@@ -10,8 +10,35 @@ The plan ([`docs/plans/active/homelab-cli.md`](../plans/active/homelab-cli.md))
 is written against those defaults. Builds on ADR-0007/0011 (relay, admission),
 ADR-0013/0023/0030 (desktop app, updater, native Windows daemon) and ADR-0029
 (`POST /api/shutdown`). Several decisions here **amend** earlier ones (loopback
-only, one relay device per workspace); each says so and, once accepted, the
-amended ADR gets a one-line pointer here.
+only, one relay device per relay host, gRPC as the relay transport); each says so
+and, once accepted, the amended ADR gets a one-line pointer here.
+
+**Human answers recorded 2026-10-13:** the relay is hosted at `relay.spacingmind.com`
+on **Cloudflare Workers + Durable Objects**, deployed from GitHub Actions to the
+Cloudflare account that already serves spacingmind.com; the self-hosted Go relay speaks
+the same protocol (D9, D11); the trust model and ops plan are accepted; the Worker lives
+**in this monorepo** (`relay-worker/`) with one shared protocol definition and one conformance
+suite, deployed by its own path-filtered `deploy-relay.yml` behind a GitHub Environment with
+required reviewers (D11); the relay "workspace" is renamed **relay host** (D12). Everything else in "Open decisions"
+(notably #9, direct connections with a password) is **still pending** and is not
+decided here.
+
+## Terminology: relay host, not workspace
+
+smind has **workspaces** (a registered git repository, with spaces and tasks). The relay has
+used the same word for something unrelated: the per-daemon record on a relay
+(`smind relay workspace new`, `workspace_id` in `relay.proto` and in pairing offers, the
+`ws` key of an offer). That caused a real misreading ("connecting creates a new workspace?").
+It does not. In this ADR and plan the relay-side concept is called a **relay host** (id: *host
+id*): **one daemon's mailbox on a relay**, made of a host id plus an admission secret.
+
+> Connecting a daemon to a relay registers **this daemon once** with that relay (a relay host
+> record and its admission secret). Nothing is created in smind's data model. Every client paired
+> with that daemon then sees **all** of the daemon's workspaces, spaces and tasks, exactly as it
+> would on a direct connection.
+
+Where this ADR quotes today's code it keeps the code's word ("workspace") with the cited
+file:line; everywhere else it says "relay host". The rename and its compatibility rules are D12.
 
 ## Reference: what Paseo does (studied 2026-10-13)
 
@@ -96,7 +123,8 @@ reference** block stating *ported / adapted / deliberately different (why)*.
   `:7400` native gRPC and grpc-web `:7401`, `internal/relay/server/run.go:51-54`).
   There is **no hosted relay**: `docs/ROADMAP.md:98` still lists "Deploy relay at
   `relay.spacingmind.sh`" as unchecked, and that host does not resolve.
-  `smind relay workspace new <id>` prints the workspace secret once
+  (In the next bullets "workspace" is today's code word for what this ADR calls a
+  **relay host**; see Terminology.) `smind relay workspace new <id>` prints the host secret once
   (`relay.go:83-93`); `smind relay connect <addr> <workspace-id> <secret>`
   stores the config and pins the relay's TLS fingerprint **trust-on-first-use**
   (`relay.go:130-155`); `smind serve` then dials the relay on every start
@@ -437,6 +465,10 @@ in the docs — examples read the password from an env file or a generated value
 
 ### D6. Relay pairing for desktop clients
 
+**What connecting does.** `smind relay connect` registers **this daemon once** with the relay (a
+relay host + admission secret). It creates nothing in smind's data: every client paired afterwards sees
+**all** of the daemon's workspaces, spaces and tasks (see Terminology).
+
 - `smind relay offer` prints the URL (stdout, unchanged for scripts) and, with a TTY
   on stdout or `--qr`, a terminal QR on stderr; `--png <file>` writes a PNG at mode
   0600. QR encoding tries level M, falls back to level L when M does not fit, and
@@ -445,14 +477,14 @@ in the docs — examples read the password from an env file or a generated value
   app". The paste-able URL is what works today for both clients; the QR is
   convenience for a future mobile scanner.
 - Offer semantics (open decision 15): reusable, non-expiring, equivalent every time,
-  because it *is* the workspace secret and the relay has no per-device credential;
-  the CLI says so ("treat this URL like a password; to revoke, enrol a new
-  workspace and `relay connect` again"). Optionally a **daemon password** (decision
+  because it *is* the relay host's secret and the relay has no per-device credential;
+  the CLI says so ("treat this URL like a password; to revoke, run `smind relay host
+  rotate`"). Optionally a **daemon password** (decision
   14) becomes the second factor so a leaked offer alone is not enough.
 - Desktop UI: Settings → Connections gains **Add via relay link**: paste → Rust
   parses (new `connections_preview_relay` returns only non-secret fields: relay
-  host:port, workspace id, grouped daemon-key fingerprint, whether the relay is
-  fingerprint-pinned) → the user confirms those values → `connections_add_relay`.
+  host:port, relay host id, grouped daemon-key fingerprint, whether the relay is
+  fingerprint-pinned or CA-verified) → the user confirms those values → `connections_add_relay`.
   The pasted string is held in component state only until submit and never logged.
   The existing URL form rejects any input containing `#offer=` and points to the new
   action (fixing the footgun). E2EE and fingerprint pinning are unchanged
@@ -460,12 +492,11 @@ in the docs — examples read the password from an env file or a generated value
 - Deep link `smind://pair#offer=…`: not in v1 (decision 16); when added it opens the
   same confirmation screen and never adds a connection from a click alone, because a
   web page can trigger `smind://`.
-- Homelab quickstart `docs/homelab.md` documents **both** paths: direct connection
-  (D8) for LAN/VPN, and the relay (self-hosted on a VPS or on the homelab with
-  `7400/tcp` + `7401/tcp` open — the desktop derives the native port as grpc-web − 1,
-  `client.rs:45-68`, so they must be adjacent; compare the fingerprint printed by
-  `smind relay` with the one `relay connect` pins, because pinning is
-  trust-on-first-use).
+- Homelab quickstart `docs/homelab.md` documents the paths: direct connection (D8) for
+  LAN/VPN; the **hosted relay** (`smind relay connect` with no address, D11) for NAT/mobile; and a
+  self-hosted relay (a VPS or the homelab; on v2 `7400/tcp` + `7401/tcp` open — the desktop derives the
+  native port as grpc-web − 1, `client.rs:45-68`; on v3 a single port; compare the fingerprint printed by
+  `smind relay` with the one `relay connect` pins).
 
 **Paseo reference — adapted (offer, confirmation, relay opt-in) and deliberately
 different (offer contents, hosting).**
@@ -484,13 +515,14 @@ different (offer contents, hosting).**
   public service with no admission, the E2EE handshake with the daemon's key is the
   trust anchor, and an optional daemon password is sent *inside* the encrypted
   hello (`SECURITY.md`, "Trust model"). smind's relay is private and gated by a
-  workspace admission secret (ADR-0011), so our offer has to carry that secret
+  relay host admission secret (ADR-0011), so our offer has to carry that secret
   — which is why it is a "password-like" link and why it does not fit a QR.
   Shrinking it (drop the duplicate `id`, base64url the fingerprint) is possible but
   needs a v2 offer decoded by Go, Rust and TS; deferred, level-L fallback instead.
   Paseo also offers a compact `relay://host:port/<serverId>?key=…[&password=…]` URI
   (`daemon-endpoints.ts`) for typing/pasting; we do not need a second format yet.
-- *Different, hosting:* Paseo operates `relay.paseo.sh`; smind has none (decision 12).
+- *Ported, hosting:* Paseo operates `relay.paseo.sh` on Cloudflare Workers + Durable Objects; smind will
+  operate `relay.spacingmind.com` the same way (D11, decided by Human), with the Fly-cutover risk noted there.
 - *Not ported yet, recorded:* a host with **several connections and a preferred one**
   (relay now, direct when reachable; Maestro `relay-then-direct.yaml`; Paseo's
   `HostProfile.connections` + `preferredConnectionId`, `host-connection.ts`) — smind's
@@ -646,45 +678,86 @@ unauthenticated token endpoint to close). Paseo's password-in-WS-`hello` is what
 for relay devices (decision 14); for HTTP+WS direct connections we choose login-then-token
 because our WS handshake today authenticates by token (`internal/wsapi`).
 
-### D9. Relay multi-device attach (amends ADR-0007 (b) / ADR-0011 "one device")
+### D9. Relay wire protocol v3 (WebSocket): one transport for hosted and self-hosted, multi-device built in (amends ADR-0007 (b), (f) and ADR-0011 "one device")
 
-**Proposal.** Lift the one-device-per-workspace limit **in this ADR's scope** (plan PRs
-P12/P13), using the model Paseo already runs in production. This supersedes my earlier
-position that it be an indefinitely deferred follow-up.
+**Why a new protocol.** Human chose to host the relay on **Cloudflare Workers + Durable
+Objects** (D11). Workers and Durable Objects cannot terminate native gRPC bidirectional streams
+today: inbound gRPC to Workers/Containers is a **private beta** reached through Spectrum, and the
+Worker-only path (gRPC-web translation) supports unary and server-streaming only, while
+bidirectional streaming needs a Container
+([Cloudflare, 2026-08-03](https://blog.cloudflare.com/grpc-workers/)). Our relay today is gRPC
+bidi streams (`relay.proto:63-70`) plus a grpc-web-over-WebSocket listener for mobile
+(`internal/relay/server/grpcweb.go`). To keep **one transport** for the hosted relay and the
+self-hosted Go `smind relay`, v3 is a plain **WebSocket** protocol that both implement; the Go relay
+gains a WebSocket endpoint (it already depends on a WebSocket stack for `internal/wsapi`) and the
+Cloudflare Worker implements the same endpoint in TypeScript.
 
-Paseo's v2 protocol (`cloudflare-adapter.ts:119-127,340-395`, `relay-transport.ts:49-55`):
-one relay session per daemon; the daemon holds **one control socket**; every client
-socket gets a `connectionId` **assigned by the relay** (clients do not choose it); the
-relay tells the daemon over the control socket `{type:"connected"|"disconnected",
-connectionId}` and a `sync` list on (re)connect; the daemon opens **one data socket per
-`connectionId`**; the relay forwards between `client:<id>` and `server:<id>` (buffering
-frames until the daemon's data socket exists); **each connection runs its own E2EE
-handshake** with a fresh ephemeral client key; many sockets may share a connectionId and
-the daemon's data socket stays up while any remain (`cloudflare-adapter.test.ts`,
-test `clt_multi`).
+**Shape (the normative spec is a PR deliverable, `docs/relay-protocol-v3.md`).**
 
-smind already has the pieces:
+- Transport: WebSocket over TLS, subprotocol `smind.relay.v3`. A relay serves several protocol
+  versions side by side under path prefixes (`/v3/…`); a client picks one.
+- Messages: binary WebSocket messages carrying protobuf — the existing `Frame`/`ControlFrame` shapes of
+  `relay.proto` with the field `workspace_id` replaced by `host_id` (relay host, see Terminology). E2EE
+  payloads are unchanged (ADR-0007: X25519 + ChaCha20-Poly1305, per-direction counters).
+- Admission (ADR-0011 SCRAM-style proof, unchanged math): `POST /v3/admit/challenge` and `POST
+  /v3/admit` over HTTPS return an **admission token** (stateless: `HMAC(relay_signing_key, host_id ‖
+  daemon_key_id ‖ expiry)`, 24 h), presented on the upgrade as `Sec-WebSocket-Protocol:
+  smind.relay.v3, adm.<token>` — **not** in the URL, so access logs never carry it. Challenge nonces are
+  single-use with a 30 s TTL.
+- Roles on `GET /v3/ws?host=<host_id>&role=…`: `control` (the daemon, one per host), `data` (the
+  daemon, one per device), `device` (any number). The **relay assigns each `device` connection its
+  `device_id`**; devices never choose it.
+- Control messages relay → daemon: `device_connected{device_id}`, `device_disconnected{device_id}`,
+  `sync{device_ids}` (on every control (re)connect). The daemon opens one `data` socket per announced
+  device; the relay forwards between `device:<id>` and `data:<id>` and buffers (bounded: 200 frames
+  **and** 4 MiB per side) until the daemon's data socket exists. **Each device runs its own E2EE
+  handshake** with a fresh ephemeral key against the daemon's persistent key.
+- Liveness: application ping/pong on `control` every 30 s answered by the relay without waking it
+  (Durable Object WebSocket auto-response, D11); idle sockets are otherwise left alone. Max message
+  1 MiB, max 16 devices per host (configurable on a self-hosted relay).
+- Enrolment (D11): `POST /v3/hosts` creates a relay host and returns `{host_id, secret}` once;
+  `POST /v3/hosts/<id>/rotate` (authenticated by an admission proof) replaces the secret and invalidates
+  every old offer; `DELETE` removes the host. Self-hosted relays keep admin-only enrolment
+  (`smind relay host new`) unless started with `--open-enrolment`.
+- **One shared protocol definition and ONE conformance suite** (both live in this monorepo):
+  `relay/protocol/` holds the `.proto`, the golden vectors (SCRAM proofs, offers, token) and the
+  language-neutral conformance scenarios; `relay/conformance/` is a black-box runner that targets any base URL.
+  CI runs the same suite against the Go relay and against the Worker running locally under `workerd`/Miniflare
+  (`wrangler dev`), on every change to either implementation or to `relay/protocol/**`, so the two cannot
+  drift.
 
-| Paseo | smind today | Change |
+**Multi-device mapping (replaces the gRPC-era sketch):**
+
+| Paseo v2 | smind today (gRPC v2) | v3 |
 |---|---|---|
-| control socket | `OpenControl` stream (`relay.proto:63`, `server.go:388-395`: only `Ping` handled) | relay → daemon notifications `DeviceConnected{device_id}`, `DeviceDisconnected{device_id}`, `Sync{device_ids}` (reusing the declared `DeviceAttach`/`DeviceDetach` slots, `relay.proto:121-148`) |
-| `connectionId` | route key `(workspace, session, device)` (`server.go:576-604`) | relay assigns `device_id` per admitted device stream; `attachRoute` stops replacing other devices' routes (it keeps replacing *the same* device on reconnect) |
-| per-connection data socket | `OpenData` stream per route | daemon opens one `OpenData` per announced device |
-| per-connection E2EE | one hardcoded `(m1-default-session, m1-default-device)` bridge (`bridge.go:12-35`) | bridge spawns a handler + E2EE session per `device_id`; fresh ephemeral device key each, daemon key unchanged |
-| buffering until daemon attaches | per-side bounded buffers (ADR-0007 (a)) | unchanged |
+| control socket (`cloudflare-adapter.ts:119-127`) | `OpenControl`, only `Ping` handled (`server.go:388-395`) | `role=control` + `device_connected/disconnected/sync` |
+| relay-assigned `connectionId` | route key `(workspace, session, device)`; `attachRoute` replaces (`server.go:576-604`) | relay-assigned `device_id`; reconnect replaces only the same device |
+| per-connection data socket | one `OpenData` per route; bridge hardcodes `m1-default-*` (`bridge.go:12-35`) | one `role=data` socket per device; bridge runs a handler + E2EE session per device |
+| buffering until daemon attaches | per-side bounded buffer (ADR-0007 (a)) | same, bounded by frames and bytes |
 
-Clients: the Rust desktop client and the mobile TS client stop hardcoding the fixed ids
-and take the relay-assigned device id. Compatibility: relay admission protocol version is
-bumped; older clients (single hardcoded id) get a clear "update required" rejection, as
-the ADR-0011 amendment did for admission v2 (no dual accept).
+**Migration.** gRPC v2 (and the grpc-web listener) stay in the Go relay for a deprecation window
+(decision 31) so existing self-hosted setups and already-paired clients keep working; the hosted relay is
+**v3 only**. New daemons, desktop and mobile speak v3. Offers gain a single `wss://host[:port]` relay
+address, which **removes the "native port = grpc-web port − 1" derivation**
+(`desktop/daemon-client/src/relay/client.rs:45-68`, `relay.go:163-174`). Compatibility policy: a relay
+accepts the **current and the previous** protocol version, so a release never strands paired users;
+this overrides the "no dual-accept" stance the ADR-0011 amendment took for the admission change, because
+a hosted relay serves clients of many smind versions.
 
-**Paseo reference — ported (protocol shape), adapted (admission, ids).** Ported:
-control socket + per-connection data stream + relay-assigned ids + per-connection E2EE +
-sync-on-reconnect. Adapted: our relay keeps **workspace admission** (ADR-0011) in front,
-so device ids are scoped to an admitted workspace; the transport is gRPC streams (native
-for desktop, grpc-web for mobile) rather than WebSockets (ADR-0007 (f)); the relay is a Go
-process, not a Durable Object. Different on purpose: Paseo's relay needs no enrolment
-because it is open; ours stays closed (decision 12).
+**Paseo reference — ported (shape), adapted (admission, framing, transport), different (self-host
+parity).** Ported: control socket + per-connection data socket + relay-assigned ids + per-connection
+E2EE + sync-on-reconnect + buffering until the daemon's data socket exists
+(`refs/paseo/packages/relay/src/cloudflare-adapter.ts:119-127,340-395`,
+`packages/server/src/server/relay-transport.ts:49-55,121-130`, test `clt_multi`,
+`cloudflare-adapter.test.ts:193-229`); keepalive and stale-control reset
+(`cloudflare-adapter.ts:219-250`, `relay-transport.ts` `CONTROL_PING_INTERVAL_MS`/
+`CONTROL_STALE_TIMEOUT_MS`); the `?serverId=…&role=…&connectionId=…` URL shape
+(`protocol/src/daemon-endpoints.ts` `buildRelayWebSocketUrl`). Adapted: SCRAM admission with a per-host
+secret in front (Paseo's hosted relay is open); protobuf binary frames and an admission token in a
+subprotocol rather than URL parameters; relay-assigned device ids. Different: Paseo points at a separate
+`getpaseo/paseo-relay` repository for its official relay (`docs/docker.md` "Security") while
+`packages/relay` holds the Worker; we keep the Go relay and the Worker in this repository and require
+**both to pass one conformance suite**.
 
 ### D10. `smind config get|set|unset` and no launch flags
 
@@ -699,6 +772,152 @@ way to change `server.port`/`server.listen`/`server.hostnames` without per-OS un
 restart" (`local-daemon.ts:82-110`), and provides `daemon config get/set/unset` and
 `daemon reload` (`config.ts:75-110`, `reload.ts`). We port `config get/set/unset`; we do
 not port `reload` (hot reload) yet.
+
+### D11. Hosted relay at `relay.spacingmind.com` on Cloudflare Workers + Durable Objects
+
+**Decided by Human (2026-10-13):** host the relay on **Cloudflare Workers + Durable Objects**, like
+Paseo, at `relay.spacingmind.com`, on the Cloudflare account that already serves spacingmind.com, with the
+trust model below and the ops plan below. The self-hosted Go `smind relay` speaks the same v3 protocol (D9).
+(Replaces the "self-host only" recommendation of decision 12.)
+
+**Architecture.**
+
+- A Worker routes `/v3/*`; `host` selects a **Durable Object per relay host** (`idFromName(host_id)`),
+  SQLite-backed (class declared with `new_sqlite_classes`, as Paseo's `wrangler.toml`).
+- The object holds the host record (admission `StoredKey`, created/last-admitted timestamps, usage counters),
+  single-use challenge nonces (storage, 30 s TTL), and the WebSocket attachments for `control`/`data`/
+  `device` sockets using the **WebSocket Hibernation API** so idle hosts cost no duration. Frame buffers are
+  in memory (bounded by frames and bytes; losing them on eviction only costs the reconnect grace, ADR-0007
+  (a)). The 30 s `control` ping is answered by `setWebSocketAutoResponse` without waking the object.
+- A singleton **registry object** counts hosts (global cap) and a **rate-limit** check (Workers Rate Limiting
+  binding, or a limiter object keyed by IP) guards `POST /v3/hosts` and `/v3/admit*`.
+- Secrets: `RELAY_SIGNING_KEY` (admission-token HMAC key) is a Worker secret generated by the deploy
+  pipeline; no secret is ever derived from user data.
+- Cloudflare limits that shape the design (checked 2026-10-13): a Durable Object takes a soft 1,000
+  requests/s and 32 MiB per received WebSocket message, 30 s CPU per invocation
+  ([limits](https://developers.cloudflare.com/durable-objects/platform/limits/)) — per host this is far above
+  need, and we cap messages at 1 MiB; proxied connections have a 125 s read timeout and idle WebSockets can be
+  dropped near 100 s without traffic
+  ([connection limits](https://developers.cloudflare.com/fundamentals/reference/connection-limits/)), which
+  the 30 s ping covers.
+- Cost model ([pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/)): Workers **Paid**
+  plan ($5/month minimum) so Durable Objects are not bound by the free plan's daily caps; requests $0.15 per
+  million after 1 M included; **incoming WebSocket messages bill at 20:1**; duration ($12.50 per million GB-s
+  after 400 k included, 128 MB per active object) accrues only while an object is active or not hibernation-
+  eligible. Cloudflare's own hibernated-WebSocket example lands near $20/month at its stated assumptions;
+  our real figure depends on paired hosts and frame rates and is a Human budget decision (27).
+- **Risk, recorded honestly:** Paseo built this exact design and its current `wrangler.toml` sets
+  `PASEO_RELAY_UPSTREAM = "https://paseo-relay-next.fly.dev"`, with `cutover-proxy.ts` forwarding every request
+  to a Fly deployment and `deploy-relay.yml` "manual-only while relay.paseo.sh bridges traffic to the Fly
+  deployment" (`refs/paseo/packages/relay/{wrangler.toml,src/cutover-proxy.ts}`,
+  `.github/workflows/deploy-relay.yml`). The repository does not say why; I have not verified a reason. The
+  single-protocol design is the mitigation: because v3 is plain WebSocket and the Go relay implements it, the
+  hosted relay can later move to a Go origin (or sit behind a thin Worker, as Paseo's cutover does) with **no
+  client change**.
+
+**Trust model (Human: OK as proposed).**
+
+- **TLS.** Hosted = CA-verified (Cloudflare-issued certificate for `relay.spacingmind.com`); self-hosted =
+  self-signed + fingerprint pin (ADR-0011). Clients accept both: an offer or config with an **empty
+  fingerprint means "verify the certificate chain and hostname against the system roots"** (Go
+  `RootCAs`, rustls platform/webpki roots; the field already documents "empty when the relay uses a public
+  CA", `offer.go:60-63`), a non-empty one means "pin exactly this certificate". Today `relay.Dial` refuses an
+  empty fingerprint (`internal/relay/client/client.go:37-40`) and the Rust client requires 32 bytes
+  (`desktop/daemon-client/src/relay/client.rs:139-146`); both change. `smind relay connect` first tries
+  normal verification (→ CA mode, empty fingerprint); only if that fails does it offer a pin, and it does so
+  with an explicit confirmation showing the fingerprint or `--fingerprint <hex>` — **replacing silent
+  trust-on-first-use** (`bridge.FetchFingerprint`). The mobile client does not pin at all today (it parses
+  `fp` but never uses it — `mobile/src/relay/pairing.ts:12,81`; so a self-signed relay is unlikely to work on a
+  real phone — unverified), so a CA-verified hosted relay is also what makes mobile usable.
+- **E2EE unchanged** (ADR-0007/0011): the relay sees only ciphertext envelopes.
+- **What the operator (smind, and Cloudflare as processor — it terminates TLS) can see:** client IP addresses
+  and connection times/durations, relay host ids, the daemon's public key id (sent in admission), device ids and
+  counts per host, message sizes and counts, and admission outcomes. It **cannot** see messages, tasks,
+  prompts, file paths or code, and cannot forge admission (SCRAM stores only `StoredKey`; ADR-0011 residual:
+  an operator who also records a full admission exchange can recover the secret). Logs keep no payload and no IP
+  beyond the retention in decision 32; a privacy note on spacingmind.com is a landing-repo follow-up.
+
+**Self-service enrolment (what "workspace" meant — see Terminology).** Enrolment registers **this daemon once
+on the relay**: `smind relay connect` with no address enrols at `relay.spacingmind.com` (`POST /v3/hosts`),
+receives a server-generated host id (random, unguessable, e.g. `h_` + 26 base32 chars) and a 256-bit secret
+shown once, stores them in `$SMIND_HOME`, and the daemon dials in on every start. **Nothing is created in
+smind's data model**; every client paired with the host sees all of the daemon's workspaces, spaces and tasks.
+The relay stores only `StoredKey`.
+- *No accounts in v1.* The secret is the identity; losing it means enrolling again (`relay host rotate`
+  while still connected, or a new `relay connect`). GitHub login (higher quotas, a dashboard, remote
+  revocation) is a possible later layer.
+- *Abuse limits (defaults, tunable, Human to confirm — decision 27/28):* ≤ 5 enrolments per IP per hour and ≤ 20
+  per day; ≤ 50,000 hosts globally; a host never admitted within 24 h is deleted; a host with no admission for
+  90 days is deleted (a Durable Object alarm); ≤ 16 devices per host; ≤ 1 MiB per message; sustained
+  ≤ 1 MiB/s and a soft 20 GB/month per host (throttle, then reject); ≤ 8 concurrent connection attempts per IP;
+  an operator ban list keyed by host id. Because content is opaque, abuse handling is by **volume and
+  metadata only**.
+- *The offer is still the secret.* On a shared relay a leaked offer is as serious as on a private one
+  (ADR-0011 defers device identity). So **hosted hosts require a daemon password** (P4's `smind set-password`)
+  before `relay connect` completes, and relay devices present it inside the E2EE hello (decision 14); `smind
+  relay host rotate` revokes every old offer.
+- *Default address.* `smind relay connect` with no arguments uses the hosted relay after a one-time consent
+  line ("traffic is end-to-end encrypted; the relay sees IP addresses, timing and sizes"); `smind relay connect
+  <address> …` keeps the self-hosted flow (decision 30).
+
+**Ops.**
+
+- *Repository: the smind monorepo, not a separate repo (Human, 2026-10-13).* The Worker is
+  `relay-worker/` (own `package.json` and `wrangler.toml`; TypeScript; Vitest + Miniflare unit tests); the
+  shared definition and conformance suite are `relay/protocol/` and `relay/conformance/`; the Go relay stays in
+  `internal/relay/`. One repo means one protocol change and its two implementations land in one PR and are
+  verified by the same suite. **Split `relay-worker/` into its own repository later if it ever needs separate ops
+  or licensing** (it is AGPL-3.0 with the rest, ADR-0003; ADR-0007 (h) already anticipates a permissive relay
+  repo) — the directory is self-contained so the split is a `git filter-repo` away. Paseo precedent:
+  `refs/paseo/packages/relay` plus `.github/workflows/deploy-relay.yml` in its monorepo.
+- *Pipeline: a separate `deploy-relay.yml`, not tied to release-please.* It triggers only on pushes to `develop`
+  that touch `relay-worker/**` or `relay/protocol/**` (plus `workflow_dispatch`), runs unit tests and the
+  conformance suite, then `wrangler deploy`. The Worker therefore ships **independently of smind releases**; its
+  version is `relay-worker/package.json` + the commit SHA reported by `GET /v3/info`, and the compatibility policy
+  (current + previous protocol, D9) is what keeps already-released daemons and apps working across relay deploys.
+  A separate `relay-ci.yml` runs the unit tests and the conformance suite (Go relay + Worker) on pull requests
+  touching `relay-worker/**`, `relay/**` or `internal/relay/**`, with no Cloudflare credentials.
+- *Secrets and approval: a GitHub Environment `relay-production` with required reviewers (Human approves every
+  production deploy).* The Cloudflare token lives only in that environment, so it is not exposed to PR builds or
+  to other workflows; the deploy job declares `environment: relay-production` and waits for approval. An optional
+  `relay-staging` environment (no reviewers) backs manual-dispatch deploys to `relay-staging.spacingmind.com`.
+  **BLOCKED on Human:** create the environments, add the reviewers, and add `CLOUDFLARE_API_TOKEN` and
+  `CLOUDFLARE_ACCOUNT_ID` (plus `RELAY_SIGNING_KEY` and `RELAY_ADMIN_TOKEN`, generated with `openssl rand -hex 32`,
+  which the workflow syncs to the Worker with `wrangler secret put`) as environment secrets. Required reviewers need
+  the repository to be public or on a plan that supports them — Human to confirm. Token scope to request (verify
+  against Cloudflare's dashboard when creating it): Account → *Workers Scripts: Edit*, Account → *Account Settings:
+  Read*, and for the `spacingmind.com` zone → *Workers Routes: Edit* and *DNS: Edit* (a Workers **custom domain**
+  creates the DNS record and the certificate itself, so no manual DNS step). The account must be on **Workers
+  Paid**.
+- *DNS and TLS:* `routes = [{ pattern = "relay.spacingmind.com", custom_domain = true }]` (as Paseo's
+  `wrangler.toml` does for `relay.paseo.sh`), proxied by Cloudflare — the same account and zone that serve the
+  landing site, which is deployed to Workers from `spacingmind/spacing-mind-landing-page`
+  (`apps/web/wrangler.jsonc`, routes `spacingmind.com`, `www.spacingmind.com`).
+- *Versioning and rollback:* `GET /v3/info` returns `{version, commit, protocols:[3]}`; compatibility = current +
+  previous protocol (D9). A rollback is `wrangler rollback` (or re-running the workflow on an earlier commit) —
+  still gated by the `relay-production` approval.
+- *Monitoring:* Workers observability enabled (as Paseo's), `GET /v3/healthz`, an external synthetic check
+  and Cloudflare billing/usage notifications (Human-owned accounts), an error-rate alert; a public status page
+  later (for example Upptime on GitHub Pages). No SLA is promised.
+- *Privacy:* a short page on spacingmind.com stating what the relay sees (above), the retention, and that
+  there are no accounts — a landing-repo follow-up, **required before the hosted default is switched on**.
+
+**Paseo reference — ported (Worker + Durable Object + hibernation, `custom_domain` route, observability,
+`new_sqlite_classes`, `wrangler deploy` from CI with `CLOUDFLARE_API_TOKEN`), adapted (admission and
+enrolment, which Paseo's open relay does not have), and flagged (the Fly cutover above).** Files:
+`refs/paseo/packages/relay/wrangler.toml`, `src/cloudflare-adapter.ts` (614 lines — the size of the TypeScript
+port), `.github/workflows/deploy-relay.yml`.
+
+### D12. Terminology and CLI: relay host, not workspace
+
+See "Terminology" at the top. `smind relay workspace new|ls` becomes **`smind relay host new|ls|rm|rotate`**;
+`workspace` stays as a deprecated alias printing a one-line note to stderr for two releases.
+`smind relay connect <address> <host-id> <secret>` keeps its positional shape; `smind relay connect` with no
+address enrols on the hosted relay (D11). Help text, README, `docs/homelab.md`, the desktop "Add via relay link"
+preview (it shows "Relay host", not "workspace") and error strings all use "relay host". **Wire
+compatibility:** the offer's JSON key `ws` and the v2 gRPC field `workspace_id` are untouched (documented as the
+host id); v3 uses `host_id`; the Go/Rust/TS identifiers (`bridge.Config.WorkspaceID`, `admission.Workspace`,
+`relay_workspace_id`) are renamed in v3 code and opportunistically elsewhere, never by a wire-breaking change.
 
 ## Alternatives considered
 
@@ -725,10 +944,24 @@ not port `reload` (hot reload) yet.
   Docker `-p` case. Replaced by D8 with the strict guards above.
 - **Direct connections without a password (bind-only).** Paseo permits this with a warning.
   Not chosen: the daemon's terminal tab is remote code execution.
-- **Hosted relay like `relay.paseo.sh`.** Requires open enrolment (abuse, cost) or removing the
-  workspace secret, i.e. amending ADR-0011, plus infrastructure and on-call. Decision 12.
-- **Keep one device per relay workspace and document it (this ADR's first draft).** Contradicted
-  by Paseo's production design, which our proto already anticipates. Replaced by D9.
+- **Self-host only, no hosted relay (this ADR's earlier recommendation).** Superseded by Human's
+  decision to host at `relay.spacingmind.com` (D11).
+- **Hosted relay = the existing Go gRPC relay on Fly.io / a VPS, DNS-only or behind Cloudflare's proxy.**
+  Zero protocol change and the cheapest first step (~$2–6/month: Fly `shared-cpu-1x` 256 MB lists at about
+  $1.94/month, Hetzner's smallest plan about €4.5–5.5), but Cloudflare's gRPC proxy needs port 443, ALPN h2,
+  Full TLS and the zone's gRPC toggle ([docs](https://developers.cloudflare.com/network/grpc-connections/)),
+  our relay uses two ports, and a single VM is a single point of failure with no edge. Not chosen by Human;
+  it remains the **exit path** if Workers economics disappoint, because the Go relay speaks the same v3
+  protocol (D9, D11 risk).
+- **Cloudflare Containers running the unchanged Go relay.** GA since 2026-04-13 and billed on active CPU, but
+  native gRPC ingress to Containers is still private beta via Spectrum, WebSockets pin the object while
+  connected, and the relay's host store would need external persistence. Rejected.
+- **A thin Worker that proxies to a Go origin (Paseo's current cutover shape).** Needs the WebSocket protocol
+  anyway; kept as a future option, not the first deployment.
+- **Keep gRPC as the single protocol and skip Cloudflare Workers.** Would avoid a protocol rewrite but
+  contradicts Human's hosting choice and leaves mobile on grpc-web-over-WebSocket. Not chosen.
+- **Keep one device per relay host and document it (this ADR's first draft).** Contradicted by Paseo's
+  production design, which our proto already anticipates. Replaced by D9.
 - **Building the Docker image from source inside Docker** (Paseo's approach for Node). Slow
   multi-arch builds under QEMU and a binary that differs from the checksummed release.
 - **Baking agent CLIs into the image.** Paseo, too, leaves them out. Decision 19.
@@ -773,16 +1006,17 @@ changed, or the decision is new, because of the Paseo study.**
     SSH, or a TLS reverse proxy (with the Host-rewrite caveat); revisit with `server.tls`.
 11. **★ SSH-tunnel connection type in the desktop app (b2).** *Recommended: yes* — the app runs
     the system `ssh -L` (Paseo `remoteSsh`); no daemon exposure and no password.
-12. **★ Hosted relay vs self-host.** *Recommended: self-host only for now.* Paseo hosts
-    `relay.paseo.sh`; a smind-hosted relay needs open enrolment or an ADR-0011 change plus ops.
-    Revisit after multi-device ships.
-13. **★ Relay multi-device (D9).** *Recommended: in scope — PRs P12/P13, scheduled right after
-    direct connections* (replaces "accept one device at a time, separate ADR"). Alternative:
-    keep the one-device limit and document it.
-14. **★ Password for relay devices.** *Recommended: yes* — when a daemon password is set, relay
-    devices must present it inside the E2EE hello (Paseo's pattern; Paseo is lenient for old
-    clients, we enforce since smind has no legacy builds to protect). Makes a leaked reusable
-    offer insufficient alone.
+12. **✔ Hosted relay — DECIDED by Human (2026-10-13): hosted at `relay.spacingmind.com` on
+    Cloudflare Workers + Durable Objects (D11), same protocol as the self-hosted Go relay (D9).**
+    Trust model, ops plan and use of the existing Cloudflare account accepted. Open sub-points are
+    27–33 below.
+13. **★ Relay protocol v3 + multi-device (D9).** *Recommended: yes — one WebSocket protocol for hosted and
+    self-hosted relays, multi-device built in* (consequence of decision 12; replaces "accept one device
+    at a time"). The Go relay keeps gRPC v2 for a deprecation window (decision 31).
+14. **★ Password for relay devices.** *Recommended: yes, and required for hosted relay hosts* — the daemon
+    password (needs decision 9's `smind set-password`, or a minimal local-password PR if decision 9 is
+    declined) is sent inside the E2EE hello; `relay connect` to the hosted relay refuses to finish without
+    it. Makes a leaked reusable offer insufficient alone.
 15. **Offer reuse/expiry.** *Recommended:* reusable, no expiry, loud "treat like a password"
     wording, `--png` at 0600 (Paseo is the same: no expiry, no per-device credential).
 16. **Deep link `smind://pair`.** *Recommended:* paste-only in v1; later with the confirmation
@@ -814,20 +1048,51 @@ changed, or the decision is new, because of the Paseo study.**
 26. **★ Background `smind start` without an OS service.** *Recommended: no* — `smind service` and
     the desktop app cover it; Paseo's `daemon start` + supervisor is a second supervision path.
 
+27. **★ Cloudflare plan and budget.** *Recommended:* Workers **Paid** ($5/month) on the existing
+    account, a monthly usage alert at **$20**, and a hard stop-gap (disable open enrolment) if the alert
+    fires twice. Needs Human: plan upgrade and billing alerts.
+28. **★ Enrolment model.** *Recommended:* anonymous, self-service, **no accounts in v1** (the secret is the
+    identity), server-generated host ids, the abuse limits listed in D11 (≤ 5/20 enrolments per IP per
+    hour/day, ≤ 50,000 hosts, 24 h unused GC, 90 d idle GC, ≤ 16 devices, ≤ 1 MiB/message, ≈ 20 GB/month
+    soft cap per host). Alternative: GitHub login from day one (needs an OAuth app and a sessions store).
+29. **★ Cloudflare credentials and GitHub Environments.** **BLOCKED on Human:** create the GitHub Environment
+    `relay-production` (required reviewers) and, optionally, `relay-staging`; add `CLOUDFLARE_API_TOKEN` (scope in
+    D11: Workers Scripts Edit, Account Settings Read, Workers Routes Edit and DNS Edit on `spacingmind.com`),
+    `CLOUDFLARE_ACCOUNT_ID`, `RELAY_SIGNING_KEY` and `RELAY_ADMIN_TOKEN` as environment secrets; confirm the
+    account/zone and that the repository plan supports required reviewers.
+30. **★ Default relay address.** *Recommended:* `smind relay connect` with no arguments uses
+    `relay.spacingmind.com` after a one-time consent line; a self-hosted relay always needs an explicit address.
+31. **★ gRPC v2 retirement.** *Recommended:* the Go relay serves gRPC v2 and the grpc-web listener for **two
+    minor releases** after v3 ships, then removes them; the hosted relay is v3-only; a relay always accepts the
+    current and previous protocol version.
+32. **★ Logging and privacy.** *Recommended:* no payload and no content-derived data are ever logged; IP
+    addresses appear only in short-lived edge logs (≤ 7 days); a privacy page on spacingmind.com **before** the
+    hosted default is switched on (landing-repo follow-up).
+33. **✔ Rename — DECIDED by Human (2026-10-13): relay "workspace" → "relay host"** (D12); `workspace` stays a
+    deprecated CLI alias; wire/proto field names are not changed in v2.
+34. **✔ Relay code layout and deploy gating — DECIDED by Human (2026-10-13):** the Cloudflare relay is
+    `relay-worker/` in the smind monorepo (split later only if it needs separate ops/licensing); one shared
+    `relay/protocol/` definition and one conformance suite run in CI against both the Go relay and the Worker;
+    `deploy-relay.yml` is separate from release-please, triggered by `relay-worker/**` / `relay/protocol/**` changes
+    or manually; the Cloudflare token sits in the `relay-production` Environment with required reviewers.
+
 ## Consequences
 
-- Thirteen shippable PRs (plan); riskiest: `smind update` (replaces an executable), direct
-  connections (opens the daemon to the network), relay multi-device (cross-language protocol
-  change), the Docker release job (publishes to a registry), the first-run flow (changes first
-  launch).
+- Twenty shippable PRs (plan); riskiest: `smind update` (replaces an executable), direct
+  connections (opens the daemon to the network), relay protocol v3 (a new transport implemented in Go,
+  Rust, TypeScript and a Cloudflare Worker), the public hosted relay (abuse, cost, privacy), the Docker
+  release job (publishes to a registry), the first-run flow (changes first launch).
 - Public API / security changes proposed, each gated on a decision: `/healthz managedBy` (6),
   `daemon.info` (17), non-loopback listen + login + session tokens + `/api/token` gating (9),
-  relay protocol bump for multi-device (13).
+  relay protocol v3 with multi-device and an open enrolment endpoint (13, 28).
 - The macOS silent-install default changes (22); existing users are unaffected by the upgrade rule.
 - Two footguns are fixed on the way: macOS Take-over adopting a non-smind owner, and a pairing link
   pasted into the URL form being saved as a bogus direct connection.
-- ADR-0013 ("daemon binds loopback") and ADR-0007 (b)/ADR-0011 ("one device") are amended by D8/D9
-  if accepted; their texts get a pointer to this ADR.
+- ADR-0013 ("daemon binds loopback") is amended by D8 if accepted; ADR-0007 (b) ("one device"), (f)
+  (gRPC transport) and ADR-0011 (admission over gRPC, TOFU pinning only) are amended by D9/D11; their texts
+  get a pointer to this ADR. `docs/ROADMAP.md:98` ("relay.spacingmind.sh") should read `relay.spacingmind.com`.
+- The hosted relay makes smind an operator: a privacy page, abuse handling and cost monitoring become
+  ongoing work.
 
 ## Cross-references
 
