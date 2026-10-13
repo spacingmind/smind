@@ -75,10 +75,7 @@ func TestTaskRunFacts_InterruptedMapsToError(t *testing.T) {
 
 	// Restart the registry over the same store: New reconciles the
 	// still-running row to interrupted and rehydrates it.
-	reg2, err := New(st)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
+	reg2 := newTestRegistry(t, st)
 	if f := reg2.TaskRunFacts()[task.ID]; f.State != tasktree.StateError {
 		t.Fatalf("interrupted state = %q, want error", f.State)
 	}

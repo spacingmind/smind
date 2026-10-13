@@ -1,4 +1,6 @@
 import { formatRelativeTime } from "@/lib/relative-time";
+import { formatCooldownUntil } from "./format";
+import type { ActiveCooldown } from "./model";
 import type { AccountUsage } from "./types";
 
 /** "45 s", "3 min", "2 h": the wait until `iso`, rounded up; null when it is not in the future. */
@@ -11,6 +13,29 @@ function waitUntil(iso: string | null | undefined, now: number): string | null {
   const minutes = Math.ceil(seconds / 60);
   if (minutes < 60) return `${minutes} min`;
   return `${Math.ceil(minutes / 60)} h`;
+}
+
+/** A model name is client-controlled: cap what one cooldown line can hold. */
+export const COOLDOWN_MODEL_MAX_CHARS = 40;
+
+function shortModel(model: string): string {
+  const chars = Array.from(model);
+  return chars.length > COOLDOWN_MODEL_MAX_CHARS ? `${chars.slice(0, COOLDOWN_MODEL_MAX_CHARS - 1).join("")}…` : model;
+}
+
+/** What the upstream rejected: "5-hour window", "weekly limit for <model>", "<model> only". */
+function cooldownRejected(cooldown: ActiveCooldown): string | null {
+  const model = cooldown.model ? shortModel(cooldown.model) : null;
+  switch (cooldown.window) {
+    case "five_hour":
+      return "5-hour window";
+    case "weekly":
+      return "weekly window";
+    case "weekly_model":
+      return model ? `weekly limit for ${model}` : "weekly model limit";
+    default:
+      return cooldown.scope === "model" && model ? `${model} only` : null;
+  }
 }
 
 function tail(prefix: string, wait: string | null): string {
@@ -65,6 +90,30 @@ export const usageCopy = {
         return { disabled: false, label: "Refresh" };
     }
   },
+  /**
+   * The passive cooldown as copy, in parts so a card can lay them out: `label` "Rate limited",
+   * `until` "until 2:05 PM", `rejected` what was rejected (and "reset time unknown" for a guessed
+   * end), `note` where it was seen. `headline` is `label` and `until` as one sentence.
+   */
+  cooldown: (
+    cooldown: ActiveCooldown,
+    now: number = Date.now(),
+    locale?: string,
+  ): { label: string; until: string; headline: string; rejected: string | null; note: string } => {
+    const label = "Rate limited";
+    const until = `until ${formatCooldownUntil(cooldown.untilMs, now, locale)}`;
+    const rejected = [cooldownRejected(cooldown), cooldown.reason === "fallback" ? "reset time unknown" : null]
+      .filter((part): part is string => part !== null)
+      .join(" · ");
+    return { label, until, headline: `${label} ${until}`, rejected: rejected || null, note: "seen on a proxied request" };
+  },
+  /** A window with no percent says its status instead of an empty meter. */
+  windowStatus: (status: string | undefined): string | null => {
+    if (status === "rejected") return "Limit reached";
+    if (status === "allowed_warning") return "Near limit";
+    return null;
+  },
+  observedWindow: "from recent traffic",
   pin: "Pin to sidebar",
   unpin: "Unpin from sidebar",
   disabled: "Plan usage is turned off. Set accountUsage.enabled to true in config to see it.",

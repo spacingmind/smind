@@ -62,7 +62,7 @@ import {
   type WorkspaceWithTree,
 } from "@/lib/workspace-tree";
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
-import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, taskSlotSignal, workspaceTasks } from "@/lib/sidebar-signal";
+import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, taskSlotSignal, workspaceMonogram, workspaceTasks } from "@/lib/sidebar-signal";
 import { attentionRollup, nestTasks, type TaskNode } from "@/lib/task-tree";
 import { formatRelativeTime, formatRelativeTimeShort } from "@/lib/relative-time";
 import { useTaskStats, type TaskStats } from "@/hooks/use-task-stats";
@@ -91,6 +91,7 @@ import {
 import { SetupBadge } from "@/components/task-setup";
 import { WorkspaceScriptsDialog } from "@/components/workspace-scripts-dialog";
 import { Button } from "@/components/ui/button";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -129,6 +130,7 @@ import {
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
+  useSidebar,
   SidebarMenuItem,
   SidebarMenuSub,
   SidebarMenuSubButton,
@@ -871,7 +873,9 @@ export function AppSidebar({
             )}
           </SidebarGroupLabel>
           <SidebarGroupContent className="flex min-h-0 flex-1 flex-col">
-            <ScrollArea className="min-h-0 flex-1">
+            {/* The rail rows carry a name tooltip (SidebarMenuButton `tooltip`). */}
+            <TooltipProvider>
+            <ScrollArea className="min-h-0 flex-1 group-data-[collapsible=icon]:[&_[data-slot=scroll-area-scrollbar]]:hidden">
               <RowSignalContext.Provider value={rowSignal}>
                 <CollapsedNodesContext.Provider value={nodes}>
                 <SidebarMenu className="@container/sb">
@@ -953,6 +957,7 @@ export function AppSidebar({
                 </CollapsedNodesContext.Provider>
               </RowSignalContext.Provider>
             </ScrollArea>
+            </TooltipProvider>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
@@ -1421,7 +1426,21 @@ function WorkspaceItem({
   ];
 
   const { active, rowProps, setMenuOpen } = useRowActive();
-
+  const { state: sidebarState, setOpen: setSidebarOpen } = useSidebar();
+  const name = workspace.Title || workspace.Path;
+  const monogram = workspaceMonogram(workspace.Title || workspace.Path.split(/[\\/]/).filter(Boolean).pop() || "");
+  const selectedHere = selectedTaskId !== null && workspaceTasks(workspace).some((t) => t.ID === selectedTaskId);
+  // In the icon rail the row is only a badge, so a click opens the sidebar
+  // and reveals this workspace's tasks rather than toggling a tree that is
+  // not visible.
+  const onRowClick = () => {
+    if (sidebarState === "collapsed") {
+      setSidebarOpen(true);
+      if (!expanded) onToggleExpanded();
+      return;
+    }
+    onToggleExpanded();
+  };
   return (
     <SidebarMenuItem>
       <ContextMenu>
@@ -1436,26 +1455,48 @@ function WorkspaceItem({
         <ContextMenuTrigger asChild>
           <div className="sticky top-0 z-20 bg-sidebar" {...rowProps}>
             <SidebarMenuButton
-              onClick={onToggleExpanded}
+              onClick={onRowClick}
+              tooltip={name}
+              aria-label={name}
               data-testid="sidebar-workspace-row"
               data-workspace-id={workspace.ID}
               aria-expanded={expanded}
               className={cn("rounded-lg", active && "pr-7")}
             >
-              <FolderGit2 />
+              <FolderGit2 className="group-data-[collapsible=icon]:hidden" />
+              <span
+                data-testid="rail-monogram"
+                data-selected={selectedHere || undefined}
+                className={cn(
+                  "relative -m-1 hidden size-6 shrink-0 items-center justify-center rounded-md bg-muted text-ui-xs font-semibold text-foreground group-data-[collapsible=icon]:flex",
+                  selectedHere && "bg-selected ring-2 ring-sidebar-ring",
+                )}
+              >
+                <span aria-hidden="true">{monogram}</span>
+                {aggregate && (
+                  <StatusDot
+                    status={aggregate}
+                    data-testid="rail-aggregate"
+                    data-aggregate={aggregate}
+                    className="absolute -right-0.5 -bottom-0.5 size-2 ring-2 ring-sidebar"
+                  />
+                )}
+              </span>
               <FadeText
                 data-testid="container-title"
                 fade={active}
-                className="flex-initial text-ui-base font-medium"
+                className="flex-initial text-ui-base font-medium group-data-[collapsible=icon]:hidden"
               >
-                {workspace.Title || workspace.Path}
+                {name}
               </FadeText>
-              <RowChevron open={expanded} />
-              <AggregateSlot
-                status={aggregate}
-                label={`${workspace.Title || workspace.Path} activity`}
-                className={active ? "invisible" : undefined}
-              />
+              <span className="contents group-data-[collapsible=icon]:hidden">
+                <RowChevron open={expanded} />
+                <AggregateSlot
+                  status={aggregate}
+                  label={`${name} activity`}
+                  className={active ? "invisible" : undefined}
+                />
+              </span>
             </SidebarMenuButton>
             <RowActions>
               {active && (

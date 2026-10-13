@@ -110,8 +110,11 @@ func New(s *store.Store, reg *accounts.Registry, reader quota.Reader, opts ...Op
 //
 // If a routing decision for sessionKey exists, hasn't expired, and its
 // account isn't currently exhausted, that account is reused (session
-// affinity). Otherwise a new account is selected from candidateAccountIDs
-// per policy, persisted as the new decision, and returned.
+// affinity). A pinned account that is only in a transient back-off is routed
+// around for this request without rewriting the decision; when no other
+// candidate can serve it (a single-account pool, or all the others exhausted)
+// the pinned account is used anyway. Otherwise a new account is selected from
+// candidateAccountIDs per policy, persisted as the new decision, and returned.
 //
 // Exhaustion is judged from the cached usage windows only; Route never
 // fetches and never fails because usage data is missing or stale.
@@ -129,8 +132,24 @@ func (r *Router) Route(ctx context.Context, sessionKey string, policy string, ca
 	// a pin to an account outside that set (e.g. a glm-* account for a
 	// claude-* request) must not override it.
 	if found && time.Now().UTC().Before(decision.ExpiresAt) && slices.Contains(candidateAccountIDs, decision.AccountID) {
-		if exhausted, _ := r.exhaustion(decision.AccountID, rc.model, r.clock()); !exhausted {
+		exhausted, transientOnly, _ := r.exhaustionDetail(decision.AccountID, rc.model, r.clock())
+		if !exhausted {
 			return r.registry.Get(decision.AccountID)
+		}
+		if transientOnly {
+			// A bare-429 back-off lasts at most ~60 s. Route around the pinned
+			// account for this request only and leave the stored decision
+			// alone, so the session returns to its account (and its prompt
+			// cache) once the back-off ends instead of moving for the full TTL.
+			// With nowhere else to go (selectAccount fails: a single-account pool
+			// or every candidate exhausted), keep the pinned account: the
+			// upstream answers its own 429, which beats a smind-side 503 for up
+			// to 60 s.
+			accountID, err := r.selectAccount(policy, candidateAccountIDs, rc.model)
+			if err != nil {
+				accountID = decision.AccountID
+			}
+			return r.registry.Get(accountID)
 		}
 	}
 
@@ -202,19 +221,29 @@ func (r *Router) selectAccount(policy string, candidateAccountIDs []int64, model
 //
 // Both only read memory; nothing here fetches.
 func (r *Router) exhaustion(accountID int64, model string, now time.Time) (exhausted bool, until time.Time) {
+	exhausted, _, until = r.exhaustionDetail(accountID, model, now)
+	return exhausted, until
+}
+
+// exhaustionDetail is exhaustion plus transientOnly: the account is exhausted
+// solely by a transient bare-429 back-off, with no fetched-window exhaustion
+// and no rejected/fallback cooldown. Only then may session affinity survive.
+func (r *Router) exhaustionDetail(accountID int64, model string, now time.Time) (exhausted, transientOnly bool, until time.Time) {
 	if !r.usageRouting {
-		return false, time.Time{}
+		return false, false, time.Time{}
 	}
 	if cd, ok := r.reader.Cooldown(accountID, model, now); ok && cd.Until.After(now) {
 		exhausted, until = true, cd.Until
+		transientOnly = cd.Transient()
 	}
 	if fetched, reset := r.windowExhaustion(accountID, model, now); fetched {
 		exhausted = true
+		transientOnly = false
 		if reset.After(until) {
 			until = reset
 		}
 	}
-	return exhausted, until
+	return exhausted, transientOnly, until
 }
 
 // windowExhaustion evaluates the cached fetched report only.

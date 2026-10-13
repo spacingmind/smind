@@ -52,4 +52,19 @@ describe("summaryWindows", () => {
     expect(hasPlanWindows([problemAccount("error"), claudeAccount()])).toBe(true);
     expect(hasPlanWindows([problemAccount("error")])).toBe(false);
   });
+
+  it("keeps_a_percentless_window_only_when_its_status_limits", () => {
+    const account = claudeAccount();
+    const [five, weekly] = account.report!.windows!;
+    const rejected = { id: "obs_a", label: "obs", status: "rejected", source: "observed" };
+    const warning = { id: "obs_b", label: "obs", status: "allowed_warning", source: "observed" };
+    const allowed = { id: "obs_c", label: "obs", status: "allowed", source: "observed" };
+    const windows = [rejected, five, allowed, weekly, warning, null as never];
+    const ids = (w: typeof windows) => summaryWindows({ ...account, report: { ...account.report!, windows: w } }).map((x) => x.id);
+    expect(ids(windows)).toEqual(["obs_a", "five_hour", "weekly", "obs_b"]);
+    // Without summary flags the first percent window stays the only meter, the status ones still show.
+    const unflagged = windows.map((w) => (w ? { ...w, summary: false } : w));
+    expect(ids(unflagged)).toEqual(["obs_a", "five_hour", "obs_b"]);
+    expect(hasPlanWindows([{ ...account, report: { ...account.report!, windows: [rejected] } }])).toBe(true);
+  });
 });

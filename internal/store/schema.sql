@@ -264,13 +264,16 @@ CREATE TABLE IF NOT EXISTS quota_poll_state (
 -- quota_cooldown: passive rejection cooldowns (ADR-0028 §7), one row per
 -- account and scope. scope_model '' is a credential-wide cooldown; a model id
 -- scopes it to that model. Additive: CREATE TABLE IF NOT EXISTS applies it to
--- existing databases on the next Open, so no migrate.go entry.
+-- existing databases on the next Open; rejected_window (the window whose
+-- rejection set it, display only) was added later, so it also has a migrate.go
+-- entry for databases that already had the table.
 CREATE TABLE IF NOT EXISTS quota_cooldown (
     account_id INTEGER NOT NULL REFERENCES accounts(id),
     scope_model TEXT NOT NULL DEFAULT '',
     until TIMESTAMP NOT NULL,
     reason TEXT NOT NULL,
     level INTEGER NOT NULL DEFAULT 0,
+    rejected_window TEXT NOT NULL DEFAULT '',
     observed_at TIMESTAMP NOT NULL,
     PRIMARY KEY (account_id, scope_model)
 );

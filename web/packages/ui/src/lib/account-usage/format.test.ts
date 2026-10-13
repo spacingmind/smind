@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatAmount, formatDisplayPct, formatPct, formatResetLabel } from "./format";
+import { formatAmount, formatCooldownUntil, formatDisplayPct, formatPct, formatResetLabel } from "./format";
 import type { UsageWindow } from "./types";
 
 const NOW = Date.parse("2026-10-01T12:00:00Z");
@@ -78,5 +78,18 @@ describe("formatAmount", () => {
 
   it("writes an unknown unit out plainly", () => {
     expect(formatAmount(5, "wombats", "en")).toBe("5 wombats");
+  });
+});
+
+describe("formatCooldownUntil", () => {
+  const noon = new Date(2026, 9, 12, 12, 0).getTime();
+
+  it("is the time alone today", () => {
+    expect(formatCooldownUntil(noon + 65 * 60_000, noon, "en-US")).toMatch(/^1:05\s?PM$/);
+    expect(formatCooldownUntil(noon + 65 * 60_000, noon, "en-GB")).toBe("13:05");
+  });
+
+  it("adds the date on another day", () => {
+    expect(formatCooldownUntil(noon + 26 * 3_600_000, noon, "en-US")).toMatch(/^Oct 13, 2:00\s?PM$/);
   });
 });
