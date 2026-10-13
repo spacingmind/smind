@@ -7,12 +7,26 @@ import { EM_DASH, formatCost, formatTokens, usageSourceLabel } from "@/lib/usage
 import type { RunUsage } from "@/lib/types";
 
 /**
- * The run footer's per-run usage pill (ADR-0020 UI follow-up): a compact,
- * muted one-liner of the run's reported usage, with a popover listing
- * every field at full precision. Null fields are omitted from the pill
- * and shown as an em dash in the popover -- never 0, which is a real
- * reported value. Renders nothing when the run has no usage at all
- * (an old run, or one that has not reported yet).
+ * The footer's compact cost: like formatCost, but two decimals once the
+ * cost is at least a cent -- the exact value lives in the card.
+ */
+function formatCompactCost(usd: number): string {
+  return usd >= 0.01 ? `$${usd.toFixed(2)}` : formatCost(usd);
+}
+
+/**
+ * The run footer's per-run usage pill (ADR-0020 UI follow-up). The inline
+ * text is the one number a reading footer wants -- the cost (`$0.03`),
+ * else the compact in+out total (`17.6k tokens`). A run that reported no
+ * number at all keeps an icon-only pill (not nothing): its card is the
+ * only place the run's ADR-0028 plan-usage section is reachable from, and
+ * `usage === undefined` alone renders nothing (an old run, or one that has
+ * not reported yet).
+ *
+ * The popover lists every field at full precision (null fields show as an
+ * em dash there -- never 0, which is a real reported value), and the
+ * pill's accessible name carries the full in/out/cost detail
+ * (ADR-0028 PR-E keeps the card reachable by hover, focus and click).
  *
  * ADR-0028 PR-E: the card also carries the Plan usage section for the run's
  * provider (`provider`; omitted or one with no plan windows adds nothing).
@@ -21,15 +35,22 @@ export function RunUsagePill({ usage, provider }: { usage: RunUsage | undefined;
   const plan = useChatPlanUsage(provider);
   if (usage === undefined) return null;
 
-  const parts: string[] = [];
-  if (usage.inputTokens !== null && usage.inputTokens !== undefined) {
-    parts.push(`${formatTokens(usage.inputTokens, "compact")} in`);
-  }
-  if (usage.outputTokens !== null && usage.outputTokens !== undefined) {
-    parts.push(`${formatTokens(usage.outputTokens, "compact")} out`);
-  }
-  if (parts.length === 0) parts.push("Usage not reported");
-  if (usage.costUsd !== null && usage.costUsd !== undefined) parts.push(formatCost(usage.costUsd));
+  const hasInput = usage.inputTokens !== null && usage.inputTokens !== undefined;
+  const hasOutput = usage.outputTokens !== null && usage.outputTokens !== undefined;
+  const hasCost = usage.costUsd !== null && usage.costUsd !== undefined;
+
+  const inline = hasCost
+    ? formatCompactCost(usage.costUsd!)
+    : hasInput || hasOutput
+      ? `${formatTokens((usage.inputTokens ?? 0) + (usage.outputTokens ?? 0), "compact")} tokens`
+      : null;
+
+  const labelParts: string[] = [];
+  if (hasInput) labelParts.push(`${formatTokens(usage.inputTokens, "compact")} in`);
+  if (hasOutput) labelParts.push(`${formatTokens(usage.outputTokens, "compact")} out`);
+  if (hasCost) labelParts.push(formatCost(usage.costUsd));
+  if (labelParts.length === 0) labelParts.push("Usage not reported");
+  const label = `Usage: ${labelParts.join(", ")}`;
 
   const rows: Array<[string, string]> = [
     ["Input", formatTokens(usage.inputTokens)],
@@ -42,8 +63,6 @@ export function RunUsagePill({ usage, provider }: { usage: RunUsage | undefined;
     ["Context", `${formatTokens(usage.contextUsed)} / ${formatTokens(usage.contextSize)}`],
   ];
 
-  const label = `Usage: ${parts.join(", ")}`;
-
   return (
     <UsagePillCard
       testId="run-usage-pill"
@@ -51,7 +70,7 @@ export function RunUsagePill({ usage, provider }: { usage: RunUsage | undefined;
       pill={
         <>
           <Coins className="size-3" />
-          <span className="truncate">{parts.join(" · ")}</span>
+          {inline !== null && <span className="truncate">{inline}</span>}
         </>
       }
       contentTestId="run-usage-popover"

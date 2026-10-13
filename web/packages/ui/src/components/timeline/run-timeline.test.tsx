@@ -1,5 +1,5 @@
 import { act } from "react";
-import { fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { assistantMarkdown } from "@/components/timeline/timeline-text";
@@ -26,7 +26,7 @@ function run(events: RunLogEvent[], overrides: Partial<RunEntry> = {}): RunEntry
 }
 
 describe("RunTimeline stop reason", () => {
-  it("labels a max_turn_requests run as turn limit reached", () => {
+  it("labels a max_turn_requests run as a hit tool-turn limit warning", () => {
     render(
       <ul>
         <RunTimeline run={run([{ type: "chunk", text: "x" }], { stopReason: "max_turn_requests" })} />
@@ -34,18 +34,17 @@ describe("RunTimeline stop reason", () => {
     );
     const el = screen.getByTestId("run-stop-reason");
     expect(el.getAttribute("data-tone")).toBe("warning");
-    expect(el.textContent).toContain("Turn limit reached");
-    expect(el.textContent).toContain("Send a message to continue");
+    expect(el.textContent).toBe("Hit the tool-turn limit");
   });
 
-  it("shows other stop reasons verbatim and names a cancel", () => {
+  it("shows other stop reasons as Ended and names a cancel", () => {
     const { unmount } = render(
       <ul>
         <RunTimeline run={run([{ type: "chunk", text: "x" }], { stopReason: "whatever" })} />
       </ul>,
     );
     const el = screen.getByTestId("run-stop-reason");
-    expect(el.textContent).toBe("whatever");
+    expect(el.textContent).toBe("Ended: whatever");
     expect(el.getAttribute("data-tone")).toBe("neutral");
     unmount();
     render(
@@ -53,7 +52,7 @@ describe("RunTimeline stop reason", () => {
         <RunTimeline run={run([{ type: "chunk", text: "x" }], { stopReason: "cancelled" })} />
       </ul>,
     );
-    expect(screen.getByTestId("run-stop-reason").textContent).toBe("Stopped");
+    expect(screen.getByTestId("run-stop-reason").textContent).toBe("Stopped by you");
   });
 
   it("hides the normal end_turn stop reason", () => {
@@ -89,37 +88,62 @@ describe("RunTimeline", () => {
     expect(screen.getByTestId("timeline-unknown")).toHaveTextContent("todo_list");
   });
 
-  it("run header shows the requested model", () => {
+  it("a finished run shows model, duration and cost and no \"done\"", () => {
     const { rerender } = render(
       <ul>
-        <RunTimeline run={run([], { model: "claude-opus-5-5" })} />
+        <RunTimeline
+          run={run([], {
+            model: "claude-sonnet-4-5",
+            usage: { inputTokens: 12345, outputTokens: 1234, costUsd: 0.032, source: "claude_result" },
+          })}
+          modelLabels={{ "claude-native/claude-sonnet-4-5": "Sonnet 4.5" }}
+        />
       </ul>,
     );
-    expect(screen.getByTestId("run-model-chip")).toHaveTextContent("claude-opus-5-5");
+    const footer = screen.getByTestId("run-footer");
+    expect(within(footer).getByTestId("run-model")).toHaveTextContent("Sonnet 4.5");
+    expect(within(footer).getByTestId("run-elapsed")).toHaveTextContent("2s");
+    expect(within(footer).getByTestId("run-usage-pill")).toHaveTextContent("$0.03");
+    expect(footer.textContent).not.toContain("done");
+    expect(footer.textContent).not.toContain("claude-native");
+    // No stop-reason segment on a normal finish.
+    expect(within(footer).queryByTestId("run-stop-reason")).not.toBeInTheDocument();
 
-    // A default run (no model requested) has no chip.
+    // With no catalog and no model reported, the fallback is the raw
+    // provider id humanised through the same pipeline -- still a label.
     rerender(
-      <ul>
-        <RunTimeline run={run([], { model: "" })} />
-      </ul>,
-    );
-    expect(screen.queryByTestId("run-model-chip")).not.toBeInTheDocument();
-  });
-
-  it("shows the provider's label when a providerLabels map is given, the raw id otherwise (label ?? id)", () => {
-    const { rerender } = render(
       <ul>
         <RunTimeline run={run([])} />
       </ul>,
     );
-    expect(screen.getByTestId("run-entry")).toHaveTextContent("claude-native");
+    expect(screen.getByTestId("run-model")).toHaveTextContent("claude-native");
+  });
 
-    rerender(
-      <ul>
-        <RunTimeline run={run([])} providerLabels={{ "claude-native": "Claude Code" }} />
-      </ul>,
-    );
-    expect(screen.getByTestId("run-entry")).toHaveTextContent("Claude Code");
+  it("a running run shows Working… with a live elapsed time", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T00:00:00Z"));
+    try {
+      render(
+        <ul>
+          <RunTimeline run={run([], { status: "running", finishedAt: undefined })} />
+        </ul>,
+      );
+      expect(within(screen.getByTestId("run-meta")).getByRole("status")).toHaveTextContent("Working…");
+      expect(screen.getByTestId("run-meta")).toHaveAttribute("data-status", "running");
+      // After 12 fake seconds the label ticks up to 12s.
+      act(() => {
+        vi.advanceTimersByTime(12_000);
+      });
+      expect(screen.getByTestId("run-working-elapsed")).toHaveTextContent("12s");
+      // The ticking number is a timer (aria-live off); only the static word is a live region.
+      expect(screen.getByTestId("run-working-elapsed")).toHaveAttribute("role", "timer");
+      expect(within(screen.getByTestId("run-meta")).getByRole("status")).toHaveTextContent(/^Working…$/);
+      expect(screen.getByTestId("run-meta")).toHaveAttribute("aria-label", "Working");
+      // No model segment while running.
+      expect(screen.queryByTestId("run-model")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([
@@ -211,26 +235,24 @@ describe("RunTimeline", () => {
     expect(screen.getByTestId("timeline-unknown")).toBeInTheDocument();
   });
 
-  it("run footer shows the usage pill", () => {
+  it("the relative time carries the absolute time as its title", () => {
+    const finished = new Date(Date.now() - 2 * 60 * 60 * 1000);
     render(
       <ul>
-        <RunTimeline
-          run={run([], {
-            stopReason: "max_tokens",
-            usage: { inputTokens: 12345, outputTokens: 1234, costUsd: 0.042, source: "claude_result" },
-          })}
-        />
+        <RunTimeline run={run([], { startedAt: "2024-01-01T00:00:00Z", finishedAt: finished.toISOString() })} />
       </ul>,
     );
-
-    const footer = screen.getByTestId("run-footer");
-    expect(within(footer).getByTestId("run-usage-pill")).toHaveTextContent("12.3k in · 1.2k out · $0.042");
-    // The pill sits between the stop reason and the action bar.
-    const stop = within(footer).getByTestId("run-stop-reason");
-    const pill = within(footer).getByTestId("run-usage-pill");
-    const copy = within(footer).getByTestId("run-copy-button");
-    expect(stop.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(pill.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const age = screen.getByTestId("run-age");
+    expect(age).toHaveTextContent("2h ago");
+    expect(age.getAttribute("title")).toBe(finished.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }));
+    // A fresh finish (< 1 min old) shows no age segment at all.
+    cleanup();
+    render(
+      <ul>
+        <RunTimeline run={run([], { startedAt: "2024-01-01T00:00:00Z", finishedAt: new Date().toISOString() })} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-age")).not.toBeInTheDocument();
   });
 
   function stubClipboard() {
@@ -266,7 +288,8 @@ describe("RunTimeline", () => {
       </ul>,
     );
 
-    expect(screen.getByTestId("run-elapsed")).toHaveTextContent("2.0s");
+    expect(screen.getByTestId("run-elapsed")).toHaveTextContent("2s");
+    expect(screen.getByTestId("run-elapsed").getAttribute("title")).toBe("2.0 s");
 
     await openCopyMenu();
     await act(async () => {
@@ -345,6 +368,60 @@ describe("RunTimeline", () => {
     );
     expect(screen.queryByTestId("run-prompt-edit")).toBeNull();
     expect(screen.getByTestId("run-prompt-copy")).toBeInTheDocument();
+  });
+
+  it("Continue appears on the latest max_tokens run and calls onContinue", () => {
+    const onContinue = vi.fn();
+    const r = run([{ type: "chunk", text: "x" }], { stopReason: "max_tokens" });
+    const { rerender } = render(
+      <ul>
+        <RunTimeline run={r} isLatest onContinue={onContinue} />
+      </ul>,
+    );
+    fireEvent.click(screen.getByTestId("run-continue"));
+    expect(onContinue).toHaveBeenCalledWith(r);
+
+    // Not the latest run, or no handler -- the button disappears.
+    rerender(
+      <ul>
+        <RunTimeline run={r} isLatest={false} onContinue={onContinue} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-continue")).not.toBeInTheDocument();
+    rerender(
+      <ul>
+        <RunTimeline run={r} isLatest />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-continue")).not.toBeInTheDocument();
+  });
+
+  it("Continue and Retry are hidden on an older run", () => {
+    render(
+      <ul>
+        <RunTimeline run={run([], { stopReason: "max_tokens" })} isLatest={false} onContinue={() => {}} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-continue")).not.toBeInTheDocument();
+    cleanup();
+    render(
+      <ul>
+        <RunTimeline run={run([], { status: "error", err: "boom" })} isLatest={false} onRerun={() => {}} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-retry")).not.toBeInTheDocument();
+  });
+
+  it("Retry on a failed latest run calls onRerun", () => {
+    const onRerun = vi.fn();
+    const r = run([], { status: "error", err: "boom" });
+    render(
+      <ul>
+        <RunTimeline run={r} isLatest onRerun={onRerun} />
+      </ul>,
+    );
+    fireEvent.click(screen.getByTestId("run-retry"));
+    expect(onRerun).toHaveBeenCalledWith(r);
   });
 
   it("finished runs offer Re-run; a running run does not", () => {
@@ -454,6 +531,7 @@ describe("RunTimeline borderless chrome", () => {
           <RunTimeline run={run([], { status })} />
         </ul>,
       );
+      expect(screen.getByTestId("run-meta")).toHaveAttribute("data-status", status);
       const cls = screen.getByTestId("run-meta").className;
       unmount();
       return cls.split(/\s+/);
@@ -718,5 +796,29 @@ describe("useRunTimeline mcpServers", () => {
     });
     expect(result.current.runs?.[0]?.configRevision).toBe(2);
     expect(result.current.runs?.[0]?.items).toEqual([]);
+  });
+});
+
+describe("RunTimeline model segment title", () => {
+  it("keeps the exact requested model id one hover away (ADR-0025)", () => {
+    render(
+      <ul>
+        <RunTimeline run={run([], { model: "claude-opus-5-5" })} modelLabels={{ "claude-native/claude-opus-5-5": "Opus 5.5" }} />
+      </ul>,
+    );
+    const model = screen.getByTestId("run-model");
+    expect(model).toHaveTextContent("Opus 5.5");
+    expect(model).toHaveAttribute("title", "Requested model: claude-opus-5-5");
+  });
+
+  it("falls back to the reported model id for a default run", () => {
+    render(
+      <ul>
+        <RunTimeline run={run([], { usage: { model: "claude-sonnet-4-5-20250929", source: "claude_result" } })} />
+      </ul>,
+    );
+    const model = screen.getByTestId("run-model");
+    expect(model).toHaveTextContent("Sonnet 4.5");
+    expect(model).toHaveAttribute("title", "Reported model: claude-sonnet-4-5-20250929");
   });
 });
