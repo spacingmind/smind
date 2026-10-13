@@ -69,8 +69,8 @@ redirect in `spacingmind/spacing-mind-landing-page` `apps/web/next.config.ts`
 `redirects()`, added after P1 is in a release; the relay privacy page on spacingmind.com. Not in this plan: built-in TLS
 for direct connections (decision 10), relay-then-direct "one host, several connections" (decision 25), pairing-offer
 v2 compaction (decision 18), GitHub login for the hosted relay, a status page, removing gRPC v2 after its deprecation
-window (decision 31; a later PR), and any rename of smind's own "Workspace" concept (a separate question still pending
-with the Human, deliberately not touched here).
+window (decision 31; a later PR). smind's own "Workspace" concept is **not** renamed (Human, 2026-10-13): only the
+relay-side "workspace" becomes "relay host".
 
 ## Acceptance Criteria
 
@@ -873,8 +873,8 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   this monorepo as `relay-worker/` with one shared `relay/protocol/` definition and ONE conformance suite run against
   both implementations (decision 34); `deploy-relay.yml` is separate from release-please, path-filtered, and gated by
   the `relay-production` GitHub Environment with required reviewers; the relay-side "workspace" is renamed "relay
-  host" (P0, decision 33). Still pending with the Human: the other open decisions (notably #9) and a separate naming
-  question about smind's own "Workspace" (not acted on).
+  host" (P0, decision 33); smind's own "Workspace" concept stays as is. Still pending with the Human: the other open
+  decisions (notably #9).
 - **Terminology (P0):** a *relay host* is one daemon's mailbox on a relay (host id + admission secret). Connecting
   registers this daemon once; it creates nothing in smind's data; every paired client sees all of the daemon's
   workspaces, spaces and tasks.
