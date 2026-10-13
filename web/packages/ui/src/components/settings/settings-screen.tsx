@@ -1,5 +1,4 @@
 import { Fragment, useEffect, useState } from "react";
-import { ArrowLeft, ChevronRight } from "lucide-react";
 
 import "@/components/settings/appearance-section";
 import "@/components/settings/connections-section";
@@ -24,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { headerLeftInsetPx } from "@/lib/window-chrome";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClient } from "@/lib/ws-client";
+import { Icons } from "@/lib/icons";
 
 /** Tailwind `p-2`, which an inline `paddingLeft` replaces (see AppHeader). */
 const BASE_PADDING_PX = 8;
@@ -83,7 +83,7 @@ function SettingsNav({
               >
                 {section.icon}
                 {section.label}
-                {list && <ChevronRight className="ml-auto size-4 text-foreground-subtle" />}
+                {list && <Icons.chevronRight className="ml-auto size-4 text-foreground-subtle" />}
               </button>
             </li>
           </Fragment>
@@ -208,7 +208,7 @@ export function SettingsScreen({
             data-testid="settings-back-button"
             onClick={onNavigateBack}
           >
-            <ArrowLeft className="size-4" />
+            <Icons.back className="size-4" />
           </Button>
           <h1 className="truncate text-ui-base font-medium">Settings</h1>
           <div className="ml-auto" />
@@ -245,7 +245,7 @@ export function SettingsScreen({
             data-testid="settings-detail-back"
             onClick={() => setView("list")}
           >
-            <ArrowLeft className="size-4" />
+            <Icons.back className="size-4" />
           </Button>
           <h1 className="truncate text-ui-base font-medium">{active?.label}</h1>
           <div className="ml-auto" />
@@ -268,7 +268,7 @@ export function SettingsScreen({
       data-testid="settings-back-button"
       onClick={onNavigateBack}
     >
-      <ArrowLeft className="size-3.5" />
+      <Icons.back className="size-3.5" />
       Back to app
     </Button>
   );

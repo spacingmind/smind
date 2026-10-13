@@ -1,8 +1,8 @@
 import * as React from "react"
 import { Dialog as SheetPrimitive } from "radix-ui"
-import { XIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { Icons } from "@/lib/icons";
 
 function Dialog({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="dialog" {...props} />
@@ -67,7 +67,7 @@ function DialogContent({
             data-slot="dialog-close"
             className="absolute top-4 right-4 rounded-lg opacity-70 transition-opacity hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-hidden disabled:pointer-events-none [&>svg]:size-4 [&>svg]:shrink-0"
           >
-            <XIcon />
+            <Icons.close />
             <span className="sr-only">Close</span>
           </SheetPrimitive.Close>
         )}

@@ -1,6 +1,6 @@
-import { Settings2 } from "lucide-react";
 
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { Icons } from "@/lib/icons";
 
 /**
  * Item 13's General section originally held the composer's two defaults
@@ -37,6 +37,6 @@ registerSettingsSection({
   // First in the nav (run-config IA regroup: General · Appearance ·
   // Agents & providers · Connection · Notifications · Shortcuts).
   order: 50,
-  icon: <Settings2 aria-hidden className="size-3.5" />,
+  icon: <Icons.settings aria-hidden className="size-3.5" />,
   render: (ctx) => <GeneralSection {...ctx} />,
 });

@@ -1,4 +1,3 @@
-import { Check, Monitor, Moon, Sun } from "lucide-react";
 
 import { Tooltip, TooltipContent, TooltipTrigger, useMenuTooltip } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
@@ -10,11 +9,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useTheme } from "@/hooks/use-theme";
 import type { ThemePreference } from "@/lib/theme";
+import { Icons } from "@/lib/icons";
 
-const OPTIONS: { id: ThemePreference; label: string; icon: typeof Sun }[] = [
-  { id: "light", label: "Light", icon: Sun },
-  { id: "dark", label: "Dark", icon: Moon },
-  { id: "system", label: "System", icon: Monitor },
+const OPTIONS: { id: ThemePreference; label: string; icon: typeof Icons.themeLight }[] = [
+  { id: "light", label: "Light", icon: Icons.themeLight },
+  { id: "dark", label: "Dark", icon: Icons.themeDark },
+  { id: "system", label: "System", icon: Icons.themeSystem },
 ];
 
 /**
@@ -28,7 +28,7 @@ const OPTIONS: { id: ThemePreference; label: string; icon: typeof Sun }[] = [
 export function ThemeToggle({ withTooltip = false, className }: { withTooltip?: boolean; className?: string }) {
   const { preference, resolved, setPreference } = useTheme();
   const themeTip = useMenuTooltip();
-  const TriggerIcon = resolved === "dark" ? Moon : Sun;
+  const TriggerIcon = resolved === "dark" ? Icons.themeDark : Icons.themeLight;
 
   const trigger = (
     <Button variant="ghost" size="icon-sm" aria-label={`Theme: ${preference}`} data-testid="theme-toggle-trigger" className={className}>
@@ -63,7 +63,7 @@ export function ThemeToggle({ withTooltip = false, className }: { withTooltip?: 
             >
               <Icon />
               {option.label}
-              {active && <Check className="ml-auto size-3.5" />}
+              {active && <Icons.check className="ml-auto size-3.5" />}
             </DropdownMenuItem>
           );
         })}

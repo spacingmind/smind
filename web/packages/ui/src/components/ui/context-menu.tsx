@@ -1,8 +1,8 @@
 import * as React from "react";
 import { ContextMenu as ContextMenuPrimitive } from "radix-ui";
-import { ChevronRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { Icons } from "@/lib/icons";
 
 /**
  * A shadcn-shaped wrapper over Radix's ContextMenu, added for the file
@@ -86,7 +86,7 @@ function ContextMenuSubTrigger({
       {...props}
     >
       {children}
-      <ChevronRight className="ml-auto size-4" />
+      <Icons.chevronRight className="ml-auto size-4" />
     </ContextMenuPrimitive.SubTrigger>
   );
 }
