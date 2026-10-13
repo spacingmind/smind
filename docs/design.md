@@ -1,4 +1,4 @@
-# smind web UI: design rules
+# sMind web UI: design rules
 
 This is the living reference for `web/packages/ui`'s token vocabulary,
 density, primitives, copy rules, and the keyboard/palette registration APIs
@@ -13,7 +13,7 @@ Apache-2.0 attribution this incorporation requires.
 
 ## Character
 
-smind is a calm technical console: quiet, dense, and operational rather
+sMind is a calm technical console: quiet, dense, and operational rather
 than decorative — the same thesis `refs/zcode/DESIGN.md`'s Product
 Character section states for ZCode. Every visual decision serves either
 *act on this* or *understand this* — never *look at this*.
