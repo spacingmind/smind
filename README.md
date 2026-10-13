@@ -85,8 +85,7 @@ task desktop:mac           # build only; output under desktop/src-tauri/target/<
 
 ### Windows desktop app
 
-Each release attaches an installer (`smind-desktop-<version>-windows-x64`
-NSIS `.exe` / `.msi`). The installer bundles the matching native `smind.exe`:
+Each release attaches an x64 installer (NSIS `*-setup.exe` and `.msi`). The installer bundles the matching native `smind.exe`:
 **Install** or **Update** in the app copies it to
 `%LOCALAPPDATA%\smind\bin\` and runs it from there — nothing is downloaded,
 so the daemon's version always matches the app's. Git for Windows is
