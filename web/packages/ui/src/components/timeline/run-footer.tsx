@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
  * component only renders it, plus the two live tickers (the running
  * elapsed label and the relative age) that a pure view model can't own.
  */
-export function RunFooter({
+export function RunFooter<T extends RunFooterRun>({
   run,
   providerLabels,
   modelLabels,
@@ -30,7 +30,7 @@ export function RunFooter({
   onRerun,
   children,
 }: {
-  run: RunFooterRun;
+  run: T;
   /** provider.list's id→label map ("label ?? id", run-config IA). */
   providerLabels?: Record<string, string>;
   /** `${provider}/${modelId}` → human label; `${provider}/` → that provider's default-model label. */
@@ -38,9 +38,9 @@ export function RunFooter({
   /** Continue/Retry are offered on the chat's latest run only. */
   isLatest?: boolean;
   /** Continue: re-submits with the prompt "Continue" on the run's own config (task-detail wires it). */
-  onContinue?: (run: RunFooterRun) => void;
+  onContinue?: (run: T) => void;
   /** Retry: the existing Re-run path, offered on a failed latest run. */
-  onRerun?: (run: RunFooterRun) => void;
+  onRerun?: (run: T) => void;
   /** The hover action bar (copy / re-run) -- rendered as-is at the end of the line. */
   children?: ReactNode;
 }) {

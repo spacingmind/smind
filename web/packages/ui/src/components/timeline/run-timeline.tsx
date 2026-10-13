@@ -4,7 +4,7 @@ import { Check, Copy, Pencil, RotateCcw } from "lucide-react";
 import { groupTimeline, type DetailLevel } from "@/components/timeline/detail-level";
 import { TimelineRow, type TimelineRowContext } from "@/components/timeline/timeline-row";
 import { ToolGroupRow } from "@/components/timeline/tool-group-row";
-import { assistantMarkdown, formatElapsed, timelineToText } from "@/components/timeline/timeline-text";
+import { assistantMarkdown, timelineToText } from "@/components/timeline/timeline-text";
 import {
   CopyAction,
   MESSAGE_ACTION_CLASS,
@@ -12,22 +12,12 @@ import {
   MessageActions,
   useCopyFeedback,
 } from "@/components/timeline/message-actions";
-import { RunUsagePill } from "@/components/run-usage-pill";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger, useMenuTooltip } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
-import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
-import { describeStopReason } from "@/components/timeline/stop-reason";
+import { RunFooter } from "@/components/timeline/run-footer";
+import type { RunModelLabels } from "@/components/timeline/run-footer-model";
 import { canRetryWithHigherEffort, type RunEntry } from "@/hooks/use-run-timeline";
-import type { RunStatusValue } from "@/lib/types";
-
-const RUN_STATUS_DOT: Record<RunStatusValue, StatusDotStatus> = {
-  running: "running",
-  done: "success",
-  error: "danger",
-  stopped: "warning",
-};
 
 /**
  * One run rendered as a turn: the prompt that started it, the typed
@@ -51,7 +41,10 @@ export const RunTimeline = memo(function RunTimeline({
   onRetry,
   onRerun,
   onEditPrompt,
+  onContinue,
   providerLabels,
+  modelLabels,
+  isLatest = false,
 }: {
   run: RunEntry;
   detailLevel?: DetailLevel;
@@ -60,11 +53,15 @@ export const RunTimeline = memo(function RunTimeline({
   onRerun?: (run: RunEntry) => void;
   /** Loads this run's prompt into the composer; omitted hides the action. */
   onEditPrompt?: (run: RunEntry) => void;
+  /** Continue (max_tokens / turn-limit endings): submits "Continue" on the run's own config; omitted hides the button. */
+  onContinue?: (run: RunEntry) => void;
   /** provider.list's id→label map ("label ?? id", run-config IA); omitted leaves raw ids. */
   providerLabels?: Record<string, string>;
+  /** `${provider}/${modelId}` → human model label; `${provider}/` → the provider's default-model label (run footer). */
+  modelLabels?: RunModelLabels;
+  /** Continue/Retry are offered on the chat's latest run only. */
+  isLatest?: boolean;
 } & TimelineRowContext) {
-  const elapsed = formatElapsed(run.startedAt, run.finishedAt);
-  const stop = run.stopReason ? describeStopReason(run.stopReason) : null;
   const groups = groupTimeline(run.items, detailLevel);
 
   return (
@@ -122,44 +119,7 @@ export const RunTimeline = memo(function RunTimeline({
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-ui-sm text-foreground-muted" data-testid="run-footer">
-          <div
-            className={cn(
-              "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 transition-opacity",
-              run.status === "done" &&
-                "opacity-70 group-has-[:focus-visible]/answer:opacity-100 group-hover/answer:opacity-100 [@media(hover:none)]:opacity-100",
-            )}
-            data-testid="run-meta"
-          >
-            <span className="flex items-center gap-1.5">
-              <StatusDot status={RUN_STATUS_DOT[run.status] ?? "neutral"} />
-              <span data-testid="run-status">{run.status}</span>
-            </span>
-            <span className="truncate">{providerLabels?.[run.provider] ?? run.provider}</span>
-            {run.model && (
-              // ADR-0025: only a *requested* model is shown -- a default run has no chip.
-              <span
-                data-testid="run-model-chip"
-                title={`Requested model: ${run.model}`}
-                className="max-w-40 shrink truncate rounded bg-surface px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted"
-              >
-                {run.model}
-              </span>
-            )}
-            {elapsed && <span data-testid="run-elapsed">{elapsed}</span>}
-            {stop && (
-              <span
-                data-testid="run-stop-reason"
-                data-tone={stop.tone}
-                title={stop.hint}
-                className={stop.tone === "warning" ? "text-warning" : undefined}
-              >
-                {stop.label}
-                {stop.hint && <span className="ml-1 text-foreground-muted">· {stop.hint}</span>}
-              </span>
-            )}
-            <RunUsagePill usage={run.usage} provider={run.provider} />
-          </div>
+        <RunFooter run={run} providerLabels={providerLabels} modelLabels={modelLabels} isLatest={isLatest} onContinue={onContinue} onRerun={onRerun}>
           <MessageActions group="run" className="ml-auto" data-testid="run-actions">
             <RunCopyMenu run={run} />
             {onRerun && run.status !== "running" && (
@@ -171,7 +131,7 @@ export const RunTimeline = memo(function RunTimeline({
               />
             )}
           </MessageActions>
-        </div>
+        </RunFooter>
       </div>
     </li>
   );
