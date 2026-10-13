@@ -554,7 +554,7 @@ describe("App live events", () => {
     respond(socket, "run.list", null);
     await flush();
 
-    expect(screen.getByText("Welcome to smind")).toBeInTheDocument();
+    expect(screen.getByText("Welcome to sMind")).toBeInTheDocument();
   });
 });
 

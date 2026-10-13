@@ -22,7 +22,7 @@ afterEach(() => {
 describe("UpdateBadge", () => {
   it("AH-AC11 shows for the open prompt and for a dismissed update, naming the version", async () => {
     await mountBadge({ desktop: true, state: { stage: "prompt", info: INFO, error: null } });
-    expect(screen.getByTestId("update-badge")).toHaveAttribute("aria-label", "Update available: smind v0.11.0");
+    expect(screen.getByTestId("update-badge")).toHaveAttribute("aria-label", "Update available: sMind v0.11.0");
     cleanup();
     await mountBadge({ desktop: true, state: { stage: "idle", available: INFO } });
     expect(screen.getByTestId("update-badge")).toBeInTheDocument();
