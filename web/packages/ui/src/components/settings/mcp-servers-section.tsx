@@ -445,7 +445,7 @@ function McpServerForm({
     <form className="flex flex-col gap-2" onSubmit={onSubmit}>
       <div className="grid grid-cols-2 gap-2">
         <Input
-          aria-label="Icons.host name"
+          aria-label="Server name"
           data-testid={`${idPrefix}-name`}
           placeholder="Name (e.g. playwright)"
           value={form.name}
