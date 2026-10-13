@@ -16,38 +16,58 @@ function usage(overrides: Partial<RunUsage> = {}): RunUsage {
   };
 }
 
+const ALL_NULL = {
+  inputTokens: null,
+  outputTokens: null,
+  costUsd: null,
+  cachedInputTokens: null,
+  cacheWriteTokens: null,
+  reasoningTokens: null,
+  model: null,
+  contextUsed: null,
+  contextSize: null,
+};
+
 describe("RunUsagePill", () => {
-  it("shows input, output and cost compactly", () => {
+  it("the pill shows cost only, else total tokens", () => {
+    // Cost wins, two decimals at a cent and above; the card keeps the exact value.
+    let view = render(<RunUsagePill usage={usage()} />);
+    expect(view.getByTestId("run-usage-pill")).toHaveTextContent("$0.04");
+    view.unmount();
+
+    view = render(<RunUsagePill usage={usage({ costUsd: 1.234 })} />);
+    expect(view.getByTestId("run-usage-pill")).toHaveTextContent("$1.23");
+    view.unmount();
+
+    // No cost -- the compact in+out total.
+    view = render(<RunUsagePill usage={usage({ costUsd: null, inputTokens: 16400, outputTokens: 1234 })} />);
+    expect(view.getByTestId("run-usage-pill")).toHaveTextContent("17.6k tokens");
+    view.unmount();
+
+    // Only one side reported still sums fine.
+    view = render(<RunUsagePill usage={usage({ costUsd: null, inputTokens: null, outputTokens: 900 })} />);
+    expect(view.getByTestId("run-usage-pill")).toHaveTextContent("900 tokens");
+    view.unmount();
+
+    // Nothing reported -- the pill stays (its card is still reachable), icon only.
+    view = render(<RunUsagePill usage={usage({ source: "not_reported", ...ALL_NULL })} />);
+    const pill = view.getByTestId("run-usage-pill");
+    expect(pill.textContent).toBe("");
+    expect(pill).toHaveAttribute("aria-label", "Usage: Usage not reported");
+    view.unmount();
+
+    // A reported 0 is a real value: $0.00 wins over the token total.
+    view = render(<RunUsagePill usage={usage({ inputTokens: 0, outputTokens: 0, costUsd: 0 })} />);
+    expect(view.getByTestId("run-usage-pill")).toHaveTextContent("$0.00");
+    view.unmount();
+  });
+
+  it("the aria-label keeps in/out/cost", () => {
     render(<RunUsagePill usage={usage()} />);
-
-    const pill = screen.getByTestId("run-usage-pill");
-    expect(pill).toHaveTextContent("12.3k in · 1.2k out · $0.042");
+    expect(screen.getByTestId("run-usage-pill")).toHaveAttribute("aria-label", "Usage: 12.3k in, 1.2k out, $0.042");
   });
 
-  it('shows "Usage not reported" for a not_reported run, never 0', () => {
-    render(
-      <RunUsagePill
-        usage={usage({
-          source: "not_reported",
-          inputTokens: null,
-          outputTokens: null,
-          cachedInputTokens: null,
-          cacheWriteTokens: null,
-          reasoningTokens: null,
-          costUsd: null,
-          model: null,
-          contextUsed: null,
-          contextSize: null,
-        })}
-      />,
-    );
-
-    const pill = screen.getByTestId("run-usage-pill");
-    expect(pill).toHaveTextContent("Usage not reported");
-    expect(pill).not.toHaveTextContent("0");
-  });
-
-  it("omits null fields from the pill and shows an em dash for them in the popover", async () => {
+  it("shows an em dash in the card for null fields, never 0", async () => {
     render(
       <RunUsagePill
         usage={usage({
@@ -65,8 +85,7 @@ describe("RunUsagePill", () => {
     );
 
     const pill = screen.getByTestId("run-usage-pill");
-    expect(pill).toHaveTextContent("500 in");
-    expect(pill.textContent).not.toContain("out");
+    expect(pill).toHaveTextContent("500 tokens");
 
     await act(async () => {
       fireEvent.click(pill);
@@ -78,13 +97,12 @@ describe("RunUsagePill", () => {
     expect(outputValue).not.toHaveTextContent("0");
   });
 
-  it("renders a reported 0 as 0", () => {
-    render(<RunUsagePill usage={usage({ inputTokens: 0, outputTokens: 0, costUsd: 0 })} />);
-
-    expect(screen.getByTestId("run-usage-pill")).toHaveTextContent("0 in · 0 out · $0.00");
+  it("renders nothing without usage", () => {
+    const { container } = render(<RunUsagePill usage={undefined} />);
+    expect(container).toBeEmptyDOMElement();
   });
 
-  it("popover shows full thousands, the model and the source label", async () => {
+  it("the card still shows every field at full precision", async () => {
     render(<RunUsagePill usage={usage()} />);
 
     await act(async () => {
@@ -92,15 +110,10 @@ describe("RunUsagePill", () => {
     });
 
     const popover = screen.getByTestId("run-usage-popover");
-    expect(popover).toHaveTextContent("Usage");
     expect(popover).toHaveTextContent("12,345");
     expect(popover).toHaveTextContent("1,234");
+    expect(popover).toHaveTextContent("$0.042");
     expect(popover).toHaveTextContent("claude-sonnet-4-5");
     expect(popover).toHaveTextContent("Source: Claude result");
-  });
-
-  it("renders nothing without usage", () => {
-    const { container } = render(<RunUsagePill usage={undefined} />);
-    expect(container).toBeEmptyDOMElement();
   });
 });
