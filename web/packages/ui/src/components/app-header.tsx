@@ -19,11 +19,8 @@ import { desktopOS, isDesktop } from "@/lib/platform";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import type { Task } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { headerLeftInsetPx } from "@/lib/window-chrome";
+import { HEADER_BASE_PADDING_PX, headerLeftInsetPx } from "@/lib/window-chrome";
 import type { WsClient } from "@/lib/ws-client";
-
-/** Tailwind `p-2`, which an inline `paddingLeft` replaces. */
-const BASE_PADDING_PX = 8;
 
 const ICON_BUTTON = "text-foreground-muted hover:text-foreground";
 
@@ -101,6 +98,8 @@ export function AppHeader({
   connectionStatus = "connected",
   sidebarPx,
   showSidebarToggle = true,
+  showUpdateBadge = showSidebarToggle,
+  windowToggle = false,
   task = null,
   client = null,
   events = null,
@@ -111,8 +110,12 @@ export function AppHeader({
   statusText: string;
   connectionStatus?: ConnectionStatus;
   sidebarPx: number;
-  /** Whether the toggle (and update badge) live here rather than in the sidebar's top strip. */
+  /** Whether the toggle (and, by default, the update badge) live here rather than in the sidebar's top strip or the window-level toggle. */
   showSidebarToggle?: boolean;
+  /** Whether the update badge lives here (it is in the sidebar's strip while that is expanded). Defaults to `showSidebarToggle`. */
+  showUpdateBadge?: boolean;
+  /** The desktop shell's window-level sidebar toggle floats over this header's left edge (`WindowSidebarToggle`): clear its zone. */
+  windowToggle?: boolean;
   task?: Task | null;
   client?: WsClient | null;
   events?: DaemonEvents | null;
@@ -124,7 +127,7 @@ export function AppHeader({
   const { fullscreen } = useWindowState();
   const { runAction } = useKeyboard();
   const localPathActions = useLocalPathActions();
-  const leftInset = isDesktop ? headerLeftInsetPx(desktopOS, fullscreen, sidebarPx) : 0;
+  const leftInset = isDesktop ? headerLeftInsetPx(desktopOS, fullscreen, sidebarPx, windowToggle) : 0;
   const connected = connectionStatus === "connected";
 
   return (
@@ -141,15 +144,15 @@ export function AppHeader({
       <header
         data-testid="app-header"
         data-tauri-drag-region={isDesktop ? "deep" : undefined}
-        className="@container/app-header flex h-12 shrink-0 items-center gap-2 border-b border-border/50 bg-panel p-2"
-        style={leftInset > 0 ? { paddingLeft: BASE_PADDING_PX + leftInset } : undefined}
-      >
-        {showSidebarToggle && (
-          <>
-            <SidebarTrigger className={ICON_BUTTON} />
-            {onOpenUpdate && <UpdateBadge state={updateState} onOpen={onOpenUpdate} />}
-          </>
+        className={cn(
+          "@container/app-header flex h-12 shrink-0 items-center gap-2 border-b border-border/50 bg-panel p-2",
+          // The inset follows the sidebar's own width animation (App.tsx's panel: 200ms ease-out), so the title slides with it instead of jumping.
+          isDesktop && "transition-[padding-left] duration-200 ease-out motion-reduce:transition-none",
         )}
+        style={leftInset > 0 ? { paddingLeft: HEADER_BASE_PADDING_PX + leftInset } : undefined}
+      >
+        {showSidebarToggle && <SidebarTrigger className={ICON_BUTTON} />}
+        {showUpdateBadge && onOpenUpdate && <UpdateBadge state={updateState} onOpen={onOpenUpdate} />}
         {task && <HeaderTask task={task} client={client} events={events} localPathActions={localPathActions} />}
         {/* Quiet while connected (sr-only keeps the live status for assistive tech); a pill only when something is wrong. */}
         <span
