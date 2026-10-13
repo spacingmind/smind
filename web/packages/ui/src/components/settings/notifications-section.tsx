@@ -46,7 +46,7 @@ export function NotificationsSection(_ctx: SettingsSectionContext) {
       return;
     }
     try {
-      new Notification("smind", { body: "This is what a smind notification looks like." });
+      new Notification("sMind", { body: "This is what a sMind notification looks like." });
       if (soundEnabled) playNotificationSound();
       setTestState({ status: "sent" });
     } catch (err) {

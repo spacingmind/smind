@@ -786,7 +786,7 @@ export function AppSidebar({
               (windowToggle || lights) && "hidden @min-[7rem]/strip:block",
             )}
           >
-            smind
+            sMind
           </span>
           {(windowToggle || lights) && <div className="min-w-0 flex-1 @min-[7rem]/strip:hidden" />}
           {headerActions && <div className="flex shrink-0 items-center gap-1">{headerActions}</div>}
@@ -887,7 +887,7 @@ export function AppSidebar({
                     <SidebarMenuItem>
                       <div className="flex flex-col gap-3 px-2 py-4">
                         <div className="text-ui-sm text-muted-foreground">
-                          <p className="font-medium text-foreground">Welcome to smind</p>
+                          <p className="font-medium text-foreground">Welcome to sMind</p>
                           <p className="mt-1">
                             A workspace is an existing git repo. Tasks are its isolated
                             worktrees; group them into spaces if you want. Create a
