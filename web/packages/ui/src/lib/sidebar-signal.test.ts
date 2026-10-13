@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, workspaceTasks } from "@/lib/sidebar-signal";
+import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, workspaceMonogram, workspaceTasks } from "@/lib/sidebar-signal";
 import { buildWorkspaceTree } from "@/lib/workspace-tree";
 import type { AttentionReason, TaskRunStatus } from "@/hooks/use-task-attention";
 import type { RunStatusValue, Space, Task, Workspace } from "@/lib/types";
@@ -115,5 +115,19 @@ describe("workspaceTasks", () => {
   it("collects every task under a workspace, across its spaces and its ungrouped bucket", () => {
     const tree = buildWorkspaceTree(WORKSPACE, [SPACE], [task(1), task(2, 10)]);
     expect(workspaceTasks(tree).map((t) => t.ID).sort()).toEqual([1, 2]);
+  });
+});
+
+describe("workspaceMonogram", () => {
+  it.each([
+    ["alpha", "Al"],
+    ["my-app", "MA"],
+    ["My Workspace", "MW"],
+    ["one two three", "OT"],
+    ["x", "X"],
+    ["  --  ", "?"],
+    ["", "?"],
+  ])("%j -> %j", (name, expected) => {
+    expect(workspaceMonogram(name)).toBe(expected);
   });
 });

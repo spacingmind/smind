@@ -136,3 +136,22 @@ export function aggregateStatus(
 export function workspaceTasks(workspace: WorkspaceWithTree): Task[] {
   return [...workspace.spaces.flatMap((sp: SpaceWithTasks) => sp.tasks), ...workspace.ungroupedTasks];
 }
+
+/**
+ * The monogram a workspace shows in the collapsed sidebar rail: the first
+ * letters of the first two words of its name (split on non-alphanumerics),
+ * or the first two characters of a single word (first one uppercased), so
+ * "alpha" -> "Al", "my-app" -> "MA". An empty name yields "?".
+ */
+export function workspaceMonogram(name: string): string {
+  const words = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (words.length === 0) return "?";
+  if (words.length === 1) {
+    const [first, ...rest] = Array.from(words[0]);
+    return first.toUpperCase() + (rest[0] ?? "");
+  }
+  return words
+    .slice(0, 2)
+    .map((w) => Array.from(w)[0].toUpperCase())
+    .join("");
+}
