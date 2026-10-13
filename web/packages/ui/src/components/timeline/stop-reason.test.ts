@@ -9,13 +9,16 @@ describe("describeStopReason", () => {
       tone: "warning",
       hint: "Send a message to continue",
     });
-    expect(describeStopReason("max_tokens").tone).toBe("warning");
-    expect(describeStopReason("refusal").label).toBe("Agent refused");
+    expect(describeStopReason("max_tokens")?.tone).toBe("warning");
+    expect(describeStopReason("refusal")?.label).toBe("Agent refused");
+  });
+
+  it("hides the normal end_turn and names a cancel", () => {
+    expect(describeStopReason("end_turn")).toBeNull();
+    expect(describeStopReason("cancelled")).toEqual({ label: "Stopped", tone: "neutral" });
   });
 
   it("shows other stop reasons verbatim", () => {
-    for (const r of ["end_turn", "cancelled", "whatever"]) {
-      expect(describeStopReason(r)).toEqual({ label: r, tone: "neutral" });
-    }
+    expect(describeStopReason("whatever")).toEqual({ label: "whatever", tone: "neutral" });
   });
 });

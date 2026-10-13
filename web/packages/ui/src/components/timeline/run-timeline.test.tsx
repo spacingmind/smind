@@ -38,15 +38,31 @@ describe("RunTimeline stop reason", () => {
     expect(el.textContent).toContain("Send a message to continue");
   });
 
-  it("shows other stop reasons verbatim", () => {
+  it("shows other stop reasons verbatim and names a cancel", () => {
+    const { unmount } = render(
+      <ul>
+        <RunTimeline run={run([{ type: "chunk", text: "x" }], { stopReason: "whatever" })} />
+      </ul>,
+    );
+    const el = screen.getByTestId("run-stop-reason");
+    expect(el.textContent).toBe("whatever");
+    expect(el.getAttribute("data-tone")).toBe("neutral");
+    unmount();
     render(
       <ul>
         <RunTimeline run={run([{ type: "chunk", text: "x" }], { stopReason: "cancelled" })} />
       </ul>,
     );
-    const el = screen.getByTestId("run-stop-reason");
-    expect(el.textContent).toBe("cancelled");
-    expect(el.getAttribute("data-tone")).toBe("neutral");
+    expect(screen.getByTestId("run-stop-reason").textContent).toBe("Stopped");
+  });
+
+  it("hides the normal end_turn stop reason", () => {
+    render(
+      <ul>
+        <RunTimeline run={run([{ type: "chunk", text: "x" }], { stopReason: "end_turn" })} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-stop-reason")).not.toBeInTheDocument();
   });
 });
 
@@ -200,7 +216,7 @@ describe("RunTimeline", () => {
       <ul>
         <RunTimeline
           run={run([], {
-            stopReason: "end_turn",
+            stopReason: "max_tokens",
             usage: { inputTokens: 12345, outputTokens: 1234, costUsd: 0.042, source: "claude_result" },
           })}
         />

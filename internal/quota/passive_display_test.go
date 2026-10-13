@@ -429,3 +429,83 @@ func Test_cooldown_reader_has_no_observation_accessor(t *testing.T) {
 	var _ Observer = (*Passive)(nil)
 	var _ CooldownSource = (*Passive)(nil)
 }
+
+func Test_observed_status_only_window_keeps_fetched_numbers(t *testing.T) {
+	t.Parallel()
+	base := newFakeClock().Now()
+	reset := base.Add(2 * time.Hour)
+	fetched := Result{Stale: true, Report: &Report{Version: ReportVersion, Status: StatusAvailable, FetchedAt: base, Windows: []Window{
+		{ID: "five_hour", Label: "5-hour", UsedPct: ptr(42.0), RemainingPct: ptr(58.0), ResetsAt: &reset, Tone: ToneOK, Source: "fetched"},
+		{ID: "weekly", Label: "Weekly", UsedPct: ptr(10.0), RemainingPct: ptr(90.0), ResetsAt: &reset, Tone: ToneOK, Source: "fetched"},
+	}}}
+	obs := &Observation{At: base.Add(time.Minute), Windows: []Window{
+		// status only: nothing but the status is new
+		observedWindow(Window{ID: "five_hour", Label: "5-hour"}, "allowed_warning"),
+		// numbers present: they win, the reset it lacks stays
+		observedWindow(newWindow("weekly", "Weekly", "7d", false, ptr(55.0), nil), "allowed"),
+	}}
+
+	rep, ok := DisplayReport(fetched, obs, 5*time.Minute, base.Add(10*time.Minute))
+	if !ok || len(rep.Windows) != 2 {
+		t.Fatalf("DisplayReport = %+v/%v, want 2 windows", rep, ok)
+	}
+	five, weekly := rep.Windows[0], rep.Windows[1]
+	if five.UsedPct == nil || *five.UsedPct != 42 || five.RemainingPct == nil || *five.RemainingPct != 58 ||
+		five.ResetsAt == nil || !five.ResetsAt.Equal(reset) {
+		t.Errorf("status-only window lost the fetched numbers: %+v", five)
+	}
+	if five.Source != "observed" || five.Status != "allowed_warning" || five.Tone != ToneWarning {
+		t.Errorf("status-only window source/status/tone = %q/%q/%q, want observed/allowed_warning/warning", five.Source, five.Status, five.Tone)
+	}
+	if weekly.UsedPct == nil || *weekly.UsedPct != 55 || weekly.ResetsAt == nil || !weekly.ResetsAt.Equal(reset) ||
+		weekly.Source != "observed" || weekly.Status != "allowed" {
+		t.Errorf("observed numbers must win and a missing reset stay: %+v", weekly)
+	}
+	// The inputs are not mutated.
+	if got := fetched.Report.Windows[0]; got.Source != "fetched" || got.Status != "" {
+		t.Errorf("fetched report mutated: %+v", got)
+	}
+	if obs.Windows[0].UsedPct != nil || obs.Windows[0].ResetsAt != nil {
+		t.Errorf("observation mutated: %+v", obs.Windows[0])
+	}
+}
+
+func Test_observed_failing_store_read_is_rate_limited(t *testing.T) {
+	logs, restore := captureLog()
+	defer restore()
+	fs := newFakeStore()
+	fs.setFail(false, true)
+	p, clk := newFakePassive(t, fs)
+
+	for i := 0; i < 20; i++ {
+		if _, ok := p.Observed(1); ok {
+			t.Fatal("Observed with a failing store = ok")
+		}
+	}
+	if n := fs.count("GetLatestQuotaSnapshotKind"); n != 1 {
+		t.Fatalf("store reads inside the retry window = %d, want 1", n)
+	}
+	if n := strings.Count(logs.String(), "\n"); n != 1 {
+		t.Errorf("log lines inside the retry window = %d, want 1", n)
+	}
+
+	clk.Advance(passiveLoadRetry - time.Millisecond)
+	p.Observed(1)
+	if n := fs.count("GetLatestQuotaSnapshotKind"); n != 1 {
+		t.Fatalf("store reads just before the window ends = %d, want 1", n)
+	}
+	clk.Advance(time.Millisecond)
+	p.Observed(1)
+	if n := fs.count("GetLatestQuotaSnapshotKind"); n != 2 {
+		t.Fatalf("store reads once the window ended = %d, want 2", n)
+	}
+
+	// The store recovers: the next read after the window succeeds and is cached.
+	fs.setFail(false, false)
+	clk.Advance(passiveLoadRetry)
+	p.Observed(1)
+	p.Observed(1)
+	if n := fs.count("GetLatestQuotaSnapshotKind"); n != 3 {
+		t.Fatalf("store reads after recovery = %d, want 3 (the successful one is cached)", n)
+	}
+}

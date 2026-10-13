@@ -86,6 +86,9 @@ func (f *fakeUsageDaemon) resultFor(method string, params json.RawMessage) any {
 	defer f.mu.Unlock()
 	switch method {
 	case "account.usage":
+		if override, ok := f.results[method]; ok {
+			return override
+		}
 		return map[string]any{"enabled": true, "ttlSeconds": 300, "reports": []any{}, "echo": json.RawMessage(params)}
 	case "usage.summary":
 		return []any{}
@@ -296,5 +299,26 @@ func TestAccountUsageTool_UsageSummaryUnchanged(t *testing.T) {
 	// have touched it, and the call must not have surfaced as account.usage.
 	if got := len(f.usageCalls()); got != 0 {
 		t.Fatalf("account.usage called %d times by usage_summary, want 0", got)
+	}
+}
+
+// TestMCPAccountUsagePassesCooldownThrough: report rows are relayed as
+// generic maps, so the daemon's optional cooldown key reaches the agent.
+func TestMCPAccountUsagePassesCooldownThrough(t *testing.T) {
+	cs, f := newAccountUsageSession(t)
+	f.mu.Lock()
+	f.results["account.usage"] = map[string]any{"enabled": true, "ttlSeconds": 300, "reports": []any{
+		map[string]any{"accountId": 1, "cooldown": map[string]any{"until": "2026-10-12T13:00:00Z", "scope": "account", "reason": "rejected", "window": "weekly"}},
+	}}
+	f.mu.Unlock()
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "account_usage", Arguments: map[string]any{}})
+	if err != nil || res.IsError {
+		t.Fatalf("CallTool() = %v, %+v", err, res)
+	}
+	b, _ := json.Marshal(res.StructuredContent)
+	for _, want := range []string{`"cooldown"`, `"until":"2026-10-12T13:00:00Z"`, `"window":"weekly"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("missing %s in %s", want, b)
+		}
 	}
 }

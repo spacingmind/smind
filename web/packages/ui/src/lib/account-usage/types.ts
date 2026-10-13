@@ -31,8 +31,27 @@ export interface UsageWindow {
   resetsAt?: string | null;
   durationSeconds?: number;
   tone?: UsageTone;
+  /** "fetched" (the plan endpoint) or "observed" (rate-limit headers on a proxied request). */
   source?: string;
+  /** "allowed" | "allowed_warning" | "rejected"; an observed window may carry only this. */
   status?: string;
+}
+
+export type UsageCooldownScope = "account" | "model";
+export type UsageCooldownReason = "rejected" | "fallback";
+export type UsageCooldownWindow = "five_hour" | "weekly" | "weekly_model" | "unified";
+
+/** A passive cooldown: an upstream rejection seen on a proxied request (ADR-0028 PR-F). */
+export interface UsageCooldown {
+  /** RFC 3339 UTC: when the account (or model) may be routed again. */
+  until: string;
+  scope: UsageCooldownScope;
+  /** Set when `scope` is "model". Client-controlled text: render it as text only. */
+  model?: string;
+  /** "fallback": the reset time was unknown and the daemon guessed. */
+  reason: UsageCooldownReason;
+  /** The window the upstream rejected, when it said. */
+  window?: UsageCooldownWindow;
 }
 
 export interface UsageBalance {
@@ -90,8 +109,8 @@ export interface AccountUsage {
   inFlight: boolean;
   lastError: string | null;
   report: UsageReport | null;
-  /** Reserved for PR-F; nothing reads it yet. */
-  cooldown?: { until: string; scope: "account" | "model"; model?: string; reason: string };
+  /** Present while a passive cooldown is in force; read through `activeCooldown`, never directly. */
+  cooldown?: UsageCooldown | null;
 }
 
 export interface AccountUsageParams {

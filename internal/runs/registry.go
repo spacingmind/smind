@@ -1324,28 +1324,37 @@ func (reg *Registry) Stop(runID string) error {
 func (reg *Registry) CloseAll() {
 	reg.closing.Store(true)
 
-	reg.mu.Lock()
-	running := make([]*run, 0, len(reg.runs))
-	for _, r := range reg.runs {
-		r.mu.Lock()
-		isRunning := r.status == StatusRunning
-		r.mu.Unlock()
-		if isRunning {
-			running = append(running, r)
+	// Loop until a pass finds nothing running: a finish that was already
+	// inside its queue hand-off when closing latched can still register a
+	// new run after the first snapshot, and that run is only visible to the
+	// next pass. Delivery refuses once closing is set, so this terminates.
+	for {
+		reg.mu.Lock()
+		running := make([]*run, 0, len(reg.runs))
+		for _, r := range reg.runs {
+			r.mu.Lock()
+			isRunning := r.status == StatusRunning
+			r.mu.Unlock()
+			if isRunning {
+				running = append(running, r)
+			}
 		}
-	}
-	reg.mu.Unlock()
+		reg.mu.Unlock()
+		if len(running) == 0 {
+			return
+		}
 
-	var wg sync.WaitGroup
-	for _, r := range running {
-		wg.Add(1)
-		go func(r *run) {
-			defer wg.Done()
-			_ = reg.Stop(r.id)
-			<-r.closedCh
-		}(r)
+		var wg sync.WaitGroup
+		for _, r := range running {
+			wg.Add(1)
+			go func(r *run) {
+				defer wg.Done()
+				_ = reg.Stop(r.id)
+				<-r.closedCh
+			}(r)
+		}
+		wg.Wait()
 	}
-	wg.Wait()
 }
 
 // List returns a summary of every Run the Registry currently knows about

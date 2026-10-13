@@ -1,6 +1,9 @@
+import { Clock } from "lucide-react";
+
 import { UsageBalanceBar } from "@/components/account-usage/usage-balance-bar";
 import { UsageRefreshButton } from "@/components/account-usage/usage-refresh-button";
 import { UsageSourceIcon } from "@/components/account-usage/usage-source-icon";
+import { useActiveCooldown } from "@/components/account-usage/use-active-cooldown";
 import { UsageWindowBar } from "@/components/account-usage/usage-window-bar";
 import type { UsagePinning } from "@/components/account-usage/use-usage-surface";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -57,6 +60,8 @@ export function UsageCard({
   compact?: boolean;
 }) {
   const isMobile = useIsMobile();
+  const cooldown = useActiveCooldown(usage);
+  const cooldownCopy = cooldown ? usageCopy.cooldown(cooldown) : null;
   const report = usage.report;
   const available = report?.status === "available";
   const windows: UsageWindow[] = available ? list(report.windows) : [];
@@ -107,6 +112,28 @@ export function UsageCard({
           </div>
         ) : null}
       </div>
+
+      {cooldownCopy ? (
+        <div className="flex flex-col gap-0.5" data-testid="usage-cooldown">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-ui-sm">
+            <StatusBadge status="danger" data-testid="usage-cooldown-badge">
+              <Clock aria-hidden className="size-3 shrink-0" />
+              {cooldownCopy.label}
+            </StatusBadge>
+            {/* Flex drops this space from the layout; it keeps "Rate limited until …" one sentence for text readers. */}
+            {" "}
+            <span className="min-w-0 break-words text-foreground" data-testid="usage-cooldown-until">
+              {cooldownCopy.until}
+              {cooldownCopy.rejected ? (
+                <span className="text-muted-foreground">{` · ${cooldownCopy.rejected}`}</span>
+              ) : null}
+            </span>
+          </div>
+          <p className="text-ui-sm text-muted-foreground" data-testid="usage-cooldown-note">
+            {cooldownCopy.note}
+          </p>
+        </div>
+      ) : null}
 
       {message ? (
         <p

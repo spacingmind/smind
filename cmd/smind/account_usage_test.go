@@ -321,3 +321,149 @@ func TestAccountUsageStripsControlCharacters(t *testing.T) {
 		t.Fatalf("control characters reached the output: %q", buf.String())
 	}
 }
+
+// cooldownRender renders one account row against usageNow with the local
+// zone pinned to UTC+2, so "local" clock output is deterministic.
+func cooldownRender(t *testing.T, e accountUsageEntry) string {
+	t.Helper()
+	prev := time.Local
+	time.Local = time.FixedZone("test", 2*3600)
+	t.Cleanup(func() { time.Local = prev })
+	e.Provider = "anthropic"
+	e.DisplayName = "Work"
+	var out bytes.Buffer
+	renderAccountUsage(&out, &accountUsageResponse{Enabled: true, Reports: []accountUsageEntry{e}}, false, usageNow)
+	return out.String()
+}
+
+func TestAccountUsageCLIShowsCooldownUntilAndWindow(t *testing.T) {
+	// usageNow 12:00 UTC = 14:00 local; 13:30 UTC = 15:30 local, same day.
+	got := cooldownRender(t, accountUsageEntry{Cooldown: &accountUsageCooldown{
+		Until: usageNow.Add(90 * time.Minute), Scope: "account", Reason: "rejected", Window: "five_hour",
+	}})
+	if !strings.Contains(got, "Work (anthropic)\n  cooling down until 15:30 (5-hour window rejected)\n") {
+		t.Fatalf("got:\n%s", got)
+	}
+	got = cooldownRender(t, accountUsageEntry{Cooldown: &accountUsageCooldown{
+		Until: usageNow.Add(48 * time.Hour), Scope: "account", Reason: "rejected", Window: "weekly",
+	}})
+	if !strings.Contains(got, "cooling down until Oct 14 14:00 (weekly window rejected)") {
+		t.Fatalf("got:\n%s", got)
+	}
+	got = cooldownRender(t, accountUsageEntry{Cooldown: &accountUsageCooldown{
+		Until: usageNow.Add(time.Hour), Scope: "account", Reason: "rejected", Window: "unified",
+	}})
+	if !strings.Contains(got, "(rate limit rejected)") {
+		t.Fatalf("got:\n%s", got)
+	}
+	// Crossing local midnight: 23:00 UTC is 01:00 local the next day.
+	got = cooldownRender(t, accountUsageEntry{Cooldown: &accountUsageCooldown{
+		Until: usageNow.Add(11 * time.Hour), Scope: "account", Reason: "rejected",
+	}})
+	if !strings.Contains(got, "until Oct 13 01:00 (rate limit rejected)") {
+		t.Fatalf("got:\n%s", got)
+	}
+}
+
+func TestAccountUsageCLICooldownModelScopeAndFallbackWording(t *testing.T) {
+	until := usageNow.Add(time.Hour)
+	got := cooldownRender(t, accountUsageEntry{Cooldown: &accountUsageCooldown{
+		Until: until, Scope: "model", Model: "claude-opus-4", Reason: "rejected", Window: "weekly_model",
+	}})
+	if !strings.Contains(got, "(weekly limit for claude-opus-4 rejected)") || strings.Contains(got, "for claude-opus-4 for") {
+		t.Fatalf("got:\n%s", got)
+	}
+	got = cooldownRender(t, accountUsageEntry{Cooldown: &accountUsageCooldown{
+		Until: until, Scope: "model", Model: "claude-opus-4", Reason: "rejected", Window: "five_hour",
+	}})
+	if !strings.Contains(got, "(5-hour window for claude-opus-4 rejected)") {
+		t.Fatalf("got:\n%s", got)
+	}
+	got = cooldownRender(t, accountUsageEntry{Cooldown: &accountUsageCooldown{
+		Until: until, Scope: "account", Reason: "fallback",
+	}})
+	if !strings.Contains(got, "(rate limit rejected, reset time unknown)") {
+		t.Fatalf("got:\n%s", got)
+	}
+}
+
+func TestAccountUsageCLIExpiredCooldownPrintsNothing(t *testing.T) {
+	got := cooldownRender(t, accountUsageEntry{Cooldown: &accountUsageCooldown{
+		Until: usageNow.Add(-time.Minute), Scope: "account", Reason: "rejected", Window: "five_hour",
+	}})
+	if strings.Contains(got, "cooling down") {
+		t.Fatalf("got:\n%s", got)
+	}
+}
+
+func TestAccountUsageCLICooldownTextIsSanitised(t *testing.T) {
+	got := cooldownRender(t, accountUsageEntry{Cooldown: &accountUsageCooldown{
+		Until: usageNow.Add(time.Hour), Scope: "model", Model: "opus\x1b[31m\nEVIL", Reason: "rejected", Window: "weekly_model",
+	}})
+	if strings.ContainsAny(got, "\x1b") || strings.Contains(got, "\nEVIL") || !strings.Contains(got, "opus[31mEVIL") {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestAccountUsageCLIObservedWindowMarkedFromRecentTraffic(t *testing.T) {
+	got := cooldownRender(t, accountUsageEntry{Report: &quota.Report{
+		Version: 2, Status: quota.StatusAvailable,
+		Windows: []quota.Window{
+			{ID: "five_hour", Label: "Session", UsedPct: ptrFloat(80), Source: "observed"},
+			{ID: "weekly", Label: "Week", Source: "observed", Status: "rejected"},
+			{ID: "weekly_x", Label: "Other", Source: "fetched", Status: "allowed_warning"},
+		},
+	}})
+	for _, want := range []string{
+		"Session  80% used · from recent traffic",
+		"Week     rejected · from recent traffic",
+		"Other    allowed_warning\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q;\ngot:\n%s", want, got)
+		}
+	}
+}
+
+func TestAccountUsageCLIJSONPassthroughIncludesCooldown(t *testing.T) {
+	raw := `{"enabled":true,"ttlSeconds":300,"reports":[{"accountId":1,"key":"k","cooldown":{"until":"2026-10-12T13:00:00Z","scope":"model","model":"m","reason":"fallback","future":1}}]}`
+	dial := func(context.Context) (wsCaller, error) {
+		return func(_ context.Context, _ string, _ any, out any) error {
+			return json.Unmarshal([]byte(raw), out)
+		}, nil
+	}
+	var out bytes.Buffer
+	if code := runAccountUsage(context.Background(), dial, false, true, usageNow, &out, &out); code != 0 {
+		t.Fatalf("code = %d", code)
+	}
+	for _, want := range []string{`"cooldown"`, `"until": "2026-10-12T13:00:00Z"`, `"future": 1`} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %s in %s", want, out.String())
+		}
+	}
+}
+
+func TestAccountUsageCLIMalformedCooldownUntilDoesNotFailCommand(t *testing.T) {
+	raw := `{"enabled":true,"ttlSeconds":300,"reports":[` +
+		`{"accountId":1,"key":"a","provider":"anthropic","displayName":"Bad","cooldown":{"until":"not a time","scope":"account","reason":"rejected","window":"five_hour"}},` +
+		`{"accountId":2,"key":"b","provider":"anthropic","displayName":"NumUntil","cooldown":{"until":12345,"scope":"account","reason":"rejected"}},` +
+		`{"accountId":3,"key":"c","provider":"anthropic","displayName":"Good","cooldown":{"until":"2026-10-12T13:30:00Z","scope":"account","reason":"rejected","window":"weekly"}}]}`
+	dial := func(context.Context) (wsCaller, error) {
+		return func(_ context.Context, _ string, _ any, out any) error {
+			return json.Unmarshal([]byte(raw), out)
+		}, nil
+	}
+	var out, errOut bytes.Buffer
+	if code := runAccountUsage(context.Background(), dial, false, false, usageNow, &out, &errOut); code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, errOut.String())
+	}
+	got := out.String()
+	for _, name := range []string{"Bad (anthropic)", "NumUntil (anthropic)", "Good (anthropic)"} {
+		if !strings.Contains(got, name) {
+			t.Errorf("row %q missing from:\n%s", name, got)
+		}
+	}
+	if n := strings.Count(got, "cooling down until"); n != 1 || !strings.Contains(got, "(weekly window rejected)") {
+		t.Errorf("want only the valid cooldown line, got %d in:\n%s", n, got)
+	}
+}

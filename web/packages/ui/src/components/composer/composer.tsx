@@ -28,6 +28,8 @@ import type {
 import type { WsClientLike } from "@/lib/ws-client";
 
 /** Used until provider.list answers (and kept if it fails) so the composer is never unusable because one fetch lost. */
+/** How long the picker waits on provider.list before it falls back to the built-in catalog. */
+const PROVIDER_LIST_TIMEOUT_MS = 8000;
 const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm" }];
 
 /** Icon-only send cluster: 44px touch targets below md (Item 21), ZCode's 32px rounded squares from md up. */
@@ -152,6 +154,8 @@ export function Composer({
 }) {
   const draft = useComposerDraft(taskId);
   const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
+  // False until provider.list settles (result or failure): the combined picker shows its loading states meanwhile.
+  const [providersSettled, setProvidersSettled] = useState(false);
   // ADR-0014's Profiles picker: a named provider/permissionMode/
   // thinkingLevel bundle a user applies in one click. Empty when the
   // daemon has none (a fresh install, or client.call failing) -- the
@@ -214,16 +218,25 @@ export function Composer({
 
   useEffect(() => {
     setProviders(FALLBACK_PROVIDERS);
+    setProvidersSettled(false);
     if (!client) return;
     let cancelled = false;
+    // A daemon that never answers must not leave the picker on "Loading…" forever: the fallback catalog takes over.
+    const giveUp = setTimeout(() => {
+      if (!cancelled) setProvidersSettled(true);
+    }, PROVIDER_LIST_TIMEOUT_MS);
     client
       .call<ProviderListResult>("provider.list")
       .then((result) => {
         if (!cancelled && result.providers.length > 0) setProviders(result.providers);
       })
-      .catch((err) => console.error("provider.list failed, using fallback provider list", err));
+      .catch((err) => console.error("provider.list failed, using fallback provider list", err))
+      .finally(() => {
+        if (!cancelled) setProvidersSettled(true);
+      });
     return () => {
       cancelled = true;
+      clearTimeout(giveUp);
     };
   }, [client]);
 
@@ -422,6 +435,7 @@ export function Composer({
           boundProvider={boundProvider}
           profiles={profiles}
           providers={providers}
+          providersLoading={!!client && !providersSettled}
           disabled={inactive}
           liveRun={liveRun}
           providerHealth={providerHealth.health}
