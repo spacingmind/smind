@@ -81,20 +81,73 @@ Sources: `refs/zcode/packages/{desktop,ui}`, `refs/paseo/packages/{desktop,app}`
 
 ## smind before this change (diagnosis)
 
-(filled in from the real-macOS baseline screenshots — see Validation)
+Baseline = origin/develop (e8f30640), rendered from the desktop-flavoured web build with a stubbed
+Tauri bridge + a drawn 3-light overlay at x=16..76 (the real app could not be rendered: the macOS
+session was locked, see Validation). Measured on a 1280×800 viewport:
+
+1. **Collapsed rail: the lights straddle the rail and the content panel.** Rail is 48px; the lights end at
+   x=76, so the yellow light sits on the seam: the panel's `border-l`, its rounded top-left corner and the
+   surface change (vibrancy sidebar → opaque panel) all run through the cluster. (ZCode/Paseo never have
+   this: they hide the sidebar, so the lights are always on one surface.)
+2. **The toggle jumps and loses focus.** Expanded it lives at the right end of the sidebar's top strip
+   (x=220); collapsed it is re-mounted in the header at x=93. Flipping `toggleInSidebar` unmounts the button
+   the user just activated (keyboard focus lost) and the header inset flips 0→36px instantly while the sidebar
+   width animates for 200ms, so the title/toggle jump rather than slide.
+3. Compact sheet / Settings / fullscreen were already clear of the lights (header pads 84, Settings strip is
+   empty), no change needed beyond keeping them intact. Windows/Linux: no lights; only the toggle jump (2).
 
 ## Decisions
 
-(none yet)
+All within the existing model (collapsible="icon" rail, inset panel); no new architecture, no ADR.
+
+- D1. Port the shared ZCode/Paseo pattern: in the desktop build (non-compact) the sidebar toggle is ONE
+  window-level element at a fixed x, mounted outside the sidebar and the header, so it never moves, never
+  re-mounts (focus survives) and nothing reflows under it. macOS: x=84 (right after the lights);
+  elsewhere/fullscreen: centred in the 48px rail (x=10). The sidebar strip and the header pad around it.
+- D2. macOS collapsed rail: the title bar (top 48px) is ONE panel-coloured bar spanning the window with the
+  rail starting BELOW it; the seam/rounded corner start below the bar. The bar is painted by an absolutely
+  positioned strip inside the animated sidebar panel wrapper, so it is uniform across the lights for the whole
+  200ms transition. Not done: hiding the rail on desktop like ZCode/Paseo -- the rail (#314) is a deliberate
+  smind feature.
+- D3. The header's left inset animates with the same 200ms ease-out as the sidebar width, so the title slides
+  monotonically instead of jumping and can never pass under the toggle zone.
+- D4. Browser build and compact sheet keep today's behaviour (toggle in the sidebar strip / header).
 
 ## Acceptance criteria
 
-(to be written once the baseline is captured)
+- DC-AC1: desktop non-compact, any sidebar state: exactly one sidebar toggle in the DOM, at the same x and y
+  before, during and after collapse/expand (macOS x=84, else x=10) and it is the same DOM node (focus persists).
+- DC-AC2: macOS with lights: no interactive element, rail item, or logo intersects the lights rect
+  (x 16..76, y 17..31) in expanded, collapsed rail, mid-toggle (sampled per frame), Settings and compact
+  states; the surface under the lights is one colour (no seam/corner/border inside x 0..84, y 0..48).
+- DC-AC3: collapsed rail starts below the 48px bar: rail items' top >= 48; the bar's bottom border lines up with
+  the header's.
+- DC-AC4: during the 200ms toggle the header title's x moves monotonically (no jump) and never goes below
+  the toggle zone end (macOS 120, else 56).
+- DC-AC5: fullscreen (no lights) reclaims the zone: toggle at x=10, sidebar strip pad 46, header inset 0,
+  and the bar/seam override is off (panel keeps its rounded corner).
+- DC-AC6: Windows/Linux: caption buttons stay the last items of the header's right edge and do not overlap the
+  header actions at 1280 and 640 wide; the sidebar strip and the header strip stay window drag regions.
+- DC-AC7: drag regions: the sidebar top strip is a deep drag region on every desktop OS; the toggle itself is a
+  button (never a drag start).
+- DC-AC8: browser build and compact layout unchanged (existing tests untouched).
+
+## Test scenarios
+
+- T1 `window-chrome.test.ts`: `toggleLeftPx`, `toggleZoneEndPx`, `headerLeftInsetPx` (reserveToggle true/false;
+  lights/no lights/fullscreen; rail 48 vs expanded 256 vs 0).
+- T2 `desktop-chrome.test.tsx`: header paddingLeft per OS/fullscreen/sidebarPx; the window toggle renders once
+  at the OS's left; sidebar strip paddingLeft; rail bar present only with lights + collapsed + not compact.
+- T3 App-level: toggling keeps the same toggle node (focus not lost).
+- T4 harness (Playwright, desktop build + stubbed bridge, mac/win/linux × light/dark): the probe in
+  `/tmp/smind-tl/harness/shoot.mjs` (hits against the lights rect, per-frame traces) - results in Validation.
 
 ## Progress
 
 - [x] Refs research.
-- [ ] Baseline screenshots (real macOS app build of origin/develop).
+- [x] Baseline diagnosed (stubbed bridge render).
+- [ ] Implementation.
+- [ ] Real-macOS screenshots (blocked while the session is locked).
 
 ## Validation
 
