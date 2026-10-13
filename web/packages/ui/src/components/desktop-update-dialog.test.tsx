@@ -1,5 +1,5 @@
 import { StrictMode, act } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppUpdateCheck, AppUpdateProgress } from "@/lib/platform";
@@ -21,6 +21,8 @@ interface Mocks {
   emitProgress: (p: AppUpdateProgress) => void;
 }
 
+const openExternalMock = vi.fn(() => Promise.resolve());
+
 function mockPlatform(opts: { check: () => Promise<AppUpdateCheck>; install?: () => Promise<void>; isDesktop?: boolean }): Mocks {
   const check = vi.fn(opts.check);
   const install = vi.fn(opts.install ?? (() => new Promise<void>(() => {})));
@@ -31,6 +33,7 @@ function mockPlatform(opts: { check: () => Promise<AppUpdateCheck>; install?: ()
     desktop: {
       appUpdateCheck: check,
       appUpdateInstall: install,
+      openExternal: openExternalMock,
       onAppUpdateCheckRequested: (cb: () => void) => {
         requestCb = cb;
         return () => {};
@@ -118,7 +121,28 @@ describe("DesktopUpdateDialog", () => {
     await mountDialog();
     expect(screen.getByText("Update available")).toBeInTheDocument();
     expect(screen.getByText(/smind v0\.11\.0 is available \(you have v0\.10\.0\)/)).toBeInTheDocument();
-    expect(screen.getByTestId("desktop-update-dialog-notes")).toHaveTextContent("- Fixed a bug");
+    const notes = screen.getByTestId("desktop-update-dialog-notes");
+    expect(notes).toHaveTextContent("Fixed a bug");
+    expect(notes.querySelectorAll("li")).toHaveLength(2);
+  });
+
+  it("update notes render release-please markdown without the version heading or commit links; links open externally", async () => {
+    const notes = [
+      "## [0.11.0](https://github.com/spacingmind/smind/compare/v0.10.0...v0.11.0) (2026-10-13)",
+      "",
+      "### Features",
+      "",
+      "* skills ([#279](https://github.com/spacingmind/smind/issues/279)) ([90469fb](https://github.com/spacingmind/smind/commit/90469fbc3b1eb78280108cee6dd8fb67dbc833dd))",
+    ].join("\n");
+    mockPlatform({ check: () => Promise.resolve({ ...AVAILABLE, notes }) });
+    await mountDialog();
+    const el = screen.getByTestId("desktop-update-dialog-notes");
+    expect(el.querySelector("h3")).toHaveTextContent("Features");
+    expect(el).not.toHaveTextContent("## [0.11.0]");
+    expect(el).not.toHaveTextContent("90469fb");
+    const link = within(el).getByRole("link", { name: "#279" });
+    fireEvent.click(link);
+    expect(openExternalMock).toHaveBeenCalledWith("https://github.com/spacingmind/smind/issues/279");
   });
 
   it("null notes show 'No release notes.'", async () => {
