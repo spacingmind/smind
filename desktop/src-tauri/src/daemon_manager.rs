@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use smind_daemon_client::daemon_manager::managed::{self, ManagedRecord, ManagedState};
 use std::path::{Path, PathBuf};
-use smind_daemon_client::daemon_manager::{native, release, version};
+use smind_daemon_client::daemon_manager::{native, version};
 #[cfg(target_os = "windows")]
 use smind_daemon_client::daemon_manager::windows_native;
 
