@@ -193,3 +193,28 @@ light cluster at x=16..76, y=17..31; Playwright drives the app's own Cmd+B short
   lights may straddle the returning corner for a few ease-out frames (<~25ms).
 - Confirmed no problem: stacking (overlay z-30 < Settings z-40 < Radix z-50, inside the inert shell), drag regions,
   drag-resize, isMobile flip, duplicate toggles, browser build.
+
+### Round 2 (Human rejected #332 on `d-3-mid-collapse.png`)
+
+Defects in that real frame: the panel's left border/corner ran up through the title strip beside the lights, and the
+sidebar content showed clipped/sliced/shifted mid-transition. (Part of that frame was my 2s "slow mode" forcing
+transitions on properties that never animate; the requirement stands regardless: no frame may show either.)
+
+Fix: (1) the sidebar's *layout* (rows vs rail) trails the requested open state until the panel's width transition
+ends (`hooks/use-settled-sidebar-open.ts`, resolves at once when nothing animates, incl. `prefers-reduced-motion`);
+its content is hidden (opacity 0, inert) meanwhile and fades in once settled, so nothing is ever clipped, sliced or
+shifted; the group label no longer animates its margin. (2) On macOS the panel-coloured bar (49px) stays across the
+window for the rail AND for every non-settled frame in both directions, the panel's corner/left border live below
+it, and the 4px resize handle only mounts once settled-expanded (it showed as a sidebar-coloured band in the strip
+during the expand). The settled-expanded corner at y=0 beside the sidebar strip is unchanged (ZCode macOS layout,
+Supervisor decision).
+
+Real-macOS re-validation (bundle built from the branch with its own bundle identifier `dev.spacingmind.desktop.capture`
+so it runs beside an installed smind, sandbox daemon, `screencapture -l`; a throwaway debug-only hook drove the app
+and forced the width/padding/opacity transitions to 6s -- the Mac has macOS Reduce Motion ON, which the app honours
+via `motion-reduce:transition-none`, so the transitions had to be forced to be observable at all; hook never
+committed). `/tmp/smind-tl/shots/real/final/` (REAL macOS): `{dark,light}-{collapse,expand}-{1-start,2-25,3-50,
+4-75,5-settled}` plus `*-0-expanded`. Checked every frame visually and by pixel row: in every non-settled frame the
+strip (y=40, x=120..1240) is a single colour, the lights zone (y=44, x=0..118) is a single colour, no vertical line
+or corner crosses y<49, sidebar content is hidden (never clipped), the toggle stays at x=84. Settled collapsed shows
+the rail badges at y=72 (same as a fresh load); settled expanded is the unchanged ZCode layout.

@@ -2,7 +2,10 @@ import { useEffect, useState, type RefObject } from "react";
 
 /** The longest transition duration on `el`, in ms (0 when none or when `getComputedStyle` has no value, e.g. jsdom). */
 function transitionMs(el: Element): number {
-  const raw = getComputedStyle(el).transitionDuration;
+  const style = getComputedStyle(el);
+  // `motion-reduce:transition-none` leaves the duration alone and sets the property to `none`: nothing animates then.
+  if (style.transitionProperty.trim() === "none") return 0;
+  const raw = style.transitionDuration;
   if (!raw) return 0;
   return Math.max(0, ...raw.split(",").map((part) => (parseFloat(part) || 0) * (part.trim().endsWith("ms") ? 1 : 1000)));
 }

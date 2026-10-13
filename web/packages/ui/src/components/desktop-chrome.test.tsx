@@ -374,6 +374,8 @@ describe("window-level sidebar toggle (desktop shell)", () => {
     fireEvent.click(toggle);
     expect(screen.getByTestId("sidebar-rail-bar")).toBeInTheDocument();
     expect(screen.getByTestId("app-content-panel")).not.toHaveClass("rounded-tl-xl");
+    // The resize handle's 4px would show as a band in the strip: not until settled.
+    expect(screen.queryByTestId("sidebar-resize-handle")).not.toBeInTheDocument();
     act(() => {
       const e = new Event("transitionend") as TransitionEvent & { propertyName: string };
       Object.assign(e, { propertyName: "width" });
@@ -381,6 +383,7 @@ describe("window-level sidebar toggle (desktop shell)", () => {
     });
     expect(screen.queryByTestId("sidebar-rail-bar")).not.toBeInTheDocument();
     expect(screen.getByTestId("app-content-panel")).toHaveClass("rounded-tl-xl", "border-l");
+    expect(screen.getByTestId("sidebar-resize-handle")).toBeInTheDocument();
   });
 
   it("App on Windows: the rail keeps an empty strip under the single window-level toggle and the panel keeps its corner", async () => {

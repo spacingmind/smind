@@ -1232,7 +1232,8 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
               />
             )}
           </div>
-          {sidebarOpen && (
+          {/* Only once settled-expanded: its 4px would otherwise show as a sidebar-coloured band in the title strip beside the lights while the width animates. */}
+          {sidebarOpen && layoutOpen && (
             <SidebarResizeHandle
               // Zero layout width: the 4px hit area straddles the seam, so the
               // panel's own border-l is the only divider (no gutter between

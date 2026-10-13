@@ -9,11 +9,13 @@ function panel() {
   return { current: el };
 }
 
-function withDuration(value: string) {
+function withDuration(value: string, property = "width") {
   const real = window.getComputedStyle.bind(window);
   vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element) => {
     const style = real(el);
-    return new Proxy(style, { get: (t, p) => (p === "transitionDuration" ? value : Reflect.get(t, p)) });
+    return new Proxy(style, {
+      get: (t, p) => (p === "transitionDuration" ? value : p === "transitionProperty" ? property : Reflect.get(t, p)),
+    });
   });
 }
 
@@ -28,6 +30,14 @@ describe("useSettledSidebarOpen", () => {
     const ref = panel();
     const { result, rerender } = renderHook(({ open }) => useSettledSidebarOpen(open, ref, true), { initialProps: { open: true } });
     expect(result.current).toBe(true);
+    rerender({ open: false });
+    expect(result.current).toBe(false);
+  });
+
+  it("follows `open` at once under reduced motion (duration kept, property none) -- no hidden gap", () => {
+    withDuration("0.2s", "none");
+    const ref = panel();
+    const { result, rerender } = renderHook(({ open }) => useSettledSidebarOpen(open, ref, true), { initialProps: { open: true } });
     rerender({ open: false });
     expect(result.current).toBe(false);
   });
