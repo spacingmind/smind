@@ -126,7 +126,7 @@ tasks:
         CGO_ENABLED=0 GOOS=darwin GOARCH=$goarch go build -buildvcs=false -ldflags "-X github.com/spacingmind/smind/internal/version.Version=$v -X github.com/spacingmind/smind/internal/version.Commit=$short" -o desktop/src-tauri/binaries/smind-{{.TARGET}} ./cmd/smind
 
   desktop:mac:
-    desc: Build the unsigned macOS app (smind.app + .dmg) for the host arch, daemon bundled (TARGET=x86_64-apple-darwin to cross-build)
+    desc: Build the unsigned macOS app (sMind.app + .dmg) for the host arch, daemon bundled (TARGET=x86_64-apple-darwin to cross-build)
     platforms: [darwin]
     vars:
       TARGET: '{{.TARGET | default (ternary "aarch64-apple-darwin" "x86_64-apple-darwin" (eq ARCH "arm64"))}}'
@@ -139,7 +139,7 @@ tasks:
         ls -d desktop/src-tauri/target/{{.TARGET}}/release/bundle/macos/*.app desktop/src-tauri/target/{{.TARGET}}/release/bundle/dmg/*.dmg
 
   desktop:mac:install:
-    desc: Build (if needed) and copy smind.app into /Applications, replacing any previous copy
+    desc: Build (if needed) and copy sMind.app into /Applications, replacing any previous copy
     platforms: [darwin]
     vars:
       TARGET: '{{.TARGET | default (ternary "aarch64-apple-darwin" "x86_64-apple-darwin" (eq ARCH "arm64"))}}'
@@ -149,16 +149,16 @@ tasks:
       - |
         set -eu
         if pgrep -x smind-desktop >/dev/null; then
-          echo "smind is running -- quit it (Cmd+Q) before replacing /Applications/smind.app" >&2
+          echo "smind is running -- quit it (Cmd+Q) before replacing /Applications/sMind.app" >&2
           exit 1
         fi
-        rm -rf /Applications/smind.app
+        rm -rf /Applications/smind.app /Applications/sMind.app
         # ditto keeps the bundle's signature/xattrs intact; a locally built
         # app carries no com.apple.quarantine, so it opens without a
         # Gatekeeper prompt. -cr is a belt-and-braces clear, not a fix.
-        ditto desktop/src-tauri/target/{{.TARGET}}/release/bundle/macos/smind.app /Applications/smind.app
-        xattr -cr /Applications/smind.app
-        echo "installed /Applications/smind.app"
+        ditto desktop/src-tauri/target/{{.TARGET}}/release/bundle/macos/sMind.app /Applications/sMind.app
+        xattr -cr /Applications/sMind.app
+        echo "installed /Applications/sMind.app"
 
   tidy:
     desc: go mod tidy

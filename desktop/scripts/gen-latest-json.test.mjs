@@ -15,7 +15,7 @@ function files() {
   return {
     "darwin-aarch64": { asset: "smind-desktop-1.2.3-macos-arm64.app.tar.gz", signature: "sig-arm64\n" },
     "darwin-x86_64": { asset: "smind-desktop-1.2.3-macos-x86_64.app.tar.gz", signature: "sig-x64\n" },
-    "windows-x86_64": { asset: "smind_1.2.3_x64-setup.exe", signature: "sig-win\n" },
+    "windows-x86_64": { asset: "sMind_1.2.3_x64-setup.exe", signature: "sig-win\n" },
   };
 }
 
@@ -114,8 +114,8 @@ function fixtureDir(version = "1.2.3") {
   writeFileSync(join(dir, `smind-desktop-${version}-macos-arm64.app.tar.gz.sig`), "sig-arm64\n");
   writeFileSync(join(dir, `smind-desktop-${version}-macos-x86_64.app.tar.gz`), "a");
   writeFileSync(join(dir, `smind-desktop-${version}-macos-x86_64.app.tar.gz.sig`), "sig-x64\n");
-  writeFileSync(join(dir, `smind_${version}_x64-setup.exe`), "a");
-  writeFileSync(join(dir, `smind_${version}_x64-setup.exe.sig`), "sig-win\n");
+  writeFileSync(join(dir, `sMind_${version}_x64-setup.exe`), "a");
+  writeFileSync(join(dir, `sMind_${version}_x64-setup.exe.sig`), "sig-win\n");
   return dir;
 }
 
@@ -146,10 +146,10 @@ test("latest-json-cli-writes-file", () => {
     const m = JSON.parse(readFileSync(out, "utf8"));
     assert.equal(m.version, "1.2.3");
     assert.equal(m.platforms["darwin-aarch64"].signature, "sig-arm64");
-    assert.match(m.platforms["windows-x86_64"].url, /smind_1\.2\.3_x64-setup\.exe$/);
+    assert.match(m.platforms["windows-x86_64"].url, /sMind_1\.2\.3_x64-setup\.exe$/);
 
     // Missing sig: non-zero exit, no output file.
-    rmSync(join(dir, "smind_1.2.3_x64-setup.exe.sig"));
+    rmSync(join(dir, "sMind_1.2.3_x64-setup.exe.sig"));
     const out2 = join(dir, "latest2.json");
     const r3 = spawnSync(process.execPath, [
       cli,
