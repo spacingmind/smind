@@ -156,10 +156,6 @@ function proseDuration(ms: number | null): string | null {
   return formatPreciseDuration(ms);
 }
 
-function proseAge(age: RunFooterAge): string {
-  return age.label === "just now" ? "just now" : age.label;
-}
-
 /**
  * The footer's whole wording for one run, per the spec's table. Never
  * throws: a bad `startedAt` yields a null duration and everything else
@@ -320,6 +316,6 @@ function ariaLabel(run: RunFooterRun, view: Omit<RunFooterView, "ariaLabel">, ms
   }
   const cost = run.usage?.costUsd;
   if (cost !== null && cost !== undefined) parts.push(`cost ${formatCost(cost)}`);
-  if (age) parts.push(proseAge(age));
+  if (age) parts.push(age.label);
   return parts.join(", ") || "Finished";
 }

@@ -6,9 +6,6 @@ import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
   describeRunFooter,
-  formatDuration,
-  formatPreciseDuration,
-  formatRelativeTime,
   resolveRunModelLabel,
   type RunModelLabels,
   type RunFooterRun,
@@ -65,17 +62,16 @@ export function RunFooter({
         aria-label={view.ariaLabel}
         className={cn(
           "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 transition-opacity",
-          run.status === "done" &&
+          view.kind === "done" &&
             "opacity-70 group-has-[:focus-visible]/answer:opacity-100 group-hover/answer:opacity-100 [@media(hover:none)]:opacity-100",
         )}
         data-testid="run-meta"
+        data-status={run.status}
       >
         {running ? (
           <span className="flex items-center gap-1.5" role="status">
             <Loader2 aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
-            <span data-testid="run-status" data-status={run.status}>
-              Working…{liveLabel(run, now) ? ` ${liveLabel(run, now)}` : ""}
-            </span>
+            <span data-testid="run-status">{view.duration ? `Working… ${view.duration}` : "Working…"}</span>
           </span>
         ) : (
           view.sentence !== undefined && (
@@ -113,9 +109,6 @@ export function RunFooter({
             </span>
           )
         )}
-        {!running && view.sentence === undefined && (
-          <span data-testid="run-status" data-status={run.status} />
-        )}
         {!running && view.model && (
           <span data-testid="run-model" className="min-w-0 truncate">
             {view.model}
@@ -126,7 +119,7 @@ export function RunFooter({
             {view.duration}
           </span>
         )}
-        <RunUsagePill usage={"usage" in run ? run.usage : undefined} provider={run.provider} />
+        <RunUsagePill usage={run.usage} provider={run.provider} />
         {view.age && (
           <time data-testid="run-age" dateTime={run.finishedAt} title={view.age.title} className="shrink-0">
             {view.age.label}
@@ -136,17 +129,6 @@ export function RunFooter({
       {children}
     </div>
   );
-}
-
-function liveElapsedMs(run: RunFooterRun, now: Date): number | null {
-  const start = Date.parse(run.startedAt);
-  if (Number.isNaN(start)) return null;
-  return Math.max(0, now.getTime() - start);
-}
-
-function liveLabel(run: RunFooterRun, now: Date): string {
-  const ms = liveElapsedMs(run, now);
-  return ms === null ? "" : formatDuration(ms);
 }
 
 /** Re-renders every `intervalMs` while mounted (null = off), returning the tick's timestamp. */
@@ -160,6 +142,3 @@ function useTicker(intervalMs: number | null): number | null {
   }, [intervalMs]);
   return tick;
 }
-
-// Re-exported for the component tests' precise-duration title assertions.
-export { formatPreciseDuration, formatRelativeTime };
