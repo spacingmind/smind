@@ -79,7 +79,7 @@ function CheckSlot({ show }: { show: boolean }) {
 
 export function SectionHeading({ label }: { label: string }) {
   return (
-    <div role="presentation" className="px-2 pt-2 pb-1 text-ui-sm font-medium text-foreground-subtle">
+    <div role="presentation" className="px-2 pt-2 pb-1 text-ui-sm font-medium text-foreground-muted">
       {label}
     </div>
   );
@@ -88,7 +88,7 @@ export function SectionHeading({ label }: { label: string }) {
 export function ProfilesHeading({ onEdit }: { onEdit: () => void }) {
   return (
     <div role="presentation" className="flex items-center justify-between pr-1 pl-2">
-      <span className="py-1.5 text-ui-sm font-medium text-foreground-subtle">Profiles</span>
+      <span className="py-1.5 text-ui-sm font-medium text-foreground-muted">Profiles</span>
       <Button
         type="button"
         variant="quiet"
@@ -117,8 +117,8 @@ export function NoAgentRow(shell: RowShellProps) {
 export function CreateProfileRow(shell: RowShellProps) {
   return (
     <RowShell {...shell} testId="model-profiles-empty">
-      <Icons.add aria-hidden className="size-4 shrink-0 text-foreground-subtle" />
-      <span className="text-ui-base text-foreground-subtle">Create profile</span>
+      <Icons.add aria-hidden className="size-4 shrink-0 text-foreground-muted" />
+      <span className="text-ui-base text-foreground-muted">Create profile</span>
     </RowShell>
   );
 }
@@ -131,12 +131,12 @@ export function ProfileRow({
 }: RowShellProps & { profile: PickerProfileRow; checked: boolean; custom: boolean }) {
   return (
     <RowShell {...shell} testId={`model-profile-row-${profile.id}`} selected={checked}>
-      <ProfileGlyph className="shrink-0 text-foreground-subtle" />
+      <ProfileGlyph className="shrink-0 text-foreground-muted" />
       <span className="max-w-[50%] shrink-0 truncate text-ui-base text-foreground">{profile.name}</span>
       {checked && custom && (
-        <span className="shrink-0 rounded bg-muted px-1 text-ui-xs text-foreground-subtle">custom</span>
+        <span className="shrink-0 rounded bg-muted px-1 text-ui-xs text-foreground-muted">custom</span>
       )}
-      <span className="min-w-0 flex-1 truncate text-ui-sm text-foreground-subtle">{profile.summary}</span>
+      <span className="min-w-0 flex-1 truncate text-ui-sm text-foreground-muted">{profile.summary}</span>
       <CheckSlot show={checked} />
     </RowShell>
   );
@@ -171,9 +171,9 @@ export function ProviderRow({
   }
   return (
     <RowShell {...shell} testId={`model-provider-${provider.id}`} className={cn(separator && "border-t border-border rounded-t-none")}>
-      <ProviderGlyph provider={provider.id} className="shrink-0 text-foreground-subtle" />
+      <ProviderGlyph provider={provider.id} className="shrink-0 text-foreground-muted" />
       <span className="min-w-0 shrink-0 truncate text-ui-base text-foreground">{provider.label}</span>
-      <span className="flex min-w-0 flex-1 items-center justify-end gap-1 truncate text-ui-sm text-foreground-subtle">
+      <span className="flex min-w-0 flex-1 items-center justify-end gap-1 truncate text-ui-sm text-foreground-muted">
         {detail}
       </span>
       {!shell.disabled && <Icons.chevronRight aria-hidden className="size-4 shrink-0 text-foreground-subtle" />}
@@ -224,7 +224,7 @@ function ModelRowProfileButton({ row, action, onAct }: { row: ModelRow; action: 
       onPointerDown={keepInputFocus}
       onClick={stop}
       className={cn(
-        "flex size-6 shrink-0 items-center justify-center rounded text-foreground-subtle hover:bg-muted hover:text-foreground",
+        "flex size-6 shrink-0 items-center justify-center rounded text-foreground-muted hover:bg-muted hover:text-foreground",
         "md:pointer-fine:opacity-0 md:pointer-fine:group-hover/row:opacity-100 md:pointer-fine:group-data-[active=true]/row:opacity-100 md:pointer-fine:group-focus-within/row:opacity-100",
       )}
     >
@@ -256,9 +256,9 @@ export function ModelRowItem({
     : row.description;
   return (
     <RowShell {...shell} testId={`model-row-${row.key}`} selected={selected}>
-      <ProviderGlyph provider={row.provider} className="shrink-0 text-foreground-subtle" />
+      <ProviderGlyph provider={row.provider} className="shrink-0 text-foreground-muted" />
       <span className="max-w-[55%] shrink-0 truncate text-ui-base text-foreground">{row.modelLabel}</span>
-      <span className="min-w-0 flex-1 truncate text-ui-sm text-foreground-subtle">{description}</span>
+      <span className="min-w-0 flex-1 truncate text-ui-sm text-foreground-muted">{description}</span>
       {action && <ModelRowProfileButton row={row} action={action} onAct={onAction} />}
       <CheckSlot show={selected} />
     </RowShell>
@@ -267,7 +267,7 @@ export function ModelRowItem({
 
 export function EmptyState({ query }: { query: string }) {
   return (
-    <div data-testid="model-search-empty" className="px-3 py-6 text-center text-ui-sm text-foreground-subtle">
+    <div data-testid="model-search-empty" className="px-3 py-6 text-center text-ui-sm text-foreground-muted">
       No models match “{query}”
     </div>
   );
@@ -275,7 +275,7 @@ export function EmptyState({ query }: { query: string }) {
 
 export function UnavailableNotice({ reason }: { reason: string }) {
   return (
-    <p data-testid="model-provider-unavailable" className="px-3 pb-2 text-ui-sm text-foreground-subtle">
+    <p data-testid="model-provider-unavailable" className="px-3 pb-2 text-ui-sm text-foreground-muted">
       {reason}
     </p>
   );
@@ -285,7 +285,7 @@ export function ProviderNotice({ kind, message }: { kind: "loading" | "error"; m
   return (
     <div
       data-testid={`model-provider-${kind}`}
-      className="flex items-center justify-center gap-2 px-3 py-6 text-center text-ui-sm text-foreground-subtle"
+      className="flex items-center justify-center gap-2 px-3 py-6 text-center text-ui-sm text-foreground-muted"
     >
       {kind === "loading" ? (
         <>
