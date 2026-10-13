@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Archive, Copy, Folder, FolderOpen, GitBranch, MoreHorizontal } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { ArchiveTaskDialog } from "@/components/crud-dialogs";
 import { PortChip, SetupBadge } from "@/components/task-setup";
@@ -34,7 +34,7 @@ export function HeaderTaskTitle({ task }: { task: Task }) {
           data-testid="app-header-title"
           className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-ui-base font-medium text-foreground outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <Folder aria-hidden className="size-4 shrink-0 text-foreground-muted" />
+          <Icons.folder aria-hidden className="size-4 shrink-0 text-foreground-muted" />
           <span className="min-w-0 truncate">{task.Title}</span>
         </button>
       </HoverCardTrigger>
@@ -42,7 +42,7 @@ export function HeaderTaskTitle({ task }: { task: Task }) {
         <p className="text-ui-base font-medium text-foreground [overflow-wrap:anywhere]">{task.Title}</p>
         {task.Branch && (
           <div className="flex items-center gap-1.5 text-ui-sm text-muted-foreground">
-            <GitBranch aria-hidden className="size-3 shrink-0" />
+            <Icons.branch aria-hidden className="size-3 shrink-0" />
             <span data-testid="app-header-task-branch" className="min-w-0 truncate">
               {task.Branch}
             </span>
@@ -107,7 +107,7 @@ export function HeaderTaskMenu({
                 data-testid="app-header-task-menu"
                 className="text-foreground-muted hover:text-foreground"
               >
-                <MoreHorizontal aria-hidden />
+                <Icons.more aria-hidden />
               </Button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
@@ -116,22 +116,22 @@ export function HeaderTaskMenu({
         <DropdownMenuContent align="start" data-testid="app-header-task-menu-content">
           {task.Branch && (
             <DropdownMenuItem data-testid="app-header-copy-branch" onSelect={() => copy(task.Branch!, "Branch name")}>
-              <Copy aria-hidden /> Copy branch name
+              <Icons.copy aria-hidden /> Copy branch name
             </DropdownMenuItem>
           )}
           {worktree && (
             <DropdownMenuItem data-testid="app-header-copy-worktree" onSelect={() => copy(worktree, "Worktree path")}>
-              <Copy aria-hidden /> Copy worktree path
+              <Icons.copy aria-hidden /> Copy worktree path
             </DropdownMenuItem>
           )}
           {worktree && localPathActions && (
             <DropdownMenuItem data-testid="app-header-reveal" onSelect={() => localPathActions.reveal(worktree)}>
-              <FolderOpen aria-hidden /> {localPathActions.revealLabel}
+              <Icons.folderOpen aria-hidden /> {localPathActions.revealLabel}
             </DropdownMenuItem>
           )}
           {(task.Branch || worktree) && <DropdownMenuSeparator />}
           <DropdownMenuItem data-testid="app-header-archive" onSelect={() => setArchiving(true)}>
-            <Archive aria-hidden /> Archive task…
+            <Icons.archive aria-hidden /> Archive task…
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

@@ -1,5 +1,5 @@
 import { Fragment, useRef } from "react";
-import { Menu } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -101,7 +101,7 @@ export function AppMenu() {
           aria-label="Application menu"
           data-testid="app-menu-trigger"
         >
-          <Menu />
+          <Icons.menu />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent

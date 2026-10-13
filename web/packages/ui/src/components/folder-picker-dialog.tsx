@@ -1,4 +1,4 @@
-import { AlertCircle, ChevronUp, Folder, FolderGit2, Loader2 } from "lucide-react";
+import { Icons } from "@/lib/icons";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -99,7 +99,7 @@ export function FolderPickerDialog({
             disabled={!result?.parent}
             onClick={() => result?.parent && void navigate(result.parent)}
           >
-            <ChevronUp className="size-4" />
+            <Icons.chevronUp className="size-4" />
           </Button>
           <p className="min-w-0 flex-1 truncate text-ui-base font-medium" title={result?.path ?? ""}>
             {result?.path ?? "…"}
@@ -129,7 +129,7 @@ export function FolderPickerDialog({
 
         {error && (
           <p className="flex items-center gap-1.5 text-ui-base text-destructive">
-            <AlertCircle className="size-3.5 shrink-0" />
+            <Icons.error className="size-3.5 shrink-0" />
             {error}
           </p>
         )}
@@ -137,7 +137,7 @@ export function FolderPickerDialog({
         <ScrollArea className="h-64 rounded-md border">
           {loading && !result ? (
             <p className="flex items-center gap-1.5 p-3 text-ui-base text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" />
+              <Icons.spinner className="size-3.5 animate-spin" />
               Loading…
             </p>
           ) : result && result.entries.length === 0 ? (
@@ -154,9 +154,9 @@ export function FolderPickerDialog({
                     className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-ui-base hover:bg-hover"
                   >
                     {entry.isGitRepo ? (
-                      <FolderGit2 className="size-3.5 shrink-0 text-primary" />
+                      <Icons.workspace className="size-3.5 shrink-0 text-primary" />
                     ) : (
-                      <Folder className="size-3.5 shrink-0" />
+                      <Icons.folder className="size-3.5 shrink-0" />
                     )}
                     <span className="min-w-0 truncate">{entry.name}</span>
                     {entry.isGitRepo && (

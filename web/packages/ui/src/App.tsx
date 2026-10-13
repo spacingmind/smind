@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Archive, Columns2, Copy, Pencil, X } from "lucide-react";
+import { Icons } from "@/lib/icons";
 import {
   DndContext,
   PointerSensor,
@@ -1996,7 +1996,7 @@ function DraggableTabTrigger({
               {/* aria-hidden: this span's own aria-label already names it; without
                   hiding the icon too, it would be announced a second time as
                   part of the *ancestor* TabsTrigger's accessible name. */}
-              <Columns2 aria-hidden="true" className="size-3" />
+              <Icons.splitColumns aria-hidden="true" className="size-3" />
             </span>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
@@ -2042,7 +2042,7 @@ function DraggableTabTrigger({
           }}
           className={cn("flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none")}
         >
-          <X aria-hidden="true" className="size-3" />
+          <Icons.close aria-hidden="true" className="size-3" />
         </span>
       )}
           </span>
@@ -2093,13 +2093,13 @@ function DraggableTabTrigger({
         )}
         {(entry.kind === "terminal" || entry.kind === "chat") && (
           <ContextMenuItem onSelect={() => setRenaming(true)} data-testid="workspace-tab-menu-rename">
-            <Pencil />
+            <Icons.edit />
             Rename
           </ContextMenuItem>
         )}
         {entry.kind === "chat" && (
           <ContextMenuItem onSelect={() => onArchiveChat(entry)} data-testid="workspace-tab-menu-archive-chat">
-            <Archive />
+            <Icons.archive />
             Archive chat
           </ContextMenuItem>
         )}
@@ -2110,7 +2110,7 @@ function DraggableTabTrigger({
             }}
             data-testid="workspace-tab-menu-copy-path"
           >
-            <Copy />
+            <Icons.copy />
             Copy path
           </ContextMenuItem>
         )}
@@ -2118,19 +2118,19 @@ function DraggableTabTrigger({
           <>
             <ContextMenuSeparator />
             <ContextMenuItem onSelect={() => onSplit(entry.key, "left")} data-testid="workspace-tab-menu-split-left">
-              <Columns2 />
+              <Icons.splitColumns />
               Split left
             </ContextMenuItem>
             <ContextMenuItem onSelect={() => onSplit(entry.key, "right")} data-testid="workspace-tab-menu-split-right">
-              <Columns2 />
+              <Icons.splitColumns />
               Split right
             </ContextMenuItem>
             <ContextMenuItem onSelect={() => onSplit(entry.key, "up")} data-testid="workspace-tab-menu-split-up">
-              <Columns2 />
+              <Icons.splitRows />
               Split up
             </ContextMenuItem>
             <ContextMenuItem onSelect={() => onSplit(entry.key, "down")} data-testid="workspace-tab-menu-split-down">
-              <Columns2 />
+              <Icons.splitRows />
               Split down
             </ContextMenuItem>
           </>

@@ -6,7 +6,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, X } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { Button } from "@/components/ui/button";
 
@@ -105,7 +105,7 @@ export const FindBar = forwardRef<FindBarHandle, FindBarProps>(function FindBar(
             data-testid="find-toggle-replace"
             onClick={() => setReplaceExpanded((expanded) => !expanded)}
           >
-            {replaceExpanded ? <ChevronDown /> : <ChevronRight />}
+            {replaceExpanded ? <Icons.chevronDown /> : <Icons.chevronRight />}
           </Button>
         )}
         <div className="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md bg-surface px-2">
@@ -140,7 +140,7 @@ export const FindBar = forwardRef<FindBarHandle, FindBarProps>(function FindBar(
           disabled={!canNavigate}
           onClick={onPrevious}
         >
-          <ArrowUp />
+          <Icons.up />
         </Button>
         <Button
           type="button"
@@ -150,10 +150,10 @@ export const FindBar = forwardRef<FindBarHandle, FindBarProps>(function FindBar(
           disabled={!canNavigate}
           onClick={onNext}
         >
-          <ArrowDown />
+          <Icons.down />
         </Button>
         <Button type="button" variant="ghost" size="icon-xs" aria-label="Close find" onClick={onClose}>
-          <X />
+          <Icons.close />
         </Button>
       </div>
       {replace && replaceExpanded && (

@@ -1,4 +1,4 @@
-import { CircleHelp, Terminal } from "lucide-react";
+import { Icons } from "@/lib/icons";
 import type { ReactNode } from "react";
 
 import { AppMenu } from "@/components/app-menu";
@@ -180,11 +180,11 @@ export function AppHeader({
             className="hidden @min-[40rem]/app-header:inline-flex"
             onClick={() => runAction("shortcuts.help", null, { source: "menu" })}
           >
-            <CircleHelp aria-hidden />
+            <Icons.shortcuts aria-hidden />
           </HeaderIconButton>
           {task && onOpenTerminal && (
             <HeaderIconButton label="Open terminal" testId="app-header-terminal" onClick={onOpenTerminal}>
-              <Terminal aria-hidden />
+              <Icons.terminal aria-hidden />
             </HeaderIconButton>
           )}
           <AppMenu />

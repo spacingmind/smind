@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { TaskLineageChips } from "@/components/task-lineage";
 import { Composer } from "@/components/composer/composer";
@@ -437,7 +437,7 @@ export function TaskDetailPane({
             onClick={follow.jumpToLatest}
             className="absolute bottom-3 left-1/2 -translate-x-1/2 shadow-sm"
           >
-            <ArrowDown className="size-3" />
+            <Icons.down className="size-3" />
             Jump to latest
           </Button>
         )}

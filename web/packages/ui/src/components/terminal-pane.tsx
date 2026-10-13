@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ClipboardPaste, Copy, Plus } from "lucide-react";
+import { Icons } from "@/lib/icons";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
@@ -602,7 +602,7 @@ export function TerminalPane({
               onClick={() => void handleCopy()}
               data-testid="terminal-copy"
             >
-              <Copy className="size-3" />
+              <Icons.copy className="size-3" />
               Copy
             </Button>
             <Button
@@ -614,7 +614,7 @@ export function TerminalPane({
               onClick={() => void handlePaste()}
               data-testid="terminal-paste"
             >
-              <ClipboardPaste className="size-3" />
+              <Icons.paste className="size-3" />
               Paste
             </Button>
             {onNewTerminal && (
@@ -626,7 +626,7 @@ export function TerminalPane({
                 onClick={onNewTerminal}
                 data-testid="terminal-new"
               >
-                <Plus className="size-3" />
+                <Icons.add className="size-3" />
                 New
               </Button>
             )}

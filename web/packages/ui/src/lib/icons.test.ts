@@ -83,7 +83,7 @@ describe("icon registry", () => {
         "statusIdle": "Circle",
         "stop": "Square",
         "success": "CircleCheck",
-        "terminal": "SquareTerminal",
+        "terminal": "Terminal",
         "themeDark": "Moon",
         "themeLight": "Sun",
         "themeSystem": "Monitor",

@@ -1,5 +1,5 @@
 import type { ComponentProps, CSSProperties, ReactNode } from "react";
-import { AlertCircle, ChevronRight, Copy, Folder, FolderOpen, GitCompare, Loader2, PanelRight, SquareArrowOutUpRight } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { FileStatusMarker } from "@/components/file-status-marker";
 import {
@@ -156,11 +156,11 @@ function DirChildren({
   if (!node) return null;
 
   if (node.error) {
-    return <TreeRow depth={depth} icon={<AlertCircle className="size-3.5" />} label={node.error} className="text-destructive" />;
+    return <TreeRow depth={depth} icon={<Icons.error className="size-3.5" />} label={node.error} className="text-destructive" />;
   }
   if (node.entries === null) {
     if (node.loading) {
-      return <TreeRow depth={depth} icon={<Loader2 className="size-3.5 animate-spin" />} label="Loading…" />;
+      return <TreeRow depth={depth} icon={<Icons.spinner className="size-3.5 animate-spin" />} label="Loading…" />;
     }
     return null;
   }
@@ -208,8 +208,8 @@ function DirChildren({
               depth={depth}
               icon={
                 <>
-                  <ChevronRight aria-hidden="true" className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} />
-                  {expanded ? <FolderOpen aria-hidden="true" className="size-3.5" /> : <Folder aria-hidden="true" className="size-3.5" />}
+                  <Icons.chevronRight aria-hidden="true" className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} />
+                  {expanded ? <Icons.folderOpen aria-hidden="true" className="size-3.5" /> : <Icons.folder aria-hidden="true" className="size-3.5" />}
                 </>
               }
               label={entry.name}
@@ -282,7 +282,7 @@ function RowContextMenu({
           onSelect={() => onRevealInDiff(path)}
           data-testid="file-menu-reveal-in-diff"
         >
-          <GitCompare />
+          <Icons.diff />
           Reveal in diff
         </ContextMenuItem>
         <ContextMenuItem
@@ -290,7 +290,7 @@ function RowContextMenu({
           onSelect={() => onOpenToSide?.(path)}
           data-testid="file-menu-open-to-side"
         >
-          <PanelRight />
+          <Icons.openToSide />
           Open to side
         </ContextMenuItem>
         <ContextMenuItem
@@ -299,14 +299,14 @@ function RowContextMenu({
           }}
           data-testid="file-menu-copy-path"
         >
-          <Copy />
+          <Icons.copy />
           Copy path
         </ContextMenuItem>
         {pathActions && absolutePath && (
           <>
             <ContextMenuSeparator />
             <ContextMenuItem onSelect={() => pathActions.actions.reveal(absolutePath)} data-testid="file-menu-reveal">
-              <FolderOpen />
+              <Icons.folderOpen />
               {pathActions.actions.revealLabel}
             </ContextMenuItem>
             {pathActions.actions.editors.map((editor) => (
@@ -316,7 +316,7 @@ function RowContextMenu({
                 data-testid="file-menu-open-in-editor"
                 data-editor-id={editor.id}
               >
-                <SquareArrowOutUpRight />
+                <Icons.externalLink />
                 Open in {editor.label}
               </ContextMenuItem>
             ))}

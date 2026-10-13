@@ -12,7 +12,7 @@ Human ask: "rà soát và đồng bộ các icon trong app 1 lần". Icons were 
 
 | Concept | Before | After (`Icons.*`) | Where |
 |---|---|---|---|
-| terminal | `SquareTerminal` (sidebar menu, bash tool) **vs** `Terminal` (header button, terminal tab) | `terminal` = `SquareTerminal` | app-sidebar, tool-renderers, app-header, tab-registry |
+| terminal | `SquareTerminal` (sidebar menu, bash tool) **vs** `Terminal` (header button, terminal tab) | `terminal` = `Terminal` (`>_`) — the Terminal tab was deliberately `>_` (app-header-and-tabs D8, `TB-AC4` asserts it), so the others follow it; ZCode/Paseo split ~50/50 | app-sidebar, tool-renderers, app-header, tab-registry |
 | usage / plan usage | `CircleGauge` (footer, usage sidebar item), `Gauge` (chat pill, source fallback), `BarChart3` (settings section) | `usage` = `Gauge` | sidebar-footer, usage-sidebar-item, chat-usage-total, usage-source-icon, settings/usage-section |
 | refresh vs retry vs reset | `RefreshCw` (settings usage), `RotateCw` (usage refresh ×2, task-setup retry), `RotateCcw` (run re-run, composer "reset to agent defaults") | `refresh` = `RefreshCw`, `retry` = `RotateCcw`, `reset` = `Undo2` | usage-refresh-button, usage-section, task-setup, run-timeline, run-config-toolbar |
 | settings gear vs sliders | `Settings` (footer, usage options, model-picker manage), `Settings2` (General section header), `SlidersHorizontal` (run-options popover) | `settings` = `Settings` (app/provider settings), `options` = `SlidersHorizontal` (per-run options); `Settings2` removed | sidebar-footer, usage-options, model-picker-rows, general-section, run-config-options |
@@ -35,7 +35,7 @@ Human ask: "rà soát và đồng bộ các icon trong app 1 lần". Icons were 
 | tokens / total / plan | `Coins` (run pill), `Sigma` (chat total), `Gauge` (plan) | `tokens`, `usageTotal`, `usage` — three scopes, kept distinct | run-usage-pill, chat-usage-total |
 | host / connections | `Server` (footer host, daemon section), `Network` (connections) | `host`, `connections` — unchanged | sidebar-footer, settings |
 
-ZCode / Paseo reference (counts of lucide imports, `refs/zcode/packages/ui/src`, `refs/paseo/packages/app/src`): usage Gauge/Activity (both); retry RefreshCw 22 / RotateCw 22; reset Undo2 (both); external ExternalLink (both); more Ellipsis / MoreHorizontal (both mix); terminal SquareTerminal 10–11 (both); settings Settings (both), Settings2 secondary; warning TriangleAlert/CircleAlert; success CircleCheck; spinner Loader2/LoaderCircle; edit Pencil; shield Shield*; thinking Brain/Sparkles; agent Bot; workspace Paseo `FolderGit2`/`Layers`, ZCode `Workflow`.
+ZCode / Paseo reference (counts of lucide imports, `refs/zcode/packages/ui/src`, `refs/paseo/packages/app/src`): usage Gauge/Activity (both); retry RefreshCw 22 / RotateCw 22; reset Undo2 (both); external ExternalLink (both); more Ellipsis / MoreHorizontal (both mix); terminal SquareTerminal/Terminal ~50/50 (both); settings Settings (both), Settings2 secondary; warning TriangleAlert/CircleAlert; success CircleCheck; spinner Loader2/LoaderCircle; edit Pencil; shield Shield*; thinking Brain/Sparkles; agent Bot; workspace Paseo `FolderGit2`/`Layers`, ZCode `Workflow`.
 
 ### Size / stroke / colour findings
 

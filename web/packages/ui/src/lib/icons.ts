@@ -8,10 +8,10 @@
 // Loader2, MoreHorizontal, `*Icon` suffixes) are the same glyphs as the
 // canonical ones below; the registry uses canonical names only.
 //
-// Glyph choices follow ZCode / Paseo where they have one (SquareTerminal,
-// Gauge, Settings, Ellipsis, ExternalLink, Undo2 for reset, CircleAlert /
-// TriangleAlert / CircleCheck for states, Bot for agents, Brain for thinking,
-// Pencil for edit). Provider brand marks live in
+// Glyph choices follow ZCode / Paseo where they have one (Gauge, Settings,
+// Ellipsis, ExternalLink, Undo2 for reset, CircleAlert / TriangleAlert /
+// CircleCheck for states, Bot for agents, Brain for thinking, Pencil for
+// edit); terminal is `>_` per the app-header-and-tabs plan (D8). Provider brand marks live in
 // components/composer/provider-glyph.tsx, file-type glyphs in lib/file-icons.tsx.
 import {
   ArrowDown,
@@ -87,9 +87,9 @@ import {
   Sigma,
   SlidersHorizontal,
   Square,
-  SquareTerminal,
   Star,
   Sun,
+  Terminal,
   Trash2,
   TriangleAlert,
   Undo2,
@@ -156,7 +156,8 @@ export const Icons = {
   help: CircleQuestionMark,
   /** The agent asking the user a question (same "?" mark as help). */
   question: CircleQuestionMark,
-  terminal: SquareTerminal,
+  /** `>_` -- the Terminal tab, header button, bash tool and worktree scripts (app-header-and-tabs D8). */
+  terminal: Terminal,
   chat: MessageSquare,
   files: FolderTree,
   diff: GitCompare,

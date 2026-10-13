@@ -1,4 +1,4 @@
-import { AlertTriangle } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import type { PermissionDetail } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -98,7 +98,7 @@ export function PermissionDetailView({ detail }: { detail: PermissionDetail }) {
           data-testid="permission-detail-shrink"
           className="flex items-start gap-1.5 rounded border border-destructive/40 px-2 py-1 font-medium text-destructive"
         >
-          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+          <Icons.warning className="mt-0.5 size-3.5 shrink-0" />
           <span>{`Overwrites ${detail.existingLines} lines with ${detail.newLines} — most of the file will be lost`}</span>
         </div>
       )}
