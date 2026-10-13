@@ -89,6 +89,13 @@ func newTestRegistry(t *testing.T, st *store.Store) *Registry {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	// Drain every in-flight run (and any queue delivery it triggers) before
+	// the test returns. Reg.Stop only signals; the run's finish persists
+	// session handles, usage and status asynchronously, and without waiting
+	// those writes race the store Close and t.TempDir's RemoveAll ("directory
+	// not empty" / "database is closed"). Registered here, after the store
+	// and (normally) the task worktree, so LIFO cleanup runs it first.
+	t.Cleanup(reg.CloseAll)
 	return reg
 }
 
@@ -1004,10 +1011,7 @@ func TestRegistry_SetPermissionMode_PersistedToStore(t *testing.T) {
 	}
 	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
 
-	reg2, err := New(st)
-	if err != nil {
-		t.Fatalf("New() (rehydrated) error = %v", err)
-	}
+	reg2 := newTestRegistry(t, st)
 	_, status, err := reg2.History(runID)
 	if err != nil {
 		t.Fatalf("rehydrated History(%q) error = %v", runID, err)
@@ -1139,6 +1143,15 @@ func TestRegistry_PermissionRequest_ProviderCtxCancelledRecordsDistinguishableEv
 	reg.mu.Lock()
 	reg.runs[runID] = r
 	reg.mu.Unlock()
+	// A hand-built run has no driving goroutine to finish it, so the
+	// registry's drain (newTestRegistry's cleanup) would wait on its closedCh
+	// forever; retire it by hand first.
+	t.Cleanup(func() {
+		r.mu.Lock()
+		r.status = StatusDone
+		r.mu.Unlock()
+		close(r.closedCh)
+	})
 
 	decider := runPermissionDecider{reg: reg, r: r}
 	providerCtx, providerCancel := context.WithCancel(context.Background())
