@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/spacingmind/smind/internal/claudecli"
 	"github.com/spacingmind/smind/internal/selfupdate"
@@ -36,9 +37,14 @@ func cleanupAfterUpdate() {
 	if !selfupdate.RenameAside {
 		return
 	}
-	if exe, err := os.Executable(); err == nil {
-		selfupdate.CleanupStale(exe)
+	exe, err := os.Executable()
+	if err != nil {
+		return
 	}
+	if real, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = real // update replaced the resolved file, so its leftovers sit next to that
+	}
+	selfupdate.CleanupStale(exe)
 }
 
 // run dispatches to a subcommand and returns the process exit code, rather

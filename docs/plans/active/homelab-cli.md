@@ -916,9 +916,37 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
 - 2026-10-14 (later): the Human approved ADR-0031 — **Accepted, except decisions 9, 12, 27–32 and 36 (Open)**; decision 35 accepted
   as proposed. Ready to start: P0–P3, P6, P7, P12a–c, P13a–b (P0 merges before P2 and P12a). Blocked: P4 and dependants (decision 9);
   P14–P16 (decision 12). Nothing implemented yet.
+- 2026-10-14: **P6 implemented** (`smind update`, checksum verification; PR "feat(cli): smind update with checksum verification
+  (ADR-0031 P6)"): `internal/selfupdate/*`, `cmd/smind/update.go`, dispatcher case + startup `.old` cleanup in `main.go`. Signature
+  verification is P7 (nil `ChecksumVerifier` hook in `update.go`); the service restart path is exercised through an injected
+  `Daemon` until P8 lands (`/healthz managedBy` is read but nothing emits it yet).
 
 ## Validation
 
 To be filled per PR as work lands: for each Acceptance Criterion, the test name or the real-platform check that
 confirmed it, the exact command run, and what was **not** verified (for example Windows 10, an arm64 Docker host, a
 real signed release, an actual mobile device). Items marked **(real)** above are not satisfied by CI alone.
+
+### P6 (2026-10-14)
+
+Commands: `task test`, `task lint`, `GOOS=windows go vet ./...`, `go test -race ./internal/selfupdate/ ./cmd/smind -run Update`.
+
+- AC1 `--check`/`--json`: `TestUpdateCheckReportsLatestAndExitsZero`, `TestUpdateCheckJSON` (cmd), `TestUpdateCheckReportsLatest`.
+- AC2 download/verify/extract/version-check, byte-identical on failure: `TestUpdateVerifiesChecksumAndInstalls`,
+  `…ChecksumMismatchLeavesBinaryIdentical`, `…MissingAssetLeavesBinaryIdentical`, `…UnknownReleaseIs404`, `…FollowsDownloadRedirects`,
+  `…RejectsArchiveWithPathTraversal`, `…RejectsMissingBinaryMember`, `…RejectsOversizeMember`, `TestExtractMemberEdgeCases`,
+  `…StagedBinaryVersionMismatchIsNeverInstalled`.
+- AC3/4 refusals + active-run detection via `run.list`: `TestUpdateRefusesWhileRunsActive`, `…WhilePermissionPending` (a pending
+  permission is a *running* run; `run.list` has no separate state), `…ForceOverridesActiveRuns`, `…NoDaemonRunningIsFine`,
+  `…RefusesWhenTheDaemonCannotBeAsked`, `…RechecksActiveRunsJustBeforeSwap`, `…RefusesDevBuild` (incl. `task build`'s
+  `-dev+sha[.dirty]`), `…RefusesDesktopManagedPath` + `TestDesktopOwned`, `…RefusesInsideContainer`, `…RefusesDowngradeWithoutForce`,
+  `…RefusesUnwritableDir`.
+- AC5 swap/rollback: `…AtomicSwapKeepsOldUntilVerified`, `…RollsBackWhenNewBinaryVersionMismatches` (atomic + rename-aside),
+  `TestSwapAndRestoreBothStrategies`, `TestPreserveKeepsRollbackCopyOutOfCleanupsReach`; Windows lock semantics:
+  `TestUpdateWindowsRenameAsideAndCleanup` (build-tagged; **compiled by `GOOS=windows go vet`, not run — no Windows host**).
+  `TestUpdateEndToEndReplacesTheRunningBinary` builds two real binaries and runs the old one's own `update` (macOS here).
+- AC6 restart: `…RestartsServiceAndWaitsForHealthzVersion`, `…RollsBackWhenHealthzNeverReportsNewVersion`,
+  `…DoesNotRespawnManualDaemon` (fake `Daemon`; no real service until P8).
+- AC7/8: `…InstallsExplicitVersion`, `…DryRunChangesNothing`, `…LatestUsesRedirectNotAPI`, `…HonoursHTTPSProxy` (child process, CONNECT seen).
+- **Not verified:** **(real)** Linux/Windows 11 against a real published release (none newer than the running build exists to
+  update to from this branch), Windows with a running `smind.exe` daemon, real `smind service restart` (P8).

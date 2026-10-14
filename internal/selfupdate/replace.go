@@ -85,6 +85,20 @@ func Restore(exe string, aside bool) error {
 	return nil
 }
 
+// Preserve moves the rollback copy to a name CleanupStale never deletes and
+// returns where the previous binary now is. It is the last resort after a
+// failed Restore: on Windows the next smind.exe start would otherwise delete
+// the .old file, the only good binary left. If the rename itself fails the
+// .old path is returned (and may still be there).
+func Preserve(exe string) string {
+	old, kept := OldPath(exe), exe+".previous"
+	_ = os.Remove(kept)
+	if err := os.Rename(old, kept); err != nil {
+		return old
+	}
+	return kept
+}
+
 // Discard drops the rollback copy after a successful update. Best effort: on
 // rename-aside platforms the .old file is the still-running old binary and
 // cannot be deleted yet; CleanupStale retries on the next start or update.

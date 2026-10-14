@@ -115,9 +115,14 @@ func (u *Updater) Check(ctx context.Context) (CheckResult, error) {
 		return CheckResult{}, err
 	}
 	res := CheckResult{Current: u.Current, Latest: latest}
-	if c, err := CompareVersions(u.Current, latest); err == nil && c < 0 {
-		res.UpdateAvailable = true
+	if IsDevBuild(u.Current) {
+		return res, nil // a dev build is never updatable; Update refuses it
 	}
+	c, err := CompareVersions(u.Current, latest)
+	if err != nil {
+		return res, fmt.Errorf("compare %q with %s: %w", u.Current, latest, err)
+	}
+	res.UpdateAvailable = c < 0
 	return res, nil
 }
 
@@ -146,7 +151,7 @@ func (u *Updater) Update(ctx context.Context, opts Options) (UpdateResult, error
 	dir := filepath.Dir(u.Exe)
 
 	// Guards that need no network come first so a refusal is instant.
-	if u.Current == "dev" || !ValidVersion(NormalizeVersion(u.Current)) {
+	if IsDevBuild(u.Current) {
 		return res, refuse("this is a %q build, not a release; install a release with the install script to use `smind update`", u.Current)
 	}
 	if reason, owned := DesktopOwned(u.Exe, u.GOOS, u.Getenv, u.Exists); owned {
@@ -190,14 +195,23 @@ func (u *Updater) Update(ctx context.Context, opts Options) (UpdateResult, error
 		return res, refuse("%s is older than the installed %s; a downgrade can strand data migrated forward — pass --force to downgrade anyway", target, u.Current)
 	}
 
-	if !opts.Force {
+	checkActive := func() error {
+		if opts.Force {
+			return nil
+		}
 		act, err := u.ActiveWork(ctx)
 		switch {
 		case err != nil:
-			return res, refuse("a daemon is running but could not be asked whether work is active (%v); pass --force to update anyway", err)
+			return refuse("a daemon is running but could not be asked whether work is active (%v); pass --force to update anyway", err)
 		case act.RunningRuns > 0:
-			return res, refuse("%d run(s) are running (a run waiting on a permission counts); let them finish or pass --force", act.RunningRuns)
+			return refuse("%d run(s) are running (a run waiting on a permission counts); let them finish or pass --force", act.RunningRuns)
 		}
+		return nil
+	}
+	// Checked first so a refusal costs no download, and again just before the
+	// swap: the download can take minutes, during which a run may have started.
+	if err := checkActive(); err != nil {
+		return res, err
 	}
 
 	staged, cleanup, err := u.download(ctx, target, dir)
@@ -220,8 +234,11 @@ func (u *Updater) Update(ctx context.Context, opts Options) (UpdateResult, error
 	}
 
 	status, err := u.Daemon.Status(ctx)
-	if err != nil {
-		return res, fmt.Errorf("probe the daemon: %w", err)
+	if err != nil && !opts.Force {
+		return res, refuse("could not tell whether a daemon is running (%v); pass --force to update anyway", err)
+	}
+	if err := checkActive(); err != nil {
+		return res, err
 	}
 
 	if err := Swap(u.Exe, staged, u.aside()); err != nil {
@@ -229,7 +246,8 @@ func (u *Updater) Update(ctx context.Context, opts Options) (UpdateResult, error
 	}
 	rollback := func(cause error) error {
 		if rerr := Restore(u.Exe, u.aside()); rerr != nil {
-			return fmt.Errorf("%w; ROLLBACK FAILED, the previous binary is at %s: %v", cause, OldPath(u.Exe), rerr)
+			kept := Preserve(u.Exe)
+			return fmt.Errorf("%w; ROLLBACK FAILED, the previous binary is kept at %s: %v", cause, kept, rerr)
 		}
 		return fmt.Errorf("%w; rolled back to smind %s", cause, u.Current)
 	}
@@ -248,7 +266,10 @@ func (u *Updater) Update(ctx context.Context, opts Options) (UpdateResult, error
 			res.Updated = false
 			cause := rollback(err)
 			// Bring the old version back up; best effort, its error is secondary.
-			if rerr := u.Daemon.Restart(ctx, u.Exe); rerr != nil {
+			// A Ctrl-C that aborted the health wait must not also abort this.
+			rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), u.HealthTimeout)
+			defer cancel()
+			if rerr := u.Daemon.Restart(rctx, u.Exe); rerr != nil {
 				cause = fmt.Errorf("%w (restarting the old daemon also failed: %v)", cause, rerr)
 			}
 			return res, cause
@@ -350,6 +371,11 @@ func (u *Updater) download(ctx context.Context, target, dir string) (stagedPath 
 
 	if err := ExtractBinary(archive, BinaryName(u.GOOS), staged, maxBinarySize); err != nil {
 		return "", nil, fmt.Errorf("extract %s: %w", name, err)
+	}
+	// Installed binaries are world-executable (install.sh does chmod 755); do
+	// not let the extractor's umask-filtered mode lock other users out.
+	if err := os.Chmod(staged, 0o755); err != nil {
+		return "", nil, err
 	}
 	return staged, cleanup, nil
 }

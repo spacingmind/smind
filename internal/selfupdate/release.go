@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path"
 	"strings"
@@ -54,6 +53,7 @@ func NewSource() *Source {
 func newHTTPClient() *http.Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.Proxy = http.ProxyFromEnvironment
+	tr.DisableCompression = true // the checksum is over the bytes the release published, not a transparently gunzipped body
 	return &http.Client{Transport: tr, Timeout: 10 * time.Minute, CheckRedirect: noHTTPSDowngrade}
 }
 
@@ -116,10 +116,7 @@ func (s *Source) LatestVersion(ctx context.Context) (string, error) {
 	if i < 0 {
 		return "", fmt.Errorf("resolve latest release: %s did not lead to a release tag (HTTP %d); is there a published release?", req.URL, resp.StatusCode)
 	}
-	tag, err := url.PathUnescape(path.Base(tagURL.Path))
-	if err != nil {
-		return "", fmt.Errorf("resolve latest release: bad tag in %s", tagURL)
-	}
+	tag := path.Base(tagURL.Path) // URL.Path is already percent-decoded; ValidVersion vets the result
 	v := NormalizeVersion(tag)
 	if !ValidVersion(v) {
 		return "", fmt.Errorf("resolve latest release: tag %q is not a version", tag)

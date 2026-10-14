@@ -84,7 +84,9 @@ func extractTarGz(archivePath, member, dst string, maxBytes int64) error {
 	}
 	defer func() { _ = gz.Close() }()
 
-	tr := tar.NewReader(gz)
+	// Bound the whole decompressed stream, not just the member: skipped
+	// entries are decompressed too.
+	tr := tar.NewReader(io.LimitReader(gz, 4*maxBytes))
 	found := false
 	for {
 		hdr, err := tr.Next()
@@ -168,6 +170,9 @@ func writeLimited(dst string, src io.Reader, maxBytes int64) error {
 		return err
 	}
 	n, err := io.Copy(out, io.LimitReader(src, maxBytes+1))
+	if err == nil {
+		err = out.Sync() // the rename that follows must not outlive the data
+	}
 	if cerr := out.Close(); err == nil {
 		err = cerr
 	}

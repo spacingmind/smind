@@ -1,7 +1,9 @@
 package selfupdate
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"net/http"
@@ -953,4 +955,161 @@ func read(t *testing.T, p string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func TestValidVersionRejectsPathTricksInBuildMetadata(t *testing.T) {
+	for _, bad := range []string{"1.0.0+x/../../../tmp/pwn", "1.0.0+..", "1.0.0+", "1.0.0+a b", `1.0.0+a\b`, "1.0.0-rc/1"} {
+		if ValidVersion(bad) {
+			t.Errorf("ValidVersion(%q) = true", bad)
+		}
+	}
+	for _, good := range []string{"1.0.0+build.5", "0.12.0-dev+abc1234.dirty", "1.2.3-rc.1"} {
+		if !ValidVersion(good) {
+			t.Errorf("ValidVersion(%q) = false", good)
+		}
+	}
+	e := newEnv(t, "0.11.1", "0.12.0")
+	_, err := e.u.Update(context.Background(), Options{Version: "1.0.0+x/../../../../tmp/pwn"})
+	wantRefusal(t, err, "not a valid version")
+	e.wantUntouched("0.11.1")
+}
+
+func TestIsDevBuildCoversWhatTaskBuildStamps(t *testing.T) {
+	for _, dev := range []string{"dev", "0.12.0-dev+abc1234", "0.12.0-dev+abc1234.dirty", "0.12.0+abc", "0.12.0-dev.3", "garbage"} {
+		if !IsDevBuild(dev) {
+			t.Errorf("IsDevBuild(%q) = false", dev)
+		}
+	}
+	for _, rel := range []string{"0.11.1", "v1.0.0", "1.0.0-rc.1"} {
+		if IsDevBuild(rel) {
+			t.Errorf("IsDevBuild(%q) = true", rel)
+		}
+	}
+	e := newEnv(t, "0.11.0-dev+abc1234.dirty", "0.12.0")
+	_, err := e.u.Update(context.Background(), Options{})
+	wantRefusal(t, err, "not a release")
+	e.wantUntouched("0.11.0-dev+abc1234.dirty")
+	if res, err := e.u.Check(context.Background()); err != nil || res.UpdateAvailable {
+		t.Fatalf("Check on a task-build binary = %+v, %v; want updateAvailable=false", res, err)
+	}
+}
+
+func TestUpdateRechecksActiveRunsJustBeforeSwap(t *testing.T) {
+	e := newEnv(t, "0.11.1", "0.12.0")
+	calls := 0
+	e.u.ActiveWork = func(context.Context) (Activity, error) {
+		calls++
+		if calls == 1 {
+			return Activity{DaemonRunning: true}, nil // idle when we started downloading...
+		}
+		return Activity{DaemonRunning: true, RunningRuns: 1}, nil // ...busy once the download is done
+	}
+	_, err := e.u.Update(context.Background(), Options{})
+	wantRefusal(t, err, "1 run(s) are running")
+	e.wantUntouched("0.11.1")
+	if calls != 2 {
+		t.Fatalf("ActiveWork called %d times, want 2 (before download, before swap)", calls)
+	}
+}
+
+type errDaemon struct{ *fakeDaemon }
+
+func (*errDaemon) Status(context.Context) (DaemonStatus, error) {
+	return DaemonStatus{}, errors.New("healthz timed out")
+}
+
+func TestUpdateRefusesWhenDaemonProbeFailsUnlessForced(t *testing.T) {
+	e := newEnv(t, "0.11.1", "0.12.0")
+	e.u.Daemon = &errDaemon{e.daemon}
+	_, err := e.u.Update(context.Background(), Options{})
+	wantRefusal(t, err, "healthz timed out")
+	e.wantUntouched("0.11.1")
+	if _, err := e.u.Update(context.Background(), Options{Force: true}); err != nil {
+		t.Fatalf("--force: %v", err)
+	}
+}
+
+func TestHealthzDaemonHungDaemonIsNotNoDaemon(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	defer srv.Close()
+	defer close(release)
+	d := &HealthzDaemon{BaseURL: srv.URL, Client: &http.Client{Timeout: 100 * time.Millisecond}}
+	if st, err := d.Status(context.Background()); err == nil || st.Running {
+		t.Fatalf("hung daemon: Status = %+v, %v; want an error, not \"not running\"", st, err)
+	}
+}
+
+func TestPreserveKeepsRollbackCopyOutOfCleanupsReach(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "smind.exe")
+	must(t, os.WriteFile(OldPath(exe), []byte("previous"), 0o755))
+	kept := Preserve(exe)
+	CleanupStale(exe)
+	if read(t, kept) != "previous" {
+		t.Fatalf("preserved copy at %s lost", kept)
+	}
+	if _, err := os.Stat(OldPath(exe)); !os.IsNotExist(err) {
+		t.Fatal(".old should have been moved")
+	}
+}
+
+func TestNoHTTPSDowngradeRedirect(t *testing.T) {
+	mk := func(u string) *http.Request { r, _ := http.NewRequest("GET", u, nil); return r }
+	if err := noHTTPSDowngrade(mk("http://evil.example/x"), []*http.Request{mk("https://github.com/x")}); err == nil {
+		t.Error("https -> http redirect was allowed")
+	}
+	if err := noHTTPSDowngrade(mk("https://objects.example/x"), []*http.Request{mk("https://github.com/x")}); err != nil {
+		t.Errorf("https -> https refused: %v", err)
+	}
+	if err := noHTTPSDowngrade(mk("http://127.0.0.1/y"), []*http.Request{mk("http://127.0.0.1/x")}); err != nil {
+		t.Errorf("http -> http (test seam) refused: %v", err)
+	}
+	via := make([]*http.Request, maxRedirects)
+	for i := range via {
+		via[i] = mk("https://a.example/")
+	}
+	if err := noHTTPSDowngrade(mk("https://a.example/"), via); err == nil {
+		t.Error("redirect loop was not stopped")
+	}
+}
+
+func TestExtractMemberEdgeCases(t *testing.T) {
+	write := func(t *testing.T, data []byte) string {
+		p := filepath.Join(t.TempDir(), "a.tar.gz")
+		must(t, os.WriteFile(p, data, 0o600))
+		return p
+	}
+	dst := func(a string) string { return filepath.Join(filepath.Dir(a), "out") }
+
+	a := write(t, selfupdatetest.ArchiveOf(t, "linux", selfupdatetest.File{Name: "./smind", Body: []byte("bin")}))
+	if err := ExtractBinary(a, "smind", dst(a), 1<<20); err != nil || read(t, dst(a)) != "bin" {
+		t.Fatalf("./smind should be accepted: %v", err)
+	}
+
+	a = write(t, selfupdatetest.ArchiveOf(t, "linux",
+		selfupdatetest.File{Name: "smind", Body: []byte("one")}, selfupdatetest.File{Name: "smind", Body: []byte("two")}))
+	if err := ExtractBinary(a, "smind", dst(a), 1<<20); err == nil || !strings.Contains(err.Error(), "twice") {
+		t.Fatalf("duplicate member: %v", err)
+	}
+	if _, err := os.Stat(dst(a)); !os.IsNotExist(err) {
+		t.Fatal("a rejected archive left the destination behind")
+	}
+
+	a = write(t, selfupdatetest.ArchiveOf(t, "linux", selfupdatetest.File{Name: "SMIND", Body: []byte("x")}))
+	if err := ExtractBinary(a, "smind", dst(a), 1<<20); !errors.Is(err, ErrMissingBinary) {
+		t.Fatalf("case-different member: %v", err)
+	}
+
+	// A symlink named smind must not be treated as the binary.
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	must(t, tw.WriteHeader(&tar.Header{Name: "smind", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"}))
+	must(t, tw.Close())
+	must(t, gz.Close())
+	a = write(t, buf.Bytes())
+	if err := ExtractBinary(a, "smind", dst(a), 1<<20); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("symlink member: %v", err)
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -65,10 +66,15 @@ func (d *HealthzDaemon) Status(ctx context.Context) (DaemonStatus, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return DaemonStatus{}, err
+		// Only a failed dial (nothing listening) means "no daemon". A timeout
+		// or reset means something is there and too busy or broken to answer,
+		// which is exactly when work may be active, so the caller must not
+		// read it as "nothing to protect".
+		var op *net.OpError
+		if errors.As(err, &op) && op.Op == "dial" && !op.Timeout() {
+			return DaemonStatus{}, nil
 		}
-		return DaemonStatus{}, nil // nothing answering the port
+		return DaemonStatus{}, fmt.Errorf("probe %s/healthz: %w", d.BaseURL, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	var h healthz

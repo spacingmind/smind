@@ -40,6 +40,14 @@ func ValidVersion(v string) bool {
 func parseSemver(v string) (semver, error) {
 	orig := v
 	if i := strings.IndexByte(v, '+'); i >= 0 {
+		// Build metadata is ignored for precedence but still ends up in URLs
+		// and file names, so it gets the same character check as prerelease
+		// identifiers (no slashes, no dots-only segments).
+		for _, id := range strings.Split(v[i+1:], ".") {
+			if id == "" || strings.Trim(id, "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-") != "" {
+				return semver{}, fmt.Errorf("invalid version %q: bad build metadata %q", orig, id)
+			}
+		}
 		v = v[:i]
 	}
 	var pre string
@@ -135,4 +143,24 @@ func comparePreID(a, b string) int {
 		return 1
 	}
 	return strings.Compare(a, b)
+}
+
+// IsDevBuild reports whether v is not a published release: the unstamped
+// "dev", or what `task build` stamps (`<manifest>-dev+<sha>[.dirty]`). Release
+// versions never carry build metadata or a "dev" prerelease.
+func IsDevBuild(v string) bool {
+	v = NormalizeVersion(v)
+	if v == "dev" || strings.Contains(v, "+") {
+		return true
+	}
+	s, err := parseSemver(v)
+	if err != nil {
+		return true
+	}
+	for _, id := range s.pre {
+		if id == "dev" {
+			return true
+		}
+	}
+	return false
 }
