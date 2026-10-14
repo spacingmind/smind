@@ -324,3 +324,220 @@ func TestBridgeDeviceCapRejectsSeventeenth(t *testing.T) {
 		d.mustList()
 	}
 }
+
+// --- reconnect, restart, liveness ---
+
+func TestBridgeResumesDeviceAfterTransportDrop(t *testing.T) {
+	f := newHubFixture(t, Options{})
+	proxy := f.viaProxy()
+	approvedWindow(t, f, 2)
+	hub := f.start(nil)
+	a, b := f.newDevice(false, "a"), f.newDevice(true, "b")
+	a.connect()
+	b.connect()
+	hub.mu.Lock()
+	before := map[string]*session{}
+	for ref, s := range hub.sessions {
+		before[ref.device] = s
+	}
+	hub.mu.Unlock()
+
+	// Only the daemon's connection to the relay is cut. The devices' own
+	// streams stay up, so their next requests wait at the relay and are
+	// answered once the daemon is back — over the SAME E2EE sessions.
+	proxy.killAll()
+	a.mustList()
+	b.mustList()
+
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	for _, d := range []*device{a, b} {
+		s := hub.sessions[routeRef{device: d.id, session: d.session}]
+		if s == nil || s != before[d.id] {
+			t.Fatalf("device %s was re-handshaken instead of resumed in place", d.label)
+		}
+	}
+}
+
+func TestBridgeReannouncesAfterDaemonRestartViaSync(t *testing.T) {
+	f := newHubFixture(t, Options{})
+	approvedWindow(t, f, 3)
+	f.start(nil)
+	a := f.newDevice(false, "a")
+	a.connect()
+	a.mustList()
+
+	// The daemon restarts: it loses every E2EE counter.
+	f.stop()
+
+	// A new device attaches while no daemon is there; the relay holds it and
+	// announces it with Sync when the daemon's control stream returns.
+	c := f.newDevice(true, "c")
+	opened := make(chan error, 1)
+	go func() { opened <- c.open("") }()
+	f.start(nil)
+	if err := <-opened; err != nil {
+		t.Fatalf("device attached during the restart: %v", err)
+	}
+	r, err := c.hello()
+	if err != nil || r.Err != nil {
+		t.Fatalf("hello after restart = %+v, %v", r, err)
+	}
+	c.mustList()
+
+	// The device that was already established cannot resume against a daemon
+	// that lost its counters; it re-handshakes with a fresh session id and,
+	// being approved already, is served without a window.
+	if err := a.open(""); err != nil {
+		t.Fatalf("fresh session after restart: %v", err)
+	}
+	r, err = a.hello()
+	if err != nil || r.Err != nil {
+		t.Fatalf("hello of a known device after restart = %+v, %v", r, err)
+	}
+	a.mustList()
+}
+
+func TestBridgeDeadStreamAfter75sReconnectsWithJitter(t *testing.T) {
+	clock := newFakeClock()
+	var mu sync.Mutex
+	var jitterSeen []time.Duration
+	f := newHubFixture(t, Options{Clock: clock, Jitter: func(d time.Duration) time.Duration {
+		mu.Lock()
+		jitterSeen = append(jitterSeen, d)
+		mu.Unlock()
+		return d
+	}})
+	proxy := f.viaProxy()
+	approvedWindow(t, f, 1)
+	f.start(nil)
+	d := f.newDevice(false, "d")
+	d.connect()
+	d.mustList()
+
+	// The path to the relay goes silent (nothing is closed, nothing arrives).
+	proxy.setBlackhole(true)
+	clock.Advance(30 * time.Second) // pings and probes go into the void
+	mu.Lock()
+	n := len(jitterSeen)
+	mu.Unlock()
+	if n != 0 {
+		t.Fatalf("reconnect started after 30 s of silence (jitter calls %d); the rule is 75 s", n)
+	}
+	advanceUntil(t, clock, time.Second, 60, "the 75 s dead-stream rule to start a reconnect", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(jitterSeen) > 0
+	})
+	mu.Lock()
+	first := jitterSeen[0]
+	mu.Unlock()
+	if first != time.Second {
+		t.Fatalf("first reconnect backoff = %v, want 1s (jitter is applied to it)", first)
+	}
+
+	// The path heals; the daemon reconnects and resumes the device in place.
+	proxy.setBlackhole(false)
+	proxy.killAll()
+	stopAdvancing := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stopAdvancing:
+				return
+			default:
+				clock.Advance(time.Second)
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+	}()
+	defer close(stopAdvancing)
+	d.mustList()
+}
+
+func TestDevicesRevokeClosesStreamAndSendsRevoke(t *testing.T) {
+	f := newHubFixture(t, Options{})
+	proxy := f.viaProxy()
+	approvedWindow(t, f, 2)
+	hub := f.start(nil)
+	a, b := f.newDevice(false, "a"), f.newDevice(false, "b")
+	a.connect()
+	b.connect()
+
+	if _, err := hub.RevokeDevice(a.id); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-a.rerr:
+	case <-time.After(fixtureTimeout):
+		t.Fatal("revoke did not end the device's stream")
+	}
+	b.mustList() // only that device
+
+	// The RELAY refuses a new attach of the revoked device (the Revoke
+	// reached it): a refusal at the relay is a PermissionDenied on the
+	// stream, before any E2EE handshake — distinct from the daemon's refusal.
+	a2 := f.newDevice(false, "a")
+	a2.priv, a2.pub, a2.id = a.priv, a.pub, a.id
+	err := a2.open("")
+	if err == nil || relayStatus(err) != codePermissionDenied {
+		t.Fatalf("attach of a revoked device = %v, want the relay's PermissionDenied", err)
+	}
+
+	// Revocations are per control stream at the relay: after the daemon
+	// reconnects it must send them again.
+	proxy.killAll()
+	waitFor(t, "the daemon to reconnect and re-send the revocation", func() bool {
+		a3 := f.newDevice(false, "a")
+		a3.priv, a3.pub, a3.id = a.priv, a.pub, a.id
+		err := a3.open("")
+		return err != nil && relayStatus(err) == codePermissionDenied && b.canList()
+	})
+}
+
+func (d *device) canList() bool {
+	_, err := d.listWorkspaces()
+	return err == nil
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(fixtureTimeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+func TestBridgeControlStreamSilentFor75sReconnects(t *testing.T) {
+	// No device at all: only the control stream's own watchdog can notice.
+	clock := newFakeClock()
+	var mu sync.Mutex
+	var jitterSeen []time.Duration
+	f := newHubFixture(t, Options{Clock: clock, Jitter: func(d time.Duration) time.Duration {
+		mu.Lock()
+		jitterSeen = append(jitterSeen, d)
+		mu.Unlock()
+		return d
+	}})
+	proxy := f.viaProxy()
+	f.start(nil)
+	waitFor(t, "the hub to connect", func() bool { return f.logs.contains("connected to") })
+
+	proxy.setBlackhole(true)
+	clock.Advance(74 * time.Second)
+	mu.Lock()
+	n := len(jitterSeen)
+	mu.Unlock()
+	if n != 0 {
+		t.Fatalf("reconnect after 74 s of silence (%d backoffs); the rule is 75 s", n)
+	}
+	advanceUntil(t, clock, time.Second, 10, "reconnect after 75 s of silence", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(jitterSeen) > 0
+	})
+}

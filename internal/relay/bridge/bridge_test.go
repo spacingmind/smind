@@ -14,7 +14,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"path/filepath"
 	"sync"
@@ -224,6 +223,7 @@ type tcpProxy struct {
 
 	mu    sync.Mutex
 	conns []net.Conn
+	hole  bool // swallow traffic instead of forwarding it (see setBlackhole)
 }
 
 func newTCPProxy(t *testing.T, target string) *tcpProxy {
@@ -260,11 +260,33 @@ func (p *tcpProxy) handle(c net.Conn) {
 	p.conns = append(p.conns, c)
 	p.mu.Unlock()
 	done := make(chan struct{}, 2)
-	go func() { io.Copy(upstream, c); done <- struct{}{} }()
-	go func() { io.Copy(c, upstream); done <- struct{}{} }()
+	go func() { p.copy(upstream, c); done <- struct{}{} }()
+	go func() { p.copy(c, upstream); done <- struct{}{} }()
 	<-done
 	upstream.Close()
 	c.Close()
+}
+
+// copy forwards src to dst, discarding the bytes while the proxy is in
+// blackhole mode.
+func (p *tcpProxy) copy(dst, src net.Conn) {
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := src.Read(buf)
+		if n > 0 {
+			p.mu.Lock()
+			hole := p.hole
+			p.mu.Unlock()
+			if !hole {
+				if _, werr := dst.Write(buf[:n]); werr != nil {
+					return
+				}
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 // killAll severs every connection this proxy has forwarded so far, without

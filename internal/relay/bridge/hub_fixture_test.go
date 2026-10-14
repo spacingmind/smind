@@ -18,6 +18,9 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/spacingmind/smind/internal/relay/client"
 	"github.com/spacingmind/smind/internal/relay/devices"
 	"github.com/spacingmind/smind/internal/relay/e2ee"
@@ -329,3 +332,113 @@ func (d *device) mustList() []json.RawMessage {
 }
 
 func relaytestMaxDevices(n int) relaytest.Option { return relaytest.WithMaxDevicesPerHost(n) }
+
+// viaProxy makes the hub reach the relay through a severable TCP proxy (the
+// existing tcpProxy): devices keep dialling the relay directly, so only the
+// DAEMON's connection can be cut.
+func (f *hubFixture) viaProxy() *tcpProxy {
+	p := newTCPProxy(f.t, f.relay.NativeAddr)
+	f.cfg.RelayAddress = p.addr()
+	return p
+}
+
+// fakeClock is a manually advanced client.Clock for the hub's timers.
+type fakeClock struct {
+	mu     sync.Mutex
+	now    time.Time
+	timers []*fakeTimer
+}
+
+type fakeTimer struct {
+	at    time.Time
+	ch    chan time.Time
+	fired bool
+}
+
+func newFakeClock() *fakeClock { return &fakeClock{now: time.Unix(2_000_000, 0)} }
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) At(at time.Time) (<-chan time.Time, func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	t := &fakeTimer{at: at, ch: make(chan time.Time, 1)}
+	if !at.After(c.now) {
+		t.fired = true
+		t.ch <- c.now
+	} else {
+		c.timers = append(c.timers, t)
+	}
+	return t.ch, func() {
+		c.mu.Lock()
+		t.fired = true
+		c.mu.Unlock()
+	}
+}
+
+// Advance moves time forward by d, firing due timers in order.
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	target := c.now.Add(d)
+	for {
+		var next *fakeTimer
+		for _, t := range c.timers {
+			if !t.fired && !t.at.After(target) && (next == nil || t.at.Before(next.at)) {
+				next = t
+			}
+		}
+		if next == nil {
+			break
+		}
+		if next.at.After(c.now) {
+			c.now = next.at
+		}
+		next.fired = true
+		next.ch <- c.now
+		// Let the woken goroutine run and re-arm before time moves on.
+		c.mu.Unlock()
+		time.Sleep(2 * time.Millisecond)
+		c.mu.Lock()
+	}
+	c.now = target
+	c.mu.Unlock()
+}
+
+// advanceUntil advances the clock in steps until cond holds, failing after
+// max steps; real time passes between steps so the network can make progress.
+func advanceUntil(t *testing.T, c *fakeClock, step time.Duration, max int, what string, cond func() bool) {
+	t.Helper()
+	for i := 0; i < max; i++ {
+		if cond() {
+			return
+		}
+		c.Advance(step)
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !cond() {
+		t.Fatalf("timed out (fake clock +%v) waiting for %s", time.Duration(max)*step, what)
+	}
+}
+
+// blackhole makes the proxy swallow all traffic on its existing connections
+// without closing them — a path that has gone silent, as a proxy dropping an
+// idle stream does — until opened again.
+func (p *tcpProxy) setBlackhole(on bool) {
+	p.mu.Lock()
+	p.hole = on
+	p.mu.Unlock()
+}
+
+const codePermissionDenied = codes.PermissionDenied
+
+// relayStatus is the gRPC code of an error from a relay call, or OK.
+func relayStatus(err error) codes.Code {
+	if s, ok := status.FromError(err); ok {
+		return s.Code()
+	}
+	return codes.Unknown
+}
