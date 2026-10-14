@@ -436,3 +436,63 @@ func TestModuleOutOfBounds(t *testing.T) {
 		}
 	}
 }
+
+// TestQRTextLevelFallbackBoundary pins where EncodeQRFit switches from level
+// M to level L: the largest symbol holds 412 bytes at M, so 413 is the first
+// length that needs L, and the result still decodes to the original content.
+func TestQRTextLevelFallbackBoundary(t *testing.T) {
+	if got := capacityBytes(maxVersion, ECMedium); got != 412 {
+		t.Fatalf("capacity at M = %d, want 412 (the boundary this test names)", got)
+	}
+	tests := []struct {
+		n         int
+		wantLevel ECLevel
+	}{
+		{412, ECMedium},
+		{413, ECLow},
+		{capacityBytes(maxVersion, ECLow), ECLow},
+	}
+	for _, tt := range tests {
+		content := strings.Repeat("x", tt.n)
+		code, err := EncodeQRFit(content)
+		if err != nil {
+			t.Fatalf("EncodeQRFit(%d bytes) error = %v", tt.n, err)
+		}
+		if code.Level() != tt.wantLevel {
+			t.Errorf("EncodeQRFit(%d bytes) level = %s, want %s", tt.n, code.Level(), tt.wantLevel)
+		}
+		got, err := decodeSymbol(modulesOf(code))
+		if err != nil || got.content != content {
+			t.Errorf("EncodeQRFit(%d bytes) does not decode back: %v", tt.n, err)
+		}
+	}
+	if _, err := EncodeQRFit(strings.Repeat("x", capacityBytes(maxVersion, ECLow)+1)); !errors.Is(err, ErrContentTooLong) {
+		t.Fatalf("beyond level L: error = %v, want ErrContentTooLong", err)
+	}
+}
+
+// TestRealisticOfferNeedsLevelLAndDecodes is the ADR-0031 case: an offer
+// carrying a relay host secret and pinned fingerprint is ~432 bytes, over
+// level M's 412, and its level-L QR must scan back to the exact link.
+func TestRealisticOfferNeedsLevelLAndDecodes(t *testing.T) {
+	o := offerFixture()
+	var pairURL string
+	for n := 1; len(pairURL) < 432; n++ {
+		o.WorkspaceID = strings.Repeat("h", n)
+		var err error
+		if pairURL, err = o.URL(""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := EncodeQR(pairURL, ECMedium); !errors.Is(err, ErrContentTooLong) {
+		t.Fatalf("a %d-byte offer should not fit at M: %v", len(pairURL), err)
+	}
+	code, err := EncodeQRFit(pairURL)
+	if err != nil || code.Level() != ECLow {
+		t.Fatalf("EncodeQRFit = level %v, err %v; want L", code.Level(), err)
+	}
+	got, err := decodeSymbol(modulesOf(code))
+	if err != nil || got.content != pairURL {
+		t.Fatalf("decoded %q (err %v), want the offer link", got.content, err)
+	}
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -13,11 +14,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mattn/go-isatty"
+
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/relay/bridge"
 	"github.com/spacingmind/smind/internal/relay/e2ee"
 	"github.com/spacingmind/smind/internal/relay/pairing"
 	"github.com/spacingmind/smind/internal/relay/server"
+	"github.com/spacingmind/smind/internal/securefile"
 )
 
 // cmdRelay runs the self-hostable relay server (`smind relay`), or manages
@@ -182,7 +186,7 @@ func cmdRelayConnect(args []string) int {
 	}); err != nil {
 		log.Fatalf("relay connect: %v", err)
 	}
-	fmt.Printf("connected to relay %s (relay host %q, fingerprint %s)\n\n`smind serve` will now dial this relay automatically. Run `smind relay offer` for a pairing URL for a mobile device.\n\n%s\n", address, hostID, fingerprint, relayConnectNote)
+	fmt.Printf("connected to relay %s (relay host %q, fingerprint %s)\n\n`smind serve` will now dial this relay automatically. Run `smind relay offer` for a pairing link for a mobile device or the desktop app.\n\n%s\n\n%s\n", address, hostID, fingerprint, relayLinkWarning, relayConnectNote)
 	return 0
 }
 
@@ -205,30 +209,72 @@ func cmdRelayConnect(args []string) int {
 // non-adjacent pair of ports needs a real fix (recording the grpc-web
 // address explicitly), which is Milestone 2 scope, not this one's.
 func cmdRelayOffer(args []string) int {
-	if len(args) != 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind relay offer")
+	return runRelayOffer(args, config.Dir(), os.Stdout, os.Stderr, isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd()))
+}
+
+// relayLinkWarning is the consent wording printed whenever a person (not a
+// script capturing stdout) is looking at an offer. It names the rotate
+// command because the offer carries the relay host's admission secret, so
+// rotating that secret is the only revocation.
+const relayLinkWarning = "Treat this link like a password: anyone with it can reach this daemon through the relay.\n" +
+	"To revoke it, run `smind relay host rotate <id>` (then `smind relay connect` again with the new secret).\n" +
+	"Traffic is end-to-end encrypted; the relay cannot read your code or messages."
+
+// runRelayOffer is cmdRelayOffer with its environment injected. stdout gets
+// only the pairing URL, exactly as before, so `$(smind relay offer)` stays
+// clean; everything meant for a person (the terminal QR, the warning, notes)
+// goes to stderr. stdoutIsTTY or --qr turns the QR on; --png writes it to a
+// file. An offer too long for any QR code is not an error: the URL is still
+// printed and the QR is skipped with a note.
+func runRelayOffer(args []string, dir string, stdout, stderr io.Writer, stdoutIsTTY bool) int {
+	fs := flag.NewFlagSet("relay offer", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprint(stderr, `usage: smind relay offer [--qr] [--png <file> [--force]]
+
+Prints a pairing link for a mobile device or the desktop app. The link goes to
+stdout; with a terminal on stdout, or --qr, a QR code is drawn on stderr too.
+--png writes the QR code to a file (mode 0600; --force overwrites).
+
+`+relayLinkWarning+"\n")
+	}
+	qr := fs.Bool("qr", false, "also draw the QR code on stderr (the default when stdout is a terminal)")
+	pngPath := fs.String("png", "", "write the QR code as a PNG to `file`")
+	force := fs.Bool("force", false, "with --png, overwrite an existing file")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
-	dir := config.Dir()
+	if fs.NArg() != 0 || (*force && *pngPath == "") {
+		fs.Usage()
+		return 2
+	}
+
 	cfg, ok, err := bridge.LoadConfig(dir)
 	if err != nil {
-		log.Fatalf("relay offer: %v", err)
+		fmt.Fprintf(stderr, "smind relay offer: %v\n", err)
+		return 1
 	}
 	if !ok {
-		fmt.Fprintln(os.Stderr, "smind relay offer: no relay connection configured; run `smind relay connect <relay-address> <host-id> <secret>` first")
+		fmt.Fprintln(stderr, "smind relay offer: no relay connection configured; run `smind relay connect <relay-address> <host-id> <secret>` first")
 		return 1
 	}
 	kp, err := e2ee.LoadOrCreateKeyPair(dir)
 	if err != nil {
-		log.Fatalf("relay offer: %v", err)
+		fmt.Fprintf(stderr, "smind relay offer: %v\n", err)
+		return 1
 	}
 	grpcWebAddr, err := deriveGRPCWebAddress(cfg.RelayAddress)
 	if err != nil {
-		log.Fatalf("relay offer: %v", err)
+		fmt.Fprintf(stderr, "smind relay offer: %v\n", err)
+		return 1
 	}
 	secret, err := hex.DecodeString(cfg.SecretHex)
 	if err != nil {
-		log.Fatalf("relay offer: decode stored secret: %v", err)
+		fmt.Fprintf(stderr, "smind relay offer: decode stored secret: %v\n", err)
+		return 1
 	}
 	offer := pairing.Offer{
 		DaemonID:         bridge.DaemonKeyID(kp),
@@ -236,14 +282,71 @@ func cmdRelayOffer(args []string) int {
 		Relay:            "https://" + grpcWebAddr,
 		RelayFingerprint: cfg.Fingerprint,
 		Secret:           secret,
-		WorkspaceID:      cfg.WorkspaceID,
+		WorkspaceID:      cfg.WorkspaceID, // the relay host id; the offer's "ws" key keeps the wire name
 	}
 	url, err := offer.URL("")
 	if err != nil {
-		log.Fatalf("relay offer: %v", err)
+		fmt.Fprintf(stderr, "smind relay offer: %v\n", err)
+		return 1
 	}
-	fmt.Println(url)
+	fmt.Fprintln(stdout, url)
+
+	showQR := *qr || stdoutIsTTY
+	if !showQR && *pngPath == "" {
+		return 0
+	}
+	code, err := pairing.EncodeQRFit(url)
+	if errors.Is(err, pairing.ErrContentTooLong) {
+		fmt.Fprintf(stderr, "\nThis link is too long for a QR code (%d bytes); copy the link above instead.\n", len(url))
+	} else if err != nil {
+		fmt.Fprintf(stderr, "smind relay offer: %v\n", err)
+		return 1
+	} else {
+		if showQR {
+			fmt.Fprintf(stderr, "\nScan with a mobile device or the desktop app:\n\n%s", code.Text())
+		}
+		if *pngPath != "" {
+			if err := writeOfferPNG(*pngPath, code, *force); err != nil {
+				fmt.Fprintf(stderr, "smind relay offer: %v\n", err)
+				return 1
+			}
+			fmt.Fprintf(stderr, "\nQR code written to %s\n", *pngPath)
+		}
+	}
+	fmt.Fprintf(stderr, "\n%s\n", relayLinkWarning)
 	return 0
+}
+
+// offerPNGModuleSize is the pixel size of one QR module in --png output: at
+// the largest symbol (77 modules) that is a ~700px image, comfortable to scan
+// from a screen.
+const offerPNGModuleSize = 8
+
+// writeOfferPNG writes code to path for the current user only (the QR is as
+// sensitive as the link). Without force it refuses to replace a file.
+func writeOfferPNG(path string, code *pairing.Code, force bool) error {
+	data, err := code.PNG(offerPNGModuleSize, 4)
+	if err != nil {
+		return err
+	}
+	if force {
+		return securefile.WriteFile(path, data)
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("%s already exists; pass --force to overwrite it", path)
+	}
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(data)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		return werr
+	}
+	return securefile.Restrict(path)
 }
 
 // deriveGRPCWebAddress guesses the relay's grpc-web listen address from its
@@ -283,11 +386,17 @@ Usage:
   smind relay host rm <id>                                remove a relay host
   smind relay host rotate <id>                            issue a new secret (printed once; the old one stops admitting)
   smind relay connect <address> <host-id> <secret>        configure this daemon to use a relay
-  smind relay offer                                       print a pairing URL for a mobile device or the desktop app
+  smind relay offer [--qr] [--png <file> [--force]]       print a pairing link (and QR code) for a mobile device or the desktop app
 
 A relay host is one daemon's mailbox on a relay: a host id plus an admission
 secret. ("smind relay workspace ..." is the deprecated name for "smind relay
 host ...".) Host changes take effect when the relay restarts.
+
+"smind relay offer" prints the pairing link on stdout; on a terminal, or with
+--qr, it also draws a QR code on stderr, and --png writes one to a file. Treat
+the link like a password: anyone with it can reach this daemon through the
+relay; to revoke it, run "smind relay host rotate". Traffic is end-to-end
+encrypted; the relay cannot read your code or messages.
 
 The relay is a dumb pipe: it authenticates relay hosts (SCRAM-style
 challenge-response) and forwards opaque ciphertext between the daemon and
