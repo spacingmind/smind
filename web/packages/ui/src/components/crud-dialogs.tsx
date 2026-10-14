@@ -366,9 +366,9 @@ function DeleteConsequences({ tasksRemoved, spacesRemoved }: { tasksRemoved: num
   return (
     <p className="mt-2">
       This removes {spaceClause}
-      {tasksRemoved} task{tasksRemoved === 1 ? "" : "s"} from smind only -- files on disk are untouched.
+      {tasksRemoved} task{tasksRemoved === 1 ? "" : "s"} from sMind only -- files on disk are untouched.
       Uncommitted work in any task worktree is checkpointed to its branch first. This cannot be undone in
-      smind.
+      sMind.
     </p>
   );
 }

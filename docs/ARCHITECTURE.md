@@ -1,6 +1,6 @@
 # Architecture
 
-Spacing Mind runs as a single Go daemon (`cmd/smind`, default `:4648`) that
+sMind (Spacing Mind) runs as a single Go daemon (`cmd/smind`, default `:4648`) that
 serves the API and the embedded web UI from one binary — see
 [decisions/0001-go-single-binary.md](decisions/0001-go-single-binary.md).
 

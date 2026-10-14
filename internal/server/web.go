@@ -30,9 +30,9 @@ func webUI() http.Handler {
 func placeholder(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(`<!doctype html>
-<html><head><title>smind</title></head>
+<html><head><title>sMind</title></head>
 <body style="font-family:system-ui;padding:3rem;color:#eee;background:#111">
-<h1>smind</h1>
+<h1>sMind</h1>
 <p>Web UI not built yet. Run <code>task build:web</code> and rebuild the binary.</p>
 </body></html>`))
 }

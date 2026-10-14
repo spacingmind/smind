@@ -276,7 +276,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // plain effect, not a ref, since document.title has no React-owned
   // counterpart to diff against.
   useEffect(() => {
-    if (typeof document !== "undefined") document.title = formatTabTitle("smind", unread.size);
+    if (typeof document !== "undefined") document.title = formatTabTitle("sMind", unread.size);
   }, [unread]);
 
   // The sidebar's user-resized width (px), persisted across reloads. It

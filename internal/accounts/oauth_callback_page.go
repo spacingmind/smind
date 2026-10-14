@@ -28,7 +28,7 @@ const callbackPageTemplate = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{.Title}} - smind</title>
+<title>{{.Title}} - sMind</title>
 <style>
   :root {
     --background: oklch(1 0 0);
@@ -119,7 +119,7 @@ func renderCallbackSuccessPage(providerLabel string) string {
 	return mustRenderCallbackPage(callbackPageData{
 		Success: true,
 		Title:   "Connected",
-		Message: "Your " + providerLabel + " account is connected to smind.",
+		Message: "Your " + providerLabel + " account is connected to sMind.",
 	})
 }
 
@@ -131,7 +131,7 @@ func renderCallbackErrorPage(reason string) string {
 	return mustRenderCallbackPage(callbackPageData{
 		Success: false,
 		Title:   "Login failed",
-		Message: "smind couldn't complete the login: " + reason + ". Go back to smind and try again.",
+		Message: "sMind couldn't complete the login: " + reason + ". Go back to sMind and try again.",
 	})
 }
 

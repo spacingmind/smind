@@ -102,7 +102,7 @@ func cmdMcpServe(args []string) int {
 func newMCPServer(client *wsclient.Client) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "smind",
-		Title:   "smind",
+		Title:   "sMind",
 		Version: version.Version,
 	}, &mcp.ServerOptions{Instructions: mcpInstructions})
 	registerMCPTools(srv, client)

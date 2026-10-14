@@ -98,7 +98,7 @@ describe("AppSidebar CRUD", () => {
     client.nth("workspace.list").resolve([]);
     await flush();
 
-    expect(await screen.findByText("Welcome to smind")).toBeInTheDocument();
+    expect(await screen.findByText("Welcome to sMind")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New workspace" })).toBeInTheDocument();
   });
 

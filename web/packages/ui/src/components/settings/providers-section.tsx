@@ -297,7 +297,7 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
                   className="text-ui-xs text-muted-foreground"
                   data-testid={`provider-group-note-${info.id}`}
                 >
-                  Used by smind's /v1 proxy, not by a task runner
+                  Used by sMind's /v1 proxy, not by a task runner
                 </p>
               )}
               {info.kind === "cli" ? (
@@ -380,7 +380,7 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      These accounts' providers have no smind consumer — no agent runner and no proxy endpoint uses them today.
+                      These accounts' providers have no sMind consumer — no agent runner and no proxy endpoint uses them today.
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>

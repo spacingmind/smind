@@ -20,11 +20,11 @@ follow up there.
 This applies to vulnerabilities in `smind` itself — the daemon (auth,
 proxy request handling, the `/ws` API, path sandboxing in the file
 explorer, PTY/terminal session handling), the CLI, and the embedded web
-UI. Issues in a third-party agent CLI smind drives (Claude Code, a GLM
+UI. Issues in a third-party agent CLI sMind drives (Claude Code, a GLM
 ACP agent, etc.), or in an upstream provider's own service, should be
 reported to that project/provider directly.
 
-smind routes requests across multiple accounts on your behalf and stores
+sMind routes requests across multiple accounts on your behalf and stores
 OAuth credentials locally (`~/.smind/`). A report involving
 credential handling, token refresh, or account isolation is very much in
 scope.

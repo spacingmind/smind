@@ -131,10 +131,10 @@ describe("providers-section", () => {
   it("notes the proxy-only groups (Claude Code, Codex) but not Kimi or GLM", async () => {
     await renderLoaded([]);
     expect(screen.getByTestId("provider-group-note-claude-native")).toHaveTextContent(
-      "smind's /v1 proxy, not by a task runner",
+      "sMind's /v1 proxy, not by a task runner",
     );
     expect(screen.getByTestId("provider-group-note-codex-native")).toHaveTextContent(
-      "smind's /v1 proxy, not by a task runner",
+      "sMind's /v1 proxy, not by a task runner",
     );
     expect(screen.queryByTestId("provider-group-note-kimi")).not.toBeInTheDocument();
     expect(screen.queryByTestId("provider-group-note-glm")).not.toBeInTheDocument();
