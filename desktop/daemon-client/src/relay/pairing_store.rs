@@ -113,7 +113,28 @@ fn pairing_dir(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("relay")
 }
 
+/// The file a connection's pairing lives in: the hex SHA-256 of the
+/// connection id. A relay connection id is `relay:<host>@<addr>`, which
+/// holds characters no Windows file name may contain (`:`, and `/`, `\`, `*`,
+/// `?` for an odd host id), and a long host id could blow the name-length
+/// limit; a hash is 64 `[0-9a-f]` characters on every OS, never collides
+/// in practice, and needs no reverse mapping (the file is only ever looked
+/// up by id, never listed). The connection id itself is unchanged -- it is
+/// what `connections.json` and `selectedId` already store.
 fn pairing_path(app_data_dir: &Path, connection_id: &str) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let name: String = Sha256::digest(connection_id.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    pairing_dir(app_data_dir).join(format!("{name}.json"))
+}
+
+/// Before the hashed name, a pairing was stored as `<connection id>.json`.
+/// That could only ever be created on unix (a Windows save failed with
+/// `InvalidFilename`), so it is read, migrated and removed best-effort
+/// there and never an error: `is_file` is false for a name the OS rejects.
+fn legacy_pairing_path(app_data_dir: &Path, connection_id: &str) -> PathBuf {
     pairing_dir(app_data_dir).join(format!("{connection_id}.json"))
 }
 
@@ -129,6 +150,11 @@ pub fn save(app_data_dir: &Path, connection_id: &str, pairing: &RelayPairing) ->
     write_private(&path, data.as_bytes())?;
     // Also covers a pre-existing file created before this was 0600-at-birth.
     set_restrictive_permissions(&path)?;
+    // A stale pre-hash copy would hold the old secret next to the new one.
+    let legacy = legacy_pairing_path(app_data_dir, connection_id);
+    if legacy != path && legacy.is_file() {
+        let _ = std::fs::remove_file(legacy);
+    }
     Ok(())
 }
 
@@ -179,6 +205,11 @@ fn set_restrictive_permissions(_path: &Path) -> io::Result<()> {
 /// whose pairing was already removed) rather than erroring.
 pub fn load(app_data_dir: &Path, connection_id: &str) -> io::Result<Option<RelayPairing>> {
     let path = pairing_path(app_data_dir, connection_id);
+    migrate_legacy(app_data_dir, connection_id, &path);
+    // If the migration could not rename (read-only dir, say), still serve the
+    // pairing from its legacy name rather than reporting it unpaired.
+    let legacy = legacy_pairing_path(app_data_dir, connection_id);
+    let path = if !path.exists() && legacy.is_file() { legacy } else { path };
     match std::fs::read_to_string(&path) {
         Ok(data) => {
             let persisted: PersistedPairing = serde_json::from_str(&data)
@@ -190,9 +221,23 @@ pub fn load(app_data_dir: &Path, connection_id: &str) -> io::Result<Option<Relay
     }
 }
 
+/// migrate_legacy moves a pre-hash `<connection id>.json` to its hashed
+/// name (a rename keeps the `0600` mode). Best-effort: if it fails the next
+/// `load` simply tries again (and reads the legacy file meanwhile).
+fn migrate_legacy(app_data_dir: &Path, connection_id: &str, new_path: &Path) {
+    let legacy = legacy_pairing_path(app_data_dir, connection_id);
+    if legacy != new_path && !new_path.exists() && legacy.is_file() {
+        let _ = std::fs::rename(&legacy, new_path);
+    }
+}
+
 /// delete removes the pairing file for `connection_id` (unpair/remove).
 /// Missing is not an error — deleting an already-gone pairing is a no-op.
 pub fn delete(app_data_dir: &Path, connection_id: &str) -> io::Result<()> {
+    let legacy = legacy_pairing_path(app_data_dir, connection_id);
+    if legacy.is_file() {
+        std::fs::remove_file(legacy)?;
+    }
     match std::fs::remove_file(pairing_path(app_data_dir, connection_id)) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -266,6 +311,79 @@ mod tests {
             load(dir.path(), "conn-b").unwrap().unwrap().workspace_id,
             "ws-b"
         );
+    }
+
+    /// Every character a Windows file name rejects, plus the shape of a real
+    /// relay connection id: must round-trip on every OS (a Windows CI run is
+    /// what proves the "no reserved chars on disk" half).
+    #[test]
+    fn windows_reserved_characters_in_the_connection_id_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        for id in [
+            "relay:ws-1@relay.example.test:7400",
+            "relay:a/b\\c*d?e\"f<g>h|i@x:1",
+            &format!("relay:{}@h:1", "w".repeat(400)),
+        ] {
+            save(dir.path(), id, &sample()).unwrap();
+            assert_eq!(load(dir.path(), id).unwrap().unwrap(), sample(), "{id}");
+            let name = pairing_path(dir.path(), id).file_name().unwrap().to_string_lossy().into_owned();
+            assert!(name.len() <= 255, "{name}");
+            assert!(
+                name.trim_end_matches(".json").chars().all(|c| c.is_ascii_hexdigit()),
+                "unsafe file name {name}"
+            );
+            delete(dir.path(), id).unwrap();
+            assert_eq!(load(dir.path(), id).unwrap(), None);
+        }
+    }
+
+    #[test]
+    fn distinct_connection_ids_get_distinct_files() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_ne!(pairing_path(dir.path(), "relay:a@h:1"), pairing_path(dir.path(), "relay:a@h:2"));
+        assert_eq!(pairing_path(dir.path(), "relay:a@h:1"), pairing_path(dir.path(), "relay:a@h:1"));
+    }
+
+    /// A pairing saved before the hashed name (unix only: it could not be
+    /// written on Windows) is found, migrated to the new name, and removed
+    /// with the connection.
+    #[cfg(unix)]
+    #[test]
+    fn legacy_file_is_loaded_and_migrated() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = "relay:ws-1@relay.example.test:7400";
+        // Write the legacy file exactly as the old `save` did.
+        save(dir.path(), "tmp", &sample()).unwrap();
+        let legacy = legacy_pairing_path(dir.path(), id);
+        std::fs::rename(pairing_path(dir.path(), "tmp"), &legacy).unwrap();
+        assert!(legacy.is_file());
+
+        assert_eq!(load(dir.path(), id).unwrap().unwrap(), sample());
+        assert!(!legacy.exists(), "legacy file should have been renamed away");
+        assert!(pairing_path(dir.path(), id).is_file());
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(pairing_path(dir.path(), id)).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        // A second load reads the migrated file.
+        assert_eq!(load(dir.path(), id).unwrap().unwrap(), sample());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delete_removes_both_legacy_and_hashed_files_and_save_drops_a_stale_legacy_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = "relay:ws-1@relay.example.test:7400";
+        let legacy = legacy_pairing_path(dir.path(), id);
+        save(dir.path(), id, &sample()).unwrap();
+        std::fs::write(&legacy, b"{}").unwrap();
+        delete(dir.path(), id).unwrap();
+        assert!(!legacy.exists());
+        assert!(!pairing_path(dir.path(), id).exists());
+
+        std::fs::create_dir_all(pairing_dir(dir.path())).unwrap();
+        std::fs::write(&legacy, b"stale").unwrap();
+        save(dir.path(), id, &sample()).unwrap();
+        assert!(!legacy.exists(), "save should drop the stale legacy copy");
     }
 
     #[cfg(unix)]
