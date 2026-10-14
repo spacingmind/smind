@@ -276,6 +276,22 @@ describe("Add via relay link (desktop build)", () => {
     expect(screen.getByTestId("relay-link-error")).toHaveTextContent(/Added "Home", but switching to it failed: watcher down/);
   });
 
+  it("locks the input while a review is in flight so Add saves exactly the previewed link", async () => {
+    let resolvePreview!: (p: ReturnType<typeof preview>) => void;
+    const { api } = await renderRelay({
+      previewRelayLink: vi.fn(() => new Promise((r) => (resolvePreview = r))),
+    });
+    fireEvent.change(screen.getByTestId("relay-link-input"), { target: { value: LINK } });
+    fireEvent.click(screen.getByTestId("relay-link-review"));
+    await flush();
+    expect(screen.getByTestId("relay-link-input")).toBeDisabled();
+
+    await act(async () => resolvePreview(preview()));
+    fireEvent.click(screen.getByTestId("relay-link-add"));
+    await flush();
+    expect(api.addRelayConnection).toHaveBeenCalledWith("", LINK);
+  });
+
   it("drops the pasted link on unmount", async () => {
     const { view, section } = await renderRelay();
     fireEvent.change(screen.getByTestId("relay-link-input"), { target: { value: LINK } });

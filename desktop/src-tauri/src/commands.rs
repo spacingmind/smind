@@ -139,6 +139,15 @@ fn parse_pairing_link(
                 .to_string(),
         );
     }
+    // The relay dial pins a SHA-256: 32 bytes, 64 hex digits. Anything else
+    // would save a connection that can never connect.
+    let fp = &offer.relay_fingerprint;
+    if fp.len() != 64 || !fp.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(
+            "pairing: invalid offer: the relay certificate fingerprint is not a SHA-256 (64 hex digits)"
+                .to_string(),
+        );
+    }
     let native_addr = relay::client::derive_native_grpc_address(&offer.relay)?;
     Ok((offer, native_addr))
 }
@@ -280,6 +289,8 @@ mod tests {
     use smind_daemon_client::proxy::connections::connection_id_for_relay;
     use smind_daemon_client::proxy::ConnectionKind;
 
+    const FP: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+
     fn offer(key: u8, ws: &str, relay_url: &str, fp: &str, secret: &[u8]) -> relay::pairing::Offer {
         relay::pairing::Offer {
             daemon_id: "daemon-1".into(),
@@ -296,7 +307,7 @@ mod tests {
     }
 
     fn good() -> relay::pairing::Offer {
-        offer(0x11, "ws-1", "https://relay.example.test:7401", "deadbeef", &[0xab; 32])
+        offer(0x11, "ws-1", "https://relay.example.test:7401", FP, &[0xab; 32])
     }
 
     fn saved(o: &relay::pairing::Offer) -> Connection {
@@ -342,9 +353,11 @@ mod tests {
         let l = link(&offer(0x11, "ws-1", "https://r.test:7401", "", &[1; 32]));
         let err = build_relay_preview(&l, &[], None).unwrap_err();
         assert!(err.contains("fingerprint"), "{err}");
-        let l = link(&offer(0x11, "ws-1", "https://r.test:7401", "ab", &[]));
+        let l = link(&offer(0x11, "ws-1", "https://r.test:7401", "ab", &[1; 32]));
+        assert!(build_relay_preview(&l, &[], None).unwrap_err().contains("SHA-256"));
+        let l = link(&offer(0x11, "ws-1", "https://r.test:7401", FP, &[]));
         assert!(build_relay_preview(&l, &[], None).unwrap_err().contains("secret"));
-        let l = link(&offer(0x11, "", "https://r.test:7401", "ab", &[1; 32]));
+        let l = link(&offer(0x11, "", "https://r.test:7401", FP, &[1; 32]));
         assert!(build_relay_preview(&l, &[], None).unwrap_err().contains("relay host id"));
         let junk = "https://x/pair#offer=notbase64!!";
         let err = build_relay_preview(junk, &[], None).unwrap_err();
@@ -377,15 +390,15 @@ mod tests {
         let same = build_relay_preview(&link(&o), &list, Some(dir.path())).unwrap();
         assert_eq!(same.kind, RelayPreviewKind::AlreadySaved);
 
-        let new_key = offer(0x22, "ws-1", &o.relay, "deadbeef", &[0xab; 32]);
+        let new_key = offer(0x22, "ws-1", &o.relay, FP, &[0xab; 32]);
         let p = build_relay_preview(&link(&new_key), &list, Some(dir.path())).unwrap();
         assert_eq!(p.kind, RelayPreviewKind::ChangedConnection);
 
-        let new_relay = offer(0x11, "ws-1", "https://other.example.test:7401", "deadbeef", &[0xab; 32]);
+        let new_relay = offer(0x11, "ws-1", "https://other.example.test:7401", FP, &[0xab; 32]);
         let p = build_relay_preview(&link(&new_relay), &list, Some(dir.path())).unwrap();
         assert_eq!(p.kind, RelayPreviewKind::ChangedConnection);
 
-        let other_host = offer(0x11, "ws-2", &o.relay, "deadbeef", &[0xab; 32]);
+        let other_host = offer(0x11, "ws-2", &o.relay, FP, &[0xab; 32]);
         let p = build_relay_preview(&link(&other_host), &list, Some(dir.path())).unwrap();
         assert_eq!(p.kind, RelayPreviewKind::NewHost);
     }

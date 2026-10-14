@@ -145,6 +145,7 @@ function ConnectionsSection() {
         <AddRelayLink
           key={handedOver?.key ?? "paste"}
           initialLink={handedOver?.link}
+          onCancel={() => setShowHandoverNotice(false)}
           onInitialLinkTaken={() => setHandedOver((h) => (h ? { ...h, link: "" } : h))}
           onAdded={() => {
             // The flow resets itself; keep it mounted so a "switching failed" note survives.

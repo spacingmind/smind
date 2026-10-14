@@ -26,12 +26,15 @@ import { desktop, MAX_RELAY_LINK_LENGTH, type Connection, type RelayPreview } fr
 export function AddRelayLink({
   initialLink,
   onInitialLinkTaken,
+  onCancel,
   onAdded,
 }: {
   /** A link already pasted elsewhere (the plain URL form); previewed straight away. */
   initialLink?: string;
   /** Called once the flow has copied `initialLink`, so the owner can stop holding the secret. */
   onInitialLinkTaken?: () => void;
+  /** Called when the user cancels the confirmation. */
+  onCancel?: () => void;
   /** Called after the connection is saved and selected (or saved, if switching failed). */
   onAdded?: (conn: Connection) => void;
 }) {
@@ -41,6 +44,9 @@ export function AddRelayLink({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
+  // The exact string the user was shown a preview of: Add saves this, never
+  // whatever the input holds by then.
+  const previewed = useRef("");
 
   useEffect(() => {
     mounted.current = true;
@@ -59,7 +65,10 @@ export function AddRelayLink({
     setBusy(true);
     try {
       const result = await desktop.previewRelayLink(candidate);
-      if (mounted.current) setPreview(result);
+      if (mounted.current) {
+        previewed.current = candidate;
+        setPreview(result);
+      }
     } catch (err) {
       if (mounted.current) {
         setLink("");
@@ -80,17 +89,21 @@ export function AddRelayLink({
   }, []);
 
   function cancel() {
+    previewed.current = "";
     setLink("");
     setPreview(null);
     setError(null);
+    onCancel?.();
   }
 
   async function confirm() {
     setError(null);
     setBusy(true);
+    const toSave = previewed.current;
+    previewed.current = "";
     let conn: Connection;
     try {
-      conn = await desktop.addRelayConnection(label, link);
+      conn = await desktop.addRelayConnection(label, toSave);
     } catch (err) {
       if (mounted.current) {
         setLink("");
@@ -221,6 +234,7 @@ export function AddRelayLink({
         data-lpignore="true"
         placeholder="Paste relay pairing link"
         value={link}
+        disabled={busy}
         onChange={(e) => setLink(e.target.value)}
       />
       <Input
