@@ -68,20 +68,33 @@ nothing else to install. Quitting the app leaves the daemon running; reopen
 it from the Dock to reconnect.
 
 The app is not signed or notarized, so Gatekeeper blocks a DMG downloaded
-through a browser. After dragging `smind.app` to `/Applications`, clear the
+through a browser. After dragging `sMind.app` to `/Applications`, clear the
 quarantine flag once:
 
 ```sh
-xattr -dr com.apple.quarantine /Applications/smind.app
+xattr -dr com.apple.quarantine /Applications/sMind.app
 ```
+
+(Installs from releases before 0.12 are named `smind.app`; they keep updating
+in place under that name.)
 
 To build and install it yourself (needs Go, bun and Rust; a locally built app
 has no quarantine flag and opens straight away):
 
 ```sh
-task desktop:mac:install   # builds smind.app + .dmg, copies the app to /Applications
+task desktop:mac:install   # builds sMind.app + .dmg, copies the app to /Applications
 task desktop:mac           # build only; output under desktop/src-tauri/target/<triple>/release/bundle/
 ```
+
+### Windows desktop app
+
+Each release attaches an x64 installer (NSIS `*-setup.exe` and `.msi`). The installer bundles the matching native `smind.exe`:
+**Install** or **Update** in the app copies it to
+`%LOCALAPPDATA%\smind\bin\` and runs it from there — nothing is downloaded,
+so the daemon's version always matches the app's. Git for Windows is
+required. An existing daemon running inside WSL is never touched: it can
+still be used as a remote connection, but it must be stopped first if it
+holds the port when you press **Install**.
 
 ### Updating
 
@@ -120,10 +133,11 @@ tar -xzf "smind_${version}_${os}_${arch}.tar.gz"
 ./smind --version
 ```
 
-There is no native Windows daemon binary yet; `internal/terminal` is now
-cross-platform (see docs/plans/active/windows-native-terminal.md), but the
-rest of the daemon's Windows runtime parity is still follow-up work. Windows
-users run the desktop app, which manages the daemon via WSL2.
+There is a native Windows daemon, shipped as
+`smind_<version>_windows_<arch>.zip` (amd64/arm64) with `smind.exe` at the
+archive root. To install it manually, unzip it anywhere and run
+`smind.exe serve`. The desktop app does not need this — its installer
+bundles the daemon (amd64; on ARM64 Windows it runs under x64 emulation).
 
 ## Quickstart
 
@@ -157,7 +171,7 @@ Anything the chosen mode still escalates waits for a human in the web UI or
 
 `smind mcp serve` ([ADR-0017](docs/decisions/0017-mcp-server.md)) runs an
 MCP server over stdio, for orchestrating agents (Claude Code, Cursor, ...)
-to drive smind sub-agents without the CLI shell-and-poll loop:
+to drive sMind sub-agents without the CLI shell-and-poll loop:
 
 ```json
 { "mcpServers": { "smind": { "command": "smind", "args": ["mcp", "serve"] } } }
@@ -181,7 +195,7 @@ instead.
 
 ## Orchestration skills
 
-smind bundles five agent skills (`smind`, `smind-leader`, `smind-handoff`,
+sMind bundles five agent skills (`smind`, `smind-leader`, `smind-handoff`,
 `smind-advisor`, `smind-committee`) that teach an orchestrating agent the
 MCP tool loop and the leader/coder pattern. They are plain `SKILL.md` files
 embedded in the binary and installed only when you ask:
@@ -196,7 +210,7 @@ Install writes only under `~/.claude/skills`, `~/.agents/skills` and
 `~/.codex/skills`, tracks what it wrote in a per-skill
 `.smind-managed-files.json` manifest, never overwrites a file you edited
 (without `--force`) and never touches other skills. No daemon is needed.
-To let an agent drive smind, add the MCP server: `smind mcp add smind stdio
+To let an agent drive sMind, add the MCP server: `smind mcp add smind stdio
 --command smind --arg mcp --arg serve` (or run `smind mcp serve` as a stdio
 server).
 

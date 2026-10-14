@@ -439,7 +439,7 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     action: "app.quit",
     combo: "Ctrl+Q",
     section: "general",
-    label: "Quit smind",
+    label: "Quit sMind",
     when: { desktop: true, mac: false, notInTerminal: true },
   },
   {

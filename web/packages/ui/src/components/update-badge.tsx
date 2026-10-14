@@ -22,7 +22,7 @@ export function UpdateBadge({
 }) {
   const info = isDesktop ? pendingUpdate(state) : null;
   if (!info) return null;
-  const label = `Update available: smind v${info.version}`;
+  const label = `Update available: sMind v${info.version}`;
   return (
     <button
       type="button"

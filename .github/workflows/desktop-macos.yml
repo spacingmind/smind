@@ -4,7 +4,7 @@ name: desktop-macos
 # and x86_64, no universal binary) -- and uploads them as workflow artifacts
 # named smind-desktop-<version>-macos-<arch>.dmg. Apple code signing and
 # notarization are out of scope (ad-hoc signature only). The *updater*
-# artifacts (smind.app.tar.gz + .sig, minisign-signed with the
+# artifacts (sMind.app.tar.gz + .sig, minisign-signed with the
 # TAURI_SIGNING_PRIVATE_KEY secret) are built only when that secret is
 # present, via tauri build --config src-tauri/tauri.updater.conf.json
 # (ADR-0023.4); PR/fork/manual builds have no secret and skip them. No
@@ -160,7 +160,7 @@ jobs:
       - name: Verify bundle
         run: |
           set -euo pipefail
-          app="desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/smind.app"
+          app="desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/sMind.app"
           want="${{ matrix.arch }}"
           for bin in "$app/Contents/MacOS/smind-desktop" "$app/Contents/MacOS/smind"; do
             got="$(lipo -archs "$bin")"
@@ -193,7 +193,7 @@ jobs:
             "dist/smind-desktop-${version}-macos-${{ matrix.arch }}.dmg"
           ls -l dist
 
-      # Updater tarball: tauri names it smind.app.tar.gz on both arches, so
+      # Updater tarball: tauri names it sMind.app.tar.gz on both arches, so
       # rename per arch (ADR-0023.3); latest.json's URLs point at these names.
       - name: Stage updater artifacts
         if: steps.sign.outputs.sign == 'true'
@@ -202,11 +202,11 @@ jobs:
           version="$(jq -r .version desktop/src-tauri/tauri.conf.json)"
           bundle_dir="desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos"
           base="dist/smind-desktop-${version}-macos-${{ matrix.arch }}.app.tar.gz"
-          for f in "$bundle_dir/smind.app.tar.gz" "$bundle_dir/smind.app.tar.gz.sig"; do
+          for f in "$bundle_dir/sMind.app.tar.gz" "$bundle_dir/sMind.app.tar.gz.sig"; do
             [ -f "$f" ] || { echo "::error::expected updater artifact $f is missing"; exit 1; }
           done
-          cp "$bundle_dir/smind.app.tar.gz" "$base"
-          cp "$bundle_dir/smind.app.tar.gz.sig" "$base.sig"
+          cp "$bundle_dir/sMind.app.tar.gz" "$base"
+          cp "$bundle_dir/sMind.app.tar.gz.sig" "$base.sig"
           ls -l dist
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

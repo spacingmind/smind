@@ -108,7 +108,7 @@ function DaemonSection() {
       )}
       {status.wslDaemonSuspected && (
         <p data-testid="daemon-wsl-notice" className="text-ui-base text-muted-foreground">
-          A daemon that this app did not start is answering on this port. If you run smind inside
+          A daemon that this app did not start is answering on this port. If you run sMind inside
           WSL, stop it there, then install the Windows daemon here. Data from a WSL install is not
           migrated.
         </p>

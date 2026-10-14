@@ -5,7 +5,7 @@ package main
 // must name every registered tool -- TestMCPServer_InstructionsNameEveryTool
 // diffs it against tools/list, so a tool added without documenting it
 // here fails the build's test run.
-const mcpInstructions = `You are orchestrating smind tasks: each task is an agent workspace (a git
+const mcpInstructions = `You are orchestrating sMind tasks: each task is an agent workspace (a git
 worktree) in which runs (prompt->answer turns) execute.
 
 The loop:
@@ -58,7 +58,7 @@ in order.
 Permissions are answered by humans ONLY. When task_wait/task_status/
 task_permissions report a pending permission request, surface it to the
 human (they respond via ` + "`smind task approve` / `smind task deny`" + ` or the
-smind web UI). Show them the request's detail
+sMind web UI). Show them the request's detail
 as is: for a write it carries the path, the size change, replacesExisting
 and a diff or preview. A write that replaces an existing file with much
 less content (largeShrink) is likely destructive; recommend rejecting it.

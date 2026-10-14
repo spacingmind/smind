@@ -1,8 +1,9 @@
-//! Windows-native daemon management (ADR-0030): install a downloaded
-//! `smind_<version>_windows_<arch>.zip` release, start `smind.exe serve`
+//! Windows-native daemon management (ADR-0030): start `smind.exe serve`
 //! detached with no console window, find who owns a port, and stop the
 //! daemon via its API with a terminate fallback -- mirroring `native.rs`'s
-//! shape so `src-tauri` can wire both hosts the same way. Parameterized on
+//! shape so `src-tauri` can wire both hosts the same way. The binary itself
+//! is the sidecar the installer ships; `src-tauri` copies it into
+//! `Layout::bin_path` (nothing is downloaded here). Parameterized on
 //! a base directory (normally `%LOCALAPPDATA%\smind`) so tests run against
 //! a temp dir.
 //!
@@ -14,7 +15,7 @@
 
 use std::fs::{self, File};
 use std::io;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -23,11 +24,10 @@ use windows_sys::Win32::NetworkManagement::IpHelper::{
     GetExtendedTcpTable, MIB_TCP6ROW_OWNER_PID, MIB_TCP6TABLE_OWNER_PID, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_OWNER_PID_ALL,
 };
 use windows_sys::Win32::System::Threading::{
-    CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, GetExitCodeProcess, GetCurrentProcess, IsWow64Process2, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, QueryFullProcessImageNameW, TerminateProcess,
+    CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, QueryFullProcessImageNameW, TerminateProcess,
 };
 
 use super::managed::{self, ManagedRecord};
-use super::release::{self, ReleaseError, ReleaseUrls};
 
 /// winnt.h: a process exit code of 259 means "still running".
 const STILL_ACTIVE: u32 = 259;
@@ -49,106 +49,6 @@ impl Layout {
     pub fn new(base_dir: &Path) -> Self {
         Self { bin_path: base_dir.join("bin").join("smind.exe"), log_path: base_dir.join("smind.log"), state_path: base_dir.join("managed.json") }
     }
-}
-
-/// safe_entry_name is the zip-slip guard: every component of every entry
-/// name must be a plain file/dir name. This rejects `..`, absolute paths
-/// (`/x`, `\x`), and drive prefixes (`C:\x`, `C:/x`) in any entry.
-fn safe_entry_name(name: &str) -> bool {
-    !name.is_empty() && Path::new(name).components().all(|c| matches!(c, Component::Normal(_)))
-}
-
-/// install_binary extracts only the root-level `smind.exe` from
-/// `zip_path` (already downloaded and checksum-verified by the caller)
-/// into `layout.bin_path`. The entry is decompressed to a temp file in the
-/// bin dir first, and renamed over any previous binary only after the
-/// whole archive validated -- so a refused zip leaves the previous binary
-/// byte-identical. A rename-over a running exe fails on Windows ("file in
-/// use"); that surfaces as a clear error rather than deleting first.
-pub fn install_binary(zip_path: &Path, layout: &Layout) -> io::Result<()> {
-    let file = File::open(zip_path)?;
-    let mut zip = zip::ZipArchive::new(file)?;
-
-    let mut exe_index: Option<usize> = None;
-    for i in 0..zip.len() {
-        let entry = zip.by_index(i)?;
-        let name = entry.name().to_string();
-        if !safe_entry_name(&name) {
-            return Err(io::Error::other(format!("refusing zip: entry {name:?} escapes the install directory")));
-        }
-        if name.eq_ignore_ascii_case("smind.exe") {
-            exe_index = Some(i);
-        }
-    }
-    let Some(exe_index) = exe_index else {
-        return Err(io::Error::other("refusing zip: no root-level smind.exe"));
-    };
-
-    let bin_dir = layout.bin_path.parent().expect("smind desktop: bin_path always has a parent");
-    fs::create_dir_all(bin_dir)?;
-    let staging = bin_dir.join(".smind.exe.staging");
-    let result = (|| -> io::Result<()> {
-        let mut entry = zip.by_index(exe_index)?;
-        let mut out = File::create(&staging)?;
-        io::copy(&mut entry, &mut out)?;
-        out.sync_all()?;
-        Ok(())
-    })();
-    if let Err(e) = result {
-        let _ = fs::remove_file(&staging);
-        return Err(e);
-    }
-
-    // Windows cannot rename over a running exe: fail loudly, do not delete
-    // the old binary first (an in-place update while the daemon runs must
-    // never leave the layout without a binary).
-    if let Err(e) = fs::rename(&staging, &layout.bin_path) {
-        let _ = fs::remove_file(&staging);
-        return Err(io::Error::other(format!(
-            "failed to replace {} with the new smind.exe (is the daemon currently running? stop it first): {e}",
-            layout.bin_path.display()
-        )));
-    }
-    Ok(())
-}
-
-/// download_and_verify fetches `urls.checksums`, then the zip, and
-/// verifies the zip's SHA-256 against the checksums file -- identical
-/// discipline to `native`; a mismatch never reaches `install_binary`, so
-/// the installed binary stays untouched.
-pub async fn download_and_verify(client: &reqwest::Client, urls: &ReleaseUrls) -> Result<Vec<u8>, ReleaseError> {
-    super::native::download_and_verify(client, urls).await
-}
-
-/// install_from_release downloads, verifies, and installs a release zip
-/// in one call, staging the download next to the binary before extracting.
-pub async fn install_from_release(client: &reqwest::Client, urls: &ReleaseUrls, layout: &Layout) -> Result<(), ReleaseError> {
-    let bytes = download_and_verify(client, urls).await?;
-    let bin_dir = layout.bin_path.parent().expect("smind desktop: bin_path always has a parent");
-    fs::create_dir_all(bin_dir).map_err(|e| ReleaseError::Io(e.to_string()))?;
-    let zip_path = bin_dir.join("download.zip");
-    fs::write(&zip_path, &bytes).map_err(|e| ReleaseError::Io(e.to_string()))?;
-    let result = install_binary(&zip_path, layout).map_err(|e| ReleaseError::Io(e.to_string()));
-    let _ = fs::remove_file(&zip_path);
-    result
-}
-
-/// native_target_for_this_machine resolves the release `(os, arch)` for
-/// this machine from the OS's real native architecture (IsWow64Process2),
-/// never from the app's own `cfg!(target_arch)`: an x64 app running under
-/// emulation on ARM64 windows must install the arm64 daemon.
-pub fn native_target_for_this_machine() -> Result<(&'static str, &'static str), String> {
-    let mut process_machine: u16 = 0;
-    let mut native_machine: u16 = 0;
-    // GetCurrentProcess's pseudo-handle needs no cleanup; both out params
-    // are plain machine u16 constants.
-    unsafe {
-        if IsWow64Process2(GetCurrentProcess(), &mut process_machine, &mut native_machine) == 0 {
-            return Err(format!("IsWow64Process2 failed with error {}", GetLastError()));
-        }
-    }
-    let arch = release::windows_target_from_os_arch(process_machine, native_machine)?;
-    Ok(("windows", arch))
 }
 
 fn installed_at_now() -> String {
@@ -423,116 +323,8 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    fn sha256_hex(data: &[u8]) -> String {
-        let mut hasher = sha2::Sha256::new();
-        use sha2::Digest;
-        hasher.update(data);
-        hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()
-    }
-
-    fn build_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
-        use zip::write::SimpleFileOptions;
-        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-        for (name, data) in entries {
-            writer.start_file(*name, SimpleFileOptions::default()).unwrap();
-            std::io::Write::write_all(&mut writer, data).unwrap();
-        }
-        let cursor = writer.finish().unwrap();
-        cursor.into_inner()
-    }
-
-    async fn serve_zip_fixture(zip_bytes: Vec<u8>, checksums_text: String, asset_name: String) -> (u16, tokio::task::JoinHandle<()>) {
-        use axum::routing::get;
-        use axum::Router;
-
-        let zip2 = zip_bytes.clone();
-        let app = Router::new()
-            .route("/checksums.txt", get(move || { let t = checksums_text.clone(); async move { t } }))
-            .route(&format!("/{asset_name}"), get(move || { let b = zip2.clone(); async move { b } }));
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let handle = tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-        (port, handle)
-    }
-
     fn fake_layout(dir: &Path) -> Layout {
         Layout::new(dir)
-    }
-
-    #[tokio::test]
-    async fn windows_install_extracts_smind_exe_and_verifies_checksum() {
-        let dir = tempfile::tempdir().unwrap();
-        let layout = fake_layout(dir.path());
-        let exe_bytes: &[u8] = b"fake pe image bytes";
-        let zip_bytes = build_zip(&[("smind.exe", exe_bytes), ("checksums.txt", b"irrelevant here")]);
-        let asset_name = "smind_0.7.0_windows_amd64.zip".to_string();
-        let checksums_text = format!("{}  {asset_name}\n", sha256_hex(&zip_bytes));
-
-        let (port, handle) = serve_zip_fixture(zip_bytes, checksums_text, asset_name.clone()).await;
-        let urls = ReleaseUrls { tarball: format!("http://127.0.0.1:{port}/{asset_name}"), checksums: format!("http://127.0.0.1:{port}/checksums.txt"), asset_name };
-        let client = reqwest::Client::new();
-        install_from_release(&client, &urls, &layout).await.unwrap();
-        assert_eq!(fs::read(&layout.bin_path).unwrap(), exe_bytes);
-        handle.abort();
-    }
-
-    #[tokio::test]
-    async fn windows_install_rejects_checksum_mismatch_and_keeps_old_binary() {
-        let dir = tempfile::tempdir().unwrap();
-        let layout = fake_layout(dir.path());
-        let old_bytes: &[u8] = b"previous installed smind.exe";
-        let bin_dir = layout.bin_path.parent().unwrap();
-        fs::create_dir_all(bin_dir).unwrap();
-        fs::write(&layout.bin_path, old_bytes).unwrap();
-
-        let zip_bytes = build_zip(&[("smind.exe", b"new bytes")]);
-        let asset_name = "smind_0.7.0_windows_amd64.zip".to_string();
-        let checksums_text = format!("{}  {asset_name}\n", "0".repeat(64));
-
-        let (port, handle) = serve_zip_fixture(zip_bytes, checksums_text, asset_name.clone()).await;
-        let urls = ReleaseUrls { tarball: format!("http://127.0.0.1:{port}/{asset_name}"), checksums: format!("http://127.0.0.1:{port}/checksums.txt"), asset_name };
-        let client = reqwest::Client::new();
-        let err = install_from_release(&client, &urls, &layout).await.unwrap_err();
-        assert!(matches!(err, ReleaseError::ChecksumMismatch { .. }), "{err}");
-        // The old binary is byte-identical: a bad download never touches it.
-        assert_eq!(fs::read(&layout.bin_path).unwrap(), old_bytes);
-        handle.abort();
-    }
-
-    #[test]
-    fn windows_install_rejects_zip_without_root_smind_exe() {
-        let dir = tempfile::tempdir().unwrap();
-        let layout = fake_layout(dir.path());
-        let zip_bytes = build_zip(&[("nested/smind.exe", b"x")]);
-        let zip_path = dir.path().join("no-root.zip");
-        fs::write(&zip_path, zip_bytes).unwrap();
-        let err = install_binary(&zip_path, &layout).unwrap_err();
-        assert!(err.to_string().contains("no root-level smind.exe"), "{err}");
-        assert!(!layout.bin_path.exists());
-    }
-
-    #[test]
-    fn windows_install_rejects_zip_slip_entry() {
-        let dir = tempfile::tempdir().unwrap();
-        let layout = fake_layout(dir.path());
-        let bin_dir = layout.bin_path.parent().unwrap();
-        fs::create_dir_all(bin_dir).unwrap();
-        let old_bytes: &[u8] = b"old";
-        fs::write(&layout.bin_path, old_bytes).unwrap();
-
-        for escaping in ["../evil.exe", "C:/windows/evil.exe", "C:\\windows\\evil.exe", "/abs/evil.exe", "..\\evil.exe"] {
-            let zip_bytes = build_zip(&[("smind.exe", b"new"), (escaping, b"payload")]);
-            let zip_path = dir.path().join("slip.zip");
-            fs::write(&zip_path, zip_bytes).unwrap();
-            let err = install_binary(&zip_path, &layout).unwrap_err();
-            assert!(err.to_string().contains("escapes"), "{escaping}: {err}");
-        }
-        // Nothing was extracted anywhere and the old binary is untouched.
-        assert_eq!(fs::read(&layout.bin_path).unwrap(), old_bytes);
-        assert!(!dir.path().join("evil.exe").exists());
     }
 
     #[test]

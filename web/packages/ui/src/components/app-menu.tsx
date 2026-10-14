@@ -60,9 +60,9 @@ export const APP_MENU_SECTIONS: { title: string; items: AppMenuItem[] }[] = [
   {
     title: "Help",
     items: [
-      { label: "About smind", testId: "about", native: "about" },
+      { label: "About sMind", testId: "about", native: "about" },
       { label: "Open Log Folder", testId: "log-folder", native: "log-folder" },
-      { label: "smind on GitHub", testId: "github", native: "github" },
+      { label: "sMind on GitHub", testId: "github", native: "github" },
       // desktop-auto-update U3: auto-update ships on Windows (and macOS); there is
       // no Linux updater, so the item mirrors the native Help menu's gate
       // (`update_menu_location` in menu.rs).

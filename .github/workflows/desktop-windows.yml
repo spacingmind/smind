@@ -11,6 +11,13 @@ name: desktop-windows
 # workflow (workflow_call) to attach the installers to an actual GitHub
 # Release. See docs/plans/completed/desktop-tauri-shell.md and
 # docs/plans/completed/release-binaries.md.
+#
+# The installers bundle the matching windows/amd64 `smind.exe` (tauri.windows
+# .conf.json externalBin; ADR-0030 amendment, docs/plans/active/
+# windows-bundled-daemon.md). When called from release-please.yml it reuses
+# that run's `smind_<version>_windows_amd64` artifact (`daemon-version`
+# input); on a push/PR/manual run there is no such artifact, so it builds the
+# daemon itself with `task desktop:win:daemon`, as desktop-macos.yml does.
 on:
   push:
     paths:
@@ -20,6 +27,13 @@ on:
   workflow_dispatch:
   workflow_call:
     inputs:
+      daemon-version:
+        description: >-
+          Version of the already-built smind_<version>_windows_amd64 artifact
+          in this run to bundle. Empty builds the daemon here instead.
+        type: string
+        required: false
+        default: ""
       require-updater-signing:
         description: >-
           Fail the build when TAURI_SIGNING_PRIVATE_KEY is absent instead of
@@ -56,11 +70,64 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: desktop/src-tauri
+          workspaces: |
+            desktop/src-tauri
+            desktop/daemon-client
+
+      # Release path: reuse the daemon this run's build-binaries job already
+      # built (same ldflags/version as the GitHub Release asset).
+      - name: Download bundled daemon
+        if: inputs.daemon-version != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: smind_${{ inputs.daemon-version }}_windows_amd64
+          path: daemon
+
+      - name: Stage bundled daemon from the release build
+        if: inputs.daemon-version != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Get-ChildItem daemon -Filter *.zip | Select-Object -First 1
+          if (-not $zip) { throw 'no windows_amd64 zip in the downloaded daemon artifact' }
+          Expand-Archive $zip.FullName -DestinationPath daemon/extracted
+          if (-not (Test-Path daemon/extracted/smind.exe)) { throw 'smind.exe not at archive root' }
+          New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
+          Copy-Item daemon/extracted/smind.exe desktop/src-tauri/binaries/smind-x86_64-pc-windows-msvc.exe
+
+      # PR / push / manual path: no release artifact exists, so build it here.
+      - name: Mark repo safe for git
+        if: inputs.daemon-version == ''
+        run: git config --global --add safe.directory "$env:GITHUB_WORKSPACE"
+
+      # Needed on both paths: besides building the daemon, the daemon-client
+      # tests `go run` a relay harness (tests/relay_harness_interop.rs).
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build bundled daemon
+        if: inputs.daemon-version == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install -g @go-task/cli
+          task desktop:win:daemon
 
       - name: Install Tauri CLI
         working-directory: desktop
         run: npm ci
+
+      # The Windows host code (daemon_manager.rs, windows_native.rs) only
+      # compiles and runs here; the sidecar is staged above, so the install
+      # tests see the same layout the installer ships.
+      - name: cargo test (desktop shell)
+        working-directory: desktop/src-tauri
+        run: cargo test
+
+      - name: cargo test (daemon client)
+        working-directory: desktop/daemon-client
+        run: cargo test
 
       # The secret is exposed only here and only in the build step's env --
       # never to other steps or third-party actions. The script prints
@@ -86,6 +153,59 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --config src-tauri/tauri.updater.conf.json
+
+      # AC5 (windows-bundled-daemon): the installers must really carry the
+      # daemon. Extract the NSIS installer (7-Zip reads NSIS) and the MSI
+      # (administrative install) and require a non-placeholder smind.exe
+      # that is byte-identical to the staged sidecar and reports the app's
+      # version. Runs on the build runner (x64), so the daemon can be run.
+      - name: Verify installers bundle smind.exe
+        shell: pwsh
+        env:
+          DAEMON_VERSION: ${{ inputs.daemon-version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $appVersion = (Get-Content desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $staged = 'desktop/src-tauri/binaries/smind-x86_64-pc-windows-msvc.exe'
+          $stagedHash = (Get-FileHash $staged -Algorithm SHA256).Hash
+          $bundle = 'desktop/src-tauri/target/release/bundle'
+
+          function Assert-Bundled($name, $root) {
+            $found = @(Get-ChildItem $root -Recurse -Filter smind.exe -File)
+            if ($found.Count -eq 0) {
+              Get-ChildItem $root -Recurse -File | Select-Object -ExpandProperty FullName | Write-Host
+              throw "$name does not contain smind.exe"
+            }
+            foreach ($f in $found) {
+              Write-Host "${name}: $($f.FullName) ($($f.Length) bytes)"
+              if ($f.Length -lt 1MB) { throw "$name smind.exe is $($f.Length) bytes -- a placeholder, not a daemon" }
+              $h = (Get-FileHash $f.FullName -Algorithm SHA256).Hash
+              if ($h -ne $stagedHash) { throw "$name smind.exe sha256 $h != staged sidecar $stagedHash" }
+            }
+          }
+
+          $nsis = Get-ChildItem "$bundle/nsis" -Filter *-setup.exe | Select-Object -First 1
+          if (-not $nsis) { throw 'no NSIS *-setup.exe built' }
+          7z x $nsis.FullName "-overify/nsis" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7z could not extract $($nsis.Name)" }
+          Assert-Bundled 'NSIS installer' 'verify/nsis'
+
+          $msi = Get-ChildItem "$bundle/msi" -Filter *.msi | Select-Object -First 1
+          if (-not $msi) { throw 'no MSI built' }
+          New-Item -ItemType Directory -Force verify/msi | Out-Null
+          $target = (Resolve-Path verify/msi).Path
+          $p = Start-Process msiexec -ArgumentList @('/a', "`"$($msi.FullName)`"", '/qn', "TARGETDIR=`"$target`"") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "msiexec /a exited $($p.ExitCode)" }
+          Assert-Bundled 'MSI' 'verify/msi'
+
+          # The bundled daemon reports the app's version. A manual dry run of
+          # the release workflow stamps `<x>-dev+<sha>`; every other build
+          # must match the app version exactly.
+          $out = & $staged version
+          Write-Host "bundled daemon: $out"
+          if ($env:DAEMON_VERSION -notlike '*-dev*' -and -not ($out -match [regex]::Escape($appVersion))) {
+            throw "bundled daemon '$out' does not report app version $appVersion"
+          }
 
       # Stage into a flat dir: uploading the nsis/*.exe and msi/*.msi globs
       # directly preserves those two subdirectories in the artifact, which

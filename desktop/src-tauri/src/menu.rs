@@ -131,11 +131,11 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     // menu item ids must be unique.
     let mut app_menu: Option<Submenu<Wry>> = None;
     if cfg!(target_os = "macos") {
-        let app_submenu = SubmenuBuilder::new(app, "smind")
+        let app_submenu = SubmenuBuilder::new(app, "sMind")
             .item(&MenuItem::with_id(
                 app,
                 ID_APP_ABOUT,
-                "About smind",
+                "About sMind",
                 true,
                 None::<&str>,
             )?)
@@ -156,13 +156,13 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
                 accel(ID_APP_SETTINGS),
             )?)
             .separator()
-            .item(&PredefinedMenuItem::hide(app, Some("Hide smind"))?)
+            .item(&PredefinedMenuItem::hide(app, Some("Hide sMind"))?)
             .item(&PredefinedMenuItem::hide_others(app, Some("Hide Others"))?)
             .separator()
             .item(&MenuItem::with_id(
                 app,
                 ID_APP_QUIT,
-                "Quit smind",
+                "Quit sMind",
                 true,
                 accel(ID_APP_QUIT),
             )?)
@@ -315,7 +315,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&MenuItem::with_id(
             app,
             ID_ABOUT,
-            "About smind",
+            "About sMind",
             true,
             None::<&str>,
         )?);
@@ -339,7 +339,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&MenuItem::with_id(
             app,
             ID_GITHUB,
-            "smind on GitHub",
+            "sMind on GitHub",
             true,
             None::<&str>,
         )?)
@@ -488,8 +488,8 @@ fn show_about(app: &AppHandle) {
     use tauri_plugin_dialog::DialogExt;
     let version = app.package_info().version.to_string();
     app.dialog()
-        .message(format!("smind desktop\nVersion {version}"))
-        .title("About smind")
+        .message(format!("sMind desktop\nVersion {version}"))
+        .title("About sMind")
         .blocking_show();
 }
 

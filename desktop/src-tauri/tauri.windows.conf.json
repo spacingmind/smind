@@ -2,10 +2,14 @@
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
     "targets": ["nsis", "msi"],
+    "externalBin": ["binaries/smind"],
     "windows": {
       "webviewInstallMode": { "type": "downloadBootstrapper" },
       "nsis": {
         "installerHooks": "./windows/hooks.nsh"
+      },
+      "wix": {
+        "upgradeCode": "22b7a470-ef38-5084-842b-a2b04d57475b"
       }
     }
   }

@@ -161,7 +161,7 @@ pub fn run() {
 
             // AC3: navigation is restricted to the proxy's own origin --
             // any other URL (an http(s) link inside the bundled UI, e.g.
-            // "smind on GitHub") opens in the OS browser instead of
+            // "sMind on GitHub") opens in the OS browser instead of
             // navigating the window away from the app.
             let nav_origin = proxy_url.origin();
             // D1/D2.1: per-platform chrome, created hidden and shown
@@ -172,7 +172,7 @@ pub fn run() {
                 MAIN_WINDOW,
                 tauri::WebviewUrl::External(initial_url),
             )
-            .title("smind")
+            .title("sMind")
             .inner_size(1280.0, 800.0)
             .on_navigation(move |url| {
                 if url.origin() == nav_origin {

@@ -107,7 +107,7 @@ export function useAppUpdate() {
       .appUpdateCheck()
       .then((check) => {
         if (check.kind === "upToDate" && manual) {
-          toast({ variant: "success", title: `smind is up to date (v${check.currentVersion})` });
+          toast({ variant: "success", title: `sMind is up to date (v${check.currentVersion})` });
         }
         dispatch({ type: "checkResult", check, manual, dismissed: dismissedRef.current });
       })

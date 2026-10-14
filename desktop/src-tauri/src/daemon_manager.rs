@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use smind_daemon_client::daemon_manager::managed::{self, ManagedRecord, ManagedState};
 use std::path::{Path, PathBuf};
-use smind_daemon_client::daemon_manager::{native, release, version};
+use smind_daemon_client::daemon_manager::{native, version};
 #[cfg(target_os = "windows")]
 use smind_daemon_client::daemon_manager::windows_native;
 
@@ -212,8 +212,9 @@ fn macos_layout(app: &AppHandle) -> Result<native::Layout, String> {
 
 /// Where install/update gets the daemon binary from. macOS takes it from
 /// inside the app bundle (desktop-macos-app M2: the release the app itself
-/// shipped with, so app and daemon versions always match); Windows has
-/// nothing bundled and downloads the matching GitHub Release.
+/// shipped with, so app and daemon versions always match); Windows does the
+/// same with the sidecar `smind.exe` the installer places next to the app
+/// (ADR-0030 amendment). Only an unsupported host has no source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InstallSource {
     Bundled,
@@ -222,16 +223,26 @@ enum InstallSource {
 
 fn install_source(platform: Platform) -> InstallSource {
     match platform {
-        Platform::Macos => InstallSource::Bundled,
-        Platform::Windows | Platform::Unsupported => InstallSource::Release,
+        Platform::Macos | Platform::Windows => InstallSource::Bundled,
+        Platform::Unsupported => InstallSource::Release,
     }
 }
 
 /// bundled_daemon_path is where Tauri's `externalBin` puts the sidecar
-/// (`tauri.macos.conf.json`): next to the app's own executable, i.e.
-/// `smind.app/Contents/MacOS/smind`.
+/// (`tauri.{macos,windows}.conf.json`): next to the app's own executable,
+/// i.e. `smind.app/Contents/MacOS/smind` or `<install dir>\smind.exe`.
 fn bundled_daemon_path(exe_dir: &Path) -> PathBuf {
-    exe_dir.join("smind")
+    exe_dir.join(if cfg!(windows) { "smind.exe" } else { "smind" })
+}
+
+/// stage_task_hint names the task that stages a daemon into the app for
+/// the host this build targets, for the "empty placeholder" error.
+fn stage_task_hint() -> &'static str {
+    if cfg!(windows) {
+        "task desktop:win:daemon"
+    } else {
+        "task desktop:mac"
+    }
 }
 
 fn bundled_daemon_path_for_app() -> Result<PathBuf, String> {
@@ -249,20 +260,25 @@ fn bundled_daemon_path_for_app() -> Result<PathBuf, String> {
 /// binary of a still-running daemon (an update) never rewrites the file it
 /// is executing from. A missing or empty source -- the latter is the
 /// placeholder `build.rs` writes for dev builds -- is a clear error, never
-/// a download fallback.
-fn install_bundled_binary(bundled: &Path, layout: &native::Layout) -> Result<(), String> {
+/// a download fallback. `bin_path` is the layout's destination
+/// (`bin/smind` or `bin\smind.exe`); the staging file is that name plus
+/// `.new` (`smind.exe.new`), so it can never be mistaken for the binary.
+fn install_bundled_binary(bundled: &Path, bin_path: &Path) -> Result<(), String> {
     let meta = std::fs::metadata(bundled)
         .map_err(|e| format!("the bundled daemon is missing from the app ({}: {e}) -- reinstall smind", bundled.display()))?;
     if !meta.is_file() || meta.len() == 0 {
         return Err(format!(
-            "the bundled daemon at {} is empty -- this build has no daemon staged (build the app with `task desktop:mac`)",
-            bundled.display()
+            "the bundled daemon at {} is empty -- this build has no daemon staged (build the app with `{}`)",
+            bundled.display(),
+            stage_task_hint()
         ));
     }
-    let bin_dir = layout.bin_path.parent().expect("smind desktop: bin_path always has a parent");
+    let bin_dir = bin_path.parent().expect("smind desktop: bin_path always has a parent");
     std::fs::create_dir_all(bin_dir).map_err(|e| format!("create {}: {e}", bin_dir.display()))?;
 
-    let staging = layout.bin_path.with_extension("new");
+    let mut staging_name = bin_path.file_name().expect("smind desktop: bin_path always has a file name").to_os_string();
+    staging_name.push(".new");
+    let staging = bin_dir.join(staging_name);
     let _ = std::fs::remove_file(&staging);
     std::fs::copy(bundled, &staging).map_err(|e| format!("copy the bundled daemon to {}: {e}", staging.display()))?;
     #[cfg(unix)]
@@ -274,8 +290,29 @@ fn install_bundled_binary(bundled: &Path, layout: &native::Layout) -> Result<(),
     // best-effort clear so Gatekeeper never judges the spawned daemon.
     #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("xattr").args(["-d", "com.apple.quarantine"]).arg(&staging).output();
-    std::fs::rename(&staging, &layout.bin_path).map_err(|e| format!("install the daemon at {}: {e}", layout.bin_path.display()))
+    // Windows refuses to rename over a running exe, and Defender or the
+    // search indexer can briefly hold a freshly written one: retry a few
+    // times, then keep the old binary and say why instead of leaving a bare
+    // OS error.
+    let mut attempt = 0;
+    loop {
+        match std::fs::rename(&staging, bin_path) {
+            Ok(()) => return Ok(()),
+            Err(_) if cfg!(windows) && attempt < RENAME_RETRIES => {
+                attempt += 1;
+                std::thread::sleep(RENAME_RETRY_DELAY);
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&staging);
+                let hint = if cfg!(windows) { " (is the daemon still running? stop it first)" } else { "" };
+                return Err(format!("install the daemon at {}{hint}: {e}", bin_path.display()));
+            }
+        }
+    }
 }
+
+const RENAME_RETRIES: u32 = 5;
+const RENAME_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// LaunchAction is what the app does about the local daemon at startup
 /// (desktop-macos-app M2.3/M2.4).
@@ -665,7 +702,7 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
             // download here.
             debug_assert_eq!(install_source(platform), InstallSource::Bundled);
             emit_progress(app, "installing", "Installing the bundled daemon…");
-            install_bundled_binary(&bundled_daemon_path_for_app()?, &layout)?;
+            install_bundled_binary(&bundled_daemon_path_for_app()?, &layout.bin_path)?;
 
             emit_progress(app, "starting", "Starting the daemon…");
             // Bug 2: only signal the previously-managed pid if it's still
@@ -721,7 +758,6 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
                     return Err(format!("{e}. {}", windows_install_conflict_hint(port)));
                 }
 
-                debug_assert_eq!(install_source(platform), InstallSource::Release);
                 // A running exe cannot be replaced on Windows: a managed
                 // daemon that is still running is stopped first, and a
                 // failed stop aborts before the binary is touched
@@ -739,10 +775,11 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
                 };
                 windows_update_plan(stop_result)?;
 
-                emit_progress(app, "downloading", "Downloading the daemon release…");
-                let (os, arch) = windows_native::native_target_for_this_machine()?;
-                let urls = release::release_urls(&app_version, os, arch);
-                windows_native::install_from_release(&reqwest::Client::new(), &urls, &layout).await.map_err(|e| e.to_string())?;
+                // The daemon ships inside the installer, like macOS: copy
+                // the sidecar next to the app exe into the managed layout.
+                debug_assert_eq!(install_source(platform), InstallSource::Bundled);
+                emit_progress(app, "installing", "Installing the bundled daemon…");
+                install_bundled_binary(&bundled_daemon_path_for_app()?, &layout.bin_path)?;
 
                 emit_progress(app, "starting", "Starting the daemon…");
                 let child = windows_native::spawn_detached(&layout, &app_version).map_err(|e| e.to_string())?;
@@ -1023,6 +1060,11 @@ pub async fn connection_version(app: AppHandle, state: tauri::State<'_, DesktopS
     Ok(ConnectionVersionInfo { reachable, daemon_version, app_version, comparison })
 }
 
+// build.rs shares this file; `cargo test` doesn't run tests in build scripts.
+#[cfg(test)]
+#[path = "../build_sidecar.rs"]
+mod build_sidecar;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1061,7 +1103,7 @@ mod tests {
 
         // The install takes the bundle path and a layout only -- it has no
         // HTTP client or release URLs to download from.
-        install_bundled_binary(&bundled, &layout).unwrap();
+        install_bundled_binary(&bundled, &layout.bin_path).unwrap();
 
         assert_eq!(fs::read(&layout.bin_path).unwrap(), b"#!/bin/sh\necho daemon\n");
         #[cfg(unix)]
@@ -1073,7 +1115,7 @@ mod tests {
         assert_eq!(install_source(Platform::Macos), InstallSource::Bundled);
         // Replacing an existing install (an update) works and leaves no staging file behind.
         fs::write(&bundled, b"v2").unwrap();
-        install_bundled_binary(&bundled, &layout).unwrap();
+        install_bundled_binary(&bundled, &layout.bin_path).unwrap();
         assert_eq!(fs::read(&layout.bin_path).unwrap(), b"v2");
         let leftovers: Vec<_> = fs::read_dir(layout.bin_path.parent().unwrap()).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert_eq!(leftovers, vec![std::ffi::OsString::from("smind")]);
@@ -1085,7 +1127,7 @@ mod tests {
         let layout = layout_in(tmp.path());
         let missing = bundled_daemon_path(&tmp.path().join("nowhere"));
 
-        let err = install_bundled_binary(&missing, &layout).unwrap_err();
+        let err = install_bundled_binary(&missing, &layout.bin_path).unwrap_err();
         assert!(err.contains("bundled daemon"), "unclear error: {err}");
         assert!(err.contains(&missing.display().to_string()), "error should name the path: {err}");
         assert!(!err.to_lowercase().contains("download"), "no download fallback: {err}");
@@ -1093,7 +1135,7 @@ mod tests {
 
         // An empty file is the dev-build placeholder (build.rs): same clear error, nothing installed.
         let empty = fake_bundle(tmp.path(), b"");
-        let err = install_bundled_binary(&empty, &layout).unwrap_err();
+        let err = install_bundled_binary(&empty, &layout.bin_path).unwrap_err();
         assert!(err.contains("empty"), "unclear error: {err}");
         assert!(!layout.bin_path.exists());
     }
@@ -1309,11 +1351,58 @@ mod tests {
     }
 
     #[test]
-    fn windows_install_downloads_the_windows_release() {
-        assert_eq!(install_source(Platform::Windows), InstallSource::Release);
-        let urls = release::release_urls("0.9.1", "windows", "amd64");
-        assert_eq!(urls.tarball, "https://github.com/spacingmind/smind/releases/download/v0.9.1/smind_0.9.1_windows_amd64.zip");
-        assert_eq!(urls.checksums, "https://github.com/spacingmind/smind/releases/download/v0.9.1/checksums.txt");
+    fn windows_install_uses_bundled_source() {
+        assert_eq!(install_source(Platform::Windows), InstallSource::Bundled);
+        assert_eq!(install_source(Platform::Macos), InstallSource::Bundled);
+    }
+
+    #[test]
+    fn bundled_daemon_path_is_platform_named() {
+        let dir = Path::new("app-dir");
+        let expected = if cfg!(windows) { "smind.exe" } else { "smind" };
+        assert_eq!(bundled_daemon_path(dir), dir.join(expected));
+    }
+
+    /// The Windows layout (`bin\smind.exe`, same shape as
+    /// `windows_native::Layout::new`) driven through the shared copy: the
+    /// staging file is `smind.exe.new` and nothing is left behind.
+    #[test]
+    fn windows_install_sources_bundled_binary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundled = tmp.path().join("app").join("smind.exe");
+        fs::create_dir_all(bundled.parent().unwrap()).unwrap();
+        fs::write(&bundled, b"MZ new").unwrap();
+        let bin_path = tmp.path().join("smind").join("bin").join("smind.exe");
+
+        install_bundled_binary(&bundled, &bin_path).unwrap();
+        assert_eq!(fs::read(&bin_path).unwrap(), b"MZ new");
+
+        // An update replaces the existing exe, leaving no staging file.
+        fs::write(&bundled, b"MZ newer").unwrap();
+        install_bundled_binary(&bundled, &bin_path).unwrap();
+        assert_eq!(fs::read(&bin_path).unwrap(), b"MZ newer");
+        let leftovers: Vec<_> = fs::read_dir(bin_path.parent().unwrap()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(leftovers, vec![std::ffi::OsString::from("smind.exe")]);
+    }
+
+    #[test]
+    fn windows_install_missing_bundled_binary_is_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bin_path = tmp.path().join("smind").join("bin").join("smind.exe");
+        let missing = tmp.path().join("nowhere").join("smind.exe");
+
+        let err = install_bundled_binary(&missing, &bin_path).unwrap_err();
+        assert!(err.contains("bundled daemon"), "unclear error: {err}");
+        assert!(err.contains(&missing.display().to_string()), "error should name the path: {err}");
+        assert!(!err.to_lowercase().contains("download"), "no download fallback: {err}");
+        assert!(!bin_path.exists());
+
+        let empty = tmp.path().join("empty-smind.exe");
+        fs::write(&empty, b"").unwrap();
+        let err = install_bundled_binary(&empty, &bin_path).unwrap_err();
+        assert!(err.contains("empty"), "unclear error: {err}");
+        assert!(!bin_path.exists());
+        assert!(err.contains(stage_task_hint()));
     }
 
     #[test]

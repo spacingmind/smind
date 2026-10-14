@@ -6,13 +6,6 @@ use std::fmt;
 
 const REPO: &str = "spacingmind/smind";
 
-/// `IMAGE_FILE_MACHINE_*` values from winnt.h, named locally so the pure
-/// mapping below stays testable without importing windows-sys here.
-pub const IMAGE_FILE_MACHINE_UNKNOWN: u16 = 0x0000;
-pub const IMAGE_FILE_MACHINE_I386: u16 = 0x014c;
-pub const IMAGE_FILE_MACHINE_AMD64: u16 = 0x8664;
-pub const IMAGE_FILE_MACHINE_ARM64: u16 = 0xaa64;
-
 /// asset_name matches exactly what `.github/workflows/release-please.yml`'s
 /// `build-binaries` job produces: `smind_<version>_<os>_<arch>.tar.gz`
 /// everywhere except windows, whose release assets are `.zip`. `os`/`arch`
@@ -21,25 +14,6 @@ pub const IMAGE_FILE_MACHINE_ARM64: u16 = 0xaa64;
 pub fn asset_name(version: &str, os: &str, arch: &str) -> String {
     let ext = if os == "windows" { "zip" } else { "tar.gz" };
     format!("smind_{version}_{os}_{arch}.{ext}")
-}
-
-/// windows_target_from_os_arch maps the two machines IsWow64Process2
-/// reports (the process's own, and the OS's native) to the release's arch
-/// vocabulary. The *native* machine decides: an x64 app running under
-/// emulation on ARM64 must download the arm64 daemon, which is why
-/// `cfg!(target_arch)` can never be used for this. The process machine is
-/// only a fallback where native detection returns UNKNOWN.
-pub fn windows_target_from_os_arch(process_machine: u16, native_machine: u16) -> Result<&'static str, String> {
-    match native_machine {
-        IMAGE_FILE_MACHINE_ARM64 => Ok("arm64"),
-        IMAGE_FILE_MACHINE_AMD64 => Ok("amd64"),
-        IMAGE_FILE_MACHINE_UNKNOWN => match process_machine {
-            IMAGE_FILE_MACHINE_ARM64 => Ok("arm64"),
-            IMAGE_FILE_MACHINE_AMD64 => Ok("amd64"),
-            other => Err(format!("unsupported windows machine {other:#06x}")),
-        },
-        other => Err(format!("unsupported native windows machine {other:#06x}")),
-    }
 }
 
 /// native_target maps the current process's `std::env::consts::{OS,ARCH}`
@@ -130,22 +104,6 @@ mod tests {
         assert_eq!(asset_name("0.7.0", "windows", "arm64"), "smind_0.7.0_windows_arm64.zip");
         // non-windows assets are unchanged
         assert!(asset_name("0.7.0", "darwin", "arm64").ends_with(".tar.gz"));
-    }
-
-    #[test]
-    fn windows_target_from_os_arch() {
-        use super::*;
-        // Native x64 process on x64 windows.
-        assert_eq!(windows_target_from_os_arch(IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_AMD64).unwrap(), "amd64");
-        // Native arm64 process on arm64 windows.
-        assert_eq!(windows_target_from_os_arch(IMAGE_FILE_MACHINE_UNKNOWN, IMAGE_FILE_MACHINE_ARM64).unwrap(), "arm64");
-        // x64 app running under emulation on ARM64: the OS machine wins,
-        // never the app's own target_arch.
-        assert_eq!(windows_target_from_os_arch(IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM64).unwrap(), "arm64");
-        // Native machine undetectable: fall back to the process machine.
-        assert_eq!(windows_target_from_os_arch(IMAGE_FILE_MACHINE_ARM64, IMAGE_FILE_MACHINE_UNKNOWN).unwrap(), "arm64");
-        assert!(windows_target_from_os_arch(IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_UNKNOWN).is_err());
-        assert!(windows_target_from_os_arch(IMAGE_FILE_MACHINE_AMD64, 0x01c4).is_err());
     }
 
     #[test]

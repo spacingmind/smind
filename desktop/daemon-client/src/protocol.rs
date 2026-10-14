@@ -151,7 +151,7 @@ pub fn notification_for(event: &EventNotification) -> Option<Notification> {
         "permission.pending" => {
             let p = permission_pending(&event.payload)?;
             Some(Notification {
-                title: "smind: permission needed".to_string(),
+                title: "sMind: permission needed".to_string(),
                 body: p.summary,
                 task_id: p.task_id,
                 request_id: p.request_id,
@@ -191,7 +191,7 @@ mod tests {
     fn notification_from_pending() {
         let msg = parse_server_message(SAMPLE).unwrap();
         let n = notification_for(msg.event.as_ref().unwrap()).unwrap();
-        assert_eq!(n.title, "smind: permission needed");
+        assert_eq!(n.title, "sMind: permission needed");
         assert_eq!(n.body, "Run `cargo test` in task 42?");
         assert_eq!(n.task_id, 42);
         assert_eq!(n.request_id, "req_9");

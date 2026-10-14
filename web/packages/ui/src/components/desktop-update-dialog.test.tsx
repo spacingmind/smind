@@ -120,7 +120,7 @@ describe("DesktopUpdateDialog", () => {
     mockPlatform({ check: () => Promise.resolve(AVAILABLE) });
     await mountDialog();
     expect(screen.getByText("Update available")).toBeInTheDocument();
-    expect(screen.getByText(/smind v0\.11\.0 is available \(you have v0\.10\.0\)/)).toBeInTheDocument();
+    expect(screen.getByText(/sMind v0\.11\.0 is available \(you have v0\.10\.0\)/)).toBeInTheDocument();
     const notes = screen.getByTestId("desktop-update-dialog-notes");
     expect(notes).toHaveTextContent("Fixed a bug");
     expect(notes.querySelectorAll("li")).toHaveLength(2);
@@ -201,7 +201,7 @@ describe("DesktopUpdateDialog", () => {
     await mountDialog();
     mocks.manualCheck();
     await flush();
-    expect(await screen.findByText("smind is up to date (v0.10.0)")).toBeInTheDocument();
+    expect(await screen.findByText("sMind is up to date (v0.10.0)")).toBeInTheDocument();
     expect(screen.queryByTestId("desktop-update-dialog")).not.toBeInTheDocument();
   });
 

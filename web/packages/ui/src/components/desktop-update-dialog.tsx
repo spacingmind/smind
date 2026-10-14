@@ -53,7 +53,7 @@ export function DesktopUpdateDialogView({ update }: { update: AppUpdateControlle
         <DialogHeader>
           <DialogTitle>Update available</DialogTitle>
           <DialogDescription>
-            smind v{info.version} is available (you have v{info.currentVersion})
+            sMind v{info.version} is available (you have v{info.currentVersion})
           </DialogDescription>
         </DialogHeader>
         <div className="max-h-60 overflow-y-auto rounded-xl bg-muted p-3 text-ui-base text-foreground">
