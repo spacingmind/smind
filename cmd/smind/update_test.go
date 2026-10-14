@@ -91,6 +91,9 @@ func (d *fakeUpdateDaemon) rpcCalls() []string {
 type updateCLIEnv struct {
 	home, exe string
 	srv       *selfupdatetest.Server
+	signer    *selfupdatetest.Signer
+	// baseHook is updaterHook minus the verifier swap: cmdUpdate's own wiring.
+	baseHook func(*selfupdate.Updater)
 }
 
 func newUpdateCLIEnv(t *testing.T, current, latest string) *updateCLIEnv {
@@ -100,20 +103,28 @@ func newUpdateCLIEnv(t *testing.T, current, latest string) *updateCLIEnv {
 	srv := selfupdatetest.New(t)
 	srv.Latest = latest
 	srv.Add(t, latest, runtime.GOOS, "amd64")
+	signer := selfupdatetest.NewSigner(t)
+	srv.Signer = signer
 	t.Setenv(selfupdate.BaseURLEnv, srv.URL)
 
 	exe := filepath.Join(t.TempDir(), selfupdate.BinaryName(runtime.GOOS))
 	if err := os.WriteFile(exe, selfupdatetest.Binary(current), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	updaterHook = func(u *selfupdate.Updater) {
+	base := func(u *selfupdate.Updater) {
 		u.Current, u.Exe = current, exe
 		u.GOARCH = "amd64"
 		u.RunVersion = selfupdatetest.RunVersion
 		u.InContainer = func() bool { return false } // CI itself may be a container
 	}
+	updaterHook = func(u *selfupdate.Updater) {
+		base(u)
+		// The production wiring checks the embedded release key; the fake
+		// release is signed with a test key, so swap the key (not the check).
+		u.VerifyChecksums = selfupdate.SignatureVerifier(signer.PublicKey())
+	}
 	t.Cleanup(func() { updaterHook = nil })
-	return &updateCLIEnv{home: home, exe: exe, srv: srv}
+	return &updateCLIEnv{home: home, exe: exe, srv: srv, signer: signer, baseHook: base}
 }
 
 func (e *updateCLIEnv) installed(t *testing.T) string {
@@ -365,11 +376,11 @@ func TestUpdateRunsTheRealVersionProbe(t *testing.T) {
 }
 
 // buildSmindVersion compiles this package's binary with a stamped version.
-func buildSmindVersion(t *testing.T, ver string) []byte {
+func buildSmindVersion(t *testing.T, ver string, extraLdflags ...string) []byte {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), exeName("smind-"+ver))
-	out, err := exec.Command("go", "build", "-o", bin,
-		"-ldflags", "-X github.com/spacingmind/smind/internal/version.Version="+ver, ".").CombinedOutput()
+	ldflags := strings.Join(append([]string{"-X github.com/spacingmind/smind/internal/version.Version=" + ver}, extraLdflags...), " ")
+	out, err := exec.Command("go", "build", "-o", bin, "-ldflags", ldflags, ".").CombinedOutput()
 	if err != nil {
 		t.Fatalf("go build (%s): %v\n%s", ver, err, out)
 	}
@@ -382,9 +393,11 @@ func buildSmindVersion(t *testing.T, ver string) []byte {
 
 // TestUpdateEndToEndReplacesTheRunningBinary builds two real smind binaries,
 // publishes the newer one on the fake release server, and runs the OLDER
-// binary's own `update`: it replaces itself while running (rename-aside on
-// Windows, rename-over elsewhere), the real `version` probe passes, and the
-// installed file then reports the new version.
+// binary's own `update`: with a valid signature it replaces itself while
+// running (rename-aside on Windows, rename-over elsewhere), the real `version`
+// probe passes, and the installed file then reports the new version. With an
+// unsigned release, or one signed by another key, the real binary refuses and
+// stays byte-identical, which also proves the production wiring in cmdUpdate.
 func TestUpdateEndToEndReplacesTheRunningBinary(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds two binaries")
@@ -392,29 +405,111 @@ func TestUpdateEndToEndReplacesTheRunningBinary(t *testing.T) {
 	if selfupdate.InContainer(runtime.GOOS, os.Getenv, func(p string) bool { _, err := os.Stat(p); return err == nil }) {
 		t.Skip("smind update refuses to run inside a container")
 	}
-	oldBin := buildSmindVersion(t, "0.1.0")
+	// The only way to point a binary at another release key is to build it so
+	// (there is deliberately no run-time override), so stamp a throwaway key.
+	signer := selfupdatetest.NewSigner(t)
+	oldBin := buildSmindVersion(t, "0.1.0", "-X github.com/spacingmind/smind/internal/selfupdate.UpdaterPublicKey="+signer.PublicKey())
 	newBin := buildSmindVersion(t, "0.2.0")
 
-	srv := selfupdatetest.New(t)
-	srv.Latest = "0.2.0"
-	srv.AddArchive(t, "0.2.0", runtime.GOOS, runtime.GOARCH,
-		selfupdatetest.Archive(t, runtime.GOOS, selfupdate.BinaryName(runtime.GOOS), newBin))
+	for _, tc := range []struct {
+		name    string
+		signer  *selfupdatetest.Signer
+		updated bool
+		stderr  string
+	}{
+		{"signed by the release key", signer, true, ""},
+		{"unsigned release", nil, false, "release has no signature"},
+		{"signed by another key", selfupdatetest.NewSigner(t), false, "signed by key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := selfupdatetest.New(t)
+			srv.Signer = tc.signer
+			srv.Latest = "0.2.0"
+			srv.AddArchive(t, "0.2.0", runtime.GOOS, runtime.GOARCH,
+				selfupdatetest.Archive(t, runtime.GOOS, selfupdate.BinaryName(runtime.GOOS), newBin))
 
-	installed := filepath.Join(t.TempDir(), selfupdate.BinaryName(runtime.GOOS))
-	if err := os.WriteFile(installed, oldBin, 0o755); err != nil {
-		t.Fatal(err)
+			installed := filepath.Join(t.TempDir(), selfupdate.BinaryName(runtime.GOOS))
+			if err := os.WriteFile(installed, oldBin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			home := t.TempDir()
+			writePortConfig(t, home, freePort(t))
+			cmd := exec.Command(installed, "update", "--force") // --force must not matter to signatures
+			cmd.Env = append(os.Environ(), "SMIND_HOME="+home, selfupdate.BaseURLEnv+"="+srv.URL)
+			out, err := cmd.CombinedOutput()
+			if tc.updated {
+				if err != nil {
+					t.Fatalf("smind update: %v\n%s", err, out)
+				}
+				got, err := exec.Command(installed, "version").Output()
+				if err != nil || !strings.HasPrefix(string(got), "smind 0.2.0") {
+					t.Fatalf("installed binary reports %q (%v), want smind 0.2.0", got, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(string(out), tc.stderr) {
+				t.Fatalf("smind update = %v\n%s\nwant a failure mentioning %q", err, out, tc.stderr)
+			}
+			if got, _ := os.ReadFile(installed); string(got) != string(oldBin) {
+				t.Fatal("a refused update changed the installed binary")
+			}
+		})
 	}
-	home := t.TempDir()
-	writePortConfig(t, home, freePort(t))
-	env := append(os.Environ(), "SMIND_HOME="+home, selfupdate.BaseURLEnv+"="+srv.URL)
+}
 
-	cmd := exec.Command(installed, "update")
-	cmd.Env = env
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("smind update: %v\n%s", err, out)
+func TestUpdateRefusesReleaseWithoutSignature(t *testing.T) {
+	e := newUpdateCLIEnv(t, "0.11.1", "0.12.0")
+	writePortConfig(t, e.home, freePort(t))
+	e.srv.Signer = nil // published before signing existed
+	code, _, errOut := runUpdate(t)
+	if code == 0 || !strings.Contains(errOut, "release has no signature") {
+		t.Fatalf("update = %d, stderr %q; want a refusal naming the missing signature", code, errOut)
 	}
-	out, err := exec.Command(installed, "version").Output()
-	if err != nil || !strings.HasPrefix(string(out), "smind 0.2.0") {
-		t.Fatalf("installed binary reports %q (%v), want smind 0.2.0", out, err)
+	if got := e.installed(t); got != "0.11.1" {
+		t.Fatalf("binary = %s", got)
+	}
+}
+
+func TestUpdateRefusesBadSignature(t *testing.T) {
+	e := newUpdateCLIEnv(t, "0.11.1", "0.12.0")
+	writePortConfig(t, e.home, freePort(t))
+	e.srv.Signer = selfupdatetest.NewSigner(t)
+	code, _, errOut := runUpdate(t, "--force") // --force must not bypass the signature
+	if code == 0 || !strings.Contains(errOut, "signature does not verify") {
+		t.Fatalf("update --force = %d, stderr %q", code, errOut)
+	}
+	if got := e.installed(t); got != "0.11.1" {
+		t.Fatalf("binary = %s", got)
+	}
+}
+
+// Production wiring: the hook here leaves cmdUpdate's own VerifyChecksums
+// alone, so the embedded release key is what checks the fake release (signed by
+// a test key) and must refuse it. Deleting the wiring line in cmdUpdate makes
+// Update refuse for want of a verifier, which also fails this test's wording.
+func TestUpdateUsesTheEmbeddedReleaseKeyByDefault(t *testing.T) {
+	e := newUpdateCLIEnv(t, "0.11.1", "0.12.0")
+	writePortConfig(t, e.home, freePort(t))
+	updaterHook = func(u *selfupdate.Updater) {
+		if u.VerifyChecksums == nil {
+			t.Error("cmdUpdate did not wire a checksum verifier")
+		}
+		e.baseHook(u)
+	}
+	code, _, errOut := runUpdate(t)
+	if code == 0 || !strings.Contains(errOut, "smind release key") {
+		t.Fatalf("update = %d, stderr %q; want a refusal because the test key is not the release key", code, errOut)
+	}
+	if got := e.installed(t); got != "0.11.1" {
+		t.Fatalf("binary = %s", got)
+	}
+}
+
+func TestUpdateHasNoSignatureBypassFlag(t *testing.T) {
+	newUpdateCLIEnv(t, "0.11.1", "0.12.0")
+	for _, flag := range []string{"--insecure-skip-signature", "--skip-signature", "--no-verify"} {
+		if code, _, errOut := runUpdate(t, flag); code != 2 || !strings.Contains(errOut, "flag provided but not defined") {
+			t.Errorf("update %s = %d, %q; want an unknown-flag usage error", flag, code, errOut)
+		}
 	}
 }

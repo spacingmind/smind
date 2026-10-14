@@ -139,6 +139,19 @@ built into the app — the corresponding private key is a repository secret
   key's releases update normally again.
 - The Linux `deb` package has no updater: install new versions by hand.
 
+#### Updating the `smind` binary itself
+
+`smind update` (`--check` to only look, `--version <v>`, `--dry-run`, `--force`) replaces
+the CLI/daemon binary from a GitHub Release. It verifies the archive's SHA-256 against
+`checksums.txt` **and** a minisign signature of `checksums.txt` (`checksums.txt.minisig`,
+made with the same key as the desktop updater, whose public half is built into `smind`);
+there is no flag to skip the signature, not even `--force`. A release without that
+signature is refused ("release has no signature"), so **releases published before the first
+signed one cannot be updated to with `smind update`**: install them with the install
+script instead (the install scripts verify the SHA-256 only). If that key is ever rotated,
+`smind` binaries built before the rotation cannot verify new releases, the same one-time
+manual reinstall as the desktop app.
+
 ### Installing the daemon from a release manually
 
 Each [GitHub Release](https://github.com/spacingmind/smind/releases) ships
