@@ -13,11 +13,13 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mattn/go-isatty"
 
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/relay/bridge"
+	"github.com/spacingmind/smind/internal/relay/devices"
 	"github.com/spacingmind/smind/internal/relay/e2ee"
 	"github.com/spacingmind/smind/internal/relay/pairing"
 	"github.com/spacingmind/smind/internal/relay/server"
@@ -36,7 +38,8 @@ import (
 //	smind relay host rm <id>
 //	smind relay host rotate <id> (prints the new raw secret once)
 //	smind relay connect <relay-address> <host-id> <secret>
-//	smind relay offer
+//	smind relay offer [--window <duration>] [--max-devices <n>]
+//	smind relay devices ls [--pending] | approve <id> | revoke <id> | rename <id> <label>
 //
 // A "relay host" is one daemon's mailbox on a relay (a host id plus an
 // admission secret). `smind relay workspace ...` is the deprecated name for
@@ -54,6 +57,8 @@ func cmdRelay(args []string) int {
 			return cmdRelayConnect(args[1:])
 		case "offer":
 			return cmdRelayOffer(args[1:])
+		case "devices":
+			return cmdRelayDevices(args[1:])
 		case "-h", "--help", "help":
 			printRelayUsage(os.Stdout)
 			return 0
@@ -236,17 +241,23 @@ func runRelayOffer(args []string, dir string, stdout, stderr io.Writer, stdoutIs
 	fs := flag.NewFlagSet("relay offer", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprint(stderr, `usage: smind relay offer [--qr] [--png <file> [--force]]
+		fmt.Fprint(stderr, `usage: smind relay offer [--window <duration>] [--max-devices <n>] [--qr] [--png <file> [--force]]
 
 Prints a pairing link for a mobile device or the desktop app. The link goes to
 stdout; with a terminal on stdout, or --qr, a QR code is drawn on stderr too.
 --png writes the QR code to a file (mode 0600; --force overwrites).
+
+Printing the link also opens a pairing window (--window, default 10m): the next
+--max-devices (default 1) new devices that connect in that time are approved
+automatically; any other new device waits for "smind relay devices approve".
 
 `+relayLinkWarning+"\n")
 	}
 	qr := fs.Bool("qr", false, "also draw the QR code on stderr (the default when stdout is a terminal)")
 	pngPath := fs.String("png", "", "write the QR code as a PNG to `file`")
 	force := fs.Bool("force", false, "with --png, overwrite an existing file")
+	window := fs.Duration("window", devices.DefaultWindowDuration, "how long new devices are approved automatically after this offer")
+	maxDevices := fs.Int("max-devices", devices.DefaultWindowSlots, "how many new devices the pairing window approves automatically")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -255,6 +266,10 @@ stdout; with a terminal on stdout, or --qr, a QR code is drawn on stderr too.
 	}
 	if fs.NArg() != 0 || (*force && *pngPath == "") {
 		fs.Usage()
+		return 2
+	}
+	if *window < time.Second || *maxDevices < 1 {
+		fmt.Fprintln(stderr, "smind relay offer: --window must be at least 1s and --max-devices at least 1")
 		return 2
 	}
 
@@ -295,6 +310,7 @@ stdout; with a terminal on stdout, or --qr, a QR code is drawn on stderr too.
 		fmt.Fprintf(stderr, "smind relay offer: %v\n", err)
 		return 1
 	}
+	openOfferWindow(dir, *window, *maxDevices, stderr)
 	fmt.Fprintln(stdout, url)
 
 	showQR := *qr || stdoutIsTTY
@@ -321,6 +337,31 @@ stdout; with a terminal on stdout, or --qr, a QR code is drawn on stderr too.
 	}
 	fmt.Fprintf(stderr, "\n%s\n", relayLinkWarning)
 	return 0
+}
+
+// openOfferWindow opens the pairing window the offer being printed relies on
+// (through the daemon when it runs, else in the registry file). A failure is
+// a warning, not an error: the offer is still valid, new devices just wait for
+// "smind relay devices approve" instead of being admitted automatically.
+func openOfferWindow(dir string, window time.Duration, maxDevices int, stderr io.Writer) {
+	ctx := context.Background()
+	ctl, closeFn, err := openDeviceControl(ctx, dir, stderr, "opening the pairing window in the device registry file directly; it applies when the daemon next starts")
+	if err == nil {
+		defer closeFn()
+		_, err = ctl.openWindow(ctx, window, maxDevices)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "smind relay offer: warning: could not open the pairing window (%s); new devices will wait for `smind relay devices approve`\n", deviceErrMessage(err))
+		return
+	}
+	fmt.Fprintf(stderr, "Pairing window open for %s or until %s; other new devices wait for `smind relay devices approve`.\n", window, newDevicesPhrase(maxDevices))
+}
+
+func newDevicesPhrase(n int) string {
+	if n == 1 {
+		return "1 new device connects"
+	}
+	return fmt.Sprintf("%d new devices connect", n)
 }
 
 // offerPNGModuleSize is the pixel size of one QR module in --png output: at
@@ -392,7 +433,17 @@ Usage:
   smind relay host rm <id>                                remove a relay host
   smind relay host rotate <id>                            issue a new secret (printed once; the old one stops admitting)
   smind relay connect <address> <host-id> <secret>        configure this daemon to use a relay
-  smind relay offer [--qr] [--png <file> [--force]]       print a pairing link (and QR code) for a mobile device or the desktop app
+  smind relay offer [--window <duration>] [--max-devices <n>] [--qr] [--png <file> [--force]]
+                                                           print a pairing link (and QR code) for a mobile device or the desktop app
+                                                           and open a pairing window (default 10m, 1 new device)
+  smind relay devices ls [--pending]                      list paired devices (and those awaiting approval)
+  smind relay devices approve <id>                        approve a pending device
+  smind relay devices revoke <id>                         revoke a device (it is disconnected and cannot return)
+  smind relay devices rename <id> <label>                 change a device's label
+
+Device ids accept any unique prefix. With the daemon running, "relay devices"
+and "relay offer" go through it; otherwise they edit the device registry file
+directly and the change applies when the daemon next starts.
 
 A relay host is one daemon's mailbox on a relay: a host id plus an admission
 secret. ("smind relay workspace ..." is the deprecated name for "smind relay
