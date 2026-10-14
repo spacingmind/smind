@@ -215,6 +215,19 @@ func (c *Code) Text() string {
 	return b.String()
 }
 
+// EncodeQRFit encodes content at error-correction level M, falling back to
+// level L when M is too small. Level L holds about 25% more bytes at the cost
+// of damage tolerance; a pairing offer that carries the relay host secret and
+// the pinned fingerprint (~430 bytes) needs it. It returns an error wrapping
+// ErrContentTooLong if content does not fit even at L.
+func EncodeQRFit(content string) (*Code, error) {
+	code, err := EncodeQR(content, ECMedium)
+	if errors.Is(err, ErrContentTooLong) {
+		return EncodeQR(content, ECLow)
+	}
+	return code, err
+}
+
 // QRPNG renders a pairing URL as a PNG QR code at error-correction level M,
 // with each module moduleSize pixels square and the standard 4-module quiet
 // zone.
