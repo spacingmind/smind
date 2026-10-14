@@ -40,12 +40,16 @@ func (c *fakeClock) Now() time.Time {
 	return c.now
 }
 
-func (c *fakeClock) After(d time.Duration) (<-chan time.Time, func()) {
+func (c *fakeClock) At(at time.Time) (<-chan time.Time, func()) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	t := &fakeTimer{at: c.now.Add(d), ch: make(chan time.Time, 1)}
+	t := &fakeTimer{at: at, ch: make(chan time.Time, 1)}
 	c.timers = append(c.timers, t)
 	c.arms++
+	if !at.After(c.now) {
+		t.fired = true
+		t.ch <- c.now
+	}
 	return t.ch, func() {
 		c.mu.Lock()
 		t.fired = true
@@ -57,6 +61,14 @@ func (c *fakeClock) armCount() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.arms
+}
+
+// waitArms waits until the loop has armed at least n timers in total, i.e.
+// it has finished its current iteration and is parked waiting for the clock.
+// Advancing before that would move time past a timer the loop has not armed yet.
+func (c *fakeClock) waitArms(t *testing.T, n int) {
+	t.Helper()
+	waitUntil(t, "the keepalive loop to park on the clock", func() bool { return c.armCount() >= n })
 }
 
 // Advance moves time forward by d, firing timers in order.
@@ -101,8 +113,9 @@ type scriptedStream struct {
 	recv chan *relaypb.Frame
 	echo bool
 
-	mu   sync.Mutex
-	sent []*relaypb.Frame
+	mu        sync.Mutex
+	sent      []*relaypb.Frame
+	blockSend chan struct{} // when non-nil, Send blocks until closed or ctx done
 }
 
 func newScriptedStream(ctx context.Context, echo bool) *scriptedStream {
@@ -111,11 +124,21 @@ func newScriptedStream(ctx context.Context, echo bool) *scriptedStream {
 
 func (s *scriptedStream) Send(f *relaypb.Frame) error {
 	s.mu.Lock()
+	block := s.blockSend
+	s.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-s.ctx.Done():
+			return s.ctx.Err()
+		}
+	}
+	s.mu.Lock()
 	s.sent = append(s.sent, f)
 	echo := s.echo && f.GetKeepalive()
 	s.mu.Unlock()
 	if echo {
-		s.recv <- &relaypb.Frame{Keepalive: true}
+		s.recv <- &relaypb.Frame{Keepalive: true, Sequence: f.GetSequence()}
 	}
 	return nil
 }
@@ -206,6 +229,7 @@ func waitUntil(t *testing.T, what string, cond func() bool) {
 func TestKeepaliveSentEvery30s(t *testing.T) {
 	fx := newKAFixture(t, true)
 	waitUntil(t, "first probe", func() bool { return fx.stream.keepalives() == 1 })
+	fx.clock.waitArms(t, 1)
 	for i, want := range []int{2, 3, 4} {
 		fx.clock.Advance(29 * time.Second)
 		if got := fx.stream.keepalives(); got != want-1 {
@@ -213,6 +237,7 @@ func TestKeepaliveSentEvery30s(t *testing.T) {
 		}
 		fx.clock.Advance(time.Second)
 		waitUntil(t, "next keepalive", func() bool { return fx.stream.keepalives() == want })
+		fx.clock.waitArms(t, i+2)
 	}
 	select {
 	case d := <-fx.data:
@@ -227,7 +252,8 @@ func TestDeadStreamAfter75sOfSilence(t *testing.T) {
 	fx := newKAFixture(t, true)
 	waitUntil(t, "first probe echoed", func() bool { return fx.stream.keepalives() == 1 })
 	// Give the reader the echo, then the relay goes silent.
-	waitUntil(t, "echo consumed", func() bool { fx.clock.Advance(0); return len(fx.stream.recv) == 0 })
+	waitUntil(t, "echo consumed", func() bool { return len(fx.stream.recv) == 0 })
+	fx.clock.waitArms(t, 1)
 	fx.stream.setEcho(false)
 
 	fx.clock.Advance(74 * time.Second)
@@ -254,6 +280,7 @@ func TestAnyRelayFrameResetsTheDeadStreamTimer(t *testing.T) {
 	fx := newKAFixture(t, true)
 	waitUntil(t, "first probe echoed", func() bool { return fx.stream.keepalives() == 1 })
 	waitUntil(t, "echo consumed", func() bool { return len(fx.stream.recv) == 0 })
+	fx.clock.waitArms(t, 1)
 	fx.stream.setEcho(false)
 
 	fx.clock.Advance(60 * time.Second)
@@ -283,6 +310,7 @@ func TestUnansweredProbeTurnsKeepaliveOff(t *testing.T) {
 	// no more probes are sent and the connection is never declared dead.
 	fx := newKAFixture(t, false)
 	waitUntil(t, "first probe", func() bool { return fx.stream.keepalives() == 1 })
+	fx.clock.waitArms(t, 1)
 	fx.clock.Advance(DefaultKeepaliveProbeTimeout + time.Second)
 	fx.clock.Advance(10 * time.Minute)
 	if got := fx.stream.keepalives(); got != 1 {
@@ -303,9 +331,67 @@ func TestKeepaliveFollowsResumeToTheNewStream(t *testing.T) {
 	fx := newKAFixture(t, true)
 	waitUntil(t, "first probe echoed", func() bool { return fx.stream.keepalives() == 1 })
 	waitUntil(t, "echo consumed", func() bool { return len(fx.stream.recv) == 0 })
+	fx.clock.waitArms(t, 1)
 
 	// Drop and resume: a new stream (the dead one's reader exits with an
 	// error, as DataConn.Resume documents; start a fresh reader like Receive).
+	fx.stream.mu.Lock()
+	oldCancel := fx.fc.cancelStream
+	fx.stream.mu.Unlock()
+	oldCancel()
+	<-fx.readEr
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	next := newScriptedStream(ctx, true)
+	armsBefore := fx.clock.armCount()
+	fx.fc.reopen(next, cancel)
+	fx.startReader()
+
+	waitUntil(t, "probe on the resumed stream", func() bool { return next.keepalives() >= 1 })
+	fx.clock.waitArms(t, armsBefore+1)
+	before := next.keepalives()
+	fx.clock.Advance(DefaultKeepaliveInterval)
+	waitUntil(t, "periodic keepalive on the resumed stream", func() bool { return next.keepalives() > before })
+}
+
+func (fx *kaFixture) supportState() kaSupport {
+	k := fx.fc.keepaliveState()
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.support
+}
+
+func TestForwardedPeerProbeIsNotAnEcho(t *testing.T) {
+	// A relay without keepalive support forwards a peer's probe to us. It is
+	// a keepalive frame, but not an answer to ours (different nonce): it is
+	// liveness evidence only and must not switch the dead-stream rule on.
+	fx := newKAFixture(t, false)
+	waitUntil(t, "first probe", func() bool { return fx.stream.keepalives() == 1 })
+	fx.clock.waitArms(t, 1)
+	nonce := fx.fc.keepaliveState().nonce
+	fx.stream.recv <- &relaypb.Frame{Keepalive: true, Sequence: nonce + 1}
+	waitUntil(t, "forwarded probe consumed", func() bool { return len(fx.stream.recv) == 0 })
+
+	fx.clock.Advance(DefaultKeepaliveProbeTimeout + time.Second)
+	fx.clock.Advance(10 * time.Minute)
+	if got := fx.supportState(); got != kaNo {
+		t.Fatalf("support = %v, want kaNo: a forwarded peer probe is not an echo", got)
+	}
+	select {
+	case err := <-fx.readEr:
+		t.Fatalf("a relay that never echoed must not be declared dead: %v", err)
+	default:
+	}
+}
+
+func TestKeepaliveReprobesAfterResumeWhenFirstEchoWasLate(t *testing.T) {
+	fx := newKAFixture(t, false)
+	waitUntil(t, "first probe", func() bool { return fx.stream.keepalives() == 1 })
+	fx.clock.waitArms(t, 1)
+	fx.clock.Advance(DefaultKeepaliveProbeTimeout + time.Second)
+	waitUntil(t, "keepalive off for the first stream", func() bool { return fx.supportState() == kaNo })
+
+	// Resume onto a stream whose relay does echo: the verdict was per stream.
 	fx.stream.mu.Lock()
 	oldCancel := fx.fc.cancelStream
 	fx.stream.mu.Unlock()
@@ -318,7 +404,28 @@ func TestKeepaliveFollowsResumeToTheNewStream(t *testing.T) {
 	fx.startReader()
 
 	waitUntil(t, "probe on the resumed stream", func() bool { return next.keepalives() >= 1 })
-	before := next.keepalives()
-	fx.clock.Advance(DefaultKeepaliveInterval)
-	waitUntil(t, "periodic keepalive on the resumed stream", func() bool { return next.keepalives() > before })
+	waitUntil(t, "echo recognised", func() bool { return fx.supportState() == kaYes })
+}
+
+func TestBlockedProbeWriteDoesNotDisableTheDeadStreamRule(t *testing.T) {
+	fx := newKAFixture(t, true)
+	waitUntil(t, "first probe echoed", func() bool { return fx.stream.keepalives() == 1 })
+	waitUntil(t, "echo consumed", func() bool { return len(fx.stream.recv) == 0 })
+	fx.clock.waitArms(t, 1)
+
+	// The stream stalls: writes block (flow control on a half-open stream)
+	// and nothing arrives. The loop must still declare it dead at 75 s.
+	fx.stream.mu.Lock()
+	fx.stream.blockSend = make(chan struct{})
+	fx.stream.echo = false
+	fx.stream.mu.Unlock()
+	fx.clock.Advance(75 * time.Second)
+	select {
+	case err := <-fx.readEr:
+		if !errors.Is(err, ErrStreamDead) {
+			t.Fatalf("Receive error = %v, want ErrStreamDead", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a probe write stuck in Send stopped the dead-stream rule")
+	}
 }

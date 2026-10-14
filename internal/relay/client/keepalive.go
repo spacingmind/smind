@@ -18,6 +18,8 @@ package client
 // WithKeepalive needs a Receive loop running, as every real session has.
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"sync"
 	"time"
@@ -44,16 +46,18 @@ var ErrStreamDead = errors.New("relay client: stream dead: nothing received from
 // Clock is the time source of the keepalive loop, injectable for tests.
 type Clock interface {
 	Now() time.Time
-	// After returns a channel that fires once after d and a function that
-	// releases the timer early.
-	After(d time.Duration) (<-chan time.Time, func())
+	// At returns a channel that fires once the clock reaches t (immediately if
+	// it already has) and a function that releases the timer early. An
+	// absolute deadline, so a loop that computed it from an earlier reading
+	// of Now cannot oversleep.
+	At(t time.Time) (<-chan time.Time, func())
 }
 
 type realClock struct{}
 
 func (realClock) Now() time.Time { return time.Now() }
-func (realClock) After(d time.Duration) (<-chan time.Time, func()) {
-	t := time.NewTimer(d)
+func (realClock) At(at time.Time) (<-chan time.Time, func()) {
+	t := time.NewTimer(time.Until(at))
 	return t.C, func() { t.Stop() }
 }
 
@@ -100,17 +104,26 @@ const (
 type keepalive struct {
 	cfg KeepaliveConfig
 
+	// nonce identifies this connection's probes: it rides in Frame.sequence and
+	// the relay echoes it back, so an echo can be told from a probe a peer sent
+	// that a relay without keepalive support merely forwarded (also a keepalive
+	// frame, but with the peer's nonce). Only an echo proves support.
+	nonce uint64
+
 	mu       sync.Mutex
 	lastRecv time.Time
 	support  kaSupport
 	dead     bool
-	stop     chan struct{} // closes the running loop
+	stop     chan struct{} // closes the running loop; also its generation
+	sending  bool          // a probe write is in flight
 }
 
-func (k *keepalive) noteRecv(keepaliveFrame bool) {
+// noteRecv records that the relay sent a frame: any frame is evidence the
+// stream is alive, and a keepalive frame carrying our nonce is an echo.
+func (k *keepalive) noteRecv(f *relaypb.Frame) {
 	k.mu.Lock()
 	k.lastRecv = k.cfg.Clock.Now()
-	if keepaliveFrame {
+	if f.GetKeepalive() && f.GetSequence() == k.nonce {
 		k.support = kaYes
 	}
 	k.mu.Unlock()
@@ -118,6 +131,11 @@ func (k *keepalive) noteRecv(keepaliveFrame bool) {
 
 func (f *frameConn) enableKeepalive(cfg KeepaliveConfig) {
 	k := &keepalive{cfg: cfg}
+	var b [8]byte
+	for k.nonce == 0 {
+		_, _ = rand.Read(b[:])
+		k.nonce = binary.BigEndian.Uint64(b[:])
+	}
 	f.ctlMu.Lock()
 	f.ka = k
 	f.ctlMu.Unlock()
@@ -139,6 +157,12 @@ func (f *frameConn) startKeepaliveLoop() {
 	k.stop = stop
 	k.lastRecv = k.cfg.Clock.Now()
 	k.dead = false
+	if k.support == kaNo {
+		// "No echo" is a verdict on one stream, not on the relay for good: a
+		// slow first echo must not switch protection off for the session's
+		// lifetime, so every (re)opened stream probes once more.
+		k.support = kaUnknown
+	}
 	k.mu.Unlock()
 	go f.keepaliveLoop(k, stop)
 }
@@ -156,7 +180,7 @@ func (f *frameConn) stopKeepalive() {
 	k.mu.Unlock()
 }
 
-func (f *frameConn) keepaliveLoop(k *keepalive, stop <-chan struct{}) {
+func (f *frameConn) keepaliveLoop(k *keepalive, stop chan struct{}) {
 	clock := k.cfg.Clock
 	k.mu.Lock()
 	probing := k.support == kaUnknown
@@ -179,13 +203,11 @@ func (f *frameConn) keepaliveLoop(k *keepalive, stop <-chan struct{}) {
 			return
 		}
 		if support == kaYes && !now.Before(last.Add(k.cfg.DeadAfter)) {
-			f.killStream(k)
+			f.killStream(k, stop)
 			return
 		}
 		if !now.Before(nextSend) {
-			if err := f.sendKeepalive(); err != nil {
-				return // the stream is already failing; the reader reports it
-			}
+			f.probeAsync(k)
 			nextSend = now.Add(k.cfg.Interval)
 		}
 		// Sleep until the earliest of: next probe, probe deadline, dead line.
@@ -202,7 +224,7 @@ func (f *frameConn) keepaliveLoop(k *keepalive, stop <-chan struct{}) {
 				wake = d
 			}
 		}
-		ch, release := clock.After(wake.Sub(now))
+		ch, release := clock.At(wake)
 		select {
 		case <-stop:
 			release()
@@ -212,26 +234,47 @@ func (f *frameConn) keepaliveLoop(k *keepalive, stop <-chan struct{}) {
 	}
 }
 
-// sendKeepalive writes one probe frame on the current stream.
-func (f *frameConn) sendKeepalive() error {
-	f.sendMu.Lock()
-	defer f.sendMu.Unlock()
-	if f.closed {
-		return errors.New("closed")
+// probeAsync writes one probe on the current stream without blocking the
+// loop: a Send stalled by flow control on a half-open stream must not stop
+// the dead-stream rule from firing. At most one probe is in flight; a
+// stalled one makes later ticks skip rather than pile up goroutines.
+func (f *frameConn) probeAsync(k *keepalive) {
+	k.mu.Lock()
+	if k.sending {
+		k.mu.Unlock()
+		return
 	}
-	return f.stream.Send(&relaypb.Frame{
-		WorkspaceId: f.route.workspaceID,
-		SessionId:   []byte(f.route.sessionID),
-		DeviceId:    f.route.deviceID,
-		Direction:   f.direction,
-		Keepalive:   true,
-	})
+	k.sending = true
+	k.mu.Unlock()
+	go func() {
+		f.sendMu.Lock()
+		if !f.closed {
+			_ = f.stream.Send(&relaypb.Frame{
+				WorkspaceId: f.route.workspaceID,
+				SessionId:   []byte(f.route.sessionID),
+				DeviceId:    f.route.deviceID,
+				Direction:   f.direction,
+				Sequence:    k.nonce,
+				Keepalive:   true,
+			})
+		}
+		f.sendMu.Unlock()
+		k.mu.Lock()
+		k.sending = false
+		k.mu.Unlock()
+	}()
 }
 
 // killStream applies the dead-stream rule: remember why, then cancel the
 // stream's context so a blocked Receive returns.
-func (f *frameConn) killStream(k *keepalive) {
+// A loop that was superseded meanwhile (Resume swapped in a new stream and
+// restarted it) must not cancel the new stream, hence the generation check.
+func (f *frameConn) killStream(k *keepalive, gen chan struct{}) {
 	k.mu.Lock()
+	if k.stop != gen {
+		k.mu.Unlock()
+		return
+	}
 	k.dead = true
 	k.mu.Unlock()
 	f.ctlMu.Lock()

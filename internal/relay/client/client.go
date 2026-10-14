@@ -317,7 +317,7 @@ func (f *frameConn) Read(p []byte) (int, error) {
 			return 0, f.streamErr(err)
 		}
 		if k := f.keepaliveState(); k != nil {
-			k.noteRecv(frame.GetKeepalive())
+			k.noteRecv(frame)
 		}
 		if frame.GetKeepalive() {
 			// A liveness frame (an echo of ours, or a peer's probe a relay
