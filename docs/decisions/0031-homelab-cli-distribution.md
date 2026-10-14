@@ -2,15 +2,15 @@
 
 ## Status
 
-**Proposed (2026-10-13, revised after a study of Paseo the same day).**
-Nothing here is decided until Human answers the "Open decisions for Human"
-list (AGENTS.md rule d). Each open decision carries a recommended default;
-decisions whose default changed *because of* the Paseo study are marked **★**.
-The plan ([`docs/plans/active/homelab-cli.md`](../plans/active/homelab-cli.md))
-is written against those defaults. Builds on ADR-0007/0011 (relay, admission),
+**Accepted (2026-10-14), except decisions 9, 12, 27–32 and 36, which remain Open** (direct connections with a password,
+and the hosted relay with everything it gates). The accepted decisions are listed under "Decisions (accepted 2026-10-14)"
+with the default the Human approved; the Open ones stay under "Open decisions for Human", and **every PR they gate stays
+BLOCKED** in the plan
+([`docs/plans/active/homelab-cli.md`](../plans/active/homelab-cli.md)). Decisions whose default changed *because of* the Paseo
+study are marked **★**. Builds on ADR-0007/0011 (relay, admission),
 ADR-0013/0023/0030 (desktop app, updater, native Windows daemon) and ADR-0029
 (`POST /api/shutdown`). Several decisions here **amend** earlier ones (loopback
-only, one relay device per relay host, gRPC as the relay transport); each says so
+only — pending decision 9 —, one relay device per relay host, ephemeral device keys); each says so
 and, once accepted, the amended ADR gets a one-line pointer here.
 
 **Human answers recorded 2026-10-13/14:** the relay-side "workspace" is renamed **relay host** and smind's own
@@ -20,8 +20,8 @@ accepted trust model, and production deploys gated by a GitHub Environment with 
 preferred any more; the options under study keep gRPC — Cloudflare's gRPC proxy in front of the unchanged Go relay,
 or the Go relay in Cloudflare Containers behind a Worker (private beta, access requested) — and every hosted-relay PR
 is **blocked on that decision**. **Multi-device (D9) is designed now on the existing gRPC protocol, independent of
-hosting.** Everything else in "Open decisions" (notably #9, direct connections with a password) is **still pending**
-and is not decided here.
+hosting.** All other decisions were accepted with their recommended defaults on 2026-10-14, including 35 (device identity:
+Ed25519 `device_hello` + pairing window + pending approval).
 
 ## Terminology: relay host, not workspace
 
@@ -229,7 +229,7 @@ reference** block stating *ported / adapted / deliberately different (why)*.
   (`refs/zcode/packages/ui/src/WelcomeScreen.tsx`); it has no connection
   onboarding, so it informs only visual style.
 
-## Decision (proposed)
+## Decision
 
 ### D1. `smind update`
 
@@ -621,6 +621,8 @@ confirmation); deliberately different (first-run, quit behaviour).**
   app-side `ManagedRecord` (`managed.rs:43-51`) plus `managedBy` from `/healthz`.
 
 ### D8. Direct connections with a password (amends "loopback only")
+
+**Status: OPEN — decision 9 is not accepted; everything that depends on it (P4, P5's password field, P8, P11, P13c) stays blocked.**
 
 **Proposal.** Let the daemon listen on a non-loopback address, protected by a password,
 as Paseo does — making a LAN/Tailscale/VPN homelab work with **no relay at all** — while
@@ -1035,40 +1037,122 @@ are renamed opportunistically, never by a wire-breaking change; the new messages
 - **QR-only pairing for desktop.** A desktop app has no scanner worth building; paste is the
   primary path.
 
-## Open decisions for Human
+## Decisions (accepted 2026-10-14)
 
-Each has a recommended default; the plan assumes the recommendation. **★ = the default
-changed, or the decision is new, because of the Paseo study.**
+Human approved every decision below on 2026-10-14 with the default stated ("Ok làm đi"). **★ = the default changed, or the
+decision is new, because of the Paseo study; ✔ = answered earlier by the Human.** Decisions 10, 14 and 24 are accepted but only take effect together with the
+still-open decision 9 (direct connections with a password), so what depends on them waits for it (noted in the plan).
 
 1. **CLI signature verification.** Verify a minisign signature of `checksums.txt` in
    `smind update` with the existing desktop-updater public key (ADR-0023; no new secret),
    signed by a new `publish`-job step, as a separate PR after the unsigned core. *Recommended:
    yes.* (Paseo has nothing to compare: npm integrity.) Install scripts stay checksum-only.
-2. **Windows: Scheduled Task vs Service.** *Recommended: per-user Scheduled Task at logon.*
-3. **Linux/macOS service scope.** *Recommended: user unit / LaunchAgent by default*;
+
+2. **Windows: Scheduled Task vs Service.** *Accepted: per-user Scheduled Task at logon.*
+
+3. **Linux/macOS service scope.** *Accepted: user unit / LaunchAgent by default*;
    `--system` opt-in on Linux (runs as the invoking user, never root); no LaunchDaemon in v1.
-4. **Update refusal policy.** *Recommended:* refuse while runs are running or a permission is
+
+4. **Update refusal policy.** *Accepted:* refuse while runs are running or a permission is
    pending; `--force` overrides; no `--wait`; stable only; downgrade needs `--force`.
-5. **Restart after update.** *Recommended:* restart only a service-managed daemon; for a
+
+5. **Restart after update.** *Accepted:* restart only a service-managed daemon; for a
    hand-started one print instructions.
-6. **Supervisor signal.** *Recommended:* additive `/healthz` field `managedBy` from env
+
+6. **Supervisor signal.** *Accepted:* additive `/healthz` field `managedBy` from env
    `SMIND_SUPERVISOR` (Paseo records `desktopManaged` in its lock file instead — adapted).
-7. **★ Daemon log file.** *Recommended: yes* — `smind serve` also writes a rotating
+
+7. **★ Daemon log file.** *Accepted: yes* — `smind serve` also writes a rotating
    `$SMIND_HOME/daemon.log` (e.g. 10 MiB × 5), `smind service logs` tails it on every OS;
    journald stays available. Replaces the shell-redirect/per-OS log design. Adds a small
    rotation dependency or ~80 lines of code.
-8. **★ `smind config get|set|unset`; no launch flags.** *Recommended: yes, no
+
+8. **★ `smind config get|set|unset`; no launch flags.** *Accepted: yes, no
    `--port/--listen` flags on `serve`* (Paseo removed the equivalent flags).
+
+10. **★ Built-in TLS for direct connections.** *Accepted: not in v1* — document Tailscale,
+    SSH, or a TLS reverse proxy (with the Host-rewrite caveat); revisit with `server.tls`.
+
+11. **★ SSH-tunnel connection type in the desktop app (b2).** *Accepted: yes* — the app runs
+    the system `ssh -L` (Paseo `remoteSsh`); no daemon exposure and no password.
+
+13. **★ Multi-device relay on gRPC (D9).** *Accepted: yes — start as soon as this ADR is accepted; independent of hosting.*
+    Uses the existing protocol (`DeviceAttach`/`DeviceDetach` + additive messages), per-device E2EE sessions in the bridge,
+    `smind relay devices ls|approve|revoke|rename`, keepalive for the 125 s proxy timeout, and a ≥ 3-device test (2 desktop +
+    1 mobile). Replaces the earlier "v3 WebSocket" plan.
+
+14. **★ Password for relay devices.** *Accepted: yes* — the daemon password (needs decision 9's `smind set-password`) is
+    sent inside `device_hello`; required for hosted relay hosts. With D9's pairing window a leaked offer is no longer a
+    standing credential, but the password remains the second factor.
+
+15. **Offer reuse/expiry.** *Accepted:* reusable, no expiry, loud "treat like a password"
+    wording, `--png` at 0600 (Paseo is the same: no expiry, no per-device credential).
+
+16. **Deep link `smind://pair`.** *Accepted:* paste-only in v1; later with the confirmation
+    screen, never auto-add.
+
+17. **`daemon.info` RPC.** *Accepted:* add a small additive WS method `{version, commit}`
+    so the notice works for relay connections (Paseo reads version from `server_info`).
+
+18. **QR default.** *Accepted:* print the QR only on a TTY or `--qr`, fall back to level L,
+    never fail the command; offer compaction (v2) deferred.
+
+19. **★ Docker image contents.** *Accepted:* one image (Debian-slim, git, ssh client, Node 22,
+    `gosu`, `tini`, curl), **root entrypoint that fixes ownership then drops to uid 1000**
+    (Paseo), agent CLIs not baked in + child-image example + compose example, listen
+    `0.0.0.0` only with a required password (needs decision 9). Alternative: a `-agents` variant.
+
+20. **Image provenance.** *Accepted:* buildx provenance/SBOM on releases; no cosign in v1.
+
+21. **`install.ps1` location.** *Accepted:* `%LOCALAPPDATA%\Programs\smind` + user `PATH`
+    (never the app's managed directory); landing redirect as a follow-up in the landing repo.
+
+22. **★ First-run default and silent install.** *Accepted:* explicit first-run screen on fresh
+    installs, no silent install; (a) pre-selected when the port is free, (d) when a smind daemon
+    already answers. **Differs from Paseo** (silent auto-start + a settings toggle).
+    Alternative: Paseo parity — silent start with a dismissible banner.
+
+23. **★ Local daemon on later launches and quit.** *Accepted:* when `manageLocalDaemon` is
+    true and `local` is selected, auto-start on every launch; the daemon keeps running after the
+    app quits (smind's ADR-0013 choice; Paseo stops it by default) — optionally add a "stop when
+    quitting" setting later.
+
+24. **★ Credential entry in "Connect to a daemon".** *Accepted:* an optional **password** field
+    shown when the probe says `authRequired` (needs decision 9); no raw-token field.
+
+25. **★ Default connection / host with several connections.** *Accepted:* keep "last selected";
+    keep connection ids derived from daemon identity so a later "relay now, direct when
+    reachable" (Paseo `preferredConnectionId`, Maestro `relay-then-direct`) needs no migration.
+
+26. **★ Background `smind start` without an OS service.** *Accepted: no* — `smind service` and
+    the desktop app cover it; Paseo's `daemon start` + supervisor is a second supervision path.
+
+33. **✔ Rename — DECIDED by Human (2026-10-13): relay "workspace" → "relay host"** (D12); `workspace` stays a deprecated CLI
+    alias; wire/proto field names are not changed; smind's own "Workspace" is not renamed.
+
+34. **✔ Relay code layout and deploy gating — DECIDED by Human (2026-10-13):** the relay code stays in the smind monorepo
+    (the Cloudflare Worker directory was to be `relay-worker/`; under (C)/(D) the deployment definition lives in a
+    self-contained deploy directory — split into its own repository later only if it needs separate ops/licensing);
+    `deploy-relay.yml` is separate from release-please and path-filtered; the credentials sit in a GitHub Environment
+    `relay-production` with required reviewers. **The hosting option itself is decision 12.**
+
+35. **★ Device identity and pairing window (D9).** *Accepted: yes* — a persistent Ed25519 device key proven inside
+    `device_hello`, a daemon-side device registry, an offer-opened pairing window (10 minutes or one new device), and `smind
+    relay devices ls|approve|revoke|rename`; amends ADR-0007 (g). Alternative (Paseo's stance): ephemeral device keys, `devices
+    ls` shows only connected devices, `revoke` closes the connection, `host rotate` is the hard reset.
+
+## Open decisions for Human
+
+These remain **Open** (Human, 2026-10-14): the hosted relay (12 and everything it gates: 27–32, 36) and direct connections
+with a password (9). Each keeps its recommended default or its option list; **every PR they gate is BLOCKED in the plan.**
+
 9. **★ Direct connections with a password (D8).** *Recommended: yes* —
    `server.listen`, `smind set-password`, refuse to start non-loopback without a password,
    `/api/token` loopback-only, expiring session tokens, Host allowlist, login rate limit;
    **replaces "loopback only, no `--bind`"** and the "don't publish 4648" Docker advice.
    Alternative: stay loopback-only and rely on relay/tunnel (cheaper, leaves Docker and
    homelab LAN users on the relay).
-10. **★ Built-in TLS for direct connections.** *Recommended: not in v1* — document Tailscale,
-    SSH, or a TLS reverse proxy (with the Host-rewrite caveat); revisit with `server.tls`.
-11. **★ SSH-tunnel connection type in the desktop app (b2).** *Recommended: yes* — the app runs
-    the system `ssh -L` (Paseo `remoteSsh`); no daemon exposure and no password.
+
 12. **⏳ Hosted relay hosting — PENDING (Human, 2026-10-14).** Options in D11: **(D)** Cloudflare's gRPC proxy (Network →
     gRPC; origin on 443 with TLS + HTTP/2/ALPN; proxied record, SSL/TLS Full; 125 s read / 30 s write timeouts, so 30–60 s
     keepalive and client reconnect; Access ignores gRPC) in front of the unchanged Go relay on **Cloud Run** (documented
@@ -1079,72 +1163,30 @@ changed, or the decision is new, because of the Paseo study.**
     [gRPC connections](https://developers.cloudflare.com/network/grpc-connections/),
     [connection limits](https://developers.cloudflare.com/fundamentals/reference/connection-limits/),
     [gRPC for Workers and Containers](https://blog.cloudflare.com/grpc-workers/).
-13. **★ Multi-device relay on gRPC (D9).** *Recommended: yes — start as soon as this ADR is accepted; independent of hosting.*
-    Uses the existing protocol (`DeviceAttach`/`DeviceDetach` + additive messages), per-device E2EE sessions in the bridge,
-    `smind relay devices ls|approve|revoke|rename`, keepalive for the 125 s proxy timeout, and a ≥ 3-device test (2 desktop +
-    1 mobile). Replaces the earlier "v3 WebSocket" plan.
-14. **★ Password for relay devices.** *Recommended: yes* — the daemon password (needs decision 9's `smind set-password`) is
-    sent inside `device_hello`; required for hosted relay hosts. With D9's pairing window a leaked offer is no longer a
-    standing credential, but the password remains the second factor.
-15. **Offer reuse/expiry.** *Recommended:* reusable, no expiry, loud "treat like a password"
-    wording, `--png` at 0600 (Paseo is the same: no expiry, no per-device credential).
-16. **Deep link `smind://pair`.** *Recommended:* paste-only in v1; later with the confirmation
-    screen, never auto-add.
-17. **`daemon.info` RPC.** *Recommended:* add a small additive WS method `{version, commit}`
-    so the notice works for relay connections (Paseo reads version from `server_info`).
-18. **QR default.** *Recommended:* print the QR only on a TTY or `--qr`, fall back to level L,
-    never fail the command; offer compaction (v2) deferred.
-19. **★ Docker image contents.** *Recommended:* one image (Debian-slim, git, ssh client, Node 22,
-    `gosu`, `tini`, curl), **root entrypoint that fixes ownership then drops to uid 1000**
-    (Paseo), agent CLIs not baked in + child-image example + compose example, listen
-    `0.0.0.0` only with a required password (needs decision 9). Alternative: a `-agents` variant.
-20. **Image provenance.** *Recommended:* buildx provenance/SBOM on releases; no cosign in v1.
-21. **`install.ps1` location.** *Recommended:* `%LOCALAPPDATA%\Programs\smind` + user `PATH`
-    (never the app's managed directory); landing redirect as a follow-up in the landing repo.
-22. **★ First-run default and silent install.** *Recommended:* explicit first-run screen on fresh
-    installs, no silent install; (a) pre-selected when the port is free, (d) when a smind daemon
-    already answers. **Differs from Paseo** (silent auto-start + a settings toggle).
-    Alternative: Paseo parity — silent start with a dismissible banner.
-23. **★ Local daemon on later launches and quit.** *Recommended:* when `manageLocalDaemon` is
-    true and `local` is selected, auto-start on every launch; the daemon keeps running after the
-    app quits (smind's ADR-0013 choice; Paseo stops it by default) — optionally add a "stop when
-    quitting" setting later.
-24. **★ Credential entry in "Connect to a daemon".** *Recommended:* an optional **password** field
-    shown when the probe says `authRequired` (needs decision 9); no raw-token field.
-25. **★ Default connection / host with several connections.** *Recommended:* keep "last selected";
-    keep connection ids derived from daemon identity so a later "relay now, direct when
-    reachable" (Paseo `preferredConnectionId`, Maestro `relay-then-direct`) needs no migration.
-26. **★ Background `smind start` without an OS service.** *Recommended: no* — `smind service` and
-    the desktop app cover it; Paseo's `daemon start` + supervisor is a second supervision path.
 
 27. **★ Hosting budget** — **blocked on 12.** Depends on the option (VPS or Cloud Run bill; or Workers Paid + Containers
     active CPU for (C)); recommended once chosen: a monthly usage alert and a kill-switch (disable open enrolment) when
     it fires.
+
 28. **★ Enrolment model** — design is hosting-agnostic, **PR blocked on 12.** *Recommended:* anonymous, self-service, no
     accounts in v1, server-generated host ids via an additive `Enrol` RPC, the abuse limits in D11. Alternative: GitHub
     login from day one.
+
 29. **★ Credentials and GitHub Environments** — **blocked on 12 (BLOCKED on Human).** The `relay-production` Environment
     with required reviewers (decided, decision 34) and the secrets that go in it depend on the option: Cloudflare token
     (DNS, zone settings for the gRPC toggle, Workers/Containers) and a GCP service account or deploy key.
+
 30. **★ Default relay address** — **blocked on 12.** *Recommended:* `smind relay connect` with no arguments uses
     `relay.spacingmind.com` after a one-time consent line; a self-hosted relay always needs an explicit address.
+
 31. **★ Relay protocol compatibility.** *Recommended:* the D9 proto changes are additive (no version bump); a relay always
     accepts the current and previous protocol revision, because the hosted relay (whenever it exists) deploys
     independently of smind releases. (Replaces the earlier "gRPC v2 retirement" decision.)
+
 32. **★ Logging and privacy.** *Recommended:* no payload and no content-derived data are ever logged; IP addresses appear
     only in short-lived edge logs (≤ 7 days); a privacy page on spacingmind.com **before** the hosted default is switched
     on (landing-repo follow-up).
-33. **✔ Rename — DECIDED by Human (2026-10-13): relay "workspace" → "relay host"** (D12); `workspace` stays a deprecated CLI
-    alias; wire/proto field names are not changed; smind's own "Workspace" is not renamed.
-34. **✔ Relay code layout and deploy gating — DECIDED by Human (2026-10-13):** the relay code stays in the smind monorepo
-    (the Cloudflare Worker directory was to be `relay-worker/`; under (C)/(D) the deployment definition lives in a
-    self-contained deploy directory — split into its own repository later only if it needs separate ops/licensing);
-    `deploy-relay.yml` is separate from release-please and path-filtered; the credentials sit in a GitHub Environment
-    `relay-production` with required reviewers. **The hosting option itself is decision 12.**
-35. **★ Device identity and pairing window (D9).** *Recommended: yes* — a persistent Ed25519 device key proven inside
-    `device_hello`, a daemon-side device registry, an offer-opened pairing window (10 minutes or one new device), and `smind
-    relay devices ls|approve|revoke|rename`; amends ADR-0007 (g). Alternative (Paseo's stance): ephemeral device keys, `devices
-    ls` shows only connected devices, `revoke` closes the connection, `host rotate` is the hard reset.
+
 36. **★ Single-port gRPC + grpc-web mode** — part of the hosted PRs (**blocked on 12**), listed so it is not missed: Cloudflare
     proxies gRPC on 443 only, while the relay serves gRPC and grpc-web on two ports today. *Recommended:* a `--listen-mux`
     option serving both on one TLS/h2 listener when option (C) or (D) is chosen.

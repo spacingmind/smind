@@ -1,8 +1,9 @@
 # Homelab distribution: update, service, install scripts, Docker, direct + relay connections, desktop first-run
 
 Implements [ADR-0031](../../decisions/0031-homelab-cli-distribution.md)
-(**Proposed**, revised after a study of Paseo and the Human's 2026-10-14 answers: hosted-relay hosting is **pending**,
-multi-device is designed now on gRPC). Every PR below that depends on an
+(**Accepted 2026-10-14**, except decisions 9, 12, 27–32 and 36, which remain **Open**; the PRs they gate stay BLOCKED
+below. Revised after a study of Paseo and the Human's answers: hosted-relay hosting is pending, multi-device is designed on
+gRPC). Every PR below that depends on an
 open decision says so; the plan is written against the ADR's recommended defaults
 (★ = default changed or new because of Paseo), and a PR must not start before its
 blocking decisions are answered (AGENTS.md rule d).
@@ -29,7 +30,7 @@ before merge — never stacked.
 | **P9** `smind service` Windows + `install.ps1 -Service` | 2 | `internal/service/windows*.go`, `scripts/install.ps1` (`-Service`), `docs/homelab.md` section | **M (5)** — scope 1, PRs 0, risk 1, decisions 1, verify 2 (real Windows 11) | 2 | **P8** (interface, log file), P1 |
 | **P10** "older than app" notice + service recognition + `daemon.info` | 4 | `web/packages/ui/src/components/desktop-daemon-banner.tsx`, `…/settings/daemon-section.tsx`, `web/packages/ui/src/lib/platform.ts`, `desktop/src-tauri/src/daemon_manager.rs` (unmanaged kind), `internal/wsapi/handlers.go` (`daemon.info`) | **L (6)** — scope 2, PRs 0, risk 1, decisions 1, verify 2 (screenshots + real relay daemon) | 6, 17 | **P5** (same web/desktop files), **P6** (command exists), **P8** (`managedBy`) |
 | **P11** ★ Docker image | 5 | `Dockerfile` (+ `docker/`), `docker/entrypoint`, `docker/docker-compose.example.yml`, `docker/Dockerfile.agents.example`, `.dockerignore`, `.github/workflows/release-please.yml` (new `docker` job), new `.github/workflows/docker-check.yml` (PR build, no push), `docs/homelab.md` section | **L (7)** — scope 1, PRs 1, risk 2, decisions 1, verify 2 (real `docker buildx`, multi-arch, run + healthcheck + `-p`) | 9, 19, 20 | **P4** (listen/password), **P7** (both edit `release-please.yml`; one owner at a time), **P8** (daemon log file) |
-| **P12a** ★ multi-device relay (gRPC): relay server, additive proto, 3-device integration harness | 6 | `internal/relay/relaypb/relay.proto` (+ regenerated), `internal/relay/server/*`, `internal/relay/e2ee` (read-only), `internal/relay/bridge/harness/*` | **L (7)** — scope 1, PRs 1, risk 2, decisions 1, verify 2 | 13, 31 | — (**may start once ADR-0031 is accepted; independent of hosting**) |
+| **P12a** ★ multi-device relay (gRPC): relay server, additive proto, 3-device integration harness | 6 | `internal/relay/relaypb/relay.proto` (+ regenerated), `internal/relay/server/*`, `internal/relay/e2ee` (read-only), `internal/relay/bridge/harness/*`, `cmd/smind/relay.go` (`--max-devices-per-host`) | **L (7)** — scope 1, PRs 1, risk 2, decisions 1, verify 2 | 13 (accepted) | **P0** (shared `cmd/smind/relay.go`; independent of hosting) |
 | **P12b** ★ multi-device relay (gRPC): bridge device hub, device identity, pairing window, `smind relay devices` | 6 | `internal/relay/bridge/*`, `internal/relay/devices/*` (new registry), `internal/wsapi/*` (`relay.device.*`), `cmd/smind/relay.go`, `cmd/smind/relay_devices.go` | **L (8)** — scope 2, PRs 1, risk 2, decisions 2, verify 1 | 13, 35 | **P12a**, **P0**, **P2** (same `relay.go`) |
 | **P12c** CA-verified TLS mode (Go) and no silent TOFU | 6 | `internal/relay/client/*`, `internal/relay/pairing/*`, `cmd/smind/relay.go`, `internal/relay/server/run.go` (`--tls-cert/--tls-key`) | **M (4)** — scope 1, PRs 0, risk 2, decisions 0, verify 1 | — | **P12b** (same `relay.go`) |
 | **P13a** ★ multi-device clients: desktop (Rust) | 6 | `desktop/daemon-client/src/relay/*`, `desktop/src-tauri/src/commands.rs` (key/offer/preview plumbing), `web/packages/ui/src/components/settings/add-relay-link.tsx` | **L (7)** — scope 2, PRs 0, risk 2, decisions 1, verify 2 | 35 | **P12b**, **P3** (same files) |
@@ -39,20 +40,29 @@ before merge — never stacked.
 | **P15** hosted relay: open enrolment + abuse limits (**BLOCKED on decision 12**) | 6 | `internal/relay/relaypb/relay.proto` (`Enrol`), `internal/relay/server/*`, `internal/relay/admission/*` | **L (7)** — scope 1, PRs 1, risk 2, decisions 2, verify 1 | **12**, 28, 32 | **P12a**, **P14** |
 | **P16** hosted relay: `relay connect` with no address (**BLOCKED on decision 12**) | 6 | `cmd/smind/relay.go`, `internal/relay/client/*`, `docs/homelab.md`, `docs/relay-privacy.md` | **M (5)** — scope 1, PRs 0, risk 1, decisions 2, verify 2 (against staging) | **12**, 14, 30, 32 | **P12c**, **P13c**, **P15**, **P14**, **P4**, **P0** |
 
+**Status (2026-10-14, after the Human's approval)**
+
+- **READY TO START** (decisions accepted; no Human input needed): **P0, P1, P2, P3** (wave 1); **P6, P7** (`smind update` +
+  signing); the multi-device track **P12a, P12b, P12c, P13a, P13b**.
+  **P0 must merge before P2 and P12a** (shared `cmd/smind/relay.go`); P12b follows P12a, P0 and P2; P12c follows P12b;
+  P13a follows P12b and P3; P13b follows P12b; P7 follows P6.
+- **BLOCKED on decision 9** (direct connections with a password — still Open): **P4**, and what depends on it: **P5, P8, P9,
+  P10, P11, P13c**.
+- **BLOCKED on decision 12** (hosted-relay hosting — still Open; also 27–32, 36): **P14, P15, P16**.
+
 **Suggested order**
 
-1. *Wave 1 (as the Human asked):* **P0** (relay-host rename; first, because `cmd/smind/relay.go` is shared) in parallel with
-   **P1** (install scripts); then **P2** (offer QR) and **P3** (Add via relay link).
-2. *Multi-device, starting as soon as ADR-0031 is accepted (independent of hosting and of decision 9):* **P12a** (relay server +
-   proto + 3-device harness) can run in parallel with wave 1 (disjoint files); then **P12b** (after P12a, P0, P2), **P12c**
+1. *Wave 1:* **P0** (relay-host rename; first, because `cmd/smind/relay.go` is shared) in parallel with **P1** (install
+   scripts); then **P2** (offer QR) and **P3** (Add via relay link). **P12a** may start as soon as **P0** has merged.
+2. *Multi-device (ready):* **P12a** (relay server + proto + 3-device harness), then **P12b** (after P12a, P0, P2), **P12c**
    (after P12b), and the clients **P13a** desktop (after P12b and P3) and **P13b** mobile (after P12b), in parallel.
-3. *Independent of everything above:* **P6** (`smind update`) and then **P7** (signing).
-4. *Waiting for the Human's answer on decision 9 (direct connections with a password):* **P4**, then **P5** (first-run), **P8**
-   (service), **P9**, **P10**, **P11** (Docker; also after P7) and **P13c** (relay device password; also after P12b). They are
-   written against the recommended defaults but not started.
-5. *BLOCKED on decision 12 (hosted-relay hosting):* **P14** (deploy and ops), **P15** (open enrolment), **P16** (default
-   address) — in that order, after P12a–c; nothing here can start until the Human chooses between (D) Cloudflare gRPC proxy +
-   Go relay, (C) Cloudflare Containers behind a Worker, or the withdrawn (B).
+3. *Independent (ready):* **P6** (`smind update`) and then **P7** (signing).
+4. *Waiting for the Human's answer on decision 9:* **P4**, then **P5** (first-run), **P8** (service), **P9**, **P10**,
+   **P11** (Docker; also after P7) and **P13c** (relay device password; also after P12b). Written against the recommended
+   defaults, not started.
+5. *BLOCKED on decision 12:* **P14** (deploy and ops), **P15** (open enrolment), **P16** (default address) — in that order,
+   after P12a–c; nothing here starts until the Human chooses between (D) Cloudflare gRPC proxy + Go relay, (C) Cloudflare
+   Containers behind a Worker, or the withdrawn (B).
 
 `cmd/smind/main.go` gets one-line dispatcher cases from P4 and P6: rebase the later one, do not stack.
 
@@ -66,8 +76,8 @@ before merge — never stacked.
 - **P16 / switching the default on:** the privacy page on spacingmind.com (landing-repo follow-up) and the first approved
   production deploy.
 - **Decision 9** (direct connections with a password): P4 and everything after it in item 4 waits.
-- **New open decisions from the multi-device design:** 35 (device identity + pairing window vs ephemeral keys), 36 (single-port
-  mode, with the hosting choice), and the sub-decisions 27–32 that depend on 12.
+- **Open decisions** (ADR-0031 "Open decisions for Human"): 9, 12, 27–32 and 36 (single-port mode, part of P14). Decision 35 (device
+  identity + pairing window + pending approval) is **accepted**.
 
 Not in this plan (landing repo, listed so it is not forgotten): `/install.ps1`
 redirect in `spacingmind/spacing-mind-landing-page` `apps/web/next.config.ts`
@@ -861,9 +871,10 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
 
 ## Decisions
 
-- Architecture and the 34 open/decided decisions live in
-  [ADR-0031](../../decisions/0031-homelab-cli-distribution.md); this plan uses the recommended defaults. Any answer
-  that differs reopens only the PRs listed in the table's "Blocking decisions" column.
+- Architecture and the 36 decisions live in [ADR-0031](../../decisions/0031-homelab-cli-distribution.md): 27 are **accepted**
+  (2026-10-14, with their recommended defaults, including 35), 9 remain **Open** (9, 12, 27–32, 36). The PRs gated by an Open
+  decision stay BLOCKED; an answer that differs from the recommended default reopens only the PRs listed in the table's
+  "Blocking decisions" column.
 - **Changed by the Paseo study** (see the ADR's reference table): direct connections with a password replace
   "loopback only" (P4); relay multi-device is scheduled in scope (P12a–b, P13a–b) instead of deferred; Docker publishes a
   port behind a required password and uses a root-then-`gosu` entrypoint (P11); a daemon-owned rotating log replaces
@@ -902,6 +913,9 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   sessions, device identity + pairing window, `smind relay devices ls|approve|revoke|rename`, 30 s keepalive for the 125 s proxy
   timeout, a ≥ 3-device test) as P12a–b and P13a–b; plan re-sequenced (wave 1 = P0, P1, P2, P3; multi-device may start on ADR
   acceptance). Nothing implemented.
+- 2026-10-14 (later): the Human approved ADR-0031 — **Accepted, except decisions 9, 12, 27–32 and 36 (Open)**; decision 35 accepted
+  as proposed. Ready to start: P0–P3, P6, P7, P12a–c, P13a–b (P0 merges before P2 and P12a). Blocked: P4 and dependants (decision 9);
+  P14–P16 (decision 12). Nothing implemented yet.
 
 ## Validation
 
