@@ -327,7 +327,7 @@ jobs:
       # half (internal/selfupdate.UpdaterPublicKey, pinned to tauri.conf.json by
       # a test). Must come after "Checksums" and before anything is uploaded.
       - name: Install the Tauri CLI (version pinned by desktop/package-lock.json)
-        run: npm ci --prefix desktop
+        run: npm ci --prefix desktop --ignore-scripts # no install scripts may run before the signing step
 
       - name: Install minisign (independent check of every signature we make)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq minisign
@@ -372,10 +372,6 @@ jobs:
           export SMIND_SIGN_PUBKEY
           TAURI_SIGNING_PRIVATE_KEY="$(cat "$key")" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
             scripts/sign-checksums.sh dist "$VERSION"
-          # And with smind's own verifier, the one `smind update` runs.
-          SMIND_VERIFY_CHECKSUMS="$PWD/dist/checksums.txt" SMIND_VERIFY_SIG="$PWD/dist/checksums.txt.minisig" \
-            SMIND_VERIFY_PUBKEY="$SMIND_SIGN_PUBKEY" SMIND_VERIFY_VERSION="$VERSION" \
-            go test -count=1 -run '^TestVerifyReleaseFilesFromEnv$' -v ./internal/selfupdate
           rm -f "$key" "$key.pub"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -401,8 +397,13 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          assets=(*.tar.gz *.zip *.exe *.msi *.dmg *.sig checksums.txt checksums.txt.minisig)
+          assets=(*.tar.gz *.zip *.exe *.msi *.dmg *.sig)
           gh release upload "$TAG" "${assets[@]}" --clobber --repo "${{ github.repository }}"
+          # smind update reads checksums.txt first and then its signature: upload
+          # the signature before checksums.txt so a client never sees one
+          # without the other and mistakes the gap for "release has no signature".
+          gh release upload "$TAG" checksums.txt.minisig --clobber --repo "${{ github.repository }}"
+          gh release upload "$TAG" checksums.txt --clobber --repo "${{ github.repository }}"
 
       # Must come after the asset upload above: latest.json references the
       # other release assets, and clients must never see a manifest that

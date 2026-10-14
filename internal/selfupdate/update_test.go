@@ -80,20 +80,22 @@ func newEnv(t *testing.T, current, latest string) *testEnv {
 	log := &bytes.Buffer{}
 	d := &fakeDaemon{}
 	return &testEnv{t: t, srv: srv, dir: dir, exe: exe, log: log, daemon: d, u: &Updater{
-		Source:        &Source{BaseURL: srv.URL, Client: newHTTPClient()},
-		Current:       current,
-		Exe:           exe,
-		GOOS:          runtime.GOOS,
-		GOARCH:        testArch,
-		Daemon:        d,
-		ActiveWork:    func(context.Context) (Activity, error) { return Activity{}, nil },
-		RunVersion:    selfupdatetest.RunVersion,
-		Getenv:        func(string) string { return "" },
-		Exists:        func(string) bool { return false },
-		InContainer:   func() bool { return false },
-		HealthTimeout: 400 * time.Millisecond,
-		HealthPoll:    10 * time.Millisecond,
-		Log:           log,
+		Source:     &Source{BaseURL: srv.URL, Client: newHTTPClient()},
+		Current:    current,
+		Exe:        exe,
+		GOOS:       runtime.GOOS,
+		GOARCH:     testArch,
+		Daemon:     d,
+		ActiveWork: func(context.Context) (Activity, error) { return Activity{}, nil },
+		RunVersion: selfupdatetest.RunVersion,
+		// These tests are about swapping and guards; signatures are verify_test.go's.
+		VerifyChecksums: func(context.Context, string, []byte, func(context.Context, string) ([]byte, error)) error { return nil },
+		Getenv:          func(string) string { return "" },
+		Exists:          func(string) bool { return false },
+		InContainer:     func() bool { return false },
+		HealthTimeout:   400 * time.Millisecond,
+		HealthPoll:      10 * time.Millisecond,
+		Log:             log,
 	}}
 }
 

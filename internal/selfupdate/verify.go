@@ -28,8 +28,14 @@ var UpdaterPublicKey = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUw
 const SignatureName = ChecksumsName + ".minisig"
 
 const (
-	algLegacy    = "Ed" // signature over the file itself
-	algPrehashed = "ED" // signature over BLAKE2b-512 of the file (what minisign and Tauri emit)
+	// algPrehashed is the signature over BLAKE2b-512 of the file, what minisign
+	// and `tauri signer sign` emit. The legacy "Ed" (signature over the file
+	// itself) is refused: the algorithm byte is not covered by any signature,
+	// so accepting both would let a prehashed signature be relabelled and
+	// verified over the 64 digest bytes. (Public key files still say "Ed": that
+	// is the key's algorithm, a different field.)
+	algPrehashed = "ED"
+	keyAlg       = "Ed"
 	maxSigSize   = 4 << 10
 )
 
@@ -59,8 +65,8 @@ func ParsePublicKey(tauriForm string) (PublicKey, error) {
 	if len(lines) < 2 || !strings.HasPrefix(lines[0], "untrusted comment:") {
 		return PublicKey{}, errors.New("public key is not a minisign public key file")
 	}
-	raw, err := base64.StdEncoding.DecodeString(lines[1])
-	if err != nil || len(raw) != 2+8+ed25519.PublicKeySize || string(raw[:2]) != algLegacy {
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(lines[1]))
+	if err != nil || len(raw) != 2+8+ed25519.PublicKeySize || string(raw[:2]) != keyAlg {
 		return PublicKey{}, errors.New("malformed minisign public key")
 	}
 	var pk PublicKey
@@ -79,9 +85,8 @@ type Signature struct {
 
 // VerifySignature checks that sigFile (a minisign signature file, text) is a
 // valid signature of data under pub, including the global signature over the
-// trusted comment. It accepts both minisign algorithms ("ED" prehashed, what
-// minisign and `tauri signer sign` produce, and legacy "Ed"). Any malformation
-// is an error: this fails closed.
+// trusted comment. Only the prehashed "ED" algorithm is accepted. Any
+// malformation is an error: this fails closed.
 func VerifySignature(pub PublicKey, data, sigFile []byte) (Signature, error) {
 	if len(sigFile) > maxSigSize {
 		return Signature{}, fmt.Errorf("%w: signature file is %d bytes", ErrBadSignature, len(sigFile))
@@ -90,11 +95,11 @@ func VerifySignature(pub PublicKey, data, sigFile []byte) (Signature, error) {
 	if len(lines) < 4 || !strings.HasPrefix(lines[0], "untrusted comment:") || !strings.HasPrefix(lines[2], "trusted comment:") {
 		return Signature{}, fmt.Errorf("%w: not a minisign signature file", ErrBadSignature)
 	}
-	raw, err := base64.StdEncoding.DecodeString(lines[1])
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(lines[1]))
 	if err != nil || len(raw) != 2+8+ed25519.SignatureSize {
 		return Signature{}, fmt.Errorf("%w: malformed signature line", ErrBadSignature)
 	}
-	global, err := base64.StdEncoding.DecodeString(lines[3])
+	global, err := base64.StdEncoding.DecodeString(strings.TrimSpace(lines[3]))
 	if err != nil || len(global) != ed25519.SignatureSize {
 		return Signature{}, fmt.Errorf("%w: malformed global signature line", ErrBadSignature)
 	}
@@ -103,16 +108,11 @@ func VerifySignature(pub PublicKey, data, sigFile []byte) (Signature, error) {
 		return Signature{}, fmt.Errorf("%w: signed by key %X, not the smind release key %X", ErrBadSignature, keyID, pub.keyID[:])
 	}
 
-	msg := data
-	switch alg {
-	case algPrehashed:
-		sum := blake2b.Sum512(data)
-		msg = sum[:]
-	case algLegacy:
-	default:
-		return Signature{}, fmt.Errorf("%w: unknown algorithm %q", ErrBadSignature, alg)
+	if alg != algPrehashed {
+		return Signature{}, fmt.Errorf("%w: unsupported signature algorithm %q (want prehashed %q)", ErrBadSignature, alg, algPrehashed)
 	}
-	if !ed25519.Verify(pub.key, msg, sig) {
+	sum := blake2b.Sum512(data)
+	if !ed25519.Verify(pub.key, sum[:], sig) {
 		return Signature{}, fmt.Errorf("%w: the data does not match its signature", ErrBadSignature)
 	}
 	comment := strings.TrimPrefix(lines[2], "trusted comment:")
@@ -155,13 +155,17 @@ func SignatureVerifier(tauriPublicKey string) ChecksumVerifier {
 // "version:<version>" matching exactly (`tauri signer sign --app-version`).
 func checkTrustedComment(comment, file, version string) error {
 	var gotFile, gotVersion string
+	var nFile, nVersion int
 	for _, f := range strings.Split(comment, "\t") {
 		if v, ok := strings.CutPrefix(f, "file:"); ok {
-			gotFile = v
+			gotFile, nFile = v, nFile+1
 		}
 		if v, ok := strings.CutPrefix(f, "version:"); ok {
-			gotVersion = v
+			gotVersion, nVersion = v, nVersion+1
 		}
+	}
+	if nFile > 1 || nVersion > 1 {
+		return fmt.Errorf("%w: the signed comment repeats its file or version field", ErrBadSignature)
 	}
 	if gotFile != file {
 		return fmt.Errorf("%w: signature is for file %q, not %s", ErrBadSignature, gotFile, file)
@@ -172,11 +176,10 @@ func checkTrustedComment(comment, file, version string) error {
 	return nil
 }
 
+// splitLines splits a minisign file into lines, dropping only line endings
+// (LF, CRLF): the trusted comment is signed byte for byte, so its own
+// whitespace must survive. Base64 lines are trimmed where they are decoded.
 func splitLines(s string) []string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	for i := range lines {
-		lines[i] = strings.TrimSpace(lines[i])
-	}
-	return lines
+	return strings.Split(strings.TrimRight(s, "\n"), "\n")
 }

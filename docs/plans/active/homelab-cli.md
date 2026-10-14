@@ -920,6 +920,16 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   (ADR-0031 P6)"): `internal/selfupdate/*`, `cmd/smind/update.go`, dispatcher case + startup `.old` cleanup in `main.go`. Signature
   verification is P7 (nil `ChecksumVerifier` hook in `update.go`); the service restart path is exercised through an injected
   `Daemon` until P8 lands (`/healthz managedBy` is read but nothing emits it yet).
+- 2026-10-14: **P7 implemented** (release signing + CLI verification; PR "feat(release): sign checksums and verify them in smind
+  update (ADR-0031 P7)"): `scripts/sign-checksums.sh` + `publish` job steps sign `checksums.txt` with the desktop-updater key
+  (Tauri CLI 2.11.5 from `desktop/package-lock.json`, `--app-version` binds the version into the signed comment) and upload
+  `checksums.txt.minisig` (before `checksums.txt`); `internal/selfupdate/verify.go` is a minisign verifier (prehashed `ED` only) with
+  `UpdaterPublicKey` embedded; `smind update` has no bypass (not even `--force`), and `Updater.Update` refuses without a verifier.
+  **Follow-ups for other PRs (not edited here):** P1 (#339 still open) owns `README.md` and `scripts/install.*` — once it merges,
+  document in README/`docs/homelab.md` that releases before the first signed one cannot be updated *to* with `smind update`
+  (reinstall with the install script); install scripts stay checksum-only per decision 1. **Accepted limit:** the signature binds
+  a release's checksums to its version, but not "latest" — a host that serves an older (still newer-than-installed) genuine
+  release as latest can hold a client back; bounding that needs a signed latest pointer or timestamp window (not in P7).
 
 ## Validation
 
@@ -950,3 +960,27 @@ Commands: `task test`, `task lint`, `GOOS=windows go vet ./...`, `go test -race 
 - AC7/8: `…InstallsExplicitVersion`, `…DryRunChangesNothing`, `…LatestUsesRedirectNotAPI`, `…HonoursHTTPSProxy` (child process, CONNECT seen).
 - **Not verified:** **(real)** Linux/Windows 11 against a real published release (none newer than the running build exists to
   update to from this branch), Windows with a running `smind.exe` daemon, real `smind service restart` (P8).
+
+### P7 (2026-10-14)
+
+Commands: `task test`, `task lint`, `GOOS=windows go vet ./...`, `actionlint`, `shellcheck scripts/sign-checksums.sh`,
+`scripts/sign-checksums.sh` run locally with a throwaway key + the locked Tauri CLI 2.11.5 + `minisign` 0.12.
+
+- AC1 signing in `publish`: `scripts/sign-checksums.sh` (Tauri sign → base64-decode → `checksums.txt.minisig`; re-verified with
+  `minisign -V` **and** smind's own verifier). Real release: missing secret fails the job; dry run: throwaway key, the real secret
+  is not referenced. CI evidence: workflow_dispatch run recorded below.
+- AC2 `TestVerifyChecksumsSignatureAccepts`, `TestVerifyRejectsTamperedChecksums`, `TestVerifyRejectsMissingMinisig`,
+  `TestVerifyRejectsWrongKey` (incl. same key-id forgery), `TestVerifyRejectsLegacyEdAlgorithm`,
+  `TestVerifyRejectsAlteredTrustedCommentAndReplays`, `TestVerifyRejectsDuplicateTrustedCommentFields`,
+  `TestVerifyRejectsMalformedSignatures`, `TestVerifyRejectsOversizeSignatureFile`, `TestUpdateRefusesReleaseWithoutSignature`
+  (selfupdate + cmd), `TestUpdateRefusesBadSignatureAndNeverDownloadsTheArchive`,
+  `TestUpdateRefusesSwappedChecksumsEvenIfTheArchiveMatchesThem`, `TestUpdateRefusesBadSignature` (cmd; `--force` does not
+  bypass), `TestUpdateHasNoSignatureBypassFlag`, `TestUpdateRefusesWithoutAVerifier`, `TestUpdateUsesTheEmbeddedReleaseKeyByDefault`,
+  and the real-binary `TestUpdateEndToEndReplacesTheRunningBinary/{signed,unsigned,other key}`. Mutation-checked: deleting the
+  `VerifyChecksums:` wiring in `cmdUpdate` fails the e2e and the embedded-key tests.
+- Real-format compatibility: `TestVerifyAcceptsRealTauriSignerOutput` (committed fixture from the real `tauri signer sign`, throwaway
+  key); one-off, not committed: the real v0.11.1 `smind_0.11.1_x64-setup.exe.sig` verifies against the embedded production key.
+- AC3 `TestEmbeddedPubkeyMatchesTauriConf`.
+- AC4 releases without a signature: `ErrNoSignature` ("release has no signature"), no checksum-only fallback.
+- **Not verified:** a real signed release with the production secret (needs the next release; the job fails closed if the secret is
+  absent), the password path with an encrypted key (the key has no password, ADR-0023), Windows runs of the tests.

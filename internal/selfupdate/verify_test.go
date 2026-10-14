@@ -31,7 +31,6 @@ func TestVerifyChecksumsSignatureAccepts(t *testing.T) {
 	verify := SignatureVerifier(signer.PublicKey())
 	for name, sig := range map[string][]byte{
 		"prehashed ED (minisign, tauri)": signer.Sign(sampleChecksums, selfupdatetest.TrustedComment("1.2.3")),
-		"legacy Ed":                      signer.SignLegacy(sampleChecksums, selfupdatetest.TrustedComment("1.2.3")),
 		"CRLF line endings":              []byte(strings.ReplaceAll(string(signer.Sign(sampleChecksums, selfupdatetest.TrustedComment("1.2.3"))), "\n", "\r\n")),
 	} {
 		if err := verify(context.Background(), "1.2.3", sampleChecksums, fetchFrom(map[string][]byte{SignatureName: sig})); err != nil {
@@ -63,6 +62,63 @@ func TestVerifyAcceptsRealTauriSignerOutput(t *testing.T) {
 	if err := verify(context.Background(), "9.9.9", append(read("checksums.txt"), "x"...), fetchFrom(files)); !errors.Is(err, ErrBadSignature) {
 		t.Fatalf("tampered checksums accepted: %v", err)
 	}
+}
+
+// The algorithm byte is not covered by either signature, so the legacy "Ed"
+// (sign the file itself) is refused outright rather than risk relabelling.
+func TestVerifyRejectsLegacyEdAlgorithm(t *testing.T) {
+	signer := selfupdatetest.NewSigner(t)
+	sig := signer.SignLegacy(sampleChecksums, selfupdatetest.TrustedComment("1.2.3"))
+	err := SignatureVerifier(signer.PublicKey())(context.Background(), "1.2.3", sampleChecksums, fetchFrom(map[string][]byte{SignatureName: sig}))
+	if !errors.Is(err, ErrBadSignature) || !strings.Contains(err.Error(), "unsupported signature algorithm") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestVerifyRejectsDuplicateTrustedCommentFields(t *testing.T) {
+	signer := selfupdatetest.NewSigner(t)
+	verify := SignatureVerifier(signer.PublicKey())
+	for _, comment := range []string{
+		"timestamp:1\tfile:checksums.txt\tversion:1.2.2\tversion:1.2.3",
+		"timestamp:1\tfile:checksums.txt\tversion:1.2.3\tversion:1.2.2",
+		"timestamp:1\tfile:latest.json\tfile:checksums.txt\tversion:1.2.3",
+	} {
+		sig := signer.Sign(sampleChecksums, comment)
+		if err := verify(context.Background(), "1.2.3", sampleChecksums, fetchFrom(map[string][]byte{SignatureName: sig})); !errors.Is(err, ErrBadSignature) {
+			t.Errorf("comment %q accepted: %v", comment, err)
+		}
+	}
+}
+
+// The trusted comment is signed byte for byte; outer whitespace is part of it
+// and must neither be trimmed away (breaking the signature) nor change which
+// fields are read.
+func TestVerifyKeepsTrustedCommentBytesIntact(t *testing.T) {
+	signer := selfupdatetest.NewSigner(t)
+	verify := SignatureVerifier(signer.PublicKey())
+	sig := signer.Sign(sampleChecksums, selfupdatetest.TrustedComment("1.2.3")+"\t")
+	if err := verify(context.Background(), "1.2.3", sampleChecksums, fetchFrom(map[string][]byte{SignatureName: sig})); err != nil {
+		t.Fatalf("a validly signed comment with a trailing tab was rejected: %v", err)
+	}
+}
+
+func TestVerifyRejectsOversizeSignatureFile(t *testing.T) {
+	signer := selfupdatetest.NewSigner(t)
+	good := signer.Sign(sampleChecksums, selfupdatetest.TrustedComment("1.2.3"))
+	big := append(append([]byte(nil), good...), []byte("\n"+strings.Repeat("A", 8192)+"\n")...)
+	err := SignatureVerifier(signer.PublicKey())(context.Background(), "1.2.3", sampleChecksums, fetchFrom(map[string][]byte{SignatureName: big}))
+	if !errors.Is(err, ErrBadSignature) || !strings.Contains(err.Error(), "signature file is") {
+		t.Fatalf("err = %v, want the size limit to trip on an otherwise valid signature", err)
+	}
+}
+
+func TestUpdateRefusesWithoutAVerifier(t *testing.T) {
+	e := newEnv(t, "0.11.1", "0.12.0")
+	e.u.VerifyChecksums = nil
+	if _, err := e.u.Update(context.Background(), Options{Force: true}); err == nil || !strings.Contains(err.Error(), "no checksum verifier") {
+		t.Fatalf("err = %v, want a refusal to run unverified", err)
+	}
+	e.wantUntouched("0.11.1")
 }
 
 func TestVerifyRejectsTamperedChecksums(t *testing.T) {
@@ -135,7 +191,6 @@ func TestVerifyRejectsMalformedSignatures(t *testing.T) {
 		"bad base64":          strings.Join([]string{lines[0], "!!!", lines[2], lines[3]}, "\n"),
 		"short signature":     strings.Join([]string{lines[0], base64.StdEncoding.EncodeToString([]byte("EDshort")), lines[2], lines[3]}, "\n"),
 		"missing comment tag": strings.Join([]string{lines[0], lines[1], "comment: x", lines[3]}, "\n"),
-		"huge":                good + strings.Repeat("A", 8192),
 		"unknown algorithm":   strings.Join([]string{lines[0], algSwap(t, lines[1], "XX"), lines[2], lines[3]}, "\n"),
 	}
 	for name, sig := range cases {

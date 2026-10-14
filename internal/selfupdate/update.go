@@ -19,7 +19,8 @@ import (
 // trusted, fetching sibling release assets (checksums.txt.minisig) through
 // fetch. A non-nil error aborts the update with nothing changed. Without a
 // verifier (nil) checksums alone detect corruption but not a swapped archive
-// plus a swapped checksums.txt; cmd/smind always installs one.
+// plus a swapped checksums.txt, so Update refuses to run without one;
+// cmd/smind installs SignatureVerifier(UpdaterPublicKey).
 type ChecksumVerifier func(ctx context.Context, version string, checksums []byte, fetch func(ctx context.Context, asset string) ([]byte, error)) error
 
 // Options are the `smind update` flags.
@@ -45,8 +46,9 @@ type Updater struct {
 	// RunVersion executes a binary's `version` and returns the version it
 	// reports. nil = really execute it.
 	RunVersion func(ctx context.Context, exe string) (string, error)
-	// VerifyChecksums authenticates checksums.txt; production wiring in
-	// cmd/smind sets SignatureVerifier(UpdaterPublicKey).
+	// VerifyChecksums authenticates checksums.txt and is required: Update
+	// refuses without it. Production wiring in cmd/smind sets
+	// SignatureVerifier(UpdaterPublicKey).
 	VerifyChecksums ChecksumVerifier
 
 	Getenv      func(string) string
@@ -170,6 +172,12 @@ func (u *Updater) Update(ctx context.Context, opts Options) (UpdateResult, error
 	}
 	if u.aside() {
 		CleanupStale(u.Exe) // an earlier update's still-locked .old, now deletable
+	}
+
+	if u.VerifyChecksums == nil {
+		// Fail closed: an Updater built without a verifier would silently be
+		// checksum-only, which a swapped archive plus checksums.txt defeats.
+		return res, errors.New("no checksum verifier configured; refusing to update unverified (this is a bug in smind)")
 	}
 
 	target := NormalizeVersion(opts.Version)
@@ -345,13 +353,11 @@ func (u *Updater) download(ctx context.Context, target, dir string) (stagedPath 
 	if err != nil {
 		return "", nil, fmt.Errorf("%w (does release v%s exist?)", err, target)
 	}
-	if u.VerifyChecksums != nil {
-		fetch := func(ctx context.Context, asset string) ([]byte, error) {
-			return u.Source.Fetch(ctx, target, asset, maxChecksumsSize)
-		}
-		if err := u.VerifyChecksums(ctx, target, checksums, fetch); err != nil {
-			return "", nil, fmt.Errorf("verify the signature of %s: %w", ChecksumsName, err)
-		}
+	fetch := func(ctx context.Context, asset string) ([]byte, error) {
+		return u.Source.Fetch(ctx, target, asset, maxChecksumsSize)
+	}
+	if err := u.VerifyChecksums(ctx, target, checksums, fetch); err != nil {
+		return "", nil, fmt.Errorf("verify the signature of %s: %w", ChecksumsName, err)
 	}
 	want, err := ExpectedChecksum(checksums, name)
 	if err != nil {
