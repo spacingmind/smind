@@ -110,6 +110,10 @@ func cmdServe(args []string) int {
 	}
 	srv.API().AttachUsage(poller, registry, passive)
 	srv.API().Runs.SetMaxConcurrentRunsPerTree(cfg.Orchestration.MaxConcurrentRunsPerTree)
+	// The relay device admin methods must be registered before the first
+	// connection is served (SetRelayDevices is not safe against concurrent
+	// requests).
+	hub := newRelayHub(srv)
 	httpSrv := &http.Server{
 		Addr:              srv.Addr(),
 		Handler:           srv.Handler(),
@@ -126,7 +130,7 @@ func cmdServe(args []string) int {
 		}
 	}()
 
-	startRelayBridge(ctx, srv)
+	startRelayBridge(ctx, srv, hub)
 
 	// One shutdown path for both triggers: the signal context (SIGINT/
 	// SIGTERM) and the authenticated POST /api/shutdown, whose channel
@@ -148,23 +152,17 @@ func cmdServe(args []string) int {
 	return 0
 }
 
-// startRelayBridge starts the daemon-as-relay-client background loop (the
-// device hub, internal/relay/bridge) if and only if `smind relay connect` has
-// persisted a config -- with no config present, nothing dials a relay and
-// smind serve's startup/behavior are exactly as before this feature existed
-// (docs/plans/active/mobile-app-milestone-1.md's Item 1 opt-in requirement).
-// It runs until ctx is cancelled, alongside the HTTP server.
-//
-// The device registry (relay-devices.json) and the admin methods behind
-// `smind relay devices` are wired either way, so devices can be listed and
-// pre-approved before the first relay connection.
-func startRelayBridge(ctx context.Context, srv *server.Server) {
-	dir := config.Dir()
+// newRelayHub builds the daemon's relay device hub and wires its registry
+// into the API's relay.device.* admin methods (what `smind relay devices`
+// talks to). It is wired whether or not a relay is configured, so devices can
+// be listed and pre-approved before the first relay connection. Call it
+// before the HTTP server starts serving.
+func newRelayHub(srv *server.Server) *bridge.Hub {
 	rc := config.Default().Relay
 	if cfg, err := config.Load(); err == nil {
 		rc = cfg.Relay
 	}
-	reg, err := devices.Open(devices.RegistryPath(dir))
+	reg, err := devices.Open(devices.RegistryPath(config.Dir()))
 	if err != nil {
 		// Never reset a registry we cannot read: that would silently forget
 		// revocations. Devices that identify themselves are refused until the
@@ -176,7 +174,17 @@ func startRelayBridge(ctx context.Context, srv *server.Server) {
 	if reg != nil {
 		srv.API().SetRelayDevices(hub)
 	}
+	return hub
+}
 
+// startRelayBridge runs the hub against the relay `smind relay connect`
+// configured, if and only if one is persisted -- with no config present,
+// nothing dials a relay and smind serve's startup/behavior are exactly as
+// before this feature existed (docs/plans/active/mobile-app-milestone-1.md's
+// Item 1 opt-in requirement). It runs until ctx is cancelled, alongside the
+// HTTP server.
+func startRelayBridge(ctx context.Context, srv *server.Server, hub *bridge.Hub) {
+	dir := config.Dir()
 	cfg, ok, err := bridge.LoadConfig(dir)
 	if err != nil {
 		log.Printf("relay bridge: %v (continuing without relay connectivity)", err)
