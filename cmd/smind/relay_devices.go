@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"text/tabwriter"
 	"time"
 
@@ -51,6 +52,12 @@ func openDeviceControl(ctx context.Context, home string, stderr io.Writer, noDae
 		if err == nil {
 			return daemonDevices{call: call}, closeFn, nil
 		}
+		if !isNoDaemon(err) {
+			// Not "nothing is listening": a daemon may well be running (a bad
+			// token, a hung connection). Editing the file now could be silently
+			// overwritten by the daemon's own writes, so report instead.
+			return nil, nil, fmt.Errorf("cannot reach the daemon: %w", err)
+		}
 		fmt.Fprintf(stderr, "smind relay: the daemon is not running (%v); %s\n", err, noDaemonNote)
 	}
 	reg, err := devices.Open(devices.RegistryPath(home))
@@ -58,6 +65,14 @@ func openDeviceControl(ctx context.Context, home string, stderr io.Writer, noDae
 		return nil, nil, err
 	}
 	return fileDevices{reg: reg}, func() {}, nil
+}
+
+// isNoDaemon reports whether err means nothing is listening where the daemon
+// would be (a refused TCP dial), as opposed to any other failure to talk to a
+// daemon that may be running.
+func isNoDaemon(err error) bool {
+	var op *net.OpError
+	return errors.As(err, &op) && op.Op == "dial" && !op.Timeout()
 }
 
 const noDaemonDeviceNote = "editing the device registry file directly; the change applies when the daemon next starts (a revoke cannot notify a relay)"

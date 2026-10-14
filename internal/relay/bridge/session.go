@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"sync"
-	"time"
 
 	"github.com/spacingmind/smind/internal/relay/client"
 )
@@ -24,7 +23,7 @@ type session struct {
 	running, orphaned, serving bool       // hub
 	conn                       *relayConn // hub: the connection the runner serves on
 	pending                    *relayConn // hub: a newer connection that announced this route while the runner was still unwinding
-	orphanedAt                 time.Time  // hub
+	orphanGen                  int        // hub: bumped on every orphaning (expiry timers compare it)
 	deviceID, label            string     // hub: verified identity ("" until/unless hello)
 	admitted, legacy           bool       // hub: past identification (counts toward the device cap)
 

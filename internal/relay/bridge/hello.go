@@ -30,6 +30,7 @@ const (
 	codeRevoked          = "revoked"
 	codeBadHello         = "bad_hello"
 	codeTooManyDevices   = "too_many_devices"
+	codeTooManyPending   = "too_many_pending"
 	codeHelloRequired    = "device_hello_required"
 	codeUnsupported      = "device_hello_unsupported"
 	codeInternal         = "internal"
@@ -85,20 +86,40 @@ func (h *Hub) identify(s *session, r *sessionReader, t *deviceTransport) error {
 			return h.admitHello(s, r, t, env)
 		}
 	}
-	// No hello: a legacy client (or one speaking nonsense).
-	if !h.opts.LegacyDevices {
+	// No hello: a legacy client (or one speaking nonsense). Legacy service is
+	// only for the fixed single-device route a pre-identity client uses: a
+	// client on any other route id is a new-style client and must identify
+	// itself (otherwise skipping the hello would dodge revocation and the
+	// pending state).
+	var env rpcEnvelope
+	if !timedOut {
+		_ = json.Unmarshal(first, &env)
+	}
+	if !h.opts.LegacyDevices || s.ref.device != DefaultDeviceID {
 		if !timedOut {
-			var env rpcEnvelope
-			_ = json.Unmarshal(first, &env)
 			_ = h.respondError(t, env.ID, codeHelloRequired, "this daemon requires device identity (device_hello); update the app")
 		}
 		h.refuseGrace(r)
 		return errSessionOver
 	}
+	// One legacy device at a time (the old protocol had exactly one): the
+	// newest replaces any earlier legacy session, such as an orphan left by a
+	// daemon restart.
+	h.mu.Lock()
+	var older []*session
+	for _, o := range h.sessions {
+		if o != s && o.legacy {
+			older = append(older, o)
+		}
+	}
+	h.mu.Unlock()
+	for _, o := range older {
+		h.drop(o)
+	}
 	h.mu.Lock()
 	if h.admittedCountLocked() >= h.maxDevs {
 		h.mu.Unlock()
-		h.refuse(t, r, "", codeTooManyDevices, "too many connected devices")
+		h.refuse(t, r, env.ID, codeTooManyDevices, "too many connected devices")
 		return errSessionOver
 	}
 	s.legacy, s.admitted = true, true
@@ -145,7 +166,23 @@ func (h *Hub) admitHello(s *session, r *sessionReader, t *deviceTransport, env r
 		h.refuse(t, r, env.ID, codeUnsupported, "this daemon does not track relay devices")
 		return errSessionOver
 	}
+	// The same device identifying on a new session (it reconnected with a
+	// fresh session id after a daemon restart, say) replaces its old session.
+	h.supersede(s, s.ref.device)
+	// Room first: a device refused for lack of room must not be recorded
+	// (and approved, burning a pairing slot) as a side effect.
+	h.mu.Lock()
+	full := h.admittedCountLocked() >= h.maxDevs
+	h.mu.Unlock()
+	if full {
+		h.refuse(t, r, env.ID, codeTooManyDevices, "too many connected devices")
+		return errSessionOver
+	}
 	dec, err := h.opts.Registry.Admit(s.ref.device, pub, hello.Label)
+	if errors.Is(err, devices.ErrTooManyPending) {
+		h.refuse(t, r, env.ID, codeTooManyPending, "too many devices are awaiting approval on this daemon")
+		return errSessionOver
+	}
 	if err != nil {
 		h.logf("relay bridge: device registry: %v", err)
 		h.refuse(t, r, env.ID, codeInternal, "device registry unavailable")
@@ -178,6 +215,22 @@ func (h *Hub) admitHello(s *session, r *sessionReader, t *deviceTransport, env r
 		return err
 	}
 	return nil
+}
+
+// supersede drops every other session of deviceID (same device, older
+// session): a device is served on one session at a time.
+func (h *Hub) supersede(keep *session, deviceID string) {
+	h.mu.Lock()
+	var old []*session
+	for _, o := range h.sessions {
+		if o != keep && o.deviceID == deviceID {
+			old = append(old, o)
+		}
+	}
+	h.mu.Unlock()
+	for _, o := range old {
+		h.drop(o)
+	}
 }
 
 // errorKind names a Verify failure without echoing key material.

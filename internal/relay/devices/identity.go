@@ -122,8 +122,11 @@ func ValidateLabel(label string) error {
 		return fmt.Errorf("%w: not valid UTF-8", ErrBadLabel)
 	}
 	for _, r := range label {
-		if unicode.IsControl(r) {
-			return fmt.Errorf("%w: contains control character", ErrBadLabel)
+		// Controls and the invisible/format/separator/private-use characters
+		// (bidi overrides, zero-width, line separators) that could spoof a
+		// terminal listing or another device's name.
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp, unicode.Co) {
+			return fmt.Errorf("%w: contains control or invisible character", ErrBadLabel)
 		}
 	}
 	return nil

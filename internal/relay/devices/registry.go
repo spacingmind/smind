@@ -71,12 +71,24 @@ type Decision struct {
 type Window struct {
 	ExpiresAt time.Time `json:"expires_at"`
 	Remaining int       `json:"remaining"`
+	// OpenedAt is when the window opened. Only a device first seen at or after
+	// it may take a slot: one that was already waiting (pending) before the
+	// owner printed the offer is not the device the owner is pairing, and an
+	// attacker who registered early must not be first in line.
+	OpenedAt time.Time `json:"opened_at,omitempty"`
 }
 
 var (
 	ErrNotFound  = errors.New("devices: no such device")
 	ErrAmbiguous = errors.New("devices: device id prefix is ambiguous")
+	// ErrTooManyPending refuses a new unknown device while MaxPending devices
+	// already wait for approval, so a flood of fresh keys cannot grow (and
+	// rewrite) the registry without bound or bury the real pending device.
+	ErrTooManyPending = errors.New("devices: too many devices awaiting approval")
 )
+
+// MaxPending bounds devices in the pending state.
+const MaxPending = 128
 
 type fileFormat struct {
 	V       int      `json:"v"`
@@ -239,11 +251,34 @@ func (r *Registry) write(s snapshot) error {
 		os.Remove(tmpName)
 		return fmt.Errorf("devices: write registry: %w", err)
 	}
-	if err := os.Rename(tmpName, r.path); err != nil {
+	if err := renameWithRetry(tmpName, r.path); err != nil {
 		os.Remove(tmpName)
 		return fmt.Errorf("devices: write registry: %w", err)
 	}
+	syncDir(dir)
 	return nil
+}
+
+// renameWithRetry renames over the target, retrying briefly: on Windows the
+// rename fails while another process (the CLI reading the file) holds it open.
+func renameWithRetry(from, to string) error {
+	var err error
+	for i := 0; i < 5; i++ {
+		if err = os.Rename(from, to); err == nil {
+			return nil
+		}
+		time.Sleep(time.Duration(i+1) * 10 * time.Millisecond)
+	}
+	return err
+}
+
+// syncDir flushes the directory entry so a crash right after a revoke cannot
+// resurrect the previous file. Best effort: not every platform supports it.
+func syncDir(dir string) {
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
 }
 
 // commit persists next and, only on success, makes it the live state.
@@ -324,6 +359,15 @@ func (r *Registry) Admit(id string, pub []byte, label string) (Decision, error) 
 	changed := false // a state/label/window change that must hit the disk
 	isNew := false
 	if !known {
+		pending := 0
+		for _, d := range next.devices {
+			if d.State == StatePending {
+				pending++
+			}
+		}
+		if pending >= MaxPending {
+			return Decision{}, ErrTooManyPending
+		}
 		dev = Device{ID: id, Pub: append([]byte(nil), pub...), Label: label, FirstSeen: now, State: StatePending}
 		isNew = true
 		changed = true
@@ -333,8 +377,10 @@ func (r *Registry) Admit(id string, pub []byte, label string) (Decision, error) 
 	}
 	dev.LastSeen = now
 
-	// A device that is not yet approved takes a pairing slot if one is open.
-	if dev.State == StatePending && next.window != nil && next.window.Remaining > 0 {
+	// A device that is not yet approved takes a pairing slot if one is open and
+	// it was first seen after the window opened (see Window.OpenedAt).
+	if dev.State == StatePending && next.window != nil && next.window.Remaining > 0 &&
+		!dev.FirstSeen.Before(next.window.OpenedAt) {
 		dev.State = StateApproved
 		next.window.Remaining--
 		if next.window.Remaining <= 0 {
@@ -432,7 +478,7 @@ func (r *Registry) OpenWindow(d time.Duration, maxNew int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	next := r.cur.clone()
-	next.window = &Window{ExpiresAt: r.now().UTC().Add(d), Remaining: maxNew}
+	next.window = &Window{ExpiresAt: r.now().UTC().Add(d), Remaining: maxNew, OpenedAt: r.now().UTC()}
 	return r.commit(next)
 }
 

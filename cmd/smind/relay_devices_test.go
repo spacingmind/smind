@@ -7,8 +7,12 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
+	"os"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -62,7 +66,7 @@ func noDaemon(t *testing.T) string {
 	t.Setenv("SMIND_HOME", home)
 	old := relayDeviceDial
 	relayDeviceDial = func(context.Context) (wsCaller, func(), error) {
-		return nil, nil, errors.New("connect: refused")
+		return nil, nil, fmt.Errorf("connect: %w", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED})
 	}
 	t.Cleanup(func() { relayDeviceDial = old })
 	return home
@@ -315,5 +319,25 @@ func TestRelayOfferWindowFlags(t *testing.T) {
 		if code != 2 || stdout != "" || len(d.calls) != 0 {
 			t.Errorf("%v = %d, stdout %q, calls %v; want usage error", args, code, stdout, d.calls)
 		}
+	}
+}
+
+func TestDevicesCLIDoesNotEditFileWhenDaemonIsUnreachableForOtherReasons(t *testing.T) {
+	// A dial that fails for a reason other than "nothing is listening" (a bad
+	// token, a hung daemon) must not fall back to editing the file: the daemon
+	// may be running and would overwrite the edit.
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	old := relayDeviceDial
+	relayDeviceDial = func(context.Context) (wsCaller, func(), error) {
+		return nil, nil, errors.New("auth: bad token")
+	}
+	t.Cleanup(func() { relayDeviceDial = old })
+	code, _, stderr := runDevices(t, home, "revoke", "abcd")
+	if code != 1 || !strings.Contains(stderr, "cannot reach the daemon") {
+		t.Fatalf("code=%d stderr=%q; want exit 1 and a clear error", code, stderr)
+	}
+	if _, err := os.Stat(devices.RegistryPath(home)); err == nil {
+		t.Fatal("the registry file was written although the daemon could not be reached")
 	}
 }

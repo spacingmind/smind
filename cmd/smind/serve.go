@@ -113,7 +113,7 @@ func cmdServe(args []string) int {
 	// The relay device admin methods must be registered before the first
 	// connection is served (SetRelayDevices is not safe against concurrent
 	// requests).
-	hub := newRelayHub(srv)
+	hub := newRelayHub(srv, cfg.Relay)
 	httpSrv := &http.Server{
 		Addr:              srv.Addr(),
 		Handler:           srv.Handler(),
@@ -157,11 +157,7 @@ func cmdServe(args []string) int {
 // talks to). It is wired whether or not a relay is configured, so devices can
 // be listed and pre-approved before the first relay connection. Call it
 // before the HTTP server starts serving.
-func newRelayHub(srv *server.Server) *bridge.Hub {
-	rc := config.Default().Relay
-	if cfg, err := config.Load(); err == nil {
-		rc = cfg.Relay
-	}
+func newRelayHub(srv *server.Server, rc config.RelayConfig) *bridge.Hub {
 	reg, err := devices.Open(devices.RegistryPath(config.Dir()))
 	if err != nil {
 		// Never reset a registry we cannot read: that would silently forget

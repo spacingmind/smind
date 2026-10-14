@@ -206,25 +206,22 @@ func TestRevokedDeviceRefusedWithReasonAtHello(t *testing.T) {
 	d.connect()
 	d.mustList()
 
-	if _, err := f.hub.RevokeDevice(d.id); err != nil {
+	// Revoked in the registry only (the relay was never told), so the refusal
+	// below can only come from the daemon's hello check.
+	if _, err := f.reg.Revoke(d.id); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-d.rerr:
-	case <-time.After(fixtureTimeout):
-		t.Fatal("revoking did not close the device's stream")
-	}
-
-	// Even if the relay did not refuse it, the daemon does, with a reason.
 	d2 := f.newDevice(false, "x")
 	d2.priv, d2.pub, d2.id = d.priv, d.pub, d.id
-	err := d2.open("")
-	if err != nil {
-		return // the relay refused the attach (Revoke reached it): also correct
+	if err := d2.open(""); err != nil {
+		t.Fatalf("the relay should still accept the attach: %v", err)
 	}
 	r, err := d2.hello()
-	if err == nil && (r.Err == nil || r.Err.Code != codeRevoked) {
-		t.Fatalf("revoked device's hello = %+v, want code %q", r, codeRevoked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Err == nil || r.Err.Code != codeRevoked {
+		t.Fatalf("revoked device's hello = %+v, want error code %q", r, codeRevoked)
 	}
 }
 
@@ -255,6 +252,7 @@ func TestLegacyClientServedWhileLegacyDevicesTrue(t *testing.T) {
 	f := newHubFixture(t, Options{LegacyDevices: true})
 	f.start(nil)
 	d := f.newDevice(false, "old-app")
+	d.id = DefaultDeviceID                           // a pre-identity client uses the fixed route
 	if err := d.open(DefaultSessionID); err != nil { // sends no hello
 		t.Fatal(err)
 	}
@@ -268,6 +266,7 @@ func TestLegacyDeprecationLogged(t *testing.T) {
 	f := newHubFixture(t, Options{LegacyDevices: true})
 	f.start(nil)
 	d := f.newDevice(false, "old-app")
+	d.id = DefaultDeviceID
 	if err := d.open(""); err != nil {
 		t.Fatal(err)
 	}
@@ -281,6 +280,7 @@ func TestLegacyClientRefusedWhenLegacyDevicesFalse(t *testing.T) {
 	f := newHubFixture(t, Options{LegacyDevices: false})
 	f.start(nil)
 	d := f.newDevice(false, "old-app")
+	d.id = DefaultDeviceID
 	if err := d.open(""); err != nil {
 		t.Fatal(err)
 	}
@@ -291,14 +291,106 @@ func TestLegacyClientRefusedWhenLegacyDevicesFalse(t *testing.T) {
 }
 
 func TestLegacyClientSilentForHelloTimeoutIsStillServed(t *testing.T) {
-	f := newHubFixture(t, Options{LegacyDevices: true, HelloTimeout: 300 * time.Millisecond})
+	f := newHubFixture(t, Options{LegacyDevices: true, HelloTimeout: 400 * time.Millisecond})
 	f.start(nil)
 	d := f.newDevice(false, "quiet-app")
+	d.id = DefaultDeviceID
 	if err := d.open(""); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(600 * time.Millisecond) // longer than the hello timeout, no message sent
+	time.Sleep(100 * time.Millisecond)
+	if f.logs.contains("deprecated") {
+		t.Fatal("the daemon decided the client was legacy before the hello timeout")
+	}
+	waitFor(t, "the silent client to be served as legacy after the hello timeout", func() bool { return f.logs.contains("deprecated") })
 	d.mustList()
+}
+
+func TestSilentClientRefusedWhenLegacyDevicesFalse(t *testing.T) {
+	f := newHubFixture(t, Options{LegacyDevices: false, HelloTimeout: 300 * time.Millisecond})
+	f.start(nil)
+	d := f.newDevice(false, "quiet-app")
+	d.id = DefaultDeviceID
+	if err := d.open(""); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(700 * time.Millisecond)
+	if f.logs.contains("deprecated") {
+		t.Fatal("a silent client was served as legacy although relay.legacyDevices is false")
+	}
+	r, err := d.request("workspace.list", nil)
+	if err == nil && r.Err == nil {
+		t.Fatal("a silent client was served although relay.legacyDevices is false")
+	}
+}
+
+func TestLegacyFallbackOnlyOnTheFixedRoute(t *testing.T) {
+	// Skipping the hello must not dodge identity: a client on any route id
+	// other than the fixed legacy one is refused even while legacy is allowed.
+	f := newHubFixture(t, Options{LegacyDevices: true})
+	f.start(nil)
+	d := f.newDevice(false, "new-style-without-hello")
+	if err := d.open(""); err != nil {
+		t.Fatal(err)
+	}
+	r, err := d.request("workspace.list", nil)
+	if err != nil || r.Err == nil || r.Err.Code != codeHelloRequired {
+		t.Fatalf("answer = %+v, %v; want %q", r, err, codeHelloRequired)
+	}
+}
+
+func TestNewestLegacySessionReplacesTheOlder(t *testing.T) {
+	f := newHubFixture(t, Options{LegacyDevices: true})
+	f.start(nil)
+	first := f.newDevice(false, "old-1")
+	first.id = DefaultDeviceID
+	if err := first.open("legacy-session-1"); err != nil {
+		t.Fatal(err)
+	}
+	first.mustList()
+	second := f.newDevice(false, "old-2")
+	second.id = DefaultDeviceID
+	if err := second.open("legacy-session-2"); err != nil {
+		t.Fatal(err)
+	}
+	second.mustList()
+	f.hub.mu.Lock()
+	legacy := 0
+	for _, s := range f.hub.sessions {
+		if s.legacy {
+			legacy++
+		}
+	}
+	f.hub.mu.Unlock()
+	if legacy != 1 {
+		t.Fatalf("%d legacy sessions, want exactly 1", legacy)
+	}
+}
+
+func TestSameDeviceNewSessionReplacesItsOldSession(t *testing.T) {
+	f := newHubFixture(t, Options{}, relaytestMaxDevices(40))
+	approvedWindow(t, f, 1)
+	f.start(nil)
+	d := f.newDevice(false, "d")
+	d.connect()
+	d.mustList()
+	old := d.session
+
+	// Same persistent key, fresh session (a client that lost its daemon).
+	if err := d.open(""); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := d.hello(); err != nil || r.Err != nil {
+		t.Fatalf("hello on the new session = %+v, %v", r, err)
+	}
+	d.mustList()
+	f.hub.mu.Lock()
+	_, oldStill := f.hub.sessions[routeRef{device: d.id, session: old}]
+	n := len(f.hub.sessions)
+	f.hub.mu.Unlock()
+	if oldStill || n != 1 {
+		t.Fatalf("old session still registered=%v, sessions=%d; want the old one replaced", oldStill, n)
+	}
 }
 
 func TestBridgeDeviceCapRejectsSeventeenth(t *testing.T) {

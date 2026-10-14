@@ -6,6 +6,7 @@ import (
 	"crypto/hkdf"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"math"
 	"testing"
@@ -322,5 +323,41 @@ func TestTranscriptHashIsTheHKDFSalt(t *testing.T) {
 	}
 	if !bytes.Equal(d2m, want) {
 		t.Fatal("TranscriptHash is not the salt deriveKeys uses")
+	}
+}
+
+// TestE2EECoreUnchanged pins the key schedule with fixed X25519 identities:
+// the directional keys and the transcript digest must stay byte-for-byte what
+// they were before device identity was layered on top (ADR-0031 P12b AC 8).
+// The expected values were produced by the pre-P12b implementation.
+func TestE2EECoreUnchanged(t *testing.T) {
+	dseed, mseed := make([]byte, 32), make([]byte, 32)
+	for i := range dseed {
+		dseed[i], mseed[i] = byte(i+1), byte(0xa0+i)
+	}
+	dpriv, err := ecdh.X25519().NewPrivateKey(dseed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mpriv, err := ecdh.X25519().NewPrivateKey(mseed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dpub, mpub := dpriv.PublicKey().Bytes(), mpriv.PublicKey().Bytes()
+	d2m, m2d, err := deriveKeys(dpriv, mpriv.PublicKey(), dpub, mpub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		got  []byte
+		want string
+	}{
+		"daemon->mobile key": {d2m, "f57bf827270072d43e15823abba27a6f3deebde29d524beccc6bee6fd2510acc"},
+		"mobile->daemon key": {m2d, "b091892c20de8617fb4a2e1af589144aeee8395af58df7daafcedfc4445c1ccb"},
+		"transcript hash":    {TranscriptHash(dpub, mpub), "5cdbc91f0f22aea3df1d15bf8c3b7040cab7530cc6b851cb1c4e31ca8a096e40"},
+	} {
+		if hex.EncodeToString(c.got) != c.want {
+			t.Errorf("%s changed: got %x, want %s", name, c.got, c.want)
+		}
 	}
 }

@@ -280,7 +280,6 @@ func (h *Hub) serveConn(ctx context.Context, cfg Config, grpcConn *grpc.ClientCo
 			h.conn = nil
 		}
 		h.mu.Unlock()
-		h.orphanAll(c)
 	}()
 	h.logf("relay bridge: connected to %s (relay host %s)", cfg.RelayAddress, cfg.WorkspaceID)
 
@@ -372,27 +371,14 @@ func (h *Hub) serveConn(ctx context.Context, cfg Config, grpcConn *grpc.ClientCo
 	}
 }
 
-// onSync reconciles with the relay's authoritative list of waiting routes:
-// listed routes get (or resume) a session; sessions orphaned by the previous
-// connection that are not listed belong to devices that are gone.
+// onSync handles the relay's list of routes waiting for a daemon side:
+// listed routes get (or resume) a session. Absence is NOT proof a device is
+// gone — a route whose old daemon side the relay has not yet noticed dead
+// (a half-open connection) is not listed either — so an orphaned session that
+// is missing here is kept until its orphan TTL or a DeviceDetach.
 func (h *Hub) onSync(c *relayConn, refs []*relaypb.ControlFrame_DeviceRef) {
-	listed := make(map[routeRef]bool, len(refs))
 	for _, r := range refs {
-		listed[routeRef{r.GetDeviceId(), string(r.GetSessionId())}] = true
-	}
-	h.mu.Lock()
-	var gone []*session
-	for ref, s := range h.sessions {
-		if s.orphaned && !listed[ref] {
-			gone = append(gone, s)
-		}
-	}
-	h.mu.Unlock()
-	for _, s := range gone {
-		h.drop(s)
-	}
-	for ref := range listed {
-		h.ensure(c, ref)
+		h.ensure(c, routeRef{r.GetDeviceId(), string(r.GetSessionId())})
 	}
 	// Revocations are per control stream at the relay: re-send them on every
 	// (re)connect. Only now — a Sync proves the relay speaks Revoke (an older
@@ -449,19 +435,6 @@ func (h *Hub) drop(s *session) {
 	s.cancel()
 }
 
-// orphanAll marks every session that was running on dead connection c as
-// waiting for the next connection (its runner exits on its own as c.ctx is
-// cancelled), and arms their expiry.
-func (h *Hub) orphanAll(c *relayConn) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for _, s := range h.sessions {
-		if s.conn == c {
-			s.orphanedAt = h.clock.Now()
-		}
-	}
-}
-
 // runSession is the goroutine tree of one device: open or resume the
 // daemon-side stream, handshake, identify, serve; on a transport failure
 // over a live relay connection resume in place with jittered backoff; on a
@@ -494,8 +467,10 @@ func (h *Hub) runSession(s *session, c *relayConn) {
 			}
 			s.pending = nil
 			s.running, s.orphaned = false, true
+			s.orphanGen++
+			gen := s.orphanGen
 			h.mu.Unlock()
-			h.expireOrphan(s)
+			h.expireOrphan(s, gen)
 			return
 		}
 		if s.dc == nil || (err != nil && isFatalSessionErr(err)) {
@@ -523,14 +498,15 @@ func (h *Hub) runSession(s *session, c *relayConn) {
 	}
 }
 
-// expireOrphan drops s if it is still orphaned after orphanTTL.
-func (h *Hub) expireOrphan(s *session) {
+// expireOrphan drops s if it is still in the same orphaning (gen) after
+// orphanTTL — a session orphaned, resumed and orphaned again is on a new clock.
+func (h *Hub) expireOrphan(s *session, gen int) {
 	go func() {
 		if !h.sleep(s.ctx, orphanTTL) {
 			return
 		}
 		h.mu.Lock()
-		still := s.orphaned && h.sessions[s.ref] == s
+		still := s.orphaned && s.orphanGen == gen && h.sessions[s.ref] == s
 		h.mu.Unlock()
 		if still {
 			h.drop(s)
@@ -550,7 +526,18 @@ func isFatalSessionErr(err error) bool {
 
 // serveSession runs one attach of a session on connection c: open/resume the
 // stream, (first time) identify the device, serve until the transport ends.
-func (h *Hub) serveSession(s *session, c *relayConn) error {
+func (h *Hub) serveSession(s *session, c *relayConn) (err error) {
+	var r *sessionReader
+	defer func() {
+		// A session that is over (cancelled, refused, closed by the server)
+		// releases its DataConn — and with it the keepalive loop — once the
+		// reader has ended (Close must never run under a pending Receive).
+		if s.dc != nil && r != nil && (s.ctx.Err() != nil || errors.Is(err, errSessionOver)) {
+			s.cancel()
+			<-r.done
+			_ = s.dc.Close()
+		}
+	}()
 	if s.dc == nil {
 		dc, err := client.OpenData(s.ctx, c.rc, c.admissionID, h.cfg.WorkspaceID, s.ref.session, s.ref.device, h.kp, e2ee.RoleDaemon, client.WithKeepalive(h.keepaliveConfig()))
 		if err != nil {
@@ -569,7 +556,7 @@ func (h *Hub) serveSession(s *session, c *relayConn) error {
 		return fmt.Errorf("resume: %w", err)
 	}
 
-	r := newSessionReader(s.ctx, s.dc)
+	r = newSessionReader(s.ctx, s.dc)
 	defer r.stop()
 	tr := &deviceTransport{s: s, r: r}
 
