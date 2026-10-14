@@ -43,6 +43,15 @@ pub fn validate_base_url(raw: &str) -> Result<Url, String> {
     if trimmed.is_empty() {
         return Err("URL is required".to_string());
     }
+    // A relay pairing link carries the relay's admission secret in its
+    // fragment; stripping the fragment below would save a bogus direct
+    // connection to the link's pairing host. Never echo the link.
+    if trimmed
+        .split_once('#')
+        .is_some_and(|(_, frag)| url::form_urlencoded::parse(frag.as_bytes()).any(|(k, _)| k == "offer"))
+    {
+        return Err("that is a relay pairing link, not a daemon URL: use \"Add via relay link\"".to_string());
+    }
     let mut url = Url::parse(trimmed).map_err(|e| format!("invalid URL {trimmed:?}: {e}"))?;
     match url.scheme() {
         "http" | "https" => {}
@@ -295,6 +304,14 @@ mod tests {
         assert!(validate_base_url("file:///etc/passwd").is_err());
         assert!(validate_base_url("javascript:alert(1)").is_err());
         assert!(validate_base_url("ftp://example.com").is_err());
+    }
+
+    #[test]
+    fn validate_base_url_rejects_relay_pairing_links_without_echoing_them() {
+        let err = validate_base_url("https://spacingmind.sh/pair#offer=c2VjcmV0").unwrap_err();
+        assert!(err.contains("Add via relay link"), "{err}");
+        assert!(!err.contains("c2VjcmV0"), "{err}");
+        assert!(validate_base_url("http://example.com:9000/#z").is_ok());
     }
 
     #[test]
