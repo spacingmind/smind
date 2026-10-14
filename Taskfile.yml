@@ -82,6 +82,12 @@ tasks:
     cmds:
       - go test ./...
       - node --test 'desktop/scripts/*.test.mjs'
+      - sh scripts/install_test.sh
+
+  test:install:ps:
+    desc: Run the install.ps1 tests (needs PowerShell 7, `pwsh`)
+    cmds:
+      - pwsh -NoProfile -File scripts/install_test.ps1
 
   test:web:
     desc: Run the web UI's test suite
@@ -95,6 +101,12 @@ tasks:
     cmds:
       - go vet ./...
       - test -z "$(gofmt -l $(git ls-files '*.go'))"
+      - |
+        if command -v shellcheck >/dev/null 2>&1; then
+          shellcheck scripts/install.sh scripts/install_test.sh
+        else
+          echo "shellcheck not installed; skipping install script lint" >&2
+        fi
 
   check:versions:
     desc: Verify the four desktop version fields match the release manifest
