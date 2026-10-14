@@ -299,6 +299,8 @@ and the relay host secret hashes.
 "smind relay connect"/"smind relay offer" are the OTHER side: they make
 this daemon a client of some relay (self-hosted or not), so "smind serve"
 dials out to it in the background and a paired mobile device can reach
-this daemon's workspaces through it. Connecting registers this daemon once with the relay; every paired client sees all of this daemon's workspaces, spaces and tasks; nothing is created in smind.
+this daemon's workspaces through it.
+
+Connecting registers this daemon once with the relay; every paired client sees all of this daemon's workspaces, spaces and tasks; nothing is created in smind.
 `)
 }
