@@ -167,6 +167,13 @@ func (h *Hub) admitHello(s *session, r *sessionReader, t *deviceTransport, env r
 	}
 	s.deviceID, s.label, s.admitted = dec.Device.ID, dec.Device.Label, true
 	h.mu.Unlock()
+	// A revoke that landed between Admit and now could not see this session
+	// (its deviceID was not set yet): look again, so a revoked device is never
+	// served.
+	if d, ok := h.opts.Registry.Get(dec.Device.ID); !ok || d.State != devices.StateApproved {
+		h.refuse(t, r, env.ID, codeRevoked, "this device was revoked")
+		return errSessionOver
+	}
 	if err := h.respondResult(t, env.ID, helloResult{V: devices.HelloVersion, DeviceID: dec.Device.ID, State: string(dec.Device.State)}); err != nil {
 		return err
 	}

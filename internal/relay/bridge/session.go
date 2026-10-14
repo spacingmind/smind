@@ -23,6 +23,7 @@ type session struct {
 
 	running, orphaned, serving bool       // hub
 	conn                       *relayConn // hub: the connection the runner serves on
+	pending                    *relayConn // hub: a newer connection that announced this route while the runner was still unwinding
 	orphanedAt                 time.Time  // hub
 	deviceID, label            string     // hub: verified identity ("" until/unless hello)
 	admitted, legacy           bool       // hub: past identification (counts toward the device cap)

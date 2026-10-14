@@ -413,6 +413,13 @@ func (h *Hub) ensure(c *relayConn, ref routeRef) {
 		}
 		s = h.newSessionLocked(ref)
 	} else if s.running {
+		// Idempotent for the same connection. A DIFFERENT (newer) connection
+		// announcing a route whose old runner is still unwinding must not be
+		// lost — the relay will not say it again — so the runner picks it up
+		// when it exits.
+		if s.conn != c {
+			s.pending = c
+		}
 		h.mu.Unlock()
 		return
 	}
@@ -475,8 +482,17 @@ func (h *Hub) runSession(s *session, c *relayConn) {
 			return
 		case c.ctx.Err() != nil:
 			// The relay connection died under a healthy session: keep its
-			// E2EE state and wait for the next connection's Sync.
+			// E2EE state and wait for the next connection's Sync — unless a
+			// newer connection already announced this route.
 			h.mu.Lock()
+			if next := s.pending; next != nil && next.ctx.Err() == nil {
+				s.pending, s.conn = nil, next
+				h.mu.Unlock()
+				c = next
+				failures, backoff = 0, time.Second
+				continue
+			}
+			s.pending = nil
 			s.running, s.orphaned = false, true
 			h.mu.Unlock()
 			h.expireOrphan(s)
