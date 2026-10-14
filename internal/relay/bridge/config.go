@@ -1,5 +1,5 @@
 // Package bridge wires the daemon itself into a relay as a client: it
-// persists the `smind relay connect` triple (address, workspace ID,
+// persists the `smind relay connect` triple (address, relay host id,
 // secret) plus the relay's pinned TLS fingerprint, and runs the background
 // loop that dials the relay, admits, and bridges each relay-carried E2EE
 // data session into the same internal/wsapi RPC dispatch table the
@@ -33,10 +33,10 @@ type Config struct {
 	// RelayAddress is the relay's host:port (as dialled by
 	// internal/relay/client.Dial).
 	RelayAddress string
-	// WorkspaceID is the workspace this daemon is enrolled as, per `smind
-	// relay workspace new`.
+	// WorkspaceID is the relay host this daemon is enrolled as, per `smind
+	// relay host new`.
 	WorkspaceID string
-	// SecretHex is the hex-encoded workspace secret `smind relay workspace
+	// SecretHex is the hex-encoded relay host secret `smind relay host
 	// new` printed once.
 	SecretHex string
 	// Fingerprint is the relay's TLS certificate fingerprint (hex SHA-256
@@ -62,7 +62,7 @@ func ConfigPath(dir string) string {
 	return filepath.Join(dir, configFileName)
 }
 
-// SaveConfig persists cfg under dir (mode 0600 -- it carries the workspace
+// SaveConfig persists cfg under dir (mode 0600 -- it carries the relay host
 // secret in the clear, same sensitivity as the e2ee keypair and auth
 // token this package's sibling packages already persist alongside it).
 func SaveConfig(dir string, cfg Config) error {

@@ -27,11 +27,11 @@ import (
 // shuts the relay down cleanly.
 func TestRunServesTLSAndWorkspaceEnrollment(t *testing.T) {
 	dir := t.TempDir()
-	secret, err := EnrollWorkspace(dir, "ws-a")
+	secret, err := EnrollHost(dir, "ws-a")
 	if err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
-	if _, err := EnrollWorkspace(dir, "ws-a"); err == nil {
+	if _, err := EnrollHost(dir, "ws-a"); err == nil {
 		t.Fatal("duplicate enrollment must fail")
 	}
 

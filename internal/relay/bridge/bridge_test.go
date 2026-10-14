@@ -36,7 +36,7 @@ import (
 func startTestRelay(t *testing.T, workspaceID string) (cfg Config, stop func()) {
 	t.Helper()
 	dir := t.TempDir()
-	secret, err := server.EnrollWorkspace(dir, workspaceID)
+	secret, err := server.EnrollHost(dir, workspaceID)
 	if err != nil {
 		t.Fatalf("enroll: %v", err)
 	}

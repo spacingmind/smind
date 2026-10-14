@@ -5,9 +5,9 @@
 // buffer (ADR-0007 (a)). The relay never sees an E2EE session key or
 // plaintext: Frame payload bytes are copied through, never inspected.
 //
-// Fanout (ADR-0007 (b)): a workspace may have multiple paired devices,
+// Fanout (ADR-0007 (b)): a relay host may have multiple paired devices,
 // each with its own OpenData stream and its own E2EE session (and hence
-// its own route, keyed (workspace, session, device), with one bounded
+// its own route, keyed (relay host, session, device), with one bounded
 // queue per side). There is deliberately NO device-to-device forwarding:
 // the daemon reaches each device over its own route, and a device's
 // frames go only to the daemon. That is the conservative reading of the
@@ -45,8 +45,8 @@ const DefaultBufferCap = 200
 
 // Bounds on relay state that would otherwise grow for as long as the
 // process runs (every Admit adds a binding, every distinct
-// (workspace, session, device) adds a route). All are overridable with the
-// Options below; the defaults are far above normal use (a workspace has a
+// (relay host, session, device) adds a route). All are overridable with the
+// Options below; the defaults are far above normal use (a relay host has a
 // handful of devices, and a daemon re-admits only after a restart or
 // reconnect) and low enough that a misbehaving client cannot make the relay
 // hold unbounded memory.
@@ -58,7 +58,7 @@ const (
 	DefaultRouteGrace = 5 * time.Minute
 
 	// DefaultMaxBindingsPerWorkspace caps live admission bindings per
-	// workspace; past it the least-recently-used binding is evicted (its
+	// relay host; past it the least-recently-used binding is evicted (its
 	// holder re-admits, which is cheap).
 	DefaultMaxBindingsPerWorkspace = 64
 
@@ -79,14 +79,14 @@ const (
 // its lowercase-hex encoding (metadata values must be printable ASCII). The
 // ID is random, delivered only over the authenticated connection, and is
 // not itself a credential — every frame is still checked against the
-// workspace binding it names.
+// relay host binding it names.
 const MetadataKeyAdmission = "admission-id"
 
 // gRPC statuses for the two authz failures. Callers see codes, not causes,
-// so a rejected stream reveals only "not admitted" or "wrong workspace".
+// so a rejected stream reveals only "not admitted" or "wrong relay host".
 var (
 	errNotAdmitted  = status.Error(codes.Unauthenticated, "relay: connection not admitted")
-	errWrongBinding = status.Error(codes.PermissionDenied, "relay: workspace binding mismatch")
+	errWrongBinding = status.Error(codes.PermissionDenied, "relay: relay host binding mismatch")
 )
 
 type side uint8
@@ -116,7 +116,7 @@ type Server struct {
 	}
 }
 
-// binding is one admission ID's workspace binding plus the bookkeeping
+// binding is one admission ID's relay host binding plus the bookkeeping
 // that bounds it. Guarded by Server.mu.
 type binding struct {
 	workspaceID string
@@ -141,7 +141,7 @@ func WithRouteGrace(d time.Duration) Option {
 	}
 }
 
-// WithBindingLimits sets the per-workspace cap on admission bindings and
+// WithBindingLimits sets the per-host cap on admission bindings and
 // the idle TTL after which an unused binding expires (<=0 keeps the
 // default for that bound).
 func WithBindingLimits(maxPerWorkspace int, ttl time.Duration) Option {
@@ -261,9 +261,9 @@ func (s *Server) bindingExpired(b *binding, now time.Time) bool {
 }
 
 // addBindingLocked records a new admission binding, first evicting the
-// workspace's least-recently-used binding(s) while it is at the cap.
+// relay host's least-recently-used binding(s) while it is at the cap.
 // Bindings with no attached stream are preferred victims; a binding in use
-// is only evicted when every one of the workspace's bindings is in use
+// is only evicted when every one of the relay host's bindings is in use
 // (its stream keeps running — only a later Resume would need a fresh
 // admission).
 func (s *Server) addBindingLocked(id, workspaceID string, now time.Time) {
@@ -322,7 +322,7 @@ func (s *Server) Admit(ctx context.Context, req *relaypb.AdmitRequest) (*relaypb
 	return &relaypb.AdmitResponse{AdmissionId: session.AdmissionID}, nil
 }
 
-// binding resolves the workspace binding a stream presents via its
+// binding resolves the relay host binding a stream presents via its
 // admission-id metadata, or fails with errNotAdmitted. On success the
 // binding is marked in use until the returned release func is called (once,
 // when the stream ends): a binding with a live stream never expires, and
