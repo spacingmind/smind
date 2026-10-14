@@ -1049,5 +1049,5 @@ Commands: `go test -race -count=20 ./internal/relay/... ./internal/wsapi/ ./inte
 | 8 e2ee unchanged | `TestE2EECoreUnchanged` (fixed identities, golden keys), `TestTranscriptHashIsTheHKDFSalt`, the existing e2ee fixtures; `deriveKeys` is byte-identical to before |
 
 Not verified: a real desktop/mobile client (P13a/b), the cross-language hello vector in Rust/TS, Windows at runtime (registry
-rename retry, `Restrict`), a pre-P12a relay binary end to end (the `Sync`-less fallback is reasoned and unit-covered only by
-the heuristic, not run against an old binary), a real proxy.
+rename retry, `Restrict`), the hub against a pre-P12a relay (the `Sync`-less fallback to the fixed legacy route has no test — it is reasoned
+from the old server code only), a real proxy.
