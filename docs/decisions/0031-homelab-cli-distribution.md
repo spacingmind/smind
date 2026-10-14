@@ -772,6 +772,34 @@ host (8 per device slot) and id length (128 bytes), and pings idle peers over HT
 the matching nonce proves the relay supports keepalive (a relay without it forwards the probe, a keepalive frame with
 somebody else's nonce, which only counts as liveness); each (re)opened stream probes once.
 
+**Implementation notes (P12b, as built — the contract P13a/b implement).**
+- *`device_hello` is an ordinary wsapi request*: `{"id":"…","method":"relay.device_hello","params":{"v":1,"device_pub":b64,
+  "label":"…","signature":b64,"password"?:"…"}}`, the first message after the E2EE handshake. Success is an ordinary response
+  `{"id","result":{"v":1,"device_id","state":"approved"}}`; a refusal is `{"id","error":{"message","code"}}` with code
+  `awaiting_approval` (device recorded `pending`), `revoked`, `bad_hello` (bad signature / id mismatch / version / label),
+  `too_many_devices`, `device_hello_required` (legacy clients refused), `device_hello_unsupported` or `internal`; the daemon
+  then ends the route. A daemon from before P12b answers `method not found`, which is how a client detects it (legacy daemon).
+- *What is signed:* `"smind-device-hello" ‖ e2ee.TranscriptHash(daemon_pub, client_ephemeral_pub) ‖ daemon_pub`, where
+  `TranscriptHash` is the HKDF salt the session keys already use, `SHA-256("smind relay e2ee v1" ‖ daemon_pub ‖
+  client_pub)`; the E2EE core is unchanged (a test pins the equality). `device_id` = lowercase unpadded RFC 4648 base32 of
+  `SHA-256(device_pub)`, first 26 characters. Shared test vector: `internal/relay/devices/testdata/device_hello_vector.json`.
+  `device_hello.password` is not covered by the signature and is checked (P13c) only over the encrypted channel.
+- *Daemon behaviour:* one session per announced `(device_id, session_id)`; sessions survive a relay reconnect (orphaned, E2EE
+  state kept up to 6 minutes) and are resumed in place when the next `Sync` lists their route, dropped when it does not;
+  a client that lost its daemon (restart) must re-handshake with a **fresh session id** — it cannot tell by itself, so after
+  any resume a client should confirm liveness with a request and fall back to a fresh session if it is not answered. Data and
+  control streams ping every 30 s and are re-established after 75 s of silence with ±20 % jittered backoff. Behind a relay that
+  sends no `Sync` (older than P12a) the hub falls back to opening the fixed legacy route, and never sends `Revoke`.
+- *Legacy clients* (no `device_hello`: first message is anything else, or silence for 5 s) are served as one unlisted device
+  while `relay.legacyDevices` is true (default; deprecated, logged). **Caveat:** while it is true, a client that skips the hello
+  is served without approval, so the pairing window and `pending` state only bind once the apps are updated and
+  `relay.legacyDevices: false` is set; the default flips in the next minor release.
+- *Admin API* (local `/ws` only — over the relay these methods answer `forbidden`, so a paired device can never approve or
+  revoke devices): `relay.device.list {}` → `{"devices":[{device_id,device_pub,label,first_seen,last_seen,state,connected}],
+  "window":null|{expires_at,remaining}}`; `relay.device.approve|revoke {id}` and `relay.device.rename {id,label}` → the device
+  (ids may be unique prefixes; errors `not_found`, `ambiguous`); `relay.device.window {duration_seconds?,max_devices?}`
+  (defaults 10 min / 1) → the window. `smind relay offer` opens the window (`--window`, `--max-devices`).
+
 **Trust model of the control stream (unchanged secret, new reach).** Both ends of a relay host authenticate with the same
 host secret (ADR-0011), so the relay cannot tell the daemon from a client holding the offer. Before this decision that
 mattered little (control carried only `Ping`/`Pong`); now whoever holds the secret can supersede the daemon's control
