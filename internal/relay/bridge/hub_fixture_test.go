@@ -66,6 +66,16 @@ func (l *logSink) contains(sub string) bool {
 	return false
 }
 
+// dump logs every hub diagnostic line, for a failing test.
+func (l *logSink) dump(t *testing.T) {
+	t.Helper()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, line := range l.lines {
+		t.Logf("hub log: %s", line)
+	}
+}
+
 func containsStr(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {
@@ -326,6 +336,7 @@ func (d *device) mustList() []json.RawMessage {
 	d.t.Helper()
 	out, err := d.listWorkspaces()
 	if err != nil {
+		d.f.logs.dump(d.t)
 		d.t.Fatalf("device %s: %v", d.label, err)
 	}
 	return out
@@ -441,4 +452,29 @@ func relayStatus(err error) codes.Code {
 		return s.Code()
 	}
 	return codes.Unknown
+}
+
+// snapshotSessions records every session with the relay connection it is
+// currently bound to.
+func (h *Hub) snapshotSessions() map[*session]*relayConn {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make(map[*session]*relayConn, len(h.sessions))
+	for _, s := range h.sessions {
+		out[s] = s.conn
+	}
+	return out
+}
+
+// resumedSince reports whether every session in before is still registered,
+// serving, and bound to a different relay connection than at the snapshot.
+func (h *Hub) resumedSince(before map[*session]*relayConn) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for s, old := range before {
+		if h.sessions[s.ref] != s || !s.serving || s.conn == old {
+			return false
+		}
+	}
+	return true
 }

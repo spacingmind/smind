@@ -377,6 +377,7 @@ func (h *Hub) serveConn(ctx context.Context, cfg Config, grpcConn *grpc.ClientCo
 // (a half-open connection) is not listed either — so an orphaned session that
 // is missing here is kept until its orphan TTL or a DeviceDetach.
 func (h *Hub) onSync(c *relayConn, refs []*relaypb.ControlFrame_DeviceRef) {
+	h.logf("relay bridge: sync: %d waiting route(s)", len(refs))
 	for _, r := range refs {
 		h.ensure(c, routeRef{r.GetDeviceId(), string(r.GetSessionId())})
 	}
@@ -411,6 +412,7 @@ func (h *Hub) ensure(c *relayConn, ref routeRef) {
 	}
 	s.running, s.orphaned = true, false
 	h.mu.Unlock()
+	h.logf("relay bridge: starting session for a device route")
 	go h.runSession(s, c)
 }
 
@@ -461,12 +463,14 @@ func (h *Hub) runSession(s *session, c *relayConn) {
 			if next := s.pending; next != nil && next.ctx.Err() == nil {
 				s.pending, s.conn = nil, next
 				h.mu.Unlock()
+				h.logf("relay bridge: resuming device session on the newer relay connection")
 				c = next
 				failures, backoff = 0, time.Second
 				continue
 			}
 			s.pending = nil
 			s.running, s.orphaned = false, true
+			h.logf("relay bridge: relay connection lost; device session kept for the next sync")
 			s.orphanGen++
 			gen := s.orphanGen
 			h.mu.Unlock()

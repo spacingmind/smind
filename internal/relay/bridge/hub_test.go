@@ -427,17 +427,24 @@ func TestBridgeResumesDeviceAfterTransportDrop(t *testing.T) {
 	a, b := f.newDevice(false, "a"), f.newDevice(true, "b")
 	a.connect()
 	b.connect()
-	hub.mu.Lock()
-	before := map[string]*session{}
-	for ref, s := range hub.sessions {
-		before[ref.device] = s
+	before := hub.snapshotSessions()
+	if len(before) != 2 {
+		t.Fatalf("%d sessions before the drop, want 2", len(before))
 	}
-	hub.mu.Unlock()
 
-	// Only the daemon's connection to the relay is cut. The devices' own
-	// streams stay up, so their next requests wait at the relay and are
-	// answered once the daemon is back — over the SAME E2EE sessions.
+	// Only the daemon's connection to the relay is cut; the devices' own
+	// streams stay up.
 	proxy.killAll()
+
+	// Wait until the daemon is back and serving both sessions on the NEW
+	// relay connection. A request handed to the relay while the daemon's old
+	// stream is still dying can be lost in flight (the relay has no acks and a
+	// gRPC write into a connection that is going away still "succeeds"), which
+	// is a property of the protocol, not of resuming: what this test asserts is
+	// that the SAME E2EE sessions are resumed in place and keep working.
+	waitFor(t, "both sessions to be resumed on the new relay connection", func() bool {
+		return hub.resumedSince(before)
+	})
 	a.mustList()
 	b.mustList()
 
@@ -445,7 +452,7 @@ func TestBridgeResumesDeviceAfterTransportDrop(t *testing.T) {
 	defer hub.mu.Unlock()
 	for _, d := range []*device{a, b} {
 		s := hub.sessions[routeRef{device: d.id, session: d.session}]
-		if s == nil || s != before[d.id] {
+		if s == nil || before[s] == nil {
 			t.Fatalf("device %s was re-handshaken instead of resumed in place", d.label)
 		}
 	}
@@ -506,6 +513,7 @@ func TestBridgeDeadStreamAfter75sReconnectsWithJitter(t *testing.T) {
 	d := f.newDevice(false, "d")
 	d.connect()
 	d.mustList()
+	before := f.hub.snapshotSessions()
 
 	// The path to the relay goes silent (nothing is closed, nothing arrives).
 	proxy.setBlackhole(true)
@@ -544,6 +552,10 @@ func TestBridgeDeadStreamAfter75sReconnectsWithJitter(t *testing.T) {
 		}
 	}()
 	defer close(stopAdvancing)
+	// Only send once the daemon serves the session on its new connection: a
+	// request handed to the relay while the old daemon stream is still dying
+	// can be lost in flight (no acks in the relay protocol).
+	waitFor(t, "the session to be resumed on the new relay connection", func() bool { return f.hub.resumedSince(before) })
 	d.mustList()
 }
 
@@ -578,8 +590,10 @@ func TestDevicesRevokeClosesStreamAndSendsRevoke(t *testing.T) {
 
 	// Revocations are per control stream at the relay: after the daemon
 	// reconnects it must send them again.
+	before := hub.snapshotSessions() // b's session only: a was revoked
 	proxy.killAll()
-	waitFor(t, "the daemon to reconnect and re-send the revocation", func() bool {
+	waitFor(t, "the daemon to be back and serving b on the new relay connection", func() bool { return hub.resumedSince(before) })
+	waitFor(t, "the daemon to re-send the revocation", func() bool {
 		a3 := f.newDevice(false, "a")
 		a3.priv, a3.pub, a3.id = a.priv, a.pub, a.id
 		err := a3.open("")

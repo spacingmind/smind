@@ -788,7 +788,10 @@ somebody else's nonce, which only counts as liveness); each (re)opened stream pr
 - *Daemon behaviour:* one session per announced `(device_id, session_id)`; sessions survive a relay reconnect (orphaned, E2EE
   state kept up to 6 minutes) and are resumed in place when the next `Sync` lists their route, dropped when it does not;
   a client that lost its daemon (restart) must re-handshake with a **fresh session id** — it cannot tell by itself, so after
-  any resume a client should confirm liveness with a request and fall back to a fresh session if it is not answered. Data and
+  any resume a client should confirm liveness with a request and fall back to a fresh session if it is not answered. The relay
+  has no acknowledgements, so a request handed to the daemon's stream at the instant that connection dies can be lost in flight
+  (and the E2EE counters then no longer line up: the session is wedged until a fresh one) — treat requests as at-most-once across a
+  hard drop: time out, and open a fresh session rather than waiting. Data and
   control streams ping every 30 s and are re-established after 75 s of silence with ±20 % jittered backoff. Behind a relay that
   sends no `Sync` (older than P12a) the hub falls back to opening the fixed legacy route, and never sends `Revoke`.
 - *Legacy clients* (no `device_hello`: first message is anything else, or silence for 5 s) are served as one unlisted device
