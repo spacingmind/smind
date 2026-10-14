@@ -60,7 +60,7 @@ func Dial(target, fingerprint string) (*grpc.ClientConn, error) {
 }
 
 // Admit completes the admission exchange (ADR-0011) over c: obtains a
-// server nonce and proves possession of the raw workspace secret with the
+// server nonce and proves possession of the raw relay host secret with the
 // SCRAM-style proof of admission.ComputeProof (the secret itself never
 // leaves the process). Returns the admission ID (hex) to present on
 // subsequent streams.
@@ -195,7 +195,7 @@ func (d *DataConn) DropTransport() { d.frames.drop() }
 // Close tears down the stream and session.
 func (d *DataConn) Close() error { return d.channel.Close() }
 
-// OpenData opens a data stream for (workspace, session, device) under the
+// OpenData opens a data stream for (relay host, session, device) under the
 // admission, wraps it as an io.ReadWriteCloser of framed ciphertext, and
 // layers an e2ee.Channel on top using the given keypair and role. The
 // returned DataConn must complete Handshake before Send/Receive.

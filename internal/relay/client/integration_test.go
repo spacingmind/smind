@@ -35,7 +35,7 @@ type relayProcess struct {
 func startRelay(t *testing.T) (*relayProcess, func()) {
 	t.Helper()
 	dir := t.TempDir()
-	secret, err := server.EnrollWorkspace(dir, "ws-int")
+	secret, err := server.EnrollHost(dir, "ws-int")
 	if err != nil {
 		t.Fatalf("enroll: %v", err)
 	}

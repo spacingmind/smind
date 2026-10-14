@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { desktop, isDesktop, type Connection } from "@/lib/platform";
+import { AddRelayLink } from "@/components/settings/add-relay-link";
+import { desktop, isDesktop, isRelayPairingLink, type Connection } from "@/lib/platform";
 import { Icons } from "@/lib/icons";
 
 /**
@@ -31,6 +32,10 @@ function ConnectionsSection() {
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // A relay link pasted into the URL form above is handed to the relay flow
+  // (never saved as a URL); `key` remounts that flow for each handed-over link.
+  const [handedOver, setHandedOver] = useState<{ key: number; link: string } | null>(null);
+  const [showHandoverNotice, setShowHandoverNotice] = useState(false);
 
   const refresh = useCallback(() => {
     Promise.all([desktop.listConnections(), desktop.getCurrentConnection()])
@@ -48,6 +53,12 @@ function ConnectionsSection() {
   async function handleAdd(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+    if (isRelayPairingLink(url)) {
+      setHandedOver({ key: Date.now(), link: url.trim() });
+      setShowHandoverNotice(true);
+      setUrl("");
+      return;
+    }
     setBusy(true);
     try {
       await desktop.addConnection(label, url);
@@ -124,8 +135,27 @@ function ConnectionsSection() {
           ))}
         </ul>
       </section>
+      <section className="flex flex-col gap-2" data-testid="connection-add-relay-section">
+        <h3 className="text-ui-base font-medium text-foreground">Add via relay link</h3>
+        {showHandoverNotice && (
+          <p role="status" data-testid="connection-relay-handover" className="text-ui-base text-muted-foreground">
+            That is a relay pairing link, not a daemon URL. Nothing was saved from the URL form; review it here instead.
+          </p>
+        )}
+        <AddRelayLink
+          key={handedOver?.key ?? "paste"}
+          initialLink={handedOver?.link}
+          onCancel={() => setShowHandoverNotice(false)}
+          onInitialLinkTaken={() => setHandedOver((h) => (h ? { ...h, link: "" } : h))}
+          onAdded={() => {
+            // The flow resets itself; keep it mounted so a "switching failed" note survives.
+            setShowHandoverNotice(false);
+            refresh();
+          }}
+        />
+      </section>
       <section className="flex flex-col gap-2">
-        <h3 className="text-ui-base font-medium text-foreground">Add a connection</h3>
+        <h3 className="text-ui-base font-medium text-foreground">Add a connection by URL</h3>
         <form className="flex flex-col gap-2" onSubmit={handleAdd}>
           <Input
             aria-label="Connection label"

@@ -5,6 +5,7 @@ go 1.27.0
 require (
 	github.com/charmbracelet/x/xpty v0.1.4
 	github.com/gorilla/websocket v1.5.3
+	github.com/mattn/go-isatty v0.0.24
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/refraction-networking/utls v1.8.2
 	github.com/spacingmind/claude-agent-sdk-go v0.3.2
@@ -31,7 +32,6 @@ require (
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.17.4 // indirect
-	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rs/cors v1.7.0 // indirect

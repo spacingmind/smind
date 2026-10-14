@@ -103,6 +103,7 @@ pub fn run() {
             commands::connections_list,
             commands::connections_add,
             commands::connections_add_relay,
+            commands::connections_preview_relay,
             commands::connections_remove,
             commands::connections_select,
             commands::connections_get_current,

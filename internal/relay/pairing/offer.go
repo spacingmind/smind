@@ -41,28 +41,28 @@ var ErrInvalidOffer = errors.New("pairing: invalid offer")
 type Offer struct {
 	// DaemonID identifies the daemon the device is pairing with -- the
 	// admission daemon-key-id (internal/relay/admission), NOT the relay
-	// workspace ID; see WorkspaceID for that.
+	// relay host id; see WorkspaceID for that.
 	DaemonID string
 	// PublicKey is the daemon's long-lived X25519 public key (32 raw bytes).
 	PublicKey []byte
 	// Relay is the relay endpoint URL the device should connect to.
 	Relay string
-	// WorkspaceID is the relay workspace (internal/relay/admission.Workspace)
+	// WorkspaceID is the relay host (internal/relay/admission.Workspace)
 	// the device must present in its own Admit call to reach this daemon's
 	// data. Optional from Validate's perspective (like RelayFingerprint) so
 	// existing offer construction/round-trip callers that predate this
 	// field keep working unmodified, but a mobile client cannot complete
 	// Admit without it -- this field's addition is what actually makes
 	// pairing-offer-driven admission possible at all (there was previously
-	// no way for a scanned/pasted offer to convey which workspace to admit
+	// no way for a scanned/pasted offer to convey which relay host to admit
 	// under).
 	WorkspaceID string
 	// RelayFingerprint optionally pins the relay's self-signed TLS certificate
 	// (ADR-0011 pins it daemon-side; the mobile side needs the same pin to
 	// reach a self-hosted relay). Empty when the relay uses a public CA.
 	RelayFingerprint string
-	// Secret is the raw workspace admission secret (internal/relay/admission),
-	// the same one `smind relay workspace new` prints once and the daemon
+	// Secret is the raw relay host admission secret (internal/relay/admission),
+	// the same one `smind relay host new` prints once and the daemon
 	// hashes for its own Admit calls. Optional (omitted from Validate's
 	// requirements, matching RelayFingerprint) since not every offer needs
 	// to grant admission -- but a mobile client cannot complete Admit
@@ -70,12 +70,12 @@ type Offer struct {
 	//
 	// This is a known milestone-1 simplification, not the intended long-term
 	// design: admission today (ADR-0011) has exactly one shared secret per
-	// workspace, with no separate, revocable per-device credential, so a
+	// relay host, with no separate, revocable per-device credential, so a
 	// scanned/pasted pairing offer necessarily carries the same secret the
 	// daemon itself holds rather than a narrower one. Milestone 2's real
 	// multi-device pairing story should replace this with per-device
 	// admission issued through the relay (e.g. a control-frame exchange),
-	// so pairing a new device never requires handing out the workspace's
+	// so pairing a new device never requires handing out the relay host's
 	// master secret. The offer payload living only in the URL fragment
 	// (never sent to a server, see this package's doc comment) is this
 	// milestone's mitigation, not a fix.

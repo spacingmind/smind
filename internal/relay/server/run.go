@@ -34,7 +34,7 @@ type Config struct {
 	// documented port.
 	GRPCWebListenAddr string
 	// DataDir holds the persisted self-signed TLS certificate and
-	// workspace enrollments (config.Dir()/relay by default from the CLI).
+	// relay host enrollments (config.Dir()/relay by default from the CLI).
 	DataDir string
 	// BufferCap is the per-side reconnect buffer size (0 = default).
 	BufferCap int
@@ -82,10 +82,10 @@ func Run(ctx context.Context, cfg Config) error {
 		cfg.DataDir = RelayDir()
 	}
 
-	store := newWorkspaceStore(cfg.DataDir)
+	store := newHostStore(cfg.DataDir)
 	verifier, err := store.verifier()
 	if err != nil {
-		return fmt.Errorf("relay: workspaces: %w", err)
+		return fmt.Errorf("host store: %w", err)
 	}
 	cert, err := LoadOrCreateCert(cfg.DataDir)
 	if err != nil {
@@ -166,19 +166,24 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 }
 
-// EnrollWorkspace creates a workspace in the relay's store, returning the
+// EnrollHost creates a relay host in the relay's store, returning the
 // raw secret exactly once.
-func EnrollWorkspace(dataDir, id string) ([]byte, error) {
-	return newWorkspaceStore(dataDir).enroll(id)
+func EnrollHost(dataDir, id string) ([]byte, error) {
+	return newHostStore(dataDir).enroll(id)
 }
 
-// ListWorkspaces returns enrolled workspace IDs.
-func ListWorkspaces(dataDir string) ([]string, error) {
-	return newWorkspaceStore(dataDir).list()
+// ListHosts returns enrolled relay host ids.
+func ListHosts(dataDir string) ([]string, error) {
+	return newHostStore(dataDir).list()
 }
 
-// EnrollWorkspaceAtDefaultDir is the CLI convenience for
-// EnrollWorkspace(RelayDir(), id).
-func EnrollWorkspaceAtDefaultDir(id string) ([]byte, error) {
-	return EnrollWorkspace(RelayDir(), id)
+// RemoveHost deletes a relay host from the store.
+func RemoveHost(dataDir, id string) error {
+	return newHostStore(dataDir).remove(id)
+}
+
+// RotateHost replaces a relay host's secret, returning the new raw secret
+// exactly once.
+func RotateHost(dataDir, id string) ([]byte, error) {
+	return newHostStore(dataDir).rotate(id)
 }

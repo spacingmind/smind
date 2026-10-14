@@ -21,6 +21,29 @@ export interface Connection {
   baseUrl: string;
 }
 
+/** What the relay-link confirmation screen shows (Rust `RelayPreview`): every field is non-secret -- the admission secret and key bytes never reach the webview. */
+export interface RelayPreview {
+  /** The relay's `host:port`, as written in the link. */
+  relayAddress: string;
+  relayHostId: string;
+  /** The ends of the daemon's public key in groups of four, to compare with what the daemon prints. */
+  keyFingerprint: string;
+  /** Whether the link pins the relay's TLS certificate (false = CA-verified). */
+  pinned: boolean;
+  /** "changedConnection": a saved connection has this relay host id but a different key or relay. "alreadySaved": identical, adding refreshes it. */
+  kind: "newHost" | "alreadySaved" | "changedConnection";
+}
+
+/** The longest pairing link the UI will send to Rust (Rust enforces the same limit). */
+export const MAX_RELAY_LINK_LENGTH = 4096;
+
+/** True when `input` is a relay pairing link (an `offer` parameter in the URL fragment) -- never a plain daemon URL, even though it parses as one. */
+export function isRelayPairingLink(input: string): boolean {
+  const hash = input.trim().indexOf("#");
+  if (hash < 0) return false;
+  return new URLSearchParams(input.trim().slice(hash + 1)).has("offer");
+}
+
 /** The app-managed local daemon's status (ADR-0013 part D2), mirroring the Rust `DaemonStatus` DTO. */
 export interface DaemonStatus {
   platform: "windows" | "macos" | "unsupported";
@@ -97,6 +120,10 @@ export type NativeMenuActionId =
 export interface DesktopApi {
   listConnections(): Promise<Connection[]>;
   addConnection(label: string, url: string): Promise<Connection>;
+  /** Validates a pasted relay pairing link in Rust and returns only its non-secret fields; saves nothing. Rejects with Rust's error text (which never contains the link). */
+  previewRelayLink(pairingUrl: string): Promise<RelayPreview>;
+  /** Saves the connection a relay pairing link describes (key material stays in Rust, `0600`). Rejects with Rust's error text. */
+  addRelayConnection(label: string, pairingUrl: string): Promise<Connection>;
   removeConnection(id: string): Promise<void>;
   selectConnection(id: string): Promise<Connection>;
   getCurrentConnection(): Promise<Connection>;
@@ -197,6 +224,8 @@ function unavailable(): DesktopApi {
   return {
     listConnections: () => reject(),
     addConnection: () => reject(),
+    previewRelayLink: () => reject(),
+    addRelayConnection: () => reject(),
     removeConnection: () => reject(),
     selectConnection: () => reject(),
     getCurrentConnection: () => reject(),
@@ -263,6 +292,24 @@ function realDesktopApi(): DesktopApi {
       const conn = await invoke<Connection>("connections_add", { label, url });
       announceConnectionChange();
       return conn;
+    },
+    async previewRelayLink(pairingUrl) {
+      const invoke = await loadInvoke();
+      try {
+        return await invoke<RelayPreview>("connections_preview_relay", { pairingUrl });
+      } catch (err) {
+        throw asError(err);
+      }
+    },
+    async addRelayConnection(label, pairingUrl) {
+      const invoke = await loadInvoke();
+      try {
+        const conn = await invoke<Connection>("connections_add_relay", { label, pairingUrl });
+        announceConnectionChange();
+        return conn;
+      } catch (err) {
+        throw asError(err);
+      }
     },
     async removeConnection(id) {
       const invoke = await loadInvoke();

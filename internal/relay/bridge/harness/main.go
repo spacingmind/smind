@@ -42,7 +42,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	secret, err := server.EnrollWorkspace(relayDir, harnessWorkspaceID)
+	secret, err := server.EnrollHost(relayDir, harnessWorkspaceID)
 	if err != nil {
 		return err
 	}
