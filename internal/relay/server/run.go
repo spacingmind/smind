@@ -85,7 +85,7 @@ func Run(ctx context.Context, cfg Config) error {
 	store := newHostStore(cfg.DataDir)
 	verifier, err := store.verifier()
 	if err != nil {
-		return fmt.Errorf("relay: host store: %w", err)
+		return fmt.Errorf("host store: %w", err)
 	}
 	cert, err := LoadOrCreateCert(cfg.DataDir)
 	if err != nil {

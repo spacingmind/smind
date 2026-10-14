@@ -59,3 +59,51 @@ func TestEnrolledHostFromOldStoreAdmitsV2(t *testing.T) {
 		t.Fatalf("v2 admit against pre-existing store: %v", err)
 	}
 }
+
+// TestHostStoreRotateAdmitsNewSecretOnly proves rotate replaces the stored
+// hash: a verifier seeded afterwards admits the new secret and rejects the
+// old one, and rm drops the host entirely.
+func TestHostStoreRotateAdmitsNewSecretOnly(t *testing.T) {
+	store := newHostStore(t.TempDir())
+	oldSecret, err := store.enroll("h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newSecret, err := store.rotate("h")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	admit := func(id string, secret []byte) error {
+		v, err := store.verifier()
+		if err != nil {
+			t.Fatal(err)
+		}
+		nonce := bytes.Repeat([]byte{0x05}, admission.NonceSize)
+		chal, err := v.Challenge(&relaypb.AdmitChallengeRequest{
+			ProtocolVersion: admission.ProtocolVersion, WorkspaceId: id, ClientNonce: nonce, DaemonKeyId: "k",
+		})
+		if err != nil {
+			return err
+		}
+		req := &relaypb.AdmitRequest{
+			ProtocolVersion: admission.ProtocolVersion, WorkspaceId: id, ClientNonce: nonce,
+			DaemonKeyId: "k", ServerNonce: chal.GetServerNonce(),
+		}
+		req.Hmac = admission.ComputeProof(secret, req)
+		_, err = v.Admit(req)
+		return err
+	}
+	if err := admit("h", newSecret); err != nil {
+		t.Fatalf("new secret must admit: %v", err)
+	}
+	if err := admit("h", oldSecret); err == nil {
+		t.Fatal("old secret must not admit after rotate")
+	}
+	if err := store.remove("h"); err != nil {
+		t.Fatal(err)
+	}
+	if err := admit("h", newSecret); err == nil {
+		t.Fatal("removed relay host must not admit")
+	}
+}

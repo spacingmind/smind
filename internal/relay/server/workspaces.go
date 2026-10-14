@@ -37,11 +37,11 @@ func (s hostStore) load() (map[string]hostRecord, error) {
 		return map[string]hostRecord{}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("relay hosts: read: %w", err)
+		return nil, fmt.Errorf("relay host store: read: %w", err)
 	}
 	var m map[string]hostRecord
 	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("relay hosts: parse %s: %w", s.path, err)
+		return nil, fmt.Errorf("relay host store: parse %s: %w", s.path, err)
 	}
 	return m, nil
 }
@@ -50,17 +50,17 @@ func (s hostStore) load() (map[string]hostRecord, error) {
 func (s hostStore) save(records map[string]hostRecord) error {
 	data, err := json.MarshalIndent(records, "", "  ")
 	if err != nil {
-		return fmt.Errorf("relay hosts: marshal: %w", err)
+		return fmt.Errorf("relay host store: marshal: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return fmt.Errorf("relay hosts: mkdir: %w", err)
+		return fmt.Errorf("relay host store: mkdir: %w", err)
 	}
 	tmp := s.path + ".tmp"
 	if err := securefile.WriteFile(tmp, data); err != nil {
-		return fmt.Errorf("relay hosts: write: %w", err)
+		return fmt.Errorf("relay host store: write: %w", err)
 	}
 	if err := os.Rename(tmp, s.path); err != nil {
-		return fmt.Errorf("relay hosts: rename: %w", err)
+		return fmt.Errorf("relay host store: rename: %w", err)
 	}
 	return nil
 }
@@ -73,7 +73,7 @@ func (s hostStore) enroll(id string) (secret []byte, err error) {
 		return nil, err
 	}
 	if _, exists := records[id]; exists {
-		return nil, fmt.Errorf("relay hosts: %q already enrolled", id)
+		return nil, fmt.Errorf("relay host %q already enrolled", id)
 	}
 	host, secret, err := admission.NewWorkspace(id)
 	if err != nil {
@@ -121,7 +121,7 @@ func (s hostStore) remove(id string) error {
 		return err
 	}
 	if _, exists := records[id]; !exists {
-		return fmt.Errorf("relay hosts: %q is not enrolled", id)
+		return fmt.Errorf("relay host %q is not enrolled", id)
 	}
 	delete(records, id)
 	return s.save(records)
@@ -136,7 +136,7 @@ func (s hostStore) rotate(id string) (secret []byte, err error) {
 		return nil, err
 	}
 	if _, exists := records[id]; !exists {
-		return nil, fmt.Errorf("relay hosts: %q is not enrolled", id)
+		return nil, fmt.Errorf("relay host %q is not enrolled", id)
 	}
 	host, secret, err := admission.NewWorkspace(id)
 	if err != nil {
