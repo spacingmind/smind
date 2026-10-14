@@ -759,6 +759,27 @@ frames; ADR-0007 (a)) plus a new byte cap (4 MiB), idle-route grace unchanged (5
 `DefaultRouteGrace`). The relay keeps **one control stream per host**; a new one supersedes the old (the old
 ends with `Aborted: superseded`).
 
+**Implementation notes (P12a, as built).** (1) `Sync` is always sent after the first `Pong`, even when empty, and is the
+*authoritative* list of waiting routes: a daemon reconciles against it (a `DeviceDetach` dropped by an overflowing control
+outbox is recovered by the route's absence). (2) The relay does **not** re-announce `DeviceAttach` when a daemon side ends
+(a daemon that rejects a device would otherwise reconnect to it in a loop); a lost daemon recovers through `Sync`.
+(3) `DeviceDetach` is sent when a device side ends with no daemon side and again, idempotently, when a route is
+garbage-collected; the daemon treats a detach for an unknown route as a no-op and an attach for a known one as a no-op.
+(4) `Revoke` also closes the daemon side of that device's routes and lives only as long as the control stream that sent it:
+the daemon re-sends its revocations on every control (re)connect. (5) Besides the 16-device cap the relay bounds routes per
+host (8 per device slot) and id length (128 bytes), and pings idle peers over HTTP/2 so a vanished phone frees its slot.
+(6) Keepalive probes carry a per-connection random nonce in `Frame.sequence` and the relay echoes it: only an echo with
+the matching nonce proves the relay supports keepalive (a relay without it forwards the probe, a keepalive frame with
+somebody else's nonce, which only counts as liveness); each (re)opened stream probes once.
+
+**Trust model of the control stream (unchanged secret, new reach).** Both ends of a relay host authenticate with the same
+host secret (ADR-0011), so the relay cannot tell the daemon from a client holding the offer. Before this decision that
+mattered little (control carried only `Ping`/`Pong`); now whoever holds the secret can supersede the daemon's control
+stream, read the `(device_id, session_id)` of waiting routes, and `Revoke` another device's route (availability only: the
+payloads stay end-to-end encrypted and the daemon stays authoritative). The pairing window and the daemon's device
+registry (below) limit what a leaked offer buys, but a daemon-only control credential — and rate-limiting supersede — is
+the follow-up that closes this, to be decided with the hosted relay (decisions 12 and 28).
+
 **Device identity, listing and revocation (needed for `smind relay devices ls|revoke`).** Today a device's key is
 a fresh ephemeral X25519 key per session and the daemon cannot tell clients apart. Persistent device keys
 **cannot** be fed to the existing handshake (its HKDF salt is the transcript of public keys,
