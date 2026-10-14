@@ -130,6 +130,12 @@ Origin allowlist, no new endpoints — and the desktop app ships a
       handling, git worktrees) is follow-up work driven by that plan's
       non-blocking full-suite CI results.
 
+      *Update (2026-10-13, ADR-0030 amendment):* the host matrix is now
+      macOS native and Windows native; the WSL2 host is removed, and both
+      native hosts take the daemon from the copy bundled in the app
+      (Tauri `externalBin`), installed into a managed directory and run
+      from there.
+
     This is where ADR-0012's deferred "sidecar mode" lands.
     Remote/tunneled/relay daemons are never updated by the app. They
     only get a "daemon is older than this app" notice.

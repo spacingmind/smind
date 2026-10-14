@@ -125,6 +125,28 @@ tasks:
         echo "building bundled smind $v ($short) for darwin/$goarch"
         CGO_ENABLED=0 GOOS=darwin GOARCH=$goarch go build -buildvcs=false -ldflags "-X github.com/spacingmind/smind/internal/version.Version=$v -X github.com/spacingmind/smind/internal/version.Commit=$short" -o desktop/src-tauri/binaries/smind-{{.TARGET}} ./cmd/smind
 
+  desktop:win:daemon:
+    desc: Build the windows/amd64 smind.exe the Windows app bundles into desktop/src-tauri/binaries (cross-builds from any OS)
+    deps: [build:web]
+    vars:
+      TARGET: '{{.TARGET | default "x86_64-pc-windows-msvc"}}'
+    cmds:
+      # Same contract as desktop:mac:daemon: stamped with the desktop version
+      # so /healthz reports exactly the app's version. The installer is x64
+      # only (ADR-0030 amendment), so only the amd64 triple is supported;
+      # Tauri's externalBin on Windows is binaries/smind-<triple>.exe.
+      - |
+        set -eu
+        v=`jq -r .version desktop/src-tauri/tauri.conf.json`
+        short=`git rev-parse --short HEAD`
+        case "{{.TARGET}}" in
+          x86_64-pc-windows-msvc) goarch=amd64 ;;
+          *) echo "unsupported TARGET {{.TARGET}}" >&2; exit 1 ;;
+        esac
+        mkdir -p desktop/src-tauri/binaries
+        echo "building bundled smind.exe $v ($short) for windows/$goarch"
+        CGO_ENABLED=0 GOOS=windows GOARCH=$goarch go build -buildvcs=false -ldflags "-X github.com/spacingmind/smind/internal/version.Version=$v -X github.com/spacingmind/smind/internal/version.Commit=$short" -o desktop/src-tauri/binaries/smind-{{.TARGET}}.exe ./cmd/smind
+
   desktop:mac:
     desc: Build the unsigned macOS app (sMind.app + .dmg) for the host arch, daemon bundled (TARGET=x86_64-apple-darwin to cross-build)
     platforms: [darwin]
