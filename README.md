@@ -67,7 +67,7 @@ release, verifies the SHA-256, and installs `smind.exe` to
 once (open a new terminal afterwards). It honours `SMIND_VERSION` and
 `SMIND_INSTALL_DIR` the same way (`$env:SMIND_VERSION = "0.11.1"` before the
 command), is safe to re-run to update, and leaves any previous install
-untouched if a step fails. It never writes to `%LOCALAPPDATA%\smind\`, the
+untouched if the download, checksum or extraction fails. It never writes to `%LOCALAPPDATA%\smind\`, the
 directory the [Windows desktop app](#windows-desktop-app) manages; the two
 installs are independent. Git for Windows is required (the script warns if it
 is missing).

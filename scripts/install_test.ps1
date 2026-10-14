@@ -5,10 +5,10 @@
 #   pwsh -NoProfile -File scripts/install_test.ps1
 #
 # The run against a real Release on a Windows runner lives in
-# .github/workflows/install-windows.yml.
+# .github/workflows/install-scripts.yml.
 $ErrorActionPreference = 'Stop'
 
-$env:SMIND_INSTALL_NO_RUN = '1'
+Set-Variable -Name SmindInstallNoRun -Value $true
 . (Join-Path $PSScriptRoot 'install.ps1')
 
 $work = Join-Path ([IO.Path]::GetTempPath()) ('smind-install-test-' + [guid]::NewGuid().ToString('N'))
@@ -286,8 +286,34 @@ Test-Case 'Install_ShellStateNotLeaked' {
     # `irm | iex` runs in the caller's scope: the installer must not change its settings.
     New-Release '1.2.3'
     $eap = $ErrorActionPreference; $pp = $ProgressPreference
+    $global:LASTEXITCODE = 42
     Assert-True (Invoke-Install -Version '1.2.3').Ok 'install'
     Assert-True ($ErrorActionPreference -eq $eap -and $ProgressPreference -eq $pp) 'preference variables unchanged'
+    Assert-True ($global:LASTEXITCODE -eq 42) "LASTEXITCODE changed to $global:LASTEXITCODE"
+}
+
+Test-Case 'Install_PathRegistryFailure_IsWarningNotFailure' {
+    New-Release '1.2.3'
+    function Set-SmindUserPath { param([string]$Value) throw "registry is locked ($Value)" }
+    $r = Invoke-Install -Version '1.2.3'
+    Assert-True $r.Ok "must not fail: $($r.Error)"
+    Assert-True (@($r.Warnings | Where-Object { $_ -match 'user PATH' }).Count -eq 1) "warnings: $($r.Warnings -join '|')"
+    Assert-True ((Read-Exe (Join-Path (Join-Path $script:fakeLocal 'Programs') 'smind')) -eq 'fake smind 1.2.3') 'exe installed'
+    function Set-SmindUserPath { param([string]$Value) $script:fakePath = $Value }
+}
+
+Test-Case 'Install_RelativeAndEnvInstallDir_ResolveAgainstPowerShellLocation' {
+    New-Release '1.2.3'
+    $base = Join-Path $work 'cwd'
+    New-Item -ItemType Directory -Path $base | Out-Null
+    Push-Location $base
+    try {
+        Assert-True (Invoke-Install -Version '1.2.3' -InstallDir 'rel').Ok 'relative'
+        Assert-True ((Read-Exe (Join-Path $base 'rel')) -eq 'fake smind 1.2.3') 'installed under the PowerShell location'
+        $env:SMIND_TEST_DIR = Join-Path $work 'fromenv'
+        Assert-True (Invoke-Install -Version '1.2.3' -InstallDir '%SMIND_TEST_DIR%').Ok 'env var'
+        Assert-True ((Read-Exe (Join-Path $work 'fromenv')) -eq 'fake smind 1.2.3') 'env var expanded'
+    } finally { Pop-Location; Remove-Item Env:SMIND_TEST_DIR -ErrorAction SilentlyContinue }
 }
 
 Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue

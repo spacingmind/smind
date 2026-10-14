@@ -79,14 +79,14 @@ function Get-SmindArch {
 
 function Invoke-SmindDownload {
     param([string]$Url, [string]$OutFile)
-    Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing
+    Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -TimeoutSec 600
 }
 
 function Get-SmindLatestVersion {
     # Resolve "latest" via the release redirect rather than the API, which is
     # rate-limited for anonymous callers.
     $response = Invoke-WebRequest -Uri 'https://github.com/spacingmind/smind/releases/latest' `
-        -Method Head -UseBasicParsing -MaximumRedirection 5
+        -Method Head -UseBasicParsing -MaximumRedirection 5 -TimeoutSec 60
     $base = $response.BaseResponse
     if ($base -is [System.Net.HttpWebResponse]) {
         $final = $base.ResponseUri.AbsoluteUri
@@ -218,20 +218,24 @@ function Install-SmindExe {
     param([string]$Source, [string]$Dir)
     $final = Join-Path $Dir 'smind.exe'
     $stage = "$final.new"
-    Copy-Item -LiteralPath $Source -Destination $stage -Force
     $old = $null
+    $done = $false
     try {
+        Copy-Item -LiteralPath $Source -Destination $stage -Force
         if (Test-Path -LiteralPath $final) {
             $old = "$final.old-" + [guid]::NewGuid().ToString('N').Substring(0, 8)
             Move-Item -LiteralPath $final -Destination $old -Force
         }
         Move-Item -LiteralPath $stage -Destination $final -Force
-    } catch {
-        if ($old -and -not (Test-Path -LiteralPath $final) -and (Test-Path -LiteralPath $old)) {
-            Move-Item -LiteralPath $old -Destination $final -Force
+        $done = $true
+    } finally {
+        # finally (not catch) so Ctrl+C between the two moves also restores.
+        if (-not $done) {
+            if ($old -and -not (Test-Path -LiteralPath $final) -and (Test-Path -LiteralPath $old)) {
+                Move-Item -LiteralPath $old -Destination $final -Force
+            }
+            Remove-Item -LiteralPath $stage -Force -ErrorAction SilentlyContinue
         }
-        Remove-Item -LiteralPath $stage -Force -ErrorAction SilentlyContinue
-        throw
     }
     # Best effort: stale copies from earlier updates (may still be running).
     Get-ChildItem -LiteralPath $Dir -Filter 'smind.exe.old-*' -ErrorAction SilentlyContinue |
@@ -254,7 +258,10 @@ function Install-Smind {
 
     $managedDir = Join-Path (Get-SmindLocalAppData) 'smind'
     if (-not $InstallDir) { $InstallDir = Join-Path (Join-Path (Get-SmindLocalAppData) 'Programs') 'smind' }
-    $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+    # Expand %VARS% and resolve a relative path against the PowerShell location
+    # (GetFullPath would use the process directory, which Set-Location does not change).
+    $InstallDir = [Environment]::ExpandEnvironmentVariables($InstallDir)
+    $InstallDir = [IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir))
     if (Test-SmindUnderDir -Path $InstallDir -Parent $managedDir) {
         throw "refusing to install into ${managedDir}: that is the sMind desktop app's managed directory; choose another SMIND_INSTALL_DIR"
     }
@@ -294,18 +301,25 @@ function Install-Smind {
 
     $exe = Join-Path $InstallDir 'smind.exe'
     $installed = $null
+    $savedExit = Get-Variable -Scope Global -Name LASTEXITCODE -ValueOnly -ErrorAction SilentlyContinue # a native call here must not change the caller's $LASTEXITCODE
     try { $installed = (& $exe --version 2>$null | Select-Object -First 1) } catch { $installed = $null }
+    if ($null -ne $savedExit) { $global:LASTEXITCODE = $savedExit }
     if (-not $installed) { $installed = "smind v$Version" }
     Write-Host "Installed $installed to $exe"
     if ($running) {
         Write-Host 'A smind daemon is running; restart it to use the new version.'
     }
 
-    $userPath = Get-SmindUserPath
-    if (-not (Test-SmindPathEntry -PathList $userPath -Dir $InstallDir)) {
-        $newPath = if ($userPath) { $userPath.TrimEnd(';') + ';' + $InstallDir } else { $InstallDir }
-        Set-SmindUserPath -Value $newPath
-        Write-Host "Added $InstallDir to your user PATH; open a new terminal to pick it up."
+    # The binary is in place by now; a PATH problem must not look like a failed install.
+    try {
+        $userPath = Get-SmindUserPath
+        if (-not (Test-SmindPathEntry -PathList $userPath -Dir $InstallDir)) {
+            $newPath = if ($userPath) { $userPath.TrimEnd(';') + ';' + $InstallDir } else { $InstallDir }
+            Set-SmindUserPath -Value $newPath
+            Write-Host "Added $InstallDir to your user PATH; open a new terminal to pick it up."
+        }
+    } catch {
+        Write-Warning "could not add $InstallDir to your user PATH ($($_.Exception.Message)); add it yourself or run $exe directly"
     }
     if (-not (Test-SmindPathEntry -PathList $env:Path -Dir $InstallDir)) {
         $env:Path = ([string]$env:Path).TrimEnd(';') + ';' + $InstallDir
@@ -328,12 +342,14 @@ function Invoke-SmindInstaller {
         }
         Install-Smind -Version $env:SMIND_VERSION -InstallDir $env:SMIND_INSTALL_DIR
     } catch {
-        Write-Host "smind-install: $($_.Exception.Message)" -ForegroundColor Red
         $global:LASTEXITCODE = 1
-        # Under `iex` there is no script file and `exit` would close the shell.
-        if ($PSCommandPath) { exit 1 }
+        # Under `iex` there is no script file and `exit` would close the shell:
+        # throw instead, which also makes `powershell -Command "irm ... | iex"` fail.
+        if (-not $PSCommandPath) { throw "smind-install: $($_.Exception.Message)" }
+        Write-Host "smind-install: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
     }
 }
 
-# Tests dot-source this file with SMIND_INSTALL_NO_RUN=1 to get the functions.
-if ($env:SMIND_INSTALL_NO_RUN -ne '1') { Invoke-SmindInstaller }
+# Tests set $SmindInstallNoRun before dot-sourcing this file to get the functions only.
+if (-not (Get-Variable -Name SmindInstallNoRun -ErrorAction SilentlyContinue)) { Invoke-SmindInstaller }

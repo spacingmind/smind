@@ -45,6 +45,19 @@ Environment:
 EOF
 }
 
+# An explicit --version must carry a real value: not empty (that would
+# silently fall back to latest) and not another option (`--version --help`).
+set_version() {
+  case "$1" in
+    "" | -*)
+      usage >&2
+      printf "smind-install: --version needs a version, got: '%s'\n" "$1" >&2
+      exit 2
+      ;;
+  esac
+  version="$1"
+}
+
 version="${SMIND_VERSION:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -58,11 +71,11 @@ while [ $# -gt 0 ]; do
         printf 'smind-install: --version needs a value\n' >&2
         exit 2
       fi
-      version="$2"
+      set_version "$2"
       shift 2
       ;;
     --version=*)
-      version="${1#--version=}"
+      set_version "${1#--version=}"
       shift
       ;;
     *)
@@ -114,14 +127,15 @@ if [ -z "$version" ]; then
 fi
 version="${version#v}"
 case "$version" in
-  "" | *[!0-9A-Za-z.+-]*) err "could not determine a valid version (got '$version')" ;;
+  "" | [!0-9]* | *[!0-9A-Za-z.+-]*) err "could not determine a valid version (got '$version')" ;;
 esac
 
 name="smind_${version}_${os}_${arch}.tar.gz"
 base="https://github.com/$REPO/releases/download/v${version}"
 
 tmp="$(mktemp -d 2>/dev/null || mktemp -d -t smind)"
-trap 'rm -rf "$tmp"' EXIT INT TERM
+stage=
+trap 'rm -rf "$tmp"; [ -z "$stage" ] || rm -f "$stage"' EXIT INT TERM
 
 say "Downloading smind v${version} (${os}/${arch})..."
 curl -fsSL -o "$tmp/$name" "$base/$name" || err "download failed: $base/$name"
@@ -146,9 +160,10 @@ mkdir -p "$dir" || err "could not create $dir"
 [ -w "$dir" ] || err "$dir is not writable; set SMIND_INSTALL_DIR or re-run with sudo"
 
 # Install via a temp name + rename so a running smind is never half-written.
-cp "$tmp/smind" "$dir/.smind.tmp.$$"
-chmod 755 "$dir/.smind.tmp.$$"
-mv -f "$dir/.smind.tmp.$$" "$dir/smind"
+stage="$dir/.smind.tmp.$$"
+cp "$tmp/smind" "$stage"
+chmod 755 "$stage"
+mv -f "$stage" "$dir/smind"
 
 say "Installed $("$dir/smind" --version 2>/dev/null || echo "smind v$version") to $dir/smind"
 

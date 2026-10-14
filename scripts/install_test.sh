@@ -165,6 +165,34 @@ test_missing_release_fails_and_installs_nothing() {
   [ "$rc" -ne 0 ] && has "$work/err" "download failed" && [ ! -e "$work/bin/smind" ]
 }
 
+test_version_flag_rejects_empty_and_option_values() {
+  run_install env SMIND_VERSION=1.2.3 sh "$script" --version ""
+  [ "$rc" -eq 2 ] && has "$work/err" "needs a version" && [ ! -s "$work/curl.log" ] || return 1
+  run_install sh "$script" --version=
+  [ "$rc" -eq 2 ] && [ ! -s "$work/curl.log" ] || return 1
+  run_install sh "$script" --version --help
+  [ "$rc" -eq 2 ] && [ ! -s "$work/curl.log" ] && [ ! -e "$work/bin/smind" ]
+}
+
+test_version_must_start_with_digit() {
+  run_install sh "$script" --version .hidden
+  [ "$rc" -ne 0 ] && has "$work/err" "valid version" && [ ! -s "$work/curl.log" ]
+}
+
+test_stdin_form_sh_dash_s() {
+  # curl ... | sh -s -- --version X
+  : >"$work/curl.log"
+  rm -rf "${work:?}/bin" "${work:?}/home"
+  mkdir -p "$work/home"
+  set +e
+  env PATH="$stubs:$PATH" HOME="$work/home" FAKE_RELEASES="$releases" \
+    FAKE_CURL_LOG="$work/curl.log" SMIND_INSTALL_DIR="$work/bin" \
+    sh -s -- --version 4.5.6 <"$script" >"$work/out" 2>"$work/err"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] && [ "$("$work/bin/smind")" = "smind version 4.5.6" ]
+}
+
 test_invalid_version_rejected() {
   run_install sh "$script" --version '1.0;rm -rf'
   [ "$rc" -ne 0 ] && has "$work/err" "valid version" && [ ! -s "$work/curl.log" ]
@@ -201,7 +229,7 @@ test_rerun_updates_in_place() {
   run_install sh "$script" --version 1.2.3
   env PATH="$stubs:$PATH" HOME="$work/home" FAKE_RELEASES="$releases" \
     FAKE_CURL_LOG="$work/curl.log" SMIND_INSTALL_DIR="$work/bin" \
-    sh "$script" --version 4.5.6 >"$work/out" 2>"$work/err"
+    sh "$script" --version 4.5.6 >"$work/out" 2>"$work/err" || return 1
   [ "$("$work/bin/smind")" = "smind version 4.5.6" ]
 }
 
