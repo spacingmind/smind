@@ -19,6 +19,7 @@ import (
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/quota"
 	"github.com/spacingmind/smind/internal/relay/bridge"
+	"github.com/spacingmind/smind/internal/relay/devices"
 	"github.com/spacingmind/smind/internal/relay/e2ee"
 	"github.com/spacingmind/smind/internal/routing"
 	"github.com/spacingmind/smind/internal/server"
@@ -147,14 +148,35 @@ func cmdServe(args []string) int {
 	return 0
 }
 
-// startRelayBridge starts the daemon-as-relay-client background loop
-// (internal/relay/bridge.Run) if and only if `smind relay connect` has
-// persisted a config -- with no config present, this is a no-op and
-// smind serve's startup/behavior are exactly as before this feature
-// existed (docs/plans/active/mobile-app-milestone-1.md's Item 1 opt-in
-// requirement). It runs until ctx is cancelled, alongside the HTTP server.
+// startRelayBridge starts the daemon-as-relay-client background loop (the
+// device hub, internal/relay/bridge) if and only if `smind relay connect` has
+// persisted a config -- with no config present, nothing dials a relay and
+// smind serve's startup/behavior are exactly as before this feature existed
+// (docs/plans/active/mobile-app-milestone-1.md's Item 1 opt-in requirement).
+// It runs until ctx is cancelled, alongside the HTTP server.
+//
+// The device registry (relay-devices.json) and the admin methods behind
+// `smind relay devices` are wired either way, so devices can be listed and
+// pre-approved before the first relay connection.
 func startRelayBridge(ctx context.Context, srv *server.Server) {
 	dir := config.Dir()
+	rc := config.Default().Relay
+	if cfg, err := config.Load(); err == nil {
+		rc = cfg.Relay
+	}
+	reg, err := devices.Open(devices.RegistryPath(dir))
+	if err != nil {
+		// Never reset a registry we cannot read: that would silently forget
+		// revocations. Devices that identify themselves are refused until the
+		// file is fixed; legacy clients are unaffected.
+		log.Printf("relay devices: %v (device identity disabled until the file is fixed)", err)
+		reg = nil
+	}
+	hub := bridge.NewHub(bridge.Options{Registry: reg, LegacyDevices: rc.LegacyDevices, MaxDevices: rc.MaxDevices})
+	if reg != nil {
+		srv.API().SetRelayDevices(hub)
+	}
+
 	cfg, ok, err := bridge.LoadConfig(dir)
 	if err != nil {
 		log.Printf("relay bridge: %v (continuing without relay connectivity)", err)
@@ -169,7 +191,7 @@ func startRelayBridge(ctx context.Context, srv *server.Server) {
 		return
 	}
 	go func() {
-		if err := bridge.Run(ctx, cfg, kp, srv.API()); err != nil {
+		if err := hub.Run(ctx, cfg, kp, srv.API()); err != nil {
 			log.Printf("relay bridge: %v", err)
 		}
 	}()
