@@ -46,6 +46,7 @@ fn main() {
             "connections_list",
             "connections_add",
             "connections_add_relay",
+            "connections_preview_relay",
             "connections_remove",
             "connections_select",
             "connections_get_current",

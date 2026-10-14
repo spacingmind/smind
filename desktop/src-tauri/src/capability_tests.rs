@@ -22,6 +22,7 @@ fn capability_allowlist_exact() {
         "allow-connections-list",
         "allow-connections-add",
         "allow-connections-add-relay",
+        "allow-connections-preview-relay",
         "allow-connections-remove",
         "allow-connections-select",
         "allow-connections-get-current",
@@ -114,4 +115,20 @@ fn app_quit_is_allowlisted_and_registered() {
     assert!(include_str!("lib.rs").contains("menu::app_menu_action"));
     assert!(BUILD_RS.contains("\"app_quit\""));
     assert!(include_str!("lib.rs").contains("commands::app_quit"));
+}
+
+/// `connections_preview_relay` (ADR-0031 P3) is allowlisted, declared in
+/// build.rs and registered with the invoke handler.
+#[test]
+fn proxy_capability_lists_preview_relay() {
+    let cap: Value = serde_json::from_str(PROXY_CAPABILITY).expect("proxy.json parses");
+    let perms: Vec<&str> = cap["permissions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(perms.contains(&"allow-connections-preview-relay"));
+    assert!(BUILD_RS.contains("\"connections_preview_relay\""));
+    assert!(include_str!("lib.rs").contains("commands::connections_preview_relay"));
 }
