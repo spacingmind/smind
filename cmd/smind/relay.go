@@ -30,7 +30,7 @@ import (
 // offer`) -- a different role from operating a relay: see internal/relay/
 // bridge's doc comment.
 //
-//	smind relay [--listen <addr>] [--data-dir <dir>]
+//	smind relay [--listen <addr>] [--data-dir <dir>] [--max-devices-per-host <n>]
 //	smind relay host new <id>    (prints the raw secret once)
 //	smind relay host ls
 //	smind relay host rm <id>
@@ -65,6 +65,7 @@ func cmdRelay(args []string) int {
 	listen := fs.String("listen", server.DefaultListenAddr, "listen address (native gRPC)")
 	grpcWebListen := fs.String("grpc-web-listen", server.DefaultGRPCWebListenAddr, "listen address for the same RPCs over grpc-web")
 	dataDir := fs.String("data-dir", "", "relay data directory (default $SMIND_HOME/relay)")
+	maxDevices := fs.Int("max-devices-per-host", server.DefaultMaxDevicesPerHost, "maximum devices attached to one relay host at once")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -81,6 +82,7 @@ func cmdRelay(args []string) int {
 		ListenAddr:        *listen,
 		GRPCWebListenAddr: *grpcWebListen,
 		DataDir:           *dataDir,
+		MaxDevicesPerHost: *maxDevices,
 	}); err != nil {
 		log.Fatalf("relay: %v", err)
 	}
@@ -379,8 +381,8 @@ func printRelayUsage(w io.Writer) {
 	fmt.Fprint(w, `smind relay — self-hostable E2EE relay server
 
 Usage:
-  smind relay [--listen <addr>] [--grpc-web-listen <addr>] [--data-dir <dir>]
-                                                           start the relay server
+  smind relay [--listen <addr>] [--grpc-web-listen <addr>] [--data-dir <dir>] [--max-devices-per-host <n>]
+                                                           start the relay server (default 16 devices per relay host)
   smind relay host new <id>                               enroll a relay host (secret printed once)
   smind relay host ls                                     list enrolled relay hosts
   smind relay host rm <id>                                remove a relay host

@@ -13,6 +13,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 
 	"github.com/spacingmind/smind/internal/config"
 )
@@ -36,8 +37,11 @@ type Config struct {
 	// DataDir holds the persisted self-signed TLS certificate and
 	// relay host enrollments (config.Dir()/relay by default from the CLI).
 	DataDir string
-	// BufferCap is the per-side reconnect buffer size (0 = default).
+	// BufferCap is the per-side reconnect buffer size in frames (0 = default).
 	BufferCap int
+	// MaxDevicesPerHost caps the devices one relay host may have attached at
+	// once (0 = DefaultMaxDevicesPerHost).
+	MaxDevicesPerHost int
 	// Listener, when non-nil, is served instead of binding ListenAddr —
 	// lets tests hand Run a kernel-assigned ephemeral listener with no
 	// bind race. Run takes ownership (closes it on stop).
@@ -92,11 +96,21 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 
-	srv := New(verifier, cfg.BufferCap)
-	gs := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS13,
-	})))
+	srv := New(verifier, cfg.BufferCap, WithMaxDevicesPerHost(cfg.MaxDevicesPerHost))
+	gs := grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(&tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS13,
+		})),
+		// Clients behind a proxy keep long-lived streams alive with HTTP/2
+		// PINGs (ADR-0031 D9, flow 8, alongside the application keepalive
+		// frame). The default policy answers a ping more often than every 5
+		// minutes with GOAWAY too_many_pings, so allow 20 s.
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             20 * time.Second,
+			PermitWithoutStream: true,
+		}),
+	)
 	srv.Register(gs)
 
 	lis := cfg.Listener
