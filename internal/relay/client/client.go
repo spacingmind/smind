@@ -181,6 +181,11 @@ func (d *DataConn) Resume(ctx context.Context, c relaypb.RelayClient, admissionI
 	return nil
 }
 
+// PeerPublicKey is the peer's ephemeral X25519 handshake key once the
+// handshake completed (nil before). With the local key it names the session's
+// transcript, which an application-layer identity proof can be bound to.
+func (d *DataConn) PeerPublicKey() []byte { return d.channel.PeerPublicKey() }
+
 // Send encrypts and forwards one application message.
 func (d *DataConn) Send(msg []byte) error { return d.channel.Send(msg) }
 
