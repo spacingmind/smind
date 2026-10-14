@@ -25,10 +25,13 @@ import { desktop, MAX_RELAY_LINK_LENGTH, type Connection, type RelayPreview } fr
  */
 export function AddRelayLink({
   initialLink,
+  onInitialLinkTaken,
   onAdded,
 }: {
   /** A link already pasted elsewhere (the plain URL form); previewed straight away. */
   initialLink?: string;
+  /** Called once the flow has copied `initialLink`, so the owner can stop holding the secret. */
+  onInitialLinkTaken?: () => void;
   /** Called after the connection is saved and selected (or saved, if switching failed). */
   onAdded?: (conn: Connection) => void;
 }) {
@@ -71,6 +74,7 @@ export function AddRelayLink({
   useEffect(() => {
     if (started.current || !initialLink) return;
     started.current = true;
+    onInitialLinkTaken?.();
     void review(initialLink);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, for the link handed in at mount
   }, []);

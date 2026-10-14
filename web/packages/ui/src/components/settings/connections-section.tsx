@@ -35,7 +35,7 @@ function ConnectionsSection() {
   // A relay link pasted into the URL form above is handed to the relay flow
   // (never saved as a URL); `key` remounts that flow for each handed-over link.
   const [handedOver, setHandedOver] = useState<{ key: number; link: string } | null>(null);
-  const [relayFlowKey, setRelayFlowKey] = useState(0);
+  const [showHandoverNotice, setShowHandoverNotice] = useState(false);
 
   const refresh = useCallback(() => {
     Promise.all([desktop.listConnections(), desktop.getCurrentConnection()])
@@ -55,6 +55,7 @@ function ConnectionsSection() {
     setError(null);
     if (isRelayPairingLink(url)) {
       setHandedOver({ key: Date.now(), link: url.trim() });
+      setShowHandoverNotice(true);
       setUrl("");
       return;
     }
@@ -136,17 +137,18 @@ function ConnectionsSection() {
       </section>
       <section className="flex flex-col gap-2" data-testid="connection-add-relay-section">
         <h3 className="text-ui-base font-medium text-foreground">Add via relay link</h3>
-        {handedOver && (
+        {showHandoverNotice && (
           <p role="status" data-testid="connection-relay-handover" className="text-ui-base text-muted-foreground">
             That is a relay pairing link, not a daemon URL. Nothing was saved from the URL form; review it here instead.
           </p>
         )}
         <AddRelayLink
-          key={handedOver ? `handover-${handedOver.key}` : `paste-${relayFlowKey}`}
+          key={handedOver?.key ?? "paste"}
           initialLink={handedOver?.link}
+          onInitialLinkTaken={() => setHandedOver((h) => (h ? { ...h, link: "" } : h))}
           onAdded={() => {
-            setHandedOver(null);
-            setRelayFlowKey((k) => k + 1);
+            // The flow resets itself; keep it mounted so a "switching failed" note survives.
+            setShowHandoverNotice(false);
             refresh();
           }}
         />
