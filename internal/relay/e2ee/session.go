@@ -79,6 +79,20 @@ func newSession(priv *ecdh.PrivateKey, peerPub *ecdh.PublicKey, role Role, daemo
 	return &Session{send: sendAEAD, recv: recvAEAD}, nil
 }
 
+// TranscriptHash is the handshake transcript digest the session keys are
+// salted with: SHA-256(label ‖ daemonPub ‖ mobilePub). It is public data both
+// ends can compute from the two handshake keys, so an application layer above
+// the channel (the relay's device_hello, ADR-0031 D9) can bind a signature to
+// exactly this session without any change to the handshake or the key
+// schedule. daemonPub and mobilePub are the 32-byte X25519 public keys.
+func TranscriptHash(daemonPub, mobilePub []byte) []byte {
+	transcript := sha256.New()
+	transcript.Write([]byte(hkdfLabel))
+	transcript.Write(daemonPub)
+	transcript.Write(mobilePub)
+	return transcript.Sum(nil)
+}
+
 // deriveKeys performs the X25519 exchange and expands it into the two
 // directional keys. Both ends run this with the same inputs — the public keys
 // are always hashed daemon-first, regardless of which side is deriving — so

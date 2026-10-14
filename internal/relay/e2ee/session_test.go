@@ -2,6 +2,9 @@ package e2ee
 
 import (
 	"bytes"
+	"crypto/ecdh"
+	"crypto/hkdf"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"math"
@@ -285,5 +288,39 @@ func TestChannelRejectsShortDataFrame(t *testing.T) {
 	}
 	if !p.mobile.Closed() {
 		t.Error("channel should be closed after a malformed data frame")
+	}
+}
+
+// TestTranscriptHashIsTheHKDFSalt pins TranscriptHash to the salt deriveKeys
+// actually uses, so a device_hello signature bound to it is bound to the
+// session's real transcript (and the key schedule is provably unchanged).
+func TestTranscriptHashIsTheHKDFSalt(t *testing.T) {
+	d, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mPub := m.Public()
+	peer, err := ecdh.X25519().NewPublicKey(mPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d2m, _, err := deriveKeys(d.priv, peer, d.Public(), mPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared, err := d.priv.ECDH(peer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := hkdf.Key(sha256.New, shared, TranscriptHash(d.Public(), mPub), dirDaemonToMobile, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(d2m, want) {
+		t.Fatal("TranscriptHash is not the salt deriveKeys uses")
 	}
 }
