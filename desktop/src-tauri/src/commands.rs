@@ -325,7 +325,7 @@ mod tests {
         assert!(!json.contains(&URL_SAFE_NO_PAD.encode([0xab; 32])), "admission secret leaked");
         assert!(!json.contains(&URL_SAFE_NO_PAD.encode([0x11; 32])), "full key leaked");
         // Ends of the key only, in groups of four.
-        assert_eq!(p.key_fingerprint, "ERER ERER \u{2026} ERER ERER");
+        assert_eq!(p.key_fingerprint, "ERER ERER \u{2026} RERE RERE");
     }
 
     #[test]
