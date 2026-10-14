@@ -22,6 +22,8 @@ set -euo pipefail
 
 dir="${1:?usage: sign-checksums.sh <dir> <version>}"
 version="${2:?usage: sign-checksums.sh <dir> <version>}"
+# Absolute: the Go verifier below runs from its package directory.
+dir="$(cd "$dir" && pwd)"
 tauri="${TAURI_CLI:-desktop/node_modules/.bin/tauri}"
 
 [ -s "$dir/checksums.txt" ] || { echo "sign-checksums: $dir/checksums.txt is missing or empty" >&2; exit 1; }
