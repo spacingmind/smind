@@ -15,7 +15,22 @@ type Config struct {
 	Worktrees     WorktreesConfig     `yaml:"worktrees"`
 	Agents        AgentsConfig        `yaml:"agents"`
 	AccountUsage  AccountUsageConfig  `yaml:"accountUsage"`
+	Relay         RelayConfig         `yaml:"relay"`
 }
+
+// RelayConfig tunes this daemon's relay client side (ADR-0031 D9).
+type RelayConfig struct {
+	// LegacyDevices admits relay peers that do not send a device_hello
+	// (clients older than multi-device), as one shared legacy device.
+	// Default true.
+	LegacyDevices bool `yaml:"legacyDevices"`
+	// MaxDevices caps how many paired devices may be connected at once.
+	// Default 16; Load rejects values < 1.
+	MaxDevices int `yaml:"maxDevices"`
+}
+
+// DefaultRelayMaxDevices is relay.maxDevices when unset.
+const DefaultRelayMaxDevices = 16
 
 // AccountUsageConfig is the user-facing surface of ADR-0028's usage
 // windows. Only these five knobs are configurable; the call-budget
@@ -122,6 +137,7 @@ func Default() Config {
 			ExhaustThresholdPct: 100,
 			Passive:             true,
 		},
+		Relay: RelayConfig{LegacyDevices: true, MaxDevices: DefaultRelayMaxDevices},
 	}
 }
 
@@ -156,6 +172,9 @@ func Load() (Config, error) {
 	}
 	if p := cfg.AccountUsage.ExhaustThresholdPct; p < 1 || p > 100 {
 		return cfg, fmt.Errorf("config %s: accountUsage.exhaustThresholdPct must be between 1 and 100, got %d", Path(), p)
+	}
+	if n := cfg.Relay.MaxDevices; n < 1 {
+		return cfg, fmt.Errorf("config %s: relay.maxDevices must be >= 1, got %d", Path(), n)
 	}
 	if mt := cfg.Agents.GLM.MaxTurns; mt != nil && (*mt < 1 || *mt > MaxGLMTurns) {
 		return cfg, fmt.Errorf("config %s: agents.glm.maxTurns must be between 1 and %d, got %d", Path(), MaxGLMTurns, *mt)
