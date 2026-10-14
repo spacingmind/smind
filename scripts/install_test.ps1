@@ -289,7 +289,9 @@ Test-Case 'Install_ShellStateNotLeaked' {
     $global:LASTEXITCODE = 42
     Assert-True (Invoke-Install -Version '1.2.3').Ok 'install'
     Assert-True ($ErrorActionPreference -eq $eap -and $ProgressPreference -eq $pp) 'preference variables unchanged'
-    Assert-True ($global:LASTEXITCODE -eq 42) "LASTEXITCODE changed to $global:LASTEXITCODE"
+    $after = $global:LASTEXITCODE
+    $global:LASTEXITCODE = 0
+    Assert-True ($after -eq 42) "LASTEXITCODE changed to $after"
 }
 
 Test-Case 'Install_PathRegistryFailure_IsWarningNotFailure' {
@@ -319,4 +321,6 @@ Test-Case 'Install_RelativeAndEnvInstallDir_ResolveAgainstPowerShellLocation' {
 Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host ''
 Write-Host "$($script:passes) passed, $($script:fails) failed"
+# Explicit: CI wrappers exit with $LASTEXITCODE when the script ends without `exit`.
 if ($script:fails -gt 0) { exit 1 }
+exit 0
