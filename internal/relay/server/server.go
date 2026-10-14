@@ -953,8 +953,10 @@ func (s *Server) deviceLimitReachedLocked(ws, deviceID string) bool {
 // frames across the disconnect gap — until no stream has been attached to
 // either side for routeGrace, when Sweep collects the route. It tells the
 // daemon what changed: a device side that ends with no daemon side is a
-// DeviceDetach; a daemon side that ends while the device side is live is a
-// fresh DeviceAttach (the daemon should re-open its side).
+// DeviceDetach. A daemon side that ends is NOT re-announced: the daemon
+// closed it, or lost it together with its control stream (which resyncs), and
+// re-announcing would make a daemon that deliberately rejects a device
+// reconnect to it in a loop.
 func (s *Server) detach(sd side, r *route, att *attachment) {
 	att.cancel()
 	s.mu.Lock()
@@ -973,11 +975,8 @@ func (s *Server) detach(sd side, r *route, att *attachment) {
 	if s.mu.routes[routeKey(r.workspaceID, r.sessionID, r.deviceID)] != r {
 		return // revoked or collected: nothing to announce
 	}
-	switch {
-	case sd == sideDevice && r.mu.streams[sideDaemon] == nil:
+	if sd == sideDevice && r.mu.streams[sideDaemon] == nil {
 		s.announceLocked(r.workspaceID, detachFrame(r))
-	case sd == sideDaemon && r.mu.streams[sideDevice] != nil:
-		s.announceLocked(r.workspaceID, attachFrame(r))
 	}
 }
 
