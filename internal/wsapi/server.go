@@ -68,7 +68,18 @@ type API struct {
 // *client.DataConn, so a mobile-originated request gets the same answer a
 // browser tab's would.
 func (a *API) ServeTransport(ctx context.Context, tr Transport) {
+	a.serve(ctx, tr, false)
+}
+
+// serveLocal is ServeTransport for the token-authenticated /ws connection:
+// the one surface allowed to administer the daemon itself (relay.device.*).
+func (a *API) serveLocal(ctx context.Context, tr Transport) {
+	a.serve(ctx, tr, true)
+}
+
+func (a *API) serve(ctx context.Context, tr Transport, local bool) {
 	c := newConn(tr, a.hs)
+	c.local = local
 	c.runScoped = false // no run-scoped identity exists yet (ADR-0027)
 	c.eventsSub = newSubscriber()
 	c.eventsBus = a.bus
@@ -126,7 +137,7 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 		}
 		defer ws.Close()
 
-		api.ServeTransport(r.Context(), wsTransport{ws})
+		api.serveLocal(r.Context(), wsTransport{ws})
 	})
 	return api, nil
 }
