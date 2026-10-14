@@ -920,6 +920,17 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   (ADR-0031 P6)"): `internal/selfupdate/*`, `cmd/smind/update.go`, dispatcher case + startup `.old` cleanup in `main.go`. Signature
   verification is P7 (nil `ChecksumVerifier` hook in `update.go`); the service restart path is exercised through an injected
   `Daemon` until P8 lands (`/healthz managedBy` is read but nothing emits it yet).
+- 2026-10-14 (P12a): relay server, additive proto and 3-device harness implemented on `feat/relay-multi-device-server` (one PR).
+  Decisions taken inside the spec: `Sync` is always sent on control accept (even empty) so a daemon has an unambiguous "initial
+  state complete" marker, which changed the one existing grpc-web test that assumed strict Pong/Pong alternation (it now reads
+  until the Pong); the relay does **not** re-announce `DeviceAttach` when a daemon side ends (a daemon that rejects a device
+  would reconnect to it in a loop; `Sync` on control accept covers a lost daemon); `Revoke` also closes the daemon side of that
+  device's routes and is scoped to the control stream that sent it; `--max-devices-per-host` counts distinct device ids with a live
+  device side; the server enforces a 20 s HTTP/2 PING floor (`keepalive.EnforcementPolicy`) so clients may later enable
+  `keepalive.ClientParameters` at 30 s; the Go client gained an opt-in `WithKeepalive` (30 s probe, 75 s dead-stream rule, probe
+  negotiated: the first probe must be echoed within 10 s or keepalive stays off for that connection, so a relay from before this
+  PR is never sent a stream of probes). Client HTTP/2 PINGs are deliberately **not** enabled: an older relay's default policy
+  answers a ping more often than every 5 minutes with GOAWAY.
 
 ## Validation
 

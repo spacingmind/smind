@@ -17,6 +17,8 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +28,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/spacingmind/smind/internal/relay/admission"
 	relaypb "github.com/spacingmind/smind/internal/relay/relaypb"
 )
 
@@ -241,8 +244,8 @@ func (s *mdStream) expectRecv(d time.Duration) *relaypb.Frame {
 			select {
 			case err := <-s.done:
 				s.t.Fatalf("data stream closed while waiting for frame (terminal status: %v)", err)
-			default:
-				s.t.Fatalf("data stream closed while waiting for frame")
+			case <-time.After(mdTimeout):
+				s.t.Fatalf("data stream closed while waiting for frame (no terminal status)")
 			}
 		}
 		return f
@@ -294,6 +297,20 @@ func mdRoute(deviceID, sessionID string, dir relaypb.Direction) frameRoute {
 }
 
 // --- tests ---
+
+// mdWaitStreams waits until the relay has n data streams attached: a stream's
+// route is attached by the server asynchronously after the client's first
+// frame, so a test that depends on earlier attaches must wait for them.
+func mdWaitStreams(t *testing.T, h *harness, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for h.srv.Streams() != n {
+		if time.Now().After(deadline) {
+			t.Fatalf("relay has %d attached streams, want %d", h.srv.Streams(), n)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
 
 func TestDeviceAttachSentWhenDeviceAttachesWithoutDaemonSide(t *testing.T) {
 	h := newHarness(t, 0)
@@ -444,6 +461,7 @@ func TestDeviceCapPerHostIs16AndConfigurable(t *testing.T) {
 		v := mdOpenStream(t, h, ctx, adm, mdRoute(fmt.Sprintf("dev-%02d", i), "sess-1", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
 		v.send(v.frame(0, []byte("reg")))
 	}
+	mdWaitStreams(t, h, 16)
 	v17 := mdOpenStream(t, h, ctx, adm, mdRoute("dev-17", "sess-1", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
 	v17.send(v17.frame(0, []byte("reg")))
 	v17.expectDone(codes.ResourceExhausted)
@@ -460,6 +478,7 @@ func TestDeviceCapPerHostIs16AndConfigurable(t *testing.T) {
 		v := mdOpenStream(t, h2, ctx, adm2, mdRoute(fmt.Sprintf("dev2-%d", i), "sess-1", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
 		v.send(v.frame(0, []byte("reg")))
 	}
+	mdWaitStreams(t, h2, 2)
 	v3 := mdOpenStream(t, h2, ctx, adm2, mdRoute("dev2-2", "sess-1", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
 	v3.send(v3.frame(0, []byte("reg")))
 	v3.expectDone(codes.ResourceExhausted)
@@ -555,7 +574,7 @@ func TestKeepaliveEchoedNotForwardedNotBuffered(t *testing.T) {
 	// same stream and never forwarded to the peer.
 	v := mdOpenStream(t, h, ctx, adm, mdRoute("dev-k", "sess-k", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
 	v.send(v.frame(0, []byte("reg")))
-	d.expectRecv(mdTimeout) // device reg
+	d.expectRecv(mdTimeout)                                     // device reg
 	if got := v.expectRecv(mdTimeout); got.GetSequence() != 0 { // daemon reg forwarded to device
 		t.Fatalf("unexpected frame before keepalive: %+v", got)
 	}
@@ -643,7 +662,7 @@ func TestDeviceReconnectReplacesOnlyItsOwnRoute(t *testing.T) {
 
 	// The other two routes' streams stay open and keep carrying frames,
 	// in both directions.
-	for i := range [3]int{0, 2} {
+	for _, i := range []int{0, 2} {
 		d, v := sides[i][0], sides[i][1]
 		d.send(d.frame(1, []byte("to-device")))
 		if got := v.expectRecv(mdTimeout); got.GetSequence() != 1 || string(got.GetPayload()) != "to-device" {
@@ -661,4 +680,134 @@ func TestDeviceReconnectReplacesOnlyItsOwnRoute(t *testing.T) {
 	}
 	v1.send(v1.frame(1, []byte("re-to-daemon")))
 	sides[1][0].expectRecv(mdTimeout)
+}
+
+func TestExistingFixedIDClientAndDaemonStillWork(t *testing.T) {
+	// The pre-multi-device world: fixed ids, no control stream, no
+	// keepalive. Frames must flow both ways exactly as before.
+	h := newHarness(t, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	adm := h.admit(ctx, testWorkspace, "daemon-key-1")
+
+	sess, dev := "m1-default-session", "m1-default-device"
+	dr := mdRoute(dev, sess, relaypb.Direction_DIRECTION_DAEMON_TO_DEVICE)
+	vr := mdRoute(dev, sess, relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON)
+	d := mdOpenStream(t, h, ctx, adm, dr)
+	v := mdOpenStream(t, h, ctx, adm, vr)
+	d.send(d.frame(0, []byte("reg")))
+	v.send(v.frame(0, []byte("reg")))
+	v.expectRecv(mdTimeout)
+	d.expectRecv(mdTimeout)
+
+	ct1 := randBytes(t, 32)
+	d.send(d.frame(1, ct1))
+	if got := v.expectRecv(mdTimeout); !bytes.Equal(got.GetPayload(), ct1) {
+		t.Fatalf("fixed-id daemon->device payload mismatch")
+	}
+	ct2 := randBytes(t, 32)
+	v.send(v.frame(1, ct2))
+	if got := d.expectRecv(mdTimeout); !bytes.Equal(got.GetPayload(), ct2) {
+		t.Fatalf("fixed-id device->daemon payload mismatch")
+	}
+
+	// Then also with a control stream that only pings and ignores the
+	// Attach/Sync frames the relay sends: data flow is unaffected.
+	ctl := mdOpenControl(t, h, ctx, adm)
+	ctl.expectPong(7)
+	ctl.expectSync(map[string]string{}) // both sides live: nothing waiting
+	ct3 := randBytes(t, 32)
+	d.send(d.frame(2, ct3))
+	if got := v.expectRecv(mdTimeout); !bytes.Equal(got.GetPayload(), ct3) {
+		t.Fatalf("fixed-id daemon->device payload mismatch with control stream")
+	}
+	ct4 := randBytes(t, 32)
+	v.send(v.frame(2, ct4))
+	if got := d.expectRecv(mdTimeout); !bytes.Equal(got.GetPayload(), ct4) {
+		t.Fatalf("fixed-id device->daemon payload mismatch with control stream")
+	}
+	ctl.quiet(mdQuiet)
+}
+
+func TestControlStreamsOfDifferentHostsAreIsolated(t *testing.T) {
+	h := newHarness(t, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	adm := h.admit(ctx, testWorkspace, "daemon-key-1")
+
+	// A second relay host on the same harness server. Nothing in
+	// harness_test.go exposes this, but the verifier is reachable
+	// same-package; registering another workspace needs no edits there.
+	const hostB = "ws-md-host-b"
+	wsB, secretB, err := admission.NewWorkspace(hostB)
+	if err != nil {
+		t.Fatalf("NewWorkspace(hostB): %v", err)
+	}
+	h.srv.verifier.Register(wsB)
+
+	admB := mdAdmit(t, h, ctx, hostB, secretB)
+
+	// Host A's control stream is up and drained.
+	ctlA := mdOpenControl(t, h, ctx, adm)
+	ctlA.expectPong(7)
+	ctlA.expectSync(map[string]string{})
+
+	// A device attaching to host B's route must not produce an Attach on
+	// host A's control stream.
+	const devID = "dev-shared"
+	routeB := mdRoute(devID, "sess-b", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON)
+	routeB.workspaceID = hostB
+	vB := mdOpenStream(t, h, ctx, admB, routeB)
+	vB.send(vB.frame(0, []byte("reg")))
+	ctlA.quiet(mdQuiet)
+
+	// Revoke of the same device id on host A cannot close host B's
+	// device: its stream stays open and still carries frames.
+	ctlA.send(&relaypb.ControlFrame{
+		WorkspaceId: testWorkspace,
+		Body:        &relaypb.ControlFrame_Revoke_{Revoke: &relaypb.ControlFrame_Revoke{DeviceId: devID}},
+	})
+	daemonB := routeB
+	daemonB.direction = relaypb.Direction_DIRECTION_DAEMON_TO_DEVICE
+	dB := mdOpenStream(t, h, ctx, admB, daemonB)
+	dB.send(dB.frame(0, []byte("reg")))
+	vB.expectRecv(mdTimeout)
+	ct := randBytes(t, 16)
+	dB.send(dB.frame(1, ct))
+	if got := vB.expectRecv(mdTimeout); !bytes.Equal(got.GetPayload(), ct) {
+		t.Fatalf("host B device lost a frame after host A revoked the same device id")
+	}
+	vB.quiet(mdQuiet)
+}
+
+// mdAdmit is h.admit for a workspace other than the harness's own, with
+// that workspace's secret.
+func mdAdmit(t *testing.T, h *harness, ctx context.Context, workspaceID string, secret []byte) string {
+	t.Helper()
+	nonce := make([]byte, admission.NonceSize)
+	if _, err := rand.Read(nonce); err != nil {
+		t.Fatalf("client nonce: %v", err)
+	}
+	chal, err := h.client.AdmitChallenge(ctx, &relaypb.AdmitChallengeRequest{
+		ProtocolVersion: admission.ProtocolVersion,
+		WorkspaceId:     workspaceID,
+		ClientNonce:     nonce,
+		DaemonKeyId:     "daemon-key-b",
+	})
+	if err != nil {
+		t.Fatalf("AdmitChallenge: %v", err)
+	}
+	req := &relaypb.AdmitRequest{
+		ProtocolVersion: admission.ProtocolVersion,
+		WorkspaceId:     workspaceID,
+		ClientNonce:     nonce,
+		DaemonKeyId:     "daemon-key-b",
+		ServerNonce:     chal.GetServerNonce(),
+	}
+	req.Hmac = admission.ComputeProof(secret, req)
+	resp, err := h.client.Admit(ctx, req)
+	if err != nil {
+		t.Fatalf("Admit: %v", err)
+	}
+	return hex.EncodeToString(resp.GetAdmissionId())
 }
