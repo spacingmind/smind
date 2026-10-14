@@ -299,17 +299,19 @@ func (u *Updater) restartAndWait(ctx context.Context, target string) error {
 // in dir (same filesystem as the install, so the swap is a rename). The
 // returned cleanup removes the staged file and the download directory; after a
 // successful Swap the staged path no longer exists and removal is a no-op.
-func (u *Updater) download(ctx context.Context, target, dir string) (staged string, cleanup func(), err error) {
+func (u *Updater) download(ctx context.Context, target, dir string) (stagedPath string, cleanupFn func(), err error) {
 	name := AssetName(target, u.GOOS, u.GOARCH)
 	tmp, err := os.MkdirTemp("", "smind-update-")
 	if err != nil {
 		return "", nil, err
 	}
-	staged = filepath.Join(dir, fmt.Sprintf(".smind.new.%d%s", os.Getpid(), exeSuffix(u.GOOS)))
-	cleanup = func() {
+	staged := filepath.Join(dir, fmt.Sprintf(".smind.new.%d%s", os.Getpid(), exeSuffix(u.GOOS)))
+	cleanup := func() {
 		_ = os.RemoveAll(tmp)
 		_ = os.Remove(staged)
 	}
+	// The error returns below assign the named results (nil cleanup), so the
+	// deferred cleanup must use the locals, not the results.
 	defer func() {
 		if err != nil {
 			cleanup()
