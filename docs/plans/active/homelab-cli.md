@@ -928,8 +928,11 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   device's routes and is scoped to the control stream that sent it; `--max-devices-per-host` counts distinct device ids with a live
   device side; the server enforces a 20 s HTTP/2 PING floor (`keepalive.EnforcementPolicy`) so clients may later enable
   `keepalive.ClientParameters` at 30 s; the Go client gained an opt-in `WithKeepalive` (30 s probe, 75 s dead-stream rule, probe
-  negotiated: the first probe must be echoed within 10 s or keepalive stays off for that connection, so a relay from before this
-  PR is never sent a stream of probes). Client HTTP/2 PINGs are deliberately **not** enabled: an older relay's default policy
+  negotiated: the probe carries a per-connection nonce that the relay echoes, and the first echo must arrive within 10 s or
+  keepalive stays off for that stream, so a relay from before this PR is sent one probe per stream, not a stream of them).
+  An independent review (concurrency, compatibility, E2EE) drove: nonce-matched echoes, per-stream probe verdict, non-blocking
+  probe writes, `DeviceDetach` on route GC, route cap and id-length bound, length-prefixed route keys, server HTTP/2 pings, and the
+  ADR-0031 D9 "trust model of the control stream" paragraph (any host-secret holder can supersede control — follow-up, decision 12/28). Client HTTP/2 PINGs are deliberately **not** enabled: an older relay's default policy
   answers a ping more often than every 5 minutes with GOAWAY.
 
 ## Validation
@@ -961,3 +964,23 @@ Commands: `task test`, `task lint`, `GOOS=windows go vet ./...`, `go test -race 
 - AC7/8: `…InstallsExplicitVersion`, `…DryRunChangesNothing`, `…LatestUsesRedirectNotAPI`, `…HonoursHTTPSProxy` (child process, CONNECT seen).
 - **Not verified:** **(real)** Linux/Windows 11 against a real published release (none newer than the running build exists to
   update to from this branch), Windows with a running `smind.exe` daemon, real `smind service restart` (P8).
+
+### P12a (2026-10-14, branch `feat/relay-multi-device-server`)
+
+Commands: `go test -race -count=20 ./internal/relay/...` (all packages ok; client 440 s, relaytest 95 s, server 106 s),
+`task lint`, `task test` (exit 0), `GOOS=windows go vet ./internal/relay/... ./cmd/...`.
+
+| AC | Evidence |
+|---|---|
+| 1 proto additive + golden | `relay.proto` regenerated with protoc 36.2 / protoc-gen-go 1.36.12 / go-grpc 1.6.2 (not hand-edited); `compat_test.go`: `TestGoldenBytesCurrentEncoding`, `TestNewFrameDecodesUnderPreviousDefinition`, `TestNewControlFramesDecodeUnderPreviousDefinition`, `TestPreviousEncodingDecodesUnderCurrentDefinition` against `testdata/relay_v0.desc` (the previous definition; plan name `TestProtoNewFramesDecodeUnderOldDefinition` is covered by these) |
+| 2 Attach / Detach / Sync | `TestDeviceAttachSentWhenDeviceAttachesWithoutDaemonSide`, `TestDeviceDetachSentWhenRouteGarbageCollected` (device-side end and GC), `TestSyncListsWaitingRoutesOnControlAccept` |
+| 3 one control stream per host | `TestNewControlStreamSupersedesOld` (`Aborted: superseded`) |
+| 4 limits | `TestDeviceCapPerHostIs16AndConfigurable` (17th `ResourceExhausted`), `TestBufferBoundedByFramesAndBytes`, plus review additions `TestRouteCapPerHostBoundsDaemonSideRoutes`, `TestOverlongIDsAreRejected`; route grace unchanged (existing `bounds_test`) |
+| 5 keepalive | `TestKeepaliveEchoedNotForwardedNotBuffered`; client rule with a fake clock: `TestKeepaliveSentEvery30s`, `TestDeadStreamAfter75sOfSilence`, `TestAnyRelayFrameResetsTheDeadStreamTimer`, `TestUnansweredProbeTurnsKeepaliveOff`, `TestForwardedPeerProbeIsNotAnEcho`, `TestKeepaliveReprobesAfterResumeWhenFirstEchoWasLate`, `TestBlockedProbeWriteDoesNotDisableTheDeadStreamRule`, `TestKeepaliveFollowsResumeToTheNewStream`; proxy case `TestIdleStreamSurvivesProxyIdleTimeout` (idle shim closes a stream after 1 s, keepalives every 0.2 s keep it; `TestIdleStreamWithoutKeepaliveIsClosedByTheProxy` is the control) |
+| 6 Revoke | `TestRevokeClosesDeviceStreamsAndBlocksAttach`, harness `…ThenOneRevoked` |
+| 7 backward compatibility | existing `server_test`, `fanout_test`, `bounds_test`, `bridge` suites pass; **one existing test edited**: `TestGRPCWeb_OpenControlPingPongOverWebsocket` now reads until the Pong because `Sync` follows the first `Pong`; `TestExistingFixedIDClientAndDaemonStillWork`; `TestControlStreamsOfDifferentHostsAreIsolated` |
+| 8 3-device harness | `internal/relay/relaytest` (real `server.Run`, native + grpc-web clients over one `relaypb.RelayClient` interface, daemon stub, devices): `TestThreeDevicesConcurrentViaHarness` (+ `…ThenOneReconnects`, `…ThenDaemonControlReconnects`, `…ThenOneRevoked`), `TestNoPlaintextVisibleToRelay` |
+
+Not verified: a real proxy (Cloudflare) in front of the relay, a real mobile/desktop client, the cross-language (Rust/TS)
+interop run named in the ADR test bar (P13a/b), a daemon restart through the real bridge (P12b), grpc-web keepalive
+through a browser WebSocket.
