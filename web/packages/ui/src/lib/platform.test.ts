@@ -22,6 +22,8 @@ describe("platform in a non-desktop build", () => {
     await expect(desktop.listConnections()).rejects.toThrow(/unavailable/i);
     await expect(desktop.getCurrentConnection()).rejects.toThrow(/unavailable/i);
     await expect(desktop.addConnection("x", "http://example.com")).rejects.toThrow(/unavailable/i);
+    await expect(desktop.previewRelayLink("x")).rejects.toThrow(/unavailable/i);
+    await expect(desktop.addRelayConnection("x", "y")).rejects.toThrow(/unavailable/i);
     await expect(desktop.removeConnection("id")).rejects.toThrow(/unavailable/i);
     await expect(desktop.selectConnection("id")).rejects.toThrow(/unavailable/i);
     await expect(desktop.openExternal("https://example.com")).rejects.toThrow(/unavailable/i);
@@ -120,6 +122,47 @@ describe("platform in a desktop build", () => {
     expect(invoke).toHaveBeenCalledWith("app_update_check");
     await desktop.appUpdateInstall();
     expect(invoke).toHaveBeenCalledWith("app_update_install");
+  });
+
+  it("maps the relay-link methods to their commands, wraps Rust's string errors, and announces a saved connection", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const preview = { relayAddress: "relay.test:7401", relayHostId: "ws-1", keyFingerprint: "ERER ERER … RERE RERE", pinned: true, kind: "newHost" };
+    const conn = { id: "relay:ws-1@relay.test:7400", kind: "relay", label: "Home", baseUrl: "relay://ws-1@relay.test:7400" };
+    const invoke = vi.fn(async (cmd: string) => {
+      if (cmd === "connections_preview_relay") return preview;
+      if (cmd === "connections_add_relay") return conn;
+      throw "pairing: invalid offer: unsupported offer version 2";
+    });
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    const { desktop } = await import("@/lib/platform");
+    const { CONNECTION_CHANGED_EVENT } = await import("@/lib/local-paths");
+    const changed = vi.fn();
+    window.addEventListener(CONNECTION_CHANGED_EVENT, changed);
+
+    expect(await desktop.previewRelayLink("https://x/pair#offer=abc")).toEqual(preview);
+    expect(invoke).toHaveBeenCalledWith("connections_preview_relay", { pairingUrl: "https://x/pair#offer=abc" });
+    expect(changed).not.toHaveBeenCalled();
+
+    expect(await desktop.addRelayConnection("Home", "https://x/pair#offer=abc")).toEqual(conn);
+    expect(invoke).toHaveBeenCalledWith("connections_add_relay", { label: "Home", pairingUrl: "https://x/pair#offer=abc" });
+    expect(changed).toHaveBeenCalledTimes(1);
+
+    invoke.mockRejectedValueOnce("pairing: invalid offer: unsupported offer version 2");
+    await expect(desktop.previewRelayLink("bad")).rejects.toThrow("unsupported offer version 2");
+    invoke.mockRejectedValueOnce("too long");
+    await expect(desktop.addRelayConnection("", "bad")).rejects.toBeInstanceOf(Error);
+    expect(changed).toHaveBeenCalledTimes(1);
+    window.removeEventListener(CONNECTION_CHANGED_EVENT, changed);
+  });
+
+  it("isRelayPairingLink recognises an offer fragment and nothing else", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const { isRelayPairingLink } = await import("@/lib/platform");
+    expect(isRelayPairingLink("https://spacingmind.sh/pair#offer=abc")).toBe(true);
+    expect(isRelayPairingLink("  https://x/pair#v=1&offer=abc\n")).toBe(true);
+    expect(isRelayPairingLink("http://example.com:9000")).toBe(false);
+    expect(isRelayPairingLink("http://example.com:9000/#section")).toBe(false);
+    expect(isRelayPairingLink("http://example.com/?offer=1")).toBe(false);
   });
 
   it("onDaemonProgress subscribes and forwards events, unsubscribing on cleanup", async () => {
