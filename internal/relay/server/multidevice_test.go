@@ -238,7 +238,12 @@ func (s *mdStream) expectRecv(d time.Duration) *relaypb.Frame {
 	select {
 	case f, ok := <-s.frames:
 		if !ok {
-			s.t.Fatalf("data stream closed while waiting for frame")
+			select {
+			case err := <-s.done:
+				s.t.Fatalf("data stream closed while waiting for frame (terminal status: %v)", err)
+			default:
+				s.t.Fatalf("data stream closed while waiting for frame")
+			}
 		}
 		return f
 	case <-time.After(d):
@@ -312,7 +317,11 @@ func TestDeviceAttachSentWhenDeviceAttachesWithoutDaemonSide(t *testing.T) {
 	v.expectRecv(mdTimeout) // reg flushed to the device
 	d.stream.CloseSend()
 	d.expectDone(codes.OK)
-	ctl.expectAttach("dev-a", "sess-a")
+	// No re-announce: the relay no longer sends DeviceAttach when a
+	// daemon side ends while the device side is live (reconnect-loop
+	// hazard); the daemon would learn the waiting route from the next
+	// Sync instead.
+	ctl.quiet(mdQuiet)
 }
 
 func TestDeviceDetachSentWhenRouteGarbageCollected(t *testing.T) {
@@ -513,4 +522,143 @@ func TestBufferBoundedByFramesAndBytes(t *testing.T) {
 	if got := v3.expectRecv(mdTimeout); !bytes.Equal(got.GetPayload(), big) {
 		t.Fatalf("oversized buffered frame was dropped or mangled")
 	}
+}
+
+func TestKeepaliveEchoedNotForwardedNotBuffered(t *testing.T) {
+	h := newHarness(t, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	adm := h.admit(ctx, testWorkspace, "daemon-key-1")
+
+	// Daemon side only: keepalives from it must buffer nothing.
+	r := mdRoute("dev-k", "sess-k", relaypb.Direction_DIRECTION_DAEMON_TO_DEVICE)
+	d := mdOpenStream(t, h, ctx, adm, r)
+	d.send(d.frame(0, []byte("reg")))
+
+	ka := d.frame(42, nil)
+	ka.Keepalive = true
+	d.send(ka)
+	echo := d.expectRecv(mdTimeout)
+	if !echo.GetKeepalive() || echo.GetSequence() != 42 {
+		t.Fatalf("keepalive echo mismatch: keepalive=%v seq=%d", echo.GetKeepalive(), echo.GetSequence())
+	}
+	// Answered "from" the peer's direction.
+	if echo.GetDirection() != relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON {
+		t.Fatalf("keepalive echo direction = %v, want DEVICE_TO_DAEMON", echo.GetDirection())
+	}
+	if n := h.srv.BufferedFrames(testWorkspace, "sess-k", "dev-k"); n != 1 {
+		t.Fatalf("buffered = %d, want 1 (only the reg frame; keepalives must not buffer)", n)
+	}
+	d.quiet(mdQuiet)
+
+	// With both sides attached, a device keepalive is answered on the
+	// same stream and never forwarded to the peer.
+	v := mdOpenStream(t, h, ctx, adm, mdRoute("dev-k", "sess-k", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+	v.send(v.frame(0, []byte("reg")))
+	d.expectRecv(mdTimeout) // device reg
+	if got := v.expectRecv(mdTimeout); got.GetSequence() != 0 { // daemon reg forwarded to device
+		t.Fatalf("unexpected frame before keepalive: %+v", got)
+	}
+	ka2 := v.frame(99, nil)
+	ka2.Keepalive = true
+	v.send(ka2)
+	echo2 := v.expectRecv(mdTimeout)
+	if !echo2.GetKeepalive() || echo2.GetSequence() != 99 || echo2.GetDirection() != relaypb.Direction_DIRECTION_DAEMON_TO_DEVICE {
+		t.Fatalf("device keepalive echo mismatch: %+v", echo2)
+	}
+	d.quiet(mdQuiet)
+	if n := h.srv.BufferedFrames(testWorkspace, "sess-k", "dev-k"); n != 0 {
+		t.Fatalf("keepalive was buffered (%d frames)", n)
+	}
+}
+
+func TestRevokeClosesDeviceStreamsAndBlocksAttach(t *testing.T) {
+	h := newHarness(t, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	adm := h.admit(ctx, testWorkspace, "daemon-key-1")
+	ctl := mdOpenControl(t, h, ctx, adm)
+	ctl.expectPong(7)
+	ctl.expectSync(map[string]string{})
+
+	v := mdOpenStream(t, h, ctx, adm, mdRoute("dev-r", "sess-r", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+	v.send(v.frame(0, []byte("reg")))
+	ctl.expectAttach("dev-r", "sess-r")
+
+	ctl.send(&relaypb.ControlFrame{
+		WorkspaceId: testWorkspace,
+		Body:        &relaypb.ControlFrame_Revoke_{Revoke: &relaypb.ControlFrame_Revoke{DeviceId: "dev-r"}},
+	})
+
+	// The device's live stream ends with PermissionDenied.
+	v.expectDone(codes.PermissionDenied)
+
+	// New attaches for that device id are refused while the control
+	// stream lives.
+	v2 := mdOpenStream(t, h, ctx, adm, mdRoute("dev-r", "sess-r2", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+	v2.send(v2.frame(0, []byte("reg")))
+	v2.expectDone(codes.PermissionDenied)
+
+	// Other devices are unaffected.
+	other := mdOpenStream(t, h, ctx, adm, mdRoute("dev-ok", "sess-ok", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+	other.send(other.frame(0, []byte("reg")))
+	ctl.expectAttach("dev-ok", "sess-ok")
+
+	// The revocation dies with the control stream: after it ends, the
+	// device id may attach again.
+	ctl.stream.CloseSend()
+	<-ctl.done
+	v3 := mdOpenStream(t, h, ctx, adm, mdRoute("dev-r", "sess-r3", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+	v3.send(v3.frame(0, []byte("reg")))
+	v3.quiet(mdQuiet) // accepted again
+}
+
+func TestDeviceReconnectReplacesOnlyItsOwnRoute(t *testing.T) {
+	h := newHarness(t, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	adm := h.admit(ctx, testWorkspace, "daemon-key-1")
+
+	sides := [3][2]*mdStream{}
+	for i := 0; i < 3; i++ {
+		dev := mdRoute(fmt.Sprintf("dev-%d", i), fmt.Sprintf("sess-%d", i), relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON)
+		dae := dev
+		dae.direction = relaypb.Direction_DIRECTION_DAEMON_TO_DEVICE
+		v := mdOpenStream(t, h, ctx, adm, dev)
+		d := mdOpenStream(t, h, ctx, adm, dae)
+		v.send(v.frame(0, []byte("reg")))
+		d.send(d.frame(0, []byte("reg")))
+		v.expectRecv(mdTimeout)
+		d.expectRecv(mdTimeout)
+		sides[i] = [2]*mdStream{d, v}
+	}
+
+	// Device 1 re-opens the SAME (session, device) stream; the old one is
+	// superseded and the new one works.
+	sides[1][1].stream.CloseSend()
+	<-sides[1][1].done
+	v1 := mdOpenStream(t, h, ctx, adm, mdRoute("dev-1", "sess-1", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+	v1.send(v1.frame(0, []byte("reg")))
+	sides[1][0].expectRecv(mdTimeout)
+
+	// The other two routes' streams stay open and keep carrying frames,
+	// in both directions.
+	for i := range [3]int{0, 2} {
+		d, v := sides[i][0], sides[i][1]
+		d.send(d.frame(1, []byte("to-device")))
+		if got := v.expectRecv(mdTimeout); got.GetSequence() != 1 || string(got.GetPayload()) != "to-device" {
+			t.Fatalf("route %d daemon->device frame lost: %+v", i, got)
+		}
+		v.send(v.frame(1, []byte("to-daemon")))
+		if got := d.expectRecv(mdTimeout); got.GetSequence() != 1 || string(got.GetPayload()) != "to-daemon" {
+			t.Fatalf("route %d device->daemon frame lost: %+v", i, got)
+		}
+	}
+	// And the reconnected route works too.
+	sides[1][0].send(sides[1][0].frame(1, []byte("re-to-device")))
+	if got := v1.expectRecv(mdTimeout); got.GetSequence() != 1 {
+		t.Fatalf("reconnected route lost a frame: %+v", got)
+	}
+	v1.send(v1.frame(1, []byte("re-to-daemon")))
+	sides[1][0].expectRecv(mdTimeout)
 }
