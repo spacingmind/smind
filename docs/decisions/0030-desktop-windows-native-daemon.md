@@ -86,3 +86,77 @@ expected to work (ConPTY's minimum) but only Windows 11 has been validated.
   note that Windows native is "not yet a supported daemon host" is retired.
 - `docs/plans/active/desktop-managed-daemon.md`'s WSL2 sections are
   superseded for Windows.
+
+## Amendment (2026-10-13): the installer bundles `smind.exe`
+
+Chosen by the user: "thống nhất theo macOS" (make Windows match macOS).
+Implementation plan: `docs/plans/active/windows-bundled-daemon.md`.
+
+**Install source is the bundled sidecar.** `tauri.windows.conf.json` lists
+`binaries/smind` as an `externalBin` (Tauri stages it as
+`binaries/smind-x86_64-pc-windows-msvc.exe` and the installers place it next
+to the app as `smind.exe`). **Install** and **Update** copy that file to
+`%LOCALAPPDATA%\smind\bin\smind.exe` and run the copy, never the bundled
+file in place — the same copy-then-run model macOS uses (ADR-0013 D2), so
+the identity checks (`exe_path` of the managed record, the live port
+owner's image path) keep pointing at one stable location that does not move
+with the install directory or get locked by the installer. The copy is
+staged beside its destination and renamed into place; a running managed
+daemon is stopped first (a running exe cannot be replaced on Windows),
+unchanged from the first amendment's stop/restart/identity/take-over/WSL
+rules.
+
+**The download path is removed, not kept as a fallback.** Reasons:
+1. macOS has no fallback and its tests assert that a missing or empty
+   bundled daemon is a clear error ("reinstall smind"), never a download;
+   "one behaviour across both desktop OSes" is the point of the change.
+2. A fallback masks a broken installer. CI now fails the build if the
+   installer lacks a runnable `smind.exe` of the app's version; a silent
+   network repair path would hide the same defect on users' machines and
+   cannot be exercised without a Windows machine.
+3. The bundle guarantees version lockstep (the app and its daemon are built
+   from the same commit with the same stamp) and works offline; a download
+   can only add skew (a yanked/never-published tag, a dev build, a proxy
+   blocking GitHub).
+4. It deletes the zip/checksum/`IsWow64Process2` code (and the `zip`
+   dependency) from the Windows host. The `smind_<version>_windows_<arch>.zip`
+   release assets remain published for manual installs and
+   `verify-windows-*`.
+
+**Version lockstep.** The Windows installer is built from the same release
+run as the daemon (`build-desktop-windows` needs `build-binaries` and
+bundles its `windows_amd64` artifact, exactly as `build-desktop-macos` does
+for darwin) and CI asserts the bundled `smind.exe` reports the app version.
+"Daemon older than the app" is therefore resolved by **Update from the
+bundle**, which is the same Install code path as on macOS.
+
+**Existing downloaded daemon on upgrade.** Nothing to migrate: the layout is
+unchanged (`%LOCALAPPDATA%\smind\bin\smind.exe`, `managed.json`,
+`smind.log`) and the `managed.json` record stays valid. A daemon installed
+by the download flow is replaced by the bundled one the first time the user
+runs **Update** (the app's updater offers it as "daemon older than the app"
+exactly as before); until then it keeps running untouched. The bundled copy
+overwrites it in place after the usual stop.
+
+**Architecture.** The installer is built on `windows-latest` (x64), so it
+bundles the `amd64` daemon. On an ARM64 Windows machine the x64 app already
+runs under emulation and now runs an x64 daemon under emulation as well; the
+previous "daemon follows the OS architecture" rule goes away with the
+download. A native ARM64 desktop installer (which would bundle the `arm64`
+daemon via the target-triple suffix) is a follow-up; the `arm64` zip stays
+published and verified by `verify-windows-arm64`.
+
+**Uninstaller / layout overlap.** The NSIS default install dir is also
+`%LOCALAPPDATA%\smind` (the managed layout's root). Tauri's uninstaller (and
+in-place update) deletes only the files it installed — now `smind-desktop.exe`,
+the bundled `smind.exe` sidecar and `uninstall.exe` — then a non-recursive
+`RMDir "$INSTDIR"`, so `bin\`, `managed.json` and `smind.log` survive. The
+bundled sidecar (`%LOCALAPPDATA%\smind\smind.exe`) and the managed copy
+(`%LOCALAPPDATA%\smind\bin\smind.exe`) are different files in different
+directories, so an update never touches the running daemon's image. The
+layout is therefore **kept**; the plan's validation records the check of
+Tauri's NSIS/WiX templates. A running managed daemon surviving uninstall is
+pre-existing behaviour and unchanged.
+
+**Not decided here.** Auto-start of the daemon at app launch is macOS-only
+today (`auto_start`); extending it to Windows is a separate product decision.

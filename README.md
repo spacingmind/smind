@@ -83,6 +83,16 @@ task desktop:mac:install   # builds smind.app + .dmg, copies the app to /Applica
 task desktop:mac           # build only; output under desktop/src-tauri/target/<triple>/release/bundle/
 ```
 
+### Windows desktop app
+
+Each release attaches an x64 installer (NSIS `*-setup.exe` and `.msi`). The installer bundles the matching native `smind.exe`:
+**Install** or **Update** in the app copies it to
+`%LOCALAPPDATA%\smind\bin\` and runs it from there — nothing is downloaded,
+so the daemon's version always matches the app's. Git for Windows is
+required. An existing daemon running inside WSL is never touched: it can
+still be used as a remote connection, but it must be stopped first if it
+holds the port when you press **Install**.
+
 ### Updating
 
 The macOS and Windows desktop apps check for updates on GitHub Releases
@@ -120,10 +130,11 @@ tar -xzf "smind_${version}_${os}_${arch}.tar.gz"
 ./smind --version
 ```
 
-There is no native Windows daemon binary yet; `internal/terminal` is now
-cross-platform (see docs/plans/active/windows-native-terminal.md), but the
-rest of the daemon's Windows runtime parity is still follow-up work. Windows
-users run the desktop app, which manages the daemon via WSL2.
+There is a native Windows daemon, shipped as
+`smind_<version>_windows_<arch>.zip` (amd64/arm64) with `smind.exe` at the
+archive root. To install it manually, unzip it anywhere and run
+`smind.exe serve`. The desktop app does not need this — its installer
+bundles the daemon (amd64; on ARM64 Windows it runs under x64 emulation).
 
 ## Quickstart
 

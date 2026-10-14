@@ -1,0 +1,123 @@
+# Windows desktop app bundles `smind.exe`, like macOS
+
+Size: L (6) — scope 2 (Rust + CI + docs), PRs 1, risk 1 (release pipeline,
+daemon replacement), decisions 1 (ADR-0030 amendment), verification 1
+(real Windows needed, not available here).
+
+Implements the 2026-10-13 amendment to ADR-0030. The Windows installers
+(NSIS + MSI) carry `smind.exe` as a Tauri sidecar; Install/Update copy it to
+`%LOCALAPPDATA%\smind\bin\` exactly as macOS copies its bundled daemon into
+its data dir. The GitHub-Release download path is removed. Out of scope:
+a native ARM64 installer, auto-start on Windows, code signing, the landing
+page copy (separate repo).
+
+## Acceptance Criteria
+
+1. **AC1 — Sidecar configured.** `tauri.windows.conf.json` has
+   `bundle.externalBin: ["binaries/smind"]`; the Windows build consumes
+   `binaries/smind-x86_64-pc-windows-msvc.exe`. A debug/test build on a
+   machine without the staged daemon still compiles (empty placeholder, as on
+   macOS); a release build never writes a placeholder.
+2. **AC2 — Daemon build task.** `task desktop:win:daemon` builds
+   `smind.exe` for `windows/amd64` stamped with the desktop version
+   (`desktop/src-tauri/tauri.conf.json`) into
+   `desktop/src-tauri/binaries/smind-x86_64-pc-windows-msvc.exe`, with the
+   same flags as `desktop:mac:daemon`.
+3. **AC3 — Release wiring.** In `release-please.yml`, `build-desktop-windows`
+   `needs` `build-binaries` and passes `daemon-version`; `desktop-windows.yml`
+   reuses that run's `smind_<version>_windows_amd64` artifact instead of
+   rebuilding. `verify-windows-*` and `publish` are unchanged in meaning.
+4. **AC4 — PR CI still builds.** Without `daemon-version` (push/PR/manual),
+   `desktop-windows.yml` builds the daemon in-job (`task desktop:win:daemon`)
+   before `tauri build`, mirroring `desktop-macos.yml`.
+5. **AC5 — Installer contains the daemon.** A CI step fails the job unless
+   (a) the NSIS installer lists `smind.exe` (and it is not a placeholder:
+   > 1 MB), (b) the MSI contains it, and (c) the bundled `smind.exe` runs and
+   its `version` output matches the app version (unless a `-dev` dry run).
+6. **AC6 — Install copies the bundle.** On Windows, Install/Update resolve
+   the sidecar next to the app executable (`smind.exe`), copy it via a
+   staged file renamed into `%LOCALAPPDATA%\smind\bin\smind.exe`, and start
+   that copy. No network access; a missing or empty bundled file is a clear
+   error naming the path and never a download.
+7. **AC7 — Update from the bundle.** "Daemon older than the app" on Windows
+   is resolved by the same Install/Update flow: the running managed daemon
+   is stopped first (existing `windows_update_plan`), then the bundled
+   binary replaces `bin\smind.exe`, then the daemon starts and the managed
+   record is saved only after the identity/version check passes. A failed
+   stop aborts before the binary is touched.
+8. **AC8 — #311 logic unchanged.** Stop/restart, identity checks, take-over
+   rules and the WSL-conflict refusal behave as before (their existing tests
+   pass unmodified).
+9. **AC9 — Download path gone.** The Windows host no longer references the
+   release URL, zip extraction, checksum download or `IsWow64Process2`
+   (`install_binary`, `download_and_verify`, `install_from_release`,
+   `native_target_for_this_machine`, `windows_target_from_os_arch` and the
+   `zip` dependency are removed); `install_source(Windows)` is `Bundled`.
+10. **AC10 — Uninstaller overlap checked.** Tauri's generated NSIS (and WiX)
+    template is read to confirm uninstall/update cannot delete `bin\`,
+    `managed.json` or `smind.log` and cannot collide with the new sidecar
+    `%LOCALAPPDATA%\smind\smind.exe`; the layout is changed only if it can.
+11. **AC11 — Docs.** ADR-0030 amendment + ADR-0013 note; README's install
+    section describes the Windows app bundling the daemon, and no longer says
+    Windows users run it via WSL2 or that there is no native Windows binary.
+12. **AC12 — Real machine** (needs the Windows session): fresh install of the
+    CI installer, click Install -> daemon runs from `bin\`; upgrade over a
+    previously downloaded daemon via Update.
+
+## Test Scenarios
+
+- `windows_install_sources_bundled_binary` — copy the bundled file into a
+  layout, replacing an existing `smind.exe`, leaves no staging file (AC6, AC7).
+- `windows_install_missing_bundled_binary_is_error` — missing and empty
+  source: error names the bundled path, mentions "bundled daemon"/"empty",
+  never "download", destination untouched (AC6).
+- `bundled_daemon_path_is_platform_named` — `smind.exe` on Windows, `smind`
+  elsewhere, resolved next to the app exe (AC6).
+- `windows_install_uses_bundled_source` — `install_source(Windows) ==
+  Bundled` (AC9); replaces `windows_install_downloads_the_windows_release`.
+- `windows_update_stops_running_daemon_before_replacing_binary` — existing
+  test, unchanged (AC7, AC8).
+- Existing `windows_take_over_refused_for_foreign_owner`,
+  `install_refused_on_port_conflict_names_the_port`,
+  `classify_wsl_forwarded_port_is_not_takeover_eligible` pass unmodified (AC8).
+- `ensure_sidecar_placeholder` is a pure fn tested for the windows triple
+  file name (`smind-<triple>.exe`) and for "release never writes" (AC1).
+- CI: `desktop-windows` job `Verify bundle` step (AC5); `cargo test` and
+  `cargo check --target x86_64-pc-windows-msvc` where the host allows.
+- Template read recorded in Validation (AC10).
+
+## Decisions
+
+- Download path removed rather than kept as a fallback — ADR-0030
+  amendment (macOS parity, no masked broken bundles, lockstep, less
+  untestable code).
+- Managed layout kept; sidecar and managed copy are different paths.
+- Bundled arch is amd64 (installer is x64); ARM64 runs it emulated until an
+  ARM64 installer exists.
+- No auto-start on Windows in this change.
+- Shared `release.rs` / `checksums.rs` / `native::download_and_verify` are
+  left in place (still part of the daemon-client API and macOS tests); only
+  the Windows-specific download code is removed.
+
+## Progress
+
+- [x] ADR-0030 amendment, ADR-0013 note, this plan.
+- [x] Rust: sidecar path, shared copy install, placeholder, remove download (peer-sonnet a8c3c1b4, 26517d2e, e583de74 — ACCEPTED by Lead after reading the full diff).
+- [x] Taskfile `desktop:win:daemon`, `desktop-windows.yml`, `release-please.yml` (Lead, 22cedfa5).
+- [x] README (peer-glm 0acf8066, ACCEPTED; installer file-name claim corrected by Lead).
+- [x] Adversarial review of workflow + Rust (reviewer 4e5f67f3 on #334; findings 1, 4, 5, 6 applied, 3 disproved by the green Windows `cargo test`, 7 (jq CRLF) not needed: the daemon reported `smind 0.11.1`; finding 2 -- the release-path artifact download -- still needs a `release-please` workflow_dispatch dry run, see AC3).
+- [x] PR #334 + `desktop-windows` workflow green with the Verify bundle step (push run 38389176580).
+
+## Validation
+
+- **AC1** verified: `tauri.windows.conf.json` `externalBin`; Windows `tauri build` succeeded with the staged sidecar (run 38389176580). Placeholder naming: `sidecar_placeholder_name` test; release build refuses an empty placeholder (checked locally: `cargo build --release` panics).
+- **AC2** verified: `task desktop:win:daemon` ran on the `windows-latest` runner (PR path) and produced a daemon reporting `smind 0.11.1`.
+- **AC3 NOT yet verified**: the `release-please.yml` wiring (`needs: build-binaries`, `daemon-version`, artifact download + unzip in `desktop-windows.yml`) has never run. It needs a `release-please` `workflow_dispatch` dry run on this branch (publishes workflow artifacts only, no Release) -- left to the Human because dispatching it was not authorized in this session.
+- **AC4** verified: the push/PR run built the daemon in-job.
+- **AC5** verified on the real runner (run 38389176580, `Verify installers bundle smind.exe`): NSIS installer -> `smind.exe` 40,391,680 bytes; MSI -> `PFiles\smind\smind.exe` 40,391,680 bytes; both SHA-256-identical to the staged sidecar; `smind.exe version` -> `smind 0.11.1`.
+- **AC6/AC7/AC9** verified by unit tests on macOS and on the Windows runner (`cargo test` for `desktop/src-tauri` and `desktop/daemon-client` both ran green on `windows-latest`, which compiles the `cfg(windows)` install branch): `windows_install_sources_bundled_binary`, `windows_install_missing_bundled_binary_is_error`, `bundled_daemon_path_is_platform_named`, `windows_install_uses_bundled_source`, plus the unchanged `windows_update_stops_running_daemon_before_replacing_binary`. Rename-over-running-exe is retried 5 x 200 ms then reported with a "stop it first" hint; the old binary is kept.
+- **AC8** verified: the #311 tests pass unmodified.
+- **AC10** verified by reading Tauri's templates (`tauri-apps/tauri` master; the app locks tauri 2.11.6, so not version-pinned -- recheck on Tauri upgrades): NSIS install path `$LOCALAPPDATA\smind` (`installer.nsi:523-524`), sidecar written as `$INSTDIR\smind.exe` (`:674-677`), uninstall deletes only listed files + non-recursive `RMDir` (`:802-836`), "delete app data" touches only `...\dev.spacingmind.desktop` (`:898-899`), the running-app check only watches `smind-desktop.exe` (`:661`, `:798`); WiX is perMachine `ProgramFiles64\smind` by default, `RemoveFolder` only removes empty dirs (`main.wxs:28, 121-122, 185-186`). Caveat: an MSI installed after an NSIS install can pick up the NSIS HKCU install dir (`main.wxs:77-82`) -- still only removes its own components. Layout unchanged.
+- **AC11** verified by reading: README, ADR-0030 amendment, ADR-0013 note.
+- **AC12 NOT verified -- needs the Windows session**: fresh install of the CI installer + Install button -> daemon runs from `bin\`; Update over a daemon previously downloaded by the old flow; Defender holding the freshly copied exe; ARM64 (amd64 daemon under emulation).
+- Host checks: `task test`, `task lint`, `task check:versions`, desktop node tests, `cargo test` in both crates. `cargo clippy --all-targets -D warnings` on macOS reports `dead_code` for Windows-only helpers (not touched here); `daemon-client` clippy trips `should_implement_trait` in `backoff.rs` (untouched file).
