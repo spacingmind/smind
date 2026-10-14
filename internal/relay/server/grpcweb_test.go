@@ -62,7 +62,7 @@ func startGRPCWebTestRelay(t *testing.T) (*grpcWebTestRelay, func()) {
 	t.Helper()
 	dir := t.TempDir()
 	const workspaceID = "ws-grpcweb"
-	secret, err := EnrollWorkspace(dir, workspaceID)
+	secret, err := EnrollHost(dir, workspaceID)
 	if err != nil {
 		t.Fatalf("enroll: %v", err)
 	}

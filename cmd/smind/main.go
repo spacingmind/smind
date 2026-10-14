@@ -81,8 +81,7 @@ Usage:
   smind stop                                              ask the running daemon to shut down gracefully
 
   smind relay [--listen <addr>] [--data-dir <dir>]        start the self-hostable E2EE relay
-  smind relay workspace new <id>                          enroll a relay workspace (secret printed once)
-  smind relay workspace ls                                list relay workspaces
+  smind relay host new|ls|rm|rotate [<id>]                manage relay hosts (secret printed once)
 
   smind workspace create <repoPath> <name> <policy>       register a workspace
   smind workspace ls                                      list workspaces

@@ -21,7 +21,7 @@ import (
 
 // ProtocolVersion is the admission state machine version. Version 2
 // (ADR-0011, 2026-10-08 amendment) is the SCRAM-style proof: the client
-// proves knowledge of the raw workspace secret without the relay's stored
+// proves knowledge of the raw relay host secret without the relay's stored
 // hash being sufficient to forge it. Version 1 (HMAC keyed by the stored
 // hash itself) made the relay's workspaces.json credential-equivalent and
 // is rejected outright — never dual-accepted.
@@ -37,9 +37,9 @@ const challengeTTL = 30 * time.Second
 
 // Default bounds on outstanding (issued, unconsumed, unexpired) challenges.
 // Challenge is unauthenticated and, to avoid a workspace-existence oracle,
-// is answered even for unknown workspace IDs, so without a bound a flood of
+// is answered even for unknown relay host ids, so without a bound a flood of
 // AdmitChallenge calls grows the map without limit for one challengeTTL at
-// a time. The per-workspace cap stops one workspace ID (known or made up)
+// a time. The per-workspace cap stops one relay host id (known or made up)
 // from consuming the global budget on its own; the global cap bounds the
 // total. A legitimate daemon/device holds a challenge for milliseconds, so
 // both defaults are far above any real load.
@@ -49,9 +49,9 @@ const (
 )
 
 // ErrRejected is the single, generic admission failure returned for every
-// rejection path (unknown workspace, wrong secret, bad transcript,
+// rejection path (unknown relay host, wrong secret, bad transcript,
 // unknown/expired/consumed nonce, version mismatch). Distinct causes would
-// let an attacker probe which workspace IDs exist or how close a guessed
+// let an attacker probe which relay host ids exist or how close a guessed
 // secret is, so callers must not wrap or enrich it with the cause.
 var ErrRejected = errors.New("admission: rejected")
 
@@ -214,7 +214,7 @@ func (v *Verifier) Admit(req *relaypb.AdmitRequest) (Session, error) {
 	}
 
 	// Transcript inputs must match the challenge exactly, so a nonce
-	// issued for one workspace/key/nonce triple cannot admit another.
+	// issued for one relay host/key/nonce triple cannot admit another.
 	transcriptInputsMatch := req.GetProtocolVersion() == ProtocolVersion &&
 		req.GetWorkspaceId() == ch.workspaceID &&
 		req.GetDaemonKeyId() == ch.daemonKeyID &&
@@ -296,7 +296,7 @@ func ProofMask(storedKey []byte, req *relaypb.AdmitRequest) []byte {
 
 // ComputeProof builds the client's admission proof, SCRAM-style (RFC 5802):
 //
-//	ClientKey = the raw 32-byte workspace secret
+//	ClientKey = the raw 32-byte relay host secret
 //	StoredKey = SHA-256(ClientKey)            (what the relay persists)
 //	proof     = ClientKey XOR HMAC-SHA256(StoredKey, transcript)
 //
@@ -304,7 +304,7 @@ func ProofMask(storedKey []byte, req *relaypb.AdmitRequest) []byte {
 // accepts iff SHA-256(ClientKey') == StoredKey. Knowing only StoredKey
 // (e.g. by reading the relay's workspaces.json) gives an attacker the pad
 // but not ClientKey, so it cannot forge a proof. secret must be the raw
-// 32-byte workspace secret.
+// 32-byte relay host secret.
 func ComputeProof(secret []byte, req *relaypb.AdmitRequest) []byte {
 	mask := ProofMask(HashSecret(secret), req)
 	proof := make([]byte, len(mask))

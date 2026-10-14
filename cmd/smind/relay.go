@@ -21,21 +21,31 @@ import (
 )
 
 // cmdRelay runs the self-hostable relay server (`smind relay`), or manages
-// its workspace enrollments (`smind relay workspace ...`), or configures
+// its relay host enrollments (`smind relay host ...`), or configures
 // this daemon as a relay *client* (`smind relay connect`/`smind relay
 // offer`) -- a different role from operating a relay: see internal/relay/
 // bridge's doc comment.
 //
 //	smind relay [--listen <addr>] [--data-dir <dir>]
-//	smind relay workspace new <id>    (prints the raw secret once)
-//	smind relay workspace ls
-//	smind relay connect <relay-address> <workspace-id> <secret>
+//	smind relay host new <id>    (prints the raw secret once)
+//	smind relay host ls
+//	smind relay host rm <id>
+//	smind relay host rotate <id> (prints the new raw secret once)
+//	smind relay connect <relay-address> <host-id> <secret>
 //	smind relay offer
+//
+// A "relay host" is one daemon's mailbox on a relay (a host id plus an
+// admission secret). `smind relay workspace ...` is the deprecated name for
+// `smind relay host ...`; the wire format (proto `workspace_id`, the offer's
+// `ws` key) and the stored files keep the old word (ADR-0031 D12).
 func cmdRelay(args []string) int {
 	if len(args) > 0 {
 		switch args[0] {
+		case "host":
+			return cmdRelayHost(args[1:])
 		case "workspace":
-			return cmdRelayWorkspace(args[1:])
+			fmt.Fprintln(os.Stderr, "smind relay: \"relay workspace\" is deprecated; use \"smind relay host\"")
+			return cmdRelayHost(args[1:])
 		case "connect":
 			return cmdRelayConnect(args[1:])
 		case "offer":
@@ -73,36 +83,58 @@ func cmdRelay(args []string) int {
 	return 0
 }
 
-func cmdRelayWorkspace(args []string) int {
+// relayConnectNote says what connecting does and does not do: the word
+// "workspace" here is smind's own, which a relay host is unrelated to.
+const relayConnectNote = "Connecting registers this daemon once with the relay; every paired client sees all of this daemon's workspaces, spaces and tasks; nothing is created in smind."
+
+// relayHostSecretNote is printed after a host secret: it is shown once, and
+// the relay restarts to pick up a store change.
+const relayHostSecretNote = "Give this to the daemon's pairing flow; the relay stores only its hash."
+
+func cmdRelayHost(args []string) int {
 	if len(args) == 0 {
 		printRelayUsage(os.Stderr)
 		return 2
 	}
 	dataDir := server.RelayDir()
 	switch args[0] {
-	case "new":
+	case "new", "rotate":
 		if len(args) != 2 {
-			fmt.Fprintln(os.Stderr, "usage: smind relay workspace new <id>")
+			fmt.Fprintf(os.Stderr, "usage: smind relay host %s <id>\n", args[0])
 			return 2
 		}
-		secret, err := server.EnrollWorkspace(dataDir, args[1])
+		issue, verb := server.EnrollHost, "enrolled"
+		if args[0] == "rotate" {
+			issue, verb = server.RotateHost, "rotated (the old secret stops admitting once the relay restarts)"
+		}
+		secret, err := issue(dataDir, args[1])
 		if err != nil {
 			log.Fatalf("relay: %v", err)
 		}
-		fmt.Printf("workspace %q enrolled. Raw secret (shown ONCE, not retrievable again):\n\n  %s\n\nGive this to the daemon's pairing flow; the relay stores only its hash.\n", args[1], secretHex(secret))
+		fmt.Printf("relay host %q %s. Raw secret (shown ONCE, not retrievable again):\n\n  %s\n\n%s\n", args[1], verb, secretHex(secret), relayHostSecretNote)
+		return 0
+	case "rm":
+		if len(args) != 2 {
+			fmt.Fprintln(os.Stderr, "usage: smind relay host rm <id>")
+			return 2
+		}
+		if err := server.RemoveHost(dataDir, args[1]); err != nil {
+			log.Fatalf("relay: %v", err)
+		}
+		fmt.Printf("relay host %q removed (it stops admitting once the relay restarts)\n", args[1])
 		return 0
 	case "ls":
 		if len(args) != 1 {
-			fmt.Fprintln(os.Stderr, "usage: smind relay workspace ls")
+			fmt.Fprintln(os.Stderr, "usage: smind relay host ls")
 			return 2
 		}
-		ids, err := server.ListWorkspaces(dataDir)
+		ids, err := server.ListHosts(dataDir)
 		if err != nil {
 			log.Fatalf("relay: %v", err)
 		}
 		sort.Strings(ids)
 		if len(ids) == 0 {
-			fmt.Println("(no workspaces enrolled)")
+			fmt.Println("(no relay hosts enrolled)")
 			return 0
 		}
 		for _, id := range ids {
@@ -110,17 +142,17 @@ func cmdRelayWorkspace(args []string) int {
 		}
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "smind relay workspace: unknown subcommand %q\n\n", args[0])
+		fmt.Fprintf(os.Stderr, "smind relay host: unknown subcommand %q\n\n", args[0])
 		printRelayUsage(os.Stderr)
 		return 2
 	}
 }
 
 // cmdRelayConnect implements `smind relay connect <relay-address>
-// <workspace-id> <secret>`: the daemon-as-relay-client pairing config
+// <host-id> <secret>`: the daemon-as-relay-client pairing config
 // (docs/decisions -- see docs/plans/active/mobile-app-milestone-1.md's
-// Decisions). address/workspaceID/secret are exactly the values `smind
-// relay workspace new`'s one-time output already gives a relay operator;
+// Decisions). address/hostID/secret are exactly the values `smind
+// relay host new`'s one-time output already gives a relay operator;
 // the relay's TLS fingerprint is captured here via trust-on-first-use
 // (bridge.FetchFingerprint) rather than a fourth argument, since a fresh
 // relay's fingerprint isn't something a human would otherwise copy by hand.
@@ -129,10 +161,10 @@ func cmdRelayWorkspace(args []string) int {
 // simply doesn't exist until this command runs.
 func cmdRelayConnect(args []string) int {
 	if len(args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: smind relay connect <relay-address> <workspace-id> <secret>")
+		fmt.Fprintln(os.Stderr, "usage: smind relay connect <relay-address> <host-id> <secret>")
 		return 2
 	}
-	address, workspaceID, secret := args[0], args[1], args[2]
+	address, hostID, secret := args[0], args[1], args[2]
 	if _, err := hex.DecodeString(secret); err != nil {
 		fmt.Fprintf(os.Stderr, "smind relay connect: secret is not valid hex: %v\n", err)
 		return 2
@@ -144,13 +176,13 @@ func cmdRelayConnect(args []string) int {
 	}
 	if err := bridge.SaveConfig(config.Dir(), bridge.Config{
 		RelayAddress: address,
-		WorkspaceID:  workspaceID,
+		WorkspaceID:  hostID, // bridge.Config keeps the wire name; it is the relay host id
 		SecretHex:    secret,
 		Fingerprint:  fingerprint,
 	}); err != nil {
 		log.Fatalf("relay connect: %v", err)
 	}
-	fmt.Printf("connected to relay %s (workspace %q, fingerprint %s)\n\n`smind serve` will now dial this relay automatically. Run `smind relay offer` for a pairing URL for a mobile device.\n", address, workspaceID, fingerprint)
+	fmt.Printf("connected to relay %s (relay host %q, fingerprint %s)\n\n`smind serve` will now dial this relay automatically. Run `smind relay offer` for a pairing URL for a mobile device.\n\n%s\n", address, hostID, fingerprint, relayConnectNote)
 	return 0
 }
 
@@ -183,7 +215,7 @@ func cmdRelayOffer(args []string) int {
 		log.Fatalf("relay offer: %v", err)
 	}
 	if !ok {
-		fmt.Fprintln(os.Stderr, "smind relay offer: no relay connection configured; run `smind relay connect <relay-address> <workspace-id> <secret>` first")
+		fmt.Fprintln(os.Stderr, "smind relay offer: no relay connection configured; run `smind relay connect <relay-address> <host-id> <secret>` first")
 		return 1
 	}
 	kp, err := e2ee.LoadOrCreateKeyPair(dir)
@@ -246,21 +278,27 @@ func printRelayUsage(w io.Writer) {
 Usage:
   smind relay [--listen <addr>] [--grpc-web-listen <addr>] [--data-dir <dir>]
                                                            start the relay server
-  smind relay workspace new <id>                          enroll a workspace (secret printed once)
-  smind relay workspace ls                                list enrolled workspaces
-  smind relay connect <address> <workspace-id> <secret>   configure this daemon to use a relay
-  smind relay offer                                       print a pairing URL for a mobile device
+  smind relay host new <id>                               enroll a relay host (secret printed once)
+  smind relay host ls                                     list enrolled relay hosts
+  smind relay host rm <id>                                remove a relay host
+  smind relay host rotate <id>                            issue a new secret (printed once; the old one stops admitting)
+  smind relay connect <address> <host-id> <secret>        configure this daemon to use a relay
+  smind relay offer                                       print a pairing URL for a mobile device or the desktop app
 
-The relay is a dumb pipe: it authenticates workspaces (SCRAM-style
+A relay host is one daemon's mailbox on a relay: a host id plus an admission
+secret. ("smind relay workspace ..." is the deprecated name for "smind relay
+host ...".) Host changes take effect when the relay restarts.
+
+The relay is a dumb pipe: it authenticates relay hosts (SCRAM-style
 challenge-response) and forwards opaque ciphertext between the daemon and
 paired mobile devices. It never sees plaintext. Data lives under
 $SMIND_HOME/relay (default ~/.smind/relay): a self-signed TLS
 certificate (pin its fingerprint, printed at startup, at pairing time)
-and the workspace secret hashes.
+and the relay host secret hashes.
 
 "smind relay connect"/"smind relay offer" are the OTHER side: they make
 this daemon a client of some relay (self-hosted or not), so "smind serve"
 dials out to it in the background and a paired mobile device can reach
-this daemon's workspaces through it.
+this daemon's workspaces through it. Connecting registers this daemon once with the relay; every paired client sees all of this daemon's workspaces, spaces and tasks; nothing is created in smind.
 `)
 }
