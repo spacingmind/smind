@@ -20,8 +20,9 @@
 # embedded), the Windows desktop installers and the macOS .dmg per arch (by
 # calling desktop-windows.yml / desktop-macos.yml as reusable workflows; both
 # apps bundle the matching daemon built here), package everything with a
-# SHA-256 checksums.txt, and attach it all to that Release. No
-# signing/notarization (out of scope); the Windows daemon ships as
+# SHA-256 checksums.txt (signed with the desktop-updater minisign key as
+# checksums.txt.minisig, ADR-0031 P7), and attach it all to that Release. No
+# OS code signing/notarization (out of scope); the Windows daemon ships as
 # smind_<version>_windows_{amd64,arm64}.zip. Modeled on
 # refs/cliproxyapi's release workflow, adapted to release-please already
 # owning tag/Release creation.
@@ -320,6 +321,63 @@ jobs:
           fi
           sha256sum "${files[@]}" | sort -k2 > checksums.txt
 
+      # Signs checksums.txt (ADR-0031 P7) so `smind update` can tell a genuine
+      # release from one whose archives AND checksums.txt were swapped. Same
+      # minisign key as the desktop updater (ADR-0023); smind embeds the public
+      # half (internal/selfupdate.UpdaterPublicKey, pinned to tauri.conf.json by
+      # a test). Must come after "Checksums" and before anything is uploaded.
+      - name: Install the Tauri CLI (version pinned by desktop/package-lock.json)
+        run: npm ci --prefix desktop
+
+      - name: Install minisign (independent check of every signature we make)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      # Real release: the release key is mandatory (a missing secret fails the
+      # job, never publishes unsigned -- ADR-0023 §4) and the new signature is
+      # re-verified against the public key committed in tauri.conf.json. The
+      # key goes through the environment only; nothing here prints it.
+      - name: Sign checksums.txt (release key)
+        if: needs.release-please.outputs.release_created == 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set: refusing to publish a release without a signed checksums.txt"
+            exit 1
+          fi
+          SMIND_SIGN_PUBKEY="$(jq -r .plugins.updater.pubkey desktop/src-tauri/tauri.conf.json)"
+          export SMIND_SIGN_PUBKEY
+          scripts/sign-checksums.sh dist "$VERSION"
+
+      # workflow_dispatch dry run: prove the signing pipeline with a throwaway
+      # key generated here. The real secret is not referenced by this step, so
+      # a dry run can never sign (or leak) with it; the signature in the dry-run
+      # artifact is by a key nobody trusts.
+      - name: Sign checksums.txt (dry run, throwaway key)
+        if: needs.release-please.outputs.release_created != 'true'
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/dryrun-signing.key"
+          desktop/node_modules/.bin/tauri signer generate -w "$key" -p "" -f >/dev/null
+          SMIND_SIGN_PUBKEY="$(cat "$key.pub")"
+          export SMIND_SIGN_PUBKEY
+          TAURI_SIGNING_PRIVATE_KEY="$(cat "$key")" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
+            scripts/sign-checksums.sh dist "$VERSION"
+          # And with smind's own verifier, the one `smind update` runs.
+          SMIND_VERIFY_CHECKSUMS="$PWD/dist/checksums.txt" SMIND_VERIFY_SIG="$PWD/dist/checksums.txt.minisig" \
+            SMIND_VERIFY_PUBKEY="$SMIND_SIGN_PUBKEY" SMIND_VERIFY_VERSION="$VERSION" \
+            go test -count=1 -run '^TestVerifyReleaseFilesFromEnv$' -v ./internal/selfupdate
+          rm -f "$key" "$key.pub"
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: smind_${{ needs.prepare.outputs.version }}_release
@@ -331,6 +389,7 @@ jobs:
             dist/*.dmg
             dist/*.sig
             dist/checksums.txt
+            dist/checksums.txt.minisig
           if-no-files-found: error
 
       - name: Upload to Release
@@ -342,7 +401,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          assets=(*.tar.gz *.zip *.exe *.msi *.dmg *.sig checksums.txt)
+          assets=(*.tar.gz *.zip *.exe *.msi *.dmg *.sig checksums.txt checksums.txt.minisig)
           gh release upload "$TAG" "${assets[@]}" --clobber --repo "${{ github.repository }}"
 
       # Must come after the asset upload above: latest.json references the
