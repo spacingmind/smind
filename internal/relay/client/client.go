@@ -170,12 +170,14 @@ func (d *DataConn) Resume(ctx context.Context, c relaypb.RelayClient, admissionI
 	if d.frames.isClosed() {
 		return fmt.Errorf("relay client: resume: transport already closed cleanly; start a new session instead")
 	}
-	sctx := metadata.AppendToOutgoingContext(ctx, metadataKeyAdmission, admissionID)
+	sctx, cancel := context.WithCancel(ctx)
+	sctx = metadata.AppendToOutgoingContext(sctx, metadataKeyAdmission, admissionID)
 	stream, err := c.OpenData(sctx)
 	if err != nil {
+		cancel()
 		return fmt.Errorf("relay client: resume: open data: %w", err)
 	}
-	d.frames.reopen(stream)
+	d.frames.reopen(stream, cancel)
 	return nil
 }
 
@@ -200,13 +202,18 @@ func (d *DataConn) Close() error { return d.channel.Close() }
 // layers an e2ee.Channel on top using the given keypair and role. The
 // returned DataConn must complete Handshake before Send/Receive.
 func OpenData(ctx context.Context, c relaypb.RelayClient, admissionID, workspaceID, sessionID, deviceID string, kp *e2ee.KeyPair, role e2ee.Role, opts ...DataOption) (*DataConn, error) {
-	sctx := metadata.AppendToOutgoingContext(ctx, metadataKeyAdmission, admissionID)
+	// The stream gets its own cancellable context so the keepalive dead-stream
+	// rule can break a blocked Receive (see keepalive.go).
+	sctx, cancel := context.WithCancel(ctx)
+	sctx = metadata.AppendToOutgoingContext(sctx, metadataKeyAdmission, admissionID)
 	stream, err := c.OpenData(sctx)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("relay client: open data: %w", err)
 	}
 	fc := &frameConn{
-		stream: stream,
+		stream:       stream,
+		cancelStream: cancel,
 		route: route{
 			workspaceID: workspaceID,
 			sessionID:   sessionID,
@@ -252,6 +259,14 @@ type frameConn struct {
 	seq     uint64
 	pending []byte
 	closed  bool
+
+	// cancelStream cancels the current stream's context; ka is the optional
+	// keepalive state (see keepalive.go). ctlMu guards both and is a leaf
+	// lock (never held while taking sendMu/recvMu), so the read path and the
+	// keepalive loop can use them without ordering against those.
+	ctlMu        sync.Mutex
+	cancelStream context.CancelFunc
+	ka           *keepalive
 }
 
 type route struct {
@@ -282,7 +297,7 @@ func (f *frameConn) Write(p []byte) (int, error) {
 	}
 	f.seq++
 	if err := f.stream.Send(frame); err != nil {
-		return 0, err
+		return 0, f.streamErr(err)
 	}
 	return len(p), nil
 }
@@ -296,12 +311,22 @@ func (f *frameConn) Read(p []byte) (int, error) {
 	if f.closed {
 		return 0, io.ErrClosedPipe
 	}
-	frame, err := f.stream.Recv()
-	if err != nil {
-		return 0, err
+	for {
+		frame, err := f.stream.Recv()
+		if err != nil {
+			return 0, f.streamErr(err)
+		}
+		if k := f.keepaliveState(); k != nil {
+			k.noteRecv(frame)
+		}
+		if frame.GetKeepalive() {
+			// A liveness frame (an echo of ours, or a peer's probe a relay
+			// forwarded): never application data.
+			continue
+		}
+		f.pending = frame.GetPayload()
+		return f.drain(p)
 	}
-	f.pending = frame.GetPayload()
-	return f.drain(p)
 }
 
 func (f *frameConn) drain(p []byte) (int, error) {
@@ -314,14 +339,21 @@ func (f *frameConn) drain(p []byte) (int, error) {
 // adapter's sequence counter (relay buffer ordering) and clearing any
 // partial payload left over from the dead stream, then re-registers the
 // route (the relay derives a stream's route from its first frame).
-func (f *frameConn) reopen(stream relaypb.Relay_OpenDataClient) {
+func (f *frameConn) reopen(stream relaypb.Relay_OpenDataClient, cancel context.CancelFunc) {
 	f.sendMu.Lock()
 	f.recvMu.Lock()
+	f.ctlMu.Lock()
+	if f.cancelStream != nil {
+		f.cancelStream() // release the dead stream's context
+	}
+	f.cancelStream = cancel
+	f.ctlMu.Unlock()
 	f.stream = stream
 	f.pending = nil
 	f.recvMu.Unlock()
 	f.sendMu.Unlock()
 	f.register()
+	f.startKeepaliveLoop()
 }
 
 // drop kills the stream (network-drop model): the adapter stays resumable
@@ -339,6 +371,7 @@ func (f *frameConn) reopen(stream relaypb.Relay_OpenDataClient) {
 // confirmed dead, closing that window instead of hoping CloseSend
 // propagates fast enough.
 func (f *frameConn) drop() {
+	f.stopKeepalive()
 	f.sendMu.Lock()
 	f.recvMu.Lock()
 	st := f.stream
@@ -359,6 +392,7 @@ func (f *frameConn) isClosed() bool {
 }
 
 func (f *frameConn) Close() error {
+	f.stopKeepalive()
 	f.sendMu.Lock()
 	f.recvMu.Lock()
 	f.closed = true

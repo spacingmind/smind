@@ -509,9 +509,16 @@ func TestGRPCWeb_OpenControlPingPongOverWebsocket(t *testing.T) {
 		WorkspaceId: relay.workspace,
 		Body:        &relaypb.ControlFrame_Ping_{Ping: &relaypb.ControlFrame_Ping{Sequence: 42}},
 	})
-	ok, trailer = stream.recvMessage(&pong)
-	if !ok {
-		t.Fatalf("OpenControl ping: unexpected trailer status=%s message=%s", trailer.status, trailer.message)
+	// The relay also sends a Sync right after accepting the stream (ADR-0031
+	// D9), so read until the Pong rather than assuming strict alternation.
+	for {
+		ok, trailer = stream.recvMessage(&pong)
+		if !ok {
+			t.Fatalf("OpenControl ping: unexpected trailer status=%s message=%s", trailer.status, trailer.message)
+		}
+		if pong.GetPong() != nil {
+			break
+		}
 	}
 	if pong.GetPong().GetSequence() != 42 {
 		t.Fatalf("pong sequence = %d, want 42", pong.GetPong().GetSequence())

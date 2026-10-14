@@ -48,9 +48,35 @@ curl -fsSL https://spacingmind.com/install.sh | sh
 
 [`scripts/install.sh`](scripts/install.sh) downloads the latest release for
 your OS/arch, verifies it against `checksums.txt`, and installs `smind` to
-`/usr/local/bin` (or `~/.local/bin` if that isn't writable). Set
-`SMIND_VERSION=0.8.0` to pin a release or `SMIND_INSTALL_DIR` to choose the
-target directory.
+`/usr/local/bin` (or `~/.local/bin` if that isn't writable). Pin a release
+with `--version` (`curl -fsSL https://spacingmind.com/install.sh | sh -s --
+--version 0.11.1`) or `SMIND_VERSION=0.11.1` (the flag wins if both are set),
+and choose the target directory with `SMIND_INSTALL_DIR`. Re-running it
+installs over the previous version, so it is also the update path.
+
+On Windows, in PowerShell (5.1 or 7):
+
+```powershell
+irm https://raw.githubusercontent.com/spacingmind/smind/master/scripts/install.ps1 | iex
+```
+
+[`scripts/install.ps1`](scripts/install.ps1) downloads
+`smind_<version>_windows_<amd64|arm64>.zip` and `checksums.txt` from the
+release, verifies the SHA-256, and installs `smind.exe` to
+`%LOCALAPPDATA%\Programs\smind`, adding that directory to your user `PATH`
+once (open a new terminal afterwards). It honours `SMIND_VERSION` and
+`SMIND_INSTALL_DIR` the same way (`$env:SMIND_VERSION = "0.11.1"` before the
+command), is safe to re-run to update, and leaves any previous install
+untouched if the download, checksum or extraction fails. It never writes to `%LOCALAPPDATA%\smind\`, the
+directory the [Windows desktop app](#windows-desktop-app) manages; the two
+installs are independent. Git for Windows is required (the script warns if it
+is missing).
+
+> `https://spacingmind.com/install.ps1` will serve the same script once the
+> website redirect exists; until then use the raw GitHub URL above. The
+> script is on `master` from the first release that includes it.
+
+Then `smind serve` and open <http://localhost:4648>.
 
 From source:
 
@@ -113,6 +139,19 @@ built into the app — the corresponding private key is a repository secret
   key's releases update normally again.
 - The Linux `deb` package has no updater: install new versions by hand.
 
+#### Updating the `smind` binary itself
+
+`smind update` (`--check` to only look, `--version <v>`, `--dry-run`, `--force`) replaces
+the CLI/daemon binary from a GitHub Release. It verifies the archive's SHA-256 against
+`checksums.txt` **and** a minisign signature of `checksums.txt` (`checksums.txt.minisig`,
+made with the same key as the desktop updater, whose public half is built into `smind`);
+there is no flag to skip the signature, not even `--force`. A release without that
+signature is refused ("release has no signature"), so **releases published before the first
+signed one cannot be updated to with `smind update`**: install them with the install
+script instead (the install scripts verify the SHA-256 only). If that key is ever rotated,
+`smind` binaries built before the rotation cannot verify new releases, the same one-time
+manual reinstall as the desktop app.
+
 ### Installing the daemon from a release manually
 
 Each [GitHub Release](https://github.com/spacingmind/smind/releases) ships
@@ -133,9 +172,9 @@ tar -xzf "smind_${version}_${os}_${arch}.tar.gz"
 ./smind --version
 ```
 
-There is a native Windows daemon, shipped as
-`smind_<version>_windows_<arch>.zip` (amd64/arm64) with `smind.exe` at the
-archive root. To install it manually, unzip it anywhere and run
+The native Windows daemon ships as `smind_<version>_windows_<arch>.zip`
+(amd64/arm64) with `smind.exe` at the archive root. `install.ps1` above
+automates installing it; to do it by hand, unzip it anywhere and run
 `smind.exe serve`. The desktop app does not need this — its installer
 bundles the daemon (amd64; on ARM64 Windows it runs under x64 emulation).
 
