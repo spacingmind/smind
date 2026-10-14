@@ -1,0 +1,106 @@
+name: Install scripts
+
+# scripts/install.sh (Linux, macOS) and scripts/install.ps1 (Windows), ADR-0031
+# P1. The unit tests use fakes and need no network; the Windows job also runs
+# the real one-liner against the latest published Release. Only runs when the
+# scripts (or this file) change, or on demand.
+on:
+  pull_request:
+    paths:
+      - "scripts/install*"
+      - "scripts/PSScriptAnalyzerSettings.psd1"
+      - ".github/workflows/install-scripts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install shellcheck (macOS)
+        if: runner.os == 'macOS'
+        run: command -v shellcheck || brew install shellcheck
+
+      - name: shellcheck
+        run: shellcheck scripts/install.sh scripts/install_test.sh
+
+      - name: install.sh against a fake release server
+        run: sh scripts/install_test.sh
+
+      # The real thing: latest published release, into a scratch directory.
+      - name: install.sh against the latest Release
+        run: |
+          dir="$RUNNER_TEMP/smind-bin"
+          SMIND_INSTALL_DIR="$dir" sh scripts/install.sh
+          "$dir/smind" --version
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
+            Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+          }
+          $findings = foreach ($f in 'scripts/install.ps1', 'scripts/install_test.ps1') {
+            Invoke-ScriptAnalyzer -Path $f -Settings scripts/PSScriptAnalyzerSettings.psd1
+          }
+          $findings | Format-Table RuleName, ScriptName, Line, Message -Wrap
+          if ($findings) { exit 1 }
+
+      # Both shells: end users are on Windows PowerShell 5.1 (powershell.exe)
+      # or PowerShell 7.
+      - name: install.ps1 unit tests (PowerShell 7)
+        shell: pwsh
+        run: ./scripts/install_test.ps1
+
+      - name: install.ps1 unit tests (Windows PowerShell 5.1)
+        shell: powershell
+        run: ./scripts/install_test.ps1
+
+      # The one-liner as users run it (`... | iex`), under Windows PowerShell
+      # 5.1, against the latest published Release. Installs to the default
+      # %LOCALAPPDATA%\Programs\smind and the user PATH of this throwaway
+      # runner.
+      - name: install.ps1 against the latest Release (iex, 5.1)
+        shell: powershell
+        run: |
+          $global:LASTEXITCODE = 0
+          Get-Content -Raw scripts/install.ps1 | Invoke-Expression
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Check the install (and that re-running is idempotent)
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\smind'
+          $exe = Join-Path $dir 'smind.exe'
+          if (-not (Test-Path $exe)) { throw "missing $exe" }
+          $first = & $exe --version
+          Write-Host "installed: $first"
+          if (-not $first) { throw 'smind --version printed nothing' }
+
+          # Second run through the file entry point (PowerShell 7) = update in place.
+          ./scripts/install.ps1
+          if ($LASTEXITCODE -ne 0) { throw "re-run failed ($LASTEXITCODE)" }
+          if ((& $exe --version) -ne $first) { throw 'version changed on a same-version re-run' }
+
+          $userPath = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment').GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+          $count = @($userPath.Split(';') | Where-Object { $_.TrimEnd('\') -ieq $dir }).Count
+          if ($count -ne 1) { throw "install dir is on the user PATH $count times, want 1" }
+
+          $managed = Join-Path $env:LOCALAPPDATA 'smind'
+          if (Test-Path $managed) { throw "$managed (the desktop app's directory) must not be created" }
+
+          $stray = @(Get-ChildItem $dir | Where-Object Name -ne 'smind.exe')
+          if ($stray) { throw "unexpected files in ${dir}: $($stray.Name -join ', ')" }

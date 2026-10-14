@@ -2,36 +2,101 @@
 # Installs the smind daemon/CLI from a GitHub Release.
 #
 #   curl -fsSL https://spacingmind.com/install.sh | sh
+#   curl -fsSL https://spacingmind.com/install.sh | sh -s -- --version 0.11.1
+#
+# Options:
+#   --version <v>      release to install, e.g. 0.11.1 (default: latest)
+#   -h, --help         print usage and exit
 #
 # Environment overrides:
-#   SMIND_VERSION      release to install, e.g. 0.8.0 (default: latest)
+#   SMIND_VERSION      same as --version; the flag wins if both are given
 #   SMIND_INSTALL_DIR  target directory (default: /usr/local/bin if writable,
 #                      otherwise ~/.local/bin)
 #
 # Downloads smind_<version>_<os>_<arch>.tar.gz plus checksums.txt, verifies
-# the SHA-256, and installs the `smind` binary. Linux and macOS only: there
-# is no native Windows daemon yet (ADR-0013), Windows users install the
-# desktop app instead.
+# the SHA-256 (mandatory), and installs the `smind` binary. Re-running it
+# installs the requested (or latest) release over the previous one.
+# Linux and macOS only: on Windows use scripts/install.ps1 (PowerShell).
+#
+# TODO(ADR-0031 P8): `--service` (install, then `smind service install`).
 set -eu
 
 REPO="spacingmind/smind"
+WINDOWS_ONELINER="irm https://raw.githubusercontent.com/$REPO/master/scripts/install.ps1 | iex"
 
 say() { printf '%s\n' "$*"; }
 err() { printf 'smind-install: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || err "required command not found: $1"; }
 
-need curl
-need tar
-need uname
+usage() {
+  cat <<'EOF'
+Usage: install.sh [--version <version>] [--help]
+
+Installs the smind daemon/CLI from a GitHub Release (Linux and macOS).
+
+Options:
+  --version <v>   release to install, e.g. 0.11.1 (default: latest)
+  -h, --help      print this help
+
+Environment:
+  SMIND_VERSION      same as --version (the flag wins if both are given)
+  SMIND_INSTALL_DIR  target directory (default: /usr/local/bin if writable,
+                     otherwise ~/.local/bin)
+EOF
+}
+
+# An explicit --version must carry a real value: not empty (that would
+# silently fall back to latest) and not another option (`--version --help`).
+set_version() {
+  case "$1" in
+    "" | -*)
+      usage >&2
+      printf "smind-install: --version needs a version, got: '%s'\n" "$1" >&2
+      exit 2
+      ;;
+  esac
+  version="$1"
+}
+
+version="${SMIND_VERSION:-}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --version)
+      if [ $# -lt 2 ]; then
+        usage >&2
+        printf 'smind-install: --version needs a value\n' >&2
+        exit 2
+      fi
+      set_version "$2"
+      shift 2
+      ;;
+    --version=*)
+      set_version "${1#--version=}"
+      shift
+      ;;
+    *)
+      usage >&2
+      printf 'smind-install: unknown option: %s\n' "$1" >&2
+      exit 2
+      ;;
+  esac
+done
 
 case "$(uname -s)" in
   Linux) os=linux ;;
   Darwin) os=darwin ;;
   MINGW* | MSYS* | CYGWIN*)
-    err "no native Windows build yet; download the desktop app from https://github.com/$REPO/releases/latest"
+    err "this script is for Linux and macOS; on Windows run in PowerShell: $WINDOWS_ONELINER"
     ;;
   *) err "unsupported OS: $(uname -s)" ;;
 esac
+
+need curl
+need tar
 
 case "$(uname -m)" in
   x86_64 | amd64) arch=amd64 ;;
@@ -53,7 +118,6 @@ else
   err "need sha256sum or shasum to verify the download"
 fi
 
-version="${SMIND_VERSION:-}"
 if [ -z "$version" ]; then
   # Resolve "latest" via the release redirect rather than the API, which is
   # rate-limited for anonymous callers.
@@ -63,14 +127,15 @@ if [ -z "$version" ]; then
 fi
 version="${version#v}"
 case "$version" in
-  "" | *[!0-9A-Za-z.+-]*) err "could not determine a valid version (got '$version')" ;;
+  "" | [!0-9]* | *[!0-9A-Za-z.+-]*) err "could not determine a valid version (got '$version')" ;;
 esac
 
 name="smind_${version}_${os}_${arch}.tar.gz"
 base="https://github.com/$REPO/releases/download/v${version}"
 
 tmp="$(mktemp -d 2>/dev/null || mktemp -d -t smind)"
-trap 'rm -rf "$tmp"' EXIT INT TERM
+stage=
+trap 'rm -rf "$tmp"; [ -z "$stage" ] || rm -f "$stage"' EXIT INT TERM
 
 say "Downloading smind v${version} (${os}/${arch})..."
 curl -fsSL -o "$tmp/$name" "$base/$name" || err "download failed: $base/$name"
@@ -95,9 +160,10 @@ mkdir -p "$dir" || err "could not create $dir"
 [ -w "$dir" ] || err "$dir is not writable; set SMIND_INSTALL_DIR or re-run with sudo"
 
 # Install via a temp name + rename so a running smind is never half-written.
-cp "$tmp/smind" "$dir/.smind.tmp.$$"
-chmod 755 "$dir/.smind.tmp.$$"
-mv -f "$dir/.smind.tmp.$$" "$dir/smind"
+stage="$dir/.smind.tmp.$$"
+cp "$tmp/smind" "$stage"
+chmod 755 "$stage"
+mv -f "$stage" "$dir/smind"
 
 say "Installed $("$dir/smind" --version 2>/dev/null || echo "smind v$version") to $dir/smind"
 
@@ -111,5 +177,5 @@ case ":${PATH}:" in
 esac
 
 say ""
-say "Get started:"
+say "Next:"
 say "  smind serve    # then open http://localhost:4648"
