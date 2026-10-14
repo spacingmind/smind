@@ -34,6 +34,10 @@ type Server struct {
 	Latest string
 	// Assets maps "<version>/<asset name>" to bytes; checksums.txt is one such entry.
 	Assets map[string][]byte
+	// Signer, when set, makes the server serve a checksums.txt.minisig for every
+	// version that has a checksums.txt and no explicit ".minisig" entry in
+	// Assets, signed over the checksums as they are at request time.
+	Signer *Signer
 	// Redirect makes every asset download bounce through /cdn/ first, like GitHub's object store.
 	Redirect bool
 	// Requests records every request path, in order.
@@ -81,6 +85,13 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 func (s *Server) asset(w http.ResponseWriter, r *http.Request, key string) {
 	s.mu.Lock()
 	b, ok := s.Assets[key]
+	if !ok && s.Signer != nil {
+		if ver, found := strings.CutSuffix(key, "/checksums.txt.minisig"); found {
+			if sums, has := s.Assets[ver+"/checksums.txt"]; has {
+				b, ok = s.Signer.Sign(sums, TrustedComment(ver)), true
+			}
+		}
+	}
 	s.mu.Unlock()
 	if !ok {
 		http.NotFound(w, r)

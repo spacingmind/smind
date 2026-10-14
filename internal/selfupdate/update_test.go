@@ -683,7 +683,7 @@ func TestUpdateDoesNotRespawnManualDaemon(t *testing.T) {
 func TestUpdateSignatureHookRunsBeforeAnyDigestIsTrusted(t *testing.T) {
 	e := newEnv(t, "0.11.1", "0.12.0")
 	var gotChecksums string
-	e.u.VerifyChecksums = func(_ context.Context, checksums []byte, fetch func(context.Context, string) ([]byte, error)) error {
+	e.u.VerifyChecksums = func(_ context.Context, _ string, checksums []byte, fetch func(context.Context, string) ([]byte, error)) error {
 		gotChecksums = string(checksums)
 		return errors.New("bad signature")
 	}

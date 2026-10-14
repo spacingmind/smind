@@ -14,13 +14,13 @@ import (
 	"time"
 )
 
-// ChecksumVerifier is the signature-verification hook (ADR-0031 decision 1,
-// PR P7). It runs on the downloaded checksums.txt BEFORE any digest in it is
-// trusted, and may fetch sibling release assets (checksums.txt.minisig) through
-// fetch. A non-nil error aborts the update with nothing changed. P6 ships with
-// this nil: checksums alone detect corruption but not a swapped archive plus a
-// swapped checksums.txt (ADR-0031 Context).
-type ChecksumVerifier func(ctx context.Context, checksums []byte, fetch func(ctx context.Context, asset string) ([]byte, error)) error
+// ChecksumVerifier verifies the downloaded checksums.txt of release `version`
+// (see SignatureVerifier, ADR-0031 decision 1) BEFORE any digest in it is
+// trusted, fetching sibling release assets (checksums.txt.minisig) through
+// fetch. A non-nil error aborts the update with nothing changed. Without a
+// verifier (nil) checksums alone detect corruption but not a swapped archive
+// plus a swapped checksums.txt; cmd/smind always installs one.
+type ChecksumVerifier func(ctx context.Context, version string, checksums []byte, fetch func(ctx context.Context, asset string) ([]byte, error)) error
 
 // Options are the `smind update` flags.
 type Options struct {
@@ -45,7 +45,8 @@ type Updater struct {
 	// RunVersion executes a binary's `version` and returns the version it
 	// reports. nil = really execute it.
 	RunVersion func(ctx context.Context, exe string) (string, error)
-	// VerifyChecksums is the P7 signature hook; nil in P6.
+	// VerifyChecksums authenticates checksums.txt; production wiring in
+	// cmd/smind sets SignatureVerifier(UpdaterPublicKey).
 	VerifyChecksums ChecksumVerifier
 
 	Getenv      func(string) string
@@ -348,7 +349,7 @@ func (u *Updater) download(ctx context.Context, target, dir string) (stagedPath 
 		fetch := func(ctx context.Context, asset string) ([]byte, error) {
 			return u.Source.Fetch(ctx, target, asset, maxChecksumsSize)
 		}
-		if err := u.VerifyChecksums(ctx, checksums, fetch); err != nil {
+		if err := u.VerifyChecksums(ctx, target, checksums, fetch); err != nil {
 			return "", nil, fmt.Errorf("verify the signature of %s: %w", ChecksumsName, err)
 		}
 	}

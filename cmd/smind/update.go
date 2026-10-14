@@ -71,7 +71,10 @@ func cmdUpdate(args []string) int {
 		Exe:        exe,
 		Daemon:     &selfupdate.HealthzDaemon{BaseURL: base},
 		ActiveWork: daemonActivity,
-		Log:        logw,
+		// Fail closed: the signature over checksums.txt is checked before any
+		// digest is trusted, and there is no flag or env var to skip it.
+		VerifyChecksums: selfupdate.SignatureVerifier(selfupdate.UpdaterPublicKey),
+		Log:             logw,
 	}
 	if updaterHook != nil {
 		updaterHook(u)
