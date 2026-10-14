@@ -77,6 +77,10 @@ func cmdRelay(args []string) int {
 	if *dataDir == "" {
 		*dataDir = server.RelayDir()
 	}
+	if *maxDevices < 1 {
+		fmt.Fprintln(os.Stderr, "smind relay: --max-devices-per-host must be at least 1")
+		return 2
+	}
 
 	if err := server.Run(context.Background(), server.Config{
 		ListenAddr:        *listen,

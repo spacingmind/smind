@@ -32,6 +32,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -85,9 +86,21 @@ const (
 	// buffer for a disconnected peer, in addition to the frame-count cap.
 	DefaultBufferBytes = 4 << 20
 
+	// routesPerDevice scales DefaultMaxDevicesPerHost into the cap on routes
+	// (sessions) one relay host may hold, whatever their side: a device that
+	// re-handshakes leaves its old route to the grace period, so a host
+	// legitimately has a few per device, but not unboundedly many.
+	routesPerDevice = 8
+
+	// maxIDLen bounds device and session ids in frame metadata; they key
+	// relay state and are echoed on the control stream.
+	maxIDLen = 128
+
 	// controlOutboxCap bounds the control frames queued for a daemon that is
 	// slow to read. Past it frames are dropped and a fresh Sync snapshot is
-	// sent instead, which carries the same information.
+	// sent instead: the daemon must treat Sync as the authoritative list of
+	// waiting routes and reconcile (a dropped DeviceDetach is recovered by the
+	// route's absence from it).
 	controlOutboxCap = 64
 
 	// sweepInterval rate-limits the opportunistic sweep that rides on
@@ -112,6 +125,7 @@ var (
 	errRevoked      = status.Error(codes.PermissionDenied, "relay: device revoked")
 	errSuperseded   = status.Error(codes.Aborted, "superseded")
 	errTooManyDev   = status.Error(codes.ResourceExhausted, "relay: too many attached devices for this relay host")
+	errTooManyRoute = status.Error(codes.ResourceExhausted, "relay: too many sessions for this relay host")
 )
 
 type side uint8
@@ -325,6 +339,9 @@ func (s *Server) sweepLocked(now time.Time) {
 		r.mu.Unlock()
 		if gone {
 			delete(s.mu.routes, key)
+			// Tell the daemon the route is gone (idempotent: a device side
+			// that ended earlier already announced it).
+			s.announceLocked(r.workspaceID, detachFrame(r))
 		}
 	}
 	for id, b := range s.mu.bindings {
@@ -863,6 +880,9 @@ func (s *Server) checkFrame(f *relaypb.Frame) error {
 	if f.GetDirection() == relaypb.Direction_DIRECTION_UNSPECIFIED {
 		return status.Error(codes.InvalidArgument, "relay: frame missing direction")
 	}
+	if len(f.GetSessionId()) > maxIDLen || len(f.GetDeviceId()) > maxIDLen {
+		return status.Error(codes.InvalidArgument, "relay: session or device id too long")
+	}
 	return nil
 }
 
@@ -903,6 +923,9 @@ func (s *Server) attachRoute(first *relaypb.Frame, sd side, stream relaypb.Relay
 		return nil, nil, errTooManyDev
 	}
 	if !ok {
+		if s.routeCountLocked(ws) >= s.maxDevices*routesPerDevice {
+			return nil, nil, errTooManyRoute
+		}
 		r = &route{
 			workspaceID: ws,
 			sessionID:   string(first.GetSessionId()),
@@ -927,6 +950,17 @@ func (s *Server) attachRoute(first *relaypb.Frame, sd side, stream relaypb.Relay
 		s.announceLocked(ws, attachFrame(r))
 	}
 	return r, att, nil
+}
+
+// routeCountLocked is the number of routes the host holds. Caller holds s.mu.
+func (s *Server) routeCountLocked(ws string) int {
+	n := 0
+	for _, r := range s.mu.routes {
+		if r.workspaceID == ws {
+			n++
+		}
+	}
+	return n
 }
 
 // deviceLimitReachedLocked reports whether attaching a device-side stream for
@@ -995,8 +1029,10 @@ func (r *route) queueFor(sd side) *frameQueue {
 	return r.deviceQ
 }
 
+// routeKey is length-prefixed so ids containing any byte cannot collide
+// ("a\x00b","c" vs "a","b\x00c").
 func routeKey(workspaceID, sessionID, deviceID string) string {
-	return workspaceID + "\x00" + sessionID + "\x00" + deviceID
+	return fmt.Sprintf("%d:%s|%d:%s|%d:%s", len(workspaceID), workspaceID, len(sessionID), sessionID, len(deviceID), deviceID)
 }
 
 // normalizeStreamErr maps clean client closes and context cancellation to

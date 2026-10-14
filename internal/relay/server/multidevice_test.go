@@ -101,9 +101,10 @@ func (c *mdControl) quiet(d time.Duration) {
 	c.t.Helper()
 	select {
 	case f, ok := <-c.frames:
-		if ok {
-			c.t.Fatalf("unexpected control frame while expecting quiet: %+v", f)
+		if !ok {
+			c.t.Fatalf("control stream ended while expecting quiet")
 		}
+		c.t.Fatalf("unexpected control frame while expecting quiet: %+v", f)
 	case <-time.After(d):
 	}
 }
@@ -259,9 +260,10 @@ func (s *mdStream) quiet(d time.Duration) {
 	s.t.Helper()
 	select {
 	case f, ok := <-s.frames:
-		if ok {
-			s.t.Fatalf("unexpected data frame while expecting quiet: %+v", f)
+		if !ok {
+			s.t.Fatalf("data stream ended while expecting quiet")
 		}
+		s.t.Fatalf("unexpected data frame while expecting quiet: %+v", f)
 	case <-time.After(d):
 	}
 }
@@ -297,6 +299,24 @@ func mdRoute(deviceID, sessionID string, dir relaypb.Direction) frameRoute {
 }
 
 // --- tests ---
+
+// mdSettle sends a keepalive on s and waits for its echo: the relay handles a
+// stream's frames in order, so once the echo is back every earlier frame on
+// that stream has been forwarded or buffered.
+func mdSettle(s *mdStream) {
+	s.t.Helper()
+	s.send(&relaypb.Frame{
+		WorkspaceId: s.route.workspaceID,
+		SessionId:   []byte(s.route.sessionID),
+		DeviceId:    s.route.deviceID,
+		Direction:   s.route.direction,
+		Sequence:    1 << 40,
+		Keepalive:   true,
+	})
+	if echo := s.expectRecv(mdTimeout); !echo.GetKeepalive() || echo.GetSequence() != 1<<40 {
+		s.t.Fatalf("settle: expected the keepalive echo, got %+v", echo)
+	}
+}
 
 // mdWaitStreams waits until the relay has n data streams attached: a stream's
 // route is attached by the server asynchronously after the client's first
@@ -359,10 +379,8 @@ func TestDeviceDetachSentWhenRouteGarbageCollected(t *testing.T) {
 	ctl.expectDetach("dev-gc", "sess-gc")
 	ctl.quiet(mdQuiet)
 
-	// ...and garbage-collecting an idle route (fake clock + Sweep past
-	// the grace) does NOT announce anything: the implemented server has
-	// no daemon-side route to send a Detach for that the daemon ever
-	// knew about; it would be re-surfaced by the next Sync instead.
+	// ...and garbage-collecting an idle route (fake clock + Sweep past the
+	// grace) announces DeviceDetach too (idempotent with the one above).
 	clock := newFakeClock()
 	h2 := newHarnessWithOptions(t, 0, WithClock(clock.Now), WithRouteGrace(testGrace))
 	ctx2, cancel2 := context.WithCancel(context.Background())
@@ -385,15 +403,21 @@ func TestDeviceDetachSentWhenRouteGarbageCollected(t *testing.T) {
 	if n := routeCount(h2.srv); n != 0 {
 		t.Fatalf("routes after grace = %d, want 0", n)
 	}
-	ctl2.quiet(mdQuiet) // no further control traffic for the GC itself
-
-	// A fresh Sync does not list the collected route.
-	ctl2.send(&relaypb.ControlFrame{
-		WorkspaceId: testWorkspace,
-		Body:        &relaypb.ControlFrame_Ping_{Ping: &relaypb.ControlFrame_Ping{Sequence: 8}},
-	})
-	ctl2.expectPong(8)
+	ctl2.expectDetach("dev-gc2", "sess-gc2")
 	ctl2.quiet(mdQuiet)
+
+	// A route that never saw a device-side end (daemon side only) is also
+	// collected with a Detach.
+	d3 := mdOpenStream(t, h2, ctx2, adm2, mdRoute("dev-gc3", "sess-gc3", relaypb.Direction_DIRECTION_DAEMON_TO_DEVICE))
+	d3.send(d3.frame(0, []byte("reg")))
+	waitFor(t, mdTimeout, func() bool { return h2.srv.Streams() == 1 })
+	d3.stream.CloseSend()
+	d3.expectDone(codes.OK)
+	waitFor(t, mdTimeout, func() bool { return h2.srv.Streams() == 0 })
+	ctl2.quiet(mdQuiet) // a daemon side ending announces nothing
+	clock.Advance(testGrace + time.Second)
+	h2.srv.Sweep()
+	ctl2.expectDetach("dev-gc3", "sess-gc3")
 }
 
 func TestSyncListsWaitingRoutesOnControlAccept(t *testing.T) {
@@ -498,7 +522,10 @@ func TestBufferBoundedByFramesAndBytes(t *testing.T) {
 	for i := 0; i < n; i++ {
 		d.send(d.frame(uint64(i), []byte{byte('a' + i)}))
 	}
-	waitFor(t, mdTimeout, func() bool { return h.srv.BufferedFrames(testWorkspace, "sess-b", "dev-b") == 4 })
+	mdSettle(d)
+	if got := h.srv.BufferedFrames(testWorkspace, "sess-b", "dev-b"); got != 4 {
+		t.Fatalf("buffered frames = %d, want 4", got)
+	}
 	v := mdOpenStream(t, h, ctx, adm, mdRoute("dev-b", "sess-b", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
 	v.send(v.frame(0, []byte("reg")))
 	for i := n - 4; i < n; i++ {
@@ -517,7 +544,10 @@ func TestBufferBoundedByFramesAndBytes(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		d2.send(d2.frame(uint64(i), []byte{byte(i), byte(i)}))
 	}
-	waitFor(t, mdTimeout, func() bool { return h2.srv.BufferedFrames(testWorkspace, "sess-b2", "dev-b2") == 2 })
+	mdSettle(d2)
+	if got := h2.srv.BufferedFrames(testWorkspace, "sess-b2", "dev-b2"); got != 2 {
+		t.Fatalf("buffered frames = %d, want 2", got)
+	}
 	v2 := mdOpenStream(t, h2, ctx, adm2, mdRoute("dev-b2", "sess-b2", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
 	v2.send(v2.frame(0, []byte("reg")))
 	for i := 1; i < 3; i++ {
@@ -535,7 +565,10 @@ func TestBufferBoundedByFramesAndBytes(t *testing.T) {
 	d3 := mdOpenStream(t, h3, ctx, adm3, r3)
 	big := randBytes(t, 64)
 	d3.send(d3.frame(0, big))
-	waitFor(t, mdTimeout, func() bool { return h3.srv.BufferedFrames(testWorkspace, "sess-b3", "dev-b3") == 1 })
+	mdSettle(d3)
+	if got := h3.srv.BufferedFrames(testWorkspace, "sess-b3", "dev-b3"); got != 1 {
+		t.Fatalf("buffered frames = %d, want 1", got)
+	}
 	v3 := mdOpenStream(t, h3, ctx, adm3, mdRoute("dev-b3", "sess-b3", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
 	v3.send(v3.frame(0, []byte("reg")))
 	if got := v3.expectRecv(mdTimeout); !bytes.Equal(got.GetPayload(), big) {

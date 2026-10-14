@@ -110,6 +110,13 @@ func Run(ctx context.Context, cfg Config) error {
 			MinTime:             20 * time.Second,
 			PermitWithoutStream: true,
 		}),
+		// The relay pings too, so a peer that vanished without a FIN (a phone
+		// leaving Wi-Fi) releases its stream, and its device slot, instead of
+		// holding them until TCP gives up.
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    time.Minute,
+			Timeout: 20 * time.Second,
+		}),
 	)
 	srv.Register(gs)
 
