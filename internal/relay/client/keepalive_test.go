@@ -181,6 +181,7 @@ type kaFixture struct {
 	stream *scriptedStream
 	data   chan []byte
 	readEr chan error
+	echo   bool // the scripted relay answers probes
 }
 
 func newKAFixture(t *testing.T, echo bool) *kaFixture {
@@ -194,7 +195,7 @@ func newKAFixture(t *testing.T, echo bool) *kaFixture {
 		route:        route{workspaceID: "ws", sessionID: "s", deviceID: "d"},
 		direction:    relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON,
 	}
-	fx := &kaFixture{fc: fc, clock: newFakeClock(), stream: st, data: make(chan []byte, 8), readEr: make(chan error, 1)}
+	fx := &kaFixture{fc: fc, clock: newFakeClock(), stream: st, data: make(chan []byte, 8), readEr: make(chan error, 1), echo: echo}
 	fc.enableKeepalive(KeepaliveConfig{Clock: fx.clock}.withDefaults())
 	t.Cleanup(fc.stopKeepalive)
 	fx.startReader()
@@ -205,9 +206,17 @@ func newKAFixture(t *testing.T, echo bool) *kaFixture {
 // timers in total) and its last probe write has finished: probeAsync skips a
 // tick while a write is still in flight, so advancing earlier could skip a
 // probe the test expects.
+//
+// With an echoing relay it also waits until the reader has consumed the echo
+// and the loop knows the relay supports keepalive: advancing fake time first
+// could age the probe past its 10 s window before the reader ran, which turns
+// keepalive off — correct behaviour, but not what these tests set out to see.
 func (fx *kaFixture) park(t *testing.T, n int) {
 	t.Helper()
 	fx.clock.waitArms(t, n)
+	if fx.echo {
+		waitUntil(t, "the relay's echo to be recognised", func() bool { return fx.supportState() == kaYes })
+	}
 	k := fx.fc.keepaliveState()
 	waitUntil(t, "the last probe write to finish", func() bool {
 		k.mu.Lock()
