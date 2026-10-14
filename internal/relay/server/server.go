@@ -18,6 +18,14 @@
 // a daemon "broadcast" is the same event separately encrypted and sent
 // on each per-device stream, which the relay sees as ordinary
 // independent routes.
+//
+// Multi-device (ADR-0031 D9): the relay keeps ONE control stream per relay
+// host and uses it to tell the daemon which device routes are waiting for a
+// daemon side (DeviceAttach / DeviceDetach / Sync), so the daemon can open
+// one data stream per device. Everything is keyed by the authenticated relay
+// host binding, so a route, a control stream, a Revoke or a device count of
+// one relay host can never reach another's. Routing is by opaque ids only;
+// payloads are never inspected.
 package server
 
 import (
@@ -68,6 +76,20 @@ const (
 	// DataConn.Resume after a normal drop always finds its binding.
 	DefaultBindingTTL = 24 * time.Hour
 
+	// DefaultMaxDevicesPerHost caps the devices (distinct device ids with a
+	// live device-side stream) one relay host may have attached at once; the
+	// next one is refused with ResourceExhausted.
+	DefaultMaxDevicesPerHost = 16
+
+	// DefaultBufferBytes bounds the payload bytes one side of a route may
+	// buffer for a disconnected peer, in addition to the frame-count cap.
+	DefaultBufferBytes = 4 << 20
+
+	// controlOutboxCap bounds the control frames queued for a daemon that is
+	// slow to read. Past it frames are dropped and a fresh Sync snapshot is
+	// sent instead, which carries the same information.
+	controlOutboxCap = 64
+
 	// sweepInterval rate-limits the opportunistic sweep that rides on
 	// Admit / attachRoute; Run also drives Sweep from a ticker so an idle
 	// relay releases memory too.
@@ -87,6 +109,9 @@ const MetadataKeyAdmission = "admission-id"
 var (
 	errNotAdmitted  = status.Error(codes.Unauthenticated, "relay: connection not admitted")
 	errWrongBinding = status.Error(codes.PermissionDenied, "relay: relay host binding mismatch")
+	errRevoked      = status.Error(codes.PermissionDenied, "relay: device revoked")
+	errSuperseded   = status.Error(codes.Aborted, "superseded")
+	errTooManyDev   = status.Error(codes.ResourceExhausted, "relay: too many attached devices for this relay host")
 )
 
 type side uint8
@@ -100,8 +125,10 @@ const (
 type Server struct {
 	relaypb.UnimplementedRelayServer
 
-	verifier  *admission.Verifier
-	bufferCap int
+	verifier   *admission.Verifier
+	bufferCap  int
+	bufferByte int
+	maxDevices int
 
 	now              func() time.Time
 	routeGrace       time.Duration
@@ -110,8 +137,9 @@ type Server struct {
 
 	mu struct {
 		sync.Mutex
-		bindings  map[string]*binding // admission ID -> binding
-		routes    map[string]*route   // routeKey -> route
+		bindings  map[string]*binding     // admission ID -> binding
+		routes    map[string]*route       // routeKey -> route
+		controls  map[string]*controlConn // relay host id -> its one control stream
 		lastSweep time.Time
 	}
 }
@@ -155,6 +183,26 @@ func WithBindingLimits(maxPerWorkspace int, ttl time.Duration) Option {
 	}
 }
 
+// WithMaxDevicesPerHost sets how many devices one relay host may have
+// attached at once (<=0 keeps DefaultMaxDevicesPerHost).
+func WithMaxDevicesPerHost(n int) Option {
+	return func(s *Server) {
+		if n > 0 {
+			s.maxDevices = n
+		}
+	}
+}
+
+// WithBufferBytes sets the per-side reconnect buffer byte bound (<=0 keeps
+// DefaultBufferBytes).
+func WithBufferBytes(n int) Option {
+	return func(s *Server) {
+		if n > 0 {
+			s.bufferByte = n
+		}
+	}
+}
+
 // WithClock injects the time source used for route grace and binding TTLs,
 // so tests advance a fake clock instead of sleeping.
 func WithClock(now func() time.Time) Option {
@@ -171,19 +219,46 @@ type route struct {
 
 	mu struct {
 		sync.Mutex
-		streams map[side]relaypb.Relay_OpenDataServer
+		// streams is the live attachment per side. A side's pump has an
+		// independent, explicitly-cancellable context rather than
+		// stream.Context() directly (see attachRoute's doc comment).
+		streams map[side]*attachment
 		// idleSince is when the last attached stream detached; zero while
 		// any stream is attached. A route idle longer than the server's
 		// route grace is garbage-collected.
 		idleSince time.Time
-		// pumpCancel stops the CURRENT send pump for a side (see
-		// attachRoute's doc comment for why a side's pump needs an
-		// independent, explicitly-cancellable context rather than reusing
-		// stream.Context() directly).
-		pumpCancel map[side]context.CancelFunc
 	}
 	daemonQ *frameQueue
 	deviceQ *frameQueue
+}
+
+// attachment is one live OpenData stream on one side of a route.
+type attachment struct {
+	stream relaypb.Relay_OpenDataServer
+	// sendMu serializes stream.Send between the queue pump and keepalive
+	// replies (grpc streams allow one concurrent sender).
+	sendMu sync.Mutex
+	// pumpCtx/cancel drive this attachment's send pump.
+	pumpCtx context.Context
+	cancel  context.CancelFunc
+	// abort carries the status the handler must end the stream with when the
+	// relay closes it on purpose (Revoke); set BEFORE cancel is called.
+	abort chan error
+}
+
+func (a *attachment) send(f *relaypb.Frame) error {
+	a.sendMu.Lock()
+	defer a.sendMu.Unlock()
+	return a.stream.Send(f)
+}
+
+// close ends the attachment with err (best effort, never blocks).
+func (a *attachment) close(err error) {
+	select {
+	case a.abort <- err:
+	default:
+	}
+	a.cancel()
 }
 
 // New creates a Server using the admission Verifier and a per-side
@@ -195,6 +270,8 @@ func New(verifier *admission.Verifier, bufferCap int, opts ...Option) *Server {
 	s := &Server{
 		verifier:         verifier,
 		bufferCap:        bufferCap,
+		bufferByte:       DefaultBufferBytes,
+		maxDevices:       DefaultMaxDevicesPerHost,
 		now:              time.Now,
 		routeGrace:       DefaultRouteGrace,
 		maxBindingsPerWS: DefaultMaxBindingsPerWorkspace,
@@ -205,6 +282,7 @@ func New(verifier *admission.Verifier, bufferCap int, opts ...Option) *Server {
 	}
 	s.mu.bindings = make(map[string]*binding)
 	s.mu.routes = make(map[string]*route)
+	s.mu.controls = make(map[string]*controlConn)
 	return s
 }
 
@@ -367,9 +445,165 @@ func (s *Server) binding(ctx context.Context) (workspaceID string, release func(
 
 // --- Control socket ---
 
-// OpenControl keeps a per-daemon stream that enforces the admission
-// binding and echoes/answers liveness. It carries no application payload;
-// per-device lifecycle announcements are interpreted in a later step.
+// controlConn is the relay-side state of a relay host's one control stream.
+// Every frame bound for the daemon goes through out and is written by
+// OpenControl's single writer loop (a grpc stream allows one sender).
+type controlConn struct {
+	host string
+
+	outMu  sync.Mutex
+	out    []*relaypb.ControlFrame
+	resync bool
+	notify chan struct{}
+
+	// abort ends the stream with a status (superseded by a newer control
+	// stream). Buffered so the sender never blocks.
+	abort chan error
+
+	// revoked holds device ids the daemon revoked on this stream; it lives and
+	// dies with the stream. Guarded by Server.mu.
+	revoked map[string]struct{}
+}
+
+func newControlConn(host string) *controlConn {
+	return &controlConn{
+		host:    host,
+		notify:  make(chan struct{}, 1),
+		abort:   make(chan error, 1),
+		revoked: make(map[string]struct{}),
+	}
+}
+
+// enqueue queues cf for the daemon. It never blocks; when the outbox is full
+// the frame is dropped and the writer sends a fresh Sync snapshot instead.
+func (c *controlConn) enqueue(cf *relaypb.ControlFrame) {
+	c.outMu.Lock()
+	if len(c.out) >= controlOutboxCap {
+		c.resync = true
+	} else {
+		c.out = append(c.out, cf)
+	}
+	c.outMu.Unlock()
+	select {
+	case c.notify <- struct{}{}:
+	default:
+	}
+}
+
+// drain returns the queued frames and whether a resync is owed.
+func (c *controlConn) drain() ([]*relaypb.ControlFrame, bool) {
+	c.outMu.Lock()
+	defer c.outMu.Unlock()
+	out, resync := c.out, c.resync
+	c.out, c.resync = nil, false
+	return out, resync
+}
+
+func controlBody(host string, body func(*relaypb.ControlFrame)) *relaypb.ControlFrame {
+	cf := &relaypb.ControlFrame{WorkspaceId: host}
+	body(cf)
+	return cf
+}
+
+func attachFrame(r *route) *relaypb.ControlFrame {
+	return controlBody(r.workspaceID, func(cf *relaypb.ControlFrame) {
+		cf.Body = &relaypb.ControlFrame_DeviceAttach_{DeviceAttach: &relaypb.ControlFrame_DeviceAttach{
+			DeviceId: r.deviceID, SessionId: []byte(r.sessionID),
+		}}
+	})
+}
+
+func detachFrame(r *route) *relaypb.ControlFrame {
+	return controlBody(r.workspaceID, func(cf *relaypb.ControlFrame) {
+		cf.Body = &relaypb.ControlFrame_DeviceDetach_{DeviceDetach: &relaypb.ControlFrame_DeviceDetach{
+			DeviceId: r.deviceID, SessionId: []byte(r.sessionID),
+		}}
+	})
+}
+
+// announceLocked queues cf on host's control stream, if it has one (a daemon
+// that is not connected learns the same state from Sync when it is). Caller
+// holds s.mu.
+func (s *Server) announceLocked(host string, cf *relaypb.ControlFrame) {
+	if c := s.mu.controls[host]; c != nil {
+		c.enqueue(cf)
+	}
+}
+
+// syncFrameLocked lists the host's routes that have a live device side and no
+// daemon side. Caller holds s.mu.
+func (s *Server) syncFrameLocked(host string) *relaypb.ControlFrame {
+	sync := &relaypb.ControlFrame_Sync{}
+	for _, r := range s.mu.routes {
+		if r.workspaceID != host {
+			continue
+		}
+		r.mu.Lock()
+		waiting := r.mu.streams[sideDevice] != nil && r.mu.streams[sideDaemon] == nil
+		r.mu.Unlock()
+		if waiting {
+			sync.Devices = append(sync.Devices, &relaypb.ControlFrame_DeviceRef{
+				DeviceId: r.deviceID, SessionId: []byte(r.sessionID),
+			})
+		}
+	}
+	return controlBody(host, func(cf *relaypb.ControlFrame) {
+		cf.Body = &relaypb.ControlFrame_Sync_{Sync: sync}
+	})
+}
+
+// registerControl makes c the host's control stream, ending any predecessor
+// with Aborted "superseded", and queues the initial Sync — both under s.mu,
+// so a device that attaches concurrently is either in the Sync or announced
+// after it, never missed.
+func (s *Server) registerControl(c *controlConn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if old := s.mu.controls[c.host]; old != nil {
+		select {
+		case old.abort <- errSuperseded:
+		default:
+		}
+	}
+	s.mu.controls[c.host] = c
+	c.enqueue(s.syncFrameLocked(c.host))
+}
+
+// unregisterControl drops c if it is still the host's control stream (a
+// superseded one is already replaced). Its revocations end with it.
+func (s *Server) unregisterControl(c *controlConn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.mu.controls[c.host] == c {
+		delete(s.mu.controls, c.host)
+	}
+}
+
+// revoke closes every stream of the host's routes for deviceID and refuses
+// new attaches for it until c's stream ends. The daemon stays authoritative:
+// this only saves relay resources and stops a reconnect loop early.
+func (s *Server) revoke(c *controlConn, deviceID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c.revoked[deviceID] = struct{}{}
+	for key, r := range s.mu.routes {
+		if r.workspaceID != c.host || r.deviceID != deviceID {
+			continue
+		}
+		delete(s.mu.routes, key)
+		r.mu.Lock()
+		for _, a := range r.mu.streams {
+			a.close(errRevoked)
+		}
+		r.mu.Unlock()
+	}
+}
+
+// OpenControl keeps the host's one control stream: it enforces the admission
+// binding, answers Ping with Pong, sends Sync on accept and
+// DeviceAttach/DeviceDetach as device routes appear and disappear, and
+// executes Revoke. A newer control stream for the same host supersedes this
+// one. It carries no application payload.
 func (s *Server) OpenControl(stream relaypb.Relay_OpenControlServer) error {
 	first, err := stream.Recv()
 	if err != nil {
@@ -383,23 +617,18 @@ func (s *Server) OpenControl(stream relaypb.Relay_OpenControlServer) error {
 	if first.GetWorkspaceId() != ws {
 		return errWrongBinding
 	}
+	// The first frame must be a Ping (the client's registration); anything
+	// else is not a valid control registration.
+	if first.GetPing() == nil {
+		return status.Error(codes.Unimplemented, "relay: control stream must start with a ping")
+	}
+
+	c := newControlConn(ws)
+	c.enqueue(pongFrame(ws, first.GetPing().GetSequence()))
+	s.registerControl(c)
+	defer s.unregisterControl(c)
 
 	recvErr := make(chan error, 1)
-	handle := func(cf *relaypb.ControlFrame) error {
-		if cf.GetPing() == nil {
-			// Device attach/detach announcements are interpreted when
-			// fanout lands; a dumb pipe forwards nothing it cannot route
-			// yet.
-			return status.Error(codes.Unimplemented, "relay: control frame not handled in this step")
-		}
-		return stream.Send(&relaypb.ControlFrame{
-			WorkspaceId: ws,
-			Body:        &relaypb.ControlFrame_Pong_{Pong: &relaypb.ControlFrame_Pong{Sequence: cf.GetPing().GetSequence()}},
-		})
-	}
-	if err := handle(first); err != nil {
-		return normalizeStreamErr(err)
-	}
 	go func() {
 		for {
 			cf, err := stream.Recv()
@@ -407,18 +636,51 @@ func (s *Server) OpenControl(stream relaypb.Relay_OpenControlServer) error {
 				recvErr <- err
 				return
 			}
-			if err := handle(cf); err != nil {
-				recvErr <- err
+			if cf.GetWorkspaceId() != ws {
+				recvErr <- errWrongBinding
 				return
+			}
+			switch body := cf.GetBody().(type) {
+			case *relaypb.ControlFrame_Ping_:
+				c.enqueue(pongFrame(ws, body.Ping.GetSequence()))
+			case *relaypb.ControlFrame_Revoke_:
+				s.revoke(c, body.Revoke.GetDeviceId())
+			default:
+				// Pong and relay→daemon bodies from a daemon, and bodies this
+				// revision does not know: ignored, so newer peers can add
+				// messages without killing the stream.
 			}
 		}
 	}()
 
-	select {
-	case err := <-recvErr:
-		return normalizeStreamErr(err)
-	case <-stream.Context().Done():
-		return normalizeStreamErr(stream.Context().Err())
+	for {
+		select {
+		case <-c.notify:
+			frames, resync := c.drain()
+			if resync {
+				s.mu.Lock()
+				frames = append(frames, s.syncFrameLocked(ws))
+				s.mu.Unlock()
+			}
+			for _, f := range frames {
+				if err := stream.Send(f); err != nil {
+					return normalizeStreamErr(err)
+				}
+			}
+		case err := <-c.abort:
+			return err
+		case err := <-recvErr:
+			return normalizeStreamErr(err)
+		case <-stream.Context().Done():
+			return normalizeStreamErr(stream.Context().Err())
+		}
+	}
+}
+
+func pongFrame(host string, seq uint64) *relaypb.ControlFrame {
+	return &relaypb.ControlFrame{
+		WorkspaceId: host,
+		Body:        &relaypb.ControlFrame_Pong_{Pong: &relaypb.ControlFrame_Pong{Sequence: seq}},
 	}
 }
 
@@ -427,7 +689,8 @@ func (s *Server) OpenControl(stream relaypb.Relay_OpenControlServer) error {
 // OpenData is the forwarding loop for one side (daemon or device) of one
 // E2EE session. Inbound frames are validated against the route's binding
 // and pushed to the peer side's queue; the peer's pump (if attached)
-// drains it onto its stream. Payload bytes are opaque throughout.
+// drains it onto its stream. Payload bytes are opaque throughout. A frame
+// with Keepalive set is answered on the same stream and goes no further.
 func (s *Server) OpenData(stream relaypb.Relay_OpenDataServer) error {
 	first, err := stream.Recv()
 	if err != nil {
@@ -446,11 +709,29 @@ func (s *Server) OpenData(stream relaypb.Relay_OpenDataServer) error {
 	}
 
 	sd := dataSide(first.GetDirection())
-	r, pumpCtx := s.attachRoute(first, sd, stream)
-	defer s.detach(sd, r, stream)
-
-	if err := s.forward(r, sd, first); err != nil {
+	r, att, err := s.attachRoute(first, sd, stream)
+	if err != nil {
 		return err
+	}
+	defer s.detach(sd, r, att)
+
+	if first.GetKeepalive() {
+		if err := att.send(keepaliveEcho(r, sd, first)); err != nil {
+			return normalizeStreamErr(err)
+		}
+	} else if err := s.forward(r, sd, first); err != nil {
+		return err
+	}
+
+	// finish maps a loop exit to the stream's status: a deliberate close by
+	// the relay (Revoke) wins over the cancellation it caused.
+	finish := func(err error) error {
+		select {
+		case a := <-att.abort:
+			return a
+		default:
+			return normalizeStreamErr(err)
+		}
 	}
 
 	recvErr := make(chan error, 1)
@@ -460,6 +741,19 @@ func (s *Server) OpenData(stream relaypb.Relay_OpenDataServer) error {
 			if err != nil {
 				recvErr <- err
 				return
+			}
+			if f.GetKeepalive() {
+				// Liveness probes need only the stream's own binding: they
+				// are consumed here, never forwarded or buffered.
+				if f.GetWorkspaceId() != "" && f.GetWorkspaceId() != r.workspaceID {
+					recvErr <- errWrongBinding
+					return
+				}
+				if err := att.send(keepaliveEcho(r, sd, f)); err != nil {
+					recvErr <- err
+					return
+				}
+				continue
 			}
 			if err := s.checkFrame(f); err != nil {
 				recvErr <- err
@@ -484,12 +778,12 @@ func (s *Server) OpenData(stream relaypb.Relay_OpenDataServer) error {
 
 	// Send pump: drain this side's queue onto this stream. A stalled peer
 	// never blocks the relay — its queue absorbs and evicts. It pops using
-	// pumpCtx, not stream.Context() -- see attachRoute's doc comment for
-	// why those must be different contexts.
+	// the attachment's pumpCtx, not stream.Context() -- see attachRoute's doc
+	// comment for why those must be different contexts.
 	sendErr := make(chan error, 1)
 	go func() {
 		for {
-			f, err := r.queueFor(sd).pop(pumpCtx)
+			f, err := r.queueFor(sd).pop(att.pumpCtx)
 			if err != nil {
 				sendErr <- err
 				return
@@ -504,12 +798,12 @@ func (s *Server) OpenData(stream relaypb.Relay_OpenDataServer) error {
 			// frame to a stream that's already been superseded is
 			// exactly how it gets lost. Either way out of this pump
 			// re-queues the frame instead of dropping it.
-			if pumpCtx.Err() != nil {
+			if att.pumpCtx.Err() != nil {
 				r.queueFor(sd).pushFront(f)
-				sendErr <- pumpCtx.Err()
+				sendErr <- att.pumpCtx.Err()
 				return
 			}
-			if err := stream.Send(f); err != nil {
+			if err := att.send(f); err != nil {
 				r.queueFor(sd).pushFront(f)
 				sendErr <- err
 				return
@@ -519,11 +813,31 @@ func (s *Server) OpenData(stream relaypb.Relay_OpenDataServer) error {
 
 	select {
 	case err := <-recvErr:
-		return normalizeStreamErr(err)
+		return finish(err)
 	case err := <-sendErr:
-		return normalizeStreamErr(err)
+		return finish(err)
 	case <-stream.Context().Done():
-		return normalizeStreamErr(stream.Context().Err())
+		return finish(stream.Context().Err())
+	}
+}
+
+// keepaliveEcho is the answer to a keepalive probe received from side sd: a
+// keepalive frame travelling the other way, with the probe's sequence so the
+// sender can match it.
+func keepaliveEcho(r *route, sd side, probe *relaypb.Frame) *relaypb.Frame {
+	// A device is answered "from the daemon" and vice versa, like the real
+	// traffic arriving on that stream.
+	dir := relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON
+	if sd == sideDevice {
+		dir = relaypb.Direction_DIRECTION_DAEMON_TO_DEVICE
+	}
+	return &relaypb.Frame{
+		WorkspaceId: r.workspaceID,
+		SessionId:   []byte(r.sessionID),
+		DeviceId:    r.deviceID,
+		Direction:   dir,
+		Sequence:    probe.GetSequence(),
+		Keepalive:   true,
 	}
 }
 
@@ -573,51 +887,98 @@ func (s *Server) checkFrame(f *relaypb.Frame) error {
 // moment a new stream attaches for the same side) closes that window
 // deterministically instead of relying on transport-failure detection
 // timing.
-func (s *Server) attachRoute(first *relaypb.Frame, sd side, stream relaypb.Relay_OpenDataServer) (*route, context.Context) {
-	key := routeKey(first.GetWorkspaceId(), string(first.GetSessionId()), first.GetDeviceId())
+func (s *Server) attachRoute(first *relaypb.Frame, sd side, stream relaypb.Relay_OpenDataServer) (*route, *attachment, error) {
+	ws, deviceID := first.GetWorkspaceId(), first.GetDeviceId()
+	key := routeKey(ws, string(first.GetSessionId()), deviceID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.maybeSweepLocked(s.now())
+	if c := s.mu.controls[ws]; c != nil {
+		if _, revoked := c.revoked[deviceID]; revoked {
+			return nil, nil, errRevoked
+		}
+	}
 	r, ok := s.mu.routes[key]
+	if sd == sideDevice && s.deviceLimitReachedLocked(ws, deviceID) {
+		return nil, nil, errTooManyDev
+	}
 	if !ok {
 		r = &route{
-			workspaceID: first.GetWorkspaceId(),
+			workspaceID: ws,
 			sessionID:   string(first.GetSessionId()),
-			deviceID:    first.GetDeviceId(),
+			deviceID:    deviceID,
 		}
-		r.daemonQ = newFrameQueue(s.bufferCap)
-		r.deviceQ = newFrameQueue(s.bufferCap)
-		r.mu.streams = make(map[side]relaypb.Relay_OpenDataServer)
-		r.mu.pumpCancel = make(map[side]context.CancelFunc)
+		r.daemonQ = newByteBoundedFrameQueue(s.bufferCap, s.bufferByte)
+		r.deviceQ = newByteBoundedFrameQueue(s.bufferCap, s.bufferByte)
+		r.mu.streams = make(map[side]*attachment)
 		s.mu.routes[key] = r
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if cancel, ok := r.mu.pumpCancel[sd]; ok {
-		cancel()
+	if old := r.mu.streams[sd]; old != nil {
+		old.cancel()
 	}
 	pumpCtx, cancel := context.WithCancel(stream.Context())
-	r.mu.pumpCancel[sd] = cancel
-	r.mu.streams[sd] = stream
+	att := &attachment{stream: stream, pumpCtx: pumpCtx, cancel: cancel, abort: make(chan error, 1)}
+	r.mu.streams[sd] = att
 	r.mu.idleSince = time.Time{}
-	return r, pumpCtx
+	if sd == sideDevice && r.mu.streams[sideDaemon] == nil {
+		// A device is waiting for a daemon side: tell the daemon.
+		s.announceLocked(ws, attachFrame(r))
+	}
+	return r, att, nil
 }
 
-// detach removes this stream from the route if a reconnect has not
+// deviceLimitReachedLocked reports whether attaching a device-side stream for
+// deviceID would exceed the host's device limit: the distinct device ids with
+// a live device side, not counting deviceID itself (a reconnect or a fresh
+// session of an attached device is not a new device). Caller holds s.mu.
+func (s *Server) deviceLimitReachedLocked(ws, deviceID string) bool {
+	live := make(map[string]struct{})
+	for _, r := range s.mu.routes {
+		if r.workspaceID != ws || r.deviceID == deviceID {
+			continue
+		}
+		r.mu.Lock()
+		if r.mu.streams[sideDevice] != nil {
+			live[r.deviceID] = struct{}{}
+		}
+		r.mu.Unlock()
+	}
+	return len(live) >= s.maxDevices
+}
+
+// detach removes this attachment from the route if a reconnect has not
 // already replaced it. Queues persist in the route, which is what carries
 // frames across the disconnect gap — until no stream has been attached to
-// either side for routeGrace, when Sweep collects the route.
-func (s *Server) detach(sd side, r *route, stream relaypb.Relay_OpenDataServer) {
+// either side for routeGrace, when Sweep collects the route. It tells the
+// daemon what changed: a device side that ends with no daemon side is a
+// DeviceDetach; a daemon side that ends while the device side is live is a
+// fresh DeviceAttach (the daemon should re-open its side).
+func (s *Server) detach(sd side, r *route, att *attachment) {
+	att.cancel()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	r.mu.Lock()
-	if r.mu.streams[sd] == stream {
-		delete(r.mu.streams, sd)
-		if len(r.mu.streams) == 0 {
-			// Start the grace clock: the route (and its reconnect buffers)
-			// is kept for routeGrace waiting for a peer, then collected.
-			r.mu.idleSince = s.now()
-		}
+	defer r.mu.Unlock()
+	if r.mu.streams[sd] != att {
+		return
 	}
-	r.mu.Unlock()
+	delete(r.mu.streams, sd)
+	if len(r.mu.streams) == 0 {
+		// Start the grace clock: the route (and its reconnect buffers)
+		// is kept for routeGrace waiting for a peer, then collected.
+		r.mu.idleSince = s.now()
+	}
+	if s.mu.routes[routeKey(r.workspaceID, r.sessionID, r.deviceID)] != r {
+		return // revoked or collected: nothing to announce
+	}
+	switch {
+	case sd == sideDevice && r.mu.streams[sideDaemon] == nil:
+		s.announceLocked(r.workspaceID, detachFrame(r))
+	case sd == sideDaemon && r.mu.streams[sideDevice] != nil:
+		s.announceLocked(r.workspaceID, attachFrame(r))
+	}
 }
 
 // forward pushes one frame to the opposite side's queue. The peer's pump

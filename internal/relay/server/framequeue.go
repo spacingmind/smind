@@ -11,28 +11,47 @@ import (
 // for one side of a route: while that side has a live stream, the stream's
 // pump drains it; while it doesn't, it *is* the reconnect-grace buffer and
 // keeps at most cap frames, evicting the oldest past that (ADR-0007 (a)).
+// It is bounded by frame count AND by payload bytes (maxBytes <= 0 disables
+// the byte bound): whichever is hit first evicts the oldest frames, but the
+// newest frame is always kept, so a single frame larger than maxBytes is
+// still delivered (gRPC's own message limit bounds it).
 // push never blocks — a dumb pipe degrades by eviction, not by stalling.
 type frameQueue struct {
-	mu     sync.Mutex
-	notify chan struct{}
-	items  []*relaypb.Frame
-	cap    int
+	mu       sync.Mutex
+	notify   chan struct{}
+	items    []*relaypb.Frame
+	cap      int
+	maxBytes int
+	bytes    int
 }
 
-func newFrameQueue(capacity int) *frameQueue {
+func newFrameQueue(capacity int) *frameQueue { return newByteBoundedFrameQueue(capacity, 0) }
+
+func newByteBoundedFrameQueue(capacity, maxBytes int) *frameQueue {
 	return &frameQueue{
-		notify: make(chan struct{}, 1),
-		items:  make([]*relaypb.Frame, 0, capacity),
-		cap:    capacity,
+		notify:   make(chan struct{}, 1),
+		items:    make([]*relaypb.Frame, 0, capacity),
+		cap:      capacity,
+		maxBytes: maxBytes,
+	}
+}
+
+func frameBytes(f *relaypb.Frame) int { return len(f.GetPayload()) }
+
+// shrinkLocked evicts from the front while a bound is exceeded, never
+// dropping the last remaining frame.
+func (q *frameQueue) shrinkLocked() {
+	for len(q.items) > 1 && (len(q.items) > q.cap || (q.maxBytes > 0 && q.bytes > q.maxBytes)) {
+		q.bytes -= frameBytes(q.items[0])
+		q.items = q.items[1:]
 	}
 }
 
 func (q *frameQueue) push(f *relaypb.Frame) {
 	q.mu.Lock()
-	if len(q.items) == q.cap {
-		q.items = q.items[1:] // evict oldest
-	}
 	q.items = append(q.items, f)
+	q.bytes += frameBytes(f)
+	q.shrinkLocked()
 	q.mu.Unlock()
 	select {
 	case q.notify <- struct{}{}:
@@ -49,8 +68,12 @@ func (q *frameQueue) push(f *relaypb.Frame) {
 func (q *frameQueue) pushFront(f *relaypb.Frame) {
 	q.mu.Lock()
 	q.items = append([]*relaypb.Frame{f}, q.items...)
-	if len(q.items) > q.cap {
-		q.items = q.items[:q.cap] // evict the newest overflow; this frame is the oldest and stays.
+	q.bytes += frameBytes(f)
+	// Evict the newest overflow; this frame is the oldest and stays.
+	for len(q.items) > 1 && (len(q.items) > q.cap || (q.maxBytes > 0 && q.bytes > q.maxBytes)) {
+		last := len(q.items) - 1
+		q.bytes -= frameBytes(q.items[last])
+		q.items = q.items[:last]
 	}
 	q.mu.Unlock()
 	select {
@@ -79,6 +102,7 @@ func (q *frameQueue) pop(ctx context.Context) (*relaypb.Frame, error) {
 		if len(q.items) > 0 {
 			f := q.items[0]
 			q.items = q.items[1:]
+			q.bytes -= frameBytes(f)
 			q.mu.Unlock()
 			return f, nil
 		}
