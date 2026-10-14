@@ -15,8 +15,10 @@ package server
 // handoff, not papered over.
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 	"time"
@@ -153,11 +155,15 @@ func (c *mdControl) expectSync(want map[string]string) {
 	}
 }
 
-// expectDone closes the send side and asserts the stream ends with the
-// given code and (exact, if non-empty) message.
+// expectDone asserts the stream ends with the given code and (exact, if
+// non-empty) message. Only a clean close (codes.OK) closes the send side
+// first — doing so before an expected server-side error would race the
+// server's own status against a client-initiated EOF.
 func (c *mdControl) expectDone(code codes.Code, msg string) {
 	c.t.Helper()
-	c.stream.CloseSend()
+	if code == codes.OK {
+		c.stream.CloseSend()
+	}
 	select {
 	case err := <-c.done:
 		if status.Code(err) != code {
@@ -254,10 +260,13 @@ func (s *mdStream) quiet(d time.Duration) {
 
 // expectDone asserts the stream ends with the given status, closing the
 // send side first. A clean close (the server returned no status) surfaces
-// client-side as EOF, i.e. codes.OK.
+// client-side as EOF, i.e. codes.OK; only then is the send side closed
+// here (closing it before an expected server-side error races the two).
 func (s *mdStream) expectDone(code codes.Code) {
 	s.t.Helper()
-	s.stream.CloseSend()
+	if code == codes.OK {
+		s.stream.CloseSend()
+	}
 	select {
 	case err := <-s.done:
 		if code == codes.OK {
@@ -388,4 +397,120 @@ func TestSyncListsWaitingRoutesOnControlAccept(t *testing.T) {
 	ctl.expectPong(7)
 	ctl.expectSync(map[string]string{"dev-w1": "sess-w1", "dev-w2": "sess-w2"})
 	ctl.quiet(mdQuiet)
+}
+
+func TestNewControlStreamSupersedesOld(t *testing.T) {
+	h := newHarness(t, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	adm := h.admit(ctx, testWorkspace, "daemon-key-1")
+
+	old := mdOpenControl(t, h, ctx, adm)
+	old.expectPong(7)
+	old.expectSync(map[string]string{})
+
+	// A second control stream for the same host ends the first with
+	// Aborted "superseded" and becomes the host's control stream.
+	fresh := mdOpenControl(t, h, ctx, adm)
+	old.expectDone(codes.Aborted, "superseded")
+	fresh.expectPong(7)
+	fresh.expectSync(map[string]string{})
+
+	// Announcements now arrive only on the new stream.
+	v := mdOpenStream(t, h, ctx, adm, mdRoute("dev-s", "sess-s", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+	v.send(v.frame(0, []byte("reg")))
+	fresh.expectAttach("dev-s", "sess-s")
+}
+
+func TestDeviceCapPerHostIs16AndConfigurable(t *testing.T) {
+	// Default cap of 16: the 17th distinct device id with a live device
+	// side gets ResourceExhausted; a new session of an already-attached
+	// device id is not counted.
+	h := newHarness(t, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	adm := h.admit(ctx, testWorkspace, "daemon-key-1")
+
+	for i := 0; i < 16; i++ {
+		v := mdOpenStream(t, h, ctx, adm, mdRoute(fmt.Sprintf("dev-%02d", i), "sess-1", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+		v.send(v.frame(0, []byte("reg")))
+	}
+	v17 := mdOpenStream(t, h, ctx, adm, mdRoute("dev-17", "sess-1", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+	v17.send(v17.frame(0, []byte("reg")))
+	v17.expectDone(codes.ResourceExhausted)
+
+	// A different session of an attached device id still attaches.
+	v := mdOpenStream(t, h, ctx, adm, mdRoute("dev-00", "sess-2", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+	v.send(v.frame(0, []byte("reg")))
+	v.quiet(mdQuiet) // still attached, not refused
+
+	// Configured cap of 2: the 3rd distinct device is refused.
+	h2 := newHarnessWithOptions(t, 0, WithMaxDevicesPerHost(2))
+	adm2 := h2.admit(ctx, testWorkspace, "daemon-key-1")
+	for i := 0; i < 2; i++ {
+		v := mdOpenStream(t, h2, ctx, adm2, mdRoute(fmt.Sprintf("dev2-%d", i), "sess-1", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+		v.send(v.frame(0, []byte("reg")))
+	}
+	v3 := mdOpenStream(t, h2, ctx, adm2, mdRoute("dev2-2", "sess-1", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+	v3.send(v3.frame(0, []byte("reg")))
+	v3.expectDone(codes.ResourceExhausted)
+}
+
+func TestBufferBoundedByFramesAndBytes(t *testing.T) {
+	// Frame-count bound: with cap 4, the 5th buffered frame evicts the
+	// oldest; a late-attaching device receives the newest 4 in order.
+	h := newHarness(t, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	adm := h.admit(ctx, testWorkspace, "daemon-key-1")
+
+	r := mdRoute("dev-b", "sess-b", relaypb.Direction_DIRECTION_DAEMON_TO_DEVICE)
+	d := mdOpenStream(t, h, ctx, adm, r)
+	const n = 6
+	for i := 0; i < n; i++ {
+		d.send(d.frame(uint64(i), []byte{byte('a' + i)}))
+	}
+	waitFor(t, mdTimeout, func() bool { return h.srv.BufferedFrames(testWorkspace, "sess-b", "dev-b") == 4 })
+	v := mdOpenStream(t, h, ctx, adm, mdRoute("dev-b", "sess-b", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+	v.send(v.frame(0, []byte("reg")))
+	for i := n - 4; i < n; i++ {
+		if got := v.expectRecv(mdTimeout); got.GetSequence() != uint64(i) {
+			t.Fatalf("frame-count bound: got sequence %d, want %d", got.GetSequence(), i)
+		}
+	}
+	v.quiet(mdQuiet)
+
+	// Byte bound: bufferCap 200 but WithBufferBytes(4): three 2-byte
+	// payloads exceed 4 bytes, so only the newest two survive.
+	h2 := newHarnessWithOptions(t, 200, WithBufferBytes(4))
+	adm2 := h2.admit(ctx, testWorkspace, "daemon-key-1")
+	r2 := mdRoute("dev-b2", "sess-b2", relaypb.Direction_DIRECTION_DAEMON_TO_DEVICE)
+	d2 := mdOpenStream(t, h2, ctx, adm2, r2)
+	for i := 0; i < 3; i++ {
+		d2.send(d2.frame(uint64(i), []byte{byte(i), byte(i)}))
+	}
+	waitFor(t, mdTimeout, func() bool { return h2.srv.BufferedFrames(testWorkspace, "sess-b2", "dev-b2") == 2 })
+	v2 := mdOpenStream(t, h2, ctx, adm2, mdRoute("dev-b2", "sess-b2", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+	v2.send(v2.frame(0, []byte("reg")))
+	for i := 1; i < 3; i++ {
+		if got := v2.expectRecv(mdTimeout); got.GetSequence() != uint64(i) {
+			t.Fatalf("byte bound: got sequence %d, want %d", got.GetSequence(), i)
+		}
+	}
+	v2.quiet(mdQuiet)
+
+	// A single frame larger than the byte bound is still kept and
+	// delivered (the newest is never evicted).
+	h3 := newHarnessWithOptions(t, 200, WithBufferBytes(8))
+	adm3 := h3.admit(ctx, testWorkspace, "daemon-key-1")
+	r3 := mdRoute("dev-b3", "sess-b3", relaypb.Direction_DIRECTION_DAEMON_TO_DEVICE)
+	d3 := mdOpenStream(t, h3, ctx, adm3, r3)
+	big := randBytes(t, 64)
+	d3.send(d3.frame(0, big))
+	waitFor(t, mdTimeout, func() bool { return h3.srv.BufferedFrames(testWorkspace, "sess-b3", "dev-b3") == 1 })
+	v3 := mdOpenStream(t, h3, ctx, adm3, mdRoute("dev-b3", "sess-b3", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+	v3.send(v3.frame(0, []byte("reg")))
+	if got := v3.expectRecv(mdTimeout); !bytes.Equal(got.GetPayload(), big) {
+		t.Fatalf("oversized buffered frame was dropped or mangled")
+	}
 }
