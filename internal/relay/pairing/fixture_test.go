@@ -8,6 +8,9 @@ package pairing
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -40,5 +43,25 @@ func TestFixtureOfferURLForTypeScriptPort(t *testing.T) {
 		got.Relay != offer.Relay || got.RelayFingerprint != offer.RelayFingerprint ||
 		!bytes.Equal(got.Secret, offer.Secret) || got.WorkspaceID != offer.WorkspaceID {
 		t.Fatalf("ParseURL round trip = %+v, want %+v", got, offer)
+	}
+}
+
+// TestOfferWireFormatUnchanged pins that the relay-host rename (ADR-0031 P0)
+// left the offer's JSON key names alone: the host id still travels as "ws".
+func TestOfferWireFormatUnchanged(t *testing.T) {
+	payload := strings.TrimPrefix(fixtureOfferURL, "https://spacingmind.sh/pair#offer=")
+	raw, err := base64.RawURLEncoding.DecodeString(payload)
+	if err != nil {
+		t.Fatalf("decode fixture payload: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("parse fixture payload: %v", err)
+	}
+	if m["ws"] != "ws-fixture-1" {
+		t.Fatalf(`fixture "ws" key = %v, want "ws-fixture-1" (keys: %v)`, m["ws"], m)
+	}
+	if _, renamed := m["host"]; renamed {
+		t.Fatal(`offer payload must not gain a "host" key`)
 	}
 }

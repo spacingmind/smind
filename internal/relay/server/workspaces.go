@@ -1,9 +1,11 @@
 package server
 
-// workspaces.go — persisted workspace enrollment for the relay: one JSON
-// file mapping workspace ID -> secret hash (ADR-0011: the raw secret is
+// workspaces.go — persisted relay-host enrollment for the relay: one JSON
+// file mapping relay host id -> secret hash (ADR-0011: the raw secret is
 // printed once at creation and never stored). Kept deliberately file-based
-// and small; the relay is a self-hosted single-process service.
+// and small; the relay is a self-hosted single-process service. The file is
+// still named workspaces.json (its historical name; stored data is not
+// renamed — ADR-0031 D12), and its keys are relay host ids.
 
 import (
 	"encoding/json"
@@ -16,68 +18,68 @@ import (
 	"github.com/spacingmind/smind/internal/securefile"
 )
 
-type workspaceRecord struct {
+type hostRecord struct {
 	SecretHash []byte `json:"secret_hash"`
 }
 
-type workspaceStore struct {
+type hostStore struct {
 	path string
 }
 
-func newWorkspaceStore(dir string) workspaceStore {
-	return workspaceStore{path: filepath.Join(dir, "workspaces.json")}
+func newHostStore(dir string) hostStore {
+	return hostStore{path: filepath.Join(dir, "workspaces.json")}
 }
 
-// load reads all enrolled workspaces. A missing file is an empty store.
-func (s workspaceStore) load() (map[string]workspaceRecord, error) {
+// load reads all enrolled relay hosts. A missing file is an empty store.
+func (s hostStore) load() (map[string]hostRecord, error) {
 	data, err := os.ReadFile(s.path)
 	if os.IsNotExist(err) {
-		return map[string]workspaceRecord{}, nil
+		return map[string]hostRecord{}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("relay workspaces: read: %w", err)
+		return nil, fmt.Errorf("relay host store: read: %w", err)
 	}
-	var m map[string]workspaceRecord
+	var m map[string]hostRecord
 	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("relay workspaces: parse %s: %w", s.path, err)
+		return nil, fmt.Errorf("relay host store: parse %s: %w", s.path, err)
 	}
 	return m, nil
 }
 
 // saveLocked writes the store back atomically (temp + rename).
-func (s workspaceStore) save(records map[string]workspaceRecord) error {
+func (s hostStore) save(records map[string]hostRecord) error {
 	data, err := json.MarshalIndent(records, "", "  ")
 	if err != nil {
-		return fmt.Errorf("relay workspaces: marshal: %w", err)
+		return fmt.Errorf("relay host store: marshal: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return fmt.Errorf("relay workspaces: mkdir: %w", err)
+		return fmt.Errorf("relay host store: mkdir: %w", err)
 	}
 	tmp := s.path + ".tmp"
 	if err := securefile.WriteFile(tmp, data); err != nil {
-		return fmt.Errorf("relay workspaces: write: %w", err)
+		return fmt.Errorf("relay host store: write: %w", err)
 	}
 	if err := os.Rename(tmp, s.path); err != nil {
-		return fmt.Errorf("relay workspaces: rename: %w", err)
+		return fmt.Errorf("relay host store: rename: %w", err)
 	}
 	return nil
 }
 
-// enroll creates a new workspace with a fresh 256-bit secret and returns
+// enroll creates a new relay host with a fresh 256-bit secret and returns
 // the raw secret exactly once (never retrievable again).
-func (s workspaceStore) enroll(id string) (secret []byte, err error) {
+func (s hostStore) enroll(id string) (secret []byte, err error) {
 	records, err := s.load()
 	if err != nil {
 		return nil, err
 	}
 	if _, exists := records[id]; exists {
-		return nil, fmt.Errorf("relay workspaces: %q already enrolled", id)
+		return nil, fmt.Errorf("relay host %q already enrolled", id)
 	}
-	ws, secret, err := admission.NewWorkspace(id)
+	host, secret, err := admission.NewWorkspace(id)
 	if err != nil {
 		return nil, err
 	}
-	records[id] = workspaceRecord{SecretHash: ws.SecretHash}
+	records[id] = hostRecord{SecretHash: host.SecretHash}
 	if err := s.save(records); err != nil {
 		return nil, err
 	}
@@ -85,8 +87,8 @@ func (s workspaceStore) enroll(id string) (secret []byte, err error) {
 }
 
 // verifier returns an admission.Verifier seeded with every enrolled
-// workspace, for the running relay server.
-func (s workspaceStore) verifier() (*admission.Verifier, error) {
+// relay host, for the running relay server.
+func (s hostStore) verifier() (*admission.Verifier, error) {
 	records, err := s.load()
 	if err != nil {
 		return nil, err
@@ -98,8 +100,8 @@ func (s workspaceStore) verifier() (*admission.Verifier, error) {
 	return v, nil
 }
 
-// list returns the enrolled workspace IDs (sorted by the caller).
-func (s workspaceStore) list() ([]string, error) {
+// list returns the enrolled relay host ids (sorted by the caller).
+func (s hostStore) list() ([]string, error) {
 	records, err := s.load()
 	if err != nil {
 		return nil, err
@@ -109,4 +111,40 @@ func (s workspaceStore) list() ([]string, error) {
 		ids = append(ids, id)
 	}
 	return ids, nil
+}
+
+// remove deletes a relay host; its secret stops admitting once the relay
+// restarts (the verifier is seeded from the store at startup).
+func (s hostStore) remove(id string) error {
+	records, err := s.load()
+	if err != nil {
+		return err
+	}
+	if _, exists := records[id]; !exists {
+		return fmt.Errorf("relay host %q is not enrolled", id)
+	}
+	delete(records, id)
+	return s.save(records)
+}
+
+// rotate replaces a relay host's secret with a fresh 256-bit one and returns
+// the new raw secret exactly once. The old secret no longer admits once the
+// relay restarts.
+func (s hostStore) rotate(id string) (secret []byte, err error) {
+	records, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+	if _, exists := records[id]; !exists {
+		return nil, fmt.Errorf("relay host %q is not enrolled", id)
+	}
+	host, secret, err := admission.NewWorkspace(id)
+	if err != nil {
+		return nil, err
+	}
+	records[id] = hostRecord{SecretHash: host.SecretHash}
+	if err := s.save(records); err != nil {
+		return nil, err
+	}
+	return secret, nil
 }
