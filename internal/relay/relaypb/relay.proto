@@ -119,16 +119,25 @@ message AdmitResponse {
 // --- Control channel ---
 
 message ControlFrame {
+  // DeviceAttach (relay -> daemon): a device-side data stream attached to a
+  // route that has no daemon side yet. The daemon answers by opening the
+  // daemon side of that route (OpenData, DIRECTION_DAEMON_TO_DEVICE) with the
+  // same (device_id, session_id). Older daemons ignore it.
   message DeviceAttach {
-    // Device ID assigned at pairing.
+    // Device ID of the attached route (Frame.device_id).
     string device_id = 1;
     // The device's persisted public key material as offered at pairing,
-    // opaque to the relay's control logic.
+    // opaque to the relay's control logic. Unused by the relay (kept).
     bytes pairing_payload = 2;
+    // E2EE session id of the attached route (Frame.session_id).
+    bytes session_id = 3;
   }
 
+  // DeviceDetach (relay -> daemon): the route's device side ended and no
+  // daemon side is attached, or the route was garbage-collected.
   message DeviceDetach {
     string device_id = 1;
+    bytes session_id = 2;
   }
 
   message Ping {
@@ -140,6 +149,27 @@ message ControlFrame {
     uint64 sequence = 1;
   }
 
+  // DeviceRef names one route of the control stream's relay host.
+  message DeviceRef {
+    string device_id = 1;
+    bytes session_id = 2;
+  }
+
+  // Sync (relay -> daemon): every route with a live device side and no
+  // daemon side. Sent once, right after a control stream is accepted, so a
+  // daemon that (re)connects learns about devices that attached while it
+  // was away.
+  message Sync {
+    repeated DeviceRef devices = 1;
+  }
+
+  // Revoke (daemon -> relay): close this device's streams and refuse new
+  // attaches for it until the control stream ends (best effort; the daemon
+  // stays authoritative and rejects the device itself).
+  message Revoke {
+    string device_id = 1;
+  }
+
   // Relay host id the control connection is bound to; must match the
   // authenticated admission binding or the relay rejects the stream.
   string workspace_id = 1;
@@ -149,6 +179,8 @@ message ControlFrame {
     DeviceDetach device_detach = 3;
     Ping ping = 4;
     Pong pong = 5;
+    Sync sync = 6;
+    Revoke revoke = 7;
   }
 }
 
@@ -184,4 +216,10 @@ message Frame {
   // Opaque ciphertext. The relay has no key for this and must not attempt
   // to inspect it.
   bytes payload = 6;
+  // Application-level liveness probe (ADR-0031 D9, flow 8). A frame with
+  // keepalive set is consumed by the relay and answered with a keepalive
+  // frame on the same stream; it is never forwarded to the peer and never
+  // buffered, and it carries no payload. Peers that predate this field
+  // never set it.
+  bool keepalive = 7;
 }
