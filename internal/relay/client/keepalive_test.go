@@ -201,6 +201,21 @@ func newKAFixture(t *testing.T, echo bool) *kaFixture {
 	return fx
 }
 
+// park waits until the keepalive loop is parked on the clock (it has armed n
+// timers in total) and its last probe write has finished: probeAsync skips a
+// tick while a write is still in flight, so advancing earlier could skip a
+// probe the test expects.
+func (fx *kaFixture) park(t *testing.T, n int) {
+	t.Helper()
+	fx.clock.waitArms(t, n)
+	k := fx.fc.keepaliveState()
+	waitUntil(t, "the last probe write to finish", func() bool {
+		k.mu.Lock()
+		defer k.mu.Unlock()
+		return !k.sending
+	})
+}
+
 func (fx *kaFixture) startReader() {
 	go func() {
 		buf := make([]byte, 64)
@@ -229,7 +244,7 @@ func waitUntil(t *testing.T, what string, cond func() bool) {
 func TestKeepaliveSentEvery30s(t *testing.T) {
 	fx := newKAFixture(t, true)
 	waitUntil(t, "first probe", func() bool { return fx.stream.keepalives() == 1 })
-	fx.clock.waitArms(t, 1)
+	fx.park(t, 1)
 	for i, want := range []int{2, 3, 4} {
 		fx.clock.Advance(29 * time.Second)
 		if got := fx.stream.keepalives(); got != want-1 {
@@ -237,7 +252,7 @@ func TestKeepaliveSentEvery30s(t *testing.T) {
 		}
 		fx.clock.Advance(time.Second)
 		waitUntil(t, "next keepalive", func() bool { return fx.stream.keepalives() == want })
-		fx.clock.waitArms(t, i+2)
+		fx.park(t, i+2)
 	}
 	select {
 	case d := <-fx.data:
@@ -253,7 +268,7 @@ func TestDeadStreamAfter75sOfSilence(t *testing.T) {
 	waitUntil(t, "first probe echoed", func() bool { return fx.stream.keepalives() == 1 })
 	// Give the reader the echo, then the relay goes silent.
 	waitUntil(t, "echo consumed", func() bool { return len(fx.stream.recv) == 0 })
-	fx.clock.waitArms(t, 1)
+	fx.park(t, 1)
 	fx.stream.setEcho(false)
 
 	fx.clock.Advance(74 * time.Second)
@@ -280,7 +295,7 @@ func TestAnyRelayFrameResetsTheDeadStreamTimer(t *testing.T) {
 	fx := newKAFixture(t, true)
 	waitUntil(t, "first probe echoed", func() bool { return fx.stream.keepalives() == 1 })
 	waitUntil(t, "echo consumed", func() bool { return len(fx.stream.recv) == 0 })
-	fx.clock.waitArms(t, 1)
+	fx.park(t, 1)
 	fx.stream.setEcho(false)
 
 	fx.clock.Advance(60 * time.Second)
@@ -310,7 +325,7 @@ func TestUnansweredProbeTurnsKeepaliveOff(t *testing.T) {
 	// no more probes are sent and the connection is never declared dead.
 	fx := newKAFixture(t, false)
 	waitUntil(t, "first probe", func() bool { return fx.stream.keepalives() == 1 })
-	fx.clock.waitArms(t, 1)
+	fx.park(t, 1)
 	fx.clock.Advance(DefaultKeepaliveProbeTimeout + time.Second)
 	fx.clock.Advance(10 * time.Minute)
 	if got := fx.stream.keepalives(); got != 1 {
@@ -331,7 +346,7 @@ func TestKeepaliveFollowsResumeToTheNewStream(t *testing.T) {
 	fx := newKAFixture(t, true)
 	waitUntil(t, "first probe echoed", func() bool { return fx.stream.keepalives() == 1 })
 	waitUntil(t, "echo consumed", func() bool { return len(fx.stream.recv) == 0 })
-	fx.clock.waitArms(t, 1)
+	fx.park(t, 1)
 
 	// Drop and resume: a new stream (the dead one's reader exits with an
 	// error, as DataConn.Resume documents; start a fresh reader like Receive).
@@ -348,7 +363,7 @@ func TestKeepaliveFollowsResumeToTheNewStream(t *testing.T) {
 	fx.startReader()
 
 	waitUntil(t, "probe on the resumed stream", func() bool { return next.keepalives() >= 1 })
-	fx.clock.waitArms(t, armsBefore+1)
+	fx.park(t, armsBefore+1)
 	before := next.keepalives()
 	fx.clock.Advance(DefaultKeepaliveInterval)
 	waitUntil(t, "periodic keepalive on the resumed stream", func() bool { return next.keepalives() > before })
@@ -367,7 +382,7 @@ func TestForwardedPeerProbeIsNotAnEcho(t *testing.T) {
 	// liveness evidence only and must not switch the dead-stream rule on.
 	fx := newKAFixture(t, false)
 	waitUntil(t, "first probe", func() bool { return fx.stream.keepalives() == 1 })
-	fx.clock.waitArms(t, 1)
+	fx.park(t, 1)
 	nonce := fx.fc.keepaliveState().nonce
 	fx.stream.recv <- &relaypb.Frame{Keepalive: true, Sequence: nonce + 1}
 	waitUntil(t, "forwarded probe consumed", func() bool { return len(fx.stream.recv) == 0 })
@@ -387,7 +402,7 @@ func TestForwardedPeerProbeIsNotAnEcho(t *testing.T) {
 func TestKeepaliveReprobesAfterResumeWhenFirstEchoWasLate(t *testing.T) {
 	fx := newKAFixture(t, false)
 	waitUntil(t, "first probe", func() bool { return fx.stream.keepalives() == 1 })
-	fx.clock.waitArms(t, 1)
+	fx.park(t, 1)
 	fx.clock.Advance(DefaultKeepaliveProbeTimeout + time.Second)
 	waitUntil(t, "keepalive off for the first stream", func() bool { return fx.supportState() == kaNo })
 
@@ -411,7 +426,7 @@ func TestBlockedProbeWriteDoesNotDisableTheDeadStreamRule(t *testing.T) {
 	fx := newKAFixture(t, true)
 	waitUntil(t, "first probe echoed", func() bool { return fx.stream.keepalives() == 1 })
 	waitUntil(t, "echo consumed", func() bool { return len(fx.stream.recv) == 0 })
-	fx.clock.waitArms(t, 1)
+	fx.park(t, 1)
 
 	// The stream stalls: writes block (flow control on a half-open stream)
 	// and nothing arrives. The loop must still declare it dead at 75 s.
