@@ -12,8 +12,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/spacingmind/smind/internal/claudecli"
+	"github.com/spacingmind/smind/internal/selfupdate"
 )
 
 func main() {
@@ -24,7 +26,25 @@ func main() {
 	if code, handled := claudecli.MaybeRunLauncher(); handled {
 		os.Exit(code)
 	}
+	cleanupAfterUpdate()
 	os.Exit(run(os.Args[1:]))
+}
+
+// cleanupAfterUpdate deletes the smind.exe.old a previous `smind update` could
+// not remove while that binary was still running (Windows only; a file that is
+// still in use is simply left for next time).
+func cleanupAfterUpdate() {
+	if !selfupdate.RenameAside {
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	if real, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = real // update replaced the resolved file, so its leftovers sit next to that
+	}
+	selfupdate.CleanupStale(exe)
 }
 
 // run dispatches to a subcommand and returns the process exit code, rather
@@ -60,6 +80,8 @@ func run(args []string) int {
 		return cmdMcp(args[1:])
 	case "skill":
 		return cmdSkill(args[1:])
+	case "update":
+		return cmdUpdate(args[1:])
 	case "version", "--version", "-v":
 		return cmdVersion(osStdout)
 	case "-h", "--help", "help":
@@ -124,6 +146,9 @@ Usage:
   smind skill ls [--target claude|agents|codex|all]       bundled orchestration skills x targets (installed/modified/missing)
   smind skill install [--target ...] [--force] [name...]  install the bundled skills (explicit; no daemon needed)
   smind skill uninstall [--target ...] [name...]          remove only the files smind installed
+
+  smind update [--check] [--version <v>] [--force]        update this binary to the latest release (SHA-256 verified)
+      [--dry-run] [--json]                                 --check only reports; refuses while runs are active unless --force
 
 Every subcommand except "serve" and "skill" talks to a locally running daemon over its
 WebSocket API, authenticating with the token the daemon itself wrote to
