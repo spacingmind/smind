@@ -303,70 +303,121 @@ func TestServeLoopbackDefaultUnchanged(t *testing.T) {
 }
 
 // TestServeDirectConnectionEndToEnd runs a real daemon beyond loopback and
-// reaches it through this machine's LAN address, which makes the TCP peer a
-// non-loopback address exactly as another machine would be.
+// walks the whole remote flow against it: no standing token, wrong then right
+// password, a session token that opens /ws only through the subprotocol, never
+// the URL.
+//
+// Two ways to be "not the local user" without a second machine:
+//   - through this machine's LAN address, so the TCP peer is a non-loopback
+//     address (skipped when a host firewall swallows it);
+//   - through 127.0.0.1 with an external Host name, exactly what a same-host
+//     reverse proxy sends (the TCP peer is loopback, the Host is not).
 func TestServeDirectConnectionEndToEnd(t *testing.T) {
-	lan := lanIP()
-	if lan == "" {
-		t.Skip("no non-loopback IPv4 address to play the remote client")
-	}
 	bin := buildSmind(t)
+	t.Run("from the LAN address", func(t *testing.T) {
+		lan := lanIP()
+		if lan == "" {
+			t.Skip("no non-loopback IPv4 address to play the remote client")
+		}
+		runDirectFlow(t, bin, func(port int) (string, string) { return fmt.Sprintf("%s:%d", lan, port), "" }, true)
+	})
+	t.Run("same-host reverse proxy (loopback peer, external Host)", func(t *testing.T) {
+		runDirectFlow(t, bin, func(port int) (string, string) { return fmt.Sprintf("127.0.0.1:%d", port), "smind.example.com" }, false)
+	})
+}
+
+// runDirectFlow starts a daemon on 0.0.0.0 with a password and drives it from
+// the address target(port) returns, presenting hostHeader when non-empty.
+func runDirectFlow(t *testing.T, bin string, target func(port int) (addr, hostHeader string), skipIfUnreachable bool) {
 	home := cliHome(t)
 	port := freePort(t)
 	var o, e bytes.Buffer
 	if code := runSetPassword([]string{"--password-stdin"}, strings.NewReader(goodPassword), &o, &e); code != 0 {
 		t.Fatal(e.String())
 	}
-	d := startServe(t, bin, home, fmt.Sprintf("%s=0.0.0.0:%d", config.EnvListen, port))
+	d := startServe(t, bin, home, fmt.Sprintf("%s=0.0.0.0:%d", config.EnvListen, port), config.EnvHostnames+"=smind.example.com")
 	waitDaemonHealthy(t, port, 30*time.Second)
-	base := fmt.Sprintf("http://%s:%d", lan, port)
-	// TCP can connect and still go nowhere (the macOS application firewall
-	// holds unsigned binaries' LAN traffic), so probe with a real request.
-	probe := &http.Client{Timeout: 3 * time.Second}
-	if resp, err := probe.Get(base + "/healthz"); err != nil {
-		t.Skipf("this machine cannot reach its own daemon on %s (host firewall or VPN interface?): %v", lan, err)
-	} else {
-		_ = resp.Body.Close()
+	addr, hostHeader := target(port)
+	base := "http://" + addr
+
+	do := func(client *http.Client, method, path string, body []byte, hdr http.Header) (*http.Response, []byte) {
+		req, err := http.NewRequest(method, base+path, bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hostHeader != "" {
+			req.Host = hostHeader
+		}
+		for k, v := range hdr {
+			req.Header[k] = v
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		return resp, b
 	}
 
+	if skipIfUnreachable {
+		// TCP can connect and still go nowhere (the macOS application firewall
+		// holds unsigned binaries' LAN traffic), so probe with a real request.
+		req, _ := http.NewRequest("GET", base+"/healthz", nil)
+		if resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req); err != nil {
+			t.Skipf("this machine cannot reach its own daemon on %s (host firewall or VPN interface?): %v", addr, err)
+		} else {
+			_ = resp.Body.Close()
+		}
+	}
+
+	_, hb := do(testHTTP, "GET", "/healthz", nil, nil)
 	var h map[string]any
-	getJSON(t, base+"/healthz", http.StatusOK, &h)
+	_ = json.Unmarshal(hb, &h)
 	if h["authRequired"] != true {
-		t.Fatalf("healthz = %v", h)
+		t.Fatalf("healthz = %s", hb)
 	}
-	// The standing token is not served to a LAN peer...
-	resp, err := testHTTP.Get(base + "/api/token")
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
 	daemonTok, _ := auth.LoadOrCreateToken(home)
+	resp, body := do(testHTTP, "GET", "/api/token", nil, nil)
 	if resp.StatusCode != http.StatusForbidden || strings.Contains(string(body), daemonTok) {
-		t.Fatalf("/api/token from %s: %d %s", lan, resp.StatusCode, body)
+		t.Fatalf("/api/token as a remote client: %d %s", resp.StatusCode, body)
 	}
-	// ...but it still is to loopback.
-	getJSON(t, fmt.Sprintf("http://127.0.0.1:%d/api/token", port), http.StatusOK, &map[string]string{})
+	// A name nobody configured is refused outright.
+	if hostHeader != "" {
+		req, _ := http.NewRequest("GET", base+"/healthz", nil)
+		req.Host = "other.example.org"
+		if r, err := testHTTP.Do(req); err != nil || r.StatusCode != http.StatusForbidden {
+			t.Fatalf("an unlisted Host: %v %v", r, err)
+		}
+	}
 
-	wrong := postLogin(t, base, "not the password!!")
-	if wrong.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("wrong password: %d", wrong.StatusCode)
+	jsonHdr := http.Header{"Content-Type": {"application/json"}}
+	wrongBody, _ := json.Marshal(map[string]string{"password": "not the password!!"})
+	if resp, _ := do(testHTTP, "POST", "/api/login", wrongBody, jsonHdr); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("wrong password: %d", resp.StatusCode)
 	}
-	ok := postLogin(t, base, goodPassword)
-	if ok.StatusCode != http.StatusOK {
-		t.Fatalf("right password: %d", ok.StatusCode)
+	rightBody, _ := json.Marshal(map[string]string{"password": goodPassword})
+	resp, body = do(testHTTP, "POST", "/api/login", rightBody, jsonHdr)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("right password: %d %s", resp.StatusCode, body)
 	}
 	var login struct{ Token string }
-	_ = json.NewDecoder(ok.Body).Decode(&login)
-	_ = ok.Body.Close()
+	_ = json.Unmarshal(body, &login)
 	if login.Token == "" || login.Token == daemonTok {
 		t.Fatalf("login token %q", login.Token)
 	}
 
+	wsHdr := http.Header{}
+	if hostHeader != "" {
+		wsHdr.Set("Host", hostHeader)
+	}
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second, Subprotocols: []string{"smind", "smind.bearer." + login.Token}}
-	ws, _, err := dialer.Dial(fmt.Sprintf("ws://%s:%d/ws", lan, port), nil)
+	ws, wresp, err := dialer.Dial("ws://"+addr+"/ws", wsHdr)
 	if err != nil {
 		t.Fatalf("ws with a session token: %v", err)
+	}
+	if got := wresp.Header.Get("Sec-WebSocket-Protocol"); got != "smind" {
+		t.Fatalf("negotiated subprotocol %q", got)
 	}
 	if err := ws.WriteJSON(map[string]any{"id": "1", "method": "workspace.list"}); err != nil {
 		t.Fatal(err)
@@ -374,18 +425,26 @@ func TestServeDirectConnectionEndToEnd(t *testing.T) {
 	var reply struct{ ID string }
 	_ = ws.SetReadDeadline(time.Now().Add(10 * time.Second))
 	if err := ws.ReadJSON(&reply); err != nil || reply.ID != "1" {
-		t.Fatalf("workspace.list over the LAN socket: %+v %v", reply, err)
+		t.Fatalf("workspace.list over the remote socket: %+v %v", reply, err)
 	}
 	_ = ws.Close()
 
-	if _, resp, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://%s:%d/ws?token=%s", lan, port, daemonTok), nil); err == nil || resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("the daemon token over the LAN must be refused: %v %v", err, resp)
+	plain := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+	if _, r, err := plain.Dial("ws://"+addr+"/ws?token="+daemonTok, wsHdr); err == nil || r.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("the daemon token must be refused from a remote client: %v %v", err, r)
 	}
-	if _, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://%s:%d/ws?token=%s", lan, port, login.Token), nil); err == nil {
+	if _, _, err := plain.Dial("ws://"+addr+"/ws?token="+login.Token, wsHdr); err == nil {
 		t.Fatal("a session token in the URL must be refused")
 	}
+	crossOrigin := http.Header{"Origin": {"http://evil.example"}}
+	for k, v := range wsHdr {
+		crossOrigin[k] = v
+	}
+	if _, _, err := dialer.Dial("ws://"+addr+"/ws", crossOrigin); err == nil {
+		t.Fatal("a cross-origin upgrade must be refused even with a valid session")
+	}
 
-	// The daemon's own log carries no secret.
+	// The daemon's own log carries no secret, and says it is beyond loopback.
 	for _, secret := range []string{goodPassword, login.Token, daemonTok} {
 		if strings.Contains(d.out.String(), secret) {
 			t.Errorf("the daemon log contains a secret:\n%s", d.out)
@@ -394,11 +453,11 @@ func TestServeDirectConnectionEndToEnd(t *testing.T) {
 	if !strings.Contains(d.out.String(), "WARNING") {
 		t.Errorf("a daemon beyond loopback should say so in its log:\n%s", d.out)
 	}
-	// Local CLI keeps working beside it.
+	// Local CLI keeps working beside it (it dials 127.0.0.1 with the token file).
 	cmd := exec.Command(bin, "workspace", "ls")
 	cmd.Env = append(smindEnv(home), fmt.Sprintf("%s=0.0.0.0:%d", config.EnvListen, port))
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("smind workspace ls beside a LAN daemon: %v: %s", err, out)
+		t.Fatalf("smind workspace ls beside a daemon on 0.0.0.0: %v: %s", err, out)
 	}
 }
 
