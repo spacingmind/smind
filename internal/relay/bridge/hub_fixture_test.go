@@ -296,9 +296,34 @@ func (d *device) rerrOr() chan error {
 	return out
 }
 
-// hello sends device_hello and returns the daemon's answer.
+// awaitChallenge returns the challenge the daemon sends first on a device
+// route (messages before it, if any, are dropped).
+func (d *device) awaitChallenge() ([]byte, error) {
+	deadline := time.After(fixtureTimeout)
+	for {
+		select {
+		case m, ok := <-d.msgs:
+			if !ok {
+				return nil, errors.New("stream ended before the daemon's challenge")
+			}
+			c, isChallenge, err := devices.ParseChallengeMessage(m)
+			if isChallenge {
+				return c, err
+			}
+		case <-deadline:
+			return nil, errors.New("no device challenge from the daemon")
+		}
+	}
+}
+
+// hello answers the daemon's challenge with a signed device_hello and returns
+// the daemon's reply.
 func (d *device) hello() (rpcResp, error) {
-	h := devices.SignHello(d.priv, d.label, d.f.kp.Public(), d.eph.Public())
+	c, err := d.awaitChallenge()
+	if err != nil {
+		return rpcResp{}, err
+	}
+	h := devices.SignHello(d.priv, d.label, d.f.kp.Public(), d.eph.Public(), []byte(d.session), c)
 	return d.request(devices.HelloMethod, h)
 }
 

@@ -1,29 +1,65 @@
 {
-  "comment": "ADR-0031 D9 device_hello. signature = Ed25519(seed, signed_bytes); signed_bytes = \"smind-device-hello\" || SHA256(\"smind relay e2ee v1\" || daemon_pub || mobile_pub) || daemon_pub. Verify with device_id from the frame.",
+  "comment": "ADR-0031 D9 device_hello VERSION 2. signature = Ed25519(seed, signed_bytes); signed_bytes = \"smind-device-hello-v2\" || SHA256(\"smind relay e2ee v1\" || daemon_pub || mobile_pub) || daemon_pub || uint16BE(len(session_id)) || session_id || challenge. session_id is the relay route's session id (UTF-8 bytes of the string in the frame); challenge is the 32 bytes the daemon sent in challenge_message right after the E2EE handshake. Verify with device_id from the frame. Version 1 (device_hello_vector_v1.json) is retired and refused.",
+  "version": 2,
   "seed_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
   "device_pub_hex": "4fd099ccd47d7893dfe9ec24414ecb0d9b5420232aad30d91c465be33cbe65c4",
   "device_id": "ugarfmfxwqrf74yfe7qppt32dy",
   "daemon_pub_hex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
   "mobile_pub_hex": "505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f",
+  "session_id": "sess-0123456789abcdef",
+  "challenge_hex": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+  "challenge_message": {
+    "event": "relay.device_challenge",
+    "params": {
+      "challenge": "wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t8=",
+      "v": 2
+    }
+  },
   "label": "Pixel 9 (test vector)",
-  "signed_bytes_hex": "736d696e642d6465766963652d68656c6c6f97062d63280e27d5787edb4ed3bb5bbeee0226e5a98fc1cd2cc5f7dae054d5b9101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
-  "signature_hex": "4b5c365e28ac12f4f8317eec0f7506b7304ce7e6fd2e3da8035e80324d03a2b7cc0ae16de2ded8da64bc5e0f82e39259b956bcbbac41a2600c63748512aa5b08",
+  "signed_bytes_hex": "736d696e642d6465766963652d68656c6c6f2d763297062d63280e27d5787edb4ed3bb5bbeee0226e5a98fc1cd2cc5f7dae054d5b9101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0015736573732d30313233343536373839616263646566c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+  "signature_hex": "7b5083026b58cb1b4e684473d85d77ce017c97d3160321f5cf577c11c2f59a5a2394cdf18f3d6f2d9e0ce4d20a1dafa1d73de1ee84d830841125fd1814c06505",
   "hello": {
-    "v": 1,
+    "v": 2,
     "device_pub": "T9CZzNR9eJPf6ewkQU7LDZtUICMqrTDZHEZb4zy+ZcQ=",
     "label": "Pixel 9 (test vector)",
-    "signature": "S1w2XiisEvT4MX7sD3UGtzBM5+b9Lj2oA16AMk0DorfMCuFt4t7Y2mS8Xg+C45JZuVa8u6xBomAMY3SFEqpbCA=="
+    "signature": "e1CDAmtYyxtOaERz2F13zgF8l9MWAyH1z1d8EcL1mlojlM3xjz1vLZ4M5NIKHa+h1z3h7oTYMIQRJf0YFMBlBQ=="
   },
-  "negative": {
-    "comment": "Hello signed over a different mobile_pub; verifying it against mobile_pub (top level) must fail with bad signature.",
-    "mobile_pub_hex": "909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
-    "signed_bytes_hex": "736d696e642d6465766963652d68656c6c6f32dfb70470771fc522dd1044eda9584e98aac6714b30d86496a2a97bd8139743101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
-    "hello": {
-      "v": 1,
-      "device_pub": "T9CZzNR9eJPf6ewkQU7LDZtUICMqrTDZHEZb4zy+ZcQ=",
-      "label": "Pixel 9 (test vector)",
-      "signature": "Vutg2F7Agy+GiQ26ADDZe6dTVaN6cLhZvk5CTERacgWl4IC0E/LUFzOyTV1PtlEDqpjsOitIDxqkueWDV28fAw=="
+  "negative": [
+    {
+      "name": "other_mobile_pub",
+      "changed": "mobile_pub",
+      "signed_bytes_hex": "736d696e642d6465766963652d68656c6c6f2d763232dfb70470771fc522dd1044eda9584e98aac6714b30d86496a2a97bd8139743101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0015736573732d30313233343536373839616263646566c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+      "hello": {
+        "v": 2,
+        "device_pub": "T9CZzNR9eJPf6ewkQU7LDZtUICMqrTDZHEZb4zy+ZcQ=",
+        "label": "Pixel 9 (test vector)",
+        "signature": "ijJfaaUWfTNKZfARdZ4xfuvNNskRGjftMnNv/hCbRzBGYZRiLB6XDUvum+yYcvvKbh6ezlYDNRoYuE09DAF0BA=="
+      },
+      "error": "bad_signature"
     },
-    "error": "bad_signature"
-  }
+    {
+      "name": "other_session_id",
+      "changed": "session_id",
+      "signed_bytes_hex": "736d696e642d6465766963652d68656c6c6f2d763297062d63280e27d5787edb4ed3bb5bbeee0226e5a98fc1cd2cc5f7dae054d5b9101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0012736573732d616e6f746865722d726f757465c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+      "hello": {
+        "v": 2,
+        "device_pub": "T9CZzNR9eJPf6ewkQU7LDZtUICMqrTDZHEZb4zy+ZcQ=",
+        "label": "Pixel 9 (test vector)",
+        "signature": "gzDoWkFIamcpSaInuqf+l9AiCX8O633eaMPFI/+KmQ7us0mCZOYwnrssnV7LNrmlQxs5puyFta5U4OphKqITCw=="
+      },
+      "error": "bad_signature"
+    },
+    {
+      "name": "other_challenge",
+      "changed": "challenge",
+      "signed_bytes_hex": "736d696e642d6465766963652d68656c6c6f2d763297062d63280e27d5787edb4ed3bb5bbeee0226e5a98fc1cd2cc5f7dae054d5b9101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0015736573732d30313233343536373839616263646566c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0",
+      "hello": {
+        "v": 2,
+        "device_pub": "T9CZzNR9eJPf6ewkQU7LDZtUICMqrTDZHEZb4zy+ZcQ=",
+        "label": "Pixel 9 (test vector)",
+        "signature": "mxNvPAsbjmv1CTII4MuMZDpOQljrpU53OAUGNvL6oy6q9GKbpmlDXJ5wn7CyRIkSMszZh096olVSkEfgUM4yDQ=="
+      },
+      "error": "bad_signature"
+    }
+  ]
 }

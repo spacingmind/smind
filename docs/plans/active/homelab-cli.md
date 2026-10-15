@@ -519,7 +519,7 @@ the existing `DeviceAttach`/`DeviceDetach` slots (`relay.proto:121-148`) instead
    (`DataConn.Resume`); after a daemon restart the `Sync` re-announces waiting devices; HTTP/2 PING keepalive parameters are
    also set.
 3. **Device identity:** the first application message must be `device_hello{v, device_pub (Ed25519), label, signature,
-   [password]}` where `signature` signs `"smind-device-hello" ‖ SHA-256(handshake transcript) ‖ daemon_pub`; the frame
+   [password]}` (**v2**, see ADR-0031 D9: the daemon sends a fresh challenge first) where `signature` signs `"smind-device-hello-v2" ‖ SHA-256(handshake transcript) ‖ daemon_pub ‖ session_id ‖ challenge`; the frame
    `device_id` must equal `base32(SHA-256(device_pub))[:26]`; a mismatch or a bad signature drops the session.
 4. **Registry:** `$SMIND_HOME/relay-devices.json` (mode 0600) holds `{device_id, device_pub, label, first_seen, last_seen,
    state: approved | pending | revoked}`; revoked devices are refused with a clear reason; atomic writes.
@@ -958,6 +958,12 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   retry). **Decided by the Human (2026-10-15): `relay.legacyDevices` defaults to false** (with it true, revoke, pending and the window do
   not bind legacy access); `docs/homelab.md` says that relay pairing needs the updated clients (P13a/b) until then and warns about
   the opt-in. Still open: a per-offer one-time token (offer format change) is the stronger pairing-window fix.
+- 2026-10-15 (fix, before #350/#351 merge): the P13b review found two defects in what P12b shipped. (1) `device_hello` v1 signed only
+  (daemon key, client ephemeral key), both fixed by a captured handshake, so a captured session replays into a new route and is
+  admitted as that device (and `supersede` drops the real session): hello **v2** — the daemon sends a fresh challenge first and the
+  signature covers the route session id and that challenge; v1 is refused (no released client speaks it); vector updated (v1 kept as
+  history). (2) wsapi answered an unknown method with nothing (the error was sent before the request was registered in flight):
+  fixed, tested.
 
 ## Validation
 
@@ -1084,3 +1090,13 @@ Known gaps left: launchd `status` does not print enabled/disabled; a Go crash tr
 Not verified: a real **reboot/logout cycle with lingering** and a real **macOS login cycle** (the runners prove install, stop-stays-stopped, crash restart and
 restart, not boot persistence); `--system` against a real `/etc/systemd/system` (unit rendering and the `SUDO_USER` rules are unit-tested, the real run
 is not); `smind update` driving a real `service restart` end to end; the desktop app's behaviour next to a real service.
+
+### Fix: device_hello v2 + unknown-method answer (2026-10-15, `fix/device-hello-replay`)
+
+`devices`: `TestDeviceHelloReplayInAnotherSessionRejected` (other client key / daemon key / session id / challenge each fail),
+`TestV1HelloIsRefused`, `TestChallengeMessageRoundTrip`, `TestHelloVectorMatchesFile` (v2 vector incl. the challenge message and
+three negatives), `TestV1VectorIsHistorical`; hub (real relay + hub): `TestCapturedHelloSessionCannotBeReplayedIntoANewRoute`
+(a captured transcript — handshake frames + hello ciphertext — replayed into a new route is rejected and the real session
+untouched; the test fails when the challenge/session binding is removed), `TestHelloBoundToTheChallengeAndTheSession`,
+`TestEachSessionGetsAFreshChallenge`, `TestHelloVersion1IsRefusedWithAClearReason`; `wsapi`:
+`TestUnknownMethodAlwaysGetsAMethodNotFoundResponse` (fails on the old ordering).

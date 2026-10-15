@@ -774,17 +774,35 @@ the matching nonce proves the relay supports keepalive (a relay without it forwa
 somebody else's nonce, which only counts as liveness); each (re)opened stream probes once.
 
 **Implementation notes (P12b, as built — the contract P13a/b implement).**
-- *`device_hello` is an ordinary wsapi request*: `{"id":"…","method":"relay.device_hello","params":{"v":1,"device_pub":b64,
-  "label":"…","signature":b64,"password"?:"…"}}`, the first message after the E2EE handshake. Success is an ordinary response
-  `{"id","result":{"v":1,"device_id","state":"approved"}}`; a refusal is `{"id","error":{"message","code"}}` with code
-  `awaiting_approval` (device recorded `pending`), `revoked`, `bad_hello` (bad signature / id mismatch / version / label),
+- *`device_hello` is an ordinary wsapi request* (version 2, see the replay fix below): `{"id":"…","method":"relay.device_hello",
+  "params":{"v":2,"device_pub":b64,"label":"…","signature":b64,"password"?:"…"}}`, sent right after the daemon's challenge.
+  Success is an ordinary response `{"id","result":{"v":2,"device_id","state":"approved"}}`; a refusal is
+  `{"id","error":{"message","code"}}` with code `awaiting_approval` (device recorded `pending`), `revoked`, `bad_hello` (bad
+  signature / id mismatch / label / malformed), `hello_version_unsupported` (a hello that is not version 2),
   `too_many_devices`, `device_hello_required` (legacy clients refused), `device_hello_unsupported` or `internal`; the daemon
   then ends the route. A daemon from before P12b answers `method not found`, which is how a client detects it (legacy daemon).
-- *What is signed:* `"smind-device-hello" ‖ e2ee.TranscriptHash(daemon_pub, client_ephemeral_pub) ‖ daemon_pub`, where
-  `TranscriptHash` is the HKDF salt the session keys already use, `SHA-256("smind relay e2ee v1" ‖ daemon_pub ‖
-  client_pub)`; the E2EE core is unchanged (a test pins the equality). `device_id` = lowercase unpadded RFC 4648 base32 of
-  `SHA-256(device_pub)`, first 26 characters. Shared test vector: `internal/relay/devices/testdata/device_hello_vector.json`.
-  `device_hello.password` is not covered by the signature and is checked (P13c) only over the encrypted channel.
+- *The challenge (hello v2):* on a device route (any route but the fixed legacy one) the daemon's first encrypted message is
+  `{"event":"relay.device_challenge","params":{"v":2,"challenge":<std base64 of 32 random bytes>}}` (no `id`; a client waits
+  for it before signing, and never lets it reach the application layer). A new challenge per session, never reused.
+- *What is signed (v2):* `"smind-device-hello-v2" ‖ TranscriptHash(daemon_pub, client_ephemeral_pub) ‖ daemon_pub ‖
+  uint16BE(len(session_id)) ‖ session_id ‖ challenge`, where `TranscriptHash` is the HKDF salt the session keys already use,
+  `SHA-256("smind relay e2ee v1" ‖ daemon_pub ‖ client_pub)`, `session_id` is the UTF-8 bytes of the relay route's session id
+  and `challenge` the 32 bytes just received; the E2EE core is unchanged (a test pins the equality). `device_id` = lowercase
+  unpadded RFC 4648 base32 of `SHA-256(device_pub)`, first 26 characters. Shared test vector (v2, with the challenge message
+  and three negative vectors — other client key, other session id, other challenge):
+  `internal/relay/devices/testdata/device_hello_vector.json`; the retired v1 vector is kept for the record in
+  `device_hello_vector_v1.json` (the daemon refuses its hello). `device_hello.password` is not covered by the signature and is
+  checked (P13c) only over the encrypted channel.
+- *v1 is not accepted (2026-10-15):* v1 signed nothing the daemon contributed. No released client ever spoke it — the
+  clients that do (desktop P13a, mobile P13b) ship after this change, and every released app lacks a hello altogether and is
+  refused by default (`relay.legacyDevices` is false) — so there is nothing to keep compatible, and accepting v1 would keep the
+  replay open. A client that still sends it is told `hello_version_unsupported`.
+- *Residual (recorded, not fixed here):* with deterministic session keys a replayed transcript makes the daemon encrypt with
+  the same (key, nonce) pairs as the original session: the daemon's replies in the replay (the challenge, then a refusal)
+  reuse the keystream of the original session's first daemon frames. What an eavesdropper can learn from that is bounded by
+  what those frames contain (a random challenge; the hello response, whose content is public metadata). A handshake that mixes
+  a daemon ephemeral key into the key schedule would remove the property for good; it changes the E2EE core and is a separate
+  decision.
 - *Daemon behaviour:* one session per announced `(device_id, session_id)`; sessions survive a relay reconnect (orphaned, E2EE
   state kept up to 6 minutes) and are resumed in place when the next `Sync` lists their route, dropped when it does not;
   a client that lost its daemon (restart) must re-handshake with a **fresh session id** — it cannot tell by itself, so after
@@ -829,10 +847,18 @@ a fresh ephemeral X25519 key per session and the daemon cannot tell clients apar
 space). So the E2EE core stays untouched and identity is an **inner layer**:
 
 - Each client creates a persistent **Ed25519 device key** (desktop: app data dir, mode 0600 like
-  `pairing_store`; mobile: the platform secure store) and sends, as its first encrypted application message,
-  `device_hello{v, device_pub, label, signature, [password]}` where `signature` signs
-  `"smind-device-hello" ‖ SHA-256(handshake transcript) ‖ daemon_pub` — proof of possession bound to this session,
-  so it cannot be replayed.
+  `pairing_store`; mobile: the platform secure store). On a device route the daemon speaks first, inside the encrypted
+  channel, with a **fresh random challenge**; the client answers with
+  `device_hello{v:2, device_pub, label, signature, [password]}` where `signature` signs
+  `"smind-device-hello-v2" ‖ SHA-256(handshake transcript) ‖ daemon_pub ‖ session_id ‖ challenge` — proof of possession
+  bound to this one live session: the handshake keys, the relay route's session id and the daemon's challenge.
+  **Why the challenge (decided 2026-10-15, after the P13b review):** the session keys depend only on the daemon's
+  long-lived key and the client's *ephemeral* key, so anyone who can open a route (a relay operator, a host-secret
+  holder) can replay a *captured* client transcript — handshake frames plus the hello ciphertext — into a new route; the
+  daemon derives identical keys and decrypts it. A version-1 hello (signed over the handshake keys only) would be
+  admitted as that device, and the daemon's "one session per device" rule would drop the real session. Only something the
+  daemon chooses afresh per session proves the hello was made for *this* session; the E2EE handshake and key schedule are
+  deliberately unchanged (`TestE2EECoreUnchanged`).
 - `device_id` in the frame metadata **must equal** `base32(SHA-256(device_pub))[:26]`; the daemon drops a route
   whose id does not match, so a client cannot claim another's id.
 - The daemon keeps a registry `$SMIND_HOME/relay-devices.json` (mode 0600): `{device_id, device_pub, label,

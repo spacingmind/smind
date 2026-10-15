@@ -29,6 +29,7 @@ const (
 	codeAwaitingApproval = "awaiting_approval"
 	codeRevoked          = "revoked"
 	codeBadHello         = "bad_hello"
+	codeHelloVersion     = "hello_version_unsupported"
 	codeTooManyDevices   = "too_many_devices"
 	codeTooManyPending   = "too_many_pending"
 	codeHelloRequired    = "device_hello_required"
@@ -76,6 +77,25 @@ func mustJSON(v any) []byte {
 // allowed — a client that predates device identity. It returns errSessionOver
 // when the device is refused (the caller drops the session).
 func (h *Hub) identify(s *session, r *sessionReader, t *deviceTransport) error {
+	// On a device route the daemon speaks first: a fresh challenge the device
+	// must sign into its hello. The session keys depend only on the daemon's
+	// long-lived key and the client's ephemeral key, so a captured client
+	// transcript replays into an identical session — only something the daemon
+	// chooses afresh per session proves the hello was made for THIS one. (The
+	// fixed single-device route, which pre-identity clients use, gets no
+	// challenge: they ignore unknown events but need not be sent one.)
+	var challenge []byte
+	if h.opts.Registry != nil && s.ref.device != DefaultDeviceID {
+		c, err := devices.NewChallenge()
+		if err != nil {
+			h.logf("relay bridge: challenge: %v", err)
+			return errSessionOver
+		}
+		if err := t.Send(devices.ChallengeMessage(c)); err != nil {
+			return err
+		}
+		challenge = c
+	}
 	first, timedOut, err := h.firstMessage(r)
 	if err != nil {
 		return err
@@ -83,7 +103,7 @@ func (h *Hub) identify(s *session, r *sessionReader, t *deviceTransport) error {
 	if !timedOut {
 		var env rpcEnvelope
 		if json.Unmarshal(first, &env) == nil && env.Method == devices.HelloMethod && env.ID != "" {
-			return h.admitHello(s, r, t, env)
+			return h.admitHello(s, r, t, env, challenge)
 		}
 	}
 	// No hello: a legacy client (or one speaking nonsense). Legacy service is
@@ -149,21 +169,34 @@ func (h *Hub) firstMessage(r *sessionReader) (msg []byte, timedOut bool, err err
 	}
 }
 
-func (h *Hub) admitHello(s *session, r *sessionReader, t *deviceTransport, env rpcEnvelope) error {
+func (h *Hub) admitHello(s *session, r *sessionReader, t *deviceTransport, env rpcEnvelope, challenge []byte) error {
 	var hello devices.Hello
 	if err := json.Unmarshal(env.Params, &hello); err != nil {
 		h.refuse(t, r, env.ID, codeBadHello, "malformed device_hello")
 		return errSessionOver
 	}
-	pub, err := hello.Verify(s.ref.device, h.kp.Public(), s.dc.PeerPublicKey())
+	if h.opts.Registry == nil {
+		h.refuse(t, r, env.ID, codeUnsupported, "this daemon does not track relay devices")
+		return errSessionOver
+	}
+	if hello.V != devices.HelloVersion {
+		// v1 signed nothing the daemon contributed and could be replayed from a
+		// captured session; it is retired, and no released client spoke it.
+		h.logf("relay bridge: device_hello version %d refused (need %d)", hello.V, devices.HelloVersion)
+		h.refuse(t, r, env.ID, codeHelloVersion, fmt.Sprintf("device_hello version %d is not accepted; update the app (need version %d)", hello.V, devices.HelloVersion))
+		return errSessionOver
+	}
+	if challenge == nil {
+		// No challenge was issued on this route (the fixed single-device
+		// route): an identity hello cannot be fresh here.
+		h.refuse(t, r, env.ID, codeBadHello, "device_hello is not accepted on this route")
+		return errSessionOver
+	}
+	pub, err := hello.Verify(s.ref.device, h.kp.Public(), s.dc.PeerPublicKey(), []byte(s.ref.session), challenge)
 	if err != nil {
 		// Reason deliberately coarse; the cause is logged without key material.
 		h.logf("relay bridge: device_hello rejected: %v", errorKind(err))
 		h.refuse(t, r, env.ID, codeBadHello, "device_hello rejected")
-		return errSessionOver
-	}
-	if h.opts.Registry == nil {
-		h.refuse(t, r, env.ID, codeUnsupported, "this daemon does not track relay devices")
 		return errSessionOver
 	}
 	// The same device identifying on a new session (it reconnected with a

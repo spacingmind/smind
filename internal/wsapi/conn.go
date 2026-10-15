@@ -174,18 +174,22 @@ func (c *conn) handleCancel(params json.RawMessage) {
 }
 
 func (c *conn) dispatch(connCtx context.Context, env envelope) {
+	reqCtx, cancel := context.WithCancel(connCtx)
+	defer cancel()
+
+	// The request is registered in flight BEFORE its method is looked up:
+	// sendError/sendResult only write for a request they can `terminate`, so
+	// answering an unknown method first would be silently dropped and the
+	// client would wait forever for a "method not found".
+	c.mu.Lock()
+	c.inflight[env.ID] = &inflightRequest{cancel: cancel}
+	c.mu.Unlock()
+
 	h, ok := c.handlers[env.Method]
 	if !ok {
 		c.sendError(env.ID, fmt.Errorf("method not found: %s", env.Method))
 		return
 	}
-
-	reqCtx, cancel := context.WithCancel(connCtx)
-	defer cancel()
-
-	c.mu.Lock()
-	c.inflight[env.ID] = &inflightRequest{cancel: cancel}
-	c.mu.Unlock()
 
 	rc := &requestContext{conn: c, id: env.ID, runScoped: c.runScoped, local: c.local}
 	result, err := h(reqCtx, rc, env.Params)
