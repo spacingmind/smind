@@ -121,11 +121,24 @@ func IsTrueLoopback(r *http.Request) bool {
 	return !HasProxyHeaders(r)
 }
 
+// proxyHeaders are the request headers reverse proxies and CDNs add. Their
+// presence means the request did not come straight from a local client. This
+// is a best-effort deny-list, not a guarantee: a proxy that adds none of them
+// and rewrites Host to the daemon's own address is indistinguishable from a
+// local client (docs/homelab.md: configure the proxy to pass Host and add
+// X-Forwarded-For, or do not run one on the daemon's host).
+var proxyHeaders = map[string]bool{
+	"forwarded": true, "via": true, "x-real-ip": true, "x-client-ip": true,
+	"x-cluster-client-ip": true, "cf-connecting-ip": true, "cf-ray": true,
+	"true-client-ip": true, "client-ip": true, "x-proxyuser-ip": true,
+	"front-end-https": true, "x-arr-ssl": true,
+}
+
 // HasProxyHeaders reports whether the request carries any forwarding header.
 func HasProxyHeaders(r *http.Request) bool {
 	for name := range r.Header {
 		n := strings.ToLower(name)
-		if n == "forwarded" || n == "x-real-ip" || n == "via" || strings.HasPrefix(n, "x-forwarded-") {
+		if proxyHeaders[n] || strings.HasPrefix(n, "x-forwarded-") || strings.HasPrefix(n, "x-original-") {
 			return true
 		}
 	}

@@ -156,15 +156,12 @@ func (s *Server) Addr() string {
 	return net.JoinHostPort(host, strconv.Itoa(port))
 }
 
-// Addrs is every address the daemon binds: Addr, plus a loopback companion
-// when Addr is a specific non-loopback IP or name, so local clients always
-// reach the daemon on 127.0.0.1.
-func (s *Server) Addrs() []string {
-	addrs := []string{s.Addr()}
-	if c := s.cfg.Server.LoopbackCompanion(); c != "" {
-		addrs = append(addrs, c)
-	}
-	return addrs
+// Binds is every listener the daemon opens (see config.ServerConfig.Binds):
+// the configured address plus, when needed, 127.0.0.1 so local clients always
+// reach the daemon.
+func (s *Server) Binds() []config.Bind {
+	b, _ := s.cfg.Server.Binds() // validated by newDirectAuth
+	return b
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

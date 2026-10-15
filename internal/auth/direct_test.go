@@ -218,11 +218,53 @@ func TestIsTrueLoopback(t *testing.T) {
 		"x-forwarded-proto":             {mk("127.0.0.1:5", "localhost", "X-Forwarded-Proto", "https"), false},
 		"forwarded":                     {mk("127.0.0.1:5", "localhost", "Forwarded", "for=1.2.3.4"), false},
 		"x-real-ip":                     {mk("127.0.0.1:5", "localhost", "X-Real-Ip", "1.2.3.4"), false},
+		"cf-connecting-ip":              {mk("127.0.0.1:5", "localhost", "CF-Connecting-IP", "1.2.3.4"), false},
+		"true-client-ip":                {mk("127.0.0.1:5", "localhost", "True-Client-IP", "1.2.3.4"), false},
+		"x-original-forwarded-for":      {mk("127.0.0.1:5", "localhost", "X-Original-Forwarded-For", "1.2.3.4"), false},
+		"x-client-ip":                   {mk("127.0.0.1:5", "localhost", "X-Client-IP", "1.2.3.4"), false},
 		"unparsable peer":               {mk("garbage", "localhost"), false},
 	}
 	for name, c := range cases {
 		if got := IsTrueLoopback(c.r); got != c.want {
 			t.Errorf("%s: IsTrueLoopback = %v, want %v", name, got, c.want)
 		}
+	}
+}
+
+func TestLoginLimiterGroupsIPv6By64(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	l := NewLoginLimiter(func() time.Time { return now })
+	// A subscriber rotating inside one /64 is one client.
+	for i := 0; i < freeAttempts+1; i++ {
+		l.Fail("2001:db8:1:2::" + string(rune('a'+i)))
+	}
+	if ok, _ := l.Allow("2001:db8:1:2:ffff:ffff:ffff:ffff"); ok {
+		t.Fatal("addresses in the same /64 must share a bucket")
+	}
+	if ok, _ := l.Allow("2001:db8:1:3::1"); !ok {
+		t.Fatal("a different /64 must not be affected")
+	}
+	if Key("192.0.2.7") != "192.0.2.7" || Key("::ffff:192.0.2.7") != "192.0.2.7" || Key("not an ip") != "not an ip" {
+		t.Fatal("Key")
+	}
+}
+
+// Behind a same-host reverse proxy every remote client arrives from loopback.
+// One guesser must not be able to lock the real user out through the shared
+// address: only the global window applies to loopback peers.
+func TestLoginLimiterDoesNotLockOutTheSharedLoopbackBucket(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	l := NewLoginLimiter(func() time.Time { return now })
+	for i := 0; i < freeAttempts*3; i++ {
+		l.Fail("127.0.0.1")
+	}
+	if ok, _ := l.Allow("127.0.0.1"); !ok {
+		t.Fatal("a per-address lockout of the proxy's address would lock every proxied user out")
+	}
+	for i := 0; i <= globalMax; i++ {
+		l.Fail("127.0.0.1")
+	}
+	if ok, _ := l.Allow("127.0.0.1"); ok {
+		t.Fatal("the global window must still stop a flood through the proxy")
 	}
 }

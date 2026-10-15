@@ -293,15 +293,39 @@ func removeNode(root *yaml.Node, path []string) {
 	}
 }
 
-// writeAtomic writes data next to path and renames it into place, so a crash
-// never leaves a truncated config.yaml. The file is owner-only (it may hold the
-// password hash).
+// writeAtomic writes data to a private temp file next to path and renames it
+// into place, so a crash never leaves a truncated config.yaml and two
+// concurrent edits never share a temp file. The file is owner-only (it may
+// hold the password hash) from its first byte. A symlinked config.yaml (a
+// dotfile manager) is edited through the link, not replaced by a regular file.
 func writeAtomic(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := securefile.WriteFile(tmp, data); err != nil {
+	f, err := os.CreateTemp(dir, ".config.yaml.*") // created 0600
+	if err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	tmp := f.Name()
+	cleanup := func() { _ = f.Close(); _ = os.Remove(tmp) }
+	if err := securefile.Restrict(tmp); err != nil {
+		cleanup()
+		return fmt.Errorf("write config: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		cleanup()
+		return fmt.Errorf("write config: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		cleanup()
+		return fmt.Errorf("write config: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
 		return fmt.Errorf("write config: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {

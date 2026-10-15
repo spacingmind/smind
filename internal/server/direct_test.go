@@ -3,7 +3,9 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -252,8 +254,8 @@ func TestServeRefusesNonLoopbackWithoutPassword(t *testing.T) {
 
 func TestServeLoopbackDefaultUnchanged(t *testing.T) {
 	srv := newTestServer(t, daemonToken)
-	if srv.Addr() != "127.0.0.1:4648" || len(srv.Addrs()) != 1 {
-		t.Fatalf("Addr = %s, Addrs = %v", srv.Addr(), srv.Addrs())
+	if srv.Addr() != "127.0.0.1:4648" || len(srv.Binds()) != 1 || srv.Binds()[0].Network != "tcp4" {
+		t.Fatalf("Addr = %s, Binds = %v", srv.Addr(), srv.Binds())
 	}
 	// No password: login is off, healthz says so, the token still reaches loopback.
 	rec := login(srv.Handler(), loopbackReq("POST", "/api/login", nil), "anything at all")
@@ -267,12 +269,26 @@ func TestListenCompanionKeepsLoopbackReachable(t *testing.T) {
 	cfg.Server.PasswordHash = passwordHash(t)
 	cfg.Server.Listen = "192.168.1.10:5000"
 	srv := newTestServerCfg(t, daemonToken, cfg)
-	if got := srv.Addrs(); len(got) != 2 || got[0] != "192.168.1.10:5000" || got[1] != "127.0.0.1:5000" {
-		t.Fatalf("Addrs = %v", got)
+	if got := srv.Binds(); len(got) != 2 || got[0].Addr != "192.168.1.10:5000" || got[0].Network != "tcp4" || got[1].Addr != "127.0.0.1:5000" {
+		t.Fatalf("Binds = %v", got)
 	}
 	cfg.Server.Listen = "0.0.0.0:5000"
-	if got := newTestServerCfg(t, daemonToken, cfg).Addrs(); len(got) != 1 {
-		t.Fatalf("a wildcard already covers loopback, got %v", got)
+	// 0.0.0.0 means IPv4 only (not Go's dual-stack default) and already covers loopback.
+	if got := newTestServerCfg(t, daemonToken, cfg).Binds(); len(got) != 1 || got[0].Network != "tcp4" {
+		t.Fatalf("0.0.0.0 binds %v", got)
+	}
+	for listen, want := range map[string][]config.Bind{
+		"[::]:5000":      {{Network: "tcp", Addr: "[::]:5000"}},
+		":5000":          {{Network: "tcp", Addr: ":5000"}},
+		"localhost:5000": {{Network: "tcp4", Addr: "127.0.0.1:5000"}},
+		"[::1]:5000":     {{Network: "tcp6", Addr: "[::1]:5000"}, {Network: "tcp4", Addr: "127.0.0.1:5000"}},
+		"127.0.0.2:5000": {{Network: "tcp4", Addr: "127.0.0.2:5000"}, {Network: "tcp4", Addr: "127.0.0.1:5000"}},
+	} {
+		cfg.Server.Listen = listen
+		got, err := cfg.Server.Binds()
+		if err != nil || fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("listen %s: binds %v (%v), want %v", listen, got, err, want)
+		}
 	}
 }
 
@@ -333,9 +349,10 @@ func TestLoginReturnsSessionNotDaemonToken(t *testing.T) {
 
 func TestLoginWrongPasswordConstantTime401(t *testing.T) {
 	srv := serverWithPassword(t, nil)
-	// Wrong passwords of every shape get the same answer and body; the check is
-	// bcrypt's constant-time compare on the stored hash, with no early exit on
-	// length or prefix.
+	// Wrong passwords of every shape get the same answer and body. bcrypt
+	// compares in constant time with respect to the password; the one length
+	// shortcut is that a guess over bcrypt's 72-byte limit cannot match and is
+	// rejected without hashing, which reveals only that it was over-long.
 	var bodies []string
 	for _, pw := range []string{"", "x", testPassword + "!", testPassword[:len(testPassword)-1], strings.ToUpper(testPassword), strings.Repeat("a", 100)} {
 		r := remoteReq("POST", "/api/login", nil)
@@ -646,5 +663,40 @@ func TestNoSecretInLogs(t *testing.T) {
 		if secret != "" && strings.Contains(buf.String(), secret) {
 			t.Errorf("a secret leaked into the log: %q in %q", secret, buf.String())
 		}
+	}
+}
+
+// Clients that open login requests and never send the body must not hold the
+// bcrypt slots real logins need (slots are taken only after the body is read).
+func TestLoginSlowBodiesDoNotStarveRealLogins(t *testing.T) {
+	srv := serverWithPassword(t, nil)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	addr := strings.TrimPrefix(ts.URL, "http://")
+
+	var hogs []net.Conn
+	for i := 0; i < 8; i++ { // twice the slot count
+		c, err := net.Dial("tcp", addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hogs = append(hogs, c)
+		fmt.Fprintf(c, "POST /api/login HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: 4000\r\n\r\n", addr)
+	}
+	defer func() {
+		for _, c := range hogs {
+			_ = c.Close()
+		}
+	}()
+	time.Sleep(200 * time.Millisecond)
+
+	body, _ := json.Marshal(map[string]string{"password": testPassword})
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Post(ts.URL+"/api/login", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("a real login behind 8 stalled bodies: status %d, want 200", resp.StatusCode)
 	}
 }

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"net"
 	"sync"
 	"time"
 )
@@ -48,9 +49,24 @@ func NewLoginLimiter(now func() time.Time) *LoginLimiter {
 	return &LoginLimiter{now: now, ips: map[string]*ipState{}}
 }
 
+// Key maps a peer address to the limiter bucket: IPv4 addresses and IPv6
+// addresses grouped by /64 (a single host or subscriber holds a whole /64, so
+// per-address buckets would be free to rotate). Unparsable input is its own key.
+func Key(ip string) string {
+	p := net.ParseIP(ip)
+	if p == nil {
+		return ip
+	}
+	if v4 := p.To4(); v4 != nil {
+		return v4.String()
+	}
+	return p.Mask(net.CIDRMask(64, 128)).String() + "/64"
+}
+
 // Allow reports whether ip may attempt a login now; when not, retryAfter is
 // how long to wait.
 func (l *LoginLimiter) Allow(ip string) (ok bool, retryAfter time.Duration) {
+	ip = Key(ip)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
@@ -65,10 +81,18 @@ func (l *LoginLimiter) Allow(ip string) (ok bool, retryAfter time.Duration) {
 
 // Fail records a wrong password from ip.
 func (l *LoginLimiter) Fail(ip string) {
+	ip = Key(ip)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
 
+	if isLoopbackKey(ip) {
+		// Behind a same-host reverse proxy every remote client shares this
+		// address, so a per-address lockout would let one guesser lock the
+		// real user out indefinitely. Only the global window applies here.
+		l.recordGlobalLocked(now)
+		return
+	}
 	st := l.ips[ip]
 	if st == nil {
 		l.evictLocked(now)
@@ -91,6 +115,16 @@ func (l *LoginLimiter) Fail(ip string) {
 		st.until = now.Add(delay)
 	}
 
+	l.recordGlobalLocked(now)
+}
+
+func isLoopbackKey(ip string) bool {
+	p := net.ParseIP(ip)
+	return p != nil && p.IsLoopback()
+}
+
+// recordGlobalLocked counts a failure in the all-clients window.
+func (l *LoginLimiter) recordGlobalLocked(now time.Time) {
 	cut := now.Add(-globalWindow)
 	kept := l.globals[:0]
 	for _, t := range l.globals {
@@ -107,6 +141,7 @@ func (l *LoginLimiter) Fail(ip string) {
 
 // Success clears ip's failure history.
 func (l *LoginLimiter) Success(ip string) {
+	ip = Key(ip)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.ips, ip)

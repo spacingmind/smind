@@ -59,9 +59,32 @@ user's rights. Choose a long, unique one (the minimum is 12 characters; there is
 - **Host allowlist** (DNS-rebinding defence): every request must carry `localhost`, `*.localhost`, an IP address or a name
   from `server.hostnames`, or it gets `403 Host not allowed`. The WebSocket also requires a same-origin `Origin`.
   Session tokens travel in the `Sec-WebSocket-Protocol` header or `Authorization`, never in the URL.
-- **Reverse proxy on the same host:** it must pass the browser's `Host` through (nginx `proxy_set_header Host $host;`) and
-  its name must be in `server.hostnames`. Then the standing token stays unreachable and clients sign in. A proxy that
-  *rewrites* `Host` to `localhost` defeats the loopback test and would publish `/api/token` to the world: don't.
+- **Reverse proxy on the same host: read this before you set one up.** The daemon cannot see who is behind a proxy on
+  its own machine; it only sees a loopback connection, a `Host` header and the headers the proxy adds. `/api/token` (and
+  therefore a terminal and every agent, **with no password**) is withheld only while the proxy sends the browser's own
+  `Host` and adds at least one forwarding header. nginx's default `proxy_pass http://127.0.0.1:4648;` does neither (it
+  rewrites `Host` to `127.0.0.1:4648` and adds nothing): behind it anyone who can reach the proxy can read the token.
+  Configure it explicitly and put the name in `server.hostnames`:
+
+  ```nginx
+  location / {
+      proxy_pass http://127.0.0.1:4648;
+      proxy_set_header Host $host;                       # the name clients typed, not 127.0.0.1
+      proxy_set_header X-Forwarded-For $remote_addr;     # any forwarding header turns the token off
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade $http_upgrade;            # WebSocket
+      proxy_set_header Connection "upgrade";
+  }
+  ```
+
+  Then check from another machine: `curl -i https://smind.example.com/api/token` must answer `403`. If you cannot
+  guarantee this, do not run a proxy on the daemon's own host; bind the daemon to a LAN address instead, or use a tunnel.
+- **Listening on all interfaces:** `0.0.0.0:4648` is IPv4 only. For IPv6 as well use `[::]:4648` (or `:4648`); the daemon
+  logs the addresses it actually bound. When `server.listen` is not `127.0.0.1` the daemon also binds `127.0.0.1` so the CLI
+  and the desktop app keep working.
+- **Lockout:** repeated wrong passwords throttle the client (IPv6 by /64). Behind a same-host proxy all clients share the
+  proxy's address, so only a global limit (40 wrong passwords a minute, then one minute of no logins) applies; anyone who
+  can reach the port can therefore hold logins locked. Restrict who can reach it (firewall, VPN).
 - **Residual risk:** one shared password, no per-device revocation (restart the daemon to end every session), no MFA, no
   audit log. A local process of the same user can still read `~/.smind/token`.
 

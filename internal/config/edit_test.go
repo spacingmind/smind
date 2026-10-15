@@ -108,8 +108,8 @@ func TestConfigSetCreatesFileOwnerOnly(t *testing.T) {
 	if !strings.Contains(readFile(t, path), "port: 4700") {
 		t.Fatal(readFile(t, path))
 	}
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
-		t.Fatal("temp file left behind")
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".config.yaml.*")); len(left) != 0 {
+		t.Fatalf("temp files left behind: %v", left)
 	}
 }
 
@@ -138,7 +138,7 @@ func TestConfigSetValidatesValues(t *testing.T) {
 	for key, vals := range map[string][]string{
 		"server.port":      {"0", "70000", "abc", "", "-1"},
 		"server.listen":    {"", "4648", "host-only", "1.2.3.4:", "1.2.3.4:99999", "a b:1"},
-		"server.hostnames": {"", "http://x.com", "x.com:4648", "*.x.com", "x..com", "-x.com"},
+		"server.hostnames": {"", "http://x.com", "x.com:4648", "*.x.com", "x..com", "-x.com", ".com", ".localhost.", "."},
 	} {
 		for _, v := range vals {
 			if err := Set(key, v); err == nil {
@@ -225,7 +225,8 @@ func TestListenHelpers(t *testing.T) {
 		{"", 0, true, "", false},
 		{"127.0.0.1:4648", 0, true, "", false},
 		{"localhost:5000", 0, true, "", false},
-		{"[::1]:5000", 0, true, "", false},
+		{"[::1]:5000", 0, true, "127.0.0.1:5000", false},
+		{"127.0.0.2:5000", 0, true, "127.0.0.1:5000", false},
 		{"0.0.0.0:4648", 0, false, "", false},
 		{":4648", 0, false, "", false},
 		{"[::]:4648", 0, false, "", false},
@@ -263,5 +264,57 @@ func TestLoadRejectsBadServerSection(t *testing.T) {
 	useHome(t, "server:\n  hostnames: [\"http://bad\"]\n")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "hostnames") {
 		t.Fatalf("Load = %v", err)
+	}
+}
+
+func TestConfigSetEditsThroughASymlinkAndKeepsItPrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	link := useHome(t, "")
+	real := filepath.Join(t.TempDir(), "dotfiles-config.yaml")
+	if err := os.WriteFile(real, []byte("# managed elsewhere\nserver:\n  port: 4648\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := Set("server.port", "4701"); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Lstat(link); fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("the symlink was replaced by a regular file")
+	}
+	got := readFile(t, real)
+	if !strings.Contains(got, "4701") || !strings.Contains(got, "# managed elsewhere") {
+		t.Fatalf("target file:\n%s", got)
+	}
+	if fi, _ := os.Stat(real); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", fi.Mode().Perm())
+	}
+}
+
+func TestEnvStillAppliesWhenTheFileDoesNotParse(t *testing.T) {
+	useHome(t, "server: [this is not a mapping\n")
+	t.Setenv(EnvListen, "0.0.0.0:4700")
+	t.Setenv(EnvPassword, "container-password-123")
+	cfg, err := Load()
+	if err == nil {
+		t.Fatal("Load accepted a broken file")
+	}
+	if cfg.Server.Listen != "0.0.0.0:4700" || cfg.Server.PasswordPlain == "" {
+		t.Fatalf("the environment was dropped along with the file: %+v", cfg.Server)
+	}
+}
+
+func TestBindsNeverDualStackAnIPv4Literal(t *testing.T) {
+	for listen, want := range map[string]string{
+		"0.0.0.0:4648": "tcp4", "192.168.1.5:4648": "tcp4", "127.0.0.1:4648": "tcp4", "localhost:4648": "tcp4",
+		"[::]:4648": "tcp", ":4648": "tcp", "[fd00::1]:4648": "tcp6", "nas.lan:4648": "tcp",
+	} {
+		b, err := ServerConfig{Listen: listen}.Binds()
+		if err != nil || b[0].Network != want {
+			t.Errorf("%s: %v %v, want primary network %s", listen, b, err, want)
+		}
 	}
 }

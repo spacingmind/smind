@@ -214,18 +214,55 @@ func IsLoopbackHost(host string) bool {
 
 // LoopbackCompanion returns the extra loopback address the daemon must also
 // bind so local clients (CLI, agent CLIs using the proxy, the desktop app)
-// keep working when Listen is a specific non-loopback IP or name: "" when the
-// configured address already covers loopback (a loopback address, or the
-// 0.0.0.0 / :: / empty-host wildcards).
+// keep working: they always dial 127.0.0.1:<port>. "" when the configured
+// address already covers it (127.0.0.1, "localhost", the 0.0.0.0 / :: / empty
+// host wildcards); otherwise 127.0.0.1:<port> (a specific LAN or Tailscale
+// IP or name, or another loopback address such as [::1] or 127.0.0.2).
 func (s ServerConfig) LoopbackCompanion() string {
 	host, port, err := s.ListenHostPort()
-	if err != nil || IsLoopbackHost(host) {
+	if err != nil {
 		return ""
 	}
-	if ip := net.ParseIP(strings.Trim(host, "[]")); host == "" || (ip != nil && ip.IsUnspecified()) {
+	if ip := net.ParseIP(strings.Trim(host, "[]")); host == "" || strings.EqualFold(host, "localhost") ||
+		(ip != nil && (ip.IsUnspecified() || ip.Equal(net.IPv4(127, 0, 0, 1)))) {
 		return ""
 	}
 	return net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+}
+
+// Bind is one listener to open.
+type Bind struct{ Network, Addr string }
+
+// Binds lists every listener the daemon opens: the configured address plus the
+// loopback companion. IPv4 literals bind IPv4 only ("tcp4"): Go's "tcp" on
+// 0.0.0.0 is dual-stack and would also expose the host's global IPv6
+// addresses, which is not what "0.0.0.0" says. Say "[::]:port" (or ":port")
+// to listen on both families. "localhost" binds 127.0.0.1.
+func (s ServerConfig) Binds() ([]Bind, error) {
+	host, port, err := s.ListenHostPort()
+	if err != nil {
+		return nil, err
+	}
+	if strings.EqualFold(host, "localhost") {
+		host = "127.0.0.1"
+	}
+	binds := []Bind{{Network: listenNetwork(host), Addr: net.JoinHostPort(host, strconv.Itoa(port))}}
+	if c := s.LoopbackCompanion(); c != "" {
+		binds = append(binds, Bind{Network: "tcp4", Addr: c})
+	}
+	return binds, nil
+}
+
+func listenNetwork(host string) string {
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	switch {
+	case ip == nil, ip.IsUnspecified() && ip.To4() == nil: // names, "", "::" : both families
+		return "tcp"
+	case ip.To4() != nil:
+		return "tcp4"
+	default:
+		return "tcp6"
+	}
 }
 
 // HasPassword reports whether remote login is configured, by hash or by
@@ -259,6 +296,10 @@ func ValidateHostname(h string) error {
 	name := strings.TrimPrefix(h, ".")
 	if name == "" || len(name) > 253 {
 		return fmt.Errorf("%q is not a hostname", h)
+	}
+	if strings.HasPrefix(h, ".") && !strings.Contains(strings.TrimSuffix(name, "."), ".") {
+		// ".com" would switch the DNS-rebinding defence off for a whole TLD.
+		return fmt.Errorf("%q matches every name under %q; list a specific domain such as .example.com", h, name)
 	}
 	for _, label := range strings.Split(strings.TrimSuffix(name, "."), ".") {
 		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
@@ -323,6 +364,9 @@ func Load() (Config, error) {
 	}
 	if err == nil {
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			// The environment still applies: a container's SMIND_LISTEN and
+			// SMIND_PASSWORD must not vanish because the file has a typo.
+			applyServerEnv(&cfg.Server)
 			return cfg, fmt.Errorf("parse config %s: %w", Path(), err)
 		}
 	}

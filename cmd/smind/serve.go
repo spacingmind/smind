@@ -131,15 +131,19 @@ func cmdServe(args []string) int {
 	// Bind every address before announcing anything, so a port conflict
 	// fails the start instead of leaving a half-listening daemon.
 	var listeners []net.Listener
-	for _, addr := range srv.Addrs() {
-		ln, err := net.Listen("tcp", addr)
+	for _, b := range srv.Binds() {
+		ln, err := net.Listen(b.Network, b.Addr)
 		if err != nil {
 			log.Fatalf("listen: %v", err)
 		}
 		listeners = append(listeners, ln)
 	}
 	if !cfg.Server.ListenIsLoopback() {
-		log.Printf("WARNING: listening on %s, beyond this machine: login is by password over plain HTTP (anyone on the network path can read it); use a trusted network, Tailscale, an SSH tunnel or a TLS-terminating proxy", srv.Addr())
+		var bound []string
+		for _, ln := range listeners {
+			bound = append(bound, ln.Addr().String())
+		}
+		log.Printf("WARNING: listening beyond this machine on %s: login is by password over plain HTTP (anyone on the network path can read it); use a trusted network, Tailscale, an SSH tunnel or a TLS-terminating proxy", strings.Join(bound, ", "))
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

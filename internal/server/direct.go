@@ -169,14 +169,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		tooMany(w, wait)
 		return
 	}
-	select {
-	case d.bcryptSlots <- struct{}{}:
-		defer func() { <-d.bcryptSlots }()
-	default:
-		tooMany(w, time.Second)
-		return
-	}
-
+	// Read the (tiny) body before taking a bcrypt slot, under a short deadline:
+	// a client that opens connections and never sends the body must not hold
+	// the slots that real logins need.
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(5 * time.Second))
 	var req loginRequest
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxLoginBody+1))
 	if len(body) > maxLoginBody {
@@ -185,6 +181,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil || json.Unmarshal(body, &req) != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected {\"password\": \"...\"}"})
+		return
+	}
+	select {
+	case d.bcryptSlots <- struct{}{}:
+		defer func() { <-d.bcryptSlots }()
+	default:
+		tooMany(w, time.Second)
 		return
 	}
 	if !auth.CheckPassword(d.hash, req.Password) {
