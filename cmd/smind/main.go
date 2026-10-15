@@ -80,6 +80,10 @@ func run(args []string) int {
 		return cmdMcp(args[1:])
 	case "skill":
 		return cmdSkill(args[1:])
+	case "config":
+		return cmdConfig(args[1:])
+	case "set-password":
+		return cmdSetPassword(args[1:])
 	case "update":
 		return cmdUpdate(args[1:])
 	case "version", "--version", "-v":
@@ -101,6 +105,12 @@ Usage:
   smind serve                                             start the daemon
 
   smind stop                                              ask the running daemon to shut down gracefully
+
+  smind config get [path]                                 show server.port / listen / hostnames as stored
+  smind config set <path> <value>                         change one (comments kept; restart to apply)
+  smind config unset <path>                               restore its default
+  smind set-password [--password-stdin]                   set the password remote clients log in with
+                                                           (bcrypt hash in config.yaml; needed to listen beyond localhost)
 
   smind relay [--listen <addr>] [--data-dir <dir>]        start the self-hostable E2EE relay
   smind relay host new|ls|rm|rotate [<id>]                manage relay hosts (secret printed once)

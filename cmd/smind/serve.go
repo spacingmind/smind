@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -34,6 +35,14 @@ import (
 // for the SMIND_ACP_COMMAND hook below.
 func cmdServe(args []string) int {
 	if len(args) != 0 {
+		// Launch flags were removed (ADR-0031 D10): one documented place
+		// configures the daemon, the same for a terminal, a service and Docker.
+		for _, a := range args {
+			if strings.HasPrefix(a, "--port") || strings.HasPrefix(a, "--listen") || strings.HasPrefix(a, "--host") || strings.HasPrefix(a, "--bind") || strings.HasPrefix(a, "--password") {
+				fmt.Fprintf(os.Stderr, "smind serve: %s was removed; use `smind config set server.listen <host:port>` (or server.port, server.hostnames), `smind set-password`, then restart\n", strings.SplitN(a, "=", 2)[0])
+				return 2
+			}
+		}
 		fmt.Fprintln(os.Stderr, "usage: smind serve")
 		return 2
 	}
@@ -119,16 +128,31 @@ func cmdServe(args []string) int {
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	// Bind every address before announcing anything, so a port conflict
+	// fails the start instead of leaving a half-listening daemon.
+	var listeners []net.Listener
+	for _, addr := range srv.Addrs() {
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			log.Fatalf("listen: %v", err)
+		}
+		listeners = append(listeners, ln)
+	}
+	if !cfg.Server.ListenIsLoopback() {
+		log.Printf("WARNING: listening on %s, beyond this machine: login is by password over plain HTTP (anyone on the network path can read it); use a trusted network, Tailscale, an SSH tunnel or a TLS-terminating proxy", srv.Addr())
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	go func() {
-		log.Printf("smind listening on http://%s", httpSrv.Addr)
-		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("listen: %v", err)
-		}
-	}()
+	for _, ln := range listeners {
+		go func() {
+			log.Printf("smind listening on http://%s", ln.Addr())
+			if err := httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Fatalf("listen: %v", err)
+			}
+		}()
+	}
 
 	startRelayBridge(ctx, srv, hub)
 

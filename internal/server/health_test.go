@@ -20,7 +20,7 @@ func TestHandleHealth_ReportsVersion(t *testing.T) {
 	version.Version = "0.7.0-dev+abc1234"
 	t.Cleanup(func() { version.Version = prev })
 
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req := loopbackReq(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

@@ -38,10 +38,7 @@ func dialDaemon(ctx context.Context) (*wsclient.Client, error) {
 		return nil, fmt.Errorf("auth: %w", err)
 	}
 
-	port := cfg.Server.Port
-	if port == 0 {
-		port = 4648
-	}
+	port := cfg.Server.ClientPort()
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 
 	client, err := wsclient.Dial(ctx, addr, token)
