@@ -6,6 +6,7 @@
 //! `docs/plans/active/desktop-bundled-ui.md`.
 
 pub mod connections;
+pub mod local_token;
 pub mod secret;
 pub mod server;
 
