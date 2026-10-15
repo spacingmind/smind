@@ -11,11 +11,11 @@
 //! more often than every 5 minutes with GOAWAY.
 //!
 //! Negotiation is by probing, never by version: the probe carries a
-//! per-connection random nonce in `Frame.sequence` and the relay echoes it.
-//! Only an echo with OUR nonce proves the relay supports keepalive. A relay
+//! per-connection random token in `Frame.sequence` and the relay echoes it.
+//! Only an echo with OUR token proves the relay supports keepalive. A relay
 //! without it forwards the probe to the peer instead (and may forward the
 //! peer's probes to us): those are keepalive frames too, but carry somebody
-//! else's nonce, so they count as liveness only. The first echo must arrive
+//! else's token, so they count as liveness only. The first echo must arrive
 //! within `probe_timeout` or keepalive stays off for that stream; every
 //! (re)opened stream probes once more, so one slow echo cannot switch the
 //! protection off for the session's lifetime.
@@ -62,7 +62,7 @@ pub enum Support {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Nothing,
-    /// Write one probe frame (`Frame{keepalive:true, sequence: nonce}`).
+    /// Write one probe frame (`Frame{keepalive:true, sequence: token}`).
     SendProbe,
     /// The stream has been silent for `dead_after`: drop it and resume.
     Dead,
@@ -71,7 +71,7 @@ pub enum Action {
 #[derive(Debug)]
 pub struct Liveness {
     cfg: LivenessCfg,
-    nonce: u64,
+    token: u64,
     support: Support,
     stream_start: Instant,
     last_recv: Instant,
@@ -79,13 +79,13 @@ pub struct Liveness {
 }
 
 impl Liveness {
-    /// new starts liveness for a connection; `nonce` must be non-zero and
-    /// random per connection (see [`random_nonce`]).
-    pub fn new(cfg: LivenessCfg, nonce: u64, now: Instant) -> Self {
-        assert_ne!(nonce, 0, "keepalive nonce must be non-zero");
+    /// new starts liveness for a connection; `token` must be non-zero and
+    /// random per connection (see [`random_token`]).
+    pub fn new(cfg: LivenessCfg, token: u64, now: Instant) -> Self {
+        assert_ne!(token, 0, "keepalive token must be non-zero");
         Self {
             cfg,
-            nonce,
+            token,
             support: Support::Unknown,
             stream_start: now,
             last_recv: now,
@@ -99,8 +99,8 @@ impl Liveness {
         self.cfg = cfg;
     }
 
-    pub fn nonce(&self) -> u64 {
-        self.nonce
+    pub fn token(&self) -> u64 {
+        self.token
     }
 
     pub fn support(&self) -> Support {
@@ -120,10 +120,10 @@ impl Liveness {
     }
 
     /// on_frame records that the relay sent a frame: any frame is evidence the
-    /// stream is alive, and a keepalive frame carrying our nonce is an echo.
+    /// stream is alive, and a keepalive frame carrying our token is an echo.
     pub fn on_frame(&mut self, now: Instant, keepalive: bool, sequence: u64) {
         self.last_recv = now;
-        if keepalive && sequence == self.nonce {
+        if keepalive && sequence == self.token {
             self.support = Support::Yes;
         }
     }
@@ -166,11 +166,11 @@ impl Liveness {
     }
 }
 
-/// random_nonce returns a non-zero random probe nonce for one connection.
-pub fn random_nonce() -> u64 {
+/// random_token returns a non-zero random probe token for one connection.
+pub fn random_token() -> u64 {
     loop {
         let mut b = [0u8; 8];
-        getrandom::fill(&mut b).expect("OS randomness for the keepalive nonce");
+        getrandom::fill(&mut b).expect("OS randomness for the keepalive token");
         let n = u64::from_be_bytes(b);
         if n != 0 {
             return n;
@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn a_forwarded_peer_probe_is_not_an_echo() {
         // A relay without keepalive support forwards the peer's probe to us:
-        // a keepalive frame, but with the PEER's nonce.
+        // a keepalive frame, but with the PEER's token.
         let t0 = Instant::now();
         let mut l = Liveness::new(LivenessCfg::default(), 7, t0);
         l.poll(t0);
@@ -302,10 +302,10 @@ mod tests {
     }
 
     #[test]
-    fn nonce_is_nonzero_and_varies() {
-        let a = random_nonce();
-        let b = random_nonce();
+    fn token_is_nonzero_and_varies() {
+        let a = random_token();
+        let b = random_token();
         assert!(a != 0 && b != 0);
-        assert_ne!(a, b, "two random 64-bit nonces collided");
+        assert_ne!(a, b, "two random 64-bit tokens collided");
     }
 }

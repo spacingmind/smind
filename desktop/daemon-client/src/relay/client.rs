@@ -362,11 +362,11 @@ impl DataFrameTransport {
 
     /// send_probe writes one keepalive probe (ADR-0031 D9 flow 8): an empty
     /// frame flagged `keepalive` whose `sequence` carries this connection's
-    /// nonce, which the relay echoes back. It is not counted in `seq` (the
+    /// token, which the relay echoes back. It is not counted in `seq` (the
     /// relay never buffers or forwards it).
     pub async fn send_probe(&mut self) -> Result<(), DataTransportError> {
-        let nonce = self.liveness.lock().unwrap().nonce();
-        let mut frame = self.build_frame(nonce, Vec::new());
+        let token = self.liveness.lock().unwrap().token();
+        let mut frame = self.build_frame(token, Vec::new());
         frame.keepalive = true;
         self.tx
             .send(frame)
@@ -453,7 +453,7 @@ impl FrameTransport for DataFrameTransport {
         loop {
             let frame = self.rx.next_frame().await?;
             // Liveness first: ANY frame from the relay proves the stream is
-            // alive, and a keepalive frame carrying our nonce is an echo.
+            // alive, and a keepalive frame carrying our token is an echo.
             self.liveness
                 .lock()
                 .unwrap()
@@ -567,7 +567,7 @@ pub async fn open_data(
     let (tx, rx) = open_data_stream(grpc, admission_id, registration).await?;
     let mut liveness = Liveness::new(
         LivenessCfg::default(),
-        liveness::random_nonce(),
+        liveness::random_token(),
         Instant::now(),
     );
     liveness.start_stream(Instant::now());

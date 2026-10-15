@@ -853,7 +853,7 @@ somebody else's nonce, which only counts as liveness); each (re)opened stream pr
   without a served session in between the client stops switching and shows the cause (so two daemon answers that contradict each
   other cannot make it ping-pong), and every switch waits the ordinary backoff. A client that cannot read its device key does not
   connect and says so; it never falls back to the single-device protocol on its own.
-- *Keepalive:* probes carry a per-connection random nonce in `Frame.sequence`; the relay echoes it; only a matching echo proves
+- *Keepalive:* probes carry a per-connection random token (a correlation id, not a cryptographic nonce) in `Frame.sequence`; the relay echoes it; only a matching echo proves
   support (a forwarded peer probe is liveness only); first echo within 10 s or keepalive is off for that stream, re-probed on every
   (re)opened stream; probe every 30 s; 75 s without any relay frame = dead → resume. No HTTP/2 client pings.
 - *Resume and a lost daemon:* after a resume the client confirms the session with a request (`workspace.list`) and falls back to a
