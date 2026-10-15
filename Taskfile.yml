@@ -103,7 +103,7 @@ tasks:
       - test -z "$(gofmt -l $(git ls-files '*.go'))"
       - |
         if command -v shellcheck >/dev/null 2>&1; then
-          shellcheck scripts/install.sh scripts/install_test.sh
+          shellcheck scripts/install.sh scripts/install_test.sh scripts/service_smoke.sh
         else
           echo "shellcheck not installed; skipping install script lint" >&2
         fi

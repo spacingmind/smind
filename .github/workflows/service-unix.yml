@@ -1,0 +1,77 @@
+name: Service (systemd, launchd)
+
+# `smind service` against the real service managers, ADR-0031 P8: a systemd
+# --user unit on ubuntu and a LaunchAgent on macOS, driven by
+# scripts/service_smoke.sh. The unit tests with a fake systemctl/launchctl run
+# in the normal `ci` job. Only runs when the service code (or this file)
+# changes, or on demand.
+on:
+  pull_request:
+    paths:
+      - "internal/service/**"
+      - "internal/logging/**"
+      - "cmd/smind/service*.go"
+      - "cmd/smind/serve.go"
+      - "scripts/service_smoke.sh"
+      - ".github/workflows/service-unix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  systemd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build smind
+        run: go build -o "$RUNNER_TEMP/smind" ./cmd/smind
+
+      # The runner is a normal systemd host but has no user session; lingering
+      # makes systemd start user@<uid>.service, which is what `systemctl
+      # --user` talks to.
+      - name: Start a systemd user session
+        run: |
+          sudo loginctl enable-linger "$USER"
+          uid="$(id -u)"
+          for _ in $(seq 1 30); do [ -S "/run/user/$uid/bus" ] && break; sleep 1; done
+          ls -l "/run/user/$uid/"
+          echo "XDG_RUNTIME_DIR=/run/user/$uid" >>"$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus" >>"$GITHUB_ENV"
+
+      - name: systemctl --user works
+        run: systemctl --user show-environment | head -3
+
+      - name: smind service on systemd --user
+        run: scripts/service_smoke.sh "$RUNNER_TEMP/smind"
+
+      - name: Journal (on failure)
+        if: failure()
+        run: journalctl --user -u smind.service --no-pager | tail -50
+
+  launchd:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build smind
+        run: go build -o "$RUNNER_TEMP/smind" ./cmd/smind
+
+      - name: The gui/<uid> launchd domain
+        run: |
+          id -u
+          launchctl print "gui/$(id -u)" | head -5 || echo "no gui domain for this user"
+
+      - name: smind service on launchd
+        run: scripts/service_smoke.sh "$RUNNER_TEMP/smind"

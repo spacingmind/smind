@@ -15,6 +15,58 @@ daemon to a relay registers **this daemon once** with that relay; every paired c
 workspaces, spaces and tasks. Nothing is created in smind. (Older docs and the wire format call this a "workspace";
 smind's own workspaces are a different thing: registered git repositories.)
 
+## Run the daemon as a service (Linux and macOS)
+
+`smind serve` runs in the foreground and stops with your terminal. To keep the daemon running across logouts and
+reboots, let your OS service manager supervise it. smind has no background `smind start` of its own: the service manager
+is the supervisor.
+
+```sh
+smind service install        # systemd user unit (Linux) or LaunchAgent (macOS); enables it and starts the daemon
+# or in one step with the installer:
+curl -fsSL https://spacingmind.com/install.sh | sh -s -- --service
+```
+
+| Command | What it does |
+|---|---|
+| `smind service install [--system] [--home <dir>] [--path <PATH>] [--no-start]` | Writes the unit, enables it, starts it. Safe to repeat: an unchanged unit is not rewritten and a running daemon is never restarted by it. |
+| `smind service status` | State, pid, port, and the daemon's version next to this binary's. Exit code 0 running, 3 stopped, 4 not installed. |
+| `smind service start` / `stop` / `restart` | Drive the unit. `smind update` calls `restart` for you when the daemon is service-managed. |
+| `smind service uninstall` | Stops and removes the unit. Your data in `$SMIND_HOME` is never touched. |
+| `smind service logs [-f] [-n N]` | Tails the daemon's own log file (below). |
+
+The port and every other setting come from `config.yaml` (there is no `--port`); the unit starts the same
+`smind serve` you would run by hand. `install` captures the `PATH` of the shell you run it from, so `git`, `node` and
+your agent CLIs resolve inside the service (override with `--path`), and `SMIND_HOME` when you have it set (or `--home`).
+If another daemon already answers on the configured port (a `smind serve` you started, or the desktop app's own),
+`install` enables the unit but does not start it and says why; it never stops a process it did not start.
+
+**Linux: user unit (default).** The unit lives in `~/.config/systemd/user/smind.service` and runs as you. A user unit
+only runs while you are logged in unless *lingering* is on, so for a headless homelab box run
+`sudo loginctl enable-linger $USER` once (`install` prints this when lingering is off). Without a systemd user session
+(for example over `sudo su`, or in a container without systemd) `install` fails with an explanation.
+
+**Linux: `--system`.** `sudo smind service install --system` writes `/etc/systemd/system/smind.service` with
+`User=<you>`, taken from `SUDO_USER`; the daemon never runs as root, and the command refuses plain root without
+`SUDO_USER`. sudo replaces your `PATH`, so pass it explicitly: `sudo smind service install --system --path "$PATH"`.
+With the installer: `curl -fsSL https://spacingmind.com/install.sh | sudo sh -s -- --service --system`.
+
+**macOS.** A LaunchAgent in `~/Library/LaunchAgents/com.spacingmind.smind.plist`. It loads into your `gui/<uid>` domain,
+which exists only while you are logged in to the Mac's graphical session, so it starts at login, not at boot, and cannot
+be loaded over plain ssh on a Mac nobody is logged in to (the plist is still written and loads at the next login).
+`smind stop` (or `smind service stop`) leaves it stopped; a crash restarts it.
+
+**Logs.** The daemon writes `$SMIND_HOME/daemon.log` itself (mode `0600`, rotated at 10 MiB, 5 files kept; change with
+`log.maxSizeMB` and `log.maxFiles` in `config.yaml`) in addition to stderr, so `smind service logs` works the same on
+every OS. On Linux `journalctl --user -u smind` shows the same lines.
+
+**Desktop app.** The app never starts a second daemon on a port that is already served, and `smind service install`
+does not start while the app's own daemon holds the port. The app sees a service-managed daemon as one it does not
+manage (`/healthz` reports `"managedBy": "systemd"` or `"launchd"`) and leaves it alone; do not use its **take over
+management** option on it, because the service manager would just restart the daemon. Stop the service first
+(`smind service uninstall`) if you want the app to manage the daemon. Hiding **take over** for a service-managed daemon
+is planned (ADR-0031 P10). Windows has no `smind service` yet (a per-user scheduled task is planned).
+
 ## Path A: direct connection
 
 Direct connections with a password are not available yet; the daemon still binds loopback only. Until they land,

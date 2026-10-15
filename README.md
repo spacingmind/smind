@@ -76,7 +76,9 @@ is missing).
 > website redirect exists; until then use the raw GitHub URL above. The
 > script is on `master` from the first release that includes it.
 
-Then `smind serve` and open <http://localhost:4648>.
+Then `smind serve` and open <http://localhost:4648>. To keep the daemon running across logouts and reboots on Linux or
+macOS, run `smind service install` (or pass `--service` to the install script); see
+[docs/homelab.md](docs/homelab.md#run-the-daemon-as-a-service-linux-and-macos).
 
 From source:
 
