@@ -209,14 +209,18 @@ desktop), deep-link auto-pair (decision 16).
    `SMIND_HOSTNAMES` override config for containers.
 4. **The daemon refuses to start** when `listen` is non-loopback and no password is
    configured, with a message naming `smind set-password`.
-5. `GET /api/token` is served only when `RemoteAddr` is loopback **and** `Host` is a loopback
-   name/IP **and** no `Forwarded`/`X-Forwarded-*`/`X-Real-IP` header is present; otherwise 403.
+5. `GET /api/token` is served only when **no password is configured**, `RemoteAddr` is loopback **and** `Host` is a
+   loopback name/IP **and** no `Forwarded`/`X-Forwarded-*`/`X-Real-IP` (or other proxy) header is present; otherwise 403.
+   **With a password it is always 403** (amended 2026-10-15): the local web UI signs in; the CLI/desktop client read the
+   token file.
 6. `POST /api/login {password}` returns an expiring, in-memory 256-bit session token
    (not the daemon token); wrong password → 401 with constant-time comparison; per-IP
    exponential backoff after repeated failures (429 with `Retry-After`).
 7. `/ws` accepts the session token via `Sec-WebSocket-Protocol` bearer or `Authorization`,
-   **not** via the URL query, for non-loopback clients; the loopback token query path keeps
-   working for existing loopback clients.
+   **not** via the URL query, for non-loopback clients. The daemon token (from the token file) is accepted from loopback
+   in the `Authorization` header; the `?token=` query form keeps working for loopback clients only **while no password
+   is set** (amended 2026-10-15; `wsclient` and the desktop notification client send the header, plus the query for
+   older daemons).
 8. `Host` is validated on every HTTP request and WS upgrade against `localhost`, `*.localhost`,
    any literal IP, and `server.hostnames` (leading `.` matches the domain and subdomains);
    anything else → 403 `Host not allowed`. `CheckOrigin` stays same-origin.
@@ -970,10 +974,13 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   `Via`, `CF-Connecting-IP`, `True-Client-IP`, `X-Original-*`... count as proxy headers; loopback peers share one limiter
   bucket without a per-address lockout (a same-host proxy would otherwise let one guesser lock everyone out). **Left for P5:**
   the desktop "Connect to a daemon" password field (the Rust proxy must forward `/api/login` and the subprotocol), `connections_probe`.
-  **Open design question for the Human** (found by the independent review, not changed here because it alters the plan's
-  items 1 and 9): the loopback `/api/token` shortcut cannot tell a default same-host nginx (`proxy_pass`, which rewrites Host to
-  `127.0.0.1:4648` and adds no headers) from a local client; docs/homelab.md now says so and gives a safe config. The strict
-  alternative is to disable the shortcut whenever a password is set (the local UI then logs in too).
+  **Review finding, resolved by the Human the same day** (see the next entry): the loopback `/api/token` shortcut could not tell a default same-host nginx from a local client.
+- 2026-10-15 (P4 review decision): with a password set `/api/token` is closed even on loopback and the `?token=` WebSocket
+  form is refused; the CLI (`internal/wsclient`) and the desktop notification client (`desktop/daemon-client`, token-file
+  fallback for a loopback daemon, bearer header) read `~/.smind/token`. **P5 follow-up:** the desktop *webview* proxy
+  (`proxy/server.rs`) still forwards `/ws` without the `Sec-WebSocket-Protocol` bearer and without an upstream
+  `Authorization`, so a password-protected local daemon shows the web login there but cannot complete the socket until P5
+  forwards the subprotocol (or injects the token-file bearer for `ConnectionKind::Local`).
 
 ## Validation
 
@@ -1110,3 +1117,12 @@ touched web test files, a real daemon driven by Chrome (Playwright) for light + 
 - **Not verified:** **(real)** another machine on the LAN in a browser + `curl` through nginx on the same host (the plan's real
   check; the reviewer showed the default-nginx shape leaks the token, see Progress), Windows execution, the Rust desktop path
   (P5), a TTY prompt on a real terminal (seam-tested).
+- P4 amendment (2026-10-15): `TestAPITokenNotServedWhenPasswordSet` (loopback, localhost, default-nginx Host rewrite, LAN → 403),
+  `TestPasswordSetRefusesTheQueryTokenEvenOnLoopback` (query refused, `Authorization` bearer works, remote bearer refused),
+  `TestPasswordDaemonServesNoTokenButTheCLIStillWorks` (real daemon: loopback and a stock-nginx-shaped reverse proxy both get
+  403 on `/api/token`, `?token=` refused, `smind workspace ls` and `smind stop` still work from the token file); Rust
+  (`cargo test`): `token_falls_back_to_the_file_when_a_password_daemon_refuses_the_endpoint`,
+  `a_remote_daemon_never_uses_the_local_token_file`, `local_token_path_follows_smind_home_then_home`,
+  `token_file_is_only_for_a_loopback_daemon` (188 lib tests pass; `cargo clippy` flags only a pre-existing `backoff.rs` lint
+  on this toolchain). **Not verified:** a real nginx (the stock-shaped Go reverse proxy stands in for it), the desktop
+  webview against a password daemon (P5).

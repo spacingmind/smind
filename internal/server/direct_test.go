@@ -569,16 +569,67 @@ func TestWSRejectsDaemonTokenFromNonLoopback(t *testing.T) {
 }
 
 func TestLoopbackQueryTokenStillWorks(t *testing.T) {
-	for name, srv := range map[string]*Server{"no password": newTestServer(t, daemonToken), "with password": serverWithPassword(t, nil)} {
-		ts := wsServer(t, srv, false)
-		c, _, err := dialWS(ts, "?token="+daemonToken, nil, nil)
-		if err != nil {
-			t.Fatalf("%s: loopback dial with the daemon token: %v", name, err)
-		}
-		wsCall(t, c)
-		_ = c.Close()
-		if _, resp, err := dialWS(ts, "?token=wrong", nil, nil); err == nil || resp.StatusCode != 401 {
-			t.Errorf("%s: wrong token: %v %v", name, err, resp)
+	// Without a password nothing changes for existing loopback clients.
+	ts := wsServer(t, newTestServer(t, daemonToken), false)
+	c, _, err := dialWS(ts, "?token="+daemonToken, nil, nil)
+	if err != nil {
+		t.Fatalf("loopback dial with the daemon token: %v", err)
+	}
+	wsCall(t, c)
+	_ = c.Close()
+	if _, resp, err := dialWS(ts, "?token=wrong", nil, nil); err == nil || resp.StatusCode != 401 {
+		t.Errorf("wrong token: %v %v", err, resp)
+	}
+}
+
+// With a password set the standing token is not served to anyone and the URL
+// form is refused even on loopback; the token file holder (the CLI) uses the
+// Authorization header. Without a password the header works too.
+func TestPasswordSetRefusesTheQueryTokenEvenOnLoopback(t *testing.T) {
+	ts := wsServer(t, serverWithPassword(t, nil), false)
+	if _, resp, err := dialWS(ts, "?token="+daemonToken, nil, nil); err == nil || resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("?token= with a password configured must be refused on loopback: %v %v", err, resp)
+	}
+	c, _, err := dialWS(ts, "", nil, http.Header{"Authorization": {"Bearer " + daemonToken}})
+	if err != nil {
+		t.Fatalf("the CLI's Authorization bearer must still work on loopback: %v", err)
+	}
+	wsCall(t, c)
+	_ = c.Close()
+	if _, resp, err := dialWS(ts, "", nil, http.Header{"Authorization": {"Bearer wrong"}}); err == nil || resp.StatusCode != 401 {
+		t.Fatalf("wrong bearer: %v %v", err, resp)
+	}
+	// From another machine the standing token still does not work, in any form.
+	lan := wsServer(t, serverWithPassword(t, nil), true)
+	if _, _, err := dialWS(lan, "", nil, http.Header{"Authorization": {"Bearer " + daemonToken}}); err == nil {
+		t.Fatal("the daemon token as a bearer from another machine was accepted")
+	}
+
+	// And without a password the header form is accepted on loopback as well.
+	plain := wsServer(t, newTestServer(t, daemonToken), false)
+	c, _, err = dialWS(plain, "", nil, http.Header{"Authorization": {"Bearer " + daemonToken}})
+	if err != nil {
+		t.Fatalf("bearer without a password: %v", err)
+	}
+	_ = c.Close()
+}
+
+// ADR-0031 D8 (decided 2026-10-15): with a password configured /api/token is
+// never served, not even to loopback. That is what makes a default same-host
+// nginx (Host rewritten to 127.0.0.1:port, no forwarding header) harmless.
+func TestAPITokenNotServedWhenPasswordSet(t *testing.T) {
+	h := serverWithPassword(t, nil).Handler()
+	shapes := map[string]*http.Request{
+		"plain loopback":                 loopbackReq("GET", "/api/token", nil),
+		"default nginx (Host rewritten)": func() *http.Request { r := loopbackReq("GET", "/api/token", nil); r.Host = "127.0.0.1:4648"; return r }(),
+		"localhost":                      func() *http.Request { r := loopbackReq("GET", "/api/token", nil); r.Host = "localhost:4648"; return r }(),
+		"from the LAN":                   remoteReq("GET", "/api/token", nil),
+	}
+	for name, r := range shapes {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		if rec.Code != http.StatusForbidden || strings.Contains(rec.Body.String(), daemonToken) || !strings.Contains(rec.Body.String(), "/api/login") {
+			t.Errorf("%s: status %d body %s, want 403 pointing at /api/login", name, rec.Code, rec.Body)
 		}
 	}
 }

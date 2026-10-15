@@ -125,12 +125,25 @@ func sameOrigin(r *http.Request) bool {
 	return strings.EqualFold(u.Host, r.Host)
 }
 
-// handleToken serves the daemon's standing token (the bundled web UI and the
-// desktop proxy read it from loopback). It is only for a true loopback
-// caller: TCP peer loopback, a Host naming this machine, no proxy headers, and
-// no foreign Origin. Everyone else gets 403 and must log in. This is what keeps
-// a same-host reverse proxy from publishing the token.
+// handleToken serves the daemon's standing token to the bundled web UI.
+//
+// With a password configured it is never served, to anyone, loopback
+// included (ADR-0031 D8, decided 2026-10-15): a request that looks local cannot
+// be told from one relayed by a default same-host reverse proxy (nginx
+// rewrites Host to the upstream and adds no header), so loopback is not proof
+// of being the local user. The web UI signs in like every other client; the
+// CLI reads the token file instead (wsclient sends it as a bearer).
+//
+// Without a password the daemon is loopback-only by default and the token is
+// served to a true loopback caller: TCP peer loopback, a Host naming this
+// machine, no proxy headers, no foreign Origin.
 func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
+	if s.direct.hash != "" {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "a password is configured: the daemon token is not served; sign in with POST /api/login",
+		})
+		return
+	}
 	if !auth.IsTrueLoopback(r) || !sameOrigin(r) {
 		writeJSON(w, http.StatusForbidden, map[string]string{
 			"error": "the daemon token is only served to a local client; log in with POST /api/login",
@@ -212,8 +225,12 @@ func tooMany(w http.ResponseWriter, wait time.Duration) {
 // authorizeWS is the /ws admission rule (wsapi.API.SetAuthorizer):
 //   - a live session token, offered as the "smind.bearer.<token>" subprotocol
 //     or an Authorization: Bearer header, from any client; never from the URL;
-//   - otherwise the daemon token in the "token" query parameter, but only from
-//     a true loopback caller (the bundled UI, the CLI, the desktop proxy).
+//   - otherwise the daemon token (which only someone with the token file has),
+//     from a true loopback caller: in the Authorization header, and, only while
+//     no password is configured, in the "token" query parameter that existing
+//     loopback clients use. With a password set the query form is refused even
+//     on loopback, so the credential a local client holds never rides in a URL
+//     that a proxy or log could capture.
 func (s *Server) authorizeWS(r *http.Request) bool {
 	d := s.direct
 	if d.sessions != nil {
@@ -224,6 +241,13 @@ func (s *Server) authorizeWS(r *http.Request) bool {
 		}
 	}
 	if !auth.IsTrueLoopback(r) {
+		return false
+	}
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") &&
+		subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(h, "Bearer ")), []byte(d.token)) == 1 {
+		return true
+	}
+	if d.hash != "" {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(d.token)) == 1

@@ -6,8 +6,10 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::{header::AUTHORIZATION, HeaderValue};
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
 use crate::backoff::Backoff;
 use crate::cache::WorkspaceCache;
@@ -45,8 +47,7 @@ pub async fn healthz_ok(cfg: &Config) -> bool {
 pub async fn resolve_workspace_id(cfg: &Config, task_id: i64) -> Option<i64> {
     let client = reqwest::Client::new();
     let token = fetch_token(cfg, &client).await.ok()?;
-    let ws_url = cfg.ws_url(&token).ok()?;
-    let (ws, _resp) = connect_async(ws_url.as_str()).await.ok()?;
+    let ws = connect_ws(cfg, &token).await.ok()?;
     let (mut tx, mut rx) = ws.split();
 
     let req_id = protocol::task_get_request_id(task_id);
@@ -189,11 +190,9 @@ async fn try_run_once(
     on_event: &impl Fn(ClientEvent),
 ) -> Result<bool, String> {
     let token = fetch_token(cfg, client).await?;
-    let ws_url = cfg.ws_url(&token)?;
-    let (ws, _resp) = connect_async(ws_url.as_str())
-        .await
-        .map_err(|e| format!("ws connect: {e}"))?;
-    eprintln!("smind desktop: ws connected to {}", ws_url.as_str());
+    let ws = connect_ws(cfg, &token).await?;
+    // Not the URL: it carries the token.
+    eprintln!("smind desktop: ws connected to {}", cfg.daemon_url);
     let (mut tx, mut rx) = ws.split();
 
     let [sub, sub_resolved] = [subscribe_message(), subscribe_resolved_message()].map(|m| m.to_string());
@@ -336,7 +335,36 @@ async fn handle_relay_message(
     }
 }
 
+/// connect_ws opens /ws with the token in the Authorization header (which a
+/// daemon with a password requires) and in the URL (which daemons that predate
+/// that read).
+async fn connect_ws(cfg: &Config, token: &str) -> Result<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, String> {
+    let url = cfg.ws_url(token)?;
+    let mut req = url.as_str().into_client_request().map_err(|e| format!("ws request: {e}"))?;
+    let bearer = HeaderValue::from_str(&format!("Bearer {token}")).map_err(|e| format!("ws auth header: {e}"))?;
+    req.headers_mut().insert(AUTHORIZATION, bearer);
+    let (ws, _resp) = connect_async(req).await.map_err(|e| format!("ws connect: {e}"))?;
+    Ok(ws)
+}
+
+/// fetch_token gets the daemon token from GET /api/token; a daemon with a
+/// password refuses that (403, ADR-0031 D8), so for a daemon on this machine it
+/// falls back to the token file the same OS user can read.
 async fn fetch_token(cfg: &Config, client: &reqwest::Client) -> Result<String, String> {
+    match fetch_token_http(cfg, client).await {
+        Ok(token) => Ok(token),
+        Err(err) => {
+            if cfg.is_loopback_daemon() {
+                if let Some(token) = crate::config::read_local_token() {
+                    return Ok(token);
+                }
+            }
+            Err(err)
+        }
+    }
+}
+
+async fn fetch_token_http(cfg: &Config, client: &reqwest::Client) -> Result<String, String> {
     #[derive(serde::Deserialize)]
     struct TokenResp {
         token: String,
@@ -347,6 +375,8 @@ async fn fetch_token(cfg: &Config, client: &reqwest::Client) -> Result<String, S
         .send()
         .await
         .map_err(|e| format!("token fetch: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("token fetch: {e}"))?
         .json()
         .await
         .map_err(|e| format!("token decode: {e}"))?;
@@ -356,6 +386,69 @@ async fn fetch_token(cfg: &Config, client: &reqwest::Client) -> Result<String, S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// serves one canned HTTP response per connection on an ephemeral port.
+    async fn canned_http(status_line: &'static str, body: &'static str) -> std::net::SocketAddr {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 2048];
+                let _ = sock.read(&mut buf).await;
+                let resp = format!(
+                    "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        addr
+    }
+
+    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[tokio::test]
+    async fn token_comes_from_the_endpoint_when_it_serves_one() {
+        let addr = canned_http("200 OK", r#"{"token":"from-endpoint"}"#).await;
+        let cfg = Config { daemon_url: format!("http://{addr}").parse().unwrap() };
+        assert_eq!(fetch_token(&cfg, &reqwest::Client::new()).await.unwrap(), "from-endpoint");
+    }
+
+    #[tokio::test]
+    async fn token_falls_back_to_the_file_when_a_password_daemon_refuses_the_endpoint() {
+        let addr = canned_http("403 Forbidden", r#"{"error":"a password is configured"}"#).await;
+        let cfg = Config { daemon_url: format!("http://{addr}").parse().unwrap() };
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("token"), "from-file\n").unwrap();
+        let _guard = ENV_LOCK.lock().await;
+        let prev = std::env::var("SMIND_HOME").ok();
+        std::env::set_var("SMIND_HOME", dir.path());
+        let got = fetch_token(&cfg, &reqwest::Client::new()).await;
+        match prev {
+            Some(v) => std::env::set_var("SMIND_HOME", v),
+            None => std::env::remove_var("SMIND_HOME"),
+        }
+        assert_eq!(got.unwrap(), "from-file");
+    }
+
+    #[tokio::test]
+    async fn a_remote_daemon_never_uses_the_local_token_file() {
+        // 127.0.0.2 is loopback, so use a name that is not: the point is the
+        // is_loopback_daemon gate, which fetch_token consults before the file.
+        let cfg = Config { daemon_url: "http://192.0.2.1:1".parse().unwrap() };
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("token"), "local-secret").unwrap();
+        let _guard = ENV_LOCK.lock().await;
+        let prev = std::env::var("SMIND_HOME").ok();
+        std::env::set_var("SMIND_HOME", dir.path());
+        let got = fetch_token(&cfg, &reqwest::Client::new()).await;
+        match prev {
+            Some(v) => std::env::set_var("SMIND_HOME", v),
+            None => std::env::remove_var("SMIND_HOME"),
+        }
+        assert!(got.is_err(), "a remote daemon must not be handed this machine's token: {got:?}");
+    }
 
     #[test]
     fn subscribe_message_shape() {

@@ -622,7 +622,7 @@ confirmation); deliberately different (first-run, quit behaviour).**
 
 ### D8. Direct connections with a password (amends "loopback only")
 
-**Status: ACCEPTED (2026-10-15, decision 9) — the recommended default below was approved as written; P4 implements it, and P5's password field, P8, P11 and P13c build on it.**
+**Status: ACCEPTED (2026-10-15, decision 9) — the recommended default below was approved; P4 implements it, and P5's password field, P8, P11 and P13c build on it. One amendment the same day (Human, on the P4 security review): with a password set, `/api/token` is closed even on loopback (see that bullet).**
 
 **Proposal.** Let the daemon listen on a non-loopback address, protected by a password,
 as Paseo does — making a LAN/Tailscale/VPN homelab work with **no relay at all** — while
@@ -637,12 +637,19 @@ keeping loopback-only as the default and refusing unsafe combinations.
   (Paseo only warns.) A weak password is rejected at `set-password` (minimum length 12;
   no default, no `change-me` in docs): anyone authenticated can run a shell through the
   terminal tab and every agent, so the password is an RCE credential.
-- **`GET /api/token` is only served to a loopback client talking to a loopback Host with
-  no forwarding headers** (`X-Forwarded-*`, `Forwarded`, `X-Real-IP`). Otherwise it is
-  403. This keeps the existing loopback UX (bundled UI, desktop proxy) unchanged while
-  closing the same-host-reverse-proxy leak: an external request carries an external
-  Host, so it is refused even though `RemoteAddr` is loopback (caveat: a proxy that
-  rewrites `Host` to `localhost` defeats this; documented).
+- **`GET /api/token`: without a password it is only served to a loopback client talking to a
+  loopback Host with no forwarding headers** (`X-Forwarded-*`, `Forwarded`, `X-Real-IP`, and
+  other proxy headers); otherwise it is 403. **With a password configured it is never served,
+  to anyone, loopback included** (**amended 2026-10-15, Human decision on the P4 review**): a
+  default same-host nginx (`proxy_pass http://127.0.0.1:4648;`) rewrites `Host` to the upstream
+  and adds no header, so a proxied request is indistinguishable from a local one and the
+  header heuristic alone would hand the token (a terminal, with no password) to anyone who can
+  reach the proxy. The bundled web UI therefore signs in with the password like every other
+  browser; the CLI and the desktop client authenticate with the token **file**
+  (`~/.smind/token`, readable only by the same OS user), sent as an `Authorization` bearer —
+  the `?token=` URL form is refused when a password is set. Without a password the daemon is
+  loopback-only by default and the old behaviour is unchanged (a same-host proxy in front of a
+  password-less daemon can still leak the token: set a password first).
 - **Non-loopback clients log in:** `POST /api/login {password}` → a **revocable,
   expiring session token** (random 256-bit, held in memory, not the daemon's long-lived
   token), accepted by `/ws` via the `Sec-WebSocket-Protocol` bearer and the

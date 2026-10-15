@@ -7,6 +7,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -496,4 +498,67 @@ func postLogin(t *testing.T, base, password string) *http.Response {
 		t.Fatal(err)
 	}
 	return resp
+}
+
+// ADR-0031 D8 (decided 2026-10-15): with a password the daemon token is never
+// served over HTTP, even to loopback, so (1) a default same-host nginx cannot
+// publish it and (2) the CLI, which reads the token file, still works.
+func TestPasswordDaemonServesNoTokenButTheCLIStillWorks(t *testing.T) {
+	bin := buildSmind(t)
+	home := cliHome(t)
+	port := freePort(t)
+	writePortConfig(t, home, port)
+	var o, e bytes.Buffer
+	if code := runSetPassword([]string{"--password-stdin"}, strings.NewReader(goodPassword), &o, &e); code != 0 {
+		t.Fatal(e.String())
+	}
+	d := startServe(t, bin, home) // loopback listen, password set
+	waitDaemonHealthy(t, port, 30*time.Second)
+	daemonTok, _ := auth.LoadOrCreateToken(home)
+	upstream := fmt.Sprintf("127.0.0.1:%d", port)
+
+	var h map[string]any
+	getJSON(t, "http://"+upstream+"/healthz", http.StatusOK, &h)
+	if h["authRequired"] != true {
+		t.Fatalf("healthz = %v", h)
+	}
+	// Plain loopback, and a stock nginx `proxy_pass http://127.0.0.1:PORT;`:
+	// Host rewritten to the upstream, no forwarding header added.
+	proxy := httptest.NewServer(&httputil.ReverseProxy{Director: func(r *http.Request) {
+		r.URL.Scheme, r.URL.Host, r.Host = "http", upstream, upstream
+		r.Header["X-Forwarded-For"] = nil // ReverseProxy would add it; nginx does not by default
+	}})
+	defer proxy.Close()
+	for name, base := range map[string]string{"loopback": "http://" + upstream, "default nginx on the same host": proxy.URL} {
+		resp, err := testHTTP.Get(base + "/api/token")
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden || strings.Contains(string(b), daemonTok) {
+			t.Fatalf("%s: GET /api/token = %d %s, want 403 without the token", name, resp.StatusCode, b)
+		}
+	}
+	// The URL form of the token is refused on loopback too.
+	if _, r, err := (&websocket.Dialer{HandshakeTimeout: 10 * time.Second}).Dial("ws://"+upstream+"/ws?token="+daemonTok, nil); err == nil || r.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("?token= with a password set: %v %v", err, r)
+	}
+
+	// The CLI reads ~/.smind/token and keeps working, including `smind stop`.
+	cmd := exec.Command(bin, "workspace", "ls")
+	cmd.Env = smindEnv(home)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("smind workspace ls against a password daemon: %v: %s\n%s", err, out, d.out)
+	}
+	stop := exec.Command(bin, "stop")
+	stop.Env = smindEnv(home)
+	if out, err := stop.CombinedOutput(); err != nil {
+		t.Fatalf("smind stop against a password daemon: %v: %s", err, out)
+	}
+	select {
+	case <-d.done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the daemon did not stop")
+	}
 }

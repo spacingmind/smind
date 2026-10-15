@@ -54,31 +54,21 @@ user's rights. Choose a long, unique one (the minimum is 12 characters; there is
 - **Login:** `POST /api/login` returns a random 256-bit session token that expires after 24 hours. The standing daemon
   token is never sent to a remote client. Wrong passwords back off per client address (5 free attempts, then 2 s, 4 s,
   8 s... up to 15 minutes) and there is a global limit against address rotation.
-- **`/api/token`** (the daemon's standing token) is served only to a true loopback caller: a loopback TCP peer, a Host that
-  names this machine, and no `Forwarded`/`X-Forwarded-*`/`X-Real-IP`/`Via` header. Everyone else gets 403.
+- **`/api/token`** (the daemon's standing token) is **never served once a password is set**, not even to the machine's
+  own browser: the local web UI signs in with the password like every other client. The CLI (`smind ...`) and the desktop
+  app's notification client keep working because they read the token from `~/.smind/token` (readable only by your OS
+  user) and send it in an `Authorization` header; the `?token=` URL form is refused when a password is set. (With no
+  password the daemon is loopback-only and `/api/token` is served to a true loopback caller, as before.)
 - **Host allowlist** (DNS-rebinding defence): every request must carry `localhost`, `*.localhost`, an IP address or a name
   from `server.hostnames`, or it gets `403 Host not allowed`. The WebSocket also requires a same-origin `Origin`.
   Session tokens travel in the `Sec-WebSocket-Protocol` header or `Authorization`, never in the URL.
-- **Reverse proxy on the same host: read this before you set one up.** The daemon cannot see who is behind a proxy on
-  its own machine; it only sees a loopback connection, a `Host` header and the headers the proxy adds. `/api/token` (and
-  therefore a terminal and every agent, **with no password**) is withheld only while the proxy sends the browser's own
-  `Host` and adds at least one forwarding header. nginx's default `proxy_pass http://127.0.0.1:4648;` does neither (it
-  rewrites `Host` to `127.0.0.1:4648` and adds nothing): behind it anyone who can reach the proxy can read the token.
-  Configure it explicitly and put the name in `server.hostnames`:
-
-  ```nginx
-  location / {
-      proxy_pass http://127.0.0.1:4648;
-      proxy_set_header Host $host;                       # the name clients typed, not 127.0.0.1
-      proxy_set_header X-Forwarded-For $remote_addr;     # any forwarding header turns the token off
-      proxy_http_version 1.1;
-      proxy_set_header Upgrade $http_upgrade;            # WebSocket
-      proxy_set_header Connection "upgrade";
-  }
-  ```
-
-  Then check from another machine: `curl -i https://smind.example.com/api/token` must answer `403`. If you cannot
-  guarantee this, do not run a proxy on the daemon's own host; bind the daemon to a LAN address instead, or use a tunnel.
+- **Reverse proxy on the same host:** with a password set the daemon token cannot be fetched over HTTP at all, so a proxy
+  in front of the daemon (even a stock nginx `proxy_pass http://127.0.0.1:4648;`, which rewrites `Host` and adds no
+  header) exposes only the login. Put the name clients type in `server.hostnames`, pass `Host` through
+  (`proxy_set_header Host $host;`) and proxy WebSockets (`Upgrade`/`Connection`). Check from another machine that
+  `curl -i https://smind.example.com/api/token` answers `403`.
+  **Without a password** a proxy on the daemon's own host is not safe (the daemon cannot tell a proxied request from a
+  local one, and would serve the token): set a password first.
 - **Listening on all interfaces:** `0.0.0.0:4648` is IPv4 only. For IPv6 as well use `[::]:4648` (or `:4648`); the daemon
   logs the addresses it actually bound. When `server.listen` is not `127.0.0.1` the daemon also binds `127.0.0.1` so the CLI
   and the desktop app keep working.
