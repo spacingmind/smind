@@ -71,14 +71,45 @@ pub fn read_local_token() -> Option<String> {
 }
 
 impl Config {
-    /// is_loopback_daemon reports whether the daemon URL points at this machine,
-    /// the only case where the local token file is the right credential.
+    /// is_loopback_daemon reports whether the daemon URL *names* this machine:
+    /// a loopback IP literal or the name `localhost`. It does no lookup (see
+    /// `is_local_daemon` for the check that decides whether a credential may be
+    /// requested or read). IPv4-mapped IPv6 literals (`::ffff:127.0.0.1`) are
+    /// deliberately not loopback here: refusing is the safe direction.
     pub fn is_loopback_daemon(&self) -> bool {
         match self.daemon_url.host() {
             Some(url::Host::Domain(d)) => d.eq_ignore_ascii_case("localhost"),
             Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
             Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
             None => false,
+        }
+    }
+
+    /// is_local_daemon is the gate for everything credential-shaped: it is
+    /// true only when the daemon is on this machine by *address*, not by
+    /// spelling. An IP literal must be loopback; the name `localhost` must
+    /// resolve, and every address it resolves to must be loopback (an
+    /// `/etc/hosts` entry or a resolver pointing it elsewhere makes it remote).
+    /// Any other host name is remote without being looked up. Only for a local
+    /// daemon may the client request `/api/token` or read the token file; a
+    /// remote daemon is reached with a login session or a relay, never with a
+    /// token fetched over plain http.
+    pub async fn is_local_daemon(&self) -> bool {
+        if !self.is_loopback_daemon() {
+            return false;
+        }
+        match self.daemon_url.host() {
+            Some(url::Host::Domain(d)) => {
+                let port = self.daemon_url.port_or_known_default().unwrap_or(80);
+                match tokio::net::lookup_host((d, port)).await {
+                    Ok(addrs) => {
+                        let addrs: Vec<_> = addrs.collect();
+                        !addrs.is_empty() && addrs.iter().all(|a| a.ip().is_loopback())
+                    }
+                    Err(_) => false,
+                }
+            }
+            _ => true, // a loopback IP literal, checked above
         }
     }
 

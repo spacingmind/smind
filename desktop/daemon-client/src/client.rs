@@ -347,20 +347,23 @@ async fn connect_ws(cfg: &Config, token: &str) -> Result<WebSocketStream<MaybeTl
     Ok(ws)
 }
 
-/// fetch_token gets the daemon token from GET /api/token; a daemon with a
-/// password refuses that (403, ADR-0031 D8), so for a daemon on this machine it
-/// falls back to the token file the same OS user can read.
+/// fetch_token gets the daemon token for a daemon on THIS machine: from GET
+/// /api/token, or, when a password daemon refuses that (403, ADR-0031 D8), from
+/// the token file the same OS user can read. For any daemon that is not local
+/// by address it does nothing: no `/api/token` request is ever made (a token
+/// must never be fetched over plain http from a remote host, and a remote
+/// daemon is reached by login session or relay), and the local token file is
+/// never read for it.
 async fn fetch_token(cfg: &Config, client: &reqwest::Client) -> Result<String, String> {
+    if !cfg.is_local_daemon().await {
+        return Err(format!(
+            "{} is not a local daemon: no token is fetched for it (sign in with its password, or use a relay)",
+            cfg.daemon_url
+        ));
+    }
     match fetch_token_http(cfg, client).await {
         Ok(token) => Ok(token),
-        Err(err) => {
-            if cfg.is_loopback_daemon() {
-                if let Some(token) = crate::config::read_local_token() {
-                    return Ok(token);
-                }
-            }
-            Err(err)
-        }
+        Err(err) => crate::config::read_local_token().ok_or(err),
     }
 }
 
@@ -432,10 +435,66 @@ mod tests {
         assert_eq!(got.unwrap(), "from-file");
     }
 
+    /// a listener that counts every connection it accepts.
+    async fn counting_listener() -> (std::net::SocketAddr, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let hits = std::sync::Arc::new(AtomicUsize::new(0));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let counter = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((_sock, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        (addr, hits)
+    }
+
+    #[tokio::test]
+    async fn no_token_request_is_made_to_a_daemon_that_is_not_local() {
+        use std::sync::atomic::Ordering;
+        // The listener is reachable (it is on 127.0.0.1), but the URL spells the
+        // address as IPv4-mapped IPv6, which the gate treats as not local: the
+        // proof is that nothing connects, not that a connection failed.
+        let (addr, hits) = counting_listener().await;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("token"), "local-secret").unwrap();
+        let _guard = ENV_LOCK.lock().await;
+        let prev = std::env::var("SMIND_HOME").ok();
+        std::env::set_var("SMIND_HOME", dir.path());
+        for url in [
+            format!("http://[::ffff:127.0.0.1]:{}", addr.port()),
+            format!("http://localhost.example.invalid:{}", addr.port()),
+            format!("http://192.0.2.1:{}", addr.port()),
+        ] {
+            let cfg = Config { daemon_url: url.parse().unwrap() };
+            let started = std::time::Instant::now();
+            let got = fetch_token(&cfg, &reqwest::Client::new()).await;
+            assert!(got.is_err(), "{url}: a non-local daemon was handed a token: {got:?}");
+            assert!(started.elapsed() < Duration::from_millis(1500), "{url}: it tried to connect (timed out) instead of refusing");
+        }
+        match prev {
+            Some(v) => std::env::set_var("SMIND_HOME", v),
+            None => std::env::remove_var("SMIND_HOME"),
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(hits.load(Ordering::SeqCst), 0, "a token request reached a daemon that is not local");
+    }
+
+    #[tokio::test]
+    async fn localhost_counts_as_local_only_when_every_address_is_loopback() {
+        let cfg = Config { daemon_url: "http://localhost:4648".parse().unwrap() };
+        // Standard resolvers return only loopback addresses for localhost.
+        assert!(cfg.is_local_daemon().await);
+        assert!(Config { daemon_url: "http://127.0.0.1:1".parse().unwrap() }.is_local_daemon().await);
+        assert!(Config { daemon_url: "http://[::1]:1".parse().unwrap() }.is_local_daemon().await);
+        assert!(!Config { daemon_url: "http://192.168.1.10:4648".parse().unwrap() }.is_local_daemon().await);
+        assert!(!Config { daemon_url: "https://smind.example.com".parse().unwrap() }.is_local_daemon().await);
+        assert!(!Config { daemon_url: "http://[::ffff:127.0.0.1]:1".parse().unwrap() }.is_local_daemon().await);
+    }
+
     #[tokio::test]
     async fn a_remote_daemon_never_uses_the_local_token_file() {
-        // 127.0.0.2 is loopback, so use a name that is not: the point is the
-        // is_loopback_daemon gate, which fetch_token consults before the file.
         let cfg = Config { daemon_url: "http://192.0.2.1:1".parse().unwrap() };
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("token"), "local-secret").unwrap();

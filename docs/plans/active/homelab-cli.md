@@ -1126,3 +1126,8 @@ touched web test files, a real daemon driven by Chrome (Playwright) for light + 
   `token_file_is_only_for_a_loopback_daemon` (188 lib tests pass; `cargo clippy` flags only a pre-existing `backoff.rs` lint
   on this toolchain). **Not verified:** a real nginx (the stock-shaped Go reverse proxy stands in for it), the desktop
   webview against a password daemon (P5).
+- P4 / CodeQL (`rust/non-https-url`, `client.rs` `fetch_token_http`): the desktop client now requests `/api/token` and reads the token
+  file **only for a daemon that is local by address** (`Config::is_local_daemon`: loopback IP literal, or `localhost` with every resolved
+  address loopback; IPv4-mapped literals and every other name are refused without a lookup); for any other daemon no token request is
+  made at all. Tests: `no_token_request_is_made_to_a_daemon_that_is_not_local` (a counting listener sees zero connections),
+  `localhost_counts_as_local_only_when_every_address_is_loopback`, `a_remote_daemon_never_uses_the_local_token_file`.
