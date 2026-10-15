@@ -2,8 +2,8 @@
 
 ## Status
 
-**Accepted (2026-10-14), except decisions 9, 12, 27–32 and 36, which remain Open** (direct connections with a password,
-and the hosted relay with everything it gates). The accepted decisions are listed under "Decisions (accepted 2026-10-14)"
+**Accepted (2026-10-14), except decisions 12, 27–32 and 36, which remain Open** (the hosted relay and everything it gates).
+**Decision 9 (direct connections with a password, D8) was Accepted on 2026-10-15** with the recommended default. The accepted decisions are listed under "Decisions (accepted 2026-10-14)"
 with the default the Human approved; the Open ones stay under "Open decisions for Human", and **every PR they gate stays
 BLOCKED** in the plan
 ([`docs/plans/active/homelab-cli.md`](../plans/active/homelab-cli.md)). Decisions whose default changed *because of* the Paseo
@@ -622,7 +622,7 @@ confirmation); deliberately different (first-run, quit behaviour).**
 
 ### D8. Direct connections with a password (amends "loopback only")
 
-**Status: OPEN — decision 9 is not accepted; everything that depends on it (P4, P5's password field, P8, P11, P13c) stays blocked.**
+**Status: ACCEPTED (2026-10-15, decision 9) — the recommended default below was approved as written; P4 implements it, and P5's password field, P8, P11 and P13c build on it.**
 
 **Proposal.** Let the daemon listen on a non-loopback address, protected by a password,
 as Paseo does — making a LAN/Tailscale/VPN homelab work with **no relay at all** — while
@@ -1104,7 +1104,7 @@ are renamed opportunistically, never by a wire-breaking change; the new messages
 
 Human approved every decision below on 2026-10-14 with the default stated ("Ok làm đi"). **★ = the default changed, or the
 decision is new, because of the Paseo study; ✔ = answered earlier by the Human.** Decisions 10, 14 and 24 are accepted but only take effect together with the
-still-open decision 9 (direct connections with a password), so what depends on them waits for it (noted in the plan).
+decision 9 (direct connections with a password, accepted 2026-10-15), which P4 implements first (noted in the plan).
 
 1. **CLI signature verification.** Verify a minisign signature of `checksums.txt` in
    `smind update` with the existing desktop-updater public key (ADR-0023; no new secret),
@@ -1132,6 +1132,12 @@ still-open decision 9 (direct connections with a password), so what depends on t
 
 8. **★ `smind config get|set|unset`; no launch flags.** *Accepted: yes, no
    `--port/--listen` flags on `serve`* (Paseo removed the equivalent flags).
+
+9. **★ Direct connections with a password (D8).** *Accepted (2026-10-15): yes* — `server.listen`, `smind set-password`
+   (bcrypt hash, minimum 12 characters), the daemon refuses to start with a non-loopback `listen` and no password,
+   `/api/token` only for a true loopback caller, expiring session tokens from `POST /api/login` (not the standing daemon
+   token), Host allowlist, per-IP login backoff; **replaces "loopback only, no `--bind`"** and the "don't publish 4648" Docker
+   advice. (The relay-device password, decision 14, builds on the same `set-password`.)
 
 10. **★ Built-in TLS for direct connections.** *Accepted: not in v1* — document Tailscale,
     SSH, or a TLS reverse proxy (with the Host-rewrite caveat); revisit with `server.tls`.
@@ -1206,15 +1212,9 @@ still-open decision 9 (direct connections with a password), so what depends on t
 
 ## Open decisions for Human
 
-These remain **Open** (Human, 2026-10-14): the hosted relay (12 and everything it gates: 27–32, 36) and direct connections
-with a password (9). Each keeps its recommended default or its option list; **every PR they gate is BLOCKED in the plan.**
-
-9. **★ Direct connections with a password (D8).** *Recommended: yes* —
-   `server.listen`, `smind set-password`, refuse to start non-loopback without a password,
-   `/api/token` loopback-only, expiring session tokens, Host allowlist, login rate limit;
-   **replaces "loopback only, no `--bind`"** and the "don't publish 4648" Docker advice.
-   Alternative: stay loopback-only and rely on relay/tunnel (cheaper, leaves Docker and
-   homelab LAN users on the relay).
+These remain **Open** (Human, 2026-10-14): the hosted relay (12 and everything it gates: 27–32, 36). Each keeps its
+recommended default or its option list; **every PR they gate is BLOCKED in the plan.** (Decision 9, direct connections with a
+password, left this list on 2026-10-15: it is Accepted, see "Decisions".)
 
 12. **⏳ Hosted relay hosting — PENDING (Human, 2026-10-14).** Options in D11: **(D)** Cloudflare's gRPC proxy (Network →
     gRPC; origin on 443 with TLS + HTTP/2/ALPN; proxied record, SSL/TLS Full; 125 s read / 30 s write timeouts, so 30–60 s

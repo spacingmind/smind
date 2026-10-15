@@ -1,8 +1,8 @@
 # Homelab distribution: update, service, install scripts, Docker, direct + relay connections, desktop first-run
 
 Implements [ADR-0031](../../decisions/0031-homelab-cli-distribution.md)
-(**Accepted 2026-10-14**, except decisions 9, 12, 27–32 and 36, which remain **Open**; the PRs they gate stay BLOCKED
-below. Revised after a study of Paseo and the Human's answers: hosted-relay hosting is pending, multi-device is designed on
+(**Accepted 2026-10-14**, except decisions 12, 27–32 and 36, which remain **Open**; the PRs they gate stay BLOCKED
+below. **Decision 9 (direct connections with a password) was Accepted 2026-10-15**: P4 and what depends on it are unblocked. Revised after a study of Paseo and the Human's answers: hosted-relay hosting is pending, multi-device is designed on
 gRPC). Every PR below that depends on an
 open decision says so; the plan is written against the ADR's recommended defaults
 (★ = default changed or new because of Paseo), and a PR must not start before its
@@ -46,8 +46,8 @@ before merge — never stacked.
   signing); the multi-device track **P12a, P12b, P12c, P13a, P13b**.
   **P0 must merge before P2 and P12a** (shared `cmd/smind/relay.go`); P12b follows P12a, P0 and P2; P12c follows P12b;
   P13a follows P12b and P3; P13b follows P12b; P7 follows P6.
-- **BLOCKED on decision 9** (direct connections with a password — still Open): **P4**, and what depends on it: **P5, P8, P9,
-  P10, P11, P13c**.
+- **Decision 9 ACCEPTED 2026-10-15** (direct connections with a password): **P4** is ready, and unblocks what depends on it:
+  **P5, P8, P9, P10, P11, P13c** (each still has its other predecessors).
 - **BLOCKED on decision 12** (hosted-relay hosting — still Open; also 27–32, 36): **P14, P15, P16**.
 
 **Suggested order**
@@ -57,9 +57,9 @@ before merge — never stacked.
 2. *Multi-device (ready):* **P12a** (relay server + proto + 3-device harness), then **P12b** (after P12a, P0, P2), **P12c**
    (after P12b), and the clients **P13a** desktop (after P12b and P3) and **P13b** mobile (after P12b), in parallel.
 3. *Independent (ready):* **P6** (`smind update`) and then **P7** (signing).
-4. *Waiting for the Human's answer on decision 9:* **P4**, then **P5** (first-run), **P8** (service), **P9**, **P10**,
+4. *Decision 9 accepted (2026-10-15):* **P4** first, then **P5** (first-run), **P8** (service), **P9**, **P10**,
    **P11** (Docker; also after P7) and **P13c** (relay device password; also after P12b). Written against the recommended
-   defaults, not started.
+   defaults; P4 in progress (2026-10-15).
 5. *BLOCKED on decision 12:* **P14** (deploy and ops), **P15** (open enrolment), **P16** (default address) — in that order,
    after P12a–c; nothing here starts until the Human chooses between (D) Cloudflare gRPC proxy + Go relay, (C) Cloudflare
    Containers behind a Worker, or the withdrawn (B).
