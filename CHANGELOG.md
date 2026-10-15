@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.12.0](https://github.com/spacingmind/smind/compare/v0.11.1...v0.12.0) (2026-10-15)
+
+
+### Features
+
+* **cli:** smind update with checksum verification (ADR-0031 P6) ([#341](https://github.com/spacingmind/smind/issues/341)) ([e25846c](https://github.com/spacingmind/smind/commit/e25846cf4c96be1dfa4a0997044743d6b3951840))
+* **desktop:** add a connection from a relay pairing link (ADR-0031 P3) ([#342](https://github.com/spacingmind/smind/issues/342)) ([65906e5](https://github.com/spacingmind/smind/commit/65906e50fcf91949d2b1aa9f88e4008d11f604cd))
+* **desktop:** bundle the native daemon in the Windows app, like macOS ([#334](https://github.com/spacingmind/smind/issues/334)) ([94c43b4](https://github.com/spacingmind/smind/commit/94c43b4a3c0209ccd3f7fbd7dc169126f95b7acb))
+* install script fixes and install.ps1 for Windows (ADR-0031 P1) ([#339](https://github.com/spacingmind/smind/issues/339)) ([098299e](https://github.com/spacingmind/smind/commit/098299e16e4eacfc01cc24229b4c0647b8ffa89d))
+* **relay:** "relay host" replaces the relay-side "workspace" wording (ADR-0031 P0) ([#338](https://github.com/spacingmind/smind/issues/338)) ([0e357b4](https://github.com/spacingmind/smind/commit/0e357b425a2d8e40782ef898b1627d04f9beeec2))
+* **relay:** multi-device relay server, protocol additions and 3-device harness (ADR-0031 P12a) ([#345](https://github.com/spacingmind/smind/issues/345)) ([9a06ee4](https://github.com/spacingmind/smind/commit/9a06ee4ff39b7783c47aa4fa446701ce16f45c0f))
+* **relay:** per-device sessions in the daemon bridge, device identity and smind relay devices (ADR-0031 P12b) ([#346](https://github.com/spacingmind/smind/issues/346)) ([b284c3c](https://github.com/spacingmind/smind/commit/b284c3c9b0d62e2944e4570149f0db01e6b311ae))
+* **relay:** QR and PNG pairing offers + homelab quickstart (ADR-0031 P2) ([#340](https://github.com/spacingmind/smind/issues/340)) ([dadbedd](https://github.com/spacingmind/smind/commit/dadbedda6df1be6b1e0fa483342e801da6a9770b))
+* **release:** sign checksums and verify them in smind update (ADR-0031 P7) ([#343](https://github.com/spacingmind/smind/issues/343)) ([d61c1a2](https://github.com/spacingmind/smind/commit/d61c1a234a305f3ae7021e21806b6ae2440a8b66))
+* sMind as the product display name ([#336](https://github.com/spacingmind/smind/issues/336)) ([a9bcbf3](https://github.com/spacingmind/smind/commit/a9bcbf3d66b54c00e878738ead45eefa56592c9a))
+
+
+### Bug Fixes
+
+* **desktop:** relay pairings get a Windows-safe file name ([#344](https://github.com/spacingmind/smind/issues/344)) ([a0084ae](https://github.com/spacingmind/smind/commit/a0084aeb3970c1bab0de74b1282c7a3c2f6229b7))
+* **desktop:** set the new relay Frame.keepalive field; build desktop on proto changes ([#347](https://github.com/spacingmind/smind/issues/347)) ([1d815cc](https://github.com/spacingmind/smind/commit/1d815cc59210b6626cb4cc23460b00b8238e3110))
+
 ## [0.11.1](https://github.com/spacingmind/smind/compare/v0.11.0...v0.11.1) (2026-10-13)
 
 
