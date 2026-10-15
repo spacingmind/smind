@@ -55,6 +55,7 @@ import {
   GitBranch,
   GitCompare,
   Globe,
+  Link2,
   Image,
   Info,
   KeyRound,
@@ -179,6 +180,7 @@ export const Icons = {
   groupByStatus: ListChecks,
   groupByWorkspace: FolderGit2,
   web: Globe,
+  link: Link2,
 
   // --- agents / models
   agent: Bot,

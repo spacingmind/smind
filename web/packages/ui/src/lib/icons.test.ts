@@ -53,6 +53,7 @@ describe("icon registry", () => {
         "host": "Server",
         "image": "Image",
         "info": "Info",
+        "link": "Link2",
         "mcp": "Plug",
         "menu": "Menu",
         "model": "Cpu",
