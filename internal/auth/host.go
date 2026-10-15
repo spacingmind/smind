@@ -3,6 +3,7 @@ package auth
 import (
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -43,7 +44,10 @@ func hostOnly(hostport string) (string, bool) {
 		return "", false
 	}
 	host := hostport
-	if h, _, err := net.SplitHostPort(hostport); err == nil {
+	if h, port, err := net.SplitHostPort(hostport); err == nil {
+		if n, perr := strconv.Atoi(port); perr != nil || n < 1 || n > 65535 {
+			return "", false // "localhost:abc", "localhost:", port 0
+		}
 		host = h
 	} else if strings.HasPrefix(hostport, "[") && strings.HasSuffix(hostport, "]") {
 		host = hostport[1 : len(hostport)-1]

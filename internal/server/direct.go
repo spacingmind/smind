@@ -141,6 +141,9 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"token": s.token})
 }
 
+// maxLoginBody caps the login request: a password is at most 72 bytes.
+const maxLoginBody = 4096
+
 type loginRequest struct {
 	Password string `json:"password"`
 }
@@ -175,7 +178,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req loginRequest
-	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxLoginBody+1))
+	if len(body) > maxLoginBody {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request too large"})
+		return
+	}
 	if err != nil || json.Unmarshal(body, &req) != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected {\"password\": \"...\"}"})
 		return
