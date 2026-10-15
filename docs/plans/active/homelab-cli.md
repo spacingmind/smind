@@ -986,7 +986,7 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   5 s → 30 s (each ask is a fresh route and the relay keeps an abandoned route 5 minutes against its 128-route host cap) and a blip
   while pending, a full daemon (`too_many_*`) or a full relay (status 8) are retried, not final; a link that dies within 2 s of
   connecting backs off (the hub's min-stable rule); the Ed25519 seed is a closure variable, not a property of the identity object;
-  Connect is single-flight and a identity reset waits for the key removal. **Not changed, for a decision (E2EE core / ADR text):**
+  Connect is single-flight and an identity reset waits for the key removal. **Not changed, for a decision (E2EE core / ADR text):**
   the signed hello is bound to `(daemon_pub, client ephemeral pub)` only and the daemon adds no per-session value, so whoever can open
   a route under a device's id (the relay operator, a holder of the host secret) can replay a captured hello + ciphertext into a new
   route, be admitted as that device and make the daemon's `supersede` drop the real session (no forgery, no reads; availability and
