@@ -253,12 +253,18 @@ fn parse_key_file(data: &str) -> io::Result<DeviceKey> {
 /// Loads the connection's device key, generating and persisting one on first
 /// use. A present but unreadable/corrupt file is an error, never regenerated:
 /// silently minting a new identity would orphan the approved device.
+///
+/// Creation is atomic and race-free: the key is written in full to a private
+/// temp file and then hard-linked into place, which fails if the file already
+/// exists. Two concurrent first uses (app start racing a pairing, two quick
+/// selects) therefore agree on ONE key — the loser reads the winner's — and a
+/// reader never sees a half-written file. (A zero-length file is a crash
+/// residue of a pre-atomic version: no identity was ever used with it, so it is
+/// replaced.)
 pub fn load_or_create_key(app_data_dir: &Path, connection_id: &str) -> io::Result<DeviceKey> {
     let path = key_path(app_data_dir, connection_id);
-    match std::fs::read_to_string(&path) {
-        Ok(data) => return parse_key_file(&data),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e),
+    if let Some(key) = read_key(&path)? {
+        return Ok(key);
     }
     let dir = app_data_dir.join("relay");
     std::fs::create_dir_all(&dir)?;
@@ -269,9 +275,39 @@ pub fn load_or_create_key(app_data_dir: &Path, connection_id: &str) -> io::Resul
         seed_b64: STANDARD.encode(key.seed_bytes()),
     })
     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    write_private(&path, data.as_bytes())?;
-    set_restrictive_permissions(&path)?;
-    Ok(key)
+    let mut nonce = [0u8; 8];
+    getrandom::fill(&mut nonce).map_err(|e| io::Error::other(e.to_string()))?;
+    let tmp = dir.join(format!(
+        ".devkey-{}-{:016x}.tmp",
+        std::process::id(),
+        u64::from_be_bytes(nonce)
+    ));
+    write_private(&tmp, data.as_bytes())?;
+    set_restrictive_permissions(&tmp)?;
+    let linked = std::fs::hard_link(&tmp, &path);
+    let _ = std::fs::remove_file(&tmp);
+    match linked {
+        Ok(()) => Ok(key),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => match read_key(&path)? {
+            Some(winner) => Ok(winner),
+            None => {
+                // The existing file is a zero-length crash residue: replace it.
+                std::fs::remove_file(&path)?;
+                load_or_create_key(app_data_dir, connection_id)
+            }
+        },
+        Err(e) => Err(e),
+    }
+}
+
+/// read_key reads the key file: `Ok(None)` when it is missing or empty.
+fn read_key(path: &Path) -> io::Result<Option<DeviceKey>> {
+    match std::fs::read_to_string(path) {
+        Ok(data) if data.trim().is_empty() => Ok(None),
+        Ok(data) => parse_key_file(&data).map(Some),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// Removes the connection's device key; missing is Ok.
@@ -287,6 +323,42 @@ pub fn delete_key(app_data_dir: &Path, connection_id: &str) -> io::Result<()> {
 mod tests {
     use super::*;
     use ed25519_dalek::{Signature, VerifyingKey};
+
+    #[test]
+    fn concurrent_first_use_agrees_on_one_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        let keys: Vec<[u8; 32]> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let path = path.clone();
+                    scope.spawn(move || load_or_create_key(&path, "relay:c@h:1").unwrap().public())
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        assert!(keys.iter().all(|k| *k == keys[0]), "concurrent first uses minted different keys");
+        assert_eq!(load_or_create_key(&path, "relay:c@h:1").unwrap().public(), keys[0]);
+        // No temp file is left behind.
+        let leftovers: Vec<_> = std::fs::read_dir(path.join("relay"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+
+    #[test]
+    fn a_zero_length_key_file_is_replaced_but_garbage_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("relay")).unwrap();
+        let path = key_path(dir.path(), "relay:c@h:2");
+        std::fs::write(&path, b"").unwrap();
+        let key = load_or_create_key(dir.path(), "relay:c@h:2").unwrap();
+        assert_eq!(load_or_create_key(dir.path(), "relay:c@h:2").unwrap().public(), key.public());
+        std::fs::write(&path, b"not json").unwrap();
+        assert!(load_or_create_key(dir.path(), "relay:c@h:2").is_err(), "garbage must stay an error");
+    }
     use serde_json::Value;
 
     const VECTOR: &str = include_str!(concat!(
@@ -414,8 +486,9 @@ mod tests {
         let id = "relay:ws-1@h:1";
         let path = key_path(dir.path(), id);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // (A zero-length file is a crash residue, not corruption: see
+        // `a_zero_length_key_file_is_replaced_but_garbage_is_an_error`.)
         for bad in [
-            "",
             "{\"v\":1,\"seed_b6",
             "{\"v\":1,\"seed_b64\":\"AAAA\"}",
             "{\"v\":2,\"seed_b64\":\"\"}",

@@ -34,6 +34,8 @@ tokio-stream = "0.1.19"
 
 [dev-dependencies]
 tempfile = "3"
+# paused-clock tests (`start_paused`)
+tokio = { version = "1", features = ["test-util"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

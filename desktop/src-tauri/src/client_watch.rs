@@ -118,8 +118,9 @@ fn activate(
         Ok(Some(pairing)) => {
             // The connection's persistent device key (created at pairing; made
             // here for a pairing saved before device identity existed). If it
-            // cannot be read the client falls back to the single-device
-            // protocol, which a current daemon refuses with a clear status.
+            // cannot be read the client does not connect and says why
+            // (Settings → Connections shows it): quietly speaking the
+            // single-device protocol would only be refused by a current daemon.
             let options = match relay::device::load_or_create_key(app_data_dir, &conn.id) {
                 Ok(key) => relay::client::RelayOptions::identity(Arc::new(key)),
                 Err(e) => {
@@ -127,7 +128,9 @@ fn activate(
                         "smind desktop: relay connection {:?}: device key: {e}",
                         conn.id
                     );
-                    relay::client::RelayOptions::legacy_only()
+                    relay::client::RelayOptions::key_unavailable(format!(
+                        "the device key cannot be read ({e}); remove this connection and add the link again"
+                    ))
                 }
             };
             let (relay_handle, relay_task) = relay::client::spawn(pairing, options);

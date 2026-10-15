@@ -95,12 +95,26 @@ export function RelayConnectionStatus({ status }: { status: RelayStatus }) {
     case "refused":
       return (
         <div role="status" className="mt-1 flex flex-col gap-1" data-testid="connection-relay-status" data-state="refused">
-          <span className="text-ui-sm font-medium text-destructive">The daemon refused this device.</span>
+          <span className="text-ui-sm font-medium text-destructive">{refusalHeadline(status.code)}</span>
           <span className={quiet}>
             {status.message ?? "No reason given."}
             {status.code ? ` (${status.code})` : ""}
           </span>
         </div>
       );
+  }
+}
+
+/** Codes the desktop itself raises (not the daemon's refusal of a hello) get their own headline. */
+function refusalHeadline(code: string | undefined): string {
+  switch (code) {
+    case "device_key_unavailable":
+      return "This device's key cannot be read.";
+    case "device_hello_unsupported":
+    case "device_hello_required":
+    case "daemon_not_answering":
+      return "Could not agree with the daemon on how to connect.";
+    default:
+      return "The daemon refused this device.";
   }
 }

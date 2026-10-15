@@ -272,22 +272,22 @@ fn counting_jitter(d: Duration) -> Duration {
     d
 }
 
-/// Timing with every protocol interval shrunk ~50x so liveness, stalls and
+/// Timing with every protocol interval shrunk ~20-30x (with margins wide enough for a loaded CI runner) so liveness, stalls and
 /// retries happen in seconds; the state machines are the production ones.
 fn fast_timing() -> Timing {
     Timing {
         liveness: LivenessCfg {
-            interval: Duration::from_millis(300),
-            dead_after: Duration::from_millis(1500),
-            probe_timeout: Duration::from_millis(600),
+            interval: Duration::from_millis(500),
+            dead_after: Duration::from_millis(2500),
+            probe_timeout: Duration::from_millis(1000),
         },
         connect_timeout: Duration::from_secs(3),
         handshake_timeout: Duration::from_secs(8),
         hello_timeout: Duration::from_secs(8),
-        resume_probe_timeout: Duration::from_millis(2000),
+        resume_probe_timeout: Duration::from_millis(4000),
         min_stable_connection: Duration::from_millis(200),
-        request_stall: Duration::from_millis(2000),
-        idle_probe: Duration::from_millis(2500),
+        request_stall: Duration::from_millis(4000),
+        idle_probe: Duration::from_millis(5000),
         backoff_base: Duration::from_millis(100),
         backoff_max: Duration::from_millis(500),
         awaiting_retry: Duration::from_millis(300),
@@ -313,10 +313,19 @@ impl Drop for Client {
 }
 
 fn start_client(pairing: &RelayPairing, addr: Option<&str>) -> Client {
+    start_client_with(pairing, addr, |_| {})
+}
+
+fn start_client_with(
+    pairing: &RelayPairing,
+    addr: Option<&str>,
+    tweak: impl FnOnce(&mut Timing),
+) -> Client {
     let key = Arc::new(DeviceKey::generate());
     let device_id = key.device_id();
     let mut options = RelayOptions::identity(key);
     options.timing = fast_timing();
+    tweak(&mut options.timing);
     let mut p = pairing.clone();
     if let Some(a) = addr {
         p.relay_native_addr = a.to_string();
@@ -583,16 +592,28 @@ async fn client_reconnects_after_silence_with_jitter() {
     h.cmd("window 1 600");
     let pairing = h.pairing();
     let proxy = Proxy::start(h.native_addr.clone()).await;
-    let a = start_client(&pairing, Some(&proxy.addr));
+    // Only the keepalive dead-stream rule may notice the silence: the daemon
+    // stall checks are pushed out of reach so they cannot do its job.
+    let a = start_client_with(&pairing, Some(&proxy.addr), |t| {
+        t.request_stall = Duration::from_secs(3600);
+        t.idle_probe = Duration::from_secs(3600);
+    });
     wait_status(&a.handle, 40, |s| *s == Status::Connected).await;
     served(&a, "a-1").await;
+    // The rule only applies once the relay has echoed a probe (otherwise it is
+    // a relay without keepalive and the client stays quiet by design).
+    let stats = a.handle.stats();
+    wait_until(20, "the relay's keepalive echo", || {
+        stats.keepalive_confirmed.load(Ordering::SeqCst)
+    })
+    .await;
 
     // The path goes silent (nothing closed, nothing arrives): within the
     // dead-stream window the client notices; while it stays silent every
     // reconnect attempt times out and each retry delay goes through the jitter.
     let jitter_before = JITTER_CALLS.load(Ordering::SeqCst);
     proxy.blackhole(true);
-    wait_status(&a.handle, 20, |s| *s != Status::Connected).await;
+    wait_status(&a.handle, 10, |s| *s != Status::Connected).await; // dead_after is 2.5 s
     tokio::time::sleep(Duration::from_millis(4500)).await; // > connect_timeout: at least one failed attempt
     // The path heals; the client comes back as the same device and is served.
     proxy.blackhole(false);
@@ -603,6 +624,45 @@ async fn client_reconnects_after_silence_with_jitter() {
         "reconnect delays must go through the jitter"
     );
     assert_eq!(h.devices().iter().filter(|d| d["device_id"] == a.device_id.as_str()).count(), 1);
+}
+
+#[tokio::test]
+async fn client_resumes_after_transport_drop_keeping_ids() {
+    let _serial = serial();
+    let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
+    h.cmd("window 1 600");
+    let pairing = h.pairing();
+    let proxy = Proxy::start(h.native_addr.clone()).await;
+    let a = start_client(&pairing, Some(&proxy.addr));
+    wait_status(&a.handle, 40, |s| *s == Status::Connected).await;
+    served(&a, "a-1").await;
+    assert_eq!(a.handle.stats().fresh_sessions.load(Ordering::SeqCst), 1);
+    assert_eq!(a.handle.stats().resumes.load(Ordering::SeqCst), 0);
+
+    // A transport drop with the daemon untouched and nothing in flight: the
+    // SAME E2EE session is resumed in place (no new handshake, no new hello),
+    // under the same ids. The test sends nothing until the client is back: a
+    // request handed to a stream at the instant it dies burns an E2EE counter
+    // the daemon never sees (the relay has no acknowledgements), which is
+    // exactly the case the client's fresh-session fallback exists for — see
+    // `three_devices_..._after_one_reconnects`, which does send immediately.
+    proxy.kill_all();
+    let stats = a.handle.stats();
+    wait_until(30, "the client to reconnect", || {
+        stats.resumes.load(Ordering::SeqCst) + stats.fresh_sessions.load(Ordering::SeqCst) >= 2
+    })
+    .await;
+    assert_eq!(stats.resumes.load(Ordering::SeqCst), 1, "the drop was not resumed in place");
+    assert_eq!(
+        stats.fresh_sessions.load(Ordering::SeqCst),
+        1,
+        "a transport drop must not start a fresh session"
+    );
+    wait_status(&a.handle, 10, |s| *s == Status::Connected).await;
+    served(&a, "a-resumed").await;
+    let devices = h.devices();
+    assert_eq!(devices.iter().filter(|d| d["device_id"] == a.device_id.as_str()).count(), 1);
+    assert_eq!(devices.len(), 2, "the mobile stub and this client only: {devices:?}");
 }
 
 #[tokio::test]

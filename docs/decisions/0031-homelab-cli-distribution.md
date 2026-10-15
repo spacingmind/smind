@@ -846,15 +846,19 @@ somebody else's nonce, which only counts as liveness); each (re)opened stream pr
   signed over this session's transcript. Frames use the device id (`base32(SHA-256(pub))[:26]`) as the route's device id.
 - *Hello outcomes:* approved → serve; `awaiting_approval` → status "awaiting approval" and retry every ~5 s (so approval takes effect
   within seconds); `revoked` (from the daemon's hello, or the relay's `PermissionDenied` before the handshake) → "revoked", retry
-  every ~60 s; any other refusal → shown with the daemon's code, retry ~30 s; `device_hello_unsupported`/method-not-found, or no
-  answer to the handshake on the identity route, → fall back to the fixed single-device route without a hello (a daemon from before
-  device identity); a `device_hello_required` error on the single-device route → back to the identity route.
+  every ~60 s (only the relay's "device revoked" counts as a revoke, not any PermissionDenied); any other refusal → shown with the
+  daemon's code, retry ~30 s; `device_hello_unsupported`/method-not-found, or no answer to the handshake on the identity route, →
+  one attempt on the fixed single-device route without a hello (a daemon from before device identity); a `device_hello_required`
+  error there → back to the identity route. The single-device route is kept only while it has answered; after two such switches
+  without a served session in between the client stops switching and shows the cause (so two daemon answers that contradict each
+  other cannot make it ping-pong), and every switch waits the ordinary backoff. A client that cannot read its device key does not
+  connect and says so; it never falls back to the single-device protocol on its own.
 - *Keepalive:* probes carry a per-connection random nonce in `Frame.sequence`; the relay echoes it; only a matching echo proves
   support (a forwarded peer probe is liveness only); first echo within 10 s or keepalive is off for that stream, re-probed on every
   (re)opened stream; probe every 30 s; 75 s without any relay frame = dead → resume. No HTTP/2 client pings.
 - *Resume and a lost daemon:* after a resume the client confirms the session with a request (`workspace.list`) and falls back to a
-  fresh session if it is not answered within 10 s; because the relay cannot tell a device that the daemon restarted, a request
-  unanswered for 15 s, or 60 s without anything from the daemon, makes the client run the same check. Requests in flight at a
+  fresh session if it is not answered within 15 s; because the relay cannot tell a device that the daemon restarted, a request
+  unanswered for 30 s, or 90 s without anything from the daemon, makes the client run the same check. Requests in flight at a
   hard connection drop can be lost (no acks in the relay protocol).
 - *Transport detail worth mirroring:* a gRPC client that waits for response headers before it may read hangs a resume that has
   nothing buffered (the relay sends headers only with its first frame) — resolve the stream lazily and send the registration frame

@@ -41,6 +41,18 @@ describe("RelayConnectionStatus", () => {
     expect(line).toHaveTextContent("too many connected devices");
   });
 
+  it("says plainly when the device key cannot be read, instead of blaming the daemon", () => {
+    render(
+      <RelayConnectionStatus
+        status={{ state: "refused", code: "device_key_unavailable", message: "remove this connection and add the link again" }}
+      />,
+    );
+    const line = screen.getByTestId("connection-relay-status");
+    expect(line).toHaveTextContent("This device's key cannot be read.");
+    expect(line).not.toHaveTextContent("The daemon refused");
+    expect(line).toHaveTextContent("remove this connection and add the link again");
+  });
+
   it.each([
     ["connected", "Connected through the relay"],
     ["connecting", "Connecting through the relay…"],

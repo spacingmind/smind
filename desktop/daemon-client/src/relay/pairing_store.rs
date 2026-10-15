@@ -235,16 +235,19 @@ fn migrate_legacy(app_data_dir: &Path, connection_id: &str, new_path: &Path) {
 /// (unpair/remove). Missing is not an error — deleting an already-gone pairing
 /// is a no-op.
 pub fn delete(app_data_dir: &Path, connection_id: &str) -> io::Result<()> {
-    crate::relay::device::delete_key(app_data_dir, connection_id)?;
+    // The pairing goes first, the device key last: if the second removal
+    // fails, a leftover key is harmless, whereas a pairing that outlived its
+    // key would mint a new, unapproved identity at the next connect.
     let legacy = legacy_pairing_path(app_data_dir, connection_id);
     if legacy.is_file() {
         std::fs::remove_file(legacy)?;
     }
     match std::fs::remove_file(pairing_path(app_data_dir, connection_id)) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e),
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
     }
+    crate::relay::device::delete_key(app_data_dir, connection_id)
 }
 
 #[cfg(test)]
