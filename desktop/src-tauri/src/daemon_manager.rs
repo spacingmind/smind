@@ -553,6 +553,25 @@ fn find_port_owner(platform: Platform, port: u16) -> Option<u32> {
     }
 }
 
+/// managed_record_exists is the upgrade rule's second signal (ADR-0031 D7): an
+/// earlier version of the app installed and recorded a managed daemon.
+pub(crate) fn managed_record_exists(app: &AppHandle) -> bool {
+    match detect_platform() {
+        Platform::Macos => macos_layout(app).ok().and_then(|l| managed::load(&l.state_path)).is_some(),
+        Platform::Windows => {
+            #[cfg(target_os = "windows")]
+            {
+                windows_layout().ok().and_then(|l| managed::load(&l.state_path)).is_some()
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                false
+            }
+        }
+        Platform::Unsupported => false,
+    }
+}
+
 /// binary_installed answers "is the managed binary on disk right now" --
 /// `restart`'s precondition (`managed::assert_restartable`) and
 /// `compute_status`'s `binary_installed` field share this one check.

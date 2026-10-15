@@ -141,6 +141,14 @@ pub fn run() {
             });
 
             let connections_path = app.path().app_data_dir()?.join(CONNECTIONS_FILE);
+            // ADR-0031 D7: evaluated once, before the registry load can
+            // create connections.json and before auto_start runs.
+            let app_settings_path = app_settings::settings_path(&connections_path);
+            let app_settings = app_settings::load_or_upgrade(
+                &app_settings_path,
+                connections_path.exists(),
+                daemon_manager::managed_record_exists(app.handle()),
+            );
             let registry = Registry::load(&connections_path, &local_base_url);
 
             // AC3: a fresh secret every launch.
@@ -300,6 +308,8 @@ pub fn run() {
             app.manage(DesktopState {
                 proxy: proxy_state,
                 connections_path,
+                app_settings: Mutex::new(app_settings),
+                app_settings_path,
                 proxy_url,
                 cache,
                 tray,
