@@ -16,6 +16,7 @@ use smind_daemon_client::daemon_manager::{native, version};
 #[cfg(target_os = "windows")]
 use smind_daemon_client::daemon_manager::windows_native;
 
+use crate::app_settings::AppSettings;
 use crate::state::DesktopState;
 
 const PROGRESS_EVENT: &str = "daemon-progress";
@@ -347,17 +348,56 @@ fn launch_decision(reachable: bool, managed_state: ManagedState, comparison: ver
     }
 }
 
+/// startup_decision gates `launch_decision` on the first-run settings
+/// (ADR-0031 D7): until onboarding is done, or when the user turned local
+/// daemon management off, or when another connection is selected, the app
+/// never installs, starts or updates anything.
+fn startup_decision(
+    settings: AppSettings,
+    local_selected: bool,
+    reachable: bool,
+    managed_state: ManagedState,
+    comparison: version::Comparison,
+) -> LaunchAction {
+    if !settings.onboarding_completed || !settings.manage_local_daemon || !local_selected {
+        return LaunchAction::NoOp;
+    }
+    launch_decision(reachable, managed_state, comparison)
+}
+
+const MANAGEMENT_OFF: &str = "the app-managed local daemon is turned off in Settings";
+
+/// ensure_managed is the guard on every command that mutates the local
+/// daemon (`daemon_install`/`update`/`restart`, `take_over_daemon`).
+fn ensure_managed(settings: AppSettings) -> Result<(), String> {
+    if settings.manage_local_daemon {
+        Ok(())
+    } else {
+        Err(MANAGEMENT_OFF.to_string())
+    }
+}
+
+fn guard_management(state: &DesktopState) -> Result<(), String> {
+    ensure_managed(*state.app_settings.lock().unwrap())
+}
+
 /// auto_start runs once per app launch, after `DesktopState` is managed:
 /// installs/starts the bundled daemon when nothing is serving, and
 /// updates a managed one that's older than the app, both through the same
 /// `install_or_update` (and `daemon-progress` events) the Install/Update
 /// buttons use. macOS only, and only while the built-in local connection
 /// is the selected one -- someone using a remote daemon didn't ask for a
-/// local one. Failures surface as a progress event plus the log; the
+/// local one, and nothing at all until first-run is complete and local
+/// management is on (`startup_decision`). Failures surface as a progress event plus the log; the
 /// banner and Settings -> Daemon keep working for a manual retry.
 pub async fn auto_start(app: AppHandle) {
     let state = app.state::<DesktopState>();
     if detect_platform() != Platform::Macos {
+        return;
+    }
+    let settings = *state.app_settings.lock().unwrap();
+    if !settings.onboarding_completed || !settings.manage_local_daemon {
+        log::info!("daemon auto-start: skipped ({settings:?})");
         return;
     }
     let local_selected = state.proxy.registry.lock().unwrap().current().id == smind_daemon_client::proxy::connections::LOCAL_ID;
@@ -365,7 +405,7 @@ pub async fn auto_start(app: AppHandle) {
         return;
     }
     let status = compute_status(&app, &state).await;
-    let action = launch_decision(status.reachable, status.managed_state, status.comparison);
+    let action = startup_decision(settings, local_selected, status.reachable, status.managed_state, status.comparison);
     log::info!("daemon auto-start: {action:?} (reachable={}, {:?}, {:?})", status.reachable, status.managed_state, status.comparison);
     if !matches!(action, LaunchAction::InstallAndStart) {
         return;
@@ -1043,21 +1083,25 @@ pub async fn daemon_status(app: AppHandle, state: tauri::State<'_, DesktopState>
 
 #[tauri::command]
 pub async fn daemon_install(app: AppHandle, state: tauri::State<'_, DesktopState>) -> Result<DaemonStatus, String> {
+    guard_management(&state)?;
     install_or_update(&app, &state).await
 }
 
 #[tauri::command]
 pub async fn daemon_update(app: AppHandle, state: tauri::State<'_, DesktopState>) -> Result<DaemonStatus, String> {
+    guard_management(&state)?;
     install_or_update(&app, &state).await
 }
 
 #[tauri::command]
 pub async fn daemon_restart(app: AppHandle, state: tauri::State<'_, DesktopState>) -> Result<DaemonStatus, String> {
+    guard_management(&state)?;
     restart(&app, &state).await
 }
 
 #[tauri::command]
 pub async fn take_over_daemon(app: AppHandle, state: tauri::State<'_, DesktopState>) -> Result<DaemonStatus, String> {
+    guard_management(&state)?;
     take_over(&app, &state).await
 }
 
@@ -1184,6 +1228,33 @@ mod tests {
         // Healthy daemon we can't attribute to a port owner (lsof blind,
         // or a non-local URL): nothing to do.
         assert_eq!(launch_decision(true, NotRunning, Older), NoOp);
+    }
+
+    const ONBOARDED: AppSettings = AppSettings { onboarding_completed: true, manage_local_daemon: true };
+
+    #[test]
+    fn auto_start_noop_until_onboarded() {
+        let pending = AppSettings { onboarding_completed: false, manage_local_daemon: true };
+        for state in [ManagedState::NotRunning, ManagedState::Managed, ManagedState::Unmanaged] {
+            assert_eq!(startup_decision(pending, true, false, state, Comparison::Unknown), LaunchAction::NoOp, "{state:?}");
+        }
+    }
+
+    #[test]
+    fn auto_start_noop_when_manage_local_daemon_false() {
+        let off = AppSettings { onboarding_completed: true, manage_local_daemon: false };
+        assert_eq!(startup_decision(off, true, false, ManagedState::NotRunning, Comparison::Unknown), LaunchAction::NoOp);
+        assert_eq!(startup_decision(off, true, true, ManagedState::Managed, Comparison::Older), LaunchAction::NoOp);
+        assert!(ensure_managed(off).unwrap_err().contains("turned off in Settings"));
+        assert!(ensure_managed(ONBOARDED).is_ok());
+    }
+
+    #[test]
+    fn auto_start_runs_when_managed_and_local_selected() {
+        assert_eq!(startup_decision(ONBOARDED, true, false, ManagedState::NotRunning, Comparison::Unknown), LaunchAction::InstallAndStart);
+        assert_eq!(startup_decision(ONBOARDED, true, true, ManagedState::Managed, Comparison::Older), LaunchAction::OfferUpdate);
+        // Another connection selected: still nothing.
+        assert_eq!(startup_decision(ONBOARDED, false, false, ManagedState::NotRunning, Comparison::Unknown), LaunchAction::NoOp);
     }
 
     #[test]
