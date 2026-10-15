@@ -176,14 +176,15 @@ smind relay devices rename <id> <label>
 Ids accept a unique prefix. With the daemon running these talk to it; with no daemon they edit the registry file and
 the change applies when the daemon next starts.
 
-> **Requires updated clients.** Relay pairing needs the desktop and mobile apps that send a device identity
-> (multi-device clients, in progress). Until they ship, an installed desktop or mobile build **cannot connect** through
-> the relay — the daemon refuses a client without a device identity ("device identity required"). As a stop-gap you can
-> set `relay.legacyDevices: true` in `$SMIND_HOME/config.yaml` to let such a client in on one fixed route. **Do not
-> leave it on:** a legacy client is served without approval and cannot be revoked, so anyone who has your pairing link
-> (the relay host secret plus your daemon's public key) — or the relay operator — can connect, and `devices revoke`, the
-> pending state and the pairing window do not apply to it. The daemon logs a warning at start and for every legacy
-> connection.
+> **Requires updated clients.** Relay pairing needs apps that send a device identity. **The desktop app does** (a device key
+> per relay connection, created when you add the link; Settings → Connections shows "Waiting for approval on the daemon" with
+> the exact `smind relay devices approve <id>` to run, or "revoked"). **The mobile app does not yet** (multi-device mobile client,
+> in progress): until it ships, an installed mobile build **cannot connect** through the relay — the daemon refuses a client
+> without a device identity ("device identity required"). As a stop-gap you can set `relay.legacyDevices: true` in
+> `$SMIND_HOME/config.yaml` to let such a client in on one fixed route. **Do not leave it on:** a legacy client is served without
+> approval and cannot be revoked, so anyone who has your pairing link (the relay host secret plus your daemon's public key) — or
+> the relay operator — can connect, and `devices revoke`, the pending state and the pairing window do not apply to it. The daemon
+> logs a warning at start and for every legacy connection.
 
 ### Limits today
 

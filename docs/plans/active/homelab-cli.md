@@ -964,6 +964,15 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   signature covers the route session id and that challenge; v1 is refused (no released client speaks it); vector updated (v1 kept as
   history). (2) wsapi answered an unknown method with nothing (the error was sent before the request was registered in flight):
   fixed, tested.
+- 2026-10-15 (P13a): desktop (Rust) multi-device relay client on `feat/desktop-relay-device-identity` — device key per connection, signed
+  `device_hello`, nonce-matched keepalive, 75 s rule, resume with a liveness check, restart detection, single-device-route fallback,
+  Settings → Connections states. **Not in this PR:** AC 3 (CA-verified mode, `connections_*_relay` reporting `pinned` vs CA-verified,
+  `client_pinned_vs_webpki_roots`, `add_relay_accepts_empty_fingerprint_offer`, `preview_relay_reports_pinned_or_ca_verified`) — it
+  needs the Go side first (P12c); and the TypeScript third client of AC 5 — the interop run uses the Go grpc-web mobile stub as the third
+  device (the real mobile client is P13b). Found and fixed on the way: the Rust loop reused one ephemeral E2EE key across fresh
+  handshakes; tonic's `open_data` hangs a resume with nothing buffered; no dial timeout; an approved-again revoked device stayed
+  refused by the relay until the daemon reconnected (the hub now reconnects its control stream); the harness mobile stub could
+  deadlock in `DataConn.Close`.
 
 ## Validation
 
@@ -1100,3 +1109,21 @@ three negatives), `TestV1VectorIsHistorical`; hub (real relay + hub): `TestCaptu
 untouched; the test fails when the challenge/session binding is removed), `TestHelloBoundToTheChallengeAndTheSession`,
 `TestEachSessionGetsAFreshChallenge`, `TestHelloVersion1IsRefusedWithAClearReason`; `wsapi`:
 `TestUnknownMethodAlwaysGetsAMethodNotFoundResponse` (fails on the old ordering).
+### P13a (2026-10-15, branch `feat/desktop-relay-device-identity`)
+
+Commands: `cd desktop/daemon-client && cargo test` (200 unit + legacy interop + 7 multi-device interop, Go harness), `cd
+desktop/src-tauri && cargo test` (71), `web/packages/ui`: `tsc --noEmit` + `vitest run src/components/settings` (168), Go
+`go test -race ./internal/relay/bridge/...`, light + dark screenshots of the Connections states (headless Chrome against a
+preview page; the real desktop app was not launched).
+
+| AC | Evidence |
+|---|---|
+| 1 key | `device_key_generated_once_mode_0600`, `device_key_deleted_when_connection_removed` (also via `pairing_store::delete`), `device_key_corrupt_file_is_an_error`, `device_key_never_exposed` (Debug redaction), `device_key_never_returned_by_ipc` (every status the UI can read has only non-secret fields), `device_id_matches_public_key_hash`, `device_hello_signature_verifies_against_go_vector` (byte-for-byte against `internal/relay/devices/testdata/device_hello_vector.json`, incl. the negative vector) |
+| 2 session/keepalive/reconnect | `client_sends_keepalive_every_30s`, dead-after-75 s / any-frame-resets / forwarded-peer-probe-is-not-an-echo / per-stream re-probe (`liveness.rs` unit tests on explicit instants), `client_reconnects_after_silence_with_jitter` (interop: a blackholing proxy, shrunk intervals, retry delays go through the jitter, same device afterwards), reconnect keeping ids: `…_after_one_reconnects` (same single registry entry) |
+| 4 multi-device | `three_devices_two_rust_one_go_stay_attached` (+ `…_after_one_reconnects`, `…_after_daemon_restart`, `…_after_revoke_only_that_device_is_refused`) against the real Go relay + hub with the Go grpc-web mobile stub as the third device; `unknown_device_outside_the_window_waits_for_approval_then_connects`; `legacy_daemon_still_works` (a daemon without device identity → single-device route) |
+| UI | `relay-connection-status.test.tsx`, `connections-section.test.tsx`; `relay_status_is_allowlisted_and_registered`, `capability_allowlist_exact` |
+| Go side | `TestApprovingARevokedDeviceLiftsTheRelaysRefusal`; harness `-hub -mobile-stub` tests |
+
+Not verified: AC 3 and the TypeScript device (see Progress); the real macOS/Windows app (the screenshots are of the component in a
+headless browser, not the Tauri window); Windows at runtime for the new Rust (CI runs `cargo test` for the daemon client with Go);
+a relay from before P12a; a real 125 s proxy.
