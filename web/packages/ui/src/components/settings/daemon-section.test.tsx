@@ -27,6 +27,8 @@ function baseStatus(overrides: Partial<Record<string, unknown>> = {}) {
     installedPath: "/tmp/smind/bin/smind",
     logPath: "/tmp/smind/smind.log",
     binaryInstalled: true,
+    localService: "smind",
+    portOccupied: false,
     wslDaemonSuspected: false,
     gitFound: null,
     prerequisiteMessage: null,
