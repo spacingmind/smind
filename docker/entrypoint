@@ -1,0 +1,58 @@
+#!/bin/bash
+# Container entrypoint (ADR-0031 D5): refuse unsafe starts, fix volume
+# ownership as root, then run as the unprivileged smind user.
+set -euo pipefail
+
+SMIND_USER=smind
+data_dir="${SMIND_HOME:-/data}"
+
+die() { echo "smind: $*" >&2; exit 78; }
+
+# Only the daemon itself is gated; `docker exec`/`docker run ... smind relay`,
+# `smind config`, `bash` etc. pass through untouched.
+is_daemon() { [ "${1:-}" = smind ] && [ "${2:-}" = serve ]; }
+
+# True when the effective listen address is not loopback-only. The image sets
+# SMIND_LISTEN=0.0.0.0:4648; a config.yaml `server.listen` can change that, so
+# read both (SMIND_LISTEN wins, as in the daemon).
+listen="${SMIND_LISTEN:-}"
+if [ -z "$listen" ] && [ -r "$data_dir/config.yaml" ]; then
+  listen="$(sed -n 's/^[[:space:]]*listen:[[:space:]]*"\{0,1\}\([^"#[:space:]]*\).*/\1/p' "$data_dir/config.yaml" | head -n 1)"
+fi
+loopback_listen() {
+  case "${listen%:*}" in 127.* | localhost | '[::1]' | ::1) return 0 ;; *) return 1 ;; esac
+}
+
+has_stored_password() {
+  [ -r "$data_dir/config.yaml" ] && grep -Eq '^[[:space:]]*passwordHash:[[:space:]]*[^[:space:]#]' "$data_dir/config.yaml"
+}
+
+if is_daemon "$@" && [ -n "$listen" ] && ! loopback_listen; then
+  # The daemon refuses this too (ADR-0031 D8); saying it here, before anything is
+  # started, gives the clearest message and does not depend on the daemon build.
+  if [ -n "${SMIND_PASSWORD:-}" ]; then
+    [ "${#SMIND_PASSWORD}" -ge 12 ] || die "SMIND_PASSWORD must be at least 12 characters (the password is a remote-code-execution credential)"
+  elif ! has_stored_password; then
+    die "refusing to listen on ${listen} without a password: anyone who can reach the port could run commands in this container. Set SMIND_PASSWORD (at least 12 characters), for example: docker run -e SMIND_PASSWORD=\"\$(openssl rand -base64 24)\" ... , or set SMIND_LISTEN=127.0.0.1:4648 and reach it through a relay or an SSH tunnel."
+  fi
+fi
+
+if [ "$(id -u)" = 0 ]; then
+  # A fresh named volume or a bind mount created by the host user arrives owned
+  # by root (or another uid): make the state and home directories writable for
+  # the smind user. /workspaces is only fixed at its top level, never walked:
+  # it holds users' repositories.
+  uid="$(id -u "$SMIND_USER")"
+  gid="$(id -g "$SMIND_USER")"
+  mkdir -p "$data_dir" /home/smind /workspaces
+  for d in "$data_dir" /home/smind; do
+    if [ "$(stat -c %u:%g "$d")" != "$uid:$gid" ]; then
+      chown -R "$uid:$gid" "$d"
+    fi
+  done
+  if [ "$(stat -c %u:%g /workspaces)" != "$uid:$gid" ]; then
+    chown "$uid:$gid" /workspaces
+  fi
+  exec gosu "$SMIND_USER" "$@"
+fi
+exec "$@"
