@@ -979,6 +979,20 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   request is registered in-flight, so `terminate` rejects it and the daemon sends **no answer at all** — the ADR/P12b text that
   "a daemon from before P12b answers method not found" is not what the code does; a client cannot use an unknown method as a
   probe (the first cut of this client did, and a resumed session was never confirmed).
+  An independent review (identity, reconnect state machine, protocol agreement) drove: `close()` during a fresh session's
+  handshake ends its stream (it had left an admitted ghost device); an **end-to-end liveness watchdog** (a request unanswered for 15 s
+  or 90 s of silence is followed by one cheap question; no answer in 10 s means the daemon lost the session and a fresh one is
+  opened — keepalive only proves the *relay*, so a daemon restarted behind a live stream used to hang every call); pending polls grow
+  5 s → 30 s (each ask is a fresh route and the relay keeps an abandoned route 5 minutes against its 128-route host cap) and a blip
+  while pending, a full daemon (`too_many_*`) or a full relay (status 8) are retried, not final; a link that dies within 2 s of
+  connecting backs off (the hub's min-stable rule); the Ed25519 seed is a closure variable, not a property of the identity object;
+  Connect is single-flight and a identity reset waits for the key removal. **Not changed, for a decision (E2EE core / ADR text):**
+  the signed hello is bound to `(daemon_pub, client ephemeral pub)` only and the daemon adds no per-session value, so whoever can open
+  a route under a device's id (the relay operator, a holder of the host secret) can replay a captured hello + ciphertext into a new
+  route, be admitted as that device and make the daemon's `supersede` drop the real session (no forgery, no reads; availability and
+  impersonation of a session the attacker cannot extend) — "so it cannot be replayed" in D9 holds against a different ephemeral key
+  but not against that party; fixing it needs the daemon to contribute a nonce or the session id to the signed bytes (Go + vector
+  + desktop + mobile together).
 
 ## Validation
 
@@ -1115,3 +1129,35 @@ three negatives), `TestV1VectorIsHistorical`; hub (real relay + hub): `TestCaptu
 untouched; the test fails when the challenge/session binding is removed), `TestHelloBoundToTheChallengeAndTheSession`,
 `TestEachSessionGetsAFreshChallenge`, `TestHelloVersion1IsRefusedWithAClearReason`; `wsapi`:
 `TestUnknownMethodAlwaysGetsAMethodNotFoundResponse` (fails on the old ordering).
+
+### P13b (2026-10-15, branch `feat/mobile-relay-device-identity`)
+
+Commands: `cd mobile && npx tsc --noEmit && npx vitest run --exclude "**/*.node.test.ts"` (19 files, 119 tests),
+`npm run test:integration` (3 files, 10 tests; builds `internal/relay/bridge/devharness`, a real relay + a real daemon hub with a
+device registry + two Go desktop peers), `npm run smoke:web:full` (Expo web in headless Chromium against the same harness),
+`go test ./...`, `go test -race -count=3 ./internal/relay/bridge/devharness/`, `task lint`.
+
+| AC | Evidence |
+|---|---|
+| 1 key in the secure store | `deviceIdentity.test.ts`: `device key persists in the secure store`, `is generated once and differs between devices`, `replaces a corrupt stored value with a fresh key`, `never puts the seed in the hello, nor on the identity object`; `platformKeyStore.ts` wires `expo-secure-store` (device-bound, after-first-unlock; in memory on web) |
+| shared vector | `deviceIdentity.test.ts`: `device_hello signature verifies against the Go vector (and matches it byte for byte)`, `derives the vector public key and device id`, `builds the vector signed bytes`, negative case `a hello signed for a different session does not verify against this one` — reads `internal/relay/devices/testdata/device_hello_vector.json` |
+| 2 hello, keepalive, resume, ids | `RelayConnection.device.test.ts` (fake relay + daemon that verifies the hello with the real signed-bytes construction): `sends a device_hello that the daemon verifies, under a key-derived device id and a per-pairing session id`, `keepalive is sent on the websocket stream`, `dead stream after the silence window reconnects (and resumes the same session)`, `resumes after a drop keeping ids, sequence and the E2EE session`, `opens a fresh session … when the daemon lost the old one, and re-subscribes`, `rejects an in-flight request when the stream drops (at-most-once)`; `keepalive.test.ts` pins 30 s / 75 s / 10 s and the nonce-echo rule; `proto.test.ts`: `encodes Frame.keepalive (field 7) exactly as the Go relaypb does` (Go-computed literal), round trips |
+| pending / revoked UI states | `RelayConnection.device.test.ts`: `a device the daemon has not approved is pending, then connects by itself once approved`, `a revoked device is revoked and stops trying`, `revocation mid-session …`, `… noticed only at the next hello …`; `connectionStatus.test.ts` (copy incl. the exact `smind relay devices approve <id>`); screenshots (below) |
+| 3 help text | `CERTIFICATE_HELP` on the pairing screen (screenshot) and `docs/homelab.md` §6 |
+| 4 interop, 3 devices | `integration.devices.node.test.ts` (real TS client ↔ real Go relay + daemon hub + 2 Go native desktop peers): pending → `approve` → connected by itself; peers join while the mobile client stays attached (3 approved + connected devices); real-relay keepalive echoes; resume after a cut stream with the peers unaffected; fresh session + re-subscribe after `daemon-restart` **with the stream left up** (liveness watchdog); relay restart; `revoke` refuses only the mobile device and the peers keep answering; a revoked key stays revoked and a new key is a new pending device. `integration.node.test.ts` / `integration.persistent.node.test.ts` now run through `device_hello` against the same hub |
+| review hardening | `RelayConnection.device.test.ts` "review hardening": close during the handshake, daemon restart behind a live stream (pending call rejected, fresh session), idle probe, transient error while pending, `too_many_devices` retried, status 8 retried, flap backoff, daemon that never answers `device_hello` |
+
+Screenshots (Expo web, light and dark, read by the Lead): `mobile/.smoke/{pairing,pending,tasks,revoked}-{light,dark}.png` from
+`npm run smoke:web:full` ("Waiting for approval" with the approve command naming the device, the task list after approval, "This
+device was revoked" with *Reset device identity*); not committed (`.smoke/` is gitignored).
+
+`task test`: the Go suite passes (`go test ./...`) and so do the mobile suites; the **web UI suite did not pass cleanly on this
+machine** (38 timeouts/failures in `App.test.tsx`, `app-menu`, `open-in-editor`, `desktop-chrome`, `App.responsive` with the load
+average at ~150 from other agents; `App.test.tsx -t TB-AC4` passes alone) — no file under `web/` or `desktop/` is touched by this
+branch.
+
+Not verified: a real phone or simulator (Hermes, `crypto.getRandomValues`, `expo-secure-store` on iOS/Android — including whether
+Android returns null instead of throwing on a Keystore mismatch, which would silently make the device a new pending device —, React
+Native's `WebSocket`); the ≥ 10-minute run with two real desktop apps and a 125 s proxy shim; self-signed relay refusal on a device;
+a Rust client in the three-device run (P13a). Labels with exotic Unicode format characters (`devices.ValidateLabel` follows Go's
+`unicode.Cf`; the client's table covers the common ones and the label is app-generated today).
