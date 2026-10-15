@@ -959,6 +959,17 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   not bind legacy access); `docs/homelab.md` says that relay pairing needs the updated clients (P13a/b) until then and warns about
   the opt-in. Still open: a per-offer one-time token (offer format change) is the stronger pairing-window fix.
 
+- 2026-10-15: **P10 implemented** (PR "feat: daemon.info and an older-daemon notice (ADR-0031 P10)"): `daemon.info` WS method
+  (`internal/wsapi/daemon_info.go`: version, commit, managedBy, platform, startedAt; readable over the relay channel); desktop
+  `connection_version`/`daemon_status` carry `/healthz managedBy`, `take_over` refuses a service-managed daemon
+  (`UnmanagedKind::Service`); the banner shows a dismissible notice with copyable `smind update` / installer commands for
+  unmanaged daemons, reads relay daemons' versions over `/ws`, and says "version unknown" for a relay daemon without
+  `daemon.info`; Settings → Daemon hides take over and says "Managed by systemd/launchd/Task Scheduler". **Found while doing
+  it:** a daemon sent *no* response to an unknown method (`dispatch` called `sendError` for an id never registered in
+  `inflight`); fixed, and the banner also treats a 4 s silence as "predates daemon.info" because every shipped daemon behaves
+  that way. Not done: the `docker pull` variant for a daemon reporting it runs from an image (`image?` in `daemon.info`, needs
+  P11), and the P5 setting that stops offering (a) while a service owns the port (P5 not started).
+
 ## Validation
 
 To be filled per PR as work lands: for each Acceptance Criterion, the test name or the real-platform check that
