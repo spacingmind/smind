@@ -530,8 +530,10 @@ the existing `DeviceAttach`/`DeviceDetach` slots (`relay.proto:121-148`) instead
    `relay.device.list|approve|revoke|rename|window` WS methods on the running daemon (loopback token) so a revoke closes the
    device's stream immediately and sends `Revoke` to the relay; with no daemon running they edit the registry file directly.
 7. **Legacy clients:** a client that sends no `device_hello` within 5 s is served as a single unlisted `legacy` device while
-   config `relay.legacyDevices` is true (default **true for one minor release**, then false); the daemon logs that it is
-   deprecated. This keeps already-installed desktop/mobile builds working until P13a/b ship.
+   config `relay.legacyDevices` is true (default **false — Human decision 2026-10-15**, was "true for one minor release"); the daemon logs a warning at start and per legacy
+   connection. With the default false, an already-installed desktop/mobile build cannot connect through the relay until P13a/b
+   ship (it is refused with `device_hello_required`); a user may opt in with `relay.legacyDevices: true`, knowing legacy access is
+   served without approval and cannot be revoked (`docs/homelab.md`, ADR-0031 D9).
 8. No change to the E2EE core (`internal/relay/e2ee`): the handshake, HKDF salt and counters are untouched.
 
 **Paseo reference — different (device key).** Paseo's clients use an ephemeral key per connection and the daemon keeps no device
@@ -815,7 +817,7 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
 - CLI/API: `TestDevicesLsAndPendingFlag`, `TestDevicesApproveRevokeRename`, `TestDevicesRevokeClosesStreamAndSendsRevoke`,
   `TestDevicesCLIEditsFileWhenNoDaemon`, `TestRelayDeviceWSMethodsRequireToken`.
 - Legacy: `TestLegacyClientServedWhileLegacyDevicesTrue`, `TestLegacyClientRefusedWhenLegacyDevicesFalse`,
-  `TestLegacyDeprecationLogged`.
+  `TestLegacyWarningLogged`.
 
 ### P12c
 
@@ -953,9 +955,9 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   window slot only for devices first seen after it opened; the hub never drops a session because a `Sync` omitted it; same-device
   new session replaces the old; room checked before a device is recorded; 128-pending cap; CLI edits the registry file only when
   nothing listens on the daemon port; label hygiene (bidi/zero-width/separator characters); registry durability (dir fsync, rename
-  retry). **Open for the Human:** with `relay.legacyDevices` true (the default the plan asks for) revoke, pending and the window do
-  not bind legacy access — the ADR records it and recommends flipping the default once P13a/b ship; a per-offer one-time token (offer
-  format change) is the stronger pairing-window fix.
+  retry). **Decided by the Human (2026-10-15): `relay.legacyDevices` defaults to false** (with it true, revoke, pending and the window do
+  not bind legacy access); `docs/homelab.md` says that relay pairing needs the updated clients (P13a/b) until then and warns about
+  the opt-in. Still open: a per-offer one-time token (offer format change) is the stronger pairing-window fix.
 
 ## Validation
 
@@ -1045,7 +1047,7 @@ Commands: `go test -race -count=20 ./internal/relay/... ./internal/wsapi/ ./inte
 | 4 registry | `TestRegistryFileMode0600AndAtomicWrite`, `TestRevokedDeviceRefusedWithReason` (+ `…AtHello` at the hub), `TestRegistryReloadSeesExternalEdit`, `TestRegistryCorruptFileIsAnError`, `TestRegistryConcurrentAdmit` |
 | 5 window | `TestUnknownDeviceOutsideWindowIsPending`, `TestOfferOpensWindowAndApprovesExactlyOneDevice`, `TestPairingWindowExpires`, `TestPairingWindowFlags`, `TestPendingDeviceFromBeforeTheWindowDoesNotTakeASlot`, `TestTooManyPendingDevicesAreRefused` |
 | 6 CLI + API | `cmd/smind`: `TestDevicesLsAndPendingFlag`, `TestDevicesApproveRevokeRename`, `TestDevicesCLIEditsFileWhenNoDaemon`, `TestDevicesCLIDoesNotEditFileWhenDaemonIsUnreachableForOtherReasons`, `TestRelayOfferWindowFlags`; `wsapi`: `TestRelayDeviceWSMethodsRequireToken`, handler tests; hub: `TestDevicesRevokeClosesStreamAndSendsRevoke` (stream closed, relay refuses the re-attach with PermissionDenied, revocation re-sent after a reconnect) |
-| 7 legacy | `TestLegacyClientServedWhileLegacyDevicesTrue`, `TestLegacyClientRefusedWhenLegacyDevicesFalse`, `TestLegacyDeprecationLogged`, `TestLegacyClientSilentForHelloTimeoutIsStillServed`, `TestSilentClientRefusedWhenLegacyDevicesFalse`, `TestLegacyFallbackOnlyOnTheFixedRoute`, `TestNewestLegacySessionReplacesTheOlder`; the pre-existing bridge tests (fixed ids, no hello) pass unchanged |
+| 7 legacy | `TestConfig_RelayDefaultsAndValidation` (default false, opt-in true), `TestLegacyClientServedWhileLegacyDevicesTrue`, `TestLegacyClientRefusedWhenLegacyDevicesFalse`, `TestLegacyWarningLogged`, `TestLegacyClientSilentForHelloTimeoutIsStillServed`, `TestSilentClientRefusedWhenLegacyDevicesFalse`, `TestLegacyFallbackOnlyOnTheFixedRoute`, `TestNewestLegacySessionReplacesTheOlder`; the pre-existing bridge tests (fixed ids, no hello) pass unchanged |
 | 8 e2ee unchanged | `TestE2EECoreUnchanged` (fixed identities, golden keys), `TestTranscriptHashIsTheHKDFSalt`, the existing e2ee fixtures; `deriveKeys` is byte-identical to before |
 
 Not verified: a real desktop/mobile client (P13a/b), the cross-language hello vector in Rust/TS, Windows at runtime (registry

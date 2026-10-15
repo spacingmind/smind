@@ -21,8 +21,17 @@ type Config struct {
 // RelayConfig tunes this daemon's relay client side (ADR-0031 D9).
 type RelayConfig struct {
 	// LegacyDevices admits relay peers that do not send a device_hello
-	// (clients older than multi-device), as one shared legacy device.
-	// Default true.
+	// (desktop/mobile builds older than multi-device) as one unlisted legacy
+	// device on the fixed legacy route. Default FALSE (decided 2026-10-15,
+	// ADR-0031 D9): only devices that prove a device identity connect.
+	//
+	// WARNING — setting this to true switches device security off for that
+	// route: anyone holding the relay host secret and this daemon's public key
+	// (a leaked pairing link, a stolen paired device, the relay operator) can
+	// connect and is served WITHOUT approval, and `smind relay devices revoke`,
+	// the pending state and the pairing window do not apply to it. Enable it
+	// only as a stop-gap until your desktop/mobile apps are updated; the daemon
+	// logs a warning at start and for every legacy connection.
 	LegacyDevices bool `yaml:"legacyDevices"`
 	// MaxDevices caps how many paired devices may be connected at once.
 	// Default 16; Load rejects values < 1.
@@ -137,7 +146,7 @@ func Default() Config {
 			ExhaustThresholdPct: 100,
 			Passive:             true,
 		},
-		Relay: RelayConfig{LegacyDevices: true, MaxDevices: DefaultRelayMaxDevices},
+		Relay: RelayConfig{LegacyDevices: false, MaxDevices: DefaultRelayMaxDevices},
 	}
 }
 

@@ -795,13 +795,15 @@ somebody else's nonce, which only counts as liveness); each (re)opened stream pr
   control streams ping every 30 s and are re-established after 75 s of silence with ±20 % jittered backoff. Behind a relay that
   sends no `Sync` (older than P12a) the hub falls back to opening the fixed legacy route, and never sends `Revoke`.
 - *Legacy clients* (no `device_hello`: first message is anything else, or silence for 5 s) are served as one unlisted device
-  while `relay.legacyDevices` is true (default; deprecated, logged) — but only on the fixed legacy route
-  (`m1-default-device`) and one at a time (the newest replaces the older); a client on any other route id must identify itself.
-  **Caveat (security):** while `relay.legacyDevices` is true, anyone holding the relay host secret and the daemon's public key
-  (that is, a leaked offer, a stolen paired device, or the relay operator) can open the fixed legacy route and be served without
-  approval; `devices revoke`, the `pending` state and the pairing window do not bind legacy access. They only bind once the apps
-  are updated (P13a/b) and `relay.legacyDevices: false` is set. **Recommendation: flip the default to false as soon as P13a/b
-  ship, or earlier for users who do not have a pre-identity app.**
+  **only while `relay.legacyDevices` is true** — and only on the fixed legacy route (`m1-default-device`), one at a time (the
+  newest replaces the older); a client on any other route id must identify itself. **DECIDED by Human (2026-10-15): the default
+  is `false` starting with P12b / v0.12.0** (the plan had asked for "true for one minor release"). With it false the daemon
+  refuses a client without a device identity with `device_hello_required`, so an installed desktop/mobile build cannot connect
+  through the relay until it ships the multi-device client (P13a/b); a user can opt in explicitly with
+  `relay.legacyDevices: true`, with a loud warning in the config docs (`docs/homelab.md`, `internal/config`) and in the log at
+  start and per legacy connection. **Why:** while it is true, anyone holding the relay host secret and the daemon's public key
+  (a leaked offer, a stolen paired device, or the relay operator) can open the fixed legacy route and be served without
+  approval; `devices revoke`, the `pending` state and the pairing window do not bind legacy access.
 - *Pairing window rule:* a device takes a slot only if it was first seen at or after the window opened (an attacker that
   registered early as `pending` is not first in line); first-come among devices that appear after `smind relay offer` remains —
   a one-time token in the offer link that the signed hello must carry is the stronger fix and is left to a follow-up
@@ -838,7 +840,7 @@ space). So the E2EE core stays untouched and identity is an **inner layer**:
 - **Pairing window.** `smind relay offer` opens a window (default 10 minutes or one new device, `--window`,
   `--max-devices`) in which an unknown device is approved automatically; outside it an unknown device is recorded
   as `pending` and refused ("awaiting approval"; `smind relay devices approve <id>`). A leaked old offer is
-  therefore useless once the window closes **(only once `relay.legacyDevices` is false — see the P12b implementation notes)** — the offer stops being a standing credential. (The host secret still
+  therefore useless once the window closes **(true since the 2026-10-15 decision made `relay.legacyDevices` default to false — see the P12b implementation notes)** — the offer stops being a standing credential. (The host secret still
   gates the relay; the daemon password, decision 14, is an additional factor inside `device_hello`.)
 - `smind relay devices ls [--pending]` (id, label, state, connected?, first/last seen), `approve <id>`,
   `revoke <id>`, `rename <id> <label>` talk to the **running daemon** over its authenticated WS API (new

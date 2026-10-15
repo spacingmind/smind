@@ -262,7 +262,7 @@ func TestLegacyClientServedWhileLegacyDevicesTrue(t *testing.T) {
 	}
 }
 
-func TestLegacyDeprecationLogged(t *testing.T) {
+func TestLegacyWarningLogged(t *testing.T) {
 	f := newHubFixture(t, Options{LegacyDevices: true})
 	f.start(nil)
 	d := f.newDevice(false, "old-app")
@@ -271,8 +271,8 @@ func TestLegacyDeprecationLogged(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.mustList()
-	if !f.logs.contains("deprecated") {
-		t.Fatal("serving a legacy client must log that it is deprecated")
+	if !f.logs.contains("WARNING") {
+		t.Fatal("serving a legacy client must log a warning that it is served without approval")
 	}
 }
 
@@ -299,10 +299,10 @@ func TestLegacyClientSilentForHelloTimeoutIsStillServed(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if f.logs.contains("deprecated") {
+	if f.logs.contains("WARNING") {
 		t.Fatal("the daemon decided the client was legacy before the hello timeout")
 	}
-	waitFor(t, "the silent client to be served as legacy after the hello timeout", func() bool { return f.logs.contains("deprecated") })
+	waitFor(t, "the silent client to be served as legacy after the hello timeout", func() bool { return f.logs.contains("WARNING") })
 	d.mustList()
 }
 
@@ -315,7 +315,7 @@ func TestSilentClientRefusedWhenLegacyDevicesFalse(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(700 * time.Millisecond)
-	if f.logs.contains("deprecated") {
+	if f.logs.contains("WARNING") {
 		t.Fatal("a silent client was served as legacy although relay.legacyDevices is false")
 	}
 	r, err := d.request("workspace.list", nil)

@@ -21,8 +21,8 @@ func loadRelayYAML(t *testing.T, yaml string) (Config, error) {
 
 func TestConfig_RelayDefaultsAndValidation(t *testing.T) {
 	d := Default().Relay
-	if !d.LegacyDevices || d.MaxDevices != 16 {
-		t.Fatalf("Default().Relay = %+v, want legacyDevices true, maxDevices 16", d)
+	if d.LegacyDevices || d.MaxDevices != 16 {
+		t.Fatalf("Default().Relay = %+v, want legacyDevices FALSE (decided 2026-10-15), maxDevices 16", d)
 	}
 
 	cfg, err := loadRelayYAML(t, "")
@@ -30,13 +30,13 @@ func TestConfig_RelayDefaultsAndValidation(t *testing.T) {
 		t.Fatalf("no file: %+v, %v", cfg.Relay, err)
 	}
 
-	// Setting one key keeps the other's default.
-	cfg, err = loadRelayYAML(t, "relay:\n  legacyDevices: false\n")
-	if err != nil || cfg.Relay.LegacyDevices || cfg.Relay.MaxDevices != 16 {
-		t.Fatalf("legacyDevices:false: %+v, %v", cfg.Relay, err)
+	// Setting one key keeps the other's default; legacy is an explicit opt-in.
+	cfg, err = loadRelayYAML(t, "relay:\n  legacyDevices: true\n")
+	if err != nil || !cfg.Relay.LegacyDevices || cfg.Relay.MaxDevices != 16 {
+		t.Fatalf("legacyDevices:true: %+v, %v", cfg.Relay, err)
 	}
 	cfg, err = loadRelayYAML(t, "relay:\n  maxDevices: 3\n")
-	if err != nil || !cfg.Relay.LegacyDevices || cfg.Relay.MaxDevices != 3 {
+	if err != nil || cfg.Relay.LegacyDevices || cfg.Relay.MaxDevices != 3 {
 		t.Fatalf("maxDevices:3: %+v, %v", cfg.Relay, err)
 	}
 

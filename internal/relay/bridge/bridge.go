@@ -46,8 +46,10 @@ func DaemonKeyID(kp *e2ee.KeyPair) string {
 }
 
 // Run is the one-call form of Hub.Run for callers that need no device
-// registry (tests, and the daemon before its registry is wired): it serves
-// devices through a fresh Hub, with legacy clients allowed. See Hub.
+// registry: the cross-language interop harness and the legacy-client tests,
+// whose clients are exactly the pre-identity kind, so it serves them (legacy
+// clients allowed). The daemon does not use it — `smind serve` builds a Hub
+// from relay.legacyDevices, which defaults to false. See Hub.
 func Run(ctx context.Context, cfg Config, kp *e2ee.KeyPair, api Server) error {
 	return NewHub(Options{LegacyDevices: true}).Run(ctx, cfg, kp, api)
 }

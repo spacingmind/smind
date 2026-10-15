@@ -166,6 +166,9 @@ func newRelayHub(srv *server.Server, rc config.RelayConfig) *bridge.Hub {
 		log.Printf("relay devices: %v (device identity disabled until the file is fixed)", err)
 		reg = nil
 	}
+	if rc.LegacyDevices {
+		log.Printf("relay: WARNING: relay.legacyDevices is true — a relay client without device identity is served WITHOUT approval and cannot be revoked (anyone with the relay host secret and this daemon's public key can connect). Update the desktop/mobile apps and remove the setting.")
+	}
 	hub := bridge.NewHub(bridge.Options{Registry: reg, LegacyDevices: rc.LegacyDevices, MaxDevices: rc.MaxDevices})
 	if reg != nil {
 		srv.API().SetRelayDevices(hub)

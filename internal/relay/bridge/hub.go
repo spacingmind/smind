@@ -84,7 +84,9 @@ type Options struct {
 	// clients can then be served.
 	Registry *devices.Registry
 	// LegacyDevices serves a client that sends no device_hello as one
-	// unlisted "legacy" device (ADR-0031 P12b AC 7; deprecated).
+	// unlisted "legacy" device on the fixed legacy route (ADR-0031 P12b AC 7).
+	// Off by default in the daemon (decided 2026-10-15): while it is on, that
+	// route is served without approval and cannot be revoked.
 	LegacyDevices bool
 	// MaxDevices bounds served device sessions (0 = DefaultMaxDevices).
 	MaxDevices int

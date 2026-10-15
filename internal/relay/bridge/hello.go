@@ -124,7 +124,7 @@ func (h *Hub) identify(s *session, r *sessionReader, t *deviceTransport) error {
 	}
 	s.legacy, s.admitted = true, true
 	h.mu.Unlock()
-	h.logf("relay bridge: serving a client without device identity as a legacy device — deprecated, update the desktop/mobile app (relay.legacyDevices will default to false)")
+	h.logf("relay bridge: WARNING: serving a client without device identity as a legacy device because relay.legacyDevices is true — it is served without approval and cannot be revoked; update the desktop/mobile app and set relay.legacyDevices: false")
 	if !timedOut {
 		t.push(first)
 	}
