@@ -1,0 +1,16 @@
+# Written by `smind service install`; the next install overwrites edits.
+[Unit]
+Description=sMind daemon
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/smind serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+Environment="PATH=/home/alice/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="SMIND_SUPERVISOR=systemd"
+
+[Install]
+WantedBy=default.target

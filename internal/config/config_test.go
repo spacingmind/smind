@@ -166,3 +166,78 @@ func TestLoad_OrchestrationMaxConcurrentRunsPerTreeRejectsZero(t *testing.T) {
 		t.Fatal("Load() = nil error, want rejection of maxConcurrentRunsPerTree 0")
 	}
 }
+
+func TestDefault_LogRotation(t *testing.T) {
+	t.Parallel()
+	got := Default().Log
+	if got.MaxSizeMB != 10 || got.MaxFiles != 5 {
+		t.Fatalf("Default().Log = %+v, want 10 MiB x 5 files", got)
+	}
+}
+
+func TestLoad_LogRotationOverrideAndValidation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("log:\n  maxSizeMB: 2\n  maxFiles: 3\n")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Log.MaxSizeMB != 2 || cfg.Log.MaxFiles != 3 {
+		t.Fatalf("Log = %+v, want 2 x 3", cfg.Log)
+	}
+
+	// A key left out keeps its default.
+	write("log:\n  maxFiles: 7\n")
+	if cfg, err = Load(); err != nil || cfg.Log.MaxSizeMB != 10 || cfg.Log.MaxFiles != 7 {
+		t.Fatalf("partial override: %+v, %v", cfg.Log, err)
+	}
+
+	for _, bad := range []string{"log:\n  maxSizeMB: 0\n", "log:\n  maxFiles: 0\n", "log:\n  maxFiles: -1\n"} {
+		write(bad)
+		if _, err := Load(); err == nil {
+			t.Errorf("Load() accepted %q", bad)
+		}
+	}
+}
+
+func TestLoadFile_ReadsAnotherUsersConfigWithoutMigrating(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("server:\n  port: 5555\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil || cfg.Server.Port != 5555 {
+		t.Fatalf("LoadFile = %+v, %v", cfg.Server, err)
+	}
+	if cfg, err := LoadFile(filepath.Join(dir, "missing.yaml")); err != nil || cfg.Server.Port != 4648 {
+		t.Fatalf("missing file must give defaults: %+v, %v", cfg.Server, err)
+	}
+}
+
+func TestDirFor_PrefersSmindThenLegacyThenSmind(t *testing.T) {
+	home := t.TempDir()
+	if got := DirFor(home); got != filepath.Join(home, ".smind") {
+		t.Errorf("fresh home: %s", got)
+	}
+	if err := os.Mkdir(filepath.Join(home, ".spacingmind"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := DirFor(home); got != filepath.Join(home, ".spacingmind") {
+		t.Errorf("legacy only: %s", got)
+	}
+	if err := os.Mkdir(filepath.Join(home, ".smind"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := DirFor(home); got != filepath.Join(home, ".smind") {
+		t.Errorf("both: %s", got)
+	}
+}

@@ -1,0 +1,19 @@
+# Written by `smind service install`; the next install overwrites edits.
+[Unit]
+Description=sMind daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/smind serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+User=alice
+Environment="PATH=/opt/bin:/usr/bin:/bin"
+Environment="SMIND_SUPERVISOR=systemd"
+
+[Install]
+WantedBy=multi-user.target

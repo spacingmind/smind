@@ -67,7 +67,10 @@ make_release() {
   v="$1"
   d="$releases/v$v"
   mkdir -p "$d" "$work/pkg"
-  printf '#!/bin/sh\necho "smind version %s"\n' "$v" >"$work/pkg/smind"
+  # `smind service ...` records its arguments (and can be made to fail), like
+  # the real command would be invoked by --service; anything else prints a version.
+  # shellcheck disable=SC2016 # the stub's own $1 / ${...} must stay literal
+  printf '#!/bin/sh\nif [ "$1" = service ]; then echo "$@" >>"${FAKE_SMIND_LOG:-/dev/null}"; exit "${FAKE_SERVICE_EXIT:-0}"; fi\necho "smind version %s"\n' "$v" >"$work/pkg/smind"
   chmod +x "$work/pkg/smind"
   tar -czf "$d/smind_${v}_linux_amd64.tar.gz" -C "$work/pkg" smind
   sum="$(sha256 "$d/smind_${v}_linux_amd64.tar.gz")"
@@ -92,11 +95,12 @@ passes=0
 # FAKE_* are taken from the caller's environment.
 run_install() {
   : >"$work/curl.log"
+  : >"$work/smind.log"
   rm -rf "${work:?}/bin" "${work:?}/home"
   mkdir -p "$work/home"
   set +e
   env PATH="$stubs:$PATH" HOME="$work/home" \
-    FAKE_RELEASES="$releases" FAKE_CURL_LOG="$work/curl.log" \
+    FAKE_RELEASES="$releases" FAKE_CURL_LOG="$work/curl.log" FAKE_SMIND_LOG="$work/smind.log" \
     SMIND_INSTALL_DIR="$work/bin" "$@" >"$work/out" 2>"$work/err"
   rc=$?
   set -e
@@ -191,6 +195,37 @@ test_stdin_form_sh_dash_s() {
   rc=$?
   set -e
   [ "$rc" -eq 0 ] && [ "$("$work/bin/smind")" = "smind version 4.5.6" ]
+}
+
+test_no_service_flag_never_runs_service_install() {
+  run_install sh "$script" --version 1.2.3
+  [ "$rc" -eq 0 ] && [ ! -s "$work/smind.log" ] && has "$work/out" "smind service install"
+}
+
+test_install_sh_service_flag_runs_service_install() {
+  run_install sh "$script" --version 1.2.3 --service
+  [ "$rc" -eq 0 ] && [ "$(cat "$work/smind.log")" = "service install" ] &&
+    has "$work/out" "smind service status"
+}
+
+test_service_system_flag_passes_through() {
+  run_install sh "$script" --version 1.2.3 --service --system
+  [ "$rc" -eq 0 ] && [ "$(cat "$work/smind.log")" = "service install --system" ]
+}
+
+test_system_without_service_exits_2() {
+  run_install sh "$script" --version 1.2.3 --system
+  [ "$rc" -eq 2 ] && has "$work/err" "together with --service" && [ ! -s "$work/curl.log" ]
+}
+
+test_service_install_failure_fails_the_script_but_keeps_the_binary() {
+  run_install env FAKE_SERVICE_EXIT=1 sh "$script" --version 1.2.3 --service
+  [ "$rc" -ne 0 ] && has "$work/err" "service install' failed" && [ -x "$work/bin/smind" ]
+}
+
+test_service_flag_on_msys_still_points_at_powershell() {
+  run_install env FAKE_UNAME_S=MINGW64_NT-10.0 sh "$script" --service
+  [ "$rc" -ne 0 ] && has "$work/err" "install.ps1" && [ ! -s "$work/smind.log" ]
 }
 
 test_invalid_version_rejected() {

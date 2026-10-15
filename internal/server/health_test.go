@@ -46,3 +46,41 @@ func TestHandleHealth_ReportsVersion(t *testing.T) {
 		t.Errorf("version = %q, want the injected %q", body.Version, "0.7.0-dev+abc1234")
 	}
 }
+
+// TestHealthzIncludesManagedByWhenEnvSet: a daemon started by an OS service
+// manager reports which one (ADR-0031 decision 6), next to the unchanged
+// status/service/version fields.
+func TestHealthzIncludesManagedByWhenEnvSet(t *testing.T) {
+	handler := newTestServer(t, "test-token", WithManagedBy("systemd")).Handler()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode /healthz response: %v", err)
+	}
+	if body["managedBy"] != "systemd" {
+		t.Errorf("managedBy = %v, want systemd", body["managedBy"])
+	}
+	for _, k := range []string{"status", "service", "version"} {
+		if _, ok := body[k]; !ok {
+			t.Errorf("existing field %q missing from %v", k, body)
+		}
+	}
+}
+
+// TestHealthzOmitsManagedByWhenUnset: a hand-started daemon has no
+// supervisor, and clients tell "managed" from "not" by the key's absence.
+func TestHealthzOmitsManagedByWhenUnset(t *testing.T) {
+	handler := newTestServer(t, "test-token").Handler()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode /healthz response: %v", err)
+	}
+	if _, ok := body["managedBy"]; ok {
+		t.Errorf("managedBy must be absent when no supervisor is set, got %v", body)
+	}
+}
