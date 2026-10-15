@@ -15,7 +15,31 @@ type Config struct {
 	Worktrees     WorktreesConfig     `yaml:"worktrees"`
 	Agents        AgentsConfig        `yaml:"agents"`
 	AccountUsage  AccountUsageConfig  `yaml:"accountUsage"`
+	Relay         RelayConfig         `yaml:"relay"`
 }
+
+// RelayConfig tunes this daemon's relay client side (ADR-0031 D9).
+type RelayConfig struct {
+	// LegacyDevices admits relay peers that do not send a device_hello
+	// (desktop/mobile builds older than multi-device) as one unlisted legacy
+	// device on the fixed legacy route. Default FALSE (decided 2026-10-15,
+	// ADR-0031 D9): only devices that prove a device identity connect.
+	//
+	// WARNING — setting this to true switches device security off for that
+	// route: anyone holding the relay host secret and this daemon's public key
+	// (a leaked pairing link, a stolen paired device, the relay operator) can
+	// connect and is served WITHOUT approval, and `smind relay devices revoke`,
+	// the pending state and the pairing window do not apply to it. Enable it
+	// only as a stop-gap until your desktop/mobile apps are updated; the daemon
+	// logs a warning at start and for every legacy connection.
+	LegacyDevices bool `yaml:"legacyDevices"`
+	// MaxDevices caps how many paired devices may be connected at once.
+	// Default 16; Load rejects values < 1.
+	MaxDevices int `yaml:"maxDevices"`
+}
+
+// DefaultRelayMaxDevices is relay.maxDevices when unset.
+const DefaultRelayMaxDevices = 16
 
 // AccountUsageConfig is the user-facing surface of ADR-0028's usage
 // windows. Only these five knobs are configurable; the call-budget
@@ -122,6 +146,7 @@ func Default() Config {
 			ExhaustThresholdPct: 100,
 			Passive:             true,
 		},
+		Relay: RelayConfig{LegacyDevices: false, MaxDevices: DefaultRelayMaxDevices},
 	}
 }
 
@@ -156,6 +181,9 @@ func Load() (Config, error) {
 	}
 	if p := cfg.AccountUsage.ExhaustThresholdPct; p < 1 || p > 100 {
 		return cfg, fmt.Errorf("config %s: accountUsage.exhaustThresholdPct must be between 1 and 100, got %d", Path(), p)
+	}
+	if n := cfg.Relay.MaxDevices; n < 1 {
+		return cfg, fmt.Errorf("config %s: relay.maxDevices must be >= 1, got %d", Path(), n)
 	}
 	if mt := cfg.Agents.GLM.MaxTurns; mt != nil && (*mt < 1 || *mt > MaxGLMTurns) {
 		return cfg, fmt.Errorf("config %s: agents.glm.maxTurns must be between 1 and %d, got %d", Path(), MaxGLMTurns, *mt)

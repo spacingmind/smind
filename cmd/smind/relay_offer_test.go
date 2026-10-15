@@ -53,8 +53,8 @@ func urlOnly(t *testing.T, stdout string) string {
 func TestRelayOfferURLOnlyOnStdout(t *testing.T) {
 	dir := offerDir(t, 12)
 	code, stdout, stderr := offer(t, dir, false)
-	if code != 0 || stderr != "" {
-		t.Fatalf("non-TTY offer = %d, stderr %q; want 0 and silent stderr", code, stderr)
+	if code != 0 || strings.Count(stderr, "\n") != 1 || !strings.HasPrefix(stderr, "Pairing window open for 10m0s") {
+		t.Fatalf("non-TTY offer = %d, stderr %q; want 0 and only the pairing-window line", code, stderr)
 	}
 	url := urlOnly(t, stdout)
 

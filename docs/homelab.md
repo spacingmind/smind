@@ -102,12 +102,42 @@ connection.)*
 Open the mobile app's pairing screen and paste the link (or scan the QR code in builds that support scanning), then
 Connect.
 
+### 7. Approve devices
+
+Every client proves a **device identity** (a key it creates once) when it connects, and the daemon keeps a registry of
+devices in `$SMIND_HOME/relay-devices.json`. Printing a link with `smind relay offer` opens a **pairing window**
+(10 minutes or one new device; `--window <duration>` and `--max-devices <n>` change that): the first new device that
+connects while it is open is approved automatically. Any other new device is recorded as *pending* and refused with
+"awaiting approval" until you approve it:
+
+```
+smind relay devices ls [--pending]     # id, label, state, connected, first/last seen
+smind relay devices approve <id>
+smind relay devices revoke <id>        # ends its session at once and tells the relay to refuse it
+smind relay devices rename <id> <label>
+```
+
+Ids accept a unique prefix. With the daemon running these talk to it; with no daemon they edit the registry file and
+the change applies when the daemon next starts.
+
+> **Requires updated clients.** Relay pairing needs the desktop and mobile apps that send a device identity
+> (multi-device clients, in progress). Until they ship, an installed desktop or mobile build **cannot connect** through
+> the relay — the daemon refuses a client without a device identity ("device identity required"). As a stop-gap you can
+> set `relay.legacyDevices: true` in `$SMIND_HOME/config.yaml` to let such a client in on one fixed route. **Do not
+> leave it on:** a legacy client is served without approval and cannot be revoked, so anyone who has your pairing link
+> (the relay host secret plus your daemon's public key) — or the relay operator — can connect, and `devices revoke`, the
+> pending state and the pairing window do not apply to it. The daemon logs a warning at start and for every legacy
+> connection.
+
 ### Limits today
 
-- **One device at a time.** The relay serves one attached device per relay host; pairing a second device (a phone and the
-  desktop app together) is not supported until the multi-device relay work lands. The same link works for either, but
-  not both at once.
-- The pairing link has no expiry and is not single-use; `rotate` is the only revocation.
+- A relay host serves up to 16 devices at once (`smind relay --max-devices-per-host` on the relay,
+  `relay.maxDevices` on the daemon); each device gets its own session and sees all of the daemon's workspaces, spaces
+  and tasks.
+- The pairing link has no expiry and is not single-use; `smind relay host rotate` is the way to invalidate every link at
+  once. A leaked link alone no longer admits new devices once the pairing window has closed, because the daemon
+  refuses devices it has not approved — but it still reaches the relay host.
+- Requests in flight at the moment a connection drops hard can be lost; clients time out and open a fresh session.
 - Trust on first use: the fingerprint is pinned the first time you run `relay connect` (step 3), so do that step on a
   trusted network and compare fingerprints.
 

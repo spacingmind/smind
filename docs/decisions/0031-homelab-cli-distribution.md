@@ -759,9 +759,10 @@ frames; ADR-0007 (a)) plus a new byte cap (4 MiB), idle-route grace unchanged (5
 `DefaultRouteGrace`). The relay keeps **one control stream per host**; a new one supersedes the old (the old
 ends with `Aborted: superseded`).
 
-**Implementation notes (P12a, as built).** (1) `Sync` is always sent after the first `Pong`, even when empty, and is the
-*authoritative* list of waiting routes: a daemon reconciles against it (a `DeviceDetach` dropped by an overflowing control
-outbox is recovered by the route's absence). (2) The relay does **not** re-announce `DeviceAttach` when a daemon side ends
+**Implementation notes (P12a, as built).** (1) `Sync` is always sent after the first `Pong`, even when empty, and lists every route that has a live device side and no
+daemon side: the daemon opens each listed route. Absence from a `Sync` is **not** proof that a device is gone (a route whose old
+daemon side the relay has not yet noticed dead is not listed either), so a daemon keeps a session it holds until a
+`DeviceDetach` or its own timeout. (2) The relay does **not** re-announce `DeviceAttach` when a daemon side ends
 (a daemon that rejects a device would otherwise reconnect to it in a loop); a lost daemon recovers through `Sync`.
 (3) `DeviceDetach` is sent when a device side ends with no daemon side and again, idempotently, when a route is
 garbage-collected; the daemon treats a detach for an unknown route as a no-op and an attach for a known one as a no-op.
@@ -771,6 +772,47 @@ host (8 per device slot) and id length (128 bytes), and pings idle peers over HT
 (6) Keepalive probes carry a per-connection random nonce in `Frame.sequence` and the relay echoes it: only an echo with
 the matching nonce proves the relay supports keepalive (a relay without it forwards the probe, a keepalive frame with
 somebody else's nonce, which only counts as liveness); each (re)opened stream probes once.
+
+**Implementation notes (P12b, as built — the contract P13a/b implement).**
+- *`device_hello` is an ordinary wsapi request*: `{"id":"…","method":"relay.device_hello","params":{"v":1,"device_pub":b64,
+  "label":"…","signature":b64,"password"?:"…"}}`, the first message after the E2EE handshake. Success is an ordinary response
+  `{"id","result":{"v":1,"device_id","state":"approved"}}`; a refusal is `{"id","error":{"message","code"}}` with code
+  `awaiting_approval` (device recorded `pending`), `revoked`, `bad_hello` (bad signature / id mismatch / version / label),
+  `too_many_devices`, `device_hello_required` (legacy clients refused), `device_hello_unsupported` or `internal`; the daemon
+  then ends the route. A daemon from before P12b answers `method not found`, which is how a client detects it (legacy daemon).
+- *What is signed:* `"smind-device-hello" ‖ e2ee.TranscriptHash(daemon_pub, client_ephemeral_pub) ‖ daemon_pub`, where
+  `TranscriptHash` is the HKDF salt the session keys already use, `SHA-256("smind relay e2ee v1" ‖ daemon_pub ‖
+  client_pub)`; the E2EE core is unchanged (a test pins the equality). `device_id` = lowercase unpadded RFC 4648 base32 of
+  `SHA-256(device_pub)`, first 26 characters. Shared test vector: `internal/relay/devices/testdata/device_hello_vector.json`.
+  `device_hello.password` is not covered by the signature and is checked (P13c) only over the encrypted channel.
+- *Daemon behaviour:* one session per announced `(device_id, session_id)`; sessions survive a relay reconnect (orphaned, E2EE
+  state kept up to 6 minutes) and are resumed in place when the next `Sync` lists their route, dropped when it does not;
+  a client that lost its daemon (restart) must re-handshake with a **fresh session id** — it cannot tell by itself, so after
+  any resume a client should confirm liveness with a request and fall back to a fresh session if it is not answered. The relay
+  has no acknowledgements, so a request handed to the daemon's stream at the instant that connection dies can be lost in flight
+  (and the E2EE counters then no longer line up: the session is wedged until a fresh one) — treat requests as at-most-once across a
+  hard drop: time out, and open a fresh session rather than waiting. Data and
+  control streams ping every 30 s and are re-established after 75 s of silence with ±20 % jittered backoff. Behind a relay that
+  sends no `Sync` (older than P12a) the hub falls back to opening the fixed legacy route, and never sends `Revoke`.
+- *Legacy clients* (no `device_hello`: first message is anything else, or silence for 5 s) are served as one unlisted device
+  **only while `relay.legacyDevices` is true** — and only on the fixed legacy route (`m1-default-device`), one at a time (the
+  newest replaces the older); a client on any other route id must identify itself. **DECIDED by Human (2026-10-15): the default
+  is `false` starting with P12b / v0.12.0** (the plan had asked for "true for one minor release"). With it false the daemon
+  refuses a client without a device identity with `device_hello_required`, so an installed desktop/mobile build cannot connect
+  through the relay until it ships the multi-device client (P13a/b); a user can opt in explicitly with
+  `relay.legacyDevices: true`, with a loud warning in the config docs (`docs/homelab.md`, `internal/config`) and in the log at
+  start and per legacy connection. **Why:** while it is true, anyone holding the relay host secret and the daemon's public key
+  (a leaked offer, a stolen paired device, or the relay operator) can open the fixed legacy route and be served without
+  approval; `devices revoke`, the `pending` state and the pairing window do not bind legacy access.
+- *Pairing window rule:* a device takes a slot only if it was first seen at or after the window opened (an attacker that
+  registered early as `pending` is not first in line); first-come among devices that appear after `smind relay offer` remains —
+  a one-time token in the offer link that the signed hello must carry is the stronger fix and is left to a follow-up
+  (offer format change, P2/P13). The registry refuses new unknown devices beyond 128 pending.
+- *Admin API* (local `/ws` only — over the relay these methods answer `forbidden`, so a paired device can never approve or
+  revoke devices): `relay.device.list {}` → `{"devices":[{device_id,device_pub,label,first_seen,last_seen,state,connected}],
+  "window":null|{expires_at,remaining}}`; `relay.device.approve|revoke {id}` and `relay.device.rename {id,label}` → the device
+  (ids may be unique prefixes; errors `not_found`, `ambiguous`); `relay.device.window {duration_seconds?,max_devices?}`
+  (defaults 10 min / 1) → the window. `smind relay offer` opens the window (`--window`, `--max-devices`).
 
 **Trust model of the control stream (unchanged secret, new reach).** Both ends of a relay host authenticate with the same
 host secret (ADR-0011), so the relay cannot tell the daemon from a client holding the offer. Before this decision that
@@ -798,7 +840,7 @@ space). So the E2EE core stays untouched and identity is an **inner layer**:
 - **Pairing window.** `smind relay offer` opens a window (default 10 minutes or one new device, `--window`,
   `--max-devices`) in which an unknown device is approved automatically; outside it an unknown device is recorded
   as `pending` and refused ("awaiting approval"; `smind relay devices approve <id>`). A leaked old offer is
-  therefore useless once the window closes — the offer stops being a standing credential. (The host secret still
+  therefore useless once the window closes **(true since the 2026-10-15 decision made `relay.legacyDevices` default to false — see the P12b implementation notes)** — the offer stops being a standing credential. (The host secret still
   gates the relay; the daemon password, decision 14, is an additional factor inside `device_hello`.)
 - `smind relay devices ls [--pending]` (id, label, state, connected?, first/last seen), `approve <id>`,
   `revoke <id>`, `rename <id> <label>` talk to the **running daemon** over its authenticated WS API (new

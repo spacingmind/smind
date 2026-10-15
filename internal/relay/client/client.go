@@ -13,6 +13,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -153,7 +154,22 @@ func WithExpectedPeerKey(pub []byte) DataOption {
 // Handshake runs the E2EE handshake over the relay, starting a fresh
 // session (see the DataConn doc for when to choose this over Resume).
 // A key pinned via WithExpectedPeerKey is enforced here.
-func (d *DataConn) Handshake(ctx context.Context) error { return d.channel.Handshake(ctx, d.pin...) }
+//
+// When the relay refuses the stream (a revoked device, a full relay host) the
+// stream is already terminated by the time the first frame is written, and
+// gRPC then reports the write as a bare io.EOF; the actual status (e.g.
+// PermissionDenied) is only available from the receive side. Whether the
+// caller sees the status or the EOF would depend on timing, so a handshake
+// that failed this way returns the stream's terminal status instead.
+func (d *DataConn) Handshake(ctx context.Context) error {
+	err := d.channel.Handshake(ctx, d.pin...)
+	if err != nil && errors.Is(err, io.EOF) {
+		if st := d.frames.terminalStatus(); st != nil {
+			return fmt.Errorf("relay client: handshake: %w", st)
+		}
+	}
+	return err
+}
 
 // Resume reopens the OpenData stream over a newly dialled client after a
 // transport-level drop, resuming the previously established session: the
@@ -180,6 +196,11 @@ func (d *DataConn) Resume(ctx context.Context, c relaypb.RelayClient, admissionI
 	d.frames.reopen(stream, cancel)
 	return nil
 }
+
+// PeerPublicKey is the peer's ephemeral X25519 handshake key once the
+// handshake completed (nil before). With the local key it names the session's
+// transcript, which an application-layer identity proof can be bound to.
+func (d *DataConn) PeerPublicKey() []byte { return d.channel.PeerPublicKey() }
 
 // Send encrypts and forwards one application message.
 func (d *DataConn) Send(msg []byte) error { return d.channel.Send(msg) }
@@ -383,6 +404,27 @@ func (f *frameConn) drop() {
 		}
 	}
 	f.recvMu.Unlock()
+}
+
+// terminalStatus returns the error that ended the stream, for a stream whose
+// send side already reported io.EOF (so it is terminated and Recv returns
+// promptly). Frames still buffered ahead of the status are discarded: this is
+// only used after a failed handshake, when the session is dead anyway. nil if
+// the stream ended cleanly or no status can be read.
+func (f *frameConn) terminalStatus() error {
+	f.recvMu.Lock()
+	defer f.recvMu.Unlock()
+	for i := 0; i < 64; i++ {
+		_, err := f.stream.Recv()
+		if err == nil {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return f.streamErr(err)
+	}
+	return nil
 }
 
 func (f *frameConn) isClosed() bool {
