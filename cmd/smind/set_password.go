@@ -39,7 +39,10 @@ func runSetPassword(args []string, stdin io.Reader, stdout, stderr io.Writer) in
 	fromStdin := false
 	for _, a := range args {
 		if a != "--password-stdin" {
-			fmt.Fprintf(stderr, "smind set-password: unexpected argument %q (the password is never taken from the command line)\n%s\n", a, cmdSetPasswordUsage)
+			// Not echoed: a user who typed their password here must not see it
+			// repeated into a terminal log.
+			_ = a
+			fmt.Fprintf(stderr, "smind set-password: unexpected argument (the password is never taken from the command line)\n%s\n", cmdSetPasswordUsage)
 			return 2
 		}
 		fromStdin = true

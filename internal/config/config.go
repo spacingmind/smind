@@ -169,6 +169,11 @@ func (s ServerConfig) ListenHostPort() (host string, port int, err error) {
 	if err != nil || n < 1 || n > 65535 {
 		return "", 0, fmt.Errorf("server.listen %q: %q is not a valid port", s.Listen, p)
 	}
+	if ip := net.ParseIP(strings.Trim(h, "[]")); h != "" && ip == nil {
+		if err := ValidateHostname(h); err != nil || strings.HasPrefix(h, ".") {
+			return "", 0, fmt.Errorf("server.listen %q: %q is neither an IP address nor a hostname", s.Listen, h)
+		}
+	}
 	if s.Port != 0 && s.Port != n && s.Port != DefaultPort {
 		return "", 0, fmt.Errorf("server.port (%d) and server.listen (%s) name different ports; set one of them", s.Port, s.Listen)
 	}
