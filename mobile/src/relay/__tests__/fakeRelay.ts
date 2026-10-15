@@ -154,6 +154,8 @@ export class FakeRelay implements RelayNet {
   admissions = 0;
   /** When set, the daemon holds every hello answer until it resolves (a slow daemon). */
   gate: Promise<void> | null = null;
+  /** When set, the next stream opened is ended at once with this error (a relay refusing the route). */
+  killNextStream: Error | null = null;
   /** When set, admit() fails (the relay is unreachable). */
   admitError: Error | null = null;
 
@@ -172,6 +174,10 @@ export class FakeRelay implements RelayNet {
   openStream(_wsUrl: string, headers: Record<string, string>): DataStream {
     const s = new FakeStream(this, headers);
     this.streams.push(s);
+    if (this.killNextStream) {
+      s.kill(this.killNextStream);
+      this.killNextStream = null;
+    }
     return s;
   }
 

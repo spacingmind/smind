@@ -328,6 +328,7 @@ describe('review hardening', () => {
     await conn.whenConnected();
     const epoch = conn.epoch;
     await vi.waitFor(() => expect(relay.requests.filter((r) => r.method === 'workspace.list').length).toBeGreaterThanOrEqual(2), { timeout: 3000 });
+    await new Promise((r) => setTimeout(r, 900)); // longer than the probe's own timeout (600 ms): a false drop would show by now
     expect(conn.epoch).toBe(epoch); // answered: no reconnect
     relay.restartDaemon();
     await vi.waitFor(() => expect(conn.epoch).toBeGreaterThan(epoch), { timeout: 5000 });
@@ -366,15 +367,40 @@ describe('review hardening', () => {
     await vi.waitFor(() => expect(conn.state.kind).toBe('connected'), { timeout: 5000 });
   });
 
+  it('a relay that refuses the route when the first connect opens it (status 8) is retried, not failed', async () => {
+    const relay = new FakeRelay();
+    relay.killNextStream = new GrpcStatusError('OpenData', 8, 'relay: too many sessions for this relay host');
+    const conn = start(relay);
+    const seen = states(conn);
+    await conn.whenConnected(); // the second attempt gets through
+    expect(kinds(seen)).toContain('reconnecting');
+    expect(kinds(seen)).not.toContain('failed');
+  });
+
+  it('keeps probing from the OLDEST unanswered request: tapping again on a frozen session does not postpone the check', async () => {
+    const relay = new FakeRelay();
+    const conn = start(relay, { liveness: { pendingStaleMs: 200, idleStaleMs: 5000, checkMs: 30 } });
+    await conn.whenConnected();
+    const epoch = conn.epoch;
+    relay.restartDaemon();
+    const calls: Promise<unknown>[] = [];
+    for (let i = 0; i < 12; i++) {
+      calls.push(conn.call('hang').catch(() => {}));
+      await new Promise((r) => setTimeout(r, 40)); // a new request every 40 ms, well inside the stale window
+    }
+    await vi.waitFor(() => expect(conn.epoch).toBeGreaterThan(epoch), { timeout: 5000 });
+    await Promise.all(calls);
+  });
+
   it('a path that connects and dies at once backs off instead of reconnecting in a tight loop', async () => {
     const relay = new FakeRelay();
     const conn = start(relay, { reconnect: { baseMs: 80, maxMs: 400, minStableMs: 10_000, resumeProbeMs: 600, handshakeMs: 1500 } });
     await conn.whenConnected();
     const before = relay.streams.length;
-    const t0 = Date.now();
     relay.dropCurrentStream();
+    await new Promise((r) => setTimeout(r, 50)); // inside the backoff (baseMs 80): no new stream yet
+    expect(relay.streams.length).toBe(before);
     await vi.waitFor(() => expect(relay.streams.length).toBeGreaterThan(before), { timeout: 3000 });
-    expect(Date.now() - t0).toBeGreaterThanOrEqual(60); // waited ~baseMs, not zero
   });
 
   it('a daemon that never answers device_hello (the real behaviour of one that predates it) fails with the update hint', async () => {

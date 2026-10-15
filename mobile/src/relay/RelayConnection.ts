@@ -816,8 +816,10 @@ export class RelayConnection {
     const startedAt = Date.now();
     const timer = setInterval(() => {
       if (this.probing || this.closed || this.channel !== link.session.channel) return;
+      // The OLDEST unanswered request starts the clock: a user tapping again on
+      // a frozen screen must not keep pushing the probe back.
       let waitingSince = 0;
-      for (const p of this.pending.values()) if (!p.background) waitingSince = Math.max(waitingSince, p.sentAt);
+      for (const p of this.pending.values()) if (!p.background) waitingSince = waitingSince === 0 ? p.sentAt : Math.min(waitingSince, p.sentAt);
       const quietSince = Math.max(this.lastInbound, startedAt, waitingSince);
       const staleAfter = waitingSince > 0 ? this.liveness.pendingStaleMs : this.liveness.idleStaleMs;
       if (Date.now() - quietSince < staleAfter) return;

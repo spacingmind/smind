@@ -55,7 +55,13 @@ function AppShell() {
 
   const handleResetIdentity = useCallback(async () => {
     // The old key is gone before the pairing screen can start a new connection.
-    await resetDeviceIdentity().catch(() => {});
+    // If it cannot be removed, stay on this card: leaving would reconnect with
+    // the same (revoked) identity.
+    try {
+      await resetDeviceIdentity();
+    } catch {
+      return;
+    }
     handleDisconnect();
   }, [handleDisconnect]);
 

@@ -42,6 +42,7 @@ export function PairingScreen({ onConnected }: Props) {
   const attempt = useRef<RelayConnection | null>(null);
   const stopTracking = useRef<(() => void) | null>(null);
   const handedOff = useRef(false);
+  const starting = useRef(false);
   const [connState, setConnState] = useState<ConnectionState | null>(null);
 
   useEffect(
@@ -62,7 +63,8 @@ export function PairingScreen({ onConnected }: Props) {
   }
 
   async function handleConnect() {
-    if (attempt.current || status.kind === 'starting') return; // one attempt at a time: a second would fight the first over the same device
+    if (attempt.current || starting.current) return; // one attempt at a time: a second would fight the first over the same device
+    starting.current = true;
     setStatus({ kind: 'starting' });
     try {
       const identity = await loadPlatformIdentity();
@@ -70,6 +72,11 @@ export function PairingScreen({ onConnected }: Props) {
       attempt.current = conn;
       const track = (s: ConnectionState) => {
         setConnState(s);
+        if (s.kind === 'failed' || s.kind === 'revoked') {
+          // Over for good: let Connect (and Reset) start from a clean slate.
+          conn.close();
+          attempt.current = null;
+        }
         if (s.kind === 'connected' && !handedOff.current) {
           handedOff.current = true;
           stopTracking.current?.();
@@ -82,6 +89,8 @@ export function PairingScreen({ onConnected }: Props) {
       setStatus({ kind: 'idle' });
     } catch (e) {
       setStatus({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      starting.current = false;
     }
   }
 
