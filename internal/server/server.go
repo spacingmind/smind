@@ -73,6 +73,7 @@ func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *
 	if err != nil {
 		return nil, fmt.Errorf("server: new: %w", err)
 	}
+	api.SetManagedBy(o.managedBy)
 	return &Server{
 		cfg:       cfg,
 		proxy:     newProxy(reg, router, db, withObserver(o.observer)),

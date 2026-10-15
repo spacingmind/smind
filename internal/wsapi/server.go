@@ -55,8 +55,9 @@ type API struct {
 	Runs      *runs.Registry
 	Terminals *terminal.Registry
 
-	hs  map[string]handlerFunc
-	bus *eventBus
+	hs   map[string]handlerFunc
+	bus  *eventBus
+	info *DaemonInfo
 }
 
 // ServeTransport serves one RPC connection to completion over tr -- same
@@ -123,7 +124,9 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 	acctReg.SetNotifier(busAccountNotifier{bus: bus})
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
 	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, mcpReg, coord, db)
-	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus}
+	info := newDaemonInfo(time.Now())
+	hs["daemon.info"] = handleDaemonInfo(info)
+	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus, info: info}
 	api.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.URL.Query().Get("token")
 		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
