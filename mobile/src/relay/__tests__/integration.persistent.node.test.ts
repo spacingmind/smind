@@ -17,26 +17,23 @@
 // which is exactly RelayConnection's contract; each connection getting
 // a fresh harness here mirrors that one-connection-per-session reality.
 //
+// P13b: identifies itself with device_hello (admitted by the harness's pairing
+// window), as the daemon refuses clients without a device identity.
+//
 // Run with: npm run test:integration (from mobile/), which requires `go`
 // on PATH and the smind Go module to be present at ../ (this repo root).
 
 /// <reference types="node" />
-import { spawn, ChildProcessByStdio, execFileSync } from 'child_process';
-import type { Readable } from 'stream';
+import { execFileSync } from 'child_process';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RelayConnection } from '../RelayConnection';
+import { DevHarness, testConnectOptions } from './devHarness';
 
-const REPO_ROOT = join(__dirname, '..', '..', '..', '..');
-
-let harnessBinary: string;
-let harnessProcess: ChildProcessByStdio<null, Readable, Readable>;
-let pairingUrl: string;
-let tmpDir: string;
+let harness: DevHarness;
 let wsDir: string;
-
 let previousTLSReject: string | undefined;
 
 beforeAll(async () => {
@@ -44,13 +41,6 @@ beforeAll(async () => {
   // override is test-only and does not touch the client code under test.
   previousTLSReject = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-
-  tmpDir = mkdtempSync(join(tmpdir(), 'smind-relay-harness-bin-'));
-  harnessBinary = join(tmpDir, 'relayharness');
-  execFileSync('go', ['build', '-o', harnessBinary, './internal/relay/bridge/harness'], {
-    cwd: REPO_ROOT,
-    stdio: 'inherit',
-  });
 
   // workspace.create requires an existing git repo (tasks are worktrees
   // branched off it), so seed a minimal one.
@@ -61,28 +51,11 @@ beforeAll(async () => {
     ['-c', 'user.name=smind-test', '-c', 'user.email=smind-test@example.com', '-C', wsDir, 'commit', '-q', '--allow-empty', '-m', 'init'],
   );
 
-  pairingUrl = await new Promise<string>((resolve, reject) => {
-    harnessProcess = spawn(harnessBinary, [], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    const onData = (chunk: Buffer) => {
-      stdout += chunk.toString('utf8');
-      const match = stdout.match(/^READY (\S+)$/m);
-      if (match) {
-        harnessProcess.stdout.off('data', onData);
-        resolve(match[1]);
-      }
-    };
-    harnessProcess.stdout.on('data', onData);
-    harnessProcess.stderr.on('data', (chunk: Buffer) => process.stderr.write(`[harness] ${chunk}`));
-    harnessProcess.on('error', reject);
-    harnessProcess.on('exit', (code) => reject(new Error(`harness exited early with code ${code}`)));
-    setTimeout(() => reject(new Error('harness did not print READY in time')), 15_000);
-  });
-}, 60_000);
+  harness = await DevHarness.start(1);
+}, 90_000);
 
 afterAll(() => {
-  harnessProcess?.kill();
-  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
+  harness?.stop();
   if (wsDir) rmSync(wsDir, { recursive: true, force: true });
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = previousTLSReject;
 });
@@ -92,7 +65,7 @@ describe('persistent connection against a real Go relay + daemon bridge', () => 
     'sustains multiple sequential calls and a pushed eventNotification over one connection',
     { timeout: 30_000 },
     async () => {
-      const conn = await RelayConnection.connect(pairingUrl);
+      const conn = await RelayConnection.connect(harness.pairingUrl, testConnectOptions(2));
       try {
         // At least 3 sequential calls over the one admit+handshake (Item
         // 1's acceptance criterion), via the same mutating methods the

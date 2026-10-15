@@ -29,6 +29,7 @@ import { listRunsForTask, RunSummary } from '../api';
 import { sendFollowUpPrompt, RunTail } from '../followUpPrompt';
 import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
 import { RelayConnection } from '../relay/RelayConnection';
+import { useConnectionState } from '../relay/useConnectionState';
 import { lineFromAttachEvent, TimelineLine, timelineFromLogs } from '../runTimeline';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
@@ -78,6 +79,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   const [sendError, setSendError] = useState<string | null>(null);
   const [permissions, setPermissions] = useState<PermissionRequestState[]>([]);
   const [expandedToolCalls, setExpandedToolCalls] = useState<ReadonlySet<string>>(new Set());
+  const { epoch } = useConnectionState(conn); // reload what a drop interrupted (the run attach) once reconnected
   const board = useRef(new PermissionBoard()).current;
   const liveSeq = useRef(0);
   const followUpTails = useRef<RunTail[]>([]);
@@ -141,7 +143,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
       for (const tail of followUpTails.current) tail.cancel();
       followUpTails.current = [];
     };
-  }, [conn, taskId]);
+  }, [conn, taskId, epoch]);
 
   const nextSeq = useCallback(() => {
     liveSeq.current++;

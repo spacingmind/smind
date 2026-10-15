@@ -8,16 +8,19 @@
 // Rebuilt on the token system (mobile-ui-polish plan Item 1): every
 // color comes from useAppTheme(), never a hardcoded hex literal.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
 import { UiHost } from '../ui/UiHost';
 import { StatusBar } from 'expo-status-bar';
-import { RelayConnection } from '../relay/RelayConnection';
+import { CERTIFICATE_HELP, describeState } from '../relay/connectionStatus';
+import { defaultDeviceLabel, loadPlatformIdentity, resetDeviceIdentity } from '../relay/platformKeyStore';
+import { ConnectionState, RelayConnection } from '../relay/RelayConnection';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
+import { ConnectionStatusCard } from './ConnectionStatusCard';
 
-type Status = { kind: 'idle' } | { kind: 'connecting' } | { kind: 'error'; message: string };
+type Status = { kind: 'idle' } | { kind: 'starting' } | { kind: 'error'; message: string };
 
 interface Props {
   onConnected: (conn: RelayConnection) => void;
@@ -33,15 +36,66 @@ export function PairingScreen({ onConnected }: Props) {
   const pairingUrlState = useNativeState('');
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
 
+  // The connection being set up. The relay connection keeps going while the
+  // daemon has not approved this device (pending): the card below says so and
+  // the screen moves on by itself once it is approved.
+  const attempt = useRef<RelayConnection | null>(null);
+  const handedOff = useRef(false);
+  const [connState, setConnState] = useState<ConnectionState | null>(null);
+
+  useEffect(
+    () => () => {
+      if (!handedOff.current) attempt.current?.close();
+    },
+    [],
+  );
+
+  function cancelAttempt() {
+    attempt.current?.close();
+    attempt.current = null;
+    setConnState(null);
+    setStatus({ kind: 'idle' });
+  }
+
   async function handleConnect() {
-    setStatus({ kind: 'connecting' });
+    setStatus({ kind: 'starting' });
     try {
-      const conn = await RelayConnection.connect(pairingUrl.trim());
-      onConnected(conn);
+      const identity = await loadPlatformIdentity();
+      const conn = RelayConnection.open(pairingUrl.trim(), { identity, label: defaultDeviceLabel() });
+      attempt.current = conn;
+      const track = (s: ConnectionState) => {
+        setConnState(s);
+        if (s.kind === 'connected' && !handedOff.current) {
+          handedOff.current = true;
+          onConnected(conn);
+        }
+      };
+      conn.onState(track);
+      track(conn.state);
+      setStatus({ kind: 'idle' });
     } catch (e) {
       setStatus({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
     }
   }
+
+  async function handleResetIdentity() {
+    cancelAttempt();
+    await resetDeviceIdentity();
+  }
+
+  const busy = status.kind === 'starting' || (connState !== null && connState.kind !== 'failed' && connState.kind !== 'revoked');
+  const view = connState ? describeState(connState) : null;
+  const actions =
+    connState?.kind === 'pending'
+      ? [{ label: 'Cancel', onPress: cancelAttempt }]
+      : connState?.kind === 'revoked'
+        ? [
+            { label: 'Reset device identity', onPress: handleResetIdentity },
+            { label: 'Back', onPress: cancelAttempt },
+          ]
+        : connState?.kind === 'failed'
+          ? [{ label: 'Back', onPress: cancelAttempt }]
+          : [];
 
   return (
     <View style={styles.container}>
@@ -68,13 +122,15 @@ export function PairingScreen({ onConnected }: Props) {
       <View style={styles.connectWrap}>
         <UiHost>
           <Button
-            label={status.kind === 'connecting' ? 'Connecting…' : 'Connect'}
+            label={busy ? 'Connecting…' : 'Connect'}
             onPress={handleConnect}
-            disabled={!pairingUrl.trim() || status.kind === 'connecting'}
+            disabled={!pairingUrl.trim() || busy}
           />
         </UiHost>
       </View>
+      {view && <ConnectionStatusCard view={view} actions={actions} />}
       {status.kind === 'error' && <Text style={styles.error}>{status.message}</Text>}
+      <Text style={styles.help}>{CERTIFICATE_HELP}</Text>
     </View>
   );
 }
@@ -116,6 +172,12 @@ function makeStyles(theme: AppTheme) {
     },
     connectWrap: {
       marginTop: theme.spacing[4],
+    },
+    help: {
+      fontSize: theme.type.metadataLabel.fontSize,
+      lineHeight: theme.type.metadataLabel.lineHeight,
+      color: theme.foregroundMuted,
+      marginTop: theme.spacing[6],
     },
     error: {
       color: theme.status.danger,

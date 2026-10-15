@@ -18,13 +18,21 @@ import { TaskDetailScreen } from './src/screens/TaskDetailScreen';
 import { TasksScreen } from './src/screens/TasksScreen';
 import { Task } from './src/api';
 import { RelayConnection } from './src/relay/RelayConnection';
+import { describeState } from './src/relay/connectionStatus';
+import { resetDeviceIdentity } from './src/relay/platformKeyStore';
+import { useConnectionState } from './src/relay/useConnectionState';
+import { ConnectionStatusCard, ReconnectingBanner } from './src/screens/ConnectionStatusCard';
+import { useAppTheme } from './src/theme/ThemeProvider';
 import { AppThemeProvider } from './src/theme/ThemeProvider';
+import { View } from 'react-native';
 
 type Screen = { kind: 'pairing' } | { kind: 'tasks' } | { kind: 'task'; task: Task };
 
 function AppShell() {
   const [conn, setConn] = useState<RelayConnection | null>(null);
   const [screen, setScreen] = useState<Screen>({ kind: 'pairing' });
+  const theme = useAppTheme();
+  const { state } = useConnectionState(conn);
 
   const handleConnected = useCallback((c: RelayConnection) => {
     setConn(c);
@@ -45,13 +53,40 @@ function AppShell() {
     setScreen({ kind: 'tasks' });
   }, []);
 
+  const handleResetIdentity = useCallback(async () => {
+    handleDisconnect();
+    await resetDeviceIdentity();
+  }, [handleDisconnect]);
+
   if (!conn || screen.kind === 'pairing') {
     return <PairingScreen onConnected={handleConnected} />;
+  }
+
+  // A live session can still end up refused: the daemon owner revoked this
+  // device (or forgot it, so it is pending again), or the daemon at the other
+  // end changed keys. Say so instead of
+  // leaving screens whose calls all reject.
+  if (state.kind === 'revoked' || state.kind === 'failed' || state.kind === 'pending') {
+    const view = describeState(state)!;
+    const actions =
+      state.kind === 'revoked'
+        ? [
+            { label: 'Reset device identity', onPress: handleResetIdentity },
+            { label: 'Back', onPress: handleDisconnect },
+          ]
+        : [{ label: 'Back', onPress: handleDisconnect }];
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.surface[0], paddingTop: theme.spacing[16], paddingHorizontal: theme.spacing[4] }}>
+        <StatusBar style="auto" />
+        <ConnectionStatusCard view={view} actions={actions} />
+      </View>
+    );
   }
 
   return (
     <>
       <StatusBar style="auto" />
+      {state.kind === 'reconnecting' ? <ReconnectingBanner>Reconnecting to the daemon…</ReconnectingBanner> : null}
       {screen.kind === 'task' ? (
         <TaskDetailScreen conn={conn} taskId={screen.task.ID} taskTitle={screen.task.Title} onBack={handleBack} />
       ) : (

@@ -3,7 +3,8 @@
 // in React Native, which node-side tests cannot load.
 
 import * as SecureStore from 'expo-secure-store';
-import { DeviceKeyStore, MemoryDeviceKeyStore } from './deviceIdentity';
+import { Platform } from 'react-native';
+import { DeviceIdentity, DeviceKeyStore, loadOrCreateIdentity, MemoryDeviceKeyStore } from './deviceIdentity';
 import { secureStoreDeviceKeyStore } from './deviceKeyStore';
 
 /**
@@ -21,4 +22,35 @@ export async function platformDeviceKeyStore(): Promise<DeviceKeyStore> {
     deleteItemAsync: SecureStore.deleteItemAsync,
     keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
   });
+}
+
+let identityPromise: Promise<DeviceIdentity> | null = null;
+
+/** The device identity for this install, created on first use and then kept (in memory for the process, in the secure store across launches). */
+export function loadPlatformIdentity(): Promise<DeviceIdentity> {
+  if (!identityPromise) {
+    identityPromise = platformDeviceKeyStore()
+      .then(loadOrCreateIdentity)
+      .catch((e) => {
+        identityPromise = null; // a failed read is retried, not cached
+        throw e;
+      });
+  }
+  return identityPromise;
+}
+
+/**
+ * Forgets this device's identity: the next connection uses a new key and
+ * presents as a new device to the daemon (which has to approve it again). The
+ * way back for a device whose identity the daemon revoked.
+ */
+export async function resetDeviceIdentity(): Promise<void> {
+  identityPromise = null;
+  await (await platformDeviceKeyStore()).remove();
+}
+
+/** What the person approving this device on the daemon sees, e.g. "iPhone (smind mobile)". */
+export function defaultDeviceLabel(): string {
+  const kind = Platform.OS === 'ios' ? 'iPhone' : Platform.OS === 'android' ? 'Android phone' : 'Browser';
+  return `${kind} (smind mobile)`;
 }

@@ -1,19 +1,34 @@
-// RelayConnection.ts is Milestone 2's Item 1: the persistent, multi-call
+// RelayConnection.ts is Milestone 2's Item 1 -- the persistent, multi-call
 // generalization of Milestone 1's one-shot connectAndFetchWorkspaceList
-// (docs/plans/active/mobile-app-milestone-2.md). One admit + E2EE
-// handshake buys any number of sequential (or concurrent) JSON-RPC-style
-// calls over the same Channel, plus topic subscriptions for the server's
-// unsolicited eventNotification pushes -- the TypeScript mirror of
-// internal/wsapi/conn.go's id-keyed request/response contract layered
-// with internal/wsapi/events.go's subscribe/push mechanism:
+// (docs/plans/active/mobile-app-milestone-2.md) -- grown into the mobile half
+// of ADR-0031 D9's multi-device relay (P13b): the connection has a device
+// identity, proves it with relay.device_hello, keeps its stream alive with
+// keepalives, and survives drops by resuming (or, when the daemon lost the
+// session, re-handshaking) on its own.
+//
+// One admit + E2EE handshake + device_hello buys any number of sequential (or
+// concurrent) JSON-RPC-style calls over the same Channel, plus topic
+// subscriptions for the server's unsolicited eventNotification pushes -- the
+// TypeScript mirror of internal/wsapi/conn.go's id-keyed request/response
+// contract layered with internal/wsapi/events.go's subscribe/push mechanism:
 //   out:  {id, method, params}
 //   back: {id, result} | {id, error: {message, code?}}
 //         {id, event, params}                  (request-scoped emit, e.g. run.attach chunks)
 //         {event: {topic, seq, payload}}       (no id: pushed event notification)
+//
+// Lifecycle (see ConnectionState): connecting -> connected; a drop goes to
+// reconnecting and back; a daemon that has not approved this device yet is
+// pending (retried until approved); a revoked device is revoked for good.
+// Requests are at-most-once across a drop (the relay has no acknowledgements,
+// so one in flight when the stream died may be lost): they reject and the
+// caller decides whether to repeat them. Subscriptions are the connection's
+// business and are re-established after every reconnect.
 
 import { computeProof, PROTOCOL_VERSION, randomNonce } from './admission';
-import { Channel, generateKeyPair, Role } from './e2ee';
-import { GRPCWebSocketStream, grpcWebUnary } from './grpcweb';
+import { buildDeviceHello, DeviceIdentity, HELLO_METHOD, HELLO_VERSION } from './deviceIdentity';
+import { Channel, generateKeyPair, RawTransport, Role } from './e2ee';
+import { DataStream, GrpcCode, GRPCWebSocketStream, GrpcStatusError, grpcWebUnary } from './grpcweb';
+import { DEFAULT_KEEPALIVE, Keepalive, KeepaliveTiming } from './keepalive';
 import { PairingOffer, parsePairingURL } from './pairing';
 import {
   decodeAdmitChallengeResponse,
@@ -23,13 +38,7 @@ import {
   encodeAdmitChallengeRequest,
   encodeAdmitRequest,
   encodeFrame,
-  Frame,
 } from './proto';
-
-/** The daemon-side fixed session identity Milestone 1's bridge bridges (see internal/relay/bridge's DefaultSessionID/DefaultDeviceID doc comment for why). */
-const DEFAULT_SESSION_ID = 'm1-default-session';
-const DEFAULT_DEVICE_ID = 'm1-default-device';
-const MOBILE_DAEMON_KEY_ID = 'mobile-app-milestone-1';
 
 /** One server-pushed eventNotification, already unwrapped from its envelope. */
 export interface RelayEvent {
@@ -68,24 +77,86 @@ interface PendingCall {
   onEvent?: (event: string, params: unknown) => void;
 }
 
+/** Where a connection is in its life; see the file comment. */
+export type ConnectionState =
+  | { kind: 'connecting' }
+  | { kind: 'connected' }
+  /** The stream dropped (or the daemon is unreachable) and the connection is working to get back. */
+  | { kind: 'reconnecting'; attempt: number; reason: string }
+  /** The daemon knows this device but has not approved it: `smind relay devices approve <deviceId>` on the daemon. Retried automatically. */
+  | { kind: 'pending'; deviceId: string; label: string }
+  /** The daemon (or relay) revoked this device. Terminal: pair again to use a fresh identity. */
+  | { kind: 'revoked'; deviceId: string }
+  /** Cannot connect and will not retry on its own (bad offer secret, daemon too old, ...). */
+  | { kind: 'failed'; message: string }
+  | { kind: 'closed' };
+
+/** Timings of the reconnect loop; tests shorten them. */
+export interface ReconnectTiming {
+  /** First backoff step after the first immediate retry; doubles up to maxMs (1 s). */
+  baseMs: number;
+  /** Backoff ceiling (30 s). */
+  maxMs: number;
+  /** How often a pending (not yet approved) device asks again (5 s). */
+  pendingPollMs: number;
+  /** How long a resumed session gets to answer a liveness request before it is replaced by a fresh one (10 s). */
+  resumeProbeMs: number;
+  /** How long a fresh session gets to finish the E2EE handshake and the hello answer (20 s). */
+  handshakeMs: number;
+  /** Resumes of one session that may fail in a row before it is replaced by a fresh one (3). */
+  maxResumeFailures: number;
+}
+
+export const DEFAULT_RECONNECT: ReconnectTiming = {
+  baseMs: 1_000,
+  maxMs: 30_000,
+  pendingPollMs: 5_000,
+  resumeProbeMs: 10_000,
+  handshakeMs: 20_000,
+  maxResumeFailures: 3,
+};
+
+/** The network side of a connection; tests substitute a fake relay. */
+export interface RelayNet {
+  admit(baseUrl: string, workspaceId: string, secret: Uint8Array, daemonKeyId: string): Promise<Uint8Array>;
+  openStream(wsUrl: string, headers: Record<string, string>): DataStream;
+}
+
+export interface ConnectOptions {
+  /** The persistent device identity (deviceIdentity.ts); proven to the daemon in relay.device_hello. */
+  identity: DeviceIdentity;
+  /** Shown to the person approving this device on the daemon. */
+  label: string;
+  keepalive?: Partial<KeepaliveTiming>;
+  reconnect?: Partial<ReconnectTiming>;
+  net?: RelayNet;
+  /** Spreads a delay by +-20% (tests pass an identity function). */
+  jitter?: (ms: number) => number;
+}
+
+/** The hello was refused because the daemon has not approved this device. */
+class AwaitingApprovalError extends Error {}
+/** The daemon or relay revoked this device. */
+class RevokedError extends Error {}
+/** A failure that retrying will not fix. */
+class FatalError extends Error {}
+
+const HELLO_REQUEST_ID = 'hello';
+const PING_METHOD = 'relay.ping';
+
 function hexEncode(bytes: Uint8Array): string {
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 }
 
-async function admit(baseUrl: string, workspaceId: string, secret: Uint8Array): Promise<Uint8Array> {
+async function admit(baseUrl: string, workspaceId: string, secret: Uint8Array, daemonKeyId: string): Promise<Uint8Array> {
   const clientNonce = randomNonce();
   const challenge = await grpcWebUnary(
     baseUrl,
     'AdmitChallenge',
-    encodeAdmitChallengeRequest({
-      protocolVersion: PROTOCOL_VERSION,
-      workspaceId,
-      clientNonce,
-      daemonKeyId: MOBILE_DAEMON_KEY_ID,
-    }),
-    decodeAdmitChallengeResponse
+    encodeAdmitChallengeRequest({ protocolVersion: PROTOCOL_VERSION, workspaceId, clientNonce, daemonKeyId }),
+    decodeAdmitChallengeResponse,
   );
 
   const proof = computeProof(secret, {
@@ -93,7 +164,7 @@ async function admit(baseUrl: string, workspaceId: string, secret: Uint8Array): 
     workspaceId,
     clientNonce,
     serverNonce: challenge.serverNonce,
-    daemonKeyId: MOBILE_DAEMON_KEY_ID,
+    daemonKeyId,
   });
 
   const admitResp = await grpcWebUnary(
@@ -103,15 +174,20 @@ async function admit(baseUrl: string, workspaceId: string, secret: Uint8Array): 
       protocolVersion: PROTOCOL_VERSION,
       workspaceId,
       clientNonce,
-      daemonKeyId: MOBILE_DAEMON_KEY_ID,
+      daemonKeyId,
       serverNonce: challenge.serverNonce,
       proof,
     }),
-    decodeAdmitResponse
+    decodeAdmitResponse,
   );
   if (admitResp.admissionId.length === 0) throw new Error('admit: relay returned an empty admission id');
   return admitResp.admissionId;
 }
+
+const realNet: RelayNet = {
+  admit,
+  openStream: (wsUrl, headers) => new GRPCWebSocketStream(wsUrl, headers),
+};
 
 function wsBaseURL(httpsBaseUrl: string): string {
   if (httpsBaseUrl.startsWith('https://')) return 'wss://' + httpsBaseUrl.slice('https://'.length);
@@ -119,94 +195,260 @@ function wsBaseURL(httpsBaseUrl: string): string {
   throw new Error(`relay URL must be http(s)://, got ${httpsBaseUrl}`);
 }
 
-/**
- * Adapts one GRPCWebSocketStream (relay.v1.Frame messages) to e2ee's
- * RawTransport (opaque byte chunks) -- the TypeScript mirror of Go's
- * frameConn (internal/relay/client/client.go), one layer below the E2EE
- * Channel.
- */
-function frameTransport(stream: GRPCWebSocketStream, workspaceId: string, sessionId: string, deviceId: string) {
-  let seq = 0;
-  return {
-    send(bytes: Uint8Array): void {
-      const frame: Frame = {
-        workspaceId,
-        sessionId: new TextEncoder().encode(sessionId),
-        deviceId,
-        direction: Direction.DEVICE_TO_DAEMON,
-        sequence: seq++,
-        payload: bytes,
-      };
-      stream.send(encodeFrame(frame));
-    },
-    receiveChunk(): Promise<Uint8Array> {
-      return stream.receiveMessage(decodeFrame).then((f) => f.payload);
-    },
-  };
+/** A fresh E2EE session id (Frame.session_id): 128 random bits, hex. */
+function randomSessionId(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return 's-' + hexEncode(bytes);
+}
+
+function defaultJitter(ms: number): number {
+  return ms * (0.8 + Math.random() * 0.4);
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
 }
 
 /**
- * RelayConnection is one admitted, E2EE-handshaken, long-lived relay
- * session. Construct via connect(); then issue any number of call()s
- * (each matched to its own response by a locally-generated incrementing
- * id, so out-of-order or concurrent responses land on the right promise)
- * and subscribe() to topics for pushed eventNotification messages. close()
- * tears the underlying stream down; call()s after close reject instead of
- * hanging, as do in-flight ones.
+ * RouteTransport adapts the OpenData streams of ONE relay route (host,
+ * session, device) to e2ee's RawTransport -- the TypeScript mirror of Go's
+ * frameConn (internal/relay/client/client.go) one layer below the E2EE
+ * Channel. The route outlives any one stream: after a drop attach() puts the
+ * next stream under the same Channel, and the frame sequence carries on (the
+ * relay orders buffered frames by it), so the session resumes in place.
  */
+class RouteTransport implements RawTransport {
+  private stream: DataStream | null = null;
+  private keepalive: Keepalive | null = null;
+  private seq = 0;
+
+  constructor(
+    private readonly workspaceId: string,
+    private readonly sessionId: string,
+    private readonly deviceId: string,
+    private readonly timing: KeepaliveTiming,
+  ) {}
+
+  /** Starts using stream: registers the route (the relay derives a stream's route from its first frame) and starts its keepalive. */
+  attach(stream: DataStream): void {
+    this.stream = stream;
+    this.send(new Uint8Array(0));
+    this.keepalive?.stop();
+    this.keepalive = new Keepalive(
+      this.timing,
+      (nonce) => this.sendFrame(stream, { sequence: nonce, payload: new Uint8Array(0), keepalive: true }),
+      () => stream.close(),
+    );
+  }
+
+  /** Ends the current stream (idempotent); the session state in the Channel is untouched. */
+  detach(): void {
+    this.keepalive?.stop();
+    this.keepalive = null;
+    this.stream?.close();
+    this.stream = null;
+  }
+
+  private sendFrame(stream: DataStream, f: { sequence: number; payload: Uint8Array; keepalive: boolean }): void {
+    stream.send(
+      encodeFrame({
+        workspaceId: this.workspaceId,
+        sessionId: new TextEncoder().encode(this.sessionId),
+        deviceId: this.deviceId,
+        direction: Direction.DEVICE_TO_DAEMON,
+        ...f,
+      }),
+    );
+  }
+
+  send(bytes: Uint8Array): void {
+    if (!this.stream) throw new Error('relay: stream is closed');
+    this.sendFrame(this.stream, { sequence: this.seq++, payload: bytes, keepalive: false });
+  }
+
+  async receiveChunk(): Promise<Uint8Array> {
+    const stream = this.stream;
+    if (!stream) throw new Error('relay: stream is closed');
+    for (;;) {
+      const frame = await stream.receiveMessage(decodeFrame);
+      this.keepalive?.noteFrame(frame);
+      // A liveness frame (an echo of ours, or a probe a relay without
+      // keepalive forwarded from the peer): never application data.
+      if (frame.keepalive) continue;
+      return frame.payload;
+    }
+  }
+}
+
+/** One E2EE session with the daemon: survives stream drops (resume) until it is replaced (fresh). */
+interface Session {
+  transport: RouteTransport;
+  channel: Channel;
+}
+
+/** A running receive loop over a session's current stream. */
+interface Link {
+  session: Session;
+  /** Settles when the receive loop ended, i.e. the stream is gone. */
+  done: Promise<Error>;
+}
+
 /** The piece of GRPCWebSocketStream close() needs; an interface so tests can supply a stub. */
 export interface CloseableStream {
   close(): void;
 }
 
+class TimeoutError extends Error {}
+
+/**
+ * Maps what a stream or handshake threw to what the supervisor acts on: a
+ * relay refusal of a revoked device and a daemon whose key is not the one in
+ * the offer are final, everything else is a transport failure.
+ */
+function classify(err: unknown): Error {
+  const e = err instanceof Error ? err : new Error(String(err));
+  if (e instanceof AwaitingApprovalError || e instanceof RevokedError || e instanceof FatalError || e instanceof TimeoutError) return e;
+  if (e instanceof GrpcStatusError && e.code === GrpcCode.PermissionDenied && /revoked/i.test(e.message)) {
+    return new RevokedError(e.message);
+  }
+  if (e.message.startsWith('e2ee: daemon public key does not match')) {
+    return new FatalError('the daemon at the other end is not the one in the pairing offer (its key changed); pair again');
+  }
+  return e;
+}
+
+/**
+ * RelayConnection is one admitted, E2EE-handshaken, identified, long-lived
+ * relay session. Create it with open() (or connect(), which waits for the
+ * connected state); then issue any number of call()s (each matched to its own
+ * response by a locally-generated incrementing id, so out-of-order or
+ * concurrent responses land on the right promise) and subscribe() to topics
+ * for pushed eventNotification messages. It reconnects on its own after a
+ * drop (see the file comment); state/onState expose where it is. close()
+ * tears it down for good: call()s after close reject instead of hanging, as do
+ * in-flight ones.
+ */
 export class RelayConnection {
-  private readonly stream: CloseableStream;
-  private readonly channel: Channel;
+  private channel: Channel | null;
+  private stream: CloseableStream | null;
   private nextId = 0;
   private pending = new Map<string, PendingCall>();
   private topicCallbacks = new Map<string, Set<(event: RelayEvent) => void>>();
   private closed = false;
+  private stateValue: ConnectionState;
+  private connectedCount = 0;
+  private stateListeners = new Set<(s: ConnectionState) => void>();
+
+  // Supervised mode only (open()); an "established" connection (the
+  // constructor's stream + channel) has none of this and does not reconnect.
+  private session: Session | null = null;
+  private link: Link | null = null;
+  private opts: ConnectOptions | null = null;
+  private keepalive: KeepaliveTiming = DEFAULT_KEEPALIVE;
+  private timing: ReconnectTiming = DEFAULT_RECONNECT;
+  private net: RelayNet = realNet;
+  private jitter: (ms: number) => number = defaultJitter;
+  private wake: (() => void) | null = null;
 
   /** The pairing offer this connection was admitted under. */
   readonly offer: PairingOffer;
 
-  /** Public for tests (over a pre-handshaken Channel); real callers use connect(). */
-  constructor(offer: PairingOffer, stream: CloseableStream, channel: Channel) {
+  /**
+   * Public for tests: an already-handshaken connection over a pre-made
+   * Channel, with no identity and no reconnect (the in-memory harness,
+   * relayHarness.ts). Real callers use open() / connect().
+   */
+  constructor(offer: PairingOffer, stream: CloseableStream | null, channel: Channel | null) {
     this.offer = offer;
     this.stream = stream;
     this.channel = channel;
-    this.runReceiveLoop();
+    this.stateValue = channel ? { kind: 'connected' } : { kind: 'connecting' };
+    if (channel) {
+      this.connectedCount = 1;
+      void this.receiveLoop(channel).then((err) => this.failAllPending(err));
+    }
   }
 
   /**
-   * Runs the full connect sequence (parse offer -> admit -> open the
-   * bridged E2EE data session as the mobile role -> verify the daemon's
-   * public key against the offer's) and returns the live connection with
-   * its receive loop already running.
+   * Starts a connection in the background and returns it at once, in the
+   * connecting state; watch state/onState. Throws for an offer that cannot be
+   * used at all.
    */
-  static async connect(pairingUrl: string): Promise<RelayConnection> {
+  static open(pairingUrl: string, opts: ConnectOptions): RelayConnection {
     const offer = parsePairingURL(pairingUrl);
-    if (!offer.workspaceId) throw new Error('pairing offer has no workspace id');
+    if (!offer.workspaceId) throw new Error('pairing offer has no relay host id');
     if (offer.secret.length === 0) throw new Error('pairing offer has no admission secret');
+    const conn = new RelayConnection(offer, null, null);
+    conn.opts = opts;
+    conn.keepalive = { ...DEFAULT_KEEPALIVE, ...opts.keepalive };
+    conn.timing = { ...DEFAULT_RECONNECT, ...opts.reconnect };
+    conn.net = opts.net ?? realNet;
+    conn.jitter = opts.jitter ?? defaultJitter;
+    void conn.supervise().catch((e) => conn.setState({ kind: 'failed', message: e instanceof Error ? e.message : String(e) }));
+    return conn;
+  }
 
-    const admissionId = await admit(offer.relay, offer.workspaceId, offer.secret);
+  /**
+   * open() that resolves once the connection is connected, and rejects if it
+   * ends up revoked, failed or closed. A device that is not approved yet
+   * keeps waiting (the pending state): approval arrives out of band.
+   */
+  static async connect(pairingUrl: string, opts: ConnectOptions): Promise<RelayConnection> {
+    const conn = RelayConnection.open(pairingUrl, opts);
+    try {
+      await conn.whenConnected();
+    } catch (e) {
+      conn.close();
+      throw e;
+    }
+    return conn;
+  }
 
-    const stream = new GRPCWebSocketStream(`${wsBaseURL(offer.relay)}/relay.v1.Relay/OpenData`, {
-      'admission-id': hexEncode(admissionId),
+  /** Where the connection is now. */
+  get state(): ConnectionState {
+    return this.stateValue;
+  }
+
+  /** Counts how many times the connection became connected (first connect and every reconnect); screens reload their data when it changes. */
+  get epoch(): number {
+    return this.connectedCount;
+  }
+
+  /** Calls cb on every state change; returns its unsubscribe. */
+  onState(cb: (state: ConnectionState) => void): () => void {
+    this.stateListeners.add(cb);
+    return () => this.stateListeners.delete(cb);
+  }
+
+  /** Resolves when connected; rejects when revoked, failed or closed. */
+  whenConnected(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const check = (s: ConnectionState): boolean => {
+        if (s.kind === 'connected') resolve();
+        else if (s.kind === 'revoked') reject(new Error('this device was revoked by the daemon'));
+        else if (s.kind === 'failed') reject(new Error(s.message));
+        else if (s.kind === 'closed') reject(new Error('relay: connection is closed'));
+        else return false;
+        return true;
+      };
+      if (check(this.stateValue)) return;
+      const off = this.onState((s) => {
+        if (check(s)) off();
+      });
     });
-    await stream.ready();
-
-    const transport = frameTransport(stream, offer.workspaceId, DEFAULT_SESSION_ID, DEFAULT_DEVICE_ID);
-    // The relay derives a stream's route from its first frame, so an empty
-    // registration frame is sent immediately -- internal/relay/client's
-    // frameConn.register does the same thing on the Go side.
-    transport.send(new Uint8Array(0));
-
-    const mobileKeyPair = generateKeyPair();
-    const channel = new Channel(transport, mobileKeyPair, Role.Mobile);
-    await channel.handshake(offer.publicKey);
-
-    return new RelayConnection(offer, stream, channel);
   }
 
   /**
@@ -215,32 +457,13 @@ export class RelayConnection {
    * emits like run.attach's streamed chunks) are routed to
    * opts.onEvent if given. A matching {id, error} response (or the
    * connection dying) rejects this call's promise only -- other in-flight
-   * calls are unaffected.
+   * calls are unaffected. While the connection is not connected the call
+   * rejects at once.
    */
   call(method: string, params?: unknown, opts?: CallOptions): CancellablePromise<unknown> {
-    if (this.closed) {
-      return Object.assign(Promise.reject(new Error('relay: connection is closed')), { cancel: () => {} });
-    }
-    const id = String(++this.nextId);
-    const promise = new Promise<unknown>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, onEvent: opts?.onEvent });
-      const envelope: Record<string, unknown> = { id, method };
-      if (params !== undefined) envelope.params = params;
-      this.channel.send(new TextEncoder().encode(JSON.stringify(envelope)));
-    }) as CancellablePromise<unknown>;
-    promise.cancel = () => {
-      const p = this.pending.get(id);
-      if (!p) return;
-      this.pending.delete(id);
-      // conn.go's cancellation shape: task.cancel with no envelope id,
-      // naming the target request's id in params. For run.attach this
-      // detaches without stopping the run.
-      if (!this.closed) {
-        this.channel.send(new TextEncoder().encode(JSON.stringify({ method: 'task.cancel', params: { id } })));
-      }
-      p.reject(new Error('relay: call cancelled'));
-    };
-    return promise;
+    if (this.closed) return rejected(new Error('relay: connection is closed'));
+    if (this.stateValue.kind !== 'connected') return rejected(new Error(`relay: not connected (${this.stateValue.kind})`));
+    return this.request(method, params, opts);
   }
 
   /**
@@ -248,7 +471,8 @@ export class RelayConnection {
    * returns its unsubscribe function, which removes the callbacks and
    * releases the topics no other subscriber wants (via
    * events.unsubscribe). Pushed eventNotification messages are dispatched
-   * by topic to every registered callback.
+   * by topic to every registered callback. The connection re-subscribes to
+   * every wanted topic after each reconnect.
    */
   subscribe(topics: string[], onEvent: (event: RelayEvent) => void): () => void {
     const newlySubscribed: string[] = [];
@@ -278,41 +502,84 @@ export class RelayConnection {
     };
   }
 
-  /** Tears down the stream; pending and future call()s reject, and topic callbacks stop. Idempotent. */
+  /** Tears down the stream for good; pending and future call()s reject, topic callbacks stop and no reconnect follows. Idempotent. */
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    const err = new Error('relay: connection is closed');
-    for (const p of this.pending.values()) p.reject(err);
-    this.pending.clear();
+    this.rejectPending(new Error('relay: connection is closed'));
     this.topicCallbacks.clear();
-    this.stream.close();
+    this.session?.transport.detach();
+    this.stream?.close();
+    this.setState({ kind: 'closed' });
+    this.wake?.();
+  }
+
+  // --- requests ---
+
+  private request(method: string, params: unknown, opts?: CallOptions): CancellablePromise<unknown> {
+    const channel = this.channel;
+    if (!channel) return rejected(new Error('relay: not connected'));
+    const id = String(++this.nextId);
+    const promise = new Promise<unknown>((resolve, reject) => {
+      this.pending.set(id, { resolve, reject, onEvent: opts?.onEvent });
+      const envelope: Record<string, unknown> = { id, method };
+      if (params !== undefined) envelope.params = params;
+      try {
+        channel.send(new TextEncoder().encode(JSON.stringify(envelope)));
+      } catch (e) {
+        this.pending.delete(id);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
+    }) as CancellablePromise<unknown>;
+    promise.cancel = () => {
+      const p = this.pending.get(id);
+      if (!p) return;
+      this.pending.delete(id);
+      // conn.go's cancellation shape: task.cancel with no envelope id,
+      // naming the target request's id in params. For run.attach this
+      // detaches without stopping the run.
+      if (!this.closed && this.channel === channel) {
+        try {
+          channel.send(new TextEncoder().encode(JSON.stringify({ method: 'task.cancel', params: { id } })));
+        } catch {
+          // The stream is going down; the daemon drops the request with it.
+        }
+      }
+      p.reject(new Error('relay: call cancelled'));
+    };
+    return promise;
   }
 
   private fireSubscriptionRPC(method: string, topics: string[]): void {
-    if (this.closed) return;
-    this.call(method, { topics }).catch(() => {
+    if (this.closed || this.stateValue.kind !== 'connected') return;
+    this.request(method, { topics }).catch(() => {
       // A failed subscribe just means this callback never fires; an
       // unsubscribe that races a closed connection is equally ignorable.
     });
   }
 
-  private runReceiveLoop(): void {
-    void (async () => {
-      const decoder = new TextDecoder();
-      try {
-        for (;;) {
-          const bytes = await this.channel.receive();
-          try {
-            this.handleEnvelope(JSON.parse(decoder.decode(bytes)));
-          } catch {
-            // Malformed JSON: skip the message, mirroring conn.go's serve.
-          }
+  private resubscribe(): void {
+    const topics = [...this.topicCallbacks.keys()];
+    if (topics.length > 0) this.fireSubscriptionRPC('events.subscribe', topics);
+  }
+
+  // --- receive path ---
+
+  /** Dispatches decrypted messages from channel until its stream ends; resolves with why. */
+  private async receiveLoop(channel: Channel): Promise<Error> {
+    const decoder = new TextDecoder();
+    try {
+      for (;;) {
+        const bytes = await channel.receive();
+        try {
+          this.handleEnvelope(JSON.parse(decoder.decode(bytes)));
+        } catch {
+          // Malformed JSON: skip the message, mirroring conn.go's serve.
         }
-      } catch (err) {
-        this.failAllPending(err instanceof Error ? err : new Error(String(err)));
       }
-    })();
+    } catch (err) {
+      return err instanceof Error ? err : new Error(String(err));
+    }
   }
 
   private handleEnvelope(env: WireEnvelope): void {
@@ -348,10 +615,255 @@ export class RelayConnection {
     }
   }
 
-  private failAllPending(err: Error): void {
-    this.closed = true;
+  private rejectPending(err: Error): void {
     for (const p of this.pending.values()) p.reject(err);
     this.pending.clear();
-    this.topicCallbacks.clear();
   }
+
+  /** An established (non-reconnecting) connection lost its stream: same as the old behaviour, closed for good. */
+  private failAllPending(err: Error): void {
+    this.closed = true;
+    this.rejectPending(err);
+    this.topicCallbacks.clear();
+    this.setState({ kind: 'closed' });
+  }
+
+  private setState(next: ConnectionState): void {
+    if (this.stateValue.kind === 'closed' && next.kind !== 'closed') return;
+    this.stateValue = next;
+    if (next.kind === 'connected') this.connectedCount++;
+    for (const cb of [...this.stateListeners]) cb(next);
+  }
+
+  // --- supervisor ---
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(done, ms);
+      const self = this;
+      function done() {
+        clearTimeout(timer);
+        self.wake = null;
+        resolve();
+      }
+      this.wake = done;
+    });
+  }
+
+  private backoff(attempt: number): number {
+    return this.jitter(Math.min(this.timing.baseMs * 2 ** (attempt - 1), this.timing.maxMs));
+  }
+
+  /**
+   * The connection's whole life: establish a session (resume the previous one
+   * after a drop, otherwise a fresh one), serve until its stream ends, then
+   * establish again -- until closed, revoked or failed for good.
+   */
+  private async supervise(): Promise<void> {
+    const opts = this.opts!;
+    let everConnected = false;
+    let attempt = 0;
+    let resumeFailures = 0;
+
+    while (!this.closed) {
+      let link: Link;
+      try {
+        link = this.session ? await this.resumeSession(this.session) : await this.freshSession();
+      } catch (raw) {
+        if (this.closed) return;
+        const e = classify(raw);
+        if (e instanceof RevokedError) {
+          this.dropSession();
+          this.setState({ kind: 'revoked', deviceId: opts.identity.deviceId });
+          return;
+        }
+        if (e instanceof FatalError) {
+          this.dropSession();
+          this.setState({ kind: 'failed', message: e.message });
+          return;
+        }
+        if (e instanceof AwaitingApprovalError) {
+          this.dropSession();
+          this.setState({ kind: 'pending', deviceId: opts.identity.deviceId, label: opts.label });
+          await this.sleep(this.jitter(this.timing.pendingPollMs));
+          continue;
+        }
+        if (e instanceof TimeoutError && this.session) {
+          // The resumed session was not answered: the daemon lost it (it
+          // restarted, or dropped the device). Start over with a fresh one.
+          this.dropSession();
+          continue;
+        }
+        if (!everConnected) {
+          // Nothing has worked yet: an unreachable relay or a bad secret is
+          // the user's to fix; report it rather than retrying silently.
+          this.dropSession();
+          this.setState({ kind: 'failed', message: e.message });
+          return;
+        }
+        if (this.session && ++resumeFailures >= this.timing.maxResumeFailures) {
+          this.dropSession();
+          resumeFailures = 0;
+        }
+        attempt++;
+        this.setState({ kind: 'reconnecting', attempt, reason: e.message });
+        await this.sleep(this.backoff(attempt));
+        continue;
+      }
+
+      everConnected = true;
+      attempt = 0;
+      resumeFailures = 0;
+      this.link = link;
+      this.setState({ kind: 'connected' });
+      this.resubscribe();
+
+      const err = classify(await link.done);
+      link.session.transport.detach();
+      this.link = null;
+      if (this.closed) return;
+      if (err instanceof RevokedError) {
+        this.dropSession();
+        this.setState({ kind: 'revoked', deviceId: opts.identity.deviceId });
+        return;
+      }
+      // The first retry is immediate: most drops are a blip.
+      this.setState({ kind: 'reconnecting', attempt: 0, reason: err.message });
+    }
+  }
+
+  private dropSession(): void {
+    this.session?.transport.detach();
+    this.session = null;
+    this.channel = null;
+  }
+
+  /** Admits and opens one OpenData stream for the route; failures here are transport failures (the session, if any, is intact). */
+  private async openRoute(): Promise<DataStream> {
+    const { offer } = this;
+    const admissionId = await this.net.admit(offer.relay, offer.workspaceId, offer.secret, `device-${this.opts!.identity.deviceId}`);
+    if (this.closed) throw new Error('relay: connection is closed');
+    const stream = this.net.openStream(`${wsBaseURL(offer.relay)}/relay.v1.Relay/OpenData`, {
+      'admission-id': hexEncode(admissionId),
+    });
+    try {
+      await stream.ready();
+    } catch (e) {
+      stream.close();
+      throw e;
+    }
+    if (this.closed) {
+      stream.close();
+      throw new Error('relay: connection is closed');
+    }
+    return stream;
+  }
+
+  /** Starts the receive loop over the session's current stream; done fails every pending request when the stream ends. */
+  private startLink(session: Session): Link {
+    this.channel = session.channel;
+    const done = this.receiveLoop(session.channel).then((err) => {
+      this.rejectPending(new Error('relay: connection lost'));
+      return err;
+    });
+    return { session, done };
+  }
+
+  /** A brand new session: new route id, new E2EE handshake, device_hello. */
+  private async freshSession(): Promise<Link> {
+    const { identity, label } = this.opts!;
+    this.dropSession();
+    const transport = new RouteTransport(this.offer.workspaceId, randomSessionId(), identity.deviceId, this.keepalive);
+    const keyPair = generateKeyPair();
+    const channel = new Channel(transport, keyPair, Role.Mobile);
+    try {
+      transport.attach(await this.openRoute());
+      await withTimeout(
+        channel.handshake(this.offer.publicKey),
+        this.timing.handshakeMs,
+        'the daemon did not complete the relay handshake (is it running and connected to this relay?)',
+      );
+      channel.send(
+        new TextEncoder().encode(
+          JSON.stringify({
+            id: HELLO_REQUEST_ID,
+            method: HELLO_METHOD,
+            params: buildDeviceHello(identity, label, this.offer.publicKey, keyPair.publicKey),
+          }),
+        ),
+      );
+      await withTimeout(
+        this.readHelloAnswer(channel),
+        this.timing.handshakeMs,
+        'the daemon did not answer device_hello (it may be older than v0.12: update it)',
+      );
+    } catch (e) {
+      transport.detach();
+      throw classify(e);
+    }
+    const session: Session = { transport, channel };
+    this.session = session;
+    return this.startLink(session);
+  }
+
+  /** Reads the hello answer (the first message after the handshake) and turns a refusal into the error the supervisor acts on. */
+  private async readHelloAnswer(channel: Channel): Promise<void> {
+    const decoder = new TextDecoder();
+    for (;;) {
+      let env: WireEnvelope;
+      try {
+        env = JSON.parse(decoder.decode(await channel.receive()));
+      } catch (e) {
+        if (e instanceof SyntaxError) continue;
+        throw e;
+      }
+      if (env.id !== HELLO_REQUEST_ID) continue;
+      if (env.error) {
+        const { code, message } = env.error;
+        if (code === 'awaiting_approval') throw new AwaitingApprovalError(message);
+        if (code === 'revoked') throw new RevokedError(message);
+        if (code === 'bad_hello' || code === 'device_hello_unsupported') throw new FatalError(message);
+        if (!code && /method not found/i.test(message)) {
+          throw new FatalError('the daemon predates device identity (it needs v0.12 or later); update it');
+        }
+        throw new Error(message); // too_many_devices, too_many_pending, internal: worth retrying
+      }
+      const result = env.result as { v?: number; device_id?: string } | undefined;
+      if (result?.v !== HELLO_VERSION || result.device_id !== this.opts!.identity.deviceId) {
+        throw new FatalError('the daemon answered device_hello with an unexpected identity');
+      }
+      return;
+    }
+  }
+
+  /** Puts a new stream under the existing session (same route, same keys and counters) and checks that the daemon still has it. */
+  private async resumeSession(session: Session): Promise<Link> {
+    const stream = await this.openRoute();
+    session.transport.attach(stream);
+    session.channel.resumeTransport();
+    const link = this.startLink(session);
+    try {
+      // The relay has no acknowledgements, so the only proof the daemon still
+      // holds this session is an answer. Any answer will do, even "method
+      // not found".
+      await withTimeout(this.request(PING_METHOD, undefined).catch(answeredOrThrow), this.timing.resumeProbeMs, 'the daemon did not answer on the resumed session');
+    } catch (e) {
+      session.transport.detach();
+      const why = classify(await link.done);
+      if (why instanceof RevokedError) throw why;
+      throw e instanceof TimeoutError ? e : classify(e);
+    }
+    return link;
+  }
+}
+
+/** A daemon's error answer ("method not found") is still an answer; only a lost connection or a failed send is not. */
+function answeredOrThrow(e: Error): void {
+  if (e.message === 'relay: connection lost' || e.message === 'relay: not connected' || e.message === 'relay: connection is closed') throw e;
+}
+
+function rejected(err: Error): CancellablePromise<unknown> {
+  const p = Promise.reject(err) as CancellablePromise<unknown>;
+  p.cancel = () => {};
+  return p;
 }
