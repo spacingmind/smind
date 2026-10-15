@@ -58,8 +58,8 @@ export function UrlConnectForm({
       onRelayLink(link);
       return;
     }
-    const parsed = parseDaemonUrl(url);
-    if (!parsed) {
+    const raw = url.trim();
+    if (!parseDaemonUrl(raw)) {
       setError("Enter an http:// or https:// address, e.g. http://host:4648.");
       return;
     }
@@ -68,8 +68,8 @@ export function UrlConnectForm({
     inFlight.current = true;
     setBusy(true);
     try {
-      const result = await desktop.probeConnection(parsed.toString());
-      setProbe({ url: parsed.toString(), result });
+      const result = await desktop.probeConnection(raw);
+      setProbe({ url: raw, result });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

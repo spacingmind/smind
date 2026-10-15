@@ -136,6 +136,12 @@ export function FirstRun({
     };
   }, []);
 
+  // The URL form's "try SSH / relay" shortcuts and the relay-link hand-over move the connect method.
+  const { method: connectMethod } = connect;
+  useEffect(() => {
+    if (connectMethod) setChoice(connectMethod);
+  }, [connectMethod]);
+
   function select(id: ChoiceId) {
     setChoice(id);
     setLocalError(null);
