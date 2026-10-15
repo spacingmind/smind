@@ -22,6 +22,8 @@ on:
     paths:
       - "desktop/**"
       - "web/packages/ui/**"
+      # desktop/daemon-client compiles this proto (build.rs)
+      - "internal/relay/relaypb/**"
       - ".github/workflows/desktop-macos.yml"
   workflow_dispatch:
   workflow_call:
