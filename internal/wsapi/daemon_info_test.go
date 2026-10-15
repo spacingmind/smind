@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -136,5 +137,45 @@ func TestDaemonInfoIsReadableOverRelayChannel(t *testing.T) {
 	got := daemonInfoOver(t, client)
 	if got["version"] != version.Version || got["managedBy"] != "launchd" {
 		t.Fatalf("daemon.info over the relay channel = %v", got)
+	}
+}
+
+// TestUnknownMethodGetsAnErrorResponse: a client probing for a method this
+// daemon lacks must be told so, not left waiting (it used to be dropped).
+func TestUnknownMethodGetsAnErrorResponse(t *testing.T) {
+	api := newInfoAPI(t)
+	client, server := newPipeTransportPair()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go api.ServeTransport(ctx, server)
+	defer client.Close()
+
+	data, _ := json.Marshal(envelope{ID: "7", Method: "no.such.method"})
+	if err := client.Send(data); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		env envelope
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		raw, err := client.Receive()
+		var env envelope
+		if err == nil {
+			err = json.Unmarshal(raw, &env)
+		}
+		ch <- result{env, err}
+	}()
+	select {
+	case r := <-ch:
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		if r.env.ID != "7" || r.env.Error == nil || !strings.Contains(r.env.Error.Message, "method not found: no.such.method") {
+			t.Fatalf("response = %+v, want a method-not-found error for id 7", r.env)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no response to an unknown method: the error was dropped")
 	}
 }

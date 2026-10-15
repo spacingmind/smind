@@ -176,7 +176,12 @@ func (c *conn) handleCancel(params json.RawMessage) {
 func (c *conn) dispatch(connCtx context.Context, env envelope) {
 	h, ok := c.handlers[env.Method]
 	if !ok {
-		c.sendError(env.ID, fmt.Errorf("method not found: %s", env.Method))
+		// Not sendError: that only writes for an id in the inflight map, and
+		// this request never entered it, so the error was silently dropped and
+		// the caller hung forever (daemons before this fix never answer an
+		// unknown method; clients probing for a newer one, like daemon.info,
+		// must still time out).
+		c.writeEnvelope(envelope{ID: env.ID, Error: codedError(fmt.Errorf("method not found: %s", env.Method))})
 		return
 	}
 

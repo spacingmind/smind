@@ -112,16 +112,24 @@ export function DesktopDaemonBanner({
   useEffect(() => {
     if (!needsReport || !client) return;
     let cancelled = false;
-    client
-      .call<DaemonReport>("daemon.info")
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // A daemon from before this method never answers an unknown method (it
+    // dropped the request), so silence has to count as "unsupported" too.
+    const silence = new Promise<"unsupported">((resolve) => {
+      timer = setTimeout(() => resolve("unsupported"), DAEMON_INFO_TIMEOUT_MS);
+    });
+    Promise.race([client.call<DaemonReport>("daemon.info"), silence])
       .then((r) => !cancelled && setReported(r))
       .catch((err: unknown) => {
-        // "method not found" is the pre-daemon.info daemon; anything else
-        // (connection not ready, dropped) tells us nothing -- stay quiet.
+        // "method not found" is the pre-daemon.info daemon (newer daemons say
+        // so); anything else (connection not ready, dropped) tells us
+        // nothing -- stay quiet.
         if (!cancelled && err instanceof Error && /method not found/i.test(err.message)) setReported("unsupported");
-      });
+      })
+      .finally(() => clearTimeout(timer));
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [needsReport, client, current?.id]);
 
@@ -259,6 +267,9 @@ export function DesktopDaemonBanner({
     </div>
   );
 }
+
+/** How long a connected daemon gets to answer `daemon.info` before it counts as predating the method. */
+const DAEMON_INFO_TIMEOUT_MS = 4000;
 
 /** What `daemon.info` returns that the banner reads. */
 interface DaemonReport {

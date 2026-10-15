@@ -401,6 +401,25 @@ describe("ADR-0031 P10 — the older-daemon notice for daemons the app does not 
     expect(commandTexts()).toEqual(["curl -fsSL https://spacingmind.com/install.sh | sh", "irm https://spacingmind.com/install.ps1 | iex"]);
   });
 
+  it("treats a daemon that never answers daemon.info as predating it", async () => {
+    // Daemons before the method silently dropped an unknown request.
+    vi.useFakeTimers();
+    try {
+      const call = vi.fn(() => new Promise<never>(() => {}));
+      mockPlatform({ current: RELAY, connectionVersion: relayProbe });
+      const { DesktopDaemonBanner } = await import("@/components/desktop-daemon-banner");
+      const { container } = render(<DesktopDaemonBanner client={{ call } as never} />);
+      await flush();
+      expect(container).toBeEmptyDOMElement(); // still waiting: no verdict yet
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4500);
+      });
+      expect(screen.getByTestId("desktop-daemon-banner")).toHaveTextContent("Daemon version unknown");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("says nothing about a relay connection whose daemon.info failed for another reason", async () => {
     const call = vi.fn(() => Promise.reject(new Error("connection closed")));
     mockPlatform({ current: RELAY, connectionVersion: relayProbe });
