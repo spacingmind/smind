@@ -45,6 +45,7 @@ mac-notification-sys = "0.6"
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt"] }
 
 [lib]
 name = "smind_desktop_lib"
