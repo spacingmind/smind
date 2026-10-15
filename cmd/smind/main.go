@@ -160,7 +160,7 @@ Usage:
   smind update [--check] [--version <v>] [--force]        update this binary to the latest release (SHA-256 verified)
       [--dry-run] [--json]                                 --check only reports; refuses while runs are active unless --force
 
-Every subcommand except "serve" and "skill" talks to a locally running daemon over its
+Every subcommand except "serve", "skill", "config", "set-password" and "update" talks to a locally running daemon over its
 WebSocket API, authenticating with the token the daemon itself wrote to
 ~/.smind/token (override the home directory with $SMIND_HOME).
 `)
