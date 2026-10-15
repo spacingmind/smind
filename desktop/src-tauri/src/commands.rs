@@ -24,22 +24,104 @@ pub fn connections_get_current(state: State<'_, DesktopState>) -> Connection {
     state.proxy.registry.lock().unwrap().current().clone()
 }
 
+/// login_timeout bounds POST /api/login (bcrypt on the daemon is slow by design).
+const LOGIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// login exchanges `password` for a session token (ADR-0031 D8
+/// `POST /api/login`). Every error is fixed text or a status/number: neither
+/// the password nor the URL is echoed.
+async fn login(base: &url::Url, password: &str) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Reply {
+        token: Option<String>,
+        retry_after_seconds: Option<u64>,
+    }
+    let mut url = crate::probe::without_userinfo(base.clone());
+    url.set_path("/api/login");
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(LOGIN_TIMEOUT)
+        .build()
+        .map_err(|_| "could not start the login request".to_string())?;
+    let resp = client
+        .post(url)
+        .json(&serde_json::json!({ "password": password }))
+        .send()
+        .await
+        .map_err(|e| format!("login failed: {}", crate::probe::describe_request_error(&e)))?;
+    let status = resp.status();
+    let header_wait = resp.headers().get(reqwest::header::RETRY_AFTER).and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<u64>().ok());
+    let body = resp.json::<Reply>().await.ok();
+    match status.as_u16() {
+        200 => body.and_then(|r| r.token).filter(|t| !t.is_empty()).ok_or_else(|| "the daemon's login answer had no session token".to_string()),
+        401 => Err("wrong password".to_string()),
+        429 => {
+            let wait = body.and_then(|r| r.retry_after_seconds).or(header_wait);
+            Err(match wait {
+                Some(n) => format!("too many attempts, retry in {n} s"),
+                None => "too many attempts, retry later".to_string(),
+            })
+        }
+        403 => Err("this daemon does not use a password".to_string()),
+        code => Err(format!("login failed: the daemon answered HTTP {code}")),
+    }
+}
+
+/// scrub overwrites the password's bytes before it is dropped (best effort:
+/// the request body copies are out of reach).
+fn scrub(password: Option<String>) {
+    if let Some(p) = password {
+        let mut bytes = p.into_bytes();
+        bytes.fill(0);
+    }
+}
+
+/// add_url_connection is `connections_add`: with a password it logs in first
+/// and saves the connection only on success, keeping the session token in
+/// memory (`ProxyState::set_session`). The password is never stored.
+async fn add_url_connection(
+    proxy: &smind_daemon_client::proxy::ProxyState,
+    path: &std::path::Path,
+    label: &str,
+    url: &str,
+    password: Option<String>,
+) -> Result<Connection, String> {
+    let password = password.filter(|p| !p.is_empty());
+    let result = async {
+        let session = match &password {
+            Some(p) => {
+                let base = smind_daemon_client::proxy::connections::validate_base_url(url)?;
+                Some(login(&base, p).await?)
+            }
+            None => None,
+        };
+        let conn = {
+            let mut registry = proxy.registry.lock().unwrap();
+            let conn = registry.add(label, url)?;
+            registry.save(path).map_err(|e| e.to_string())?;
+            conn
+        };
+        if let Some(token) = session {
+            proxy.set_session(&conn.id, token);
+        }
+        Ok(conn)
+    }
+    .await;
+    scrub(password);
+    result
+}
+
 #[tauri::command]
-pub fn connections_add(
+pub async fn connections_add(
     state: State<'_, DesktopState>,
     label: String,
     url: String,
     // ADR-0031 D7 (b): with a password Rust logs in and keeps the session
-    // token in memory. SCAFFOLD: not used yet.
+    // token in memory; the password itself is never kept.
     password: Option<String>,
 ) -> Result<Connection, String> {
-    let _ = &password;
-    let mut registry = state.proxy.registry.lock().unwrap();
-    let conn = registry.add(&label, &url)?;
-    registry
-        .save(&state.connections_path)
-        .map_err(|e| e.to_string())?;
-    Ok(conn)
+    add_url_connection(&state.proxy, &state.connections_path, &label, &url, password).await
 }
 
 #[tauri::command]
@@ -50,6 +132,7 @@ pub fn connections_remove(state: State<'_, DesktopState>, id: String) -> Result<
         .save(&state.connections_path)
         .map_err(|e| e.to_string())?;
     drop(registry);
+    state.proxy.clear_session(&id);
     // Unpairing deletes the keys: a no-op for local/url ids, since
     // `pairing_store::delete` only ever removes a file that a relay
     // connection's `connections_add_relay` would have created.
@@ -405,5 +488,77 @@ mod tests {
         let other_host = offer(0x11, "ws-2", &o.relay, FP, &[0xab; 32]);
         let p = build_relay_preview(&link(&other_host), &list, Some(dir.path())).unwrap();
         assert_eq!(p.kind, RelayPreviewKind::NewHost);
+    }
+
+    // --- connections_add with a password (ADR-0031 D7 b / D8) ---
+
+    use smind_daemon_client::proxy::{ProxyState, Registry};
+
+    fn proxy() -> std::sync::Arc<ProxyState> {
+        let local = url::Url::parse("http://127.0.0.1:4648").unwrap();
+        ProxyState::new("s".into(), Registry::new(&local), Box::new(crate::assets::EmbeddedAssets))
+    }
+
+    fn reply(status: &str, extra: &str, body: &str) -> &'static str {
+        Box::leak(
+            format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
+                .into_boxed_str(),
+        )
+    }
+
+    #[tokio::test]
+    async fn connections_add_wrong_password_saves_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        let proxy = proxy();
+        let (url, seen) = crate::probe::test_support::stub(vec![reply("401 Unauthorized", "", r#"{"error":"invalid password"}"#)]);
+        let err = add_url_connection(&proxy, &path, "Lab", &url, Some("hunter2hunter2".into())).await.unwrap_err();
+        assert_eq!(err, "wrong password");
+        assert!(!path.exists(), "nothing saved");
+        assert_eq!(proxy.registry.lock().unwrap().list().len(), 1);
+        let req = seen.lock().unwrap()[0].clone();
+        assert!(req.starts_with("POST /api/login "), "{req}");
+        assert!(req.to_ascii_lowercase().contains("content-type: application/json"), "{req}");
+        assert!(req.contains(r#"{"password":"hunter2hunter2"}"#), "{req}");
+    }
+
+    #[tokio::test]
+    async fn connections_add_login_errors_are_mapped_without_secrets() {
+        let cases = [
+            (reply("429 Too Many Requests", "Retry-After: 7\r\n", r#"{"error":"too many attempts","retryAfterSeconds":7}"#), "too many attempts, retry in 7 s"),
+            (reply("429 Too Many Requests", "Retry-After: 9\r\n", "nope"), "too many attempts, retry in 9 s"),
+            (reply("403 Forbidden", "", r#"{"error":"x"}"#), "this daemon does not use a password"),
+            (reply("500 Internal Server Error", "", "{}"), "login failed: the daemon answered HTTP 500"),
+        ];
+        for (canned, want) in cases {
+            let dir = tempfile::tempdir().unwrap();
+            let (url, _) = crate::probe::test_support::stub(vec![canned]);
+            let err = add_url_connection(&proxy(), &dir.path().join("c.json"), "", &url, Some("hunter2hunter2".into())).await.unwrap_err();
+            assert_eq!(err, want);
+            assert!(!err.contains("hunter2") && !err.contains("127.0.0.1"));
+        }
+    }
+
+    #[tokio::test]
+    async fn connections_add_success_keeps_session_in_memory_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        let proxy = proxy();
+        let (url, _) = crate::probe::test_support::stub(vec![reply("200 OK", "", r#"{"token":"sess-tok-123","expiresAt":"2030-01-01T00:00:00Z"}"#)]);
+        let conn = add_url_connection(&proxy, &path, "Lab", &url, Some("hunter2hunter2".into())).await.unwrap();
+        assert_eq!(proxy.session(&conn.id).as_deref(), Some("sess-tok-123"));
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(on_disk.contains(&conn.id));
+        assert!(!on_disk.contains("hunter2") && !on_disk.contains("sess-tok-123"), "{on_disk}");
+        proxy.clear_session(&conn.id);
+        assert_eq!(proxy.session(&conn.id), None);
+    }
+
+    #[tokio::test]
+    async fn connections_add_without_password_does_not_log_in() {
+        let dir = tempfile::tempdir().unwrap();
+        // No stub is listening: a login attempt would fail.
+        let conn = add_url_connection(&proxy(), &dir.path().join("c.json"), "Lab", "http://127.0.0.1:9", Some(String::new())).await.unwrap();
+        assert_eq!(conn.kind, ConnectionKind::Url);
     }
 }

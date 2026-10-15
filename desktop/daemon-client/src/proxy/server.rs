@@ -54,6 +54,10 @@ pub struct ProxyState {
     /// plan's "one relay connection is one shared, multiplexed pipe"
     /// decision.
     pub relay: Mutex<Option<RelayHandle>>,
+    /// ADR-0031 D8: per-connection session tokens from a password login,
+    /// keyed by connection id. Memory only -- never persisted, and never
+    /// sent to the webview (the proxy attaches them upstream itself).
+    sessions: Mutex<std::collections::HashMap<String, String>>,
 }
 
 impl ProxyState {
@@ -64,7 +68,20 @@ impl ProxyState {
             assets,
             http_client: reqwest::Client::new(),
             relay: Mutex::new(None),
+            sessions: Mutex::new(std::collections::HashMap::new()),
         })
+    }
+
+    pub fn set_session(&self, connection_id: &str, token: String) {
+        self.sessions.lock().unwrap().insert(connection_id.to_string(), token);
+    }
+
+    pub fn session(&self, connection_id: &str) -> Option<String> {
+        self.sessions.lock().unwrap().get(connection_id).cloned()
+    }
+
+    pub fn clear_session(&self, connection_id: &str) {
+        self.sessions.lock().unwrap().remove(connection_id);
     }
 
     fn current(&self) -> (ConnectionKind, String) {
