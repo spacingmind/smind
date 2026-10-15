@@ -1,5 +1,5 @@
 import { act } from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 async function flush(): Promise<void> {
@@ -271,5 +271,69 @@ describe("daemon-section (desktop build)", () => {
 
     expect(daemonStatus).toHaveBeenCalledTimes(2);
     expect(screen.getByTestId("daemon-reachable")).toHaveTextContent("Not running");
+  });
+});
+
+describe("daemon-section with manageLocalDaemon=false (ADR-0031 D7)", () => {
+  const OFF = { onboardingCompleted: true, manageLocalDaemon: false };
+
+  it("with manageLocalDaemon=false the daemon section disables install/update/restart/take-over", async () => {
+    const scenarios: Array<{ status: Record<string, unknown>; testids: string[] }> = [
+      { status: baseStatus({ managedState: "notRunning", reachable: false }), testids: ["daemon-install"] },
+      { status: baseStatus({ managedState: "managed", comparison: "older" }), testids: ["daemon-update", "daemon-restart"] },
+      { status: baseStatus({ managedState: "unmanaged" }), testids: ["daemon-take-over"] },
+    ];
+    for (const { status, testids } of scenarios) {
+      cleanup();
+      vi.resetModules();
+      const desktop = await renderSection({
+        daemonStatus: vi.fn(() => Promise.resolve(status)),
+        appSettingsGet: vi.fn(() => Promise.resolve(OFF)),
+        appSettingsSet: vi.fn((patch: object) => Promise.resolve({ ...OFF, ...patch })),
+      });
+      for (const id of testids) expect(screen.getByTestId(id)).toBeDisabled();
+      expect(screen.getByTestId("daemon-manage-off")).toHaveTextContent(/not managing a daemon/i);
+      // Status stays visible, read-only.
+      expect(screen.getByTestId("daemon-reachable")).toBeInTheDocument();
+      fireEvent.click(screen.getByTestId(testids[0]));
+      await flush();
+      expect(desktop.daemonInstall).not.toHaveBeenCalled();
+      expect(desktop.daemonUpdate).not.toHaveBeenCalled();
+      expect(desktop.daemonRestart).not.toHaveBeenCalled();
+      expect(desktop.takeOverDaemon).not.toHaveBeenCalled();
+    }
+  });
+
+  it("Enable app-managed daemon persists the setting and re-enables the actions", async () => {
+    const desktop = await renderSection({
+      daemonStatus: vi.fn(() => Promise.resolve(baseStatus({ managedState: "notRunning", reachable: false }))),
+      appSettingsGet: vi.fn(() => Promise.resolve(OFF)),
+      appSettingsSet: vi.fn((patch: object) => Promise.resolve({ ...OFF, ...patch })),
+    });
+    expect(screen.getByTestId("daemon-install")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("daemon-enable-managed"));
+    await flush();
+
+    expect(desktop.appSettingsSet).toHaveBeenCalledWith({ manageLocalDaemon: true });
+    expect(screen.queryByTestId("daemon-manage-off")).not.toBeInTheDocument();
+    expect(screen.getByTestId("daemon-install")).toBeEnabled();
+    expect(desktop.daemonInstall).not.toHaveBeenCalled();
+  });
+
+  it("keeps the actions enabled while managing, and when the settings read fails", async () => {
+    await renderSection({
+      daemonStatus: vi.fn(() => Promise.resolve(baseStatus({ managedState: "notRunning", reachable: false }))),
+      appSettingsGet: vi.fn(() => Promise.reject(new Error("no such command"))),
+    });
+    expect(screen.getByTestId("daemon-install")).toBeEnabled();
+    expect(screen.queryByTestId("daemon-manage-off")).not.toBeInTheDocument();
+  });
+
+  it("offers Run setup again, labelled Finish setup while onboarding is pending", async () => {
+    await renderSection({
+      daemonStatus: vi.fn(() => Promise.resolve(baseStatus())),
+      appSettingsGet: vi.fn(() => Promise.resolve({ onboardingCompleted: false, manageLocalDaemon: false })),
+    });
+    expect(screen.getByTestId("connection-run-setup")).toHaveTextContent("Finish setup");
   });
 });

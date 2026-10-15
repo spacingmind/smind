@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ConnectMethodPanel, CONNECT_METHOD_LABELS, useConnectMethod, type ConnectMethodId } from "@/components/first-run/connect-methods";
-import { requestFirstRun } from "@/components/first-run/first-run-events";
+import { SetupSection } from "@/components/first-run/setup-section";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { desktop, isDesktop, type AppSettings, type Connection } from "@/lib/platform";
@@ -310,38 +310,6 @@ function ManageLocalDaemon() {
           {error}
         </p>
       )}
-    </section>
-  );
-}
-
-/** "Run setup again" / "Finish setup": reopens first-run without touching any saved connection or setting. */
-function SetupSection() {
-  const [pending, setPending] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    desktop
-      .appSettingsGet()
-      .then((s) => !cancelled && setPending(!s.onboardingCompleted))
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return (
-    <section className="flex items-center justify-between gap-4" data-testid="connection-setup-section">
-      <div className="flex flex-col gap-0.5">
-        <h3 className="text-ui-base font-medium text-foreground">Setup</h3>
-        <p className="max-w-sm text-ui-base text-muted-foreground">
-          {pending
-            ? "You skipped the first-run setup. Finish it to choose how this app gets a daemon."
-            : "Reopen the first-run choices. Saved connections stay as they are until you pick something."}
-        </p>
-      </div>
-      <Button variant="outline" size="sm" data-testid="connection-run-setup" onClick={requestFirstRun}>
-        {pending ? "Finish setup" : "Run setup again"}
-      </Button>
     </section>
   );
 }
