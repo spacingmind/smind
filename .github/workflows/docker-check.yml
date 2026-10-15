@@ -1,0 +1,86 @@
+# Builds the smind image on pull requests that touch Docker files and runs the
+# container smoke tests (ADR-0031 P11). It never pushes anything; publishing is
+# the `docker` job in release-please.yml, on real releases only.
+name: docker-check
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - docker/**
+      - .github/workflows/docker-check.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      - name: Install Task
+        run: sh -c "$(curl -fsSL https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
+      - name: Lint the entrypoint and the smoke tests
+        run: shellcheck -x -P SCRIPTDIR docker/entrypoint docker/tests/*.sh
+
+      # The same two files the release job extracts from the release tarballs.
+      # 0.0.0-ci is a release-shaped version (not "dev"), so `smind update` takes
+      # the container branch instead of refusing as a dev build.
+      - name: Build the linux binaries
+        env:
+          VERSION: 0.0.0-ci
+        run: task docker:bin
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build linux/amd64 + linux/arm64 (no push)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=0.0.0-ci
+          push: false
+
+      - name: Load linux/amd64 for the smoke tests
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          build-args: VERSION=0.0.0-ci
+          load: true
+          tags: smind:ci
+
+      - name: Container smoke tests
+        env:
+          IMAGE: smind:ci
+          EXPECT_VERSION: 0.0.0-ci
+        run: bash docker/tests/run_all.sh
+
+      - name: Compose example validates (and refuses without a password)
+        run: |
+          set -euo pipefail
+          SMIND_PASSWORD=ci-only-twelve-chars docker compose -f docker/docker-compose.example.yml config >/dev/null
+          if docker compose -f docker/docker-compose.example.yml config >/dev/null 2>&1; then
+            echo "the compose example must refuse to render without SMIND_PASSWORD" >&2
+            exit 1
+          fi
+
+      - name: Agents child image example builds
+        run: |
+          set -euo pipefail
+          docker build -f docker/Dockerfile.agents.example --build-arg SMIND_IMAGE=smind:ci -t smind-agents:ci .
+          docker run --rm smind-agents:ci claude --version
