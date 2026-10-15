@@ -162,38 +162,43 @@ pub fn save(app_data_dir: &Path, connection_id: &str, pairing: &RelayPairing) ->
 /// time on unix, so the key material is never briefly readable by other
 /// users between write and chmod.
 #[cfg(unix)]
-fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
+pub(crate) fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
-    let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
     f.write_all(data)?;
     f.sync_all()
 }
 
 #[cfg(not(unix))]
-fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
+pub(crate) fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
     std::fs::write(path, data)
 }
 
 #[cfg(unix)]
-fn restrict_dir(dir: &Path) -> io::Result<()> {
+pub(crate) fn restrict_dir(dir: &Path) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
 }
 
 #[cfg(not(unix))]
-fn restrict_dir(_dir: &Path) -> io::Result<()> {
+pub(crate) fn restrict_dir(_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
 #[cfg(unix)]
-fn set_restrictive_permissions(path: &Path) -> io::Result<()> {
+pub(crate) fn set_restrictive_permissions(path: &Path) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
 }
 
 #[cfg(not(unix))]
-fn set_restrictive_permissions(_path: &Path) -> io::Result<()> {
+pub(crate) fn set_restrictive_permissions(_path: &Path) -> io::Result<()> {
     // No POSIX mode bits on Windows: the file relies on the app data
     // directory's own per-user ACL, same posture as the Go daemon's
     // equally sensitive `relay-connect.json`/`relay-keypair.json`.
@@ -209,7 +214,11 @@ pub fn load(app_data_dir: &Path, connection_id: &str) -> io::Result<Option<Relay
     // If the migration could not rename (read-only dir, say), still serve the
     // pairing from its legacy name rather than reporting it unpaired.
     let legacy = legacy_pairing_path(app_data_dir, connection_id);
-    let path = if !path.exists() && legacy.is_file() { legacy } else { path };
+    let path = if !path.exists() && legacy.is_file() {
+        legacy
+    } else {
+        path
+    };
     match std::fs::read_to_string(&path) {
         Ok(data) => {
             let persisted: PersistedPairing = serde_json::from_str(&data)
@@ -231,9 +240,10 @@ fn migrate_legacy(app_data_dir: &Path, connection_id: &str, new_path: &Path) {
     }
 }
 
-/// delete removes the pairing file for `connection_id` (unpair/remove).
+/// delete removes the pairing file (and the device key) for `connection_id` (unpair/remove).
 /// Missing is not an error — deleting an already-gone pairing is a no-op.
 pub fn delete(app_data_dir: &Path, connection_id: &str) -> io::Result<()> {
+    crate::relay::device::delete_key(app_data_dir, connection_id)?;
     let legacy = legacy_pairing_path(app_data_dir, connection_id);
     if legacy.is_file() {
         std::fs::remove_file(legacy)?;
@@ -326,10 +336,16 @@ mod tests {
         ] {
             save(dir.path(), id, &sample()).unwrap();
             assert_eq!(load(dir.path(), id).unwrap().unwrap(), sample(), "{id}");
-            let name = pairing_path(dir.path(), id).file_name().unwrap().to_string_lossy().into_owned();
+            let name = pairing_path(dir.path(), id)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
             assert!(name.len() <= 255, "{name}");
             assert!(
-                name.trim_end_matches(".json").chars().all(|c| c.is_ascii_hexdigit()),
+                name.trim_end_matches(".json")
+                    .chars()
+                    .all(|c| c.is_ascii_hexdigit()),
                 "unsafe file name {name}"
             );
             delete(dir.path(), id).unwrap();
@@ -340,8 +356,14 @@ mod tests {
     #[test]
     fn distinct_connection_ids_get_distinct_files() {
         let dir = tempfile::tempdir().unwrap();
-        assert_ne!(pairing_path(dir.path(), "relay:a@h:1"), pairing_path(dir.path(), "relay:a@h:2"));
-        assert_eq!(pairing_path(dir.path(), "relay:a@h:1"), pairing_path(dir.path(), "relay:a@h:1"));
+        assert_ne!(
+            pairing_path(dir.path(), "relay:a@h:1"),
+            pairing_path(dir.path(), "relay:a@h:2")
+        );
+        assert_eq!(
+            pairing_path(dir.path(), "relay:a@h:1"),
+            pairing_path(dir.path(), "relay:a@h:1")
+        );
     }
 
     /// A pairing saved before the hashed name (unix only: it could not be
@@ -359,10 +381,17 @@ mod tests {
         assert!(legacy.is_file());
 
         assert_eq!(load(dir.path(), id).unwrap().unwrap(), sample());
-        assert!(!legacy.exists(), "legacy file should have been renamed away");
+        assert!(
+            !legacy.exists(),
+            "legacy file should have been renamed away"
+        );
         assert!(pairing_path(dir.path(), id).is_file());
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(pairing_path(dir.path(), id)).unwrap().permissions().mode() & 0o777;
+        let mode = std::fs::metadata(pairing_path(dir.path(), id))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
         assert_eq!(mode, 0o600);
         // A second load reads the migrated file.
         assert_eq!(load(dir.path(), id).unwrap().unwrap(), sample());
