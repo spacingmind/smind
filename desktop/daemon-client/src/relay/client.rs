@@ -304,6 +304,9 @@ impl DataFrameTransport {
             direction: self.direction as i32,
             sequence: seq,
             payload,
+            // ADR-0031 P12a field; this client does not send relay keepalive
+            // probes yet (P13a).
+            keepalive: false,
         }
     }
 
@@ -469,6 +472,7 @@ pub async fn open_data(
         direction: direction as i32,
         sequence: 0,
         payload: Vec::new(),
+        keepalive: false,
     };
     let (tx, rx) = open_data_stream(grpc, admission_id, registration).await?;
     Ok(DataFrameTransport {
