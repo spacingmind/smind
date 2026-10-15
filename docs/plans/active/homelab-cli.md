@@ -958,6 +958,22 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   retry). **Decided by the Human (2026-10-15): `relay.legacyDevices` defaults to false** (with it true, revoke, pending and the window do
   not bind legacy access); `docs/homelab.md` says that relay pairing needs the updated clients (P13a/b) until then and warns about
   the opt-in. Still open: a per-offer one-time token (offer format change) is the stronger pairing-window fix.
+- 2026-10-15: **Decision 9 accepted** (ADR-0031 flipped). **P4 implemented** (`feat/direct-connections-password`): `server.listen` /
+  `server.hostnames` / `server.passwordHash` (+ `SMIND_LISTEN`/`SMIND_HOSTNAMES`/`SMIND_PASSWORD`), `smind config get|set|unset`
+  (yaml.Node edit, comments kept), `smind set-password` (bcrypt cost 12, ≥ 12 chars, TTY twice or `--password-stdin`, never argv),
+  the daemon refuses non-loopback without a password, `/api/token` for true loopback only, `POST /api/login` → 24 h in-memory
+  session token (SHA-256 only kept), `/ws` via `Sec-WebSocket-Protocol: smind, smind.bearer.<token>` or `Authorization` (never the
+  URL), Host allowlist on every request, same-origin `Origin`, per-/64 login backoff + global window + bcrypt slots, healthz
+  `authRequired`, web login form, `docs/homelab.md` threat model. Decisions taken inside the spec: a session token opens **/ws
+  only** (the proxy endpoints and `/api/shutdown` stay behind the daemon token); the daemon always also binds `127.0.0.1` so
+  the CLI works with a specific-IP listen; `0.0.0.0` binds IPv4 only (Go's dual-stack default would also expose IPv6);
+  `Via`, `CF-Connecting-IP`, `True-Client-IP`, `X-Original-*`... count as proxy headers; loopback peers share one limiter
+  bucket without a per-address lockout (a same-host proxy would otherwise let one guesser lock everyone out). **Left for P5:**
+  the desktop "Connect to a daemon" password field (the Rust proxy must forward `/api/login` and the subprotocol), `connections_probe`.
+  **Open design question for the Human** (found by the independent review, not changed here because it alters the plan's
+  items 1 and 9): the loopback `/api/token` shortcut cannot tell a default same-host nginx (`proxy_pass`, which rewrites Host to
+  `127.0.0.1:4648` and adds no headers) from a local client; docs/homelab.md now says so and gives a safe config. The strict
+  alternative is to disable the shortcut whenever a password is set (the local UI then logs in too).
 
 ## Validation
 
@@ -1053,3 +1069,44 @@ Commands: `go test -race -count=20 ./internal/relay/... ./internal/wsapi/ ./inte
 Not verified: a real desktop/mobile client (P13a/b), the cross-language hello vector in Rust/TS, Windows at runtime (registry
 rename retry, `Restrict`), the hub against a pre-P12a relay (the `Sync`-less fallback to the fixed legacy route has no test — it is reasoned
 from the old server code only), a real proxy.
+
+### P4 (2026-10-15)
+
+Commands: `go test -count=1 ./...`, `task lint`, `GOOS=windows go vet ./...`, `cd web && bunx tsc -b packages/ui`, vitest on the five
+touched web test files, a real daemon driven by Chrome (Playwright) for light + dark screenshots.
+
+- AC1 defaults unchanged: `TestServeLoopbackDefaultUnchanged` (cmd, real daemon: healthz `authRequired:false`, loopback `/api/token`,
+  `smind workspace ls`, foreign Host refused, nothing on the LAN address), `TestLoopbackQueryTokenStillWorks`, the unchanged
+  existing server/wsapi/cmd suites.
+- AC2 `smind config`: `TestConfigSetGetUnsetRoundTripKeepsComments`, `TestConfigSetRejectsUnknownKey`, `TestConfigSetValidatesValues`,
+  `TestConfigSetCreatesFileOwnerOnly`, `TestConfigSetEditsThroughASymlinkAndKeepsItPrivate`, `TestConfigCommandRoundTrip`,
+  `TestConfigGetNeverPrintsTheHash`, `TestServeFlagsStillRejected`.
+- AC3 `set-password`: `TestSetPasswordRejectsShort`, `TestSetPasswordWritesBcryptMode0600` (hash verifies; password/hash absent from
+  file, stdout, stderr), `TestSetPasswordNonTTYNeedsFlag` (argv password refused and not echoed), `TestSetPasswordPromptsTwiceOnATTY`,
+  `TestEnvOverridesConfig`, `TestEnvPasswordIsHashedInMemory`, `TestEnvStillAppliesWhenTheFileDoesNotParse`.
+- AC4 refusal: `TestServeRefusesNonLoopbackWithoutPassword` (server unit + real process, also a short `SMIND_PASSWORD`),
+  `TestWeakOrBrokenPasswordMaterialRefused`, `TestBindsNeverDualStackAnIPv4Literal`, `TestListenCompanionKeepsLoopbackReachable`.
+- AC5 `/api/token`: `TestAPITokenLoopbackOK`, `…ForbiddenForNonLoopbackRemoteAddr`, `…ForbiddenWhenHostIsExternal`,
+  `…ForbiddenWithForwardedHeaders` (10 headers), `…ForbiddenForForeignOrigin`, `TestIsTrueLoopback`.
+- AC6 login: `TestLoginReturnsSessionNotDaemonToken`, `TestLoginWrongPasswordConstantTime401`, `TestLoginRateLimitBackoff429`,
+  `TestLoginLimiter*` (doubling/cap, per-address, /64, global window, shared loopback bucket, bounded map),
+  `TestLoginRejectsCrossSiteAndMalformedRequests`, `TestLoginSlowBodiesDoNotStarveRealLogins`, `TestSessionTokenExpires`,
+  `TestSessionStore*`.
+- AC7 `/ws`: `TestWSAcceptsSubprotocolBearer` (server answers `smind`, never the token), `TestWSAcceptsAuthorizationHeaderSession`,
+  `TestWSRejectsSessionTokenInQueryForNonLoopback`, `TestWSRejectsDaemonTokenFromNonLoopback`, `TestWSRejectsExpiredAndUnknownSessions`,
+  `TestSessionTokenOnlyOpensWebSocket`.
+- AC8 Host/Origin: `TestHostAllowlistDefaults`, `TestHostAllowlistLeadingDotMatchesSubdomains`, `TestHostNotAllowed403` (every route incl. /ws),
+  `TestHostPolicy`, `TestCheckOriginSameOriginOnly`.
+- AC9 UI: `it("shows the login form when the daemon requires a password")`, `it("does not show it on loopback")`,
+  `it("keeps the session token out of localStorage …")` and the wrong-password / 429 / expiry / rejection / never-stored cases
+  (37 tests in 5 files). **Screenshots** (Chrome, real daemon behind a `127.0.0.1.nip.io` Host, light + dark): fresh form, pending,
+  wrong password, rate-limit countdown, signed-in app, expired-session notice, loopback (no login), "not enabled" message — all
+  reviewed; only `sessionStorage` holds the session, `localStorage` holds UI preferences only.
+- AC10 `TestHealthzAuthRequiredField`. AC11 `docs/homelab.md`.
+- No secret in logs: `TestNoSecretInLogs`, and the real-daemon test checks the process log for password, session and daemon token.
+- Real-process remote flow: `TestServeDirectConnectionEndToEnd` — same-host-proxy shape (loopback peer, external Host) runs here; the
+  LAN-address shape **skips on this Mac** (the application firewall silently holds unsigned binaries' LAN traffic) and runs
+  wherever the machine can reach itself (Linux CI).
+- **Not verified:** **(real)** another machine on the LAN in a browser + `curl` through nginx on the same host (the plan's real
+  check; the reviewer showed the default-nginx shape leaks the token, see Progress), Windows execution, the Rust desktop path
+  (P5), a TTY prompt on a real terminal (seam-tested).
