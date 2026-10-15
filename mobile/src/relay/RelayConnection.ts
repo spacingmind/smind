@@ -142,7 +142,9 @@ class RevokedError extends Error {}
 class FatalError extends Error {}
 
 const HELLO_REQUEST_ID = 'hello';
-const PING_METHOD = 'relay.ping';
+// The liveness probe after a resume: a cheap read every daemon serves. (Not an
+// unknown method: the daemon does not answer those at all.)
+const PROBE_METHOD = 'workspace.list';
 
 function hexEncode(bytes: Uint8Array): string {
   return Array.from(bytes)
@@ -184,7 +186,8 @@ async function admit(baseUrl: string, workspaceId: string, secret: Uint8Array, d
   return admitResp.admissionId;
 }
 
-const realNet: RelayNet = {
+/** The real network: grpc-web unary admission and the grpc-web websocket stream. */
+export const grpcWebRelayNet: RelayNet = {
   admit,
   openStream: (wsUrl, headers) => new GRPCWebSocketStream(wsUrl, headers),
 };
@@ -206,9 +209,11 @@ function defaultJitter(ms: number): number {
   return ms * (0.8 + Math.random() * 0.4);
 }
 
+class TimeoutError extends Error {}
+
 function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), ms);
+    const timer = setTimeout(() => reject(new TimeoutError(message)), ms);
     p.then(
       (v) => {
         clearTimeout(timer);
@@ -311,8 +316,6 @@ export interface CloseableStream {
   close(): void;
 }
 
-class TimeoutError extends Error {}
-
 /**
  * Maps what a stream or handshake threw to what the supervisor acts on: a
  * relay refusal of a revoked device and a daemon whose key is not the one in
@@ -359,7 +362,7 @@ export class RelayConnection {
   private opts: ConnectOptions | null = null;
   private keepalive: KeepaliveTiming = DEFAULT_KEEPALIVE;
   private timing: ReconnectTiming = DEFAULT_RECONNECT;
-  private net: RelayNet = realNet;
+  private net: RelayNet = grpcWebRelayNet;
   private jitter: (ms: number) => number = defaultJitter;
   private wake: (() => void) | null = null;
 
@@ -395,7 +398,7 @@ export class RelayConnection {
     conn.opts = opts;
     conn.keepalive = { ...DEFAULT_KEEPALIVE, ...opts.keepalive };
     conn.timing = { ...DEFAULT_RECONNECT, ...opts.reconnect };
-    conn.net = opts.net ?? realNet;
+    conn.net = opts.net ?? grpcWebRelayNet;
     conn.jitter = opts.jitter ?? defaultJitter;
     void conn.supervise().catch((e) => conn.setState({ kind: 'failed', message: e instanceof Error ? e.message : String(e) }));
     return conn;
@@ -844,9 +847,8 @@ export class RelayConnection {
     const link = this.startLink(session);
     try {
       // The relay has no acknowledgements, so the only proof the daemon still
-      // holds this session is an answer. Any answer will do, even "method
-      // not found".
-      await withTimeout(this.request(PING_METHOD, undefined).catch(answeredOrThrow), this.timing.resumeProbeMs, 'the daemon did not answer on the resumed session');
+      // holds this session is an answer. Any answer will do, even an error.
+      await withTimeout(this.request(PROBE_METHOD, undefined).catch(answeredOrThrow), this.timing.resumeProbeMs, 'the daemon did not answer on the resumed session');
     } catch (e) {
       session.transport.detach();
       const why = classify(await link.done);
@@ -857,7 +859,7 @@ export class RelayConnection {
   }
 }
 
-/** A daemon's error answer ("method not found") is still an answer; only a lost connection or a failed send is not. */
+/** A daemon's error answer is still an answer; only a lost connection or a failed send is not. */
 function answeredOrThrow(e: Error): void {
   if (e.message === 'relay: connection lost' || e.message === 'relay: not connected' || e.message === 'relay: connection is closed') throw e;
 }

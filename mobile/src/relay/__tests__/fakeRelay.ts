@@ -127,8 +127,7 @@ class DaemonRoute {
           continue;
         }
         this.relay.requests.push({ route: this.key, method: msg.method, params: msg.params });
-        if (msg.method === 'relay.ping') reply(msg.id, { error: { message: 'method not found: relay.ping' } });
-        else if (msg.method === 'workspace.list') reply(msg.id, { result: [] });
+        if (msg.method === 'workspace.list') reply(msg.id, { result: [] });
         else if (msg.method === 'events.subscribe') reply(msg.id, { result: { topics: msg.params?.topics ?? [] } });
         else if (msg.method === 'hang') {
           // never answered: a request that is in flight when the stream dies

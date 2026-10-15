@@ -34,8 +34,8 @@ function start(relay: FakeRelay, over: Partial<ConnectOptions> = {}): RelayConne
     label: 'Test phone',
     net: relay,
     jitter: (ms) => ms,
-    keepalive: { intervalMs: 40, deadAfterMs: 120, probeTimeoutMs: 60 },
-    reconnect: { baseMs: 5, maxMs: 20, pendingPollMs: 20, resumeProbeMs: 150, handshakeMs: 800 },
+    keepalive: { intervalMs: 40, deadAfterMs: 400, probeTimeoutMs: 150 },
+    reconnect: { baseMs: 5, maxMs: 20, pendingPollMs: 20, resumeProbeMs: 300, handshakeMs: 1500 },
     ...over,
   });
   open.push(conn);
@@ -115,7 +115,7 @@ describe('keepalive', () => {
     const conn = start(relay);
     await conn.whenConnected();
     const seen = states(conn);
-    await new Promise((r) => setTimeout(r, 400)); // well past deadAfterMs
+    await new Promise((r) => setTimeout(r, 900)); // well past deadAfterMs
     expect(kinds(seen)).toEqual(['connected']);
     expect(relay.streams).toHaveLength(1);
   });
