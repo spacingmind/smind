@@ -6,10 +6,11 @@
 //! (Go) — but from the "device" (mobile role) side, since the desktop
 //! app is a relay-paired device like a phone, not the daemon itself.
 
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tokio::sync::{broadcast, mpsc, watch};
+use tokio::time::Instant;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::metadata::MetadataValue;
 use tonic::transport::{Channel as GrpcChannel, Endpoint, Uri};
@@ -17,21 +18,21 @@ use tonic::Request;
 
 use crate::backoff::Backoff;
 use crate::relay::admission::{self, Transcript};
+use crate::relay::channel::ChannelError;
 use crate::relay::channel::{Channel as E2eeChannel, FrameTransport};
 use crate::relay::crypto::{decode_frame, encode_frame, FrameError, KeyPair, Role};
+use crate::relay::device::{self, DeviceKey, HelloOutcome};
+use crate::relay::liveness::{self, Action, Liveness, LivenessCfg};
 use crate::relay::pairing_store::RelayPairing;
 use crate::relay::relaypb::relay_client::RelayClient as GrpcRelayClient;
 use crate::relay::relaypb::{AdmitChallengeRequest, AdmitRequest, Direction, Frame};
 
-/// The single hardcoded (session, device) pair the daemon's own relay
-/// bridge (`internal/relay/bridge.go`) serves per workspace today — a
-/// documented milestone-1 simplification, not something this client can
-/// change unilaterally (it isn't a wire-protocol constant, just a value
-/// both ends must agree on to land on the same relay route). The desktop
-/// client MUST use these same values to reach the daemon's bridge at
-/// all. See the plan's "Known limitation" section: a mobile device and a
-/// desktop relay connection to the same workspace cannot both be
-/// attached at once as a result.
+/// The fixed (session, device) pair of the single-device relay protocol
+/// (milestone 1). A daemon from before device identity (ADR-0031 P12b) only
+/// serves this route; a current daemon serves it only while its
+/// `relay.legacyDevices` is on (off by default). This client uses it as the
+/// FALLBACK for such a daemon: its normal route is the one named by its own
+/// device id and a fresh session id.
 pub const DEFAULT_SESSION_ID: &str = "m1-default-session";
 pub const DEFAULT_DEVICE_ID: &str = "m1-default-device";
 
@@ -293,9 +294,30 @@ pub struct DataFrameTransport {
     device_id: String,
     direction: Direction,
     seq: u64,
+    liveness: Arc<Mutex<Liveness>>,
 }
 
 impl DataFrameTransport {
+    /// liveness is the keepalive state shared with `pump`: every frame the
+    /// relay sends is reported to it from `recv_frame`.
+    pub fn liveness(&self) -> Arc<Mutex<Liveness>> {
+        self.liveness.clone()
+    }
+
+    /// send_probe writes one keepalive probe (ADR-0031 D9 flow 8): an empty
+    /// frame flagged `keepalive` whose `sequence` carries this connection's
+    /// nonce, which the relay echoes back. It is not counted in `seq` (the
+    /// relay never buffers or forwards it).
+    pub async fn send_probe(&mut self) -> Result<(), DataTransportError> {
+        let nonce = self.liveness.lock().unwrap().nonce();
+        let mut frame = self.build_frame(nonce, Vec::new());
+        frame.keepalive = true;
+        self.tx
+            .send(frame)
+            .await
+            .map_err(|_| DataTransportError::Closed)
+    }
+
     fn build_frame(&self, seq: u64, payload: Vec<u8>) -> Frame {
         Frame {
             workspace_id: self.workspace_id.clone(),
@@ -304,8 +326,6 @@ impl DataFrameTransport {
             direction: self.direction as i32,
             sequence: seq,
             payload,
-            // ADR-0031 P12a field; this client does not send relay keepalive
-            // probes yet (P13a).
             keepalive: false,
         }
     }
@@ -345,6 +365,7 @@ impl DataFrameTransport {
             .map_err(DataTransportError::Open)?;
         self.tx = tx;
         self.rx = rx;
+        self.liveness.lock().unwrap().start_stream(Instant::now());
         Ok(())
     }
 
@@ -383,6 +404,15 @@ impl FrameTransport for DataFrameTransport {
                 .await
                 .ok_or(DataTransportError::Closed)?
                 .map_err(DataTransportError::Status)?;
+            // Liveness first: ANY frame from the relay proves the stream is
+            // alive, and a keepalive frame carrying our nonce is an echo.
+            self.liveness
+                .lock()
+                .unwrap()
+                .on_frame(Instant::now(), frame.keepalive, frame.sequence);
+            if frame.keepalive {
+                continue; // relay plumbing (an echo, or a probe a relay forwarded), never e2ee content
+            }
             // The peer's own empty-payload registration frame (relay
             // routing plumbing, not e2ee content) also arrives on this
             // stream, since the relay forwards every frame -- including
@@ -475,6 +505,12 @@ pub async fn open_data(
         keepalive: false,
     };
     let (tx, rx) = open_data_stream(grpc, admission_id, registration).await?;
+    let mut liveness = Liveness::new(
+        LivenessCfg::default(),
+        liveness::random_nonce(),
+        Instant::now(),
+    );
+    liveness.start_stream(Instant::now());
     Ok(DataFrameTransport {
         tx,
         rx,
@@ -483,16 +519,162 @@ pub async fn open_data(
         device_id: device_id.to_string(),
         direction,
         seq: 1,
+        liveness: Arc::new(Mutex::new(liveness)),
     })
 }
 
-// --- The reconnect loop: connect/admit/handshake, resume-first on drop ---
+// --- The reconnect loop: connect/admit/handshake/hello, resume-first on drop ---
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// What the relay connection is doing, for the UI (Settings → Connections).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Status {
     Connecting,
     Connected,
     Reconnecting,
+    /// The daemon knows this device but has not approved it yet: the user
+    /// approves it on the daemon (`smind relay devices approve <id>`). The
+    /// client keeps retrying, so approval takes effect within seconds.
+    AwaitingApproval {
+        device_id: String,
+    },
+    /// The daemon (or the relay) revoked this device.
+    Revoked {
+        device_id: String,
+    },
+    /// The daemon refused this device's hello for another reason (`code` is
+    /// the daemon's machine-readable code, e.g. `too_many_devices`).
+    Refused {
+        code: String,
+        message: String,
+    },
+}
+
+impl Status {
+    /// state_name is the stable identifier the UI switches on.
+    pub fn state_name(&self) -> &'static str {
+        match self {
+            Status::Connecting => "connecting",
+            Status::Connected => "connected",
+            Status::Reconnecting => "reconnecting",
+            Status::AwaitingApproval { .. } => "awaitingApproval",
+            Status::Revoked { .. } => "revoked",
+            Status::Refused { .. } => "refused",
+        }
+    }
+}
+
+/// Timing knobs of the relay loop; the defaults are the documented protocol
+/// values (30 s probe, 75 s dead stream, jittered backoff), tests shrink them.
+#[derive(Clone)]
+pub struct Timing {
+    pub liveness: LivenessCfg,
+    pub handshake_timeout: Duration,
+    pub hello_timeout: Duration,
+    /// How long a resumed session gets to answer a liveness request before it
+    /// is abandoned for a fresh one (the daemon may have lost its counters).
+    pub resume_probe_timeout: Duration,
+    pub min_stable_connection: Duration,
+    /// A request the daemon has not answered (nor sent anything else) for this
+    /// long makes the client suspect the daemon lost its session (a restart:
+    /// the relay has no way to tell a device) and re-establish it.
+    pub request_stall: Duration,
+    /// With nothing received from the daemon for this long the client sends
+    /// a cheap request of its own, so a restart is noticed while idle too.
+    pub idle_probe: Duration,
+    pub backoff_base: Duration,
+    pub backoff_max: Duration,
+    /// Retry period while awaiting approval / after a revoke / after another
+    /// refusal.
+    pub awaiting_retry: Duration,
+    pub revoked_retry: Duration,
+    pub refused_retry: Duration,
+    /// Spreads a delay (±20 % by default) so a fleet reconnecting after a
+    /// relay restart does not move in lockstep.
+    pub jitter: fn(Duration) -> Duration,
+}
+
+impl Default for Timing {
+    fn default() -> Self {
+        Self {
+            liveness: LivenessCfg::default(),
+            handshake_timeout: HANDSHAKE_TIMEOUT,
+            hello_timeout: Duration::from_secs(10),
+            resume_probe_timeout: Duration::from_secs(10),
+            min_stable_connection: MIN_STABLE_CONNECTION,
+            request_stall: Duration::from_secs(15),
+            idle_probe: Duration::from_secs(60),
+            backoff_base: Duration::from_secs(1),
+            backoff_max: MAX_RECONNECT_BACKOFF,
+            awaiting_retry: Duration::from_secs(5),
+            revoked_retry: Duration::from_secs(60),
+            refused_retry: Duration::from_secs(30),
+            jitter: default_jitter,
+        }
+    }
+}
+
+fn default_jitter(d: Duration) -> Duration {
+    let mut b = [0u8; 4];
+    getrandom::fill(&mut b).expect("OS randomness for backoff jitter");
+    let unit = f64::from(u32::from_be_bytes(b)) / f64::from(u32::MAX); // 0..=1
+    d.mul_f64(0.8 + 0.4 * unit)
+}
+
+/// RelayOptions configures one relay connection.
+#[derive(Clone)]
+pub struct RelayOptions {
+    /// The connection's persistent device key. `None` = no device identity:
+    /// the client then speaks only the single-device protocol (fixed route,
+    /// no hello), as before ADR-0031 P12b.
+    pub device_key: Option<Arc<DeviceKey>>,
+    /// Label shown in `smind relay devices ls`.
+    pub label: String,
+    pub timing: Timing,
+}
+
+impl RelayOptions {
+    pub fn identity(key: Arc<DeviceKey>) -> Self {
+        Self {
+            device_key: Some(key),
+            label: default_device_label(),
+            timing: Timing::default(),
+        }
+    }
+
+    pub fn legacy_only() -> Self {
+        Self {
+            device_key: None,
+            label: String::new(),
+            timing: Timing::default(),
+        }
+    }
+}
+
+/// default_device_label names this install in the daemon's device list.
+pub fn default_device_label() -> String {
+    let host = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .or_else(|_| std::env::var("HOST"))
+        .unwrap_or_default();
+    let label = if host.trim().is_empty() {
+        "sMind Desktop".to_string()
+    } else {
+        format!("sMind Desktop ({})", host.trim())
+    };
+    // The daemon rejects labels with control/invisible characters or > 64 bytes.
+    let cleaned: String = label.chars().filter(|c| !c.is_control()).collect();
+    let mut out = String::new();
+    for c in cleaned.chars() {
+        if out.len() + c.len_utf8() > 64 {
+            break;
+        }
+        out.push(c);
+    }
+    if device::validate_label(&out).is_ok() {
+        out
+    } else {
+        "sMind Desktop".to_string()
+    }
 }
 
 /// A handle the proxy's `/ws` bridge and the daemon-client watcher both
@@ -556,12 +738,21 @@ pub(crate) fn test_handle() -> TestHandleParts {
 /// spawn starts the background reconnect loop for `pairing` and returns
 /// a handle to it. The loop runs until the returned handle (and every
 /// clone/subscriber) is dropped.
-pub fn spawn(pairing: RelayPairing) -> (RelayHandle, tokio::task::JoinHandle<()>) {
+pub fn spawn(
+    pairing: RelayPairing,
+    options: RelayOptions,
+) -> (RelayHandle, tokio::task::JoinHandle<()>) {
     let (outbound_tx, outbound_rx) = mpsc::channel(FRAME_CHANNEL_CAPACITY);
     let (inbound_tx, _) = broadcast::channel(FRAME_CHANNEL_CAPACITY);
     let (status_tx, status_rx) = watch::channel(Status::Connecting);
     let inbound_tx_task = inbound_tx.clone();
-    let task = tokio::spawn(run(pairing, outbound_rx, inbound_tx_task, status_tx));
+    let task = tokio::spawn(run(
+        pairing,
+        options,
+        outbound_rx,
+        inbound_tx_task,
+        status_tx,
+    ));
     (
         RelayHandle {
             outbound_tx,
@@ -572,41 +763,221 @@ pub fn spawn(pairing: RelayPairing) -> (RelayHandle, tokio::task::JoinHandle<()>
     )
 }
 
-/// run is the daemon-side-mirrored reconnect loop: dial + admit, resume
-/// the existing e2ee session on a transport-level reconnect whenever
-/// possible (falling back to a fresh handshake only when Resume itself
-/// fails or there's no prior session), and pump JSON-RPC bytes between
-/// the e2ee channel and the outbound/inbound queues — mirrors
-/// `bridge.Run` (Go)'s structure exactly, including its
-/// stable-connection-resets-backoff anti-flap rule.
-///
-/// `grpc`'s initial `None` and `need_connect`'s `false` branch are true
-/// dead stores by the same structural reason they are in `bridge.Run`
-/// (Go): both are unconditionally overwritten before the loop's next
-/// read, on every iteration after the first, by design (kept 1:1 with
-/// Go rather than restructured away).
-#[allow(unused_assignments)]
+/// RouteMode is which route this client asks the daemon for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RouteMode {
+    /// Its own device id and a fresh session id; identifies itself with
+    /// `device_hello` (a current daemon).
+    Identity,
+    /// The fixed single-device route, no hello (a daemon from before device
+    /// identity, or one that does not track devices).
+    Legacy,
+}
+
+/// Why a fresh session could not be established.
+#[derive(Debug)]
+enum Failure {
+    /// Transport, admission or handshake trouble: back off and retry.
+    Retry(String),
+    /// Nobody answered the handshake on the identity route: probably a
+    /// daemon from before device identity (it never opens that route).
+    HandshakeTimeout,
+    /// The daemon answered the hello with a refusal.
+    Refused { code: String, message: String },
+    /// The relay itself refused the stream (PermissionDenied: revoked).
+    RelayDenied(String),
+    /// The daemon does not do device identity (method not found / unsupported).
+    NoIdentitySupport,
+}
+
+type DataChannel = E2eeChannel<DataFrameTransport>;
+
+fn random_session_id() -> String {
+    let mut b = [0u8; 16];
+    getrandom::fill(&mut b).expect("OS randomness for the session id");
+    format!("dsk-{}", hex_encode(&b))
+}
+
+/// establish opens a FRESH session: a fresh ephemeral E2EE key (never reused
+/// across sessions — a reused key with restarted counters would repeat
+/// nonces), the E2EE handshake pinned to the daemon key, then, on the
+/// identity route, `device_hello` bound to this very session.
+async fn establish(
+    grpc: &mut GrpcRelayClient<GrpcChannel>,
+    admission_id: &str,
+    pairing: &RelayPairing,
+    options: &RelayOptions,
+    mode: RouteMode,
+) -> Result<DataChannel, Failure> {
+    let (session_id, device_id) = match (mode, options.device_key.as_ref()) {
+        (RouteMode::Identity, Some(key)) => (random_session_id(), key.device_id()),
+        _ => (
+            DEFAULT_SESSION_ID.to_string(),
+            DEFAULT_DEVICE_ID.to_string(),
+        ),
+    };
+    let transport = open_data(
+        grpc,
+        admission_id,
+        &pairing.workspace_id,
+        &session_id,
+        &device_id,
+    )
+    .await
+    .map_err(Failure::Retry)?;
+    transport
+        .liveness()
+        .lock()
+        .unwrap()
+        .start_stream(Instant::now());
+    let kp = KeyPair::generate();
+    let mut channel = E2eeChannel::new(transport, Role::Mobile);
+    let handshake = tokio::time::timeout(
+        options.timing.handshake_timeout,
+        channel.handshake(&kp, Some(&pairing.daemon_public_key)),
+    )
+    .await;
+    match handshake {
+        Ok(Ok(())) => {}
+        Ok(Err(ChannelError::Transport(DataTransportError::Status(s))))
+            if s.code() == tonic::Code::PermissionDenied =>
+        {
+            return Err(Failure::RelayDenied(s.message().to_string()));
+        }
+        Ok(Err(e)) => return Err(Failure::Retry(format!("handshake: {e}"))),
+        Err(_) if mode == RouteMode::Identity => return Err(Failure::HandshakeTimeout),
+        Err(_) => return Err(Failure::Retry("handshake: timed out".into())),
+    }
+
+    let (RouteMode::Identity, Some(key)) = (mode, options.device_key.as_ref()) else {
+        return Ok(channel);
+    };
+    let hello = key.hello(&options.label, &pairing.daemon_public_key, &kp.public());
+    let request_id = "relay-hello-1";
+    channel
+        .send(device::hello_request(request_id, &hello).as_bytes())
+        .await
+        .map_err(|e| Failure::Retry(format!("hello: {e}")))?;
+    let outcome = tokio::time::timeout(options.timing.hello_timeout, async {
+        loop {
+            let msg = channel
+                .receive()
+                .await
+                .map_err(|e| Failure::Retry(format!("hello: {e}")))?;
+            let Ok(text) = String::from_utf8(msg) else {
+                continue;
+            };
+            if let Some(outcome) = device::parse_hello_response(request_id, &text) {
+                return Ok(outcome);
+            }
+        }
+    })
+    .await
+    .map_err(|_| Failure::Retry("hello: timed out".into()))??;
+    match outcome {
+        HelloOutcome::Approved { .. } => Ok(channel),
+        HelloOutcome::MethodNotFound => Err(Failure::NoIdentitySupport),
+        HelloOutcome::Refused { code, .. } if code == "device_hello_unsupported" => {
+            Err(Failure::NoIdentitySupport)
+        }
+        HelloOutcome::Refused { code, message } => Err(Failure::Refused { code, message }),
+    }
+}
+
+const RESUME_PROBE_ID: &str = "relay-resume-probe";
+
+/// confirm_alive proves a resumed session still talks to a daemon that holds
+/// its E2EE state: the relay has no acknowledgements, so after a resume the
+/// only evidence is a request that gets answered. Messages that arrive
+/// meanwhile are forwarded as usual; the probe's own response is consumed.
+async fn confirm_alive(
+    channel: &mut DataChannel,
+    inbound_tx: &broadcast::Sender<Vec<u8>>,
+    timeout: Duration,
+) -> bool {
+    let request =
+        serde_json::json!({"id": RESUME_PROBE_ID, "method": "workspace.list"}).to_string();
+    if channel.send(request.as_bytes()).await.is_err() {
+        return false;
+    }
+    tokio::time::timeout(timeout, async {
+        loop {
+            match channel.receive().await {
+                Ok(msg) => {
+                    if message_id(&msg).as_deref() == Some(RESUME_PROBE_ID) {
+                        return true;
+                    }
+                    let _ = inbound_tx.send(msg);
+                }
+                Err(_) => return false,
+            }
+        }
+    })
+    .await
+    .unwrap_or(false)
+}
+
+/// message_id returns the `id` of a JSON message that is a response (has a
+/// result or an error), not an event.
+fn message_id(msg: &[u8]) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_slice(msg).ok()?;
+    if v.get("result").is_none() && v.get("error").is_none() {
+        return None;
+    }
+    v.get("id")?.as_str().map(str::to_string)
+}
+
+/// is_hello_required reports whether `msg` is the daemon's refusal of a
+/// client that skipped the hello (an error carrying `device_hello_required`).
+fn is_hello_required(msg: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(msg)
+        .ok()
+        .and_then(|v| {
+            v["error"]["code"]
+                .as_str()
+                .map(|c| c == "device_hello_required")
+        })
+        .unwrap_or(false)
+}
+
+/// run is the reconnect loop: dial + admit, resume the existing e2ee
+/// session on a transport-level reconnect whenever possible (falling back to
+/// a fresh session when the resume cannot be confirmed or there is none),
+/// identify with `device_hello`, and pump JSON-RPC bytes between the e2ee
+/// channel and the outbound/inbound queues — the device-side mirror of
+/// `internal/relay/bridge`'s hub, with the same stable-connection-resets-
+/// backoff anti-flap rule.
 async fn run(
     pairing: RelayPairing,
+    options: RelayOptions,
     mut outbound_rx: mpsc::Receiver<Vec<u8>>,
     inbound_tx: broadcast::Sender<Vec<u8>>,
     status_tx: watch::Sender<Status>,
 ) {
-    let kp = KeyPair::generate();
+    let timing = options.timing.clone();
     // The offer's daemon id IS the admission daemon_key_id (see
     // cmd/smind/relay.go's cmdRelayOffer: DaemonID = bridge.DaemonKeyID(kp),
     // the same string the daemon itself presents when admitting) -- this
     // client (playing the device/mobile role) presents that same value,
     // never re-derives its own.
     let daemon_key_id = pairing.daemon_id.clone();
-    let mut backoff = Backoff::new(Duration::from_secs(1), MAX_RECONNECT_BACKOFF);
-    let mut data: Option<E2eeChannel<DataFrameTransport>> = None;
-    let mut grpc: Option<GrpcRelayClient<GrpcChannel>> = None;
-    let mut need_connect = true;
-
+    let device_id = options
+        .device_key
+        .as_ref()
+        .map(|k| k.device_id())
+        .unwrap_or_default();
+    let mut backoff = Backoff::new(timing.backoff_base, timing.backoff_max);
+    let mut data: Option<DataChannel> = None;
+    let mut mode = if options.device_key.is_some() {
+        RouteMode::Identity
+    } else {
+        RouteMode::Legacy
+    };
     loop {
-        if need_connect {
-            let _ = status_tx.send(Status::Reconnecting);
+        {
+            if matches!(*status_tx.borrow(), Status::Connected) {
+                let _ = status_tx.send(Status::Reconnecting);
+            }
             let dial_and_admit = async {
                 let channel = dial(&pairing.relay_native_addr, &pairing.relay_fingerprint).await?;
                 let mut grpc = GrpcRelayClient::new(channel);
@@ -619,11 +990,11 @@ async fn run(
                 .await?;
                 Ok::<_, String>((grpc, admission_id))
             };
-            let (new_grpc, admission_id) = match dial_and_admit.await {
+            let (mut grpc, admission_id) = match dial_and_admit.await {
                 Ok(v) => v,
                 Err(e) => {
                     eprintln!("smind desktop: relay connect: {e}");
-                    if sleep_or_stop(&mut outbound_rx, backoff.next())
+                    if sleep_or_stop(&mut outbound_rx, (timing.jitter)(backoff.next()))
                         .await
                         .is_none()
                     {
@@ -632,63 +1003,78 @@ async fn run(
                     continue;
                 }
             };
-            grpc = Some(new_grpc);
 
+            // Resume the established session in place when there is one.
             let mut resumed = false;
             if let Some(existing) = data.as_mut() {
                 match existing
                     .transport_mut()
-                    .reopen(grpc.as_mut().unwrap(), &admission_id)
+                    .reopen(&mut grpc, &admission_id)
                     .await
                 {
-                    Ok(()) => resumed = true,
+                    Ok(()) => {
+                        if confirm_alive(existing, &inbound_tx, timing.resume_probe_timeout).await {
+                            resumed = true;
+                        } else {
+                            eprintln!("smind desktop: relay resume: not answered; starting a fresh session");
+                        }
+                    }
                     Err(e) => eprintln!("smind desktop: relay resume: open data: {e}"),
+                }
+                if !resumed {
+                    data = None;
                 }
             }
             if !resumed {
-                match open_data(
-                    grpc.as_mut().unwrap(),
-                    &admission_id,
-                    &pairing.workspace_id,
-                    DEFAULT_SESSION_ID,
-                    DEFAULT_DEVICE_ID,
-                )
-                .await
-                {
-                    Ok(transport) => {
-                        let mut channel = E2eeChannel::new(transport, Role::Mobile);
-                        let handshake = tokio::time::timeout(
-                            HANDSHAKE_TIMEOUT,
-                            channel.handshake(&kp, Some(&pairing.daemon_public_key)),
-                        )
-                        .await;
-                        match handshake {
-                            Ok(Ok(())) => data = Some(channel),
-                            Ok(Err(e)) => {
-                                eprintln!("smind desktop: relay handshake: {e}");
-                                if sleep_or_stop(&mut outbound_rx, backoff.next())
-                                    .await
-                                    .is_none()
-                                {
-                                    return;
-                                }
-                                continue;
+                match establish(&mut grpc, &admission_id, &pairing, &options, mode).await {
+                    Ok(channel) => data = Some(channel),
+                    Err(failure) => {
+                        let delay = match failure {
+                            Failure::Retry(e) => {
+                                eprintln!("smind desktop: relay connect: {e}");
+                                backoff.next()
                             }
-                            Err(_) => {
-                                eprintln!("smind desktop: relay handshake: timed out");
-                                if sleep_or_stop(&mut outbound_rx, backoff.next())
-                                    .await
-                                    .is_none()
-                                {
-                                    return;
-                                }
-                                continue;
+                            Failure::HandshakeTimeout => {
+                                // Nobody serves our identity route: assume a
+                                // daemon from before device identity and try the
+                                // fixed single-device route next.
+                                eprintln!("smind desktop: relay: no daemon answered on the device route; trying the single-device route");
+                                mode = RouteMode::Legacy;
+                                Duration::ZERO
                             }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("smind desktop: relay handshake: open data: {e}");
-                        if sleep_or_stop(&mut outbound_rx, backoff.next())
+                            Failure::NoIdentitySupport => {
+                                eprintln!("smind desktop: relay: the daemon does not support device identity; using the single-device route");
+                                mode = RouteMode::Legacy;
+                                Duration::ZERO
+                            }
+                            Failure::RelayDenied(msg) => {
+                                eprintln!("smind desktop: relay refused this device: {msg}");
+                                let _ = status_tx.send(Status::Revoked {
+                                    device_id: device_id.clone(),
+                                });
+                                timing.revoked_retry
+                            }
+                            Failure::Refused { code, message } => {
+                                let (status, delay) = match code.as_str() {
+                                    "awaiting_approval" => (
+                                        Status::AwaitingApproval {
+                                            device_id: device_id.clone(),
+                                        },
+                                        timing.awaiting_retry,
+                                    ),
+                                    "revoked" => (
+                                        Status::Revoked {
+                                            device_id: device_id.clone(),
+                                        },
+                                        timing.revoked_retry,
+                                    ),
+                                    _ => (Status::Refused { code, message }, timing.refused_retry),
+                                };
+                                let _ = status_tx.send(status);
+                                delay
+                            }
+                        };
+                        if sleep_or_stop(&mut outbound_rx, (timing.jitter)(delay))
                             .await
                             .is_none()
                         {
@@ -698,70 +1084,177 @@ async fn run(
                     }
                 }
             }
-            need_connect = false;
+            backoff.reset();
             let _ = status_tx.send(Status::Connected);
         }
 
         let connected_at = Instant::now();
-        pump(data.as_mut().unwrap(), &mut outbound_rx, &inbound_tx).await;
+        let channel = data.as_mut().unwrap();
+        let end = pump(channel, &mut outbound_rx, &inbound_tx, &timing).await;
+        match end {
+            PumpEnd::Stopped => return,
+            PumpEnd::HelloRequired => {
+                // A daemon that now requires identity: switch routes.
+                if options.device_key.is_some() {
+                    mode = RouteMode::Identity;
+                    data = None;
+                }
+            }
+            PumpEnd::Dead => eprintln!(
+                "smind desktop: relay: nothing from the relay for {:?}; reconnecting",
+                timing.liveness.dead_after
+            ),
+            PumpEnd::Stalled => eprintln!(
+                "smind desktop: relay: the daemon stopped answering; re-checking the session"
+            ),
+            PumpEnd::Ended => {}
+        }
 
-        if connected_at.elapsed() >= MIN_STABLE_CONNECTION {
+        if connected_at.elapsed() >= timing.min_stable_connection {
             backoff.reset();
-        } else if sleep_or_stop(&mut outbound_rx, backoff.next())
+        } else if sleep_or_stop(&mut outbound_rx, (timing.jitter)(backoff.next()))
             .await
             .is_none()
         {
             return;
         }
-        need_connect = true;
     }
 }
 
-/// pump drains `outbound_rx` into the e2ee channel and forwards decrypted
-/// inbound messages to `inbound_tx`, until either side errors — mirrors
+enum PumpEnd {
+    /// Every `RelayHandle` sender was dropped: nothing left to serve.
+    Stopped,
+    /// The transport or the e2ee channel failed: resume.
+    Ended,
+    /// No frame from the relay for the dead-stream window: resume.
+    Dead,
+    /// The daemon stopped answering although the relay is alive (it may have
+    /// restarted and lost this session): resume, and if that is not answered
+    /// either, start a fresh session.
+    Stalled,
+    /// The daemon answered a request with `device_hello_required`.
+    HelloRequired,
+}
+
+/// pump drains `outbound_rx` into the e2ee channel, forwards decrypted
+/// inbound messages to `inbound_tx`, and drives the keepalive probe and the
+/// dead-stream rule, until one side ends — mirrors
 /// `api.ServeTransport(ctx, dc)` (Go) blocking for the life of one data
 /// session.
 async fn pump(
-    data: &mut E2eeChannel<DataFrameTransport>,
+    data: &mut DataChannel,
     outbound_rx: &mut mpsc::Receiver<Vec<u8>>,
     inbound_tx: &broadcast::Sender<Vec<u8>>,
-) {
+    timing: &Timing,
+) -> PumpEnd {
+    let liveness = data.transport_mut().liveness();
+    let start = Instant::now();
+    liveness.lock().unwrap().start_stream(start);
+    // Application-level liveness (see `Timing::request_stall`): the relay's
+    // keepalive proves the RELAY is alive, not that the daemon still holds
+    // this session.
+    let mut last_app_recv = start;
+    let mut pending_since: Option<Instant> = None;
     loop {
+        let wake = [
+            liveness.lock().unwrap().next_wake(),
+            Some(match pending_since {
+                Some(at) => at + timing.request_stall,
+                None => last_app_recv + timing.idle_probe,
+            }),
+        ]
+        .into_iter()
+        .flatten()
+        .min();
+        let sleep = async {
+            match wake {
+                Some(at) => tokio::time::sleep_until(at).await,
+                None => std::future::pending().await,
+            }
+        };
         tokio::select! {
             msg = outbound_rx.recv() => {
                 match msg {
                     Some(msg) => {
+                        if pending_since.is_none() && is_request(&msg) {
+                            pending_since = Some(Instant::now());
+                        }
                         if let Err(e) = data.send(&msg).await {
                             eprintln!("smind desktop: relay send: {e}");
-                            return;
+                            return PumpEnd::Ended;
                         }
                     }
-                    None => return, // every RelayHandle sender dropped
+                    None => return PumpEnd::Stopped,
                 }
             }
             received = data.receive() => {
                 match received {
                     Ok(msg) => {
+                        last_app_recv = Instant::now();
+                        pending_since = None;
+                        if is_hello_required(&msg) {
+                            return PumpEnd::HelloRequired;
+                        }
+                        if message_id(&msg).as_deref() == Some(IDLE_PROBE_ID) {
+                            continue; // our own liveness request's answer
+                        }
                         let _ = inbound_tx.send(msg);
                     }
                     Err(e) => {
                         eprintln!("smind desktop: relay receive: {e}");
-                        return;
+                        return PumpEnd::Ended;
                     }
+                }
+            }
+            _ = sleep => {
+                let now = Instant::now();
+                let action = liveness.lock().unwrap().poll(now);
+                match action {
+                    Action::Nothing => {}
+                    Action::SendProbe => {
+                        if let Err(e) = data.transport_mut().send_probe().await {
+                            eprintln!("smind desktop: relay keepalive: {e}");
+                            return PumpEnd::Ended;
+                        }
+                    }
+                    Action::Dead => return PumpEnd::Dead,
+                }
+                match pending_since {
+                    Some(at) if now >= at + timing.request_stall => return PumpEnd::Stalled,
+                    None if now >= last_app_recv + timing.idle_probe => {
+                        let probe = serde_json::json!({"id": IDLE_PROBE_ID, "method": "workspace.list"}).to_string();
+                        if let Err(e) = data.send(probe.as_bytes()).await {
+                            eprintln!("smind desktop: relay liveness request: {e}");
+                            return PumpEnd::Ended;
+                        }
+                        pending_since = Some(now);
+                    }
+                    _ => {}
                 }
             }
         }
     }
 }
 
-/// sleep_or_stop waits for `d`, but returns early with `None` if every
-/// `RelayHandle` sender has already been dropped (nothing left to serve),
-/// so a backing-off loop doesn't keep a task alive forever after its
-/// last consumer is gone.
+const IDLE_PROBE_ID: &str = "relay-idle-probe";
+
+/// is_request reports whether `msg` is a request that expects a response
+/// (an `id` and a `method`), as opposed to a fire-and-forget message such as
+/// `task.cancel`.
+fn is_request(msg: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(msg)
+        .map(|v| v.get("id").is_some() && v.get("method").is_some())
+        .unwrap_or(false)
+}
+
+/// sleep_or_stop waits for `d`, but returns `None` if every `RelayHandle`
+/// sender has been dropped (nothing left to serve), so a backing-off loop
+/// doesn't keep a task alive forever after its last consumer is gone. A
+/// message arriving mid-backoff only wakes the wait early.
 async fn sleep_or_stop(outbound_rx: &mut mpsc::Receiver<Vec<u8>>, d: Duration) -> Option<()> {
     tokio::select! {
         _ = tokio::time::sleep(d) => Some(()),
-        _ = outbound_rx.recv() => Some(()), // a send arriving mid-backoff is fine, just wakes us early
+        msg = outbound_rx.recv() => msg.map(|_| ()),
     }
 }
 
