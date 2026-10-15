@@ -10,7 +10,7 @@ BLOCKED** in the plan
 study are marked **★**. Builds on ADR-0007/0011 (relay, admission),
 ADR-0013/0023/0030 (desktop app, updater, native Windows daemon) and ADR-0029
 (`POST /api/shutdown`). Several decisions here **amend** earlier ones (loopback
-only — pending decision 9 —, one relay device per relay host, ephemeral device keys); each says so
+only — decision 9, accepted 2026-10-15 —, one relay device per relay host, ephemeral device keys); each says so
 and, once accepted, the amended ADR gets a one-line pointer here.
 
 **Human answers recorded 2026-10-13/14:** the relay-side "workspace" is renamed **relay host** and smind's own
@@ -428,10 +428,10 @@ non-publishing check); `workflow_dispatch` can republish.
   non-root `smind` user (uid/gid 1000, matching most host users) with `gosu`; if
   started as non-root it just runs. This fixes the bind-mount permission pain that
   `--user` workarounds only paper over.
-- **Listening and auth (depends on decision 9):** the image sets
+- **Listening and auth (decision 9, accepted; needs P4):** the image sets
   `SMIND_LISTEN=0.0.0.0:4648` and **refuses to start without `SMIND_PASSWORD`**
   (Paseo only warns, `paseo-docker-entrypoint:60-65`), serves the web UI on the same
-  origin, and `-p 4648:4648` works. Until decision 9 lands the image is relay-only
+  origin, and `-p 4648:4648` works. Until P4 lands the image is relay-only
   (loopback bind, do not publish 4648).
 - State: `SMIND_HOME=/data` (`VOLUME`), repositories under a second mount
   (`/workspaces`); stored paths are container paths. Agent credentials persist under
