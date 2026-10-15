@@ -70,6 +70,8 @@ describe('three devices on one relay host: two Go desktop peers and the mobile T
       net,
       // Quick probes against the REAL relay (the 30 s / 75 s defaults are unit-tested).
       keepalive: { intervalMs: 300, deadAfterMs: 2_000, probeTimeoutMs: 2_000 },
+      // The end-to-end watchdog, shortened (defaults: 15 s with a request waiting, 90 s idle).
+      liveness: { pendingStaleMs: 1_500, idleStaleMs: 3_000, checkMs: 250 },
     });
     await vi.waitFor(() => expect(mobile.state.kind).toBe('pending'), { timeout: 20_000 });
     if (mobile.state.kind !== 'pending') throw new Error('unreachable');
@@ -120,14 +122,14 @@ describe('three devices on one relay host: two Go desktop peers and the mobile T
     expect((await harness.devices()).filter((r) => r.id === mobileId)).toHaveLength(1);
   });
 
-  it('opens a fresh session and re-subscribes after the daemon restarts', { timeout: 90_000 }, async () => {
+  it('opens a fresh session and re-subscribes after the daemon restarts (stream stays up)', { timeout: 90_000 }, async () => {
     const seen: string[] = [];
     mobile.subscribe(['workspace.updated', 'task.created'], (e) => seen.push(e.topic));
     const epoch = mobile.epoch;
     await harness.mustCmd('daemon-restart');
-    // The daemon lost the session's counters; the client notices (its resumed session is not answered,
-    // or its stream is ended) and re-handshakes with a new session id.
-    net.cutLive();
+    // The daemon lost the session's counters but the relay keeps the phone's stream up and echoing
+    // keepalives, so nothing drops: the liveness watchdog notices that the daemon stopped answering and
+    // re-handshakes with a new session id (no cut of the stream here, on purpose).
     await vi.waitFor(() => expect(mobile.epoch).toBeGreaterThan(epoch), { timeout: 60_000 });
     await expect(mobile.call('workspace.list')).resolves.toEqual([]);
     expect((await harness.devices()).find((r) => r.id === mobileId)).toMatchObject({ state: 'approved', connected: true });

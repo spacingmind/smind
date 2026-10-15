@@ -156,7 +156,15 @@ connection.)*
 ### 6. Pair a mobile device
 
 Open the mobile app's pairing screen and paste the link (or scan the QR code in builds that support scanning), then
-Connect.
+Connect. On first use the app creates its device key (kept in the iOS Keychain or the Android Keystore through the
+platform secure store). If the pairing window is not open for it, the app shows **Waiting for approval** with the exact
+`smind relay devices approve <id>` command to run on the daemon's computer (step 7) and connects by itself once you
+approve. A device you revoke shows **This device was revoked**; *Reset device identity* gives it a new key, which the
+daemon treats as a new device that needs approval again. After a dropped connection the app reconnects on its own and
+resumes its session.
+
+A phone does not pin the relay's certificate (it has no way to confirm a fingerprint): the relay needs a certificate
+that the phone already trusts, for example one from a public CA. A self-signed relay certificate is refused.
 
 ### 7. Approve devices
 

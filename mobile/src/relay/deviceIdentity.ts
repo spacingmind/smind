@@ -73,7 +73,7 @@ export function helloSignedBytes(daemonPub: Uint8Array, mobilePub: Uint8Array): 
 
 /**
  * A device's persistent identity. The seed is the secret: it never leaves
- * this object except into a DeviceKeyStore, and is never logged.
+ * identityFromSeed's closure except into a DeviceKeyStore, and is never logged.
  */
 export interface DeviceIdentity {
   /** The Ed25519 public key (32 bytes). */
@@ -84,26 +84,19 @@ export interface DeviceIdentity {
   sign(msg: Uint8Array): Uint8Array;
 }
 
-class SeedIdentity implements DeviceIdentity {
-  readonly publicKey: Uint8Array;
-  readonly deviceId: string;
-  private readonly seed: Uint8Array;
-
-  constructor(seed: Uint8Array) {
-    this.seed = seed;
-    this.publicKey = ed25519.getPublicKey(seed);
-    this.deviceId = deviceIdFor(this.publicKey);
-  }
-
-  sign(msg: Uint8Array): Uint8Array {
-    return ed25519.sign(msg, this.seed);
-  }
-}
-
 /** Builds an identity from a 32-byte Ed25519 seed. */
 export function identityFromSeed(seed: Uint8Array): DeviceIdentity {
   if (seed.length !== SEED_LEN) throw new Error(`device key: seed is ${seed.length} bytes, want ${SEED_LEN}`);
-  return new SeedIdentity(seed.slice());
+  // The seed lives only in this closure: it is not a property of the returned
+  // object, so serialising or logging the identity (or the connection and
+  // props that hold it) cannot expose it.
+  const secret = seed.slice();
+  const publicKey = ed25519.getPublicKey(secret);
+  return {
+    publicKey,
+    deviceId: deviceIdFor(publicKey),
+    sign: (msg) => ed25519.sign(msg, secret),
+  };
 }
 
 /** Where the device seed persists. save() must not resolve before the seed is durable. */

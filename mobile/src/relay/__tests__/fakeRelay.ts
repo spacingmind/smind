@@ -22,7 +22,7 @@ import { DataStream } from '../grpcweb';
 import { Frame, decodeFrame, encodeFrame, Direction } from '../proto';
 import { RelayNet } from '../RelayConnection';
 
-export type DevicePolicy = 'approved' | 'pending' | 'revoked' | 'legacy-daemon' | 'bad_hello';
+export type DevicePolicy = 'approved' | 'pending' | 'revoked' | 'legacy-daemon' | 'silent' | 'too_many' | 'bad_hello';
 
 export class FakeStream implements DataStream {
   routeKey: string | null = null;
@@ -123,6 +123,7 @@ class DaemonRoute {
         if (msg.method === 'relay.device_hello') {
           this.helloSeen++;
           this.relay.hellos.push(msg.params as DeviceHello);
+          if (this.relay.gate) await this.relay.gate;
           if (!this.relay.checkHello(this, msg.id, msg.params as DeviceHello, reply)) return;
           continue;
         }
@@ -151,6 +152,8 @@ export class FakeRelay implements RelayNet {
   /** What the daemon decides about a device at hello. */
   policy: (deviceId: string) => DevicePolicy = () => 'approved';
   admissions = 0;
+  /** When set, the daemon holds every hello answer until it resolves (a slow daemon). */
+  gate: Promise<void> | null = null;
   /** When set, admit() fails (the relay is unreachable). */
   admitError: Error | null = null;
 
@@ -229,9 +232,14 @@ export class FakeRelay implements RelayNet {
     const verified =
       deviceIdFor(pub) === route.deviceId && ed25519.verify(sig, helloSignedBytes(this.daemonKeys.publicKey, peer), pub);
     const policy = this.policy(route.deviceId);
+    if (policy === 'silent') return true; // what the real daemon does with a method it does not know: no answer
     if (policy === 'legacy-daemon') {
       reply(id, { error: { message: 'method not found: relay.device_hello' } });
       return true;
+    }
+    if (policy === 'too_many') {
+      reply(id, { error: { message: 'too many connected devices', code: 'too_many_devices' } });
+      return false;
     }
     if (!verified || policy === 'bad_hello') {
       reply(id, { error: { message: 'device_hello rejected', code: 'bad_hello' } });

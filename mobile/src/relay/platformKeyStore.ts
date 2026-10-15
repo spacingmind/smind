@@ -25,16 +25,21 @@ export async function platformDeviceKeyStore(): Promise<DeviceKeyStore> {
 }
 
 let identityPromise: Promise<DeviceIdentity> | null = null;
+let removal: Promise<void> | null = null;
 
 /** The device identity for this install, created on first use and then kept (in memory for the process, in the secure store across launches). */
 export function loadPlatformIdentity(): Promise<DeviceIdentity> {
   if (!identityPromise) {
-    identityPromise = platformDeviceKeyStore()
+    // A reset in progress finishes first: loading the key it is deleting, or
+    // saving one it then deletes, would split the identity from what is stored.
+    const attempt = (removal ?? Promise.resolve())
+      .then(platformDeviceKeyStore)
       .then(loadOrCreateIdentity)
       .catch((e) => {
-        identityPromise = null; // a failed read is retried, not cached
+        if (identityPromise === attempt) identityPromise = null; // a failed read is retried, not cached
         throw e;
       });
+    identityPromise = attempt;
   }
   return identityPromise;
 }
@@ -46,7 +51,13 @@ export function loadPlatformIdentity(): Promise<DeviceIdentity> {
  */
 export async function resetDeviceIdentity(): Promise<void> {
   identityPromise = null;
-  await (await platformDeviceKeyStore()).remove();
+  const mine = (async () => (await platformDeviceKeyStore()).remove())();
+  removal = mine;
+  try {
+    await mine;
+  } finally {
+    if (removal === mine) removal = null;
+  }
 }
 
 /** What the person approving this device on the daemon sees, e.g. "iPhone (smind mobile)". */

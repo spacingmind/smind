@@ -132,10 +132,16 @@ describe('device key persistence', () => {
     expect(secure.items.get('smind.relay.deviceKey.v1')).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it('never puts the seed in the hello', async () => {
+  it('never puts the seed in the hello, nor on the identity object', async () => {
     const seed = fromHex(vector.seed_hex);
-    const hello = buildDeviceHello(identityFromSeed(seed), 'x', new Uint8Array(32), new Uint8Array(32));
+    const identity = identityFromSeed(seed);
+    const hello = buildDeviceHello(identity, 'x', new Uint8Array(32), new Uint8Array(32));
     expect(JSON.stringify(hello)).not.toContain(base64Encode(seed));
+    // Serialising or logging the identity (or whatever holds it) must not reveal the seed.
+    expect(Object.keys(identity).sort()).toEqual(['deviceId', 'publicKey', 'sign']);
+    expect(JSON.stringify(identity)).not.toContain(vector.seed_hex);
+    expect(JSON.stringify(Array.from(seed))).not.toBe(JSON.stringify(identity));
+    expect(JSON.stringify(identity)).not.toContain(JSON.stringify(Array.from(seed)).slice(1, -1));
   });
 });
 

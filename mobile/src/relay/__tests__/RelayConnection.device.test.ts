@@ -35,7 +35,7 @@ function start(relay: FakeRelay, over: Partial<ConnectOptions> = {}): RelayConne
     net: relay,
     jitter: (ms) => ms,
     keepalive: { intervalMs: 40, deadAfterMs: 400, probeTimeoutMs: 150 },
-    reconnect: { baseMs: 5, maxMs: 20, pendingPollMs: 20, resumeProbeMs: 300, handshakeMs: 1500 },
+    reconnect: { baseMs: 5, maxMs: 20, pendingPollMs: 20, pendingPollMaxMs: 40, minStableMs: 2000, resumeProbeMs: 600, handshakeMs: 1500 },
     ...over,
   });
   open.push(conn);
@@ -86,6 +86,7 @@ describe('device identity on the wire', () => {
     const relay = new FakeRelay();
     const a = start(relay);
     await a.whenConnected();
+    a.close(); // a daemon serves one session per device at a time
     const b = start(relay);
     await b.whenConnected();
     const keys = relay.routeKeys();
@@ -288,6 +289,99 @@ describe('approval and revocation', () => {
     relay.policy = () => 'bad_hello';
     const conn = start(relay);
     await expect(conn.whenConnected()).rejects.toThrow('rejected');
+  });
+});
+
+describe('review hardening', () => {
+  it('close() during the handshake ends the stream instead of leaving an admitted ghost session', async () => {
+    const relay = new FakeRelay();
+    let release: () => void = () => {};
+    relay.gate = new Promise<void>((resolve) => (release = resolve)); // the daemon is slow to answer the hello
+    const conn = start(relay);
+    await vi.waitFor(() => expect(relay.hellos).toHaveLength(1)); // the hello is on its way, the answer is not
+    conn.close();
+    expect(relay.streams[0].closed).toBe(true);
+    release();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(conn.state.kind).toBe('closed');
+    expect(relay.streams).toHaveLength(1); // and it did not start another one
+  });
+
+  it('a daemon that restarted without the stream dropping is noticed (calls hang no longer): fresh session, pending calls rejected', async () => {
+    const relay = new FakeRelay();
+    const conn = start(relay, { liveness: { pendingStaleMs: 150, idleStaleMs: 5000, checkMs: 30 } });
+    await conn.whenConnected();
+    const epoch = conn.epoch;
+    const inFlight = conn.call('hang'); // never answered, like a request the new daemon never saw
+    relay.restartDaemon(); // the relay keeps the phone's stream up and echoing keepalives
+    const rejection = expect(inFlight).rejects.toThrow('relay: connection lost');
+    await vi.waitFor(() => expect(conn.epoch).toBeGreaterThan(epoch), { timeout: 5000 });
+    await rejection;
+    expect(relay.routeKeys()).toHaveLength(2); // a fresh session, not a resume of the dead one
+    expect(relay.hellos).toHaveLength(2);
+    await expect(conn.call('workspace.list')).resolves.toEqual([]);
+  });
+
+  it('total silence on an idle session is probed too, and a healthy daemon is left alone', async () => {
+    const relay = new FakeRelay();
+    const conn = start(relay, { liveness: { pendingStaleMs: 5000, idleStaleMs: 120, checkMs: 30 } });
+    await conn.whenConnected();
+    const epoch = conn.epoch;
+    await vi.waitFor(() => expect(relay.requests.filter((r) => r.method === 'workspace.list').length).toBeGreaterThanOrEqual(2), { timeout: 3000 });
+    expect(conn.epoch).toBe(epoch); // answered: no reconnect
+    relay.restartDaemon();
+    await vi.waitFor(() => expect(conn.epoch).toBeGreaterThan(epoch), { timeout: 5000 });
+  });
+
+  it('a transient error while pending does not turn into a final failure', async () => {
+    const relay = new FakeRelay();
+    relay.policy = () => 'pending';
+    const conn = start(relay);
+    await vi.waitFor(() => expect(conn.state.kind).toBe('pending'), { timeout: 2000 });
+    relay.admitError = new Error('network blip');
+    await new Promise((r) => setTimeout(r, 200));
+    expect(['pending', 'reconnecting']).toContain(conn.state.kind);
+    relay.admitError = null;
+    relay.policy = () => 'approved';
+    await conn.whenConnected();
+  });
+
+  it('a daemon with no room (too_many_devices) is retried with backoff, even on the first connect', async () => {
+    const relay = new FakeRelay();
+    relay.policy = () => 'too_many';
+    const conn = start(relay);
+    await vi.waitFor(() => expect(relay.hellos.length).toBeGreaterThanOrEqual(2), { timeout: 3000 });
+    expect(conn.state.kind).toBe('reconnecting');
+    relay.policy = () => 'approved';
+    await conn.whenConnected();
+  });
+
+  it('a relay that is full (status 8 on the stream) is retried too', async () => {
+    const relay = new FakeRelay();
+    const conn = start(relay);
+    await conn.whenConnected();
+    relay.restartDaemon();
+    relay.dropCurrentStream(new GrpcStatusError('OpenData', 8, 'relay: too many sessions for this relay host'));
+    await vi.waitFor(() => expect(conn.state.kind).toBe('reconnecting'));
+    await vi.waitFor(() => expect(conn.state.kind).toBe('connected'), { timeout: 5000 });
+  });
+
+  it('a path that connects and dies at once backs off instead of reconnecting in a tight loop', async () => {
+    const relay = new FakeRelay();
+    const conn = start(relay, { reconnect: { baseMs: 80, maxMs: 400, minStableMs: 10_000, resumeProbeMs: 600, handshakeMs: 1500 } });
+    await conn.whenConnected();
+    const before = relay.streams.length;
+    const t0 = Date.now();
+    relay.dropCurrentStream();
+    await vi.waitFor(() => expect(relay.streams.length).toBeGreaterThan(before), { timeout: 3000 });
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(60); // waited ~baseMs, not zero
+  });
+
+  it('a daemon that never answers device_hello (the real behaviour of one that predates it) fails with the update hint', async () => {
+    const relay = new FakeRelay();
+    relay.policy = () => 'silent';
+    const conn = start(relay, { reconnect: { handshakeMs: 150 } });
+    await expect(conn.whenConnected()).rejects.toThrow('may be older than v0.12');
   });
 });
 

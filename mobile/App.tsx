@@ -54,8 +54,9 @@ function AppShell() {
   }, []);
 
   const handleResetIdentity = useCallback(async () => {
+    // The old key is gone before the pairing screen can start a new connection.
+    await resetDeviceIdentity().catch(() => {});
     handleDisconnect();
-    await resetDeviceIdentity();
   }, [handleDisconnect]);
 
   if (!conn || screen.kind === 'pairing') {

@@ -72,6 +72,9 @@ interface WireEnvelope {
 }
 
 interface PendingCall {
+  sentAt: number;
+  /** Connection housekeeping (subscriptions, liveness probes): not something the liveness watchdog waits on. */
+  background: boolean;
   resolve: (result: unknown) => void;
   reject: (err: Error) => void;
   onEvent?: (event: string, params: unknown) => void;
@@ -97,8 +100,16 @@ export interface ReconnectTiming {
   baseMs: number;
   /** Backoff ceiling (30 s). */
   maxMs: number;
-  /** How often a pending (not yet approved) device asks again (5 s). */
+  /**
+   * How often a pending (not yet approved) device asks again (5 s at first,
+   * growing by half each time up to pendingPollMaxMs): every ask is a fresh
+   * session, and the relay keeps an abandoned route for 5 minutes against its
+   * per-host route cap, so a patient phone must not open one every few seconds.
+   */
   pendingPollMs: number;
+  pendingPollMaxMs: number;
+  /** A link that ends sooner than this after connecting counts as a failed attempt (backoff), not a blip (immediate retry) (2 s). */
+  minStableMs: number;
   /** How long a resumed session gets to answer a liveness request before it is replaced by a fresh one (10 s). */
   resumeProbeMs: number;
   /** How long a fresh session gets to finish the E2EE handshake and the hello answer (20 s). */
@@ -111,9 +122,31 @@ export const DEFAULT_RECONNECT: ReconnectTiming = {
   baseMs: 1_000,
   maxMs: 30_000,
   pendingPollMs: 5_000,
+  pendingPollMaxMs: 30_000,
+  minStableMs: 2_000,
   resumeProbeMs: 10_000,
   handshakeMs: 20_000,
   maxResumeFailures: 3,
+};
+
+/**
+ * Liveness of the end-to-end session (keepalive only proves the RELAY is
+ * there): a request nobody answers for pendingStaleMs, or total silence for
+ * idleStaleMs, makes the connection ask the daemon a cheap question; no answer
+ * within ReconnectTiming.resumeProbeMs means the daemon lost the session (it
+ * restarted, or dropped the device) and the connection opens a fresh one.
+ */
+export interface LivenessTiming {
+  pendingStaleMs: number;
+  idleStaleMs: number;
+  /** How often the watchdog looks. */
+  checkMs: number;
+}
+
+export const DEFAULT_LIVENESS: LivenessTiming = {
+  pendingStaleMs: 15_000,
+  idleStaleMs: 90_000,
+  checkMs: 2_000,
 };
 
 /** The network side of a connection; tests substitute a fake relay. */
@@ -129,6 +162,7 @@ export interface ConnectOptions {
   label: string;
   keepalive?: Partial<KeepaliveTiming>;
   reconnect?: Partial<ReconnectTiming>;
+  liveness?: Partial<LivenessTiming>;
   net?: RelayNet;
   /** Spreads a delay by +-20% (tests pass an identity function). */
   jitter?: (ms: number) => number;
@@ -140,6 +174,8 @@ class AwaitingApprovalError extends Error {}
 class RevokedError extends Error {}
 /** A failure that retrying will not fix. */
 class FatalError extends Error {}
+/** The daemon or relay is busy or full: retry with backoff, even on the first connect. */
+class RetryableError extends Error {}
 
 const HELLO_REQUEST_ID = 'hello';
 // The liveness probe after a resume: a cheap read every daemon serves. (Not an
@@ -323,9 +359,20 @@ export interface CloseableStream {
  */
 function classify(err: unknown): Error {
   const e = err instanceof Error ? err : new Error(String(err));
-  if (e instanceof AwaitingApprovalError || e instanceof RevokedError || e instanceof FatalError || e instanceof TimeoutError) return e;
+  if (
+    e instanceof AwaitingApprovalError ||
+    e instanceof RevokedError ||
+    e instanceof FatalError ||
+    e instanceof RetryableError ||
+    e instanceof TimeoutError
+  ) {
+    return e;
+  }
   if (e instanceof GrpcStatusError && e.code === GrpcCode.PermissionDenied && /revoked/i.test(e.message)) {
     return new RevokedError(e.message);
+  }
+  if (e instanceof GrpcStatusError && e.code === GrpcCode.ResourceExhausted) {
+    return new RetryableError(e.message); // the relay host is full of devices or routes
   }
   if (e.message.startsWith('e2ee: daemon public key does not match')) {
     return new FatalError('the daemon at the other end is not the one in the pairing offer (its key changed); pair again');
@@ -364,6 +411,12 @@ export class RelayConnection {
   private timing: ReconnectTiming = DEFAULT_RECONNECT;
   private net: RelayNet = grpcWebRelayNet;
   private jitter: (ms: number) => number = defaultJitter;
+  private liveness: LivenessTiming = DEFAULT_LIVENESS;
+  /** When a message from the daemon last arrived (the liveness watchdog's clock). */
+  private lastInbound = 0;
+  private probing = false;
+  /** The route of a fresh session that is still handshaking, so close() can end it. */
+  private connecting: RouteTransport | null = null;
   private wake: (() => void) | null = null;
 
   /** The pairing offer this connection was admitted under. */
@@ -400,6 +453,7 @@ export class RelayConnection {
     conn.timing = { ...DEFAULT_RECONNECT, ...opts.reconnect };
     conn.net = opts.net ?? grpcWebRelayNet;
     conn.jitter = opts.jitter ?? defaultJitter;
+    conn.liveness = { ...DEFAULT_LIVENESS, ...opts.liveness };
     void conn.supervise().catch((e) => conn.setState({ kind: 'failed', message: e instanceof Error ? e.message : String(e) }));
     return conn;
   }
@@ -465,7 +519,9 @@ export class RelayConnection {
    */
   call(method: string, params?: unknown, opts?: CallOptions): CancellablePromise<unknown> {
     if (this.closed) return rejected(new Error('relay: connection is closed'));
-    if (this.stateValue.kind !== 'connected') return rejected(new Error(`relay: not connected (${this.stateValue.kind})`));
+    if (this.stateValue.kind !== 'connected' || !this.channel) {
+      return rejected(new Error(`relay: not connected (${this.stateValue.kind === 'connected' ? 'reconnecting' : this.stateValue.kind})`));
+    }
     return this.request(method, params, opts);
   }
 
@@ -512,6 +568,7 @@ export class RelayConnection {
     this.rejectPending(new Error('relay: connection is closed'));
     this.topicCallbacks.clear();
     this.session?.transport.detach();
+    this.connecting?.detach();
     this.stream?.close();
     this.setState({ kind: 'closed' });
     this.wake?.();
@@ -519,12 +576,12 @@ export class RelayConnection {
 
   // --- requests ---
 
-  private request(method: string, params: unknown, opts?: CallOptions): CancellablePromise<unknown> {
+  private request(method: string, params: unknown, opts?: CallOptions, background = false): CancellablePromise<unknown> {
     const channel = this.channel;
     if (!channel) return rejected(new Error('relay: not connected'));
     const id = String(++this.nextId);
     const promise = new Promise<unknown>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, onEvent: opts?.onEvent });
+      this.pending.set(id, { sentAt: Date.now(), background, resolve, reject, onEvent: opts?.onEvent });
       const envelope: Record<string, unknown> = { id, method };
       if (params !== undefined) envelope.params = params;
       try {
@@ -555,7 +612,7 @@ export class RelayConnection {
 
   private fireSubscriptionRPC(method: string, topics: string[]): void {
     if (this.closed || this.stateValue.kind !== 'connected') return;
-    this.request(method, { topics }).catch(() => {
+    this.request(method, { topics }, undefined, true).catch(() => {
       // A failed subscribe just means this callback never fires; an
       // unsubscribe that races a closed connection is equally ignorable.
     });
@@ -574,6 +631,7 @@ export class RelayConnection {
     try {
       for (;;) {
         const bytes = await channel.receive();
+        this.lastInbound = Date.now();
         try {
           this.handleEnvelope(JSON.parse(decoder.decode(bytes)));
         } catch {
@@ -665,8 +723,12 @@ export class RelayConnection {
   private async supervise(): Promise<void> {
     const opts = this.opts!;
     let everConnected = false;
+    // Set once something has actually answered (a daemon that wants approval, a
+    // relay that is full): from then on a failure is retried, not reported as final.
+    let reachedDaemon = false;
     let attempt = 0;
     let resumeFailures = 0;
+    let pendingPolls = 0;
 
     while (!this.closed) {
       let link: Link;
@@ -687,8 +749,10 @@ export class RelayConnection {
         }
         if (e instanceof AwaitingApprovalError) {
           this.dropSession();
+          reachedDaemon = true;
           this.setState({ kind: 'pending', deviceId: opts.identity.deviceId, label: opts.label });
-          await this.sleep(this.jitter(this.timing.pendingPollMs));
+          const ask = Math.min(this.timing.pendingPollMs * 1.5 ** pendingPolls++, this.timing.pendingPollMaxMs);
+          await this.sleep(this.jitter(ask));
           continue;
         }
         if (e instanceof TimeoutError && this.session) {
@@ -697,7 +761,8 @@ export class RelayConnection {
           this.dropSession();
           continue;
         }
-        if (!everConnected) {
+        if (e instanceof RetryableError) reachedDaemon = true;
+        if (!everConnected && !reachedDaemon) {
           // Nothing has worked yet: an unreachable relay or a bad secret is
           // the user's to fix; report it rather than retrying silently.
           this.dropSession();
@@ -715,13 +780,16 @@ export class RelayConnection {
       }
 
       everConnected = true;
-      attempt = 0;
       resumeFailures = 0;
+      pendingPolls = 0;
       this.link = link;
+      const connectedAt = Date.now();
       this.setState({ kind: 'connected' });
       this.resubscribe();
 
+      const stopWatching = this.watchLiveness(link);
       const err = classify(await link.done);
+      stopWatching();
       link.session.transport.detach();
       this.link = null;
       if (this.closed) return;
@@ -730,9 +798,45 @@ export class RelayConnection {
         this.setState({ kind: 'revoked', deviceId: opts.identity.deviceId });
         return;
       }
-      // The first retry is immediate: most drops are a blip.
-      this.setState({ kind: 'reconnecting', attempt: 0, reason: err.message });
+      // A drop after a stable stretch is a blip and is retried at once; one
+      // right after connecting is a flapping path and backs off like any
+      // failed attempt (the hub's minStableConnection rule).
+      attempt = Date.now() - connectedAt >= this.timing.minStableMs ? 0 : attempt + 1;
+      this.setState({ kind: 'reconnecting', attempt, reason: err.message });
+      if (attempt > 0) await this.sleep(this.backoff(attempt));
     }
+  }
+
+  /**
+   * The end-to-end liveness watchdog (see LivenessTiming). Returns its stop.
+   * A probe that goes unanswered ends the link AND forgets the session, so
+   * the supervisor opens a fresh one instead of resuming a dead one.
+   */
+  private watchLiveness(link: Link): () => void {
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      if (this.probing || this.closed || this.channel !== link.session.channel) return;
+      let waitingSince = 0;
+      for (const p of this.pending.values()) if (!p.background) waitingSince = Math.max(waitingSince, p.sentAt);
+      const quietSince = Math.max(this.lastInbound, startedAt, waitingSince);
+      const staleAfter = waitingSince > 0 ? this.liveness.pendingStaleMs : this.liveness.idleStaleMs;
+      if (Date.now() - quietSince < staleAfter) return;
+      this.probing = true;
+      void withTimeout(
+        this.request(PROBE_METHOD, undefined, undefined, true).catch(answeredOrThrow),
+        this.timing.resumeProbeMs,
+        'the daemon stopped answering on this session',
+      )
+        .catch((e) => {
+          if (!(e instanceof TimeoutError) || this.closed || this.channel !== link.session.channel) return;
+          this.dropSession();
+          link.session.transport.detach();
+        })
+        .finally(() => {
+          this.probing = false;
+        });
+    }, this.liveness.checkMs);
+    return () => clearInterval(timer);
   }
 
   private dropSession(): void {
@@ -765,7 +869,11 @@ export class RelayConnection {
   /** Starts the receive loop over the session's current stream; done fails every pending request when the stream ends. */
   private startLink(session: Session): Link {
     this.channel = session.channel;
+    this.lastInbound = Date.now();
     const done = this.receiveLoop(session.channel).then((err) => {
+      // From here no call may be sent on this session: it would never be
+      // answered (and never rejected) if issued before the supervisor reacts.
+      if (this.channel === session.channel) this.channel = null;
       this.rejectPending(new Error('relay: connection lost'));
       return err;
     });
@@ -779,8 +887,10 @@ export class RelayConnection {
     const transport = new RouteTransport(this.offer.workspaceId, randomSessionId(), identity.deviceId, this.keepalive);
     const keyPair = generateKeyPair();
     const channel = new Channel(transport, keyPair, Role.Mobile);
+    this.connecting = transport;
     try {
       transport.attach(await this.openRoute());
+      if (this.closed) throw new Error('relay: connection is closed');
       await withTimeout(
         channel.handshake(this.offer.publicKey),
         this.timing.handshakeMs,
@@ -800,9 +910,14 @@ export class RelayConnection {
         this.timing.handshakeMs,
         'the daemon did not answer device_hello (it may be older than v0.12: update it)',
       );
+      // close() ended the route while the handshake was in flight: do not
+      // turn the finished handshake into a live, admitted session.
+      if (this.closed) throw new Error('relay: connection is closed');
     } catch (e) {
       transport.detach();
       throw classify(e);
+    } finally {
+      this.connecting = null;
     }
     const session: Session = { transport, channel };
     this.session = session;
@@ -829,7 +944,7 @@ export class RelayConnection {
         if (!code && /method not found/i.test(message)) {
           throw new FatalError('the daemon predates device identity (it needs v0.12 or later); update it');
         }
-        throw new Error(message); // too_many_devices, too_many_pending, internal: worth retrying
+        throw new RetryableError(message); // too_many_devices, too_many_pending, internal: worth retrying
       }
       const result = env.result as { v?: number; device_id?: string } | undefined;
       if (result?.v !== HELLO_VERSION || result.device_id !== this.opts!.identity.deviceId) {
@@ -848,7 +963,7 @@ export class RelayConnection {
     try {
       // The relay has no acknowledgements, so the only proof the daemon still
       // holds this session is an answer. Any answer will do, even an error.
-      await withTimeout(this.request(PROBE_METHOD, undefined).catch(answeredOrThrow), this.timing.resumeProbeMs, 'the daemon did not answer on the resumed session');
+      await withTimeout(this.request(PROBE_METHOD, undefined, undefined, true).catch(answeredOrThrow), this.timing.resumeProbeMs, 'the daemon did not answer on the resumed session');
     } catch (e) {
       session.transport.detach();
       const why = classify(await link.done);

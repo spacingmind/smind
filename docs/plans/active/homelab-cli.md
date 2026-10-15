@@ -964,6 +964,21 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   signature covers the route session id and that challenge; v1 is refused (no released client speaks it); vector updated (v1 kept as
   history). (2) wsapi answered an unknown method with nothing (the error was sent before the request was registered in flight):
   fixed, tested.
+- 2026-10-15 (P13b): mobile device identity, keepalive, resume and multi-device implemented on
+  `feat/mobile-relay-device-identity`. Decisions inside the spec: the daemon must be v0.12+ (the client uses a per-pairing
+  session id and the key-derived device id, which a pre-P12b daemon never opens a route for, so there is no legacy fallback on mobile —
+  a daemon that does not answer `device_hello` within 20 s is reported as "may be older than v0.12"); a device the daemon has not
+  approved is `pending` and **retried every 5 s** with a fresh session until approved (revoked and bad-hello are final, anything
+  else backs off); after a drop the client first **resumes** the same session (same route, E2EE counters and frame sequence) and
+  proves the daemon still holds it with one `workspace.list` (any answer counts; 10 s), else opens a **fresh session** (new session id,
+  new ephemeral key, new hello) and re-subscribes; requests in flight across a drop reject (at-most-once, as P12b says); the
+  key lives in the platform secure store (`expo-secure-store`, device-bound, after-first-unlock) and in memory only on Expo web;
+  a revoked device offers **Reset device identity** (new key = new pending device) instead of retrying; the hand-written proto
+  gained `Frame.keepalive` only (a device never opens the control stream, so none of the `ControlFrame` messages are needed).
+  **Daemon finding (not fixed here):** `internal/wsapi/conn.go` `dispatch` calls `sendError` for an unknown method *before* the
+  request is registered in-flight, so `terminate` rejects it and the daemon sends **no answer at all** — the ADR/P12b text that
+  "a daemon from before P12b answers method not found" is not what the code does; a client cannot use an unknown method as a
+  probe (the first cut of this client did, and a resumed session was never confirmed).
 
 ## Validation
 

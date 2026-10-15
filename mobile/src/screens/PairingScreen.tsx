@@ -40,17 +40,21 @@ export function PairingScreen({ onConnected }: Props) {
   // daemon has not approved this device (pending): the card below says so and
   // the screen moves on by itself once it is approved.
   const attempt = useRef<RelayConnection | null>(null);
+  const stopTracking = useRef<(() => void) | null>(null);
   const handedOff = useRef(false);
   const [connState, setConnState] = useState<ConnectionState | null>(null);
 
   useEffect(
     () => () => {
+      stopTracking.current?.();
       if (!handedOff.current) attempt.current?.close();
     },
     [],
   );
 
   function cancelAttempt() {
+    stopTracking.current?.();
+    stopTracking.current = null;
     attempt.current?.close();
     attempt.current = null;
     setConnState(null);
@@ -58,6 +62,7 @@ export function PairingScreen({ onConnected }: Props) {
   }
 
   async function handleConnect() {
+    if (attempt.current || status.kind === 'starting') return; // one attempt at a time: a second would fight the first over the same device
     setStatus({ kind: 'starting' });
     try {
       const identity = await loadPlatformIdentity();
@@ -67,10 +72,12 @@ export function PairingScreen({ onConnected }: Props) {
         setConnState(s);
         if (s.kind === 'connected' && !handedOff.current) {
           handedOff.current = true;
+          stopTracking.current?.();
+          stopTracking.current = null;
           onConnected(conn);
         }
       };
-      conn.onState(track);
+      stopTracking.current = conn.onState(track);
       track(conn.state);
       setStatus({ kind: 'idle' });
     } catch (e) {
@@ -80,7 +87,13 @@ export function PairingScreen({ onConnected }: Props) {
 
   async function handleResetIdentity() {
     cancelAttempt();
-    await resetDeviceIdentity();
+    setStatus({ kind: 'starting' }); // Connect stays disabled until the old key is gone
+    try {
+      await resetDeviceIdentity();
+      setStatus({ kind: 'idle' });
+    } catch (e) {
+      setStatus({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
+    }
   }
 
   const busy = status.kind === 'starting' || (connState !== null && connState.kind !== 'failed' && connState.kind !== 'revoked');
