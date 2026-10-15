@@ -1,0 +1,37 @@
+# A homelab smind daemon (ADR-0031 D5). Copy to docker-compose.yml, then:
+#
+#   echo "SMIND_PASSWORD=$(openssl rand -base64 24)" > .env && chmod 600 .env
+#   docker compose up -d
+#   open http://<this-host>:4648 and sign in with that password
+#
+# The password is an RCE credential (a signed-in client gets a terminal and every
+# agent, with the container's rights): use a long unique one, and read
+# docs/homelab.md "What is protected" before exposing the port beyond a trusted
+# network. The image refuses to start without it.
+services:
+  smind:
+    # Pin a version in production: ghcr.io/spacingmind/smind:<version>
+    image: ghcr.io/spacingmind/smind:latest
+    restart: unless-stopped
+    ports:
+      # Published on the LAN. Bind to one address instead for a VPN-only host,
+      # e.g. "100.64.0.5:4648:4648" (a Tailscale address).
+      - "4648:4648"
+    environment:
+      # Read from .env; compose refuses to start if it is missing.
+      SMIND_PASSWORD: ${SMIND_PASSWORD:?set SMIND_PASSWORD in .env (at least 12 characters)}
+      # Names clients type in the browser besides IPs and localhost. A leading dot
+      # matches subdomains. Example: SMIND_HOSTNAMES=nas.lan,.home.example
+      SMIND_HOSTNAMES: ${SMIND_HOSTNAMES:-}
+    volumes:
+      # Database, token, accounts, relay config, config.yaml.
+      - smind-data:/data
+      # Agent CLI logins and settings (.claude, .codex) live under the home dir.
+      - smind-home:/home/smind
+      # Your repositories: register them as workspaces by their /workspaces path.
+      - ./workspaces:/workspaces
+    # The image's own healthcheck (GET /healthz) applies.
+
+volumes:
+  smind-data:
+  smind-home:
