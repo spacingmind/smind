@@ -52,6 +52,8 @@ export interface DaemonStatus {
   appVersion: string;
   comparison: "older" | "same" | "newer" | "unknown";
   managedState: "notRunning" | "managed" | "unmanaged";
+  /** `/healthz` `managedBy` ("systemd" | "launchd" | "task"): an OS service manager owns this daemon, so the app never takes it over. Absent/null when none does. */
+  managedBy?: string | null;
   pid: number | null;
   installedPath: string | null;
   logPath: string | null;
@@ -77,6 +79,8 @@ export interface ConnectionVersionInfo {
   daemonVersion: string | null;
   appVersion: string;
   comparison: "older" | "same" | "newer" | "unknown";
+  /** `/healthz` `managedBy` when the daemon reports one; absent/null otherwise (and for a relay connection, which has no `/healthz`). */
+  managedBy?: string | null;
 }
 
 /** A check result from `app_update_check` (ADR-0023 interface contract): no updater on this platform, nothing newer, or an update Rust has verified and now holds for `appUpdateInstall`. */

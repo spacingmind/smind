@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
+import { managedByLabel } from "@/lib/daemon-version";
 import { desktop, isDesktop, type DaemonProgress, type DaemonStatus } from "@/lib/platform";
 import { Icons } from "@/lib/icons";
 
@@ -88,7 +89,13 @@ function DaemonSection() {
         <dd data-testid="daemon-version">{status.daemonVersion ?? "—"}</dd>
         <dt className="text-muted-foreground">Managed</dt>
         <dd data-testid="daemon-managed-state">
-          {status.managedState === "managed" ? "Managed by this app" : status.managedState === "unmanaged" ? "Running, not managed by the app" : "Not running"}
+          {status.managedBy
+            ? `Managed by ${managedByLabel(status.managedBy)}`
+            : status.managedState === "managed"
+              ? "Managed by this app"
+              : status.managedState === "unmanaged"
+                ? "Running, not managed by the app"
+                : "Not running"}
         </dd>
         <dt className="text-muted-foreground">Log file</dt>
         <dd data-testid="daemon-log-path" className="truncate font-mono text-ui-sm">
@@ -104,6 +111,14 @@ function DaemonSection() {
       {status.prerequisiteMessage && (
         <p role="alert" data-testid="daemon-prerequisite" className="text-ui-base text-muted-foreground">
           {status.prerequisiteMessage}
+        </p>
+      )}
+      {status.managedBy && (
+        <p data-testid="daemon-service-notice" className="text-ui-base text-muted-foreground">
+          An OS service ({managedByLabel(status.managedBy)}) runs this daemon, so this app leaves it alone: restarting or
+          stopping it from here would only make the service start it again. Manage it with{" "}
+          <code className="font-mono text-ui-sm">smind service</code>, and update it with{" "}
+          <code className="font-mono text-ui-sm">smind update</code>.
         </p>
       )}
       {status.wslDaemonSuspected && (
@@ -142,12 +157,12 @@ function DaemonSection() {
             Restart
           </Button>
         )}
-        {status.managedState === "unmanaged" && !status.wslDaemonSuspected && !confirmingTakeOver && (
+        {status.managedState === "unmanaged" && !status.wslDaemonSuspected && !status.managedBy && !confirmingTakeOver && (
           <Button variant="outline" size="sm" data-testid="daemon-take-over" onClick={() => setConfirmingTakeOver(true)} disabled={busy}>
             Take over management
           </Button>
         )}
-        {status.managedState === "unmanaged" && !status.wslDaemonSuspected && confirmingTakeOver && (
+        {status.managedState === "unmanaged" && !status.wslDaemonSuspected && !status.managedBy && confirmingTakeOver && (
           <>
             <span className="self-center text-ui-base text-muted-foreground">Manage the daemon already running on this port?</span>
             <Button size="sm" data-testid="daemon-take-over-confirm" onClick={() => run(() => desktop.takeOverDaemon())} disabled={busy}>
