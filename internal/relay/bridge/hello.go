@@ -349,7 +349,26 @@ func (h *Hub) ApproveDevice(id string) (devices.Device, error) {
 	if h.opts.Registry == nil {
 		return devices.Device{}, devices.ErrNotFound
 	}
-	return h.opts.Registry.Approve(id)
+	before, known := h.opts.Registry.Get(id)
+	d, err := h.opts.Registry.Approve(id)
+	if err != nil {
+		return devices.Device{}, err
+	}
+	if known && before.State == devices.StateRevoked {
+		// The relay refuses a revoked device until the control stream that
+		// revoked it ends, and there is no message that lifts a revocation:
+		// end the control stream so the daemon reconnects (re-sending only the
+		// devices that are still revoked) and the approved device can attach.
+		// Running sessions resume in place.
+		h.mu.Lock()
+		c := h.conn
+		h.mu.Unlock()
+		if c != nil {
+			h.logf("relay bridge: device re-approved after a revoke; reconnecting to lift the relay's refusal")
+			c.cancel()
+		}
+	}
+	return d, nil
 }
 
 func (h *Hub) RenameDevice(id, label string) (devices.Device, error) {

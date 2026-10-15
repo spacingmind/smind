@@ -93,6 +93,12 @@ impl Liveness {
         }
     }
 
+    /// set_cfg replaces the timing (the connection's configured values; a
+    /// transport starts with the defaults).
+    pub fn set_cfg(&mut self, cfg: LivenessCfg) {
+        self.cfg = cfg;
+    }
+
     pub fn nonce(&self) -> u64 {
         self.nonce
     }

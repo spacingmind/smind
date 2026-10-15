@@ -278,6 +278,39 @@ impl std::fmt::Display for DataTransportError {
     }
 }
 
+/// Inbound is the receiving half of an `OpenData` stream. A tonic client call
+/// resolves only once the server has sent response HEADERS, and the relay
+/// sends none until it has a frame for this side — so awaiting the call would
+/// block a resume that has nothing buffered until the peer happens to speak
+/// (grpc-go, which the Go client uses, returns the stream at once). The call
+/// therefore runs in the background and the stream is picked up on the first
+/// read; the send half works from the start.
+pub enum Inbound {
+    Ready(tonic::Streaming<Frame>),
+    Pending(tokio::sync::oneshot::Receiver<Result<tonic::Streaming<Frame>, tonic::Status>>),
+}
+
+impl Inbound {
+    async fn next_frame(&mut self) -> Result<Frame, DataTransportError> {
+        use tonic::codegen::tokio_stream::StreamExt;
+        loop {
+            match self {
+                Inbound::Ready(stream) => {
+                    return stream
+                        .next()
+                        .await
+                        .ok_or(DataTransportError::Closed)?
+                        .map_err(DataTransportError::Status);
+                }
+                Inbound::Pending(resolved) => {
+                    let result = resolved.await.map_err(|_| DataTransportError::Closed)?;
+                    *self = Inbound::Ready(result.map_err(DataTransportError::Status)?);
+                }
+            }
+        }
+    }
+}
+
 /// DataFrameTransport adapts one `OpenData` bidi stream to
 /// `FrameTransport`: writes become outbound `Frame`s (payload = the
 /// whole length-prefixed e2ee wire frame, opaque here too), reads return
@@ -288,7 +321,7 @@ impl std::fmt::Display for DataTransportError {
 /// running across a transport-level reconnect.
 pub struct DataFrameTransport {
     tx: mpsc::Sender<Frame>,
-    rx: tonic::Streaming<Frame>,
+    rx: Inbound,
     workspace_id: String,
     session_id: Vec<u8>,
     device_id: String,
@@ -360,9 +393,7 @@ impl DataFrameTransport {
     ) -> Result<(), DataTransportError> {
         let registration = self.build_frame(self.seq, Vec::new());
         self.seq += 1;
-        let (tx, rx) = open_data_stream(grpc, admission_id, registration)
-            .await
-            .map_err(DataTransportError::Open)?;
+        let (tx, rx) = open_data_stream(grpc, admission_id, registration).await?;
         self.tx = tx;
         self.rx = rx;
         self.liveness.lock().unwrap().start_stream(Instant::now());
@@ -396,14 +427,8 @@ impl FrameTransport for DataFrameTransport {
     }
 
     async fn recv_frame(&mut self) -> Result<(u8, Vec<u8>), Self::Error> {
-        use tonic::codegen::tokio_stream::StreamExt;
         loop {
-            let rx = &mut self.rx;
-            let frame = rx
-                .next()
-                .await
-                .ok_or(DataTransportError::Closed)?
-                .map_err(DataTransportError::Status)?;
+            let frame = self.rx.next_frame().await?;
             // Liveness first: ANY frame from the relay proves the stream is
             // alive, and a keepalive frame carrying our nonce is an echo.
             self.liveness
@@ -457,13 +482,13 @@ pub async fn open_data_stream(
     grpc: &mut GrpcRelayClient<GrpcChannel>,
     admission_id: &str,
     first_frame: Frame,
-) -> Result<(mpsc::Sender<Frame>, tonic::Streaming<Frame>), String> {
+) -> Result<(mpsc::Sender<Frame>, Inbound), DataTransportError> {
     let (tx, rx) = mpsc::channel::<Frame>(FRAME_CHANNEL_CAPACITY);
     let mut req = Request::new(ReceiverStream::new(rx));
     req.metadata_mut().insert(
         ADMISSION_METADATA_KEY,
         MetadataValue::try_from(admission_id)
-            .map_err(|e| format!("relay client: admission metadata: {e}"))?,
+            .map_err(|e| DataTransportError::Open(format!("relay client: admission metadata: {e}")))?,
     );
     // Send before awaiting the RPC's own resolution, not after: a
     // streaming RPC's response headers are typically not sent by the
@@ -474,13 +499,19 @@ pub async fn open_data_stream(
     // it resolves immediately regardless of `open_data`'s progress.
     tx.send(first_frame)
         .await
-        .map_err(|_| "relay client: send first frame: channel closed immediately".to_string())?;
-    let stream = grpc
-        .open_data(req)
-        .await
-        .map_err(|e| format!("relay client: open data: {e}"))?
-        .into_inner();
-    Ok((tx, stream))
+        .map_err(|_| {
+            DataTransportError::Open("relay client: send first frame: channel closed immediately".to_string())
+        })?;
+    // The call is NOT awaited here (see `Inbound`): a status the relay refuses
+    // the stream with (PermissionDenied for a revoked device) surfaces on the
+    // first read instead.
+    let (resolved_tx, resolved_rx) = tokio::sync::oneshot::channel();
+    let mut grpc = grpc.clone();
+    tokio::spawn(async move {
+        let result = grpc.open_data(req).await.map(|r| r.into_inner());
+        let _ = resolved_tx.send(result);
+    });
+    Ok((tx, Inbound::Pending(resolved_rx)))
 }
 
 /// open_data opens a fresh `OpenData` stream under `admission_id` for
@@ -493,7 +524,7 @@ pub async fn open_data(
     workspace_id: &str,
     session_id: &str,
     device_id: &str,
-) -> Result<DataFrameTransport, String> {
+) -> Result<DataFrameTransport, DataTransportError> {
     let direction = Direction::DeviceToDaemon; // this client always plays the device (mobile) role
     let registration = Frame {
         workspace_id: workspace_id.to_string(),
@@ -568,6 +599,9 @@ impl Status {
 #[derive(Clone)]
 pub struct Timing {
     pub liveness: LivenessCfg,
+    /// Bound on dial + TLS + admission: a path that swallows traffic would
+    /// otherwise hang a reconnect forever.
+    pub connect_timeout: Duration,
     pub handshake_timeout: Duration,
     pub hello_timeout: Duration,
     /// How long a resumed session gets to answer a liveness request before it
@@ -597,6 +631,7 @@ impl Default for Timing {
     fn default() -> Self {
         Self {
             liveness: LivenessCfg::default(),
+            connect_timeout: Duration::from_secs(20),
             handshake_timeout: HANDSHAKE_TIMEOUT,
             hello_timeout: Duration::from_secs(10),
             resume_probe_timeout: Duration::from_secs(10),
@@ -824,12 +859,19 @@ async fn establish(
         &device_id,
     )
     .await
-    .map_err(Failure::Retry)?;
-    transport
-        .liveness()
-        .lock()
-        .unwrap()
-        .start_stream(Instant::now());
+    .map_err(|e| match e {
+        // The relay itself refuses a revoked device's stream.
+        DataTransportError::Status(s) if s.code() == tonic::Code::PermissionDenied => {
+            Failure::RelayDenied(s.message().to_string())
+        }
+        e => Failure::Retry(format!("open data: {e}")),
+    })?;
+    {
+        let liveness = transport.liveness();
+        let mut l = liveness.lock().unwrap();
+        l.set_cfg(options.timing.liveness);
+        l.start_stream(Instant::now());
+    }
     let kp = KeyPair::generate();
     let mut channel = E2eeChannel::new(transport, Role::Mobile);
     let handshake = tokio::time::timeout(
@@ -989,6 +1031,11 @@ async fn run(
                 )
                 .await?;
                 Ok::<_, String>((grpc, admission_id))
+            };
+            let dial_and_admit = async {
+                tokio::time::timeout(timing.connect_timeout, dial_and_admit)
+                    .await
+                    .unwrap_or_else(|_| Err("timed out connecting to the relay".to_string()))
             };
             let (mut grpc, admission_id) = match dial_and_admit.await {
                 Ok(v) => v,

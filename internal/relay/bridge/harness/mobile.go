@@ -124,7 +124,13 @@ func (m *mobileStub) connect(ctx context.Context, session string) error {
 	if err != nil {
 		return fmt.Errorf("open data: %w", err)
 	}
-	defer dc.Close()
+	// DataConn.Close takes the lock a pending Receive holds, so the stream
+	// context must be cancelled (which unblocks Receive) BEFORE Close runs —
+	// a plain `defer dc.Close()` runs first (LIFO) and can deadlock the stub.
+	defer func() {
+		cancel()
+		_ = dc.Close()
+	}()
 	hctx, hcancel := context.WithTimeout(sctx, mobileIOBound)
 	err = dc.Handshake(hctx)
 	hcancel()
