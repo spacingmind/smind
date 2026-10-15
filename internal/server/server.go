@@ -32,6 +32,7 @@ type Server struct {
 	runs      *runs.Registry
 	terminals *terminal.Registry
 	token     string
+	managedBy string
 
 	shutdownCh   chan struct{}
 	shutdownOnce sync.Once
@@ -41,7 +42,16 @@ type Server struct {
 type Option func(*options)
 
 type options struct {
-	observer quota.Observer
+	observer  quota.Observer
+	managedBy string
+}
+
+// WithManagedBy records which supervisor started this daemon ("systemd",
+// "launchd", "task"), published as /healthz `managedBy` so clients (the
+// desktop app, `smind update`) know an OS service manager owns the process
+// (ADR-0031 decision 6). The empty string, the default, omits the field.
+func WithManagedBy(supervisor string) Option {
+	return func(opts *options) { opts.managedBy = supervisor }
 }
 
 // WithQuotaObserver reports every Anthropic OAuth upstream response the proxy
@@ -71,6 +81,7 @@ func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *
 		runs:      api.Runs,
 		terminals: api.Terminals,
 		token:     token,
+		managedBy: o.managedBy,
 
 		shutdownCh: make(chan struct{}),
 	}, nil
@@ -146,11 +157,15 @@ func (s *Server) Addr() string {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"status":  "ok",
 		"service": "smind",
 		"version": version.Version,
-	})
+	}
+	if s.managedBy != "" {
+		body["managedBy"] = s.managedBy
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 // handleToken serves the daemon's real current auth token as JSON, so the

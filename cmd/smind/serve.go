@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/spacingmind/smind/internal/acp"
 	"github.com/spacingmind/smind/internal/auth"
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/logging"
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/quota"
 	"github.com/spacingmind/smind/internal/relay/bridge"
@@ -23,6 +26,7 @@ import (
 	"github.com/spacingmind/smind/internal/relay/e2ee"
 	"github.com/spacingmind/smind/internal/routing"
 	"github.com/spacingmind/smind/internal/server"
+	"github.com/spacingmind/smind/internal/service"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -38,10 +42,20 @@ func cmdServe(args []string) int {
 		return 2
 	}
 
+	// The unit/plist `smind service install` writes sets SMIND_SUPERVISOR so
+	// /healthz can say an OS service manager owns this process (ADR-0031
+	// decision 6). Take it out of the environment: agents and shells this
+	// daemon spawns inherit it otherwise, and a `smind serve` started by one of
+	// them would wrongly claim to be service-managed too.
+	supervisor := takeSupervisorEnv()
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Printf("config: %v (continuing with defaults)", err)
 	}
+
+	closeLog := setupDaemonLog(cfg.Log, os.Stderr)
+	defer closeLog()
 
 	db, err := store.Open(store.DefaultPath())
 	if err != nil {
@@ -104,7 +118,7 @@ func cmdServe(args []string) int {
 	}
 	log.Printf("auth token: %s", auth.TokenPath(config.Dir()))
 
-	srv, err := server.New(cfg, registry, router, wm, runner, db, token, server.WithQuotaObserver(passive))
+	srv, err := server.New(cfg, registry, router, wm, runner, db, token, server.WithQuotaObserver(passive), server.WithManagedBy(supervisor))
 	if err != nil {
 		log.Fatalf("server: %v", err)
 	}
@@ -150,6 +164,39 @@ func cmdServe(args []string) int {
 	srv.Close()       // kill every still-running terminal session's shell/PTY
 	log.Printf("smind stopped")
 	return 0
+}
+
+// takeSupervisorEnv reads SMIND_SUPERVISOR and removes it from the process
+// environment, so the agents and shells this daemon spawns do not inherit it.
+func takeSupervisorEnv() string {
+	v := strings.TrimSpace(os.Getenv(service.SupervisorEnv))
+	_ = os.Unsetenv(service.SupervisorEnv)
+	return v
+}
+
+// setupDaemonLog points the standard logger at stderr *and* the daemon's own
+// rotating log, $SMIND_HOME/daemon.log, so `smind service logs` reads the same
+// thing on every OS and no unit has to redirect output (ADR-0031 decision 7).
+// The file is best effort: if it cannot be opened the daemon logs to stderr
+// only, and a write error never reaches the stderr copy. The returned func
+// closes the file.
+func setupDaemonLog(lc config.LogConfig, stderr io.Writer) func() {
+	dir := config.Dir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		log.Printf("log file: %v (logging to stderr only)", err)
+		return func() {}
+	}
+	path := filepath.Join(dir, logging.FileName)
+	rf, err := logging.OpenRotating(path, int64(lc.MaxSizeMB)<<20, lc.MaxFiles)
+	if err != nil {
+		log.Printf("log file %s: %v (logging to stderr only)", path, err)
+		return func() {}
+	}
+	// Both best effort: io.MultiWriter stops at the first failing writer, and a
+	// closed terminal or pipe on stderr must not silence the file (or the other
+	// way round).
+	log.SetOutput(io.MultiWriter(logging.BestEffort{W: stderr}, logging.BestEffort{W: rf}))
+	return func() { _ = rf.Close() }
 }
 
 // newRelayHub builds the daemon's relay device hub and wires its registry

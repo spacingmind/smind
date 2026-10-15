@@ -82,6 +82,8 @@ func run(args []string) int {
 		return cmdSkill(args[1:])
 	case "update":
 		return cmdUpdate(args[1:])
+	case "service":
+		return cmdService(args[1:])
 	case "version", "--version", "-v":
 		return cmdVersion(osStdout)
 	case "-h", "--help", "help":
@@ -101,6 +103,11 @@ Usage:
   smind serve                                             start the daemon
 
   smind stop                                              ask the running daemon to shut down gracefully
+
+  smind service install|uninstall|status|start|stop|restart [--system]
+                                                           run the daemon under systemd (Linux) or launchd (macOS)
+  smind service install [--system] [--home <dir>] [--path <PATH>] [--no-start]
+  smind service logs [-f] [-n <lines>]                    tail the daemon's own log (daemon.log)
 
   smind relay [--listen <addr>] [--data-dir <dir>]        start the self-hostable E2EE relay
   smind relay host new|ls|rm|rotate [<id>]                manage relay hosts (secret printed once)

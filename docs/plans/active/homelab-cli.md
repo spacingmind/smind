@@ -1053,3 +1053,34 @@ Commands: `go test -race -count=20 ./internal/relay/... ./internal/wsapi/ ./inte
 Not verified: a real desktop/mobile client (P13a/b), the cross-language hello vector in Rust/TS, Windows at runtime (registry
 rename retry, `Restrict`), the hub against a pre-P12a relay (the `Sync`-less fallback to the fixed legacy route has no test — it is reasoned
 from the old server code only), a real proxy.
+
+### P8 (2026-10-15, branch `feat/smind-service-unix`)
+
+Commands: `go test ./...`, `go test -race ./internal/service ./internal/logging`, `task lint`, `sh scripts/install_test.sh` (sh, dash, bash),
+`GOOS=windows go vet ./cmd/... ./internal/service/... ./internal/logging/... ./internal/config/... ./internal/server/...`, `actionlint`,
+`shellcheck scripts/install.sh scripts/install_test.sh scripts/service_smoke.sh`, and the `Service (systemd, launchd)` workflow
+(`scripts/service_smoke.sh` against the real service managers on `ubuntu-latest` and `macos-latest`).
+
+| AC | Evidence |
+|---|---|
+| 1 commands/flags | `cmd/smind`: `TestServiceUsageErrorsExitTwo` (no `--port`; `--no-start` is install-only), `TestServiceStatusExitCodes`, `TestServiceOnUnsupportedOS`; `TestServiceCLIWithFakeServiceManager` runs the real binary against a fake `systemctl`/`launchctl` on `PATH` and a temp `HOME` (install, status, re-install, uninstall) |
+| 2 systemd | `internal/service`: `TestSystemdUserUnitGolden`, `TestSystemdUserUnitWithSMINDHOMEGolden`, `TestSystemdSystemUnitGoldenUsesSudoUser`, `TestSystemdSystemRefusesPlainRoot` (no `SUDO_USER` and `SUDO_USER=root`), `TestSystemdSystemNeedsRoot`, `TestSystemdUserInstallUnderSudoIsRefused`, `TestSystemdUnitOmitsSMINDHOMEWhenUnset`, `TestSystemdUnitCapturesPATH` (+ `--path`), `TestSystemdUnitDirectives` (no sandboxing directives), `TestSystemdUnitQuoting`, `TestSystemdInstallRefusesNewlinesInPaths`, `TestLingerHintWhenDisabled` |
+| 3 launchd | `TestLaunchdPlistGolden` (`RunAtLoad`, `KeepAlive={SuccessfulExit:false}`, `PATH`, `SMIND_SUPERVISOR=launchd`; `plutil -lint` on macOS), `TestLaunchdPlistIsWellFormedAndEscaped`, `TestServiceStartStopRestart/launchd`; **real:** the macOS runner smoke test: graceful `smind stop` stays stopped for 12 s, `kill -9` restarts |
+| 4 install | `TestServiceInstallIdempotent` (both backends), `TestServiceInstallDoesNotRestartARunningDaemonOnAChangedUnit`, `TestServiceInstallNoStartStillEnables`, `TestServiceInstallRefusesToStartWhenForeignDaemonAnswers` (hand-started smind, an app-managed one, a non-smind listener; both backends; the foreign daemon stays up, the unit/plist is still installed and enabled), `TestServiceStartRefusesWhenForeignDaemonAnswers`, `TestServiceUninstallKeepsSMINDHOME` |
+| 5 status | `TestServiceStatusExitCodes` (both backends, and through the CLI), `TestServiceStatusReportsDaemonVersusBinaryVersion`, `TestServiceStatusReportsAForeignListener`, `TestServiceStatusReadsThePortFromConfig`, `TestSystemdScopeAutoDetectsASystemUnit` |
+| 6 healthz | `internal/server`: `TestHealthzIncludesManagedByWhenEnvSet`, `TestHealthzOmitsManagedByWhenUnset`; `cmd/smind`: `TestServe_DaemonLogAndManagedBy` (real daemon with and without `SMIND_SUPERVISOR`; the variable is removed from the daemon's own environment so spawned agents do not inherit it) |
+| 7 daemon.log | `internal/logging`: `TestDaemonLogFileRotatesAtSize`, `TestDaemonLogFileMode0600`, `TestRotatingKeepsOnlyTheActiveFileWhenMaxFilesIsOne`, `TestRotatingOversizedSingleWriteIsKeptWhole`, `TestRotatingConcurrentWritersLoseNoWholeLine`, `TestTailFile`, `TestFollowSeesAppendsAndSurvivesRotation`; `cmd/smind`: `TestStderrStillReceivesLogs`, `TestDaemonLogFailureFallsBackToStderr`, `TestServiceLogsTailsDaemonLog`, `TestServiceLogsFollowStopsOnContextAndSeesAppends`; `internal/config`: `TestDefault_LogRotation`, `TestLoad_LogRotationOverrideAndValidation` |
+| 8 install.sh | `scripts/install_test.sh`: `test_install_sh_service_flag_runs_service_install` (shim `smind`), `test_service_system_flag_passes_through`, `test_system_without_service_exits_2`, `test_service_install_failure_fails_the_script_but_keeps_the_binary`, `test_no_service_flag_never_runs_service_install`, `test_service_flag_on_msys_still_points_at_powershell` |
+| review round | independent adversarial review (11 findings, 9 acted on): `TestStatusStartRestartUseTheInstalledUnitsHome` (the daemon's own `SMIND_HOME`/port after `install --home`, both backends), `TestInstalledHomeDefaultsWhenTheUnitHasNoSMINDHOME`, `TestInstallRejectsARelativeHome`, `TestUnitHomeRoundTripsThroughQuoting`, `TestLaunchdRefusesRootAndSudo`, `TestSystemdActingCommandsRefuseSudoOnAUserUnitAndNeedRootForASystemUnit`, `TestSystemInstallWarnsThatSudoPATHIsCaptured`, `TestSystemdBusFailureWordingVariants`, `TestSystemdStatusToolFailureIsAnErrorNotNotInstalled`, `TestSystemdUninstallStopsWhenSystemdCannotBeReached`, `TestLaunchdUninstallKeepsThePlistWhenBootoutFails`, `TestRestartRefusesWhenAStoppedServiceFacesAForeignDaemon`, `TestStartWaitsForOurOwnDaemonNotAnyoneElses`, `TestLaunchdStartRefusesWhenForeignDaemonAnswers`, `TestLaunchdRestartWaitsForThePortToBeFree`, `TestInstallSaysWhenTheRunningDaemonIsOlderThanThisBinary`, `TestRotatingRecoversWhenTheLogCannotBeReopened`, `TestDaemonLogSurvivesABrokenStderr`, `TestTakeSupervisorEnvRemovesItFromTheEnvironment`, `TestServiceLogsReadTheInstalledServicesHome`; mutation-checked (dropping the managedBy match, the launchd `waitDown`, the uninstall stop check each fails a test) |
+| 9 docs | `docs/homelab.md` "Run the daemon as a service" (systemd user vs `--system`, linger, the LaunchAgent GUI-session limit, log location and rotation, desktop-app coexistence); README pointer |
+
+`smind update`'s restart path (P6) needed no change: `HealthzDaemon.Restart` runs `<exe> service restart` and `Status` reads `managedBy`; both now have a real
+counterpart. Coexistence with the desktop app needed **no app change**: a service-managed daemon already shows as `unmanaged` to the app, which never touches it
+automatically (`launch_decision` → `UnmanagedBanner`) and offers *take over management* only on an explicit confirmation; hiding that button for a daemon
+whose `/healthz` has `managedBy` is the P10 work (noted in `docs/homelab.md`).
+
+Known gaps left: launchd `status` does not print enabled/disabled; a Go crash trace goes to stderr (journal on Linux, nowhere on macOS), not `daemon.log`; on Windows `logs -f` will hold the log open without FILE_SHARE_DELETE (P9).
+
+Not verified: a real **reboot/logout cycle with lingering** and a real **macOS login cycle** (the runners prove install, stop-stays-stopped, crash restart and
+restart, not boot persistence); `--system` against a real `/etc/systemd/system` (unit rendering and the `SUDO_USER` rules are unit-tested, the real run
+is not); `smind update` driving a real `service restart` end to end; the desktop app's behaviour next to a real service.
