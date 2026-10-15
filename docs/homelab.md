@@ -36,7 +36,8 @@ curl -fsSL https://spacingmind.com/install.sh | sh -s -- --service
 | `smind service logs [-f] [-n N]` | Tails the daemon's own log file (below). |
 
 The port and every other setting come from `config.yaml` (there is no `--port`); the unit starts the same
-`smind serve` you would run by hand. `install` captures the `PATH` of the shell you run it from, so `git`, `node` and
+`smind serve` you would run by hand. Once installed, `status`, `start`, `restart` and `logs` use the `SMIND_HOME` written
+in the unit (not the one in your current shell), so they always look at the daemon's own data. `install` captures the `PATH` of the shell you run it from, so `git`, `node` and
 your agent CLIs resolve inside the service (override with `--path`), and `SMIND_HOME` when you have it set (or `--home`).
 If another daemon already answers on the configured port (a `smind serve` you started, or the desktop app's own),
 `install` enables the unit but does not start it and says why; it never stops a process it did not start.
@@ -49,7 +50,9 @@ only runs while you are logged in unless *lingering* is on, so for a headless ho
 **Linux: `--system`.** `sudo smind service install --system` writes `/etc/systemd/system/smind.service` with
 `User=<you>`, taken from `SUDO_USER`; the daemon never runs as root, and the command refuses plain root without
 `SUDO_USER`. sudo replaces your `PATH`, so pass it explicitly: `sudo smind service install --system --path "$PATH"`.
-With the installer: `curl -fsSL https://spacingmind.com/install.sh | sudo sh -s -- --service --system`.
+With the installer: `curl -fsSL https://spacingmind.com/install.sh | sudo sh -s -- --service --system` (this captures
+sudo's `PATH`, so agent CLIs in your home do not resolve; install prints a warning, and the fix is the `--path "$PATH"`
+form above run from your own shell).
 
 **macOS.** A LaunchAgent in `~/Library/LaunchAgents/com.spacingmind.smind.plist`. It loads into your `gui/<uid>` domain,
 which exists only while you are logged in to the Mac's graphical session, so it starts at login, not at boot, and cannot
@@ -58,7 +61,8 @@ be loaded over plain ssh on a Mac nobody is logged in to (the plist is still wri
 
 **Logs.** The daemon writes `$SMIND_HOME/daemon.log` itself (mode `0600`, rotated at 10 MiB, 5 files kept; change with
 `log.maxSizeMB` and `log.maxFiles` in `config.yaml`) in addition to stderr, so `smind service logs` works the same on
-every OS. On Linux `journalctl --user -u smind` shows the same lines.
+every OS. On Linux `journalctl --user -u smind` (`journalctl -u smind` for a `--system` unit) shows the same lines plus
+anything the daemon prints outside its logger, such as a crash trace; on macOS that crash output is not captured.
 
 **Desktop app.** The app never starts a second daemon on a port that is already served, and `smind service install`
 does not start while the app's own daemon holds the port. The app sees a service-managed daemon as one it does not

@@ -121,6 +121,27 @@ func cmdService(args []string) int {
 	}
 }
 
+// serviceLogDir is where the daemon writes daemon.log: the smind home of the
+// installed service when there is one (its unit may set a SMIND_HOME this
+// shell does not have), else this shell's own.
+func serviceLogDir() string {
+	env, err := service.DefaultEnv(version.Version)
+	if err != nil {
+		return config.Dir()
+	}
+	if serviceEnvHook != nil {
+		serviceEnvHook(&env)
+	}
+	m, err := service.New(env)
+	if err != nil {
+		return config.Dir()
+	}
+	if h, ok := m.InstalledHome(service.Options{}); ok {
+		return h
+	}
+	return config.Dir()
+}
+
 // cmdServiceLogs prints the tail of the daemon's own log file, daemon.log in
 // the smind home (ADR-0031 decision 7), the same on every OS; -f keeps
 // following it across rotations until Ctrl+C.
@@ -142,7 +163,7 @@ func cmdServiceLogs(args []string) int {
 		fmt.Fprintln(osStderr, "usage: smind service logs [-f] [-n <lines>]")
 		return 2
 	}
-	path := filepath.Join(config.Dir(), logging.FileName)
+	path := filepath.Join(serviceLogDir(), logging.FileName)
 	off, err := logging.TailFile(path, lines, osStdout)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

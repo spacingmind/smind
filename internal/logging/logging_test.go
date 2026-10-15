@@ -309,3 +309,35 @@ func TestFollowWaitsForAMissingFile(t *testing.T) {
 	}
 	waitFor(t, "hello", func() bool { return out.String() == "hello\n" })
 }
+
+// A rotation that cannot reopen the log (directory briefly gone) must not
+// leave the writer dead: the next Write after the directory is back works.
+func TestRotatingRecoversWhenTheLogCannotBeReopened(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "logs")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, FileName)
+	r, err := OpenRotating(path, 20, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	_, _ = r.Write([]byte("first line\n"))
+
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Write([]byte("this one rotates and cannot reopen\n")); err == nil {
+		t.Fatal("a write with no directory must report an error")
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Write([]byte("after recovery\n")); err != nil {
+		t.Fatalf("the writer must recover once the directory is back: %v", err)
+	}
+	if got := readFile(t, path); got != "after recovery\n" {
+		t.Errorf("daemon.log = %q", got)
+	}
+}

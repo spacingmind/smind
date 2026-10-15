@@ -645,14 +645,19 @@ func TestServiceStartStopRestart(t *testing.T) {
 		if err := m.Stop(bg, Options{}); err != nil || te.daemon.probe(bg, 0).Up {
 			t.Errorf("stop: %v", err)
 		}
-		// A daemon that exited by itself (smind stop) stays loaded and start kickstarts it.
+		// A daemon that exited by itself (smind stop) stays loaded; start reloads it
+		// (bootout + bootstrap, never kickstart: that would keep the OLD plist).
 		_ = m.Start(bg, Options{})
 		fl.exited()
+		fl.mu.Lock()
+		fl.calls = nil
+		fl.mu.Unlock()
 		if err := m.Start(bg, Options{}); err != nil {
 			t.Fatal(err)
 		}
-		if fl.called("launchctl kickstart") == 0 {
-			t.Errorf("a loaded-but-exited job is kickstarted: %v", fl.calls)
+		got = strings.Join(fl.calls, "|")
+		if fl.called("launchctl kickstart") != 0 || !strings.Contains(got, "bootout") || strings.Index(got, "bootout") > strings.Index(got, "bootstrap") {
+			t.Errorf("a loaded-but-exited job must be re-bootstrapped, not kickstarted: %v", fl.calls)
 		}
 	})
 }
@@ -735,5 +740,346 @@ func TestSystemdUserInstallUnderSudoIsRefused(t *testing.T) {
 	}
 	if _, statErr := os.Stat(te.userUnit()); statErr == nil {
 		t.Error("nothing may be written")
+	}
+}
+
+// ------------------------------------------------ review round: home, guards
+
+// The HIGH finding: a service installed with a SMIND_HOME of its own (a flag, or
+// the installing shell's) must be driven with THAT home's config afterwards, from
+// any shell: the port, the daemon.log and the foreign-daemon check all follow it.
+func TestStatusStartRestartUseTheInstalledUnitsHome(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			te := newTestEnv(t, goos)
+			svcHome := filepath.Join(te.home, "srv-smind")
+			if err := os.MkdirAll(svcHome, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(svcHome, "config.yaml"), []byte("server:\n  port: 5151\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var m Manager
+			if goos == "linux" {
+				m, _ = te.systemd(t)
+			} else {
+				m, _ = te.launchd(t)
+			}
+			if err := m.Install(bg, Options{Home: svcHome, NoStart: true}); err != nil {
+				t.Fatal(err)
+			}
+			// A later command from a plain shell (no SMIND_HOME): same home, same port.
+			delete(te.environ, "SMIND_HOME")
+			if h, ok := m.InstalledHome(Options{}); !ok || h != svcHome {
+				t.Fatalf("InstalledHome = %q, %v; want %q", h, ok, svcHome)
+			}
+			var ports []int
+			te.Env.Probe = func(_ context.Context, port int) Health {
+				ports = append(ports, port)
+				return te.daemon.probe(bg, port)
+			}
+			m2, _ := New(te.Env)
+			te.resetOutput()
+			_, _ = m2.Status(bg, Options{})
+			if !strings.Contains(te.out.String(), "port:    5151") || !strings.Contains(te.out.String(), "home:    "+svcHome) {
+				t.Errorf("status:\n%s", te.out.String())
+			}
+			if err := m2.Start(bg, Options{}); err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			for _, p := range ports {
+				if p != 5151 {
+					t.Errorf("probed port %d, want 5151 (the installed service's)", p)
+				}
+			}
+		})
+	}
+}
+
+func TestInstalledHomeDefaultsWhenTheUnitHasNoSMINDHOME(t *testing.T) {
+	te := newTestEnv(t, "linux")
+	m, _ := te.systemd(t)
+	_ = m.Install(bg, Options{NoStart: true})
+	// The shell now has a SMIND_HOME the daemon does not: the unit is the authority.
+	te.environ["SMIND_HOME"] = "/some/other/place"
+	h, ok := m.InstalledHome(Options{})
+	if !ok || h != filepath.Join(te.home, ".smind") {
+		t.Errorf("InstalledHome = %q, %v", h, ok)
+	}
+	if _, ok := mustManager(t, newTestEnv(t, "linux")).InstalledHome(Options{}); ok {
+		t.Error("nothing installed must report false")
+	}
+}
+
+func mustManager(t *testing.T, te *testEnv) Manager {
+	t.Helper()
+	m, _ := te.systemd(t)
+	return m
+}
+
+func TestInstallRejectsARelativeHome(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		te := newTestEnv(t, goos)
+		var m Manager
+		if goos == "linux" {
+			m, _ = te.systemd(t)
+		} else {
+			m, _ = te.launchd(t)
+		}
+		err := m.Install(bg, Options{Home: "relative/dir"})
+		if err == nil || !strings.Contains(err.Error(), "absolute") {
+			t.Errorf("%s: err = %v", goos, err)
+		}
+		if _, statErr := os.Stat(te.userUnit()); statErr == nil {
+			t.Errorf("%s: nothing may be written", goos)
+		}
+		te.environ["SMIND_HOME"] = "also/relative"
+		if err := m.Install(bg, Options{}); err == nil {
+			t.Errorf("%s: a relative SMIND_HOME in the shell must be rejected too", goos)
+		}
+	}
+}
+
+func TestUnitHomeRoundTripsThroughQuoting(t *testing.T) {
+	for _, home := range []string{`/srv/my smind`, `/srv/100%/smind`, `/srv/a"b`, `/srv/back\slash`} {
+		unit := renderUnit(unitSpec{Exe: "/x/smind", Path: "/bin", Home: home})
+		m := reUnitHome.FindStringSubmatch(unit)
+		if m == nil || unquoteEnvValue(m[1]) != home {
+			t.Errorf("home %q did not round-trip: %v", home, m)
+		}
+	}
+	if got := quoteEnv("SMIND_HOME", "/a%b"); got != `"SMIND_HOME=/a%%b"` {
+		t.Errorf("%% must be doubled in Environment=: %s", got)
+	}
+}
+
+func TestLaunchdRefusesRootAndSudo(t *testing.T) {
+	te := newTestEnv(t, "darwin")
+	te.Euid = 0
+	te.environ["SUDO_USER"] = "alice"
+	m, fl := te.launchd(t)
+	for name, op := range map[string]func() error{
+		"install":   func() error { return m.Install(bg, Options{}) },
+		"uninstall": func() error { return m.Uninstall(bg, Options{}) },
+		"start":     func() error { return m.Start(bg, Options{}) },
+		"stop":      func() error { return m.Stop(bg, Options{}) },
+		"restart":   func() error { return m.Restart(bg, Options{}) },
+	} {
+		if err := op(); err == nil || !strings.Contains(err.Error(), "without sudo") {
+			t.Errorf("%s as root: err = %v", name, err)
+		}
+	}
+	if _, err := os.Stat(te.plist()); err == nil {
+		t.Error("nothing may be written as root")
+	}
+	if len(fl.calls) != 0 {
+		t.Errorf("launchctl was called: %v", fl.calls)
+	}
+}
+
+func TestSystemdActingCommandsRefuseSudoOnAUserUnitAndNeedRootForASystemUnit(t *testing.T) {
+	te := newTestEnv(t, "linux")
+	m, fs := te.systemd(t)
+	_ = m.Install(bg, Options{NoStart: true})
+
+	te.Euid = 0
+	te.environ["SUDO_USER"] = "alice"
+	m2, _ := New(te.Env)
+	for name, op := range map[string]func() error{
+		"start":     func() error { return m2.Start(bg, Options{}) },
+		"stop":      func() error { return m2.Stop(bg, Options{}) },
+		"restart":   func() error { return m2.Restart(bg, Options{}) },
+		"uninstall": func() error { return m2.Uninstall(bg, Options{}) },
+	} {
+		if err := op(); err == nil || !strings.Contains(err.Error(), "without sudo") {
+			t.Errorf("%s under sudo on a user unit: err = %v", name, err)
+		}
+	}
+	if _, err := os.Stat(te.userUnit()); err != nil {
+		t.Error("the user unit must not be touched by a sudo run")
+	}
+	_ = fs
+
+	// A system unit, acted on by a non-root user: a clear sudo hint, not a raw polkit error.
+	te2 := newTestEnv(t, "linux")
+	te2.Euid = 0
+	te2.environ["SUDO_USER"] = "alice"
+	ms, _ := te2.systemd(t)
+	if err := ms.Install(bg, Options{System: true, NoStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	te2.Euid = 1000
+	te2.environ["SUDO_USER"] = ""
+	ms2, _ := New(te2.Env)
+	for name, op := range map[string]func() error{
+		"start":   func() error { return ms2.Start(bg, Options{System: true}) },
+		"stop":    func() error { return ms2.Stop(bg, Options{System: true}) },
+		"restart": func() error { return ms2.Restart(bg, Options{System: true}) },
+	} {
+		if err := op(); err == nil || !strings.Contains(err.Error(), "sudo") {
+			t.Errorf("%s of a system unit as a normal user: err = %v", name, err)
+		}
+	}
+}
+
+func TestSystemInstallWarnsThatSudoPATHIsCaptured(t *testing.T) {
+	te := newTestEnv(t, "linux")
+	te.Euid = 0
+	te.environ["SUDO_USER"] = "alice"
+	m, _ := te.systemd(t)
+	_ = m.Install(bg, Options{System: true, NoStart: true})
+	if !strings.Contains(te.errb.String(), "sudo's, not yours") {
+		t.Errorf("stderr = %q", te.errb.String())
+	}
+	te2 := newTestEnv(t, "linux")
+	te2.Euid = 0
+	te2.environ["SUDO_USER"] = "alice"
+	m2, _ := te2.systemd(t)
+	_ = m2.Install(bg, Options{System: true, NoStart: true, Path: "/home/alice/.local/bin:/usr/bin"})
+	if strings.Contains(te2.errb.String(), "sudo's, not yours") {
+		t.Errorf("no warning when --path is given: %q", te2.errb.String())
+	}
+}
+
+func TestSystemdBusFailureWordingVariants(t *testing.T) {
+	for _, msg := range []string{
+		"Failed to connect to bus: No medium found",
+		"Failed to connect to user scope bus via local transport: No such file or directory",
+	} {
+		te := newTestEnv(t, "linux")
+		m, fs := te.systemd(t)
+		fs.noBus = true
+		fs.busMessage = msg
+		if err := m.Install(bg, Options{}); err == nil || !strings.Contains(err.Error(), "no systemd user session") {
+			t.Errorf("%q: err = %v", msg, err)
+		}
+	}
+}
+
+func TestSystemdStatusToolFailureIsAnErrorNotNotInstalled(t *testing.T) {
+	te := newTestEnv(t, "linux")
+	m, fs := te.systemd(t)
+	_ = m.Install(bg, Options{NoStart: true})
+	fs.showFails = true
+	st, err := m.Status(bg, Options{})
+	if err == nil {
+		t.Errorf("status = %v with no error; a failing `systemctl show` must be reported", st)
+	}
+}
+
+func TestSystemdUninstallStopsWhenSystemdCannotBeReached(t *testing.T) {
+	te := newTestEnv(t, "linux")
+	m, fs := te.systemd(t)
+	_ = m.Install(bg, Options{})
+	fs.noBus = true
+	if err := m.Uninstall(bg, Options{}); err == nil {
+		t.Fatal("uninstall must fail when it cannot stop the daemon")
+	}
+	if _, err := os.Stat(te.userUnit()); err != nil {
+		t.Error("the unit must stay: removing it would orphan a running, enabled daemon")
+	}
+}
+
+func TestLaunchdUninstallKeepsThePlistWhenBootoutFails(t *testing.T) {
+	te := newTestEnv(t, "darwin")
+	m, fl := te.launchd(t)
+	_ = m.Install(bg, Options{})
+	fl.bootoutFails = true
+	if err := m.Uninstall(bg, Options{}); err == nil {
+		t.Fatal("uninstall must fail when bootout fails")
+	}
+	if _, err := os.Stat(te.plist()); err != nil {
+		t.Error("the plist must stay while the agent is still loaded")
+	}
+}
+
+func TestRestartRefusesWhenAStoppedServiceFacesAForeignDaemon(t *testing.T) {
+	te := newTestEnv(t, "linux")
+	m, fs := te.systemd(t)
+	_ = m.Install(bg, Options{NoStart: true})
+	te.daemon.set(true, true, "0.9.0", "")
+	err := m.Restart(bg, Options{})
+	if err == nil || !strings.Contains(err.Error(), "not restarting") {
+		t.Errorf("systemd: err = %v", err)
+	}
+	if fs.called("systemctl --user restart") != 0 {
+		t.Error("must not restart into a crash loop")
+	}
+
+	te2 := newTestEnv(t, "darwin")
+	m2, fl := te2.launchd(t)
+	_ = m2.Install(bg, Options{NoStart: true})
+	te2.daemon.set(true, true, "0.9.0", "")
+	if err := m2.Restart(bg, Options{}); err == nil || !strings.Contains(err.Error(), "not restarting") {
+		t.Errorf("launchd: err = %v", err)
+	}
+	if fl.called("launchctl bootstrap") != 0 {
+		t.Error("must not bootstrap into a crash loop")
+	}
+}
+
+func TestStartWaitsForOurOwnDaemonNotAnyoneElses(t *testing.T) {
+	// The port is free when `start` is issued, but the daemon that then answers is
+	// not managed by this service (a foreign smind grabbed the port): not "started".
+	te := newTestEnv(t, "linux")
+	m, fs := te.systemd(t)
+	_ = m.Install(bg, Options{NoStart: true})
+	te.Env.Probe = func(context.Context, int) Health {
+		if fs.called("systemctl --user start") > 0 {
+			return Health{Up: true, Smind: true, Version: "0.9.0"} // no managedBy
+		}
+		return Health{}
+	}
+	m2, _ := New(te.Env)
+	err := m2.Start(bg, Options{})
+	if err == nil || !strings.Contains(err.Error(), "did not answer") {
+		t.Errorf("a foreign smind answering must not count as started: %v", err)
+	}
+}
+
+func TestLaunchdStartRefusesWhenForeignDaemonAnswers(t *testing.T) {
+	te := newTestEnv(t, "darwin")
+	m, fl := te.launchd(t)
+	_ = m.Install(bg, Options{NoStart: true})
+	te.daemon.set(true, true, "0.9.0", "")
+	err := m.Start(bg, Options{})
+	if err == nil || !strings.Contains(err.Error(), "not starting") {
+		t.Errorf("err = %v", err)
+	}
+	if fl.called("launchctl bootstrap") != 0 || fl.called("launchctl kickstart") != 0 {
+		t.Errorf("must not load: %v", fl.calls)
+	}
+}
+
+func TestLaunchdRestartWaitsForThePortToBeFree(t *testing.T) {
+	te := newTestEnv(t, "darwin")
+	m, fl := te.launchd(t)
+	_ = m.Install(bg, Options{})
+	fl.bootoutKeepsDaemon = true // the old daemon is slow to release the port
+	err := m.Restart(bg, Options{})
+	if err == nil || !strings.Contains(err.Error(), "still answering") {
+		t.Errorf("err = %v, want a wait-for-port failure", err)
+	}
+	if fl.called("launchctl bootstrap") > 1 { // only the install's
+		t.Errorf("must not bootstrap while the old daemon holds the port: %v", fl.calls)
+	}
+}
+
+func TestInstallSaysWhenTheRunningDaemonIsOlderThanThisBinary(t *testing.T) {
+	te := newTestEnv(t, "linux")
+	m, _ := te.systemd(t)
+	_ = m.Install(bg, Options{})
+	te.Version = "1.1.0" // the binary was replaced by an upgrade
+	m2, _ := New(te.Env)
+	te.resetOutput()
+	_ = m2.Install(bg, Options{})
+	if !strings.Contains(te.out.String(), "already running smind 1.0.0, but this binary is 1.1.0") {
+		t.Errorf("output = %q", te.out.String())
+	}
+}
+
+func TestLaunchdStateRegexMatchesNotRunning(t *testing.T) {
+	if m := reState.FindStringSubmatch("x = {\n\tstate = not running\n}\n"); m == nil || m[1] != "not running" {
+		t.Errorf("state = %v", m)
 	}
 }

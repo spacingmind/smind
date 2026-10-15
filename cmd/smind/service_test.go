@@ -33,6 +33,15 @@ func runSvc(t *testing.T, args []string) (int, string) {
 	return code, buf.String()
 }
 
+// isolateServiceEnv points the service commands at a throwaway home and an OS
+// with no backend, so a test never looks at (or into) a service installed on
+// the machine running the tests.
+func isolateServiceEnv(t *testing.T) {
+	t.Helper()
+	serviceEnvHook = func(e *service.Env) { e.GOOS, e.Home = "windows", t.TempDir() }
+	t.Cleanup(func() { serviceEnvHook = nil })
+}
+
 func writeDaemonLog(t *testing.T, home string, lines int) {
 	t.Helper()
 	var b strings.Builder
@@ -49,6 +58,7 @@ func writeDaemonLog(t *testing.T, home string, lines int) {
 func TestServiceLogsTailsDaemonLog(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SMIND_HOME", home)
+	isolateServiceEnv(t)
 	writeDaemonLog(t, home, 500)
 
 	code, out := runSvc(t, []string{"service", "logs", "-n", "3"})
@@ -68,6 +78,7 @@ func TestServiceLogsTailsDaemonLog(t *testing.T) {
 
 func TestServiceLogsWithoutALogFile(t *testing.T) {
 	t.Setenv("SMIND_HOME", t.TempDir())
+	isolateServiceEnv(t)
 	code, out := runSvc(t, []string{"service", "logs"})
 	if code != 1 || !strings.Contains(out, "no daemon log yet") {
 		t.Errorf("exit = %d, output %q", code, out)
@@ -77,6 +88,7 @@ func TestServiceLogsWithoutALogFile(t *testing.T) {
 func TestServiceLogsFollowStopsOnContextAndSeesAppends(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SMIND_HOME", home)
+	isolateServiceEnv(t)
 	writeDaemonLog(t, home, 2)
 
 	var out syncedBuffer
@@ -388,7 +400,9 @@ exit 0
 	smindHome := filepath.Join(home, ".smind")
 	run := func(args ...string) (int, string) {
 		cmd := exec.Command(bin, args...)
-		cmd.Env = append(os.Environ(), "HOME="+home, "SMIND_HOME="+smindHome, "PATH="+toolDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		// XDG_CONFIG_HOME is pinned: a runner may set it, which moves where a
+		// systemd user unit is written.
+		cmd.Env = append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"), "SMIND_HOME="+smindHome, "PATH="+toolDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		out, err := cmd.CombinedOutput()
 		code := 0
 		if ee, ok := err.(*exec.ExitError); ok {
@@ -431,5 +445,69 @@ exit 0
 	}
 	if _, err := os.Stat(calls); err != nil {
 		t.Error("the fake service manager was never called")
+	}
+}
+
+// A broken stderr (closed terminal, a pipe the desktop app dropped) must not
+// stop the line reaching daemon.log: io.MultiWriter would otherwise stop at
+// the first failing writer.
+func TestDaemonLogSurvivesABrokenStderr(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	prevOut, prevFlags := log.Writer(), log.Flags()
+	t.Cleanup(func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) })
+	log.SetFlags(0)
+
+	closeLog := setupDaemonLog(config.Default().Log, failingWriter{})
+	log.Printf("must reach the file")
+	closeLog()
+	if b, _ := os.ReadFile(filepath.Join(home, logging.FileName)); string(b) != "must reach the file\n" {
+		t.Errorf("daemon.log = %q", b)
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, fmt.Errorf("broken pipe") }
+
+// The supervisor variable is consumed: a child of the daemon must not see it.
+func TestTakeSupervisorEnvRemovesItFromTheEnvironment(t *testing.T) {
+	t.Setenv(service.SupervisorEnv, " systemd ")
+	if got := takeSupervisorEnv(); got != "systemd" {
+		t.Errorf("value = %q", got)
+	}
+	if _, set := os.LookupEnv(service.SupervisorEnv); set {
+		t.Error("SMIND_SUPERVISOR must be unset after it was read")
+	}
+	if got := takeSupervisorEnv(); got != "" {
+		t.Errorf("second read = %q", got)
+	}
+}
+
+// `smind service logs` reads the log of the INSTALLED service, whose unit may
+// set a SMIND_HOME this shell does not have.
+func TestServiceLogsReadTheInstalledServicesHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", filepath.Join(home, "shell-home")) // not where the daemon logs
+	svcHome := filepath.Join(home, "svc-home")
+	if err := os.MkdirAll(svcHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonLog(t, svcHome, 3)
+
+	serviceEnvHook = func(e *service.Env) { e.GOOS, e.Home, e.Euid, e.UID = "linux", home, 1000, 501 }
+	t.Cleanup(func() { serviceEnvHook = nil })
+	unit := filepath.Join(home, ".config", "systemd", "user", service.UnitName)
+	if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", "")
+	body := "[Service]\nEnvironment=\"SMIND_HOME=" + svcHome + "\"\n"
+	if err := os.WriteFile(unit, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out := runSvc(t, []string{"service", "logs", "-n", "1"})
+	if code != 0 || !strings.Contains(out, "line 3") {
+		t.Errorf("exit = %d, output %q", code, out)
 	}
 }

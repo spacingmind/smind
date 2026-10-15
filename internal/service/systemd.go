@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -114,7 +115,7 @@ func (s *systemd) ctl(ctx context.Context, system bool, args ...string) (Result,
 	if err != nil {
 		return res, fmt.Errorf("run systemctl: %w (is systemd installed?)", err)
 	}
-	if res.ExitCode != 0 && !system && (strings.Contains(res.Stderr, "Failed to connect to bus") || strings.Contains(res.Stderr, "No medium found")) {
+	if res.ExitCode != 0 && !system && (strings.Contains(res.Stderr, "Failed to connect to") || strings.Contains(res.Stderr, "No medium found")) {
 		return res, fmt.Errorf("%s: there is no systemd user session for this login (XDG_RUNTIME_DIR unset, or `su`/`sudo` without a login session). Log in normally, or use `sudo smind service install --system`", strings.TrimSpace(res.Stderr))
 	}
 	return res, nil
@@ -148,6 +149,17 @@ func (s *systemd) booted() error {
 	return nil
 }
 
+// needRoot is the up-front check for acting on a system unit.
+func (s *systemd) needRoot(o Options, what string) error {
+	if o.System && s.env.Euid != 0 {
+		return fmt.Errorf("--system %s the unit in %s: re-run with sudo (`sudo smind service %s --system`)", what, s.env.SystemUnitDir, strings.Fields(what)[0])
+	}
+	if !o.System {
+		return s.env.refuseSudoForUserScope()
+	}
+	return nil
+}
+
 func (s *systemd) Install(ctx context.Context, o Options) error {
 	env := s.env
 	if err := s.booted(); err != nil {
@@ -160,11 +172,20 @@ func (s *systemd) Install(ctx context.Context, o Options) error {
 	if err != nil {
 		return err
 	}
+	smindHome, err := env.smindHome(o, home)
+	if err != nil {
+		return err
+	}
 	env.warnTemporaryExe()
+	if o.System && o.Path == "" && env.Getenv("SUDO_USER") != "" {
+		env.warnf("the PATH captured here is sudo's, not yours: tools in your home (~/.local/bin, nvm, ...) will not resolve inside the service. Re-run with --path \"$PATH\" from your own shell if agents need them.")
+	}
 
-	sp := unitSpec{Exe: env.Exe, Path: env.capturePath(o), Home: o.Home, User: username, System: o.System}
-	if sp.Home == "" {
-		sp.Home = env.Getenv("SMIND_HOME")
+	sp := unitSpec{Exe: env.Exe, Path: env.capturePath(o), User: username, System: o.System}
+	// SMIND_HOME is written only when it was asked for (flag or shell); the
+	// default home needs no variable.
+	if o.Home != "" || env.Getenv("SMIND_HOME") != "" {
+		sp.Home = smindHome
 	}
 	for _, v := range []string{sp.Exe, sp.Path, sp.Home} {
 		if strings.ContainsAny(v, "\n\r") {
@@ -193,14 +214,17 @@ func (s *systemd) Install(ctx context.Context, o Options) error {
 	}
 
 	running := s.active(ctx, o.System)
-	port := env.port(env.smindHome(o, home))
+	port := env.port(smindHome)
 	switch {
 	case o.NoStart:
 		env.outf("not starting (--no-start); start it with `smind service start`")
 	case running:
-		if changed {
+		switch h := env.Probe(ctx, port); {
+		case changed:
 			env.outf("already running; run `smind service restart` to apply the new unit")
-		} else {
+		case h.Smind && env.Version != "" && h.Version != "" && h.Version != env.Version:
+			env.outf("already running smind %s, but this binary is %s: run `smind service restart` to switch", h.Version, env.Version)
+		default:
 			env.outf("already running")
 		}
 	default:
@@ -211,7 +235,7 @@ func (s *systemd) Install(ctx context.Context, o Options) error {
 		if err := s.ctlOK(ctx, o.System, "start", UnitName); err != nil {
 			return err
 		}
-		if err := env.waitHealthy(ctx, port); err != nil {
+		if err := env.waitHealthy(ctx, port, "systemd"); err != nil {
 			return err
 		}
 		env.outf("started; smind is listening on http://127.0.0.1:%d", port)
@@ -237,22 +261,25 @@ func (s *systemd) lingerHint(ctx context.Context, username string) {
 func (s *systemd) Uninstall(ctx context.Context, o Options) error {
 	env := s.env
 	o = s.scope(o)
-	if o.System && env.Euid != 0 {
-		return errors.New("--system removes " + filepath.Join(env.SystemUnitDir, UnitName) + ": re-run with `sudo smind service uninstall --system`")
+	if err := s.needRoot(o, "removes"); err != nil {
+		return err
 	}
 	home, _, err := env.target(o.System)
-	if err != nil && o.System {
-		// Uninstall does not need the target user; fall back to the caller.
-		home = env.Home
+	if err != nil {
+		home = env.Home // uninstall does not need the target user
 	}
 	path := s.unitPath(o.System, home)
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		env.outf("not installed (%s does not exist); nothing to do", path)
 		return nil
 	}
-	// Stop and disable are best effort: a unit that is already stopped or
-	// was never enabled must not block removal.
-	_, _ = s.ctl(ctx, o.System, "stop", UnitName)
+	// A failure to even talk to systemd (no user session bus) must stop us
+	// here: removing the file would leave the daemon running and enabled
+	// with nothing left to manage it. A unit that is merely already stopped
+	// or never enabled is a non-zero exit and does not block removal.
+	if _, err := s.ctl(ctx, o.System, "stop", UnitName); err != nil {
+		return err
+	}
 	_, _ = s.ctl(ctx, o.System, "disable", UnitName)
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("remove %s: %w", path, err)
@@ -271,6 +298,9 @@ func (s *systemd) show(ctx context.Context, system bool) (map[string]string, err
 		"--property=LoadState,ActiveState,SubState,UnitFileState,MainPID")
 	if err != nil {
 		return nil, err
+	}
+	if res.ExitCode != 0 {
+		return nil, fmt.Errorf("systemctl show %s: exit %d: %s", UnitName, res.ExitCode, strings.TrimSpace(res.Stderr))
 	}
 	props := map[string]string{}
 	for _, line := range strings.Split(res.Stdout, "\n") {
@@ -294,6 +324,31 @@ func (s *systemd) installed(ctx context.Context, system bool, home string) (bool
 	return true, props, nil
 }
 
+var reUnitHome = regexp.MustCompile(`(?m)^Environment="SMIND_HOME=(.*)"$`)
+
+// unquoteEnvValue undoes quoteEnv for the value part.
+func unquoteEnvValue(v string) string {
+	return strings.NewReplacer(`\\`, `\`, `\"`, `"`, `%%`, `%`, `\n`, "\n").Replace(v)
+}
+
+// InstalledHome implements Manager: the SMIND_HOME written into the unit.
+func (s *systemd) InstalledHome(o Options) (string, bool) {
+	o = s.scope(o)
+	home, _, err := s.env.target(o.System)
+	if err != nil {
+		home = s.env.Home
+	}
+	data, err := os.ReadFile(s.unitPath(o.System, home))
+	if err != nil {
+		return "", false
+	}
+	unitHome := ""
+	if m := reUnitHome.FindSubmatch(data); m != nil {
+		unitHome = unquoteEnvValue(string(m[1]))
+	}
+	return serviceHome(unitHome, home), true
+}
+
 func (s *systemd) Status(ctx context.Context, o Options) (State, error) {
 	env := s.env
 	o = s.scope(o)
@@ -313,7 +368,8 @@ func (s *systemd) Status(ctx context.Context, o Options) (State, error) {
 	if props["ActiveState"] == "active" {
 		state = Running
 	}
-	port := env.port(env.smindHome(o, home))
+	smindHome, _ := s.InstalledHome(o)
+	port := env.port(smindHome)
 	h := env.Probe(ctx, port)
 
 	env.outf("smind service (%s)", s.Name(o))
@@ -331,6 +387,7 @@ func (s *systemd) Status(ctx context.Context, o Options) (State, error) {
 		pid = ", pid " + props["MainPID"]
 	}
 	env.outf("  state:   %s%s; enabled: %s", active, pid, enabled)
+	env.outf("  home:    %s", smindHome)
 	env.outf("  port:    %d", port)
 	switch {
 	case h.Smind:
@@ -347,8 +404,9 @@ func (s *systemd) Status(ctx context.Context, o Options) (State, error) {
 	return state, nil
 }
 
-// requireInstalled returns ErrNotInstalled unless the unit exists.
-func (s *systemd) requireInstalled(ctx context.Context, o Options) (home string, err error) {
+// requireInstalled returns ErrNotInstalled unless the unit exists, and the
+// smind home the installed unit runs with.
+func (s *systemd) requireInstalled(ctx context.Context, o Options) (smindHome string, err error) {
 	home, _, terr := s.env.target(o.System)
 	if terr != nil {
 		home = s.env.Home
@@ -360,16 +418,20 @@ func (s *systemd) requireInstalled(ctx context.Context, o Options) (home string,
 	if !ok {
 		return "", ErrNotInstalled
 	}
-	return home, nil
+	smindHome, _ = s.InstalledHome(o)
+	return smindHome, nil
 }
 
 func (s *systemd) Start(ctx context.Context, o Options) error {
 	o = s.scope(o)
-	home, err := s.requireInstalled(ctx, o)
+	if err := s.needRoot(o, "starts"); err != nil {
+		return err
+	}
+	smindHome, err := s.requireInstalled(ctx, o)
 	if err != nil {
 		return err
 	}
-	port := s.env.port(s.env.smindHome(o, home))
+	port := s.env.port(smindHome)
 	if s.active(ctx, o.System) {
 		s.env.outf("already running")
 		return nil
@@ -380,7 +442,7 @@ func (s *systemd) Start(ctx context.Context, o Options) error {
 	if err := s.ctlOK(ctx, o.System, "start", UnitName); err != nil {
 		return err
 	}
-	if err := s.env.waitHealthy(ctx, port); err != nil {
+	if err := s.env.waitHealthy(ctx, port, "systemd"); err != nil {
 		return err
 	}
 	s.env.outf("started")
@@ -389,6 +451,9 @@ func (s *systemd) Start(ctx context.Context, o Options) error {
 
 func (s *systemd) Stop(ctx context.Context, o Options) error {
 	o = s.scope(o)
+	if err := s.needRoot(o, "stops"); err != nil {
+		return err
+	}
 	if _, err := s.requireInstalled(ctx, o); err != nil {
 		return err
 	}
@@ -401,14 +466,25 @@ func (s *systemd) Stop(ctx context.Context, o Options) error {
 
 func (s *systemd) Restart(ctx context.Context, o Options) error {
 	o = s.scope(o)
-	home, err := s.requireInstalled(ctx, o)
+	if err := s.needRoot(o, "restarts"); err != nil {
+		return err
+	}
+	smindHome, err := s.requireInstalled(ctx, o)
 	if err != nil {
 		return err
+	}
+	port := s.env.port(smindHome)
+	// A stopped unit with a foreign daemon on the port would crash on bind and
+	// loop; refuse like Start does.
+	if !s.active(ctx, o.System) {
+		if msg := s.env.foreignDaemonMessage(ctx, port); msg != "" {
+			return fmt.Errorf("not restarting: %s; stop it first", msg)
+		}
 	}
 	if err := s.ctlOK(ctx, o.System, "restart", UnitName); err != nil {
 		return err
 	}
-	if err := s.env.waitHealthy(ctx, s.env.port(s.env.smindHome(o, home))); err != nil {
+	if err := s.env.waitHealthy(ctx, port, "systemd"); err != nil {
 		return err
 	}
 	s.env.outf("restarted")

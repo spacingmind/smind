@@ -69,6 +69,8 @@ type fakeSystemctl struct {
 	active      map[bool]bool
 	linger      string // "yes"/"no"; "" = loginctl fails
 	noBus       bool
+	busMessage  string
+	showFails   bool
 	startFails  bool
 	calls       []string
 	daemonAfter string // version the daemon reports once started
@@ -114,7 +116,11 @@ func (f *fakeSystemctl) Run(_ context.Context, name string, args ...string) (Res
 		args = args[1:]
 	}
 	if f.noBus && !system {
-		return Result{ExitCode: 1, Stderr: "Failed to connect to bus: No medium found\n"}, nil
+		msg := f.busMessage
+		if msg == "" {
+			msg = "Failed to connect to bus: No medium found"
+		}
+		return Result{ExitCode: 1, Stderr: msg + "\n"}, nil
 	}
 	unit := f.systemUnit
 	if !system {
@@ -152,6 +158,9 @@ func (f *fakeSystemctl) Run(_ context.Context, name string, args ...string) (Res
 		}
 		return Result{Stdout: "inactive\n", ExitCode: 3}, nil
 	case "show":
+		if f.showFails {
+			return Result{ExitCode: 1, Stderr: "boom\n"}, nil
+		}
 		load, active, sub, ufs, pid := "not-found", "inactive", "dead", "", "0"
 		if exists {
 			load = "loaded"
@@ -170,16 +179,18 @@ func (f *fakeSystemctl) Run(_ context.Context, name string, args ...string) (Res
 
 // fakeLaunchctl is the same for launchctl.
 type fakeLaunchctl struct {
-	mu            sync.Mutex
-	plist         string
-	service       string
-	domain        string
-	daemon        *fakeDaemon
-	loaded        bool
-	running       bool
-	noGUISession  bool
-	calls         []string
-	daemonVersion string
+	mu                 sync.Mutex
+	plist              string
+	service            string
+	domain             string
+	daemon             *fakeDaemon
+	loaded             bool
+	running            bool
+	noGUISession       bool
+	bootoutFails       bool
+	bootoutKeepsDaemon bool
+	calls              []string
+	daemonVersion      string
 }
 
 func newFakeLaunchctl(daemon *fakeDaemon, plist string, uid int) *fakeLaunchctl {
@@ -243,8 +254,13 @@ func (f *fakeLaunchctl) Run(_ context.Context, name string, args ...string) (Res
 		if !f.loaded {
 			return Result{ExitCode: 113, Stderr: "Boot-out failed: 3: No such process\n"}, nil
 		}
+		if f.bootoutFails {
+			return Result{ExitCode: 5, Stderr: "Boot-out failed: 5: Input/output error\n"}, nil
+		}
 		f.loaded, f.running = false, false
-		f.daemon.set(false, false, "", "")
+		if !f.bootoutKeepsDaemon {
+			f.daemon.set(false, false, "", "")
+		}
 		return Result{}, nil
 	case "kickstart":
 		if !f.loaded {

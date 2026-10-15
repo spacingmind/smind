@@ -30,6 +30,7 @@ type Rotating struct {
 	maxFiles int
 	f        *os.File
 	size     int64
+	closed   bool
 }
 
 // OpenRotating opens (creating if needed) the log at path for appending.
@@ -63,15 +64,22 @@ func (r *Rotating) open() error {
 }
 
 // Write appends p, rotating first when it would not fit. A rotation that
-// fails never drops the line: it is written to the current file.
+// cannot reopen the file (directory briefly gone, disk full) loses only the
+// lines written while it is unavailable: the next Write tries again, so the
+// log recovers by itself.
 func (r *Rotating) Write(p []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.f == nil {
+	if r.closed {
 		return 0, os.ErrClosed
 	}
-	if r.size > 0 && r.size+int64(len(p)) > r.maxSize {
+	if r.f != nil && r.size > 0 && r.size+int64(len(p)) > r.maxSize {
 		r.rotate()
+	}
+	if r.f == nil {
+		if err := r.open(); err != nil {
+			return 0, err
+		}
 	}
 	n, err := r.f.Write(p)
 	r.size += int64(n)
@@ -80,7 +88,8 @@ func (r *Rotating) Write(p []byte) (int, error) {
 
 // rotate shifts the numbered files up and starts a new active file. Errors
 // are tolerated step by step: the worst outcome is a log that grows past
-// maxSize until the next successful rotation, never a lost line.
+// maxSize until the next successful rotation, or (when the new file cannot be
+// created) lines lost until the next Write manages to reopen it.
 func (r *Rotating) rotate() {
 	_ = r.f.Close()
 	r.f = nil
@@ -99,12 +108,8 @@ func (r *Rotating) rotate() {
 		}
 	}
 	if err := r.open(); err != nil {
-		// Could not start a fresh file (disk full, directory gone): keep
-		// appending wherever we can rather than dying.
-		r.size = 0
-		if f, err := os.OpenFile(r.path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600); err == nil {
-			r.f = f
-		}
+		// Could not start a fresh file: r.f stays nil and the next Write retries.
+		r.f, r.size = nil, 0
 	}
 }
 
@@ -112,6 +117,7 @@ func (r *Rotating) rotate() {
 func (r *Rotating) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.closed = true
 	if r.f == nil {
 		return nil
 	}

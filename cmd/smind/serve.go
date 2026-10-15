@@ -47,8 +47,7 @@ func cmdServe(args []string) int {
 	// decision 6). Take it out of the environment: agents and shells this
 	// daemon spawns inherit it otherwise, and a `smind serve` started by one of
 	// them would wrongly claim to be service-managed too.
-	supervisor := strings.TrimSpace(os.Getenv(service.SupervisorEnv))
-	_ = os.Unsetenv(service.SupervisorEnv)
+	supervisor := takeSupervisorEnv()
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -167,6 +166,14 @@ func cmdServe(args []string) int {
 	return 0
 }
 
+// takeSupervisorEnv reads SMIND_SUPERVISOR and removes it from the process
+// environment, so the agents and shells this daemon spawns do not inherit it.
+func takeSupervisorEnv() string {
+	v := strings.TrimSpace(os.Getenv(service.SupervisorEnv))
+	_ = os.Unsetenv(service.SupervisorEnv)
+	return v
+}
+
 // setupDaemonLog points the standard logger at stderr *and* the daemon's own
 // rotating log, $SMIND_HOME/daemon.log, so `smind service logs` reads the same
 // thing on every OS and no unit has to redirect output (ADR-0031 decision 7).
@@ -185,7 +192,10 @@ func setupDaemonLog(lc config.LogConfig, stderr io.Writer) func() {
 		log.Printf("log file %s: %v (logging to stderr only)", path, err)
 		return func() {}
 	}
-	log.SetOutput(io.MultiWriter(stderr, logging.BestEffort{W: rf}))
+	// Both best effort: io.MultiWriter stops at the first failing writer, and a
+	// closed terminal or pipe on stderr must not silence the file (or the other
+	// way round).
+	log.SetOutput(io.MultiWriter(logging.BestEffort{W: stderr}, logging.BestEffort{W: rf}))
 	return func() { _ = rf.Close() }
 }
 

@@ -99,6 +99,12 @@ type Manager interface {
 	Start(ctx context.Context, o Options) error
 	Stop(ctx context.Context, o Options) error
 	Restart(ctx context.Context, o Options) error
+	// InstalledHome is the smind home directory the installed service runs
+	// with (the SMIND_HOME in its unit, else the user's default), and false
+	// when no service is installed. Every command that acts on an existing
+	// install uses it, so they agree with the daemon whatever the caller's
+	// own SMIND_HOME is.
+	InstalledHome(o Options) (string, bool)
 }
 
 // Result is one finished command.
@@ -281,16 +287,43 @@ func (e Env) target(system bool) (home, username string, err error) {
 	return h, name, nil
 }
 
-// smindHome is where the daemon keeps its data for this install: an explicit
-// --home, else the caller's SMIND_HOME, else the target user's default.
-func (e Env) smindHome(o Options, targetHome string) string {
-	if o.Home != "" {
-		return o.Home
+// smindHome is where the daemon keeps its data for a NEW install: an explicit
+// --home, else the caller's SMIND_HOME, else the target user's default. It
+// must be absolute: the service manager does not start in your shell's
+// directory.
+func (e Env) smindHome(o Options, targetHome string) (string, error) {
+	h := o.Home
+	if h == "" {
+		h = e.Getenv("SMIND_HOME")
 	}
-	if v := e.Getenv("SMIND_HOME"); v != "" {
-		return v
+	if h == "" {
+		return config.DirFor(targetHome), nil
+	}
+	if !filepath.IsAbs(h) {
+		return "", fmt.Errorf("SMIND_HOME %q must be an absolute path to go into a service (pass --home <absolute dir>)", h)
+	}
+	return h, nil
+}
+
+// serviceHome is the home of an EXISTING install: what its unit says, since
+// that is what the daemon actually uses; the unit having no SMIND_HOME means
+// the target user's default, whatever this shell has set.
+func serviceHome(unitHome string, targetHome string) string {
+	if unitHome != "" {
+		return unitHome
 	}
 	return config.DirFor(targetHome)
+}
+
+// refuseSudoForUserScope refuses to act on a user-scope service as root
+// under sudo: it would run `systemctl --user` as root, or write root-owned
+// files into your home.
+func (e Env) refuseSudoForUserScope() error {
+	name := e.Getenv("SUDO_USER")
+	if e.Euid == 0 && name != "" && name != "root" {
+		return fmt.Errorf("you are running under sudo, but this service belongs to your own account (%s): run it without sudo", name)
+	}
+	return nil
 }
 
 // port is the daemon's configured port, read from that home's config.yaml.
@@ -333,11 +366,15 @@ func (e Env) warnTemporaryExe() {
 }
 
 // waitHealthy polls until the smind daemon answers /healthz on port.
-func (e Env) waitHealthy(ctx context.Context, port int) error {
+//
+// supervisor is the value of managedBy the daemon must report: a daemon that
+// answers without it is someone else's (a hand-started or app-managed one that
+// held the port), not the one this service just started.
+func (e Env) waitHealthy(ctx context.Context, port int, supervisor string) error {
 	ctx, cancel := context.WithTimeout(ctx, e.StartTimeout)
 	defer cancel()
 	for {
-		if h := e.Probe(ctx, port); h.Smind {
+		if h := e.Probe(ctx, port); h.Smind && h.ManagedBy == supervisor {
 			return nil
 		}
 		select {

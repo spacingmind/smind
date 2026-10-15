@@ -44,6 +44,9 @@ wait_down() {
   done
   fail "daemon still answering on port $port"
 }
+service_pid() {
+  "$bin" service status 2>/dev/null | sed -n 's/.*pid \([0-9][0-9]*\).*/\1/p' | head -1
+}
 status_code() {
   set +e
   "$bin" service status >/dev/null 2>&1
@@ -84,11 +87,21 @@ step "start"
 wait_up 30
 
 step "a crash (kill -9) restarts the daemon"
-pid="$("$bin" service status | sed -n 's/.*pid \([0-9][0-9]*\).*/\1/p' | head -1)"
+pid="$(service_pid)"
 [ -n "$pid" ] || fail "no pid in status output"
 kill -9 "$pid"
-wait_down 15
-wait_up 60
+# launchd can respawn faster than we can poll for the gap, so wait for a NEW pid
+# that answers rather than for the daemon to be down.
+i=0
+while [ "$i" -lt 60 ]; do
+  new="$(service_pid)"
+  if [ -n "$new" ] && [ "$new" != "$pid" ] && health >/dev/null 2>&1; then
+    break
+  fi
+  i=$((i + 1))
+  sleep 1
+done
+[ "$i" -lt 60 ] || fail "the daemon was not restarted after kill -9 (pid was $pid)"
 
 step "restart"
 "$bin" service restart

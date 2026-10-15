@@ -5,11 +5,14 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/spacingmind/smind/internal/config"
 )
 
 // launchd is the macOS backend: a per-user LaunchAgent in the gui/<uid>
@@ -109,7 +112,8 @@ func (l *launchd) ctlOK(ctx context.Context, args ...string) error {
 
 var (
 	rePID   = regexp.MustCompile(`(?m)^\s*pid = (\d+)\s*$`)
-	reState = regexp.MustCompile(`(?m)^\s*state = (\S+)\s*$`)
+	reState = regexp.MustCompile(`(?m)^\s*state = (.+?)\s*$`)
+	reHome  = regexp.MustCompile(`<key>SMIND_HOME</key>\s*<string>([^<]*)</string>`)
 )
 
 // job is what `launchctl print` said about the service.
@@ -146,15 +150,45 @@ func (l *launchd) rejectSystem(o Options) error {
 	return nil
 }
 
-func (l *launchd) Install(ctx context.Context, o Options) error {
-	env := l.env
+// guard is the check every acting command starts with: no --system, and not
+// root (a LaunchAgent belongs to the logged-in user; as root the gui/<uid>
+// domain is the wrong one and the plist would be root-owned in their home).
+func (l *launchd) guard(o Options) error {
 	if err := l.rejectSystem(o); err != nil {
 		return err
 	}
+	if l.env.Euid == 0 {
+		return errors.New("a LaunchAgent belongs to your own account: run `smind service` as yourself, without sudo")
+	}
+	return nil
+}
+
+// InstalledHome implements Manager: the SMIND_HOME written into the plist.
+func (l *launchd) InstalledHome(Options) (string, bool) {
+	data, err := os.ReadFile(l.plistPath())
+	if err != nil {
+		return "", false
+	}
+	unitHome := ""
+	if m := reHome.FindSubmatch(data); m != nil {
+		unitHome = html.UnescapeString(string(m[1]))
+	}
+	return serviceHome(unitHome, l.env.Home), true
+}
+
+func (l *launchd) Install(ctx context.Context, o Options) error {
+	env := l.env
+	if err := l.guard(o); err != nil {
+		return err
+	}
+	smindHome, err := env.smindHome(o, env.Home)
+	if err != nil {
+		return err
+	}
 	env.warnTemporaryExe()
-	sp := plistSpec{Exe: env.Exe, Path: env.capturePath(o), Home: o.Home, Work: env.Home}
-	if sp.Home == "" {
-		sp.Home = env.Getenv("SMIND_HOME")
+	sp := plistSpec{Exe: env.Exe, Path: env.capturePath(o), Work: env.Home}
+	if o.Home != "" || env.Getenv("SMIND_HOME") != "" {
+		sp.Home = smindHome
 	}
 	path := l.plistPath()
 	changed, err := writeIfChanged(path, []byte(renderPlist(sp)), 0o644)
@@ -170,7 +204,7 @@ func (l *launchd) Install(ctx context.Context, o Options) error {
 	_, _ = l.ctl(ctx, "enable", l.service())
 	env.outf("enabled %s (loads at every login of this user)", LaunchdLabel)
 
-	port := env.port(env.smindHome(o, env.Home))
+	port := env.port(smindHome)
 	j, err := l.job(ctx)
 	if err != nil {
 		return err
@@ -179,9 +213,12 @@ func (l *launchd) Install(ctx context.Context, o Options) error {
 	case o.NoStart:
 		env.outf("not starting (--no-start); start it with `smind service start`")
 	case j.running:
-		if changed {
+		switch h := env.Probe(ctx, port); {
+		case changed:
 			env.outf("already running; run `smind service restart` to apply the new plist")
-		} else {
+		case h.Smind && env.Version != "" && h.Version != "" && h.Version != env.Version:
+			env.outf("already running smind %s, but this binary is %s: run `smind service restart` to switch", h.Version, env.Version)
+		default:
 			env.outf("already running")
 		}
 	default:
@@ -192,7 +229,7 @@ func (l *launchd) Install(ctx context.Context, o Options) error {
 		if err := l.load(ctx, j); err != nil {
 			return err
 		}
-		if err := env.waitHealthy(ctx, port); err != nil {
+		if err := env.waitHealthy(ctx, port, "launchd"); err != nil {
 			return err
 		}
 		env.outf("started; smind is listening on http://127.0.0.1:%d", port)
@@ -200,30 +237,39 @@ func (l *launchd) Install(ctx context.Context, o Options) error {
 	return nil
 }
 
-// load starts the job: kickstart when it is loaded but not running (after a
-// graceful `smind stop`), bootstrap when it is not loaded.
+// load starts the job. A job that is loaded but not running (after a graceful
+// `smind stop`) is unloaded first: kickstart would run the OLD definition,
+// while bootstrap re-reads the plist this install may just have changed.
 func (l *launchd) load(ctx context.Context, j job) error {
 	if j.loaded {
-		return l.ctlOK(ctx, "kickstart", l.service())
+		if err := l.ctlOK(ctx, "bootout", l.service()); err != nil {
+			return err
+		}
 	}
 	return l.ctlOK(ctx, "bootstrap", l.domain(), l.plistPath())
 }
 
 func (l *launchd) Uninstall(ctx context.Context, o Options) error {
 	env := l.env
-	if err := l.rejectSystem(o); err != nil {
+	if err := l.guard(o); err != nil {
 		return err
 	}
 	path := l.plistPath()
 	_, statErr := os.Stat(path)
-	j, _ := l.job(ctx)
+	j, err := l.job(ctx)
+	if err != nil {
+		return err
+	}
 	if errors.Is(statErr, os.ErrNotExist) && !j.loaded {
 		env.outf("not installed (%s does not exist); nothing to do", path)
 		return nil
 	}
 	if j.loaded {
-		// bootout stops the job (SIGTERM, then SIGKILL after ExitTimeOut).
-		_, _ = l.ctl(ctx, "bootout", l.service())
+		// bootout stops the job (SIGTERM, then SIGKILL after ExitTimeOut). If it
+		// fails, keep the plist: removing it would orphan a running agent.
+		if err := l.ctlOK(ctx, "bootout", l.service()); err != nil {
+			return err
+		}
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove %s: %w", path, err)
@@ -250,7 +296,11 @@ func (l *launchd) Status(ctx context.Context, o Options) (State, error) {
 	if j.running {
 		state = Running
 	}
-	port := env.port(env.smindHome(o, env.Home))
+	smindHome, _ := l.InstalledHome(o)
+	if smindHome == "" {
+		smindHome = config.DirFor(env.Home)
+	}
+	port := env.port(smindHome)
 	h := env.Probe(ctx, port)
 
 	env.outf("smind service (%s)", l.Name(o))
@@ -266,6 +316,7 @@ func (l *launchd) Status(ctx context.Context, o Options) (State, error) {
 		}
 	}
 	env.outf("  state:   %s", loaded)
+	env.outf("  home:    %s", smindHome)
 	env.outf("  port:    %d", port)
 	switch {
 	case h.Smind:
@@ -282,18 +333,21 @@ func (l *launchd) Status(ctx context.Context, o Options) (State, error) {
 	return state, nil
 }
 
-func (l *launchd) requireInstalled(o Options) error {
-	if err := l.rejectSystem(o); err != nil {
-		return err
+// requireInstalled returns the home of the installed agent, or ErrNotInstalled.
+func (l *launchd) requireInstalled(o Options) (string, error) {
+	if err := l.guard(o); err != nil {
+		return "", err
 	}
-	if _, err := os.Stat(l.plistPath()); err != nil {
-		return ErrNotInstalled
+	h, ok := l.InstalledHome(o)
+	if !ok {
+		return "", ErrNotInstalled
 	}
-	return nil
+	return h, nil
 }
 
 func (l *launchd) Start(ctx context.Context, o Options) error {
-	if err := l.requireInstalled(o); err != nil {
+	smindHome, err := l.requireInstalled(o)
+	if err != nil {
 		return err
 	}
 	j, err := l.job(ctx)
@@ -304,14 +358,14 @@ func (l *launchd) Start(ctx context.Context, o Options) error {
 		l.env.outf("already running")
 		return nil
 	}
-	port := l.env.port(l.env.smindHome(o, l.env.Home))
+	port := l.env.port(smindHome)
 	if msg := l.env.foreignDaemonMessage(ctx, port); msg != "" {
 		return fmt.Errorf("not starting: %s; stop it first", msg)
 	}
 	if err := l.load(ctx, j); err != nil {
 		return err
 	}
-	if err := l.env.waitHealthy(ctx, port); err != nil {
+	if err := l.env.waitHealthy(ctx, port, "launchd"); err != nil {
 		return err
 	}
 	l.env.outf("started")
@@ -319,7 +373,7 @@ func (l *launchd) Start(ctx context.Context, o Options) error {
 }
 
 func (l *launchd) Stop(ctx context.Context, o Options) error {
-	if err := l.requireInstalled(o); err != nil {
+	if _, err := l.requireInstalled(o); err != nil {
 		return err
 	}
 	j, err := l.job(ctx)
@@ -341,10 +395,11 @@ func (l *launchd) Stop(ctx context.Context, o Options) error {
 // the plist, then waits for the port to be released in between so the new
 // daemon does not race the old one for it.
 func (l *launchd) Restart(ctx context.Context, o Options) error {
-	if err := l.requireInstalled(o); err != nil {
+	smindHome, err := l.requireInstalled(o)
+	if err != nil {
 		return err
 	}
-	port := l.env.port(l.env.smindHome(o, l.env.Home))
+	port := l.env.port(smindHome)
 	j, err := l.job(ctx)
 	if err != nil {
 		return err
@@ -356,11 +411,14 @@ func (l *launchd) Restart(ctx context.Context, o Options) error {
 		if err := l.env.waitDown(ctx, port); err != nil {
 			return err
 		}
+	} else if msg := l.env.foreignDaemonMessage(ctx, port); msg != "" {
+		// Not loaded and something else answers: bootstrap would crash-loop.
+		return fmt.Errorf("not restarting: %s; stop it first", msg)
 	}
 	if err := l.ctlOK(ctx, "bootstrap", l.domain(), l.plistPath()); err != nil {
 		return err
 	}
-	if err := l.env.waitHealthy(ctx, port); err != nil {
+	if err := l.env.waitHealthy(ctx, port, "launchd"); err != nil {
 		return err
 	}
 	l.env.outf("restarted")
