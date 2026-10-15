@@ -87,7 +87,7 @@ describe("platform in a desktop build", () => {
 
     const added = await desktop.addConnection("Tunnel", "http://example.com:9000");
     expect(added).toEqual({ id: "url:example", kind: "url", label: "Tunnel", baseUrl: "http://example.com:9000" });
-    expect(invoke).toHaveBeenCalledWith("connections_add", { label: "Tunnel", url: "http://example.com:9000" });
+    expect(invoke).toHaveBeenCalledWith("connections_add", { label: "Tunnel", url: "http://example.com:9000", password: null });
 
     await desktop.removeConnection("url:example");
     expect(invoke).toHaveBeenCalledWith("connections_remove", { id: "url:example" });

@@ -29,7 +29,11 @@ pub fn connections_add(
     state: State<'_, DesktopState>,
     label: String,
     url: String,
+    // ADR-0031 D7 (b): with a password Rust logs in and keeps the session
+    // token in memory. SCAFFOLD: not used yet.
+    password: Option<String>,
 ) -> Result<Connection, String> {
+    let _ = &password;
     let mut registry = state.proxy.registry.lock().unwrap();
     let conn = registry.add(&label, &url)?;
     registry

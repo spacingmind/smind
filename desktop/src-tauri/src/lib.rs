@@ -17,6 +17,7 @@ use smind_daemon_client as dclient;
 use smind_daemon_client::proxy::{ProxyState, Registry};
 use smind_daemon_client::Config;
 
+mod app_settings;
 mod assets;
 mod client_watch;
 mod commands;
@@ -28,6 +29,8 @@ mod menu;
 mod notify;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod overlay_icon;
+mod probe;
+mod ssh_tunnel;
 mod state;
 mod tray;
 mod updater;
@@ -104,6 +107,10 @@ pub fn run() {
             commands::connections_add,
             commands::connections_add_relay,
             commands::connections_preview_relay,
+            probe::connections_probe,
+            ssh_tunnel::connections_add_ssh,
+            app_settings::app_settings_get,
+            app_settings::app_settings_set,
             commands::connections_remove,
             commands::connections_select,
             commands::connections_get_current,
