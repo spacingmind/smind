@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use axum::extract::ws::{Message, WebSocketUpgrade};
 use axum::extract::{RawQuery, State};
 use axum::http::HeaderMap;
+use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
@@ -73,13 +74,19 @@ async fn spawn_stub_as(protected: bool, smind_healthz: bool) -> (SocketAddr, Log
             "/api/ping",
             get(|State(log): State<Log>, headers: HeaderMap, RawQuery(q): RawQuery| async move {
                 record(&log, "/api/ping", &headers, q);
-                "ok"
+                if headers.get("authorization").and_then(|v| v.to_str().ok()) == Some("Bearer expired-session") {
+                    return (axum::http::StatusCode::UNAUTHORIZED, "session expired");
+                }
+                (axum::http::StatusCode::OK, "ok")
             }),
         )
         .route(
             "/ws",
             get(|State(log): State<Log>, headers: HeaderMap, RawQuery(q): RawQuery, ws: WebSocketUpgrade| async move {
                 record(&log, "/ws", &headers, q);
+                if headers.get("authorization").and_then(|v| v.to_str().ok()) == Some("Bearer expired-session") {
+                    return axum::http::StatusCode::UNAUTHORIZED.into_response();
+                }
                 let offered: Vec<String> = headers
                     .get("sec-websocket-protocol")
                     .and_then(|v| v.to_str().ok())
@@ -91,7 +98,7 @@ async fn spawn_stub_as(protected: bool, smind_healthz: bool) -> (SocketAddr, Log
                             break;
                         }
                     }
-                })
+                }).into_response()
             }),
         )
         .with_state(log.clone());
@@ -353,4 +360,32 @@ async fn token_never_reaches_the_webview() {
             assert!(!s.contains(secret), "{secret} leaked to the webview: {s}");
         }
     }
+}
+
+#[tokio::test]
+async fn expired_session_is_cleared_so_the_webview_sees_the_daemons_refusal() {
+    let h = harness().await;
+    let (id, _remote) = h.select_url_connection().await;
+
+    // /api: the daemon answers 401 to the session -> it is dropped.
+    h.state.set_session(&id, "expired-session".to_string());
+    let body: serde_json::Value = h.get("/api/token").await.json().await.unwrap();
+    assert!(body["token"].as_str().is_some(), "synthesized while the session is held");
+    assert_eq!(h.get("/api/ping").await.status(), 401, "the daemon's answer passes through");
+    assert_eq!(h.state.session(&id), None);
+    // Now /api/token reaches the daemon instead of looping on a dead placeholder.
+    let token: serde_json::Value = h.get("/api/token").await.json().await.unwrap();
+    assert_eq!(token["token"], "daemon-token");
+
+    // /ws: a refused handshake drops the session too.
+    h.state.set_session(&id, "expired-session".to_string());
+    let mut req = format!("ws://127.0.0.1:{}/ws", h.port).into_client_request().unwrap();
+    req.headers_mut().insert("cookie", h.cookie.parse().unwrap());
+    assert!(tokio_tungstenite::connect_async(req).await.is_err());
+    assert_eq!(h.state.session(&id), None);
+
+    // A healthy session is never dropped.
+    h.state.set_session(&id, "session-ok".to_string());
+    assert_eq!(h.get("/api/ping").await.status(), 200);
+    assert_eq!(h.state.session(&id).as_deref(), Some("session-ok"));
 }

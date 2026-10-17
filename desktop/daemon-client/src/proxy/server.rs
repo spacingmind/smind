@@ -360,6 +360,7 @@ async fn proxy_http(State(state): State<Arc<ProxyState>>, req: Request<Body>) ->
     // `local`'s own token fetch always asks the daemon (it refreshes what the
     // proxy knows about password protection), so it carries no credential.
     let bearer = if is_token_get { None } else { state.upstream_bearer(&conn).await };
+    let session_in_use = bearer.is_some() && bearer == state.session(&conn.id);
     let path_and_query = req
         .uri()
         .path_and_query()
@@ -398,6 +399,12 @@ async fn proxy_http(State(state): State<Arc<ProxyState>>, req: Request<Body>) ->
     match upstream {
         Ok(resp) => {
             let status = resp.status();
+            if session_in_use && matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+                // The daemon no longer honours this session (expired): drop it,
+                // so the next /api/token passes the daemon's own refusal
+                // through and the webview shows its login screen.
+                state.clear_session(&conn.id);
+            }
             if is_token_get && ProxyState::is_builtin_local(&conn) {
                 // 403 = a password-protected daemon (#349) that no longer
                 // serves its token: authenticate with the token file when we
@@ -575,6 +582,11 @@ async fn proxy_ws(
     let (upstream, resp) = match connect_async(request).await {
         Ok(ok) => ok,
         Err(e) => {
+            if let (tokio_tungstenite::tungstenite::Error::Http(resp), true) = (&e, bearer.is_some() && bearer == state.session(&conn.id)) {
+                if matches!(resp.status().as_u16(), 401 | 403) {
+                    state.clear_session(&conn.id);
+                }
+            }
             eprintln!("smind desktop: proxy ws upstream connect failed: {e}");
             return (StatusCode::BAD_GATEWAY, "smind desktop: upstream connection failed").into_response();
         }
