@@ -6,6 +6,13 @@
 . "$(dirname "$0")/lib.sh"
 
 if ! image_has_direct_connections; then
+  # A daemon without direct connections ignores SMIND_LISTEN and SMIND_PASSWORD:
+  # the container is "healthy" on loopback and `-p 4648:4648` reaches nothing. That
+  # must never be published, so the release job sets REQUIRE_DIRECT_CONNECTIONS=1
+  # and this becomes a failure there; PR builds may skip until the daemon has it.
+  if [ "${REQUIRE_DIRECT_CONNECTIONS:-}" = 1 ]; then
+    fail "this image's smind has no direct connections (smind config): published-port login cannot work, refusing to pass"
+  fi
   echo "skip - this image's smind predates direct connections (P4); published-port login is not testable yet"
   exit 0
 fi

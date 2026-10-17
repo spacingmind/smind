@@ -19,9 +19,14 @@ FROM debian:bookworm-slim
 
 ARG TARGETARCH
 ARG VERSION=dev
-# Node 22 LTS: the GLM agent starts with `npx`. Fetched from nodejs.org and
-# checked against that release's SHASUMS256.txt.
+# Node 22 LTS: the GLM agent starts with `npx`.
 ARG NODE_VERSION=22.23.3
+# SHA-256 of node-v${NODE_VERSION}-linux-<arch>.tar.xz, pinned here (from
+# https://nodejs.org/dist/v22.23.3/SHASUMS256.txt) so the download is checked
+# against something that lives in this repository, not against a file fetched
+# from the same host as the tarball. Bump all three together.
+ARG NODE_SHA256_AMD64=df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de
+ARG NODE_SHA256_ARM64=a44aeb94849a299b22df10b9e622ec2f605c2183501bc40590705131de7c740f
 
 LABEL org.opencontainers.image.title="smind" \
       org.opencontainers.image.description="The smind daemon: agent orchestration with a web UI" \
@@ -36,17 +41,16 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends \
         ca-certificates curl git gosu openssh-client procps tini xz-utils; \
     case "${TARGETARCH}" in \
-        amd64) node_arch=x64 ;; \
-        arm64) node_arch=arm64 ;; \
+        amd64) node_arch=x64; node_sha="${NODE_SHA256_AMD64}" ;; \
+        arm64) node_arch=arm64; node_sha="${NODE_SHA256_ARM64}" ;; \
         *) echo "unsupported TARGETARCH '${TARGETARCH}'" >&2; exit 1 ;; \
     esac; \
     node_tar="node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
     cd /tmp; \
-    curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/${node_tar}"; \
-    curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt"; \
-    grep " ${node_tar}\$" SHASUMS256.txt | sha256sum -c -; \
+    curl --proto '=https' --tlsv1.2 -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/${node_tar}"; \
+    echo "${node_sha}  ${node_tar}" | sha256sum -c -; \
     tar -xJf "${node_tar}" -C /usr/local --strip-components=1 --no-same-owner; \
-    rm -f "${node_tar}" SHASUMS256.txt; \
+    rm -f "${node_tar}"; \
     node --version; npm --version; \
     apt-get purge -y --auto-remove xz-utils; \
     rm -rf /var/lib/apt/lists/*; \

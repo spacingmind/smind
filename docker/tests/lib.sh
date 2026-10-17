@@ -2,7 +2,9 @@
 # Shared helpers for the image smoke tests (docker/tests/test_image_*.sh).
 # Environment: IMAGE (default smind:ci), PASSWORD (any 12+ char value; a random
 # one is generated), EXPECT_VERSION (when set, `smind --version` must match it).
-set -euo pipefail
+# No pipefail: `producer | grep -q` must not fail when grep exits early and the
+# producer gets SIGPIPE.
+set -eu
 
 IMAGE="${IMAGE:-smind:ci}"
 PASSWORD="${PASSWORD:-$(head -c 24 /dev/urandom | base64 | tr -d '/+=' | head -c 24)}"
@@ -29,8 +31,10 @@ cleanup() {
 trap cleanup EXIT
 
 new_name() { echo "smind-test-$1-$SUFFIX"; }
-new_volume() { local v; v="$(new_name "$1")"; docker volume create "$v" >/dev/null; VOLUMES+=("$v"); echo "$v"; }
-new_network() { local n; n="$(new_name "$1")"; docker network create "$n" >/dev/null; NETWORKS+=("$n"); echo "$n"; }
+# These set REPLY instead of printing the name: they must run in the current
+# shell, or the arrays cleanup() walks would stay empty and leak the resource.
+new_volume() { REPLY="$(new_name "$1")"; docker volume create "$REPLY" >/dev/null; VOLUMES+=("$REPLY"); }
+new_network() { REPLY="$(new_name "$1")"; docker network create "$REPLY" >/dev/null; NETWORKS+=("$REPLY"); }
 
 # start_daemon <name> [docker run args...]: a daemon with a password, detached.
 start_daemon() {
@@ -57,5 +61,14 @@ wait_healthy() { # <name> [seconds]
 # The daemon-with-P4 features (login, session tokens) exist only in images whose
 # smind has `config`; older builds ignore SMIND_LISTEN and listen on loopback.
 image_has_direct_connections() { docker run --rm "$IMAGE" smind config get >/dev/null 2>&1; }
+# `smind service` exists only in builds with the OS-service installer (P8).
+image_has_service() { docker run --rm "$IMAGE" smind service 2>&1 | grep -qi 'usage'; }
+
+# poll <seconds> <command...>: retry until the command succeeds (no fixed sleeps).
+poll() {
+  local limit="$1" i; shift
+  for ((i = 0; i < limit; i++)); do "$@" >/dev/null 2>&1 && return 0; sleep 1; done
+  return 1
+}
 
 published_port() { docker port "$1" 4648/tcp | head -n 1 | sed 's/.*://'; }

@@ -4,7 +4,7 @@
 # shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
-vol="$(new_volume state)"
+new_volume state; vol="$REPLY"
 c1="$(new_name state1)"
 start_daemon "$c1" -v "$vol:/data"
 wait_healthy "$c1" 30

@@ -3,13 +3,28 @@
 # shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
-vol="$(new_volume chown)"
+new_volume chown; vol="$REPLY"
 name="$(new_name chown)"
 start_daemon "$name" -v "$vol:/data"
 wait_healthy "$name" 30
 [ "$(docker exec "$name" stat -c %u:%g /data)" = 1000:1000 ] || fail "the named volume was not chowned to 1000:1000"
 docker exec --user smind "$name" sh -c 'touch /data/writable && test -s /data/token' || fail "uid 1000 cannot write /data"
 pass "a root-owned named volume is chowned for the smind user"
+
+# A file `docker exec` (root by default) writes into an already-correct /data is
+# handed back to the smind user at the next start, instead of silently breaking it.
+docker exec "$name" sh -c 'echo "# written by root" > /data/root-wrote.yaml'
+docker restart "$name" >/dev/null
+wait_healthy "$name" 30
+[ "$(docker exec "$name" stat -c %u /data/root-wrote.yaml)" = 1000 ] || fail "a root-owned file in /data was not repaired"
+pass "root-owned files left by docker exec are repaired at start"
+
+# Files owned by anyone else are left alone, with a warning (an operator's own bind mount).
+docker exec "$name" sh -c 'echo x > /data/foreign && chown 4242:4242 /data/foreign'
+docker restart "$name" >/dev/null
+wait_healthy "$name" 30
+[ "$(docker exec "$name" stat -c %u /data/foreign)" = 4242 ] || fail "a file owned by another uid was re-owned"
+pass "files owned by other users are not touched"
 docker rm -f "$name" >/dev/null
 
 # Docker Desktop's file sharing maps ownership itself, so a chown on a bind mount
@@ -28,7 +43,7 @@ else
 fi
 
 # Started non-root (--user), the entrypoint just runs: a writable mount works.
-vol2="$(new_volume nonroot)"
+new_volume nonroot; vol2="$REPLY"
 docker run --rm -v "$vol2:/data" --entrypoint sh "$IMAGE" -c 'touch /data/.keep && chown -R 4242:4242 /data' >/dev/null # non-empty: Docker re-applies the image's ownership to an empty volume at every mount
 name="$(new_name nonroot)"
 start_daemon "$name" --user 4242:4242 -v "$vol2:/data"

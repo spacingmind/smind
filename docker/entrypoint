@@ -38,19 +38,28 @@ if is_daemon "$@" && [ -n "$listen" ] && ! loopback_listen; then
 fi
 
 if [ "$(id -u)" = 0 ]; then
-  # A fresh named volume or a bind mount created by the host user arrives owned
-  # by root (or another uid): make the state and home directories writable for
-  # the smind user. /workspaces is only fixed at its top level, never walked:
-  # it holds users' repositories.
   uid="$(id -u "$SMIND_USER")"
   gid="$(id -g "$SMIND_USER")"
   mkdir -p "$data_dir" /home/smind /workspaces
+
+  # Hand root-owned state to the smind user, and nothing else. Root-owned means
+  # "created by root": a fresh named volume, a bind mount the host made with sudo,
+  # or a file `docker exec` (root by default) wrote into /data or the home dir.
+  # Files owned by any other uid are never touched: a bind mount of the
+  # operator's own directory keeps its owner (the daemon then needs
+  # `docker run --user <that uid>`, which is said below). `find -xdev` stays on
+  # the one filesystem (nested mounts are skipped) and `chown -h` never follows
+  # symlinks.
   for d in "$data_dir" /home/smind; do
-    if [ "$(stat -c %u:%g "$d")" != "$uid:$gid" ]; then
-      chown -R "$uid:$gid" "$d"
+    find "$d" -xdev -uid 0 -exec chown -h "$uid:$gid" {} + 2>/dev/null || true
+    owner="$(stat -c %u "$d")"
+    if [ "$owner" != "$uid" ]; then
+      echo "smind: warning: $d is owned by uid $owner, not $uid; the daemon will not be able to write there. Run the container with --user $owner, or chown the mount." >&2
     fi
   done
-  if [ "$(stat -c %u:%g /workspaces)" != "$uid:$gid" ]; then
+  # /workspaces holds your repositories: its top level is only adopted when root
+  # owns it, and it is never walked.
+  if [ "$(stat -c %u /workspaces)" = 0 ]; then
     chown "$uid:$gid" /workspaces
   fi
   exec gosu "$SMIND_USER" "$@"
