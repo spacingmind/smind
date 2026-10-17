@@ -1,8 +1,8 @@
 # Homelab distribution: update, service, install scripts, Docker, direct + relay connections, desktop first-run
 
 Implements [ADR-0031](../../decisions/0031-homelab-cli-distribution.md)
-(**Accepted 2026-10-14**, except decisions 9, 12, 27–32 and 36, which remain **Open**; the PRs they gate stay BLOCKED
-below. Revised after a study of Paseo and the Human's answers: hosted-relay hosting is pending, multi-device is designed on
+(**Accepted 2026-10-14**, except decisions 12, 27–32 and 36, which remain **Open**; the PRs they gate stay BLOCKED
+below. **Decision 9 (direct connections with a password) was Accepted 2026-10-15**: P4 and what depends on it are unblocked. Revised after a study of Paseo and the Human's answers: hosted-relay hosting is pending, multi-device is designed on
 gRPC). Every PR below that depends on an
 open decision says so; the plan is written against the ADR's recommended defaults
 (★ = default changed or new because of Paseo), and a PR must not start before its
@@ -46,8 +46,8 @@ before merge — never stacked.
   signing); the multi-device track **P12a, P12b, P12c, P13a, P13b**.
   **P0 must merge before P2 and P12a** (shared `cmd/smind/relay.go`); P12b follows P12a, P0 and P2; P12c follows P12b;
   P13a follows P12b and P3; P13b follows P12b; P7 follows P6.
-- **BLOCKED on decision 9** (direct connections with a password — still Open): **P4**, and what depends on it: **P5, P8, P9,
-  P10, P11, P13c**.
+- **Decision 9 ACCEPTED 2026-10-15** (direct connections with a password): **P4** is ready, and unblocks what depends on it:
+  **P5, P8, P9, P10, P11, P13c** (each still has its other predecessors).
 - **BLOCKED on decision 12** (hosted-relay hosting — still Open; also 27–32, 36): **P14, P15, P16**.
 
 **Suggested order**
@@ -57,9 +57,9 @@ before merge — never stacked.
 2. *Multi-device (ready):* **P12a** (relay server + proto + 3-device harness), then **P12b** (after P12a, P0, P2), **P12c**
    (after P12b), and the clients **P13a** desktop (after P12b and P3) and **P13b** mobile (after P12b), in parallel.
 3. *Independent (ready):* **P6** (`smind update`) and then **P7** (signing).
-4. *Waiting for the Human's answer on decision 9:* **P4**, then **P5** (first-run), **P8** (service), **P9**, **P10**,
+4. *Decision 9 accepted (2026-10-15):* **P4** first, then **P5** (first-run), **P8** (service), **P9**, **P10**,
    **P11** (Docker; also after P7) and **P13c** (relay device password; also after P12b). Written against the recommended
-   defaults, not started.
+   defaults; P4 in progress (2026-10-15).
 5. *BLOCKED on decision 12:* **P14** (deploy and ops), **P15** (open enrolment), **P16** (default address) — in that order,
    after P12a–c; nothing here starts until the Human chooses between (D) Cloudflare gRPC proxy + Go relay, (C) Cloudflare
    Containers behind a Worker, or the withdrawn (B).
@@ -209,14 +209,18 @@ desktop), deep-link auto-pair (decision 16).
    `SMIND_HOSTNAMES` override config for containers.
 4. **The daemon refuses to start** when `listen` is non-loopback and no password is
    configured, with a message naming `smind set-password`.
-5. `GET /api/token` is served only when `RemoteAddr` is loopback **and** `Host` is a loopback
-   name/IP **and** no `Forwarded`/`X-Forwarded-*`/`X-Real-IP` header is present; otherwise 403.
+5. `GET /api/token` is served only when **no password is configured**, `RemoteAddr` is loopback **and** `Host` is a
+   loopback name/IP **and** no `Forwarded`/`X-Forwarded-*`/`X-Real-IP` (or other proxy) header is present; otherwise 403.
+   **With a password it is always 403** (amended 2026-10-15): the local web UI signs in; the CLI/desktop client read the
+   token file.
 6. `POST /api/login {password}` returns an expiring, in-memory 256-bit session token
    (not the daemon token); wrong password → 401 with constant-time comparison; per-IP
    exponential backoff after repeated failures (429 with `Retry-After`).
 7. `/ws` accepts the session token via `Sec-WebSocket-Protocol` bearer or `Authorization`,
-   **not** via the URL query, for non-loopback clients; the loopback token query path keeps
-   working for existing loopback clients.
+   **not** via the URL query, for non-loopback clients. The daemon token (from the token file) is accepted from loopback
+   in the `Authorization` header; the `?token=` query form keeps working for loopback clients only **while no password
+   is set** (amended 2026-10-15; `wsclient` and the desktop notification client send the header, plus the query for
+   older daemons).
 8. `Host` is validated on every HTTP request and WS upgrade against `localhost`, `*.localhost`,
    any literal IP, and `server.hostnames` (leading `.` matches the domain and subdomains);
    anything else → 403 `Host not allowed`. `CheckOrigin` stays same-origin.
@@ -519,7 +523,7 @@ the existing `DeviceAttach`/`DeviceDetach` slots (`relay.proto:121-148`) instead
    (`DataConn.Resume`); after a daemon restart the `Sync` re-announces waiting devices; HTTP/2 PING keepalive parameters are
    also set.
 3. **Device identity:** the first application message must be `device_hello{v, device_pub (Ed25519), label, signature,
-   [password]}` where `signature` signs `"smind-device-hello" ‖ SHA-256(handshake transcript) ‖ daemon_pub`; the frame
+   [password]}` (**v2**, see ADR-0031 D9: the daemon sends a fresh challenge first) where `signature` signs `"smind-device-hello-v2" ‖ SHA-256(handshake transcript) ‖ daemon_pub ‖ session_id ‖ challenge`; the frame
    `device_id` must equal `base32(SHA-256(device_pub))[:26]`; a mismatch or a bad signature drops the session.
 4. **Registry:** `$SMIND_HOME/relay-devices.json` (mode 0600) holds `{device_id, device_pub, label, first_seen, last_seen,
    state: approved | pending | revoked}`; revoked devices are refused with a clear reason; atomic writes.
@@ -958,6 +962,80 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   retry). **Decided by the Human (2026-10-15): `relay.legacyDevices` defaults to false** (with it true, revoke, pending and the window do
   not bind legacy access); `docs/homelab.md` says that relay pairing needs the updated clients (P13a/b) until then and warns about
   the opt-in. Still open: a per-offer one-time token (offer format change) is the stronger pairing-window fix.
+- 2026-10-15: **Decision 9 accepted** (ADR-0031 flipped). **P4 implemented** (`feat/direct-connections-password`): `server.listen` /
+  `server.hostnames` / `server.passwordHash` (+ `SMIND_LISTEN`/`SMIND_HOSTNAMES`/`SMIND_PASSWORD`), `smind config get|set|unset`
+  (yaml.Node edit, comments kept), `smind set-password` (bcrypt cost 12, ≥ 12 chars, TTY twice or `--password-stdin`, never argv),
+  the daemon refuses non-loopback without a password, `/api/token` for true loopback only, `POST /api/login` → 24 h in-memory
+  session token (SHA-256 only kept), `/ws` via `Sec-WebSocket-Protocol: smind, smind.bearer.<token>` or `Authorization` (never the
+  URL), Host allowlist on every request, same-origin `Origin`, per-/64 login backoff + global window + bcrypt slots, healthz
+  `authRequired`, web login form, `docs/homelab.md` threat model. Decisions taken inside the spec: a session token opens **/ws
+  only** (the proxy endpoints and `/api/shutdown` stay behind the daemon token); the daemon always also binds `127.0.0.1` so
+  the CLI works with a specific-IP listen; `0.0.0.0` binds IPv4 only (Go's dual-stack default would also expose IPv6);
+  `Via`, `CF-Connecting-IP`, `True-Client-IP`, `X-Original-*`... count as proxy headers; loopback peers share one limiter
+  bucket without a per-address lockout (a same-host proxy would otherwise let one guesser lock everyone out). **Left for P5:**
+  the desktop "Connect to a daemon" password field (the Rust proxy must forward `/api/login` and the subprotocol), `connections_probe`.
+  **Review finding, resolved by the Human the same day** (see the next entry): the loopback `/api/token` shortcut could not tell a default same-host nginx from a local client.
+- 2026-10-15 (P4 review decision): with a password set `/api/token` is closed even on loopback and the `?token=` WebSocket
+  form is refused; the CLI (`internal/wsclient`) and the desktop notification client (`desktop/daemon-client`, token-file
+  fallback for a loopback daemon, bearer header) read `~/.smind/token`. **P5 follow-up:** the desktop *webview* proxy
+  (`proxy/server.rs`) still forwards `/ws` without the `Sec-WebSocket-Protocol` bearer and without an upstream
+  `Authorization`, so a password-protected local daemon shows the web login there but cannot complete the socket until P5
+  forwards the subprotocol (or injects the token-file bearer for `ConnectionKind::Local`).
+- 2026-10-15 (fix, before #350/#351 merge): the P13b review found two defects in what P12b shipped. (1) `device_hello` v1 signed only
+  (daemon key, client ephemeral key), both fixed by a captured handshake, so a captured session replays into a new route and is
+  admitted as that device (and `supersede` drops the real session): hello **v2** — the daemon sends a fresh challenge first and the
+  signature covers the route session id and that challenge; v1 is refused (no released client speaks it); vector updated (v1 kept as
+  history). (2) wsapi answered an unknown method with nothing (the error was sent before the request was registered in flight):
+  fixed, tested.
+- 2026-10-15 (P13b): mobile device identity, keepalive, resume and multi-device implemented on
+  `feat/mobile-relay-device-identity`. Decisions inside the spec: the daemon must be v0.12+ (the client uses a per-pairing
+  session id and the key-derived device id, which a pre-P12b daemon never opens a route for, so there is no legacy fallback on mobile —
+  a daemon that sends no device challenge within 5 s is reported as outdated — see hello v2 below); a device the daemon has not
+  approved is `pending` and **retried every 5 s** with a fresh session until approved (revoked and bad-hello are final, anything
+  else backs off); after a drop the client first **resumes** the same session (same route, E2EE counters and frame sequence) and
+  proves the daemon still holds it with one `workspace.list` (any answer counts; 10 s), else opens a **fresh session** (new session id,
+  new ephemeral key, new hello) and re-subscribes; requests in flight across a drop reject (at-most-once, as P12b says); the
+  key lives in the platform secure store (`expo-secure-store`, device-bound, after-first-unlock) and in memory only on Expo web;
+  a revoked device offers **Reset device identity** (new key = new pending device) instead of retrying; the hand-written proto
+  gained `Frame.keepalive` only (a device never opens the control stream, so none of the `ControlFrame` messages are needed).
+  **Daemon finding (fixed by #354):** `internal/wsapi/conn.go` `dispatch` sent no answer for an unknown method (the error was
+  sent before the request was registered in-flight); the first cut of this client probed a resumed session with an unknown method
+  and never got confirmation, so the probe is now `workspace.list`.
+  An independent review (identity, reconnect state machine, protocol agreement) drove: `close()` during a fresh session's
+  handshake ends its stream (it had left an admitted ghost device); an **end-to-end liveness watchdog** (a request unanswered for 15 s
+  or 90 s of silence is followed by one cheap question; no answer in 10 s means the daemon lost the session and a fresh one is
+  opened — keepalive only proves the *relay*, so a daemon restarted behind a live stream used to hang every call); pending polls grow
+  5 s → 30 s (each ask is a fresh route and the relay keeps an abandoned route 5 minutes against its 128-route host cap) and a blip
+  while pending, a full daemon (`too_many_*`) or a full relay (status 8) are retried, not final; a link that dies within 2 s of
+  connecting backs off (the hub's min-stable rule); the Ed25519 seed is a closure variable, not a property of the identity object;
+  Connect is single-flight and an identity reset waits for the key removal. A second review of those fixes added: the watchdog
+  clock starts at the **oldest** unanswered request (a user tapping on a frozen screen no longer postpones the probe), Connect works
+  again after a failed or revoked attempt, and a failed identity reset keeps the revoked card instead of leaving silently. **Hello replay (found by the first review, fixed by #354, adopted here as
+  hello v2):** v1 signed only `(daemon_pub, client ephemeral pub)`, so whoever could open a route under a device's id (the relay
+  operator, a holder of the host secret) could replay a captured hello + ciphertext into a new route, be admitted as that device and
+  make `supersede` drop the real session. v2: the daemon's first encrypted message on a device route is `relay.device_challenge`
+  (32 random bytes, std base64), and the signature covers `"smind-device-hello-v2" ‖ TranscriptHash ‖ daemon_pub ‖
+  uint16BE(len(session_id)) ‖ session_id ‖ challenge`. The mobile client waits for the challenge (5 s, as the desktop), signs the one
+  received on THIS session, never sends a v1 hello and never falls back to one; no challenge, a challenge of another version or
+  length, or `hello_version_unsupported` is the failed state "Daemon outdated or on a different version" (shows `smind update`).
+  A resume sends no hello (one challenge per session); a fresh session gets a fresh challenge. The shared vector is v2 with four
+  negatives, read by the TS test; the Go `devharness` peers sign v2 too. A reviewer pass on this change found no crypto or flow
+  defect (signed bytes, session-id bytes, per-session challenge, strict challenge parse, no v1/challenge-less hello path); it
+  drove: a challenge that stalls AFTER a daemon has answered on this connection is retried, not called outdated (only a first
+  connect treats silence as final); exact-byte checks for three of the four vector negatives; one less repetition in the outdated
+  card. The integration tests no longer switch TLS verification off in code (CodeQL "disabling certificate validation"): `npm run
+  test:integration` starts the test process with `NODE_TLS_REJECT_UNAUTHORIZED=0` for the harness's self-signed relay and the tests
+  refuse to run without it.
+
+- 2026-10-15 (P13a): desktop (Rust) multi-device relay client on `feat/desktop-relay-device-identity` — device key per connection, signed
+  `device_hello`, nonce-matched keepalive, 75 s rule, resume with a liveness check, restart detection, single-device-route fallback,
+  Settings → Connections states. **Not in this PR:** AC 3 (CA-verified mode, `connections_*_relay` reporting `pinned` vs CA-verified,
+  `client_pinned_vs_webpki_roots`, `add_relay_accepts_empty_fingerprint_offer`, `preview_relay_reports_pinned_or_ca_verified`) — it
+  needs the Go side first (P12c); and the TypeScript third client of AC 5 — the interop run uses the Go grpc-web mobile stub as the third
+  device (the real mobile client is P13b). Found and fixed on the way: the Rust loop reused one ephemeral E2EE key across fresh
+  handshakes; tonic's `open_data` hangs a resume with nothing buffered; no dial timeout; an approved-again revoked device stayed
+  refused by the relay until the daemon reconnected (the hub now reconnects its control stream); the harness mobile stub could
+  deadlock in `DataConn.Close`.
 - 2026-10-17 (P5): first-run and connection onboarding implemented on `feat/desktop-first-run` (Rust: `app_settings.rs`, `probe.rs`,
   `ssh_tunnel.rs`, `proxy/{local_token,bounded}.rs`, proxy auth in `proxy/server.rs`; web: `components/first-run/*`, Settings →
   Connections/Daemon). Decisions taken inside the spec: (1) a first launch with no upgrade signal **writes** `app-settings.json`
@@ -1075,6 +1153,60 @@ Not verified: a real desktop/mobile client (P13a/b), the cross-language hello ve
 rename retry, `Restrict`), the hub against a pre-P12a relay (the `Sync`-less fallback to the fixed legacy route has no test — it is reasoned
 from the old server code only), a real proxy.
 
+### P4 (2026-10-15)
+
+Commands: `go test -count=1 ./...`, `task lint`, `GOOS=windows go vet ./...`, `cd web && bunx tsc -b packages/ui`, vitest on the five
+touched web test files, a real daemon driven by Chrome (Playwright) for light + dark screenshots.
+
+- AC1 defaults unchanged: `TestServeLoopbackDefaultUnchanged` (cmd, real daemon: healthz `authRequired:false`, loopback `/api/token`,
+  `smind workspace ls`, foreign Host refused, nothing on the LAN address), `TestLoopbackQueryTokenStillWorks`, the unchanged
+  existing server/wsapi/cmd suites.
+- AC2 `smind config`: `TestConfigSetGetUnsetRoundTripKeepsComments`, `TestConfigSetRejectsUnknownKey`, `TestConfigSetValidatesValues`,
+  `TestConfigSetCreatesFileOwnerOnly`, `TestConfigSetEditsThroughASymlinkAndKeepsItPrivate`, `TestConfigCommandRoundTrip`,
+  `TestConfigGetNeverPrintsTheHash`, `TestServeFlagsStillRejected`.
+- AC3 `set-password`: `TestSetPasswordRejectsShort`, `TestSetPasswordWritesBcryptMode0600` (hash verifies; password/hash absent from
+  file, stdout, stderr), `TestSetPasswordNonTTYNeedsFlag` (argv password refused and not echoed), `TestSetPasswordPromptsTwiceOnATTY`,
+  `TestEnvOverridesConfig`, `TestEnvPasswordIsHashedInMemory`, `TestEnvStillAppliesWhenTheFileDoesNotParse`.
+- AC4 refusal: `TestServeRefusesNonLoopbackWithoutPassword` (server unit + real process, also a short `SMIND_PASSWORD`),
+  `TestWeakOrBrokenPasswordMaterialRefused`, `TestBindsNeverDualStackAnIPv4Literal`, `TestListenCompanionKeepsLoopbackReachable`.
+- AC5 `/api/token`: `TestAPITokenLoopbackOK`, `…ForbiddenForNonLoopbackRemoteAddr`, `…ForbiddenWhenHostIsExternal`,
+  `…ForbiddenWithForwardedHeaders` (10 headers), `…ForbiddenForForeignOrigin`, `TestIsTrueLoopback`.
+- AC6 login: `TestLoginReturnsSessionNotDaemonToken`, `TestLoginWrongPasswordConstantTime401`, `TestLoginRateLimitBackoff429`,
+  `TestLoginLimiter*` (doubling/cap, per-address, /64, global window, shared loopback bucket, bounded map),
+  `TestLoginRejectsCrossSiteAndMalformedRequests`, `TestLoginSlowBodiesDoNotStarveRealLogins`, `TestSessionTokenExpires`,
+  `TestSessionStore*`.
+- AC7 `/ws`: `TestWSAcceptsSubprotocolBearer` (server answers `smind`, never the token), `TestWSAcceptsAuthorizationHeaderSession`,
+  `TestWSRejectsSessionTokenInQueryForNonLoopback`, `TestWSRejectsDaemonTokenFromNonLoopback`, `TestWSRejectsExpiredAndUnknownSessions`,
+  `TestSessionTokenOnlyOpensWebSocket`.
+- AC8 Host/Origin: `TestHostAllowlistDefaults`, `TestHostAllowlistLeadingDotMatchesSubdomains`, `TestHostNotAllowed403` (every route incl. /ws),
+  `TestHostPolicy`, `TestCheckOriginSameOriginOnly`.
+- AC9 UI: `it("shows the login form when the daemon requires a password")`, `it("does not show it on loopback")`,
+  `it("keeps the session token out of localStorage …")` and the wrong-password / 429 / expiry / rejection / never-stored cases
+  (37 tests in 5 files). **Screenshots** (Chrome, real daemon behind a `127.0.0.1.nip.io` Host, light + dark): fresh form, pending,
+  wrong password, rate-limit countdown, signed-in app, expired-session notice, loopback (no login), "not enabled" message — all
+  reviewed; only `sessionStorage` holds the session, `localStorage` holds UI preferences only.
+- AC10 `TestHealthzAuthRequiredField`. AC11 `docs/homelab.md`.
+- No secret in logs: `TestNoSecretInLogs`, and the real-daemon test checks the process log for password, session and daemon token.
+- Real-process remote flow: `TestServeDirectConnectionEndToEnd` — same-host-proxy shape (loopback peer, external Host) runs here; the
+  LAN-address shape **skips on this Mac** (the application firewall silently holds unsigned binaries' LAN traffic) and runs
+  wherever the machine can reach itself (Linux CI).
+- **Not verified:** **(real)** another machine on the LAN in a browser + `curl` through nginx on the same host (the plan's real
+  check; the reviewer showed the default-nginx shape leaks the token, see Progress), Windows execution, the Rust desktop path
+  (P5), a TTY prompt on a real terminal (seam-tested).
+- P4 amendment (2026-10-15): `TestAPITokenNotServedWhenPasswordSet` (loopback, localhost, default-nginx Host rewrite, LAN → 403),
+  `TestPasswordSetRefusesTheQueryTokenEvenOnLoopback` (query refused, `Authorization` bearer works, remote bearer refused),
+  `TestPasswordDaemonServesNoTokenButTheCLIStillWorks` (real daemon: loopback and a stock-nginx-shaped reverse proxy both get
+  403 on `/api/token`, `?token=` refused, `smind workspace ls` and `smind stop` still work from the token file); Rust
+  (`cargo test`): `token_falls_back_to_the_file_when_a_password_daemon_refuses_the_endpoint`,
+  `a_remote_daemon_never_uses_the_local_token_file`, `local_token_path_follows_smind_home_then_home`,
+  `token_file_is_only_for_a_loopback_daemon` (188 lib tests pass; `cargo clippy` flags only a pre-existing `backoff.rs` lint
+  on this toolchain). **Not verified:** a real nginx (the stock-shaped Go reverse proxy stands in for it), the desktop
+  webview against a password daemon (P5).
+- P4 / CodeQL (`rust/non-https-url`, `client.rs` `fetch_token_http`): the desktop client now requests `/api/token` and reads the token
+  file **only for a daemon that is local by address** (`Config::is_local_daemon`: loopback IP literal, or `localhost` with every resolved
+  address loopback; IPv4-mapped literals and every other name are refused without a lookup); for any other daemon no token request is
+  made at all. Tests: `no_token_request_is_made_to_a_daemon_that_is_not_local` (a counting listener sees zero connections),
+  `localhost_counts_as_local_only_when_every_address_is_loopback`, `a_remote_daemon_never_uses_the_local_token_file`.
 ### P8 (2026-10-15, branch `feat/smind-service-unix`)
 
 Commands: `go test ./...`, `go test -race ./internal/service ./internal/logging`, `task lint`, `sh scripts/install_test.sh` (sh, dash, bash),
@@ -1105,3 +1237,74 @@ Known gaps left: launchd `status` does not print enabled/disabled; a Go crash tr
 Not verified: a real **reboot/logout cycle with lingering** and a real **macOS login cycle** (the runners prove install, stop-stays-stopped, crash restart and
 restart, not boot persistence); `--system` against a real `/etc/systemd/system` (unit rendering and the `SUDO_USER` rules are unit-tested, the real run
 is not); `smind update` driving a real `service restart` end to end; the desktop app's behaviour next to a real service.
+
+### Fix: device_hello v2 + unknown-method answer (2026-10-15, `fix/device-hello-replay`)
+
+`devices`: `TestDeviceHelloReplayInAnotherSessionRejected` (other client key / daemon key / session id / challenge each fail),
+`TestV1HelloIsRefused`, `TestChallengeMessageRoundTrip`, `TestHelloVectorMatchesFile` (v2 vector incl. the challenge message and
+three negatives), `TestV1VectorIsHistorical`; hub (real relay + hub): `TestCapturedHelloSessionCannotBeReplayedIntoANewRoute`
+(a captured transcript — handshake frames + hello ciphertext — replayed into a new route is rejected and the real session
+untouched; the test fails when the challenge/session binding is removed), `TestHelloBoundToTheChallengeAndTheSession`,
+`TestEachSessionGetsAFreshChallenge`, `TestHelloVersion1IsRefusedWithAClearReason`; `wsapi`:
+`TestUnknownMethodAlwaysGetsAMethodNotFoundResponse` (fails on the old ordering).
+
+### P13b (2026-10-15, branch `feat/mobile-relay-device-identity`)
+
+Commands: `cd mobile && npx tsc --noEmit && npx vitest run --exclude "**/*.node.test.ts"` (19 files, 134 tests),
+`npm run test:integration` (3 files, 11 tests; builds `internal/relay/bridge/devharness`, a real relay + a real daemon hub with a
+device registry + two Go desktop peers), `npm run smoke:web:full` (Expo web in headless Chromium against the same harness),
+`go test ./...`, `go test -race -count=3 ./internal/relay/bridge/devharness/`, `task lint`. Re-run on top of #354 (hello v2).
+
+| AC | Evidence |
+|---|---|
+| 1 key in the secure store | `deviceIdentity.test.ts`: `device key persists in the secure store`, `is generated once and differs between devices`, `replaces a corrupt stored value with a fresh key`, `never puts the seed in the hello, nor on the identity object`; `platformKeyStore.ts` wires `expo-secure-store` (device-bound, after-first-unlock; in memory on web) |
+| shared vector (v2) | `deviceIdentity.test.ts`: `device_hello v2 signature verifies against the Go vector (and matches it byte for byte)`, `parses the daemon's challenge message into the vector challenge`, `builds the vector signed bytes`, `has four negatives, each with its own signed bytes and a signature that does not verify against the real bytes` (other daemon key / mobile key / session id / challenge), challenge-message parse rejections — reads `internal/relay/devices/testdata/device_hello_vector.json` |
+| hello v2 flow | `RelayConnection.device.test.ts` "hello v2": `a daemon that sends no challenge (older than v2) is reported as outdated, never sent a v1 hello, never retried` (fake transport), `a challenge of another version, or one that is not 32 bytes …`, `hello_version_unsupported`, `every fresh session signs the challenge of THAT session: a hello from one session does not verify in another`, `a resumed session sends no new hello`; `integration.devices.node.test.ts`: `is reported as outdated …` against the real relay and a daemon that handshakes and stays silent (`devharness -outdated-daemon`) |
+| 2 hello, keepalive, resume, ids | `RelayConnection.device.test.ts` (fake relay + daemon that verifies the hello with the real signed-bytes construction): `sends a device_hello that the daemon verifies, under a key-derived device id and a per-pairing session id`, `keepalive is sent on the websocket stream`, `dead stream after the silence window reconnects (and resumes the same session)`, `resumes after a drop keeping ids, sequence and the E2EE session`, `opens a fresh session … when the daemon lost the old one, and re-subscribes`, `rejects an in-flight request when the stream drops (at-most-once)`; `keepalive.test.ts` pins 30 s / 75 s / 10 s and the nonce-echo rule; `proto.test.ts`: `encodes Frame.keepalive (field 7) exactly as the Go relaypb does` (Go-computed literal), round trips |
+| pending / revoked UI states | `RelayConnection.device.test.ts`: `a device the daemon has not approved is pending, then connects by itself once approved`, `a revoked device is revoked and stops trying`, `revocation mid-session …`, `… noticed only at the next hello …`; `connectionStatus.test.ts` (copy incl. the exact `smind relay devices approve <id>`); screenshots (below) |
+| 3 help text | `CERTIFICATE_HELP` on the pairing screen (screenshot) and `docs/homelab.md` §6 |
+| 4 interop, 3 devices | `integration.devices.node.test.ts` (real TS client ↔ real Go relay + daemon hub + 2 Go native desktop peers): pending → `approve` → connected by itself; peers join while the mobile client stays attached (3 approved + connected devices); real-relay keepalive echoes; resume after a cut stream with the peers unaffected; fresh session + re-subscribe after `daemon-restart` **with the stream left up** (liveness watchdog); relay restart; `revoke` refuses only the mobile device and the peers keep answering; a revoked key stays revoked and a new key is a new pending device. `integration.node.test.ts` / `integration.persistent.node.test.ts` now run through `device_hello` against the same hub |
+| review hardening | `RelayConnection.device.test.ts` "review hardening": close during the handshake, daemon restart behind a live stream (pending call rejected, fresh session), idle probe, transient error while pending, `too_many_devices` retried, status 8 retried, flap backoff, daemon that never answers `device_hello` |
+
+Screenshots (Expo web, light and dark, read by the Lead): `mobile/.smoke/{pairing,pending,tasks,revoked,outdated}-{light,dark}.png` from
+`npm run smoke:web:full` ("Waiting for approval" with the approve command naming the device, the task list after approval, "This
+device was revoked" with *Reset device identity*, "Daemon outdated or on a different version" with `smind update`); not committed (`.smoke/` is gitignored).
+
+`task test`: the Go suite passes (`go test ./...`) and so do the mobile suites; the **web UI suite did not pass cleanly on this
+machine** (38 timeouts/failures in `App.test.tsx`, `app-menu`, `open-in-editor`, `desktop-chrome`, `App.responsive` with the load
+average at ~150 from other agents; `App.test.tsx -t TB-AC4` passes alone) — no file under `web/` or `desktop/` is touched by this
+branch.
+
+Not verified: a real phone or simulator (Hermes, `crypto.getRandomValues`, `expo-secure-store` on iOS/Android — including whether
+Android returns null instead of throwing on a Keystore mismatch, which would silently make the device a new pending device —, React
+Native's `WebSocket`); the ≥ 10-minute run with two real desktop apps and a 125 s proxy shim; self-signed relay refusal on a device;
+a Rust client in the three-device run (P13a). Labels with exotic Unicode format characters (`devices.ValidateLabel` follows Go's
+`unicode.Cf`; the client's table covers the common ones and the label is app-generated today).
+
+### P13a (2026-10-15, branch `feat/desktop-relay-device-identity`)
+
+Commands: `cd desktop/daemon-client && cargo test` (200 unit + legacy interop + 7 multi-device interop, Go harness), `cd
+desktop/src-tauri && cargo test` (71), `web/packages/ui`: `tsc --noEmit` + `vitest run src/components/settings` (168), Go
+`go test -race ./internal/relay/bridge/...`, light + dark screenshots of the Connections states (headless Chrome against a
+preview page; the real desktop app was not launched).
+
+| AC | Evidence |
+|---|---|
+| 1 key | `device_key_generated_once_mode_0600`, `device_key_deleted_when_connection_removed` (also via `pairing_store::delete`), `device_key_corrupt_file_is_an_error`, `device_key_never_exposed` (Debug redaction), `device_key_never_returned_by_ipc` (every status the UI can read has only non-secret fields), `device_id_matches_public_key_hash`, `device_hello_signature_verifies_against_go_vector` (byte-for-byte against `internal/relay/devices/testdata/device_hello_vector.json`, incl. the negative vector) |
+| 2 session/keepalive/reconnect | `client_sends_keepalive_every_30s`, dead-after-75 s / any-frame-resets / forwarded-peer-probe-is-not-an-echo / per-stream re-probe (`liveness.rs` unit tests on explicit instants), `client_reconnects_after_silence_with_jitter` (interop: a blackholing proxy, shrunk intervals, retry delays go through the jitter, same device afterwards), reconnect keeping ids: `…_after_one_reconnects` (same single registry entry) |
+| 4 multi-device | `three_devices_two_rust_one_go_stay_attached` (+ `…_after_one_reconnects`, `…_after_daemon_restart`, `…_after_revoke_only_that_device_is_refused`) against the real Go relay + hub with the Go grpc-web mobile stub as the third device; `unknown_device_outside_the_window_waits_for_approval_then_connects`; `legacy_daemon_still_works` (a daemon without device identity → single-device route) |
+| UI | `relay-connection-status.test.tsx`, `connections-section.test.tsx`; `relay_status_is_allowlisted_and_registered`, `capability_allowlist_exact` |
+| Go side | `TestApprovingARevokedDeviceLiftsTheRelaysRefusal`; harness `-hub -mobile-stub` tests |
+
+Not verified: AC 3 and the TypeScript device (see Progress); the real macOS/Windows app (the screenshots are of the component in a
+headless browser, not the Tauri window); Windows at runtime for the new Rust (CI runs `cargo test` for the daemon client with Go);
+a relay from before P12a; a real 125 s proxy.
+
+**Hello v2 (PR #354 follow-up on this branch).** The desktop answers the daemon's `relay.device_challenge` (32 bytes, std base64) with a
+v2 hello signed over `…‖ uint16BE(len(session_id)) ‖ session_id ‖ challenge` (`device_hello_signature_verifies_against_go_vector`
+against the shared v2 vector incl. its four negatives, `parse_challenge_variants`); no challenge within `challenge_timeout` (5 s) or a
+challenge of another version shows `daemon_outdated` ("different versions", `relay-connection-status.test.tsx`), never a v1 hello.
+The Go bridge now sends the challenge on every non-legacy device route (also without a registry) so `legacy_daemon_still_works`
+keeps reaching `device_hello_unsupported`. The silent-daemon path is tested with a fake transport and a paused clock (`a_silent_daemon_is_outdated_and_is_never_sent_a_hello`:
+exactly the 5 s window, nothing sent; also `a_challenge_of_another_version_…`, `a_challenge_gets_a_v2_hello_bound_to_session_and_challenge`);
+a real v0.12.0 daemon was not run.

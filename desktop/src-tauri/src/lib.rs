@@ -111,6 +111,7 @@ pub fn run() {
             ssh_tunnel::connections_add_ssh,
             app_settings::app_settings_get,
             app_settings::app_settings_set,
+            commands::connections_relay_status,
             commands::connections_remove,
             commands::connections_select,
             commands::connections_get_current,

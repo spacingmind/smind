@@ -34,7 +34,7 @@ func TestShutdown_NoToken_Unauthorized(t *testing.T) {
 			srv := newTestServer(t, "test-token")
 			handler := srv.Handler()
 
-			req := httptest.NewRequest(http.MethodPost, "/api/shutdown", nil)
+			req := loopbackReq(http.MethodPost, "/api/shutdown", nil)
 			if header != "" {
 				req.Header.Set("Authorization", header)
 			}
@@ -58,7 +58,7 @@ func TestShutdown_GetDoesNotTrigger(t *testing.T) {
 	srv := newTestServer(t, "test-token")
 	handler := srv.Handler()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/shutdown", nil)
+	req := loopbackReq(http.MethodGet, "/api/shutdown", nil)
 	req.Header.Set("Authorization", "Bearer test-token")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -80,7 +80,7 @@ func TestShutdown_PostWithToken_AcceptsOnce(t *testing.T) {
 	handler := srv.Handler()
 
 	doPost := func() *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "/api/shutdown", nil)
+		req := loopbackReq(http.MethodPost, "/api/shutdown", nil)
 		req.Header.Set("Authorization", "Bearer test-token")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)

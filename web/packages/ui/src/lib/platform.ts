@@ -34,6 +34,17 @@ export interface RelayPreview {
   kind: "newHost" | "alreadySaved" | "changedConnection";
 }
 
+/**
+ * The live state of the selected relay connection (Rust `RelayStatus`). All fields are non-secret: `deviceId` is this install's own device id (what
+ * `smind relay devices approve` takes), `code`/`message` are the daemon's refusal.
+ */
+export interface RelayStatus {
+  state: "connecting" | "connected" | "reconnecting" | "awaitingApproval" | "revoked" | "refused";
+  deviceId?: string;
+  code?: string;
+  message?: string;
+}
+
 /** The longest pairing link the UI will send to Rust (Rust enforces the same limit). */
 export const MAX_RELAY_LINK_LENGTH = 4096;
 
@@ -171,6 +182,8 @@ export interface DesktopApi {
   removeConnection(id: string): Promise<void>;
   selectConnection(id: string): Promise<Connection>;
   getCurrentConnection(): Promise<Connection>;
+  /** The live state of the selected relay connection (connected, awaiting approval on the daemon, revoked, ...); `null` when the selected connection is not a relay one. */
+  relayStatus(): Promise<RelayStatus | null>;
   /** Opens an http(s) URL in the OS's default browser -- Rust validates the scheme (AC5); this is the only escape hatch a bundled-UI link needs, since in-window navigation is restricted to the proxy origin (AC3). */
   openExternal(url: string): Promise<void>;
   /** Quits the app (`app_quit`). The renderer's Ctrl+Q on Windows/Linux, where the undecorated window has no menu to carry the accelerator. */
@@ -278,6 +291,7 @@ function unavailable(): DesktopApi {
     removeConnection: () => reject(),
     selectConnection: () => reject(),
     getCurrentConnection: () => reject(),
+    relayStatus: () => reject(),
     openExternal: () => reject(),
     quit: () => reject(),
     getSystemTheme: () => reject(),
@@ -430,6 +444,10 @@ function realDesktopApi(): DesktopApi {
     async getCurrentConnection() {
       const invoke = await loadInvoke();
       return invoke<Connection>("connections_get_current");
+    },
+    async relayStatus() {
+      const invoke = await loadInvoke();
+      return invoke<RelayStatus | null>("connections_relay_status");
     },
     async openExternal(url) {
       const invoke = await loadInvoke();

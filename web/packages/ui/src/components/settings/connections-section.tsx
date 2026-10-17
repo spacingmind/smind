@@ -4,6 +4,7 @@ import { ConnectMethodPanel, CONNECT_METHOD_LABELS, useConnectMethod, type Conne
 import { SetupSection } from "@/components/first-run/setup-section";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
+import { RelayConnectionStatus, useRelayStatus } from "@/components/settings/relay-connection-status";
 import { desktop, isDesktop, type AppSettings, type Connection } from "@/lib/platform";
 import { Icons } from "@/lib/icons";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,9 @@ function ConnectionsSection() {
   const [menuOpen, setMenuOpen] = useState(false);
   const connect = useConnectMethod();
   const [panelOpen, setPanelOpen] = useState(false);
+  // The live state of the current connection when it is a relay one: pending
+  // approval and revoked devices need to be told what to do about it.
+  const relayStatus = useRelayStatus(current?.kind === "relay");
 
   const refresh = useCallback(() => {
     Promise.all([desktop.listConnections(), desktop.getCurrentConnection()])
@@ -155,6 +159,8 @@ function ConnectionsSection() {
                   )}
                 </span>
                 <span className="truncate font-mono text-ui-sm text-muted-foreground">{c.baseUrl}</span>
+                {current?.id === c.id && c.kind === "relay" && relayStatus && <RelayConnectionStatus status={relayStatus} />}
+                {current?.id === c.id && c.kind === "relay" && relayStatus && <RelayConnectionStatus status={relayStatus} />}
               </div>
               <div className="flex shrink-0 gap-1">
                 {current?.id !== c.id && (

@@ -51,6 +51,7 @@ fn main() {
             "connections_add_ssh",
             "app_settings_get",
             "app_settings_set",
+            "connections_relay_status",
             "connections_remove",
             "connections_select",
             "connections_get_current",

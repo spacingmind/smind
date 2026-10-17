@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"sync"
 	"sync/atomic"
@@ -99,7 +100,11 @@ type Client struct {
 // waiting on a terminal response.
 func Dial(ctx context.Context, addr, token string) (*Client, error) {
 	u := url.URL{Scheme: "ws", Host: addr, Path: "/ws", RawQuery: "token=" + url.QueryEscape(token)}
-	ws, _, err := websocket.DefaultDialer.DialContext(ctx, u.String(), nil)
+	// The token goes in the Authorization header, which a daemon with a password
+	// requires (it refuses the URL form); the query parameter stays for daemons
+	// that predate that and only read the URL.
+	hdr := http.Header{"Authorization": {"Bearer " + token}}
+	ws, _, err := websocket.DefaultDialer.DialContext(ctx, u.String(), hdr)
 	if err != nil {
 		return nil, fmt.Errorf("wsclient: dial %s: %w", u.Host, err)
 	}

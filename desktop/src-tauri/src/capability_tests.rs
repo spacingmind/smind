@@ -27,6 +27,7 @@ fn capability_allowlist_exact() {
         "allow-connections-add-ssh",
         "allow-app-settings-get",
         "allow-app-settings-set",
+        "allow-connections-relay-status",
         "allow-connections-remove",
         "allow-connections-select",
         "allow-connections-get-current",
@@ -135,4 +136,21 @@ fn proxy_capability_lists_preview_relay() {
     assert!(perms.contains(&"allow-connections-preview-relay"));
     assert!(BUILD_RS.contains("\"connections_preview_relay\""));
     assert!(include_str!("lib.rs").contains("commands::connections_preview_relay"));
+}
+
+/// `connections_relay_status` (ADR-0031 P13a) is allowlisted, declared in
+/// build.rs and registered with the invoke handler; it returns the connection
+/// state, never key material.
+#[test]
+fn relay_status_is_allowlisted_and_registered() {
+    let cap: Value = serde_json::from_str(PROXY_CAPABILITY).expect("proxy.json parses");
+    let perms: Vec<&str> = cap["permissions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(perms.contains(&"allow-connections-relay-status"));
+    assert!(BUILD_RS.contains("\"connections_relay_status\""));
+    assert!(include_str!("lib.rs").contains("commands::connections_relay_status"));
 }

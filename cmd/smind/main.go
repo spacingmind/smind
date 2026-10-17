@@ -80,6 +80,10 @@ func run(args []string) int {
 		return cmdMcp(args[1:])
 	case "skill":
 		return cmdSkill(args[1:])
+	case "config":
+		return cmdConfig(args[1:])
+	case "set-password":
+		return cmdSetPassword(args[1:])
 	case "update":
 		return cmdUpdate(args[1:])
 	case "service":
@@ -104,6 +108,11 @@ Usage:
 
   smind stop                                              ask the running daemon to shut down gracefully
 
+  smind config get [path]                                 show server.port / listen / hostnames as stored
+  smind config set <path> <value>                         change one (comments kept; restart to apply)
+  smind config unset <path>                               restore its default
+  smind set-password [--password-stdin]                   set the password remote clients log in with
+                                                           (bcrypt hash in config.yaml; needed to listen beyond localhost)
   smind service install|uninstall|status|start|stop|restart [--system]
                                                            run the daemon under systemd (Linux) or launchd (macOS)
   smind service install [--system] [--home <dir>] [--path <PATH>] [--no-start]
@@ -157,7 +166,7 @@ Usage:
   smind update [--check] [--version <v>] [--force]        update this binary to the latest release (SHA-256 verified)
       [--dry-run] [--json]                                 --check only reports; refuses while runs are active unless --force
 
-Every subcommand except "serve" and "skill" talks to a locally running daemon over its
+Every subcommand except "serve", "skill", "config", "set-password" and "update" talks to a locally running daemon over its
 WebSocket API, authenticating with the token the daemon itself wrote to
 ~/.smind/token (override the home directory with $SMIND_HOME).
 `)
