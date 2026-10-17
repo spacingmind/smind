@@ -162,7 +162,7 @@ pub fn save(app_data_dir: &Path, connection_id: &str, pairing: &RelayPairing) ->
 /// time on unix, so the key material is never briefly readable by other
 /// users between write and chmod.
 #[cfg(unix)]
-fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
+pub(crate) fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
@@ -171,29 +171,29 @@ fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
+pub(crate) fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
     std::fs::write(path, data)
 }
 
 #[cfg(unix)]
-fn restrict_dir(dir: &Path) -> io::Result<()> {
+pub(crate) fn restrict_dir(dir: &Path) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
 }
 
 #[cfg(not(unix))]
-fn restrict_dir(_dir: &Path) -> io::Result<()> {
+pub(crate) fn restrict_dir(_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
 #[cfg(unix)]
-fn set_restrictive_permissions(path: &Path) -> io::Result<()> {
+pub(crate) fn set_restrictive_permissions(path: &Path) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
 }
 
 #[cfg(not(unix))]
-fn set_restrictive_permissions(_path: &Path) -> io::Result<()> {
+pub(crate) fn set_restrictive_permissions(_path: &Path) -> io::Result<()> {
     // No POSIX mode bits on Windows: the file relies on the app data
     // directory's own per-user ACL, same posture as the Go daemon's
     // equally sensitive `relay-connect.json`/`relay-keypair.json`.
@@ -231,18 +231,23 @@ fn migrate_legacy(app_data_dir: &Path, connection_id: &str, new_path: &Path) {
     }
 }
 
-/// delete removes the pairing file for `connection_id` (unpair/remove).
-/// Missing is not an error — deleting an already-gone pairing is a no-op.
+/// delete removes the pairing file (and the device key) for `connection_id`
+/// (unpair/remove). Missing is not an error — deleting an already-gone pairing
+/// is a no-op.
 pub fn delete(app_data_dir: &Path, connection_id: &str) -> io::Result<()> {
+    // The pairing goes first, the device key last: if the second removal
+    // fails, a leftover key is harmless, whereas a pairing that outlived its
+    // key would mint a new, unapproved identity at the next connect.
     let legacy = legacy_pairing_path(app_data_dir, connection_id);
     if legacy.is_file() {
         std::fs::remove_file(legacy)?;
     }
     match std::fs::remove_file(pairing_path(app_data_dir, connection_id)) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e),
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
     }
+    crate::relay::device::delete_key(app_data_dir, connection_id)
 }
 
 #[cfg(test)]

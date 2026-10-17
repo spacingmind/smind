@@ -836,6 +836,36 @@ somebody else's nonce, which only counts as liveness); each (re)opened stream pr
   (ids may be unique prefixes; errors `not_found`, `ambiguous`); `relay.device.window {duration_seconds?,max_devices?}`
   (defaults 10 min / 1) → the window. `smind relay offer` opens the window (`--window`, `--max-devices`).
 
+**Implementation notes (P13a, desktop client as built — what the mobile client (P13b) mirrors).**
+- *Key:* one Ed25519 device key **per relay connection** (not per install: a stable id is visible to the relay in every frame, so a
+  per-install key would let a relay operator link one install across daemons), created when the pairing is saved, stored at `0600`
+  next to the pairing under a hashed file name, deleted with the connection, never returned by any command. A key file that cannot
+  be read is an error — it is never silently replaced (that would silently become a new, unapproved device).
+- *Per session:* a fresh random session id and a fresh ephemeral E2EE key for every fresh handshake (an ephemeral key reused across
+  fresh sessions repeats keys and nonces — the pre-P13a Rust loop did this; fixed); `device_hello` right after the handshake,
+  signed over this session's transcript. Frames use the device id (`base32(SHA-256(pub))[:26]`) as the route's device id.
+- *Hello outcomes:* approved → serve; `awaiting_approval` → status "awaiting approval" and retry every ~5 s (so approval takes effect
+  within seconds); `revoked` (from the daemon's hello, or the relay's `PermissionDenied` before the handshake) → "revoked", retry
+  every ~60 s (only the relay's "device revoked" counts as a revoke, not any PermissionDenied); any other refusal → shown with the
+  daemon's code, retry ~30 s; `device_hello_unsupported`/method-not-found, or no answer to the handshake on the identity route, →
+  one attempt on the fixed single-device route without a hello (a daemon from before device identity); a `device_hello_required`
+  error there → back to the identity route. The single-device route is kept only while it has answered; after two such switches
+  without a served session in between the client stops switching and shows the cause (so two daemon answers that contradict each
+  other cannot make it ping-pong), and every switch waits the ordinary backoff. A client that cannot read its device key does not
+  connect and says so; it never falls back to the single-device protocol on its own.
+- *Keepalive:* probes carry a per-connection random token (a correlation id, not a cryptographic nonce) in `Frame.sequence`; the relay echoes it; only a matching echo proves
+  support (a forwarded peer probe is liveness only); first echo within 10 s or keepalive is off for that stream, re-probed on every
+  (re)opened stream; probe every 30 s; 75 s without any relay frame = dead → resume. No HTTP/2 client pings.
+- *Resume and a lost daemon:* after a resume the client confirms the session with a request (`workspace.list`) and falls back to a
+  fresh session if it is not answered within 15 s; because the relay cannot tell a device that the daemon restarted, a request
+  unanswered for 30 s, or 90 s without anything from the daemon, makes the client run the same check. Requests in flight at a
+  hard connection drop can be lost (no acks in the relay protocol).
+- *Transport detail worth mirroring:* a gRPC client that waits for response headers before it may read hangs a resume that has
+  nothing buffered (the relay sends headers only with its first frame) — resolve the stream lazily and send the registration frame
+  at once. Bound dial + TLS + admission with a timeout (a path that swallows traffic otherwise hangs forever).
+- *UI:* Settings → Connections shows the live state of the selected relay connection; "waiting for approval" and "revoked" name
+  the command to run on the daemon's machine with the device's own id.
+
 **Trust model of the control stream (unchanged secret, new reach).** Both ends of a relay host authenticate with the same
 host secret (ADR-0011), so the relay cannot tell the daemon from a client holding the offer. Before this decision that
 mattered little (control carried only `Ping`/`Pong`); now whoever holds the secret can supersede the daemon's control
