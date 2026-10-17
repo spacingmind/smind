@@ -87,7 +87,7 @@ impl ProxyState {
             http_client: reqwest::Client::new(),
             relay: Mutex::new(None),
             sessions: Mutex::new(std::collections::HashMap::new()),
-            local_token_source: Mutex::new(Arc::new(crate::proxy::local_token::read)),
+            local_token_source: Mutex::new(Arc::new(crate::config::read_local_token)),
             local_password: Mutex::new(None),
             gate_client: crate::proxy::bounded::client(GATE_TIMEOUT),
             ssh_local: Mutex::new(std::collections::HashMap::new()),
@@ -168,7 +168,7 @@ impl ProxyState {
     }
 
     async fn is_password_smind(&self, base_url: &str) -> bool {
-        crate::proxy::local_token::is_password_smind(&self.gate_client, base_url).await
+        crate::proxy::bounded::is_password_smind(&self.gate_client, base_url).await
     }
 
     /// local_file_token reads the daemon token file now (it changes when the
@@ -176,7 +176,7 @@ impl ProxyState {
     /// (`SMIND_DAEMON_URL` can point it elsewhere).
     async fn local_file_token(&self, conn: &Connection) -> Option<String> {
         let base = Url::parse(&conn.base_url).ok()?;
-        if !crate::proxy::local_token::is_local_by_address(&base).await {
+        if !(crate::config::Config { daemon_url: base }).is_local_daemon().await {
             return None;
         }
         let source = self.local_token_source.lock().unwrap().clone();

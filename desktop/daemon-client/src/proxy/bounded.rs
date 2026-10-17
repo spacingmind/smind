@@ -32,6 +32,26 @@ pub async fn read_limited(mut resp: reqwest::Response, limit: usize) -> Option<V
     Some(body)
 }
 
+/// is_password_smind confirms that what answers at `base_url` really is a
+/// password-protected smind daemon (`/healthz`: service "smind", authRequired
+/// true) before the daemon token file is attached to anything it says.
+/// `client` should come from `client()` (short timeout, no redirects).
+pub async fn is_password_smind(client: &reqwest::Client, base_url: &str) -> bool {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Healthz {
+        service: Option<String>,
+        #[serde(default)]
+        auth_required: bool,
+    }
+    let url = format!("{}/healthz", base_url.trim_end_matches('/'));
+    let Ok(resp) = client.get(url).send().await else { return false };
+    if !resp.status().is_success() {
+        return false;
+    }
+    read_json::<Healthz>(resp, MAX_BODY_BYTES).await.is_some_and(|h| h.service.as_deref() == Some("smind") && h.auth_required)
+}
+
 /// read_json is `read_limited` + JSON decode, `None` on any failure.
 pub async fn read_json<T: serde::de::DeserializeOwned>(resp: reqwest::Response, limit: usize) -> Option<T> {
     serde_json::from_slice(&read_limited(resp, limit).await?).ok()

@@ -112,9 +112,9 @@ fn activate(
             .parse()
             .expect("smind desktop: saved connection URL is well-formed");
         // A password-protected daemon refuses /api/token: `local` falls back
-        // to the daemon token file, a url connection to its held session.
+        // to the daemon token file inside the client, a url connection uses
+        // its held session.
         let auth = match conn.kind {
-            ConnectionKind::Local => dclient::client::WatcherAuth::local(),
             ConnectionKind::Url => {
                 let (proxy, id) = (proxy.clone(), conn.id.clone());
                 dclient::client::WatcherAuth::with_session(move || proxy.session(&id))
