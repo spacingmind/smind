@@ -41,6 +41,8 @@ pub trait AssetSource: Send + Sync + 'static {
     fn get(&self, path: &str) -> Option<(Vec<u8>, String)>;
 }
 
+const GATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
 pub struct ProxyState {
     pub secret: String,
     pub registry: std::sync::Arc<Mutex<Registry>>,
@@ -67,6 +69,9 @@ pub struct ProxyState {
     /// UI's own token fetch. Only then does the proxy authenticate with the
     /// token file; an older daemon keeps today's token-query flow.
     local_password: Mutex<Option<(String, bool)>>,
+    /// Short-timeout, no-redirect client for gate decisions (`/api/token` and
+    /// `/healthz` probes) -- never the streaming `http_client`.
+    gate_client: reqwest::Client,
     /// ADR-0031 D7 (b2): the local end (`http://127.0.0.1:<port>`) of each
     /// running `ssh -N -L` tunnel, keyed by `ssh`-kind connection id. Owned
     /// and kept current by the desktop's tunnel manager.
@@ -84,6 +89,7 @@ impl ProxyState {
             sessions: Mutex::new(std::collections::HashMap::new()),
             local_token_source: Mutex::new(Arc::new(crate::proxy::local_token::read)),
             local_password: Mutex::new(None),
+            gate_client: crate::proxy::bounded::client(GATE_TIMEOUT),
             ssh_local: Mutex::new(std::collections::HashMap::new()),
         })
     }
@@ -159,6 +165,28 @@ impl ProxyState {
     /// token file -- the built-in `local` entry ONLY, never url/relay.
     fn is_builtin_local(conn: &Connection) -> bool {
         conn.id == LOCAL_ID && conn.kind == ConnectionKind::Local
+    }
+
+    /// is_password_smind confirms what answered 403 on /api/token really is a
+    /// password-protected smind daemon (`/healthz`: service "smind",
+    /// authRequired true) before the daemon token file is ever attached to
+    /// anything it says -- any other 403 is passed through untouched.
+    async fn is_password_smind(&self, base_url: &str) -> bool {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Healthz {
+            service: Option<String>,
+            #[serde(default)]
+            auth_required: bool,
+        }
+        let url = format!("{}/healthz", base_url.trim_end_matches('/'));
+        let Ok(resp) = self.gate_client.get(url).send().await else { return false };
+        if !resp.status().is_success() {
+            return false;
+        }
+        crate::proxy::bounded::read_json::<Healthz>(resp, crate::proxy::bounded::MAX_BODY_BYTES)
+            .await
+            .is_some_and(|h| h.service.as_deref() == Some("smind") && h.auth_required)
     }
 
     /// local_file_token reads the daemon token file now (it changes when the
@@ -392,7 +420,7 @@ async fn proxy_http(State(state): State<Arc<ProxyState>>, req: Request<Body>) ->
                 // 403 = a password-protected daemon (#349) that no longer
                 // serves its token: authenticate with the token file when we
                 // can read it. Anything else keeps the plain token flow.
-                let protected = status == StatusCode::FORBIDDEN;
+                let protected = status == StatusCode::FORBIDDEN && state.is_password_smind(&conn.base_url).await;
                 state.set_password_gate(&conn.base_url, protected);
                 if protected && state.local_file_token(&conn).await.is_some() {
                     return placeholder_token_response();
@@ -524,8 +552,9 @@ async fn proxy_ws(
     if ProxyState::is_builtin_local(&conn) && state.password_gate(&conn.base_url).is_none() {
         // The UI normally fetched /api/token first; if not, ask now.
         let probe = format!("{}/api/token", conn.base_url.trim_end_matches('/'));
-        if let Ok(resp) = state.http_client.get(probe).send().await {
-            state.set_password_gate(&conn.base_url, resp.status() == StatusCode::FORBIDDEN);
+        if let Ok(resp) = state.gate_client.get(probe).send().await {
+            let protected = resp.status() == StatusCode::FORBIDDEN && state.is_password_smind(&conn.base_url).await;
+            state.set_password_gate(&conn.base_url, protected);
         }
     }
     let bearer = state.upstream_bearer(&conn).await;

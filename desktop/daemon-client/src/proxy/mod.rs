@@ -5,6 +5,7 @@
 //! `docs/decisions/0013-desktop-bundled-ui.md` and
 //! `docs/plans/active/desktop-bundled-ui.md`.
 
+pub mod bounded;
 pub mod connections;
 pub mod local_token;
 pub mod secret;

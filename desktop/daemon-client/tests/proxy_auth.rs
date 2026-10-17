@@ -42,6 +42,11 @@ fn record(log: &Log, path: &'static str, headers: &HeaderMap, query: Option<Stri
 /// /ws selects the first offered `smind.bearer.*` protocol (like the real
 /// daemon) then echoes text frames.
 async fn spawn_stub(protected: bool) -> (SocketAddr, Log) {
+    spawn_stub_as(protected, protected).await
+}
+
+/// `smind_healthz`: whether /healthz identifies a password-protected smind.
+async fn spawn_stub_as(protected: bool, smind_healthz: bool) -> (SocketAddr, Log) {
     let log: Log = Arc::new(Mutex::new(Vec::new()));
     let app = Router::new()
         .route(
@@ -52,6 +57,16 @@ async fn spawn_stub(protected: bool) -> (SocketAddr, Log) {
                     return (axum::http::StatusCode::FORBIDDEN, axum::Json(serde_json::json!({ "error": "password configured" })));
                 }
                 (axum::http::StatusCode::OK, axum::Json(serde_json::json!({ "token": "daemon-token" })))
+            }),
+        )
+        .route(
+            "/healthz",
+            get(move || async move {
+                if smind_healthz {
+                    axum::Json(serde_json::json!({ "service": "smind", "version": "0.1.0", "authRequired": true }))
+                } else {
+                    axum::Json(serde_json::json!({ "service": "nginx" }))
+                }
             }),
         )
         .route(
@@ -109,7 +124,11 @@ async fn harness() -> Harness {
 }
 
 async fn harness_with(protected: bool) -> Harness {
-    let (addr, stub) = spawn_stub(protected).await;
+    harness_as(protected, protected).await
+}
+
+async fn harness_as(protected: bool, smind_healthz: bool) -> Harness {
+    let (addr, stub) = spawn_stub_as(protected, smind_healthz).await;
     let local = Url::parse(&format!("http://{addr}")).unwrap();
     let state = ProxyState::new(SECRET.to_string(), Registry::new(&local), Box::new(EmptyAssets));
     state.set_local_token_source(|| None);
@@ -209,6 +228,20 @@ async fn local_connection_with_403_token_falls_back_to_injected_bearer() {
 async fn local_connection_with_403_and_no_token_file_passes_the_403_through() {
     let h = harness_with(true).await;
     assert_eq!(h.get("/api/token").await.status(), 403);
+}
+
+#[tokio::test]
+async fn token_file_is_never_used_for_a_403_that_is_not_a_password_smind() {
+    // A 403 on /api/token from something whose /healthz is not a
+    // password-protected smind: the 403 passes through and no bearer is sent.
+    let h = harness_as(true, false).await;
+    h.state.set_local_token_source(|| Some("file-token".to_string()));
+    assert_eq!(h.get("/api/token").await.status(), 403);
+    assert_eq!(h.get("/api/ping").await.status(), 200);
+    let (_ws, _) = h.ws("", &[]).await;
+    for seen in h.stub.lock().unwrap().iter() {
+        assert_eq!(seen.authorization, None, "{seen:?}");
+    }
 }
 
 #[tokio::test]
