@@ -64,6 +64,10 @@ pub fn validate_base_url(raw: &str) -> Result<Url, String> {
     if url.host_str().is_none() {
         return Err(format!("invalid URL {trimmed:?}: missing host"));
     }
+    // Never echo the URL here: it carries the credential being refused.
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("a daemon URL must not contain credentials".to_string());
+    }
     url.set_path("");
     url.set_query(None);
     url.set_fragment(None);
@@ -419,6 +423,18 @@ mod tests {
         assert_eq!(loaded.list().len(), 2);
         assert_eq!(loaded.current().id, conn.id);
         assert_eq!(loaded.current().label, "Tunnel");
+    }
+
+    #[test]
+    fn validate_base_url_rejects_userinfo_without_echoing_it() {
+        for raw in ["http://user:hunter2@host:4648", "https://tok@host", "http://:hunter2@host"] {
+            let err = validate_base_url(raw).unwrap_err();
+            assert_eq!(err, "a daemon URL must not contain credentials");
+            assert!(!err.contains("hunter2"));
+            let mut reg = Registry::new(&local_url());
+            assert!(reg.add("x", raw).is_err());
+            assert_eq!(reg.list().len(), 1);
+        }
     }
 
     #[test]
