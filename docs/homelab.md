@@ -189,9 +189,7 @@ the change applies when the daemon next starts.
 > **Requires updated clients.** Relay pairing needs apps that send a device identity. **The desktop app does** (a device key
 > per relay connection, created when you add the link; Settings → Connections shows "Waiting for approval on the daemon" with
 > the exact `smind relay devices approve <id>` to run, or "revoked"; it needs a daemon that sends the device challenge — one built
-> after the hello-v2 fix, newer than v0.12.0 — and says "different versions" otherwise). **The mobile app does not yet** (multi-device mobile client,
-> in progress): until it ships, an installed mobile build **cannot connect** through the relay — the daemon refuses a client
-> without a device identity ("device identity required"). As a stop-gap you can set `relay.legacyDevices: true` in
+> after the hello-v2 fix, newer than v0.12.0 — and says "different versions" otherwise). **The mobile app does too** (a device key in the platform secure store; the pairing screen shows "Waiting for approval" with the same command, or "This device was revoked", or "Daemon outdated or on a different version" when the daemon sends no device challenge). A desktop or mobile build from before these clients **cannot connect** through the relay — the daemon refuses a client without a device identity ("device identity required"). As a stop-gap you can set `relay.legacyDevices: true` in
 > `$SMIND_HOME/config.yaml` to let such a client in on one fixed route. **Do not leave it on:** a legacy client is served without
 > approval and cannot be revoked, so anyone who has your pairing link (the relay host secret plus your daemon's public key) — or
 > the relay operator — can connect, and `devices revoke`, the pending state and the pairing window do not apply to it. The daemon
