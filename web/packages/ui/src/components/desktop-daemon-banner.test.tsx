@@ -333,7 +333,10 @@ describe("ADR-0031 P10 — the older-daemon notice for daemons the app does not 
     await mount();
     await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
     expect(commandTexts()).toEqual(["smind update"]);
-    expect(screen.getByTestId("desktop-daemon-banner-copy")).toHaveTextContent("Copy");
+    // Icon-only copy button inside the chip, named by its aria-label.
+    expect(screen.getByTestId("desktop-daemon-banner-copy")).toHaveAttribute("aria-label", "Copy");
+    expect(screen.getByTestId("desktop-daemon-banner-copy")).toHaveTextContent("");
+    expect(screen.getByTestId("desktop-daemon-banner-command").parentElement).toContainElement(screen.getByTestId("desktop-daemon-banner-copy"));
     expect(screen.queryByTestId("desktop-daemon-banner-update")).not.toBeInTheDocument();
   });
 
@@ -357,9 +360,8 @@ describe("ADR-0031 P10 — the older-daemon notice for daemons the app does not 
     await flush();
     expect(writeText).toHaveBeenCalledTimes(1);
     expect(writeText).toHaveBeenCalledWith("irm https://spacingmind.com/install.ps1 | iex");
-    expect(psCopy).toHaveTextContent("Copied");
-    expect(shCopy).toHaveTextContent("Copy");
-    expect(shCopy).not.toHaveTextContent("Copied");
+    expect(psCopy).toHaveAttribute("aria-label", "Copied");
+    expect(shCopy).toHaveAttribute("aria-label", "Copy");
     // The button confirms in place: nothing else grabbed focus.
     expect(document.activeElement === document.body || document.activeElement === psCopy).toBe(true);
   });
@@ -440,7 +442,38 @@ describe("ADR-0031 P10 — the older-daemon notice for daemons the app does not 
     await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner-update")).toBeInTheDocument());
     expect(commandTexts()).toEqual([]);
     expect(screen.queryByTestId("desktop-daemon-banner-copy")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("desktop-daemon-banner-dismiss")).not.toBeInTheDocument();
+    // ...and, like every variant, can be dismissed (a restart may not be wanted mid-run).
+    expect(screen.getByTestId("desktop-daemon-banner-dismiss")).toBeInTheDocument();
+  });
+
+  it("dismissing the managed local notice hides it and stops the idle auto-update", async () => {
+    const daemonUpdate = vi.fn(() => Promise.resolve({ managedState: "managed" }));
+    mockPlatform({
+      current: LOCAL,
+      connectionVersion: older("0.11.1"),
+      daemonStatus: () => Promise.resolve({ managedState: "managed", comparison: "older" }),
+      daemonUpdate,
+    });
+    const { DesktopDaemonBanner } = await import("@/components/desktop-daemon-banner");
+    // Not loaded runs: nothing auto-updates yet.
+    const { rerender } = render(<DesktopDaemonBanner runsLoaded={false} runningRuns={0} />);
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner-update")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("desktop-daemon-banner-dismiss"));
+    await waitFor(() => expect(screen.queryByTestId("desktop-daemon-banner")).not.toBeInTheDocument());
+    // Runs load, the daemon is idle: a dismissed notice must not restart it.
+    rerender(<DesktopDaemonBanner runsLoaded runningRuns={0} />);
+    await flush();
+    await flush();
+    expect(daemonUpdate).not.toHaveBeenCalled();
+  });
+
+  it("puts the commands in one grid so the chips share a width", async () => {
+    mockPlatform({ current: TUNNEL, connectionVersion: older("0.11.1") });
+    await mount();
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
+    const [sh, ps] = screen.getAllByTestId("desktop-daemon-banner-command");
+    expect(sh.parentElement?.parentElement).toBe(ps.parentElement?.parentElement);
+    expect(sh.parentElement?.parentElement).toHaveStyle({ gridTemplateColumns: "max-content max-content" });
   });
 
   it("shows managed-by-service with the copy block for a service-managed local daemon", async () => {

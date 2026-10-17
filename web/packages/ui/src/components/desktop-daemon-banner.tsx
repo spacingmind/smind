@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useCopyFeedback } from "@/components/timeline/message-actions";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { compareVersions, dismissNotice, isNoticeDismissed, managedByLabel, noticeToken, updateCommands, type UpdateCommand } from "@/lib/daemon-version";
 import { Icons } from "@/lib/icons";
@@ -160,18 +161,18 @@ export function DesktopDaemonBanner({
   const actionable = current?.kind === "local" && managed;
   const older = comparison === "older";
   const token = info ? noticeToken(daemonVersion, info.appVersion) : "";
-  const dismissed = !actionable && current !== null && (dismissedToken === token || isNoticeDismissed(current.id, token));
+  const dismissed = current !== null && (dismissedToken === token || isNoticeDismissed(current.id, token));
 
   // Idle and armed -> update without a click. Not before runsLoaded: an
   // empty run map before the first run.list means "not known yet", not
   // "0 running".
   useEffect(() => {
-    if (!actionable || !older || !runsLoaded || runningRuns > 0 || !armed || busy) return;
+    if (!actionable || !older || dismissed || !runsLoaded || runningRuns > 0 || !armed || busy) return;
     const key = `${current!.id}:${info!.daemonVersion}`;
     if (autoFiredRef.current.has(key)) return;
     autoFiredRef.current.add(key);
     runUpdate();
-  }, [actionable, older, runsLoaded, runningRuns, armed, busy, current, info, runUpdate]);
+  }, [actionable, older, dismissed, runsLoaded, runningRuns, armed, busy, current, info, runUpdate]);
 
   if (!isDesktop || !current || !info || !(older || versionUnknown) || dismissed) {
     return null;
@@ -191,10 +192,11 @@ export function DesktopDaemonBanner({
     <div
       data-testid="desktop-daemon-banner"
       role="status"
-      className="flex items-start justify-between gap-3 border-b border-warning/40 bg-warning/10 px-4 py-2 text-ui-base text-foreground"
+      className="flex flex-col gap-1.5 border-b border-warning/40 bg-warning/10 px-4 py-2 text-ui-base text-foreground"
     >
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <span>
+      {/* One title row for every variant, so the text and the buttons centre on each other. */}
+      <div className="flex min-h-7 items-center justify-between gap-3">
+        <span className="min-w-0">
           {versionUnknown
             ? `Daemon version unknown — it may be older than this app (v${info.appVersion})`
             : `Daemon v${daemonVersion} is older than this app (v${info.appVersion})`}
@@ -205,23 +207,39 @@ export function DesktopDaemonBanner({
               ? ` · ${runningRuns} ${runningRuns === 1 ? "agent" : "agents"} running — will update when ${runningRuns === 1 ? "it" : "they"} finish`
               : null}
         </span>
-        {commands.length > 0 && (
-          <div className="flex flex-col gap-1" data-testid="desktop-daemon-banner-commands">
-            <span className="text-ui-sm text-muted-foreground">{commands.length === 1 ? "Update it by running:" : "Update it by running, on that machine:"}</span>
-            {commands.map((c) => (
-              <CommandRow key={c.command} command={c} />
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        {!actionable && (
+        <div className="flex shrink-0 items-center gap-2">
+          {error && (
+            <>
+              <span role="alert" data-testid="desktop-daemon-banner-error" className="text-destructive">
+                {error}
+              </span>
+              <Button size="sm" variant="outline" data-testid="desktop-daemon-banner-retry" onClick={() => void runUpdate()} disabled={busy}>
+                Retry
+              </Button>
+            </>
+          )}
+          {actionable && deferring && armed && (
+            <Button size="sm" variant="outline" data-testid="desktop-daemon-banner-update-now" onClick={() => setConfirmOpen(true)} disabled={busy}>
+              Update now
+            </Button>
+          )}
+          {actionable && deferring && armed && !busy && !error && (
+            <Button size="sm" variant="ghost" data-testid="desktop-daemon-banner-not-now" onClick={() => setArmed(false)}>
+              Not now
+            </Button>
+          )}
+          {actionable && (!deferring || !armed) && (
+            <Button size="sm" data-testid="desktop-daemon-banner-update" onClick={handleManualUpdate} disabled={busy}>
+              {busy ? "Updating…" : "Update & restart"}
+            </Button>
+          )}
           <Button
             size="icon-xs"
             variant="ghost"
             aria-label="Dismiss"
             title="Dismiss until the daemon or app version changes"
             data-testid="desktop-daemon-banner-dismiss"
+            disabled={busy}
             onClick={() => {
               dismissNotice(current.id, token);
               setDismissedToken(token);
@@ -229,33 +247,22 @@ export function DesktopDaemonBanner({
           >
             <Icons.close aria-hidden />
           </Button>
-        )}
-        {error && (
-          <>
-            <span role="alert" data-testid="desktop-daemon-banner-error" className="text-destructive">
-              {error}
-            </span>
-            <Button size="sm" variant="outline" data-testid="desktop-daemon-banner-retry" onClick={() => void runUpdate()} disabled={busy}>
-              Retry
-            </Button>
-          </>
-        )}
-        {actionable && deferring && armed && (
-          <Button size="sm" variant="outline" data-testid="desktop-daemon-banner-update-now" onClick={() => setConfirmOpen(true)} disabled={busy}>
-            Update now
-          </Button>
-        )}
-        {actionable && deferring && armed && !busy && !error && (
-          <Button size="sm" variant="ghost" data-testid="desktop-daemon-banner-not-now" onClick={() => setArmed(false)}>
-            Not now
-          </Button>
-        )}
-        {actionable && (!deferring || !armed) && (
-          <Button size="sm" data-testid="desktop-daemon-banner-update" onClick={handleManualUpdate} disabled={busy}>
-            {busy ? "Updating…" : "Update & restart"}
-          </Button>
-        )}
+        </div>
       </div>
+      {commands.length > 0 && (
+        <div className="flex flex-col gap-1" data-testid="desktop-daemon-banner-commands">
+          <span className="text-ui-sm text-muted-foreground">{commands.length === 1 ? "Update it by running:" : "Update it by running, on that machine:"}</span>
+          {/* One grid, so the command chips share the width of the longest. */}
+          <div
+            className="grid items-center gap-x-3 gap-y-1"
+            style={{ gridTemplateColumns: commands.some((c) => c.label) ? "max-content max-content" : "max-content" }}
+          >
+            {commands.map((c) => (
+              <CommandRow key={c.command} command={c} />
+            ))}
+          </div>
+        </div>
+      )}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent data-testid="desktop-daemon-banner-confirm">
           <DialogHeader>
@@ -297,22 +304,42 @@ interface DaemonReport {
   managedBy?: string;
 }
 
-/** One copyable command: the code, and a button that puts exactly that text on the clipboard. */
+/**
+ * One copyable command: the code in a chip with a small icon-only copy button
+ * inside its right edge (Paseo's code-block copy, highlighted-code-block.tsx:
+ * 167-250: a muted Copy icon that darkens on hover and becomes a Check for
+ * 1.5 s). Copies exactly the displayed text. A label cell comes first when the
+ * command is for a particular machine.
+ */
 function CommandRow({ command }: { command: UpdateCommand }) {
   const { copied, copy } = useCopyFeedback();
+  const label = copied ? "Copied" : "Copy";
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {command.label && <span className="w-36 shrink-0 text-ui-sm text-muted-foreground">{command.label}</span>}
-      <code
-        data-testid="desktop-daemon-banner-command"
-        className="min-w-0 select-all break-all rounded-md border border-border bg-background px-2 py-0.5 font-mono text-ui-sm text-foreground"
-      >
-        {command.command}
-      </code>
-      <Button size="xs" variant="outline" data-testid="desktop-daemon-banner-copy" onClick={() => void copy(command.command)}>
-        {copied ? <Icons.check aria-hidden /> : <Icons.copy aria-hidden />}
-        <span aria-live="polite">{copied ? "Copied" : "Copy"}</span>
-      </Button>
-    </div>
+    <>
+      {command.label && <span className="text-ui-sm text-muted-foreground">{command.label}</span>}
+      <div className="flex min-w-0 items-center rounded-md border border-border bg-background">
+        <code data-testid="desktop-daemon-banner-command" className="min-w-0 flex-1 select-all break-all py-0.5 pl-2 pr-3 font-mono text-ui-sm text-foreground">
+          {command.command}
+        </code>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={label}
+                data-testid="desktop-daemon-banner-copy"
+                className="mr-0.5 size-5 shrink-0 text-foreground-muted hover:text-foreground"
+                onClick={() => void copy(command.command)}
+              >
+                {copied ? <Icons.check aria-hidden /> : <Icons.copy aria-hidden />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{label}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+    </>
   );
 }
