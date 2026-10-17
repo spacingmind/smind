@@ -965,9 +965,9 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   (`UnmanagedKind::Service`); the banner shows a dismissible notice with copyable `smind update` / installer commands for
   unmanaged daemons, reads relay daemons' versions over `/ws`, and says "version unknown" for a relay daemon without
   `daemon.info`; Settings → Daemon hides take over and says "Managed by systemd/launchd/Task Scheduler". **Found while doing
-  it:** a daemon sent *no* response to an unknown method (`dispatch` called `sendError` for an id never registered in
-  `inflight`); fixed, and the banner also treats a 4 s silence as "predates daemon.info" because every shipped daemon behaves
-  that way. Not done: the `docker pull` variant for a daemon reporting it runs from an image (`image?` in `daemon.info`, needs
+  it:** a daemon sends *no* response to an unknown method (`dispatch` calls `sendError` for an id never registered in
+  `inflight`; fixed separately in the `fix/device-hello-replay` PR), and every shipped daemon behaves that way, so the banner
+  treats a 4 s silence as "predates daemon.info". Not done: the `docker pull` variant for a daemon reporting it runs from an image (`image?` in `daemon.info`, needs
   P11), and the P5 setting that stops offering (a) while a service owns the port (P5 not started).
 
 ## Validation
