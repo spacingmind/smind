@@ -143,6 +143,11 @@ export class FrameReader {
     this.buffer = concatBytes(this.buffer, chunk);
   }
 
+  /** Drops any partially received frame (the rest of it died with its stream). */
+  clear(): void {
+    this.buffer = new Uint8Array(0);
+  }
+
   /** Returns the next complete frame, or null if more bytes are needed. */
   tryRead(): DecodedFrame | null {
     if (this.buffer.length < 4) return null;
@@ -203,6 +208,11 @@ export class Channel {
     this.role = role;
   }
 
+  /** The peer's ephemeral handshake public key once the handshake completed (null before); with ours it names the session's transcript. */
+  get peerKey(): Uint8Array | null {
+    return this.peerPublicKey;
+  }
+
   private writeHello(): void {
     const payload = concatBytes(new Uint8Array([PROTOCOL_VERSION, this.role]), this.keyPair.publicKey);
     this.transport.send(encodeFrame(FRAME_HELLO, payload));
@@ -255,6 +265,17 @@ export class Channel {
       }
       throw new Error(`e2ee: expected ready, got frame type 0x${frame.type.toString(16)}`);
     }
+  }
+
+  /**
+   * Prepares the channel for a new transport after a drop, keeping the
+   * session (key and both counters): bytes of a frame the dead stream only
+   * half delivered are discarded, as client.DataConn.Resume does on the Go
+   * side. Call it only when no receive() is in flight.
+   */
+  resumeTransport(): void {
+    if (!this.session) throw new Error('e2ee: no established session to resume');
+    this.reader.clear();
   }
 
   send(message: Uint8Array): void {

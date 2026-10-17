@@ -964,6 +964,46 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   signature covers the route session id and that challenge; v1 is refused (no released client speaks it); vector updated (v1 kept as
   history). (2) wsapi answered an unknown method with nothing (the error was sent before the request was registered in flight):
   fixed, tested.
+- 2026-10-15 (P13b): mobile device identity, keepalive, resume and multi-device implemented on
+  `feat/mobile-relay-device-identity`. Decisions inside the spec: the daemon must be v0.12+ (the client uses a per-pairing
+  session id and the key-derived device id, which a pre-P12b daemon never opens a route for, so there is no legacy fallback on mobile —
+  a daemon that sends no device challenge within 5 s is reported as outdated — see hello v2 below); a device the daemon has not
+  approved is `pending` and **retried every 5 s** with a fresh session until approved (revoked and bad-hello are final, anything
+  else backs off); after a drop the client first **resumes** the same session (same route, E2EE counters and frame sequence) and
+  proves the daemon still holds it with one `workspace.list` (any answer counts; 10 s), else opens a **fresh session** (new session id,
+  new ephemeral key, new hello) and re-subscribes; requests in flight across a drop reject (at-most-once, as P12b says); the
+  key lives in the platform secure store (`expo-secure-store`, device-bound, after-first-unlock) and in memory only on Expo web;
+  a revoked device offers **Reset device identity** (new key = new pending device) instead of retrying; the hand-written proto
+  gained `Frame.keepalive` only (a device never opens the control stream, so none of the `ControlFrame` messages are needed).
+  **Daemon finding (fixed by #354):** `internal/wsapi/conn.go` `dispatch` sent no answer for an unknown method (the error was
+  sent before the request was registered in-flight); the first cut of this client probed a resumed session with an unknown method
+  and never got confirmation, so the probe is now `workspace.list`.
+  An independent review (identity, reconnect state machine, protocol agreement) drove: `close()` during a fresh session's
+  handshake ends its stream (it had left an admitted ghost device); an **end-to-end liveness watchdog** (a request unanswered for 15 s
+  or 90 s of silence is followed by one cheap question; no answer in 10 s means the daemon lost the session and a fresh one is
+  opened — keepalive only proves the *relay*, so a daemon restarted behind a live stream used to hang every call); pending polls grow
+  5 s → 30 s (each ask is a fresh route and the relay keeps an abandoned route 5 minutes against its 128-route host cap) and a blip
+  while pending, a full daemon (`too_many_*`) or a full relay (status 8) are retried, not final; a link that dies within 2 s of
+  connecting backs off (the hub's min-stable rule); the Ed25519 seed is a closure variable, not a property of the identity object;
+  Connect is single-flight and an identity reset waits for the key removal. A second review of those fixes added: the watchdog
+  clock starts at the **oldest** unanswered request (a user tapping on a frozen screen no longer postpones the probe), Connect works
+  again after a failed or revoked attempt, and a failed identity reset keeps the revoked card instead of leaving silently. **Hello replay (found by the first review, fixed by #354, adopted here as
+  hello v2):** v1 signed only `(daemon_pub, client ephemeral pub)`, so whoever could open a route under a device's id (the relay
+  operator, a holder of the host secret) could replay a captured hello + ciphertext into a new route, be admitted as that device and
+  make `supersede` drop the real session. v2: the daemon's first encrypted message on a device route is `relay.device_challenge`
+  (32 random bytes, std base64), and the signature covers `"smind-device-hello-v2" ‖ TranscriptHash ‖ daemon_pub ‖
+  uint16BE(len(session_id)) ‖ session_id ‖ challenge`. The mobile client waits for the challenge (5 s, as the desktop), signs the one
+  received on THIS session, never sends a v1 hello and never falls back to one; no challenge, a challenge of another version or
+  length, or `hello_version_unsupported` is the failed state "Daemon outdated or on a different version" (shows `smind update`).
+  A resume sends no hello (one challenge per session); a fresh session gets a fresh challenge. The shared vector is v2 with four
+  negatives, read by the TS test; the Go `devharness` peers sign v2 too. A reviewer pass on this change found no crypto or flow
+  defect (signed bytes, session-id bytes, per-session challenge, strict challenge parse, no v1/challenge-less hello path); it
+  drove: a challenge that stalls AFTER a daemon has answered on this connection is retried, not called outdated (only a first
+  connect treats silence as final); exact-byte checks for three of the four vector negatives; one less repetition in the outdated
+  card. The integration tests no longer switch TLS verification off in code (CodeQL "disabling certificate validation"): `npm run
+  test:integration` starts the test process with `NODE_TLS_REJECT_UNAUTHORIZED=0` for the harness's self-signed relay and the tests
+  refuse to run without it.
+
 - 2026-10-15 (P13a): desktop (Rust) multi-device relay client on `feat/desktop-relay-device-identity` — device key per connection, signed
   `device_hello`, nonce-matched keepalive, 75 s rule, resume with a liveness check, restart detection, single-device-route fallback,
   Settings → Connections states. **Not in this PR:** AC 3 (CA-verified mode, `connections_*_relay` reporting `pinned` vs CA-verified,
@@ -1109,6 +1149,40 @@ three negatives), `TestV1VectorIsHistorical`; hub (real relay + hub): `TestCaptu
 untouched; the test fails when the challenge/session binding is removed), `TestHelloBoundToTheChallengeAndTheSession`,
 `TestEachSessionGetsAFreshChallenge`, `TestHelloVersion1IsRefusedWithAClearReason`; `wsapi`:
 `TestUnknownMethodAlwaysGetsAMethodNotFoundResponse` (fails on the old ordering).
+
+### P13b (2026-10-15, branch `feat/mobile-relay-device-identity`)
+
+Commands: `cd mobile && npx tsc --noEmit && npx vitest run --exclude "**/*.node.test.ts"` (19 files, 134 tests),
+`npm run test:integration` (3 files, 11 tests; builds `internal/relay/bridge/devharness`, a real relay + a real daemon hub with a
+device registry + two Go desktop peers), `npm run smoke:web:full` (Expo web in headless Chromium against the same harness),
+`go test ./...`, `go test -race -count=3 ./internal/relay/bridge/devharness/`, `task lint`. Re-run on top of #354 (hello v2).
+
+| AC | Evidence |
+|---|---|
+| 1 key in the secure store | `deviceIdentity.test.ts`: `device key persists in the secure store`, `is generated once and differs between devices`, `replaces a corrupt stored value with a fresh key`, `never puts the seed in the hello, nor on the identity object`; `platformKeyStore.ts` wires `expo-secure-store` (device-bound, after-first-unlock; in memory on web) |
+| shared vector (v2) | `deviceIdentity.test.ts`: `device_hello v2 signature verifies against the Go vector (and matches it byte for byte)`, `parses the daemon's challenge message into the vector challenge`, `builds the vector signed bytes`, `has four negatives, each with its own signed bytes and a signature that does not verify against the real bytes` (other daemon key / mobile key / session id / challenge), challenge-message parse rejections — reads `internal/relay/devices/testdata/device_hello_vector.json` |
+| hello v2 flow | `RelayConnection.device.test.ts` "hello v2": `a daemon that sends no challenge (older than v2) is reported as outdated, never sent a v1 hello, never retried` (fake transport), `a challenge of another version, or one that is not 32 bytes …`, `hello_version_unsupported`, `every fresh session signs the challenge of THAT session: a hello from one session does not verify in another`, `a resumed session sends no new hello`; `integration.devices.node.test.ts`: `is reported as outdated …` against the real relay and a daemon that handshakes and stays silent (`devharness -outdated-daemon`) |
+| 2 hello, keepalive, resume, ids | `RelayConnection.device.test.ts` (fake relay + daemon that verifies the hello with the real signed-bytes construction): `sends a device_hello that the daemon verifies, under a key-derived device id and a per-pairing session id`, `keepalive is sent on the websocket stream`, `dead stream after the silence window reconnects (and resumes the same session)`, `resumes after a drop keeping ids, sequence and the E2EE session`, `opens a fresh session … when the daemon lost the old one, and re-subscribes`, `rejects an in-flight request when the stream drops (at-most-once)`; `keepalive.test.ts` pins 30 s / 75 s / 10 s and the nonce-echo rule; `proto.test.ts`: `encodes Frame.keepalive (field 7) exactly as the Go relaypb does` (Go-computed literal), round trips |
+| pending / revoked UI states | `RelayConnection.device.test.ts`: `a device the daemon has not approved is pending, then connects by itself once approved`, `a revoked device is revoked and stops trying`, `revocation mid-session …`, `… noticed only at the next hello …`; `connectionStatus.test.ts` (copy incl. the exact `smind relay devices approve <id>`); screenshots (below) |
+| 3 help text | `CERTIFICATE_HELP` on the pairing screen (screenshot) and `docs/homelab.md` §6 |
+| 4 interop, 3 devices | `integration.devices.node.test.ts` (real TS client ↔ real Go relay + daemon hub + 2 Go native desktop peers): pending → `approve` → connected by itself; peers join while the mobile client stays attached (3 approved + connected devices); real-relay keepalive echoes; resume after a cut stream with the peers unaffected; fresh session + re-subscribe after `daemon-restart` **with the stream left up** (liveness watchdog); relay restart; `revoke` refuses only the mobile device and the peers keep answering; a revoked key stays revoked and a new key is a new pending device. `integration.node.test.ts` / `integration.persistent.node.test.ts` now run through `device_hello` against the same hub |
+| review hardening | `RelayConnection.device.test.ts` "review hardening": close during the handshake, daemon restart behind a live stream (pending call rejected, fresh session), idle probe, transient error while pending, `too_many_devices` retried, status 8 retried, flap backoff, daemon that never answers `device_hello` |
+
+Screenshots (Expo web, light and dark, read by the Lead): `mobile/.smoke/{pairing,pending,tasks,revoked,outdated}-{light,dark}.png` from
+`npm run smoke:web:full` ("Waiting for approval" with the approve command naming the device, the task list after approval, "This
+device was revoked" with *Reset device identity*, "Daemon outdated or on a different version" with `smind update`); not committed (`.smoke/` is gitignored).
+
+`task test`: the Go suite passes (`go test ./...`) and so do the mobile suites; the **web UI suite did not pass cleanly on this
+machine** (38 timeouts/failures in `App.test.tsx`, `app-menu`, `open-in-editor`, `desktop-chrome`, `App.responsive` with the load
+average at ~150 from other agents; `App.test.tsx -t TB-AC4` passes alone) — no file under `web/` or `desktop/` is touched by this
+branch.
+
+Not verified: a real phone or simulator (Hermes, `crypto.getRandomValues`, `expo-secure-store` on iOS/Android — including whether
+Android returns null instead of throwing on a Keystore mismatch, which would silently make the device a new pending device —, React
+Native's `WebSocket`); the ≥ 10-minute run with two real desktop apps and a 125 s proxy shim; self-signed relay refusal on a device;
+a Rust client in the three-device run (P13a). Labels with exotic Unicode format characters (`devices.ValidateLabel` follows Go's
+`unicode.Cf`; the client's table covers the common ones and the label is app-generated today).
+
 ### P13a (2026-10-15, branch `feat/desktop-relay-device-identity`)
 
 Commands: `cd desktop/daemon-client && cargo test` (200 unit + legacy interop + 7 multi-device interop, Go harness), `cd

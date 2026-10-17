@@ -9,6 +9,7 @@
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
     "expo": "~57.0.24",
+    "expo-secure-store": "~57.0.4",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -29,7 +30,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "test": "vitest run --exclude \"**/*.node.test.ts\"",
-    "test:integration": "vitest run src/relay/__tests__/integration.node.test.ts src/relay/__tests__/integration.persistent.node.test.ts",
+    "test:integration": "NODE_TLS_REJECT_UNAUTHORIZED=0 vitest run src/relay/__tests__/integration.node.test.ts src/relay/__tests__/integration.persistent.node.test.ts src/relay/__tests__/integration.devices.node.test.ts",
     "typecheck": "tsc --noEmit",
     "smoke:web": "node scripts/smoke-web.mjs",
     "smoke:web:full": "node scripts/smoke-web.mjs --full"
