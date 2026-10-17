@@ -43,6 +43,8 @@ Copy-Item $Exe (Join-Path $decoyDir 'smind.exe')
 Set-Content -Path (Join-Path $decoyHome 'config.yaml') -Value "server:`n  port: $decoyPort" -Encoding ascii
 $decoyExe = Join-Path $decoyDir 'smind.exe'
 
+function DecoyHealth { try { Invoke-RestMethod "http://127.0.0.1:$decoyPort/healthz" -TimeoutSec 2 } catch { $null } }
+
 function Step($m) { Write-Host ""; Write-Host "== $m" }
 function Fail($m) { throw "FAIL: $m" }
 function Check($cond, $m) { if (-not $cond) { Fail $m } }
@@ -79,7 +81,7 @@ try {
     $env:SMIND_HOME = $decoyHome
     $decoySup = Start-Process -FilePath $decoyExe -ArgumentList 'service', 'run' -PassThru -WindowStyle Hidden
     $env:SMIND_HOME = $smindHome
-    WaitFor 'the decoy daemon' { try { Invoke-RestMethod "http://127.0.0.1:$decoyPort/healthz" -TimeoutSec 2 } catch { $null } }
+    WaitFor 'the decoy daemon' { DecoyHealth }
     Check (-not $decoySup.HasExited) 'the decoy supervisor exited'
 
     Step 'install registers a per-user logon task and starts the daemon'
@@ -202,7 +204,7 @@ try {
 
     Step 'the decoy smind.exe was never touched'
     Check (-not $decoySup.HasExited) 'the decoy supervisor was killed by smind service'
-    Check ((try { Invoke-RestMethod "http://127.0.0.1:$decoyPort/healthz" -TimeoutSec 2 } catch { $null })) 'the decoy daemon was stopped by smind service'
+    Check (DecoyHealth) 'the decoy daemon was stopped by smind service'
 } finally {
     Cleanup
 }
