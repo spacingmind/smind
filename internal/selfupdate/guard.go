@@ -19,7 +19,7 @@ func refuse(format string, a ...any) error { return &Refusal{Reason: fmt.Sprintf
 // user: inside the app bundle (macOS: the bundled sidecar under
 // `*.app/Contents/`), inside the managed-daemon directory (macOS
 // `.../managed-daemon/bin/smind`, Windows `%LOCALAPPDATA%\smind\bin\`), or next
-// to the app's own executable (Windows bundles `smind.exe` beside `sMind.exe`).
+// to the app's own executable (Windows bundles `smind.exe` beside the app's `smind-desktop.exe`, Tauri's ${MAINBINARYNAME}).
 // The app updates that daemon itself (ADR-0013/0030); replacing it under the
 // app would desync its recorded identity. goos selects path semantics so the
 // Windows rules are unit-testable anywhere.
@@ -41,7 +41,10 @@ func DesktopOwned(exe, goos string, getenv func(string) string, exists func(stri
 				return "the running smind.exe is in the desktop app's managed-daemon directory; the app updates it", true
 			}
 		}
-		if exists(path.Join(path.Dir(slash), "sMind.exe")) {
+		// The app's executable is its Cargo name, NOT "sMind.exe": that differs from the
+		// sidecar "smind.exe" only by case, so on NTFS (case-insensitive) it "exists"
+		// next to every smind.exe and every standalone install was refused.
+		if exists(path.Join(path.Dir(slash), "smind-desktop.exe")) {
 			return "the running smind.exe sits next to the sMind desktop app; the app updates its own daemon", true
 		}
 	}

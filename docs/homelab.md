@@ -15,7 +15,7 @@ daemon to a relay registers **this daemon once** with that relay; every paired c
 workspaces, spaces and tasks. Nothing is created in smind. (Older docs and the wire format call this a "workspace";
 smind's own workspaces are a different thing: registered git repositories.)
 
-## Run the daemon as a service (Linux and macOS)
+## Run the daemon as a service (Linux, macOS and Windows)
 
 `smind serve` runs in the foreground and stops with your terminal. To keep the daemon running across logouts and
 reboots, let your OS service manager supervise it. smind has no background `smind start` of its own: the service manager
@@ -24,7 +24,8 @@ is the supervisor.
 ```sh
 smind service install        # systemd user unit (Linux) or LaunchAgent (macOS); enables it and starts the daemon
 # or in one step with the installer:
-curl -fsSL https://spacingmind.com/install.sh | sh -s -- --service
+curl -fsSL https://spacingmind.com/install.sh | sh -s -- --service       # Linux, macOS
+$env:SMIND_SERVICE = 1; irm https://raw.githubusercontent.com/spacingmind/smind/master/scripts/install.ps1 | iex   # Windows (PowerShell)
 ```
 
 | Command | What it does |
@@ -59,6 +60,26 @@ which exists only while you are logged in to the Mac's graphical session, so it 
 be loaded over plain ssh on a Mac nobody is logged in to (the plist is still written and loads at the next login).
 `smind stop` (or `smind service stop`) leaves it stopped; a crash restarts it.
 
+**Windows.** A per-user **Scheduled Task** named `smind` (not a Windows Service, which would run as another identity
+without your `PATH`, agent logins and profile). It has a logon trigger for your account only, runs as you in your
+interactive session at the least privilege level, and registering it needs **no administrator rights** (a policy that
+forbids scheduled tasks can still refuse it; the error then names the refused `schtasks /Create` step). **It starts at
+logon, not at boot**: a headless Windows machine needs auto-logon, which smind does not set up. The daemon is launched
+through `conhost.exe --headless`, so it has no console window. It runs only in your own interactive Windows session
+(signed in at the console or over RDP): `smind service start` over plain ssh will time out. `status` exits 0 / 3 / 4 as on the other
+systems. The task is named `smind` machine-wide, so a second user on the same machine is refused rather than given their own.
+
+- `smind service stop` asks the daemon to shut down (`POST /api/shutdown`) and only if it does not exit in time ends the
+  task and kills what is left; it never stops a daemon this task did not start (the desktop app's, or one you started by
+  hand), and `install`/`start` do not start next to one.
+- A crashed daemon is restarted up to 3 times, 1 minute apart, by `smind service run` (what the task executes): the
+  Task Scheduler's own restart-on-failure cannot see the daemon's exit code through the headless console. After that, or
+  after a clean stop, it stays down until the next logon or `smind service start`.
+- The task runs with your logon environment (`PATH` included), so there is no `--path`; `--home` becomes `service run
+  --home`. Environment changes need a new logon to reach it.
+- `install.ps1` takes `-Service` (`& ([scriptblock]::Create((irm <url>))) -Service`) or `SMIND_SERVICE=1` for the
+  `irm | iex` form.
+
 **Logs.** The daemon writes `$SMIND_HOME/daemon.log` itself (mode `0600`, rotated at 10 MiB, 5 files kept; change with
 `log.maxSizeMB` and `log.maxFiles` in `config.yaml`) in addition to stderr, so `smind service logs` works the same on
 every OS. On Linux `journalctl --user -u smind` (`journalctl -u smind` for a `--system` unit) shows the same lines plus
@@ -69,7 +90,8 @@ does not start while the app's own daemon holds the port. The app sees a service
 manage (`/healthz` reports `"managedBy": "systemd"` or `"launchd"`) and leaves it alone; do not use its **take over
 management** option on it, because the service manager would just restart the daemon. Stop the service first
 (`smind service uninstall`) if you want the app to manage the daemon. Hiding **take over** for a service-managed daemon
-is planned (ADR-0031 P10). Windows has no `smind service` yet (a per-user scheduled task is planned).
+is planned (ADR-0031 P10). On Windows the value is `"managedBy": "taskscheduler"`, and `smind service install` refuses to
+run from the app's own `%LOCALAPPDATA%\smind\bin` directory (the app replaces that daemon when it updates).
 
 ## Path A: direct connection
 
@@ -176,16 +198,14 @@ smind relay devices rename <id> <label>
 Ids accept a unique prefix. With the daemon running these talk to it; with no daemon they edit the registry file and
 the change applies when the daemon next starts.
 
-> **Requires updated clients.** Relay pairing needs apps that send a device identity. **The desktop app does** (a device key
-> per relay connection, created when you add the link; Settings → Connections shows "Waiting for approval on the daemon" with
-> the exact `smind relay devices approve <id>` to run, or "revoked"; it needs a daemon that sends the device challenge — one built
-> after the hello-v2 fix, newer than v0.12.0 — and says "different versions" otherwise). **The mobile app does not yet** (multi-device mobile client,
-> in progress): until it ships, an installed mobile build **cannot connect** through the relay — the daemon refuses a client
-> without a device identity ("device identity required"). As a stop-gap you can set `relay.legacyDevices: true` in
-> `$SMIND_HOME/config.yaml` to let such a client in on one fixed route. **Do not leave it on:** a legacy client is served without
-> approval and cannot be revoked, so anyone who has your pairing link (the relay host secret plus your daemon's public key) — or
-> the relay operator — can connect, and `devices revoke`, the pending state and the pairing window do not apply to it. The daemon
-> logs a warning at start and for every legacy connection.
+> **Requires updated clients.** Relay pairing needs the desktop and mobile apps that send a device identity
+> (multi-device clients, in progress). Until they ship, an installed desktop or mobile build **cannot connect** through
+> the relay — the daemon refuses a client without a device identity ("device identity required"). As a stop-gap you can
+> set `relay.legacyDevices: true` in `$SMIND_HOME/config.yaml` to let such a client in on one fixed route. **Do not
+> leave it on:** a legacy client is served without approval and cannot be revoked, so anyone who has your pairing link
+> (the relay host secret plus your daemon's public key) — or the relay operator — can connect, and `devices revoke`, the
+> pending state and the pairing window do not apply to it. The daemon logs a warning at start and for every legacy
+> connection.
 
 ### Limits today
 

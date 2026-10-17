@@ -5,3 +5,6 @@
 # Embedded into the binary (go:embed bundle): a Windows checkout with
 # core.autocrlf=true would otherwise ship SKILL.md files with CRLF endings.
 internal/skills/bundle/** text eol=lf
+
+# Golden files compared byte for byte by the service tests.
+internal/service/testdata/** text eol=lf

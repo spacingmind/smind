@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -384,7 +385,12 @@ func TestDesktopOwned(t *testing.T) {
 		{"linux user install", "/home/me/.local/bin/smind", "linux", env(nil), none, false},
 		{"windows managed dir", `C:\Users\me\AppData\Local\smind\bin\smind.exe`, "windows", env(map[string]string{"LOCALAPPDATA": `C:\Users\me\AppData\Local`}), none, true},
 		{"windows managed dir, other case", `c:\users\ME\appdata\local\SMIND\bin\smind.exe`, "windows", env(map[string]string{"LOCALAPPDATA": `C:\Users\me\AppData\Local`}), none, true},
-		{"windows beside the app", `C:\Program Files\sMind\smind.exe`, "windows", env(nil), func(p string) bool { return p == `C:/Program Files/sMind/sMind.exe` }, true},
+		{"windows beside the app", `C:\Program Files\sMind\smind.exe`, "windows", env(nil), func(p string) bool { return p == `C:/Program Files/sMind/smind-desktop.exe` }, true},
+		// A case-insensitive file system answers "exists" for sMind.exe whenever smind.exe is there:
+		// that must not read as "the desktop app is next to this binary".
+		{"windows standalone install on a case-insensitive fs", `C:\Users\me\AppData\Local\Programs\smind\smind.exe`, "windows", env(map[string]string{"LOCALAPPDATA": `C:\Users\me\AppData\Local`}), func(p string) bool {
+			return strings.EqualFold(path.Base(p), "smind.exe") || strings.EqualFold(path.Base(p), "sMind.exe")
+		}, false},
 		{"windows install script dir", `C:\Users\me\AppData\Local\Programs\smind\smind.exe`, "windows", env(map[string]string{"LOCALAPPDATA": `C:\Users\me\AppData\Local`}), none, false},
 	}
 	for _, c := range cases {

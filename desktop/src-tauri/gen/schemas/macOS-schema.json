@@ -405,12 +405,6 @@
           "markdownDescription": "Enables the connections_preview_relay command without any pre-configured scope."
         },
         {
-          "description": "Enables the connections_relay_status command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-connections-relay-status",
-          "markdownDescription": "Enables the connections_relay_status command without any pre-configured scope."
-        },
-        {
           "description": "Enables the connections_remove command without any pre-configured scope.",
           "type": "string",
           "const": "allow-connections-remove",
@@ -541,12 +535,6 @@
           "type": "string",
           "const": "deny-connections-preview-relay",
           "markdownDescription": "Denies the connections_preview_relay command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the connections_relay_status command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-connections-relay-status",
-          "markdownDescription": "Denies the connections_relay_status command without any pre-configured scope."
         },
         {
           "description": "Denies the connections_remove command without any pre-configured scope.",

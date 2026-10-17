@@ -2,9 +2,8 @@
 // (ADR-0031 D9). A device is a long-lived Ed25519 key; its id is a hash of
 // the public key, so the id can never be claimed by anyone who does not hold
 // the private key. The device proves possession with a signed hello bound to
-// the one end-to-end session it is sent over — the handshake keys, the relay
-// route's session id and a fresh challenge the daemon sends first — so a
-// captured hello is useless on any other session.
+// the one end-to-end handshake it is sent over, so a captured hello cannot
+// be replayed into another session.
 package devices
 
 import (
@@ -12,8 +11,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base32"
-	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -27,28 +24,12 @@ const (
 	// HelloMethod is the application-level method a client sends first,
 	// inside the encrypted channel, to identify its device.
 	HelloMethod = "relay.device_hello"
-	// HelloVersion is the only hello format this package accepts. Version 1
-	// signed only (daemon key, client ephemeral key); both are fixed by the
-	// client's captured handshake, so anyone able to open a route could replay
-	// a captured session (handshake frames plus the hello ciphertext) and be
-	// admitted as that device. Version 2 adds the route's session id and a
-	// per-session challenge from the daemon. No released client ever spoke v1
-	// (the first clients ship after this change), so v1 is not accepted.
-	HelloVersion = 2
-	// HelloVersionV1 is the retired format, kept so a v1 hello is recognised
-	// and refused with a clear reason.
-	HelloVersionV1 = 1
-
-	// ChallengeMethod is the event the daemon sends first, inside the
-	// encrypted channel, on a device route (flow: handshake → challenge →
-	// hello): {"event":"relay.device_challenge","params":{"v":2,"challenge":b64}}.
-	ChallengeMethod = "relay.device_challenge"
-	// ChallengeLen is the challenge size in bytes.
-	ChallengeLen = 32
+	// HelloVersion is the only hello format this package accepts.
+	HelloVersion = 1
 
 	deviceIDLen   = 26
 	maxLabelBytes = 64
-	helloDomain   = "smind-device-hello-v2"
+	helloDomain   = "smind-device-hello"
 )
 
 var (
@@ -57,7 +38,6 @@ var (
 	ErrIDMismatch   = errors.New("devices: device id does not match public key")
 	ErrBadSignature = errors.New("devices: bad hello signature")
 	ErrBadLabel     = errors.New("devices: invalid device label")
-	ErrBadChallenge = errors.New("devices: bad hello challenge")
 )
 
 var idEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
@@ -81,89 +61,29 @@ type Hello struct {
 	Password  string `json:"password,omitempty"`
 }
 
-// NewChallenge returns a fresh random challenge for one session.
-func NewChallenge() ([]byte, error) {
-	c := make([]byte, ChallengeLen)
-	if _, err := rand.Read(c); err != nil {
-		return nil, err
-	}
-	return c, nil
-}
-
-// ChallengeMessage is the encrypted application message that carries the
-// daemon's challenge to the device.
-func ChallengeMessage(challenge []byte) []byte {
-	b, err := json.Marshal(map[string]any{
-		"event":  ChallengeMethod,
-		"params": map[string]any{"v": HelloVersion, "challenge": challenge},
-	})
-	if err != nil {
-		panic(err) // a map of a string, an int and a []byte always marshals
-	}
-	return b
-}
-
-// ParseChallengeMessage extracts the challenge from a message, reporting
-// whether the message is the daemon's challenge event at all.
-func ParseChallengeMessage(msg []byte) (challenge []byte, ok bool, err error) {
-	var env struct {
-		Event  string `json:"event"`
-		Params struct {
-			V         int    `json:"v"`
-			Challenge []byte `json:"challenge"`
-		} `json:"params"`
-	}
-	if json.Unmarshal(msg, &env) != nil || env.Event != ChallengeMethod {
-		return nil, false, nil
-	}
-	if env.Params.V != HelloVersion {
-		return nil, true, fmt.Errorf("%w: challenge version %d", ErrBadVersion, env.Params.V)
-	}
-	if len(env.Params.Challenge) != ChallengeLen {
-		return nil, true, fmt.Errorf("%w: %d bytes", ErrBadChallenge, len(env.Params.Challenge))
-	}
-	return env.Params.Challenge, true, nil
-}
-
-// HelloSignedBytes is the message a device signs (version 2):
-//
-//	"smind-device-hello-v2"
-//	‖ TranscriptHash(daemonPub, mobilePub)   32 bytes, the HKDF salt of the session
-//	‖ daemonPub                               32 bytes
-//	‖ uint16BE(len(sessionID)) ‖ sessionID    the exact bytes of the route's Frame.session_id
-//	‖ challenge                               32 bytes, fresh from the daemon
-//
-// mobilePub is the client's ephemeral X25519 handshake key. The E2EE session
-// keys depend only on the daemon's long-lived key and that ephemeral key, so a
-// captured client transcript replays into an identical session; the session id
-// ties the hello to one route, and the daemon's fresh challenge — which a
-// replaying party cannot have seen — to one live session. daemonPub is
-// repeated outside the hash so the signed bytes name the daemon explicitly.
-func HelloSignedBytes(daemonPub, mobilePub, sessionID, challenge []byte) []byte {
-	if len(sessionID) > 0xFFFF {
-		panic("devices: session id too long to sign") // the relay caps ids at 128 bytes
-	}
+// HelloSignedBytes is the message a device signs:
+// "smind-device-hello" ‖ TranscriptHash(daemonPub, mobilePub) ‖ daemonPub.
+// mobilePub is the client's ephemeral X25519 handshake key, so the signature
+// is valid for exactly one session; daemonPub is repeated outside the hash so
+// the signed bytes name the daemon explicitly.
+func HelloSignedBytes(daemonPub, mobilePub []byte) []byte {
 	th := e2ee.TranscriptHash(daemonPub, mobilePub)
-	out := make([]byte, 0, len(helloDomain)+len(th)+len(daemonPub)+2+len(sessionID)+len(challenge))
+	out := make([]byte, 0, len(helloDomain)+len(th)+len(daemonPub))
 	out = append(out, helloDomain...)
 	out = append(out, th...)
 	out = append(out, daemonPub...)
-	out = binary.BigEndian.AppendUint16(out, uint16(len(sessionID)))
-	out = append(out, sessionID...)
-	out = append(out, challenge...)
 	return out
 }
 
 // SignHello builds a signed hello for the session identified by the two
-// handshake public keys, the relay route's session id and the daemon's
-// challenge.
-func SignHello(priv ed25519.PrivateKey, label string, daemonPub, mobilePub, sessionID, challenge []byte) Hello {
+// handshake public keys.
+func SignHello(priv ed25519.PrivateKey, label string, daemonPub, mobilePub []byte) Hello {
 	pub := priv.Public().(ed25519.PublicKey)
 	return Hello{
 		V:         HelloVersion,
 		DevicePub: append([]byte(nil), pub...),
 		Label:     label,
-		Signature: ed25519.Sign(priv, HelloSignedBytes(daemonPub, mobilePub, sessionID, challenge)),
+		Signature: ed25519.Sign(priv, HelloSignedBytes(daemonPub, mobilePub)),
 	}
 }
 
@@ -171,12 +91,9 @@ func SignHello(priv ed25519.PrivateKey, label string, daemonPub, mobilePub, sess
 // claimed, returning the device's public key. The label is checked too:
 // it is shown to humans approving devices, so control characters must not
 // get through.
-func (h Hello) Verify(frameDeviceID string, daemonPub, mobilePub, sessionID, challenge []byte) (ed25519.PublicKey, error) {
+func (h Hello) Verify(frameDeviceID string, daemonPub, mobilePub []byte) (ed25519.PublicKey, error) {
 	if h.V != HelloVersion {
 		return nil, fmt.Errorf("%w: %d", ErrBadVersion, h.V)
-	}
-	if len(challenge) != ChallengeLen {
-		return nil, ErrBadChallenge
 	}
 	if len(h.DevicePub) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("%w: got %d bytes", ErrBadKey, len(h.DevicePub))
@@ -188,7 +105,7 @@ func (h Hello) Verify(frameDeviceID string, daemonPub, mobilePub, sessionID, cha
 	if err := ValidateLabel(h.Label); err != nil {
 		return nil, err
 	}
-	if !ed25519.Verify(pub, HelloSignedBytes(daemonPub, mobilePub, sessionID, challenge), h.Signature) {
+	if !ed25519.Verify(pub, HelloSignedBytes(daemonPub, mobilePub), h.Signature) {
 		return nil, ErrBadSignature
 	}
 	return append(ed25519.PublicKey(nil), pub...), nil
