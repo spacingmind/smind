@@ -5,6 +5,7 @@ import { useCopyFeedback } from "@/components/timeline/message-actions";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { compareVersions, dismissNotice, isNoticeDismissed, managedByLabel, noticeToken, updateCommands, type UpdateCommand } from "@/lib/daemon-version";
 import { Icons } from "@/lib/icons";
+import { CONNECTION_CHANGED_EVENT } from "@/lib/local-paths";
 import { desktop, isDesktop, type Connection, type ConnectionVersionInfo, type DaemonProgress } from "@/lib/platform";
 import type { WsClient } from "@/lib/ws-client";
 
@@ -60,20 +61,24 @@ export function DesktopDaemonBanner({
   /** (connection id, daemon version) pairs already auto-updated this app session, so a failure never loops. */
   const autoFiredRef = useRef<Set<string>>(new Set());
 
+  /** Bumped per refresh, so a slow answer for a connection the user has since left never lands. */
+  const refreshSeq = useRef(0);
+
   const refresh = useCallback(() => {
     if (!isDesktop) return;
+    const seq = ++refreshSeq.current;
     desktop
       .getCurrentConnection()
       .then(async (c) => {
-        setCurrent(c);
         const versionInfo = await desktop.connectionVersion(c.id);
+        // Learn whether the app manages the daemon *before* publishing any of
+        // it: published piecemeal, a managed local daemon would flash the
+        // copy-this-command notice until its status arrived.
+        const isManaged = c.kind === "local" ? (await desktop.daemonStatus()).managedState === "managed" : false;
+        if (seq !== refreshSeq.current) return;
+        setCurrent(c);
         setInfo(versionInfo);
-        if (c.kind === "local") {
-          const status = await desktop.daemonStatus();
-          setManaged(status.managedState === "managed");
-        } else {
-          setManaged(false);
-        }
+        setManaged(isManaged);
       })
       .catch(() => {
         // Best-effort: a version-skew notice is cosmetic, never load-bearing.
@@ -82,6 +87,19 @@ export function DesktopDaemonBanner({
 
   useEffect(() => {
     refresh();
+  }, [refresh]);
+
+  // Switching connections: everything learned about the old one (its
+  // daemon.info answer, a dismissal) is about a different daemon now.
+  useEffect(() => {
+    const onChanged = () => {
+      setReported(null);
+      setDismissedToken(null);
+      setError(null);
+      refresh();
+    };
+    window.addEventListener(CONNECTION_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(CONNECTION_CHANGED_EVENT, onChanged);
   }, [refresh]);
 
   useEffect(() => {
@@ -112,21 +130,22 @@ export function DesktopDaemonBanner({
   useEffect(() => {
     if (!needsReport || !client) return;
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
     // A daemon from before this method never answers an unknown method (it
-    // dropped the request), so silence has to count as "unsupported" too.
-    const silence = new Promise<"unsupported">((resolve) => {
-      timer = setTimeout(() => resolve("unsupported"), DAEMON_INFO_TIMEOUT_MS);
-    });
-    Promise.race([client.call<DaemonReport>("daemon.info"), silence])
+    // drops the request), so silence has to count as "unsupported" too. The
+    // verdict is provisional: a real answer that merely arrives late (a slow
+    // relay) replaces it.
+    const timer = setTimeout(() => {
+      if (!cancelled) setReported((prev) => prev ?? "unsupported");
+    }, DAEMON_INFO_TIMEOUT_MS);
+    client
+      .call<DaemonReport>("daemon.info")
       .then((r) => !cancelled && setReported(r))
       .catch((err: unknown) => {
         // "method not found" is the pre-daemon.info daemon (newer daemons say
         // so); anything else (connection not ready, dropped) tells us
         // nothing -- stay quiet.
         if (!cancelled && err instanceof Error && /method not found/i.test(err.message)) setReported("unsupported");
-      })
-      .finally(() => clearTimeout(timer));
+      });
     return () => {
       cancelled = true;
       clearTimeout(timer);

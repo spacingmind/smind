@@ -479,4 +479,78 @@ describe("ADR-0031 P10 — the older-daemon notice for daemons the app does not 
     await mount();
     await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
   });
+
+  it("never flashes the copy-this-command notice for a managed local daemon while its status loads", async () => {
+    let resolveStatus!: (v: unknown) => void;
+    const status = new Promise((r) => {
+      resolveStatus = r;
+    });
+    mockPlatform({ current: LOCAL, connectionVersion: older("0.11.1"), daemonStatus: () => status });
+    await mount();
+    await flush();
+    await flush();
+    // The version is known, the app's management of the daemon is not yet: say nothing.
+    expect(screen.queryByTestId("desktop-daemon-banner")).not.toBeInTheDocument();
+    await act(async () => {
+      resolveStatus({ managedState: "managed", comparison: "older" });
+    });
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner-update")).toBeInTheDocument());
+    expect(commandTexts()).toEqual([]);
+  });
+
+  it("lets a late daemon.info answer replace the provisional version-unknown notice", async () => {
+    vi.useFakeTimers();
+    try {
+      let answer!: (v: unknown) => void;
+      const call = vi.fn(
+        () =>
+          new Promise((r) => {
+            answer = r;
+          }),
+      );
+      mockPlatform({ current: RELAY, connectionVersion: relayProbe });
+      const { DesktopDaemonBanner } = await import("@/components/desktop-daemon-banner");
+      render(<DesktopDaemonBanner client={{ call } as never} />);
+      await flush();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4500);
+      });
+      expect(screen.getByTestId("desktop-daemon-banner")).toHaveTextContent("Daemon version unknown");
+      await act(async () => {
+        answer({ version: "0.12.0" }); // a slow relay finally answers: it is current
+      });
+      await flush();
+      expect(screen.queryByTestId("desktop-daemon-banner")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-reads and forgets the old connection's dismissal when the connection changes", async () => {
+    const OTHER = { ...TUNNEL, id: "url:other", label: "Other" };
+    let current: unknown = TUNNEL;
+    const connectionVersion = vi.fn(older("0.11.1"));
+    vi.doMock("@/lib/platform", () => ({
+      isDesktop: true,
+      desktop: {
+        getCurrentConnection: () => Promise.resolve(current),
+        connectionVersion,
+        daemonStatus: () => Promise.resolve({ managedState: "notRunning" }),
+        daemonUpdate: vi.fn(),
+        onDaemonProgress: () => () => {},
+      },
+    }));
+    await mount();
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("desktop-daemon-banner-dismiss"));
+    await waitFor(() => expect(screen.queryByTestId("desktop-daemon-banner")).not.toBeInTheDocument());
+
+    // Switch to another connection with the same versions: its notice is its own.
+    current = OTHER;
+    await act(async () => {
+      window.dispatchEvent(new Event("smind:connection-changed"));
+    });
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
+    expect(connectionVersion).toHaveBeenLastCalledWith("url:other");
+  });
 });

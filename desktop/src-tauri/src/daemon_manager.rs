@@ -493,7 +493,13 @@ fn answering_without_owner(reachable: bool, port_owner: Option<u32>) -> bool {
 /// effective_managed_state is `managed::classify` plus the Windows case
 /// above: a port that answers with no visible owner is `Unmanaged` (never
 /// `NotRunning`, which would invite Install onto an occupied port).
-fn effective_managed_state(platform: Platform, reachable: bool, record: Option<&ManagedRecord>, port_owner: Option<u32>) -> ManagedState {
+fn effective_managed_state(platform: Platform, reachable: bool, record: Option<&ManagedRecord>, port_owner: Option<u32>, managed_by: Option<&str>) -> ManagedState {
+    // An OS service owns the daemon: whatever the app recorded (say, a
+    // take-over from before the app knew about services), it must not offer
+    // to restart, update or kill it -- the service would just start it again.
+    if reachable && managed_by.is_some() {
+        return ManagedState::Unmanaged;
+    }
     if platform == Platform::Windows && answering_without_owner(reachable, port_owner) {
         return ManagedState::Unmanaged;
     }
@@ -672,7 +678,7 @@ async fn compute_status(app: &AppHandle, state: &DesktopState) -> DaemonStatus {
     };
 
     let port_owner = find_port_owner(platform, port);
-    let managed_state = effective_managed_state(platform, reachable, record.as_ref(), port_owner);
+    let managed_state = effective_managed_state(platform, reachable, record.as_ref(), port_owner, managed_by.as_deref());
 
     // AC6: on Windows, an unmanaged port owner whose image is not an
     // identifiable smind.exe is most likely the WSL relay forwarding a
@@ -730,11 +736,22 @@ async fn compute_status(app: &AppHandle, state: &DesktopState) -> DaemonStatus {
     }
 }
 
+/// refuse_service_managed is the backstop behind the UI hiding its buttons:
+/// install/update/restart stop the running daemon, which a service-managed
+/// one must never have done to it by the app (ADR-0031 P10).
+async fn refuse_service_managed(platform: Platform, base_url: &url::Url, port: u16) -> Result<(), String> {
+    match probe_health(base_url).await.managed_by.as_deref() {
+        Some(m) => Err(take_over_refusal(platform, None, Some(m), port).unwrap_or_default()),
+        None => Ok(()),
+    }
+}
+
 async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, String> {
     let platform = detect_platform();
     let app_version = app_version_string(app);
     let base_url = local_base_url(state);
     let port = base_url.port_or_known_default().unwrap_or(DEFAULT_PORT);
+    refuse_service_managed(platform, &base_url, port).await?;
 
     match platform {
         Platform::Macos => {
@@ -865,6 +882,7 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
     let platform = detect_platform();
     let base_url = local_base_url(state);
     let port = base_url.port_or_known_default().unwrap_or(DEFAULT_PORT);
+    refuse_service_managed(platform, &base_url, port).await?;
 
     let record = match platform {
         Platform::Macos => macos_layout(app).ok().and_then(|l| managed::load(&l.state_path)),
@@ -1307,6 +1325,19 @@ mod tests {
         assert_eq!(classify_unmanaged(None, Some("")), ForeignOrWsl);
     }
 
+    /// A take-over recorded before the app knew about services must not make a
+    /// service-managed daemon look app-managed (and so restartable).
+    #[test]
+    fn a_service_managed_daemon_is_unmanaged_even_with_a_matching_record() {
+        let record = ManagedRecord { pid: 7, version: "0.12.0".into(), installed_at: "0".into(), exe_path: "/x/smind".into() };
+        for platform in [Platform::Macos, Platform::Windows] {
+            assert_eq!(effective_managed_state(platform, true, Some(&record), Some(7), None), ManagedState::Managed);
+            assert_eq!(effective_managed_state(platform, true, Some(&record), Some(7), Some("launchd")), ManagedState::Unmanaged);
+        }
+        // Not answering: nothing to be managed by anyone.
+        assert_eq!(effective_managed_state(Platform::Macos, false, None, None, Some("launchd")), ManagedState::NotRunning);
+    }
+
     #[test]
     fn take_over_refused_for_a_service_managed_daemon_on_every_platform() {
         for platform in [Platform::Macos, Platform::Windows, Platform::Unsupported] {
@@ -1352,14 +1383,14 @@ mod tests {
         assert!(!answering_without_owner(false, None));
         assert!(!answering_without_owner(true, Some(7)));
 
-        assert_eq!(effective_managed_state(Platform::Windows, true, None, None), ManagedState::Unmanaged);
+        assert_eq!(effective_managed_state(Platform::Windows, true, None, None, None), ManagedState::Unmanaged);
         // Nothing answering: still plain NotRunning.
-        assert_eq!(effective_managed_state(Platform::Windows, false, None, None), ManagedState::NotRunning);
+        assert_eq!(effective_managed_state(Platform::Windows, false, None, None, None), ManagedState::NotRunning);
         // A visible owner keeps the normal decision table.
         let record = ManagedRecord { pid: 7, version: "0.10.0".into(), installed_at: "0".into(), exe_path: r"C:\x\smind.exe".into() };
-        assert_eq!(effective_managed_state(Platform::Windows, true, Some(&record), Some(7)), ManagedState::Managed);
+        assert_eq!(effective_managed_state(Platform::Windows, true, Some(&record), Some(7), None), ManagedState::Managed);
         // Other platforms never use the Windows rule.
-        assert_eq!(effective_managed_state(Platform::Macos, true, None, None), ManagedState::NotRunning);
+        assert_eq!(effective_managed_state(Platform::Macos, true, None, None, None), ManagedState::NotRunning);
     }
 
     #[test]
