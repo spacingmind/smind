@@ -272,4 +272,25 @@ describe("daemon-section (desktop build)", () => {
     expect(daemonStatus).toHaveBeenCalledTimes(2);
     expect(screen.getByTestId("daemon-reachable")).toHaveTextContent("Not running");
   });
+
+  it("shows managed-by-service and hides Take over for a service-managed daemon", async () => {
+    await renderSection({
+      daemonStatus: () => Promise.resolve(baseStatus({ managedState: "unmanaged", managedBy: "systemd", comparison: "older" })),
+    });
+
+    expect(screen.getByTestId("daemon-managed-state")).toHaveTextContent("Managed by systemd");
+    expect(screen.getByTestId("daemon-service-notice")).toHaveTextContent("smind service");
+    expect(screen.queryByTestId("daemon-take-over")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("daemon-install")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("daemon-restart")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("daemon-update")).not.toBeInTheDocument();
+  });
+
+  it("names Task Scheduler for a Windows service-managed daemon", async () => {
+    await renderSection({
+      daemonStatus: () => Promise.resolve(baseStatus({ platform: "windows", managedState: "unmanaged", managedBy: "task" })),
+    });
+    expect(screen.getByTestId("daemon-managed-state")).toHaveTextContent("Managed by Task Scheduler");
+    expect(screen.queryByTestId("daemon-take-over")).not.toBeInTheDocument();
+  });
 });

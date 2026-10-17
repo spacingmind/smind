@@ -66,10 +66,16 @@ anything the daemon prints outside its logger, such as a crash trace; on macOS t
 
 **Desktop app.** The app never starts a second daemon on a port that is already served, and `smind service install`
 does not start while the app's own daemon holds the port. The app sees a service-managed daemon as one it does not
-manage (`/healthz` reports `"managedBy": "systemd"` or `"launchd"`) and leaves it alone; do not use its **take over
-management** option on it, because the service manager would just restart the daemon. Stop the service first
-(`smind service uninstall`) if you want the app to manage the daemon. Hiding **take over** for a service-managed daemon
-is planned (ADR-0031 P10). Windows has no `smind service` yet (a per-user scheduled task is planned).
+manage (`/healthz` reports `"managedBy": "systemd"` or `"launchd"`) and leaves it alone: Settings → Daemon says "Managed
+by systemd" and offers no **take over management** (the app also refuses it), because the service manager would just
+restart the daemon. Stop the service first (`smind service uninstall`) if you want the app to manage the daemon. Windows
+has no `smind service` yet (a per-user scheduled task is planned).
+
+**Older than the app.** When the connected daemon is older than the desktop app, the app shows a dismissible notice with
+the command that updates it and a **Copy** button: `smind update` (daemons from v0.12.0 on) or the installer one-liners
+for an older one. A daemon reached through a relay is asked for its version over the connection itself (the `daemon.info`
+method); a relay daemon too old to answer is shown as "version unknown" with the installer commands. The notice is
+dismissed per connection and per daemon/app version pair. A daemon the app manages keeps its **Update & restart** button.
 
 ## Path A: direct connection
 
