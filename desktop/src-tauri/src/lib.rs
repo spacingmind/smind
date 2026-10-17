@@ -306,6 +306,8 @@ pub fn run() {
             );
 
             app.manage(updater::UpdateState::default());
+            let ssh_tunnels = ssh_tunnel::SshTunnels::default();
+            ssh_tunnels.bind_proxy(proxy_state.clone());
 
             app.manage(DesktopState {
                 proxy: proxy_state,
@@ -313,7 +315,7 @@ pub fn run() {
                 app_settings: Mutex::new(app_settings),
                 app_settings_path,
                 proxy_url,
-                ssh_tunnels: ssh_tunnel::SshTunnels::default(),
+                ssh_tunnels,
                 cache,
                 tray,
                 client_task: Mutex::new(client_task),

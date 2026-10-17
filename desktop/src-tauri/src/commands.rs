@@ -166,6 +166,12 @@ pub async fn select_connection(
     let existing = proxy.registry.lock().unwrap().list().iter().find(|c| c.id == id).cloned();
     if let Some(conn) = existing.as_ref().filter(|c| c.kind == smind_daemon_client::proxy::ConnectionKind::Ssh) {
         crate::ssh_tunnel::ensure_tunnel(proxy, tunnels, conn).await?;
+        // Removed while the tunnel was coming up: do not leave an orphan
+        // authenticated ssh child behind.
+        if !proxy.registry.lock().unwrap().list().iter().any(|c| c.id == id) {
+            crate::ssh_tunnel::forget_tunnel(proxy, tunnels, id);
+            return Err("this connection was removed".to_string());
+        }
     }
     let mut registry = proxy.registry.lock().unwrap();
     registry.select(id)?;
