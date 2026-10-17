@@ -1053,7 +1053,7 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   authenticates the same way. Review (independent, adversarial) drove: the upgrade-rule fix above, tunnel liveness/serialization,
   bounded 64 KiB bodies, per-id start lock, IPv6/non-ASCII host rules, remove-cleanup on a failed save, userinfo rejection in
   `validate_base_url`, token query no longer logged. **Not verified:** a real macOS first-run on a wiped profile and a real ssh host
-  (see the PR), Windows 11, and a live P4 daemon login (PR #349 was still open; the proxy follows its documented API). Known gaps: a
+  (see the PR), Windows 11, and Windows-side ssh. **Verified against the real P4 daemon (#349, merged):** an opt-in test (`src-tauri/src/real_daemon_test.rs`, `SMIND_REAL_DAEMON_BIN=<smind> cargo test real_daemon`) drives a real `smind serve` with a password through probe, wrong/right login, the proxy's synthesized token + injected session bearer, local token-file injection after the real 403, session drop, and both watcher paths; it found that the real daemon selects the plain `smind` subprotocol (never the bearer entry), so the proxy now forwards `smind` along with `smind.bearer.*`. Known gaps: a
   squatter that binds the picked tunnel port before ssh authenticates cannot be told apart from ssh's listener; a downgrade to an app
   that does not know `kind: "ssh"` resets `connections.json` (pre-existing all-or-nothing registry load); sessions held in Rust expire
   after ~24 h and then fall back to the webview login.
