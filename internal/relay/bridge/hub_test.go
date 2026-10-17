@@ -237,67 +237,96 @@ func TestRevokedDeviceRefusedWithReasonAtHello(t *testing.T) {
 // challenge exists for. The E2EE session keys depend only on the daemon's
 // long-lived key and the client's ephemeral key, so whoever can open a route
 // (a relay operator, a host-secret holder) can replay a CAPTURED client
-// transcript — handshake frames and the hello ciphertext — into a new route
-// and the daemon derives the identical keys and decrypts it. The signed hello
-// must not carry over: the daemon's fresh per-session challenge (and the route
-// session id) are part of what was signed. The real session is untouched.
+// transcript — handshake frames and the hello ciphertext — and the daemon
+// derives the identical keys and decrypts it. The signed hello must not carry
+// over: the daemon's fresh per-session challenge (and the route session id) are
+// part of what was signed.
+//
+// Two variants isolate the two bindings: a replay into ANOTHER session id is
+// also stopped by the session-id binding; a replay into the SAME session id,
+// after the original session is gone, is stopped only by the challenge.
 func TestCapturedHelloSessionCannotBeReplayedIntoANewRoute(t *testing.T) {
-	f := newHubFixture(t, Options{})
-	approvedWindow(t, f, 2)
-	hub := f.start(nil)
-	victim := f.newDevice(false, "victim")
-	victim.connect()
-	victim.mustList()
-
-	// What the relay saw the victim send for its session: every data frame.
-	var captured []*relaypb.Frame
-	for _, rec := range f.relay.Frames.Records() {
-		if rec.Sent && rec.Frame.GetDeviceId() == victim.id && string(rec.Frame.GetSessionId()) == victim.session {
-			captured = append(captured, rec.Frame)
+	for _, sameSession := range []bool{false, true} {
+		name := "another session id"
+		if sameSession {
+			name = "the same session id after the original ended (only the challenge stops this)"
 		}
-	}
-	if len(captured) < 3 { // registration, E2EE hello, E2EE ready, the hello request, ...
-		t.Fatalf("captured only %d of the victim's frames", len(captured))
-	}
+		t.Run(name, func(t *testing.T) {
+			f := newHubFixture(t, Options{})
+			approvedWindow(t, f, 2)
+			hub := f.start(nil)
+			victim := f.newDevice(false, "victim")
+			victim.connect()
+			victim.mustList()
 
-	// The attacker replays them verbatim on a route of its own.
-	rc := relaytest.NativeClient(t, f.relay)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	adm, err := client.Admit(ctx, rc, f.relay.HostID, "attacker", f.relay.Secret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stream, err := rc.OpenData(metadata.AppendToOutgoingContext(ctx, "admission-id", adm))
-	if err != nil {
-		t.Fatal(err)
-	}
-	const replaySession = "replayed-route"
-	for _, fr := range captured {
-		replay := proto.Clone(fr).(*relaypb.Frame)
-		replay.SessionId = []byte(replaySession)
-		if err := stream.Send(replay); err != nil {
-			t.Fatalf("replay send: %v", err)
-		}
-	}
+			// What the relay saw the victim send for its session: every data frame.
+			var captured []*relaypb.Frame
+			for _, rec := range f.relay.Frames.Records() {
+				if rec.Sent && rec.Frame.GetDeviceId() == victim.id && string(rec.Frame.GetSessionId()) == victim.session {
+					captured = append(captured, rec.Frame)
+				}
+			}
+			if len(captured) < 3 { // registration, E2EE hello, E2EE ready, the hello request, ...
+				t.Fatalf("captured only %d of the victim's frames", len(captured))
+			}
 
-	// The daemon answers the handshake (the attacker cannot read it), reaches
-	// the replayed hello, and refuses it: nothing was signed over THIS
-	// session's challenge.
-	waitFor(t, "the daemon to reject the replayed hello", func() bool { return f.logs.contains("device_hello rejected") })
-	hub.mu.Lock()
-	for ref, s := range hub.sessions {
-		if ref.session == replaySession && s.admitted {
+			replaySession := "replayed-route"
+			if sameSession {
+				replaySession = victim.session
+				// The original session ends: the device goes away and the
+				// daemon forgets the session (as after a detach).
+				victim.cancel()
+				hub.detach(routeRef{device: victim.id, session: victim.session})
+				waitFor(t, "the original session to be gone", func() bool {
+					hub.mu.Lock()
+					defer hub.mu.Unlock()
+					_, still := hub.sessions[routeRef{device: victim.id, session: victim.session}]
+					return !still
+				})
+			}
+			rejectedBefore := f.logs.count("device_hello rejected")
+
+			// The attacker replays them verbatim.
+			rc := relaytest.NativeClient(t, f.relay)
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			adm, err := client.Admit(ctx, rc, f.relay.HostID, "attacker", f.relay.Secret)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream, err := rc.OpenData(metadata.AppendToOutgoingContext(ctx, "admission-id", adm))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, fr := range captured {
+				replay := proto.Clone(fr).(*relaypb.Frame)
+				replay.SessionId = []byte(replaySession)
+				if err := stream.Send(replay); err != nil {
+					t.Fatalf("replay send: %v", err)
+				}
+			}
+
+			// The daemon answers the handshake (the attacker cannot read it),
+			// reaches the replayed hello, and refuses it: nothing was signed
+			// over THIS session's challenge.
+			waitFor(t, "the daemon to reject the replayed hello", func() bool {
+				return f.logs.count("device_hello rejected") > rejectedBefore
+			})
+			hub.mu.Lock()
+			for ref, s := range hub.sessions {
+				if ref.session == replaySession && s.admitted {
+					hub.mu.Unlock()
+					t.Fatal("a replayed hello was admitted")
+				}
+			}
 			hub.mu.Unlock()
-			t.Fatal("a replayed hello was admitted")
-		}
-	}
-	hub.mu.Unlock()
-
-	// And the real session was not superseded or disturbed.
-	victim.mustList()
-	if got := f.reg.List(); len(got) != 1 || got[0].ID != victim.id {
-		t.Fatalf("the registry changed: %+v", got)
+			if got := f.reg.List(); len(got) != 1 || got[0].ID != victim.id {
+				t.Fatalf("the registry changed: %+v", got)
+			}
+			if !sameSession {
+				victim.mustList() // the real session was not superseded or disturbed
+			}
+		})
 	}
 }
 

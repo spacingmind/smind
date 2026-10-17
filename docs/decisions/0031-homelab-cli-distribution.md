@@ -726,7 +726,8 @@ Message flows (D = daemon, R = relay, C1…C3 = clients; "route" = `(host, sessi
 3. Daemon spawns a device session  (one goroutine tree per device)
    b. D → R  OpenData: Frame{host, s1, d1, DAEMON_TO_DEVICE}      (attaches the daemon side of the route)
    c. R → D  buffered E2EE hello flushed; E2EE handshake completes (responder role, unchanged)
-   d. C1 → D (first encrypted app message) device_hello{device_pub, label, signature, [password]}
+   d. D → C1 (first encrypted app message) relay.device_challenge{challenge}            (fresh per session, hello v2)
+      C1 → D device_hello{v:2, device_pub, label, signature over keys‖session_id‖challenge, [password]}
       D      verifies the signature, derives device id, checks the device registry (see "Device identity")
    e. D      api.ServeTransport(ctx, dc)  — the same call a browser WebSocket gets, so C1 sees ALL of the
              daemon's workspaces, spaces and tasks; subscriptions and permission prompts are per connection
@@ -780,13 +781,14 @@ somebody else's nonce, which only counts as liveness); each (re)opened stream pr
   `{"id","error":{"message","code"}}` with code `awaiting_approval` (device recorded `pending`), `revoked`, `bad_hello` (bad
   signature / id mismatch / label / malformed), `hello_version_unsupported` (a hello that is not version 2),
   `too_many_devices`, `device_hello_required` (legacy clients refused), `device_hello_unsupported` or `internal`; the daemon
-  then ends the route. A daemon from before P12b answers `method not found`, which is how a client detects it (legacy daemon).
+  then ends the route.
+- *What a client does when no challenge arrives:* wait a bounded time (5 s) after the handshake, then treat the silence as "this daemon is too old for device hello v2" (a 0.12.0 daemon only accepts the retired v1 hello and sends no challenge) and tell the user to update the daemon. A client **never** falls back to a v1 hello and never signs without a challenge — that would reopen the replay. (A daemon from before P12b never opens a device route at all; clients detect it by the unanswered handshake.)
 - *The challenge (hello v2):* on a device route (any route but the fixed legacy one) the daemon's first encrypted message is
-  `{"event":"relay.device_challenge","params":{"v":2,"challenge":<std base64 of 32 random bytes>}}` (no `id`; a client waits
-  for it before signing, and never lets it reach the application layer). A new challenge per session, never reused.
+  `{"event":"relay.device_challenge","params":{"v":2,"challenge":<standard base64, with padding, of 32 random bytes>}}` (no `id`; a client waits
+  for it before signing, and never lets it reach the application layer). One challenge per session, never reused across sessions: it is kept on the session, so a transport blip while the device is identifying does not invalidate a hello it already signed.
 - *What is signed (v2):* `"smind-device-hello-v2" ‖ TranscriptHash(daemon_pub, client_ephemeral_pub) ‖ daemon_pub ‖
   uint16BE(len(session_id)) ‖ session_id ‖ challenge`, where `TranscriptHash` is the HKDF salt the session keys already use,
-  `SHA-256("smind relay e2ee v1" ‖ daemon_pub ‖ client_pub)`, `session_id` is the UTF-8 bytes of the relay route's session id
+  `SHA-256("smind relay e2ee v1" ‖ daemon_pub ‖ client_pub)`, `session_id` is the exact bytes of the route's `Frame.session_id` (ids are capped at 128 bytes)
   and `challenge` the 32 bytes just received; the E2EE core is unchanged (a test pins the equality). `device_id` = lowercase
   unpadded RFC 4648 base32 of `SHA-256(device_pub)`, first 26 characters. Shared test vector (v2, with the challenge message
   and three negative vectors — other client key, other session id, other challenge):
@@ -800,7 +802,9 @@ somebody else's nonce, which only counts as liveness); each (re)opened stream pr
 - *Residual (recorded, not fixed here):* with deterministic session keys a replayed transcript makes the daemon encrypt with
   the same (key, nonce) pairs as the original session: the daemon's replies in the replay (the challenge, then a refusal)
   reuse the keystream of the original session's first daemon frames. What an eavesdropper can learn from that is bounded by
-  what those frames contain (a random challenge; the hello response, whose content is public metadata). A handshake that mixes
+  what those frames contain (a random challenge; the hello response, whose content is public metadata). Nonce reuse also
+  leaks the Poly1305 one-time key for those two counters, so a replaying party could forge or splice daemon→client frames at
+  counters 0 and 1 — which the real client consumed long ago — i.e. at worst a denial of service. A handshake that mixes
   a daemon ephemeral key into the key schedule would remove the property for good; it changes the E2EE core and is a separate
   decision.
 - *Daemon behaviour:* one session per announced `(device_id, session_id)`; sessions survive a relay reconnect (orphaned, E2EE

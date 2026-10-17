@@ -241,7 +241,7 @@ func buildVector(t *testing.T) []byte {
 		}
 	}
 	v := vectorFile{
-		Comment:          "ADR-0031 D9 device_hello VERSION 2. signature = Ed25519(seed, signed_bytes); signed_bytes = \"smind-device-hello-v2\" || SHA256(\"smind relay e2ee v1\" || daemon_pub || mobile_pub) || daemon_pub || uint16BE(len(session_id)) || session_id || challenge. session_id is the relay route's session id (UTF-8 bytes of the string in the frame); challenge is the 32 bytes the daemon sent in challenge_message right after the E2EE handshake. Verify with device_id from the frame. Version 1 (device_hello_vector_v1.json) is retired and refused.",
+		Comment:          "ADR-0031 D9 device_hello VERSION 2. signature = Ed25519(seed, signed_bytes); signed_bytes = \"smind-device-hello-v2\" || SHA256(\"smind relay e2ee v1\" || daemon_pub || mobile_pub) || daemon_pub || uint16BE(len(session_id)) || session_id || challenge. session_id is the exact bytes of the relay route's Frame.session_id (the vector's value is ASCII); challenge is the 32 bytes the daemon sent in challenge_message (standard base64 WITH padding) right after the E2EE handshake. Verify with device_id from the frame. Version 1 (device_hello_vector_v1.json) is retired and refused.",
 		Version:          HelloVersion,
 		SeedHex:          hex.EncodeToString(fixedBytes(0xA0)),
 		DevicePubHex:     hex.EncodeToString(pub),
@@ -256,6 +256,7 @@ func buildVector(t *testing.T) []byte {
 		SignatureHex:     hex.EncodeToString(h.Signature),
 		Hello:            marshal(h),
 		Negative: []vectorNegative{
+			neg("other_daemon_pub", "daemon_pub", fixedBytes(0x20), mpub, session, challenge),
 			neg("other_mobile_pub", "mobile_pub", dpub, fixedBytes(0x90), session, challenge),
 			neg("other_session_id", "session_id", dpub, mpub, []byte("sess-another-route"), challenge),
 			neg("other_challenge", "challenge", dpub, mpub, session, fixedBytes(0xC1)),
@@ -307,8 +308,20 @@ func TestHelloVectorMatchesFile(t *testing.T) {
 	if _, err := h.Verify(v.DeviceID, dpub, mpub, session, challenge); err != nil {
 		t.Fatalf("positive vector: %v", err)
 	}
-	if len(v.Negative) < 3 {
-		t.Fatalf("expected the three negative vectors, got %d", len(v.Negative))
+	if len(v.Negative) < 4 {
+		t.Fatalf("expected the four negative vectors, got %d", len(v.Negative))
+	}
+	// The golden signed_bytes_hex is also assembled here from the written
+	// layout, independently of HelloSignedBytes, so a bug in that function
+	// cannot be baked into the vector unnoticed.
+	hand := []byte("smind-device-hello-v2")
+	hand = append(hand, e2eeTranscript(dpub, mpub)...)
+	hand = append(hand, dpub...)
+	hand = append(hand, byte(len(session)>>8), byte(len(session)))
+	hand = append(hand, session...)
+	hand = append(hand, challenge...)
+	if hex.EncodeToString(hand) != v.SignedBytesHex {
+		t.Fatalf("signed_bytes_hex does not match the documented layout:\n got  %s\n want %s", v.SignedBytesHex, hex.EncodeToString(hand))
 	}
 	for _, n := range v.Negative {
 		var nh Hello

@@ -76,6 +76,19 @@ func (l *logSink) dump(t *testing.T) {
 	}
 }
 
+// count reports how many logged lines contain sub.
+func (l *logSink) count(sub string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for _, s := range l.lines {
+		if containsStr(s, sub) {
+			n++
+		}
+	}
+	return n
+}
+
 func containsStr(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

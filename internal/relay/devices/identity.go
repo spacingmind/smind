@@ -130,7 +130,7 @@ func ParseChallengeMessage(msg []byte) (challenge []byte, ok bool, err error) {
 //	"smind-device-hello-v2"
 //	‖ TranscriptHash(daemonPub, mobilePub)   32 bytes, the HKDF salt of the session
 //	‖ daemonPub                               32 bytes
-//	‖ uint16BE(len(sessionID)) ‖ sessionID    the relay route's session id
+//	‖ uint16BE(len(sessionID)) ‖ sessionID    the exact bytes of the route's Frame.session_id
 //	‖ challenge                               32 bytes, fresh from the daemon
 //
 // mobilePub is the client's ephemeral X25519 handshake key. The E2EE session
@@ -140,6 +140,9 @@ func ParseChallengeMessage(msg []byte) (challenge []byte, ok bool, err error) {
 // replaying party cannot have seen — to one live session. daemonPub is
 // repeated outside the hash so the signed bytes name the daemon explicitly.
 func HelloSignedBytes(daemonPub, mobilePub, sessionID, challenge []byte) []byte {
+	if len(sessionID) > 0xFFFF {
+		panic("devices: session id too long to sign") // the relay caps ids at 128 bytes
+	}
 	th := e2ee.TranscriptHash(daemonPub, mobilePub)
 	out := make([]byte, 0, len(helloDomain)+len(th)+len(daemonPub)+2+len(sessionID)+len(challenge))
 	out = append(out, helloDomain...)

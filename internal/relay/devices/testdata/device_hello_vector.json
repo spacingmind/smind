@@ -1,5 +1,5 @@
 {
-  "comment": "ADR-0031 D9 device_hello VERSION 2. signature = Ed25519(seed, signed_bytes); signed_bytes = \"smind-device-hello-v2\" || SHA256(\"smind relay e2ee v1\" || daemon_pub || mobile_pub) || daemon_pub || uint16BE(len(session_id)) || session_id || challenge. session_id is the relay route's session id (UTF-8 bytes of the string in the frame); challenge is the 32 bytes the daemon sent in challenge_message right after the E2EE handshake. Verify with device_id from the frame. Version 1 (device_hello_vector_v1.json) is retired and refused.",
+  "comment": "ADR-0031 D9 device_hello VERSION 2. signature = Ed25519(seed, signed_bytes); signed_bytes = \"smind-device-hello-v2\" || SHA256(\"smind relay e2ee v1\" || daemon_pub || mobile_pub) || daemon_pub || uint16BE(len(session_id)) || session_id || challenge. session_id is the exact bytes of the relay route's Frame.session_id (the vector's value is ASCII); challenge is the 32 bytes the daemon sent in challenge_message (standard base64 WITH padding) right after the E2EE handshake. Verify with device_id from the frame. Version 1 (device_hello_vector_v1.json) is retired and refused.",
   "version": 2,
   "seed_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
   "device_pub_hex": "4fd099ccd47d7893dfe9ec24414ecb0d9b5420232aad30d91c465be33cbe65c4",
@@ -25,6 +25,18 @@
     "signature": "e1CDAmtYyxtOaERz2F13zgF8l9MWAyH1z1d8EcL1mlojlM3xjz1vLZ4M5NIKHa+h1z3h7oTYMIQRJf0YFMBlBQ=="
   },
   "negative": [
+    {
+      "name": "other_daemon_pub",
+      "changed": "daemon_pub",
+      "signed_bytes_hex": "736d696e642d6465766963652d68656c6c6f2d7632a75fc437aab86afe2fb8d33b19128cc056807fb17d9fb0af3ea7d0d2925e2126202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f0015736573732d30313233343536373839616263646566c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+      "hello": {
+        "v": 2,
+        "device_pub": "T9CZzNR9eJPf6ewkQU7LDZtUICMqrTDZHEZb4zy+ZcQ=",
+        "label": "Pixel 9 (test vector)",
+        "signature": "0wdhmlHCKR+CFgDw2Hq+5oxBXFTV8Mc1ku07qx32RR0UXTVPH7WnFTPIEiOFwYwzZUegR/kyfYunWRZFvAv4Cw=="
+      },
+      "error": "bad_signature"
+    },
     {
       "name": "other_mobile_pub",
       "changed": "mobile_pub",

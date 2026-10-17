@@ -84,18 +84,23 @@ func (h *Hub) identify(s *session, r *sessionReader, t *deviceTransport) error {
 	// chooses afresh per session proves the hello was made for THIS one. (The
 	// fixed single-device route, which pre-identity clients use, gets no
 	// challenge: they ignore unknown events but need not be sent one.)
-	var challenge []byte
 	if h.opts.Registry != nil && s.ref.device != DefaultDeviceID {
-		c, err := devices.NewChallenge()
-		if err != nil {
-			h.logf("relay bridge: challenge: %v", err)
-			return errSessionOver
+		if s.challenge == nil {
+			c, err := devices.NewChallenge()
+			if err != nil {
+				h.logf("relay bridge: challenge: %v", err)
+				return errSessionOver
+			}
+			s.challenge = c
 		}
-		if err := t.Send(devices.ChallengeMessage(c)); err != nil {
-			return err
+		if !s.challengeSent {
+			if err := t.Send(devices.ChallengeMessage(s.challenge)); err != nil {
+				return err
+			}
+			s.challengeSent = true
 		}
-		challenge = c
 	}
+	challenge := s.challenge
 	first, timedOut, err := h.firstMessage(r)
 	if err != nil {
 		return err
