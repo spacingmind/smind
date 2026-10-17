@@ -1328,3 +1328,8 @@ one built from the P4 branch), `docker compose config`, the agents example build
   bypassed with `--entrypoint smind`), login 200/401, `/api/token` 403, unlisted Host 403. Note: `/proc/<pid>/environ` keeps the
   daemon's *initial* environment (including `SMIND_PASSWORD`) readable to same-user processes even though `os.Unsetenv` removes it
   from the environment children inherit; documented in `docs/homelab.md` with the `smind set-password` alternative.
+- 2026-10-17 (second review pass on P11): fixed the entrypoint's ownership walk (`find -depth`, skips multiply-linked regular files, accurate nested-mount
+  comment; verified with only CHOWN/SETUID/SETGID, where a parent-first walk strands 0700 trees), tightened the loopback pre-check to a
+  dotted quad, made the `managedBy=docker` check non-skippable, test cleanup of other-owner temp dirs from a container; new test
+  `root-owned nested 0700 trees are repaired with only CHOWN/SETUID/SETGID`.
+

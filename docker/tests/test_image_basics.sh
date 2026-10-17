@@ -66,7 +66,9 @@ set -e
 grep -q 'pulling a new image' <<<"$msg" || fail "update refusal does not say to pull a new image: $msg"
 pass "smind update refuses: $msg"
 
-if image_has_service; then
+# develop's smind has `smind service` (and with it managedBy); only an image built from
+# something older may skip this, and the release job (REQUIRE_DIRECT_CONNECTIONS) may not.
+if image_has_service || [ "${REQUIRE_DIRECT_CONNECTIONS:-}" = 1 ]; then
   docker exec "$name" curl -fsS http://127.0.0.1:4648/healthz | grep -q '"managedBy":"docker"' || fail "healthz does not report managedBy=docker"
   pass "healthz reports managedBy=docker"
 else

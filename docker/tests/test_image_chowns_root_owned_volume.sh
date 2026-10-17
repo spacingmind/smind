@@ -60,6 +60,20 @@ else
   pass "a bind mount owned by another uid keeps its owner; --user <uid> runs it"
 fi
 
+# The compose example's capability set (CHOWN, SETUID, SETGID, no DAC_READ_SEARCH): a root-owned
+# tree with 0700 directories (a `sudo cp -r ~/.claude`) must still end up owned by uid 1000, which
+# needs the children chowned before their parent.
+new_volume caps; volcaps="$REPLY"
+docker run --rm -v "$volcaps:/data" --entrypoint sh "$IMAGE" -c \
+  'mkdir -p /data/rootdir/sub && echo x > /data/rootdir/sub/f && chmod -R 0700 /data/rootdir && chown -R 0:0 /data/rootdir' >/dev/null
+name="$(new_name caps)"
+start_daemon "$name" --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID \
+  --security-opt no-new-privileges:true -v "$volcaps:/data"
+wait_healthy "$name" 30
+[ "$(docker exec --user smind "$name" stat -c %u /data/rootdir/sub/f)" = 1000 ] || fail "a nested 0700 root-owned tree was not handed to uid 1000 under the compose capability set"
+pass "root-owned nested 0700 trees are repaired with only CHOWN/SETUID/SETGID"
+docker rm -f "$name" >/dev/null
+
 # Started non-root (--user), the entrypoint just runs: a writable mount works.
 new_volume nonroot; vol2="$REPLY"
 docker run --rm -v "$vol2:/data" --entrypoint sh "$IMAGE" -c 'touch /data/.keep && chown -R 4242:4242 /data' >/dev/null # non-empty: Docker re-applies the image's ownership to an empty volume at every mount

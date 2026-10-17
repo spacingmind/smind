@@ -20,7 +20,7 @@ if [ -z "$listen" ] && [ -r "$data_dir/config.yaml" ]; then
   listen="$(sed -n 's/^[[:space:]]*listen:[[:space:]]*"\{0,1\}\([^"#[:space:]]*\).*/\1/p' "$data_dir/config.yaml" | head -n 1)"
 fi
 loopback_listen() {
-  case "${listen%:*}" in 127.* | localhost | '[::1]' | ::1) return 0 ;; *) return 1 ;; esac
+  case "${listen%:*}" in 127.[0-9]*.[0-9]*.[0-9]* | localhost | '[::1]' | ::1) return 0 ;; *) return 1 ;; esac
 }
 
 has_stored_password() {
@@ -47,11 +47,16 @@ if [ "$(id -u)" = 0 ]; then
   # or a file `docker exec` (root by default) wrote into /data or the home dir.
   # Files owned by any other uid are never touched: a bind mount of the
   # operator's own directory keeps its owner (the daemon then needs
-  # `docker run --user <that uid>`, which is said below). `find -xdev` stays on
-  # the one filesystem (nested mounts are skipped) and `chown -h` never follows
-  # symlinks.
+  # `docker run --user <that uid>`, which is said below). `chown -h` never
+  # follows symlinks, and `find -xdev` does not descend into a nested mount (the
+  # mount point directory itself is still re-owned if root owns it). `-depth`
+  # chowns children before their parent: with only CHOWN/SETUID/SETGID (the
+  # compose example, no DAC_READ_SEARCH) root cannot enter a 0700 directory it no
+  # longer owns, so a parent-first walk would strand everything inside it.
+  # Multiply-linked regular files are skipped: they may share an inode with a file
+  # outside this tree.
   for d in "$data_dir" /home/smind; do
-    find "$d" -xdev -uid 0 -exec chown -h "$uid:$gid" {} + 2>/dev/null || true
+    find "$d" -xdev -depth -uid 0 ! \( -type f -links +1 \) -exec chown -h "$uid:$gid" {} + 2>/dev/null || true
     owner="$(stat -c %u "$d")"
     if [ "$owner" != "$uid" ]; then
       echo "smind: warning: $d is owned by uid $owner, not $uid; the daemon will not be able to write there. Run the container with --user $owner, or chown the mount." >&2

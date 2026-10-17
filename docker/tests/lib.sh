@@ -23,9 +23,10 @@ cleanup() {
   for n in "${NETWORKS[@]+"${NETWORKS[@]}"}"; do docker network rm "$n" >/dev/null 2>&1 || true; done
   for v in "${VOLUMES[@]+"${VOLUMES[@]}"}"; do docker volume rm -f "$v" >/dev/null 2>&1 || true; done
   # Directories may hold files owned by uid 1000: remove them from a container.
+  # /tmp is sticky: the runner cannot remove a directory another uid owns, so
+  # delete it as root from a container that mounts its parent.
   for d in "${TMPDIRS[@]+"${TMPDIRS[@]}"}"; do
-    docker run --rm -v "$d:/x" --entrypoint sh "$IMAGE" -c 'rm -rf /x/* /x/.[!.]* 2>/dev/null || true' >/dev/null 2>&1 || true
-    rmdir "$d" 2>/dev/null || true
+    docker run --rm -v "$(dirname "$d"):/p" --entrypoint sh "$IMAGE" -c 'rm -rf "/p/$1"' sh "$(basename "$d")" >/dev/null 2>&1 || true
   done
 }
 trap cleanup EXIT
