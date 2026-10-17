@@ -1,0 +1,16 @@
+# A child image with the agent CLIs smind can drive (ADR-0031 D5). They are not in
+# the base image: they are third-party programs with their own licences, versions
+# and credentials. (The GLM agent needs nothing extra: smind runs it with `npx`.)
+#
+#   docker build -f docker/Dockerfile.agents.example \
+#     --build-arg SMIND_IMAGE=ghcr.io/spacingmind/smind:<version> -t smind-agents .
+#
+# First login, from the host (credentials persist in the /home/smind volume):
+#   docker exec -it --user smind <container> claude
+ARG SMIND_IMAGE=ghcr.io/spacingmind/smind:latest
+FROM ${SMIND_IMAGE}
+
+# The base image's entrypoint starts as root, fixes volume ownership and drops to
+# the smind user, so this child image keeps the default (root) USER.
+RUN npm install --global @anthropic-ai/claude-code @openai/codex \
+    && npm cache clean --force
