@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.13.0](https://github.com/spacingmind/smind/compare/v0.12.0...v0.13.0) (2026-10-17)
+
+
+### Features
+
+* **cli:** smind service for systemd and launchd (ADR-0031 P8) ([#348](https://github.com/spacingmind/smind/issues/348)) ([0714031](https://github.com/spacingmind/smind/commit/07140310cc635aa516b5649e47669aebb7cd023a))
+* daemon.info and an older-daemon notice (ADR-0031 P10) ([#356](https://github.com/spacingmind/smind/issues/356)) ([a2a73b5](https://github.com/spacingmind/smind/commit/a2a73b5d13434ae665b5e1b3f1175deee2a69764))
+* **desktop:** relay device identity, keepalive and multi-device (ADR-0031 P13a) ([#351](https://github.com/spacingmind/smind/issues/351)) ([b59cc8a](https://github.com/spacingmind/smind/commit/b59cc8a3bc51bcadbae9683aecbce80a0795e2a1))
+* direct connections with a daemon password and smind config (ADR-0031 P4) ([#349](https://github.com/spacingmind/smind/issues/349)) ([9bc05fb](https://github.com/spacingmind/smind/commit/9bc05fbe4e918533436fcc93dd10cff89c755dc8))
+* **mobile:** relay device identity, keepalive and multi-device (ADR-0031 P13b) ([#350](https://github.com/spacingmind/smind/issues/350)) ([fa22f59](https://github.com/spacingmind/smind/commit/fa22f594613d375c234257e795b86cf9b18466d0))
+
+
+### Bug Fixes
+
+* **relay:** bind device_hello to a daemon challenge; answer unknown methods ([#354](https://github.com/spacingmind/smind/issues/354)) ([f25fafb](https://github.com/spacingmind/smind/commit/f25fafb1773ef35b4446ade0ee260a5ee061ef45))
+
 ## [0.12.0](https://github.com/spacingmind/smind/compare/v0.11.1...v0.12.0) (2026-10-15)
 
 
