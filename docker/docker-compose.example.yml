@@ -30,6 +30,13 @@ services:
       - smind-home:/home/smind
       # Your repositories: register them as workspaces by their /workspaces path.
       - ./workspaces:/workspaces
+    # The entrypoint needs only CHOWN (fix volume ownership) and SETUID/SETGID
+    # (drop to uid 1000); the daemon and its agents then run with no capabilities
+    # at all and cannot gain any. Tested with exactly this set.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    security_opt:
+      - no-new-privileges:true
     # The image's own healthcheck (GET /healthz) applies.
 
 volumes:

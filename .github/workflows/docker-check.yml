@@ -70,6 +70,13 @@ jobs:
           EXPECT_VERSION: 0.0.0-ci
         run: bash docker/tests/run_all.sh
 
+      - name: Run the linux/arm64 image (QEMU)
+        run: |
+          set -euo pipefail
+          docker buildx build --platform linux/arm64 --load --build-arg VERSION=0.0.0-ci -t smind:ci-arm64 .
+          docker run --rm --platform linux/arm64 smind:ci-arm64 smind --version
+          docker run --rm --platform linux/arm64 smind:ci-arm64 node --version
+
       - name: Compose example validates (and refuses without a password)
         run: |
           set -euo pipefail

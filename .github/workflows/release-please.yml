@@ -481,11 +481,23 @@ jobs:
           load: true
           tags: smind:ci
 
+      # A release whose smind lacks direct connections would publish an image that
+      # reports healthy but ignores SMIND_LISTEN/SMIND_PASSWORD (nothing answers on
+      # a published port): when this job pushes, the published-port login test must
+      # run and pass instead of skipping.
       - name: Container smoke tests (the release binary itself)
         env:
           IMAGE: smind:ci
           EXPECT_VERSION: ${{ env.VERSION }}
+          REQUIRE_DIRECT_CONNECTIONS: ${{ env.PUSH == 'true' && '1' || '' }}
         run: bash docker/tests/run_all.sh
+
+      - name: Run the linux/arm64 image (QEMU)
+        run: |
+          set -euo pipefail
+          docker buildx build --platform linux/arm64 --load --build-arg VERSION="$VERSION" -t smind:ci-arm64 .
+          docker run --rm --platform linux/arm64 smind:ci-arm64 smind --version
+          docker run --rm --platform linux/arm64 smind:ci-arm64 node --version
 
       - name: Log in to GHCR
         if: env.PUSH == 'true'

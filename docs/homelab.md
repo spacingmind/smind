@@ -223,9 +223,17 @@ does this: it reads `SMIND_PASSWORD` from `.env` and refuses to start without it
   `SMIND_HOSTNAMES` (comma separated) adds the names clients type when they are not IPs.
 - **Volumes.** `/data` is `SMIND_HOME`: database, token, accounts, relay config, `config.yaml`. `/home/smind` holds agent
   CLI logins (`.claude`, `.codex`). `/workspaces` is where your repositories go: register them with their container path
-  (`/workspaces/<repo>`). The entrypoint starts as root only to make `/data` and `/home/smind` writable for uid 1000 (a fresh
-  named volume or a bind mount created by root), then runs the daemon as the `smind` user (uid/gid 1000, `tini` as PID 1).
-  `docker run --user <uid>:<gid>` skips that step and needs mounts you already made writable.
+  (`/workspaces/<repo>`). The entrypoint starts as root only to hand **root-owned** files in `/data` and `/home/smind` to uid 1000 (a fresh
+  named volume, a bind mount created with `sudo`, or a file `docker exec` wrote as root), then runs the daemon as the `smind`
+  user (uid/gid 1000, `tini` as PID 1). Files owned by any other uid are never touched (a bind mount of your own directory
+  keeps its owner; the entrypoint warns, and you run the container with `--user <that uid>`), and `/workspaces` is only adopted
+  at its top level when root owns it. **Use `docker exec --user smind`** for `smind ...` commands: as root they would write
+  root-owned files. `--user <uid>:<gid>` skips the entrypoint's ownership step and needs mounts you already made writable
+  (`/data`, and a writable `/home/smind` for npm and agent caches).
+- **Port and listen address are set with the environment**, not `smind config`: the image sets `SMIND_LISTEN=0.0.0.0:4648`,
+  and the environment beats `config.yaml`, so `smind config set server.port|listen` inside the container has no effect (or
+  makes the daemon refuse to start because the two disagree). Change the published port with `-p`, or set `SMIND_LISTEN`.
+  To restart the daemon use `docker restart smind` (`smind stop` ends the container).
 - **Health and supervision.** The image has a healthcheck on `/healthz` (healthy within about 15 s) and sets
   `SMIND_SUPERVISOR=docker`, so `/healthz` reports `managedBy: docker`.
 - **State survives** removing and recreating the container on the same volumes (database, token, accounts, relay config).
@@ -242,6 +250,13 @@ does this: it reads `SMIND_PASSWORD` from `.env` and refuses to start without it
   (`smind account login`) prints the authorize URL, but the image has no browser to open it and the OAuth callback is
   `http://localhost:<port>/callback` *inside* the container, so it only completes if that port is reachable from your
   browser (not tested); use `account add` or the agent CLI's own login.
+- **Hardening.** The compose example drops every capability except `CHOWN`, `SETUID` and `SETGID` (what the entrypoint
+  needs) and sets `no-new-privileges`: the daemon and its agents then run with no capabilities at all. For `docker run` add
+  `--cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --security-opt no-new-privileges:true`. The password in
+  `SMIND_PASSWORD` is visible in `docker inspect`; use an env file with restrictive permissions, or `smind set-password` into the
+  `/data` volume.
+- **Publishing (maintainers).** A package pushed to GHCR for the first time is private: after the first release, make
+  `ghcr.io/spacingmind/smind` public in the repository's package settings, or the documented `docker pull` fails for everyone else.
 - **The container is the isolation boundary:** agents read and write whatever you mount, including `/workspaces` and the
   home volume.
 
