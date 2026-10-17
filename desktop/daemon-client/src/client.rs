@@ -655,7 +655,7 @@ mod tests {
 
     /// A password stub daemon whose /ws upgrades only with `Authorization:
     /// Bearer <accept>` and no `?token=` query; records what each /ws saw.
-    async fn password_daemon(accept: &'static str) -> (Config, WsSeen) {
+    async fn protected_daemon(accept: &'static str) -> (Config, WsSeen) {
         use axum::extract::ws::WebSocketUpgrade;
         use axum::http::{HeaderMap, StatusCode};
         use axum::response::IntoResponse;
@@ -681,7 +681,7 @@ mod tests {
 
     #[tokio::test]
     async fn watcher_uses_held_session_as_bearer_never_in_the_url() {
-        let (cfg, seen) = password_daemon("session-1").await;
+        let (cfg, seen) = protected_daemon("session-1").await;
         let auth = WatcherAuth::with_session(|| Some("session-1".to_string()));
         connect(&cfg, &reqwest::Client::new(), &auth).await.expect("authenticated");
         assert_eq!(seen.lock().unwrap()[0], (Some("Bearer session-1".to_string()), None), "bearer header, no query");
