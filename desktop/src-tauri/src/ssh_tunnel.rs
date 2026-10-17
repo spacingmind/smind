@@ -275,7 +275,7 @@ impl SshTunnels {
 
     #[cfg(test)]
     fn kill_for_test(&self, id: &str) {
-        let mut tunnels = self.tunnels.lock().unwrap();
+        let tunnels = self.tunnels.lock().unwrap();
         let t = tunnels.get(id).expect("tunnel exists");
         let mut child = t.child.lock().unwrap();
         child.kill().unwrap();
@@ -573,6 +573,21 @@ mod tests {
             });
             assert_eq!(selected.unwrap_err(), "this connection was removed");
             assert_eq!(tunnels.local_url(&conn.id), None);
+            assert_eq!(p.ssh_local(&conn.id), None);
+        }
+
+        #[tokio::test]
+        async fn remove_stops_the_tunnel_even_when_saving_fails() {
+            let dir = tempfile::tempdir().unwrap();
+            let p = proxy();
+            let tunnels = SshTunnels::with_program(fake_ssh(dir.path()));
+            let conn = add_ssh_connection(&p, &tunnels, &dir.path().join("connections.json"), "Lab", &target()).await.unwrap();
+            let url = p.ssh_local(&conn.id).unwrap();
+            assert!(reachable(&url));
+            let unwritable = dir.path().join("a-directory");
+            std::fs::create_dir(&unwritable).unwrap(); // writing a file over a directory fails
+            assert!(crate::commands::remove_connection(&p, &tunnels, &unwritable, &conn.id).is_err());
+            assert!(!reachable(&url), "the ssh child was stopped");
             assert_eq!(p.ssh_local(&conn.id), None);
         }
 

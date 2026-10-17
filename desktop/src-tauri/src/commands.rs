@@ -133,20 +133,24 @@ pub fn remove_connection(
     path: &std::path::Path,
     id: &str,
 ) -> Result<(), String> {
-    {
+    // The in-memory removal is what makes the connection gone; a failure to
+    // persist it must not leave its session, tunnel or pairing keys behind, so
+    // cleanup always runs and the first error is the one reported.
+    let removed = {
         let mut registry = proxy.registry.lock().unwrap();
         registry.remove(id)?;
-        registry.save(path).map_err(|e| e.to_string())?;
-    }
+        registry.save(path).map_err(|e| e.to_string())
+    };
     proxy.clear_session(id);
     crate::ssh_tunnel::forget_tunnel(proxy, tunnels, id);
     // Unpairing deletes the keys: a no-op for local/url ids, since
     // `pairing_store::delete` only ever removes a file that a relay
     // connection's `connections_add_relay` would have created.
-    if let Some(dir) = path.parent() {
-        relay::pairing_store::delete(dir, id).map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    let unpaired = match path.parent() {
+        Some(dir) => relay::pairing_store::delete(dir, id).map_err(|e| e.to_string()),
+        None => Ok(()),
+    };
+    removed.and(unpaired)
 }
 
 #[tauri::command]
@@ -567,6 +571,33 @@ mod tests {
             assert_eq!(err, want);
             assert!(!err.contains("hunter2") && !err.contains("127.0.0.1"));
         }
+    }
+
+    #[test]
+    fn remove_cleans_up_even_when_saving_the_registry_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = proxy();
+        let conn = p.registry.lock().unwrap().add("Lab", "http://127.0.0.1:9").unwrap();
+        p.set_session(&conn.id, "sess".into());
+        // An unwritable registry path: its parent is a regular file.
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, b"x").unwrap();
+        let bad_path = blocker.join("connections.json");
+
+        let tunnels = crate::ssh_tunnel::SshTunnels::default();
+        let err = remove_connection(&p, &tunnels, &bad_path, &conn.id).unwrap_err();
+        assert!(!err.is_empty());
+        assert_eq!(p.registry.lock().unwrap().list().len(), 1, "removed in memory");
+        assert_eq!(p.session(&conn.id), None, "session cleared");
+        // The pairing keys live next to the registry file: they are deleted too.
+        let ok_path = dir.path().join("connections.json");
+        let c2 = p.registry.lock().unwrap().add("Lab2", "http://127.0.0.1:10").unwrap();
+        let pairing2 = relay::pairing_store::pairing_path(dir.path(), &c2.id);
+        std::fs::create_dir_all(pairing2.parent().unwrap()).unwrap();
+        std::fs::write(&pairing2, b"keys").unwrap();
+        std::fs::create_dir(&ok_path).unwrap(); // saving over a directory fails
+        assert!(remove_connection(&p, &tunnels, &ok_path, &c2.id).is_err());
+        assert!(!pairing2.exists(), "pairing keys deleted despite the save failure");
     }
 
     #[tokio::test]
