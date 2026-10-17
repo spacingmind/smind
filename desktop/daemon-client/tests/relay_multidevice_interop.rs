@@ -284,6 +284,7 @@ fn fast_timing() -> Timing {
         connect_timeout: Duration::from_secs(3),
         handshake_timeout: Duration::from_secs(8),
         hello_timeout: Duration::from_secs(8),
+        challenge_timeout: Duration::from_secs(8),
         resume_probe_timeout: Duration::from_millis(4000),
         min_stable_connection: Duration::from_millis(200),
         request_stall: Duration::from_millis(4000),

@@ -633,6 +633,10 @@ pub struct Timing {
     pub connect_timeout: Duration,
     pub handshake_timeout: Duration,
     pub hello_timeout: Duration,
+    /// How long the daemon gets to send its `relay.device_challenge` after the
+    /// handshake. A daemon from before hello v2 never does: it waits for a
+    /// v1 hello this client no longer speaks.
+    pub challenge_timeout: Duration,
     /// How long a resumed session gets to answer a liveness request before it
     /// is abandoned for a fresh one (the daemon may have lost its counters).
     pub resume_probe_timeout: Duration,
@@ -663,6 +667,7 @@ impl Default for Timing {
             connect_timeout: Duration::from_secs(20),
             handshake_timeout: HANDSHAKE_TIMEOUT,
             hello_timeout: Duration::from_secs(10),
+            challenge_timeout: Duration::from_secs(5),
             resume_probe_timeout: Duration::from_secs(15),
             min_stable_connection: MIN_STABLE_CONNECTION,
             // Long enough that a slow request (a silent tool run in a task) is
@@ -964,7 +969,14 @@ async fn establish(
     let (RouteMode::Identity, Some(key)) = (mode, options.device_key.as_ref()) else {
         return Ok(channel);
     };
-    let hello = key.hello(&options.label, &pairing.daemon_public_key, &kp.public());
+    let challenge = await_challenge(&mut channel, options.timing.challenge_timeout).await?;
+    let hello = key.hello(
+        &options.label,
+        &pairing.daemon_public_key,
+        &kp.public(),
+        &session_id,
+        &challenge,
+    );
     let request_id = "relay-hello-1";
     channel
         .send(device::hello_request(request_id, &hello).as_bytes())
@@ -994,6 +1006,48 @@ async fn establish(
         }
         HelloOutcome::Refused { code, message } => Err(Failure::Refused { code, message }),
     }
+}
+
+/// await_challenge waits for the daemon's per-session `relay.device_challenge`
+/// (hello v2). Silence means a daemon that predates it: reported as
+/// `daemon_outdated`, never answered with the retired v1 hello.
+async fn await_challenge(
+    channel: &mut DataChannel,
+    timeout: Duration,
+) -> Result<[u8; device::CHALLENGE_LEN], Failure> {
+    tokio::time::timeout(timeout, async {
+        loop {
+            let msg = channel
+                .receive()
+                .await
+                .map_err(|e| Failure::Retry(format!("challenge: {e}")))?;
+            let Ok(text) = String::from_utf8(msg) else {
+                continue;
+            };
+            match device::parse_challenge(&text) {
+                Some(Ok(challenge)) => return Ok(challenge),
+                Some(Err(reason)) => {
+                    // A challenge of another version: this client and the
+                    // daemon disagree on the hello; say so, don't loop.
+                    return Err(Failure::Refused {
+                        code: "daemon_outdated".into(),
+                        message: format!(
+                            "The daemon and this app use different device hellos ({reason}); update the older one."
+                        ),
+                    });
+                }
+                None => {}
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        Err(Failure::Refused {
+            code: "daemon_outdated".into(),
+            message: "The daemon did not send a device challenge: update it (smind v0.12.0 and older cannot talk to this app version)."
+                .into(),
+        })
+    })
 }
 
 /// is_revoked_by_relay: the relay refuses a revoked device's stream with

@@ -155,7 +155,11 @@ func (m *mobileStub) connect(ctx context.Context, session string) error {
 		}
 	}()
 
-	h := devices.SignHello(m.priv, mobileLabel, m.daemon, eph.Public())
+	challenge, err := c.awaitChallenge(sctx)
+	if err != nil {
+		return err
+	}
+	h := devices.SignHello(m.priv, mobileLabel, m.daemon, eph.Public(), []byte(session), challenge)
 	resp, err := c.request(sctx, devices.HelloMethod, h)
 	if err != nil {
 		return err
@@ -200,6 +204,34 @@ type rpcResponse struct {
 		Message string `json:"message"`
 		Code    string `json:"code"`
 	} `json:"error"`
+}
+
+// awaitChallenge waits for the daemon's per-session device challenge, which
+// it sends first on a device route (hello v2).
+func (c *rpcConn) awaitChallenge(ctx context.Context) ([]byte, error) {
+	timeout := time.After(mobileRPCBound)
+	for {
+		select {
+		case m := <-c.msgs:
+			ch, ok, err := devices.ParseChallengeMessage(m)
+			if !ok {
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("challenge: %w", err)
+			}
+			return ch, nil
+		case <-c.done:
+			if c.err != nil {
+				return nil, c.err
+			}
+			return nil, errors.New("stream ended")
+		case <-timeout:
+			return nil, errors.New("timed out waiting for the device challenge")
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 }
 
 // request sends one request and waits for its response, skipping events.

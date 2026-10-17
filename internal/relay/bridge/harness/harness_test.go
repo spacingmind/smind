@@ -211,7 +211,11 @@ func (d *goDevice) tryConnect(label string) (rpcResponse, error) {
 			c.msgs <- m
 		}
 	}()
-	h := devices.SignHello(d.priv, label, d.r.ready.DaemonPub, eph.Public())
+	challenge, err := c.awaitChallenge(ctx)
+	if err != nil {
+		return rpcResponse{}, fmt.Errorf("challenge: %w", err)
+	}
+	h := devices.SignHello(d.priv, label, d.r.ready.DaemonPub, eph.Public(), []byte(session), challenge)
 	resp, err := d.c.request(ctx, devices.HelloMethod, h)
 	if err != nil {
 		return rpcResponse{}, fmt.Errorf("hello: %w", err)
