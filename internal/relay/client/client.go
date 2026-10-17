@@ -45,19 +45,26 @@ func Dial(target, fingerprint string) (*grpc.ClientConn, error) {
 	}
 	tlsCfg := &tls.Config{
 		// Chain verification is replaced by the fingerprint pin below.
-		InsecureSkipVerify: true,
-		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			for _, raw := range rawCerts {
-				sum := sha256.Sum256(raw)
-				if string(sum[:]) == string(fp) {
-					return nil
-				}
-			}
-			return fmt.Errorf("relay client: certificate fingerprint does not match pin")
-		},
-		MinVersion: tls.VersionTLS13,
+		InsecureSkipVerify:    true,
+		VerifyPeerCertificate: pinLeaf(fp),
+		MinVersion:            tls.VersionTLS13,
 	}
 	return grpc.NewClient(target, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+}
+
+// pinLeaf checks the leaf certificate only: it is the one the handshake
+// proves the server holds the key for. Extra chain certificates are
+// attacker-controlled, so a MITM could otherwise append the real relay's
+// public certificate and pass the pin.
+func pinLeaf(fp []byte) func([][]byte, [][]*x509.Certificate) error {
+	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+		if len(rawCerts) > 0 {
+			if sum := sha256.Sum256(rawCerts[0]); string(sum[:]) == string(fp) {
+				return nil
+			}
+		}
+		return fmt.Errorf("relay client: certificate fingerprint does not match pin")
+	}
 }
 
 // Admit completes the admission exchange (ADR-0011) over c: obtains a
