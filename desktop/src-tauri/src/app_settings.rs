@@ -59,17 +59,21 @@ pub fn save(path: &Path, settings: &AppSettings) -> Result<(), String> {
     })
 }
 
-/// load_or_upgrade is the startup evaluation: an absent file on an install
-/// that already has saved connections or a managed-daemon record is an
-/// upgrade, not a first run -- it is written as onboarded so those installs
-/// keep today's behaviour and never see first-run.
+/// load_or_upgrade is the startup evaluation. With the file absent: an
+/// install that already has saved connections or a managed-daemon record is
+/// an upgrade from before this file existed -- written as onboarded, so it
+/// keeps today's behaviour and never sees first-run; anything else is a
+/// fresh install and FIRST_RUN is written at once. That write is what makes
+/// "absent" mean only "pre-settings install": this app itself later creates
+/// connections.json and the managed record, which must never be mistaken for
+/// an upgrade on the next launch.
 pub fn load_or_upgrade(path: &Path, has_connections: bool, has_managed_record: bool) -> AppSettings {
-    if !path.exists() && (has_connections || has_managed_record) {
-        let upgraded = AppSettings::UPGRADED;
-        if let Err(e) = save(path, &upgraded) {
-            log::warn!("could not persist upgraded app settings: {e}");
+    if !path.exists() {
+        let initial = if has_connections || has_managed_record { AppSettings::UPGRADED } else { AppSettings::FIRST_RUN };
+        if let Err(e) = save(path, &initial) {
+            log::warn!("could not persist initial app settings: {e}");
         }
-        return upgraded;
+        return initial;
     }
     load(path)
 }
@@ -104,7 +108,20 @@ mod tests {
     fn app_settings_missing_file_means_first_run() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(load_or_upgrade(&path(&dir), false, false), AppSettings::FIRST_RUN);
-        assert!(!path(&dir).exists(), "first run writes nothing until a set");
+        assert_eq!(load(&path(&dir)), AppSettings::FIRST_RUN);
+        assert!(path(&dir).exists(), "first run is written at once so absent only means pre-settings");
+    }
+
+    #[test]
+    fn fresh_install_that_later_gains_connections_stays_first_run() {
+        let dir = tempfile::tempdir().unwrap();
+        // Launch 1: no signals.
+        assert_eq!(load_or_upgrade(&path(&dir), false, false), AppSettings::FIRST_RUN);
+        // The user skips first-run, adds a connection (connections.json appears)
+        // and an install leaves a managed record.
+        std::fs::write(dir.path().join("connections.json"), b"{}").unwrap();
+        // Launch 2: the signals exist now, but the file does too.
+        assert_eq!(load_or_upgrade(&path(&dir), true, true), AppSettings::FIRST_RUN);
     }
 
     #[test]
