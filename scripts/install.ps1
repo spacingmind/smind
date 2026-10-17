@@ -8,6 +8,15 @@
 # Environment overrides:
 #   SMIND_VERSION      release to install, e.g. 0.11.1 (default: latest)
 #   SMIND_INSTALL_DIR  target directory (default: %LOCALAPPDATA%\Programs\smind)
+#   SMIND_SERVICE=1    same as -Service
+#
+# Options (when the script is run as a file or as a script block; `iex` cannot
+# take parameters, so use SMIND_SERVICE there):
+#   -Service           after installing, run `smind service install`: a per-user
+#                      scheduled task that starts the daemon at logon
+#
+#   & ([scriptblock]::Create((irm <url>))) -Service
+#   $env:SMIND_SERVICE = 1; irm <url> | iex
 #
 # Downloads smind_<version>_windows_<amd64|arm64>.zip plus checksums.txt from
 # the Release, verifies the SHA-256 (mandatory), extracts only smind.exe,
@@ -22,7 +31,6 @@
 # would close the user's shell), keeps its settings inside functions, and is
 # plain ASCII. Works on Windows PowerShell 5.1 and PowerShell 7.
 #
-# TODO(ADR-0031 P9): `-Service` (install, then `smind service install`).
 
 function Resolve-SmindArch {
     # Maps the OS architecture to the release asset suffix. NativeMachine is
@@ -242,8 +250,19 @@ function Install-SmindExe {
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
 }
 
+function Invoke-SmindServiceInstall {
+    # Runs `<exe> service install` (output goes straight to the console) and
+    # reports whether it succeeded. A function so tests can stand in for the exe.
+    param([string]$Exe)
+    # Out-Host: the exe's output must reach the console, not the function's
+    # output stream (where it would become part of the return value and make a
+    # failure look like success: `-not @('...', $false)` is false).
+    & $Exe service install | Out-Host
+    return [bool]($LASTEXITCODE -eq 0)
+}
+
 function Install-Smind {
-    param([string]$Version, [string]$InstallDir)
+    param([string]$Version, [string]$InstallDir, [switch]$Service)
     $ErrorActionPreference = 'Stop'
     $ProgressPreference = 'SilentlyContinue' # Windows PowerShell 5.1 downloads crawl with progress on
     Set-StrictMode -Version Latest
@@ -329,18 +348,36 @@ function Install-Smind {
         Write-Warning 'Git for Windows was not found. smind needs it for workspaces; install it from https://gitforwindows.org'
     }
 
-    Write-Host ''
-    Write-Host 'Next:'
-    Write-Host '  smind serve    # then open http://localhost:4648'
+    if ($Service) {
+        Write-Host ''
+        Write-Host 'Installing the smind service (a scheduled task that starts the daemon at logon)...'
+        $savedExit = Get-Variable -Scope Global -Name LASTEXITCODE -ValueOnly -ErrorAction SilentlyContinue
+        $ok = Invoke-SmindServiceInstall -Exe $exe
+        if ($null -ne $savedExit) { $global:LASTEXITCODE = $savedExit }
+        if (-not $ok) {
+            throw "smind is installed at $exe, but 'smind service install' failed (see above)"
+        }
+        Write-Host ''
+        Write-Host 'Next:'
+        Write-Host '  smind service status    # then open http://localhost:4648'
+        Write-Host '  smind service logs -f'
+        Write-Host 'The task starts at logon, not at boot.'
+    } else {
+        Write-Host ''
+        Write-Host 'Next:'
+        Write-Host '  smind serve    # then open http://localhost:4648'
+        Write-Host '  (or run it at every logon: smind service install)'
+    }
 }
 
 function Invoke-SmindInstaller {
+    param([switch]$Service)
     try {
         # Platform only exists on PowerShell 6+; Windows PowerShell 5.1 is always Windows.
         if ($PSVersionTable['Platform'] -and $PSVersionTable['Platform'] -ne 'Win32NT') {
             throw 'this script is for Windows; on Linux and macOS run: curl -fsSL https://spacingmind.com/install.sh | sh'
         }
-        Install-Smind -Version $env:SMIND_VERSION -InstallDir $env:SMIND_INSTALL_DIR
+        Install-Smind -Version $env:SMIND_VERSION -InstallDir $env:SMIND_INSTALL_DIR -Service:$Service
     } catch {
         $global:LASTEXITCODE = 1
         # Under `iex` there is no script file and `exit` would close the shell:
@@ -352,4 +389,8 @@ function Invoke-SmindInstaller {
 }
 
 # Tests set $SmindInstallNoRun before dot-sourcing this file to get the functions only.
-if (-not (Get-Variable -Name SmindInstallNoRun -ErrorAction SilentlyContinue)) { Invoke-SmindInstaller }
+if (-not (Get-Variable -Name SmindInstallNoRun -ErrorAction SilentlyContinue)) {
+    # -Service from the command line / a script block, or SMIND_SERVICE=1 (the iex form).
+    $wantService = ($args -contains '-Service') -or ($env:SMIND_SERVICE -in '1', 'true')
+    Invoke-SmindInstaller -Service:$wantService
+}
