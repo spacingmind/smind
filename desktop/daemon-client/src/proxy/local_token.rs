@@ -56,6 +56,28 @@ pub async fn is_local_by_address(url: &Url) -> bool {
     }
 }
 
+/// is_password_smind confirms that what answers at `base_url` really is a
+/// password-protected smind daemon (`/healthz`: service "smind", authRequired
+/// true) before the token file is ever attached to anything it says. Short
+/// timeout (the caller's `client`), bounded body.
+pub async fn is_password_smind(client: &reqwest::Client, base_url: &str) -> bool {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Healthz {
+        service: Option<String>,
+        #[serde(default)]
+        auth_required: bool,
+    }
+    let url = format!("{}/healthz", base_url.trim_end_matches('/'));
+    let Ok(resp) = client.get(url).send().await else { return false };
+    if !resp.status().is_success() {
+        return false;
+    }
+    crate::proxy::bounded::read_json::<Healthz>(resp, crate::proxy::bounded::MAX_BODY_BYTES)
+        .await
+        .is_some_and(|h| h.service.as_deref() == Some("smind") && h.auth_required)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

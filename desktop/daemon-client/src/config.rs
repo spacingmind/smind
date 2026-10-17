@@ -56,6 +56,14 @@ impl Config {
         Ok(url)
     }
 
+    /// ws_base_url is the /ws upgrade URL with no query: for a client that
+    /// authenticates with a header instead of `?token=`.
+    pub fn ws_base_url(&self) -> Result<Url, String> {
+        let mut url = self.ws_url("")?;
+        url.set_query(None);
+        Ok(url)
+    }
+
     pub fn token_url(&self) -> Url {
         let mut url = self.daemon_url.clone();
         url.set_path("/api/token");
