@@ -17,6 +17,7 @@ vi.mock("@/lib/platform", async (orig) => ({
 }));
 
 import FirstRunGate from "@/components/first-run/first-run-gate";
+import { SetupSection } from "@/components/first-run/setup-section";
 import { requestFirstRun } from "@/components/first-run/first-run-events";
 
 let runSetup: () => void = () => {};
@@ -78,6 +79,23 @@ describe("first-run gate", () => {
     });
     expect(screen.getByTestId("the-app")).toBeInTheDocument();
     await act(async () => requestFirstRun());
+    expect(await screen.findByTestId("first-run")).toBeInTheDocument();
+    expect(desk.appSettingsSet).not.toHaveBeenCalled();
+  });
+
+  it("a Skip for now session dismissal leaves the Settings Finish setup entry working", async () => {
+    desk.appSettingsGet.mockResolvedValue({ onboardingCompleted: false, manageLocalDaemon: false });
+    mount();
+    await screen.findByTestId("first-run");
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("first-run-skip"));
+    });
+    expect(screen.getByTestId("the-app")).toBeInTheDocument();
+    render(<SetupSection />);
+    const finish = await screen.findByText("Finish setup");
+    await act(async () => {
+      fireEvent.click(finish);
+    });
     expect(await screen.findByTestId("first-run")).toBeInTheDocument();
     expect(desk.appSettingsSet).not.toHaveBeenCalled();
   });

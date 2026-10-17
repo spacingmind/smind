@@ -26,6 +26,7 @@ function ChoiceCard({
   summary,
   selected,
   disabled,
+  locked,
   disabledReason,
   onSelect,
   children,
@@ -35,7 +36,10 @@ function ChoiceCard({
   title: string;
   summary: string;
   selected: boolean;
+  /** Not selectable (and shows `disabledReason`). */
   disabled?: boolean;
+  /** Temporarily not selectable (an install is running) but the card keeps its body on screen. */
+  locked?: boolean;
   disabledReason?: string | null;
   onSelect: (id: ChoiceId) => void;
   children?: ReactNode;
@@ -51,7 +55,7 @@ function ChoiceCard({
         role="radio"
         aria-checked={selected}
         aria-disabled={disabled || undefined}
-        disabled={disabled}
+        disabled={disabled || locked}
         data-testid={`first-run-radio-${id}`}
         onClick={() => onSelect(id)}
         className="flex w-full items-start gap-3 rounded-xl p-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed"
@@ -243,7 +247,7 @@ export function FirstRun({
                   title="Use the daemon already running here"
                   summary={situation.existing.text}
                   selected={choice === "existing"}
-                  disabled={locked}
+                  locked={locked}
                   onSelect={select}
                 >
                   <div>
@@ -278,7 +282,8 @@ export function FirstRun({
                       : "The app installs and manages a local daemon for you."
                   }
                   selected={choice === "run"}
-                  disabled={locked || situation.runBlocked !== null}
+                  locked={locked}
+                  disabled={situation.runBlocked !== null}
                   disabledReason={situation.runBlocked}
                   onSelect={select}
                 >
@@ -303,7 +308,7 @@ export function FirstRun({
                 title="Connect to a daemon"
                 summary="Enter the address of a smind daemon you can reach."
                 selected={choice === "url"}
-                disabled={locked}
+                locked={locked}
                 onSelect={select}
               >
                 <ConnectMethodPanel method="url" state={connect} onConnected={finishRemote} />
@@ -314,7 +319,7 @@ export function FirstRun({
                 title="Connect over SSH"
                 summary="Tunnel to a daemon on another machine with your system ssh."
                 selected={choice === "ssh"}
-                disabled={locked}
+                locked={locked}
                 onSelect={select}
               >
                 <ConnectMethodPanel method="ssh" state={connect} onConnected={finishRemote} />
@@ -325,7 +330,7 @@ export function FirstRun({
                 title="Pair via relay link"
                 summary="Paste a pairing link from a relay host: an end-to-end encrypted connection through your relay."
                 selected={choice === "relay"}
-                disabled={locked}
+                locked={locked}
                 onSelect={select}
               >
                 <ConnectMethodPanel

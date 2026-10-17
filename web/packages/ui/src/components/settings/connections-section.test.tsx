@@ -219,6 +219,19 @@ describe("connections-section (desktop build)", () => {
     expect(screen.getByTestId("connection-remove-ssh:homelab")).toBeInTheDocument();
   });
 
+  it("shows Rust's text inline when switching to an ssh connection fails", async () => {
+    const SSH = { id: "ssh:homelab", kind: "ssh" as const, label: "homelab", baseUrl: "http://127.0.0.1:50123" };
+    await renderSection({
+      listConnections: () => Promise.resolve([LOCAL, SSH]),
+      getCurrentConnection: () => Promise.resolve(LOCAL),
+      selectConnection: () => Promise.reject("ssh tunnel is not running: Connection refused"),
+    });
+    fireEvent.click(screen.getByTestId("connection-select-ssh:homelab"));
+    await flush();
+    expect(screen.getByTestId("connection-list-error")).toHaveTextContent("Connection refused");
+    expect(screen.getByTestId("connection-row-ssh:homelab")).toBeInTheDocument();
+  });
+
   describe("Manage this computer's daemon", () => {
   const MANAGED_RUNNING = { ...STATUS, managedState: "managed", reachable: true, localService: "smind" };
 
