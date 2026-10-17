@@ -67,6 +67,10 @@ pub struct ProxyState {
     /// UI's own token fetch. Only then does the proxy authenticate with the
     /// token file; an older daemon keeps today's token-query flow.
     local_password: Mutex<Option<(String, bool)>>,
+    /// ADR-0031 D7 (b2): the local end (`http://127.0.0.1:<port>`) of each
+    /// running `ssh -N -L` tunnel, keyed by `ssh`-kind connection id. Owned
+    /// and kept current by the desktop's tunnel manager.
+    ssh_local: Mutex<std::collections::HashMap<String, String>>,
 }
 
 impl ProxyState {
@@ -80,6 +84,7 @@ impl ProxyState {
             sessions: Mutex::new(std::collections::HashMap::new()),
             local_token_source: Mutex::new(Arc::new(crate::proxy::local_token::read)),
             local_password: Mutex::new(None),
+            ssh_local: Mutex::new(std::collections::HashMap::new()),
         })
     }
 
@@ -103,6 +108,43 @@ impl ProxyState {
     /// token is read (default: the token file, read per attempt).
     pub fn set_local_token_source(&self, source: impl Fn() -> Option<String> + Send + Sync + 'static) {
         *self.local_token_source.lock().unwrap() = Arc::new(source);
+    }
+
+    pub fn set_ssh_local(&self, connection_id: &str, local_url: String) {
+        self.ssh_local.lock().unwrap().insert(connection_id.to_string(), local_url);
+    }
+
+    pub fn ssh_local(&self, connection_id: &str) -> Option<String> {
+        self.ssh_local.lock().unwrap().get(connection_id).cloned()
+    }
+
+    pub fn clear_ssh_local(&self, connection_id: &str) {
+        self.ssh_local.lock().unwrap().remove(connection_id);
+    }
+
+    /// upstream_base is the URL requests for `conn` are actually sent to:
+    /// its own base URL, or for an `ssh` connection its tunnel's local end
+    /// (`None` while no tunnel is running).
+    pub fn upstream_base(&self, conn: &Connection) -> Option<String> {
+        match conn.kind {
+            ConnectionKind::Ssh => self.ssh_local(&conn.id),
+            _ => Some(conn.base_url.clone()),
+        }
+    }
+
+    /// current_upstream is `current()` with an `ssh` connection resolved to
+    /// its tunnel (as a plain `url` connection), or the 502 text explaining
+    /// that the tunnel is down.
+    fn current_upstream(&self) -> Result<Connection, String> {
+        let mut conn = self.current();
+        if conn.kind == ConnectionKind::Ssh {
+            let Some(local) = self.ssh_local(&conn.id) else {
+                return Err(format!("smind desktop: the SSH tunnel for {} is not running; switch to it again to reconnect", conn.label));
+            };
+            conn.base_url = local;
+            conn.kind = ConnectionKind::Url;
+        }
+        Ok(conn)
     }
 
     fn password_gate(&self, base_url: &str) -> Option<bool> {
@@ -290,7 +332,10 @@ const HOP_BY_HOP_REQUEST_HEADERS: &[header::HeaderName] = &[
 ];
 
 async fn proxy_http(State(state): State<Arc<ProxyState>>, req: Request<Body>) -> Response {
-    let conn = state.current();
+    let conn = match state.current_upstream() {
+        Ok(c) => c,
+        Err(msg) => return (StatusCode::BAD_GATEWAY, msg).into_response(),
+    };
     let base = conn.base_url.clone();
     if conn.kind == ConnectionKind::Relay {
         return relay_api_response(req.uri());
@@ -437,7 +482,10 @@ async fn proxy_ws(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let conn = state.current();
+    let conn = match state.current_upstream() {
+        Ok(c) => c,
+        Err(msg) => return (StatusCode::BAD_GATEWAY, msg).into_response(),
+    };
     if conn.kind == ConnectionKind::Relay {
         return match state.current_relay() {
             Some(handle) => ws.on_upgrade(move |socket| bridge_relay(socket, handle)),

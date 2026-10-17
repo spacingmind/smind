@@ -10,5 +10,5 @@ pub mod local_token;
 pub mod secret;
 pub mod server;
 
-pub use connections::{Connection, ConnectionKind, Registry};
+pub use connections::{Connection, ConnectionKind, Registry, SshTarget};
 pub use server::{serve, AssetSource, ProxyState};
