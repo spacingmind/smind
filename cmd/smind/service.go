@@ -25,8 +25,9 @@ const cmdServiceUsage = `usage: smind service <command>
   smind service logs [-f] [-n <lines>]
 
 Runs the daemon under the OS service manager: a systemd unit on Linux (user
-unit; --system for a system unit that still runs as you) or a LaunchAgent on
-macOS. Port and other settings are in config.yaml, not flags.
+unit; --system for a system unit that still runs as you), a LaunchAgent on
+macOS, or a per-user scheduled task on Windows (starts at logon, not at boot).
+Port and other settings are in config.yaml, not flags.
 status exits 0 when running, 3 when stopped, 4 when not installed.`
 
 // serviceEnvHook lets tests replace the machine the service commands see
@@ -46,6 +47,8 @@ func cmdService(args []string) int {
 		return 0
 	case "logs":
 		return cmdServiceLogs(rest)
+	case "run":
+		return cmdServiceRun(rest)
 	case "install", "uninstall", "status", "start", "stop", "restart":
 	default:
 		fmt.Fprintf(osStderr, "smind service: unknown command %q\n%s\n", sub, cmdServiceUsage)
