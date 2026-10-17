@@ -153,19 +153,21 @@ func (u *Updater) Update(ctx context.Context, opts Options) (UpdateResult, error
 	res := UpdateResult{Current: u.Current, DryRun: opts.DryRun}
 	dir := filepath.Dir(u.Exe)
 
-	// Guards that need no network come first so a refusal is instant.
-	if IsDevBuild(u.Current) {
-		return res, refuse("this is a %q build, not a release; install a release with the install script to use `smind update`", u.Current)
-	}
-	if reason, owned := DesktopOwned(u.Exe, u.GOOS, u.Getenv, u.Exists); owned {
-		return res, refuse("%s (%s)", reason, u.Exe)
-	}
+	// Guards that need no network come first so a refusal is instant. The
+	// container check leads: inside an image the useful answer is "pull a new
+	// image", whatever the build (a dev image included).
 	inContainer := InContainer
 	if u.InContainer != nil {
 		inContainer = func(string, func(string) string, func(string) bool) bool { return u.InContainer() }
 	}
 	if inContainer(u.GOOS, u.Getenv, u.Exists) {
 		return res, refuse("running inside a container; update by pulling a new image instead")
+	}
+	if IsDevBuild(u.Current) {
+		return res, refuse("this is a %q build, not a release; install a release with the install script to use `smind update`", u.Current)
+	}
+	if reason, owned := DesktopOwned(u.Exe, u.GOOS, u.Getenv, u.Exists); owned {
+		return res, refuse("%s (%s)", reason, u.Exe)
 	}
 	if err := CheckWritable(dir); err != nil {
 		return res, err

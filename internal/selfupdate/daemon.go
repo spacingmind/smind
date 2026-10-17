@@ -83,7 +83,19 @@ func (d *HealthzDaemon) Status(ctx context.Context) (DaemonStatus, error) {
 		// treat it as running-and-unmanaged so we never restart it.
 		return DaemonStatus{Running: true}, nil
 	}
-	return DaemonStatus{Running: true, Version: h.Version, Managed: h.ManagedBy != ""}, nil
+	return DaemonStatus{Running: true, Version: h.Version, Managed: restartableSupervisor(h.ManagedBy)}, nil
+}
+
+// restartableSupervisor is true for the OS service managers `smind service`
+// installs units for. Any other value of managedBy (the Docker image reports
+// "docker") means something else owns the daemon and an update must neither
+// restart it nor pretend to: it prints the manual-restart instructions instead.
+func restartableSupervisor(managedBy string) bool {
+	switch managedBy {
+	case "systemd", "launchd", "task":
+		return true
+	}
+	return false
 }
 
 // Restart runs `<exe> service restart`. The freshly installed binary is used

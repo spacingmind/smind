@@ -305,6 +305,70 @@ the change applies when the daemon next starts.
 - Trust on first use: the fingerprint is pinned the first time you run `relay connect` (step 3), so do that step on a
   trusted network and compare fingerprints.
 
+## Docker
+
+`ghcr.io/spacingmind/smind` (`linux/amd64` and `linux/arm64`; tags `<version>`, `<major>.<minor>` and `latest`) runs the daemon
+with the web UI. It is built from the release's own binaries (the ones `checksums.txt` lists), never compiled in Docker.
+
+```sh
+docker run -d --name smind --restart unless-stopped \
+  -p 4648:4648 \
+  -e SMIND_PASSWORD="$(openssl rand -base64 24)" \
+  -v smind-data:/data -v smind-home:/home/smind -v "$PWD/workspaces:/workspaces" \
+  ghcr.io/spacingmind/smind
+```
+
+Read the password back with `docker inspect smind` or put it in an env file first (`docker/docker-compose.example.yml`
+does this: it reads `SMIND_PASSWORD` from `.env` and refuses to start without it). Then open `http://<host>:4648` and sign in.
+
+- **A password is mandatory.** The image listens on `0.0.0.0:4648`, so it refuses to start without `SMIND_PASSWORD` (at least 12
+  characters; the entrypoint says why, and the daemon enforces the same rule). A password already stored in `/data/config.yaml`
+  by `docker exec --user smind smind smind set-password` also counts. To keep the daemon off the network set
+  `-e SMIND_LISTEN=127.0.0.1:4648` (no port publishing) and reach it through a relay or a tunnel.
+  Everything in "What is protected" above applies: plain HTTP, the password is a remote-code-execution credential, and
+  `SMIND_HOSTNAMES` (comma separated) adds the names clients type when they are not IPs.
+- **Volumes.** `/data` is `SMIND_HOME`: database, token, accounts, relay config, `config.yaml`. `/home/smind` holds agent
+  CLI logins (`.claude`, `.codex`). `/workspaces` is where your repositories go: register them with their container path
+  (`/workspaces/<repo>`). The entrypoint starts as root only to hand **root-owned** files in `/data` and `/home/smind` to uid 1000 (a fresh
+  named volume, a bind mount created with `sudo`, or a file `docker exec` wrote as root), then runs the daemon as the `smind`
+  user (uid/gid 1000, `tini` as PID 1). Files owned by any other uid are never touched (a bind mount of your own directory
+  keeps its owner; the entrypoint warns, and you run the container with `--user <that uid>`), and `/workspaces` is only adopted
+  at its top level when root owns it. **Use `docker exec --user smind`** for `smind ...` commands: as root they would write
+  root-owned files. `--user <uid>:<gid>` skips the entrypoint's ownership step and needs mounts you already made writable
+  (`/data`, and a writable `/home/smind` for npm and agent caches).
+- **Port and listen address are set with the environment**, not `smind config`: the image sets `SMIND_LISTEN=0.0.0.0:4648`,
+  and the environment beats `config.yaml`, so `smind config set server.port|listen` inside the container has no effect (or
+  makes the daemon refuse to start because the two disagree). Change the published port with `-p`, or set `SMIND_LISTEN`.
+  To restart the daemon use `docker restart smind` (`smind stop` ends the container).
+- **Health and supervision.** The image has a healthcheck on `/healthz` (healthy within about 15 s) and sets
+  `SMIND_SUPERVISOR=docker`, so `/healthz` reports `managedBy: docker`.
+- **State survives** removing and recreating the container on the same volumes (database, token, accounts, relay config).
+  `docker exec --user smind smind smind relay connect <relay:port> <host-id> <secret>` stores its config in `/data`, and the
+  restarted container dials the relay again; see Path B.
+- **Updating** means pulling a new tag. `smind update` inside the image refuses ("update by pulling a new image").
+- **Agent CLIs are not in the image.** `claude` and `codex` are third-party programs with their own licences, versions and
+  credentials. `docker/Dockerfile.agents.example` is a child image that adds both (`npm install --global
+  @anthropic-ai/claude-code @openai/codex`); it was built and `claude --version` run in CI. Sign in once with
+  `docker exec -it --user smind smind claude` (the login lands in the `/home/smind` volume). The GLM agent needs nothing
+  extra: smind runs it with `npx` (Node 22 is in the image) and downloads it on first use.
+- **Adding accounts.** `smind account add <provider> <label>` reads the credential from stdin and works in a container:
+  `printf %s "$KEY" | docker exec -i --user smind smind smind account add anthropic homelab`. Browser login
+  (`smind account login`) prints the authorize URL, but the image has no browser to open it and the OAuth callback is
+  `http://localhost:<port>/callback` *inside* the container, so it only completes if that port is reachable from your
+  browser (not tested); use `account add` or the agent CLI's own login.
+- **Hardening.** The compose example drops every capability except `CHOWN`, `SETUID` and `SETGID` (what the entrypoint
+  needs) and sets `no-new-privileges`: the daemon and its agents then run with no capabilities at all. For `docker run` add
+  `--cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --security-opt no-new-privileges:true`. The password in
+  `SMIND_PASSWORD` is visible in `docker inspect`, and (as in any process's initial environment) to other processes of the
+  same user through `/proc/<pid>/environ` even though the daemon removes it from what its children inherit: agents run as that
+  user and already hold the daemon token, so use a password you use nowhere else. To keep it out of the environment entirely, run
+  `docker exec --user smind <c> smind set-password` once (it stores a bcrypt hash in the `/data` volume) and start without
+  `SMIND_PASSWORD`.
+- **Publishing (maintainers).** A package pushed to GHCR for the first time is private: after the first release, make
+  `ghcr.io/spacingmind/smind` public in the repository's package settings, or the documented `docker pull` fails for everyone else.
+- **The container is the isolation boundary:** agents read and write whatever you mount, including `/workspaces` and the
+  home volume.
+
 ## Which to use
 
 - Same LAN or VPN, nothing to host: a direct connection (password), or an SSH tunnel.

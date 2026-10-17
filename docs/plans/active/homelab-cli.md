@@ -1047,6 +1047,21 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   handshakes; tonic's `open_data` hangs a resume with nothing buffered; no dial timeout; an approved-again revoked device stayed
   refused by the relay until the daemon reconnected (the hub now reconnects its control stream); the harness mobile stub could
   deadlock in `DataConn.Close`.
+- 2026-10-17: **P11 implemented** (`feat/docker-image`): `Dockerfile` (debian:bookworm-slim, Node 22 pinned by sha256, the release's
+  own binary COPYed per `TARGETARCH`, non-root uid 1000, tini, `SMIND_HOME=/data`, `SMIND_LISTEN=0.0.0.0:4648`,
+  `SMIND_SUPERVISOR=docker`, healthcheck on the SMIND_LISTEN port), `docker/entrypoint` (refuses a non-loopback listen without a
+  12+ character password or a stored hash, repairs root-owned state without touching other owners, `gosu` drop), `task docker:bin`,
+  `docker/docker-compose.example.yml` (capabilities dropped), `docker/Dockerfile.agents.example` (built, `claude --version` and
+  `codex --version` run), `docker/tests/*` (5 scripts), `docker-check.yml` (PRs), a `docker` job in `release-please.yml` (after
+  `publish`: extracts the verified linux binaries, runs the smoke tests on the release binary, pushes `<version>`, `<major>.<minor>`,
+  `latest` for both platforms with provenance + SBOM on real releases only; `workflow_dispatch` builds and tests without pushing —
+  the ADR's "dispatch can republish" is **not** implemented), `docs/homelab.md` Docker section, README. Decisions inside the spec: base
+  `debian:bookworm-slim` + release binaries as the ADR/plan say (not distroless/Go-in-Docker); `managedBy: docker` is not treated as
+  restartable by `smind update` (only systemd/launchd/task are); inside a container `smind update` now says "pull a new image" before
+  the dev-build refusal; the published-port login test **skips** when the image's smind has no direct connections (P4) **except**
+  in the release job, where it must pass (`REQUIRE_DIRECT_CONNECTIONS=1`) so an image that ignores `SMIND_LISTEN` is never pushed.
+  **Dependency:** the password/`SMIND_LISTEN` behaviour is P4 (#349); until it is on develop the PR's image listens on loopback
+  and the login test skips, and no release can push (the release job fails instead).
 
 - 2026-10-15: **P10 implemented** (PR "feat: daemon.info and an older-daemon notice (ADR-0031 P10)"): `daemon.info` WS method
   (`internal/wsapi/daemon_info.go`: version, commit, managedBy, platform, startedAt; readable over the relay channel); desktop
@@ -1309,6 +1324,36 @@ The Go bridge now sends the challenge on every non-legacy device route (also wit
 keeps reaching `device_hello_unsupported`. The silent-daemon path is tested with a fake transport and a paused clock (`a_silent_daemon_is_outdated_and_is_never_sent_a_hello`:
 exactly the 5 s window, nothing sent; also `a_challenge_of_another_version_…`, `a_challenge_gets_a_v2_hello_bound_to_session_and_challenge`);
 a real v0.12.0 daemon was not run.
+
+### P11 (2026-10-17)
+
+Commands: `task docker:bin`, `docker buildx build --platform linux/arm64`, `bash docker/tests/run_all.sh` against two images (one from develop,
+one built from the P4 branch), `docker compose config`, the agents example build, `shellcheck -x -P SCRIPTDIR`, `actionlint`, a
+`workflow_dispatch` dry run of `release-please.yml`.
+
+- AC1 job: `docker` in `release-please.yml` + `docker-check.yml` — see the CI evidence in the PR (the dry run's job log shows the
+  release binary being smoke-tested, both platforms built, nothing pushed).
+- AC2 non-root + entrypoint: `test_image_basics.sh` (uid 1000 after the root entrypoint, git/ssh/curl/gosu/tini/Node 22),
+  `test_image_chowns_root_owned_volume.sh` (root-owned named volume and bind mount, root-owned files repaired after `docker exec`, other
+  owners untouched, `--user` start).
+- AC3 password: `test_image_basics.sh` (refuses with no, empty, short `SMIND_PASSWORD`; loopback listen needs none; a stored
+  `passwordHash` suffices on a P4 image), `test_image_login_through_published_port.sh` (P4 image: `-p`, login 200/401, `/api/token` 403,
+  unlisted Host 403, no secret in logs).
+- AC4 healthy ≤ 30 s (`wait_healthy 30`), `docker stop` graceful (SIGTERM reaches the daemon). AC5 `test_image_state_survives_recreate.sh`.
+  AC6 `test_image_relay_config_persists.sh`. AC7 `smind update` inside the image (`test_image_basics.sh`). AC8 compose config renders
+  with a password and refuses without; agents example builds.
+- **Not verified:** **(real)** the published `:<version>` on real amd64 and arm64 hosts and the docs' quickstart verbatim (no release has
+  been cut), the browser-OAuth path in a container (documented as untested), Docker Desktop cannot observe bind-mount ownership (that
+  test runs on the Linux CI engine), a first GHCR push (the package must be made public by a maintainer).
+- 2026-10-17 (after #349 merged): `docker-check` now sets `REQUIRE_DIRECT_CONNECTIONS=1`, so the published-port login test runs in PR CI.
+  Verified on an image built from develop: refusal without a password (entrypoint **and** the daemon itself when the entrypoint is
+  bypassed with `--entrypoint smind`), login 200/401, `/api/token` 403, unlisted Host 403. Note: `/proc/<pid>/environ` keeps the
+  daemon's *initial* environment (including `SMIND_PASSWORD`) readable to same-user processes even though `os.Unsetenv` removes it
+  from the environment children inherit; documented in `docs/homelab.md` with the `smind set-password` alternative.
+- 2026-10-17 (second review pass on P11): fixed the entrypoint's ownership walk (`find -depth`, skips multiply-linked regular files, accurate nested-mount
+  comment; verified with only CHOWN/SETUID/SETGID, where a parent-first walk strands 0700 trees), tightened the loopback pre-check to a
+  dotted quad, made the `managedBy=docker` check non-skippable, test cleanup of other-owner temp dirs from a container; new test
+  `root-owned nested 0700 trees are repaired with only CHOWN/SETUID/SETGID`.
 
 ### P9 (2026-10-17, branch `feat/smind-service-windows`)
 

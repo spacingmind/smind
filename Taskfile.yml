@@ -22,6 +22,22 @@ tasks:
         echo "building smind $v ($short)"
         go build -buildvcs=false -ldflags "-X github.com/spacingmind/smind/internal/version.Version=$v -X github.com/spacingmind/smind/internal/version.Commit=$short" -o bin/smind ./cmd/smind
 
+  docker:bin:
+    desc: Cross-build the static linux/amd64 and linux/arm64 daemons the Dockerfile COPYs (bin/<arch>/smind); VERSION overrides the stamped version
+    deps: [build:web]
+    cmds:
+      - |
+        v="${VERSION:-}"
+        short=`git rev-parse --short HEAD`
+        if [ -z "$v" ]; then
+          v=`grep -o '"[^"]*"' .release-please-manifest.json | sed -n 2p | tr -d '"'`
+          v="$v-dev+$short"
+        fi
+        for arch in amd64 arm64; do
+          echo "building smind $v for linux/$arch"
+          CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -buildvcs=false -ldflags "-X github.com/spacingmind/smind/internal/version.Version=$v -X github.com/spacingmind/smind/internal/version.Commit=$short" -o bin/$arch/smind ./cmd/smind
+        done
+
   build:web:
     desc: Build the web UI into internal/server/dist
     dir: web
