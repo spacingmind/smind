@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as daemonLib from "@/lib/daemon";
+import { LoginRequiredError } from "@/lib/auth";
 import { WsClient } from "@/lib/ws-client";
 import { watchForReconnect, type ConnectionStatus } from "@/lib/reconnect";
 import { FakeSocket } from "@/test/fake-socket";
@@ -137,6 +138,27 @@ describe("watchForReconnect", () => {
 
     await vi.advanceTimersToNextTimerAsync();
     expect(spy).toHaveBeenCalledTimes(2);
+
+    handle.close();
+  });
+});
+
+describe("watchForReconnect credential handling", () => {
+  it("a handshake rejection with a session token stops the loop and asks for a login instead of retrying forever", async () => {
+    const socket = new FakeSocket();
+    const client = new WsClient(socket);
+    const connect = vi.fn(() => Promise.reject(new LoginRequiredError("rejected")));
+    const onLoginRequired = vi.fn();
+
+    const handle = watchForReconnect(client, { connect, onClient: () => {}, onLoginRequired });
+    socket.emitClose();
+    await advancePastBackoff();
+
+    expect(onLoginRequired).toHaveBeenCalledExactlyOnceWith("rejected");
+    // No further attempts however long we wait.
+    await advancePastBackoff();
+    await advancePastBackoff();
+    expect(connect).toHaveBeenCalledTimes(1);
 
     handle.close();
   });

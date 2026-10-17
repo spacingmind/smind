@@ -1,6 +1,6 @@
 # Homelab quickstart: reach a daemon from another device
 
-The smind daemon (`smind serve`) listens on `127.0.0.1:4648` only. To use it from a laptop, a phone or the desktop app
+The smind daemon (`smind serve`) listens on `127.0.0.1:4648` by default. To use it from a laptop, a phone or the desktop app
 on another machine, you connect to it one of two ways:
 
 | | Direct connection | Relay |
@@ -73,14 +73,79 @@ is planned (ADR-0031 P10). Windows has no `smind service` yet (a per-user schedu
 
 ## Path A: direct connection
 
-Direct connections with a password are not available yet; the daemon still binds loopback only. Until they land,
-use an SSH tunnel (or any VPN that gives you loopback access) to the machine running the daemon:
+Let the daemon listen on your LAN or VPN address, protected by a password. Without a password it never listens beyond
+loopback.
 
 ```sh
-ssh -N -L 4648:127.0.0.1:4648 you@homelab    # then open http://localhost:4648 on this machine
+smind set-password                       # prompts twice; stores a bcrypt hash in ~/.smind/config.yaml (mode 0600)
+smind config set server.listen 0.0.0.0:4648
+smind config set server.hostnames nas.lan   # every name clients will type that is not an IP or localhost
+smind stop && smind serve                # restart to apply
 ```
 
-This page will describe the built-in direct connection once it ships.
+Then open `http://<address>:4648` in a browser on another machine and sign in with the password. A sign-in lasts 24 hours
+(the session token is kept in the tab's `sessionStorage` and dropped when it expires; the password itself is never stored)
+and ends when the daemon restarts.
+
+Settings (`smind config get|set|unset`, comments in `config.yaml` are kept, a restart applies them):
+
+| Key | Meaning |
+|---|---|
+| `server.port` | Port of the default `127.0.0.1` address (4648) |
+| `server.listen` | `host:port` to bind. A non-loopback host needs a password; the daemon **refuses to start** otherwise |
+| `server.hostnames` | Extra `Host` names to accept. A leading dot matches the domain and its subdomains (`.example.com`) |
+| `server.passwordHash` | Written by `smind set-password` (shown as `<set>`, never printed); `smind config unset server.passwordHash` removes it |
+
+For containers, `SMIND_LISTEN`, `SMIND_HOSTNAMES` (comma separated) and `SMIND_PASSWORD` (at least 12 characters, hashed in
+memory, never written to disk) override the file. `smind serve` itself takes no flags.
+
+### What is protected, and what is not
+
+**The password is a remote-code-execution credential.** Whoever signs in gets a terminal and every agent, with your
+user's rights. Choose a long, unique one (the minimum is 12 characters; there is no default).
+
+- **Transport is plain HTTP.** On a LAN anyone on the network path can read the password and the session. Use it only on a
+  network you trust. Otherwise put the daemon behind Tailscale or WireGuard, an SSH tunnel, or a reverse proxy that
+  terminates TLS. smind has no built-in TLS.
+- **Login:** `POST /api/login` returns a random 256-bit session token that expires after 24 hours. The standing daemon
+  token is never sent to a remote client. Wrong passwords back off per client address (5 free attempts, then 2 s, 4 s,
+  8 s... up to 15 minutes) and there is a global limit against address rotation.
+- **`/api/token`** (the daemon's standing token) is **never served once a password is set**, not even to the machine's
+  own browser: the local web UI signs in with the password like every other client. The CLI (`smind ...`) and the desktop
+  app's notification client keep working because they read the token from `~/.smind/token` (readable only by your OS
+  user) and send it in an `Authorization` header; the `?token=` URL form is refused when a password is set. (With no
+  password the daemon is loopback-only and `/api/token` is served to a true loopback caller, as before.)
+- **Host allowlist** (DNS-rebinding defence): every request must carry `localhost`, `*.localhost`, an IP address or a name
+  from `server.hostnames`, or it gets `403 Host not allowed`. The WebSocket also requires a same-origin `Origin`.
+  Session tokens travel in the `Sec-WebSocket-Protocol` header or `Authorization`, never in the URL.
+- **Reverse proxy on the same host:** with a password set the daemon token cannot be fetched over HTTP at all, so a proxy
+  in front of the daemon (even a stock nginx `proxy_pass http://127.0.0.1:4648;`, which rewrites `Host` and adds no
+  header) exposes only the login. Put the name clients type in `server.hostnames`, pass `Host` through
+  (`proxy_set_header Host $host;`) and proxy WebSockets (`Upgrade`/`Connection`). Check from another machine that
+  `curl -i https://smind.example.com/api/token` answers `403`.
+  **Without a password** a proxy on the daemon's own host is not safe (the daemon cannot tell a proxied request from a
+  local one, and would serve the token): set a password first.
+- **Listening on all interfaces:** `0.0.0.0:4648` is IPv4 only. For IPv6 as well use `[::]:4648` (or `:4648`); the daemon
+  logs the addresses it actually bound. When `server.listen` is not `127.0.0.1` the daemon also binds `127.0.0.1` so the CLI
+  and the desktop app keep working.
+- **Lockout:** repeated wrong passwords throttle the client (IPv6 by /64). Behind a same-host proxy all clients share the
+  proxy's address, so only a global limit (40 wrong passwords a minute, then one minute of no logins) applies; anyone who
+  can reach the port can therefore hold logins locked. Restrict who can reach it (firewall, VPN).
+- **Residual risk:** one shared password, no per-device revocation (restart the daemon to end every session), no MFA, no
+  audit log. A local process of the same user can still read `~/.smind/token`.
+
+### Alternatives with no open port
+
+- An **SSH tunnel** keeps the daemon on loopback and needs no password:
+
+  ```sh
+  ssh -N -L 4648:127.0.0.1:4648 you@homelab    # then open http://localhost:4648 on this machine
+  ```
+
+- A **relay** (Path B) works through NAT.
+
+> The desktop app's "Connect to a daemon" form does not take a password yet; use the browser, a tunnel or a relay from
+> the app until first-run onboarding (a later change) adds it.
 
 ## Path B: relay
 
@@ -156,7 +221,17 @@ connection.)*
 ### 6. Pair a mobile device
 
 Open the mobile app's pairing screen and paste the link (or scan the QR code in builds that support scanning), then
-Connect.
+Connect. On first use the app creates its device key (kept in the iOS Keychain or the Android Keystore through the
+platform secure store). If the pairing window is not open for it, the app shows **Waiting for approval** with the exact
+`smind relay devices approve <id>` command to run on the daemon's computer (step 7) and connects by itself once you
+approve. A device you revoke shows **This device was revoked**; *Reset device identity* gives it a new key, which the
+daemon treats as a new device that needs approval again. After a dropped connection the app reconnects on its own and
+resumes its session.
+The app and the daemon must speak the same device-identity version (hello v2): if the daemon sends no device challenge the
+app says "Daemon outdated or on a different version" and does not connect — update the daemon with `smind update`.
+
+A phone does not pin the relay's certificate (it has no way to confirm a fingerprint): the relay needs a certificate
+that the phone already trusts, for example one from a public CA. A self-signed relay certificate is refused.
 
 ### 7. Approve devices
 
@@ -179,9 +254,7 @@ the change applies when the daemon next starts.
 > **Requires updated clients.** Relay pairing needs apps that send a device identity. **The desktop app does** (a device key
 > per relay connection, created when you add the link; Settings → Connections shows "Waiting for approval on the daemon" with
 > the exact `smind relay devices approve <id>` to run, or "revoked"; it needs a daemon that sends the device challenge — one built
-> after the hello-v2 fix, newer than v0.12.0 — and says "different versions" otherwise). **The mobile app does not yet** (multi-device mobile client,
-> in progress): until it ships, an installed mobile build **cannot connect** through the relay — the daemon refuses a client
-> without a device identity ("device identity required"). As a stop-gap you can set `relay.legacyDevices: true` in
+> after the hello-v2 fix, newer than v0.12.0 — and says "different versions" otherwise). **The mobile app does too** (a device key in the platform secure store; the pairing screen shows "Waiting for approval" with the same command, or "This device was revoked", or "Daemon outdated or on a different version" when the daemon sends no device challenge). A desktop or mobile build from before these clients **cannot connect** through the relay — the daemon refuses a client without a device identity ("device identity required"). As a stop-gap you can set `relay.legacyDevices: true` in
 > `$SMIND_HOME/config.yaml` to let such a client in on one fixed route. **Do not leave it on:** a legacy client is served without
 > approval and cannot be revoked, so anyone who has your pairing link (the relay host secret plus your daemon's public key) — or
 > the relay operator — can connect, and `devices revoke`, the pending state and the pairing window do not apply to it. The daemon
@@ -262,6 +335,6 @@ does this: it reads `SMIND_PASSWORD` from `.env` and refuses to start without it
 
 ## Which to use
 
-- Same LAN or VPN, nothing to host: a direct connection (SSH tunnel today).
+- Same LAN or VPN, nothing to host: a direct connection (password), or an SSH tunnel.
 - Phone, laptop on another network, or a daemon behind NAT: a relay.
 - A hosted relay (no server to run) is planned; this page will say when it is available.

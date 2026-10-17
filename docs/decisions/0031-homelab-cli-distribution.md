@@ -2,15 +2,15 @@
 
 ## Status
 
-**Accepted (2026-10-14), except decisions 9, 12, 27–32 and 36, which remain Open** (direct connections with a password,
-and the hosted relay with everything it gates). The accepted decisions are listed under "Decisions (accepted 2026-10-14)"
+**Accepted (2026-10-14), except decisions 12, 27–32 and 36, which remain Open** (the hosted relay and everything it gates).
+**Decision 9 (direct connections with a password, D8) was Accepted on 2026-10-15** with the recommended default. The accepted decisions are listed under "Decisions (accepted 2026-10-14)"
 with the default the Human approved; the Open ones stay under "Open decisions for Human", and **every PR they gate stays
 BLOCKED** in the plan
 ([`docs/plans/active/homelab-cli.md`](../plans/active/homelab-cli.md)). Decisions whose default changed *because of* the Paseo
 study are marked **★**. Builds on ADR-0007/0011 (relay, admission),
 ADR-0013/0023/0030 (desktop app, updater, native Windows daemon) and ADR-0029
 (`POST /api/shutdown`). Several decisions here **amend** earlier ones (loopback
-only — pending decision 9 —, one relay device per relay host, ephemeral device keys); each says so
+only — decision 9, accepted 2026-10-15 —, one relay device per relay host, ephemeral device keys); each says so
 and, once accepted, the amended ADR gets a one-line pointer here.
 
 **Human answers recorded 2026-10-13/14:** the relay-side "workspace" is renamed **relay host** and smind's own
@@ -428,10 +428,10 @@ non-publishing check); `workflow_dispatch` can republish.
   non-root `smind` user (uid/gid 1000, matching most host users) with `gosu`; if
   started as non-root it just runs. This fixes the bind-mount permission pain that
   `--user` workarounds only paper over.
-- **Listening and auth (depends on decision 9):** the image sets
+- **Listening and auth (decision 9, accepted; needs P4):** the image sets
   `SMIND_LISTEN=0.0.0.0:4648` and **refuses to start without `SMIND_PASSWORD`**
   (Paseo only warns, `paseo-docker-entrypoint:60-65`), serves the web UI on the same
-  origin, and `-p 4648:4648` works. Until decision 9 lands the image is relay-only
+  origin, and `-p 4648:4648` works. Until P4 lands the image is relay-only
   (loopback bind, do not publish 4648).
 - State: `SMIND_HOME=/data` (`VOLUME`), repositories under a second mount
   (`/workspaces`); stored paths are container paths. Agent credentials persist under
@@ -622,7 +622,7 @@ confirmation); deliberately different (first-run, quit behaviour).**
 
 ### D8. Direct connections with a password (amends "loopback only")
 
-**Status: OPEN — decision 9 is not accepted; everything that depends on it (P4, P5's password field, P8, P11, P13c) stays blocked.**
+**Status: ACCEPTED (2026-10-15, decision 9) — the recommended default below was approved; P4 implements it, and P5's password field, P8, P11 and P13c build on it. One amendment the same day (Human, on the P4 security review): with a password set, `/api/token` is closed even on loopback (see that bullet).**
 
 **Proposal.** Let the daemon listen on a non-loopback address, protected by a password,
 as Paseo does — making a LAN/Tailscale/VPN homelab work with **no relay at all** — while
@@ -637,12 +637,19 @@ keeping loopback-only as the default and refusing unsafe combinations.
   (Paseo only warns.) A weak password is rejected at `set-password` (minimum length 12;
   no default, no `change-me` in docs): anyone authenticated can run a shell through the
   terminal tab and every agent, so the password is an RCE credential.
-- **`GET /api/token` is only served to a loopback client talking to a loopback Host with
-  no forwarding headers** (`X-Forwarded-*`, `Forwarded`, `X-Real-IP`). Otherwise it is
-  403. This keeps the existing loopback UX (bundled UI, desktop proxy) unchanged while
-  closing the same-host-reverse-proxy leak: an external request carries an external
-  Host, so it is refused even though `RemoteAddr` is loopback (caveat: a proxy that
-  rewrites `Host` to `localhost` defeats this; documented).
+- **`GET /api/token`: without a password it is only served to a loopback client talking to a
+  loopback Host with no forwarding headers** (`X-Forwarded-*`, `Forwarded`, `X-Real-IP`, and
+  other proxy headers); otherwise it is 403. **With a password configured it is never served,
+  to anyone, loopback included** (**amended 2026-10-15, Human decision on the P4 review**): a
+  default same-host nginx (`proxy_pass http://127.0.0.1:4648;`) rewrites `Host` to the upstream
+  and adds no header, so a proxied request is indistinguishable from a local one and the
+  header heuristic alone would hand the token (a terminal, with no password) to anyone who can
+  reach the proxy. The bundled web UI therefore signs in with the password like every other
+  browser; the CLI and the desktop client authenticate with the token **file**
+  (`~/.smind/token`, readable only by the same OS user), sent as an `Authorization` bearer —
+  the `?token=` URL form is refused when a password is set. Without a password the daemon is
+  loopback-only by default and the old behaviour is unchanged (a same-host proxy in front of a
+  password-less daemon can still leak the token: set a password first).
 - **Non-loopback clients log in:** `POST /api/login {password}` → a **revocable,
   expiring session token** (random 256-bit, held in memory, not the daemon's long-lived
   token), accepted by `/ws` via the `Sec-WebSocket-Protocol` bearer and the
@@ -1164,7 +1171,7 @@ are renamed opportunistically, never by a wire-breaking change; the new messages
 
 Human approved every decision below on 2026-10-14 with the default stated ("Ok làm đi"). **★ = the default changed, or the
 decision is new, because of the Paseo study; ✔ = answered earlier by the Human.** Decisions 10, 14 and 24 are accepted but only take effect together with the
-still-open decision 9 (direct connections with a password), so what depends on them waits for it (noted in the plan).
+decision 9 (direct connections with a password, accepted 2026-10-15), which P4 implements first (noted in the plan).
 
 1. **CLI signature verification.** Verify a minisign signature of `checksums.txt` in
    `smind update` with the existing desktop-updater public key (ADR-0023; no new secret),
@@ -1192,6 +1199,12 @@ still-open decision 9 (direct connections with a password), so what depends on t
 
 8. **★ `smind config get|set|unset`; no launch flags.** *Accepted: yes, no
    `--port/--listen` flags on `serve`* (Paseo removed the equivalent flags).
+
+9. **★ Direct connections with a password (D8).** *Accepted (2026-10-15): yes* — `server.listen`, `smind set-password`
+   (bcrypt hash, minimum 12 characters), the daemon refuses to start with a non-loopback `listen` and no password,
+   `/api/token` only for a true loopback caller, expiring session tokens from `POST /api/login` (not the standing daemon
+   token), Host allowlist, per-IP login backoff; **replaces "loopback only, no `--bind`"** and the "don't publish 4648" Docker
+   advice. (The relay-device password, decision 14, builds on the same `set-password`.)
 
 10. **★ Built-in TLS for direct connections.** *Accepted: not in v1* — document Tailscale,
     SSH, or a TLS reverse proxy (with the Host-rewrite caveat); revisit with `server.tls`.
@@ -1266,15 +1279,9 @@ still-open decision 9 (direct connections with a password), so what depends on t
 
 ## Open decisions for Human
 
-These remain **Open** (Human, 2026-10-14): the hosted relay (12 and everything it gates: 27–32, 36) and direct connections
-with a password (9). Each keeps its recommended default or its option list; **every PR they gate is BLOCKED in the plan.**
-
-9. **★ Direct connections with a password (D8).** *Recommended: yes* —
-   `server.listen`, `smind set-password`, refuse to start non-loopback without a password,
-   `/api/token` loopback-only, expiring session tokens, Host allowlist, login rate limit;
-   **replaces "loopback only, no `--bind`"** and the "don't publish 4648" Docker advice.
-   Alternative: stay loopback-only and rely on relay/tunnel (cheaper, leaves Docker and
-   homelab LAN users on the relay).
+These remain **Open** (Human, 2026-10-14): the hosted relay (12 and everything it gates: 27–32, 36). Each keeps its
+recommended default or its option list; **every PR they gate is BLOCKED in the plan.** (Decision 9, direct connections with a
+password, left this list on 2026-10-15: it is Accepted, see "Decisions".)
 
 12. **⏳ Hosted relay hosting — PENDING (Human, 2026-10-14).** Options in D11: **(D)** Cloudflare's gRPC proxy (Network →
     gRPC; origin on 443 with TLS + HTTP/2/ALPN; proxied record, SSL/TLS Full; 125 s read / 30 s write timeouts, so 30–60 s
