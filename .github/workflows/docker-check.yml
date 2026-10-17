@@ -68,6 +68,9 @@ jobs:
         env:
           IMAGE: smind:ci
           EXPECT_VERSION: 0.0.0-ci
+          # develop's smind has direct connections now (ADR-0031 P4): the
+          # published-port login test must run, not skip.
+          REQUIRE_DIRECT_CONNECTIONS: "1"
         run: bash docker/tests/run_all.sh
 
       - name: Run the linux/arm64 image (QEMU)

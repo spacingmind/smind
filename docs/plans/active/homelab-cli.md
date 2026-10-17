@@ -1323,3 +1323,8 @@ one built from the P4 branch), `docker compose config`, the agents example build
 - **Not verified:** **(real)** the published `:<version>` on real amd64 and arm64 hosts and the docs' quickstart verbatim (no release has
   been cut), the browser-OAuth path in a container (documented as untested), Docker Desktop cannot observe bind-mount ownership (that
   test runs on the Linux CI engine), a first GHCR push (the package must be made public by a maintainer).
+- 2026-10-17 (after #349 merged): `docker-check` now sets `REQUIRE_DIRECT_CONNECTIONS=1`, so the published-port login test runs in PR CI.
+  Verified on an image built from develop: refusal without a password (entrypoint **and** the daemon itself when the entrypoint is
+  bypassed with `--entrypoint smind`), login 200/401, `/api/token` 403, unlisted Host 403. Note: `/proc/<pid>/environ` keeps the
+  daemon's *initial* environment (including `SMIND_PASSWORD`) readable to same-user processes even though `os.Unsetenv` removes it
+  from the environment children inherit; documented in `docs/homelab.md` with the `smind set-password` alternative.

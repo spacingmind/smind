@@ -326,8 +326,11 @@ does this: it reads `SMIND_PASSWORD` from `.env` and refuses to start without it
 - **Hardening.** The compose example drops every capability except `CHOWN`, `SETUID` and `SETGID` (what the entrypoint
   needs) and sets `no-new-privileges`: the daemon and its agents then run with no capabilities at all. For `docker run` add
   `--cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --security-opt no-new-privileges:true`. The password in
-  `SMIND_PASSWORD` is visible in `docker inspect`; use an env file with restrictive permissions, or `smind set-password` into the
-  `/data` volume.
+  `SMIND_PASSWORD` is visible in `docker inspect`, and (as in any process's initial environment) to other processes of the
+  same user through `/proc/<pid>/environ` even though the daemon removes it from what its children inherit: agents run as that
+  user and already hold the daemon token, so use a password you use nowhere else. To keep it out of the environment entirely, run
+  `docker exec --user smind <c> smind set-password` once (it stores a bcrypt hash in the `/data` volume) and start without
+  `SMIND_PASSWORD`.
 - **Publishing (maintainers).** A package pushed to GHCR for the first time is private: after the first release, make
   `ghcr.io/spacingmind/smind` public in the repository's package settings, or the documented `docker pull` fails for everyone else.
 - **The container is the isolation boundary:** agents read and write whatever you mount, including `/workspaces` and the
