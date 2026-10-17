@@ -62,6 +62,11 @@ pub struct ProxyState {
     /// Where the `local` connection's daemon token comes from (the token
     /// file by default; swapped in tests).
     local_token_source: Mutex<Arc<dyn Fn() -> Option<String> + Send + Sync>>,
+    /// Whether the `local` daemon at a base URL answered `GET /api/token`
+    /// with 403 (a password-protected daemon, ADR-0031 D8), learned from the
+    /// UI's own token fetch. Only then does the proxy authenticate with the
+    /// token file; an older daemon keeps today's token-query flow.
+    local_password: Mutex<Option<(String, bool)>>,
 }
 
 impl ProxyState {
@@ -74,6 +79,7 @@ impl ProxyState {
             relay: Mutex::new(None),
             sessions: Mutex::new(std::collections::HashMap::new()),
             local_token_source: Mutex::new(Arc::new(crate::proxy::local_token::read)),
+            local_password: Mutex::new(None),
         })
     }
 
@@ -99,25 +105,45 @@ impl ProxyState {
         *self.local_token_source.lock().unwrap() = Arc::new(source);
     }
 
-    /// upstream_bearer is the credential the proxy attaches upstream itself
-    /// for `conn` (ADR-0031 D8), so the webview never holds it: the held
-    /// login session for a connection that has one; else, for the built-in
-    /// `local` connection ONLY and only while it really is this machine, the
-    /// daemon token file, read now (it changes when the daemon restarts).
-    /// Never a url/relay connection's, whatever the token file holds.
-    async fn upstream_bearer(&self, conn: &Connection) -> Option<String> {
-        if let Some(token) = self.session(&conn.id) {
-            return Some(token);
-        }
-        if conn.id != LOCAL_ID || conn.kind != ConnectionKind::Local {
-            return None;
-        }
+    fn password_gate(&self, base_url: &str) -> Option<bool> {
+        self.local_password.lock().unwrap().as_ref().filter(|(b, _)| b == base_url).map(|(_, v)| *v)
+    }
+
+    fn set_password_gate(&self, base_url: &str, protected: bool) {
+        *self.local_password.lock().unwrap() = Some((base_url.to_string(), protected));
+    }
+
+    /// is_builtin_local: the connection whose credential may come from the
+    /// token file -- the built-in `local` entry ONLY, never url/relay.
+    fn is_builtin_local(conn: &Connection) -> bool {
+        conn.id == LOCAL_ID && conn.kind == ConnectionKind::Local
+    }
+
+    /// local_file_token reads the daemon token file now (it changes when the
+    /// daemon restarts), only while `local` really is this machine
+    /// (`SMIND_DAEMON_URL` can point it elsewhere).
+    async fn local_file_token(&self, conn: &Connection) -> Option<String> {
         let base = Url::parse(&conn.base_url).ok()?;
         if !crate::proxy::local_token::is_local_by_address(&base).await {
             return None;
         }
         let source = self.local_token_source.lock().unwrap().clone();
         source()
+    }
+
+    /// upstream_bearer is the credential the proxy attaches upstream itself
+    /// for `conn` (ADR-0031 D8), so the webview never holds it: the held
+    /// login session for a connection that has one; else, for the built-in
+    /// `local` connection only and only once its daemon is known to be
+    /// password-protected (`password_gate`), the daemon token file.
+    async fn upstream_bearer(&self, conn: &Connection) -> Option<String> {
+        if let Some(token) = self.session(&conn.id) {
+            return Some(token);
+        }
+        if !Self::is_builtin_local(conn) || self.password_gate(&conn.base_url) != Some(true) {
+            return None;
+        }
+        self.local_file_token(conn).await
     }
 
     /// set_relay installs (or, with `None`, clears) the relay transport
@@ -269,12 +295,16 @@ async fn proxy_http(State(state): State<Arc<ProxyState>>, req: Request<Body>) ->
     if conn.kind == ConnectionKind::Relay {
         return relay_api_response(req.uri());
     }
-    let bearer = state.upstream_bearer(&conn).await;
-    if bearer.is_some() && req.method() == axum::http::Method::GET && req.uri().path() == "/api/token" {
+    let is_token_get = req.method() == axum::http::Method::GET && req.uri().path() == "/api/token";
+    let has_session = state.session(&conn.id).is_some();
+    if is_token_get && has_session {
         // The webview only needs *a* token to proceed; the real credential is
-        // attached upstream below and never leaves Rust.
+        // attached upstream and never leaves Rust.
         return placeholder_token_response();
     }
+    // `local`'s own token fetch always asks the daemon (it refreshes what the
+    // proxy knows about password protection), so it carries no credential.
+    let bearer = if is_token_get { None } else { state.upstream_bearer(&conn).await };
     let path_and_query = req
         .uri()
         .path_and_query()
@@ -313,6 +343,16 @@ async fn proxy_http(State(state): State<Arc<ProxyState>>, req: Request<Body>) ->
     match upstream {
         Ok(resp) => {
             let status = resp.status();
+            if is_token_get && ProxyState::is_builtin_local(&conn) {
+                // 403 = a password-protected daemon (#349) that no longer
+                // serves its token: authenticate with the token file when we
+                // can read it. Anything else keeps the plain token flow.
+                let protected = status == StatusCode::FORBIDDEN;
+                state.set_password_gate(&conn.base_url, protected);
+                if protected && state.local_file_token(&conn).await.is_some() {
+                    return placeholder_token_response();
+                }
+            }
             let mut headers = resp.headers().clone();
             headers.remove(header::CONNECTION);
             let body = Body::from_stream(resp.bytes_stream());
@@ -433,6 +473,13 @@ async fn proxy_ws(
     // daemon's token file) the proxy authenticates the upstream handshake
     // itself and drops whatever token the webview put in the URL; otherwise
     // the webview's own `smind.bearer.*` subprotocols are passed through.
+    if ProxyState::is_builtin_local(&conn) && state.password_gate(&conn.base_url).is_none() {
+        // The UI normally fetched /api/token first; if not, ask now.
+        let probe = format!("{}/api/token", conn.base_url.trim_end_matches('/'));
+        if let Ok(resp) = state.http_client.get(probe).send().await {
+            state.set_password_gate(&conn.base_url, resp.status() == StatusCode::FORBIDDEN);
+        }
+    }
     let bearer = state.upstream_bearer(&conn).await;
     let offered = offered_bearer_protocols(&headers);
     let query = match (&bearer, query.as_deref()) {

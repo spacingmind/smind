@@ -37,17 +37,21 @@ fn record(log: &Log, path: &'static str, headers: &HeaderMap, query: Option<Stri
     log.lock().unwrap().push(Seen { path, authorization: h("authorization"), protocols: h("sec-websocket-protocol"), query });
 }
 
-/// A stub daemon: /api/token serves "daemon-token", /api/ping answers ok, and
+/// A stub daemon: /api/token serves "daemon-token" (403 when `protected`, like
+/// a password daemon), /api/ping answers ok, and
 /// /ws selects the first offered `smind.bearer.*` protocol (like the real
 /// daemon) then echoes text frames.
-async fn spawn_stub() -> (SocketAddr, Log) {
+async fn spawn_stub(protected: bool) -> (SocketAddr, Log) {
     let log: Log = Arc::new(Mutex::new(Vec::new()));
     let app = Router::new()
         .route(
             "/api/token",
-            get(|State(log): State<Log>, headers: HeaderMap| async move {
+            get(move |State(log): State<Log>, headers: HeaderMap| async move {
                 record(&log, "/api/token", &headers, None);
-                axum::Json(serde_json::json!({ "token": "daemon-token" }))
+                if protected {
+                    return (axum::http::StatusCode::FORBIDDEN, axum::Json(serde_json::json!({ "error": "password configured" })));
+                }
+                (axum::http::StatusCode::OK, axum::Json(serde_json::json!({ "token": "daemon-token" })))
             }),
         )
         .route(
@@ -101,7 +105,11 @@ struct Harness {
 
 /// Proxy whose built-in `local` connection points at a stub daemon.
 async fn harness() -> Harness {
-    let (addr, stub) = spawn_stub().await;
+    harness_with(false).await
+}
+
+async fn harness_with(protected: bool) -> Harness {
+    let (addr, stub) = spawn_stub(protected).await;
     let local = Url::parse(&format!("http://{addr}")).unwrap();
     let state = ProxyState::new(SECRET.to_string(), Registry::new(&local), Box::new(EmptyAssets));
     state.set_local_token_source(|| None);
@@ -134,7 +142,7 @@ impl Harness {
     /// Adds a url connection pointing at a second stub, selects it, and
     /// returns (its id, its stub log).
     async fn select_url_connection(&self) -> (String, Log) {
-        let (addr, log) = spawn_stub().await;
+        let (addr, log) = spawn_stub(false).await;
         let mut reg = self.state.registry.lock().unwrap();
         let conn = reg.add("remote", &format!("http://{addr}")).unwrap();
         reg.select(&conn.id).unwrap();
@@ -153,7 +161,8 @@ async fn ws_forwards_bearer_subprotocol_and_echoes_selected() {
     let (mut ws, selected) = h.ws("", &["other.proto", "smind.bearer.abc123"]).await;
     assert_eq!(selected.as_deref(), Some("smind.bearer.abc123"), "the browser aborts unless the selection is echoed");
     echo_roundtrip(&mut ws).await;
-    let seen = h.stub.lock().unwrap()[0].clone();
+    let ws_seen = |h: &Harness| h.stub.lock().unwrap().iter().filter(|s| s.path == "/ws").cloned().collect::<Vec<_>>();
+    let seen = ws_seen(&h)[0].clone();
     assert_eq!(seen.protocols.as_deref(), Some("smind.bearer.abc123"), "only smind.bearer.* is forwarded");
     assert_eq!(seen.authorization, None, "no credential of the proxy's own with nothing configured");
 
@@ -161,21 +170,23 @@ async fn ws_forwards_bearer_subprotocol_and_echoes_selected() {
     let (mut ws, selected) = h.ws("?token=t", &[]).await;
     assert_eq!(selected, None);
     echo_roundtrip(&mut ws).await;
-    assert_eq!(h.stub.lock().unwrap()[1].query.as_deref(), Some("token=t"), "without a credential the query is passed through");
+    assert_eq!(ws_seen(&h)[1].query.as_deref(), Some("token=t"), "without a credential the query is passed through");
 }
 
 #[tokio::test]
-async fn local_connection_injects_token_file_bearer() {
-    let h = harness().await;
+async fn local_connection_with_403_token_falls_back_to_injected_bearer() {
+    let h = harness_with(true).await;
     h.state.set_local_token_source(|| Some("file-token".to_string()));
 
-    // GET /api/token is synthesized, and /api/* carries the bearer.
+    // The daemon refuses /api/token (403): the answer is synthesized, and
+    // /api/* then carries the bearer.
     let body: serde_json::Value = h.get("/api/token").await.json().await.unwrap();
     let placeholder = body["token"].as_str().unwrap().to_string();
     assert!(!placeholder.is_empty() && placeholder != "daemon-token" && placeholder != "file-token");
-    assert!(h.stub.lock().unwrap().is_empty(), "the synthesized token never reaches the daemon");
+    assert_eq!(h.stub.lock().unwrap()[0].path, "/api/token");
+    assert_eq!(h.stub.lock().unwrap()[0].authorization, None, "the token fetch itself carries no credential");
     assert_eq!(h.get("/api/ping?token=zzz&x=1").await.status(), 200);
-    let ping = h.stub.lock().unwrap()[0].clone();
+    let ping = h.stub.lock().unwrap()[1].clone();
     assert_eq!(ping.authorization.as_deref(), Some("Bearer file-token"));
     assert_eq!(ping.query.as_deref(), Some("x=1"), "the placeholder token param is stripped");
 
@@ -183,7 +194,7 @@ async fn local_connection_injects_token_file_bearer() {
     let (mut ws, selected) = h.ws(&format!("?token={placeholder}"), &[]).await;
     assert_eq!(selected, None);
     echo_roundtrip(&mut ws).await;
-    let seen = h.stub.lock().unwrap()[1].clone();
+    let seen = h.stub.lock().unwrap()[2].clone();
     assert_eq!(seen.path, "/ws");
     assert_eq!(seen.authorization.as_deref(), Some("Bearer file-token"));
     assert_eq!(seen.query, None);
@@ -191,7 +202,31 @@ async fn local_connection_injects_token_file_bearer() {
     // The token file is read per attempt: a restarted daemon's new token is used.
     h.state.set_local_token_source(|| Some("rotated".to_string()));
     let (_ws, _) = h.ws("", &[]).await;
-    assert_eq!(h.stub.lock().unwrap()[2].authorization.as_deref(), Some("Bearer rotated"));
+    assert_eq!(h.stub.lock().unwrap()[3].authorization.as_deref(), Some("Bearer rotated"));
+}
+
+#[tokio::test]
+async fn local_connection_with_403_and_no_token_file_passes_the_403_through() {
+    let h = harness_with(true).await;
+    assert_eq!(h.get("/api/token").await.status(), 403);
+}
+
+#[tokio::test]
+async fn local_connection_without_password_keeps_token_query_flow() {
+    let h = harness().await;
+    // A readable token file changes nothing for a daemon that serves /api/token.
+    h.state.set_local_token_source(|| Some("file-token".to_string()));
+    let body: serde_json::Value = h.get("/api/token").await.json().await.unwrap();
+    assert_eq!(body["token"], "daemon-token", "passthrough, not synthesized");
+    h.get("/api/ping?token=daemon-token").await;
+    let (mut ws, _) = h.ws("?token=daemon-token", &[]).await;
+    echo_roundtrip(&mut ws).await;
+    let log = h.stub.lock().unwrap();
+    assert_eq!(log[1].query.as_deref(), Some("token=daemon-token"));
+    assert_eq!(log[2].query.as_deref(), Some("token=daemon-token"), "the token query still reaches an older daemon");
+    for seen in log.iter() {
+        assert_eq!(seen.authorization, None, "{seen:?}");
+    }
 }
 
 #[tokio::test]
@@ -258,7 +293,7 @@ async fn session_connection_injects_session_bearer_and_synthesizes_token() {
 
 #[tokio::test]
 async fn token_never_reaches_the_webview() {
-    let h = harness().await;
+    let h = harness_with(true).await;
     h.state.set_local_token_source(|| Some("file-token".to_string()));
     let mut surfaces: Vec<String> = Vec::new();
 
