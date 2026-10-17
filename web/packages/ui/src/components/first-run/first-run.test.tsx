@@ -83,6 +83,32 @@ beforeEach(() => {
   desk.daemonInstall.mockResolvedValue({ ...FREE, reachable: true, managedState: "managed", localService: "smind" });
 });
 
+describe("first-run branding and copy", () => {
+  it("leads with the sMind mark and title", async () => {
+    await renderFirstRun();
+    expect(screen.getByTestId("first-run-logo").querySelector("img")?.getAttribute("src")).toBe("/logo.png");
+    expect(screen.getByTestId("first-run-title")).toHaveTextContent("Welcome to sMind");
+    expect(screen.getByTestId("first-run-choice-run")).toHaveTextContent("Run sMind on this computer");
+  });
+
+  it("names the service manager when a service owns the running daemon", async () => {
+    await renderFirstRun({ ...RUNNING_SMIND, managedBy: "systemd" });
+    expect(screen.getByTestId("first-run-choice-existing")).toHaveTextContent("managed by systemd");
+    expect(screen.getByTestId("first-run-choice-existing")).not.toHaveTextContent("started outside the app");
+  });
+
+  it("labels the daemon password field", async () => {
+    desk.probeConnection.mockResolvedValue({ ...PROBE_OK, authRequired: true });
+    await renderFirstRun();
+    await pick("url");
+    await type(screen.getByTestId("connection-add-url"), "http://h:4648");
+    await click(screen.getByTestId("connection-add-submit"));
+    expect(await screen.findByLabelText("Daemon password")).toBeInTheDocument();
+    expect(screen.getByText("Daemon password", { selector: "label" })).toBeVisible();
+    expect(screen.getByTestId("connection-add-submit")).toBeEnabled();
+  });
+});
+
 describe("first-run local situation", () => {
   it("preselects Run here when the port is free", async () => {
     await renderFirstRun();
@@ -91,12 +117,12 @@ describe("first-run local situation", () => {
     expect(screen.queryByTestId("first-run-radio-existing")).toBeNull();
   });
 
-  it("preselects Use the running daemon and disables Run here when a smind daemon answers", async () => {
+  it("preselects Use the running daemon and disables Run here when a sMind daemon answers", async () => {
     await renderFirstRun(RUNNING_SMIND);
     expect(checked("existing")).toBe(true);
     expect(radio("run")).toBeDisabled();
     expect(screen.getByTestId("first-run-reason-run")).toHaveTextContent(/already running/i);
-    expect(screen.getByTestId("first-run-choice-existing")).toHaveTextContent("smind v0.11.1");
+    expect(screen.getByTestId("first-run-choice-existing")).toHaveTextContent("sMind v0.11.1");
     expect(screen.getByTestId("first-run-choice-existing")).toHaveTextContent("started outside the app");
     // (d) is listed first.
     const choices = screen.getByTestId("first-run-choices");
@@ -239,12 +265,12 @@ describe("first-run connect by URL", () => {
     expect(password.value).toBe("");
   });
 
-  it("refuses a URL that is not a smind daemon", async () => {
+  it("refuses a URL that is not a sMind daemon", async () => {
     desk.probeConnection.mockResolvedValue({ ...PROBE_OK, service: "nginx", version: null });
     await openUrl();
     await type(screen.getByTestId("connection-add-url"), "http://h:8080");
     await click(screen.getByTestId("connection-add-submit"));
-    expect(await screen.findByTestId("url-not-smind")).toHaveTextContent(/not a smind daemon/i);
+    expect(await screen.findByTestId("url-not-smind")).toHaveTextContent(/not a sMind daemon/i);
     expect(screen.getByTestId("connection-add-submit")).toHaveTextContent("Check");
     await click(screen.getByTestId("connection-add-submit"));
     expect(desk.addConnection).not.toHaveBeenCalled();

@@ -532,7 +532,7 @@ fn take_over_refusal(platform: Platform, owner_image: Option<&str>, managed_by: 
     }
     Some(match platform {
         Platform::Windows => format!("a daemon not started by this app is answering on port {port} -- if it runs in WSL, stop it there; take over is only offered for a smind.exe"),
-        _ => format!("the process holding port {port} is not a smind daemon (it may be an ssh tunnel or another program) -- take over is only offered for a smind process"),
+        _ => format!("the process holding port {port} is not a sMind daemon (it may be an ssh tunnel or another program) -- take over is only offered for a sMind process"),
     })
 }
 
@@ -1488,7 +1488,7 @@ mod tests {
     fn take_over_refused_for_non_smind_owner_on_macos() {
         for owner in ["/usr/bin/ssh", "/usr/local/bin/other", "/opt/smind-helper", "/x/smind.exe"] {
             let err = take_over_refusal(Platform::Macos, Some(owner), None, 4648).unwrap_or_else(|| panic!("{owner} must be refused"));
-            assert!(err.contains("not a smind daemon") && err.contains("4648"), "{err}");
+            assert!(err.contains("not a sMind daemon") && err.contains("4648"), "{err}");
         }
         assert!(take_over_refusal(Platform::Macos, None, None, 4648).is_some());
     }

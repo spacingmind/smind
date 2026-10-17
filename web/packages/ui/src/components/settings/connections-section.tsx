@@ -32,6 +32,30 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * An ssh connection is stored as `ssh://[user@]host[:sshPort]?daemonPort=N`: show
+ * that target (never the tunnel's local URL, which changes every launch), with the
+ * remote daemon port as a quiet second detail.
+ */
+function SshTargetLine({ baseUrl }: { baseUrl: string }) {
+  let target = baseUrl;
+  let daemonPort: string | null = null;
+  try {
+    const u = new URL(baseUrl);
+    const host = u.hostname.startsWith("[") ? u.hostname : u.hostname.includes(":") ? `[${u.hostname}]` : u.hostname;
+    target = `ssh://${u.username ? `${decodeURIComponent(u.username)}@` : ""}${host}${u.port ? `:${u.port}` : ""}`;
+    daemonPort = u.searchParams.get("daemonPort");
+  } catch {
+    // Not a parseable ssh URI: show it as stored.
+  }
+  return (
+    <span className="flex min-w-0 items-baseline gap-2" data-testid="connection-ssh-target">
+      <span className="truncate font-mono text-ui-sm text-muted-foreground">{target}</span>
+      {daemonPort && <span className="shrink-0 text-ui-sm text-foreground-subtlest">daemon port {daemonPort}</span>}
+    </span>
+  );
+}
+
 const ADD_METHODS: ConnectMethodId[] = ["url", "ssh", "relay"];
 
 function ConnectionsSection() {
@@ -158,8 +182,11 @@ function ConnectionsSection() {
                     </span>
                   )}
                 </span>
-                <span className="truncate font-mono text-ui-sm text-muted-foreground">{c.baseUrl}</span>
-                {current?.id === c.id && c.kind === "relay" && relayStatus && <RelayConnectionStatus status={relayStatus} />}
+                {c.kind === "ssh" ? (
+                  <SshTargetLine baseUrl={c.baseUrl} />
+                ) : (
+                  <span className="truncate font-mono text-ui-sm text-muted-foreground">{c.baseUrl}</span>
+                )}
                 {current?.id === c.id && c.kind === "relay" && relayStatus && <RelayConnectionStatus status={relayStatus} />}
               </div>
               <div className="flex shrink-0 gap-1">

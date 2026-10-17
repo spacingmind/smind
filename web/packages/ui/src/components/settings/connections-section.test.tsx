@@ -238,18 +238,22 @@ describe("connections-section (desktop build)", () => {
   });
 
   it("lists ssh connections with an SSH tag", async () => {
-    const SSH = { id: "ssh:homelab", kind: "ssh" as const, label: "homelab", baseUrl: "http://127.0.0.1:50123" };
+    const SSH = { id: "ssh:homelab", kind: "ssh" as const, label: "homelab", baseUrl: "ssh://me@homelab.lan:2222?daemonPort=4648" };
     await renderSection({
       listConnections: () => Promise.resolve([LOCAL, SSH]),
       getCurrentConnection: () => Promise.resolve(LOCAL),
     });
     expect(screen.getByTestId("connection-row-ssh:homelab")).toHaveTextContent("homelab");
     expect(screen.getByTestId("connection-kind-ssh:homelab")).toHaveTextContent("SSH");
+    // The stored target is shown (not a tunnel URL), the daemon port as a second detail.
+    expect(screen.getByTestId("connection-row-ssh:homelab")).toHaveTextContent("ssh://me@homelab.lan:2222");
+    expect(screen.getByTestId("connection-row-ssh:homelab")).toHaveTextContent("daemon port 4648");
+    expect(screen.getByTestId("connection-row-ssh:homelab")).not.toHaveTextContent("127.0.0.1");
     expect(screen.getByTestId("connection-remove-ssh:homelab")).toBeInTheDocument();
   });
 
   it("shows Rust's text inline when switching to an ssh connection fails", async () => {
-    const SSH = { id: "ssh:homelab", kind: "ssh" as const, label: "homelab", baseUrl: "http://127.0.0.1:50123" };
+    const SSH = { id: "ssh:homelab", kind: "ssh" as const, label: "homelab", baseUrl: "ssh://me@homelab.lan:2222?daemonPort=4648" };
     await renderSection({
       listConnections: () => Promise.resolve([LOCAL, SSH]),
       getCurrentConnection: () => Promise.resolve(LOCAL),

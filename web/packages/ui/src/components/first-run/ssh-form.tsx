@@ -77,7 +77,7 @@ export function SshConnectForm({ onConnected }: { onConnected: (conn: Connection
   return (
     <form className="flex flex-col gap-2" onSubmit={submit} data-testid="ssh-form" noValidate>
       <p className="text-ui-base text-muted-foreground">
-        Tunnels to a smind daemon already running on another machine through your system <code className="font-mono text-ui-sm">ssh</code>.
+        Tunnels to a sMind daemon already running on another machine through your system <code className="font-mono text-ui-sm">ssh</code>.
         It uses your SSH keys and agent; nothing changes on that machine.
       </p>
       <Input

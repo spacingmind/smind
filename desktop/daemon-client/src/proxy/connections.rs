@@ -277,7 +277,7 @@ impl Registry {
         let conn = Connection {
             id: target.connection_id(),
             kind: ConnectionKind::Ssh,
-            label: if label.is_empty() { format!("SSH ({})", target.host) } else { label.to_string() },
+            label: if label.is_empty() { target.host.clone() } else { label.to_string() },
             base_url: target.to_uri()?,
         };
         if let Some(existing) = self.connections.iter_mut().find(|c| c.id == conn.id) {
@@ -603,7 +603,7 @@ mod tests {
         let conn = reg.add_ssh("", &t).unwrap();
         assert_eq!(conn.id, "ssh:me@lab.example:2222:4648");
         assert_eq!(conn.kind, ConnectionKind::Ssh);
-        assert_eq!(conn.label, "SSH (me@lab.example)");
+        assert_eq!(conn.label, "me@lab.example");
         assert_eq!(conn.base_url, "ssh://me@lab.example:2222?daemonPort=4648");
         reg.select(&conn.id).unwrap();
         reg.save(&path).unwrap();

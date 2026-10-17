@@ -1,4 +1,5 @@
 import type { ConnectMethodId } from "@/components/first-run/connect-methods";
+import { managedByLabel } from "@/lib/daemon-version";
 import type { DaemonStatus } from "@/lib/platform";
 
 export type ChoiceId = "run" | "existing" | ConnectMethodId;
@@ -11,7 +12,7 @@ export interface LocalSituation {
   unsupported: boolean;
   /** A running daemon this app already manages (re-running setup): Run here keeps it instead of reinstalling. */
   alreadyManaged: boolean;
-  /** (d) is offered: a smind daemon answers and the app does not manage it. */
+  /** (d) is offered: a sMind daemon answers and the app does not manage it. */
   existing: { text: string } | null;
   /** Why (a) is disabled; null = enabled. */
   runBlocked: string | null;
@@ -33,12 +34,16 @@ export function describeLocalSituation(status: DaemonStatus | null): LocalSituat
   const base = { known: true, unsupported, alreadyManaged, wsl };
 
   if (status.reachable && smind && status.managedState !== "managed") {
-    const version = status.daemonVersion ? `smind v${status.daemonVersion.replace(/^v/, "")}` : "A smind daemon";
-    const where = wsl ? "started outside the app (it looks like a daemon running inside WSL)" : "started outside the app";
+    const version = status.daemonVersion ? `sMind v${status.daemonVersion.replace(/^v/, "")}` : "A sMind daemon";
+    const where = status.managedBy
+      ? `managed by ${managedByLabel(status.managedBy)}`
+      : wsl
+        ? "started outside the app (it looks like a daemon running inside WSL)"
+        : "started outside the app";
     return {
       ...base,
       existing: { text: `${version} is already running on this computer, ${where}. The app will connect to it and leave it alone.` },
-      runBlocked: "A smind daemon is already running here, so the app won't install a second one.",
+      runBlocked: "A sMind daemon is already running here, so the app won't install a second one.",
       preselect: "existing",
     };
   }
@@ -46,7 +51,7 @@ export function describeLocalSituation(status: DaemonStatus | null): LocalSituat
     return {
       ...base,
       existing: null,
-      runBlocked: `Something that is not smind answers on this computer's smind port (127.0.0.1:4648). ${PORT_NOTE}`,
+      runBlocked: `Something that is not sMind answers on this computer's sMind port (127.0.0.1:4648). ${PORT_NOTE}`,
       preselect: null,
     };
   }
@@ -54,7 +59,7 @@ export function describeLocalSituation(status: DaemonStatus | null): LocalSituat
     return {
       ...base,
       existing: null,
-      runBlocked: `Another program is using this computer's smind port (127.0.0.1:4648) without answering as smind. ${PORT_NOTE}`,
+      runBlocked: `Another program is using this computer's smind port (127.0.0.1:4648) without answering as sMind. ${PORT_NOTE}`,
       preselect: null,
     };
   }

@@ -228,8 +228,15 @@ export function FirstRun({
       <div className="min-h-0 flex-1 overflow-y-auto">
         <main className="mx-auto flex w-full max-w-xl flex-col gap-6 px-6 pb-10 pt-4">
           <div className="flex flex-col gap-1">
+            {/* The same mark as the sidebar header, larger: welcome screens lead with the brand. */}
+            <span
+              data-testid="first-run-logo"
+              className="mb-3 grid size-12 shrink-0 place-items-center rounded-xl bg-foreground dark:bg-transparent"
+            >
+              <img src="/logo.png" alt="" className="size-8 dark:size-12" />
+            </span>
             <h1 className="text-ui-xl font-semibold" data-testid="first-run-title">
-              {rerun ? "Run setup again" : "Welcome to smind"}
+              {rerun ? "Run setup again" : "Welcome to sMind"}
             </h1>
             <p className="text-ui-base text-muted-foreground">
               Choose how this app gets a daemon to talk to. You can change this later in Settings.
@@ -264,7 +271,7 @@ export function FirstRun({
                 <div data-testid="first-run-linux-guidance" className="flex items-start gap-3 rounded-xl border border-border bg-card p-3">
                   <Icons.host aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                   <div className="flex min-w-0 flex-col gap-1">
-                    <span className="text-ui-base font-medium">Run smind on this computer</span>
+                    <span className="text-ui-base font-medium">Run sMind on this computer</span>
                     <span className="text-ui-base text-muted-foreground">
                       The app can&apos;t manage a daemon on this platform. Install one as a service with{" "}
                       <code className="font-mono text-ui-sm">smind service install</code>, then run setup again to use it.
@@ -275,10 +282,10 @@ export function FirstRun({
                 <ChoiceCard
                   id="run"
                   icon={<Icons.host aria-hidden className="size-4" />}
-                  title="Run smind on this computer"
+                  title="Run sMind on this computer"
                   summary={
                     situation.alreadyManaged
-                      ? "smind is already running here and managed by this app."
+                      ? "sMind is already running here and managed by this app."
                       : "The app installs and manages a local daemon for you."
                   }
                   selected={choice === "run"}
@@ -298,7 +305,7 @@ export function FirstRun({
               )}
               {situation.wsl && !situation.existing && (
                 <p data-testid="first-run-wsl" className="px-1 text-ui-sm text-muted-foreground">
-                  If you run smind inside WSL, stop it there first: its port is forwarded to Windows and would collide with the daemon the app installs.
+                  If you run sMind inside WSL, stop it there first: its port is forwarded to Windows and would collide with the daemon the app installs.
                 </p>
               )}
 
@@ -306,7 +313,7 @@ export function FirstRun({
                 id="url"
                 icon={<Icons.web aria-hidden className="size-4" />}
                 title="Connect to a daemon"
-                summary="Enter the address of a smind daemon you can reach."
+                summary="Enter the address of a sMind daemon you can reach."
                 selected={choice === "url"}
                 locked={locked}
                 onSelect={select}

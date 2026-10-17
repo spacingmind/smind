@@ -144,21 +144,26 @@ export function UrlConnectForm({
         </p>
       )}
       {result?.reachable && result.authRequired && (
-        <Input
-          ref={passwordRef}
-          aria-label="Daemon password"
-          data-testid="url-password"
-          type="password"
-          autoComplete="off"
-          data-1p-ignore
-          data-lpignore="true"
-          placeholder="Daemon password"
-          disabled={busy}
-        />
+        <div className="flex flex-col gap-1">
+          <label htmlFor="url-password" className="text-ui-sm font-medium text-muted-foreground">
+            Daemon password
+          </label>
+          <Input
+            id="url-password"
+            ref={passwordRef}
+            data-testid="url-password"
+            type="password"
+            autoComplete="off"
+            data-1p-ignore
+            data-lpignore="true"
+            placeholder="Enter the daemon password"
+            disabled={busy}
+          />
+        </div>
       )}
       {notSmind && (
         <p role="alert" data-testid="url-not-smind" className="text-ui-base text-destructive">
-          That address answers, but it is not a smind daemon ({host}). Nothing was saved.
+          That address answers, but it is not a sMind daemon ({host}). Nothing was saved.
         </p>
       )}
       {unreachable && (
@@ -175,7 +180,7 @@ export function UrlConnectForm({
           ) : (
             <>
               <p data-testid="url-loopback-note">
-                smind daemons listen on loopback (127.0.0.1) unless a password is set, so a daemon on another machine usually can&apos;t be
+                sMind daemons listen on loopback (127.0.0.1) unless a password is set, so a daemon on another machine usually can&apos;t be
                 reached directly. Connect over SSH, or pair through a relay link instead.
               </p>
               {onPickMethod && (
@@ -207,7 +212,7 @@ export function UrlConnectForm({
   );
 }
 
-/** A probe result the user may save: reachable and positively a smind daemon. */
+/** A probe result the user may save: reachable and positively a sMind daemon. */
 function saveable(result: ProbeResult): boolean {
   return result.reachable && result.service === "smind";
 }
