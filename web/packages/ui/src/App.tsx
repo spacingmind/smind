@@ -990,6 +990,7 @@ function AppShell({
       />
       {isDesktop && (
         <DesktopDaemonBanner
+          client={client}
           runsLoaded={runsLoaded}
           runningRuns={[...runningChatsByTask.values()].reduce((n, chats) => n + chats.size, 0)}
         />
