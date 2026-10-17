@@ -8,6 +8,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use url::{Host, Url};
 
+use smind_daemon_client::proxy::bounded;
 use smind_daemon_client::proxy::connections::validate_base_url;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -95,7 +96,8 @@ pub async fn probe(raw_url: &str) -> ProbeResult {
     let status = resp.status();
     // Anything that answers HTTP is reachable; whether it is smind is the
     // `service` field's job (the UI refuses anything but "smind").
-    let body = resp.json::<Healthz>().await.ok();
+    // Bounded: a hostile or broken address must not make us buffer its answer.
+    let body = bounded::read_json::<Healthz>(resp, bounded::MAX_BODY_BYTES).await;
     ProbeResult {
         reachable: true,
         version: body.as_ref().and_then(|h| h.version.clone()),
@@ -213,6 +215,17 @@ mod tests {
         assert!(!bad.error.unwrap().contains("hunter2"));
         let link = connections_probe("https://relay.example/#offer=abc".to_string()).await.unwrap();
         assert!(link.error.unwrap().contains("relay pairing link"));
+    }
+
+    #[tokio::test]
+    async fn oversized_healthz_body_is_not_smind() {
+        let filler = "x".repeat(200 * 1024);
+        let body: &'static str = Box::leak(format!(r#"{{"service":"smind","pad":"{filler}"}}"#).into_boxed_str());
+        let (url, _) = stub(vec![leak(ok_json(body))]);
+        let got = probe(&url).await;
+        assert!(got.reachable);
+        assert_eq!(got.service, None, "an over-limit body is never parsed");
+        assert_eq!(got.version, None);
     }
 
     #[test]

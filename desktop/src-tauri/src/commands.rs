@@ -52,7 +52,7 @@ async fn login(base: &url::Url, password: &str) -> Result<String, String> {
         .map_err(|e| format!("login failed: {}", crate::probe::describe_request_error(&e)))?;
     let status = resp.status();
     let header_wait = resp.headers().get(reqwest::header::RETRY_AFTER).and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<u64>().ok());
-    let body = resp.json::<Reply>().await.ok();
+    let body = smind_daemon_client::proxy::bounded::read_json::<Reply>(resp, smind_daemon_client::proxy::bounded::MAX_BODY_BYTES).await;
     match status.as_u16() {
         200 => body.and_then(|r| r.token).filter(|t| !t.is_empty()).ok_or_else(|| "the daemon's login answer had no session token".to_string()),
         401 => Err("wrong password".to_string()),
@@ -567,6 +567,19 @@ mod tests {
             assert_eq!(err, want);
             assert!(!err.contains("hunter2") && !err.contains("127.0.0.1"));
         }
+    }
+
+    #[tokio::test]
+    async fn oversized_login_answer_is_an_error_not_a_buffer() {
+        let dir = tempfile::tempdir().unwrap();
+        let filler = "x".repeat(200 * 1024);
+        let body = format!(r#"{{"token":"sess","pad":"{filler}"}}"#);
+        let canned: &'static str = Box::leak(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).into_boxed_str());
+        let (url, _) = crate::probe::test_support::stub(vec![canned]);
+        let proxy = proxy();
+        let err = add_url_connection(&proxy, &dir.path().join("c.json"), "", &url, Some("hunter2hunter2".into())).await.unwrap_err();
+        assert_eq!(err, "the daemon's login answer had no session token");
+        assert_eq!(proxy.registry.lock().unwrap().list().len(), 1, "nothing saved");
     }
 
     #[tokio::test]
