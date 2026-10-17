@@ -144,10 +144,7 @@ func daemonPort() (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("config: %w", err)
 	}
-	if cfg.Server.Port == 0 {
-		return 4648, nil
-	}
-	return cfg.Server.Port, nil
+	return cfg.Server.ClientPort(), nil
 }
 
 // daemonBaseURL is the daemon's loopback HTTP base. A config that cannot be

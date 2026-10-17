@@ -16,6 +16,7 @@
 // WsClient already exists, and re-arms itself on every successful
 // reconnect so the loop continues indefinitely.
 import * as daemonLib from "./daemon";
+import { LoginRequiredError } from "./auth";
 import type { WsClient } from "./ws-client";
 
 /** Real-time connection status, driven by actual socket events -- not just the initial connect promise. */
@@ -56,10 +57,20 @@ export interface ReconnectOptions {
    * socket) -- defaults to daemon.ts's connectDaemon, which refetches
    * /api/token every call by construction (no caching), satisfying the
    * "token is refetched on each reconnect attempt" requirement for free.
+   * It also picks the credential: a stored session token when there is one,
+   * the loopback token otherwise (see connectDaemon).
    * Overridable for tests so they don't need a real fetch/WebSocket.
    */
   connect?: () => Promise<WsClient>;
   backoff?: BackoffOptions;
+  /**
+   * Invoked once, after which the loop stops for good, when a reconnect
+   * attempt finds there is no usable credential left (the session token was
+   * refused or expired and there is no loopback token): retrying would loop
+   * forever against a daemon that will keep saying no, so the app shows the
+   * login form instead and starts a fresh connect after sign-in.
+   */
+  onLoginRequired?: (reason: LoginRequiredError["reason"]) => void;
 }
 
 export interface ReconnectHandle {
@@ -119,8 +130,14 @@ export function watchForReconnect(client: WsClient, opts: ReconnectOptions): Rec
           opts.onStatusChange?.("connected");
           opts.onClient(next);
         })
-        .catch(() => {
+        .catch((err: unknown) => {
           if (tornDown) return;
+          if (err instanceof LoginRequiredError) {
+            tornDown = true;
+            current.close();
+            opts.onLoginRequired?.(err.reason);
+            return;
+          }
           attemptReconnect(attempt + 1);
         });
     }, nextDelay(attempt, backoff));

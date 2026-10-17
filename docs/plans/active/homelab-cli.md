@@ -1,8 +1,8 @@
 # Homelab distribution: update, service, install scripts, Docker, direct + relay connections, desktop first-run
 
 Implements [ADR-0031](../../decisions/0031-homelab-cli-distribution.md)
-(**Accepted 2026-10-14**, except decisions 9, 12, 27–32 and 36, which remain **Open**; the PRs they gate stay BLOCKED
-below. Revised after a study of Paseo and the Human's answers: hosted-relay hosting is pending, multi-device is designed on
+(**Accepted 2026-10-14**, except decisions 12, 27–32 and 36, which remain **Open**; the PRs they gate stay BLOCKED
+below. **Decision 9 (direct connections with a password) was Accepted 2026-10-15**: P4 and what depends on it are unblocked. Revised after a study of Paseo and the Human's answers: hosted-relay hosting is pending, multi-device is designed on
 gRPC). Every PR below that depends on an
 open decision says so; the plan is written against the ADR's recommended defaults
 (★ = default changed or new because of Paseo), and a PR must not start before its
@@ -46,8 +46,8 @@ before merge — never stacked.
   signing); the multi-device track **P12a, P12b, P12c, P13a, P13b**.
   **P0 must merge before P2 and P12a** (shared `cmd/smind/relay.go`); P12b follows P12a, P0 and P2; P12c follows P12b;
   P13a follows P12b and P3; P13b follows P12b; P7 follows P6.
-- **BLOCKED on decision 9** (direct connections with a password — still Open): **P4**, and what depends on it: **P5, P8, P9,
-  P10, P11, P13c**.
+- **Decision 9 ACCEPTED 2026-10-15** (direct connections with a password): **P4** is ready, and unblocks what depends on it:
+  **P5, P8, P9, P10, P11, P13c** (each still has its other predecessors).
 - **BLOCKED on decision 12** (hosted-relay hosting — still Open; also 27–32, 36): **P14, P15, P16**.
 
 **Suggested order**
@@ -57,9 +57,9 @@ before merge — never stacked.
 2. *Multi-device (ready):* **P12a** (relay server + proto + 3-device harness), then **P12b** (after P12a, P0, P2), **P12c**
    (after P12b), and the clients **P13a** desktop (after P12b and P3) and **P13b** mobile (after P12b), in parallel.
 3. *Independent (ready):* **P6** (`smind update`) and then **P7** (signing).
-4. *Waiting for the Human's answer on decision 9:* **P4**, then **P5** (first-run), **P8** (service), **P9**, **P10**,
+4. *Decision 9 accepted (2026-10-15):* **P4** first, then **P5** (first-run), **P8** (service), **P9**, **P10**,
    **P11** (Docker; also after P7) and **P13c** (relay device password; also after P12b). Written against the recommended
-   defaults, not started.
+   defaults; P4 in progress (2026-10-15).
 5. *BLOCKED on decision 12:* **P14** (deploy and ops), **P15** (open enrolment), **P16** (default address) — in that order,
    after P12a–c; nothing here starts until the Human chooses between (D) Cloudflare gRPC proxy + Go relay, (C) Cloudflare
    Containers behind a Worker, or the withdrawn (B).
@@ -209,14 +209,18 @@ desktop), deep-link auto-pair (decision 16).
    `SMIND_HOSTNAMES` override config for containers.
 4. **The daemon refuses to start** when `listen` is non-loopback and no password is
    configured, with a message naming `smind set-password`.
-5. `GET /api/token` is served only when `RemoteAddr` is loopback **and** `Host` is a loopback
-   name/IP **and** no `Forwarded`/`X-Forwarded-*`/`X-Real-IP` header is present; otherwise 403.
+5. `GET /api/token` is served only when **no password is configured**, `RemoteAddr` is loopback **and** `Host` is a
+   loopback name/IP **and** no `Forwarded`/`X-Forwarded-*`/`X-Real-IP` (or other proxy) header is present; otherwise 403.
+   **With a password it is always 403** (amended 2026-10-15): the local web UI signs in; the CLI/desktop client read the
+   token file.
 6. `POST /api/login {password}` returns an expiring, in-memory 256-bit session token
    (not the daemon token); wrong password → 401 with constant-time comparison; per-IP
    exponential backoff after repeated failures (429 with `Retry-After`).
 7. `/ws` accepts the session token via `Sec-WebSocket-Protocol` bearer or `Authorization`,
-   **not** via the URL query, for non-loopback clients; the loopback token query path keeps
-   working for existing loopback clients.
+   **not** via the URL query, for non-loopback clients. The daemon token (from the token file) is accepted from loopback
+   in the `Authorization` header; the `?token=` query form keeps working for loopback clients only **while no password
+   is set** (amended 2026-10-15; `wsclient` and the desktop notification client send the header, plus the query for
+   older daemons).
 8. `Host` is validated on every HTTP request and WS upgrade against `localhost`, `*.localhost`,
    any literal IP, and `server.hostnames` (leading `.` matches the domain and subdomains);
    anything else → 403 `Host not allowed`. `CheckOrigin` stays same-origin.
@@ -958,6 +962,25 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   retry). **Decided by the Human (2026-10-15): `relay.legacyDevices` defaults to false** (with it true, revoke, pending and the window do
   not bind legacy access); `docs/homelab.md` says that relay pairing needs the updated clients (P13a/b) until then and warns about
   the opt-in. Still open: a per-offer one-time token (offer format change) is the stronger pairing-window fix.
+- 2026-10-15: **Decision 9 accepted** (ADR-0031 flipped). **P4 implemented** (`feat/direct-connections-password`): `server.listen` /
+  `server.hostnames` / `server.passwordHash` (+ `SMIND_LISTEN`/`SMIND_HOSTNAMES`/`SMIND_PASSWORD`), `smind config get|set|unset`
+  (yaml.Node edit, comments kept), `smind set-password` (bcrypt cost 12, ≥ 12 chars, TTY twice or `--password-stdin`, never argv),
+  the daemon refuses non-loopback without a password, `/api/token` for true loopback only, `POST /api/login` → 24 h in-memory
+  session token (SHA-256 only kept), `/ws` via `Sec-WebSocket-Protocol: smind, smind.bearer.<token>` or `Authorization` (never the
+  URL), Host allowlist on every request, same-origin `Origin`, per-/64 login backoff + global window + bcrypt slots, healthz
+  `authRequired`, web login form, `docs/homelab.md` threat model. Decisions taken inside the spec: a session token opens **/ws
+  only** (the proxy endpoints and `/api/shutdown` stay behind the daemon token); the daemon always also binds `127.0.0.1` so
+  the CLI works with a specific-IP listen; `0.0.0.0` binds IPv4 only (Go's dual-stack default would also expose IPv6);
+  `Via`, `CF-Connecting-IP`, `True-Client-IP`, `X-Original-*`... count as proxy headers; loopback peers share one limiter
+  bucket without a per-address lockout (a same-host proxy would otherwise let one guesser lock everyone out). **Left for P5:**
+  the desktop "Connect to a daemon" password field (the Rust proxy must forward `/api/login` and the subprotocol), `connections_probe`.
+  **Review finding, resolved by the Human the same day** (see the next entry): the loopback `/api/token` shortcut could not tell a default same-host nginx from a local client.
+- 2026-10-15 (P4 review decision): with a password set `/api/token` is closed even on loopback and the `?token=` WebSocket
+  form is refused; the CLI (`internal/wsclient`) and the desktop notification client (`desktop/daemon-client`, token-file
+  fallback for a loopback daemon, bearer header) read `~/.smind/token`. **P5 follow-up:** the desktop *webview* proxy
+  (`proxy/server.rs`) still forwards `/ws` without the `Sec-WebSocket-Protocol` bearer and without an upstream
+  `Authorization`, so a password-protected local daemon shows the web login there but cannot complete the socket until P5
+  forwards the subprotocol (or injects the token-file bearer for `ConnectionKind::Local`).
 - 2026-10-15 (fix, before #350/#351 merge): the P13b review found two defects in what P12b shipped. (1) `device_hello` v1 signed only
   (daemon key, client ephemeral key), both fixed by a captured handshake, so a captured session replays into a new route and is
   admitted as that device (and `supersede` drops the real session): hello **v2** — the daemon sends a fresh challenge first and the
@@ -1109,6 +1132,60 @@ Not verified: a real desktop/mobile client (P13a/b), the cross-language hello ve
 rename retry, `Restrict`), the hub against a pre-P12a relay (the `Sync`-less fallback to the fixed legacy route has no test — it is reasoned
 from the old server code only), a real proxy.
 
+### P4 (2026-10-15)
+
+Commands: `go test -count=1 ./...`, `task lint`, `GOOS=windows go vet ./...`, `cd web && bunx tsc -b packages/ui`, vitest on the five
+touched web test files, a real daemon driven by Chrome (Playwright) for light + dark screenshots.
+
+- AC1 defaults unchanged: `TestServeLoopbackDefaultUnchanged` (cmd, real daemon: healthz `authRequired:false`, loopback `/api/token`,
+  `smind workspace ls`, foreign Host refused, nothing on the LAN address), `TestLoopbackQueryTokenStillWorks`, the unchanged
+  existing server/wsapi/cmd suites.
+- AC2 `smind config`: `TestConfigSetGetUnsetRoundTripKeepsComments`, `TestConfigSetRejectsUnknownKey`, `TestConfigSetValidatesValues`,
+  `TestConfigSetCreatesFileOwnerOnly`, `TestConfigSetEditsThroughASymlinkAndKeepsItPrivate`, `TestConfigCommandRoundTrip`,
+  `TestConfigGetNeverPrintsTheHash`, `TestServeFlagsStillRejected`.
+- AC3 `set-password`: `TestSetPasswordRejectsShort`, `TestSetPasswordWritesBcryptMode0600` (hash verifies; password/hash absent from
+  file, stdout, stderr), `TestSetPasswordNonTTYNeedsFlag` (argv password refused and not echoed), `TestSetPasswordPromptsTwiceOnATTY`,
+  `TestEnvOverridesConfig`, `TestEnvPasswordIsHashedInMemory`, `TestEnvStillAppliesWhenTheFileDoesNotParse`.
+- AC4 refusal: `TestServeRefusesNonLoopbackWithoutPassword` (server unit + real process, also a short `SMIND_PASSWORD`),
+  `TestWeakOrBrokenPasswordMaterialRefused`, `TestBindsNeverDualStackAnIPv4Literal`, `TestListenCompanionKeepsLoopbackReachable`.
+- AC5 `/api/token`: `TestAPITokenLoopbackOK`, `…ForbiddenForNonLoopbackRemoteAddr`, `…ForbiddenWhenHostIsExternal`,
+  `…ForbiddenWithForwardedHeaders` (10 headers), `…ForbiddenForForeignOrigin`, `TestIsTrueLoopback`.
+- AC6 login: `TestLoginReturnsSessionNotDaemonToken`, `TestLoginWrongPasswordConstantTime401`, `TestLoginRateLimitBackoff429`,
+  `TestLoginLimiter*` (doubling/cap, per-address, /64, global window, shared loopback bucket, bounded map),
+  `TestLoginRejectsCrossSiteAndMalformedRequests`, `TestLoginSlowBodiesDoNotStarveRealLogins`, `TestSessionTokenExpires`,
+  `TestSessionStore*`.
+- AC7 `/ws`: `TestWSAcceptsSubprotocolBearer` (server answers `smind`, never the token), `TestWSAcceptsAuthorizationHeaderSession`,
+  `TestWSRejectsSessionTokenInQueryForNonLoopback`, `TestWSRejectsDaemonTokenFromNonLoopback`, `TestWSRejectsExpiredAndUnknownSessions`,
+  `TestSessionTokenOnlyOpensWebSocket`.
+- AC8 Host/Origin: `TestHostAllowlistDefaults`, `TestHostAllowlistLeadingDotMatchesSubdomains`, `TestHostNotAllowed403` (every route incl. /ws),
+  `TestHostPolicy`, `TestCheckOriginSameOriginOnly`.
+- AC9 UI: `it("shows the login form when the daemon requires a password")`, `it("does not show it on loopback")`,
+  `it("keeps the session token out of localStorage …")` and the wrong-password / 429 / expiry / rejection / never-stored cases
+  (37 tests in 5 files). **Screenshots** (Chrome, real daemon behind a `127.0.0.1.nip.io` Host, light + dark): fresh form, pending,
+  wrong password, rate-limit countdown, signed-in app, expired-session notice, loopback (no login), "not enabled" message — all
+  reviewed; only `sessionStorage` holds the session, `localStorage` holds UI preferences only.
+- AC10 `TestHealthzAuthRequiredField`. AC11 `docs/homelab.md`.
+- No secret in logs: `TestNoSecretInLogs`, and the real-daemon test checks the process log for password, session and daemon token.
+- Real-process remote flow: `TestServeDirectConnectionEndToEnd` — same-host-proxy shape (loopback peer, external Host) runs here; the
+  LAN-address shape **skips on this Mac** (the application firewall silently holds unsigned binaries' LAN traffic) and runs
+  wherever the machine can reach itself (Linux CI).
+- **Not verified:** **(real)** another machine on the LAN in a browser + `curl` through nginx on the same host (the plan's real
+  check; the reviewer showed the default-nginx shape leaks the token, see Progress), Windows execution, the Rust desktop path
+  (P5), a TTY prompt on a real terminal (seam-tested).
+- P4 amendment (2026-10-15): `TestAPITokenNotServedWhenPasswordSet` (loopback, localhost, default-nginx Host rewrite, LAN → 403),
+  `TestPasswordSetRefusesTheQueryTokenEvenOnLoopback` (query refused, `Authorization` bearer works, remote bearer refused),
+  `TestPasswordDaemonServesNoTokenButTheCLIStillWorks` (real daemon: loopback and a stock-nginx-shaped reverse proxy both get
+  403 on `/api/token`, `?token=` refused, `smind workspace ls` and `smind stop` still work from the token file); Rust
+  (`cargo test`): `token_falls_back_to_the_file_when_a_password_daemon_refuses_the_endpoint`,
+  `a_remote_daemon_never_uses_the_local_token_file`, `local_token_path_follows_smind_home_then_home`,
+  `token_file_is_only_for_a_loopback_daemon` (188 lib tests pass; `cargo clippy` flags only a pre-existing `backoff.rs` lint
+  on this toolchain). **Not verified:** a real nginx (the stock-shaped Go reverse proxy stands in for it), the desktop
+  webview against a password daemon (P5).
+- P4 / CodeQL (`rust/non-https-url`, `client.rs` `fetch_token_http`): the desktop client now requests `/api/token` and reads the token
+  file **only for a daemon that is local by address** (`Config::is_local_daemon`: loopback IP literal, or `localhost` with every resolved
+  address loopback; IPv4-mapped literals and every other name are refused without a lookup); for any other daemon no token request is
+  made at all. Tests: `no_token_request_is_made_to_a_daemon_that_is_not_local` (a counting listener sees zero connections),
+  `localhost_counts_as_local_only_when_every_address_is_loopback`, `a_remote_daemon_never_uses_the_local_token_file`.
 ### P8 (2026-10-15, branch `feat/smind-service-unix`)
 
 Commands: `go test ./...`, `go test -race ./internal/service ./internal/logging`, `task lint`, `sh scripts/install_test.sh` (sh, dash, bash),
