@@ -19,12 +19,12 @@ import (
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
-func newTestServer(t *testing.T, token string) *Server {
+func newTestServer(t *testing.T, token string, opts ...Option) *Server {
 	t.Helper()
 	return newTestServerCfg(t, token, config.Default())
 }
 
-func newTestServerCfg(t *testing.T, token string, cfg config.Config) *Server {
+func newTestServerCfg(t *testing.T, token string, cfg config.Config, opts ...Option) *Server {
 	t.Helper()
 	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
 	if err != nil {
@@ -42,7 +42,7 @@ func newTestServerCfg(t *testing.T, token string, cfg config.Config) *Server {
 	router := routing.New(s, reg, poller)
 	wm := workspace.New(s)
 	runner := taskrunner.New(wm)
-	srv, err := New(cfg, reg, router, wm, runner, s, token)
+	srv, err := New(cfg, reg, router, wm, runner, s, token, opts...)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

@@ -27,6 +27,12 @@ func Dir() string {
 	if err != nil {
 		return dirName
 	}
+	return DirFor(home)
+}
+
+// DirFor is Dir's resolution for the home directory of a given user, ignoring
+// $SMIND_HOME (the caller decides whether that applies).
+func DirFor(home string) string {
 	smind := filepath.Join(home, dirName)
 	if _, err := os.Lstat(smind); err == nil {
 		return smind

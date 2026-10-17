@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Written by `smind service install`; the next install overwrites edits. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.spacingmind.smind</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/smind</string>
+		<string>serve</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>WorkingDirectory</key>
+	<string>/Users/alice</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/bin:/bin</string>
+		<key>SMIND_SUPERVISOR</key>
+		<string>launchd</string>
+	</dict>
+</dict>
+</plist>

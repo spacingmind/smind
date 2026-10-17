@@ -33,6 +33,7 @@ type Server struct {
 	terminals *terminal.Registry
 	token     string
 	direct    *directAuth
+	managedBy string
 
 	shutdownCh   chan struct{}
 	shutdownOnce sync.Once
@@ -42,7 +43,16 @@ type Server struct {
 type Option func(*options)
 
 type options struct {
-	observer quota.Observer
+	observer  quota.Observer
+	managedBy string
+}
+
+// WithManagedBy records which supervisor started this daemon ("systemd",
+// "launchd", "task"), published as /healthz `managedBy` so clients (the
+// desktop app, `smind update`) know an OS service manager owns the process
+// (ADR-0031 decision 6). The empty string, the default, omits the field.
+func WithManagedBy(supervisor string) Option {
+	return func(opts *options) { opts.managedBy = supervisor }
 }
 
 // WithQuotaObserver reports every Anthropic OAuth upstream response the proxy
@@ -77,6 +87,7 @@ func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *
 		terminals: api.Terminals,
 		token:     token,
 		direct:    direct,
+		managedBy: o.managedBy,
 
 		shutdownCh: make(chan struct{}),
 	}
@@ -165,14 +176,18 @@ func (s *Server) Binds() []config.Bind {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"status":  "ok",
 		"service": "smind",
 		"version": version.Version,
 		// Whether remote clients must log in (a password is configured).
 		// Loopback clients never need to.
 		"authRequired": s.direct.hash != "",
-	})
+	}
+	if s.managedBy != "" {
+		body["managedBy"] = s.managedBy
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 // handleShutdown serves POST /api/shutdown (ADR-0029 D2): 202 Accepted,

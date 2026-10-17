@@ -19,7 +19,26 @@ type Config struct {
 	Agents        AgentsConfig        `yaml:"agents"`
 	AccountUsage  AccountUsageConfig  `yaml:"accountUsage"`
 	Relay         RelayConfig         `yaml:"relay"`
+	Log           LogConfig           `yaml:"log"`
 }
+
+// LogConfig tunes the daemon's own rotating log file, $SMIND_HOME/daemon.log
+// (ADR-0031 decision 7). The daemon also keeps logging to stderr.
+type LogConfig struct {
+	// MaxSizeMB is the size at which daemon.log is rotated. Default 10;
+	// Load rejects values < 1.
+	MaxSizeMB int `yaml:"maxSizeMB"`
+	// MaxFiles is how many log files are kept in total, the active one
+	// included (daemon.log, daemon.log.1, ...). Default 5; Load rejects
+	// values < 1.
+	MaxFiles int `yaml:"maxFiles"`
+}
+
+// Defaults for LogConfig.
+const (
+	DefaultLogMaxSizeMB = 10
+	DefaultLogMaxFiles  = 5
+)
 
 // RelayConfig tunes this daemon's relay client side (ADR-0031 D9).
 type RelayConfig struct {
@@ -345,6 +364,7 @@ func Default() Config {
 			Passive:             true,
 		},
 		Relay: RelayConfig{LegacyDevices: false, MaxDevices: DefaultRelayMaxDevices},
+		Log:   LogConfig{MaxSizeMB: DefaultLogMaxSizeMB, MaxFiles: DefaultLogMaxFiles},
 	}
 }
 
@@ -357,43 +377,58 @@ func Default() Config {
 // Migration never fails the load; see home.go.
 func Load() (Config, error) {
 	migrateIfDue()
+	return LoadFile(Path())
+}
+
+// LoadFile reads the config at path like Load does, without the home
+// migration. `smind service` uses it to read the config of the user the
+// service runs as, which is not always the user running the command.
+func LoadFile(path string) (Config, error) {
 	cfg := Default()
-	data, err := os.ReadFile(Path())
+	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
+		// The environment still applies: a container's SMIND_LISTEN and
+		// SMIND_PASSWORD must not vanish because the file cannot be read.
+		applyServerEnv(&cfg.Server)
 		return cfg, fmt.Errorf("read config: %w", err)
 	}
 	if err == nil {
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			// The environment still applies: a container's SMIND_LISTEN and
-			// SMIND_PASSWORD must not vanish because the file has a typo.
+			// Same for a typo in the file.
 			applyServerEnv(&cfg.Server)
-			return cfg, fmt.Errorf("parse config %s: %w", Path(), err)
+			return cfg, fmt.Errorf("parse config %s: %w", path, err)
 		}
 	}
 	applyServerEnv(&cfg.Server)
 	if err := validateServer(cfg.Server); err != nil {
-		return cfg, fmt.Errorf("config %s: %w", Path(), err)
+		return cfg, fmt.Errorf("config %s: %w", path, err)
 	}
 	if os.IsNotExist(err) {
 		return cfg, nil
 	}
 	if _, _, _, err := cfg.Worktrees.Ports.PortRange(); err != nil {
-		return cfg, fmt.Errorf("config %s: %w", Path(), err)
+		return cfg, fmt.Errorf("config %s: %w", path, err)
 	}
 	if n := cfg.Orchestration.MaxConcurrentRunsPerTree; n < 1 {
-		return cfg, fmt.Errorf("config %s: orchestration.maxConcurrentRunsPerTree must be >= 1, got %d", Path(), n)
+		return cfg, fmt.Errorf("config %s: orchestration.maxConcurrentRunsPerTree must be >= 1, got %d", path, n)
 	}
 	if ttl := cfg.AccountUsage.TTLSeconds; ttl < MinAccountUsageTTLSeconds {
-		return cfg, fmt.Errorf("config %s: accountUsage.ttlSeconds must be >= %d, got %d", Path(), MinAccountUsageTTLSeconds, ttl)
+		return cfg, fmt.Errorf("config %s: accountUsage.ttlSeconds must be >= %d, got %d", path, MinAccountUsageTTLSeconds, ttl)
 	}
 	if p := cfg.AccountUsage.ExhaustThresholdPct; p < 1 || p > 100 {
-		return cfg, fmt.Errorf("config %s: accountUsage.exhaustThresholdPct must be between 1 and 100, got %d", Path(), p)
+		return cfg, fmt.Errorf("config %s: accountUsage.exhaustThresholdPct must be between 1 and 100, got %d", path, p)
 	}
 	if n := cfg.Relay.MaxDevices; n < 1 {
-		return cfg, fmt.Errorf("config %s: relay.maxDevices must be >= 1, got %d", Path(), n)
+		return cfg, fmt.Errorf("config %s: relay.maxDevices must be >= 1, got %d", path, n)
+	}
+	if n := cfg.Log.MaxSizeMB; n < 1 {
+		return cfg, fmt.Errorf("config %s: log.maxSizeMB must be >= 1, got %d", path, n)
+	}
+	if n := cfg.Log.MaxFiles; n < 1 {
+		return cfg, fmt.Errorf("config %s: log.maxFiles must be >= 1, got %d", path, n)
 	}
 	if mt := cfg.Agents.GLM.MaxTurns; mt != nil && (*mt < 1 || *mt > MaxGLMTurns) {
-		return cfg, fmt.Errorf("config %s: agents.glm.maxTurns must be between 1 and %d, got %d", Path(), MaxGLMTurns, *mt)
+		return cfg, fmt.Errorf("config %s: agents.glm.maxTurns must be between 1 and %d, got %d", path, MaxGLMTurns, *mt)
 	}
 	return cfg, nil
 }

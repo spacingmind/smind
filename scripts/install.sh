@@ -6,6 +6,10 @@
 #
 # Options:
 #   --version <v>      release to install, e.g. 0.11.1 (default: latest)
+#   --service          after installing, run `smind service install` (a
+#                      systemd user unit on Linux, a LaunchAgent on macOS)
+#   --system           with --service on Linux: a system unit that runs as the
+#                      invoking user (run the script with sudo; never root)
 #   -h, --help         print usage and exit
 #
 # Environment overrides:
@@ -17,8 +21,6 @@
 # the SHA-256 (mandatory), and installs the `smind` binary. Re-running it
 # installs the requested (or latest) release over the previous one.
 # Linux and macOS only: on Windows use scripts/install.ps1 (PowerShell).
-#
-# TODO(ADR-0031 P8): `--service` (install, then `smind service install`).
 set -eu
 
 REPO="spacingmind/smind"
@@ -30,12 +32,18 @@ need() { command -v "$1" >/dev/null 2>&1 || err "required command not found: $1"
 
 usage() {
   cat <<'EOF'
-Usage: install.sh [--version <version>] [--help]
+Usage: install.sh [--version <version>] [--service [--system]] [--help]
 
 Installs the smind daemon/CLI from a GitHub Release (Linux and macOS).
 
 Options:
   --version <v>   release to install, e.g. 0.11.1 (default: latest)
+  --service       after installing, run `smind service install` so the daemon
+                  starts at login/boot (systemd user unit on Linux,
+                  LaunchAgent on macOS)
+  --system        with --service on Linux: install a system-wide unit that
+                  runs as the invoking user (needs sudo; never runs as root):
+                    curl -fsSL https://spacingmind.com/install.sh | sudo sh -s -- --service --system
   -h, --help      print this help
 
 Environment:
@@ -59,6 +67,8 @@ set_version() {
 }
 
 version="${SMIND_VERSION:-}"
+service=0
+system=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -h | --help)
@@ -78,6 +88,14 @@ while [ $# -gt 0 ]; do
       set_version "${1#--version=}"
       shift
       ;;
+    --service)
+      service=1
+      shift
+      ;;
+    --system)
+      system=1
+      shift
+      ;;
     *)
       usage >&2
       printf 'smind-install: unknown option: %s\n' "$1" >&2
@@ -85,6 +103,12 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+if [ "$system" = 1 ] && [ "$service" = 0 ]; then
+  usage >&2
+  printf 'smind-install: --system only applies together with --service\n' >&2
+  exit 2
+fi
 
 case "$(uname -s)" in
   Linux) os=linux ;;
@@ -94,6 +118,10 @@ case "$(uname -s)" in
     ;;
   *) err "unsupported OS: $(uname -s)" ;;
 esac
+
+if [ "$system" = 1 ] && [ "$os" != linux ]; then
+  err "--system is only available on Linux (macOS uses a per-user LaunchAgent)"
+fi
 
 need curl
 need tar
@@ -176,6 +204,23 @@ case ":${PATH}:" in
     ;;
 esac
 
-say ""
-say "Next:"
-say "  smind serve    # then open http://localhost:4648"
+if [ "$service" = 1 ]; then
+  say ""
+  say "Installing the smind service..."
+  if [ "$system" = 1 ]; then
+    "$dir/smind" service install --system ||
+      err "smind is installed at $dir/smind, but 'smind service install --system' failed (see above)"
+  else
+    "$dir/smind" service install ||
+      err "smind is installed at $dir/smind, but 'smind service install' failed (see above)"
+  fi
+  say ""
+  say "Next:"
+  say "  smind service status    # then open http://localhost:4648"
+  say "  smind service logs -f"
+else
+  say ""
+  say "Next:"
+  say "  smind serve    # then open http://localhost:4648"
+  say "  (or run it as a service: smind service install)"
+fi
