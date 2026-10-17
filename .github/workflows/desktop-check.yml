@@ -1,0 +1,60 @@
+name: desktop-check
+
+# PR gate for the desktop Rust code: cargo test for the Tauri shell and the
+# daemon client on macOS and Windows, without building the web UI, the
+# bundled daemon or the installers. The full app builds (desktop-macos.yml,
+# desktop-windows.yml) run after the merge to develop. build.rs creates the
+# externalBin placeholder, so no daemon binary is needed here.
+on:
+  pull_request:
+    paths:
+      - "desktop/src-tauri/**"
+      - "desktop/daemon-client/**"
+      # daemon-client compiles relaypb (build.rs) and its tests `go run` the
+      # relay harness
+      - "internal/relay/**"
+      - ".github/workflows/desktop-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo-test:
+    name: cargo test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Mark repo safe for git
+        shell: bash
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            desktop/src-tauri
+            desktop/daemon-client
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: cargo test (desktop shell)
+        working-directory: desktop/src-tauri
+        run: cargo test
+
+      - name: cargo test (daemon client)
+        working-directory: desktop/daemon-client
+        run: cargo test
