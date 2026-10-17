@@ -357,7 +357,7 @@ async fn token_never_reaches_the_webview() {
         assert_eq!(selected.as_deref(), Some("smind.bearer.browser-side"));
         surfaces.push(selected.unwrap());
         for s in &surfaces {
-            assert!(!s.contains(secret), "{secret} leaked to the webview: {s}");
+            assert!(!s.contains(secret), "a proxy credential reached the webview");
         }
     }
 }

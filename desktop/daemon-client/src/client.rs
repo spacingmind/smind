@@ -513,7 +513,7 @@ mod tests {
     /// and never with a `?token=` query. Records what each /ws saw.
     type WsSeen = Arc<std::sync::Mutex<Vec<(Option<String>, Option<String>)>>>;
 
-    async fn password_daemon(accept: &'static str) -> (Config, WsSeen) {
+    async fn protected_daemon(accept: &'static str) -> (Config, WsSeen) {
         use axum::extract::ws::WebSocketUpgrade;
         use axum::http::{HeaderMap, StatusCode};
         use axum::response::IntoResponse;
@@ -545,17 +545,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn watcher_authenticates_to_password_daemon_with_token_file_bearer() {
-        let (cfg, seen) = password_daemon("file-token").await;
+    async fn watcher_authenticates_to_protected_daemon_with_token_file_bearer() {
+        let (cfg, seen) = protected_daemon("file-token").await;
         let auth = WatcherAuth { session: None, local_token_file: Some(Arc::new(|| Some("file-token".to_string()))) };
         let (_ws, label) = connect_authed(&cfg, &reqwest::Client::new(), &auth).await.expect("authenticated");
         assert_eq!(seen.lock().unwrap()[0], (Some("Bearer file-token".to_string()), None), "bearer header, no query");
-        assert!(!label.contains("token") && !label.contains('?'), "{label}");
+        assert!(!label.contains("token") && !label.contains('?'), "the log label must carry no query");
     }
 
     #[tokio::test]
     async fn watcher_uses_held_session_as_bearer_never_in_the_url() {
-        let (cfg, seen) = password_daemon("session-1").await;
+        let (cfg, seen) = protected_daemon("session-1").await;
         let auth = WatcherAuth::with_session(|| Some("session-1".to_string()));
         connect_authed(&cfg, &reqwest::Client::new(), &auth).await.expect("authenticated");
         assert_eq!(seen.lock().unwrap()[0], (Some("Bearer session-1".to_string()), None));
@@ -569,7 +569,7 @@ mod tests {
 
     #[tokio::test]
     async fn watcher_without_credentials_does_not_authenticate() {
-        let (cfg, seen) = password_daemon("x").await;
+        let (cfg, seen) = protected_daemon("x").await;
         let err = connect_authed(&cfg, &reqwest::Client::new(), &WatcherAuth::default()).await.err().unwrap();
         assert!(err.contains("password-protected"), "{err}");
         assert!(seen.lock().unwrap().is_empty());
