@@ -122,6 +122,19 @@ pub struct Session {
     recv_counter: u64,
 }
 
+/// SHA-256(label ‖ daemon_pub ‖ mobile_pub): the HKDF salt, and the value
+/// the device hello signature binds to (Go: `e2ee.TranscriptHash`).
+pub fn transcript_hash(
+    daemon_pub: &[u8; PUBLIC_KEY_SIZE],
+    mobile_pub: &[u8; PUBLIC_KEY_SIZE],
+) -> [u8; 32] {
+    let mut transcript = Sha256::new();
+    transcript.update(HKDF_LABEL.as_bytes());
+    transcript.update(daemon_pub);
+    transcript.update(mobile_pub);
+    transcript.finalize().into()
+}
+
 impl Session {
     /// Derives both directional keys from an X25519 exchange. `daemon_pub`
     /// and `mobile_pub` are always passed in that order regardless of
@@ -136,11 +149,7 @@ impl Session {
         let peer = PublicKey::from(*peer_public);
         let shared = kp.secret.diffie_hellman(&peer);
 
-        let mut transcript = Sha256::new();
-        transcript.update(HKDF_LABEL.as_bytes());
-        transcript.update(daemon_pub);
-        transcript.update(mobile_pub);
-        let salt = transcript.finalize();
+        let salt = transcript_hash(daemon_pub, mobile_pub);
 
         let hk = Hkdf::<Sha256>::new(Some(&salt), shared.as_bytes());
         let mut d2m = [0u8; 32];

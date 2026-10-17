@@ -816,3 +816,38 @@ func TestBridgeControlStreamSilentFor75sReconnects(t *testing.T) {
 		return len(jitterSeen) > 0
 	})
 }
+
+func TestApprovingARevokedDeviceLiftsTheRelaysRefusal(t *testing.T) {
+	f := newHubFixture(t, Options{})
+	approvedWindow(t, f, 2)
+	hub := f.start(nil)
+	a, b := f.newDevice(false, "a"), f.newDevice(false, "b")
+	a.connect()
+	b.connect()
+
+	if _, err := hub.RevokeDevice(a.id); err != nil {
+		t.Fatal(err)
+	}
+	a2 := f.newDevice(false, "a")
+	a2.priv, a2.pub, a2.id = a.priv, a.pub, a.id
+	if err := a2.open(""); err == nil || relayStatus(err) != codePermissionDenied {
+		t.Fatalf("a revoked device attached: %v", err)
+	}
+
+	// A human approves it again. The relay's refusal only ends with the
+	// control stream that sent it, so the hub reconnects; the device then gets
+	// in without any other step, and the other device is served throughout.
+	if _, err := hub.ApproveDevice(a.id); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the re-approved device to be served", func() bool {
+		d := f.newDevice(false, "a")
+		d.priv, d.pub, d.id = a.priv, a.pub, a.id
+		if err := d.open(""); err != nil {
+			return false
+		}
+		r, err := d.hello()
+		return err == nil && r.Err == nil && d.canList()
+	})
+	b.mustList()
+}

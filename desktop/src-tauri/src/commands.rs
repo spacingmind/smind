@@ -39,18 +39,31 @@ pub fn connections_add(
 }
 
 #[tauri::command]
-pub fn connections_remove(state: State<'_, DesktopState>, id: String) -> Result<(), String> {
-    let mut registry = state.proxy.registry.lock().unwrap();
-    registry.remove(&id)?;
-    registry
-        .save(&state.connections_path)
-        .map_err(|e| e.to_string())?;
-    drop(registry);
+pub fn connections_remove(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    id: String,
+) -> Result<(), String> {
+    let (was_current, now_current) = {
+        let mut registry = state.proxy.registry.lock().unwrap();
+        let was_current = registry.current().id == id;
+        registry.remove(&id)?;
+        registry
+            .save(&state.connections_path)
+            .map_err(|e| e.to_string())?;
+        (was_current, registry.current().clone())
+    };
     // Unpairing deletes the keys: a no-op for local/url ids, since
     // `pairing_store::delete` only ever removes a file that a relay
     // connection's `connections_add_relay` would have created.
     if let Some(dir) = state.connections_path.parent() {
         relay::pairing_store::delete(dir, &id).map_err(|e| e.to_string())?;
+    }
+    // Removing the connection that is live falls back to the local one: stop
+    // its relay session (and its device key in memory) now instead of leaving
+    // it attached until the next switch.
+    if was_current {
+        client_watch::restart(&app, &state, &now_current);
     }
     Ok(())
 }
@@ -254,9 +267,72 @@ pub fn connections_add_relay(
         .connections_path
         .parent()
         .ok_or("smind desktop: connections path has no parent directory")?;
-    relay::pairing_store::save(app_data_dir, &conn.id, &pairing).map_err(|e| e.to_string())?;
+    // The pairing and the connection's device key are created together
+    // (ADR-0031 P13a): the key is generated once, kept at 0600 next to the
+    // pairing, deleted with it, and never returned by any command. If either
+    // cannot be written the connection is taken back out of the registry, so
+    // the user can simply retry instead of being left with a half-made entry.
+    let persisted = relay::pairing_store::save(app_data_dir, &conn.id, &pairing)
+        .map_err(|e| e.to_string())
+        .and_then(|()| {
+            relay::device::load_or_create_key(app_data_dir, &conn.id)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        });
+    if let Err(e) = persisted {
+        let _ = relay::pairing_store::delete(app_data_dir, &conn.id);
+        let mut registry = state.proxy.registry.lock().unwrap();
+        let _ = registry.remove(&conn.id);
+        let _ = registry.save(&state.connections_path);
+        return Err(e);
+    }
 
     Ok(conn)
+}
+
+/// RelayStatus is what Settings → Connections shows for the selected relay
+/// connection. Every field is non-secret: the state name, this device's own
+/// id (which the user types into `smind relay devices approve`), and the
+/// daemon's refusal code/message.
+#[derive(serde::Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RelayStatus {
+    pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+impl From<&relay::client::Status> for RelayStatus {
+    fn from(s: &relay::client::Status) -> Self {
+        use relay::client::Status;
+        let (device_id, code, message) = match s {
+            Status::AwaitingApproval { device_id } | Status::Revoked { device_id } => {
+                (Some(device_id.clone()), None, None)
+            }
+            Status::Refused { code, message } => (None, Some(code.clone()), Some(message.clone())),
+            _ => (None, None, None),
+        };
+        RelayStatus {
+            state: s.state_name().to_string(),
+            device_id,
+            code,
+            message,
+        }
+    }
+}
+
+/// connections_relay_status reports the live state of the selected relay
+/// connection (`None` when the selected connection is not a relay one, or
+/// has no live transport).
+#[tauri::command]
+pub fn connections_relay_status(state: State<'_, DesktopState>) -> Option<RelayStatus> {
+    let handle = state.proxy.relay.lock().unwrap().clone()?;
+    let status = handle.status().borrow().clone();
+    Some(RelayStatus::from(&status))
 }
 
 /// Quits the app. The renderer's Ctrl+Q on Windows/Linux calls this: the
@@ -286,6 +362,57 @@ pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_key_never_returned_by_ipc() {
+        // Every status the UI can see, serialised exactly as the command
+        // returns it: only the documented non-secret fields appear, and none
+        // is a key, seed or secret.
+        use relay::client::Status;
+        let all = [
+            Status::Connecting,
+            Status::Connected,
+            Status::Reconnecting,
+            Status::AwaitingApproval { device_id: "abcdefghijklmnopqrstuvwxyz".into() },
+            Status::Revoked { device_id: "abcdefghijklmnopqrstuvwxyz".into() },
+            Status::Refused { code: "too_many_devices".into(), message: "too many".into() },
+        ];
+        for st in &all {
+            let v = serde_json::to_value(RelayStatus::from(st)).unwrap();
+            for key in v.as_object().unwrap().keys() {
+                assert!(
+                    matches!(key.as_str(), "state" | "deviceId" | "code" | "message"),
+                    "unexpected field {key} in the relay status"
+                );
+            }
+        }
+        // And the key store has no accessor that returns a seed or private key
+        // to callers outside the crate: the type is neither Serialize nor Clone
+        // (compile-time property); its Debug output is redacted.
+        let key = relay::device::DeviceKey::generate();
+        let dbg = format!("{key:?}");
+        assert!(dbg.contains("redacted"), "{dbg}");
+    }
+
+    #[test]
+    fn relay_status_names_are_stable() {
+        use relay::client::Status;
+        let names: Vec<String> = [
+            Status::Connecting,
+            Status::Connected,
+            Status::Reconnecting,
+            Status::AwaitingApproval { device_id: "x".into() },
+            Status::Revoked { device_id: "x".into() },
+            Status::Refused { code: "c".into(), message: "m".into() },
+        ]
+        .iter()
+        .map(|s| RelayStatus::from(s).state)
+        .collect();
+        assert_eq!(
+            names,
+            ["connecting", "connected", "reconnecting", "awaitingApproval", "revoked", "refused"]
+        );
+    }
     use smind_daemon_client::proxy::connections::connection_id_for_relay;
     use smind_daemon_client::proxy::ConnectionKind;
 
