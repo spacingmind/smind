@@ -400,18 +400,29 @@ Ported: the daemon-owned **rotating `daemon.log`** (`supervisor.ts:15-16,128-129
 
 ### P9 — `smind service` Windows + `install.ps1 -Service`
 
-1. A per-user Scheduled Task `smind` runs a hidden `smind.exe serve` at logon (no console window),
-   restarts on failure (3× at 1-minute intervals); output goes to the daemon's own `daemon.log`
-   (P8), not a shell redirect.
-2. `start`/`stop`/`restart`/`status`/`logs`/`uninstall` behave as in P8; `stop` uses `POST
-   /api/shutdown` (ADR-0029) first and `schtasks /End` only if the daemon does not exit within the
-   stop timeout.
-3. Registration does not require elevation (verified on Windows 11); if it does on some setups the
-   error says exactly which step needs it.
-4. `SMIND_SUPERVISOR=task` is set; the hidden-launch wrapper works on Windows 10 and 11 (spike
-   result recorded in Validation, with the fallback used if `conhost --headless` is unavailable).
-5. `install.ps1 -Service` installs then registers the task.
-6. Docs state plainly that the task starts at logon, not at boot.
+1. A per-user Scheduled Task `smind` (logon trigger for the current user, interactive token, least privilege)
+   runs `conhost.exe --headless smind.exe service run` at logon: no console window, and `service run` starts
+   `smind serve` (as `SMIND_SUPERVISOR=taskscheduler`, `SMIND_HOME` from `--home`) inside a kill-on-close Job
+   Object and restarts it after a crash 3× at 1-minute intervals (the budget starts over after a 10-minute
+   healthy run). *Amended by the P9 spike (measured, see Validation): `conhost --headless` exits 0 whatever its
+   child's exit code, so the task's own `RestartOnFailure` (kept in the XML as a backstop) never fires; the
+   restart policy is applied by `service run`.* Output goes to the daemon's own `daemon.log` (P8), not a shell
+   redirect.
+2. `start`/`stop`/`restart`/`status`/`logs`/`uninstall` behave as in P8; `stop` uses `POST /api/shutdown`
+   (ADR-0029) first, then waits for the port to free; only if the daemon does not exit within the stop timeout
+   (or the request fails) is the kill fallback used. `schtasks /End` ends only the task's own process (conhost)
+   and leaves the daemon running, so the fallback also sweeps this install's `service run` supervisors and, if
+   needed, the listener. A daemon this task did not start is never stopped or killed (`stop`/`restart` refuse,
+   `uninstall` still removes the task).
+3. Registration does not require elevation: **verified on `windows-latest` (Windows Server 2025) with a standard
+   local user** (Medium integrity, not in Administrators). Windows 10/11 client: unverified. When a policy
+   refuses it, the error names the refused `schtasks /Create` step.
+4. `SMIND_SUPERVISOR=taskscheduler` is set (was `task`; changed on the Human's instruction 2026-10-17). The
+   hidden launch works with `conhost --headless` (measured: no window, interactive session). If `conhost.exe` is
+   missing `install` falls back to launching `smind.exe` directly (visible console) with a warning; whether
+   `--headless` exists on every Windows 10 build is unverified.
+5. `install.ps1 -Service` (or `SMIND_SERVICE=1`, the `iex` form) installs then registers the task.
+6. Docs state plainly that the task starts at logon, not at boot, and runs only in the user's interactive session.
 
 **Paseo reference — deliberately different.** Paseo has no Windows service/task story either
 (CLI via npm; the desktop app starts the daemon and its lock file marks `desktopManaged`,
@@ -519,7 +530,7 @@ the existing `DeviceAttach`/`DeviceDetach` slots (`relay.proto:121-148`) instead
    (`DataConn.Resume`); after a daemon restart the `Sync` re-announces waiting devices; HTTP/2 PING keepalive parameters are
    also set.
 3. **Device identity:** the first application message must be `device_hello{v, device_pub (Ed25519), label, signature,
-   [password]}` (**v2**, see ADR-0031 D9: the daemon sends a fresh challenge first) where `signature` signs `"smind-device-hello-v2" ‖ SHA-256(handshake transcript) ‖ daemon_pub ‖ session_id ‖ challenge`; the frame
+   [password]}` where `signature` signs `"smind-device-hello" ‖ SHA-256(handshake transcript) ‖ daemon_pub`; the frame
    `device_id` must equal `base32(SHA-256(device_pub))[:26]`; a mismatch or a bad signature drops the session.
 4. **Registry:** `$SMIND_HOME/relay-devices.json` (mode 0600) holds `{device_id, device_pub, label, first_seen, last_seen,
    state: approved | pending | revoked}`; revoked devices are refused with a clear reason; atomic writes.
@@ -958,21 +969,6 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   retry). **Decided by the Human (2026-10-15): `relay.legacyDevices` defaults to false** (with it true, revoke, pending and the window do
   not bind legacy access); `docs/homelab.md` says that relay pairing needs the updated clients (P13a/b) until then and warns about
   the opt-in. Still open: a per-offer one-time token (offer format change) is the stronger pairing-window fix.
-- 2026-10-15 (fix, before #350/#351 merge): the P13b review found two defects in what P12b shipped. (1) `device_hello` v1 signed only
-  (daemon key, client ephemeral key), both fixed by a captured handshake, so a captured session replays into a new route and is
-  admitted as that device (and `supersede` drops the real session): hello **v2** — the daemon sends a fresh challenge first and the
-  signature covers the route session id and that challenge; v1 is refused (no released client speaks it); vector updated (v1 kept as
-  history). (2) wsapi answered an unknown method with nothing (the error was sent before the request was registered in flight):
-  fixed, tested.
-- 2026-10-15 (P13a): desktop (Rust) multi-device relay client on `feat/desktop-relay-device-identity` — device key per connection, signed
-  `device_hello`, nonce-matched keepalive, 75 s rule, resume with a liveness check, restart detection, single-device-route fallback,
-  Settings → Connections states. **Not in this PR:** AC 3 (CA-verified mode, `connections_*_relay` reporting `pinned` vs CA-verified,
-  `client_pinned_vs_webpki_roots`, `add_relay_accepts_empty_fingerprint_offer`, `preview_relay_reports_pinned_or_ca_verified`) — it
-  needs the Go side first (P12c); and the TypeScript third client of AC 5 — the interop run uses the Go grpc-web mobile stub as the third
-  device (the real mobile client is P13b). Found and fixed on the way: the Rust loop reused one ephemeral E2EE key across fresh
-  handshakes; tonic's `open_data` hangs a resume with nothing buffered; no dial timeout; an approved-again revoked device stayed
-  refused by the relay until the daemon reconnected (the hub now reconnects its control stream); the harness mobile stub could
-  deadlock in `DataConn.Close`.
 
 ## Validation
 
@@ -1100,39 +1096,46 @@ Not verified: a real **reboot/logout cycle with lingering** and a real **macOS l
 restart, not boot persistence); `--system` against a real `/etc/systemd/system` (unit rendering and the `SUDO_USER` rules are unit-tested, the real run
 is not); `smind update` driving a real `service restart` end to end; the desktop app's behaviour next to a real service.
 
-### Fix: device_hello v2 + unknown-method answer (2026-10-15, `fix/device-hello-replay`)
+### P9 (2026-10-17, branch `feat/smind-service-windows`)
 
-`devices`: `TestDeviceHelloReplayInAnotherSessionRejected` (other client key / daemon key / session id / challenge each fail),
-`TestV1HelloIsRefused`, `TestChallengeMessageRoundTrip`, `TestHelloVectorMatchesFile` (v2 vector incl. the challenge message and
-three negatives), `TestV1VectorIsHistorical`; hub (real relay + hub): `TestCapturedHelloSessionCannotBeReplayedIntoANewRoute`
-(a captured transcript — handshake frames + hello ciphertext — replayed into a new route is rejected and the real session
-untouched; the test fails when the challenge/session binding is removed), `TestHelloBoundToTheChallengeAndTheSession`,
-`TestEachSessionGetsAFreshChallenge`, `TestHelloVersion1IsRefusedWithAClearReason`; `wsapi`:
-`TestUnknownMethodAlwaysGetsAMethodNotFoundResponse` (fails on the old ordering).
-### P13a (2026-10-15, branch `feat/desktop-relay-device-identity`)
+**What the spike proved** (`windows-latest` = Windows Server 2025, build 10.0.26100; the runner user is an
+elevated administrator with an interactive console session 2; the spike workflow is not part of the PR):
 
-Commands: `cd desktop/daemon-client && cargo test` (200 unit + legacy interop + 7 multi-device interop, Go harness), `cd
-desktop/src-tauri && cargo test` (71), `web/packages/ui`: `tsc --noEmit` + `vitest run src/components/settings` (168), Go
-`go test -race ./internal/relay/bridge/...`, light + dark screenshots of the Connections states (headless Chrome against a
-preview page; the real desktop app was not launched).
+| Question | Measured |
+|---|---|
+| Register a per-user logon task without elevation? | **Yes.** A standard local user (`whoami /groups`: Medium Mandatory Level, no Administrators; `net session`: access denied) ran `schtasks /Create /XML`, `/Run`, `/End`, `/Delete` for a `LogonTrigger` task with `InteractiveToken` + `LeastPrivilege`: all exit 0. The same worked from the admin account under a restricted token (`runas /trustlevel:0x20000`). `scripts/service_unelevated_check.ps1` repeats the standard-user case in CI with `smind service install`/`status`/`uninstall`. |
+| XML encoding | UTF-16 LE with BOM works; a UTF-8 file is rejected ("The task XML is malformed … unable to switch the encoding"). |
+| Hidden launch | `conhost.exe --headless "smind.exe" …` as the task action: `smind.exe` runs as its child in session 2 with `MainWindowHandle = 0`; no console window. |
+| Does the task restart a crashed daemon? | **No.** `conhost --headless` exits 0 whatever the child's exit code (`conhost … cmd /c "exit 7"` → 0); killing the daemon left the task `Ready`, last result `0x0`, and nothing restarted in 110 s. |
+| `schtasks /End` | Ends only conhost; **`smind.exe` kept running.** |
+| Stored XML | Task Scheduler normalises the XML: the principal becomes a SID and the default `RunLevel` is omitted, so the definition cannot be compared byte for byte (the Description carries a hash instead). |
+
+These facts are why the task runs `smind service run` (supervisor + restart policy in a Job Object) and why
+`stop` has the sweep fallback.
+
+Commands: `go test -race ./internal/service ./internal/logging`, `go test ./cmd/smind -run 'TestSupervise|TestServiceRun|TestService'`,
+`task lint`, `GOOS=windows go vet`, `/tmp/pwsh scripts/install_test.ps1` (27 cases), PSScriptAnalyzer, `actionlint`, and the
+`Service (Windows Task Scheduler)` workflow on `windows-latest`: the Go tests **on a Windows host**, the standard-user check,
+`scripts/service_smoke.ps1` against the real Task Scheduler, and `install.ps1 -Service` end to end (a local release, a real task).
 
 | AC | Evidence |
 |---|---|
-| 1 key | `device_key_generated_once_mode_0600`, `device_key_deleted_when_connection_removed` (also via `pairing_store::delete`), `device_key_corrupt_file_is_an_error`, `device_key_never_exposed` (Debug redaction), `device_key_never_returned_by_ipc` (every status the UI can read has only non-secret fields), `device_id_matches_public_key_hash`, `device_hello_signature_verifies_against_go_vector` (byte-for-byte against `internal/relay/devices/testdata/device_hello_vector.json`, incl. the negative vector) |
-| 2 session/keepalive/reconnect | `client_sends_keepalive_every_30s`, dead-after-75 s / any-frame-resets / forwarded-peer-probe-is-not-an-echo / per-stream re-probe (`liveness.rs` unit tests on explicit instants), `client_reconnects_after_silence_with_jitter` (interop: a blackholing proxy, shrunk intervals, retry delays go through the jitter, same device afterwards), reconnect keeping ids: `…_after_one_reconnects` (same single registry entry) |
-| 4 multi-device | `three_devices_two_rust_one_go_stay_attached` (+ `…_after_one_reconnects`, `…_after_daemon_restart`, `…_after_revoke_only_that_device_is_refused`) against the real Go relay + hub with the Go grpc-web mobile stub as the third device; `unknown_device_outside_the_window_waits_for_approval_then_connects`; `legacy_daemon_still_works` (a daemon without device identity → single-device route) |
-| UI | `relay-connection-status.test.tsx`, `connections-section.test.tsx`; `relay_status_is_allowlisted_and_registered`, `capability_allowlist_exact` |
-| Go side | `TestApprovingARevokedDeviceLiftsTheRelaysRefusal`; harness `-hub -mobile-stub` tests |
+| 1 task + hidden launch + restart | `TestWindowsTaskXMLGolden` (logon trigger, interactive token, least privilege, `PT0S`, `IgnoreNew`, `RestartOnFailure`, conhost action; goldens reviewed by hand), `…IsWellFormedAndEscaped`, `…FileIsUTF16WithBOM`; supervisor: `TestSuperviseRestartsACrashedDaemon`, `…GivesUpAfterTheRestartBudget`, `…DoesNotRestartAfterAGracefulStop`, `…BudgetResetsAfterAHealthyRun`, `…StopsWaitingWhenCancelled`, `TestServiceRunSetsTheSupervisorAndHome`; **real:** smoke phases "runs hidden" (conhost --headless parent, `MainWindowHandle` 0, session ≠ 0) and "a crash is restarted" (daemon killed, a new `serve` pid answers within 150 s, `daemon.log` records the restart) |
+| 2 commands, graceful stop | `TestWindowsTaskStopUsesShutdownEndpointFirst` (one ordered log: shutdown → `/End` → sweep), `…StopFallsBackToEnd`, `…FallsBackWhenTheRequestFails`, `TestWindowsStopNeverTouchesAForeignDaemon`, `…KillsAHungDaemonOfOurs`, `…UninstallWithAForeignDaemonStillRemovesTheTask`, `…FailedSweepAfterAGracefulStopIsOnlyAWarning`, `…StartAndInstallSweepAStaleSupervisorBeforeRunning`, `TestServiceInstallIdempotentWindows`, `…InstallRefusesToStartWhenForeignDaemonAnswers` (4 kinds), `…StartRefusesWhenForeignDaemonAnswers`, `…StartWaitsForOurOwnDaemon`, `TestWindowsServiceStatusExitCodes`, `…StatusReadsTheInstalledTasksHome`, `…QueryGoesThroughUTF8AndRoundTripsNonASCII`, `…RefusesATaskThatBelongsToAnotherUser`, `…DisabledTaskIsReRegisteredByInstall`, `TestPowershellForceStopScriptNamesOnlyThisInstall`, `TestPsQuoteDoublesEveryKindOfSingleQuote`; **real:** smoke phases for graceful `smind stop`, `service stop` (no fallback text, nothing left), the fallback (token removed so the request fails → `/End` + sweep, no `smind.exe` left), restart, uninstall (task gone, `SMIND_HOME` kept, status 4), the foreign daemon (hand-started `smind serve`: install registers but does not start, `start`/`stop` refuse, it stays up), a **decoy `smind.exe` with its own path, supervisor and port is never touched**, and an exe and `SMIND_HOME` with spaces and non-ASCII characters throughout |
+| 3 no elevation | `TestWindowsInstallNeedsNoElevationPrompt` (no `/RU`/`/RL`), `…InstallDeniedNamesTheRefusedStep`; **real:** `service_unelevated_check.ps1` as a standard user (install exit 0, task has a logon trigger and does not ask for elevation, status 3, uninstall, task gone) |
+| 4 `taskscheduler`, hidden launch | `TestServiceRunSetsTheSupervisorAndHome`, `…ManagedBy` tests from P8; smoke: `/healthz managedBy == taskscheduler`; `TestWindowsInstallWithoutConhostWarnsAndStillWorks` |
+| 5 `install.ps1 -Service` | `install_test.ps1`: `Install_Service_RegistersTask`, `…WithoutService_NeverRegistersATask`, `…ServiceFailure_FailsButKeepsTheBinary`, `…ServiceFailedChecksum_NeverRegistersATask`, `InvokeServiceInstall_ReportsTheExitCodeOfTheRealExe` (the real function against a fake exe: its stdout must not make a failure look like success); **real:** the workflow step installs from a local release and checks managedBy, status and uninstall |
+| 6 docs | `docs/homelab.md` "Run the daemon as a service (Linux, macOS and Windows)" |
 
-Not verified: AC 3 and the TypeScript device (see Progress); the real macOS/Windows app (the screenshots are of the component in a
-headless browser, not the Tauri window); Windows at runtime for the new Rust (CI runs `cargo test` for the daemon client with Go);
-a relay from before P12a; a real 125 s proxy.
+Independent review: 14 findings, acted on (the rest are listed below). Also found by the real-Windows CI: **`selfupdate.DesktopOwned`
+looked for `sMind.exe` beside the binary, which a case-insensitive NTFS finds next to every `smind.exe`, so on Windows
+every standalone install (and `smind update`, P6) was refused as "next to the desktop app"**; the app's real executable is
+`smind-desktop.exe` (Tauri's `${MAINBINARYNAME}`). Fixed with a regression test.
 
-**Hello v2 (PR #354 follow-up on this branch).** The desktop answers the daemon's `relay.device_challenge` (32 bytes, std base64) with a
-v2 hello signed over `…‖ uint16BE(len(session_id)) ‖ session_id ‖ challenge` (`device_hello_signature_verifies_against_go_vector`
-against the shared v2 vector incl. its four negatives, `parse_challenge_variants`); no challenge within `challenge_timeout` (5 s) or a
-challenge of another version shows `daemon_outdated` ("different versions", `relay-connection-status.test.tsx`), never a v1 hello.
-The Go bridge now sends the challenge on every non-legacy device route (also without a registry) so `legacy_daemon_still_works`
-keeps reaching `device_hello_unsupported`. The silent-daemon path is tested with a fake transport and a paused clock (`a_silent_daemon_is_outdated_and_is_never_sent_a_hello`:
-exactly the 5 s window, nothing sent; also `a_challenge_of_another_version_…`, `a_challenge_gets_a_v2_hello_bound_to_session_and_challenge`);
-a real v0.12.0 daemon was not run.
+Known gaps / not verified: Windows 10 and the Windows 11 **client** (everything above is Server 2025); whether `conhost.exe --headless`
+exists on every Windows 10 build; domain / Azure AD accounts (the logon trigger uses the `DOMAIN\user` name); any account whose
+`schtasks` output is not decodable even with code page 65001 (the CI proves non-ASCII paths round-trip on one locale); `smind update`
+driving a real `service restart` on Windows; that a transient `schtasks /Query` failure is read as "not installed" (the tool localises
+its errors, so only the exit code is available); the task name `\smind` is machine-wide (a second user's install is refused by the
+owner check, not given its own task); logoff/shutdown behaviour (the supervisor lets the daemon shut down gracefully before any kill, not
+verified on a real logoff).

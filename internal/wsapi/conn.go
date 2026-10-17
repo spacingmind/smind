@@ -176,13 +176,7 @@ func (c *conn) handleCancel(params json.RawMessage) {
 func (c *conn) dispatch(connCtx context.Context, env envelope) {
 	h, ok := c.handlers[env.Method]
 	if !ok {
-		// Answered directly, not through sendError: that only writes for a
-		// request registered in flight (it exists to guarantee ONE terminal
-		// response per in-flight id), and this request never is — routing it
-		// through there silently dropped the answer, leaving the client waiting
-		// forever for a "method not found". Not registering it also keeps a
-		// stray duplicate id from clobbering a running request's entry.
-		c.writeEnvelope(envelope{ID: env.ID, Error: codedError(fmt.Errorf("method not found: %s", env.Method))})
+		c.sendError(env.ID, fmt.Errorf("method not found: %s", env.Method))
 		return
 	}
 

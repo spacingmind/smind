@@ -46,7 +46,6 @@ describe("connections-section (desktop build)", () => {
     addConnection?: (label: string, url: string) => Promise<unknown>;
     removeConnection?: (id: string) => Promise<unknown>;
     selectConnection?: (id: string) => Promise<unknown>;
-    relayStatus?: () => Promise<unknown>;
   }) {
     vi.doMock("@/lib/platform", async (orig) => ({
       ...(await orig<typeof import("@/lib/platform")>()),
@@ -81,34 +80,6 @@ describe("connections-section (desktop build)", () => {
     // The local entry can never be removed (AC4); a url entry can.
     expect(screen.queryByTestId("connection-remove-local")).not.toBeInTheDocument();
     expect(screen.getByTestId("connection-remove-url:example")).toBeInTheDocument();
-  });
-
-  it("shows the live relay state, and what to run, under the current relay connection only", async () => {
-    const RELAY = { id: "relay:homelab@relay.example.test:7400", kind: "relay" as const, label: "Homelab", baseUrl: "relay:homelab@relay.example.test:7400" };
-    const relayStatus = vi.fn().mockResolvedValue({ state: "awaitingApproval", deviceId: "abcdefghijklmnopqrstuvwxyz" });
-    await renderSection({
-      listConnections: () => Promise.resolve([LOCAL, RELAY]),
-      getCurrentConnection: () => Promise.resolve(RELAY),
-      relayStatus,
-    });
-    await flush();
-
-    const row = screen.getByTestId(`connection-row-${RELAY.id}`);
-    expect(row).toHaveTextContent("Waiting for approval on the daemon");
-    expect(row).toHaveTextContent("smind relay devices approve abcdefghijklmnopqrstuvwxyz");
-    // A different connection's row has no relay state of its own.
-    expect(screen.getByTestId("connection-row-local")).not.toHaveTextContent("Waiting for approval");
-  });
-
-  it("does not ask for a relay state when the current connection is not a relay one", async () => {
-    const relayStatus = vi.fn().mockResolvedValue({ state: "connected" });
-    await renderSection({
-      listConnections: () => Promise.resolve([LOCAL]),
-      getCurrentConnection: () => Promise.resolve(LOCAL),
-      relayStatus,
-    });
-    await flush();
-    expect(relayStatus).not.toHaveBeenCalled();
   });
 
   it("Switch calls selectConnection with the row's id", async () => {

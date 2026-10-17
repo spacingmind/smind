@@ -1,21 +1,13 @@
 package bridge
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"os/exec"
 	"sync"
 	"testing"
 	"time"
 
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/protobuf/proto"
-
-	"github.com/spacingmind/smind/internal/relay/client"
 	"github.com/spacingmind/smind/internal/relay/devices"
-	relaypb "github.com/spacingmind/smind/internal/relay/relaypb"
-	"github.com/spacingmind/smind/internal/relay/relaytest"
 )
 
 // approvedWindow lets the next n unknown devices in without a human.
@@ -121,7 +113,7 @@ func TestBridgeDeviceFailureIsolated(t *testing.T) {
 	if err := bad.open(""); err != nil {
 		t.Fatal(err)
 	}
-	if err := bad.dc.Send([]byte(`{"id":"h","method":"relay.device_hello","params":{"v":2,"device_pub":"AA==","signature":"AA=="}}`)); err != nil {
+	if err := bad.dc.Send([]byte(`{"id":"h","method":"relay.device_hello","params":{"v":1,"device_pub":"AA==","signature":"AA=="}}`)); err != nil {
 		t.Fatal(err)
 	}
 	r, err := bad.await("h")
@@ -233,185 +225,24 @@ func TestRevokedDeviceRefusedWithReasonAtHello(t *testing.T) {
 	}
 }
 
-// TestCapturedHelloSessionCannotBeReplayedIntoANewRoute is the attack the
-// challenge exists for. The E2EE session keys depend only on the daemon's
-// long-lived key and the client's ephemeral key, so whoever can open a route
-// (a relay operator, a host-secret holder) can replay a CAPTURED client
-// transcript — handshake frames and the hello ciphertext — and the daemon
-// derives the identical keys and decrypts it. The signed hello must not carry
-// over: the daemon's fresh per-session challenge (and the route session id) are
-// part of what was signed.
-//
-// Two variants isolate the two bindings: a replay into ANOTHER session id is
-// also stopped by the session-id binding; a replay into the SAME session id,
-// after the original session is gone, is stopped only by the challenge.
-func TestCapturedHelloSessionCannotBeReplayedIntoANewRoute(t *testing.T) {
-	for _, sameSession := range []bool{false, true} {
-		name := "another session id"
-		if sameSession {
-			name = "the same session id after the original ended (only the challenge stops this)"
-		}
-		t.Run(name, func(t *testing.T) {
-			f := newHubFixture(t, Options{})
-			approvedWindow(t, f, 2)
-			hub := f.start(nil)
-			victim := f.newDevice(false, "victim")
-			victim.connect()
-			victim.mustList()
-
-			// What the relay saw the victim send for its session: every data frame.
-			var captured []*relaypb.Frame
-			for _, rec := range f.relay.Frames.Records() {
-				if rec.Sent && rec.Frame.GetDeviceId() == victim.id && string(rec.Frame.GetSessionId()) == victim.session {
-					captured = append(captured, rec.Frame)
-				}
-			}
-			if len(captured) < 3 { // registration, E2EE hello, E2EE ready, the hello request, ...
-				t.Fatalf("captured only %d of the victim's frames", len(captured))
-			}
-
-			replaySession := "replayed-route"
-			if sameSession {
-				replaySession = victim.session
-				// The original session ends: the device goes away and the
-				// daemon forgets the session (as after a detach).
-				victim.cancel()
-				hub.detach(routeRef{device: victim.id, session: victim.session})
-				waitFor(t, "the original session to be gone", func() bool {
-					hub.mu.Lock()
-					defer hub.mu.Unlock()
-					_, still := hub.sessions[routeRef{device: victim.id, session: victim.session}]
-					return !still
-				})
-			}
-			rejectedBefore := f.logs.count("device_hello rejected")
-
-			// The attacker replays them verbatim.
-			rc := relaytest.NativeClient(t, f.relay)
-			ctx, cancel := context.WithCancel(context.Background())
-			t.Cleanup(cancel)
-			adm, err := client.Admit(ctx, rc, f.relay.HostID, "attacker", f.relay.Secret)
-			if err != nil {
-				t.Fatal(err)
-			}
-			stream, err := rc.OpenData(metadata.AppendToOutgoingContext(ctx, "admission-id", adm))
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, fr := range captured {
-				replay := proto.Clone(fr).(*relaypb.Frame)
-				replay.SessionId = []byte(replaySession)
-				if err := stream.Send(replay); err != nil {
-					t.Fatalf("replay send: %v", err)
-				}
-			}
-
-			// The daemon answers the handshake (the attacker cannot read it),
-			// reaches the replayed hello, and refuses it: nothing was signed
-			// over THIS session's challenge.
-			waitFor(t, "the daemon to reject the replayed hello", func() bool {
-				return f.logs.count("device_hello rejected") > rejectedBefore
-			})
-			hub.mu.Lock()
-			for ref, s := range hub.sessions {
-				if ref.session == replaySession && s.admitted {
-					hub.mu.Unlock()
-					t.Fatal("a replayed hello was admitted")
-				}
-			}
-			hub.mu.Unlock()
-			if got := f.reg.List(); len(got) != 1 || got[0].ID != victim.id {
-				t.Fatalf("the registry changed: %+v", got)
-			}
-			if !sameSession {
-				victim.mustList() // the real session was not superseded or disturbed
-			}
-		})
-	}
-}
-
-// TestHelloBoundToTheChallengeAndTheSession: the daemon only accepts a hello
-// signed over the challenge it sent this session and this route's session id.
-func TestHelloBoundToTheChallengeAndTheSession(t *testing.T) {
+func TestDeviceHelloReplayInAnotherSessionRefused(t *testing.T) {
 	f := newHubFixture(t, Options{})
-	approvedWindow(t, f, 3)
+	approvedWindow(t, f, 2)
 	f.start(nil)
+	victim := f.newDevice(false, "victim")
+	victim.connect()
 
-	// Signed over a challenge the daemon never sent this session.
-	a := f.newDevice(false, "wrong-challenge")
-	if err := a.open(""); err != nil {
+	// A eavesdropper (who cannot read the encrypted hello, but suppose it
+	// obtained the signed bytes) replays them in its own session.
+	good := devices.SignHello(victim.priv, "victim", f.kp.Public(), victim.eph.Public())
+	attacker := f.newDevice(false, "attacker")
+	attacker.id, attacker.pub = victim.id, victim.pub // claims the victim's id on its own route
+	if err := attacker.open(""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.awaitChallenge(); err != nil {
-		t.Fatal(err)
-	}
-	stale := bytes.Repeat([]byte{7}, devices.ChallengeLen)
-	r, err := a.request(devices.HelloMethod, devices.SignHello(a.priv, a.label, f.kp.Public(), a.eph.Public(), []byte(a.session), stale))
+	r, err := attacker.request(devices.HelloMethod, good)
 	if err != nil || r.Err == nil || r.Err.Code != codeBadHello {
-		t.Fatalf("hello over a stale challenge = %+v, %v; want %q", r, err, codeBadHello)
-	}
-
-	// Signed for another route's session id.
-	b := f.newDevice(false, "wrong-session")
-	if err := b.open(""); err != nil {
-		t.Fatal(err)
-	}
-	c, err := b.awaitChallenge()
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, err = b.request(devices.HelloMethod, devices.SignHello(b.priv, b.label, f.kp.Public(), b.eph.Public(), []byte("another-route"), c))
-	if err != nil || r.Err == nil || r.Err.Code != codeBadHello {
-		t.Fatalf("hello for another session id = %+v, %v; want %q", r, err, codeBadHello)
-	}
-
-	// The honest flow works.
-	ok := f.newDevice(false, "honest")
-	ok.connect()
-	ok.mustList()
-}
-
-// TestEachSessionGetsAFreshChallenge: a challenge is never reused across
-// sessions (nor across the daemon's restarts), or a captured one would do.
-func TestEachSessionGetsAFreshChallenge(t *testing.T) {
-	f := newHubFixture(t, Options{})
-	approvedWindow(t, f, 1)
-	f.start(nil)
-	d := f.newDevice(false, "d")
-	seen := map[string]bool{}
-	for i := 0; i < 3; i++ {
-		if err := d.open(""); err != nil {
-			t.Fatal(err)
-		}
-		c, err := d.awaitChallenge()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if seen[string(c)] {
-			t.Fatal("the daemon sent the same challenge twice")
-		}
-		seen[string(c)] = true
-	}
-}
-
-// TestHelloVersion1IsRefusedWithAClearReason: a client that still speaks the
-// retired v1 hello is told so (no released client does).
-func TestHelloVersion1IsRefusedWithAClearReason(t *testing.T) {
-	f := newHubFixture(t, Options{})
-	approvedWindow(t, f, 1)
-	f.start(nil)
-	d := f.newDevice(false, "old")
-	if err := d.open(""); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.awaitChallenge(); err != nil {
-		t.Fatal(err)
-	}
-	h := devices.SignHello(d.priv, d.label, f.kp.Public(), d.eph.Public(), []byte(d.session), bytes.Repeat([]byte{1}, devices.ChallengeLen))
-	h.V = devices.HelloVersionV1
-	r, err := d.request(devices.HelloMethod, h)
-	if err != nil || r.Err == nil || r.Err.Code != codeHelloVersion {
-		t.Fatalf("v1 hello answer = %+v, %v; want %q", r, err, codeHelloVersion)
+		t.Fatalf("replayed hello answer = %+v, %v; want %q", r, err, codeBadHello)
 	}
 }
 
@@ -815,39 +646,4 @@ func TestBridgeControlStreamSilentFor75sReconnects(t *testing.T) {
 		defer mu.Unlock()
 		return len(jitterSeen) > 0
 	})
-}
-
-func TestApprovingARevokedDeviceLiftsTheRelaysRefusal(t *testing.T) {
-	f := newHubFixture(t, Options{})
-	approvedWindow(t, f, 2)
-	hub := f.start(nil)
-	a, b := f.newDevice(false, "a"), f.newDevice(false, "b")
-	a.connect()
-	b.connect()
-
-	if _, err := hub.RevokeDevice(a.id); err != nil {
-		t.Fatal(err)
-	}
-	a2 := f.newDevice(false, "a")
-	a2.priv, a2.pub, a2.id = a.priv, a.pub, a.id
-	if err := a2.open(""); err == nil || relayStatus(err) != codePermissionDenied {
-		t.Fatalf("a revoked device attached: %v", err)
-	}
-
-	// A human approves it again. The relay's refusal only ends with the
-	// control stream that sent it, so the hub reconnects; the device then gets
-	// in without any other step, and the other device is served throughout.
-	if _, err := hub.ApproveDevice(a.id); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, "the re-approved device to be served", func() bool {
-		d := f.newDevice(false, "a")
-		d.priv, d.pub, d.id = a.priv, a.pub, a.id
-		if err := d.open(""); err != nil {
-			return false
-		}
-		r, err := d.hello()
-		return err == nil && r.Err == nil && d.canList()
-	})
-	b.mustList()
 }

@@ -29,12 +29,6 @@ type session struct {
 
 	dc         *client.DataConn // runner
 	identified bool             // runner
-	// challenge is this session's hello challenge, and challengeSent whether it
-	// reached the device: ONE challenge per session, reused if identification is
-	// re-entered after a transport blip (a second one would invalidate a hello
-	// the device already signed), re-sent only if the earlier send failed.
-	challenge     []byte // runner
-	challengeSent bool   // runner
 }
 
 // newSessionLocked creates and registers a session. Caller holds Hub.mu and

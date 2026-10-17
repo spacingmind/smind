@@ -1,40 +1,147 @@
 // Command harness is a throwaway test helper, not part of smind's own
 // CLI: it starts a real relay (internal/relay/server.Run) and a real
-// daemon-side bridge into it, with one enrolled workspace, then prints a
-// real pairing URL and blocks.
+// daemon-side bridge (internal/relay/bridge.Run) into it, with one
+// enrolled workspace, then prints a real pairing URL and blocks.
 //
-// It exists solely so the cross-language integration tests (mobile/'s
-// node test and desktop/daemon-client's Rust interop test) can drive the
-// real TypeScript/Rust relay clients against a real Go relay end-to-end --
-// proving interoperability, not just that each side's own unit tests pass
-// in isolation.
-//
-// With no flags it runs the legacy bridge (bridge.Run). With -hub it runs the
-// multi-device hub with a device registry and a stdin command channel; with
-// -mobile-stub it also plays a mobile device itself. See harness.go.
+// It exists solely so mobile/'s cross-language integration test
+// (mobile/src/relay/__tests__/integration.node.test.ts) can drive the
+// real TypeScript grpc-web + E2EE client (mobile/src/relay/client.ts)
+// against a real Go relay end-to-end -- proving interoperability, not
+// just that each side's own unit tests pass in isolation.
 package main
 
 import (
 	"context"
-	"flag"
+	"encoding/hex"
 	"fmt"
+	"net"
 	"os"
-	"os/signal"
+	"path/filepath"
+
+	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/relay/bridge"
+	"github.com/spacingmind/smind/internal/relay/e2ee"
+	"github.com/spacingmind/smind/internal/relay/pairing"
+	"github.com/spacingmind/smind/internal/relay/server"
+	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/workspace"
+	"github.com/spacingmind/smind/internal/wsapi"
 )
 
-func main() {
-	var cfg Config
-	flag.BoolVar(&cfg.Hub, "hub", false, "run the multi-device hub with a device registry (stdin commands)")
-	flag.BoolVar(&cfg.Legacy, "legacy", false, "hub mode: also serve clients without device identity")
-	flag.IntVar(&cfg.MaxDevices, "max-devices", 0, "hub mode: bound on served devices (0 = default)")
-	flag.BoolVar(&cfg.MobileStub, "mobile-stub", false, "hub mode: play a mobile device over grpc-web")
-	flag.Parse()
-	cfg.Stdin, cfg.Stdout, cfg.Stderr = os.Stdin, os.Stdout, os.Stderr
+const harnessWorkspaceID = "ws-node-harness"
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	if err := Run(ctx, cfg); err != nil {
+func main() {
+	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "harness:", err)
 		os.Exit(1)
 	}
+}
+
+func run() error {
+	relayDir, err := os.MkdirTemp("", "smind-relay-harness-")
+	if err != nil {
+		return err
+	}
+	secret, err := server.EnrollHost(relayDir, harnessWorkspaceID)
+	if err != nil {
+		return err
+	}
+
+	nativeLis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	webLis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+
+	// Generate the cert BEFORE starting Run, so this process's own
+	// fingerprint and the one Run serves are guaranteed identical -- Run
+	// would otherwise race its own LoadOrCreateCert against this one (see
+	// internal/relay/client/integration_test.go's startRelay, which
+	// documents the same ordering requirement).
+	cert, err := server.LoadOrCreateCert(relayDir)
+	if err != nil {
+		return err
+	}
+	fingerprint := server.CertFingerprint(cert)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		if err := server.Run(ctx, server.Config{DataDir: relayDir, Listener: nativeLis, GRPCWebListener: webLis}); err != nil {
+			fmt.Fprintln(os.Stderr, "relay run:", err)
+		}
+	}()
+
+	dbDir, err := os.MkdirTemp("", "smind-harness-db-")
+	if err != nil {
+		return err
+	}
+	db, err := store.Open(filepath.Join(dbDir, "smind.db"))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	acctDB, err := store.Open(filepath.Join(dbDir, "accounts.db"))
+	if err != nil {
+		return err
+	}
+	defer acctDB.Close()
+
+	wm := workspace.New(db)
+	api, err := wsapi.New(wm, accounts.New(acctDB), nil, db, "harness-token")
+	if err != nil {
+		return err
+	}
+
+	daemonKP, err := e2ee.GenerateKeyPair()
+	if err != nil {
+		return err
+	}
+
+	cfg := bridge.Config{
+		RelayAddress: nativeLis.Addr().String(),
+		WorkspaceID:  harnessWorkspaceID,
+		SecretHex:    hex.EncodeToString(secret),
+		Fingerprint:  fingerprint,
+	}
+	go func() {
+		if err := bridge.Run(ctx, cfg, daemonKP, api); err != nil {
+			fmt.Fprintln(os.Stderr, "bridge run:", err)
+		}
+	}()
+
+	offer := pairing.Offer{
+		DaemonID:         bridge.DaemonKeyID(daemonKP),
+		PublicKey:        daemonKP.Public(),
+		Relay:            "https://" + webLis.Addr().String(),
+		RelayFingerprint: fingerprint,
+		Secret:           secret,
+		WorkspaceID:      harnessWorkspaceID,
+	}
+	url, err := offer.URL("")
+	if err != nil {
+		return err
+	}
+
+	// The one line a test harness watches stdout for; everything else on
+	// stdout/stderr is diagnostic only.
+	fmt.Println("READY " + url)
+
+	// The offer's Relay field is the grpc-web address (mobile-only,
+	// see cmd/smind/relay.go's cmdRelayOffer) -- the desktop Rust client
+	// (ADR-0007 amendment, 2026-09-25) dials the relay's *native* gRPC
+	// listener instead, whose address production code derives from the
+	// grpc-web one by a fixed port convention that doesn't hold here
+	// (nativeLis/webLis above are two independent ephemeral ports, not
+	// adjacent ones). Printing it directly lets the Rust interop test
+	// (desktop/daemon-client/tests/relay_harness_interop.rs) dial the
+	// right port without that convention; it's an additive diagnostic
+	// line, not a protocol change -- the mobile-side integration tests
+	// only ever match the "READY " line and ignore any other output.
+	fmt.Println("NATIVE " + nativeLis.Addr().String())
+
+	select {} // block until the parent test process kills us.
 }
