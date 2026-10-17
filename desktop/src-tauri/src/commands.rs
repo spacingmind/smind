@@ -80,7 +80,7 @@ fn scrub(password: Option<String>) {
 /// add_url_connection is `connections_add`: with a password it logs in first
 /// and saves the connection only on success, keeping the session token in
 /// memory (`ProxyState::set_session`). The password is never stored.
-async fn add_url_connection(
+pub(crate) async fn add_url_connection(
     proxy: &smind_daemon_client::proxy::ProxyState,
     path: &std::path::Path,
     label: &str,

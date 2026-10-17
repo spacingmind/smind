@@ -46,6 +46,9 @@ mac-notification-sys = "0.6"
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt"] }
+# real_daemon_test (opt-in e2e): the same crates daemon-client already uses.
+futures-util = "0.3"
+tokio-tungstenite = "0.30"
 
 [lib]
 name = "smind_desktop_lib"

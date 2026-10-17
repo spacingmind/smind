@@ -87,10 +87,12 @@ async fn spawn_stub_as(protected: bool, smind_healthz: bool) -> (SocketAddr, Log
                 if headers.get("authorization").and_then(|v| v.to_str().ok()) == Some("Bearer expired-session") {
                     return axum::http::StatusCode::UNAUTHORIZED.into_response();
                 }
+                // Like the real daemon (wsapi.Subprotocol): select "smind" when
+                // offered, never the bearer entry.
                 let offered: Vec<String> = headers
                     .get("sec-websocket-protocol")
                     .and_then(|v| v.to_str().ok())
-                    .map(|v| v.split(',').map(|p| p.trim().to_string()).filter(|p| p.starts_with("smind.bearer.")).collect())
+                    .map(|v| v.split(',').map(|p| p.trim().to_string()).filter(|p| p == "smind").collect())
                     .unwrap_or_default();
                 ws.protocols(offered).on_upgrade(|mut socket| async move {
                     while let Some(Ok(msg)) = socket.next().await {
@@ -184,12 +186,12 @@ async fn echo_roundtrip(ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungst
 #[tokio::test]
 async fn ws_forwards_bearer_subprotocol_and_echoes_selected() {
     let h = harness().await;
-    let (mut ws, selected) = h.ws("", &["other.proto", "smind.bearer.abc123"]).await;
-    assert_eq!(selected.as_deref(), Some("smind.bearer.abc123"), "the browser aborts unless the selection is echoed");
+    let (mut ws, selected) = h.ws("", &["other.proto", "smind", "smind.bearer.abc123"]).await;
+    assert_eq!(selected.as_deref(), Some("smind"), "the daemon's selection is echoed, or the browser aborts");
     echo_roundtrip(&mut ws).await;
     let ws_seen = |h: &Harness| h.stub.lock().unwrap().iter().filter(|s| s.path == "/ws").cloned().collect::<Vec<_>>();
     let seen = ws_seen(&h)[0].clone();
-    assert_eq!(seen.protocols.as_deref(), Some("smind.bearer.abc123"), "only smind.bearer.* is forwarded");
+    assert_eq!(seen.protocols.as_deref(), Some("smind, smind.bearer.abc123"), "only smind and smind.bearer.* are forwarded");
     assert_eq!(seen.authorization, None, "no credential of the proxy's own with nothing configured");
 
     // No offered protocol: nothing selected, still connects (unchanged behaviour).
@@ -324,6 +326,15 @@ async fn session_connection_injects_session_bearer_and_synthesizes_token() {
     let seen = remote.lock().unwrap()[1].clone();
     assert_eq!(seen.authorization.as_deref(), Some("Bearer session-1"));
     assert_eq!(seen.query, None);
+
+    // The webview's own `["smind", "smind.bearer.x"]` offer under injection:
+    // its bearer entry is never forwarded, `smind` is, and the daemon's
+    // selection of it is echoed.
+    let (_ws, selected) = h.ws("", &["smind", "smind.bearer.webview-token"]).await;
+    assert_eq!(selected.as_deref(), Some("smind"));
+    let seen = remote.lock().unwrap().last().unwrap().clone();
+    assert_eq!(seen.protocols.as_deref(), Some("smind"));
+    assert_eq!(seen.authorization.as_deref(), Some("Bearer session-1"));
 
     // Removing the session stops the injection.
     h.state.clear_session(&id);

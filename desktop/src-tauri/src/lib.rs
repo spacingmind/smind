@@ -37,6 +37,8 @@ mod updater;
 mod window_chrome;
 #[cfg(test)]
 mod capability_tests;
+#[cfg(test)]
+mod real_daemon_test;
 mod zoom_store;
 
 use state::DesktopState;

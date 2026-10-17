@@ -477,16 +477,23 @@ fn bearer_header(token: &str) -> Option<HeaderValue> {
 /// WebSocket, so the token rides there instead of in the URL.
 const BEARER_SUBPROTOCOL_PREFIX: &str = "smind.bearer.";
 
-/// offered_bearer_protocols lists the `smind.bearer.*` subprotocols the
-/// browser offered, in order.
-fn offered_bearer_protocols(headers: &HeaderMap) -> Vec<String> {
+/// The subprotocol the real daemon always selects (`wsapi.Subprotocol`): a
+/// browser offers `["smind", "smind.bearer.<token>"]` and the daemon answers
+/// `smind`, never the token. Found against the real daemon: forwarding only
+/// the bearer entry makes the upstream handshake fail ("server sent no
+/// subprotocol").
+const SUBPROTOCOL: &str = "smind";
+
+/// offered_protocols lists the subprotocols the browser offered that the
+/// proxy passes on -- `smind` and `smind.bearer.*` -- in order.
+fn offered_protocols(headers: &HeaderMap) -> Vec<String> {
     headers
         .get_all(header::SEC_WEBSOCKET_PROTOCOL)
         .iter()
         .filter_map(|v| v.to_str().ok())
         .flat_map(|v| v.split(','))
         .map(str::trim)
-        .filter(|p| p.starts_with(BEARER_SUBPROTOCOL_PREFIX))
+        .filter(|p| *p == SUBPROTOCOL || p.starts_with(BEARER_SUBPROTOCOL_PREFIX))
         .map(str::to_string)
         .collect()
 }
@@ -547,7 +554,7 @@ async fn proxy_ws(
         }
     }
     let bearer = state.upstream_bearer(&conn).await;
-    let offered = offered_bearer_protocols(&headers);
+    let offered = offered_protocols(&headers);
     let query = match (&bearer, query.as_deref()) {
         (Some(_), Some(q)) => {
             let uri: Uri = format!("/ws?{q}").parse().unwrap_or_else(|_| Uri::from_static("/ws"));
@@ -561,19 +568,23 @@ async fn proxy_ws(
         Ok(r) => r,
         Err(_) => return (StatusCode::BAD_GATEWAY, "smind desktop: invalid upstream URL").into_response(),
     };
-    match &bearer {
-        Some(token) => match bearer_header(token) {
+    // What goes upstream: with the proxy's own credential the browser's
+    // bearer entries are dropped (never forwarded) but `smind` stays, so the
+    // daemon still selects it; without one, everything offered is forwarded.
+    let upstream_offer: Vec<&String> = offered.iter().filter(|p| bearer.is_none() || !p.starts_with(BEARER_SUBPROTOCOL_PREFIX)).collect();
+    if let Some(token) = &bearer {
+        match bearer_header(token) {
             Some(v) => {
                 request.headers_mut().insert(header::AUTHORIZATION, v);
             }
             None => return (StatusCode::BAD_GATEWAY, "smind desktop: unusable credential").into_response(),
-        },
-        None if !offered.is_empty() => {
-            if let Ok(v) = HeaderValue::from_str(&offered.join(", ")) {
-                request.headers_mut().insert(header::SEC_WEBSOCKET_PROTOCOL, v);
-            }
         }
-        None => {}
+    }
+    if !upstream_offer.is_empty() {
+        let joined = upstream_offer.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ");
+        if let Ok(v) = HeaderValue::from_str(&joined) {
+            request.headers_mut().insert(header::SEC_WEBSOCKET_PROTOCOL, v);
+        }
     }
 
     // Dial upstream before accepting the browser: the browser aborts a socket
@@ -591,17 +602,17 @@ async fn proxy_ws(
             return (StatusCode::BAD_GATEWAY, "smind desktop: upstream connection failed").into_response();
         }
     };
-    let selected = match &bearer {
-        // The upstream was not offered the browser's protocols: echo the
-        // browser's own first choice so it does not abort.
-        Some(_) => offered.first().cloned(),
-        None => resp
-            .headers()
-            .get(header::SEC_WEBSOCKET_PROTOCOL)
-            .and_then(|v| v.to_str().ok())
-            .map(|v| v.trim().to_string())
-            .filter(|v| offered.contains(v)),
-    };
+    // Echo what the daemon selected (it must be one of the browser's offers).
+    // If it selected nothing although the browser offered a bearer entry that
+    // was withheld from it, answer with the browser's own first choice so the
+    // browser does not abort the socket.
+    let chosen = resp
+        .headers()
+        .get(header::SEC_WEBSOCKET_PROTOCOL)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.trim().to_string())
+        .filter(|v| offered.contains(v));
+    let selected = chosen.or_else(|| if bearer.is_some() { offered.first().cloned() } else { None });
     let ws = match selected {
         Some(p) => ws.protocols([p]),
         None => ws,
