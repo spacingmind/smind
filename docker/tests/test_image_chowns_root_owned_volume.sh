@@ -32,14 +32,32 @@ docker rm -f "$name" >/dev/null
 if docker info --format '{{.OperatingSystem}}' | grep -qi 'docker desktop'; then
   echo "skip - bind-mount chown is not observable on Docker Desktop"
 else
+  # (1) A bind mount root owns (made with sudo, or a fresh `docker volume`-style
+  # directory) is handed to uid 1000. mktemp makes it owned by the runner, so make
+  # it root-owned from inside a container.
   dir="$(mktemp -d)"; TMPDIRS+=("$dir")
-  chmod 0755 "$dir"
+  docker run --rm -v "$dir:/x" --entrypoint sh "$IMAGE" -c 'chown 0:0 /x && chmod 0755 /x' >/dev/null
   name="$(new_name chownbind)"
   start_daemon "$name" -v "$dir:/data"
   wait_healthy "$name" 30
-  [ "$(docker exec "$name" stat -c %u /data)" = 1000 ] || fail "the bind mount was not chowned"
+  [ "$(docker exec "$name" stat -c %u /data)" = 1000 ] || fail "the root-owned bind mount was not chowned"
   pass "a root-owned bind mount is chowned for the smind user"
   docker rm -f "$name" >/dev/null
+
+  # (2) A bind mount owned by someone else (the operator's own directory) is NOT
+  # re-owned: the entrypoint says so, and --user <that uid> is the way to run it.
+  dir2="$(mktemp -d)"; TMPDIRS+=("$dir2")
+  docker run --rm -v "$dir2:/x" --entrypoint sh "$IMAGE" -c 'chown 4343:4343 /x' >/dev/null
+  name="$(new_name foreignbind)"; CONTAINERS+=("$name")
+  docker run -d --name "$name" -e "SMIND_PASSWORD=$PASSWORD" -v "$dir2:/data" "$IMAGE" >/dev/null
+  poll 30 sh -c "[ \"\$(docker inspect --format '{{.State.Running}}' '$name')\" = false ]" || fail "a daemon that cannot write /data kept running"
+  docker logs "$name" 2>&1 | grep -q 'owned by uid 4343' || fail "the entrypoint did not explain the foreign owner: $(docker logs "$name" 2>&1 | tail -3)"
+  [ "$(stat -c %u "$dir2")" = 4343 ] || fail "the operator's directory was re-owned"
+  docker rm -f "$name" >/dev/null
+  name="$(new_name foreignbind2)"
+  start_daemon "$name" --user 4343:4343 -v "$dir2:/data"
+  wait_healthy "$name" 30
+  pass "a bind mount owned by another uid keeps its owner; --user <uid> runs it"
 fi
 
 # Started non-root (--user), the entrypoint just runs: a writable mount works.
