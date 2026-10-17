@@ -115,7 +115,7 @@ function ConnectionsSection() {
                 role="menu"
                 aria-label="Add connection"
                 data-testid="connection-add-menu-items"
-                className="absolute right-0 top-full z-10 mt-1 flex min-w-52 flex-col rounded-xl border bg-popover p-1 text-popover-foreground shadow-md"
+                className="absolute right-0 top-full z-10 mt-1 flex min-w-64 flex-col rounded-xl border bg-popover p-1 text-popover-foreground shadow-md"
               >
                 {ADD_METHODS.map((m) => (
                   <button
@@ -123,7 +123,7 @@ function ConnectionsSection() {
                     type="button"
                     role="menuitem"
                     data-testid={`connection-add-menu-${m}`}
-                    className="rounded-lg px-2 py-1.5 text-left text-ui-base outline-none hover:bg-hover focus-visible:bg-hover"
+                    className="rounded-lg px-2 py-1.5 text-left text-ui-base whitespace-nowrap outline-none hover:bg-hover focus-visible:bg-hover"
                     onClick={() => openMethod(m)}
                   >
                     {CONNECT_METHOD_LABELS[m]}

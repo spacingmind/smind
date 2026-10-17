@@ -114,7 +114,7 @@ export function UrlConnectForm({
 
   return (
     <form className="flex flex-col gap-2" onSubmit={submit} data-testid="url-form" autoComplete="off" noValidate>
-      <p className="text-ui-base text-muted-foreground">Enter the address of a smind daemon you can reach from this computer.</p>
+      <p className="text-ui-base text-muted-foreground">Use an http:// or https:// address with the daemon's port (4648 by default).</p>
       <Input
         aria-label="Connection URL"
         data-testid="connection-add-url"

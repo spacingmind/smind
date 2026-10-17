@@ -215,7 +215,7 @@ export function FirstRun({
   const locked = installing;
 
   return (
-    <div data-testid="first-run" className="flex h-full min-h-0 flex-col bg-background text-foreground">
+    <div data-testid="first-run" className="flex h-screen min-h-0 flex-col bg-background text-foreground">
       <header
         className="flex h-12 shrink-0 items-center gap-2 p-2"
         data-testid="first-run-header"
