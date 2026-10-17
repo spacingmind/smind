@@ -1133,5 +1133,6 @@ v2 hello signed over `…‖ uint16BE(len(session_id)) ‖ session_id ‖ challe
 against the shared v2 vector incl. its four negatives, `parse_challenge_variants`); no challenge within `challenge_timeout` (5 s) or a
 challenge of another version shows `daemon_outdated` ("different versions", `relay-connection-status.test.tsx`), never a v1 hello.
 The Go bridge now sends the challenge on every non-legacy device route (also without a registry) so `legacy_daemon_still_works`
-keeps reaching `device_hello_unsupported`. Not covered by a test: the 5 s silence → `daemon_outdated` path (needs a fake transport;
-a v0.12.0 daemon was not run).
+keeps reaching `device_hello_unsupported`. The silent-daemon path is tested with a fake transport and a paused clock (`a_silent_daemon_is_outdated_and_is_never_sent_a_hello`:
+exactly the 5 s window, nothing sent; also `a_challenge_of_another_version_…`, `a_challenge_gets_a_v2_hello_bound_to_session_and_challenge`);
+a real v0.12.0 daemon was not run.
