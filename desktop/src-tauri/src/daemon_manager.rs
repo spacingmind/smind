@@ -1141,13 +1141,18 @@ pub async fn take_over_daemon(app: AppHandle, state: tauri::State<'_, DesktopSta
 /// loopback proxy doesn't forward `/healthz` at all.
 #[tauri::command]
 pub async fn connection_version(app: AppHandle, state: tauri::State<'_, DesktopState>, id: String) -> Result<ConnectionVersionInfo, String> {
-    let base_url = {
+    let conn = {
         let registry = state.proxy.registry.lock().unwrap();
-        registry.list().iter().find(|c| c.id == id).map(|c| c.base_url.clone())
+        registry.list().iter().find(|c| c.id == id).cloned()
     }
     .ok_or_else(|| format!("no connection with id {id:?}"))?;
-    let url = url::Url::parse(&base_url).map_err(|e| e.to_string())?;
     let app_version = app_version_string(&app);
+    // An ssh connection is probed through its tunnel's local end; with no
+    // tunnel running it is simply unreachable.
+    let Some(base_url) = state.proxy.upstream_base(&conn) else {
+        return Ok(ConnectionVersionInfo { reachable: false, daemon_version: None, app_version, comparison: version::Comparison::Unknown });
+    };
+    let url = url::Url::parse(&base_url).map_err(|e| e.to_string())?;
     let HealthzProbe { reachable, version: daemon_version, .. } = probe_healthz(&url).await;
     let comparison = daemon_version.as_deref().map(|d| version::compare(&app_version, d)).unwrap_or(version::Comparison::Unknown);
     Ok(ConnectionVersionInfo { reachable, daemon_version, app_version, comparison })

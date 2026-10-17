@@ -15,6 +15,7 @@ use smind_daemon_client::proxy::ProxyState;
 use smind_daemon_client::WorkspaceCache;
 
 use crate::app_settings::AppSettings;
+use crate::ssh_tunnel::SshTunnels;
 use crate::tray::Tray;
 
 pub struct DesktopState {
@@ -24,6 +25,8 @@ pub struct DesktopState {
     pub app_settings: Mutex<AppSettings>,
     pub app_settings_path: PathBuf,
     pub proxy_url: Url,
+    /// ADR-0031 D7 (b2): the `ssh -N -L` children of `ssh`-kind connections.
+    pub ssh_tunnels: SshTunnels,
     pub cache: WorkspaceCache,
     pub tray: Arc<Tray>,
     /// The daemon-client watcher task following the selected connection

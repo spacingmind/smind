@@ -76,7 +76,9 @@ pub async fn probe(raw_url: &str) -> ProbeResult {
         Ok(url) => without_userinfo(url),
         // validate_base_url echoes what was typed, which may hold a password
         // or a pairing secret: report only the reason.
-        Err(e) if e.contains("relay pairing link") => return ProbeResult::unreachable(false, e),
+        Err(e) if e.contains("relay pairing link") || e.contains("must not contain credentials") => {
+            return ProbeResult::unreachable(false, e)
+        }
         Err(_) => return ProbeResult::unreachable(false, "not a valid http(s) daemon URL"),
     };
     let loopback = is_loopback_host(&base);
@@ -196,11 +198,15 @@ mod tests {
     async fn connections_probe_unreachable_is_not_an_error() {
         // A port nothing listens on.
         let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        let got = connections_probe(format!("http://user:hunter2@127.0.0.1:{port}")).await.expect("never Err");
+        let got = connections_probe(format!("http://127.0.0.1:{port}")).await.expect("never Err");
         assert!(!got.reachable);
         assert!(got.loopback);
         let err = got.error.expect("an explanation");
-        assert!(!err.contains("hunter2") && !err.contains("127.0.0.1"), "{err}");
+        assert!(!err.contains("127.0.0.1"), "{err}");
+
+        let creds = connections_probe("http://user:hunter2@127.0.0.1:1".to_string()).await.unwrap();
+        assert!(!creds.reachable);
+        assert_eq!(creds.error.as_deref(), Some("a daemon URL must not contain credentials"));
 
         let bad = connections_probe("ftp://user:hunter2@host".to_string()).await.unwrap();
         assert!(!bad.reachable);

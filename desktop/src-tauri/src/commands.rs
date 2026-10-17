@@ -124,38 +124,62 @@ pub async fn connections_add(
     add_url_connection(&state.proxy, &state.connections_path, &label, &url, password).await
 }
 
-#[tauri::command]
-pub fn connections_remove(state: State<'_, DesktopState>, id: String) -> Result<(), String> {
-    let mut registry = state.proxy.registry.lock().unwrap();
-    registry.remove(&id)?;
-    registry
-        .save(&state.connections_path)
-        .map_err(|e| e.to_string())?;
-    drop(registry);
-    state.proxy.clear_session(&id);
+/// remove_connection deletes `id` from the registry and everything that
+/// belongs to it: a held login session, an ssh tunnel (its child is
+/// killed), a relay pairing's keys.
+pub fn remove_connection(
+    proxy: &smind_daemon_client::proxy::ProxyState,
+    tunnels: &crate::ssh_tunnel::SshTunnels,
+    path: &std::path::Path,
+    id: &str,
+) -> Result<(), String> {
+    {
+        let mut registry = proxy.registry.lock().unwrap();
+        registry.remove(id)?;
+        registry.save(path).map_err(|e| e.to_string())?;
+    }
+    proxy.clear_session(id);
+    crate::ssh_tunnel::forget_tunnel(proxy, tunnels, id);
     // Unpairing deletes the keys: a no-op for local/url ids, since
     // `pairing_store::delete` only ever removes a file that a relay
     // connection's `connections_add_relay` would have created.
-    if let Some(dir) = state.connections_path.parent() {
-        relay::pairing_store::delete(dir, &id).map_err(|e| e.to_string())?;
+    if let Some(dir) = path.parent() {
+        relay::pairing_store::delete(dir, id).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
 #[tauri::command]
-pub fn connections_select(
+pub fn connections_remove(state: State<'_, DesktopState>, id: String) -> Result<(), String> {
+    remove_connection(&state.proxy, &state.ssh_tunnels, &state.connections_path, &id)
+}
+
+/// select_connection selects `id`; an `ssh` connection first gets its tunnel
+/// (re)started if it is not running, and a failure (ssh's own stderr) leaves
+/// the selection unchanged.
+pub async fn select_connection(
+    proxy: &smind_daemon_client::proxy::ProxyState,
+    tunnels: &crate::ssh_tunnel::SshTunnels,
+    path: &std::path::Path,
+    id: &str,
+) -> Result<Connection, String> {
+    let existing = proxy.registry.lock().unwrap().list().iter().find(|c| c.id == id).cloned();
+    if let Some(conn) = existing.as_ref().filter(|c| c.kind == smind_daemon_client::proxy::ConnectionKind::Ssh) {
+        crate::ssh_tunnel::ensure_tunnel(proxy, tunnels, conn).await?;
+    }
+    let mut registry = proxy.registry.lock().unwrap();
+    registry.select(id)?;
+    registry.save(path).map_err(|e| e.to_string())?;
+    Ok(registry.current().clone())
+}
+
+#[tauri::command]
+pub async fn connections_select(
     app: AppHandle,
     state: State<'_, DesktopState>,
     id: String,
 ) -> Result<Connection, String> {
-    let conn = {
-        let mut registry = state.proxy.registry.lock().unwrap();
-        registry.select(&id)?;
-        registry
-            .save(&state.connections_path)
-            .map_err(|e| e.to_string())?;
-        registry.current().clone()
-    };
+    let conn = select_connection(&state.proxy, &state.ssh_tunnels, &state.connections_path, &id).await?;
     client_watch::restart(&app, &state, &conn);
     Ok(conn)
 }

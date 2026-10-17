@@ -116,6 +116,12 @@ pub fn handle_run_event(app: &AppHandle, event: RunEvent) {
             let _ = win.set_focus();
         }
     }
+    // ADR-0031 D7 (b2): the app's ssh children die with it.
+    if let RunEvent::Exit = event {
+        if let Some(state) = app.try_state::<crate::state::DesktopState>() {
+            state.ssh_tunnels.stop_all();
+        }
+    }
     #[cfg(not(target_os = "macos"))]
     let _ = (app, event);
 }

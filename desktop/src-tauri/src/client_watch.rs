@@ -101,8 +101,13 @@ fn activate(
 ) {
     if conn.kind != ConnectionKind::Relay {
         proxy.set_relay(None);
-        let daemon_url: Url = conn
-            .base_url
+        // An ssh connection is watched through its tunnel's local end; with
+        // no tunnel yet there is nothing to watch (it is restarted when the
+        // tunnel comes up).
+        let Some(base_url) = proxy.upstream_base(conn) else {
+            return (None, None);
+        };
+        let daemon_url: Url = base_url
             .parse()
             .expect("smind desktop: saved connection URL is well-formed");
         let client_task = spawn(app, tray, cache, proxy_url, Config { daemon_url });

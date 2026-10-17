@@ -227,7 +227,9 @@ pub fn run() {
                 use tauri_plugin_deep_link::DeepLinkExt;
 
                 fn current_cfg(proxy: &ProxyState) -> Config {
-                    let base_url = proxy.registry.lock().unwrap().current().base_url.clone();
+                    let current = proxy.registry.lock().unwrap().current().clone();
+                    // An ssh connection is reached through its tunnel's local end.
+                    let base_url = proxy.upstream_base(&current).unwrap_or(current.base_url);
                     Config {
                         daemon_url: base_url
                             .parse()
@@ -311,11 +313,26 @@ pub fn run() {
                 app_settings: Mutex::new(app_settings),
                 app_settings_path,
                 proxy_url,
+                ssh_tunnels: ssh_tunnel::SshTunnels::default(),
                 cache,
                 tray,
                 client_task: Mutex::new(client_task),
                 relay_task: Mutex::new(relay_task),
             });
+
+            // ADR-0031 D7 (b2): a saved ssh connection that is selected gets
+            // its tunnel brought up best-effort (the proxy's 502 explains a
+            // failure; selecting it again retries), then the watcher follows.
+            if initial_conn.kind == dclient::proxy::ConnectionKind::Ssh {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = handle.state::<DesktopState>();
+                    match ssh_tunnel::ensure_tunnel(&state.proxy, &state.ssh_tunnels, &initial_conn).await {
+                        Ok(()) => client_watch::restart(&handle, &state, &initial_conn),
+                        Err(e) => log::warn!("ssh tunnel for {:?} did not start: {e}", initial_conn.label),
+                    }
+                });
+            }
 
             // desktop-macos-app M2.3/M2.4: install + start the bundled
             // daemon when none is reachable, or update an older managed
