@@ -21,6 +21,11 @@ import (
 
 func newTestServer(t *testing.T, token string, opts ...Option) *Server {
 	t.Helper()
+	return newTestServerCfg(t, token, config.Default(), opts...)
+}
+
+func newTestServerCfg(t *testing.T, token string, cfg config.Config, opts ...Option) *Server {
+	t.Helper()
 	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
 	if err != nil {
 		t.Fatalf("store.Open() error = %v", err)
@@ -37,7 +42,7 @@ func newTestServer(t *testing.T, token string, opts ...Option) *Server {
 	router := routing.New(s, reg, poller)
 	wm := workspace.New(s)
 	runner := taskrunner.New(wm)
-	srv, err := New(config.Default(), reg, router, wm, runner, s, token, opts...)
+	srv, err := New(cfg, reg, router, wm, runner, s, token, opts...)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -68,7 +73,7 @@ func TestHandlerAuth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req := loopbackReq(tt.method, tt.path, nil)
 			if tt.authHeader != "" {
 				req.Header.Set("Authorization", tt.authHeader)
 			}
@@ -89,7 +94,7 @@ func TestHandlerAuth_CorrectTokenReachesProxy(t *testing.T) {
 	const token = "test-token"
 	handler := newTestServer(t, token).Handler()
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	req := loopbackReq(http.MethodPost, "/v1/messages", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -103,7 +108,7 @@ func TestHandlerAuth_WebUIUnauthenticated(t *testing.T) {
 	const token = "test-token"
 	handler := newTestServer(t, token).Handler()
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := loopbackReq(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -119,7 +124,7 @@ func TestHandleToken_Unauthenticated(t *testing.T) {
 	const token = "the-real-token"
 	handler := newTestServer(t, token).Handler()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/token", nil)
+	req := loopbackReq(http.MethodGet, "/api/token", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

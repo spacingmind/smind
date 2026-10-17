@@ -176,11 +176,13 @@ export class WsClient implements WsClientLike {
   /**
    * Connects to `url` (expected to be a `ws(s)://.../ws?token=...` URL --
    * see `daemonWsUrl`) and resolves once the connection is open and usable,
-   * mirroring wsclient.go's Dial.
+   * mirroring wsclient.go's Dial. `protocols` carries a password-login
+   * session token (see `sessionWsProtocols`); the daemon-token loopback path
+   * passes none.
    */
-  static connect(url: string): Promise<WsClient> {
+  static connect(url: string, protocols?: string[]): Promise<WsClient> {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(url);
+      const ws = protocols ? new WebSocket(url, protocols) : new WebSocket(url);
       const onOpen = () => {
         ws.removeEventListener("error", onError);
         resolve(new WsClient(ws));
@@ -463,4 +465,19 @@ function decodeTerminal<TResult>(env: WireEnvelope): TResult {
 export function daemonWsUrl(token: string, loc: Pick<Location, "protocol" | "host"> = window.location): string {
   const scheme = loc.protocol === "https:" ? "wss:" : "ws:";
   return `${scheme}//${loc.host}/ws?token=${encodeURIComponent(token)}`;
+}
+
+/** Same-origin `ws(s)://.../ws` URL with no credential in it -- for session-token connections, which authenticate via subprotocol. */
+export function daemonWsBaseUrl(loc: Pick<Location, "protocol" | "host"> = window.location): string {
+  const scheme = loc.protocol === "https:" ? "wss:" : "ws:";
+  return `${scheme}//${loc.host}/ws`;
+}
+
+/**
+ * Subprotocols for a password-login session: the server selects "smind" and
+ * reads the token from the "smind.bearer.<token>" entry, so the token never
+ * appears in a URL (which proxies and access logs record).
+ */
+export function sessionWsProtocols(sessionToken: string): string[] {
+  return ["smind", `smind.bearer.${sessionToken}`];
 }

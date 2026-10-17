@@ -5,6 +5,7 @@ import { registerSettingsSection } from "@/components/settings/settings-registry
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AddRelayLink } from "@/components/settings/add-relay-link";
+import { RelayConnectionStatus, useRelayStatus } from "@/components/settings/relay-connection-status";
 import { desktop, isDesktop, isRelayPairingLink, type Connection } from "@/lib/platform";
 import { Icons } from "@/lib/icons";
 
@@ -36,6 +37,9 @@ function ConnectionsSection() {
   // (never saved as a URL); `key` remounts that flow for each handed-over link.
   const [handedOver, setHandedOver] = useState<{ key: number; link: string } | null>(null);
   const [showHandoverNotice, setShowHandoverNotice] = useState(false);
+  // The live state of the current connection when it is a relay one: pending
+  // approval and revoked devices need to be told what to do about it.
+  const relayStatus = useRelayStatus(current?.kind === "relay");
 
   const refresh = useCallback(() => {
     Promise.all([desktop.listConnections(), desktop.getCurrentConnection()])
@@ -113,6 +117,7 @@ function ConnectionsSection() {
                   )}
                 </span>
                 <span className="truncate font-mono text-ui-sm text-muted-foreground">{c.baseUrl}</span>
+                {current?.id === c.id && c.kind === "relay" && relayStatus && <RelayConnectionStatus status={relayStatus} />}
               </div>
               <div className="flex shrink-0 gap-1">
                 {current?.id !== c.id && (

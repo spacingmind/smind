@@ -75,6 +75,8 @@ import { isMovableKind, useTaskTabs, type PaneId, type SplitDirection, type TabP
 import { useSettledSidebarOpen } from "@/hooks/use-settled-sidebar-open";
 import { useSidebarResize } from "@/hooks/use-sidebar-resize";
 import { SIDEBAR_ICON_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
+import { LoginScreen } from "@/components/login-screen";
+import { LoginRequiredError, type LoginReason } from "@/lib/auth";
 import { connectDaemon } from "@/lib/daemon";
 import { desktop, desktopOS, isDesktop } from "@/lib/platform";
 import { hasTrafficLights } from "@/lib/window-chrome";
@@ -147,10 +149,29 @@ export function App({
   // it in main.tsx: `useActionHandler` is how every surface inside claims
   // an action, so the provider has to be an *ancestor* of all of them --
   // including AppShell itself, which claims the shell-level actions.
+  //
+  // Password gate: when the daemon wants a password (a browser on another
+  // machine; loopback never gets here) AppShell reports it and this swaps
+  // the whole shell for the login form. Unmounting the shell closes its
+  // client and reconnect loop; after sign-in a bumped `attempt` key mounts a
+  // fresh shell, which runs the normal initial connect with the new session.
+  const [loginReason, setLoginReason] = useState<LoginReason | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  if (loginReason !== null) {
+    return (
+      <LoginScreen
+        reason={loginReason}
+        onLoggedIn={() => {
+          setLoginReason(null);
+          setAttempt((n) => n + 1);
+        }}
+      />
+    );
+  }
   return (
     <KeyboardProvider>
       <PaletteProvider>
-        <AppShell connect={connect} />
+        <AppShell key={attempt} connect={connect} onLoginRequired={setLoginReason} />
       </PaletteProvider>
     </KeyboardProvider>
   );
@@ -171,7 +192,14 @@ const SETTINGS_SAFE_ACTIONS: readonly ActionId[] = [
   "app.quit",
 ];
 
-function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
+function AppShell({
+  connect,
+  onLoginRequired,
+}: {
+  connect: () => Promise<WsClient>;
+  /** The daemon needs a password: the app swaps this shell for the login form. */
+  onLoginRequired: (reason: LoginReason) => void;
+}) {
   // Item 21: below the 768px breakpoint (Tailwind's own `md`, and the
   // number `hooks/use-mobile.ts` already used for the shadcn Sidebar's
   // built-in mobile Sheet), the sidebar-vs-content split and the side
@@ -321,6 +349,9 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         reconnectHandle = watchForReconnect(c, {
           connect,
           onStatusChange: setConnectionStatus,
+          onLoginRequired: (reason) => {
+            if (!cancelled) onLoginRequired(reason);
+          },
           onClient: (newClient) => {
             if (cancelled) {
               newClient.close();
@@ -335,17 +366,20 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         });
       })
       .catch((err: unknown) => {
-        if (!cancelled) {
-          setConnectionStatus("disconnected");
-          setConnectError(err instanceof Error ? err.message : String(err));
+        if (cancelled) return;
+        if (err instanceof LoginRequiredError) {
+          onLoginRequired(err.reason);
+          return;
         }
+        setConnectionStatus("disconnected");
+        setConnectError(err instanceof Error ? err.message : String(err));
       });
 
     return () => {
       cancelled = true;
       reconnectHandle?.close();
     };
-  }, [connect]);
+  }, [connect, onLoginRequired]);
 
   // The task header's lineage jump (PR-U2): fetch the target task fresh
   // (the sidebar's tree may not hold an archived-then-reshown task) and

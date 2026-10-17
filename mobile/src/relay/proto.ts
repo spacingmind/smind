@@ -2,11 +2,13 @@
 // client needs (internal/relay/relaypb/relay.proto), field-for-field.
 //
 // There's no protoc-generated JS/TS client here on purpose: the message
-// set this milestone's mobile client needs (AdmitChallenge, Admit, Frame)
-// is small and fixed, and hand-rolling it avoids adding a protoc/codegen
-// toolchain to mobile/'s build for five flat messages -- see this
-// project's grpc-web Go test (internal/relay/server/grpcweb_test.go) for
-// the identical reasoning on the Go test side.
+// set the mobile client needs (AdmitChallenge, Admit, Frame) is small and
+// fixed -- a device never opens the control stream, so none of the
+// ControlFrame messages are needed -- and hand-rolling it avoids adding a
+// protoc/codegen toolchain to mobile/'s build for a handful of flat
+// messages -- see this project's grpc-web Go test
+// (internal/relay/server/grpcweb_test.go) for the identical reasoning on
+// the Go test side.
 
 import { ByteWriter, decodeFields, getBytes, getString, getVarint } from './varint';
 
@@ -79,8 +81,15 @@ export interface Frame {
   sessionId: Uint8Array;
   deviceId: string;
   direction: number;
+  /**
+   * The E2EE per-direction counter; on a keepalive frame, the connection's
+   * probe nonce, which the relay echoes back (see keepalive.ts). A JS number
+   * is exact below 2^53, so nonces generated here stay under that.
+   */
   sequence: number;
   payload: Uint8Array;
+  /** Application-level liveness probe/echo (ADR-0031 D9, flow 8); never carries a payload. */
+  keepalive: boolean;
 }
 
 export function encodeFrame(m: Frame): Uint8Array {
@@ -91,6 +100,7 @@ export function encodeFrame(m: Frame): Uint8Array {
   w.writeVarintField(4, m.direction);
   w.writeVarintField(5, m.sequence);
   w.writeBytesField(6, m.payload);
+  w.writeVarintField(7, m.keepalive ? 1 : 0);
   return w.finish();
 }
 
@@ -103,5 +113,6 @@ export function decodeFrame(buf: Uint8Array): Frame {
     direction: getVarint(f, 4),
     sequence: getVarint(f, 5),
     payload: getBytes(f, 6),
+    keepalive: getVarint(f, 7) !== 0,
   };
 }

@@ -8,16 +8,18 @@
 // Modes (see package.json's smoke:web / smoke:web:full):
 //   default  Item 1: static build, assert PairingScreen renders (title,
 //            input, Connect), no console/page errors, screenshot light+dark.
-//   --full   Item 2: also start the Go relay harness (built and spawned the
-//            same way as mobile/src/relay/__tests__/integration.node.test.ts;
-//            its READY line carries the pairing URL), paste the URL into
-//            the pairing input, press Connect, and screenshot the task list
-//            screen in both schemes. The harness's relay uses a self-signed
-//            cert, hence ignoreHTTPSErrors on the browser context. Only ONE
-//            admit/handshake runs against the harness -- the light/dark
-//            screenshots come from one live connection via
-//            page.emulateMedia, not two separate connects (see
-//            pairAndAssertTasks's doc comment for why a second one breaks).
+//   --full   Items 2 + ADR-0031 P13b: also start the Go device harness
+//            (internal/relay/bridge/devharness: a real relay and a real
+//            multi-device daemon hub; built and spawned the same way as
+//            mobile/src/relay/__tests__/devHarness.ts; its READY line carries
+//            the pairing URL and its stdin takes approve/revoke commands),
+//            paste the URL into the pairing input, press Connect and walk the
+//            device through its states, screenshotting each in both schemes
+//            via page.emulateMedia: "Waiting for approval" (the daemon has
+//            not approved this device), the task list (approved), and "This
+//            device was revoked". The harness's relay uses a self-signed
+//            cert, hence ignoreHTTPSErrors on the browser context. The web
+//            target has no secure store, so each page load is a new device.
 //
 // The build is deterministic (`npx expo export --platform web` + a tiny
 // static file server), not the Metro dev server, so the run does not
@@ -74,48 +76,68 @@ async function startStaticServer() {
   return server;
 }
 
-async function startHarness() {
-  // Same build/spawn + "READY <url>" handshake as integration.node.test.ts,
-  // minus its NODE_TLS_REJECT_UNAUTHORIZED override: the browser context
-  // uses ignoreHTTPSErrors for the harness's self-signed cert instead.
+async function startHarness(extraArgs = []) {
+  // Same build/spawn + "READY <url>" handshake as devHarness.ts, minus the
+  // NODE_TLS_REJECT_UNAUTHORIZED override: the browser context uses
+  // ignoreHTTPSErrors for the harness's self-signed cert instead. stdin takes
+  // one command per line (approve/revoke/list...), each answered by one JSON
+  // line on stdout.
   const tmpDir = mkdtempSync(join(tmpdir(), 'smind-smoke-harness-'));
-  const binary = join(tmpDir, 'relayharness');
-  execFileSync('go', ['build', '-o', binary, './internal/relay/bridge/harness'], {
+  const binary = join(tmpDir, 'devharness');
+  execFileSync('go', ['build', '-o', binary, './internal/relay/bridge/devharness'], {
     cwd: REPO_ROOT,
     stdio: 'inherit',
   });
-  const proc = spawn(binary, [], { stdio: ['ignore', 'pipe', 'pipe'] });
-  const pairingUrl = await new Promise((resolveUrl, reject) => {
-    let stdout = '';
-    const onData = (chunk) => {
-      stdout += chunk.toString('utf8');
-      const match = stdout.match(/^READY (\S+)$/m);
-      if (match) {
-        proc.stdout.off('data', onData);
-        resolveUrl(match[1]);
-      }
-    };
-    proc.stdout.on('data', onData);
-    proc.stderr.on('data', (c) => process.stderr.write(`[harness] ${c}`));
-    proc.on('error', reject);
-    proc.on('exit', (code) => reject(new Error(`harness exited early with code ${code}`)));
-    setTimeout(() => reject(new Error('harness did not print READY in time')), 15_000);
+  const proc = spawn(binary, extraArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
+  proc.stderr.on('data', (c) => process.stderr.write(`[harness] ${c}`));
+  const lines = [];
+  const waiters = [];
+  let buf = '';
+  proc.stdout.on('data', (chunk) => {
+    buf += chunk.toString('utf8');
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i);
+      buf = buf.slice(i + 1);
+      const w = waiters.shift();
+      if (w) w(line);
+      else lines.push(line);
+    }
   });
+  const nextLine = (ms) =>
+    new Promise((resolveLine, reject) => {
+      const queued = lines.shift();
+      if (queued !== undefined) return resolveLine(queued);
+      const timer = setTimeout(() => reject(new Error('harness: no output in time')), ms);
+      waiters.push((l) => {
+        clearTimeout(timer);
+        resolveLine(l);
+      });
+    });
+  const exited = new Promise((_, reject) => proc.on('exit', (code) => reject(new Error(`harness exited early with code ${code}`))));
+  let pairingUrl = '';
+  for (;;) {
+    const line = await Promise.race([nextLine(20_000), exited]);
+    if (line.startsWith('READY ')) {
+      pairingUrl = line.slice('READY '.length).trim();
+      break;
+    }
+  }
+  const cmd = async (line) => {
+    proc.stdin.write(line + '\n');
+    for (;;) {
+      const raw = await nextLine(30_000);
+      if (raw.startsWith('{')) return JSON.parse(raw);
+    }
+  };
   return {
     pairingUrl,
+    cmd,
     cleanup: () => {
-      // SIGKILL, not the default SIGTERM: internal/relay/server.Run installs
-      // its own signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM) for
-      // *its own* derived context, which process-wide disables the Go
-      // runtime's default terminate-on-SIGTERM behavior -- but that context
-      // is local to Run() (shadows its parameter) and is never wired to the
-      // ctx harness/main.go's bridge.Run shares, and main() itself blocks on
-      // a bare `select {}` that no cancellation reaches either. Net effect:
-      // once Run() has started, plain SIGTERM cancels the relay's own
-      // listeners (so its bridge starts an endless reconnect-retry loop
-      // against a now-closed port) while the process itself never exits.
-      // Confirmed by hand: `proc.kill()` here left a relayharness process
-      // alive and logging reconnect attempts for 8+ minutes.
+      // SIGKILL, not the default SIGTERM: server.Run installs its own
+      // signal handler, which disables the Go runtime's default terminate-on-
+      // SIGTERM behaviour, so a plain kill can leave the harness process
+      // alive (confirmed by hand with the first harness).
       proc.kill('SIGKILL');
       rmSync(tmpDir, { recursive: true, force: true });
     },
@@ -166,39 +188,32 @@ async function assertPairingScreen(page, url) {
   }
 }
 
+/** Screenshots the current state in both color schemes (one live connection; page.emulateMedia flips the theme). */
+async function shootBothSchemes(page, name) {
+  for (const scheme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.waitForTimeout(200); // theme re-render after the media-query flip
+    await page.screenshot({ path: join(SMOKE_DIR, `${name}-${scheme}.png`), fullPage: true });
+    console.log(`wrote ${name}-${scheme}.png`);
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
+}
+
 /**
- * Runs Item 2's full pairing flow once (one admit + one E2EE handshake),
- * then screenshots both color schemes via page.emulateMedia -- NOT two
- * separate connections. RelayConnection.ts's DEFAULT_SESSION_ID/
- * DEFAULT_DEVICE_ID are fixed constants (Milestone 1's single-device
- * assumption), so a second independent connect() against the same harness
- * collides with the first: the daemon-side bridge (internal/relay/bridge/
- * bridge.go) treats it as a *resume* of the still-known session rather
- * than a new one, and the resume/fresh-handshake fallback races the new
- * client's hello, failing with "e2ee: protocol violation: expected hello,
- * got frame type 0x02". Confirmed by hand: two sequential contexts each
- * doing their own connect() reliably broke the second one. One connection,
- * two emulated color schemes, matches how the real app would toggle dark
- * mode anyway (ThemeProvider's useColorScheme reacts to the same
- * prefers-color-scheme media query).
+ * Waits for the task list after the device was approved. TasksScreen's
+ * post-connect states: 'ready' always renders a Disconnect button; 'error'
+ * renders "Couldn't load the workspace". When ready, the harness daemon
+ * tracks no workspaces, so the empty state -- "No workspaces yet" -- must
+ * render.
  */
-async function pairAndAssertTasks(page, pairingUrl) {
-  await page.fill('textarea, input[type="text"]', pairingUrl);
-  await page.getByRole('button', { name: 'Connect' }).click();
-  // TasksScreen's post-connect states: 'ready' always renders a Disconnect
-  // button; 'error' renders "Couldn't load the workspace". When ready, the
-  // harness daemon tracks no workspaces (its EnrollWorkspace only creates a
-  // relay-level admission secret, not a store row), so the task list is
-  // empty and FlatList's ListEmptyComponent -- "No workspaces yet" --
-  // must actually render (it couldn't before the empty-state fix: the
-  // ungrouped section made the data array never empty).
+async function assertTasks(page) {
   const ready = page.getByRole('button', { name: 'Disconnect' });
   const errored = page.getByText("Couldn't load the workspace");
   const loaded = ready.or(errored).first();
   try {
-    await loaded.waitFor({ timeout: 20_000 });
+    await loaded.waitFor({ timeout: 30_000 });
   } catch {
-    fail('tasks screen did not render');
+    fail('tasks screen did not render after approval');
     return false;
   }
   if (await errored.isVisible().catch(() => false)) {
@@ -206,14 +221,70 @@ async function pairAndAssertTasks(page, pairingUrl) {
     fail(`tasks screen rendered the error state: ${bodyText}`);
     return false;
   }
-  // The harness has no tasks, so the ready state must show the empty state.
-  const emptyState = page.getByText('No workspaces yet', { exact: true });
   try {
-    await emptyState.waitFor({ timeout: 5_000 });
+    await page.getByText('No workspaces yet', { exact: true }).waitFor({ timeout: 5_000 });
   } catch {
-    fail('tasks screen empty state (\"No workspaces yet\") not shown for the task-less harness workspace');
+    fail('tasks screen empty state ("No workspaces yet") not shown for the task-less harness workspace');
   }
   return true;
+}
+
+/**
+ * A daemon from before device_hello v2 (the harness's -outdated-daemon): it
+ * completes the E2EE handshake and never sends the device challenge, so the app
+ * must say the daemon is outdated (after the 5 s challenge window) rather than
+ * connect or retry.
+ */
+async function outdatedDaemon(page, harness) {
+  await page.fill('textarea, input[type="text"]', harness.pairingUrl);
+  await page.getByRole('button', { name: 'Connect' }).click();
+  try {
+    await page.getByText('Daemon outdated or on a different version', { exact: true }).waitFor({ timeout: 40_000 });
+  } catch {
+    fail('"Daemon outdated or on a different version" did not appear for a daemon that sends no device challenge');
+    return;
+  }
+  if (!(await page.getByText('smind update', { exact: true }).isVisible().catch(() => false))) fail('outdated card does not show `smind update`');
+  await shootBothSchemes(page, 'outdated');
+}
+
+/**
+ * ADR-0031 P13b's device lifecycle in the browser, against the real relay and
+ * daemon hub: Connect -> "Waiting for approval" (with the approve command
+ * naming this device) -> `approve` on the daemon -> the task list appears by
+ * itself -> `revoke` on the daemon -> "This device was revoked".
+ */
+async function deviceLifecycle(page, harness) {
+  await page.fill('textarea, input[type="text"]', harness.pairingUrl);
+  await page.getByRole('button', { name: 'Connect' }).click();
+
+  try {
+    await page.getByText('Waiting for approval', { exact: true }).waitFor({ timeout: 30_000 });
+  } catch {
+    fail('"Waiting for approval" did not appear for an unapproved device');
+    return;
+  }
+  const command = await page.locator('text=/smind relay devices approve [a-z2-7]{26}/').first().innerText().catch(() => '');
+  const deviceId = command.match(/approve ([a-z2-7]{26})/)?.[1];
+  if (!deviceId) {
+    fail(`pending card does not show the approve command for this device (saw: ${JSON.stringify(command)})`);
+    return;
+  }
+  const listed = (await harness.cmd('list')).devices?.find((d) => d.id === deviceId);
+  if (!listed || listed.state !== 'pending') fail(`daemon does not list the shown device id as pending: ${JSON.stringify(listed)}`);
+  await shootBothSchemes(page, 'pending');
+
+  await harness.cmd(`approve ${deviceId}`);
+  if (await assertTasks(page)) await shootBothSchemes(page, 'tasks');
+
+  await harness.cmd(`revoke ${deviceId}`);
+  try {
+    await page.getByText('This device was revoked', { exact: true }).waitFor({ timeout: 30_000 });
+  } catch {
+    fail('"This device was revoked" did not appear after the daemon revoked the device');
+    return;
+  }
+  await shootBothSchemes(page, 'revoked');
 }
 
 async function run() {
@@ -225,6 +296,7 @@ async function run() {
   const browser = await chromium.launch();
 
   let harness = null;
+  let outdated = null;
   try {
     for (const scheme of ['light', 'dark']) {
       const context = await browser.newContext({ colorScheme: scheme, ignoreHTTPSErrors: true });
@@ -237,30 +309,29 @@ async function run() {
     }
 
     if (FULL) {
-      // One connection for both screenshots -- see pairAndAssertTasks's
-      // doc comment for why a second connect() against the same harness
-      // isn't safe.
       harness = await startHarness();
       const context = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
       const page = await context.newPage();
       trackErrors(page, 'full');
       await page.goto(url, { waitUntil: 'load' });
       await page.getByText('smind pairing', { exact: true }).waitFor({ timeout: 20_000 });
-      if (await pairAndAssertTasks(page, harness.pairingUrl)) {
-        await page.screenshot({ path: join(SMOKE_DIR, 'tasks-light.png'), fullPage: true });
-        console.log('wrote tasks-light.png');
-
-        await page.emulateMedia({ colorScheme: 'dark' });
-        await page.waitForTimeout(200); // theme re-render after the media-query flip
-        await page.screenshot({ path: join(SMOKE_DIR, 'tasks-dark.png'), fullPage: true });
-        console.log('wrote tasks-dark.png');
-      }
+      await deviceLifecycle(page, harness);
       await context.close();
+
+      outdated = await startHarness(['-outdated-daemon']);
+      const oldContext = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+      const oldPage = await oldContext.newPage();
+      trackErrors(oldPage, 'outdated');
+      await oldPage.goto(url, { waitUntil: 'load' });
+      await oldPage.getByText('smind pairing', { exact: true }).waitFor({ timeout: 20_000 });
+      await outdatedDaemon(oldPage, outdated);
+      await oldContext.close();
     }
   } finally {
     await browser.close();
     server.close();
     harness?.cleanup();
+    outdated?.cleanup();
   }
 
   if (pageErrors.length > 0) fail(`page/console errors during run:\n  ${pageErrors.join('\n  ')}`);

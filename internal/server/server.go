@@ -32,6 +32,7 @@ type Server struct {
 	runs      *runs.Registry
 	terminals *terminal.Registry
 	token     string
+	direct    *directAuth
 	managedBy string
 
 	shutdownCh   chan struct{}
@@ -69,12 +70,16 @@ func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *
 	for _, opt := range opts {
 		opt(&o)
 	}
+	direct, err := newDirectAuth(cfg.Server, token)
+	if err != nil {
+		return nil, err
+	}
 	api, err := wsapi.New(wm, reg, runner, db, token)
 	if err != nil {
 		return nil, fmt.Errorf("server: new: %w", err)
 	}
 	api.SetManagedBy(o.managedBy)
-	return &Server{
+	s := &Server{
 		cfg:       cfg,
 		proxy:     newProxy(reg, router, db, withObserver(o.observer)),
 		ws:        api.Handler,
@@ -82,10 +87,13 @@ func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *
 		runs:      api.Runs,
 		terminals: api.Terminals,
 		token:     token,
+		direct:    direct,
 		managedBy: o.managedBy,
 
 		shutdownCh: make(chan struct{}),
-	}, nil
+	}
+	api.SetAuthorizer(s.authorizeWS)
+	return s, nil
 }
 
 // API returns the underlying wsapi.API, for a caller that needs to bridge a
@@ -133,28 +141,39 @@ func (s *Server) Close() {
 // POST /api/shutdown is token-gated exactly like the proxy routes
 // (ADR-0029 D2): shutting the daemon down is as destructive as anything
 // the token already authorizes.
-// GET /api/token is unauthenticated for the same reason /ws's own check
-// isn't an Authorization header: see handleToken's doc comment.
+// GET /api/token is served only to a true loopback caller (handleToken) and
+// POST /api/login trades the password for an expiring session token that /ws
+// accepts (ADR-0031 D8); both, like every other route, sit behind the Host
+// allowlist (directAuth.guard).
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /api/token", s.handleToken)
+	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.Handle("POST /v1/messages", auth.RequireToken(s.token, http.HandlerFunc(s.proxy.handleAnthropic)))
 	mux.Handle("POST /v1/messages/count_tokens", auth.RequireToken(s.token, http.HandlerFunc(s.proxy.handleAnthropicCountTokens)))
 	mux.Handle("POST /v1/chat/completions", auth.RequireToken(s.token, http.HandlerFunc(s.proxy.handleOpenAI)))
 	mux.Handle("POST /api/shutdown", auth.RequireToken(s.token, http.HandlerFunc(s.handleShutdown)))
 	mux.Handle("GET /ws", s.ws)
 	mux.Handle("/", webUI())
-	return mux
+	return s.direct.guard(mux)
 }
 
-// Addr returns the listen address.
+// Addr returns the configured listen address (127.0.0.1:4648 by default).
 func (s *Server) Addr() string {
-	port := s.cfg.Server.Port
-	if port == 0 {
-		port = 4648
+	host, port, err := s.cfg.Server.ListenHostPort()
+	if err != nil { // newDirectAuth rejected it already; keep Addr total
+		return net.JoinHostPort("127.0.0.1", strconv.Itoa(config.DefaultPort))
 	}
-	return net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
+
+// Binds is every listener the daemon opens (see config.ServerConfig.Binds):
+// the configured address plus, when needed, 127.0.0.1 so local clients always
+// reach the daemon.
+func (s *Server) Binds() []config.Bind {
+	b, _ := s.cfg.Server.Binds() // validated by newDirectAuth
+	return b
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -162,31 +181,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status":  "ok",
 		"service": "smind",
 		"version": version.Version,
+		// Whether remote clients must log in (a password is configured).
+		// Loopback clients never need to.
+		"authRequired": s.direct.hash != "",
 	}
 	if s.managedBy != "" {
 		body["managedBy"] = s.managedBy
 	}
 	writeJSON(w, http.StatusOK, body)
-}
-
-// handleToken serves the daemon's real current auth token as JSON, so the
-// web UI's own page JS can open /ws?token=... on load without the user
-// pasting anything in manually.
-//
-// This carries no auth check of its own, deliberately: the token already
-// has to be readable by page JS one way or another, since a browser
-// WebSocket client can't set an Authorization header on the /ws upgrade
-// (see wsapi.Handler's doc comment) -- /ws itself already checks the token
-// as a plain, unauthenticated-to-reach query parameter for exactly that
-// reason. Serving it via a same-origin GET doesn't introduce a new trust
-// boundary beyond what already exists: anyone who can reach this HTTP
-// server at all can already hit /ws (or any other token-gated endpoint) by
-// reading the token some other way. This is scoped to smind's current
-// single-user-localhost posture; revisit if remote access is ever added.
-func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"token": s.token,
-	})
 }
 
 // handleShutdown serves POST /api/shutdown (ADR-0029 D2): 202 Accepted,
