@@ -33,6 +33,9 @@ export function describeState(state: ConnectionState): StatusView | null {
         detail: 'The daemon no longer accepts this device. Reset its identity to ask for approval again as a new device.',
       };
     case 'failed':
+      if (state.versionMismatch) {
+        return { tone: 'danger', title: 'Daemon outdated or on a different version', detail: state.message, command: 'smind update' };
+      }
       return { tone: 'danger', title: 'Couldn’t connect', detail: state.message };
     case 'reconnecting':
       return { tone: 'info', title: 'Reconnecting…', detail: state.reason };

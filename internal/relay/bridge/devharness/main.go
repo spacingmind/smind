@@ -55,8 +55,9 @@ const (
 
 func main() {
 	windowMax := flag.Int("window-max", 0, "open a 10 minute pairing window for this many new devices at start (0 = closed)")
+	outdated := flag.Bool("outdated-daemon", false, "run a daemon from before device_hello v2 instead of the hub: it completes the E2EE handshake on every device route and then says nothing (no device challenge)")
 	flag.Parse()
-	if err := run(*windowMax); err != nil {
+	if err := run(*windowMax, *outdated); err != nil {
 		fmt.Fprintln(os.Stderr, "devharness:", err)
 		os.Exit(1)
 	}
@@ -150,7 +151,7 @@ type harness struct {
 	peerKeys  map[string]ed25519.PrivateKey
 }
 
-func run(windowMax int) error {
+func run(windowMax int, outdated bool) error {
 	relayDir, err := os.MkdirTemp("", "smind-devharness-relay-")
 	if err != nil {
 		return err
@@ -217,11 +218,17 @@ func run(windowMax int) error {
 		SecretHex:    hex.EncodeToString(secret),
 		Fingerprint:  h.fp,
 	}
-	h.startHub()
-	defer h.stopHub()
-	defer h.closePeers()
+	if outdated {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go outdatedDaemon(ctx, h)
+	} else {
+		h.startHub()
+		defer h.stopHub()
+		defer h.closePeers()
+	}
 
-	if windowMax > 0 {
+	if windowMax > 0 && !outdated {
 		if err := h.hub.OpenPairingWindow(10*time.Minute, windowMax); err != nil {
 			return err
 		}
@@ -242,7 +249,79 @@ func run(windowMax int) error {
 	fmt.Println("READY " + url)
 	fmt.Println("NATIVE " + h.relay.nativeAddr)
 
+	if outdated {
+		// No hub: only quit works; the commands that need it answer an error.
+		h.hub = bridge.NewHub(bridge.Options{Registry: h.reg})
+	}
 	return h.loop(os.Stdin, os.Stdout)
+}
+
+// outdatedDaemon stands in for a daemon from before device_hello v2 (ADR-0031
+// D9): it learns of device routes from the relay's control stream, opens the
+// daemon side of each, completes the E2EE handshake as the responder — and then
+// says nothing, as such a daemon does until it receives a hello. A v2 client
+// must give up on it (no challenge), never sending a hello of its own.
+func outdatedDaemon(ctx context.Context, h *harness) {
+	conn, err := client.Dial(h.relay.nativeAddr, h.fp)
+	if err != nil {
+		logf("outdated daemon: dial: %v", err)
+		return
+	}
+	defer conn.Close()
+	rc := relaypb.NewRelayClient(conn)
+	adm, err := client.Admit(ctx, rc, harnessHostID, bridge.DaemonKeyID(h.daemonKP), h.secret)
+	if err != nil {
+		logf("outdated daemon: admit: %v", err)
+		return
+	}
+	ctl, err := client.OpenControl(ctx, rc, adm, harnessHostID)
+	if err != nil {
+		logf("outdated daemon: control: %v", err)
+		return
+	}
+	var mu sync.Mutex
+	seen := map[string]bool{}
+	serve := func(device string, session []byte) {
+		key := device + "|" + string(session)
+		mu.Lock()
+		dup := seen[key]
+		seen[key] = true
+		mu.Unlock()
+		if dup {
+			return
+		}
+		go func() {
+			dc, err := client.OpenData(ctx, rc, adm, harnessHostID, string(session), device, h.daemonKP, e2ee.RoleDaemon)
+			if err != nil {
+				return
+			}
+			hctx, hcancel := context.WithTimeout(ctx, stopTimeout)
+			defer hcancel()
+			if dc.Handshake(hctx) != nil {
+				return
+			}
+			logf("outdated daemon: handshake done on a device route; staying silent")
+			for { // read and ignore whatever the client sends
+				if _, err := dc.Receive(); err != nil {
+					return
+				}
+			}
+		}()
+	}
+	for {
+		cf, err := ctl.Recv()
+		if err != nil {
+			return
+		}
+		switch b := cf.GetBody().(type) {
+		case *relaypb.ControlFrame_Sync_:
+			for _, d := range b.Sync.GetDevices() {
+				serve(d.GetDeviceId(), d.GetSessionId())
+			}
+		case *relaypb.ControlFrame_DeviceAttach_:
+			serve(b.DeviceAttach.GetDeviceId(), b.DeviceAttach.GetSessionId())
+		}
+	}
 }
 
 func (h *harness) startHub() {
@@ -439,6 +518,10 @@ type peer struct {
 	ended   chan struct{}
 	endErr  error
 	once    sync.Once
+
+	// challenge delivers the daemon's device_hello v2 challenge, the first
+	// message of a device route (ADR-0031 D9).
+	challenge chan []byte
 }
 
 func (p *peer) close() {
@@ -468,7 +551,7 @@ func (h *harness) peerAdd(label string) (map[string]any, error) {
 	deviceID := devices.DeviceID(pub)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	p := &peer{label: label, priv: priv, cancel: cancel, waiters: map[string]chan rpcResp{}, ended: make(chan struct{})}
+	p := &peer{label: label, priv: priv, cancel: cancel, waiters: map[string]chan rpcResp{}, ended: make(chan struct{}), challenge: make(chan []byte, 1)}
 	fail := func(err error) (map[string]any, error) {
 		p.close()
 		return nil, err
@@ -509,7 +592,14 @@ func (h *harness) peerAdd(label string) (map[string]any, error) {
 	go p.pump()
 	h.peers[label] = p
 
-	hello := devices.SignHello(priv, label, h.daemonKP.Public(), eph.Public())
+	// The daemon speaks first on a device route: sign ITS challenge, for THIS session.
+	var challenge []byte
+	select {
+	case challenge = <-p.challenge:
+	case <-time.After(callTimeout):
+		return fail(errors.New("no device challenge from the daemon"))
+	}
+	hello := devices.SignHello(priv, label, h.daemonKP.Public(), eph.Public(), []byte(session), challenge)
 	r, err := p.request(devices.HelloMethod, hello, callTimeout)
 	if err != nil {
 		return fail(err)
@@ -536,6 +626,15 @@ func (p *peer) pump() {
 			p.endErr = err
 			p.mu.Unlock()
 			return
+		}
+		if c, ok, err := devices.ParseChallengeMessage(m); ok {
+			if err == nil {
+				select {
+				case p.challenge <- c:
+				default:
+				}
+			}
+			continue
 		}
 		var r rpcResp
 		if json.Unmarshal(m, &r) != nil || r.ID == "" || (r.Result == nil && r.Error == nil) {

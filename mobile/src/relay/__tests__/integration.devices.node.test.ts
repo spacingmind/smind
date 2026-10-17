@@ -168,3 +168,21 @@ describe('three devices on one relay host: two Go desktop peers and the mobile T
     expect(fresh.state).not.toEqual({ kind: 'pending', deviceId: mobileId, label: expect.anything() });
   });
 });
+
+describe('a daemon from before device_hello v2 (real relay, real E2EE handshake, then silence)', () => {
+  it('is reported as outdated: failed with versionMismatch, no hello ever sent, no retry loop', { timeout: 60_000 }, async () => {
+    const old = await DevHarness.start(0, true);
+    try {
+      const net = new RecordingNet();
+      const conn = RelayConnection.open(old.pairingUrl, testConnectOptions(31, { net, reconnect: { challengeMs: 1_500, handshakeMs: 15_000 } }));
+      connections.push(conn);
+      await expect(conn.whenConnected()).rejects.toThrow('did not send a device challenge');
+      expect(conn.state).toMatchObject({ kind: 'failed', versionMismatch: true });
+      const streams = net.streams.length;
+      await new Promise((r) => setTimeout(r, 1_500));
+      expect(net.streams.length).toBe(streams); // not retried
+    } finally {
+      old.stop();
+    }
+  });
+});

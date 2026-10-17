@@ -76,7 +76,7 @@ async function startStaticServer() {
   return server;
 }
 
-async function startHarness() {
+async function startHarness(extraArgs = []) {
   // Same build/spawn + "READY <url>" handshake as devHarness.ts, minus the
   // NODE_TLS_REJECT_UNAUTHORIZED override: the browser context uses
   // ignoreHTTPSErrors for the harness's self-signed cert instead. stdin takes
@@ -88,7 +88,7 @@ async function startHarness() {
     cwd: REPO_ROOT,
     stdio: 'inherit',
   });
-  const proc = spawn(binary, [], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const proc = spawn(binary, extraArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
   proc.stderr.on('data', (c) => process.stderr.write(`[harness] ${c}`));
   const lines = [];
   const waiters = [];
@@ -230,6 +230,25 @@ async function assertTasks(page) {
 }
 
 /**
+ * A daemon from before device_hello v2 (the harness's -outdated-daemon): it
+ * completes the E2EE handshake and never sends the device challenge, so the app
+ * must say the daemon is outdated (after the 5 s challenge window) rather than
+ * connect or retry.
+ */
+async function outdatedDaemon(page, harness) {
+  await page.fill('textarea, input[type="text"]', harness.pairingUrl);
+  await page.getByRole('button', { name: 'Connect' }).click();
+  try {
+    await page.getByText('Daemon outdated or on a different version', { exact: true }).waitFor({ timeout: 40_000 });
+  } catch {
+    fail('"Daemon outdated or on a different version" did not appear for a daemon that sends no device challenge');
+    return;
+  }
+  if (!(await page.getByText('smind update', { exact: true }).isVisible().catch(() => false))) fail('outdated card does not show `smind update`');
+  await shootBothSchemes(page, 'outdated');
+}
+
+/**
  * ADR-0031 P13b's device lifecycle in the browser, against the real relay and
  * daemon hub: Connect -> "Waiting for approval" (with the approve command
  * naming this device) -> `approve` on the daemon -> the task list appears by
@@ -277,6 +296,7 @@ async function run() {
   const browser = await chromium.launch();
 
   let harness = null;
+  let outdated = null;
   try {
     for (const scheme of ['light', 'dark']) {
       const context = await browser.newContext({ colorScheme: scheme, ignoreHTTPSErrors: true });
@@ -297,11 +317,21 @@ async function run() {
       await page.getByText('smind pairing', { exact: true }).waitFor({ timeout: 20_000 });
       await deviceLifecycle(page, harness);
       await context.close();
+
+      outdated = await startHarness(['-outdated-daemon']);
+      const oldContext = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+      const oldPage = await oldContext.newPage();
+      trackErrors(oldPage, 'outdated');
+      await oldPage.goto(url, { waitUntil: 'load' });
+      await oldPage.getByText('smind pairing', { exact: true }).waitFor({ timeout: 20_000 });
+      await outdatedDaemon(oldPage, outdated);
+      await oldContext.close();
     }
   } finally {
     await browser.close();
     server.close();
     harness?.cleanup();
+    outdated?.cleanup();
   }
 
   if (pageErrors.length > 0) fail(`page/console errors during run:\n  ${pageErrors.join('\n  ')}`);

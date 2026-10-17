@@ -1,8 +1,10 @@
 // deviceIdentity.test.ts pins the mobile device identity to the Go side
 // through the shared cross-language vector (internal/relay/devices/testdata/
-// device_hello_vector.json, the same file the Go and Rust tests read): the
-// device id derivation, the signed bytes, the Ed25519 signature and the
-// hello JSON must match byte for byte, and the negative case must not verify.
+// device_hello_vector.json, hello VERSION 2 -- the same file the Go and Rust
+// tests read): the device id derivation, the challenge message parse, the
+// signed bytes, the Ed25519 signature and the hello JSON must match byte for
+// byte, and each of the four negatives (a changed daemon key, mobile key,
+// session id or challenge) must NOT verify against the real bytes.
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -11,26 +13,40 @@ import { describe, expect, it } from 'vitest';
 import { base64Decode, base64Encode } from '../base64';
 import {
   buildDeviceHello,
+  ChallengeVersionError,
   deviceIdFor,
+  HELLO_VERSION,
   helloSignedBytes,
   identityFromSeed,
   loadOrCreateIdentity,
   MemoryDeviceKeyStore,
+  parseChallengeMessage,
   sanitizeLabel,
 } from '../deviceIdentity';
 import { secureStoreDeviceKeyStore, SecureStoreLike } from '../deviceKeyStore';
 
+interface Hello {
+  v: number;
+  device_pub: string;
+  label: string;
+  signature: string;
+}
+
 interface Vector {
+  version: number;
   seed_hex: string;
   device_pub_hex: string;
   device_id: string;
   daemon_pub_hex: string;
   mobile_pub_hex: string;
+  session_id: string;
+  challenge_hex: string;
+  challenge_message: { event: string; params: { v: number; challenge: string } };
   label: string;
   signed_bytes_hex: string;
   signature_hex: string;
-  hello: { v: number; device_pub: string; label: string; signature: string };
-  negative: { mobile_pub_hex: string; signed_bytes_hex: string; hello: { signature: string }; error: string };
+  hello: Hello;
+  negative: Array<{ name: string; changed: string; signed_bytes_hex: string; hello: Hello; error: string }>;
 }
 
 const vector: Vector = JSON.parse(
@@ -49,10 +65,19 @@ function hex(b: Uint8Array): string {
     .join('');
 }
 
-describe('device_hello cross-language vector', () => {
+const utf8 = (s: string) => new TextEncoder().encode(s);
+
+describe('device_hello v2 cross-language vector', () => {
   const identity = identityFromSeed(fromHex(vector.seed_hex));
   const daemonPub = fromHex(vector.daemon_pub_hex);
   const mobilePub = fromHex(vector.mobile_pub_hex);
+  const sessionId = utf8(vector.session_id);
+  const challenge = fromHex(vector.challenge_hex);
+
+  it('is the version this client speaks', () => {
+    expect(vector.version).toBe(2);
+    expect(HELLO_VERSION).toBe(2);
+  });
 
   it('derives the vector public key and device id', () => {
     expect(hex(identity.publicKey)).toBe(vector.device_pub_hex);
@@ -61,26 +86,75 @@ describe('device_hello cross-language vector', () => {
     expect(identity.deviceId).toHaveLength(26);
   });
 
-  it('builds the vector signed bytes', () => {
-    expect(hex(helloSignedBytes(daemonPub, mobilePub))).toBe(vector.signed_bytes_hex);
+  it('parses the daemon\'s challenge message into the vector challenge', () => {
+    const message = utf8(JSON.stringify(vector.challenge_message));
+    expect(hex(parseChallengeMessage(message)!)).toBe(vector.challenge_hex);
+    expect(base64Encode(challenge)).toBe(vector.challenge_message.params.challenge);
   });
 
-  it('device_hello signature verifies against the Go vector (and matches it byte for byte)', () => {
-    const hello = buildDeviceHello(identity, vector.label, daemonPub, mobilePub);
+  it('builds the vector signed bytes', () => {
+    expect(hex(helloSignedBytes(daemonPub, mobilePub, sessionId, challenge))).toBe(vector.signed_bytes_hex);
+  });
+
+  it('device_hello v2 signature verifies against the Go vector (and matches it byte for byte)', () => {
+    const hello = buildDeviceHello(identity, vector.label, daemonPub, mobilePub, sessionId, challenge);
     expect(hello).toEqual(vector.hello);
+    expect(hello.v).toBe(2);
     // Ed25519 is deterministic, so the signature is the Go one...
     expect(hex(base64Decode(hello.signature))).toBe(vector.signature_hex);
     // ...and it verifies under the device key over the vector's signed bytes.
     expect(ed25519.verify(fromHex(vector.signature_hex), fromHex(vector.signed_bytes_hex), identity.publicKey)).toBe(true);
   });
 
-  it('a hello signed for a different session does not verify against this one', () => {
-    const wrongSession = fromHex(vector.negative.mobile_pub_hex);
-    const hello = buildDeviceHello(identity, vector.label, daemonPub, wrongSession);
-    expect(hello.signature).toBe(vector.negative.hello.signature);
-    expect(hex(helloSignedBytes(daemonPub, wrongSession))).toBe(vector.negative.signed_bytes_hex);
-    // The signature the negative vector carries must fail against the real transcript.
-    expect(ed25519.verify(base64Decode(vector.negative.hello.signature), helloSignedBytes(daemonPub, mobilePub), identity.publicKey)).toBe(false);
+  it('has four negatives, each with its own signed bytes and a signature that does not verify against the real bytes', () => {
+    expect(vector.negative.map((n) => n.name)).toEqual(['other_daemon_pub', 'other_mobile_pub', 'other_session_id', 'other_challenge']);
+    const real = helloSignedBytes(daemonPub, mobilePub, sessionId, challenge);
+    for (const n of vector.negative) {
+      expect(n.error).toBe('bad_signature');
+      expect(n.signed_bytes_hex, n.name).not.toBe(vector.signed_bytes_hex);
+      const sig = base64Decode(n.hello.signature);
+      // It IS a valid signature over its own bytes (the file is honest about what was signed)...
+      expect(ed25519.verify(sig, fromHex(n.signed_bytes_hex), identity.publicKey), n.name).toBe(true);
+      // ...and must fail against the bytes the daemon would reconstruct for the real session.
+      expect(ed25519.verify(sig, real, identity.publicKey), n.name).toBe(false);
+    }
+  });
+
+  it('what this client signs changes with each of daemon key, mobile key, session id and challenge', () => {
+    const base = hex(helloSignedBytes(daemonPub, mobilePub, sessionId, challenge));
+    const other = (b: Uint8Array) => new Uint8Array(b.map((x) => x ^ 1));
+    expect(hex(helloSignedBytes(other(daemonPub), mobilePub, sessionId, challenge))).not.toBe(base);
+    expect(hex(helloSignedBytes(daemonPub, other(mobilePub), sessionId, challenge))).not.toBe(base);
+    expect(hex(helloSignedBytes(daemonPub, mobilePub, utf8('sess-another-route'), challenge))).not.toBe(base);
+    expect(hex(helloSignedBytes(daemonPub, mobilePub, sessionId, other(challenge)))).not.toBe(base);
+    // and the negatives' bytes are exactly those variants
+    for (const n of vector.negative) expect(vector.signed_bytes_hex).not.toBe(n.signed_bytes_hex);
+  });
+
+  it('refuses to sign without a 32-byte challenge or with an oversized session id', () => {
+    expect(() => helloSignedBytes(daemonPub, mobilePub, sessionId, new Uint8Array(31))).toThrow('challenge');
+    expect(() => helloSignedBytes(daemonPub, mobilePub, new Uint8Array(129), challenge)).toThrow('session id');
+  });
+});
+
+describe('daemon challenge message', () => {
+  const msg = (v: unknown, challenge: unknown, event = 'relay.device_challenge') => utf8(JSON.stringify({ event, params: { v, challenge } }));
+  const good = base64Encode(new Uint8Array(32).fill(5));
+
+  it('ignores messages that are not the challenge', () => {
+    expect(parseChallengeMessage(utf8('{"id":"1","result":[]}'))).toBeNull();
+    expect(parseChallengeMessage(utf8('not json'))).toBeNull();
+    expect(parseChallengeMessage(msg(2, good, 'task.created'))).toBeNull();
+  });
+
+  it('rejects a challenge of another version, a bad length and non-canonical base64', () => {
+    expect(() => parseChallengeMessage(msg(1, good))).toThrow(ChallengeVersionError);
+    expect(() => parseChallengeMessage(msg(3, good))).toThrow(ChallengeVersionError);
+    expect(() => parseChallengeMessage(msg(2, base64Encode(new Uint8Array(31))))).toThrow(ChallengeVersionError);
+    expect(() => parseChallengeMessage(msg(2, base64Encode(new Uint8Array(33))))).toThrow(ChallengeVersionError);
+    expect(() => parseChallengeMessage(msg(2, 42))).toThrow(ChallengeVersionError);
+    expect(() => parseChallengeMessage(msg(2, good.replace(/=+$/, '')))).toThrow(ChallengeVersionError); // padding is part of the contract
+    expect(parseChallengeMessage(msg(2, good))).toEqual(new Uint8Array(32).fill(5));
   });
 });
 
@@ -135,7 +209,7 @@ describe('device key persistence', () => {
   it('never puts the seed in the hello, nor on the identity object', async () => {
     const seed = fromHex(vector.seed_hex);
     const identity = identityFromSeed(seed);
-    const hello = buildDeviceHello(identity, 'x', new Uint8Array(32), new Uint8Array(32));
+    const hello = buildDeviceHello(identity, 'x', new Uint8Array(32), new Uint8Array(32), utf8('s'), new Uint8Array(32));
     expect(JSON.stringify(hello)).not.toContain(base64Encode(seed));
     // Serialising or logging the identity (or whatever holds it) must not reveal the seed.
     expect(Object.keys(identity).sort()).toEqual(['deviceId', 'publicKey', 'sign']);

@@ -15,14 +15,14 @@
 // the approved/pending/revoked decision, and a tiny request handler.
 
 import { ed25519 } from '@noble/curves/ed25519.js';
-import { base64Decode } from '../base64';
+import { base64Decode, base64Encode } from '../base64';
 import { DeviceHello, deviceIdFor, helloSignedBytes } from '../deviceIdentity';
 import { Channel, generateKeyPair, RawTransport, Role } from '../e2ee';
 import { DataStream } from '../grpcweb';
 import { Frame, decodeFrame, encodeFrame, Direction } from '../proto';
 import { RelayNet } from '../RelayConnection';
 
-export type DevicePolicy = 'approved' | 'pending' | 'revoked' | 'legacy-daemon' | 'silent' | 'too_many' | 'bad_hello';
+export type DevicePolicy = 'approved' | 'pending' | 'revoked' | 'legacy-daemon' | 'silent' | 'too_many' | 'bad_hello' | 'version';
 
 export class FakeStream implements DataStream {
   routeKey: string | null = null;
@@ -88,10 +88,12 @@ class DaemonRoute {
   helloSeen = 0;
   deviceId = '';
   alive = true;
+  /** The challenge this route's daemon sent (one per session). */
+  readonly challenge = crypto.getRandomValues(new Uint8Array(32));
 
   constructor(
     private readonly relay: FakeRelay,
-    private readonly key: string,
+    readonly key: string,
   ) {
     const transport: RawTransport = {
       send: (bytes) => relay.toDevice(key, bytes),
@@ -118,6 +120,7 @@ class DaemonRoute {
     const reply = (id: string, body: object) => this.channel.send(new TextEncoder().encode(JSON.stringify({ id, ...body })));
     try {
       await this.channel.handshake();
+      this.relay.sendChallenge(this);
       for (;;) {
         const msg = JSON.parse(decoder.decode(await this.channel.receive()));
         if (msg.method === 'relay.device_hello') {
@@ -230,14 +233,38 @@ export class FakeRelay implements RelayNet {
     return r;
   }
 
+  /** How the daemon opens a device route (hello v2: it speaks first, with a challenge). */
+  challengeMode: 'v2' | 'none' | 'other-version' | 'short' = 'v2';
+  /** Every hello the daemon received, with what it needs to verify it. */
+  readonly helloLog: Array<{ hello: DeviceHello; routeKey: string; session: string; challenge: Uint8Array; mobilePub: Uint8Array }> = [];
+
+  /** The daemon's first message on a route. */
+  sendChallenge(route: DaemonRoute): void {
+    if (this.challengeMode === 'none') return; // a daemon from before hello v2 sends nothing
+    const v = this.challengeMode === 'other-version' ? 3 : 2;
+    const bytes = this.challengeMode === 'short' ? route.challenge.slice(0, 31) : route.challenge;
+    route.channel.send(new TextEncoder().encode(JSON.stringify({ event: 'relay.device_challenge', params: { v, challenge: base64Encode(bytes) } })));
+  }
+
   /** The daemon's decision for a hello; false ends the route. */
   checkHello(route: DaemonRoute, id: string, hello: DeviceHello, reply: (id: string, body: object) => void): boolean {
     const peer = route.channel.peerKey!;
     const pub = base64Decode(hello.device_pub);
     const sig = base64Decode(hello.signature);
+    const session = route.key.split('|')[1];
+    this.helloLog.push({ hello, routeKey: route.key, session, challenge: route.challenge, mobilePub: peer });
+    if (hello.v !== 2) {
+      reply(id, { error: { message: 'unsupported hello version', code: 'hello_version_unsupported' } });
+      return false;
+    }
     const verified =
-      deviceIdFor(pub) === route.deviceId && ed25519.verify(sig, helloSignedBytes(this.daemonKeys.publicKey, peer), pub);
+      deviceIdFor(pub) === route.deviceId &&
+      ed25519.verify(sig, helloSignedBytes(this.daemonKeys.publicKey, peer, new TextEncoder().encode(session), route.challenge), pub);
     const policy = this.policy(route.deviceId);
+    if (policy === 'version') {
+      reply(id, { error: { message: 'unsupported hello version', code: 'hello_version_unsupported' } });
+      return false;
+    }
     if (policy === 'silent') return true; // what the real daemon does with a method it does not know: no answer
     if (policy === 'legacy-daemon') {
       reply(id, { error: { message: 'method not found: relay.device_hello' } });
@@ -259,7 +286,7 @@ export class FakeRelay implements RelayNet {
       reply(id, { error: { message: 'this device was revoked', code: 'revoked' } });
       return false;
     }
-    reply(id, { result: { v: 1, device_id: route.deviceId, state: 'approved' } });
+    reply(id, { result: { v: 2, device_id: route.deviceId, state: 'approved' } });
     return true;
   }
 

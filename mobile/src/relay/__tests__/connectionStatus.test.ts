@@ -18,6 +18,14 @@ describe('describeState', () => {
     expect(v.command).toBeUndefined();
   });
 
+  it('says the daemon is outdated or on a different version, and what to run', () => {
+    const v = describeState({ kind: 'failed', message: 'no challenge', versionMismatch: true })!;
+    expect(v.tone).toBe('danger');
+    expect(v.title).toBe('Daemon outdated or on a different version');
+    expect(v.detail).toBe('no challenge');
+    expect(v.command).toBe('smind update');
+  });
+
   it('shows failures and reconnects, and nothing for connecting/connected/closed', () => {
     expect(describeState({ kind: 'failed', message: 'boom' })).toMatchObject({ tone: 'danger', detail: 'boom' });
     expect(describeState({ kind: 'reconnecting', attempt: 2, reason: 'closed' })).toMatchObject({ tone: 'info', title: 'Reconnecting…' });

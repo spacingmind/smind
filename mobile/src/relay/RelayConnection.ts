@@ -25,7 +25,7 @@
 // business and are re-established after every reconnect.
 
 import { computeProof, PROTOCOL_VERSION, randomNonce } from './admission';
-import { buildDeviceHello, DeviceIdentity, HELLO_METHOD, HELLO_VERSION } from './deviceIdentity';
+import { buildDeviceHello, ChallengeVersionError, DeviceIdentity, HELLO_METHOD, HELLO_VERSION, parseChallengeMessage } from './deviceIdentity';
 import { Channel, generateKeyPair, RawTransport, Role } from './e2ee';
 import { DataStream, GrpcCode, GRPCWebSocketStream, GrpcStatusError, grpcWebUnary } from './grpcweb';
 import { DEFAULT_KEEPALIVE, Keepalive, KeepaliveTiming } from './keepalive';
@@ -90,8 +90,12 @@ export type ConnectionState =
   | { kind: 'pending'; deviceId: string; label: string }
   /** The daemon (or relay) revoked this device. Terminal: pair again to use a fresh identity. */
   | { kind: 'revoked'; deviceId: string }
-  /** Cannot connect and will not retry on its own (bad offer secret, daemon too old, ...). */
-  | { kind: 'failed'; message: string }
+  /**
+   * Cannot connect and will not retry on its own (bad offer secret, ...).
+   * versionMismatch: the daemon is older than this app (no device challenge)
+   * or speaks another hello version; update the daemon (or the app).
+   */
+  | { kind: 'failed'; message: string; versionMismatch?: boolean }
   | { kind: 'closed' };
 
 /** Timings of the reconnect loop; tests shorten them. */
@@ -112,8 +116,14 @@ export interface ReconnectTiming {
   minStableMs: number;
   /** How long a resumed session gets to answer a liveness request before it is replaced by a fresh one (10 s). */
   resumeProbeMs: number;
-  /** How long a fresh session gets to finish the E2EE handshake and the hello answer (20 s). */
+  /** How long a fresh session gets to finish the E2EE handshake and the hello answer (20 s each). */
   handshakeMs: number;
+  /**
+   * How long after the handshake the daemon's device challenge may take (5 s,
+   * as the desktop client). No challenge means a daemon from before hello v2:
+   * the client never falls back to the replayable v1 hello.
+   */
+  challengeMs: number;
   /** Resumes of one session that may fail in a row before it is replaced by a fresh one (3). */
   maxResumeFailures: number;
 }
@@ -126,6 +136,7 @@ export const DEFAULT_RECONNECT: ReconnectTiming = {
   minStableMs: 2_000,
   resumeProbeMs: 10_000,
   handshakeMs: 20_000,
+  challengeMs: 5_000,
   maxResumeFailures: 3,
 };
 
@@ -174,10 +185,15 @@ class AwaitingApprovalError extends Error {}
 class RevokedError extends Error {}
 /** A failure that retrying will not fix. */
 class FatalError extends Error {}
+/** The daemon and this app speak different device-identity versions: nothing to retry, someone has to update. */
+class VersionMismatchError extends FatalError {}
 /** The daemon or relay is busy or full: retry with backoff, even on the first connect. */
 class RetryableError extends Error {}
 
 const HELLO_REQUEST_ID = 'hello';
+const DAEMON_OUTDATED =
+  'The daemon did not send a device challenge: it is older than this app (device hello v2) or runs a different version. Update the daemon (smind update) and try again.';
+const VERSIONS_DIFFER = 'The daemon and this app use different device-identity versions. Update the daemon and the app to the same release.';
 // The liveness probe after a resume: a cheap read every daemon serves. (Not an
 // unknown method: the daemon does not answer those at all.)
 const PROBE_METHOD = 'workspace.list';
@@ -278,7 +294,7 @@ class RouteTransport implements RawTransport {
 
   constructor(
     private readonly workspaceId: string,
-    private readonly sessionId: string,
+    readonly sessionId: string,
     private readonly deviceId: string,
     private readonly timing: KeepaliveTiming,
   ) {}
@@ -744,7 +760,7 @@ export class RelayConnection {
         }
         if (e instanceof FatalError) {
           this.dropSession();
-          this.setState({ kind: 'failed', message: e.message });
+          this.setState({ kind: 'failed', message: e.message, versionMismatch: e instanceof VersionMismatchError || undefined });
           return;
         }
         if (e instanceof AwaitingApprovalError) {
@@ -898,19 +914,30 @@ export class RelayConnection {
         this.timing.handshakeMs,
         'the daemon did not complete the relay handshake (is it running and connected to this relay?)',
       );
+      // The daemon speaks first on a device route: its challenge, fresh for
+      // this session, goes into the signature. Never fall back to a hello
+      // without it (version 1 was replayable).
+      const challenge = await this.readChallenge(channel);
       channel.send(
         new TextEncoder().encode(
           JSON.stringify({
             id: HELLO_REQUEST_ID,
             method: HELLO_METHOD,
-            params: buildDeviceHello(identity, label, this.offer.publicKey, keyPair.publicKey),
+            params: buildDeviceHello(
+              identity,
+              label,
+              this.offer.publicKey,
+              keyPair.publicKey,
+              new TextEncoder().encode(transport.sessionId),
+              challenge,
+            ),
           }),
         ),
       );
       await withTimeout(
         this.readHelloAnswer(channel),
         this.timing.handshakeMs,
-        'the daemon did not answer device_hello (it may be older than v0.12: update it)',
+        'the daemon did not answer device_hello (it may be older than this app: update it)',
       );
       // close() ended the route while the handshake was in flight: do not
       // turn the finished handshake into a live, admitted session.
@@ -924,6 +951,23 @@ export class RelayConnection {
     const session: Session = { transport, channel };
     this.session = session;
     return this.startLink(session);
+  }
+
+  /** Waits for the daemon's device challenge (the first message after the handshake). */
+  private async readChallenge(channel: Channel): Promise<Uint8Array> {
+    const read = (async () => {
+      for (;;) {
+        const challenge = parseChallengeMessage(await channel.receive());
+        if (challenge) return challenge;
+      }
+    })();
+    try {
+      return await withTimeout(read, this.timing.challengeMs, DAEMON_OUTDATED);
+    } catch (e) {
+      if (e instanceof TimeoutError) throw new VersionMismatchError(DAEMON_OUTDATED);
+      if (e instanceof ChallengeVersionError) throw new VersionMismatchError(`${VERSIONS_DIFFER} (${e.message})`);
+      throw e;
+    }
   }
 
   /** Reads the hello answer (the first message after the handshake) and turns a refusal into the error the supervisor acts on. */
@@ -942,10 +986,9 @@ export class RelayConnection {
         const { code, message } = env.error;
         if (code === 'awaiting_approval') throw new AwaitingApprovalError(message);
         if (code === 'revoked') throw new RevokedError(message);
+        if (code === 'hello_version_unsupported') throw new VersionMismatchError(VERSIONS_DIFFER);
         if (code === 'bad_hello' || code === 'device_hello_unsupported') throw new FatalError(message);
-        if (!code && /method not found/i.test(message)) {
-          throw new FatalError('the daemon predates device identity (it needs v0.12 or later); update it');
-        }
+        if (!code && /method not found/i.test(message)) throw new VersionMismatchError(DAEMON_OUTDATED);
         throw new RetryableError(message); // too_many_devices, too_many_pending, internal: worth retrying
       }
       const result = env.result as { v?: number; device_id?: string } | undefined;

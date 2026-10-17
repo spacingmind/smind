@@ -74,6 +74,9 @@ export function PairingScreen({ onConnected }: Props) {
         setConnState(s);
         if (s.kind === 'failed' || s.kind === 'revoked') {
           // Over for good: let Connect (and Reset) start from a clean slate.
+          // Stop listening first, or close() would replace this card with 'closed'.
+          stopTracking.current?.();
+          stopTracking.current = null;
           conn.close();
           attempt.current = null;
         }

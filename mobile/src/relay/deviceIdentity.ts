@@ -1,10 +1,19 @@
 // deviceIdentity.ts is the mobile half of ADR-0031 D9's device identity
 // (decision 35): a persistent Ed25519 key, the self-authenticating device id
-// derived from it, and the signed relay.device_hello the daemon checks
-// inside the encrypted channel. It mirrors internal/relay/devices/
+// derived from it, and the signed relay.device_hello (version 2) the daemon
+// checks inside the encrypted channel. It mirrors internal/relay/devices/
 // identity.go and is pinned to it by the shared cross-language vector
 // (internal/relay/devices/testdata/device_hello_vector.json, see
 // __tests__/deviceIdentity.test.ts).
+//
+// Version 2: the daemon speaks first on a device route, with a fresh
+// 32-byte challenge (relay.device_challenge), and the hello's signature covers
+// that challenge and the route's session id as well as the handshake
+// transcript. The session keys depend only on the daemon's long-lived key and
+// the client's ephemeral key, so a version-1 hello (signed over those alone)
+// replayed into an identical session; only something the daemon chose afresh
+// proves the hello was made for THIS session. A client never sends a version-1
+// hello.
 //
 // Pure JS crypto (@noble) and no React Native imports, so it runs under
 // vitest/node; where the key lives is the DeviceKeyStore's business
@@ -12,14 +21,19 @@
 
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { base64Encode } from './base64';
+import { base64Decode, base64Encode } from './base64';
 
 /** Method name of the first application message (devices.HelloMethod). */
 export const HELLO_METHOD = 'relay.device_hello';
+/** Event name of the daemon's first message on a device route (devices.ChallengeMethod). */
+export const CHALLENGE_EVENT = 'relay.device_challenge';
 /** The only hello format the daemon accepts (devices.HelloVersion). */
-export const HELLO_VERSION = 1;
+export const HELLO_VERSION = 2;
+/** Length of the daemon's challenge (devices.ChallengeLen). */
+export const CHALLENGE_LEN = 32;
 
-const HELLO_DOMAIN = 'smind-device-hello';
+const HELLO_DOMAIN = 'smind-device-hello-v2';
+const MAX_SESSION_ID_BYTES = 128;
 const E2EE_LABEL = 'smind relay e2ee v1';
 const DEVICE_ID_LEN = 26;
 const MAX_LABEL_BYTES = 64;
@@ -66,9 +80,60 @@ export function transcriptHash(daemonPub: Uint8Array, mobilePub: Uint8Array): Ui
   return sha256(concatBytes(textEncoder.encode(E2EE_LABEL), daemonPub, mobilePub));
 }
 
-/** devices.HelloSignedBytes: "smind-device-hello" || TranscriptHash || daemonPub. */
-export function helloSignedBytes(daemonPub: Uint8Array, mobilePub: Uint8Array): Uint8Array {
-  return concatBytes(textEncoder.encode(HELLO_DOMAIN), transcriptHash(daemonPub, mobilePub), daemonPub);
+/**
+ * devices.HelloSignedBytes (version 2):
+ *   "smind-device-hello-v2" || TranscriptHash || daemonPub
+ *   || uint16BE(len(sessionId)) || sessionId || challenge
+ * sessionId is the exact bytes of the Frame.session_id the data stream was
+ * opened with; challenge is the 32 bytes the daemon sent on THIS session.
+ */
+export function helloSignedBytes(
+  daemonPub: Uint8Array,
+  mobilePub: Uint8Array,
+  sessionId: Uint8Array,
+  challenge: Uint8Array,
+): Uint8Array {
+  if (sessionId.length > MAX_SESSION_ID_BYTES) throw new Error('device hello: session id too long to sign');
+  if (challenge.length !== CHALLENGE_LEN) throw new Error(`device hello: challenge is ${challenge.length} bytes, want ${CHALLENGE_LEN}`);
+  const len = new Uint8Array(2);
+  new DataView(len.buffer).setUint16(0, sessionId.length, false);
+  return concatBytes(textEncoder.encode(HELLO_DOMAIN), transcriptHash(daemonPub, mobilePub), daemonPub, len, sessionId, challenge);
+}
+
+/** The daemon speaks a different hello version (or sent a malformed challenge): this client cannot identify to it. */
+export class ChallengeVersionError extends Error {}
+
+/**
+ * Reads the daemon's first message on a device route.
+ *   - null: it is not the challenge event (some other message).
+ *   - the 32 challenge bytes when it is, with version 2.
+ *   - throws ChallengeVersionError for a challenge of another version or one
+ *     that is not 32 bytes of standard base64.
+ */
+export function parseChallengeMessage(message: Uint8Array): Uint8Array | null {
+  let env: { event?: unknown; params?: { v?: unknown; challenge?: unknown } };
+  try {
+    env = JSON.parse(new TextDecoder().decode(message));
+  } catch {
+    return null;
+  }
+  if (!env || env.event !== CHALLENGE_EVENT) return null;
+  if (env.params?.v !== HELLO_VERSION) {
+    throw new ChallengeVersionError(`the daemon sent a device challenge of version ${String(env.params?.v)}, this app speaks ${HELLO_VERSION}`);
+  }
+  const text = env.params.challenge;
+  let challenge: Uint8Array;
+  try {
+    if (typeof text !== 'string') throw new Error('not a string');
+    challenge = base64Decode(text);
+    if (base64Encode(challenge) !== text) throw new Error('not canonical standard base64');
+  } catch {
+    throw new ChallengeVersionError('the daemon sent a malformed device challenge');
+  }
+  if (challenge.length !== CHALLENGE_LEN) {
+    throw new ChallengeVersionError(`the daemon sent a ${challenge.length}-byte device challenge, want ${CHALLENGE_LEN}`);
+  }
+  return challenge;
 }
 
 /**
@@ -184,20 +249,23 @@ export function sanitizeLabel(label: string): string {
 }
 
 /**
- * Signs a hello for the session identified by the daemon's public key (from
- * the pairing offer, verified by the handshake) and this session's ephemeral
- * X25519 public key, so it is valid for exactly one session.
+ * Signs a hello for one session: the daemon's public key (from the pairing
+ * offer, verified by the handshake), this session's ephemeral X25519 public
+ * key, the route's session id and the challenge the daemon sent on this
+ * session, so it is valid for exactly one live session.
  */
 export function buildDeviceHello(
   identity: DeviceIdentity,
   label: string,
   daemonPub: Uint8Array,
   mobilePub: Uint8Array,
+  sessionId: Uint8Array,
+  challenge: Uint8Array,
 ): DeviceHello {
   return {
     v: HELLO_VERSION,
     device_pub: base64Encode(identity.publicKey),
     label: sanitizeLabel(label),
-    signature: base64Encode(identity.sign(helloSignedBytes(daemonPub, mobilePub))),
+    signature: base64Encode(identity.sign(helloSignedBytes(daemonPub, mobilePub, sessionId, challenge))),
   };
 }

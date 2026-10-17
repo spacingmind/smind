@@ -42,12 +42,18 @@ export class DevHarness {
     this.attachReader();
   }
 
-  /** Builds the harness binary and starts it; windowMax > 0 opens a pairing window for that many new devices. */
-  static async start(windowMax = 0): Promise<DevHarness> {
+  /**
+   * Builds the harness binary and starts it; windowMax > 0 opens a pairing
+   * window for that many new devices. outdatedDaemon runs a daemon from before
+   * device_hello v2 instead of the hub: it handshakes and then never sends a
+   * device challenge.
+   */
+  static async start(windowMax = 0, outdatedDaemon = false): Promise<DevHarness> {
     const tmpDir = mkdtempSync(join(tmpdir(), 'smind-devharness-bin-'));
     const binary = join(tmpDir, 'devharness');
     execFileSync('go', ['build', '-o', binary, './internal/relay/bridge/devharness'], { cwd: REPO_ROOT, stdio: 'inherit' });
-    const proc = spawn(binary, windowMax > 0 ? ['-window-max', String(windowMax)] : [], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const args = [...(windowMax > 0 ? ['-window-max', String(windowMax)] : []), ...(outdatedDaemon ? ['-outdated-daemon'] : [])];
+    const proc = spawn(binary, args, { stdio: ['pipe', 'pipe', 'pipe'] });
     proc.stderr.on('data', (c: Buffer) => {
       if (process.env.DEVHARNESS_LOG) process.stderr.write(`[devharness] ${c}`);
     });

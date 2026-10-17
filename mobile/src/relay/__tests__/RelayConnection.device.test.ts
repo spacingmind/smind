@@ -62,7 +62,7 @@ describe('device identity on the wire', () => {
 
     expect(relay.hellos).toHaveLength(1);
     const hello = relay.hellos[0];
-    expect(hello.v).toBe(1);
+    expect(hello.v).toBe(2);
     expect(hello.label).toBe('Test phone');
     expect(base64Decode(hello.device_pub)).toEqual(identity.publicKey);
 
@@ -72,11 +72,19 @@ describe('device identity on the wire', () => {
     expect(sessionId).not.toMatch(/^m1-default/);
     expect(sessionId.length).toBeGreaterThan(8);
 
-    // The signature binds the handshake: checked by the fake daemon with the real signed-bytes construction.
-    // The first non-empty frame carries the E2EE hello with the client's ephemeral key (last 32 bytes).
+    // The signature binds the session: checked by the fake daemon with the real v2 signed-bytes construction
+    // (handshake transcript, route session id and the challenge the daemon sent on this session).
+    const logged = relay.helloLog[0];
+    expect(logged.session).toBe(sessionId);
     const e2eeHello = relay.lastStream.sent.find((f) => !f.keepalive && f.payload.length > 0)!;
-    const ephemeralPub = e2eeHello.payload.slice(-32);
-    expect(ed25519.verify(base64Decode(hello.signature), helloSignedBytes(relay.daemonKeys.publicKey, ephemeralPub), identity.publicKey)).toBe(true);
+    const ephemeralPub = e2eeHello.payload.slice(-32); // the first non-empty frame carries the E2EE hello (key in the last 32 bytes)
+    expect(logged.mobilePub).toEqual(ephemeralPub);
+    const bytes = (session: string, challenge: Uint8Array) =>
+      helloSignedBytes(relay.daemonKeys.publicKey, ephemeralPub, new TextEncoder().encode(session), challenge);
+    expect(ed25519.verify(base64Decode(hello.signature), bytes(sessionId, logged.challenge), identity.publicKey)).toBe(true);
+    // Not valid for another route's session id, nor for another challenge (a replay into a new route/session fails both ways).
+    expect(ed25519.verify(base64Decode(hello.signature), bytes('s-other-route', logged.challenge), identity.publicKey)).toBe(false);
+    expect(ed25519.verify(base64Decode(hello.signature), bytes(sessionId, new Uint8Array(32).fill(1)), identity.publicKey)).toBe(false);
 
     // And the connection is usable.
     await expect(conn.call('workspace.list')).resolves.toEqual([]);
@@ -280,7 +288,7 @@ describe('approval and revocation', () => {
     const relay = new FakeRelay();
     relay.policy = () => 'legacy-daemon';
     const conn = start(relay);
-    await expect(conn.whenConnected()).rejects.toThrow('predates device identity');
+    await expect(conn.whenConnected()).rejects.toThrow('older than this app');
     expect(conn.state.kind).toBe('failed');
   });
 
@@ -407,7 +415,79 @@ describe('review hardening', () => {
     const relay = new FakeRelay();
     relay.policy = () => 'silent';
     const conn = start(relay, { reconnect: { handshakeMs: 150 } });
-    await expect(conn.whenConnected()).rejects.toThrow('may be older than v0.12');
+    await expect(conn.whenConnected()).rejects.toThrow('may be older than this app');
+  });
+});
+
+describe('hello v2: the daemon speaks first', () => {
+  /** A hello of any kind on the wire: the client must not send one without a valid challenge. */
+  const helloSent = (relay: FakeRelay) => relay.streams.some((st) => st.sent.some((f) => !f.keepalive && f.payload.length > 90)) || relay.hellos.length > 0;
+
+  it('a daemon that sends no challenge (older than v2) is reported as outdated, never sent a v1 hello, never retried', async () => {
+    const relay = new FakeRelay();
+    relay.challengeMode = 'none';
+    const conn = start(relay, { reconnect: { challengeMs: 150, handshakeMs: 1500 } });
+    await expect(conn.whenConnected()).rejects.toThrow('did not send a device challenge');
+    expect(conn.state).toMatchObject({ kind: 'failed', versionMismatch: true });
+    expect(relay.hellos).toHaveLength(0); // no hello of any version reached the daemon
+    expect(helloSent(relay)).toBe(false);
+    const streams = relay.streams.length;
+    await new Promise((r) => setTimeout(r, 300));
+    expect(relay.streams.length).toBe(streams); // and no retry loop
+    expect(relay.streams[0].closed).toBe(true);
+  });
+
+  it('a challenge of another version, or one that is not 32 bytes, means different versions: failed, no hello', async () => {
+    for (const mode of ['other-version', 'short'] as const) {
+      const relay = new FakeRelay();
+      relay.challengeMode = mode;
+      const conn = start(relay);
+      await expect(conn.whenConnected()).rejects.toThrow('different device-identity versions');
+      expect(conn.state).toMatchObject({ kind: 'failed', versionMismatch: true });
+      expect(relay.hellos).toHaveLength(0);
+    }
+  });
+
+  it('a daemon that refuses the hello as hello_version_unsupported is a version mismatch too', async () => {
+    const relay = new FakeRelay();
+    relay.policy = () => 'version';
+    const conn = start(relay);
+    await expect(conn.whenConnected()).rejects.toThrow('different device-identity versions');
+    expect(conn.state).toMatchObject({ kind: 'failed', versionMismatch: true });
+  });
+
+  it('every fresh session signs the challenge of THAT session: a hello from one session does not verify in another', async () => {
+    const relay = new FakeRelay();
+    const conn = start(relay);
+    await conn.whenConnected();
+    const epoch = conn.epoch;
+    relay.restartDaemon();
+    relay.dropCurrentStream();
+    await vi.waitFor(() => expect(conn.epoch).toBeGreaterThan(epoch), { timeout: 5000 });
+    expect(relay.helloLog).toHaveLength(2);
+    const [a, b] = relay.helloLog;
+    expect(a.session).not.toBe(b.session);
+    expect(Buffer.from(a.challenge).equals(Buffer.from(b.challenge))).toBe(false); // a fresh challenge per session
+    const verifies = (h: typeof a, against: typeof a) =>
+      ed25519.verify(
+        base64Decode(h.hello.signature),
+        helloSignedBytes(relay.daemonKeys.publicKey, against.mobilePub, new TextEncoder().encode(against.session), against.challenge),
+        identity.publicKey,
+      );
+    expect(verifies(a, a)).toBe(true);
+    expect(verifies(b, b)).toBe(true);
+    expect(verifies(a, b)).toBe(false); // replaying session A's hello into session B fails
+    expect(verifies(b, a)).toBe(false);
+  });
+
+  it('a resumed session sends no new hello (its challenge was answered once, on that session)', async () => {
+    const relay = new FakeRelay();
+    const conn = start(relay);
+    await conn.whenConnected();
+    const epoch = conn.epoch;
+    relay.dropCurrentStream();
+    await vi.waitFor(() => expect(conn.epoch).toBeGreaterThan(epoch), { timeout: 5000 });
+    expect(relay.helloLog).toHaveLength(1);
   });
 });
 

@@ -162,6 +162,8 @@ platform secure store). If the pairing window is not open for it, the app shows 
 approve. A device you revoke shows **This device was revoked**; *Reset device identity* gives it a new key, which the
 daemon treats as a new device that needs approval again. After a dropped connection the app reconnects on its own and
 resumes its session.
+The app and the daemon must speak the same device-identity version (hello v2): if the daemon sends no device challenge the
+app says "Daemon outdated or on a different version" and does not connect — update the daemon with `smind update`.
 
 A phone does not pin the relay's certificate (it has no way to confirm a fingerprint): the relay needs a certificate
 that the phone already trusts, for example one from a public CA. A self-signed relay certificate is refused.
