@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use axum::extract::ws::{Message, WebSocketUpgrade};
 use axum::extract::{RawQuery, State};
 use axum::http::HeaderMap;
+use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
@@ -42,6 +43,11 @@ fn record(log: &Log, path: &'static str, headers: &HeaderMap, query: Option<Stri
 /// /ws selects the first offered `smind.bearer.*` protocol (like the real
 /// daemon) then echoes text frames.
 async fn spawn_stub(protected: bool) -> (SocketAddr, Log) {
+    spawn_stub_as(protected, protected).await
+}
+
+/// `smind_healthz`: whether /healthz identifies a password-protected smind.
+async fn spawn_stub_as(protected: bool, smind_healthz: bool) -> (SocketAddr, Log) {
     let log: Log = Arc::new(Mutex::new(Vec::new()));
     let app = Router::new()
         .route(
@@ -55,16 +61,32 @@ async fn spawn_stub(protected: bool) -> (SocketAddr, Log) {
             }),
         )
         .route(
+            "/healthz",
+            get(move || async move {
+                if smind_healthz {
+                    axum::Json(serde_json::json!({ "service": "smind", "version": "0.1.0", "authRequired": true }))
+                } else {
+                    axum::Json(serde_json::json!({ "service": "nginx" }))
+                }
+            }),
+        )
+        .route(
             "/api/ping",
             get(|State(log): State<Log>, headers: HeaderMap, RawQuery(q): RawQuery| async move {
                 record(&log, "/api/ping", &headers, q);
-                "ok"
+                if headers.get("authorization").and_then(|v| v.to_str().ok()) == Some("Bearer expired-session") {
+                    return (axum::http::StatusCode::UNAUTHORIZED, "session expired");
+                }
+                (axum::http::StatusCode::OK, "ok")
             }),
         )
         .route(
             "/ws",
             get(|State(log): State<Log>, headers: HeaderMap, RawQuery(q): RawQuery, ws: WebSocketUpgrade| async move {
                 record(&log, "/ws", &headers, q);
+                if headers.get("authorization").and_then(|v| v.to_str().ok()) == Some("Bearer expired-session") {
+                    return axum::http::StatusCode::UNAUTHORIZED.into_response();
+                }
                 let offered: Vec<String> = headers
                     .get("sec-websocket-protocol")
                     .and_then(|v| v.to_str().ok())
@@ -76,7 +98,7 @@ async fn spawn_stub(protected: bool) -> (SocketAddr, Log) {
                             break;
                         }
                     }
-                })
+                }).into_response()
             }),
         )
         .with_state(log.clone());
@@ -109,7 +131,11 @@ async fn harness() -> Harness {
 }
 
 async fn harness_with(protected: bool) -> Harness {
-    let (addr, stub) = spawn_stub(protected).await;
+    harness_as(protected, protected).await
+}
+
+async fn harness_as(protected: bool, smind_healthz: bool) -> Harness {
+    let (addr, stub) = spawn_stub_as(protected, smind_healthz).await;
     let local = Url::parse(&format!("http://{addr}")).unwrap();
     let state = ProxyState::new(SECRET.to_string(), Registry::new(&local), Box::new(EmptyAssets));
     state.set_local_token_source(|| None);
@@ -209,6 +235,20 @@ async fn local_connection_with_403_token_falls_back_to_injected_bearer() {
 async fn local_connection_with_403_and_no_token_file_passes_the_403_through() {
     let h = harness_with(true).await;
     assert_eq!(h.get("/api/token").await.status(), 403);
+}
+
+#[tokio::test]
+async fn token_file_is_never_used_for_a_403_that_is_not_a_password_smind() {
+    // A 403 on /api/token from something whose /healthz is not a
+    // password-protected smind: the 403 passes through and no bearer is sent.
+    let h = harness_as(true, false).await;
+    h.state.set_local_token_source(|| Some("file-token".to_string()));
+    assert_eq!(h.get("/api/token").await.status(), 403);
+    assert_eq!(h.get("/api/ping").await.status(), 200);
+    let (_ws, _) = h.ws("", &[]).await;
+    for seen in h.stub.lock().unwrap().iter() {
+        assert_eq!(seen.authorization, None, "{seen:?}");
+    }
 }
 
 #[tokio::test]
@@ -320,4 +360,32 @@ async fn token_never_reaches_the_webview() {
             assert!(!s.contains(secret), "{secret} leaked to the webview: {s}");
         }
     }
+}
+
+#[tokio::test]
+async fn expired_session_is_cleared_so_the_webview_sees_the_daemons_refusal() {
+    let h = harness().await;
+    let (id, _remote) = h.select_url_connection().await;
+
+    // /api: the daemon answers 401 to the session -> it is dropped.
+    h.state.set_session(&id, "expired-session".to_string());
+    let body: serde_json::Value = h.get("/api/token").await.json().await.unwrap();
+    assert!(body["token"].as_str().is_some(), "synthesized while the session is held");
+    assert_eq!(h.get("/api/ping").await.status(), 401, "the daemon's answer passes through");
+    assert_eq!(h.state.session(&id), None);
+    // Now /api/token reaches the daemon instead of looping on a dead placeholder.
+    let token: serde_json::Value = h.get("/api/token").await.json().await.unwrap();
+    assert_eq!(token["token"], "daemon-token");
+
+    // /ws: a refused handshake drops the session too.
+    h.state.set_session(&id, "expired-session".to_string());
+    let mut req = format!("ws://127.0.0.1:{}/ws", h.port).into_client_request().unwrap();
+    req.headers_mut().insert("cookie", h.cookie.parse().unwrap());
+    assert!(tokio_tungstenite::connect_async(req).await.is_err());
+    assert_eq!(h.state.session(&id), None);
+
+    // A healthy session is never dropped.
+    h.state.set_session(&id, "session-ok".to_string());
+    assert_eq!(h.get("/api/ping").await.status(), 200);
+    assert_eq!(h.state.session(&id).as_deref(), Some("session-ok"));
 }

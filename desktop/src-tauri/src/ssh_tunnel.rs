@@ -12,6 +12,7 @@ use std::io::Read;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -58,13 +59,15 @@ pub fn tunnel_args(target: &SshTarget, local_port: u16) -> Vec<String> {
 
 /// A running `ssh -N -L` child. Dropping it kills and reaps the child.
 struct Tunnel {
-    child: Child,
+    child: Arc<Mutex<Child>>,
     local_port: u16,
+    /// Set when we stop the child ourselves, so the exit watcher stays quiet.
+    stopped: Arc<AtomicBool>,
 }
 
 impl Tunnel {
-    fn alive(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
+    fn alive(&self) -> bool {
+        matches!(self.child.lock().unwrap().try_wait(), Ok(None))
     }
 
     fn url(&self) -> String {
@@ -74,15 +77,26 @@ impl Tunnel {
 
 impl Drop for Tunnel {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.stopped.store(true, Ordering::SeqCst);
+        let mut child = self.child.lock().unwrap();
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }
+
+/// Called with (connection id, tunnel local URL) when a tunnel's ssh child
+/// exits on its own.
+type ExitHook = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
 /// SshTunnels owns the tunnels of the `ssh`-kind connections, by id.
 pub struct SshTunnels {
     program: PathBuf,
     tunnels: Mutex<HashMap<String, Tunnel>>,
+    /// One async lock per connection id: concurrent `start`s for the same id
+    /// run one after the other, so the second finds the first's tunnel
+    /// instead of spawning a second authenticated ssh child.
+    start_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    exit_hook: Mutex<Option<ExitHook>>,
 }
 
 impl Default for SshTunnels {
@@ -131,14 +145,54 @@ fn failure_detail(stderr: &[u8], status: std::process::ExitStatus) -> String {
 
 impl SshTunnels {
     pub fn with_program(program: impl Into<PathBuf>) -> Self {
-        Self { program: program.into(), tunnels: Mutex::new(HashMap::new()) }
+        Self {
+            program: program.into(),
+            tunnels: Mutex::new(HashMap::new()),
+            start_locks: Mutex::new(HashMap::new()),
+            exit_hook: Mutex::new(None),
+        }
+    }
+
+    /// bind_proxy makes a tunnel whose ssh child dies on its own drop its
+    /// mapping in `proxy` (if it still points at that tunnel): the proxy then
+    /// answers "tunnel is not running", and a stranger binding the freed
+    /// local port can never receive webview traffic or a session bearer.
+    pub fn bind_proxy(&self, proxy: Arc<ProxyState>) {
+        let hook: ExitHook = Arc::new(move |id, url| {
+            if proxy.ssh_local(id).as_deref() == Some(url) {
+                proxy.clear_ssh_local(id);
+            }
+        });
+        *self.exit_hook.lock().unwrap() = Some(hook);
+    }
+
+    fn start_lock(&self, id: &str) -> Arc<tokio::sync::Mutex<()>> {
+        self.start_locks.lock().unwrap().entry(id.to_string()).or_default().clone()
+    }
+
+    /// watch_exit reports (once) when `tunnel`'s child exits by itself.
+    fn watch_exit(&self, id: &str, tunnel: &Tunnel) {
+        let Some(hook) = self.exit_hook.lock().unwrap().clone() else { return };
+        let (child, stopped, url, id) = (tunnel.child.clone(), tunnel.stopped.clone(), tunnel.url(), id.to_string());
+        std::thread::spawn(move || loop {
+            if stopped.load(Ordering::SeqCst) {
+                return;
+            }
+            if !matches!(child.lock().unwrap().try_wait(), Ok(None)) {
+                if !stopped.load(Ordering::SeqCst) {
+                    hook(&id, &url);
+                }
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        });
     }
 
     /// local_url is the tunnel's local end if its ssh child is still running;
     /// a dead child is found here (lazily) and forgotten.
     pub fn local_url(&self, id: &str) -> Option<String> {
         let mut tunnels = self.tunnels.lock().unwrap();
-        let alive = tunnels.get_mut(id)?.alive();
+        let alive = tunnels.get(id)?.alive();
         if alive {
             tunnels.get(id).map(Tunnel::url)
         } else {
@@ -152,6 +206,8 @@ impl SshTunnels {
     /// connections, i.e. ssh authenticated and bound the forward; ssh
     /// exiting first is the error, carrying its stderr.
     pub async fn start(&self, id: &str, target: &SshTarget) -> Result<String, String> {
+        let lock = self.start_lock(id);
+        let _serialized = lock.lock().await;
         if let Some(url) = self.local_url(id) {
             return Ok(url);
         }
@@ -172,12 +228,13 @@ impl SshTunnels {
             }
         })?;
         let (stderr, reader) = capture(child.stderr.take().expect("stderr is piped"));
-        let mut tunnel = Tunnel { child, local_port };
+        let tunnel = Tunnel { child: Arc::new(Mutex::new(child)), local_port, stopped: Arc::new(AtomicBool::new(false)) };
 
         let addr = SocketAddr::from(([127, 0, 0, 1], local_port));
         let deadline = Instant::now() + STARTUP_TIMEOUT;
         loop {
-            if let Ok(Some(status)) = tunnel.child.try_wait() {
+            let exited = tunnel.child.lock().unwrap().try_wait();
+            if let Ok(Some(status)) = exited {
                 // Let the reader see the last of stderr.
                 for _ in 0..20 {
                     if reader.is_finished() {
@@ -187,7 +244,13 @@ impl SshTunnels {
                 }
                 return Err(failure_detail(&stderr.lock().unwrap(), status));
             }
-            if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() {
+            // The port accepting is not proof it is ssh's forward: also require
+            // the child to still be running. Residual window, not closed here:
+            // a local process that binds the picked port before ssh has
+            // authenticated would pass the connect check for a moment (a
+            // listener cannot be told apart from ssh's); ExitOnForwardFailure
+            // then makes ssh exit, which this loop reports on its next pass.
+            if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() && tunnel.alive() {
                 break;
             }
             if Instant::now() >= deadline {
@@ -197,6 +260,7 @@ impl SshTunnels {
             tokio::time::sleep(POLL_INTERVAL).await;
         }
         let url = tunnel.url();
+        self.watch_exit(id, &tunnel);
         self.tunnels.lock().unwrap().insert(id.to_string(), tunnel);
         Ok(url)
     }
@@ -211,10 +275,11 @@ impl SshTunnels {
 
     #[cfg(test)]
     fn kill_for_test(&self, id: &str) {
-        let mut tunnels = self.tunnels.lock().unwrap();
-        let t = tunnels.get_mut(id).expect("tunnel exists");
-        t.child.kill().unwrap();
-        t.child.wait().unwrap();
+        let tunnels = self.tunnels.lock().unwrap();
+        let t = tunnels.get(id).expect("tunnel exists");
+        let mut child = t.child.lock().unwrap();
+        child.kill().unwrap();
+        child.wait().unwrap();
     }
 }
 
@@ -445,6 +510,85 @@ mod tests {
             assert_eq!(tunnels.local_url(&conn.id), None);
             assert_eq!(p.ssh_local(&conn.id), None);
             assert!(!std::fs::read_to_string(&path).unwrap().contains("ssh:"));
+        }
+
+        /// A fake ssh that takes `delay` seconds to "authenticate".
+        fn slow_fake_ssh(dir: &Path, delay: &str) -> PathBuf {
+            let fast = fake_ssh(dir);
+            script(dir, "slow-ssh", &format!("sleep {delay}\nexec '{}' \"$@\"", fast.display()))
+        }
+
+        async fn wait_until(mut f: impl FnMut() -> bool) -> bool {
+            for _ in 0..60 {
+                if f() {
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            false
+        }
+
+        #[tokio::test]
+        async fn ssh_exit_clears_the_proxy_mapping_so_a_squatter_gets_nothing() {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("connections.json");
+            let p = proxy();
+            let tunnels = SshTunnels::with_program(fake_ssh(dir.path()));
+            tunnels.bind_proxy(p.clone());
+            let conn = add_ssh_connection(&p, &tunnels, &path, "Lab", &target()).await.unwrap();
+            assert!(p.ssh_local(&conn.id).is_some());
+
+            tunnels.kill_for_test(&conn.id);
+            assert!(wait_until(|| p.ssh_local(&conn.id).is_none()).await, "the mapping outlived its ssh child");
+
+            // A mapping that already points elsewhere (a newer tunnel) is left alone.
+            let conn2 = add_ssh_connection(&p, &tunnels, &path, "Lab", &target()).await.unwrap();
+            p.set_ssh_local(&conn2.id, "http://127.0.0.1:1".into());
+            tunnels.kill_for_test(&conn2.id);
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            assert_eq!(p.ssh_local(&conn2.id).as_deref(), Some("http://127.0.0.1:1"));
+        }
+
+        #[tokio::test]
+        async fn concurrent_starts_for_one_connection_share_one_tunnel() {
+            let dir = tempfile::tempdir().unwrap();
+            let tunnels = SshTunnels::with_program(slow_fake_ssh(dir.path(), "0.2"));
+            let id = target().connection_id();
+            let t = target();
+            let (a, b) = tokio::join!(tunnels.start(&id, &t), tunnels.start(&id, &t));
+            assert_eq!(a.unwrap(), b.unwrap(), "the second start reused the first's tunnel");
+            assert_eq!(tunnels.tunnels.lock().unwrap().len(), 1);
+        }
+
+        #[tokio::test]
+        async fn select_of_a_connection_removed_meanwhile_leaves_no_tunnel() {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("connections.json");
+            let p = proxy();
+            let tunnels = SshTunnels::with_program(slow_fake_ssh(dir.path(), "0.4"));
+            let conn = p.registry.lock().unwrap().add_ssh("Lab", &target()).unwrap();
+            let (selected, _) = tokio::join!(crate::commands::select_connection(&p, &tunnels, &path, &conn.id), async {
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                p.registry.lock().unwrap().remove(&conn.id).unwrap();
+            });
+            assert_eq!(selected.unwrap_err(), "this connection was removed");
+            assert_eq!(tunnels.local_url(&conn.id), None);
+            assert_eq!(p.ssh_local(&conn.id), None);
+        }
+
+        #[tokio::test]
+        async fn remove_stops_the_tunnel_even_when_saving_fails() {
+            let dir = tempfile::tempdir().unwrap();
+            let p = proxy();
+            let tunnels = SshTunnels::with_program(fake_ssh(dir.path()));
+            let conn = add_ssh_connection(&p, &tunnels, &dir.path().join("connections.json"), "Lab", &target()).await.unwrap();
+            let url = p.ssh_local(&conn.id).unwrap();
+            assert!(reachable(&url));
+            let unwritable = dir.path().join("a-directory");
+            std::fs::create_dir(&unwritable).unwrap(); // writing a file over a directory fails
+            assert!(crate::commands::remove_connection(&p, &tunnels, &unwritable, &conn.id).is_err());
+            assert!(!reachable(&url), "the ssh child was stopped");
+            assert_eq!(p.ssh_local(&conn.id), None);
         }
 
         #[tokio::test]

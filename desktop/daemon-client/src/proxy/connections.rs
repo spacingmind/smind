@@ -64,14 +64,31 @@ impl SshTarget {
         if host.is_empty() {
             return Err("SSH host is required".to_string());
         }
+        // ssh_config aliases and DNS names are ASCII; refusing the rest also
+        // keeps percent-encoding out of argv and the stored URI.
+        if !host.is_ascii() {
+            return Err("SSH host must be ASCII".to_string());
+        }
         if host.chars().any(|c| c.is_whitespace() || c.is_control()) || host.starts_with('-') {
             return Err("SSH host is invalid".to_string());
         }
-        if host.rsplit_once('@').is_some_and(|(user, h)| user.is_empty() || h.is_empty() || h.starts_with('-')) {
+        let (user, name) = match host.rsplit_once('@') {
+            Some((user, name)) => (Some(user), name),
+            None => (None, host),
+        };
+        // An IPv6 literal is accepted bare (`::1`) or bracketed (`[::1]`) and
+        // kept bare for ssh's argv and the connection id; only the stored URI
+        // brackets it.
+        let name = name.strip_prefix('[').and_then(|n| n.strip_suffix(']')).unwrap_or(name);
+        if name.is_empty() || name.starts_with('-') || name.contains(['[', ']']) || user.is_some_and(str::is_empty) {
             return Err("SSH host is invalid".to_string());
         }
+        let host = match user {
+            Some(user) => format!("{user}@{name}"),
+            None => name.to_string(),
+        };
         Ok(SshTarget {
-            host: host.to_string(),
+            host,
             ssh_port: self.ssh_port.map(|p| validate_port(p, "SSH port")).transpose()?,
             daemon_port: validate_port(self.daemon_port, "daemon port")?,
         })
@@ -84,7 +101,8 @@ impl SshTarget {
             None => (None, self.host.as_str()),
         };
         let mut url = Url::parse("ssh://placeholder").expect("static URL");
-        url.set_host(Some(host)).map_err(|_| "SSH host is invalid".to_string())?;
+        let host = if host.contains(':') { format!("[{host}]") } else { host.to_string() };
+        url.set_host(Some(&host)).map_err(|_| "SSH host is invalid".to_string())?;
         if let Some(user) = user {
             url.set_username(user).map_err(|_| "SSH host is invalid".to_string())?;
         }
@@ -604,6 +622,34 @@ mod tests {
         assert_eq!(reg.list().len(), 3);
         assert_eq!(reg.list()[2].id, "ssh:me@lab.example:default:4648");
         assert_eq!(SshTarget::from_uri("ssh://[::1]?daemonPort=9").unwrap().host, "::1");
+    }
+
+    #[test]
+    fn ssh_ipv6_hosts_are_normalised_to_the_bare_form() {
+        for raw in ["::1", "[::1]", " [::1] "] {
+            let t = target(raw, Some(22), 4648).validate().unwrap();
+            assert_eq!(t.host, "::1", "{raw}");
+            assert_eq!(t.connection_id(), "ssh:::1:22:4648");
+            // Brackets only inside the stored URI, and it round-trips bare.
+            let uri = t.to_uri().unwrap();
+            assert_eq!(uri, "ssh://[::1]:22?daemonPort=4648");
+            assert_eq!(SshTarget::from_uri(&uri).unwrap(), t);
+        }
+        let with_user = target("me@[2001:db8::7]", None, 9).validate().unwrap();
+        assert_eq!(with_user.host, "me@2001:db8::7");
+        assert_eq!(with_user.to_uri().unwrap(), "ssh://me@[2001:db8::7]?daemonPort=9");
+        assert_eq!(SshTarget::from_uri(&with_user.to_uri().unwrap()).unwrap(), with_user);
+        // Only brackets, unbalanced or stray brackets: rejected.
+        for bad in ["[]", "me@[]", "[::1", "::1]", "a[b]c", "[[::1]]"] {
+            assert_eq!(target(bad, None, 9).validate().unwrap_err(), "SSH host is invalid", "{bad}");
+        }
+    }
+
+    #[test]
+    fn ssh_non_ascii_host_rejected() {
+        for host in ["lab\u{e9}", "me@h\u{f6}st", "\u{4e3b}\u{673a}", "ho\u{a0}st"] {
+            assert_eq!(target(host, None, 9).validate().unwrap_err(), "SSH host must be ASCII", "{host:?}");
+        }
     }
 
     #[test]

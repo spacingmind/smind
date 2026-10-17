@@ -3,10 +3,12 @@
 //! here (not in the tauri crate) so it compiles and is exercisable
 //! without webkit2gtk; the shell passes in a notification callback.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::backoff::Backoff;
@@ -22,6 +24,108 @@ const SUBSCRIBE_ID: &str = "events-sub-1";
 
 /// A one-shot resolution has this long to get an answer before giving up.
 const RESOLVE_TIMEOUT: Duration = Duration::from_secs(3);
+
+type TokenSource = Arc<dyn Fn() -> Option<String> + Send + Sync>;
+
+/// WatcherAuth is how the watcher authenticates to a password-protected
+/// daemon (ADR-0031 D8), which refuses `GET /api/token`. The default (no
+/// credentials) is the plain token-query flow every older daemon uses.
+/// Credentials are only ever sent as an `Authorization: Bearer` header,
+/// never in the URL, and never logged.
+#[derive(Clone, Default)]
+pub struct WatcherAuth {
+    /// A held login session token for this connection, read per attempt
+    /// (it is cleared when the session expires).
+    pub session: Option<TokenSource>,
+    /// The built-in local connection: when `/api/token` answers 403 and
+    /// `/healthz` confirms a password-protected smind, use the daemon token
+    /// file (read per attempt; local-by-address only).
+    pub local_token_file: Option<TokenSource>,
+}
+
+impl WatcherAuth {
+    /// local is the auth for the built-in `local` connection.
+    pub fn local() -> Self {
+        Self { session: None, local_token_file: Some(Arc::new(crate::proxy::local_token::read)) }
+    }
+
+    pub fn with_session(session: impl Fn() -> Option<String> + Send + Sync + 'static) -> Self {
+        Self { session: Some(Arc::new(session)), local_token_file: None }
+    }
+}
+
+/// How the /ws upgrade is authenticated.
+enum Credential {
+    /// The daemon token from `/api/token`, as `?token=`.
+    Query(String),
+    /// A bearer token, as the Authorization header.
+    Bearer(String),
+}
+
+enum TokenError {
+    Forbidden,
+    Other(String),
+}
+
+/// credential picks what to authenticate with for one attempt: a held
+/// session first, else the daemon's own token, else (403, local only, a
+/// confirmed password smind) the token file.
+async fn credential(cfg: &Config, client: &reqwest::Client, auth: &WatcherAuth) -> Result<Credential, String> {
+    if let Some(token) = auth.session.as_ref().and_then(|s| s()) {
+        return Ok(Credential::Bearer(token));
+    }
+    match fetch_token(cfg, client).await {
+        Ok(token) => Ok(Credential::Query(token)),
+        Err(TokenError::Other(e)) => Err(e),
+        Err(TokenError::Forbidden) => {
+            let refused = || "token fetch: the daemon refused (password-protected) and no credential is available".to_string();
+            let Some(source) = &auth.local_token_file else { return Err(refused()) };
+            if !crate::proxy::local_token::is_local_by_address(&cfg.daemon_url).await
+                || !crate::proxy::local_token::is_password_smind(&crate::proxy::bounded::client(HTTP_TIMEOUT), cfg.daemon_url.as_str()).await
+            {
+                return Err(refused());
+            }
+            source().map(Credential::Bearer).ok_or_else(refused)
+        }
+    }
+}
+
+/// connect_authed opens /ws with whichever credential applies.
+async fn connect_authed(
+    cfg: &Config,
+    client: &reqwest::Client,
+    auth: &WatcherAuth,
+) -> Result<(tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, String), String> {
+    let (request, label) = match credential(cfg, client, auth).await? {
+        Credential::Query(token) => {
+            let url = cfg.ws_url(&token)?;
+            let label = url_label(&url);
+            (url.as_str().into_client_request().map_err(|e| format!("ws request: {e}"))?, label)
+        }
+        Credential::Bearer(token) => {
+            let url = cfg.ws_base_url()?;
+            let label = url_label(&url);
+            let mut request = url.as_str().into_client_request().map_err(|e| format!("ws request: {e}"))?;
+            let mut value = tokio_tungstenite::tungstenite::http::HeaderValue::from_str(&format!("Bearer {token}"))
+                .map_err(|_| "ws request: unusable credential".to_string())?;
+            value.set_sensitive(true);
+            request.headers_mut().insert(tokio_tungstenite::tungstenite::http::header::AUTHORIZATION, value);
+            (request, label)
+        }
+    };
+    let (ws, _resp) = connect_async(request).await.map_err(|e| format!("ws connect: {e}"))?;
+    Ok((ws, label))
+}
+
+/// url_label is what may be logged of a /ws URL: scheme, host, port and
+/// path, never the query (which can carry the daemon token).
+fn url_label(url: &url::Url) -> String {
+    let host = url.host_str().unwrap_or_default();
+    match url.port() {
+        Some(port) => format!("{}://{host}:{port}{}", url.scheme(), url.path()),
+        None => format!("{}://{host}{}", url.scheme(), url.path()),
+    }
+}
 
 /// healthz_ok reports whether the daemon answers GET /healthz.
 pub async fn healthz_ok(cfg: &Config) -> bool {
@@ -44,9 +148,7 @@ pub async fn healthz_ok(cfg: &Config) -> bool {
 /// timeout, same as a cache miss.
 pub async fn resolve_workspace_id(cfg: &Config, task_id: i64) -> Option<i64> {
     let client = reqwest::Client::new();
-    let token = fetch_token(cfg, &client).await.ok()?;
-    let ws_url = cfg.ws_url(&token).ok()?;
-    let (ws, _resp) = connect_async(ws_url.as_str()).await.ok()?;
+    let (ws, _label) = connect_authed(cfg, &client, &WatcherAuth::default()).await.ok()?;
     let (mut tx, mut rx) = ws.split();
 
     let req_id = protocol::task_get_request_id(task_id);
@@ -153,10 +255,20 @@ pub async fn run(
     cache: WorkspaceCache,
     on_event: impl Fn(ClientEvent) + Send + Sync + 'static,
 ) {
+    run_with_auth(cfg, WatcherAuth::default(), cache, on_event).await
+}
+
+/// run_with_auth is `run` for a daemon that may be password-protected.
+pub async fn run_with_auth(
+    cfg: Config,
+    auth: WatcherAuth,
+    cache: WorkspaceCache,
+    on_event: impl Fn(ClientEvent) + Send + Sync + 'static,
+) {
     let client = reqwest::Client::new();
     let mut backoff = Backoff::default();
     loop {
-        let stable = run_once(&cfg, &client, &cache, &on_event).await;
+        let stable = run_once(&cfg, &client, &auth, &cache, &on_event).await;
         if stable {
             backoff.reset();
         }
@@ -170,10 +282,11 @@ pub async fn run(
 async fn run_once(
     cfg: &Config,
     client: &reqwest::Client,
+    auth: &WatcherAuth,
     cache: &WorkspaceCache,
     on_event: &impl Fn(ClientEvent),
 ) -> bool {
-    match try_run_once(cfg, client, cache, on_event).await {
+    match try_run_once(cfg, client, auth, cache, on_event).await {
         Ok(stable) => stable,
         Err(err) => {
             eprintln!("smind desktop: daemon connection error: {err}");
@@ -185,15 +298,12 @@ async fn run_once(
 async fn try_run_once(
     cfg: &Config,
     client: &reqwest::Client,
+    auth: &WatcherAuth,
     cache: &WorkspaceCache,
     on_event: &impl Fn(ClientEvent),
 ) -> Result<bool, String> {
-    let token = fetch_token(cfg, client).await?;
-    let ws_url = cfg.ws_url(&token)?;
-    let (ws, _resp) = connect_async(ws_url.as_str())
-        .await
-        .map_err(|e| format!("ws connect: {e}"))?;
-    eprintln!("smind desktop: ws connected to {}", ws_url.as_str());
+    let (ws, label) = connect_authed(cfg, client, auth).await?;
+    eprintln!("smind desktop: ws connected to {label}");
     let (mut tx, mut rx) = ws.split();
 
     let [sub, sub_resolved] = [subscribe_message(), subscribe_resolved_message()].map(|m| m.to_string());
@@ -336,21 +446,24 @@ async fn handle_relay_message(
     }
 }
 
-async fn fetch_token(cfg: &Config, client: &reqwest::Client) -> Result<String, String> {
+async fn fetch_token(cfg: &Config, client: &reqwest::Client) -> Result<String, TokenError> {
     #[derive(serde::Deserialize)]
     struct TokenResp {
         token: String,
     }
-    let resp: TokenResp = client
+    let resp = client
         .get(cfg.token_url())
         .timeout(HTTP_TIMEOUT)
         .send()
         .await
-        .map_err(|e| format!("token fetch: {e}"))?
-        .json()
+        .map_err(|e| TokenError::Other(format!("token fetch: {}", e.without_url())))?;
+    if resp.status() == reqwest::StatusCode::FORBIDDEN {
+        return Err(TokenError::Forbidden);
+    }
+    let body: TokenResp = crate::proxy::bounded::read_json(resp, crate::proxy::bounded::MAX_BODY_BYTES)
         .await
-        .map_err(|e| format!("token decode: {e}"))?;
-    Ok(resp.token)
+        .ok_or_else(|| TokenError::Other("token decode: not a token answer".to_string()))?;
+    Ok(body.token)
 }
 
 #[cfg(test)]
@@ -393,5 +506,75 @@ mod tests {
         assert_eq!(attention_event(&running), Some(ClientEvent::RunRunning { task_id: 5 }));
         let resolved = event("permission.resolved", serde_json::json!({"runId":"r","taskId":5,"requestId":"q","reason":"human"}));
         assert_eq!(attention_event(&resolved), Some(ClientEvent::PermissionResolved { request_id: "q".into() }));
+    }
+
+    /// A password-protected stub daemon: /api/token 403, /healthz a
+    /// password smind, /ws upgrades only with `Authorization: Bearer <accept>`
+    /// and never with a `?token=` query. Records what each /ws saw.
+    type WsSeen = Arc<std::sync::Mutex<Vec<(Option<String>, Option<String>)>>>;
+
+    async fn password_daemon(accept: &'static str) -> (Config, WsSeen) {
+        use axum::extract::ws::WebSocketUpgrade;
+        use axum::http::{HeaderMap, StatusCode};
+        use axum::response::IntoResponse;
+        let seen: WsSeen = Arc::default();
+        let log = seen.clone();
+        let app = axum::Router::new()
+            .route("/api/token", axum::routing::get(|| async { (StatusCode::FORBIDDEN, "password configured") }))
+            .route(
+                "/healthz",
+                axum::routing::get(|| async { axum::Json(serde_json::json!({"service":"smind","authRequired":true})) }),
+            )
+            .route(
+                "/ws",
+                axum::routing::get(move |headers: HeaderMap, axum::extract::RawQuery(q): axum::extract::RawQuery, ws: WebSocketUpgrade| async move {
+                    let auth = headers.get("authorization").and_then(|v| v.to_str().ok()).map(str::to_string);
+                    log.lock().unwrap().push((auth.clone(), q.clone()));
+                    if q.is_some() || auth.as_deref() != Some(&format!("Bearer {accept}")) {
+                        return StatusCode::UNAUTHORIZED.into_response();
+                    }
+                    ws.on_upgrade(|_socket| async {}).into_response()
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (Config { daemon_url: format!("http://{addr}").parse().unwrap() }, seen)
+    }
+
+    #[tokio::test]
+    async fn watcher_authenticates_to_password_daemon_with_token_file_bearer() {
+        let (cfg, seen) = password_daemon("file-token").await;
+        let auth = WatcherAuth { session: None, local_token_file: Some(Arc::new(|| Some("file-token".to_string()))) };
+        let (_ws, label) = connect_authed(&cfg, &reqwest::Client::new(), &auth).await.expect("authenticated");
+        assert_eq!(seen.lock().unwrap()[0], (Some("Bearer file-token".to_string()), None), "bearer header, no query");
+        assert!(!label.contains("token") && !label.contains('?'), "{label}");
+    }
+
+    #[tokio::test]
+    async fn watcher_uses_held_session_as_bearer_never_in_the_url() {
+        let (cfg, seen) = password_daemon("session-1").await;
+        let auth = WatcherAuth::with_session(|| Some("session-1".to_string()));
+        connect_authed(&cfg, &reqwest::Client::new(), &auth).await.expect("authenticated");
+        assert_eq!(seen.lock().unwrap()[0], (Some("Bearer session-1".to_string()), None));
+        // An expired/cleared session falls back to the token flow, which a
+        // password daemon refuses: an error, not a query-token attempt.
+        let cleared = WatcherAuth::with_session(|| None);
+        let err = connect_authed(&cfg, &reqwest::Client::new(), &cleared).await.map(|_| ()).unwrap_err();
+        assert!(err.contains("password-protected"), "{err}");
+        assert_eq!(seen.lock().unwrap().len(), 1, "nothing was sent to /ws");
+    }
+
+    #[tokio::test]
+    async fn watcher_without_credentials_does_not_authenticate() {
+        let (cfg, seen) = password_daemon("x").await;
+        let err = connect_authed(&cfg, &reqwest::Client::new(), &WatcherAuth::default()).await.err().unwrap();
+        assert!(err.contains("password-protected"), "{err}");
+        assert!(seen.lock().unwrap().is_empty());
+        // The token file is not trusted for a daemon whose healthz is not a password smind.
+        let url_label_check = url_label(&"ws://127.0.0.1:1/ws?token=SECRET".parse().unwrap());
+        assert_eq!(url_label_check, "ws://127.0.0.1:1/ws");
     }
 }

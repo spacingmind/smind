@@ -181,7 +181,7 @@ async fn probe_healthz(base_url: &url::Url) -> HealthzProbe {
     let client = reqwest::Client::new();
     match client.get(url).timeout(std::time::Duration::from_secs(2)).send().await {
         Ok(resp) if resp.status().is_success() => {
-            let body = resp.json::<Healthz>().await.ok();
+            let body = smind_daemon_client::proxy::bounded::read_json::<Healthz>(resp, smind_daemon_client::proxy::bounded::MAX_BODY_BYTES).await;
             HealthzProbe {
                 reachable: true,
                 version: body.as_ref().and_then(|h| h.version.clone()),

@@ -41,6 +41,8 @@ pub trait AssetSource: Send + Sync + 'static {
     fn get(&self, path: &str) -> Option<(Vec<u8>, String)>;
 }
 
+const GATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
 pub struct ProxyState {
     pub secret: String,
     pub registry: std::sync::Arc<Mutex<Registry>>,
@@ -67,6 +69,9 @@ pub struct ProxyState {
     /// UI's own token fetch. Only then does the proxy authenticate with the
     /// token file; an older daemon keeps today's token-query flow.
     local_password: Mutex<Option<(String, bool)>>,
+    /// Short-timeout, no-redirect client for gate decisions (`/api/token` and
+    /// `/healthz` probes) -- never the streaming `http_client`.
+    gate_client: reqwest::Client,
     /// ADR-0031 D7 (b2): the local end (`http://127.0.0.1:<port>`) of each
     /// running `ssh -N -L` tunnel, keyed by `ssh`-kind connection id. Owned
     /// and kept current by the desktop's tunnel manager.
@@ -84,6 +89,7 @@ impl ProxyState {
             sessions: Mutex::new(std::collections::HashMap::new()),
             local_token_source: Mutex::new(Arc::new(crate::proxy::local_token::read)),
             local_password: Mutex::new(None),
+            gate_client: crate::proxy::bounded::client(GATE_TIMEOUT),
             ssh_local: Mutex::new(std::collections::HashMap::new()),
         })
     }
@@ -159,6 +165,10 @@ impl ProxyState {
     /// token file -- the built-in `local` entry ONLY, never url/relay.
     fn is_builtin_local(conn: &Connection) -> bool {
         conn.id == LOCAL_ID && conn.kind == ConnectionKind::Local
+    }
+
+    async fn is_password_smind(&self, base_url: &str) -> bool {
+        crate::proxy::local_token::is_password_smind(&self.gate_client, base_url).await
     }
 
     /// local_file_token reads the daemon token file now (it changes when the
@@ -350,6 +360,7 @@ async fn proxy_http(State(state): State<Arc<ProxyState>>, req: Request<Body>) ->
     // `local`'s own token fetch always asks the daemon (it refreshes what the
     // proxy knows about password protection), so it carries no credential.
     let bearer = if is_token_get { None } else { state.upstream_bearer(&conn).await };
+    let session_in_use = bearer.is_some() && bearer == state.session(&conn.id);
     let path_and_query = req
         .uri()
         .path_and_query()
@@ -388,11 +399,17 @@ async fn proxy_http(State(state): State<Arc<ProxyState>>, req: Request<Body>) ->
     match upstream {
         Ok(resp) => {
             let status = resp.status();
+            if session_in_use && matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+                // The daemon no longer honours this session (expired): drop it,
+                // so the next /api/token passes the daemon's own refusal
+                // through and the webview shows its login screen.
+                state.clear_session(&conn.id);
+            }
             if is_token_get && ProxyState::is_builtin_local(&conn) {
                 // 403 = a password-protected daemon (#349) that no longer
                 // serves its token: authenticate with the token file when we
                 // can read it. Anything else keeps the plain token flow.
-                let protected = status == StatusCode::FORBIDDEN;
+                let protected = status == StatusCode::FORBIDDEN && state.is_password_smind(&conn.base_url).await;
                 state.set_password_gate(&conn.base_url, protected);
                 if protected && state.local_file_token(&conn).await.is_some() {
                     return placeholder_token_response();
@@ -524,8 +541,9 @@ async fn proxy_ws(
     if ProxyState::is_builtin_local(&conn) && state.password_gate(&conn.base_url).is_none() {
         // The UI normally fetched /api/token first; if not, ask now.
         let probe = format!("{}/api/token", conn.base_url.trim_end_matches('/'));
-        if let Ok(resp) = state.http_client.get(probe).send().await {
-            state.set_password_gate(&conn.base_url, resp.status() == StatusCode::FORBIDDEN);
+        if let Ok(resp) = state.gate_client.get(probe).send().await {
+            let protected = resp.status() == StatusCode::FORBIDDEN && state.is_password_smind(&conn.base_url).await;
+            state.set_password_gate(&conn.base_url, protected);
         }
     }
     let bearer = state.upstream_bearer(&conn).await;
@@ -564,6 +582,11 @@ async fn proxy_ws(
     let (upstream, resp) = match connect_async(request).await {
         Ok(ok) => ok,
         Err(e) => {
+            if let (tokio_tungstenite::tungstenite::Error::Http(resp), true) = (&e, bearer.is_some() && bearer == state.session(&conn.id)) {
+                if matches!(resp.status().as_u16(), 401 | 403) {
+                    state.clear_session(&conn.id);
+                }
+            }
             eprintln!("smind desktop: proxy ws upstream connect failed: {e}");
             return (StatusCode::BAD_GATEWAY, "smind desktop: upstream connection failed").into_response();
         }
