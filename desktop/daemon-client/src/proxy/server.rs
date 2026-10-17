@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::extract::ws::{Message as AxumMessage, WebSocket, WebSocketUpgrade};
 use axum::extract::{RawQuery, State};
-use axum::http::{header, HeaderValue, Request, StatusCode, Uri};
+use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{any, get};
@@ -23,10 +23,11 @@ use axum::Router;
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpListener;
 use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message as TMessage;
 use url::Url;
 
-use crate::proxy::connections::{ConnectionKind, Registry};
+use crate::proxy::connections::{Connection, ConnectionKind, Registry, LOCAL_ID};
 use crate::proxy::secret::{self, GateOutcome};
 use crate::relay::client::RelayHandle;
 
@@ -39,6 +40,8 @@ pub trait AssetSource: Send + Sync + 'static {
     /// slash), or None if there's no such asset.
     fn get(&self, path: &str) -> Option<(Vec<u8>, String)>;
 }
+
+const GATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 pub struct ProxyState {
     pub secret: String,
@@ -54,6 +57,25 @@ pub struct ProxyState {
     /// plan's "one relay connection is one shared, multiplexed pipe"
     /// decision.
     pub relay: Mutex<Option<RelayHandle>>,
+    /// ADR-0031 D8: per-connection session tokens from a password login,
+    /// keyed by connection id. Memory only -- never persisted, and never
+    /// sent to the webview (the proxy attaches them upstream itself).
+    sessions: Mutex<std::collections::HashMap<String, String>>,
+    /// Where the `local` connection's daemon token comes from (the token
+    /// file by default; swapped in tests).
+    local_token_source: Mutex<Arc<dyn Fn() -> Option<String> + Send + Sync>>,
+    /// Whether the `local` daemon at a base URL answered `GET /api/token`
+    /// with 403 (a password-protected daemon, ADR-0031 D8), learned from the
+    /// UI's own token fetch. Only then does the proxy authenticate with the
+    /// token file; an older daemon keeps today's token-query flow.
+    local_password: Mutex<Option<(String, bool)>>,
+    /// Short-timeout, no-redirect client for gate decisions (`/api/token` and
+    /// `/healthz` probes) -- never the streaming `http_client`.
+    gate_client: reqwest::Client,
+    /// ADR-0031 D7 (b2): the local end (`http://127.0.0.1:<port>`) of each
+    /// running `ssh -N -L` tunnel, keyed by `ssh`-kind connection id. Owned
+    /// and kept current by the desktop's tunnel manager.
+    ssh_local: Mutex<std::collections::HashMap<String, String>>,
 }
 
 impl ProxyState {
@@ -64,13 +86,116 @@ impl ProxyState {
             assets,
             http_client: reqwest::Client::new(),
             relay: Mutex::new(None),
+            sessions: Mutex::new(std::collections::HashMap::new()),
+            local_token_source: Mutex::new(Arc::new(crate::config::read_local_token)),
+            local_password: Mutex::new(None),
+            gate_client: crate::proxy::bounded::client(GATE_TIMEOUT),
+            ssh_local: Mutex::new(std::collections::HashMap::new()),
         })
     }
 
-    fn current(&self) -> (ConnectionKind, String) {
-        let reg = self.registry.lock().unwrap();
-        let c = reg.current();
-        (c.kind, c.base_url.clone())
+    pub fn set_session(&self, connection_id: &str, token: String) {
+        self.sessions.lock().unwrap().insert(connection_id.to_string(), token);
+    }
+
+    pub fn session(&self, connection_id: &str) -> Option<String> {
+        self.sessions.lock().unwrap().get(connection_id).cloned()
+    }
+
+    pub fn clear_session(&self, connection_id: &str) {
+        self.sessions.lock().unwrap().remove(connection_id);
+    }
+
+    fn current(&self) -> Connection {
+        self.registry.lock().unwrap().current().clone()
+    }
+
+    /// set_local_token_source replaces how the `local` connection's daemon
+    /// token is read (default: the token file, read per attempt).
+    pub fn set_local_token_source(&self, source: impl Fn() -> Option<String> + Send + Sync + 'static) {
+        *self.local_token_source.lock().unwrap() = Arc::new(source);
+    }
+
+    pub fn set_ssh_local(&self, connection_id: &str, local_url: String) {
+        self.ssh_local.lock().unwrap().insert(connection_id.to_string(), local_url);
+    }
+
+    pub fn ssh_local(&self, connection_id: &str) -> Option<String> {
+        self.ssh_local.lock().unwrap().get(connection_id).cloned()
+    }
+
+    pub fn clear_ssh_local(&self, connection_id: &str) {
+        self.ssh_local.lock().unwrap().remove(connection_id);
+    }
+
+    /// upstream_base is the URL requests for `conn` are actually sent to:
+    /// its own base URL, or for an `ssh` connection its tunnel's local end
+    /// (`None` while no tunnel is running).
+    pub fn upstream_base(&self, conn: &Connection) -> Option<String> {
+        match conn.kind {
+            ConnectionKind::Ssh => self.ssh_local(&conn.id),
+            _ => Some(conn.base_url.clone()),
+        }
+    }
+
+    /// current_upstream is `current()` with an `ssh` connection resolved to
+    /// its tunnel (as a plain `url` connection), or the 502 text explaining
+    /// that the tunnel is down.
+    fn current_upstream(&self) -> Result<Connection, String> {
+        let mut conn = self.current();
+        if conn.kind == ConnectionKind::Ssh {
+            let Some(local) = self.ssh_local(&conn.id) else {
+                return Err(format!("smind desktop: the SSH tunnel for {} is not running; switch to it again to reconnect", conn.label));
+            };
+            conn.base_url = local;
+            conn.kind = ConnectionKind::Url;
+        }
+        Ok(conn)
+    }
+
+    fn password_gate(&self, base_url: &str) -> Option<bool> {
+        self.local_password.lock().unwrap().as_ref().filter(|(b, _)| b == base_url).map(|(_, v)| *v)
+    }
+
+    fn set_password_gate(&self, base_url: &str, protected: bool) {
+        *self.local_password.lock().unwrap() = Some((base_url.to_string(), protected));
+    }
+
+    /// is_builtin_local: the connection whose credential may come from the
+    /// token file -- the built-in `local` entry ONLY, never url/relay.
+    fn is_builtin_local(conn: &Connection) -> bool {
+        conn.id == LOCAL_ID && conn.kind == ConnectionKind::Local
+    }
+
+    async fn is_password_smind(&self, base_url: &str) -> bool {
+        crate::proxy::bounded::is_password_smind(&self.gate_client, base_url).await
+    }
+
+    /// local_file_token reads the daemon token file now (it changes when the
+    /// daemon restarts), only while `local` really is this machine
+    /// (`SMIND_DAEMON_URL` can point it elsewhere).
+    async fn local_file_token(&self, conn: &Connection) -> Option<String> {
+        let base = Url::parse(&conn.base_url).ok()?;
+        if !(crate::config::Config { daemon_url: base }).is_local_daemon().await {
+            return None;
+        }
+        let source = self.local_token_source.lock().unwrap().clone();
+        source()
+    }
+
+    /// upstream_bearer is the credential the proxy attaches upstream itself
+    /// for `conn` (ADR-0031 D8), so the webview never holds it: the held
+    /// login session for a connection that has one; else, for the built-in
+    /// `local` connection only and only once its daemon is known to be
+    /// password-protected (`password_gate`), the daemon token file.
+    async fn upstream_bearer(&self, conn: &Connection) -> Option<String> {
+        if let Some(token) = self.session(&conn.id) {
+            return Some(token);
+        }
+        if !Self::is_builtin_local(conn) || self.password_gate(&conn.base_url) != Some(true) {
+            return None;
+        }
+        self.local_file_token(conn).await
     }
 
     /// set_relay installs (or, with `None`, clears) the relay transport
@@ -217,21 +342,49 @@ const HOP_BY_HOP_REQUEST_HEADERS: &[header::HeaderName] = &[
 ];
 
 async fn proxy_http(State(state): State<Arc<ProxyState>>, req: Request<Body>) -> Response {
-    let (kind, base) = state.current();
-    if kind == ConnectionKind::Relay {
+    let conn = match state.current_upstream() {
+        Ok(c) => c,
+        Err(msg) => return (StatusCode::BAD_GATEWAY, msg).into_response(),
+    };
+    let base = conn.base_url.clone();
+    if conn.kind == ConnectionKind::Relay {
         return relay_api_response(req.uri());
     }
+    let is_token_get = req.method() == axum::http::Method::GET && req.uri().path() == "/api/token";
+    let has_session = state.session(&conn.id).is_some();
+    if is_token_get && has_session {
+        // The webview only needs *a* token to proceed; the real credential is
+        // attached upstream and never leaves Rust.
+        return placeholder_token_response();
+    }
+    // `local`'s own token fetch always asks the daemon (it refreshes what the
+    // proxy knows about password protection), so it carries no credential.
+    let bearer = if is_token_get { None } else { state.upstream_bearer(&conn).await };
+    let session_in_use = bearer.is_some() && bearer == state.session(&conn.id);
     let path_and_query = req
         .uri()
         .path_and_query()
         .map(|pq| pq.as_str())
         .unwrap_or("/");
+    let path_and_query = if bearer.is_some() {
+        strip_query_param(req.uri(), "token")
+    } else {
+        path_and_query.to_string()
+    };
     let url = format!("{}{}", base.trim_end_matches('/'), path_and_query);
 
     let method = req.method().clone();
     let mut headers = req.headers().clone();
     for name in HOP_BY_HOP_REQUEST_HEADERS {
         headers.remove(name);
+    }
+    if let Some(token) = &bearer {
+        match bearer_header(token) {
+            Some(v) => {
+                headers.insert(header::AUTHORIZATION, v);
+            }
+            None => return (StatusCode::BAD_GATEWAY, "smind desktop: unusable credential").into_response(),
+        }
     }
     let body_stream = req.into_body().into_data_stream();
 
@@ -246,6 +399,22 @@ async fn proxy_http(State(state): State<Arc<ProxyState>>, req: Request<Body>) ->
     match upstream {
         Ok(resp) => {
             let status = resp.status();
+            if session_in_use && matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+                // The daemon no longer honours this session (expired): drop it,
+                // so the next /api/token passes the daemon's own refusal
+                // through and the webview shows its login screen.
+                state.clear_session(&conn.id);
+            }
+            if is_token_get && ProxyState::is_builtin_local(&conn) {
+                // 403 = a password-protected daemon (#349) that no longer
+                // serves its token: authenticate with the token file when we
+                // can read it. Anything else keeps the plain token flow.
+                let protected = status == StatusCode::FORBIDDEN && state.is_password_smind(&conn.base_url).await;
+                state.set_password_gate(&conn.base_url, protected);
+                if protected && state.local_file_token(&conn).await.is_some() {
+                    return placeholder_token_response();
+                }
+            }
             let mut headers = resp.headers().clone();
             headers.remove(header::CONNECTION);
             let body = Body::from_stream(resp.bytes_stream());
@@ -278,11 +447,7 @@ async fn proxy_http(State(state): State<Arc<ProxyState>>, req: Request<Body>) ->
 fn relay_api_response(uri: &Uri) -> Response {
     let rest = uri.path().strip_prefix("/api/").unwrap_or("");
     if rest == "token" {
-        use base64::Engine;
-        let mut buf = [0u8; 16];
-        getrandom::fill(&mut buf).expect("getrandom: relay token");
-        let token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf);
-        return axum::Json(serde_json::json!({ "token": token })).into_response();
+        return placeholder_token_response();
     }
     (
         StatusCode::NOT_FOUND,
@@ -291,15 +456,61 @@ fn relay_api_response(uri: &Uri) -> Response {
         .into_response()
 }
 
+/// placeholder_token_response is the synthesized `GET /api/token` answer: an
+/// opaque random value, not a credential (see `relay_api_response`).
+fn placeholder_token_response() -> Response {
+    use base64::Engine;
+    let mut buf = [0u8; 16];
+    getrandom::fill(&mut buf).expect("getrandom: placeholder token");
+    let token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf);
+    axum::Json(serde_json::json!({ "token": token })).into_response()
+}
+
+fn bearer_header(token: &str) -> Option<HeaderValue> {
+    let mut v = HeaderValue::from_str(&format!("Bearer {token}")).ok()?;
+    v.set_sensitive(true);
+    Some(v)
+}
+
+/// The WebSocket subprotocol prefix a login session token is offered under
+/// (`wsapi.BearerSubprotocolPrefix`): a browser cannot set headers on a
+/// WebSocket, so the token rides there instead of in the URL.
+const BEARER_SUBPROTOCOL_PREFIX: &str = "smind.bearer.";
+
+/// The subprotocol the real daemon always selects (`wsapi.Subprotocol`): a
+/// browser offers `["smind", "smind.bearer.<token>"]` and the daemon answers
+/// `smind`, never the token. Found against the real daemon: forwarding only
+/// the bearer entry makes the upstream handshake fail ("server sent no
+/// subprotocol").
+const SUBPROTOCOL: &str = "smind";
+
+/// offered_protocols lists the subprotocols the browser offered that the
+/// proxy passes on -- `smind` and `smind.bearer.*` -- in order.
+fn offered_protocols(headers: &HeaderMap) -> Vec<String> {
+    headers
+        .get_all(header::SEC_WEBSOCKET_PROTOCOL)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .map(str::trim)
+        .filter(|p| *p == SUBPROTOCOL || p.starts_with(BEARER_SUBPROTOCOL_PREFIX))
+        .map(str::to_string)
+        .collect()
+}
+
 // --- /ws bridge, frame-by-frame, Origin-less upstream handshake ---------
 
 async fn proxy_ws(
     State(state): State<Arc<ProxyState>>,
     RawQuery(query): RawQuery,
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let (kind, base) = state.current();
-    if kind == ConnectionKind::Relay {
+    let conn = match state.current_upstream() {
+        Ok(c) => c,
+        Err(msg) => return (StatusCode::BAD_GATEWAY, msg).into_response(),
+    };
+    if conn.kind == ConnectionKind::Relay {
         return match state.current_relay() {
             Some(handle) => ws.on_upgrade(move |socket| bridge_relay(socket, handle)),
             None => (
@@ -309,7 +520,7 @@ async fn proxy_ws(
                 .into_response(),
         };
     }
-    let mut target = match Url::parse(&base) {
+    let mut target = match Url::parse(&conn.base_url) {
         Ok(u) => u,
         Err(_) => {
             return (
@@ -329,25 +540,96 @@ async fn proxy_ws(
     // succeeds, so this is infallible in practice.
     let _ = target.set_scheme(scheme);
     target.set_path("/ws");
+
+    // ADR-0031 D8: with a credential of its own (held session, or the local
+    // daemon's token file) the proxy authenticates the upstream handshake
+    // itself and drops whatever token the webview put in the URL; otherwise
+    // the webview's own `smind.bearer.*` subprotocols are passed through.
+    if ProxyState::is_builtin_local(&conn) && state.password_gate(&conn.base_url).is_none() {
+        // The UI normally fetched /api/token first; if not, ask now.
+        let probe = format!("{}/api/token", conn.base_url.trim_end_matches('/'));
+        if let Ok(resp) = state.gate_client.get(probe).send().await {
+            let protected = resp.status() == StatusCode::FORBIDDEN && state.is_password_smind(&conn.base_url).await;
+            state.set_password_gate(&conn.base_url, protected);
+        }
+    }
+    let bearer = state.upstream_bearer(&conn).await;
+    let offered = offered_protocols(&headers);
+    let query = match (&bearer, query.as_deref()) {
+        (Some(_), Some(q)) => {
+            let uri: Uri = format!("/ws?{q}").parse().unwrap_or_else(|_| Uri::from_static("/ws"));
+            strip_query_param(&uri, "token").split_once('?').map(|(_, q)| q.to_string())
+        }
+        (_, q) => q.map(str::to_string),
+    };
     target.set_query(query.as_deref());
 
-    ws.on_upgrade(move |socket| bridge(socket, target))
+    let mut request = match target.as_str().into_client_request() {
+        Ok(r) => r,
+        Err(_) => return (StatusCode::BAD_GATEWAY, "smind desktop: invalid upstream URL").into_response(),
+    };
+    // What goes upstream: with the proxy's own credential the browser's
+    // bearer entries are dropped (never forwarded) but `smind` stays, so the
+    // daemon still selects it; without one, everything offered is forwarded.
+    let upstream_offer: Vec<&String> = offered.iter().filter(|p| bearer.is_none() || !p.starts_with(BEARER_SUBPROTOCOL_PREFIX)).collect();
+    if let Some(token) = &bearer {
+        match bearer_header(token) {
+            Some(v) => {
+                request.headers_mut().insert(header::AUTHORIZATION, v);
+            }
+            None => return (StatusCode::BAD_GATEWAY, "smind desktop: unusable credential").into_response(),
+        }
+    }
+    if !upstream_offer.is_empty() {
+        let joined = upstream_offer.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ");
+        if let Ok(v) = HeaderValue::from_str(&joined) {
+            request.headers_mut().insert(header::SEC_WEBSOCKET_PROTOCOL, v);
+        }
+    }
+
+    // Dial upstream before accepting the browser: the browser aborts a socket
+    // whose offered subprotocol the server did not select, so the answer has
+    // to carry what the daemon chose.
+    let (upstream, resp) = match connect_async(request).await {
+        Ok(ok) => ok,
+        Err(e) => {
+            if let (tokio_tungstenite::tungstenite::Error::Http(resp), true) = (&e, bearer.is_some() && bearer == state.session(&conn.id)) {
+                if matches!(resp.status().as_u16(), 401 | 403) {
+                    state.clear_session(&conn.id);
+                }
+            }
+            eprintln!("smind desktop: proxy ws upstream connect failed: {e}");
+            return (StatusCode::BAD_GATEWAY, "smind desktop: upstream connection failed").into_response();
+        }
+    };
+    // Echo what the daemon selected (it must be one of the browser's offers).
+    // If it selected nothing although the browser offered a bearer entry that
+    // was withheld from it, answer with the browser's own first choice so the
+    // browser does not abort the socket.
+    let chosen = resp
+        .headers()
+        .get(header::SEC_WEBSOCKET_PROTOCOL)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.trim().to_string())
+        .filter(|v| offered.contains(v));
+    let selected = chosen.or_else(|| if bearer.is_some() { offered.first().cloned() } else { None });
+    let ws = match selected {
+        Some(p) => ws.protocols([p]),
+        None => ws,
+    };
+    ws.on_upgrade(move |socket| bridge(socket, upstream))
 }
 
 /// bridge pumps frames in both directions between the browser-side
-/// `socket` and a fresh, Origin-less outbound connection to `target`
+/// `socket` and the already-open, Origin-less `upstream` connection
 /// until either side closes -- the same no-Origin handshake the
 /// existing `daemon-client::client` connection already relies on (see
 /// ADR-0012), just used here for the browser's own connection instead
 /// of the notification watcher's.
-async fn bridge(socket: WebSocket, target: Url) {
-    let upstream = match connect_async(target.as_str()).await {
-        Ok((ws, _resp)) => ws,
-        Err(e) => {
-            eprintln!("smind desktop: proxy ws upstream connect failed: {e}");
-            return;
-        }
-    };
+async fn bridge<S>(socket: WebSocket, upstream: tokio_tungstenite::WebSocketStream<S>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     let (mut up_tx, mut up_rx) = upstream.split();
     let (mut down_tx, mut down_rx) = socket.split();
 
