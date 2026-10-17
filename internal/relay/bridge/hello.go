@@ -84,7 +84,11 @@ func (h *Hub) identify(s *session, r *sessionReader, t *deviceTransport) error {
 	// chooses afresh per session proves the hello was made for THIS one. (The
 	// fixed single-device route, which pre-identity clients use, gets no
 	// challenge: they ignore unknown events but need not be sent one.)
-	if h.opts.Registry != nil && s.ref.device != DefaultDeviceID {
+	//
+	// Also without a registry: that daemon refuses the hello with
+	// device_hello_unsupported, and a client only reaches the hello (and so
+	// learns to fall back to the single-device route) after the challenge.
+	if s.ref.device != DefaultDeviceID {
 		if s.challenge == nil {
 			c, err := devices.NewChallenge()
 			if err != nil {
