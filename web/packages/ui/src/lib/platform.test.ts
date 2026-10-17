@@ -22,6 +22,12 @@ describe("platform in a non-desktop build", () => {
     await expect(desktop.listConnections()).rejects.toThrow(/unavailable/i);
     await expect(desktop.getCurrentConnection()).rejects.toThrow(/unavailable/i);
     await expect(desktop.addConnection("x", "http://example.com")).rejects.toThrow(/unavailable/i);
+    await expect(desktop.addConnection("x", "http://example.com", "pw")).rejects.toThrow(/unavailable/i);
+    await expect(desktop.probeConnection("http://example.com")).rejects.toThrow(/unavailable/i);
+    await expect(desktop.addSshConnection("x", { host: "h", sshPort: null, daemonPort: 4648 })).rejects.toThrow(/unavailable/i);
+    await expect(desktop.appSettingsGet()).rejects.toThrow(/unavailable/i);
+    await expect(desktop.appSettingsSet({ onboardingCompleted: true })).rejects.toThrow(/unavailable/i);
+    expect(() => desktop.onRunSetupRequested(() => {})()).not.toThrow();
     await expect(desktop.previewRelayLink("x")).rejects.toThrow(/unavailable/i);
     await expect(desktop.addRelayConnection("x", "y")).rejects.toThrow(/unavailable/i);
     await expect(desktop.removeConnection("id")).rejects.toThrow(/unavailable/i);
@@ -65,7 +71,7 @@ describe("platform in a desktop build", () => {
         case "daemon_update":
         case "daemon_restart":
         case "take_over_daemon":
-          return { platform: "macos", reachable: true, daemonVersion: "0.7.0", appVersion: "0.7.0", comparison: "same", managedState: "managed", pid: 123, installedPath: "/tmp/smind", logPath: "/tmp/smind.log", binaryInstalled: true, wslDaemonSuspected: false, gitFound: null, prerequisiteMessage: null };
+          return { platform: "macos", reachable: true, daemonVersion: "0.7.0", appVersion: "0.7.0", comparison: "same", managedState: "managed", pid: 123, installedPath: "/tmp/smind", logPath: "/tmp/smind.log", binaryInstalled: true, localService: "smind", portOccupied: false, wslDaemonSuspected: false, gitFound: null, prerequisiteMessage: null };
         case "connection_version":
           return { reachable: true, daemonVersion: "0.6.0", appVersion: "0.7.0", comparison: "older" };
         case "app_update_check":
@@ -153,6 +159,89 @@ describe("platform in a desktop build", () => {
     await expect(desktop.addRelayConnection("", "bad")).rejects.toBeInstanceOf(Error);
     expect(changed).toHaveBeenCalledTimes(1);
     window.removeEventListener(CONNECTION_CHANGED_EVENT, changed);
+  });
+
+  it("maps the first-run methods to their commands: probe, password add, ssh add, settings get/set", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const probe = { reachable: true, version: "0.12.0", service: "smind", authRequired: true, loopback: false, error: null };
+    const ssh = { id: "ssh:homelab", kind: "ssh", label: "homelab", baseUrl: "http://127.0.0.1:50123" };
+    const settings = { onboardingCompleted: true, manageLocalDaemon: false };
+    const invoke = vi.fn(async (cmd: string) => {
+      switch (cmd) {
+        case "connections_probe":
+          return probe;
+        case "connections_add":
+          return { id: "url:h", kind: "url", label: "h", baseUrl: "http://h:4648" };
+        case "connections_add_ssh":
+          return ssh;
+        case "app_settings_get":
+        case "app_settings_set":
+          return settings;
+        default:
+          throw new Error(`unexpected invoke command ${cmd}`);
+      }
+    });
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    const { desktop } = await import("@/lib/platform");
+    const { CONNECTION_CHANGED_EVENT } = await import("@/lib/local-paths");
+    const changed = vi.fn();
+    window.addEventListener(CONNECTION_CHANGED_EVENT, changed);
+
+    expect(await desktop.probeConnection("http://h:4648")).toEqual(probe);
+    expect(invoke).toHaveBeenCalledWith("connections_probe", { url: "http://h:4648" });
+    expect(changed).not.toHaveBeenCalled();
+
+    await desktop.addConnection("h", "http://h:4648", "hunter2");
+    expect(invoke).toHaveBeenCalledWith("connections_add", { label: "h", url: "http://h:4648", password: "hunter2" });
+    expect(changed).toHaveBeenCalledTimes(1);
+
+    expect(await desktop.addSshConnection("homelab", { host: "homelab", sshPort: 2222, daemonPort: 4648 })).toEqual(ssh);
+    expect(invoke).toHaveBeenCalledWith("connections_add_ssh", { label: "homelab", host: "homelab", sshPort: 2222, daemonPort: 4648 });
+    await desktop.addSshConnection("homelab", { host: "homelab", sshPort: null, daemonPort: 4648 });
+    expect(invoke).toHaveBeenLastCalledWith("connections_add_ssh", { label: "homelab", host: "homelab", sshPort: null, daemonPort: 4648 });
+    expect(changed).toHaveBeenCalledTimes(3);
+
+    expect(await desktop.appSettingsGet()).toEqual(settings);
+    expect(invoke).toHaveBeenCalledWith("app_settings_get");
+    expect(await desktop.appSettingsSet({ manageLocalDaemon: false })).toEqual(settings);
+    expect(invoke).toHaveBeenCalledWith("app_settings_set", { patch: { manageLocalDaemon: false } });
+    window.removeEventListener(CONNECTION_CHANGED_EVENT, changed);
+  });
+
+  it("wraps Rust's string errors from the first-run commands and announces nothing on failure", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const invoke = vi.fn(async () => {
+      throw "ssh: connect to host homelab port 22: Connection refused";
+    });
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    const { desktop } = await import("@/lib/platform");
+    const { CONNECTION_CHANGED_EVENT } = await import("@/lib/local-paths");
+    const changed = vi.fn();
+    window.addEventListener(CONNECTION_CHANGED_EVENT, changed);
+
+    const target = { host: "homelab", sshPort: null, daemonPort: 4648 };
+    await expect(desktop.addSshConnection("h", target)).rejects.toThrow("Connection refused");
+    await expect(desktop.addSshConnection("h", target)).rejects.toBeInstanceOf(Error);
+    await expect(desktop.probeConnection("http://h")).rejects.toBeInstanceOf(Error);
+    await expect(desktop.appSettingsSet({ onboardingCompleted: true })).rejects.toBeInstanceOf(Error);
+    await expect(desktop.addConnection("h", "http://h", "pw")).rejects.toBeInstanceOf(Error);
+    expect(changed).not.toHaveBeenCalled();
+    window.removeEventListener(CONNECTION_CHANGED_EVENT, changed);
+  });
+
+  it("onRunSetupRequested subscribes to the Help menu event and unsubscribes on cleanup", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const unlisten = vi.fn();
+    const listen = vi.fn(async (_event: string, _handler: (e: { payload: unknown }) => void) => unlisten);
+    vi.doMock("@tauri-apps/api/event", () => ({ listen }));
+    const { desktop } = await import("@/lib/platform");
+    const cb = vi.fn();
+    const unsubscribe = desktop.onRunSetupRequested(cb);
+    await vi.waitFor(() => expect(listen).toHaveBeenCalledWith("run-setup-requested", expect.any(Function)));
+    listen.mock.calls[0][1]({ payload: null });
+    expect(cb).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    await vi.waitFor(() => expect(unlisten).toHaveBeenCalled());
   });
 
   it("isRelayPairingLink recognises an offer fragment and nothing else", async () => {
