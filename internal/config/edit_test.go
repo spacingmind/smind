@@ -318,3 +318,19 @@ func TestBindsNeverDualStackAnIPv4Literal(t *testing.T) {
 		}
 	}
 }
+
+func TestEnvStillAppliesWhenTheFileCannotBeRead(t *testing.T) {
+	path := useHome(t, "")
+	if err := os.Mkdir(path, 0o700); err != nil { // a directory where config.yaml should be: ReadFile fails, not "not exist"
+		t.Fatal(err)
+	}
+	t.Setenv(EnvListen, "0.0.0.0:4700")
+	t.Setenv(EnvPassword, "container-password-123")
+	cfg, err := Load()
+	if err == nil {
+		t.Fatal("Load accepted an unreadable config")
+	}
+	if cfg.Server.Listen != "0.0.0.0:4700" || cfg.Server.PasswordPlain == "" {
+		t.Fatalf("the environment was dropped with the unreadable file: %+v", cfg.Server)
+	}
+}

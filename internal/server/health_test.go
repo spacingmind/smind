@@ -53,7 +53,7 @@ func TestHandleHealth_ReportsVersion(t *testing.T) {
 func TestHealthzIncludesManagedByWhenEnvSet(t *testing.T) {
 	handler := newTestServer(t, "test-token", WithManagedBy("systemd")).Handler()
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	handler.ServeHTTP(rec, loopbackReq(http.MethodGet, "/healthz", nil))
 
 	var body map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
@@ -74,7 +74,7 @@ func TestHealthzIncludesManagedByWhenEnvSet(t *testing.T) {
 func TestHealthzOmitsManagedByWhenUnset(t *testing.T) {
 	handler := newTestServer(t, "test-token").Handler()
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	handler.ServeHTTP(rec, loopbackReq(http.MethodGet, "/healthz", nil))
 
 	var body map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {

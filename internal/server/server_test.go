@@ -21,7 +21,7 @@ import (
 
 func newTestServer(t *testing.T, token string, opts ...Option) *Server {
 	t.Helper()
-	return newTestServerCfg(t, token, config.Default())
+	return newTestServerCfg(t, token, config.Default(), opts...)
 }
 
 func newTestServerCfg(t *testing.T, token string, cfg config.Config, opts ...Option) *Server {
