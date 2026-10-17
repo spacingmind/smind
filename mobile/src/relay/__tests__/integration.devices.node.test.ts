@@ -13,10 +13,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DataStream, GRPCWebSocketStream } from '../grpcweb';
 import { decodeFrame } from '../proto';
 import { ConnectOptions, grpcWebRelayNet, RelayConnection, RelayNet } from '../RelayConnection';
-import { DevHarness, testConnectOptions } from './devHarness';
+import { DevHarness, requireSelfSignedHarnessTrust, testConnectOptions } from './devHarness';
 
 let harness: DevHarness;
-let previousTLSReject: string | undefined;
 const connections: RelayConnection[] = [];
 
 /** The real grpc-web network, plus the ability to see every stream and cut the live one (a network drop). */
@@ -49,15 +48,13 @@ function open(seed: number, over: Partial<ConnectOptions> = {}): RelayConnection
 }
 
 beforeAll(async () => {
-  previousTLSReject = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; // the harness relay's self-signed cert; see integration.node.test.ts
+  requireSelfSignedHarnessTrust();
   harness = await DevHarness.start(0);
 }, 90_000);
 
 afterAll(() => {
   for (const c of connections) c.close();
   harness?.stop();
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = previousTLSReject;
 });
 
 describe('three devices on one relay host: two Go desktop peers and the mobile TypeScript client', () => {

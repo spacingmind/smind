@@ -30,17 +30,14 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RelayConnection } from '../RelayConnection';
-import { DevHarness, testConnectOptions } from './devHarness';
+import { DevHarness, requireSelfSignedHarnessTrust, testConnectOptions } from './devHarness';
 
 let harness: DevHarness;
 let wsDir: string;
-let previousTLSReject: string | undefined;
 
 beforeAll(async () => {
-  // Same self-signed-cert caveat as integration.node.test.ts: this
-  // override is test-only and does not touch the client code under test.
-  previousTLSReject = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  // The harness's relay uses a fresh self-signed cert; see requireSelfSignedHarnessTrust.
+  requireSelfSignedHarnessTrust();
 
   // workspace.create requires an existing git repo (tasks are worktrees
   // branched off it), so seed a minimal one.
@@ -57,7 +54,6 @@ beforeAll(async () => {
 afterAll(() => {
   harness?.stop();
   if (wsDir) rmSync(wsDir, { recursive: true, force: true });
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = previousTLSReject;
 });
 
 describe('persistent connection against a real Go relay + daemon bridge', () => {

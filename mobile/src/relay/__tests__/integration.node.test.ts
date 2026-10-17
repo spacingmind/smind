@@ -33,26 +33,18 @@
 /// <reference types="node" />
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { connectAndFetchWorkspaceList } from '../client';
-import { DevHarness, testConnectOptions } from './devHarness';
+import { DevHarness, requireSelfSignedHarnessTrust, testConnectOptions } from './devHarness';
 
 let harness: DevHarness;
-let previousTLSReject: string | undefined;
 
 beforeAll(async () => {
-  // The harness's relay uses a fresh self-signed cert (server.LoadOrCreateCert),
-  // same as any self-hosted `smind relay`. A real device needs a CA-verified
-  // certificate (mobile does not pin, see PairingScreen's help text), so there
-  // is no real CA to trust here: this test-only override disables Node's TLS
-  // verification purely for this harness's ad hoc local cert. It does not touch
-  // grpcweb.ts/client.ts, which stay exactly what a real device would run.
-  previousTLSReject = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  // The harness's relay uses a fresh self-signed cert; see requireSelfSignedHarnessTrust.
+  requireSelfSignedHarnessTrust();
   harness = await DevHarness.start(1);
 }, 90_000);
 
 afterAll(() => {
   harness?.stop();
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = previousTLSReject;
 });
 
 describe('end-to-end against a real Go relay + daemon bridge', () => {

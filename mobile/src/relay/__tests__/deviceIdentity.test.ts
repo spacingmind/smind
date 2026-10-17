@@ -128,6 +128,13 @@ describe('device_hello v2 cross-language vector', () => {
     expect(hex(helloSignedBytes(daemonPub, mobilePub, utf8('sess-another-route'), challenge))).not.toBe(base);
     expect(hex(helloSignedBytes(daemonPub, mobilePub, sessionId, other(challenge)))).not.toBe(base);
     // and the negatives' bytes are exactly those variants
+    // and the vector's negatives are exactly those variants (where the file carries enough to rebuild them)
+    const byName = Object.fromEntries(vector.negative.map((n) => [n.name, n.signed_bytes_hex]));
+    expect(hex(helloSignedBytes(daemonPub, mobilePub, utf8('sess-another-route'), challenge))).toBe(byName.other_session_id);
+    expect(hex(helloSignedBytes(daemonPub, mobilePub, sessionId, new Uint8Array(challenge.map((x) => x + 1))))).toBe(byName.other_challenge);
+    expect(hex(helloSignedBytes(fromHex('202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f'), mobilePub, sessionId, challenge))).toBe(
+      byName.other_daemon_pub,
+    );
     for (const n of vector.negative) expect(vector.signed_bytes_hex).not.toBe(n.signed_bytes_hex);
   });
 

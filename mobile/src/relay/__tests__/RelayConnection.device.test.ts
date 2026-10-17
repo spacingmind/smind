@@ -437,6 +437,20 @@ describe('hello v2: the daemon speaks first', () => {
     expect(relay.streams[0].closed).toBe(true);
   });
 
+  it('a daemon that stalls on the challenge AFTER having answered is retried, not called outdated', { timeout: 20_000 }, async () => {
+    const relay = new FakeRelay();
+    const conn = start(relay, { reconnect: { baseMs: 5, maxMs: 20, resumeProbeMs: 300, handshakeMs: 1500, challengeMs: 150 } });
+    await conn.whenConnected();
+    const epoch = conn.epoch;
+    relay.challengeMode = 'none'; // the new session's challenge never comes (a stalled daemon)
+    relay.restartDaemon();
+    relay.dropCurrentStream();
+    await vi.waitFor(() => expect(relay.streams.length).toBeGreaterThan(3), { timeout: 8000 }); // it keeps trying
+    expect(conn.state.kind).not.toBe('failed');
+    relay.challengeMode = 'v2';
+    await vi.waitFor(() => expect(conn.epoch).toBeGreaterThan(epoch), { timeout: 8000 });
+  });
+
   it('a challenge of another version, or one that is not 32 bytes, means different versions: failed, no hello', async () => {
     for (const mode of ['other-version', 'short'] as const) {
       const relay = new FakeRelay();

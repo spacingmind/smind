@@ -996,7 +996,13 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   received on THIS session, never sends a v1 hello and never falls back to one; no challenge, a challenge of another version or
   length, or `hello_version_unsupported` is the failed state "Daemon outdated or on a different version" (shows `smind update`).
   A resume sends no hello (one challenge per session); a fresh session gets a fresh challenge. The shared vector is v2 with four
-  negatives, read by the TS test; the Go `devharness` peers sign v2 too.
+  negatives, read by the TS test; the Go `devharness` peers sign v2 too. A reviewer pass on this change found no crypto or flow
+  defect (signed bytes, session-id bytes, per-session challenge, strict challenge parse, no v1/challenge-less hello path); it
+  drove: a challenge that stalls AFTER a daemon has answered on this connection is retried, not called outdated (only a first
+  connect treats silence as final); exact-byte checks for three of the four vector negatives; one less repetition in the outdated
+  card. The integration tests no longer switch TLS verification off in code (CodeQL "disabling certificate validation"): `npm run
+  test:integration` starts the test process with `NODE_TLS_REJECT_UNAUTHORIZED=0` for the harness's self-signed relay and the tests
+  refuse to run without it.
 
 ## Validation
 
@@ -1136,8 +1142,8 @@ untouched; the test fails when the challenge/session binding is removed), `TestH
 
 ### P13b (2026-10-15, branch `feat/mobile-relay-device-identity`)
 
-Commands: `cd mobile && npx tsc --noEmit && npx vitest run --exclude "**/*.node.test.ts"` (19 files, 121 tests),
-`npm run test:integration` (3 files, 10 tests; builds `internal/relay/bridge/devharness`, a real relay + a real daemon hub with a
+Commands: `cd mobile && npx tsc --noEmit && npx vitest run --exclude "**/*.node.test.ts"` (19 files, 134 tests),
+`npm run test:integration` (3 files, 11 tests; builds `internal/relay/bridge/devharness`, a real relay + a real daemon hub with a
 device registry + two Go desktop peers), `npm run smoke:web:full` (Expo web in headless Chromium against the same harness),
 `go test ./...`, `go test -race -count=3 ./internal/relay/bridge/devharness/`, `task lint`. Re-run on top of #354 (hello v2).
 

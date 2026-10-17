@@ -13,6 +13,21 @@ import { identityFromSeed } from '../deviceIdentity';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..', '..');
 
+/**
+ * The harness's relay serves a fresh self-signed certificate (like any
+ * self-hosted `smind relay`), and a real device does not accept that (the
+ * pairing screen says so), so these node-side tests must be allowed to talk to
+ * it. That is a property of the test PROCESS, set where it is started
+ * (`npm run test:integration`), not something the tests switch on in code:
+ * this only checks it and says what to run. It does not touch grpcweb.ts or
+ * client.ts, which stay exactly what a device runs.
+ */
+export function requireSelfSignedHarnessTrust(): void {
+  if (process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0') {
+    throw new Error('the integration tests talk to a self-signed relay: run them with `npm run test:integration` (it sets NODE_TLS_REJECT_UNAUTHORIZED=0 for that process)');
+  }
+}
+
 export interface HarnessReply {
   cmd: string;
   ok: boolean;

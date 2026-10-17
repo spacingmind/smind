@@ -187,13 +187,20 @@ class RevokedError extends Error {}
 class FatalError extends Error {}
 /** The daemon and this app speak different device-identity versions: nothing to retry, someone has to update. */
 class VersionMismatchError extends FatalError {}
+/**
+ * No challenge arrived in time. Final on a first connect (the daemon is older
+ * than this app), but only a stall once a daemon has answered on this
+ * connection: one that already served v2 cannot have become outdated.
+ */
+class ChallengeSilenceError extends VersionMismatchError {}
 /** The daemon or relay is busy or full: retry with backoff, even on the first connect. */
 class RetryableError extends Error {}
 
 const HELLO_REQUEST_ID = 'hello';
 const DAEMON_OUTDATED =
-  'The daemon did not send a device challenge: it is older than this app (device hello v2) or runs a different version. Update the daemon (smind update) and try again.';
-const VERSIONS_DIFFER = 'The daemon and this app use different device-identity versions. Update the daemon and the app to the same release.';
+  'The daemon did not send a device challenge: it is older than this app (device hello v2) or runs a different version. Update the daemon and try again.';
+const VERSIONS_DIFFER =
+  'The daemon and this app use different device-identity versions. Update the daemon, and the app too if it is the older one, to the same release.';
 // The liveness probe after a resume: a cheap read every daemon serves. (Not an
 // unknown method: the daemon does not answer those at all.)
 const PROBE_METHOD = 'workspace.list';
@@ -758,7 +765,8 @@ export class RelayConnection {
           this.setState({ kind: 'revoked', deviceId: opts.identity.deviceId });
           return;
         }
-        if (e instanceof FatalError) {
+        const stalled = e instanceof ChallengeSilenceError && (everConnected || reachedDaemon);
+        if (e instanceof FatalError && !stalled) {
           this.dropSession();
           this.setState({ kind: 'failed', message: e.message, versionMismatch: e instanceof VersionMismatchError || undefined });
           return;
@@ -964,7 +972,7 @@ export class RelayConnection {
     try {
       return await withTimeout(read, this.timing.challengeMs, DAEMON_OUTDATED);
     } catch (e) {
-      if (e instanceof TimeoutError) throw new VersionMismatchError(DAEMON_OUTDATED);
+      if (e instanceof TimeoutError) throw new ChallengeSilenceError(DAEMON_OUTDATED);
       if (e instanceof ChallengeVersionError) throw new VersionMismatchError(`${VERSIONS_DIFFER} (${e.message})`);
       throw e;
     }
