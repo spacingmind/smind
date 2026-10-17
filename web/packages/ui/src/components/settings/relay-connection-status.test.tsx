@@ -53,6 +53,18 @@ describe("RelayConnectionStatus", () => {
     expect(line).toHaveTextContent("remove this connection and add the link again");
   });
 
+  it("tells an outdated daemon apart from a refusal", () => {
+    render(
+      <RelayConnectionStatus
+        status={{ state: "refused", code: "daemon_outdated", message: "The daemon did not send a device challenge: update it." }}
+      />,
+    );
+    const line = screen.getByTestId("connection-relay-status");
+    expect(line).toHaveTextContent("different versions");
+    expect(line).not.toHaveTextContent("The daemon refused");
+    expect(line).toHaveTextContent("update it");
+  });
+
   it.each([
     ["connected", "Connected through the relay"],
     ["connecting", "Connecting through the relay…"],

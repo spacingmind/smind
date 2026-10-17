@@ -1127,3 +1127,11 @@ preview page; the real desktop app was not launched).
 Not verified: AC 3 and the TypeScript device (see Progress); the real macOS/Windows app (the screenshots are of the component in a
 headless browser, not the Tauri window); Windows at runtime for the new Rust (CI runs `cargo test` for the daemon client with Go);
 a relay from before P12a; a real 125 s proxy.
+
+**Hello v2 (PR #354 follow-up on this branch).** The desktop answers the daemon's `relay.device_challenge` (32 bytes, std base64) with a
+v2 hello signed over `…‖ uint16BE(len(session_id)) ‖ session_id ‖ challenge` (`device_hello_signature_verifies_against_go_vector`
+against the shared v2 vector incl. its four negatives, `parse_challenge_variants`); no challenge within `challenge_timeout` (5 s) or a
+challenge of another version shows `daemon_outdated` ("different versions", `relay-connection-status.test.tsx`), never a v1 hello.
+The Go bridge now sends the challenge on every non-legacy device route (also without a registry) so `legacy_daemon_still_works`
+keeps reaching `device_hello_unsupported`. Not covered by a test: the 5 s silence → `daemon_outdated` path (needs a fake transport;
+a v0.12.0 daemon was not run).
