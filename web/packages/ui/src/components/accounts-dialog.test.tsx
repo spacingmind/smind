@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import { AccountsDialog } from "@/components/accounts-dialog";
 import { FakeWsClient } from "@/test/fake-ws-client";
+import { FakeUsageDaemon } from "@/test/usage-test-client";
+import { renderWithDaemon } from "@/test/render-with-daemon";
 
 const ACCOUNTS = [
   {
@@ -36,8 +38,8 @@ async function flush(): Promise<void> {
   });
 }
 
-function renderDialog(client: FakeWsClient) {
-  render(<AccountsDialog client={client as never} open onOpenChange={() => {}} />);
+function renderDialog(daemon: FakeUsageDaemon) {
+  renderWithDaemon(<AccountsDialog client={daemon.client} open onOpenChange={() => {}} />, daemon);
 }
 
 /** The manual-paste form is collapsed behind a disclosure by default -- open it before interacting with its fields. */
@@ -48,7 +50,7 @@ async function openManualForm(): Promise<void> {
 describe("AccountsDialog", () => {
   it("lists accounts from account.list, labeling each with provider.list's label for its account-provider id", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list").resolve(ACCOUNTS);
     client.nth("provider.list").resolve(PROVIDERS);
@@ -64,7 +66,7 @@ describe("AccountsDialog", () => {
 
   it("falls back to the raw provider id when provider.list hasn't described it", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list").resolve(ACCOUNTS);
     await flush();
@@ -75,7 +77,7 @@ describe("AccountsDialog", () => {
 
   it("shows the empty hint when there are no accounts", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list").resolve([]);
     await flush();
@@ -85,7 +87,7 @@ describe("AccountsDialog", () => {
 
   it("manual-paste form is collapsed until its disclosure is opened", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list").resolve([]);
     client.nth("provider.list").resolve(PROVIDERS);
@@ -103,7 +105,7 @@ describe("AccountsDialog", () => {
 
   it("manual-add dropdown is derived from provider.list's credential-bearing providers, keyed by accountProvider not id", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list").resolve([]);
     await flush();
@@ -129,7 +131,7 @@ describe("AccountsDialog", () => {
 
   it("renders a GLM row as managed-externally, with no credential or add-account affordance", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list").resolve([]);
     await flush();
@@ -159,7 +161,7 @@ describe("AccountsDialog", () => {
 
   it("hides the managed-externally section when provider.list returns no cli-kind providers", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list").resolve([]);
     await flush();
@@ -176,7 +178,7 @@ describe("AccountsDialog", () => {
 
   it("add form requires label and credential before calling account.add", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list").resolve([]);
     await flush();
@@ -191,7 +193,7 @@ describe("AccountsDialog", () => {
 
   it("submits account.add with provider, label, credential and refreshes the list", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list", 0).resolve([]);
     client.nth("provider.list").resolve(PROVIDERS);
@@ -221,7 +223,7 @@ describe("AccountsDialog", () => {
 
   it("shows a collapsed Base URL field for an api-key provider and sends it in account.add", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list", 0).resolve([]);
     client.nth("provider.list").resolve(PROVIDERS);
@@ -254,7 +256,7 @@ describe("AccountsDialog", () => {
 
   it("hides the Base URL field for an oauth-kind provider", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list", 0).resolve([]);
     client.nth("provider.list").resolve(PROVIDERS);
@@ -268,7 +270,7 @@ describe("AccountsDialog", () => {
 
   it("surfaces a daemon error from account.add inline", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list", 0).resolve([]);
     client.nth("provider.list").resolve(PROVIDERS);
@@ -290,7 +292,7 @@ describe("AccountsDialog", () => {
 
   it("Connect requires a label before calling account.oauthStart", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list", 0).resolve([]);
     client.nth("provider.list").resolve(PROVIDERS);
@@ -305,7 +307,7 @@ describe("AccountsDialog", () => {
 
   it("Connect calls account.oauthStart with the accountProvider id, renders the authorize link on the event, and refreshes on success", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list", 0).resolve([]);
     client.nth("provider.list").resolve(PROVIDERS);
@@ -340,7 +342,7 @@ describe("AccountsDialog", () => {
 
   it("surfaces a daemon error from account.oauthStart inline", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list", 0).resolve([]);
     client.nth("provider.list").resolve(PROVIDERS);
@@ -360,7 +362,7 @@ describe("AccountsDialog", () => {
 
   it("Cancel aborts the in-flight account.oauthStart via its own signal (ui-redesign-parity Item 14)", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list", 0).resolve([]);
     client.nth("provider.list").resolve(PROVIDERS);
@@ -378,7 +380,7 @@ describe("AccountsDialog", () => {
 
   it("a cancelled login does not surface its rejection as an error", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list", 0).resolve([]);
     client.nth("provider.list").resolve(PROVIDERS);
@@ -401,7 +403,7 @@ describe("AccountsDialog", () => {
 
   it("renders a neutral status dot for an untested account row, with a Test button", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list").resolve(ACCOUNTS);
     await flush();
@@ -414,7 +416,7 @@ describe("AccountsDialog", () => {
 
   it("Test calls provider.test and shows an ok result inline, turning the dot green", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list").resolve(ACCOUNTS);
     await flush();
@@ -438,7 +440,7 @@ describe("AccountsDialog", () => {
 
   it("Test shows a not-ok result inline and turns the dot red", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list").resolve(ACCOUNTS);
     await flush();
@@ -458,7 +460,7 @@ describe("AccountsDialog", () => {
 
   it("Test on a managed-externally (cli-kind) row calls provider.test with its provider id and shows the result", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list").resolve([]);
     await flush();
@@ -481,7 +483,7 @@ describe("AccountsDialog", () => {
 
   it("surfaces a rejected provider.test call as an inline not-ok result", async () => {
     const client = new FakeWsClient();
-    renderDialog(client);
+    renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list").resolve(ACCOUNTS);
     await flush();

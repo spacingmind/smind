@@ -1,6 +1,7 @@
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { AccountUsage, AccountUsageParams } from "@/lib/account-usage/types";
 import { RpcError, type WsClient } from "@/lib/ws-client";
+import { FakeWsClient } from "@/test/fake-ws-client";
 import { usageResult } from "@/test/account-usage-fixtures";
 import type { Account, ProviderListResult, ProviderTestResult, RunSummary } from "@/lib/types";
 
@@ -45,8 +46,16 @@ export class FakeUsageDaemon {
   /** Optional shaper for an account mutation's result (the daemon's own answer, e.g. a credential swap that changes credentialType). */
   onAccountMutation: ((method: string, params: unknown, account: Account) => Account) | null = null;
 
-  constructor(reports: AccountUsage[]) {
+  /**
+   * When set, every non-`account.usage` RPC is delegated to this fake
+   * (recorded, resolved by hand) instead of auto-answered — for tests that
+   * drive calls manually (accounts-dialog's connect/test flows).
+   */
+  wsClient: FakeWsClient | null = null;
+
+  constructor(reports: AccountUsage[], wsClient: FakeWsClient | null = null) {
     this.reports = reports;
+    this.wsClient = wsClient;
   }
 
   private listeners = new Map<string, Set<(payload: unknown) => void>>();
@@ -57,6 +66,7 @@ export class FakeUsageDaemon {
 
   readonly client = {
     call: async (method: string, params?: unknown): Promise<unknown> => {
+      if (method !== "account.usage" && this.wsClient) return this.wsClient.call(method, params);
       if (method !== "account.usage") {
         this.calls.push({ method, params });
         if (this.failNonUsageWith) throw this.failNonUsageWith;
@@ -114,6 +124,10 @@ export class FakeUsageDaemon {
       const ids = p.accountIds;
       const reports = ids ? this.reports.filter((r) => ids.includes(r.accountId)) : this.reports;
       return usageResult(reports, { enabled: this.enabled, ttlSeconds: this.ttlSeconds });
+    },
+    callStream: async (method: string, params?: unknown, onEvent?: unknown, options?: unknown): Promise<unknown> => {
+      if (this.wsClient) return this.wsClient.callStream(method, params, onEvent as never, options as never);
+      return (this.client as { call: (m: string, p?: unknown) => Promise<unknown> }).call(method, params);
     },
   } as unknown as WsClient;
 
