@@ -923,10 +923,12 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 - [x] M1: schema + async writer
 - [x] M1: usage extraction (4 cases) + tee'd passthrough + include_usage
 - [x] M1: wsapi `usage.*` + `smind usage`
-- [ ] O1: run provenance — spec written 2026-10-18 (O1 section above).
-  - [ ] P1+P2+P3 backend (store, `workspace.GitHead/GitDirty`, runs capture, wsapi, MCP) — peer-glm
-  - [ ] P4 web (types, hook, footer segment, `Icons.commit`, tests, screenshots) — peer-glm
-  - [ ] independent review, `task test` + `task lint` + `tsc -b`, PR
+- [x] O1: run provenance — spec 2026-10-18, built 2026-10-18 on branch `feat/run-provenance` (see Validation "O1 provenance").
+  - [x] P1 store migration + `UpdateRunProvenance` — peer-glm, ACCEPTED (`fded1edd`)
+  - [x] P2 `workspace.GitHead/GitDirty` — peer-glm, ACCEPTED (`fee56ea0`; Lead later added `--no-optional-locks`)
+  - [x] P2 runs capture — peer-glm draft did not compile, Lead fixed the build (`ae16730f`); its tests ACCEPTED (`a8bb326d`)
+  - [x] P3 wsapi + MCP fields — peer-sonnet, ACCEPTED (`6110add2`, `a74e869a`)
+  - [x] P4 web — peer-glm; first candidate REJECTED (hook after early return, empty separator segment), fix ACCEPTED; its screenshots were blank, Lead re-took them
 - [x] O1: stop/resume keeps the session
 - [x] O2: MCP parent params + depth guard (Wave 1 slice; per-tree
       concurrency guard and guide stay Wave 2)
@@ -1049,7 +1051,19 @@ Known limitation: when `profileId` is set, `task_send` sends `source=human` so t
 - **Not verified** — (a) a browser-composer send *while a real run is live*: the sandbox's only runnable provider (`claude-native`, not logged in) finishes in under a second, so the busy-send path is covered by unit/integration tests and by the CLI-queued delivery above, not by driving the composer through a live run; (b) the "Send now" button and Cmd/Ctrl+Enter interrupt end to end and its screenshot (unit-tested only); (c) the auto-cancel row screenshot; (d) mobile (out of scope); (e) the desktop app.
 - **Decisions beyond the spec** — per-row "send now"/"edit" for an already-queued item is not built (needs new server verbs); cancel-race handling and the auto-cancel string coupling (`"cancelled by user"` vs `"delivery failed:`) are documented in `use-chat-queue.ts`.
 
-Not started: O1 (run provenance columns), O2 Wave 2 items.
+**O1 provenance** (branch `feat/run-provenance`, 2026-10-18):
+
+- **Migration** — `TestMigrate_RunProvenanceColumns`: old rows read back nil/nil/nil; re-running is a no-op. `TestUpdateRunProvenance_WritesOnlyNonNil`.
+- **Capture** (real temp git worktrees, fake ACP agent) — `TestRun_ProvenanceCapture_CommitDuringRun` (head != base), `_DirtyEdit` (clean run `dirty=false`, edited run `dirty=true`), `_StartedDirty_EndsClean`, `_NonGitDir` (NULLs, `done`, no event mentions git), `_GitMissing`, `_QueueDeliveredRun`, `_StartWhenBusyImmediate`, `_StopMidRun`, `_HungGit` (status `done`, NULLs, bounded), `TestRehydratedRun_KeepsProvenance`. Helpers: `TestGitHead_GitDirty` (8 subtests), `TestGitHead_HungGitReturnsAtDeadline`, `TestGitDirty_DoesNotRunFsmonitorHook`, `TestGitHead_NotARepoInsideParentRepo` (the last three fail with their fix reverted — checked).
+- **Wire** — `TestRunList_ProvenanceFields`, `TestRunStatusEvent_ProvenanceFields` (also `run.logs`), `TestTaskStatus_ProvenanceFields`.
+- **Web** — `run-provenance.test.tsx` (9 cases incl. hooks-order rerender, copy-click), `run-footer-provenance.test.tsx` (mount / no stray separator), `use-run-timeline.test.tsx` provenance block (run.list seed, null/absent, run.status patch, run.logs recovery path — fails with the recovery patch removed).
+- **Screenshots** (light + dark, stubbed RunFooter in four states, 900 px, viewed by the Lead): `/tmp/o1-run-header-shots/run-footer-light.png`, `.../run-footer-dark.png`. The commit icon + 7-char sha sits between duration and age with the same dot separators as its neighbours; the dirty marker is a small orange dot that reads in both themes; the running state shows the base sha; a run with no provenance shows no segment and no stray separator.
+- **Independent review** (read-only, 10 findings). Fixed: (1) a git child that outlives the killed git defeated the 3 s deadline and could hang `finish`/`CloseAll` — `cmd.WaitDelay`; (2) `git status` honours an agent-editable `core.fsmonitor`, now run on every run — `-c core.fsmonitor=false`, `--ignore-submodules=all`, `--no-optional-locks`, `GIT_TERMINAL_PROMPT=0`; (3) the start capture now derives from the run's ctx (a Stop skips it) and the terminal capture drops to 1 s during `CloseAll`; (7) `GIT_CEILING_DIRECTORIES` so a worktree that lost its `.git` is not read as the parent repo; (6) web recovery paths take provenance from `run.logs`; (9) migration appended at the end; (10) missing tests added. Not changed: (4) the start capture still adds up to its git latency (≤3 s, normally ~10 ms) before the agent is spawned, by design (base must be read before the agent edits); (5) there is no second "running" `run.status` for the base — adding one broke `TestEvents_NoCrossDeliveryBetweenTopics` and other clients treat each event as a status change — so a live run's base shows on the next `run.list`, and the terminal event carries base + head.
+- **Existing exposure (not new class):** the daemon already runs `git status/add/diff` in task worktrees for diff/commit/archive (`stagedPaths`, `taskDiff`, `snapshotIndex`); those still honour `core.fsmonitor`. Provenance was hardened; the older calls were not touched (follow-up).
+- **Not verified:** a live run against a real provider (claude-native/GLM) in a sandbox daemon — no logged-in provider here; coverage is the real registry + real git + fake ACP agent. Screenshots are of stubbed data, not of the running app. The migration was exercised on a synthetic old-schema DB, not a copy of a real `smind.db`.
+- **Pre-existing failure, not from this change:** `TestMCPTaskWait_ChildrenOf_CapsAt16` (cmd/smind) fails ("task tree concurrency limit reached (4 of 4 …)") identically on the plan-only commit `4bcd53df` (= origin/develop code); `task test` is otherwise green.
+
+Not started: O2 Wave 2 items. (O1 run provenance: see "O1 provenance" below.)
 
 **ADR-M AC 1–6 + 8 — per-run usage from agent events** (branch `feat/run-usage-adr-0020`, `task test` + `task lint` green, 2026-10-11):
 

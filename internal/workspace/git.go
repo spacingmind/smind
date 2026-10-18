@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // repoWorktreeLocks serializes git worktree mutations per repository.
@@ -214,6 +215,11 @@ func runGitOutputEnvCtx(ctx context.Context, dir string, env []string, args ...s
 	if env != nil {
 		cmd.Env = env
 	}
+	// CommandContext kills only git itself; a grandchild (an fsmonitor hook,
+	// a credential helper) that outlives it keeps the stdout/stderr pipes
+	// open and Run would wait for it indefinitely. WaitDelay bounds that
+	// wait so a cancelled ctx really does return.
+	cmd.WaitDelay = gitWaitDelay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -222,6 +228,10 @@ func runGitOutputEnvCtx(ctx context.Context, dir string, env []string, args ...s
 	}
 	return stdout.String(), nil
 }
+
+// gitWaitDelay is how long runGitOutputEnvCtx waits for git's output pipes
+// to close after ctx is done and git has been killed.
+const gitWaitDelay = 500 * time.Millisecond
 
 // dirExists reports whether path exists and is a directory.
 func dirExists(path string) bool {

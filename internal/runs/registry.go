@@ -853,7 +853,10 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 		}
 	}()
 
-	reg.captureProvenance(r, true)
+	// No second "running" notification for the base: clients treat each
+	// run.status as a status change. A live run's base reaches the UI with
+	// the next run.list; the terminal run.status carries base and head.
+	reg.captureProvenance(ctx, r, true)
 
 	decider := runPermissionDecider{reg: reg, r: r}
 	err := runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, r.prompt, decider, r.getPerm(), r.thinkingLevel, r.model, events)
@@ -1153,7 +1156,7 @@ func (reg *Registry) finish(r *run, err error) {
 	// O1: capture the terminal-state provenance BEFORE the terminal status
 	// is persisted, so the row and the in-memory status agree. The ctx is
 	// fresh (not the run's), so a Stop-cancelled run still captures.
-	reg.captureProvenance(r, false)
+	reg.captureProvenance(context.Background(), r, false)
 
 	// Persist before the in-memory status transition below becomes
 	// visible, not after: otherwise a caller that observes the terminal

@@ -541,6 +541,10 @@ export interface RunLogsResult {
   status: RunStatusValue;
   stopReason?: string;
   err?: string;
+  /** O1 provenance -- omitted by the daemon when unknown (or by an older daemon). */
+  baseSha?: string;
+  headSha?: string;
+  dirty?: boolean;
   events: RunLogEvent[];
 }
 

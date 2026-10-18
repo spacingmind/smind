@@ -142,6 +142,27 @@ describe("useRunTimeline provenance", () => {
     expect("dirty" in run).toBe(false);
   });
 
+  it("the run.logs recovery path (stream failed) fills in head sha and dirty", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+    client.nth("run.list", 0).resolve([summary({ BaseSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Status: "running", FinishedAt: null })]);
+    await flush();
+
+    await act(async () => {
+      client.nth("run.attach", 0).reject(new Error("socket dropped"));
+    });
+    await flush();
+    await act(async () => {
+      client
+        .nth("run.logs", 0)
+        .resolve({ runId: "run-1", status: "done", headSha: "dddddddddddddddddddddddddddddddddddddddd", dirty: true, events: [] } satisfies RunLogsResult);
+    });
+
+    await waitFor(() => expect(result.current.runs?.[0]?.headSha).toBe("dddddddddddddddddddddddddddddddddddddddd"));
+    expect(result.current.runs?.[0]?.baseSha).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(result.current.runs?.[0]?.dirty).toBe(true);
+  });
+
   it("a run.status event patches only the provenance keys it carries", async () => {
     const client = new FakeWsClient();
     const ev = fakeEvents();

@@ -174,6 +174,16 @@ var migrations = []migration{
 		},
 	},
 	{
+		// ADR-0028 §7.4: quota_cooldown.rejected_window records which window
+		// (five_hour, weekly, weekly_model, unified) a rejection cooldown came
+		// from, for display. Existing rows predate it: '' (unknown). Not named
+		// "window": that is an SQL keyword.
+		name: "quota_cooldown_rejected_window",
+		apply: func(db *sql.DB) error {
+			return addColumnIfMissing(db, "quota_cooldown", "rejected_window", "TEXT NOT NULL DEFAULT ''")
+		},
+	},
+	{
 		// O1 run provenance: the worktree's git state for a run -- base_sha
 		// (HEAD at start), head_sha (HEAD at the terminal state) and dirty
 		// (latest successful capture). All NULL (unknown) for pre-existing
@@ -190,16 +200,6 @@ var migrations = []migration{
 				}
 			}
 			return nil
-		},
-	},
-	{
-		// ADR-0028 §7.4: quota_cooldown.rejected_window records which window
-		// (five_hour, weekly, weekly_model, unified) a rejection cooldown came
-		// from, for display. Existing rows predate it: '' (unknown). Not named
-		// "window": that is an SQL keyword.
-		name: "quota_cooldown_rejected_window",
-		apply: func(db *sql.DB) error {
-			return addColumnIfMissing(db, "quota_cooldown", "rejected_window", "TEXT NOT NULL DEFAULT ''")
 		},
 	},
 }

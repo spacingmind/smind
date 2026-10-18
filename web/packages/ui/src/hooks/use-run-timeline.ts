@@ -543,6 +543,7 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
             status: logs.status,
             stopReason: logs.stopReason,
             err: logs.err,
+            ...provenanceOf(logs),
             finishedAt: new Date().toISOString(),
           });
         })
@@ -551,6 +552,15 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
           // everything streamed before the run ended.
         });
     });
+}
+
+/** The provenance keys a run.logs result actually carries -- only those, so a missing one never overwrites a list-seeded value with undefined. */
+function provenanceOf(logs: RunLogsResult): Pick<RunEntry, "baseSha" | "headSha" | "dirty"> {
+  return {
+    ...(logs.baseSha ? { baseSha: logs.baseSha } : {}),
+    ...(logs.headSha ? { headSha: logs.headSha } : {}),
+    ...(logs.dirty !== undefined ? { dirty: logs.dirty } : {}),
+  };
 }
 
 /** Maps one run.list entry to its timeline entry -- shared by the initial load and the adopt-unknown-runs path below, so the two can't drift. */
@@ -656,6 +666,7 @@ export function useRunTimeline(
                   // backfill never overwrites a list-seeded value with
                   // undefined.
                   ...(usage !== undefined ? { usage } : {}),
+                  ...provenanceOf(logs),
                   status: logs.status,
                   stopReason: logs.stopReason,
                   err: logs.err,

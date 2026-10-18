@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -347,5 +348,63 @@ func TestRehydratedRun_KeepsProvenance(t *testing.T) {
 	listed := reg2.List(chatID)
 	if len(listed) != 1 || listed[0].BaseSHA == nil || listed[0].HeadSHA == nil || listed[0].Dirty == nil {
 		t.Fatalf("List() after rehydrate = %+v, want provenance carried", listed)
+	}
+}
+
+// A git that hangs (a slow fsmonitor hook, a stuck filesystem) must cost
+// the run at most the capture timeout at each end: the run still finishes
+// "done", with NULL provenance and no stuck "running" state.
+func TestRun_ProvenanceCapture_HungGit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell shim")
+	}
+	// Not parallel: PATH and the package-level timeout.
+	wm, st, task, reg, runner := newProvEnv(t, "")
+	old := provenanceTimeout
+	provenanceTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { provenanceTimeout = old })
+	shim := t.TempDir()
+	// `sleep` is a child that outlives the killed shell and ends by itself.
+	if err := os.WriteFile(filepath.Join(shim, "git"), []byte("#!/bin/sh\nsleep 3\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", shim+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	started := time.Now()
+	runID := provStart(t, reg, wm, runner, task)
+	status := waitForStatus(t, reg, runID, StatusDone, 10*time.Second)
+	if took := time.Since(started); took > 8*time.Second {
+		t.Fatalf("run took %v with a hung git, want it bounded by the capture timeouts", took)
+	}
+	if status.BaseSHA != nil || status.HeadSHA != nil || status.Dirty != nil {
+		t.Fatalf("provenance = %v/%v/%v, want all nil when git hangs", status.BaseSHA, status.HeadSHA, status.Dirty)
+	}
+	row, err := st.GetRun(runID)
+	if err != nil {
+		t.Fatalf("GetRun() error = %v", err)
+	}
+	if row.BaseSHA != nil || row.HeadSHA != nil || row.Dirty != nil {
+		t.Fatalf("persisted provenance = %v/%v/%v, want NULLs", row.BaseSHA, row.HeadSHA, row.Dirty)
+	}
+}
+
+// StartWhenBusy's immediate-start branch builds its own run (not via Start):
+// it must record provenance too.
+func TestRun_ProvenanceCapture_StartWhenBusyImmediate(t *testing.T) {
+	t.Parallel()
+	wm, st, task, reg, runner := newProvEnv(t, "")
+	out, err := reg.StartWhenBusy(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "", WhenBusyReject, store.ChatQueueSourceHuman, 0, 0)
+	if err != nil {
+		t.Fatalf("StartWhenBusy() error = %v", err)
+	}
+	if out.RunID == "" {
+		t.Fatalf("StartWhenBusy() = %+v, want an immediate run", out)
+	}
+	status := waitForStatus(t, reg, out.RunID, StatusDone, 10*time.Second)
+	if status.BaseSHA == nil || status.HeadSHA == nil || status.Dirty == nil {
+		t.Fatalf("provenance = %v/%v/%v, want all recorded on the immediate-start path", status.BaseSHA, status.HeadSHA, status.Dirty)
+	}
+	if row, err := st.GetRun(out.RunID); err != nil || row.BaseSHA == nil || row.HeadSHA == nil {
+		t.Fatalf("persisted = %+v, %v; want base and head", row, err)
 	}
 }

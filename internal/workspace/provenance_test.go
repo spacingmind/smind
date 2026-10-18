@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 )
 
 // gitT runs git in dir with the user identity passed via `-c` (never the
@@ -150,4 +152,83 @@ func TestGitHead_GitDirty(t *testing.T) {
 			t.Fatal("GitDirty() error = nil with a cancelled context, want error")
 		}
 	})
+}
+
+// fakeGitOnPath puts a `git` shim first on PATH that runs body (a shell
+// snippet). The real git stays reachable behind it for any later call.
+func fakeGitOnPath(t *testing.T, body string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell shim")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// A git that spawns a child which outlives it (an fsmonitor hook, a
+// credential helper) keeps the output pipes open; the ctx deadline must
+// still return promptly instead of waiting for that child.
+func TestGitHead_HungGitReturnsAtDeadline(t *testing.T) {
+	// Not parallel: PATH. The shim's `sleep` is a child that outlives the
+	// killed shell, and ends by itself after 4s.
+	dir := newProvenanceRepo(t)
+	fakeGitOnPath(t, "sleep 4")
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := GitHead(ctx, dir); err == nil {
+		t.Fatal("GitHead() error = nil, want an error from the hung git")
+	}
+	if _, err := GitDirty(ctx, dir); err == nil {
+		t.Fatal("GitDirty() error = nil, want an error from the hung git")
+	}
+	if took := time.Since(start); took > 3*time.Second {
+		t.Fatalf("took %v, want return shortly after the 300ms deadline", took)
+	}
+}
+
+// The repo config is editable by the agent, so provenance must not run an
+// fsmonitor hook it names.
+func TestGitDirty_DoesNotRunFsmonitorHook(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell hook")
+	}
+	dir := newProvenanceRepo(t)
+	marker := filepath.Join(t.TempDir(), "ran")
+	hook := filepath.Join(t.TempDir(), "hook.sh")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, dir, "config", "core.fsmonitor", hook)
+
+	if _, err := GitDirty(context.Background(), dir); err != nil {
+		t.Fatalf("GitDirty() error = %v", err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("fsmonitor hook ran under GitDirty")
+	}
+
+	// Control: plain `git status` does run it (else this test proves nothing).
+	gitT(t, dir, "status")
+	if _, err := os.Stat(marker); err != nil {
+		t.Skip("this git does not run the configured fsmonitor hook on status; hardening untestable here")
+	}
+}
+
+// A directory that lost its own .git must not read as the parent repo.
+func TestGitHead_NotARepoInsideParentRepo(t *testing.T) {
+	parent := newProvenanceRepo(t)
+	sub := filepath.Join(parent, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if sha, err := GitHead(context.Background(), sub); err == nil {
+		t.Fatalf("GitHead(sub of a repo) = %q, want an error (not a repo)", sha)
+	}
+	if _, err := GitDirty(context.Background(), sub); err == nil {
+		t.Fatal("GitDirty(sub of a repo) error = nil, want an error")
+	}
 }
