@@ -97,13 +97,15 @@ type ExchangeResult struct {
 }
 
 // anthropicExchangeResponse is anthropic's token response on the
-// authorization_code grant: the refresh-shaped fields plus the account the
-// login belonged to. Account is kept raw and read defensively by
-// anthropicSubject: its shape is not ours to enforce, and an unexpected one
-// must never fail a login that worked before identities existed.
+// authorization_code grant: the refresh-shaped fields plus the account and
+// organization the login belonged to. Both are kept raw and read defensively
+// by anthropicExchangeSubject: their shape is not ours to enforce, and an
+// unexpected one must never fail a login that worked before identities
+// existed.
 type anthropicExchangeResponse struct {
 	anthropicTokenResponse
-	Account json.RawMessage `json:"account"`
+	Account      json.RawMessage `json:"account"`
+	Organization json.RawMessage `json:"organization"`
 }
 
 // openAIExchangeResponse is openai's token response on the
@@ -217,7 +219,7 @@ func (l *AnthropicLogin) Exchange(ctx context.Context, code, state string, pkce 
 			RefreshToken: tok.RefreshToken,
 			ExpiresAt:    time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second),
 		},
-		Subject: anthropicSubject(tok.Account),
+		Subject: anthropicExchangeSubject(tok.Account, tok.Organization),
 	}, nil
 }
 

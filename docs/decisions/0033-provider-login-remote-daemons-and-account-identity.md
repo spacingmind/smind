@@ -92,16 +92,29 @@ non-generalizable to remote transports). The explicit login contract below is th
 - `identity` = hex SHA-256 of the **length-prefixed** provider and subject, `"<len>:<provider>|<len>:<subject>"` (length
   prefixes make the hash input delimiter-safe: no provider/subject text can make two different pairs collide, which a plain
   `"<provider>:<subject>"` join would allow), where `<subject>` is, from the **token exchange response**
-  (no extra provider call, so ADR-0028's rate-limit rules are untouched): Anthropic → `account.uuid`
-  (`refs/cliproxyapi/internal/auth/claude/anthropic_auth.go:134-139`); OpenAI → the id_token's
+  (no extra provider call, so ADR-0028's rate-limit rules are untouched): Anthropic → the token response's `account.uuid` and
+  `organization.uuid`, length-prefixed the same way, **both required** (with either missing the login has no identity; the
+  login itself still succeeds; `refs/cliproxyapi/internal/auth/claude/anthropic_auth.go:134-160`); OpenAI → the id_token's
   `sub` and `chatgpt_account_id` claims, length-prefixed the same way, **both required** (with either missing the login has
   no identity, so two workspaces can never merge on `sub` alone;
   `refs/cliproxyapi/internal/auth/codex/jwt_parser.go:19,43`). The id_token payload is decoded without signature
   verification (it came straight from the token endpoint over TLS, the trust the access token already gets), and an
-  unexpected `account` / `id_token` shape means "no identity", never a failed login. It is hashed so no
+  unexpected `account` / `organization` / `id_token` shape means "no identity", never a failed login. It is hashed so no
   vendor id/e-mail is stored or logged; it never crosses the wire (the wire only gets `hasIdentity: bool`). API-key
   and pasted-credential accounts keep `identity = NULL`; replacing a credential by paste (`account.updateCredential`)
   **clears** the row's identity, since it described the old credential.
+- **Why the Anthropic subject includes the organization.** One person can belong to a personal and a team organization
+  under a single `account.uuid`; the two have different plans and separate rate-limit pools. With `account.uuid` alone,
+  logging in to the team org would replace the personal row's credential in place (routing slot, quota rows and cooldown
+  history of the wrong pool), and a row-level Re-login of the personal row completed in the team org would pass the identity
+  check. With `(account.uuid, organization.uuid)` the team login creates a second row, and that row-level Re-login is an
+  `identity_mismatch`. This mirrors cockpit-tools, which keys on e-mail + account uuid + organization uuid and requires
+  organization equality for CLI sync. No extra provider call is made (the organization comes from the same token exchange
+  response).
+  - *Migration:* none. The first Anthropic identity derivation (B1, commit `cace0114`) is in no release tag, so no
+    persisted identity was ever computed from `account.uuid` alone.
+  - *Unverified:* which organization Anthropic mints the token for when a person belongs to several (the authorize page
+    may let the user pick, or default to one); the daemon only records whichever the token response names.
 - No e-mail is stored or exposed (ADR-0028's "no e-mail beyond the user's label" holds).
 
 **Semantics of `account.oauthStart`** (optional `accountId`):

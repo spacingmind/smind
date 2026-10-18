@@ -487,6 +487,48 @@ func TestLoginCoordinator_Relogin(t *testing.T) {
 		}
 	})
 
+	t.Run("relogin same account different org creates a second row", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		personalSubject := anthropicSubject("acct-1", "org-personal")
+		teamSubject := anthropicSubject("acct-1", "org-team")
+
+		personal, err := relogin(t, coord, login, "personal", LoginOptions{}, personalSubject)
+		if err != nil || !personal.Created {
+			t.Fatalf("personal Login() = %+v, %v, want created", personal, err)
+		}
+		before, _ := registry.Get(personal.Account.ID)
+
+		// Same account.uuid, other organization: a different rate-limit pool,
+		// so a new row -- never an in-place replace of the personal one.
+		team, err := relogin(t, coord, login, "team", LoginOptions{}, teamSubject)
+		if err != nil {
+			t.Fatalf("team Login() error = %v", err)
+		}
+		if !team.Created || team.Adopted || team.Account.ID == personal.Account.ID {
+			t.Fatalf("team result = %+v, want a new row beside account %d", team, personal.Account.ID)
+		}
+		after, _ := registry.Get(personal.Account.ID)
+		if after.OAuth.AccessToken != before.OAuth.AccessToken || after.Label != "personal" {
+			t.Errorf("personal row = %+v, want untouched", after)
+		}
+		if accts, _ := registry.List(); len(accts) != 2 {
+			t.Errorf("accounts = %d, want 2", len(accts))
+		}
+
+		// A row-level Re-login of the personal row that ends up in the team
+		// org is an identity_mismatch.
+		_, err = relogin(t, coord, login, "again", LoginOptions{AccountID: personal.Account.ID}, teamSubject)
+		var le *LoginError
+		if !errors.As(err, &le) || le.Code != LoginCodeIdentityMismatch {
+			t.Fatalf("row re-login in another org error = %v, want identity_mismatch", err)
+		}
+		if again, _ := registry.Get(personal.Account.ID); again.OAuth.AccessToken != before.OAuth.AccessToken {
+			t.Error("a mismatched login changed the personal row's credential")
+		}
+	})
+
 	t.Run("adopt refuses a non-oauth account", func(t *testing.T) {
 		t.Parallel()
 

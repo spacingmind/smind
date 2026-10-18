@@ -78,11 +78,33 @@ func openAISubject(idToken string) string {
 	return lengthPrefixed(sub, accountID)
 }
 
-// anthropicSubject reads account.uuid from the token response's raw account
-// value; anything but an object holding a string uuid is "" (no identity).
-func anthropicSubject(account json.RawMessage) string {
+// anthropicSubject is the Anthropic identity subject: account.uuid plus
+// organization.uuid, length-prefixed (see lengthPrefixed) like the OpenAI
+// subject. One person can belong to several organizations (a personal and a
+// team one) under a single account.uuid, each with its own plan and
+// rate-limit pool, so BOTH parts are required: account.uuid alone would let a
+// login to one organization replace another's row. With either part empty
+// the result is "" -- no identity.
+func anthropicSubject(accountUUID, orgUUID string) string {
+	if accountUUID == "" || orgUUID == "" {
+		return ""
+	}
+	return lengthPrefixed(accountUUID, orgUUID)
+}
+
+// anthropicExchangeSubject reads account.uuid and organization.uuid from the
+// token response's raw account and organization values; anything but an
+// object holding a string uuid is "" for that part, and so (see
+// anthropicSubject) no identity.
+func anthropicExchangeSubject(account, organization json.RawMessage) string {
+	return anthropicSubject(rawObjectUUID(account), rawObjectUUID(organization))
+}
+
+// rawObjectUUID returns the string uuid field of raw if raw is a JSON object
+// holding one, else "".
+func rawObjectUUID(raw json.RawMessage) string {
 	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(account, &obj); err != nil {
+	if err := json.Unmarshal(raw, &obj); err != nil {
 		return ""
 	}
 	return rawString(obj["uuid"])
