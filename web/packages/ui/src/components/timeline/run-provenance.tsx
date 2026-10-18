@@ -2,17 +2,17 @@ import { Icons } from "@/lib/icons";
 import { useCopyFeedback } from "@/components/timeline/message-actions";
 import type { RunStatusValue } from "@/lib/types";
 
+/** The sha the footer segment shows: head once terminal (when known), else base; undefined means nothing renders. */
+export function provenanceSha(status: RunStatusValue, baseSha?: string, headSha?: string): string | undefined {
+  return (status !== "running" && headSha) || baseSha;
+}
+
 /**
  * The run footer's provenance segment (O1): the worktree commit the run
  * started from (or ended at, once terminal), a quiet dirty marker, and
  * click-to-copy of the full sha shown. Renders nothing when neither sha
  * is known (an old run, a non-git worktree).
  */
-/** The sha the footer segment shows: head once terminal (when known), else base; undefined means nothing renders. */
-export function provenanceSha(status: RunStatusValue, baseSha?: string, headSha?: string): string | undefined {
-  return (status !== "running" && headSha) || baseSha;
-}
-
 export function RunProvenance({
   baseSha,
   headSha,
