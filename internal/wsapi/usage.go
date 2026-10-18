@@ -210,6 +210,49 @@ func handleUsageSummary(db *store.Store) handlerFunc {
 	}
 }
 
+// learningUsageResult is usage.learning's result: the "Learning" bucket
+// (ADR-0026) -- usage of system runs, which usage.summary excludes.
+type learningUsageResult struct {
+	Runs         int     `json:"runs"`
+	InputTokens  int64   `json:"inputTokens"`
+	OutputTokens int64   `json:"outputTokens"`
+	CostUSD      float64 `json:"costUsd"`
+}
+
+// handleUsageLearning totals system-run usage over since/until (same
+// semantics as usage.summary). It is its own method because usage.summary's
+// result is a bare array, so an additive object field would break every
+// existing consumer (CLI, MCP, UI).
+func handleUsageLearning(db *store.Store) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		if db == nil {
+			return nil, fmt.Errorf("usage.learning: store is unavailable")
+		}
+		var p struct {
+			Since string `json:"since"`
+			Until string `json:"until"`
+		}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return nil, fmt.Errorf("usage.learning: invalid params: %w", err)
+			}
+		}
+		since, err := parseUsageTime("usage.learning", "since", p.Since)
+		if err != nil {
+			return nil, err
+		}
+		until, err := parseUsageTime("usage.learning", "until", p.Until)
+		if err != nil {
+			return nil, err
+		}
+		n, in, out, cost, err := db.SummarizeLearningUsageWindow(since, until)
+		if err != nil {
+			return nil, fmt.Errorf("usage.learning: %w", err)
+		}
+		return learningUsageResult{Runs: n, InputTokens: in, OutputTokens: out, CostUSD: cost}, nil
+	}
+}
+
 // parseUsageTime parses an optional RFC3339 timestamp param (empty ->
 // nil, an open bound), naming method/field in any error so usage.list and
 // usage.summary's since/until both report which one failed.

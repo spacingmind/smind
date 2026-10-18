@@ -93,6 +93,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"profile.delete":           handleProfileDelete(profReg),
 		"usage.list":               handleUsageList(db),
 		"usage.summary":            handleUsageSummary(db),
+		"usage.learning":           handleUsageLearning(db),
 		"mcp.create":               handleMcpCreate(mcpReg),
 		"mcp.list":                 handleMcpList(mcpReg),
 		"mcp.get":                  handleMcpGet(mcpReg),

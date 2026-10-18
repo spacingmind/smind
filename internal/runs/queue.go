@@ -144,6 +144,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		perm:               perm,
 		thinkingLevel:      thinkingLevel,
 		model:              model,
+		purpose:            startPurpose(opts),
 		worktree:           worktree,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
@@ -480,7 +481,27 @@ func (reg *Registry) CancelQueuedItem(id int64) error {
 type StartOption func(*startOptions)
 
 type startOptions struct {
-	model string
+	model   string
+	purpose string
+}
+
+// WithPurpose marks the run as a system run (ADR-0026: "reflect",
+// "curate"). System runs are hidden from List/ListFiltered unless asked
+// for, auto-deny every permission request, and never publish permission
+// notifications. "" is an ordinary user run.
+func WithPurpose(purpose string) StartOption {
+	return func(o *startOptions) { o.purpose = purpose }
+}
+
+func startPurpose(opts []StartOption) string {
+	var o startOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	if o.purpose == store.RunPurposeUser {
+		return ""
+	}
+	return o.purpose
 }
 
 // WithModel names the model the run is asked to use (ADR-0025). "" is the
