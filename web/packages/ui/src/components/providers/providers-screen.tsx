@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type JSX } from "react";
+import { useEffect, useMemo, useRef, type JSX } from "react";
 
 import { Icons } from "@/lib/icons";
 import { buildProviderNav, type ProviderNavItem } from "@/lib/providers-view";
@@ -28,11 +28,27 @@ export function ProvidersScreen({ client }: { client: WsClient | null }): JSX.El
       buildProviderNav({
         providers,
         accounts: rows.map((r) => r.account),
-        toneOf: (id) => rows.find((r) => r.account.id === id)?.status.tone,
+        toneOf: (id) => rows.find((r) => r.account.id === id)?.badge.tone,
       }),
     [providers, rows],
   );
   const selected = items.find((item) => item.id === selectedProviderId) ?? items[0] ?? null;
+
+  // Mobile push/pop moves focus with the view: the back button when the
+  // detail opens, the previously selected nav item when it closes.
+  const screenRef = useRef<HTMLDivElement>(null);
+  const backRef = useRef<HTMLButtonElement>(null);
+  const previousView = useRef(mobileView);
+  const selectedId = selected?.id ?? null;
+  useEffect(() => {
+    const previous = previousView.current;
+    previousView.current = mobileView;
+    if (!isMobile) return;
+    if (mobileView === "detail" && previous !== "detail") backRef.current?.focus();
+    if (mobileView === "list" && previous === "detail" && selectedId !== null) {
+      screenRef.current?.querySelector<HTMLElement>(`[data-testid="provider-nav-item-${selectedId}"]`)?.focus();
+    }
+  }, [mobileView, isMobile, selectedId]);
 
   if (!loaded) {
     if (error) {
@@ -55,6 +71,7 @@ export function ProvidersScreen({ client }: { client: WsClient | null }): JSX.El
   if (isMobile) {
     return (
       <div
+        ref={screenRef}
         data-testid="providers-screen"
         data-layout="pushed"
         className="@container/providers flex min-h-[28rem] overflow-hidden rounded-xl border bg-card"
@@ -68,6 +85,7 @@ export function ProvidersScreen({ client }: { client: WsClient | null }): JSX.El
           <div className="min-w-0 flex-1">
             <div className="flex h-8 items-center gap-2 px-2">
               <button
+                ref={backRef}
                 type="button"
                 data-testid="provider-detail-back"
                 onClick={back}

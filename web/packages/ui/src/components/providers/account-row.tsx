@@ -26,11 +26,19 @@ import {
 import { StatusBadge } from "@/components/ui/status-badge";
 import { StatusDot } from "@/components/ui/status-dot";
 
-const DOT_STATUS: Record<AccountRowData["status"]["tone"], "success" | "danger" | "warning" | "neutral"> = {
+// The dot is the health badge's tone, so dot, badge, nav and summary share one fold.
+const DOT_STATUS: Record<HealthBadge["tone"], "success" | "danger" | "warning" | "neutral"> = {
   ok: "success",
   danger: "danger",
   warning: "warning",
   neutral: "neutral",
+};
+
+const DOT_STATE: Record<HealthBadge["tone"], string> = {
+  ok: "ok",
+  danger: "failed",
+  warning: "warning",
+  neutral: "unknown",
 };
 
 function healthBadge(badge: HealthBadge, id: number): JSX.Element {
@@ -68,10 +76,10 @@ export function AccountRow(props: {
   const { data, mostHeadroom, displayAs, testing, onTest, refresh, action, onAction, onRelogin } = props;
   const { account, usage, status, badge } = data;
   const id = account.id;
-  const state = status.tone === "danger" ? "failed" : status.tone === "ok" ? "ok" : status.tone === "warning" ? "warning" : "unknown";
   const informational = usage?.report?.status === "unavailable" && usage.report.problem?.kind === "no_quota";
-  const detail = badge.detail ?? status.reason;
-  const detailTone = badge.kind === "cooldown" ? "text-warning" : badge.kind === "relogin" || badge.kind === "error" ? "text-destructive" : "";
+  const rawDetail = badge.detail ?? status.reason;
+  const detail = rawDetail && data.test && rawDetail === data.test.detail ? `Provider test: ${rawDetail}` : rawDetail;
+  const detailTone = badge.tone === "warning" ? "text-warning" : badge.tone === "danger" ? "text-destructive" : "";
 
   return (
     <li
@@ -83,13 +91,13 @@ export function AccountRow(props: {
       ) : (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <StatusDot
-            status={DOT_STATUS[status.tone]}
+            status={DOT_STATUS[badge.tone]}
             className="size-2"
             role="img"
-            aria-label={status.label}
-            title={status.label}
+            aria-label={badge.label}
+            title={badge.label}
             data-testid={`provider-row-dot-${id}`}
-            data-status={state}
+            data-status={DOT_STATE[badge.tone]}
           />
           <span className="min-w-0 truncate text-ui-base font-medium text-foreground">{status.name}</span>
           <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">

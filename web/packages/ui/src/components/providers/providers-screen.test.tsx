@@ -6,6 +6,8 @@ import { FakeUsageDaemon } from "@/test/usage-test-client";
 import { renderWithDaemon } from "@/test/render-with-daemon";
 import { ProvidersScreen } from "@/components/providers/providers-screen";
 import { useProvidersViewStore } from "@/stores/providers-view-store";
+import { queryKeys } from "@/lib/query-keys";
+import { claudeAccount } from "@/test/account-usage-fixtures";
 import type { Account, ProviderListResult } from "@/lib/types";
 
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: vi.fn(() => false) }));
@@ -91,6 +93,38 @@ describe("ProvidersScreen", () => {
     });
     expect(screen.getByTestId("provider-nav")).toBeInTheDocument();
     expect(screen.queryByTestId("provider-detail")).not.toBeInTheDocument();
+  });
+
+  it("mobile push focuses the back button and pop restores the nav focus", async () => {
+    vi.mocked(useIsMobile).mockReturnValue(true);
+    const d = daemon();
+    renderWithDaemon(<ProvidersScreen client={d.client} />, d);
+    await flush();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("provider-nav-item-openai"));
+    });
+    expect(screen.getByTestId("provider-detail-back")).toHaveFocus();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("provider-detail-back"));
+    });
+    expect(screen.getByTestId("provider-nav-item-openai")).toHaveFocus();
+  });
+
+  it("nav tone follows the health badge", async () => {
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    const d = new FakeUsageDaemon([
+      claudeAccount({ accountId: 1, cooldown: { until, scope: "account", reason: "rejected" } }, Date.now()),
+    ]);
+    d.providers = daemon().providers;
+    d.accounts = [account(1, "anthropic", "main")];
+    const view = renderWithDaemon(<ProvidersScreen client={d.client} />, d);
+    await flush();
+    await flush();
+    await act(async () => {
+      view.queryClient().setQueryData(queryKeys.providerTest("anthropic"), { ok: false, detail: "boom" });
+    });
+    // Cooling down (warning) wins over the failed test in the badge, so the nav says "Needs attention", not "Problem".
+    expect(screen.getAllByTestId("provider-nav-item-anthropic")[0]).toHaveAccessibleName(/Needs attention/);
   });
 
   it("account list failure shows the error", async () => {

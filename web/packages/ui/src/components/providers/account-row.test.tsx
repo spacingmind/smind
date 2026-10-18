@@ -111,4 +111,19 @@ describe("AccountRow", () => {
     expect(screen.getByTestId("provider-row-update-credential-1")).toBeInTheDocument();
     expect(screen.getByTestId("provider-row-remove-1")).toBeInTheDocument();
   });
+
+  it("badge and dot agree when the test failed during a cooldown", () => {
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    const usage = claudeAccount({ accountId: 1, cooldown: { until, scope: "account", reason: "rejected" } }, Date.now());
+    const data = row({ usage, test: { ok: false, detail: "boom" } as never });
+    renderWithDaemon(element({ data }), daemon());
+    expect(screen.getByTestId("provider-row-health-1")).toHaveTextContent("Cooling down");
+    expect(screen.getByTestId("provider-row-dot-1")).toHaveAttribute("data-status", "warning");
+  });
+
+  it("row prefixes a provider test result with where it came from", () => {
+    const data = row({ test: { ok: false, detail: "boom" } as never, usage: undefined });
+    renderWithDaemon(element({ data }), daemon());
+    expect(screen.getByTestId("provider-row-test-result-1")).toHaveTextContent("Provider test: boom");
+  });
 });

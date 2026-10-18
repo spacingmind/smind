@@ -55,7 +55,7 @@ describe("providers cache integration", () => {
     expect(d.countCalls("provider.test")).toBe(0);
     const dot = screen.getByTestId("provider-row-dot-1");
     expect(dot).toHaveAttribute("data-status", "failed");
-    expect(dot).toHaveAttribute("title", "Login expired");
+    expect(dot).toHaveAttribute("title", "Needs re-login");
     expect(screen.getByTestId("provider-row-health-1")).toHaveTextContent("Needs re-login");
     expect(screen.getByTestId("provider-row-test-result-1")).toHaveTextContent(
       /Login expired.*Reconnect it in Providers\./,

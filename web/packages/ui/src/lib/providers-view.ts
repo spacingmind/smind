@@ -91,8 +91,12 @@ export function healthBadge(input: {
       detail: usageCopy.cooldown(cooldown, now).headline,
     };
   }
-  if ((test && !test.ok) || usage?.report?.status === "error") {
-    return { kind: "error", label: "Error", tone: "danger", detail: test?.detail ?? (usage ? usageCopy.problem(usage, now) : null) };
+  if (test && !test.ok) {
+    return { kind: "error", label: "Error", tone: "danger", detail: test.detail };
+  }
+  if (usage?.report?.status === "error") {
+    // The provider answered nothing usable for usage -- not a failed login or test, so a warning.
+    return { kind: "error", label: "Usage unavailable", tone: "warning", detail: usageCopy.problem(usage, now) };
   }
   if (test?.ok || usage?.report?.status === "available") {
     return { kind: "active", label: "Active", tone: "ok", detail: null };

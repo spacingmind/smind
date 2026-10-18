@@ -41,7 +41,17 @@ describe("ProviderNav", () => {
     expect(screen.getByTestId("provider-nav")).toHaveAttribute("data-mode", "rail");
     const button = screen.getByTestId("provider-nav-item-anthropic");
     expect(button).toHaveAttribute("title", "Claude");
-    expect(button).toHaveAttribute("aria-label", "Claude");
+    expect(button).toHaveAttribute("aria-label", "Claude, 2 accounts, All accounts healthy");
     expect(screen.queryByText("Claude")).not.toBeInTheDocument();
+  });
+
+  it("nav buttons expose the tone in their accessible name", () => {
+    for (const mode of ["full", "rail"] as const) {
+      const view = render(<ProviderNav items={items} selectedId={null} onSelect={() => {}} mode={mode} />);
+      expect(screen.getByRole("button", { name: "Claude, 2 accounts, All accounts healthy" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Codex, Not connected" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Other accounts, 1 accounts, Needs attention" })).toBeInTheDocument();
+      view.unmount();
+    }
   });
 });

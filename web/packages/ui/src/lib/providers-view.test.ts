@@ -108,6 +108,18 @@ describe("healthBadge", () => {
     expect(active).toMatchObject({ kind: "active", tone: "ok", detail: null });
   });
 
+  it("a usage fetch error is a warning, not an error", () => {
+    const result = badge({ report: { status: "error", fetchedAt: "" } });
+    expect(result).toMatchObject({ kind: "error", label: "Usage unavailable", tone: "warning" });
+    expect(typeof result.detail).toBe("string");
+    expect(badge({ report: { status: "error", fetchedAt: "" } }, { ok: false, detail: "boom" })).toMatchObject({
+      kind: "error",
+      label: "Error",
+      tone: "danger",
+      detail: "boom",
+    });
+  });
+
   it("health badge cooldown label shows the end time", () => {
     const untilMs = Date.UTC(2026, 0, 1, 13, 0, 0);
     const result = badge({ cooldown: { until: "2026-01-01T13:00:00Z", scope: "account", reason: "rejected" } });

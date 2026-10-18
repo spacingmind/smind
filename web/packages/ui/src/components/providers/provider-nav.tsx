@@ -25,6 +25,11 @@ function toneLabel(item: ProviderNavItem): string {
   }
 }
 
+function accessibleName(item: ProviderNavItem): string {
+  const count = item.accountIds.length;
+  return `${item.label}${count > 0 ? `, ${count} accounts` : ""}, ${toneLabel(item)}`;
+}
+
 export function ProviderNav(props: {
   items: ProviderNavItem[];
   selectedId: string | null;
@@ -46,7 +51,7 @@ export function ProviderNav(props: {
                   data-testid={`provider-nav-item-${item.id}`}
                   aria-current={selected ? "true" : undefined}
                   title={item.label}
-                  aria-label={item.label}
+                  aria-label={accessibleName(item)}
                   onClick={() => onSelect(item.id)}
                   className={`relative size-10 grid place-items-center rounded-lg hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/50 outline-none ${selectedClasses}`}
                 >
@@ -54,6 +59,7 @@ export function ProviderNav(props: {
                   <StatusDot
                     status={TONE_STATUS[item.tone]}
                     title={toneLabel(item)}
+                    aria-hidden
                     className="absolute right-1 top-1 size-2"
                   />
                 </button>
@@ -66,6 +72,7 @@ export function ProviderNav(props: {
                 type="button"
                 data-testid={`provider-nav-item-${item.id}`}
                 aria-current={selected ? "true" : undefined}
+                aria-label={accessibleName(item)}
                 onClick={() => onSelect(item.id)}
                 className={`h-8 flex w-full items-center gap-2 rounded-lg px-2 hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/50 outline-none ${selectedClasses}`}
               >
@@ -81,7 +88,7 @@ export function ProviderNav(props: {
                 <StatusDot
                   status={TONE_STATUS[item.tone]}
                   title={toneLabel(item)}
-                  aria-label={toneLabel(item)}
+                  aria-hidden
                   className="size-2"
                 />
               </button>
