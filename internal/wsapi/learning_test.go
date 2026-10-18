@@ -498,3 +498,27 @@ func TestLearning_SystemRowsNeverReturned(t *testing.T) {
 	f.api.SetLearning(LearningDeps{Trigger: &fakeTrigger{}})
 	f.fail("learning.reflect", map[string]any{"chatId": sysChat.ID}, "invalid_params")
 }
+
+// TestLearning_RunScopedCallerRefused: learning.* is human-only. A
+// run-scoped (agent) caller is refused by every method in the table, so the
+// moment a connection carries an agent identity (ADR-0027) none of the loop
+// is reachable from it. The MCP catalog test in cmd/smind proves no tool
+// wraps these methods today.
+func TestLearning_RunScopedCallerRefused(t *testing.T) {
+	t.Parallel()
+	f := newLearnFx(t)
+	n := 0
+	for method, h := range f.api.hs {
+		if len(method) < 9 || method[:9] != "learning." {
+			continue
+		}
+		n++
+		_, err := h(context.Background(), &requestContext{runScoped: true}, json.RawMessage(`{"id":1,"workspaceId":1,"chatId":1}`))
+		if e := codedError(err); err == nil || e.Code != "forbidden" {
+			t.Errorf("%s as run-scoped caller: err = %v, want forbidden", method, err)
+		}
+	}
+	if n < 20 {
+		t.Fatalf("only %d learning.* methods registered", n)
+	}
+}
