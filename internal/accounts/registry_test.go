@@ -458,12 +458,12 @@ func TestRegistry_ReplaceCredentialIdentity(t *testing.T) {
 			t.Fatalf("pasted-credential row changed by an OAuth login: %+v", got)
 		}
 
-		// A row-level Re-login of the pasted row now adopts-or-conflicts like
-		// any legacy row: here the new row owns the identity.
+		// A row-level Re-login of the pasted row is refused: only OAuth rows
+		// are re-logged-in or adopted.
 		_, err = relogin(t, coord, login, "x", LoginOptions{AccountID: id}, "subject-1")
 		var le *LoginError
-		if !errors.As(err, &le) || le.Code != LoginCodeIdentityInUse {
-			t.Fatalf("Re-login of the pasted row error = %v, want identity_in_use", err)
+		if !errors.As(err, &le) || le.Code != LoginCodeNotOAuthAccount {
+			t.Fatalf("Re-login of the pasted row error = %v, want login_not_oauth_account", err)
 		}
 	})
 

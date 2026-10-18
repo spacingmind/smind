@@ -90,6 +90,7 @@ const (
 	LoginCodeIdentityInUse      = "identity_in_use"
 	LoginCodeUnknownAccount     = "login_unknown_account"
 	LoginCodeIdentityUnverified = "identity_unverified"
+	LoginCodeNotOAuthAccount    = "login_not_oauth_account"
 )
 
 // LoginError is an error with a stable machine-readable code. Detail never
@@ -171,7 +172,8 @@ func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, op
 }
 
 // reloginTarget loads the row a Re-login names, as a LoginCodeUnknownAccount
-// error when it does not exist or belongs to a different provider.
+// error when it does not exist or belongs to a different provider, and as a
+// LoginCodeNotOAuthAccount error when it is not an OAuth row.
 func (c *LoginCoordinator) reloginTarget(provider string, id int64) (store.Account, error) {
 	target, err := c.registry.stored(id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -182,6 +184,11 @@ func (c *LoginCoordinator) reloginTarget(provider string, id int64) (store.Accou
 	}
 	if target.Provider != provider {
 		return store.Account{}, &LoginError{Code: LoginCodeUnknownAccount, Detail: fmt.Sprintf("account %d belongs to a different provider", id)}
+	}
+	// A pasted API-key row is not a vendor login: re-logging it in would
+	// silently convert it to OAuth (and adopt an identity it never had).
+	if target.CredentialType != CredentialTypeOAuth {
+		return store.Account{}, &LoginError{Code: LoginCodeNotOAuthAccount, Detail: fmt.Sprintf("account %d does not use an OAuth login", id)}
 	}
 	return target, nil
 }

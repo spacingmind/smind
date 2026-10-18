@@ -509,6 +509,26 @@ func TestLoginCoordinator_Relogin(t *testing.T) {
 		}
 	})
 
+	t.Run("adopt refuses a non-oauth account", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		pasted, err := registry.AddAPIKey("fake", "pasted", "sk-pasted")
+		if err != nil {
+			t.Fatalf("AddAPIKey() error = %v", err)
+		}
+
+		_, err = relogin(t, coord, login, "x", LoginOptions{AccountID: pasted.ID}, "subject-1")
+		var le *LoginError
+		if !errors.As(err, &le) || le.Code != LoginCodeNotOAuthAccount || !strings.HasPrefix(err.Error(), "login_not_oauth_account") {
+			t.Fatalf("Login() error = %v, want login_not_oauth_account", err)
+		}
+		got, _ := registry.Get(pasted.ID)
+		if got.CredentialType != CredentialTypeAPIKey || got.APIKey == nil || got.APIKey.Key != "sk-pasted" || got.HasIdentity {
+			t.Errorf("the API-key row was changed: %+v", got)
+		}
+	})
+
 	t.Run("relogin adopt clears cooldowns because the row may be a different vendor account", func(t *testing.T) {
 		t.Parallel()
 
