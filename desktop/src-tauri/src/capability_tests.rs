@@ -29,6 +29,7 @@ fn capability_allowlist_exact() {
         "allow-app-settings-get",
         "allow-app-settings-set",
         "allow-connections-relay-status",
+        "allow-connections-unsupported",
         "allow-connections-remove",
         "allow-connections-select",
         "allow-connections-get-current",

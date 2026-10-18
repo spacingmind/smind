@@ -14,6 +14,12 @@ import { CONNECTION_CHANGED_EVENT } from "@/lib/local-paths";
  */
 
 /** A saved daemon connection (AC4's Rust-side `Registry`/`Connection` shape, mirrored here). */
+export interface UnsupportedConnection {
+  id: string | null;
+  label: string | null;
+  kind: string | null;
+}
+
 export interface Connection {
   id: string;
   kind: "local" | "url" | "relay" | "ssh";
@@ -179,6 +185,8 @@ export type NativeMenuActionId =
 /** The commands `capabilities/proxy.json` exposes to the bundled UI (AC5/ADR-0013 part D2), one method per command. */
 export interface DesktopApi {
   listConnections(): Promise<Connection[]>;
+  /** Saved entries whose `kind` this build does not understand (written by a newer app version): id/label/kind only, never `baseUrl`. */
+  listUnsupportedConnections(): Promise<UnsupportedConnection[]>;
   /** Saves a daemon URL. With a `password` Rust logs in through `POST /api/login` first and holds the session token in memory (never the password); rejects with Rust's error text. */
   addConnection(label: string, url: string, password?: string): Promise<Connection>;
   /** Probes a daemon URL (`connections_probe`) without saving it. Never rejects for an unreachable URL: that is `reachable: false` with an `error`. */
@@ -300,6 +308,7 @@ function unavailable(): DesktopApi {
     Promise.reject(new Error("smind: the desktop connection API is unavailable in this build"));
   return {
     listConnections: () => reject(),
+    listUnsupportedConnections: () => reject(),
     addConnection: () => reject(),
     probeConnection: () => reject(),
     addSshConnection: () => reject(),
@@ -370,6 +379,10 @@ function realDesktopApi(): DesktopApi {
     async listConnections() {
       const invoke = await loadInvoke();
       return invoke<Connection[]>("connections_list");
+    },
+    async listUnsupportedConnections() {
+      const invoke = await loadInvoke();
+      return invoke<UnsupportedConnection[]>("connections_unsupported");
     },
     async addConnection(label, url, password) {
       const invoke = await loadInvoke();
