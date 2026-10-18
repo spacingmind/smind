@@ -100,6 +100,11 @@ type runStatusPayload struct {
 	Status     string `json:"status"`
 	StopReason string `json:"stopReason,omitempty"`
 	Err        string `json:"err,omitempty"`
+	// BaseSHA/HeadSHA/Dirty are the run's git provenance (O1), omitted
+	// while unknown.
+	BaseSHA string `json:"baseSha,omitempty"`
+	HeadSHA string `json:"headSha,omitempty"`
+	Dirty   *bool  `json:"dirty,omitempty"`
 }
 
 // permissionPendingPayload is the payload of permission.pending events:
