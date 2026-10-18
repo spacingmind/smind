@@ -37,7 +37,7 @@ func (s *Store) SumRunUsageByTask(workspaceID int64) (map[int64]TaskUsageSums, e
 		FROM run_usage u
 		JOIN runs r ON r.id = u.run_id
 		JOIN tasks t ON t.id = u.task_id
-		WHERE t.workspace_id = ?
+		WHERE t.workspace_id = ? AND r.purpose = 'user'
 		GROUP BY u.task_id`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("sum run usage by task for workspace %d: %w", workspaceID, err)

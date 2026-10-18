@@ -28,7 +28,7 @@ func (s *Store) CreateChat(taskID int64, title string) (Chat, error) {
 // GetChat returns the chat with the given id.
 func (s *Store) GetChat(id int64) (Chat, error) {
 	row := s.db.QueryRow(
-		`SELECT id, task_id, title, provider, agent_session, created_at, archived_at FROM chats WHERE id = ?`, id,
+		`SELECT id, task_id, title, provider, agent_session, created_at, archived_at, learn_watermark, learn_pending FROM chats WHERE id = ?`, id,
 	)
 	c, err := scanChat(row)
 	if err != nil {
@@ -41,7 +41,7 @@ func (s *Store) GetChat(id int64) (Chat, error) {
 // task's default chat, see workspace.Manager.DefaultChat -- first).
 // includeArchived controls whether archived chats are included.
 func (s *Store) ListChatsByTask(taskID int64, includeArchived bool) ([]Chat, error) {
-	query := `SELECT id, task_id, title, provider, agent_session, created_at, archived_at FROM chats WHERE task_id = ?`
+	query := `SELECT id, task_id, title, provider, agent_session, created_at, archived_at, learn_watermark, learn_pending FROM chats WHERE task_id = ?`
 	if !includeArchived {
 		query += ` AND archived_at IS NULL`
 	}
@@ -118,7 +118,7 @@ func scanChat(row rowScanner) (Chat, error) {
 	var provider, agentSession sql.NullString
 	var archivedAt sql.NullTime
 
-	if err := row.Scan(&c.ID, &c.TaskID, &c.Title, &provider, &agentSession, &c.CreatedAt, &archivedAt); err != nil {
+	if err := row.Scan(&c.ID, &c.TaskID, &c.Title, &provider, &agentSession, &c.CreatedAt, &archivedAt, &c.LearnWatermark, &c.LearnPending); err != nil {
 		return Chat{}, err
 	}
 	c.Provider = nullToStringPtr(provider)

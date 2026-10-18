@@ -35,13 +35,28 @@ func (s *Store) CreateTask(t Task) (Task, error) {
 
 	now := time.Now().UTC()
 	t.CreatedAt, t.UpdatedAt = now, now
+	if t.Kind == "" {
+		t.Kind = TaskKindTask
+	}
+	return insertTask(s.db, t)
+}
 
-	res, err := s.db.Exec(
-		`INSERT INTO tasks (workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+// Task kinds (tasks.kind, ADR-0026).
+const (
+	TaskKindTask   = "task"
+	TaskKindSystem = "system"
+)
+
+// Run purposes (runs.purpose, ADR-0026).
+const RunPurposeUser = "user"
+
+func insertTask(db execer, t Task) (Task, error) {
+	res, err := db.Exec(
+		`INSERT INTO tasks (workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, kind)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.WorkspaceID, int64PtrToNull(t.SpaceID), int64PtrToNull(t.ParentTaskID), t.Title, t.Status,
 		stringPtrToNull(t.WorktreePath), stringPtrToNull(t.Branch),
-		t.CreatedAt, t.UpdatedAt, timePtrToNull(t.ArchivedAt),
+		t.CreatedAt, t.UpdatedAt, timePtrToNull(t.ArchivedAt), t.Kind,
 	)
 	if err != nil {
 		return Task{}, fmt.Errorf("insert task: %w", err)
@@ -52,6 +67,45 @@ func (s *Store) CreateTask(t Task) (Task, error) {
 	}
 	t.ID = id
 	return t, nil
+}
+
+// CreateSystemTask inserts a hidden system task (kind 'system', status
+// 'done', worktree_path = cwd, no branch/port/setup) plus its default chat
+// in one transaction. It is a dedicated helper rather than a Kind field on
+// CreateTask callers because the pair must be atomic and needs no parent
+// validation; no git or notifier work happens at this layer.
+func (s *Store) CreateSystemTask(workspaceID int64, title, cwd string) (Task, Chat, error) {
+	now := time.Now().UTC()
+	t := Task{
+		WorkspaceID: workspaceID, Title: title, Status: "done", Kind: TaskKindSystem,
+		WorktreePath: &cwd, CreatedAt: now, UpdatedAt: now,
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Task{}, Chat{}, fmt.Errorf("create system task: begin: %w", err)
+	}
+	t, err = insertTask(tx, t)
+	if err != nil {
+		_ = tx.Rollback()
+		return Task{}, Chat{}, fmt.Errorf("create system task: %w", err)
+	}
+	res, err := tx.Exec(
+		`INSERT INTO chats (task_id, title, provider, agent_session, created_at) VALUES (?, ?, NULL, NULL, ?)`,
+		t.ID, title, now,
+	)
+	if err != nil {
+		_ = tx.Rollback()
+		return Task{}, Chat{}, fmt.Errorf("create system task: insert chat: %w", err)
+	}
+	chatID, err := res.LastInsertId()
+	if err != nil {
+		_ = tx.Rollback()
+		return Task{}, Chat{}, fmt.Errorf("create system task: chat id: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Task{}, Chat{}, fmt.Errorf("create system task: commit: %w", err)
+	}
+	return t, Chat{ID: chatID, TaskID: t.ID, Title: title, CreatedAt: now}, nil
 }
 
 // GetTask returns the task with the given id.
@@ -67,13 +121,25 @@ func (s *Store) GetTask(id int64) (Task, error) {
 	return t, nil
 }
 
-// ListTasksByWorkspace returns all tasks for workspaceID, ordered by id.
+// ListTasksByWorkspace returns all non-system tasks for workspaceID,
+// ordered by id.
 func (s *Store) ListTasksByWorkspace(workspaceID int64) ([]Task, error) {
-	rows, err := s.db.Query(
-		`SELECT `+taskCols+`
-		 FROM tasks WHERE workspace_id = ? ORDER BY id`,
-		workspaceID,
-	)
+	return s.listWorkspaceTasks(workspaceID, false)
+}
+
+// ListAllTasksByWorkspace is ListTasksByWorkspace including hidden system
+// tasks; cascades (DeleteWorkspace) need it so FKs don't block deletion.
+func (s *Store) ListAllTasksByWorkspace(workspaceID int64) ([]Task, error) {
+	return s.listWorkspaceTasks(workspaceID, true)
+}
+
+func (s *Store) listWorkspaceTasks(workspaceID int64, includeSystem bool) ([]Task, error) {
+	query := `SELECT ` + taskCols + `
+		 FROM tasks WHERE workspace_id = ?`
+	if !includeSystem {
+		query += ` AND kind != 'system'`
+	}
+	rows, err := s.db.Query(query+` ORDER BY id`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("list tasks for workspace %d: %w", workspaceID, err)
 	}
@@ -90,13 +156,18 @@ func (s *Store) ListTasksByWorkspace(workspaceID int64) ([]Task, error) {
 	return tasks, rows.Err()
 }
 
-// ListTasksBySpace returns all tasks in spaceID, ordered by id.
+// ListTasksBySpace returns all non-system tasks in spaceID, ordered by id.
 func (s *Store) ListTasksBySpace(spaceID int64) ([]Task, error) {
-	rows, err := s.db.Query(
-		`SELECT `+taskCols+`
-		 FROM tasks WHERE space_id = ? ORDER BY id`,
-		spaceID,
-	)
+	return s.listSpaceTasks(spaceID, false)
+}
+
+func (s *Store) listSpaceTasks(spaceID int64, includeSystem bool) ([]Task, error) {
+	query := `SELECT ` + taskCols + `
+		 FROM tasks WHERE space_id = ?`
+	if !includeSystem {
+		query += ` AND kind != 'system'`
+	}
+	rows, err := s.db.Query(query+` ORDER BY id`, spaceID)
 	if err != nil {
 		return nil, fmt.Errorf("list tasks for space %d: %w", spaceID, err)
 	}
@@ -119,7 +190,7 @@ func (s *Store) ListTasksBySpace(spaceID int64) ([]Task, error) {
 func (s *Store) ListTasksByParent(parentID int64) ([]Task, error) {
 	rows, err := s.db.Query(
 		`SELECT `+taskCols+`
-		 FROM tasks WHERE parent_task_id = ? ORDER BY id`,
+		 FROM tasks WHERE parent_task_id = ? AND kind != 'system' ORDER BY id`,
 		parentID,
 	)
 	if err != nil {
@@ -164,7 +235,7 @@ func (s *Store) TaskDepth(id int64) (int, error) {
 func (s *Store) ListUngroupedTasksByWorkspace(workspaceID int64) ([]Task, error) {
 	rows, err := s.db.Query(
 		`SELECT `+taskCols+`
-		 FROM tasks WHERE workspace_id = ? AND space_id IS NULL ORDER BY id`,
+		 FROM tasks WHERE workspace_id = ? AND space_id IS NULL AND kind != 'system' ORDER BY id`,
 		workspaceID,
 	)
 	if err != nil {
@@ -273,7 +344,7 @@ func (s *Store) DeleteTask(id int64) error {
 }
 
 // taskCols is the column list scanTask reads.
-const taskCols = "id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, setup_status, setup_error, setup_log, port"
+const taskCols = "id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, setup_status, setup_error, setup_log, port, kind"
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -288,7 +359,7 @@ func scanTask(row rowScanner) (Task, error) {
 
 	if err := row.Scan(&t.ID, &t.WorkspaceID, &spaceID, &parentTaskID, &t.Title, &t.Status,
 		&worktreePath, &branch, &t.CreatedAt, &t.UpdatedAt, &archivedAt,
-		&setupStatus, &setupError, &setupLog, &port); err != nil {
+		&setupStatus, &setupError, &setupLog, &port, &t.Kind); err != nil {
 		return Task{}, err
 	}
 
