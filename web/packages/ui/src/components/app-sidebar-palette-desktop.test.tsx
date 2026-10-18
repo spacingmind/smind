@@ -2,7 +2,6 @@ import { act } from "react";
 import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { useRegisteredCommands } from "@/palette/palette-provider";
 import { FakeWsClient } from "@/test/fake-ws-client";
 
 // isDesktop is a module-load constant, so each test mocks @/lib/platform
