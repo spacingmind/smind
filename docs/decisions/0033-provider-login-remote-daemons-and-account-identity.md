@@ -136,7 +136,7 @@ downgrading.
 | `account.oauthStart` (streaming) | params `{provider, label, method?, accountId?}`; events `authorizeUrl {loginId,url}` or `deviceCode {loginId,verificationUrl,userCode,expiresAt,intervalSeconds}`; final result `{account…, created, adopted?}` |
 | `account.oauthComplete` | `{loginId, redirectUrl}` → `{}` |
 | cancel | aborting the in-flight `account.oauthStart` request (existing `task.cancel`-by-request-id path) cancels the login, frees the listener/poller and the per-provider claim |
-| errors | stable codes in the message prefix: `login_in_progress`, `login_unknown`, `state_mismatch`, `device_unsupported`, `device_expired`, `identity_mismatch`, `identity_in_use`, `identity_unverified`, `login_unknown_account`, `login_not_oauth_account`, `denied`, `timeout`. On the wire the message is `account.oauthStart: <code>: <detail>` (the handler's method prefix, then the code): clients anchor on the code after that prefix, never on the detail text |
+| errors | stable codes in the message prefix: `login_in_progress`, `login_unknown`, `login_wrong_method`, `login_attempts_exceeded`, `login_bad_redirect`, `login_already_completed`, `state_mismatch`, `device_unsupported`, `device_expired`, `identity_mismatch`, `identity_in_use`, `identity_unverified`, `login_unknown_account`, `login_not_oauth_account`, `denied`, `timeout`. On the wire the message is `account.oauthStart: <code>: <detail>` (the handler's method prefix, then the code): clients anchor on the code after that prefix, never on the detail text |
 
 The client keeps a **generation counter** per Connect attempt: events/results from an older generation (after Cancel or a
 restart of the flow) are dropped (cliproxyapi's TUI pattern). One login per provider at a time stays (existing claim).
