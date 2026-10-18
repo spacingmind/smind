@@ -15,6 +15,7 @@ import (
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
+	"github.com/spacingmind/smind/internal/taskrunner/fakeclaude"
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
@@ -28,6 +29,12 @@ var fakeACPAgentPath string
 var fakeCodexAgentPath string
 
 func TestMain(m *testing.M) {
+	// Re-executed as the fake claude CLI by isolated-run tests (see
+	// newIsolatedEnv); must win before any suite setup.
+	if os.Getenv(fakeClaudeEnv) == "1" {
+		fakeclaude.Run()
+		return
+	}
 	dir, err := os.MkdirTemp("", "smind-runs-test-")
 	if err != nil {
 		panic(err)
@@ -56,6 +63,7 @@ func TestMain(m *testing.M) {
 	defer os.RemoveAll(smindHome)
 	os.Setenv("SMIND_HOME", smindHome)
 
+	os.Setenv(fakeClaudeEnv, "1") // inherited by the re-executed fake CLI
 	os.Exit(m.Run())
 }
 

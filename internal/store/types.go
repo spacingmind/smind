@@ -160,6 +160,12 @@ type Run struct {
 	// "user". Non-user runs are hidden from ListRecentRuns and from the
 	// main usage summaries.
 	Purpose string
+	// Origin is who authored the run's prompt ("human", "orchestrator",
+	// "agent"); "" = unknown (pre-existing rows, plain Start callers).
+	Origin string
+	// Interrupt is true when the prompt was delivered as a mid-run
+	// interrupt (a priority-1 queue item).
+	Interrupt bool
 }
 
 // RunEvent is one persisted internal/runs.Event, in the order it was

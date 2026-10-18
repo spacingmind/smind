@@ -98,3 +98,22 @@ func TestEventCodec_McpServersRoundTrip(t *testing.T) {
 		t.Fatalf("decodeEvent() McpServers = %+v, want %+v", got.McpServers, want.McpServers)
 	}
 }
+
+func TestDecodeStoredEvent_RoundTrip(t *testing.T) {
+	t.Parallel()
+	in := Event{Type: taskrunner.EventTypeText, Text: "héllo \"x\"\n"}
+	data, err := encodeEvent(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := DecodeStoredEvent(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Type != in.Type || out.Text != in.Text {
+		t.Fatalf("DecodeStoredEvent = %+v, want %+v", out, in)
+	}
+	if _, err := DecodeStoredEvent("{not json"); err == nil {
+		t.Fatal("DecodeStoredEvent(garbage) succeeded")
+	}
+}

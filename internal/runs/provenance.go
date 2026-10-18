@@ -27,7 +27,10 @@ var provenanceTimeout = 3 * time.Second
 // fields, so a terminal capture with a failed sha read leaves the start
 // values (and dirty semantics stay "latest successful capture").
 func (reg *Registry) captureProvenance(parent context.Context, r *run, atStart bool) {
-	if r.worktree == "" {
+	// System runs (ADR-0026) work in an empty scratch dir, not a git
+	// worktree: there is nothing to record, and a SMIND_HOME inside some
+	// repo must not make us read that repo's HEAD.
+	if r.worktree == "" || r.purpose != "" {
 		return
 	}
 	timeout := provenanceTimeout

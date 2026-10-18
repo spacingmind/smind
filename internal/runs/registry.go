@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -314,6 +315,8 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 		perm:               taskrunner.PermissionSettings{Mode: row.PermissionMode, AutoAccept: row.AutoAccept},
 		model:              row.Model,
 		purpose:            rowPurpose(row.Purpose),
+		origin:             row.Origin,
+		interrupt:          row.Interrupt,
 		startedAt:          row.StartedAt,
 		ctx:                ctx,
 		cancel:             cancel,
@@ -373,6 +376,17 @@ type run struct {
 	// purpose is "" for a user run, else the system purpose ("reflect",
 	// "curate"; ADR-0026). Set at Start, immutable, persisted on the row.
 	purpose string
+
+	// origin is who authored the prompt (human|orchestrator|agent, "" =
+	// unknown) and interrupt whether it was delivered as a mid-run
+	// interrupt. Set at start, immutable, persisted on the row.
+	origin    string
+	interrupt bool
+
+	// isolation, when set, drives the turn through RunPromptIsolated
+	// (system runs only; see WithIsolation). Not persisted: nothing
+	// re-drives a rehydrated run.
+	isolation *taskrunner.IsolationOptions
 
 	// toolCallIDs is the set of distinct non-empty ToolCallIDs record saw
 	// on EventTypeToolCall events; its size is RunFinished.ToolCalls.
@@ -493,6 +507,7 @@ func (r *run) statusLocked() RunStatus {
 		Model:          r.model,
 		Usage:          UsageFromEvent(r.usage),
 		Purpose:        r.purpose,
+		Origin:         r.origin,
 	}
 	rs.BaseSHA = cloneStrPtr(r.baseSHA)
 	rs.HeadSHA = cloneStrPtr(r.headSHA)
@@ -605,6 +620,9 @@ func (reg *Registry) withStoredUsage(out []RunSummary) {
 // empty means the provider's default and the spawn is unchanged.
 func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel, opts ...StartOption) (string, error) {
 	model := startModel(opts)
+	if err := validateIsolation(provider, opts); err != nil {
+		return "", err
+	}
 	p, err := prepareStart(wm, runner, taskID, chatID, provider, prompt, perm, thinkingLevel, model)
 	if err != nil {
 		return "", err
@@ -650,6 +668,9 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		thinkingLevel:      thinkingLevel,
 		model:              model,
 		purpose:            startPurpose(opts),
+		origin:             resolveStartOptions(opts).origin,
+		interrupt:          resolveStartOptions(opts).interrupt,
+		isolation:          resolveStartOptions(opts).isolation,
 		worktree:           worktree,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
@@ -736,7 +757,7 @@ func (reg *Registry) registerAndDrive(r *run, runCtx context.Context, runner *ta
 	if _, err := reg.st.CreateRun(store.Run{
 		ID: r.id, TaskID: r.taskID, ChatID: r.chatID, Provider: string(r.provider), Prompt: r.prompt,
 		Status: string(StatusRunning), StartedAt: r.startedAt,
-		PermissionMode: r.perm.Mode, AutoAccept: r.perm.AutoAccept, Model: r.model, Purpose: r.purpose,
+		PermissionMode: r.perm.Mode, AutoAccept: r.perm.AutoAccept, Model: r.model, Purpose: r.purpose, Origin: r.origin, Interrupt: r.interrupt,
 	}); err != nil {
 		reg.mu.Lock()
 		delete(reg.runs, r.id)
@@ -892,7 +913,12 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 	reg.captureProvenance(ctx, r, true)
 
 	decider := runPermissionDecider{reg: reg, r: r}
-	err := runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, r.prompt, decider, r.getPerm(), r.thinkingLevel, r.model, events)
+	var err error
+	if r.isolation != nil {
+		err = runner.RunPromptIsolated(ctx, r.taskID, r.chatID, r.provider, r.prompt, r.model, *r.isolation, events)
+	} else {
+		err = runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, r.prompt, decider, r.getPerm(), r.thinkingLevel, r.model, events)
+	}
 	<-forwardDone
 	reg.finish(r, err)
 }
@@ -1212,6 +1238,9 @@ func (reg *Registry) finish(r *run, err error) {
 	case err != nil:
 		status = StatusError
 		errMsg = err.Error()
+		if r.isolation != nil {
+			errMsg = clipErrMsg(errMsg)
+		}
 	default:
 		status = StatusDone
 	}
@@ -1637,4 +1666,19 @@ func (reg *Registry) ActiveRunForTask(taskID int64) (runID string, queued bool, 
 		}
 	}
 	return "", false, false, nil
+}
+
+// maxIsolatedErrMsg bounds the error text stored for an isolated run.
+const maxIsolatedErrMsg = 500
+
+// clipErrMsg truncates s to maxIsolatedErrMsg bytes on a rune boundary.
+func clipErrMsg(s string) string {
+	if len(s) <= maxIsolatedErrMsg {
+		return s
+	}
+	n := maxIsolatedErrMsg
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

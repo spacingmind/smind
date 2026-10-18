@@ -115,6 +115,10 @@ type RunStatus struct {
 	// Purpose is "user" for ordinary runs (omitted on the wire) or the
 	// system purpose ("reflect", "curate") of a learning run (ADR-0026).
 	Purpose string `json:"purpose,omitempty"`
+
+	// Origin is who authored the run's prompt (human, orchestrator,
+	// agent); omitted when unknown.
+	Origin string `json:"origin,omitempty"`
 }
 
 // RunUsage is RunStatus's usage totals. Every numeric field is nil when the
