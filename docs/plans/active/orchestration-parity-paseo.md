@@ -570,10 +570,16 @@ Named tests: `TestMCPTools_TaskStatusWithEvents`, `TestMCPTools_TaskLogsWithEven
 
 New decisions raised by the fold-in (not built, recommendation attached):
 
-- **D12: CLI/UI to flip `autoAccept` live on one run** (D-G2). `run.setPermissionMode`
+- **D12: CLI/UI to flip `autoAccept` live on one run** (D-G2). **Decided 2026-10-18 (user): build the CLI** (`smind task mode`, below). `run.setPermissionMode`
   with a human source already allows it; the gap is discoverability. Recommend
   a `smind task mode <runId> [--auto-accept on|off] [mode]` human-only CLI,
   needs no ADR (it exposes an existing human-source RPC) but is your call.
+  *Decision recorded:* the CLI declares `source: "human"` explicitly; the MCP `task_set_mode` stays orchestrator-source with no
+  `autoAccept`/`source` input and no MCP tool is added. The source is a declaration by the surface, not a credential (every client
+  holds the daemon token), so the CLI adds a speed bump on the escalations (turning auto-accept on, or picking a mode the daemon would refuse an
+  agent, needs "yes" typed at a terminal, no `--yes`; the mode is probed as the orchestrator source so the daemon, not the CLI, decides which
+  modes auto-approve, failing closed); against a process that can run commands as the user the boundary stays the provider's permission mode or
+  sandbox (ADR-0019), as for `smind task approve`.
 - **D13: `needs-continue` run state for `max_turn_requests`** (D-G5). Today
   such a run ends `done` with only `stopReason` telling the truth. Recommend
   adding it as a distinct terminal status, which ripples through `run.status`,
@@ -586,6 +592,7 @@ New decisions raised by the fold-in (not built, recommendation attached):
 - [x] ADR-0024 (D1) and ADR-0025 (D2) written, Accepted; D1-D11 answered (2026-10-11)
 - [x] PR-A discovery tools + server instructions: #264 (merged)
 - [x] PR-B task from baseRef/branch/PR + `task_archive` + archive guard/latch: #266 (merged)
+- [x] D12 `smind task mode <runId> [--auto-accept on|off] [mode]` human-only CLI (2026-10-18, PR "feat(cli): smind task mode for humans (D12)")
 - [x] PR-E worktree setup/teardown + ports (backend + CLI): #270 (merged)
 - [ ] PR-C live settings + wait-any: #269 (open, CI green)
 - [ ] PR-G dogfood fixes (D-G1 blocker, D-G3..D-G10): #273 (open, stacked on #269)
@@ -598,6 +605,7 @@ New decisions raised by the fold-in (not built, recommendation attached):
 
 Per PR, with what was and was not verified (details in each PR body):
 
+- **D12 (`smind task mode`):** `TestTaskModeParse`, `TestTaskModeDeclaresHumanSource` (the CLI sends `source: "human"` explicitly), `TestTaskModeAutoAcceptOnNeedsATerminalAndAYes` (an auto-approving mode or auto-accept on needs a terminal and `yes`, else no human-source call is made; off and safe modes never ask; an unverifiable mode fails closed), `TestTaskModeAgainstARealDaemon` (live ACP run: a human picks `bypass_permissions`, turns auto-accept on, then off), `TestRunSetPermissionMode_AgentSourceIsRefusedLikeOrchestrator` (source `agent` refused an auto-approving mode and `autoAccept=true`; `human` allowed), `TestMCPTools_NoToolCanEscalatePermissions` (no MCP tool takes `source`; only `task_send` takes `autoAccept`, which the daemon rejects: `TestMCPTools_TaskSendRejectsAutoApprovingMode`). Not verified: a real provider's auto-accept toggle (fake ACP agent only).
 - **PR-A (#264):** TestRunList_*, TestMCPTools_{WorkspaceList,TaskGet,RunList*,ProviderListMarksAutoApprovingModes,ProfileListIncludesNotes}, TestMCPServer_InstructionsNameEveryTool (fails when a tool is undocumented), TestCapRuns. Criteria 1-7 met.
 - **PR-B (#266):** ref validation and git argv safety (`TestManager_CreateTask_BaseRefRejectsOptionLikeInput`), single-level refs/SHAs, `prNumber <= 0` rejected at every layer; archive guard fails closed, latch set *before* the active check (`TestTryBeginArchive_LatchSetBeforeActiveCheck` fails on the old order), `run.start` refuses archived tasks. Not verified: PR path against a real GitHub remote (test seam only).
 - **PR-E (#270):** setup/teardown/port tests listed in the PR; review fixes: `Start` honors setup-busy, `RetrySetup` atomic, `discardTask` never deletes a pre-existing branch (regression `TestCreateTask_ExistingBranchPortExhaustionKeepsUserBranch`, verified to fail on the old behavior). Not verified: real `npm ci`, Windows.

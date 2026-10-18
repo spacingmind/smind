@@ -39,6 +39,41 @@ func TestMCPTools_NoApprovalToolInCatalog(t *testing.T) {
 	}
 }
 
+// TestMCPTools_NoToolCanEscalatePermissions: `smind task mode` is human-only
+// (orchestration-parity D12), so nothing in the MCP catalog may take an
+// source, and only task_send takes autoAccept (the daemon rejects true there:
+// TestMCPTools_TaskSendRejectsAutoApprovingMode). task_set_mode can only ever
+// switch to a mode the daemon accepts from the orchestrator source, and no tool
+// can claim "human".
+func TestMCPTools_NoToolCanEscalatePermissions(t *testing.T) {
+	env := newMCPSession(t)
+	res, err := env.cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range res.Tools {
+		schema, err := json.Marshal(tool.InputSchema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var in struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(schema, &in); err != nil {
+			t.Fatal(err)
+		}
+		if _, has := in.Properties["source"]; has {
+			t.Errorf("MCP tool %s takes a source: an orchestrating agent must not be able to claim one", tool.Name)
+		}
+		if _, has := in.Properties["autoAccept"]; has && tool.Name != "task_send" {
+			t.Errorf("MCP tool %s takes autoAccept: only task_send may (and the daemon refuses true)", tool.Name)
+		}
+		if tool.Name == "task_mode" || strings.Contains(tool.Name, "auto_accept") {
+			t.Errorf("tools/list contains %q, which is human-only", tool.Name)
+		}
+	}
+}
+
 // TestMCPTools_SchemaValidationErrors pins AC4: an invalid call (wrong
 // type for a required field) is rejected by the SDK's schema validation
 // before the handler runs, surfacing as a tool result with IsError set
