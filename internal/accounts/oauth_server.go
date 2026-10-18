@@ -36,6 +36,18 @@ type callbackResult struct {
 	errCode string
 }
 
+// checkBoundLoopback verifies the address a listener actually bound is
+// loopback. checkLoopbackAddr only judges the requested string; a name such as
+// "localhost" is resolved by the OS, and a hosts file or resolver could point
+// it at a network-reachable address.
+func checkBoundLoopback(l net.Listener) error {
+	tcp, ok := l.Addr().(*net.TCPAddr)
+	if !ok || !tcp.IP.IsLoopback() {
+		return fmt.Errorf("oauth callback listener bound to %s, which is not loopback-only", l.Addr())
+	}
+	return nil
+}
+
 // callbackServer is a temporary local HTTP listener that serves exactly one
 // OAuth callback request on addr+path, then reports it on result. Bind
 // happens synchronously in newCallbackServer, before the caller is told an
@@ -64,6 +76,10 @@ func newCallbackServer(addr, path, providerLabel string) (*callbackServer, error
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("bind oauth callback listener on %s: %w", addr, err)
+	}
+	if err := checkBoundLoopback(listener); err != nil {
+		_ = listener.Close()
+		return nil, err
 	}
 
 	s := &callbackServer{listener: listener, result: make(chan callbackResult, 1), providerLabel: providerLabel}
