@@ -110,7 +110,8 @@ func (s *Store) ReplaceAccountCredential(id int64, credentialType, credentialDat
 
 // ReplaceAccountCredentialKeepingIdentity is ReplaceAccountCredential for the
 // OAuth re-login of the same vendor account (ADR-0033 D6): the credential is
-// swapped and the stored identity is left as is.
+// swapped, the stored identity is left as is and the account's quota
+// cooldowns are kept (the same vendor account is still exhausted).
 func (s *Store) ReplaceAccountCredentialKeepingIdentity(id int64, credentialType, credentialData string) (Account, error) {
 	return s.replaceAccountCredential(id, credentialType, credentialData, "", true)
 }
@@ -162,10 +163,14 @@ func (s *Store) SetAccountIdentity(id int64, identity string) (Account, error) {
 	return s.GetAccount(id)
 }
 
-// replaceAccountCredential does the work of the replace methods. keepIdentity
-// leaves the stored identity untouched; otherwise it is set to identity ("" =
-// cleared to NULL) in the same UPDATE as the credential.
-func (s *Store) replaceAccountCredential(id int64, credentialType, credentialData, identity string, keepIdentity bool) (Account, error) {
+// replaceAccountCredential does the work of the replace methods. sameAccount
+// says the new credential is known to belong to the same vendor account as
+// the old one (an OAuth re-login with a matching identity): the stored
+// identity is left untouched and the passive quota cooldowns are kept, since
+// that account is still as exhausted as it was. Otherwise the identity is set
+// to identity ("" = cleared to NULL) in the same UPDATE as the credential and
+// the cooldowns are deleted, as the row may now be a different account.
+func (s *Store) replaceAccountCredential(id int64, credentialType, credentialData, identity string, sameAccount bool) (Account, error) {
 	if _, err := s.GetAccount(id); err != nil {
 		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
 	}
@@ -178,15 +183,17 @@ func (s *Store) replaceAccountCredential(id int64, credentialType, credentialDat
 	defer tx.Rollback()
 	if _, err := tx.Exec(
 		`UPDATE accounts SET credential_type = ?, credential_data = ?, identity = CASE WHEN ? THEN identity ELSE NULLIF(?, '') END, updated_at = ? WHERE id = ?`,
-		credentialType, credentialData, keepIdentity, identity, time.Now().UTC(), id,
+		credentialType, credentialData, sameAccount, identity, time.Now().UTC(), id,
 	); err != nil {
 		if isUniqueViolation(err) {
 			return Account{}, fmt.Errorf("update account %d credential: %w", id, ErrIdentityInUse)
 		}
 		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
 	}
-	if _, err := tx.Exec(`DELETE FROM quota_cooldown WHERE account_id = ?`, id); err != nil {
-		return Account{}, fmt.Errorf("update account %d credential: delete quota cooldowns: %w", id, err)
+	if !sameAccount {
+		if _, err := tx.Exec(`DELETE FROM quota_cooldown WHERE account_id = ?`, id); err != nil {
+			return Account{}, fmt.Errorf("update account %d credential: delete quota cooldowns: %w", id, err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)

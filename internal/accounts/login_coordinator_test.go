@@ -424,9 +424,9 @@ func TestLoginCoordinator_Relogin(t *testing.T) {
 		}
 		id := first.Account.ID
 
-		// Rows that must survive a re-login: routing affinity, quota snapshot
-		// and the models list. A passive cooldown is cleared by a credential
-		// change by design (ADR-0028 section 7).
+		// Rows that must survive a same-identity re-login: routing affinity,
+		// quota snapshot, the passive cooldown (the same vendor account is
+		// still quota-exhausted) and the models list.
 		now := time.Now().UTC()
 		if _, err := registry.SetModels(id, []string{"claude-*"}); err != nil {
 			t.Fatalf("SetModels() error = %v", err)
@@ -471,11 +471,11 @@ func TestLoginCoordinator_Relogin(t *testing.T) {
 		if got, err := registry.store.GetQuotaSnapshot(snap.ID); err != nil || got.AccountID != id {
 			t.Errorf("quota snapshot = %+v, %v, want kept on account %d", got, err, id)
 		}
-		if cds, _ := registry.store.ListQuotaCooldowns(id); len(cds) != 0 {
-			t.Errorf("cooldowns = %v, want cleared by the credential change", cds)
+		if cds, _ := registry.store.ListQuotaCooldowns(id); len(cds) != 1 {
+			t.Errorf("cooldowns = %v, want the cooldown kept (same vendor account)", cds)
 		}
-		if len(hooked) != 1 || hooked[0] != id {
-			t.Errorf("credential-replaced hook calls = %v, want [%d]", hooked, id)
+		if len(hooked) != 0 {
+			t.Errorf("credential-replaced hook calls = %v, want none (the passive cooldown stays)", hooked)
 		}
 		if ups := notifier.updates(); len(ups) != 2 || ups[1].ID != id {
 			t.Errorf("account.updated notifications = %d, want the models change plus the re-login", len(ups))
@@ -506,6 +506,32 @@ func TestLoginCoordinator_Relogin(t *testing.T) {
 		}
 		if accts, _ := registry.List(); len(accts) != 1 {
 			t.Errorf("accounts = %d, want no new row", len(accts))
+		}
+	})
+
+	t.Run("relogin adopt clears cooldowns because the row may be a different vendor account", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		var hooked []int64
+		registry.SetCredentialReplacedHook(func(id int64) { hooked = append(hooked, id) })
+		legacy, err := registry.AddOAuth("fake", "legacy", OAuthCredential{AccessToken: "old", RefreshToken: "old-r", ExpiresAt: time.Now().Add(time.Hour)})
+		if err != nil {
+			t.Fatalf("AddOAuth() error = %v", err)
+		}
+		now := time.Now().UTC()
+		if err := registry.store.SaveQuotaCooldown(store.QuotaCooldown{AccountID: legacy.ID, Until: now.Add(time.Hour), Reason: "r", ObservedAt: now}); err != nil {
+			t.Fatalf("SaveQuotaCooldown() error = %v", err)
+		}
+
+		if _, err := relogin(t, coord, login, "x", LoginOptions{AccountID: legacy.ID}, "subject-1"); err != nil {
+			t.Fatalf("Login() error = %v", err)
+		}
+		if cds, _ := registry.store.ListQuotaCooldowns(legacy.ID); len(cds) != 0 {
+			t.Errorf("cooldowns = %v, want cleared by the adopt", cds)
+		}
+		if len(hooked) != 1 || hooked[0] != legacy.ID {
+			t.Errorf("credential-replaced hook calls = %v, want [%d]", hooked, legacy.ID)
 		}
 	})
 

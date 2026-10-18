@@ -227,18 +227,19 @@ func (c *LoginCoordinator) persist(provider, label string, opts LoginOptions, ex
 		return LoginResult{}, &LoginError{Code: LoginCodeIdentityUnverified, Detail: fmt.Sprintf("this login did not identify its %s account, so account %d was not changed", providerDisplayLabel(provider), target.ID)}
 	case opts.AccountID != 0 && identity == "":
 		// A legacy row (no identity) cannot be verified either, but there is
-		// nothing to protect: replace its credential, identity untouched.
-		return c.replaced(provider, target.ID, exchanged.Credential, "", false)
+		// nothing to protect: replace its credential, identity untouched
+		// (and, as it may be another vendor account, its cooldowns cleared).
+		return c.replaced(provider, target.ID, exchanged.Credential, "", false, false)
 	case opts.AccountID != 0 && owned && owner.ID == target.ID:
-		return c.replaced(provider, target.ID, exchanged.Credential, "", false)
+		return c.replaced(provider, target.ID, exchanged.Credential, "", false, true)
 	case opts.AccountID != 0 && target.Identity != "":
 		return LoginResult{}, &LoginError{Code: LoginCodeIdentityMismatch, Detail: fmt.Sprintf("this login is a different %s account than account %d", providerDisplayLabel(provider), target.ID)}
 	case opts.AccountID != 0 && owned:
 		return LoginResult{}, identityInUse(owner.ID)
 	case opts.AccountID != 0:
-		return c.replaced(provider, target.ID, exchanged.Credential, identity, true)
+		return c.replaced(provider, target.ID, exchanged.Credential, identity, true, false)
 	case owned:
-		return c.replaced(provider, owner.ID, exchanged.Credential, "", false)
+		return c.replaced(provider, owner.ID, exchanged.Credential, "", false, true)
 	}
 
 	created, err := c.registry.AddOAuthWithIdentity(provider, label, exchanged.Credential, identity)
@@ -255,10 +256,10 @@ func (c *LoginCoordinator) persist(provider, label string, opts LoginOptions, ex
 	return LoginResult{Account: account, Created: true}, nil
 }
 
-// replaced swaps id's credential (adopting adoptIdentity when non-empty) and
-// returns the refreshed row.
-func (c *LoginCoordinator) replaced(provider string, id int64, cred OAuthCredential, adoptIdentity string, adopted bool) (LoginResult, error) {
-	if _, err := c.registry.ReplaceOAuth(id, cred, adoptIdentity); err != nil {
+// replaced swaps id's credential (see Registry.ReplaceOAuth for adoptIdentity
+// and sameAccount) and returns the refreshed row.
+func (c *LoginCoordinator) replaced(provider string, id int64, cred OAuthCredential, adoptIdentity string, adopted, sameAccount bool) (LoginResult, error) {
+	if _, err := c.registry.ReplaceOAuth(id, cred, adoptIdentity, sameAccount); err != nil {
 		if errors.Is(err, store.ErrIdentityInUse) {
 			return LoginResult{}, c.identityInUseNow(provider, adoptIdentity)
 		}

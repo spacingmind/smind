@@ -164,29 +164,43 @@ func (r *Registry) AddOAuthWithIdentity(provider, label string, cred OAuthCreden
 
 // ReplaceOAuth swaps the account's credential for the oauth credential cred
 // -- the re-login path (ADR-0033 D6): id, label, models and every row
-// referencing the account are kept. A non-empty adoptIdentity is stored in
-// the same transaction (a legacy row gaining its identity; another owner is
-// store.ErrIdentityInUse and nothing changes); "" leaves the stored identity
-// as is. Fires the credential-replaced hook (which drops the passive
-// cooldown) and then NotifyAccountUpdated, like ReplaceCredential. The
-// poller's rejected-credential state is keyed on a credential fingerprint,
-// so the new credential unblocks refresh by itself.
-func (r *Registry) ReplaceOAuth(id int64, cred OAuthCredential, adoptIdentity string) (store.Account, error) {
+// referencing the account are kept. There are three cases:
+//   - sameAccount: the login's identity matched this row's, so it is the same
+//     vendor account. The stored identity and the passive quota cooldown stay
+//     (that account is still exhausted) and the credential-replaced hook does
+//     not fire.
+//   - adoptIdentity != "": a legacy row gains the identity in the same
+//     transaction (another owner is store.ErrIdentityInUse and nothing
+//     changes).
+//   - neither: the new credential cannot be tied to the old one (a legacy
+//     row, no identity either side).
+//
+// In the last two the row may now be a different vendor account, so the
+// persisted cooldowns are deleted and the hook fires (dropping the in-memory
+// cooldown), as for ReplaceCredential. NotifyAccountUpdated always fires. The
+// poller's rejected-credential state is keyed on a credential fingerprint, so
+// the new credential unblocks refresh by itself.
+func (r *Registry) ReplaceOAuth(id int64, cred OAuthCredential, adoptIdentity string, sameAccount bool) (store.Account, error) {
 	data, err := json.Marshal(cred)
 	if err != nil {
 		return store.Account{}, fmt.Errorf("marshal oauth credential: %w", err)
 	}
 	var updated store.Account
-	if adoptIdentity != "" {
+	switch {
+	case adoptIdentity != "":
 		updated, err = r.store.ReplaceAccountCredentialAdoptingIdentity(id, CredentialTypeOAuth, string(data), adoptIdentity)
-	} else {
+	case sameAccount:
 		updated, err = r.store.ReplaceAccountCredentialKeepingIdentity(id, CredentialTypeOAuth, string(data))
+	default:
+		updated, err = r.store.ReplaceAccountCredential(id, CredentialTypeOAuth, string(data))
 	}
 	if err != nil {
 		return store.Account{}, err
 	}
-	if fn := r.getCredentialReplacedHook(); fn != nil {
-		fn(id)
+	if !sameAccount {
+		if fn := r.getCredentialReplacedHook(); fn != nil {
+			fn(id)
+		}
 	}
 	if n := r.getNotifier(); n != nil {
 		n.NotifyAccountUpdated(updated)
