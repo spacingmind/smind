@@ -36,16 +36,16 @@ jobs:
           $proc = Start-Process $app.FullName -PassThru
           Start-Sleep 8
           "app running: $(-not $proc.HasExited)"
+          Write-Host "--- processes after launch"
+          Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'msedgewebview2|smind-desktop' } | Select-Object ProcessId, ParentProcessId, Name, @{n='Cmd';e={ if ($_.CommandLine.Length -gt 400) { $_.CommandLine.Substring(0,400) } else { $_.CommandLine } }} | Format-List | Out-String
+          Write-Host "--- listening ports"
+          netstat -ano | Select-String 'LISTENING' | Select-String '9222|127.0.0.1'
+          Write-Host "--- try both loopbacks"
+          foreach ($u in 'http://127.0.0.1:9222/json/version','http://localhost:9222/json/version','http://[::1]:9222/json/version') { try { "$u -> $((Invoke-WebRequest $u -UseBasicParsing -TimeoutSec 3).Content)" } catch { "$u -> $($_.Exception.Message)" } }
+          Write-Host "--- env as seen by the app process"
+          "env var in this shell: $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
+          Get-ChildItem "$env:LOCALAPPDATA" -Directory | Select-Object Name | Format-Table | Out-String
           Write-Host "--- daemon_status"
-          node desktop/scripts/cdp-invoke.mjs 9222 'window.__TAURI_INTERNALS__.invoke("daemon_status")' 90
+          node desktop/scripts/cdp-invoke.mjs 9222 'window.__TAURI_INTERNALS__.invoke("daemon_status")' 20
           "exit $LASTEXITCODE"
-          Write-Host "--- daemon_install"
-          node desktop/scripts/cdp-invoke.mjs 9222 'window.__TAURI_INTERNALS__.invoke("daemon_install")' 90
-          "exit $LASTEXITCODE"
-          Start-Sleep 3
-          try { Invoke-RestMethod http://127.0.0.1:4648/healthz | ConvertTo-Json -Compress } catch { "healthz: $($_.Exception.Message)" }
-          Get-ChildItem "$env:LOCALAPPDATA\sMind" -Recurse | Select-Object FullName, Length | Format-Table -AutoSize | Out-String
-          Get-ChildItem "$env:USERPROFILE\.smind" -ErrorAction SilentlyContinue | Select-Object Name, Length | Format-Table | Out-String
-          Get-Content "$env:LOCALAPPDATA\sMind\smind.log" -Tail 20 -ErrorAction SilentlyContinue
-          Get-Process smind, smind-desktop -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, Path | Format-Table | Out-String
           exit 0
