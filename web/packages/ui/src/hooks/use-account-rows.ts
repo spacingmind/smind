@@ -1,6 +1,7 @@
 import { skipToken, useQueries } from "@tanstack/react-query";
 
 import { useAccounts } from "@/hooks/use-accounts";
+import { useNow } from "@/hooks/use-now";
 import { useUsageReports } from "@/hooks/use-usage-reports";
 import { accountStatus, type AccountStatus } from "@/lib/account-status";
 import { queryKeys } from "@/lib/query-keys";
@@ -26,6 +27,7 @@ export function useAccountRows(): { rows: AccountRowData[]; loaded: boolean; err
   const accountsQuery = useAccounts();
   const accounts = accountsQuery.data;
   const { snapshot } = useUsageReports();
+  const now = useNow();
 
   const providerKeys = [...new Set((accounts ?? []).map((a) => a.provider))];
   // Same shape as useProviderTestResult: a cache read per key, never a fetch.
@@ -48,8 +50,8 @@ export function useAccountRows(): { rows: AccountRowData[]; loaded: boolean; err
       account,
       usage,
       test,
-      status: accountStatus({ account, usage, test }),
-      badge: healthBadge({ usage, test }),
+      status: accountStatus({ account, usage, test, now }),
+      badge: healthBadge({ usage, test, now }),
     };
   });
   return { rows, loaded: accounts !== undefined, error: accounts === undefined ? (accountsQuery.error ?? null) : null };

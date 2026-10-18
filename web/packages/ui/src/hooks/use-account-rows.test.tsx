@@ -1,5 +1,5 @@
 import { act } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useAccountRows } from "@/hooks/use-account-rows";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
@@ -63,5 +63,27 @@ describe("useAccountRows", () => {
     const view = renderHookWithDaemon((_: null) => useAccountRows(), d, { initialProps: null });
     expect(view.result.current.loaded).toBe(false);
     expect(view.result.current.rows).toEqual([]);
+  });
+
+  describe("clock", () => {
+    afterEach(() => vi.useRealTimers());
+
+    it("cooling down expires on the clock tick", async () => {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+      const until = new Date(Date.now() + 60_000).toISOString();
+      const d = new FakeUsageDaemon([
+        claudeAccount({ accountId: 1, cooldown: { until, scope: "account", reason: "rejected" } }, Date.now()),
+      ]);
+      d.accounts = [account(1, "anthropic", "main")];
+      const view = renderHookWithDaemon((_: null) => useAccountRows(), d, { initialProps: null });
+      await flush();
+      await flush();
+      expect(view.result.current.rows[0].badge.kind).toBe("cooldown");
+      await act(async () => {
+        vi.advanceTimersByTime(90_000);
+      });
+      expect(view.result.current.rows[0].badge.kind).not.toBe("cooldown");
+      expect(view.result.current.rows[0].status.label).not.toBe("Rate limited");
+    });
   });
 });
