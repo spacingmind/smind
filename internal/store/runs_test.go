@@ -322,3 +322,74 @@ func TestRunStart_ModelPersistedOnRun(t *testing.T) {
 		t.Fatalf("ListRecentRuns models = %v", seen)
 	}
 }
+
+func boolPtr(b bool) *bool { return &b }
+
+// TestUpdateRunProvenance_WritesOnlyNonNil: a start-time capture (base +
+// dirty) followed by a terminal capture (head + dirty) keeps the earlier
+// base, overwrites dirty, and both GetRun and ListRecentRuns return the
+// fields. A nil-field-only call writes nothing, and a missing run id is an
+// error.
+func TestUpdateRunProvenance_WritesOnlyNonNil(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	task := newTestTaskForRuns(t, s)
+	if _, err := s.CreateRun(Run{ID: "run-prov", TaskID: task.ID, Provider: "glm", Prompt: "hi", Status: "running", StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("CreateRun() error = %v", err)
+	}
+
+	got, err := s.GetRun("run-prov")
+	if err != nil {
+		t.Fatalf("GetRun() error = %v", err)
+	}
+	if got.BaseSHA != nil || got.HeadSHA != nil || got.Dirty != nil {
+		t.Fatalf("CreateRun() provenance = %v/%v/%v, want nil (CreateRun leaves them NULL)", got.BaseSHA, got.HeadSHA, got.Dirty)
+	}
+
+	// Start capture: base + dirty only.
+	if err := s.UpdateRunProvenance("run-prov", RunProvenance{BaseSHA: strPtr("sha-1"), Dirty: boolPtr(true)}); err != nil {
+		t.Fatalf("UpdateRunProvenance() start error = %v", err)
+	}
+	got, err = s.GetRun("run-prov")
+	if err != nil {
+		t.Fatalf("GetRun() error = %v", err)
+	}
+	if got.BaseSHA == nil || *got.BaseSHA != "sha-1" || got.HeadSHA != nil || got.Dirty == nil || !*got.Dirty {
+		t.Fatalf("after start capture = %v/%v/%v, want sha-1/nil/true", got.BaseSHA, got.HeadSHA, got.Dirty)
+	}
+
+	// Terminal capture: head + dirty only -- base survives, dirty is
+	// overwritten (latest successful capture wins, O1 dirty semantics).
+	if err := s.UpdateRunProvenance("run-prov", RunProvenance{HeadSHA: strPtr("sha-2"), Dirty: boolPtr(false)}); err != nil {
+		t.Fatalf("UpdateRunProvenance() terminal error = %v", err)
+	}
+	got, err = s.GetRun("run-prov")
+	if err != nil {
+		t.Fatalf("GetRun() error = %v", err)
+	}
+	if got.BaseSHA == nil || *got.BaseSHA != "sha-1" || got.HeadSHA == nil || *got.HeadSHA != "sha-2" || got.Dirty == nil || *got.Dirty {
+		t.Fatalf("after terminal capture = %v/%v/%v, want sha-1/sha-2/false", got.BaseSHA, got.HeadSHA, got.Dirty)
+	}
+
+	// All-nil writes nothing (a failed capture leaves the stored values).
+	if err := s.UpdateRunProvenance("run-prov", RunProvenance{}); err != nil {
+		t.Fatalf("UpdateRunProvenance() empty error = %v", err)
+	}
+
+	list, err := s.ListRecentRuns(10)
+	if err != nil {
+		t.Fatalf("ListRecentRuns() error = %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("ListRecentRuns() len = %d, want 1", len(list))
+	}
+	r := list[0]
+	if r.BaseSHA == nil || *r.BaseSHA != "sha-1" || r.HeadSHA == nil || *r.HeadSHA != "sha-2" || r.Dirty == nil || *r.Dirty {
+		t.Fatalf("ListRecentRuns() provenance = %v/%v/%v, want sha-1/sha-2/false", r.BaseSHA, r.HeadSHA, r.Dirty)
+	}
+
+	if err := s.UpdateRunProvenance("no-such-run", RunProvenance{BaseSHA: strPtr("x")}); err == nil {
+		t.Fatal("UpdateRunProvenance() on missing run error = nil, want error")
+	}
+}

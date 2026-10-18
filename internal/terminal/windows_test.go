@@ -14,7 +14,7 @@ import (
 )
 
 // This file holds the Windows-only test scenarios from
-// docs/plans/active/windows-native-terminal.md: ConPTY echo round-trip,
+// docs/plans/completed/windows-native-terminal.md: ConPTY echo round-trip,
 // natural shell exit closing the session (the AC4 ConPTY-doesn't-EOF
 // gotcha), Job Object tree kill (AC5), concurrent CloseAll, and resize
 // (AC7). resolveShell's own table test (AC6) lives here too.

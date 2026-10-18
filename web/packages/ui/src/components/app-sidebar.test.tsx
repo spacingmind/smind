@@ -1252,6 +1252,9 @@ describe("AppSidebar footer Host popover and agent palette entries (run-config I
     expect(byTitle.has("Settings: Providers")).toBe(true);
     expect(byTitle.has("New agent…")).toBe(true);
     expect(byTitle.has("Use agent: Quick Fixes")).toBe(true);
+    // The Connection group of Settings is desktop-only (this file runs as a web build).
+    expect(byTitle.has("Settings: Daemon server")).toBe(false);
+    expect(byTitle.has("Settings: Daemon")).toBe(false);
 
     // The Agents entries deep-link via the window event (this composer-
     // toolbar-shared channel); Settings -> Providers (ADR-0015) is now a

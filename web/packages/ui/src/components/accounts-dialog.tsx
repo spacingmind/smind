@@ -18,6 +18,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
+import { externalLinkProps, openExternalUrl } from "@/lib/external-link";
+import { isDesktop } from "@/lib/platform";
 import type { Account, ProviderInfo, ProviderListResult, ProviderTestResult } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
@@ -189,7 +191,12 @@ export function ConnectAccountPanel({
         (event, params) => {
           if (event !== "authorizeUrl") return;
           const url = (params as { url?: string } | undefined)?.url;
-          if (url) setAuthorizeUrl(url);
+          if (!url) return;
+          setAuthorizeUrl(url);
+          // The daemon only reports the URL. A desktop build opens it itself
+          // (an event handler isn't a user gesture, so a browser would block
+          // window.open here -- the link below covers that case).
+          if (isDesktop) openExternalUrl(url);
         },
         { signal: controller.signal },
       );
@@ -257,8 +264,8 @@ export function ConnectAccountPanel({
               <p>
                 {authorizeUrl ? (
                   <>
-                    Waiting for login — if a browser didn't open automatically,{" "}
-                    <a href={authorizeUrl} target="_blank" rel="noreferrer" className="underline">
+                    Waiting for login — {isDesktop ? "if your browser didn't open, " : ""}
+                    <a {...externalLinkProps(authorizeUrl)} className="underline">
                       open the login page
                     </a>
                     .

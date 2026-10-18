@@ -115,10 +115,15 @@ Cross-platform:
 ## Progress
 
 - [x] Spec written (2026-10-10).
-- [ ] Implementation.
-- [ ] Windows CI green.
+- [x] Implementation: delivered by #245 (v0.10.0), which carries this plan's xpty-based backend (PR #239's branch) and, on Windows, replaces xpty with the own ConPTY wrapper (ADR-0022).
+- [x] Windows CI green: the `windows-terminal` job in `.github/workflows/ci.yml` (blocking build/vet/terminal tests) and `windows-full-suite.yml`.
+
+**Closed 2026-10-18 as superseded.** This plan's Windows backend choice (AC2: `charmbracelet/x/xpty`, with a ConPTY wrapper "swappable later") was replaced by [windows-conpty-wrapper.md](../completed/windows-conpty-wrapper.md) / ADR-0022 the same day it was written; Unix still uses xpty. Its remaining criteria (AC1 Windows builds, AC3 Unix unchanged, AC4 shell exit detected, AC5 tree kill via a Job Object, AC6 shell resolution, AC7 resize, AC8 the Windows CI job) are what the successor's Validation and the CI jobs above exercise; the runtime-parity and desktop-management follow-ups it names shipped as #310 and #311.
 
 ## Validation
 
-_(fill per AC: test name or command + result; for AC8 list the non-blocking
-full-suite failures verbatim.)_
+Superseded: validated through the successor plan. See `docs/plans/completed/windows-conpty-wrapper.md`'s Validation
+(real Windows 11 run: ConPTY round-trip, resize, drain-to-EOF on exit, Job Object tree kill, `go test -count=20
+./internal/terminal/...`, vet for windows/amd64, windows/arm64, linux and darwin) and the blocking `windows-terminal` CI job.
+The non-blocking full-suite list this plan asked for became `windows-full-suite.yml` and the runtime-parity work in #310. Not
+re-verified here: AC9 (the doc wording) was not re-read when closing this plan.

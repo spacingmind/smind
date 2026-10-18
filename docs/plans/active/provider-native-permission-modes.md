@@ -245,7 +245,7 @@ Web (`web/packages/ui`, vitest):
   `cmd/smind/{task.go,profile.go,main.go}` (+tests);
   `web/packages/ui/src/{lib/types.ts,hooks/use-run-timeline.ts,components/composer/{composer.tsx,run-config-toolbar.tsx,run-config-preference.ts,approval-policy-cycle.ts},components/task-detail.tsx,components/settings/profiles-section.tsx}` plus the listed tests;
   `mobile/src/permissionRequests.ts` (comments only).
-- **Docs**: ADR-0014, ADR-0018 notes; README; `docs/plans/active/run-config-ia.md`
+- **Docs**: ADR-0014, ADR-0018 notes; README; `docs/plans/completed/run-config-ia.md`
   and `web-ui-*.md` mentions (update if still active).
 
 ## Progress

@@ -798,3 +798,48 @@ func TestMigrate_ModelColumns(t *testing.T) {
 		s.Close()
 	}
 }
+
+// TestMigrate_RunProvenanceColumns: a database whose runs table predates
+// the O1 provenance columns gets them on Open, the old row reads back
+// nil/nil/nil (unknown, never zero values), and re-running the migration
+// (a second Open) is a no-op.
+func TestMigrate_RunProvenanceColumns(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "old-provenance.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	task := newTestTaskForRuns(t, s)
+	for _, col := range []string{"base_sha", "head_sha", "dirty"} {
+		if _, err := s.db.Exec(`ALTER TABLE runs DROP COLUMN ` + col); err != nil {
+			t.Fatalf("drop runs.%s: %v", col, err)
+		}
+	}
+	now := time.Now().UTC()
+	if _, err := s.db.Exec(
+		`INSERT INTO runs (id, task_id, provider, prompt, status, started_at) VALUES ('old-run', ?, 'glm', 'hi', 'done', ?)`,
+		task.ID, now,
+	); err != nil {
+		t.Fatalf("seed old run: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	for i := 0; i < 2; i++ { // second Open proves idempotence
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open() #%d error = %v", i, err)
+		}
+		got, err := s.GetRun("old-run")
+		if err != nil {
+			t.Fatalf("GetRun() error = %v", err)
+		}
+		if got.BaseSHA != nil || got.HeadSHA != nil || got.Dirty != nil {
+			t.Fatalf("Open() #%d provenance = %v/%v/%v, want nil/nil/nil", i, got.BaseSHA, got.HeadSHA, got.Dirty)
+		}
+		s.Close()
+	}
+}

@@ -305,10 +305,12 @@ ported):
 
 ## Progress
 
-- [ ] D1 — window chrome (+ all of D2.1, no white flash): implemented on `feat/desktop-chrome`, automated checks green; native visual checks outstanding, see Validation
-- [ ] D2 — remove webview-isms (D2.1 owned/implemented by D1 above): D2.2–D2.8 implemented on `feat/desktop-de-webview` (stacked on `feat/desktop-chrome`), automated checks green; see Validation
-- [ ] D3 — desktop shortcuts + native menu: implemented on `feat/desktop-shortcuts-menu`, automated checks green; native menu check outstanding, see Validation
-- [ ] D4 — native integrations (reveal/open-in-editor, badge): implemented on `feat/desktop-native-integrations`, automated checks green; native Windows/Linux/WSL2 checks outstanding, see Validation
+- [x] D1 — window chrome (+ all of D2.1, no white flash): #237, in v0.10.0 (2026-10-11)
+- [x] D2 — remove webview-isms: #240, in v0.10.0
+- [x] D3 — desktop shortcuts + native menu: #247, in v0.10.0
+- [x] D4 — native integrations (reveal/open-in-editor, badge): #252, in v0.10.0
+
+**Closed 2026-10-18.** D1–D4 each shipped as their own PR in v0.10.0 (CHANGELOG 0.10.0). The "native visual checks outstanding" notes in Validation below were written before a real Windows pass existed; that pass happened on 0.10.0 on 2026-10-11 and its findings are W1–W4 below (all shipped, #283 and #285). The Linux and WSL2 native checks were never run: the desktop app no longer has a Linux/WSL2 host after #311 (it manages a native Windows daemon instead of WSL2), so they are moot, not pending.
 
 ## Validation
 
@@ -680,14 +682,26 @@ Named tests:
 
 ### Progress (W1–W4)
 
-- [ ] W1 — WSL start (PR-A)
-- [ ] W2 — badge clears (PR-A)
-- [x] W3 — tray/menu/Find/Ctrl+Q (PR-B)
-- [x] W4 — devtools/theme/scrollbars/VS Code (PR-B)
+- [x] W1 — WSL start (PR-A, #283): shipped, then moot: #311 replaced the WSL2 daemon host with a native Windows daemon and removed the WSL start path
+- [x] W2 — badge clears (PR-A, #283)
+- [x] W3 — tray/menu/Find/Ctrl+Q (PR-B, #285)
+- [x] W4 — devtools/theme/scrollbars/VS Code (PR-B, #285)
 
 ### Validation (W1–W4)
 
-_To be filled as each criterion is confirmed._
+#### PR-A (W1, W2) — #283
+
+- **W2 badge clears** — `permission.resolved` is an additive daemon topic: Go `TestPermissionResolvedIsAKnownTopic`,
+  `TestPermissionResolvedPublishedOnHumanAnswer`, `TestPermissionResolvedPublishedOnTimeout`,
+  `TestPermissionResolvedPublishedWhenRunStopped`, `TestAutoAcceptPublishesNoPermissionResolved`; Rust (`desktop/daemon-client`: `attention.rs`, `client.rs`,
+  `protocol.rs`) `resolved_clears_only_that_request`, `resolved_for_unknown_request_is_a_noop`, `run_ended_clears_its_task_only`,
+  `most_recent_task_falls_back_after_resolve`, `subscribe_messages_put_permission_resolved_in_its_own_message`,
+  `run_status_done_emits_run_ended`, `permission_resolved_payload_decodes`.
+- **W1 WSL start** — a failed restart never reports a stale Running: Rust `failed_restart_never_reports_managed_running`
+  (`daemon_manager.rs`), web `daemon-section.test.tsx` "re-reads the live status after a failed restart instead of keeping the
+  stale Running state". The WSL start-script tests and the retry-once test of that PR were deleted with the WSL path in #311.
+  Not verified on a real WSL host at the time (none was available), and now moot.
+
 
 #### PR-B (W3, W4)
 
