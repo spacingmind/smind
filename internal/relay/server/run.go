@@ -57,6 +57,10 @@ type Config struct {
 	// GRPCWebListenAddr -- the grpc-web counterpart of Listener, for the
 	// same reason.
 	GRPCWebListener net.Listener
+	// OnServer, when non-nil, is called once with the Server before it starts
+	// serving. It is for test introspection (Server.DaemonAttached); the
+	// relay itself never needs it.
+	OnServer func(*Server)
 }
 
 // DefaultListenAddr is the relay's default bind address.
@@ -144,6 +148,9 @@ func Run(ctx context.Context, cfg Config) error {
 		}),
 	)
 	srv.Register(gs)
+	if cfg.OnServer != nil {
+		cfg.OnServer(srv)
+	}
 
 	lis := cfg.Listener
 	if lis == nil {

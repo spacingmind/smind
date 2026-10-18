@@ -283,6 +283,16 @@ func TestCapturedHelloSessionCannotBeReplayedIntoANewRoute(t *testing.T) {
 					_, still := hub.sessions[routeRef{device: victim.id, session: victim.session}]
 					return !still
 				})
+				// The daemon dropping its session only starts closing its
+				// stream; the relay learns of that later. A device that
+				// attaches before then is not announced to the daemon (the
+				// relay still counts the old daemon side), so no session would
+				// start and the replay would sit unread. Wait for the relay to
+				// have let go of the old stream, as a real replay minutes later
+				// would find it.
+				waitFor(t, "the relay to drop the old daemon-side stream", func() bool {
+					return !f.relay.DaemonSideAttached(victim.session, victim.id)
+				})
 			}
 			rejectedBefore := f.logs.count("device_hello rejected")
 

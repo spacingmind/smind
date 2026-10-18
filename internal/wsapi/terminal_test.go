@@ -3,6 +3,7 @@ package wsapi
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"runtime"
 	"strconv"
 	"strings"
@@ -40,9 +41,74 @@ func collectDataUntil(t *testing.T, ws *websocket.Conn, id, want string, timeout
 		if strings.Contains(acc.String(), want) {
 			return acc.String()
 		}
-		env := readEnvelopeFor(t, ws, id, time.Until(deadline))
+		env, err := tryReadEnvelopeFor(ws, id, deadline)
+		if err != nil {
+			t.Fatalf("%v; terminal output so far (%d bytes): %q", err, acc.Len(), acc.String())
+		}
 		acc.WriteString(decodeDataEvent(t, env))
 	}
+}
+
+// tryReadEnvelopeFor is readEnvelopeFor returning its failure, so a caller
+// can add what it had collected when the wait ran out.
+func tryReadEnvelopeFor(ws *websocket.Conn, id string, deadline time.Time) (envelope, error) {
+	if err := ws.SetReadDeadline(deadline); err != nil {
+		return envelope{}, err
+	}
+	for {
+		_, data, err := ws.ReadMessage()
+		if err != nil {
+			return envelope{}, fmt.Errorf("ReadMessage() error = %w (waiting for id %q)", err, id)
+		}
+		var env envelope
+		if json.Unmarshal(data, &env) != nil {
+			continue // an ADR-0005 event notification, not an RPC message
+		}
+		if env.ID == id {
+			return env, nil
+		}
+	}
+}
+
+// writeAndCollect reads ws until the terminal.write request writeID has
+// answered AND the "data" events of the open terminal.attach attachID have
+// shown want, and returns what the attach emitted.
+//
+// A write and the attach's output race on the wire: the PTY echoes typed
+// input as it is written, so attach "data" events routinely arrive before the
+// write's own response. readEnvelopeFor(ws, writeID) throws away every message
+// that is not addressed to writeID, so reading the response first and
+// collecting the data afterwards loses whatever came earlier, and a shell that
+// has already finished leaves nothing more to wait for. One loop reads both.
+func writeAndCollect(t *testing.T, ws *websocket.Conn, writeID, attachID, want string, timeout time.Duration) string {
+	t.Helper()
+	var acc strings.Builder
+	wrote := false
+	deadline := time.Now().Add(timeout)
+	if err := ws.SetReadDeadline(deadline); err != nil {
+		t.Fatalf("SetReadDeadline() error = %v", err)
+	}
+	for !wrote || !strings.Contains(acc.String(), want) {
+		_, data, err := ws.ReadMessage()
+		if err != nil {
+			t.Fatalf("ReadMessage() error = %v (write answered: %v; waiting for %q in the output of %q); terminal output so far (%d bytes): %q",
+				err, wrote, want, attachID, acc.Len(), acc.String())
+		}
+		var env envelope
+		if json.Unmarshal(data, &env) != nil {
+			continue // an ADR-0005 event notification, not an RPC message
+		}
+		switch env.ID {
+		case writeID:
+			if env.Error != nil {
+				t.Fatalf("terminal.write error = %v", env.Error.Message)
+			}
+			wrote = true
+		case attachID:
+			acc.WriteString(decodeDataEvent(t, env))
+		}
+	}
+	return acc.String()
 }
 
 // readTerminalResponses reads messages off ws until every id in ids has
@@ -115,18 +181,11 @@ func TestServer_TerminalCreateAttachWrite_RealShell(t *testing.T) {
 	sendRequest(t, ws, "write", "terminal.write", map[string]any{
 		"terminalId": created.TerminalID, "data": "echo hello-from-wsapi-test\n",
 	})
-	writeResp := readEnvelopeFor(t, ws, "write", 5*time.Second)
-	if writeResp.Error != nil {
-		t.Fatalf("terminal.write error = %v", writeResp.Error.Message)
-	}
-
 	// 15s, not this file's usual 5s: this is the one wait in the test that
 	// depends on a real OS shell process actually scheduling and running
-	// (echoing back over the PTY), not just an RPC round trip -- CI runners
-	// occasionally starve that under load (observed as a flake: "i/o
-	// timeout (waiting for id \"attach\")" on an otherwise unrelated PR's
-	// CI run), where a real terminal never gets that slow interactively.
-	collectDataUntil(t, ws, "attach", "hello-from-wsapi-test", 15*time.Second)
+	// (echoing back over the PTY), not just an RPC round trip. The write
+	// response and the output are read together (see writeAndCollect).
+	writeAndCollect(t, ws, "write", "attach", "hello-from-wsapi-test", 15*time.Second)
 
 	sendRequest(t, ws, "close", "terminal.close", map[string]any{"terminalId": created.TerminalID})
 
@@ -180,8 +239,7 @@ func TestServer_TerminalAttach_SecondConnectionSeesBackfill(t *testing.T) {
 	sendRequest(t, creator, "write", "terminal.write", map[string]any{
 		"terminalId": created.TerminalID, "data": "echo before-second-conn\n",
 	})
-	readEnvelopeFor(t, creator, "write", 5*time.Second)
-	collectDataUntil(t, creator, "attach", "before-second-conn", 5*time.Second)
+	writeAndCollect(t, creator, "write", "attach", "before-second-conn", 5*time.Second)
 
 	attacher := dialWS(t, srv, "tok")
 	sendRequest(t, attacher, "attach2", "terminal.attach", map[string]any{"terminalId": created.TerminalID})
@@ -236,10 +294,9 @@ func TestServer_TerminalResize_ReachesPTY(t *testing.T) {
 	sendRequest(t, ws, "write", "terminal.write", map[string]any{
 		"terminalId": created.TerminalID, "data": "stty size\n",
 	})
-	readEnvelopeFor(t, ws, "write", 5*time.Second)
 
 	want := strconv.Itoa(rows) + " " + strconv.Itoa(cols)
-	collectDataUntil(t, ws, "attach", want, 5*time.Second)
+	writeAndCollect(t, ws, "write", "attach", want, 5*time.Second)
 }
 
 // TestServer_TerminalAttach_DetachDoesNotCloseSession proves a
@@ -272,8 +329,7 @@ func TestServer_TerminalAttach_DetachDoesNotCloseSession(t *testing.T) {
 	sendRequest(t, ws, "write", "terminal.write", map[string]any{
 		"terminalId": created.TerminalID, "data": "echo sync-marker\n",
 	})
-	readEnvelopeFor(t, ws, "write", 5*time.Second)
-	collectDataUntil(t, ws, "attach", "sync-marker", 5*time.Second)
+	writeAndCollect(t, ws, "write", "attach", "sync-marker", 5*time.Second)
 
 	sendCancel(t, ws, "attach")
 	// The marker match above can leave the echo's trailing output still
@@ -415,8 +471,7 @@ func TestServer_TerminalAttach_RehydratedSessionAfterRestart(t *testing.T) {
 	sendRequest(t, ws1, "write", "terminal.write", map[string]any{
 		"terminalId": created.TerminalID, "data": "echo before-restart-marker\n",
 	})
-	readEnvelopeFor(t, ws1, "write", 5*time.Second)
-	collectDataUntil(t, ws1, "attach", "before-restart-marker", 5*time.Second)
+	writeAndCollect(t, ws1, "write", "attach", "before-restart-marker", 5*time.Second)
 
 	sendRequest(t, ws1, "close", "terminal.close", map[string]any{"terminalId": created.TerminalID})
 	readTerminalResponses(t, ws1, []string{"close", "attach"}, 5*time.Second)

@@ -1059,6 +1059,23 @@ func (s *Server) Streams() int {
 	return n
 }
 
+// DaemonAttached reports whether the route has a live daemon-side stream —
+// test introspection only. A device that attaches while this is still true
+// is not announced to the daemon (the relay assumes that daemon side is
+// serving it), so a test that ends a daemon session and immediately re-attaches
+// the same route must wait for it to turn false.
+func (s *Server) DaemonAttached(workspaceID, sessionID, deviceID string) bool {
+	s.mu.Lock()
+	r, ok := s.mu.routes[routeKey(workspaceID, sessionID, deviceID)]
+	s.mu.Unlock()
+	if !ok {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.mu.streams[sideDaemon] != nil
+}
+
 // BufferedFrames returns the number of frames currently held in
 // reconnect buffers for the given route — test introspection only.
 func (s *Server) BufferedFrames(workspaceID, sessionID, deviceID string) int {
