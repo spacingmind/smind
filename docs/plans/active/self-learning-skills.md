@@ -327,12 +327,67 @@ probation 25 runs / capacity 30 / curator every 5 landings) as config knobs;
 D12 deterministic similarity check in the gate (high threshold rejects,
 medium threshold flags with a merge action; thresholds in config).
 
+Implementation decisions made in Phase B (refinements, not architecture):
+
+- **One proposal model.** Every proposal (create, patch, merge bundle) lives
+  in `learned_skill_proposals` (`kind create|patch|bundle`, `status
+  pending|approved|rejected`); `learned_skills` holds only approved skills
+  (`active|disabled|archived`). Approval is one transaction (`LandSkill` /
+  `PatchSkill` / `ApplyBundle` with a `ProposalID`). Rejected proposals are
+  kept for the reflector's negative examples. This supersedes the ADR text
+  that mentions `proposed`/`rejected` skill statuses; the gate's `LiveSkill`
+  still takes pending proposals (status `proposed`) so D12 compares against
+  them.
+- **Gate contract.** `Mode` (reflect/curate) is derived from the job type
+  server-side. The collector must honour the `Window` contract in
+  `internal/learning/gate/types.go` (`user_message` = human-typed only;
+  `failure_recovery` = agent action, not repo-controlled tool output). A
+  window is built for one workspace only. The human prompt is not a run event
+  (it lives in `runs.prompt`), so the window gives it the sentinel key
+  `(runID, seq -1)`.
+- **Landing must re-verify** (AC14 addendum, from the gate review): re-run
+  `gate.Check` inside the landing transaction against a refreshed snapshot;
+  match the patch's base version/body hash; apply batched intents
+  sequentially with no mutual-absorb cycles; persist `Render(Verdict.Result)`
+  not the raw intent; per-workspace skill quota.
+
+**OPEN, needs the user (AGENTS.md rule d): reflector tool isolation on
+GLM/Kimi.** The Phase B0 spike (read-only, 2026-10-18) found that the
+claude-native reflector can be run with no tools (`--tools ""`, strict MCP,
+empty setting sources, empty temp cwd, deny-all decider; to be confirmed with
+one live run), but the GLM ACP agent owns its tools: `read_file`,
+`list_files`, `web_search` and `web_reader` never ask permission in any mode
+and the client cannot disable them (glm-acp-agent 1.14.0
+`protocol/agent.js`, `tools/executor.js`); Kimi's tooling could not be
+inspected. So ADR section 3's "no tools" and `TestReflector_HasNoTools`
+cannot hold for GLM as written, and an injected window could try to
+exfiltrate through `web_search`/`web_reader`. Options: (1) v1 reflects only
+claude-native runs; GLM/Kimi-sourced windows are recorded `skipped:
+provider_no_tool_isolation` (recommended: keeps the hard rule, loses GLM
+learning for now, GLM delivery still works from learned skills); (2) a GLM
+reflector with mitigations (empty cwd, `--max-turns 1`, reject-only decider,
+fail the job on any tool-call event) accepting the web egress risk; (3) a
+tool-less direct chat-completion call to the GLM endpoint (a second LLM
+client, which ADR-0026 rejected); (4) reflect GLM transcripts with a Claude
+reflector (breaks the same-recipient rule, D4). Until decided, B2 implements
+option 1 and the reflector tests assert no-tools for claude-native only.
+
 ## Progress
 
 - 2026-10-11: Phase A written (ADR-0026 Proposed, this plan). No feature code.
 - 2026-10-18: user accepted D1-D11 as recommended and added D12 (similarity
   check). ADR-0026 set to Accepted; D12 added to the ADR (gate list, inbox
   UX), ACs 33-34 and the named tests above. Phase B starts with B1.
+
+- 2026-10-18: B1 split into three non-stacked PRs, each reviewed by an
+  independent read-only reviewer and hardened before opening:
+  #392 (store schema, ledger/versions/proposals/jobs, lifecycle function),
+  #393 (redactor + `learning:` config + kill switch that fails closed),
+  #394 (gate, D12 similarity, human-skill loader). B0 spike done (see OPEN
+  decision above). Next: B2a window builder + `Eligible`, B2b run plumbing
+  (`runs.purpose`, hidden system tasks, run-finished observer, Learning usage
+  bucket), B2c isolated reflector runner (claude-native), B2d collector/job
+  service; then B3 delivery, B4 wsapi/CLI/UI, B5 curator/export.
 
 ## Validation
 
