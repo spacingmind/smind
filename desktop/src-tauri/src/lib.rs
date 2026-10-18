@@ -354,7 +354,8 @@ pub fn run() {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn updater_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry, tauri_plugin_updater::Config> {
+pub(crate) fn updater_plugin<R: tauri::Runtime>(
+) -> tauri::plugin::TauriPlugin<R, tauri_plugin_updater::Config> {
     // ADR-0023.3: a candidate is offered only if strictly newer than the
     // running version AND a stable release (no pre-release part).
     tauri_plugin_updater::Builder::new()

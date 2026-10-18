@@ -180,6 +180,72 @@ pub struct UpdateState {
     pub install: InstallInProgress,
 }
 
+/// The check, over an already configured builder (production passes
+/// `app.updater_builder()`; the e2e tests pass one aimed at a local feed).
+/// A successful `available` result is stored as the pending update.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) async fn check_with(
+    builder: tauri_plugin_updater::UpdaterBuilder,
+    current_version: &str,
+    state: &UpdateState,
+) -> Result<AppUpdateCheck, String> {
+    state.install.ensure_idle()?;
+    let updater = builder.build().map_err(|e| e.to_string())?;
+    match updater.check().await {
+        Ok(Some(update)) => {
+            log::info!("smind desktop: update available: {}", update.version);
+            let result = AppUpdateCheck::Available {
+                version: update.version.clone(),
+                current_version: update.current_version.clone(),
+                notes: cap_notes(update.body.clone()),
+                date: update.date.map(|d| d.to_string()),
+            };
+            // An install may have started while the check ran.
+            state.install.ensure_idle()?;
+            state.pending.set(update);
+            Ok(result)
+        }
+        Ok(None) => Ok(AppUpdateCheck::UpToDate {
+            current_version: current_version.to_string(),
+        }),
+        Err(e) => {
+            log::info!("smind desktop: update check failed: {e}");
+            Err(e.to_string())
+        }
+    }
+}
+
+/// Download, verify the signature and install the pending update, reporting
+/// progress through `emit` (the `app-update-progress` payloads). A failure
+/// leaves the update pending so the UI's retry still finds it. The
+/// platform's relaunch is the caller's job: macOS restarts the app after
+/// this returns, Windows' installer exits the app itself.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) async fn install_pending(
+    state: &UpdateState,
+    emit: &(dyn Fn(serde_json::Value) + Send + Sync),
+) -> Result<(), String> {
+    let _guard = state.install.begin()?;
+    let update = state.pending.take()?;
+    let result = update
+        .download_and_install(
+            |downloaded, total| {
+                emit(serde_json::json!({
+                    "stage": "downloading",
+                    "downloaded": downloaded,
+                    "total": total,
+                }));
+            },
+            || emit(serde_json::json!({ "stage": "installing" })),
+        )
+        .await
+        .map_err(|e| {
+            log::info!("smind desktop: update install failed: {e}");
+            e.to_string()
+        });
+    settle_install(&state.pending, update, result)
+}
+
 #[tauri::command]
 pub async fn app_update_check(
     app: tauri::AppHandle,
@@ -194,30 +260,12 @@ pub async fn app_update_check(
     {
         use tauri_plugin_updater::UpdaterExt;
 
-        state.install.ensure_idle()?;
-        let updater = app.updater_builder().build().map_err(|e| e.to_string())?;
-        match updater.check().await {
-            Ok(Some(update)) => {
-                log::info!("smind desktop: update available: {}", update.version);
-                let result = AppUpdateCheck::Available {
-                    version: update.version.clone(),
-                    current_version: update.current_version.clone(),
-                    notes: cap_notes(update.body.clone()),
-                    date: update.date.map(|d| d.to_string()),
-                };
-                // An install may have started while the check ran.
-                state.install.ensure_idle()?;
-                state.pending.set(update);
-                Ok(result)
-            }
-            Ok(None) => Ok(AppUpdateCheck::UpToDate {
-                current_version: app.package_info().version.to_string(),
-            }),
-            Err(e) => {
-                log::info!("smind desktop: update check failed: {e}");
-                Err(e.to_string())
-            }
-        }
+        check_with(
+            app.updater_builder(),
+            &app.package_info().version.to_string(),
+            &state,
+        )
+        .await
     }
 }
 
@@ -235,35 +283,10 @@ pub async fn app_update_install(
     {
         use tauri::Emitter;
 
-        let _guard = state.install.begin()?;
-        let update = state.pending.take()?;
-        let download_app = app.clone();
-        let install_app = app.clone();
-        let result = update
-            .download_and_install(
-                move |downloaded, total| {
-                    let _ = download_app.emit(
-                        "app-update-progress",
-                        serde_json::json!({
-                            "stage": "downloading",
-                            "downloaded": downloaded,
-                            "total": total,
-                        }),
-                    );
-                },
-                move || {
-                    let _ = install_app.emit(
-                        "app-update-progress",
-                        serde_json::json!({ "stage": "installing" }),
-                    );
-                },
-            )
-            .await
-            .map_err(|e| {
-                log::info!("smind desktop: update install failed: {e}");
-                e.to_string()
-            });
-        settle_install(&state.pending, update, result)?;
+        install_pending(&state, &|payload| {
+            let _ = app.emit("app-update-progress", payload);
+        })
+        .await?;
         // Windows: the NSIS installer exits the app itself. macOS: the
         // call never resolves -- restart does not return.
         #[cfg(target_os = "macos")]
