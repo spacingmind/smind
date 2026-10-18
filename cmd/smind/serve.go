@@ -230,6 +230,18 @@ func setupDaemonLog(lc config.LogConfig, stderr io.Writer) func() {
 	// closed terminal or pipe on stderr must not silence the file (or the other
 	// way round).
 	log.SetOutput(io.MultiWriter(logging.BestEffort{W: stderr}, logging.BestEffort{W: rf}))
+	// Panic traces must land in daemon.log too (under systemd that is the
+	// journal's job, under launchd/the Windows task nobody reads stderr).
+	// Best effort: on failure the daemon continues with stderr-only traces.
+	co, err := logging.InstallCrashOutput(path)
+	if err != nil {
+		log.Printf("crash output: %v (panic traces go to stderr only)", err)
+	} else {
+		rf.OnRotate(func() { _ = co.Reopen() })
+	}
+	// The crash output is NOT unset here: deferred funcs run during panic
+	// unwinding, before the runtime prints the trace — unsetting it would
+	// lose the trace we installed it for. The process exits right after.
 	return func() { _ = rf.Close() }
 }
 
