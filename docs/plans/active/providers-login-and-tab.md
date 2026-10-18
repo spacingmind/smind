@@ -209,6 +209,15 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
   nor accounts logs request params at all (no `log.`/`slog.` call in `internal/wsapi/{conn,wsapi,server}.go` or `internal/accounts`),
   so nothing needed redacting; `account.oauthComplete`'s own param errors are fixed text (a JSON decode error is not wrapped, it can
   quote input).
+- Review fixes (`login_complete_test.go` unless noted): `simultaneous` no longer fails when the paste wins and the listener closes
+  under the racing GET (`tryCallback` ignores transport errors); `a paste acknowledged by oauthComplete is never dropped` (calls
+  `await` directly with the paste acknowledged first and a listener result / cancelled ctx / expired timeout ready too, 200
+  iterations each; removing the `pl.resolved` re-check under the mutex fails it); `oauthComplete error paste without matching state
+  does not fail the login` (an `error=` paste must prove state, missing or wrong -> `state_mismatch`, login stays pending; the
+  listener path is unchanged); `oauthComplete after cancel is login_unknown` (a login ended by ctx cancel or timeout reports
+  `login_unknown`, never `login_already_completed`); `callback listener is loopback only` also rejects `localhost.evil:0` and
+  `checkBoundLoopback` rejects a bound non-loopback address (`oauth_server_test.go`, fake listener).
+  Flake check, both modes: `go test -count=10 ./internal/accounts` and `go test -race -count=10 ./internal/accounts` pass.
 - AC-B7 codes `login_in_progress`, `timeout`, `state_mismatch`, `denied`, `login_bad_redirect` now come from `*LoginError` on the
   listener path too (existing tests updated to assert codes via `requireLoginCode`). ADR-0033's error list gained
   `login_wrong_method`, `login_attempts_exceeded`, `login_bad_redirect`, `login_already_completed`.

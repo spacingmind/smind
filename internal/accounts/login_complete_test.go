@@ -450,8 +450,8 @@ func TestLoginCoordinator_Complete(t *testing.T) {
 			},
 		}
 		for name, competing := range cases {
+			coord, _, _ := newCompleteCoordinator(t)
 			for i := 0; i < 200; i++ {
-				coord, _, _ := newCompleteCoordinator(t)
 				pl := &pendingLogin{provider: "fake", state: "st", method: loginMethodBrowser, paste: make(chan callbackResult, 1)}
 				coord.register("id", pl)
 				srv := &callbackServer{result: make(chan callbackResult, 1)}
