@@ -2,12 +2,19 @@ import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { AccountUsage, AccountUsageParams } from "@/lib/account-usage/types";
 import { RpcError, type WsClient } from "@/lib/ws-client";
 import { usageResult } from "@/test/account-usage-fixtures";
+import type { Account, ProviderListResult, ProviderTestResult } from "@/lib/types";
 
 /**
  * A scripted daemon for the plan-usage tests: answers `account.usage` from a
  * mutable list, records every request (the call-budget tests assert exact
  * counts and modes), and can emit the `account.usage` / `account.removed`
  * events the daemon would push.
+ *
+ * The accounts/providers surfaces (ADR-0032 AC5-AC9) extend the same fake:
+ * `accounts` answers `account.list`, `providers` answers `provider.list`,
+ * `testResults` answers `provider.test`, and the account mutations
+ * (`account.rename` / `account.updateCredential` / `account.remove`) update
+ * `accounts` and record their params. Every RPC records into `calls`.
  */
 export class FakeUsageDaemon {
   reports: AccountUsage[];
@@ -23,15 +30,77 @@ export class FakeUsageDaemon {
   /** When set, `account.usage` requests (recorded at once) answer only after it settles: holds a request in flight. */
   gate: Promise<void> | null = null;
 
-  private listeners = new Map<string, Set<(payload: unknown) => void>>();
+  /** Answers `account.list`; mutated by the account mutations below and by tests directly. */
+  accounts: Account[] = [];
+  /** Answers `provider.list`. */
+  providers: ProviderListResult = { providers: [] };
+  /** `provider.test` answers per provider key; a missing key answers `{ ok: true, detail: "ok" }`. */
+  testResults: Record<string, ProviderTestResult> = {};
+  /** When set, every `account.list` / `provider.list` / `provider.test` / account-mutation request rejects with it. */
+  failNonUsageWith: Error | null = null;
+  /** Every non-`account.usage` request, as `{ method, params }`, in order. */
+  calls: { method: string; params: unknown }[] = [];
 
   constructor(reports: AccountUsage[]) {
     this.reports = reports;
   }
 
+  private listeners = new Map<string, Set<(payload: unknown) => void>>();
+
+  private nextId(): number {
+    return this.accounts.reduce((max, a) => Math.max(max, a.id), 0) + 1;
+  }
+
   readonly client = {
     call: async (method: string, params?: unknown): Promise<unknown> => {
-      if (method !== "account.usage") return null;
+      if (method !== "account.usage") {
+        this.calls.push({ method, params });
+        if (this.failNonUsageWith) throw this.failNonUsageWith;
+        switch (method) {
+          case "account.list":
+            return this.accounts;
+          case "provider.list":
+            return this.providers;
+          case "provider.test":
+            return this.testResults[(params as { provider?: string } | undefined)?.provider ?? ""] ?? { ok: true, detail: "ok" };
+          case "account.rename": {
+            const p = params as { id: number; label: string };
+            const index = this.accounts.findIndex((a) => a.id === p.id);
+            if (index === -1) throw new RpcError(`account ${p.id} not found`);
+            this.accounts[index] = { ...this.accounts[index], label: p.label, updatedAt: new Date().toISOString() };
+            return this.accounts[index];
+          }
+          case "account.updateCredential": {
+            const p = params as { id: number };
+            const index = this.accounts.findIndex((a) => a.id === p.id);
+            if (index === -1) throw new RpcError(`account ${p.id} not found`);
+            this.accounts[index] = { ...this.accounts[index], updatedAt: new Date().toISOString() };
+            return this.accounts[index];
+          }
+          case "account.remove": {
+            const p = params as { id: number };
+            this.accounts = this.accounts.filter((a) => a.id !== p.id);
+            return null;
+          }
+          case "run.list":
+            return [];
+          case "account.add": {
+            const p = params as { provider: string; label: string; credentialType?: string };
+            const account: Account = {
+              id: this.nextId(),
+              provider: p.provider,
+              label: p.label,
+              credentialType: p.credentialType ?? "oauth",
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            this.accounts = [...this.accounts, account];
+            return account;
+          }
+          default:
+            return null;
+        }
+      }
       const p = (params ?? {}) as AccountUsageParams;
       this.requests.push(p);
       if (this.gate) await this.gate;
@@ -68,5 +137,10 @@ export class FakeUsageDaemon {
 
   count(mode: "cached" | "touch" | "refresh"): number {
     return this.requests.filter((r) => r.mode === mode).length;
+  }
+
+  /** How many non-`account.usage` requests recorded the given method (0 = never called). */
+  countCalls(method: string): number {
+    return this.calls.filter((c) => c.method === method).length;
   }
 }
