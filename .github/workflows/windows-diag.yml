@@ -1,0 +1,95 @@
+name: windows-diag
+# TEMPORARY (windows nightly investigation); deleted before the PR is final.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/windows-diag.yml"
+permissions:
+  contents: read
+jobs:
+  diag:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [default, tempD, noDefender]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Machine facts
+        shell: pwsh
+        run: |
+          Get-PSDrive -PSProvider FileSystem | Format-Table Name, @{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}}, @{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}}
+          Get-Volume | Format-Table DriveLetter, FileSystem, DriveType, @{n='SizeGB';e={[math]::Round($_.Size/1GB)}}
+          "TEMP=$env:TEMP  GOCACHE=$(go env GOCACHE)  workspace=$env:GITHUB_WORKSPACE"
+          (Get-MpComputerStatus | Select-Object AMServiceEnabled, RealTimeProtectionEnabled, BehaviorMonitorEnabled, IoavProtectionEnabled | Format-List | Out-String)
+          (Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors | Format-List | Out-String)
+          "RAM GB: $([math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1GB,1))"
+          exit 0
+
+      - name: Apply scenario
+        shell: pwsh
+        run: |
+          if ('${{ matrix.scenario }}' -eq 'tempD') {
+            New-Item -ItemType Directory -Force D:\gotmp | Out-Null
+            "TEMP=D:\gotmp" | Out-File -Append -Encoding ascii $env:GITHUB_ENV
+            "TMP=D:\gotmp" | Out-File -Append -Encoding ascii $env:GITHUB_ENV
+          }
+          if ('${{ matrix.scenario }}' -eq 'noDefender') {
+            Set-MpPreference -DisableRealtimeMonitoring $true
+            Add-MpPreference -ExclusionPath $env:TEMP, $env:GITHUB_WORKSPACE, (go env GOCACHE)
+            (Get-MpComputerStatus).RealTimeProtectionEnabled
+          }
+          exit 0
+
+      - name: fsync micro-benchmark (the cost of one durable commit)
+        shell: pwsh
+        run: |
+          $dir = Join-Path ([IO.Path]::GetTempPath()) 'syncbench'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          @'
+          package main
+          import ("fmt"; "os"; "path/filepath"; "time")
+          func main() {
+              dir := os.Args[1]
+              f, _ := os.Create(filepath.Join(dir, "x.bin"))
+              defer f.Close()
+              buf := make([]byte, 4096)
+              const n = 200
+              t := time.Now()
+              for i := 0; i < n; i++ { f.Write(buf); f.Sync() }
+              fmt.Printf("%s: %d write+fsync = %v (%.2f ms each)\n", dir, n, time.Since(t), float64(time.Since(t).Microseconds())/1000/n)
+              t = time.Now()
+              for i := 0; i < n; i++ { g, _ := os.Create(filepath.Join(dir, fmt.Sprintf("f%d", i))); g.Write(buf); g.Close() }
+              fmt.Printf("%s: %d small file creates = %v (%.2f ms each)\n", dir, n, time.Since(t), float64(time.Since(t).Microseconds())/1000/n)
+          }
+          '@ | Set-Content -Encoding ascii "$dir\main.go"
+          Push-Location $dir; go mod init syncbench 2>$null | Out-Null; go build -o sb.exe . ; Pop-Location
+          & "$dir\sb.exe" $dir
+          New-Item -ItemType Directory -Force D:\sb | Out-Null
+          & "$dir\sb.exe" D:\sb
+          exit 0
+
+      - name: go test ./internal/store (json) with per-test timings
+        shell: pwsh
+        run: |
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          go test -json -count=1 -timeout 14m ./internal/store 2>&1 | Out-File -Encoding utf8 store.json
+          "go test exit $LASTEXITCODE after $($sw.Elapsed)"
+          $ev = Get-Content store.json | ForEach-Object { try { $_ | ConvertFrom-Json } catch { $null } } | Where-Object { $_ -and $_.Test -and $_.Action -in 'pass','fail' }
+          "tests finished: $(@($ev).Count)"
+          ($ev | Sort-Object Elapsed -Descending | Select-Object -First 25 | Format-Table Test, Action, Elapsed -AutoSize | Out-String)
+          "sum of test time: $([math]::Round(($ev | Measure-Object Elapsed -Sum).Sum,1)) s"
+          exit 0
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: store-json-${{ matrix.scenario }}
+          path: store.json
+          retention-days: 7
