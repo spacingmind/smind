@@ -217,6 +217,29 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		// ADR-0026: self-learning skills. The new tables are additive
+		// (schema.sql's CREATE TABLE IF NOT EXISTS covers them on every
+		// Open); what pre-existing databases need are the new columns on
+		// workspaces/chats/runs/tasks, whose NOT NULL defaults backfill
+		// the pre-existing rows (learning off, nothing pending, every run
+		// a user run, every task a user task).
+		name: "learning_columns",
+		apply: func(db *sql.DB) error {
+			for _, c := range []struct{ table, col, ddl string }{
+				{"workspaces", "learning_mode", "TEXT NOT NULL DEFAULT 'off'"},
+				{"chats", "learn_watermark", "INTEGER NOT NULL DEFAULT 0"},
+				{"chats", "learn_pending", "INTEGER NOT NULL DEFAULT 0"},
+				{"runs", "purpose", "TEXT NOT NULL DEFAULT 'user'"},
+				{"tasks", "kind", "TEXT NOT NULL DEFAULT 'task'"},
+			} {
+				if err := addColumnIfMissing(db, c.table, c.col, c.ddl); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and
