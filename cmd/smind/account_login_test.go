@@ -167,3 +167,29 @@ func TestRunAccountLoginUsage(t *testing.T) {
 		t.Fatalf("run(account login) with one arg = %d, want 2", code)
 	}
 }
+
+// TestPrintLoginResult: a login that replaced an existing same-identity
+// account says so (the requested label was ignored); a new account prints the
+// plain account line, as does a daemon that sends no `created` field at all.
+func TestPrintLoginResult(t *testing.T) {
+	t.Parallel()
+
+	no, yes := false, true
+	for name, tc := range map[string]struct {
+		created *bool
+		want    string
+	}{
+		"updated": {&no, "updated work (already connected)\n"},
+		"created": {&yes, "7\tanthropic\twork\toauth\n"},
+		"absent":  {nil, "7\tanthropic\twork\toauth\n"},
+	} {
+		var out bytes.Buffer
+		printLoginResult(&out, loginResult{
+			accountResult: accountResult{ID: 7, Provider: "anthropic", Label: "work", CredentialType: "oauth"},
+			Created:       tc.created,
+		})
+		if out.String() != tc.want {
+			t.Errorf("%s: printLoginResult = %q, want %q", name, out.String(), tc.want)
+		}
+	}
+}

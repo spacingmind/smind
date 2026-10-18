@@ -1,20 +1,40 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
 
-// CreateAccount inserts a new account, stamping created_at/updated_at.
+// ErrIdentityInUse reports an account identity already owned by a different
+// row of the same provider (the partial unique index on
+// accounts(provider, identity)).
+var ErrIdentityInUse = errors.New("account identity already in use")
+
+const accountColumns = `id, provider, label, credential_type, credential_data, COALESCE(models, ''), COALESCE(identity, ''), created_at, updated_at`
+
+func scanAccount(sc interface{ Scan(...any) error }) (Account, error) {
+	var a Account
+	err := sc.Scan(&a.ID, &a.Provider, &a.Label, &a.CredentialType, &a.CredentialData, &a.Models, &a.Identity, &a.CreatedAt, &a.UpdatedAt)
+	return a, err
+}
+
+// CreateAccount inserts a new account, stamping created_at/updated_at. A
+// non-empty a.Identity is stored (a collision with another row of the same
+// provider returns ErrIdentityInUse); "" stores NULL.
 func (s *Store) CreateAccount(a Account) (Account, error) {
 	now := time.Now().UTC()
 	a.CreatedAt, a.UpdatedAt = now, now
 
 	res, err := s.db.Exec(
-		`INSERT INTO accounts (provider, label, credential_type, credential_data, models, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?)`,
-		a.Provider, a.Label, a.CredentialType, a.CredentialData, a.Models, a.CreatedAt, a.UpdatedAt,
+		`INSERT INTO accounts (provider, label, credential_type, credential_data, models, identity, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?)`,
+		a.Provider, a.Label, a.CredentialType, a.CredentialData, a.Models, a.Identity, a.CreatedAt, a.UpdatedAt,
 	)
+	if isUniqueViolation(err) {
+		return Account{}, fmt.Errorf("insert account: %w", ErrIdentityInUse)
+	}
 	if err != nil {
 		return Account{}, fmt.Errorf("insert account: %w", err)
 	}
@@ -81,8 +101,76 @@ func (s *Store) SetAccountModels(id int64, modelsJSON string) (Account, error) {
 // credential_data on the refresh path, this is the account.updateCredential
 // RPC's store call. A credential change also clears the account's passive
 // quota cooldowns (ADR-0028 §7); the refresh path does not. A nonexistent id
-// is a clear not-found error.
+// is a clear not-found error. The account's identity (ADR-0033 D6) described
+// the old credential, so it is cleared in the same UPDATE; the OAuth re-login
+// path uses the Keeping/Adopting variants instead.
 func (s *Store) ReplaceAccountCredential(id int64, credentialType, credentialData string) (Account, error) {
+	return s.replaceAccountCredential(id, credentialType, credentialData, "", false)
+}
+
+// ReplaceAccountCredentialKeepingIdentity is ReplaceAccountCredential for the
+// OAuth re-login of the same vendor account (ADR-0033 D6): the credential is
+// swapped, the stored identity is left as is and the account's quota
+// cooldowns are kept (the same vendor account is still exhausted).
+func (s *Store) ReplaceAccountCredentialKeepingIdentity(id int64, credentialType, credentialData string) (Account, error) {
+	return s.replaceAccountCredential(id, credentialType, credentialData, "", true)
+}
+
+// ReplaceAccountCredentialAdoptingIdentity is ReplaceAccountCredential plus
+// setting the account's identity in the same transaction (ADR-0033 D6:
+// re-login in place, adopting the identity for a legacy row). identity must
+// be non-empty; another row of the same provider owning it returns
+// ErrIdentityInUse and changes nothing.
+func (s *Store) ReplaceAccountCredentialAdoptingIdentity(id int64, credentialType, credentialData, identity string) (Account, error) {
+	if identity == "" {
+		return Account{}, fmt.Errorf("update account %d credential: empty identity", id)
+	}
+	return s.replaceAccountCredential(id, credentialType, credentialData, identity, false)
+}
+
+// GetAccountByIdentity returns the account of the given provider owning
+// identity. A missing row (and an empty identity, which never matches) is
+// sql.ErrNoRows, checkable with errors.Is.
+func (s *Store) GetAccountByIdentity(provider, identity string) (Account, error) {
+	if identity == "" {
+		return Account{}, fmt.Errorf("get account by identity: %w", sql.ErrNoRows)
+	}
+	a, err := scanAccount(s.db.QueryRow(
+		`SELECT `+accountColumns+` FROM accounts WHERE provider = ? AND identity = ?`, provider, identity))
+	if err != nil {
+		return Account{}, fmt.Errorf("get account by identity: %w", err)
+	}
+	return a, nil
+}
+
+// SetAccountIdentity stores identity on the account with the given id
+// without touching its credential ("" clears it back to NULL). Another row
+// of the same provider owning it returns ErrIdentityInUse. A nonexistent id
+// is a not-found error.
+func (s *Store) SetAccountIdentity(id int64, identity string) (Account, error) {
+	if _, err := s.GetAccount(id); err != nil {
+		return Account{}, fmt.Errorf("set account %d identity: %w", id, err)
+	}
+	if _, err := s.db.Exec(
+		`UPDATE accounts SET identity = NULLIF(?, ''), updated_at = ? WHERE id = ?`,
+		identity, time.Now().UTC(), id,
+	); err != nil {
+		if isUniqueViolation(err) {
+			return Account{}, fmt.Errorf("set account %d identity: %w", id, ErrIdentityInUse)
+		}
+		return Account{}, fmt.Errorf("set account %d identity: %w", id, err)
+	}
+	return s.GetAccount(id)
+}
+
+// replaceAccountCredential does the work of the replace methods. sameAccount
+// says the new credential is known to belong to the same vendor account as
+// the old one (an OAuth re-login with a matching identity): the stored
+// identity is left untouched and the passive quota cooldowns are kept, since
+// that account is still as exhausted as it was. Otherwise the identity is set
+// to identity ("" = cleared to NULL) in the same UPDATE as the credential and
+// the cooldowns are deleted, as the row may now be a different account.
+func (s *Store) replaceAccountCredential(id int64, credentialType, credentialData, identity string, sameAccount bool) (Account, error) {
 	if _, err := s.GetAccount(id); err != nil {
 		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
 	}
@@ -94,13 +182,18 @@ func (s *Store) ReplaceAccountCredential(id int64, credentialType, credentialDat
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(
-		`UPDATE accounts SET credential_type = ?, credential_data = ?, updated_at = ? WHERE id = ?`,
-		credentialType, credentialData, time.Now().UTC(), id,
+		`UPDATE accounts SET credential_type = ?, credential_data = ?, identity = CASE WHEN ? THEN identity ELSE NULLIF(?, '') END, updated_at = ? WHERE id = ?`,
+		credentialType, credentialData, sameAccount, identity, time.Now().UTC(), id,
 	); err != nil {
+		if isUniqueViolation(err) {
+			return Account{}, fmt.Errorf("update account %d credential: %w", id, ErrIdentityInUse)
+		}
 		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
 	}
-	if _, err := tx.Exec(`DELETE FROM quota_cooldown WHERE account_id = ?`, id); err != nil {
-		return Account{}, fmt.Errorf("update account %d credential: delete quota cooldowns: %w", id, err)
+	if !sameAccount {
+		if _, err := tx.Exec(`DELETE FROM quota_cooldown WHERE account_id = ?`, id); err != nil {
+			return Account{}, fmt.Errorf("update account %d credential: delete quota cooldowns: %w", id, err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
@@ -141,11 +234,7 @@ func (s *Store) DeleteAccount(id int64) error {
 
 // GetAccount returns the account with the given id.
 func (s *Store) GetAccount(id int64) (Account, error) {
-	var a Account
-	err := s.db.QueryRow(
-		`SELECT id, provider, label, credential_type, credential_data, COALESCE(models, ''), created_at, updated_at
-		 FROM accounts WHERE id = ?`, id,
-	).Scan(&a.ID, &a.Provider, &a.Label, &a.CredentialType, &a.CredentialData, &a.Models, &a.CreatedAt, &a.UpdatedAt)
+	a, err := scanAccount(s.db.QueryRow(`SELECT `+accountColumns+` FROM accounts WHERE id = ?`, id))
 	if err != nil {
 		return Account{}, fmt.Errorf("get account %d: %w", id, err)
 	}
@@ -155,8 +244,7 @@ func (s *Store) GetAccount(id int64) (Account, error) {
 // ListAccounts returns all accounts, ordered by id.
 func (s *Store) ListAccounts() ([]Account, error) {
 	rows, err := s.db.Query(
-		`SELECT id, provider, label, credential_type, credential_data, COALESCE(models, ''), created_at, updated_at
-		 FROM accounts ORDER BY id`,
+		`SELECT ` + accountColumns + ` FROM accounts ORDER BY id`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list accounts: %w", err)
@@ -165,8 +253,8 @@ func (s *Store) ListAccounts() ([]Account, error) {
 
 	var accounts []Account
 	for rows.Next() {
-		var a Account
-		if err := rows.Scan(&a.ID, &a.Provider, &a.Label, &a.CredentialType, &a.CredentialData, &a.Models, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		a, err := scanAccount(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan account: %w", err)
 		}
 		accounts = append(accounts, a)

@@ -185,7 +185,7 @@ func cmdAccountLogin(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	var account accountResult
+	var account loginResult
 	err = client.CallStream(ctx, "account.oauthStart", map[string]any{
 		"provider": provider, "label": label,
 	}, func(event string, params json.RawMessage) {
@@ -203,8 +203,28 @@ func cmdAccountLogin(args []string) int {
 		fmt.Fprintf(os.Stderr, "account login: %v\n", err)
 		return 1
 	}
-	fmt.Printf("%d\t%s\t%s\t%s\n", account.ID, account.Provider, account.Label, account.CredentialType)
+	printLoginResult(os.Stdout, account)
 	return 0
+}
+
+// loginResult is account.oauthStart's result: the account plus whether a row
+// was created. Created is a pointer so a daemon that predates the field reads
+// as "unknown", not "updated".
+type loginResult struct {
+	accountResult
+	Created *bool `json:"created"`
+}
+
+// printLoginResult prints the login's outcome: the account line in
+// account-add's format for a new account, or an "updated" note when an
+// existing same-identity account's credential was replaced (the label asked
+// for is ignored in that case, so say which account it was).
+func printLoginResult(w io.Writer, r loginResult) {
+	if r.Created != nil && !*r.Created {
+		fmt.Fprintf(w, "updated %s (already connected)\n", r.Label)
+		return
+	}
+	fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", r.ID, r.Provider, r.Label, r.CredentialType)
 }
 
 // providerTestResult mirrors internal/wsapi/handlers.go's providerTestResult,

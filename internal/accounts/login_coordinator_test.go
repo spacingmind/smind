@@ -2,14 +2,18 @@ package accounts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/spacingmind/smind/internal/store"
 )
 
 // fakeLogin is a Login implementation standing in for a real vendor, for
@@ -23,6 +27,8 @@ type fakeLogin struct {
 
 	// exchangeErr, if set, is returned by Exchange instead of a credential.
 	exchangeErr error
+	// subject is the vendor account subject Exchange reports ("" = none).
+	subject string
 }
 
 func (f *fakeLogin) CallbackAddr() string { return f.addr }
@@ -33,14 +39,17 @@ func (f *fakeLogin) AuthorizeURL(state string, pkce PKCECodes) string {
 		"&challenge=" + url.QueryEscape(pkce.CodeChallenge)
 }
 
-func (f *fakeLogin) Exchange(_ context.Context, code, state string, pkce PKCECodes) (OAuthCredential, error) {
+func (f *fakeLogin) Exchange(_ context.Context, code, state string, pkce PKCECodes) (ExchangeResult, error) {
 	if f.exchangeErr != nil {
-		return OAuthCredential{}, f.exchangeErr
+		return ExchangeResult{}, f.exchangeErr
 	}
-	return OAuthCredential{
-		AccessToken:  "access-for-" + code,
-		RefreshToken: "refresh-for-" + code,
-		ExpiresAt:    time.Now().Add(time.Hour),
+	return ExchangeResult{
+		Credential: OAuthCredential{
+			AccessToken:  "access-for-" + code,
+			RefreshToken: "refresh-for-" + code,
+			ExpiresAt:    time.Now().Add(time.Hour),
+		},
+		Subject: f.subject,
 	}, nil
 }
 
@@ -107,7 +116,7 @@ func TestLoginCoordinator_Login_UnsupportedProvider(t *testing.T) {
 	t.Parallel()
 
 	coord := NewLoginCoordinator(newTestRegistry(t), map[string]Login{})
-	_, err := coord.Login(context.Background(), "bogus", "label", func(string) {})
+	_, err := coord.Login(context.Background(), "bogus", "label", LoginOptions{}, func(string) {})
 	if err == nil {
 		t.Fatal("Login() error = nil, want error for unsupported provider")
 	}
@@ -131,8 +140,8 @@ func TestLoginCoordinator_Login_HappyPath(t *testing.T) {
 	}
 	doneCh := make(chan loginResult, 1)
 	go func() {
-		account, err := coord.Login(context.Background(), "fake", "my-label", func(u string) { urlCh <- u })
-		doneCh <- loginResult{account, err}
+		account, err := coord.Login(context.Background(), "fake", "my-label", LoginOptions{}, func(u string) { urlCh <- u })
+		doneCh <- loginResult{account.Account, err}
 	}()
 
 	authorizeURL := <-urlCh
@@ -190,7 +199,7 @@ func TestLoginCoordinator_Login_StateMismatch(t *testing.T) {
 	urlCh := make(chan string, 1)
 	doneCh := make(chan error, 1)
 	go func() {
-		_, err := coord.Login(context.Background(), "fake", "label", func(u string) { urlCh <- u })
+		_, err := coord.Login(context.Background(), "fake", "label", LoginOptions{}, func(u string) { urlCh <- u })
 		doneCh <- err
 	}()
 
@@ -219,7 +228,7 @@ func TestLoginCoordinator_Login_Timeout(t *testing.T) {
 	coord := NewLoginCoordinator(newTestRegistry(t), map[string]Login{"fake": login})
 	coord.timeout = 100 * time.Millisecond
 
-	_, err := coord.Login(context.Background(), "fake", "label", func(string) {})
+	_, err := coord.Login(context.Background(), "fake", "label", LoginOptions{}, func(string) {})
 	if err == nil {
 		t.Fatal("Login() error = nil, want a timeout error")
 	}
@@ -246,13 +255,13 @@ func TestLoginCoordinator_Login_ConcurrentSameProvider(t *testing.T) {
 	urlCh := make(chan string, 1)
 	doneCh := make(chan error, 1)
 	go func() {
-		_, err := coord.Login(ctx, "fake", "first", func(u string) { urlCh <- u })
+		_, err := coord.Login(ctx, "fake", "first", LoginOptions{}, func(u string) { urlCh <- u })
 		doneCh <- err
 	}()
 
 	<-urlCh // the first login's listener is bound and blocking on its callback
 
-	_, err := coord.Login(context.Background(), "fake", "second", func(string) {})
+	_, err := coord.Login(context.Background(), "fake", "second", LoginOptions{}, func(string) {})
 	if err == nil {
 		t.Fatal("second Login() error = nil, want \"already in progress\"")
 	}
@@ -288,7 +297,7 @@ func TestLoginCoordinator_Login_ContextCancelled(t *testing.T) {
 	urlCh := make(chan string, 1)
 	doneCh := make(chan error, 1)
 	go func() {
-		_, err := coord.Login(ctx, "fake", "label", func(u string) { urlCh <- u })
+		_, err := coord.Login(ctx, "fake", "label", LoginOptions{}, func(u string) { urlCh <- u })
 		doneCh <- err
 	}()
 
@@ -313,7 +322,7 @@ func TestLoginCoordinator_Login_ExchangeError(t *testing.T) {
 	urlCh := make(chan string, 1)
 	doneCh := make(chan error, 1)
 	go func() {
-		_, err := coord.Login(context.Background(), "fake", "label", func(u string) { urlCh <- u })
+		_, err := coord.Login(context.Background(), "fake", "label", LoginOptions{}, func(u string) { urlCh <- u })
 		doneCh <- err
 	}()
 
@@ -329,4 +338,339 @@ func TestLoginCoordinator_Login_ExchangeError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "token endpoint rejected the code") {
 		t.Errorf("Login() error = %v, want it to wrap the exchange error", err)
 	}
+}
+
+// relogin drives one full fake login (authorize URL -> callback -> exchange)
+// against coord, with the fake vendor reporting subject, and returns the
+// result. A fresh callback address per call keeps sequential logins from
+// racing each other for a just-released port.
+func relogin(t *testing.T, coord *LoginCoordinator, login *fakeLogin, label string, opts LoginOptions, subject string) (LoginResult, error) {
+	t.Helper()
+	login.addr = freeAddr(t)
+	login.subject = subject
+
+	urlCh := make(chan string, 1)
+	type outcome struct {
+		res LoginResult
+		err error
+	}
+	doneCh := make(chan outcome, 1)
+	go func() {
+		res, err := coord.Login(context.Background(), "fake", label, opts, func(u string) { urlCh <- u })
+		doneCh <- outcome{res, err}
+	}()
+
+	select {
+	case u := <-urlCh:
+		state := stateFromAuthorizeURL(t, u)
+		resp, err := http.Get(fmt.Sprintf("http://%s/callback?code=code-%s&state=%s", login.addr, label, url.QueryEscape(state)))
+		if err != nil {
+			t.Fatalf("GET callback: %v", err)
+		}
+		resp.Body.Close()
+	case o := <-doneCh:
+		// Login failed before the authorize URL was issued.
+		return o.res, o.err
+	}
+	o := <-doneCh
+	return o.res, o.err
+}
+
+type captureNotifier struct {
+	mu      sync.Mutex
+	updated []store.Account
+}
+
+func (n *captureNotifier) NotifyAccountUpdated(a store.Account) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.updated = append(n.updated, a)
+}
+func (n *captureNotifier) NotifyAccountRemoved(int64) {}
+
+func (n *captureNotifier) updates() []store.Account {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]store.Account(nil), n.updated...)
+}
+
+func newReloginCoordinator(t *testing.T) (*LoginCoordinator, *Registry, *fakeLogin) {
+	t.Helper()
+	registry := newTestRegistry(t)
+	login := &fakeLogin{path: "/callback"}
+	coord := NewLoginCoordinator(registry, map[string]Login{"fake": login})
+	coord.timeout = 10 * time.Second
+	return coord, registry, login
+}
+
+func TestLoginCoordinator_Relogin(t *testing.T) {
+	t.Parallel()
+
+	t.Run("relogin same identity replaces credential in place and keeps routing links", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		notifier := &captureNotifier{}
+		registry.SetNotifier(notifier)
+		var hooked []int64
+		registry.SetCredentialReplacedHook(func(id int64) { hooked = append(hooked, id) })
+
+		first, err := relogin(t, coord, login, "work", LoginOptions{}, "subject-1")
+		if err != nil {
+			t.Fatalf("first Login() error = %v", err)
+		}
+		if !first.Created || first.Adopted || !first.Account.HasIdentity {
+			t.Fatalf("first result = %+v, want created with identity", first)
+		}
+		id := first.Account.ID
+
+		// Rows that must survive a same-identity re-login: routing affinity,
+		// quota snapshot, the passive cooldown (the same vendor account is
+		// still quota-exhausted) and the models list.
+		now := time.Now().UTC()
+		if _, err := registry.SetModels(id, []string{"claude-*"}); err != nil {
+			t.Fatalf("SetModels() error = %v", err)
+		}
+		decision, err := registry.store.CreateRoutingDecision(store.RoutingDecision{SessionKey: "s1", AccountID: id, Policy: "p", DecidedAt: now, ExpiresAt: now.Add(time.Hour)})
+		if err != nil {
+			t.Fatalf("CreateRoutingDecision() error = %v", err)
+		}
+		snap, err := registry.store.CreateQuotaSnapshot(store.QuotaSnapshot{AccountID: id, UsageData: `{}`, PolledAt: now, ExpiresAt: now.Add(time.Hour)})
+		if err != nil {
+			t.Fatalf("CreateQuotaSnapshot() error = %v", err)
+		}
+		if err := registry.store.SaveQuotaCooldown(store.QuotaCooldown{AccountID: id, Until: now.Add(time.Hour), Reason: "r", ObservedAt: now}); err != nil {
+			t.Fatalf("SaveQuotaCooldown() error = %v", err)
+		}
+
+		// Same vendor account logs in again, asking for a different label.
+		second, err := relogin(t, coord, login, "renamed-by-mistake", LoginOptions{}, "subject-1")
+		if err != nil {
+			t.Fatalf("second Login() error = %v", err)
+		}
+		if second.Created || second.Adopted || second.Account.ID != id {
+			t.Fatalf("second result = %+v, want in-place replace of account %d", second, id)
+		}
+		if second.Account.Label != "work" {
+			t.Errorf("label = %q, want the existing %q (requested label ignored)", second.Account.Label, "work")
+		}
+		if second.Account.OAuth == nil || second.Account.OAuth.AccessToken != "access-for-code-renamed-by-mistake" {
+			t.Errorf("credential = %+v, want the new login's tokens", second.Account.OAuth)
+		}
+		if len(second.Account.Models) != 1 || second.Account.Models[0] != "claude-*" {
+			t.Errorf("models = %v, want kept", second.Account.Models)
+		}
+
+		accts, _ := registry.List()
+		if len(accts) != 1 {
+			t.Fatalf("accounts = %d, want still 1", len(accts))
+		}
+		if got, err := registry.store.GetRoutingDecision(decision.ID); err != nil || got.AccountID != id {
+			t.Errorf("routing decision = %+v, %v, want kept on account %d", got, err, id)
+		}
+		if got, err := registry.store.GetQuotaSnapshot(snap.ID); err != nil || got.AccountID != id {
+			t.Errorf("quota snapshot = %+v, %v, want kept on account %d", got, err, id)
+		}
+		if cds, _ := registry.store.ListQuotaCooldowns(id); len(cds) != 1 {
+			t.Errorf("cooldowns = %v, want the cooldown kept (same vendor account)", cds)
+		}
+		if len(hooked) != 0 {
+			t.Errorf("credential-replaced hook calls = %v, want none (the passive cooldown stays)", hooked)
+		}
+		if ups := notifier.updates(); len(ups) != 2 || ups[1].ID != id {
+			t.Errorf("account.updated notifications = %d, want the models change plus the re-login", len(ups))
+		}
+	})
+
+	t.Run("relogin with accountId and different identity is identity_mismatch", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		work, err := relogin(t, coord, login, "work", LoginOptions{}, "subject-1")
+		if err != nil {
+			t.Fatalf("Login() error = %v", err)
+		}
+		before, _ := registry.Get(work.Account.ID)
+
+		_, err = relogin(t, coord, login, "other", LoginOptions{AccountID: work.Account.ID}, "subject-2")
+		var le *LoginError
+		if !errors.As(err, &le) || le.Code != LoginCodeIdentityMismatch || !strings.HasPrefix(err.Error(), "identity_mismatch") {
+			t.Fatalf("Login() error = %v, want identity_mismatch", err)
+		}
+		if strings.Contains(err.Error(), "subject-") {
+			t.Errorf("error %q leaks the subject", err)
+		}
+		after, _ := registry.Get(work.Account.ID)
+		if after.OAuth.AccessToken != before.OAuth.AccessToken {
+			t.Error("a mismatched login changed the account's credential")
+		}
+		if accts, _ := registry.List(); len(accts) != 1 {
+			t.Errorf("accounts = %d, want no new row", len(accts))
+		}
+	})
+
+	t.Run("adopt refuses a non-oauth account", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		pasted, err := registry.AddAPIKey("fake", "pasted", "sk-pasted")
+		if err != nil {
+			t.Fatalf("AddAPIKey() error = %v", err)
+		}
+
+		_, err = relogin(t, coord, login, "x", LoginOptions{AccountID: pasted.ID}, "subject-1")
+		var le *LoginError
+		if !errors.As(err, &le) || le.Code != LoginCodeNotOAuthAccount || !strings.HasPrefix(err.Error(), "login_not_oauth_account") {
+			t.Fatalf("Login() error = %v, want login_not_oauth_account", err)
+		}
+		got, _ := registry.Get(pasted.ID)
+		if got.CredentialType != CredentialTypeAPIKey || got.APIKey == nil || got.APIKey.Key != "sk-pasted" || got.HasIdentity {
+			t.Errorf("the API-key row was changed: %+v", got)
+		}
+	})
+
+	t.Run("relogin adopt clears cooldowns because the row may be a different vendor account", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		var hooked []int64
+		registry.SetCredentialReplacedHook(func(id int64) { hooked = append(hooked, id) })
+		legacy, err := registry.AddOAuth("fake", "legacy", OAuthCredential{AccessToken: "old", RefreshToken: "old-r", ExpiresAt: time.Now().Add(time.Hour)})
+		if err != nil {
+			t.Fatalf("AddOAuth() error = %v", err)
+		}
+		now := time.Now().UTC()
+		if err := registry.store.SaveQuotaCooldown(store.QuotaCooldown{AccountID: legacy.ID, Until: now.Add(time.Hour), Reason: "r", ObservedAt: now}); err != nil {
+			t.Fatalf("SaveQuotaCooldown() error = %v", err)
+		}
+
+		if _, err := relogin(t, coord, login, "x", LoginOptions{AccountID: legacy.ID}, "subject-1"); err != nil {
+			t.Fatalf("Login() error = %v", err)
+		}
+		if cds, _ := registry.store.ListQuotaCooldowns(legacy.ID); len(cds) != 0 {
+			t.Errorf("cooldowns = %v, want cleared by the adopt", cds)
+		}
+		if len(hooked) != 1 || hooked[0] != legacy.ID {
+			t.Errorf("credential-replaced hook calls = %v, want [%d]", hooked, legacy.ID)
+		}
+	})
+
+	t.Run("relogin adopts identity for a legacy account", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		legacy, err := registry.AddOAuth("fake", "legacy", OAuthCredential{AccessToken: "old", RefreshToken: "old-r", ExpiresAt: time.Now().Add(time.Hour)})
+		if err != nil {
+			t.Fatalf("AddOAuth() error = %v", err)
+		}
+		if got, _ := registry.Get(legacy.ID); got.HasIdentity {
+			t.Fatal("legacy account already has an identity")
+		}
+
+		res, err := relogin(t, coord, login, "ignored", LoginOptions{AccountID: legacy.ID}, "subject-1")
+		if err != nil {
+			t.Fatalf("Login() error = %v", err)
+		}
+		if res.Created || !res.Adopted || res.Account.ID != legacy.ID || !res.Account.HasIdentity || res.Account.Label != "legacy" {
+			t.Fatalf("result = %+v, want adopt of account %d keeping its label", res, legacy.ID)
+		}
+		if res.Account.OAuth == nil || res.Account.OAuth.AccessToken != "access-for-code-ignored" {
+			t.Errorf("credential = %+v, want the new login's tokens", res.Account.OAuth)
+		}
+		// The adopted identity now matches a plain login of the same account.
+		again, err := relogin(t, coord, login, "again", LoginOptions{}, "subject-1")
+		if err != nil || again.Created || again.Account.ID != legacy.ID {
+			t.Fatalf("plain re-login after adopt = %+v, %v, want in-place on %d", again, err, legacy.ID)
+		}
+	})
+
+	t.Run("relogin adopt is identity_in_use when another row owns it", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		owner, err := relogin(t, coord, login, "owner", LoginOptions{}, "subject-1")
+		if err != nil {
+			t.Fatalf("Login() error = %v", err)
+		}
+		legacy, err := registry.AddOAuth("fake", "legacy", OAuthCredential{AccessToken: "old", RefreshToken: "old-r", ExpiresAt: time.Now().Add(time.Hour)})
+		if err != nil {
+			t.Fatalf("AddOAuth() error = %v", err)
+		}
+
+		_, err = relogin(t, coord, login, "x", LoginOptions{AccountID: legacy.ID}, "subject-1")
+		var le *LoginError
+		if !errors.As(err, &le) || le.Code != LoginCodeIdentityInUse || !strings.HasPrefix(err.Error(), "identity_in_use") {
+			t.Fatalf("Login() error = %v, want identity_in_use", err)
+		}
+		if !strings.Contains(err.Error(), fmt.Sprintf("account %d", owner.Account.ID)) {
+			t.Errorf("error %q does not name the owning row %d", err, owner.Account.ID)
+		}
+		got, _ := registry.Get(legacy.ID)
+		if got.HasIdentity || got.OAuth.AccessToken != "old" {
+			t.Errorf("legacy row changed despite identity_in_use: %+v", got)
+		}
+	})
+
+	t.Run("relogin of an unknown or foreign account fails before the flow starts", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		_, err := relogin(t, coord, login, "x", LoginOptions{AccountID: 4242}, "subject-1")
+		var le *LoginError
+		if !errors.As(err, &le) || le.Code != LoginCodeUnknownAccount {
+			t.Fatalf("Login(unknown id) error = %v, want login_unknown_account", err)
+		}
+		other, err := registry.AddOAuth("anthropic", "a", OAuthCredential{AccessToken: "t", RefreshToken: "r"})
+		if err != nil {
+			t.Fatalf("AddOAuth() error = %v", err)
+		}
+		_, err = relogin(t, coord, login, "x", LoginOptions{AccountID: other.ID}, "subject-1")
+		if !errors.As(err, &le) || le.Code != LoginCodeUnknownAccount {
+			t.Fatalf("Login(foreign provider row) error = %v, want login_unknown_account", err)
+		}
+	})
+
+	t.Run("relogin without a subject cannot overwrite an identity-bearing row", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		work, err := relogin(t, coord, login, "work", LoginOptions{}, "subject-1")
+		if err != nil || !work.Account.HasIdentity {
+			t.Fatalf("Login() = %+v, %v, want an account with identity", work, err)
+		}
+		before, _ := registry.Get(work.Account.ID)
+
+		_, err = relogin(t, coord, login, "x", LoginOptions{AccountID: work.Account.ID}, "")
+		var le *LoginError
+		if !errors.As(err, &le) || le.Code != LoginCodeIdentityUnverified || !strings.HasPrefix(err.Error(), "identity_unverified") {
+			t.Fatalf("subject-less re-login error = %v, want identity_unverified", err)
+		}
+		after, _ := registry.Get(work.Account.ID)
+		if after.OAuth.AccessToken != before.OAuth.AccessToken || !after.HasIdentity {
+			t.Errorf("an unverifiable login changed the identity-bearing row: %+v", after)
+		}
+	})
+
+	t.Run("login without a subject creates and replaces without an identity", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		first, err := relogin(t, coord, login, "a", LoginOptions{}, "")
+		if err != nil || !first.Created || first.Account.HasIdentity {
+			t.Fatalf("login without subject = %+v, %v, want created without identity", first, err)
+		}
+		// Two subject-less logins are two rows (nothing to match on).
+		second, err := relogin(t, coord, login, "b", LoginOptions{}, "")
+		if err != nil || !second.Created || second.Account.ID == first.Account.ID {
+			t.Fatalf("second subject-less login = %+v, %v, want a new row", second, err)
+		}
+		// A row-level re-login without a subject replaces the credential only.
+		third, err := relogin(t, coord, login, "c", LoginOptions{AccountID: first.Account.ID}, "")
+		if err != nil || third.Created || third.Adopted || third.Account.ID != first.Account.ID || third.Account.HasIdentity {
+			t.Fatalf("row re-login without subject = %+v, %v", third, err)
+		}
+		if accts, _ := registry.List(); len(accts) != 2 {
+			t.Errorf("accounts = %d, want 2", len(accts))
+		}
+	})
 }

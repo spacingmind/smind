@@ -19,7 +19,11 @@ var ErrMcpServerNameConflict = errors.New("mcp server name already exists")
 
 // isMcpServerNameConflict reports whether err is the sqlite driver's
 // unique-constraint error, after any amount of fmt.Errorf %w wrapping.
-func isMcpServerNameConflict(err error) bool {
+func isMcpServerNameConflict(err error) bool { return isUniqueViolation(err) }
+
+// isUniqueViolation reports whether err is the sqlite driver's
+// unique-constraint error (false for nil), after any %w wrapping.
+func isUniqueViolation(err error) bool {
 	var se *sqlite.Error
 	if !errors.As(err, &se) {
 		return false
