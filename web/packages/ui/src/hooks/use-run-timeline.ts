@@ -296,6 +296,12 @@ export interface RunEntry {
    * Undefined when the run has no usage row (not an empty object).
    */
   usage?: RunUsage;
+  /** O1 provenance: worktree HEAD at the run's start (undefined when unknown). */
+  baseSha?: string;
+  /** O1 provenance: worktree HEAD at the terminal state (undefined while running/unknown). */
+  headSha?: string;
+  /** O1 provenance: dirty at the latest successful capture (undefined when unknown). */
+  dirty?: boolean;
   /**
    * Bumped by dropped (non-row) ACP updates that signal the live config options may have
    * changed, so the option refetch (use-run-config-options) still fires for them.
@@ -564,6 +570,9 @@ function toRunEntry(r: RunSummary): RunEntry {
     thinkingLevel: r.ThinkingLevel,
     model: r.Model ?? "",
     ...(r.usage ? { usage: r.usage } : {}),
+    ...(r.BaseSHA ? { baseSha: r.BaseSHA } : {}),
+    ...(r.HeadSHA ? { headSha: r.HeadSHA } : {}),
+    ...(r.Dirty !== undefined && r.Dirty !== null ? { dirty: r.Dirty } : {}),
   };
 }
 
@@ -745,7 +754,15 @@ export function useRunTimeline(
       const p = payload as Partial<RunStatusEventPayload>;
       const runId = p.runId;
       if (p.chatId !== chatId || !runId) return;
-      if (knownRuns.current.has(runId)) return;
+      if (knownRuns.current.has(runId)) {
+        const provenance: Pick<RunEntry, "baseSha" | "headSha" | "dirty"> = {};
+        let has = false;
+        if (p.baseSha !== undefined) { provenance.baseSha = p.baseSha; has = true; }
+        if (p.headSha !== undefined) { provenance.headSha = p.headSha; has = true; }
+        if (p.dirty !== undefined) { provenance.dirty = p.dirty; has = true; }
+        if (has) patch(setRuns, runId, provenance);
+        return;
+      }
       const session = sessionRef.current;
       if (!session || adopting.current.has(runId)) return;
       adopting.current.add(runId);

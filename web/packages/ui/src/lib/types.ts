@@ -256,6 +256,12 @@ export interface RunSummary {
   Model?: string;
   /** ADR-0020: the run's usage totals -- lowercase json tag, so unlike the PascalCase fields above. Absent for an old run or one that reported nothing. */
   usage?: RunUsage;
+  /** O1 provenance: the worktree HEAD at the run's start; null/absent when unknown (an older daemon, a non-git worktree, or a failed git call). */
+  BaseSHA?: string | null;
+  /** O1 provenance: the worktree HEAD at the run's terminal state; null/absent while running or unknown. */
+  HeadSHA?: string | null;
+  /** O1 provenance: the worktree's dirty state at the latest successful capture (start, overwritten at the terminal state). */
+  Dirty?: boolean | null;
 }
 
 // internal/runs.WhenBusy's values (ADR-0021 §2), run.start's optional
@@ -703,6 +709,10 @@ export interface RunStatusEventPayload {
   status: RunStatusValue;
   stopReason?: string;
   err?: string;
+  /** O1 provenance -- omitted when unknown. */
+  baseSha?: string;
+  headSha?: string;
+  dirty?: boolean;
 }
 
 // Payload of permission.pending: {runId, taskId, chatId, requestId,
