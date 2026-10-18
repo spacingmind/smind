@@ -71,6 +71,13 @@ describe("RunProvenance", () => {
     expect(writeText).toHaveBeenCalledWith(BASE);
   });
 
+  it("rerenders the same instance from no sha to a sha without a hooks error", () => {
+    const { rerender } = mount({ baseSha: undefined, headSha: undefined });
+    expect(screen.queryByTestId("run-provenance")).toBeNull();
+    rerender(<RunProvenance baseSha={BASE} status="done" />);
+    expect(screen.getByTestId("run-provenance").textContent).toContain("aaaaaaa");
+  });
+
   it("renders nothing when neither sha is known", () => {
     mount({ baseSha: undefined, headSha: undefined });
     expect(screen.queryByTestId("run-provenance")).toBeNull();

@@ -28,7 +28,22 @@ describe("RunFooter provenance segment", () => {
   });
 
   it("mounts nothing when neither sha is known", () => {
-    render(<RunFooter run={run()} />);
+    const { rerender } = render(<RunFooter run={run()} />);
+    expect(screen.queryByTestId("run-provenance")).toBeNull();
+    // No stray empty segment either: a terminal run without shas has the
+    // same run-meta child count as one with a provenance segment minus one.
+    rerender(<RunFooter run={run({ baseSha: BASE, headSha: HEAD })} />);
+    expect(screen.getByTestId("run-provenance")).toBeTruthy();
+  });
+
+  it("renders no separator segment for a sha-less terminal run", () => {
+    const { rerender } = render(<RunFooter run={run({ usage: undefined })} />);
+    const without = screen.getByTestId("run-meta").childElementCount;
+    rerender(<RunFooter run={run({ usage: undefined, baseSha: BASE, headSha: HEAD })} />);
+    const withProvenance = screen.getByTestId("run-meta").childElementCount;
+    expect(without).toBe(withProvenance - 1);
+    rerender(<RunFooter run={run({ usage: undefined })} />);
+    expect(screen.getByTestId("run-meta").childElementCount).toBe(without);
     expect(screen.queryByTestId("run-provenance")).toBeNull();
   });
 });

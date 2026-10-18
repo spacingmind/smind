@@ -8,6 +8,11 @@ import type { RunStatusValue } from "@/lib/types";
  * click-to-copy of the full sha shown. Renders nothing when neither sha
  * is known (an old run, a non-git worktree).
  */
+/** The sha the footer segment shows: head once terminal (when known), else base; undefined means nothing renders. */
+export function provenanceSha(status: RunStatusValue, baseSha?: string, headSha?: string): string | undefined {
+  return (status !== "running" && headSha) || baseSha;
+}
+
 export function RunProvenance({
   baseSha,
   headSha,
@@ -19,11 +24,9 @@ export function RunProvenance({
   dirty?: boolean;
   status: RunStatusValue;
 }) {
-  const terminal = status !== "running";
-  const shownSha = (terminal && headSha) || baseSha;
-  if (!shownSha) return null;
-
   const { copied, copy } = useCopyFeedback();
+  const shownSha = provenanceSha(status, baseSha, headSha);
+  if (!shownSha) return null;
   const title = [
     baseSha ? `Base ${baseSha}` : null,
     headSha ? `Head ${headSha}` : null,
