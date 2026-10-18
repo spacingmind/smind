@@ -285,6 +285,28 @@ mod tests {
         assert!(state.pending.take().is_err());
     }
 
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn available_result_matches_the_ui_fixture() {
+        const FIXTURE: &str =
+            include_str!("../../../web/packages/ui/src/lib/__fixtures__/app-update-available.json");
+        let fixture: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+        let key = TestKey::generate();
+        let feed = Feed::serve_release(&Release {
+            version: fixture["version"].as_str().unwrap().to_string(),
+            notes: fixture["notes"].as_str().unwrap().to_string(),
+            pub_date: "2026-10-12T09:00:00Z".to_string(),
+            signature: key.sign(&app_tarball("new"), Some("0.10.1")),
+            artifact: app_tarball("new"),
+        });
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        let got = check_with(app.updater_builder(), RUNNING, &state)
+            .await
+            .expect("check");
+        assert_eq!(serde_json::to_value(&got).unwrap(), fixture);
+    }
+
     /// A fake installed app the plugin can replace: `<tmp>/smind.app/Contents/...`.
     #[cfg(target_os = "macos")]
     fn installed_app(dir: &std::path::Path, marker: &str) -> std::path::PathBuf {
