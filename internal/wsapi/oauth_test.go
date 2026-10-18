@@ -77,10 +77,12 @@ func newTestWSServerWithCoordinator(t *testing.T, wm *workspace.Manager, acctReg
 	if err != nil {
 		t.Fatalf("runs.New() error = %v", err)
 	}
+	t.Cleanup(reg.CloseAll)
 	treg, err := terminal.New(db)
 	if err != nil {
 		t.Fatalf("terminal.New() error = %v", err)
 	}
+	t.Cleanup(treg.CloseAll)
 	profReg := profiles.New(db)
 	mcpReg := mcpservers.New(db)
 

@@ -77,6 +77,7 @@ func TestAPI_ServeTransport_FakeTransportDispatchesLikeWebSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	t.Cleanup(handler.Close)
 
 	client, server := newPipeTransportPair()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -152,6 +153,7 @@ func TestUnknownMethodAlwaysGetsAMethodNotFoundResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	t.Cleanup(api.Close)
 	client, server := newPipeTransportPair()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
