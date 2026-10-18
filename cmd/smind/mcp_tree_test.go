@@ -125,7 +125,21 @@ func TestMCPTaskWait_ChildrenOf_ReturnsFirstFinished(t *testing.T) {
 	sup := createTreeTask(t, env, wsID, 0, "", "")
 	hung := createTreeTaskWithRun(t, env, wsID, sup, "hang")
 	stopTestRuns(t, env, hung)
-	createTreeTaskWithRun(t, env, wsID, sup, "")
+	// The finisher is held (not a fast scenario) so it is certainly still
+	// running when task_wait resolves the children's running runs; it is
+	// released only after the wait is under way.
+	finisherTask, finisherDir := createTreeTaskIn(t, env, wsID, sup, "worker", "hold")
+	var started struct {
+		RunID string `json:"runId"`
+	}
+	if err := wsCall(t, env.srvURL, "run.start", map[string]any{"taskId": finisherTask, "provider": "glm", "prompt": "hi"}, &started); err != nil {
+		t.Fatalf("run.start: %v", err)
+	}
+	waitForRunChunk(t, env.srvURL, started.RunID)
+	t.Cleanup(func() { _ = os.WriteFile(filepath.Join(finisherDir, "release"), nil, 0o644) })
+	time.AfterFunc(500*time.Millisecond, func() {
+		_ = os.WriteFile(filepath.Join(finisherDir, "release"), nil, 0o644)
+	})
 
 	start := time.Now()
 	var out taskWaitOutput
@@ -143,6 +157,9 @@ func TestMCPTaskWait_ChildrenOf_ReturnsFirstFinished(t *testing.T) {
 	}
 	if out.RunID == hung {
 		t.Fatalf("returned the hung child's run %s", hung)
+	}
+	if out.RunID != started.RunID {
+		t.Fatalf("task_wait returned run %s, want the released child's run %s", out.RunID, started.RunID)
 	}
 }
 
@@ -240,6 +257,14 @@ func createTreeWorkspace(t *testing.T, env *mcpTestEnv) int64 {
 // task's own worktree (the fake agent reads it per task).
 func createTreeTask(t *testing.T, env *mcpTestEnv, wsID, parent int64, title, scenario string) int64 {
 	t.Helper()
+	id, _ := createTreeTaskIn(t, env, wsID, parent, title, scenario)
+	return id
+}
+
+// createTreeTaskIn is createTreeTask that also returns the task's worktree
+// path ("" when it has none), for tests that drop files into it.
+func createTreeTaskIn(t *testing.T, env *mcpTestEnv, wsID, parent int64, title, scenario string) (int64, string) {
+	t.Helper()
 	params := map[string]any{"workspaceId": wsID, "title": title}
 	if title == "" {
 		params["title"] = "task"
@@ -259,7 +284,11 @@ func createTreeTask(t *testing.T, env *mcpTestEnv, wsID, parent int64, title, sc
 			t.Fatalf("write scenario: %v", err)
 		}
 	}
-	return task.ID
+	worktree := ""
+	if task.WorktreePath != nil {
+		worktree = *task.WorktreePath
+	}
+	return task.ID, worktree
 }
 
 // createTreeTaskWithRun creates a child task with its scenario file and

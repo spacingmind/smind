@@ -99,11 +99,12 @@ func newTestDaemon(t *testing.T, scenario string) *testDaemon {
 
 	runner := taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath}))
 	token := "tok"
-	handler, err := wsapi.Handler(wm, accounts.New(s), runner, s, token)
+	api, err := wsapi.New(wm, accounts.New(s), runner, s, token)
 	if err != nil {
-		t.Fatalf("wsapi.Handler() error = %v", err)
+		t.Fatalf("wsapi.New() error = %v", err)
 	}
-	srv := httptest.NewServer(handler)
+	t.Cleanup(api.Close)
+	srv := httptest.NewServer(api.Handler)
 	t.Cleanup(srv.Close)
 
 	return &testDaemon{srv: srv, token: token, task: task}

@@ -194,6 +194,7 @@ func TestTaskArchive_BlocksRunStartWhileArchiving(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wsapi.New() error = %v", err)
 	}
+	t.Cleanup(api.Close)
 	srv := httptest.NewServer(api.Handler)
 	t.Cleanup(srv.Close)
 	ws := dialWS(t, srv, "tok")

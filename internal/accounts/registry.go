@@ -1,7 +1,9 @@
 package accounts
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -19,11 +21,15 @@ type Account struct {
 	CredentialType string
 	// Models are path.Match globs of the models this account serves
 	// (empty = no list); see MatchesModel.
-	Models    []string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	APIKey    *APIKeyCredential
-	OAuth     *OAuthCredential
+	Models []string
+	// HasIdentity reports whether the account carries a stable vendor
+	// identity (ADR-0033 D6). The identity itself is deliberately not
+	// exposed on this type.
+	HasIdentity bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	APIKey      *APIKeyCredential
+	OAuth       *OAuthCredential
 }
 
 // Notifier receives account lifecycle notifications (ADR-0015): update
@@ -134,8 +140,15 @@ func (r *Registry) AddAPIKeyWithBaseURL(provider, label, key, baseURL string) (s
 	})
 }
 
-// AddOAuth creates a new oauth account.
+// AddOAuth creates a new oauth account with no identity.
 func (r *Registry) AddOAuth(provider, label string, cred OAuthCredential) (store.Account, error) {
+	return r.AddOAuthWithIdentity(provider, label, cred, "")
+}
+
+// AddOAuthWithIdentity creates a new oauth account carrying identity (see
+// AccountIdentity; "" = none). Another row of the same provider owning
+// identity is store.ErrIdentityInUse.
+func (r *Registry) AddOAuthWithIdentity(provider, label string, cred OAuthCredential, identity string) (store.Account, error) {
 	data, err := json.Marshal(cred)
 	if err != nil {
 		return store.Account{}, fmt.Errorf("marshal oauth credential: %w", err)
@@ -145,7 +158,85 @@ func (r *Registry) AddOAuth(provider, label string, cred OAuthCredential) (store
 		Label:          label,
 		CredentialType: CredentialTypeOAuth,
 		CredentialData: string(data),
+		Identity:       identity,
 	})
+}
+
+// ReplaceOAuth swaps the account's credential for the oauth credential cred
+// -- the re-login path (ADR-0033 D6): id, label, models and every row
+// referencing the account are kept. There are three cases:
+//   - sameAccount: the login's identity matched this row's, so it is the same
+//     vendor account. The stored identity and the passive quota cooldown stay
+//     (that account is still exhausted) and the credential-replaced hook does
+//     not fire.
+//   - adoptIdentity != "": a legacy row gains the identity in the same
+//     transaction (another owner is store.ErrIdentityInUse and nothing
+//     changes).
+//   - neither: the new credential cannot be tied to the old one (a legacy
+//     row, no identity either side).
+//
+// In the last two the row may now be a different vendor account, so the
+// persisted cooldowns are deleted and the hook fires (dropping the in-memory
+// cooldown), as for ReplaceCredential. NotifyAccountUpdated always fires. The
+// poller's rejected-credential state is keyed on a credential fingerprint, so
+// the new credential unblocks refresh by itself.
+func (r *Registry) ReplaceOAuth(id int64, cred OAuthCredential, adoptIdentity string, sameAccount bool) (store.Account, error) {
+	data, err := json.Marshal(cred)
+	if err != nil {
+		return store.Account{}, fmt.Errorf("marshal oauth credential: %w", err)
+	}
+	// Serialize with EnsureFresh: an in-flight refresh of the old credential
+	// must not persist over this one when it finishes (and a refresh that
+	// starts afterwards re-reads this credential under the same lock).
+	unlock := r.lockAccount(id)
+	defer unlock()
+	var updated store.Account
+	switch {
+	case adoptIdentity != "":
+		updated, err = r.store.ReplaceAccountCredentialAdoptingIdentity(id, CredentialTypeOAuth, string(data), adoptIdentity)
+	case sameAccount:
+		updated, err = r.store.ReplaceAccountCredentialKeepingIdentity(id, CredentialTypeOAuth, string(data))
+	default:
+		updated, err = r.store.ReplaceAccountCredential(id, CredentialTypeOAuth, string(data))
+	}
+	if err != nil {
+		return store.Account{}, err
+	}
+	if !sameAccount {
+		if fn := r.getCredentialReplacedHook(); fn != nil {
+			fn(id)
+		}
+	}
+	if n := r.getNotifier(); n != nil {
+		n.NotifyAccountUpdated(updated)
+	}
+	return updated, nil
+}
+
+// lockAccount takes the account's refresh lock (the one EnsureFresh holds),
+// blocking until it is free, and returns the unlock function.
+func (r *Registry) lockAccount(id int64) (unlock func()) {
+	lock := r.accountRefreshLock(id)
+	lock <- struct{}{}
+	return func() { <-lock }
+}
+
+// stored returns the raw store row (including its identity, which the typed
+// Account never carries).
+func (r *Registry) stored(id int64) (store.Account, error) {
+	return r.store.GetAccount(id)
+}
+
+// findByIdentity returns the provider's account owning identity, if any.
+func (r *Registry) findByIdentity(provider, identity string) (store.Account, bool, error) {
+	a, err := r.store.GetAccountByIdentity(provider, identity)
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.Account{}, false, nil
+	}
+	if err != nil {
+		return store.Account{}, false, err
+	}
+	return a, true, nil
 }
 
 // AddWithCredential creates a new account whose credential is parsed the
@@ -241,7 +332,9 @@ func (r *Registry) Rename(id int64, label string) (store.Account, error) {
 // with the parsed credential, firing the credential-replaced hook and then
 // NotifyAccountUpdated on success. It is
 // account.updateCredential's registry call: parsing mirrors account.add
-// exactly (see ParseCredential).
+// exactly (see ParseCredential). The account's identity (ADR-0033 D6)
+// described the old credential, so it is cleared; the OAuth re-login path
+// (ReplaceOAuth) owns identity instead.
 func (r *Registry) ReplaceCredential(id int64, credential, baseURL string) (store.Account, error) {
 	if strings.TrimSpace(credential) == "" {
 		return store.Account{}, fmt.Errorf("credential is required")
@@ -250,6 +343,9 @@ func (r *Registry) ReplaceCredential(id int64, credential, baseURL string) (stor
 	if err != nil {
 		return store.Account{}, err
 	}
+	// Same reason as ReplaceOAuth: an in-flight refresh must not overwrite it.
+	unlock := r.lockAccount(id)
+	defer unlock()
 	updated, err := r.store.ReplaceAccountCredential(id, credentialType, credentialData)
 	if err != nil {
 		return store.Account{}, err
@@ -309,6 +405,7 @@ func decodeAccount(a store.Account) (Account, error) {
 		Provider:       a.Provider,
 		Label:          a.Label,
 		CredentialType: a.CredentialType,
+		HasIdentity:    a.Identity != "",
 		CreatedAt:      a.CreatedAt,
 		UpdatedAt:      a.UpdatedAt,
 	}

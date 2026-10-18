@@ -68,10 +68,13 @@ func TestTaskRunFacts_InterruptedMapsToError(t *testing.T) {
 	wm, st := newTestWorkspaceManager(t)
 	reg := newTestRegistry(t, st)
 	runner := newTestRunner(wm)
-	task := newTestTask(t, wm, "")
+	// "hang" keeps the run in `running` for good: with a fast scenario it
+	// could finish before the restart below, leaving nothing to interrupt.
+	task := newTestTask(t, wm, "hang")
 	if _, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, ""); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
+	waitForFactState(t, reg, task.ID, tasktree.StateRunning)
 
 	// Restart the registry over the same store: New reconciles the
 	// still-running row to interrupted and rehydrates it.

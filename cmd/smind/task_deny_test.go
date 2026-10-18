@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTaskDeny_RejectsPending(t *testing.T) {
@@ -17,12 +18,23 @@ func TestTaskDeny_RejectsPending(t *testing.T) {
 		t.Fatalf("task deny = %d, out %q", code, out)
 	}
 
+	// The permission_resolved event is appended by the run's own goroutine
+	// after the daemon delivers the decision, so run.logs can lag the CLI's
+	// exit: wait for it instead of asserting on the first read.
 	var logs runLogsResult
-	if err := client.Call(context.Background(), "run.logs", map[string]any{"runId": runID}, &logs); err != nil {
-		t.Fatalf("run.logs: %v", err)
-	}
-	if len(pendingPermissionsFrom(logs)) != 0 {
-		t.Fatalf("a permission is still pending after deny: %+v", logs.Events)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		logs = runLogsResult{}
+		if err := client.Call(context.Background(), "run.logs", map[string]any{"runId": runID}, &logs); err != nil {
+			t.Fatalf("run.logs: %v", err)
+		}
+		if len(pendingPermissionsFrom(logs)) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("a permission is still pending 10s after deny: %+v", logs.Events)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	var req, resolved *runLogEvent
 	for i := range logs.Events {

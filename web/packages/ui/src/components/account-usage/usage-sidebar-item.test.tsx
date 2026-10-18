@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UsageSidebarItem } from "@/components/account-usage/usage-sidebar-item";
@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { STORAGE_KEYS } from "@/lib/storage";
 import type { UsageWindow } from "@/lib/account-usage/types";
 import { claudeAccount, codexAccount, problemAccount } from "@/test/account-usage-fixtures";
+import { renderWithDaemon } from "@/test/render-with-daemon";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 
 const openUsageModal = vi.fn();
@@ -53,12 +54,13 @@ function setPrefs(prefs: Record<string, unknown>): void {
 }
 
 async function renderItem(daemon: FakeUsageDaemon, { open = true }: { open?: boolean } = {}) {
-  const view = render(
+  const view = renderWithDaemon(
     <SidebarProvider defaultOpen={open}>
       <TooltipProvider>
-        <UsageSidebarItem client={daemon.client} events={daemon.events} />
+        <UsageSidebarItem />
       </TooltipProvider>
     </SidebarProvider>,
+    daemon,
   );
   await flush();
   return view;
@@ -285,7 +287,7 @@ describe("call budget (AC54)", () => {
       ...fresh,
       report: { ...fresh.report!, fetchedAt: "2026-10-13T00:00:00Z", windows: [{ id: "five_hour", label: "5-hour", shortLabel: "5h", summary: true, usedPct: 88 }] },
     };
-    act(() => daemon.emit("account.usage", { usage }));
+    await act(async () => daemon.emit("account.usage", { usage }));
     expect(within(row()).getByTestId("sidebar-usage-pinned-window").textContent).toBe("88% 5h");
     expect(daemon.requests).toHaveLength(before);
   });

@@ -1,5 +1,5 @@
 import { act } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -9,9 +9,9 @@ import {
 } from "@/components/settings/providers-section";
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import "@/components/settings/providers-section";
-import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { ProviderInfo, RunSummary } from "@/lib/types";
-import { FakeWsClient } from "@/test/fake-ws-client";
+import { FakeUsageDaemon } from "@/test/usage-test-client";
+import { renderWithDaemon } from "@/test/render-with-daemon";
 
 const PROVIDERS: ProviderInfo[] = [
   { id: "claude-native", label: "Claude Code", credentialKind: "oauth", accountProvider: "anthropic" },
@@ -31,29 +31,10 @@ async function flush(): Promise<void> {
   });
 }
 
-function renderSection(client: FakeWsClient, events?: DaemonEvents) {
+function renderSection(daemon: FakeUsageDaemon) {
   const section = listSettingsSections().find((s) => s.id === "providers");
   if (!section) throw new Error("providers section did not register");
-  render(<>{section.render({ client: client as never, events })}</>);
-}
-
-/** A minimal DaemonEvents fake: records listeners per topic and lets a test fire one directly (same shape profiles-section.test.tsx uses). */
-function fakeDaemonEvents(): DaemonEvents & { fire(topic: string, payload: unknown): void } {
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
-  return {
-    subscribe(topic, listener) {
-      let set = listeners.get(topic);
-      if (!set) {
-        set = new Set();
-        listeners.set(topic, set);
-      }
-      set.add(listener);
-      return () => set!.delete(listener);
-    },
-    fire(topic, payload) {
-      for (const fn of listeners.get(topic) ?? []) fn(payload);
-    },
-  };
+  renderWithDaemon(<>{section.render({ client: daemon.client, events: daemon.events })}</>, daemon);
 }
 
 /** Opens the ⋯ menu on a row and clicks the named item, the way app-sidebar-crud.test.tsx drives Radix menus. */
@@ -67,14 +48,14 @@ function run(id: string, provider: string, status: RunSummary["Status"]): RunSum
   return { ID: id, TaskID: 0, ChatID: 0, Provider: provider as RunSummary["Provider"], Prompt: "", Status: status, StartedAt: "", FinishedAt: null, StopReason: "", Err: "", PermissionMode: "", AutoAccept: false, ThinkingLevel: "" };
 }
 
-/** Renders the section with account.list and provider.list already resolved, so structure assertions need no extra flushing. */
+/** Renders the section with account.list and provider.list answered, so structure assertions need no extra flushing. */
 async function renderLoaded(accounts: ReturnType<typeof account>[], providers = PROVIDERS) {
-  const client = new FakeWsClient();
-  renderSection(client);
-  client.nth("account.list").resolve(accounts);
-  client.nth("provider.list").resolve({ providers });
+  const daemon = new FakeUsageDaemon([]);
+  daemon.accounts = accounts.map((a) => ({ ...a }));
+  daemon.providers = { providers };
+  renderSection(daemon);
   await flush();
-  return client;
+  return daemon;
 }
 
 describe("groupAccountsByProvider", () => {
@@ -159,11 +140,10 @@ describe("providers-section", () => {
     expect(screen.getByText("OAuth")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("provider-test-anthropic"));
-    expect(client.nth("provider.test").params).toEqual({ provider: "anthropic" });
-    client.nth("provider.test").resolve({ ok: true, detail: "using \"work-claude\" (oauth)" });
     await flush();
+    expect(client.calls.find((c) => c.method === "provider.test")?.params).toEqual({ provider: "anthropic" });
 
-    expect(screen.getByTestId("provider-row-test-result-1")).toHaveTextContent("work-claude");
+    expect(screen.getByTestId("provider-row-test-result-1")).toHaveTextContent("ok");
     expect(screen.getByTestId("provider-row-dot-1")).toHaveAttribute("data-status", "ok");
   });
 });
@@ -221,10 +201,8 @@ describe("providers-section actions", () => {
     await chooseMenuItem(1, "Rename");
     fireEvent.change(screen.getByTestId("provider-rename-input-1"), { target: { value: "renamed" } });
     fireEvent.click(screen.getByTestId("provider-rename-save-1"));
-    expect(client.nth("account.rename").params).toEqual({ id: 1, label: "renamed" });
-
-    client.nth("account.rename").resolve(account(1, "anthropic", "renamed"));
     await flush();
+    expect(client.calls.find((c) => c.method === "account.rename")?.params).toEqual({ id: 1, label: "renamed" });
 
     expect(screen.getByText("renamed")).toBeInTheDocument();
     expect(screen.queryByText("work-claude")).not.toBeInTheDocument();
@@ -232,18 +210,18 @@ describe("providers-section actions", () => {
 
   it("updates a credential via account.updateCredential with the pasted value and optional baseUrl", async () => {
     const client = await renderLoaded([account(1, "anthropic", "work-claude")]);
+    client.onAccountMutation = (_m, _p, a) => ({ ...a, credentialType: "api_key" });
 
     await chooseMenuItem(1, "Update credential");
     fireEvent.change(screen.getByTestId("provider-credential-input-1"), { target: { value: "sk-new" } });
     fireEvent.change(screen.getByTestId("provider-credential-base-url-1"), { target: { value: "http://127.0.0.1:8080" } });
     fireEvent.click(screen.getByTestId("provider-credential-save-1"));
-    expect(client.nth("account.updateCredential").params).toEqual({
+    await flush();
+    expect(client.calls.find((c) => c.method === "account.updateCredential")?.params).toEqual({
       id: 1,
       credential: "sk-new",
       baseUrl: "http://127.0.0.1:8080",
     });
-
-    client.nth("account.updateCredential").resolve(account(1, "anthropic", "work-claude", "api_key"));
     await flush();
 
     expect(screen.getByText("API key")).toBeInTheDocument();
@@ -255,11 +233,8 @@ describe("providers-section actions", () => {
       account(2, "anthropic", "alt"),
     ]);
 
+    client.runs = [run("a", "claude-native", "running"), run("b", "claude-native", "running")];
     await chooseMenuItem(1, "Remove");
-    client.nth("run.list").resolve([
-      run("a", "claude-native", "running"),
-      run("b", "claude-native", "running"),
-    ]);
     await flush();
 
     expect(screen.getByTestId("provider-remove-warning-1")).toHaveTextContent(
@@ -267,9 +242,8 @@ describe("providers-section actions", () => {
     );
 
     fireEvent.click(screen.getByTestId("provider-remove-confirm-1"));
-    expect(client.nth("account.remove").params).toEqual({ id: 1 });
-    client.nth("account.remove").resolve({});
     await flush();
+    expect(client.calls.find((c) => c.method === "account.remove")?.params).toEqual({ id: 1 });
 
     expect(screen.queryByTestId("provider-row-1")).not.toBeInTheDocument();
     expect(screen.getByTestId("provider-row-2")).toBeInTheDocument();
@@ -278,8 +252,8 @@ describe("providers-section actions", () => {
   it("shows the last-account failure branch in the remove warning", async () => {
     const client = await renderLoaded([account(1, "anthropic", "work-claude")]);
 
+    client.runs = [run("a", "claude-native", "running")];
     await chooseMenuItem(1, "Remove");
-    client.nth("run.list").resolve([run("a", "claude-native", "running")]);
     await flush();
 
     expect(screen.getByTestId("provider-remove-warning-1")).toHaveTextContent(
@@ -288,23 +262,24 @@ describe("providers-section actions", () => {
   });
 
   it("reflects account.updated / account.removed events without a manual refresh", async () => {
-    const client = new FakeWsClient();
-    const events = fakeDaemonEvents();
-    renderSection(client, events);
-    client.nth("account.list").resolve([account(1, "anthropic", "work-claude")]);
-    client.nth("provider.list").resolve({ providers: PROVIDERS });
+    const client = new FakeUsageDaemon([]);
+    client.accounts = [account(1, "anthropic", "work-claude")];
+    client.providers = { providers: PROVIDERS };
+    renderSection(client);
     await flush();
     expect(screen.getByText("work-claude")).toBeInTheDocument();
 
+    client.accounts = [account(1, "anthropic", "renamed-elsewhere")];
     act(() => {
-      events.fire("account.updated", { account: account(1, "anthropic", "renamed-elsewhere") });
+      client.emit("account.updated", { account: account(1, "anthropic", "renamed-elsewhere") });
     });
     await flush();
     expect(screen.getByText("renamed-elsewhere")).toBeInTheDocument();
     expect(screen.queryByText("work-claude")).not.toBeInTheDocument();
 
+    client.accounts = [];
     act(() => {
-      events.fire("account.removed", { id: 1 });
+      client.emit("account.removed", { id: 1 });
     });
     await flush();
     expect(screen.queryByTestId("provider-row-1")).not.toBeInTheDocument();
@@ -327,21 +302,14 @@ describe("providers-section connect flows", () => {
     fireEvent.change(document.getElementById("account-label")!, { target: { value: "alt" } });
     fireEvent.change(document.getElementById("account-credential")!, { target: { value: "sk-new" } });
     fireEvent.click(screen.getByTestId("accounts-add-submit"));
-    expect(client.nth("account.add").params).toMatchObject({
+    expect(client.calls.find((c) => c.method === "account.add")?.params).toMatchObject({
       provider: "anthropic",
       label: "alt",
       credential: "sk-new",
     });
-
-    client.nth("account.add").resolve(account(2, "anthropic", "alt"));
     await flush();
-    // onConnected refreshes via a second account.list -- answer it with
-    // the list including the new account, the way the daemon would.
-    client.nth("account.list", 1).resolve([
-      account(1, "anthropic", "work-claude"),
-      account(2, "anthropic", "alt"),
-    ]);
-    await flush();
+    // account.add updated the daemon's own list; onConnected invalidates
+    // account.list and the re-read brings the new account in.
     expect(screen.getByText("alt")).toBeInTheDocument();
   });
 

@@ -5,14 +5,19 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { STORAGE_KEYS } from "@/lib/storage";
 import { claudeAccount, usageResult } from "@/test/account-usage-fixtures";
+import { DaemonQueryProvider } from "@/lib/query/daemon-query-provider";
+import { createQueryClient } from "@/lib/query/query-client";
+import "@/test/query-scheduler";
 import { RpcError } from "@/lib/ws-client";
 import { FakeWsClient } from "@/test/fake-ws-client";
 
 function renderSidebar(client: FakeWsClient, open = true) {
   return render(
-    <SidebarProvider defaultOpen={open}>
-      <AppSidebar client={client as never} selectedTaskId={null} />
-    </SidebarProvider>,
+    <DaemonQueryProvider queryClient={createQueryClient()} client={client as never} events={null}>
+      <SidebarProvider defaultOpen={open}>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>
+    </DaemonQueryProvider>,
   );
 }
 

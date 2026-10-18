@@ -58,6 +58,7 @@ describe("useDaemonEvents", () => {
         "chat.updated",
         "chat.archived",
         "chat.queueUpdated",
+        "account.updated",
         "account.usage",
         "account.removed",
       ],
