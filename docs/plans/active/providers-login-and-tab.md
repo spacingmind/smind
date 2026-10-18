@@ -206,6 +206,21 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
 - `manual override beats the derived remote flag` -- `web/packages/ui/src/lib/login-remote.test.ts`
 - `override is stored per connection id and survives a reload` -- `web/packages/ui/src/stores/login-location-store.test.ts`
 
+**PR-A1 (logic): pure view logic in `web/packages/ui/src/lib/providers-view.ts`; run with
+`cd web/packages/ui && npx vitest run src/lib/providers-view.test.ts` (12 tests green; `bun run typecheck` and `task lint` clean):**
+- `nav has one item per provider in order` -- `src/lib/providers-view.test.ts`
+- `nav item tone is the worst account tone` -- `src/lib/providers-view.test.ts`
+- `nav puts unmapped accounts in an other bucket` -- `src/lib/providers-view.test.ts`
+- `nav treats cli providers as accountless` -- `src/lib/providers-view.test.ts`
+- `health badge order: relogin beats cooldown beats error beats active` -- `src/lib/providers-view.test.ts`
+- `health badge cooldown label shows the end time` -- `src/lib/providers-view.test.ts`
+- `health badge untested without data` -- `src/lib/providers-view.test.ts`
+- `most headroom picks the best active account per provider` -- `src/lib/providers-view.test.ts`
+- `most headroom needs two candidates and skips unhealthy accounts` -- `src/lib/providers-view.test.ts`
+- `filter matches label, display name and plan` -- `src/lib/providers-view.test.ts`
+- `filter by attention and active` -- `src/lib/providers-view.test.ts`
+- `sort by status puts attention first` -- `src/lib/providers-view.test.ts`
+
 **PR-B1 (AC-B1..AC-B3), all Go tests under `-race`:**
 - `identity migration keeps existing rows null` -- `internal/store/migrate_test.go` (`TestMigrate_AccountsIdentity`, run twice for
   idempotence; also asserts the partial unique index rejects a duplicate `(provider, identity)` and allows many NULLs and the same
