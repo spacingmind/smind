@@ -21,7 +21,7 @@ import (
 // registerMCPRunTools adds the run-reading tools, task_wait, and task_stop
 // to the catalog.
 func registerMCPRunTools(srv *mcp.Server, client *wsclient.Client) {
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_status", Description: "Non-blocking snapshot of a run: status, the last few transcript entries, and any still-pending permission request. A pending permission means the run is NOT finished: loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again (pass ignorePermissionIds to skip requests you already surfaced); only done/error/stopped mean the run ended."}, mcpTaskStatus(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_status", Description: "Non-blocking snapshot of a run: status, the last few transcript entries, and any still-pending permission request. A pending permission means the run is NOT finished: loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again (pass ignorePermissionIds to skip requests you already surfaced); only done/error/stopped mean the run ended. Includes the run's git provenance (baseSha, headSha, dirty) when known."}, mcpTaskStatus(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_logs", Description: "Read a run's full (or tailed) transcript and current status."}, mcpTaskLogs(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_permissions", Description: "List a run's still-pending permission requests (read-only). The human approves or denies them via `smind task approve` or the sMind web UI; there is no tool for that here. Each request carries a `detail` for writes (path, size change, replacesExisting, largeShrink, diff or preview): surface it to the human as is. loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again (pass ignorePermissionIds to skip requests you already surfaced); only done/error/stopped mean the run ended."}, mcpTaskPermissions(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_wait", Description: "Block until a run finishes (done/error/stopped), a permission request goes pending, or the timeout elapses (default 120s). Check `state`: loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again (pass ignorePermissionIds to skip requests you already surfaced); only done/error/stopped mean the run ended. A human approves or denies a pending permission out of band (sMind web UI or `smind task approve`); to keep waiting after surfacing it, re-issue task_wait with ignorePermissionIds listing the request ids you have already surfaced -- the wait then ends only on a NEW pending request, a terminal status, or the timeout. Pass runIds (2-16 distinct runs, instead of runId) to wait for the first of several: it returns as soon as any one is done/error/stopped or has a pending permission, and runId in the result names which. A timeout is not a failure -- timedOut: true just means the run is still going; re-issue task_wait with the same runId to keep waiting, or use task_status for a non-blocking check."}, mcpTaskWait(client))
@@ -104,6 +104,9 @@ type taskStatusOutput struct {
 	StopReason        string                `json:"stopReason,omitempty"`
 	StopNote          string                `json:"stopNote,omitempty"`
 	Err               string                `json:"err,omitempty"`
+	BaseSHA           string                `json:"baseSha,omitempty" jsonschema:"full commit SHA of the run's worktree when it started; omitted when unknown"`
+	HeadSHA           string                `json:"headSha,omitempty" jsonschema:"full commit SHA of the run's worktree at its latest capture; omitted when unknown"`
+	Dirty             *bool                 `json:"dirty,omitempty" jsonschema:"whether the run's worktree had uncommitted changes at its latest capture; omitted when unknown"`
 	Events            []mcpRunEvent         `json:"events"`
 	PendingPermission *pendingPermissionOut `json:"pendingPermission,omitempty"`
 }
@@ -132,6 +135,9 @@ func buildTaskStatusOutput(result runLogsResult) taskStatusOutput {
 		StopReason: result.StopReason,
 		StopNote:   stopNote(result.StopReason),
 		Err:        result.Err,
+		BaseSHA:    result.BaseSHA,
+		HeadSHA:    result.HeadSHA,
+		Dirty:      result.Dirty,
 	}
 	events := result.Events
 	if len(events) > mcpStatusTail {

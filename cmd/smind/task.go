@@ -142,11 +142,16 @@ type runLogEvent struct {
 
 // runLogsResult is run.logs's terminal result.
 type runLogsResult struct {
-	RunID      string        `json:"runId"`
-	Status     string        `json:"status"`
-	StopReason string        `json:"stopReason,omitempty"`
-	Err        string        `json:"err,omitempty"`
-	Events     []runLogEvent `json:"events"`
+	RunID      string `json:"runId"`
+	Status     string `json:"status"`
+	StopReason string `json:"stopReason,omitempty"`
+	Err        string `json:"err,omitempty"`
+	// BaseSHA/HeadSHA/Dirty mirror the run's git provenance (O1), absent
+	// while unknown.
+	BaseSHA string        `json:"baseSha,omitempty"`
+	HeadSHA string        `json:"headSha,omitempty"`
+	Dirty   *bool         `json:"dirty,omitempty"`
+	Events  []runLogEvent `json:"events"`
 }
 
 func cmdTask(args []string) int {
