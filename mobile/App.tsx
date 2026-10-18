@@ -22,6 +22,7 @@ import { describeState } from './src/relay/connectionStatus';
 import { resetDeviceIdentity } from './src/relay/platformKeyStore';
 import { useConnectionState } from './src/relay/useConnectionState';
 import { ConnectionStatusCard, ReconnectingBanner } from './src/screens/ConnectionStatusCard';
+import { DaemonPasswordPrompt } from './src/screens/DaemonPasswordPrompt';
 import { useAppTheme } from './src/theme/ThemeProvider';
 import { AppThemeProvider } from './src/theme/ThemeProvider';
 import { View } from 'react-native';
@@ -69,6 +70,17 @@ function AppShell() {
     return <PairingScreen onConnected={handleConnected} />;
   }
 
+  // The daemon got a password (or its password changed) while this session was
+  // down: ask for it here, over the same screen, instead of retrying blindly.
+  if (state.kind === 'password' || state.kind === 'locked') {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.surface[0], paddingTop: theme.spacing[16], paddingHorizontal: theme.spacing[4] }}>
+        <StatusBar style="auto" />
+        <DaemonPasswordPrompt state={state} onSubmit={(password) => conn.submitPassword(password)} actions={[{ label: 'Back', onPress: handleDisconnect }]} />
+      </View>
+    );
+  }
+
   // A live session can still end up refused: the daemon owner revoked this
   // device (or forgot it, so it is pending again), or the daemon at the other
   // end changed keys. Say so instead of
@@ -93,7 +105,7 @@ function AppShell() {
   return (
     <>
       <StatusBar style="auto" />
-      {state.kind === 'reconnecting' ? <ReconnectingBanner>Reconnecting to the daemon…</ReconnectingBanner> : null}
+      {state.kind === 'reconnecting' || state.kind === 'connecting' ? <ReconnectingBanner>Reconnecting to the daemon…</ReconnectingBanner> : null}
       {screen.kind === 'task' ? (
         <TaskDetailScreen conn={conn} taskId={screen.task.ID} taskTitle={screen.task.Title} onBack={handleBack} />
       ) : (

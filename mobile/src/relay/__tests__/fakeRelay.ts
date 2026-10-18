@@ -157,6 +157,16 @@ export class FakeRelay implements RelayNet {
   admissions = 0;
   /** When set, the daemon holds every hello answer until it resolves (a slow daemon). */
   gate: Promise<void> | null = null;
+  /** The daemon password every hello must carry (P13c); undefined = the daemon has none. */
+  password: string | undefined = undefined;
+  /** The next N hellos are answered too_many_attempts (rate limited) BEFORE the password is looked at, as the real daemon does. */
+  lockNextHellos = 0;
+  /** retry_after (seconds) the lockout names; undefined leaves the field out (a daemon that gives no number). */
+  retryAfter: number | undefined = 1;
+  /** A misbehaving daemon that answers password_required even when a password was sent. */
+  alwaysRequirePassword = false;
+  /** Wrong passwords the daemon received, and how many hellos carried none. */
+  wrongPasswords = 0;
   /** When set, the next stream opened is ended at once with this error (a relay refusing the route). */
   killNextStream: Error | null = null;
   /** When set, admit() fails (the relay is unreachable). */
@@ -261,6 +271,24 @@ export class FakeRelay implements RelayNet {
       deviceIdFor(pub) === route.deviceId &&
       ed25519.verify(sig, helloSignedBytes(this.daemonKeys.publicKey, peer, new TextEncoder().encode(session), route.challenge), pub);
     const policy = this.policy(route.deviceId);
+    // The daemon password (P13c) comes right after proof of the device key and before the registry:
+    // a device that fails it is never recorded and learns nothing about its state. The rate limit is checked first.
+    if (this.lockNextHellos > 0) {
+      this.lockNextHellos--;
+      reply(id, { error: { message: 'too many password attempts', code: 'too_many_attempts', ...(this.retryAfter === undefined ? {} : { retry_after: this.retryAfter }) } });
+      return false;
+    }
+    if (verified && this.password !== undefined) {
+      if (!hello.password || this.alwaysRequirePassword) {
+        reply(id, { error: { message: 'this daemon requires its password', code: 'password_required' } });
+        return false;
+      }
+      if (hello.password !== this.password) {
+        this.wrongPasswords++;
+        reply(id, { error: { message: 'incorrect password', code: 'incorrect_password' } });
+        return false;
+      }
+    }
     if (policy === 'version') {
       reply(id, { error: { message: 'unsupported hello version', code: 'hello_version_unsupported' } });
       return false;

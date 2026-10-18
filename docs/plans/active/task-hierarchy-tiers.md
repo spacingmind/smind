@@ -513,6 +513,12 @@ dialogs' counts equal the server selection and both actions work end to end.
 ## Progress
 
 - 2026-10-11 Phase A: gap analysis and this spec written.
+- [x] PR-G per-tree concurrency guard (H6): #289 (merged 2026-10-11)
+- [x] PR-T `task.tree` read model + MCP `task_tree` and `task_wait {childrenOf}` (H5, H7, H8, H10): #291 (merged)
+- [x] PR-U1 nested, collapsible sidebar tree with attention rollup (H1, H2): #293 (merged)
+- [x] PR-U2 task header lineage, tree rollups and archive-parent confirm (H3, H4, H5): #295 (merged)
+- [x] H11 explicit "Archive finished descendants" and "Stop all in tree" (no cascade on archive; user-approved 2026-10-18): #376
+- H9 (tier label): derived from structure, no field added (`TierOf`), as recommended in section 6.
 - 2026-10-18 H11: spec written (PR-H11, §5) before implementation.
 - 2026-10-18 H11: built by two peers (backend Sonnet after GLM ran out of
   turns with one commit; web GLM), reviewed by the read-only reviewer, then
@@ -525,6 +531,38 @@ dialogs' counts equal the server selection and both actions work end to end.
   stopTree-dialog and hover-card bugs the mocks hid.
 
 ## Validation
+
+Checked against `origin/develop` on 2026-10-18: every named test below was grep-verified to exist by that exact name unless listed under "named but not built". "Tests pass" is each PR's own `task test` / `task lint` green (PR bodies), not re-run here.
+
+### PR-G (#289)
+
+- **G-AC1** `TestDefault_OrchestrationMaxConcurrentRunsPerTree`, `TestLoad_OrchestrationMaxConcurrentRunsPerTreeOverride`, `TestLoad_OrchestrationMaxConcurrentRunsPerTreeRejectsZero`.
+- **G-AC2/G-AC3** (`internal/runs/tree_guard_test.go`) `TestTreeGuard_FifthConcurrentRunRejected`, `TestTreeGuard_SlotFreesWhenRunEnds`, `TestTreeGuard_SeparateTreesDoNotShareBudget`, `TestTreeGuard_ConcurrentStartsAdmitExactlyLimit`, `TestTreeGuard_ConcurrentStartWhenBusyAdmitsExactlyLimit`, `TestTreeGuard_WaitingPermissionRunStillCountsAsSlot`, `TestTreeGuard_QueuedPromptStaysQueuedAndDeliversWhenSlotFrees`, `TestTreeGuard_ConfiguredLimitHonoured`. The PR records mutation checking (disabling the limit check fails all 8).
+- **G-AC4** `TestRunStart_TreeBusyErrorIsReturnedToWSClient` (`internal/wsapi`).
+- Named but not built: `TestTreeGuard_RootResolutionIsOneStorePassOutsideLock` (the "no store read while holding `reg.mu`" seam test); the property rests on the code structure and the atomicity tests above.
+
+### PR-T (#291)
+
+- **T-AC1** `TestBuild_ThreeTierOrderAndDepth`, `TestBuild_OrphanOfArchivedParentIsRoot`, `TestBuild_SubtreeUsageCountsEachRunOnce`, `TestBuild_ArchivedDescendantUsageIncludedCountsExcluded`, `TestBuild_UnreportedFieldsStayNullNotZero`, `TestBuild_CountsRunningWaitingFailedDone`, `TestBuild_CycleTerminates`, `TestBuild_TruncatesAt500`, `TestTierOf_Table` (the PR notes double-adding a child's usage fails 4 of them).
+- **T-AC2** `TestTaskTree_Workspace`, `TestTaskTree_RootedAtTask`, `TestTaskTree_ParamsExactlyOne`, `TestTaskTree_WaitingPermissionState`, `TestTaskTree_WideTree200ChildrenIsOneStorePass`. `TestTaskTree_CrossWorkspaceTaskIsError` was not built under that name: the handler's error cases are `TestTaskTree_UnknownTaskIsError` and `TestTaskTree_ArchivedTaskIsError`.
+- **T-AC3** `TestMCPTaskTree_Nested`, `TestMCPTaskTree_ExactlyOneOfWorkspaceOrTask`, `TestMCPTaskWait_ChildrenOf_ReturnsFirstFinished`, `TestMCPTaskWait_ChildrenOf_NoRunningChildrenReturnsIdle`, `TestMCPTaskWait_ChildrenOf_ExclusiveWithRunId`, `TestMCPTaskWait_ChildrenOf_CapsAt16`; server instructions and the bundled `smind` skill teach both tools.
+- Since then `task.tree` also carries the D13 `disposition` (#373).
+
+### PR-U1 (#293)
+
+- **U1-AC1** `ParentTaskID?: number | null` is on the `Task` type (`web/packages/ui/src/lib/types.ts`).
+- **U1-AC2/U1-AC3** the `lib/task-tree.test.ts` cases and the `app-sidebar.test.tsx` cases named in the spec exist, including nesting, collapse, rollup reason and count, and the live `task.created` / `task.archived` / `run.status` / reconnect cases. The tier chip on the row was superseded by sidebar-polish S4 (tier in the hover card and aria-label), as the spec's own note says.
+- Named but not built: "a 300-task wide tree renders without re-rendering unrelated rows" (the memo guard).
+- **U1-AC4 screenshots:** not recorded as light/dark screenshots in the PR; its body says the layout was checked in a browser at the default sidebar width in both themes. Treated as partially verified.
+
+### PR-U2 (#295)
+
+- **U2-AC1** the `task-detail.test.tsx` and `task-lineage` cases named in the spec exist (spawned-by breadcrumb and jump, no breadcrumb for a root, archived parent inert, children strip and live updates, status summary, usage rollup). "usage rollup shows em dash when nothing reported and never 0" is the test `usage rollup is omitted when nothing is reported and never shows 0`; "does not double count own runs" was not built as a web test (the server-side `TestBuild_SubtreeUsageCountsEachRunOnce` covers double counting).
+- **U2-AC2** the `crud-dialogs.test.tsx` archive-dialog cases exist, including that confirming issues exactly one `task.archive`, for the parent only (no cascade).
+- **U2-AC3 screenshots:** not recorded in the PR. Unverified.
+- Since then the pill reads the D13 disposition (a done-at-a-cap child is a warning).
+
+### PR-H11 (#376)
 
 H11 (2026-10-18):
 

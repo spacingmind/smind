@@ -701,6 +701,28 @@ export function AppSidebar({
         run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } })),
       },
     ];
+    // Desktop-only: the Connection group of Settings (daemon server = the
+    // saved connections, daemon = the app-managed local daemon) exists only
+    // in the desktop build (connections-section.tsx / daemon-section.tsx
+    // register only when isDesktop), so its palette entries do too.
+    if (isDesktop) {
+      commands.push(
+        {
+          id: "settings-daemon-server",
+          group: "Settings",
+          title: "Settings: Daemon server",
+          keywords: ["daemon", "server", "connection", "connections", "host", "remote", "relay", "url"],
+          run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "connections" } })),
+        },
+        {
+          id: "settings-daemon",
+          group: "Settings",
+          title: "Settings: Daemon",
+          keywords: ["daemon", "install", "update", "restart", "version", "managed", "take over"],
+          run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "daemon" } })),
+        },
+      );
+    }
     // "Use agent: <name>" seeds the active composer with that profile's
     // config, exactly as picking it from the composer's own picker does
     // (ADR-0014's client-side apply mechanism). Dispatched as a window
