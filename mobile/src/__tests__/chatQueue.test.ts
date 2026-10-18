@@ -198,6 +198,30 @@ describe('ChatQueue', () => {
     q.stop();
   });
 
+  it('promptForRun finds the prompt of the delivered item for a run id', async () => {
+    const conn = fakeConn();
+    const q = new ChatQueue(conn, 5, () => {});
+    q.start();
+    await answerList(conn, [item({ ID: 1, Status: 'delivered', RunID: 'run-7', Prompt: 'next step' }), item({ ID: 2 })]);
+    expect(q.promptForRun('run-7')).toBe('next step');
+    q.stop();
+  });
+
+  it('promptForRun is undefined for a queued, cancelled or unknown run', async () => {
+    const conn = fakeConn();
+    const q = new ChatQueue(conn, 5, () => {});
+    q.start();
+    await answerList(conn, [
+      item({ ID: 1, Status: 'queued', RunID: 'run-a', Prompt: 'still queued' }),
+      item({ ID: 2, Status: 'cancelled', CancelKind: 'auto', RunID: 'run-b', Prompt: 'gone' }),
+      item({ ID: 3, Status: 'delivered', RunID: 'run-c', Prompt: '' }),
+    ]);
+    expect(q.promptForRun('run-a')).toBeUndefined();
+    expect(q.promptForRun('run-b')).toBeUndefined();
+    expect(q.promptForRun('nope')).toBeUndefined();
+    q.stop();
+  });
+
   it('cancel calls chat.queueCancel with the item id and leaves the row until the snapshot', async () => {
     const conn = fakeConn();
     const q = new ChatQueue(conn, 5, () => {});

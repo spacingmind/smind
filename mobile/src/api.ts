@@ -154,3 +154,12 @@ export async function listChatQueue(conn: RelayConnection, chatId: number): Prom
 export async function cancelQueuedPrompt(conn: RelayConnection, itemId: number): Promise<void> {
   await conn.call('chat.queueCancel', { itemId });
 }
+
+/**
+ * run.stop (mobile Stop control): stop the run runId from this -- or any
+ * -- connection; the daemon (internal/wsapi handleRunStop) treats stopping
+ * an already-finished run as success, so the wrapper never errors for that.
+ */
+export async function stopRun(conn: RelayConnection, runId: string): Promise<void> {
+  await conn.call('run.stop', { runId });
+}
