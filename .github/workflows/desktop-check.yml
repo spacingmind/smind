@@ -51,6 +51,13 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # The daemon-client interop test `go run`s the relay harness and gives
+      # it 30 s to start; on a cold runner the module download and compile
+      # alone take about that long, so build it once up front.
+      - name: Warm the Go build cache for the relay harness
+        shell: bash
+        run: go build -o "$RUNNER_TEMP/relay-harness" ./internal/relay/bridge/harness
+
       - name: cargo test (desktop shell)
         working-directory: desktop/src-tauri
         run: cargo test
