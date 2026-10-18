@@ -3,7 +3,7 @@
 // statusDot, diff, the type-role scale, elevation, duration -- valued
 // independently per platform (mobile-ui-polish plan's Decisions: one
 // vocabulary, two renderers, no shared npm package, see docs/plans/
-// active/mobile-ui-polish.md). Hex values are hand-ported from
+// completed/mobile-ui-polish.md). Hex values are hand-ported from
 // web/packages/ui/src/index.css's :root/.dark blocks (oklch literals
 // converted to sRGB hex); `foregroundMuted` isn't in that port list but
 // is the standard shadcn muted-foreground companion to the exact

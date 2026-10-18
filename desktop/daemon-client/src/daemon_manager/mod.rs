@@ -1,6 +1,6 @@
 //! The app-managed local daemon (ADR-0013 part D2, ADR-0030): install,
 //! update and restart a daemon the app itself started, natively on
-//! Windows and macOS. See `docs/plans/active/desktop-managed-daemon.md`.
+//! Windows and macOS. See `docs/plans/completed/desktop-managed-daemon.md`.
 //!
 //! Pure, OS-agnostic logic (version comparison, checksum verification,
 //! release asset naming, the managed/unmanaged decision table) lives here

@@ -404,18 +404,29 @@ Ported: the daemon-owned **rotating `daemon.log`** (`supervisor.ts:15-16,128-129
 
 ### P9 — `smind service` Windows + `install.ps1 -Service`
 
-1. A per-user Scheduled Task `smind` runs a hidden `smind.exe serve` at logon (no console window),
-   restarts on failure (3× at 1-minute intervals); output goes to the daemon's own `daemon.log`
-   (P8), not a shell redirect.
-2. `start`/`stop`/`restart`/`status`/`logs`/`uninstall` behave as in P8; `stop` uses `POST
-   /api/shutdown` (ADR-0029) first and `schtasks /End` only if the daemon does not exit within the
-   stop timeout.
-3. Registration does not require elevation (verified on Windows 11); if it does on some setups the
-   error says exactly which step needs it.
-4. `SMIND_SUPERVISOR=task` is set; the hidden-launch wrapper works on Windows 10 and 11 (spike
-   result recorded in Validation, with the fallback used if `conhost --headless` is unavailable).
-5. `install.ps1 -Service` installs then registers the task.
-6. Docs state plainly that the task starts at logon, not at boot.
+1. A per-user Scheduled Task `smind` (logon trigger for the current user, interactive token, least privilege)
+   runs `conhost.exe --headless smind.exe service run` at logon: no console window, and `service run` starts
+   `smind serve` (as `SMIND_SUPERVISOR=taskscheduler`, `SMIND_HOME` from `--home`) inside a kill-on-close Job
+   Object and restarts it after a crash 3× at 1-minute intervals (the budget starts over after a 10-minute
+   healthy run). *Amended by the P9 spike (measured, see Validation): `conhost --headless` exits 0 whatever its
+   child's exit code, so the task's own `RestartOnFailure` (kept in the XML as a backstop) never fires; the
+   restart policy is applied by `service run`.* Output goes to the daemon's own `daemon.log` (P8), not a shell
+   redirect.
+2. `start`/`stop`/`restart`/`status`/`logs`/`uninstall` behave as in P8; `stop` uses `POST /api/shutdown`
+   (ADR-0029) first, then waits for the port to free; only if the daemon does not exit within the stop timeout
+   (or the request fails) is the kill fallback used. `schtasks /End` ends only the task's own process (conhost)
+   and leaves the daemon running, so the fallback also sweeps this install's `service run` supervisors and, if
+   needed, the listener. A daemon this task did not start is never stopped or killed (`stop`/`restart` refuse,
+   `uninstall` still removes the task).
+3. Registration does not require elevation: **verified on `windows-latest` (Windows Server 2025) with a standard
+   local user** (Medium integrity, not in Administrators). Windows 10/11 client: unverified. When a policy
+   refuses it, the error names the refused `schtasks /Create` step.
+4. `SMIND_SUPERVISOR=taskscheduler` is set (was `task`; changed on the Human's instruction 2026-10-17). The
+   hidden launch works with `conhost --headless` (measured: no window, interactive session). If `conhost.exe` is
+   missing `install` falls back to launching `smind.exe` directly (visible console) with a warning; whether
+   `--headless` exists on every Windows 10 build is unverified.
+5. `install.ps1 -Service` (or `SMIND_SERVICE=1`, the `iex` form) installs then registers the task.
+6. Docs state plainly that the task starts at logon, not at boot, and runs only in the user's interactive session.
 
 **Paseo reference — deliberately different.** Paseo has no Windows service/task story either
 (CLI via npm; the desktop app starts the daemon and its lock file marks `desktopManaged`,
@@ -1099,6 +1110,17 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   connection switches within one app run; `connections_relay_set_password` names the connection (refused if it is not the selected one). Independent review
   fixes: the key-bound cell, the unjudged-password rule, the generation-guarded `clear_if`, the clamped `retry_after`, the stale-status reset on switch.
 
+- 2026-10-18: **P12c implemented** (PR "feat(relay): CA-verified TLS for relay clients and no silent trust-on-first-use (ADR-0031 P12c)"):
+  `client.Dial` with an empty fingerprint verifies chain + host name against the system roots (no `InsecureSkipVerify`; `WithRootCAs`
+  for tests), a non-empty one still pins the leaf only; `smind relay connect` tries normal verification first (stores an empty fingerprint),
+  otherwise shows the fingerprint and needs a typed yes or a matching `--fingerprint <hex>` (nothing saved on refusal/EOF/unreachable;
+  the prompt prints our own reason, never certificate-controlled text); `smind relay --tls-cert/--tls-key` serves an operator's
+  certificate on both listeners and reloads renewals; `smind relay offer` omits `fp` for a CA relay. **Follow-up for P13a (desktop,
+  not edited here):** `connections_preview_relay` rejects an offer without `fp` (`desktop/src-tauri/src/commands.rs:149`) and
+  `relay::client::dial` requires a 32-byte pin (`desktop/daemon-client/src/relay/client.rs:140`), so the desktop cannot yet join a CA
+  relay; the Rust offer parser already accepts a missing `fp`. Mobile parses a missing `fp` (`wire.fp ?? ''`) and never pins (platform
+  trust), so it works with a CA relay.
+
 ## Validation
 
 To be filled per PR as work lands: for each Acceptance Criterion, the test name or the real-platform check that
@@ -1401,3 +1423,55 @@ Commands: `go test ./internal/relay/... ./internal/server`, `cargo test` (daemon
 - **Not verified:** the real Tauri app against a real relay with a password (the Rust client is verified against the real Go hub; the webview IPC is mocked),
   a real mobile client (its own PR), Windows execution.
 
+### P9 (2026-10-17, branch `feat/smind-service-windows`)
+
+**What the spike proved** (`windows-latest` = Windows Server 2025, build 10.0.26100; the runner user is an
+elevated administrator with an interactive console session 2; the spike workflow is not part of the PR):
+
+| Question | Measured |
+|---|---|
+| Register a per-user logon task without elevation? | **Yes.** A standard local user (`whoami /groups`: Medium Mandatory Level, no Administrators; `net session`: access denied) ran `schtasks /Create /XML`, `/Run`, `/End`, `/Delete` for a `LogonTrigger` task with `InteractiveToken` + `LeastPrivilege`: all exit 0. The same worked from the admin account under a restricted token (`runas /trustlevel:0x20000`). `scripts/service_unelevated_check.ps1` repeats the standard-user case in CI with `smind service install`/`status`/`uninstall`. |
+| XML encoding | UTF-16 LE with BOM works; a UTF-8 file is rejected ("The task XML is malformed … unable to switch the encoding"). |
+| Hidden launch | `conhost.exe --headless "smind.exe" …` as the task action: `smind.exe` runs as its child in session 2 with `MainWindowHandle = 0`; no console window. |
+| Does the task restart a crashed daemon? | **No.** `conhost --headless` exits 0 whatever the child's exit code (`conhost … cmd /c "exit 7"` → 0); killing the daemon left the task `Ready`, last result `0x0`, and nothing restarted in 110 s. |
+| `schtasks /End` | Ends only conhost; **`smind.exe` kept running.** |
+| Stored XML | Task Scheduler normalises the XML: the principal becomes a SID and the default `RunLevel` is omitted, so the definition cannot be compared byte for byte (the Description carries a hash instead). |
+
+These facts are why the task runs `smind service run` (supervisor + restart policy in a Job Object) and why
+`stop` has the sweep fallback.
+
+Commands: `go test -race ./internal/service ./internal/logging`, `go test ./cmd/smind -run 'TestSupervise|TestServiceRun|TestService'`,
+`task lint`, `GOOS=windows go vet`, `/tmp/pwsh scripts/install_test.ps1` (27 cases), PSScriptAnalyzer, `actionlint`, and the
+`Service (Windows Task Scheduler)` workflow on `windows-latest`: the Go tests **on a Windows host**, the standard-user check,
+`scripts/service_smoke.ps1` against the real Task Scheduler, and `install.ps1 -Service` end to end (a local release, a real task).
+
+| AC | Evidence |
+|---|---|
+| 1 task + hidden launch + restart | `TestWindowsTaskXMLGolden` (logon trigger, interactive token, least privilege, `PT0S`, `IgnoreNew`, `RestartOnFailure`, conhost action; goldens reviewed by hand), `…IsWellFormedAndEscaped`, `…FileIsUTF16WithBOM`; supervisor: `TestSuperviseRestartsACrashedDaemon`, `…GivesUpAfterTheRestartBudget`, `…DoesNotRestartAfterAGracefulStop`, `…BudgetResetsAfterAHealthyRun`, `…StopsWaitingWhenCancelled`, `TestServiceRunSetsTheSupervisorAndHome`; **real:** smoke phases "runs hidden" (conhost --headless parent, `MainWindowHandle` 0, session ≠ 0) and "a crash is restarted" (daemon killed, a new `serve` pid answers within 150 s, `daemon.log` records the restart) |
+| 2 commands, graceful stop | `TestWindowsTaskStopUsesShutdownEndpointFirst` (one ordered log: shutdown → `/End` → sweep), `…StopFallsBackToEnd`, `…FallsBackWhenTheRequestFails`, `TestWindowsStopNeverTouchesAForeignDaemon`, `…KillsAHungDaemonOfOurs`, `…UninstallWithAForeignDaemonStillRemovesTheTask`, `…FailedSweepAfterAGracefulStopIsOnlyAWarning`, `…StartAndInstallSweepAStaleSupervisorBeforeRunning`, `TestServiceInstallIdempotentWindows`, `…InstallRefusesToStartWhenForeignDaemonAnswers` (4 kinds), `…StartRefusesWhenForeignDaemonAnswers`, `…StartWaitsForOurOwnDaemon`, `TestWindowsServiceStatusExitCodes`, `…StatusReadsTheInstalledTasksHome`, `…QueryGoesThroughUTF8AndRoundTripsNonASCII`, `…RefusesATaskThatBelongsToAnotherUser`, `…DisabledTaskIsReRegisteredByInstall`, `TestPowershellForceStopScriptNamesOnlyThisInstall`, `TestPsQuoteDoublesEveryKindOfSingleQuote`; **real:** smoke phases for graceful `smind stop`, `service stop` (no fallback text, nothing left), the fallback (token removed so the request fails → `/End` + sweep, no `smind.exe` left), restart, uninstall (task gone, `SMIND_HOME` kept, status 4), the foreign daemon (hand-started `smind serve`: install registers but does not start, `start`/`stop` refuse, it stays up), a **decoy `smind.exe` with its own path, supervisor and port is never touched**, and an exe and `SMIND_HOME` with spaces and non-ASCII characters throughout |
+| 3 no elevation | `TestWindowsInstallNeedsNoElevationPrompt` (no `/RU`/`/RL`), `…InstallDeniedNamesTheRefusedStep`; **real:** `service_unelevated_check.ps1` as a standard user (install exit 0, task has a logon trigger and does not ask for elevation, status 3, uninstall, task gone) |
+| 4 `taskscheduler`, hidden launch | `TestServiceRunSetsTheSupervisorAndHome`, `…ManagedBy` tests from P8; smoke: `/healthz managedBy == taskscheduler`; `TestWindowsInstallWithoutConhostWarnsAndStillWorks` |
+| 5 `install.ps1 -Service` | `install_test.ps1`: `Install_Service_RegistersTask`, `…WithoutService_NeverRegistersATask`, `…ServiceFailure_FailsButKeepsTheBinary`, `…ServiceFailedChecksum_NeverRegistersATask`, `InvokeServiceInstall_ReportsTheExitCodeOfTheRealExe` (the real function against a fake exe: its stdout must not make a failure look like success); **real:** the workflow step installs from a local release and checks managedBy, status and uninstall |
+| 6 docs | `docs/homelab.md` "Run the daemon as a service (Linux, macOS and Windows)" |
+
+Merge with develop (2026-10-18, after P4 #349 and P10 #356): `SMIND_SUPERVISOR=taskscheduler` surfaces through P10's `managedBy`
+(`daemon.info`, the banner and Settings → Daemon "Managed by Task Scheduler"): the web `managedByLabel` and the desktop
+`managed_by_label` map `taskscheduler` (and the ADR's first sketch `task`) to "Task Scheduler" (`daemon-version.test.ts`,
+`daemon-section.test.tsx`, `take_over_refused_for_a_service_managed_daemon_on_every_platform`). A P4 password daemon under the task:
+no backend writes a secret into its definition (`TestNoServiceBackendCopiesAPasswordIntoTheDefinition`, all three OSes), the service's
+port comes from `server.listen` (`TestWindowsServiceUsesThePortOfServerListen`), and the real-Windows smoke has a phase that sets
+`server.listen=0.0.0.0:<port>` + `set-password`, restarts the task, checks `/api/token` is closed, that neither the task XML nor any
+process command line holds the password, and that `service stop`/`uninstall` stay graceful (token file + bearer).
+
+Independent review: 14 findings, acted on (the rest are listed below). Also found by the real-Windows CI: **`selfupdate.DesktopOwned`
+looked for `sMind.exe` beside the binary, which a case-insensitive NTFS finds next to every `smind.exe`, so on Windows
+every standalone install (and `smind update`, P6) was refused as "next to the desktop app"**; the app's real executable is
+`smind-desktop.exe` (Tauri's `${MAINBINARYNAME}`). Fixed with a regression test.
+
+Known gaps / not verified: Windows 10 and the Windows 11 **client** (everything above is Server 2025); whether `conhost.exe --headless`
+exists on every Windows 10 build; domain / Azure AD accounts (the logon trigger uses the `DOMAIN\user` name); any account whose
+`schtasks` output is not decodable even with code page 65001 (the CI proves non-ASCII paths round-trip on one locale); `smind update`
+driving a real `service restart` on Windows; that a transient `schtasks /Query` failure is read as "not installed" (the tool localises
+its errors, so only the exit code is available); the task name `\smind` is machine-wide (a second user's install is refused by the
+owner check, not given its own task); logoff/shutdown behaviour (the supervisor lets the daemon shut down gracefully before any kill, not
+verified on a real logoff).

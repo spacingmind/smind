@@ -13,7 +13,7 @@ import (
 // caller can test with errors.Is(err, fs.ErrNotExist). n <= 0 writes nothing
 // but still returns the current end of the file.
 func TailFile(path string, n int, w io.Writer) (int64, error) {
-	f, err := os.Open(path)
+	f, err := openShared(path)
 	if err != nil {
 		return 0, err
 	}
@@ -84,7 +84,7 @@ func Follow(ctx context.Context, path string, w io.Writer, offset int64) error {
 		}
 	}()
 	open := func(off int64) {
-		nf, err := os.Open(path)
+		nf, err := openShared(path)
 		if err != nil {
 			return
 		}

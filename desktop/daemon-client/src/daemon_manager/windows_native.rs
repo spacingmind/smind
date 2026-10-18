@@ -236,9 +236,8 @@ pub fn kill_process(pid: u32) -> io::Result<()> {
 }
 
 /// token_path is where the daemon persists its bearer token
-/// (`internal/auth`): `$SMIND_HOME/token`, else `~/.smind/token` (the
-/// legacy `~/.spacingmind` still wins if `~/.smind` does not exist yet,
-/// matching `internal/config.Dir`).
+/// (`internal/auth`): `$SMIND_HOME/token`, else `~/.smind/token`, matching
+/// `internal/config.Dir`.
 pub fn token_path() -> PathBuf {
     if let Ok(home) = std::env::var("SMIND_HOME") {
         if !home.is_empty() {
@@ -246,9 +245,7 @@ pub fn token_path() -> PathBuf {
         }
     }
     let profile = std::env::var("USERPROFILE").unwrap_or_default();
-    let smind = Path::new(&profile).join(".smind");
-    let legacy = Path::new(&profile).join(".spacingmind");
-    if !smind.exists() && legacy.exists() { legacy.join("token") } else { smind.join("token") }
+    Path::new(&profile).join(".smind").join("token")
 }
 
 pub fn read_token(path: &Path) -> io::Result<String> {

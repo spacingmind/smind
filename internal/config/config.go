@@ -374,19 +374,13 @@ func Default() Config {
 
 // Load reads the config file, falling back to defaults for missing keys.
 // A missing file is not an error.
-//
-// Load first performs the one-time home migration: when SMIND_HOME is unset
-// and ~/.smind does not exist while ~/.spacingmind is a directory, the
-// legacy tree is renamed to ~/.smind and a compat symlink is left behind.
-// Migration never fails the load; see home.go.
 func Load() (Config, error) {
-	migrateIfDue()
 	return LoadFile(Path())
 }
 
-// LoadFile reads the config at path like Load does, without the home
-// migration. `smind service` uses it to read the config of the user the
-// service runs as, which is not always the user running the command.
+// LoadFile reads the config at path like Load does. `smind service` uses it
+// to read the config of the user the service runs as, which is not always the
+// user running the command.
 func LoadFile(path string) (Config, error) {
 	cfg := Default()
 	data, err := os.ReadFile(path)

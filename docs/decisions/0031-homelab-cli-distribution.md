@@ -324,6 +324,14 @@ Rules common to all backends:
   Windows 10/11 are **to be proven on a real machine** (plan spike). A task runs
   only after login; a headless Windows box needs auto-logon — documented, not
   solved here.
+  **Measured in P9 (2026-10-17, `windows-latest` = Windows Server 2025; Windows 10/11 client unverified):**
+  a standard local user (Medium integrity, not in Administrators) registers, runs, ends and deletes the logon task
+  with `schtasks` — no elevation; `conhost.exe --headless smind.exe …` gives the daemon a console but no window, in
+  the interactive session; **but** `conhost --headless` exits 0 whatever the child's exit code, so the task's
+  `RestartOnFailure` never fires for a crashed daemon, and `schtasks /End` ends only conhost and leaves the daemon
+  running. Hence the task runs `smind.exe service run` (a small supervisor inside a kill-on-close Job Object that
+  restarts a crashed daemon 3× at 1-minute intervals, as `RestartOnFailure` would) and `service stop` kills what `/End`
+  leaves. The task XML must be UTF-16 (UTF-8 is rejected: "unable to switch the encoding").
 
 **Coexistence with the desktop app.** The app already refuses to install over an
 unmanaged owner (`managed.rs:64-70`) and starts nothing when the port is held
@@ -332,7 +340,7 @@ unmanaged owner (`managed.rs:64-70`) and starts nothing when the port is held
 hides **Take over** and says "managed by systemd/launchd/Task Scheduler — stop
 the service to hand it to the app" (taking over a supervised daemon would make the
 supervisor restart it); the signal is an additive `/healthz` field `managedBy`
-set from an env var the unit defines (`SMIND_SUPERVISOR=systemd|launchd|task`)
+set from an env var the unit defines (`SMIND_SUPERVISOR=systemd|launchd|taskscheduler`; the Windows value was `task` until P9, changed on the Human's instruction 2026-10-17)
 (open decision 6); (2) macOS Take over must be refused unless the port owner is a
 `smind` image, closing the `ssh -L` footgun (a bug fix, no decision needed);
 (3) "Run smind on this computer" is disabled with an explanation while a service
@@ -1377,6 +1385,6 @@ password, left this list on 2026-10-15: it is Accepted, see "Decisions".)
   remote daemons never updated by the app, loopback posture), ADR-0023 (updater keys), ADR-0029
   (`/api/shutdown`), ADR-0030 (Windows native daemon; rejected a service for the app).
 - `docs/plans/completed/desktop-relay-transport.md` (single-device limit),
-  `docs/plans/active/desktop-windows-native-daemon.md` and the `feat/windows-bundled-daemon` branch.
+  `docs/plans/completed/desktop-windows-native-daemon.md` and the `feat/windows-bundled-daemon` branch.
 - Paseo (`refs/paseo` @ `8d9e7d3a`): see the reference table above and each "Paseo reference" block.
 - Plan: [`docs/plans/active/homelab-cli.md`](../plans/active/homelab-cli.md).
