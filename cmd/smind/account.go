@@ -159,6 +159,34 @@ type authorizeURLEventParams struct {
 	URL string `json:"url"`
 }
 
+// deviceCodeEventParams is the params payload of the "deviceCode" event a
+// device-method account.oauthStart emits.
+type deviceCodeEventParams struct {
+	VerificationURL string `json:"verificationUrl"`
+	UserCode        string `json:"userCode"`
+}
+
+// parseAccountLoginArgs reads `[--device] <provider> <label>`; the flag may
+// come before, between or after the positionals. ok is false for any other
+// flag or the wrong number of positionals.
+func parseAccountLoginArgs(args []string) (provider, label string, device, ok bool) {
+	var positional []string
+	for _, a := range args {
+		switch {
+		case a == "--device":
+			device = true
+		case strings.HasPrefix(a, "-"):
+			return "", "", false, false
+		default:
+			positional = append(positional, a)
+		}
+	}
+	if len(positional) != 2 {
+		return "", "", false, false
+	}
+	return positional[0], positional[1], device, true
+}
+
 // cmdAccountLogin drives a browser-based OAuth login through the daemon
 // (account.oauthStart): it blocks until the daemon reports the login done,
 // printing the authorize URL as soon as the daemon has one (always -- the
@@ -169,11 +197,17 @@ type authorizeURLEventParams struct {
 // callback listener however this request ends, so a Ctrl+C here doesn't
 // leak it.
 func cmdAccountLogin(args []string) int {
-	if len(args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: smind account login <provider> <label>")
+	provider, label, device, ok := parseAccountLoginArgs(args)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "usage: smind account login [--device] <provider> <label>")
 		return 2
 	}
-	provider, label := args[0], args[1]
+	params := map[string]any{"provider": provider, "label": label}
+	if device {
+		// Device-code login (openai): prints a code to enter on any device
+		// instead of opening a browser here.
+		params["method"] = "device"
+	}
 
 	client, err := dialDaemon(context.Background())
 	if err != nil {
@@ -186,18 +220,8 @@ func cmdAccountLogin(args []string) int {
 	defer stop()
 
 	var account loginResult
-	err = client.CallStream(ctx, "account.oauthStart", map[string]any{
-		"provider": provider, "label": label,
-	}, func(event string, params json.RawMessage) {
-		if event != "authorizeUrl" {
-			return
-		}
-		var p authorizeURLEventParams
-		if err := json.Unmarshal(params, &p); err != nil || p.URL == "" {
-			return
-		}
-		fmt.Printf("Open this URL to log in:\n%s\n", p.URL)
-		openBrowser(p.URL)
+	err = client.CallStream(ctx, "account.oauthStart", params, func(event string, params json.RawMessage) {
+		printLoginEvent(os.Stdout, event, params)
 	}, &account)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "account login: %v\n", err)
@@ -205,6 +229,29 @@ func cmdAccountLogin(args []string) int {
 	}
 	printLoginResult(os.Stdout, account)
 	return 0
+}
+
+// printLoginEvent reports one account.oauthStart event on w: the authorize URL
+// (also opened in a local browser, best effort) or, for a device login, the
+// verification URL and user code (no browser: the user signs in on another
+// device). A pasteOnly hint needs no handling here -- the CLI always prints the
+// URL. Unknown or malformed events are ignored.
+func printLoginEvent(w io.Writer, event string, params json.RawMessage) {
+	switch event {
+	case "authorizeUrl":
+		var p authorizeURLEventParams
+		if err := json.Unmarshal(params, &p); err != nil || p.URL == "" {
+			return
+		}
+		fmt.Fprintf(w, "Open this URL to log in:\n%s\n", p.URL)
+		openBrowser(p.URL)
+	case "deviceCode":
+		var p deviceCodeEventParams
+		if err := json.Unmarshal(params, &p); err != nil || p.VerificationURL == "" || p.UserCode == "" {
+			return
+		}
+		fmt.Fprintf(w, "Open %s and enter this code to log in:\n%s\n", p.VerificationURL, p.UserCode)
+	}
 }
 
 // loginResult is account.oauthStart's result: the account plus whether a row

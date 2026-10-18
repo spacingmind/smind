@@ -142,7 +142,7 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
 - [ ] ADR-0033 + this plan (docs PR)
 - [x] PR-B1 identity (branch `feat/account-identity`)
 - [x] PR-B2 loginId + oauthComplete (branch `feat/oauth-complete`)
-- [ ] PR-B3 device code
+- [x] PR-B3 device code (branch `feat/device-login`)
 - [ ] PR-B4 connect form
 - [ ] PR-A1 Providers master/detail
 - [ ] PR-A2 models/diagnostics/deep link
@@ -223,3 +223,73 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
   `login_wrong_method`, `login_attempts_exceeded`, `login_bad_redirect`, `login_already_completed`.
 - Gate: `account.oauthStart` has no run-scoped or local-only gate today (`runScoped` is set by nothing yet, ADR-0027), so
   `account.oauthComplete` has none either; revisit when run tokens land.
+
+**PR-B3 (AC-B8 plus two callback-listener fixes), `go test ./...`, `go test -count=10 ./internal/accounts`, `go test -race -count=10 ./internal/accounts`, `go test -race -count=3 ./internal/wsapi -run 'Login|OAuth|Oauth|Complete|Device'` and `task lint` pass. No vendor endpoint is reached: the real `OpenAILogin` talks to an httptest fake behind `testHTTPClient`.**
+- Listener hardening (`internal/accounts/oauth_server.go`, `newCallbackServer` now takes the login's state): `junk callback does not end the
+  login` and `callback with matching state still completes the login` -- `login_complete_test.go` (`TestLoginCoordinator_Complete`; junk =
+  no state, wrong state, empty state, `error=` with and without state, `/favicon.ico`, `/`, all answered with an error status and
+  ignored; the matching callback, success and `error=` forms, still completes or denies). `TestCallbackServerHardening` --
+  `oauth_server_test.go` (`ReadHeaderTimeout` set; `close` returns in bounded time with a half-sent request held open and frees the
+  port). The old "mismatched listener callback ends the login with `state_mismatch`" tests became: the paste-path mismatch (kept,
+  `oauthComplete wrong state errors and leaves login pending`) and the secrets test now checks the listener's 400 page does not echo
+  the request (`login_secrets_test.go`).
+- `busy callback port falls back to paste only` -- `login_complete_test.go` (a plain listener holds the fake `CallbackAddr()`; the
+  event has `PasteOnly`; `Complete` finishes the login and creates the account; the other process's listener is untouched) with
+  `a bind error other than address in use still fails the login` (bad port, `0.0.0.0`, non-loopback host: plain errors, no event).
+  Wire: `oauthStart flags pasteOnly when the callback port is busy` and, in `oauthStart emits authorizeUrl with a loginId`, the raw
+  event has no `pasteOnly` key normally -- `internal/wsapi/oauth_complete_test.go`.
+- Events: `LoginEvent{Kind: "authorizeUrl"|"deviceCode", ...}` replaces the authorize-URL callback; `handleAccountOAuthStart` emits
+  `authorizeUrl {loginId,url,pasteOnly?}` or `deviceCode {loginId,verificationUrl,userCode,expiresAt (RFC3339),intervalSeconds}` with
+  `rc.Emit` (requesting connection only). CLI: `printLoginEvent` prints the verification URL and code for `deviceCode` without opening
+  a browser -- `TestPrintLoginEventDeviceCode` in `cmd/smind/account_login_test.go`.
+- AC-B8, accounts layer -- `internal/accounts/login_device_test.go`:
+  - `device login polls until approved then stores account` (`TestLoginCoordinator_Device`, fake `DeviceLogin`: 3 pending polls then
+    the grant, `created:true`, identity set, credential stored, `Complete` is `login_wrong_method` while polling and `login_unknown`
+    after; a second device login of the same account updates in place) and the same name in `TestOpenAIDeviceLogin_Vendor` with the real
+    `OpenAILogin` against the fake vendor (403/404 pending, the poll body carries the issued `device_auth_id`/`user_code`, the exchange
+    form carries the device `redirect_uri`, the vendor's authorization code and the vendor's verifier).
+  - `device login stops at expiry and on cancel` (shortened `deviceTimeout`: `device_expired`, polling stops, no account; cancel:
+    `context.Canceled`, loginId `login_unknown`, the provider claim is free for a second login).
+  - `device login 404 is device_unsupported` (both layers: `ErrDeviceUnsupported` from the vendor's 404, `device_unsupported` from
+    `Login`, claim freed, the vendor body never in the error), `device method is rejected for anthropic` (no claim, no event; the real
+    `AnthropicLogin` does not implement `DeviceLogin`), `unknown method is login_bad_method`, `device login one login per provider`,
+    `device relogin keeps identity semantics` (`identity_mismatch`, in-place replace), and `device login failures` (start error,
+    non-pending poll error, exchange error: `device_failed` with fixed text; three transient poll errors are retried, a pending answer
+    resets the count, a fourth in a row fails).
+  - Vendor protocol: `start parses user_code or usercode and interval as string or number` (default 5s, clamp to [1s,30s], garbage and
+    1e300 safe), `poll maps 403 and 404 to pending and others to failure` (500 is neither pending nor transient, a dead server is
+    `ErrDeviceTransient`, a cancelled ctx is its own error), `device login exchange yields the browser path's result` (same subject
+    derivation as the browser exchange).
+  - `device login secrets never appear in logs or errors` -- `TestDeviceLoginSecretsNeverAppearInLogsOrErrors` (log and slog captured;
+    success plus non-2xx, garbage and cancelled paths at all three endpoints, vendor bodies carrying distinctive secrets: user code,
+    `device_auth_id`, authorization code, verifier, tokens and the body marker are absent from every error and log).
+- AC-B8, wire -- `internal/wsapi/oauth_device_test.go` (`TestServer_AccountOAuthDevice`): `device login emits deviceCode to requester
+  only` (two connections; the raw event has exactly `loginId, verificationUrl, userCode, expiresAt, intervalSeconds`, expiry about 15
+  minutes out, no `device_auth_id` anywhere; the bystander receives nothing; cancelling the request ends the login), `device login
+  finishes through account.oauthStart` (`created:true`, identity), `device method errors carry stable codes` (`device_unsupported` for a
+  provider without a device flow, `login_bad_method` without echoing the value).
+- ADR-0033's error list gained `device_failed` and `login_bad_method`.
+- CLI: `smind account login [--device] <provider> <label>` sends `method:"device"` -- `TestParseAccountLoginArgs` and
+  `TestRunAccountLoginDeviceFlag` (start params carry `method:"device"` only with the flag, the code and URL are printed, no browser)
+  in `cmd/smind/account_login_test.go`; usage text in `cmd/smind/main.go`.
+- `exchange errors never echo the vendor body` -- `internal/accounts/oauth_exchange_errors_test.go`
+  (`TestExchangeErrorsNeverEchoTheVendorBody`, log and slog captured): the anthropic and openai browser-path `Exchange` errors keep
+  `status N` and drop the body (non-200 at 400/401/500 and a garbage 200). Refresh errors (`refresh_providers.go`) still quote the
+  body; they are not part of the login flow and are untouched.
+- Windows: `isAddrInUse` (`oauth_server.go`) is `errors.Is(err, syscall.EADDRINUSE)` or a `syscall.Errno` of 10048 (WSAEADDRINUSE),
+  used by the paste-only fallback -- `TestIsAddrInUse` in `oauth_server_test.go` (real busy port, synthetic
+  `net.OpError{Err: os.NewSyscallError("bind", syscall.Errno(10048))}`, wrapped, other errnos and the loopback-guard error are
+  false). `GOOS=windows go build ./...` and `GOOS=windows go vet ./internal/accounts` pass.
+- Review fixes (`login_device_test.go`): `device login retries a poll that times out` (`TestLoginCoordinator_Device`: a fake
+  returning the raw `context.DeadlineExceeded` once, four in a row ending `device_failed`, the caller's own deadline not retried;
+  `TestOpenAIDeviceLogin_Vendor`: a vendor that hangs on the first two polls is cut off by the coordinator's `pollTimeout` and
+  retried, an always-hanging vendor exhausts the 3 retries) and `device login retries 429 and 5xx polls` (429/500/502/503: three in
+  a row absorbed, a fourth fails after exactly four polls; 400/401/410 fail on the first poll; `PollDevice` maps 429 and 5xx to
+  `ErrDeviceTransient`, other 4xx to a plain failure, neither carries the body). The per-poll timeout was the bug: it surfaced as a
+  raw deadline error and skipped the retry budget.
+- Notes (also in ADR-0033 D3): an `error=` redirect without `state` is now ignored on the listener path (vendors echo state on
+  errors; the user can paste the redirect), so a login whose only redirect was such an error hangs until the 10-minute timeout. In
+  the paste-only fallback a process squatting on the port can see `code`+`state` but cannot use them without the PKCE verifier,
+  which never leaves the daemon; a squatter on `[::1]` is not detected. Windows `WSAEACCES` (10013, excluded port ranges) still
+  fails the login -- follow-up.
+- Not in this PR: the web connect form (PR-B4).

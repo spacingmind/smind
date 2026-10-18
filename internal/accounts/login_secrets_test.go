@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"log"
 	"log/slog"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -59,12 +60,16 @@ func TestLoginSecretsNeverAppearInLogsOrErrors(t *testing.T) {
 		t.Fatalf("Login() error = %v", o.err)
 	}
 
-	// Second login: a mismatched listener callback and an exhausted attempt
-	// budget.
+	// Second login: a mismatched listener callback (ignored, so the login is
+	// still pending and the listener's 400 page must not echo the secrets
+	// either) and an exhausted attempt budget.
 	s2 := startFakeLogin(t, coord, login, "secrets2")
-	getCallback(t, login.addr, secretCode, secretWrong)
-	o := s2.wait(t)
-	record(o.err)
+	body := getCallbackBody(t, login.addr, secretCode, secretWrong, http.StatusBadRequest)
+	if strings.Contains(body, secretCode) || strings.Contains(body, secretWrong) {
+		t.Errorf("listener error page leaks the request: %q", body)
+	}
+	s2.cancel()
+	record(s2.wait(t).err)
 	s3 := startFakeLogin(t, coord, login, "secrets3")
 	for i := 0; i < maxCompleteAttempts+1; i++ {
 		record(coord.Complete(s3.loginID, pastedWrong))

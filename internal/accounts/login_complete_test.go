@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -37,6 +39,7 @@ type startedLogin struct {
 	loginID      string
 	authorizeURL string
 	state        string
+	event        LoginEvent
 	done         chan loginOutcome
 	cancel       context.CancelFunc
 }
@@ -47,20 +50,26 @@ type startedLogin struct {
 func startFakeLogin(t *testing.T, coord *LoginCoordinator, login *fakeLogin, label string) startedLogin {
 	t.Helper()
 	login.addr = freeAddr(t)
+	return launchFakeLogin(t, coord, label)
+}
+
+// launchFakeLogin is startFakeLogin on whatever address the fake login
+// already carries.
+func launchFakeLogin(t *testing.T, coord *LoginCoordinator, label string) startedLogin {
+	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	type issued struct{ id, url string }
-	issuedCh := make(chan issued, 1)
+	issuedCh := make(chan LoginEvent, 1)
 	done := make(chan loginOutcome, 1)
 	go func() {
-		res, err := coord.Login(ctx, "fake", label, LoginOptions{}, func(id, u string) { issuedCh <- issued{id, u} })
+		res, err := coord.Login(ctx, "fake", label, LoginOptions{}, func(e LoginEvent) { issuedCh <- e })
 		done <- loginOutcome{res, err}
 	}()
 
 	select {
 	case i := <-issuedCh:
-		return startedLogin{loginID: i.id, authorizeURL: i.url, state: stateFromAuthorizeURL(t, i.url), done: done, cancel: cancel}
+		return startedLogin{loginID: i.LoginID, authorizeURL: i.URL, state: stateFromAuthorizeURL(t, i.URL), event: i, done: done, cancel: cancel}
 	case o := <-done:
 		t.Fatalf("Login() ended before issuing an authorize URL: %v", o.err)
 	case <-time.After(5 * time.Second):
@@ -103,6 +112,23 @@ func getCallback(t *testing.T, addr, code, state string) {
 		return
 	}
 	resp.Body.Close()
+}
+
+// getCallbackBody GETs the listener's callback address and returns the body,
+// failing t unless the status is wantStatus.
+func getCallbackBody(t *testing.T, addr, code, state string, wantStatus int) string {
+	t.Helper()
+	resp, err := http.Get(fmt.Sprintf("http://%s/callback?code=%s&state=%s", addr, url.QueryEscape(code), url.QueryEscape(state)))
+	if err != nil {
+		t.Errorf("GET callback: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != wantStatus {
+		t.Errorf("callback status = %d, want %d", resp.StatusCode, wantStatus)
+	}
+	return string(body)
 }
 
 // tryCallback is getCallback for a request that may legitimately lose a race:
@@ -165,6 +191,9 @@ func TestLoginCoordinator_Complete(t *testing.T) {
 		}
 		if pendingCount(coord) != 1 {
 			t.Errorf("pending logins = %d, want 1 while the login waits", pendingCount(coord))
+		}
+		if first.event.Kind != LoginEventAuthorizeURL || first.event.PasteOnly {
+			t.Errorf("event = %+v, want a plain authorizeUrl event (not paste-only)", first.event)
 		}
 		first.cancel()
 		first.wait(t)
@@ -252,6 +281,125 @@ func TestLoginCoordinator_Complete(t *testing.T) {
 		if o := s.wait(t); o.err != nil {
 			t.Fatalf("Login() error = %v", o.err)
 		}
+	})
+
+	t.Run("busy callback port falls back to paste only", func(t *testing.T) {
+		t.Parallel()
+		coord, registry, login := newCompleteCoordinator(t)
+
+		// Someone else owns the vendor's callback port.
+		occupied, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("net.Listen() error = %v", err)
+		}
+		defer occupied.Close()
+		login.addr = occupied.Addr().String()
+
+		s := launchFakeLogin(t, coord, "busy")
+		if !s.event.PasteOnly || s.event.Kind != LoginEventAuthorizeURL || s.event.URL == "" {
+			t.Fatalf("event = %+v, want an authorizeUrl event with PasteOnly", s.event)
+		}
+		if err := coord.Complete(s.loginID, pasteURL("pasted", s.state)); err != nil {
+			t.Fatalf("Complete() error = %v", err)
+		}
+		o := s.wait(t)
+		if o.err != nil || !o.res.Created || o.res.Account.OAuth == nil || o.res.Account.OAuth.AccessToken != "access-for-pasted" {
+			t.Fatalf("Login() = %+v, %v, want an account created from the paste", o.res, o.err)
+		}
+		if n := accountCount(t, registry); n != 1 {
+			t.Fatalf("accounts = %d, want 1", n)
+		}
+
+		// The other process's listener is untouched by the login's teardown.
+		conn, err := net.Dial("tcp", login.addr)
+		if err != nil {
+			t.Fatalf("dial the occupied port: %v", err)
+		}
+		conn.Close()
+	})
+
+	t.Run("a bind error other than address in use still fails the login", func(t *testing.T) {
+		t.Parallel()
+		coord, _, login := newCompleteCoordinator(t)
+
+		for _, addr := range []string{"127.0.0.1:99999", "0.0.0.0:0", "192.0.2.1:1455"} {
+			login.addr = addr
+			_, err := coord.Login(context.Background(), "fake", "bad", LoginOptions{}, func(LoginEvent) {
+				t.Errorf("a login on %s issued an event", addr)
+			})
+			if err == nil {
+				t.Errorf("Login(%s) error = nil, want the bind/loopback failure", addr)
+			}
+			var le *LoginError
+			if errors.As(err, &le) {
+				t.Errorf("Login(%s) error = %v, want a plain error rather than a login code", addr, err)
+			}
+		}
+		if pendingCount(coord) != 0 {
+			t.Errorf("pending logins = %d, want none", pendingCount(coord))
+		}
+	})
+
+	t.Run("junk callback does not end the login", func(t *testing.T) {
+		t.Parallel()
+		coord, _, login := newCompleteCoordinator(t)
+		s := startFakeLogin(t, coord, login, "junk")
+
+		junk := []string{
+			"/callback",
+			"/callback?code=stolen",
+			"/callback?code=stolen&state=wrong",
+			"/callback?error=access_denied",
+			"/callback?error=access_denied&state=wrong",
+			"/callback?code=stolen&state=",
+			"/favicon.ico",
+			"/",
+		}
+		for _, path := range junk {
+			resp, err := http.Get("http://" + login.addr + path)
+			if err != nil {
+				t.Fatalf("GET %s: %v", path, err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode < 400 {
+				t.Errorf("GET %s status = %d, want an error status", path, resp.StatusCode)
+			}
+		}
+		select {
+		case o := <-s.done:
+			t.Fatalf("Login() ended after junk requests: %+v", o)
+		case <-time.After(100 * time.Millisecond):
+		}
+		if pendingCount(coord) != 1 {
+			t.Fatalf("pending logins = %d, want the login still pending", pendingCount(coord))
+		}
+
+		// A matching callback still completes it.
+		getCallback(t, login.addr, "real-code", s.state)
+		o := s.wait(t)
+		if o.err != nil || o.res.Account.OAuth == nil || o.res.Account.OAuth.AccessToken != "access-for-real-code" {
+			t.Fatalf("Login() = %+v, %v, want the matching callback's code", o.res, o.err)
+		}
+	})
+
+	t.Run("callback with matching state still completes the login", func(t *testing.T) {
+		t.Parallel()
+		coord, _, login := newCompleteCoordinator(t)
+
+		s := startFakeLogin(t, coord, login, "ok")
+		getCallback(t, login.addr, "good-code", s.state)
+		if o := s.wait(t); o.err != nil || o.res.Account.OAuth.AccessToken != "access-for-good-code" {
+			t.Fatalf("Login() = %+v, %v, want the callback's code", o.res, o.err)
+		}
+
+		// The error= form with the matching state is delivered and denies.
+		s = startFakeLogin(t, coord, login, "denied")
+		resp, err := http.Get("http://" + login.addr + "/callback?error=access_denied&state=" + url.QueryEscape(s.state))
+		if err != nil {
+			t.Fatalf("GET callback: %v", err)
+		}
+		resp.Body.Close()
+		requireLoginCode(t, s.wait(t).err, LoginCodeDenied)
 	})
 
 	t.Run("oauthComplete unknown loginId errors", func(t *testing.T) {
