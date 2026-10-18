@@ -81,11 +81,11 @@ export class DevHarness {
    * device_hello v2 instead of the hub: it handshakes and then never sends a
    * device challenge.
    */
-  static async start(windowMax = 0, outdatedDaemon = false, password?: string): Promise<DevHarness> {
+  static async start(windowMax = 0, outdatedDaemon = false, password?: string, fakeAgentPath?: string): Promise<DevHarness> {
     const tmpDir = mkdtempSync(join(tmpdir(), 'smind-devharness-bin-'));
     const binary = join(tmpDir, 'devharness');
     execFileSync('go', ['build', '-o', binary, './internal/relay/bridge/devharness'], { cwd: REPO_ROOT, stdio: 'inherit' });
-    const args = [...(windowMax > 0 ? ['-window-max', String(windowMax)] : []), ...(outdatedDaemon ? ['-outdated-daemon'] : []), ...(password ? ['-password', password] : [])];
+    const args = [...(windowMax > 0 ? ['-window-max', String(windowMax)] : []), ...(outdatedDaemon ? ['-outdated-daemon'] : []), ...(password ? ['-password', password] : []), ...(fakeAgentPath ? ['-fake-agent', fakeAgentPath] : [])];
     const proc = spawn(binary, args, { stdio: ['pipe', 'pipe', 'pipe'] });
     proc.stderr.on('data', (c: Buffer) => {
       if (process.env.DEVHARNESS_LOG) process.stderr.write(`[devharness] ${c}`);
@@ -152,6 +152,17 @@ export class DevHarness {
     return ((await this.mustCmd('list')).devices ?? []) as DeviceRow[];
   }
 
+  async seedRun(stopReason: string): Promise<{ workspaceId: number; taskId: number; runId: string; stopReason: string; disposition?: string }> {
+    const r = await this.mustCmd(`seed-run ${stopReason}`);
+    return {
+      workspaceId: r.workspaceId as number,
+      taskId: r.taskId as number,
+      runId: r.runId as string,
+      stopReason: r.stopReason as string,
+      disposition: (r.disposition as string | undefined) || undefined,
+    };
+  }
+
   stop(): void {
     this.proc.kill('SIGKILL');
     rmSync(this.tmpDir, { recursive: true, force: true });
@@ -169,4 +180,12 @@ export function testConnectOptions(seedByte: number, over: Partial<ConnectOption
     reconnect: { pendingPollMs: 300, baseMs: 100, maxMs: 1_000, resumeProbeMs: 8_000, handshakeMs: 15_000 },
     ...over,
   };
+}
+
+/** Builds the fake ACP agent (internal/taskrunner/fakeagent) for seed-run. */
+export function buildFakeAgent(): { path: string; cleanup(): void } {
+  const dir = mkdtempSync(join(tmpdir(), 'smind-fakeagent-'));
+  const path = join(dir, 'fakeagent');
+  execFileSync('go', ['build', '-o', path, './internal/taskrunner/fakeagent'], { cwd: REPO_ROOT, stdio: 'inherit' });
+  return { path, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }

@@ -9,7 +9,8 @@
 // rolls the optimistic line back so the caller can re-show the draft for
 // a retry.
 
-import { startRun } from './api';
+import { RunSummary, startRun } from './api';
+import { CONTINUE_PROMPT } from './runFooter';
 import { RelayConnection } from './relay/RelayConnection';
 import { lineFromAttachEvent, TimelineLine } from './runTimeline';
 
@@ -78,4 +79,18 @@ export async function sendFollowUpPrompt(
     // Detach (navigate-away cancel) or the connection ending: the new
     // run's streamed events simply stop, same as the initial run's tail.
   });
+}
+
+/**
+ * The not-finished footer's Continue action (ADR-0027 D13): a follow-up
+ * run with the prompt "Continue" on the capped run's own provider.
+ */
+export function continueRun(
+  conn: RelayConnection,
+  deps: SendFollowUpDeps,
+  taskId: number,
+  run: Pick<RunSummary, 'Provider'>,
+  nextSeq: () => number,
+): Promise<void> {
+  return sendFollowUpPrompt(conn, deps, taskId, run.Provider, CONTINUE_PROMPT, nextSeq);
 }
