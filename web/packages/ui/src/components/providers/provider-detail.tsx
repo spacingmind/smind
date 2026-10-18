@@ -1,6 +1,17 @@
 import type { JSX } from "react";
+
 import type { ProviderNavItem } from "@/lib/providers-view";
+import { providerConsumer } from "@/lib/providers-groups";
 import { ProviderGlyph } from "@/components/composer/provider-glyph";
+import { AccountsCard } from "@/components/providers/accounts-card";
+import { TestButton } from "@/components/providers/account-actions";
+import { Button } from "@/components/ui/button";
+import { StatusDot } from "@/components/ui/status-dot";
+import { useRunProviderTest } from "@/hooks/use-accounts";
+import { useAccountRows } from "@/hooks/use-account-rows";
+import { useProviderCatalog } from "@/hooks/use-provider-catalog";
+import { useProvidersViewStore } from "@/stores/providers-view-store";
+import type { Account } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
 const KIND_LABEL: Record<ProviderNavItem["kind"], string> = {
@@ -10,8 +21,18 @@ const KIND_LABEL: Record<ProviderNavItem["kind"], string> = {
   other: "Other accounts",
 };
 
-/** Stub: a later task fills in the account list, connect form and CLI hint. */
-export function ProviderDetail({ item }: { item: ProviderNavItem | null; client: WsClient | null }): JSX.Element {
+export function ProviderDetail({
+  item,
+  client,
+  onRelogin = () => {},
+}: {
+  item: ProviderNavItem | null;
+  client: WsClient | null;
+  onRelogin?: (a: Account) => void;
+}): JSX.Element {
+  const { providers } = useProviderCatalog();
+  const { rows } = useAccountRows();
+  const { runTest, isTesting } = useRunProviderTest();
   if (!item) {
     return (
       <div data-testid="provider-detail" className="p-6">
@@ -19,13 +40,82 @@ export function ProviderDetail({ item }: { item: ProviderNavItem | null; client:
       </div>
     );
   }
+
+  const idSet = new Set(item.accountIds);
+  const itemRows = rows.filter((r) => idSet.has(r.account.id));
+  const attention = itemRows.filter((r) => r.badge.kind === "relogin" || r.badge.kind === "cooldown" || r.badge.kind === "error").length;
+
   return (
-    <div data-testid="provider-detail" className="p-6">
-      <div className="flex items-center gap-2">
-        {item.id === "other" ? null : <ProviderGlyph provider={item.id} />}
-        <h3 className="text-ui-lg font-medium">{item.label}</h3>
+    <div data-testid="provider-detail" className="flex flex-col gap-3 p-4">
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          {item.id === "other" ? null : <ProviderGlyph provider={item.id} />}
+          <h3 className="text-ui-lg font-medium">{item.label}</h3>
+        </div>
+        <p className="text-ui-sm text-muted-foreground">
+          {KIND_LABEL[item.kind]}
+          {itemRows.length > 0 ? (
+            <span data-testid="provider-detail-summary">
+              {` · ${itemRows.length} account${itemRows.length === 1 ? "" : "s"}`}
+              {attention > 0
+                ? ` · ${attention} need${attention === 1 ? "s" : ""} attention`
+                : " · all healthy"}
+            </span>
+          ) : null}
+        </p>
+        {item.kind === "other" ? (
+          <p className="text-ui-sm text-muted-foreground">
+            These accounts' providers have no sMind consumer — no agent runner and no proxy endpoint uses them today.
+          </p>
+        ) : null}
+        {item.accountProvider && providerConsumer(item.accountProvider) === "proxy" ? (
+          <p className="text-ui-xs text-muted-foreground" data-testid={`provider-group-note-${item.id}`}>
+            Accounts here route sMind's /v1 proxy; agent runs use the CLI's own login.
+          </p>
+        ) : null}
       </div>
-      <p className="text-ui-base text-muted-foreground">{KIND_LABEL[item.kind]}</p>
+
+      {item.kind === "cli" ? (
+        <div
+          className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5"
+          data-testid={`provider-external-${item.id}`}
+        >
+          <span className="flex flex-col gap-0.5">
+            <span className="text-ui-base text-muted-foreground">Managed externally via CLI</span>
+            <span className="text-ui-xs text-muted-foreground">
+              Authenticates itself via its own CLI login — accounts added here aren't read by it.
+            </span>
+          </span>
+          <TestButton providerId={item.id} testing={isTesting(item.id)} onTest={runTest} />
+        </div>
+      ) : itemRows.length === 0 ? (
+        <div
+          className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5"
+          data-testid={`provider-not-connected-${item.id}`}
+        >
+          <span className="flex items-center gap-1.5 text-ui-base text-muted-foreground">
+            <StatusDot status="neutral" className="size-2" />
+            Not connected
+          </span>
+          <Button
+            variant="default"
+            size="xs"
+            data-testid={`provider-connect-${item.id}`}
+            onClick={() => useProvidersViewStore.getState().requestConnect(item.id)}
+          >
+            {`Connect ${item.label}`}
+          </Button>
+        </div>
+      ) : (
+        <AccountsCard
+          item={item}
+          rows={itemRows}
+          providers={providers}
+          allAccounts={rows.map((r) => r.account)}
+          client={client}
+          onRelogin={onRelogin}
+        />
+      )}
     </div>
   );
 }
