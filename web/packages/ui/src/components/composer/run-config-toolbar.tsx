@@ -8,6 +8,7 @@ import { readRunConfigPreference, writeRunConfigPreference } from "@/components/
 import { setSettingsIntent } from "@/lib/settings-intent";
 import { buildBrowserProviders, type ProviderHealth } from "@/lib/model-browser";
 import { readStoredDefaultAgentId } from "@/lib/settings-preferences";
+import { selectProvider } from "@/stores/providers-view-store";
 import { cn } from "@/lib/utils";
 import {
   AUTO_ACCEPT_HELP,
@@ -411,7 +412,10 @@ function RunConfigToolbarModelPicker() {
           setSettingsIntent({ kind: "editProfile", id: Number(profileId) });
           openSettings("agents");
         }}
-        onOpenProviderSettings={() => openSettings("providers")}
+        onOpenProviderSettings={(providerId) => {
+          selectProvider(providerId);
+          openSettings("providers");
+        }}
         onOpen={meta.onPickerOpen}
       />
       {state.custom && (

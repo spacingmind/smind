@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RunConfigToolbar, type LiveRunControls } from "@/components/composer/run-config-toolbar";
 import type { AgentProfile, ProviderInfo } from "@/lib/types";
+import { useProvidersViewStore } from "@/stores/providers-view-store";
 
 /** The same served catalog shape composer.test.tsx stubs provider.list with: Claude's mode list is static, GLM's ACP auto-accept is on. */
 const SERVED_PROVIDERS: ProviderInfo[] = [
@@ -226,5 +227,19 @@ describe("RunConfigToolbar live run (D1)", () => {
     await pick("Permission mode", "Plan Mode");
     expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Plan Mode");
     expect(onChange.mock.calls.at(-1)![0].state.permissionMode).toBe("plan");
+  });
+
+  it("manage provider opens Providers with that provider selected", async () => {
+    useProvidersViewStore.getState().reset();
+    const events: CustomEvent[] = [];
+    const listener = (e: Event) => events.push(e as CustomEvent);
+    window.addEventListener("smind:open-settings", listener);
+    renderToolbar();
+    // Open the picker's provider view (starts on Claude Code's view).
+    fireEvent.click(screen.getByTestId("composer-model-picker"));
+    fireEvent.click(await screen.findByTestId("model-picker-provider-settings"));
+    expect(useProvidersViewStore.getState().selectedProviderId).toBe("claude-native");
+    expect(events.at(-1)!.detail).toEqual({ sectionId: "providers" });
+    window.removeEventListener("smind:open-settings", listener);
   });
 });

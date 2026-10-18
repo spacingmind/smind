@@ -135,7 +135,7 @@ describe("ProviderDetail", () => {
 
   it("detail diagnostics reflects the account health", async () => {
     const d = daemon([account(1, "anthropic")]);
-    const view = renderWithDaemon(<ProviderDetail item={item({ accountIds: [1], tone: "ok", connected: true })} client={d.client} />, d);
+    renderWithDaemon(<ProviderDetail item={item({ accountIds: [1], tone: "ok", connected: true })} client={d.client} />, d);
     await flush();
     fireEvent.click(screen.getByTestId("provider-diagnostics-toggle"));
     const text = screen.getByTestId("provider-diagnostics-text").textContent ?? "";

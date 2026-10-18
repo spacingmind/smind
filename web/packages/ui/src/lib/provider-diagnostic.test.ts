@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildProviderDiagnostic } from "@/lib/provider-diagnostic";
-import { accountStatus, type AccountStatus } from "@/lib/account-status";
+import { accountStatus } from "@/lib/account-status";
 import { healthBadge } from "@/lib/providers-view";
 import { claudeAccount } from "@/test/account-usage-fixtures";
 import type { AccountRowData } from "@/hooks/use-account-rows";
