@@ -110,8 +110,24 @@ type accountResult struct {
 	Label          string   `json:"label"`
 	CredentialType string   `json:"credentialType"`
 	Models         []string `json:"models"`
-	CreatedAt      string   `json:"createdAt"`
-	UpdatedAt      string   `json:"updatedAt"`
+	// HasIdentity is true when the account carries a stable vendor identity
+	// (ADR-0033 D6). The identity itself never leaves the daemon.
+	HasIdentity bool   `json:"hasIdentity"`
+	CreatedAt   string `json:"createdAt"`
+	UpdatedAt   string `json:"updatedAt"`
+}
+
+// oauthStartResult is account.oauthStart's final result: the account (the
+// same credential-free shape as account.list) plus which ADR-0033 D6 outcome
+// the login had.
+type oauthStartResult struct {
+	accountResult
+	// Created: a new account was inserted; false means an existing account's
+	// credential was replaced in place.
+	Created bool `json:"created"`
+	// Adopted: a legacy account (no identity) was re-logged-in and adopted
+	// the login's identity. Omitted when false.
+	Adopted bool `json:"adopted,omitempty"`
 }
 
 func accountResultFrom(a accounts.Account) accountResult {
@@ -121,7 +137,8 @@ func accountResultFrom(a accounts.Account) accountResult {
 	}
 	return accountResult{
 		ID: a.ID, Provider: a.Provider, Label: a.Label, CredentialType: a.CredentialType, Models: models,
-		CreatedAt: a.CreatedAt.Format(time.RFC3339), UpdatedAt: a.UpdatedAt.Format(time.RFC3339),
+		HasIdentity: a.HasIdentity,
+		CreatedAt:   a.CreatedAt.Format(time.RFC3339), UpdatedAt: a.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -288,6 +305,9 @@ func handleAccountOAuthStart(coord *accounts.LoginCoordinator) handlerFunc {
 		var p struct {
 			Provider string `json:"provider"`
 			Label    string `json:"label"`
+			// AccountID, when set, makes this a row-level Re-login of that
+			// account (ADR-0033 D6).
+			AccountID int64 `json:"accountId,omitempty"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("account.oauthStart: invalid params: %w", err)
@@ -296,13 +316,13 @@ func handleAccountOAuthStart(coord *accounts.LoginCoordinator) handlerFunc {
 			return nil, fmt.Errorf("account.oauthStart: provider and label are required")
 		}
 
-		account, err := coord.Login(ctx, p.Provider, p.Label, func(url string) {
+		res, err := coord.Login(ctx, p.Provider, p.Label, accounts.LoginOptions{AccountID: p.AccountID}, func(url string) {
 			rc.Emit("authorizeUrl", map[string]string{"url": url})
 		})
 		if err != nil {
 			return nil, fmt.Errorf("account.oauthStart: %w", err)
 		}
-		return accountResultFrom(account), nil
+		return oauthStartResult{accountResult: accountResultFrom(res.Account), Created: res.Created, Adopted: res.Adopted}, nil
 	}
 }
 

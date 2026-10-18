@@ -8,7 +8,12 @@ CREATE TABLE IF NOT EXISTS accounts (
     updated_at TIMESTAMP NOT NULL,
     -- JSON array of path.Match globs this account serves (ADR-0020 §5);
     -- NULL = no list.
-    models TEXT
+    models TEXT,
+    -- Hashed vendor account identity (ADR-0033 D6); NULL = none (API-key and
+    -- pasted credentials, and OAuth rows not yet re-logged-in). The partial
+    -- unique index lives in migrate.go because it needs the column to exist
+    -- on older databases first.
+    identity TEXT
 );
 
 CREATE TABLE IF NOT EXISTS routing_decisions (

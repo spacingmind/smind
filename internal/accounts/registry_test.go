@@ -1,6 +1,8 @@
 package accounts
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -417,3 +419,132 @@ type recordingNotifier struct {
 
 func (n *recordingNotifier) NotifyAccountUpdated(a store.Account) { n.updated = append(n.updated, a) }
 func (n *recordingNotifier) NotifyAccountRemoved(id int64)        { n.removed = append(n.removed, id) }
+
+// A credential replaced by paste (account.updateCredential) no longer
+// describes the vendor account its identity came from, so the identity is
+// cleared; a later OAuth login of that vendor account must not silently
+// convert the pasted-credential row back.
+func TestRegistry_ReplaceCredentialIdentity(t *testing.T) {
+	t.Parallel()
+
+	t.Run("updateCredential clears identity", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		first, err := relogin(t, coord, login, "work", LoginOptions{}, "subject-1")
+		if err != nil || !first.Account.HasIdentity {
+			t.Fatalf("Login() = %+v, %v, want an account with identity", first, err)
+		}
+		id := first.Account.ID
+
+		updated, err := registry.ReplaceCredential(id, "sk-ant-pasted", "")
+		if err != nil {
+			t.Fatalf("ReplaceCredential() error = %v", err)
+		}
+		if updated.Identity != "" {
+			t.Fatal("ReplaceCredential() left the identity of the replaced credential")
+		}
+		if got, _ := registry.Get(id); got.HasIdentity || got.CredentialType != CredentialTypeAPIKey || got.APIKey == nil || got.APIKey.Key != "sk-ant-pasted" {
+			t.Fatalf("account after paste = %+v, want an api_key row without identity", got)
+		}
+
+		// The same vendor account logging in again creates a new row; the
+		// pasted-credential row is untouched.
+		second, err := relogin(t, coord, login, "again", LoginOptions{}, "subject-1")
+		if err != nil || !second.Created || second.Account.ID == id || !second.Account.HasIdentity {
+			t.Fatalf("OAuth login after paste = %+v, %v, want a new row with identity", second, err)
+		}
+		if got, _ := registry.Get(id); got.CredentialType != CredentialTypeAPIKey || got.APIKey == nil || got.APIKey.Key != "sk-ant-pasted" {
+			t.Fatalf("pasted-credential row changed by an OAuth login: %+v", got)
+		}
+
+		// A row-level Re-login of the pasted row is refused: only OAuth rows
+		// are re-logged-in or adopted.
+		_, err = relogin(t, coord, login, "x", LoginOptions{AccountID: id}, "subject-1")
+		var le *LoginError
+		if !errors.As(err, &le) || le.Code != LoginCodeNotOAuthAccount {
+			t.Fatalf("Re-login of the pasted row error = %v, want login_not_oauth_account", err)
+		}
+	})
+
+	t.Run("oauth re-login of the same account keeps the identity", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		first, err := relogin(t, coord, login, "work", LoginOptions{}, "subject-1")
+		if err != nil {
+			t.Fatalf("Login() error = %v", err)
+		}
+		if _, err := relogin(t, coord, login, "work", LoginOptions{AccountID: first.Account.ID}, "subject-1"); err != nil {
+			t.Fatalf("Re-login error = %v", err)
+		}
+		if got, _ := registry.Get(first.Account.ID); !got.HasIdentity {
+			t.Fatal("OAuth re-login of the same account dropped its identity")
+		}
+	})
+}
+
+// blockingRefresher parks inside Refresh until released, so a test can start
+// a re-login while a refresh is in flight.
+type blockingRefresher struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingRefresher) Refresh(_ context.Context, cred OAuthCredential) (OAuthCredential, error) {
+	close(b.entered)
+	<-b.release
+	return OAuthCredential{AccessToken: "refreshed-old", RefreshToken: cred.RefreshToken, ExpiresAt: time.Now().Add(time.Hour)}, nil
+}
+
+func TestRegistry_ReloginDuringRefresh(t *testing.T) {
+	t.Parallel()
+
+	t.Run("relogin during an in-flight refresh keeps the new credential", func(t *testing.T) {
+		t.Parallel()
+
+		registry := newTestRegistry(t)
+		acct, err := registry.AddOAuth("anthropic", "work", OAuthCredential{AccessToken: "expired", RefreshToken: "old-r", ExpiresAt: time.Now().Add(-time.Hour)})
+		if err != nil {
+			t.Fatalf("AddOAuth() error = %v", err)
+		}
+
+		refresher := &blockingRefresher{entered: make(chan struct{}), release: make(chan struct{})}
+		refreshDone := make(chan error, 1)
+		go func() {
+			_, err := registry.EnsureFresh(context.Background(), acct.ID, refresher)
+			refreshDone <- err
+		}()
+		<-refresher.entered // the refresh now holds the account's lock
+
+		fresh := OAuthCredential{AccessToken: "from-relogin", RefreshToken: "new-r", ExpiresAt: time.Now().Add(time.Hour)}
+		reloginDone := make(chan error, 1)
+		go func() {
+			_, err := registry.ReplaceOAuth(acct.ID, fresh, "", true)
+			reloginDone <- err
+		}()
+
+		// The re-login must wait for the refresh rather than race it.
+		select {
+		case err := <-reloginDone:
+			t.Fatalf("ReplaceOAuth returned while a refresh was in flight (err = %v)", err)
+		case <-time.After(200 * time.Millisecond):
+		}
+
+		close(refresher.release)
+		if err := <-refreshDone; err != nil {
+			t.Fatalf("EnsureFresh() error = %v", err)
+		}
+		if err := <-reloginDone; err != nil {
+			t.Fatalf("ReplaceOAuth() error = %v", err)
+		}
+
+		got, err := registry.Get(acct.ID)
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got.OAuth == nil || got.OAuth.AccessToken != "from-relogin" || got.OAuth.RefreshToken != "new-r" {
+			t.Fatalf("credential after re-login = %+v, want the new login's tokens (an in-flight refresh must not overwrite it)", got.OAuth)
+		}
+	})
+}

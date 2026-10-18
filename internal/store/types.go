@@ -11,7 +11,10 @@ type Account struct {
 	CredentialData string
 	// Models is a JSON array of path.Match globs ("" = no list; stored as
 	// NULL).
-	Models    string
+	Models string
+	// Identity is the hashed vendor account identity (ADR-0033 D6; "" = none,
+	// stored as NULL). Never put on the wire or in logs.
+	Identity  string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
