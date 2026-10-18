@@ -4,10 +4,12 @@
 //! Tauri types, so it's unit-testable (including the persistence round
 //! trip) without a webview.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use url::Url;
 
 /// The built-in local entry's fixed id. Never removable (AC4).
@@ -199,12 +201,42 @@ pub fn connection_id_for_relay(workspace_id: &str, relay_native_addr: &str) -> S
     format!("relay:{workspace_id}@{relay_native_addr}")
 }
 
+/// The file as raw JSON: known entries are parsed into `Connection`s,
+/// everything this build does not understand (unknown kinds, unknown
+/// fields) is kept verbatim so a newer app version's data survives a
+/// round trip through an older one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredRegistry {
     connections: Vec<Connection>,
     #[serde(rename = "selectedId")]
     selected_id: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RawRegistry {
+    #[serde(default)]
+    connections: Vec<Value>,
+    #[serde(rename = "selectedId")]
+    selected_id: Option<String>,
+    #[serde(flatten)]
+    extra: Map<String, Value>,
+}
+
+/// A display-only summary of an entry whose `kind` this build does not
+/// know. Carries only `id`/`label`/`kind` -- never `baseUrl` or other
+/// fields, which can hold credentials.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UnsupportedConnection {
+    pub id: Option<String>,
+    pub label: Option<String>,
+    pub kind: Option<String>,
+}
+
+fn string_field(v: &Value, key: &str) -> Option<String> {
+    v.get(key).and_then(Value::as_str).map(str::to_string)
+}
+
+const KNOWN_ENTRY_KEYS: [&str; 4] = ["id", "kind", "label", "baseUrl"];
 
 /// Registry holds the connection list, in-memory, plus which one is
 /// currently selected. The built-in `local` entry always exists at
@@ -214,6 +246,10 @@ struct StoredRegistry {
 pub struct Registry {
     connections: Vec<Connection>,
     selected_id: String,
+    unsupported: Vec<Value>,
+    entry_extras: HashMap<String, Map<String, Value>>,
+    top_extra: Map<String, Value>,
+    preserved_selection: Option<String>,
 }
 
 impl Registry {
@@ -224,7 +260,26 @@ impl Registry {
         Self {
             connections: vec![local_connection(local_base_url)],
             selected_id: LOCAL_ID.to_string(),
+            unsupported: Vec::new(),
+            entry_extras: HashMap::new(),
+            top_extra: Map::new(),
+            preserved_selection: None,
         }
+    }
+
+    /// unsupported lists the stored entries this build could not parse
+    /// (unknown kind, or a known kind with an invalid shape). They are
+    /// kept verbatim and written back on `save`; they never appear in
+    /// `list()`/`current()`.
+    pub fn unsupported(&self) -> Vec<UnsupportedConnection> {
+        self.unsupported
+            .iter()
+            .map(|v| UnsupportedConnection {
+                id: string_field(v, "id"),
+                label: string_field(v, "label"),
+                kind: string_field(v, "kind"),
+            })
+            .collect()
     }
 
     pub fn list(&self) -> &[Connection] {
@@ -360,23 +415,55 @@ impl Registry {
         let Ok(data) = fs::read_to_string(path) else {
             return Self::new(local_base_url);
         };
-        let Ok(stored) = serde_json::from_str::<StoredRegistry>(&data) else {
+        let Ok(raw) = serde_json::from_str::<RawRegistry>(&data) else {
             return Self::new(local_base_url);
         };
-        let mut connections: Vec<Connection> = stored
-            .connections
-            .into_iter()
-            .filter(|c| c.id != LOCAL_ID)
-            .collect();
+        let mut connections: Vec<Connection> = Vec::new();
+        let mut unsupported: Vec<Value> = Vec::new();
+        let mut entry_extras: HashMap<String, Map<String, Value>> = HashMap::new();
+        for v in raw.connections {
+            match serde_json::from_value::<Connection>(v.clone()) {
+                // The local entry is always rebuilt from the current
+                // local_base_url; a stored one is dropped.
+                Ok(c) if c.id != LOCAL_ID => {
+                    if let Some(obj) = v.as_object() {
+                        let extras: Map<String, Value> = obj
+                            .iter()
+                            .filter(|(k, _)| !KNOWN_ENTRY_KEYS.contains(&k.as_str()))
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect();
+                        if !extras.is_empty() {
+                            entry_extras.insert(c.id.clone(), extras);
+                        }
+                    }
+                    connections.push(c);
+                }
+                Ok(_) => {}
+                Err(_) => unsupported.push(v),
+            }
+        }
         connections.insert(0, local_connection(local_base_url));
-        let selected_id = if connections.iter().any(|c| c.id == stored.selected_id) {
-            stored.selected_id
+        let stored_selected = raw.selected_id.unwrap_or_default();
+        let selected_id = if connections.iter().any(|c| c.id == stored_selected) {
+            stored_selected
         } else {
             LOCAL_ID.to_string()
         };
+        // If the stored selection points at an entry we cannot use, keep
+        // the selection local in memory but remember it, so save() does
+        // not silently rewrite the user's choice.
+        let preserved_selection = unsupported
+            .iter()
+            .find(|v| v.get("id").and_then(Value::as_str) == Some(selected_id.as_str()))
+            .and_then(|_| Some(selected_id.clone()))
+            .filter(|id| *id != LOCAL_ID.to_string());
         Self {
             connections,
-            selected_id,
+            selected_id: if preserved_selection.is_some() { LOCAL_ID.to_string() } else { selected_id },
+            unsupported,
+            entry_extras,
+            top_extra: raw.extra,
+            preserved_selection,
         }
     }
 
