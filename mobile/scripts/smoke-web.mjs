@@ -25,7 +25,7 @@
 // static file server), not the Metro dev server, so the run does not
 // depend on dev-server timing.
 
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -74,6 +74,19 @@ async function startStaticServer() {
   });
   await new Promise((r) => server.listen(PORT, '127.0.0.1', r));
   return server;
+}
+
+/** Whether the harness built from this tree takes -password (the daemon side of P13c). */
+function harnessHasPasswordFlag() {
+  const dir = mkdtempSync(join(tmpdir(), 'smind-smoke-probe-'));
+  try {
+    const binary = join(dir, 'devharness');
+    execFileSync('go', ['build', '-o', binary, './internal/relay/bridge/devharness'], { cwd: REPO_ROOT, stdio: 'inherit' });
+    const probe = spawnSync(binary, ['-h'], { encoding: 'utf8' });
+    return `${probe.stderr}${probe.stdout}`.includes('-password');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 async function startHarness(extraArgs = []) {
@@ -249,6 +262,106 @@ async function outdatedDaemon(page, harness) {
 }
 
 /**
+ * ADR-0027 D13 on mobile: a run that ended `done` at a turn cap reads "Hit the
+ * tool-turn limit · not finished" with a Continue button (a normal run next to
+ * it shows neither); Continue starts a follow-up run with the prompt "Continue".
+ * The runs are REAL ones, executed by the repo's fake ACP agent through the
+ * harness's seed-run command.
+ */
+async function needsContinue(page, harness) {
+  const capped = await harness.cmd('seed-run max_turn_requests Capped task');
+  const normal = await harness.cmd('seed-run end_turn Normal task');
+  if (!capped.ok || capped.disposition !== 'needs-continue') fail(`seeded capped run is not needs-continue: ${JSON.stringify(capped)}`);
+  if (!normal.ok || normal.disposition) fail(`seeded normal run has a disposition: ${JSON.stringify(normal)}`);
+  await page.fill('textarea, input[type="text"]', harness.pairingUrl);
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  try {
+    await page.getByText('Capped task', { exact: true }).waitFor({ timeout: 30_000 });
+  } catch {
+    fail('the seeded tasks did not appear on the task list');
+    return;
+  }
+
+  // A normal run: no footer.
+  await page.getByText('Normal task', { exact: true }).click();
+  await page.getByText(/^run [0-9a-f]{8} ·/).waitFor({ timeout: 20_000 });
+  if (await page.getByText(/not finished/).isVisible().catch(() => false)) fail('a normal done run shows a not-finished footer');
+  if (await page.getByRole('button', { name: 'Continue', exact: true }).isVisible().catch(() => false)) fail('a normal done run shows Continue');
+  await shootBothSchemes(page, 'run-normal');
+  await page.getByRole('button', { name: /Back/ }).click();
+
+  // The capped run: the warning sentence and Continue.
+  await page.getByText('Capped task', { exact: true }).click();
+  try {
+    await page.getByText('Hit the tool-turn limit · not finished', { exact: true }).waitFor({ timeout: 20_000 });
+  } catch {
+    fail('"Hit the tool-turn limit · not finished" did not appear for a run that ended at the turn cap');
+    return;
+  }
+  await shootBothSchemes(page, 'run-needs-continue');
+
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  try {
+    await page.getByText('user: Continue', { exact: true }).waitFor({ timeout: 20_000 });
+  } catch {
+    fail('Continue did not start a follow-up run (no "Continue" user line)');
+    return;
+  }
+  if (await page.getByText('Hit the tool-turn limit · not finished', { exact: true }).isVisible().catch(() => false)) {
+    fail('the footer is still shown after Continue was pressed');
+  }
+  await shootBothSchemes(page, 'run-continued');
+}
+
+/**
+ * ADR-0031 P13c: a daemon with a password. Connect -> "Daemon password
+ * required" -> a wrong password -> "Incorrect password" -> more wrong ones until
+ * the daemon rate-limits this device -> the correct password -> "Too many
+ * attempts" with a countdown (the correct password is kept and tried again by
+ * itself) -> the task list. The password only ever goes into the prompt's field.
+ */
+async function daemonPassword(page, harness, password) {
+  const submit = async (value) => {
+    await page.locator('input[type="password"]').fill(value);
+    await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  };
+  await page.fill('textarea, input[type="text"]', harness.pairingUrl);
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  try {
+    await page.getByText('Daemon password required', { exact: true }).waitFor({ timeout: 30_000 });
+  } catch {
+    fail('"Daemon password required" did not appear for a daemon with a password');
+    return;
+  }
+  if ((await page.locator('input[type="password"]').count()) !== 1) fail('the prompt has no masked (type=password) field');
+  await shootBothSchemes(page, 'password-required');
+
+  await submit('not the password');
+  try {
+    await page.getByText('Incorrect password', { exact: true }).waitFor({ timeout: 30_000 });
+  } catch {
+    fail('"Incorrect password" did not appear after a wrong password');
+    return;
+  }
+  await shootBothSchemes(page, 'password-incorrect');
+
+  // The 6th wrong attempt for one device id starts the daemon's delay; the next hello is rate limited.
+  for (let i = 0; i < 5; i++) {
+    await submit(`still wrong ${i}`);
+    await page.getByText('Incorrect password', { exact: true }).waitFor({ timeout: 30_000 });
+  }
+  await submit(password);
+  try {
+    await page.getByText('Too many attempts', { exact: true }).waitFor({ timeout: 30_000 });
+  } catch {
+    fail('"Too many attempts" did not appear once the daemon rate-limited this device');
+    return;
+  }
+  await shootBothSchemes(page, 'password-locked');
+  if (await assertTasks(page)) await shootBothSchemes(page, 'password-tasks');
+}
+
+/**
  * ADR-0031 P13b's device lifecycle in the browser, against the real relay and
  * daemon hub: Connect -> "Waiting for approval" (with the approve command
  * naming this device) -> `approve` on the daemon -> the task list appears by
@@ -297,6 +410,8 @@ async function run() {
 
   let harness = null;
   let outdated = null;
+  let protectedDaemon = null;
+  let seeded = null;
   try {
     for (const scheme of ['light', 'dark']) {
       const context = await browser.newContext({ colorScheme: scheme, ignoreHTTPSErrors: true });
@@ -326,12 +441,45 @@ async function run() {
       await oldPage.getByText('smind pairing', { exact: true }).waitFor({ timeout: 20_000 });
       await outdatedDaemon(oldPage, outdated);
       await oldContext.close();
+
+      // ADR-0027 D13: the not-finished footer on a real capped run (the repo's fake ACP agent).
+      const agentDir = mkdtempSync(join(tmpdir(), 'smind-smoke-fakeagent-'));
+      const fakeAgent = join(agentDir, 'fakeagent');
+      execFileSync('go', ['build', '-o', fakeAgent, './internal/taskrunner/fakeagent'], { cwd: REPO_ROOT, stdio: 'inherit' });
+      try {
+        seeded = await startHarness(['-fake-agent', fakeAgent, '-window-max', '1']);
+        const runContext = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+        const runPage = await runContext.newPage();
+        trackErrors(runPage, 'run-footer');
+        await runPage.goto(url, { waitUntil: 'load' });
+        await runPage.getByText('smind pairing', { exact: true }).waitFor({ timeout: 20_000 });
+        await needsContinue(runPage, seeded);
+        await runContext.close();
+      } finally {
+        rmSync(agentDir, { recursive: true, force: true });
+      }
+
+      if (await harnessHasPasswordFlag()) {
+        const secret = 'correct horse battery staple';
+        protectedDaemon = await startHarness(['-password', secret, '-window-max', '1']);
+        const pwContext = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+        const pwPage = await pwContext.newPage();
+        trackErrors(pwPage, 'password');
+        await pwPage.goto(url, { waitUntil: 'load' });
+        await pwPage.getByText('smind pairing', { exact: true }).waitFor({ timeout: 20_000 });
+        await daemonPassword(pwPage, protectedDaemon, secret);
+        await pwContext.close();
+      } else {
+        console.log('skipping the daemon-password stage: this tree\'s devharness has no -password (ADR-0031 P13c daemon side)');
+      }
     }
   } finally {
     await browser.close();
     server.close();
     harness?.cleanup();
     outdated?.cleanup();
+    protectedDaemon?.cleanup();
+    seeded?.cleanup();
   }
 
   if (pageErrors.length > 0) fail(`page/console errors during run:\n  ${pageErrors.join('\n  ')}`);

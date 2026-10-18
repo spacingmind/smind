@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Icons } from "@/lib/icons";
 
 import { ArchiveTaskDialog } from "@/components/crud-dialogs";
+import { ArchiveFinishedDialog, StopTreeDialog } from "@/components/tree-action-dialogs";
 import { PortChip, SetupBadge } from "@/components/task-setup";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,10 +13,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { ignoreSelect, MENU_CLOSE_INSTANT, reachableDisabledProps } from "@/lib/menu-item-disabled";
 import { toast } from "@/components/ui/toast";
 import { Tooltip, TooltipContent, TooltipTrigger, useMenuTooltip } from "@/components/ui/tooltip";
 import type { LocalPathActions } from "@/hooks/use-local-path-actions";
 import { formatRelativeTime } from "@/lib/relative-time";
+import { availabilityFromTaskTree, type TreeActionAvailability } from "@/lib/task-tree-actions";
+import type { TaskTreeResult } from "@/lib/task-lineage";
 import type { Task } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
@@ -91,11 +95,54 @@ export function HeaderTaskMenu({
   localPathActions: LocalPathActions | null;
 }) {
   const [archiving, setArchiving] = useState(false);
+  const [archiveFinished, setArchiveFinished] = useState(false);
+  const [stoppingTree, setStoppingTree] = useState(false);
+  const [treeActions, setTreeActions] = useState<TreeActionAvailability | null>(null);
   const { tooltip, onMenuOpenChange } = useMenuTooltip();
   const worktree = task.WorktreePath;
+
+  // PR-H11: the header has no task forest, so the tree actions' availability
+  // comes from a task.tree fetch (stale-guarded per task/client). A task
+  // whose tree has no descendants offers neither entry, same rule as the
+  // sidebar.
+  const [treeRefresh, setTreeRefresh] = useState(0);
+  // An item that opens a dialog closes the menu instantly (no exit fade under the dialog).
+  const [instantClose, setInstantClose] = useState(false);
+  // A different task starts with no availability (no leftovers from the last one).
+  useEffect(() => {
+    setTreeActions(null);
+  }, [task.ID]);
+  useEffect(() => {
+    if (!client) return;
+    const reqTaskId = task.ID;
+    let cancelled = false;
+    client
+      .call<TaskTreeResult>("task.tree", { taskId: task.ID })
+      .then((result) => {
+        if (cancelled || task.ID !== reqTaskId) return;
+        setTreeActions(availabilityFromTaskTree(result.nodes ?? []));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error("task.tree failed, header tree actions hidden", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // treeRefresh bumps whenever the menu opens, so the enable/disable state
+    // is current when the user looks at it.
+  }, [client, task.ID, treeRefresh]);
   return (
     <>
-      <DropdownMenu onOpenChange={onMenuOpenChange}>
+      <DropdownMenu
+        onOpenChange={(open) => {
+          onMenuOpenChange(open);
+          if (open) {
+            setTreeRefresh((n) => n + 1);
+            setInstantClose(false);
+          }
+        }}
+      >
         <Tooltip {...tooltip}>
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
@@ -113,7 +160,11 @@ export function HeaderTaskMenu({
           </TooltipTrigger>
           <TooltipContent side="bottom">Task actions</TooltipContent>
         </Tooltip>
-        <DropdownMenuContent align="start" data-testid="app-header-task-menu-content">
+        <DropdownMenuContent
+          align="start"
+          data-testid="app-header-task-menu-content"
+          className={instantClose ? MENU_CLOSE_INSTANT : undefined}
+        >
           {task.Branch && (
             <DropdownMenuItem data-testid="app-header-copy-branch" onSelect={() => copy(task.Branch!, "Branch name")}>
               <Icons.copy aria-hidden /> Copy branch name
@@ -130,11 +181,78 @@ export function HeaderTaskMenu({
             </DropdownMenuItem>
           )}
           {(task.Branch || worktree) && <DropdownMenuSeparator />}
-          <DropdownMenuItem data-testid="app-header-archive" onSelect={() => setArchiving(true)}>
+          {treeActions && (
+            <>
+              <DropdownMenuItem
+                data-testid="app-header-archive-finished"
+                {...(!treeActions.archive.enabled ? reachableDisabledProps("app-header-archive-finished-reason") : {})}
+                onSelect={
+                  treeActions.archive.enabled
+                    ? () => {
+                        setInstantClose(true);
+                        setArchiveFinished(true);
+                      }
+                    : ignoreSelect
+                }
+              >
+                <Icons.archive aria-hidden /> Archive finished sub-tasks…
+                {!treeActions.archive.enabled && (
+                  <span id="app-header-archive-finished-reason" className="ml-auto pl-2 text-ui-xs text-muted-foreground">
+                    {treeActions.archive.reason}
+                  </span>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                data-testid="app-header-stop-tree"
+                {...(!treeActions.stop.enabled ? reachableDisabledProps("app-header-stop-tree-reason") : {})}
+                onSelect={
+                  treeActions.stop.enabled
+                    ? () => {
+                        setInstantClose(true);
+                        setStoppingTree(true);
+                      }
+                    : ignoreSelect
+                }
+              >
+                <Icons.stop aria-hidden /> Stop all in tree…
+                {!treeActions.stop.enabled && (
+                  <span id="app-header-stop-tree-reason" className="ml-auto pl-2 text-ui-xs text-muted-foreground">
+                    {treeActions.stop.reason}
+                  </span>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
+          <DropdownMenuItem
+            data-testid="app-header-archive"
+            onSelect={() => {
+              setInstantClose(true);
+              setArchiving(true);
+            }}
+          >
             <Icons.archive aria-hidden /> Archive task…
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      {archiveFinished && (
+        <ArchiveFinishedDialog
+          client={client}
+          task={task}
+          open
+          onOpenChange={(open) => !open && setArchiveFinished(false)}
+          onArchived={() => {}}
+        />
+      )}
+      {stoppingTree && (
+        <StopTreeDialog
+          client={client}
+          task={task}
+          open
+          onOpenChange={(open) => !open && setStoppingTree(false)}
+          onStopped={() => {}}
+        />
+      )}
       {archiving && (
         <ArchiveTaskDialog
           client={client}
