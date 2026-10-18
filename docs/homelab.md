@@ -179,6 +179,18 @@ smind relay listening on [::]:7400 (fingerprint 3f9a…), grpc-web on [::]:7401
 Keep that fingerprint; you will check it in step 3. The relay data (certificate, relay host secret hashes) lives under
 `$SMIND_HOME/relay` (default `~/.smind/relay`).
 
+**A real certificate instead.** If the relay has a DNS name and you have a certificate for it (Let's Encrypt, or your own
+CA), serve that instead:
+
+```sh
+smind relay --tls-cert /etc/letsencrypt/live/relay.example.com/fullchain.pem \
+            --tls-key  /etc/letsencrypt/live/relay.example.com/privkey.pem
+```
+
+Both ports use it. Clients then verify it like a browser does (trusted CA, matching name, not expired), so there is
+no fingerprint to compare or pin, and a phone can connect. The files are re-read when they change, so a renewal needs no
+restart. Reach the relay by the name in the certificate (`relay.example.com:7400`), not by IP address.
+
 ### 2. Create a relay host
 
 On the relay machine:
@@ -198,9 +210,27 @@ On the machine that runs `smind serve`:
 smind relay connect relay.example.com:7400 homelab <secret>
 ```
 
-`connect` saves the connection and **pins the relay's TLS fingerprint on first use**; it prints the fingerprint it
-pinned. **Compare it with the one the relay printed in step 1** — if they differ, someone is in the middle: do not
-continue. `smind serve` then dials the relay automatically on every start (restart it if it was already running).
+`connect` first checks the relay's certificate the way a browser would. If it verifies (a public CA, the right name, not
+expired) it stores that decision and there is nothing to pin. Otherwise, which is the case for the default self-signed
+certificate, it **shows the certificate's fingerprint and asks you to confirm it**:
+
+```
+The relay at relay.example.com:7400 does not present a certificate your system trusts:
+  x509: certificate signed by unknown authority
+
+Its certificate fingerprint is
+
+  3f9a…
+
+Compare it with the fingerprint "smind relay" printed when it started. …
+Pin it and connect? [y/N]
+```
+
+**Compare it with the one the relay printed in step 1** — if they differ, someone is in the middle: answer no. It never
+pins silently, and without a confirmation (for example with no terminal) it saves nothing. To skip the prompt, pass the
+fingerprint you copied from the relay: `smind relay connect --fingerprint 3f9a… relay.example.com:7400 homelab <secret>`
+pins it only if the relay presents exactly that certificate. `smind serve` then dials the relay automatically on every start
+(restart it if it was already running).
 
 ### 4. Print a pairing link
 
@@ -210,7 +240,8 @@ smind relay offer
 
 The link goes to stdout. On a terminal (or with `--qr`) a QR code is also drawn on stderr, so `$(smind relay offer)`
 still captures only the link. `--png offer.png` writes the QR code to a file (mode `0600`; `--force` overwrites an
-existing file). An offer carries the relay host secret and the pinned fingerprint, so it is about 430 bytes; the QR
+existing file). An offer carries the relay host secret and, for a self-signed relay, the pinned fingerprint (a relay with a
+CA certificate has none), so it is about 430 bytes; the QR
 falls back to error-correction level L to fit it, and an offer too long for any QR code is still printed as a link
 with a note.
 
@@ -237,7 +268,13 @@ The app and the daemon must speak the same device-identity version (hello v2): i
 app says "Daemon outdated or on a different version" and does not connect — update the daemon with `smind update`.
 
 A phone does not pin the relay's certificate (it has no way to confirm a fingerprint): the relay needs a certificate
-that the phone already trusts, for example one from a public CA. A self-signed relay certificate is refused.
+that the phone already trusts, for example one from a public CA (`smind relay --tls-cert/--tls-key`). A self-signed relay
+certificate is refused.
+
+**Desktop app and CA relays.** Today the desktop app's "Add via relay link" accepts only an offer with a fingerprint, so
+it cannot yet connect to a relay serving a CA certificate (an offer without one is rejected as "missing relay certificate
+fingerprint"). Until that lands, use the daemon on the relay's own network, or pair desktop clients to a self-signed
+relay.
 
 ### 7. Approve devices
 
@@ -275,8 +312,8 @@ the change applies when the daemon next starts.
   once. A leaked link alone no longer admits new devices once the pairing window has closed, because the daemon
   refuses devices it has not approved — but it still reaches the relay host.
 - Requests in flight at the moment a connection drops hard can be lost; clients time out and open a fresh session.
-- Trust on first use: the fingerprint is pinned the first time you run `relay connect` (step 3), so do that step on a
-  trusted network and compare fingerprints.
+- A self-signed relay is trusted by confirming its fingerprint in `relay connect` (step 3): compare it with the one the
+  relay printed, and pass `--fingerprint` to make that check explicit. A CA certificate needs no such step.
 
 ## Docker
 
