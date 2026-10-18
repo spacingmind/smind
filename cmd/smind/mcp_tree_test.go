@@ -189,32 +189,36 @@ func TestMCPTaskWait_ChildrenOf_ExclusiveWithRunId(t *testing.T) {
 }
 
 // TestMCPTaskWait_ChildrenOf_CapsAt16 proves more than 16 running child
-// runs are capped at the 16, with a message saying so. The children are
-// driven by short finishing runs; the cap keeps the wait set bounded.
+// runs are capped at the 16, with the cap reported. The 18 children are
+// genuinely concurrent (hung runs) in ONE task tree, so the daemon's
+// per-tree run cap is raised above 18 for this test: with the default of 4
+// the test could only ever pass by racing runs that had already finished.
 func TestMCPTaskWait_ChildrenOf_CapsAt16(t *testing.T) {
-	env := newMCPSession(t)
+	const children = 18
+	env := newMCPSessionWithRunCap(t, 32)
 	wsID := createTreeWorkspace(t, env)
 	sup := createTreeTask(t, env, wsID, 0, "", "")
 
 	var runIDs []string
-	for i := 0; i < 18; i++ {
-		runIDs = append(runIDs, createTreeTaskWithRun(t, env, wsID, sup, ""))
+	for i := 0; i < children; i++ {
+		runIDs = append(runIDs, createTreeTaskWithRun(t, env, wsID, sup, "hang"))
 	}
 	stopTestRuns(t, env, runIDs...)
+	if len(runIDs) <= mcpWaitMaxRunIDs {
+		t.Fatalf("test setup broken: only %d child runs started, want more than %d", len(runIDs), mcpWaitMaxRunIDs)
+	}
 
-	// Call the resolver directly: the full wait would race the quickly
-	// finishing runs, but the resolution (and its cap) happens up front.
+	// Call the resolver directly: the cap is applied up front, before any wait.
 	ids, capped, _, err := mcpTaskTreeChildrenOf(context.Background(), envDaemonClient(t, env), sup)
 	if err != nil {
 		t.Fatalf("mcpTaskTreeChildrenOf() error = %v", err)
 	}
-	if len(ids) > mcpWaitMaxRunIDs {
-		t.Fatalf("resolved %d runs, want <= %d", len(ids), mcpWaitMaxRunIDs)
+	if len(ids) != mcpWaitMaxRunIDs {
+		t.Fatalf("resolved %d runs, want exactly %d (%d are running)", len(ids), mcpWaitMaxRunIDs, children)
 	}
-	if len(runIDs) <= mcpWaitMaxRunIDs {
-		t.Fatalf("test setup broken: only %d child runs running", len(runIDs))
+	if !capped {
+		t.Fatalf("capped = false with %d running children, want true", children)
 	}
-	_ = capped
 }
 
 // createTreeWorkspace registers a fresh git repo as a workspace over the

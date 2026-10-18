@@ -408,3 +408,30 @@ func TestRun_ProvenanceCapture_StartWhenBusyImmediate(t *testing.T) {
 		t.Fatalf("persisted = %+v, %v; want base and head", row, err)
 	}
 }
+
+// Start returns without waiting on git: the base capture runs in the drive
+// goroutine. With a 2 s capture timeout and a git that hangs for 4 s, a
+// Start that blocked on the capture would take at least 2 s.
+func TestRun_ProvenanceCapture_HungGitDoesNotBlockStart(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell shim")
+	}
+	// Not parallel: PATH and the package-level timeout.
+	wm, _, task, reg, runner := newProvEnv(t, "")
+	old := provenanceTimeout
+	provenanceTimeout = 2 * time.Second
+	t.Cleanup(func() { provenanceTimeout = old })
+	shim := t.TempDir()
+	if err := os.WriteFile(filepath.Join(shim, "git"), []byte("#!/bin/sh\nsleep 4\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", shim+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	started := time.Now()
+	runID := provStart(t, reg, wm, runner, task)
+	if took := time.Since(started); took > time.Second {
+		t.Fatalf("Start took %v with a hung git, want it to return without waiting for the capture", took)
+	}
+	// Drain: the run still ends, bounded by the two capture timeouts.
+	waitForStatus(t, reg, runID, StatusDone, 15*time.Second)
+}
