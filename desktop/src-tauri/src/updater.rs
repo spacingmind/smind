@@ -177,11 +177,23 @@ pub struct UpdateState {
     pub install: InstallInProgress,
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub fn updater_plugin<R: tauri::Runtime>(
+) -> tauri::plugin::TauriPlugin<R, tauri_plugin_updater::Config> {
+    // ADR-0023.3: a candidate is offered only if strictly newer than the
+    // running version AND a stable release (no pre-release part).
+    tauri_plugin_updater::Builder::new()
+        .default_version_comparator(|current, update| {
+            is_offerable(&current.to_string(), &update.version.to_string())
+        })
+        .build()
+}
+
 /// The check, over an already configured builder (production passes
 /// `app.updater_builder()`; the e2e tests pass one aimed at a local feed).
 /// A successful `available` result is stored as the pending update.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-pub(crate) async fn check_with(
+pub async fn check_with(
     builder: tauri_plugin_updater::UpdaterBuilder,
     current_version: &str,
     state: &UpdateState,
@@ -221,7 +233,7 @@ pub(crate) async fn check_with(
 /// platform's relaunch is the caller's job: macOS restarts the app after
 /// this returns, Windows' installer exits the app itself.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-pub(crate) async fn install_pending(
+pub async fn install_pending(
     state: &UpdateState,
     _guard: &InstallGuard<'_>,
     emit: &(dyn Fn(serde_json::Value) + Send + Sync),

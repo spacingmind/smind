@@ -10,7 +10,7 @@ CI, with a throwaway signing key, so the manual list shrinks to the window itsel
 - `desktop/src-tauri/src/updater.rs`: the two commands are thin wrappers over
   `check_with(builder, current_version, state)` and
   `install_pending(state, emit)`; the tests call the same cores the commands call.
-- `desktop/src-tauri/src/updater_e2e.rs` (test-only, macOS/Windows): a mock-runtime
+- `desktop/src-tauri/tests/updater_e2e.rs` (integration test, macOS/Windows; an integration target so build.rs can give the Windows test exe the Common Controls v6 manifest dependency via `rustc-link-arg-tests`, hence `updater` is a `#[doc(hidden)] pub mod`): a mock-runtime
   Tauri app with the **real updater plugin registered the way `lib.rs` does**
   (`updater_plugin::<R>()`, same version comparator), configured with a pubkey and
   endpoint from the test (`plugins.updater` in the mock context, plus
@@ -41,7 +41,7 @@ CI, with a throwaway signing key, so the manual list shrinks to the window itsel
 
 ## Test scenarios
 
-Rust (`desktop/src-tauri/src/updater_e2e.rs`, `cargo test --lib updater_e2e`):
+Rust (`desktop/src-tauri/tests/updater_e2e.rs`, `cargo test --test updater_e2e`):
 `check_reports_available_and_downloads_nothing`,
 `available_result_matches_the_ui_fixture`,
 `same_version_is_up_to_date`, `older_version_is_not_offered`,

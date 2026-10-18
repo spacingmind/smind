@@ -6,11 +6,16 @@
 //!
 //! Not covered here (still manual, see docs/plans/active/desktop-update-e2e.md):
 //! the webview window, the menu click and `app.restart()`.
+//!
+//! An integration test (not a lib unit test) so build.rs can give its Windows
+//! executable the Common Controls v6 manifest dependency (`rustc-link-arg-tests`).
 
-#[cfg(target_os = "macos")]
-use crate::updater::install_pending;
-use crate::updater::{check_with, AppUpdateCheck, UpdateState};
+#![cfg(any(target_os = "macos", target_os = "windows"))]
+
 use base64::Engine;
+#[cfg(target_os = "macos")]
+use smind_desktop_lib::updater::install_pending;
+use smind_desktop_lib::updater::{check_with, AppUpdateCheck, UpdateState};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -209,7 +214,7 @@ pub fn test_app(pubkey: &str, endpoint: &str) -> App<MockRuntime> {
         .0
         .insert("updater".to_string(), updater);
     let app = mock_builder()
-        .plugin(crate::updater_plugin::<MockRuntime>())
+        .plugin(smind_desktop_lib::updater::updater_plugin::<MockRuntime>())
         .build(context)
         .expect("build mock app");
     app.manage(UpdateState::default());
