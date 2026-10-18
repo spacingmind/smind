@@ -17,6 +17,7 @@ import type { ConnectionStatus } from "@/lib/reconnect";
 import { openExternalUrl } from "@/lib/external-link";
 import { isDesktop } from "@/lib/platform";
 import { Icons, type IconComponent } from "@/lib/icons";
+import { PendingProposalBadge } from "@/components/learning/pending-badge";
 import { cn } from "@/lib/utils";
 
 const DOCS_URL = "https://github.com/spacingmind/smind#readme";
@@ -53,11 +54,14 @@ function FooterIconButton({
   icon: Icon,
   testId,
   onClick,
+  badge,
 }: {
   label: string;
   icon: IconComponent;
   testId: string;
   onClick: () => void;
+  /** A quiet indicator pinned to the button's top-right corner. */
+  badge?: ReactNode;
 }) {
   return (
     <FooterTooltip label={label}>
@@ -66,10 +70,11 @@ function FooterIconButton({
         size="icon-sm"
         aria-label={label}
         data-testid={testId}
-        className={ICON_BUTTON_CLASS}
+        className={cn(ICON_BUTTON_CLASS, badge && "relative")}
         onClick={onClick}
       >
         <Icon />
+        {badge}
       </Button>
     </FooterTooltip>
   );
@@ -301,6 +306,7 @@ export function SidebarFooterActions({
             icon={Icons.settings}
             testId="sidebar-settings-button"
             onClick={() => onOpenSettings?.()}
+            badge={<PendingProposalBadge className="absolute top-1.5 right-1.5" />}
           />
         </div>
       </div>

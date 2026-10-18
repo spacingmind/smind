@@ -4,6 +4,7 @@ import "@/components/settings/appearance-section";
 import "@/components/settings/connections-section";
 import "@/components/settings/daemon-section";
 import "@/components/settings/general-section";
+import "@/components/settings/learned-skills-section";
 import "@/components/settings/mcp-servers-section";
 import "@/components/settings/notifications-section";
 import "@/components/settings/profiles-section";
@@ -83,7 +84,12 @@ function SettingsNav({
               >
                 {section.icon}
                 {section.label}
-                {list && <Icons.chevronRight className="ml-auto size-4 text-foreground-subtle" />}
+                {(section.badge || list) && (
+                  <span className="ml-auto flex items-center gap-2">
+                    {section.badge}
+                    {list && <Icons.chevronRight className="size-4 text-foreground-subtle" />}
+                  </span>
+                )}
               </button>
             </li>
           </Fragment>

@@ -35,7 +35,7 @@ export function SegmentedControl<T extends string>({
         // segmented control always has a selection.
         if (next) onChange(next as T);
       }}
-      className={cn("inline-flex rounded-lg border border-input-border p-0.5", className)}
+      className={cn("inline-flex rounded-lg border border-input-border p-0.5 data-[disabled]:opacity-50", className)}
     >
       {options.map((opt) => (
         <ToggleGroup.Item
