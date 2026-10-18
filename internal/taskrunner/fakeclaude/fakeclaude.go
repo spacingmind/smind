@@ -18,6 +18,10 @@ import (
 	"github.com/spacingmind/smind/internal/securefile"
 )
 
+// ScenarioEnv, when set, names the scenario instead of the "scenario" file in
+// the working directory -- for callers whose cwd is cleaned between runs.
+const ScenarioEnv = "FAKE_CLAUDE_SCENARIO"
+
 // Run is a minimal NDJSON scripted stand-in for the `claude`
 // CLI's headless stream-json protocol. Like fakeagent, its scenario comes
 // from a "scenario" file in its working directory (claudecode.Client sets
@@ -28,7 +32,9 @@ func Run() {
 		os.Exit(1)
 	}
 	scenario := "reply"
-	if data, err := os.ReadFile(filepath.Join(wd, "scenario")); err == nil {
+	if v := os.Getenv(ScenarioEnv); v != "" {
+		scenario = v
+	} else if data, err := os.ReadFile(filepath.Join(wd, "scenario")); err == nil {
 		scenario = strings.TrimSpace(string(data))
 	}
 

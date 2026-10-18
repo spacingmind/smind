@@ -108,6 +108,22 @@ func (s *Store) CreateSystemTask(workspaceID int64, title, cwd string) (Task, Ch
 	return t, Chat{ID: chatID, TaskID: t.ID, Title: title, CreatedAt: now}, nil
 }
 
+// GetSystemTask returns workspaceID's hidden system task (kind 'system'), or
+// ok=false when it has none. The learning executor keeps exactly one.
+func (s *Store) GetSystemTask(workspaceID int64) (t Task, ok bool, err error) {
+	row := s.db.QueryRow(
+		`SELECT `+taskCols+` FROM tasks WHERE workspace_id = ? AND kind = 'system' ORDER BY id LIMIT 1`, workspaceID,
+	)
+	t, err = scanTask(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Task{}, false, nil
+	}
+	if err != nil {
+		return Task{}, false, fmt.Errorf("get system task for workspace %d: %w", workspaceID, err)
+	}
+	return t, true, nil
+}
+
 // GetTask returns the task with the given id.
 func (s *Store) GetTask(id int64) (Task, error) {
 	row := s.db.QueryRow(
