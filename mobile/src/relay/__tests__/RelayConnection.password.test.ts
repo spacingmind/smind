@@ -154,6 +154,76 @@ describe('a daemon with a password', () => {
     expect(passwords.get(passwordKey(parsePairingURL(pairingUrl(relay))))).toBe('keep-me'); // never forgotten by a lockout
   });
 
+  it('a daemon that gives no retry_after is waited out at the floor, not hammered', async () => {
+    const relay = new FakeRelay();
+    relay.password = 'p';
+    relay.lockNextHellos = 1;
+    relay.retryAfter = undefined;
+    const passwords = createDaemonPasswords();
+    passwords.set(passwordKey(parsePairingURL(pairingUrl(relay))), 'p');
+    const conn = start(relay, passwords, { reconnect: { lockMinMs: 300, lockMaxMs: 3_600_000, baseMs: 5, maxMs: 20, handshakeMs: 1500, resumeProbeMs: 600 } });
+    await vi.waitFor(() => expect(conn.state.kind).toBe('locked'), { timeout: 2000 });
+    const t0 = Date.now();
+    const hellos = relay.helloLog.length;
+    await new Promise((r) => setTimeout(r, 150));
+    expect(relay.helloLog.length).toBe(hellos); // still waiting
+    await conn.whenConnected();
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(120);
+  });
+
+  it('locked twice in a row waits twice, keeps the password through both, and spends no wrong attempt', async () => {
+    const relay = new FakeRelay();
+    relay.password = 'p';
+    relay.lockNextHellos = 2;
+    const passwords = createDaemonPasswords();
+    passwords.set(passwordKey(parsePairingURL(pairingUrl(relay))), 'p');
+    const conn = start(relay, passwords);
+    await conn.whenConnected();
+    expect(passwordsSent(relay)).toEqual(['p', 'p', 'p']); // two lockouts, then accepted
+    expect(relay.wrongPasswords).toBe(0);
+  });
+
+  it('a password typed while locked replaces the stored one and is used at the next attempt', async () => {
+    const relay = new FakeRelay();
+    relay.password = 'second';
+    relay.lockNextHellos = 1;
+    const passwords = createDaemonPasswords();
+    passwords.set(passwordKey(parsePairingURL(pairingUrl(relay))), 'first');
+    const conn = start(relay, passwords);
+    await vi.waitFor(() => expect(conn.state.kind).toBe('locked'));
+    conn.submitPassword('second'); // typed during the wait: stored, not sent yet
+    expect(conn.state.kind).toBe('locked');
+    await conn.whenConnected();
+    expect(passwordsSent(relay)).toEqual(['first', 'second']);
+  });
+
+  it('close() (Cancel / Back) while the prompt is up ends the connection: no leaked wait, no more streams', async () => {
+    const relay = new FakeRelay();
+    relay.password = 'p';
+    const conn = start(relay, createDaemonPasswords());
+    await vi.waitFor(() => expect(conn.state.kind).toBe('password'));
+    const streams = relay.streams.length;
+    conn.close();
+    expect(conn.state.kind).toBe('closed');
+    conn.submitPassword('p'); // after close: harmless
+    await new Promise((r) => setTimeout(r, 150));
+    expect(relay.streams.length).toBe(streams);
+    expect(relay.streams.every((s) => s.closed)).toBe(true);
+  });
+
+  it('a daemon that keeps asking for a password it was just given reaches the person instead of looping', async () => {
+    const relay = new FakeRelay();
+    relay.password = 'p';
+    relay.alwaysRequirePassword = true; // misbehaving: required even though the hello carried one
+    const passwords = createDaemonPasswords();
+    passwords.set(passwordKey(parsePairingURL(pairingUrl(relay))), 'p');
+    const conn = start(relay, passwords);
+    await vi.waitFor(() => expect(conn.state).toEqual({ kind: 'password', reason: 'required' }), { timeout: 2000 });
+    const hellos = relay.helloLog.length;
+    await new Promise((r) => setTimeout(r, 250));
+    expect(relay.helloLog.length).toBe(hellos); // no tight reconnect loop
+  });
+
   it('clamps what a daemon says about how long to wait', async () => {
     const relay = new FakeRelay();
     relay.password = 'x';
@@ -242,7 +312,9 @@ describe('a daemon with a password', () => {
     conn.submitPassword('TOP-SECRET-phrase');
     await conn.whenConnected();
 
-    const everything = JSON.stringify({ states, state: conn.state, offer: conn.offer, logs, store: passwords, identity });
+    const everything = JSON.stringify({ states, state: conn.state, offer: conn.offer, logs, identity });
+    // The store keeps its contents in a closure: nothing enumerable to serialise.
+    expect(Object.values(passwords).every((v) => typeof v === 'function')).toBe(true);
     for (const secret of ['TOP-SECRET-phrase', 'WRONG-secret-phrase']) expect(everything).not.toContain(secret);
     // The frames on the wire carry it only inside E2EE ciphertext: no frame payload contains it in the clear.
     for (const s of relay.streams) {

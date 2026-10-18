@@ -218,12 +218,13 @@ class VersionMismatchError extends FatalError {}
 class ChallengeSilenceError extends VersionMismatchError {}
 /** The daemon wants a password, or refused the one sent (P13c). `sent` is what was sent, so exactly that value can be forgotten. */
 class PasswordError extends Error {
-  constructor(
-    message: string,
-    readonly reason: 'required' | 'incorrect',
-    readonly sent: string | undefined,
-  ) {
+  readonly reason: 'required' | 'incorrect';
+  /** What was sent. Not enumerable: serialising or logging this error must never print a password. */
+  declare readonly sent: string | undefined;
+  constructor(message: string, reason: 'required' | 'incorrect', sent: string | undefined) {
     super(message);
+    this.reason = reason;
+    Object.defineProperty(this, 'sent', { value: sent, enumerable: false });
   }
 }
 /** The daemon rate-limited this device (too_many_attempts); retryAfter is its number of seconds. */
@@ -845,7 +846,10 @@ export class RelayConnection {
           const key = passwordKey(this.offer);
           // Forget exactly the value the daemon refused, never one typed since.
           if (e.reason === 'incorrect' && e.sent !== undefined) this.passwords.forgetIfEqual(key, e.sent);
-          if (this.passwords.get(key) !== undefined) continue; // a newer one is already here: use it
+          // A value typed since the one that was sent is already here: use it. (Only a DIFFERENT one:
+          // the daemon asking again for what we just sent must reach the person, not loop.)
+          const stored = this.passwords.get(key);
+          if (stored !== undefined && stored !== e.sent) continue;
           // Stop the automatic loop: only the person can fix this. The waiter exists
           // before the state is announced, so a submit made from a state listener
           // cannot be lost.
@@ -863,6 +867,7 @@ export class RelayConnection {
           const waitMs = Math.min(Math.max(e.retryAfter * 1000, this.timing.lockMinMs), this.timing.lockMaxMs);
           this.setState({ kind: 'locked', retryAfter: Math.round(waitMs / 1000), until: Date.now() + waitMs });
           await this.sleep(waitMs);
+          this.setState({ kind: 'connecting' }); // the wait is over: do not keep saying "trying again in 0 s" while it tries
           continue;
         }
         if (e instanceof AwaitingApprovalError) {

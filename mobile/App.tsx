@@ -105,7 +105,7 @@ function AppShell() {
   return (
     <>
       <StatusBar style="auto" />
-      {state.kind === 'reconnecting' ? <ReconnectingBanner>Reconnecting to the daemon…</ReconnectingBanner> : null}
+      {state.kind === 'reconnecting' || state.kind === 'connecting' ? <ReconnectingBanner>Reconnecting to the daemon…</ReconnectingBanner> : null}
       {screen.kind === 'task' ? (
         <TaskDetailScreen conn={conn} taskId={screen.task.ID} taskTitle={screen.task.Title} onBack={handleBack} />
       ) : (

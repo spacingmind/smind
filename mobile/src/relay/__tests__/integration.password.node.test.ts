@@ -15,13 +15,14 @@ import { createDaemonPasswords } from '../daemonPasswords';
 import { ConnectOptions, RelayConnection } from '../RelayConnection';
 import { DevHarness, harnessSupportsPassword, requireSelfSignedHarnessTrust, testConnectOptions } from './devHarness';
 
-const supported = (() => {
-  try {
-    return harnessSupportsPassword();
-  } catch {
-    return false;
-  }
-})();
+// A failed `go build` (or a missing `go`) throws here and fails the file: only a harness that really lacks the flag
+// (a tree without the daemon side, PR #360) skips. SMIND_REQUIRE_PASSWORD_HARNESS=1 turns even that into a failure.
+const supported = harnessSupportsPassword();
+const required = process.env.SMIND_REQUIRE_PASSWORD_HARNESS === '1';
+
+it.runIf(required && !supported)('the harness has -password (SMIND_REQUIRE_PASSWORD_HARNESS=1)', () => {
+  throw new Error('devharness has no -password flag: the daemon side of P13c (PR #360) is missing from this tree');
+});
 
 const PASSWORD = 'correct horse battery staple';
 const connections: RelayConnection[] = [];

@@ -4,8 +4,10 @@
 // daemon rate-limits this device. The typed text lives only in this
 // component's local input until Submit hands it to the connection (memory
 // only, see relay/daemonPasswords.ts); it is cleared on submit and never
-// logged. The field asks the OS not to autofill or offer to save it: the
-// password must not reach a keychain or password manager from here.
+// logged. The field is masked and sets autoComplete="off" so the OS has no
+// reason to autofill it or offer to save it (best effort: how iOS/Android
+// password managers treat it is not verified); the app itself never writes it
+// to a keychain or any storage.
 
 import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';

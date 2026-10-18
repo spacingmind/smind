@@ -28,15 +28,19 @@ export function requireSelfSignedHarnessTrust(): void {
   }
 }
 
+let passwordFlag: boolean | undefined;
+
 /** Whether the harness built from this tree can require a daemon password (-password, ADR-0031 P13c; it arrives with the daemon side, PR #360). */
 export function harnessSupportsPassword(): boolean {
+  if (passwordFlag !== undefined) return passwordFlag;
   const dir = mkdtempSync(join(tmpdir(), 'smind-devharness-probe-'));
   try {
     const binary = join(dir, 'devharness');
     execFileSync('go', ['build', '-o', binary, './internal/relay/bridge/devharness'], { cwd: REPO_ROOT, stdio: 'inherit' });
     // The flag package prints its usage to stderr and exits non-zero for -h.
     const probe = spawnSync(binary, ['-h'], { encoding: 'utf8' });
-    return `${probe.stderr}${probe.stdout}`.includes('-password');
+    passwordFlag = `${probe.stderr}${probe.stdout}`.includes('-password');
+    return passwordFlag;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
