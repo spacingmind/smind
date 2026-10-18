@@ -68,11 +68,12 @@ var guardRules = []guardRule{
 }
 
 // GuardScan scans the texts against the six guard families and reports each
-// matching (family, pattern) once as a ReasonGuard finding.
+// matching (family, pattern) once as a ReasonGuard finding. Each text is
+// scanned raw and in its canonical form.
 func GuardScan(texts ...string) []Finding {
 	seen := make(map[GuardFamily]map[string]struct{})
 	var out []Finding
-	for _, t := range texts {
+	for _, t := range scanTexts(texts) {
 		for _, r := range guardRules {
 			if !r.re.MatchString(t) {
 				continue

@@ -137,7 +137,7 @@ func CheckBody(body string, lim Limits) []Finding {
 	if len(body) > lim.MaxBodyBytes {
 		out = append(out, finding(ReasonBodyTooLong, "body is %d bytes, max %d", len(body), lim.MaxBodyBytes))
 	}
-	lines := strings.Split(body, "\n")
+	lines := strings.Split(normalizeNewlines(body), "\n")
 	nonBlank := 0
 	for _, ln := range lines {
 		if strings.TrimSpace(ln) != "" {
@@ -164,10 +164,11 @@ func CheckBody(body string, lim Limits) []Finding {
 	return out
 }
 
-// CheckLinks rejects URLs, links, and HTML tags in the given texts.
+// CheckLinks rejects URLs, links, and HTML tags in the given texts (raw and
+// canonical form).
 func CheckLinks(texts ...string) []Finding {
 	var out []Finding
-	for _, t := range texts {
+	for _, t := range scanTexts(texts) {
 		if m := urlRe.FindString(t); m != "" {
 			out = append(out, finding(ReasonURLLink, "link or URL not allowed: %q", m))
 		}
@@ -175,14 +176,14 @@ func CheckLinks(texts ...string) []Finding {
 			out = append(out, finding(ReasonURLLink, "html tag not allowed: %q", m))
 		}
 	}
-	return out
+	return dedupeFindings(out)
 }
 
 // CheckPathsAndHosts rejects absolute paths and host names / IP addresses in
 // the given texts. Relative paths and ~/ prefixes are allowed.
 func CheckPathsAndHosts(texts ...string) []Finding {
 	var out []Finding
-	for _, t := range texts {
+	for _, t := range scanTexts(texts) {
 		if m := absPathRe.FindStringSubmatch(t); m != nil {
 			out = append(out, finding(ReasonAbsPath, "absolute path not allowed: %q", m[1]))
 		}
@@ -196,5 +197,5 @@ func CheckPathsAndHosts(texts ...string) []Finding {
 			out = append(out, finding(ReasonHostName, "host name not allowed: %q", m))
 		}
 	}
-	return out
+	return dedupeFindings(out)
 }
