@@ -70,9 +70,10 @@ export async function fetchOverview(
 }
 
 /** run.list, filtered to one task; most recent first (the daemon's own ordering). */
-export async function listRunsForTask(conn: RelayConnection, taskId: number): Promise<RunSummary[]> {
-  const all = (await conn.call('run.list')) as RunSummary[];
-  return all.filter((r) => r.TaskID === taskId);
+export async function listRunsForTask(conn: RelayConnection, taskId: number, chatId?: number): Promise<RunSummary[]> {
+  // With a chat the daemon filters (run.list {taskId, chatId}); a task has more than one chat, so "latest" is per chat.
+  const all = (await conn.call('run.list', chatId === undefined ? undefined : { taskId, chatId })) as RunSummary[];
+  return all.filter((r) => r.TaskID === taskId && (chatId === undefined || r.ChatID === chatId));
 }
 
 /**

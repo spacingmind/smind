@@ -8,7 +8,7 @@
 // would stop the run.
 
 import { describe, expect, it } from 'vitest';
-import { continueRun, sendFollowUpPrompt } from '../followUpPrompt';
+import { continueRun, isEchoOfOptimisticLine, sendFollowUpPrompt } from '../followUpPrompt';
 import { CloseableStream, RelayConnection } from '../relay/RelayConnection';
 import { PairingOffer } from '../relay/pairing';
 import { makeRelayHarness } from '../relayHarness';
@@ -257,7 +257,7 @@ describe('sendFollowUpPrompt with whenBusy (fake connection)', () => {
 });
 
 describe('sendFollowUpPrompt shouldAttach (fake connection)', () => {
-  it('a run another path already attached is not attached again and the optimistic line stands down', async () => {
+  it('a run another path already attached is not attached again and the optimistic line stays', async () => {
     const { conn, calls } = fakeConnection((method) => {
       if (method === 'run.start') return { runId: 'run-new' };
       if (method === 'run.attach') return {};
@@ -269,7 +269,8 @@ describe('sendFollowUpPrompt shouldAttach (fake connection)', () => {
 
     expect(result).toEqual({ kind: 'started', runId: 'run-new' });
     expect(calls.filter(([m]) => m === 'run.attach')).toEqual([]); // no second attach
-    expect(rec.removed).toEqual([{ key: 'f1', role: 'user', text: 'next step' }]); // the adopted stream replays the prompt
+    expect(rec.removed).toEqual([]); // the prompt line stays: the daemon does not echo it as an event, the adopting stream dedupes an echo against it
+    expect(rec.appended).toEqual([{ key: 'f1', role: 'user', text: 'next step' }]);
     expect(rec.tails).toEqual([]);
   });
 
@@ -290,5 +291,21 @@ describe('sendFollowUpPrompt shouldAttach (fake connection)', () => {
     ]);
     expect(rec.removed).toEqual([]);
     expect(rec.tails).toHaveLength(1);
+  });
+});
+
+describe('isEchoOfOptimisticLine', () => {
+  const optimistic = { key: 'f1', role: 'user', text: 'next step' } as TimelineLine;
+
+  it('is true for a user_message echoing an optimistic user line, so the prompt shows once', () => {
+    expect(isEchoOfOptimisticLine([optimistic], 'user_message', { text: 'next step' })).toBe(true);
+  });
+
+  it('is false for a different prompt, another event type, or a user line the daemon sent (not optimistic)', () => {
+    expect(isEchoOfOptimisticLine([optimistic], 'user_message', { text: 'something else' })).toBe(false);
+    expect(isEchoOfOptimisticLine([optimistic], 'chunk', { text: 'next step' })).toBe(false);
+    expect(isEchoOfOptimisticLine([{ key: 'e3', role: 'user', text: 'next step' } as TimelineLine], 'user_message', { text: 'next step' })).toBe(false);
+    expect(isEchoOfOptimisticLine([], 'user_message', { text: 'next step' })).toBe(false);
+    expect(isEchoOfOptimisticLine([optimistic], 'user_message', undefined)).toBe(false);
   });
 });

@@ -32,7 +32,7 @@ export function QueuedPrompts({ items, onCancel }: { items: ChatQueueItem[]; onC
               <TouchableOpacity
                 accessibilityRole="button"
                 accessibilityLabel={cancelAccessibilityLabel(item)}
-                hitSlop={8}
+                hitSlop={{ top: 14, bottom: 14, left: 10, right: 10 }}
                 onPress={() => onCancel(item.ID)}
               >
                 <Text style={styles.cancel}>Cancel</Text>
@@ -71,6 +71,7 @@ function makeStyles(theme: AppTheme) {
       color: theme.foregroundMuted,
     },
     reason: {
+      flexShrink: 1, // a long reason must not crush the prompt column
       fontSize: theme.type.metadataLabel.fontSize,
       lineHeight: theme.type.metadataLabel.lineHeight,
       fontWeight: theme.type.metadataLabel.fontWeight,

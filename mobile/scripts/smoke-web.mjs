@@ -342,6 +342,18 @@ async function promptQueue(page, harness) {
   await page.getByText(/^run [0-9a-f]{8} ·/).waitFor({ timeout: 20_000 });
   if (await page.getByLabel('Queued prompts').isVisible().catch(() => false)) fail('an idle task shows a queue');
   await shootBothSchemes(page, 'queue-idle');
+
+  // An idle send under whenBusy "queue" starts the run at once; the user's own prompt line shows exactly once, whichever of
+  // the run.start response and the run.status event reaches the screen first.
+  await page.locator('textarea').fill('hello idle');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  try {
+    await page.getByText('user: hello idle', { exact: true }).waitFor({ timeout: 20_000 });
+    await page.waitForFunction(() => document.body.innerText.split('assistant: world!').length - 1 >= 2, null, { timeout: 30_000 });
+  } catch {
+    fail('an idle send did not start a run showing the prompt and its reply');
+  }
+  if ((await page.getByText('user: hello idle', { exact: true }).count()) !== 1) fail('the sent prompt line is not shown exactly once');
   await page.getByRole('button', { name: /Back/ }).click();
 
   // Live: two prompts queue on the daemon.

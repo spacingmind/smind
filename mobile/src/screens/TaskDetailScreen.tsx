@@ -34,7 +34,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View
 import { Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
 import { UiHost } from '../ui/UiHost';
 import { defaultChatId, listRunsForTask, RunSummary } from '../api';
-import { continueRun, sendFollowUpPrompt, RunTail } from '../followUpPrompt';
+import { continueRun, isEchoOfOptimisticLine, sendFollowUpPrompt, RunTail } from '../followUpPrompt';
 import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
 import { RelayConnection } from '../relay/RelayConnection';
 import { useConnectionState } from '../relay/useConnectionState';
@@ -102,14 +102,17 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   const attachedRuns = useRef(new Set<string>());
   const lastRunId = useRef<string | null>(null);
   const mounted = useRef(true);
+  const chatIdRef = useRef<number | null>(null);
+  const refreshSeq = useRef(0);
+  const sending = useRef(false);
   const queue = useChatQueue(conn, chatId);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true; // set again on a remount (Fast Refresh) -- the cleanup alone would leave it false for good
+    return () => {
       mounted.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
 
   /** Attach to a run and stream its events into the timeline; every run is attached at most once (attachedRuns guard). */
   const attachRun = (runId: string, isCancelled: () => boolean) => {
@@ -121,7 +124,11 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
         if (feedPermissionEvent(board, runId, event, params)) return;
         liveSeq.current++;
         const newLines = lineFromAttachEvent(event, params, 1_000_000 + liveSeq.current);
-        if (newLines.length > 0) setLines((prev) => [...prev, ...newLines]);
+        if (newLines.length === 0) return;
+        // An echo of a prompt this client already shows optimistically is skipped, so a prompt shows once whichever
+        // path (the run.start response or this adoption) attached the run first.
+        if (event === 'user_message') setLines((prev) => (isEchoOfOptimisticLine(prev, event, params) ? prev : [...prev, ...newLines]));
+        else setLines((prev) => [...prev, ...newLines]);
       },
     });
     followUpTails.current.push(p);
@@ -133,14 +140,22 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
 
   /** Keeps the header meta and the not-finished footer in step with the latest run (e.g. a queued prompt the daemon delivered). */
   const refreshLatest = useCallback(async () => {
+    const seq = ++refreshSeq.current; // overlapping refreshes: only the newest answer is applied
     try {
-      const runs = await listRunsForTask(conn, taskId);
-      if (!mounted.current) return;
+      // "Latest" is per chat (a task can have more than one).
+      const runs = await listRunsForTask(conn, taskId, chatIdRef.current ?? undefined);
+      if (!mounted.current || seq !== refreshSeq.current) return;
       const next = runs[0] ?? null;
       setState((prev) => (prev.kind === 'ready' ? { kind: 'ready', run: next } : prev));
       if ((next?.ID ?? null) !== lastRunId.current) {
         lastRunId.current = next?.ID ?? null;
         setContinued(false);
+      }
+      // Re-derive the live flag from the daemon's own list: a run.status the daemon dropped (event.dropped) must not leave
+      // "live" stale, nor a live run unattached.
+      if (next) {
+        followerRef.current?.markKnown(next.ID, next.Status);
+        if (next.Status === 'running') attachRun(next.ID, () => !mounted.current);
       }
     } catch {
       // the screen keeps what it has
@@ -150,6 +165,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   useEffect(() => {
     let cancelled = false;
     let offStatus: (() => void) | null = null;
+    let offDropped: (() => void) | null = null;
     setState({ kind: 'loading' });
     setContinued(false);
     setLines([]);
@@ -158,7 +174,20 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
     followerRef.current = null;
     setLiveRunId(null);
     setChatId(null);
+    chatIdRef.current = null;
     board.onChange = () => setPermissions(board.list());
+
+    // Subscribe to run.status BEFORE the first await: a run the daemon delivers (or starts) while this screen is still
+    // loading must not be missed. Events wait in `early` until the follower (which needs the chat id) exists.
+    const early: RunStatusEvent[] = [];
+    let follower: RunFollower | null = null;
+    offStatus = conn.subscribe(['run.status'], (e) => {
+      const ev = e.payload as RunStatusEvent;
+      if (follower) follower.onRunStatus(ev);
+      else early.push(ev);
+    });
+    // The daemon dropped pushed events for us: re-read the latest run (the queue refetches itself).
+    offDropped = conn.onDropped(() => void refreshLatest());
 
     (async () => {
       try {
@@ -178,8 +207,9 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
         }
         if (cancelled) return;
         setChatId(resolved);
+        chatIdRef.current = resolved;
         if (resolved !== null) {
-          const follower = new RunFollower(
+          follower = new RunFollower(
             resolved,
             (runId) => {
               attachRun(runId, () => cancelled);
@@ -191,8 +221,9 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
             },
           );
           followerRef.current = follower;
-          offStatus = conn.subscribe(['run.status'], (e) => follower.onRunStatus(e.payload as RunStatusEvent));
           if (latest) follower.markKnown(latest.ID, latest.Status);
+          for (const ev of early) follower.onRunStatus(ev); // what arrived while loading
+          early.length = 0;
         }
 
         if (!latest) return;
@@ -209,7 +240,9 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
           const logs = (await conn.call('run.logs', { runId: latest.ID })) as { events?: unknown[] };
           if (cancelled) return;
           board.applyLogEvents(latest.ID, logs.events ?? []);
-          setLines(timelineFromLogs(logs as { events?: never[] }));
+          // Merge, do not overwrite: a prompt sent or a run adopted while the logs were loading has already appended lines.
+          const logLines = timelineFromLogs(logs as { events?: never[] });
+          setLines((prev) => [...logLines, ...prev]);
         }
       } catch (e) {
         if (!cancelled) setState({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
@@ -219,6 +252,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
     return () => {
       cancelled = true;
       offStatus?.();
+      offDropped?.();
       followerRef.current = null;
       // Any follow-up run's attach detaches the same way (Item 1).
       for (const tail of followUpTails.current) tail.cancel();
@@ -248,6 +282,8 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
     async (whenBusy: 'queue' | 'interrupt') => {
       const text = draft.trim();
       if (!text || state.kind !== 'ready' || state.run === null) return;
+      if (sending.current) return; // one send at a time: a second press before the re-render must not queue the prompt twice
+      sending.current = true;
       setDraft('');
       draftState.value = '';
       setSendError(null);
@@ -276,6 +312,8 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
         setDraft(text); // the typed text is never silently lost
         draftState.value = text;
         setSendError(e instanceof Error ? e.message : String(e));
+      } finally {
+        sending.current = false;
       }
     },
     [appendLines, board, chatId, conn, draft, nextSeq, queue, removeLines, state, taskId, trackTail],
@@ -289,7 +327,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
     setContinued(true);
     setSendError(null);
     try {
-      await continueRun(
+      const result = await continueRun(
         conn,
         {
           appendLines,
@@ -305,12 +343,14 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
         taskId,
         state.run,
         nextSeq,
+        chatId ?? undefined,
       );
+      if (result.kind === 'queued') queue.refresh();
     } catch (e) {
       setContinued(false);
       setSendError(e instanceof Error ? e.message : String(e));
     }
-  }, [appendLines, board, conn, continued, nextSeq, removeLines, state, taskId, trackTail]);
+  }, [appendLines, board, chatId, conn, continued, nextSeq, queue, removeLines, state, taskId, trackTail]);
 
   const handlePermissionTap = useCallback(
     (requestId: string, optionId: string) => {

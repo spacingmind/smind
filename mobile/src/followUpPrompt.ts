@@ -77,10 +77,11 @@ export async function sendFollowUpPrompt(
   }
   const runId = result.runId;
   if (deps.shouldAttach && !deps.shouldAttach(runId)) {
-    // Another path (a run.status adoption) already attached this run;
-    // that stream replays the prompt itself, so the optimistic line
-    // stands down and this send attaches nothing.
-    deps.removeLines([userLine]);
+    // Another path (a run.status adoption that beat this response) already
+    // attached this run. The optimistic line STAYS: the daemon does not
+    // synthesise the prompt as an event, so an agent that does not echo it
+    // would leave the transcript without the user's own line. A stream that
+    // does echo it is deduped against this line (isEchoOfOptimisticLine).
     return result;
   }
   // run.attach backfills the new run's whole recorded history before the
@@ -112,6 +113,19 @@ export async function sendFollowUpPrompt(
 }
 
 /**
+ * Whether a streamed event is the agent's echo of a prompt this client
+ * already rendered optimistically (a user_message whose text equals an
+ * optimistic user line, those keyed `f<seq>` by sendFollowUpPrompt): the
+ * screen skips it so the prompt shows once, whichever of the run.start
+ * response and the run.status adoption attached the run first.
+ */
+export function isEchoOfOptimisticLine(lines: readonly TimelineLine[], event: string, params: unknown): boolean {
+  if (event !== 'user_message') return false;
+  const text = (params as { text?: string } | undefined)?.text;
+  return text !== undefined && lines.some((l) => l.role === 'user' && l.key.startsWith('f') && l.text === text);
+}
+
+/**
  * The not-finished footer's Continue action (ADR-0027 D13): a follow-up
  * run with the prompt "Continue" on the capped run's own provider. An
  * idle chat starts at once; a busy one queues -- the same as the web's
@@ -123,6 +137,7 @@ export function continueRun(
   taskId: number,
   run: Pick<RunSummary, 'Provider'>,
   nextSeq: () => number,
+  chatId?: number,
 ): Promise<RunStartResult> {
-  return sendFollowUpPrompt(conn, deps, taskId, run.Provider, CONTINUE_PROMPT, nextSeq, { whenBusy: 'queue' });
+  return sendFollowUpPrompt(conn, deps, taskId, run.Provider, CONTINUE_PROMPT, nextSeq, { whenBusy: 'queue', chatId });
 }
