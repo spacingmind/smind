@@ -585,6 +585,15 @@ New decisions raised by the fold-in (not built, recommendation attached):
   adding it as a distinct terminal status, which ripples through `run.status`,
   the CLI, `task_wait`, the web timeline and the queue's "finished" trigger;
   needs an ADR.
+  *Decided 2026-10-18 (user): ADR-0027's recommendation, not a status.* A derived `disposition` (`needs-continue`) beside the unchanged run
+  status, computed from status + stop reason (`runs.DispositionFor`: `done` ending at `max_turn_requests`, `max_tokens` or
+  `budget_exceeded`) and never stored, so it survives a restart for free. Additive on `run.list` (`Disposition`), `run.logs`,
+  `run.status` events and the `task.prompt`/`run.attach` result (`disposition`), MCP `task_status`/`task_wait`/`task_logs`/`run_list`
+  `task.tree`/`task_tree` (the node `run.disposition`, a "(N needs-continue)" note in the summary and in `task_wait {childrenOf}`
+  child states, and a warning pill in the web lineage) and `smind task runs` (`done (needs-continue)`). `task_wait` still returns `state: "done"` with a message saying the work is not
+  finished, so the queue's "finished" trigger and every status consumer are unchanged. The web run footer reads the disposition
+  (an unknown cap still offers Continue; an older daemon falls back to the stop-reason cases). Only `needs-continue` is built: the
+  rest of ADR-0027 section 4's dispositions need the handoff tools.
 
 ## Progress
 
@@ -599,7 +608,7 @@ New decisions raised by the fold-in (not built, recommendation attached):
 - [ ] PR-F model selection (backend + CLI + MCP): #272 (open); PR-F2 web: #276 (open, stacked on #272)
 - [ ] PR-E2 web setup editor/badge: #275 (open)
 - [ ] PR-D bundled skills + `smind skill install|ls|uninstall`: code complete in branch `feat/orchestration-skills` (carries temporary integration merges of #269/#273); PR opens after they merge, rebased onto develop
-- [ ] D12 (live `autoAccept` CLI) and D13 (`needs-continue` run state) answered by the user
+- [x] D12 (live `autoAccept` CLI) and D13 (`needs-continue`) answered by the user (2026-10-18); D13 shipped as a derived `disposition`, not a status (PR "feat(runs): derived needs-continue disposition (D13)")
 
 ## Validation
 
@@ -612,3 +621,4 @@ Per PR, with what was and was not verified (details in each PR body):
 - **PR-C (#269):** source-guarded `run.setPermissionMode`/`run.setConfigOption` (fail-closed on catalog lookup error and on non-`thought_level|model` categories), wait-any. Not verified: GLM's real option category.
 - **PR-G (#273), PR-F (#272), PR-F2 (#276), PR-E2 (#275):** see PR bodies; web PRs include light+dark screenshot reviews against sandbox daemons (isolated `SMIND_HOME`/port). Not verified anywhere: real GLM/Codex agents for model lists and `--max-turns`.
 - **Recurring, unrelated:** `TestServer_TerminalAttach_*` and a few `@smind/ui` `App.test.tsx` tests time out intermittently under load; they pass when rerun alone.
+- **D13 (derived `needs-continue` disposition):** `TestDispositionFor`, `TestDispositionIsNotAStatus` (status values unchanged), `TestRegistry_DispositionNeedsContinueSurvivesRehydrate` (live, listed and after a restart), `TestRunDispositionNeedsContinueOnAMaxTurnStop` / `TestRunDispositionAbsentForANormalFinish` (run.list, run.logs and the run.status event of a real fake-agent run ending `max_turn_requests`/`max_tokens`), `TestMCPTools_DispositionNeedsContinue` (task_wait keeps `state: done` and says the work is not finished; task_status, task_logs, run_list), `TestTaskRunFacts_DispositionOfTheLatestFinishedRun` + `TestBuild_NodeRunCarriesTheDisposition` + `TestTreeSummaryAndChildStatesShowNeedsContinue` (task.tree and what a supervisor reads), `TestRunStatusCellShowsTheDisposition`; web: `describeRunFooter` cases (known caps, unknown cap, ignored unless done, older daemon unchanged), `RunTimeline` Continue on a disposition, `useRunTimeline` run.list/run.logs carry it. Light and dark screenshots of the run footer on a real daemon (`smind serve` with a fake GLM agent): "Hit the tool-turn limit · not finished · Continue" next to a normal run with no warning. Not done: the mobile app's run list still renders `done (max_turn_requests)` without a not-finished marker (owners of `mobile/`). Not verified: a real GLM agent hitting `--max-turns`; `budget_exceeded` (nothing emits it yet).

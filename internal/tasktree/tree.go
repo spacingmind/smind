@@ -36,6 +36,9 @@ type RunFact struct {
 	State              State
 	RunningRunIDs      []string
 	PendingPermissions int
+	// Disposition is "needs-continue" when the latest finished run ended done
+	// at a turn/token/budget cap (runs.DispositionFor); empty otherwise.
+	Disposition string
 }
 
 // Run state constants for RunFact.State / Node.Run.State.
@@ -85,6 +88,9 @@ type NodeRun struct {
 	State              State    `json:"state"`
 	RunningRunIDs      []string `json:"runningRunIds"`
 	PendingPermissions int      `json:"pendingPermissions"`
+	// Disposition is "needs-continue" for a node whose latest run is "done"
+	// but was cut off at a cap (additive, omitted otherwise).
+	Disposition string `json:"disposition,omitempty"`
 }
 
 // NodeUsage bundles a node's own usage, its subtree rollup (every
@@ -232,7 +238,7 @@ func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, r
 			ChildCount: liveKids,
 			Run: NodeRun{
 				State: factState(facts, t.ID), RunningRunIDs: runIDs,
-				PendingPermissions: f.PendingPermissions,
+				PendingPermissions: f.PendingPermissions, Disposition: f.Disposition,
 			},
 			Counts: rec.counts,
 			Usage:  NodeUsage{Own: usage[t.ID], Subtree: rec.usage, ArchivedDescendants: rec.archived},

@@ -42,6 +42,8 @@ export interface TaskTreeNode {
     state: TaskTreeRunState;
     runningRunIds: string[];
     pendingPermissions: number;
+    /** "needs-continue" when the latest run is "done" but was cut off at a turn/token/budget cap (ADR-0027 D13). */
+    disposition?: string;
   };
   counts: TaskTreeCounts;
   usage: {
@@ -109,6 +111,8 @@ export function pillStatusWithSubtree(node: TaskTreeNode): StatusDotStatus {
   if (node.counts.failed > 0) return "danger";
   if (node.counts.waitingPermission > 0 || node.run.state === "waiting_permission") return "warning";
   if (node.counts.running > 0 || node.run.state === "running") return "running";
+  // "done" at a cap is not finished: a calm green dot would hide it.
+  if (node.run.state === "done" && node.run.disposition === "needs-continue") return "warning";
   return pillStatus(node.run.state);
 }
 

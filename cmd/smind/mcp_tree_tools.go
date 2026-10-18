@@ -52,6 +52,8 @@ type taskTreeNodeRun struct {
 	State              string   `json:"state"`
 	RunningRunIDs      []string `json:"runningRunIds"`
 	PendingPermissions int      `json:"pendingPermissions"`
+	// Disposition is "needs-continue" for a done run that hit a cap.
+	Disposition string `json:"disposition,omitempty"`
 }
 
 type taskTreeCounts struct {
@@ -152,16 +154,24 @@ func treeSummary(nodes []taskTreeNode) string {
 	var states = map[string]int{
 		"running": 0, "waiting_permission": 0, "done": 0, "error": 0, "stopped": 0, "idle": 0,
 	}
+	needsContinue := 0
 	for _, n := range nodes {
 		if _, ok := states[n.Run.State]; ok {
 			states[n.Run.State]++
+		}
+		if n.Run.State == "done" && n.Run.Disposition == "needs-continue" {
+			needsContinue++
 		}
 	}
 	order := []string{"running", "waiting_permission", "error", "done", "stopped", "idle"}
 	var parts []string
 	for _, s := range order {
 		if states[s] > 0 {
-			parts = append(parts, fmt.Sprintf("%d %s", states[s], s))
+			part := fmt.Sprintf("%d %s", states[s], s)
+			if s == "done" && needsContinue > 0 {
+				part += fmt.Sprintf(" (%d needs-continue: cut off at a cap, not finished)", needsContinue)
+			}
+			parts = append(parts, part)
 		}
 	}
 	if len(parts) == 0 {
@@ -185,6 +195,9 @@ func mcpTaskTreeChildrenOf(ctx context.Context, client *wsclient.Client, parentT
 	for _, n := range flat.Nodes {
 		if n.Depth == 1 {
 			childStates[n.ID] = n.Run.State
+			if n.Run.State == "done" && n.Run.Disposition != "" {
+				childStates[n.ID] += " (" + n.Run.Disposition + ")"
+			}
 			all = append(all, n.Run.RunningRunIDs...)
 		}
 	}

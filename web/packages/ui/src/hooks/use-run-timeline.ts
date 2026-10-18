@@ -256,6 +256,8 @@ export interface RunEntry {
   /** The run's transcript: backfilled history plus, for a run still streaming, live events folded in as they arrive. */
   items: TimelineItem[];
   stopReason?: string;
+  /** Derived by the daemon: "needs-continue" when the run ended done at a turn/token/budget cap (ADR-0027 D13). */
+  disposition?: string;
   err?: string;
   /**
    * The run's provider-native permission mode (ADR-0019) -- "" until the
@@ -525,7 +527,7 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
     )
     .then((result) => {
       if (session.cancelled) return;
-      patch(setRuns, runId, { status: "done", stopReason: result.stopReason, finishedAt: new Date().toISOString() });
+      patch(setRuns, runId, { status: "done", stopReason: result.stopReason, disposition: result.disposition, finishedAt: new Date().toISOString() });
     })
     .catch(() => {
       if (session.cancelled) return;
@@ -536,6 +538,7 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
           patch(setRuns, runId, {
             status: logs.status,
             stopReason: logs.stopReason,
+            disposition: logs.disposition,
             err: logs.err,
             finishedAt: new Date().toISOString(),
           });
@@ -558,6 +561,7 @@ function toRunEntry(r: RunSummary): RunEntry {
     finishedAt: r.FinishedAt ?? undefined,
     items: [],
     stopReason: r.StopReason || undefined,
+    disposition: r.Disposition || undefined,
     err: r.Err || undefined,
     permissionMode: r.PermissionMode,
     autoAccept: r.AutoAccept,
@@ -649,6 +653,7 @@ export function useRunTimeline(
                   ...(usage !== undefined ? { usage } : {}),
                   status: logs.status,
                   stopReason: logs.stopReason,
+                  disposition: logs.disposition,
                   err: logs.err,
                 });
               })
@@ -772,6 +777,7 @@ export function useRunTimeline(
                     items: buildTimeline(logs.events),
                     status: logs.status,
                     stopReason: logs.stopReason,
+                    disposition: logs.disposition,
                     err: logs.err,
                   });
                 })
