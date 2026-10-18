@@ -699,6 +699,62 @@ func (p *peer) request(method string, params any, timeout time.Duration) (rpcRes
 	}
 }
 
+// newSeedTask creates (once) the shared seeded workspace and a task in it;
+// scenario, when non-empty, selects the fake agent's behaviour via a
+// "scenario" file in the task worktree.
+func (h *harness) newSeedTask(title, scenario string) (store.Workspace, store.Task, error) {
+	// One seeded workspace for every seed-run (the app lists the first workspace's tasks): created on first use.
+	if h.seedWS == nil {
+		repo, err := os.MkdirTemp(h.workDir, "seed-repo-")
+		if err != nil {
+			return store.Workspace{}, store.Task{}, err
+		}
+		git := func(gitArgs []string) error {
+			cmd := exec.Command("git", gitArgs...)
+			cmd.Dir = repo
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("git %v: %v: %s", gitArgs, err, out)
+			}
+			return nil
+		}
+		for _, g := range [][]string{
+			{"init"},
+			{"config", "core.autocrlf", "false"},
+			{"config", "user.email", "devharness@example.com"},
+			{"config", "user.name", "devharness"},
+		} {
+			if err := git(g); err != nil {
+				return store.Workspace{}, store.Task{}, err
+			}
+		}
+		if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("seeded\n"), 0o644); err != nil {
+			return store.Workspace{}, store.Task{}, err
+		}
+		if err := git([]string{"add", "README.md"}); err != nil {
+			return store.Workspace{}, store.Task{}, err
+		}
+		if err := git([]string{"commit", "-m", "initial commit"}); err != nil {
+			return store.Workspace{}, store.Task{}, err
+		}
+		created, err := h.wm.CreateWorkspace(repo, "Seeded", "hard", nil)
+		if err != nil {
+			return store.Workspace{}, store.Task{}, err
+		}
+		h.seedWS = &created
+	}
+	ws := *h.seedWS
+	task, err := h.wm.CreateTask(ws.ID, nil, title)
+	if err != nil {
+		return store.Workspace{}, store.Task{}, err
+	}
+	if scenario != "" {
+		if err := os.WriteFile(filepath.Join(*task.WorktreePath, "scenario"), []byte(scenario), 0o644); err != nil {
+			return store.Workspace{}, store.Task{}, err
+		}
+	}
+	return ws, task, nil
+}
+
 // seedRun creates a workspace, a task and a real run executed by the fake ACP
 // agent (D13): with a scenario "stop <reason>" the run ends done at a cap and
 // reports Disposition needs-continue; without one it ends end_turn normally.
@@ -714,54 +770,13 @@ func (h *harness) seedRun(args []string) (map[string]any, error) {
 	if len(args) > 1 {
 		title = strings.Join(args[1:], " ")
 	}
-	// One seeded workspace for every seed-run (the app lists the first workspace's tasks): created on first use.
-	if h.seedWS == nil {
-		repo, err := os.MkdirTemp(h.workDir, "seed-repo-")
-		if err != nil {
-			return nil, err
-		}
-		git := func(gitArgs ...string) error {
-			cmd := exec.Command("git", gitArgs...)
-			cmd.Dir = repo
-			if out, err := cmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("git %v: %v: %s", gitArgs, err, out)
-			}
-			return nil
-		}
-		for _, g := range [][]string{
-			{"init"},
-			{"config", "core.autocrlf", "false"},
-			{"config", "user.email", "devharness@example.com"},
-			{"config", "user.name", "devharness"},
-		} {
-			if err := git(g...); err != nil {
-				return nil, err
-			}
-		}
-		if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("seeded\n"), 0o644); err != nil {
-			return nil, err
-		}
-		if err := git("add", "README.md"); err != nil {
-			return nil, err
-		}
-		if err := git("commit", "-m", "initial commit"); err != nil {
-			return nil, err
-		}
-		created, err := h.wm.CreateWorkspace(repo, "Seeded", "hard", nil)
-		if err != nil {
-			return nil, err
-		}
-		h.seedWS = &created
+	scenario := ""
+	if reason != "end_turn" {
+		scenario = "stop " + reason
 	}
-	ws := *h.seedWS
-	task, err := h.wm.CreateTask(ws.ID, nil, title)
+	ws, task, err := h.newSeedTask(title, scenario)
 	if err != nil {
 		return nil, err
-	}
-	if reason != "end_turn" {
-		if err := os.WriteFile(filepath.Join(*task.WorktreePath, "scenario"), []byte("stop "+reason), 0o644); err != nil {
-			return nil, err
-		}
 	}
 
 	ctx := context.Background()
