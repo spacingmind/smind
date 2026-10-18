@@ -49,7 +49,7 @@ func (s *Store) DeleteSpace(id int64) error {
 	if _, err := s.GetSpace(id); err != nil {
 		return fmt.Errorf("delete space %d: %w", id, err)
 	}
-	tasks, err := s.ListTasksBySpace(id)
+	tasks, err := s.listSpaceTasks(id, true)
 	if err != nil {
 		return fmt.Errorf("delete space %d: %w", id, err)
 	}

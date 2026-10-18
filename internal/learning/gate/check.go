@@ -32,6 +32,9 @@ func Check(in Intent, w Window, live []LiveSkill, cfg Config) Verdict {
 	if cfg.Mode == ModeCurate && in.Action == ActionCreate {
 		return Verdict{Findings: []Finding{{Reason: ReasonBadAction, Detail: "curator intents may only patch or delete"}}}
 	}
+	if cfg.Mode != ModeCurate && in.Action == ActionDelete {
+		return Verdict{Findings: []Finding{{Reason: ReasonBadAction, Detail: "reflector intents may only create or patch"}}}
+	}
 
 	add(CheckName(in.Name)...)
 	if in.Reason == "" {
