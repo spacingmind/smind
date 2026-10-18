@@ -41,6 +41,8 @@ export class FakeUsageDaemon {
   runs: RunSummary[] = [];
   /** `provider.test` answers per provider key; a missing key answers `{ ok: true, detail: "ok" }`. */
   testResults: Record<string, ProviderTestResult> = {};
+  /** `provider.test` keys whose RPC rejects (the check itself errored, as opposed to answering `{ ok: false }`). */
+  testRpcErrors: Record<string, Error> = {};
   /** When set, every `account.list` / `provider.list` / `provider.test` / account-mutation request rejects with it. */
   failNonUsageWith: Error | null = null;
   /** Every non-`account.usage` request, as `{ method, params }`, in order. */
@@ -81,8 +83,11 @@ export class FakeUsageDaemon {
             return this.accounts;
           case "provider.list":
             return this.providers;
-          case "provider.test":
+          case "provider.test": {
+            const failure = this.testRpcErrors[(params as { provider?: string } | undefined)?.provider ?? ""];
+            if (failure) throw failure;
             return this.testResults[(params as { provider?: string } | undefined)?.provider ?? ""] ?? { ok: true, detail: "ok" };
+          }
           case "account.rename": {
             const p = params as { id: number; label: string };
             const index = this.accounts.findIndex((a) => a.id === p.id);

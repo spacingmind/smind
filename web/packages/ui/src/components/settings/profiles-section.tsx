@@ -449,10 +449,14 @@ function ProfileForm({
  * has been saved yet.
  */
 function ProviderHealthDot({ provider, testId }: { provider: string; testId: string }) {
-  const { health } = useProviderHealth();
+  const { health, ensure, rpcFailed } = useProviderHealth();
+  // Fills this provider's answer if nothing has (cached answers are kept; see runProviderTest).
+  useEffect(() => {
+    ensure();
+  }, [ensure]);
 
   const result = health[provider];
-  const state = result === undefined ? "unknown" : result.ok ? "ok" : "failed";
+  const state = rpcFailed.has(provider) ? "failed" : result === undefined ? "unknown" : result.ok ? "ok" : "failed";
   const status = state === "ok" ? "success" : state === "failed" ? "danger" : "neutral";
   const label = state === "ok" ? "Connection ok" : state === "failed" ? "Connection failed" : "Not tested yet";
   return (

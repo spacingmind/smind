@@ -58,9 +58,57 @@ describe("useProviderHealth", () => {
     act(() => result.current.ensure());
     await flush();
     expect(result.current.health["claude-native"]).toBeUndefined();
+    // For a picker it is still untested (never disabled on a guess); for a count it is "tested, not healthy".
+    expect(result.current.rpcFailed.has("claude-native")).toBe(true);
+    expect(result.current.summary).toEqual({ healthy: 0, total: 1, tested: 1 });
 
     daemon.failNonUsageWith = null;
     act(() => result.current.ensure());
+    expect(daemon.countCalls("provider.test")).toBe(2);
+    await flush();
+    expect(result.current.health["claude-native"]).toEqual({ ok: false, detail: "not found" });
+    expect(result.current.rpcFailed.has("claude-native")).toBe(false);
+  });
+
+  it("an invalidated answer is re-tested by the next ensure; a fresh one is not", async () => {
+    const daemon = new FakeUsageDaemon([]);
+    daemon.providers = { providers: [{ id: "claude-native" }] };
+    const seeded = createQueryClient();
+    seeded.setQueryData(queryKeys.providerList(), { providers: [{ id: "claude-native" }] });
+    const { result } = renderHookWithDaemon(() => useProviderHealth(), daemon, { initialProps: undefined, queryClient: seeded });
+    await flush();
+    act(() => result.current.ensure());
+    await flush();
+    act(() => result.current.ensure());
+    expect(daemon.countCalls("provider.test")).toBe(1);
+
+    await act(async () => void seeded.invalidateQueries({ queryKey: queryKeys.providerTest("claude-native") }));
+    act(() => result.current.ensure());
+    expect(daemon.countCalls("provider.test")).toBe(2);
+  });
+
+  it("never tests the fallback ids while provider.list is still loading, only once it failed", async () => {
+    const daemon = new FakeUsageDaemon([]);
+    daemon.failNonUsageWith = null;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const call = daemon.client.call.bind(daemon.client);
+    (daemon.client as { call: unknown }).call = async (method: string, params?: unknown) => {
+      if (method === "provider.list") {
+        await gate;
+        throw new Error("provider.list down");
+      }
+      return call(method, params);
+    };
+    const { result } = renderHookWithDaemon(() => useProviderHealth(), daemon, { initialProps: undefined });
+    await flush();
+    act(() => result.current.ensure());
+    expect(daemon.countCalls("provider.test")).toBe(0);
+
+    release();
+    await flush();
+    act(() => result.current.ensure());
+    // The list failed, so the picker's fallback catalog (claude-native + glm) is what gets tested.
     expect(daemon.countCalls("provider.test")).toBe(2);
   });
 

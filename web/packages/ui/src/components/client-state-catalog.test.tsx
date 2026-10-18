@@ -15,7 +15,9 @@ import { KeyboardProvider } from "@/keyboard/keyboard-provider";
 import { PaletteProvider, useRegisteredCommands } from "@/palette/palette-provider";
 import type { AgentProfile, Chat, Task } from "@/lib/types";
 import { FakeWsClient } from "@/test/fake-ws-client";
-import { renderWithClientProp, renderWithDaemon } from "@/test/render-with-daemon";
+import { useProviderCatalog } from "@/hooks/use-provider-catalog";
+import { createQueryClient } from "@/lib/query/query-client";
+import { renderHookWithDaemon, renderWithClientProp, renderWithDaemon } from "@/test/render-with-daemon";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 
 /**
@@ -116,8 +118,9 @@ describe("shared catalog / profile / health cache", () => {
     const count = (method: string) => d.calls.filter((c) => c.method === method).length;
     expect(count("provider.list")).toBe(1);
     expect(count("profile.list")).toBe(1);
-    // One local health check per provider key, shared by the sidebar count, the picker and the dots.
-    expect(count("provider.test")).toBeLessThanOrEqual(3);
+    // One local health check per provider key (anthropic, openai, glm), run by the sidebar's ensure() and
+    // shared by the picker and the dots: not zero, not one per surface.
+    expect(count("provider.test")).toBe(3);
     // And nothing here may ever ask a provider for plan usage (ADR-0028).
     expect(d.count("touch")).toBe(0);
     expect(d.count("refresh")).toBe(0);
@@ -171,7 +174,16 @@ describe("shared catalog / profile / health cache", () => {
     await act(async () => d.emit("profile.updated", { profile: { ...created, Name: "Reviewer 2" } }));
     expect(commands.some((c) => c.title === "Use agent: Reviewer 2")).toBe(true);
     expect(commands.some((c) => c.title === "Use agent: Reviewer")).toBe(false);
+    // The open picker shows the renamed entry too (Settings row + picker entry), and not the old name.
+    expect((await screen.findAllByText("Reviewer 2")).length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryAllByText("Reviewer")).toHaveLength(0);
+    d.profiles = []; // the daemon's truth after the delete
     await act(async () => d.emit("profile.deleted", { id: created.ID }));
+    expect(commands.some((c) => c.title.startsWith("Use agent:"))).toBe(false);
+    expect(screen.queryAllByText("Reviewer 2")).toHaveLength(0);
+    // A late update for the deleted profile does not bring it back (one re-read settles it).
+    await act(async () => d.emit("profile.updated", { profile: { ...created, Name: "Reviewer 3" } }));
+    await flush();
     expect(commands.some((c) => c.title.startsWith("Use agent:"))).toBe(false);
   });
 
@@ -201,9 +213,10 @@ describe("shared catalog / profile / health cache", () => {
     const healthy = Number(/(\d+) healthy/.exec(screen.getByTestId("sidebar-footer-host-providers").textContent ?? "")?.[1]);
     // Providers' account rows: claude (anthropic) ok, codex (openai) failing; GLM has no account row.
     const okDots = screen.getAllByTestId(/^provider-row-dot-/).filter((dot) => dot.getAttribute("data-status") === "ok");
-    // The sidebar also counts GLM (cli, tested ok) -- it has no account row, so compare through the same cache:
+    // The footer counts providers through the same cache: every provider whose test answered ok (anthropic, glm).
+    const okProviders = Object.values(d.testResults).filter((r) => r.ok).length;
     expect(okDots).toHaveLength(1);
-    expect(healthy).toBe(okDots.length + 1);
+    expect(healthy).toBe(okProviders);
     expect(within(screen.getByTestId("provider-row-2")).getByTestId("provider-row-dot-2")).toHaveAttribute("data-status", "failed");
 
     // Pressing Test on the failing row after it recovers flips the dot AND the footer count together.
@@ -212,6 +225,65 @@ describe("shared catalog / profile / health cache", () => {
     await flush();
     expect(screen.getByTestId("provider-row-dot-2")).toHaveAttribute("data-status", "ok");
     expect(screen.getByTestId("sidebar-footer-host-providers")).toHaveTextContent("3 healthy");
+  });
+
+  it("a provider.test that errors counts as not healthy: the footer count still shows", async () => {
+    const d = new FakeUsageDaemon([]);
+    d.providers = PROVIDERS as never;
+    d.testRpcErrors = { glm: new Error("provider.test: spawn failed") };
+    renderWithDaemon(
+      <KeyboardProvider>
+        <PaletteProvider>
+          <SidebarProvider>
+            <AppSidebar client={d.client as never} selectedTaskId={null} />
+          </SidebarProvider>
+        </PaletteProvider>
+      </KeyboardProvider>,
+      d,
+    );
+    await flush();
+    fireEvent.click(screen.getByTestId("sidebar-footer-host"));
+    // anthropic + openai answer ok, glm's check errored: 2 of 3, and the count is not hidden.
+    expect(screen.getByTestId("sidebar-footer-host-providers")).toHaveTextContent("2 healthy");
+  });
+
+  it("account.updated drops that provider's health answer and the footer re-tests it", async () => {
+    const d = new FakeUsageDaemon([]);
+    d.providers = PROVIDERS as never;
+    d.accounts = [account(1, "anthropic", "work")];
+    renderWithDaemon(
+      <KeyboardProvider>
+        <PaletteProvider>
+          <SidebarProvider>
+            <AppSidebar client={d.client as never} selectedTaskId={null} />
+          </SidebarProvider>
+        </PaletteProvider>
+      </KeyboardProvider>,
+      d,
+    );
+    await flush();
+    const tests = (key: string) => d.calls.filter((c) => c.method === "provider.test" && (c.params as { provider: string }).provider === key).length;
+    expect(tests("anthropic")).toBe(1);
+    // Credential re-login: the provider's earlier answer is stale; exactly that provider is re-tested.
+    await act(async () => d.emit("account.updated", { account: account(1, "anthropic", "work") }));
+    await flush();
+    expect(tests("anthropic")).toBe(2);
+    expect(tests("openai")).toBe(1);
+  });
+
+  it("a failed provider.list is not re-sent by every component that mounts afterwards", async () => {
+    const d = new FakeUsageDaemon([]);
+    d.failNonUsageWith = new Error("provider.list down");
+    const qc = createQueryClient();
+    const first = renderHookWithDaemon(() => useProviderCatalog(), d, { initialProps: undefined, queryClient: qc });
+    await flush();
+    expect(d.countCalls("provider.list")).toBe(1);
+    expect(first.result.current.settled).toBe(true);
+    first.unmount();
+    // Another surface mounts later against the same connection's cache: the failure is remembered, not retried.
+    renderHookWithDaemon(() => useProviderCatalog(), d, { initialProps: undefined, queryClient: qc });
+    await flush();
+    expect(d.countCalls("provider.list")).toBe(1);
   });
 
   it("one fallback provider list constant", () => {
@@ -228,12 +300,25 @@ describe("shared catalog / profile / health cache", () => {
     };
     walk(root);
     expect(declarations).toEqual(["lib/provider-catalog-fallback.ts"]);
+    // And no inline copy of the two-provider list under another name.
+    const inline: string[] = [];
+    const walkInline = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) walkInline(path);
+        else if (/\.tsx?$/.test(name) && !/\.test\./.test(name) && /\[\s*\{\s*id:\s*"claude-native"\s*\}\s*,\s*\{\s*id:\s*"glm"\s*\}\s*\]/.test(readFileSync(path, "utf8"))) {
+          inline.push(path.slice(root.length + 1));
+        }
+      }
+    };
+    walkInline(root);
+    expect(inline).toEqual(["lib/provider-catalog-fallback.ts"]);
   });
 });
 
 // A bare FakeWsClient variant: nothing answers, so exactly what each surface *asked* is visible.
 describe("shared catalog requests (unanswered client)", () => {
-  it("composer, task header and agents settings share one provider.list and one profile.list request", async () => {
+  it("composer and task header share one provider.list and one profile.list request", async () => {
     const client = new FakeWsClient();
     renderWithClientProp(
       <KeyboardProvider>

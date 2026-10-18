@@ -22,13 +22,9 @@ import type {
   ConfigOptionParams,
   PermissionSettings,
   Provider,
-
   ThinkingLevel,
 } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
-
-/** Used until provider.list answers (and kept if it fails) so the composer is never unusable because one fetch lost. */
-/** How long the picker waits on provider.list before it falls back to the built-in catalog. */
 
 /** Icon-only send cluster: 44px touch targets below md (Item 21), ZCode's 32px rounded squares from md up. */
 const ICON_ACTION_BUTTON_CLASS = "size-11 rounded-xl md:size-8";

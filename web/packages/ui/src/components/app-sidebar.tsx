@@ -616,9 +616,10 @@ export function AppSidebar({
     summary.total > 0 && summary.tested === summary.total ? { healthy: summary.healthy, total: summary.total } : null;
   // Runs when the catalog arrives (total 0 -> N) and per connection; `ensure` skips keys already cached
   // or in flight, so each provider is tested once per connection, never on a loop.
+  const untested = summary.tested < summary.total;
   useEffect(() => {
     ensure();
-  }, [ensure, summary.total]);
+  }, [ensure, summary.total, untested]);
 
   /**
    * Moving a task has no confirmation dialog (unlike archive/delete -- it's

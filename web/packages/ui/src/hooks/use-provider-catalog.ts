@@ -5,15 +5,17 @@ import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
 import { FALLBACK_PROVIDERS } from "@/lib/provider-catalog-fallback";
 import { queryKeys } from "@/lib/query-keys";
 import type { ProviderInfo, ProviderListResult } from "@/lib/types";
-import type { WsClient } from "@/lib/ws-client";
+import type { WsClientLike } from "@/lib/ws-client";
 
 /** The one `provider.list` query definition: the hook and one-off readers (`ensureQueryData`) share it, so the key has a single fetcher. */
-export function providerListQueryOptions(client: WsClient | null) {
+export function providerListQueryOptions(client: WsClientLike | null) {
   return queryOptions({
     queryKey: queryKeys.providerList(),
     enabled: client !== null,
     staleTime: Infinity,
     retry: false,
+    // A failed list is not re-sent by every component that mounts afterwards (a reconnect/event invalidation re-reads it).
+    retryOnMount: false,
     queryFn: async (): Promise<ProviderListResult> => {
       if (!client) throw new Error("no daemon connection");
       try {
@@ -57,13 +59,15 @@ export function useProviderCatalog(): {
   const query = useQuery(providerListQueryOptions(client));
   const providers = query.data?.providers ?? NO_PROVIDERS;
   // A daemon that never answers must not leave a picker on "Loading…" forever: the fallback catalog takes over.
-  const [timedOut, setTimedOut] = useState(false);
+  // Per connection: a new client waits (shows "Loading…") again before falling back.
+  const [timedOutFor, setTimedOutFor] = useState<WsClientLike | null>(null);
+  const timedOut = client !== null && timedOutFor === client;
   const waiting = client !== null && query.data === undefined && !query.error;
   useEffect(() => {
     if (!waiting) return;
-    const giveUp = setTimeout(() => setTimedOut(true), PROVIDER_LIST_TIMEOUT_MS);
+    const giveUp = setTimeout(() => setTimedOutFor(client), PROVIDER_LIST_TIMEOUT_MS);
     return () => clearTimeout(giveUp);
-  }, [waiting]);
+  }, [waiting, client]);
   return {
     providers,
     providersOrFallback: providers.length > 0 ? providers : FALLBACK_PROVIDERS,

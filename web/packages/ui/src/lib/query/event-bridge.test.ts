@@ -115,4 +115,28 @@ describe("applyDaemonEvent", () => {
     expect(qc.getQueryData(queryKeys.accountUsage())).toBeUndefined();
     expect(qc.getQueryData(queryKeys.accountList())).toBeUndefined();
   });
+
+  it("profile.updated for a profile the cache does not hold re-reads instead of resurrecting it", () => {
+    const qc = createQueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    qc.setQueryData(queryKeys.profileList(), [{ ID: 1, Name: "A" }]);
+    applyDaemonEvent(qc, "profile.updated", { profile: { ID: 9, Name: "Ghost" } });
+    expect(qc.getQueryData<{ ID: number }[]>(queryKeys.profileList())?.map((p) => p.ID)).toEqual([1]);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.profileList() });
+    // A *created* profile is upserted.
+    applyDaemonEvent(qc, "profile.created", { profile: { ID: 2, Name: "B" } });
+    expect(qc.getQueryData<{ ID: number }[]>(queryKeys.profileList())?.map((p) => p.ID)).toEqual([1, 2]);
+  });
+
+  it("account.updated / account.removed drop the provider's cached health answer", () => {
+    const qc = createQueryClient();
+    qc.setQueryData(queryKeys.providerTest("anthropic"), { ok: false, detail: "old" });
+    qc.setQueryData(queryKeys.providerTest("openai"), { ok: true, detail: "ok" });
+    qc.setQueryData(queryKeys.accountList(), [account(1, "A"), { ...account(2, "B"), provider: "openai" }]);
+    applyDaemonEvent(qc, "account.updated", { account: account(1, "A") });
+    expect(qc.getQueryData(queryKeys.providerTest("anthropic"))).toBeUndefined();
+    expect(qc.getQueryData(queryKeys.providerTest("openai"))).toBeDefined();
+    applyDaemonEvent(qc, "account.removed", { id: 2 });
+    expect(qc.getQueryData(queryKeys.providerTest("openai"))).toBeUndefined();
+  });
 });

@@ -29,6 +29,13 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       } else {
         void queryClient.invalidateQueries({ queryKey: queryKeys.accountList() });
       }
+      // The credential may have changed, so the provider's earlier health answer is stale: drop it (the
+      // footer's ensure() re-tests it; a local check, never a provider call).
+      if (account && typeof account.provider === "string") {
+        queryClient.removeQueries({ queryKey: queryKeys.providerTest(account.provider) });
+      } else {
+        queryClient.removeQueries({ queryKey: queryKeys.providerTestAll() });
+      }
       // A new account has no usage row yet and a renamed one has a new displayName: one more
       // cached read picks both up.
       void queryClient.invalidateQueries({ queryKey: queryKeys.accountUsage() });
@@ -42,6 +49,9 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
         void queryClient.invalidateQueries({ queryKey: queryKeys.accountUsage() });
         return;
       }
+      const removed = queryClient.getQueryData<Account[]>(queryKeys.accountList())?.find((a) => a.id === id);
+      if (removed) queryClient.removeQueries({ queryKey: queryKeys.providerTest(removed.provider) });
+      else queryClient.removeQueries({ queryKey: queryKeys.providerTestAll() });
       queryClient.setQueryData<Account[]>(queryKeys.accountList(), (held) => held?.filter((a) => a.id !== id));
       queryClient.setQueryData<UsageQueryData>(queryKeys.accountUsage(), (held) =>
         held ? { ...held, reports: held.reports.filter((r) => r.accountId !== id) } : held,
@@ -75,7 +85,11 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       const profile = (payload as { profile?: AgentProfile } | null)?.profile;
       // Upsert by ID is idempotent with the mutation's own write; a malformed
       // payload (or a list not yet cached) falls back to one re-read.
-      if (isProfile(profile) && queryClient.getQueryData(queryKeys.profileList()) !== undefined) {
+      const held = queryClient.getQueryData<AgentProfile[]>(queryKeys.profileList());
+      // An *update* for a profile the cache does not hold (it was deleted just before, or the list is
+      // stale) is settled by one re-read instead of resurrecting it, as with account.usage.
+      const known = topic === "profile.created" || held?.some((p) => isProfile(profile) && p.ID === profile.ID);
+      if (isProfile(profile) && held !== undefined && known) {
         upsertProfileInCache(queryClient, profile);
       } else {
         void queryClient.invalidateQueries({ queryKey: queryKeys.profileList() });

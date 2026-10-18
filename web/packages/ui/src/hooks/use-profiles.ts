@@ -22,6 +22,7 @@ export function useProfiles() {
     enabled: client !== null,
     staleTime: Infinity,
     retry: false,
+    retryOnMount: false,
     queryFn: async (): Promise<AgentProfile[]> => {
       if (!client) throw new Error("no daemon connection");
       return (await client.call<AgentProfile[]>("profile.list")) ?? [];
@@ -39,7 +40,8 @@ export function useProfileList(): AgentProfile[] {
 /** Writes a `profile.*` mutation's or event's profile into the cached list (upsert by ID). */
 export function upsertProfileInCache(queryClient: QueryClient, profile: AgentProfile): void {
   queryClient.setQueryData<AgentProfile[]>(queryKeys.profileList(), (held) => {
-    if (!held) return [profile];
+    // No cached list: leave it to the first read (a one-element list would pass for the whole answer).
+    if (!held) return held;
     const index = held.findIndex((existing) => existing.ID === profile.ID);
     if (index === -1) return [...held, profile];
     const next = held.slice();

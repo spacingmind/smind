@@ -14,6 +14,8 @@ export const queryKeys = {
   providerList: () => ["provider.list"] as const,
   profileList: () => ["profile.list"] as const,
   /** One `provider.test` answer per account-vocabulary provider key (`accountHealthTestKey`). */
+  /** Every cached `provider.test` answer (a prefix, for removal after a reconnect or an account change). */
+  providerTestAll: () => ["provider.test"] as const,
   providerTest: (providerKey: string) => ["provider.test", providerKey] as const,
   /** The `useRunProviderTest` mutation for that provider: its pending entries are the row's "Testing…". */
   providerTestMutation: (providerKey: string) => ["provider.test.run", providerKey] as const,

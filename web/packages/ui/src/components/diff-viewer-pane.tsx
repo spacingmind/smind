@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { providerListQueryOptions } from "@/hooks/use-provider-catalog";
 import { Icons } from "@/lib/icons";
 
 import { DiffRender, type DiffOutputFormat } from "@/components/diff-render";
@@ -12,8 +14,6 @@ import { PaneHeader } from "@/components/ui/pane-header";
 import { externalLinkProps } from "@/lib/external-link";
 import { cn } from "@/lib/utils";
 import { useTaskDiff } from "@/hooks/use-task-diff";
-import { useQueryClient } from "@tanstack/react-query";
-import { providerListQueryOptions } from "@/hooks/use-provider-catalog";
 import { suggestCommitMessage } from "@/lib/commit-suggestion";
 import { formatDiffStat } from "@/lib/diff-stat";
 import { subscribeDiffReveal, takeDiffReveal } from "@/lib/diff-reveal";
@@ -286,9 +286,9 @@ export function DiffViewerPane({
     try {
       let provider: Provider = "claude-native";
       try {
-        // The shared catalog's cache entry (re-reading it only if it was
-        // never fetched or was invalidated) -- never a second one-off fetch.
-        const result = await queryClient.ensureQueryData(providerListQueryOptions(client as never));
+        // The shared catalog's cache entry: served from the cache while it is fresh, re-read only if
+        // it was never fetched or was invalidated -- never a second one-off fetch.
+        const result = await queryClient.fetchQuery(providerListQueryOptions(client));
         if (result?.providers?.[0]) provider = result.providers[0].id;
       } catch {
         // provider.list failing shouldn't block the review -- the daemon's
