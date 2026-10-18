@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gorilla/websocket"
@@ -165,6 +166,39 @@ func TestRunAccountLoginUsage(t *testing.T) {
 	}
 	if code := run([]string{"account", "login", "anthropic"}); code != 2 {
 		t.Fatalf("run(account login) with one arg = %d, want 2", code)
+	}
+}
+
+// TestPrintLoginEventDeviceCode: a deviceCode event prints the verification URL
+// and the user code and never opens a browser; an authorizeUrl event still
+// does; malformed and unknown events print nothing.
+func TestPrintLoginEventDeviceCode(t *testing.T) {
+	var opened []string
+	previousOpenBrowser := openBrowser
+	openBrowser = func(u string) { opened = append(opened, u) }
+	defer func() { openBrowser = previousOpenBrowser }()
+
+	var out bytes.Buffer
+	printLoginEvent(&out, "deviceCode", json.RawMessage(`{"loginId":"l","verificationUrl":"https://example.invalid/device","userCode":"ABCD-1234","expiresAt":"2030-01-01T00:00:00Z","intervalSeconds":5}`))
+	want := "Open https://example.invalid/device and enter this code to log in:\nABCD-1234\n"
+	if out.String() != want {
+		t.Errorf("deviceCode output = %q, want %q", out.String(), want)
+	}
+	if len(opened) != 0 {
+		t.Errorf("openBrowser called with %q for a device login, want no browser", opened)
+	}
+
+	out.Reset()
+	printLoginEvent(&out, "deviceCode", json.RawMessage(`{"verificationUrl":"https://example.invalid/device"}`))
+	printLoginEvent(&out, "deviceCode", json.RawMessage(`not json`))
+	printLoginEvent(&out, "somethingElse", json.RawMessage(`{}`))
+	if out.Len() != 0 {
+		t.Errorf("malformed or unknown events printed %q, want nothing", out.String())
+	}
+
+	printLoginEvent(&out, "authorizeUrl", json.RawMessage(`{"loginId":"l","url":"https://example.invalid/a","pasteOnly":true}`))
+	if len(opened) != 1 || opened[0] != "https://example.invalid/a" || !strings.Contains(out.String(), "https://example.invalid/a") {
+		t.Errorf("authorizeUrl: opened %q, output %q, want the URL printed and opened", opened, out.String())
 	}
 }
 

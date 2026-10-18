@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"log/slog"
+	"net"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
@@ -96,6 +97,34 @@ func TestServer_AccountOAuthComplete(t *testing.T) {
 			t.Fatalf("account.oauthComplete error = %v", resp.Error.Message)
 		}
 		readEnvelopeFor(t, ws, "1", 5*time.Second)
+	})
+
+	t.Run("oauthStart flags pasteOnly when the callback port is busy", func(t *testing.T) {
+		t.Parallel()
+		env := newOAuthTestEnv(t)
+		ws := dialWS(t, env.srv, "tok")
+
+		occupied, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("net.Listen() error = %v", err)
+		}
+		defer occupied.Close()
+		env.login.addr = occupied.Addr().String()
+
+		loginID, state, _, raw := startOAuthRaw(t, ws, "1")
+		var params struct {
+			PasteOnly bool `json:"pasteOnly"`
+		}
+		if err := json.Unmarshal(raw, &params); err != nil || !params.PasteOnly {
+			t.Fatalf("authorizeUrl params = %s, want pasteOnly:true", raw)
+		}
+		sendRequest(t, ws, "2", "account.oauthComplete", map[string]any{"loginId": loginID, "redirectUrl": "http://localhost:54545/callback?code=c&state=" + state})
+		if resp := readEnvelopeFor(t, ws, "2", 5*time.Second); resp.Error != nil {
+			t.Fatalf("account.oauthComplete error = %v", resp.Error.Message)
+		}
+		if term := readEnvelopeFor(t, ws, "1", 5*time.Second); term.Error != nil {
+			t.Fatalf("account.oauthStart error = %v", term.Error.Message)
+		}
 	})
 
 	t.Run("oauthComplete finishes the login from a pasted redirect", func(t *testing.T) {

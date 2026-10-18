@@ -196,23 +196,7 @@ func cmdAccountLogin(args []string) int {
 	err = client.CallStream(ctx, "account.oauthStart", map[string]any{
 		"provider": provider, "label": label,
 	}, func(event string, params json.RawMessage) {
-		switch event {
-		case "authorizeUrl":
-			var p authorizeURLEventParams
-			if err := json.Unmarshal(params, &p); err != nil || p.URL == "" {
-				return
-			}
-			fmt.Printf("Open this URL to log in:\n%s\n", p.URL)
-			openBrowser(p.URL)
-		case "deviceCode":
-			// No browser is opened: a device login is for a machine whose
-			// browser is not the one the user signs in with.
-			var p deviceCodeEventParams
-			if err := json.Unmarshal(params, &p); err != nil || p.VerificationURL == "" || p.UserCode == "" {
-				return
-			}
-			fmt.Printf("Open %s and enter this code to log in:\n%s\n", p.VerificationURL, p.UserCode)
-		}
+		printLoginEvent(os.Stdout, event, params)
 	}, &account)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "account login: %v\n", err)
@@ -220,6 +204,29 @@ func cmdAccountLogin(args []string) int {
 	}
 	printLoginResult(os.Stdout, account)
 	return 0
+}
+
+// printLoginEvent reports one account.oauthStart event on w: the authorize URL
+// (also opened in a local browser, best effort) or, for a device login, the
+// verification URL and user code (no browser: the user signs in on another
+// device). A pasteOnly hint needs no handling here -- the CLI always prints the
+// URL. Unknown or malformed events are ignored.
+func printLoginEvent(w io.Writer, event string, params json.RawMessage) {
+	switch event {
+	case "authorizeUrl":
+		var p authorizeURLEventParams
+		if err := json.Unmarshal(params, &p); err != nil || p.URL == "" {
+			return
+		}
+		fmt.Fprintf(w, "Open this URL to log in:\n%s\n", p.URL)
+		openBrowser(p.URL)
+	case "deviceCode":
+		var p deviceCodeEventParams
+		if err := json.Unmarshal(params, &p); err != nil || p.VerificationURL == "" || p.UserCode == "" {
+			return
+		}
+		fmt.Fprintf(w, "Open %s and enter this code to log in:\n%s\n", p.VerificationURL, p.UserCode)
+	}
 }
 
 // loginResult is account.oauthStart's result: the account plus whether a row
