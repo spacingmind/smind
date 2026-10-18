@@ -3,7 +3,9 @@
 package redact
 
 import (
+	"encoding/json"
 	"math"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -42,8 +44,10 @@ var (
 	homeRegexes = []*regexp.Regexp{
 		regexp.MustCompile(`/Users/[^/\s]+`),
 		regexp.MustCompile(`/home/[^/\s]+`),
-		regexp.MustCompile(`(?i)c:\\users\\[^\\\s]+`),
+		regexp.MustCompile(`(?i)\\\\\?\\[a-z]:\\users\\[^\\\s]+`),
+		regexp.MustCompile(`(?i)[a-z]:\\users\\[^\\\s]+`),
 	}
+	rootHome     = regexp.MustCompile(`(^|[^A-Za-z0-9._-])/root(/|$)`)
 	entropyToken = regexp.MustCompile(`[A-Za-z0-9+=]{24,}`)
 	lowerHex     = regexp.MustCompile(`^[0-9a-f]+$`)
 )
@@ -52,28 +56,42 @@ var (
 // safe for concurrent use.
 type Redactor struct {
 	exactSecrets []string
-	homeDirs     []string
+	homeDirs     []*regexp.Regexp
 }
 
 // New builds a Redactor. exactSecrets are values scrubbed by exact match
 // (MCP env/header values, run env values); values shorter than 8 bytes are
 // ignored. homeDirs are absolute home dirs rewritten to "~".
 func New(exactSecrets []string, homeDirs []string) *Redactor {
+	seen := map[string]bool{}
 	var exact []string
-	for _, s := range exactSecrets {
-		if len(s) >= 8 {
-			exact = append(exact, s)
+	add := func(v string) {
+		if len(v) >= 8 && !seen[v] {
+			seen[v] = true
+			exact = append(exact, v)
 		}
+	}
+	for _, s := range exactSecrets {
+		add(s)
+		// Secrets also show up JSON-escaped (tool inputs) and URL-encoded
+		// (query strings, paths).
+		if b, err := json.Marshal(s); err == nil {
+			add(string(b[1 : len(b)-1]))
+		}
+		add(url.QueryEscape(s))
+		add(url.PathEscape(s))
 	}
 	// Longest first so a secret containing another is replaced whole.
 	sort.Slice(exact, func(i, j int) bool { return len(exact[i]) > len(exact[j]) })
-	var homes []string
+	var homes []*regexp.Regexp
 	for _, h := range homeDirs {
 		h = strings.TrimSuffix(h, "/")
 		if h == "" || h == "/" {
 			continue
 		}
-		homes = append(homes, h)
+		// The home dir must end at a path boundary: /home/al is not a prefix
+		// of /home/alice.
+		homes = append(homes, regexp.MustCompile(regexp.QuoteMeta(h)+`([^A-Za-z0-9._-]|$)`))
 	}
 	return &Redactor{exactSecrets: exact, homeDirs: homes}
 }
@@ -85,11 +103,12 @@ func (r *Redactor) String(s string) string {
 		s = strings.ReplaceAll(s, sec, Placeholder)
 	}
 	for _, h := range r.homeDirs {
-		s = strings.ReplaceAll(s, h, "~")
+		s = h.ReplaceAllString(s, "~${1}")
 	}
 	for _, hre := range homeRegexes {
 		s = hre.ReplaceAllString(s, "~")
 	}
+	s = rootHome.ReplaceAllString(s, "${1}~${2}")
 	for _, rl := range rules {
 		switch rl.name {
 		case "bearer":

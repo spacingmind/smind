@@ -54,6 +54,7 @@ func corpus(r *Redactor) map[string]string {
 		"url creds":        "postgres://admin:s3cret@localhost:5432/app redis://:s3cretpw@cache:6379",
 		"curl -u":          "curl -u admin:s3cr3tpassw0rd http://x",
 		"prefixed":         "k " + "npm_" + "abcdefghijklmnopqrst" + " " + "hf_" + "abcdefghijklmnopqrstuvwx",
+		"home boundary":    "/home/alice/x and D:\\Users\\bob\\proj and \\\\?\\C:\\Users\\bob\\x /root/y",
 		"counters":         "max_tokens: 4096 and credentials: none",
 	}
 }
@@ -297,6 +298,41 @@ func TestRedact_PrefixedKeys(t *testing.T) {
 	} {
 		if got := r.String("tok " + in + " end"); got != "tok "+Placeholder+" end" {
 			t.Errorf("%q: got %q", in, got)
+		}
+	}
+}
+
+func TestRedact_HomePrefixBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		homes    []string
+		in, want string
+	}{
+		{[]string{"/home/al"}, "/home/alice/x", "~/x"},
+		{[]string{"/home/al"}, "cd /home/al/x", "cd ~/x"},
+		{[]string{"/home/al"}, "/home/al", "~"},
+		{[]string{"/Users/bo"}, "/Users/bob/x", "~/x"},
+		{nil, `D:\Users\bob\proj`, `~\proj`},
+		{nil, `\\?\C:\Users\bob\proj`, `~\proj`},
+		{nil, "/root/proj and /root", "~/proj and ~"},
+		{nil, "/var/root/x /rooted/y", "/var/root/x /rooted/y"},
+	} {
+		if got := New(nil, tc.homes).String(tc.in); got != tc.want {
+			t.Errorf("%v %q: got %q, want %q", tc.homes, tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestRedact_EncodedExactSecrets(t *testing.T) {
+	const secret = `pa"ss word/123x`
+	r := New([]string{secret}, nil)
+	for name, form := range map[string]string{
+		"raw":   secret,
+		"json":  `pa\"ss word/123x`,
+		"query": `pa%22ss+word%2F123x`,
+		"path":  `pa%22ss%20word%2F123x`,
+	} {
+		if got := r.String("val " + form + " end"); got != "val "+Placeholder+" end" {
+			t.Errorf("%s: got %q", name, got)
 		}
 	}
 }
