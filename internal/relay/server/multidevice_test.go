@@ -466,6 +466,10 @@ func TestSyncListsWaitingRoutesOnControlAccept(t *testing.T) {
 	for _, w := range waiting {
 		v := mdOpenStream(t, h, ctx, adm, mdRoute(w.dev, w.sess, relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
 		v.send(v.frame(0, []byte("reg")))
+		// Send only queues the frame: the relay registers the route when it
+		// reads it. Wait until it has forwarded it (into the daemon queue), or
+		// the control stream below can open first and Sync would miss the route.
+		waitFor(t, mdTimeout, func() bool { return h.srv.BufferedFrames(testWorkspace, w.sess, w.dev) == 1 })
 	}
 	// ...and a route that already has a daemon side must NOT be listed.
 	both := mdOpenStream(t, h, ctx, adm, mdRoute("dev-full", "sess-full", relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
