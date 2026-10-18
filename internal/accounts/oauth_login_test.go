@@ -307,6 +307,44 @@ func idTokenWithClaims(t *testing.T, claims map[string]any) string {
 	return enc.EncodeToString([]byte(`{"alg":"none"}`)) + "." + enc.EncodeToString(payload) + "." + enc.EncodeToString([]byte("sig"))
 }
 
+// anthropicIdentityOf runs an Anthropic exchange against a fake token
+// endpoint whose response carries the given account.uuid and
+// organization.uuid ("" omits that object), and returns the resulting
+// identity.
+func anthropicIdentityOf(t *testing.T, newLogin func(body string) *AnthropicLogin, accountUUID, orgUUID string) string {
+	t.Helper()
+	body := map[string]any{"access_token": "a", "refresh_token": "r", "expires_in": 3600}
+	if accountUUID != "" {
+		body["account"] = map[string]any{"uuid": accountUUID, "email_address": "someone@example.com"}
+	}
+	if orgUUID != "" {
+		body["organization"] = map[string]any{"uuid": orgUUID}
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal anthropic exchange body: %v", err)
+	}
+	res, err := newLogin(string(raw)).Exchange(context.Background(), "c", "s", PKCECodes{CodeVerifier: "v"})
+	if err != nil {
+		t.Fatalf("Exchange() error = %v", err)
+	}
+	if res.Credential.AccessToken != "a" {
+		t.Fatalf("credential = %+v, want the login to succeed whatever the identity", res.Credential)
+	}
+	return AccountIdentity("anthropic", res.Subject)
+}
+
+func newAnthropicLoginForBody(t *testing.T) func(body string) *AnthropicLogin {
+	t.Helper()
+	return func(body string) *AnthropicLogin {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(body))
+		}))
+		t.Cleanup(srv.Close)
+		return NewAnthropicLogin(WithAnthropicLoginHTTPClient(testHTTPClient(t, srv)))
+	}
+}
+
 func TestLoginExchange_Identity(t *testing.T) {
 	t.Parallel()
 
@@ -339,13 +377,8 @@ func TestLoginExchange_Identity(t *testing.T) {
 			}
 			return AccountIdentity(provider, res.Subject)
 		}
-		anthropicIdentity := func(uuid string) string {
-			body := `{"access_token":"a","refresh_token":"r","expires_in":3600}`
-			if uuid != "" {
-				body = `{"access_token":"a","refresh_token":"r","expires_in":3600,"account":{"uuid":"` + uuid + `","email_address":"someone@example.com"},"organization":{"uuid":"org-1"}}`
-			}
-			res, err := anthropicLogin(body).Exchange(context.Background(), "c", "s", PKCECodes{CodeVerifier: "v"})
-			return identityOf("anthropic", res, err)
+		anthropicIdentity := func(accountUUID, orgUUID string) string {
+			return anthropicIdentityOf(t, anthropicLogin, accountUUID, orgUUID)
 		}
 		openaiIdentity := func(sub, chatgptAccount string) string {
 			var idToken string
@@ -360,13 +393,13 @@ func TestLoginExchange_Identity(t *testing.T) {
 			return identityOf("openai", res, err)
 		}
 
-		// Anthropic: stable per account.uuid, distinct across accounts,
-		// empty when the response has no account.
-		a1, a1again, a2 := anthropicIdentity("uuid-1"), anthropicIdentity("uuid-1"), anthropicIdentity("uuid-2")
+		// Anthropic: stable per (account.uuid, organization.uuid), distinct
+		// across accounts, empty when the response has no account.
+		a1, a1again, a2 := anthropicIdentity("uuid-1", "org-1"), anthropicIdentity("uuid-1", "org-1"), anthropicIdentity("uuid-2", "org-1")
 		if a1 == "" || a1 != a1again || a1 == a2 {
 			t.Errorf("anthropic identities = %q, %q, %q, want stable and distinct", a1, a1again, a2)
 		}
-		if got := anthropicIdentity(""); got != "" {
+		if got := anthropicIdentity("", ""); got != "" {
 			t.Errorf("anthropic identity without account = %q, want empty", got)
 		}
 
@@ -386,7 +419,7 @@ func TestLoginExchange_Identity(t *testing.T) {
 			t.Error("identity does not depend on provider")
 		}
 		for _, id := range []string{a1, o1} {
-			if len(id) != 64 || strings.Contains(id, "uuid-1") || strings.Contains(id, "user-1") || strings.Contains(id, "ws-1") {
+			if len(id) != 64 || strings.Contains(id, "uuid-1") || strings.Contains(id, "org-1") || strings.Contains(id, "user-1") || strings.Contains(id, "ws-1") {
 				t.Errorf("identity %q is not an opaque sha256 hex", id)
 			}
 		}
@@ -426,6 +459,45 @@ func TestAccountIdentity_Derivation(t *testing.T) {
 		both := openAISubject(idTokenWithClaims(t, map[string]any{"sub": "user-1", "https://api.openai.com/auth": auth("ws-1")}))
 		if both == "" {
 			t.Error("openAISubject with both sub and chatgpt_account_id is empty")
+		}
+	})
+
+	t.Run("anthropic identity requires both account uuid and organization uuid", func(t *testing.T) {
+		t.Parallel()
+
+		newLogin := newAnthropicLoginForBody(t)
+		for name, ids := range map[string][2]string{
+			"missing organization": {"acct-1", ""},
+			"missing account":      {"", "org-1"},
+			"both missing":         {"", ""},
+		} {
+			if got := anthropicIdentityOf(t, newLogin, ids[0], ids[1]); got != "" {
+				t.Errorf("%s: identity = %q, want empty (no identity, login still succeeds)", name, got)
+			}
+		}
+		if got := anthropicIdentityOf(t, newLogin, "acct-1", "org-1"); got == "" {
+			t.Error("identity with both account and organization uuid is empty")
+		}
+		for _, pair := range [][2]string{{"", "org"}, {"acct", ""}, {"", ""}} {
+			if got := anthropicSubject(pair[0], pair[1]); got != "" {
+				t.Errorf("anthropicSubject(%q, %q) = %q, want empty", pair[0], pair[1], got)
+			}
+		}
+	})
+
+	t.Run("anthropic same account uuid in a different org yields a different identity", func(t *testing.T) {
+		t.Parallel()
+
+		newLogin := newAnthropicLoginForBody(t)
+		personal := anthropicIdentityOf(t, newLogin, "acct-1", "org-personal")
+		team := anthropicIdentityOf(t, newLogin, "acct-1", "org-team")
+		otherPerson := anthropicIdentityOf(t, newLogin, "acct-2", "org-personal")
+		if personal == "" || team == "" || personal == team || personal == otherPerson {
+			t.Errorf("identities = %q, %q, %q, want all distinct", personal, team, otherPerson)
+		}
+		// account/org boundary inside the subject is delimiter safe.
+		if anthropicSubject("a|b", "c") == anthropicSubject("a", "b|c") || anthropicSubject("a:1", "b") == anthropicSubject("a", "1:b") {
+			t.Error("anthropic subject collides across the account/org boundary")
 		}
 	})
 
@@ -480,6 +552,30 @@ func TestLoginExchange_UnexpectedShapes(t *testing.T) {
 			}
 			if res.Subject != "" || res.Credential.AccessToken != "a" {
 				t.Errorf("anthropic account=%s: result = %+v, want credential kept and no subject", name, res)
+			}
+		}
+
+		// A valid account with an unusable organization is no identity either.
+		for name, org := range map[string]string{
+			"string":      `"oops"`,
+			"null":        `null`,
+			"array":       `[]`,
+			"uuid number": `{"uuid":5}`,
+			"uuid object": `{"uuid":{"x":1}}`,
+			"empty":       `{}`,
+		} {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"access_token":"a","refresh_token":"r","expires_in":3600,"account":{"uuid":"acct-1"},"organization":` + org + `}`))
+			}))
+			t.Cleanup(srv.Close)
+			login := NewAnthropicLogin(WithAnthropicLoginHTTPClient(testHTTPClient(t, srv)))
+			res, err := login.Exchange(context.Background(), "c", "s", PKCECodes{CodeVerifier: "v"})
+			if err != nil {
+				t.Errorf("anthropic organization=%s (%s): Exchange() error = %v, want the login to succeed", name, org, err)
+				continue
+			}
+			if res.Subject != "" || res.Credential.AccessToken != "a" {
+				t.Errorf("anthropic organization=%s: result = %+v, want credential kept and no subject", name, res)
 			}
 		}
 
