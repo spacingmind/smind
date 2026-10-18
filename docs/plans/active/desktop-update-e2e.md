@@ -81,11 +81,38 @@ Web (`bunx vitest run src/components/desktop-update-dialog.test.tsx`):
 - [x] UI fixture test (peer-glm, `f11377c3`)
 - [x] Independent review (read-only): production plugin config as the test base, guard held across the relaunch, `installing` only after verification, tokio `rt-multi-thread` explicit
 - [x] Docs: `desktop-auto-update.md` Not verified updated
-- [ ] CI evidence (macOS + Windows `cargo test`)
+- [x] CI evidence (macOS + Windows `cargo test`, run 39105531439 on `aabe92d5`)
 
 ## Validation
 
-(filled when the scenarios pass)
+Commands: `cd desktop/src-tauri && cargo test --test updater_e2e` (13 pass on macOS locally
+and in CI; 11 on Windows CI, the two install tests are macOS-only), `cargo test` (115 lib
+tests + the e2e), `cd web/packages/ui && bunx vitest run src/components/desktop-update-dialog.test.tsx`
+(16 pass), `tsc -b packages/ui` clean.
+
+- AC1 `check_reports_available_and_downloads_nothing` (log == `GET /latest.json`).
+- AC2 `same_version_is_up_to_date`, `older_version_is_not_offered`,
+  `prerelease_version_is_not_offered` (the one that proves the production comparator is wired in),
+  `dead_endpoint_is_an_error`.
+- AC3 `install_replaces_the_bundle_and_reports_progress` (macOS: real extraction onto a fake
+  `smind.app`, `downloading` then `installing`, log `latest.json` then the artifact),
+  `download_verifies_a_good_signature` (control, also Windows).
+- AC4 `tampered_artifact_is_refused`, `signature_from_another_key_is_refused`,
+  `artifact_signed_for_another_version_is_refused`, `undecodable_signature_is_refused`,
+  macOS `refused_install_leaves_the_bundle_and_keeps_the_update_pending` (Info.plist still `old`,
+  update still pending, no `installing` event). The tampered byte is the gzip trailer so an
+  unverified tarball would have extracted cleanly: the bundle assertion is real.
+- AC5 `available_result_matches_the_ui_fixture` (Rust JSON == fixture) +
+  `update dialog renders the Rust-produced available result` (mutation: fixture version 9.9.9
+  makes the vitest fail).
+- AC6 `desktop-check` on macOS + Windows, no secret; the key is generated per test.
+- Independent read-only review: no blockers; changed because of it: tests start from the committed
+  `plugins.updater`, the install guard is held across the relaunch, `installing` is announced only
+  after verification, tokio `rt-multi-thread` explicit.
+- Windows needed the e2e to be an integration test: tauri-build embeds the Common Controls v6
+  manifest in the bin only, so a test exe reaching muda's `TaskDialogIndirect` import failed with
+  `STATUS_ENTRYPOINT_NOT_FOUND`; `build.rs` now emits `rustc-link-arg-tests` for MSVC
+  (`rustc-link-arg-tests` does not reach a lib's unit tests).
 
 ## Still manual
 
