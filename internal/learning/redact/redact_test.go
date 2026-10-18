@@ -32,6 +32,15 @@ func corpus(r *Redactor) map[string]string {
 		"home explicit":   "/data/home/bob/src/main.go",
 		"home windows":    `C:\Users\Carol\proj\main.go`,
 		"plain":           "nothing interesting here",
+		"json apikey":     `{"apiKey": "` + "ZGHFS43f" + `ks9dmas3"}`,
+		"json escaped":    `{\"password\": \"` + "hunter2" + `secret42\"}`,
+		"json env":        `{"env":{"OPENAI_API_KEY":"` + "sk-test" + `1234abcd"}}`,
+		"single quoted":   "FOO_SECRET='" + "hunter2" + "secret'",
+		"auth token":      "Authorization: Token " + "abcdef0123" + "456789abcdef",
+		"auth basic":      "Authorization: Basic " + "dXNlcjpwYXNz" + "d29yZDEyMzQ1Njc4",
+		"auth bearer":     "Authorization: Bearer " + "abcdef0123" + "456789abcdef",
+		"query":           "https://x/y?key=" + "abcdefgh" + "1234&sig=zzzzzzzz",
+		"counters":        "max_tokens: 4096 and credentials: none",
 	}
 }
 
@@ -75,7 +84,7 @@ func TestRedact_RuleCorpus(t *testing.T) {
 		return r.String(s) == "creds Bearer "+Placeholder
 	})
 	check("key=value", func(s string) bool { return r.String(s) == "DB_PASSWORD="+Placeholder })
-	check("api_key quoted", func(s string) bool { return r.String(s) == "config api_key="+Placeholder })
+	check("api_key quoted", func(s string) bool { return r.String(s) == `config api_key: "`+Placeholder+`"` })
 	check("email", func(s string) bool { return r.String(s) == "contact "+Placeholder+" now" })
 	check("card luhn", func(s string) bool { return r.String(s) == "card "+Placeholder+" charged" })
 	check("card nonluhn", func(s string) bool { return !r.Changed(s) })
@@ -119,5 +128,60 @@ func TestRedact_ChangedReportsDifference(t *testing.T) {
 	}
 	if r.Changed("plain text only") {
 		t.Fatal("Changed = true for an untouched string")
+	}
+}
+
+func TestRedact_JSONQuotedKeys(t *testing.T) {
+	r := New(nil, nil)
+	for in, want := range map[string]string{
+		`{"apiKey": "` + "ZGHFS43f" + `ks9dmas3"}`:               `{"apiKey": "[REDACTED]"}`,
+		`{\"password\": \"` + "hunter2" + `secret42\"}`:          `{\"password\": \"[REDACTED]\"}`,
+		`{"env":{"OPENAI_API_KEY":"` + "sk-test" + `1234abcd"}}`: `{"env":{"OPENAI_API_KEY":"[REDACTED]"}}`,
+		"FOO_SECRET='" + "hunter2" + "secret'":                   "FOO_SECRET='[REDACTED]'",
+	} {
+		if got := r.String(in); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRedact_AuthHeaders(t *testing.T) {
+	r := New(nil, nil)
+	for in, want := range map[string]string{
+		"Authorization: Token " + "abcdef0123" + "456789abcdef":       "Authorization: Token [REDACTED]",
+		"Authorization: Basic " + "dXNlcjpwYXNz" + "d29yZDEyMzQ1Njc4": "Authorization: Basic [REDACTED]",
+		"Authorization: Bearer " + "abcdef0123" + "456789abcdef":      "Authorization: Bearer [REDACTED]",
+	} {
+		if got := r.String(in); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRedact_KeyNamesAndQueryParams(t *testing.T) {
+	r := New(nil, nil)
+	for in, want := range map[string]string{
+		"MY_KEY=" + "abcd1234efgh":                 "MY_KEY=[REDACTED]",
+		"PRIVATE_KEY=" + "abcd1234efgh":            "PRIVATE_KEY=[REDACTED]",
+		"SSH_KEY=" + "abcd1234efgh":                "SSH_KEY=[REDACTED]",
+		"?key=" + "abcdefgh" + "1234&sig=zzzzzzzz": "?key=[REDACTED]&sig=[REDACTED]",
+		"password: " + "hunter2" + "hunter2":       "password: [REDACTED]",
+	} {
+		if got := r.String(in); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRedact_NoOverRedactionOfCountersAndWords(t *testing.T) {
+	r := New(nil, nil)
+	for _, in := range []string{
+		"max_tokens: 4096", "input_tokens: 1234", "tokenizer: gpt2",
+		"credentials: none", "Authentication: failed with 401",
+		"Authors: Alice and Bob", "author: Bob", "monkey: banana1234",
+	} {
+		if got := r.String(in); got != in {
+			t.Errorf("%q changed to %q", in, got)
+		}
 	}
 }
