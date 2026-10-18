@@ -18,6 +18,8 @@ export function ThinkingSelect({
   variant,
   placeholder,
   testId,
+  label = "Thinking level",
+  title,
 }: {
   levels?: { id: string; label: string; help?: string }[];
   value: string;
@@ -26,18 +28,22 @@ export function ThinkingSelect({
   variant: "pill" | "field";
   placeholder?: string;
   testId?: string;
+  /** The accessible name; a live ACP session's own option names itself (`option.name`). */
+  label?: string;
+  /** Overrides the current level's help text as the tooltip (a live option's own description). */
+  title?: string;
 }) {
   const current = levels.find((t) => t.id === value);
   return (
     <Select value={value} onValueChange={onChange} disabled={disabled}>
       <SelectTrigger
-        aria-label="Thinking level"
-        title={current?.help}
+        aria-label={label}
+        title={title ?? current?.help}
         data-testid={testId}
         className={variant === "pill" ? PILL_TRIGGER_CLASS : "w-full"}
       >
         {variant === "pill" && <Icons.thinking aria-hidden className="shrink-0" />}
-        <SelectValue placeholder={placeholder ?? "Thinking level"} />
+        <SelectValue placeholder={placeholder ?? label} />
       </SelectTrigger>
       <SelectContent>
         {levels.map((t) => (
