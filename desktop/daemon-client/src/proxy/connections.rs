@@ -201,10 +201,8 @@ pub fn connection_id_for_relay(workspace_id: &str, relay_native_addr: &str) -> S
     format!("relay:{workspace_id}@{relay_native_addr}")
 }
 
-/// The file as raw JSON: known entries are parsed into `Connection`s,
-/// everything this build does not understand (unknown kinds, unknown
-/// fields) is kept verbatim so a newer app version's data survives a
-/// round trip through an older one.
+/// Test-only: the old all-or-nothing file shape, used to write stale
+/// registries in tests.
 #[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredRegistry {
@@ -213,6 +211,10 @@ struct StoredRegistry {
     selected_id: String,
 }
 
+/// The file as raw JSON: known entries are parsed into `Connection`s,
+/// everything this build does not understand (unknown kinds, unknown
+/// fields) is kept verbatim so a newer app version's data survives a
+/// round trip through an older one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RawRegistry {
     #[serde(default)]
