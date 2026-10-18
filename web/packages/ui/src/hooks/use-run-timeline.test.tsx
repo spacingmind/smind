@@ -134,6 +134,77 @@ describe("useRunTimeline usage", () => {
   });
 });
 
+describe("useRunTimeline provenance", () => {
+  it("run.list BaseSHA/HeadSHA/Dirty seed the run entry", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+
+    client.nth("run.list", 0).resolve([
+      summary({ BaseSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", HeadSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Dirty: true }),
+    ]);
+    await flush();
+
+    expect(result.current.runs?.[0]?.baseSha).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(result.current.runs?.[0]?.headSha).toBe("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    expect(result.current.runs?.[0]?.dirty).toBe(true);
+  });
+
+  it("null/absent provenance fields leave the keys unset", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+
+    client.nth("run.list", 0).resolve([summary({ BaseSHA: null, HeadSHA: null, Dirty: null })]);
+    await flush();
+    await act(async () => {
+      client.nth("run.logs", 0).resolve({ runId: "run-1", status: "done", events: [] } satisfies RunLogsResult);
+    });
+
+    await waitFor(() => expect(result.current.runs?.[0]?.items).toHaveLength(0));
+    const run = result.current.runs?.[0] ?? {};
+    expect("baseSha" in run).toBe(false);
+    expect("headSha" in run).toBe(false);
+    expect("dirty" in run).toBe(false);
+  });
+
+  it("the run.logs recovery path (stream failed) fills in head sha and dirty", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+    client.nth("run.list", 0).resolve([summary({ BaseSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Status: "running", FinishedAt: null })]);
+    await flush();
+
+    await act(async () => {
+      client.nth("run.attach", 0).reject(new Error("socket dropped"));
+    });
+    await flush();
+    await act(async () => {
+      client
+        .nth("run.logs", 0)
+        .resolve({ runId: "run-1", status: "done", headSha: "dddddddddddddddddddddddddddddddddddddddd", dirty: true, events: [] } satisfies RunLogsResult);
+    });
+
+    await waitFor(() => expect(result.current.runs?.[0]?.headSha).toBe("dddddddddddddddddddddddddddddddddddddddd"));
+    expect(result.current.runs?.[0]?.baseSha).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(result.current.runs?.[0]?.dirty).toBe(true);
+  });
+
+  it("a run.status event patches only the provenance keys it carries", async () => {
+    const client = new FakeWsClient();
+    const ev = fakeEvents();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10, ev.events));
+    client.nth("run.list", 0).resolve([summary({ BaseSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Status: "running", FinishedAt: null })]);
+    await flush();
+    await act(async () => {
+      client.emit("run.attach", 0, "chunk", { text: "hi" });
+    });
+
+    await ev.fire("run.status", { runId: "run-1", taskId: 1, chatId: 10, status: "done", headSha: "cccccccccccccccccccccccccccccccccccccccc", dirty: false });
+
+    expect(result.current.runs?.[0]?.baseSha).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(result.current.runs?.[0]?.headSha).toBe("cccccccccccccccccccccccccccccccccccccccc");
+    expect(result.current.runs?.[0]?.dirty).toBe(false);
+  });
+});
+
 function fakeEvents() {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const events: DaemonEvents = {

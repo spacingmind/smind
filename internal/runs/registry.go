@@ -78,6 +78,11 @@ type Registry struct {
 	// and Start/record/finish for the write path.
 	st *store.Store
 
+	// treeRootStoreRead, when non-nil, is called before each store read treeRootOf
+	// makes. A test seam (tree_guard_test.go) for "root resolution never reads the
+	// store under reg.mu"; nil in production.
+	treeRootStoreRead func()
+
 	// notifier, if set via SetNotifier, receives run.status lifecycle
 	// notifications (Start, finish) and permission.pending notifications
 	// (runPermissionDecider), so the wsapi server can push them as
@@ -311,6 +316,9 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 		errMsg:             row.ErrMsg,
 		history:            history,
 		nextEventSeq:       nextSeq,
+		baseSHA:            row.BaseSHA,
+		headSHA:            row.HeadSHA,
+		dirty:              row.Dirty,
 		subscribers:        make(map[int]*subQueue),
 		pendingPermissions: make(map[string]chan string),
 	}, nil
@@ -419,6 +427,19 @@ type run struct {
 	// it never emitted one, and always nil on a rehydrated run (List/History
 	// read the persisted run_usage row for those). Guarded by mu.
 	usage *taskrunner.Usage
+
+	// worktree is this run's task worktree dir ("" when the task has
+	// none), read once at Start for O1 provenance capture. Immutable
+	// after Start.
+	worktree string
+
+	// baseSHA/headSHA/dirty are the run's git provenance (O1): captured in
+	// drive (base, before the agent is spawned) and finish (head, before
+	// the terminal status is persisted). nil = unknown; a git failure
+	// never fails the run. Guarded by mu.
+	baseSHA *string
+	headSHA *string
+	dirty   *bool
 }
 
 // getPerm returns r's current permission settings under its mutex.
@@ -429,7 +450,7 @@ func (r *run) getPerm() taskrunner.PermissionSettings {
 }
 
 func (r *run) statusLocked() RunStatus {
-	return RunStatus{
+	rs := RunStatus{
 		ID:             r.id,
 		TaskID:         r.taskID,
 		ChatID:         r.chatID,
@@ -447,6 +468,26 @@ func (r *run) statusLocked() RunStatus {
 		Model:          r.model,
 		Usage:          UsageFromEvent(r.usage),
 	}
+	rs.BaseSHA = cloneStrPtr(r.baseSHA)
+	rs.HeadSHA = cloneStrPtr(r.headSHA)
+	rs.Dirty = cloneBoolPtr(r.dirty)
+	return rs
+}
+
+func cloneStrPtr(p *string) *string {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
+}
+
+func cloneBoolPtr(p *bool) *bool {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
 }
 
 // upsertUsage persists u as r's run_usage row. Best-effort: a store failure
@@ -559,6 +600,13 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		return "", err
 	}
 
+	// O1 provenance: the worktree dir the run's captures read, resolved
+	// before driving ("" when the task has none; capture then no-ops).
+	worktree := ""
+	if t, terr := wm.GetTask(taskID); terr == nil && t.WorktreePath != nil {
+		worktree = *t.WorktreePath
+	}
+
 	id, err := newRunID()
 	if err != nil {
 		return "", fmt.Errorf("runs: start: %w", err)
@@ -575,6 +623,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		perm:               perm,
 		thinkingLevel:      thinkingLevel,
 		model:              model,
+		worktree:           worktree,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
 		cancel:             cancel,
@@ -809,6 +858,11 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 			reg.record(r, e)
 		}
 	}()
+
+	// No second "running" notification for the base: clients treat each
+	// run.status as a status change. A live run's base reaches the UI with
+	// the next run.list; the terminal run.status carries base and head.
+	reg.captureProvenance(ctx, r, true)
 
 	decider := runPermissionDecider{reg: reg, r: r}
 	err := runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, r.prompt, decider, r.getPerm(), r.thinkingLevel, r.model, events)
@@ -1104,6 +1158,11 @@ func (reg *Registry) finish(r *run, err error) {
 	default:
 		status = StatusDone
 	}
+
+	// O1: capture the terminal-state provenance BEFORE the terminal status
+	// is persisted, so the row and the in-memory status agree. The ctx is
+	// fresh (not the run's), so a Stop-cancelled run still captures.
+	reg.captureProvenance(context.Background(), r, false)
 
 	// Persist before the in-memory status transition below becomes
 	// visible, not after: otherwise a caller that observes the terminal

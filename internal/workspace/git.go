@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // repoWorktreeLocks serializes git worktree mutations per repository.
@@ -200,11 +202,24 @@ func runGitOutput(dir string, args ...string) (string, error) {
 // taskDiff to point git at a throwaway index file via GIT_INDEX_FILE
 // without touching the worktree's real one.
 func runGitOutputEnv(dir string, env []string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	return runGitOutputEnvCtx(context.Background(), dir, env, args...)
+}
+
+// runGitOutputEnvCtx is runGitOutputEnv bounded by ctx: the git subprocess
+// is killed (not merely waited on) when ctx is done, so a hung git can
+// never outlive the caller's deadline. O1's provenance capture runs on the
+// run's drive goroutine and must give up within its own timeout.
+func runGitOutputEnvCtx(ctx context.Context, dir string, env []string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	if env != nil {
 		cmd.Env = env
 	}
+	// CommandContext kills only git itself; a grandchild (an fsmonitor hook,
+	// a credential helper) that outlives it keeps the stdout/stderr pipes
+	// open and Run would wait for it indefinitely. WaitDelay bounds that
+	// wait so a cancelled ctx really does return.
+	cmd.WaitDelay = gitWaitDelay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -213,6 +228,10 @@ func runGitOutputEnv(dir string, env []string, args ...string) (string, error) {
 	}
 	return stdout.String(), nil
 }
+
+// gitWaitDelay is how long runGitOutputEnvCtx waits for git's output pipes
+// to close after ctx is done and git has been killed.
+const gitWaitDelay = 500 * time.Millisecond
 
 // dirExists reports whether path exists and is a directory.
 func dirExists(path string) bool {

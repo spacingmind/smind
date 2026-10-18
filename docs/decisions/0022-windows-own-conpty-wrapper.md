@@ -4,7 +4,7 @@
 
 Accepted (2026-10-10, chosen by the user). Supersedes the "Library:
 `charmbracelet/x/xpty`" decision in
-`docs/plans/active/windows-native-terminal.md` for Windows only; Unix keeps
+`docs/plans/completed/windows-native-terminal.md` for Windows only; Unix keeps
 xpty (creack/pty). Implementation plan:
 `docs/plans/completed/windows-conpty-wrapper.md`.
 

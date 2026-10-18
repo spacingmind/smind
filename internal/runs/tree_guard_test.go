@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -414,5 +415,49 @@ func TestTreeGuard_ConfiguredLimitHonoured(t *testing.T) {
 	_, err = e.reg.Start(context.Background(), e.wm, e.runner, e.root.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start after restoring default limit: error = %v, want nil", err)
+	}
+}
+
+// TestTreeGuard_RootResolutionIsOneStorePassOutsideLock pins G-AC2/G-AC3:
+// the tree root is resolved from the store BEFORE reg.mu is taken, in one
+// walk up the parent chain per start -- one GetTask per ancestor, none
+// repeated, none under the lock.
+func TestTreeGuard_RootResolutionIsOneStorePassOutsideLock(t *testing.T) {
+	t.Parallel()
+	e := newTreeGuardEnv(t, 1, true)
+	var reads, heldReads atomic.Int32
+	e.reg.treeRootStoreRead = func() {
+		reads.Add(1)
+		// reg.mu is a sync.Mutex: if this (the starting goroutine) held it, TryLock can never
+		// succeed. Retry briefly so a transient hold by ANOTHER goroutine (a running run's
+		// bookkeeping) is not mistaken for a violation.
+		for i := 0; i < 100; i++ {
+			if e.reg.mu.TryLock() {
+				e.reg.mu.Unlock()
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		heldReads.Add(1)
+	}
+	// Start on the grandchild: the walk reads grandchild, child, root = 3 tasks.
+	e.startOn(t, e.tasks[1].ID)
+	if got := reads.Load(); got != 3 {
+		t.Fatalf("Start on a depth-2 task read the store %d times for root resolution, want 3 (one pass up the chain)", got)
+	}
+	if got := heldReads.Load(); got != 0 {
+		t.Fatalf("%d of those store reads happened while reg.mu was held", got)
+	}
+	// StartWhenBusy (the queue's path) resolves the root the same way: root task = depth 0 = 1 read.
+	reads.Store(0)
+	_, err := e.reg.StartWhenBusy(context.Background(), e.wm, e.runner, e.root.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, taskrunner.ThinkingLevelUnspecified, WhenBusyReject, "", 0, 0)
+	if err != nil {
+		t.Fatalf("StartWhenBusy error = %v", err)
+	}
+	if got := reads.Load(); got != 1 {
+		t.Fatalf("StartWhenBusy on a depth-0 task read the store %d times for root resolution, want 1", got)
+	}
+	if got := heldReads.Load(); got != 0 {
+		t.Fatalf("%d of StartWhenBusy's store reads happened while reg.mu was held", got)
 	}
 }
