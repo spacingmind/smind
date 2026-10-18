@@ -420,7 +420,8 @@ function AccountRow({
             <span className="flex shrink-0 items-center gap-2">
               {status?.reason && (
                 <span
-                  className={`max-w-48 truncate text-ui-sm ${
+                  title={status.reason}
+                  className={`max-w-sm truncate text-ui-sm ${
                     state === "ok" ? "text-success" : state === "warning" ? "text-warning" : "text-destructive"
                   }`}
                   data-testid={`provider-row-test-result-${account.id}`}
