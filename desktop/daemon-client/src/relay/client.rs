@@ -22,6 +22,7 @@ use crate::relay::channel::ChannelError;
 use crate::relay::channel::{Channel as E2eeChannel, FrameTransport};
 use crate::relay::crypto::{decode_frame, encode_frame, FrameError, KeyPair, Role};
 use crate::relay::device::{self, DeviceKey, HelloOutcome};
+use crate::relay::password::PasswordCell;
 use crate::relay::liveness::{self, Action, Liveness, LivenessCfg};
 use crate::relay::pairing_store::RelayPairing;
 use crate::relay::relaypb::relay_client::RelayClient as GrpcRelayClient;
@@ -601,6 +602,17 @@ pub enum Status {
     Revoked {
         device_id: String,
     },
+    /// The daemon has a password (P13c) and this connection has none: the user
+    /// must enter it. The client does not retry by itself; entering a password
+    /// reconnects at once.
+    PasswordRequired,
+    /// The daemon rejected the password (it has been forgotten): enter it again.
+    IncorrectPassword,
+    /// Too many wrong passwords: the daemon asks the client to wait. After
+    /// `retry_after_secs` the state becomes `PasswordRequired`.
+    PasswordLocked {
+        retry_after_secs: u64,
+    },
     /// The daemon refused this device's hello for another reason (`code` is
     /// the daemon's machine-readable code, e.g. `too_many_devices`).
     Refused {
@@ -618,6 +630,9 @@ impl Status {
             Status::Reconnecting => "reconnecting",
             Status::AwaitingApproval { .. } => "awaitingApproval",
             Status::Revoked { .. } => "revoked",
+            Status::PasswordRequired => "passwordRequired",
+            Status::IncorrectPassword => "incorrectPassword",
+            Status::PasswordLocked { .. } => "passwordLocked",
             Status::Refused { .. } => "refused",
         }
     }
@@ -708,6 +723,9 @@ pub struct RelayOptions {
     /// not connect at all and says so (`Status::Refused`), rather than quietly
     /// speaking the single-device protocol a current daemon refuses.
     pub key_error: Option<String>,
+    /// The daemon password for `device_hello` (P13c), shared with the
+    /// connection's `RelayHandle`. Empty until the user enters one.
+    pub password: PasswordCell,
 }
 
 impl RelayOptions {
@@ -717,6 +735,7 @@ impl RelayOptions {
             label: default_device_label(),
             timing: Timing::default(),
             key_error: None,
+            password: PasswordCell::default(),
         }
     }
 
@@ -727,6 +746,7 @@ impl RelayOptions {
             label: String::new(),
             timing: Timing::default(),
             key_error: Some(message),
+            password: PasswordCell::default(),
         }
     }
 
@@ -736,6 +756,7 @@ impl RelayOptions {
             label: String::new(),
             timing: Timing::default(),
             key_error: None,
+            password: PasswordCell::default(),
         }
     }
 }
@@ -778,6 +799,7 @@ pub struct RelayHandle {
     inbound_tx: broadcast::Sender<Vec<u8>>,
     status_rx: watch::Receiver<Status>,
     stats: Arc<RelayStats>,
+    password: PasswordCell,
 }
 
 /// Counters of how sessions were (re)established, for tests and diagnostics.
@@ -812,6 +834,12 @@ impl RelayHandle {
     pub fn stats(&self) -> &RelayStats {
         &self.stats
     }
+
+    /// Gives the connection the daemon password (P13c) and wakes it: a loop
+    /// waiting for one reconnects at once. Held in memory only.
+    pub fn set_password(&self, password: String) {
+        self.password.set(password);
+    }
 }
 
 #[cfg(test)]
@@ -837,6 +865,7 @@ pub(crate) fn test_handle() -> TestHandleParts {
             inbound_tx: inbound_tx.clone(),
             status_rx,
             stats: Arc::default(),
+            password: PasswordCell::default(),
         },
         outbound_rx,
         inbound_tx,
@@ -856,6 +885,7 @@ pub fn spawn(
     let (status_tx, status_rx) = watch::channel(Status::Connecting);
     let inbound_tx_task = inbound_tx.clone();
     let stats = Arc::new(RelayStats::default());
+    let password = options.password.clone();
     let task = tokio::spawn(run(
         pairing,
         options,
@@ -870,6 +900,7 @@ pub fn spawn(
             inbound_tx,
             status_rx,
             stats,
+            password,
         },
         task,
     )
@@ -896,6 +927,9 @@ enum Failure {
     HandshakeTimeout,
     /// The daemon answered the hello with a refusal.
     Refused { code: String, message: String },
+    /// The daemon's password check refused the hello (P13c): `password_required`,
+    /// `incorrect_password` or `too_many_attempts` (with its `retry_after`).
+    Password { code: String, retry_after: Option<u64> },
     /// The relay itself refused the stream (PermissionDenied: revoked).
     RelayDenied(String),
     /// The daemon does not do device identity (method not found / unsupported).
@@ -977,6 +1011,7 @@ async fn establish(
         &kp.public(),
         &session_id,
         &options.timing,
+        &options.password,
     )
     .await?;
     Ok(channel)
@@ -994,12 +1029,18 @@ async fn identify_device<T: FrameTransport>(
     mobile_pub: &[u8; 32],
     session_id: &str,
     timing: &Timing,
+    password: &PasswordCell,
 ) -> Result<(), Failure> {
     let challenge = await_challenge(channel, timing.challenge_timeout).await?;
     let hello = key.hello(label, daemon_pub, mobile_pub, session_id, &challenge);
     let request_id = "relay-hello-1";
+    // The password (when the user entered one this run) goes into the encrypted
+    // request only; the copy zeroizes when this function returns.
+    let pw = password.get();
+    let request = device::hello_request_with_password(request_id, &hello, pw.as_ref().map(|p| p.as_str()));
+    drop(pw);
     channel
-        .send(device::hello_request(request_id, &hello).as_bytes())
+        .send(request.as_bytes())
         .await
         .map_err(|e| Failure::Retry(format!("hello: {e}")))?;
     let outcome = tokio::time::timeout(timing.hello_timeout, async {
@@ -1021,10 +1062,15 @@ async fn identify_device<T: FrameTransport>(
     match outcome {
         HelloOutcome::Approved { .. } => Ok(()),
         HelloOutcome::MethodNotFound => Err(Failure::NoIdentitySupport),
-        HelloOutcome::Refused { code, .. } if code == "device_hello_unsupported" => {
+        HelloOutcome::Refused { ref code, .. } if code == "device_hello_unsupported" => {
             Err(Failure::NoIdentitySupport)
         }
-        HelloOutcome::Refused { code, message } => Err(Failure::Refused { code, message }),
+        HelloOutcome::Refused { code, retry_after, .. }
+            if matches!(code.as_str(), "password_required" | "incorrect_password" | "too_many_attempts") =>
+        {
+            Err(Failure::Password { code, retry_after })
+        }
+        HelloOutcome::Refused { code, message, .. } => Err(Failure::Refused { code, message }),
     }
 }
 
@@ -1356,8 +1402,42 @@ async fn run(
                     data = Some(channel);
                     stats.fresh_sessions.fetch_add(1, Ordering::SeqCst);
                 }
+                Err(Failure::Password { code, retry_after }) => {
+                    // The daemon's password check (P13c). None of these retries by
+                    // itself: a missing or rejected password needs the user, and a
+                    // rejected one must not be re-sent (it would only count against
+                    // the daemon's limit).
+                    eprintln!("smind desktop: relay: the daemon's password check answered {code}");
+                    match code.as_str() {
+                        "too_many_attempts" => {
+                            options.password.clear();
+                            let wait = retry_after.unwrap_or(60).max(5);
+                            let _ = status_tx.send(Status::PasswordLocked { retry_after_secs: wait });
+                            if sleep_or_stop(&mut outbound_rx, Duration::from_secs(wait)).await.is_none() {
+                                return;
+                            }
+                            let _ = status_tx.send(Status::PasswordRequired);
+                        }
+                        "incorrect_password" => {
+                            options.password.clear();
+                            let _ = status_tx.send(Status::IncorrectPassword);
+                        }
+                        _ => {
+                            let _ = status_tx.send(Status::PasswordRequired);
+                        }
+                    }
+                    if wait_for_password(&mut outbound_rx, &options.password).await.is_none() {
+                        return;
+                    }
+                    waiting_attempts = 0;
+                    backoff.reset();
+                    let _ = status_tx.send(Status::Connecting);
+                    continue;
+                }
                 Err(failure) => {
                     let (status, delay) = match failure {
+                        // Handled by the arm above; kept so the match stays exhaustive.
+                        Failure::Password { .. } => continue,
                         Failure::Retry(e) => {
                             eprintln!("smind desktop: relay connect: {e}");
                             if let Some(t) = modes.legacy_unserved() {
@@ -1654,6 +1734,25 @@ fn is_request(msg: &[u8]) -> bool {
 /// doesn't keep a task alive forever after its last consumer is gone. It never
 /// consumes a queued message and is never cut short by one: a retry delay is
 /// the delay, however many requests the UI sends meanwhile.
+/// wait_for_password parks the loop until the user enters a password (a
+/// `PasswordCell::set`), returning `None` if the connection is dropped first.
+/// No connection is held open meanwhile.
+async fn wait_for_password(outbound_rx: &mut mpsc::Receiver<Vec<u8>>, password: &PasswordCell) -> Option<()> {
+    loop {
+        if outbound_rx.is_closed() {
+            return None;
+        }
+        tokio::select! {
+            () = password.changed() => {
+                if password.is_set() {
+                    return Some(());
+                }
+            }
+            () = tokio::time::sleep(Duration::from_millis(250)) => {}
+        }
+    }
+}
+
 async fn sleep_or_stop(outbound_rx: &mut mpsc::Receiver<Vec<u8>>, d: Duration) -> Option<()> {
     let end = Instant::now() + d;
     loop {
@@ -1703,7 +1802,7 @@ mod tests {
         assert_eq!(timing.challenge_timeout, Duration::from_secs(5));
         let started = Instant::now();
         let err = identify_device(
-            &mut mobile, &key, "laptop", &dkp.public(), &mkp.public(), "sess", &timing,
+            &mut mobile, &key, "laptop", &dkp.public(), &mkp.public(), "sess", &timing, &PasswordCell::default(),
         )
         .await
         .unwrap_err();
@@ -1729,7 +1828,7 @@ mod tests {
         let timing = Timing::default();
         let started = Instant::now();
         let err = identify_device(
-            &mut mobile, &key, "laptop", &dkp.public(), &mkp.public(), "sess", &timing,
+            &mut mobile, &key, "laptop", &dkp.public(), &mkp.public(), "sess", &timing, &PasswordCell::default(),
         )
         .await
         .unwrap_err();
@@ -1755,8 +1854,9 @@ mod tests {
         let key = DeviceKey::from_seed([7; 32]);
         let timing = Timing::default();
         let (dpub, mpub) = (dkp.public(), mkp.public());
+        let no_password = PasswordCell::default();
         let (res, got) = tokio::join!(
-            identify_device(&mut mobile, &key, "laptop", &dpub, &mpub, "sess-1", &timing),
+            identify_device(&mut mobile, &key, "laptop", &dpub, &mpub, "sess-1", &timing, &no_password),
             async {
                 let msg = daemon.receive().await.unwrap();
                 let v: serde_json::Value = serde_json::from_slice(&msg).unwrap();
@@ -1771,6 +1871,78 @@ mod tests {
         assert_eq!(got["params"]["v"], 2);
         let expect = key.hello("laptop", &dkp.public(), &mkp.public(), "sess-1", &challenge);
         assert_eq!(got["params"], serde_json::to_value(&expect).unwrap());
+    }
+
+    /// P13c: with a password in the cell the hello carries it in params (only
+    /// there), and nothing else about the request changes.
+    #[tokio::test(start_paused = true)]
+    async fn the_hello_carries_the_password_when_the_user_entered_one() {
+        let (mut daemon, mut mobile, dkp, mkp) = established_pair().await;
+        let challenge = [9u8; device::CHALLENGE_LEN];
+        let encoded = {
+            use base64::Engine as _;
+            base64::engine::general_purpose::STANDARD.encode(challenge)
+        };
+        let event = serde_json::json!({"event": device::CHALLENGE_EVENT,
+            "params": {"v": 2, "challenge": encoded}})
+        .to_string();
+        daemon.send(event.as_bytes()).await.unwrap();
+        let key = DeviceKey::from_seed([7; 32]);
+        let timing = Timing::default();
+        let (dpub, mpub) = (dkp.public(), mkp.public());
+        let password = PasswordCell::default();
+        password.set("a-long-daemon-password".into());
+        let (res, got) = tokio::join!(
+            identify_device(&mut mobile, &key, "laptop", &dpub, &mpub, "sess-1", &timing, &password),
+            async {
+                let msg = daemon.receive().await.unwrap();
+                let v: serde_json::Value = serde_json::from_slice(&msg).unwrap();
+                let reply = serde_json::json!({"id": v["id"], "error": {"message": "wrong", "code": "incorrect_password"}})
+                    .to_string();
+                daemon.send(reply.as_bytes()).await.unwrap();
+                v
+            }
+        );
+        match res {
+            Err(Failure::Password { code, retry_after: None }) => assert_eq!(code, "incorrect_password"),
+            other => panic!("expected a password refusal, got {other:?}"),
+        }
+        assert_eq!(got["params"]["password"], "a-long-daemon-password");
+        let expect = key.hello("laptop", &dkp.public(), &mkp.public(), "sess-1", &challenge);
+        let mut params = got["params"].clone();
+        params.as_object_mut().unwrap().remove("password");
+        assert_eq!(params, serde_json::to_value(&expect).unwrap(), "the signed hello is unchanged");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_parked_loop_wakes_when_a_password_arrives_and_stops_when_dropped() {
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(1);
+        let cell = PasswordCell::default();
+        let waiter = {
+            let cell = cell.clone();
+            tokio::spawn(async move {
+                let woke = wait_for_password(&mut rx, &cell).await;
+                (woke, rx)
+            })
+        };
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        assert!(!waiter.is_finished(), "must not return without a password");
+        cell.set("a-password-123456".into());
+        let (woke, rx) = waiter.await.unwrap();
+        assert_eq!(woke, Some(()));
+        // An empty set (a clear) does not wake; dropping the connection stops it.
+        let mut rx = rx;
+        let cell2 = PasswordCell::default();
+        let waiter = tokio::spawn(async move { wait_for_password(&mut rx, &cell2).await });
+        drop(tx);
+        assert_eq!(waiter.await.unwrap(), None);
+    }
+
+    #[test]
+    fn password_states_have_stable_names() {
+        assert_eq!(Status::PasswordRequired.state_name(), "passwordRequired");
+        assert_eq!(Status::IncorrectPassword.state_name(), "incorrectPassword");
+        assert_eq!(Status::PasswordLocked { retry_after_secs: 8 }.state_name(), "passwordLocked");
     }
 
     // --- ModeMachine -----------------------------------------------------
