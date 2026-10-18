@@ -153,6 +153,7 @@ type harness struct {
 	runner    *taskrunner.Runner
 	fakeAgent string
 	workDir   string
+	seedWS    *store.Workspace // the workspace seed-run puts its tasks in
 
 	hub       *bridge.Hub
 	hubCancel context.CancelFunc
@@ -713,42 +714,46 @@ func (h *harness) seedRun(args []string) (map[string]any, error) {
 	if len(args) > 1 {
 		title = strings.Join(args[1:], " ")
 	}
-	repo, err := os.MkdirTemp(h.workDir, "seed-repo-")
-	if err != nil {
-		return nil, err
-	}
-	git := func(gitArgs ...string) error {
-		cmd := exec.Command("git", gitArgs...)
-		cmd.Dir = repo
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("git %v: %v: %s", gitArgs, err, out)
-		}
-		return nil
-	}
-	for _, g := range [][]string{
-		{"init"},
-		{"config", "core.autocrlf", "false"},
-		{"config", "user.email", "devharness@example.com"},
-		{"config", "user.name", "devharness"},
-	} {
-		if err := git(g...); err != nil {
+	// One seeded workspace for every seed-run (the app lists the first workspace's tasks): created on first use.
+	if h.seedWS == nil {
+		repo, err := os.MkdirTemp(h.workDir, "seed-repo-")
+		if err != nil {
 			return nil, err
 		}
+		git := func(gitArgs ...string) error {
+			cmd := exec.Command("git", gitArgs...)
+			cmd.Dir = repo
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("git %v: %v: %s", gitArgs, err, out)
+			}
+			return nil
+		}
+		for _, g := range [][]string{
+			{"init"},
+			{"config", "core.autocrlf", "false"},
+			{"config", "user.email", "devharness@example.com"},
+			{"config", "user.name", "devharness"},
+		} {
+			if err := git(g...); err != nil {
+				return nil, err
+			}
+		}
+		if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("seeded\n"), 0o644); err != nil {
+			return nil, err
+		}
+		if err := git("add", "README.md"); err != nil {
+			return nil, err
+		}
+		if err := git("commit", "-m", "initial commit"); err != nil {
+			return nil, err
+		}
+		created, err := h.wm.CreateWorkspace(repo, "Seeded", "hard", nil)
+		if err != nil {
+			return nil, err
+		}
+		h.seedWS = &created
 	}
-	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("seeded\n"), 0o644); err != nil {
-		return nil, err
-	}
-	if err := git("add", "README.md"); err != nil {
-		return nil, err
-	}
-	if err := git("commit", "-m", "initial commit"); err != nil {
-		return nil, err
-	}
-
-	ws, err := h.wm.CreateWorkspace(repo, "Seeded", "hard", nil)
-	if err != nil {
-		return nil, err
-	}
+	ws := *h.seedWS
 	task, err := h.wm.CreateTask(ws.ID, nil, title)
 	if err != nil {
 		return nil, err
