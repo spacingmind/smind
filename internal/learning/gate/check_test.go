@@ -67,7 +67,7 @@ func TestGate_RejectsBadAbsorbedInto(t *testing.T) {
 		in.Action = ActionDelete
 		in.Name = "learned-a"
 		in.AbsorbedInto = tc.abs
-		v := Check(in, okWindow(), tc.live, okConfig())
+		v := Check(in, okWindow(), tc.live, curateCfg())
 		if !hasReason(v.Findings, ReasonBadAbsorbedInto) {
 			t.Errorf("%s: findings %v, want bad_absorbed_into", tc.name, v.Findings)
 		}
@@ -139,6 +139,37 @@ func TestGate_CurateCannotCreate(t *testing.T) {
 	}
 	if v.OK {
 		t.Error("curate create must not be OK")
+	}
+}
+
+func TestGate_ReflectCannotDelete(t *testing.T) {
+	live := []LiveSkill{
+		{Name: "learned-a", Status: "active", Description: "Use when a.", Body: "run a"},
+		{Name: "learned-b", Status: "active", Description: "Use when b.", Body: "run b"},
+	}
+	in := okCreate()
+	in.Action = ActionDelete
+	in.Name = "learned-a"
+	in.AbsorbedInto = "learned-b"
+	for _, mode := range []Mode{ModeReflect, ""} { // unknown mode fails closed to reflect
+		cfg := okConfig()
+		cfg.Mode = mode
+		v := Check(in, okWindow(), live, cfg)
+		if v.OK || len(v.Findings) != 1 || v.Findings[0].Reason != ReasonBadAction {
+			t.Errorf("mode %q: findings %v, want single bad_action", mode, v.Findings)
+		}
+	}
+}
+
+func TestGate_CurateCanDelete(t *testing.T) {
+	live := []LiveSkill{
+		{Name: "learned-a", Status: "active", Description: "Use when a.", Body: "run a"},
+		{Name: "learned-b", Status: "active", Description: "Use when b.", Body: "run b"},
+	}
+	in := Intent{Action: ActionDelete, Name: "learned-a", AbsorbedInto: "learned-b", Reason: "duplicate of b"}
+	v := Check(in, nil, live, curateCfg())
+	if !v.OK || hasReason(v.Findings, ReasonBadAction) {
+		t.Errorf("curate delete rejected: %v", v.Findings)
 	}
 }
 
