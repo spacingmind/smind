@@ -129,6 +129,7 @@ export function ConnectAccountPanel({
   const [method, setMethod] = useState<ConnectMethod>("browser");
   const [methodTouched, setMethodTouched] = useState(false);
   const [labelTouched, setLabelTouched] = useState(false);
+  const [justAdded, setJustAdded] = useState<{ provider: string; label: string } | null>(null);
   const [pasteHint, setPasteHint] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
 
@@ -173,8 +174,18 @@ export function ConnectAccountPanel({
   }, [selectedProvider, remote, methodTouched]);
 
   // The default label (account-N) follows the provider until the user
-  // edits the field; a finished login re-arms the prefill.
-  const defaultLabel = `account-${accounts.filter((a) => a.provider === provider).length + 1}`;
+  // edits the field; a finished login re-arms the prefill. N is the
+  // smallest unused slot for this provider (deleted account-1 frees the
+  // name), and a just-added label counts until the accounts query
+  // reflects it.
+  const taken = new Set(
+    accounts.filter((a) => a.provider === provider).map((a) => a.label),
+  );
+  const added = justAdded;
+  if (provider && added && added.provider === provider) taken.add(added.label);
+  let n = 1;
+  while (taken.has(`account-${n}`)) n++;
+  const defaultLabel = `account-${n}`;
 
   useEffect(() => {
     if (!labelTouched) setLabel(defaultLabel);
@@ -210,6 +221,7 @@ export function ConnectAccountPanel({
         ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
       });
       setLabelTouched(false);
+      setJustAdded({ provider, label: label.trim() });
       setCredential("");
       setBaseUrl("");
       onConnected();

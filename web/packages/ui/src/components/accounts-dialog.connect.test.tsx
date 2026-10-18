@@ -36,6 +36,7 @@ async function setup(platform: PlatformMock = { isDesktop: false }, accounts: un
         platform.connection ? Promise.resolve({ label: "c", baseUrl: "", ...platform.connection }) : Promise.reject(new Error("none")),
     },
   }));
+  cleanup();
   const { ConnectAccountPanel } = await import("@/components/accounts-dialog");
   const { renderWithDaemon } = await import("@/test/render-with-daemon");
   const { FakeUsageDaemon } = await import("@/test/usage-test-client");
@@ -47,13 +48,23 @@ async function setup(platform: PlatformMock = { isDesktop: false }, accounts: un
   useLoginLocationStore.getState().setOverride("web", null);
 
   const client = new FakeWsClient();
-  const daemon = new FakeUsageDaemon(accounts as never, client);
+  const daemon = new FakeUsageDaemon([], client);
+  daemon.accounts = accounts as never;
+  // A fresh cache per scenario (the app root's per-connection QueryClient):
+  // otherwise the first setup's account.list answer sticks.
+  const { createQueryClient } = await import("@/lib/query/query-client");
+  const queryClient = createQueryClient();
   const onConnected = vi.fn();
   renderWithDaemon(
     <ConnectAccountPanel client={daemon.client as never} providers={PROVIDERS.providers as never} onConnected={onConnected} />,
     daemon,
+    { queryClient },
   );
-  client.nth("account.list").resolve(accounts);
+  if (client.calls.some((c) => c.method === "account.list")) {
+    await act(async () => {
+      client.nth("account.list").resolve(accounts);
+    });
+  }
   await flush();
   return { client, onConnected };
 }
@@ -109,20 +120,33 @@ describe("ConnectAccountPanel connect flows", () => {
   });
 
   it("connect label defaults to account-N", async () => {
+    // No anthropic accounts yet: the first free slot is account-1.
     await setup();
     expect(labelInput().value).toBe("account-1");
 
-    // Switching providers re-prefills per provider (openai has no account yet).
-    fireEvent.click(await screen.findByLabelText("Provider"));
-    fireEvent.click(await screen.findByRole("option", { name: "Codex" }));
+    // account-1 and account-2 exist: the default takes the next free slot.
+    await setup(undefined, [
+      { id: 1, provider: "anthropic", label: "account-1", credentialType: "oauth", createdAt: "", updatedAt: "" },
+      { id: 2, provider: "anthropic", label: "account-2", credentialType: "oauth", createdAt: "", updatedAt: "" },
+    ]);
+    expect(labelInput().value).toBe("account-3");
+
+    // Only account-2 exists (account-1 was deleted): the freed slot is
+    // reused -- the smallest unused N wins.
+    await setup(undefined, [
+      { id: 2, provider: "anthropic", label: "account-2", credentialType: "oauth", createdAt: "", updatedAt: "" },
+    ]);
     expect(labelInput().value).toBe("account-1");
 
-    // A provider with an existing account counts it.
-    const second = await setup({ isDesktop: false }, []);
+    // Per provider: openai has none while anthropic has account-1.
+    const { client } = await setup(undefined, [
+      { id: 1, provider: "anthropic", label: "account-1", credentialType: "oauth", createdAt: "", updatedAt: "" },
+    ]);
+    expect(labelInput().value).toBe("account-2");
     fireEvent.click(await screen.findByLabelText("Provider"));
     fireEvent.click(await screen.findByRole("option", { name: "Codex" }));
     expect(labelInput().value).toBe("account-1");
-    void second;
+    void client;
   });
 
   it("remote openai defaults to the device method and shows the device code panel", async () => {
@@ -273,7 +297,8 @@ describe("ConnectAccountPanel connect flows", () => {
   it("no connect button without a provider", async () => {
     vi.resetModules();
     vi.doMock("@/lib/platform", () => ({ isDesktop: false, desktop: {} }));
-    const { ConnectAccountPanel } = await import("@/components/accounts-dialog");
+    cleanup();
+  const { ConnectAccountPanel } = await import("@/components/accounts-dialog");
     const { renderWithDaemon } = await import("@/test/render-with-daemon");
     const { FakeUsageDaemon } = await import("@/test/usage-test-client");
     const { FakeWsClient } = await import("@/test/fake-ws-client");
@@ -297,7 +322,8 @@ describe("ConnectAccountPanel connect flows", () => {
   it("empty providers state", async () => {
     vi.resetModules();
     vi.doMock("@/lib/platform", () => ({ isDesktop: false, desktop: {} }));
-    const { ConnectAccountPanel } = await import("@/components/accounts-dialog");
+    cleanup();
+  const { ConnectAccountPanel } = await import("@/components/accounts-dialog");
     const { renderWithDaemon } = await import("@/test/render-with-daemon");
     const { FakeUsageDaemon } = await import("@/test/usage-test-client");
     const { FakeWsClient } = await import("@/test/fake-ws-client");
