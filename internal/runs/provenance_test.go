@@ -435,3 +435,23 @@ func TestRun_ProvenanceCapture_HungGitDoesNotBlockStart(t *testing.T) {
 	// Drain: the run still ends, bounded by the two capture timeouts.
 	waitForStatus(t, reg, runID, StatusDone, 15*time.Second)
 }
+
+// TestRun_ProvenanceCapture_SkippedForSystemRuns: a system run (ADR-0026)
+// works in a scratch dir; even when that dir happens to be inside a git
+// worktree, nothing is read from git and no provenance is recorded.
+func TestRun_ProvenanceCapture_SkippedForSystemRuns(t *testing.T) {
+	t.Parallel()
+	wm, st, task, reg, runner := newProvEnv(t, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "", WithPurpose("reflect"))
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+	row, err := st.GetRun(runID)
+	if err != nil {
+		t.Fatalf("GetRun() error = %v", err)
+	}
+	if row.BaseSHA != nil || row.HeadSHA != nil || row.Dirty != nil {
+		t.Fatalf("system run recorded provenance %v/%v/%v, want nil/nil/nil", row.BaseSHA, row.HeadSHA, row.Dirty)
+	}
+}
