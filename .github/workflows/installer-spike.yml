@@ -1,0 +1,51 @@
+name: installer-spike
+# TEMPORARY (windows installer e2e spike); deleted before the PR is final.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/installer-spike.yml"
+      - "desktop/scripts/cdp-invoke.mjs"
+permissions:
+  contents: read
+jobs:
+  spike:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: install v0.12.0 silently, launch with a debugging port, drive the Tauri commands
+        shell: pwsh
+        run: |
+          $PSStyle.OutputRendering = 'PlainText'
+          $ErrorActionPreference = 'Continue'
+          "node $(node --version)"; "session id: $((Get-Process -Id $PID).SessionId)"
+          Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue | Select-Object pv | Format-List
+          New-Item -ItemType Directory -Force old | Out-Null
+          gh release download v0.12.0 --repo spacingmind/smind -p '*x64-setup.exe' -D old
+          $setup = (Get-ChildItem old -Filter *.exe | Select-Object -First 1).FullName
+          "installer: $setup ($((Get-Item $setup).Length) bytes)"
+          $p = Start-Process $setup -ArgumentList '/S' -Wait -PassThru
+          "installer exit: $($p.ExitCode)"
+          Get-ChildItem "$env:LOCALAPPDATA" -Directory | Where-Object Name -match 'smind|sMind' | ForEach-Object { $_.FullName; Get-ChildItem $_.FullName | Select-Object Name, Length | Format-Table | Out-String }
+          $app = Get-ChildItem "$env:LOCALAPPDATA\sMind" -Filter smind-desktop.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          "app exe: $($app.FullName)"
+          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'
+          $proc = Start-Process $app.FullName -PassThru
+          Start-Sleep 8
+          "app running: $(-not $proc.HasExited)"
+          Write-Host "--- daemon_status"
+          node desktop/scripts/cdp-invoke.mjs 9222 'window.__TAURI_INTERNALS__.invoke("daemon_status")' 90
+          "exit $LASTEXITCODE"
+          Write-Host "--- daemon_install"
+          node desktop/scripts/cdp-invoke.mjs 9222 'window.__TAURI_INTERNALS__.invoke("daemon_install")' 90
+          "exit $LASTEXITCODE"
+          Start-Sleep 3
+          try { Invoke-RestMethod http://127.0.0.1:4648/healthz | ConvertTo-Json -Compress } catch { "healthz: $($_.Exception.Message)" }
+          Get-ChildItem "$env:LOCALAPPDATA\sMind" -Recurse | Select-Object FullName, Length | Format-Table -AutoSize | Out-String
+          Get-ChildItem "$env:USERPROFILE\.smind" -ErrorAction SilentlyContinue | Select-Object Name, Length | Format-Table | Out-String
+          Get-Content "$env:LOCALAPPDATA\sMind\smind.log" -Tail 20 -ErrorAction SilentlyContinue
+          Get-Process smind, smind-desktop -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, Path | Format-Table | Out-String
+          exit 0
