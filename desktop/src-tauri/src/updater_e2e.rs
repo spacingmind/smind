@@ -404,6 +404,44 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[tokio::test(flavor = "multi_thread")]
+    async fn refused_install_leaves_the_bundle_and_keeps_the_update_pending() {
+        let key = TestKey::generate();
+        let good = release(&key, "0.10.1", app_tarball("new"));
+        let mut tampered = good.artifact.clone();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 0xff;
+        let feed = Feed::serve_release(&Release { artifact: tampered, ..good });
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let dir = tempfile::tempdir().unwrap();
+        let exe = installed_app(dir.path(), "old");
+        let state = app.state::<UpdateState>();
+        check_with(app.updater_builder().executable_path(&exe), RUNNING, &state)
+            .await
+            .expect("check");
+        let events = Mutex::new(Vec::new());
+        let err = install_pending(&state, &|p| events.lock().unwrap().push(p))
+            .await
+            .expect_err("tampered artifact must be refused");
+        assert!(err.to_lowercase().contains("signature"));
+        let plist = std::fs::read_to_string(dir.path().join("smind.app/Contents/Info.plist")).unwrap();
+        assert_eq!(plist, "old");
+        assert!(exe.exists());
+        assert!(state.pending.take().is_ok(), "failed install stays retryable");
+        // The plugin runs its `on_download_finish` hook (our "installing"
+        // event) before verifying the signature, so an "installing" event is
+        // emitted even for a refused artifact; what must hold is that the
+        // bundle is untouched and the update stays retryable.
+        let events = events.into_inner().unwrap();
+        let last_download = events
+            .iter()
+            .rev()
+            .find(|e| e["stage"] == "downloading")
+            .unwrap();
+        assert!(last_download["downloaded"].as_u64().unwrap() > 0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test(flavor = "multi_thread")]
     async fn install_replaces_the_bundle_and_reports_progress() {
         let key = TestKey::generate();
         let feed = Feed::serve_release(&release(&key, "0.10.1", app_tarball("new")));
