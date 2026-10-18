@@ -304,6 +304,41 @@ func TestLoginCoordinator_Device(t *testing.T) {
 		s.wait(t)
 	})
 
+	t.Run("device login retries a poll that times out", func(t *testing.T) {
+		t.Parallel()
+		// A DeviceLogin that reports the per-poll deadline as the raw context
+		// error (as a hung HTTP request does) once, then approves.
+		coord, _, dev := newDeviceCoordinator(t)
+		dev.pollFn = func(n int) (DeviceGrant, error) {
+			if n == 1 {
+				return DeviceGrant{}, context.DeadlineExceeded
+			}
+			return DeviceGrant{AuthorizationCode: "c", CodeVerifier: "v"}, nil
+		}
+		res, err := coord.Login(context.Background(), "fake", "slow", LoginOptions{Method: LoginMethodDevice}, func(LoginEvent) {})
+		if err != nil || !res.Created {
+			t.Fatalf("Login() = %+v, %v, want the timed-out poll retried", res, err)
+		}
+
+		// Four in a row still ends the login (the same cap as other transient
+		// errors), and a deadline of the caller's own ctx is not retried.
+		coord, _, dev = newDeviceCoordinator(t)
+		dev.pollFn = func(int) (DeviceGrant, error) { return DeviceGrant{}, context.DeadlineExceeded }
+		_, err = coord.Login(context.Background(), "fake", "slow", LoginOptions{Method: LoginMethodDevice}, func(LoginEvent) {})
+		requireLoginCode(t, err, LoginCodeDeviceFailed)
+		if dev.pollCount() != maxDeviceRetries+1 {
+			t.Errorf("polls = %d, want %d", dev.pollCount(), maxDeviceRetries+1)
+		}
+
+		coord, _, dev = newDeviceCoordinator(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+		defer cancel()
+		_, err = coord.Login(ctx, "fake", "slow", LoginOptions{Method: LoginMethodDevice}, func(LoginEvent) {})
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("Login() with an expiring caller ctx error = %v, want that deadline", err)
+		}
+	})
+
 	t.Run("device login failures", func(t *testing.T) {
 		t.Parallel()
 		approve := func(int) (DeviceGrant, error) { return DeviceGrant{AuthorizationCode: "c", CodeVerifier: "v"}, nil }
@@ -402,6 +437,9 @@ type deviceVendor struct {
 	pendingPolls   int32  // polls answered 403 (then 404) before the grant
 	pollStatus     int    // after pending: 200 grant, or this status
 	pollBody       string
+	hangPolls      int32 // first polls that hang until the client gives up
+	flakyPolls     int32 // then polls answered flakyStatus
+	flakyStatus    int
 	tokenStatus    int // 200 by default
 	tokenBody      string
 	subject        string
@@ -452,6 +490,18 @@ func (v *deviceVendor) serve(w http.ResponseWriter, r *http.Request) {
 	case "/api/accounts/deviceauth/token":
 		v.record(r)
 		n := v.polls.Add(1)
+		if n <= v.hangPolls {
+			// A slow vendor: no answer until the client gives up.
+			<-r.Context().Done()
+			return
+		}
+		n -= v.hangPolls
+		if n <= v.flakyPolls {
+			w.WriteHeader(v.flakyStatus)
+			_, _ = w.Write([]byte(`{"error":"FLAKY-BODY"}`))
+			return
+		}
+		n -= v.flakyPolls
 		if n <= v.pendingPolls {
 			if n%2 == 0 {
 				w.WriteHeader(http.StatusNotFound)
@@ -632,10 +682,21 @@ func TestOpenAIDeviceLogin_Vendor(t *testing.T) {
 			t.Errorf("approved poll = %+v, %v, want the vendor's grant", grant, err)
 		}
 
-		failure := &deviceVendor{t: t, pollStatus: http.StatusInternalServerError, pollBody: "VENDOR-500-BODY"}
-		_, err := failure.newLogin(t).PollDevice(context.Background(), ch)
-		if err == nil || errors.Is(err, ErrDevicePending) || errors.Is(err, ErrDeviceTransient) || strings.Contains(err.Error(), "VENDOR-500-BODY") {
-			t.Errorf("PollDevice() error = %v, want a non-pending, non-transient failure without the body", err)
+		// Other 4xx are hard failures; 429 and 5xx are transient. Neither
+		// carries the body.
+		for _, status := range []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusGone, http.StatusUnprocessableEntity} {
+			failure := &deviceVendor{t: t, pollStatus: status, pollBody: "VENDOR-BODY"}
+			_, err := failure.newLogin(t).PollDevice(context.Background(), ch)
+			if err == nil || errors.Is(err, ErrDevicePending) || errors.Is(err, ErrDeviceTransient) || strings.Contains(err.Error(), "VENDOR-BODY") {
+				t.Errorf("status %d: PollDevice() error = %v, want a non-pending, non-transient failure without the body", status, err)
+			}
+		}
+		for _, status := range []int{http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout} {
+			flaky := &deviceVendor{t: t, pollStatus: status, pollBody: "VENDOR-BODY"}
+			_, err := flaky.newLogin(t).PollDevice(context.Background(), ch)
+			if !errors.Is(err, ErrDeviceTransient) || strings.Contains(err.Error(), "VENDOR-BODY") {
+				t.Errorf("status %d: PollDevice() error = %v, want ErrDeviceTransient without the body", status, err)
+			}
 		}
 
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -660,6 +721,70 @@ func TestOpenAIDeviceLogin_Vendor(t *testing.T) {
 		cancel()
 		if _, err := l.PollDevice(ctx, ch); !errors.Is(err, context.Canceled) {
 			t.Errorf("PollDevice() with a cancelled ctx error = %v, want context.Canceled", err)
+		}
+	})
+
+	t.Run("device login retries 429 and 5xx polls", func(t *testing.T) {
+		t.Parallel()
+		for _, status := range []int{http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable} {
+			// Up to maxDeviceRetries failures in a row are absorbed.
+			vendor := &deviceVendor{t: t, flakyPolls: maxDeviceRetries, flakyStatus: status, pendingPolls: 1}
+			coord := NewLoginCoordinator(newTestRegistry(t), map[string]Login{"openai": vendor.newLogin(t)})
+			coord.minPoll = time.Millisecond
+			if _, err := coord.Login(context.Background(), "openai", "x", LoginOptions{Method: LoginMethodDevice}, func(LoginEvent) {}); err != nil {
+				t.Errorf("status %d: Login() error = %v, want the retries to absorb %d failures", status, err, maxDeviceRetries)
+			}
+
+			// One more in a row ends the login.
+			vendor = &deviceVendor{t: t, flakyPolls: maxDeviceRetries + 1, flakyStatus: status}
+			coord = NewLoginCoordinator(newTestRegistry(t), map[string]Login{"openai": vendor.newLogin(t)})
+			coord.minPoll = time.Millisecond
+			_, err := coord.Login(context.Background(), "openai", "x", LoginOptions{Method: LoginMethodDevice}, func(LoginEvent) {})
+			requireLoginCode(t, err, LoginCodeDeviceFailed)
+			if got := vendor.polls.Load(); got != maxDeviceRetries+1 {
+				t.Errorf("status %d: polls = %d, want %d (the first plus three retries)", status, got, maxDeviceRetries+1)
+			}
+		}
+
+		// Other 4xx fail on the first poll.
+		for _, status := range []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusGone} {
+			vendor := &deviceVendor{t: t, pollStatus: status}
+			coord := NewLoginCoordinator(newTestRegistry(t), map[string]Login{"openai": vendor.newLogin(t)})
+			coord.minPoll = time.Millisecond
+			_, err := coord.Login(context.Background(), "openai", "x", LoginOptions{Method: LoginMethodDevice}, func(LoginEvent) {})
+			requireLoginCode(t, err, LoginCodeDeviceFailed)
+			if got := vendor.polls.Load(); got != 1 {
+				t.Errorf("status %d: polls = %d, want the login to stop at the first", status, got)
+			}
+		}
+	})
+
+	t.Run("device login retries a poll that times out", func(t *testing.T) {
+		t.Parallel()
+
+		// The vendor hangs on the first two polls; each is cut off by the
+		// per-poll timeout and retried, then the third is approved.
+		vendor := &deviceVendor{t: t, hangPolls: 2}
+		coord := NewLoginCoordinator(newTestRegistry(t), map[string]Login{"openai": vendor.newLogin(t)})
+		coord.minPoll = time.Millisecond
+		coord.pollTimeout = 40 * time.Millisecond
+		res, err := coord.Login(context.Background(), "openai", "x", LoginOptions{Method: LoginMethodDevice}, func(LoginEvent) {})
+		if err != nil || !res.Created {
+			t.Fatalf("Login() = %+v, %v, want the slow polls retried", res, err)
+		}
+		if got := vendor.polls.Load(); got != 3 {
+			t.Errorf("polls = %d, want 3 (two timeouts then the grant)", got)
+		}
+
+		// A vendor that always hangs exhausts the retries instead of looping.
+		vendor = &deviceVendor{t: t, hangPolls: 1 << 20}
+		coord = NewLoginCoordinator(newTestRegistry(t), map[string]Login{"openai": vendor.newLogin(t)})
+		coord.minPoll = time.Millisecond
+		coord.pollTimeout = 20 * time.Millisecond
+		_, err = coord.Login(context.Background(), "openai", "x", LoginOptions{Method: LoginMethodDevice}, func(LoginEvent) {})
+		requireLoginCode(t, err, LoginCodeDeviceFailed)
+		if got := vendor.polls.Load(); got != maxDeviceRetries+1 {
+			t.Errorf("polls = %d, want %d", got, maxDeviceRetries+1)
 		}
 	})
 

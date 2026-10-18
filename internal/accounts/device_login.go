@@ -73,7 +73,8 @@ type DeviceLogin interface {
 	// the flow is not enabled.
 	StartDevice(ctx context.Context) (DeviceChallenge, error)
 	// PollDevice checks one time. ErrDevicePending while the user has not
-	// approved; ErrDeviceTransient (wrapped) for a retryable failure.
+	// approved; ErrDeviceTransient (wrapped) for a retryable failure (a request
+	// that did not complete, 429, 5xx).
 	PollDevice(ctx context.Context, ch DeviceChallenge) (DeviceGrant, error)
 	// ExchangeDevice trades an approved grant for tokens.
 	ExchangeDevice(ctx context.Context, g DeviceGrant) (ExchangeResult, error)
@@ -173,7 +174,7 @@ func (c *LoginCoordinator) pollDevice(ctx context.Context, dev DeviceLogin, ch D
 		if remaining <= 0 {
 			return DeviceGrant{}, expired()
 		}
-		pollCtx, cancel := context.WithTimeout(ctx, min(devicePollRequestTimeout, remaining))
+		pollCtx, cancel := context.WithTimeout(ctx, min(c.pollTimeout, remaining))
 		grant, err := dev.PollDevice(pollCtx, ch)
 		cancel()
 
@@ -186,7 +187,9 @@ func (c *LoginCoordinator) pollDevice(ctx context.Context, dev DeviceLogin, ch D
 			return DeviceGrant{}, expired()
 		case errors.Is(err, ErrDevicePending):
 			transient = 0
-		case errors.Is(err, ErrDeviceTransient):
+		case errors.Is(err, ErrDeviceTransient), errors.Is(err, context.DeadlineExceeded):
+			// A deadline here is the per-poll timeout: the caller's own ctx
+			// and the login's expiry were ruled out above.
 			if transient++; transient > maxDeviceRetries {
 				return DeviceGrant{}, failed()
 			}
@@ -309,7 +312,10 @@ func (l *OpenAILogin) minDeviceInterval() time.Duration {
 }
 
 // PollDevice implements DeviceLogin. The vendor answers 403 or 404 until the
-// user approves the code.
+// user approves the code. A 429 or 5xx is ErrDeviceTransient; any other
+// non-2xx is a hard failure. A request cut off by ctx's own deadline returns
+// that context error; the coordinator, which owns the per-poll deadline,
+// treats it as transient.
 func (l *OpenAILogin) PollDevice(ctx context.Context, ch DeviceChallenge) (DeviceGrant, error) {
 	status, body, err := l.postDeviceJSON(ctx, openaiDeviceTokenURL, map[string]string{
 		"device_auth_id": ch.DeviceAuthID,
@@ -320,6 +326,10 @@ func (l *OpenAILogin) PollDevice(ctx context.Context, ch DeviceChallenge) (Devic
 	}
 	if status == http.StatusForbidden || status == http.StatusNotFound {
 		return DeviceGrant{}, ErrDevicePending
+	}
+	if status == http.StatusTooManyRequests || status >= 500 {
+		// The vendor is rate limiting or unwell, not refusing the login.
+		return DeviceGrant{}, fmt.Errorf("openai device login: the approval check returned status %d: %w", status, ErrDeviceTransient)
 	}
 	if !statusOK(status) {
 		return DeviceGrant{}, fmt.Errorf("openai device login: the approval check returned status %d", status)

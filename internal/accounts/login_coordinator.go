@@ -75,6 +75,9 @@ type LoginCoordinator struct {
 	// them, like timeout.
 	deviceTimeout time.Duration
 	minPoll       time.Duration
+	// pollTimeout (default devicePollRequestTimeout) bounds one poll request;
+	// a poll that hits it is retried like any transient failure.
+	pollTimeout time.Duration
 
 	mu       sync.Mutex
 	inFlight map[string]bool
@@ -114,6 +117,7 @@ func NewLoginCoordinator(registry *Registry, logins map[string]Login) *LoginCoor
 
 		deviceTimeout: deviceLoginTimeout,
 		minPoll:       deviceMinInterval,
+		pollTimeout:   devicePollRequestTimeout,
 		inFlight:      make(map[string]bool),
 		pending:       make(map[string]*pendingLogin),
 	}
