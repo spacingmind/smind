@@ -134,9 +134,11 @@ func (v *Verdict) checkContent(result Skill, in Intent, cfg Config, add func(...
 	add(CheckPathsAndHosts(result.Description, result.Body)...)
 	add(CheckHiddenText(in.Name, result.Category, result.Description, result.Body)...)
 	if cfg.Redact != nil {
-		for field, text := range map[string]string{"category": result.Category, "description": result.Description, "body": result.Body} {
-			if cfg.Redact(text) != text {
-				add(Finding{Reason: ReasonSecret, Detail: fmt.Sprintf("redactor modified the %s field", field)})
+		for _, f := range []struct{ field, text string }{
+			{"category", result.Category}, {"description", result.Description}, {"body", result.Body},
+		} {
+			if cfg.Redact(f.text) != f.text {
+				add(Finding{Reason: ReasonSecret, Detail: fmt.Sprintf("redactor modified the %s field", f.field)})
 			}
 		}
 	}
@@ -154,10 +156,8 @@ func (v *Verdict) checkSimilarity(result Skill, patchTarget *LiveSkill, learned,
 		} else {
 			score = similarity.Score(proposalHuman, otherHuman)
 		}
-		if score > bestScore || (score == bestScore && name < bestName) || bestName == "" && score > 0 {
-			if score > bestScore || (score == bestScore && name < bestName) {
-				bestName, bestScore = name, score
-			}
+		if score > bestScore || (score == bestScore && score > 0 && name < bestName) {
+			bestName, bestScore = name, score
 		}
 	}
 	for _, s := range learned {

@@ -97,8 +97,9 @@ type fmField struct {
 // fence; the body beyond it is never read.
 func parseHead(r io.Reader) Skill {
 	scanner := bufio.NewScanner(io.LimitReader(r, MaxHeadBytes))
-	buf := make([]byte, 512)
-	scanner.Buffer(buf, 512)
+	// Start small so a short frontmatter stops the read early; allow one
+	// line up to the head cap so a long description is not silently dropped.
+	scanner.Buffer(make([]byte, 512), MaxHeadBytes)
 	var fields []fmField
 	inFM := false
 	for scanner.Scan() {
@@ -120,7 +121,13 @@ func parseHead(r io.Reader) Skill {
 		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
 			// folded/literal continuation of the previous field
 			if len(fields) > 0 {
-				fields[len(fields)-1].value += " " + trimmed
+				last := &fields[len(fields)-1]
+				switch last.value {
+				case ">", "|", ">-", "|-", ">+", "|+": // block scalar indicator, not text
+					last.value = trimmed
+				default:
+					last.value += " " + trimmed
+				}
 			}
 			continue
 		}
@@ -135,6 +142,11 @@ func parseHead(r io.Reader) Skill {
 			s.Name = unquote(f.value)
 		case "description":
 			s.Description = unquote(f.value)
+			// YAML block scalar indicators carry no text themselves.
+			switch s.Description {
+			case ">", "|", ">-", "|-", ">+", "|+":
+				s.Description = ""
+			}
 		}
 	}
 	return s

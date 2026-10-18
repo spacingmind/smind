@@ -198,3 +198,22 @@ func TestHumanSkills_OversizedOrBrokenHeadSkipped(t *testing.T) {
 	}
 
 }
+
+func TestHumanSkills_LongDescriptionLineAndBlockScalar(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("word ", 300) // 1500 bytes on one line
+	fsys := fstest.MapFS{
+		"skills/a/SKILL.md": {Data: []byte("---\nname: a\ndescription: " + long + "\n---\nbody\n")},
+		"skills/b/SKILL.md": {Data: []byte("---\nname: b\ndescription: >\n  folded text\n  continues\n---\nbody\n")},
+	}
+	got, err := Load(fsys, "skills")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("Load = %v, %v", got, err)
+	}
+	if strings.TrimSpace(got[0].Description) != strings.TrimSpace(long) {
+		t.Fatalf("long description truncated: %d bytes", len(got[0].Description))
+	}
+	if got[1].Description != "folded text continues" {
+		t.Fatalf("block scalar description = %q", got[1].Description)
+	}
+}
