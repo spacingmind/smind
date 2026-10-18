@@ -387,6 +387,26 @@ describe("ConnectAccountPanel connect flows", () => {
     expect(screen.getByLabelText("Base URL (optional)")).toHaveValue("");
   });
 
+  it("paste input is focused when revealed by the hint", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { client } = await setup();
+
+    await act(async () => {
+      await connect(client);
+    });
+    await act(async () => {
+      emitAuthorize(client);
+    });
+    await flush();
+    await act(async () => {
+      vi.advanceTimersByTime(15000);
+    });
+    await flush();
+
+    fireEvent.click(screen.getByTestId("login-trouble-toggle"));
+    expect(screen.getByLabelText("Sign-in redirect address")).toHaveFocus();
+  });
+
   it("the paste a credential disclosure is gone", async () => {
     await setup();
     expect(screen.queryByTestId("accounts-manual-toggle")).not.toBeInTheDocument();

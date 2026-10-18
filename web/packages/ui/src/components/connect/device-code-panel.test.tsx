@@ -37,7 +37,9 @@ describe("device code panel", () => {
 
   it("device panel shows the code, link and countdown", () => {
     renderPanel();
-    expect(screen.getByTestId("device-code").textContent).toBe(USER_CODE);
+    expect(screen.getByTestId("device-code").textContent).toContain(USER_CODE);
+    // The visually hidden reader text carries the "Device code:" prefix.
+    expect(screen.getByTestId("device-code").textContent).toBe(`ABCD-1234Device code: ${USER_CODE}`);
     const link = screen.getByTestId("device-code-link");
     expect(link).toHaveAttribute("href", VERIFICATION_URL);
     expect(link.textContent).toBe(VERIFICATION_URL);

@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Icons } from "@/lib/icons";
@@ -44,12 +44,21 @@ export function DeviceCodePanel(props: {
 
   const expired = remainingMs <= 0;
 
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
+
   function copy() {
     navigator.clipboard
       .writeText(userCode)
       .then(() => {
         setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
+        if (copiedTimer.current) clearTimeout(copiedTimer.current);
+        copiedTimer.current = setTimeout(() => setCopied(false), 1500);
       })
       .catch(() => {});
   }
@@ -61,12 +70,11 @@ export function DeviceCodePanel(props: {
     >
       <p className="text-ui-base">Open the verification page and enter this code:</p>
       <div className="flex items-center gap-2">
-        <span
-          data-testid="device-code"
-          aria-label="Device code"
-          className="font-mono text-2xl tracking-widest"
-        >
+        <span data-testid="device-code" className="font-mono text-2xl tracking-widest">
           {userCode}
+          {/* Readable as "Device code: X" rather than a bare string; a
+              plain span's aria-label is ignored by many screen readers. */}
+          <span className="sr-only">{`Device code: ${userCode}`}</span>
         </span>
         <Button
           type="button"

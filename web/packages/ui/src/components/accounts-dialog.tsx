@@ -419,7 +419,7 @@ export function ConnectAccountPanel({
             </p>
           )}
           {state.phase === "starting" && (
-            <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/50 px-2.5 py-1.5 text-ui-base text-muted-foreground">
+            <div role="status" aria-live="polite" className="flex items-center justify-between gap-2 rounded-md border bg-muted/50 px-2.5 py-1.5 text-ui-base text-muted-foreground">
               <p>Starting login…</p>
               <Button
                 type="button"
@@ -434,7 +434,7 @@ export function ConnectAccountPanel({
             </div>
           )}
           {state.phase === "waiting" && (
-            <div className="grid gap-2 rounded-md border bg-muted/50 px-2.5 py-1.5 text-ui-base text-muted-foreground">
+            <div role="status" aria-live="polite" className="grid gap-2 rounded-md border bg-muted/50 px-2.5 py-1.5 text-ui-base text-muted-foreground">
               <div className="flex items-center justify-between gap-2">
                 <p>
                   Waiting for login — {isDesktop ? "if your browser didn't open, " : ""}
@@ -459,7 +459,10 @@ export function ConnectAccountPanel({
                   onSubmit={login.complete}
                   pending={login.pasting}
                   error={login.pasteError}
-                  autoFocus={remote}
+                  // The immediate (remote) panel opens with the login; the
+                  // hinted one appears after an explicit click, so its
+                  // input takes focus either way.
+                  autoFocus={remote || pasteOpen}
                 />
               ) : pasteHint ? (
                 <button
@@ -474,12 +477,14 @@ export function ConnectAccountPanel({
             </div>
           )}
           {state.phase === "device" && (
-            <DeviceCodePanel
+            <div role="status" aria-live="polite">
+              <DeviceCodePanel
               userCode={state.userCode}
               verificationUrl={state.verificationUrl}
               expiresAt={state.expiresAt}
               onCancel={login.cancel}
             />
+            </div>
           )}
           {state.phase === "done" && (
             <LoginDoneNotice
