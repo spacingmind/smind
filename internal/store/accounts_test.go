@@ -260,9 +260,21 @@ func TestStore_AccountIdentity(t *testing.T) {
 		t.Fatalf("plain accounts carry identities %q/%q", b.Identity, c.Identity)
 	}
 
-	// Plain replace keeps the stored identity; adopting sets it and swaps the credential atomically.
-	if got, err := s.ReplaceAccountCredential(a.ID, "oauth", `{"n":1}`); err != nil || got.Identity != "id-1" {
-		t.Fatalf("ReplaceAccountCredential() = %+v, %v, want identity kept", got, err)
+	// The OAuth re-login replace keeps the stored identity; the paste replace
+	// clears it (it described the old credential); adopting sets it and swaps
+	// the credential atomically.
+	if got, err := s.ReplaceAccountCredentialKeepingIdentity(a.ID, "oauth", `{"n":1}`); err != nil || got.Identity != "id-1" {
+		t.Fatalf("ReplaceAccountCredentialKeepingIdentity() = %+v, %v, want identity kept", got, err)
+	}
+	d, err := s.CreateAccount(Account{Provider: "anthropic", Label: "d", CredentialType: "oauth", CredentialData: `{}`, Identity: "id-9"})
+	if err != nil {
+		t.Fatalf("CreateAccount(d) error = %v", err)
+	}
+	if got, err := s.ReplaceAccountCredential(d.ID, "api_key", `{"key":"k"}`); err != nil || got.Identity != "" {
+		t.Fatalf("ReplaceAccountCredential() = %+v, %v, want identity cleared", got, err)
+	}
+	if _, err := s.GetAccountByIdentity("anthropic", "id-9"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("GetAccountByIdentity(cleared) error = %v, want ErrNoRows", err)
 	}
 	if _, err := s.ReplaceAccountCredentialAdoptingIdentity(b.ID, "oauth", `{"n":2}`, "id-1"); !errors.Is(err, ErrIdentityInUse) {
 		t.Fatalf("adopt owned identity error = %v, want ErrIdentityInUse", err)

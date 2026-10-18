@@ -1,6 +1,7 @@
 package accounts
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -417,3 +418,67 @@ type recordingNotifier struct {
 
 func (n *recordingNotifier) NotifyAccountUpdated(a store.Account) { n.updated = append(n.updated, a) }
 func (n *recordingNotifier) NotifyAccountRemoved(id int64)        { n.removed = append(n.removed, id) }
+
+// A credential replaced by paste (account.updateCredential) no longer
+// describes the vendor account its identity came from, so the identity is
+// cleared; a later OAuth login of that vendor account must not silently
+// convert the pasted-credential row back.
+func TestRegistry_ReplaceCredentialIdentity(t *testing.T) {
+	t.Parallel()
+
+	t.Run("updateCredential clears identity", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		first, err := relogin(t, coord, login, "work", LoginOptions{}, "subject-1")
+		if err != nil || !first.Account.HasIdentity {
+			t.Fatalf("Login() = %+v, %v, want an account with identity", first, err)
+		}
+		id := first.Account.ID
+
+		updated, err := registry.ReplaceCredential(id, "sk-ant-pasted", "")
+		if err != nil {
+			t.Fatalf("ReplaceCredential() error = %v", err)
+		}
+		if updated.Identity != "" {
+			t.Fatal("ReplaceCredential() left the identity of the replaced credential")
+		}
+		if got, _ := registry.Get(id); got.HasIdentity || got.CredentialType != CredentialTypeAPIKey || got.APIKey == nil || got.APIKey.Key != "sk-ant-pasted" {
+			t.Fatalf("account after paste = %+v, want an api_key row without identity", got)
+		}
+
+		// The same vendor account logging in again creates a new row; the
+		// pasted-credential row is untouched.
+		second, err := relogin(t, coord, login, "again", LoginOptions{}, "subject-1")
+		if err != nil || !second.Created || second.Account.ID == id || !second.Account.HasIdentity {
+			t.Fatalf("OAuth login after paste = %+v, %v, want a new row with identity", second, err)
+		}
+		if got, _ := registry.Get(id); got.CredentialType != CredentialTypeAPIKey || got.APIKey == nil || got.APIKey.Key != "sk-ant-pasted" {
+			t.Fatalf("pasted-credential row changed by an OAuth login: %+v", got)
+		}
+
+		// A row-level Re-login of the pasted row now adopts-or-conflicts like
+		// any legacy row: here the new row owns the identity.
+		_, err = relogin(t, coord, login, "x", LoginOptions{AccountID: id}, "subject-1")
+		var le *LoginError
+		if !errors.As(err, &le) || le.Code != LoginCodeIdentityInUse {
+			t.Fatalf("Re-login of the pasted row error = %v, want identity_in_use", err)
+		}
+	})
+
+	t.Run("oauth re-login of the same account keeps the identity", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		first, err := relogin(t, coord, login, "work", LoginOptions{}, "subject-1")
+		if err != nil {
+			t.Fatalf("Login() error = %v", err)
+		}
+		if _, err := relogin(t, coord, login, "work", LoginOptions{AccountID: first.Account.ID}, "subject-1"); err != nil {
+			t.Fatalf("Re-login error = %v", err)
+		}
+		if got, _ := registry.Get(first.Account.ID); !got.HasIdentity {
+			t.Fatal("OAuth re-login of the same account dropped its identity")
+		}
+	})
+}

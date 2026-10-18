@@ -165,5 +165,8 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
   `internal/wsapi/oauth_test.go` (`created`/`adopted`, `identity_mismatch`/`login_unknown_account` through the `account.oauthStart:`
   wrapper); `TestAccount_ListExposesHasIdentityNeverIdentity` in `internal/wsapi/account_test.go` (raw JSON has `hasIdentity`, no
   `identity` key or value).
+- `updateCredential clears identity` -- `internal/accounts/registry_test.go` (`TestRegistry_ReplaceCredentialIdentity`): a pasted
+  credential clears the row's identity in the same UPDATE, a later OAuth login of that vendor account creates a new row (the pasted row
+  is not converted), and an OAuth re-login of the same account keeps its identity. Store side: `TestStore_AccountIdentity`.
 - Refresh-blocked clearing needs no new code: the quota poller's rejected-credential state is keyed on a credential fingerprint
   (`internal/quota/poller.go`), so a replaced credential unblocks by itself.

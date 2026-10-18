@@ -101,9 +101,18 @@ func (s *Store) SetAccountModels(id int64, modelsJSON string) (Account, error) {
 // credential_data on the refresh path, this is the account.updateCredential
 // RPC's store call. A credential change also clears the account's passive
 // quota cooldowns (ADR-0028 §7); the refresh path does not. A nonexistent id
-// is a clear not-found error.
+// is a clear not-found error. The account's identity (ADR-0033 D6) described
+// the old credential, so it is cleared in the same UPDATE; the OAuth re-login
+// path uses the Keeping/Adopting variants instead.
 func (s *Store) ReplaceAccountCredential(id int64, credentialType, credentialData string) (Account, error) {
-	return s.replaceAccountCredential(id, credentialType, credentialData, "")
+	return s.replaceAccountCredential(id, credentialType, credentialData, "", false)
+}
+
+// ReplaceAccountCredentialKeepingIdentity is ReplaceAccountCredential for the
+// OAuth re-login of the same vendor account (ADR-0033 D6): the credential is
+// swapped and the stored identity is left as is.
+func (s *Store) ReplaceAccountCredentialKeepingIdentity(id int64, credentialType, credentialData string) (Account, error) {
+	return s.replaceAccountCredential(id, credentialType, credentialData, "", true)
 }
 
 // ReplaceAccountCredentialAdoptingIdentity is ReplaceAccountCredential plus
@@ -115,7 +124,7 @@ func (s *Store) ReplaceAccountCredentialAdoptingIdentity(id int64, credentialTyp
 	if identity == "" {
 		return Account{}, fmt.Errorf("update account %d credential: empty identity", id)
 	}
-	return s.replaceAccountCredential(id, credentialType, credentialData, identity)
+	return s.replaceAccountCredential(id, credentialType, credentialData, identity, false)
 }
 
 // GetAccountByIdentity returns the account of the given provider owning
@@ -153,10 +162,10 @@ func (s *Store) SetAccountIdentity(id int64, identity string) (Account, error) {
 	return s.GetAccount(id)
 }
 
-// replaceAccountCredential does the work of both replace methods; a
-// non-empty identity is stored alongside the credential, "" leaves the
-// stored identity untouched.
-func (s *Store) replaceAccountCredential(id int64, credentialType, credentialData, identity string) (Account, error) {
+// replaceAccountCredential does the work of the replace methods. keepIdentity
+// leaves the stored identity untouched; otherwise it is set to identity ("" =
+// cleared to NULL) in the same UPDATE as the credential.
+func (s *Store) replaceAccountCredential(id int64, credentialType, credentialData, identity string, keepIdentity bool) (Account, error) {
 	if _, err := s.GetAccount(id); err != nil {
 		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
 	}
@@ -168,8 +177,8 @@ func (s *Store) replaceAccountCredential(id int64, credentialType, credentialDat
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(
-		`UPDATE accounts SET credential_type = ?, credential_data = ?, identity = COALESCE(NULLIF(?, ''), identity), updated_at = ? WHERE id = ?`,
-		credentialType, credentialData, identity, time.Now().UTC(), id,
+		`UPDATE accounts SET credential_type = ?, credential_data = ?, identity = CASE WHEN ? THEN identity ELSE NULLIF(?, '') END, updated_at = ? WHERE id = ?`,
+		credentialType, credentialData, keepIdentity, identity, time.Now().UTC(), id,
 	); err != nil {
 		if isUniqueViolation(err) {
 			return Account{}, fmt.Errorf("update account %d credential: %w", id, ErrIdentityInUse)

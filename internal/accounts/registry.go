@@ -180,7 +180,7 @@ func (r *Registry) ReplaceOAuth(id int64, cred OAuthCredential, adoptIdentity st
 	if adoptIdentity != "" {
 		updated, err = r.store.ReplaceAccountCredentialAdoptingIdentity(id, CredentialTypeOAuth, string(data), adoptIdentity)
 	} else {
-		updated, err = r.store.ReplaceAccountCredential(id, CredentialTypeOAuth, string(data))
+		updated, err = r.store.ReplaceAccountCredentialKeepingIdentity(id, CredentialTypeOAuth, string(data))
 	}
 	if err != nil {
 		return store.Account{}, err
@@ -305,7 +305,9 @@ func (r *Registry) Rename(id int64, label string) (store.Account, error) {
 // with the parsed credential, firing the credential-replaced hook and then
 // NotifyAccountUpdated on success. It is
 // account.updateCredential's registry call: parsing mirrors account.add
-// exactly (see ParseCredential).
+// exactly (see ParseCredential). The account's identity (ADR-0033 D6)
+// described the old credential, so it is cleared; the OAuth re-login path
+// (ReplaceOAuth) owns identity instead.
 func (r *Registry) ReplaceCredential(id int64, credential, baseURL string) (store.Account, error) {
 	if strings.TrimSpace(credential) == "" {
 		return store.Account{}, fmt.Errorf("credential is required")
