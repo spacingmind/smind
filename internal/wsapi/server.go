@@ -141,8 +141,8 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 	profReg := profiles.New(db)
 	mcpReg := mcpservers.New(db)
 	bus := newEventBus()
-	wm.SetNotifier(busWorkspaceNotifier{bus: bus})
-	reg.SetNotifier(busRunNotifier{bus: bus})
+	wm.SetNotifier(busWorkspaceNotifier{bus: bus, db: db})
+	reg.SetNotifier(busRunNotifier{bus: bus, db: db})
 	profReg.SetNotifier(busProfileNotifier{bus: bus})
 	mcpReg.SetNotifier(busMcpServerNotifier{bus: bus})
 
@@ -187,9 +187,24 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 // wire payload.
 type busWorkspaceNotifier struct {
 	bus *eventBus
+	db  *store.Store
+}
+
+// isSystemTask reports whether taskID is a hidden system task (ADR-0026);
+// notifications about one are dropped. A lookup failure (e.g. the row was
+// just deleted) counts as not-system so a user task's event is never lost.
+func isSystemTask(db *store.Store, taskID int64) bool {
+	if db == nil {
+		return false
+	}
+	t, err := db.GetTask(taskID)
+	return err == nil && t.Kind == store.TaskKindSystem
 }
 
 func (b busWorkspaceNotifier) NotifyTaskStatus(taskID int64, status string) {
+	if isSystemTask(b.db, taskID) {
+		return
+	}
 	b.bus.Publish(Event{Topic: TopicTaskStatus, Payload: taskStatusPayload{TaskID: taskID, Status: status}})
 }
 
@@ -210,30 +225,51 @@ func (b busWorkspaceNotifier) NotifySpaceDeleted(id, workspaceID int64) {
 }
 
 func (b busWorkspaceNotifier) NotifyTaskCreated(t store.Task) {
+	if t.Kind == store.TaskKindSystem {
+		return
+	}
 	b.bus.Publish(Event{Topic: TopicTaskCreated, Payload: taskCreatedPayload{Task: t}})
 }
 
 func (b busWorkspaceNotifier) NotifyTaskUpdated(t store.Task) {
+	if t.Kind == store.TaskKindSystem {
+		return
+	}
 	b.bus.Publish(Event{Topic: TopicTaskUpdated, Payload: taskUpdatedPayload{Task: t}})
 }
 
 func (b busWorkspaceNotifier) NotifyTaskArchived(t store.Task) {
+	if t.Kind == store.TaskKindSystem {
+		return
+	}
 	b.bus.Publish(Event{Topic: TopicTaskArchived, Payload: taskArchivedPayload{Task: t}})
 }
 
 func (b busWorkspaceNotifier) NotifyTaskDeleted(id, workspaceID int64, spaceID *int64) {
+	if isSystemTask(b.db, id) {
+		return
+	}
 	b.bus.Publish(Event{Topic: TopicTaskDeleted, Payload: taskDeletedPayload{ID: id, WorkspaceID: workspaceID, SpaceID: spaceID}})
 }
 
 func (b busWorkspaceNotifier) NotifyChatCreated(c store.Chat) {
+	if isSystemTask(b.db, c.TaskID) {
+		return
+	}
 	b.bus.Publish(Event{Topic: TopicChatCreated, Payload: chatCreatedPayload{Chat: c}})
 }
 
 func (b busWorkspaceNotifier) NotifyChatUpdated(c store.Chat) {
+	if isSystemTask(b.db, c.TaskID) {
+		return
+	}
 	b.bus.Publish(Event{Topic: TopicChatUpdated, Payload: chatUpdatedPayload{Chat: c}})
 }
 
 func (b busWorkspaceNotifier) NotifyChatArchived(c store.Chat) {
+	if isSystemTask(b.db, c.TaskID) {
+		return
+	}
 	b.bus.Publish(Event{Topic: TopicChatArchived, Payload: chatArchivedPayload{Chat: c}})
 }
 
@@ -303,9 +339,13 @@ func (b busMcpServerNotifier) NotifyMcpServerDeleted(id int64) {
 // each Registry lifecycle notification into its ADR-0005 wire payload.
 type busRunNotifier struct {
 	bus *eventBus
+	db  *store.Store
 }
 
 func (b busRunNotifier) NotifyRunStatus(s runs.RunStatus) {
+	if s.Purpose != "" {
+		return
+	}
 	b.bus.Publish(Event{Topic: TopicRunStatus, Payload: runStatusPayload{
 		RunID: s.ID, TaskID: s.TaskID, ChatID: s.ChatID, Status: string(s.Status),
 		StopReason: s.StopReason, Disposition: s.Disposition, Err: s.Err,
@@ -314,6 +354,9 @@ func (b busRunNotifier) NotifyRunStatus(s runs.RunStatus) {
 }
 
 func (b busRunNotifier) NotifyPermissionPending(runID string, taskID, chatID int64, requestID, summary string, options []taskrunner.PermissionOption) {
+	if isSystemTask(b.db, taskID) {
+		return
+	}
 	b.bus.Publish(Event{Topic: TopicPermissionPending, Payload: permissionPendingPayload{
 		RunID: runID, TaskID: taskID, ChatID: chatID, RequestID: requestID, Summary: summary,
 		Options: toPermissionOptionParams(options),
@@ -321,12 +364,20 @@ func (b busRunNotifier) NotifyPermissionPending(runID string, taskID, chatID int
 }
 
 func (b busRunNotifier) NotifyPermissionResolved(runID string, taskID, chatID int64, requestID, optionID, reason string) {
+	if isSystemTask(b.db, taskID) {
+		return
+	}
 	b.bus.Publish(Event{Topic: TopicPermissionResolved, Payload: permissionResolvedPayload{
 		RunID: runID, TaskID: taskID, ChatID: chatID, RequestID: requestID, OptionID: optionID, Reason: reason,
 	}})
 }
 
 func (b busRunNotifier) NotifyChatQueueUpdated(chatID int64, items []store.ChatQueueItem) {
+	if b.db != nil {
+		if c, err := b.db.GetChat(chatID); err == nil && isSystemTask(b.db, c.TaskID) {
+			return
+		}
+	}
 	b.bus.Publish(Event{Topic: TopicChatQueueUpdated, Payload: chatQueueUpdatedPayload{
 		ChatID: chatID, Items: toChatQueueItemParams(items),
 	}})

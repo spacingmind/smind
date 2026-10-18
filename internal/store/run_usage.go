@@ -179,10 +179,25 @@ func (s *Store) SummarizeRunUsage(since, until *time.Time, groupBy string) ([]Ru
 // bucket, ADR-0026) started at or after since; SummarizeRunUsage excludes
 // them.
 func (s *Store) SummarizeLearningUsage(since time.Time) (runs int, inputTokens, outputTokens int64, costUSD float64, err error) {
-	err = s.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(u.input_tokens), 0), COALESCE(SUM(u.output_tokens), 0), COALESCE(SUM(u.cost_usd), 0)
+	return s.SummarizeLearningUsageWindow(&since, nil)
+}
+
+// SummarizeLearningUsageWindow is SummarizeLearningUsage over usage.summary's
+// window: since inclusive, until exclusive, either nil for open.
+func (s *Store) SummarizeLearningUsageWindow(since, until *time.Time) (runs int, inputTokens, outputTokens int64, costUSD float64, err error) {
+	query := `SELECT COUNT(*), COALESCE(SUM(u.input_tokens), 0), COALESCE(SUM(u.output_tokens), 0), COALESCE(SUM(u.cost_usd), 0)
 		FROM run_usage u JOIN runs r ON r.id = u.run_id
-		WHERE r.purpose != 'user' AND r.started_at >= ?`, since).Scan(&runs, &inputTokens, &outputTokens, &costUSD)
-	if err != nil {
+		WHERE r.purpose != 'user'`
+	var args []any
+	if since != nil {
+		query += ` AND r.started_at >= ?`
+		args = append(args, *since)
+	}
+	if until != nil {
+		query += ` AND r.started_at < ?`
+		args = append(args, *until)
+	}
+	if err = s.db.QueryRow(query, args...).Scan(&runs, &inputTokens, &outputTokens, &costUSD); err != nil {
 		err = fmt.Errorf("summarize learning usage: %w", err)
 	}
 	return
