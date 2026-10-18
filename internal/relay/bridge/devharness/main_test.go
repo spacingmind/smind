@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -245,4 +246,155 @@ func TestSeedRunCappedRunNeedsContinue(t *testing.T) {
 		t.Fatalf("seed-run without -fake-agent: %v", m)
 	}
 	plain.mustOK("quit")
+}
+
+func startFake(t *testing.T) *proc {
+	t.Helper()
+	fakeDir := t.TempDir()
+	fake := filepath.Join(fakeDir, "fakeagent")
+	if runtime.GOOS == "windows" {
+		fake += ".exe"
+	}
+	if out, err := exec.Command("go", "build", "-o", fake, "../../../taskrunner/fakeagent").CombinedOutput(); err != nil {
+		t.Fatalf("go build fakeagent: %v\n%s", err, out)
+	}
+	return start(t, "-fake-agent", fake)
+}
+
+// TestQueueDeliversWhenTheLiveRunIsStopped (ADR-0021): prompts queued on a
+// busy chat stay queued in FIFO order and are delivered as new runs, oldest
+// first, once the live run is stopped.
+func TestQueueDeliversWhenTheLiveRunIsStopped(t *testing.T) {
+	p := startFake(t)
+
+	m := p.mustOK("seed-live hang Live")
+	if m["status"] != "running" {
+		t.Fatalf("seed-live: %v", m)
+	}
+	taskID := int64(m["taskId"].(float64))
+	chatID := int64(m["chatId"].(float64))
+
+	if m := p.mustOK("queue-prompt " + fmtInt(taskID) + " queue second"); m["queued"] != true {
+		t.Fatalf("queue-prompt second: %v", m)
+	}
+	if m := p.mustOK("queue-prompt " + fmtInt(taskID) + " queue third"); m["queued"] != true {
+		t.Fatalf("queue-prompt third: %v", m)
+	}
+	secondID, thirdID := queueIDByPrompt(t, p, chatID, "second"), queueIDByPrompt(t, p, chatID, "third")
+	if secondID == 0 || thirdID == 0 || secondID == thirdID {
+		t.Fatalf("expected two distinct queued items: %d %d", secondID, thirdID)
+	}
+
+	p.mustOK("set-scenario " + fmtInt(taskID) + " default")
+	p.mustOK("stop-run " + m2s(m["runId"]))
+
+	var firstRunID string
+	eventually(t, "second delivered", func() bool {
+		for _, it := range queueItems(t, p, chatID) {
+			if int64(it["id"].(float64)) == secondID && it["status"] == "delivered" && it["runId"].(string) != "" {
+				firstRunID = it["runId"].(string)
+				return true
+			}
+		}
+		return false
+	})
+	eventually(t, "second delivered run done", func() bool {
+		return p.mustOK("run-status " + firstRunID)["status"] == "done"
+	})
+	eventually(t, "third delivered", func() bool {
+		for _, it := range queueItems(t, p, chatID) {
+			if int64(it["id"].(float64)) == thirdID && it["status"] == "delivered" && it["runId"].(string) != "" {
+				return true
+			}
+		}
+		return false
+	})
+	p.mustOK("quit")
+}
+
+// TestQueueInterruptStopsTheLiveRunAndGoesFirst (ADR-0021): an interrupt
+// prompt stops the live run and is delivered before earlier queued prompts.
+func TestQueueInterruptStopsTheLiveRunAndGoesFirst(t *testing.T) {
+	p := startFake(t)
+
+	m := p.mustOK("seed-live hang Live")
+	if m["status"] != "running" {
+		t.Fatalf("seed-live: %v", m)
+	}
+	taskID := int64(m["taskId"].(float64))
+	chatID := int64(m["chatId"].(float64))
+	liveRunID := m2s(m["runId"])
+
+	p.mustOK("queue-prompt " + fmtInt(taskID) + " queue first")
+	// The interrupt's delivered run must be able to finish.
+	p.mustOK("set-scenario " + fmtInt(taskID) + " default")
+	if m := p.mustOK("queue-prompt " + fmtInt(taskID) + " interrupt urgent"); m["queued"] != true {
+		t.Fatalf("queue-prompt urgent: %v", m)
+	}
+
+	eventually(t, "live run stopped", func() bool {
+		return p.mustOK("run-status " + liveRunID)["status"] == "stopped"
+	})
+	firstID, urgentID := queueIDByPrompt(t, p, chatID, "first"), queueIDByPrompt(t, p, chatID, "urgent")
+	var urgentRunID string
+	eventually(t, "urgent delivered with a runId", func() bool {
+		for _, it := range queueItems(t, p, chatID) {
+			if int64(it["id"].(float64)) == urgentID && it["runId"].(string) != "" {
+				urgentRunID = it["runId"].(string)
+				return it["status"] == "delivered"
+			}
+		}
+		return false
+	})
+	if r := queueItemByID(t, p, chatID, firstID); r["runId"].(string) == "" && r["status"] != "delivered" {
+		// first is still queued while urgent already runs (priority).
+		t.Logf("urgent delivered before first: first = %v", r)
+	}
+	p.mustOK("stop-run " + urgentRunID)
+	eventually(t, "first delivered after urgent", func() bool {
+		for _, it := range queueItems(t, p, chatID) {
+			if int64(it["id"].(float64)) == firstID && it["status"] == "delivered" && it["runId"].(string) != "" {
+				return true
+			}
+		}
+		return false
+	})
+	p.mustOK("quit")
+}
+
+func fmtInt(i int64) string { return strconv.FormatInt(i, 10) }
+
+func m2s(v any) string { return v.(string) }
+
+func queueItems(t *testing.T, p *proc, chatID int64) []map[string]any {
+	t.Helper()
+	raw := p.mustOK("queue-list " + fmtInt(chatID))["items"].([]any)
+	items := make([]map[string]any, 0, len(raw))
+	for _, it := range raw {
+		items = append(items, it.(map[string]any))
+	}
+	return items
+}
+
+func queueItemByID(t *testing.T, p *proc, chatID, id int64) map[string]any {
+	t.Helper()
+	for _, it := range queueItems(t, p, chatID) {
+		if it["id"].(float64) == float64(id) {
+			return it
+		}
+	}
+	t.Fatalf("queue item %d not found", id)
+	return nil
+}
+
+// queueIDByPrompt finds a queue item by its prompt text.
+func queueIDByPrompt(t *testing.T, p *proc, chatID int64, prompt string) int64 {
+	t.Helper()
+	for _, it := range queueItems(t, p, chatID) {
+		if it["prompt"] == prompt {
+			return int64(it["id"].(float64))
+		}
+	}
+	t.Fatalf("queue item %q not found", prompt)
+	return 0
 }

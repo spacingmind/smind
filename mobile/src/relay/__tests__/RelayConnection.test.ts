@@ -208,6 +208,21 @@ describe('RelayConnection.subscribe', () => {
     expect(events).toHaveLength(1); // no callback fired after unsubscribe
   });
 
+  it('onDropped fires for the daemon\'s synthetic event.dropped without any subscription RPC, and stops after unsubscribe', async () => {
+    const { conn, daemon } = await makePair();
+    const counts: number[] = [];
+    const off = conn.onDropped((n) => counts.push(n));
+
+    daemon.pushNotification('event.dropped', { count: 3 }, 1);
+    await vi.waitFor(() => expect(counts).toEqual([3]));
+    expect(daemon.received()).toHaveLength(0); // event.dropped is not a topic: nothing was sent to subscribe to it
+
+    off();
+    daemon.pushNotification('event.dropped', { count: 1 }, 2);
+    await new Promise((r) => setTimeout(r, 25));
+    expect(counts).toEqual([3]);
+  });
+
   it('coalesces overlapping subscriptions and only unsubscribes topics when the last callback goes', async () => {
     const { conn, daemon } = await makePair();
     const seen1: string[] = [];
