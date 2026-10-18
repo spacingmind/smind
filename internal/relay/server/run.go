@@ -37,6 +37,13 @@ type Config struct {
 	// DataDir holds the persisted self-signed TLS certificate and
 	// relay host enrollments (config.Dir()/relay by default from the CLI).
 	DataDir string
+	// TLSCertFile and TLSKeyFile, both or neither, make the relay serve that
+	// certificate (a CA-issued one, ADR-0031 P12c) instead of its generated
+	// self-signed one. Clients then verify it against the system roots and
+	// have no fingerprint to pin. The files are re-read when they change
+	// (a renewal).
+	TLSCertFile string
+	TLSKeyFile  string
 	// BufferCap is the per-side reconnect buffer size in frames (0 = default).
 	BufferCap int
 	// MaxDevicesPerHost caps the devices one relay host may have attached at
@@ -91,16 +98,34 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("host store: %w", err)
 	}
-	cert, err := LoadOrCreateCert(cfg.DataDir)
-	if err != nil {
-		return err
+	if (cfg.TLSCertFile == "") != (cfg.TLSKeyFile == "") {
+		return fmt.Errorf("relay: --tls-cert and --tls-key must be given together")
+	}
+	var (
+		getCert func(*tls.ClientHelloInfo) (*tls.Certificate, error)
+		tlsNote string
+	)
+	if cfg.TLSCertFile != "" {
+		src, err := newCertSource(cfg.TLSCertFile, cfg.TLSKeyFile)
+		if err != nil {
+			return err
+		}
+		getCert = src.GetCertificate
+		tlsNote = fmt.Sprintf("certificate %s: clients verify it, no fingerprint to pin", cfg.TLSCertFile)
+	} else {
+		cert, err := LoadOrCreateCert(cfg.DataDir)
+		if err != nil {
+			return err
+		}
+		getCert = func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return &cert, nil }
+		tlsNote = "fingerprint " + CertFingerprint(cert)
 	}
 
 	srv := New(verifier, cfg.BufferCap, WithMaxDevicesPerHost(cfg.MaxDevicesPerHost))
 	gs := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(&tls.Config{
-			Certificates: []tls.Certificate{cert},
-			MinVersion:   tls.VersionTLS13,
+			GetCertificate: getCert,
+			MinVersion:     tls.VersionTLS13,
 		})),
 		// Clients behind a proxy keep long-lived streams alive with HTTP/2
 		// PINGs (ADR-0031 D9, flow 8, alongside the application keepalive
@@ -154,9 +179,9 @@ func Run(ctx context.Context, cfg Config) error {
 	// affects native gRPC, which is exactly the point of using a separate
 	// listener instead of multiplexing one port.
 	webErrCh := make(chan error, 1)
-	go func() { webErrCh <- serveGRPCWeb(ctx, gs, cert, webLis) }()
+	go func() { webErrCh <- serveGRPCWeb(ctx, gs, getCert, webLis) }()
 
-	fmt.Fprintf(os.Stderr, "smind relay listening on %s (fingerprint %s), grpc-web on %s\n", lis.Addr(), CertFingerprint(cert), webLis.Addr())
+	fmt.Fprintf(os.Stderr, "smind relay listening on %s (%s), grpc-web on %s\n", lis.Addr(), tlsNote, webLis.Addr())
 
 	select {
 	case <-ctx.Done():

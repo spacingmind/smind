@@ -42,7 +42,7 @@ import (
 // sandbox has no bearing on an admission-authenticated mobile client that
 // isn't a browser at all), only break legitimate clients that don't send a
 // browser-style Origin header.
-func serveGRPCWeb(ctx context.Context, gs *grpc.Server, cert tls.Certificate, lis net.Listener) error {
+func serveGRPCWeb(ctx context.Context, gs *grpc.Server, getCert func(*tls.ClientHelloInfo) (*tls.Certificate, error), lis net.Listener) error {
 	wrapped := grpcweb.WrapServer(gs,
 		grpcweb.WithWebsockets(true),
 		grpcweb.WithWebsocketOriginFunc(func(*http.Request) bool { return true }),
@@ -50,7 +50,7 @@ func serveGRPCWeb(ctx context.Context, gs *grpc.Server, cert tls.Certificate, li
 	)
 	httpSrv := &http.Server{
 		Handler:   wrapped,
-		TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13},
+		TLSConfig: &tls.Config{GetCertificate: getCert, MinVersion: tls.VersionTLS13},
 	}
 
 	errCh := make(chan error, 1)

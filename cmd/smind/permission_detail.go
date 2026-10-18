@@ -120,6 +120,8 @@ func stopNote(stopReason string) string {
 		return `The agent hit its turn limit before finishing, so the work may be incomplete. Send a follow-up prompt such as "continue" to resume.`
 	case "max_tokens":
 		return "The agent hit its output token limit; the last answer may be cut off."
+	case "budget_exceeded":
+		return "The run hit its budget limit, so the work may be incomplete. Raise the budget if needed, then send a follow-up prompt such as \"continue\" to resume."
 	case "refusal":
 		return "The agent refused the request."
 	default:

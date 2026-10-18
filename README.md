@@ -77,8 +77,8 @@ is missing).
 > script is on `master` from the first release that includes it.
 
 Then `smind serve` and open <http://localhost:4648>. To keep the daemon running across logouts and reboots on Linux or
-macOS, run `smind service install` (or pass `--service` to the install script); see
-[docs/homelab.md](docs/homelab.md#run-the-daemon-as-a-service-linux-and-macos).
+macOS, or at every logon on Windows, run `smind service install` (or pass `--service` to the install script, `-Service` to install.ps1); see
+[docs/homelab.md](docs/homelab.md#run-the-daemon-as-a-service-linux-macos-and-windows).
 
 From source:
 
@@ -220,6 +220,26 @@ Each run uses its provider's own permission modes
 
 Anything the chosen mode still escalates waits for a human in the web UI or
 `smind task approve`. The web UI's prompt form has the same mode picker.
+
+A human who trusts a run can change its settings while it runs, instead of
+approving every tool call one by one:
+
+```sh
+smind task mode <runId> --auto-accept on     # asks you to type "yes" at a terminal
+smind task mode <runId> bypassPermissions    # an auto-approving mode asks the same
+smind task mode <runId> acceptEdits          # switch to another mode the provider advertises
+smind task mode <runId> --auto-accept off
+```
+
+This is human-only: the MCP server has no tool that can turn auto-accept on or
+pick an auto-approving mode, and the daemon refuses both for any caller that is
+not a human ([ADR-0019](docs/decisions/0019-provider-native-permission-modes.md)
+decision 6). The command declares itself as the human surface, and turning
+auto-accept on, or picking a mode that approves tool calls itself, needs a person
+at a terminal; that is a speed bump, not a proof,
+because every client of the daemon holds the same token. Against an agent that
+can run shell commands as you, the boundary is the provider's own permission
+mode or sandbox, as for `smind task approve`.
 
 ### MCP server (`smind mcp serve`)
 

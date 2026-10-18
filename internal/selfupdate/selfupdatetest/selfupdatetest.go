@@ -122,7 +122,7 @@ func RunVersion(_ context.Context, exe string) (string, error) {
 // kept).
 func (s *Server) Add(t testing.TB, version, goos, goarch string) {
 	t.Helper()
-	s.AddArchive(t, version, goos, goarch, Archive(t, goos, "smind", Binary(version)))
+	s.AddArchive(t, version, goos, goarch, Archive(t, goos, binaryName(goos), Binary(version)))
 }
 
 // AddArchive publishes archive bytes as version's asset for goos/goarch and
@@ -171,6 +171,15 @@ type File struct {
 func Archive(t testing.TB, goos, member string, body []byte) []byte {
 	t.Helper()
 	return ArchiveOf(t, goos, File{member, body}, File{"LICENSE", []byte("MIT")})
+}
+
+// binaryName is the archive member of the daemon: selfupdate.BinaryName, which
+// this package cannot import (selfupdate's own tests import it).
+func binaryName(goos string) string {
+	if goos == "windows" {
+		return "smind.exe"
+	}
+	return "smind"
 }
 
 // ArchiveOf builds an archive from arbitrary entries, names verbatim (so

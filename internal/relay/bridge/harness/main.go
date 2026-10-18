@@ -27,6 +27,7 @@ func main() {
 	flag.BoolVar(&cfg.Hub, "hub", false, "run the multi-device hub with a device registry (stdin commands)")
 	flag.BoolVar(&cfg.Legacy, "legacy", false, "hub mode: also serve clients without device identity")
 	flag.IntVar(&cfg.MaxDevices, "max-devices", 0, "hub mode: bound on served devices (0 = default)")
+	flag.StringVar(&cfg.Password, "password", "", "hub mode: require this daemon password in every device_hello (ADR-0031 P13c)")
 	flag.BoolVar(&cfg.MobileStub, "mobile-stub", false, "hub mode: play a mobile device over grpc-web")
 	flag.Parse()
 	cfg.Stdin, cfg.Stdout, cfg.Stderr = os.Stdin, os.Stdout, os.Stderr

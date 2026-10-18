@@ -12,6 +12,11 @@ on it today. Until that evidence exists this ADR is a design to pick up,
 not a commitment. The numbered design below says what the extension would
 be; the "Decisions for the user" list in the plan is what to answer first.
 
+**D13 accepted and built (2026-10-18):** the derived `needs-continue` disposition of section 4, as recommended there and not as a new
+run status: `runs.DispositionFor(status, stopReason)`, additive on `run.list`, `run.logs`, `run.status`, MCP `task_status`/`task_wait`/
+`task_logs`/`run_list`, `smind task runs` and the web run footer (orchestration-parity plan, decision D13). Everything else in this ADR
+(the rest of the dispositions, `handoff_submit`/`handoff_review`, tiers, sizing) remains Proposed as above.
+
 Spec: [`docs/plans/active/orchestration-roles.md`](../plans/active/orchestration-roles.md).
 
 ## Context

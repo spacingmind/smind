@@ -256,8 +256,9 @@ type rpcResp struct {
 }
 
 type rpcErr struct {
-	Message string `json:"message"`
-	Code    string `json:"code"`
+	Message    string `json:"message"`
+	Code       string `json:"code"`
+	RetryAfter int    `json:"retry_after"`
 }
 
 // request sends one request and waits for its response (events are skipped).
@@ -331,13 +332,32 @@ func (d *device) awaitChallenge() ([]byte, error) {
 
 // hello answers the daemon's challenge with a signed device_hello and returns
 // the daemon's reply.
-func (d *device) hello() (rpcResp, error) {
+func (d *device) hello() (rpcResp, error) { return d.helloWithPassword("") }
+
+// helloWithPassword is hello carrying the daemon password (P13c); "" sends none.
+func (d *device) helloWithPassword(password string) (rpcResp, error) {
 	c, err := d.awaitChallenge()
 	if err != nil {
 		return rpcResp{}, err
 	}
 	h := devices.SignHello(d.priv, d.label, d.f.kp.Public(), d.eph.Public(), []byte(d.session), c)
+	h.Password = password // not covered by the signature
 	return d.request(devices.HelloMethod, h)
+}
+
+// connectWithPassword = open + hello(password), requiring approval.
+func (d *device) connectWithPassword(password string) {
+	d.t.Helper()
+	if err := d.open(""); err != nil {
+		d.t.Fatalf("device %s open: %v", d.label, err)
+	}
+	r, err := d.helloWithPassword(password)
+	if err != nil {
+		d.t.Fatalf("device %s hello: %v", d.label, err)
+	}
+	if r.Err != nil {
+		d.t.Fatalf("device %s hello refused: %+v", d.label, r.Err)
+	}
 }
 
 // connect = open + hello, requiring approval.

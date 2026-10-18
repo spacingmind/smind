@@ -30,6 +30,8 @@ type Config struct {
 	Hub        bool
 	Legacy     bool
 	MaxDevices int
+	// Password, when set, is the daemon password every device_hello must carry.
+	Password   string
 	MobileStub bool
 
 	Stdin  io.Reader
@@ -166,6 +168,7 @@ func Run(ctx context.Context, cfg Config) error {
 			Registry:      reg,
 			LegacyDevices: cfg.Legacy,
 			MaxDevices:    cfg.MaxDevices,
+			Password:      bridge.StaticPassword(cfg.Password),
 			Logf:          func(f string, a ...any) { errw.printf("hub: "+f, a...) },
 		}, bcfg, daemonKP, api)
 		hubd.start(ctx)

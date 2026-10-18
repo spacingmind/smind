@@ -3,6 +3,7 @@ package tasktree
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -372,3 +373,24 @@ func equalIDs(a, b []int64) bool {
 }
 
 func costPtr(v float64) *float64 { return &v }
+
+// TestBuild_NodeRunCarriesTheDisposition (D13): a node whose latest run is
+// "done" at a cap says so, and one without says nothing (the key is omitted).
+func TestBuild_NodeRunCarriesTheDisposition(t *testing.T) {
+	tasks := []Task{task(1, nil, false), task(2, pid(1), false), task(3, pid(1), false)}
+	facts := map[int64]RunFact{
+		2: {State: StateDone, Disposition: "needs-continue"},
+		3: {State: StateDone},
+	}
+	nodes, _ := Build(tasks, facts, nil, Root{WorkspaceID: 1})
+	if got := find(t, nodes, 2).Run; got.State != StateDone || got.Disposition != "needs-continue" {
+		t.Fatalf("capped node run = %+v", got)
+	}
+	plain, err := json.Marshal(find(t, nodes, 3).Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(plain), "disposition") {
+		t.Fatalf("a node without a disposition must omit the key: %s", plain)
+	}
+}

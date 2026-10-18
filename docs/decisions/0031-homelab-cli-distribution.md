@@ -324,6 +324,14 @@ Rules common to all backends:
   Windows 10/11 are **to be proven on a real machine** (plan spike). A task runs
   only after login; a headless Windows box needs auto-logon — documented, not
   solved here.
+  **Measured in P9 (2026-10-17, `windows-latest` = Windows Server 2025; Windows 10/11 client unverified):**
+  a standard local user (Medium integrity, not in Administrators) registers, runs, ends and deletes the logon task
+  with `schtasks` — no elevation; `conhost.exe --headless smind.exe …` gives the daemon a console but no window, in
+  the interactive session; **but** `conhost --headless` exits 0 whatever the child's exit code, so the task's
+  `RestartOnFailure` never fires for a crashed daemon, and `schtasks /End` ends only conhost and leaves the daemon
+  running. Hence the task runs `smind.exe service run` (a small supervisor inside a kill-on-close Job Object that
+  restarts a crashed daemon 3× at 1-minute intervals, as `RestartOnFailure` would) and `service stop` kills what `/End`
+  leaves. The task XML must be UTF-16 (UTF-8 is rejected: "unable to switch the encoding").
 
 **Coexistence with the desktop app.** The app already refuses to install over an
 unmanaged owner (`managed.rs:64-70`) and starts nothing when the port is held
@@ -332,7 +340,7 @@ unmanaged owner (`managed.rs:64-70`) and starts nothing when the port is held
 hides **Take over** and says "managed by systemd/launchd/Task Scheduler — stop
 the service to hand it to the app" (taking over a supervised daemon would make the
 supervisor restart it); the signal is an additive `/healthz` field `managedBy`
-set from an env var the unit defines (`SMIND_SUPERVISOR=systemd|launchd|task`)
+set from an env var the unit defines (`SMIND_SUPERVISOR=systemd|launchd|taskscheduler`; the Windows value was `task` until P9, changed on the Human's instruction 2026-10-17)
 (open decision 6); (2) macOS Take over must be refused unless the port owner is a
 `smind` image, closing the `ssh -L` footgun (a bug fix, no decision needed);
 (3) "Run smind on this computer" is disabled with an explanation while a service
@@ -802,6 +810,37 @@ somebody else's nonce, which only counts as liveness); each (re)opened stream pr
   `internal/relay/devices/testdata/device_hello_vector.json`; the retired v1 vector is kept for the record in
   `device_hello_vector_v1.json` (the daemon refuses its hello). `device_hello.password` is not covered by the signature and is
   checked (P13c) only over the encrypted channel.
+- *Daemon password (P13c, as built — the contract desktop and mobile implement).* When the daemon has a password (P4: `smind
+  set-password` or `SMIND_PASSWORD`), `device_hello.password` (a JSON string, the clear password, **only inside the encrypted
+  channel**, never in a URL, offer, log or the signed bytes) must be present and correct in **every** hello, approved devices
+  included. The signed bytes, the v2 vectors and the hello version do not change. Order on the daemon: signature + id binding
+  (as before) → **password** → capacity → registry `Admit`. So a device that cannot prove the password learns nothing about its
+  registry state (no `awaiting_approval` / `revoked` oracle) and is **never recorded as pending**. Refusals, all ordinary
+  `{"id","error":{"message","code",["retry_after"]}}` responses after which the daemon ends the route:
+  `password_required` (the daemon has a password, the hello had none or an empty one; not counted as a wrong attempt),
+  `incorrect_password` (counted), `too_many_attempts` (this device id, or all devices, are rate limited; `error.retry_after` is an
+  integer number of seconds ≥ 1). A hello `password` longer than 128 bytes is `incorrect_password`. The check is bcrypt against the
+  stored hash (constant time with respect to the password). Rate limit: per device id 5 free wrong attempts, then 2 s, 4 s, 8 s …
+  capped at 15 min; plus a global window (more than 40 wrong attempts a minute across all devices locks every hello for a minute).
+  With **no** password set the hello is accepted as before (a `password` field is ignored, never logged) and the daemon logs one
+  warning line when the relay bridge starts. A password-protected daemon also refuses **legacy** clients (no hello) even when
+  `relay.legacyDevices` is true (`device_hello_required`): the legacy route cannot carry a password.
+  *Client rules (desktop, mobile):* send `password` only when the user entered one this run. On `password_required` or
+  `incorrect_password` stop the automatic retry loop, show the password prompt, and on submit reconnect (a new session, a new
+  challenge: the hello is per session) with the password; after `incorrect_password` forget the rejected value. On
+  `too_many_attempts` show "try again in N s" and wait `retry_after` (at least 5 s, at most an hour: clamp what a daemon says). The
+  daemon checks its rate limit *before* it looks at the password, so a lockout says nothing about the password that was sent: keep
+  it and try it again once after the wait (forgetting it would let anyone who can hold the daemon's global limit make every client
+  discard a correct password); only a password the daemon answered `incorrect_password` for is forgotten, and exactly that one
+  (not a newer one the user typed while the reply was in flight), and never re-sent. Keep the password in memory only (Rust process memory on desktop, JS memory on mobile) for the rest of the app run so
+  transport blips and daemon restarts reconnect without asking again; never write it to disk, a keychain, logs, URLs, or the
+  webview. A password is only ever sent to the daemon it was typed for: the desktop keys its in-memory password by connection id *and*
+  the daemon's public key (re-adding a link that changes the key starts empty), and the set-password command names the connection.
+  A daemon from before P13c ignores the field (an unknown JSON key), so a client holding a password still connects to it.
+  *Accepted residuals:* one attacker with relay access and any Ed25519 key can spend ~40 wrong guesses a minute across rotated device
+  ids (~58k a day, in addition to `/api/login`'s own budget) and can hold the global lock to delay every new session (existing and
+  resumed sessions are unaffected); a 12+ character unique password makes the guessing budget irrelevant, and a lockout never
+  makes a client forget a correct password.
 - *v1 is not accepted (2026-10-15):* v1 signed nothing the daemon contributed. No released client ever spoke it — the
   clients that do (desktop P13a, mobile P13b) ship after this change, and every released app lacks a hello altogether and is
   refused by default (`relay.legacyDevices` is false) — so there is nothing to keep compatible, and accepting v1 would keep the
@@ -1346,6 +1385,6 @@ password, left this list on 2026-10-15: it is Accepted, see "Decisions".)
   remote daemons never updated by the app, loopback posture), ADR-0023 (updater keys), ADR-0029
   (`/api/shutdown`), ADR-0030 (Windows native daemon; rejected a service for the app).
 - `docs/plans/completed/desktop-relay-transport.md` (single-device limit),
-  `docs/plans/active/desktop-windows-native-daemon.md` and the `feat/windows-bundled-daemon` branch.
+  `docs/plans/completed/desktop-windows-native-daemon.md` and the `feat/windows-bundled-daemon` branch.
 - Paseo (`refs/paseo` @ `8d9e7d3a`): see the reference table above and each "Paseo reference" block.
 - Plan: [`docs/plans/active/homelab-cli.md`](../plans/active/homelab-cli.md).

@@ -166,9 +166,22 @@ type Env struct {
 	Probe func(ctx context.Context, port int) Health
 	// SystemdBooted reports whether this machine runs systemd as init.
 	SystemdBooted func() bool
+	// Shutdown asks the daemon on port to stop (POST /api/shutdown with the
+	// token in home). Default: the real request. Windows backend.
+	Shutdown func(ctx context.Context, port int, home string) error
+	// ForceStop kills this install's leftover processes (see forceStopScript):
+	// its `service run` supervisors (after waiting up to wait for them to exit by
+	// themselves) and, depending on mode, the process listening on port.
+	// Default on Windows: a PowerShell script. Windows backend.
+	ForceStop func(ctx context.Context, exe string, port int, mode KillMode, wait time.Duration) ([]int, error)
+	// FileExists reports whether a path exists (default os.Stat).
+	FileExists func(path string) bool
 	// SystemUnitDir is where system units live (default /etc/systemd/system);
 	// a field so tests never write under /etc.
 	SystemUnitDir string
+	// UserSID is the current user's SID (Windows), to recognise a scheduled
+	// task that belongs to someone else.
+	UserSID string
 	// Version is this binary's version, for `status`.
 	Version string
 	// Out and Err receive the human output.
@@ -194,13 +207,16 @@ func DefaultEnv(version string) (Env, error) {
 	if err != nil {
 		return Env{}, fmt.Errorf("find your home directory: %w", err)
 	}
-	var username string
+	var username, sid string
 	if u, err := user.Current(); err == nil {
 		username = u.Username
+		if runtime.GOOS == "windows" {
+			sid = u.Uid
+		}
 	}
 	return Env{
 		GOOS: runtime.GOOS, UID: os.Getuid(), Euid: os.Geteuid(),
-		Username: username, Home: home, Getenv: os.Getenv, Exe: exe,
+		Username: username, UserSID: sid, Home: home, Getenv: os.Getenv, Exe: exe,
 		Runner: ExecRunner{}, LookupUser: lookupUser, Probe: probeHTTP,
 		SystemdBooted: func() bool { _, err := os.Stat("/run/systemd/system"); return err == nil },
 		Version:       version, Out: os.Stdout, Err: os.Stderr,
@@ -224,6 +240,8 @@ func New(env Env) (Manager, error) {
 		return &systemd{env: env}, nil
 	case "darwin":
 		return &launchd{env: env}, nil
+	case "windows":
+		return &taskSched{env: env}, nil
 	default:
 		return nil, fmt.Errorf("%w (%s)", ErrUnsupported, env.GOOS)
 	}
@@ -238,6 +256,12 @@ func (e Env) withDefaults() Env {
 	}
 	if e.StopTimeout <= 0 {
 		e.StopTimeout = 40 * time.Second
+	}
+	if e.FileExists == nil {
+		e.FileExists = func(p string) bool { _, err := os.Stat(p); return err == nil }
+	}
+	if e.ForceStop == nil && e.GOOS == "windows" {
+		e.ForceStop = powershellForceStop(e.Runner)
 	}
 	if e.SystemUnitDir == "" {
 		e.SystemUnitDir = systemUnitDir
@@ -299,10 +323,21 @@ func (e Env) smindHome(o Options, targetHome string) (string, error) {
 	if h == "" {
 		return config.DirFor(targetHome), nil
 	}
-	if !filepath.IsAbs(h) {
+	if !e.isAbs(h) {
 		return "", fmt.Errorf("SMIND_HOME %q must be an absolute path to go into a service (pass --home <absolute dir>)", h)
 	}
 	return h, nil
+}
+
+// isAbs is filepath.IsAbs for the OS the service is for: a Windows path is
+// absolute with a drive letter or as a UNC path, whatever OS runs the tests.
+func (e Env) isAbs(p string) bool {
+	if e.GOOS == "windows" {
+		return len(p) >= 3 && p[1] == ':' && (p[2] == '\\' || p[2] == '/') || strings.HasPrefix(p, `\\`)
+	}
+	// Elsewhere: a rooted path, or whatever this host calls absolute (the
+	// unit tests fake a Linux or macOS target on a Windows host).
+	return strings.HasPrefix(p, "/") || filepath.IsAbs(p)
 }
 
 // serviceHome is the home of an EXISTING install: what its unit says, since

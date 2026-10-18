@@ -166,3 +166,40 @@ func TestRunSetPermissionMode_OrchestratorFailsClosedWithoutCatalog(t *testing.T
 		t.Fatalf("stored run = %+v, %v; want permission mode default", row, err)
 	}
 }
+
+// TestRunSetPermissionMode_AgentSourceIsRefusedLikeOrchestrator: the guard is
+// "any non-human source", so a caller that declares itself an agent gets no
+// more than the orchestrator does -- no auto-approving mode, no autoAccept=true
+// -- while the human source (what `smind task mode` declares) is allowed.
+func TestRunSetPermissionMode_AgentSourceIsRefusedLikeOrchestrator(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "hang")
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+	started := startRun(t, ws, map[string]any{"taskId": task.ID, "provider": "glm", "prompt": "hi"})
+
+	for name, params := range map[string]map[string]any{
+		"auto-approving mode": {"runId": started.RunID, "modeId": "bypass_permissions", "source": "agent"},
+		"autoAccept true":     {"runId": started.RunID, "autoAccept": true, "source": "agent"},
+	} {
+		sendRequest(t, ws, name, "run.setPermissionMode", params)
+		resp := readEnvelopeFor(t, ws, name, 5*time.Second)
+		if resp.Error == nil || !strings.Contains(resp.Error.Message, "ADR-0019") {
+			t.Fatalf("%s from source=agent: error = %+v, want an ADR-0019 refusal", name, resp.Error)
+		}
+	}
+	if summaries := readRunList(t, ws); len(summaries) != 1 || summaries[0].AutoAccept || summaries[0].PermissionMode == "bypass_permissions" {
+		t.Fatalf("run.list = %+v, want the run unchanged", summaries)
+	}
+
+	// The same calls from the human source succeed.
+	sendRequest(t, ws, "human", "run.setPermissionMode", map[string]any{"runId": started.RunID, "autoAccept": true, "source": "human"})
+	if resp := readEnvelopeFor(t, ws, "human", 5*time.Second); resp.Error != nil {
+		t.Fatalf("human autoAccept=true: %+v", resp.Error)
+	}
+
+	sendRequest(t, ws, "stop", "run.stop", map[string]any{"runId": started.RunID})
+	readEnvelopeFor(t, ws, "stop", 5*time.Second)
+}

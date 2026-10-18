@@ -146,6 +146,7 @@ Usage:
   smind task chat new <taskId> [title]                    create a chat
   smind task chat rename <chatId> <title>                 rename a chat
   smind task chat archive <chatId>                        archive a chat
+  smind task mode <runId> [--auto-accept on|off] [<mode>]  change a live run's permission mode or auto-accept (humans only)
   smind task attach <runId>                                stream a run (Ctrl+C to detach)
   smind task logs <runId> [-f|--follow] [--tail N]        show (or follow) a run's history
   smind task stop <runId>                                  stop a running run

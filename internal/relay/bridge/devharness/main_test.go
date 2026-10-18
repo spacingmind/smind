@@ -7,6 +7,7 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -78,6 +79,9 @@ func (p *proc) state(label string) string {
 func start(t *testing.T) *proc {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "devharness")
+	if runtime.GOOS == "windows" {
+		bin += ".exe" // exec.Command does not append it to a path
+	}
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
