@@ -14,12 +14,12 @@ import (
 
 // runIsolated runs RunPromptIsolated to completion and returns the events
 // and the error.
-func runIsolated(t *testing.T, r *Runner, task store.Task, provider Provider, decider PermissionDecider, iso IsolationOptions) ([]Event, error) {
+func runIsolated(t *testing.T, r *Runner, task store.Task, provider Provider, iso IsolationOptions) ([]Event, error) {
 	t.Helper()
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPromptIsolated(context.Background(), task.ID, task.ID, provider, "hi", decider, "", iso, events)
+		errCh <- r.RunPromptIsolated(context.Background(), task.ID, task.ID, provider, "hi", "", iso, events)
 	}()
 	got := drainEvents(events)
 	return got, <-errCh
@@ -68,7 +68,7 @@ func TestReflector_HasNoTools(t *testing.T) {
 	wm, task := newTestTask(t, "echo-args")
 	r := claudeNativeRunner(t, wm)
 
-	got, err := runIsolated(t, r, task, ProviderClaudeNative, nil, IsolationOptions{SystemPrompt: "you reflect"})
+	got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "you reflect"})
 	if err != nil {
 		t.Fatalf("RunPromptIsolated() error = %v", err)
 	}
@@ -90,7 +90,7 @@ func TestReflector_NoMcpNoAddDir(t *testing.T) {
 	if _, ok := flagValue(runClaudeMcp(t, r, task), "--mcp-config"); !ok {
 		t.Fatal("fixture broken: normal run has no --mcp-config")
 	}
-	if _, err := runIsolated(t, r, task, ProviderClaudeNative, nil, IsolationOptions{SystemPrompt: "p", MaxTurns: 0}); err != nil {
+	if _, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p", MaxTurns: 0}); err != nil {
 		t.Fatalf("RunPromptIsolated() error = %v", err)
 	}
 	assertIsolatedFlags(t, readArgs(t, task), "p")
@@ -100,7 +100,7 @@ func TestReflector_MaxTurnsOverride(t *testing.T) {
 	t.Parallel()
 	wm, task := newTestTask(t, "echo-args")
 	r := claudeNativeRunner(t, wm)
-	if _, err := runIsolated(t, r, task, ProviderClaudeNative, nil, IsolationOptions{SystemPrompt: "p", MaxTurns: 3}); err != nil {
+	if _, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p", MaxTurns: 3}); err != nil {
 		t.Fatalf("error = %v", err)
 	}
 	if v, _ := flagValue(readArgs(t, task), "--max-turns"); v != "3" {
@@ -139,7 +139,7 @@ func TestRunPromptIsolated_RefusesAcpProviders(t *testing.T) {
 			t.Parallel()
 			wm, task := newTestTask(t, "echo-args")
 			r := claudeNativeRunner(t, wm)
-			got, err := runIsolated(t, r, task, p, nil, IsolationOptions{SystemPrompt: "p"})
+			got, err := runIsolated(t, r, task, p, IsolationOptions{SystemPrompt: "p"})
 			if !errors.Is(err, ErrIsolationUnsupported) {
 				t.Fatalf("error = %v, want ErrIsolationUnsupported", err)
 			}
@@ -157,14 +157,14 @@ func TestRunPromptIsolated_RequiresSystemPromptAndTask(t *testing.T) {
 	t.Parallel()
 	wm, task := newTestTask(t, "echo-args")
 	r := claudeNativeRunner(t, wm)
-	if _, err := runIsolated(t, r, task, ProviderClaudeNative, nil, IsolationOptions{}); err == nil {
+	if _, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{}); err == nil {
 		t.Fatal("empty SystemPrompt: want error")
 	}
 	if _, statErr := os.Stat(filepath.Join(*task.WorktreePath, "args")); !os.IsNotExist(statErr) {
 		t.Fatal("subprocess started despite invalid options")
 	}
 	task.ID = 99999
-	if _, err := runIsolated(t, r, task, ProviderClaudeNative, nil, IsolationOptions{SystemPrompt: "p"}); err == nil {
+	if _, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"}); err == nil {
 		t.Fatal("unknown task: want error")
 	}
 }
@@ -174,7 +174,7 @@ func TestRunPromptIsolated_DoesNotTouchSessionStore(t *testing.T) {
 	wm, task := newTestTask(t, "echo-args")
 	r := claudeNativeRunner(t, wm)
 
-	if _, err := runIsolated(t, r, task, ProviderClaudeNative, nil, IsolationOptions{SystemPrompt: "p"}); err != nil {
+	if _, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"}); err != nil {
 		t.Fatalf("error = %v", err)
 	}
 	if h, ok := r.sessionStore.Get(task.ID); ok {
@@ -182,7 +182,7 @@ func TestRunPromptIsolated_DoesNotTouchSessionStore(t *testing.T) {
 	}
 
 	r.sessionStore.Set(task.ID, SessionHandle{Provider: ProviderClaudeNative, SessionID: "stale-sess"})
-	if _, err := runIsolated(t, r, task, ProviderClaudeNative, nil, IsolationOptions{SystemPrompt: "p"}); err != nil {
+	if _, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"}); err != nil {
 		t.Fatalf("error = %v", err)
 	}
 	if v, ok := flagValue(readArgs(t, task), "--resume"); ok {
@@ -203,7 +203,7 @@ func TestRunPromptIsolated_ToolAttemptAborts(t *testing.T) {
 	wm, task := newTestTask(t, "tool-attempt")
 	r := claudeNativeRunner(t, wm)
 
-	got, err := runIsolated(t, r, task, ProviderClaudeNative, nil, IsolationOptions{SystemPrompt: "p"})
+	got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
 	if !errors.Is(err, ErrIsolationViolated) {
 		t.Fatalf("error = %v, want ErrIsolationViolated", err)
 	}
@@ -224,42 +224,18 @@ func TestRunPromptIsolated_ToolAttemptAborts(t *testing.T) {
 	}
 }
 
-// isoRecordingDecider records the summaries it is asked about and denies.
-type isoRecordingDecider struct{ summaries []string }
-
-func (d *isoRecordingDecider) Decide(_ context.Context, summary string, _ []PermissionOption) (string, error) {
-	d.summaries = append(d.summaries, summary)
-	return claudeOptionDeny, nil
-}
-
 func TestRunPromptIsolated_PermissionRequestDenied(t *testing.T) {
 	t.Parallel()
-	t.Run("nil decider denies", func(t *testing.T) {
+	t.Run("denies every permission request", func(t *testing.T) {
 		t.Parallel()
 		wm, task := newTestTask(t, "permission")
 		r := claudeNativeRunner(t, wm)
-		got, err := runIsolated(t, r, task, ProviderClaudeNative, nil, IsolationOptions{SystemPrompt: "p"})
+		got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
 		if err != nil {
 			t.Fatalf("error = %v", err)
 		}
 		if txt := FinalText(got); txt != "chose:deny" {
 			t.Fatalf("final text = %q, want chose:deny", txt)
-		}
-	})
-	t.Run("custom decider consulted", func(t *testing.T) {
-		t.Parallel()
-		wm, task := newTestTask(t, "permission")
-		r := claudeNativeRunner(t, wm)
-		d := &isoRecordingDecider{}
-		got, err := runIsolated(t, r, task, ProviderClaudeNative, d, IsolationOptions{SystemPrompt: "p"})
-		if err != nil {
-			t.Fatalf("error = %v", err)
-		}
-		if len(d.summaries) != 1 || !strings.Contains(d.summaries[0], "Bash") {
-			t.Fatalf("decider summaries = %q, want one Bash request", d.summaries)
-		}
-		if txt := FinalText(got); txt != "chose:deny" {
-			t.Fatalf("final text = %q", txt)
 		}
 	})
 }
@@ -268,7 +244,7 @@ func TestRunPromptIsolated_ReturnsFinalAssistantText(t *testing.T) {
 	t.Parallel()
 	wm, task := newTestTask(t, "reply")
 	r := claudeNativeRunner(t, wm)
-	got, err := runIsolated(t, r, task, ProviderClaudeNative, nil, IsolationOptions{SystemPrompt: "p"})
+	got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -299,5 +275,63 @@ func TestFinalText(t *testing.T) {
 				t.Fatalf("FinalText = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRunPromptIsolated_InitWithToolsAborts(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "init-with-tools")
+	r := claudeNativeRunner(t, wm)
+	got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
+	if !errors.Is(err, ErrIsolationViolated) {
+		t.Fatalf("error = %v, want ErrIsolationViolated", err)
+	}
+	if !strings.Contains(err.Error(), "init reported tools") {
+		t.Fatalf("error %q does not say init reported tools", err)
+	}
+	if last := got[len(got)-1]; last.Type != EventTypeDone || last.StopReason != "isolation_violated" {
+		t.Fatalf("last event = %+v, want Done/isolation_violated", last)
+	}
+	if txt := FinalText(got); txt != "" {
+		t.Fatalf("FinalText = %q, want empty after a violation", txt)
+	}
+}
+
+func TestRunPromptIsolated_InitCleanProceeds(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "init-clean")
+	r := claudeNativeRunner(t, wm)
+	got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
+	if err != nil {
+		t.Fatalf("error = %v (non-empty agents and empty collections must pass)", err)
+	}
+	if txt := FinalText(got); txt != "after init" {
+		t.Fatalf("FinalText = %q", txt)
+	}
+}
+
+func TestRunPromptIsolated_ResultErrorFails(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "result-error")
+	r := claudeNativeRunner(t, wm)
+	_, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
+	if !errors.Is(err, ErrIsolatedRunFailed) {
+		t.Fatalf("error = %v, want ErrIsolatedRunFailed", err)
+	}
+	if errors.Is(err, ErrIsolationViolated) {
+		t.Fatalf("error = %v must not be a violation", err)
+	}
+}
+
+func TestRunPromptIsolated_PermissionDenialsViolate(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "result-permission-denials")
+	r := claudeNativeRunner(t, wm)
+	got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
+	if !errors.Is(err, ErrIsolationViolated) {
+		t.Fatalf("error = %v, want ErrIsolationViolated", err)
+	}
+	if last := got[len(got)-1]; last.StopReason != "isolation_violated" {
+		t.Fatalf("last event = %+v, want isolation_violated", last)
 	}
 }

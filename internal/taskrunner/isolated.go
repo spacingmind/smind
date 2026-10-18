@@ -2,10 +2,12 @@ package taskrunner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 )
@@ -24,8 +26,48 @@ type IsolationOptions struct {
 // stripped of their tools).
 var ErrIsolationUnsupported = errors.New("taskrunner: isolated runs are only supported on claude-native")
 
-// ErrIsolationViolated is returned when an isolated run attempted a tool call.
+// ErrIsolationViolated is returned when an isolated run attempted a tool
+// call, or the CLI reported tools/MCP servers/commands/skills/plugins at
+// init.
 var ErrIsolationViolated = errors.New("taskrunner: isolated run attempted a tool call")
+
+// ErrIsolatedRunFailed is returned when the CLI ended the run with an error
+// result (error_max_turns, API error, ...).
+var ErrIsolatedRunFailed = errors.New("taskrunner: isolated run failed")
+
+// isolatedInitFields are the init-message keys that must be absent or empty
+// in an isolated run. "agents" is deliberately not listed: built-in agent
+// definitions are not tools.
+var isolatedInitFields = []string{"tools", "mcp_servers", "slash_commands", "skills", "plugins"}
+
+// initViolation returns the first isolatedInitFields entry that is present
+// and non-empty in the raw init message, or "". Missing keys and unparsable
+// payloads are ignored: the real init shape is not confirmed live, so the
+// check must never fail on what it cannot read.
+func initViolation(raw json.RawMessage) string {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil {
+		return ""
+	}
+	for _, f := range isolatedInitFields {
+		v, ok := m[f]
+		if !ok {
+			continue
+		}
+		var arr []json.RawMessage
+		if json.Unmarshal(v, &arr) == nil {
+			if len(arr) > 0 {
+				return f
+			}
+			continue
+		}
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(v, &obj) == nil && len(obj) > 0 {
+			return f
+		}
+	}
+	return ""
+}
 
 // isolationViolatedStop is the StopReason of the final Done event of a run
 // aborted for attempting a tool call.
@@ -55,19 +97,21 @@ func (denyAllClaudePolicy) Decide(_ context.Context, _ claudecode.CanUseToolRequ
 // closed before returning in every case, and the task's worktree path is the
 // CLI's cwd (callers pass a task whose worktree is an empty temp dir).
 //
-// decider nil denies every permission request; a non-nil decider is
-// consulted instead.
+// Every permission request is denied; callers cannot supply a decider.
 //
 // Defense in depth: --tools "" means the model has no tool to call, but if
-// a tool_use block still arrives the run is cancelled (killing the CLI), a
-// final Done event with StopReason isolationViolatedStop is sent, and an
-// error wrapping ErrIsolationViolated and naming the tool is returned.
-// Nothing from the violating turn onward is forwarded.
+// a tool_use block still arrives, or the CLI's init message lists tools,
+// MCP servers, slash commands, skills or plugins, the run is cancelled
+// (killing the CLI), a final Done event with StopReason
+// isolationViolatedStop is sent, and an error wrapping ErrIsolationViolated
+// is returned. A result carrying permission denials is a violation too; an
+// error result returns ErrIsolatedRunFailed. Nothing from the violating
+// turn onward is forwarded. err != nil means discard every event.
 //
 // The caller reads the model's answer with FinalText(events): the text
 // chunks of the last assistant turn, i.e. the contiguous EventTypeText
 // events before the trailing usage/Done events.
-func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, provider Provider, prompt string, decider PermissionDecider, model string, iso IsolationOptions, events chan<- Event) error {
+func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, provider Provider, prompt string, model string, iso IsolationOptions, events chan<- Event) error {
 	defer close(events)
 
 	if provider != ProviderClaudeNative {
@@ -123,11 +167,7 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 	if model != "" && model != ClaudeModelDefault {
 		opts = append(opts, claudecode.WithModel(model))
 	}
-	if decider != nil {
-		opts = append(opts, claudecode.WithPermissionPolicy(claudeDeciderAdapter{decider: decider, cwd: worktreePath}))
-	} else {
-		opts = append(opts, claudecode.WithPermissionPolicy(denyAllClaudePolicy{}))
-	}
+	opts = append(opts, claudecode.WithPermissionPolicy(denyAllClaudePolicy{}))
 
 	client, err := r.newClaudeClient(worktreePath, opts...)
 	if err != nil {
@@ -140,7 +180,7 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 
 	var (
 		mu       sync.Mutex
-		violated string // tool name of the first tool call; "" when none
+		violated string // what tripped the run; "" when nothing did
 		tripped  bool
 	)
 	updates := make(chan claudecode.Message)
@@ -148,10 +188,20 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 	go func() {
 		defer close(forwardDone)
 		for msg := range updates {
+			if sys, ok := msg.(claudecode.SystemMessage); ok && sys.Subtype == "init" {
+				if f := initViolation(sys.Raw); f != "" {
+					mu.Lock()
+					if !tripped {
+						tripped, violated = true, "init reported "+f
+						cancel()
+					}
+					mu.Unlock()
+				}
+			}
 			for _, e := range claudeEvents(msg) {
 				mu.Lock()
 				if e.Type == EventTypeToolCall && !tripped {
-					tripped, violated = true, e.ToolName
+					tripped, violated = true, fmt.Sprintf("tool call %q", e.ToolName)
 					cancel()
 				}
 				drop := tripped
@@ -170,17 +220,23 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 	result, err := client.Prompt(runCtx, prompt, updates)
 	<-forwardDone
 	mu.Lock()
-	didTrip, toolName := tripped, violated
+	didTrip, reason := tripped, violated
 	mu.Unlock()
+	if !didTrip && err == nil && len(result.PermissionDenials) > 0 {
+		didTrip, reason = true, "permission denied for a tool request"
+	}
 	if didTrip {
 		select {
 		case events <- Event{Type: EventTypeDone, StopReason: isolationViolatedStop}:
 		case <-ctx.Done():
 		}
-		return fmt.Errorf("%w: %q", ErrIsolationViolated, toolName)
+		return fmt.Errorf("%w: %s", ErrIsolationViolated, reason)
 	}
 	if err != nil {
 		return fmt.Errorf("taskrunner: isolated claude code prompt: %w", err)
+	}
+	if result.IsError {
+		return fmt.Errorf("%w: %s", ErrIsolatedRunFailed, clipBytes(resultFailure(result), 200))
 	}
 	r.sendUsage(ctx, events, claudeUsage(result))
 
@@ -189,6 +245,32 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 	case <-ctx.Done():
 	}
 	return nil
+}
+
+// resultFailure describes an error ResultMessage for an error string.
+func resultFailure(res claudecode.ResultMessage) string {
+	parts := []string{}
+	for _, p := range []string{res.TerminalReason, res.StopReason, res.Result} {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	parts = append(parts, res.Errors...)
+	if len(parts) == 0 {
+		return "error result"
+	}
+	return strings.Join(parts, ": ")
+}
+
+// clipBytes truncates s to at most n bytes without splitting a rune.
+func clipBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // FinalText returns the text of the last assistant turn in events: the
