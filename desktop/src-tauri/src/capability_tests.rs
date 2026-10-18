@@ -23,6 +23,7 @@ fn capability_allowlist_exact() {
         "allow-connections-add",
         "allow-connections-add-relay",
         "allow-connections-preview-relay",
+        "allow-connections-relay-set-password",
         "allow-connections-probe",
         "allow-connections-add-ssh",
         "allow-app-settings-get",
@@ -136,6 +137,22 @@ fn proxy_capability_lists_preview_relay() {
     assert!(perms.contains(&"allow-connections-preview-relay"));
     assert!(BUILD_RS.contains("\"connections_preview_relay\""));
     assert!(include_str!("lib.rs").contains("commands::connections_preview_relay"));
+}
+
+/// `connections_relay_set_password` (ADR-0031 P13c) is allowlisted, declared in
+/// build.rs and registered; it takes the daemon password in and returns nothing.
+#[test]
+fn relay_set_password_is_allowlisted_and_registered() {
+    let cap: Value = serde_json::from_str(PROXY_CAPABILITY).expect("proxy.json parses");
+    let perms: Vec<&str> = cap["permissions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(perms.contains(&"allow-connections-relay-set-password"));
+    assert!(BUILD_RS.contains("\"connections_relay_set_password\""));
+    assert!(include_str!("lib.rs").contains("commands::connections_relay_set_password"));
 }
 
 /// `connections_relay_status` (ADR-0031 P13a) is allowlisted, declared in

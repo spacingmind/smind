@@ -1,5 +1,6 @@
 //! Native gRPC transport to the relay (ADR-0007 amendment, 2026-09-25):
-//! TLS with pairing-time fingerprint pinning (ADR-0011), the admission
+//! TLS with pairing-time fingerprint pinning (ADR-0011) or, for a relay with
+//! a real certificate, system-roots CA verification (ADR-0031 P12c), the admission
 //! challenge-response, and the reconnect/resume loop that keeps a
 //! `Channel<DataFrameTransport>` (see `crate::relay::channel`) alive
 //! across transport-level drops, mirroring `internal/relay/bridge.Run`
@@ -22,6 +23,7 @@ use crate::relay::channel::ChannelError;
 use crate::relay::channel::{Channel as E2eeChannel, FrameTransport};
 use crate::relay::crypto::{decode_frame, encode_frame, FrameError, KeyPair, Role};
 use crate::relay::device::{self, DeviceKey, HelloOutcome};
+use crate::relay::password::PasswordCell;
 use crate::relay::liveness::{self, Action, Liveness, LivenessCfg};
 use crate::relay::pairing_store::RelayPairing;
 use crate::relay::relaypb::relay_client::RelayClient as GrpcRelayClient;
@@ -68,7 +70,7 @@ pub fn derive_native_grpc_address(relay_grpc_web_url: &str) -> Result<String, St
     Ok(format!("{host}:{native_port}"))
 }
 
-// --- TLS: pin the relay's certificate fingerprint (ADR-0011), no CA ---
+// --- TLS: pin the relay's certificate fingerprint (ADR-0011), or CA mode ---
 
 #[derive(Debug)]
 struct PinnedFingerprintVerifier {
@@ -131,45 +133,116 @@ impl rustls::client::danger::ServerCertVerifier for PinnedFingerprintVerifier {
     }
 }
 
-/// dial connects to the relay at `native_addr` (host:port), pinning the
-/// TLS certificate fingerprint (hex SHA-256 of the DER cert, from
-/// `RelayPairing::relay_fingerprint`) instead of trusting any CA —
-/// mirrors `internal/relay/client.Dial` (Go) exactly, but via a custom
-/// rustls connector rather than tonic's built-in TLS feature (see the
-/// ADR-0007 amendment: this is a plain native-gRPC dial, no grpc-web).
-pub async fn dial(native_addr: &str, fingerprint_hex: &str) -> Result<GrpcChannel, String> {
-    let fingerprint: [u8; 32] = hex_decode(fingerprint_hex)?
-        .try_into()
-        .map_err(|_| format!("relay client: bad fingerprint {fingerprint_hex:?}"))?;
+/// How the relay's certificate is verified (mirrors Go's
+/// `internal/relay/client.Dial`, ADR-0031 P12c).
+#[derive(Debug, PartialEq, Eq)]
+enum TlsMode {
+    /// Empty fingerprint: the full chain and the host name against the
+    /// system roots, as for any HTTPS site. Nothing is skipped.
+    Ca,
+    /// A 64-hex fingerprint: pin the leaf (SHA-256 of the DER end-entity)
+    /// and trust no CA.
+    Pin([u8; 32]),
+}
 
+/// parse_tls_mode is the three-way decision. A malformed fingerprint is an
+/// error, NEVER a fallback to CA mode.
+fn parse_tls_mode(fingerprint_hex: &str) -> Result<TlsMode, String> {
+    if fingerprint_hex.is_empty() {
+        return Ok(TlsMode::Ca);
+    }
+    let bad = || format!("relay client: bad fingerprint {fingerprint_hex:?}");
+    // Exactly 64 ASCII hex digits (checked first: hex_decode slices by byte).
+    if fingerprint_hex.len() != 64 || !fingerprint_hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(bad());
+    }
+    let fingerprint: [u8; 32] = hex_decode(fingerprint_hex).map_err(|_| bad())?.try_into().map_err(|_| bad())?;
+    Ok(TlsMode::Pin(fingerprint))
+}
+
+/// native_roots loads the operating system's trust store (the same roots the
+/// Go client uses, so a relay whose certificate comes from a CA the user
+/// installed in their OS verifies). Deliberately not webpki-roots (it would
+/// ignore the OS store) and not rustls-platform-verifier (Apple/Windows
+/// policy engines add rules, such as macOS's private-CA lifetime limits, that
+/// would make behaviour platform-dependent). The cost: no OS revocation
+/// checking (no CRL/OCSP). Loaded per dial attempt; reconnects are rare.
+fn native_roots() -> Result<rustls::RootCertStore, String> {
+    let loaded = rustls_native_certs::load_native_certs();
+    let mut roots = rustls::RootCertStore::empty();
+    let (added, _ignored) = roots.add_parsable_certificates(loaded.certs);
+    if added == 0 {
+        return Err("relay client: no system root certificates could be loaded".to_string());
+    }
+    Ok(roots)
+}
+
+/// tls_config builds the client TLS configuration for `mode`. In CA mode
+/// `roots` replaces the system roots (tests with a private CA); `None` loads
+/// them. In pin mode `roots` is ignored: no CA is trusted.
+fn tls_config(mode: TlsMode, roots: Option<Arc<rustls::RootCertStore>>) -> Result<rustls::ClientConfig, String> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let verifier = Arc::new(PinnedFingerprintVerifier {
-        fingerprint,
-        provider: provider.clone(),
-    });
-    let mut tls_config = rustls::ClientConfig::builder_with_provider(provider)
+    let builder = rustls::ClientConfig::builder_with_provider(provider.clone())
         .with_protocol_versions(&[&rustls::version::TLS13])
-        .map_err(|e| format!("relay client: tls config: {e}"))?
-        .dangerous()
-        .with_custom_certificate_verifier(verifier)
-        .with_no_client_auth();
+        .map_err(|e| format!("relay client: tls config: {e}"))?;
+    let mut tls_config = match mode {
+        TlsMode::Pin(fingerprint) => builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(PinnedFingerprintVerifier { fingerprint, provider }))
+            .with_no_client_auth(),
+        TlsMode::Ca => {
+            let roots = match roots {
+                Some(roots) => roots,
+                None => Arc::new(native_roots()?),
+            };
+            let verifier = rustls::client::WebPkiServerVerifier::builder_with_provider(roots, provider)
+                .build()
+                .map_err(|e| format!("relay client: tls verifier: {e}"))?;
+            builder.with_webpki_verifier(verifier).with_no_client_auth()
+        }
+    };
     // grpc-go's server-side transport credentials require ALPN "h2" to
     // pick HTTP/2 -- without it the TLS handshake completes but the
     // server closes the connection as soon as we speak HTTP/2 on it
     // (observed as a broken-pipe error on the very first RPC).
     tls_config.alpn_protocols = vec![b"h2".to_vec()];
-    let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
+    Ok(tls_config)
+}
 
-    let host = native_addr
-        .rsplit_once(':')
-        .map(|(h, _)| h.to_string())
-        .unwrap_or_else(|| native_addr.to_string());
-    let server_name = rustls::pki_types::ServerName::try_from(host)
+/// server_name is the TLS server name for `native_addr` (host:port): a DNS
+/// name, or an IP literal (verified against the certificate's IP SANs).
+fn server_name(native_addr: &str) -> Result<rustls::pki_types::ServerName<'static>, String> {
+    let host = native_addr.rsplit_once(':').map(|(h, _)| h).unwrap_or(native_addr);
+    let host = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host);
+    Ok(rustls::pki_types::ServerName::try_from(host.to_string())
         .map_err(|e| format!("relay client: server name from {native_addr:?}: {e}"))?
-        .to_owned();
+        .to_owned())
+}
+
+/// dial connects to the relay at `native_addr` (host:port). With a pairing's
+/// `relay_fingerprint` (hex SHA-256 of the DER leaf) it pins that leaf and
+/// trusts no CA (ADR-0011); with an EMPTY fingerprint it is CA mode: the
+/// chain and host name are verified against the system roots over TLS 1.3
+/// (ADR-0031 P12c). A malformed fingerprint is an error, never CA mode. This
+/// mirrors `internal/relay/client.Dial` (Go), but via a custom rustls
+/// connector rather than tonic's built-in TLS feature (see the ADR-0007
+/// amendment: this is a plain native-gRPC dial, no grpc-web).
+pub async fn dial(native_addr: &str, fingerprint_hex: &str) -> Result<GrpcChannel, String> {
+    dial_with_roots(native_addr, fingerprint_hex, None).await
+}
+
+/// dial_with_roots is `dial` with CA mode's roots replaceable (a private CA in
+/// tests); `None` loads the system roots.
+pub async fn dial_with_roots(
+    native_addr: &str,
+    fingerprint_hex: &str,
+    roots: Option<Arc<rustls::RootCertStore>>,
+) -> Result<GrpcChannel, String> {
+    let tls_config = tls_config(parse_tls_mode(fingerprint_hex)?, roots)?;
+    let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
+    let server_name = server_name(native_addr)?;
 
     let dial_addr = native_addr.to_string();
-    let connector = connector.clone();
     let svc = tower::service_fn(move |_uri: Uri| {
         let connector = connector.clone();
         let dial_addr = dial_addr.clone();
@@ -186,7 +259,24 @@ pub async fn dial(native_addr: &str, fingerprint_hex: &str) -> Result<GrpcChanne
     endpoint
         .connect_with_connector(svc)
         .await
-        .map_err(|e| format!("relay client: connect: {e}"))
+        .map_err(|e| format!("relay client: connect: {}", error_chain(&e)))
+}
+
+/// error_chain renders `e` with its sources ("transport error: ... invalid
+/// peer certificate: UnknownIssuer"): tonic's own Display stops at
+/// "transport error", which hides why a certificate was refused.
+fn error_chain(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut source = e.source();
+    while let Some(s) = source {
+        let text = s.to_string();
+        if !out.contains(&text) {
+            out.push_str(": ");
+            out.push_str(&text);
+        }
+        source = s.source();
+    }
+    out
 }
 
 fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
@@ -601,6 +691,17 @@ pub enum Status {
     Revoked {
         device_id: String,
     },
+    /// The daemon has a password (P13c) and this connection has none: the user
+    /// must enter it. The client does not retry by itself; entering a password
+    /// reconnects at once.
+    PasswordRequired,
+    /// The daemon rejected the password (it has been forgotten): enter it again.
+    IncorrectPassword,
+    /// Too many wrong passwords: the daemon asks the client to wait. After
+    /// `retry_after_secs` the state becomes `PasswordRequired`.
+    PasswordLocked {
+        retry_after_secs: u64,
+    },
     /// The daemon refused this device's hello for another reason (`code` is
     /// the daemon's machine-readable code, e.g. `too_many_devices`).
     Refused {
@@ -618,6 +719,9 @@ impl Status {
             Status::Reconnecting => "reconnecting",
             Status::AwaitingApproval { .. } => "awaitingApproval",
             Status::Revoked { .. } => "revoked",
+            Status::PasswordRequired => "passwordRequired",
+            Status::IncorrectPassword => "incorrectPassword",
+            Status::PasswordLocked { .. } => "passwordLocked",
             Status::Refused { .. } => "refused",
         }
     }
@@ -708,6 +812,9 @@ pub struct RelayOptions {
     /// not connect at all and says so (`Status::Refused`), rather than quietly
     /// speaking the single-device protocol a current daemon refuses.
     pub key_error: Option<String>,
+    /// The daemon password for `device_hello` (P13c), shared with the
+    /// connection's `RelayHandle`. Empty until the user enters one.
+    pub password: PasswordCell,
 }
 
 impl RelayOptions {
@@ -717,6 +824,7 @@ impl RelayOptions {
             label: default_device_label(),
             timing: Timing::default(),
             key_error: None,
+            password: PasswordCell::default(),
         }
     }
 
@@ -727,6 +835,7 @@ impl RelayOptions {
             label: String::new(),
             timing: Timing::default(),
             key_error: Some(message),
+            password: PasswordCell::default(),
         }
     }
 
@@ -736,6 +845,7 @@ impl RelayOptions {
             label: String::new(),
             timing: Timing::default(),
             key_error: None,
+            password: PasswordCell::default(),
         }
     }
 }
@@ -778,6 +888,7 @@ pub struct RelayHandle {
     inbound_tx: broadcast::Sender<Vec<u8>>,
     status_rx: watch::Receiver<Status>,
     stats: Arc<RelayStats>,
+    password: PasswordCell,
 }
 
 /// Counters of how sessions were (re)established, for tests and diagnostics.
@@ -812,6 +923,12 @@ impl RelayHandle {
     pub fn stats(&self) -> &RelayStats {
         &self.stats
     }
+
+    /// Gives the connection the daemon password (P13c) and wakes it: a loop
+    /// waiting for one reconnects at once. Held in memory only.
+    pub fn set_password(&self, password: String) {
+        self.password.set(password);
+    }
 }
 
 #[cfg(test)]
@@ -837,6 +954,7 @@ pub(crate) fn test_handle() -> TestHandleParts {
             inbound_tx: inbound_tx.clone(),
             status_rx,
             stats: Arc::default(),
+            password: PasswordCell::default(),
         },
         outbound_rx,
         inbound_tx,
@@ -856,6 +974,7 @@ pub fn spawn(
     let (status_tx, status_rx) = watch::channel(Status::Connecting);
     let inbound_tx_task = inbound_tx.clone();
     let stats = Arc::new(RelayStats::default());
+    let password = options.password.clone();
     let task = tokio::spawn(run(
         pairing,
         options,
@@ -870,6 +989,7 @@ pub fn spawn(
             inbound_tx,
             status_rx,
             stats,
+            password,
         },
         task,
     )
@@ -886,6 +1006,9 @@ enum RouteMode {
     Legacy,
 }
 
+/// The longest wait the client will honour from a daemon's `retry_after`.
+const MAX_RETRY_AFTER_SECS: u64 = 3600;
+
 /// Why a fresh session could not be established.
 #[derive(Debug)]
 enum Failure {
@@ -896,6 +1019,15 @@ enum Failure {
     HandshakeTimeout,
     /// The daemon answered the hello with a refusal.
     Refused { code: String, message: String },
+    /// The daemon's password check refused the hello (P13c): `password_required`,
+    /// `incorrect_password` or `too_many_attempts` (with its `retry_after`).
+    Password {
+        code: String,
+        retry_after: Option<u64>,
+        /// The `PasswordCell` generation this hello carried: an `incorrect_password`
+        /// answer forgets that password and nothing newer.
+        sent_generation: u64,
+    },
     /// The relay itself refused the stream (PermissionDenied: revoked).
     RelayDenied(String),
     /// The daemon does not do device identity (method not found / unsupported).
@@ -977,6 +1109,7 @@ async fn establish(
         &kp.public(),
         &session_id,
         &options.timing,
+        &options.password,
     )
     .await?;
     Ok(channel)
@@ -986,6 +1119,9 @@ async fn establish(
 /// wait for the daemon's challenge, then send the hello bound to it. The
 /// hello is sent only after a well-formed challenge, so a daemon that sends
 /// none (one from before v2) never receives anything from this client.
+// Eight inputs that are all distinct facts of one hello (key, label, both public keys, session, timing,
+// password); a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 async fn identify_device<T: FrameTransport>(
     channel: &mut E2eeChannel<T>,
     key: &DeviceKey,
@@ -994,12 +1130,18 @@ async fn identify_device<T: FrameTransport>(
     mobile_pub: &[u8; 32],
     session_id: &str,
     timing: &Timing,
+    password: &PasswordCell,
 ) -> Result<(), Failure> {
     let challenge = await_challenge(channel, timing.challenge_timeout).await?;
     let hello = key.hello(label, daemon_pub, mobile_pub, session_id, &challenge);
     let request_id = "relay-hello-1";
+    // The password (when the user entered one this run) goes into the encrypted
+    // request only; the copy zeroizes when this function returns.
+    let (pw, sent_generation) = password.snapshot();
+    let request = device::hello_request_with_password(request_id, &hello, pw.as_ref().map(|p| p.as_str()));
+    drop(pw);
     channel
-        .send(device::hello_request(request_id, &hello).as_bytes())
+        .send(request.as_bytes())
         .await
         .map_err(|e| Failure::Retry(format!("hello: {e}")))?;
     let outcome = tokio::time::timeout(timing.hello_timeout, async {
@@ -1021,10 +1163,15 @@ async fn identify_device<T: FrameTransport>(
     match outcome {
         HelloOutcome::Approved { .. } => Ok(()),
         HelloOutcome::MethodNotFound => Err(Failure::NoIdentitySupport),
-        HelloOutcome::Refused { code, .. } if code == "device_hello_unsupported" => {
+        HelloOutcome::Refused { ref code, .. } if code == "device_hello_unsupported" => {
             Err(Failure::NoIdentitySupport)
         }
-        HelloOutcome::Refused { code, message } => Err(Failure::Refused { code, message }),
+        HelloOutcome::Refused { code, retry_after, .. }
+            if matches!(code.as_str(), "password_required" | "incorrect_password" | "too_many_attempts") =>
+        {
+            Err(Failure::Password { code, retry_after, sent_generation })
+        }
+        HelloOutcome::Refused { code, message, .. } => Err(Failure::Refused { code, message }),
     }
 }
 
@@ -1356,8 +1503,49 @@ async fn run(
                     data = Some(channel);
                     stats.fresh_sessions.fetch_add(1, Ordering::SeqCst);
                 }
+                Err(Failure::Password { code, retry_after, sent_generation }) => {
+                    // The daemon's password check (P13c). A missing or rejected password
+                    // needs the user, so neither retries by itself, and a rejected one is
+                    // never re-sent (it would only count against the daemon's limit).
+                    eprintln!("smind desktop: relay: the daemon's password check answered {code}");
+                    match code.as_str() {
+                        "too_many_attempts" => {
+                            // The daemon looked at the rate limit, not the password: nothing
+                            // was rejected, so the password (if any) is kept and tried again
+                            // after the wait. (Discarding it would let anyone who can hold the
+                            // daemon's global limit make every desktop forget a correct one.)
+                            // The wait is the daemon's, clamped to a sane range.
+                            let wait = retry_after.unwrap_or(60).clamp(5, MAX_RETRY_AFTER_SECS);
+                            let _ = status_tx.send(Status::PasswordLocked { retry_after_secs: wait });
+                            if sleep_or_stop(&mut outbound_rx, Duration::from_secs(wait)).await.is_none() {
+                                return;
+                            }
+                            if options.password.is_set() {
+                                let _ = status_tx.send(Status::Connecting);
+                                continue;
+                            }
+                            let _ = status_tx.send(Status::PasswordRequired);
+                        }
+                        "incorrect_password" => {
+                            options.password.clear_if(sent_generation);
+                            let _ = status_tx.send(Status::IncorrectPassword);
+                        }
+                        _ => {
+                            let _ = status_tx.send(Status::PasswordRequired);
+                        }
+                    }
+                    if wait_for_password(&mut outbound_rx, &options.password).await.is_none() {
+                        return;
+                    }
+                    waiting_attempts = 0;
+                    backoff.reset();
+                    let _ = status_tx.send(Status::Connecting);
+                    continue;
+                }
                 Err(failure) => {
                     let (status, delay) = match failure {
+                        // Handled by the arm above; kept so the match stays exhaustive.
+                        Failure::Password { .. } => continue,
                         Failure::Retry(e) => {
                             eprintln!("smind desktop: relay connect: {e}");
                             if let Some(t) = modes.legacy_unserved() {
@@ -1654,6 +1842,25 @@ fn is_request(msg: &[u8]) -> bool {
 /// doesn't keep a task alive forever after its last consumer is gone. It never
 /// consumes a queued message and is never cut short by one: a retry delay is
 /// the delay, however many requests the UI sends meanwhile.
+/// wait_for_password parks the loop until the user enters a password (a
+/// `PasswordCell::set`), returning `None` if the connection is dropped first.
+/// No connection is held open meanwhile.
+async fn wait_for_password(outbound_rx: &mut mpsc::Receiver<Vec<u8>>, password: &PasswordCell) -> Option<()> {
+    loop {
+        if outbound_rx.is_closed() {
+            return None;
+        }
+        tokio::select! {
+            () = password.changed() => {
+                if password.is_set() {
+                    return Some(());
+                }
+            }
+            () = tokio::time::sleep(Duration::from_millis(250)) => {}
+        }
+    }
+}
+
 async fn sleep_or_stop(outbound_rx: &mut mpsc::Receiver<Vec<u8>>, d: Duration) -> Option<()> {
     let end = Instant::now() + d;
     loop {
@@ -1703,7 +1910,7 @@ mod tests {
         assert_eq!(timing.challenge_timeout, Duration::from_secs(5));
         let started = Instant::now();
         let err = identify_device(
-            &mut mobile, &key, "laptop", &dkp.public(), &mkp.public(), "sess", &timing,
+            &mut mobile, &key, "laptop", &dkp.public(), &mkp.public(), "sess", &timing, &PasswordCell::default(),
         )
         .await
         .unwrap_err();
@@ -1729,7 +1936,7 @@ mod tests {
         let timing = Timing::default();
         let started = Instant::now();
         let err = identify_device(
-            &mut mobile, &key, "laptop", &dkp.public(), &mkp.public(), "sess", &timing,
+            &mut mobile, &key, "laptop", &dkp.public(), &mkp.public(), "sess", &timing, &PasswordCell::default(),
         )
         .await
         .unwrap_err();
@@ -1755,8 +1962,9 @@ mod tests {
         let key = DeviceKey::from_seed([7; 32]);
         let timing = Timing::default();
         let (dpub, mpub) = (dkp.public(), mkp.public());
+        let no_password = PasswordCell::default();
         let (res, got) = tokio::join!(
-            identify_device(&mut mobile, &key, "laptop", &dpub, &mpub, "sess-1", &timing),
+            identify_device(&mut mobile, &key, "laptop", &dpub, &mpub, "sess-1", &timing, &no_password),
             async {
                 let msg = daemon.receive().await.unwrap();
                 let v: serde_json::Value = serde_json::from_slice(&msg).unwrap();
@@ -1771,6 +1979,78 @@ mod tests {
         assert_eq!(got["params"]["v"], 2);
         let expect = key.hello("laptop", &dkp.public(), &mkp.public(), "sess-1", &challenge);
         assert_eq!(got["params"], serde_json::to_value(&expect).unwrap());
+    }
+
+    /// P13c: with a password in the cell the hello carries it in params (only
+    /// there), and nothing else about the request changes.
+    #[tokio::test(start_paused = true)]
+    async fn the_hello_carries_the_password_when_the_user_entered_one() {
+        let (mut daemon, mut mobile, dkp, mkp) = established_pair().await;
+        let challenge = [9u8; device::CHALLENGE_LEN];
+        let encoded = {
+            use base64::Engine as _;
+            base64::engine::general_purpose::STANDARD.encode(challenge)
+        };
+        let event = serde_json::json!({"event": device::CHALLENGE_EVENT,
+            "params": {"v": 2, "challenge": encoded}})
+        .to_string();
+        daemon.send(event.as_bytes()).await.unwrap();
+        let key = DeviceKey::from_seed([7; 32]);
+        let timing = Timing::default();
+        let (dpub, mpub) = (dkp.public(), mkp.public());
+        let password = PasswordCell::default();
+        password.set("a-long-daemon-password".into());
+        let (res, got) = tokio::join!(
+            identify_device(&mut mobile, &key, "laptop", &dpub, &mpub, "sess-1", &timing, &password),
+            async {
+                let msg = daemon.receive().await.unwrap();
+                let v: serde_json::Value = serde_json::from_slice(&msg).unwrap();
+                let reply = serde_json::json!({"id": v["id"], "error": {"message": "wrong", "code": "incorrect_password"}})
+                    .to_string();
+                daemon.send(reply.as_bytes()).await.unwrap();
+                v
+            }
+        );
+        match res {
+            Err(Failure::Password { code, retry_after: None, .. }) => assert_eq!(code, "incorrect_password"),
+            other => panic!("expected a password refusal, got {other:?}"),
+        }
+        assert_eq!(got["params"]["password"], "a-long-daemon-password");
+        let expect = key.hello("laptop", &dkp.public(), &mkp.public(), "sess-1", &challenge);
+        let mut params = got["params"].clone();
+        params.as_object_mut().unwrap().remove("password");
+        assert_eq!(params, serde_json::to_value(&expect).unwrap(), "the signed hello is unchanged");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_parked_loop_wakes_when_a_password_arrives_and_stops_when_dropped() {
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(1);
+        let cell = PasswordCell::default();
+        let waiter = {
+            let cell = cell.clone();
+            tokio::spawn(async move {
+                let woke = wait_for_password(&mut rx, &cell).await;
+                (woke, rx)
+            })
+        };
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        assert!(!waiter.is_finished(), "must not return without a password");
+        cell.set("a-password-123456".into());
+        let (woke, rx) = waiter.await.unwrap();
+        assert_eq!(woke, Some(()));
+        // An empty set (a clear) does not wake; dropping the connection stops it.
+        let mut rx = rx;
+        let cell2 = PasswordCell::default();
+        let waiter = tokio::spawn(async move { wait_for_password(&mut rx, &cell2).await });
+        drop(tx);
+        assert_eq!(waiter.await.unwrap(), None);
+    }
+
+    #[test]
+    fn password_states_have_stable_names() {
+        assert_eq!(Status::PasswordRequired.state_name(), "passwordRequired");
+        assert_eq!(Status::IncorrectPassword.state_name(), "incorrectPassword");
+        assert_eq!(Status::PasswordLocked { retry_after_secs: 8 }.state_name(), "passwordLocked");
     }
 
     // --- ModeMachine -----------------------------------------------------
@@ -1932,5 +2212,230 @@ mod tests {
     fn hex_round_trip() {
         let b = [0xde, 0xad, 0xbe, 0xef];
         assert_eq!(hex_decode(&hex_encode(&b)).unwrap(), b);
+    }
+}
+
+#[cfg(test)]
+mod tls_tests {
+    use super::*;
+    use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair, SanType};
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName};
+    use std::net::{IpAddr, Ipv4Addr};
+
+    /// A private CA that signs leaf certificates for the tests.
+    struct TestCa {
+        params: CertificateParams,
+        cert: rcgen::Certificate,
+        key: KeyPair,
+    }
+
+    struct Leaf {
+        der: CertificateDer<'static>,
+        key: PrivateKeyDer<'static>,
+    }
+
+    impl TestCa {
+        fn new() -> TestCa {
+            Self::named("test relay CA")
+        }
+
+        fn named(cn: &str) -> TestCa {
+            let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
+            params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+            params.distinguished_name.push(rcgen::DnType::CommonName, cn);
+            let key = KeyPair::generate().unwrap();
+            let cert = params.self_signed(&key).unwrap();
+            TestCa { params, cert, key }
+        }
+
+        fn roots(&self) -> Arc<rustls::RootCertStore> {
+            let mut roots = rustls::RootCertStore::empty();
+            roots.add(self.cert.der().clone()).unwrap();
+            Arc::new(roots)
+        }
+
+        fn leaf_with(&self, sans: Vec<SanType>, tweak: impl FnOnce(&mut CertificateParams)) -> Leaf {
+            let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
+            params.subject_alt_names = sans;
+            tweak(&mut params);
+            let key = KeyPair::generate().unwrap();
+            let issuer = Issuer::from_params(&self.params, &self.key);
+            let cert = params.signed_by(&key, &issuer).unwrap();
+            Leaf { der: cert.der().clone(), key: PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.serialize_der())) }
+        }
+    }
+
+    fn self_signed(sans: Vec<SanType>) -> Leaf {
+        let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
+        params.subject_alt_names = sans;
+        let key = KeyPair::generate().unwrap();
+        let cert = params.self_signed(&key).unwrap();
+        Leaf { der: cert.der().clone(), key: PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.serialize_der())) }
+    }
+
+    fn dns(name: &str) -> SanType {
+        SanType::DnsName(name.try_into().unwrap())
+    }
+
+    fn fingerprint(der: &CertificateDer<'_>) -> String {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(der.as_ref()).iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// Serves TLS 1.3 (ALPN h2) with `leaf` on a free port; completes handshakes only.
+    async fn tls_server(leaf: &Leaf) -> std::net::SocketAddr {
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let mut config = rustls::ServerConfig::builder_with_provider(provider)
+            .with_protocol_versions(&[&rustls::version::TLS13])
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(vec![leaf.der.clone()], leaf.key.clone_key())
+            .unwrap();
+        config.alpn_protocols = vec![b"h2".to_vec()];
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((tcp, _)) = listener.accept().await {
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    if let Ok(mut tls) = acceptor.accept(tcp).await {
+                        use tokio::io::AsyncReadExt;
+                        let mut buf = [0u8; 1];
+                        let _ = tls.read(&mut buf).await;
+                    }
+                });
+            }
+        });
+        addr
+    }
+
+    /// handshake dials `addr` presenting `name`, with the config `tls_config`
+    /// builds for `fingerprint` and `roots`.
+    async fn handshake(addr: std::net::SocketAddr, name: ServerName<'static>, fingerprint: &str, roots: Option<Arc<rustls::RootCertStore>>) -> Result<(), String> {
+        let config = tls_config(parse_tls_mode(fingerprint)?, roots)?;
+        let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
+        let tcp = tokio::net::TcpStream::connect(addr).await.map_err(|e| e.to_string())?;
+        let mut tls = connector.connect(name, tcp).await.map_err(|e| e.to_string())?;
+        // TLS 1.3 reports a rejected certificate on the first read after the
+        // handshake as an alert; a verified one just waits for the server.
+        let _ = &mut tls;
+        Ok(())
+    }
+
+    fn name(n: &str) -> ServerName<'static> {
+        ServerName::try_from(n.to_string()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn ca_mode_accepts_a_valid_chain_for_the_host() {
+        let ca = TestCa::new();
+        let leaf = ca.leaf_with(vec![dns("relay.test")], |_| {});
+        let addr = tls_server(&leaf).await;
+        handshake(addr, name("relay.test"), "", Some(ca.roots())).await.expect("a chain from the trusted CA for the right host");
+    }
+
+    #[tokio::test]
+    async fn ca_mode_rejects_wrong_host() {
+        let ca = TestCa::new();
+        let leaf = ca.leaf_with(vec![dns("relay.test")], |_| {});
+        let addr = tls_server(&leaf).await;
+        let err = handshake(addr, name("other.test"), "", Some(ca.roots())).await.unwrap_err();
+        assert!(err.to_lowercase().contains("not valid for") || err.contains("NotValidForName"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn ca_mode_rejects_expired_certificate() {
+        let ca = TestCa::new();
+        let leaf = ca.leaf_with(vec![dns("relay.test")], |p| {
+            p.not_before = rcgen::date_time_ymd(2000, 1, 1);
+            p.not_after = rcgen::date_time_ymd(2001, 1, 1);
+        });
+        let addr = tls_server(&leaf).await;
+        let err = handshake(addr, name("relay.test"), "", Some(ca.roots())).await.unwrap_err();
+        assert!(err.to_lowercase().contains("expired"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn ca_mode_rejects_self_signed_without_a_pin() {
+        let leaf = self_signed(vec![dns("relay.test")]);
+        let addr = tls_server(&leaf).await;
+        let ca = TestCa::named("some other CA"); // trusts some CA, just not this certificate
+        let err = handshake(addr, name("relay.test"), "", Some(ca.roots())).await.unwrap_err();
+        assert!(err.to_lowercase().contains("unknownissuer") || err.to_lowercase().contains("unknown"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn ca_mode_rejects_a_chain_from_an_unknown_ca() {
+        let signing_ca = TestCa::new();
+        let trusted_ca = TestCa::named("some other CA");
+        let leaf = signing_ca.leaf_with(vec![dns("relay.test")], |_| {});
+        let addr = tls_server(&leaf).await;
+        let err = handshake(addr, name("relay.test"), "", Some(trusted_ca.roots())).await.unwrap_err();
+        assert!(err.to_lowercase().contains("unknown"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn ca_mode_accepts_ip_san_for_an_ip_target() {
+        let ca = TestCa::new();
+        let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let leaf = ca.leaf_with(vec![SanType::IpAddress(ip)], |_| {});
+        let addr = tls_server(&leaf).await;
+        // The target is an IP literal: the server name is an IP address.
+        let n = server_name(&addr.to_string()).unwrap();
+        assert!(matches!(n, ServerName::IpAddress(_)));
+        handshake(addr, n, "", Some(ca.roots())).await.expect("IP SAN matches the IP target");
+        // A DNS-only certificate does not satisfy an IP target.
+        let dns_only = ca.leaf_with(vec![dns("relay.test")], |_| {});
+        let addr2 = tls_server(&dns_only).await;
+        assert!(handshake(addr2, server_name(&addr2.to_string()).unwrap(), "", Some(ca.roots())).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn pin_mode_still_accepts_the_pinned_leaf_and_rejects_another() {
+        let leaf = self_signed(vec![dns("relay.test")]);
+        let addr = tls_server(&leaf).await;
+        let pin = fingerprint(&leaf.der);
+        handshake(addr, name("relay.test"), &pin, None).await.expect("the pinned leaf");
+        // The pin does not look at names either (as before).
+        handshake(addr, name("anything.test"), &pin, None).await.expect("pin mode ignores names");
+        let other = self_signed(vec![dns("relay.test")]);
+        let err = handshake(addr, name("relay.test"), &fingerprint(&other.der), None).await.unwrap_err();
+        assert!(err.contains("does not match pin"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn pin_mode_ignores_roots() {
+        let ca = TestCa::new();
+        let leaf = ca.leaf_with(vec![dns("relay.test")], |_| {});
+        let addr = tls_server(&leaf).await;
+        let wrong_pin = "ab".repeat(32);
+        let err = handshake(addr, name("relay.test"), &wrong_pin, Some(ca.roots())).await.unwrap_err();
+        assert!(err.contains("does not match pin"), "a trusted CA must not rescue a wrong pin: {err}");
+        // And the right pin works with no roots at all.
+        handshake(addr, name("relay.test"), &fingerprint(&leaf.der), None).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn malformed_fingerprint_is_an_error_not_ca_mode() {
+        let ca = TestCa::new();
+        let leaf = ca.leaf_with(vec![dns("relay.test")], |_| {});
+        let addr = tls_server(&leaf).await;
+        let valid = fingerprint(&leaf.der);
+        for bad in [
+            &valid[..63],                    // odd length
+            &format!("{}zz", &valid[..62]),  // non-hex
+            &valid[..62],                    // 31 bytes
+            &format!("{valid}00"),           // 33 bytes
+            " ",
+            "é".repeat(32).as_str(),         // multi-byte, even length
+        ] {
+            let err = handshake(addr, name("relay.test"), bad, Some(ca.roots())).await.unwrap_err();
+            assert!(err.contains("bad fingerprint"), "{bad:?} -> {err}");
+            // The public entry point refuses too, before dialing anything.
+            let dialed = dial_with_roots(&addr.to_string(), bad, Some(ca.roots())).await.unwrap_err();
+            assert!(dialed.contains("bad fingerprint"), "{dialed}");
+        }
+        assert_eq!(parse_tls_mode("").unwrap(), TlsMode::Ca);
     }
 }
