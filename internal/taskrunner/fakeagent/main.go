@@ -445,6 +445,22 @@ func runPromptScript(promptMsg message, cwd string) {
 		return
 	}
 
+	// "hold": like "hang" but ends cleanly once a file named "release"
+	// appears in the session's cwd, so a test decides exactly when the run
+	// finishes instead of racing a fast scenario against its own setup.
+	if scenario == "hold" {
+		sessionUpdate("before hold")
+		release := filepath.Join(cwd, "release")
+		for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			if _, err := os.Stat(release); err == nil {
+				break
+			}
+		}
+		sessionUpdate("released")
+		respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+
 	if scenario == "permission-write" {
 		// A GLM-style whole-file Write permission on "existing.txt" (relative
 		// to the worktree), proving the daemon surfaces what it overwrites.
