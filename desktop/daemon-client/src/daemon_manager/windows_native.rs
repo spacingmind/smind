@@ -105,7 +105,7 @@ pub fn spawn_detached(layout: &Layout, version: &str) -> io::Result<Child> {
     }
 }
 
-fn tcp_table_owner_pid(family: u32, port: u16) -> io::Result<Option<u32>> {
+fn tcp_table_owner_pids(family: u32, port: u16) -> io::Result<Vec<u32>> {
     // dwLocalPort is network byte order in the low 16 bits.
     let target_port = port.swap_bytes() as u32;
     let mut size: u32 = 0;
@@ -132,6 +132,7 @@ fn tcp_table_owner_pid(family: u32, port: u16) -> io::Result<Option<u32>> {
         }
     }
     let buf_len = buf.len() * std::mem::size_of::<u32>();
+    let mut pids: Vec<u32> = Vec::new();
     if family == AF_INET {
         // Table header (entry count) followed by fixed-size rows; validate
         // the buffer is large enough for the declared rows before reading.
@@ -142,8 +143,8 @@ fn tcp_table_owner_pid(family: u32, port: u16) -> io::Result<Option<u32>> {
         }
         let rows = unsafe { std::slice::from_raw_parts((&(*table).table) as *const MIB_TCPROW_OWNER_PID, count) };
         for row in rows {
-            if row.dwState == MIB_TCP_STATE_LISTEN && (row.dwLocalPort & 0xffff) == target_port {
-                return Ok(Some(row.dwOwningPid));
+            if row.dwState == MIB_TCP_STATE_LISTEN && (row.dwLocalPort & 0xffff) == target_port && !pids.contains(&row.dwOwningPid) {
+                pids.push(row.dwOwningPid);
             }
         }
     } else {
@@ -154,22 +155,37 @@ fn tcp_table_owner_pid(family: u32, port: u16) -> io::Result<Option<u32>> {
         }
         let rows = unsafe { std::slice::from_raw_parts((&(*table).table) as *const MIB_TCP6ROW_OWNER_PID, count) };
         for row in rows {
-            if row.dwState == MIB_TCP_STATE_LISTEN && (row.dwLocalPort & 0xffff) == target_port {
-                return Ok(Some(row.dwOwningPid));
+            if row.dwState == MIB_TCP_STATE_LISTEN && (row.dwLocalPort & 0xffff) == target_port && !pids.contains(&row.dwOwningPid) {
+                pids.push(row.dwOwningPid);
             }
         }
     }
-    Ok(None)
+    Ok(pids)
 }
 
 /// find_port_owner asks the IP Helper TCP table (listener rows, IPv4 and
 /// IPv6) which pid is bound to `port` -- the same primitive `lsof`
 /// provides on macOS, with no `netstat` child process.
 pub fn find_port_owner(port: u16) -> io::Result<Option<u32>> {
-    if let Some(pid) = tcp_table_owner_pid(AF_INET, port)? {
-        return Ok(Some(pid));
+    if let Some(pid) = tcp_table_owner_pids(AF_INET, port)?.first() {
+        return Ok(Some(*pid));
     }
-    tcp_table_owner_pid(AF_INET6, port)
+    Ok(tcp_table_owner_pids(AF_INET6, port)?.first().copied())
+}
+
+/// find_port_owners is every pid with a listener row for `port` (IPv4 rows
+/// first, then IPv6), without duplicates. An SSH tunnel's local port is
+/// trusted only when ALL of them are our own ssh child: Windows lets a later
+/// bind of the same port coexist with ssh's, and the first row alone would
+/// not show it.
+pub fn find_port_owners(port: u16) -> io::Result<Vec<u32>> {
+    let mut pids = tcp_table_owner_pids(AF_INET, port)?;
+    for pid in tcp_table_owner_pids(AF_INET6, port)? {
+        if !pids.contains(&pid) {
+            pids.push(pid);
+        }
+    }
+    Ok(pids)
 }
 
 /// exe_path_for_pid resolves the image a pid was launched from via

@@ -25,6 +25,7 @@ use crate::state::DesktopState;
 const STDERR_LIMIT: usize = 8192;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(12);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
+const TUNNEL_DIED_AT_START: &str = "the SSH tunnel stopped right after it started; try again";
 const MISSING_SSH: &str = "ssh was not found on this computer: install the OpenSSH client and try again";
 
 /// tunnel_args is the argv after the program: `--` ends options so a host can
@@ -43,6 +44,15 @@ pub fn tunnel_args(target: &SshTarget, local_port: u16) -> Vec<String> {
         "ServerAliveInterval=15",
         "-o",
         "ServerAliveCountMax=3",
+        // The user's ssh_config must not turn this into a mux client or a
+        // backgrounded master: our child has to own its own -L listener
+        // (the owner check below compares the listener's pid with it).
+        "-o",
+        "ControlMaster=no",
+        "-o",
+        "ControlPath=none",
+        "-o",
+        "ControlPersist=no",
     ]
     .map(String::from)
     .to_vec();
@@ -114,32 +124,44 @@ enum OwnerCheck {
     Unavailable,
 }
 
-/// `found` is what the platform port-owner helper returned for the local port.
-fn classify_owner(found: std::io::Result<Option<u32>>, child_pid: u32) -> OwnerCheck {
+/// `found` is every pid the platform helper reports listening on the local
+/// port. The port is ours only when ALL of them are the ssh child: a second
+/// listener (a wildcard or IPv6 bind, or a later same-port bind) next to ssh's
+/// is a squatter. `fail_closed` says what a failed lookup means: on macOS and
+/// Windows the helper must work, so a failure refuses (`Unidentified`); on
+/// other platforms there is no helper and the tunnel falls back to the
+/// `/healthz` answer alone (`Unavailable`, the weaker check).
+fn classify_owner(found: std::io::Result<Vec<u32>>, child_pid: u32, fail_closed: bool) -> OwnerCheck {
     match found {
-        Ok(Some(pid)) if pid == child_pid => OwnerCheck::Ours,
-        Ok(Some(pid)) => OwnerCheck::Foreign(pid),
-        Ok(None) => OwnerCheck::Unidentified,
+        Ok(pids) if pids.is_empty() => OwnerCheck::Unidentified,
+        Ok(pids) => match pids.iter().find(|pid| **pid != child_pid) {
+            Some(other) => OwnerCheck::Foreign(*other),
+            None => OwnerCheck::Ours,
+        },
+        Err(_) if fail_closed => OwnerCheck::Unidentified,
         Err(_) => OwnerCheck::Unavailable,
     }
 }
 
+/// Whether the platform has a port-owner helper this check can rely on.
+const OWNER_LOOKUP_FAIL_CLOSED: bool = cfg!(any(target_os = "macos", target_os = "windows"));
+
 /// Who listens on the local port, per the OS's own port-owner helper.
-fn port_owner(port: u16) -> std::io::Result<Option<u32>> {
+fn port_owners(port: u16) -> std::io::Result<Vec<u32>> {
     #[cfg(target_os = "macos")]
     {
-        smind_daemon_client::daemon_manager::native::find_port_owner(port)
+        smind_daemon_client::daemon_manager::native::find_port_owners(port)
     }
     #[cfg(target_os = "windows")]
     {
-        smind_daemon_client::daemon_manager::windows_native::find_port_owner(port)
+        smind_daemon_client::daemon_manager::windows_native::find_port_owners(port)
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = port;
         Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
-            "no port-owner helper on this platform",
+            "no port-owner helper on this platform (the tunnel is checked by its /healthz answer only)",
         ))
     }
 }
@@ -153,7 +175,7 @@ fn verdict(owner: &OwnerCheck, reachable: bool, service: Option<&str>) -> Result
             Err(format!("another program (process {pid}) is listening on the local port picked for the SSH tunnel, not ssh; refusing to use it -- try again"))
         }
         OwnerCheck::Unidentified => {
-            Err("the program listening on the local port picked for the SSH tunnel could not be identified as ssh; refusing to use it -- try again".to_string())
+            Err("the program listening on the local port picked for the SSH tunnel could not be identified as ssh (or could not be looked up); refusing to use it -- try again".to_string())
         }
         OwnerCheck::Ours | OwnerCheck::Unavailable => {
             if reachable && service != Some("smind") {
@@ -324,9 +346,15 @@ impl SshTunnels {
         // a sMind daemon; otherwise a local squatter would receive the
         // proxied traffic (and any bearer). Dropping `tunnel` kills + reaps
         // the child; nothing is inserted.
-        let child_pid = tunnel.child.lock().unwrap().id();
-        let owner = classify_owner(port_owner(local_port), child_pid);
         let health = crate::probe::probe(&tunnel.url()).await;
+        // The probe can take seconds; ssh dying meanwhile frees the port for
+        // anyone, so liveness and ownership are checked AFTER it, closest to
+        // use (a pid of a child that is still unreaped cannot be reused).
+        if !tunnel.alive() {
+            return Err("the ssh process exited while the SSH tunnel was being verified".to_string());
+        }
+        let child_pid = tunnel.child.lock().unwrap().id();
+        let owner = classify_owner(port_owners(local_port), child_pid, OWNER_LOOKUP_FAIL_CLOSED);
         verdict(&owner, health.reachable, health.service.as_deref())?;
         let url = tunnel.url();
         self.watch_exit(id, &tunnel);
@@ -358,7 +386,14 @@ pub async fn ensure_tunnel(proxy: &ProxyState, tunnels: &SshTunnels, conn: &Conn
     debug_assert_eq!(conn.kind, ConnectionKind::Ssh);
     let target = SshTarget::from_uri(&conn.base_url)?;
     let url = tunnels.start(&conn.id, &target).await?;
-    proxy.set_ssh_local(&conn.id, url);
+    proxy.set_ssh_local(&conn.id, url.clone());
+    // ssh may have died between the start's last check and the mapping: the
+    // exit hook only clears a mapping that already exists, so look again now
+    // and never leave a dead tunnel's port mapped.
+    if tunnels.local_url(&conn.id).as_deref() != Some(url.as_str()) {
+        forget_tunnel(proxy, tunnels, &conn.id);
+        return Err(TUNNEL_DIED_AT_START.to_string());
+    }
     Ok(())
 }
 
@@ -380,13 +415,24 @@ pub async fn add_ssh_connection(
     let target = target.validate()?;
     let id = target.connection_id();
     let url = tunnels.start(&id, &target).await?;
+    // Nothing is saved for a tunnel that is already gone.
+    if tunnels.local_url(&id).as_deref() != Some(url.as_str()) {
+        forget_tunnel(proxy, tunnels, &id);
+        return Err(TUNNEL_DIED_AT_START.to_string());
+    }
     let saved = {
         let mut registry = proxy.registry.lock().unwrap();
         registry.add_ssh(label, &target).and_then(|conn| registry.save(path).map(|_| conn).map_err(|e| e.to_string()))
     };
     match saved {
         Ok(conn) => {
-            proxy.set_ssh_local(&id, url);
+            proxy.set_ssh_local(&id, url.clone());
+            // Died between the check above and the mapping: the entry is
+            // saved, so unmap the dead port (the proxy answers 502 until the
+            // connection is selected again, which restarts the tunnel).
+            if tunnels.local_url(&id).as_deref() != Some(url.as_str()) {
+                forget_tunnel(proxy, tunnels, &id);
+            }
             Ok(conn)
         }
         Err(e) => {
@@ -418,28 +464,56 @@ mod tests {
 
     #[test]
     fn owner_check_ours_when_the_pid_matches() {
-        assert_eq!(classify_owner(Ok(Some(7)), 7), OwnerCheck::Ours);
+        assert_eq!(classify_owner(Ok(vec![7]), 7, true), OwnerCheck::Ours);
+    }
+
+    #[test]
+    fn owner_check_ours_when_every_listener_is_our_child() {
+        assert_eq!(classify_owner(Ok(vec![7, 7]), 7, true), OwnerCheck::Ours);
     }
 
     #[test]
     fn owner_check_foreign_when_the_pid_differs() {
-        assert_eq!(classify_owner(Ok(Some(9)), 7), OwnerCheck::Foreign(9));
+        assert_eq!(classify_owner(Ok(vec![9]), 7, true), OwnerCheck::Foreign(9));
+    }
+
+    #[test]
+    fn owner_check_foreign_when_any_listener_is_not_ours() {
+        // A wildcard/IPv6 squatter next to ssh's own listener, in either order.
+        assert_eq!(classify_owner(Ok(vec![7, 9]), 7, true), OwnerCheck::Foreign(9));
+        assert_eq!(classify_owner(Ok(vec![9, 7]), 7, true), OwnerCheck::Foreign(9));
     }
 
     #[test]
     fn owner_check_unidentified_when_nobody_is_found() {
-        assert_eq!(classify_owner(Ok(None), 7), OwnerCheck::Unidentified);
+        assert_eq!(classify_owner(Ok(vec![]), 7, true), OwnerCheck::Unidentified);
+        assert_eq!(classify_owner(Ok(vec![]), 7, false), OwnerCheck::Unidentified);
     }
 
     #[test]
-    fn owner_check_unavailable_when_the_helper_errors() {
+    fn owner_check_unavailable_when_the_helper_errors_and_there_is_no_helper() {
         assert_eq!(
-            classify_owner(
-                Err(std::io::Error::other("boom")),
-                7
-            ),
+            classify_owner(Err(std::io::Error::other("boom")), 7, false),
             OwnerCheck::Unavailable
         );
+    }
+
+    #[test]
+    fn owner_check_refuses_a_failed_lookup_where_the_helper_must_work() {
+        // macOS / Windows: lsof or the IP Helper failing means we cannot vouch
+        // for the listener, so the tunnel is refused rather than waved through.
+        assert_eq!(
+            classify_owner(Err(std::io::Error::other("boom")), 7, true),
+            OwnerCheck::Unidentified
+        );
+    }
+
+    #[test]
+    fn tunnel_args_never_multiplex() {
+        let args = tunnel_args(&target(), 51000).join(" ");
+        for want in ["ControlMaster=no", "ControlPath=none", "ControlPersist=no"] {
+            assert!(args.contains(want), "{args}");
+        }
     }
 
     #[test]
@@ -489,6 +563,12 @@ mod tests {
                 "ServerAliveInterval=15",
                 "-o",
                 "ServerAliveCountMax=3",
+                "-o",
+                "ControlMaster=no",
+                "-o",
+                "ControlPath=none",
+                "-o",
+                "ControlPersist=no",
                 "-p",
                 "2222",
                 "-L",
@@ -578,6 +658,10 @@ mod tests {
                     }
                     if service.as_str() == "down" {
                         return;
+                    }
+                    // Lets a test hold start() inside its /healthz probe.
+                    if let Some(ms) = std::env::var("FAKE_SSH_HEALTHZ_DELAY_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
+                        std::thread::sleep(Duration::from_millis(ms));
                     }
                     let body = format!(
                         "{{\"service\":\"{service}\",\"status\":\"ok\",\"version\":\"test\"}}"
@@ -829,6 +913,50 @@ mod tests {
                 err.contains("another program") || err.contains("could not be identified"),
                 "{err}"
             );
+            assert!(tunnels.local_url(&id).is_none());
+        }
+
+        /// A wildcard (0.0.0.0) listener on the picked port next to ssh's own
+        /// 127.0.0.1 listener (macOS lets both coexist): connections still reach
+        /// ssh's, but the port has TWO owners, so the check must refuse. The
+        /// fake daemon answers /healthz slowly, holding start() inside its probe
+        /// while the squatter binds NEXT to the already-listening fake ssh.
+        #[cfg(target_os = "macos")]
+        #[tokio::test]
+        async fn a_wildcard_listener_next_to_ssh_is_refused() {
+            let dir = tempfile::tempdir().unwrap();
+            let fast = fake_ssh(dir.path());
+            let slow = script(
+                dir.path(),
+                "slow-healthz-ssh",
+                &format!("FAKE_SSH_HEALTHZ_DELAY_MS=1200 exec '{}' \"$@\"", fast.display()),
+            );
+            let tunnels = std::sync::Arc::new(SshTunnels::with_program(slow));
+            let id = target().connection_id();
+            let t = tunnels.clone();
+            let started = {
+                let id = id.clone();
+                tokio::spawn(async move { t.start(&id, &target()).await })
+            };
+            let argv_path = dir.path().join("argv.txt");
+            let mut squatter = None;
+            for _ in 0..200 {
+                if let Ok(argv) = std::fs::read_to_string(&argv_path) {
+                    if let Some(line) = argv.lines().find(|l| l.starts_with("127.0.0.1:")) {
+                        let port: u16 = line.split(':').nth(1).unwrap().parse().unwrap();
+                        // Only once ssh's own listener is up: the squatter joins it.
+                        if reachable(&format!("http://127.0.0.1:{port}")) {
+                            squatter = TcpListener::bind(("0.0.0.0", port)).ok();
+                            break;
+                        }
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            let squatter = squatter.expect("bound the wildcard next to ssh's listener");
+            let err = started.await.unwrap().unwrap_err();
+            drop(squatter);
+            assert!(err.contains("another program"), "{err}");
             assert!(tunnels.local_url(&id).is_none());
         }
 
