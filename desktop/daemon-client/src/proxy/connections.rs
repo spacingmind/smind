@@ -848,7 +848,7 @@ mod tests {
         reg.save(&out).unwrap();
         let saved = read_json(&out);
         let conns = saved["connections"].as_array().unwrap();
-        assert!(conns.iter().any(|c| *c == unknown), "{conns:?}");
+        assert!(conns.contains(&unknown), "{conns:?}");
     }
 
     #[test]
