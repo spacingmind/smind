@@ -152,8 +152,8 @@ export class DevHarness {
     return ((await this.mustCmd('list')).devices ?? []) as DeviceRow[];
   }
 
-  async seedRun(stopReason: string): Promise<{ workspaceId: number; taskId: number; runId: string; stopReason: string; disposition?: string }> {
-    const r = await this.mustCmd(`seed-run ${stopReason}`);
+  async seedRun(stopReason: string, title?: string): Promise<{ workspaceId: number; taskId: number; runId: string; stopReason: string; disposition?: string }> {
+    const r = await this.mustCmd(`seed-run ${stopReason}${title ? ` ${title}` : ''}`);
     return {
       workspaceId: r.workspaceId as number,
       taskId: r.taskId as number,
