@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -246,4 +247,41 @@ func TestMCPTaskWait_PendingPermissionsIncludeDetail(t *testing.T) {
 	_ = client.Call(context.Background(), "run.respondPermission", map[string]any{
 		"runId": runID, "requestId": out.PendingPermission.RequestID, "optionId": firstDenyOption(out.PendingPermission.Options),
 	}, nil)
+}
+
+func TestTaskStatus_ProvenanceFields(t *testing.T) {
+	keysOf := func(out taskStatusOutput) map[string]any {
+		b, err := json.Marshal(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+
+	// Decode from the run.logs wire shape, as mcpRunLogs does.
+	var known runLogsResult
+	wire := `{"runId":"r1","status":"done","baseSha":"aaaa1111","headSha":"bbbb2222","dirty":false,"events":[]}`
+	if err := json.Unmarshal([]byte(wire), &known); err != nil {
+		t.Fatal(err)
+	}
+	got := keysOf(buildTaskStatusOutput(known))
+	// dirty=false is known and must not be dropped by omitempty.
+	if got["baseSha"] != "aaaa1111" || got["headSha"] != "bbbb2222" || got["dirty"] != false {
+		t.Fatalf("known task_status = %+v, want baseSha/headSha/dirty=false", got)
+	}
+
+	var unknown runLogsResult
+	if err := json.Unmarshal([]byte(`{"runId":"r2","status":"running","events":[]}`), &unknown); err != nil {
+		t.Fatal(err)
+	}
+	got = keysOf(buildTaskStatusOutput(unknown))
+	for _, key := range []string{"baseSha", "headSha", "dirty"} {
+		if _, ok := got[key]; ok {
+			t.Errorf("unknown task_status has %q, want it absent: %+v", key, got)
+		}
+	}
 }
