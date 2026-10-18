@@ -1,3 +1,5 @@
+import type { JSX } from "react";
+
 import { Icons } from "@/lib/icons";
 import type { ProviderNavItem, NavTone } from "@/lib/providers-view";
 import { ProviderGlyph } from "@/components/composer/provider-glyph";
