@@ -183,6 +183,25 @@ var migrations = []migration{
 			return addColumnIfMissing(db, "quota_cooldown", "rejected_window", "TEXT NOT NULL DEFAULT ''")
 		},
 	},
+	{
+		// O1 run provenance: the worktree's git state for a run -- base_sha
+		// (HEAD at start), head_sha (HEAD at the terminal state) and dirty
+		// (latest successful capture). All NULL (unknown) for pre-existing
+		// rows: git may legitimately fail, and unknown is not false.
+		name: "run_provenance",
+		apply: func(db *sql.DB) error {
+			for _, c := range []struct{ col, ddl string }{
+				{"base_sha", "TEXT"},
+				{"head_sha", "TEXT"},
+				{"dirty", "INTEGER"},
+			} {
+				if err := addColumnIfMissing(db, "runs", c.col, c.ddl); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and

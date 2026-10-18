@@ -28,6 +28,7 @@ describe("icon registry", () => {
         "chevronRight": "ChevronRight",
         "chevronUp": "ChevronUp",
         "close": "X",
+        "commit": "GitCommitHorizontal",
         "connections": "Network",
         "copy": "Copy",
         "credentials": "KeyRound",
