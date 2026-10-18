@@ -6,7 +6,7 @@ import {
   useUpdateAccountCredential,
 } from "@/hooks/use-accounts";
 import type { SettingsSectionContext } from "@/components/settings/settings-registry";
-import { removeWarning } from "@/components/settings/providers-section";
+import { removeWarning } from "@/lib/providers-groups";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
