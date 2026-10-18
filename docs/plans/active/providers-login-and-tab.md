@@ -160,6 +160,37 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
 - PR-B4 (hook): `login hook maps errors to a code, message and soft flag` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
 - PR-B4 (hook): `login result is upserted into the account cache and onConnected fires` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
 - PR-B4 (hook): `login hook never keeps the pasted url in state` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `login hook prefers an explicit client` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `login remote hook derives remote from the desktop connection kind` — `web/packages/ui/src/hooks/use-login-remote.test.ts`
+- PR-B4 (hook): `login remote hook uses the hostname on web` — `web/packages/ui/src/hooks/use-login-remote.test.ts`
+- PR-B4 (hook): `login remote hook override wins and persists per connection` — `web/packages/ui/src/hooks/use-login-remote.test.ts`
+
+**PR-B4 (panels):**
+- `device panel shows the code, link and countdown` — `web/packages/ui/src/components/connect/device-code-panel.test.tsx`
+- `device panel copies the code` — `web/packages/ui/src/components/connect/device-code-panel.test.tsx`
+- `device panel shows expired when the time has passed` — `web/packages/ui/src/components/connect/device-code-panel.test.tsx`
+- `device panel cancel calls onCancel` — `web/packages/ui/src/components/connect/device-code-panel.test.tsx`
+- `paste panel submits the trimmed address` — `web/packages/ui/src/components/connect/paste-redirect-panel.test.tsx`
+- `paste panel disables finish while empty or pending` — `web/packages/ui/src/components/connect/paste-redirect-panel.test.tsx`
+- `paste panel shows the error` — `web/packages/ui/src/components/connect/paste-redirect-panel.test.tsx`
+- `paste panel submits on enter` — `web/packages/ui/src/components/connect/paste-redirect-panel.test.tsx`
+- `done notice words created, updated and adopted differently` — `web/packages/ui/src/components/connect/login-notices.test.tsx`
+- `error notice distinguishes soft from explanatory errors` — `web/packages/ui/src/components/connect/login-notices.test.tsx`
+- `notices call onDismiss` — `web/packages/ui/src/components/connect/login-notices.test.tsx`
+- `connect methods per provider` — `web/packages/ui/src/lib/login-methods.test.ts`
+- `default connect method follows remote and availability` — `web/packages/ui/src/lib/login-methods.test.ts`
+
+**PR-B4 (form):**
+- `method selector offers the provider's methods` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `connect label defaults to account-N` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `remote openai defaults to the device method and shows the device code panel` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `remote anthropic shows the paste field immediately` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `local login shows paste after the trouble delay` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `pasted redirect calls account.oauthComplete and finishes the login` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `done notice words created and updated differently` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `api key method adds an account with the credential` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `the paste a credential disclosure is gone` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `location toggle switches remote and local defaults` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
 (filled as PRs land)
 
 **PR-B4 (lib):**
