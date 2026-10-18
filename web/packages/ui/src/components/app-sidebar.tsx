@@ -1985,6 +1985,9 @@ const TaskRow = memo(function TaskRow({
   const setMenuOpen = (open: boolean) => {
     setRowMenuOpen(open);
     setMenuOpenState(open);
+    // Forget a card that was open or pending when the menu opened, or it
+    // would pop back up the moment the menu closes.
+    if (open) setHoverOpen(false);
   };
   // On a narrow sidebar the ⋯ is overlaid on the row's right end (the time
   // slot is dropped there), where the child-count chip, rollup and setup badge
@@ -2057,7 +2060,7 @@ const TaskRow = memo(function TaskRow({
               <Icons.chevronRight className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")} />
             </button>
           )}
-          <HoverCard openDelay={400} closeDelay={100} open={hoverOpen && !menuOpen} onOpenChange={setHoverOpen}>
+          <HoverCard openDelay={400} closeDelay={100} open={hoverOpen && !menuOpen} onOpenChange={(o) => setHoverOpen(o && !menuOpen)}>
             <HoverCardTrigger asChild>
               <SidebarMenuSubButton
                 asChild
