@@ -371,3 +371,5 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
   which never leaves the daemon; a squatter on `[::1]` is not detected. Windows `WSAEACCES` (10013, excluded port ranges) still
   fails the login -- follow-up.
 - Not in this PR: the web connect form (PR-B4).
+
+- PR-A1 (move/rows): `TestButton`/`RenameForm`/`UpdateCredentialForm`/`RemoveAccountDialog`/`FormError`/`authTypeLabel`/`RowAction` moved to `src/components/providers/account-actions.tsx`, grouping helpers to `src/lib/providers-groups.ts` (re-exported from `providers-section.tsx`), behavior and test-ids byte-identical — providers-section.test.tsx (21) and accounts-dialog.test.tsx (22) green unchanged; new `src/lib/providers-groups.test.ts` (4: groups/removeWarning/providerConsumer). New `useAccountRows` (`src/hooks/use-account-rows.test.tsx`, 3: `account rows combine accounts, cached usage and cached test results`, `account rows never trigger a usage refresh or touch`, `account rows are not loaded until the list arrives`). `bun run typecheck`, `task lint` clean.
