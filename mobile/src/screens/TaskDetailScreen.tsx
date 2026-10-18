@@ -116,6 +116,8 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   const refreshSeq = useRef(0);
   const sending = useRef(false);
   const queue = useChatQueue(conn, chatId);
+  const queueRef = useRef(queue); // the adoption callback lives in the load effect: it reads the current queue through this
+  queueRef.current = queue;
 
   useEffect(() => {
     mounted.current = true; // set again on a remount (Fast Refresh) -- the cleanup alone would leave it false for good
@@ -246,7 +248,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
             resolved,
             (runId) => {
               attachRun(runId, () => cancelled, () =>
-                adoptedPromptText({ promptForRun: () => undefined }, () => listRunsForTask(conn, taskId, chatIdRef.current ?? undefined), runId),
+                adoptedPromptText({ promptForRun: (id) => queueRef.current.promptForRun(id) }, () => listRunsForTask(conn, taskId, chatIdRef.current ?? undefined), runId),
               );
               void refreshLatest();
             },
