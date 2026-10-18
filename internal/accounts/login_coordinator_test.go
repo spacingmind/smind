@@ -199,35 +199,6 @@ func TestLoginCoordinator_Login_HappyPath(t *testing.T) {
 	}
 }
 
-func TestLoginCoordinator_Login_StateMismatch(t *testing.T) {
-	t.Parallel()
-
-	login := &fakeLogin{addr: freeAddr(t), path: "/callback"}
-	coord := NewLoginCoordinator(newTestRegistry(t), map[string]Login{"fake": login})
-	coord.timeout = 10 * time.Second
-
-	urlCh := make(chan string, 1)
-	doneCh := make(chan error, 1)
-	go func() {
-		_, err := coord.Login(context.Background(), "fake", "label", LoginOptions{}, func(_, u string) { urlCh <- u })
-		doneCh <- err
-	}()
-
-	<-urlCh // wait for the listener to be up before hitting it
-
-	resp, err := http.Get(fmt.Sprintf("http://%s/callback?code=test-code&state=totally-wrong", login.addr))
-	if err != nil {
-		t.Fatalf("GET callback: %v", err)
-	}
-	resp.Body.Close()
-
-	err = <-doneCh
-	if err == nil {
-		t.Fatal("Login() error = nil, want error for a mismatched state")
-	}
-	requireLoginCode(t, err, LoginCodeStateMismatch)
-}
-
 func TestLoginCoordinator_Login_Timeout(t *testing.T) {
 	t.Parallel()
 

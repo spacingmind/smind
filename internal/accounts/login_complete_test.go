@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -103,6 +104,23 @@ func getCallback(t *testing.T, addr, code, state string) {
 		return
 	}
 	resp.Body.Close()
+}
+
+// getCallbackBody GETs the listener's callback address and returns the body,
+// failing t unless the status is wantStatus.
+func getCallbackBody(t *testing.T, addr, code, state string, wantStatus int) string {
+	t.Helper()
+	resp, err := http.Get(fmt.Sprintf("http://%s/callback?code=%s&state=%s", addr, url.QueryEscape(code), url.QueryEscape(state)))
+	if err != nil {
+		t.Errorf("GET callback: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != wantStatus {
+		t.Errorf("callback status = %d, want %d", resp.StatusCode, wantStatus)
+	}
+	return string(body)
 }
 
 // tryCallback is getCallback for a request that may legitimately lose a race:
@@ -252,6 +270,68 @@ func TestLoginCoordinator_Complete(t *testing.T) {
 		if o := s.wait(t); o.err != nil {
 			t.Fatalf("Login() error = %v", o.err)
 		}
+	})
+
+	t.Run("junk callback does not end the login", func(t *testing.T) {
+		t.Parallel()
+		coord, _, login := newCompleteCoordinator(t)
+		s := startFakeLogin(t, coord, login, "junk")
+
+		junk := []string{
+			"/callback",
+			"/callback?code=stolen",
+			"/callback?code=stolen&state=wrong",
+			"/callback?error=access_denied",
+			"/callback?error=access_denied&state=wrong",
+			"/callback?code=stolen&state=",
+			"/favicon.ico",
+			"/",
+		}
+		for _, path := range junk {
+			resp, err := http.Get("http://" + login.addr + path)
+			if err != nil {
+				t.Fatalf("GET %s: %v", path, err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode < 400 {
+				t.Errorf("GET %s status = %d, want an error status", path, resp.StatusCode)
+			}
+		}
+		select {
+		case o := <-s.done:
+			t.Fatalf("Login() ended after junk requests: %+v", o)
+		case <-time.After(100 * time.Millisecond):
+		}
+		if pendingCount(coord) != 1 {
+			t.Fatalf("pending logins = %d, want the login still pending", pendingCount(coord))
+		}
+
+		// A matching callback still completes it.
+		getCallback(t, login.addr, "real-code", s.state)
+		o := s.wait(t)
+		if o.err != nil || o.res.Account.OAuth == nil || o.res.Account.OAuth.AccessToken != "access-for-real-code" {
+			t.Fatalf("Login() = %+v, %v, want the matching callback's code", o.res, o.err)
+		}
+	})
+
+	t.Run("callback with matching state still completes the login", func(t *testing.T) {
+		t.Parallel()
+		coord, _, login := newCompleteCoordinator(t)
+
+		s := startFakeLogin(t, coord, login, "ok")
+		getCallback(t, login.addr, "good-code", s.state)
+		if o := s.wait(t); o.err != nil || o.res.Account.OAuth.AccessToken != "access-for-good-code" {
+			t.Fatalf("Login() = %+v, %v, want the callback's code", o.res, o.err)
+		}
+
+		// The error= form with the matching state is delivered and denies.
+		s = startFakeLogin(t, coord, login, "denied")
+		resp, err := http.Get("http://" + login.addr + "/callback?error=access_denied&state=" + url.QueryEscape(s.state))
+		if err != nil {
+			t.Fatalf("GET callback: %v", err)
+		}
+		resp.Body.Close()
+		requireLoginCode(t, s.wait(t).err, LoginCodeDenied)
 	})
 
 	t.Run("oauthComplete unknown loginId errors", func(t *testing.T) {

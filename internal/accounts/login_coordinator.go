@@ -197,7 +197,7 @@ func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, op
 		return LoginResult{}, fmt.Errorf("oauth login: %w", err)
 	}
 
-	server, err := newCallbackServer(login.CallbackAddr(), login.CallbackPath(), providerDisplayLabel(provider))
+	server, err := newCallbackServer(login.CallbackAddr(), login.CallbackPath(), providerDisplayLabel(provider), state)
 	if err != nil {
 		return LoginResult{}, fmt.Errorf("oauth login: %w", err)
 	}
