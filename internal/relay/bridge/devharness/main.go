@@ -10,7 +10,8 @@
 // {"cmd":"<name>","ok":true,...} or {"cmd":"<name>","ok":false,"error":"..."}.
 // Commands: list | approve <id|peer label> | revoke <id|peer label> | window <maxNew> [seconds] |
 // peer-add <label> | peer-call <label> | peer-drop <label> | relay-restart |
-// daemon-restart | quit. Diagnostics go to stderr, prefixed "devharness: ".
+// daemon-restart | quit. With -fake-agent also:
+// seed-run <stopReason|end_turn> [title]. Diagnostics go to stderr, prefixed "devharness: ".
 package main
 
 import (
@@ -25,6 +26,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -42,6 +44,7 @@ import (
 	"github.com/spacingmind/smind/internal/relay/pairing"
 	relaypb "github.com/spacingmind/smind/internal/relay/relaypb"
 	"github.com/spacingmind/smind/internal/relay/server"
+	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -149,6 +152,7 @@ type harness struct {
 	wm        *workspace.Manager
 	runner    *taskrunner.Runner
 	fakeAgent string
+	workDir   string
 
 	hub       *bridge.Hub
 	hubCancel context.CancelFunc
@@ -191,6 +195,7 @@ func run(windowMax int, outdated bool, password, fakeAgent string) error {
 	}
 	h := &harness{
 		password:  password,
+		workDir:   workDir,
 		fakeAgent: fakeAgent,
 		secret:    secret,
 		fp:        server.CertFingerprint(cert),
@@ -493,6 +498,8 @@ func (h *harness) dispatch(cmd string, args []string) (map[string]any, error) {
 			return nil, err
 		}
 		return map[string]any{}, nil
+	case "seed-run":
+		return h.seedRun(args)
 	case "daemon-restart":
 		// A new Hub loses every E2EE counter; waiting clients must re-handshake
 		// on a fresh session id. Registry and daemon key are kept.
@@ -688,5 +695,97 @@ func (p *peer) request(method string, params any, timeout time.Duration) (rpcRes
 		return rpcResp{}, fmt.Errorf("stream ended: %v", err)
 	case <-time.After(timeout):
 		return rpcResp{}, errors.New("timed out waiting for response")
+	}
+}
+
+// seedRun creates a workspace, a task and a real run executed by the fake ACP
+// agent (D13): with a scenario "stop <reason>" the run ends done at a cap and
+// reports Disposition needs-continue; without one it ends end_turn normally.
+func (h *harness) seedRun(args []string) (map[string]any, error) {
+	if h.runner == nil {
+		return nil, errors.New("seed-run needs -fake-agent")
+	}
+	if err := need(args, 1, "seed-run <stopReason|end_turn> [title]"); err != nil {
+		return nil, err
+	}
+	reason := args[0]
+	title := "Seeded task"
+	if len(args) > 1 {
+		title = strings.Join(args[1:], " ")
+	}
+	repo, err := os.MkdirTemp(h.workDir, "seed-repo-")
+	if err != nil {
+		return nil, err
+	}
+	git := func(gitArgs ...string) error {
+		cmd := exec.Command("git", gitArgs...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git %v: %v: %s", gitArgs, err, out)
+		}
+		return nil
+	}
+	for _, g := range [][]string{
+		{"init"},
+		{"config", "core.autocrlf", "false"},
+		{"config", "user.email", "devharness@example.com"},
+		{"config", "user.name", "devharness"},
+	} {
+		if err := git(g...); err != nil {
+			return nil, err
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("seeded\n"), 0o644); err != nil {
+		return nil, err
+	}
+	if err := git("add", "README.md"); err != nil {
+		return nil, err
+	}
+	if err := git("commit", "-m", "initial commit"); err != nil {
+		return nil, err
+	}
+
+	ws, err := h.wm.CreateWorkspace(repo, "Seeded", "hard", nil)
+	if err != nil {
+		return nil, err
+	}
+	task, err := h.wm.CreateTask(ws.ID, nil, title)
+	if err != nil {
+		return nil, err
+	}
+	if reason != "end_turn" {
+		if err := os.WriteFile(filepath.Join(*task.WorktreePath, "scenario"), []byte("stop "+reason), 0o644); err != nil {
+			return nil, err
+		}
+	}
+
+	ctx := context.Background()
+	runID, err := h.api.Runs.Start(ctx, h.wm, h.runner, task.ID, 0, taskrunner.ProviderGLM, "seed", taskrunner.PermissionSettings{}, taskrunner.ThinkingLevelUnspecified)
+	if err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		_, st, err := h.api.Runs.History(runID)
+		if err != nil {
+			return nil, err
+		}
+		if st.Status == runs.StatusDone {
+			return map[string]any{
+				"workspaceId": ws.ID,
+				"taskId":      task.ID,
+				"runId":       runID,
+				"status":      "done",
+				"stopReason":  st.StopReason,
+				"disposition": st.Disposition,
+			}, nil
+		}
+		if st.Status == runs.StatusError {
+			return nil, fmt.Errorf("seeded run failed: %s", st.Err)
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.New("timed out waiting for the seeded run to finish")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
