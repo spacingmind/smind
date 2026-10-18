@@ -76,7 +76,7 @@ func (p *proc) state(label string) string {
 	return ""
 }
 
-func start(t *testing.T) *proc {
+func start(t *testing.T, extraArgs ...string) *proc {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "devharness")
 	if runtime.GOOS == "windows" {
@@ -86,7 +86,7 @@ func start(t *testing.T) *proc {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, bin)
+	cmd := exec.CommandContext(ctx, bin, extraArgs...)
 	stdin, _ := cmd.StdinPipe()
 	stdout, _ := cmd.StdoutPipe()
 	if err := cmd.Start(); err != nil {
@@ -215,4 +215,34 @@ func TestDeviceHarness(t *testing.T) {
 	if err := p.cmd.Wait(); err != nil {
 		t.Fatalf("exit: %v", err)
 	}
+}
+
+// TestSeedRunCappedRunNeedsContinue (D13): seed-run drives a real fake-agent
+// run to done; a capped stop reason reports Disposition needs-continue, a
+// normal end_turn does not, and without -fake-agent the command errors.
+func TestSeedRunCappedRunNeedsContinue(t *testing.T) {
+	fakeDir := t.TempDir()
+	fake := filepath.Join(fakeDir, "fakeagent")
+	if runtime.GOOS == "windows" {
+		fake += ".exe"
+	}
+	if out, err := exec.Command("go", "build", "-o", fake, "../../../taskrunner/fakeagent").CombinedOutput(); err != nil {
+		t.Fatalf("go build fakeagent: %v\n%s", err, out)
+	}
+
+	p := start(t, "-fake-agent", fake)
+	if m := p.mustOK("seed-run max_turn_requests"); m["stopReason"] != "max_turn_requests" || m["disposition"] != "needs-continue" || m["status"] != "done" {
+		t.Fatalf("seed-run max_turn_requests: %v", m)
+	}
+	m := p.mustOK("seed-run end_turn")
+	if m["status"] != "done" || m["disposition"] != "" || m["stopReason"] == "max_turn_requests" || m["stopReason"] == "max_tokens" {
+		t.Fatalf("seed-run end_turn: %v", m)
+	}
+	p.mustOK("quit")
+
+	plain := start(t)
+	if m := plain.do("seed-run x"); m["ok"] != false || m["error"] != "seed-run needs -fake-agent" {
+		t.Fatalf("seed-run without -fake-agent: %v", m)
+	}
+	plain.mustOK("quit")
 }
