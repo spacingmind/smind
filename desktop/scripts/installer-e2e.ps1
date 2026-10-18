@@ -225,7 +225,31 @@ try {
     Check ((Get-DaemonProc).ProcessId -eq $newProcId) 'the new daemon was replaced after the app quit'
     $summary.Add("phase B3: app quit, new daemon still running (pid $newProcId)")
 
-    # TODO phase C: uninstall, data survives
+    Step 'phase C: uninstall keeps the daemon install and the data'
+    Stop-App  # idempotent: already stopped after B3
+    $p = Start-Process "$appDir\uninstall.exe" -ArgumentList ('/S _?=' + $appDir) -Wait -PassThru
+    Check ($p.ExitCode -eq 0) "the uninstaller exited $($p.ExitCode)"
+    Check (-not (Test-Path $appExe)) 'the uninstaller left the app exe'
+    Check (-not (Test-Path $sidecar)) 'the uninstaller left the bundled sidecar'
+    Check (Test-Path $binExe) 'the uninstaller deleted the managed bin\smind.exe'
+    Check ((Get-Sha $binExe) -eq $newSidecarHash) 'the managed bin\smind.exe changed during uninstall'
+    Check (Test-Path $managedJson) 'the uninstaller deleted managed.json'
+    if (Test-Path "$appDir\smind.log") {
+        Write-Host "smind.log present: $((Get-Item "$appDir\smind.log").Length) bytes"
+    } else {
+        Write-Host "smind.log does not exist after uninstall; dir listing:"
+        Get-ChildItem $appDir -Recurse | ForEach-Object { Write-Host $_.FullName }
+    }
+    Check (Test-Path "$dataDir\e2e-marker.txt") 'the uninstaller deleted the e2e marker'
+    Check ((Get-Content "$dataDir\e2e-marker.txt" -Raw).Trim() -eq 'keep me') 'the e2e marker changed'
+    Check (Test-Path "$dataDir\token") 'the uninstaller deleted the auth token'
+    Check ((Get-Sha "$dataDir\token") -eq $tokenHash) 'the auth token changed'
+    Check ((Get-Item "$dataDir\smind.db").Length -ge $dbSize) 'the uninstaller shrank smind.db'
+    $ls = (& $binExe workspace ls) 2>&1 | Out-String
+    Check ($ls -match 'e2e-ws') "the daemon does not serve workspace e2e-ws after uninstall: $ls"
+    Check ($null -ne (Get-Healthz)) 'the uninstaller stopped the daemon'
+    Remove-Item "$appDir\uninstall.exe" -Force  # left behind by the in-place run
+    $summary.Add("phase C: app uninstalled, managed daemon (pid $newProcId) and all user data survived")
 } finally {
     Disable-Cdp
     Stop-App
@@ -240,5 +264,5 @@ try {
     }
 }
 Write-Host ''
-Write-Host 'installer e2e phase A passed'
+Write-Host 'installer e2e passed'
 exit 0
