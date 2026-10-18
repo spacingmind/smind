@@ -101,7 +101,7 @@ audit is in the Supervisor's notes). Status: **spec**, nothing built.
 
 ## Progress
 - [x] PR 1 (S1+S2) — branch `feat/client-state-accounts` (awaiting merge)
-- [ ] PR 2 (S3)
+- [x] PR 2 (S3) — branch `feat/client-state-catalog` (awaiting merge)
 - [ ] PR 3 (S4)
 - [ ] PR 4 (AC17)
 - [ ] PR 5 (AC18)
@@ -143,3 +143,29 @@ not re-evaluated against time while Settings stays open; AccountsDialog/profiles
 on the same host:port share an identity (the reconnect invalidation re-reads them).
 Unverified: real daemon + real provider accounts (deliberately not used); mid-transition frames (nothing in this PR animates);
 desktop app webview.
+
+### PR 2 (S3), 2026-10-18
+Evidence: `task lint` 0, `bunx tsc -b packages/ui` clean, full UI suite green (see PR), live harness (Vite, scripted fake client) light + dark
+screenshots in `/tmp/shots-adr32/out2/` (`agents-*`, `agents-*-live`, `sidebar-*`, `composer-*`): composer picker disables Codex with
+"codex not on PATH" from the shared health cache, sidebar footer "2 healthy" for 3 providers (1 failing), a profile created elsewhere
+appears in Settings → Agents without reload. Live call counts per page: 1 `provider.list`, 1 `profile.list`, `provider.test` once per
+provider key (3), 0 `account.usage`.
+- AC10 ✔ `client-state-catalog.test.tsx` `provider.list fetched once with composer, sidebar, task header and settings mounted`
+  (exactly 1 `provider.list`, 1 `profile.list`, 3 `provider.test`, 0 touch/refresh); `a failed provider.list is not re-sent by every
+  component that mounts afterwards`. Remaining readers of those RPCs are the hooks (`use-provider-catalog`, `use-profiles`,
+  `use-provider-health`, `use-accounts`) and the shared `providerListQueryOptions`.
+- AC11 ✔ `profile created in settings appears in composer picker and palette` (create through the Agents form; rename and delete via
+  `profile.*` events reach the palette and the open picker; a late update after delete does not resurrect it).
+- AC12 ✔ `sidebar health count matches providers dots` (same cache; Test press flips both); `a provider.test that errors counts as not
+  healthy: the footer count still shows`; health answers are dropped on `account.updated/removed` for that provider and on a same-daemon
+  reconnect, and re-tested once (`use-daemon-events.query.test.tsx`, `event-bridge.test.ts`).
+- AC13 ✔ `one fallback provider list constant` (single declaration, no inline copy).
+Independent review (read-only `reviewer`) found: rejected `provider.test` hid the footer count, health never re-tested after reconnect or
+an account change, the Agents dot did not test itself, picker health empty while the list loaded/failed, `ensureQueryData` ignored
+invalidation, catalog timeout not per client, failed lists refetched on every mount, profile mutation could plant a one-element list,
+resubscribe churn, and several tests that did not assert their names — all fixed with tests in the last commit. During integration a
+render loop (unstable `ensure()`/`health` identities) hung the suite; fixed and covered by every composer/sidebar test.
+Known/deferred: the Providers account rows' dot still folds usage state (S2) while the footer counts provider-level test results
+(an expired login with a passing local test shows red in Providers, healthy in the footer count); a unified provider-level health
+model belongs with the Providers redesign.
+Unverified: real daemon + real provider accounts; desktop webview; mid-transition frames (nothing in this PR animates).
