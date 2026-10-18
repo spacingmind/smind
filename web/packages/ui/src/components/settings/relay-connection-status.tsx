@@ -166,7 +166,10 @@ function DaemonPasswordPrompt({ status }: { status: RelayStatus }) {
       <span className={status.state === "passwordRequired" ? "text-ui-sm font-medium text-foreground" : "text-ui-sm font-medium text-destructive"}>
         {headline}
       </span>
-      <span className={quiet}>Set with `smind set-password` on the daemon&apos;s machine. The app keeps it in memory only and asks again after a restart.</span>
+      <span className={quiet}>
+        Set with <code className="rounded bg-muted px-1 font-mono text-foreground">smind set-password</code> on the daemon&apos;s machine. The app keeps it in memory only
+        and asks again after a restart.
+      </span>
       <div className="flex items-center gap-2">
         <Input
           aria-label="Daemon password"

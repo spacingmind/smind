@@ -1067,6 +1067,14 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   `inflight`; fixed separately in the `fix/device-hello-replay` PR), and every shipped daemon behaves that way, so the banner
   treats a 4 s silence as "predates daemon.info". Not done: the `docker pull` variant for a daemon reporting it runs from an image (`image?` in `daemon.info`, needs
   P11), and the P5 setting that stops offering (a) while a service owns the port (P5 not started).
+- 2026-10-18: **P13c implemented** (`feat/relay-device-password`, daemon + desktop; mobile is the mobile Lead's PR from the wire spec in ADR-0031 D9
+  "Daemon password (P13c, as built)"): `bridge.PasswordGate` checked after the signature and before capacity/`Admit` (never recorded as pending,
+  no registry oracle, every hello), `password_required` / `incorrect_password` / `too_many_attempts`+`retry_after`, per-device-id backoff + global window,
+  legacy clients refused when a password is set, one warning per start when none; Rust `PasswordCell` (zeroized, redacted Debug) + three relay states +
+  `connections_relay_set_password` (webview → Rust once, never back); web prompt in Settings → Connections; the harnesses gained `-password`. The
+  signed bytes and the v2 vectors are unchanged (the password is in the params, outside the signature). Decisions inside the spec: the desktop does not
+  retry on `password_required`/`incorrect_password` (it parks until the user enters one); after `too_many_attempts` the discarded password is not re-sent
+  and the client waits `max(retry_after, 5)` s then asks again; the password cell is per connection id and survives connection switches within one app run.
 
 ## Validation
 
@@ -1348,4 +1356,25 @@ one built from the P4 branch), `docker compose config`, the agents example build
   comment; verified with only CHOWN/SETUID/SETGID, where a parent-first walk strands 0700 trees), tightened the loopback pre-check to a
   dotted quad, made the `managedBy=docker` check non-skippable, test cleanup of other-owner temp dirs from a container; new test
   `root-owned nested 0700 trees are repaired with only CHOWN/SETUID/SETGID`.
+
+### P13c (2026-10-18)
+
+Commands: `go test ./internal/relay/... ./internal/server`, `cargo test` (daemon-client incl. the interop against the real Go hub with `-password`, and src-tauri),
+`bunx vitest run src/components/settings/relay-connection-status.test.tsx`, `bunx tsc -b packages/ui`, `task lint`, `GOOS=windows go vet ./...`, Playwright screenshots.
+
+- Go: `TestDeviceHelloPasswordRequiredWhenSet`, `TestWrongPasswordRejectedAndNotRecordedPending`, `TestPasswordRefusalRevealsNothingAboutTheRegistry`,
+  `TestWrongPasswordsAreRateLimitedPerDevice`, `TestOverlongPasswordIsIncorrect`, `TestNoPasswordConfiguredWarnsOnce`,
+  `TestNoPasswordSetIgnoresAHelloPasswordAndNeverLogsIt`, `TestPasswordNeverLoggedOnRefusal`, `TestPasswordProtectedDaemonRefusesLegacyClients`,
+  `TestRelayPasswordGateFollowsTheDaemonPassword` (the real bcrypt gate).
+- Rust: `the_password_rides_in_params_and_never_in_the_signed_hello`, `the_hello_carries_the_password_when_the_user_entered_one`,
+  `a_parked_loop_wakes_when_a_password_arrives_and_stops_when_dropped`, `password_states_have_stable_names`, `PasswordCell` tests (redacted Debug,
+  zeroizing slot), `relay_set_password_is_allowlisted_and_registered`, `relay_status_names_are_stable`, `password_lockout_reports_its_wait_and_nothing_secret`;
+  against the real Go hub: `password_protected_daemon_asks_rejects_a_wrong_password_and_accepts_the_right_one`,
+  `repeated_wrong_passwords_are_rate_limited_by_the_daemon`.
+- UI: `it("asks for the daemon password when the relay host requires it and never stores it")` + incorrect / locked countdown / Rust error / over-long cases.
+- **Screenshots** (light + dark; the real built bundle served by a real daemon, `window.__TAURI_INTERNALS__` mocked in Chrome because the Tauri shell
+  cannot be driven headless here): needs-password, typed, pending, incorrect, locked (countdown, form disabled), connected; the password is in no web storage
+  and not in the DOM after submit.
+- **Not verified:** the real Tauri app against a real relay with a password (the Rust client is verified against the real Go hub; the webview IPC is mocked),
+  a real mobile client (its own PR), Windows execution.
 
