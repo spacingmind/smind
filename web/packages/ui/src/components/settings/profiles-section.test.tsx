@@ -1,12 +1,13 @@
 import { act } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import "@/components/settings/profiles-section";
-import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { setSettingsIntent, takeSettingsIntent } from "@/lib/settings-intent";
-import { FakeWsClient } from "@/test/fake-ws-client";
+import { useRunProviderTest } from "@/hooks/use-accounts";
+import { renderHookWithDaemon, renderWithDaemon } from "@/test/render-with-daemon";
+import { FakeUsageDaemon } from "@/test/usage-test-client";
 
 const PROFILE = {
   ID: 1,
@@ -27,29 +28,20 @@ async function flush(): Promise<void> {
   });
 }
 
-/** A minimal DaemonEvents fake: records listeners per topic and lets a test fire one directly, mirroring useDaemonEvents' real subscribe/dispatch shape without a real connection. */
-function fakeDaemonEvents(): DaemonEvents & { fire(topic: string, payload: unknown): void } {
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
-  return {
-    subscribe(topic, listener) {
-      let set = listeners.get(topic);
-      if (!set) {
-        set = new Set();
-        listeners.set(topic, set);
-      }
-      set.add(listener);
-      return () => set!.delete(listener);
-    },
-    fire(topic, payload) {
-      for (const fn of listeners.get(topic) ?? []) fn(payload);
-    },
-  };
-}
-
-function renderSection(client: FakeWsClient, events?: DaemonEvents) {
+function renderSection(daemon: FakeUsageDaemon) {
   const section = listSettingsSections().find((s) => s.id === "agents");
   if (!section) throw new Error("profiles section did not register");
-  render(<>{section.render({ client: client as never, events })}</>);
+  return renderWithDaemon(<>{section.render({ client: daemon.client, events: daemon.events })}</>, daemon);
+}
+
+/** A daemon with the profiles (and optionally providers) preloaded and answered, for tests that don't script them by hand. */
+async function renderWithProfiles(profiles: unknown[], providers: { providers: unknown[] } | null = null) {
+  const daemon = new FakeUsageDaemon([]);
+  daemon.profiles = profiles as never;
+  if (providers) daemon.providers = providers as never;
+  const view = renderSection(daemon);
+  await flush();
+  return { daemon, view };
 }
 
 describe("profiles-section", () => {
@@ -62,10 +54,7 @@ describe("profiles-section", () => {
       kind: "newProfile",
       seed: { name: "Sonnet 5", provider: "claude-native", model: "sonnet-5", permissionMode: "plan", thinkingLevel: "extended" },
     });
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([PROFILE]);
-    await flush();
+    await renderWithProfiles([PROFILE]);
 
     expect(screen.getByTestId("profile-new-form")).toBeInTheDocument();
     expect(screen.getByTestId("profile-form-name")).toHaveValue("Sonnet 5");
@@ -75,20 +64,14 @@ describe("profiles-section", () => {
 
   it("a pending edit intent opens that profile's inline editor", async () => {
     setSettingsIntent({ kind: "editProfile", id: 1 });
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([PROFILE]);
-    await flush();
+    await renderWithProfiles([PROFILE]);
 
     expect(screen.getByTestId("profile-edit-form-1-name")).toHaveValue("UI work");
     expect(screen.queryByTestId("profile-new-form")).not.toBeInTheDocument();
   });
 
   it("an intent arriving while the section is open is applied", async () => {
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([PROFILE]);
-    await flush();
+    await renderWithProfiles([PROFILE]);
     expect(screen.queryByTestId("profile-edit-form-1-name")).not.toBeInTheDocument();
 
     act(() => setSettingsIntent({ kind: "editProfile", id: 1 }));
@@ -97,29 +80,20 @@ describe("profiles-section", () => {
   });
 
   it("renders an empty state with zero profiles", async () => {
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([]);
-    await flush();
+    await renderWithProfiles([]);
 
     expect(screen.getByTestId("profiles-empty-state")).toBeInTheDocument();
   });
 
   it("lists profiles from profile.list", async () => {
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([PROFILE]);
-    await flush();
+    await renderWithProfiles([PROFILE]);
 
     expect(screen.getByTestId("profile-row-1")).toBeInTheDocument();
     expect(screen.getByText("UI work")).toBeInTheDocument();
   });
 
   it("the header's + New agent button opens the add card at the top of the list, and creating a profile through it appears below", async () => {
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([PROFILE]);
-    await flush();
+    const { daemon } = await renderWithProfiles([PROFILE]);
 
     expect(screen.queryByTestId("profile-form-name")).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("profile-new-button"));
@@ -136,9 +110,9 @@ describe("profiles-section", () => {
     fireEvent.click(screen.getByTestId("profile-form-submit"));
     await flush();
 
-    expect(client.nth("profile.create").params).toMatchObject({ name: "New profile", provider: "claude-native" });
+    expect(daemon.calls.find((c) => c.method === "profile.create")?.params).toMatchObject({ name: "New profile", provider: "claude-native" });
 
-    client.nth("profile.create").resolve({ ...PROFILE, ID: 2, Name: "New profile" });
+    daemon.emit("profile.created", { profile: { ...PROFILE, ID: 2, Name: "New profile" } });
     await flush();
 
     expect(within(screen.getByTestId("profile-row-2")).getByText("New profile")).toBeInTheDocument();
@@ -147,10 +121,7 @@ describe("profiles-section", () => {
   });
 
   it("the form's permission-mode field lists the provider's own modes, saves permissionMode, and the card names the mode (W4)", async () => {
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([PROFILE]);
-    await flush();
+    const { daemon } = await renderWithProfiles([PROFILE]);
 
     // The stored profile's card line uses the provider's own mode label.
     expect(screen.getByTestId("profile-row-1")).toHaveTextContent("Plan Mode");
@@ -168,7 +139,7 @@ describe("profiles-section", () => {
     fireEvent.click(screen.getByTestId("profile-form-submit"));
     await flush();
 
-    expect(client.nth("profile.create").params).toMatchObject({
+    expect(daemon.calls.find((c) => c.method === "profile.create")?.params).toMatchObject({
       name: "Bypass bot",
       provider: "claude-native",
       permissionMode: "bypassPermissions",
@@ -177,16 +148,13 @@ describe("profiles-section", () => {
   });
 
   it("Cancel closes the add card without creating anything, and opening Edit on a row closes an open add card", async () => {
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([PROFILE]);
-    await flush();
+    const { daemon } = await renderWithProfiles([PROFILE]);
 
     fireEvent.click(screen.getByTestId("profile-new-button"));
     await flush();
     fireEvent.click(screen.getByTestId("profile-form-cancel"));
     expect(screen.queryByTestId("profile-new-form")).not.toBeInTheDocument();
-    expect(client.calls.some((c) => c.method === "profile.create")).toBe(false);
+    expect(daemon.calls.some((c) => c.method === "profile.create")).toBe(false);
 
     // Only one card is ever open -- opening a row's Edit while the add
     // card is open closes the add card.
@@ -202,19 +170,13 @@ describe("profiles-section", () => {
   });
 
   it("keeps its own title when rendered outside the settings screen", async () => {
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([]);
-    await flush();
+    await renderWithProfiles([]);
 
     expect(screen.getByRole("heading", { level: 3, name: "Agents" })).toBeInTheDocument();
   });
 
   it("empty state shows a sentence and the one + New agent button (no second CTA in the body)", async () => {
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([]);
-    await flush();
+    await renderWithProfiles([]);
 
     expect(screen.getByTestId("profiles-empty-state")).toBeInTheDocument();
     expect(screen.queryByTestId("profiles-empty-new-button")).not.toBeInTheDocument();
@@ -230,10 +192,7 @@ describe("profiles-section", () => {
   // and Edit now expands inline in the row (profile-edit-form-{id}-*)
   // rather than repurposing the bottom "New agent" form.
   it("editing a profile opens inline in the row and persists changes", async () => {
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([PROFILE]);
-    await flush();
+    const { daemon } = await renderWithProfiles([PROFILE]);
 
     fireEvent.pointerDown(screen.getByTestId("profile-menu-1"), { button: 0 });
     fireEvent.click(await screen.findByTestId("profile-edit-1"));
@@ -248,9 +207,9 @@ describe("profiles-section", () => {
     fireEvent.click(screen.getByTestId("profile-edit-form-1-submit"));
     await flush();
 
-    expect(client.nth("profile.update").params).toMatchObject({ id: 1, name: "Renamed" });
+    expect(daemon.calls.find((c) => c.method === "profile.update")?.params).toMatchObject({ id: 1, name: "Renamed" });
 
-    client.nth("profile.update").resolve({ ...PROFILE, Name: "Renamed" });
+    daemon.emit("profile.updated", { profile: { ...PROFILE, Name: "Renamed" } });
     await flush();
 
     expect(screen.getByText("Renamed")).toBeInTheDocument();
@@ -260,34 +219,27 @@ describe("profiles-section", () => {
   });
 
   it("deleting a profile from the ⋯ menu calls profile.delete with its id", async () => {
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([PROFILE]);
-    await flush();
+    const { daemon } = await renderWithProfiles([PROFILE]);
 
     fireEvent.pointerDown(screen.getByTestId("profile-menu-1"), { button: 0 });
     fireEvent.click(await screen.findByTestId("profile-delete-1"));
     await flush();
 
-    expect(client.nth("profile.delete").params).toEqual({ id: 1 });
+    expect(daemon.calls.find((c) => c.method === "profile.delete")?.params).toEqual({ id: 1 });
 
-    client.nth("profile.delete").resolve({});
+    daemon.emit("profile.deleted", { id: 1 });
     await flush();
 
     expect(screen.queryByTestId("profile-row-1")).not.toBeInTheDocument();
   });
 
   it("reflects a profile.created event from outside its own mutation, without a manual refresh", async () => {
-    const client = new FakeWsClient();
-    const events = fakeDaemonEvents();
-    renderSection(client, events);
-    client.nth("profile.list").resolve([]);
-    await flush();
+    const { daemon } = await renderWithProfiles([]);
 
     expect(screen.getByTestId("profiles-empty-state")).toBeInTheDocument();
 
     act(() => {
-      events.fire("profile.created", { profile: PROFILE });
+      daemon.emit("profile.created", { profile: PROFILE });
     });
     await flush();
 
@@ -296,15 +248,11 @@ describe("profiles-section", () => {
   });
 
   it("reflects a profile.deleted event by removing the row", async () => {
-    const client = new FakeWsClient();
-    const events = fakeDaemonEvents();
-    renderSection(client, events);
-    client.nth("profile.list").resolve([PROFILE]);
-    await flush();
+    const { daemon } = await renderWithProfiles([PROFILE]);
     expect(screen.getByTestId("profile-row-1")).toBeInTheDocument();
 
     act(() => {
-      events.fire("profile.deleted", { id: 1 });
+      daemon.emit("profile.deleted", { id: 1 });
     });
     await flush();
 
@@ -328,11 +276,7 @@ describe("profiles-section model field (ADR-0025)", () => {
   };
 
   it("profile editor saves model", async () => {
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([PROFILE]);
-    client.nth("provider.list").resolve(PROVIDERS);
-    await flush();
+    const { daemon } = await renderWithProfiles([PROFILE], PROVIDERS);
 
     fireEvent.click(screen.getByTestId("profile-new-button"));
     await flush();
@@ -345,15 +289,11 @@ describe("profiles-section model field (ADR-0025)", () => {
     fireEvent.click(screen.getByTestId("profile-form-submit"));
     await flush();
 
-    expect(client.nth("profile.create").params).toMatchObject({ name: "Cheap", provider: "claude-native", model: "sonnet" });
+    expect(daemon.calls.find((c) => c.method === "profile.create")?.params).toMatchObject({ name: "Cheap", provider: "claude-native", model: "sonnet" });
   });
 
   it("profile editor hides the model field for a provider with no models", async () => {
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([PROFILE]);
-    client.nth("provider.list").resolve(PROVIDERS);
-    await flush();
+    await renderWithProfiles([PROFILE], PROVIDERS);
 
     fireEvent.click(screen.getByTestId("profile-new-button"));
     await flush();
@@ -365,11 +305,7 @@ describe("profiles-section model field (ADR-0025)", () => {
   });
 
   it("profile list shows the model", async () => {
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([{ ...PROFILE, Model: "opus" }]);
-    client.nth("provider.list").resolve(PROVIDERS);
-    await flush();
+    await renderWithProfiles([{ ...PROFILE, Model: "opus" }], PROVIDERS);
 
     expect(screen.getByTestId("profile-row-1")).toHaveTextContent("Opus");
   });
@@ -377,10 +313,7 @@ describe("profiles-section model field (ADR-0025)", () => {
 
 describe("profiles-section ★ default agent (run-config IA)", () => {
   it("marks a profile default, and clicking its star again clears it", async () => {
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([PROFILE]);
-    await flush();
+    await renderWithProfiles([PROFILE]);
 
     const star = screen.getByTestId("profile-default-1");
     expect(star).toHaveAttribute("aria-pressed", "false");
@@ -395,10 +328,7 @@ describe("profiles-section ★ default agent (run-config IA)", () => {
   });
 
   it("clears the default when its agent is deleted", async () => {
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([PROFILE]);
-    await flush();
+    const { daemon } = await renderWithProfiles([PROFILE]);
 
     fireEvent.click(screen.getByTestId("profile-default-1"));
     expect(window.localStorage.getItem("smind:settings:defaultAgentId")).toBe("1");
@@ -406,7 +336,7 @@ describe("profiles-section ★ default agent (run-config IA)", () => {
     fireEvent.pointerDown(screen.getByTestId("profile-menu-1"), { button: 0 });
     fireEvent.click(await screen.findByTestId("profile-delete-1"));
     await flush();
-    client.nth("profile.delete").resolve({});
+    daemon.emit("profile.deleted", { id: 1 });
     await flush();
 
     expect(window.localStorage.getItem("smind:settings:defaultAgentId")).toBeNull();
@@ -414,28 +344,37 @@ describe("profiles-section ★ default agent (run-config IA)", () => {
 });
 
 describe("profiles-section inline edit's provider health dot (run-config IA)", () => {
-  it("tests the profile's provider and renders ok/failed from provider.test", async () => {
-    const client = new FakeWsClient();
-    renderSection(client);
-    client.nth("profile.list").resolve([PROFILE]);
-    client.nth("provider.list").resolve({
-      providers: [{ id: "claude-native", label: "Claude Code", credentialKind: "oauth", accountProvider: "anthropic" }],
-    });
-    await flush();
+  it("renders the profile's provider health from the shared provider.test cache", async () => {
+    // claude-native is credential-backed -- the cached test's key uses the
+    // accounts-vocabulary id (accountProvider), not the raw taskrunner
+    // provider id, per ProviderInfo.accountProvider's own doc comment.
+    const { daemon, view } = await renderWithProfiles(
+      [PROFILE],
+      { providers: [{ id: "claude-native", label: "Claude Code", credentialKind: "oauth", accountProvider: "anthropic" }] },
+    );
 
+    // Opening the editor makes sure its provider has a health answer: one local check, run once however
+    // often the form re-renders, written to the shared cache.
+    daemon.testResults = { anthropic: { ok: false, detail: "no credential" } };
     fireEvent.pointerDown(screen.getByTestId("profile-menu-1"), { button: 0 });
     fireEvent.click(await screen.findByTestId("profile-edit-1"));
     await flush();
+    expect(daemon.countCalls("provider.test")).toBe(1);
+    expect(screen.getByTestId("profile-edit-form-1-provider-health")).toHaveAttribute("data-status", "failed");
 
-    // claude-native is credential-backed -- provider.test is called with
-    // the accounts-vocabulary id (accountProvider), not the raw taskrunner
-    // provider id, per ProviderInfo.accountProvider's own doc comment.
-    const testCall = client.nth("provider.test", 0);
-    expect(testCall.params).toEqual({ provider: "anthropic" });
-
+    // A result landing in the shared cache by another path (a Test button, the sidebar's count, the
+    // picker) flips the dot live -- write it the way useRunProviderTest does.
+    const { runTest } = renderHookWithDaemon(() => useRunProviderTest(), daemon, {
+      initialProps: undefined,
+      queryClient: view.queryClient(),
+    }).result.current;
+    daemon.testResults = { anthropic: { ok: true, detail: "using saved credential" } };
     await act(async () => {
-      testCall.resolve({ ok: true, detail: "using saved credential" });
+      runTest("anthropic");
     });
+    await flush();
+    // One more call: the Test button's own. The dot re-read the shared cache; it did not fetch again.
+    expect(daemon.countCalls("provider.test")).toBe(2);
     expect(screen.getByTestId("profile-edit-form-1-provider-health")).toHaveAttribute("data-status", "ok");
   });
 });

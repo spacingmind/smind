@@ -64,6 +64,25 @@ describe("useDaemonEvents -> query cache", () => {
     expect(invalidate).toHaveBeenCalledTimes(1);
   });
 
+  it("a same-daemon reconnect drops the cached health answers so they are re-tested", async () => {
+    const qc = createQueryClient();
+    qc.setQueryData(queryKeys.providerTest("anthropic"), { ok: false, detail: "codex not on PATH" });
+    qc.setQueryData(queryKeys.accountList(), [{ id: 1 }]);
+    const first = fakeClient();
+    const second = fakeClient();
+    let current = first.client;
+    const { rerender } = renderHook(() => useDaemonEvents(current, qc));
+    await first.answerSubscribe();
+    expect(qc.getQueryData(queryKeys.providerTest("anthropic"))).toBeDefined();
+
+    current = second.client;
+    rerender();
+    await second.answerSubscribe();
+    expect(qc.getQueryData(queryKeys.providerTest("anthropic"))).toBeUndefined();
+    // Everything else is kept (and invalidated), not dropped.
+    expect(qc.getQueryData(queryKeys.accountList())).toEqual([{ id: 1 }]);
+  });
+
   it("an inactive query invalidated by a reconnect re-reads on its next mount, through the new client", async () => {
     const qc = createQueryClient();
     const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;

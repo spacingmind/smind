@@ -6,7 +6,9 @@ import { ComposerStatusChips } from "@/components/composer/composer-status-chips
 import { QueuedPrompts } from "@/components/composer/queued-prompts";
 import { resolveNextPermissionMode } from "@/components/composer/permission-mode-cycle";
 import { useComposerDraft } from "@/components/composer/use-composer-draft";
+import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useProviderHealth } from "@/hooks/use-provider-health";
+import { useProfileList } from "@/hooks/use-profiles";
 import type { SubmitResult } from "@/hooks/use-run-timeline";
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
 import { RunConfigToolbar, type LiveRunControls, type RunConfigContextValue, type RunConfigState } from "@/components/composer/run-config-toolbar";
@@ -16,21 +18,13 @@ import { useActionHandler, useKeyboard } from "@/keyboard/keyboard-provider";
 import { formatCombo } from "@/keyboard/shortcut-string";
 import { type DiffStat } from "@/lib/diff-stat";
 import type {
-  AgentProfile,
   ChatQueueItem,
   ConfigOptionParams,
   PermissionSettings,
   Provider,
-  ProviderInfo,
-  ProviderListResult,
   ThinkingLevel,
 } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
-
-/** Used until provider.list answers (and kept if it fails) so the composer is never unusable because one fetch lost. */
-/** How long the picker waits on provider.list before it falls back to the built-in catalog. */
-const PROVIDER_LIST_TIMEOUT_MS = 8000;
-const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm" }];
 
 /** Icon-only send cluster: 44px touch targets below md (Item 21), ZCode's 32px rounded squares from md up. */
 const ICON_ACTION_BUTTON_CLASS = "size-11 rounded-xl md:size-8";
@@ -153,18 +147,21 @@ export function Composer({
   };
 }) {
   const draft = useComposerDraft(taskId);
-  const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
-  // False until provider.list settles (result or failure): the combined picker shows its loading states meanwhile.
-  const [providersSettled, setProvidersSettled] = useState(false);
   // ADR-0014's Profiles picker: a named provider/permissionMode/
   // thinkingLevel bundle a user applies in one click. Empty when the
   // daemon has none (a fresh install, or client.call failing) -- the
   // control below renders nothing in that case, so the composer's
   // pre-profiles defaults are exactly what an empty-profiles daemon still
   // gets (AC15's regression requirement).
-  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+  // One provider.list / profile.list cache entry per connection (ADR-0032):
+  // the picker's provider list and Profiles picker read the shared cache,
+  // kept live by events and mutations -- no per-composer fetch effects.
+  const { providersOrFallback: providers, settled: providersSettled } = useProviderCatalog();
+  // The Profiles picker: empty when the daemon has none, so the composer's
+  // pre-profiles defaults are exactly what an empty-profiles daemon gets.
+  const profiles = useProfileList();
   // Lazy provider.test results for the combined picker: fetched when it first opens, not on render.
-  const providerHealth = useProviderHealth(client, providers);
+  const providerHealth = useProviderHealth();
   // The run config itself lives in RunConfigToolbar's shared context
   // (run-config IA); this mirror is what the composer's own submit and
   // Shift+Tab cycle read, updated by the toolbar's onChange.
@@ -215,45 +212,6 @@ export function Composer({
   useActionHandler("composer.focus", () => textareaNode.current?.focus());
   const { bindings, isMac } = useKeyboard();
   const focusCombo = bindings.find((b) => b.id === "composer-focus")?.effectiveCombo ?? null;
-
-  useEffect(() => {
-    setProviders(FALLBACK_PROVIDERS);
-    setProvidersSettled(false);
-    if (!client) return;
-    let cancelled = false;
-    // A daemon that never answers must not leave the picker on "Loading…" forever: the fallback catalog takes over.
-    const giveUp = setTimeout(() => {
-      if (!cancelled) setProvidersSettled(true);
-    }, PROVIDER_LIST_TIMEOUT_MS);
-    client
-      .call<ProviderListResult>("provider.list")
-      .then((result) => {
-        if (!cancelled && result.providers.length > 0) setProviders(result.providers);
-      })
-      .catch((err) => console.error("provider.list failed, using fallback provider list", err))
-      .finally(() => {
-        if (!cancelled) setProvidersSettled(true);
-      });
-    return () => {
-      cancelled = true;
-      clearTimeout(giveUp);
-    };
-  }, [client]);
-
-  useEffect(() => {
-    setProfiles([]);
-    if (!client) return;
-    let cancelled = false;
-    client
-      .call<AgentProfile[]>("profile.list")
-      .then((result) => {
-        if (!cancelled) setProfiles(result ?? []);
-      })
-      .catch((err) => console.error("profile.list failed, hiding the Profiles picker", err));
-    return () => {
-      cancelled = true;
-    };
-  }, [client]);
 
   const canSend = connected && taskId !== null;
   const running = runningRunId !== null;

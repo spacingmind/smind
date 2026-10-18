@@ -1,9 +1,10 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
-import type { ReactElement, ReactNode } from "react";
+import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
 import { DaemonQueryProvider, useDaemonQueryClient } from "@/lib/query/daemon-query-provider";
+import { createQueryClient } from "@/lib/query/query-client";
 import "@/test/query-scheduler";
 import type { FakeUsageDaemon } from "@/test/usage-test-client";
 
@@ -90,4 +91,37 @@ export function renderHookWithDaemon<T, P>(
       view.rerenderWith(current);
     },
   };
+}
+
+/**
+ * `render` for a component that takes its WsClient as a prop and whose shared-cache hooks (catalog,
+ * profiles, accounts) read the same client from the daemon provider: provides a fresh QueryClient and
+ * the element's own `client` prop, so a test keeps scripting that one client. `rerender` re-provides the
+ * new element's client (a client swap keeps the cache, as the app does for the same daemon).
+ */
+/** The first `client` prop found walking down the element's children (a sidebar/pane wrapped in layout providers). */
+function clientPropOf(node: ReactNode): never | null {
+  if (!isValidElement(node)) return null;
+  const props = node.props as { client?: never; children?: ReactNode };
+  if (props.client) return props.client;
+  for (const child of Children.toArray(props.children)) {
+    const found = clientPropOf(child);
+    if (found) return found;
+  }
+  return null;
+}
+
+export function renderWithClientProp(ui: ReactElement): RenderResult {
+  const queryClient = createQueryClient();
+  const wrap = (element: ReactElement) => (
+    <DaemonQueryProvider
+      queryClient={queryClient}
+      client={clientPropOf(element)}
+      events={null}
+    >
+      {element}
+    </DaemonQueryProvider>
+  );
+  const view = render(wrap(ui));
+  return { ...view, rerender: (next: ReactNode) => view.rerender(wrap(next as ReactElement)) };
 }

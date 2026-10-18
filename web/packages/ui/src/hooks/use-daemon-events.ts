@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { applyDaemonEvent } from "@/lib/query/event-bridge";
+import { queryKeys } from "@/lib/query-keys";
 import type { DaemonNotification, WsClient } from "@/lib/ws-client";
 import { LIFECYCLE_TOPICS } from "@/lib/workspace-tree";
 
@@ -78,7 +79,12 @@ export function useDaemonEvents(client: WsClient | null, queryClient?: QueryClie
       .call("events.subscribe", { topics: TOPICS })
       .catch(() => {})
       .then(() => {
-        if (reconnected && queryClient) void queryClient.invalidateQueries();
+        if (reconnected && queryClient) {
+          // The daemon may have restarted with a fixed PATH or credential: its health answers are
+          // re-tested (the footer's ensure() notices the gap); everything else is re-read.
+          queryClient.removeQueries({ queryKey: queryKeys.providerTestAll() });
+          void queryClient.invalidateQueries();
+        }
       });
 
     const off = client.onNotification((n: DaemonNotification) => {
