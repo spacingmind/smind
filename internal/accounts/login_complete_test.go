@@ -105,6 +105,16 @@ func getCallback(t *testing.T, addr, code, state string) {
 	resp.Body.Close()
 }
 
+// tryCallback is getCallback for a request that may legitimately lose a race:
+// when the paste wins, Login closes the listener, so the GET can fail with a
+// refused or reset connection. Transport errors are ignored.
+func tryCallback(addr, code, state string) {
+	resp, err := http.Get(fmt.Sprintf("http://%s/callback?code=%s&state=%s", addr, url.QueryEscape(code), url.QueryEscape(state)))
+	if err == nil {
+		resp.Body.Close()
+	}
+}
+
 // waitResolved blocks until the login named id has been resolved (its
 // outcome decided), so a test can observe "already completed" without racing
 // the wake-up of the Login goroutine.
@@ -369,7 +379,7 @@ func TestLoginCoordinator_Complete(t *testing.T) {
 				wg.Add(2)
 				go func() {
 					defer wg.Done()
-					getCallback(t, login.addr, "from-listener", s.state)
+					tryCallback(login.addr, "from-listener", s.state)
 				}()
 				go func() {
 					defer wg.Done()
