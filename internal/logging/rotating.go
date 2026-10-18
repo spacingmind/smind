@@ -31,6 +31,7 @@ type Rotating struct {
 	f        *os.File
 	size     int64
 	closed   bool
+	onRotate func()
 }
 
 // OpenRotating opens (creating if needed) the log at path for appending.
@@ -44,6 +45,16 @@ func OpenRotating(path string, maxSize int64, maxFiles int) (*Rotating, error) {
 		return nil, err
 	}
 	return r, nil
+}
+
+// OnRotate sets a callback run after every successful rotation, once the new
+// active file is open. It is used to reopen a crash-output handle that still
+// points at the renamed file. fn must not call back into this Rotating
+// (write, close, OnRotate): it runs with r.mu held.
+func (r *Rotating) OnRotate(fn func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onRotate = fn
 }
 
 func (r *Rotating) open() error {
@@ -88,8 +99,8 @@ func (r *Rotating) Write(p []byte) (int, error) {
 
 // rotate shifts the numbered files up and starts a new active file. Errors
 // are tolerated step by step: the worst outcome is a log that grows past
-// maxSize until the next successful rotation, or (when the new file cannot be
-// created) lines lost until the next Write manages to reopen it.
+// maxSize until the next successful rotation, or (when the new file cannot
+// be created) lines lost until the next Write manages to reopen it.
 func (r *Rotating) rotate() {
 	_ = r.f.Close()
 	r.f = nil
@@ -110,6 +121,10 @@ func (r *Rotating) rotate() {
 	if err := r.open(); err != nil {
 		// Could not start a fresh file: r.f stays nil and the next Write retries.
 		r.f, r.size = nil, 0
+		return
+	}
+	if r.onRotate != nil {
+		r.onRotate()
 	}
 }
 

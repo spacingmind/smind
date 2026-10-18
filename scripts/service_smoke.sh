@@ -103,6 +103,34 @@ while [ "$i" -lt 60 ]; do
 done
 [ "$i" -lt 60 ] || fail "the daemon was not restarted after kill -9 (pid was $pid)"
 
+step "a Go crash trace reaches daemon.log"
+pid="$(service_pid)"
+[ -n "$pid" ] || fail "no pid in status output"
+kill -QUIT "$pid"
+i=0
+while [ "$i" -lt 30 ]; do
+  if grep -q 'SIGQUIT: quit' "$SMIND_HOME/daemon.log"; then
+    break
+  fi
+  i=$((i + 1))
+  sleep 1
+done
+if ! grep -q 'SIGQUIT: quit' "$SMIND_HOME/daemon.log"; then
+  tail -20 "$SMIND_HOME/daemon.log" || true
+  fail "daemon.log has no SIGQUIT trace"
+fi
+# SIGQUIT kills the daemon too; wait for the supervisor to restart it.
+i=0
+while [ "$i" -lt 60 ]; do
+  new="$(service_pid)"
+  if [ -n "$new" ] && [ "$new" != "$pid" ] && health >/dev/null 2>&1; then
+    break
+  fi
+  i=$((i + 1))
+  sleep 1
+done
+[ "$i" -lt 60 ] || fail "the daemon was not restarted after SIGQUIT (pid was $pid)"
+
 step "restart"
 "$bin" service restart
 wait_up 30
