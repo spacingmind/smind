@@ -334,3 +334,25 @@ func envDaemonClient(t *testing.T, env *mcpTestEnv) *wsclient.Client {
 	t.Helper()
 	return dialTestClient(t, env.srvURL)
 }
+
+// A supervisor reads child states through task_tree and task_wait childrenOf;
+// a child "done" at a cap must not read as plain done there (D13).
+func TestTreeSummaryAndChildStatesShowNeedsContinue(t *testing.T) {
+	node := func(id int64, state, disposition string) taskTreeNode {
+		return taskTreeNode{ID: id, Depth: 1, Run: taskTreeNodeRun{State: state, Disposition: disposition}}
+	}
+	nodes := []taskTreeNode{node(1, "done", ""), node(2, "done", "needs-continue"), node(3, "error", "")}
+	got := treeSummary(nodes)
+	want := "3 tasks: 1 error, 2 done (1 needs-continue: cut off at a cap, not finished)"
+	if got != want {
+		t.Fatalf("treeSummary = %q, want %q", got, want)
+	}
+	if plain := treeSummary(nodes[:1]); plain != "1 tasks: 1 done" {
+		t.Fatalf("a tree with no capped run changed its summary: %q", plain)
+	}
+	nested := nestTaskTree(taskTreeFlat{Nodes: nodes})
+	run := nested.Roots[1]["run"].(taskTreeNodeRun)
+	if run.Disposition != "needs-continue" {
+		t.Fatalf("task_tree node run = %+v, want the disposition to ride through", run)
+	}
+}
