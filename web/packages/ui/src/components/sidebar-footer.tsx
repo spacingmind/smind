@@ -14,7 +14,8 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useKeyboard } from "@/keyboard/keyboard-provider";
 import type { ConnectionStatus } from "@/lib/reconnect";
-import { desktop, isDesktop } from "@/lib/platform";
+import { openExternalUrl } from "@/lib/external-link";
+import { isDesktop } from "@/lib/platform";
 import { Icons, type IconComponent } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
@@ -22,14 +23,6 @@ const DOCS_URL = "https://github.com/spacingmind/smind#readme";
 const ISSUES_URL = "https://github.com/spacingmind/smind/issues/new";
 
 const ICON_BUTTON_CLASS = "text-foreground-muted hover:text-foreground";
-
-function openExternal(url: string): void {
-  if (isDesktop) {
-    desktop.openExternal(url).catch(() => {});
-    return;
-  }
-  window.open(url, "_blank", "noopener,noreferrer");
-}
 
 export function providerTone(health: { healthy: number; total: number } | null): StatusDotStatus | null {
   if (!health || health.total === 0) return null;
@@ -231,10 +224,10 @@ function HelpButton({ onOpenSettings }: { onOpenSettings?: (sectionId?: string) 
         <DropdownMenuItem data-testid="sidebar-footer-help-palette" onSelect={() => runAction("palette.open")}>
           Command palette
         </DropdownMenuItem>
-        <DropdownMenuItem data-testid="sidebar-footer-help-docs" onSelect={() => openExternal(DOCS_URL)}>
+        <DropdownMenuItem data-testid="sidebar-footer-help-docs" onSelect={() => openExternalUrl(DOCS_URL)}>
           Documentation
         </DropdownMenuItem>
-        <DropdownMenuItem data-testid="sidebar-footer-help-issue" onSelect={() => openExternal(ISSUES_URL)}>
+        <DropdownMenuItem data-testid="sidebar-footer-help-issue" onSelect={() => openExternalUrl(ISSUES_URL)}>
           Report an issue
         </DropdownMenuItem>
       </DropdownMenuContent>
