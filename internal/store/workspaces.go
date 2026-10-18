@@ -99,6 +99,11 @@ func (s *Store) DeleteWorkspace(id int64) error {
 			return fmt.Errorf("delete workspace %d: %w", id, err)
 		}
 	}
+	// Learning rows (skills, versions, ledger, proposals, jobs) reference
+	// workspaces(id): drop them before the workspace row itself (ADR-0026).
+	if err := s.ForgetWorkspaceLearning(id); err != nil {
+		return fmt.Errorf("delete workspace %d: %w", id, err)
+	}
 	if _, err := s.db.Exec(`DELETE FROM workspaces WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete workspace %d: %w", id, err)
 	}
