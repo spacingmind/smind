@@ -54,7 +54,7 @@ describe("profiles-section", () => {
       kind: "newProfile",
       seed: { name: "Sonnet 5", provider: "claude-native", model: "sonnet-5", permissionMode: "plan", thinkingLevel: "extended" },
     });
-    const { daemon, view } = await renderWithProfiles([PROFILE]);
+    await renderWithProfiles([PROFILE]);
 
     expect(screen.getByTestId("profile-new-form")).toBeInTheDocument();
     expect(screen.getByTestId("profile-form-name")).toHaveValue("Sonnet 5");
@@ -64,14 +64,14 @@ describe("profiles-section", () => {
 
   it("a pending edit intent opens that profile's inline editor", async () => {
     setSettingsIntent({ kind: "editProfile", id: 1 });
-    const { daemon, view } = await renderWithProfiles([PROFILE]);
+    await renderWithProfiles([PROFILE]);
 
     expect(screen.getByTestId("profile-edit-form-1-name")).toHaveValue("UI work");
     expect(screen.queryByTestId("profile-new-form")).not.toBeInTheDocument();
   });
 
   it("an intent arriving while the section is open is applied", async () => {
-    const { daemon, view } = await renderWithProfiles([PROFILE]);
+    await renderWithProfiles([PROFILE]);
     expect(screen.queryByTestId("profile-edit-form-1-name")).not.toBeInTheDocument();
 
     act(() => setSettingsIntent({ kind: "editProfile", id: 1 }));
