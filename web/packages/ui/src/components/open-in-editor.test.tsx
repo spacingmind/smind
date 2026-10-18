@@ -2,7 +2,8 @@
 // is mocked per scenario (`isDesktop` is a module-load constant) and the
 // components are imported fresh, like desktop-daemon-banner.test.tsx.
 import { act } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";

@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TaskLineageHeader } from "@/components/task-lineage";

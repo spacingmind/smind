@@ -38,7 +38,7 @@ describe("useProviderHealth", () => {
     await flush();
     expect(result.current.health["claude-native"]).toEqual({ ok: true, detail: "ok" });
     expect(result.current.health.glm).toEqual({ ok: true, detail: "ok" });
-    expect(result.current.summary).toEqual({ healthy: 2, total: 2 });
+    expect(result.current.summary).toEqual({ healthy: 2, total: 2, tested: 2 });
 
     act(() => result.current.ensure());
     expect(daemon.countCalls("provider.test")).toBe(2);
@@ -93,6 +93,6 @@ describe("useProviderHealth", () => {
     await flush();
     act(() => result.current.ensure());
     await flush();
-    expect(result.current.summary).toEqual({ healthy: 1, total: 2 });
+    expect(result.current.summary).toEqual({ healthy: 1, total: 2, tested: 2 });
   });
 });
