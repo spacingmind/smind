@@ -55,6 +55,15 @@ user-code request returns the error code `device_unsupported`; the UI falls back
   `account.oauthStart` request resolves with the account. An unknown/expired `loginId` is an **error** (never a silent
   success); a wrong `state` is an error and leaves the login pending, with at most 5 attempts per login.
 - The browser login lifetime becomes 10 minutes (was 5) so a human can paste.
+- The loopback listener delivers only a request carrying the login's `state`, for `code` and `error=` redirects alike; any
+  other request (scanner, favicon, another local process) gets a 400 page and is ignored. A vendor `error=` redirect without
+  `state` is therefore ignored on the listener path (vendors echo state on errors; the user can paste the redirect instead),
+  and a login whose only redirect was such an error waits out the 10-minute timeout.
+- If the vendor-fixed callback port is already bound (`EADDRINUSE`, or Winsock's `WSAEADDRINUSE`), the login continues
+  paste-only (`authorizeUrl` carries `pasteOnly: true`) instead of failing. A process squatting on the port can see the `code`
+  and `state` of a redirect that lands on it but cannot use them: the PKCE verifier never leaves the daemon. A squatter on
+  the IPv6 loopback (`[::1]`) while the daemon binds IPv4 is not detected. Windows `WSAEACCES` (10013, excluded port ranges)
+  still fails the login; handling it as paste-only is a follow-up.
 - Security: the redirect URL carries an authorization code — it is never logged and never echoed in an error message
   (errors name only the reason). The PKCE verifier never leaves the daemon.
 
@@ -115,7 +124,7 @@ non-generalizable to remote transports). The explicit login contract below is th
    provider's → `login_unknown_account` (both checked before the browser step).
 5. Otherwise a new account is created with the identity (`created: true`).
 
-The CLI (`smind account login <provider> <label>`) goes through the same RPC, so it too now updates an existing
+The CLI (`smind account login [--device] <provider> <label>`) goes through the same RPC, so it too now updates an existing
 same-identity account instead of creating a second row, ignores the label in that case, and prints
 `updated <label> (already connected)`.
 

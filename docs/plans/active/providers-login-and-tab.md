@@ -280,4 +280,16 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
   used by the paste-only fallback -- `TestIsAddrInUse` in `oauth_server_test.go` (real busy port, synthetic
   `net.OpError{Err: os.NewSyscallError("bind", syscall.Errno(10048))}`, wrapped, other errnos and the loopback-guard error are
   false). `GOOS=windows go build ./...` and `GOOS=windows go vet ./internal/accounts` pass.
+- Review fixes (`login_device_test.go`): `device login retries a poll that times out` (`TestLoginCoordinator_Device`: a fake
+  returning the raw `context.DeadlineExceeded` once, four in a row ending `device_failed`, the caller's own deadline not retried;
+  `TestOpenAIDeviceLogin_Vendor`: a vendor that hangs on the first two polls is cut off by the coordinator's `pollTimeout` and
+  retried, an always-hanging vendor exhausts the 3 retries) and `device login retries 429 and 5xx polls` (429/500/502/503: three in
+  a row absorbed, a fourth fails after exactly four polls; 400/401/410 fail on the first poll; `PollDevice` maps 429 and 5xx to
+  `ErrDeviceTransient`, other 4xx to a plain failure, neither carries the body). The per-poll timeout was the bug: it surfaced as a
+  raw deadline error and skipped the retry budget.
+- Notes (also in ADR-0033 D3): an `error=` redirect without `state` is now ignored on the listener path (vendors echo state on
+  errors; the user can paste the redirect), so a login whose only redirect was such an error hangs until the 10-minute timeout. In
+  the paste-only fallback a process squatting on the port can see `code`+`state` but cannot use them without the PKCE verifier,
+  which never leaves the daemon; a squatter on `[::1]` is not detected. Windows `WSAEACCES` (10013, excluded port ranges) still
+  fails the login -- follow-up.
 - Not in this PR: the web connect form (PR-B4).
