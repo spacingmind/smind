@@ -315,7 +315,7 @@ export function ConnectAccountPanel({
           </button>
         )}
       </div>
-      {method === "api-key" ? (
+      {method === "api-key" && selectedProvider ? (
         <div className="grid gap-3">
           {error && <p className="text-ui-base text-destructive">{error}</p>}
           <div className="grid gap-2">
@@ -365,7 +365,7 @@ export function ConnectAccountPanel({
             </Button>
           </div>
         </div>
-      ) : (
+      ) : selectedProvider ? (
         <div className="grid gap-3">
           {error && (
             <p className="text-ui-base text-destructive">{error}</p>
@@ -463,7 +463,7 @@ export function ConnectAccountPanel({
             <LoginErrorNotice message={state.message} soft={state.soft} onDismiss={login.reset} />
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

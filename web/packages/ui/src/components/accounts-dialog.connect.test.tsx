@@ -270,6 +270,49 @@ describe("ConnectAccountPanel connect flows", () => {
     expect(add.params).toEqual({ provider: "anthropic", label: "account-1", credential: "sk-new" });
   });
 
+  it("no connect button without a provider", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/platform", () => ({ isDesktop: false, desktop: {} }));
+    const { ConnectAccountPanel } = await import("@/components/accounts-dialog");
+    const { renderWithDaemon } = await import("@/test/render-with-daemon");
+    const { FakeUsageDaemon } = await import("@/test/usage-test-client");
+    const { FakeWsClient } = await import("@/test/fake-ws-client");
+    const client = new FakeWsClient();
+    const daemon = new FakeUsageDaemon([], client);
+    renderWithDaemon(
+      <ConnectAccountPanel client={daemon.client as never} providers={[]} onConnected={() => {}} />,
+      daemon,
+    );
+    client.nth("account.list").resolve([]);
+    await flush();
+
+    // No credential provider resolved: no provider-"" connect button, no
+    // method selector, no api-key form -- just the heading.
+    expect(screen.queryByTestId("accounts-connect-")).not.toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup", { name: "Sign-in method" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Credential")).not.toBeInTheDocument();
+    expect(screen.getByText("Connect an account")).toBeInTheDocument();
+  });
+
+  it("empty providers state", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/platform", () => ({ isDesktop: false, desktop: {} }));
+    const { ConnectAccountPanel } = await import("@/components/accounts-dialog");
+    const { renderWithDaemon } = await import("@/test/render-with-daemon");
+    const { FakeUsageDaemon } = await import("@/test/usage-test-client");
+    const { FakeWsClient } = await import("@/test/fake-ws-client");
+    const client = new FakeWsClient();
+    const daemon = new FakeUsageDaemon([], client);
+    renderWithDaemon(
+      <ConnectAccountPanel client={daemon.client as never} providers={[]} onConnected={() => {}} />,
+      daemon,
+    );
+    client.nth("account.list").resolve([]);
+    await flush();
+    expect(screen.getByText("Connect an account")).toBeInTheDocument();
+    expect(screen.queryByTestId("accounts-connect-")).not.toBeInTheDocument();
+  });
+
   it("the paste a credential disclosure is gone", async () => {
     await setup();
     expect(screen.queryByTestId("accounts-manual-toggle")).not.toBeInTheDocument();
