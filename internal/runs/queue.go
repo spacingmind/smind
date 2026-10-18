@@ -145,6 +145,8 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		thinkingLevel:      thinkingLevel,
 		model:              model,
 		purpose:            startPurpose(opts),
+		origin:             source,
+		interrupt:          resolveStartOptions(opts).interrupt,
 		worktree:           worktree,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
@@ -356,7 +358,11 @@ func (reg *Registry) deliverOne(chatID int64) {
 			continue
 		}
 
-		runID, err := reg.Start(context.Background(), wm, runner, chat.TaskID, chatID, taskrunner.Provider(cfg.Provider), deliverPrompt(item), taskrunner.PermissionSettings{Mode: cfg.PermissionMode, AutoAccept: cfg.AutoAccept}, taskrunner.ThinkingLevel(cfg.ThinkingLevel), WithModel(cfg.Model))
+		startOpts := []StartOption{WithModel(cfg.Model), WithOrigin(item.Source)}
+		if item.Priority == 1 {
+			startOpts = append(startOpts, WithInterrupt())
+		}
+		runID, err := reg.Start(context.Background(), wm, runner, chat.TaskID, chatID, taskrunner.Provider(cfg.Provider), deliverPrompt(item), taskrunner.PermissionSettings{Mode: cfg.PermissionMode, AutoAccept: cfg.AutoAccept}, taskrunner.ThinkingLevel(cfg.ThinkingLevel), startOpts...)
 		if err != nil {
 			var busyErr *ChatBusyError
 			var setupErr *SetupBusyError
@@ -481,8 +487,32 @@ func (reg *Registry) CancelQueuedItem(id int64) error {
 type StartOption func(*startOptions)
 
 type startOptions struct {
-	model   string
-	purpose string
+	model     string
+	purpose   string
+	origin    string
+	interrupt bool
+}
+
+// WithOrigin records who authored the run's prompt (store.ChatQueueSource*:
+// human, orchestrator, agent) on the run, for ADR-0026's window builder.
+// Omitted = ” (unknown). StartWhenBusy stamps its own source argument on an
+// immediate start, so callers only need this on a direct Start.
+func WithOrigin(source string) StartOption {
+	return func(o *startOptions) { o.origin = source }
+}
+
+// WithInterrupt marks the run's prompt as a mid-run interrupt (a delivered
+// priority-1 queue item).
+func WithInterrupt() StartOption {
+	return func(o *startOptions) { o.interrupt = true }
+}
+
+func resolveStartOptions(opts []StartOption) startOptions {
+	var o startOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return o
 }
 
 // WithPurpose marks the run as a system run (ADR-0026: "reflect",

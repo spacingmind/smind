@@ -23,10 +23,10 @@ func (s *Store) CreateRun(r Run) (Run, error) {
 		chatID = sql.NullInt64{Int64: r.ChatID, Valid: true}
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO runs (id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, approval_policy, model, purpose)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)`,
+		`INSERT INTO runs (id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, approval_policy, model, purpose, origin, interrupt)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)`,
 		r.ID, r.TaskID, chatID, r.Provider, r.Prompt, r.Status, r.StartedAt,
-		timePtrToNull(r.FinishedAt), r.StopReason, r.ErrMsg, r.PermissionMode, r.AutoAccept, nullString(r.Model), r.Purpose,
+		timePtrToNull(r.FinishedAt), r.StopReason, r.ErrMsg, r.PermissionMode, r.AutoAccept, nullString(r.Model), r.Purpose, r.Origin, r.Interrupt,
 	)
 	if err != nil {
 		return Run{}, fmt.Errorf("insert run: %w", err)
@@ -126,7 +126,7 @@ func (s *Store) MarkRunningRunsInterrupted(interruptedStatus string) (int64, err
 // GetRun returns the run with the given id.
 func (s *Store) GetRun(id string) (Run, error) {
 	row := s.db.QueryRow(
-		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose
+		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose, origin, interrupt
 		 FROM runs WHERE id = ?`, id,
 	)
 	r, err := scanRun(row)
@@ -152,7 +152,7 @@ func (s *Store) ListRunsByPurpose(purpose string, limit int) ([]Run, error) {
 
 func (s *Store) listRuns(where string, limit int, args ...any) ([]Run, error) {
 	rows, err := s.db.Query(
-		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose
+		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose, origin, interrupt
 		 FROM runs `+where+` ORDER BY started_at DESC LIMIT ?`, append(args, limit)...,
 	)
 	if err != nil {
@@ -219,7 +219,7 @@ func scanRun(row rowScanner) (Run, error) {
 	var dirty sql.NullBool
 	if err := row.Scan(&r.ID, &r.TaskID, &chatID, &r.Provider, &r.Prompt, &r.Status,
 		&r.StartedAt, &finishedAt, &r.StopReason, &r.ErrMsg, &r.PermissionMode, &r.AutoAccept, &model,
-		&baseSHA, &headSHA, &dirty, &r.Purpose); err != nil {
+		&baseSHA, &headSHA, &dirty, &r.Purpose, &r.Origin, &r.Interrupt); err != nil {
 		return Run{}, err
 	}
 	// NULL decodes as ChatID 0 ("unknown"/pre-chats) -- see CreateRun's

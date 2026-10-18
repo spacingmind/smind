@@ -314,6 +314,8 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 		perm:               taskrunner.PermissionSettings{Mode: row.PermissionMode, AutoAccept: row.AutoAccept},
 		model:              row.Model,
 		purpose:            rowPurpose(row.Purpose),
+		origin:             row.Origin,
+		interrupt:          row.Interrupt,
 		startedAt:          row.StartedAt,
 		ctx:                ctx,
 		cancel:             cancel,
@@ -373,6 +375,12 @@ type run struct {
 	// purpose is "" for a user run, else the system purpose ("reflect",
 	// "curate"; ADR-0026). Set at Start, immutable, persisted on the row.
 	purpose string
+
+	// origin is who authored the prompt (human|orchestrator|agent, "" =
+	// unknown) and interrupt whether it was delivered as a mid-run
+	// interrupt. Set at start, immutable, persisted on the row.
+	origin    string
+	interrupt bool
 
 	// toolCallIDs is the set of distinct non-empty ToolCallIDs record saw
 	// on EventTypeToolCall events; its size is RunFinished.ToolCalls.
@@ -493,6 +501,7 @@ func (r *run) statusLocked() RunStatus {
 		Model:          r.model,
 		Usage:          UsageFromEvent(r.usage),
 		Purpose:        r.purpose,
+		Origin:         r.origin,
 	}
 	rs.BaseSHA = cloneStrPtr(r.baseSHA)
 	rs.HeadSHA = cloneStrPtr(r.headSHA)
@@ -650,6 +659,8 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		thinkingLevel:      thinkingLevel,
 		model:              model,
 		purpose:            startPurpose(opts),
+		origin:             resolveStartOptions(opts).origin,
+		interrupt:          resolveStartOptions(opts).interrupt,
 		worktree:           worktree,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
@@ -736,7 +747,7 @@ func (reg *Registry) registerAndDrive(r *run, runCtx context.Context, runner *ta
 	if _, err := reg.st.CreateRun(store.Run{
 		ID: r.id, TaskID: r.taskID, ChatID: r.chatID, Provider: string(r.provider), Prompt: r.prompt,
 		Status: string(StatusRunning), StartedAt: r.startedAt,
-		PermissionMode: r.perm.Mode, AutoAccept: r.perm.AutoAccept, Model: r.model, Purpose: r.purpose,
+		PermissionMode: r.perm.Mode, AutoAccept: r.perm.AutoAccept, Model: r.model, Purpose: r.purpose, Origin: r.origin, Interrupt: r.interrupt,
 	}); err != nil {
 		reg.mu.Lock()
 		delete(reg.runs, r.id)
