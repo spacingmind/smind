@@ -137,6 +137,7 @@ func (s *Store) SummarizeRunUsage(since, until *time.Time, groupBy string) ([]Ru
 		conds = append(conds, "r.started_at < ?")
 		args = append(args, *until)
 	}
+	conds = append(conds, "r.purpose = 'user'")
 	where := ""
 	if len(conds) > 0 {
 		where = " WHERE " + strings.Join(conds, " AND ")
@@ -172,4 +173,17 @@ func (s *Store) SummarizeRunUsage(since, until *time.Time, groupBy string) ([]Ru
 		out = append(out, u)
 	}
 	return out, rows.Err()
+}
+
+// SummarizeLearningUsage totals run_usage of non-user runs (the "Learning"
+// bucket, ADR-0026) started at or after since; SummarizeRunUsage excludes
+// them.
+func (s *Store) SummarizeLearningUsage(since time.Time) (runs int, inputTokens, outputTokens int64, costUSD float64, err error) {
+	err = s.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(u.input_tokens), 0), COALESCE(SUM(u.output_tokens), 0), COALESCE(SUM(u.cost_usd), 0)
+		FROM run_usage u JOIN runs r ON r.id = u.run_id
+		WHERE r.purpose != 'user' AND r.started_at >= ?`, since).Scan(&runs, &inputTokens, &outputTokens, &costUSD)
+	if err != nil {
+		err = fmt.Errorf("summarize learning usage: %w", err)
+	}
+	return
 }
