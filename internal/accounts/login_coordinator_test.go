@@ -584,6 +584,27 @@ func TestLoginCoordinator_Relogin(t *testing.T) {
 		}
 	})
 
+	t.Run("relogin without a subject cannot overwrite an identity-bearing row", func(t *testing.T) {
+		t.Parallel()
+
+		coord, registry, login := newReloginCoordinator(t)
+		work, err := relogin(t, coord, login, "work", LoginOptions{}, "subject-1")
+		if err != nil || !work.Account.HasIdentity {
+			t.Fatalf("Login() = %+v, %v, want an account with identity", work, err)
+		}
+		before, _ := registry.Get(work.Account.ID)
+
+		_, err = relogin(t, coord, login, "x", LoginOptions{AccountID: work.Account.ID}, "")
+		var le *LoginError
+		if !errors.As(err, &le) || le.Code != LoginCodeIdentityUnverified || !strings.HasPrefix(err.Error(), "identity_unverified") {
+			t.Fatalf("subject-less re-login error = %v, want identity_unverified", err)
+		}
+		after, _ := registry.Get(work.Account.ID)
+		if after.OAuth.AccessToken != before.OAuth.AccessToken || !after.HasIdentity {
+			t.Errorf("an unverifiable login changed the identity-bearing row: %+v", after)
+		}
+	})
+
 	t.Run("login without a subject creates and replaces without an identity", func(t *testing.T) {
 		t.Parallel()
 

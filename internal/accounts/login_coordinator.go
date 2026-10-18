@@ -86,9 +86,10 @@ type LoginResult struct {
 // Stable error codes (ADR-0033 login contract). They are the message prefix
 // of the error Login returns; LoginError carries them for errors.As.
 const (
-	LoginCodeIdentityMismatch = "identity_mismatch"
-	LoginCodeIdentityInUse    = "identity_in_use"
-	LoginCodeUnknownAccount   = "login_unknown_account"
+	LoginCodeIdentityMismatch   = "identity_mismatch"
+	LoginCodeIdentityInUse      = "identity_in_use"
+	LoginCodeUnknownAccount     = "login_unknown_account"
+	LoginCodeIdentityUnverified = "identity_unverified"
 )
 
 // LoginError is an error with a stable machine-readable code. Detail never
@@ -195,9 +196,10 @@ func (c *LoginCoordinator) reloginTarget(provider string, id int64) (store.Accou
 //     row, or none was named): its credential is replaced in place.
 //  4. Otherwise a new row is created with the identity.
 //
-// A login without a subject has no identity: it replaces a named row's
-// credential leaving its identity alone, or creates a row without one. It
-// never fails the login.
+// A login without a subject has no identity: it creates a row without one,
+// or replaces the credential of a named legacy row (identity stays unset). A
+// named row that already has an identity is never overwritten by a login
+// that cannot prove who it is: identity_unverified.
 func (c *LoginCoordinator) persist(provider, label string, opts LoginOptions, exchanged ExchangeResult) (LoginResult, error) {
 	identity := AccountIdentity(provider, exchanged.Subject)
 
@@ -219,8 +221,13 @@ func (c *LoginCoordinator) persist(provider, label string, opts LoginOptions, ex
 	}
 
 	switch {
+	case opts.AccountID != 0 && identity == "" && target.Identity != "":
+		// Nothing proves this login is the vendor account the row holds, so
+		// the identity-bearing row's credential is not overwritten.
+		return LoginResult{}, &LoginError{Code: LoginCodeIdentityUnverified, Detail: fmt.Sprintf("this login did not identify its %s account, so account %d was not changed", providerDisplayLabel(provider), target.ID)}
 	case opts.AccountID != 0 && identity == "":
-		// Cannot verify or adopt: replace the named row, identity untouched.
+		// A legacy row (no identity) cannot be verified either, but there is
+		// nothing to protect: replace its credential, identity untouched.
 		return c.replaced(provider, target.ID, exchanged.Credential, "", false)
 	case opts.AccountID != 0 && owned && owner.ID == target.ID:
 		return c.replaced(provider, target.ID, exchanged.Credential, "", false)
