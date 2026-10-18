@@ -330,6 +330,20 @@ the change applies when the daemon next starts.
 > the relay operator — can connect, and `devices revoke`, the pending state and the pairing window do not apply to it. The daemon
 > logs a warning at start and for every legacy connection.
 
+### 8. Require the daemon password from relay devices
+
+If the daemon has a password (`smind set-password`, see Path A), **every relay device must present it**, on every
+connection, approved devices included. It travels inside the end-to-end encrypted channel (the relay never sees it), and it
+is checked **before** anything about the device is recorded or revealed: a device without the right password is never listed
+as pending, and learns nothing about whether it is approved or revoked. The desktop app asks for it in Settings → Connections
+("This daemon needs its password"), keeps it in memory only (never on disk, never in a log, never handed back to the UI), and
+asks again after a restart. Wrong guesses are rate limited per device (5 free tries, then waits that double up to 15 minutes),
+and with more than 40 wrong attempts a minute across all devices the daemon refuses every password check for a minute.
+
+Without a password a relay device is admitted by your approval alone, and the daemon logs one warning line when the relay
+bridge starts. With a password, a client that predates device identity (`relay.legacyDevices: true`) is refused regardless: the
+legacy route cannot carry a password. The mobile app takes the same password (its own prompt follows).
+
 ### Limits today
 
 - A relay host serves up to 16 devices at once (`smind relay --max-devices-per-host` on the relay,

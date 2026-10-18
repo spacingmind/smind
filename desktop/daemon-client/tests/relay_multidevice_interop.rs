@@ -586,6 +586,83 @@ async fn unknown_device_outside_the_window_waits_for_approval_then_connects() {
     served(&a, "a-approved").await;
 }
 
+/// submit_password hands the client a password and returns the first status AFTER that moment that
+/// satisfies `pred` (a status left over from the previous attempt cannot satisfy it: the watch is
+/// marked seen before the password is set, so only a new change counts).
+async fn submit_password(handle: &RelayHandle, password: &str, secs: u64, pred: impl Fn(&Status) -> bool) -> Status {
+    let mut rx = handle.status();
+    rx.borrow_and_update();
+    handle.set_password(password.to_string());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    loop {
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(left, rx.changed()).await {
+            Ok(Ok(())) => {
+                let s = rx.borrow_and_update().clone();
+                if pred(&s) {
+                    return s;
+                }
+            }
+            _ => panic!("timed out ({secs}s) after submitting a password; last was {:?}", rx.borrow()),
+        }
+    }
+}
+
+const DAEMON_PASSWORD: &str = "a daemon password for the interop test";
+
+/// P13c against the real Go daemon hub with a password: the client stops and asks
+/// instead of retrying, a wrong password is forgotten and not recorded, and the
+/// right one connects (an unknown device then still needs the pairing window).
+#[tokio::test]
+async fn password_protected_daemon_asks_rejects_a_wrong_password_and_accepts_the_right_one() {
+    let _serial = serial();
+    let h = tokio::task::spawn_blocking(|| Harness::start(&["-hub", "-password", DAEMON_PASSWORD])).await.unwrap();
+    assert!(h.cmd("window 3 600").starts_with("OK window"));
+    let pairing = h.pairing();
+    let a = start_client(&pairing, None);
+
+    // No password entered yet: the daemon says so, the client parks (no retry loop) and nothing is recorded.
+    wait_status(&a.handle, 40, |s| *s == Status::PasswordRequired).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(*a.handle.status().borrow(), Status::PasswordRequired, "it must not retry on its own");
+    assert!(
+        h.devices().iter().all(|d| d["device_id"] != a.device_id.as_str()),
+        "a device that never supplied the password was recorded"
+    );
+
+    // A wrong password: rejected, forgotten, still not recorded.
+    submit_password(&a.handle, "definitely not the password", 40, |s| *s == Status::IncorrectPassword).await;
+    assert!(h.devices().iter().all(|d| d["device_id"] != a.device_id.as_str()));
+
+    // The right one (the pairing window is open): connected and served.
+    submit_password(&a.handle, DAEMON_PASSWORD, 40, |s| *s == Status::Connected).await;
+    served(&a, "a-with-password").await;
+    let listed = h.devices().into_iter().find(|d| d["device_id"] == a.device_id.as_str());
+    assert_eq!(listed.expect("approved device listed")["state"], "approved");
+}
+
+#[tokio::test]
+async fn repeated_wrong_passwords_are_rate_limited_by_the_daemon() {
+    let _serial = serial();
+    let h = tokio::task::spawn_blocking(|| Harness::start(&["-hub", "-password", DAEMON_PASSWORD])).await.unwrap();
+    assert!(h.cmd("window 3 600").starts_with("OK window"));
+    let a = start_client(&h.pairing(), None);
+    wait_status(&a.handle, 40, |s| *s == Status::PasswordRequired).await;
+    // Five wrong attempts are free, the sixth is counted and locks the device id.
+    for n in 1..=6 {
+        submit_password(&a.handle, &format!("wrong guess number {n}"), 40, |s| *s == Status::IncorrectPassword).await;
+    }
+    // The next attempt, even with the right password, is told to wait.
+    let st = submit_password(&a.handle, DAEMON_PASSWORD, 40, |s| matches!(s, Status::PasswordLocked { .. })).await;
+    let Status::PasswordLocked { retry_after_secs } = st else { unreachable!() };
+    assert!(retry_after_secs >= 5, "the client waits at least 5 s: {retry_after_secs}");
+    // The lockout judged nothing about the password the user had just typed, so it is kept and
+    // tried again after the wait (a rejected one is cleared, see the first test): the right
+    // password then connects without asking again.
+    wait_status(&a.handle, 60, |s| *s == Status::Connected).await;
+    served(&a, "a-after-lockout").await;
+}
+
 #[tokio::test]
 async fn client_reconnects_after_silence_with_jitter() {
     let _serial = serial();

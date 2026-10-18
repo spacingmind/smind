@@ -98,18 +98,22 @@ func TestSystemdUnitOmitsSMINDHOMEWhenUnset(t *testing.T) {
 	}
 
 	// Set in the shell, or via --home (which wins).
+	// Host-absolute paths: "/from/shell" is not absolute on a Windows host, where
+	// these tests also run.
 	te2 := newTestEnv(t, "linux")
-	te2.environ["SMIND_HOME"] = "/from/shell"
+	shellHome := filepath.Join(te2.home, "from-shell")
+	flagHome := filepath.Join(te2.home, "from-flag")
+	te2.environ["SMIND_HOME"] = shellHome
 	m2, _ := te2.systemd(t)
 	_ = m2.Install(bg, Options{NoStart: true})
-	if u, _ := os.ReadFile(te2.userUnit()); !strings.Contains(string(u), `"SMIND_HOME=/from/shell"`) {
+	if u, _ := os.ReadFile(te2.userUnit()); !strings.Contains(string(u), quoteEnv("SMIND_HOME", shellHome)) {
 		t.Errorf("shell SMIND_HOME not captured:\n%s", u)
 	}
 	te3 := newTestEnv(t, "linux")
-	te3.environ["SMIND_HOME"] = "/from/shell"
+	te3.environ["SMIND_HOME"] = shellHome
 	m3, _ := te3.systemd(t)
-	_ = m3.Install(bg, Options{NoStart: true, Home: "/from/flag"})
-	if u, _ := os.ReadFile(te3.userUnit()); !strings.Contains(string(u), `"SMIND_HOME=/from/flag"`) || strings.Contains(string(u), "/from/shell") {
+	_ = m3.Install(bg, Options{NoStart: true, Home: flagHome})
+	if u, _ := os.ReadFile(te3.userUnit()); !strings.Contains(string(u), quoteEnv("SMIND_HOME", flagHome)) || strings.Contains(string(u), "from-shell") {
 		t.Errorf("--home must win over the shell's SMIND_HOME:\n%s", u)
 	}
 }

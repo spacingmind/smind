@@ -5,8 +5,9 @@
 //! single fixed `SMIND_DAEMON_URL` -- including a `relay`-kind
 //! connection, whose transport this module also starts/stops.
 
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use tauri::AppHandle;
 use url::Url;
@@ -88,6 +89,55 @@ fn on_event(
 /// `proxy` (AC5's `/ws` bridge reads it from there) if any. Returns the
 /// new task handles for the caller to store; it does not abort anything
 /// -- see `restart`, which does that before calling this.
+/// The daemon passwords entered this run, in memory only, never persisted. Keyed by
+/// connection id AND the daemon's public key: re-adding a link with the same relay
+/// host id but a different daemon key replaces the connection, and a password the
+/// user typed for the old daemon must never be sent to the new one.
+fn password_cells() -> &'static Mutex<HashMap<(String, [u8; 32]), relay::password::PasswordCell>> {
+    static CELLS: OnceLock<Mutex<HashMap<(String, [u8; 32]), relay::password::PasswordCell>>> = OnceLock::new();
+    CELLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn password_cell(conn_id: &str, daemon_key: &[u8; 32]) -> relay::password::PasswordCell {
+    password_cells()
+        .lock()
+        .unwrap()
+        .entry((conn_id.to_string(), *daemon_key))
+        .or_default()
+        .clone()
+}
+
+/// forget_password drops every in-memory password of a removed connection.
+pub fn forget_password(conn_id: &str) {
+    password_cells().lock().unwrap().retain(|(id, _), cell| {
+        if id == conn_id {
+            cell.clear();
+            false
+        } else {
+            true
+        }
+    });
+}
+
+#[cfg(test)]
+mod password_tests {
+    use super::*;
+
+    #[test]
+    fn a_new_daemon_key_under_the_same_connection_id_gets_no_password() {
+        let (old_key, new_key) = ([1u8; 32], [2u8; 32]);
+        let old = password_cell("relay:test-host@relay.example:7400", &old_key);
+        old.set("typed-for-the-old-daemon".into());
+        let same = password_cell("relay:test-host@relay.example:7400", &old_key);
+        assert!(same.is_set(), "the same daemon keeps its password across restarts of the loop");
+        let other = password_cell("relay:test-host@relay.example:7400", &new_key);
+        assert!(!other.is_set(), "a different daemon key must start with no password");
+        forget_password("relay:test-host@relay.example:7400");
+        assert!(!password_cell("relay:test-host@relay.example:7400", &old_key).is_set(), "removal forgets every key's password");
+        assert!(!old.is_set());
+    }
+}
+
 fn activate(
     app: &AppHandle,
     proxy: &Arc<ProxyState>,
@@ -138,7 +188,13 @@ fn activate(
             // (Settings → Connections shows it): quietly speaking the
             // single-device protocol would only be refused by a current daemon.
             let options = match relay::device::load_or_create_key(app_data_dir, &conn.id) {
-                Ok(key) => relay::client::RelayOptions::identity(Arc::new(key)),
+                Ok(key) => {
+                    let mut options = relay::client::RelayOptions::identity(Arc::new(key));
+                    // The daemon password the user entered this run survives the
+                    // restart a connection switch or a daemon bounce causes.
+                    options.password = password_cell(&conn.id, &pairing.daemon_public_key);
+                    options
+                }
                 Err(e) => {
                     eprintln!(
                         "smind desktop: relay connection {:?}: device key: {e}",
