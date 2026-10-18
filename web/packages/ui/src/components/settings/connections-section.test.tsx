@@ -430,9 +430,21 @@ describe("Add via relay link (desktop build)", () => {
     expect(screen.getByTestId("relay-link-address")).toHaveTextContent("relay.test:7401");
     expect(screen.getByTestId("relay-link-host-id")).toHaveTextContent("ws-1");
     expect(screen.getByTestId("relay-link-fingerprint")).toHaveTextContent("ERER ERER");
-    expect(screen.getByTestId("relay-link-trust")).toHaveTextContent(/pinned/i);
+    expect(screen.getByTestId("relay-link-trust")).toHaveTextContent(/pinned fingerprint/i);
     expect(screen.getByTestId("relay-link-confirm").textContent).not.toContain("c2VjcmV0");
     expect(screen.queryByTestId("relay-link-input")).not.toBeInTheDocument();
+  });
+
+  it("says a CA-mode relay is verified by a public certificate for its host name", async () => {
+    await renderRelay({
+      previewRelayLink: vi.fn(() => Promise.resolve({ ...preview(), relayAddress: "relay.example.org:7401", pinned: false })),
+    });
+    await paste(LINK);
+
+    expect(screen.getByTestId("relay-link-trust")).toHaveTextContent("Verified by a public certificate");
+    expect(screen.getByTestId("relay-link-trust")).not.toHaveTextContent(/pinned/i);
+    expect(screen.getByTestId("relay-link-trust-detail")).toHaveTextContent("valid for relay.example.org");
+    expect(screen.getByTestId("relay-link-trust-detail")).toHaveTextContent("self-signed certificate is refused");
   });
 
   it("adds the connection only after Add is pressed, then selects it and refreshes", async () => {

@@ -7,7 +7,8 @@
 # grep/sed are available (Git Bash on windows-latest).
 set -euo pipefail
 
-log="${1:?usage: go-test-summary.sh <go-test-output.log>}"
+log="${1:?usage: go-test-summary.sh <go-test-output.log> [go-test.json]}"
+json="${2:-}"
 
 ok=$(grep -cE '^ok[[:space:]]' "$log" || true)
 failed=$(grep -cE '^FAIL[[:space:]]' "$log" || true)
@@ -43,4 +44,19 @@ if [ "$ntests" -gt 0 ]; then
   echo "### Failing tests (first 200)"
   echo
   printf '%s\n' "$tests" | head -200 | sed 's/^/- `/; s/$/`/'
+fi
+
+# With the `go test -json` stream (and jq): the slowest tests and packages, so a
+# suite that is merely slow shows where the time goes before it times out.
+if [ -n "$json" ] && [ -s "$json" ] && command -v jq >/dev/null 2>&1; then
+  echo
+  echo "### Slowest packages"
+  echo
+  jq -r 'select((.Action=="pass" or .Action=="fail") and (.Test == null) and .Elapsed != null) | "\(.Elapsed)\t\(.Package)"' "$json" 2>/dev/null \
+    | sort -rn | head -12 | awk -F'\t' '{printf "- `%s` %.1fs\n", $2, $1}' || true
+  echo
+  echo "### Slowest tests"
+  echo
+  jq -r 'select((.Action=="pass" or .Action=="fail") and .Test != null and (.Test | contains("/") | not) and .Elapsed != null) | "\(.Elapsed)\t\(.Package)\t\(.Test)"' "$json" 2>/dev/null \
+    | sort -rn | head -25 | awk -F'\t' '{n=split($2,p,"/"); printf "- `%s` (%s) %.1fs\n", $3, p[n], $1}' || true
 fi

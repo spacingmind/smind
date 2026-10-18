@@ -12,6 +12,13 @@ on:
   schedule:
     - cron: "17 19 * * *"
   workflow_dispatch:
+    inputs:
+      packages:
+        description: "Packages to test (default: all)"
+        default: "./..."
+      timeout:
+        description: "Per-package go test timeout"
+        default: "10m"
 
 permissions:
   contents: read
@@ -33,25 +40,46 @@ jobs:
       # Per-package timeout, not per-step: one slow or hung package panics
       # with its running tests listed instead of the whole step being killed
       # with no output. cmd/smind alone takes ~5 min on Windows today.
-      - name: go test ./...
+      # Where the tests write: the runner's C: drive costs ~2.8 ms per fsync
+      # against ~0.07 ms on D: (measured on windows-latest, 2026-10-18), and every
+      # SQLite commit is several fsyncs. t.TempDir, GOTMPDIR and the test
+      # binaries all follow TEMP.
+      - name: Put TEMP on the fast drive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force D:\gotmp | Out-Null
+          "TEMP=D:\gotmp" | Out-File -Append -Encoding ascii $env:GITHUB_ENV
+          "TMP=D:\gotmp" | Out-File -Append -Encoding ascii $env:GITHUB_ENV
+
+      # -json so the summary can rank the slowest tests and packages; go-test.log
+      # is the plain output rebuilt from it. SMIND_SQLITE_SYNCHRONOUS=off drops
+      # the per-commit fsync of the test databases (durability is not what these
+      # tests check; the daemon never sets it): ~20 ms per commit on C:, which
+      # made the DB-heavy packages take minutes and hit SQLITE_BUSY.
+      - name: go test
         id: test
         shell: bash
+        env:
+          SMIND_SQLITE_SYNCHRONOUS: "off"
         run: |
           set +e
-          go test -timeout 10m ./... > go-test.log 2>&1
+          go test -json -timeout "${{ inputs.timeout || '10m' }}" ${{ inputs.packages || './...' }} > go-test.json 2>&1
           echo "exit=$?" >> "$GITHUB_OUTPUT"
+          jq -rj 'select(.Action=="output") | .Output' go-test.json > go-test.log 2>/dev/null || cp go-test.json go-test.log
           tail -40 go-test.log
 
       - name: Summary
         if: always()
         shell: bash
-        run: bash scripts/go-test-summary.sh go-test.log >> "$GITHUB_STEP_SUMMARY"
+        run: bash scripts/go-test-summary.sh go-test.log go-test.json >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: windows-go-test-log
-          path: go-test.log
+          path: |
+            go-test.log
+            go-test.json
           retention-days: 14
 
       - name: Fail if any package failed

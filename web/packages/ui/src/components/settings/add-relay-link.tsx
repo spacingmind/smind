@@ -6,6 +6,13 @@ import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { Input } from "@/components/ui/input";
 import { desktop, MAX_RELAY_LINK_LENGTH, type Connection, type RelayPreview } from "@/lib/platform";
 
+/** The host part of a `host:port` relay address (an IPv6 literal keeps its brackets off). */
+function relayHostName(address: string): string {
+  const end = address.lastIndexOf(":");
+  const host = end > 0 && !address.endsWith("]") ? address.slice(0, end) : address;
+  return host.replace(/^\[|\]$/g, "");
+}
+
 /**
  * ADR-0031 P3: add a daemon through a relay pairing link, as paste -> preview
  * -> confirm -> save -> switch. Ported from Paseo's host-confirmation step
@@ -152,7 +159,7 @@ export function AddRelayLink({
             variant="warning"
             testId="relay-link-changed"
             title="This relay host's key or relay changed"
-            description="A saved connection already uses this relay host id, but this link has a different daemon key or relay. Only continue if you re-paired the daemon yourself."
+            description="A saved connection already uses this relay host id, but this link has a different daemon key, relay or certificate setting (pinned or public). Only continue if you re-paired the daemon yourself."
           />
         )}
         {preview.kind === "alreadySaved" && (
@@ -174,7 +181,14 @@ export function AddRelayLink({
             {preview.keyFingerprint}
           </dd>
           <dt className="text-muted-foreground">Relay certificate</dt>
-          <dd data-testid="relay-link-trust">{preview.pinned ? "Pinned by this link" : "Verified by a certificate authority"}</dd>
+          <dd data-testid="relay-link-trust" className="flex flex-col">
+            <span>{preview.pinned ? "Pinned fingerprint" : "Verified by a public certificate"}</span>
+            <span className="text-ui-sm text-muted-foreground" data-testid="relay-link-trust-detail">
+              {preview.pinned
+                ? "This link carries the relay's certificate fingerprint; only that exact certificate is accepted."
+                : `The relay must present a certificate valid for ${relayHostName(preview.relayAddress)} from an authority this computer trusts. A self-signed certificate is refused.`}
+            </span>
+          </dd>
           <dt className="text-muted-foreground">Label</dt>
           <dd data-testid="relay-link-label" className="truncate">
             {label.trim() || `Relay (${preview.relayHostId})`}
