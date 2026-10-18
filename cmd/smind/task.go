@@ -151,7 +151,7 @@ type runLogsResult struct {
 
 func cmdTask(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|logs|stop|permissions|approve|deny|options|set-option|chat|queue> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|logs|stop|permissions|approve|deny|mode|options|set-option|chat|queue> ...")
 		return 2
 	}
 	switch args[0] {
@@ -175,6 +175,8 @@ func cmdTask(args []string) int {
 		return cmdTaskApprove(args[1:])
 	case "deny":
 		return cmdTaskDeny(args[1:])
+	case "mode":
+		return cmdTaskMode(args[1:])
 	case "options":
 		return cmdTaskOptions(args[1:])
 	case "set-option":
