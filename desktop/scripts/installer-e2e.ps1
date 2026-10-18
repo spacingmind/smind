@@ -167,6 +167,65 @@ try {
     Check ($null -ne (Get-Healthz)) 'the daemon stopped answering after the app quit'
     Check ((Get-DaemonProc).ProcessId -eq $procIdBefore) 'the daemon was replaced after the app quit'
     $summary.Add("phase A4: app quit, daemon still running (pid $procIdBefore)")
+
+    Step 'phase B1: silent upgrade with the new installer, over the running old daemon'
+    $newAppVersion = (Get-Content desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+    $p = Start-Process $NewInstaller -ArgumentList '/S' -Wait -PassThru
+    Check ($p.ExitCode -eq 0) "the new installer exited $($p.ExitCode)"
+    Check (Test-Path $appExe) 'the upgrade removed the app exe'
+    Check (Test-Path $sidecar) 'the upgrade removed the bundled sidecar'
+    Check (Test-Path "$appDir\uninstall.exe") 'uninstall.exe is gone after the upgrade'
+    $newSidecarHash = Get-Sha $sidecar
+    Check ($newSidecarHash -ne $oldSidecarHash) 'the upgrade did not replace the bundled sidecar (same sha256)'
+    $newVersionOut = (& $sidecar version) -join ' '
+    Check ($newVersionOut -match [regex]::Escape($newAppVersion)) "the new sidecar reports '$newVersionOut', want it to contain $newAppVersion"
+    Write-Host "new sidecar: $newVersionOut"
+    $newCommit = if ($newVersionOut -match '\((.+)\)') { $Matches[1] } else { '?' }
+    Check ($newCommit -ne $oldCommit) "the new sidecar reports the same build commit ($newCommit) as the old one ($oldCommit)"
+    Check ((Get-Sha $binExe) -eq $oldSidecarHash) 'the installer touched the managed bin\smind.exe'
+    Check ((Get-DaemonProc).ProcessId -eq $procIdBefore) 'the running daemon was disturbed by the installer'
+    Check ($null -ne (Get-Healthz)) 'the daemon stopped answering after the upgrade install'
+    Check ((Get-Content "$dataDir\e2e-marker.txt" -Raw).Trim() -eq 'keep me') 'the installer deleted the e2e marker'
+    Check ((Get-Sha "$dataDir\token") -eq $tokenHash) 'the installer replaced the auth token'
+    Check ((Get-Item "$dataDir\smind.db").Length -ge $dbSize) 'the installer shrank smind.db'
+    $summary.Add("phase B1: upgraded to $newAppVersion ($newCommit), sidecar sha256 $newSidecarHash, daemon pid $procIdBefore undisturbed, data intact")
+
+    Step 'phase B2: the new app replaces the old daemon (Update)'
+    Start-App
+    $st = Invoke-Tauri 'daemon_status'
+    Write-Host ($st | ConvertTo-Json -Compress)
+    Check ($st.managedState -eq 'managed') "managedState is '$($st.managedState)', want managed"
+    Check ($st.reachable -eq $true) 'the daemon is not reachable from the new app'
+    Check ($st.appVersion -eq $newAppVersion) "appVersion is '$($st.appVersion)', want $newAppVersion"
+    Check ($st.daemonVersion -eq $OldVersion) "daemonVersion is '$($st.daemonVersion)', want $OldVersion (the old daemon)"
+    $r = Invoke-Tauri 'daemon_update'
+    Write-Host ($r | ConvertTo-Json -Compress)
+    WaitFor 'the replaced daemon' { $d = Get-DaemonProc; $d -and $d.ProcessId -ne $procIdBefore -and (Get-Healthz) } 90
+    $newProc = Get-DaemonProc
+    Check ((Get-Sha $binExe) -eq $newSidecarHash) 'bin\smind.exe is not the new bundled daemon'
+    Check ($newProc.ExecutablePath -eq $binExe) "the daemon runs from '$($newProc.ExecutablePath)', want $binExe"
+    Check (-not (Get-Process -Id $procIdBefore -ErrorAction SilentlyContinue)) 'the old daemon process is still running'
+    Check ((Get-Healthz).version -eq $newAppVersion) "healthz version is '$((Get-Healthz).version)', want $newAppVersion"
+    Check ($r.managedState -eq 'managed') "daemon_update returned managedState '$($r.managedState)', want managed"
+    $rec = Get-Content $managedJson -Raw | ConvertFrom-Json
+    Check ($rec.version -eq $newAppVersion) "managed.json version is '$($rec.version)', want $newAppVersion"
+    Check ($rec.pid -eq $newProc.ProcessId) "managed.json pid is '$($rec.pid)', want the running pid $($newProc.ProcessId)"
+    Check ((Get-Content "$dataDir\e2e-marker.txt" -Raw).Trim() -eq 'keep me') 'the daemon replacement deleted the e2e marker'
+    Check ((Get-Sha "$dataDir\token") -eq $tokenHash) 'the daemon replacement replaced the auth token'
+    Check ((Get-Item "$dataDir\smind.db").Length -ge $dbSize) 'the daemon replacement shrank smind.db'
+    $ls = (& $binExe workspace ls) 2>&1 | Out-String
+    Check ($ls -match 'e2e-ws') "the new daemon does not serve workspace e2e-ws: $ls"
+    $summary.Add("phase B2: daemon replaced by daemon_update (pid $procIdBefore -> $($newProc.ProcessId)), bin\smind.exe = new sidecar, data served by the new daemon")
+
+    Step 'phase B3: closing the new app leaves the new daemon running'
+    $newProcId = $newProc.ProcessId
+    Stop-App
+    Start-Sleep 3
+    Check ($null -ne (Get-Healthz)) 'the new daemon stopped answering after the app quit'
+    Check ((Get-DaemonProc).ProcessId -eq $newProcId) 'the new daemon was replaced after the app quit'
+    $summary.Add("phase B3: app quit, new daemon still running (pid $newProcId)")
+
+    # TODO phase C: uninstall, data survives
 } finally {
     Disable-Cdp
     Stop-App
