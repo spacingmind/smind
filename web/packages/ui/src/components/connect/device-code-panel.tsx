@@ -29,20 +29,23 @@ export function DeviceCodePanel(props: {
   const { userCode, verificationUrl, expiresAt, onCancel } = props;
   const now = props.now ?? Date.now;
   const [copied, setCopied] = useState(false);
+  // NaN (an unparseable expiresAt) means "no countdown" rather than a
+  // permanently-expired panel.
+  const expiryMs = Date.parse(expiresAt);
   const [remainingMs, setRemainingMs] = useState(() =>
-    Math.max(0, Date.parse(expiresAt) - now()),
+    Number.isNaN(expiryMs) ? NaN : Math.max(0, expiryMs - now()),
   );
 
   useEffect(() => {
-    const expires = Date.parse(expiresAt);
-    const update = () => setRemainingMs(Math.max(0, expires - now()));
+    if (Number.isNaN(expiryMs)) return;
+    const update = () => setRemainingMs(Math.max(0, expiryMs - now()));
     update();
-    if (expires - now() <= 0) return;
+    if (expiryMs - now() <= 0) return;
     const timer = setInterval(update, 1000);
     return () => clearInterval(timer);
-  }, [expiresAt, now]);
+  }, [expiryMs, now]);
 
-  const expired = remainingMs <= 0;
+  const expired = !Number.isNaN(remainingMs) && remainingMs <= 0;
 
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
@@ -91,7 +94,11 @@ export function DeviceCodePanel(props: {
         {verificationUrl}
       </a>
       <p className="text-ui-base" data-testid="device-code-countdown">
-        {expired ? "The code has expired" : `Expires in ${formatRemaining(remainingMs)}`}
+        {Number.isNaN(remainingMs)
+          ? ""
+          : expired
+            ? "The code has expired"
+            : `Expires in ${formatRemaining(remainingMs)}`}
       </p>
       <p className="text-ui-sm text-muted-foreground">
         Only enter this code on the page above — never share it.

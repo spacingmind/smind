@@ -49,19 +49,31 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value !== "";
 }
 
+/** An http(s) URL (the daemon's own redirects are always loopback http). */
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export function parseLoginEvent(event: string, params: unknown): LoginEvent | null {
   if (typeof params !== "object" || params === null) return null;
   const p = params as Record<string, unknown>;
   if (event === "authorizeUrl") {
-    if (!isNonEmptyString(p.loginId) || !isNonEmptyString(p.url)) return null;
+    if (!isNonEmptyString(p.loginId) || !isNonEmptyString(p.url) || !isHttpUrl(p.url)) return null;
     return { kind: "authorizeUrl", loginId: p.loginId, url: p.url, pasteOnly: p.pasteOnly === true };
   }
   if (event === "deviceCode") {
     if (
       !isNonEmptyString(p.loginId) ||
       !isNonEmptyString(p.verificationUrl) ||
+      !isHttpUrl(p.verificationUrl) ||
       !isNonEmptyString(p.userCode) ||
       !isNonEmptyString(p.expiresAt) ||
+      Number.isNaN(Date.parse(p.expiresAt)) ||
       typeof p.intervalSeconds !== "number" ||
       !Number.isFinite(p.intervalSeconds) ||
       p.intervalSeconds <= 0

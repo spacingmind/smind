@@ -76,4 +76,9 @@ describe("device code panel", () => {
     fireEvent.click(screen.getByTestId("accounts-connect-cancel"));
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
+
+  it("device panel handles an unparseable expiry", () => {
+    renderPanel({ expiresAt: "not a date" });
+    expect(screen.getByTestId("device-code-countdown").textContent).not.toMatch(/Expires in/);
+  });
 });

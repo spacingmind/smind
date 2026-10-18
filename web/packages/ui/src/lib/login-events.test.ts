@@ -131,4 +131,40 @@ describe("isSoftLoginError", () => {
     expect(isSoftLoginError("identity_mismatch")).toBe(false);
     expect(isSoftLoginError("unknown")).toBe(false);
   });
+
+  it("parseLoginEvent rejects non-http urls and bad expiry", () => {
+    expect(parseLoginEvent("authorizeUrl", { loginId: "l", url: "javascript:alert(1)" })).toBeNull();
+    expect(parseLoginEvent("authorizeUrl", { loginId: "l", url: "ftp://example.com" })).toBeNull();
+    expect(parseLoginEvent("authorizeUrl", { loginId: "l", url: "not a url" })).toBeNull();
+    expect(
+      parseLoginEvent("deviceCode", {
+        loginId: "l",
+        verificationUrl: "javascript:alert(1)",
+        userCode: "X",
+        expiresAt: "2099-01-01T00:00:00Z",
+        intervalSeconds: 5,
+      }),
+    ).toBeNull();
+    expect(
+      parseLoginEvent("deviceCode", {
+        loginId: "l",
+        verificationUrl: "https://example.com/device",
+        userCode: "X",
+        expiresAt: "not a date",
+        intervalSeconds: 5,
+      }),
+    ).toBeNull();
+    // A zero/negative interval is rejected just as before.
+    expect(
+      parseLoginEvent("deviceCode", {
+        loginId: "l",
+        verificationUrl: "https://example.com/device",
+        userCode: "X",
+        expiresAt: "2099-01-01T00:00:00Z",
+        intervalSeconds: 0,
+      }),
+    ).toBeNull();
+    // The valid shapes still parse.
+    expect(parseLoginEvent("authorizeUrl", { loginId: "l", url: "https://a" })).toMatchObject({ kind: "authorizeUrl" });
+  });
 });
