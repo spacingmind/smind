@@ -28,11 +28,18 @@
 // runs the daemon starts itself when delivering a queued prompt are
 // adopted by RunFollower over run.status and attached exactly once
 // (attachedRuns guard shared with sendFollowUpPrompt's shouldAttach).
+//
+// A live run can be stopped (run.stop, web's composer handleStop) with
+// a Stop/Stopping… control driven by stopControlView; a daemon-delivered
+// (adopted) run's prompt is not in its streamed events, so the adoption
+// path buffers run.attach events until adoptedPromptText resolves and
+// prepends the prompt as a user line (keyed p<runId>).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
 import { UiHost } from '../ui/UiHost';
+import { adoptedPromptText } from '../adoptedPrompt';
 import { defaultChatId, listRunsForTask, RunSummary } from '../api';
 import { continueRun, isEchoOfOptimisticLine, sendFollowUpPrompt, RunTail } from '../followUpPrompt';
 import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
@@ -41,6 +48,7 @@ import { useConnectionState } from '../relay/useConnectionState';
 import { RunFollower, RunStatusEvent } from '../runFollower';
 import { describeRunFooter } from '../runFooter';
 import { lineFromAttachEvent, TimelineLine, timelineFromLogs } from '../runTimeline';
+import { requestStop, stopControlView } from '../stopControl';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { useChatQueue } from '../useChatQueue';
@@ -90,6 +98,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   const draftState = useNativeState('');
   const [sendError, setSendError] = useState<string | null>(null);
   const [continued, setContinued] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [permissions, setPermissions] = useState<PermissionRequestState[]>([]);
   const [expandedToolCalls, setExpandedToolCalls] = useState<ReadonlySet<string>>(new Set());
   const [chatId, setChatId] = useState<number | null>(null);
@@ -100,6 +109,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   const followUpTails = useRef<RunTail[]>([]);
   const followerRef = useRef<RunFollower | null>(null);
   const attachedRuns = useRef(new Set<string>());
+  const promptShown = useRef(new Set<string>());
   const lastRunId = useRef<string | null>(null);
   const mounted = useRef(true);
   const chatIdRef = useRef<number | null>(null);
@@ -114,21 +124,28 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
     };
   }, []);
 
-  /** Attach to a run and stream its events into the timeline; every run is attached at most once (attachedRuns guard). */
-  const attachRun = (runId: string, isCancelled: () => boolean) => {
+  /** Attach to a run and stream its events into the timeline; every run is attached at most once (attachedRuns guard).
+   * With a `prelude`, events are buffered until it settles so its line (the adopted run's prompt) precedes the run's lines. */
+  const attachRun = (runId: string, isCancelled: () => boolean, prelude?: () => Promise<string | undefined>) => {
     if (attachedRuns.current.has(runId)) return;
     attachedRuns.current.add(runId);
+    const handle = (event: string, params: unknown) => {
+      if (isCancelled()) return;
+      if (feedPermissionEvent(board, runId, event, params)) return;
+      liveSeq.current++;
+      const newLines = lineFromAttachEvent(event, params, 1_000_000 + liveSeq.current);
+      if (newLines.length === 0) return;
+      // An echo of a prompt this client already shows optimistically is skipped, so a prompt shows once whichever
+      // path (the run.start response or this adoption) attached the run first.
+      if (event === 'user_message') setLines((prev) => (isEchoOfOptimisticLine(prev, event, params) ? prev : [...prev, ...newLines]));
+      else setLines((prev) => [...prev, ...newLines]);
+    };
+    let ready = prelude === undefined;
+    const buffered: Array<[string, unknown]> = [];
     const p = conn.call('run.attach', { runId }, {
-      onEvent: (event, params) => {
-        if (isCancelled()) return;
-        if (feedPermissionEvent(board, runId, event, params)) return;
-        liveSeq.current++;
-        const newLines = lineFromAttachEvent(event, params, 1_000_000 + liveSeq.current);
-        if (newLines.length === 0) return;
-        // An echo of a prompt this client already shows optimistically is skipped, so a prompt shows once whichever
-        // path (the run.start response or this adoption) attached the run first.
-        if (event === 'user_message') setLines((prev) => (isEchoOfOptimisticLine(prev, event, params) ? prev : [...prev, ...newLines]));
-        else setLines((prev) => [...prev, ...newLines]);
+      onEvent: (event: string, params: unknown) => {
+        if (ready) handle(event, params);
+        else buffered.push([event, params]);
       },
     });
     followUpTails.current.push(p);
@@ -136,6 +153,21 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
       // Detach (navigate-away cancel) or the connection ending:
       // either way the screen state already says what it needs to.
     });
+    if (prelude) {
+      void prelude()
+        .then((text) => {
+          if (text && !isCancelled() && !promptShown.current.has(runId)) {
+            promptShown.current.add(runId);
+            const line = { key: `p${runId}`, role: 'user', text } as TimelineLine;
+            setLines((prev) => (prev.some((l) => l.role === 'user' && l.key.startsWith('f') && l.text === text) ? prev : [...prev, line]));
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          ready = true;
+          for (const [e, params] of buffered.splice(0)) handle(e, params);
+        });
+    }
   };
 
   /** Keeps the header meta and the not-finished footer in step with the latest run (e.g. a queued prompt the daemon delivered). */
@@ -171,6 +203,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
     setLines([]);
     setPermissions([]);
     attachedRuns.current.clear();
+    promptShown.current.clear();
     followerRef.current = null;
     setLiveRunId(null);
     setChatId(null);
@@ -212,7 +245,9 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
           follower = new RunFollower(
             resolved,
             (runId) => {
-              attachRun(runId, () => cancelled);
+              attachRun(runId, () => cancelled, () =>
+                adoptedPromptText({ promptForRun: () => undefined }, () => listRunsForTask(conn, taskId, chatIdRef.current ?? undefined), runId),
+              );
               void refreshLatest();
             },
             (live) => {
@@ -322,6 +357,15 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   const handleSend = useCallback(() => send('queue'), [send]);
   const handleSendNow = useCallback(() => send('interrupt'), [send]);
 
+  const handleStop = useCallback(async () => {
+    if (liveRunId === null || stopping) return;
+    setStopping(true);
+    setSendError(null);
+    const failure = await requestStop(conn, liveRunId);
+    if (failure !== null && mounted.current) setSendError(failure);
+    if (mounted.current) setStopping(false);
+  }, [conn, liveRunId, stopping]);
+
   const handleContinue = useCallback(async () => {
     if (continued || state.kind !== 'ready' || state.run === null) return;
     setContinued(true);
@@ -369,6 +413,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   }, []);
 
   const canSend = draft.trim().length > 0 && state.kind === 'ready' && state.run !== null;
+  const stopView = stopControlView(liveRunId, stopping);
 
   return (
     <View style={styles.container}>
@@ -468,6 +513,11 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
                 multiline
               />
             </UiHost>
+            {stopView.visible && (
+              <UiHost style={styles.sendHost}>
+                <Button label={stopView.label} onPress={handleStop} disabled={stopView.disabled} />
+              </UiHost>
+            )}
             {liveRunId !== null && canSend && (
               <UiHost style={styles.sendHost}>
                 <Button label="Send now" onPress={handleSendNow} />
