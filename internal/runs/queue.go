@@ -87,6 +87,9 @@ func (reg *Registry) starterDeps() (*workspace.Manager, *taskrunner.Runner, bool
 // configuration (ADR-0019 decision 6, at enqueue time per ADR-0021 §6).
 func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel, whenBusy WhenBusy, source string, fromTaskID, fromChatID int64, opts ...StartOption) (StartOutcome, error) {
 	model := startModel(opts)
+	if resolveStartOptions(opts).isolation != nil {
+		return StartOutcome{}, errors.New("runs: start: WithIsolation is only supported by Start, not StartWhenBusy")
+	}
 	if whenBusy == "" {
 		whenBusy = WhenBusyReject // the wire default: old clients unchanged
 	}
@@ -491,6 +494,7 @@ type startOptions struct {
 	purpose   string
 	origin    string
 	interrupt bool
+	isolation *taskrunner.IsolationOptions
 }
 
 // WithOrigin records who authored the run's prompt (store.ChatQueueSource*:
@@ -505,6 +509,31 @@ func WithOrigin(source string) StartOption {
 // priority-1 queue item).
 func WithInterrupt() StartOption {
 	return func(o *startOptions) { o.interrupt = true }
+}
+
+// WithIsolation runs the turn through Runner.RunPromptIsolated (no tools, no
+// MCP, no ambient context; ADR-0026) instead of RunPrompt. Only a system run
+// may be isolated -- it requires WithPurpose -- and only on claude-native
+// (D13); Start refuses anything else before registering or persisting a
+// run. The run's permission requests stay the system auto-deny. Start only:
+// StartWhenBusy rejects it, because a queued item cannot carry it.
+func WithIsolation(iso taskrunner.IsolationOptions) StartOption {
+	return func(o *startOptions) { o.isolation = &iso }
+}
+
+// validateIsolation is Start's pre-registration check of WithIsolation.
+func validateIsolation(provider taskrunner.Provider, opts []StartOption) error {
+	o := resolveStartOptions(opts)
+	if o.isolation == nil {
+		return nil
+	}
+	if startPurpose(opts) == "" {
+		return errors.New("runs: start: WithIsolation requires a system purpose (WithPurpose)")
+	}
+	if provider != taskrunner.ProviderClaudeNative {
+		return fmt.Errorf("runs: start: %w (got %q)", taskrunner.ErrIsolationUnsupported, provider)
+	}
+	return nil
 }
 
 func resolveStartOptions(opts []StartOption) startOptions {
