@@ -130,6 +130,37 @@ describe("describeRunFooter: max_tokens and max_turn_requests are warnings with 
   });
 });
 
+describe("describeRunFooter: the daemon's needs-continue disposition (ADR-0027 D13)", () => {
+  it("reads as not finished and offers Continue for the caps it knows", () => {
+    const turn = describeRunFooter(freshRun({ stopReason: "max_turn_requests", disposition: "needs-continue" }), { now: NOW, modelLabel: "" });
+    expect(turn.sentence).toBe("Hit the tool-turn limit · not finished");
+    expect(turn.tone).toBe("warning");
+    expect(turn.action).toBe("continue");
+    const tokens = describeRunFooter(freshRun({ stopReason: "max_tokens", disposition: "needs-continue" }), { now: NOW, modelLabel: "" });
+    expect(tokens.sentence).toBe("Stopped at the output limit · not finished");
+  });
+  it("trusts the disposition for a cap this client has never heard of", () => {
+    const budget = describeRunFooter(freshRun({ stopReason: "budget_exceeded", disposition: "needs-continue" }), { now: NOW, modelLabel: "" });
+    expect(budget.sentence).toBe("Stopped at the budget limit · not finished");
+    expect(budget.action).toBe("continue");
+    // Unlisted reason: still a warning with Continue, never the neutral "Ended: …".
+    const other = describeRunFooter(freshRun({ stopReason: "some_future_cap", disposition: "needs-continue" }), { now: NOW, modelLabel: "" });
+    expect(other.sentence).toBe("Stopped at a limit · not finished");
+    expect(other.tone).toBe("warning");
+    expect(other.action).toBe("continue");
+  });
+  it("is ignored unless the run is done, and an older daemon (no disposition) is unchanged", () => {
+    const failed = describeRunFooter(freshRun({ status: "error", stopReason: "max_turn_requests", disposition: "needs-continue" }), { now: NOW, modelLabel: "" });
+    expect(failed.sentence).toMatch(/^Failed/);
+    expect(failed.action).toBe("retry");
+    const old = describeRunFooter(freshRun({ stopReason: "max_turn_requests" }), { now: NOW, modelLabel: "" });
+    expect(old.sentence).toBe("Hit the tool-turn limit");
+    expect(old.action).toBe("continue");
+    const normal = describeRunFooter(freshRun({ stopReason: "end_turn" }), { now: NOW, modelLabel: "" });
+    expect(normal.sentence).toBeUndefined();
+  });
+});
+
 describe("describeRunFooter: refusal is a warning with no action", () => {
   it("words a refusal", () => {
     const view = describeRunFooter(freshRun({ stopReason: "refusal" }), { now: NOW, modelLabel: "" });

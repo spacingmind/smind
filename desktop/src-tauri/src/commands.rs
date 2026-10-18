@@ -161,6 +161,8 @@ pub fn connections_remove(
 ) -> Result<(), String> {
     let was_current = state.proxy.registry.lock().unwrap().current().id == id;
     let result = remove_connection(&state.proxy, &state.ssh_tunnels, &state.connections_path, &id);
+    // A removed connection's password goes with it (it only ever lived in memory).
+    client_watch::forget_password(&id);
     // Removing the connection that is live falls back to the local one: stop
     // its relay session (and its device key in memory) now instead of leaving
     // it attached until the next switch.
@@ -226,9 +228,9 @@ pub struct RelayPreview {
     /// The relay host id the link admits under.
     pub relay_host_id: String,
     pub key_fingerprint: String,
-    /// Whether the relay's TLS certificate is pinned by the link (false =
-    /// CA-verified). The desktop transport only dials a pinned relay today,
-    /// so a link without a fingerprint is rejected rather than previewed.
+    /// Whether the relay's TLS certificate is pinned by the link (false = CA
+    /// mode: the certificate chain and host name are verified against the
+    /// system roots, for a relay serving a real certificate).
     pub pinned: bool,
     pub kind: RelayPreviewKind,
 }
@@ -269,16 +271,11 @@ fn parse_pairing_link(
     if offer.secret.is_empty() {
         return Err("pairing: invalid offer: missing admission secret".to_string());
     }
-    if offer.relay_fingerprint.trim().is_empty() {
-        return Err(
-            "pairing: invalid offer: missing relay certificate fingerprint (the desktop app connects only to a relay it can pin)"
-                .to_string(),
-        );
-    }
-    // The relay dial pins a SHA-256: 32 bytes, 64 hex digits. Anything else
-    // would save a connection that can never connect.
+    // An empty fingerprint is CA mode (ADR-0031 P12c). A non-empty one must be
+    // a SHA-256 -- 32 bytes, 64 hex digits -- and is NEVER read as CA mode when
+    // it is not: that would silently drop a pin the link asked for.
     let fp = &offer.relay_fingerprint;
-    if fp.len() != 64 || !fp.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if !fp.is_empty() && (fp.len() != 64 || !fp.bytes().all(|b| b.is_ascii_hexdigit())) {
         return Err(
             "pairing: invalid offer: the relay certificate fingerprint is not a SHA-256 (64 hex digits)"
                 .to_string(),
@@ -427,6 +424,9 @@ pub struct RelayStatus {
     pub code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// `passwordLocked`: seconds until the daemon will take another try.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_secs: Option<u64>,
 }
 
 impl From<&relay::client::Status> for RelayStatus {
@@ -439,11 +439,16 @@ impl From<&relay::client::Status> for RelayStatus {
             Status::Refused { code, message } => (None, Some(code.clone()), Some(message.clone())),
             _ => (None, None, None),
         };
+        let retry_after_secs = match s {
+            Status::PasswordLocked { retry_after_secs } => Some(*retry_after_secs),
+            _ => None,
+        };
         RelayStatus {
             state: s.state_name().to_string(),
             device_id,
             code,
             message,
+            retry_after_secs,
         }
     }
 }
@@ -456,6 +461,42 @@ pub fn connections_relay_status(state: State<'_, DesktopState>) -> Option<RelayS
     let handle = state.proxy.relay.lock().unwrap().clone()?;
     let status = handle.status().borrow().clone();
     Some(RelayStatus::from(&status))
+}
+
+/// connections_relay_set_password hands the relay connection `id` (which must be the selected one) the
+/// daemon password (ADR-0031 P13c) and wakes it. The password is typed in the
+/// webview and crosses this command once; from here it lives in Rust process
+/// memory only (`PasswordCell`: zeroized, redacted Debug), is never written to
+/// disk or logs, and is never returned to the webview — the status read-back
+/// (`connections_relay_status`) carries state names only. A password the daemon
+/// rejects is forgotten by the connection.
+#[tauri::command]
+pub fn connections_relay_set_password(
+    state: State<'_, DesktopState>,
+    id: String,
+    password: String,
+) -> Result<(), String> {
+    use smind_daemon_client::relay::password::MAX_PASSWORD_BYTES;
+    if password.is_empty() {
+        return Err("enter the daemon's password".into());
+    }
+    if password.len() > MAX_PASSWORD_BYTES {
+        return Err("that is too long to be the daemon's password".into());
+    }
+    // Bound to a connection: the status the user saw may be a moment stale after a
+    // switch, and a password typed for one daemon must not go to another.
+    if state.proxy.registry.lock().unwrap().current().id != id {
+        return Err("that connection is no longer the selected one".into());
+    }
+    let handle = state
+        .proxy
+        .relay
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "no relay connection is selected".to_string())?;
+    handle.set_password(password);
+    Ok(())
 }
 
 /// Quits the app. The renderer's Ctrl+Q on Windows/Linux calls this: the
@@ -527,14 +568,43 @@ mod tests {
             Status::AwaitingApproval { device_id: "x".into() },
             Status::Revoked { device_id: "x".into() },
             Status::Refused { code: "c".into(), message: "m".into() },
+            Status::PasswordRequired,
+            Status::IncorrectPassword,
+            Status::PasswordLocked { retry_after_secs: 8 },
         ]
         .iter()
         .map(|s| RelayStatus::from(s).state)
         .collect();
         assert_eq!(
             names,
-            ["connecting", "connected", "reconnecting", "awaitingApproval", "revoked", "refused"]
+            [
+                "connecting",
+                "connected",
+                "reconnecting",
+                "awaitingApproval",
+                "revoked",
+                "refused",
+                "passwordRequired",
+                "incorrectPassword",
+                "passwordLocked"
+            ]
         );
+    }
+
+    #[test]
+    fn password_lockout_reports_its_wait_and_nothing_secret() {
+        use relay::client::Status;
+        let locked = RelayStatus::from(&Status::PasswordLocked { retry_after_secs: 8 });
+        assert_eq!(locked.retry_after_secs, Some(8));
+        let json = serde_json::to_value(&locked).unwrap();
+        assert_eq!(json["state"], "passwordLocked");
+        assert_eq!(json["retryAfterSecs"], 8);
+        // No state carries a password or any field that could.
+        for st in [Status::PasswordRequired, Status::IncorrectPassword] {
+            let v = serde_json::to_value(RelayStatus::from(&st)).unwrap();
+            let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+            assert_eq!(keys, ["state"]);
+        }
     }
     use smind_daemon_client::proxy::connections::connection_id_for_relay;
     use smind_daemon_client::proxy::ConnectionKind;
@@ -600,9 +670,6 @@ mod tests {
 
     #[test]
     fn connections_preview_relay_rejects_missing_pieces_without_echoing_link() {
-        let l = link(&offer(0x11, "ws-1", "https://r.test:7401", "", &[1; 32]));
-        let err = build_relay_preview(&l, &[], None).unwrap_err();
-        assert!(err.contains("fingerprint"), "{err}");
         let l = link(&offer(0x11, "ws-1", "https://r.test:7401", "ab", &[1; 32]));
         assert!(build_relay_preview(&l, &[], None).unwrap_err().contains("SHA-256"));
         let l = link(&offer(0x11, "ws-1", "https://r.test:7401", FP, &[]));
@@ -613,6 +680,48 @@ mod tests {
         let err = build_relay_preview(junk, &[], None).unwrap_err();
         assert!(!err.contains("notbase64"), "{err}");
         assert!(build_relay_preview("  ", &[], None).is_err());
+    }
+
+    #[test]
+    fn connections_preview_relay_accepts_ca_mode_offer_with_pinned_false() {
+        let ca = offer(0x11, "ws-1", "https://r.test:7401", "", &[1; 32]);
+        let p = build_relay_preview(&link(&ca), &[], None).unwrap();
+        assert!(!p.pinned, "no fingerprint = CA mode");
+        assert_eq!(p.relay_address, "r.test:7401");
+        // The JSON contract is unchanged: `pinned` is a bool.
+        assert_eq!(serde_json::to_value(&p).unwrap()["pinned"], false);
+        let pinned = build_relay_preview(&link(&good()), &[], None).unwrap();
+        assert!(pinned.pinned);
+    }
+
+    #[test]
+    fn connections_preview_relay_rejects_malformed_fingerprint_never_ca_mode() {
+        let valid = FP.to_string();
+        for bad in [&valid[..63], &valid[..62], &format!("{valid}00"), &format!("{}zz", &valid[..62]), " ", "deadbeef"] {
+            let l = link(&offer(0x11, "ws-1", "https://r.test:7401", bad, &[1; 32]));
+            let err = build_relay_preview(&l, &[], None).unwrap_err();
+            assert!(err.contains("not a SHA-256"), "{bad:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn connections_add_relay_roundtrips_empty_fingerprint() {
+        let dir = tempfile::tempdir().unwrap();
+        let ca = offer(0x11, "ws-1", "https://r.test:7401", "", &[0xab; 32]);
+        let (parsed, addr) = parse_pairing_link(&link(&ca)).unwrap();
+        let conn = saved(&parsed);
+        relay::pairing_store::save(dir.path(), &conn.id, &relay::pairing_store::RelayPairing::from_offer(&parsed, addr)).unwrap();
+        let loaded = relay::pairing_store::load(dir.path(), &conn.id).unwrap().expect("saved");
+        assert_eq!(loaded.relay_fingerprint, "", "CA mode survives the round trip");
+        assert_eq!(loaded.workspace_id, "ws-1");
+        // Re-pasting the same CA-mode link is AlreadySaved (empty == empty), and
+        // switching a saved CA-mode connection to a pinned link is a change.
+        let list = [conn];
+        let same = build_relay_preview(&link(&ca), &list, Some(dir.path())).unwrap();
+        assert_eq!(same.kind, RelayPreviewKind::AlreadySaved);
+        let pinned = offer(0x11, "ws-1", "https://r.test:7401", FP, &[0xab; 32]);
+        let changed = build_relay_preview(&link(&pinned), &list, Some(dir.path())).unwrap();
+        assert_eq!(changed.kind, RelayPreviewKind::ChangedConnection);
     }
 
     #[test]

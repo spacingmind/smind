@@ -253,8 +253,11 @@ Settled for this plan:
   fixed on the way: `claudecode.WithEnv` replaces the env list per call, so a
   decider's dialog-timeout variable dropped the task's `SMIND_PORT`.
 - 2026-10-12: AC8 decision: nightly + on-demand only, no blocking PR check.
-- Open: a green `windows-full-suite.yml` run on GitHub, the first release
-  carrying the Windows zips (AC9), ADR-0024 wording, README.
+- 2026-10-18: **AC8 closed** (`fix/windows-nightly-suite`, PR #366): `windows-full-suite.yml` had failed every
+  scheduled run since 2026-10-13 (a dozen packages hit the 10-minute timeout; `internal/wsapi` among them) and now
+  passes in about 5 minutes: 42 of 42 packages on two consecutive `workflow_dispatch` runs. See Validation.
+- Open: the first release carrying the Windows zips (AC9). The ADR-0024 wording (the "Amended by ADR-0029" note on
+  the setup shell) and the README (install.ps1, the Windows zips, the native daemon, the WSL note) are already done.
 
 ## Validation
 
@@ -313,9 +316,30 @@ All on Windows 11 25H2 build 26200, amd64, Go 1.27.0, branch
   green on Linux via WSL).
 - **AC8** — suite green locally (above; 35 packages after merging develop on
   2026-10-12). Nightly + `workflow_dispatch` is the agreed scope (no blocking
-  PR job, user decision 2026-10-12). **Not yet:** a green
-  `windows-full-suite.yml` run on GitHub (needs the workflow on `develop`, or
-  a manual dispatch against the branch).
+  PR job, user decision 2026-10-12). **Closed 2026-10-18:** `windows-full-suite.yml` is green on `windows-latest`
+  (Windows Server 2025, Go 1.27.0), twice in a row via `workflow_dispatch` on `fix/windows-nightly-suite`
+  (runs 39094806467 and 39095113748, ~5 min each, 42 packages ok, 0 failing tests); the three nightly runs
+  before it timed out at 10 min per package in `wsapi`, `store`, `runs`, `quota`, `server`, `taskrunner`,
+  `workspace`, `relay/bridge` and `cmd/smind`.
+  **Why it was red (measured on the runner, 2026-10-18):** it was not `wsapi`-specific. Every SQLite commit is several
+  fsyncs plus a journal file created and deleted, and the runner's `C:` drive (the default `TEMP`) is slow at that:
+  one write+fsync cost 2.8 ms on `C:` against 0.07 ms on `D:` (`internal/store` open of a fresh database: 0.83 s,
+  100 inserts: 1.97 s; the same on `D:`: 0.08 s and 0.17 s). Defender real-time protection was already off. A package
+  that does thousands of commits (`store`, `runs`, `wsapi`, `taskrunner`, `workspace`, `server`) took minutes, and
+  tests with concurrent writers exceeded the 5 s `busy_timeout` (`TestStore_ConcurrentAccountCreates`,
+  `TestTreeGuard_Concurrent*`: "database is locked"). Fixes: `store.Open` applies `schema.sql` in **one transaction**
+  (0.83 s to 0.1 s on `C:`, and atomic); `SMIND_SQLITE_SYNCHRONOUS=off` (a test/CI knob; the daemon never sets it, the
+  default stays SQLite's FULL) and `TEMP` on `D:` in the nightly; and cmd/smind builds the daemon binary once per test
+  process instead of 12 links (6 to 25 s each). The timeout stays 10 min per package; the slowest package is now
+  `cmd/smind` at ~210 s.
+  **Windows-only test bugs the suite also hid** (all fixed, none skipped): `selfupdatetest` named the archive member
+  `smind` for a windows archive (every `Update*` test failed: "no binary member smind.exe"); the desktop-app guard in
+  `selfupdate.DesktopOwned` looked for `sMind.exe`, which NTFS finds next to every `smind.exe`, so on Windows **every
+  standalone install and `smind update` was refused** (a product bug; real app binary is `smind-desktop.exe`); the
+  `devharness` test built `devharness` without `.exe`; the relay hello vector, the minisign fixtures and the service
+  goldens are byte-compared and need `eol=lf` under `core.autocrlf`; a P8 service test used `/from/shell` as an
+  absolute path; the P8 `logs -f` test sends itself an interrupt (not possible on Windows) and a log-rotation test
+  removes a directory holding an open file (skipped there with the reason).
 - **AC9** — branch `feat/release-windows-binaries` (slice E, off `develop`): the
   release matrix gains `windows/amd64` and `windows/arm64` (pure Go,
   cross-compiled on ubuntu), `smind_<version>_windows_<arch>.zip` with

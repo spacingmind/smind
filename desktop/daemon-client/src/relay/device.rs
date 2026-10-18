@@ -185,7 +185,19 @@ pub fn parse_challenge(text: &str) -> Option<Result<[u8; CHALLENGE_LEN], String>
 }
 
 pub fn hello_request(request_id: &str, hello: &Hello) -> String {
-    serde_json::json!({ "id": request_id, "method": HELLO_METHOD, "params": hello }).to_string()
+    hello_request_with_password(request_id, hello, None)
+}
+
+/// The hello request carrying the daemon password (ADR-0031 P13c) when there
+/// is one. The password rides in the request's params only: inside the E2EE
+/// channel, outside the signature, and never in the `Hello` struct (whose Debug
+/// output would otherwise be one careless `{:?}` away from a log).
+pub fn hello_request_with_password(request_id: &str, hello: &Hello, password: Option<&str>) -> String {
+    let mut params = serde_json::to_value(hello).expect("hello serializes");
+    if let (Some(p), Some(obj)) = (password.filter(|p| !p.is_empty()), params.as_object_mut()) {
+        obj.insert("password".into(), serde_json::Value::String(p.to_string()));
+    }
+    serde_json::json!({ "id": request_id, "method": HELLO_METHOD, "params": params }).to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -197,6 +209,8 @@ pub enum HelloOutcome {
     Refused {
         code: String,
         message: String,
+        /// `error.retry_after` (seconds) on a rate-limited refusal.
+        retry_after: Option<u64>,
     },
     /// An older daemon that does not know `relay.device_hello`.
     MethodNotFound,
@@ -223,7 +237,8 @@ pub fn parse_hello_response(request_id: &str, text: &str) -> Option<HelloOutcome
         if code.is_empty() && message.starts_with("method not found") {
             return Some(HelloOutcome::MethodNotFound);
         }
-        return Some(HelloOutcome::Refused { code, message });
+        let retry_after = err.get("retry_after").and_then(|r| r.as_u64());
+        return Some(HelloOutcome::Refused { code, message, retry_after });
     }
     let result = v.get("result")?;
     Some(HelloOutcome::Approved {
@@ -624,8 +639,25 @@ mod tests {
                 )),
                 Some(HelloOutcome::Refused {
                     code: code.into(),
-                    message: format!("m {code}")
+                    message: format!("m {code}"),
+                    retry_after: None,
                 })
+            );
+        }
+        // P13c: a rate-limited refusal says when to come back.
+        assert_eq!(
+            p(r#"{"id":"r1","error":{"message":"wait","code":"too_many_attempts","retry_after":8}}"#),
+            Some(HelloOutcome::Refused {
+                code: "too_many_attempts".into(),
+                message: "wait".into(),
+                retry_after: Some(8),
+            })
+        );
+        for code in ["password_required", "incorrect_password"] {
+            let parsed = p(&format!(r#"{{"id":"r1","error":{{"message":"m","code":"{code}"}}}}"#));
+            assert!(
+                matches!(parsed, Some(HelloOutcome::Refused { code: ref c, retry_after: None, .. }) if c == code),
+                "{parsed:?}"
             );
         }
         assert_eq!(
@@ -662,5 +694,27 @@ mod tests {
         ] {
             assert!(validate_label(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn the_password_rides_in_params_and_never_in_the_signed_hello() {
+        let key = DeviceKey::generate();
+        let challenge = [7u8; CHALLENGE_LEN];
+        let hello = key.hello("laptop", &[1u8; 32], &[2u8; 32], "sess", &challenge);
+        let plain: serde_json::Value = serde_json::from_str(&hello_request("r1", &hello)).unwrap();
+        assert!(plain["params"].get("password").is_none(), "no password unless one is given");
+        let with: serde_json::Value =
+            serde_json::from_str(&hello_request_with_password("r1", &hello, Some("pw-correct-horse"))).unwrap();
+        assert_eq!(with["params"]["password"], "pw-correct-horse");
+        // Everything else, including the signature, is byte-identical: the signed bytes do not change.
+        let mut stripped = with.clone();
+        stripped["params"].as_object_mut().unwrap().remove("password");
+        assert_eq!(stripped, plain);
+        // An empty password is no password.
+        let empty: serde_json::Value =
+            serde_json::from_str(&hello_request_with_password("r1", &hello, Some(""))).unwrap();
+        assert!(empty["params"].get("password").is_none());
+        // And the Hello struct itself cannot print a password: it has no such field.
+        assert!(!format!("{hello:?}").contains("pw-correct-horse"));
     }
 }

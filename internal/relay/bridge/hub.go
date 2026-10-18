@@ -100,6 +100,9 @@ type Options struct {
 	// Logf receives hub diagnostics; nil = log.Printf. Never given keys,
 	// secrets or message content.
 	Logf func(format string, args ...any)
+	// Password gates every device_hello with the daemon password (P13c). Nil,
+	// or a gate that is not Required, admits devices without one.
+	Password PasswordGate
 }
 
 // Hub is the device hub. Create with NewHub, run with (*Hub).Run.
@@ -110,6 +113,7 @@ type Hub struct {
 	logf    func(string, ...any)
 	maxDevs int
 	hello   time.Duration
+	pw      *passwordState
 
 	mu       sync.Mutex
 	server   Server
@@ -146,6 +150,7 @@ func NewHub(opts Options) *Hub {
 	if h.hello <= 0 {
 		h.hello = DefaultHelloTimeout
 	}
+	h.pw = newPasswordState(h.clock.Now)
 	return h
 }
 
@@ -190,6 +195,7 @@ func (h *Hub) Run(ctx context.Context, cfg Config, kp *e2ee.KeyPair, srv Server)
 	h.server, h.hubCtx, h.kp, h.cfg = srv, ctx, kp, cfg
 	h.mu.Unlock()
 	defer h.shutdown()
+	h.warnNoPassword()
 
 	backoff := time.Second
 	for ctx.Err() == nil {

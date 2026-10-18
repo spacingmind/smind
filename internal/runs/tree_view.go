@@ -14,16 +14,20 @@ type TaskRunFact struct {
 	State              tasktree.State
 	RunningRunIDs      []string
 	PendingPermissions int
+	// Disposition is the latest finished run's DispositionFor, when the task
+	// has no run going: "needs-continue" for a run that ended done at a cap.
+	Disposition string
 }
 
 // taskRunFactSnapshot is one run's contribution to TaskRunFacts, read
 // under that run's own mu.
 type taskRunFactSnapshot struct {
-	id        string
-	taskID    int64
-	startedAt int64 // unix nanos, for oldest-first ordering
-	status    Status
-	pending   int
+	id         string
+	taskID     int64
+	startedAt  int64 // unix nanos, for oldest-first ordering
+	status     Status
+	stopReason string
+	pending    int
 }
 
 // TaskRunFacts summarizes the registry's in-memory runs per task id in
@@ -40,11 +44,12 @@ func (reg *Registry) TaskRunFacts() map[int64]TaskRunFact {
 	for _, r := range reg.runs {
 		r.mu.Lock()
 		snaps = append(snaps, taskRunFactSnapshot{
-			id:        r.id,
-			taskID:    r.taskID,
-			startedAt: r.startedAt.UnixNano(),
-			status:    r.status,
-			pending:   len(r.pendingPermissions),
+			id:         r.id,
+			taskID:     r.taskID,
+			startedAt:  r.startedAt.UnixNano(),
+			status:     r.status,
+			stopReason: r.stopReason,
+			pending:    len(r.pendingPermissions),
 		})
 		r.mu.Unlock()
 	}
@@ -94,6 +99,7 @@ func (reg *Registry) TaskRunFacts() map[int64]TaskRunFact {
 			f.RunningRunIDs = ids
 		} else if a.hasLatest {
 			f.State = mapStatusToState(a.latest.status)
+			f.Disposition = DispositionFor(a.latest.status, a.latest.stopReason)
 		} else {
 			f.State = tasktree.StateIdle
 		}

@@ -253,6 +253,18 @@ func (s *Server) authorizeWS(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(d.token)) == 1
 }
 
+// RelayPasswordGate adapts the daemon password to the relay hub: relay devices
+// must present it in their device_hello (ADR-0031 P13c). The password is fixed
+// when the daemon starts (changing it needs a restart, which ends every relay
+// session too), and Check is the same bcrypt check POST /api/login uses.
+func (s *Server) RelayPasswordGate() relayPasswordGate { return relayPasswordGate{s.direct} }
+
+type relayPasswordGate struct{ d *directAuth }
+
+func (g relayPasswordGate) Required() bool { return g.d.hash != "" }
+
+func (g relayPasswordGate) Check(password string) bool { return auth.CheckPassword(g.d.hash, password) }
+
 // bearerTokens lists the tokens a request presents in headers: the
 // Authorization bearer and any "smind.bearer.*" offered subprotocol.
 func bearerTokens(r *http.Request) []string {
