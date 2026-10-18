@@ -2,13 +2,14 @@
 
 ## Status
 
-**Proposed** (2026-10-11). Nothing here is decided. Per AGENTS.md rule (d)
-this ADR stops at the decision list in "Decisions for the user"; Phase B
-(code) starts only after the user answers it. The spec for Phase B is
+**Accepted** (2026-10-18). The user accepted D1-D11 exactly as recommended in
+"Decisions" below and added D12 (deterministic similarity check in the gate).
+Phase B (code) is unblocked; the spec is
 [`docs/plans/active/self-learning-skills.md`](../plans/active/self-learning-skills.md).
+Originally proposed 2026-10-11.
 
-Numbering: 0023 (desktop auto-update, open PR #274), 0024 and 0025 are
-taken, so this is 0026.
+Numbering: 0023 (desktop auto-update), 0024 and 0025 are taken, so this is
+0026.
 
 ## Context
 
@@ -85,7 +86,7 @@ the curator is told **not to trust counters** that are still mostly zero.
   is the main argument for not using the repo as the storage or delivery
   location.
 
-## Decision (proposed)
+## Decision
 
 ### 1. Shape
 
@@ -385,6 +386,15 @@ Per skill, in `learned_skills`:
     version**, **delete**, **export**.
   - Proposals show the diff against the current body for a patch, and a
     flagged banner when the guard scan found anything near the line.
+  - **Possible duplicate (D12):** a proposal whose similarity to a live skill
+    is above the medium threshold is flagged "Possible duplicate of
+    `<skill>`" and shows both skills side by side with the similarity
+    score. A learned match offers **Merge into this skill**: the proposal
+    becomes a `patch` of the existing learned skill (the human edits the
+    merged body, the proposal's evidence is carried over), re-runs the gate
+    and still waits for approval. A human/third-party match shows names and
+    descriptions only (bodies are never read) and offers no merge, since
+    human skills are never modified; the human can reject or approve anyway.
 - **Approval before landing: on by default in v1.** A `proposed` skill is
   never offered to any agent. A workspace may later opt into auto-approve
   for `patch` intents on already-approved skills only (D2), never for
@@ -433,11 +443,32 @@ Per skill, in `learned_skills`:
      (exfiltration, injection phrases, destructive, persistence, network,
      obfuscation) over body and description, a redaction pass, an
      absolute-path and host-name scrub, `absorbed_into` and name collision
-     checks, near-duplicate check against human skill names.
+     checks, and the **similarity check** (D12, below) against every live
+     skill, learned and human.
   4. **No executable content in v1:** only `SKILL.md` text. No `scripts/`,
      `templates/`, `assets/`, no `references/` files. (autoharness allows
      them with a pointer rule; v1 skips them. Phase C may add plain-text
      `references/*.md`.)
+  4a. **Similarity check (D12, deterministic, no LLM).** The gate scores a
+     `create` proposal (and a `patch`'s resulting text, against every skill
+     other than its own target) against **all live skills in the workspace**:
+     learned skills in status `proposed`, `active` or `disabled` (name +
+     description + body), and human/third-party skills (**name + description
+     only**; their bodies are never read, per D10). The score is
+     `max(token Jaccard, character-trigram Dice)` over lowercased,
+     whitespace-collapsed text, with the proposal's own `name + description`
+     compared against a human skill's `name + description` and its full text
+     against a learned skill's full text. Above the **high** threshold
+     (default 0.85) the gate rejects as `duplicate_of: <skill>`, writing
+     nothing. Above the **medium** threshold (default 0.60) it passes but
+     records `possible_duplicate_of: <skill>` and the score on the proposal,
+     which the inbox shows (section 8) with a **Merge into this skill**
+     action. Both thresholds live in `config.yaml`
+     (`learning.similarity.duplicate`, `learning.similarity.possible`); the
+     defaults are guesses calibrated against a fixture corpus in the gate
+     tests and revisited with real data. This closes the gap that the gate
+     only compared names against human skills; the reflector and curator keep
+     their LLM-side dedupe on top.
   5. **Human approval** with the evidence on screen.
   6. **Blast radius:** workspace-scoped, read-only projection, no global
      layer, so a poisoned skill affects only that repo's later runs and one
@@ -476,22 +507,24 @@ Per skill, in `learned_skills`:
 | Curator + tar snapshots + `absorbed_into` | none | Curator job, library snapshot, merge bundle |
 | Per-skill ledger | none | `learned_skill_ledger`, `learned_skill_versions` |
 | Body/description caps (25 lines, 60/1024 chars) | none | Gate caps (25 lines, 4 KB, 160 chars) |
+| (none: autoharness dedupes only through the reflector/curator prompt) | n/a | **Deterministic similarity check** in the gate against all live skills, with an inbox "Possible duplicate" flag and merge action (D12, new) |
 | `/learn` skill | CLI, UI, MCP | "Learn from this chat" button + `smind learn reflect` |
 | Opt-in notification | desktop/mobile notification path, lifecycle events | `learnedSkill.*` topics, badge, toast |
 | (none: autoharness has no approval step) | n/a | **Human approval inbox** (new; smind's addition) |
 | (none: autoharness trusts the transcript) | n/a | **Provenance rule** against injection (new) |
 | (none: autoharness writes into `.claude/skills`) | n/a | Daemon-owned storage, projected read-only (new; avoids the `.claude/skills` -> `.agents/skills` symlink hazard) |
 
-## Decisions for the user
+## Decisions
 
-Each has a recommendation; none is made.
+Accepted by the user on 2026-10-18: D1-D11 exactly as recommended, plus D12
+added by the user.
 
-| # | Decision | Options | Recommendation |
+| # | Decision | Options | Decided |
 |---|---|---|---|
 | D1 | Opt-in vs on by default | per-workspace opt-in, default off / on by default with approval / global-only toggle | **Per-workspace opt-in, default off.** Learning sends transcript excerpts to a model and writes persistent context; the first run in a new repo should not do that silently. A one-time prompt in Settings offers to enable it. |
 | D2 | Approval before a skill lands | always / on for create, off for patch of approved skills / off | **Always in v1** (every proposed skill and every curator merge waits in the inbox). Revisit an auto-approve for patches after a few weeks of measured approve/reject rates. |
 | D3 | Storage location | daemon DB + projection / repo `.claude/skills` / `~/.claude/skills` / both | **Daemon DB canonical, delivered by read-only projection; repo/`~/.claude` only via explicit export.** Avoids git noise, the symlink write-through in this repo, and agents editing approved skills. |
-| D4 | Reflector model and cost budget | same provider as the source run / always Claude Haiku / always GLM | **Same-recipient rule**, Haiku-class for Claude, GLM default for GLM; per-workspace daily cap **USD 0.25 / 150k tokens**, 1 job per 30 min, 120 KB window. These numbers are guesses; calibrate from the first week of `run_usage` before widening. Please confirm or adjust the cap. |
+| D4 | Reflector model and cost budget | same provider as the source run / always Claude Haiku / always GLM | **Same-recipient rule**, Haiku-class for Claude, GLM default for GLM; per-workspace daily cap **USD 0.25 / 150k tokens**, 1 job per 30 min, 120 KB window. These numbers are guesses; calibrate from the first week of `run_usage` before widening. Confirmed by the user as proposed. |
 | D5 | Can skills ever be global | never / explicit promote / reflector-proposed | **No global layer in v1; later, only an explicit human "promote" that re-runs a repo-agnostic gate.** A global skill's blast radius is every repo, and cross-repo injection is the worst case. |
 | D6 | Provenance rule strictness | evidence must include a user message or recovered failure / any evidence / user message only | **User message, recovered failure, human permission denial, or a loaded skill proved wrong.** It is the main injection defence; it will cost some recall (lessons seen only in tool output are dropped), which is the intended trade. |
 | D7 | Measuring GLM/Kimi skill use | v1 `skill_get` MCP / v1 inline only / never | **Inline only in v1, `skill_get` MCP in Phase C.** v1 treats those skills as unmeasured (never auto-archived for zero use). Cheaper and it ships GLM delivery now, at the cost of no GLM adherence data for a while. |
@@ -499,6 +532,7 @@ Each has a recommendation; none is made.
 | D9 | Codex | exclude in v1 / write `.agents/skills` in the worktree | **Exclude in v1** (no tool events, no clean injection, repo writes ruled out). Explicit export still works. |
 | D10 | Show human skill descriptions to the reflector for dedupe | yes (names+descriptions only) / no | **Yes, read-only, descriptions only.** Avoids learning what the repo already documents. Bodies never sent. |
 | D11 | Numbers: cadence 50 tool calls, probation 25 runs, capacity 30, curator every 5 landings | keep / change | **Keep as defaults, all knobs in `config.yaml`.** They are autoharness's, rescaled; there is no measured basis yet. |
+| D12 | Duplicate detection beyond names | name collision only / LLM-side dedupe only / deterministic similarity check in the gate | **Deterministic (no LLM) similarity check against all live skills, learned and human** (human: name + description only, bodies never read). Above a high threshold the gate rejects as duplicate; above a medium threshold the inbox flags "Possible duplicate of `<skill>`", shows both side by side and offers "Merge into this skill" (the proposal becomes a patch of the existing learned skill, still approval-gated). Thresholds in `config.yaml` (defaults 0.85 / 0.60). Reflector and curator keep their LLM-side dedupe. Added by the user 2026-10-18. |
 
 ## Alternatives considered
 
