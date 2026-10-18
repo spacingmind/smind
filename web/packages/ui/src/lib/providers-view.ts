@@ -1,4 +1,7 @@
-import type { Account, ProviderInfo } from "@/lib/types";
+import { usageCopy } from "@/lib/account-usage/copy";
+import { activeCooldown } from "@/lib/account-usage/model";
+import type { AccountUsage } from "@/lib/account-usage/types";
+import type { Account, ProviderInfo, ProviderTestResult } from "@/lib/types";
 
 export type NavTone = "ok" | "warning" | "danger" | "neutral";
 
@@ -54,4 +57,45 @@ export function buildProviderNav(input: {
 function worstTone(tones: NavTone[]): NavTone {
   if (tones.length === 0) return "neutral";
   return tones.reduce((worst, tone) => (TONE_ORDER[tone] < TONE_ORDER[worst] ? tone : worst));
+}
+
+export type HealthKind = "relogin" | "cooldown" | "error" | "active" | "untested";
+
+export interface HealthBadge {
+  kind: HealthKind;
+  label: string;
+  detail: string | null;
+  tone: NavTone;
+}
+
+export function healthBadge(input: {
+  usage: AccountUsage | undefined;
+  test: ProviderTestResult | undefined;
+  now?: number;
+  formatTime?: (ms: number) => string;
+}): HealthBadge {
+  const now = input.now ?? Date.now();
+  const formatTime =
+    input.formatTime ?? ((ms: number) => Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(ms)));
+  const { usage, test } = input;
+  const problem = usage?.report?.problem?.kind;
+  if (usage && (problem === "expired" || problem === "rejected")) {
+    return { kind: "relogin", label: "Needs re-login", tone: "danger", detail: usageCopy.problem(usage, now) };
+  }
+  const cooldown = activeCooldown(usage, now);
+  if (cooldown) {
+    return {
+      kind: "cooldown",
+      label: `Cooling down until ${formatTime(cooldown.untilMs)}`,
+      tone: "warning",
+      detail: usageCopy.cooldown(cooldown, now).headline,
+    };
+  }
+  if ((test && !test.ok) || usage?.report?.status === "error") {
+    return { kind: "error", label: "Error", tone: "danger", detail: test?.detail ?? (usage ? usageCopy.problem(usage, now) : null) };
+  }
+  if (test?.ok || usage?.report?.status === "available") {
+    return { kind: "active", label: "Active", tone: "ok", detail: null };
+  }
+  return { kind: "untested", label: "Not tested", tone: "neutral", detail: null };
 }

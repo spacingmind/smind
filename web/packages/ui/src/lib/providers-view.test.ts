@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { buildProviderNav } from "@/lib/providers-view";
-import type { Account, ProviderInfo } from "@/lib/types";
+import { healthBadge } from "@/lib/providers-view";
+import type { AccountUsage } from "@/lib/account-usage/types";
+import type { Account, ProviderInfo, ProviderTestResult } from "@/lib/types";
 
 function provider(overrides: Partial<ProviderInfo> = {}): ProviderInfo {
   return { id: "glm" as ProviderInfo["id"], ...overrides };
@@ -69,3 +71,66 @@ describe("buildProviderNav", () => {
     expect(items[0]).toMatchObject({ kind: "cli", accountIds: [], tone: "neutral", connected: false });
   });
 });
+
+describe("healthBadge", () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+  const formatTime = (ms: number) => `T${ms - now}`;
+  const badge = (usage: Partial<AccountUsage> | undefined, test?: ProviderTestResult) =>
+    healthBadge({
+      usage: usage === undefined ? undefined : ({ ...baseUsage(), ...usage } as AccountUsage),
+      test,
+      now,
+      formatTime,
+    });
+
+  it("health badge order: relogin beats cooldown beats error beats active", () => {
+    const expired = badge({ report: { status: "error", problem: { kind: "expired" }, fetchedAt: "" }, cooldown: { until: "2026-01-01T13:00:00Z", scope: "account", reason: "rejected" } }, { ok: false, detail: "boom" });
+    expect(expired.kind).toBe("relogin");
+    expect(expired.tone).toBe("danger");
+
+    const cooling = badge(
+      { cooldown: { until: "2026-01-01T13:00:00Z", scope: "account", reason: "rejected" } },
+      { ok: false, detail: "boom" },
+    );
+    expect(cooling.kind).toBe("cooldown");
+    expect(cooling.tone).toBe("warning");
+
+    const erroring = badge({}, { ok: false, detail: "boom" });
+    expect(erroring).toMatchObject({ kind: "error", tone: "danger", detail: "boom" });
+
+    const active = badge({ report: { status: "available", fetchedAt: "" } }, { ok: true, detail: "" });
+    expect(active).toMatchObject({ kind: "active", tone: "ok", detail: null });
+  });
+
+  it("health badge cooldown label shows the end time", () => {
+    const untilMs = Date.UTC(2026, 0, 1, 13, 0, 0);
+    const result = badge({ cooldown: { until: "2026-01-01T13:00:00Z", scope: "account", reason: "rejected" } });
+    expect(result.label).toBe(`Cooling down until ${formatTime(untilMs)}`);
+    expect(result.detail).toMatch(/^Rate limited until /);
+  });
+
+  it("health badge untested without data", () => {
+    expect(badge(undefined, undefined)).toEqual({
+      kind: "untested",
+      label: "Not tested",
+      tone: "neutral",
+      detail: null,
+    });
+  });
+});
+
+function baseUsage(): AccountUsage {
+  return {
+    accountId: 1,
+    key: "anthropic-1",
+    provider: "anthropic",
+    displayName: "Claude",
+    credentialType: "oauth",
+    stale: false,
+    nextRefreshAt: null,
+    refreshBlocked: null,
+    inFlight: false,
+    lastError: null,
+    report: null,
+  };
+}
