@@ -167,8 +167,9 @@ func pinnedTLS(fingerprint string) (*tls.Config, error) {
 	return &tls.Config{
 		InsecureSkipVerify: true, // replaced by the pin below
 		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			for _, raw := range rawCerts {
-				if sum := sha256.Sum256(raw); string(sum[:]) == string(fp) {
+			// Leaf only, like client.Dial: extra chain certs are unauthenticated.
+			if len(rawCerts) > 0 {
+				if sum := sha256.Sum256(rawCerts[0]); string(sum[:]) == string(fp) {
 					return nil
 				}
 			}
