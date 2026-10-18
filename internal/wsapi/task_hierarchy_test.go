@@ -12,7 +12,7 @@ import (
 // parentTaskId reaches workspace.Manager.CreateTask (the child's
 // ParentTaskID round-trips), and task.list's optional parentTaskId filters
 // to direct children only -- the wsapi half of the task-hierarchy plan
-// (docs/plans/active/smind-control-parity.md), on top of internal/store and
+// (docs/plans/completed/smind-control-parity.md), on top of internal/store and
 // internal/workspace's own coverage of the same validation.
 func TestServer_TaskCreateList_ParentTaskID(t *testing.T) {
 	t.Parallel()

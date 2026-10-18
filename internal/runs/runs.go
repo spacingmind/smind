@@ -70,6 +70,11 @@ type RunStatus struct {
 	// taskrunner.EventTypeDone event's StopReason.
 	StopReason string
 
+	// Disposition is derived from Status and StopReason (DispositionFor):
+	// "needs-continue" for a run that ended done at a turn/token/budget cap,
+	// empty otherwise. It is not a status and is never stored.
+	Disposition string
+
 	// Err is populated once Status is StatusError, carrying the error
 	// RunPrompt returned.
 	Err string

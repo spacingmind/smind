@@ -38,6 +38,30 @@ async function flush(): Promise<void> {
   });
 }
 
+describe("useRunTimeline disposition (ADR-0027 D13)", () => {
+  it("carries the daemon's needs-continue disposition from run.list and a run.logs backfill", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+
+    client.nth("run.list", 0).resolve([summary({ StopReason: "max_turn_requests", Disposition: "needs-continue" })]);
+    await flush();
+    expect(result.current.runs?.[0]?.disposition).toBe("needs-continue");
+
+    await act(async () => {
+      client.nth("run.logs", 0).resolve({ runId: "run-1", status: "done", stopReason: "max_turn_requests", disposition: "needs-continue", events: [] } satisfies RunLogsResult);
+    });
+    await waitFor(() => expect(result.current.runs?.[0]?.disposition).toBe("needs-continue"));
+  });
+
+  it("a normal finish has no disposition", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+    client.nth("run.list", 0).resolve([summary()]);
+    await flush();
+    expect(result.current.runs?.[0]?.disposition).toBeUndefined();
+  });
+});
+
 describe("useRunTimeline usage", () => {
   it("run.list usage seeds the run entry", async () => {
     const client = new FakeWsClient();

@@ -48,7 +48,7 @@ type options struct {
 }
 
 // WithManagedBy records which supervisor started this daemon ("systemd",
-// "launchd", "task"), published as /healthz `managedBy` so clients (the
+// "launchd", "taskscheduler"), published as /healthz `managedBy` so clients (the
 // desktop app, `smind update`) know an OS service manager owns the process
 // (ADR-0031 decision 6). The empty string, the default, omits the field.
 func WithManagedBy(supervisor string) Option {

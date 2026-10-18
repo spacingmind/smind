@@ -1034,8 +1034,9 @@ type runQueuedResult struct {
 // taskPromptResult is the terminal result of a successful task.prompt (or
 // run.attach/run.start reaching StatusDone).
 type taskPromptResult struct {
-	RunID      string `json:"runId"`
-	StopReason string `json:"stopReason"`
+	RunID       string `json:"runId"`
+	StopReason  string `json:"stopReason"`
+	Disposition string `json:"disposition,omitempty"`
 }
 
 // taskChunkParams is the params payload of every "chunk", "user_message",
@@ -1401,7 +1402,7 @@ func terminalResult(reg *runs.Registry, runID string) (any, error) {
 	}
 	switch status.Status {
 	case runs.StatusDone:
-		return taskPromptResult{RunID: runID, StopReason: status.StopReason}, nil
+		return taskPromptResult{RunID: runID, StopReason: status.StopReason, Disposition: status.Disposition}, nil
 	case runs.StatusStopped:
 		return nil, fmt.Errorf("run %s: stopped", runID)
 	case runs.StatusError:
@@ -1527,7 +1528,9 @@ type runLogsResult struct {
 	RunID      string `json:"runId"`
 	Status     string `json:"status"`
 	StopReason string `json:"stopReason,omitempty"`
-	Err        string `json:"err,omitempty"`
+	// Disposition is runs.RunStatus.Disposition ("needs-continue" or absent).
+	Disposition string `json:"disposition,omitempty"`
+	Err         string `json:"err,omitempty"`
 	// BaseSHA/HeadSHA/Dirty are the run's git provenance (O1), omitted
 	// while unknown.
 	BaseSHA string        `json:"baseSha,omitempty"`
@@ -1563,14 +1566,15 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 			events[i] = toRunLogEvent(e)
 		}
 		return runLogsResult{
-			RunID:      status.ID,
-			Status:     string(status.Status),
-			StopReason: status.StopReason,
-			Err:        status.Err,
-			BaseSHA:    derefStr(status.BaseSHA),
-			HeadSHA:    derefStr(status.HeadSHA),
-			Dirty:      status.Dirty,
-			Events:     events,
+			RunID:       status.ID,
+			Status:      string(status.Status),
+			StopReason:  status.StopReason,
+			Disposition: status.Disposition,
+			Err:         status.Err,
+			BaseSHA:     derefStr(status.BaseSHA),
+			HeadSHA:     derefStr(status.HeadSHA),
+			Dirty:       status.Dirty,
+			Events:      events,
 		}, nil
 	}
 }

@@ -8,7 +8,7 @@ import (
 )
 
 // Raw PromptResponse payloads captured from the real glm-acp-agent binary
-// (fake model); see docs/plans/active/dogfood-gap-fixes.md.
+// (fake model); see docs/plans/completed/dogfood-gap-fixes.md.
 const (
 	// 1.14.0: one prompt, 6 model calls: the summed total.
 	glmRawSixCalls = `{"stopReason":"end_turn","usage":{"inputTokens":21000,"outputTokens":210,"totalTokens":21210,"cachedReadTokens":18900,"thoughtTokens":0}}`

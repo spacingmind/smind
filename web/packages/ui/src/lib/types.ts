@@ -245,6 +245,8 @@ export interface RunSummary {
   StartedAt: string;
   FinishedAt: string | null;
   StopReason: string;
+  /** Derived by the daemon (ADR-0027 D13): "needs-continue" when the run ended done at a turn/token/budget cap; absent/empty otherwise. Not a status. */
+  Disposition?: string;
   Err: string;
   /** The run's current provider-native permission mode -- live for a running run (see run.setPermissionMode), whatever it last was for a finished one. */
   PermissionMode: string;
@@ -315,6 +317,8 @@ export interface RunSetPermissionModeResult {
 export interface RunAttachResult {
   runId: string;
   stopReason: string;
+  /** "needs-continue" when the run ended done at a cap (ADR-0027 D13). */
+  disposition?: string;
 }
 
 // Params of every "chunk" event task.prompt/run.attach emit
@@ -540,6 +544,8 @@ export interface RunLogsResult {
   runId: string;
   status: RunStatusValue;
   stopReason?: string;
+  /** "needs-continue" when the run ended done at a cap (ADR-0027 D13). */
+  disposition?: string;
   err?: string;
   /** O1 provenance -- omitted by the daemon when unknown (or by an older daemon). */
   baseSha?: string;
@@ -712,6 +718,8 @@ export interface RunStatusEventPayload {
   chatId: number;
   status: RunStatusValue;
   stopReason?: string;
+  /** "needs-continue" when the run ended done at a cap (ADR-0027 D13). */
+  disposition?: string;
   err?: string;
   /** O1 provenance -- omitted when unknown. */
   baseSha?: string;

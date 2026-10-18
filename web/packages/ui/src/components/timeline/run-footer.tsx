@@ -70,6 +70,7 @@ export function RunFooter<T extends RunFooterRun>({
         )}
         data-testid="run-meta"
         data-status={run.status}
+        data-disposition={run.disposition}
       >
         {running ? (
           <span className={cn(SEGMENT, "gap-1.5")}>

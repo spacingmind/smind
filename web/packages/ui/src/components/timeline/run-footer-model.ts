@@ -38,6 +38,8 @@ export interface RunFooterRun {
   startedAt: string;
   finishedAt?: string;
   stopReason?: string;
+  /** The daemon's derived disposition (ADR-0027 D13): "needs-continue" when the run ended done at a turn/token/budget cap. */
+  disposition?: string;
   err?: string;
   model?: string;
   usage?: RunUsage;
@@ -48,6 +50,16 @@ export interface RunFooterRun {
 
 /** `modelLabels` keys: `${provider}/${modelId}` for a catalog entry, `${provider}/` for the provider's default-model label. */
 export type RunModelLabels = Record<string, string>;
+
+/** runs.DispositionNeedsContinue. */
+const NEEDS_CONTINUE = "needs-continue";
+
+/** How each cap a daemon reports is worded; an unlisted cap reads "Stopped at a limit". */
+const CAP_SENTENCES: Record<string, string> = {
+  max_tokens: "Stopped at the output limit",
+  max_turn_requests: "Hit the tool-turn limit",
+  budget_exceeded: "Stopped at the budget limit",
+};
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 3_600_000;
@@ -208,6 +220,24 @@ export function describeRunFooter(
       action: "retry",
       duration: null,
       durationTitle: null,
+      model: opts.modelLabel,
+      age,
+    });
+  }
+
+  // The daemon says this run was cut off at a cap (ADR-0027 D13): it is not
+  // finished, whatever its "done" status. The disposition, not a list of stop
+  // reasons here, decides, so a cap this client has never heard of (a budget
+  // stop) still reads as needing a continue; an older daemon sends none and
+  // the stop-reason cases below cover the two caps it can report.
+  if (run.status === "done" && run.disposition === NEEDS_CONTINUE) {
+    return detail({
+      kind: "abnormal",
+      sentence: `${CAP_SENTENCES[run.stopReason ?? ""] ?? "Stopped at a limit"} · not finished`,
+      tone: "warning",
+      action: "continue",
+      duration,
+      durationTitle: proseDuration(ms),
       model: opts.modelLabel,
       age,
     });

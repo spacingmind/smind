@@ -67,7 +67,7 @@ var migrations = []migration{
 		},
 	},
 	{
-		// Task hierarchy (docs/plans/active/smind-control-parity.md): nullable
+		// Task hierarchy (docs/plans/completed/smind-control-parity.md): nullable
 		// parent pointer on tasks, nil for root tasks. Pre-existing databases
 		// get the column; no backfill needed (NULL is the valid root default).
 		name: "tasks.parent_task_id",

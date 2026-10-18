@@ -100,7 +100,7 @@ Anything touching those files waits for it to land on `develop`:
 
 ### Step 0 — tracked in existing plans
 `docs/plans/completed/mcp-server.md`, `docs/plans/completed/agent-mcp-servers.md`,
-and the task-hierarchy items of `docs/plans/active/smind-control-parity.md`.
+and the task-hierarchy items of `docs/plans/completed/smind-control-parity.md`.
 
 ### M1 — request log for proxied traffic
 - `request_log` table, one row per proxied request, with these columns:

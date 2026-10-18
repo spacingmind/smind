@@ -55,9 +55,10 @@ const (
 
 func main() {
 	windowMax := flag.Int("window-max", 0, "open a 10 minute pairing window for this many new devices at start (0 = closed)")
+	password := flag.String("password", "", "require this daemon password in every device_hello (ADR-0031 P13c); empty = none")
 	outdated := flag.Bool("outdated-daemon", false, "run a daemon from before device_hello v2 instead of the hub: it completes the E2EE handshake on every device route and then says nothing (no device challenge)")
 	flag.Parse()
-	if err := run(*windowMax, *outdated); err != nil {
+	if err := run(*windowMax, *outdated, *password); err != nil {
 		fmt.Fprintln(os.Stderr, "devharness:", err)
 		os.Exit(1)
 	}
@@ -149,9 +150,10 @@ type harness struct {
 	hubDone   chan struct{}
 	peers     map[string]*peer
 	peerKeys  map[string]ed25519.PrivateKey
+	password  string // the daemon password devices must carry; "" = none
 }
 
-func run(windowMax int, outdated bool) error {
+func run(windowMax int, outdated bool, password string) error {
 	relayDir, err := os.MkdirTemp("", "smind-devharness-relay-")
 	if err != nil {
 		return err
@@ -183,6 +185,7 @@ func run(windowMax int, outdated bool) error {
 		return err
 	}
 	h := &harness{
+		password: password,
 		secret:   secret,
 		fp:       server.CertFingerprint(cert),
 		relay:    &relayProc{dir: relayDir, nativeAddr: nativeLis.Addr().String(), web: webLis.Addr().String()},
@@ -325,7 +328,7 @@ func outdatedDaemon(ctx context.Context, h *harness) {
 }
 
 func (h *harness) startHub() {
-	h.hub = bridge.NewHub(bridge.Options{Registry: h.reg, LegacyDevices: false, Logf: logf})
+	h.hub = bridge.NewHub(bridge.Options{Registry: h.reg, LegacyDevices: false, Logf: logf, Password: bridge.StaticPassword(h.password)})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	hub := h.hub

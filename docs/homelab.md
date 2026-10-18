@@ -15,7 +15,7 @@ daemon to a relay registers **this daemon once** with that relay; every paired c
 workspaces, spaces and tasks. Nothing is created in smind. (Older docs and the wire format call this a "workspace";
 smind's own workspaces are a different thing: registered git repositories.)
 
-## Run the daemon as a service (Linux and macOS)
+## Run the daemon as a service (Linux, macOS and Windows)
 
 `smind serve` runs in the foreground and stops with your terminal. To keep the daemon running across logouts and
 reboots, let your OS service manager supervise it. smind has no background `smind start` of its own: the service manager
@@ -24,7 +24,8 @@ is the supervisor.
 ```sh
 smind service install        # systemd user unit (Linux) or LaunchAgent (macOS); enables it and starts the daemon
 # or in one step with the installer:
-curl -fsSL https://spacingmind.com/install.sh | sh -s -- --service
+curl -fsSL https://spacingmind.com/install.sh | sh -s -- --service       # Linux, macOS
+$env:SMIND_SERVICE = 1; irm https://raw.githubusercontent.com/spacingmind/smind/master/scripts/install.ps1 | iex   # Windows (PowerShell)
 ```
 
 | Command | What it does |
@@ -39,6 +40,11 @@ The port and every other setting come from `config.yaml` (there is no `--port`);
 `smind serve` you would run by hand. Once installed, `status`, `start`, `restart` and `logs` use the `SMIND_HOME` written
 in the unit (not the one in your current shell), so they always look at the daemon's own data. `install` captures the `PATH` of the shell you run it from, so `git`, `node` and
 your agent CLIs resolve inside the service (override with `--path`), and `SMIND_HOME` when you have it set (or `--home`).
+A daemon password (`smind set-password`, stored as a hash in `config.yaml`) and `server.listen` work under every
+service because the service starts the same `smind serve`: nothing secret is ever written into the unit, plist or task (the
+Windows task's command line and XML are readable by every local user), and `SMIND_PASSWORD`, `SMIND_LISTEN` and
+`SMIND_HOSTNAMES` from your shell are **not** carried into it, so set them in `config.yaml` with `smind config set`. The
+service's own probes and shutdown request use the daemon's loopback address and its token file, as `smind stop` does.
 If another daemon already answers on the configured port (a `smind serve` you started, or the desktop app's own),
 `install` enables the unit but does not start it and says why; it never stops a process it did not start.
 
@@ -59,6 +65,26 @@ which exists only while you are logged in to the Mac's graphical session, so it 
 be loaded over plain ssh on a Mac nobody is logged in to (the plist is still written and loads at the next login).
 `smind stop` (or `smind service stop`) leaves it stopped; a crash restarts it.
 
+**Windows.** A per-user **Scheduled Task** named `smind` (not a Windows Service, which would run as another identity
+without your `PATH`, agent logins and profile). It has a logon trigger for your account only, runs as you in your
+interactive session at the least privilege level, and registering it needs **no administrator rights** (a policy that
+forbids scheduled tasks can still refuse it; the error then names the refused `schtasks /Create` step). **It starts at
+logon, not at boot**: a headless Windows machine needs auto-logon, which smind does not set up. The daemon is launched
+through `conhost.exe --headless`, so it has no console window. It runs only in your own interactive Windows session
+(signed in at the console or over RDP): `smind service start` over plain ssh will time out. `status` exits 0 / 3 / 4 as on the other
+systems. The task is named `smind` machine-wide, so a second user on the same machine is refused rather than given their own.
+
+- `smind service stop` asks the daemon to shut down (`POST /api/shutdown`) and only if it does not exit in time ends the
+  task and kills what is left; it never stops a daemon this task did not start (the desktop app's, or one you started by
+  hand), and `install`/`start` do not start next to one.
+- A crashed daemon is restarted up to 3 times, 1 minute apart, by `smind service run` (what the task executes): the
+  Task Scheduler's own restart-on-failure cannot see the daemon's exit code through the headless console. After that, or
+  after a clean stop, it stays down until the next logon or `smind service start`.
+- The task runs with your logon environment (`PATH` included), so there is no `--path`; `--home` becomes `service run
+  --home`. Environment changes need a new logon to reach it.
+- `install.ps1` takes `-Service` (`& ([scriptblock]::Create((irm <url>))) -Service`) or `SMIND_SERVICE=1` for the
+  `irm | iex` form.
+
 **Logs.** The daemon writes `$SMIND_HOME/daemon.log` itself (mode `0600`, rotated at 10 MiB, 5 files kept; change with
 `log.maxSizeMB` and `log.maxFiles` in `config.yaml`) in addition to stderr, so `smind service logs` works the same on
 every OS. On Linux `journalctl --user -u smind` (`journalctl -u smind` for a `--system` unit) shows the same lines plus
@@ -68,8 +94,9 @@ anything the daemon prints outside its logger, such as a crash trace; on macOS t
 does not start while the app's own daemon holds the port. The app sees a service-managed daemon as one it does not
 manage (`/healthz` reports `"managedBy": "systemd"` or `"launchd"`) and leaves it alone: Settings → Daemon says "Managed
 by systemd" and offers no **take over management** (the app also refuses it), because the service manager would just
-restart the daemon. Stop the service first (`smind service uninstall`) if you want the app to manage the daemon. Windows
-has no `smind service` yet (a per-user scheduled task is planned).
+restart the daemon. Stop the service first (`smind service uninstall`) if you want the app to manage the daemon. On Windows
+the value is `"managedBy": "taskscheduler"` (Settings → Daemon says "Managed by Task Scheduler"), and `smind service install`
+refuses to run from the app's own `%LOCALAPPDATA%\smind\bin` directory (the app replaces that daemon when it updates).
 
 **Older than the app.** When the connected daemon is older than the desktop app, the app shows a dismissible notice with
 the command that updates it and a **Copy** button: `smind update` (daemons from v0.12.0 on) or the installer one-liners
@@ -179,6 +206,18 @@ smind relay listening on [::]:7400 (fingerprint 3f9a…), grpc-web on [::]:7401
 Keep that fingerprint; you will check it in step 3. The relay data (certificate, relay host secret hashes) lives under
 `$SMIND_HOME/relay` (default `~/.smind/relay`).
 
+**A real certificate instead.** If the relay has a DNS name and you have a certificate for it (Let's Encrypt, or your own
+CA), serve that instead:
+
+```sh
+smind relay --tls-cert /etc/letsencrypt/live/relay.example.com/fullchain.pem \
+            --tls-key  /etc/letsencrypt/live/relay.example.com/privkey.pem
+```
+
+Both ports use it. Clients then verify it like a browser does (trusted CA, matching name, not expired), so there is
+no fingerprint to compare or pin, and a phone can connect. The files are re-read when they change, so a renewal needs no
+restart. Reach the relay by the name in the certificate (`relay.example.com:7400`), not by IP address.
+
 ### 2. Create a relay host
 
 On the relay machine:
@@ -198,9 +237,27 @@ On the machine that runs `smind serve`:
 smind relay connect relay.example.com:7400 homelab <secret>
 ```
 
-`connect` saves the connection and **pins the relay's TLS fingerprint on first use**; it prints the fingerprint it
-pinned. **Compare it with the one the relay printed in step 1** — if they differ, someone is in the middle: do not
-continue. `smind serve` then dials the relay automatically on every start (restart it if it was already running).
+`connect` first checks the relay's certificate the way a browser would. If it verifies (a public CA, the right name, not
+expired) it stores that decision and there is nothing to pin. Otherwise, which is the case for the default self-signed
+certificate, it **shows the certificate's fingerprint and asks you to confirm it**:
+
+```
+The relay at relay.example.com:7400 does not present a certificate your system trusts:
+  x509: certificate signed by unknown authority
+
+Its certificate fingerprint is
+
+  3f9a…
+
+Compare it with the fingerprint "smind relay" printed when it started. …
+Pin it and connect? [y/N]
+```
+
+**Compare it with the one the relay printed in step 1** — if they differ, someone is in the middle: answer no. It never
+pins silently, and without a confirmation (for example with no terminal) it saves nothing. To skip the prompt, pass the
+fingerprint you copied from the relay: `smind relay connect --fingerprint 3f9a… relay.example.com:7400 homelab <secret>`
+pins it only if the relay presents exactly that certificate. `smind serve` then dials the relay automatically on every start
+(restart it if it was already running).
 
 ### 4. Print a pairing link
 
@@ -210,7 +267,8 @@ smind relay offer
 
 The link goes to stdout. On a terminal (or with `--qr`) a QR code is also drawn on stderr, so `$(smind relay offer)`
 still captures only the link. `--png offer.png` writes the QR code to a file (mode `0600`; `--force` overwrites an
-existing file). An offer carries the relay host secret and the pinned fingerprint, so it is about 430 bytes; the QR
+existing file). An offer carries the relay host secret and, for a self-signed relay, the pinned fingerprint (a relay with a
+CA certificate has none), so it is about 430 bytes; the QR
 falls back to error-correction level L to fit it, and an offer too long for any QR code is still printed as a link
 with a note.
 
@@ -237,7 +295,13 @@ The app and the daemon must speak the same device-identity version (hello v2): i
 app says "Daemon outdated or on a different version" and does not connect — update the daemon with `smind update`.
 
 A phone does not pin the relay's certificate (it has no way to confirm a fingerprint): the relay needs a certificate
-that the phone already trusts, for example one from a public CA. A self-signed relay certificate is refused.
+that the phone already trusts, for example one from a public CA (`smind relay --tls-cert/--tls-key`). A self-signed relay
+certificate is refused.
+
+**Desktop app and CA relays.** Today the desktop app's "Add via relay link" accepts only an offer with a fingerprint, so
+it cannot yet connect to a relay serving a CA certificate (an offer without one is rejected as "missing relay certificate
+fingerprint"). Until that lands, use the daemon on the relay's own network, or pair desktop clients to a self-signed
+relay.
 
 ### 7. Approve devices
 
@@ -266,6 +330,20 @@ the change applies when the daemon next starts.
 > the relay operator — can connect, and `devices revoke`, the pending state and the pairing window do not apply to it. The daemon
 > logs a warning at start and for every legacy connection.
 
+### 8. Require the daemon password from relay devices
+
+If the daemon has a password (`smind set-password`, see Path A), **every relay device must present it**, on every
+connection, approved devices included. It travels inside the end-to-end encrypted channel (the relay never sees it), and it
+is checked **before** anything about the device is recorded or revealed: a device without the right password is never listed
+as pending, and learns nothing about whether it is approved or revoked. The desktop app asks for it in Settings → Connections
+("This daemon needs its password"), keeps it in memory only (never on disk, never in a log, never handed back to the UI), and
+asks again after a restart. Wrong guesses are rate limited per device (5 free tries, then waits that double up to 15 minutes),
+and with more than 40 wrong attempts a minute across all devices the daemon refuses every password check for a minute.
+
+Without a password a relay device is admitted by your approval alone, and the daemon logs one warning line when the relay
+bridge starts. With a password, a client that predates device identity (`relay.legacyDevices: true`) is refused regardless: the
+legacy route cannot carry a password. The mobile app takes the same password (its own prompt follows).
+
 ### Limits today
 
 - A relay host serves up to 16 devices at once (`smind relay --max-devices-per-host` on the relay,
@@ -275,8 +353,8 @@ the change applies when the daemon next starts.
   once. A leaked link alone no longer admits new devices once the pairing window has closed, because the daemon
   refuses devices it has not approved — but it still reaches the relay host.
 - Requests in flight at the moment a connection drops hard can be lost; clients time out and open a fresh session.
-- Trust on first use: the fingerprint is pinned the first time you run `relay connect` (step 3), so do that step on a
-  trusted network and compare fingerprints.
+- A self-signed relay is trusted by confirming its fingerprint in `relay connect` (step 3): compare it with the one the
+  relay printed, and pass `--fingerprint` to make that check explicit. A CA certificate needs no such step.
 
 ## Docker
 

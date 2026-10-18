@@ -91,15 +91,17 @@ type taskStatusPayload struct {
 }
 
 // runStatusPayload is the payload of run.status events:
-// {runId, taskId, chatId, status, stopReason, err}. ChatID is ADR-0016
-// P1.4's additive field.
+// {runId, taskId, chatId, status, stopReason, disposition, err}. ChatID is
+// ADR-0016 P1.4's additive field; disposition is runs.RunStatus.Disposition
+// (ADR-0027 D13), additive and absent unless a run needs a continue.
 type runStatusPayload struct {
-	RunID      string `json:"runId"`
-	TaskID     int64  `json:"taskId"`
-	ChatID     int64  `json:"chatId"`
-	Status     string `json:"status"`
-	StopReason string `json:"stopReason,omitempty"`
-	Err        string `json:"err,omitempty"`
+	RunID       string `json:"runId"`
+	TaskID      int64  `json:"taskId"`
+	ChatID      int64  `json:"chatId"`
+	Status      string `json:"status"`
+	StopReason  string `json:"stopReason,omitempty"`
+	Disposition string `json:"disposition,omitempty"`
+	Err         string `json:"err,omitempty"`
 	// BaseSHA/HeadSHA/Dirty are the run's git provenance (O1), omitted
 	// while unknown.
 	BaseSHA string `json:"baseSha,omitempty"`
