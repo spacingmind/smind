@@ -136,7 +136,13 @@ function DaemonSection() {
           {status.prerequisiteMessage}
         </p>
       )}
-      {status.managedBy && (
+      {status.managedBy === "docker" && (
+        <p data-testid="daemon-service-notice" className="text-ui-base text-muted-foreground">
+          This daemon runs in a Docker container (managed by Docker), so this app leaves it alone. Restart or update it with{" "}
+          <code className="font-mono text-ui-sm">docker</code> (pull the new image and recreate the container).
+        </p>
+      )}
+      {status.managedBy && status.managedBy !== "docker" && (
         <p data-testid="daemon-service-notice" className="text-ui-base text-muted-foreground">
           An OS service ({managedByLabel(status.managedBy)}) runs this daemon, so this app leaves it alone: restarting or
           stopping it from here would only make the service start it again. Manage it with{" "}

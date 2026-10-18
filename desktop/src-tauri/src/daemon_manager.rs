@@ -161,6 +161,7 @@ fn classify_unmanaged(platform: Platform, owner_image: Option<&str>, managed_by:
 fn managed_by_label(managed_by: &str) -> &str {
     match managed_by {
         "task" => "Task Scheduler",
+        "docker" => "Docker",
         other => other,
     }
 }
@@ -522,6 +523,11 @@ fn windows_exe_matches(pid: u32, expected: &Path) -> bool {
 /// not refused here.
 fn take_over_refusal(platform: Platform, owner_image: Option<&str>, managed_by: Option<&str>, port: u16) -> Option<String> {
     if classify_unmanaged(platform, owner_image, managed_by) == UnmanagedKind::Service {
+        if managed_by == Some("docker") {
+            return Some(format!(
+                "the daemon on port {port} runs in a Docker container (managed by Docker) -- manage it with docker, not from this app"
+            ));
+        }
         return Some(format!(
             "the daemon on port {port} is managed by {} -- manage it with `smind service` (stop, restart, update), not from this app",
             managed_by_label(managed_by.unwrap_or_default())
@@ -1458,6 +1464,9 @@ mod tests {
         }
         let err = take_over_refusal(Platform::Windows, None, Some("task"), 4648).unwrap();
         assert!(err.contains("Task Scheduler"), "{err}");
+        // A container is not a service manager: no `smind service` advice.
+        let err = take_over_refusal(Platform::Macos, Some("/usr/local/bin/smind"), Some("docker"), 4648).unwrap();
+        assert!(err.contains("managed by Docker") && !err.contains("smind service"), "{err}");
         // Absent managedBy: a smind owner is still eligible.
         assert!(take_over_refusal(Platform::Macos, Some("/x/smind"), None, 4648).is_none());
     }

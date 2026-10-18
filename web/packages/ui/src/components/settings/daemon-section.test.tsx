@@ -288,6 +288,17 @@ describe("daemon-section (desktop build)", () => {
     expect(screen.queryByTestId("daemon-update")).not.toBeInTheDocument();
   });
 
+  it("names Docker for a containerised daemon and does not advise `smind service`", async () => {
+    await renderSection({
+      daemonStatus: () => Promise.resolve(baseStatus({ managedState: "unmanaged", managedBy: "docker", comparison: "older" })),
+    });
+
+    expect(screen.getByTestId("daemon-managed-state")).toHaveTextContent("Managed by Docker");
+    expect(screen.getByTestId("daemon-service-notice")).toHaveTextContent("Docker container");
+    expect(screen.getByTestId("daemon-service-notice")).not.toHaveTextContent("smind service");
+    expect(screen.queryByTestId("daemon-take-over")).not.toBeInTheDocument();
+  });
+
   it("names Task Scheduler for a Windows service-managed daemon", async () => {
     await renderSection({
       daemonStatus: () => Promise.resolve(baseStatus({ platform: "windows", managedState: "unmanaged", managedBy: "task" })),

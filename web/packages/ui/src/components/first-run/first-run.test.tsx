@@ -97,6 +97,11 @@ describe("first-run branding and copy", () => {
     expect(screen.getByTestId("first-run-choice-existing")).not.toHaveTextContent("started outside the app");
   });
 
+  it("says managed by Docker for a containerised daemon", async () => {
+    await renderFirstRun({ ...RUNNING_SMIND, managedBy: "docker" });
+    expect(screen.getByTestId("first-run-choice-existing")).toHaveTextContent("managed by Docker");
+  });
+
   it("labels the daemon password field", async () => {
     desk.probeConnection.mockResolvedValue({ ...PROBE_OK, authRequired: true });
     await renderFirstRun();
