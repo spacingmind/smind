@@ -165,6 +165,7 @@ export function ConnectAccountPanel({
   // explicit choice survives a location flip but resets on provider change.
   useEffect(() => {
     setMethodTouched(false);
+    setLabelTouched(false);
   }, [provider]);
 
   useEffect(() => {

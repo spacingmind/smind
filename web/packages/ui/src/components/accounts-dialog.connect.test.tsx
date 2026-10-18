@@ -407,6 +407,63 @@ describe("ConnectAccountPanel connect flows", () => {
     expect(screen.getByLabelText("Sign-in redirect address")).toHaveFocus();
   });
 
+
+  it("hint timer is cancelled on cancel and unmount", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { client, onConnected } = await setup();
+    void onConnected;
+
+    await act(async () => {
+      await connect(client);
+    });
+    await act(async () => {
+      emitAuthorize(client);
+    });
+    await flush();
+
+    // Cancel clears the timer and the region with it.
+    fireEvent.click(screen.getByTestId("accounts-connect-cancel"));
+    await flush();
+    await act(async () => {
+      vi.advanceTimersByTime(15000);
+    });
+    await flush();
+    expect(screen.queryByTestId("login-trouble-toggle")).not.toBeInTheDocument();
+  });
+
+  it("labelTouched survives a re-render but resets on provider change", async () => {
+    await setup();
+    fireEvent.change(labelInput(), { target: { value: "my-label" } });
+
+    // A provider switch re-prefills (the edit does not survive it).
+    fireEvent.click(await screen.findByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "Codex" }));
+    expect(labelInput().value).toBe("account-1");
+  });
+
+  it("the pasted address is not in the DOM after an accepted paste", async () => {
+    const { client } = await setup({ isDesktop: true, connection: { id: "c1", kind: "url" } });
+    await act(async () => {
+      await connect(client);
+    });
+    await act(async () => {
+      emitAuthorize(client);
+    });
+    await flush();
+
+    const input = screen.getByLabelText("Sign-in redirect address");
+    fireEvent.change(input, { target: { value: REDIRECT_URL } });
+    fireEvent.click(screen.getByTestId("paste-redirect-submit"));
+    await waitFor(() => client.nth("account.oauthComplete"));
+    await act(async () => {
+      client.nth("account.oauthComplete").resolve(null);
+    });
+    await flush();
+
+    expect(input).toHaveValue("");
+    expect(document.body.innerHTML).not.toContain(REDIRECT_URL);
+  });
+
   it("the paste a credential disclosure is gone", async () => {
     await setup();
     expect(screen.queryByTestId("accounts-manual-toggle")).not.toBeInTheDocument();
@@ -414,7 +471,7 @@ describe("ConnectAccountPanel connect flows", () => {
   });
 
   it("location toggle switches remote and local defaults", async () => {
-    const { client } = await setup({ isDesktop: true, connection: { id: "c1", kind: "url" } });
+    await setup({ isDesktop: true, connection: { id: "c1", kind: "url" } });
     fireEvent.click(await screen.findByLabelText("Provider"));
     fireEvent.click(await screen.findByRole("option", { name: "Codex" }));
     await flush();
@@ -432,7 +489,5 @@ describe("ConnectAccountPanel connect flows", () => {
     fireEvent.click(screen.getByTestId("login-location-toggle"));
     await flush();
     expect(screen.getByRole("radio", { name: "Device code" })).toHaveAttribute("data-state", "on");
-
-    void connect(client);
   });
 });

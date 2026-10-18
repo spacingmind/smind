@@ -19,24 +19,22 @@ export function PasteRedirectPanel(props: {
   const [value, setValue] = useState("");
   const trimmed = value.trim();
   const disabled = props.pending || trimmed === "";
-  // An accepted paste is `pending` going true -> false with no error: the
-  // address (which carries the OAuth code) is spent, so it must not stay
-  // in the input or the DOM.
   // An edited input invalidates the shown error; the next paste re-arms it.
   const [dismissedError, setDismissedError] = useState(false);
   const error = props.error && !dismissedError ? props.error : null;
+  // The pasted address carries the OAuth code and is spent the moment it
+  // is submitted -- cleared on submit (the daemon now holds it) and again
+  // on an accepted paste (`pending` true -> false with no error).
   const wasPending = useRef(false);
   useEffect(() => {
-    if (wasPending.current && !props.pending && !props.error) {
-      setValue("");
-      setDismissedError(false);
-    }
+    if (wasPending.current && !props.pending && !props.error) setValue("");
     wasPending.current = props.pending;
   }, [props.pending, props.error]);
 
   function submit() {
     if (disabled) return;
     props.onSubmit(trimmed);
+    setValue("");
   }
 
   return (

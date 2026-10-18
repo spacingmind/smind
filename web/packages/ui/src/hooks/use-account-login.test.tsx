@@ -400,7 +400,8 @@ describe("useAccountLogin", () => {
       client.nth("account.oauthComplete").reject(new Error("account.oauthComplete: weird: nope"));
     });
     await flush();
-    const serialized = JSON.stringify({ state: login().state, pasteError: login().pasteError });
+    const whole = { ...login() };
+    const serialized = JSON.stringify(whole);
     expect(serialized).not.toContain(PASTED_URL);
     expect(serialized).not.toContain("SECRET");
   });
