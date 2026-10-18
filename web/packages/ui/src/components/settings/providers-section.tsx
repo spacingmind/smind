@@ -1,6 +1,15 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
-import { ConnectAccountPanel, useProviderTest } from "@/components/accounts-dialog";
+import {
+  useAccountStatus,
+  useAccounts,
+  useRemoveAccount,
+  useRenameAccount,
+  useRunProviderTest,
+  useUpdateAccountCredential,
+} from "@/hooks/use-accounts";
+import { ConnectAccountPanel } from "@/components/accounts-dialog";
 import {
   registerSettingsSection,
   type SettingsSectionContext,
@@ -30,11 +39,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { queryKeys } from "@/lib/query-keys";
 import type {
   Account,
   ProviderInfo,
   ProviderListResult,
-  ProviderTestResult,
   RunSummary,
 } from "@/lib/types";
 
@@ -152,41 +161,18 @@ export function providerConsumer(accountProvider: string): ProviderConsumer {
 
 type RowAction = { kind: "rename" | "credential" | "remove"; account: Account };
 
-function ProvidersSection({ client, events }: SettingsSectionContext) {
-  const [accounts, setAccounts] = useState<Account[] | null>(null);
+function ProvidersSection({ client }: SettingsSectionContext) {
+  const queryClient = useQueryClient();
+  const accountsQuery = useAccounts();
+  const accounts = accountsQuery.data;
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  const [error, setError] = useState<string | null>(null);
   // The connect/login + manual-paste flows live in the shared
   // ConnectAccountPanel (accounts-dialog.tsx) -- the same flows the old
   // dialog hosted -- shown behind the header's "Connect account"
   // disclosure so the grouped list stays the surface's primary content.
   const [connecting, setConnecting] = useState(false);
   const [action, setAction] = useState<RowAction | null>(null);
-  const { testResults, testing, testProvider } = useProviderTest(client);
-
-  async function refreshAccounts() {
-    if (!client) return;
-    try {
-      const list = (await client.call<Account[]>("account.list")) ?? [];
-      setAccounts(list);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  useEffect(() => {
-    if (!client) return;
-    let cancelled = false;
-    client
-      .call<Account[]>("account.list")
-      .then((list) => {
-        if (!cancelled) setAccounts(list ?? []);
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-    return () => {
-      cancelled = true;
-    };
-  }, [client]);
+  const { runTest, isTesting } = useRunProviderTest();
 
   useEffect(() => {
     if (!client) return;
@@ -201,52 +187,6 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
       cancelled = true;
     };
   }, [client]);
-
-  // Live updates (ADR-0009 shape): a rename/credential swap from a second
-  // tab or the CLI arrives as account.updated, a removal as
-  // account.removed -- no manual refresh needed. The acting tab applies
-  // mutations through its own optimistic upsert too (see each action's
-  // handler), so a null events surface never blocks the flow.
-  useEffect(() => {
-    if (!events) return;
-    const offUpdated = events.subscribe("account.updated", (payload) => {
-      const a = (payload as { account?: Account } | undefined)?.account;
-      if (!a) return;
-      setAccounts((prev) => {
-        if (!prev) return prev;
-        const index = prev.findIndex((existing) => existing.id === a.id);
-        if (index === -1) return [...prev, a];
-        const next = prev.slice();
-        next[index] = a;
-        return next;
-      });
-    });
-    const offRemoved = events.subscribe("account.removed", (payload) => {
-      const id = (payload as { id?: number } | undefined)?.id;
-      if (id === undefined) return;
-      setAccounts((prev) => (prev ? prev.filter((a) => a.id !== id) : prev));
-    });
-    return () => {
-      offUpdated();
-      offRemoved();
-    };
-  }, [events]);
-
-  /** Applies a mutation's result immediately (the event may lag or events be null) -- upsert-by-id, mirroring profiles-section's handler. */
-  function upsertAccount(a: Account) {
-    setAccounts((prev) => {
-      if (!prev) return [a];
-      const index = prev.findIndex((existing) => existing.id === a.id);
-      if (index === -1) return [...prev, a];
-      const next = prev.slice();
-      next[index] = a;
-      return next;
-    });
-  }
-
-  function dropAccount(id: number) {
-    setAccounts((prev) => (prev ? prev.filter((a) => a.id !== id) : prev));
-  }
 
   const { groups, other } = groupAccountsByProvider(providers, accounts ?? []);
 
@@ -271,15 +211,15 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
         <ConnectAccountPanel
           client={client}
           providers={providers}
-          onConnected={() => void refreshAccounts()}
+          onConnected={() => void queryClient.invalidateQueries({ queryKey: queryKeys.accountList() })}
         />
       )}
-      {error && (
+      {accountsQuery.error && (
         <p role="alert" className="text-ui-base text-destructive">
-          {error}
+          {accountsQuery.error instanceof Error ? accountsQuery.error.message : String(accountsQuery.error)}
         </p>
       )}
-      {accounts === null ? (
+      {accounts === undefined ? (
         <p className="text-ui-base text-muted-foreground">Loading…</p>
       ) : (
         <div className="flex flex-col gap-3 rounded-xl border bg-card p-3">
@@ -318,11 +258,7 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
                       read by it.
                     </span>
                   </span>
-                  <TestButton
-                    providerId={info.id}
-                    testing={testing[info.id]}
-                    onTest={testProvider}
-                  />
+                  <TestButton providerId={info.id} testing={isTesting(info.id)} onTest={runTest} />
                 </div>
               ) : groupAccounts.length === 0 ? (
                 <div
@@ -348,13 +284,10 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
                     <AccountRow
                       key={account.id}
                       account={account}
-                      testResult={testResults[account.provider]}
-                      testing={testing[account.provider]}
-                      onTest={testProvider}
+                      runTest={runTest}
+                      testing={isTesting(account.provider)}
                       action={action?.account.id === account.id ? action : null}
                       onAction={setAction}
-                      onUpsert={upsertAccount}
-                      client={client}
                     />
                   ))}
                 </ul>
@@ -390,13 +323,10 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
                   <AccountRow
                     key={account.id}
                     account={account}
-                    testResult={testResults[account.provider]}
-                    testing={testing[account.provider]}
-                    onTest={testProvider}
+                    runTest={runTest}
+                    testing={isTesting(account.provider)}
                     action={action?.account.id === account.id ? action : null}
                     onAction={setAction}
-                    onUpsert={upsertAccount}
-                    client={client}
                   />
                 ))}
               </ul>
@@ -410,10 +340,7 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
           account={action.account}
           providers={providers}
           accounts={accounts ?? []}
-          onRemoved={() => {
-            dropAccount(action.account.id);
-            setAction(null);
-          }}
+          onRemoved={() => setAction(null)}
           onOpenChange={(open) => !open && setAction(null)}
         />
       )}
@@ -446,24 +373,21 @@ function TestButton({
 
 function AccountRow({
   account,
-  testResult,
+  runTest,
   testing,
-  onTest,
   action,
   onAction,
-  onUpsert,
-  client,
 }: {
   account: Account;
-  testResult: ProviderTestResult | undefined;
-  testing: boolean | undefined;
-  onTest: (providerId: string) => void;
+  runTest: (providerId: string) => void;
+  testing: boolean;
   action: RowAction | null;
   onAction: (action: RowAction | null) => void;
-  onUpsert: (account: Account) => void;
-  client: SettingsSectionContext["client"];
 }) {
-  const state = testResult === undefined ? "unknown" : testResult.ok ? "ok" : "failed";
+  const status = useAccountStatus(account.id);
+  // The shared cache fold (ADR-0032): one status across Providers, Plan
+  // usage and the chat pill. The old per-component dot only knew provider.test.
+  const state = status ? (status.tone === "danger" ? "failed" : status.tone === "ok" ? "ok" : status.tone === "warning" ? "warning" : "unknown") : "unknown";
   return (
     <li
       className="flex flex-col gap-1 rounded-lg px-2 py-1.5 hover:bg-hover"
@@ -472,11 +396,7 @@ function AccountRow({
       {action?.kind === "rename" ? (
         <RenameForm
           account={account}
-          client={client}
-          onSaved={(updated) => {
-            onUpsert(updated);
-            onAction(null);
-          }}
+          onSaved={() => onAction(null)}
           onCancel={() => onAction(null)}
         />
       ) : (
@@ -484,43 +404,37 @@ function AccountRow({
           <div className="flex items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1.5">
               <StatusDot
-                status={state === "ok" ? "success" : state === "failed" ? "danger" : "neutral"}
+                status={state === "ok" ? "success" : state === "failed" ? "danger" : state === "warning" ? "warning" : "neutral"}
                 className="size-2"
-                title={
-                  state === "ok"
-                    ? "Connection ok"
-                    : state === "failed"
-                      ? "Connection failed"
-                      : "Not tested yet"
-                }
+                title={status?.label ?? "Not tested yet"}
                 data-testid={`provider-row-dot-${account.id}`}
                 data-status={state}
               />
               <span className="min-w-0 truncate text-ui-base font-medium text-foreground">
-                {account.label}
+                {status?.name ?? account.label}
               </span>
               <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">
                 {authTypeLabel(account.credentialType)}
               </span>
             </span>
             <span className="flex shrink-0 items-center gap-2">
-              {testResult && (
+              {status?.reason && (
                 <span
                   className={`max-w-48 truncate text-ui-sm ${
-                    testResult.ok ? "text-success" : "text-destructive"
+                    state === "ok" ? "text-success" : state === "warning" ? "text-warning" : "text-destructive"
                   }`}
                   data-testid={`provider-row-test-result-${account.id}`}
                 >
-                  {testResult.detail}
+                  {status.reason}
                 </span>
               )}
-              <TestButton providerId={account.provider} testing={testing} onTest={onTest} />
+              <TestButton providerId={account.provider} testing={testing} onTest={runTest} />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    aria-label={`Account actions for ${account.label}`}
+                    aria-label={`Account actions for ${status?.name ?? account.label}`}
                     data-testid={`provider-row-menu-${account.id}`}
                   >
                     <Icons.more />
@@ -553,11 +467,7 @@ function AccountRow({
           {action?.kind === "credential" && (
             <UpdateCredentialForm
               account={account}
-              client={client}
-              onSaved={(updated) => {
-                onUpsert(updated);
-                onAction(null);
-              }}
+              onSaved={() => onAction(null)}
               onCancel={() => onAction(null)}
             />
           )}
@@ -570,26 +480,27 @@ function AccountRow({
 /** Inline label edit (sketch §4's "edit opens inline in the row"): one input + Save/Cancel, saving via account.rename. */
 function RenameForm({
   account,
-  client,
   onSaved,
   onCancel,
 }: {
   account: Account;
-  client: SettingsSectionContext["client"];
-  onSaved: (updated: Account) => void;
+  onSaved: () => void;
   onCancel: () => void;
 }) {
+  // The edit still targets the real account.label; the usage report's
+  // displayName wins for display (AC58) but is not what this form changes.
+  const rename = useRenameAccount();
   const [label, setLabel] = useState(account.label);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function save() {
-    if (!client || !label.trim()) return;
+    if (!label.trim()) return;
     setPending(true);
     setError(null);
     try {
-      const updated = await client.call<Account>("account.rename", { id: account.id, label: label.trim() });
-      onSaved(updated);
+      await rename.mutateAsync({ id: account.id, label: label.trim() });
+      onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -645,31 +556,30 @@ function RenameForm({
  */
 function UpdateCredentialForm({
   account,
-  client,
   onSaved,
   onCancel,
 }: {
   account: Account;
-  client: SettingsSectionContext["client"];
-  onSaved: (updated: Account) => void;
+  onSaved: () => void;
   onCancel: () => void;
 }) {
+  const updateCredential = useUpdateAccountCredential();
   const [credential, setCredential] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function save() {
-    if (!client || !credential.trim()) return;
+    if (!credential.trim()) return;
     setPending(true);
     setError(null);
     try {
-      const updated = await client.call<Account>("account.updateCredential", {
+      await updateCredential.mutateAsync({
         id: account.id,
         credential: credential.trim(),
         ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
       });
-      onSaved(updated);
+      onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -735,6 +645,7 @@ function RemoveAccountDialog({
   onOpenChange,
 }: {
   client: SettingsSectionContext["client"];
+  // eslint-disable-next-line
   account: Account;
   providers: ProviderInfo[];
   accounts: Account[];
@@ -744,6 +655,7 @@ function RemoveAccountDialog({
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const remove = useRemoveAccount();
 
   useEffect(() => {
     if (!client) return;
@@ -806,11 +718,10 @@ function RemoveAccountDialog({
             disabled={pending}
             data-testid={`provider-remove-confirm-${account.id}`}
             onClick={async () => {
-              if (!client) return;
               setPending(true);
               setError(null);
               try {
-                await client.call("account.remove", { id: account.id });
+                await remove.mutateAsync(account.id);
                 onRemoved();
               } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));

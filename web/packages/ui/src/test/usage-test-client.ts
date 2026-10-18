@@ -2,7 +2,7 @@ import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { AccountUsage, AccountUsageParams } from "@/lib/account-usage/types";
 import { RpcError, type WsClient } from "@/lib/ws-client";
 import { usageResult } from "@/test/account-usage-fixtures";
-import type { Account, ProviderListResult, ProviderTestResult } from "@/lib/types";
+import type { Account, ProviderListResult, ProviderTestResult, RunSummary } from "@/lib/types";
 
 /**
  * A scripted daemon for the plan-usage tests: answers `account.usage` from a
@@ -34,12 +34,16 @@ export class FakeUsageDaemon {
   accounts: Account[] = [];
   /** Answers `provider.list`. */
   providers: ProviderListResult = { providers: [] };
+  /** Answers `run.list` (the remove-account warning's running-run count). */
+  runs: RunSummary[] = [];
   /** `provider.test` answers per provider key; a missing key answers `{ ok: true, detail: "ok" }`. */
   testResults: Record<string, ProviderTestResult> = {};
   /** When set, every `account.list` / `provider.list` / `provider.test` / account-mutation request rejects with it. */
   failNonUsageWith: Error | null = null;
   /** Every non-`account.usage` request, as `{ method, params }`, in order. */
   calls: { method: string; params: unknown }[] = [];
+  /** Optional shaper for an account mutation's result (the daemon's own answer, e.g. a credential swap that changes credentialType). */
+  onAccountMutation: ((method: string, params: unknown, account: Account) => Account) | null = null;
 
   constructor(reports: AccountUsage[]) {
     this.reports = reports;
@@ -68,14 +72,14 @@ export class FakeUsageDaemon {
             const index = this.accounts.findIndex((a) => a.id === p.id);
             if (index === -1) throw new RpcError(`account ${p.id} not found`);
             this.accounts[index] = { ...this.accounts[index], label: p.label, updatedAt: new Date().toISOString() };
-            return this.accounts[index];
+            return this.onAccountMutation ? this.onAccountMutation(method, params, this.accounts[index]) : this.accounts[index];
           }
           case "account.updateCredential": {
             const p = params as { id: number };
             const index = this.accounts.findIndex((a) => a.id === p.id);
             if (index === -1) throw new RpcError(`account ${p.id} not found`);
             this.accounts[index] = { ...this.accounts[index], updatedAt: new Date().toISOString() };
-            return this.accounts[index];
+            return this.onAccountMutation ? this.onAccountMutation(method, params, this.accounts[index]) : this.accounts[index];
           }
           case "account.remove": {
             const p = params as { id: number };
@@ -83,7 +87,7 @@ export class FakeUsageDaemon {
             return null;
           }
           case "run.list":
-            return [];
+            return this.runs;
           case "account.add": {
             const p = params as { provider: string; label: string; credentialType?: string };
             const account: Account = {
