@@ -8,16 +8,14 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
 import { useDefaultAgentId } from "@/hooks/use-default-agent";
+import { useProviderCatalog } from "@/hooks/use-provider-catalog";
+import { useProviderHealth } from "@/hooks/use-provider-health";
+import { useCreateProfile, useDeleteProfile, useProfiles, useUpdateProfile } from "@/hooks/use-profiles";
 import { AUTO_ACCEPT_HELP, AUTO_ACCEPT_LABEL, describePermission, providerModels, providerModes, supportsAutoAccept } from "@/lib/permission-modes";
-import { accountHealthTestKey } from "@/lib/provider-health";
 import { subscribeSettingsIntent, takeSettingsIntent, type ProfileSeed } from "@/lib/settings-intent";
 import { thinkingLevelLabel } from "@/lib/thinking-levels";
-import type { AgentProfile, ModeInfo, ProviderInfo, ProviderListResult, ProviderTestResult, ThinkingLevel } from "@/lib/types";
-import type { WsClient } from "@/lib/ws-client";
+import type { AgentProfile, ModeInfo, ProviderInfo, ThinkingLevel } from "@/lib/types";
 import { Icons } from "@/lib/icons";
-
-/** Used until provider.list answers (and kept if it fails), same fallback composer.tsx uses -- this form must never be unusable because one fetch lost. */
-const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm" }];
 
 // "Provider default" (the empty id -- the provider's own default mode) is
 // this form's own entry; the rest are the selected provider's own
@@ -90,9 +88,14 @@ type OpenCard = number | "new" | null;
  * which (if either) is open; there's exactly one shared form state
  * because only one card is ever open at a time.
  */
-function ProfilesSection({ client, events }: SettingsSectionContext) {
-  const [profiles, setProfiles] = useState<AgentProfile[] | null>(null);
-  const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
+function ProfilesSection(_props: SettingsSectionContext) {
+  // One profile.list / provider.list cache entry per connection (ADR-0032):
+  // live updates arrive through the event bridge, so this section no longer
+  // subscribes to profile.* itself, and a profile saved here reaches the
+  // composer picker and the palette immediately.
+  const profilesQuery = useProfiles();
+  const profiles = profilesQuery.data ?? null;
+  const { providersOrFallback: providers } = useProviderCatalog();
   const [openCard, setOpenCard] = useState<OpenCard>(null);
   const [form, setForm] = useState<ProfileFormState>(EMPTY_FORM);
   const [pending, setPending] = useState(false);
@@ -102,58 +105,9 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
   // same stored id). Replaces General's old "Defaults for new tasks"
   // control -- see the plan's Decisions section.
   const { defaultAgentId, setDefaultAgentId } = useDefaultAgentId();
-
-  useEffect(() => {
-    if (!client) return;
-    let cancelled = false;
-    client
-      .call<AgentProfile[]>("profile.list")
-      .then((list) => {
-        if (!cancelled) setProfiles(list ?? []);
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-    return () => {
-      cancelled = true;
-    };
-  }, [client]);
-
-  useEffect(() => {
-    if (!client) return;
-    let cancelled = false;
-    client
-      .call<ProviderListResult>("provider.list")
-      .then((result) => {
-        if (!cancelled && result.providers.length > 0) setProviders(result.providers);
-      })
-      .catch((err) => console.error("provider.list failed, using fallback provider list", err));
-    return () => {
-      cancelled = true;
-    };
-  }, [client]);
-
-  useEffect(() => {
-    if (!events) return;
-    const offCreated = events.subscribe("profile.created", (payload) => {
-      const p = (payload as { profile?: AgentProfile } | undefined)?.profile;
-      if (!p) return;
-      setProfiles((prev) => (prev ? upsertProfile(prev, p) : [p]));
-    });
-    const offUpdated = events.subscribe("profile.updated", (payload) => {
-      const p = (payload as { profile?: AgentProfile } | undefined)?.profile;
-      if (!p) return;
-      setProfiles((prev) => (prev ? upsertProfile(prev, p) : [p]));
-    });
-    const offDeleted = events.subscribe("profile.deleted", (payload) => {
-      const id = (payload as { id?: number } | undefined)?.id;
-      if (id === undefined) return;
-      setProfiles((prev) => (prev ? prev.filter((p) => p.ID !== id) : prev));
-    });
-    return () => {
-      offCreated();
-      offUpdated();
-      offDeleted();
-    };
-  }, [events]);
+  const createProfile = useCreateProfile();
+  const updateProfile = useUpdateProfile();
+  const deleteProfile = useDeleteProfile();
 
   // Composer picker handoff (lib/settings-intent.ts): applied once the list has
   // loaded (an edit intent needs the profile), and again whenever one arrives
@@ -196,29 +150,24 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!client || openCard === null || !form.name.trim()) return;
+    if (openCard === null || !form.name.trim()) return;
     setPending(true);
     setError(null);
+    const params = {
+      name: form.name.trim(),
+      provider: form.provider,
+      permissionMode: form.permissionMode,
+      autoAccept: supportsAutoAccept(providers, form.provider) && form.autoAccept,
+      thinkingLevel: form.thinkingLevel,
+      model: form.model,
+      notes: form.notes,
+    };
+    // The mutation upserts the RPC's own returned profile into the shared
+    // cache, so every surface (composer picker, palette, task header) sees
+    // it immediately; the profile.* event arriving too is idempotent.
     try {
-      const params = {
-        name: form.name.trim(),
-        provider: form.provider,
-        permissionMode: form.permissionMode,
-        autoAccept: supportsAutoAccept(providers, form.provider) && form.autoAccept,
-        thinkingLevel: form.thinkingLevel,
-        model: form.model,
-        notes: form.notes,
-      };
-      // Upsert from the RPC's own returned profile rather than waiting for
-      // the profile.created/updated event: the mutation's own tab must show
-      // the result immediately even when events is null (not yet connected)
-      // or when that event arrives after this promise already resolved --
-      // upsertProfile dedupes by ID, so a later event is a harmless no-op.
-      const saved =
-        openCard === "new"
-          ? await client.call<AgentProfile>("profile.create", params)
-          : await client.call<AgentProfile>("profile.update", { id: openCard, ...params });
-      setProfiles((prev) => (prev ? upsertProfile(prev, saved) : [saved]));
+      if (openCard === "new") await createProfile.mutateAsync(params);
+      else await updateProfile.mutateAsync({ id: openCard, ...params });
       closeCard();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -228,10 +177,8 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
   }
 
   async function handleDelete(id: number) {
-    if (!client) return;
     try {
-      await client.call("profile.delete", { id });
-      setProfiles((prev) => (prev ? prev.filter((p) => p.ID !== id) : prev));
+      await deleteProfile.mutateAsync(id);
       if (openCard === id) closeCard();
       // A deleted default agent can't stay ★ -- a stale id would silently
       // stop seeding new tasks (run-config-toolbar.tsx's lookup just fails
@@ -275,7 +222,6 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
                       form={form}
                       setForm={setForm}
                       providers={providers}
-                      client={client}
                       onSubmit={handleSubmit}
                       onCancel={closeCard}
                       pending={pending}
@@ -341,7 +287,6 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
                           form={form}
                           setForm={setForm}
                           providers={providers}
-                          client={client}
                           onSubmit={handleSubmit}
                           onCancel={closeCard}
                           pending={pending}
@@ -381,7 +326,6 @@ function ProfileForm({
   form,
   setForm,
   providers,
-  client,
   onSubmit,
   onCancel,
   pending,
@@ -392,7 +336,6 @@ function ProfileForm({
   form: ProfileFormState;
   setForm: (updater: (f: ProfileFormState) => ProfileFormState) => void;
   providers: ProviderInfo[];
-  client: WsClient | null;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
   onCancel: () => void;
   pending: boolean;
@@ -426,7 +369,7 @@ function ProfileForm({
               ))}
             </SelectContent>
           </Select>
-          <ProviderHealthDot client={client} provider={form.provider} providers={providers} testId={`${idPrefix}-provider-health`} />
+          <ProviderHealthDot provider={form.provider} testId={`${idPrefix}-provider-health`} />
         </div>
         <ProfileModelSelect form={form} setForm={setForm} providers={providers} idPrefix={idPrefix} />
         <Select value={form.permissionMode} onValueChange={(value) => setForm((f) => ({ ...f, permissionMode: value }))}>
@@ -505,37 +448,10 @@ function ProfileForm({
  * *provider's* backing account, not whether this particular profile row
  * has been saved yet.
  */
-function ProviderHealthDot({
-  client,
-  provider,
-  providers,
-  testId,
-}: {
-  client: WsClient | null;
-  provider: string;
-  providers: ProviderInfo[];
-  testId: string;
-}) {
-  const testKey = accountHealthTestKey(provider, providers);
-  const [result, setResult] = useState<ProviderTestResult | undefined>(undefined);
+function ProviderHealthDot({ provider, testId }: { provider: string; testId: string }) {
+  const { health } = useProviderHealth();
 
-  useEffect(() => {
-    setResult(undefined);
-    if (!client || !testKey) return;
-    let cancelled = false;
-    client
-      .call<ProviderTestResult>("provider.test", { provider: testKey })
-      .then((r) => {
-        if (!cancelled) setResult(r);
-      })
-      .catch((err) => {
-        if (!cancelled) setResult({ ok: false, detail: err instanceof Error ? err.message : String(err) });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [client, testKey]);
-
+  const result = health[provider];
   const state = result === undefined ? "unknown" : result.ok ? "ok" : "failed";
   const status = state === "ok" ? "success" : state === "failed" ? "danger" : "neutral";
   const label = state === "ok" ? "Connection ok" : state === "failed" ? "Connection failed" : "Not tested yet";
@@ -594,14 +510,6 @@ function ProfileModelSelect({
       </SelectContent>
     </Select>
   );
-}
-
-function upsertProfile(list: AgentProfile[], p: AgentProfile): AgentProfile[] {
-  const index = list.findIndex((existing) => existing.ID === p.ID);
-  if (index === -1) return [...list, p];
-  const next = list.slice();
-  next[index] = p;
-  return next;
 }
 
 function providerLabel(providers: ProviderInfo[], id: string): string {
