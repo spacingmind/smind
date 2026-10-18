@@ -1,6 +1,11 @@
 // Package humanskills loads the names and descriptions of human/third-party
-// skills for read-only dedupe. It never reads skill bodies (capped at the
-// frontmatter head) and never opens anything for write.
+// skills for read-only dedupe. It never PARSES or retains body bytes; the
+// scanner's read-ahead is bounded by MaxHeadBytes. It never opens anything
+// for write, and skips SKILL.md entries that are not regular files (FIFOs,
+// devices) so a hostile skills directory cannot hang the loader.
+//
+// A human skill named "learned-*" is returned like any other: it is a name
+// the gate's collision check will then refuse for learned skills.
 package humanskills
 
 import (
@@ -22,6 +27,14 @@ type Skill struct {
 // MaxHeadBytes caps how much of any SKILL.md is read.
 const MaxHeadBytes = 8192
 
+const (
+	// MaxEntriesPerRoot caps how many directory entries of one root are
+	// considered (in name order).
+	MaxEntriesPerRoot = 500
+	// MaxSkills caps the total number of skills returned.
+	MaxSkills = 1000
+)
+
 // Load reads skills from each root directory inside fsys. Missing roots and
 // unparseable skills are skipped, never an error.
 func Load(fsys fs.FS, roots ...string) ([]Skill, error) {
@@ -31,6 +44,9 @@ func Load(fsys fs.FS, roots ...string) ([]Skill, error) {
 		entries, err := fs.ReadDir(fsys, root)
 		if err != nil {
 			continue
+		}
+		if len(entries) > MaxEntriesPerRoot {
+			entries = entries[:MaxEntriesPerRoot]
 		}
 		for _, e := range entries {
 			path := path.Join(root, e.Name())
@@ -45,8 +61,16 @@ func Load(fsys fs.FS, roots ...string) ([]Skill, error) {
 			out = append(out, s)
 		}
 	}
+	return finish(out), nil
+}
+
+// finish sorts by name and applies the total cap.
+func finish(out []Skill) []Skill {
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
+	if len(out) > MaxSkills {
+		out = out[:MaxSkills]
+	}
+	return out
 }
 
 // LoadDirs loads skills from absolute directories on disk. A missing dir is
@@ -71,16 +95,24 @@ func LoadDirs(dirs ...string) ([]Skill, error) {
 			out = append(out, s)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
+	return finish(out), nil
 }
 
 func readHead(fsys fs.FS, dir, dirName string) (Skill, bool) {
+	// Stat before Open: opening a FIFO for read blocks until a writer shows
+	// up. Symlinks are followed on purpose (skill dirs are legitimately
+	// symlinked); only the final target must be a regular file.
+	if st, err := fs.Stat(fsys, dir+"/SKILL.md"); err != nil || !st.Mode().IsRegular() {
+		return Skill{}, false
+	}
 	f, err := fsys.Open(dir + "/SKILL.md")
 	if err != nil {
 		return Skill{}, false
 	}
 	defer f.Close()
+	if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() {
+		return Skill{}, false
+	}
 	s := parseHead(f)
 	if s.Name == "" {
 		s.Name = dirName
@@ -102,8 +134,14 @@ func parseHead(r io.Reader) Skill {
 	scanner.Buffer(make([]byte, 512), MaxHeadBytes)
 	var fields []fmField
 	inFM := false
+	first := true
 	for scanner.Scan() {
-		line := strings.TrimRight(scanner.Text(), " \t")
+		text := scanner.Text()
+		if first {
+			text = strings.TrimPrefix(text, "\ufeff")
+			first = false
+		}
+		line := strings.TrimRight(text, " \t")
 		trimmed := strings.TrimSpace(line)
 		if !inFM {
 			if trimmed == "---" {

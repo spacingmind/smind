@@ -217,3 +217,49 @@ func TestHumanSkills_LongDescriptionLineAndBlockScalar(t *testing.T) {
 		t.Fatalf("block scalar description = %q", got[1].Description)
 	}
 }
+
+func TestHumanSkills_BOMFrontmatterParsed(t *testing.T) {
+	fsys := fstest.MapFS{
+		"skills/bom/SKILL.md": &fstest.MapFile{Data: []byte("\ufeff---\nname: bom-skill\ndescription: Use when a BOM leads.\n---\nbody\n")},
+	}
+	got, err := Load(fsys, "skills")
+	if err != nil || len(got) != 1 || got[0].Name != "bom-skill" || got[0].Description != "Use when a BOM leads." {
+		t.Errorf("got %+v err %v", got, err)
+	}
+}
+
+func TestHumanSkills_EntryAndTotalCaps(t *testing.T) {
+	fsys := fstest.MapFS{}
+	for i := 0; i < 600; i++ {
+		name := fmt.Sprintf("s%04d", i)
+		fsys["a/"+name+"/SKILL.md"] = &fstest.MapFile{Data: []byte("---\nname: " + name + "\n---\n")}
+	}
+	got, _ := Load(fsys, "a")
+	if len(got) != MaxEntriesPerRoot {
+		t.Fatalf("600 dirs -> %d skills, want %d", len(got), MaxEntriesPerRoot)
+	}
+	if got[len(got)-1].Name != "s0499" {
+		t.Errorf("last considered = %q, want s0499 (entries are taken in name order)", got[len(got)-1].Name)
+	}
+
+	// three roots of 500 distinct skills: total capped at MaxSkills
+	big := fstest.MapFS{}
+	for r := 0; r < 3; r++ {
+		for i := 0; i < 500; i++ {
+			name := fmt.Sprintf("r%d-%04d", r, i)
+			big[fmt.Sprintf("root%d/%s/SKILL.md", r, name)] = &fstest.MapFile{Data: []byte("---\nname: " + name + "\n---\n")}
+		}
+	}
+	got, _ = Load(big, "root0", "root1", "root2")
+	if len(got) != MaxSkills {
+		t.Errorf("total = %d, want %d", len(got), MaxSkills)
+	}
+}
+
+func TestHumanSkills_LearnedPrefixReturnedLikeAnyOther(t *testing.T) {
+	fsys := fstest.MapFS{"s/x/SKILL.md": &fstest.MapFile{Data: []byte("---\nname: learned-thing\ndescription: Use when x.\n---\n")}}
+	got, _ := Load(fsys, "s")
+	if len(got) != 1 || got[0].Name != "learned-thing" {
+		t.Errorf("got %+v", got)
+	}
+}
