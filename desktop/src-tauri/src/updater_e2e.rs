@@ -208,7 +208,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn spike_check_reports_available_without_downloading() {
+    async fn check_reports_available_and_downloads_nothing() {
         let key = TestKey::generate();
         let feed = Feed::serve_release(&release(&key, "0.10.1", app_tarball("new")));
         let app = test_app(&key.pubkey(), &feed.latest_url());
@@ -216,8 +216,180 @@ mod tests {
         let got = check_with(app.updater_builder(), RUNNING, &state)
             .await
             .expect("check");
-        assert!(matches!(got, AppUpdateCheck::Available { ref version, .. } if version == "0.10.1"));
+        match got {
+            AppUpdateCheck::Available { version, notes, .. } => {
+                assert_eq!(version, "0.10.1");
+                assert!(notes.is_some());
+            }
+            other => panic!("expected Available, got {other:?}"),
+        }
         assert_eq!(feed.requests(), vec!["GET /latest.json"]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn same_version_is_up_to_date() {
+        let key = TestKey::generate();
+        let feed = Feed::serve_release(&release(&key, "0.10.0", app_tarball("new")));
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        let got = check_with(app.updater_builder(), RUNNING, &state)
+            .await
+            .expect("check");
+        assert!(matches!(
+            got,
+            AppUpdateCheck::UpToDate { ref current_version } if current_version == "0.10.0"
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn older_version_is_not_offered() {
+        let key = TestKey::generate();
+        let feed = Feed::serve_release(&release(&key, "0.9.9", app_tarball("new")));
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        let got = check_with(app.updater_builder(), RUNNING, &state)
+            .await
+            .expect("check");
+        assert!(matches!(
+            got,
+            AppUpdateCheck::UpToDate { ref current_version } if current_version == "0.10.0"
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn prerelease_version_is_not_offered() {
+        let key = TestKey::generate();
+        let feed = Feed::serve_release(&release(&key, "0.11.0-rc.1", app_tarball("new")));
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        let got = check_with(app.updater_builder(), RUNNING, &state)
+            .await
+            .expect("check");
+        assert!(matches!(
+            got,
+            AppUpdateCheck::UpToDate { ref current_version } if current_version == "0.10.0"
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dead_endpoint_is_an_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let app = test_app(&TestKey::generate().pubkey(), &format!("http://127.0.0.1:{port}/latest.json"));
+        let state = app.state::<UpdateState>();
+        let err = check_with(app.updater_builder(), RUNNING, &state)
+            .await
+            .expect_err("dead endpoint must error");
+        assert!(!err.is_empty());
+        assert!(state.pending.take().is_err());
+    }
+
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn available_result_matches_the_ui_fixture() {
+        const FIXTURE: &str =
+            include_str!("../../../web/packages/ui/src/lib/__fixtures__/app-update-available.json");
+        let fixture: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+        let key = TestKey::generate();
+        let feed = Feed::serve_release(&Release {
+            version: fixture["version"].as_str().unwrap().to_string(),
+            notes: fixture["notes"].as_str().unwrap().to_string(),
+            pub_date: "2026-10-12T09:00:00Z".to_string(),
+            signature: key.sign(&app_tarball("new"), Some("0.10.1")),
+            artifact: app_tarball("new"),
+        });
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        let got = check_with(app.updater_builder(), RUNNING, &state)
+            .await
+            .expect("check");
+        assert_eq!(serde_json::to_value(&got).unwrap(), fixture);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn download_verifies_a_good_signature() {
+        let key = TestKey::generate();
+        let good = release(&key, "0.10.1", app_tarball("new"));
+        let feed = Feed::serve_release(&good);
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        check_with(app.updater_builder(), RUNNING, &state).await.expect("check");
+        let update = state.pending.take().unwrap();
+        let bytes = update.download(|_, _| {}, || {}).await.expect("download");
+        assert_eq!(bytes, good.artifact);
+        assert_eq!(feed.requests(), vec!["GET /latest.json", "GET /smind.app.tar.gz"]);
+    }
+
+    async fn refused(feed: Feed, app: App<MockRuntime>) -> String {
+        let state = app.state::<UpdateState>();
+        let update = state.pending.take().unwrap();
+        let err = update
+            .download(|_, _| {}, || {})
+            .await
+            .expect_err("refused")
+            .to_string();
+        assert_eq!(
+            feed.requests(),
+            vec!["GET /latest.json", "GET /smind.app.tar.gz"]
+        );
+        err
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tampered_artifact_is_refused() {
+        let key = TestKey::generate();
+        let good = release(&key, "0.10.1", app_tarball("new"));
+        let mut tampered = good.artifact.clone();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 0xff;
+        let feed = Feed::serve_release(&Release { artifact: tampered, ..good });
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        check_with(app.updater_builder(), RUNNING, &state).await.expect("check");
+        let err = refused(feed, app).await;
+        assert!(err.to_lowercase().contains("signature verification failed"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn signature_from_another_key_is_refused() {
+        let signing_key = TestKey::generate();
+        let verifying_key = TestKey::generate();
+        let feed = Feed::serve_release(&release(&signing_key, "0.10.1", app_tarball("new")));
+        let app = test_app(&verifying_key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        check_with(app.updater_builder(), RUNNING, &state).await.expect("check");
+        let err = refused(feed, app).await;
+        assert!(err.to_lowercase().contains("different key"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn artifact_signed_for_another_version_is_refused() {
+        let key = TestKey::generate();
+        let artifact = app_tarball("new");
+        let feed = Feed::serve_release(&Release {
+            signature: key.sign(&artifact, Some("0.9.0")),
+            ..release(&key, "0.10.1", artifact.clone())
+        });
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        check_with(app.updater_builder(), RUNNING, &state).await.expect("check");
+        let err = refused(feed, app).await;
+        assert!(err.to_lowercase().contains("signed for version"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn undecodable_signature_is_refused() {
+        let key = TestKey::generate();
+        let feed = Feed::serve_release(&Release {
+            signature: "!!!not-base64!!!".to_string(),
+            ..release(&key, "0.10.1", app_tarball("new"))
+        });
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        check_with(app.updater_builder(), RUNNING, &state).await.expect("check");
+        let err = refused(feed, app).await;
+        assert!(err.to_lowercase().contains("invalid symbol"));
     }
 
     /// A fake installed app the plugin can replace: `<tmp>/smind.app/Contents/...`.
@@ -232,7 +404,45 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[tokio::test(flavor = "multi_thread")]
-    async fn spike_install_replaces_the_bundle() {
+    async fn refused_install_leaves_the_bundle_and_keeps_the_update_pending() {
+        let key = TestKey::generate();
+        let good = release(&key, "0.10.1", app_tarball("new"));
+        let mut tampered = good.artifact.clone();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 0xff;
+        let feed = Feed::serve_release(&Release { artifact: tampered, ..good });
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let dir = tempfile::tempdir().unwrap();
+        let exe = installed_app(dir.path(), "old");
+        let state = app.state::<UpdateState>();
+        check_with(app.updater_builder().executable_path(&exe), RUNNING, &state)
+            .await
+            .expect("check");
+        let events = Mutex::new(Vec::new());
+        let err = install_pending(&state, &|p| events.lock().unwrap().push(p))
+            .await
+            .expect_err("tampered artifact must be refused");
+        assert!(err.to_lowercase().contains("signature"));
+        let plist = std::fs::read_to_string(dir.path().join("smind.app/Contents/Info.plist")).unwrap();
+        assert_eq!(plist, "old");
+        assert!(exe.exists());
+        assert!(state.pending.take().is_ok(), "failed install stays retryable");
+        // The plugin runs its `on_download_finish` hook (our "installing"
+        // event) before verifying the signature, so an "installing" event is
+        // emitted even for a refused artifact; what must hold is that the
+        // bundle is untouched and the update stays retryable.
+        let events = events.into_inner().unwrap();
+        let last_download = events
+            .iter()
+            .rev()
+            .find(|e| e["stage"] == "downloading")
+            .unwrap();
+        assert!(last_download["downloaded"].as_u64().unwrap() > 0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn install_replaces_the_bundle_and_reports_progress() {
         let key = TestKey::generate();
         let feed = Feed::serve_release(&release(&key, "0.10.1", app_tarball("new")));
         let app = test_app(&key.pubkey(), &feed.latest_url());
@@ -251,6 +461,13 @@ mod tests {
         let events = events.into_inner().unwrap();
         assert_eq!(events.last().unwrap()["stage"], "installing");
         assert_eq!(events[0]["stage"], "downloading");
+        let last_download = events
+            .iter()
+            .rev()
+            .find(|e| e["stage"] == "downloading")
+            .unwrap();
+        assert!(last_download["downloaded"].as_u64().unwrap() > 0);
         assert_eq!(feed.requests(), vec!["GET /latest.json", "GET /smind.app.tar.gz"]);
+        assert!(state.pending.take().is_err());
     }
 }
