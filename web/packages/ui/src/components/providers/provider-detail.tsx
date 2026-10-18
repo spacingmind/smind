@@ -1,17 +1,19 @@
-import type { JSX } from "react";
+import { useState, type JSX } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import type { ProviderNavItem } from "@/lib/providers-view";
 import { providerConsumer } from "@/lib/providers-groups";
 import { ProviderGlyph } from "@/components/composer/provider-glyph";
 import { AccountsCard } from "@/components/providers/accounts-card";
 import { TestButton } from "@/components/providers/account-actions";
+import { ConnectAccountPanel } from "@/components/accounts-dialog";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { useRunProviderTest } from "@/hooks/use-accounts";
 import { useAccountRows } from "@/hooks/use-account-rows";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useProvidersViewStore } from "@/stores/providers-view-store";
-import type { Account } from "@/lib/types";
+import { queryKeys } from "@/lib/query-keys";
 import type { WsClient } from "@/lib/ws-client";
 
 const KIND_LABEL: Record<ProviderNavItem["kind"], string> = {
@@ -24,15 +26,20 @@ const KIND_LABEL: Record<ProviderNavItem["kind"], string> = {
 export function ProviderDetail({
   item,
   client,
-  onRelogin = () => {},
 }: {
   item: ProviderNavItem | null;
   client: WsClient | null;
-  onRelogin?: (a: Account) => void;
 }): JSX.Element {
   const { providers } = useProviderCatalog();
   const { rows } = useAccountRows();
   const { runTest, isTesting } = useRunProviderTest();
+  const queryClient = useQueryClient();
+  const connectProviderId = useProvidersViewStore((s) => s.connectProviderId);
+  const reloginAccountId = useProvidersViewStore((s) => s.reloginAccountId);
+  const clearConnect = useProvidersViewStore((s) => s.clearConnect);
+  const clearRelogin = useProvidersViewStore((s) => s.clearRelogin);
+  const requestRelogin = useProvidersViewStore((s) => s.requestRelogin);
+  const [showConnect, setShowConnect] = useState(false);
   if (!item) {
     return (
       <div data-testid="provider-detail" className="p-6">
@@ -44,6 +51,14 @@ export function ProviderDetail({
   const idSet = new Set(item.accountIds);
   const itemRows = rows.filter((r) => idSet.has(r.account.id));
   const attention = itemRows.filter((r) => r.badge.kind === "relogin" || r.badge.kind === "cooldown" || r.badge.kind === "error").length;
+  // The connect panel never renders for the other bucket or cli items; the
+  // three ways it can open are mutually exclusive (the store flags win over
+  // the local + Connect toggle).
+  const canConnect = item.kind !== "other" && item.kind !== "cli" && item.accountProvider !== undefined;
+  const connectOpen = canConnect && connectProviderId === item.id;
+  const reloginAccount = canConnect ? itemRows.find((r) => r.account.id === reloginAccountId)?.account ?? null : null;
+  const manualConnectOpen = canConnect && !connectOpen && !reloginAccount && showConnect;
+  const onConnected = () => void queryClient.invalidateQueries({ queryKey: queryKeys.accountList() });
 
   return (
     <div data-testid="provider-detail" className="flex flex-col gap-3 p-4">
@@ -51,6 +66,19 @@ export function ProviderDetail({
         <div className="flex items-center gap-2">
           {item.id === "other" ? null : <ProviderGlyph provider={item.id} />}
           <h3 className="text-ui-lg font-medium">{item.label}</h3>
+          {canConnect ? (
+            <>
+              <span className="flex-1" />
+              <Button
+              variant="outline"
+              size="sm"
+              data-testid="provider-detail-connect"
+              onClick={() => setShowConnect((v) => !v)}
+            >
+                + Connect account
+              </Button>
+            </>
+          ) : null}
         </div>
         <p className="text-ui-sm text-muted-foreground">
           {KIND_LABEL[item.kind]}
@@ -74,6 +102,36 @@ export function ProviderDetail({
           </p>
         ) : null}
       </div>
+
+      {connectOpen ? (
+        <ConnectAccountPanel
+          client={client}
+          providers={providers}
+          initialProviderId={item.accountProvider}
+          autoStart
+          onClose={clearConnect}
+          onConnected={onConnected}
+        />
+      ) : null}
+      {reloginAccount ? (
+        <ConnectAccountPanel
+          client={client}
+          providers={providers}
+          relogin={reloginAccount}
+          autoStart
+          onClose={clearRelogin}
+          onConnected={onConnected}
+        />
+      ) : null}
+      {manualConnectOpen ? (
+        <ConnectAccountPanel
+          client={client}
+          providers={providers}
+          initialProviderId={item.accountProvider}
+          onClose={() => setShowConnect(false)}
+          onConnected={onConnected}
+        />
+      ) : null}
 
       {item.kind === "cli" ? (
         <div
@@ -113,7 +171,7 @@ export function ProviderDetail({
           providers={providers}
           allAccounts={rows.map((r) => r.account)}
           client={client}
-          onRelogin={onRelogin}
+          onRelogin={(a) => requestRelogin(a.id, item.id)}
         />
       )}
     </div>
