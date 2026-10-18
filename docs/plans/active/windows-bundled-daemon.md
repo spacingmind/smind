@@ -60,9 +60,12 @@ page copy (separate repo).
 11. **AC11 — Docs.** ADR-0030 amendment + ADR-0013 note; README's install
     section describes the Windows app bundling the daemon, and no longer says
     Windows users run it via WSL2 or that there is no native Windows binary.
-12. **AC12 — Real machine** (needs the Windows session): fresh install of the
-    CI installer, click Install -> daemon runs from `bin\`; upgrade over a
-    previously downloaded daemon via Update.
+12. **AC12 — Real machine**: fresh install of the old (v0.12.0) release
+    installer, Install -> daemon runs from `bin\`; upgrade over it with the CI
+    installer, Update -> daemon replaced, data kept; uninstall keeps `bin\`,
+    `managed.json`, `smind.log` and `%USERPROFILE%\.smind`. Automated on
+    `windows-latest` (`installer-e2e` job in `desktop-windows.yml`,
+    `desktop/scripts/installer-e2e.ps1`); the rest stays manual (see Validation).
 
 ## Test Scenarios
 
@@ -119,5 +122,6 @@ page copy (separate repo).
 - **AC8** verified: the #311 tests pass unmodified.
 - **AC10** verified by reading Tauri's templates (`tauri-apps/tauri` master; the app locks tauri 2.11.6, so not version-pinned -- recheck on Tauri upgrades): NSIS install path `$LOCALAPPDATA\smind` (`installer.nsi:523-524`), sidecar written as `$INSTDIR\smind.exe` (`:674-677`), uninstall deletes only listed files + non-recursive `RMDir` (`:802-836`), "delete app data" touches only `...\dev.spacingmind.desktop` (`:898-899`), the running-app check only watches `smind-desktop.exe` (`:661`, `:798`); WiX is perMachine `ProgramFiles64\smind` by default, `RemoveFolder` only removes empty dirs (`main.wxs:28, 121-122, 185-186`). Caveat: an MSI installed after an NSIS install can pick up the NSIS HKCU install dir (`main.wxs:77-82`) -- still only removes its own components. Layout unchanged.
 - **AC11** verified by reading: README, ADR-0030 amendment, ADR-0013 note.
-- **AC12 NOT verified -- needs the Windows session**: fresh install of the CI installer + Install button -> daemon runs from `bin\`; Update over a daemon previously downloaded by the old flow; Defender holding the freshly copied exe; ARM64 (amd64 daemon under emulation).
+- **AC12 -- automated on windows-latest** (`installer-e2e` job in `desktop-windows.yml`, driven by `desktop/scripts/installer-e2e.ps1`; the real Tauri app is driven headlessly through a WebView2 policy debugging port + `desktop/scripts/cdp-invoke.mjs` calling `daemon_status`/`daemon_install`/`daemon_update`). Phases: A silent-install the v0.12.0 NSIS installer, Install -> daemon runs from `bin\smind.exe`, create a workspace + marker; B silent-install the CI installer over the running old daemon (managed copy, pid, data untouched; sidecar replaced -- proven by sha256 and build commit since both versions are 0.12.0), Update -> new `bin\smind.exe` hash, new pid, `managed.json` rewritten, data served by the new daemon; C `uninstall.exe /S _?=<dir>` removes the app + sidecar and keeps `bin\`, `managed.json`, `smind.log`, the running daemon and `.smind`. Runs: https://github.com/spacingmind/smind/actions/runs/39105151968 (dev loop, installers from build run 39104349151); full pipeline runs (build + installer-e2e, both green): https://github.com/spacingmind/smind/actions/runs/39105478793 and https://github.com/spacingmind/smind/actions/runs/39105484083.
+- **AC12 still manual (cannot be automated on a hosted runner)**: Defender holding/scanning the freshly copied exe and any Defender/SmartScreen prompt; ARM64 (amd64 daemon under emulation); the installer wizard and real GUI click flow (the e2e calls the same Tauri commands over CDP, not mouse clicks); MSI per-machine/UAC path (only NSIS per-user `/S` is exercised); Windows 10 vs 11 client variants (runner is Server); code signing.
 - Host checks: `task test`, `task lint`, `task check:versions`, desktop node tests, `cargo test` in both crates. `cargo clippy --all-targets -D warnings` on macOS reports `dead_code` for Windows-only helpers (not touched here); `daemon-client` clippy trips `should_implement_trait` in `backoff.rs` (untouched file).
