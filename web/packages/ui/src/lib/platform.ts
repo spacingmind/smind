@@ -63,7 +63,7 @@ export interface DaemonStatus {
   appVersion: string;
   comparison: "older" | "same" | "newer" | "unknown";
   managedState: "notRunning" | "managed" | "unmanaged";
-  /** `/healthz` `managedBy` ("systemd" | "launchd" | "task"): an OS service manager owns this daemon, so the app never takes it over. Absent/null when none does. */
+  /** `/healthz` `managedBy` ("systemd" | "launchd" | "taskscheduler"): an OS service manager owns this daemon, so the app never takes it over. Absent/null when none does. */
   managedBy?: string | null;
   pid: number | null;
   installedPath: string | null;

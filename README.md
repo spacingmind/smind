@@ -77,8 +77,8 @@ is missing).
 > script is on `master` from the first release that includes it.
 
 Then `smind serve` and open <http://localhost:4648>. To keep the daemon running across logouts and reboots on Linux or
-macOS, run `smind service install` (or pass `--service` to the install script); see
-[docs/homelab.md](docs/homelab.md#run-the-daemon-as-a-service-linux-and-macos).
+macOS, or at every logon on Windows, run `smind service install` (or pass `--service` to the install script, `-Service` to install.ps1); see
+[docs/homelab.md](docs/homelab.md#run-the-daemon-as-a-service-linux-macos-and-windows).
 
 From source:
 
