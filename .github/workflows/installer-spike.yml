@@ -32,12 +32,19 @@ jobs:
           Get-ChildItem "$env:LOCALAPPDATA" -Directory | Where-Object Name -match 'smind|sMind' | ForEach-Object { $_.FullName; Get-ChildItem $_.FullName | Select-Object Name, Length | Format-Table | Out-String }
           $app = Get-ChildItem "$env:LOCALAPPDATA\sMind" -Filter smind-desktop.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           "app exe: $($app.FullName)"
-          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'
+          # WebView2's documented policy for extra browser arguments, keyed by the host exe name
+          # (the env var is ignored when the host sets its own arguments, as Tauri does).
+          foreach ($hive in 'HKLM','HKCU') {
+            $k = "${hive}:\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments"
+            New-Item -Path $k -Force | Out-Null
+            New-ItemProperty -Path $k -Name 'smind-desktop.exe' -Value '--remote-debugging-port=9222' -PropertyType String -Force | Out-Null
+          }
           $proc = Start-Process $app.FullName -PassThru
           Start-Sleep 8
           "app running: $(-not $proc.HasExited)"
-          Write-Host "--- processes after launch"
-          Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'msedgewebview2|smind-desktop' } | Select-Object ProcessId, ParentProcessId, Name, @{n='Cmd';e={ if ($_.CommandLine.Length -gt 400) { $_.CommandLine.Substring(0,400) } else { $_.CommandLine } }} | Format-List | Out-String
+          Write-Host "--- the browser process command line (split)"
+          $b = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'msedgewebview2.exe' -and $_.CommandLine -match 'embedded-browser-webview=1' -and $_.CommandLine -notmatch '--type=' } | Select-Object -First 1
+          ($b.CommandLine -split ' --') -join "`n--"
           Write-Host "--- listening ports"
           netstat -ano | Select-String 'LISTENING' | Select-String '9222|127.0.0.1'
           Write-Host "--- try both loopbacks"
