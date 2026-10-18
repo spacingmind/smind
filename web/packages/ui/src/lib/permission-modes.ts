@@ -85,3 +85,9 @@ export function describePermission(providers: ProviderInfo[], provider: string, 
 export function providerModels(providers: ProviderInfo[], provider: string): ModelInfo[] {
   return infoFor(providers, provider)?.models ?? [];
 }
+
+/** Whether the effective mode auto-approves prompts (or ACP Auto-accept is on): the pickers warn (shield + warning colour) without changing any mode semantics. */
+export function isDangerousMode(providers: ProviderInfo[], provider: string, mode: string, autoAccept: boolean): boolean {
+  const current = providerModes(providers, provider).find((m) => m.id === effectiveMode(providers, provider, mode));
+  return current?.autoApproves === true || autoAccept;
+}

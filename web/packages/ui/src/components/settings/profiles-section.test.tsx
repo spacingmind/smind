@@ -58,7 +58,8 @@ describe("profiles-section", () => {
 
     expect(screen.getByTestId("profile-new-form")).toBeInTheDocument();
     expect(screen.getByTestId("profile-form-name")).toHaveValue("Sonnet 5");
-    expect(screen.getByTestId("profile-form-provider")).toHaveTextContent(/claude/i);
+    // The shared provider+model picker (field variant) names the provider and the seeded model.
+    expect(screen.getByTestId("profile-form-provider")).toHaveAttribute("title", expect.stringMatching(/claude.*sonnet-5/i));
     expect(takeSettingsIntent()).toBeNull();
   });
 
@@ -281,27 +282,41 @@ describe("profiles-section model field (ADR-0025)", () => {
     fireEvent.click(screen.getByTestId("profile-new-button"));
     await flush();
     fireEvent.change(screen.getByTestId("profile-form-name"), { target: { value: "Cheap" } });
-    fireEvent.click(screen.getByTestId("profile-form-model"));
-    const options = await screen.findAllByRole("option");
-    expect(options.map((o) => o.textContent)).toEqual(["Provider default", "Sonnet", "Opus"]);
-    fireEvent.click(options[1]);
+    // The shared provider+model picker (field variant): opens on the current provider's models.
+    fireEvent.click(screen.getByTestId("profile-form-provider"));
+    const rows = (await screen.findAllByRole("option")).map((o) => o.textContent);
+    expect(rows).toEqual(expect.arrayContaining(["Default model", "Sonnet", "Opus"].map((t) => expect.stringContaining(t))));
+    fireEvent.click(screen.getByTestId("model-row-claude-native:sonnet"));
     await flush();
+    expect(screen.getByTestId("profile-form-provider")).toHaveTextContent("Sonnet");
     fireEvent.click(screen.getByTestId("profile-form-submit"));
     await flush();
 
     expect(daemon.calls.find((c) => c.method === "profile.create")?.params).toMatchObject({ name: "Cheap", provider: "claude-native", model: "sonnet" });
   });
 
-  it("profile editor hides the model field for a provider with no models", async () => {
-    await renderWithProfiles([PROFILE], PROVIDERS);
+  it("choosing another provider in the picker resets the model and the provider-scoped mode", async () => {
+    const { daemon } = await renderWithProfiles([PROFILE], PROVIDERS);
 
     fireEvent.click(screen.getByTestId("profile-new-button"));
     await flush();
-    expect(screen.getByTestId("profile-form-model")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("profile-form-name"), { target: { value: "Other" } });
     fireEvent.click(screen.getByTestId("profile-form-provider"));
-    fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
+    fireEvent.click(screen.getByTestId("model-row-claude-native:opus"));
     await flush();
-    expect(screen.queryByTestId("profile-form-model")).not.toBeInTheDocument();
+    // Switch to GLM (no catalog models): its own default model, nothing carried over from Claude.
+    fireEvent.click(screen.getByTestId("profile-form-provider"));
+    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    fireEvent.click(screen.getByTestId("model-provider-glm"));
+    fireEvent.click(screen.getByTestId("model-row-glm:"));
+    await flush();
+    expect(screen.getByTestId("profile-form-provider")).toHaveAttribute("title", expect.stringMatching(/glm/i));
+    // Thinking is Claude-only: gone for GLM.
+    expect(screen.queryByTestId("profile-form-thinking-level")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("profile-form-submit"));
+    await flush();
+
+    expect(daemon.calls.find((c) => c.method === "profile.create")?.params).toMatchObject({ name: "Other", provider: "glm", model: "", permissionMode: "" });
   });
 
   it("profile list shows the model", async () => {
@@ -376,5 +391,36 @@ describe("profiles-section inline edit's provider health dot (run-config IA)", (
     // One more call: the Test button's own. The dot re-read the shared cache; it did not fetch again.
     expect(daemon.countCalls("provider.test")).toBe(2);
     expect(screen.getByTestId("profile-edit-form-1-provider-health")).toHaveAttribute("data-status", "ok");
+  });
+});
+
+describe("profile form uses the shared run-config pickers (ADR-0032 S4)", () => {
+  it("profile form uses the shared provider/model, mode and thinking pickers", async () => {
+    await renderWithProfiles([PROFILE]);
+    fireEvent.click(screen.getByTestId("profile-new-button"));
+    await flush();
+
+    // Provider + model: the composer's picker (its trigger names "Model: <provider · model>", glyph included),
+    // in the field variant (full width, opens downwards).
+    const picker = screen.getByTestId("profile-form-provider");
+    expect(picker).toHaveAttribute("aria-label", expect.stringMatching(/^Model: /));
+    expect(within(picker).getByTestId("provider-glyph")).toBeInTheDocument();
+    expect(picker.className).toContain("w-full");
+    fireEvent.click(picker);
+    expect(screen.getByTestId("model-picker-popover")).toHaveAttribute("data-side", "bottom");
+    expect(screen.queryByTestId("model-profiles-band")).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByTestId("model-search-input"), { key: "Escape" });
+
+    // Mode and thinking: the same controls as the toolbar, same labels and help text.
+    const mode = screen.getByTestId("profile-form-permission-mode");
+    expect(mode).toHaveAttribute("aria-label", "Permission mode");
+    expect(screen.getByTestId("profile-form-thinking-level")).toHaveAttribute("aria-label", "Thinking level");
+
+    // The dangerous-mode styling is the toolbar's too: an auto-approving mode flags the field.
+    expect(mode).not.toHaveAttribute("data-danger");
+    fireEvent.click(mode);
+    fireEvent.click(await screen.findByRole("option", { name: "Bypass" }));
+    await flush();
+    expect(screen.getByTestId("profile-form-permission-mode")).toHaveAttribute("data-danger", "true");
   });
 });
