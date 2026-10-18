@@ -320,6 +320,7 @@ func TestProfile_ModelOverriddenByCall(t *testing.T) {
 	}, &overridden); isErr {
 		t.Fatal("task_send via profile + model returned an error result")
 	}
+	waitForRunStatus(t, client, overridden.RunID, "done")
 	models := runModelsOf(t, env)
 	if models[viaProfile.RunID] != "fake-model-a" {
 		t.Fatalf("profile run model = %q, want fake-model-a", models[viaProfile.RunID])

@@ -134,6 +134,10 @@ func newConfigOptionTestEnvCap(t *testing.T, home string, maxRunsPerTree int, ag
 	if err != nil {
 		t.Fatalf("wsapi.New() error = %v", err)
 	}
+	// LIFO: srv.Close, then api.Close (stop runs + terminals), then the
+	// store close registered above, then TempDir removal -- no run may
+	// still write to the db or a worktree when they go away.
+	t.Cleanup(api.Close)
 	if maxRunsPerTree > 0 {
 		api.Runs.SetMaxConcurrentRunsPerTree(maxRunsPerTree)
 	}

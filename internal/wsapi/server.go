@@ -79,6 +79,16 @@ type API struct {
 	authorize func(*http.Request) bool
 }
 
+// Close stops every still-running agent run and terminal session the API
+// owns and waits for their goroutines to finish (runs.Registry.CloseAll,
+// terminal.Registry.CloseAll). Call it after the HTTP server stops
+// accepting connections and before the store closes, so no background
+// writer is left touching the database or a worktree directory.
+func (a *API) Close() {
+	a.Runs.CloseAll()
+	a.Terminals.CloseAll()
+}
+
 // SetAuthorizer replaces the /ws admission rule. internal/server uses it to
 // accept session tokens (direct connections with a password, ADR-0031 D8) and
 // to keep the daemon-token query rule for true loopback callers only. It is not
