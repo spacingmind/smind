@@ -405,3 +405,48 @@ func TestLoginExchange_Identity(t *testing.T) {
 		}
 	})
 }
+
+func TestAccountIdentity_Derivation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("openai identity requires both sub and chatgpt_account_id", func(t *testing.T) {
+		t.Parallel()
+
+		auth := func(id string) map[string]any { return map[string]any{"chatgpt_account_id": id} }
+		for name, claims := range map[string]map[string]any{
+			"sub only":             {"sub": "user-1"},
+			"sub, empty account":   {"sub": "user-1", "https://api.openai.com/auth": auth("")},
+			"account only":         {"https://api.openai.com/auth": auth("ws-1")},
+			"sub, wrong auth type": {"sub": "user-1", "https://api.openai.com/auth": "oops"},
+		} {
+			if got := openAISubject(idTokenWithClaims(t, claims)); got != "" {
+				t.Errorf("openAISubject(%s) = %q, want empty (no identity)", name, got)
+			}
+		}
+		both := openAISubject(idTokenWithClaims(t, map[string]any{"sub": "user-1", "https://api.openai.com/auth": auth("ws-1")}))
+		if both == "" {
+			t.Error("openAISubject with both sub and chatgpt_account_id is empty")
+		}
+	})
+
+	t.Run("identity hash input is delimiter safe", func(t *testing.T) {
+		t.Parallel()
+
+		// Provider/subject boundary.
+		if AccountIdentity("a", "b:c") == AccountIdentity("a:b", "c") {
+			t.Error("AccountIdentity collides across the provider/subject boundary")
+		}
+		// sub/account boundary inside the OpenAI subject.
+		tok := func(sub, account string) string {
+			return openAISubject(idTokenWithClaims(t, map[string]any{
+				"sub": sub, "https://api.openai.com/auth": map[string]any{"chatgpt_account_id": account},
+			}))
+		}
+		if tok("a|b", "c") == tok("a", "b|c") || tok("a:1", "b") == tok("a", "1:b") {
+			t.Error("openai subject collides across the sub/account boundary")
+		}
+		if AccountIdentity("openai", tok("a|b", "c")) == AccountIdentity("openai", tok("a", "b|c")) {
+			t.Error("openai identity collides across the sub/account boundary")
+		}
+	})
+}
