@@ -32,24 +32,63 @@ import (
 // the server implementation.
 const metadataKeyAdmission = "admission-id"
 
-// Dial connects to the relay at target (host:port), pinning the TLS
-// certificate fingerprint (hex SHA-256 of the DER cert, as printed by
-// `smind relay` at startup and carried in pairing.Offer.RelayFingerprint)
-// instead of trusting any CA. An empty fingerprint is refused: an unpinned
-// connection to a self-signed relay is exactly the MITM ADR-0011 exists
-// to prevent.
-func Dial(target, fingerprint string) (*grpc.ClientConn, error) {
+// DialOption adjusts Dial. Production code passes none.
+type DialOption func(*dialOptions)
+
+type dialOptions struct {
+	roots *x509.CertPool
+}
+
+// WithRootCAs verifies a CA-mode connection (empty fingerprint) against pool
+// instead of the system roots. For tests with a private CA, and for a
+// self-hoster whose relay certificate comes from an internal CA; it has no
+// effect on a pinned connection, which trusts no CA at all.
+func WithRootCAs(pool *x509.CertPool) DialOption {
+	return func(o *dialOptions) { o.roots = pool }
+}
+
+// Dial connects to the relay at target (host:port) over TLS 1.3, in one of
+// two modes chosen by fingerprint:
+//
+//   - A non-empty fingerprint (hex SHA-256 of the DER leaf certificate, as
+//     printed by `smind relay` at startup and carried in
+//     pairing.Offer.RelayFingerprint) pins exactly that certificate and
+//     trusts no CA: the self-signed relay of ADR-0011.
+//   - An empty fingerprint is CA mode (ADR-0031 P12c): the certificate chain
+//     and the host name in target are verified against the system roots, as
+//     for any HTTPS site. It is for a relay serving a real certificate
+//     (`smind relay --tls-cert/--tls-key`). Nothing is skipped on this path.
+//
+// A malformed fingerprint is an error, never a fallback to CA mode.
+func Dial(target, fingerprint string, opts ...DialOption) (*grpc.ClientConn, error) {
+	tlsCfg, err := tlsConfig(fingerprint, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return grpc.NewClient(target, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+}
+
+// tlsConfig builds the client TLS configuration for Dial's two modes.
+func tlsConfig(fingerprint string, opts ...DialOption) (*tls.Config, error) {
+	var o dialOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	if fingerprint == "" {
+		// RootCAs nil means the system roots; the server name is taken from
+		// the dial target by the gRPC transport credentials.
+		return &tls.Config{RootCAs: o.roots, MinVersion: tls.VersionTLS13}, nil
+	}
 	fp, err := hex.DecodeString(fingerprint)
 	if err != nil || len(fp) != sha256.Size {
 		return nil, fmt.Errorf("relay client: bad fingerprint %q", fingerprint)
 	}
-	tlsCfg := &tls.Config{
+	return &tls.Config{
 		// Chain verification is replaced by the fingerprint pin below.
-		InsecureSkipVerify:    true,
+		InsecureSkipVerify:    true, //nolint:gosec // pinned leaf, see pinLeaf.
 		VerifyPeerCertificate: pinLeaf(fp),
 		MinVersion:            tls.VersionTLS13,
-	}
-	return grpc.NewClient(target, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+	}, nil
 }
 
 // pinLeaf checks the leaf certificate only: it is the one the handshake

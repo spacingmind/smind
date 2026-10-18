@@ -3,7 +3,7 @@
 //! logic in `smind_daemon_client::daemon_manager` with the OS calls it
 //! needs (spawning the daemon process, hitting the network) plus Tauri
 //! glue (app data dir, event emission, app version). See
-//! `docs/plans/active/desktop-managed-daemon.md`.
+//! `docs/plans/completed/desktop-managed-daemon.md`.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -42,7 +42,7 @@ pub struct DaemonStatus {
     pub comparison: version::Comparison,
     pub managed_state: ManagedState,
     /// `/healthz` `managedBy` (ADR-0031 P8): the OS service manager
-    /// ("systemd", "launchd", "task") that supervises the daemon, when one
+    /// ("systemd", "launchd", "taskscheduler") that supervises the daemon, when one
     /// does. A service-managed daemon is never taken over or killed by the
     /// app -- the service would just restart it.
     pub managed_by: Option<String>,
@@ -160,7 +160,8 @@ fn classify_unmanaged(platform: Platform, owner_image: Option<&str>, managed_by:
 /// managed_by_label is the display name of a `/healthz` `managedBy` value.
 fn managed_by_label(managed_by: &str) -> &str {
     match managed_by {
-        "task" => "Task Scheduler",
+        // `taskscheduler` is what the Windows scheduled task sets (ADR-0031 P9).
+        "taskscheduler" | "task" => "Task Scheduler",
         "docker" => "Docker",
         other => other,
     }
@@ -1436,7 +1437,7 @@ mod tests {
     #[test]
     fn classify_unmanaged_service_when_healthz_managed_by_present() {
         use UnmanagedKind::*;
-        assert_eq!(classify_unmanaged(Platform::Windows, Some(r"C:\Users\x\AppData\Local\smind\bin\smind.exe"), Some("task")), Service);
+        assert_eq!(classify_unmanaged(Platform::Windows, Some(r"C:\Users\x\AppData\Local\smind\bin\smind.exe"), Some("taskscheduler")), Service);
         assert_eq!(classify_unmanaged(Platform::Macos, Some("/usr/local/bin/smind"), Some("systemd")), Service);
         assert_eq!(classify_unmanaged(Platform::Macos, None, Some("launchd")), Service);
         // An empty value is "not managed", like an absent one.
@@ -1462,7 +1463,7 @@ mod tests {
             let err = take_over_refusal(platform, Some("/usr/local/bin/smind"), Some("systemd"), 4648).expect("service-managed must be refused");
             assert!(err.contains("managed by systemd") && err.contains("smind service"), "{err}");
         }
-        let err = take_over_refusal(Platform::Windows, None, Some("task"), 4648).unwrap();
+        let err = take_over_refusal(Platform::Windows, None, Some("taskscheduler"), 4648).unwrap();
         assert!(err.contains("Task Scheduler"), "{err}");
         // A container is not a service manager: no `smind service` advice.
         let err = take_over_refusal(Platform::Macos, Some("/usr/local/bin/smind"), Some("docker"), 4648).unwrap();

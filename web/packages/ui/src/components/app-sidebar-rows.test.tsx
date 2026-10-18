@@ -1,4 +1,4 @@
-// Sidebar polish (docs/plans/active/sidebar-polish.md): row-level behavior of
+// Sidebar polish (docs/plans/completed/sidebar-polish.md): row-level behavior of
 // the task sidebar -- scoped actions (S1), keyboard (S2), the single status
 // slot (S3), the single-line row (S4), container rows (S5), the task context
 // menu (S6), title fade + per-row indentation (S7) and persisted expansion

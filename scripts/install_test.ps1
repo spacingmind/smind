@@ -39,6 +39,9 @@ function Get-SmindUserPath { $script:fakePath }
 function Set-SmindUserPath { param([string]$Value) $script:fakePath = $Value }
 function Test-SmindGitInstalled { $script:gitInstalled }
 function Get-SmindArch { 'amd64' }
+$script:serviceCalls = @()
+$script:serviceOk = $true
+function Invoke-SmindServiceInstall { param([string]$Exe) $script:serviceCalls += $Exe; return $script:serviceOk }
 
 function New-Release {
     # New-Release <version> [-Arch amd64] [-Entries @{name=content}] [-Tamper]
@@ -69,16 +72,18 @@ function Reset-State {
     $script:gitInstalled = $true
     $script:latest = '9.9.9'
     $script:downloads = @()
+    $script:serviceCalls = @()
+    $script:serviceOk = $true
     if (Test-Path $script:fakeLocal) { Remove-Item $script:fakeLocal -Recurse -Force }
     New-Item -ItemType Directory -Path $script:fakeLocal | Out-Null
 }
 
 # Runs Install-Smind, returning @{ Ok; Error; Warnings; Output }.
 function Invoke-Install {
-    param([string]$Version, [string]$InstallDir)
+    param([string]$Version, [string]$InstallDir, [switch]$Service)
     $result = @{ Ok = $true; Error = $null; Warnings = @(); Output = @() }
     try {
-        $stream = Install-Smind -Version $Version -InstallDir $InstallDir 3>&1 6>&1
+        $stream = Install-Smind -Version $Version -InstallDir $InstallDir -Service:$Service 3>&1 6>&1
         $result.Warnings = @($stream | Where-Object { $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { $_.Message })
         $result.Output = @($stream | Where-Object { $_ -isnot [System.Management.Automation.WarningRecord] } | ForEach-Object { "$_" })
     } catch {
@@ -280,6 +285,62 @@ Test-Case 'Install_NoGitWarningWhenGitPresent' {
     New-Release '1.2.3'
     $r = Invoke-Install -Version '1.2.3'
     Assert-True ($r.Warnings.Count -eq 0) "warnings: $($r.Warnings -join '|')"
+}
+
+Test-Case 'Install_Service_RegistersTask' {
+    New-Release '1.2.3'
+    $r = Invoke-Install -Version '1.2.3' -Service
+    Assert-True $r.Ok "install failed: $($r.Error)"
+    $dir = Join-Path (Join-Path $script:fakeLocal 'Programs') 'smind'
+    Assert-True ($script:serviceCalls.Count -eq 1) "service install calls: $($script:serviceCalls.Count)"
+    Assert-True ($script:serviceCalls[0] -eq (Join-Path $dir 'smind.exe')) "ran $($script:serviceCalls[0])"
+    Assert-True ((Read-Exe $dir) -eq 'fake smind 1.2.3') 'binary installed'
+    Assert-True (($r.Output -join "`n") -match 'starts at logon, not at boot') 'says when the task runs'
+}
+
+Test-Case 'Install_WithoutService_NeverRegistersATask' {
+    New-Release '1.2.3'
+    $r = Invoke-Install -Version '1.2.3'
+    Assert-True $r.Ok "install failed: $($r.Error)"
+    Assert-True ($script:serviceCalls.Count -eq 0) 'no service install without -Service'
+}
+
+Test-Case 'Install_ServiceFailure_FailsButKeepsTheBinary' {
+    New-Release '1.2.3'
+    $script:serviceOk = $false
+    $r = Invoke-Install -Version '1.2.3' -Service
+    Assert-True (-not $r.Ok) 'must report failure'
+    Assert-True ($r.Error -match "smind service install' failed") $r.Error
+    Assert-True ((Read-Exe (Join-Path (Join-Path $script:fakeLocal 'Programs') 'smind')) -eq 'fake smind 1.2.3') 'the binary stays installed'
+}
+
+Test-Case 'Install_ServiceFailedChecksum_NeverRegistersATask' {
+    New-Release '6.6.6' -Tamper
+    $r = Invoke-Install -Version '6.6.6' -Service
+    Assert-True (-not $r.Ok) 'must fail'
+    Assert-True ($script:serviceCalls.Count -eq 0) 'a failed install must not register a task'
+}
+
+Test-Case 'InvokeServiceInstall_ReportsTheExitCodeOfTheRealExe' {
+    # The real function against a fake exe that prints and exits non-zero or zero:
+    # its stdout must not leak into the return value (a non-empty array is truthy).
+    Remove-Item Function:\Invoke-SmindServiceInstall
+    . (Join-Path $PSScriptRoot 'install.ps1')
+    $isWin = ($env:OS -eq 'Windows_NT')
+    foreach ($code in 0, 1) {
+        $fake = Join-Path $work "fake-smind-$code"
+        if ($isWin) {
+            $fake += '.cmd'
+            Set-Content -LiteralPath $fake -Encoding ascii -Value @('@echo off', 'echo registered the task', "exit /b $code")
+        } else {
+            Set-Content -LiteralPath $fake -Value @('#!/bin/sh', 'echo registered the task', "exit $code")
+            chmod +x $fake
+        }
+        $r = Invoke-SmindServiceInstall -Exe $fake
+        Assert-True ($r -is [bool]) "returned $($r.GetType().Name), want a single bool"
+        Assert-True ($r -eq ($code -eq 0)) "exit $code reported as $r"
+    }
+    function Invoke-SmindServiceInstall { param([string]$Exe) $script:serviceCalls += $Exe; return $script:serviceOk }
 }
 
 Test-Case 'Install_ShellStateNotLeaked' {

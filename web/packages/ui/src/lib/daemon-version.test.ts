@@ -59,6 +59,7 @@ describe("managedByLabel", () => {
   it("names the service managers", () => {
     expect(managedByLabel("systemd")).toBe("systemd");
     expect(managedByLabel("launchd")).toBe("launchd");
+    expect(managedByLabel("taskscheduler")).toBe("Task Scheduler");
     expect(managedByLabel("task")).toBe("Task Scheduler");
   });
 });

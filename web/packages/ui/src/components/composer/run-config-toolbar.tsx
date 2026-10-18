@@ -363,7 +363,7 @@ export function describeProfile(p: AgentProfile, providers: ProviderInfo[]): str
 
 /**
  * The one combined provider + model selector (Paseo's combined-model-selector;
- * docs/plans/active/composer-combined-model-picker.md) -- it replaced the
+ * docs/plans/completed/composer-combined-model-picker.md) -- it replaced the
  * separate Agent, Provider and Model controls. Profiles ("agents") are the
  * pinned root section of its popover, so applying, detaching and managing them
  * works as before; the reset-to-agent button stays beside the trigger while

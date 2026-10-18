@@ -223,21 +223,9 @@ func TestLoadFile_ReadsAnotherUsersConfigWithoutMigrating(t *testing.T) {
 	}
 }
 
-func TestDirFor_PrefersSmindThenLegacyThenSmind(t *testing.T) {
+func TestDirFor_IsDotSmind(t *testing.T) {
 	home := t.TempDir()
 	if got := DirFor(home); got != filepath.Join(home, ".smind") {
-		t.Errorf("fresh home: %s", got)
-	}
-	if err := os.Mkdir(filepath.Join(home, ".spacingmind"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if got := DirFor(home); got != filepath.Join(home, ".spacingmind") {
-		t.Errorf("legacy only: %s", got)
-	}
-	if err := os.Mkdir(filepath.Join(home, ".smind"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if got := DirFor(home); got != filepath.Join(home, ".smind") {
-		t.Errorf("both: %s", got)
+		t.Errorf("DirFor = %s", got)
 	}
 }

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -32,12 +34,12 @@ import (
 // offer`) -- a different role from operating a relay: see internal/relay/
 // bridge's doc comment.
 //
-//	smind relay [--listen <addr>] [--data-dir <dir>] [--max-devices-per-host <n>]
+//	smind relay [--listen <addr>] [--data-dir <dir>] [--max-devices-per-host <n>] [--tls-cert <pem> --tls-key <pem>]
 //	smind relay host new <id>    (prints the raw secret once)
 //	smind relay host ls
 //	smind relay host rm <id>
 //	smind relay host rotate <id> (prints the new raw secret once)
-//	smind relay connect <relay-address> <host-id> <secret>
+//	smind relay connect [--fingerprint <hex>] <relay-address> <host-id> <secret>
 //	smind relay offer [--window <duration>] [--max-devices <n>]
 //	smind relay devices ls [--pending] | approve <id> | revoke <id> | rename <id> <label>
 //
@@ -65,37 +67,55 @@ func cmdRelay(args []string) int {
 		}
 	}
 
+	cfg, code := parseRelayServeFlags(args, os.Stderr)
+	if code != 0 {
+		return code
+	}
+	if err := server.Run(context.Background(), cfg); err != nil {
+		log.Fatalf("relay: %v", err)
+	}
+	return 0
+}
+
+// parseRelayServeFlags reads the flags of `smind relay` (the server). A
+// non-zero code means the process should exit with it, usage having been
+// printed to stderr.
+func parseRelayServeFlags(args []string, stderr io.Writer) (server.Config, int) {
 	fs := flag.NewFlagSet("relay", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stderr)
 	listen := fs.String("listen", server.DefaultListenAddr, "listen address (native gRPC)")
 	grpcWebListen := fs.String("grpc-web-listen", server.DefaultGRPCWebListenAddr, "listen address for the same RPCs over grpc-web")
 	dataDir := fs.String("data-dir", "", "relay data directory (default $SMIND_HOME/relay)")
 	maxDevices := fs.Int("max-devices-per-host", server.DefaultMaxDevicesPerHost, "maximum devices attached to one relay host at once")
+	tlsCert := fs.String("tls-cert", "", "serve this PEM certificate chain (e.g. Let's Encrypt) instead of a self-signed one; needs --tls-key")
+	tlsKey := fs.String("tls-key", "", "the PEM private key for --tls-cert")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return server.Config{}, 2
 	}
 	if fs.NArg() > 0 {
-		fmt.Fprintf(os.Stderr, "smind relay: unexpected argument %q\n\n", fs.Arg(0))
-		printRelayUsage(os.Stderr)
-		return 2
+		fmt.Fprintf(stderr, "smind relay: unexpected argument %q\n\n", fs.Arg(0))
+		printRelayUsage(stderr)
+		return server.Config{}, 2
 	}
 	if *dataDir == "" {
 		*dataDir = server.RelayDir()
 	}
 	if *maxDevices < 1 {
-		fmt.Fprintln(os.Stderr, "smind relay: --max-devices-per-host must be at least 1")
-		return 2
+		fmt.Fprintln(stderr, "smind relay: --max-devices-per-host must be at least 1")
+		return server.Config{}, 2
 	}
-
-	if err := server.Run(context.Background(), server.Config{
+	if (*tlsCert == "") != (*tlsKey == "") {
+		fmt.Fprintln(stderr, "smind relay: --tls-cert and --tls-key must be given together")
+		return server.Config{}, 2
+	}
+	return server.Config{
 		ListenAddr:        *listen,
 		GRPCWebListenAddr: *grpcWebListen,
 		DataDir:           *dataDir,
 		MaxDevicesPerHost: *maxDevices,
-	}); err != nil {
-		log.Fatalf("relay: %v", err)
-	}
-	return 0
+		TLSCertFile:       *tlsCert,
+		TLSKeyFile:        *tlsKey,
+	}, 0
 }
 
 // relayConnectNote says what connecting does and does not do: the word
@@ -163,42 +183,144 @@ func cmdRelayHost(args []string) int {
 	}
 }
 
-// cmdRelayConnect implements `smind relay connect <relay-address>
-// <host-id> <secret>`: the daemon-as-relay-client pairing config
-// (docs/decisions -- see docs/plans/active/mobile-app-milestone-1.md's
-// Decisions). address/hostID/secret are exactly the values `smind
-// relay host new`'s one-time output already gives a relay operator;
-// the relay's TLS fingerprint is captured here via trust-on-first-use
-// (bridge.FetchFingerprint) rather than a fourth argument, since a fresh
-// relay's fingerprint isn't something a human would otherwise copy by hand.
+// cmdRelayConnect implements `smind relay connect [--fingerprint <hex>]
+// <relay-address> <host-id> <secret>`: the daemon-as-relay-client pairing
+// config (docs/decisions -- see docs/plans/active/mobile-app-milestone-1.md's
+// Decisions). address/hostID/secret are exactly the values `smind relay host
+// new`'s one-time output already gives a relay operator.
+//
+// How the relay's certificate is trusted is decided here, once (ADR-0031
+// P12c): a relay serving a certificate that verifies for its host name
+// against the system roots is stored with an empty fingerprint (CA mode,
+// nothing to pin); any other relay's fingerprint is shown and must be
+// confirmed -- or given with --fingerprint -- before it is pinned. Nothing is
+// ever pinned silently, because whoever answers this one connection would
+// otherwise be trusted for good.
+//
 // Persisting this under $SMIND_HOME is what makes `smind serve` dial the
 // relay automatically on every future start -- opt-in, since the config
 // simply doesn't exist until this command runs.
 func cmdRelayConnect(args []string) int {
-	if len(args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: smind relay connect <relay-address> <host-id> <secret>")
+	return runRelayConnect(args, config.Dir(), bridge.TLSProbe{}, os.Stdin, os.Stdout, os.Stderr)
+}
+
+// relayTLSProbe is what runRelayConnect needs from bridge.TLSProbe, so a test
+// can stand in for the network.
+type relayTLSProbe interface {
+	Verify(address string) error
+	Fingerprint(address string) (string, error)
+}
+
+const relayConnectUsage = `usage: smind relay connect [--fingerprint <hex>] <relay-address> <host-id> <secret>
+
+A relay with a certificate from a public CA is verified normally. For a
+self-signed relay the certificate's fingerprint is shown and you confirm it
+(compare it with the one "smind relay" printed), or pass it as --fingerprint.
+`
+
+func runRelayConnect(args []string, dir string, probe relayTLSProbe, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("relay connect", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() { fmt.Fprint(stderr, relayConnectUsage) }
+	wantFP := fs.String("fingerprint", "", "pin this hex SHA-256 certificate fingerprint (no prompt); the relay must present it")
+	pos, err := parseInterspersed(fs, args)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
-	address, hostID, secret := args[0], args[1], args[2]
-	if _, err := hex.DecodeString(secret); err != nil {
-		fmt.Fprintf(os.Stderr, "smind relay connect: secret is not valid hex: %v\n", err)
+	if len(pos) != 3 {
+		fs.Usage()
 		return 2
+	}
+	address, hostID, secret := pos[0], pos[1], pos[2]
+	if _, err := hex.DecodeString(secret); err != nil {
+		fmt.Fprintf(stderr, "smind relay connect: secret is not valid hex: %v\n", err)
+		return 2
+	}
+	var pin []byte
+	if *wantFP != "" {
+		pin, err = hex.DecodeString(strings.TrimSpace(*wantFP))
+		if err != nil || len(pin) != sha256.Size {
+			fmt.Fprintln(stderr, "smind relay connect: --fingerprint must be 64 hex characters (the SHA-256 of the relay's certificate)")
+			return 2
+		}
 	}
 
-	fingerprint, err := bridge.FetchFingerprint(address)
-	if err != nil {
-		log.Fatalf("relay connect: %v", err)
+	fingerprint, trust, code := resolveRelayTrust(address, hex.EncodeToString(pin), probe, stdin, stdout, stderr)
+	if code != 0 {
+		return code
 	}
-	if err := bridge.SaveConfig(config.Dir(), bridge.Config{
+	if err := bridge.SaveConfig(dir, bridge.Config{
 		RelayAddress: address,
 		WorkspaceID:  hostID, // bridge.Config keeps the wire name; it is the relay host id
 		SecretHex:    secret,
 		Fingerprint:  fingerprint,
 	}); err != nil {
-		log.Fatalf("relay connect: %v", err)
+		fmt.Fprintf(stderr, "smind relay connect: %v\n", err)
+		return 1
 	}
-	fmt.Printf("connected to relay %s (relay host %q, fingerprint %s)\n\n`smind serve` will now dial this relay automatically. Run `smind relay offer` for a pairing link for a mobile device or the desktop app.\n\n%s\n\n%s\n", address, hostID, fingerprint, relayLinkWarning, relayConnectNote)
+	fmt.Fprintf(stdout, "connected to relay %s (relay host %q, %s)\n\n`smind serve` will now dial this relay automatically. Run `smind relay offer` for a pairing link for a mobile device or the desktop app.\n\n%s\n\n%s\n", address, hostID, trust, relayLinkWarning, relayConnectNote)
 	return 0
+}
+
+// resolveRelayTrust decides what to store as the relay's fingerprint and how
+// to describe it: "" for a CA-verified relay, the confirmed (or supplied)
+// fingerprint otherwise. A non-zero code means connect must stop, having
+// said why.
+func resolveRelayTrust(address, suppliedFP string, probe relayTLSProbe, stdin io.Reader, stdout, stderr io.Writer) (fingerprint, trust string, code int) {
+	if suppliedFP != "" {
+		presented, err := probe.Fingerprint(address)
+		if err != nil {
+			fmt.Fprintf(stderr, "smind relay connect: %v\n", err)
+			return "", "", 1
+		}
+		if presented != suppliedFP {
+			fmt.Fprintf(stderr, "smind relay connect: %s presents certificate %s, not the --fingerprint you gave (%s); nothing was saved\n", address, presented, suppliedFP)
+			return "", "", 1
+		}
+		return presented, "pinned fingerprint " + presented, 0
+	}
+
+	verr := probe.Verify(address)
+	if verr == nil {
+		return "", "certificate verified by system roots; no fingerprint to pin", 0
+	}
+	if !errors.Is(verr, bridge.ErrNotVerified) {
+		fmt.Fprintf(stderr, "smind relay connect: %v\n", verr)
+		return "", "", 1
+	}
+	presented, err := probe.Fingerprint(address)
+	if err != nil {
+		fmt.Fprintf(stderr, "smind relay connect: %v\n", err)
+		return "", "", 1
+	}
+	fmt.Fprintf(stdout, "The relay at %s does not present a certificate your system trusts:\n  %v\n\nIts certificate fingerprint is\n\n  %s\n\nCompare it with the fingerprint \"smind relay\" printed when it started. Anyone who can answer this connection\nright now could present a different certificate, so only continue if they match.\nPin it and connect? [y/N] ", address, verr, presented)
+	answer, _ := bufio.NewReader(stdin).ReadString('\n')
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return presented, "pinned fingerprint " + presented, 0
+	}
+	fmt.Fprintln(stderr, "\nsmind relay connect: not confirmed; nothing was saved. (Run it again and confirm, pass --fingerprint <hex>, or give the relay a certificate from a public CA with \"smind relay --tls-cert/--tls-key\".)")
+	return "", "", 1
+}
+
+// parseInterspersed is fs.Parse that also accepts flags after positional
+// arguments (`connect addr host secret --fingerprint x`), returning the
+// positionals in order.
+func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
+	var pos []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		if fs.NArg() == 0 {
+			return pos, nil
+		}
+		pos = append(pos, fs.Arg(0))
+		args = fs.Args()[1:]
+	}
 }
 
 // cmdRelayOffer implements `smind relay offer`: prints the pairing deep
@@ -427,12 +549,15 @@ func printRelayUsage(w io.Writer) {
 
 Usage:
   smind relay [--listen <addr>] [--grpc-web-listen <addr>] [--data-dir <dir>] [--max-devices-per-host <n>]
-                                                           start the relay server (default 16 devices per relay host)
+              [--tls-cert <pem> --tls-key <pem>]           start the relay server (default 16 devices per relay host);
+                                                           with --tls-cert/--tls-key it serves your CA certificate
+                                                           (e.g. Let's Encrypt) instead of a self-signed one
   smind relay host new <id>                               enroll a relay host (secret printed once)
   smind relay host ls                                     list enrolled relay hosts
   smind relay host rm <id>                                remove a relay host
   smind relay host rotate <id>                            issue a new secret (printed once; the old one stops admitting)
-  smind relay connect <address> <host-id> <secret>        configure this daemon to use a relay
+  smind relay connect [--fingerprint <hex>] <address> <host-id> <secret>
+                                                           configure this daemon to use a relay
   smind relay offer [--window <duration>] [--max-devices <n>] [--qr] [--png <file> [--force]]
                                                            print a pairing link (and QR code) for a mobile device or the desktop app
                                                            and open a pairing window (default 10m, 1 new device)
@@ -444,6 +569,12 @@ Usage:
 Device ids accept any unique prefix. With the daemon running, "relay devices"
 and "relay offer" go through it; otherwise they edit the device registry file
 directly and the change applies when the daemon next starts.
+
+Trusting the relay's certificate: "relay connect" first verifies it like a web
+browser would (public CA, matching host name, not expired); if that works nothing
+is pinned. Otherwise (a self-signed relay, the default) it shows the certificate
+fingerprint and asks you to confirm it, or takes --fingerprint <hex>; it never
+pins a certificate silently.
 
 A relay host is one daemon's mailbox on a relay: a host id plus an admission
 secret. ("smind relay workspace ..." is the deprecated name for "smind relay

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,16 +43,44 @@ func writePortConfig(t *testing.T, home string, port int) {
 	}
 }
 
-// buildSmind compiles this package's binary once per test (the go build
-// cache makes the second and later builds cheap), the way
-// TestMCPServe_StdioRoundTrip does.
+// The daemon binary the tests run as subprocesses is built ONCE per test
+// process. A `go build` is cheap in the build cache, but the link is not (a dozen
+// tests each linking a 40 MB binary took 6 to 25 s apiece on a Windows runner),
+// and no test modifies it. TestMain removes the directory.
+var (
+	smindBinOnce sync.Once
+	smindBinDir  string
+	smindBinPath string
+	smindBinErr  error
+)
+
+// buildSmind returns this package's compiled binary, building it the first time.
 func buildSmind(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), exeName("smind-serve-test"))
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build smind: %v: %s", err, out)
+	smindBinOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "smind-test-bin-")
+		if err != nil {
+			smindBinErr = err
+			return
+		}
+		smindBinDir = dir
+		smindBinPath = filepath.Join(dir, exeName("smind-serve-test"))
+		if out, err := exec.Command("go", "build", "-o", smindBinPath, ".").CombinedOutput(); err != nil {
+			smindBinErr = fmt.Errorf("build smind: %v: %s", err, out)
+		}
+	})
+	if smindBinErr != nil {
+		t.Fatal(smindBinErr)
 	}
-	return bin
+	return smindBinPath
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if smindBinDir != "" {
+		_ = os.RemoveAll(smindBinDir)
+	}
+	os.Exit(code)
 }
 
 // smindEnv returns the subprocess environment that pins SMIND_HOME to
@@ -134,17 +163,25 @@ func openHomeStore(t *testing.T, home string) *store.Store {
 }
 
 // stdBuffer is a minimal sink for a subprocess's combined output, so
-// failure messages can show the daemon's own log.
+// failure messages can show the daemon's own log. exec.Cmd copies stdout and
+// stderr from its own goroutines while the test reads the log, so it locks.
 type stdBuffer struct {
+	mu   sync.Mutex
 	data []byte
 }
 
 func (b *stdBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.data = append(b.data, p...)
 	return len(p), nil
 }
 
-func (b *stdBuffer) String() string { return string(b.data) }
+func (b *stdBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.data)
+}
 
 // TestServe_GracefulShutdown is AC3's mandatory scenario: a real
 // `smind serve` subprocess with a live terminal session, stopped by the
