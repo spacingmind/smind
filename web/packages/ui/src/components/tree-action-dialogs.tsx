@@ -101,7 +101,10 @@ function useDryRun<T>(
     return () => {
       cancelled = true;
     };
-  }, [open, task, client, method]);
+    // task.ID, not the task object: the header's live task is a new object on
+    // every task.updated, which must not restart a dry run mid-confirm.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, task?.ID, client, method]);
 
   return { result, loading, error };
 }
@@ -209,7 +212,11 @@ export function ArchiveFinishedDialog({
               setPending(true);
               setConfirmError(null);
               try {
-                const done = await client!.call<TaskArchiveFinishedResult>("task.archiveFinished", { taskId: task.ID });
+                const done = await client!.call<TaskArchiveFinishedResult>("task.archiveFinished", {
+                  taskId: task.ID,
+                  // Pinned to what the dry run showed: a task that finished while the dialog was open is not archived unseen.
+                  ids: eligible.map((e) => e.id),
+                });
                 if (done.failed.length > 0) {
                   setOutcome(done);
                 } else {

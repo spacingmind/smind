@@ -104,6 +104,11 @@ export function HeaderTaskMenu({
   // comes from a task.tree fetch (stale-guarded per task/client). A task
   // whose tree has no descendants offers neither entry, same rule as the
   // sidebar.
+  const [treeRefresh, setTreeRefresh] = useState(0);
+  // A different task starts with no availability (no leftovers from the last one).
+  useEffect(() => {
+    setTreeActions(null);
+  }, [task.ID]);
   useEffect(() => {
     if (!client) return;
     const reqTaskId = task.ID;
@@ -121,10 +126,17 @@ export function HeaderTaskMenu({
     return () => {
       cancelled = true;
     };
-  }, [client, task.ID]);
+    // treeRefresh bumps whenever the menu opens, so the enable/disable state
+    // is current when the user looks at it.
+  }, [client, task.ID, treeRefresh]);
   return (
     <>
-      <DropdownMenu onOpenChange={onMenuOpenChange}>
+      <DropdownMenu
+        onOpenChange={(open) => {
+          onMenuOpenChange(open);
+          if (open) setTreeRefresh((n) => n + 1);
+        }}
+      >
         <Tooltip {...tooltip}>
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>

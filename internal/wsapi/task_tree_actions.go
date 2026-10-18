@@ -122,15 +122,22 @@ func loadActionTree(db *store.Store, reg *runs.Registry, method string, taskID i
 	return nodes, nil
 }
 
-func parseTreeActionParams(method string, raw json.RawMessage) (taskID int64, dryRun bool, err error) {
+func parseTreeActionParams(method string, raw json.RawMessage) (taskID int64, dryRun bool, ids map[int64]bool, err error) {
 	var p struct {
-		TaskID int64 `json:"taskId"`
-		DryRun bool  `json:"dryRun"`
+		TaskID int64   `json:"taskId"`
+		DryRun bool    `json:"dryRun"`
+		IDs    []int64 `json:"ids"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return 0, false, fmt.Errorf("%s: invalid params: %w", method, err)
+		return 0, false, nil, fmt.Errorf("%s: invalid params: %w", method, err)
 	}
-	return p.TaskID, p.DryRun, nil
+	if p.IDs != nil {
+		ids = make(map[int64]bool, len(p.IDs))
+		for _, id := range p.IDs {
+			ids[id] = true
+		}
+	}
+	return p.TaskID, p.DryRun, ids, nil
 }
 
 // queuedItemIDs returns the ids of every still-queued prompt across all
@@ -166,7 +173,7 @@ func isFinishedState(s tasktree.State) bool {
 func handleTaskArchiveFinished(wm *workspace.Manager, db *store.Store, reg *runs.Registry) handlerFunc {
 	const method = "task.archiveFinished"
 	return func(ctx context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
-		taskID, dryRun, err := parseTreeActionParams(method, raw)
+		taskID, dryRun, ids, err := parseTreeActionParams(method, raw)
 		if err != nil {
 			return nil, err
 		}
@@ -221,6 +228,17 @@ func handleTaskArchiveFinished(wm *workspace.Manager, db *store.Store, reg *runs
 			eligible[n.ID] = true
 			selection = append(selection, n)
 		}
+		if ids != nil {
+			// The confirm is pinned to what the user saw in the dry run: a
+			// task that finished while the dialog was open is not archived.
+			pinned := selection[:0:0]
+			for _, n := range selection {
+				if ids[n.ID] {
+					pinned = append(pinned, n)
+				}
+			}
+			selection = pinned
+		}
 		if len(selection) > treeArchiveCap {
 			res.Remaining = len(selection) - treeArchiveCap
 			selection = selection[:treeArchiveCap]
@@ -244,8 +262,10 @@ func handleTaskArchiveFinished(wm *workspace.Manager, db *store.Store, reg *runs
 			}
 		}
 		for _, n := range selection {
-			if err := ctx.Err(); err != nil {
-				return nil, fmt.Errorf("%s: %w", method, err)
+			if ctx.Err() != nil {
+				// The caller went away: keep what was archived so far in the
+				// result rather than hiding it behind an error.
+				break
 			}
 			if reason, ok := blockedBy[n.ID]; ok {
 				res.Skipped = append(res.Skipped, treeSkipped{ID: n.ID, Title: n.Title, Reason: reason})
@@ -308,7 +328,7 @@ func archiveOne(wm *workspace.Manager, db *store.Store, reg *runs.Registry, id i
 func handleTaskStopTree(db *store.Store, reg *runs.Registry) handlerFunc {
 	const method = "task.stopTree"
 	return func(ctx context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
-		taskID, dryRun, err := parseTreeActionParams(method, raw)
+		taskID, dryRun, _, err := parseTreeActionParams(method, raw)
 		if err != nil {
 			return nil, err
 		}
@@ -316,12 +336,20 @@ func handleTaskStopTree(db *store.Store, reg *runs.Registry) handlerFunc {
 			DryRun: dryRun, Runs: []treeRun{}, Stopped: []treeRun{}, Failed: []treeRunFailed{},
 		}
 
-		deadlineCtx, cancel := context.WithTimeout(ctx, treeStopDeadline)
+		// Detached from the request: a reload or dropped connection must not
+		// abandon a half-done stop (the rescan passes are what catch runs a
+		// live parent spawned meanwhile); the shared deadline still bounds it.
+		deadlineCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), treeStopDeadline)
 		defer cancel()
 		seen := map[string]bool{}
 		for pass := 0; pass < maxTreeStopPasses; pass++ {
 			nodes, err := loadActionTree(db, reg, method, taskID)
 			if err != nil {
+				if pass > 0 {
+					// Something changed under us (the root was archived, ...):
+					// report what the earlier passes did.
+					return res, nil
+				}
 				return nil, err
 			}
 

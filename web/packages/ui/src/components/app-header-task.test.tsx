@@ -114,6 +114,31 @@ describe("HeaderTaskMenu tree actions (PR-H11)", () => {
     expect(await screen.findByRole("heading", { name: /Stop \d+ running task/ })).toBeInTheDocument();
   });
 
+  it("header menu refetches task.tree when opened so enablement is current", async () => {
+    const client = wsFake();
+    render(
+      <TooltipProvider>
+        <HeaderTaskMenu task={TASK} client={client as never} localPathActions={null} />
+      </TooltipProvider>,
+    );
+    const first = await waitFor(() => client.nth("task.tree", 0));
+    await act(async () => {
+      first.resolve(tree({ self: "idle", descendants: ["running"] }));
+    });
+    await flush();
+
+    // Children finished since the header loaded; opening the menu refetches.
+    await openMenu();
+    const second = await waitFor(() => client.nth("task.tree", 1));
+    await act(async () => {
+      second.resolve(tree({ self: "idle", descendants: ["done"] }));
+    });
+    await flush();
+    expect(
+      document.querySelector('[data-testid="app-header-archive-finished"]')?.getAttribute("aria-disabled"),
+    ).not.toBe("true");
+  });
+
   it("header offers neither entry when the task has no descendants", async () => {
     const client = wsFake();
     render(

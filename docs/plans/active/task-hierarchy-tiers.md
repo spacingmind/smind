@@ -358,7 +358,7 @@ still-eligible failures).
 
 ```
 Item     = { id: number, title: string }
-task.archiveFinished {taskId, dryRun?} ->
+task.archiveFinished {taskId, dryRun?, ids?} ->   // ids: optional allow-list (the dry run's eligible ids)
   { dryRun, eligible: Item[], archived: Item[],
     skipped: (Item & {reason: string})[], failed: (Item & {error: string})[],
     remaining: number }
@@ -371,6 +371,9 @@ task.stopTree {taskId, dryRun?} ->
     failed: (Item & {runId: string, error: string})[], queuedCancelled: number }
     // dryRun: runs + queuedPrompts filled; non-dry: stopped/failed/queuedCancelled.
 ```
+`ids` (added after review, additive): when present the confirm archives only
+the eligible tasks whose id is listed, so a task that finished while the
+dialog was open is never archived unseen; the web sends the dry run's ids.
 Errors: unknown task, archived task, bad params (`taskId` required).
 
 **H11-AC1 (runs)** `Registry.StopAndWait(ctx, runID) error` (new file, no

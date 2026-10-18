@@ -481,6 +481,35 @@ func TestArchiveFinished_DryRunChangesNothing(t *testing.T) {
 	}
 }
 
+// TestArchiveFinished_IDsPinTheSelectionToTheDryRun: a task that finished
+// after the user's dry run (dialog still open) is not archived when the
+// confirm passes the dry run's ids.
+func TestArchiveFinished_IDsPinTheSelectionToTheDryRun(t *testing.T) {
+	t.Parallel()
+	f := newTAFixture(t)
+	root := f.task("root", 0, "")
+	seen := f.task("seen", root, "reply")
+	f.finishDone(seen, root)
+	late := f.task("late", root, "reply")
+	f.finishDone(late, root) // finished after the dry run, in the story
+
+	sendRequest(f.t, f.ws, "pin", "task.archiveFinished", map[string]any{"taskId": root, "ids": []int64{seen}})
+	resp := readEnvelopeFor(f.t, f.ws, "pin", 20*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("error = %v", resp.Error.Message)
+	}
+	var res archiveFinishedResult
+	if err := json.Unmarshal(resp.Result, &res); err != nil {
+		t.Fatal(err)
+	}
+	if !sameIDs(ids(res.Archived), []int64{seen}) {
+		t.Fatalf("archived = %v, want only %d", ids(res.Archived), seen)
+	}
+	if f.isArchived(late) || !f.isArchived(seen) {
+		t.Fatalf("late archived=%v seen archived=%v, want false/true", f.isArchived(late), f.isArchived(seen))
+	}
+}
+
 func TestArchiveFinished_CapsAtHundredAndReportsRemaining(t *testing.T) {
 	swapSeams(t)
 	f := newTAFixture(t)

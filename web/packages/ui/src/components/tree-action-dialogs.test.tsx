@@ -81,7 +81,7 @@ describe("ArchiveFinishedDialog (PR-H11)", () => {
 
     fireEvent.click(screen.getByTestId("dialog-archive-finished-confirm"));
     const confirm = await waitFor(() => client.nth("task.archiveFinished", 1));
-    expect(confirm.params).toEqual({ taskId: 7 });
+    expect(confirm.params).toEqual({ taskId: 7, ids: [8] });
 
     await act(async () => {
       confirm.resolve({
@@ -166,6 +166,19 @@ describe("ArchiveFinishedDialog (PR-H11)", () => {
     expect(screen.getByText(/checkout conflict/)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Archived 1 of 2 finished sub-tasks" })).toBeInTheDocument();
     expect(screen.getByTestId("dialog-archive-finished-confirm")).toHaveTextContent("Try again");
+  });
+});
+
+describe("dry run identity (PR-H11)", () => {
+  it("a new task object with the same id does not restart the dry run", async () => {
+    const client = wsFake();
+    const { rerender } = render(
+      <StopTreeDialog client={client} task={TASK} open onOpenChange={vi.fn()} onStopped={vi.fn()} />,
+    );
+    await waitFor(() => client.nth("task.stopTree", 0));
+    rerender(<StopTreeDialog client={client} task={{ ...TASK, UpdatedAt: "later" }} open onOpenChange={vi.fn()} onStopped={vi.fn()} />);
+    await flush();
+    expect(client.calls.filter((c) => c.method === "task.stopTree")).toHaveLength(1);
   });
 });
 

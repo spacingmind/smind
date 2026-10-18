@@ -1977,7 +1977,15 @@ const TaskRow = memo(function TaskRow({
   // caller's li also contains this task's nested children list, so a CSS
   // group on the li would reveal every descendant's actions on one hover
   // (see use-row-active.ts).
-  const { active, rowProps, setMenuOpen } = useRowActive();
+  const { active, rowProps, setMenuOpen: setRowMenuOpen } = useRowActive();
+  // The hover card must not sit on top of the row's menu (it hid the menu
+  // entries' reasons): it is controlled and held shut while a menu is open.
+  const [hoverOpen, setHoverOpen] = useState(false);
+  const [menuOpen, setMenuOpenState] = useState(false);
+  const setMenuOpen = (open: boolean) => {
+    setRowMenuOpen(open);
+    setMenuOpenState(open);
+  };
   // On a narrow sidebar the ⋯ is overlaid on the row's right end (the time
   // slot is dropped there), where the child-count chip, rollup and setup badge
   // sit -- hide them while it shows rather than draw it over them.
@@ -2049,7 +2057,7 @@ const TaskRow = memo(function TaskRow({
               <Icons.chevronRight className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")} />
             </button>
           )}
-          <HoverCard openDelay={400} closeDelay={100}>
+          <HoverCard openDelay={400} closeDelay={100} open={hoverOpen && !menuOpen} onOpenChange={setHoverOpen}>
             <HoverCardTrigger asChild>
               <SidebarMenuSubButton
                 asChild
