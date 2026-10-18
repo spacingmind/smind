@@ -1,6 +1,7 @@
 package accounts
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -479,6 +480,71 @@ func TestRegistry_ReplaceCredentialIdentity(t *testing.T) {
 		}
 		if got, _ := registry.Get(first.Account.ID); !got.HasIdentity {
 			t.Fatal("OAuth re-login of the same account dropped its identity")
+		}
+	})
+}
+
+// blockingRefresher parks inside Refresh until released, so a test can start
+// a re-login while a refresh is in flight.
+type blockingRefresher struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingRefresher) Refresh(_ context.Context, cred OAuthCredential) (OAuthCredential, error) {
+	close(b.entered)
+	<-b.release
+	return OAuthCredential{AccessToken: "refreshed-old", RefreshToken: cred.RefreshToken, ExpiresAt: time.Now().Add(time.Hour)}, nil
+}
+
+func TestRegistry_ReloginDuringRefresh(t *testing.T) {
+	t.Parallel()
+
+	t.Run("relogin during an in-flight refresh keeps the new credential", func(t *testing.T) {
+		t.Parallel()
+
+		registry := newTestRegistry(t)
+		acct, err := registry.AddOAuth("anthropic", "work", OAuthCredential{AccessToken: "expired", RefreshToken: "old-r", ExpiresAt: time.Now().Add(-time.Hour)})
+		if err != nil {
+			t.Fatalf("AddOAuth() error = %v", err)
+		}
+
+		refresher := &blockingRefresher{entered: make(chan struct{}), release: make(chan struct{})}
+		refreshDone := make(chan error, 1)
+		go func() {
+			_, err := registry.EnsureFresh(context.Background(), acct.ID, refresher)
+			refreshDone <- err
+		}()
+		<-refresher.entered // the refresh now holds the account's lock
+
+		fresh := OAuthCredential{AccessToken: "from-relogin", RefreshToken: "new-r", ExpiresAt: time.Now().Add(time.Hour)}
+		reloginDone := make(chan error, 1)
+		go func() {
+			_, err := registry.ReplaceOAuth(acct.ID, fresh, "", true)
+			reloginDone <- err
+		}()
+
+		// The re-login must wait for the refresh rather than race it.
+		select {
+		case err := <-reloginDone:
+			t.Fatalf("ReplaceOAuth returned while a refresh was in flight (err = %v)", err)
+		case <-time.After(200 * time.Millisecond):
+		}
+
+		close(refresher.release)
+		if err := <-refreshDone; err != nil {
+			t.Fatalf("EnsureFresh() error = %v", err)
+		}
+		if err := <-reloginDone; err != nil {
+			t.Fatalf("ReplaceOAuth() error = %v", err)
+		}
+
+		got, err := registry.Get(acct.ID)
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got.OAuth == nil || got.OAuth.AccessToken != "from-relogin" || got.OAuth.RefreshToken != "new-r" {
+			t.Fatalf("credential after re-login = %+v, want the new login's tokens (an in-flight refresh must not overwrite it)", got.OAuth)
 		}
 	})
 }

@@ -185,6 +185,11 @@ func (r *Registry) ReplaceOAuth(id int64, cred OAuthCredential, adoptIdentity st
 	if err != nil {
 		return store.Account{}, fmt.Errorf("marshal oauth credential: %w", err)
 	}
+	// Serialize with EnsureFresh: an in-flight refresh of the old credential
+	// must not persist over this one when it finishes (and a refresh that
+	// starts afterwards re-reads this credential under the same lock).
+	unlock := r.lockAccount(id)
+	defer unlock()
 	var updated store.Account
 	switch {
 	case adoptIdentity != "":
@@ -206,6 +211,14 @@ func (r *Registry) ReplaceOAuth(id int64, cred OAuthCredential, adoptIdentity st
 		n.NotifyAccountUpdated(updated)
 	}
 	return updated, nil
+}
+
+// lockAccount takes the account's refresh lock (the one EnsureFresh holds),
+// blocking until it is free, and returns the unlock function.
+func (r *Registry) lockAccount(id int64) (unlock func()) {
+	lock := r.accountRefreshLock(id)
+	lock <- struct{}{}
+	return func() { <-lock }
 }
 
 // stored returns the raw store row (including its identity, which the typed
@@ -330,6 +343,9 @@ func (r *Registry) ReplaceCredential(id int64, credential, baseURL string) (stor
 	if err != nil {
 		return store.Account{}, err
 	}
+	// Same reason as ReplaceOAuth: an in-flight refresh must not overwrite it.
+	unlock := r.lockAccount(id)
+	defer unlock()
 	updated, err := r.store.ReplaceAccountCredential(id, credentialType, credentialData)
 	if err != nil {
 		return store.Account{}, err
