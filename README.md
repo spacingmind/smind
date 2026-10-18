@@ -226,6 +226,7 @@ approving every tool call one by one:
 
 ```sh
 smind task mode <runId> --auto-accept on     # asks you to type "yes" at a terminal
+smind task mode <runId> bypassPermissions    # an auto-approving mode asks the same
 smind task mode <runId> acceptEdits          # switch to another mode the provider advertises
 smind task mode <runId> --auto-accept off
 ```
@@ -234,7 +235,8 @@ This is human-only: the MCP server has no tool that can turn auto-accept on or
 pick an auto-approving mode, and the daemon refuses both for any caller that is
 not a human ([ADR-0019](docs/decisions/0019-provider-native-permission-modes.md)
 decision 6). The command declares itself as the human surface, and turning
-auto-accept on needs a person at a terminal; that is a speed bump, not a proof,
+auto-accept on, or picking a mode that approves tool calls itself, needs a person
+at a terminal; that is a speed bump, not a proof,
 because every client of the daemon holds the same token. Against an agent that
 can run shell commands as you, the boundary is the provider's own permission
 mode or sandbox, as for `smind task approve`.

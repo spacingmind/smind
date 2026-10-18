@@ -18,10 +18,12 @@ package main
 // process that can run commands as the user can run this CLI, exactly as it can
 // run `smind task approve` today; against such a process the boundary is the
 // provider's own permission mode or sandbox (ADR-0019), not this command. What
-// the command adds is a speed bump on the one escalation: turning auto-accept
-// ON must be confirmed by typing "yes" at a terminal, and refuses to run
-// without one (an agent's shell tool has no terminal; there is deliberately no
-// --yes flag).
+// the command adds is a speed bump on the escalations: turning auto-accept ON,
+// or picking a mode that approves tool calls itself, must be confirmed by
+// typing "yes" at a terminal, and the command refuses to run without one
+// (there is deliberately no --yes flag). A shell tool that gives its commands
+// no terminal cannot pass it; one that wraps them in a pseudo-terminal could,
+// which is why this is a speed bump and not a boundary.
 
 import (
 	"bufio"
@@ -59,7 +61,8 @@ auto-approving mode, which the MCP tools and agents are refused.
   <mode>                 a permission mode the provider advertises (see "smind task options"
                          or the provider's modes), e.g. acceptEdits, plan
 
-Turning auto-accept on asks you to type "yes" and needs a terminal.`
+Turning auto-accept on, or picking a mode that approves tool calls itself,
+asks you to type "yes" and needs a terminal.`
 
 // taskModeRequest is what `task mode` was asked to do.
 type taskModeRequest struct {
@@ -126,6 +129,15 @@ func cmdTaskMode(args []string) int {
 
 // runTaskMode is cmdTaskMode with its environment injected. interactive says
 // whether stdin is a terminal; dial opens the daemon connection.
+//
+// Two things need a person to type "yes": turning auto-accept on, and picking
+// a mode that approves tool calls itself (bypassPermissions, full-access, ...).
+// The command does not keep its own list of such modes. It asks the daemon,
+// which owns that knowledge: the mode is first requested as the *orchestrator*
+// source, which the daemon refuses for any auto-approving mode. If that
+// succeeds the mode is safe and already applied; if it fails for any reason
+// the mode is treated as auto-approving (fail closed) and confirmed before the
+// human-source call.
 func runTaskMode(args []string, stdin io.Reader, stdout, stderr io.Writer, interactive bool, dial func(context.Context) (daemonCaller, error)) int {
 	req, err := parseTaskMode(args)
 	if err != nil {
@@ -133,18 +145,11 @@ func runTaskMode(args []string, stdin io.Reader, stdout, stderr io.Writer, inter
 		return 2
 	}
 
-	if req.AutoAccept != nil && *req.AutoAccept {
-		if !interactive {
-			fmt.Fprintln(stderr, "task mode: turning auto-accept on has to be confirmed by a person at a terminal, and stdin is not one.\n"+
-				"This command is for humans; agents cannot enable auto-accept (the MCP server has no such tool and the daemon refuses it for any non-human caller).")
-			return 1
-		}
-		fmt.Fprintf(stdout, "Auto-accept ON makes run %s approve every tool call without asking you.\nType \"yes\" to continue: ", req.RunID)
-		answer, _ := bufio.NewReader(stdin).ReadString('\n')
-		if strings.ToLower(strings.TrimSpace(answer)) != "yes" {
-			fmt.Fprintln(stderr, "\ntask mode: not confirmed; nothing changed.")
-			return 1
-		}
+	// Cheap refusal before touching the daemon: auto-accept needs a terminal.
+	autoAcceptOn := req.AutoAccept != nil && *req.AutoAccept
+	if autoAcceptOn && !interactive {
+		fmt.Fprintln(stderr, refuseNoTerminal("turning auto-accept on"))
+		return 1
 	}
 
 	client, err := dial(context.Background())
@@ -153,6 +158,32 @@ func runTaskMode(args []string, stdin io.Reader, stdout, stderr io.Writer, inter
 		return 1
 	}
 	defer client.Close()
+
+	var what string
+	if autoAcceptOn {
+		what = fmt.Sprintf("Auto-accept ON makes run %s approve every tool call without asking you.", req.RunID)
+	}
+	if req.ModeID != "" {
+		var probe permissionState
+		probeParams := map[string]any{"runId": req.RunID, "modeId": req.ModeID, "source": "orchestrator"}
+		if err := client.Call(context.Background(), "run.setPermissionMode", probeParams, &probe); err != nil && what == "" {
+			// Refused as the orchestrator (an auto-approving mode), or could not
+			// be checked: confirm before asking again as the human.
+			if !interactive {
+				fmt.Fprintln(stderr, refuseNoTerminal(fmt.Sprintf("picking mode %q, which may approve tool calls itself (or could not be checked: %v),", req.ModeID, err)))
+				return 1
+			}
+			what = fmt.Sprintf("Mode %q may let run %s approve tool calls without asking you (the daemon would not allow it for an agent: %v).", req.ModeID, req.RunID, err)
+		}
+	}
+	if what != "" {
+		fmt.Fprintf(stdout, "%s\nType \"yes\" to continue: ", what)
+		answer, _ := bufio.NewReader(stdin).ReadString('\n')
+		if strings.ToLower(strings.TrimSpace(answer)) != "yes" {
+			fmt.Fprintln(stderr, "\ntask mode: not confirmed; nothing more was changed.")
+			return 1
+		}
+	}
 
 	// Source is declared explicitly: this is the human surface (see the file
 	// comment), and the daemon's default must not be what decides it.
@@ -163,10 +194,7 @@ func runTaskMode(args []string, stdin io.Reader, stdout, stderr io.Writer, inter
 	if req.AutoAccept != nil {
 		params["autoAccept"] = *req.AutoAccept
 	}
-	var result struct {
-		PermissionMode string `json:"permissionMode"`
-		AutoAccept     bool   `json:"autoAccept"`
-	}
+	var result permissionState
 	if err := client.Call(context.Background(), "run.setPermissionMode", params, &result); err != nil {
 		fmt.Fprintf(stderr, "task mode: %v\n", err)
 		return 1
@@ -177,4 +205,15 @@ func runTaskMode(args []string, stdin io.Reader, stdout, stderr io.Writer, inter
 	}
 	fmt.Fprintf(stdout, "run %s: permission mode %q, auto-accept %s\n", req.RunID, result.PermissionMode, auto)
 	return 0
+}
+
+// permissionState is run.setPermissionMode's result.
+type permissionState struct {
+	PermissionMode string `json:"permissionMode"`
+	AutoAccept     bool   `json:"autoAccept"`
+}
+
+func refuseNoTerminal(action string) string {
+	return "task mode: " + action + " has to be confirmed by a person at a terminal, and stdin is not one.\n" +
+		"This command is for humans; agents cannot do this (the MCP server has no such tool and the daemon refuses it for any non-human caller)."
 }
