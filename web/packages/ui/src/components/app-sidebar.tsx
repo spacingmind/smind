@@ -561,6 +561,10 @@ export function AppSidebar({
 
   const { inSidebar: showUsageSummary } = useUsagePreferences();
   const [crud, setCrud] = useState<CrudTarget | null>(null);
+  // One stable callback for every task row: an inline arrow here is a new
+  // prop on each AppSidebar render, which defeats TaskRow's memo (opening a
+  // dialog would re-render every row of a large tree).
+  const archiveTask = useCallback((task: Task) => setCrud({ kind: "archive", task }), []);
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
 
   // Profiles feed the footer's agent count and the palette's "Use agent:"
@@ -933,7 +937,7 @@ export function AppSidebar({
                       query={query}
                       selectedTaskId={selectedTaskId}
                       onSelectTask={onSelectTask}
-                      onArchiveTask={(task) => setCrud({ kind: "archive", task })}
+                      onArchiveTask={archiveTask}
                     />
                   )}
                   {!searching && pinnedTasks.length > 0 && (
@@ -941,7 +945,7 @@ export function AppSidebar({
                       tasks={pinnedTasks}
                       selectedTaskId={selectedTaskId}
                       onSelectTask={onSelectTask}
-                      onArchiveTask={(task) => setCrud({ kind: "archive", task })}
+                      onArchiveTask={archiveTask}
                     />
                   )}
                   {!searching && groupMode === "status" && (
@@ -949,7 +953,7 @@ export function AppSidebar({
                       groups={statusGroups}
                       selectedTaskId={selectedTaskId}
                       onSelectTask={onSelectTask}
-                      onArchiveTask={(task) => setCrud({ kind: "archive", task })}
+                      onArchiveTask={archiveTask}
                     />
                   )}
                   {!searching &&
@@ -965,7 +969,7 @@ export function AppSidebar({
                       onToggleExpanded={() => nodes.toggle(`ws:${ws.ID}`)}
                       onAddSpace={() => setCrud({ kind: "space", workspace: ws })}
                       onAddTask={(spaceId) => setCrud({ kind: "task", workspace: ws, spaceId })}
-                      onArchiveTask={(task) => setCrud({ kind: "archive", task })}
+                      onArchiveTask={archiveTask}
                       onMoveTask={moveTask}
                       onEditScripts={() => setCrud({ kind: "scripts", workspace: ws })}
                       onDeleteWorkspace={() => setCrud({ kind: "deleteWorkspace", workspace: ws })}
