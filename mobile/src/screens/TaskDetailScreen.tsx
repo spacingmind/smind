@@ -104,9 +104,12 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   const mounted = useRef(true);
   const queue = useChatQueue(conn, chatId);
 
-  useEffect(() => {
-    mounted.current = false;
-  }, []);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+    },
+    [],
+  );
 
   /** Attach to a run and stream its events into the timeline; every run is attached at most once (attachedRuns guard). */
   const attachRun = (runId: string, isCancelled: () => boolean) => {
