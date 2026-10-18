@@ -470,6 +470,19 @@ describe("ConnectAccountPanel connect flows", () => {
     expect(screen.queryByText(/Paste a credential instead/)).not.toBeInTheDocument();
   });
 
+  it("the remote hint only mentions a device code where one exists", async () => {
+    await setup({ isDesktop: true, connection: { id: "c1", kind: "url" } });
+    // Claude Code (the default provider) has no device code.
+    expect(screen.getByTestId("login-location")).toHaveTextContent("finish by pasting the sign-in address");
+    expect(screen.getByTestId("login-location")).not.toHaveTextContent(/device code/);
+    fireEvent.click(await screen.findByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "Codex" }));
+    await flush();
+    expect(screen.getByTestId("login-location")).toHaveTextContent(
+      "finish with a device code or by pasting the sign-in address",
+    );
+  });
+
   it("location toggle switches remote and local defaults", async () => {
     await setup({ isDesktop: true, connection: { id: "c1", kind: "url" } });
     fireEvent.click(await screen.findByLabelText("Provider"));

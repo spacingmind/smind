@@ -237,7 +237,7 @@ function ProvidersSection({ client }: SettingsSectionContext) {
                   className="text-ui-xs text-muted-foreground"
                   data-testid={`provider-group-note-${info.id}`}
                 >
-                  Used by sMind's /v1 proxy, not by a task runner
+                  Accounts here route sMind's /v1 proxy; agent runs use the CLI's own login.
                 </p>
               )}
               {info.kind === "cli" ? (

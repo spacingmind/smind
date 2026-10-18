@@ -148,6 +148,7 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
 - [ ] PR-A2 models/diagnostics/deep link
 
 ## Validation
+- PR-B4 (copy): `the remote hint only mentions a device code where one exists` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`; decision 12 copy ("Accounts here route sMind's /v1 proxy; agent runs use the CLI's own login.") asserted in `components/settings/providers-section.test.tsx` (`notes the proxy-only groups (Claude Code, Codex) but not Kimi or GLM`).
 - PR-B4 (review): independent review fixes, each with a test — second paste cannot flip a successful login, paste rejected after cancel is ignored, Finish stays disabled after an accepted paste, no connect button without a provider, Connect stays disabled until a cancelled login settles, provider/method locked during a login, default label avoids collisions, paste input focused when revealed, non-http login URLs and bad expiry rejected, corrupt persisted login location dropped, early override ignored (`web/packages/ui/src/components/accounts-dialog.connect.test.tsx`, `hooks/use-account-login.test.tsx`, `lib/login-events.test.ts`, `components/connect/*.test.tsx`, `stores/login-location-store.test.ts`, `hooks/use-login-remote.test.tsx`).
 - PR-B4 (hook): `login hook goes starting then waiting on authorizeUrl` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
 - PR-B4 (hook): `login hook shows device code state on deviceCode` — `web/packages/ui/src/hooks/use-account-login.test.tsx`

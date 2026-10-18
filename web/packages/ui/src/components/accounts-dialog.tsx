@@ -325,8 +325,9 @@ export function ConnectAccountPanel({
         {remote ? (
           <p className="grid gap-1">
             <span>
-              This daemon is on another machine — finish by device code or by pasting the
-              sign-in address.
+              {methods.some((m) => m.value === "device")
+                ? "This daemon is on another machine — finish with a device code or by pasting the sign-in address."
+                : "This daemon is on another machine — finish by pasting the sign-in address."}
             </span>
             <button
               type="button"
