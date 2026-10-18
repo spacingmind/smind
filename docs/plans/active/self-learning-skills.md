@@ -351,26 +351,24 @@ Implementation decisions made in Phase B (refinements, not architecture):
   sequentially with no mutual-absorb cycles; persist `Render(Verdict.Result)`
   not the raw intent; per-workspace skill quota.
 
-**OPEN, needs the user (AGENTS.md rule d): reflector tool isolation on
-GLM/Kimi.** The Phase B0 spike (read-only, 2026-10-18) found that the
-claude-native reflector can be run with no tools (`--tools ""`, strict MCP,
-empty setting sources, empty temp cwd, deny-all decider; to be confirmed with
-one live run), but the GLM ACP agent owns its tools: `read_file`,
-`list_files`, `web_search` and `web_reader` never ask permission in any mode
-and the client cannot disable them (glm-acp-agent 1.14.0
+**Decided (D13, user, 2026-10-18): reflector tool isolation.** The Phase B0
+spike (read-only) found that the claude-native reflector can be run with no
+tools (`--tools ""`, strict MCP, empty setting sources, empty temp cwd,
+deny-all decider; confirm with one live run), but the GLM ACP agent owns its
+tools: `read_file`, `list_files`, `web_search` and `web_reader` are never
+permission-gated and the client cannot disable them (glm-acp-agent 1.14.0
 `protocol/agent.js`, `tools/executor.js`); Kimi's tooling could not be
-inspected. So ADR section 3's "no tools" and `TestReflector_HasNoTools`
-cannot hold for GLM as written, and an injected window could try to
-exfiltrate through `web_search`/`web_reader`. Options: (1) v1 reflects only
-claude-native runs; GLM/Kimi-sourced windows are recorded `skipped:
-provider_no_tool_isolation` (recommended: keeps the hard rule, loses GLM
-learning for now, GLM delivery still works from learned skills); (2) a GLM
-reflector with mitigations (empty cwd, `--max-turns 1`, reject-only decider,
-fail the job on any tool-call event) accepting the web egress risk; (3) a
-tool-less direct chat-completion call to the GLM endpoint (a second LLM
-client, which ADR-0026 rejected); (4) reflect GLM transcripts with a Claude
-reflector (breaks the same-recipient rule, D4). Until decided, B2 implements
-option 1 and the reflector tests assert no-tools for claude-native only.
+inspected. Decision: **v1 reflects claude-native runs only.** A window whose
+source run is GLM/Kimi is recorded as a job `skipped:
+provider_no_tool_isolation` and no reflector run starts; learned skills are
+still delivered to GLM/Kimi. Consequences for the spec: AC8's "same provider
+as the source run" applies to claude-native only; `TestReflector_HasNoTools`
+covers claude-native; add `TestCollector_AcpSourcedWindowSkipped` (job
+recorded `skipped: provider_no_tool_isolation`, no run started, watermark
+advanced) and `TestReflector_SameRecipientRule` becomes claude-only. Options
+not taken: GLM reflector with mitigations (web egress risk), a tool-less
+direct API call (second LLM client), Claude reflecting GLM transcripts
+(breaks D4).
 
 ## Progress
 
@@ -388,6 +386,10 @@ option 1 and the reflector tests assert no-tools for claude-native only.
   (`runs.purpose`, hidden system tasks, run-finished observer, Learning usage
   bucket), B2c isolated reflector runner (claude-native), B2d collector/job
   service; then B3 delivery, B4 wsapi/CLI/UI, B5 curator/export.
+
+- 2026-10-18: #390-#395 merged. User decided D13 (claude-native-only
+  reflection in v1, GLM/Kimi windows skipped, delivery to GLM/Kimi kept);
+  recorded in ADR-0026 and above. B2 starts with B2a (window builder).
 
 ## Validation
 

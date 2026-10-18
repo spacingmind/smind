@@ -189,8 +189,19 @@ valuable property to keep.
   the most restrictive provider-native permission mode (ADR-0019); ACP:
   deny-all permission mode, and no MCP servers. No `--add-dir`. The window is
   in the prompt, so the reflector needs no filesystem. Phase B verifies the
-  "no tools" claim per provider with a test that a prompt asking the agent to
-  run a command fails (see test `TestReflector_HasNoTools`).
+  "no tools" claim with `TestReflector_HasNoTools`.
+  **Decided (D13, 2026-10-18): v1 reflects claude-native runs only.** The B0
+  spike found the claude-native reflector can be run with no tools
+  (`--tools ""`, strict MCP config, empty setting sources, empty temp cwd,
+  deny-all decider), but a GLM/Kimi ACP agent owns its tools: `read_file`,
+  `list_files`, `web_search` and `web_reader` are never permission-gated and
+  the client cannot disable them, so "no tools" cannot be guaranteed and an
+  injected window could try to exfiltrate through the web tools. A window
+  whose source run is GLM/Kimi is therefore recorded as a job `skipped:
+  provider_no_tool_isolation` and no reflector run starts. Learned skills are
+  still **delivered** to GLM/Kimi runs (section 5); they just are not learned
+  from yet. Reconsider when an ACP agent can be launched with an empty tool
+  set.
 - **Procedure** (the prompt, derived from `agents/reflector.md`, bundled in
   the binary): capture liberally but only durable, class-level lessons;
   signals worth capturing: user corrections and frustration, a technique that worked
@@ -517,7 +528,7 @@ Per skill, in `learned_skills`:
 ## Decisions
 
 Accepted by the user on 2026-10-18: D1-D11 exactly as recommended, plus D12
-added by the user.
+added by the user, and D13 (reflector tool isolation) decided later the same day.
 
 | # | Decision | Options | Decided |
 |---|---|---|---|
@@ -533,6 +544,7 @@ added by the user.
 | D10 | Show human skill descriptions to the reflector for dedupe | yes (names+descriptions only) / no | **Yes, read-only, descriptions only.** Avoids learning what the repo already documents. Bodies never sent. |
 | D11 | Numbers: cadence 50 tool calls, probation 25 runs, capacity 30, curator every 5 landings | keep / change | **Keep as defaults, all knobs in `config.yaml`.** They are autoharness's, rescaled; there is no measured basis yet. |
 | D12 | Duplicate detection beyond names | name collision only / LLM-side dedupe only / deterministic similarity check in the gate | **Deterministic (no LLM) similarity check against all live skills, learned and human** (human: name + description only, bodies never read). Above a high threshold the gate rejects as duplicate; above a medium threshold the inbox flags "Possible duplicate of `<skill>`", shows both side by side and offers "Merge into this skill" (the proposal becomes a patch of the existing learned skill, still approval-gated). Thresholds in `config.yaml` (defaults 0.85 / 0.60). Reflector and curator keep their LLM-side dedupe. Added by the user 2026-10-18. |
+| D13 | Reflector tool isolation on GLM/Kimi | (1) claude-native-only reflection in v1, GLM/Kimi windows skipped / (2) GLM reflector with mitigations, accepting web egress / (3) tool-less direct API call (a second LLM client) / (4) Claude reflects GLM transcripts (breaks D4 same-recipient) | **(1) Decided by the user 2026-10-18.** v1 reflects claude-native runs only; GLM/Kimi-sourced windows are recorded `skipped: provider_no_tool_isolation`; learned skills are still delivered to GLM/Kimi. `TestReflector_HasNoTools` asserts no-tools for claude-native; a test asserts the skip for ACP-sourced windows. |
 
 ## Alternatives considered
 

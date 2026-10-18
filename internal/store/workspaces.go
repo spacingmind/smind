@@ -30,9 +30,9 @@ func (s *Store) CreateWorkspace(w Workspace) (Workspace, error) {
 func (s *Store) GetWorkspace(id int64) (Workspace, error) {
 	var w Workspace
 	err := s.db.QueryRow(
-		`SELECT id, path, title, routing_policy, created_at, updated_at, COALESCE(setup_script, ''), COALESCE(teardown_script, '')
+		`SELECT id, path, title, routing_policy, created_at, updated_at, COALESCE(setup_script, ''), COALESCE(teardown_script, ''), learning_mode
 		 FROM workspaces WHERE id = ?`, id,
-	).Scan(&w.ID, &w.Path, &w.Title, &w.RoutingPolicy, &w.CreatedAt, &w.UpdatedAt, &w.SetupScript, &w.TeardownScript)
+	).Scan(&w.ID, &w.Path, &w.Title, &w.RoutingPolicy, &w.CreatedAt, &w.UpdatedAt, &w.SetupScript, &w.TeardownScript, &w.LearningMode)
 	if err != nil {
 		return Workspace{}, fmt.Errorf("get workspace %d: %w", id, err)
 	}
@@ -43,7 +43,7 @@ func (s *Store) GetWorkspace(id int64) (Workspace, error) {
 // ListWorkspaces returns all workspaces, ordered by id.
 func (s *Store) ListWorkspaces() ([]Workspace, error) {
 	rows, err := s.db.Query(
-		`SELECT id, path, title, routing_policy, created_at, updated_at, COALESCE(setup_script, ''), COALESCE(teardown_script, '')
+		`SELECT id, path, title, routing_policy, created_at, updated_at, COALESCE(setup_script, ''), COALESCE(teardown_script, ''), learning_mode
 		 FROM workspaces ORDER BY id`,
 	)
 	if err != nil {
@@ -54,7 +54,7 @@ func (s *Store) ListWorkspaces() ([]Workspace, error) {
 	workspaces := make([]Workspace, 0)
 	for rows.Next() {
 		var w Workspace
-		if err := rows.Scan(&w.ID, &w.Path, &w.Title, &w.RoutingPolicy, &w.CreatedAt, &w.UpdatedAt, &w.SetupScript, &w.TeardownScript); err != nil {
+		if err := rows.Scan(&w.ID, &w.Path, &w.Title, &w.RoutingPolicy, &w.CreatedAt, &w.UpdatedAt, &w.SetupScript, &w.TeardownScript, &w.LearningMode); err != nil {
 			return nil, fmt.Errorf("scan workspace: %w", err)
 		}
 		w.HasSetupScript, w.HasTeardownScript = w.SetupScript != "", w.TeardownScript != ""
@@ -90,11 +90,14 @@ func (s *Store) DeleteWorkspace(id int64) error {
 			return fmt.Errorf("delete workspace %d: %w", id, err)
 		}
 	}
-	ungrouped, err := s.ListUngroupedTasksByWorkspace(id)
+	all, err := s.ListAllTasksByWorkspace(id)
 	if err != nil {
 		return fmt.Errorf("delete workspace %d: %w", id, err)
 	}
-	for _, t := range ungrouped {
+	for _, t := range all {
+		if t.SpaceID != nil {
+			continue // already deleted with its space
+		}
 		if err := s.DeleteTask(t.ID); err != nil {
 			return fmt.Errorf("delete workspace %d: %w", id, err)
 		}

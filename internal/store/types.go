@@ -65,6 +65,8 @@ type Workspace struct {
 	HasTeardownScript bool
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	// LearningMode is "off" or "propose" (ADR-0026); "" on write = "off".
+	LearningMode string `json:"learningMode"`
 }
 
 // Space is an optional grouping layer within a workspace, carrying its own
@@ -103,6 +105,9 @@ type Task struct {
 	SetupError  string
 	SetupLog    string
 	Port        *int64
+	// Kind is "task" or "system" (ADR-0026: hidden tasks that own learning
+	// runs); "" on write = "task". List queries return only non-system rows.
+	Kind string
 }
 
 // Run is a persisted record of one internal/runs.Registry Run: a
@@ -151,6 +156,10 @@ type Run struct {
 	BaseSHA *string
 	HeadSHA *string
 	Dirty   *bool
+	// Purpose is "user", "reflect" or "curate" (ADR-0026); "" on write =
+	// "user". Non-user runs are hidden from ListRecentRuns and from the
+	// main usage summaries.
+	Purpose string
 }
 
 // RunEvent is one persisted internal/runs.Event, in the order it was
@@ -259,6 +268,10 @@ type Chat struct {
 	AgentSession *string
 	CreatedAt    time.Time
 	ArchivedAt   *time.Time
+	// LearnWatermark/LearnPending are the learning collector's bookkeeping
+	// (ADR-0026): last reflected run seq and runs since.
+	LearnWatermark int64
+	LearnPending   int64
 }
 
 // RequestLog is one proxied-request trace row (docs/plans/active/

@@ -19,6 +19,21 @@ const runListCap = 200
 // newest started first, usage filled in from the store for finished runs.
 // The result is capped at runListCap entries, newest first.
 func (reg *Registry) ListFiltered(taskID, chatID int64, status Status) []RunSummary {
+	return reg.ListWith(RunFilter{TaskID: taskID, ChatID: chatID, Status: status})
+}
+
+// RunFilter is ListWith's filter; the zero value matches ListFiltered(0, 0, "").
+type RunFilter struct {
+	TaskID, ChatID int64
+	Status         Status
+	// IncludeSystem also returns system runs (purpose != user, ADR-0026),
+	// which List/ListFiltered hide.
+	IncludeSystem bool
+}
+
+// ListWith is ListFiltered with the full RunFilter.
+func (reg *Registry) ListWith(f RunFilter) []RunSummary {
+	taskID, chatID, status := f.TaskID, f.ChatID, f.Status
 	reg.mu.Lock()
 	rs := make([]*run, 0, len(reg.runs))
 	for _, r := range reg.runs {
@@ -26,6 +41,9 @@ func (reg *Registry) ListFiltered(taskID, chatID int64, status Status) []RunSumm
 			continue
 		}
 		if chatID != 0 && r.chatID != chatID {
+			continue
+		}
+		if r.purpose != "" && !f.IncludeSystem {
 			continue
 		}
 		rs = append(rs, r)

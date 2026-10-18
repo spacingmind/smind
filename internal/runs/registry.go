@@ -72,6 +72,13 @@ type Registry struct {
 	// finishedOrder records finished run IDs in finish order, so eviction
 	// (see finishedRetentionCap) always drops the oldest first.
 	finishedOrder []string
+	// systemFinishedOrder is finishedOrder for system runs (see retain).
+	systemFinishedOrder []string
+
+	// observers receive RunFinished from finish (AddObserver). Guarded by
+	// observersMu, not mu: finish snapshots it without holding any lock.
+	observersMu sync.Mutex
+	observers   []Observer
 
 	// st persists every Run's row and event history so both survive a
 	// daemon restart -- see New's doc comment for reconciliation/rehydration
@@ -306,6 +313,7 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 		prompt:             row.Prompt,
 		perm:               taskrunner.PermissionSettings{Mode: row.PermissionMode, AutoAccept: row.AutoAccept},
 		model:              row.Model,
+		purpose:            rowPurpose(row.Purpose),
 		startedAt:          row.StartedAt,
 		ctx:                ctx,
 		cancel:             cancel,
@@ -361,6 +369,15 @@ type run struct {
 	// provider's default; set at Start, immutable thereafter, and also
 	// persisted on the run row (store.Run.Model) so history shows the ask.
 	model string
+
+	// purpose is "" for a user run, else the system purpose ("reflect",
+	// "curate"; ADR-0026). Set at Start, immutable, persisted on the row.
+	purpose string
+
+	// toolCallIDs is the set of distinct non-empty ToolCallIDs record saw
+	// on EventTypeToolCall events; its size is RunFinished.ToolCalls.
+	// Guarded by mu.
+	toolCallIDs map[string]struct{}
 
 	// ctx is this run's own background context (the one Start derived via
 	// context.WithCancel and handed to drive/RunPrompt) -- cancel closes
@@ -449,6 +466,14 @@ func (r *run) getPerm() taskrunner.PermissionSettings {
 	return r.perm
 }
 
+// rowPurpose maps a stored purpose to the in-memory form ("" = user).
+func rowPurpose(p string) string {
+	if p == store.RunPurposeUser {
+		return ""
+	}
+	return p
+}
+
 func (r *run) statusLocked() RunStatus {
 	rs := RunStatus{
 		ID:             r.id,
@@ -467,6 +492,7 @@ func (r *run) statusLocked() RunStatus {
 		ThinkingLevel:  r.thinkingLevel,
 		Model:          r.model,
 		Usage:          UsageFromEvent(r.usage),
+		Purpose:        r.purpose,
 	}
 	rs.BaseSHA = cloneStrPtr(r.baseSHA)
 	rs.HeadSHA = cloneStrPtr(r.headSHA)
@@ -623,6 +649,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		perm:               perm,
 		thinkingLevel:      thinkingLevel,
 		model:              model,
+		purpose:            startPurpose(opts),
 		worktree:           worktree,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
@@ -709,7 +736,7 @@ func (reg *Registry) registerAndDrive(r *run, runCtx context.Context, runner *ta
 	if _, err := reg.st.CreateRun(store.Run{
 		ID: r.id, TaskID: r.taskID, ChatID: r.chatID, Provider: string(r.provider), Prompt: r.prompt,
 		Status: string(StatusRunning), StartedAt: r.startedAt,
-		PermissionMode: r.perm.Mode, AutoAccept: r.perm.AutoAccept, Model: r.model,
+		PermissionMode: r.perm.Mode, AutoAccept: r.perm.AutoAccept, Model: r.model, Purpose: r.purpose,
 	}); err != nil {
 		reg.mu.Lock()
 		delete(reg.runs, r.id)
@@ -909,6 +936,29 @@ func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string
 		return "", fmt.Errorf("runs: permission request id: %w", err)
 	}
 
+	// System runs (ADR-0026) never wait on a human: reject immediately,
+	// record the request/resolution pair, and publish no notification.
+	if d.r.purpose != "" {
+		optionID, ok := firstOptionByKind(options, "reject_once", "reject_always")
+		if !ok {
+			return "", fmt.Errorf("runs: system run permission request %q: no reject option offered: %+v", requestID, options)
+		}
+		d.reg.record(d.r, taskrunner.Event{
+			Type:                taskrunner.EventTypePermissionRequest,
+			PermissionRequestID: requestID,
+			PermissionSummary:   summary,
+			PermissionOptions:   options,
+			PermissionDetail:    detail,
+		})
+		d.reg.record(d.r, taskrunner.Event{
+			Type:                 taskrunner.EventTypePermissionResolved,
+			PermissionRequestID:  requestID,
+			PermissionOptionID:   optionID,
+			PermissionResolution: PermissionResolvedBySystem,
+		})
+		return optionID, nil
+	}
+
 	// AutoAccept (ACP only, validated at Start): the human chose to approve
 	// every prompt for this run, so allow immediately without registering
 	// a pending channel -- recorded back-to-back as a request and its
@@ -1104,6 +1154,12 @@ func (reg *Registry) record(r *run, e Event) {
 	if e.Type == taskrunner.EventTypeUsage && e.Usage != nil {
 		r.usage = e.Usage
 	}
+	if e.Type == taskrunner.EventTypeToolCall && e.ToolCallID != "" {
+		if r.toolCallIDs == nil {
+			r.toolCallIDs = make(map[string]struct{})
+		}
+		r.toolCallIDs[e.ToolCallID] = struct{}{}
+	}
 	seq := r.nextEventSeq
 	r.nextEventSeq++
 	subs := make([]*subQueue, 0, len(r.subscribers))
@@ -1139,6 +1195,7 @@ func (reg *Registry) finish(r *run, err error) {
 	stopRequested := r.stopRequested
 	stopReason := r.stopReason
 	usage := r.usage
+	toolCalls := len(r.toolCallIDs)
 	r.mu.Unlock()
 
 	// Idempotent re-upsert so the row reflects the final value. A run that
@@ -1189,6 +1246,11 @@ func (reg *Registry) finish(r *run, err error) {
 
 	reg.notifyRunStatus(r)
 
+	reg.notifyObservers(RunFinished{
+		RunID: r.id, TaskID: r.taskID, ChatID: r.chatID, Provider: string(r.provider),
+		Purpose: observerPurpose(r.purpose), Status: string(status), StopReason: stopReason, ToolCalls: toolCalls,
+	})
+
 	// Close every subscriber still attached: their relay goroutines drain
 	// whatever's already queued (nothing is lost) and then close their out
 	// channel, which is how Subscribe's caller learns the run went
@@ -1220,13 +1282,21 @@ func (reg *Registry) finish(r *run, err error) {
 	close(r.closedCh)
 }
 
+// systemRetentionCap bounds finished system runs kept in memory; they have
+// their own order so they never evict user runs from finishedRetentionCap.
+const systemRetentionCap = 50
+
 func (reg *Registry) retain(id string) {
 	reg.mu.Lock()
 	defer reg.mu.Unlock()
-	reg.finishedOrder = append(reg.finishedOrder, id)
-	for len(reg.finishedOrder) > finishedRetentionCap {
-		evict := reg.finishedOrder[0]
-		reg.finishedOrder = reg.finishedOrder[1:]
+	order, limit := &reg.finishedOrder, finishedRetentionCap
+	if r, ok := reg.runs[id]; ok && r.purpose != "" {
+		order, limit = &reg.systemFinishedOrder, systemRetentionCap
+	}
+	*order = append(*order, id)
+	for len(*order) > limit {
+		evict := (*order)[0]
+		*order = (*order)[1:]
 		delete(reg.runs, evict)
 	}
 }
@@ -1427,6 +1497,9 @@ func (reg *Registry) List(chatID int64) []RunSummary {
 	rs := make([]*run, 0, len(reg.runs))
 	for _, r := range reg.runs {
 		if chatID != 0 && r.chatID != chatID {
+			continue
+		}
+		if r.purpose != "" {
 			continue
 		}
 		rs = append(rs, r)
