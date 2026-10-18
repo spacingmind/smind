@@ -15,15 +15,18 @@ func (s *Store) CreateRun(r Run) (Run, error) {
 	// 0 -- runs.chat_id's FK would reject that outright, and a caller that
 	// predates chats entirely (or a test simulating one) has no chat to
 	// name. See Run.ChatID's doc comment.
+	if r.Purpose == "" {
+		r.Purpose = RunPurposeUser
+	}
 	var chatID sql.NullInt64
 	if r.ChatID != 0 {
 		chatID = sql.NullInt64{Int64: r.ChatID, Valid: true}
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO runs (id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, approval_policy, model)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?)`,
+		`INSERT INTO runs (id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, approval_policy, model, purpose)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)`,
 		r.ID, r.TaskID, chatID, r.Provider, r.Prompt, r.Status, r.StartedAt,
-		timePtrToNull(r.FinishedAt), r.StopReason, r.ErrMsg, r.PermissionMode, r.AutoAccept, nullString(r.Model),
+		timePtrToNull(r.FinishedAt), r.StopReason, r.ErrMsg, r.PermissionMode, r.AutoAccept, nullString(r.Model), r.Purpose,
 	)
 	if err != nil {
 		return Run{}, fmt.Errorf("insert run: %w", err)
@@ -123,7 +126,7 @@ func (s *Store) MarkRunningRunsInterrupted(interruptedStatus string) (int64, err
 // GetRun returns the run with the given id.
 func (s *Store) GetRun(id string) (Run, error) {
 	row := s.db.QueryRow(
-		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty
+		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose
 		 FROM runs WHERE id = ?`, id,
 	)
 	r, err := scanRun(row)
@@ -133,15 +136,27 @@ func (s *Store) GetRun(id string) (Run, error) {
 	return r, nil
 }
 
-// ListRecentRuns returns up to limit runs, most recently started first --
-// used to rehydrate internal/runs.Registry's in-memory map at startup.
+// ListRecentRuns returns up to limit user runs (purpose 'user'), most
+// recently started first -- used to rehydrate internal/runs.Registry's
+// in-memory map at startup. System runs are excluded so they never occupy
+// the retention cap; see ListRunsByPurpose.
 func (s *Store) ListRecentRuns(limit int) ([]Run, error) {
+	return s.listRuns(`WHERE purpose = 'user'`, limit)
+}
+
+// ListRunsByPurpose returns up to limit runs with the given purpose, most
+// recently started first.
+func (s *Store) ListRunsByPurpose(purpose string, limit int) ([]Run, error) {
+	return s.listRuns(`WHERE purpose = ?`, limit, purpose)
+}
+
+func (s *Store) listRuns(where string, limit int, args ...any) ([]Run, error) {
 	rows, err := s.db.Query(
-		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty
-		 FROM runs ORDER BY started_at DESC LIMIT ?`, limit,
+		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose
+		 FROM runs `+where+` ORDER BY started_at DESC LIMIT ?`, append(args, limit)...,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("list recent runs: %w", err)
+		return nil, fmt.Errorf("list runs: %w", err)
 	}
 	defer rows.Close()
 
@@ -204,7 +219,7 @@ func scanRun(row rowScanner) (Run, error) {
 	var dirty sql.NullBool
 	if err := row.Scan(&r.ID, &r.TaskID, &chatID, &r.Provider, &r.Prompt, &r.Status,
 		&r.StartedAt, &finishedAt, &r.StopReason, &r.ErrMsg, &r.PermissionMode, &r.AutoAccept, &model,
-		&baseSHA, &headSHA, &dirty); err != nil {
+		&baseSHA, &headSHA, &dirty, &r.Purpose); err != nil {
 		return Run{}, err
 	}
 	// NULL decodes as ChatID 0 ("unknown"/pre-chats) -- see CreateRun's
