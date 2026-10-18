@@ -268,6 +268,27 @@ describe("useAccountLogin", () => {
     expect(onConnected).toHaveBeenCalledWith(result);
   });
 
+  it("login hook prefers an explicit client", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/platform", () => ({ isDesktop: false, desktop: {} }));
+    const { useAccountLogin } = await import("@/hooks/use-account-login");
+    const { renderHookWithDaemon } = await import("@/test/render-with-daemon");
+    const { FakeUsageDaemon } = await import("@/test/usage-test-client");
+    const { FakeWsClient } = await import("@/test/fake-ws-client");
+
+    const ambient = new FakeWsClient();
+    const daemon = new FakeUsageDaemon([], ambient);
+    const explicit = new FakeWsClient();
+    const view = renderHookWithDaemon(() => useAccountLogin({ client: explicit }), daemon, {
+      initialProps: null,
+    });
+    await act(async () => {
+      view.result.current.start({ provider: "anthropic", label: "personal" });
+    });
+    expect(explicit.nth("account.oauthStart").params).toEqual({ provider: "anthropic", label: "personal" });
+    expect(ambient.calls.filter((c) => c.method === "account.oauthStart")).toHaveLength(0);
+  });
+
   it("login hook never keeps the pasted url in state", async () => {
     const { login, start, client, authorize } = await setup();
     await start();

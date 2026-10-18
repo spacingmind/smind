@@ -12,6 +12,7 @@ import {
 } from "@/lib/login-events";
 import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
 import type { LoginMethod, OAuthStartParams, OAuthStartResult } from "@/lib/types";
+import type { WsClientLike } from "@/lib/ws-client";
 
 /**
  * ADR-0033's login state machine as a hook (providers-login-and-tab PR-B4):
@@ -50,8 +51,13 @@ export interface AccountLogin {
   reset(): void;
 }
 
-export function useAccountLogin(opts?: { onConnected?: (result: OAuthStartResult) => void }): AccountLogin {
-  const { client } = useDaemonConnection();
+export function useAccountLogin(opts?: {
+  onConnected?: (result: OAuthStartResult) => void;
+  /** An explicit client (the connect panel's prop) instead of the ambient connection; used even when null. */
+  client?: WsClientLike | null;
+}): AccountLogin {
+  const ambient = useDaemonConnection().client;
+  const client = opts && "client" in opts ? opts.client : ambient;
   const queryClient = useQueryClient();
   const [state, setState] = useState<LoginState>({ phase: "idle" });
   const [pasteError, setPasteError] = useState<string | null>(null);
