@@ -6,7 +6,7 @@
 // the fake records every method that goes out).
 
 import { describe, expect, it } from 'vitest';
-import { defaultChatId, fetchOverview, listWorkspaces, startRunWhenBusy } from '../api';
+import { defaultChatId, fetchOverview, listWorkspaces, startRunWhenBusy, stopRun } from '../api';
 import { CloseableStream, RelayConnection } from '../relay/RelayConnection';
 import { PairingOffer } from '../relay/pairing';
 
@@ -166,5 +166,23 @@ describe('queue wire wrappers (ADR-0021 §9)', () => {
       throw new Error(`unexpected method ${m}`);
     });
     await expect(defaultChatId(conn, 7)).rejects.toThrow('task has no chat');
+  });
+});
+
+describe('stopRun (run.stop wrapper)', () => {
+  it('stopRun sends run.stop with the run id', async () => {
+    const { conn, calls } = fakeConnection((m) => {
+      if (m === 'run.stop') return {};
+      throw new Error(`unexpected method ${m}`);
+    });
+    await stopRun(conn, 'run-1');
+    expect(calls).toEqual([['run.stop', { runId: 'run-1' }]]);
+  });
+
+  it('stopRun rejects with the daemon\'s error', async () => {
+    const { conn } = fakeConnection(() => {
+      throw new Error('run not found');
+    });
+    await expect(stopRun(conn, 'run-x')).rejects.toThrow('run not found');
   });
 });
