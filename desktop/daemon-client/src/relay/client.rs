@@ -258,7 +258,24 @@ pub async fn dial_with_roots(
     endpoint
         .connect_with_connector(svc)
         .await
-        .map_err(|e| format!("relay client: connect: {e}"))
+        .map_err(|e| format!("relay client: connect: {}", error_chain(&e)))
+}
+
+/// error_chain renders `e` with its sources ("transport error: ... invalid
+/// peer certificate: UnknownIssuer"): tonic's own Display stops at
+/// "transport error", which hides why a certificate was refused.
+fn error_chain(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut source = e.source();
+    while let Some(s) = source {
+        let text = s.to_string();
+        if !out.contains(&text) {
+            out.push_str(": ");
+            out.push_str(&text);
+        }
+        source = s.source();
+    }
+    out
 }
 
 fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
