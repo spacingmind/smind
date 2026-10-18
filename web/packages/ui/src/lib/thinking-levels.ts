@@ -30,3 +30,12 @@ export const THINKING_LEVELS: ThinkingLevelInfo[] = [
 export function thinkingLevelLabel(level: ThinkingLevel): string {
   return THINKING_LEVELS.find((t) => t.id === (level || "standard"))?.label ?? "Standard";
 }
+
+/**
+ * Whether provider has a thinking level at all: a Claude-only, pre-run
+ * control (internal/taskrunner/thinking.go) -- every other provider takes
+ * no thinking option, so the control is omitted rather than disabled.
+ */
+export function supportsThinking(provider: string): boolean {
+  return provider === "claude-native";
+}

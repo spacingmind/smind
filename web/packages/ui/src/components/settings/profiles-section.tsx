@@ -11,10 +11,11 @@ import { useDefaultAgentId } from "@/hooks/use-default-agent";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useProviderHealth } from "@/hooks/use-provider-health";
 import { useCreateProfile, useDeleteProfile, useProfiles, useUpdateProfile } from "@/hooks/use-profiles";
-import { AUTO_ACCEPT_HELP, AUTO_ACCEPT_LABEL, describePermission, providerModels, providerModes, supportsAutoAccept } from "@/lib/permission-modes";
+import { AUTO_ACCEPT_HELP, AUTO_ACCEPT_LABEL, providerModels, providerModes, supportsAutoAccept } from "@/lib/permission-modes";
 import { subscribeSettingsIntent, takeSettingsIntent, type ProfileSeed } from "@/lib/settings-intent";
-import { thinkingLevelLabel } from "@/lib/thinking-levels";
-import type { AgentProfile, ModeInfo, ProviderInfo, ThinkingLevel } from "@/lib/types";
+import { supportsThinking } from "@/lib/thinking-levels";
+import { describeProfile } from "@/lib/describe-profile";
+import type { AgentProfile, ModeInfo, ProviderInfo } from "@/lib/types";
 import { Icons } from "@/lib/icons";
 
 // "Provider default" (the empty id -- the provider's own default mode) is
@@ -252,7 +253,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
                         </Button>
                         <div className="flex min-w-0 flex-1 flex-col">
                           <span className="truncate text-ui-base font-medium text-foreground">{p.Name}</span>
-                          <span className="truncate text-ui-sm text-muted-foreground">{profileMetaLine(p, providers)}</span>
+                          <span className="truncate text-ui-sm text-muted-foreground">{describeProfile(p, providers)}</span>
                           {p.Notes && <span className="truncate text-ui-sm text-foreground-subtlest">{p.Notes}</span>}
                         </div>
                         <DropdownMenu>
@@ -384,7 +385,7 @@ function ProfileForm({
             ))}
           </SelectContent>
         </Select>
-        {form.provider === "claude-native" ? (
+        {supportsThinking(form.provider) ? (
           <Select value={form.thinkingLevel} onValueChange={(value) => setForm((f) => ({ ...f, thinkingLevel: value }))}>
             <SelectTrigger aria-label="Thinking level" data-testid={`${idPrefix}-thinking-level`} className="w-full">
               <SelectValue placeholder="Thinking level" />
@@ -514,19 +515,6 @@ function ProfileModelSelect({
       </SelectContent>
     </Select>
   );
-}
-
-function providerLabel(providers: ProviderInfo[], id: string): string {
-  return providers.find((p) => p.id === id)?.label ?? id;
-}
-
-/** The card's one metadata line ("<provider> · <mode> · <model> · <thinking>", run-config IA): the provider's own mode label (ADR-0019), not the raw wire id -- omitted when the profile leaves the mode to the provider default and auto-accept off. Thinking is omitted for a non-Claude provider, same rule as the composer's own Thinking control. */
-function profileMetaLine(p: AgentProfile, providers: ProviderInfo[]): string {
-  const parts = [providerLabel(providers, p.Provider)];
-  if (p.PermissionMode || p.AutoAccept) parts.push(describePermission(providers, p.Provider, p.PermissionMode, p.AutoAccept));
-  if (p.Model) parts.push(providerModels(providers, p.Provider).find((m) => m.id === p.Model)?.label ?? p.Model);
-  if (p.Provider === "claude-native" && p.ThinkingLevel) parts.push(thinkingLevelLabel(p.ThinkingLevel as ThinkingLevel));
-  return parts.join(" · ");
 }
 
 registerSettingsSection({
