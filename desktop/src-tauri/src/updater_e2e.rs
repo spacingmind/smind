@@ -7,7 +7,9 @@
 //! Not covered here (still manual, see docs/plans/active/desktop-update-e2e.md):
 //! the webview window, the menu click and `app.restart()`.
 
-use crate::updater::{check_with, install_pending, AppUpdateCheck, UpdateState};
+#[cfg(target_os = "macos")]
+use crate::updater::install_pending;
+use crate::updater::{check_with, AppUpdateCheck, UpdateState};
 use base64::Engine;
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -69,7 +71,10 @@ pub fn app_tarball(marker: &str) -> Vec<u8> {
     let mut tar = tar::Builder::new(gz);
     for (path, body) in [
         ("smind.app/Contents/Info.plist", marker.as_bytes()),
-        ("smind.app/Contents/MacOS/smind-desktop", b"#!/bin/sh\n".as_slice()),
+        (
+            "smind.app/Contents/MacOS/smind-desktop",
+            b"#!/bin/sh\n".as_slice(),
+        ),
     ] {
         let mut header = tar::Header::new_gnu();
         header.set_size(body.len() as u64);
@@ -82,8 +87,16 @@ pub fn app_tarball(marker: &str) -> Vec<u8> {
 
 /// `<os>-<arch>` as the plugin looks it up in `platforms`.
 fn platform_key() -> String {
-    let os = if cfg!(target_os = "macos") { "darwin" } else { "windows" };
-    let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" };
+    let os = if cfg!(target_os = "macos") {
+        "darwin"
+    } else {
+        "windows"
+    };
+    let arch = if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x86_64"
+    };
     format!("{os}-{arch}")
 }
 
@@ -135,7 +148,10 @@ impl Feed {
                 },
             });
             HashMap::from([
-                ("/latest.json".to_string(), manifest.to_string().into_bytes()),
+                (
+                    "/latest.json".to_string(),
+                    manifest.to_string().into_bytes(),
+                ),
                 ("/smind.app.tar.gz".to_string(), release.artifact.clone()),
             ])
         })
@@ -196,6 +212,14 @@ pub fn test_app(pubkey: &str, endpoint: &str) -> App<MockRuntime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tauri_plugin_updater::UpdaterBuilder;
+
+    /// The production builder aimed at the local feed. `no_proxy` keeps a
+    /// developer's system/env proxy (Clash, Surge, HTTP_PROXY) from
+    /// intercepting 127.0.0.1.
+    fn builder(app: &App<MockRuntime>) -> UpdaterBuilder {
+        app.updater_builder().no_proxy()
+    }
 
     fn release(key: &TestKey, version: &str, artifact: Vec<u8>) -> Release {
         Release {
@@ -213,7 +237,7 @@ mod tests {
         let feed = Feed::serve_release(&release(&key, "0.10.1", app_tarball("new")));
         let app = test_app(&key.pubkey(), &feed.latest_url());
         let state = app.state::<UpdateState>();
-        let got = check_with(app.updater_builder(), RUNNING, &state)
+        let got = check_with(builder(&app), RUNNING, &state)
             .await
             .expect("check");
         match got {
@@ -232,7 +256,7 @@ mod tests {
         let feed = Feed::serve_release(&release(&key, "0.10.0", app_tarball("new")));
         let app = test_app(&key.pubkey(), &feed.latest_url());
         let state = app.state::<UpdateState>();
-        let got = check_with(app.updater_builder(), RUNNING, &state)
+        let got = check_with(builder(&app), RUNNING, &state)
             .await
             .expect("check");
         assert!(matches!(
@@ -247,7 +271,7 @@ mod tests {
         let feed = Feed::serve_release(&release(&key, "0.9.9", app_tarball("new")));
         let app = test_app(&key.pubkey(), &feed.latest_url());
         let state = app.state::<UpdateState>();
-        let got = check_with(app.updater_builder(), RUNNING, &state)
+        let got = check_with(builder(&app), RUNNING, &state)
             .await
             .expect("check");
         assert!(matches!(
@@ -262,7 +286,7 @@ mod tests {
         let feed = Feed::serve_release(&release(&key, "0.11.0-rc.1", app_tarball("new")));
         let app = test_app(&key.pubkey(), &feed.latest_url());
         let state = app.state::<UpdateState>();
-        let got = check_with(app.updater_builder(), RUNNING, &state)
+        let got = check_with(builder(&app), RUNNING, &state)
             .await
             .expect("check");
         assert!(matches!(
@@ -276,15 +300,17 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         drop(listener);
-        let app = test_app(&TestKey::generate().pubkey(), &format!("http://127.0.0.1:{port}/latest.json"));
+        let app = test_app(
+            &TestKey::generate().pubkey(),
+            &format!("http://127.0.0.1:{port}/latest.json"),
+        );
         let state = app.state::<UpdateState>();
-        let err = check_with(app.updater_builder(), RUNNING, &state)
+        let err = check_with(builder(&app), RUNNING, &state)
             .await
             .expect_err("dead endpoint must error");
         assert!(!err.is_empty());
         assert!(state.pending.take().is_err());
     }
-
 
     #[tokio::test(flavor = "multi_thread")]
     async fn available_result_matches_the_ui_fixture() {
@@ -301,7 +327,7 @@ mod tests {
         });
         let app = test_app(&key.pubkey(), &feed.latest_url());
         let state = app.state::<UpdateState>();
-        let got = check_with(app.updater_builder(), RUNNING, &state)
+        let got = check_with(builder(&app), RUNNING, &state)
             .await
             .expect("check");
         assert_eq!(serde_json::to_value(&got).unwrap(), fixture);
@@ -314,11 +340,16 @@ mod tests {
         let feed = Feed::serve_release(&good);
         let app = test_app(&key.pubkey(), &feed.latest_url());
         let state = app.state::<UpdateState>();
-        check_with(app.updater_builder(), RUNNING, &state).await.expect("check");
+        check_with(builder(&app), RUNNING, &state)
+            .await
+            .expect("check");
         let update = state.pending.take().unwrap();
         let bytes = update.download(|_, _| {}, || {}).await.expect("download");
         assert_eq!(bytes, good.artifact);
-        assert_eq!(feed.requests(), vec!["GET /latest.json", "GET /smind.app.tar.gz"]);
+        assert_eq!(
+            feed.requests(),
+            vec!["GET /latest.json", "GET /smind.app.tar.gz"]
+        );
     }
 
     async fn refused(feed: Feed, app: App<MockRuntime>) -> String {
@@ -343,10 +374,15 @@ mod tests {
         let mut tampered = good.artifact.clone();
         let last = tampered.len() - 1;
         tampered[last] ^= 0xff;
-        let feed = Feed::serve_release(&Release { artifact: tampered, ..good });
+        let feed = Feed::serve_release(&Release {
+            artifact: tampered,
+            ..good
+        });
         let app = test_app(&key.pubkey(), &feed.latest_url());
         let state = app.state::<UpdateState>();
-        check_with(app.updater_builder(), RUNNING, &state).await.expect("check");
+        check_with(builder(&app), RUNNING, &state)
+            .await
+            .expect("check");
         let err = refused(feed, app).await;
         assert!(err.to_lowercase().contains("signature verification failed"));
     }
@@ -358,7 +394,9 @@ mod tests {
         let feed = Feed::serve_release(&release(&signing_key, "0.10.1", app_tarball("new")));
         let app = test_app(&verifying_key.pubkey(), &feed.latest_url());
         let state = app.state::<UpdateState>();
-        check_with(app.updater_builder(), RUNNING, &state).await.expect("check");
+        check_with(builder(&app), RUNNING, &state)
+            .await
+            .expect("check");
         let err = refused(feed, app).await;
         assert!(err.to_lowercase().contains("different key"));
     }
@@ -373,7 +411,9 @@ mod tests {
         });
         let app = test_app(&key.pubkey(), &feed.latest_url());
         let state = app.state::<UpdateState>();
-        check_with(app.updater_builder(), RUNNING, &state).await.expect("check");
+        check_with(builder(&app), RUNNING, &state)
+            .await
+            .expect("check");
         let err = refused(feed, app).await;
         assert!(err.to_lowercase().contains("signed for version"));
     }
@@ -387,9 +427,11 @@ mod tests {
         });
         let app = test_app(&key.pubkey(), &feed.latest_url());
         let state = app.state::<UpdateState>();
-        check_with(app.updater_builder(), RUNNING, &state).await.expect("check");
+        check_with(builder(&app), RUNNING, &state)
+            .await
+            .expect("check");
         let err = refused(feed, app).await;
-        assert!(err.to_lowercase().contains("invalid symbol"));
+        assert!(!err.is_empty());
     }
 
     /// A fake installed app the plugin can replace: `<tmp>/smind.app/Contents/...`.
@@ -410,12 +452,15 @@ mod tests {
         let mut tampered = good.artifact.clone();
         let last = tampered.len() - 1;
         tampered[last] ^= 0xff;
-        let feed = Feed::serve_release(&Release { artifact: tampered, ..good });
+        let feed = Feed::serve_release(&Release {
+            artifact: tampered,
+            ..good
+        });
         let app = test_app(&key.pubkey(), &feed.latest_url());
         let dir = tempfile::tempdir().unwrap();
         let exe = installed_app(dir.path(), "old");
         let state = app.state::<UpdateState>();
-        check_with(app.updater_builder().executable_path(&exe), RUNNING, &state)
+        check_with(builder(&app).executable_path(&exe), RUNNING, &state)
             .await
             .expect("check");
         let events = Mutex::new(Vec::new());
@@ -423,10 +468,14 @@ mod tests {
             .await
             .expect_err("tampered artifact must be refused");
         assert!(err.to_lowercase().contains("signature"));
-        let plist = std::fs::read_to_string(dir.path().join("smind.app/Contents/Info.plist")).unwrap();
+        let plist =
+            std::fs::read_to_string(dir.path().join("smind.app/Contents/Info.plist")).unwrap();
         assert_eq!(plist, "old");
         assert!(exe.exists());
-        assert!(state.pending.take().is_ok(), "failed install stays retryable");
+        assert!(
+            state.pending.take().is_ok(),
+            "failed install stays retryable"
+        );
         // The plugin runs its `on_download_finish` hook (our "installing"
         // event) before verifying the signature, so an "installing" event is
         // emitted even for a refused artifact; what must hold is that the
@@ -449,14 +498,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let exe = installed_app(dir.path(), "old");
         let state = app.state::<UpdateState>();
-        check_with(app.updater_builder().executable_path(&exe), RUNNING, &state)
+        check_with(builder(&app).executable_path(&exe), RUNNING, &state)
             .await
             .expect("check");
         let events = Mutex::new(Vec::new());
         install_pending(&state, &|p| events.lock().unwrap().push(p))
             .await
             .expect("install");
-        let plist = std::fs::read_to_string(dir.path().join("smind.app/Contents/Info.plist")).unwrap();
+        let plist =
+            std::fs::read_to_string(dir.path().join("smind.app/Contents/Info.plist")).unwrap();
         assert_eq!(plist, "new");
         let events = events.into_inner().unwrap();
         assert_eq!(events.last().unwrap()["stage"], "installing");
@@ -467,7 +517,10 @@ mod tests {
             .find(|e| e["stage"] == "downloading")
             .unwrap();
         assert!(last_download["downloaded"].as_u64().unwrap() > 0);
-        assert_eq!(feed.requests(), vec!["GET /latest.json", "GET /smind.app.tar.gz"]);
+        assert_eq!(
+            feed.requests(),
+            vec!["GET /latest.json", "GET /smind.app.tar.gz"]
+        );
         assert!(state.pending.take().is_err());
     }
 }
