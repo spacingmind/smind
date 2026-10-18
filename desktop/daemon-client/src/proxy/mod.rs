@@ -5,9 +5,10 @@
 //! `docs/decisions/0013-desktop-bundled-ui.md` and
 //! `docs/plans/active/desktop-bundled-ui.md`.
 
+pub mod bounded;
 pub mod connections;
 pub mod secret;
 pub mod server;
 
-pub use connections::{Connection, ConnectionKind, Registry};
+pub use connections::{Connection, ConnectionKind, Registry, SshTarget};
 pub use server::{serve, AssetSource, ProxyState};
