@@ -32,7 +32,8 @@ func golden(t *testing.T, name, got string) {
 	if err != nil {
 		t.Fatalf("%v (run `go test ./internal/service -update`)", err)
 	}
-	if string(want) != got {
+	// A Windows checkout may have turned the golden's LF into CRLF.
+	if strings.ReplaceAll(string(want), "\r\n", "\n") != got {
 		t.Errorf("%s differs from the golden file; run `go test ./internal/service -update` if intended.\n--- got ---\n%s\n--- want ---\n%s", name, got, want)
 	}
 }

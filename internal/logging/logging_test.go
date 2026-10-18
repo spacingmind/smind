@@ -313,6 +313,9 @@ func TestFollowWaitsForAMissingFile(t *testing.T) {
 // A rotation that cannot reopen the log (directory briefly gone) must not
 // leave the writer dead: the next Write after the directory is back works.
 func TestRotatingRecoversWhenTheLogCannotBeReopened(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("removing a directory that holds an open file is not possible on Windows")
+	}
 	dir := filepath.Join(t.TempDir(), "logs")
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
