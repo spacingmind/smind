@@ -543,3 +543,148 @@ func TestDeleteLearnedSkill_KeepsLedger(t *testing.T) {
 		t.Fatalf("ledger = %+v, want 3 rows ending in delete with name kept", ledger)
 	}
 }
+
+func TestApplyBundle_RejectsSelfAbsorbAndArchivedAbsorbed(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	ws := newLearningWorkspace(t, s)
+
+	umbrella := mustLand(t, s, ws.ID, "umbrella")
+	absorbed := mustLand(t, s, ws.ID, "absorbed")
+	archived := mustLand(t, s, ws.ID, "archived")
+	if err := s.SetSkillStatus(archived.ID, SkillArchived, "human", "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	mkProposal := func() LearnedProposal {
+		p, err := s.CreateProposal(LearnedProposal{WorkspaceID: ws.ID, Kind: "bundle", Source: "curator", Name: "umbrella", TargetSkillID: &umbrella.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	checkUntouched := func(label string, p LearnedProposal) {
+		t.Helper()
+		after, _ := s.GetLearnedSkill(umbrella.ID)
+		if after.Version != 1 || after.Body != "b-umbrella" {
+			t.Fatalf("%s: umbrella = %+v, want untouched v1", label, after)
+		}
+		prop, _ := s.GetProposal(p.ID)
+		if prop.Status != "pending" {
+			t.Fatalf("%s: proposal = %q, want pending", label, prop.Status)
+		}
+	}
+
+	p := mkProposal()
+	err := s.ApplyBundle(ApplyBundleInput{ProposalID: p.ID, UmbrellaID: umbrella.ID, ExpectVersion: 1,
+		Description: "d", Body: "b", Actor: "curator", AbsorbedIDs: []int64{umbrella.ID}})
+	if !errors.Is(err, ErrBundleSelfAbsorb) {
+		t.Fatalf("self-absorb error = %v, want ErrBundleSelfAbsorb", err)
+	}
+	checkUntouched("self-absorb", p)
+
+	p = mkProposal()
+	err = s.ApplyBundle(ApplyBundleInput{ProposalID: p.ID, UmbrellaID: umbrella.ID, ExpectVersion: 1,
+		Description: "d", Body: "b", Actor: "curator", AbsorbedIDs: []int64{archived.ID}})
+	if !errors.Is(err, ErrSkillNotLive) {
+		t.Fatalf("archived absorbed error = %v, want ErrSkillNotLive", err)
+	}
+	checkUntouched("archived absorbed", p)
+
+	p = mkProposal()
+	err = s.ApplyBundle(ApplyBundleInput{ProposalID: p.ID, UmbrellaID: umbrella.ID, ExpectVersion: 1,
+		Description: "d", Body: "b", Actor: "curator", AbsorbedIDs: nil})
+	if !errors.Is(err, ErrBundleNoAbsorbed) {
+		t.Fatalf("no absorbed error = %v, want ErrBundleNoAbsorbed", err)
+	}
+	checkUntouched("no absorbed", p)
+
+	p = mkProposal()
+	err = s.ApplyBundle(ApplyBundleInput{ProposalID: p.ID, UmbrellaID: umbrella.ID, ExpectVersion: 1,
+		Description: "d", Body: "b", Actor: "curator", AbsorbedIDs: []int64{absorbed.ID, absorbed.ID}})
+	if !errors.Is(err, ErrBundleDuplicateAbsorbed) {
+		t.Fatalf("duplicate absorbed error = %v, want ErrBundleDuplicateAbsorbed", err)
+	}
+	checkUntouched("duplicate absorbed", p)
+
+	// Archived umbrella is rejected too.
+	if err := s.SetSkillStatus(umbrella.ID, SkillArchived, "human", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	p = mkProposal()
+	err = s.ApplyBundle(ApplyBundleInput{ProposalID: p.ID, UmbrellaID: umbrella.ID, ExpectVersion: 1,
+		Description: "d", Body: "b", Actor: "curator", AbsorbedIDs: []int64{absorbed.ID}})
+	if !errors.Is(err, ErrSkillNotLive) {
+		t.Fatalf("archived umbrella error = %v, want ErrSkillNotLive", err)
+	}
+}
+
+func TestPatchSkill_ArchivedPatchRejectedUndoAllowed(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	ws := newLearningWorkspace(t, s)
+	k := mustLand(t, s, ws.ID, "sk")
+	if err := s.SetSkillStatus(k.ID, SkillArchived, "human", "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.PatchSkill(PatchSkillInput{ID: k.ID, ExpectVersion: 1, Description: "d2", Body: "b2", Actor: "human"}); !errors.Is(err, ErrSkillNotLive) {
+		t.Fatalf("patch archived error = %v, want ErrSkillNotLive", err)
+	}
+	if _, err := s.PatchSkill(PatchSkillInput{ID: k.ID, ExpectVersion: 1, Description: "d2", Body: "b2", Actor: "human", Action: "merge"}); !errors.Is(err, ErrSkillNotLive) {
+		t.Fatalf("merge archived error = %v, want ErrSkillNotLive", err)
+	}
+	after, _ := s.GetLearnedSkill(k.ID)
+	if after.Version != 1 || after.Body != "b-sk" {
+		t.Fatalf("archived skill after rejected patches = %+v, want untouched v1", after)
+	}
+
+	// Undo stays allowed on archived.
+	undone, err := s.PatchSkill(PatchSkillInput{ID: k.ID, ExpectVersion: 1, Description: "d-sk", Body: "b-restored", Actor: "human", Action: "undo"})
+	if err != nil || undone.Version != 2 || undone.Body != "b-restored" {
+		t.Fatalf("undo on archived = %+v err=%v", undone, err)
+	}
+}
+
+func TestProposal_CannotApproveOtherWorkspaceChange(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	wsA := newLearningWorkspace(t, s)
+	wsB := newTestWorkspace(t, s, "/b")
+
+	skillB := mustLand(t, s, wsB.ID, "skill-b")
+	// Proposal of workspace A, pointed at a change in workspace B.
+	pA, err := s.CreateProposal(LearnedProposal{WorkspaceID: wsA.ID, Kind: "patch", Source: "reflector", Name: "skill-b", TargetSkillID: &skillB.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.PatchSkill(PatchSkillInput{ID: skillB.ID, ExpectVersion: 1, Description: "d2", Body: "b2", Actor: "human", ProposalID: pA.ID}); !errors.Is(err, ErrProposalWorkspaceMismatch) {
+		t.Fatalf("cross-workspace patch error = %v, want ErrProposalWorkspaceMismatch", err)
+	}
+	after, _ := s.GetLearnedSkill(skillB.ID)
+	if after.Version != 1 {
+		t.Fatalf("skill after mismatch = %+v, want untouched v1", after)
+	}
+	prop, _ := s.GetProposal(pA.ID)
+	if prop.Status != "pending" {
+		t.Fatalf("proposal after mismatch = %q, want pending", prop.Status)
+	}
+
+	// Same guard on LandSkill: a create proposal of A can't land a skill
+	// into workspace B.
+	pCreate, err := s.CreateProposal(LearnedProposal{WorkspaceID: wsA.ID, Kind: "create", Source: "reflector", Name: "cross"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LandSkill(LandSkillInput{
+		Skill:      LearnedSkill{WorkspaceID: wsB.ID, Name: "cross", Description: "d", Body: "b"},
+		Actor:      "human",
+		ProposalID: pCreate.ID,
+	}); !errors.Is(err, ErrProposalWorkspaceMismatch) {
+		t.Fatalf("cross-workspace land error = %v, want ErrProposalWorkspaceMismatch", err)
+	}
+	if got := countRows(t, s, `SELECT COUNT(*) FROM learned_skills WHERE name = 'cross'`); got != 0 {
+		t.Fatalf("cross-landed skills = %d, want 0", got)
+	}
+}

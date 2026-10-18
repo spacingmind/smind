@@ -13,6 +13,23 @@ import (
 // concurrent editor's patch can't be silently clobbered.
 var ErrSkillVersionConflict = errors.New("learned skill version conflict")
 
+// Bundle/proposal guard errors (ADR-0026): each is wrapped with context;
+// on any of them nothing was written (the transaction rolled back).
+var (
+	// ErrBundleSelfAbsorb: an absorbed skill id equals the umbrella id --
+	// absorbing it would archive the umbrella itself.
+	ErrBundleSelfAbsorb = errors.New("bundle absorbs the umbrella skill")
+	// ErrSkillNotLive: the skill's status is not active or disabled.
+	ErrSkillNotLive = errors.New("learned skill is not live")
+	// ErrBundleNoAbsorbed: an ApplyBundle with no absorbed skill ids.
+	ErrBundleNoAbsorbed = errors.New("bundle has no absorbed skills")
+	// ErrBundleDuplicateAbsorbed: an ApplyBundle listing one skill twice.
+	ErrBundleDuplicateAbsorbed = errors.New("bundle lists an absorbed skill twice")
+	// ErrProposalWorkspaceMismatch: the proposal belongs to a different
+	// workspace than the skill it would change.
+	ErrProposalWorkspaceMismatch = errors.New("proposal workspace does not match skill workspace")
+)
+
 const learnedSkillColumns = `id, workspace_id, name, category, description, body, status, pinned, source,
 	created_by_run, evidence, possible_duplicate_of, similarity, version,
 	offered_runs, loaded_runs, loads, loads_via_skill, loads_via_read,
@@ -126,7 +143,7 @@ func (s *Store) LandSkill(in LandSkillInput) (LearnedSkill, error) {
 	}
 	defer tx.Rollback()
 
-	if err := approveProposalInTx(tx, in.ProposalID); err != nil {
+	if err := approveProposalInTx(tx, in.ProposalID, in.Skill.WorkspaceID); err != nil {
 		return LearnedSkill{}, fmt.Errorf("land skill %q: %w", in.Skill.Name, err)
 	}
 
@@ -197,16 +214,26 @@ func (s *Store) PatchSkill(in PatchSkillInput) (LearnedSkill, error) {
 	}
 	defer tx.Rollback()
 
-	if err := approveProposalInTx(tx, in.ProposalID); err != nil {
+	var skillWS int64
+	if err := tx.QueryRow(`SELECT workspace_id FROM learned_skills WHERE id = ?`, in.ID).Scan(&skillWS); err != nil {
+		return LearnedSkill{}, fmt.Errorf("patch skill %d: %w", in.ID, err)
+	}
+	if err := approveProposalInTx(tx, in.ProposalID, skillWS); err != nil {
 		return LearnedSkill{}, fmt.Errorf("patch skill %d: %w", in.ID, err)
 	}
 
 	var current int
-	if err := tx.QueryRow(`SELECT version FROM learned_skills WHERE id = ?`, in.ID).Scan(&current); err != nil {
+	var status string
+	if err := tx.QueryRow(`SELECT version, status FROM learned_skills WHERE id = ?`, in.ID).Scan(&current, &status); err != nil {
 		return LearnedSkill{}, fmt.Errorf("patch skill %d: %w", in.ID, err)
 	}
 	if current != in.ExpectVersion {
 		return LearnedSkill{}, fmt.Errorf("patch skill %d: have version %d: %w", in.ID, current, ErrSkillVersionConflict)
+	}
+	// "undo" stays allowed on any status (undoing an archive-time content
+	// is fine); patch/merge only make sense on a live skill.
+	if in.Action != "undo" && status != SkillActive && status != SkillDisabled {
+		return LearnedSkill{}, fmt.Errorf("patch skill %d: status %s: %w", in.ID, status, ErrSkillNotLive)
 	}
 
 	res, err := tx.Exec(`UPDATE learned_skills
@@ -239,13 +266,26 @@ func (s *Store) PatchSkill(in PatchSkillInput) (LearnedSkill, error) {
 	return k, nil
 }
 
-// approveProposalInTx marks proposalID approved if it is currently pending.
-// A zero id is a no-op (human-initiated change, no proposal). A missing or
-// non-pending proposal is an error, which rolls back the enclosing
-// transaction.
-func approveProposalInTx(tx *sql.Tx, proposalID int64) error {
+// approveProposalInTx marks proposalID approved if it is currently pending
+// and belongs to expectedWorkspace (a proposal of workspace A must never
+// approve a change in workspace B). A zero id is a no-op
+// (human-initiated change, no proposal). Any mismatch is an error, which
+// rolls back the enclosing transaction.
+func approveProposalInTx(tx *sql.Tx, proposalID, expectedWorkspace int64) error {
 	if proposalID == 0 {
 		return nil
+	}
+	var wsID int64
+	var status string
+	if err := tx.QueryRow(`SELECT workspace_id, status FROM learned_skill_proposals WHERE id = ?`, proposalID).
+		Scan(&wsID, &status); err != nil {
+		return fmt.Errorf("approve proposal %d: %w", proposalID, err)
+	}
+	if status != "pending" {
+		return fmt.Errorf("approve proposal %d: status is %s, want pending: %w", proposalID, status, sql.ErrNoRows)
+	}
+	if wsID != expectedWorkspace {
+		return fmt.Errorf("approve proposal %d: workspace %d, want %d: %w", proposalID, wsID, expectedWorkspace, ErrProposalWorkspaceMismatch)
 	}
 	res, err := tx.Exec(`UPDATE learned_skill_proposals
 		SET status = 'approved', decided_at = ?
@@ -285,14 +325,35 @@ func (s *Store) ApplyBundle(in ApplyBundleInput) error {
 	}
 	defer tx.Rollback()
 
-	if err := approveProposalInTx(tx, in.ProposalID); err != nil {
+	var wsID int64
+	if err := tx.QueryRow(`SELECT workspace_id FROM learned_skills WHERE id = ?`, in.UmbrellaID).Scan(&wsID); err != nil {
+		return fmt.Errorf("apply bundle: umbrella %d: %w", in.UmbrellaID, err)
+	}
+	if err := approveProposalInTx(tx, in.ProposalID, wsID); err != nil {
 		return fmt.Errorf("apply bundle: %w", err)
 	}
 
+	if len(in.AbsorbedIDs) == 0 {
+		return fmt.Errorf("apply bundle: %w", ErrBundleNoAbsorbed)
+	}
+	seen := make(map[int64]bool, len(in.AbsorbedIDs))
+	for _, id := range in.AbsorbedIDs {
+		if id == in.UmbrellaID {
+			return fmt.Errorf("apply bundle: absorbed %d: %w", id, ErrBundleSelfAbsorb)
+		}
+		if seen[id] {
+			return fmt.Errorf("apply bundle: absorbed %d: %w", id, ErrBundleDuplicateAbsorbed)
+		}
+		seen[id] = true
+	}
+
 	var current int
-	var umbrellaName string
-	if err := tx.QueryRow(`SELECT version, name FROM learned_skills WHERE id = ?`, in.UmbrellaID).Scan(&current, &umbrellaName); err != nil {
+	var umbrellaName, umbrellaStatus string
+	if err := tx.QueryRow(`SELECT version, name, status FROM learned_skills WHERE id = ?`, in.UmbrellaID).Scan(&current, &umbrellaName, &umbrellaStatus); err != nil {
 		return fmt.Errorf("apply bundle: umbrella %d: %w", in.UmbrellaID, err)
+	}
+	if umbrellaStatus != SkillActive && umbrellaStatus != SkillDisabled {
+		return fmt.Errorf("apply bundle: umbrella %d: status %s: %w", in.UmbrellaID, umbrellaStatus, ErrSkillNotLive)
 	}
 	if current != in.ExpectVersion {
 		return fmt.Errorf("apply bundle: umbrella %d: have version %d: %w", in.UmbrellaID, current, ErrSkillVersionConflict)
@@ -306,10 +367,6 @@ func (s *Store) ApplyBundle(in ApplyBundleInput) error {
 		VALUES (?, ?, ?, ?, ?, ?)`, in.UmbrellaID, current+1, in.Description, in.Body, in.Actor, now); err != nil {
 		return fmt.Errorf("apply bundle: umbrella version: %w", err)
 	}
-	var wsID int64
-	if err := tx.QueryRow(`SELECT workspace_id FROM learned_skills WHERE id = ?`, in.UmbrellaID).Scan(&wsID); err != nil {
-		return fmt.Errorf("apply bundle: umbrella %d: %w", in.UmbrellaID, err)
-	}
 	if err := insertLedger(tx, LearnedLedgerEntry{
 		WorkspaceID: wsID, SkillID: &in.UmbrellaID, SkillName: umbrellaName,
 		Action: "merge", Reason: in.Reason, Evidence: "[]", Actor: in.Actor, CreatedAt: now,
@@ -319,13 +376,16 @@ func (s *Store) ApplyBundle(in ApplyBundleInput) error {
 
 	for _, absorbed := range in.AbsorbedIDs {
 		var absorbedWS int64
-		var absorbedName string
-		q := `SELECT workspace_id, name FROM learned_skills WHERE id = ?`
-		if err := tx.QueryRow(q, absorbed).Scan(&absorbedWS, &absorbedName); err != nil {
+		var absorbedName, absorbedStatus string
+		if err := tx.QueryRow(`SELECT workspace_id, name, status FROM learned_skills WHERE id = ?`, absorbed).
+			Scan(&absorbedWS, &absorbedName, &absorbedStatus); err != nil {
 			return fmt.Errorf("apply bundle: absorbed %d: %w", absorbed, err)
 		}
 		if absorbedWS != wsID {
 			return fmt.Errorf("apply bundle: absorbed %d: workspace %d: %w", absorbed, absorbedWS, errCrossWorkspaceSkill)
+		}
+		if absorbedStatus != SkillActive && absorbedStatus != SkillDisabled {
+			return fmt.Errorf("apply bundle: absorbed %d: status %s: %w", absorbed, absorbedStatus, ErrSkillNotLive)
 		}
 		if _, err := tx.Exec(`UPDATE learned_skills SET status = ?, updated_at = ? WHERE id = ?`, SkillArchived, now, absorbed); err != nil {
 			return fmt.Errorf("apply bundle: archive absorbed %d: %w", absorbed, err)
