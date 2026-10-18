@@ -148,7 +148,63 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
 - [ ] PR-A2 models/diagnostics/deep link
 
 ## Validation
+- PR-B4 (copy): `the remote hint only mentions a device code where one exists` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`; decision 12 copy ("Accounts here route sMind's /v1 proxy; agent runs use the CLI's own login.") asserted in `components/settings/providers-section.test.tsx` (`notes the proxy-only groups (Claude Code, Codex) but not Kimi or GLM`).
+- PR-B4 (review): independent review fixes, each with a test — second paste cannot flip a successful login, paste rejected after cancel is ignored, Finish stays disabled after an accepted paste, no connect button without a provider, Connect stays disabled until a cancelled login settles, provider/method locked during a login, default label avoids collisions, paste input focused when revealed, non-http login URLs and bad expiry rejected, corrupt persisted login location dropped, early override ignored (`web/packages/ui/src/components/accounts-dialog.connect.test.tsx`, `hooks/use-account-login.test.tsx`, `lib/login-events.test.ts`, `components/connect/*.test.tsx`, `stores/login-location-store.test.ts`, `hooks/use-login-remote.test.tsx`).
+- PR-B4 (hook): `login hook goes starting then waiting on authorizeUrl` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `login hook shows device code state on deviceCode` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `login hook marks pasteOnly from the event` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `stale generation events are dropped after cancel` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `cancel aborts the in-flight request and returns to idle` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `desktop opens the authorize url once and web does not` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `paste complete sends oauthComplete with the loginId` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `paste errors keep the login waiting and show the message` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `paste on an ended login moves to the error state` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `login hook maps errors to a code, message and soft flag` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `login result is upserted into the account cache and onConnected fires` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `login hook never keeps the pasted url in state` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `login hook prefers an explicit client` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `login remote hook derives remote from the desktop connection kind` — `web/packages/ui/src/hooks/use-login-remote.test.ts`
+- PR-B4 (hook): `login remote hook uses the hostname on web` — `web/packages/ui/src/hooks/use-login-remote.test.ts`
+- PR-B4 (hook): `login remote hook override wins and persists per connection` — `web/packages/ui/src/hooks/use-login-remote.test.ts`
+
+**PR-B4 (panels):**
+- `device panel shows the code, link and countdown` — `web/packages/ui/src/components/connect/device-code-panel.test.tsx`
+- `device panel copies the code` — `web/packages/ui/src/components/connect/device-code-panel.test.tsx`
+- `device panel shows expired when the time has passed` — `web/packages/ui/src/components/connect/device-code-panel.test.tsx`
+- `device panel cancel calls onCancel` — `web/packages/ui/src/components/connect/device-code-panel.test.tsx`
+- `paste panel submits the trimmed address` — `web/packages/ui/src/components/connect/paste-redirect-panel.test.tsx`
+- `paste panel disables finish while empty or pending` — `web/packages/ui/src/components/connect/paste-redirect-panel.test.tsx`
+- `paste panel shows the error` — `web/packages/ui/src/components/connect/paste-redirect-panel.test.tsx`
+- `paste panel submits on enter` — `web/packages/ui/src/components/connect/paste-redirect-panel.test.tsx`
+- `done notice words created, updated and adopted differently` — `web/packages/ui/src/components/connect/login-notices.test.tsx`
+- `error notice distinguishes soft from explanatory errors` — `web/packages/ui/src/components/connect/login-notices.test.tsx`
+- `notices call onDismiss` — `web/packages/ui/src/components/connect/login-notices.test.tsx`
+- `connect methods per provider` — `web/packages/ui/src/lib/login-methods.test.ts`
+- `default connect method follows remote and availability` — `web/packages/ui/src/lib/login-methods.test.ts`
+
+**PR-B4 (form):**
+- `method selector offers the provider's methods` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `connect label defaults to account-N` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `remote openai defaults to the device method and shows the device code panel` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `remote anthropic shows the paste field immediately` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `local login shows paste after the trouble delay` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `pasted redirect calls account.oauthComplete and finishes the login` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `done notice words created and updated differently` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `api key method adds an account with the credential` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `the paste a credential disclosure is gone` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
+- `location toggle switches remote and local defaults` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`
 (filled as PRs land)
+
+**PR-B4 (lib):**
+- `parseLoginEvent accepts authorizeUrl and deviceCode` -- `web/packages/ui/src/lib/login-events.test.ts`
+- `parseLoginEvent rejects malformed events` -- `web/packages/ui/src/lib/login-events.test.ts`
+- `parseLoginError splits code and detail` -- `web/packages/ui/src/lib/login-events.test.ts`
+- `parseLoginError handles unknown and legacy messages` -- `web/packages/ui/src/lib/login-events.test.ts`
+- `loginErrorMessage has copy for every known code` -- `web/packages/ui/src/lib/login-events.test.ts`
+- `isSoftLoginError only for denied, device_expired and timeout` -- `web/packages/ui/src/lib/login-events.test.ts`
+- `remote is derived from connection kind and hostname` -- `web/packages/ui/src/lib/login-remote.test.ts`
+- `manual override beats the derived remote flag` -- `web/packages/ui/src/lib/login-remote.test.ts`
+- `override is stored per connection id and survives a reload` -- `web/packages/ui/src/stores/login-location-store.test.ts`
 
 **PR-B1 (AC-B1..AC-B3), all Go tests under `-race`:**
 - `identity migration keeps existing rows null` -- `internal/store/migrate_test.go` (`TestMigrate_AccountsIdentity`, run twice for
