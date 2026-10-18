@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import { Icons } from "@/lib/icons";
 
-import { ModelPicker, type PickerProfileRow } from "@/components/composer/model-picker";
+import { ProviderModelPicker, type PickerProfileRow } from "@/components/pickers/provider-model-picker";
 import { readRunConfigPreference, writeRunConfigPreference } from "@/components/composer/run-config-preference";
 import { setSettingsIntent } from "@/lib/settings-intent";
 import { buildBrowserProviders, type ProviderHealth } from "@/lib/model-browser";
@@ -371,7 +371,7 @@ function RunConfigToolbarModelPicker() {
 
   return (
     <div className="flex shrink-0 items-center">
-      <ModelPicker
+      <ProviderModelPicker
         providers={browserProviders}
         selectedProvider={state.provider}
         selectedModel={state.model}

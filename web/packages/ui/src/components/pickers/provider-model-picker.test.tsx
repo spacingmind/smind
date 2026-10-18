@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
-import { ModelPicker, type ModelPickerProps, type PickerProfileRow } from "@/components/composer/model-picker";
+import { ProviderModelPicker, type ProviderModelPickerProps, type PickerProfileRow } from "@/components/pickers/provider-model-picker";
 import { buildBrowserProviders, type BrowserProvider, type ProviderHealth } from "@/lib/model-browser";
 import type { ProviderInfo } from "@/lib/types";
 
@@ -33,17 +33,17 @@ const PROFILES: PickerProfileRow[] = [
 ];
 
 interface Spies {
-  onSelect: Mock<ModelPickerProps["onSelect"]>;
-  onApplyProfile: Mock<ModelPickerProps["onApplyProfile"]>;
-  onClearAgent: Mock<ModelPickerProps["onClearAgent"]>;
-  onManageAgents: Mock<ModelPickerProps["onManageAgents"]>;
-  onCreateProfile: Mock<NonNullable<ModelPickerProps["onCreateProfile"]>>;
-  onEditProfile: Mock<NonNullable<ModelPickerProps["onEditProfile"]>>;
-  onOpenProviderSettings: Mock<NonNullable<ModelPickerProps["onOpenProviderSettings"]>>;
+  onSelect: Mock<ProviderModelPickerProps["onSelect"]>;
+  onApplyProfile: Mock<NonNullable<ProviderModelPickerProps["onApplyProfile"]>>;
+  onClearAgent: Mock<NonNullable<ProviderModelPickerProps["onClearAgent"]>>;
+  onManageAgents: Mock<NonNullable<ProviderModelPickerProps["onManageAgents"]>>;
+  onCreateProfile: Mock<NonNullable<ProviderModelPickerProps["onCreateProfile"]>>;
+  onEditProfile: Mock<NonNullable<ProviderModelPickerProps["onEditProfile"]>>;
+  onOpenProviderSettings: Mock<NonNullable<ProviderModelPickerProps["onOpenProviderSettings"]>>;
   onOpen: Mock<() => void>;
 }
 
-type PickerOverrides = Partial<Omit<ModelPickerProps, keyof Spies>> & { health?: Record<string, ProviderHealth> };
+type PickerOverrides = Partial<Omit<ProviderModelPickerProps, keyof Spies>> & { health?: Record<string, ProviderHealth> };
 
 function renderPicker(overrides: PickerOverrides = {}): Spies {
   const { health, ...rest } = overrides;
@@ -58,7 +58,7 @@ function renderPicker(overrides: PickerOverrides = {}): Spies {
     onOpen: vi.fn(),
   };
   render(
-    <ModelPicker
+    <ProviderModelPicker
       providers={buildBrowserProviders(INFOS, health ?? {})}
       selectedProvider="claude-native"
       selectedModel="opus-5-5"
@@ -615,5 +615,59 @@ describe("model picker", () => {
     fireEvent.keyDown(searchInput(), { key: "Escape" });
     open();
     expect(onOpen).toHaveBeenCalledTimes(2);
+  });
+
+  describe("field variant (a form control, no profiles)", () => {
+    function renderField(extra: Partial<ProviderModelPickerProps> = {}, health: Record<string, ProviderHealth> = {}) {
+      const onSelect = vi.fn();
+      render(
+        <ProviderModelPicker
+          providers={buildBrowserProviders(INFOS, health)}
+          selectedProvider="claude-native"
+          selectedModel="opus-5-5"
+          boundProvider={null}
+          disabled={false}
+          variant="field"
+          testId="profile-form-provider"
+          onSelect={onSelect}
+          {...extra}
+        />,
+      );
+      return onSelect;
+    }
+
+    it("uses its own testid, fills the width and opens downwards", () => {
+      renderField();
+      const trigger = screen.getByTestId("profile-form-provider");
+      expect(trigger).toHaveTextContent("Opus 5.5");
+      expect(trigger.className).toContain("w-full");
+      expect(screen.queryByTestId("composer-model-picker")).not.toBeInTheDocument();
+      fireEvent.click(trigger);
+      expect(screen.getByTestId("model-picker-popover")).toHaveAttribute("data-side", "bottom");
+    });
+
+    it("offers no profiles band, no create-profile rows and no No-agent row without onApplyProfile", () => {
+      renderField();
+      fireEvent.click(screen.getByTestId("profile-form-provider"));
+      expect(screen.queryByTestId("model-profiles-band")).not.toBeInTheDocument();
+      expect(screen.queryByText(/create profile/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/no agent/i)).not.toBeInTheDocument();
+    });
+
+    it("picking a model of another provider selects provider and model together, like the pill", () => {
+      const onSelect = renderField();
+      fireEvent.click(screen.getByTestId("profile-form-provider"));
+      fireEvent.click(screen.getByTestId("model-picker-back"));
+      fireEvent.click(screen.getByTestId("model-provider-glm"));
+      fireEvent.click(screen.getByTestId("model-row-glm:glm-5.3"));
+      expect(onSelect).toHaveBeenCalledExactlyOnceWith("glm", "glm-5.3");
+    });
+
+    it("disables an unhealthy provider with its reason, same as the pill", () => {
+      renderField({}, { glm: { ok: false, detail: "glm not on PATH" } });
+      fireEvent.click(screen.getByTestId("profile-form-provider"));
+      fireEvent.click(screen.getByTestId("model-picker-back"));
+      expect(screen.getByText("glm not on PATH")).toBeInTheDocument();
+    });
   });
 });
