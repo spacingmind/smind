@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TaskLineageHeader } from "@/components/task-lineage";
+import { usageChipText } from "@/lib/task-lineage";
 import { TaskDetailPane } from "@/components/task-detail";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { FakeWsClient } from "@/test/fake-ws-client";
@@ -119,6 +120,27 @@ describe("TaskLineageHeader (unit)", () => {
     };
     render(<TaskLineageHeader lineage={lineage} />);
     expect(screen.queryByTestId("task-tree-usage")).toBeNull();
+  });
+
+  it("usage rollup shows the subtree total and does not double count the task's own runs", () => {
+    const own = { ...usage(1), inputTokens: 1000, outputTokens: 500, costUsd: 0.3 };
+    const subtree = { ...usage(3), inputTokens: 5000, outputTokens: 2500, costUsd: 1.5 }; // already includes own
+    const lineage: TaskLineage = {
+      parent: null,
+      node: node({
+        id: 2,
+        counts: { running: 1, waitingPermission: 0, failed: 0, done: 0, idle: 0 },
+        usage: { own, subtree, archivedDescendants: 0 },
+      }),
+      children: [node({ id: 3, parentId: 2, run: { state: "running", runningRunIds: ["r1"], pendingPermissions: 0 } })],
+    };
+    render(<TaskLineageHeader lineage={lineage} />);
+    const chip = screen.getByTestId("task-tree-usage");
+    const doubled = { ...usage(4), inputTokens: 6000, outputTokens: 3000, costUsd: 1.8 }; // own + subtree: the bug
+    expect(chip.textContent).toContain(usageChipText(subtree)!);
+    expect(chip.textContent).not.toContain(usageChipText(doubled)!);
+    expect(chip.getAttribute("title")).toContain(`own: ${usageChipText(own)}`);
+    expect(chip.getAttribute("title")).toContain(`tree: ${usageChipText(subtree)}`);
   });
 });
 

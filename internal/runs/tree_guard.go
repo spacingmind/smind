@@ -56,6 +56,9 @@ func (reg *Registry) treeRootOf(taskID int64) (int64, error) {
 	seen := map[int64]bool{taskID: true}
 	cur := taskID
 	for i := 0; i < treeRootWalkHopLimit; i++ {
+		if reg.treeRootStoreRead != nil {
+			reg.treeRootStoreRead()
+		}
 		t, err := reg.st.GetTask(cur)
 		if err != nil {
 			return 0, fmt.Errorf("runs: start: resolve tree root of task %d: %w", taskID, err)

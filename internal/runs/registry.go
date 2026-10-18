@@ -78,6 +78,11 @@ type Registry struct {
 	// and Start/record/finish for the write path.
 	st *store.Store
 
+	// treeRootStoreRead, when non-nil, is called before each store read treeRootOf
+	// makes. A test seam (tree_guard_test.go) for "root resolution never reads the
+	// store under reg.mu"; nil in production.
+	treeRootStoreRead func()
+
 	// notifier, if set via SetNotifier, receives run.status lifecycle
 	// notifications (Start, finish) and permission.pending notifications
 	// (runPermissionDecider), so the wsapi server can push them as
