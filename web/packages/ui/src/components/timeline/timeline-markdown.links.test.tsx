@@ -37,3 +37,15 @@ describe("TimelineMarkdown links", () => {
     expect(screen.getByRole("link", { name: "top" })).not.toHaveAttribute("target");
   });
 });
+
+describe("MarkdownPreview links", () => {
+  it("desktop: a link in the file preview opens through the bridge", async () => {
+    vi.resetModules();
+    const openExternal = vi.fn(() => Promise.resolve());
+    vi.doMock("@/lib/platform", () => ({ isDesktop: true, desktop: { openExternal } }));
+    const { MarkdownPreview } = await import("@/components/file-preview");
+    render(<MarkdownPreview content="[docs](https://example.com/a)" />);
+    expect(fireEvent.click(screen.getByRole("link", { name: "docs" }))).toBe(false);
+    expect(openExternal).toHaveBeenCalledWith("https://example.com/a");
+  });
+});
