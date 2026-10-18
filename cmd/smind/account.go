@@ -166,6 +166,27 @@ type deviceCodeEventParams struct {
 	UserCode        string `json:"userCode"`
 }
 
+// parseAccountLoginArgs reads `[--device] <provider> <label>`; the flag may
+// come before, between or after the positionals. ok is false for any other
+// flag or the wrong number of positionals.
+func parseAccountLoginArgs(args []string) (provider, label string, device, ok bool) {
+	var positional []string
+	for _, a := range args {
+		switch {
+		case a == "--device":
+			device = true
+		case strings.HasPrefix(a, "-"):
+			return "", "", false, false
+		default:
+			positional = append(positional, a)
+		}
+	}
+	if len(positional) != 2 {
+		return "", "", false, false
+	}
+	return positional[0], positional[1], device, true
+}
+
 // cmdAccountLogin drives a browser-based OAuth login through the daemon
 // (account.oauthStart): it blocks until the daemon reports the login done,
 // printing the authorize URL as soon as the daemon has one (always -- the
@@ -176,11 +197,17 @@ type deviceCodeEventParams struct {
 // callback listener however this request ends, so a Ctrl+C here doesn't
 // leak it.
 func cmdAccountLogin(args []string) int {
-	if len(args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: smind account login <provider> <label>")
+	provider, label, device, ok := parseAccountLoginArgs(args)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "usage: smind account login [--device] <provider> <label>")
 		return 2
 	}
-	provider, label := args[0], args[1]
+	params := map[string]any{"provider": provider, "label": label}
+	if device {
+		// Device-code login (openai): prints a code to enter on any device
+		// instead of opening a browser here.
+		params["method"] = "device"
+	}
 
 	client, err := dialDaemon(context.Background())
 	if err != nil {
@@ -193,9 +220,7 @@ func cmdAccountLogin(args []string) int {
 	defer stop()
 
 	var account loginResult
-	err = client.CallStream(ctx, "account.oauthStart", map[string]any{
-		"provider": provider, "label": label,
-	}, func(event string, params json.RawMessage) {
+	err = client.CallStream(ctx, "account.oauthStart", params, func(event string, params json.RawMessage) {
 		printLoginEvent(os.Stdout, event, params)
 	}, &account)
 	if err != nil {

@@ -169,6 +169,132 @@ func TestRunAccountLoginUsage(t *testing.T) {
 	}
 }
 
+func TestParseAccountLoginArgs(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		args     []string
+		provider string
+		label    string
+		device   bool
+		ok       bool
+	}{
+		"plain":            {[]string{"openai", "work"}, "openai", "work", false, true},
+		"device first":     {[]string{"--device", "openai", "work"}, "openai", "work", true, true},
+		"device between":   {[]string{"openai", "--device", "work"}, "openai", "work", true, true},
+		"device last":      {[]string{"openai", "work", "--device"}, "openai", "work", true, true},
+		"no args":          {nil, "", "", false, false},
+		"one positional":   {[]string{"--device", "openai"}, "", "", false, false},
+		"three positional": {[]string{"a", "b", "c"}, "", "", false, false},
+		"unknown flag":     {[]string{"--browser", "openai", "work"}, "", "", false, false},
+		"short flag":       {[]string{"-d", "openai", "work"}, "", "", false, false},
+	} {
+		provider, label, device, ok := parseAccountLoginArgs(tc.args)
+		if provider != tc.provider || label != tc.label || device != tc.device || ok != tc.ok {
+			t.Errorf("%s: parseAccountLoginArgs(%q) = %q, %q, %v, %v; want %q, %q, %v, %v",
+				name, tc.args, provider, label, device, ok, tc.provider, tc.label, tc.device, tc.ok)
+		}
+	}
+}
+
+// TestRunAccountLoginDeviceFlag: `account login --device` sends method "device"
+// in account.oauthStart's params, prints the streamed device code without
+// opening a browser, and a plain login sends no method.
+func TestRunAccountLoginDeviceFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		args       []string
+		wantMethod any
+	}{
+		{"device", []string{"account", "login", "--device", "openai", "work"}, "device"},
+		{"browser", []string{"account", "login", "openai", "work"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("SMIND_HOME", home)
+
+			gotParams := make(chan map[string]any, 1)
+			upgrader := websocket.Upgrader{}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ws, err := upgrader.Upgrade(w, r, nil)
+				if err != nil {
+					t.Errorf("upgrade: %v", err)
+					return
+				}
+				defer ws.Close()
+				_, data, err := ws.ReadMessage()
+				if err != nil {
+					t.Errorf("ReadMessage() error = %v", err)
+					return
+				}
+				var req wireEnvelope
+				if err := json.Unmarshal(data, &req); err != nil {
+					t.Errorf("unmarshal request: %v", err)
+					return
+				}
+				var params map[string]any
+				if err := json.Unmarshal(req.Params, &params); err != nil {
+					t.Errorf("unmarshal params: %v", err)
+				}
+				gotParams <- params
+
+				for _, env := range []wireEnvelope{
+					{ID: req.ID, Event: "deviceCode", Params: json.RawMessage(`{"loginId":"l","verificationUrl":"https://example.invalid/device","userCode":"ABCD-1234","expiresAt":"2030-01-01T00:00:00Z","intervalSeconds":5}`)},
+					{ID: req.ID, Result: json.RawMessage(`{"id":7,"provider":"openai","label":"work","credentialType":"oauth","created":true}`)},
+				} {
+					out, _ := json.Marshal(env)
+					if err := ws.WriteMessage(websocket.TextMessage, out); err != nil {
+						t.Errorf("write: %v", err)
+						return
+					}
+				}
+				_, _, _ = ws.ReadMessage()
+			}))
+			t.Cleanup(srv.Close)
+			u, err := url.Parse(srv.URL)
+			if err != nil {
+				t.Fatalf("parse server URL: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("server:\n  port: "+u.Port()+"\n"), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			var stdout bytes.Buffer
+			previousStdout := os.Stdout
+			read, write, err := os.Pipe()
+			if err != nil {
+				t.Fatalf("os.Pipe() error = %v", err)
+			}
+			os.Stdout = write
+			defer func() { os.Stdout = previousStdout }()
+			var opened []string
+			previousOpenBrowser := openBrowser
+			openBrowser = func(u string) { opened = append(opened, u) }
+			defer func() { openBrowser = previousOpenBrowser }()
+
+			code := run(tc.args)
+
+			_ = write.Close()
+			_, _ = io.Copy(&stdout, read)
+			_ = read.Close()
+
+			if code != 0 {
+				t.Fatalf("run(%q) = %d, want 0 (stdout: %s)", tc.args, code, stdout.String())
+			}
+			params := <-gotParams
+			if params["provider"] != "openai" || params["label"] != "work" || params["method"] != tc.wantMethod {
+				t.Errorf("params = %+v, want provider=openai label=work method=%v", params, tc.wantMethod)
+			}
+			if !strings.Contains(stdout.String(), "ABCD-1234") || !strings.Contains(stdout.String(), "https://example.invalid/device") {
+				t.Errorf("stdout = %q, want the device code and URL", stdout.String())
+			}
+			if len(opened) != 0 {
+				t.Errorf("browser opened for %q, want none", opened)
+			}
+		})
+	}
+}
+
 // TestPrintLoginEventDeviceCode: a deviceCode event prints the verification URL
 // and the user code and never opens a browser; an authorizeUrl event still
 // does; malformed and unknown events print nothing.
