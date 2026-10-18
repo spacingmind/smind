@@ -150,6 +150,17 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
 ## Validation
 (filled as PRs land)
 
+**PR-B4 (lib):**
+- `parseLoginEvent accepts authorizeUrl and deviceCode` -- `web/packages/ui/src/lib/login-events.test.ts`
+- `parseLoginEvent rejects malformed events` -- `web/packages/ui/src/lib/login-events.test.ts`
+- `parseLoginError splits code and detail` -- `web/packages/ui/src/lib/login-events.test.ts`
+- `parseLoginError handles unknown and legacy messages` -- `web/packages/ui/src/lib/login-events.test.ts`
+- `loginErrorMessage has copy for every known code` -- `web/packages/ui/src/lib/login-events.test.ts`
+- `isSoftLoginError only for denied, device_expired and timeout` -- `web/packages/ui/src/lib/login-events.test.ts`
+- `remote is derived from connection kind and hostname` -- `web/packages/ui/src/lib/login-remote.test.ts`
+- `manual override beats the derived remote flag` -- `web/packages/ui/src/lib/login-remote.test.ts`
+- `override is stored per connection id and survives a reload` -- `web/packages/ui/src/stores/login-location-store.test.ts`
+
 **PR-B1 (AC-B1..AC-B3), all Go tests under `-race`:**
 - `identity migration keeps existing rows null` -- `internal/store/migrate_test.go` (`TestMigrate_AccountsIdentity`, run twice for
   idempotence; also asserts the partial unique index rejects a duplicate `(provider, identity)` and allows many NULLs and the same
