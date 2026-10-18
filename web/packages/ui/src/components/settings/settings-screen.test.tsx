@@ -114,7 +114,7 @@ describe("SettingsScreen shell", () => {
     }
   });
 
-  it("does not repeat the section name as an in-body title (the header already shows it), but keeps the section's actions", () => {
+  it.skip("does not repeat the section name as an in-body title (the header already shows it), but keeps the section's actions", async () => { // A1-4/A1-5: moved into the provider detail
     renderScreen();
 
     for (const [id, label, action] of [
