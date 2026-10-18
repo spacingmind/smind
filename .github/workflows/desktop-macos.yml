@@ -17,8 +17,12 @@ name: desktop-macos
 # a second time with different flags; on a PR (or manual run) there is no
 # such artifact, so it builds the daemon itself with `task desktop:mac:daemon`
 # (stamped with the app version). See docs/plans/active/desktop-macos-app.md.
+#
+# Full app builds run after a merge to develop, not on every PR; PRs get the
+# cheaper Rust gate in desktop-check.yml.
 on:
-  pull_request:
+  push:
+    branches: [develop]
     paths:
       - "desktop/**"
       - "web/packages/ui/**"
