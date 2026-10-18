@@ -43,6 +43,7 @@ import (
 	relaypb "github.com/spacingmind/smind/internal/relay/relaypb"
 	"github.com/spacingmind/smind/internal/relay/server"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
 	"github.com/spacingmind/smind/internal/wsapi"
 )
@@ -57,8 +58,9 @@ func main() {
 	windowMax := flag.Int("window-max", 0, "open a 10 minute pairing window for this many new devices at start (0 = closed)")
 	password := flag.String("password", "", "require this daemon password in every device_hello (ADR-0031 P13c); empty = none")
 	outdated := flag.Bool("outdated-daemon", false, "run a daemon from before device_hello v2 instead of the hub: it completes the E2EE handshake on every device route and then says nothing (no device challenge)")
+	fakeAgent := flag.String("fake-agent", "", "path of the compiled internal/taskrunner/fakeagent binary; enables the seed-run command")
 	flag.Parse()
-	if err := run(*windowMax, *outdated, *password); err != nil {
+	if err := run(*windowMax, *outdated, *password, *fakeAgent); err != nil {
 		fmt.Fprintln(os.Stderr, "devharness:", err)
 		os.Exit(1)
 	}
@@ -137,13 +139,16 @@ func (r *relayProc) restart() error {
 
 // harness is the whole process state; commands run one at a time.
 type harness struct {
-	relay    *relayProc
-	secret   []byte
-	fp       string
-	cfg      bridge.Config
-	daemonKP *e2ee.KeyPair
-	reg      *devices.Registry
-	api      *wsapi.API
+	relay     *relayProc
+	secret    []byte
+	fp        string
+	cfg       bridge.Config
+	daemonKP  *e2ee.KeyPair
+	reg       *devices.Registry
+	api       *wsapi.API
+	wm        *workspace.Manager
+	runner    *taskrunner.Runner
+	fakeAgent string
 
 	hub       *bridge.Hub
 	hubCancel context.CancelFunc
@@ -153,7 +158,7 @@ type harness struct {
 	password  string // the daemon password devices must carry; "" = none
 }
 
-func run(windowMax int, outdated bool, password string) error {
+func run(windowMax int, outdated bool, password, fakeAgent string) error {
 	relayDir, err := os.MkdirTemp("", "smind-devharness-relay-")
 	if err != nil {
 		return err
@@ -185,12 +190,13 @@ func run(windowMax int, outdated bool, password string) error {
 		return err
 	}
 	h := &harness{
-		password: password,
-		secret:   secret,
-		fp:       server.CertFingerprint(cert),
-		relay:    &relayProc{dir: relayDir, nativeAddr: nativeLis.Addr().String(), web: webLis.Addr().String()},
-		peers:    map[string]*peer{},
-		peerKeys: map[string]ed25519.PrivateKey{},
+		password:  password,
+		fakeAgent: fakeAgent,
+		secret:    secret,
+		fp:        server.CertFingerprint(cert),
+		relay:     &relayProc{dir: relayDir, nativeAddr: nativeLis.Addr().String(), web: webLis.Addr().String()},
+		peers:     map[string]*peer{},
+		peerKeys:  map[string]ed25519.PrivateKey{},
 	}
 	h.relay.start(nativeLis, webLis)
 	defer func() { _ = h.relay.stop() }()
@@ -205,7 +211,11 @@ func run(windowMax int, outdated bool, password string) error {
 		return err
 	}
 	defer acctDB.Close()
-	h.api, err = wsapi.New(workspace.New(db), accounts.New(acctDB), nil, db, "devharness-token")
+	h.wm = workspace.New(db)
+	if fakeAgent != "" {
+		h.runner = taskrunner.New(h.wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeAgent}))
+	}
+	h.api, err = wsapi.New(h.wm, accounts.New(acctDB), h.runner, db, "devharness-token")
 	if err != nil {
 		return err
 	}
