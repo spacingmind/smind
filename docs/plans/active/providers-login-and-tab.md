@@ -148,6 +148,18 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
 - [ ] PR-A2 models/diagnostics/deep link
 
 ## Validation
+- PR-B4 (hook): `login hook goes starting then waiting on authorizeUrl` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `login hook shows device code state on deviceCode` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `login hook marks pasteOnly from the event` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `stale generation events are dropped after cancel` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `cancel aborts the in-flight request and returns to idle` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `desktop opens the authorize url once and web does not` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `paste complete sends oauthComplete with the loginId` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `paste errors keep the login waiting and show the message` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `paste on an ended login moves to the error state` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `login hook maps errors to a code, message and soft flag` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `login result is upserted into the account cache and onConnected fires` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
+- PR-B4 (hook): `login hook never keeps the pasted url in state` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
 (filled as PRs land)
 
 **PR-B4 (lib):**
