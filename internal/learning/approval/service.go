@@ -6,6 +6,7 @@ package approval
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/spacingmind/smind/internal/learning/gate"
 	"github.com/spacingmind/smind/internal/store"
@@ -42,8 +43,9 @@ func (s *Service) gateConfig() gate.Config {
 
 // liveSnapshot is the library as the gate sees it: learned active/disabled
 // skills with bodies, pending create proposals (status "proposed") and the
-// human skills.
-func (s *Service) liveSnapshot(workspaceID int64) ([]gate.LiveSkill, error) {
+// human skills. Pending proposals listed in exclude are left out, so a
+// proposal being decided never collides with itself.
+func (s *Service) liveSnapshot(workspaceID int64, exclude ...int64) ([]gate.LiveSkill, error) {
 	skills, err := s.d.Store.ListLearnedSkills(workspaceID, store.SkillActive, store.SkillDisabled)
 	if err != nil {
 		return nil, err
@@ -57,7 +59,7 @@ func (s *Service) liveSnapshot(workspaceID int64) ([]gate.LiveSkill, error) {
 		return nil, err
 	}
 	for _, p := range pending {
-		if p.Kind != "create" {
+		if p.Kind != "create" || slices.Contains(exclude, p.ID) {
 			continue
 		}
 		items, err := DecodeItems(p.Intents)
