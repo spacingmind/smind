@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { buildProviderNav } from "@/lib/providers-view";
-import { healthBadge } from "@/lib/providers-view";
-import type { AccountUsage } from "@/lib/account-usage/types";
+import {
+  filterAccountRows,
+  healthBadge,
+  mostHeadroomAccountIds,
+  sortAccountRows,
+} from "@/lib/providers-view";
+import type { HealthBadge } from "@/lib/providers-view";
+import type { AccountUsage, UsageWindow } from "@/lib/account-usage/types";
 import type { Account, ProviderInfo, ProviderTestResult } from "@/lib/types";
 
 function provider(overrides: Partial<ProviderInfo> = {}): ProviderInfo {
@@ -134,3 +140,90 @@ function baseUsage(): AccountUsage {
     report: null,
   };
 }
+
+describe("mostHeadroomAccountIds", () => {
+  const active: HealthBadge = { kind: "active", label: "Active", detail: null, tone: "ok" };
+  const cooling: HealthBadge = { kind: "cooldown", label: "Cooling", detail: null, tone: "warning" };
+
+  function usageWith(windows: Partial<UsageWindow>[]): AccountUsage {
+    return {
+      ...baseUsage(),
+      report: {
+        status: "available",
+        fetchedAt: "",
+        windows: windows.map((window, i) => ({ id: `w${i}`, label: `w${i}`, ...window })),
+      },
+    };
+  }
+  const row = (accountId: number, provider: string, badge: HealthBadge, usage?: AccountUsage) => ({
+    accountId,
+    provider,
+    badge,
+    usage,
+  });
+
+  it("most headroom picks the best active account per provider", () => {
+    const ids = mostHeadroomAccountIds({
+      rows: [
+        row(1, "anthropic", active, usageWith([{ remainingPct: 80 }, { remainingPct: 50 }])),
+        row(2, "anthropic", active, usageWith([{ remainingPct: 70 }])),
+        row(3, "openai", active, usageWith([{ usedPct: 90 }])),
+        row(4, "openai", active, usageWith([{ remainingPct: 20 }])),
+        row(5, "kimi", active, usageWith([{ remainingPct: 90 }])),
+      ],
+    });
+    expect(ids).toEqual(new Set([2, 4]));
+  });
+
+  it("most headroom needs two candidates and skips unhealthy accounts", () => {
+    const ids = mostHeadroomAccountIds({
+      rows: [
+        row(1, "anthropic", cooling, usageWith([{ remainingPct: 90 }])),
+        row(2, "anthropic", active, usageWith([{ remainingPct: 10 }])),
+        row(3, "openai", active, usageWith([{ remainingPct: 50 }])),
+        row(4, "openai", active, undefined),
+      ],
+    });
+    expect(ids).toEqual(new Set());
+  });
+});
+
+describe("filter and sort account rows", () => {
+  const active: HealthBadge = { kind: "active", label: "Active", detail: null, tone: "ok" };
+  const relogin: HealthBadge = { kind: "relogin", label: "Needs re-login", detail: null, tone: "danger" };
+  const untested: HealthBadge = { kind: "untested", label: "Not tested", detail: null, tone: "neutral" };
+
+  const row = (label: string, badge: HealthBadge, usage?: Partial<AccountUsage>) => ({
+    account: { id: 1, provider: "anthropic", label, credentialType: "oauth", createdAt: "", updatedAt: "" },
+    badge,
+    usage: usage === undefined ? undefined : ({ ...baseUsage(), ...usage } as AccountUsage),
+  });
+
+  it("filter matches label, display name and plan", () => {
+    const rows = [
+      row("Zebra", active),
+      row("Work", active, { displayName: "Claude Max" }),
+      row("Side", active, { report: { status: "available", planLabel: "Team plan", fetchedAt: "" } }),
+    ];
+    const names = (filtered: typeof rows) => filtered.map((r) => r.account.label);
+    expect(names(filterAccountRows(rows, { query: "  zeb ", filter: "all" }))).toEqual(["Zebra"]);
+    expect(names(filterAccountRows(rows, { query: "max", filter: "all" }))).toEqual(["Work"]);
+    expect(names(filterAccountRows(rows, { query: "team", filter: "all" }))).toEqual(["Side"]);
+  });
+
+  it("filter by attention and active", () => {
+    const rows = [row("A", active), row("B", relogin), row("C", untested)];
+    const names = (filtered: typeof rows) => filtered.map((r) => r.account.label);
+    expect(names(filterAccountRows(rows, { query: "", filter: "attention" }))).toEqual(["B"]);
+    expect(names(filterAccountRows(rows, { query: "", filter: "active" }))).toEqual(["A"]);
+    expect(names(filterAccountRows(rows, { query: "", filter: "all" }))).toEqual(["A", "B", "C"]);
+  });
+
+  it("sort by status puts attention first", () => {
+    const rows = [row("Alpha", active), row("Beta", relogin), row("Gamma", untested)];
+    const names = (sorted: typeof rows) => sorted.map((r) => r.account.label);
+    expect(names(sortAccountRows(rows, "status"))).toEqual(["Beta", "Gamma", "Alpha"]);
+    expect(names(sortAccountRows(rows, "name"))).toEqual(["Alpha", "Beta", "Gamma"]);
+    expect(rows.map((r) => r.account.label)).toEqual(["Alpha", "Beta", "Gamma"].slice().reverse().reverse());
+  });
+});
