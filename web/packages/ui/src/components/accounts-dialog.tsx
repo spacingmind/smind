@@ -130,6 +130,7 @@ export function ConnectAccountPanel({
   const [methodTouched, setMethodTouched] = useState(false);
   const [labelTouched, setLabelTouched] = useState(false);
   const [pasteHint, setPasteHint] = useState(false);
+  const [pasteOpen, setPasteOpen] = useState(false);
 
   const { remote, derivedRemote, setOverride } = useLoginRemote();
   const login = useAccountLogin({
@@ -187,6 +188,7 @@ export function ConnectAccountPanel({
   // once (rendered below).
   useEffect(() => {
     setPasteHint(false);
+    setPasteOpen(false);
     if (login.state.phase !== "waiting" || remote || login.state.pasteOnly) return;
     const timer = setTimeout(() => setPasteHint(true), PASTE_HINT_DELAY_MS);
     return () => clearTimeout(timer);
@@ -232,7 +234,7 @@ export function ConnectAccountPanel({
 
   const state = login.state;
   const showPastePanel =
-    state.phase === "waiting" && (remote || state.pasteOnly || pasteHint);
+    state.phase === "waiting" && (remote || state.pasteOnly || pasteOpen);
   const connecting = state.phase === "starting" || state.phase === "waiting" || state.phase === "device";
   const selectedLabel = selectedProvider?.label ?? selectedProvider?.accountProvider ?? provider;
 
@@ -427,19 +429,16 @@ export function ConnectAccountPanel({
                   error={login.pasteError}
                   autoFocus={remote}
                 />
-              ) : (
-                <div>
-                  <button
-                    type="button"
-                    data-testid="login-trouble-toggle"
-                    onClick={() => setPasteHint(true)}
-                    className="underline hover:text-foreground"
-                    hidden={!pasteHint}
-                  >
-                    Having trouble? Paste the address instead
-                  </button>
-                </div>
-              )}
+              ) : pasteHint ? (
+                <button
+                  type="button"
+                  data-testid="login-trouble-toggle"
+                  onClick={() => setPasteOpen(true)}
+                  className="text-left underline hover:text-foreground"
+                >
+                  Having trouble? Paste the address instead
+                </button>
+              ) : null}
             </div>
           )}
           {state.phase === "device" && (
