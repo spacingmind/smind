@@ -1,24 +1,28 @@
 import { describe, expect, it } from "vitest";
 
 import { buildProviderNav } from "@/lib/providers-view";
-import type { ProviderInfo } from "@/lib/types";
+import type { Account, ProviderInfo } from "@/lib/types";
 
 function provider(overrides: Partial<ProviderInfo> = {}): ProviderInfo {
-  return { id: "p", ...overrides };
+  return { id: "glm" as ProviderInfo["id"], ...overrides };
+}
+
+function account(overrides: Partial<Account> = {}): Account {
+  return { id: 1, provider: "anthropic", label: "a", credentialType: "oauth", createdAt: "", updatedAt: "", ...overrides };
 }
 
 describe("buildProviderNav", () => {
   it("nav has one item per provider in order", () => {
     const items = buildProviderNav({
       providers: [
-        provider({ id: "b", label: "Beta", credentialKind: "oauth", accountProvider: "beta" }),
-        provider({ id: "a", label: "Alpha", credentialKind: "api-key", accountProvider: "alpha" }),
-        provider({ id: "c" }),
+        provider({ id: "codex-native", label: "Beta", credentialKind: "oauth", accountProvider: "beta" }),
+        provider({ id: "claude-native", label: "Alpha", credentialKind: "api-key", accountProvider: "alpha" }),
+        provider({ id: "glm" }),
       ],
       accounts: [],
       toneOf: () => undefined,
     });
-    expect(items.map((item) => item.id)).toEqual(["b", "a", "c"]);
+    expect(items.map((item) => item.id)).toEqual(["codex-native", "claude-native", "glm"]);
     expect(items[0]).toMatchObject({
       label: "Beta",
       accountProvider: "beta",
@@ -28,17 +32,13 @@ describe("buildProviderNav", () => {
       connected: false,
     });
     expect(items[1].kind).toBe("api-key");
-    expect(items[2]).toMatchObject({ label: "c", kind: "other", accountProvider: undefined });
+    expect(items[2]).toMatchObject({ label: "glm", kind: "other", accountProvider: undefined });
   });
 
   it("nav item tone is the worst account tone", () => {
     const items = buildProviderNav({
-      providers: [provider({ id: "p", credentialKind: "oauth", accountProvider: "anthropic" })],
-      accounts: [
-        { id: 1, provider: "anthropic", label: "a", credentialType: "oauth", createdAt: "", updatedAt: "" },
-        { id: 2, provider: "anthropic", label: "b", credentialType: "oauth", createdAt: "", updatedAt: "" },
-        { id: 3, provider: "anthropic", label: "c", credentialType: "oauth", createdAt: "", updatedAt: "" },
-      ],
+      providers: [provider({ id: "glm", credentialKind: "oauth", accountProvider: "anthropic" })],
+      accounts: [account({ id: 1, label: "a" }), account({ id: 2, label: "b" }), account({ id: 3, label: "c" })],
       toneOf: (id) => (id === 1 ? "ok" : id === 2 ? "danger" : undefined),
     });
     expect(items[0]).toMatchObject({ accountIds: [1, 2, 3], tone: "danger", connected: true });
@@ -46,10 +46,8 @@ describe("buildProviderNav", () => {
 
   it("nav puts unmapped accounts in an other bucket", () => {
     const items = buildProviderNav({
-      providers: [provider({ id: "p", credentialKind: "oauth", accountProvider: "anthropic" })],
-      accounts: [
-        { id: 5, provider: "xai", label: "x", credentialType: "oauth", createdAt: "", updatedAt: "" },
-      ],
+      providers: [provider({ id: "glm", credentialKind: "oauth", accountProvider: "anthropic" })],
+      accounts: [account({ id: 5, provider: "xai", label: "x" })],
       toneOf: () => "warning",
     });
     expect(items[1]).toMatchObject({
@@ -64,10 +62,8 @@ describe("buildProviderNav", () => {
 
   it("nav treats cli providers as accountless", () => {
     const items = buildProviderNav({
-      providers: [provider({ id: "cli", kind: "cli", credentialKind: "oauth", accountProvider: "anthropic" })],
-      accounts: [
-        { id: 9, provider: "anthropic", label: "a", credentialType: "oauth", createdAt: "", updatedAt: "" },
-      ],
+      providers: [provider({ id: "glm", kind: "cli", credentialKind: "oauth", accountProvider: "anthropic" })],
+      accounts: [account({ id: 9, label: "a" })],
       toneOf: () => "danger",
     });
     expect(items[0]).toMatchObject({ kind: "cli", accountIds: [], tone: "neutral", connected: false });
