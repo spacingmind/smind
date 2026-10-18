@@ -25,6 +25,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 	return map[string]handlerFunc{
 		"account.add":              handleAccountAdd(acctReg),
 		"account.oauthStart":       handleAccountOAuthStart(coord),
+		"account.oauthComplete":    handleAccountOAuthComplete(coord),
 		"provider.list":            handleProviderList(runner),
 		"provider.test":            handleProviderTest(acctReg),
 		"account.list":             handleAccountList(acctReg),
@@ -292,7 +293,8 @@ func handleAccountRemove(registry *accounts.Registry) handlerFunc {
 // provider (accounts.LoginCoordinator.Login), emitting an "authorizeUrl"
 // event as soon as the vendor's authorize URL is ready -- before this
 // request blocks waiting for the callback -- so the caller can open it (CLI)
-// or render it (web UI) without polling. See LoginCoordinator.Login's doc
+// or render it (web UI) without polling. The event is {loginId, url}: loginId
+// names this login for account.oauthComplete (paste-the-redirect). See LoginCoordinator.Login's doc
 // comment for the full flow: unsupported providers, a second concurrent
 // login for the same provider, callback timeout, and state mismatch all
 // surface as errors from coord.Login, wrapped here the same way every other
@@ -323,6 +325,39 @@ func handleAccountOAuthStart(coord *accounts.LoginCoordinator) handlerFunc {
 			return nil, fmt.Errorf("account.oauthStart: %w", err)
 		}
 		return oauthStartResult{accountResult: accountResultFrom(res.Account), Created: res.Created, Adopted: res.Adopted}, nil
+	}
+}
+
+// handleAccountOAuthComplete finishes a pending browser login from a redirect
+// the user pasted (accounts.LoginCoordinator.Complete, ADR-0033 D3): the
+// fallback for when the vendor's redirect cannot reach the daemon's loopback
+// listener (a remote daemon). It answers as soon as the paste is accepted --
+// the account.oauthStart request that issued loginId carries the final result.
+//
+// The pasted redirect carries the authorization code and state, so nothing
+// here echoes it: parameter errors are fixed text, and the coordinator's
+// errors never contain it.
+func handleAccountOAuthComplete(coord *accounts.LoginCoordinator) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		if coord == nil {
+			return nil, fmt.Errorf("account.oauthComplete: login coordinator is unavailable")
+		}
+		var p struct {
+			LoginID     string `json:"loginId"`
+			RedirectURL string `json:"redirectUrl"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			// Deliberately not wrapping err: a decode error can quote part
+			// of the offending input.
+			return nil, fmt.Errorf("account.oauthComplete: invalid params")
+		}
+		if p.LoginID == "" || p.RedirectURL == "" {
+			return nil, fmt.Errorf("account.oauthComplete: loginId and redirectUrl are required")
+		}
+		if err := coord.Complete(p.LoginID, p.RedirectURL); err != nil {
+			return nil, fmt.Errorf("account.oauthComplete: %w", err)
+		}
+		return struct{}{}, nil
 	}
 }
 
