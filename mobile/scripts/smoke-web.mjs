@@ -324,8 +324,9 @@ async function needsContinue(page, harness) {
 async function promptQueue(page, harness) {
   const idle = await harness.cmd('seed-run end_turn Idle task');
   const live = await harness.cmd('seed-live hang Queue task');
-  if (!idle.ok || !live.ok) {
-    fail(`seeding failed: ${JSON.stringify([idle, live])}`);
+  const stoppable = await harness.cmd('seed-live hang Stop task');
+  if (!idle.ok || !live.ok || !stoppable.ok) {
+    fail(`seeding failed: ${JSON.stringify([idle, live, stoppable])}`);
     return;
   }
   await page.fill('textarea, input[type="text"]', harness.pairingUrl);
@@ -404,7 +405,35 @@ async function promptQueue(page, harness) {
     return;
   }
   if (await page.getByRole('button', { name: /^Cancel queued prompt/ }).isVisible().catch(() => false)) fail('the delivered prompt is still shown as queued');
+  // The prompt of a daemon-delivered run shows as a "user:" line (its streamed events do not carry it), once, before the reply.
+  try {
+    await page.getByText('user: third prompt', { exact: true }).waitFor({ timeout: 20_000 });
+  } catch {
+    fail('the delivered queued prompt is not shown as a "user:" line');
+  }
+  if ((await page.getByText('user: third prompt', { exact: true }).count()) !== 1) fail('the delivered prompt line is not shown exactly once');
   await shootBothSchemes(page, 'queue-after-delivery');
+
+  // Stop: a live run has a Stop button (run.stop, no confirmation); the run ends as stopped and Stop goes away.
+  await page.getByRole('button', { name: /Back/ }).click();
+  await page.getByText('Stop task', { exact: true }).click();
+  try {
+    await page.getByText(/· glm · live$/).waitFor({ timeout: 20_000 });
+    await page.getByRole('button', { name: 'Stop', exact: true }).waitFor({ timeout: 10_000 });
+  } catch {
+    fail('a live run has no Stop button');
+    return;
+  }
+  await shootBothSchemes(page, 'stop-live');
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  try {
+    await page.getByText(/· glm · stopped$/).waitFor({ timeout: 30_000 });
+  } catch {
+    fail('Stop did not end the run (the header never read stopped)');
+    return;
+  }
+  if (await page.getByRole('button', { name: /^Stop(ping…)?$/ }).isVisible().catch(() => false)) fail('the Stop button is still shown after the run stopped');
+  await shootBothSchemes(page, 'stop-after');
 }
 
 /**

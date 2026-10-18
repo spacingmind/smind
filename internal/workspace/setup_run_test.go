@@ -44,20 +44,41 @@ func waitSetup(t *testing.T, m *Manager, id int64, want string) store.Task {
 	}
 }
 
+// TestSetup_AsyncCreateReturnsRunning proves CreateTask does not wait for the
+// setup script. The script blocks until the test drops a "release" file into
+// the worktree, which the test can only do once CreateTask has returned, so a
+// synchronous CreateTask could never return (the guard below fails it after
+// 30 s) -- no stopwatch involved, so a slow `git worktree add` under load
+// cannot trip it.
 func TestSetup_AsyncCreateReturnsRunning(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
-	w := setupWorkspace(t, m, `sleep 1; echo "id=$SMIND_TASK_ID ws=$SMIND_WORKSPACE_ID" > setup.out; echo done`)
-	start := time.Now()
-	task, err := m.CreateTask(w.ID, nil, "async")
-	if err != nil {
-		t.Fatal(err)
+	// The loop is capped (~30 s) so a failure cannot leave the script behind.
+	w := setupWorkspace(t, m, `i=0; while [ ! -e release ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done; echo "id=$SMIND_TASK_ID ws=$SMIND_WORKSPACE_ID" > setup.out; echo done`)
+	type created struct {
+		task store.Task
+		err  error
+	}
+	ch := make(chan created, 1)
+	go func() {
+		task, err := m.CreateTask(w.ID, nil, "async")
+		ch <- created{task, err}
+	}()
+	var task store.Task
+	select {
+	case c := <-ch:
+		if c.err != nil {
+			t.Fatal(c.err)
+		}
+		task = c.task
+	case <-time.After(30 * time.Second):
+		t.Fatal("CreateTask is waiting for the setup script")
 	}
 	if task.SetupStatus != SetupRunning {
 		t.Fatalf("status = %q, want running", task.SetupStatus)
 	}
-	if time.Since(start) > 900*time.Millisecond {
-		t.Fatalf("CreateTask blocked for %s", time.Since(start))
+	if err := os.WriteFile(filepath.Join(*task.WorktreePath, "release"), nil, 0o644); err != nil {
+		t.Fatal(err)
 	}
 	done := waitSetup(t, m, task.ID, SetupOK)
 	if done.SetupLog == "" {

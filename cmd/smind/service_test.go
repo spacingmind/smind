@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -126,21 +127,25 @@ func TestServiceLogsFollowStopsOnContextAndSeesAppends(t *testing.T) {
 	}
 }
 
+// syncedBuffer is an io.Writer the test reads while cmdServiceLogs' follow
+// loop writes it from another goroutine. The mutex must be a value: a lazily
+// created lock (as this type once had) is itself a data race on first use.
 type syncedBuffer struct {
-	mu  chan struct{}
+	mu  sync.Mutex
 	buf bytes.Buffer
 }
 
-func (s *syncedBuffer) lock() func() {
-	if s.mu == nil {
-		s.mu = make(chan struct{}, 1)
-	}
-	s.mu <- struct{}{}
-	return func() { <-s.mu }
+func (s *syncedBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
 }
 
-func (s *syncedBuffer) Write(p []byte) (int, error) { defer s.lock()(); return s.buf.Write(p) }
-func (s *syncedBuffer) String() string              { defer s.lock()(); return s.buf.String() }
+func (s *syncedBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
 
 func waitUntil(t *testing.T, what string, cond func() bool) {
 	t.Helper()

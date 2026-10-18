@@ -13,7 +13,13 @@ import { useConnectionState } from './relay/useConnectionState';
 export function useChatQueue(
   conn: RelayConnection,
   chatId: number | null,
-): { items: ChatQueueItem[]; cancel: (itemId: number) => Promise<void>; refresh: () => void } {
+): {
+  items: ChatQueueItem[];
+  cancel: (itemId: number) => Promise<void>;
+  refresh: () => void;
+  /** The prompt of the delivered queue item that became this run (the snapshot keeps delivered items), if known. */
+  promptForRun: (runId: string) => string | undefined;
+} {
   const [, bump] = useState(0);
   const ref = useRef<ChatQueue | null>(null);
   const { epoch } = useConnectionState(conn);
@@ -39,5 +45,6 @@ export function useChatQueue(
   const refresh = useCallback((): void => {
     void ref.current?.refresh();
   }, []);
-  return { items: ref.current?.items ?? [], cancel, refresh };
+  const promptForRun = useCallback((runId: string): string | undefined => ref.current?.promptForRun(runId), []);
+  return { items: ref.current?.items ?? [], cancel, refresh, promptForRun };
 }

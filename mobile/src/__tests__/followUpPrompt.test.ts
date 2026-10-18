@@ -301,6 +301,12 @@ describe('isEchoOfOptimisticLine', () => {
     expect(isEchoOfOptimisticLine([optimistic], 'user_message', { text: 'next step' })).toBe(true);
   });
 
+  it('a prompt line the screen added for an adopted run also dedupes the echo', () => {
+    const adopted = { key: 'p-run-7', role: 'user', text: 'next step' } as TimelineLine;
+    expect(isEchoOfOptimisticLine([adopted], 'user_message', { text: 'next step' })).toBe(true);
+    expect(isEchoOfOptimisticLine([{ key: 'e9', role: 'user', text: 'next step' } as TimelineLine], 'user_message', { text: 'next step' })).toBe(false);
+  });
+
   it('is false for a different prompt, another event type, or a user line the daemon sent (not optimistic)', () => {
     expect(isEchoOfOptimisticLine([optimistic], 'user_message', { text: 'something else' })).toBe(false);
     expect(isEchoOfOptimisticLine([optimistic], 'chunk', { text: 'next step' })).toBe(false);

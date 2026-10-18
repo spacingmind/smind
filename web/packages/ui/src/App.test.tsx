@@ -11,6 +11,15 @@ import { openHoverCard } from "@/test/sidebar-helpers";
 import { resetTerminalSessions } from "@/lib/terminal-sessions";
 import type { Chat, RunLogsResult, RunSummary, Task, TerminalSessionStatus, Workspace } from "@/lib/types";
 
+// Every test here renders the whole <App> (sidebar, split panes, dnd-kit,
+// Radix menus) in jsdom. Measured on the dev machine (10 cores): 0.4-0.8 s
+// each when idle, and 4-6.5 s for the drag-to-split / "Item 9" tests (the
+// ones that kept timing out on CI) with 20 busy loops competing -- over
+// vitest's 5 s default, which is what failed on loaded CI runners. 30 s keeps
+// a real hang failing in well under a minute while leaving ~4x headroom over
+// the worst loaded run.
+vi.setConfig({ testTimeout: 30_000 });
+
 const WORKSPACE: Workspace = {
   ID: 1,
   Path: "/tmp/ws",

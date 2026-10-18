@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,33 +29,31 @@ func portTestTasks(t *testing.T, m *Manager, n int) []int64 {
 	return ids
 }
 
+// portBase is where fakePorts starts handing out port numbers. The numbers
+// are never bound: allocation tests use a stub probe, so they cannot collide
+// with a real listener (ephemeral ports on Linux span 32768-60999, which
+// includes any fixed range a test could pick and probe).
+const portBase = 41000
+
 var portBlock atomic.Int64
 
-// freeRange finds a run of n consecutive loopback-free ports. Each call
-// searches its own 100-port block so parallel tests never share ports.
-func freeRange(t *testing.T, n int) int {
-	t.Helper()
-	start := 41000 + int(portBlock.Add(1))*100
-	for base := start; base < start+100-n; base++ {
-		ok := true
-		for p := base; p < base+n; p++ {
-			if !probePort(p) {
-				ok = false
-				break
-			}
-		}
-		if ok {
-			return base
-		}
+// fakePorts gives m a probe that reports every port free except base+offset
+// for each busyOffsets entry, and returns base, the first port number the
+// test may use (a 100-number block of its own).
+func fakePorts(m *Manager, busyOffsets ...int) int {
+	base := portBase + int(portBlock.Add(1))*100
+	taken := map[int]bool{}
+	for _, off := range busyOffsets {
+		taken[base+off] = true
 	}
-	t.Fatal("no free port range")
-	return 0
+	m.portProbe = func(p int) bool { return !taken[p] }
+	return base
 }
 
 func TestPorts_AllocatesDistinctFreePorts(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
-	base := freeRange(t, 3)
+	base := fakePorts(m)
 	m.SetWorktreesConfig(WorktreesSettings{HasPorts: true, PortLo: base, PortHi: base + 2})
 	seen := map[int]bool{}
 	for i, id := range portTestTasks(t, m, 3) {
@@ -74,7 +71,7 @@ func TestPorts_AllocatesDistinctFreePorts(t *testing.T) {
 func TestPorts_ReleasedOnArchive(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
-	base := freeRange(t, 1)
+	base := fakePorts(m)
 	m.SetWorktreesConfig(WorktreesSettings{HasPorts: true, PortLo: base, PortHi: base})
 	ids := portTestTasks(t, m, 2)
 	if _, err := m.claimPort(ids[0]); err != nil {
@@ -94,22 +91,32 @@ func TestPorts_ReleasedOnArchive(t *testing.T) {
 func TestPorts_SkipsPortInUse(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
-	base := freeRange(t, 2)
-	l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(base)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
+	base := fakePorts(m, 0)
 	m.SetWorktreesConfig(WorktreesSettings{HasPorts: true, PortLo: base, PortHi: base + 1})
 	if p, err := m.claimPort(portTestTasks(t, m, 1)[0]); err != nil || p != base+1 {
 		t.Fatalf("p=%d err=%v, want %d", p, err, base+1)
 	}
 }
 
+// TestProbePort_ReportsBoundPortBusy exercises the real probe: a port this
+// test itself holds open must read as busy. (The inverse -- a closed port
+// reads free -- is not asserted: another process may take it first.)
+func TestProbePort_ReportsBoundPortBusy(t *testing.T) {
+	t.Parallel()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	if probePort(l.Addr().(*net.TCPAddr).Port) {
+		t.Fatal("probePort reported a port held open by this test as free")
+	}
+}
+
 func TestPorts_ExhaustionFails(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
-	base := freeRange(t, 1)
+	base := fakePorts(m)
 	m.SetWorktreesConfig(WorktreesSettings{HasPorts: true, PortLo: base, PortHi: base})
 	ids := portTestTasks(t, m, 2)
 	if _, err := m.claimPort(ids[0]); err != nil {
@@ -132,7 +139,7 @@ func TestPorts_ConcurrentCreatesUnique(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
 	const n = 8
-	base := freeRange(t, n)
+	base := fakePorts(m)
 	m.SetWorktreesConfig(WorktreesSettings{HasPorts: true, PortLo: base, PortHi: base + n - 1})
 	ids := portTestTasks(t, m, n)
 	var wg sync.WaitGroup
@@ -172,7 +179,7 @@ func taskFixture(wsID int64) store.Task {
 func TestCreateTask_PortExhaustionLeavesNothing(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
-	base := freeRange(t, 1)
+	base := fakePorts(m)
 	m.SetWorktreesConfig(WorktreesSettings{HasPorts: true, PortLo: base, PortHi: base})
 	w := setupWorkspace(t, m, "")
 	first, err := m.CreateTask(w.ID, nil, "first")
@@ -232,7 +239,7 @@ func TestDiscardTask_DoesNotDeletePreExistingBranch(t *testing.T) {
 func TestCreateTask_ExistingBranchPortExhaustionKeepsUserBranch(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
-	base := freeRange(t, 1)
+	base := fakePorts(m)
 	m.SetWorktreesConfig(WorktreesSettings{HasPorts: true, PortLo: base, PortHi: base})
 	w := setupWorkspace(t, m, "")
 	runGitT(t, w.Path, "branch", "user/feature")
