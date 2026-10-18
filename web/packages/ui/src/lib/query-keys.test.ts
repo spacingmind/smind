@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
 import { queryKeys } from "@/lib/query-keys";
@@ -27,5 +28,23 @@ describe("query keys", () => {
     expect(queryKeys.accountList()).toEqual(["account.list"]);
     expect(queryKeys.accountUsage()).toEqual(["account.usage", { cached: true }]);
     expect(queryKeys.providerTest("anthropic")).toEqual(["provider.test", "anthropic"]);
+  });
+
+  it("learning keys are the RPC name plus its params, and the partial keys prefix the full ones", () => {
+    expect(queryKeys.learningStatus()).toEqual(["learning.status"]);
+    expect(queryKeys.learnedSkills(3, ["active"])).toEqual([
+      "learning.skills.list",
+      { workspaceId: 3, statuses: ["active"], includeBody: false },
+    ]);
+    expect(queryKeys.learnedSkill(9)).toEqual(["learning.skills.get", { id: 9 }]);
+    expect(queryKeys.proposals(3, "pending")).toEqual(["learning.proposals.list", { workspaceId: 3, status: "pending" }]);
+    expect(queryKeys.proposal(4)).toEqual(["learning.proposals.get", { id: 4 }]);
+    expect(queryKeys.learningJobs(3, 10)).toEqual(["learning.jobs.list", { workspaceId: 3, limit: 10 }]);
+    // A partial key must match the full keys of its workspace (invalidateQueries' partial matching).
+    const qc = new QueryClient();
+    qc.setQueryData(queryKeys.learnedSkills(3, ["active"]), []);
+    qc.setQueryData(queryKeys.learnedSkills(4, ["active"]), []);
+    expect(qc.getQueryCache().findAll({ queryKey: queryKeys.learnedSkillsOf(3) })).toHaveLength(1);
+    expect(qc.getQueryCache().findAll({ queryKey: queryKeys.learnedSkillsAll() })).toHaveLength(2);
   });
 });

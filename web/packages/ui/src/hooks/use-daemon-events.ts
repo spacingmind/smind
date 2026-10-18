@@ -31,6 +31,9 @@ const CHAT_TOPICS = ["chat.created", "chat.updated", "chat.archived", "chat.queu
 /** ADR-0015/0028's account topics: a created/renamed/re-credentialed account, a removal, and a fetched usage report. */
 const ACCOUNT_TOPICS = ["account.updated", "account.usage", "account.removed"];
 
+/** ADR-0026's self-learning topics: a new proposal, any skill/proposal change, and a reflect/curate job's status. */
+const LEARNING_TOPICS = ["learnedSkill.proposed", "learnedSkill.changed", "learning.job"];
+
 const TOPICS = [
   "task.status",
   "run.status",
@@ -40,6 +43,7 @@ const TOPICS = [
   ...MCP_TOPICS,
   ...CHAT_TOPICS,
   ...ACCOUNT_TOPICS,
+  ...LEARNING_TOPICS,
 ];
 
 /** Registration surface returned by useDaemonEvents -- topic-filtered, with per-listener try/catch isolation. */
