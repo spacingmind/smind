@@ -425,6 +425,49 @@ func TestLoginCoordinator_Complete(t *testing.T) {
 		})
 	})
 
+	t.Run("a paste acknowledged by oauthComplete is never dropped", func(t *testing.T) {
+		t.Parallel()
+
+		// The paste is acknowledged (Complete returned nil) before await
+		// observes any other event; await's select then sees the paste and a
+		// competing event ready together and picks at random. Whichever it
+		// picks, the acknowledged paste must be the delivered result -- the
+		// re-check of pl.resolved under the mutex is what guarantees it. Many
+		// iterations make both select branches near-certain to be exercised.
+		cases := map[string]func(t *testing.T, c *LoginCoordinator, srv *callbackServer) context.Context{
+			"listener result": func(t *testing.T, c *LoginCoordinator, srv *callbackServer) context.Context {
+				srv.result <- callbackResult{code: "from-listener", state: "st"}
+				return context.Background()
+			},
+			"ctx cancel": func(t *testing.T, c *LoginCoordinator, srv *callbackServer) context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+			"timeout": func(t *testing.T, c *LoginCoordinator, srv *callbackServer) context.Context {
+				c.timeout = time.Nanosecond
+				return context.Background()
+			},
+		}
+		for name, competing := range cases {
+			for i := 0; i < 200; i++ {
+				coord, _, _ := newCompleteCoordinator(t)
+				pl := &pendingLogin{provider: "fake", state: "st", method: loginMethodBrowser, paste: make(chan callbackResult, 1)}
+				coord.register("id", pl)
+				srv := &callbackServer{result: make(chan callbackResult, 1)}
+
+				if err := coord.Complete("id", pasteURL("from-paste", "st")); err != nil {
+					t.Fatalf("%s: Complete() error = %v", name, err)
+				}
+				ctx := competing(t, coord, srv)
+				res, err := coord.await(ctx, "id", srv, pl)
+				if err != nil || res.code != "from-paste" {
+					t.Fatalf("%s (iteration %d): await() = %+v, %v, want the acknowledged paste", name, i, res, err)
+				}
+			}
+		}
+	})
+
 	t.Run("oauthComplete after cancel is login_unknown", func(t *testing.T) {
 		t.Parallel()
 
