@@ -100,7 +100,7 @@ audit is in the Supervisor's notes). Status: **spec**, nothing built.
   add its own account/health state.
 
 ## Progress
-- [ ] PR 1 (S1+S2)
+- [x] PR 1 (S1+S2) — branch `feat/client-state-accounts` (awaiting merge)
 - [ ] PR 2 (S3)
 - [ ] PR 3 (S4)
 - [ ] PR 4 (AC17)
@@ -108,4 +108,28 @@ audit is in the Supervisor's notes). Status: **spec**, nothing built.
 - [ ] PR 6 (AC19)
 
 ## Validation
-(filled as PRs land)
+
+### PR 1 (S1 + S2), 2026-10-18
+Evidence: `task lint` exit 0, `bunx tsc -b packages/ui` clean, UI suite 212 files / 2604 tests green, `task test` no failures.
+Live check: a throwaway Vite harness (not committed) mounting the real Settings screen over a scripted fake client with an
+`expired` cached report; light + dark screenshots reviewed (`providers-*.png`, `usage-*.png`, renamed variants).
+- AC1 ✔ `lib/query/daemon-query-provider.test.tsx`: `query client is per connection and cleared on switch`,
+  `a reconnect to the same daemon keeps the cache and invalidates it`, first connect does not invalidate.
+- AC2 ✔ `lib/query-keys.test.ts` `query keys only come from query-keys.ts`.
+- AC3 ✔ `use-daemon-events.test.ts` (topic list includes `account.updated`), `lib/query/event-bridge.test.ts`.
+- AC4 ✔ `lib/query/query-client.ts` defaults (documented), `usageQueryOptions` retry/refetch off; failed query not retried
+  (`usage-call-budget.test.tsx`).
+- AC5 ✔ `lib/account-status.ts` + `useAccountStatus`; Providers, usage card, sidebar summary and chat pill all read the
+  single `account.usage`/`account.list` cache (sidebar *health count* is S3).
+- AC6 ✔ `providers-cache.test.tsx` `expired cached report shows expired in providers`; screenshot: `work` red
+  "Login expired 2h ago. Reconnect it in Providers." in Providers and in the Plan usage card.
+- AC7 ✔ account name = `displayName` (status.name) in Providers rows/aria-labels; rename form still edits `label`.
+- AC8 ✔ `providers-events.test.tsx` `account.updated renames the account in providers, usage card and chat pill`,
+  `a newly added account appears in plan usage without reload`; live: rename event updated the row with no reload.
+- AC9 ✔ `usage-call-budget.test.tsx` `opening settings performs zero usage refreshes` (providers/appearance/default,
+  focus/blur/visibility/timers), `providers-cache.test.tsx` `providers surface performs zero usage refreshes`,
+  `use-usage-reports.test.tsx` reconnect + two-touching-surfaces-one-touch. Live counts (harness): Providers mount =
+  1 `account.usage` `cached`, 0 touch, 0 refresh; after a rename event +1 `cached`, still 0 touch/refresh; Settings → Usage =
+  1 `touch` (the ADR-0028 touching surface, once).
+Unverified: real daemon + real provider accounts (deliberately not used); mid-transition frames (nothing in this PR animates);
+desktop app webview.
