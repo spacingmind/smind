@@ -308,3 +308,64 @@ func TestTaskTree_ArchivedTaskIsError(t *testing.T) {
 		t.Fatal("archived taskId: error = nil, want an error")
 	}
 }
+
+// TestTaskTree_CrossWorkspaceTaskResolvesItsOwnWorkspace: a taskId from
+// another workspace is not an error -- the handler takes the workspace
+// FROM the task, returning that task's own subtree and never mixing
+// workspaces.
+func TestTaskTree_CrossWorkspaceTaskResolvesItsOwnWorkspace(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+	a := newTestTask(t, wm, "")
+	b := newTestTask(t, wm, "")
+	if a.WorkspaceID == b.WorkspaceID {
+		t.Fatalf("newTestTask returned the same workspace (%d) for two tasks", a.WorkspaceID)
+	}
+
+	mkChild := func(parent store.Task, title string) store.Task {
+		p := parent.ID
+		child, err := db.CreateTask(store.Task{WorkspaceID: parent.WorkspaceID, Title: title, Status: "created", ParentTaskID: &p})
+		if err != nil {
+			t.Fatalf("CreateTask(%q) error = %v", title, err)
+		}
+		return child
+	}
+	childA := mkChild(a, "child of a")
+	childB := mkChild(b, "child of b")
+
+	for _, tc := range []struct {
+		taskID       int64
+		wantParent   store.Task
+		wantChild    store.Task
+		notParent    store.Task
+		notOtherNode int64
+	}{
+		{taskID: b.ID, wantParent: b, wantChild: childB, notParent: a, notOtherNode: childA.ID},
+		{taskID: a.ID, wantParent: a, wantChild: childA, notParent: b, notOtherNode: childB.ID},
+	} {
+		result, errObj := callTaskTree(t, ws, "tree", map[string]any{"taskId": tc.taskID})
+		if errObj != nil {
+			t.Fatalf("task.tree(taskId %d) error = %v, want nil", tc.taskID, errObj.Message)
+		}
+		if len(result.Nodes) != 2 {
+			t.Fatalf("task.tree(taskId %d) nodes = %+v, want exactly 2", tc.taskID, result.Nodes)
+		}
+		for _, n := range result.Nodes {
+			if n.WorkspaceID != tc.wantParent.WorkspaceID {
+				t.Fatalf("node %d workspaceId = %d, want %d (the task's own workspace)", n.ID, n.WorkspaceID, tc.wantParent.WorkspaceID)
+			}
+			if n.ID == tc.notParent.ID || n.ID == tc.notOtherNode {
+				t.Fatalf("task.tree(taskId %d) returned foreign node %d (workspace %d)", tc.taskID, n.ID, tc.notParent.WorkspaceID)
+			}
+		}
+		if result.Nodes[0].ID != tc.wantParent.ID || result.Nodes[0].Depth != 0 {
+			t.Fatalf("first node = {id %d, depth %d}, want {id %d, depth 0}", result.Nodes[0].ID, result.Nodes[0].Depth, tc.wantParent.ID)
+		}
+		if result.Nodes[1].ID != tc.wantChild.ID || result.Nodes[1].Depth != 1 {
+			t.Fatalf("second node = {id %d, depth %d}, want {id %d, depth 1}", result.Nodes[1].ID, result.Nodes[1].Depth, tc.wantChild.ID)
+		}
+	}
+}

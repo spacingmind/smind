@@ -44,6 +44,10 @@ export interface RunSummary {
   Status: 'running' | 'done' | 'error' | 'stopped' | 'interrupted';
   StartedAt: string;
   FinishedAt: string | null;
+  /** Why the run stopped (e.g. max_tokens); derived by the daemon. */
+  StopReason?: string;
+  /** The daemon's derived disposition (ADR-0027 D13): "needs-continue" when the run ended done at a turn/token/budget cap. */
+  Disposition?: string;
 }
 
 /** workspace.list: every workspace this daemon tracks. */

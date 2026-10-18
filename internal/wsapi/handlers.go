@@ -46,6 +46,8 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.get":                 handleTaskGet(wm),
 		"task.archive":             handleTaskArchive(wm, reg),
 		"task.tree":                handleTaskTree(db, reg),
+		"task.archiveFinished":     handleTaskArchiveFinished(wm, db, reg),
+		"task.stopTree":            handleTaskStopTree(db, reg),
 		"task.move":                handleTaskMove(wm),
 		"task.retrySetup":          handleTaskRetrySetup(wm),
 		"task.diff":                handleTaskDiff(wm),
