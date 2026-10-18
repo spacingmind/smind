@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/spacingmind/smind/internal/store"
@@ -99,6 +100,35 @@ func NewDefaultLoginCoordinator(registry *Registry) *LoginCoordinator {
 	})
 }
 
+// LoginEvent is what Login reports while a login is under way, through the
+// onEvent callback. Kind selects which fields are set.
+type LoginEvent struct {
+	// Kind is "authorizeUrl" (browser login: open URL) or "deviceCode" (device
+	// login: show UserCode and have the user enter it at VerificationURL).
+	Kind    string
+	LoginID string
+
+	// authorizeUrl.
+	URL string
+	// PasteOnly: no callback listener could be bound (its address is in use),
+	// so the login can only finish by Complete; a UI shows the paste field
+	// immediately.
+	PasteOnly bool
+
+	// deviceCode.
+	VerificationURL string
+	UserCode        string
+	// ExpiresAt is when the daemon stops polling.
+	ExpiresAt       time.Time
+	IntervalSeconds int
+}
+
+// Login event kinds.
+const (
+	LoginEventAuthorizeURL = "authorizeUrl"
+	LoginEventDeviceCode   = "deviceCode"
+)
+
 // LoginOptions are the optional inputs of Login.
 type LoginOptions struct {
 	// AccountID, when non-zero, is the row a row-level Re-login targets
@@ -164,7 +194,7 @@ func (e *LoginError) Error() string { return e.Code + ": " + e.Detail }
 // loginId; the loser is ignored. The listener, the loginId and this
 // provider's in-flight flag are released on every exit path, including ctx
 // being cancelled mid-flow.
-func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, opts LoginOptions, onAuthorizeURL func(loginID, url string)) (LoginResult, error) {
+func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, opts LoginOptions, onEvent func(LoginEvent)) (LoginResult, error) {
 	login, ok := c.logins[provider]
 	if !ok {
 		return LoginResult{}, fmt.Errorf("oauth login: unsupported provider %q", provider)
@@ -197,17 +227,26 @@ func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, op
 		return LoginResult{}, fmt.Errorf("oauth login: %w", err)
 	}
 
+	// A busy callback port (another login tool, a second daemon) is not fatal:
+	// the login continues without a listener and can only be finished by
+	// Complete (paste-only). Any other bind failure, the loopback guards
+	// included, still fails the login.
 	server, err := newCallbackServer(login.CallbackAddr(), login.CallbackPath(), providerDisplayLabel(provider), state)
-	if err != nil {
+	pasteOnly := false
+	switch {
+	case errors.Is(err, syscall.EADDRINUSE):
+		server, pasteOnly = nil, true
+	case err != nil:
 		return LoginResult{}, fmt.Errorf("oauth login: %w", err)
+	default:
+		defer server.close()
 	}
-	defer server.close()
 
 	pl := &pendingLogin{provider: provider, state: state, method: loginMethodBrowser, paste: make(chan callbackResult, 1)}
 	c.register(loginID, pl)
 	defer c.unregister(loginID)
 
-	onAuthorizeURL(loginID, login.AuthorizeURL(state, pkce))
+	onEvent(LoginEvent{Kind: LoginEventAuthorizeURL, LoginID: loginID, URL: login.AuthorizeURL(state, pkce), PasteOnly: pasteOnly})
 
 	result, err := c.await(ctx, loginID, server, pl)
 	if err != nil {
@@ -243,13 +282,19 @@ func (c *LoginCoordinator) await(ctx context.Context, loginID string, server *ca
 	timer := time.NewTimer(c.timeout)
 	defer timer.Stop()
 
+	// A paste-only login has no listener: its nil channel never fires.
+	var listenerResult <-chan callbackResult
+	if server != nil {
+		listenerResult = server.result
+	}
+
 	var res callbackResult
 	var werr error
 	select {
 	case res = <-pl.paste:
 		// Complete flipped resolved before sending.
 		return res, nil
-	case res = <-server.result:
+	case res = <-listenerResult:
 	case <-ctx.Done():
 		werr = ctx.Err()
 	case <-timer.C:

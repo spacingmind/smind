@@ -159,6 +159,13 @@ type authorizeURLEventParams struct {
 	URL string `json:"url"`
 }
 
+// deviceCodeEventParams is the params payload of the "deviceCode" event a
+// device-method account.oauthStart emits.
+type deviceCodeEventParams struct {
+	VerificationURL string `json:"verificationUrl"`
+	UserCode        string `json:"userCode"`
+}
+
 // cmdAccountLogin drives a browser-based OAuth login through the daemon
 // (account.oauthStart): it blocks until the daemon reports the login done,
 // printing the authorize URL as soon as the daemon has one (always -- the
@@ -189,15 +196,23 @@ func cmdAccountLogin(args []string) int {
 	err = client.CallStream(ctx, "account.oauthStart", map[string]any{
 		"provider": provider, "label": label,
 	}, func(event string, params json.RawMessage) {
-		if event != "authorizeUrl" {
-			return
+		switch event {
+		case "authorizeUrl":
+			var p authorizeURLEventParams
+			if err := json.Unmarshal(params, &p); err != nil || p.URL == "" {
+				return
+			}
+			fmt.Printf("Open this URL to log in:\n%s\n", p.URL)
+			openBrowser(p.URL)
+		case "deviceCode":
+			// No browser is opened: a device login is for a machine whose
+			// browser is not the one the user signs in with.
+			var p deviceCodeEventParams
+			if err := json.Unmarshal(params, &p); err != nil || p.VerificationURL == "" || p.UserCode == "" {
+				return
+			}
+			fmt.Printf("Open %s and enter this code to log in:\n%s\n", p.VerificationURL, p.UserCode)
 		}
-		var p authorizeURLEventParams
-		if err := json.Unmarshal(params, &p); err != nil || p.URL == "" {
-			return
-		}
-		fmt.Printf("Open this URL to log in:\n%s\n", p.URL)
-		openBrowser(p.URL)
 	}, &account)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "account login: %v\n", err)

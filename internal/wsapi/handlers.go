@@ -289,6 +289,27 @@ func handleAccountRemove(registry *accounts.Registry) handlerFunc {
 	}
 }
 
+// loginEventParams is the wire payload of a login event. authorizeUrl is
+// {loginId, url, pasteOnly?} (pasteOnly omitted when false); deviceCode is
+// {loginId, verificationUrl, userCode, expiresAt, intervalSeconds}. Nothing
+// else about the login (the vendor's device_auth_id, state, verifier) is sent.
+func loginEventParams(e accounts.LoginEvent) any {
+	if e.Kind == accounts.LoginEventDeviceCode {
+		return struct {
+			LoginID         string `json:"loginId"`
+			VerificationURL string `json:"verificationUrl"`
+			UserCode        string `json:"userCode"`
+			ExpiresAt       string `json:"expiresAt"`
+			IntervalSeconds int    `json:"intervalSeconds"`
+		}{e.LoginID, e.VerificationURL, e.UserCode, e.ExpiresAt.UTC().Format(time.RFC3339), e.IntervalSeconds}
+	}
+	return struct {
+		LoginID   string `json:"loginId"`
+		URL       string `json:"url"`
+		PasteOnly bool   `json:"pasteOnly,omitempty"`
+	}{e.LoginID, e.URL, e.PasteOnly}
+}
+
 // handleAccountOAuthStart runs a full browser-based OAuth login for
 // provider (accounts.LoginCoordinator.Login), emitting an "authorizeUrl"
 // event as soon as the vendor's authorize URL is ready -- before this
@@ -318,8 +339,8 @@ func handleAccountOAuthStart(coord *accounts.LoginCoordinator) handlerFunc {
 			return nil, fmt.Errorf("account.oauthStart: provider and label are required")
 		}
 
-		res, err := coord.Login(ctx, p.Provider, p.Label, accounts.LoginOptions{AccountID: p.AccountID}, func(loginID, url string) {
-			rc.Emit("authorizeUrl", map[string]string{"loginId": loginID, "url": url})
+		res, err := coord.Login(ctx, p.Provider, p.Label, accounts.LoginOptions{AccountID: p.AccountID}, func(e accounts.LoginEvent) {
+			rc.Emit(e.Kind, loginEventParams(e))
 		})
 		if err != nil {
 			return nil, fmt.Errorf("account.oauthStart: %w", err)

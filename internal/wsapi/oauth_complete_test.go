@@ -46,6 +46,13 @@ func newOAuthTestEnv(t *testing.T) oauthTestEnv {
 // authorizeUrl event it streams.
 func startOAuth(t *testing.T, ws *websocket.Conn, reqID string) (loginID, state, authorizeURL string) {
 	t.Helper()
+	loginID, state, authorizeURL, _ = startOAuthRaw(t, ws, reqID)
+	return loginID, state, authorizeURL
+}
+
+// startOAuthRaw is startOAuth that also returns the event's raw params JSON.
+func startOAuthRaw(t *testing.T, ws *websocket.Conn, reqID string) (loginID, state, authorizeURL string, raw json.RawMessage) {
+	t.Helper()
 	sendRequest(t, ws, reqID, "account.oauthStart", map[string]any{"provider": "fake", "label": "pasted"})
 	event := readEnvelopeFor(t, ws, reqID, 5*time.Second)
 	if event.Event != "authorizeUrl" {
@@ -62,7 +69,7 @@ func startOAuth(t *testing.T, ws *websocket.Conn, reqID string) (loginID, state,
 	if err != nil {
 		t.Fatalf("url.Parse(%q) error = %v", params.URL, err)
 	}
-	return params.LoginID, u.Query().Get("state"), params.URL
+	return params.LoginID, u.Query().Get("state"), params.URL, event.Params
 }
 
 func TestServer_AccountOAuthComplete(t *testing.T) {
@@ -73,7 +80,10 @@ func TestServer_AccountOAuthComplete(t *testing.T) {
 		env := newOAuthTestEnv(t)
 		ws := dialWS(t, env.srv, "tok")
 
-		loginID, state, authorizeURL := startOAuth(t, ws, "1")
+		loginID, state, authorizeURL, raw := startOAuthRaw(t, ws, "1")
+		if strings.Contains(string(raw), "pasteOnly") {
+			t.Errorf("authorizeUrl params = %s, want pasteOnly omitted when the listener is bound", raw)
+		}
 		if len(loginID) != 22 {
 			t.Errorf("loginId = %q, want 22 base64url characters", loginID)
 		}
