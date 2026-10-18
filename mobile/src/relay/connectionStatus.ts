@@ -47,3 +47,36 @@ export function describeState(state: ConnectionState): StatusView | null {
 /** The pairing screen's note on certificates: a phone does not pin a self-signed relay certificate (ADR-0031 P13b). */
 export const CERTIFICATE_HELP =
   'The relay needs a certificate your phone already trusts (for example from Let’s Encrypt). A phone does not accept a self-signed relay certificate.';
+
+/** What the daemon-password prompt shows (ADR-0031 P13c), derived from the connection state. */
+export interface PasswordPromptView {
+  tone: StatusTone;
+  title: string;
+  detail: string;
+  /** True while the daemon rate-limits this device: no input, a countdown. */
+  locked: boolean;
+}
+
+/** The password prompt for state, or null when the state is not about the daemon password. `now` is epoch ms (the countdown). */
+export function describePasswordState(state: ConnectionState, now: number = Date.now()): PasswordPromptView | null {
+  if (state.kind === 'password') {
+    return state.reason === 'incorrect'
+      ? { tone: 'danger', title: 'Incorrect password', detail: 'The daemon refused that password. Check it and try again.', locked: false }
+      : {
+          tone: 'warning',
+          title: 'Daemon password required',
+          detail: 'This daemon is protected by a password. Enter it to connect; the app keeps it only until you close it.',
+          locked: false,
+        };
+  }
+  if (state.kind === 'locked') {
+    const seconds = Math.max(0, Math.ceil((state.until - now) / 1000));
+    return {
+      tone: 'warning',
+      title: 'Too many attempts',
+      detail: `The daemon is limiting password attempts. Trying again in ${seconds} s, with the password you entered.`,
+      locked: true,
+    };
+  }
+  return null;
+}

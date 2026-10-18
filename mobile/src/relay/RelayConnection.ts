@@ -25,6 +25,7 @@
 // business and are re-established after every reconnect.
 
 import { computeProof, PROTOCOL_VERSION, randomNonce } from './admission';
+import { appDaemonPasswords, DaemonPasswords, passwordKey, passwordProblem } from './daemonPasswords';
 import { buildDeviceHello, ChallengeVersionError, DeviceIdentity, HELLO_METHOD, HELLO_VERSION, parseChallengeMessage } from './deviceIdentity';
 import { Channel, generateKeyPair, RawTransport, Role } from './e2ee';
 import { DataStream, GrpcCode, GRPCWebSocketStream, GrpcStatusError, grpcWebUnary } from './grpcweb';
@@ -60,6 +61,8 @@ export interface CancellablePromise<T> extends Promise<T> {
 interface WireError {
   message: string;
   code?: string;
+  /** Seconds a rate-limited client should wait (code too_many_attempts). */
+  retry_after?: number;
 }
 
 interface WireEnvelope {
@@ -88,6 +91,19 @@ export type ConnectionState =
   | { kind: 'reconnecting'; attempt: number; reason: string }
   /** The daemon knows this device but has not approved it: `smind relay devices approve <deviceId>` on the daemon. Retried automatically. */
   | { kind: 'pending'; deviceId: string; label: string }
+  /**
+   * The daemon has a password (ADR-0031 P13c) and this device has none that
+   * works: `required` when none was sent, `incorrect` when the one sent was
+   * refused (and forgotten). The automatic retry loop is stopped; call
+   * submitPassword() to go on.
+   */
+  | { kind: 'password'; reason: 'required' | 'incorrect' }
+  /**
+   * The daemon rate-limited this device's password attempts. The connection
+   * waits `retryAfter` seconds (the daemon's number, clamped) and then tries
+   * the same password once more; `until` is when (epoch ms).
+   */
+  | { kind: 'locked'; retryAfter: number; until: number }
   /** The daemon (or relay) revoked this device. Terminal: pair again to use a fresh identity. */
   | { kind: 'revoked'; deviceId: string }
   /**
@@ -118,6 +134,9 @@ export interface ReconnectTiming {
   resumeProbeMs: number;
   /** How long a fresh session gets to finish the E2EE handshake and the hello answer (20 s each). */
   handshakeMs: number;
+  /** The shortest and longest wait after a daemon's too_many_attempts, whatever retry_after it names (5 s, 1 h). */
+  lockMinMs: number;
+  lockMaxMs: number;
   /**
    * How long after the handshake the daemon's device challenge may take (5 s,
    * as the desktop client). No challenge means a daemon from before hello v2:
@@ -137,6 +156,8 @@ export const DEFAULT_RECONNECT: ReconnectTiming = {
   resumeProbeMs: 10_000,
   handshakeMs: 20_000,
   challengeMs: 5_000,
+  lockMinMs: 5_000,
+  lockMaxMs: 3_600_000,
   maxResumeFailures: 3,
 };
 
@@ -175,6 +196,8 @@ export interface ConnectOptions {
   reconnect?: Partial<ReconnectTiming>;
   liveness?: Partial<LivenessTiming>;
   net?: RelayNet;
+  /** Where the typed daemon password is held (default: the app-wide, memory-only store). */
+  passwords?: DaemonPasswords;
   /** Spreads a delay by +-20% (tests pass an identity function). */
   jitter?: (ms: number) => number;
 }
@@ -193,6 +216,25 @@ class VersionMismatchError extends FatalError {}
  * connection: one that already served v2 cannot have become outdated.
  */
 class ChallengeSilenceError extends VersionMismatchError {}
+/** The daemon wants a password, or refused the one sent (P13c). `sent` is what was sent, so exactly that value can be forgotten. */
+class PasswordError extends Error {
+  constructor(
+    message: string,
+    readonly reason: 'required' | 'incorrect',
+    readonly sent: string | undefined,
+  ) {
+    super(message);
+  }
+}
+/** The daemon rate-limited this device (too_many_attempts); retryAfter is its number of seconds. */
+class LockedError extends Error {
+  constructor(
+    message: string,
+    readonly retryAfter: number,
+  ) {
+    super(message);
+  }
+}
 /** The daemon or relay is busy or full: retry with backoff, even on the first connect. */
 class RetryableError extends Error {}
 
@@ -387,6 +429,8 @@ function classify(err: unknown): Error {
     e instanceof RevokedError ||
     e instanceof FatalError ||
     e instanceof RetryableError ||
+    e instanceof PasswordError ||
+    e instanceof LockedError ||
     e instanceof TimeoutError
   ) {
     return e;
@@ -435,6 +479,9 @@ export class RelayConnection {
   private net: RelayNet = grpcWebRelayNet;
   private jitter: (ms: number) => number = defaultJitter;
   private liveness: LivenessTiming = DEFAULT_LIVENESS;
+  private passwords: DaemonPasswords = appDaemonPasswords;
+  /** Wakes the supervisor waiting for the person to type a password. */
+  private passwordWaiter: (() => void) | null = null;
   /** When a message from the daemon last arrived (the liveness watchdog's clock). */
   private lastInbound = 0;
   private probing = false;
@@ -477,6 +524,7 @@ export class RelayConnection {
     conn.net = opts.net ?? grpcWebRelayNet;
     conn.jitter = opts.jitter ?? defaultJitter;
     conn.liveness = { ...DEFAULT_LIVENESS, ...opts.liveness };
+    conn.passwords = opts.passwords ?? appDaemonPasswords;
     void conn.supervise().catch((e) => conn.setState({ kind: 'failed', message: e instanceof Error ? e.message : String(e) }));
     return conn;
   }
@@ -529,6 +577,25 @@ export class RelayConnection {
         if (check(s)) off();
       });
     });
+  }
+
+  /**
+   * Gives the connection the daemon password the person typed (P13c): held in
+   * memory for this app run, for THIS daemon only, and sent in the hello of the
+   * next session. In the password state it ends the wait and reconnects at once;
+   * at any other time it is simply used the next time a hello is sent. Throws,
+   * without keeping anything, for a password the daemon could never accept
+   * (empty, or over 128 bytes).
+   */
+  submitPassword(password: string): void {
+    const problem = passwordProblem(password);
+    if (problem) throw new Error(problem);
+    if (this.closed) return;
+    this.passwords.set(passwordKey(this.offer), password);
+    if (this.stateValue.kind === 'password') {
+      this.setState({ kind: 'connecting' });
+      this.passwordWaiter?.();
+    }
   }
 
   /**
@@ -595,6 +662,7 @@ export class RelayConnection {
     this.stream?.close();
     this.setState({ kind: 'closed' });
     this.wake?.();
+    this.passwordWaiter?.();
   }
 
   // --- requests ---
@@ -771,6 +839,29 @@ export class RelayConnection {
           this.setState({ kind: 'failed', message: e.message, versionMismatch: e instanceof VersionMismatchError || undefined });
           return;
         }
+        if (e instanceof PasswordError) {
+          this.dropSession();
+          reachedDaemon = true;
+          const key = passwordKey(this.offer);
+          // Forget exactly the value the daemon refused, never one typed since.
+          if (e.reason === 'incorrect' && e.sent !== undefined) this.passwords.forgetIfEqual(key, e.sent);
+          if (this.passwords.get(key) !== undefined) continue; // a newer one is already here: use it
+          // Stop the automatic loop: only the person can fix this.
+          this.setState({ kind: 'password', reason: e.reason });
+          await new Promise<void>((resolve) => (this.passwordWaiter = resolve));
+          this.passwordWaiter = null;
+          continue;
+        }
+        if (e instanceof LockedError) {
+          this.dropSession();
+          reachedDaemon = true;
+          // What a daemon says is clamped. The password stays: the daemon checks
+          // its rate limit before the password, so a lockout says nothing about it.
+          const waitMs = Math.min(Math.max(e.retryAfter * 1000, this.timing.lockMinMs), this.timing.lockMaxMs);
+          this.setState({ kind: 'locked', retryAfter: Math.round(waitMs / 1000), until: Date.now() + waitMs });
+          await this.sleep(waitMs);
+          continue;
+        }
         if (e instanceof AwaitingApprovalError) {
           this.dropSession();
           reachedDaemon = true;
@@ -926,6 +1017,8 @@ export class RelayConnection {
       // this session, goes into the signature. Never fall back to a hello
       // without it (version 1 was replayable).
       const challenge = await this.readChallenge(channel);
+      // Only a password the person typed this run, for this daemon.
+      const sentPassword = this.passwords.get(passwordKey(this.offer));
       channel.send(
         new TextEncoder().encode(
           JSON.stringify({
@@ -938,12 +1031,13 @@ export class RelayConnection {
               keyPair.publicKey,
               new TextEncoder().encode(transport.sessionId),
               challenge,
+              sentPassword,
             ),
           }),
         ),
       );
       await withTimeout(
-        this.readHelloAnswer(channel),
+        this.readHelloAnswer(channel, sentPassword),
         this.timing.handshakeMs,
         'the daemon did not answer device_hello (it may be older than this app: update it)',
       );
@@ -979,7 +1073,7 @@ export class RelayConnection {
   }
 
   /** Reads the hello answer (the first message after the handshake) and turns a refusal into the error the supervisor acts on. */
-  private async readHelloAnswer(channel: Channel): Promise<void> {
+  private async readHelloAnswer(channel: Channel, sent: string | undefined): Promise<void> {
     const decoder = new TextDecoder();
     for (;;) {
       let env: WireEnvelope;
@@ -992,6 +1086,11 @@ export class RelayConnection {
       if (env.id !== HELLO_REQUEST_ID) continue;
       if (env.error) {
         const { code, message } = env.error;
+        if (code === 'password_required') throw new PasswordError(message, 'required', sent);
+        if (code === 'incorrect_password') throw new PasswordError(message, 'incorrect', sent);
+        if (code === 'too_many_attempts') {
+          throw new LockedError(message, Number.isFinite(env.error.retry_after) ? Number(env.error.retry_after) : 0);
+        }
         if (code === 'awaiting_approval') throw new AwaitingApprovalError(message);
         if (code === 'revoked') throw new RevokedError(message);
         if (code === 'hello_version_unsupported') throw new VersionMismatchError(VERSIONS_DIFFER);
