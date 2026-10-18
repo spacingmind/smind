@@ -67,7 +67,7 @@ func TestGate_RejectsBadAbsorbedInto(t *testing.T) {
 		in.Action = ActionDelete
 		in.Name = "learned-a"
 		in.AbsorbedInto = tc.abs
-		v := Check(in, nil, tc.live, okConfig())
+		v := Check(in, okWindow(), tc.live, okConfig())
 		if !hasReason(v.Findings, ReasonBadAbsorbedInto) {
 			t.Errorf("%s: findings %v, want bad_absorbed_into", tc.name, v.Findings)
 		}
@@ -85,18 +85,18 @@ func TestGate_RejectsAmbiguousPatch(t *testing.T) {
 	in := base()
 	in.OldString = "alpha"
 	in.NewString = "x"
-	if v := Check(in, nil, live, okConfig()); !hasReason(v.Findings, ReasonAmbiguousPatch) {
+	if v := Check(in, okWindow(), live, okConfig()); !hasReason(v.Findings, ReasonAmbiguousPatch) {
 		t.Errorf("two matches: findings %v, want ambiguous_patch", v.Findings)
 	}
 	in = base()
 	in.OldString = "missing"
-	if v := Check(in, nil, live, okConfig()); !hasReason(v.Findings, ReasonPatchTargetMissing) {
+	if v := Check(in, okWindow(), live, okConfig()); !hasReason(v.Findings, ReasonPatchTargetMissing) {
 		t.Errorf("zero matches: findings %v, want patch_target_missing", v.Findings)
 	}
 	// patching a skill not in live at all
 	in = base()
 	in.Name = "learned-nope"
-	if v := Check(in, nil, live, okConfig()); !hasReason(v.Findings, ReasonPatchTargetMissing) {
+	if v := Check(in, okWindow(), live, okConfig()); !hasReason(v.Findings, ReasonPatchTargetMissing) {
 		t.Errorf("missing target: findings %v, want patch_target_missing", v.Findings)
 	}
 }
@@ -110,7 +110,7 @@ func TestGate_PatchHappyPath(t *testing.T) {
 	in.Category = ""
 	in.OldString = "step two"
 	in.NewString = "step two revised"
-	v := Check(in, nil, live, okConfig())
+	v := Check(in, okWindow(), live, okConfig())
 	if !v.OK {
 		t.Fatalf("findings %v, want OK", v.Findings)
 	}
@@ -123,7 +123,7 @@ func TestGate_PatchHappyPath(t *testing.T) {
 	// explicit new description wins
 	in.Description = "Use when a patch is needed."
 	in.Category = "testing"
-	v = Check(in, nil, live, okConfig())
+	v = Check(in, okWindow(), live, okConfig())
 	if v.Result.Description != "Use when a patch is needed." || v.Result.Category != "testing" {
 		t.Errorf("override description/category: %+v", v.Result)
 	}
@@ -133,7 +133,7 @@ func TestGate_CurateCannotCreate(t *testing.T) {
 	in := okCreate()
 	cfg := okConfig()
 	cfg.Mode = ModeCurate
-	v := Check(in, nil, nil, cfg)
+	v := Check(in, okWindow(), nil, cfg)
 	if len(v.Findings) != 1 || v.Findings[0].Reason != ReasonBadAction {
 		t.Errorf("findings %v, want single bad_action", v.Findings)
 	}
@@ -292,7 +292,7 @@ func TestGate_PatchNotComparedAgainstOwnTarget(t *testing.T) {
 	in.NewString = "Add t.Parallel guards or split the dirs."
 	in.OldString = "Add t.Parallel guards or separate dirs."
 	live := []LiveSkill{{Name: "learned-flaky-tempdir", Status: "active", Category: "go", Description: "Use when a Go test fails on a shared TempDir.", Body: in.Body}}
-	v := Check(in, nil, live, okConfig())
+	v := Check(in, okWindow(), live, okConfig())
 	if !v.OK {
 		t.Fatalf("patching a skill must not duplicate itself; findings %v dup=%q", v.Findings, v.DuplicateOf)
 	}
