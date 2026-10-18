@@ -43,6 +43,8 @@ import {
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
 import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, taskSlotSignal, workspaceMonogram, workspaceTasks } from "@/lib/sidebar-signal";
 import { attentionRollup, nestTasks, type TaskNode } from "@/lib/task-tree";
+import { sidebarTreeActions, type TreeActionAvailability } from "@/lib/task-tree-actions";
+import { ArchiveFinishedDialog, StopTreeDialog } from "@/components/tree-action-dialogs";
 import { formatRelativeTime, formatRelativeTimeShort } from "@/lib/relative-time";
 import { useTaskStats, type TaskStats } from "@/hooks/use-task-stats";
 import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
@@ -371,12 +373,28 @@ function useStatusOverrides(client: WsClient | null, events: DaemonEvents | null
   return overrides;
 }
 
+/**
+ * Tree-wide data for PR-H11's tree actions: per-task availability of
+ * "Archive finished sub-tasks" / "Stop all in tree" (computed once from the
+ * full task list + run statuses, keyed only for tasks with live
+ * descendants) and the handlers that open the two confirm dialogs. Carried
+ * by context because the rows sit four component levels below AppSidebar
+ * and none of the intermediates needs it.
+ */
+const TreeActionsContext = createContext<{
+  availability: ReadonlyMap<number, TreeActionAvailability>;
+  onArchiveFinished: (task: Task) => void;
+  onStopTree: (task: Task) => void;
+} | null>(null);
+
 /** Which create/archive dialog a sidebar row has opened, if any. */
 type CrudTarget =
   | { kind: "workspace" }
   | { kind: "space"; workspace: WorkspaceWithTree }
   | { kind: "task"; workspace: WorkspaceWithTree; spaceId: number | null }
   | { kind: "archive"; task: Task }
+  | { kind: "archiveFinished"; task: Task }
+  | { kind: "stopTree"; task: Task }
   | { kind: "scripts"; workspace: WorkspaceWithTree }
   | { kind: "deleteWorkspace"; workspace: WorkspaceWithTree }
   | { kind: "deleteSpace"; space: SpaceWithTasks };
@@ -475,6 +493,10 @@ export function AppSidebar({
   // its own SpaceID differs, so per-space nesting would be wrong. Each
   // space bucket filters these roots back down to its own afterwards.
   const taskForest = useMemo(() => nestTasks(allTasks), [allTasks]);
+  const treeActionAvailability = useMemo(
+    () => sidebarTreeActions(allTasks, runStatus ?? EMPTY_RUN_STATUS),
+    [allTasks, runStatus],
+  );
   // A selected task hidden under a collapsed parent must be revealed, or
   // the keyboard/palette "select task" flows would silently select
   // something the user cannot see. Only the collapsed ancestors on the
@@ -877,6 +899,13 @@ export function AppSidebar({
             <TooltipProvider>
             <ScrollArea className="min-h-0 flex-1 group-data-[collapsible=icon]:[&_[data-slot=scroll-area-scrollbar]]:hidden">
               <RowSignalContext.Provider value={rowSignal}>
+              <TreeActionsContext.Provider
+                value={treeActionAvailability.size > 0 ? {
+                  availability: treeActionAvailability,
+                  onArchiveFinished: (task) => setCrud({ kind: "archiveFinished", task }),
+                  onStopTree: (task) => setCrud({ kind: "stopTree", task }),
+                } : null}
+              >
                 <CollapsedNodesContext.Provider value={nodes}>
                 <SidebarMenu className="@container/sb">
                   {error && <StatusRow icon={<Icons.error className="size-3.5" />} className="text-destructive" text={error} />}
@@ -955,6 +984,7 @@ export function AppSidebar({
                   ))}
                 </SidebarMenu>
                 </CollapsedNodesContext.Provider>
+              </TreeActionsContext.Provider>
               </RowSignalContext.Provider>
             </ScrollArea>
             </TooltipProvider>
@@ -1022,6 +1052,24 @@ export function AppSidebar({
               open
               onOpenChange={(o) => !o && setCrud(null)}
               onArchived={refresh}
+            />
+          )}
+          {crud?.kind === "archiveFinished" && (
+            <ArchiveFinishedDialog
+              client={client}
+              task={crud.task}
+              open
+              onOpenChange={(o) => !o && setCrud(null)}
+              onArchived={refresh}
+            />
+          )}
+          {crud?.kind === "stopTree" && (
+            <StopTreeDialog
+              client={client}
+              task={crud.task}
+              open
+              onOpenChange={(o) => !o && setCrud(null)}
+              onStopped={refresh}
             />
           )}
           {crud?.kind === "scripts" && (
@@ -1934,7 +1982,23 @@ const TaskRow = memo(function TaskRow({
   // slot is dropped there), where the child-count chip, rollup and setup badge
   // sit -- hide them while it shows rather than draw it over them.
   const hideForActions = active && "@max-[14rem]/sb:invisible";
-  const menuEntries = taskMenuEntries(task, { spaces, onMoveTask, isPinned: isTaskPinned, onTogglePin, onMarkUnread, onArchiveTask });
+  const treeActions = useContext(TreeActionsContext);
+  const treeAvailability = treeActions?.availability.get(task.ID);
+  const menuEntries = taskMenuEntries(task, {
+    spaces,
+    onMoveTask,
+    isPinned: isTaskPinned,
+    onTogglePin,
+    onMarkUnread,
+    onArchiveTask,
+    tree: treeActions && treeAvailability
+      ? {
+          availability: treeAvailability,
+          onArchiveFinished: () => treeActions.onArchiveFinished(task),
+          onStopTree: () => treeActions.onStopTree(task),
+        }
+      : undefined,
+  });
   const onRowKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     if (handleTaskRowArrowKey(e.key, e.currentTarget, { hasChildren, isCollapsed, onToggle: () => onToggleCollapse?.(task.ID) })) {
@@ -2278,7 +2342,7 @@ function TaskRows({
  */
 type TaskMenuEntry =
   | { kind: "move"; targets: { id: number | null; label: string }[]; onMove: (spaceId: number | null) => void }
-  | { kind: "item"; testId: string; label: string; icon: ReactNode; onSelect: () => void };
+  | { kind: "item"; testId: string; label: string; icon: ReactNode; onSelect: () => void; disabled?: boolean; mutedNote?: string };
 
 /**
  * "Move to space" lists every other space in the task's workspace plus
@@ -2295,9 +2359,34 @@ function taskMenuEntries(
     onTogglePin: (taskId: number) => void;
     onMarkUnread: (taskId: number) => void;
     onArchiveTask: (task: Task) => void;
+    /** PR-H11 tree actions; present only on rows in the tree view whose task has live descendants. */
+    tree?: { availability: TreeActionAvailability; onArchiveFinished: () => void; onStopTree: () => void };
   },
 ): TaskMenuEntry[] {
   const entries: TaskMenuEntry[] = [];
+  if (o.tree) {
+    const { availability, onArchiveFinished, onStopTree } = o.tree;
+    entries.push(
+      {
+        kind: "item",
+        testId: "sidebar-task-archive-finished-action",
+        label: "Archive finished sub-tasks…",
+        icon: <Icons.archive />,
+        onSelect: onArchiveFinished,
+        disabled: !availability.archive.enabled,
+        mutedNote: availability.archive.reason ?? undefined,
+      },
+      {
+        kind: "item",
+        testId: "sidebar-task-stop-tree-action",
+        label: "Stop all in tree…",
+        icon: <Icons.stop />,
+        onSelect: onStopTree,
+        disabled: !availability.stop.enabled,
+        mutedNote: availability.stop.reason ?? undefined,
+      },
+    );
+  }
   if (o.spaces && o.onMoveTask) {
     const targets: { id: number | null; label: string }[] = [];
     if (task.SpaceID !== null) targets.push({ id: null, label: "Ungrouped" });
@@ -2335,7 +2424,7 @@ function taskMenuEntries(
 
 /** The Radix wrappers one menu flavour renders with; dropdown and context menus share every prop used below. */
 interface MenuParts {
-  Item: ComponentType<{ onSelect?: () => void; children?: ReactNode; "data-testid"?: string; "data-space-id"?: string | number }>;
+  Item: ComponentType<{ onSelect?: () => void; children?: ReactNode; disabled?: boolean; "data-testid"?: string; "data-space-id"?: string | number }>;
   Sub: ComponentType<{ children?: ReactNode }>;
   SubTrigger: ComponentType<{ children?: ReactNode; "data-testid"?: string }>;
   SubContent: ComponentType<{ children?: ReactNode }>;
@@ -2379,8 +2468,9 @@ function TaskMenuItems({ entries, parts }: { entries: TaskMenuEntry[]; parts: Me
             </SubContent>
           </Sub>
         ) : (
-          <Item key={entry.testId} data-testid={entry.testId} onSelect={entry.onSelect}>
+          <Item key={entry.testId} data-testid={entry.testId} onSelect={entry.onSelect} disabled={entry.disabled}>
             {entry.icon} {entry.label}
+            {entry.mutedNote && <span className="ml-auto pl-2 text-ui-xs text-muted-foreground">{entry.mutedNote}</span>}
           </Item>
         ),
       )}
