@@ -751,3 +751,15 @@ func TestLoginSlowBodiesDoNotStarveRealLogins(t *testing.T) {
 		t.Fatalf("a real login behind 8 stalled bodies: status %d, want 200", resp.StatusCode)
 	}
 }
+
+// The relay hub's gate is the same bcrypt check as POST /api/login (ADR-0031 P13c).
+func TestRelayPasswordGateFollowsTheDaemonPassword(t *testing.T) {
+	none := newTestServer(t, daemonToken).RelayPasswordGate()
+	if none.Required() || none.Check("anything") {
+		t.Fatal("a daemon without a password must not require one, and must never accept one")
+	}
+	g := serverWithPassword(t, nil).RelayPasswordGate()
+	if !g.Required() || !g.Check(testPassword) || g.Check("") || g.Check(testPassword+"x") || g.Check(strings.ToUpper(testPassword)) {
+		t.Fatal("the relay gate must accept exactly the daemon password")
+	}
+}

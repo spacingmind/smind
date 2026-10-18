@@ -54,6 +54,10 @@ type RelayConfig struct {
 	// the pending state and the pairing window do not apply to it. Enable it
 	// only as a stop-gap until your desktop/mobile apps are updated; the daemon
 	// logs a warning at start and for every legacy connection.
+	//
+	// With a daemon password set (server.passwordHash / SMIND_PASSWORD) legacy
+	// service is refused regardless: a client without device identity cannot
+	// carry the password (ADR-0031 P13c).
 	LegacyDevices bool `yaml:"legacyDevices"`
 	// MaxDevices caps how many paired devices may be connected at once.
 	// Default 16; Load rejects values < 1.
