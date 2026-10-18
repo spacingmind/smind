@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 
 
+import { SetupSection } from "@/components/first-run/setup-section";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { managedByLabel } from "@/lib/daemon-version";
-import { desktop, isDesktop, type DaemonProgress, type DaemonStatus } from "@/lib/platform";
+import { desktop, isDesktop, type AppSettings, type DaemonProgress, type DaemonStatus } from "@/lib/platform";
 import { Icons } from "@/lib/icons";
 
 /**
@@ -20,6 +21,8 @@ function DaemonSection() {
   const [busy, setBusy] = useState(false);
   const [stageMessage, setStageMessage] = useState<string | null>(null);
   const [confirmingTakeOver, setConfirmingTakeOver] = useState(false);
+  // ADR-0031 D7: with `manageLocalDaemon` off the app never installs/starts/updates/takes over a daemon; status stays read-only.
+  const [settings, setSettings] = useState<AppSettings | null>(null);
 
   const refresh = useCallback(() => {
     desktop
@@ -30,7 +33,24 @@ function DaemonSection() {
 
   useEffect(() => {
     refresh();
+    // Unknown (a failed read) is treated as "managing", the pre-first-run behaviour.
+    Promise.resolve()
+      .then(() => desktop.appSettingsGet())
+      .then(setSettings)
+      .catch(() => {});
   }, [refresh]);
+
+  async function enableManaged() {
+    setError(null);
+    setBusy(true);
+    try {
+      setSettings(await desktop.appSettingsSet({ manageLocalDaemon: true }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   useEffect(() => {
     return desktop.onDaemonProgress((p: DaemonProgress) => setStageMessage(p.message));
@@ -79,6 +99,9 @@ function DaemonSection() {
     );
   }
 
+  const manageOff = settings?.manageLocalDaemon === false;
+  const locked = busy || manageOff;
+
   return (
     <div className="flex flex-col gap-3" data-testid="settings-section-daemon">
       <h3 className="text-ui-base font-medium text-foreground">Daemon</h3>
@@ -113,7 +136,13 @@ function DaemonSection() {
           {status.prerequisiteMessage}
         </p>
       )}
-      {status.managedBy && (
+      {status.managedBy === "docker" && (
+        <p data-testid="daemon-service-notice" className="text-ui-base text-muted-foreground">
+          This daemon runs in a Docker container (managed by Docker), so this app leaves it alone. Restart or update it with{" "}
+          <code className="font-mono text-ui-sm">docker</code> (pull the new image and recreate the container).
+        </p>
+      )}
+      {status.managedBy && status.managedBy !== "docker" && (
         <p data-testid="daemon-service-notice" className="text-ui-base text-muted-foreground">
           An OS service ({managedByLabel(status.managedBy)}) runs this daemon, so this app leaves it alone: restarting or
           stopping it from here would only make the service start it again. Manage it with{" "}
@@ -134,14 +163,28 @@ function DaemonSection() {
         </p>
       )}
 
+      {manageOff && (
+        <div data-testid="daemon-manage-off" className="flex flex-col gap-2 rounded-xl border bg-card p-3">
+          <p className="text-ui-base text-muted-foreground">
+            This app is not managing a daemon on this computer, so installing, updating, restarting and taking over are turned off. The
+            status above is read-only.
+          </p>
+          <div>
+            <Button size="sm" data-testid="daemon-enable-managed" disabled={busy} onClick={() => void enableManaged()}>
+              Enable app-managed daemon
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="flex gap-2">
         {status.managedState === "notRunning" && (
-          <Button size="sm" data-testid="daemon-install" onClick={() => run(() => desktop.daemonInstall())} disabled={busy}>
+          <Button size="sm" data-testid="daemon-install" onClick={() => run(() => desktop.daemonInstall())} disabled={locked}>
             Install
           </Button>
         )}
         {status.managedState === "managed" && status.comparison === "older" && (
-          <Button size="sm" data-testid="daemon-update" onClick={() => run(() => desktop.daemonUpdate())} disabled={busy}>
+          <Button size="sm" data-testid="daemon-update" onClick={() => run(() => desktop.daemonUpdate())} disabled={locked}>
             Update & restart
           </Button>
         )}
@@ -151,21 +194,21 @@ function DaemonSection() {
             size="sm"
             data-testid="daemon-restart"
             onClick={() => run(() => desktop.daemonRestart())}
-            disabled={busy || !status.binaryInstalled}
+            disabled={locked || !status.binaryInstalled}
             title={status.binaryInstalled ? undefined : "No app-managed daemon binary is installed yet -- use Update/Install first"}
           >
             Restart
           </Button>
         )}
         {status.managedState === "unmanaged" && !status.wslDaemonSuspected && !status.managedBy && !confirmingTakeOver && (
-          <Button variant="outline" size="sm" data-testid="daemon-take-over" onClick={() => setConfirmingTakeOver(true)} disabled={busy}>
+          <Button variant="outline" size="sm" data-testid="daemon-take-over" onClick={() => setConfirmingTakeOver(true)} disabled={locked}>
             Take over management
           </Button>
         )}
         {status.managedState === "unmanaged" && !status.wslDaemonSuspected && !status.managedBy && confirmingTakeOver && (
           <>
             <span className="self-center text-ui-base text-muted-foreground">Manage the daemon already running on this port?</span>
-            <Button size="sm" data-testid="daemon-take-over-confirm" onClick={() => run(() => desktop.takeOverDaemon())} disabled={busy}>
+            <Button size="sm" data-testid="daemon-take-over-confirm" onClick={() => run(() => desktop.takeOverDaemon())} disabled={locked}>
               Confirm
             </Button>
             <Button variant="ghost" size="sm" data-testid="daemon-take-over-cancel" onClick={() => setConfirmingTakeOver(false)} disabled={busy}>
@@ -174,6 +217,7 @@ function DaemonSection() {
           </>
         )}
       </div>
+      <SetupSection />
     </div>
   );
 }

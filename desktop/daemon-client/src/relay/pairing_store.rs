@@ -121,7 +121,7 @@ fn pairing_dir(app_data_dir: &Path) -> PathBuf {
 /// in practice, and needs no reverse mapping (the file is only ever looked
 /// up by id, never listed). The connection id itself is unchanged -- it is
 /// what `connections.json` and `selectedId` already store.
-fn pairing_path(app_data_dir: &Path, connection_id: &str) -> PathBuf {
+pub fn pairing_path(app_data_dir: &Path, connection_id: &str) -> PathBuf {
     use sha2::{Digest, Sha256};
     let name: String = Sha256::digest(connection_id.as_bytes())
         .iter()

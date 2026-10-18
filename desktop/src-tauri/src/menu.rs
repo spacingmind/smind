@@ -72,6 +72,11 @@ const ID_APP_QUIT: &str = "app-quit";
 // Windows, absent on Linux).
 const ID_APP_CHECK_UPDATES: &str = "app-check-updates";
 const ID_HELP_CHECK_UPDATES: &str = "help-check-updates";
+// ADR-0031 D7: Help > Run Setup Again… reopens first-run (every platform).
+const ID_RUN_SETUP: &str = "help-run-setup";
+
+/// The event the bundled UI listens to (`platform.ts` `onRunSetupRequested`).
+const RUN_SETUP_EVENT: &str = "run-setup-requested";
 
 /// desktop-auto-update U3: where the Check for Updates… item lives.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -331,6 +336,13 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let help = help_builder
         .item(&MenuItem::with_id(
             app,
+            ID_RUN_SETUP,
+            "Run Setup Again…",
+            true,
+            None::<&str>,
+        )?)
+        .item(&MenuItem::with_id(
+            app,
             ID_LOG_FOLDER,
             "Open Log Folder",
             true,
@@ -371,6 +383,13 @@ pub fn handle_event(app: &AppHandle, id: &str) {
     if matches!(id, ID_APP_CHECK_UPDATES | ID_HELP_CHECK_UPDATES) {
         crate::show_main(app);
         let _ = app.emit("app-update-check-requested", ());
+        return;
+    }
+
+    // ADR-0031 D7: reopen first-run; the UI keeps saved connections as they are.
+    if id == ID_RUN_SETUP {
+        crate::show_main(app);
+        let _ = app.emit_to(MAIN_WINDOW, RUN_SETUP_EVENT, ());
         return;
     }
 
@@ -532,6 +551,18 @@ mod tests {
         assert_eq!(menu_action_for(ID_APP_QUIT), None);
         assert_eq!(menu_action_for(ID_QUIT), None);
         assert_eq!(menu_action_for(ID_RELOAD), None);
+    }
+
+    #[test]
+    fn run_setup_again_is_a_distinct_native_item_and_event() {
+        assert_eq!(ID_RUN_SETUP, "help-run-setup");
+        // Not a renderer action and not on the header-menu allowlist: the
+        // native Help item emits the event itself.
+        assert_eq!(menu_action_for(ID_RUN_SETUP), None);
+        assert_eq!(native_item_for("run-setup"), None);
+        assert_eq!(RUN_SETUP_EVENT, "run-setup-requested");
+        let ids = [ID_ABOUT, ID_LOG_FOLDER, ID_GITHUB, ID_HELP_CHECK_UPDATES, ID_APP_CHECK_UPDATES];
+        assert!(!ids.contains(&ID_RUN_SETUP));
     }
 
     #[test]

@@ -17,6 +17,7 @@ use smind_daemon_client as dclient;
 use smind_daemon_client::proxy::{ProxyState, Registry};
 use smind_daemon_client::Config;
 
+mod app_settings;
 mod assets;
 mod client_watch;
 mod commands;
@@ -28,12 +29,16 @@ mod menu;
 mod notify;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod overlay_icon;
+mod probe;
+mod ssh_tunnel;
 mod state;
 mod tray;
 mod updater;
 mod window_chrome;
 #[cfg(test)]
 mod capability_tests;
+#[cfg(test)]
+mod real_daemon_test;
 mod zoom_store;
 
 use state::DesktopState;
@@ -104,6 +109,10 @@ pub fn run() {
             commands::connections_add,
             commands::connections_add_relay,
             commands::connections_preview_relay,
+            probe::connections_probe,
+            ssh_tunnel::connections_add_ssh,
+            app_settings::app_settings_get,
+            app_settings::app_settings_set,
             commands::connections_relay_status,
             commands::connections_relay_set_password,
             commands::connections_remove,
@@ -136,6 +145,14 @@ pub fn run() {
             });
 
             let connections_path = app.path().app_data_dir()?.join(CONNECTIONS_FILE);
+            // ADR-0031 D7: evaluated once, before the registry load can
+            // create connections.json and before auto_start runs.
+            let app_settings_path = app_settings::settings_path(&connections_path);
+            let app_settings = app_settings::load_or_upgrade(
+                &app_settings_path,
+                connections_path.exists(),
+                daemon_manager::managed_record_exists(app.handle()),
+            );
             let registry = Registry::load(&connections_path, &local_base_url);
 
             // AC3: a fresh secret every launch.
@@ -214,7 +231,9 @@ pub fn run() {
                 use tauri_plugin_deep_link::DeepLinkExt;
 
                 fn current_cfg(proxy: &ProxyState) -> Config {
-                    let base_url = proxy.registry.lock().unwrap().current().base_url.clone();
+                    let current = proxy.registry.lock().unwrap().current().clone();
+                    // An ssh connection is reached through its tunnel's local end.
+                    let base_url = proxy.upstream_base(&current).unwrap_or(current.base_url);
                     Config {
                         daemon_url: base_url
                             .parse()
@@ -291,16 +310,35 @@ pub fn run() {
             );
 
             app.manage(updater::UpdateState::default());
+            let ssh_tunnels = ssh_tunnel::SshTunnels::default();
+            ssh_tunnels.bind_proxy(proxy_state.clone());
 
             app.manage(DesktopState {
                 proxy: proxy_state,
                 connections_path,
+                app_settings: Mutex::new(app_settings),
+                app_settings_path,
                 proxy_url,
+                ssh_tunnels,
                 cache,
                 tray,
                 client_task: Mutex::new(client_task),
                 relay_task: Mutex::new(relay_task),
             });
+
+            // ADR-0031 D7 (b2): a saved ssh connection that is selected gets
+            // its tunnel brought up best-effort (the proxy's 502 explains a
+            // failure; selecting it again retries), then the watcher follows.
+            if initial_conn.kind == dclient::proxy::ConnectionKind::Ssh {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = handle.state::<DesktopState>();
+                    match ssh_tunnel::ensure_tunnel(&state.proxy, &state.ssh_tunnels, &initial_conn).await {
+                        Ok(()) => client_watch::restart(&handle, &state, &initial_conn),
+                        Err(e) => log::warn!("ssh tunnel for {:?} did not start: {e}", initial_conn.label),
+                    }
+                });
+            }
 
             // desktop-macos-app M2.3/M2.4: install + start the bundled
             // daemon when none is reachable, or update an older managed

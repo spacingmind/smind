@@ -69,7 +69,9 @@ export function updateCommands(daemonVersion: string | null): UpdateCommand[] {
 
 /** A `/healthz` or `daemon.info` `managedBy` value as a person would say it. */
 export function managedByLabel(managedBy: string): string {
-  return managedBy === "task" ? "Task Scheduler" : managedBy;
+  if (managedBy === "task") return "Task Scheduler";
+  if (managedBy === "docker") return "Docker";
+  return managedBy;
 }
 
 function isDismissedMap(value: unknown): value is Record<string, string> {

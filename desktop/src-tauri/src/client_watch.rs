@@ -29,10 +29,11 @@ pub fn spawn(
     cache: WorkspaceCache,
     proxy_url: Url,
     cfg: Config,
+    auth: dclient::client::WatcherAuth,
 ) -> tauri::async_runtime::JoinHandle<()> {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        dclient::client::run(cfg, cache.clone(), move |event| {
+        dclient::client::run_with_auth(cfg, auth, cache.clone(), move |event| {
             on_event(&handle, &tray, &cache, &proxy_url, event)
         })
         .await;
@@ -151,11 +152,26 @@ fn activate(
 ) {
     if conn.kind != ConnectionKind::Relay {
         proxy.set_relay(None);
-        let daemon_url: Url = conn
-            .base_url
+        // An ssh connection is watched through its tunnel's local end; with
+        // no tunnel yet there is nothing to watch (it is restarted when the
+        // tunnel comes up).
+        let Some(base_url) = proxy.upstream_base(conn) else {
+            return (None, None);
+        };
+        let daemon_url: Url = base_url
             .parse()
             .expect("smind desktop: saved connection URL is well-formed");
-        let client_task = spawn(app, tray, cache, proxy_url, Config { daemon_url });
+        // A password-protected daemon refuses /api/token: `local` falls back
+        // to the daemon token file inside the client, a url connection uses
+        // its held session.
+        let auth = match conn.kind {
+            ConnectionKind::Url => {
+                let (proxy, id) = (proxy.clone(), conn.id.clone());
+                dclient::client::WatcherAuth::with_session(move || proxy.session(&id))
+            }
+            _ => dclient::client::WatcherAuth::default(),
+        };
+        let client_task = spawn(app, tray, cache, proxy_url, Config { daemon_url }, auth);
         return (Some(client_task), None);
     }
 

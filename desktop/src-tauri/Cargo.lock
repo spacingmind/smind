@@ -4540,6 +4540,7 @@ dependencies = [
  "url",
  "windows-sys 0.61.2",
  "x25519-dalek",
+ "zeroize",
 ]
 
 [[package]]
@@ -4547,6 +4548,7 @@ name = "smind-desktop"
 version = "0.12.0"
 dependencies = [
  "base64 0.23.1",
+ "futures-util",
  "log",
  "mac-notification-sys",
  "notify-rust",
@@ -4570,6 +4572,7 @@ dependencies = [
  "tauri-winrt-notification 0.8.1",
  "tempfile",
  "tokio",
+ "tokio-tungstenite 0.30.0",
  "url",
 ]
 

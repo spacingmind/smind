@@ -16,6 +16,7 @@ use smind_daemon_client::daemon_manager::{native, version};
 #[cfg(target_os = "windows")]
 use smind_daemon_client::daemon_manager::windows_native;
 
+use crate::app_settings::AppSettings;
 use crate::state::DesktopState;
 
 const PROGRESS_EVENT: &str = "daemon-progress";
@@ -65,6 +66,13 @@ pub struct DaemonStatus {
     pub git_found: Option<bool>,
     /// Set when a prerequisite is missing (AC8), e.g. Git for Windows.
     pub prerequisite_message: Option<String>,
+    /// The `service` field of the local port's `/healthz` answer
+    /// (`"smind"` for a daemon); `None` when nothing answers or the answer
+    /// does not say. Lets first-run name "something that is not smind".
+    pub local_service: Option<String>,
+    /// Something owns the local port but `/healthz` did not answer: a
+    /// non-smind or non-HTTP process. First-run disables "Run here".
+    pub port_occupied: bool,
 }
 
 /// ConnectionVersionInfo is the banner's data source for a connection that
@@ -115,16 +123,16 @@ fn platform_for(target_os: &str) -> Platform {
 }
 
 /// UnmanagedKind classifies who owns the daemon port when it isn't the
-/// process this app recorded (AC6): only a Windows process whose image
-/// file is a `smind.exe` is take-over eligible, exactly like macOS.
-/// Anything else -- the WSL relay that forwards a WSL daemon's port, an
-/// unresolvable owner (gone or access denied), an unrelated app -- is
-/// not, and is never signalled or adopted.
+/// process this app recorded (AC6): only a process whose image file is the
+/// platform's smind binary (`smind.exe` on Windows, `smind` on macOS) is
+/// take-over eligible. Anything else -- the WSL relay that forwards a WSL
+/// daemon's port, an `ssh -L` tunnel, an unresolvable owner (gone or access
+/// denied), an unrelated app -- is not, and is never signalled or adopted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnmanagedKind {
-    /// The port owner's image file name is `smind.exe`.
+    /// The port owner's image file name is the platform's smind binary.
     NativeSmind,
-    /// Not a `smind.exe` (or not resolvable at all).
+    /// Not the smind binary (or not resolvable at all).
     ForeignOrWsl,
     /// `/healthz` reports `managedBy`: an OS service manager (systemd,
     /// launchd, Task Scheduler) owns the daemon. Not take-over eligible
@@ -133,20 +141,27 @@ pub enum UnmanagedKind {
     Service,
 }
 
-fn classify_unmanaged(owner_image: Option<&str>, managed_by: Option<&str>) -> UnmanagedKind {
+fn classify_unmanaged(platform: Platform, owner_image: Option<&str>, managed_by: Option<&str>) -> UnmanagedKind {
     if managed_by.is_some_and(|m| !m.is_empty()) {
         return UnmanagedKind::Service;
     }
-    let is_smind_exe = owner_image
-        .map(|img| img.rsplit(['\\', '/']).next().unwrap_or(img).eq_ignore_ascii_case("smind.exe"))
+    let is_smind = owner_image
+        .map(|img| {
+            let name = img.rsplit(['\\', '/']).next().unwrap_or(img);
+            match platform {
+                Platform::Windows => name.eq_ignore_ascii_case("smind.exe"),
+                _ => name == "smind",
+            }
+        })
         .unwrap_or(false);
-    if is_smind_exe { UnmanagedKind::NativeSmind } else { UnmanagedKind::ForeignOrWsl }
+    if is_smind { UnmanagedKind::NativeSmind } else { UnmanagedKind::ForeignOrWsl }
 }
 
 /// managed_by_label is the display name of a `/healthz` `managedBy` value.
 fn managed_by_label(managed_by: &str) -> &str {
     match managed_by {
         "task" => "Task Scheduler",
+        "docker" => "Docker",
         other => other,
     }
 }
@@ -169,10 +184,13 @@ fn local_base_url(state: &DesktopState) -> url::Url {
     url::Url::parse(&raw).expect("smind desktop: local connection base_url is always a valid URL")
 }
 
-/// Health is what `/healthz` told us.
+/// Health is what `/healthz` answered: `reachable` is any 2xx; the other
+/// fields are whatever the JSON body named (all `None` for a non-JSON answer).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Health {
     reachable: bool,
     version: Option<String>,
+    service: Option<String>,
     managed_by: Option<String>,
 }
 
@@ -180,6 +198,7 @@ async fn probe_health(base_url: &url::Url) -> Health {
     #[derive(serde::Deserialize)]
     struct Healthz {
         version: Option<String>,
+        service: Option<String>,
         #[serde(rename = "managedBy")]
         managed_by: Option<String>,
     }
@@ -189,20 +208,16 @@ async fn probe_health(base_url: &url::Url) -> Health {
     let client = reqwest::Client::new();
     match client.get(url).timeout(std::time::Duration::from_secs(2)).send().await {
         Ok(resp) if resp.status().is_success() => {
-            let body = resp.json::<Healthz>().await.ok();
+            let body = smind_daemon_client::proxy::bounded::read_json::<Healthz>(resp, smind_daemon_client::proxy::bounded::MAX_BODY_BYTES).await;
             Health {
                 reachable: true,
                 version: body.as_ref().and_then(|h| h.version.clone()),
+                service: body.as_ref().and_then(|h| h.service.clone()),
                 managed_by: body.and_then(|h| h.managed_by).filter(|m| !m.is_empty()),
             }
         }
-        _ => Health { reachable: false, version: None, managed_by: None },
+        _ => Health::default(),
     }
-}
-
-async fn probe_healthz(base_url: &url::Url) -> (bool, Option<String>) {
-    let h = probe_health(base_url).await;
-    (h.reachable, h.version)
 }
 
 /// poll_until_ready calls `probe` up to `attempts` times, `interval` apart
@@ -230,7 +245,7 @@ where
 /// and leave a perfectly good daemon looking unmanaged.
 async fn wait_for_healthz(base_url: &url::Url) -> Option<String> {
     poll_until_ready(
-        || async { Some(probe_healthz(base_url).await).filter(|(reachable, _)| *reachable).map(|(_, v)| v) },
+        || async { Some(probe_health(base_url).await).filter(|p| p.reachable).map(|p| p.version) },
         40,
         std::time::Duration::from_millis(250),
     )
@@ -388,17 +403,56 @@ fn launch_decision(reachable: bool, managed_state: ManagedState, comparison: ver
     }
 }
 
+/// startup_decision gates `launch_decision` on the first-run settings
+/// (ADR-0031 D7): until onboarding is done, or when the user turned local
+/// daemon management off, or when another connection is selected, the app
+/// never installs, starts or updates anything.
+fn startup_decision(
+    settings: AppSettings,
+    local_selected: bool,
+    reachable: bool,
+    managed_state: ManagedState,
+    comparison: version::Comparison,
+) -> LaunchAction {
+    if !settings.onboarding_completed || !settings.manage_local_daemon || !local_selected {
+        return LaunchAction::NoOp;
+    }
+    launch_decision(reachable, managed_state, comparison)
+}
+
+const MANAGEMENT_OFF: &str = "the app-managed local daemon is turned off in Settings";
+
+/// ensure_managed is the guard on every command that mutates the local
+/// daemon (`daemon_install`/`update`/`restart`, `take_over_daemon`).
+fn ensure_managed(settings: AppSettings) -> Result<(), String> {
+    if settings.manage_local_daemon {
+        Ok(())
+    } else {
+        Err(MANAGEMENT_OFF.to_string())
+    }
+}
+
+fn guard_management(state: &DesktopState) -> Result<(), String> {
+    ensure_managed(*state.app_settings.lock().unwrap())
+}
+
 /// auto_start runs once per app launch, after `DesktopState` is managed:
 /// installs/starts the bundled daemon when nothing is serving, and
 /// updates a managed one that's older than the app, both through the same
 /// `install_or_update` (and `daemon-progress` events) the Install/Update
 /// buttons use. macOS only, and only while the built-in local connection
 /// is the selected one -- someone using a remote daemon didn't ask for a
-/// local one. Failures surface as a progress event plus the log; the
+/// local one, and nothing at all until first-run is complete and local
+/// management is on (`startup_decision`). Failures surface as a progress event plus the log; the
 /// banner and Settings -> Daemon keep working for a manual retry.
 pub async fn auto_start(app: AppHandle) {
     let state = app.state::<DesktopState>();
     if detect_platform() != Platform::Macos {
+        return;
+    }
+    let settings = *state.app_settings.lock().unwrap();
+    if !settings.onboarding_completed || !settings.manage_local_daemon {
+        log::info!("daemon auto-start: skipped ({settings:?})");
         return;
     }
     let local_selected = state.proxy.registry.lock().unwrap().current().id == smind_daemon_client::proxy::connections::LOCAL_ID;
@@ -406,7 +460,7 @@ pub async fn auto_start(app: AppHandle) {
         return;
     }
     let status = compute_status(&app, &state).await;
-    let action = launch_decision(status.reachable, status.managed_state, status.comparison);
+    let action = startup_decision(settings, local_selected, status.reachable, status.managed_state, status.comparison);
     log::info!("daemon auto-start: {action:?} (reachable={}, {:?}, {:?})", status.reachable, status.managed_state, status.comparison);
     if !matches!(action, LaunchAction::InstallAndStart) {
         return;
@@ -459,25 +513,32 @@ fn windows_exe_matches(pid: u32, expected: &Path) -> bool {
     windows_native::exe_path_for_pid(pid).ok().flatten().map(|p| windows_native::exe_matches(&p, expected)).unwrap_or(false)
 }
 
-/// take_over_refusal is the AC6 gate: on Windows, take-over is only offered
-/// for a port owner whose image is a `smind.exe`; anything else gets this
-/// explanation instead. Other platforms are never refused here (their
-/// daemon binary is not called `smind.exe`, so classifying it would refuse
-/// every macOS take-over).
+/// take_over_refusal is the take-over gate. A service-managed daemon
+/// (`/healthz` `managedBy`, ADR-0031 P10) is refused on every platform:
+/// stopping or adopting it fights the service manager. Otherwise only a port
+/// owner whose image is the platform's smind binary is eligible (`smind.exe`
+/// on Windows, AC6; `smind` on macOS, so an `ssh -L` tunnel or any other
+/// process squatting the port is never adopted); anything else gets this
+/// explanation instead. Unsupported hosts never reach take-over, so they are
+/// not refused here.
 fn take_over_refusal(platform: Platform, owner_image: Option<&str>, managed_by: Option<&str>, port: u16) -> Option<String> {
-    // A service-managed daemon is refused on every platform: stopping or
-    // adopting it fights the service manager (ADR-0031 P10).
-    if classify_unmanaged(owner_image, managed_by) == UnmanagedKind::Service {
+    if classify_unmanaged(platform, owner_image, managed_by) == UnmanagedKind::Service {
+        if managed_by == Some("docker") {
+            return Some(format!(
+                "the daemon on port {port} runs in a Docker container (managed by Docker) -- manage it with docker, not from this app"
+            ));
+        }
         return Some(format!(
             "the daemon on port {port} is managed by {} -- manage it with `smind service` (stop, restart, update), not from this app",
             managed_by_label(managed_by.unwrap_or_default())
         ));
     }
-    if platform != Platform::Windows {
+    if platform == Platform::Unsupported || classify_unmanaged(platform, owner_image, managed_by) == UnmanagedKind::NativeSmind {
         return None;
     }
-    (classify_unmanaged(owner_image, managed_by) == UnmanagedKind::ForeignOrWsl).then(|| {
-        format!("a daemon not started by this app is answering on port {port} -- if it runs in WSL, stop it there; take over is only offered for a smind.exe")
+    Some(match platform {
+        Platform::Windows => format!("a daemon not started by this app is answering on port {port} -- if it runs in WSL, stop it there; take over is only offered for a smind.exe"),
+        _ => format!("the process holding port {port} is not a sMind daemon (it may be an ssh tunnel or another program) -- take over is only offered for a sMind process"),
     })
 }
 
@@ -608,6 +669,25 @@ fn find_port_owner(platform: Platform, port: u16) -> Option<u32> {
     }
 }
 
+/// managed_record_exists is the upgrade rule's second signal (ADR-0031 D7): an
+/// earlier version of the app installed and recorded a managed daemon.
+pub(crate) fn managed_record_exists(app: &AppHandle) -> bool {
+    match detect_platform() {
+        Platform::Macos => macos_layout(app).ok().and_then(|l| managed::load(&l.state_path)).is_some(),
+        Platform::Windows => {
+            #[cfg(target_os = "windows")]
+            {
+                windows_layout().ok().and_then(|l| managed::load(&l.state_path)).is_some()
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                false
+            }
+        }
+        Platform::Unsupported => false,
+    }
+}
+
 /// binary_installed answers "is the managed binary on disk right now" --
 /// `restart`'s precondition (`managed::assert_restartable`) and
 /// `compute_status`'s `binary_installed` field share this one check.
@@ -660,7 +740,7 @@ async fn compute_status(app: &AppHandle, state: &DesktopState) -> DaemonStatus {
     let base_url = local_base_url(state);
     let port = base_url.port_or_known_default().unwrap_or(DEFAULT_PORT);
 
-    let Health { reachable, version: daemon_version, managed_by } = probe_health(&base_url).await;
+    let Health { reachable, version: daemon_version, service: local_service, managed_by } = probe_health(&base_url).await;
 
     let record = match platform {
         Platform::Macos => macos_layout(app).ok().and_then(|l| managed::load(&l.state_path)),
@@ -700,7 +780,7 @@ async fn compute_status(app: &AppHandle, state: &DesktopState) -> DaemonStatus {
     let wsl_daemon_suspected = platform == Platform::Windows
         && reachable
         && managed_state == ManagedState::Unmanaged
-        && classify_unmanaged(owner_image.as_deref(), managed_by.as_deref()) == UnmanagedKind::ForeignOrWsl;
+        && classify_unmanaged(platform, owner_image.as_deref(), managed_by.as_deref()) == UnmanagedKind::ForeignOrWsl;
 
     let (git_found, prerequisite_message) = match platform {
         Platform::Windows => {
@@ -733,6 +813,8 @@ async fn compute_status(app: &AppHandle, state: &DesktopState) -> DaemonStatus {
         wsl_daemon_suspected,
         git_found,
         prerequisite_message,
+        local_service,
+        port_occupied: port_owner.is_some() && !reachable,
     }
 }
 
@@ -818,7 +900,7 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
                 // AC6 hint, since on Windows the most likely squatter is
                 // the relay forwarding a WSL daemon's port.
                 let port_owner_before = windows_native::find_port_owner(port).ok().flatten();
-                if answering_without_owner(probe_healthz(&base_url).await.0, port_owner_before) {
+                if answering_without_owner(probe_health(&base_url).await.reachable, port_owner_before) {
                     return Err(format!("a daemon is already answering on port {port}, but no Windows process owns it. {}", windows_install_conflict_hint(port)));
                 }
                 if let Err(e) = managed::assert_safe_to_install(existing_record.as_ref(), port_owner_before, port) {
@@ -1099,21 +1181,25 @@ pub async fn daemon_status(app: AppHandle, state: tauri::State<'_, DesktopState>
 
 #[tauri::command]
 pub async fn daemon_install(app: AppHandle, state: tauri::State<'_, DesktopState>) -> Result<DaemonStatus, String> {
+    guard_management(&state)?;
     install_or_update(&app, &state).await
 }
 
 #[tauri::command]
 pub async fn daemon_update(app: AppHandle, state: tauri::State<'_, DesktopState>) -> Result<DaemonStatus, String> {
+    guard_management(&state)?;
     install_or_update(&app, &state).await
 }
 
 #[tauri::command]
 pub async fn daemon_restart(app: AppHandle, state: tauri::State<'_, DesktopState>) -> Result<DaemonStatus, String> {
+    guard_management(&state)?;
     restart(&app, &state).await
 }
 
 #[tauri::command]
 pub async fn take_over_daemon(app: AppHandle, state: tauri::State<'_, DesktopState>) -> Result<DaemonStatus, String> {
+    guard_management(&state)?;
     take_over(&app, &state).await
 }
 
@@ -1123,14 +1209,19 @@ pub async fn take_over_daemon(app: AppHandle, state: tauri::State<'_, DesktopSta
 /// loopback proxy doesn't forward `/healthz` at all.
 #[tauri::command]
 pub async fn connection_version(app: AppHandle, state: tauri::State<'_, DesktopState>, id: String) -> Result<ConnectionVersionInfo, String> {
-    let base_url = {
+    let conn = {
         let registry = state.proxy.registry.lock().unwrap();
-        registry.list().iter().find(|c| c.id == id).map(|c| c.base_url.clone())
+        registry.list().iter().find(|c| c.id == id).cloned()
     }
     .ok_or_else(|| format!("no connection with id {id:?}"))?;
-    let url = url::Url::parse(&base_url).map_err(|e| e.to_string())?;
     let app_version = app_version_string(&app);
-    let Health { reachable, version: daemon_version, managed_by } = probe_health(&url).await;
+    // An ssh connection is probed through its tunnel's local end; with no
+    // tunnel running it is simply unreachable.
+    let Some(base_url) = state.proxy.upstream_base(&conn) else {
+        return Ok(ConnectionVersionInfo { reachable: false, daemon_version: None, app_version, comparison: version::Comparison::Unknown, managed_by: None });
+    };
+    let url = url::Url::parse(&base_url).map_err(|e| e.to_string())?;
+    let Health { reachable, version: daemon_version, managed_by, .. } = probe_health(&url).await;
     let comparison = daemon_version.as_deref().map(|d| version::compare(&app_version, d)).unwrap_or(version::Comparison::Unknown);
     Ok(ConnectionVersionInfo { reachable, daemon_version, app_version, comparison, managed_by })
 }
@@ -1242,6 +1333,33 @@ mod tests {
         assert_eq!(launch_decision(true, NotRunning, Older), NoOp);
     }
 
+    const ONBOARDED: AppSettings = AppSettings { onboarding_completed: true, manage_local_daemon: true };
+
+    #[test]
+    fn auto_start_noop_until_onboarded() {
+        let pending = AppSettings { onboarding_completed: false, manage_local_daemon: true };
+        for state in [ManagedState::NotRunning, ManagedState::Managed, ManagedState::Unmanaged] {
+            assert_eq!(startup_decision(pending, true, false, state, Comparison::Unknown), LaunchAction::NoOp, "{state:?}");
+        }
+    }
+
+    #[test]
+    fn auto_start_noop_when_manage_local_daemon_false() {
+        let off = AppSettings { onboarding_completed: true, manage_local_daemon: false };
+        assert_eq!(startup_decision(off, true, false, ManagedState::NotRunning, Comparison::Unknown), LaunchAction::NoOp);
+        assert_eq!(startup_decision(off, true, true, ManagedState::Managed, Comparison::Older), LaunchAction::NoOp);
+        assert!(ensure_managed(off).unwrap_err().contains("turned off in Settings"));
+        assert!(ensure_managed(ONBOARDED).is_ok());
+    }
+
+    #[test]
+    fn auto_start_runs_when_managed_and_local_selected() {
+        assert_eq!(startup_decision(ONBOARDED, true, false, ManagedState::NotRunning, Comparison::Unknown), LaunchAction::InstallAndStart);
+        assert_eq!(startup_decision(ONBOARDED, true, true, ManagedState::Managed, Comparison::Older), LaunchAction::OfferUpdate);
+        // Another connection selected: still nothing.
+        assert_eq!(startup_decision(ONBOARDED, false, false, ManagedState::NotRunning, Comparison::Unknown), LaunchAction::NoOp);
+    }
+
     #[test]
     fn launch_decision_offers_update_instead_of_restarting() {
         use Comparison::*;
@@ -1300,16 +1418,16 @@ mod tests {
     fn classify_wsl_forwarded_port_is_not_takeover_eligible() {
         use UnmanagedKind::*;
         // The relay that forwards a WSL daemon's port.
-        assert_eq!(classify_unmanaged(Some(r"C:\Windows\system32\wslrelay.exe"), None), ForeignOrWsl);
+        assert_eq!(classify_unmanaged(Platform::Windows, Some(r"C:\Windows\system32\wslrelay.exe"), None), ForeignOrWsl);
         // No owner visible (gone, or access denied).
-        assert_eq!(classify_unmanaged(None, None), ForeignOrWsl);
+        assert_eq!(classify_unmanaged(Platform::Windows, None, None), ForeignOrWsl);
         // An unrelated app.
-        assert_eq!(classify_unmanaged(Some(r"C:\Tools\other.exe"), None), ForeignOrWsl);
+        assert_eq!(classify_unmanaged(Platform::Windows, Some(r"C:\Tools\other.exe"), None), ForeignOrWsl);
         // A smind.exe anywhere is eligible, whatever the case.
-        assert_eq!(classify_unmanaged(Some(r"C:\Users\x\AppData\Local\smind\bin\SMIND.EXE"), None), NativeSmind);
-        assert_eq!(classify_unmanaged(Some(r"D:\dev\smind.exe"), None), NativeSmind);
+        assert_eq!(classify_unmanaged(Platform::Windows, Some(r"C:\Users\x\AppData\Local\smind\bin\SMIND.EXE"), None), NativeSmind);
+        assert_eq!(classify_unmanaged(Platform::Windows, Some(r"D:\dev\smind.exe"), None), NativeSmind);
         // ...but a name that merely contains it is not.
-        assert_eq!(classify_unmanaged(Some(r"C:\Windows\smind.exe.bak"), None), ForeignOrWsl);
+        assert_eq!(classify_unmanaged(Platform::Windows, Some(r"C:\Windows\smind.exe.bak"), None), ForeignOrWsl);
     }
 
     /// ADR-0031 P10: `/healthz` `managedBy` means an OS service owns the
@@ -1318,11 +1436,11 @@ mod tests {
     #[test]
     fn classify_unmanaged_service_when_healthz_managed_by_present() {
         use UnmanagedKind::*;
-        assert_eq!(classify_unmanaged(Some(r"C:\Users\x\AppData\Local\smind\bin\smind.exe"), Some("task")), Service);
-        assert_eq!(classify_unmanaged(Some("/usr/local/bin/smind"), Some("systemd")), Service);
-        assert_eq!(classify_unmanaged(None, Some("launchd")), Service);
+        assert_eq!(classify_unmanaged(Platform::Windows, Some(r"C:\Users\x\AppData\Local\smind\bin\smind.exe"), Some("task")), Service);
+        assert_eq!(classify_unmanaged(Platform::Macos, Some("/usr/local/bin/smind"), Some("systemd")), Service);
+        assert_eq!(classify_unmanaged(Platform::Macos, None, Some("launchd")), Service);
         // An empty value is "not managed", like an absent one.
-        assert_eq!(classify_unmanaged(None, Some("")), ForeignOrWsl);
+        assert_eq!(classify_unmanaged(Platform::Macos, None, Some("")), ForeignOrWsl);
     }
 
     /// A take-over recorded before the app knew about services must not make a
@@ -1346,7 +1464,10 @@ mod tests {
         }
         let err = take_over_refusal(Platform::Windows, None, Some("task"), 4648).unwrap();
         assert!(err.contains("Task Scheduler"), "{err}");
-        // Absent managedBy keeps the old behaviour.
+        // A container is not a service manager: no `smind service` advice.
+        let err = take_over_refusal(Platform::Macos, Some("/usr/local/bin/smind"), Some("docker"), 4648).unwrap();
+        assert!(err.contains("managed by Docker") && !err.contains("smind service"), "{err}");
+        // Absent managedBy: a smind owner is still eligible.
         assert!(take_over_refusal(Platform::Macos, Some("/x/smind"), None, 4648).is_none());
     }
 
@@ -1369,8 +1490,22 @@ mod tests {
     #[test]
     fn take_over_refusal_never_applies_off_windows() {
         assert!(take_over_refusal(Platform::Macos, Some("/Applications/smind.app/Contents/MacOS/smind"), None, 4648).is_none());
-        assert!(take_over_refusal(Platform::Macos, None, None, 4648).is_none());
         assert!(take_over_refusal(Platform::Unsupported, Some("/usr/bin/other"), None, 4648).is_none());
+    }
+
+    #[test]
+    fn take_over_refused_for_non_smind_owner_on_macos() {
+        for owner in ["/usr/bin/ssh", "/usr/local/bin/other", "/opt/smind-helper", "/x/smind.exe"] {
+            let err = take_over_refusal(Platform::Macos, Some(owner), None, 4648).unwrap_or_else(|| panic!("{owner} must be refused"));
+            assert!(err.contains("not a sMind daemon") && err.contains("4648"), "{err}");
+        }
+        assert!(take_over_refusal(Platform::Macos, None, None, 4648).is_some());
+    }
+
+    #[test]
+    fn take_over_allowed_for_smind_owner_on_macos() {
+        assert!(take_over_refusal(Platform::Macos, Some("/Users/x/bin/smind"), None, 4648).is_none());
+        assert!(take_over_refusal(Platform::Macos, Some("/Users/x/Library/Application Support/ai.smind.desktop/managed-daemon/bin/smind"), None, 4648).is_none());
     }
 
     /// Found in the AC10 run on a real machine: a daemon inside WSL answers
