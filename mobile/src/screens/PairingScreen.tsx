@@ -19,6 +19,7 @@ import { ConnectionState, RelayConnection } from '../relay/RelayConnection';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { ConnectionStatusCard } from './ConnectionStatusCard';
+import { DaemonPasswordPrompt } from './DaemonPasswordPrompt';
 
 type Status = { kind: 'idle' } | { kind: 'starting' } | { kind: 'error'; message: string };
 
@@ -153,7 +154,15 @@ export function PairingScreen({ onConnected }: Props) {
           />
         </UiHost>
       </View>
-      {view && <ConnectionStatusCard view={view} actions={actions} />}
+      {connState && (connState.kind === 'password' || connState.kind === 'locked') ? (
+        <DaemonPasswordPrompt
+          state={connState}
+          onSubmit={(password) => attempt.current?.submitPassword(password)}
+          actions={[{ label: 'Cancel', onPress: cancelAttempt }]}
+        />
+      ) : (
+        view && <ConnectionStatusCard view={view} actions={actions} />
+      )}
       {status.kind === 'error' && <Text style={styles.error}>{status.message}</Text>}
       <Text style={styles.help}>{CERTIFICATE_HELP}</Text>
     </View>

@@ -124,7 +124,7 @@ Origin allowlist, no new endpoints — and the desktop app ships a
       ConPTY support) is lifted -- the terminal backend is now
       cross-platform via `charmbracelet/x/xpty`, verified by a real
       `windows-latest` CI job (see
-      docs/plans/active/windows-native-terminal.md). Windows is **not**
+      docs/plans/completed/windows-native-terminal.md). Windows is **not**
       yet a supported daemon host: the rest of the daemon's runtime
       parity on Windows (agent CLI spawn via `.cmd` shims, path
       handling, git worktrees) is follow-up work driven by that plan's

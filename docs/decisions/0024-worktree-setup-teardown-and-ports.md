@@ -3,7 +3,7 @@
 ## Status
 
 Accepted (2026-10-11). The user approved D1 of
-[`docs/plans/active/orchestration-parity-paseo.md`](../plans/active/orchestration-parity-paseo.md):
+[`docs/plans/completed/orchestration-parity-paseo.md`](../plans/completed/orchestration-parity-paseo.md):
 setup/teardown plus per-task port, stored **daemon-side and
 human-authored**, never read from a repo-committed file.
 

@@ -25,7 +25,7 @@
 // static file server), not the Metro dev server, so the run does not
 // depend on dev-server timing.
 
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -74,6 +74,19 @@ async function startStaticServer() {
   });
   await new Promise((r) => server.listen(PORT, '127.0.0.1', r));
   return server;
+}
+
+/** Whether the harness built from this tree takes -password (the daemon side of P13c). */
+function harnessHasPasswordFlag() {
+  const dir = mkdtempSync(join(tmpdir(), 'smind-smoke-probe-'));
+  try {
+    const binary = join(dir, 'devharness');
+    execFileSync('go', ['build', '-o', binary, './internal/relay/bridge/devharness'], { cwd: REPO_ROOT, stdio: 'inherit' });
+    const probe = spawnSync(binary, ['-h'], { encoding: 'utf8' });
+    return `${probe.stderr}${probe.stdout}`.includes('-password');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 async function startHarness(extraArgs = []) {
@@ -301,6 +314,54 @@ async function needsContinue(page, harness) {
 }
 
 /**
+ * ADR-0031 P13c: a daemon with a password. Connect -> "Daemon password
+ * required" -> a wrong password -> "Incorrect password" -> more wrong ones until
+ * the daemon rate-limits this device -> the correct password -> "Too many
+ * attempts" with a countdown (the correct password is kept and tried again by
+ * itself) -> the task list. The password only ever goes into the prompt's field.
+ */
+async function daemonPassword(page, harness, password) {
+  const submit = async (value) => {
+    await page.locator('input[type="password"]').fill(value);
+    await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  };
+  await page.fill('textarea, input[type="text"]', harness.pairingUrl);
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  try {
+    await page.getByText('Daemon password required', { exact: true }).waitFor({ timeout: 30_000 });
+  } catch {
+    fail('"Daemon password required" did not appear for a daemon with a password');
+    return;
+  }
+  if ((await page.locator('input[type="password"]').count()) !== 1) fail('the prompt has no masked (type=password) field');
+  await shootBothSchemes(page, 'password-required');
+
+  await submit('not the password');
+  try {
+    await page.getByText('Incorrect password', { exact: true }).waitFor({ timeout: 30_000 });
+  } catch {
+    fail('"Incorrect password" did not appear after a wrong password');
+    return;
+  }
+  await shootBothSchemes(page, 'password-incorrect');
+
+  // The 6th wrong attempt for one device id starts the daemon's delay; the next hello is rate limited.
+  for (let i = 0; i < 5; i++) {
+    await submit(`still wrong ${i}`);
+    await page.getByText('Incorrect password', { exact: true }).waitFor({ timeout: 30_000 });
+  }
+  await submit(password);
+  try {
+    await page.getByText('Too many attempts', { exact: true }).waitFor({ timeout: 30_000 });
+  } catch {
+    fail('"Too many attempts" did not appear once the daemon rate-limited this device');
+    return;
+  }
+  await shootBothSchemes(page, 'password-locked');
+  if (await assertTasks(page)) await shootBothSchemes(page, 'password-tasks');
+}
+
+/**
  * ADR-0031 P13b's device lifecycle in the browser, against the real relay and
  * daemon hub: Connect -> "Waiting for approval" (with the approve command
  * naming this device) -> `approve` on the daemon -> the task list appears by
@@ -349,6 +410,7 @@ async function run() {
 
   let harness = null;
   let outdated = null;
+  let protectedDaemon = null;
   let seeded = null;
   try {
     for (const scheme of ['light', 'dark']) {
@@ -396,12 +458,27 @@ async function run() {
       } finally {
         rmSync(agentDir, { recursive: true, force: true });
       }
+
+      if (await harnessHasPasswordFlag()) {
+        const secret = 'correct horse battery staple';
+        protectedDaemon = await startHarness(['-password', secret, '-window-max', '1']);
+        const pwContext = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+        const pwPage = await pwContext.newPage();
+        trackErrors(pwPage, 'password');
+        await pwPage.goto(url, { waitUntil: 'load' });
+        await pwPage.getByText('smind pairing', { exact: true }).waitFor({ timeout: 20_000 });
+        await daemonPassword(pwPage, protectedDaemon, secret);
+        await pwContext.close();
+      } else {
+        console.log('skipping the daemon-password stage: this tree\'s devharness has no -password (ADR-0031 P13c daemon side)');
+      }
     }
   } finally {
     await browser.close();
     server.close();
     harness?.cleanup();
     outdated?.cleanup();
+    protectedDaemon?.cleanup();
     seeded?.cleanup();
   }
 
