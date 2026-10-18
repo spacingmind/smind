@@ -701,6 +701,7 @@ function makeStyles(theme: AppTheme) {
     composeRow: {
       flexDirection: 'row',
       alignItems: 'flex-end',
+      gap: theme.spacing[2],
       borderTopWidth: 1,
       borderTopColor: theme.border,
       paddingTop: theme.spacing[2],
@@ -709,7 +710,6 @@ function makeStyles(theme: AppTheme) {
     composeWrap: {
       flex: 1,
       maxHeight: 120,
-      marginRight: theme.spacing[2],
     },
     sendHost: {
       alignSelf: 'flex-end',
