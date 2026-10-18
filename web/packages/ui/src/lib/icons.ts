@@ -53,6 +53,7 @@ import {
   FolderTree,
   Gauge,
   GitBranch,
+  GitCommitHorizontal,
   GitCompare,
   Globe,
   Link2,
@@ -177,6 +178,8 @@ export const Icons = {
   toolGroup: Boxes,
   tool: Wrench,
   branch: GitBranch,
+  /** O1 provenance: a run's worktree commit. */
+  commit: GitCommitHorizontal,
   groupByStatus: ListChecks,
   groupByWorkspace: FolderGit2,
   web: Globe,

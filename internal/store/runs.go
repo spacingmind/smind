@@ -59,6 +59,48 @@ func (s *Store) UpdateRunPermission(id, permissionMode string, autoAccept bool) 
 	return nil
 }
 
+// RunProvenance is the git state of a run's worktree at a capture point
+// (O1): BaseSHA/HeadSHA are the full commit SHAs at the start and at the
+// terminal state, Dirty the worktree's dirty state at the latest
+// successful capture. Every field is nil ("unknown") rather than a zero
+// value when git couldn't be read.
+type RunProvenance struct {
+	BaseSHA *string
+	HeadSHA *string
+	Dirty   *bool
+}
+
+// UpdateRunProvenance persists a run's provenance capture (O1). Only the
+// non-nil fields are written, so a start-time capture (base_sha + dirty)
+// and a later terminal-state capture (head_sha + dirty) each leave the
+// other's columns alone: COALESCE keeps the stored value when p's field is
+// nil. A run id that doesn't exist is an error, not a silent no-op.
+func (s *Store) UpdateRunProvenance(id string, p RunProvenance) error {
+	var dirty any
+	if p.Dirty != nil {
+		dirty = *p.Dirty
+	}
+	res, err := s.db.Exec(
+		`UPDATE runs SET
+			base_sha = COALESCE(?, base_sha),
+			head_sha = COALESCE(?, head_sha),
+			dirty = COALESCE(?, dirty)
+		 WHERE id = ?`,
+		p.BaseSHA, p.HeadSHA, dirty, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update run %q provenance: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update run %q provenance: rows affected: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("update run %q provenance: no such run", id)
+	}
+	return nil
+}
+
 // MarkRunningRunsInterrupted transitions every run row still status =
 // "running" to "interrupted" -- called once at daemon startup, before any
 // new Run exists, since a "running" row surviving to a fresh process start
@@ -81,7 +123,7 @@ func (s *Store) MarkRunningRunsInterrupted(interruptedStatus string) (int64, err
 // GetRun returns the run with the given id.
 func (s *Store) GetRun(id string) (Run, error) {
 	row := s.db.QueryRow(
-		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model
+		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty
 		 FROM runs WHERE id = ?`, id,
 	)
 	r, err := scanRun(row)
@@ -95,7 +137,7 @@ func (s *Store) GetRun(id string) (Run, error) {
 // used to rehydrate internal/runs.Registry's in-memory map at startup.
 func (s *Store) ListRecentRuns(limit int) ([]Run, error) {
 	rows, err := s.db.Query(
-		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model
+		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty
 		 FROM runs ORDER BY started_at DESC LIMIT ?`, limit,
 	)
 	if err != nil {
@@ -158,8 +200,11 @@ func scanRun(row rowScanner) (Run, error) {
 	var chatID sql.NullInt64
 	var finishedAt sql.NullTime
 	var model sql.NullString
+	var baseSHA, headSHA sql.NullString
+	var dirty sql.NullBool
 	if err := row.Scan(&r.ID, &r.TaskID, &chatID, &r.Provider, &r.Prompt, &r.Status,
-		&r.StartedAt, &finishedAt, &r.StopReason, &r.ErrMsg, &r.PermissionMode, &r.AutoAccept, &model); err != nil {
+		&r.StartedAt, &finishedAt, &r.StopReason, &r.ErrMsg, &r.PermissionMode, &r.AutoAccept, &model,
+		&baseSHA, &headSHA, &dirty); err != nil {
 		return Run{}, err
 	}
 	// NULL decodes as ChatID 0 ("unknown"/pre-chats) -- see CreateRun's
@@ -170,5 +215,16 @@ func scanRun(row rowScanner) (Run, error) {
 	r.ChatID = chatID.Int64
 	r.FinishedAt = nullToTimePtr(finishedAt)
 	r.Model = model.String
+	r.BaseSHA = nullToStringPtr(baseSHA)
+	r.HeadSHA = nullToStringPtr(headSHA)
+	r.Dirty = nullBoolPtr(dirty)
 	return r, nil
+}
+
+func nullBoolPtr(n sql.NullBool) *bool {
+	if !n.Valid {
+		return nil
+	}
+	v := n.Bool
+	return &v
 }

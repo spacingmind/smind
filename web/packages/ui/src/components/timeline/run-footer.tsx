@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Icons } from "@/lib/icons";
 
 import { RunUsagePill } from "@/components/run-usage-pill";
+import { RunProvenance, provenanceSha } from "@/components/timeline/run-provenance";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
@@ -127,6 +128,11 @@ export function RunFooter<T extends RunFooterRun>({
         {!running && view.duration && (
           <span data-testid="run-elapsed" title={view.durationTitle ?? undefined} className={SEGMENT}>
             {view.duration}
+          </span>
+        )}
+        {provenanceSha(run.status, run.baseSha, run.headSha) !== undefined && (
+          <span className={SEGMENT}>
+            <RunProvenance baseSha={run.baseSha} headSha={run.headSha} dirty={run.dirty} status={run.status} />
           </span>
         )}
         {run.usage !== undefined && (

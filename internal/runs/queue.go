@@ -126,6 +126,14 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		return StartOutcome{}, err
 	}
 
+	// O1 provenance: same worktree resolution Start does, for the
+	// immediate-start run this path builds itself (the queued path's
+	// delivery goes through Start, which sets its own).
+	worktree := ""
+	if t, terr := wm.GetTask(taskID); terr == nil && t.WorktreePath != nil {
+		worktree = *t.WorktreePath
+	}
+
 	runCtx, cancel := context.WithCancel(ctx)
 	r := &run{
 		taskID:             taskID,
@@ -136,6 +144,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		perm:               perm,
 		thinkingLevel:      thinkingLevel,
 		model:              model,
+		worktree:           worktree,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
 		cancel:             cancel,
