@@ -1,5 +1,6 @@
 //! Native gRPC transport to the relay (ADR-0007 amendment, 2026-09-25):
-//! TLS with pairing-time fingerprint pinning (ADR-0011), the admission
+//! TLS with pairing-time fingerprint pinning (ADR-0011) or, for a relay with
+//! a real certificate, system-roots CA verification (ADR-0031 P12c), the admission
 //! challenge-response, and the reconnect/resume loop that keeps a
 //! `Channel<DataFrameTransport>` (see `crate::relay::channel`) alive
 //! across transport-level drops, mirroring `internal/relay/bridge.Run`
@@ -68,7 +69,7 @@ pub fn derive_native_grpc_address(relay_grpc_web_url: &str) -> Result<String, St
     Ok(format!("{host}:{native_port}"))
 }
 
-// --- TLS: pin the relay's certificate fingerprint (ADR-0011), no CA ---
+// --- TLS: pin the relay's certificate fingerprint (ADR-0011), or CA mode ---
 
 #[derive(Debug)]
 struct PinnedFingerprintVerifier {
@@ -131,45 +132,116 @@ impl rustls::client::danger::ServerCertVerifier for PinnedFingerprintVerifier {
     }
 }
 
-/// dial connects to the relay at `native_addr` (host:port), pinning the
-/// TLS certificate fingerprint (hex SHA-256 of the DER cert, from
-/// `RelayPairing::relay_fingerprint`) instead of trusting any CA —
-/// mirrors `internal/relay/client.Dial` (Go) exactly, but via a custom
-/// rustls connector rather than tonic's built-in TLS feature (see the
-/// ADR-0007 amendment: this is a plain native-gRPC dial, no grpc-web).
-pub async fn dial(native_addr: &str, fingerprint_hex: &str) -> Result<GrpcChannel, String> {
-    let fingerprint: [u8; 32] = hex_decode(fingerprint_hex)?
-        .try_into()
-        .map_err(|_| format!("relay client: bad fingerprint {fingerprint_hex:?}"))?;
+/// How the relay's certificate is verified (mirrors Go's
+/// `internal/relay/client.Dial`, ADR-0031 P12c).
+#[derive(Debug, PartialEq, Eq)]
+enum TlsMode {
+    /// Empty fingerprint: the full chain and the host name against the
+    /// system roots, as for any HTTPS site. Nothing is skipped.
+    Ca,
+    /// A 64-hex fingerprint: pin the leaf (SHA-256 of the DER end-entity)
+    /// and trust no CA.
+    Pin([u8; 32]),
+}
 
+/// parse_tls_mode is the three-way decision. A malformed fingerprint is an
+/// error, NEVER a fallback to CA mode.
+fn parse_tls_mode(fingerprint_hex: &str) -> Result<TlsMode, String> {
+    if fingerprint_hex.is_empty() {
+        return Ok(TlsMode::Ca);
+    }
+    let bad = || format!("relay client: bad fingerprint {fingerprint_hex:?}");
+    // Exactly 64 ASCII hex digits (checked first: hex_decode slices by byte).
+    if fingerprint_hex.len() != 64 || !fingerprint_hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(bad());
+    }
+    let fingerprint: [u8; 32] = hex_decode(fingerprint_hex).map_err(|_| bad())?.try_into().map_err(|_| bad())?;
+    Ok(TlsMode::Pin(fingerprint))
+}
+
+/// native_roots loads the operating system's trust store (the same roots the
+/// Go client uses, so a relay whose certificate comes from a CA the user
+/// installed in their OS verifies). Deliberately not webpki-roots (it would
+/// ignore the OS store) and not rustls-platform-verifier (Apple/Windows
+/// policy engines add rules, such as macOS's private-CA lifetime limits, that
+/// would make behaviour platform-dependent). The cost: no OS revocation
+/// checking (no CRL/OCSP). Loaded per dial attempt; reconnects are rare.
+fn native_roots() -> Result<rustls::RootCertStore, String> {
+    let loaded = rustls_native_certs::load_native_certs();
+    let mut roots = rustls::RootCertStore::empty();
+    let (added, _ignored) = roots.add_parsable_certificates(loaded.certs);
+    if added == 0 {
+        return Err("relay client: no system root certificates could be loaded".to_string());
+    }
+    Ok(roots)
+}
+
+/// tls_config builds the client TLS configuration for `mode`. In CA mode
+/// `roots` replaces the system roots (tests with a private CA); `None` loads
+/// them. In pin mode `roots` is ignored: no CA is trusted.
+fn tls_config(mode: TlsMode, roots: Option<Arc<rustls::RootCertStore>>) -> Result<rustls::ClientConfig, String> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let verifier = Arc::new(PinnedFingerprintVerifier {
-        fingerprint,
-        provider: provider.clone(),
-    });
-    let mut tls_config = rustls::ClientConfig::builder_with_provider(provider)
+    let builder = rustls::ClientConfig::builder_with_provider(provider.clone())
         .with_protocol_versions(&[&rustls::version::TLS13])
-        .map_err(|e| format!("relay client: tls config: {e}"))?
-        .dangerous()
-        .with_custom_certificate_verifier(verifier)
-        .with_no_client_auth();
+        .map_err(|e| format!("relay client: tls config: {e}"))?;
+    let mut tls_config = match mode {
+        TlsMode::Pin(fingerprint) => builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(PinnedFingerprintVerifier { fingerprint, provider }))
+            .with_no_client_auth(),
+        TlsMode::Ca => {
+            let roots = match roots {
+                Some(roots) => roots,
+                None => Arc::new(native_roots()?),
+            };
+            let verifier = rustls::client::WebPkiServerVerifier::builder_with_provider(roots, provider)
+                .build()
+                .map_err(|e| format!("relay client: tls verifier: {e}"))?;
+            builder.with_webpki_verifier(verifier).with_no_client_auth()
+        }
+    };
     // grpc-go's server-side transport credentials require ALPN "h2" to
     // pick HTTP/2 -- without it the TLS handshake completes but the
     // server closes the connection as soon as we speak HTTP/2 on it
     // (observed as a broken-pipe error on the very first RPC).
     tls_config.alpn_protocols = vec![b"h2".to_vec()];
-    let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
+    Ok(tls_config)
+}
 
-    let host = native_addr
-        .rsplit_once(':')
-        .map(|(h, _)| h.to_string())
-        .unwrap_or_else(|| native_addr.to_string());
-    let server_name = rustls::pki_types::ServerName::try_from(host)
+/// server_name is the TLS server name for `native_addr` (host:port): a DNS
+/// name, or an IP literal (verified against the certificate's IP SANs).
+fn server_name(native_addr: &str) -> Result<rustls::pki_types::ServerName<'static>, String> {
+    let host = native_addr.rsplit_once(':').map(|(h, _)| h).unwrap_or(native_addr);
+    let host = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host);
+    Ok(rustls::pki_types::ServerName::try_from(host.to_string())
         .map_err(|e| format!("relay client: server name from {native_addr:?}: {e}"))?
-        .to_owned();
+        .to_owned())
+}
+
+/// dial connects to the relay at `native_addr` (host:port). With a pairing's
+/// `relay_fingerprint` (hex SHA-256 of the DER leaf) it pins that leaf and
+/// trusts no CA (ADR-0011); with an EMPTY fingerprint it is CA mode: the
+/// chain and host name are verified against the system roots over TLS 1.3
+/// (ADR-0031 P12c). A malformed fingerprint is an error, never CA mode. This
+/// mirrors `internal/relay/client.Dial` (Go), but via a custom rustls
+/// connector rather than tonic's built-in TLS feature (see the ADR-0007
+/// amendment: this is a plain native-gRPC dial, no grpc-web).
+pub async fn dial(native_addr: &str, fingerprint_hex: &str) -> Result<GrpcChannel, String> {
+    dial_with_roots(native_addr, fingerprint_hex, None).await
+}
+
+/// dial_with_roots is `dial` with CA mode's roots replaceable (a private CA in
+/// tests); `None` loads the system roots.
+pub async fn dial_with_roots(
+    native_addr: &str,
+    fingerprint_hex: &str,
+    roots: Option<Arc<rustls::RootCertStore>>,
+) -> Result<GrpcChannel, String> {
+    let tls_config = tls_config(parse_tls_mode(fingerprint_hex)?, roots)?;
+    let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
+    let server_name = server_name(native_addr)?;
 
     let dial_addr = native_addr.to_string();
-    let connector = connector.clone();
     let svc = tower::service_fn(move |_uri: Uri| {
         let connector = connector.clone();
         let dial_addr = dial_addr.clone();
@@ -1932,5 +2004,230 @@ mod tests {
     fn hex_round_trip() {
         let b = [0xde, 0xad, 0xbe, 0xef];
         assert_eq!(hex_decode(&hex_encode(&b)).unwrap(), b);
+    }
+}
+
+#[cfg(test)]
+mod tls_tests {
+    use super::*;
+    use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair, SanType};
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName};
+    use std::net::{IpAddr, Ipv4Addr};
+
+    /// A private CA that signs leaf certificates for the tests.
+    struct TestCa {
+        params: CertificateParams,
+        cert: rcgen::Certificate,
+        key: KeyPair,
+    }
+
+    struct Leaf {
+        der: CertificateDer<'static>,
+        key: PrivateKeyDer<'static>,
+    }
+
+    impl TestCa {
+        fn new() -> TestCa {
+            Self::named("test relay CA")
+        }
+
+        fn named(cn: &str) -> TestCa {
+            let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
+            params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+            params.distinguished_name.push(rcgen::DnType::CommonName, cn);
+            let key = KeyPair::generate().unwrap();
+            let cert = params.self_signed(&key).unwrap();
+            TestCa { params, cert, key }
+        }
+
+        fn roots(&self) -> Arc<rustls::RootCertStore> {
+            let mut roots = rustls::RootCertStore::empty();
+            roots.add(self.cert.der().clone()).unwrap();
+            Arc::new(roots)
+        }
+
+        fn leaf_with(&self, sans: Vec<SanType>, tweak: impl FnOnce(&mut CertificateParams)) -> Leaf {
+            let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
+            params.subject_alt_names = sans;
+            tweak(&mut params);
+            let key = KeyPair::generate().unwrap();
+            let issuer = Issuer::from_params(&self.params, &self.key);
+            let cert = params.signed_by(&key, &issuer).unwrap();
+            Leaf { der: cert.der().clone(), key: PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.serialize_der())) }
+        }
+    }
+
+    fn self_signed(sans: Vec<SanType>) -> Leaf {
+        let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
+        params.subject_alt_names = sans;
+        let key = KeyPair::generate().unwrap();
+        let cert = params.self_signed(&key).unwrap();
+        Leaf { der: cert.der().clone(), key: PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.serialize_der())) }
+    }
+
+    fn dns(name: &str) -> SanType {
+        SanType::DnsName(name.try_into().unwrap())
+    }
+
+    fn fingerprint(der: &CertificateDer<'_>) -> String {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(der.as_ref()).iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// Serves TLS 1.3 (ALPN h2) with `leaf` on a free port; completes handshakes only.
+    async fn tls_server(leaf: &Leaf) -> std::net::SocketAddr {
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let mut config = rustls::ServerConfig::builder_with_provider(provider)
+            .with_protocol_versions(&[&rustls::version::TLS13])
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(vec![leaf.der.clone()], leaf.key.clone_key())
+            .unwrap();
+        config.alpn_protocols = vec![b"h2".to_vec()];
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((tcp, _)) = listener.accept().await {
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    if let Ok(mut tls) = acceptor.accept(tcp).await {
+                        use tokio::io::AsyncReadExt;
+                        let mut buf = [0u8; 1];
+                        let _ = tls.read(&mut buf).await;
+                    }
+                });
+            }
+        });
+        addr
+    }
+
+    /// handshake dials `addr` presenting `name`, with the config `tls_config`
+    /// builds for `fingerprint` and `roots`.
+    async fn handshake(addr: std::net::SocketAddr, name: ServerName<'static>, fingerprint: &str, roots: Option<Arc<rustls::RootCertStore>>) -> Result<(), String> {
+        let config = tls_config(parse_tls_mode(fingerprint)?, roots)?;
+        let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
+        let tcp = tokio::net::TcpStream::connect(addr).await.map_err(|e| e.to_string())?;
+        let mut tls = connector.connect(name, tcp).await.map_err(|e| e.to_string())?;
+        // TLS 1.3 reports a rejected certificate on the first read after the
+        // handshake as an alert; a verified one just waits for the server.
+        let _ = &mut tls;
+        Ok(())
+    }
+
+    fn name(n: &str) -> ServerName<'static> {
+        ServerName::try_from(n.to_string()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn ca_mode_accepts_a_valid_chain_for_the_host() {
+        let ca = TestCa::new();
+        let leaf = ca.leaf_with(vec![dns("relay.test")], |_| {});
+        let addr = tls_server(&leaf).await;
+        handshake(addr, name("relay.test"), "", Some(ca.roots())).await.expect("a chain from the trusted CA for the right host");
+    }
+
+    #[tokio::test]
+    async fn ca_mode_rejects_wrong_host() {
+        let ca = TestCa::new();
+        let leaf = ca.leaf_with(vec![dns("relay.test")], |_| {});
+        let addr = tls_server(&leaf).await;
+        let err = handshake(addr, name("other.test"), "", Some(ca.roots())).await.unwrap_err();
+        assert!(err.to_lowercase().contains("not valid for") || err.contains("NotValidForName"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn ca_mode_rejects_expired_certificate() {
+        let ca = TestCa::new();
+        let leaf = ca.leaf_with(vec![dns("relay.test")], |p| {
+            p.not_before = rcgen::date_time_ymd(2000, 1, 1);
+            p.not_after = rcgen::date_time_ymd(2001, 1, 1);
+        });
+        let addr = tls_server(&leaf).await;
+        let err = handshake(addr, name("relay.test"), "", Some(ca.roots())).await.unwrap_err();
+        assert!(err.to_lowercase().contains("expired"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn ca_mode_rejects_self_signed_without_a_pin() {
+        let leaf = self_signed(vec![dns("relay.test")]);
+        let addr = tls_server(&leaf).await;
+        let ca = TestCa::named("some other CA"); // trusts some CA, just not this certificate
+        let err = handshake(addr, name("relay.test"), "", Some(ca.roots())).await.unwrap_err();
+        assert!(err.to_lowercase().contains("unknownissuer") || err.to_lowercase().contains("unknown"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn ca_mode_rejects_a_chain_from_an_unknown_ca() {
+        let signing_ca = TestCa::new();
+        let trusted_ca = TestCa::named("some other CA");
+        let leaf = signing_ca.leaf_with(vec![dns("relay.test")], |_| {});
+        let addr = tls_server(&leaf).await;
+        let err = handshake(addr, name("relay.test"), "", Some(trusted_ca.roots())).await.unwrap_err();
+        assert!(err.to_lowercase().contains("unknown"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn ca_mode_accepts_ip_san_for_an_ip_target() {
+        let ca = TestCa::new();
+        let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let leaf = ca.leaf_with(vec![SanType::IpAddress(ip)], |_| {});
+        let addr = tls_server(&leaf).await;
+        // The target is an IP literal: the server name is an IP address.
+        let n = server_name(&addr.to_string()).unwrap();
+        assert!(matches!(n, ServerName::IpAddress(_)));
+        handshake(addr, n, "", Some(ca.roots())).await.expect("IP SAN matches the IP target");
+        // A DNS-only certificate does not satisfy an IP target.
+        let dns_only = ca.leaf_with(vec![dns("relay.test")], |_| {});
+        let addr2 = tls_server(&dns_only).await;
+        assert!(handshake(addr2, server_name(&addr2.to_string()).unwrap(), "", Some(ca.roots())).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn pin_mode_still_accepts_the_pinned_leaf_and_rejects_another() {
+        let leaf = self_signed(vec![dns("relay.test")]);
+        let addr = tls_server(&leaf).await;
+        let pin = fingerprint(&leaf.der);
+        handshake(addr, name("relay.test"), &pin, None).await.expect("the pinned leaf");
+        // The pin does not look at names either (as before).
+        handshake(addr, name("anything.test"), &pin, None).await.expect("pin mode ignores names");
+        let other = self_signed(vec![dns("relay.test")]);
+        let err = handshake(addr, name("relay.test"), &fingerprint(&other.der), None).await.unwrap_err();
+        assert!(err.contains("does not match pin"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn pin_mode_ignores_roots() {
+        let ca = TestCa::new();
+        let leaf = ca.leaf_with(vec![dns("relay.test")], |_| {});
+        let addr = tls_server(&leaf).await;
+        let wrong_pin = "ab".repeat(32);
+        let err = handshake(addr, name("relay.test"), &wrong_pin, Some(ca.roots())).await.unwrap_err();
+        assert!(err.contains("does not match pin"), "a trusted CA must not rescue a wrong pin: {err}");
+        // And the right pin works with no roots at all.
+        handshake(addr, name("relay.test"), &fingerprint(&leaf.der), None).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn malformed_fingerprint_is_an_error_not_ca_mode() {
+        let ca = TestCa::new();
+        let leaf = ca.leaf_with(vec![dns("relay.test")], |_| {});
+        let addr = tls_server(&leaf).await;
+        let valid = fingerprint(&leaf.der);
+        for bad in [
+            &valid[..63],                    // odd length
+            &format!("{}zz", &valid[..62]),  // non-hex
+            &valid[..62],                    // 31 bytes
+            &format!("{valid}00"),           // 33 bytes
+            " ",
+            "é".repeat(32).as_str(),         // multi-byte, even length
+        ] {
+            let err = handshake(addr, name("relay.test"), bad, Some(ca.roots())).await.unwrap_err();
+            assert!(err.contains("bad fingerprint"), "{bad:?} -> {err}");
+            // The public entry point refuses too, before dialing anything.
+            let dialed = dial_with_roots(&addr.to_string(), bad, Some(ca.roots())).await.unwrap_err();
+            assert!(dialed.contains("bad fingerprint"), "{dialed}");
+        }
+        assert_eq!(parse_tls_mode("").unwrap(), TlsMode::Ca);
     }
 }

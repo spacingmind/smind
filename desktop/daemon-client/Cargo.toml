@@ -31,8 +31,10 @@ http = "1.5.0"
 tonic-prost = "0.14.6"
 async-trait = "0.1.92"
 tokio-stream = "0.1.19"
+rustls-native-certs = "0.8.5"
 
 [dev-dependencies]
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
 tempfile = "3"
 # paused-clock tests (`start_paused`)
 tokio = { version = "1", features = ["test-util"] }
