@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppUpdateCheck, AppUpdateProgress } from "@/lib/platform";
+import rustAvailable from "@/lib/__fixtures__/app-update-available.json";
 
 // `@/lib/platform` is mocked per scenario (`isDesktop` is a module-load
 // constant), the components imported fresh, like desktop-daemon-banner.test.tsx.
@@ -284,6 +285,22 @@ describe("DesktopUpdateDialog", () => {
     await mountDialog();
     expect(browserMocks.check).not.toHaveBeenCalled();
     expect(browserMocks.install).not.toHaveBeenCalled();
+  });
+
+  it("update dialog renders the Rust-produced available result", async () => {
+    const check = rustAvailable as unknown as AppUpdateCheck;
+    const mocks = mockPlatform({ check: () => Promise.resolve(check) });
+    await mountDialog();
+    expect(screen.getByText("Update available")).toBeInTheDocument();
+    expect(screen.getByText(/sMind v0\.10\.1 is available \(you have v0\.10\.0\)/)).toBeInTheDocument();
+    const notes = screen.getByTestId("desktop-update-dialog-notes");
+    expect(within(notes).getAllByRole("heading", { name: "Features" })).toHaveLength(1);
+    expect(within(notes).getAllByRole("heading", { name: "Bug Fixes" })).toHaveLength(1);
+    expect(notes).toHaveTextContent("hermetic updater e2e");
+    expect(notes).not.toHaveTextContent("## [0.10.1]");
+    expect(notes).not.toHaveTextContent("abc1234");
+    expect(within(notes).getByRole("link", { name: "#999" })).toBeInTheDocument();
+    expect(mocks.install).not.toHaveBeenCalled();
   });
 
   it("dismissing during download only hides it", async () => {
