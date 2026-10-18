@@ -13,16 +13,27 @@ import (
 type Reason string
 
 const (
-	ReasonBadName        Reason = "bad_name"
-	ReasonBodyTooLong    Reason = "body_too_long"
-	ReasonBadDescription Reason = "bad_description"
-	ReasonBadCategory    Reason = "bad_category"
-	ReasonBadFrontmatter Reason = "bad_frontmatter"
-	ReasonURLLink        Reason = "url_link"
-	ReasonGuard          Reason = "guard"
-	ReasonSecret         Reason = "secret_hit"
-	ReasonAbsPath        Reason = "abs_path"
-	ReasonHostName       Reason = "host_name"
+	ReasonBadName             Reason = "bad_name"
+	ReasonBodyTooLong         Reason = "body_too_long"
+	ReasonBadDescription      Reason = "bad_description"
+	ReasonBadCategory         Reason = "bad_category"
+	ReasonBadFrontmatter      Reason = "bad_frontmatter"
+	ReasonURLLink             Reason = "url_link"
+	ReasonGuard               Reason = "guard"
+	ReasonSecret              Reason = "secret_hit"
+	ReasonAbsPath             Reason = "abs_path"
+	ReasonHostName            Reason = "host_name"
+	ReasonBadAction           Reason = "bad_action"
+	ReasonNameCollision       Reason = "name_collision"
+	ReasonBadAbsorbedInto     Reason = "bad_absorbed_into"
+	ReasonAmbiguousPatch      Reason = "ambiguous_patch"
+	ReasonPatchTargetMissing  Reason = "patch_target_missing"
+	ReasonDuplicate           Reason = "duplicate"
+	ReasonNoProvenance        Reason = "no_provenance"
+	ReasonBadEvidence         Reason = "bad_evidence"
+	ReasonEvidenceNotVerbatim Reason = "evidence_not_verbatim"
+	ReasonHiddenText          Reason = "hidden_text"
+	ReasonBadReason           Reason = "bad_reason"
 )
 
 // Finding is one gate rejection reason. Detail is short and never echoes more
