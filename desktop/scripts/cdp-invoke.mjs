@@ -84,7 +84,17 @@ for (;;) {
   await new Promise((r) => setTimeout(r, 500));
 }
 
-const reply = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+let settleTimer;
+const reply = await Promise.race([
+  send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }),
+  new Promise(() => {
+    settleTimer = setTimeout(() => {
+      console.error("the call did not settle within the timeout");
+      process.exit(2);
+    }, Math.max(1000, deadline - Date.now()));
+  }),
+]);
+clearTimeout(settleTimer);
 ws.close();
 if (reply.result?.exceptionDetails) {
   const d = reply.result.exceptionDetails;

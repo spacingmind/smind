@@ -64,11 +64,9 @@ function Stop-App {
     WaitFor 'the app to exit' { -not (Get-Process smind-desktop -ErrorAction SilentlyContinue) } 30
 }
 function Invoke-Tauri($cmd) {
-    $out = & node desktop/scripts/cdp-invoke.mjs $CdpPort "window.__TAURI_INTERNALS__.invoke('$cmd')" 120 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        $err = & node desktop/scripts/cdp-invoke.mjs $CdpPort "window.__TAURI_INTERNALS__.invoke('$cmd')" 10 2>&1 | Out-String
-        Fail "invoke '$cmd' exited $LASTEXITCODE`: $err"
-    }
+    $all = & node desktop/scripts/cdp-invoke.mjs $CdpPort "window.__TAURI_INTERNALS__.invoke('$cmd')" 120 2>&1
+    if ($LASTEXITCODE -ne 0) { Fail "invoke '$cmd' exited $LASTEXITCODE`: $($all | Out-String)" }
+    $out = $all | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }
     return ($out | Out-String) | ConvertFrom-Json
 }
 # Used only inside string concatenations below, which PSScriptAnalyzer's
@@ -234,12 +232,7 @@ try {
     Check (Test-Path $binExe) 'the uninstaller deleted the managed bin\smind.exe'
     Check ((Get-Sha $binExe) -eq $newSidecarHash) 'the managed bin\smind.exe changed during uninstall'
     Check (Test-Path $managedJson) 'the uninstaller deleted managed.json'
-    if (Test-Path "$appDir\smind.log") {
-        Write-Host "smind.log present: $((Get-Item "$appDir\smind.log").Length) bytes"
-    } else {
-        Write-Host "smind.log does not exist after uninstall; dir listing:"
-        Get-ChildItem $appDir -Recurse | ForEach-Object { Write-Host $_.FullName }
-    }
+    Check (Test-Path "$appDir\smind.log") 'the uninstaller deleted smind.log'
     Check (Test-Path "$dataDir\e2e-marker.txt") 'the uninstaller deleted the e2e marker'
     Check ((Get-Content "$dataDir\e2e-marker.txt" -Raw).Trim() -eq 'keep me') 'the e2e marker changed'
     Check (Test-Path "$dataDir\token") 'the uninstaller deleted the auth token'
@@ -251,17 +244,25 @@ try {
     Remove-Item "$appDir\uninstall.exe" -Force  # left behind by the in-place run
     $summary.Add("phase C: app uninstalled, managed daemon (pid $newProcId) and all user data survived")
 } finally {
-    Disable-Cdp
-    Stop-App
-    Get-CimInstance Win32_Process -Filter "Name='smind.exe'" |
-        Where-Object { $_.ExecutablePath -eq $binExe } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    if (Test-Path "$appDir\uninstall.exe") {
-        Start-Process "$appDir\uninstall.exe" -ArgumentList '/S' -Wait | Out-Null
-    }
-    if ($env:GITHUB_STEP_SUMMARY) {
-        Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value (($summary | ForEach-Object { "- $_" }) -join "`n") -Encoding utf8
-    }
+    # Each cleanup step is isolated so one failure cannot skip the rest or
+    # replace the original error.
+    try { Disable-Cdp } catch { Write-Host "cleanup: $_" }
+    try { Stop-App } catch { Write-Host "cleanup: $_" }
+    try {
+        Get-CimInstance Win32_Process -Filter "Name='smind.exe'" |
+            Where-Object { $_.ExecutablePath -eq $binExe } |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    } catch { Write-Host "cleanup: $_" }
+    try {
+        if (Test-Path "$appDir\uninstall.exe") {
+            Start-Process "$appDir\uninstall.exe" -ArgumentList ('/S _?=' + $appDir) -Wait | Out-Null
+        }
+    } catch { Write-Host "cleanup: $_" }
+    try {
+        if ($env:GITHUB_STEP_SUMMARY) {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value (($summary | ForEach-Object { "- $_" }) -join "`n") -Encoding utf8
+        }
+    } catch { Write-Host "cleanup: $_" }
 }
 Write-Host ''
 Write-Host 'installer e2e passed'
