@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"testing"
 	"time"
 )
 
@@ -106,4 +107,29 @@ func serial() *big.Int {
 		panic(err)
 	}
 	return n
+}
+
+// ServeTLS listens on a loopback port and completes TLS handshakes with cert
+// (then hangs up), for tests of what a client makes of a relay's certificate.
+// It returns the host:port; the listener closes when the test ends.
+func ServeTLS(t testing.TB, cert tls.Certificate) string {
+	t.Helper()
+	lis, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lis.Close() })
+	go func() {
+		for {
+			c, err := lis.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				_ = c.(*tls.Conn).Handshake()
+				_ = c.Close()
+			}()
+		}
+	}()
+	return lis.Addr().String()
 }
