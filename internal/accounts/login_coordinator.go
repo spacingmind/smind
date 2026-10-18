@@ -273,8 +273,9 @@ func (c *LoginCoordinator) await(ctx context.Context, server *callbackServer, pl
 // loginId), login_wrong_method, login_attempts_exceeded (the login stays
 // pending), login_bad_redirect (counts as an attempt), state_mismatch (the
 // login stays pending) and login_already_completed (the listener or an
-// earlier paste got there first). A pasted error= is delivered like the
-// listener's, failing the login with denied. No error text carries the
+// earlier paste got there first). A pasted error= must carry the matching
+// state like any paste, and is then delivered like the listener's, failing
+// the login with denied. No error text carries the
 // pasted text, code or state.
 func (c *LoginCoordinator) Complete(loginID, redirectURL string) error {
 	c.mu.Lock()
@@ -299,7 +300,9 @@ func (c *LoginCoordinator) Complete(loginID, redirectURL string) error {
 	if err != nil {
 		return err
 	}
-	if res.errCode == "" && subtle.ConstantTimeCompare([]byte(res.state), []byte(state)) != 1 {
+	// An error= paste must prove the state too, or anyone holding the loginId
+	// could end the login.
+	if subtle.ConstantTimeCompare([]byte(res.state), []byte(state)) != 1 {
 		return &LoginError{Code: LoginCodeStateMismatch, Detail: "the pasted redirect belongs to a different login; paste the one from this login's page"}
 	}
 

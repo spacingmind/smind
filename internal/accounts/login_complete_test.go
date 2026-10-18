@@ -290,6 +290,29 @@ func TestLoginCoordinator_Complete(t *testing.T) {
 		}
 	})
 
+	t.Run("oauthComplete error paste without matching state does not fail the login", func(t *testing.T) {
+		t.Parallel()
+		coord, _, login := newCompleteCoordinator(t)
+		s := startFakeLogin(t, coord, login, "e")
+
+		requireLoginCode(t, coord.Complete(s.loginID, "http://localhost:54545/callback?error=access_denied"), LoginCodeStateMismatch)
+		requireLoginCode(t, coord.Complete(s.loginID, "http://localhost:54545/callback?error=access_denied&state=wrong"), LoginCodeStateMismatch)
+		select {
+		case o := <-s.done:
+			t.Fatalf("Login() ended after an unproven error paste: %+v", o)
+		case <-time.After(100 * time.Millisecond):
+		}
+		if pendingCount(coord) != 1 {
+			t.Fatalf("pending logins = %d, want the login still pending", pendingCount(coord))
+		}
+
+		// With the right state the error does end the login.
+		if err := coord.Complete(s.loginID, "error=access_denied&state="+s.state); err != nil {
+			t.Fatalf("Complete() error = %v", err)
+		}
+		requireLoginCode(t, s.wait(t).err, LoginCodeDenied)
+	})
+
 	t.Run("oauthComplete rejects after five attempts", func(t *testing.T) {
 		t.Parallel()
 		coord, _, login := newCompleteCoordinator(t)
