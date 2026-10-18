@@ -390,12 +390,18 @@ func LoadFile(path string) (Config, error) {
 		// The environment still applies: a container's SMIND_LISTEN and
 		// SMIND_PASSWORD must not vanish because the file cannot be read.
 		applyEnv(&cfg)
+		// Fail closed: an unreadable config.yaml may hold learning.enabled:
+		// false, so it must not leave the default (on) in effect.
+		cfg.Learning.Enabled = false
 		return cfg, fmt.Errorf("read config: %w", err)
 	}
 	if err == nil {
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
 			// Same for a typo in the file.
 			applyEnv(&cfg)
+			// Fail closed, as for an unreadable file: a typo must not
+			// switch learning on.
+			cfg.Learning.Enabled = false
 			return cfg, fmt.Errorf("parse config %s: %w", path, err)
 		}
 	}
@@ -443,7 +449,7 @@ func applyEnv(cfg *Config) {
 	applyServerEnv(&cfg.Server)
 	if v := strings.TrimSpace(os.Getenv(EnvLearning)); v != "" {
 		switch strings.ToLower(v) {
-		case "0", "false", "off":
+		case "0", "false", "off", "no", "n", "f", "disabled":
 			cfg.Learning.Enabled = false
 		}
 	}

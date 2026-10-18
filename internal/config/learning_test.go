@@ -138,3 +138,51 @@ func TestConfig_LearningEnvKillSwitch(t *testing.T) {
 		}
 	}
 }
+
+func TestConfig_LearningEnvKillSwitchAcceptedValues(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	for _, v := range []string{"0", "false", "off", "no", "n", "f", "disabled", " FALSE ", "No", "DISABLED", "Off"} {
+		t.Setenv(EnvLearning, v)
+		cfg, err := Load()
+		if err != nil || cfg.Learning.Enabled {
+			t.Errorf("SMIND_LEARNING=%q: enabled=%v err=%v, want disabled", v, cfg.Learning.Enabled, err)
+		}
+	}
+	for _, v := range []string{"1", "true", "on", "yes"} {
+		t.Setenv(EnvLearning, v)
+		cfg, err := Load()
+		if err != nil || !cfg.Learning.Enabled {
+			t.Errorf("SMIND_LEARNING=%q: enabled=%v err=%v, want enabled", v, cfg.Learning.Enabled, err)
+		}
+	}
+}
+
+func TestConfig_LearningFailsClosedOnBrokenFile(t *testing.T) {
+	t.Setenv(EnvLearning, "")
+	dir := t.TempDir()
+
+	bad := filepath.Join(dir, "bad.yaml")
+	if err := os.WriteFile(bad, []byte("learning:\n  enabled: false\nbad: [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFile(bad)
+	if err == nil {
+		t.Fatal("malformed config: want error")
+	}
+	if cfg.Learning.Enabled {
+		t.Fatal("malformed config left learning enabled")
+	}
+
+	asDir := filepath.Join(dir, "config.yaml")
+	if err := os.Mkdir(asDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadFile(asDir)
+	if err == nil {
+		t.Fatal("unreadable config: want error")
+	}
+	if cfg.Learning.Enabled {
+		t.Fatal("unreadable config left learning enabled")
+	}
+}

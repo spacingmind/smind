@@ -65,7 +65,7 @@ type LearningSimilarity struct {
 }
 
 // EnvLearning overrides learning.enabled at load time; SMIND_LEARNING=0
-// (or false/off) forces the kill switch off.
+// (or false/off/no/n/f/disabled) forces the kill switch off.
 const EnvLearning = "SMIND_LEARNING"
 
 // DefaultLearning returns the built-in learning defaults.
