@@ -1,8 +1,13 @@
 import { Icons } from "@/lib/icons";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAccounts, useProviderTestResult, useRunProviderTest } from "@/hooks/use-accounts";
+import { useAccountLogin } from "@/hooks/use-account-login";
+import { useLoginRemote } from "@/hooks/use-login-remote";
+import { DeviceCodePanel } from "@/components/connect/device-code-panel";
+import { LoginDoneNotice, LoginErrorNotice } from "@/components/connect/login-notices";
+import { PasteRedirectPanel } from "@/components/connect/paste-redirect-panel";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   Select,
   SelectContent,
@@ -21,7 +27,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
-import { externalLinkProps, openExternalUrl } from "@/lib/external-link";
+import { externalLinkProps } from "@/lib/external-link";
+import { connectMethodsFor, defaultConnectMethod, type ConnectMethod } from "@/lib/login-methods";
 import { isDesktop } from "@/lib/platform";
 import type { Account, ProviderInfo, ProviderListResult, ProviderTestResult } from "@/lib/types";
 
@@ -96,6 +103,9 @@ export function StatusDot({ result }: { result: ProviderTestResult | undefined }
  * onConnected fires after a successful connect/add so the host can
  * refresh its account list (or rely on the account.updated event).
  */
+/** How long a local browser login waits before offering the paste-the-address fallback. */
+const PASTE_HINT_DELAY_MS = 15000;
+
 export function ConnectAccountPanel({
   client,
   providers,
@@ -110,41 +120,34 @@ export function ConnectAccountPanel({
   const [credential, setCredential] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   // The base_url field is an advanced, api-key-only knob (self-hosted/local
-  // proxy endpoints) -- collapsed behind its own disclosure, nested inside
-  // the manual form, so it doesn't compete with the credential field for
-  // attention in the common case.
+  // proxy endpoints) -- collapsed behind its own disclosure so it doesn't
+  // compete with the credential field for attention in the common case.
   const [showBaseUrl, setShowBaseUrl] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  const [oauthLabel, setOauthLabel] = useState("");
-  const [connecting, setConnecting] = useState<string | null>(null);
-  const [authorizeUrl, setAuthorizeUrl] = useState<string | null>(null);
-  const [oauthError, setOauthError] = useState<string | null>(null);
-  // The in-flight account.oauthStart call's own AbortController (ui-redesign-
-  // parity Item 14: "start -> show URL -> poll -> cancel" rather than a
-  // fire-and-forget button). WsClient.callStream already treats `signal` as
-  // "send task.cancel for this request's own id and keep waiting for its
-  // terminal response" (lib/ws-client.ts's CallOptions doc comment) -- no
-  // daemon change needed, cancellation of an arbitrary in-flight request by
-  // id already exists at the wire layer (internal/wsapi/conn.go's inflight
-  // map is keyed by request id, not by method).
-  const connectAbortRef = useRef<AbortController | null>(null);
+  const [method, setMethod] = useState<ConnectMethod>("browser");
+  const [methodTouched, setMethodTouched] = useState(false);
+  const [labelTouched, setLabelTouched] = useState(false);
+  const [pasteHint, setPasteHint] = useState(false);
 
-  // Manual paste is the secondary path (only path for api-key-only
-  // providers, a fallback for oauth ones) -- collapsed by default so the
-  // primary Connect flow isn't competing with a full form for attention.
-  const [showManual, setShowManual] = useState(false);
+  const { remote, derivedRemote, setOverride } = useLoginRemote();
+  const login = useAccountLogin({
+    client,
+    onConnected: () => onConnected(),
+  });
+  const accounts = useAccounts().data ?? [];
 
   const manualProviders = credentialProviders(providers);
-  const oauthProviders = manualProviders.filter((p) => p.credentialKind === "oauth");
-  const isAPIKeyProvider =
-    manualProviders.find((p) => p.accountProvider === provider)?.credentialKind === "api-key";
+  const selectedProvider = manualProviders.find((p) => p.accountProvider === provider);
+  const methods = selectedProvider
+    ? connectMethodsFor(selectedProvider)
+    : [{ value: "api-key" as ConnectMethod, label: "API key" }];
 
-  // Keep the manual-add dropdown's selection valid as provider.list loads
-  // in (it starts empty until the caller's fetch resolves): default to the
-  // first credential-bearing provider, and only reset it if the current
-  // selection stops being one of the options.
+  // Keep the provider selection valid as provider.list loads in (it starts
+  // empty until the caller's fetch resolves): default to the first
+  // credential-bearing provider, and only reset it if the current selection
+  // stops being one of the options.
   useEffect(() => {
     setProvider((current) => {
       const options = credentialProviders(providers);
@@ -153,6 +156,41 @@ export function ConnectAccountPanel({
       return options[0].accountProvider ?? current;
     });
   }, [providers]);
+
+  // The default method follows the provider and whether the daemon is
+  // remote (device code when signing in from another device); the user's
+  // explicit choice survives a location flip but resets on provider change.
+  useEffect(() => {
+    setMethodTouched(false);
+  }, [provider]);
+
+  useEffect(() => {
+    if (methodTouched) return;
+    if (!selectedProvider) return;
+    setMethod(defaultConnectMethod(selectedProvider, remote));
+  }, [selectedProvider, remote, methodTouched]);
+
+  // The default label (account-N) follows the provider until the user
+  // edits the field; a finished login re-arms the prefill.
+  const defaultLabel = `account-${accounts.filter((a) => a.provider === provider).length + 1}`;
+
+  useEffect(() => {
+    if (!labelTouched) setLabel(defaultLabel);
+  }, [defaultLabel, labelTouched]);
+
+  useEffect(() => {
+    if (login.state.phase === "done") setLabelTouched(false);
+  }, [login.state.phase]);
+
+  // A local browser login offers the paste fallback only after it's had a
+  // fair chance to finish on its own; remote/pasteOnly logins show it at
+  // once (rendered below).
+  useEffect(() => {
+    setPasteHint(false);
+    if (login.state.phase !== "waiting" || remote || login.state.pasteOnly) return;
+    const timer = setTimeout(() => setPasteHint(true), PASTE_HINT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [login.state.phase, login.state.phase === "waiting" ? login.state.loginId : null, remote]);
 
   async function add() {
     if (!provider || !label.trim() || !credential.trim()) {
@@ -168,7 +206,7 @@ export function ConnectAccountPanel({
         credential: credential.trim(),
         ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
       });
-      setLabel("");
+      setLabelTouched(false);
       setCredential("");
       setBaseUrl("");
       onConnected();
@@ -179,220 +217,255 @@ export function ConnectAccountPanel({
     }
   }
 
-  async function connect(providerId: string) {
-    if (!oauthLabel.trim()) {
-      setOauthError("Label is required.");
+  function startLogin() {
+    if (!label.trim()) {
+      setError("Label is required.");
       return;
     }
-    setOauthError(null);
-    setAuthorizeUrl(null);
-    setConnecting(providerId);
-    const controller = new AbortController();
-    connectAbortRef.current = controller;
-    try {
-      await client!.callStream(
-        "account.oauthStart",
-        { provider: providerId, label: oauthLabel.trim() },
-        (event, params) => {
-          if (event !== "authorizeUrl") return;
-          const url = (params as { url?: string } | undefined)?.url;
-          if (!url) return;
-          setAuthorizeUrl(url);
-          // The daemon only reports the URL. A desktop build opens it itself
-          // (an event handler isn't a user gesture, so a browser would block
-          // window.open here -- the link below covers that case).
-          if (isDesktop) openExternalUrl(url);
-        },
-        { signal: controller.signal },
-      );
-      setOauthLabel("");
-      setAuthorizeUrl(null);
-      onConnected();
-    } catch (err) {
-      // A user-initiated cancel already reflects itself in the UI by
-      // clearing `connecting` below -- surfacing the resulting "cancelled"
-      // error on top of that would read as a failure the user didn't cause.
-      if (!controller.signal.aborted) {
-        setOauthError(err instanceof Error ? err.message : String(err));
-      }
-    } finally {
-      setConnecting(null);
-      connectAbortRef.current = null;
-    }
+    setError(null);
+    login.start({
+      provider,
+      label: label.trim(),
+      method: method === "api-key" ? "browser" : method,
+    });
   }
 
-  /** Cancels the in-flight OAuth login -- the "cancel" step of the start/show-URL/poll/cancel state machine. */
-  function cancelConnect() {
-    connectAbortRef.current?.abort();
-  }
+  const state = login.state;
+  const showPastePanel =
+    state.phase === "waiting" && (remote || state.pasteOnly || pasteHint);
+  const connecting = state.phase === "starting" || state.phase === "waiting" || state.phase === "device";
+  const selectedLabel = selectedProvider?.label ?? selectedProvider?.accountProvider ?? provider;
 
   return (
-    <>
-        <div className="grid gap-3 border-t pt-4">
-          <p className="text-ui-base font-medium">Connect an account</p>
-          <div className="grid gap-1">
-            <label htmlFor="account-oauth-label" className="text-ui-base font-medium">
-              Label
+    <div className="grid gap-3 border-t pt-4">
+      <p className="text-ui-base font-medium">Connect an account</p>
+      <div className="grid gap-1">
+        <label htmlFor="account-oauth-label" className="text-ui-base font-medium">
+          Label
+        </label>
+        <Input
+          id="account-oauth-label"
+          value={label}
+          onChange={(e) => {
+            setLabelTouched(true);
+            setLabel(e.target.value);
+          }}
+          placeholder="e.g. work, personal — however you'll tell accounts apart"
+        />
+      </div>
+      {manualProviders.length > 1 && (
+        <div className="grid gap-1">
+          <label htmlFor="account-provider" className="text-ui-base font-medium">
+            Provider
+          </label>
+          <Select value={provider} onValueChange={setProvider}>
+            <SelectTrigger id="account-provider" className="w-full">
+              <SelectValue placeholder="Select provider" />
+            </SelectTrigger>
+            <SelectContent>
+              {manualProviders.map((p) => (
+                <SelectItem key={p.accountProvider} value={p.accountProvider!}>
+                  {p.label ?? p.accountProvider}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      {methods.length > 1 && (
+        <div className="grid gap-1">
+          <span className="text-ui-base font-medium">Sign-in method</span>
+          <SegmentedControl
+            label="Sign-in method"
+            options={methods}
+            value={method}
+            onChange={(v) => {
+              setMethodTouched(true);
+              setMethod(v);
+            }}
+          />
+        </div>
+      )}
+      <div data-testid="login-location" className="text-ui-sm text-muted-foreground">
+        {remote ? (
+          <p className="grid gap-1">
+            <span>
+              This daemon is on another machine — finish by device code or by pasting the
+              sign-in address.
+            </span>
+            <button
+              type="button"
+              data-testid="login-location-toggle"
+              onClick={() => setOverride(derivedRemote ? "this-device" : null)}
+              className="text-left underline hover:text-foreground"
+            >
+              I&rsquo;m on the daemon&rsquo;s machine
+            </button>
+          </p>
+        ) : (
+          <button
+            type="button"
+            data-testid="login-location-toggle"
+            onClick={() => setOverride(derivedRemote ? null : "other-device")}
+            className="underline hover:text-foreground"
+          >
+            Signing in from another device?
+          </button>
+        )}
+      </div>
+      {method === "api-key" ? (
+        <div className="grid gap-3">
+          {error && <p className="text-ui-base text-destructive">{error}</p>}
+          <div className="grid gap-2">
+            <label htmlFor="account-credential" className="text-ui-base font-medium">
+              Credential
             </label>
-            <Input
-              id="account-oauth-label"
-              value={oauthLabel}
-              onChange={(e) => setOauthLabel(e.target.value)}
-              placeholder="e.g. work, personal — however you'll tell accounts apart"
+            <textarea
+              id="account-credential"
+              className="h-24 w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-1 font-mono text-ui-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              placeholder="Paste the credential JSON (or API key) — same blob the CLI reads on stdin."
+              value={credential}
+              onChange={(e) => setCredential(e.target.value)}
             />
           </div>
-          <div className="flex flex-wrap gap-2">
-            {oauthProviders.map((p) => (
-              <Button
-                key={p.accountProvider}
-                variant="outline"
-                disabled={connecting !== null}
-                data-testid={`accounts-connect-${p.accountProvider}`}
-                onClick={() => void connect(p.accountProvider!)}
+          {selectedProvider?.credentialKind === "api-key" && (
+            <div>
+              <button
+                type="button"
+                aria-expanded={showBaseUrl}
+                data-testid="accounts-base-url-toggle"
+                onClick={() => setShowBaseUrl((v) => !v)}
+                className="flex items-center gap-1 text-ui-base text-muted-foreground hover:text-foreground"
               >
-                {connecting === p.accountProvider ? "Connecting…" : `Connect ${p.label ?? p.accountProvider}`}
-              </Button>
-            ))}
+                {showBaseUrl ? <Icons.chevronDown className="size-3" /> : <Icons.chevronRight className="size-3" />}
+                Base URL (optional)
+              </button>
+              {showBaseUrl && (
+                <div className="mt-2 grid gap-1 pl-4.5">
+                  <Input
+                    id="account-base-url"
+                    aria-label="Base URL (optional)"
+                    placeholder="e.g. http://localhost:8080"
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                  />
+                  <p className="text-ui-sm text-muted-foreground">
+                    Override the upstream endpoint for this account — advanced, for
+                    self-hosted or local proxy endpoints only.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="flex justify-end">
+            <Button onClick={add} disabled={pending} data-testid="accounts-add-submit">
+              {pending ? "Adding…" : "Add account"}
+            </Button>
           </div>
-          <p className="text-ui-sm text-muted-foreground">
-            Adding a second account for a provider you're already signed into in this
-            browser may just reconnect the same one — sign out first, or use a private
-            window, to pick a different account.
-          </p>
-          {oauthError && (
-            <p className="rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-ui-base text-destructive">
-              {oauthError}
+        </div>
+      ) : (
+        <div className="grid gap-3">
+          {error && (
+            <p className="text-ui-base text-destructive">{error}</p>
+          )}
+          <div>
+            <Button
+              data-testid={`accounts-connect-${provider}`}
+              disabled={connecting}
+              onClick={startLogin}
+            >
+              {connecting ? "Connecting…" : `Connect ${selectedLabel}`}
+            </Button>
+          </div>
+          {method === "browser" && (
+            <p className="text-ui-sm text-muted-foreground">
+              Adding a second account for a provider you&rsquo;re already signed into in this
+              browser may just reconnect the same one — sign out first, or use a private
+              window, to pick a different account.
             </p>
           )}
-          {connecting && (
+          {state.phase === "starting" && (
             <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/50 px-2.5 py-1.5 text-ui-base text-muted-foreground">
-              <p>
-                {authorizeUrl ? (
-                  <>
-                    Waiting for login — {isDesktop ? "if your browser didn't open, " : ""}
-                    <a {...externalLinkProps(authorizeUrl)} className="underline">
-                      open the login page
-                    </a>
-                    .
-                  </>
-                ) : (
-                  "Starting login…"
-                )}
-              </p>
+              <p>Starting login…</p>
               <Button
                 type="button"
                 variant="outline"
                 size="xs"
                 className="shrink-0"
                 data-testid="accounts-connect-cancel"
-                onClick={cancelConnect}
+                onClick={login.cancel}
               >
                 Cancel
               </Button>
             </div>
           )}
-        </div>
-
-        <div className="border-t pt-4">
-          <button
-            type="button"
-            aria-expanded={showManual}
-            data-testid="accounts-manual-toggle"
-            onClick={() => setShowManual((v) => !v)}
-            className="flex items-center gap-1 text-ui-base text-muted-foreground hover:text-foreground"
-          >
-            {showManual ? <Icons.chevronDown className="size-3" /> : <Icons.chevronRight className="size-3" />}
-            Paste a credential instead
-          </button>
-          <p className="mt-1 pl-4.5 text-ui-sm text-muted-foreground">
-            For providers with no Connect flow yet, or to paste a credential
-            obtained elsewhere.
-          </p>
-
-          {showManual && (
-            <div className="mt-3 grid gap-3">
-              {error && <p className="text-ui-base text-destructive">{error}</p>}
-              <div className="grid gap-2">
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="grid gap-1">
-                    <label htmlFor="account-provider" className="text-ui-base font-medium">
-                      Provider
-                    </label>
-                    <Select value={provider} onValueChange={setProvider}>
-                      <SelectTrigger id="account-provider" className="w-full">
-                        <SelectValue placeholder="Select provider" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {manualProviders.map((p) => (
-                          <SelectItem key={p.accountProvider} value={p.accountProvider!}>
-                            {p.label ?? p.accountProvider}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid gap-1">
-                    <label htmlFor="account-label" className="text-ui-base font-medium">
-                      Label
-                    </label>
-                    <Input
-                      id="account-label"
-                      value={label}
-                      onChange={(e) => setLabel(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <label htmlFor="account-credential" className="text-ui-base font-medium">
-                  Credential
-                </label>
-                <textarea
-                  id="account-credential"
-                  className="h-24 w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-1 font-mono text-ui-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                  placeholder="Paste the credential JSON (or API key) — same blob the CLI reads on stdin."
-                  value={credential}
-                  onChange={(e) => setCredential(e.target.value)}
-                />
+          {state.phase === "waiting" && (
+            <div className="grid gap-2 rounded-md border bg-muted/50 px-2.5 py-1.5 text-ui-base text-muted-foreground">
+              <div className="flex items-center justify-between gap-2">
+                <p>
+                  Waiting for login — {isDesktop ? "if your browser didn't open, " : ""}
+                  <a {...externalLinkProps(state.url)} className="underline">
+                    open the login page
+                  </a>
+                  .
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  className="shrink-0"
+                  data-testid="accounts-connect-cancel"
+                  onClick={login.cancel}
+                >
+                  Cancel
+                </Button>
               </div>
-
-              {isAPIKeyProvider && (
+              {showPastePanel ? (
+                <PasteRedirectPanel
+                  onSubmit={login.complete}
+                  pending={login.pasting}
+                  error={login.pasteError}
+                  autoFocus={remote}
+                />
+              ) : (
                 <div>
                   <button
                     type="button"
-                    aria-expanded={showBaseUrl}
-                    data-testid="accounts-base-url-toggle"
-                    onClick={() => setShowBaseUrl((v) => !v)}
-                    className="flex items-center gap-1 text-ui-base text-muted-foreground hover:text-foreground"
+                    data-testid="login-trouble-toggle"
+                    onClick={() => setPasteHint(true)}
+                    className="underline hover:text-foreground"
+                    hidden={!pasteHint}
                   >
-                    {showBaseUrl ? <Icons.chevronDown className="size-3" /> : <Icons.chevronRight className="size-3" />}
-                    Base URL (optional)
+                    Having trouble? Paste the address instead
                   </button>
-                  {showBaseUrl && (
-                    <div className="mt-2 grid gap-1 pl-4.5">
-                      <Input
-                        id="account-base-url"
-                        aria-label="Base URL (optional)"
-                        placeholder="e.g. http://localhost:8080"
-                        value={baseUrl}
-                        onChange={(e) => setBaseUrl(e.target.value)}
-                      />
-                      <p className="text-ui-sm text-muted-foreground">
-                        Override the upstream endpoint for this account — advanced, for
-                        self-hosted or local proxy endpoints only.
-                      </p>
-                    </div>
-                  )}
                 </div>
               )}
-
-              <div className="flex justify-end">
-                <Button onClick={add} disabled={pending} data-testid="accounts-add-submit">
-                  {pending ? "Adding…" : "Add account"}
-                </Button>
-              </div>
             </div>
           )}
+          {state.phase === "device" && (
+            <DeviceCodePanel
+              userCode={state.userCode}
+              verificationUrl={state.verificationUrl}
+              expiresAt={state.expiresAt}
+              onCancel={login.cancel}
+            />
+          )}
+          {state.phase === "done" && (
+            <LoginDoneNotice
+              result={{
+                label: state.result.label,
+                created: state.result.created,
+                adopted: state.result.adopted,
+              }}
+              onDismiss={login.reset}
+            />
+          )}
+          {state.phase === "error" && (
+            <LoginErrorNotice message={state.message} soft={state.soft} onDismiss={login.reset} />
+          )}
         </div>
-    </>
+      )}
+    </div>
   );
 }
 
