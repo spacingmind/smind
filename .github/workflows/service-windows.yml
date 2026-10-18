@@ -1,0 +1,110 @@
+name: Service (Windows Task Scheduler)
+
+# `smind service` on Windows against the REAL Task Scheduler (ADR-0031 P9): a
+# per-user logon task on windows-latest, driven by scripts/service_smoke.ps1,
+# plus proof that registering it needs no elevation (a standard local user does
+# it) and `install.ps1 -Service` end to end. The unit tests with a fake schtasks
+# run in the normal `ci` job. Only runs when the service code (or this file)
+# changes, or on demand.
+on:
+  pull_request:
+    paths:
+      - "internal/service/**"
+      - "internal/logging/**"
+      - "cmd/smind/service*.go"
+      - "scripts/service_smoke.ps1"
+      - "scripts/service_unelevated_check.ps1"
+      - "scripts/install.ps1"
+      - ".github/workflows/service-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Go tests (service, logging, supervisor)
+        shell: pwsh
+        run: |
+          go test -count=1 ./internal/service ./internal/logging
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          go test -count=1 ./cmd/smind -run 'TestSupervise|TestServiceRun|TestService|TestStderrStill|TestDaemonLog'
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Build smind.exe
+        shell: pwsh
+        run: |
+          go build -o "$env:RUNNER_TEMP\smind.exe" ./cmd/smind
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Environment facts
+        shell: pwsh
+        run: |
+          [Environment]::OSVersion.VersionString
+          whoami
+          whoami /groups | Select-String 'Mandatory Label'
+          "session $((Get-Process -Id $PID).SessionId)"
+          exit 0
+
+      # A standard (non-admin) user registers, queries and removes the task.
+      - name: Registration needs no elevation (standard local user)
+        shell: pwsh
+        run: ./scripts/service_unelevated_check.ps1 -Exe "$env:RUNNER_TEMP\smind.exe"
+
+      - name: smind service against the real Task Scheduler
+        shell: pwsh
+        run: ./scripts/service_smoke.ps1 -Exe "$env:RUNNER_TEMP\smind.exe"
+
+      # install.ps1 -Service end to end: a local "release" (the zip built from this
+      # branch plus its checksums.txt) stands in for GitHub; the task is real.
+      - name: install.ps1 -Service (real task, local release)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $work = Join-Path $env:RUNNER_TEMP 'ps1-release'
+          New-Item -ItemType Directory -Force $work | Out-Null
+          Copy-Item "$env:RUNNER_TEMP\smind.exe" "$work\smind.exe"
+          $zip = "$work\smind_9.9.9_windows_amd64.zip"
+          Compress-Archive -Path "$work\smind.exe" -DestinationPath $zip -Force
+          $sum = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content "$work\checksums.txt" "$sum  smind_9.9.9_windows_amd64.zip" -Encoding ascii
+
+          $smindHome = Join-Path $work 'home'
+          New-Item -ItemType Directory -Force $smindHome | Out-Null
+          Set-Content "$smindHome\config.yaml" "server:`n  port: 4998" -Encoding ascii
+          $env:SMIND_HOME = $smindHome
+          $installDir = Join-Path $work 'installed'
+
+          $SmindInstallNoRun = $true
+          . ./scripts/install.ps1
+          function Invoke-SmindDownload { param([string]$Url, [string]$OutFile) Copy-Item (Join-Path $work (Split-Path $Url -Leaf)) $OutFile }
+          function Get-SmindLatestVersion { '9.9.9' }
+          function Get-SmindUserPath { '' }
+          function Set-SmindUserPath { param([string]$Value) }
+
+          Install-Smind -Version 9.9.9 -InstallDir $installDir -Service
+          $exe = Join-Path $installDir 'smind.exe'
+          if (-not (Test-Path $exe)) { throw 'smind.exe was not installed' }
+          $ok = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            try { $h = Invoke-RestMethod http://127.0.0.1:4998/healthz -TimeoutSec 2; $ok = $true; break } catch { Start-Sleep 1 }
+          }
+          if (-not $ok) { throw 'the daemon did not come up after install.ps1 -Service' }
+          if ($h.managedBy -ne 'taskscheduler') { throw "managedBy is '$($h.managedBy)'" }
+          & $exe service status
+          if ($LASTEXITCODE -ne 0) { throw "status exited $LASTEXITCODE" }
+          & $exe service uninstall
+          if ($LASTEXITCODE -ne 0) { throw "uninstall exited $LASTEXITCODE" }
+          schtasks /Query /TN smind 2>&1 | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw 'the task is still registered' }
+          Get-Process smind -ErrorAction SilentlyContinue | Stop-Process -Force
+          exit 0

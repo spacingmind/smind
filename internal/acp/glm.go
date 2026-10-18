@@ -23,7 +23,7 @@ func WithMaxTurns(n int) GLMOption {
 // the LAST model call's usage in PromptResponse.usage, so every run was
 // under-metered. 1.6.1+ accepts --max-turns; 1.11+ reports the prompt's
 // summed usage across all its model calls. Never pin below 1.11.0 (see
-// docs/plans/active/dogfood-gap-fixes.md).
+// docs/plans/completed/dogfood-gap-fixes.md).
 func GLMCommand(opts ...GLMOption) []string {
 	var o glmOptions
 	for _, opt := range opts {

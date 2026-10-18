@@ -689,7 +689,7 @@ func TestSystemdScopeAutoDetectsASystemUnit(t *testing.T) {
 }
 
 func TestNewRejectsOtherOSes(t *testing.T) {
-	if _, err := New(Env{GOOS: "windows"}); !errors.Is(err, ErrUnsupported) {
+	if _, err := New(Env{GOOS: "plan9"}); !errors.Is(err, ErrUnsupported) {
 		t.Errorf("err = %v", err)
 	}
 }

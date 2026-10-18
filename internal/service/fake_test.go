@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/xml"
 	"flag"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf16"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files")
@@ -334,3 +336,209 @@ func (te *testEnv) launchd(t *testing.T) (Manager, *fakeLaunchctl) {
 }
 
 func (te *testEnv) resetOutput() { te.out.Reset(); te.errb.Reset() }
+
+// orderLog is one chronological log shared by the fake schtasks and the other
+// Windows side effects, so a test can assert what happened BEFORE what.
+type orderLog struct {
+	mu    sync.Mutex
+	items []string
+}
+
+func (o *orderLog) add(s string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.items = append(o.items, s)
+}
+
+func (o *orderLog) index(prefix string) int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for i, it := range o.items {
+		if strings.HasPrefix(it, prefix) {
+			return i
+		}
+	}
+	return -1
+}
+
+// fakeSchtasks is a state machine for schtasks.exe: the registered XML is read
+// from the temp file /Create is given (UTF-16 with a BOM, as the real tool
+// demands) and handed back by /Query /XML.
+type fakeSchtasks struct {
+	mu             sync.Mutex
+	xml            string // "" = no task
+	daemon         *fakeDaemon
+	createDenied   bool
+	queryErr       bool
+	runFails       bool
+	endKillsDaemon bool // false = the real behaviour: /End ends conhost only
+	calls          []string
+	daemonVersion  string
+	bad            string // reason /Create rejected the file, if any
+	order          *orderLog
+	chcp           bool // the last query went through chcp 65001
+}
+
+func newFakeSchtasks(d *fakeDaemon) *fakeSchtasks {
+	return &fakeSchtasks{daemon: d, daemonVersion: "1.0.0"}
+}
+
+func (f *fakeSchtasks) called(prefix string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+func decodeUTF16(b []byte) (string, bool) {
+	if len(b) < 2 || b[0] != 0xFF || b[1] != 0xFE {
+		return "", false
+	}
+	u := make([]uint16, 0, len(b)/2)
+	for i := 2; i+1 < len(b); i += 2 {
+		u = append(u, uint16(b[i])|uint16(b[i+1])<<8)
+	}
+	return string(utf16.Decode(u)), true
+}
+
+func (f *fakeSchtasks) Run(_ context.Context, name string, args ...string) (Result, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if name == "cmd.exe" {
+		// The query goes through cmd for UTF-8: `chcp 65001 >nul & schtasks /Query /TN smind /XML`.
+		if len(args) == 2 && args[0] == "/c" && strings.HasPrefix(args[1], "chcp 65001 >nul & schtasks ") {
+			f.chcp = true
+			args = strings.Fields(strings.TrimPrefix(args[1], "chcp 65001 >nul & schtasks "))
+			name = "schtasks"
+		}
+	}
+	if name != "schtasks" {
+		return Result{}, fmt.Errorf("unexpected tool %s", name)
+	}
+	f.calls = append(f.calls, "schtasks "+strings.Join(args, " "))
+	if f.order != nil && args[0] != "/Query" {
+		f.order.add("schtasks " + args[0])
+	}
+	switch args[0] {
+	case "/Query":
+		if f.queryErr {
+			return Result{}, fmt.Errorf("schtasks.exe not found")
+		}
+		if f.xml == "" {
+			return Result{ExitCode: 1, Stderr: "ERROR: The system cannot find the file specified.\n"}, nil
+		}
+		return Result{Stdout: f.xml}, nil
+	case "/Create":
+		if f.createDenied {
+			return Result{ExitCode: 1, Stderr: "ERROR: Access is denied.\n"}, nil
+		}
+		var file string
+		for i, a := range args {
+			if a == "/XML" {
+				file = args[i+1]
+			}
+		}
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			return Result{ExitCode: 1, Stderr: "ERROR: " + err.Error()}, nil
+		}
+		x, ok := decodeUTF16(raw)
+		if !ok {
+			return Result{ExitCode: 1, Stderr: "ERROR: The task XML is malformed.\n\n(1,40)::ERROR: unable to switch the encoding\n"}, nil
+		}
+		if err := xml.Unmarshal([]byte(strings.Replace(x, `encoding="UTF-16"`, `encoding="UTF-8"`, 1)), new(struct{})); err != nil {
+			return Result{ExitCode: 1, Stderr: "ERROR: The task XML is malformed: " + err.Error()}, nil
+		}
+		f.xml = x
+		return Result{Stdout: "SUCCESS: The scheduled task \"smind\" has successfully been created.\n"}, nil
+	case "/Run":
+		if f.xml == "" || f.runFails {
+			return Result{ExitCode: 1, Stderr: "ERROR: failed\n"}, nil
+		}
+		f.daemon.set(true, true, f.daemonVersion, SupervisorTask)
+		return Result{}, nil
+	case "/End":
+		if f.endKillsDaemon {
+			f.daemon.set(false, false, "", "")
+		}
+		return Result{}, nil
+	case "/Delete":
+		if f.xml == "" {
+			return Result{ExitCode: 1, Stderr: "ERROR: The system cannot find the file specified.\n"}, nil
+		}
+		f.xml = ""
+		return Result{}, nil
+	}
+	return Result{ExitCode: 1, Stderr: "unknown verb " + args[0]}, nil
+}
+
+// winHooks are the Windows backend's other side effects, recorded.
+type winHooks struct {
+	mu            sync.Mutex
+	order         []string
+	log           *orderLog
+	shutdownErr   error
+	shutdownStops bool // does the daemon exit after the shutdown request?
+	modes         []KillMode
+	waits         []time.Duration
+	forceStopErr  error
+	hungOwned     bool // a listener that is a child of our supervisor (KillOwned may kill it)
+	daemon        *fakeDaemon
+}
+
+func (w *winHooks) shutdown(_ context.Context, port int, home string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.order = append(w.order, fmt.Sprintf("shutdown:%d:%s", port, home))
+	w.log.add("shutdown")
+	if w.shutdownErr != nil {
+		return w.shutdownErr
+	}
+	if w.shutdownStops {
+		w.daemon.set(false, false, "", "")
+	}
+	return nil
+}
+
+func (w *winHooks) forceStop(_ context.Context, exe string, port int, mode KillMode, wait time.Duration) ([]int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.order = append(w.order, fmt.Sprintf("forcestop:%s:%d:%s:%s", exe, port, mode, wait))
+	w.log.add("forcestop:" + string(mode))
+	w.modes = append(w.modes, mode)
+	w.waits = append(w.waits, wait)
+	if w.forceStopErr != nil {
+		return nil, w.forceStopErr
+	}
+	// The kill takes effect where the script would kill the listener.
+	if mode == KillOurs || (mode == KillOwned && w.hungOwned) {
+		w.daemon.set(false, false, "", "")
+	}
+	return []int{1234}, nil
+}
+
+func (te *testEnv) windows(t *testing.T) (Manager, *fakeSchtasks, *winHooks) {
+	t.Helper()
+	te.GOOS = "windows"
+	te.Username = `WORKGROUP\alice`
+	te.Exe = `C:\Users\alice\AppData\Local\Programs\smind\smind.exe`
+	te.environ["SystemRoot"] = `C:\Windows`
+	te.environ["LOCALAPPDATA"] = `C:\Users\alice\AppData\Local`
+	fs := newFakeSchtasks(te.daemon)
+	fs.order = &orderLog{}
+	hooks := &winHooks{daemon: te.daemon, shutdownStops: true, log: fs.order}
+	te.Env.Runner = fs
+	te.Env.Shutdown = hooks.shutdown
+	te.Env.ForceStop = hooks.forceStop
+	te.Env.FileExists = func(string) bool { return true }
+	m, err := New(te.Env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m, fs, hooks
+}

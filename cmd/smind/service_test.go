@@ -38,7 +38,7 @@ func runSvc(t *testing.T, args []string) (int, string) {
 // the machine running the tests.
 func isolateServiceEnv(t *testing.T) {
 	t.Helper()
-	serviceEnvHook = func(e *service.Env) { e.GOOS, e.Home = "windows", t.TempDir() }
+	serviceEnvHook = func(e *service.Env) { e.GOOS, e.Home = "plan9", t.TempDir() }
 	t.Cleanup(func() { serviceEnvHook = nil })
 }
 
@@ -349,7 +349,7 @@ func TestServiceUsageErrorsExitTwo(t *testing.T) {
 }
 
 func TestServiceOnUnsupportedOS(t *testing.T) {
-	withServiceEnv(t, "windows", scriptedRunner(func(string, ...string) service.Result { return service.Result{} }))
+	withServiceEnv(t, "plan9", scriptedRunner(func(string, ...string) service.Result { return service.Result{} }))
 	code, out := runSvc(t, []string{"service", "status"})
 	if code != 1 || !strings.Contains(out, "not available on this OS yet") {
 		t.Errorf("exit = %d (%q)", code, out)

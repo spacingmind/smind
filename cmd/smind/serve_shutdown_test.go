@@ -163,17 +163,25 @@ func openHomeStore(t *testing.T, home string) *store.Store {
 }
 
 // stdBuffer is a minimal sink for a subprocess's combined output, so
-// failure messages can show the daemon's own log.
+// failure messages can show the daemon's own log. exec.Cmd copies stdout and
+// stderr from its own goroutines while the test reads the log, so it locks.
 type stdBuffer struct {
+	mu   sync.Mutex
 	data []byte
 }
 
 func (b *stdBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.data = append(b.data, p...)
 	return len(p), nil
 }
 
-func (b *stdBuffer) String() string { return string(b.data) }
+func (b *stdBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.data)
+}
 
 // TestServe_GracefulShutdown is AC3's mandatory scenario: a real
 // `smind serve` subprocess with a live terminal session, stopped by the

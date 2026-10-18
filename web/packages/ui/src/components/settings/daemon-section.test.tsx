@@ -301,7 +301,7 @@ describe("daemon-section (desktop build)", () => {
 
   it("names Task Scheduler for a Windows service-managed daemon", async () => {
     await renderSection({
-      daemonStatus: () => Promise.resolve(baseStatus({ platform: "windows", managedState: "unmanaged", managedBy: "task" })),
+      daemonStatus: () => Promise.resolve(baseStatus({ platform: "windows", managedState: "unmanaged", managedBy: "taskscheduler" })),
     });
     expect(screen.getByTestId("daemon-managed-state")).toHaveTextContent("Managed by Task Scheduler");
     expect(screen.queryByTestId("daemon-take-over")).not.toBeInTheDocument();

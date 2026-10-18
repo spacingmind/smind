@@ -20,7 +20,7 @@ type DaemonInfo struct {
 	Version string `json:"version"`
 	Commit  string `json:"commit,omitempty"`
 	// ManagedBy names the OS service manager that supervises this daemon
-	// ("systemd", "launchd", "task"); empty when none does. Same value as
+	// ("systemd", "launchd", "taskscheduler"); empty when none does. Same value as
 	// /healthz `managedBy`.
 	ManagedBy string `json:"managedBy,omitempty"`
 	// Platform is GOOS/GOARCH, e.g. "linux/amd64".

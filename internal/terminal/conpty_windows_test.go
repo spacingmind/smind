@@ -19,7 +19,7 @@ import (
 )
 
 // These are the conPty-level scenarios from
-// docs/plans/active/windows-conpty-wrapper.md (ADR-0022); the
+// docs/plans/completed/windows-conpty-wrapper.md (ADR-0022); the
 // Registry-level ones live in windows_test.go.
 
 // startTestConPty spawns cmd.exe with args on a fresh conPty inside a

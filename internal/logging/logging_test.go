@@ -344,3 +344,30 @@ func TestRotatingRecoversWhenTheLogCannotBeReopened(t *testing.T) {
 		t.Errorf("daemon.log = %q", got)
 	}
 }
+
+// A reader holding daemon.log open (`smind service logs -f`) must not stop the
+// daemon rotating it. On Windows that needs FILE_SHARE_DELETE on the reader's
+// handle (openShared); elsewhere it always works.
+func TestRotationSucceedsWhileAReaderHoldsTheFileOpen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	r, err := OpenRotating(path, 30, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	_, _ = r.Write([]byte("first line, before rotation\n"))
+
+	reader, err := openShared(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	_, _ = r.Write([]byte("second line, forces a rotation\n"))
+	if got := readFile(t, path+".1"); got != "first line, before rotation\n" {
+		t.Errorf("daemon.log.1 = %q: rotation did not happen while the file was open", got)
+	}
+	if got := readFile(t, path); got != "second line, forces a rotation\n" {
+		t.Errorf("daemon.log = %q", got)
+	}
+}
