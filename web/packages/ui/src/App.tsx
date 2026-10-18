@@ -60,6 +60,7 @@ import {
 } from "@/components/tab-registry";
 import { PlanUsageSourceProvider } from "@/hooks/use-chat-plan-usage";
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
+import { DaemonQueryProvider, useDaemonQueryClient } from "@/lib/query/daemon-query-provider";
 import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useInitialValue } from "@/hooks/use-initial-value";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -269,7 +270,8 @@ function AppShell({
     closeTabsToRight,
     renameTab,
   } = useTaskTabs();
-  const events = useDaemonEvents(client);
+  const queryClient = useDaemonQueryClient(client);
+  const events = useDaemonEvents(client, queryClient);
   const { attention, runStatus, runningChatsByTask, loaded: runsLoaded } = useTaskAttention(client, selectedTask?.ID ?? null, events);
   // ADR-0016 P3: the selected task's own chats, live -- the "+" menu's
   // reopen section, the seed-or-migrate step below, and every chat tab's
@@ -1314,32 +1316,34 @@ function AppShell({
   // focus order and pointer events. Radix portals (palette, dialogs) are
   // outside this wrapper and still render on top.
   return (
-    <PlanUsageSourceProvider client={client} events={events}>
-      <div className="relative h-svh w-full">
-        <UsageModalRoot client={client} events={events} />
-        <div
-          data-testid="app-shell"
-          className={cn("h-full w-full", settingsOpen && "invisible")}
-          inert={settingsOpen}
-          aria-hidden={settingsOpen || undefined}
-        >
-          {shellElement}
-        </div>
-        {settingsOpen && (
-          // No background here: on macOS the settings sidebar is a vibrancy
-          // surface and the screen paints its own opaque panes.
-          <div className="absolute inset-0 z-40">
-            <SettingsScreen
-              key={settingsOpenNonce}
-              client={client}
-              events={events}
-              onNavigateBack={closeSettings}
-              initialSectionId={settingsInitialSectionId ?? undefined}
-            />
+    <DaemonQueryProvider queryClient={queryClient} client={client} events={events}>
+      <PlanUsageSourceProvider client={client} events={events}>
+        <div className="relative h-svh w-full">
+          <UsageModalRoot client={client} events={events} />
+          <div
+            data-testid="app-shell"
+            className={cn("h-full w-full", settingsOpen && "invisible")}
+            inert={settingsOpen}
+            aria-hidden={settingsOpen || undefined}
+          >
+            {shellElement}
           </div>
-        )}
-      </div>
-    </PlanUsageSourceProvider>
+          {settingsOpen && (
+            // No background here: on macOS the settings sidebar is a vibrancy
+            // surface and the screen paints its own opaque panes.
+            <div className="absolute inset-0 z-40">
+              <SettingsScreen
+                key={settingsOpenNonce}
+                client={client}
+                events={events}
+                onNavigateBack={closeSettings}
+                initialSectionId={settingsInitialSectionId ?? undefined}
+              />
+            </div>
+          )}
+        </div>
+      </PlanUsageSourceProvider>
+    </DaemonQueryProvider>
   );
 }
 
