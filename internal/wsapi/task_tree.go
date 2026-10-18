@@ -59,17 +59,29 @@ func handleTaskTree(db *store.Store, reg *runs.Registry) handlerFunc {
 			p.WorkspaceID = t.WorkspaceID
 		}
 
-		tasks, err := db.ListTasksByWorkspace(p.WorkspaceID)
+		nodes, truncated, err := buildTaskTree(db, reg, p.WorkspaceID, root)
 		if err != nil {
-			return nil, fmt.Errorf("task.tree: list tasks: %w", err)
+			return nil, fmt.Errorf("task.tree: %w", err)
 		}
-		usage, err := db.SumRunUsageByTask(p.WorkspaceID)
-		if err != nil {
-			return nil, fmt.Errorf("task.tree: sum usage: %w", err)
-		}
-		nodes, truncated := tasktree.Build(toTreeTasks(tasks), toTreeFacts(reg.TaskRunFacts()), toTreeUsage(usage), root)
 		return taskTreeResult{Nodes: nodes, Truncated: truncated}, nil
 	}
+}
+
+// buildTaskTree is task.tree's read pass (one store pass, one usage
+// query, one reg.TaskRunFacts call, then the pure tasktree.Build), shared
+// with task.archiveFinished / task.stopTree so their selection is exactly
+// what task.tree shows.
+func buildTaskTree(db *store.Store, reg *runs.Registry, workspaceID int64, root tasktree.Root) ([]tasktree.Node, bool, error) {
+	tasks, err := db.ListTasksByWorkspace(workspaceID)
+	if err != nil {
+		return nil, false, fmt.Errorf("list tasks: %w", err)
+	}
+	usage, err := db.SumRunUsageByTask(workspaceID)
+	if err != nil {
+		return nil, false, fmt.Errorf("sum usage: %w", err)
+	}
+	nodes, truncated := tasktree.Build(toTreeTasks(tasks), toTreeFacts(reg.TaskRunFacts()), toTreeUsage(usage), root)
+	return nodes, truncated, nil
 }
 
 func toTreeTasks(tasks []store.Task) []tasktree.Task {
