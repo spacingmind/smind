@@ -34,7 +34,7 @@ type acpBackend interface {
 	SetSessionConfigOption(ctx context.Context, sessionID, configID, value string) ([]acp.ConfigOption, error)
 	SessionModes(sessionID string) (acp.SessionModeState, bool)
 	SetSessionMode(ctx context.Context, sessionID, modeID string) error
-	Prompt(ctx context.Context, sessionID, text string, updates chan<- acp.SessionUpdate) (string, error)
+	Prompt(ctx context.Context, sessionID, text string, updates chan<- acp.SessionUpdate, opts ...acp.PromptOption) (string, error)
 	PromptUsage(sessionID string) (acp.PromptUsage, bool)
 	// InstanceID identifies the agent process behind this client.
 	InstanceID() string
@@ -421,7 +421,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	}
 
 	secrets := mcpSecrets(rows)
-	sessionID, configOptions, err := r.newOrResumeACPSession(ctx, chatID, provider, client, worktreePath, mcpWire, secrets, events)
+	sessionID, configOptions, resumed, err := r.newOrResumeACPSession(ctx, chatID, provider, client, worktreePath, mcpWire, secrets, events)
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s new session: %w", provider, scrubError(err, secrets))
 	}
@@ -483,7 +483,14 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 		}
 	}()
 
-	stopReason, err := client.Prompt(ctx, sessionID, prompt, updates)
+	// ADR-0026 section 5: the learned-skill index rides on the FIRST prompt
+	// of an agent session only: a resumed session already has it in
+	// context, while a first, reset or failed-to-resume session is new.
+	var promptOpts []acp.PromptOption
+	if d, _ := DeliveryFrom(ctx); d.Preface != "" && !resumed {
+		promptOpts = append(promptOpts, acp.WithPromptPrefix(d.Preface))
+	}
+	stopReason, err := client.Prompt(ctx, sessionID, prompt, updates, promptOpts...)
 	<-forwardDone
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s prompt: %w", provider, scrubError(err, secrets))
@@ -567,17 +574,19 @@ func (r *Runner) sendUsage(ctx context.Context, events chan<- Event, u Usage) {
 //
 // secrets (see mcpSecrets) are scrubbed from agent error text placed in a
 // session note: an agent may echo configured MCP env/header values back.
-func (r *Runner) newOrResumeACPSession(ctx context.Context, chatID int64, provider Provider, client acpBackend, worktreePath string, mcpServers []any, secrets []string, events chan<- Event) (string, []acp.ConfigOption, error) {
+//
+// resumed is true only when the stored session's conversation was resumed.
+func (r *Runner) newOrResumeACPSession(ctx context.Context, chatID int64, provider Provider, client acpBackend, worktreePath string, mcpServers []any, secrets []string, events chan<- Event) (sessionID string, configOptions []acp.ConfigOption, resumed bool, err error) {
+	newSession := func() (string, []acp.ConfigOption, bool, error) {
+		id, opts, err := client.NewSession(ctx, worktreePath, mcpServers)
+		return id, opts, false, err
+	}
 	handle, ok := r.sessionStore.Get(chatID)
 	if !ok || handle.Provider != provider || handle.SessionID == "" {
-		return client.NewSession(ctx, worktreePath, mcpServers)
+		return newSession()
 	}
 
-	var (
-		configOptions []acp.ConfigOption
-		err           error
-		method        string
-	)
+	var method string
 	switch {
 	case client.SupportsLoadSession():
 		method = "session/load"
@@ -589,16 +598,16 @@ func (r *Runner) newOrResumeACPSession(ctx context.Context, chatID int64, provid
 		r.sendSessionNote(ctx, events, fmt.Sprintf(
 			"%s does not support resuming a session (no loadSession or sessionCapabilities.resume); starting a new session -- prior context from session %s is not available this turn",
 			provider, handle.SessionID))
-		return client.NewSession(ctx, worktreePath, mcpServers)
+		return newSession()
 	}
 	if err == nil {
-		return handle.SessionID, configOptions, nil
+		return handle.SessionID, configOptions, true, nil
 	}
 
 	r.sendSessionNote(ctx, events, fmt.Sprintf(
 		"could not resume %s session %s via %s (%v); starting a new session instead",
 		provider, handle.SessionID, method, scrubError(err, secrets)))
-	return client.NewSession(ctx, worktreePath, mcpServers)
+	return newSession()
 }
 
 // sendSessionNote logs note and, unless ctx is already done, forwards it as
@@ -760,6 +769,11 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 	}
 	if model != "" && model != ClaudeModelDefault {
 		opts = append(opts, claudecode.WithModel(model))
+	}
+	if d, _ := DeliveryFrom(ctx); len(d.AddDirs) > 0 {
+		// ADR-0026 section 5: the read-only learned-skill projection; no
+		// option at all without a delivery keeps the argv unchanged.
+		opts = append(opts, claudecode.WithAddDirs(d.AddDirs...))
 	}
 	mode := perm.Mode
 	if mode == "" {
