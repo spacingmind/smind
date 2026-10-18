@@ -205,6 +205,8 @@ export interface DeviceHello {
   device_pub: string;
   label: string;
   signature: string;
+  /** The daemon password (P13c), only when the person typed one this run. Not covered by the signature; only ever sent inside the encrypted channel. */
+  password?: string;
 }
 
 // Code points devices.ValidateLabel refuses: controls (Cc), the common
@@ -261,11 +263,14 @@ export function buildDeviceHello(
   mobilePub: Uint8Array,
   sessionId: Uint8Array,
   challenge: Uint8Array,
+  password?: string,
 ): DeviceHello {
-  return {
+  const hello: DeviceHello = {
     v: HELLO_VERSION,
     device_pub: base64Encode(identity.publicKey),
     label: sanitizeLabel(label),
     signature: base64Encode(identity.sign(helloSignedBytes(daemonPub, mobilePub, sessionId, challenge))),
   };
+  if (password) hello.password = password;
+  return hello;
 }
