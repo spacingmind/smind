@@ -219,14 +219,18 @@ class ChallengeSilenceError extends VersionMismatchError {}
 /** The daemon wants a password, or refused the one sent (P13c). `sent` is what was sent, so exactly that value can be forgotten. */
 class PasswordError extends Error {
   readonly reason: 'required' | 'incorrect';
-  /** What was sent. Not enumerable: serialising or logging this error must never print a password. */
-  declare readonly sent: string | undefined;
   constructor(message: string, reason: 'required' | 'incorrect', sent: string | undefined) {
     super(message);
     this.reason = reason;
-    Object.defineProperty(this, 'sent', { value: sent, enumerable: false });
+    // What was sent is kept off the error object (a WeakMap, not a property): serialising or
+    // logging this error must never print a password.
+    sentByPasswordError.set(this, sent);
+  }
+  get sent(): string | undefined {
+    return sentByPasswordError.get(this);
   }
 }
+const sentByPasswordError = new WeakMap<PasswordError, string | undefined>();
 /** The daemon rate-limited this device (too_many_attempts); retryAfter is its number of seconds. */
 class LockedError extends Error {
   constructor(
