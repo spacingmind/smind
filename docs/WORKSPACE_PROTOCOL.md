@@ -158,6 +158,16 @@ read-only review of an exact commit.
   - Wait for runs to reach a terminal state, or drain async writers, before
     `t.TempDir` cleanup.
   - Don't share names or paths between parallel tests.
+  - A helper that builds a `wsapi` stack registers `t.Cleanup(api.Close)`
+    right after `wsapi.New` (before the `httptest` server's cleanup), so the
+    order is server → runs/terminals → store → TempDir.
+  - Don't pick a port and probe it with a real bind; use the Manager's stub
+    probe, or bind `:0` and keep the listener.
+  - Don't race a fast scenario against test setup, and don't assert a
+    stopwatch on async work. Hold the run (`hang`, or `hold` + a `release`
+    file) and release it when the test is ready.
+  - Full-`<App>` web tests run with a measured 30 s timeout (4–6.5 s under CPU
+    load against vitest's 5 s default); measure before raising one.
 
 ## Process safety
 
