@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Icons } from "@/lib/icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { MARKDOWN_LINK_COMPONENTS } from "@/components/timeline/timeline-markdown";
 
 /** Which content types get a Preview mode in the editor view. */
 export type PreviewKind = "html" | "markdown" | "svg";
@@ -37,7 +38,9 @@ export function previewKind(path: string): PreviewKind | null {
 export function MarkdownPreview({ content }: { content: string }) {
   return (
     <div className="prose prose-sm max-w-none flex-1 overflow-auto px-4 py-3" data-testid="markdown-preview">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_LINK_COMPONENTS}>
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }
