@@ -111,6 +111,10 @@ type RunStatus struct {
 	BaseSHA *string
 	HeadSHA *string
 	Dirty   *bool
+
+	// Purpose is "user" for ordinary runs (omitted on the wire) or the
+	// system purpose ("reflect", "curate") of a learning run (ADR-0026).
+	Purpose string `json:"purpose,omitempty"`
 }
 
 // RunUsage is RunStatus's usage totals. Every numeric field is nil when the
