@@ -469,6 +469,8 @@ export class RelayConnection {
   private nextId = 0;
   private pending = new Map<string, PendingCall>();
   private topicCallbacks = new Map<string, Set<(event: RelayEvent) => void>>();
+  /** Listeners for the daemon's synthetic event.dropped (see onDropped). */
+  private droppedListeners = new Set<(count: number) => void>();
   private closed = false;
   private stateValue: ConnectionState;
   private connectedCount = 0;
@@ -656,12 +658,24 @@ export class RelayConnection {
     };
   }
 
+  /**
+   * Calls cb when the daemon says it dropped pushed events for this connection
+   * (its synthetic event.dropped: a slow reader fell behind), with how many. A
+   * view built from pushed snapshots refetches. event.dropped is not a topic
+   * (subscribing to it would make events.subscribe fail), so it has its own hook.
+   */
+  onDropped(cb: (count: number) => void): () => void {
+    this.droppedListeners.add(cb);
+    return () => this.droppedListeners.delete(cb);
+  }
+
   /** Tears down the stream for good; pending and future call()s reject, topic callbacks stop and no reconnect follows. Idempotent. */
   close(): void {
     if (this.closed) return;
     this.closed = true;
     this.rejectPending(new Error('relay: connection is closed'));
     this.topicCallbacks.clear();
+    this.droppedListeners.clear();
     this.session?.transport.detach();
     this.connecting?.detach();
     this.stream?.close();
@@ -754,6 +768,11 @@ export class RelayConnection {
         seq: env.event.seq,
         payload: env.event.payload,
       };
+      if (relayEvent.topic === 'event.dropped') {
+        const count = Number((relayEvent.payload as { count?: number } | undefined)?.count ?? 0);
+        for (const cb of [...this.droppedListeners]) cb(count);
+        return;
+      }
       const set = this.topicCallbacks.get(relayEvent.topic);
       if (set) for (const cb of set) cb(relayEvent);
       return;

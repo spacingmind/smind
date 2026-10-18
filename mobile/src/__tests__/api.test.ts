@@ -6,7 +6,7 @@
 // the fake records every method that goes out).
 
 import { describe, expect, it } from 'vitest';
-import { fetchOverview, listWorkspaces } from '../api';
+import { defaultChatId, fetchOverview, listWorkspaces, startRunWhenBusy } from '../api';
 import { CloseableStream, RelayConnection } from '../relay/RelayConnection';
 import { PairingOffer } from '../relay/pairing';
 
@@ -117,5 +117,54 @@ describe('listWorkspaces / fetchOverview', () => {
     fail = false;
     await expect(listWorkspaces(conn2)).resolves.toEqual([]);
     expect(calls).toHaveLength(2);
+  });
+});
+
+describe('queue wire wrappers (ADR-0021 §9)', () => {
+  it('startRunWhenBusy sends whenBusy and returns started for {runId}', async () => {
+    const { conn, calls } = fakeConnection((m) => {
+      if (m === 'run.start') return { runId: 'r1' };
+      throw new Error(`unexpected method ${m}`);
+    });
+    const result = await startRunWhenBusy(conn, { taskId: 42, provider: 'glm', prompt: 'hi', whenBusy: 'queue' });
+    expect(result).toEqual({ kind: 'started', runId: 'r1' });
+    expect(calls).toEqual([['run.start', { taskId: 42, provider: 'glm', prompt: 'hi', whenBusy: 'queue' }]]);
+  });
+
+  it('startRunWhenBusy returns queued for {queued, queueItemId}', async () => {
+    const { conn } = fakeConnection((m) => {
+      if (m === 'run.start') return { queued: true, queueItemId: 9 };
+      throw new Error(`unexpected method ${m}`);
+    });
+    const result = await startRunWhenBusy(conn, { taskId: 42, provider: 'glm', prompt: 'hi', whenBusy: 'interrupt' });
+    expect(result).toEqual({ kind: 'queued', queueItemId: 9 });
+  });
+
+  it('startRunWhenBusy omits chatId when none is given', async () => {
+    const { conn, calls } = fakeConnection((m) => {
+      if (m === 'run.start') return { runId: 'r1' };
+      throw new Error(`unexpected method ${m}`);
+    });
+    await startRunWhenBusy(conn, { taskId: 1, provider: 'glm', prompt: 'x', whenBusy: 'queue' });
+    expect(calls[0][1]).not.toHaveProperty('chatId');
+    await startRunWhenBusy(conn, { taskId: 1, chatId: 5, provider: 'glm', prompt: 'x', whenBusy: 'queue' });
+    expect(calls[1][1]).toMatchObject({ chatId: 5 });
+  });
+
+  it('defaultChatId returns the first chat of chat.list including archived', async () => {
+    const { conn, calls } = fakeConnection((m) => {
+      if (m === 'chat.list') return [{ ID: 3 }, { ID: 4 }];
+      throw new Error(`unexpected method ${m}`);
+    });
+    expect(await defaultChatId(conn, 7)).toBe(3);
+    expect(calls).toEqual([['chat.list', { taskId: 7, includeArchived: true }]]);
+  });
+
+  it('defaultChatId throws when the task has no chat', async () => {
+    const { conn } = fakeConnection((m) => {
+      if (m === 'chat.list') return [];
+      throw new Error(`unexpected method ${m}`);
+    });
+    await expect(defaultChatId(conn, 7)).rejects.toThrow('task has no chat');
   });
 });
