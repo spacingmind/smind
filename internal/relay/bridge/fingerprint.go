@@ -22,13 +22,35 @@ const probeTimeout = 10 * time.Second
 // handshake that is not about the certificate) is not wrapped and is fatal.
 var ErrNotVerified = errors.New("certificate not verified")
 
-// notVerified carries the verifier's own words ("x509: certificate has
-// expired ...") and matches ErrNotVerified.
-type notVerified struct{ cause error }
+// notVerified matches ErrNotVerified and says why in words WE chose. The
+// verifier's own text is not shown: a hostname error lists the certificate's
+// subject names, which the relay (or whoever answers the connection)
+// controls, and this message is printed right above the fingerprint a person
+// is asked to trust -- attacker-chosen text there could forge that block.
+// The cause stays reachable through Unwrap for logs and tests.
+type notVerified struct {
+	cause error
+	host  string
+}
 
-func (e notVerified) Error() string        { return e.cause.Error() }
 func (e notVerified) Unwrap() error        { return e.cause }
 func (e notVerified) Is(target error) bool { return target == ErrNotVerified }
+func (e notVerified) Error() string {
+	var (
+		unknown x509.UnknownAuthorityError
+		name    x509.HostnameError
+		invalid x509.CertificateInvalidError
+	)
+	switch {
+	case errors.As(e.cause, &unknown):
+		return "the certificate was not issued by an authority your system trusts"
+	case errors.As(e.cause, &name):
+		return fmt.Sprintf("the certificate is not valid for the name %q", e.host)
+	case errors.As(e.cause, &invalid) && invalid.Reason == x509.Expired:
+		return "the certificate has expired (or is not valid yet)"
+	}
+	return "the certificate did not verify"
+}
 
 // TLSProbe looks at a relay's TLS certificate at `smind relay connect` time.
 // The zero value verifies against the system roots, like the daemon's own
@@ -62,11 +84,12 @@ func (p TLSProbe) Verify(address string) error {
 	if err != nil {
 		var cve *tls.CertificateVerificationError
 		if errors.As(err, &cve) {
-			return notVerified{cve.Err}
+			return notVerified{cause: cve.Err, host: host}
 		}
 		return fmt.Errorf("bridge: dial %s: %w", address, err)
 	}
-	return conn.Close()
+	_ = conn.Close() // verified; a relay that hangs up straight after the handshake is not a failure
+	return nil
 }
 
 // Fingerprint dials address WITHOUT verifying its certificate and returns the

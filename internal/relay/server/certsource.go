@@ -40,15 +40,19 @@ func newCertSource(certFile, keyFile string) (*certSource, error) {
 }
 
 func (c *certSource) load() error {
-	cert, err := tls.LoadX509KeyPair(c.certFile, c.keyFile)
-	if err != nil {
-		return err
-	}
+	// Stat BEFORE reading: if a renewal rewrites the files while we read, the
+	// recorded times are older than the new files, so the next check sees a
+	// change and reloads, instead of caching the old certificate under the new
+	// times and serving it until the next renewal.
 	ci, err := os.Stat(c.certFile)
 	if err != nil {
 		return err
 	}
 	ki, err := os.Stat(c.keyFile)
+	if err != nil {
+		return err
+	}
+	cert, err := tls.LoadX509KeyPair(c.certFile, c.keyFile)
 	if err != nil {
 		return err
 	}

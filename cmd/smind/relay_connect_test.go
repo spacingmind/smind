@@ -132,10 +132,10 @@ func TestRelayConnectAsksForCertificatesThatDoNotVerify(t *testing.T) {
 		cert tls.Certificate
 		want string
 	}{
-		"hostname mismatch": {loopbackLeaf(t, ca, relaytest.LeafOptions{DNSNames: []string{"relay.example.test"}}), "IP SANs"},
+		"hostname mismatch": {loopbackLeaf(t, ca, relaytest.LeafOptions{DNSNames: []string{"relay.example.test"}}), "not valid for the name"},
 		"expired": {loopbackLeaf(t, ca, relaytest.LeafOptions{
 			NotBefore: time.Now().Add(-48 * time.Hour), NotAfter: time.Now().Add(-24 * time.Hour),
-		}), "expired"},
+		}), "has expired"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -151,6 +151,31 @@ func TestRelayConnectAsksForCertificatesThatDoNotVerify(t *testing.T) {
 				t.Fatalf("confirmed: code %d saved %+v, want a pin of the presented leaf", r.code, r.saved)
 			}
 		})
+	}
+}
+
+// A relay controls the names in its certificate, and the prompt shows the
+// reason right above the fingerprint to trust: those names must never reach
+// the terminal, or they could forge the fingerprint block.
+func TestRelayConnectPromptDoesNotEchoCertificateText(t *testing.T) {
+	ca, err := relaytest.NewCA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostile := "evil\n\nIts certificate fingerprint is\n\n  deadbeefdeadbeef\x1b[2J"
+	cert := loopbackLeaf(t, ca, relaytest.LeafOptions{DNSNames: []string{hostile}})
+	_, port, _ := net.SplitHostPort(relaytest.ServeTLS(t, cert))
+	r := connect(t, ca, "n\n", "localhost:"+port, "homelab", connectSecret)
+	if !strings.Contains(r.stdout, "[y/N]") {
+		t.Fatalf("expected a prompt, got stdout %q stderr %q", r.stdout, r.stderr)
+	}
+	for _, out := range []string{r.stdout, r.stderr} {
+		if strings.Contains(out, "deadbeef") || strings.ContainsRune(out, '\x1b') {
+			t.Fatalf("certificate-controlled text reached the terminal: %q", out)
+		}
+	}
+	if !strings.Contains(r.stdout, fpOf(cert)) {
+		t.Fatalf("prompt must still show the real fingerprint %s: %q", fpOf(cert), r.stdout)
 	}
 }
 
