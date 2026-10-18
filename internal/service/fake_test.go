@@ -192,6 +192,8 @@ type fakeLaunchctl struct {
 	noGUISession       bool
 	bootoutFails       bool
 	bootoutKeepsDaemon bool
+	disabled           bool
+	printDisabledFails bool
 	calls              []string
 	daemonVersion      string
 }
@@ -231,7 +233,17 @@ func (f *fakeLaunchctl) Run(_ context.Context, name string, args ...string) (Res
 	_, statErr := os.Stat(f.plist)
 	switch args[0] {
 	case "enable":
+		f.disabled = false
 		return Result{}, nil
+	case "print-disabled":
+		if f.printDisabledFails {
+			return Result{ExitCode: 1, Stderr: "unsupported"}, nil
+		}
+		state := "enabled"
+		if f.disabled {
+			state = "disabled"
+		}
+		return Result{Stdout: "disabled services = {\n\t\"com.apple.something\" => disabled\n\t\"" + LaunchdLabel + "\" => " + state + "\n}\n"}, nil
 	case "print":
 		if !f.loaded {
 			return Result{ExitCode: 113, Stderr: "Could not find service \"" + LaunchdLabel + "\" in domain for user gui\n"}, nil
