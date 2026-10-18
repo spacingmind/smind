@@ -50,6 +50,10 @@ func corpus(r *Redactor) map[string]string {
 		"git log hex":      "git log: f09e2e8c662248b483b7ffc050fec94dbca3a0aac36098b2cc2bd818319478da",
 		"bare hex":         "6725a2a7b860dcd6c8a1f8b46287cced9041dff0",
 		"path deep":        "web/packages/ui/src/lib/v2/foo and see web/packages/ui/src/components/Button2/index",
+		"pgp block":        "-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQOY" + "ABCDEF" + "\n-----END PGP PRIVATE KEY BLOCK-----",
+		"url creds":        "postgres://admin:s3cret@localhost:5432/app redis://:s3cretpw@cache:6379",
+		"curl -u":          "curl -u admin:s3cr3tpassw0rd http://x",
+		"prefixed":         "k " + "npm_" + "abcdefghijklmnopqrst" + " " + "hf_" + "abcdefghijklmnopqrstuvwx",
 		"counters":         "max_tokens: 4096 and credentials: none",
 	}
 }
@@ -96,6 +100,7 @@ func TestRedact_RuleCorpus(t *testing.T) {
 	check("key=value", func(s string) bool { return r.String(s) == "DB_PASSWORD="+Placeholder })
 	check("api_key quoted", func(s string) bool { return r.String(s) == `config api_key: "`+Placeholder+`"` })
 	check("email", func(s string) bool { return r.String(s) == "contact "+Placeholder+" now" })
+	check("pgp block", func(s string) bool { return r.String(s) == Placeholder })
 	check("card luhn", func(s string) bool { return r.String(s) == "card "+Placeholder+" charged" })
 	check("card nonluhn", func(s string) bool { return !r.Changed(s) })
 	check("git sha", func(s string) bool { return !r.Changed(s) })
@@ -261,4 +266,37 @@ var hex24 = []string{
 	"a7196b50ac2f86702824c1c0",
 	"99724caf4941d4072014b3ce",
 	"624a8940f1f836f99eee3692",
+}
+
+func TestRedact_UrlCredentials(t *testing.T) {
+	r := New(nil, nil)
+	for in, want := range map[string]string{
+		"postgres://admin:s3cret@localhost:5432/app":  "postgres://admin:[REDACTED]@localhost:5432/app",
+		"redis://:s3cretpw@cache:6379":                "redis://:[REDACTED]@cache:6379",
+		"DATABASE_URL=postgres://u:pw1234@db/x":       "DATABASE_URL=postgres://u:[REDACTED]@db/x",
+		"curl -u admin:s3cr3tpassw0rd http://x":       "curl -u [REDACTED] http://x",
+		"curl --user admin:s3cr3tpassw0rd http://x/y": "curl --user [REDACTED] http://x/y",
+	} {
+		if got := r.String(in); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRedact_PrefixedKeys(t *testing.T) {
+	r := New(nil, nil)
+	for _, in := range []string{
+		"sk-ant-api03-" + "AbCd_eFgh-IjKl" + "MnOp_QrSt-UvWxYz01",
+		"sk-proj-" + "AbCdEfGhIjKlMnOpQrSt" + "UvWx",
+		"AIza" + "SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q",
+		"npm_" + "AbCdEfGhIjKlMnOpQrSt",
+		"hf_" + "abcdefghijklmnopqrstuvwx",
+		"rk_live_" + "abcdefghijklmnopqrstuvwx",
+		"glpat-" + "AbCdEfGhIjKlMnOpQrSt",
+		"xapp-" + "1-A0123456789-abcdef",
+	} {
+		if got := r.String("tok " + in + " end"); got != "tok "+Placeholder+" end" {
+			t.Errorf("%q: got %q", in, got)
+		}
+	}
 }

@@ -19,7 +19,7 @@ type rule struct {
 
 var rules = []rule{
 	{"awsAccessKeyId", regexp.MustCompile(`\b(AKIA|ASIA)[0-9A-Z]{16}\b`)},
-	{"pemPrivateKey", regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(-----END [A-Z ]*PRIVATE KEY-----|$)`)},
+	{"pemPrivateKey", regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----.*?(-----END [A-Z ]*PRIVATE KEY( BLOCK)?-----|$)`)},
 	{"githubToken", regexp.MustCompile(`\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}\b`)},
 	{"githubFineGrainedToken", regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,}\b`)},
 	{"slackToken", regexp.MustCompile(`\bxox[abprs]-[A-Za-z0-9-]{10,}\b`)},
@@ -28,6 +28,12 @@ var rules = []rule{
 	{"authorization", regexp.MustCompile(`(?i)(\bauthorization\s*[:=]\s*(?:(?:basic|token|bearer|digest|negotiate|apikey)\s+)?)[^\s"',;]{6,}`)},
 	{"quotedKeyValue", regexp.MustCompile(`(?i)\b([A-Za-z0-9_.-]*?(?:api[_-]?key|apikey|secret|passw(?:or)?d|passphrase|credentials?|private[_-]?key|access[_-]?key|token|auth|authorization|signature|sig|key)[A-Za-z0-9_.-]*)((?:\\)?["']?\s*[:=]\s*(?:\\)?["'])([^"'\n]{4,}?)((?:\\)?["'])`)},
 	{"bareKeyValue", regexp.MustCompile(`(?i)\b([A-Za-z0-9_.-]*?(?:api[_-]?key|apikey|secret|passw(?:or)?d|passphrase|credentials?|private[_-]?key|access[_-]?key|token|auth|authorization|signature|sig|key)[A-Za-z0-9_.-]*)(\s*[:=]\s*)([^\s"',;&\\]{4,})`)},
+	{"urlUserinfo", regexp.MustCompile(`(://)([^/\s:@]*):([^/\s@]+)@`)},
+	{"curlUser", regexp.MustCompile(`(?i)(\s(?:-u|--user)\s+)[^\s:]+:[^\s]+`)},
+	{"skKey", regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}`)},
+	{"googleKey", regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}`)},
+	{"prefixedKey", regexp.MustCompile(`\b(?:npm|hf|glpat|rk_live|sk_live|pk_live|rk_test|sk_test)[_-][A-Za-z0-9_-]{16,}`)},
+	{"slackAppToken", regexp.MustCompile(`\bxapp-[A-Za-z0-9-]{10,}`)},
 	{"email", regexp.MustCompile(`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b`)},
 	{"cardNumber", regexp.MustCompile(`[0-9](?:[0-9 -]*[0-9])?`)},
 }
@@ -89,6 +95,10 @@ func (r *Redactor) String(s string) string {
 		case "bearer":
 			s = rl.re.ReplaceAllString(s, "Bearer "+Placeholder)
 		case "authorization":
+			s = rl.re.ReplaceAllString(s, "${1}"+Placeholder)
+		case "urlUserinfo":
+			s = rl.re.ReplaceAllString(s, "${1}${2}:"+Placeholder+"@")
+		case "curlUser":
 			s = rl.re.ReplaceAllString(s, "${1}"+Placeholder)
 		case "quotedKeyValue":
 			s = replaceKeyValue(s, rl.re, true)
