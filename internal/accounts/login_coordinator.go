@@ -2,7 +2,10 @@ package accounts
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"sync"
@@ -12,9 +15,19 @@ import (
 )
 
 // loginCallbackTimeout bounds how long LoginCoordinator.Login waits for the
-// vendor's browser redirect to land on the local callback listener before
-// giving up.
-const loginCallbackTimeout = 5 * time.Minute
+// login to be completed -- the vendor's redirect landing on the local
+// callback listener, or the user pasting it into Complete -- before giving
+// up. It is the lifetime of a loginId (ADR-0033 D3).
+const loginCallbackTimeout = 10 * time.Minute
+
+// maxCompleteAttempts is how many Complete calls one login accepts; a wrong
+// paste counts. The login stays pending after the limit is hit (it only stops
+// answering pastes), until it times out or is cancelled.
+const maxCompleteAttempts = 5
+
+// loginMethodBrowser is the PKCE authorization-code flow with a callback
+// listener and/or a pasted redirect. (The device-code method joins it in B3.)
+const loginMethodBrowser = "browser"
 
 // LoginCoordinator drives the browser-based OAuth login flow for the
 // providers in logins: generating PKCE/state, standing up the vendor's
@@ -31,13 +44,35 @@ type LoginCoordinator struct {
 
 	// timeout defaults to loginCallbackTimeout; it's a field rather than
 	// using the const directly so this package's own tests can shorten it
-	// instead of a real 5-minute wait (see login_coordinator_test.go) --
+	// instead of a real 10-minute wait (see login_coordinator_test.go) --
 	// not exposed as a constructor option, since there's no legitimate
 	// reason for a real caller to want a different value.
 	timeout time.Duration
 
 	mu       sync.Mutex
 	inFlight map[string]bool
+	// pending maps a loginId to the login it names, for the life of one Login
+	// call. Guarded by mu.
+	pending map[string]*pendingLogin
+}
+
+// pendingLogin is the part of a running Login that Complete may touch. All
+// fields are guarded by LoginCoordinator.mu except paste, which is a channel.
+type pendingLogin struct {
+	provider string
+	state    string
+	method   string
+	// paste carries the one accepted pasted redirect to Login. Capacity 1;
+	// only the goroutine that flips resolved to true sends on it.
+	paste chan callbackResult
+	// attempts counts Complete calls, accepted or not.
+	attempts int
+	// resolved is the single arbiter of "first of listener callback and paste
+	// wins": whoever sets it under mu owns the login's outcome.
+	resolved bool
+	// ended is set with resolved when the login ended without a delivered
+	// result (ctx cancelled or timed out).
+	ended bool
 }
 
 // NewLoginCoordinator returns a LoginCoordinator backed by registry, using
@@ -50,6 +85,7 @@ func NewLoginCoordinator(registry *Registry, logins map[string]Login) *LoginCoor
 		logins:   logins,
 		timeout:  loginCallbackTimeout,
 		inFlight: make(map[string]bool),
+		pending:  make(map[string]*pendingLogin),
 	}
 }
 
@@ -86,11 +122,23 @@ type LoginResult struct {
 // Stable error codes (ADR-0033 login contract). They are the message prefix
 // of the error Login returns; LoginError carries them for errors.As.
 const (
+	LoginCodeInProgress         = "login_in_progress"
 	LoginCodeIdentityMismatch   = "identity_mismatch"
 	LoginCodeIdentityInUse      = "identity_in_use"
 	LoginCodeUnknownAccount     = "login_unknown_account"
 	LoginCodeIdentityUnverified = "identity_unverified"
 	LoginCodeNotOAuthAccount    = "login_not_oauth_account"
+
+	// Codes of the paste-the-redirect flow and the listener path
+	// (ADR-0033 "Login contract").
+	LoginCodeUnknown          = "login_unknown"
+	LoginCodeWrongMethod      = "login_wrong_method"
+	LoginCodeAttemptsExceeded = "login_attempts_exceeded"
+	LoginCodeBadRedirect      = "login_bad_redirect"
+	LoginCodeAlreadyCompleted = "login_already_completed"
+	LoginCodeStateMismatch    = "state_mismatch"
+	LoginCodeDenied           = "denied"
+	LoginCodeTimeout          = "timeout"
 )
 
 // LoginError is an error with a stable machine-readable code. Detail never
@@ -104,15 +152,19 @@ func (e *LoginError) Error() string { return e.Code + ": " + e.Detail }
 
 // Login runs one provider's OAuth login flow to completion: it generates
 // PKCE codes and a state token, binds that provider's vendor-fixed
-// callback listener, invokes onAuthorizeURL with the URL a browser should
-// be sent to (only once the listener is actually bound -- see
-// newCallbackServer's doc comment for why that ordering matters), blocks
-// until the vendor's redirect lands or loginCallbackTimeout elapses,
-// validates state, exchanges the code for tokens, and stores the result
-// (see persist for the re-login semantics of ADR-0033 D6). The listener and
-// this provider's in-flight flag are released on every exit path,
-// including ctx being cancelled mid-flow.
-func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, opts LoginOptions, onAuthorizeURL func(url string)) (LoginResult, error) {
+// callback listener, registers a loginId for the login, invokes
+// onAuthorizeURL with that id and the URL a browser should be sent to (only
+// once the listener is actually bound -- see newCallbackServer's doc comment
+// for why that ordering matters), blocks until the login is completed or
+// timeout elapses, validates state, exchanges the code for tokens, and
+// stores the result (see persist for the re-login semantics of ADR-0033 D6).
+//
+// The login is completed by whichever comes first: the vendor's redirect
+// landing on the listener, or a redirect pasted into Complete under the
+// loginId; the loser is ignored. The listener, the loginId and this
+// provider's in-flight flag are released on every exit path, including ctx
+// being cancelled mid-flow.
+func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, opts LoginOptions, onAuthorizeURL func(loginID, url string)) (LoginResult, error) {
 	login, ok := c.logins[provider]
 	if !ok {
 		return LoginResult{}, fmt.Errorf("oauth login: unsupported provider %q", provider)
@@ -128,7 +180,7 @@ func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, op
 	}
 
 	if !c.claim(provider) {
-		return LoginResult{}, fmt.Errorf("oauth login: a login for provider %q is already in progress", provider)
+		return LoginResult{}, &LoginError{Code: LoginCodeInProgress, Detail: fmt.Sprintf("a login for provider %q is already in progress", provider)}
 	}
 	defer c.release(provider)
 
@@ -140,6 +192,10 @@ func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, op
 	if err != nil {
 		return LoginResult{}, fmt.Errorf("oauth login: %w", err)
 	}
+	loginID, err := newLoginID()
+	if err != nil {
+		return LoginResult{}, fmt.Errorf("oauth login: %w", err)
+	}
 
 	server, err := newCallbackServer(login.CallbackAddr(), login.CallbackPath(), providerDisplayLabel(provider))
 	if err != nil {
@@ -147,20 +203,28 @@ func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, op
 	}
 	defer server.close()
 
-	onAuthorizeURL(login.AuthorizeURL(state, pkce))
+	pl := &pendingLogin{provider: provider, state: state, method: loginMethodBrowser, paste: make(chan callbackResult, 1)}
+	c.register(loginID, pl)
+	defer c.unregister(loginID)
 
-	result, err := server.waitForCallback(ctx, c.timeout)
+	onAuthorizeURL(loginID, login.AuthorizeURL(state, pkce))
+
+	result, err := c.await(ctx, loginID, server, pl)
 	if err != nil {
+		var le *LoginError
+		if errors.As(err, &le) {
+			return LoginResult{}, err
+		}
 		return LoginResult{}, fmt.Errorf("oauth login: %w", err)
 	}
 	if result.errCode != "" {
-		return LoginResult{}, fmt.Errorf("oauth login: provider %q denied or errored: %s", provider, result.errCode)
+		return LoginResult{}, &LoginError{Code: LoginCodeDenied, Detail: fmt.Sprintf("provider %q denied or errored: %s", provider, safeErrCode(result.errCode))}
 	}
 	if result.code == "" {
-		return LoginResult{}, fmt.Errorf("oauth login: callback carried no authorization code")
+		return LoginResult{}, &LoginError{Code: LoginCodeBadRedirect, Detail: "the login carried no authorization code"}
 	}
-	if result.state != state {
-		return LoginResult{}, fmt.Errorf("oauth login: callback state mismatch")
+	if subtle.ConstantTimeCompare([]byte(result.state), []byte(state)) != 1 {
+		return LoginResult{}, &LoginError{Code: LoginCodeStateMismatch, Detail: "the login's state did not match; start the login again"}
 	}
 
 	exchanged, err := login.Exchange(ctx, result.code, result.state, pkce)
@@ -169,6 +233,121 @@ func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, op
 	}
 
 	return c.persist(provider, label, opts, exchanged)
+}
+
+// await blocks until the login resolves: the listener's callback, a pasted
+// redirect accepted by Complete, ctx being done, or the timeout. Exactly one
+// of them wins. pl.resolved, set under c.mu, is the arbiter, so a Complete
+// that already returned nil is never discarded in favour of a later event.
+func (c *LoginCoordinator) await(ctx context.Context, loginID string, server *callbackServer, pl *pendingLogin) (callbackResult, error) {
+	timer := time.NewTimer(c.timeout)
+	defer timer.Stop()
+
+	var res callbackResult
+	var werr error
+	select {
+	case res = <-pl.paste:
+		// Complete flipped resolved before sending.
+		return res, nil
+	case res = <-server.result:
+	case <-ctx.Done():
+		werr = ctx.Err()
+	case <-timer.C:
+		werr = &LoginError{Code: LoginCodeTimeout, Detail: "timed out waiting for the login to complete"}
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if pl.resolved {
+		// A Complete won the race for the same instant; its paste is
+		// already buffered (sent under this mutex, together with resolved).
+		return <-pl.paste, nil
+	}
+	pl.resolved = true
+	if werr != nil {
+		// Ended without a delivered result (ctx or timeout): the login is
+		// over, so a Complete racing with Login's return is told the id is
+		// unknown rather than "already completed".
+		pl.ended = true
+		delete(c.pending, loginID)
+	}
+	return res, werr
+}
+
+// Complete finishes a browser login from a redirect the user pasted (the
+// vendor's redirect could not reach the daemon's listener -- ADR-0033 D3). It
+// returns as soon as the paste is accepted and never waits for the token
+// exchange: the Login call that issued loginID carries the final result.
+//
+// Errors are LoginErrors: login_unknown (no such, finished or expired
+// loginId), login_wrong_method, login_attempts_exceeded (the login stays
+// pending), login_bad_redirect (counts as an attempt), state_mismatch (the
+// login stays pending) and login_already_completed (the listener or an
+// earlier paste got there first). A pasted error= must carry the matching
+// state like any paste, and is then delivered like the listener's, failing
+// the login with denied. No error text carries the
+// pasted text, code or state.
+func (c *LoginCoordinator) Complete(loginID, redirectURL string) error {
+	c.mu.Lock()
+	pl, ok := c.pending[loginID]
+	if !ok {
+		c.mu.Unlock()
+		return &LoginError{Code: LoginCodeUnknown, Detail: "no login with that id is pending (it finished, expired, or was cancelled)"}
+	}
+	if pl.method != loginMethodBrowser {
+		c.mu.Unlock()
+		return &LoginError{Code: LoginCodeWrongMethod, Detail: "this login does not take a pasted redirect"}
+	}
+	if pl.attempts >= maxCompleteAttempts {
+		c.mu.Unlock()
+		return &LoginError{Code: LoginCodeAttemptsExceeded, Detail: "too many attempts for this login; wait for it to expire or start a new one"}
+	}
+	pl.attempts++
+	state := pl.state
+	c.mu.Unlock()
+
+	res, err := parsePastedRedirect(redirectURL)
+	if err != nil {
+		return err
+	}
+	// An error= paste must prove the state too, or anyone holding the loginId
+	// could end the login.
+	if subtle.ConstantTimeCompare([]byte(res.state), []byte(state)) != 1 {
+		return &LoginError{Code: LoginCodeStateMismatch, Detail: "the pasted redirect belongs to a different login; paste the one from this login's page"}
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if pl.ended {
+		return &LoginError{Code: LoginCodeUnknown, Detail: "no login with that id is pending (it finished, expired, or was cancelled)"}
+	}
+	if pl.resolved {
+		return &LoginError{Code: LoginCodeAlreadyCompleted, Detail: "this login was already completed"}
+	}
+	pl.resolved = true
+	pl.paste <- res // capacity 1, and resolved gates it to one send
+	return nil
+}
+
+// newLoginID returns 16 random bytes, base64url-encoded.
+func newLoginID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate login id: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func (c *LoginCoordinator) register(loginID string, pl *pendingLogin) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pending[loginID] = pl
+}
+
+func (c *LoginCoordinator) unregister(loginID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.pending, loginID)
 }
 
 // reloginTarget loads the row a Re-login names, as a LoginCodeUnknownAccount
