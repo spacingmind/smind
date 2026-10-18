@@ -453,6 +453,12 @@
           "markdownDescription": "Enables the connections_select command without any pre-configured scope."
         },
         {
+          "description": "Enables the connections_unsupported command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-connections-unsupported",
+          "markdownDescription": "Enables the connections_unsupported command without any pre-configured scope."
+        },
+        {
           "description": "Enables the daemon_install command without any pre-configured scope.",
           "type": "string",
           "const": "allow-daemon-install",
@@ -619,6 +625,12 @@
           "type": "string",
           "const": "deny-connections-select",
           "markdownDescription": "Denies the connections_select command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the connections_unsupported command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-connections-unsupported",
+          "markdownDescription": "Denies the connections_unsupported command without any pre-configured scope."
         },
         {
           "description": "Denies the daemon_install command without any pre-configured scope.",

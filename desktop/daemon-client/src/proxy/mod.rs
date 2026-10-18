@@ -10,5 +10,5 @@ pub mod connections;
 pub mod secret;
 pub mod server;
 
-pub use connections::{Connection, ConnectionKind, Registry, SshTarget};
+pub use connections::{Connection, ConnectionKind, Registry, SshTarget, UnsupportedConnection};
 pub use server::{serve, AssetSource, ProxyState};

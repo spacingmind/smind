@@ -117,6 +117,7 @@ pub fn run() {
             app_settings::app_settings_get,
             app_settings::app_settings_set,
             commands::connections_relay_status,
+            commands::connections_unsupported,
             commands::connections_relay_set_password,
             commands::connections_remove,
             commands::connections_select,

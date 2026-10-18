@@ -17,6 +17,7 @@
     "allow-app-settings-get",
     "allow-app-settings-set",
     "allow-connections-relay-status",
+    "allow-connections-unsupported",
     "allow-connections-relay-set-password",
     "allow-connections-remove",
     "allow-connections-select",
