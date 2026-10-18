@@ -1,5 +1,5 @@
 import { act } from "react";
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
