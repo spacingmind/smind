@@ -233,6 +233,11 @@ platform secure store). If the pairing window is not open for it, the app shows 
 approve. A device you revoke shows **This device was revoked**; *Reset device identity* gives it a new key, which the
 daemon treats as a new device that needs approval again. After a dropped connection the app reconnects on its own and
 resumes its session.
+
+If the daemon has a password (`smind set-password`), the app asks for it ("Daemon password required") the first time, keeps it
+only in memory until you close the app (never on disk, in the keychain or in logs), and asks again only if the daemon refuses
+it ("Incorrect password"). After too many wrong attempts the daemon makes the app wait; the app then tries the password you
+entered once more by itself.
 The app and the daemon must speak the same device-identity version (hello v2): if the daemon sends no device challenge the
 app says "Daemon outdated or on a different version" and does not connect — update the daemon with `smind update`.
 

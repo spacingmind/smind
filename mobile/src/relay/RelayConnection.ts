@@ -846,9 +846,12 @@ export class RelayConnection {
           // Forget exactly the value the daemon refused, never one typed since.
           if (e.reason === 'incorrect' && e.sent !== undefined) this.passwords.forgetIfEqual(key, e.sent);
           if (this.passwords.get(key) !== undefined) continue; // a newer one is already here: use it
-          // Stop the automatic loop: only the person can fix this.
+          // Stop the automatic loop: only the person can fix this. The waiter exists
+          // before the state is announced, so a submit made from a state listener
+          // cannot be lost.
+          const typed = new Promise<void>((resolve) => (this.passwordWaiter = resolve));
           this.setState({ kind: 'password', reason: e.reason });
-          await new Promise<void>((resolve) => (this.passwordWaiter = resolve));
+          await typed;
           this.passwordWaiter = null;
           continue;
         }

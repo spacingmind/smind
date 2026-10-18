@@ -70,6 +70,17 @@ describe('a daemon with a password', () => {
     await expect(conn.call('workspace.list')).resolves.toEqual([]);
   });
 
+  it('a submit made synchronously from a state listener is not lost', async () => {
+    const relay = new FakeRelay();
+    relay.password = 'auto';
+    const conn = start(relay, createDaemonPasswords());
+    conn.onState((s) => {
+      if (s.kind === 'password') conn.submitPassword('auto'); // answers the prompt before setState even returns
+    });
+    await conn.whenConnected();
+    expect(passwordsSent(relay)).toEqual([undefined, 'auto']);
+  });
+
   it('a wrong password is refused, forgotten, never re-sent, and the prompt says so; the right one then connects', async () => {
     const relay = new FakeRelay();
     relay.password = 'right-one';
