@@ -211,12 +211,14 @@ describe("shared catalog / profile / health cache", () => {
 
     fireEvent.click(screen.getByTestId("sidebar-footer-host"));
     const healthy = Number(/(\d+) healthy/.exec(screen.getByTestId("sidebar-footer-host-providers").textContent ?? "")?.[1]);
-    // Providers' account rows: claude (anthropic) ok, codex (openai) failing; GLM has no account row.
-    const okDots = screen.getAllByTestId(/^provider-row-dot-/).filter((dot) => dot.getAttribute("data-status") === "ok");
+    // The Providers detail shows one provider at a time: Claude Code (anthropic) is selected first and is ok; Codex (openai) fails.
+    expect(screen.getByTestId("provider-row-dot-1")).toHaveAttribute("data-status", "ok");
     // The footer counts providers through the same cache: every provider whose test answered ok (anthropic, glm).
     const okProviders = Object.values(d.testResults).filter((r) => r.ok).length;
-    expect(okDots).toHaveLength(1);
     expect(healthy).toBe(okProviders);
+    await act(async () => {
+      fireEvent.click(screen.getAllByTestId("provider-nav-item-codex-native")[0]);
+    });
     expect(within(screen.getByTestId("provider-row-2")).getByTestId("provider-row-dot-2")).toHaveAttribute("data-status", "failed");
 
     // Pressing Test on the failing row after it recovers flips the dot AND the footer count together.
