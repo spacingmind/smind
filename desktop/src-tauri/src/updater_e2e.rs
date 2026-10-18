@@ -189,18 +189,25 @@ fn handle(mut stream: TcpStream, routes: &HashMap<String, Vec<u8>>, log: &Mutex<
 
 /// A mock-runtime app that has the updater plugin registered exactly as
 /// production registers it (`lib.rs::updater_plugin`, so the same version
-/// comparator), configured with `pubkey` and the local `endpoint`.
+/// comparator) and configured from the committed `tauri.conf.json`, with
+/// only `pubkey`, the local `endpoint` and the insecure-transport flag
+/// (HTTP to 127.0.0.1) replaced.
 pub fn test_app(pubkey: &str, endpoint: &str) -> App<MockRuntime> {
     let mut context = mock_context(noop_assets());
     context.package_info_mut().version = RUNNING.parse().unwrap();
-    context.config_mut().plugins.0.insert(
-        "updater".to_string(),
-        serde_json::json!({
-            "pubkey": pubkey,
-            "endpoints": [endpoint],
-            "dangerousInsecureTransportProtocol": true,
-        }),
-    );
+    // Start from the committed `plugins.updater` so the tests run with the
+    // real configuration, and override only what a local feed needs.
+    let conf: serde_json::Value =
+        serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json parses");
+    let mut updater = conf["plugins"]["updater"].clone();
+    updater["pubkey"] = pubkey.into();
+    updater["endpoints"] = serde_json::json!([endpoint]);
+    updater["dangerousInsecureTransportProtocol"] = true.into();
+    context
+        .config_mut()
+        .plugins
+        .0
+        .insert("updater".to_string(), updater);
     let app = mock_builder()
         .plugin(crate::updater_plugin::<MockRuntime>())
         .build(context)
@@ -431,7 +438,13 @@ mod tests {
             .await
             .expect("check");
         let err = refused(feed, app).await;
-        assert!(!err.is_empty());
+        let err = err.to_lowercase();
+        assert!(
+            ["base64", "symbol", "decode", "invalid"]
+                .iter()
+                .any(|w| err.contains(w)),
+            "expected a signature decoding error, got: {err}"
+        );
     }
 
     /// A fake installed app the plugin can replace: `<tmp>/smind.app/Contents/...`.
@@ -464,9 +477,11 @@ mod tests {
             .await
             .expect("check");
         let events = Mutex::new(Vec::new());
-        let err = install_pending(&state, &|p| events.lock().unwrap().push(p))
-            .await
-            .expect_err("tampered artifact must be refused");
+        let err = install_pending(&state, &state.install.begin().unwrap(), &|p| {
+            events.lock().unwrap().push(p)
+        })
+        .await
+        .expect_err("tampered artifact must be refused");
         assert!(err.to_lowercase().contains("signature"));
         let plist =
             std::fs::read_to_string(dir.path().join("smind.app/Contents/Info.plist")).unwrap();
@@ -476,11 +491,12 @@ mod tests {
             state.pending.take().is_ok(),
             "failed install stays retryable"
         );
-        // The plugin runs its `on_download_finish` hook (our "installing"
-        // event) before verifying the signature, so an "installing" event is
-        // emitted even for a refused artifact; what must hold is that the
-        // bundle is untouched and the update stays retryable.
+        // Verification happens before "installing" is announced.
         let events = events.into_inner().unwrap();
+        assert!(
+            events.iter().all(|e| e["stage"] != "installing"),
+            "a refused download must not announce installing: {events:?}"
+        );
         let last_download = events
             .iter()
             .rev()
@@ -502,9 +518,11 @@ mod tests {
             .await
             .expect("check");
         let events = Mutex::new(Vec::new());
-        install_pending(&state, &|p| events.lock().unwrap().push(p))
-            .await
-            .expect("install");
+        install_pending(&state, &state.install.begin().unwrap(), &|p| {
+            events.lock().unwrap().push(p)
+        })
+        .await
+        .expect("install");
         let plist =
             std::fs::read_to_string(dir.path().join("smind.app/Contents/Info.plist")).unwrap();
         assert_eq!(plist, "new");

@@ -51,7 +51,7 @@ tauri = { version = "2", features = ["test"] }
 minisign = "0.10"
 flate2 = "1"
 tar = "0.4"
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
 # real_daemon_test (opt-in e2e): the same crates daemon-client already uses.
 futures-util = "0.3"
 tokio-tungstenite = "0.30"

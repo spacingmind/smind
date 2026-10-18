@@ -59,13 +59,29 @@ Web (`bunx vitest run src/components/desktop-update-dialog.test.tsx`):
 - Cores split rather than a test-only hook in the commands: no production
   backdoor, the commands stay one-line wrappers.
 - Fixture shared between Rust and vitest rather than duplicating the contract.
+- The tests start from the committed `plugins.updater` in `tauri.conf.json` and
+  override only pubkey, endpoint and the insecure-transport flag.
+- Found by the e2e/review and fixed here: the plugin announces its download
+  finished (our `installing` event) *before* it verifies the signature, so a
+  tampered download showed "Installing…" before the error. `install_pending`
+  now downloads, then emits `installing`, then installs. Not a security issue
+  (nothing was installed), a truthfulness fix, pinned by
+  `refused_install_leaves_the_bundle_and_keeps_the_update_pending`.
+- Follow-up, not done here (config/policy change): enable
+  `requireSignedVersion` in `tauri.conf.json` (the live v0.12.0 signatures carry
+  `version:` in the trusted comment) with a `gen-latest-json.mjs` check that the
+  signed version equals the manifest version; today a signature without a
+  version comment is accepted, so a rollback pairing of a new version number with
+  an older signed artifact is only refused when the older signature carries one.
 
 ## Progress
 
 - [x] Cores split + harness (feed, signer, mock app) — `7fb864d5`, `e187eb40`
-- [ ] Rust scenarios
-- [ ] UI fixture test
-- [ ] Docs: update `desktop-auto-update.md` Not verified, CI evidence
+- [x] Rust scenarios (peer-glm, reviewed; `978b06a9`..`70a034fe`)
+- [x] UI fixture test (peer-glm, `f11377c3`)
+- [x] Independent review (read-only): production plugin config as the test base, guard held across the relaunch, `installing` only after verification, tokio `rt-multi-thread` explicit
+- [x] Docs: `desktop-auto-update.md` Not verified updated
+- [ ] CI evidence (macOS + Windows `cargo test`)
 
 ## Validation
 

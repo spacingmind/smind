@@ -59,9 +59,7 @@ pub enum AppUpdateCheck {
     #[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
     Unsupported,
     #[serde(rename_all = "camelCase")]
-    UpToDate {
-        current_version: String,
-    },
+    UpToDate { current_version: String },
     #[serde(rename_all = "camelCase")]
     Available {
         version: String,
@@ -134,8 +132,7 @@ pub struct InstallGuard<'a> {
 
 impl Drop for InstallGuard<'_> {
     fn drop(&mut self) {
-        self.flag
-            .store(false, std::sync::atomic::Ordering::SeqCst);
+        self.flag.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -216,33 +213,41 @@ pub(crate) async fn check_with(
 }
 
 /// Download, verify the signature and install the pending update, reporting
-/// progress through `emit` (the `app-update-progress` payloads). A failure
+/// progress through `emit` (the `app-update-progress` payloads). The caller
+/// holds the in-progress guard (`state.install.begin()`) for as long as the
+/// install and the relaunch take. `installing` is emitted only after the
+/// signature check passed, so a refused download never shows it. A failure
 /// leaves the update pending so the UI's retry still finds it. The
 /// platform's relaunch is the caller's job: macOS restarts the app after
 /// this returns, Windows' installer exits the app itself.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) async fn install_pending(
     state: &UpdateState,
+    _guard: &InstallGuard<'_>,
     emit: &(dyn Fn(serde_json::Value) + Send + Sync),
 ) -> Result<(), String> {
-    let _guard = state.install.begin()?;
     let update = state.pending.take()?;
-    let result = update
-        .download_and_install(
-            |downloaded, total| {
-                emit(serde_json::json!({
-                    "stage": "downloading",
-                    "downloaded": downloaded,
-                    "total": total,
-                }));
-            },
-            || emit(serde_json::json!({ "stage": "installing" })),
-        )
-        .await
-        .map_err(|e| {
-            log::info!("smind desktop: update install failed: {e}");
-            e.to_string()
-        });
+    let result = async {
+        let bytes = update
+            .download(
+                |downloaded, total| {
+                    emit(serde_json::json!({
+                        "stage": "downloading",
+                        "downloaded": downloaded,
+                        "total": total,
+                    }));
+                },
+                || {},
+            )
+            .await?;
+        emit(serde_json::json!({ "stage": "installing" }));
+        update.install(bytes)
+    }
+    .await
+    .map_err(|e| {
+        log::info!("smind desktop: update install failed: {e}");
+        e.to_string()
+    });
     settle_install(&state.pending, update, result)
 }
 
@@ -283,7 +288,8 @@ pub async fn app_update_install(
     {
         use tauri::Emitter;
 
-        install_pending(&state, &|payload| {
+        let guard = state.install.begin()?;
+        install_pending(&state, &guard, &|payload| {
             let _ = app.emit("app-update-progress", payload);
         })
         .await?;
@@ -459,10 +465,17 @@ mod tests {
             "base config must not ask for updater artifacts (keyless builds)"
         );
         for (name, src) in [
-            ("tauri.macos.conf.json", include_str!("../tauri.macos.conf.json")),
-            ("tauri.windows.conf.json", include_str!("../tauri.windows.conf.json")),
+            (
+                "tauri.macos.conf.json",
+                include_str!("../tauri.macos.conf.json"),
+            ),
+            (
+                "tauri.windows.conf.json",
+                include_str!("../tauri.windows.conf.json"),
+            ),
         ] {
-            let c: Value = serde_json::from_str(src).unwrap_or_else(|e| panic!("{name} parses: {e}"));
+            let c: Value =
+                serde_json::from_str(src).unwrap_or_else(|e| panic!("{name} parses: {e}"));
             let create = c["bundle"]["createUpdaterArtifacts"].clone();
             assert!(
                 create.is_null() || create == Value::Bool(false),
