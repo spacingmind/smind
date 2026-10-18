@@ -28,7 +28,32 @@ export const useLoginLocationStore = create<LoginLocationState>()(
     }),
     {
       name: LOGIN_LOCATION_STORAGE_KEY,
+      version: 1,
       partialize: (state) => ({ overrides: state.overrides }),
+      // A corrupt or older persisted shape drops to empty overrides rather
+      // than poisoning every login with a bogus location.
+      migrate: (persisted) => {
+        const overrides = (persisted as { overrides?: unknown } | undefined)?.overrides;
+        if (typeof overrides !== "object" || overrides === null || Array.isArray(overrides)) {
+          return { overrides: {} };
+        }
+        const clean: Record<string, LoginLocationOverride> = {};
+        for (const [id, value] of Object.entries(overrides as Record<string, unknown>)) {
+          if (value === "this-device" || value === "other-device") clean[id] = value;
+        }
+        return { overrides: clean };
+      },
+      merge: (persisted, current) => {
+        const migrated = (persisted as { overrides?: unknown } | undefined)?.overrides;
+        const valid =
+          typeof migrated === "object" &&
+          migrated !== null &&
+          !Array.isArray(migrated) &&
+          Object.values(migrated as Record<string, unknown>).every(
+            (v) => v === "this-device" || v === "other-device",
+          );
+        return valid ? { ...current, overrides: migrated as Record<string, LoginLocationOverride> } : current;
+      },
     },
   ),
 );

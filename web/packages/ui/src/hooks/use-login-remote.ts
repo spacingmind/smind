@@ -58,6 +58,11 @@ export function useLoginRemote(): {
     remote,
     derivedRemote,
     override,
-    setOverride: (v) => useLoginLocationStore.getState().setOverride(connectionId, v),
+    // Before the desktop connection resolves the id is unknown -- never
+    // persist an override under "".
+    setOverride: (v) => {
+      if (connectionId === "") return;
+      useLoginLocationStore.getState().setOverride(connectionId, v);
+    },
   };
 }

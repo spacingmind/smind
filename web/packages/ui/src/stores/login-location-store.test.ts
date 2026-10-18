@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { useLoginLocationStore } from "@/stores/login-location-store";
+import { act } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useLoginLocationStore, LOGIN_LOCATION_STORAGE_KEY } from "@/stores/login-location-store";
 
 describe("login-location-store", () => {
   beforeEach(() => {
@@ -32,5 +33,36 @@ describe("login-location-store", () => {
     useLoginLocationStore.getState().setOverride("conn-a", null);
     expect(useLoginLocationStore.getState().overrides["conn-a"]).toBeUndefined();
     expect(useLoginLocationStore.getState().overrides["conn-b"]).toBe("this-device");
+  });
+
+  it("store drops a corrupt persisted shape", async () => {
+    localStorage.setItem(
+      LOGIN_LOCATION_STORAGE_KEY,
+      JSON.stringify({ state: { overrides: { c1: "somewhere-else", o: {} } }, version: 9 }),
+    );
+    vi.resetModules();
+    const fresh = await import("@/stores/login-location-store");
+    expect(fresh.useLoginLocationStore.getState().overrides).toEqual({});
+  });
+
+  it("setOverride before the connection resolves is ignored", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/platform", () => ({
+      isDesktop: true,
+      desktop: { getCurrentConnection: () => new Promise(() => {}) },
+    }));
+    const { useLoginRemote } = await import("@/hooks/use-login-remote");
+    const { renderHookWithDaemon } = await import("@/test/render-with-daemon");
+    const { FakeUsageDaemon } = await import("@/test/usage-test-client");
+    const { FakeWsClient } = await import("@/test/fake-ws-client");
+    const daemon = new FakeUsageDaemon([], new FakeWsClient());
+    const view = renderHookWithDaemon(() => useLoginRemote(), daemon, { initialProps: null });
+    const fresh = await import("@/stores/login-location-store");
+    const before = JSON.stringify(fresh.useLoginLocationStore.getState().overrides);
+    await act(async () => {
+      view.result.current.setOverride("other-device");
+    });
+    expect(JSON.stringify(fresh.useLoginLocationStore.getState().overrides)).toBe(before);
+    expect(before).toBe("{}");
   });
 });
