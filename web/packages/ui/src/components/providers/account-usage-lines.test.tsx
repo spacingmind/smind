@@ -44,7 +44,7 @@ describe("AccountUsageLines", () => {
     const { container } = render(
       <>
         <AccountUsageLines usage={problemAccount("expired", {}, NOW)} displayAs="used" now={NOW} />
-        <AccountUsageLines usage={{ ...claudeAccount({}, NOW), report: undefined } as AccountUsage} displayAs="used" now={NOW} />
+        <AccountUsageLines usage={{ ...claudeAccount({}, NOW), report: undefined } as unknown as AccountUsage} displayAs="used" now={NOW} />
       </>,
     );
     expect(container.querySelector("[data-testid='account-usage-lines']")).toBeNull();

@@ -1,3 +1,5 @@
+import type { JSX } from "react";
+
 import { UsageBalanceBar } from "@/components/account-usage/usage-balance-bar";
 import { UsageWindowBar } from "@/components/account-usage/usage-window-bar";
 import { formatUsageFreshness } from "@/lib/account-usage/model";
