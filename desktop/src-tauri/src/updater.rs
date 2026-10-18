@@ -59,9 +59,7 @@ pub enum AppUpdateCheck {
     #[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
     Unsupported,
     #[serde(rename_all = "camelCase")]
-    UpToDate {
-        current_version: String,
-    },
+    UpToDate { current_version: String },
     #[serde(rename_all = "camelCase")]
     Available {
         version: String,
@@ -134,8 +132,7 @@ pub struct InstallGuard<'a> {
 
 impl Drop for InstallGuard<'_> {
     fn drop(&mut self) {
-        self.flag
-            .store(false, std::sync::atomic::Ordering::SeqCst);
+        self.flag.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -180,6 +177,92 @@ pub struct UpdateState {
     pub install: InstallInProgress,
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub fn updater_plugin<R: tauri::Runtime>(
+) -> tauri::plugin::TauriPlugin<R, tauri_plugin_updater::Config> {
+    // ADR-0023.3: a candidate is offered only if strictly newer than the
+    // running version AND a stable release (no pre-release part).
+    tauri_plugin_updater::Builder::new()
+        .default_version_comparator(|current, update| {
+            is_offerable(&current.to_string(), &update.version.to_string())
+        })
+        .build()
+}
+
+/// The check, over an already configured builder (production passes
+/// `app.updater_builder()`; the e2e tests pass one aimed at a local feed).
+/// A successful `available` result is stored as the pending update.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub async fn check_with(
+    builder: tauri_plugin_updater::UpdaterBuilder,
+    current_version: &str,
+    state: &UpdateState,
+) -> Result<AppUpdateCheck, String> {
+    state.install.ensure_idle()?;
+    let updater = builder.build().map_err(|e| e.to_string())?;
+    match updater.check().await {
+        Ok(Some(update)) => {
+            log::info!("smind desktop: update available: {}", update.version);
+            let result = AppUpdateCheck::Available {
+                version: update.version.clone(),
+                current_version: update.current_version.clone(),
+                notes: cap_notes(update.body.clone()),
+                date: update.date.map(|d| d.to_string()),
+            };
+            // An install may have started while the check ran.
+            state.install.ensure_idle()?;
+            state.pending.set(update);
+            Ok(result)
+        }
+        Ok(None) => Ok(AppUpdateCheck::UpToDate {
+            current_version: current_version.to_string(),
+        }),
+        Err(e) => {
+            log::info!("smind desktop: update check failed: {e}");
+            Err(e.to_string())
+        }
+    }
+}
+
+/// Download, verify the signature and install the pending update, reporting
+/// progress through `emit` (the `app-update-progress` payloads). The caller
+/// holds the in-progress guard (`state.install.begin()`) for as long as the
+/// install and the relaunch take. `installing` is emitted only after the
+/// signature check passed, so a refused download never shows it. A failure
+/// leaves the update pending so the UI's retry still finds it. The
+/// platform's relaunch is the caller's job: macOS restarts the app after
+/// this returns, Windows' installer exits the app itself.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub async fn install_pending(
+    state: &UpdateState,
+    _guard: &InstallGuard<'_>,
+    emit: &(dyn Fn(serde_json::Value) + Send + Sync),
+) -> Result<(), String> {
+    let update = state.pending.take()?;
+    let result = async {
+        let bytes = update
+            .download(
+                |downloaded, total| {
+                    emit(serde_json::json!({
+                        "stage": "downloading",
+                        "downloaded": downloaded,
+                        "total": total,
+                    }));
+                },
+                || {},
+            )
+            .await?;
+        emit(serde_json::json!({ "stage": "installing" }));
+        update.install(bytes)
+    }
+    .await
+    .map_err(|e| {
+        log::info!("smind desktop: update install failed: {e}");
+        e.to_string()
+    });
+    settle_install(&state.pending, update, result)
+}
+
 #[tauri::command]
 pub async fn app_update_check(
     app: tauri::AppHandle,
@@ -194,30 +277,12 @@ pub async fn app_update_check(
     {
         use tauri_plugin_updater::UpdaterExt;
 
-        state.install.ensure_idle()?;
-        let updater = app.updater_builder().build().map_err(|e| e.to_string())?;
-        match updater.check().await {
-            Ok(Some(update)) => {
-                log::info!("smind desktop: update available: {}", update.version);
-                let result = AppUpdateCheck::Available {
-                    version: update.version.clone(),
-                    current_version: update.current_version.clone(),
-                    notes: cap_notes(update.body.clone()),
-                    date: update.date.map(|d| d.to_string()),
-                };
-                // An install may have started while the check ran.
-                state.install.ensure_idle()?;
-                state.pending.set(update);
-                Ok(result)
-            }
-            Ok(None) => Ok(AppUpdateCheck::UpToDate {
-                current_version: app.package_info().version.to_string(),
-            }),
-            Err(e) => {
-                log::info!("smind desktop: update check failed: {e}");
-                Err(e.to_string())
-            }
-        }
+        check_with(
+            app.updater_builder(),
+            &app.package_info().version.to_string(),
+            &state,
+        )
+        .await
     }
 }
 
@@ -235,35 +300,11 @@ pub async fn app_update_install(
     {
         use tauri::Emitter;
 
-        let _guard = state.install.begin()?;
-        let update = state.pending.take()?;
-        let download_app = app.clone();
-        let install_app = app.clone();
-        let result = update
-            .download_and_install(
-                move |downloaded, total| {
-                    let _ = download_app.emit(
-                        "app-update-progress",
-                        serde_json::json!({
-                            "stage": "downloading",
-                            "downloaded": downloaded,
-                            "total": total,
-                        }),
-                    );
-                },
-                move || {
-                    let _ = install_app.emit(
-                        "app-update-progress",
-                        serde_json::json!({ "stage": "installing" }),
-                    );
-                },
-            )
-            .await
-            .map_err(|e| {
-                log::info!("smind desktop: update install failed: {e}");
-                e.to_string()
-            });
-        settle_install(&state.pending, update, result)?;
+        let guard = state.install.begin()?;
+        install_pending(&state, &guard, &|payload| {
+            let _ = app.emit("app-update-progress", payload);
+        })
+        .await?;
         // Windows: the NSIS installer exits the app itself. macOS: the
         // call never resolves -- restart does not return.
         #[cfg(target_os = "macos")]
@@ -436,10 +477,17 @@ mod tests {
             "base config must not ask for updater artifacts (keyless builds)"
         );
         for (name, src) in [
-            ("tauri.macos.conf.json", include_str!("../tauri.macos.conf.json")),
-            ("tauri.windows.conf.json", include_str!("../tauri.windows.conf.json")),
+            (
+                "tauri.macos.conf.json",
+                include_str!("../tauri.macos.conf.json"),
+            ),
+            (
+                "tauri.windows.conf.json",
+                include_str!("../tauri.windows.conf.json"),
+            ),
         ] {
-            let c: Value = serde_json::from_str(src).unwrap_or_else(|e| panic!("{name} parses: {e}"));
+            let c: Value =
+                serde_json::from_str(src).unwrap_or_else(|e| panic!("{name} parses: {e}"));
             let create = c["bundle"]["createUpdaterArtifacts"].clone();
             assert!(
                 create.is_null() || create == Value::Bool(false),
