@@ -76,7 +76,8 @@ describe.skipIf(!supported)('daemon password (P13c) against a real relay and dae
   });
 
   it('an approved device needs the password in every hello: a fresh session after a drop still sends it, no second prompt', { timeout: 60_000 }, async () => {
-    const conn = open(withPassword, 43);
+    // The end-to-end watchdog is shortened (defaults 15 s / 90 s): after the daemon restarts the phone's stream stays up.
+    const conn = open(withPassword, 43, { liveness: { pendingStaleMs: 1_500, idleStaleMs: 3_000, checkMs: 250 } });
     await vi.waitFor(() => expect(conn.state.kind).toBe('password'), { timeout: 20_000 });
     conn.submitPassword(PASSWORD);
     await conn.whenConnected();
@@ -103,8 +104,8 @@ describe.skipIf(!supported)('daemon password (P13c) against a real relay and dae
   it('rate limiting: after repeated wrong passwords the daemon says "too many attempts", the client keeps the correct password and connects after the wait', { timeout: 120_000 }, async () => {
     const conn = open(withPassword, 46);
     await vi.waitFor(() => expect(conn.state.kind).toBe('password'), { timeout: 20_000 });
-    // 5 free wrong attempts for this device id, then the daemon starts delaying.
-    for (let i = 0; i < 5; i++) {
+    // 5 free wrong attempts for this device id; the 6th wrong one starts the delay (2 s, then 4 s ...).
+    for (let i = 0; i < 6; i++) {
       conn.submitPassword(`wrong ${i}`);
       await vi.waitFor(() => expect(conn.state).toEqual({ kind: 'password', reason: 'incorrect' }), { timeout: 20_000 });
     }

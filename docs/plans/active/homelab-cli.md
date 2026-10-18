@@ -1083,6 +1083,18 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   `inflight`; fixed separately in the `fix/device-hello-replay` PR), and every shipped daemon behaves that way, so the banner
   treats a 4 s silence as "predates daemon.info". Not done: the `docker pull` variant for a daemon reporting it runs from an image (`image?` in `daemon.info`, needs
   P11), and the P5 setting that stops offering (a) while a service owns the port (P5 not started).
+- 2026-10-18 (P13c, mobile): the daemon-password prompt on mobile (`feat/mobile-relay-device-password`; the daemon + desktop side is
+  #360). Follows the #360 wire spec and its amendment: `relay.device_hello` carries `password` only if the person typed one this run;
+  `password_required` / `incorrect_password` stop the retry loop (state `password`, reason `required` | `incorrect`) and show a prompt,
+  and on submit the connection opens a fresh session (new challenge) with it; exactly the value the daemon refused is forgotten
+  (a newer one typed meanwhile is kept and used), never re-sent; `too_many_attempts` (state `locked`) keeps the password and retries
+  it once after `clamp(retry_after, 5 s, 1 h)`, the countdown is shown. The password lives in a closure-held in-memory store keyed by
+  relay address + relay host id + daemon public key (`mobile/src/relay/daemonPasswords.ts`), so it is only ever sent to the daemon it
+  was typed for and a re-issued link with another daemon key starts empty; it is held for the app run so drops and daemon restarts
+  reconnect without asking. It never reaches the secure store, any storage, logs, errors, state, analytics or the identity object
+  (a test greps the files that handle it for persistence/logging APIs); the field is masked and asks the OS not to autofill or offer
+  to save it; a password over 128 bytes or empty is refused locally (it would only spend a wrong attempt). The tests and the web
+  smoke detect whether the harness has `-password` (it arrives with #360), so this branch is green before and after #360 lands.
 
 ## Validation
 
@@ -1365,3 +1377,19 @@ one built from the P4 branch), `docker compose config`, the agents example build
   dotted quad, made the `managedBy=docker` check non-skippable, test cleanup of other-owner temp dirs from a container; new test
   `root-owned nested 0700 trees are repaired with only CHOWN/SETUID/SETGID`.
 
+### P13c — mobile (2026-10-18, branch `feat/mobile-relay-device-password`)
+
+Commands: `cd mobile && npx tsc --noEmit && npx vitest run --exclude "**/*.node.test.ts"`, `npm run test:integration` and
+`npm run smoke:web:full` **on a tree with #360 merged** (local temporary merge of `origin/feat/relay-device-password`, aborted afterwards;
+the harness `-password` flag is #360's), `task lint`.
+
+| AC | Evidence |
+|---|---|
+| mobile prompts, never stored | `RelayConnection.password.test.ts`: `asks for it (password required), stops retrying, and connects once it is submitted`, `a wrong password is refused, forgotten, never re-sent, and the prompt says so`, `the password reaches nothing but the encrypted hello: not state, errors, console, nor the stored identity`, `holds the password for the app run …`; `daemonPasswords.test.ts`: `a password is memory only` (no persistence/logging/analytics API in the files that handle it; the secure-store modules never mention it) |
+| spec amendment rules | `forgets exactly the rejected value: a newer one typed while the reply was in flight is kept and used`, `a lockout (too_many_attempts) keeps the password and tries it once more after the wait`, `clamps what a daemon says about how long to wait` (5 s floor, 1 h ceiling), `sends a password only to the daemon it was typed for` (relay + host id + daemon key), `refuses to submit a password the daemon could never accept` |
+| not required / pre-P13c daemon | `a daemon without a password never gets one, and a pre-P13c daemon that ignores the field still connects` |
+| real daemon (required / wrong / right / not required / rate limit) | `integration.password.node.test.ts` (real TS client ↔ real relay + hub with `-password`): `a daemon with a password asks for it; the device is NOT recorded while it has none` (registry empty), `a wrong password is refused ("incorrect"), still leaves no registry entry, and the right one connects`, `an approved device needs the password in every hello … no second prompt` (daemon restart with the stream up), `a daemon without a password ignores one the person typed earlier`, `rate limiting …` (6 wrong → `locked` → the kept correct password is accepted after the wait) |
+| screenshots | `mobile/.smoke/password-{required,incorrect,locked,tasks}-{light,dark}.png` from `smoke:web:full` (prompt, "Incorrect password", "Too many attempts" with a countdown, then the task list); read by the Lead |
+
+Not verified: a real phone or simulator (secure `TextInput` on iOS `SecureField` / Android, OS autofill suppression via
+`autoComplete="off"`), a password manager's behaviour with the field, a pre-P13c daemon on the wire (the fake daemon stands in).
