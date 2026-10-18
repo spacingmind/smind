@@ -23,6 +23,8 @@ type fakeLogin struct {
 
 	// exchangeErr, if set, is returned by Exchange instead of a credential.
 	exchangeErr error
+	// subject is the vendor account subject Exchange reports ("" = none).
+	subject string
 }
 
 func (f *fakeLogin) CallbackAddr() string { return f.addr }
@@ -33,14 +35,17 @@ func (f *fakeLogin) AuthorizeURL(state string, pkce PKCECodes) string {
 		"&challenge=" + url.QueryEscape(pkce.CodeChallenge)
 }
 
-func (f *fakeLogin) Exchange(_ context.Context, code, state string, pkce PKCECodes) (OAuthCredential, error) {
+func (f *fakeLogin) Exchange(_ context.Context, code, state string, pkce PKCECodes) (ExchangeResult, error) {
 	if f.exchangeErr != nil {
-		return OAuthCredential{}, f.exchangeErr
+		return ExchangeResult{}, f.exchangeErr
 	}
-	return OAuthCredential{
-		AccessToken:  "access-for-" + code,
-		RefreshToken: "refresh-for-" + code,
-		ExpiresAt:    time.Now().Add(time.Hour),
+	return ExchangeResult{
+		Credential: OAuthCredential{
+			AccessToken:  "access-for-" + code,
+			RefreshToken: "refresh-for-" + code,
+			ExpiresAt:    time.Now().Add(time.Hour),
+		},
+		Subject: f.subject,
 	}, nil
 }
 

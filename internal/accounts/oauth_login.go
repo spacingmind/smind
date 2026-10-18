@@ -84,7 +84,34 @@ type Login interface {
 	// through here too because Anthropic's token endpoint additionally
 	// expects it as a request body field (unlike OpenAI's, which has no
 	// state field in the token request at all -- see OpenAILogin.Exchange).
-	Exchange(ctx context.Context, code, state string, pkce PKCECodes) (OAuthCredential, error)
+	Exchange(ctx context.Context, code, state string, pkce PKCECodes) (ExchangeResult, error)
+}
+
+// ExchangeResult is what a successful code exchange yields: the credential
+// to store, plus the vendor-side account subject the token response carried
+// (ADR-0033 D6). Subject feeds AccountIdentity and is "" when the response
+// had none; it is never logged or sent over the wire.
+type ExchangeResult struct {
+	Credential OAuthCredential
+	Subject    string
+}
+
+// anthropicExchangeResponse is anthropic's token response on the
+// authorization_code grant: the refresh-shaped fields plus the account the
+// login belonged to. Only account.uuid is read (no e-mail is kept).
+type anthropicExchangeResponse struct {
+	anthropicTokenResponse
+	Account struct {
+		UUID string `json:"uuid"`
+	} `json:"account"`
+}
+
+// openAIExchangeResponse is openai's token response on the
+// authorization_code grant: the refresh-shaped fields plus the id_token the
+// identity subject is derived from.
+type openAIExchangeResponse struct {
+	openAITokenResponse
+	IDToken string `json:"id_token"`
 }
 
 // AnthropicLogin implements Login against claude.ai/platform.claude.com's
@@ -143,7 +170,7 @@ func (l *AnthropicLogin) AuthorizeURL(state string, pkce PKCECodes) string {
 // for the authorization_code grant too, exactly like AnthropicRefresher's
 // refresh_token grant -- see that type's Refresh doc comment. Unlike
 // OpenAI's, Anthropic's token request body also carries state.
-func (l *AnthropicLogin) Exchange(ctx context.Context, code, state string, pkce PKCECodes) (OAuthCredential, error) {
+func (l *AnthropicLogin) Exchange(ctx context.Context, code, state string, pkce PKCECodes) (ExchangeResult, error) {
 	reqBody, err := json.Marshal(map[string]string{
 		"grant_type":    "authorization_code",
 		"code":          code,
@@ -153,38 +180,41 @@ func (l *AnthropicLogin) Exchange(ctx context.Context, code, state string, pkce 
 		"state":         state,
 	})
 	if err != nil {
-		return OAuthCredential{}, fmt.Errorf("marshal anthropic oauth exchange request: %w", err)
+		return ExchangeResult{}, fmt.Errorf("marshal anthropic oauth exchange request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, anthropicTokenURL, bytes.NewReader(reqBody))
 	if err != nil {
-		return OAuthCredential{}, fmt.Errorf("create anthropic oauth exchange request: %w", err)
+		return ExchangeResult{}, fmt.Errorf("create anthropic oauth exchange request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := l.httpClient.Do(req)
 	if err != nil {
-		return OAuthCredential{}, fmt.Errorf("anthropic oauth exchange request: %w", err)
+		return ExchangeResult{}, fmt.Errorf("anthropic oauth exchange request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return OAuthCredential{}, fmt.Errorf("read anthropic oauth exchange response: %w", err)
+		return ExchangeResult{}, fmt.Errorf("read anthropic oauth exchange response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return OAuthCredential{}, fmt.Errorf("anthropic oauth exchange failed with status %d: %s", resp.StatusCode, body)
+		return ExchangeResult{}, fmt.Errorf("anthropic oauth exchange failed with status %d: %s", resp.StatusCode, body)
 	}
 
-	var tok anthropicTokenResponse
+	var tok anthropicExchangeResponse
 	if err := json.Unmarshal(body, &tok); err != nil {
-		return OAuthCredential{}, fmt.Errorf("parse anthropic oauth exchange response: %w", err)
+		return ExchangeResult{}, fmt.Errorf("parse anthropic oauth exchange response: %w", err)
 	}
 
-	return OAuthCredential{
-		AccessToken:  tok.AccessToken,
-		RefreshToken: tok.RefreshToken,
-		ExpiresAt:    time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second),
+	return ExchangeResult{
+		Credential: OAuthCredential{
+			AccessToken:  tok.AccessToken,
+			RefreshToken: tok.RefreshToken,
+			ExpiresAt:    time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second),
+		},
+		Subject: tok.Account.UUID,
 	}, nil
 }
 
@@ -248,7 +278,7 @@ func (l *OpenAILogin) AuthorizeURL(state string, pkce PKCECodes) string {
 // LoginCoordinator.Login). ExpiresAt is derived from the returned access
 // token's JWT exp claim, exactly like OpenAIRefresher.Refresh (OpenAI's
 // token response carries no expires_in field for either grant).
-func (l *OpenAILogin) Exchange(ctx context.Context, code, _ string, pkce PKCECodes) (OAuthCredential, error) {
+func (l *OpenAILogin) Exchange(ctx context.Context, code, _ string, pkce PKCECodes) (ExchangeResult, error) {
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
 		"client_id":     {openaiClientID},
@@ -259,37 +289,40 @@ func (l *OpenAILogin) Exchange(ctx context.Context, code, _ string, pkce PKCECod
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, openaiTokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return OAuthCredential{}, fmt.Errorf("create openai oauth exchange request: %w", err)
+		return ExchangeResult{}, fmt.Errorf("create openai oauth exchange request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := l.httpClient.Do(req)
 	if err != nil {
-		return OAuthCredential{}, fmt.Errorf("openai oauth exchange request: %w", err)
+		return ExchangeResult{}, fmt.Errorf("openai oauth exchange request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return OAuthCredential{}, fmt.Errorf("read openai oauth exchange response: %w", err)
+		return ExchangeResult{}, fmt.Errorf("read openai oauth exchange response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return OAuthCredential{}, fmt.Errorf("openai oauth exchange failed with status %d: %s", resp.StatusCode, body)
+		return ExchangeResult{}, fmt.Errorf("openai oauth exchange failed with status %d: %s", resp.StatusCode, body)
 	}
 
-	var tok openAITokenResponse
+	var tok openAIExchangeResponse
 	if err := json.Unmarshal(body, &tok); err != nil {
-		return OAuthCredential{}, fmt.Errorf("parse openai oauth exchange response: %w", err)
+		return ExchangeResult{}, fmt.Errorf("parse openai oauth exchange response: %w", err)
 	}
 
 	expiresAt, err := jwtExpiry(tok.AccessToken)
 	if err != nil {
-		return OAuthCredential{}, fmt.Errorf("parse openai access token expiry: %w", err)
+		return ExchangeResult{}, fmt.Errorf("parse openai access token expiry: %w", err)
 	}
 
-	return OAuthCredential{
-		AccessToken:  tok.AccessToken,
-		RefreshToken: tok.RefreshToken,
-		ExpiresAt:    expiresAt,
+	return ExchangeResult{
+		Credential: OAuthCredential{
+			AccessToken:  tok.AccessToken,
+			RefreshToken: tok.RefreshToken,
+			ExpiresAt:    expiresAt,
+		},
+		Subject: openAISubject(tok.IDToken),
 	}, nil
 }

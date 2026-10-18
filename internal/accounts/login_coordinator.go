@@ -110,12 +110,12 @@ func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, on
 		return Account{}, fmt.Errorf("oauth login: callback state mismatch")
 	}
 
-	cred, err := login.Exchange(ctx, result.code, result.state, pkce)
+	exchanged, err := login.Exchange(ctx, result.code, result.state, pkce)
 	if err != nil {
 		return Account{}, fmt.Errorf("oauth login: %w", err)
 	}
 
-	created, err := c.registry.AddOAuth(provider, label, cred)
+	created, err := c.registry.AddOAuth(provider, label, exchanged.Credential)
 	if err != nil {
 		return Account{}, fmt.Errorf("oauth login: %w", err)
 	}

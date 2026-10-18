@@ -31,6 +31,8 @@ import (
 type fakeOAuthLogin struct {
 	addr string
 	path string
+	// subject is the vendor account subject Exchange reports ("" = none).
+	subject string
 }
 
 func (f *fakeOAuthLogin) CallbackAddr() string { return f.addr }
@@ -40,11 +42,14 @@ func (f *fakeOAuthLogin) AuthorizeURL(state string, _ accounts.PKCECodes) string
 	return "https://example.invalid/authorize?state=" + url.QueryEscape(state)
 }
 
-func (f *fakeOAuthLogin) Exchange(_ context.Context, code, _ string, _ accounts.PKCECodes) (accounts.OAuthCredential, error) {
-	return accounts.OAuthCredential{
-		AccessToken:  "access-for-" + code,
-		RefreshToken: "refresh-for-" + code,
-		ExpiresAt:    time.Now().Add(time.Hour),
+func (f *fakeOAuthLogin) Exchange(_ context.Context, code, _ string, _ accounts.PKCECodes) (accounts.ExchangeResult, error) {
+	return accounts.ExchangeResult{
+		Credential: accounts.OAuthCredential{
+			AccessToken:  "access-for-" + code,
+			RefreshToken: "refresh-for-" + code,
+			ExpiresAt:    time.Now().Add(time.Hour),
+		},
+		Subject: f.subject,
 	}, nil
 }
 

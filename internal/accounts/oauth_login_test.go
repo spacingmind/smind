@@ -180,7 +180,7 @@ func TestAnthropicLogin_Exchange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Exchange() error = %v", err)
 	}
-	if got.AccessToken != "access-new" || got.RefreshToken != "refresh-new" {
+	if got.Credential.AccessToken != "access-new" || got.Credential.RefreshToken != "refresh-new" {
 		t.Errorf("Exchange() = %+v, want access-new/refresh-new", got)
 	}
 
@@ -250,7 +250,7 @@ func TestOpenAILogin_Exchange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Exchange() error = %v", err)
 	}
-	if got.AccessToken != accessToken || got.RefreshToken != "refresh-new" {
+	if got.Credential.AccessToken != accessToken || got.Credential.RefreshToken != "refresh-new" {
 		t.Errorf("Exchange() = %+v", got)
 	}
 
@@ -293,4 +293,115 @@ func TestOpenAILogin_Exchange_NonOKStatus(t *testing.T) {
 	if err == nil {
 		t.Fatal("Exchange() error = nil, want error for non-200 response")
 	}
+}
+
+// idTokenWithClaims builds an unsigned JWT whose payload is claims, like the
+// id_token OpenAI's token endpoint returns (the daemon never verifies it).
+func idTokenWithClaims(t *testing.T, claims map[string]any) string {
+	t.Helper()
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatalf("marshal id_token claims: %v", err)
+	}
+	enc := base64.RawURLEncoding
+	return enc.EncodeToString([]byte(`{"alg":"none"}`)) + "." + enc.EncodeToString(payload) + "." + enc.EncodeToString([]byte("sig"))
+}
+
+func TestLoginExchange_Identity(t *testing.T) {
+	t.Parallel()
+
+	t.Run("oauth exchange derives a stable identity for anthropic and openai", func(t *testing.T) {
+		t.Parallel()
+
+		access := jwtWithExpiry(t, time.Now().Add(time.Hour))
+		anthropicLogin := func(body string) *AnthropicLogin {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(body))
+			}))
+			t.Cleanup(srv.Close)
+			return NewAnthropicLogin(WithAnthropicLoginHTTPClient(testHTTPClient(t, srv)))
+		}
+		openaiLogin := func(idToken string) *OpenAILogin {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				resp := map[string]string{"access_token": access, "refresh_token": "r"}
+				if idToken != "" {
+					resp["id_token"] = idToken
+				}
+				_ = json.NewEncoder(w).Encode(resp)
+			}))
+			t.Cleanup(srv.Close)
+			return NewOpenAILogin(WithOpenAILoginHTTPClient(testHTTPClient(t, srv)))
+		}
+		identityOf := func(provider string, res ExchangeResult, err error) string {
+			t.Helper()
+			if err != nil {
+				t.Fatalf("Exchange() error = %v", err)
+			}
+			return AccountIdentity(provider, res.Subject)
+		}
+		anthropicIdentity := func(uuid string) string {
+			body := `{"access_token":"a","refresh_token":"r","expires_in":3600}`
+			if uuid != "" {
+				body = `{"access_token":"a","refresh_token":"r","expires_in":3600,"account":{"uuid":"` + uuid + `","email_address":"someone@example.com"},"organization":{"uuid":"org-1"}}`
+			}
+			res, err := anthropicLogin(body).Exchange(context.Background(), "c", "s", PKCECodes{CodeVerifier: "v"})
+			return identityOf("anthropic", res, err)
+		}
+		openaiIdentity := func(sub, chatgptAccount string) string {
+			var idToken string
+			if sub != "" {
+				idToken = idTokenWithClaims(t, map[string]any{
+					"sub":                         sub,
+					"email":                       "someone@example.com",
+					"https://api.openai.com/auth": map[string]any{"chatgpt_account_id": chatgptAccount},
+				})
+			}
+			res, err := openaiLogin(idToken).Exchange(context.Background(), "c", "s", PKCECodes{CodeVerifier: "v"})
+			return identityOf("openai", res, err)
+		}
+
+		// Anthropic: stable per account.uuid, distinct across accounts,
+		// empty when the response has no account.
+		a1, a1again, a2 := anthropicIdentity("uuid-1"), anthropicIdentity("uuid-1"), anthropicIdentity("uuid-2")
+		if a1 == "" || a1 != a1again || a1 == a2 {
+			t.Errorf("anthropic identities = %q, %q, %q, want stable and distinct", a1, a1again, a2)
+		}
+		if got := anthropicIdentity(""); got != "" {
+			t.Errorf("anthropic identity without account = %q, want empty", got)
+		}
+
+		// OpenAI: sub + chatgpt_account_id both matter.
+		o1, o1again := openaiIdentity("user-1", "ws-1"), openaiIdentity("user-1", "ws-1")
+		oWorkspace, oUser := openaiIdentity("user-1", "ws-2"), openaiIdentity("user-2", "ws-1")
+		if o1 == "" || o1 != o1again || o1 == oWorkspace || o1 == oUser {
+			t.Errorf("openai identities = %q, %q, %q, %q, want stable and distinct", o1, o1again, oWorkspace, oUser)
+		}
+		if got := openaiIdentity("", ""); got != "" {
+			t.Errorf("openai identity without id_token = %q, want empty", got)
+		}
+
+		// Same subject under different providers never collides, and the
+		// identity never contains the raw subject.
+		if AccountIdentity("anthropic", "same") == AccountIdentity("openai", "same") {
+			t.Error("identity does not depend on provider")
+		}
+		for _, id := range []string{a1, o1} {
+			if len(id) != 64 || strings.Contains(id, "uuid-1") || strings.Contains(id, "user-1") || strings.Contains(id, "ws-1") {
+				t.Errorf("identity %q is not an opaque sha256 hex", id)
+			}
+		}
+		if AccountIdentity("anthropic", "") != "" {
+			t.Error("AccountIdentity with empty subject != empty")
+		}
+	})
+
+	t.Run("malformed openai id_token yields no identity and does not fail the login", func(t *testing.T) {
+		t.Parallel()
+
+		for _, idToken := range []string{"not-a-jwt", "a.!!!.c", idTokenWithClaims(t, map[string]any{"email": "x"})} {
+			if got := openAISubject(idToken); got != "" {
+				t.Errorf("openAISubject(%q) = %q, want empty", idToken, got)
+			}
+		}
+	})
 }
