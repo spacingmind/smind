@@ -1,10 +1,34 @@
-import { useQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
 import { FALLBACK_PROVIDERS } from "@/lib/provider-catalog-fallback";
 import { queryKeys } from "@/lib/query-keys";
 import type { ProviderInfo, ProviderListResult } from "@/lib/types";
+import type { WsClient } from "@/lib/ws-client";
+
+/** The one `provider.list` query definition: the hook and one-off readers (`ensureQueryData`) share it, so the key has a single fetcher. */
+export function providerListQueryOptions(client: WsClient | null) {
+  return queryOptions({
+    queryKey: queryKeys.providerList(),
+    enabled: client !== null,
+    staleTime: Infinity,
+    retry: false,
+    queryFn: async (): Promise<ProviderListResult> => {
+      if (!client) throw new Error("no daemon connection");
+      try {
+        const result = await client.call<ProviderListResult>("provider.list");
+        if (!result) throw new Error("provider.list returned nothing");
+        if (result.providers.length === 0) console.error("provider.list returned no providers, using fallback provider list");
+        return result;
+      } catch (err) {
+        // Logged once per failed fetch (not per render); consumers fall back to FALLBACK_PROVIDERS.
+        console.error("provider.list failed, using fallback provider list", err);
+        throw err;
+      }
+    },
+  });
+}
 
 /**
  * The daemon's provider catalog, ONE cache entry per connection (ADR-0032
@@ -30,25 +54,7 @@ export function useProviderCatalog(): {
   error: Error | null;
 } {
   const { client } = useDaemonConnection();
-  const query = useQuery({
-    queryKey: queryKeys.providerList(),
-    enabled: client !== null,
-    staleTime: Infinity,
-    retry: false,
-    queryFn: async (): Promise<ProviderListResult> => {
-      if (!client) throw new Error("no daemon connection");
-      try {
-        const result = await client.call<ProviderListResult>("provider.list");
-        if (!result) throw new Error("provider.list returned nothing");
-        if (result.providers.length === 0) console.error("provider.list returned no providers, using fallback provider list");
-        return result;
-      } catch (err) {
-        // Logged once per failed fetch (not per render); consumers fall back to FALLBACK_PROVIDERS.
-        console.error("provider.list failed, using fallback provider list", err);
-        throw err;
-      }
-    },
-  });
+  const query = useQuery(providerListQueryOptions(client));
   const providers = query.data?.providers ?? NO_PROVIDERS;
   // A daemon that never answers must not leave a picker on "Loading…" forever: the fallback catalog takes over.
   const [timedOut, setTimedOut] = useState(false);
