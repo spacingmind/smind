@@ -162,6 +162,36 @@ describe("call discipline (AC54)", () => {
     expect(second.modes()).toEqual(["cached"]);
   });
 
+  it("a reconnect to the same daemon keeps the reports on screen while it re-reads cached", async () => {
+    const first = new FakeUsageDaemon([claudeAccount()]);
+    const second = new FakeUsageDaemon([claudeAccount()]);
+    const { result, rerender } = renderHookWithDaemon(() => useUsageReports({ touch: false }), first, { initialProps: null });
+    await flush();
+    expect(result.current.snapshot.reports).toHaveLength(1);
+
+    rerender({ daemon: second });
+    // No loading flash: the cache survived the transport swap and shows until the re-read lands.
+    expect(result.current.snapshot.phase).toBe("ready");
+    expect(result.current.snapshot.reports).toHaveLength(1);
+    await flush();
+    expect(second.modes()).toEqual(["cached"]);
+    expect(second.count("touch") + second.count("refresh")).toBe(0);
+  });
+
+  it("two touching surfaces mounting together send one touch", async () => {
+    const daemon = new FakeUsageDaemon([claudeAccount()]);
+    renderHookWithDaemon(
+      () => {
+        useUsageReports({ touch: true });
+        useUsageReports({ touch: true });
+      },
+      daemon,
+      { initialProps: null },
+    );
+    await flush();
+    expect(daemon.modes()).toEqual(["touch"]);
+  });
+
   it("a reconnect while a touching surface is open re-lists as cached and keeps counting the TTL", async () => {
     const first = new FakeUsageDaemon([claudeAccount()]);
     const second = new FakeUsageDaemon([claudeAccount()]);

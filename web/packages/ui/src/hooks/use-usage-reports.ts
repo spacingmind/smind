@@ -166,8 +166,8 @@ export function useUsageReports({
   const { client } = useDaemonConnection();
   const queryClient = useContext(QueryClientContext) ?? DETACHED_QUERY_CLIENT;
 
-  // The TTL clock must survive a reconnect (a new QueryClient has no touch mutations), or the new
-  // connection's first touch would go out at once instead of the one `cached` read a reconnect gets.
+  // The TTL clock survives a reconnect: the touch mutations live in the connection's QueryClient,
+  // which a same-daemon reconnect keeps. The ref covers the unmounted-between case.
   const carriedTouch = useRef<number | null>(null);
   const touchedAt = useCallback((): number | null => {
     const held = lastTouchAt(queryClient);
@@ -187,10 +187,13 @@ export function useUsageReports({
     listing.current = { queryClient, viaTouch: touch && windowIsActive() && (ttlElapsed || touching) };
   }
 
+  // The first touch stands in for the first `cached` read; once it has filled the cache the query
+  // is enabled like any other, so a same-daemon reconnect's invalidation re-reads (cached) in the
+  // background. Enabling a fresh entry fetches nothing (`staleTime: Infinity`).
   const query = useQuery(
     {
       ...usageQueryOptions(client),
-      enabled: enabled && client !== null && !listing.current.viaTouch,
+      enabled: enabled && client !== null && (!listing.current.viaTouch || heldData(queryClient) !== undefined),
     },
     queryClient,
   );

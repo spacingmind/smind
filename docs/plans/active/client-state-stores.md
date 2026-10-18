@@ -24,8 +24,10 @@ audit is in the Supervisor's notes). Status: **spec**, nothing built.
 ## Acceptance Criteria
 
 ### S1 — foundation (PR 1)
-- AC1 `@tanstack/react-query` and `zustand` added to `web/packages/ui`; one `QueryClient` per `WsClient` provided at the
-  root; switching daemon connection never shows the previous daemon's data.
+- AC1 `@tanstack/react-query` and `zustand` added to `web/packages/ui`; one `QueryClient` per daemon **connection
+  identity** (the ws endpoint, `daemonWsBaseUrl()`; not per `WsClient` object), provided at the root. A transport
+  reconnect to the same daemon keeps the cache and invalidates it (background refetch, no loading flash); switching to
+  a different connection gets a new client and never shows the previous daemon's data.
 - AC2 `src/lib/query-keys.ts` is the only place query keys are built; a lint/test forbids inline key arrays elsewhere.
 - AC3 `useDaemonEvents` is the single event→cache bridge (invalidate or `setQueryData`); it subscribes to
   `account.updated` in addition to today's topics.
@@ -39,8 +41,10 @@ audit is in the Supervisor's notes). Status: **spec**, nothing built.
 - AC7 `displayName` is the account name everywhere (ADR-0028 AC58).
 - AC8 A rename/credential change from another tab or the CLI (`account.updated`) updates every surface without reload;
   a newly added account appears in Plan usage without reload.
-- AC9 No extra provider usage calls: mounting Providers, opening Settings, or focusing the window performs **zero**
-  `account.usage` refreshes (`touch`/`refresh`); count-asserting tests.
+- AC9 No extra provider usage calls: the new query hooks and the Providers surface never send `touch`/`refresh` on
+  mount, focus, retry, reconnect or an `account.*` event (a re-read is always `mode: "cached"`); count-asserting
+  tests. The existing ADR-0028 touching surfaces (Usage modal, Settings → Usage, sidebar summary) keep their
+  once-per-TTL `touch` while open and window visible+focused; `refresh` stays button-only. (Clarified 2026-10-18, Human.)
 
 ### S3 — catalog, profiles, health (PR 2)
 - AC10 `useProviderCatalog()`, `useProfiles()`, `useProviderHealth()` replace every `provider.list` / `profile.list` /
@@ -70,6 +74,7 @@ audit is in the Supervisor's notes). Status: **spec**, nothing built.
 
 ## Test Scenarios (named; the implementing PRs add the concrete files)
 - `query client is per connection and cleared on switch`
+- `a reconnect to the same daemon keeps the cache and invalidates it`
 - `query keys only come from query-keys.ts`
 - `account.updated renames the account in providers, usage card and chat pill`
 - `expired cached report shows expired in providers`
