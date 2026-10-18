@@ -40,7 +40,9 @@ type envelope struct {
 }
 
 type rpcError struct {
-	Message string `json:"message"`
+	Message string          `json:"message"`
+	Code    string          `json:"code,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty"`
 }
 
 type cancelParams struct {
@@ -53,6 +55,11 @@ type cancelParams struct {
 // about that distinction can use errors.As.
 type RPCError struct {
 	Message string
+	// Code is the server's machine-readable error code ("" when the server
+	// sent none), and Data its optional structured detail (for example the
+	// findings of a "gate_rejected" learning error). Both are additive.
+	Code string
+	Data json.RawMessage
 }
 
 func (e *RPCError) Error() string { return e.Message }
@@ -222,7 +229,7 @@ func (c *Client) closedCh() <-chan struct{} {
 
 func decodeTerminal(env envelope, out any) error {
 	if env.Error != nil {
-		return &RPCError{Message: env.Error.Message}
+		return &RPCError{Message: env.Error.Message, Code: env.Error.Code, Data: env.Error.Data}
 	}
 	if out == nil || env.Result == nil {
 		return nil

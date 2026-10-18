@@ -161,18 +161,22 @@ func learnCallOn(client *wsclient.Client, sub, method string, params, out any) i
 	return 0
 }
 
-// gateMarker starts the findings of a gate_rejected error message
-// (approval.GateError.Error); the wire client does not surface the error
-// code, so the findings are read back out of the message.
-const gateMarker = "gate rejected landing: "
+// gateFindings are the findings of a "gate_rejected" error (RPCError.Data).
+type gateFindings struct {
+	Findings []struct {
+		Reason string `json:"reason"`
+		Detail string `json:"detail"`
+	} `json:"findings"`
+}
 
 func reportLearnError(sub string, err error) {
 	var rpc *wsclient.RPCError
-	if errors.As(err, &rpc) {
-		if _, findings, ok := strings.Cut(rpc.Message, gateMarker); ok {
+	if errors.As(err, &rpc) && rpc.Code == "gate_rejected" {
+		var g gateFindings
+		if json.Unmarshal(rpc.Data, &g) == nil && len(g.Findings) > 0 {
 			fmt.Fprintf(os.Stderr, "smind learn %s: refused by the safety gate; nothing was changed:\n", sub)
-			for _, f := range strings.Split(findings, "; ") {
-				fmt.Fprintf(os.Stderr, "  - %s\n", f)
+			for _, f := range g.Findings {
+				fmt.Fprintf(os.Stderr, "  - %s: %s\n", f.Reason, f.Detail)
 			}
 			return
 		}
