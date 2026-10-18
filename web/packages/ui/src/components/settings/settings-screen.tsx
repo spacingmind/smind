@@ -190,7 +190,7 @@ export function SettingsScreen({
   // in-body title is dropped (its actions stay) -- see settings-title.tsx.
   const activeContent = (
     <SectionTitleInHeaderProvider value>
-      {active ? active.render({ client, events }) : <EmptyState testId="settings-empty" title="No settings sections registered" />}
+      {active ? active.render({ client, events, closeSettings: onNavigateBack }) : <EmptyState testId="settings-empty" title="No settings sections registered" />}
     </SectionTitleInHeaderProvider>
   );
   const dragRegion = isDesktop ? "deep" : undefined;

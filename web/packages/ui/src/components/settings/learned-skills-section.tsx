@@ -1,5 +1,8 @@
 import { useState, type ReactNode } from "react";
 
+import { ConfirmDialog } from "@/components/learning/confirm-dialog";
+import { LearnedSkillDetail } from "@/components/learning/learned-skill-detail";
+import { RunLinkProvider } from "@/components/learning/run-link";
 import { LearningOptIn } from "@/components/learning/learning-optin";
 import { PendingProposalBadge } from "@/components/learning/pending-badge";
 import { LearnedSkillRow, ProposalRow } from "@/components/learning/skill-row";
@@ -9,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useLearnedSkills, useLearningStatus, useProposals } from "@/hooks/use-learning";
+import { useForgetLearning, useLearnedSkills, useLearningStatus, useProposals } from "@/hooks/use-learning";
 import { LEARNED_SKILLS_SECTION_ID } from "@/lib/learning-section";
 import type { LearningWorkspaceStatus } from "@/lib/learning-types";
 import { Icons } from "@/lib/icons";
@@ -116,10 +119,13 @@ function SkillsTab({
  * skill proposals (the inbox), active skills and archive. Everything is read through the shared
  * query cache; the `learnedSkill.*` events keep it live.
  */
-function LearnedSkillsSection(_ctx: SettingsSectionContext) {
+function LearnedSkillsSection({ closeSettings }: SettingsSectionContext) {
   const status = useLearningStatus();
   const [chosen, setChosen] = useState<number | null>(null);
   const [tab, setTab] = useState<Tab>("proposed");
+  const [openSkill, setOpenSkill] = useState<number | null>(null);
+  const [forgetting, setForgetting] = useState(false);
+  const forget = useForgetLearning();
 
   const workspaces = status.data?.workspaces ?? [];
   const workspace = workspaces.find((w) => w.id === chosen) ?? workspaces[0] ?? null;
@@ -139,9 +145,25 @@ function LearnedSkillsSection(_ctx: SettingsSectionContext) {
     );
   }
 
+  if (openSkill !== null) {
+    return (
+      <RunLinkProvider closeSettings={closeSettings}>
+        <div data-testid="settings-section-learned-skills">
+          <LearnedSkillDetail id={openSkill} onBack={() => setOpenSkill(null)} />
+        </div>
+      </RunLinkProvider>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4" data-testid="settings-section-learned-skills">
-      <Select value={String(workspace.id)} onValueChange={(v) => setChosen(Number(v))}>
+      <Select
+        value={String(workspace.id)}
+        onValueChange={(v) => {
+          setChosen(Number(v));
+          setOpenSkill(null);
+        }}
+      >
         <SelectTrigger aria-label="Workspace" data-testid="learning-workspace-select" className="w-full max-w-xs">
           <SelectValue />
         </SelectTrigger>
@@ -177,13 +199,38 @@ function LearnedSkillsSection(_ctx: SettingsSectionContext) {
           <ProposedTab workspace={workspace} />
         </TabsContent>
         <TabsContent value="active">
-          <SkillsTab workspace={workspace} tab="active" />
+          <SkillsTab workspace={workspace} tab="active" onOpen={setOpenSkill} />
         </TabsContent>
         <TabsContent value="archived">
-          <SkillsTab workspace={workspace} tab="archived" />
+          <SkillsTab workspace={workspace} tab="archived" onOpen={setOpenSkill} />
         </TabsContent>
       </Tabs>
       {status.error && <Alert variant="error" description={status.error.message} />}
+
+      <div className="flex items-center justify-between gap-3 border-t pt-3">
+        <p className="text-ui-sm text-muted-foreground">
+          Forgetting removes every proposal, skill, version and record learned in {workspace.title}.
+        </p>
+        <Button type="button" variant="destructive" size="sm" data-testid="learning-forget" onClick={() => setForgetting(true)}>
+          Forget everything…
+        </Button>
+      </div>
+      <ConfirmDialog
+        open={forgetting}
+        onOpenChange={(open) => {
+          setForgetting(open);
+          if (!open) forget.reset();
+        }}
+        title={`Forget everything learned in ${workspace.title}?`}
+        description="This permanently deletes the workspace's proposals, learned skills, versions, history and learning jobs. Skills you wrote yourself are not touched. It cannot be undone."
+        confirmLabel="Forget everything"
+        pendingLabel="Forgetting…"
+        requireText={workspace.title}
+        pending={forget.isPending}
+        error={forget.error?.message}
+        testId="learning-forget-dialog"
+        onConfirm={() => forget.mutate({ workspaceId: workspace.id }, { onSuccess: () => setForgetting(false) })}
+      />
     </div>
   );
 }

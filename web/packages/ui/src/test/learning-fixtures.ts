@@ -18,7 +18,7 @@ export function skill(over: Partial<LearnedSkillView> = {}): LearnedSkillView {
     status: "active",
     pinned: false,
     source: "reflector",
-    createdByRun: 7,
+    createdByRun: "run-7",
     possibleDuplicateOf: "",
     similarity: 0,
     version: 1,
@@ -56,8 +56,8 @@ export function item(over: Partial<ProposalItem> = {}): ProposalItem {
 }
 
 export const evidence: ProposalEvidence[] = [
-  { kind: "user_message", runId: 7, seq: 12, quote: "just run the one package, not everything" },
-  { kind: "failure_recovery", runId: 7, seq: -1, quote: "go test ./... timed out; go test ./pkg passed" },
+  { kind: "user_message", runId: "run-7", seq: 12, quote: "just run the one package, not everything" },
+  { kind: "failure_recovery", runId: "run-7", seq: -1, quote: "go test ./... timed out; go test ./pkg passed" },
 ];
 
 export function proposal(over: Partial<ProposalView> = {}): ProposalView {

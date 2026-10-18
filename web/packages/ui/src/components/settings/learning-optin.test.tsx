@@ -107,3 +107,20 @@ describe("pending badge", () => {
     expect(screen.queryByTestId("learning-pending-badge")).toBeNull();
   });
 });
+
+describe("forget everything", () => {
+  it("requires typing the workspace title, then calls learning.forget", async () => {
+    const d = setup();
+    await flush();
+    fireEvent.click(screen.getByTestId("learning-forget"));
+    const confirm = screen.getByTestId("learning-forget-dialog-confirm");
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByTestId("learning-forget-dialog-input"), { target: { value: "alph" } });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByTestId("learning-forget-dialog-input"), { target: { value: "alpha" } });
+    expect(confirm).not.toBeDisabled();
+    fireEvent.click(confirm);
+    await flush();
+    expect(d.calls.find((c) => c.method === "learning.forget")?.params).toEqual({ workspaceId: 1 });
+  });
+});

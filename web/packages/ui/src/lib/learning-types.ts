@@ -20,7 +20,8 @@ export interface LearnedSkillView {
   status: LearnedSkillStatus;
   pinned: boolean;
   source: LearnedSkillSource;
-  createdByRun: number;
+  /** Run ids are the run registry's text ids (`runs.id`), not numbers. */
+  createdByRun: string;
   /** Name of a live skill this one resembles; "" when none. */
   possibleDuplicateOf: string;
   similarity: number;
@@ -63,7 +64,7 @@ export interface ProposalItem {
 
 export interface ProposalEvidence {
   kind: EvidenceKind;
-  runId: number;
+  runId: string;
   /** Event seq in the run log; -1 is the run's prompt record. */
   seq: number;
   quote: string;
@@ -102,7 +103,7 @@ export interface LedgerEntryView {
   action: string;
   reason: string;
   absorbedInto: string;
-  runId: number;
+  runId: string;
   actor: string;
   createdAt: string;
 }
@@ -141,6 +142,8 @@ export interface LearnedSkillDetail {
   skill: LearnedSkillView;
   versions: VersionView[];
   ledger: LedgerEntryView[];
+  /** The quotes the skill was learned from. Not in the agreed contract yet; shown when the daemon sends it. */
+  evidence?: ProposalEvidence[];
 }
 
 export interface ProposalDetail {

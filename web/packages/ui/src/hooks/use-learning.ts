@@ -15,6 +15,7 @@ import type {
 } from "@/lib/learning-types";
 import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
 import { queryKeys } from "@/lib/query-keys";
+import type { RunSummary } from "@/lib/types";
 import { RpcError, type WsClient } from "@/lib/ws-client";
 
 /**
@@ -267,4 +268,22 @@ export function useCurate() {
     onSuccess: (_result, { workspaceId }) =>
       void queryClient.invalidateQueries({ queryKey: queryKeys.learningJobsOf(workspaceId) }),
   });
+}
+
+/**
+ * Resolves a cited run id to its task and chat (the run registry's `run.list`), so evidence can
+ * link to the chat the run belongs to. Enabled only while something that links is on screen;
+ * refreshed at most every 30 s.
+ */
+export function useRunLookup(enabled = true): (runId: string) => RunSummary | undefined {
+  const client = useClient();
+  const runs = useQuery({
+    queryKey: queryKeys.runList(),
+    enabled: client !== null && enabled,
+    staleTime: 30_000,
+    refetchOnMount: true,
+    retry: false,
+    queryFn: async (): Promise<RunSummary[]> => (await requireClient(client).call<RunSummary[] | null>("run.list")) ?? [],
+  }).data;
+  return (runId) => runs?.find((r) => String(r.ID) === runId);
 }

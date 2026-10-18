@@ -133,4 +133,25 @@ describe("Settings -> Skills (learned)", () => {
     row.focus();
     expect(document.activeElement).toBe(row);
   });
+
+  it("opening an active row shows its detail, and Back returns to the same tab", async () => {
+    const d = learningDaemon((method, params) => {
+      if (method === "learning.status") return STATUS;
+      if (method === "learning.skills.list") return ACTIVE;
+      if (method === "learning.skills.get") return { skill: ACTIVE[0], versions: [], ledger: [] };
+      if (method === "learning.proposals.list") return [];
+      void params;
+      return null;
+    });
+    renderSection(d);
+    await flush();
+    fireEvent.mouseDown(screen.getByTestId("learning-tab-active"));
+    await flush();
+    fireEvent.click(screen.getByTestId("learned-skill-row-11"));
+    await flush();
+    expect(screen.getByTestId("learned-skill-detail")).toBeTruthy();
+    expect((d.calls.find((c) => c.method === "learning.skills.get")?.params as { id: number }).id).toBe(11);
+    fireEvent.click(screen.getByTestId("learning-detail-back"));
+    expect(screen.getByTestId("learned-skill-row-11")).toBeTruthy();
+  });
 });
