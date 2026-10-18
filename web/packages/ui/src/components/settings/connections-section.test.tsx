@@ -15,6 +15,7 @@ function baseApi() {
     daemonStatus: vi.fn(() => Promise.resolve(STATUS)),
     probeConnection: vi.fn(() => Promise.resolve(PROBE_OK)),
     addSshConnection: vi.fn(),
+    listUnsupportedConnections: vi.fn(() => Promise.resolve([])),
   };
 }
 
@@ -63,6 +64,7 @@ describe("connections-section registration", () => {
 describe("connections-section (desktop build)", () => {
   async function renderSection(desktopApi: {
     listConnections: () => Promise<unknown>;
+    listUnsupportedConnections?: () => Promise<unknown>;
     getCurrentConnection: () => Promise<unknown>;
     addConnection?: (label: string, url: string, password?: string) => Promise<unknown>;
     daemonStatus?: () => Promise<unknown>;
@@ -93,6 +95,38 @@ describe("connections-section (desktop build)", () => {
     const platform = await import("@/lib/platform");
     return platform.desktop;
   }
+
+  it("shows a note for saved connections that need a newer app and hides them from the list", async () => {
+    await renderSection({
+      listConnections: () => Promise.resolve([LOCAL]),
+      listUnsupportedConnections: () => Promise.resolve([{ id: "vpn:1", label: "Office", kind: "wireguard" }]),
+      getCurrentConnection: () => Promise.resolve(LOCAL),
+    });
+    const note = screen.getByTestId("connection-unsupported-note");
+    expect(note.textContent).toContain("needs a newer version of sMind");
+    expect(note.textContent).toContain("Office");
+    expect(note.textContent).toContain("wireguard");
+    expect(screen.queryByTestId("connection-row-vpn:1")).toBeNull();
+  });
+
+  it("shows no note when every saved connection is understood", async () => {
+    await renderSection({
+      listConnections: () => Promise.resolve([LOCAL, TUNNEL]),
+      getCurrentConnection: () => Promise.resolve(LOCAL),
+    });
+    expect(screen.queryByTestId("connection-unsupported-note")).toBeNull();
+  });
+
+  it("a failure to read unsupported connections does not break the list", async () => {
+    await renderSection({
+      listConnections: () => Promise.resolve([LOCAL, TUNNEL]),
+      listUnsupportedConnections: () => Promise.reject(new Error("boom")),
+      getCurrentConnection: () => Promise.resolve(LOCAL),
+    });
+    expect(screen.getByTestId("connection-row-local")).toBeTruthy();
+    expect(screen.getByTestId(`connection-row-${TUNNEL.id}`)).toBeTruthy();
+    expect(screen.queryByTestId("connection-unsupported-note")).toBeNull();
+  });
 
   it("registers and lists connections, marking the current one", async () => {
     await renderSection({
