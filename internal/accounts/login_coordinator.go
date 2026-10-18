@@ -25,9 +25,29 @@ const loginCallbackTimeout = 10 * time.Minute
 // answering pastes), until it times out or is cancelled.
 const maxCompleteAttempts = 5
 
-// loginMethodBrowser is the PKCE authorization-code flow with a callback
-// listener and/or a pasted redirect. (The device-code method joins it in B3.)
-const loginMethodBrowser = "browser"
+// Login methods (ADR-0033 D2). Browser is the PKCE authorization-code flow
+// with a callback listener and/or a pasted redirect; device is the vendor's
+// device-code flow, which binds no listener.
+const (
+	LoginMethodBrowser = "browser"
+	LoginMethodDevice  = "device"
+
+	loginMethodBrowser = LoginMethodBrowser
+	loginMethodDevice  = LoginMethodDevice
+)
+
+// NormalizeLoginMethod maps a requested method to a known one: "" is the
+// default, browser. Anything else unknown is a login_bad_method error whose
+// text does not echo the value.
+func NormalizeLoginMethod(method string) (string, error) {
+	switch method {
+	case "", LoginMethodBrowser:
+		return LoginMethodBrowser, nil
+	case LoginMethodDevice:
+		return LoginMethodDevice, nil
+	}
+	return "", &LoginError{Code: LoginCodeBadMethod, Detail: `the login method must be "browser" or "device"`}
+}
 
 // LoginCoordinator drives the browser-based OAuth login flow for the
 // providers in logins: generating PKCE/state, standing up the vendor's
@@ -48,6 +68,16 @@ type LoginCoordinator struct {
 	// not exposed as a constructor option, since there's no legitimate
 	// reason for a real caller to want a different value.
 	timeout time.Duration
+
+	// deviceTimeout (default deviceLoginTimeout) is how long a device login
+	// polls before device_expired, and minPoll (default deviceMinInterval)
+	// floors the interval between polls; both are fields so tests can shorten
+	// them, like timeout.
+	deviceTimeout time.Duration
+	minPoll       time.Duration
+	// pollTimeout (default devicePollRequestTimeout) bounds one poll request;
+	// a poll that hits it is retried like any transient failure.
+	pollTimeout time.Duration
 
 	mu       sync.Mutex
 	inFlight map[string]bool
@@ -84,8 +114,12 @@ func NewLoginCoordinator(registry *Registry, logins map[string]Login) *LoginCoor
 		registry: registry,
 		logins:   logins,
 		timeout:  loginCallbackTimeout,
-		inFlight: make(map[string]bool),
-		pending:  make(map[string]*pendingLogin),
+
+		deviceTimeout: deviceLoginTimeout,
+		minPoll:       deviceMinInterval,
+		pollTimeout:   devicePollRequestTimeout,
+		inFlight:      make(map[string]bool),
+		pending:       make(map[string]*pendingLogin),
 	}
 }
 
@@ -99,8 +133,39 @@ func NewDefaultLoginCoordinator(registry *Registry) *LoginCoordinator {
 	})
 }
 
+// LoginEvent is what Login reports while a login is under way, through the
+// onEvent callback. Kind selects which fields are set.
+type LoginEvent struct {
+	// Kind is "authorizeUrl" (browser login: open URL) or "deviceCode" (device
+	// login: show UserCode and have the user enter it at VerificationURL).
+	Kind    string
+	LoginID string
+
+	// authorizeUrl.
+	URL string
+	// PasteOnly: no callback listener could be bound (its address is in use),
+	// so the login can only finish by Complete; a UI shows the paste field
+	// immediately.
+	PasteOnly bool
+
+	// deviceCode.
+	VerificationURL string
+	UserCode        string
+	// ExpiresAt is when the daemon stops polling.
+	ExpiresAt       time.Time
+	IntervalSeconds int
+}
+
+// Login event kinds.
+const (
+	LoginEventAuthorizeURL = "authorizeUrl"
+	LoginEventDeviceCode   = "deviceCode"
+)
+
 // LoginOptions are the optional inputs of Login.
 type LoginOptions struct {
+	// Method is "", "browser" (the default) or "device"; see NormalizeLoginMethod.
+	Method string
 	// AccountID, when non-zero, is the row a row-level Re-login targets
 	// (ADR-0033 D6): its credential is replaced, never a new row created.
 	// 0 = none.
@@ -139,6 +204,12 @@ const (
 	LoginCodeStateMismatch    = "state_mismatch"
 	LoginCodeDenied           = "denied"
 	LoginCodeTimeout          = "timeout"
+
+	// Codes of the method choice and the device-code flow.
+	LoginCodeBadMethod         = "login_bad_method"
+	LoginCodeDeviceUnsupported = "device_unsupported"
+	LoginCodeDeviceExpired     = "device_expired"
+	LoginCodeDeviceFailed      = "device_failed"
 )
 
 // LoginError is an error with a stable machine-readable code. Detail never
@@ -164,10 +235,23 @@ func (e *LoginError) Error() string { return e.Code + ": " + e.Detail }
 // loginId; the loser is ignored. The listener, the loginId and this
 // provider's in-flight flag are released on every exit path, including ctx
 // being cancelled mid-flow.
-func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, opts LoginOptions, onAuthorizeURL func(loginID, url string)) (LoginResult, error) {
+func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, opts LoginOptions, onEvent func(LoginEvent)) (LoginResult, error) {
 	login, ok := c.logins[provider]
 	if !ok {
 		return LoginResult{}, fmt.Errorf("oauth login: unsupported provider %q", provider)
+	}
+
+	method, err := NormalizeLoginMethod(opts.Method)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	var device DeviceLogin
+	if method == loginMethodDevice {
+		// Rejected before any claim, listener or request: only providers with
+		// a device flow take this method.
+		if device, ok = login.(DeviceLogin); !ok {
+			return LoginResult{}, &LoginError{Code: LoginCodeDeviceUnsupported, Detail: fmt.Sprintf("%s does not offer a device-code login", providerDisplayLabel(provider))}
+		}
 	}
 
 	// Fail fast on a Re-login aimed at a row that is gone or belongs to
@@ -184,6 +268,10 @@ func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, op
 	}
 	defer c.release(provider)
 
+	if device != nil {
+		return c.loginDevice(ctx, provider, label, opts, device, onEvent)
+	}
+
 	pkce, err := GeneratePKCECodes()
 	if err != nil {
 		return LoginResult{}, fmt.Errorf("oauth login: %w", err)
@@ -197,17 +285,26 @@ func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, op
 		return LoginResult{}, fmt.Errorf("oauth login: %w", err)
 	}
 
-	server, err := newCallbackServer(login.CallbackAddr(), login.CallbackPath(), providerDisplayLabel(provider))
-	if err != nil {
+	// A busy callback port (another login tool, a second daemon) is not fatal:
+	// the login continues without a listener and can only be finished by
+	// Complete (paste-only). Any other bind failure, the loopback guards
+	// included, still fails the login.
+	server, err := newCallbackServer(login.CallbackAddr(), login.CallbackPath(), providerDisplayLabel(provider), state)
+	pasteOnly := false
+	switch {
+	case isAddrInUse(err):
+		server, pasteOnly = nil, true
+	case err != nil:
 		return LoginResult{}, fmt.Errorf("oauth login: %w", err)
+	default:
+		defer server.close()
 	}
-	defer server.close()
 
 	pl := &pendingLogin{provider: provider, state: state, method: loginMethodBrowser, paste: make(chan callbackResult, 1)}
 	c.register(loginID, pl)
 	defer c.unregister(loginID)
 
-	onAuthorizeURL(loginID, login.AuthorizeURL(state, pkce))
+	onEvent(LoginEvent{Kind: LoginEventAuthorizeURL, LoginID: loginID, URL: login.AuthorizeURL(state, pkce), PasteOnly: pasteOnly})
 
 	result, err := c.await(ctx, loginID, server, pl)
 	if err != nil {
@@ -243,13 +340,19 @@ func (c *LoginCoordinator) await(ctx context.Context, loginID string, server *ca
 	timer := time.NewTimer(c.timeout)
 	defer timer.Stop()
 
+	// A paste-only login has no listener: its nil channel never fires.
+	var listenerResult <-chan callbackResult
+	if server != nil {
+		listenerResult = server.result
+	}
+
 	var res callbackResult
 	var werr error
 	select {
 	case res = <-pl.paste:
 		// Complete flipped resolved before sending.
 		return res, nil
-	case res = <-server.result:
+	case res = <-listenerResult:
 	case <-ctx.Done():
 		werr = ctx.Err()
 	case <-timer.C:

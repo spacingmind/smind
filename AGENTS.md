@@ -69,6 +69,15 @@ repo's history.
   terminal agent (`apps/zcode-cli`), pnpm monorepo (`packages/{desktop,
   web,ui,server,rpc,provider}`), plugin store — reference for
   desktop/web workbench UX and GLM-native agent/provider wiring.
+- `refs/cockpit-tools` — Cockpit Tools
+  (https://github.com/jlcodes99/cockpit-tools): Tauri (Rust + React,
+  zustand) multi-account manager for AI IDEs/CLIs (Codex, Claude, Copilot,
+  Cursor, Grok CLI, ZCode, …) — reference for account cards with plan badge
+  and 5h/weekly quota bars, quota refresh scheduling and cooldowns
+  (`src-tauri/src/modules/codex_quota*`, `quota_cache.rs`), Claude/Codex
+  OAuth and account identity (`claude_account_oauth_provider.rs`), redacted
+  export, per-account CLI instances, and its local Codex API gateway with
+  account pools.
 
 Day-to-day style (Go idioms, React/TS conventions) is enforced by linters
 (`go vet`/`gofmt`, and ESLint/Prettier once added to `web/`), not by reading

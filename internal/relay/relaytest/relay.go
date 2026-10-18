@@ -52,6 +52,7 @@ type Relay struct {
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	done   chan error
+	srv    *server.Server
 }
 
 // StartRelay enrols one relay host in a fresh temp data dir and runs the real
@@ -99,11 +100,27 @@ func (r *Relay) run(nativeLis, webLis net.Listener) {
 		Listener:          nativeLis,
 		GRPCWebListener:   webLis,
 		MaxDevicesPerHost: r.opts.maxDevices,
+		OnServer: func(srv *server.Server) {
+			r.mu.Lock()
+			r.srv = srv
+			r.mu.Unlock()
+		},
 	}
 	go func() { done <- server.Run(ctx, cfg) }()
 	r.mu.Lock()
 	r.cancel, r.done = cancel, done
 	r.mu.Unlock()
+}
+
+// DaemonSideAttached reports whether the relay still holds a live daemon-side
+// stream for the route (this host, session, device). A device that attaches
+// while it does is not announced to the daemon, so a test that ends a daemon
+// session and re-attaches the same route must wait for this to be false.
+func (r *Relay) DaemonSideAttached(session, device string) bool {
+	r.mu.Lock()
+	srv := r.srv
+	r.mu.Unlock()
+	return srv != nil && srv.DaemonAttached(r.HostID, session, device)
 }
 
 // Stop stops the relay and waits for server.Run to return. It is idempotent.
