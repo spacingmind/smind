@@ -30,11 +30,12 @@ func TestRunAccountAddDispatchesCredentialFromStdin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadOrCreateToken() error = %v", err)
 	}
-	handler, err := wsapi.Handler(workspace.New(s), registry, nil, s, token)
+	api, err := wsapi.New(workspace.New(s), registry, nil, s, token)
 	if err != nil {
-		t.Fatalf("wsapi.Handler() error = %v", err)
+		t.Fatalf("wsapi.New() error = %v", err)
 	}
-	srv := httptest.NewServer(handler)
+	t.Cleanup(api.Close)
+	srv := httptest.NewServer(api.Handler)
 	t.Cleanup(srv.Close)
 	u, err := url.Parse(srv.URL)
 	if err != nil {
@@ -94,11 +95,12 @@ func TestRunAccountAddForwardsBaseURLFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadOrCreateToken() error = %v", err)
 	}
-	handler, err := wsapi.Handler(workspace.New(s), registry, nil, s, token)
+	api, err := wsapi.New(workspace.New(s), registry, nil, s, token)
 	if err != nil {
-		t.Fatalf("wsapi.Handler() error = %v", err)
+		t.Fatalf("wsapi.New() error = %v", err)
 	}
-	srv := httptest.NewServer(handler)
+	t.Cleanup(api.Close)
+	srv := httptest.NewServer(api.Handler)
 	t.Cleanup(srv.Close)
 	u, err := url.Parse(srv.URL)
 	if err != nil {
@@ -162,11 +164,12 @@ func TestRunAccountRemove(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadOrCreateToken() error = %v", err)
 	}
-	handler, err := wsapi.Handler(workspace.New(s), registry, nil, s, token)
+	api, err := wsapi.New(workspace.New(s), registry, nil, s, token)
 	if err != nil {
-		t.Fatalf("wsapi.Handler() error = %v", err)
+		t.Fatalf("wsapi.New() error = %v", err)
 	}
-	srv := httptest.NewServer(handler)
+	t.Cleanup(api.Close)
+	srv := httptest.NewServer(api.Handler)
 	t.Cleanup(srv.Close)
 	u, err := url.Parse(srv.URL)
 	if err != nil {
@@ -210,11 +213,12 @@ func TestRunAccountAddForwardsModelsFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadOrCreateToken() error = %v", err)
 	}
-	handler, err := wsapi.Handler(workspace.New(s), registry, nil, s, token)
+	api, err := wsapi.New(workspace.New(s), registry, nil, s, token)
 	if err != nil {
-		t.Fatalf("wsapi.Handler() error = %v", err)
+		t.Fatalf("wsapi.New() error = %v", err)
 	}
-	srv := httptest.NewServer(handler)
+	t.Cleanup(api.Close)
+	srv := httptest.NewServer(api.Handler)
 	t.Cleanup(srv.Close)
 	u, err := url.Parse(srv.URL)
 	if err != nil {
