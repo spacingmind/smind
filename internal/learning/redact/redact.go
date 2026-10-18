@@ -29,7 +29,7 @@ var rules = []rule{
 	{"quotedKeyValue", regexp.MustCompile(`(?i)\b([A-Za-z0-9_.-]*?(?:api[_-]?key|apikey|secret|passw(?:or)?d|passphrase|credentials?|private[_-]?key|access[_-]?key|token|auth|authorization|signature|sig|key)[A-Za-z0-9_.-]*)((?:\\)?["']?\s*[:=]\s*(?:\\)?["'])([^"'\n]{4,}?)((?:\\)?["'])`)},
 	{"bareKeyValue", regexp.MustCompile(`(?i)\b([A-Za-z0-9_.-]*?(?:api[_-]?key|apikey|secret|passw(?:or)?d|passphrase|credentials?|private[_-]?key|access[_-]?key|token|auth|authorization|signature|sig|key)[A-Za-z0-9_.-]*)(\s*[:=]\s*)([^\s"',;&\\]{4,})`)},
 	{"email", regexp.MustCompile(`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b`)},
-	{"cardNumber", regexp.MustCompile(`\b(?:\d[ -]?){13,19}\b`)},
+	{"cardNumber", regexp.MustCompile(`[0-9](?:[0-9 -]*[0-9])?`)},
 }
 
 var (
@@ -95,25 +95,7 @@ func (r *Redactor) String(s string) string {
 		case "bareKeyValue":
 			s = replaceKeyValue(s, rl.re, false)
 		case "cardNumber":
-			s = rl.re.ReplaceAllStringFunc(s, func(m string) string {
-				// The pattern can swallow a trailing separator; keep it so
-				// "4111 1111 1111 1111 charged" keeps its space.
-				digits := strings.Map(func(c rune) rune {
-					if c == ' ' || c == '-' {
-						return -1
-					}
-					return c
-				}, m)
-				if !luhn(digits) {
-					return m
-				}
-				// The pattern's trailing [ -]? can swallow the separator
-				// before the next word; give it back.
-				if strings.HasSuffix(m, " ") || strings.HasSuffix(m, "-") {
-					return Placeholder + m[len(m)-1:]
-				}
-				return Placeholder
-			})
+			s = rl.re.ReplaceAllStringFunc(s, redactCards)
 		default:
 			s = rl.re.ReplaceAllString(s, Placeholder)
 		}
@@ -211,6 +193,47 @@ func replaceKeyValue(s string, re *regexp.Regexp, quoted bool) string {
 		}
 		return g[1] + g[2] + Placeholder
 	})
+}
+
+// redactCards scans one run of digits (with space/dash separators) for
+// 13-19 digit windows that start like a card (3..6) and pass Luhn, longest
+// window first at each start, left to right. Only the window's span is
+// replaced, so trailing digits such as an expiry date survive.
+func redactCards(run string) string {
+	var pos []int
+	for i := 0; i < len(run); i++ {
+		if run[i] >= '0' && run[i] <= '9' {
+			pos = append(pos, i)
+		}
+	}
+	var out strings.Builder
+	last, start := 0, 0
+	for start+13 <= len(pos) {
+		if c := run[pos[start]]; c < '3' || c > '6' {
+			start++
+			continue
+		}
+		matched := false
+		for n := min(19, len(pos)-start); n >= 13; n-- {
+			digits := make([]byte, n)
+			for k := 0; k < n; k++ {
+				digits[k] = run[pos[start+k]]
+			}
+			if luhn(string(digits)) {
+				out.WriteString(run[last:pos[start]])
+				out.WriteString(Placeholder)
+				last = pos[start+n-1] + 1
+				start += n
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			start++
+		}
+	}
+	out.WriteString(run[last:])
+	return out.String()
 }
 
 // Changed reports whether String would modify s.

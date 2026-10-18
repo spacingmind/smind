@@ -10,37 +10,42 @@ import (
 // concatenation so no literal looks like a real secret.
 func corpus(r *Redactor) map[string]string {
 	return map[string]string{
-		"aws key":         "key is " + "AKIA" + "ABCDEFGHIJKLMNOP" + " ok",
-		"pem full":        "-----BEGIN RSA PRIVATE KEY-----\nMIIEow" + "ABCDEF" + "\n-----END RSA PRIVATE KEY-----",
-		"pem lone header": "-----BEGIN PRIVATE KEY-----\nabc12345678901234567890123456789012345678901234567890123456789012345678901234567890",
-		"github token":    "tok " + "ghp_" + strings.Repeat("Ab1", 12),
-		"github fine":     "tok github_pat_" + strings.Repeat("aB1_", 7),
-		"slack token":     "tok " + "xoxb-" + "qW9eR5tY2u" + "iO3pA7sD6f",
-		"jwt":             "jwt " + "eyJhbGciOiJIUzI1NiIs" + "InR5cCI6IkpXVCJ9" + ".eyJzdWIiOiIxMjM0NTY3ODkwIn0." + strings.Repeat("S1c", 8),
-		"bearer":          "creds bearer " + strings.Repeat("aB1.", 5) + "xyz1",
-		"key=value":       `DB_PASSWORD=hunter2secret`,
-		"api_key quoted":  `config api_key: "supersecretvalue123"`,
-		"email":           "contact alice.example+tag@example.com now",
-		"card luhn":       "card 4111 1111 1111 1111 charged",
-		"card nonluhn":    "card 4111 1111 1111 1112 charged",
-		"git sha":         "commit " + strings.Repeat("ab1f", 10),
-		"sha256":          strings.Repeat("c0f", 21) + "e",
-		"base64ish":       "qW9eR5tY2uiO3pA7sD6fGh4jK",
-		"camelcase":       "TestWindowCapsRecordInputResultAndTotal",
-		"path":            "internal/learning/redact/redact_test.go",
-		"home users":      "/Users/alice/src/x",
-		"home explicit":   "/data/home/bob/src/main.go",
-		"home windows":    `C:\Users\Carol\proj\main.go`,
-		"plain":           "nothing interesting here",
-		"json apikey":     `{"apiKey": "` + "ZGHFS43f" + `ks9dmas3"}`,
-		"json escaped":    `{\"password\": \"` + "hunter2" + `secret42\"}`,
-		"json env":        `{"env":{"OPENAI_API_KEY":"` + "sk-test" + `1234abcd"}}`,
-		"single quoted":   "FOO_SECRET='" + "hunter2" + "secret'",
-		"auth token":      "Authorization: Token " + "abcdef0123" + "456789abcdef",
-		"auth basic":      "Authorization: Basic " + "dXNlcjpwYXNz" + "d29yZDEyMzQ1Njc4",
-		"auth bearer":     "Authorization: Bearer " + "abcdef0123" + "456789abcdef",
-		"query":           "https://x/y?key=" + "abcdefgh" + "1234&sig=zzzzzzzz",
-		"counters":        "max_tokens: 4096 and credentials: none",
+		"aws key":          "key is " + "AKIA" + "ABCDEFGHIJKLMNOP" + " ok",
+		"pem full":         "-----BEGIN RSA PRIVATE KEY-----\nMIIEow" + "ABCDEF" + "\n-----END RSA PRIVATE KEY-----",
+		"pem lone header":  "-----BEGIN PRIVATE KEY-----\nabc12345678901234567890123456789012345678901234567890123456789012345678901234567890",
+		"github token":     "tok " + "ghp_" + strings.Repeat("Ab1", 12),
+		"github fine":      "tok github_pat_" + strings.Repeat("aB1_", 7),
+		"slack token":      "tok " + "xoxb-" + "qW9eR5tY2u" + "iO3pA7sD6f",
+		"jwt":              "jwt " + "eyJhbGciOiJIUzI1NiIs" + "InR5cCI6IkpXVCJ9" + ".eyJzdWIiOiIxMjM0NTY3ODkwIn0." + strings.Repeat("S1c", 8),
+		"bearer":           "creds bearer " + strings.Repeat("aB1.", 5) + "xyz1",
+		"key=value":        `DB_PASSWORD=hunter2secret`,
+		"api_key quoted":   `config api_key: "supersecretvalue123"`,
+		"email":            "contact alice.example+tag@example.com now",
+		"card luhn":        "card 4111 1111 1111 1111 charged",
+		"card nonluhn":     "card 4111 1111 1111 1112 charged",
+		"git sha":          "commit " + strings.Repeat("ab1f", 10),
+		"sha256":           strings.Repeat("c0f", 21) + "e",
+		"base64ish":        "qW9eR5tY2uiO3pA7sD6fGh4jK",
+		"camelcase":        "TestWindowCapsRecordInputResultAndTotal",
+		"path":             "internal/learning/redact/redact_test.go",
+		"home users":       "/Users/alice/src/x",
+		"home explicit":    "/data/home/bob/src/main.go",
+		"home windows":     `C:\Users\Carol\proj\main.go`,
+		"plain":            "nothing interesting here",
+		"json apikey":      `{"apiKey": "` + "ZGHFS43f" + `ks9dmas3"}`,
+		"json escaped":     `{\"password\": \"` + "hunter2" + `secret42\"}`,
+		"json env":         `{"env":{"OPENAI_API_KEY":"` + "sk-test" + `1234abcd"}}`,
+		"single quoted":    "FOO_SECRET='" + "hunter2" + "secret'",
+		"auth token":       "Authorization: Token " + "abcdef0123" + "456789abcdef",
+		"auth basic":       "Authorization: Basic " + "dXNlcjpwYXNz" + "d29yZDEyMzQ1Njc4",
+		"auth bearer":      "Authorization: Bearer " + "abcdef0123" + "456789abcdef",
+		"query":            "https://x/y?key=" + "abcdefgh" + "1234&sig=zzzzzzzz",
+		"card tail digits": "paid 4111 1111 1111 1111 123 ok",
+		"card expiry":      "4111 1111 1111 1111 12/26",
+		"card year":        "4111111111111111 12 2026",
+		"card prefixed":    "order 99 4111 1111 1111 1111",
+		"timestamp":        "t=1760812345678 id=1000000000000000001 2026-10-18 12:30:45",
+		"counters":         "max_tokens: 4096 and credentials: none",
 	}
 }
 
@@ -182,6 +187,24 @@ func TestRedact_NoOverRedactionOfCountersAndWords(t *testing.T) {
 	} {
 		if got := r.String(in); got != in {
 			t.Errorf("%q changed to %q", in, got)
+		}
+	}
+}
+
+func TestRedact_CardWindows(t *testing.T) {
+	r := New(nil, nil)
+	for in, want := range map[string]string{
+		"4111 1111 1111 1111 123":      Placeholder + " 123",
+		"4111 1111 1111 1111 12/26":    Placeholder + " 12/26",
+		"4111111111111111 12 2026":     Placeholder + " 12 2026",
+		"order 99 4111 1111 1111 1111": "order 99 " + Placeholder,
+		"4111 1111 1111 1112":          "4111 1111 1111 1112",
+		"1760812345678":                "1760812345678",
+		"1000000000000000001":          "1000000000000000001",
+		"2026-10-18 12:30:45":          "2026-10-18 12:30:45",
+	} {
+		if got := r.String(in); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
 		}
 	}
 }
