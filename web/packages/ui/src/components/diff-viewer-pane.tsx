@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
+import { externalLinkProps } from "@/lib/external-link";
 import { cn } from "@/lib/utils";
 import { useTaskDiff } from "@/hooks/use-task-diff";
 import { suggestCommitMessage } from "@/lib/commit-suggestion";
@@ -400,7 +401,7 @@ export function DiffViewerPane({
           {prUrl && (
             <p className="text-ui-base" data-testid="pr-url">
               PR opened:{" "}
-              <a href={prUrl} target="_blank" rel="noreferrer" className="underline" data-testid="pr-url-link">
+              <a {...externalLinkProps(prUrl)} className="underline" data-testid="pr-url-link">
                 {prUrl}
               </a>
             </p>

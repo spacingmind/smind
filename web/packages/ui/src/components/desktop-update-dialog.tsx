@@ -2,24 +2,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAppUpdate, type AppUpdateController } from "@/lib/app-update";
 import { TimelineMarkdown } from "@/components/timeline/timeline-markdown";
-import { desktop, isDesktop } from "@/lib/platform";
+import { isDesktop } from "@/lib/platform";
 import { tidyReleaseNotes } from "@/lib/release-notes";
-import type { Components } from "react-markdown";
-
-/** Links in the notes open in the OS browser; a plain <a> would navigate the app's own webview. */
-const NOTES_COMPONENTS: Components = {
-  a: ({ href, children }) => (
-    <a
-      href={href}
-      onClick={(event) => {
-        event.preventDefault();
-        if (href) void desktop.openExternal(href).catch(() => {});
-      }}
-    >
-      {children}
-    </a>
-  ),
-};
 
 /**
  * ADR-0023 U4's update prompt: versions and release notes with Update &
@@ -61,7 +45,6 @@ export function DesktopUpdateDialogView({ update }: { update: AppUpdateControlle
             <TimelineMarkdown
               data-testid="desktop-update-dialog-notes"
               content={tidyReleaseNotes(info.notes)}
-              components={NOTES_COMPONENTS}
             />
           ) : (
             <p data-testid="desktop-update-dialog-notes">No release notes.</p>
