@@ -34,6 +34,8 @@ mod ssh_tunnel;
 mod state;
 mod tray;
 mod updater;
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
+mod updater_e2e;
 mod window_chrome;
 #[cfg(test)]
 mod capability_tests;
