@@ -149,6 +149,49 @@ and the task-hierarchy items of `docs/plans/active/smind-control-parity.md`.
   resumes. If there is nothing to resume, the run says so explicitly
   (ADR-0016 §2 "never a silent fresh start").
 
+**O1 provenance — implementation spec** (Lead, 2026-10-18; Size: M (5) —
+scope 2, PRs 1, risk 1, decisions 0, verification 1). The stop/resume bullet
+above is already done (see Progress); this spec covers only the provenance
+bullet, quoted verbatim: *"`runs` gains nullable `base_sha`, `head_sha`, and
+`dirty` (worktree HEAD at start and at the terminal state). They are exposed
+on `run.list`, `task_status`, and the web run header. If git fails, they stay
+NULL and the run is never failed."*
+
+- **P1 store.** Migration `run_provenance` adds nullable `runs.base_sha TEXT`,
+  `runs.head_sha TEXT`, `runs.dirty INTEGER` (also in `schema.sql`). Existing
+  rows read back NULL. `store.Run` gains `BaseSHA, HeadSHA *string; Dirty
+  *bool`; `store.UpdateRunProvenance` writes only the non-nil fields.
+- **P2 capture.** `workspace.GitHead(ctx, dir)` (`git rev-parse HEAD`) and
+  `workspace.GitDirty(ctx, dir)` (`git status --porcelain` non-empty, so
+  untracked files count; ignored files do not), both bounded by the caller's
+  context. `internal/runs` captures `base_sha` + `dirty` at the start of the
+  run's drive goroutine, before the agent is spawned (so `Start` returns
+  without waiting on git and the agent cannot edit before the base is read),
+  and `head_sha` + `dirty` in `finish` before the terminal status is persisted
+  (so the row and the in-memory status agree). Both use a 3 s timeout. Both
+  run-construction sites are covered (`Start` and the queue's
+  `StartWhenBusy` path). A task with no worktree, a non-git dir, git missing,
+  or a timeout records NULL for what it could not read and logs one line; it
+  never changes the run's status and never emits a run event.
+- **P3 wire.** `runs.RunStatus` gains `BaseSHA *string; HeadSHA *string; Dirty
+  *bool` (no json tags, PascalCase like its siblings; JSON `null` when
+  unknown) → `run.list`. `run.logs` result and the `run.status` event payload
+  gain additive `baseSha`/`headSha`/`dirty` (omitempty). The MCP `task_status`
+  output gains the same three keys (omitempty).
+- **P4 web.** The run footer (the per-run line under each turn — the app has
+  no separate "run header") gets a provenance segment: commit icon
+  (`Icons.commit` added to `lib/icons.ts`), 7-char sha (head once the run is
+  terminal, else base), a dirty marker when `dirty`, a tooltip with the full
+  base/head shas and dirty state, and click-to-copy of the full head sha
+  (reusing the clipboard pattern of `message-actions.tsx`). Nothing renders
+  when both shas are null (old runs, non-git).
+
+**Dirty semantics (decided here, plan said only "dirty"):** one column, the
+worktree's dirty state at the *latest* successful capture — written at start,
+overwritten at the terminal state when that capture succeeds, otherwise the
+start value stays. A running run therefore shows its start state; a finished
+one shows what it left behind.
+
 ### O2 — MCP hierarchy + guards
 - `task_new` accepts `parentTaskId`; `task_list` accepts a
   `parentTaskId` filter.
@@ -633,6 +676,47 @@ smind itself (see the gap log).
 - Live smoke (GLM and claude-native): stop mid-turn, send a correction,
   and the transcript shows the earlier context.
 
+**O1 provenance — named tests** (file in parentheses):
+- `TestMigrate_RunProvenanceColumns` (`internal/store/migrate_test.go`): an
+  old-schema DB with a run row migrates; the row reads back nil/nil/nil;
+  re-running the migration is a no-op.
+- `TestUpdateRunProvenance_WritesOnlyNonNil` (`internal/store/runs_test.go`):
+  base then head writes keep the earlier fields; a round trip through
+  `GetRun`/`ListRecentRuns` returns them.
+- `TestGitHead_GitDirty` (`internal/workspace/provenance_test.go`), temp git
+  repo subtests: `clean`, `modified tracked file`, `untracked file`,
+  `ignored file is clean`, `non-git dir` (error), `git missing` (PATH emptied
+  → error, no panic), `no commits yet` (GitHead errors), `cancelled context`.
+- `TestRun_ProvenanceCapture_CommitDuringRun` (`internal/runs/provenance_test.go`):
+  a fake agent that commits mid-run → `head_sha != base_sha`, persisted and in
+  `RunSummary`.
+- `TestRun_ProvenanceCapture_DirtyEdit`: an uncommitted edit → `dirty=true`
+  at the terminal state; a clean run → `dirty=false`.
+- `TestRun_ProvenanceCapture_StartedDirty_EndsClean`: start dirty, run commits
+  everything → final `dirty=false` (overwrite semantics).
+- `TestRun_ProvenanceCapture_NonGitDir`: NULLs, status `done`, no run event
+  mentions git.
+- `TestRun_ProvenanceCapture_GitMissing`: PATH emptied → run still `done`,
+  NULLs.
+- `TestRun_ProvenanceCapture_QueueDeliveredRun`: a run started via the queue
+  path records provenance too.
+- `TestRun_ProvenanceCapture_StopMidRun`: a stopped run still records
+  `head_sha`.
+- `TestRehydratedRun_KeepsProvenance`: restart → `run.list` still reports it.
+- `TestRunList_ProvenanceFields` + `TestRunStatusEvent_ProvenanceFields`
+  (`internal/wsapi`): PascalCase `BaseSHA/HeadSHA/Dirty` in `run.list` (JSON
+  `null` when unknown); `baseSha/headSha/dirty` in `run.logs` / `run.status`.
+- `TestTaskStatus_ProvenanceFields` (`cmd/smind/mcp_run_tools_test.go`):
+  `task_status` structured output carries the three keys; absent when unknown.
+- `run-provenance.test.tsx` (`web/.../components/timeline/`): short sha, head
+  preferred over base, dirty marker present/absent, tooltip has both full
+  shas, click copies the full head sha, renders nothing for null shas, uses
+  the `Icons` registry. Plus a `run-footer` test that the segment mounts.
+  `use-run-timeline` test: `BaseSHA/HeadSHA/Dirty` from `run.list` and the
+  `run.status` event reach the `RunEntry`.
+- Screenshots, light + dark, of the run footer with stubbed data (clean,
+  dirty, running-with-base-only, no provenance).
+
 Validated (taskrunner-level, 2026-09-28):
 `TestRunner_RunPrompt_GLM_StoppedRunStillResumes`,
 `TestRunner_RunPrompt_CodexNative_StoppedRunStillResumes`, and
@@ -839,7 +923,10 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 - [x] M1: schema + async writer
 - [x] M1: usage extraction (4 cases) + tee'd passthrough + include_usage
 - [x] M1: wsapi `usage.*` + `smind usage`
-- [ ] O1: run provenance
+- [ ] O1: run provenance — spec written 2026-10-18 (O1 section above).
+  - [ ] P1+P2+P3 backend (store, `workspace.GitHead/GitDirty`, runs capture, wsapi, MCP) — peer-glm
+  - [ ] P4 web (types, hook, footer segment, `Icons.commit`, tests, screenshots) — peer-glm
+  - [ ] independent review, `task test` + `task lint` + `tsc -b`, PR
 - [x] O1: stop/resume keeps the session
 - [x] O2: MCP parent params + depth guard (Wave 1 slice; per-tree
       concurrency guard and guide stay Wave 2)
