@@ -111,6 +111,10 @@ describe("availabilityFromTaskTree", () => {
   it("returns null for an empty node list", () => {
     expect(availabilityFromTaskTree([])).toBeNull();
   });
+
+  it("returns null when the task has no descendants (neither entry is offered)", () => {
+    expect(availabilityFromTaskTree([treeNode(1, null, "running")])).toBeNull();
+  });
 });
 
 describe("sidebarTreeActions", () => {

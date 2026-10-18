@@ -88,7 +88,9 @@ export function treeActionAvailability(
  */
 export function availabilityFromTaskTree(nodes: ReadonlyArray<TaskTreeNode>): TreeActionAvailability | null {
   const [selfNode, ...rest] = nodes;
-  if (!selfNode) return null;
+  // A task without live descendants offers neither entry (the sidebar's
+  // sidebarTreeActions encodes the same rule by keying only parents).
+  if (!selfNode || rest.length === 0) return null;
   return treeActionAvailability(
     selfNode.run.state,
     rest.map((n) => n.run.state),

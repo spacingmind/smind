@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Icons } from "@/lib/icons";
 
 import { ArchiveTaskDialog } from "@/components/crud-dialogs";
+import { ArchiveFinishedDialog, StopTreeDialog } from "@/components/tree-action-dialogs";
 import { PortChip, SetupBadge } from "@/components/task-setup";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +17,8 @@ import { toast } from "@/components/ui/toast";
 import { Tooltip, TooltipContent, TooltipTrigger, useMenuTooltip } from "@/components/ui/tooltip";
 import type { LocalPathActions } from "@/hooks/use-local-path-actions";
 import { formatRelativeTime } from "@/lib/relative-time";
+import { availabilityFromTaskTree, type TreeActionAvailability } from "@/lib/task-tree-actions";
+import type { TaskTreeResult } from "@/lib/task-lineage";
 import type { Task } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
@@ -91,8 +94,34 @@ export function HeaderTaskMenu({
   localPathActions: LocalPathActions | null;
 }) {
   const [archiving, setArchiving] = useState(false);
+  const [archiveFinished, setArchiveFinished] = useState(false);
+  const [stoppingTree, setStoppingTree] = useState(false);
+  const [treeActions, setTreeActions] = useState<TreeActionAvailability | null>(null);
   const { tooltip, onMenuOpenChange } = useMenuTooltip();
   const worktree = task.WorktreePath;
+
+  // PR-H11: the header has no task forest, so the tree actions' availability
+  // comes from a task.tree fetch (stale-guarded per task/client). A task
+  // whose tree has no descendants offers neither entry, same rule as the
+  // sidebar.
+  useEffect(() => {
+    if (!client) return;
+    const reqTaskId = task.ID;
+    let cancelled = false;
+    client
+      .call<TaskTreeResult>("task.tree", { taskId: task.ID })
+      .then((result) => {
+        if (cancelled || task.ID !== reqTaskId) return;
+        setTreeActions(availabilityFromTaskTree(result.nodes ?? []));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error("task.tree failed, header tree actions hidden", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, task.ID]);
   return (
     <>
       <DropdownMenu onOpenChange={onMenuOpenChange}>
@@ -130,11 +159,54 @@ export function HeaderTaskMenu({
             </DropdownMenuItem>
           )}
           {(task.Branch || worktree) && <DropdownMenuSeparator />}
+          {treeActions && (
+            <>
+              <DropdownMenuItem
+                data-testid="app-header-archive-finished"
+                disabled={!treeActions.archive.enabled}
+                onSelect={() => setArchiveFinished(true)}
+              >
+                <Icons.archive aria-hidden /> Archive finished sub-tasks…
+                {!treeActions.archive.enabled && (
+                  <span className="ml-auto pl-2 text-ui-xs text-muted-foreground">{treeActions.archive.reason}</span>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                data-testid="app-header-stop-tree"
+                disabled={!treeActions.stop.enabled}
+                onSelect={() => setStoppingTree(true)}
+              >
+                <Icons.stop aria-hidden /> Stop all in tree…
+                {!treeActions.stop.enabled && (
+                  <span className="ml-auto pl-2 text-ui-xs text-muted-foreground">{treeActions.stop.reason}</span>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
           <DropdownMenuItem data-testid="app-header-archive" onSelect={() => setArchiving(true)}>
             <Icons.archive aria-hidden /> Archive task…
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      {archiveFinished && (
+        <ArchiveFinishedDialog
+          client={client}
+          task={task}
+          open
+          onOpenChange={(open) => !open && setArchiveFinished(false)}
+          onArchived={() => {}}
+        />
+      )}
+      {stoppingTree && (
+        <StopTreeDialog
+          client={client}
+          task={task}
+          open
+          onOpenChange={(open) => !open && setStoppingTree(false)}
+          onStopped={() => {}}
+        />
+      )}
       {archiving && (
         <ArchiveTaskDialog
           client={client}
