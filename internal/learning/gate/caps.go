@@ -69,13 +69,13 @@ var (
 	sentenceRe = regexp.MustCompile(`[.!?](\s|$)`)
 	fmKeyRe    = regexp.MustCompile(`^(name|description|category|allowed-tools|model|tools)\s*:`)
 
-	urlRe     = regexp.MustCompile(`(?i)(https?://|ftp://|file://|www\.|\]\([^)]*\)|<https?:)`)
+	urlRe     = regexp.MustCompile(`(?im)(https?://|ftp://|file://|www\.|\]\([^)]*\)|<https?:|\bdata:\S|javascript:|vbscript:|\b(?:ssh|s3|gs|sftp|git|smb|wss?|redis|postgres(?:ql)?|mysql|mongodb)://|\bgit@[\w.-]+:|<!--|^\s*\[[^\]]+\]:\s*\S+)`)
 	htmlTagRe = regexp.MustCompile(`(?i)</?(a|img|script|iframe|style|div|span|svg|link|meta|object|embed|form|input|details|summary)\b[^>]*>`)
 
 	absPathRe  = regexp.MustCompile("(^|[\\s`\"'(=])(/(?:Users|home|var|etc|opt|tmp|usr|private|Volumes|root|srv|mnt)/[^\\s`\"')]+)")
 	winPathRe  = regexp.MustCompile(`[A-Za-z]:\\[^\s]+`)
 	ipv4Re     = regexp.MustCompile(`\b\d{1,3}(\.\d{1,3}){3}\b`)
-	hostNameRe = regexp.MustCompile(`(?i)\b[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)*\.(com|net|org|io|dev|ai|local|internal|lan|home|cloud|app)\b`)
+	hostNameRe = regexp.MustCompile(`(?i)\b[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)*\.(com|net|org|io|dev|ai|local|internal|lan|home|cloud|app|xyz|ru|tk|info|biz|uk|fr|cn|jp|br|ly|gl|ws|top|site|online|tech|club|pw|su|zip|mov)\b`)
 )
 
 // CheckName validates the skill name: ^learned-[a-z0-9]+(-[a-z0-9]+)*$, total
