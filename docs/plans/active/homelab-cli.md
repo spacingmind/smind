@@ -1084,6 +1084,17 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   treats a 4 s silence as "predates daemon.info". Not done: the `docker pull` variant for a daemon reporting it runs from an image (`image?` in `daemon.info`, needs
   P11), and the P5 setting that stops offering (a) while a service owns the port (P5 not started).
 
+- 2026-10-18: **P12c implemented** (PR "feat(relay): CA-verified TLS for relay clients and no silent trust-on-first-use (ADR-0031 P12c)"):
+  `client.Dial` with an empty fingerprint verifies chain + host name against the system roots (no `InsecureSkipVerify`; `WithRootCAs`
+  for tests), a non-empty one still pins the leaf only; `smind relay connect` tries normal verification first (stores an empty fingerprint),
+  otherwise shows the fingerprint and needs a typed yes or a matching `--fingerprint <hex>` (nothing saved on refusal/EOF/unreachable;
+  the prompt prints our own reason, never certificate-controlled text); `smind relay --tls-cert/--tls-key` serves an operator's
+  certificate on both listeners and reloads renewals; `smind relay offer` omits `fp` for a CA relay. **Follow-up for P13a (desktop,
+  not edited here):** `connections_preview_relay` rejects an offer without `fp` (`desktop/src-tauri/src/commands.rs:149`) and
+  `relay::client::dial` requires a 32-byte pin (`desktop/daemon-client/src/relay/client.rs:140`), so the desktop cannot yet join a CA
+  relay; the Rust offer parser already accepts a missing `fp`. Mobile parses a missing `fp` (`wire.fp ?? ''`) and never pins (platform
+  trust), so it works with a CA relay.
+
 ## Validation
 
 To be filled per PR as work lands: for each Acceptance Criterion, the test name or the real-platform check that
