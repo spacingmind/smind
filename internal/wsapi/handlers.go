@@ -316,8 +316,8 @@ func handleAccountOAuthStart(coord *accounts.LoginCoordinator) handlerFunc {
 			return nil, fmt.Errorf("account.oauthStart: provider and label are required")
 		}
 
-		res, err := coord.Login(ctx, p.Provider, p.Label, accounts.LoginOptions{AccountID: p.AccountID}, func(url string) {
-			rc.Emit("authorizeUrl", map[string]string{"url": url})
+		res, err := coord.Login(ctx, p.Provider, p.Label, accounts.LoginOptions{AccountID: p.AccountID}, func(loginID, url string) {
+			rc.Emit("authorizeUrl", map[string]string{"loginId": loginID, "url": url})
 		})
 		if err != nil {
 			return nil, fmt.Errorf("account.oauthStart: %w", err)

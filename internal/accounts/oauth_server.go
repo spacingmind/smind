@@ -2,7 +2,6 @@ package accounts
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -115,19 +114,6 @@ func (s *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	fmt.Fprint(w, renderCallbackSuccessPage(s.providerLabel))
-}
-
-// waitForCallback blocks until the vendor's redirect lands, ctx is done, or
-// timeout elapses, whichever comes first.
-func (s *callbackServer) waitForCallback(ctx context.Context, timeout time.Duration) (callbackResult, error) {
-	select {
-	case res := <-s.result:
-		return res, nil
-	case <-ctx.Done():
-		return callbackResult{}, ctx.Err()
-	case <-time.After(timeout):
-		return callbackResult{}, errors.New("timed out waiting for the OAuth callback")
-	}
 }
 
 // close gracefully shuts the server down, releasing its bound port. Safe to
