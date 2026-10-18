@@ -558,8 +558,6 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
         type="button"
         data-testid={testId}
         aria-label={`Model: ${title}`}
-        aria-haspopup="listbox"
-        aria-expanded={open}
         title={title}
         disabled={disabled}
         className="flex h-8 w-full items-center justify-between gap-2 rounded-lg border border-input-border bg-input px-2.5 py-1 text-ui-lg whitespace-nowrap transition-colors outline-none hover:border-input-border-hover focus-visible:border-input-border-focused focus-visible:bg-input-focused disabled:cursor-not-allowed disabled:opacity-50 md:text-ui-base"

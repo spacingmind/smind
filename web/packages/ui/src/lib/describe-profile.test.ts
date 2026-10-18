@@ -58,21 +58,11 @@ describe("describeProfile", () => {
     expect(describeProfile(profile({ Provider: "glm" }), PROVIDERS)).toBe("GLM · Default");
   });
 
-  it("describeProfile is identical in picker pill and settings row", () => {
-    // The composer picker rows (run-config-toolbar's PickerProfileRow.summary),
-    // the task-header pill, and the Settings → Agents row metadata line all
-    // call this one function, so the same profile + providers can only ever
-    // render one string. Check both shapes: everything default, and a pinned
-    // model + explicit mode/thinking.
+  it("is a pure function of the profile and the provider list", () => {
     const defaults = profile();
     const pinned = profile({ Model: "sonnet", PermissionMode: "plan", ThinkingLevel: "off" });
-    for (const p of [defaults, pinned]) {
-      const pickerSummary = describeProfile(p, PROVIDERS);
-      const settingsRow = describeProfile(p, PROVIDERS);
-      expect(pickerSummary).toBe(settingsRow);
-      expect(pickerSummary).toBe(describeProfile(p, PROVIDERS));
-    }
     expect(describeProfile(defaults, PROVIDERS)).toBe("Claude Code · Accept File Edits · Standard");
     expect(describeProfile(pinned, PROVIDERS)).toBe("Claude Code · Sonnet · Plan Mode · Off");
+    expect(describeProfile(pinned, PROVIDERS)).toBe(describeProfile(pinned, PROVIDERS));
   });
 });

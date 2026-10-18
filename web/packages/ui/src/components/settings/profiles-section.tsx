@@ -96,7 +96,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
   // composer picker and the palette immediately.
   const profilesQuery = useProfiles();
   const profiles = profilesQuery.data ?? null;
-  const { providersOrFallback: providers } = useProviderCatalog();
+  const { providersOrFallback: providers, settled: providersSettled } = useProviderCatalog();
   const [openCard, setOpenCard] = useState<OpenCard>(null);
   const [form, setForm] = useState<ProfileFormState>(EMPTY_FORM);
   const [pending, setPending] = useState(false);
@@ -228,6 +228,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
                       pending={pending}
                       error={error}
                       submitLabel={pending ? "Saving…" : "Add agent"}
+                      providersLoading={!providersSettled}
                     />
                   </li>
                 )}
@@ -293,6 +294,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
                           pending={pending}
                           error={error}
                           submitLabel={pending ? "Saving…" : "Save"}
+                          providersLoading={!providersSettled}
                         />
                       )}
                     </li>
@@ -332,6 +334,7 @@ function ProfileForm({
   pending,
   error,
   submitLabel,
+  providersLoading,
 }: {
   idPrefix: string;
   form: ProfileFormState;
@@ -342,8 +345,10 @@ function ProfileForm({
   pending: boolean;
   error: string | null;
   submitLabel: string;
+  /** provider.list has not settled: the picker says "Loading…" like the composer's, instead of fallback ids. */
+  providersLoading: boolean;
 }) {
-  const browserProviders = useMemo(() => buildBrowserProviders(providers, {}), [providers]);
+  const browserProviders = useMemo(() => buildBrowserProviders(providers, {}, { loading: providersLoading }), [providers, providersLoading]);
   return (
     <form className="flex flex-col gap-2" onSubmit={onSubmit}>
       <Input

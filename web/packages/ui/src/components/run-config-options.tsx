@@ -123,7 +123,7 @@ function ConfigOptionControl({
         <ThinkingSelect
           variant="pill"
           label={option.name}
-          title={option.description}
+          title={option.description ?? ""}
           levels={option.options.map((choice) => ({ id: choice.value, label: choice.name, help: choice.description }))}
           value={current}
           onChange={change}

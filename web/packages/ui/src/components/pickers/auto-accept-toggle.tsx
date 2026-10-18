@@ -41,7 +41,7 @@ export function AutoAcceptToggle({
       aria-pressed={checked}
       aria-busy={pending || undefined}
       title={AUTO_ACCEPT_HELP}
-      data-testid="composer-auto-accept"
+      data-testid={testId ?? "composer-auto-accept"}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       aria-label="Auto-accept"

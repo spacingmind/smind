@@ -295,28 +295,73 @@ describe("profiles-section model field (ADR-0025)", () => {
     expect(daemon.calls.find((c) => c.method === "profile.create")?.params).toMatchObject({ name: "Cheap", provider: "claude-native", model: "sonnet" });
   });
 
-  it("choosing another provider in the picker resets the model and the provider-scoped mode", async () => {
-    const { daemon } = await renderWithProfiles([PROFILE], PROVIDERS);
+  it("choosing another provider in the picker resets the model, mode and auto-accept", async () => {
+    const providers = {
+      providers: [
+        { id: "claude-native", label: "Claude Code", credentialKind: "oauth", accountProvider: "anthropic", models: [{ id: "opus", label: "Opus" }] },
+        {
+          id: "glm",
+          label: "GLM",
+          kind: "cli",
+          supportsAutoAccept: true,
+          defaultMode: "default",
+          modes: [
+            { id: "default", label: "Ask" },
+            { id: "bypass", label: "Auto", autoApproves: true },
+          ],
+          models: [{ id: "glm-5.3", label: "GLM 5.3" }],
+        },
+      ],
+    };
+    const { daemon } = await renderWithProfiles([PROFILE], providers);
 
     fireEvent.click(screen.getByTestId("profile-new-button"));
     await flush();
     fireEvent.change(screen.getByTestId("profile-form-name"), { target: { value: "Other" } });
-    fireEvent.click(screen.getByTestId("profile-form-provider"));
-    fireEvent.click(screen.getByTestId("model-row-claude-native:opus"));
-    await flush();
-    // Switch to GLM (no catalog models): its own default model, nothing carried over from Claude.
+    // Pick GLM, its model, a non-default mode and auto-accept...
     fireEvent.click(screen.getByTestId("profile-form-provider"));
     fireEvent.click(await screen.findByTestId("model-picker-back"));
     fireEvent.click(screen.getByTestId("model-provider-glm"));
-    fireEvent.click(screen.getByTestId("model-row-glm:"));
+    fireEvent.click(screen.getByTestId("model-row-glm:glm-5.3"));
     await flush();
-    expect(screen.getByTestId("profile-form-provider")).toHaveAttribute("title", expect.stringMatching(/glm/i));
-    // Thinking is Claude-only: gone for GLM.
-    expect(screen.queryByTestId("profile-form-thinking-level")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("profile-form-permission-mode"));
+    fireEvent.click(await screen.findByRole("option", { name: "Auto" }));
+    await flush();
+    fireEvent.click(screen.getByTestId("profile-form-auto-accept"));
+    expect(screen.getByTestId("profile-form-auto-accept")).toBeChecked();
+
+    // ...then switch back to Claude: the provider-scoped fields do not carry over.
+    // (A just-closed Radix Select returns focus late, which would dismiss a popover opened in the same tick.)
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    fireEvent.click(screen.getByTestId("profile-form-provider"));
+    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    fireEvent.click(screen.getByTestId("model-provider-claude-native"));
+    fireEvent.click(screen.getByTestId("model-row-claude-native:"));
+    await flush();
+    expect(screen.queryByTestId("profile-form-auto-accept")).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("profile-form-submit"));
     await flush();
 
-    expect(daemon.calls.find((c) => c.method === "profile.create")?.params).toMatchObject({ name: "Other", provider: "glm", model: "", permissionMode: "" });
+    expect(daemon.calls.find((c) => c.method === "profile.create")?.params).toMatchObject({
+      name: "Other",
+      provider: "claude-native",
+      model: "",
+      permissionMode: "",
+      autoAccept: false,
+    });
+  });
+
+  it("an edit form keeps a saved model id the catalog does not list, shows it, and saves it unchanged", async () => {
+    const { daemon } = await renderWithProfiles([{ ...PROFILE, Model: "retired-model" }], PROVIDERS);
+    fireEvent.pointerDown(screen.getByTestId("profile-menu-1"), { button: 0 });
+    fireEvent.click(await screen.findByTestId("profile-edit-1"));
+    await flush();
+    expect(screen.getByTestId("profile-edit-form-1-provider")).toHaveTextContent("retired-model");
+    fireEvent.click(screen.getByTestId("profile-edit-form-1-submit"));
+    await flush();
+    expect(daemon.calls.find((c) => c.method === "profile.update")?.params).toMatchObject({ id: 1, model: "retired-model" });
   });
 
   it("profile list shows the model", async () => {

@@ -49,7 +49,8 @@ describe("ModeSelect", () => {
     render(<ModeSelect modes={MODES} value="bypassPermissions" onChange={() => {}} dangerous variant={variant} />);
     const trigger = screen.getByLabelText("Permission mode");
     expect(trigger).toHaveAttribute("data-danger", "true");
-    if (variant === "pill") expect(trigger).toHaveClass("text-warning");
+    // Both variants warn in the warning colour (the pill also swaps its icon).
+    expect(trigger).toHaveClass("text-warning");
   });
 
   it("field variant can lead with a Provider default item", async () => {
@@ -64,13 +65,24 @@ describe("ModeSelect", () => {
       />,
     );
 
+    // An empty value names the "Provider default" entry itself (Radix would show the bare placeholder).
+    expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Provider default");
     fireEvent.click(screen.getByLabelText("Permission mode"));
     const options = await screen.findAllByRole("option");
     expect(options.map((o) => o.textContent)).toEqual(["Provider default", "Accept File Edits", "Always Ask", "Bypass"]);
-    // Radix Select items reject an empty-string value, so the form maps its
-    // sentinel before it reaches here; the provider's own ids still fire.
     fireEvent.click(options[3]);
     expect(onChange).toHaveBeenCalledWith("bypassPermissions");
+
+  });
+
+  it("the leading Provider default item is selectable and fires the empty id (Radix accepts it)", async () => {
+    const onChange = vi.fn();
+    render(
+      <ModeSelect modes={MODES} value="acceptEdits" onChange={onChange} variant="field" extraItems={[{ id: "", label: "Provider default" }]} />,
+    );
+    fireEvent.click(screen.getByLabelText("Permission mode"));
+    fireEvent.click((await screen.findAllByRole("option"))[0]);
+    expect(onChange).toHaveBeenCalledWith("");
   });
 
   it("items carry their description as title", async () => {

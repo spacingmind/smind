@@ -43,7 +43,7 @@ export function ThinkingSelect({
         className={variant === "pill" ? PILL_TRIGGER_CLASS : "w-full"}
       >
         {variant === "pill" && <Icons.thinking aria-hidden className="shrink-0" />}
-        <SelectValue placeholder={placeholder ?? label} />
+        <SelectValue placeholder={placeholder ?? levels.find((t) => t.id === "")?.label ?? label} />
       </SelectTrigger>
       <SelectContent>
         {levels.map((t) => (

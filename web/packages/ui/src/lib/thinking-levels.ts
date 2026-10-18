@@ -7,8 +7,8 @@ import type { ThinkingLevel } from "@/lib/types";
  * profiles-section.tsx with slightly different id sets.
  *
  * Claude-only (see internal/taskrunner/thinking.go's doc comment): every
- * consuming surface already gates this list behind
- * `provider === "claude-native"` on its own, so it isn't repeated here.
+ * consuming surface gates this list behind `supportsThinking(provider)`,
+ * so it isn't repeated here.
  */
 export interface ThinkingLevelInfo {
   id: Exclude<ThinkingLevel, "">;

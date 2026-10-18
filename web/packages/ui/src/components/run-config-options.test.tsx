@@ -60,6 +60,15 @@ describe("RunConfigOptions", () => {
     expect(onSetOption).toHaveBeenCalledWith("thinking", "low");
   });
 
+  it("a live option with no description of its own keeps no tooltip (the current choice's help is not borrowed)", () => {
+    const option: ConfigOptionParams = {
+      ...THINKING,
+      options: [{ value: "max", name: "Max", description: "Think the most" }],
+    };
+    render(<RunConfigOptions options={[option]} error={null} onSetOption={vi.fn()} />);
+    expect(screen.getByLabelText("Thinking")).toHaveAttribute("title", "");
+  });
+
   it("keeps the mode option when the mode pill is not live", () => {
     render(<RunConfigOptions options={[MODE]} error={null} onSetOption={vi.fn()} />);
     expect(screen.getByLabelText("Mode")).toBeInTheDocument();

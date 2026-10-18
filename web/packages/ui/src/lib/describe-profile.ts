@@ -2,7 +2,7 @@ import { describePermission } from "@/lib/permission-modes";
 import { supportsThinking, thinkingLevelLabel } from "@/lib/thinking-levels";
 import type { AgentProfile, ProviderInfo, ThinkingLevel } from "@/lib/types";
 
-/** "<provider> · <model> · <mode> · <thinking>" -- the agent menu's per-row metadata, the task-header pill, and the Settings → Agents row all share this (Paseo's profile summary order). The model is shown only when the profile pins one (ADR-0025). The mode is the provider's own label (ADR-0019). Thinking is omitted for a non-Claude profile, mirroring the Thinking control's own visibility rule. */
+/** "<provider> · <model> · <mode> · <thinking>" -- the composer picker's per-row metadata and the Settings → Agents row share this (Paseo's profile summary order). The model is shown only when the profile pins one (ADR-0025). The mode is the provider's own label (ADR-0019). Thinking is omitted for a non-Claude profile, mirroring the Thinking control's own visibility rule. */
 export function describeProfile(p: AgentProfile, providers: ProviderInfo[]): string {
   const providerLabel = providers.find((candidate) => candidate.id === p.Provider)?.label ?? p.Provider;
   const parts = [providerLabel];
