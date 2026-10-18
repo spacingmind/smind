@@ -158,6 +158,15 @@ read-only review of an exact commit.
   - Wait for runs to reach a terminal state, or drain async writers, before
     `t.TempDir` cleanup.
   - Don't share names or paths between parallel tests.
+  - Don't read a response with `readEnvelopeFor` while a streaming request
+    (`terminal.attach`, `run.attach`) is open on the same connection and its
+    events are still wanted: it discards every message not addressed to the id
+    it waits for. Read both in one loop (`writeAndCollect` in
+    `internal/wsapi/terminal_test.go`).
+  - A relay does not announce a device that attaches while it still holds a
+    daemon stream for the route. After ending a daemon session, wait for
+    `relaytest.Relay.DaemonSideAttached` to be false before re-attaching the
+    same route; the hub's own session map goes first and is not enough.
 
 ## Process safety
 

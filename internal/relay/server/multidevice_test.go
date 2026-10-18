@@ -361,6 +361,39 @@ func TestDeviceAttachSentWhenDeviceAttachesWithoutDaemonSide(t *testing.T) {
 	ctl.quiet(mdQuiet)
 }
 
+// TestDeviceAttachNotSentWhileTheOldDaemonSideIsStillRegistered pins the
+// ordering the bridge's replay tests wait on (Server.DaemonAttached): a
+// device attaching while the relay still holds a daemon stream for the route
+// is NOT announced -- the relay assumes that daemon side serves it -- and the
+// same attach is announced once the daemon stream is gone.
+func TestDeviceAttachNotSentWhileTheOldDaemonSideIsStillRegistered(t *testing.T) {
+	h := newHarness(t, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	adm := h.admit(ctx, testWorkspace, "daemon-key-1")
+	ctl := mdOpenControl(t, h, ctx, adm)
+	ctl.expectPong(7)
+	ctl.expectSync(map[string]string{})
+
+	route := func(dir relaypb.Direction) frameRoute { return mdRoute("dev-a", "sess-a", dir) }
+	d := mdOpenStream(t, h, ctx, adm, route(relaypb.Direction_DIRECTION_DAEMON_TO_DEVICE))
+	d.send(d.frame(0, []byte("reg")))
+	waitFor(t, mdTimeout, func() bool { return h.srv.DaemonAttached(testWorkspace, "sess-a", "dev-a") })
+
+	v := mdOpenStream(t, h, ctx, adm, route(relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+	v.send(v.frame(0, []byte("hello")))
+	ctl.quiet(mdQuiet)
+
+	d.stream.CloseSend()
+	d.expectDone(codes.OK)
+	waitFor(t, mdTimeout, func() bool { return !h.srv.DaemonAttached(testWorkspace, "sess-a", "dev-a") })
+
+	// A fresh device stream for the same route now has no daemon side.
+	v2 := mdOpenStream(t, h, ctx, adm, route(relaypb.Direction_DIRECTION_DEVICE_TO_DAEMON))
+	v2.send(v2.frame(0, []byte("hello")))
+	ctl.expectAttach("dev-a", "sess-a")
+}
+
 func TestDeviceDetachSentWhenRouteGarbageCollected(t *testing.T) {
 	// A device side ending with no daemon side sends DeviceDetach...
 	h := newHarness(t, 0)
