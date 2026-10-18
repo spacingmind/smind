@@ -3,29 +3,21 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { Icons } from "@/lib/icons";
 
 import { ModelPicker, type PickerProfileRow } from "@/components/composer/model-picker";
-import { PILL_TRIGGER_CLASS } from "@/components/composer/pill-class";
 import { readRunConfigPreference, writeRunConfigPreference } from "@/components/composer/run-config-preference";
 import { setSettingsIntent } from "@/lib/settings-intent";
 import { buildBrowserProviders, type ProviderHealth } from "@/lib/model-browser";
 import { readStoredDefaultAgentId } from "@/lib/settings-preferences";
-import { cn } from "@/lib/utils";
 import {
-  AUTO_ACCEPT_HELP,
-  AUTO_ACCEPT_LABEL,
   effectiveMode,
   providerModes,
   supportsAutoAccept,
 } from "@/lib/permission-modes";
-import { THINKING_LEVELS, supportsThinking } from "@/lib/thinking-levels";
+import { supportsThinking } from "@/lib/thinking-levels";
+import { ModeSelect } from "@/components/pickers/mode-select";
+import { ThinkingSelect } from "@/components/pickers/thinking-select";
+import { AutoAcceptToggle } from "@/components/pickers/auto-accept-toggle";
 import { describeProfile } from "@/lib/describe-profile";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { AgentProfile, ModeInfo, Provider, ProviderInfo, ThinkingLevel } from "@/lib/types";
 
 /**
@@ -477,40 +469,9 @@ function RunConfigToolbarMode() {
   };
   return (
     <>
-      <Select value={modeId} onValueChange={pickMode} disabled={disabled}>
-        <SelectTrigger
-          aria-label="Permission mode"
-          title={current?.description}
-          data-danger={dangerous ? "true" : undefined}
-          className={cn(PILL_TRIGGER_CLASS, dangerous && "text-warning hover:text-warning")}
-        >
-          {dangerous ? <Icons.permissionDanger aria-hidden className="shrink-0" /> : <Icons.permission aria-hidden className="shrink-0" />}
-          <SelectValue placeholder="Select mode" />
-        </SelectTrigger>
-        <SelectContent>
-          {modes.map((m) => (
-            <SelectItem key={m.id} value={m.id} title={m.description} className={m.autoApproves ? "text-warning" : undefined}>
-              {m.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <ModeSelect modes={modes} value={modeId} onChange={pickMode} disabled={disabled} dangerous={dangerous} variant="pill" />
       {showAutoAccept && (
-        <Button
-          type="button"
-          variant="ghost"
-          aria-pressed={autoAccept}
-          aria-busy={pending || undefined}
-          title={AUTO_ACCEPT_HELP}
-          data-testid="composer-auto-accept"
-          disabled={disabled}
-          onClick={toggleAutoAccept}
-          aria-label="Auto-accept"
-          className={cn(PILL_TRIGGER_CLASS, autoAccept ? "text-warning hover:text-warning" : "text-foreground-muted")}
-        >
-          <Icons.checkAll aria-hidden className="shrink-0" />
-          <span className="max-sm:hidden">{AUTO_ACCEPT_LABEL}</span>
-        </Button>
+        <AutoAcceptToggle checked={autoAccept} onChange={toggleAutoAccept} disabled={disabled} pending={pending} variant="pill" />
       )}
       {error && (
         <span data-testid="permission-mode-error" role="alert" className="px-1 text-ui-sm text-destructive">
@@ -532,27 +493,13 @@ function RunConfigToolbarThinking() {
   // NewSession responds.
   if (!supportsThinking(state.provider)) return null;
   return (
-    <Select
+    <ThinkingSelect
       value={state.thinkingLevel || "standard"}
-      onValueChange={(v) => actions.setThinkingLevel(v as ThinkingLevel)}
+      onChange={(v) => actions.setThinkingLevel(v as ThinkingLevel)}
       disabled={meta.disabled}
-    >
-      <SelectTrigger
-        aria-label="Thinking level"
-        title={THINKING_LEVELS.find((t) => t.id === (state.thinkingLevel || "standard"))?.help}
-        className={PILL_TRIGGER_CLASS}
-      >
-        <Icons.thinking aria-hidden className="shrink-0" />
-        <SelectValue placeholder="Select thinking level" />
-      </SelectTrigger>
-      <SelectContent>
-        {THINKING_LEVELS.map((t) => (
-          <SelectItem key={t.id} value={t.id} title={t.help}>
-            {t.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+      variant="pill"
+      placeholder="Select thinking level"
+    />
   );
 }
 
