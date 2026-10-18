@@ -353,18 +353,17 @@ describe("profiles-section inline edit's provider health dot (run-config IA)", (
       { providers: [{ id: "claude-native", label: "Claude Code", credentialKind: "oauth", accountProvider: "anthropic" }] },
     );
 
-    // Opening the editor runs no provider.test: the dot reads the shared
-    // cache only, and nothing has tested the provider yet.
+    // Opening the editor makes sure its provider has a health answer: one local check, run once however
+    // often the form re-renders, written to the shared cache.
+    daemon.testResults = { anthropic: { ok: false, detail: "no credential" } };
     fireEvent.pointerDown(screen.getByTestId("profile-menu-1"), { button: 0 });
     fireEvent.click(await screen.findByTestId("profile-edit-1"));
     await flush();
-    expect(daemon.countCalls("provider.test")).toBe(0);
-    expect(screen.getByTestId("profile-edit-form-1-provider-health")).toHaveAttribute("data-status", "unknown");
+    expect(daemon.countCalls("provider.test")).toBe(1);
+    expect(screen.getByTestId("profile-edit-form-1-provider-health")).toHaveAttribute("data-status", "failed");
 
-    // A test result landing in the shared cache (a Test button, the
-    // sidebar's count, the composer picker's ensure) flips the dot live --
-    // write it the way useRunProviderTest does: call provider.test and put
-    // the answer under queryKeys.providerTest("anthropic").
+    // A result landing in the shared cache by another path (a Test button, the sidebar's count, the
+    // picker) flips the dot live -- write it the way useRunProviderTest does.
     const { runTest } = renderHookWithDaemon(() => useRunProviderTest(), daemon, {
       initialProps: undefined,
       queryClient: view.queryClient(),
@@ -374,9 +373,8 @@ describe("profiles-section inline edit's provider health dot (run-config IA)", (
       runTest("anthropic");
     });
     await flush();
-    // Exactly the Test button's own call -- the dot re-read the shared
-    // cache, it did not fetch again.
-    expect(daemon.countCalls("provider.test")).toBe(1);
+    // One more call: the Test button's own. The dot re-read the shared cache; it did not fetch again.
+    expect(daemon.countCalls("provider.test")).toBe(2);
     expect(screen.getByTestId("profile-edit-form-1-provider-health")).toHaveAttribute("data-status", "ok");
   });
 });
