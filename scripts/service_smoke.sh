@@ -66,6 +66,16 @@ health | grep -q "\"managedBy\":\"$supervisor\"" || fail "healthz has no managed
 [ "$(status_code)" = 0 ] || fail "status after install should exit 0"
 "$bin" service status
 
+if [ "$supervisor" = launchd ]; then
+  step "status shows launchd's enabled/disabled override"
+  "$bin" service status | grep -q "enabled: yes" || fail "status after install should say 'enabled: yes'"
+  svc="gui/$(id -u)/com.spacingmind.smind"
+  launchctl disable "$svc"
+  "$bin" service status | grep -q "enabled: NO" || fail "status after launchctl disable should say 'enabled: NO'"
+  launchctl enable "$svc"
+  "$bin" service status | grep -q "enabled: yes" || fail "status after launchctl enable should say 'enabled: yes' again"
+fi
+
 step "install again is a no-op for the running daemon"
 out="$("$bin" service install)"
 printf '%s\n' "$out"
@@ -102,6 +112,34 @@ while [ "$i" -lt 60 ]; do
   sleep 1
 done
 [ "$i" -lt 60 ] || fail "the daemon was not restarted after kill -9 (pid was $pid)"
+
+step "a Go crash trace reaches daemon.log"
+pid="$(service_pid)"
+[ -n "$pid" ] || fail "no pid in status output"
+kill -QUIT "$pid"
+i=0
+while [ "$i" -lt 30 ]; do
+  if grep -q 'SIGQUIT: quit' "$SMIND_HOME/daemon.log"; then
+    break
+  fi
+  i=$((i + 1))
+  sleep 1
+done
+if ! grep -q 'SIGQUIT: quit' "$SMIND_HOME/daemon.log"; then
+  tail -20 "$SMIND_HOME/daemon.log" || true
+  fail "daemon.log has no SIGQUIT trace"
+fi
+# SIGQUIT kills the daemon too; wait for the supervisor to restart it.
+i=0
+while [ "$i" -lt 60 ]; do
+  new="$(service_pid)"
+  if [ -n "$new" ] && [ "$new" != "$pid" ] && health >/dev/null 2>&1; then
+    break
+  fi
+  i=$((i + 1))
+  sleep 1
+done
+[ "$i" -lt 60 ] || fail "the daemon was not restarted after SIGQUIT (pid was $pid)"
 
 step "restart"
 "$bin" service restart

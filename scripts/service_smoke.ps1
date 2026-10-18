@@ -1,7 +1,8 @@
 # Smoke-tests `smind service` against the REAL Windows Task Scheduler: install,
 # a hidden launch, an idempotent re-install, logs, a graceful stop, a crash that
 # is restarted, the stop fallback, restart, the foreign-daemon guard and
-# uninstall. It registers and removes a task named `smind` for the current user
+# uninstall. It registers and removes a task named `smind-<user SID>` for the
+# current user (and, for the migration step, briefly the old machine-wide `smind`)
 # and listens on -Port, so run it only where that is fine: a CI runner or a
 # disposable VM. Used by .github/workflows/service-windows.yml.
 #
@@ -66,7 +67,10 @@ function WaitFor($what, [scriptblock]$cond, [int]$seconds = 60) {
 function Procs { Get-CimInstance Win32_Process -Filter "Name='smind.exe'" | Where-Object { $_.ExecutablePath -eq $Exe } }
 function DaemonProc { Procs | Where-Object { $_.CommandLine -match ' serve\s*$' } | Select-Object -First 1 }
 function SupervisorProcs { Procs | Where-Object { $_.CommandLine -match ' service run( |$)' } }
-function TaskExists { schtasks /Query /TN smind 2>&1 | Out-Null; return ($LASTEXITCODE -eq 0) }
+# The per-user task name (the old machine-wide name was plain `smind`).
+$taskName = 'smind-' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+function TaskExists { schtasks /Query /TN $taskName 2>&1 | Out-Null; return ($LASTEXITCODE -eq 0) }
+function LegacyTaskExists { schtasks /Query /TN smind 2>&1 | Out-Null; return ($LASTEXITCODE -eq 0) }
 
 $cleanedUp = $false
 function Cleanup {
@@ -92,7 +96,7 @@ try {
     WaitFor 'the daemon' { Health }
     $h = Health
     Check ($h.managedBy -eq 'taskscheduler') "healthz managedBy is '$($h.managedBy)', want taskscheduler: $($h | ConvertTo-Json -Compress)"
-    $xml = (schtasks /Query /TN smind /XML 2>&1 | Out-String)
+    $xml = (schtasks /Query /TN $taskName /XML 2>&1 | Out-String)
     Check ($xml -match 'LogonTrigger') 'the task has no logon trigger'
     # Task Scheduler omits RunLevel when it is the default (LeastPrivilege), so assert the absence of the elevated one.
     Check ($xml -notmatch 'HighestAvailable') 'the task must not ask for elevation'
@@ -185,7 +189,7 @@ try {
     Check ($r.Code -eq 0) "restart with a password exited $($r.Code)"
     WaitFor 'the password-protected daemon' { (Health).managedBy -eq 'taskscheduler' }
     Check ((ApiTokenStatus) -ne 200) '/api/token must be closed while a password is set'
-    $q = (schtasks /Query /TN smind /XML 2>&1 | Out-String)
+    $q = (schtasks /Query /TN $taskName /XML 2>&1 | Out-String)
     Check ($q -notmatch [regex]::Escape($secret)) 'the password is in the task definition'
     $cmdlines = (Get-CimInstance Win32_Process | Where-Object { $_.Name -in 'smind.exe', 'conhost.exe' } | ForEach-Object { $_.CommandLine }) -join "`n"
     Check ($cmdlines -notmatch [regex]::Escape($secret)) 'the password is on a process command line'
@@ -197,6 +201,27 @@ try {
     $r = Svc start
     Check ($r.Code -eq 0) "start with a password exited $($r.Code)"
     WaitFor 'the daemon' { (Health).managedBy -eq 'taskscheduler' }
+
+    Step 'an old machine-wide \smind task of this user is migrated to the per-user name'
+    $xml = (schtasks /Query /TN $taskName /XML 2>&1 | Out-String)
+    $xmlFile = Join-Path $work 'legacy-task.xml'
+    [IO.File]::WriteAllText($xmlFile, $xml, [Text.UnicodeEncoding]::new($false, $true))  # UTF-16 LE with a BOM
+    Svc stop | Out-Null
+    schtasks /Delete /TN $taskName /F | Out-Null
+    schtasks /Create /TN smind /XML $xmlFile /F | Out-Null
+    Check ($LASTEXITCODE -eq 0) 'could not register the legacy task for the check'
+    Check ((LegacyTaskExists) -and -not (TaskExists)) 'the legacy setup is wrong'
+    $r = Svc status
+    Write-Host $r.Out
+    Check ($r.Out -match 'old machine-wide task') "status does not mention the legacy task: $($r.Out)"
+    $r = Svc install --no-start
+    Write-Host $r.Out
+    Check ($r.Code -eq 0) "install (migration) exited $($r.Code)"
+    Check ($r.Out -match 'moved the old machine-wide task') "install did not report the migration: $($r.Out)"
+    Check ((TaskExists) -and -not (LegacyTaskExists)) 'migration left the legacy task behind or did not create the per-user one'
+    $r = Svc start
+    Check ($r.Code -eq 0) "start after migration exited $($r.Code)"
+    WaitFor 'the daemon after migration' { (Health).managedBy -eq 'taskscheduler' }
 
     Step 'uninstall removes the task and keeps SMIND_HOME'
     $r = Svc uninstall

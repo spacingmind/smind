@@ -38,7 +38,8 @@ net session 2>&1 | Out-Null
 `$out = & `$exe service install --no-start --home '$smindHome' 2>&1 | Out-String
 "install exit: `$LASTEXITCODE"
 `$out
-`$q = schtasks /Query /TN smind /XML 2>&1 | Out-String
+`$tn = 'smind-' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+`$q = schtasks /Query /TN `$tn /XML 2>&1 | Out-String
 "task has logon trigger: `$(`$q -match 'LogonTrigger')"
 "task asks for elevation: `$(`$q -match 'HighestAvailable')"
 `$out = & `$exe service status 2>&1 | Out-String
@@ -47,7 +48,7 @@ net session 2>&1 | Out-Null
 `$out = & `$exe service uninstall 2>&1 | Out-String
 "uninstall exit: `$LASTEXITCODE"
 `$out
-schtasks /Query /TN smind 2>&1 | Out-Null
+schtasks /Query /TN `$tn 2>&1 | Out-Null
 "task gone after uninstall: `$(`$LASTEXITCODE -ne 0)"
 "@ | Set-Content -Encoding UTF8 "$work\inner.ps1"
 
