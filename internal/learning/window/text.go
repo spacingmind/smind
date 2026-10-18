@@ -1,6 +1,7 @@
 package window
 
 import (
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
@@ -33,14 +34,20 @@ func clipRunes(s string, n int) string {
 	return preClip(s, n-len(ellipsis)) + ellipsis
 }
 
-// neutralise breaks the transcript delimiters so untrusted text cannot close
-// or reopen the wrapper blocks.
+// delimRun matches any run of three or more angle brackets; the transcript
+// delimiters are built from exactly such runs.
+var delimRun = regexp.MustCompile("<{3,}|>{3,}")
+
+// neutralise breaks every run of three or more `<` or `>` by spacing the
+// characters apart, so untrusted text cannot close or reopen the wrapper
+// blocks however many brackets it stacks.
 func neutralise(s string) string {
 	if !strings.Contains(s, "<<<") && !strings.Contains(s, ">>>") {
 		return s
 	}
-	s = strings.ReplaceAll(s, "<<<", "< < <")
-	return strings.ReplaceAll(s, ">>>", "> > >")
+	return delimRun.ReplaceAllStringFunc(s, func(m string) string {
+		return strings.Join(strings.Split(m, ""), " ")
+	})
 }
 
 func collapseWS(s string) string { return strings.Join(strings.Fields(s), " ") }
