@@ -98,20 +98,21 @@ type ExchangeResult struct {
 
 // anthropicExchangeResponse is anthropic's token response on the
 // authorization_code grant: the refresh-shaped fields plus the account the
-// login belonged to. Only account.uuid is read (no e-mail is kept).
+// login belonged to. Account is kept raw and read defensively by
+// anthropicSubject: its shape is not ours to enforce, and an unexpected one
+// must never fail a login that worked before identities existed.
 type anthropicExchangeResponse struct {
 	anthropicTokenResponse
-	Account struct {
-		UUID string `json:"uuid"`
-	} `json:"account"`
+	Account json.RawMessage `json:"account"`
 }
 
 // openAIExchangeResponse is openai's token response on the
 // authorization_code grant: the refresh-shaped fields plus the id_token the
-// identity subject is derived from.
+// identity subject is derived from. IDToken is kept raw and read defensively
+// (rawString + openAISubject) for the same reason as anthropic's account.
 type openAIExchangeResponse struct {
 	openAITokenResponse
-	IDToken string `json:"id_token"`
+	IDToken json.RawMessage `json:"id_token"`
 }
 
 // AnthropicLogin implements Login against claude.ai/platform.claude.com's
@@ -214,7 +215,7 @@ func (l *AnthropicLogin) Exchange(ctx context.Context, code, state string, pkce 
 			RefreshToken: tok.RefreshToken,
 			ExpiresAt:    time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second),
 		},
-		Subject: tok.Account.UUID,
+		Subject: anthropicSubject(tok.Account),
 	}, nil
 }
 
@@ -323,6 +324,6 @@ func (l *OpenAILogin) Exchange(ctx context.Context, code, _ string, pkce PKCECod
 			RefreshToken: tok.RefreshToken,
 			ExpiresAt:    expiresAt,
 		},
-		Subject: openAISubject(tok.IDToken),
+		Subject: openAISubject(rawString(tok.IDToken)),
 	}, nil
 }

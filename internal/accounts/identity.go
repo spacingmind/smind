@@ -56,18 +56,43 @@ func openAISubject(idToken string) string {
 	if len(parts) != 3 {
 		return ""
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	// Some issuers pad the base64url segment; the decoder wants none.
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[1], "="))
 	if err != nil {
 		return ""
 	}
-	var claims struct {
-		Sub  string `json:"sub"`
-		Auth struct {
-			ChatGPTAccountID string `json:"chatgpt_account_id"`
-		} `json:"https://api.openai.com/auth"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil || claims.Sub == "" || claims.Auth.ChatGPTAccountID == "" {
+	// Claims are read one at a time as raw JSON so an unexpected type in any
+	// of them means "no identity", never a failed login.
+	var claims map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &claims); err != nil {
 		return ""
 	}
-	return lengthPrefixed(claims.Sub, claims.Auth.ChatGPTAccountID)
+	var auth map[string]json.RawMessage
+	if err := json.Unmarshal(claims["https://api.openai.com/auth"], &auth); err != nil {
+		return ""
+	}
+	sub, accountID := rawString(claims["sub"]), rawString(auth["chatgpt_account_id"])
+	if sub == "" || accountID == "" {
+		return ""
+	}
+	return lengthPrefixed(sub, accountID)
+}
+
+// anthropicSubject reads account.uuid from the token response's raw account
+// value; anything but an object holding a string uuid is "" (no identity).
+func anthropicSubject(account json.RawMessage) string {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(account, &obj); err != nil {
+		return ""
+	}
+	return rawString(obj["uuid"])
+}
+
+// rawString returns raw as a string if it is a JSON string, else "".
+func rawString(raw json.RawMessage) string {
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return ""
+	}
+	return s
 }

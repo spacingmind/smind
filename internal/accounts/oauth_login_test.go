@@ -450,3 +450,76 @@ func TestAccountIdentity_Derivation(t *testing.T) {
 		}
 	})
 }
+
+func TestLoginExchange_UnexpectedShapes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("exchange tolerates unexpected account and id_token shapes", func(t *testing.T) {
+		t.Parallel()
+
+		access := jwtWithExpiry(t, time.Now().Add(time.Hour))
+
+		for name, account := range map[string]string{
+			"string":       `"oops"`,
+			"null":         `null`,
+			"array":        `[]`,
+			"number":       `7`,
+			"uuid number":  `{"uuid":5}`,
+			"uuid object":  `{"uuid":{"x":1}}`,
+			"empty object": `{}`,
+		} {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"access_token":"a","refresh_token":"r","expires_in":3600,"account":` + account + `}`))
+			}))
+			t.Cleanup(srv.Close)
+			login := NewAnthropicLogin(WithAnthropicLoginHTTPClient(testHTTPClient(t, srv)))
+			res, err := login.Exchange(context.Background(), "c", "s", PKCECodes{CodeVerifier: "v"})
+			if err != nil {
+				t.Errorf("anthropic account=%s (%s): Exchange() error = %v, want the login to succeed", name, account, err)
+				continue
+			}
+			if res.Subject != "" || res.Credential.AccessToken != "a" {
+				t.Errorf("anthropic account=%s: result = %+v, want credential kept and no subject", name, res)
+			}
+		}
+
+		authClaim := map[string]any{"chatgpt_account_id": "ws-1"}
+		for name, idToken := range map[string]string{
+			"number":          `123`,
+			"object":          `{"x":1}`,
+			"null":            `null`,
+			"array":           `[]`,
+			"not a jwt":       `"abc"`,
+			"bad base64":      `"a.!!!.c"`,
+			"claims wrong":    `"` + idTokenWithClaims(t, map[string]any{"sub": 5, "https://api.openai.com/auth": "x"}) + `"`,
+			"auth wrong type": `"` + idTokenWithClaims(t, map[string]any{"sub": "u", "https://api.openai.com/auth": []int{1}}) + `"`,
+			"account number":  `"` + idTokenWithClaims(t, map[string]any{"sub": "u", "https://api.openai.com/auth": map[string]any{"chatgpt_account_id": 9}}) + `"`,
+		} {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"access_token":"` + access + `","refresh_token":"r","id_token":` + idToken + `}`))
+			}))
+			t.Cleanup(srv.Close)
+			login := NewOpenAILogin(WithOpenAILoginHTTPClient(testHTTPClient(t, srv)))
+			res, err := login.Exchange(context.Background(), "c", "s", PKCECodes{CodeVerifier: "v"})
+			if err != nil {
+				t.Errorf("openai id_token=%s: Exchange() error = %v, want the login to succeed", name, err)
+				continue
+			}
+			if res.Subject != "" || res.Credential.AccessToken != access {
+				t.Errorf("openai id_token=%s: result = %+v, want credential kept and no subject", name, res)
+			}
+		}
+
+		// A padded base64url payload (some issuers pad) still yields the subject.
+		payload, _ := json.Marshal(map[string]any{"sub": "user-1", "https://api.openai.com/auth": authClaim})
+		padded := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." + base64.URLEncoding.EncodeToString(payload) + "." + "c2ln"
+		if !strings.HasSuffix(strings.Split(padded, ".")[1], "=") {
+			// Make the fixture meaningful: pick a payload whose length needs padding.
+			payload, _ = json.Marshal(map[string]any{"sub": "user-12", "https://api.openai.com/auth": authClaim})
+			padded = base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." + base64.URLEncoding.EncodeToString(payload) + "." + "c2ln"
+		}
+		if got := openAISubject(padded); got == "" {
+			t.Errorf("openAISubject(padded payload %q) is empty, want a subject", strings.Split(padded, ".")[1])
+		}
+	})
+}
