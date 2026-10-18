@@ -20,20 +20,31 @@
 // the real 3-state status (running/success/failure -- runTimeline.ts's
 // toolCall field carries this; there is no "queued" state and no raw
 // output-line field on the wire, so no live-output capsule is rendered).
+//
+// Queue-aware (ADR-0021 §9): a plain send queues when the chat is busy
+// (whenBusy: 'queue') instead of failing; queued prompts render above
+// the compose row straight from server state with per-item Cancel; a
+// "Send now" button interrupts the live run (whenBusy: 'interrupt');
+// runs the daemon starts itself when delivering a queued prompt are
+// adopted by RunFollower over run.status and attached exactly once
+// (attachedRuns guard shared with sendFollowUpPrompt's shouldAttach).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
 import { UiHost } from '../ui/UiHost';
-import { listRunsForTask, RunSummary } from '../api';
+import { defaultChatId, listRunsForTask, RunSummary } from '../api';
 import { continueRun, sendFollowUpPrompt, RunTail } from '../followUpPrompt';
 import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
 import { RelayConnection } from '../relay/RelayConnection';
 import { useConnectionState } from '../relay/useConnectionState';
+import { RunFollower, RunStatusEvent } from '../runFollower';
 import { describeRunFooter } from '../runFooter';
 import { lineFromAttachEvent, TimelineLine, timelineFromLogs } from '../runTimeline';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
+import { useChatQueue } from '../useChatQueue';
+import { QueuedPrompts } from './QueuedPrompts';
 
 type LoadState =
   | { kind: 'loading' }
@@ -81,18 +92,69 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   const [continued, setContinued] = useState(false);
   const [permissions, setPermissions] = useState<PermissionRequestState[]>([]);
   const [expandedToolCalls, setExpandedToolCalls] = useState<ReadonlySet<string>>(new Set());
+  const [chatId, setChatId] = useState<number | null>(null);
+  const [liveRunId, setLiveRunId] = useState<string | null>(null);
   const { epoch } = useConnectionState(conn); // reload what a drop interrupted (the run attach) once reconnected
   const board = useRef(new PermissionBoard()).current;
   const liveSeq = useRef(0);
   const followUpTails = useRef<RunTail[]>([]);
+  const followerRef = useRef<RunFollower | null>(null);
+  const attachedRuns = useRef(new Set<string>());
+  const lastRunId = useRef<string | null>(null);
+  const mounted = useRef(true);
+  const queue = useChatQueue(conn, chatId);
+
+  useEffect(() => {
+    mounted.current = false;
+  }, []);
+
+  /** Attach to a run and stream its events into the timeline; every run is attached at most once (attachedRuns guard). */
+  const attachRun = (runId: string, isCancelled: () => boolean) => {
+    if (attachedRuns.current.has(runId)) return;
+    attachedRuns.current.add(runId);
+    const p = conn.call('run.attach', { runId }, {
+      onEvent: (event, params) => {
+        if (isCancelled()) return;
+        if (feedPermissionEvent(board, runId, event, params)) return;
+        liveSeq.current++;
+        const newLines = lineFromAttachEvent(event, params, 1_000_000 + liveSeq.current);
+        if (newLines.length > 0) setLines((prev) => [...prev, ...newLines]);
+      },
+    });
+    followUpTails.current.push(p);
+    p.catch(() => {
+      // Detach (navigate-away cancel) or the connection ending:
+      // either way the screen state already says what it needs to.
+    });
+  };
+
+  /** Keeps the header meta and the not-finished footer in step with the latest run (e.g. a queued prompt the daemon delivered). */
+  const refreshLatest = useCallback(async () => {
+    try {
+      const runs = await listRunsForTask(conn, taskId);
+      if (!mounted.current) return;
+      const next = runs[0] ?? null;
+      setState((prev) => (prev.kind === 'ready' ? { kind: 'ready', run: next } : prev));
+      if ((next?.ID ?? null) !== lastRunId.current) {
+        lastRunId.current = next?.ID ?? null;
+        setContinued(false);
+      }
+    } catch {
+      // the screen keeps what it has
+    }
+  }, [conn, taskId]);
 
   useEffect(() => {
     let cancelled = false;
-    let attach: { cancel(): void } | null = null;
+    let offStatus: (() => void) | null = null;
     setState({ kind: 'loading' });
     setContinued(false);
     setLines([]);
     setPermissions([]);
+    attachedRuns.current.clear();
+    followerRef.current = null;
+    setLiveRunId(null);
+    setChatId(null);
     board.onChange = () => setPermissions(board.list());
 
     (async () => {
@@ -101,6 +163,35 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
         if (cancelled) return;
         const latest = runs[0] ?? null;
         setState({ kind: 'ready', run: latest });
+        lastRunId.current = latest?.ID ?? null;
+
+        let resolved: number | null = latest?.ChatID ?? null;
+        if (resolved === null) {
+          try {
+            resolved = await defaultChatId(conn, taskId);
+          } catch {
+            resolved = null;
+          }
+        }
+        if (cancelled) return;
+        setChatId(resolved);
+        if (resolved !== null) {
+          const follower = new RunFollower(
+            resolved,
+            (runId) => {
+              attachRun(runId, () => cancelled);
+              void refreshLatest();
+            },
+            (live) => {
+              setLiveRunId(live);
+              if (live === null) void refreshLatest();
+            },
+          );
+          followerRef.current = follower;
+          offStatus = conn.subscribe(['run.status'], (e) => follower.onRunStatus(e.payload as RunStatusEvent));
+          if (latest) follower.markKnown(latest.ID, latest.Status);
+        }
+
         if (!latest) return;
 
         if (latest.Status === 'running') {
@@ -109,24 +200,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
           // Registry.Subscribe), so a separate run.logs fetch here would
           // double-render every historical line -- the web UI's
           // streamRun makes the same choice.
-          const p = conn.call(
-            'run.attach',
-            { runId: latest.ID },
-            {
-              onEvent: (event, params) => {
-                if (cancelled) return;
-                if (feedPermissionEvent(board, latest.ID, event, params)) return;
-                liveSeq.current++;
-                const newLines = lineFromAttachEvent(event, params, 1_000_000 + liveSeq.current);
-                if (newLines.length > 0) setLines((prev) => [...prev, ...newLines]);
-              },
-            },
-          );
-          attach = p;
-          p.catch(() => {
-            // Detach (navigate-away cancel) or the connection ending:
-            // either way the screen state already says what it needs to.
-          });
+          attachRun(latest.ID, () => cancelled);
         } else {
           // A finished run: one run.logs fetch, the full transcript.
           const logs = (await conn.call('run.logs', { runId: latest.ID })) as { events?: unknown[] };
@@ -141,12 +215,13 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
 
     return () => {
       cancelled = true;
-      attach?.cancel(); // clean detach: run keeps going server-side
+      offStatus?.();
+      followerRef.current = null;
       // Any follow-up run's attach detaches the same way (Item 1).
       for (const tail of followUpTails.current) tail.cancel();
       followUpTails.current = [];
     };
-  }, [conn, taskId, epoch]);
+  }, [conn, taskId, epoch, refreshLatest]);
 
   const nextSeq = useCallback(() => {
     liveSeq.current++;
@@ -166,32 +241,45 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
     followUpTails.current.push(tail);
   }, []);
 
-  const handleSend = useCallback(async () => {
-    const text = draft.trim();
-    if (!text || state.kind !== 'ready' || state.run === null) return;
-    setDraft('');
-    draftState.value = '';
-    setSendError(null);
-    try {
-      await sendFollowUpPrompt(
-        conn,
-        {
-          appendLines,
-          removeLines,
-          trackTail,
-          onEvent: (event, params, runId) => feedPermissionEvent(board, runId, event, params),
-        },
-        taskId,
-        state.run.Provider,
-        text,
-        nextSeq,
-      );
-    } catch (e) {
-      setDraft(text); // the typed text is never silently lost
-      draftState.value = text;
-      setSendError(e instanceof Error ? e.message : String(e));
-    }
-  }, [appendLines, conn, draft, nextSeq, removeLines, state, taskId, trackTail]);
+  const send = useCallback(
+    async (whenBusy: 'queue' | 'interrupt') => {
+      const text = draft.trim();
+      if (!text || state.kind !== 'ready' || state.run === null) return;
+      setDraft('');
+      draftState.value = '';
+      setSendError(null);
+      try {
+        const result = await sendFollowUpPrompt(
+          conn,
+          {
+            appendLines,
+            removeLines,
+            trackTail,
+            onEvent: (event, params, runId) => feedPermissionEvent(board, runId, event, params),
+            shouldAttach: (runId) => {
+              if (attachedRuns.current.has(runId)) return false;
+              attachedRuns.current.add(runId);
+              return true;
+            },
+          },
+          taskId,
+          state.run.Provider,
+          text,
+          nextSeq,
+          { whenBusy, chatId: chatId ?? undefined },
+        );
+        if (result.kind === 'queued') queue.refresh(); // covers a missed snapshot
+      } catch (e) {
+        setDraft(text); // the typed text is never silently lost
+        draftState.value = text;
+        setSendError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [appendLines, board, chatId, conn, draft, nextSeq, queue, removeLines, state, taskId, trackTail],
+  );
+
+  const handleSend = useCallback(() => send('queue'), [send]);
+  const handleSendNow = useCallback(() => send('interrupt'), [send]);
 
   const handleContinue = useCallback(async () => {
     if (continued || state.kind !== 'ready' || state.run === null) return;
@@ -205,6 +293,11 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
           removeLines,
           trackTail,
           onEvent: (event, params, runId) => feedPermissionEvent(board, runId, event, params),
+          shouldAttach: (runId) => {
+            if (attachedRuns.current.has(runId)) return false;
+            attachedRuns.current.add(runId);
+            return true;
+          },
         },
         taskId,
         state.run,
@@ -260,7 +353,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
           </Text>
           {(() => {
             const footer = describeRunFooter(state.run);
-            return footer !== null && !continued ? (
+            return footer !== null && !continued && liveRunId === null ? (
               <View style={styles.footerRow}>
                 <Text style={[styles.footerText, { color: theme.status.warning }]}>{footer.sentence}</Text>
                 <UiHost>
@@ -316,6 +409,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
             );
           })}
           {sendError !== null && <Text style={styles.sendError}>Couldn't send: {sendError}</Text>}
+          <QueuedPrompts items={queue.items} onCancel={(id) => void queue.cancel(id)} />
           <View style={styles.composeRow}>
             <UiHost style={styles.composeWrap}>
               <ExpoTextInput
@@ -326,11 +420,16 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
                   draftState.value = text;
                   setDraft(text);
                 }}
-                placeholder="Send a follow-up prompt…"
+                placeholder={liveRunId !== null ? 'Queue a follow-up — it sends when this run finishes' : 'Send a follow-up prompt…'}
                 placeholderTextColor={theme.foregroundMuted}
                 multiline
               />
             </UiHost>
+            {liveRunId !== null && canSend && (
+              <UiHost style={styles.sendHost}>
+                <Button label="Send now" onPress={handleSendNow} />
+              </UiHost>
+            )}
             <UiHost style={styles.sendHost}>
               <Button label="Send" onPress={handleSend} disabled={!canSend} />
             </UiHost>
