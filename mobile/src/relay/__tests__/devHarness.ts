@@ -163,6 +163,47 @@ export class DevHarness {
     };
   }
 
+  async seedLive(scenario: string, title?: string): Promise<{ workspaceId: number; taskId: number; chatId: number; runId: string }> {
+    const r = await this.mustCmd(`seed-live ${scenario}${title ? ' ' + title : ''}`);
+    return {
+      workspaceId: r.workspaceId as number,
+      taskId: r.taskId as number,
+      chatId: r.chatId as number,
+      runId: r.runId as string,
+    };
+  }
+
+  async setScenario(taskId: number, text: string): Promise<void> {
+    await this.mustCmd(`set-scenario ${taskId} ${text}`);
+  }
+
+  async stopRun(runId: string): Promise<void> {
+    await this.mustCmd(`stop-run ${runId}`);
+  }
+
+  async queuePrompt(taskId: number, whenBusy: 'queue' | 'interrupt', prompt: string): Promise<{ queued: boolean; queueItemId?: number; runId?: string }> {
+    const r = await this.mustCmd(`queue-prompt ${taskId} ${whenBusy} ${prompt}`);
+    return {
+      queued: r.queued as boolean,
+      queueItemId: r.queueItemId as number | undefined,
+      runId: (r.runId as string | undefined) || undefined,
+    };
+  }
+
+  async queueList(chatId: number): Promise<Array<{ id: number; status: string; priority: number; prompt: string; runId: string; cancelKind: string }>> {
+    const r = await this.mustCmd(`queue-list ${chatId}`);
+    return ((r.items ?? []) as Array<{ id: number; status: string; priority: number; prompt: string; runId: string; cancelKind: string }>);
+  }
+
+  async runStatus(runId: string): Promise<{ status: string; stopReason: string; disposition: string }> {
+    const r = await this.mustCmd(`run-status ${runId}`);
+    return {
+      status: (r.status as string) ?? '',
+      stopReason: (r.stopReason as string) ?? '',
+      disposition: (r.disposition as string) ?? '',
+    };
+  }
+
   stop(): void {
     this.proc.kill('SIGKILL');
     rmSync(this.tmpDir, { recursive: true, force: true });
