@@ -7,6 +7,7 @@ import { useAccountRows } from "@/hooks/use-account-rows";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useProvidersViewStore } from "@/stores/providers-view-store";
+import { FirstAccountCard } from "@/components/providers/first-account-card";
 import { ProviderDetail } from "@/components/providers/provider-detail";
 import { ProviderNav } from "@/components/providers/provider-nav";
 
@@ -34,6 +35,11 @@ export function ProvidersScreen({ client }: { client: WsClient | null }): JSX.El
     return <p className="text-ui-base text-muted-foreground">Loading…</p>;
   }
 
+  // The empty state (AC-A5): no accounts at all and no provider explicitly
+  // selected -- the first-account card sits in the detail slot until the
+  // user picks a provider or connects one.
+  const empty = rows.length === 0 && selectedProviderId === null;
+
   if (isMobile) {
     return (
       <div
@@ -58,7 +64,7 @@ export function ProvidersScreen({ client }: { client: WsClient | null }): JSX.El
                 <span className="text-ui-base">Providers</span>
               </button>
             </div>
-            <ProviderDetail item={selected} client={client} />
+            {empty ? <FirstAccountCard providers={providers} /> : <ProviderDetail item={selected} client={client} />}
           </div>
         )}
       </div>
@@ -78,7 +84,7 @@ export function ProvidersScreen({ client }: { client: WsClient | null }): JSX.El
         <ProviderNav items={items} selectedId={selected?.id ?? null} onSelect={select} mode="rail" />
       </div>
       <div className="min-w-0 flex-1">
-        <ProviderDetail item={selected} client={client} />
+        {empty ? <FirstAccountCard providers={providers} /> : <ProviderDetail item={selected} client={client} />}
       </div>
     </div>
   );

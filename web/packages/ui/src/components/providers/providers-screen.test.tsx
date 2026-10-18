@@ -1,5 +1,5 @@
 import { act } from "react";
-import { fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FakeUsageDaemon } from "@/test/usage-test-client";
@@ -83,5 +83,64 @@ describe("ProvidersScreen", () => {
     renderWithDaemon(<ProvidersScreen client={d.client} />, d);
     expect(screen.getByText("Loading…")).toBeInTheDocument();
     expect(screen.queryByTestId("providers-screen")).not.toBeInTheDocument();
+  });
+});
+
+describe("FirstAccountCard", () => {
+  beforeEach(() => {
+    useProvidersViewStore.getState().reset();
+    vi.mocked(useIsMobile).mockReturnValue(false);
+  });
+
+  it("first account card offers a connect per provider", async () => {
+    const d = new FakeUsageDaemon([]);
+    d.providers = {
+      providers: [
+        { id: "claude-native", label: "Claude Code", credentialKind: "oauth", accountProvider: "anthropic" },
+        { id: "glm", label: "GLM", kind: "cli" },
+        { id: "kimi", label: "Kimi", credentialKind: "api-key", accountProvider: "kimi" },
+      ],
+    } as unknown as ProviderListResult;
+    d.accounts = [];
+    renderWithDaemon(<ProvidersScreen client={d.client} />, d);
+    await flush();
+
+    const card = screen.getByTestId("first-account-card");
+    expect(card).toHaveTextContent("Connect your first account");
+    expect(card).toHaveTextContent("Accounts let sMind route the /v1 proxy across your subscriptions and keys.");
+    expect(screen.getByTestId("first-account-connect-claude-native")).toHaveTextContent("Connect Claude Code");
+    expect(screen.getByTestId("first-account-connect-kimi")).toHaveTextContent("Add Kimi key");
+    expect(card).toHaveTextContent("GLM signs in through its own CLI.");
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("first-account-connect-claude-native"));
+    });
+    const state = useProvidersViewStore.getState();
+    expect(state.selectedProviderId).toBe("claude-native");
+    expect(state.connectProviderId).toBe("claude-native");
+  });
+
+  it("first account card appears only with no accounts and no selection", async () => {
+    // With accounts: no card, the detail pane shows instead.
+    cleanup();
+    const d = daemon();
+    renderWithDaemon(<ProvidersScreen client={d.client} />, d);
+    await flush();
+    expect(screen.queryByTestId("first-account-card")).not.toBeInTheDocument();
+    expect(screen.getByTestId("provider-detail")).toBeInTheDocument();
+
+    // Empty list but an explicit selection: the detail pane, not the card.
+    cleanup();
+    const d2 = new FakeUsageDaemon([]);
+    d2.providers = daemon().providers;
+    d2.accounts = [];
+    renderWithDaemon(<ProvidersScreen client={d2.client} />, d2);
+    await flush();
+    expect(screen.queryByTestId("first-account-card")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getAllByTestId("provider-nav-item-anthropic")[0]);
+    });
+    expect(screen.queryByTestId("first-account-card")).not.toBeInTheDocument();
+    expect(screen.getByTestId("provider-detail")).toBeInTheDocument();
   });
 });
