@@ -34,3 +34,21 @@ export function proposalSummary(p: ProposalView): string {
 export function nonBlankLines(text: string): number {
   return text.split("\n").filter((line) => line.trim() !== "").length;
 }
+
+export const MAX_BODY_LINES = 25;
+export const MAX_DESCRIPTION_CHARS = 160;
+
+/** Why a description or body cannot be approved as typed; the same limits the daemon's gate enforces. */
+export function editorProblems(fields: { description?: string; body: string }): { description?: string; body?: string } {
+  const out: { description?: string; body?: string } = {};
+  if (fields.description !== undefined) {
+    const d = fields.description.trim();
+    if (d === "") out.description = "A description is required.";
+    else if (d.length > MAX_DESCRIPTION_CHARS) out.description = `Keep it to ${MAX_DESCRIPTION_CHARS} characters.`;
+    else if (d.includes("\n")) out.description = "Keep it to one line.";
+  }
+  const lines = nonBlankLines(fields.body);
+  if (lines === 0) out.body = "The body is required.";
+  else if (lines > MAX_BODY_LINES) out.body = `Keep it to ${MAX_BODY_LINES} lines.`;
+  return out;
+}

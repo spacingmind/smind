@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import type {
   ApproveProposalParams,
@@ -64,6 +64,19 @@ export function useLearnedSkills(
         ...(statuses ? { statuses } : {}),
         ...(includeBody ? { includeBody } : {}),
       })) ?? [],
+  });
+}
+
+/** Several skills' details at once (a patch or bundle's targets); shares each entry with `useLearnedSkill`. */
+export function useLearnedSkillDetails(ids: readonly number[]) {
+  const client = useClient();
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: queryKeys.learnedSkill(id),
+      enabled: client !== null,
+      retry: false,
+      queryFn: (): Promise<LearnedSkillDetail> => requireClient(client).call<LearnedSkillDetail>("learning.skills.get", { id }),
+    })),
   });
 }
 

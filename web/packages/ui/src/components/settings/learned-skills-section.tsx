@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 
 import { ConfirmDialog } from "@/components/learning/confirm-dialog";
 import { LearnedSkillDetail } from "@/components/learning/learned-skill-detail";
+import { ProposalReview } from "@/components/learning/proposal-review";
 import { RunLinkProvider } from "@/components/learning/run-link";
 import { LearningOptIn } from "@/components/learning/learning-optin";
 import { PendingProposalBadge } from "@/components/learning/pending-badge";
@@ -124,6 +125,7 @@ function LearnedSkillsSection({ closeSettings }: SettingsSectionContext) {
   const [chosen, setChosen] = useState<number | null>(null);
   const [tab, setTab] = useState<Tab>("proposed");
   const [openSkill, setOpenSkill] = useState<number | null>(null);
+  const [openProposal, setOpenProposal] = useState<number | null>(null);
   const [forgetting, setForgetting] = useState(false);
   const forget = useForgetLearning();
 
@@ -145,11 +147,15 @@ function LearnedSkillsSection({ closeSettings }: SettingsSectionContext) {
     );
   }
 
-  if (openSkill !== null) {
+  if (openSkill !== null || openProposal !== null) {
     return (
       <RunLinkProvider closeSettings={closeSettings}>
         <div data-testid="settings-section-learned-skills">
-          <LearnedSkillDetail id={openSkill} onBack={() => setOpenSkill(null)} />
+          {openSkill !== null ? (
+            <LearnedSkillDetail id={openSkill} onBack={() => setOpenSkill(null)} />
+          ) : (
+            <ProposalReview id={openProposal!} onBack={() => setOpenProposal(null)} />
+          )}
         </div>
       </RunLinkProvider>
     );
@@ -162,6 +168,7 @@ function LearnedSkillsSection({ closeSettings }: SettingsSectionContext) {
         onValueChange={(v) => {
           setChosen(Number(v));
           setOpenSkill(null);
+          setOpenProposal(null);
         }}
       >
         <SelectTrigger aria-label="Workspace" data-testid="learning-workspace-select" className="w-full max-w-xs">
@@ -196,7 +203,7 @@ function LearnedSkillsSection({ closeSettings }: SettingsSectionContext) {
           </TabsTrigger>
         </TabsList>
         <TabsContent value="proposed">
-          <ProposedTab workspace={workspace} />
+          <ProposedTab workspace={workspace} onOpen={setOpenProposal} />
         </TabsContent>
         <TabsContent value="active">
           <SkillsTab workspace={workspace} tab="active" onOpen={setOpenSkill} />
