@@ -129,7 +129,8 @@ Usage:
   smind account add [--base-url <url>] <provider> <label> < credential
                                                            register an account (credential from stdin)
   smind account ls                                        list accounts
-  smind account login <provider> <label>                  browser OAuth login (anthropic, openai)
+  smind account login [--device] <provider> <label>       browser OAuth login (anthropic, openai);
+                                                           --device: device-code login (openai), prints a code
   smind account rm <id>                                    remove an account (cascades routing/quota/workspace links)
   smind account test <provider>                           check whether a provider looks ready to run
   smind account usage [--refresh] [--json]               plan usage windows per account

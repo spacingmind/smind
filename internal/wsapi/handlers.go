@@ -25,6 +25,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 	return map[string]handlerFunc{
 		"account.add":              handleAccountAdd(acctReg),
 		"account.oauthStart":       handleAccountOAuthStart(coord),
+		"account.oauthComplete":    handleAccountOAuthComplete(coord),
 		"provider.list":            handleProviderList(runner),
 		"provider.test":            handleProviderTest(acctReg),
 		"account.list":             handleAccountList(acctReg),
@@ -288,11 +289,38 @@ func handleAccountRemove(registry *accounts.Registry) handlerFunc {
 	}
 }
 
+// loginEventParams is the wire payload of a login event. authorizeUrl is
+// {loginId, url, pasteOnly?} (pasteOnly omitted when false); deviceCode is
+// {loginId, verificationUrl, userCode, expiresAt, intervalSeconds}. Nothing
+// else about the login (the vendor's device_auth_id, state, verifier) is sent.
+func loginEventParams(e accounts.LoginEvent) any {
+	if e.Kind == accounts.LoginEventDeviceCode {
+		return struct {
+			LoginID         string `json:"loginId"`
+			VerificationURL string `json:"verificationUrl"`
+			UserCode        string `json:"userCode"`
+			ExpiresAt       string `json:"expiresAt"`
+			IntervalSeconds int    `json:"intervalSeconds"`
+		}{e.LoginID, e.VerificationURL, e.UserCode, e.ExpiresAt.UTC().Format(time.RFC3339), e.IntervalSeconds}
+	}
+	return struct {
+		LoginID   string `json:"loginId"`
+		URL       string `json:"url"`
+		PasteOnly bool   `json:"pasteOnly,omitempty"`
+	}{e.LoginID, e.URL, e.PasteOnly}
+}
+
 // handleAccountOAuthStart runs a full browser-based OAuth login for
 // provider (accounts.LoginCoordinator.Login), emitting an "authorizeUrl"
 // event as soon as the vendor's authorize URL is ready -- before this
 // request blocks waiting for the callback -- so the caller can open it (CLI)
-// or render it (web UI) without polling. See LoginCoordinator.Login's doc
+// or render it (web UI) without polling. The event is {loginId, url,
+// pasteOnly?}: loginId names this login for account.oauthComplete
+// (paste-the-redirect), and pasteOnly is present (true) when no callback
+// listener could be bound. With params method "device" (openai only) the
+// event is instead deviceCode {loginId, verificationUrl, userCode, expiresAt,
+// intervalSeconds}; either event goes only to the requesting connection. An
+// unknown method is login_bad_method. See LoginCoordinator.Login's doc
 // comment for the full flow: unsupported providers, a second concurrent
 // login for the same provider, callback timeout, and state mismatch all
 // surface as errors from coord.Login, wrapped here the same way every other
@@ -308,6 +336,8 @@ func handleAccountOAuthStart(coord *accounts.LoginCoordinator) handlerFunc {
 			// AccountID, when set, makes this a row-level Re-login of that
 			// account (ADR-0033 D6).
 			AccountID int64 `json:"accountId,omitempty"`
+			// Method is "browser" (the default) or "device" (ADR-0033 D2).
+			Method string `json:"method,omitempty"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("account.oauthStart: invalid params: %w", err)
@@ -315,14 +345,51 @@ func handleAccountOAuthStart(coord *accounts.LoginCoordinator) handlerFunc {
 		if p.Provider == "" || p.Label == "" {
 			return nil, fmt.Errorf("account.oauthStart: provider and label are required")
 		}
+		method, err := accounts.NormalizeLoginMethod(p.Method)
+		if err != nil {
+			return nil, fmt.Errorf("account.oauthStart: %w", err)
+		}
 
-		res, err := coord.Login(ctx, p.Provider, p.Label, accounts.LoginOptions{AccountID: p.AccountID}, func(url string) {
-			rc.Emit("authorizeUrl", map[string]string{"url": url})
+		res, err := coord.Login(ctx, p.Provider, p.Label, accounts.LoginOptions{AccountID: p.AccountID, Method: method}, func(e accounts.LoginEvent) {
+			rc.Emit(e.Kind, loginEventParams(e))
 		})
 		if err != nil {
 			return nil, fmt.Errorf("account.oauthStart: %w", err)
 		}
 		return oauthStartResult{accountResult: accountResultFrom(res.Account), Created: res.Created, Adopted: res.Adopted}, nil
+	}
+}
+
+// handleAccountOAuthComplete finishes a pending browser login from a redirect
+// the user pasted (accounts.LoginCoordinator.Complete, ADR-0033 D3): the
+// fallback for when the vendor's redirect cannot reach the daemon's loopback
+// listener (a remote daemon). It answers as soon as the paste is accepted --
+// the account.oauthStart request that issued loginId carries the final result.
+//
+// The pasted redirect carries the authorization code and state, so nothing
+// here echoes it: parameter errors are fixed text, and the coordinator's
+// errors never contain it.
+func handleAccountOAuthComplete(coord *accounts.LoginCoordinator) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		if coord == nil {
+			return nil, fmt.Errorf("account.oauthComplete: login coordinator is unavailable")
+		}
+		var p struct {
+			LoginID     string `json:"loginId"`
+			RedirectURL string `json:"redirectUrl"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			// Deliberately not wrapping err: a decode error can quote part
+			// of the offending input.
+			return nil, fmt.Errorf("account.oauthComplete: invalid params")
+		}
+		if p.LoginID == "" || p.RedirectURL == "" {
+			return nil, fmt.Errorf("account.oauthComplete: loginId and redirectUrl are required")
+		}
+		if err := coord.Complete(p.LoginID, p.RedirectURL); err != nil {
+			return nil, fmt.Errorf("account.oauthComplete: %w", err)
+		}
+		return struct{}{}, nil
 	}
 }
 

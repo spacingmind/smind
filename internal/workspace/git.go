@@ -218,8 +218,14 @@ func runGitOutputEnvCtx(ctx context.Context, dir string, env []string, args ...s
 	// CommandContext kills only git itself; a grandchild (an fsmonitor hook,
 	// a credential helper) that outlives it keeps the stdout/stderr pipes
 	// open and Run would wait for it indefinitely. WaitDelay bounds that
-	// wait so a cancelled ctx really does return.
-	cmd.WaitDelay = gitWaitDelay
+	// wait so a cancelled ctx really does return. It is set only for a ctx
+	// that can be cancelled: WaitDelay also starts when git exits normally, so
+	// under CPU starvation 500 ms can pass before the copy goroutines are
+	// scheduled and a successful `git worktree add` came back as "WaitDelay
+	// expired before I/O complete".
+	if ctx.Done() != nil {
+		cmd.WaitDelay = gitWaitDelay
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

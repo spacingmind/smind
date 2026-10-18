@@ -179,6 +179,13 @@ func TestProxy_ExhaustedPoolReturns503WithResetMessage(t *testing.T) {
 	}
 }
 
+// discardRequestLogStore accepts every request_log row and keeps none.
+type discardRequestLogStore struct{}
+
+func (discardRequestLogStore) CreateRequestLog(r store.RequestLog) (store.RequestLog, error) {
+	return r, nil
+}
+
 // TestProxy_1000RequestsZeroUsageCalls: a real enabled Poller with a counting
 // fetcher sees no fetch from 1000 proxied requests over a cold account, a
 // stale-cache account, an account in backoff, an exhausted account and one
@@ -190,7 +197,13 @@ func TestProxy_1000RequestsZeroUsageCalls(t *testing.T) {
 	s := newTestStoreForProxy(t)
 	f := &countingUsageFetcher{blockID: -1, entered: make(chan struct{}, 1)}
 	reg, router, poller := newEnabledRouting(t, s, f)
-	p := newProxy(reg, router, s, withAnthropicHTTPClient(testHTTPClient(t, up)))
+	// The request_log rows are not under test here, and 1000 of them through
+	// the real async writer commit (fsync) to the same SQLite file the router
+	// reads accounts from: under CI disk load a read waited out busy_timeout
+	// ("database is locked", a 503 on request 774). A discarding writer keeps
+	// the test about usage fetches.
+	p := newProxy(reg, router, s, withAnthropicHTTPClient(testHTTPClient(t, up)),
+		withRequestLogWriter(newRequestLogWriter(discardRequestLogStore{}, 0)))
 	t.Cleanup(p.Close)
 
 	// Candidates are walked in id order and the first non-exhausted one wins,

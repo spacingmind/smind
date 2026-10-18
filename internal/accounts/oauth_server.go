@@ -2,12 +2,50 @@ package accounts
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"syscall"
 	"time"
 )
+
+// checkLoopbackAddr rejects any listen address that is not loopback-only:
+// the callback listener carries an authorization code, so it must never be
+// reachable from the network (ADR-0033 D1). Only "localhost" or a loopback IP
+// literal passes; an empty host, 0.0.0.0, :: and every other address are
+// refused.
+func checkLoopbackAddr(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("oauth callback address %q is not host:port: %w", addr, err)
+	}
+	if host == "localhost" {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return fmt.Errorf("oauth callback address %q is not loopback-only", addr)
+}
+
+// wsaeAddrInUse is Winsock's WSAEADDRINUSE. On Windows a failed bind reports
+// it rather than syscall.EADDRINUSE (which there is a synthetic value), so
+// errors.Is(err, syscall.EADDRINUSE) alone misses a busy port.
+const wsaeAddrInUse = 10048
+
+// isAddrInUse reports whether err (from net.Listen, possibly wrapped) says the
+// address is already bound: EADDRINUSE on Unix, WSAEADDRINUSE on Windows. It
+// compiles on every platform; the numeric check is inert where 10048 is not an
+// address-in-use code, since only a bind error can carry it here.
+func isAddrInUse(err error) bool {
+	if errors.Is(err, syscall.EADDRINUSE) {
+		return true
+	}
+	var errno syscall.Errno
+	return errors.As(err, &errno) && errno == wsaeAddrInUse
+}
 
 // callbackResult is what the vendor's redirect to a callbackServer
 // delivered: either code+state on success, or a non-empty errCode
@@ -17,6 +55,26 @@ type callbackResult struct {
 	state   string
 	errCode string
 }
+
+// checkBoundLoopback verifies the address a listener actually bound is
+// loopback. checkLoopbackAddr only judges the requested string; a name such as
+// "localhost" is resolved by the OS, and a hosts file or resolver could point
+// it at a network-reachable address.
+func checkBoundLoopback(l net.Listener) error {
+	tcp, ok := l.Addr().(*net.TCPAddr)
+	if !ok || !tcp.IP.IsLoopback() {
+		return fmt.Errorf("oauth callback listener bound to %s, which is not loopback-only", l.Addr())
+	}
+	return nil
+}
+
+const (
+	// callbackReadHeaderTimeout bounds how long a client may dribble request
+	// headers at the listener (slowloris from another local process).
+	callbackReadHeaderTimeout = 10 * time.Second
+	// callbackShutdownTimeout bounds close's graceful shutdown.
+	callbackShutdownTimeout = 2 * time.Second
+)
 
 // callbackServer is a temporary local HTTP listener that serves exactly one
 // OAuth callback request on addr+path, then reports it on result. Bind
@@ -29,6 +87,9 @@ type callbackServer struct {
 	listener      net.Listener
 	result        chan callbackResult
 	providerLabel string
+	// state is the login's expected state; only a request carrying it is
+	// delivered on result.
+	state string
 }
 
 // newCallbackServer binds addr synchronously and starts serving path on it
@@ -39,17 +100,29 @@ type callbackServer struct {
 // vendor could redirect before anything is listening. providerLabel is
 // purely cosmetic: it's what the browser-facing success page names (see
 // oauth_callback_page.go), not used for any routing/matching decision.
-func newCallbackServer(addr, path, providerLabel string) (*callbackServer, error) {
+//
+// state is the login's expected state: the listener is reachable by every
+// local process, so only a request carrying that state is delivered; any other
+// request (a scanner, a favicon fetch) gets an error page and is ignored, and
+// the login stays pending.
+func newCallbackServer(addr, path, providerLabel, state string) (*callbackServer, error) {
+	if err := checkLoopbackAddr(addr); err != nil {
+		return nil, err
+	}
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("bind oauth callback listener on %s: %w", addr, err)
 	}
+	if err := checkBoundLoopback(listener); err != nil {
+		_ = listener.Close()
+		return nil, err
+	}
 
-	s := &callbackServer{listener: listener, result: make(chan callbackResult, 1), providerLabel: providerLabel}
+	s := &callbackServer{listener: listener, result: make(chan callbackResult, 1), providerLabel: providerLabel, state: state}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(path, s.handleCallback)
-	s.httpServer = &http.Server{Handler: mux}
+	s.httpServer = &http.Server{Handler: mux, ReadHeaderTimeout: callbackReadHeaderTimeout}
 
 	go func() {
 		// http.ErrServerClosed is the expected outcome of close's Shutdown
@@ -63,11 +136,11 @@ func newCallbackServer(addr, path, providerLabel string) (*callbackServer, error
 	return s, nil
 }
 
-// handleCallback captures the vendor's redirect query params and reports
-// them on result, then tells the browser it's done. Only the first request
-// is captured (result is buffered size 1); a comment isn't needed on the
-// non-blocking send below since exactly one request is ever expected per
-// flow.
+// handleCallback delivers the vendor's redirect on result, then tells the
+// browser it's done -- but only when the request carries the login's state
+// (constant-time compared), for the success form and the error= form alike. A
+// request with a missing or wrong state is answered with a 400 and ignored.
+// Only the first matching request is captured (result is buffered size 1).
 func (s *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	res := callbackResult{
@@ -76,12 +149,18 @@ func (s *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 		errCode: q.Get("error"),
 	}
 
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if s.state == "" || subtle.ConstantTimeCompare([]byte(res.state), []byte(s.state)) != 1 {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, renderCallbackErrorPage("this request does not belong to the login in progress"))
+		return
+	}
+
 	select {
 	case s.result <- res:
 	default:
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if res.errCode != "" {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprint(w, renderCallbackErrorPage(res.errCode))
@@ -95,25 +174,14 @@ func (s *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 	fmt.Fprint(w, renderCallbackSuccessPage(s.providerLabel))
 }
 
-// waitForCallback blocks until the vendor's redirect lands, ctx is done, or
-// timeout elapses, whichever comes first.
-func (s *callbackServer) waitForCallback(ctx context.Context, timeout time.Duration) (callbackResult, error) {
-	select {
-	case res := <-s.result:
-		return res, nil
-	case <-ctx.Done():
-		return callbackResult{}, ctx.Err()
-	case <-time.After(timeout):
-		return callbackResult{}, errors.New("timed out waiting for the OAuth callback")
-	}
-}
-
-// close gracefully shuts the server down, releasing its bound port. Safe to
-// call exactly once per callbackServer; LoginCoordinator.Login calls it
-// from a defer so every exit path (success, timeout, ctx cancellation)
-// tears the listener down the same way.
+// close shuts the server down, releasing its bound port: a short graceful
+// Shutdown, then a hard Close so a stuck connection cannot hold the port (or
+// this call) open. Safe to call exactly once per callbackServer;
+// LoginCoordinator.Login calls it from a defer so every exit path (success,
+// timeout, ctx cancellation) tears the listener down the same way.
 func (s *callbackServer) close() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), callbackShutdownTimeout)
 	defer cancel()
 	_ = s.httpServer.Shutdown(ctx)
+	_ = s.httpServer.Close()
 }

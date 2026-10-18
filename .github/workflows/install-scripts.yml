@@ -54,7 +54,7 @@ jobs:
           if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
             Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
           }
-          $findings = foreach ($f in 'scripts/install.ps1', 'scripts/install_test.ps1', 'scripts/service_smoke.ps1', 'scripts/service_unelevated_check.ps1') {
+          $findings = foreach ($f in 'scripts/install.ps1', 'scripts/install_test.ps1', 'scripts/service_smoke.ps1', 'scripts/service_unelevated_check.ps1', 'scripts/service_two_users_check.ps1') {
             Invoke-ScriptAnalyzer -Path $f -Settings scripts/PSScriptAnalyzerSettings.psd1
           }
           $findings | Format-Table RuleName, ScriptName, Line, Message -Wrap

@@ -1,10 +1,10 @@
 # Self-learning skills (v1)
 
-Spec for [ADR-0026](../../decisions/0026-self-learning-skills.md) (**Proposed**).
-**Phase A (this document and the ADR) is design only. Phase B does not start
-until the user answers the ADR's "Decisions for the user".** Acceptance
-criteria below assume the ADR's recommendations; if a decision changes, the
-affected criteria change with it.
+Spec for [ADR-0026](../../decisions/0026-self-learning-skills.md)
+(**Accepted** 2026-10-18; D1-D11 as recommended, D12 added by the user).
+Phase A (design) is done; Phase B (code) is unblocked and ships as
+non-stacked PRs off `develop`. If a decision changes, the affected criteria
+change with it.
 
 Reference: `refs/autoharness` (read-only clone, commit 9eec623; supervisor
 note: PR #287 adds it to the AGENTS.md refs map). Pattern only; no code is
@@ -99,7 +99,8 @@ are config knobs.
   the six guard families; unredacted secret hits; absolute paths or host
   names; name collision with a human/third-party skill in the workspace;
   `absorbed_into` not a live learned skill of the same workspace; a `patch`
-  whose `old_string` is not unique in the live body.
+  whose `old_string` is not unique in the live body; similarity to a live
+  skill at or above the high threshold (AC33).
 - AC13. **Provenance rule:** every intent carries >= 1 evidence item of kind
   `user_message`, `failure_recovery`, `permission_denied` or
   `loaded_skill_wrong` whose quote occurs verbatim in that event of the
@@ -115,6 +116,28 @@ are config knobs.
 - AC16. Every learned skill row is self-authored by construction; the
   projection is generated and read-only, and rebuilt from the DB when the
   active set changes.
+
+**Similarity check (D12)**
+
+- AC33. The gate runs a deterministic (no LLM) similarity check of every
+  `create` proposal, and of a `patch`'s resulting text against every skill
+  other than its own target, against **all live skills in the workspace**:
+  learned skills in `proposed | active | disabled` (name + description +
+  body) and human/third-party skills (**name + description only**; their
+  bodies are never opened). Score = `max(token Jaccard, character-trigram
+  Dice)` over normalised text. At or above the **high** threshold (default
+  0.85) the intent is rejected as `duplicate_of: <skill>` and nothing is
+  written; at or above the **medium** threshold (default 0.60) it passes
+  with `possible_duplicate_of` and the score recorded on the proposal.
+  Both thresholds are in `config.yaml`
+  (`learning.similarity.duplicate`, `learning.similarity.possible`).
+- AC34. A proposal flagged `possible_duplicate_of` shows "Possible duplicate
+  of `<skill>`" in the inbox with both skills side by side and the score. For
+  a learned match it offers **Merge into this skill**, which turns the
+  proposal into a `patch` of the existing learned skill (editable merged
+  body, evidence carried over, gate re-run, ledger entry, still
+  approval-gated). For a human skill match it shows name + description only
+  and offers no merge; human skills are never modified.
 
 **Approval and UX**
 
@@ -215,6 +238,19 @@ Go (`internal/learning`, store, wsapi, taskrunner, runs):
   (table per family), `_RejectsSecretHit`, `_RejectsAbsolutePathAndHost`,
   `_RejectsHumanSkillNameCollision`, `_RejectsBadAbsorbedInto`,
   `_RejectsAmbiguousPatch`, `_LandsAtomicallyOrNotAtAll`.
+- `TestGate_RejectsNearDuplicateAboveHighThreshold`,
+  `TestGate_FlagsPossibleDuplicateAboveMediumThreshold`,
+  `TestGate_PassesDissimilarBelowMediumThreshold` (fixture corpus pinning the
+  default thresholds), `TestGate_SimilarityThresholdsFromConfig`,
+  `TestGate_SimilarityComparesLearnedAndHumanSkills` (learned: full text;
+  human: name + description), `TestGate_SimilarityIgnoresArchivedAndRejected`,
+  `TestGate_PatchNotComparedAgainstOwnTarget`,
+  `TestGate_HumanSkillBodiesNeverRead` (the human-skill source is handed
+  name + description only; a fixture whose body file is unreadable or
+  tripwired proves it is never opened), `TestSimilarity_Deterministic`
+  (same inputs, same score, order independent),
+  `TestMergeIntoSkill_TurnsProposalIntoGatedPatch`,
+  `TestMergeIntoSkill_RefusedForHumanSkill`.
 - `TestProvenance_RequiresUserMessageOrRecoveredFailure`,
   `TestProvenance_QuoteMustBeVerbatim`,
   `TestProvenance_ToolOutputOnlyEvidenceRejected` (a README telling the agent
@@ -249,7 +285,11 @@ Web (`web/packages/ui`): `learned-skills-section.test.tsx` (list, tabs,
 badges, empty state), `learned-skill-detail.test.tsx` (provenance links,
 diffs, version undo), `proposal-actions.test.tsx` (approve/reject/edit),
 `learning-optin.test.tsx` (per-workspace toggle, kill switch), settings
-registry test for the new section; light + dark screenshots.
+registry test for the new section; `possible-duplicate.test.tsx` (`possible
+duplicate shows both skills and merge action`: flag, side-by-side, score,
+merge action for a learned match, no merge action for a human match);
+light + dark screenshots (incl. the possible-duplicate view and transition
+frames).
 
 Live (not mocked), run once in Validation: a claude-native run in an opted-in
 repo emits a proposal after a seeded correction; approval makes the next
@@ -263,8 +303,9 @@ the preface; `git status` of the repo is clean throughout.
   its own tests:
   - B0 spikes (ADR open questions 1-5): add-dir skill loading, no-tools run,
     ACP leading block vs usage, window cost, human-origin tagging.
-  - B1 schema + `internal/learning` core: store tables, `Eligible`, gate,
-    guard, redactor, lifecycle function, ledger/versions (no model calls).
+  - B1 schema + `internal/learning` core: store tables, `Eligible`, gate
+    (incl. the D12 similarity check), guard, redactor, lifecycle function,
+    ledger/versions (no model calls). Security-sensitive: `reviewer` pass.
   - B2 collector + reflector job + system task/profile + budget + kill switch.
   - B3 projection + delivery (claude add-dir, ACP preface) + counters.
   - B4 wsapi/CLI/events + Settings -> Skills UI + notifications.
@@ -274,17 +315,79 @@ the preface; `git status` of the repo is clean throughout.
 
 ## Decisions
 
-Open, listed in ADR-0026 "Decisions for the user" (D1-D11). Recommendations:
-opt-in per workspace; approval always; daemon DB + read-only projection;
-same-recipient reflector, Haiku-class, USD 0.25 / 150k tokens per workspace
-per day; no global layer; strict provenance; GLM inline-only in v1; Claude
-native listing only; Codex out; descriptions of human skills shown read-only;
-autoharness-derived numbers as knobs.
+Accepted 2026-10-18, recorded in ADR-0026 "Decisions" (D1-D12): opt-in per
+workspace (default off); approval always; daemon DB + read-only projection,
+export explicit; same-recipient reflector, Haiku-class for Claude / GLM
+default for GLM, USD 0.25 / 150k tokens per workspace per day, 1 job / 30
+min, 120 KB window, all in config; no global layer; strict provenance;
+GLM/Kimi inline-only in v1; Claude native listing only (with the preface
+switch); no Codex in v1; human skill names + descriptions shown to the
+reflector, bodies never; autoharness-derived numbers (50 tool calls /
+probation 25 runs / capacity 30 / curator every 5 landings) as config knobs;
+D12 deterministic similarity check in the gate (high threshold rejects,
+medium threshold flags with a merge action; thresholds in config).
+
+Implementation decisions made in Phase B (refinements, not architecture):
+
+- **One proposal model.** Every proposal (create, patch, merge bundle) lives
+  in `learned_skill_proposals` (`kind create|patch|bundle`, `status
+  pending|approved|rejected`); `learned_skills` holds only approved skills
+  (`active|disabled|archived`). Approval is one transaction (`LandSkill` /
+  `PatchSkill` / `ApplyBundle` with a `ProposalID`). Rejected proposals are
+  kept for the reflector's negative examples. This supersedes the ADR text
+  that mentions `proposed`/`rejected` skill statuses; the gate's `LiveSkill`
+  still takes pending proposals (status `proposed`) so D12 compares against
+  them.
+- **Gate contract.** `Mode` (reflect/curate) is derived from the job type
+  server-side. The collector must honour the `Window` contract in
+  `internal/learning/gate/types.go` (`user_message` = human-typed only;
+  `failure_recovery` = agent action, not repo-controlled tool output). A
+  window is built for one workspace only. The human prompt is not a run event
+  (it lives in `runs.prompt`), so the window gives it the sentinel key
+  `(runID, seq -1)`.
+- **Landing must re-verify** (AC14 addendum, from the gate review): re-run
+  `gate.Check` inside the landing transaction against a refreshed snapshot;
+  match the patch's base version/body hash; apply batched intents
+  sequentially with no mutual-absorb cycles; persist `Render(Verdict.Result)`
+  not the raw intent; per-workspace skill quota.
+
+**OPEN, needs the user (AGENTS.md rule d): reflector tool isolation on
+GLM/Kimi.** The Phase B0 spike (read-only, 2026-10-18) found that the
+claude-native reflector can be run with no tools (`--tools ""`, strict MCP,
+empty setting sources, empty temp cwd, deny-all decider; to be confirmed with
+one live run), but the GLM ACP agent owns its tools: `read_file`,
+`list_files`, `web_search` and `web_reader` never ask permission in any mode
+and the client cannot disable them (glm-acp-agent 1.14.0
+`protocol/agent.js`, `tools/executor.js`); Kimi's tooling could not be
+inspected. So ADR section 3's "no tools" and `TestReflector_HasNoTools`
+cannot hold for GLM as written, and an injected window could try to
+exfiltrate through `web_search`/`web_reader`. Options: (1) v1 reflects only
+claude-native runs; GLM/Kimi-sourced windows are recorded `skipped:
+provider_no_tool_isolation` (recommended: keeps the hard rule, loses GLM
+learning for now, GLM delivery still works from learned skills); (2) a GLM
+reflector with mitigations (empty cwd, `--max-turns 1`, reject-only decider,
+fail the job on any tool-call event) accepting the web egress risk; (3) a
+tool-less direct chat-completion call to the GLM endpoint (a second LLM
+client, which ADR-0026 rejected); (4) reflect GLM transcripts with a Claude
+reflector (breaks the same-recipient rule, D4). Until decided, B2 implements
+option 1 and the reflector tests assert no-tools for claude-native only.
 
 ## Progress
 
-- 2026-10-11: Phase A written (ADR-0026 Proposed, this plan). Awaiting the
-  user's decisions. No feature code.
+- 2026-10-11: Phase A written (ADR-0026 Proposed, this plan). No feature code.
+- 2026-10-18: user accepted D1-D11 as recommended and added D12 (similarity
+  check). ADR-0026 set to Accepted; D12 added to the ADR (gate list, inbox
+  UX), ACs 33-34 and the named tests above. Phase B starts with B1.
+
+- 2026-10-18: B1 split into three non-stacked PRs, each reviewed by an
+  independent read-only reviewer and hardened before opening:
+  #392 (store schema, ledger/versions/proposals/jobs, lifecycle function),
+  #393 (redactor + `learning:` config + kill switch that fails closed),
+  #394 (gate, D12 similarity, human-skill loader). B0 spike done (see OPEN
+  decision above). Next: B2a window builder + `Eligible`, B2b run plumbing
+  (`runs.purpose`, hidden system tasks, run-finished observer, Learning usage
+  bucket), B2c isolated reflector runner (claude-native), B2d collector/job
+  service; then B3 delivery, B4 wsapi/CLI/UI, B5 curator/export.
 
 ## Validation
 

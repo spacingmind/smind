@@ -131,6 +131,7 @@ func newRelayDeviceAPI(t *testing.T, admin RelayDeviceAdmin) (*API, *httptest.Se
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	t.Cleanup(api.Close)
 	api.SetRelayDevices(admin)
 	srv := httptest.NewServer(api.Handler)
 	t.Cleanup(srv.Close)

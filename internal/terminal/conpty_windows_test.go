@@ -214,11 +214,19 @@ func childPID(parent int, exe string) int {
 	}
 }
 
+// Deliberately not t.Parallel: on the windows-terminal CI job this test failed
+// (35-50 s wall, "could not find the shell's ping child within 10s") whenever
+// it shared the machine with TestWindows_ManySessionsNoCrossTalk's 16 ConPTY
+// workers and TestWindows_CloseKillsDescendants (runs 38129951815,
+// 38595981198, 39012681891). Serial tests run before the parallel ones are
+// released, so it now has the machine to itself for about a second.
 func TestConPty_ChildStartsInJob(t *testing.T) {
-	t.Parallel()
 	// The shell starts ping immediately -- with post-start job assignment
 	// that grandchild could be spawned before the shell joined the job.
-	_, cmd, job := startTestConPty(t, "/c", "ping -n 30 127.0.0.1")
+	// ping outlives the poll window below even on a slow runner.
+	start := time.Now()
+	_, cmd, job := startTestConPty(t, "/c", "ping -n 60 127.0.0.1")
+	spawned := time.Since(start)
 
 	if !inJob(t, cmd.Process.Pid, job) {
 		t.Fatal("shell is not in its job right after spawn")
@@ -237,7 +245,7 @@ func TestConPty_ChildStartsInJob(t *testing.T) {
 		}
 	}
 	if pingPid == 0 {
-		t.Fatal("could not find the shell's ping child within 10s")
+		t.Fatalf("could not find the shell's ping child within 10s (spawn took %v)", spawned)
 	}
 	if !inJob(t, pingPid, job) {
 		t.Fatalf("ping (pid %d) started by the shell is not in the job", pingPid)

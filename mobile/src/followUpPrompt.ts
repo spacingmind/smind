@@ -114,15 +114,19 @@ export async function sendFollowUpPrompt(
 
 /**
  * Whether a streamed event is the agent's echo of a prompt this client
- * already rendered optimistically (a user_message whose text equals an
- * optimistic user line, those keyed `f<seq>` by sendFollowUpPrompt): the
- * screen skips it so the prompt shows once, whichever of the run.start
- * response and the run.status adoption attached the run first.
+ * already rendered itself (a user_message whose text equals a client-
+ * rendered user line: those keyed `f<seq>` by sendFollowUpPrompt, or
+ * `p<runId>` for the prompt line the screen adds for an adopted run):
+ * the screen skips it so the prompt shows once, whichever of the
+ * run.start response and the run.status adoption attached the run first.
  */
 export function isEchoOfOptimisticLine(lines: readonly TimelineLine[], event: string, params: unknown): boolean {
   if (event !== 'user_message') return false;
   const text = (params as { text?: string } | undefined)?.text;
-  return text !== undefined && lines.some((l) => l.role === 'user' && l.key.startsWith('f') && l.text === text);
+  return (
+    text !== undefined &&
+    lines.some((l) => l.role === 'user' && /^[fp]/.test(l.key) && l.text === text)
+  );
 }
 
 /**

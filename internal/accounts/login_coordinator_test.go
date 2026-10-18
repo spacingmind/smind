@@ -29,6 +29,9 @@ type fakeLogin struct {
 	exchangeErr error
 	// subject is the vendor account subject Exchange reports ("" = none).
 	subject string
+	// gate, if set, makes Exchange block until it is closed (or ctx is done),
+	// so a test can observe a login that is resolved but not yet finished.
+	gate chan struct{}
 }
 
 func (f *fakeLogin) CallbackAddr() string { return f.addr }
@@ -39,7 +42,14 @@ func (f *fakeLogin) AuthorizeURL(state string, pkce PKCECodes) string {
 		"&challenge=" + url.QueryEscape(pkce.CodeChallenge)
 }
 
-func (f *fakeLogin) Exchange(_ context.Context, code, state string, pkce PKCECodes) (ExchangeResult, error) {
+func (f *fakeLogin) Exchange(ctx context.Context, code, state string, pkce PKCECodes) (ExchangeResult, error) {
+	if f.gate != nil {
+		select {
+		case <-f.gate:
+		case <-ctx.Done():
+			return ExchangeResult{}, ctx.Err()
+		}
+	}
 	if f.exchangeErr != nil {
 		return ExchangeResult{}, f.exchangeErr
 	}
@@ -116,7 +126,7 @@ func TestLoginCoordinator_Login_UnsupportedProvider(t *testing.T) {
 	t.Parallel()
 
 	coord := NewLoginCoordinator(newTestRegistry(t), map[string]Login{})
-	_, err := coord.Login(context.Background(), "bogus", "label", LoginOptions{}, func(string) {})
+	_, err := coord.Login(context.Background(), "bogus", "label", LoginOptions{}, func(LoginEvent) {})
 	if err == nil {
 		t.Fatal("Login() error = nil, want error for unsupported provider")
 	}
@@ -140,7 +150,7 @@ func TestLoginCoordinator_Login_HappyPath(t *testing.T) {
 	}
 	doneCh := make(chan loginResult, 1)
 	go func() {
-		account, err := coord.Login(context.Background(), "fake", "my-label", LoginOptions{}, func(u string) { urlCh <- u })
+		account, err := coord.Login(context.Background(), "fake", "my-label", LoginOptions{}, func(e LoginEvent) { urlCh <- e.URL })
 		doneCh <- loginResult{account.Account, err}
 	}()
 
@@ -189,37 +199,6 @@ func TestLoginCoordinator_Login_HappyPath(t *testing.T) {
 	}
 }
 
-func TestLoginCoordinator_Login_StateMismatch(t *testing.T) {
-	t.Parallel()
-
-	login := &fakeLogin{addr: freeAddr(t), path: "/callback"}
-	coord := NewLoginCoordinator(newTestRegistry(t), map[string]Login{"fake": login})
-	coord.timeout = 10 * time.Second
-
-	urlCh := make(chan string, 1)
-	doneCh := make(chan error, 1)
-	go func() {
-		_, err := coord.Login(context.Background(), "fake", "label", LoginOptions{}, func(u string) { urlCh <- u })
-		doneCh <- err
-	}()
-
-	<-urlCh // wait for the listener to be up before hitting it
-
-	resp, err := http.Get(fmt.Sprintf("http://%s/callback?code=test-code&state=totally-wrong", login.addr))
-	if err != nil {
-		t.Fatalf("GET callback: %v", err)
-	}
-	resp.Body.Close()
-
-	err = <-doneCh
-	if err == nil {
-		t.Fatal("Login() error = nil, want error for a mismatched state")
-	}
-	if !strings.Contains(err.Error(), "state mismatch") {
-		t.Errorf("Login() error = %q, want it to mention a state mismatch", err.Error())
-	}
-}
-
 func TestLoginCoordinator_Login_Timeout(t *testing.T) {
 	t.Parallel()
 
@@ -228,13 +207,11 @@ func TestLoginCoordinator_Login_Timeout(t *testing.T) {
 	coord := NewLoginCoordinator(newTestRegistry(t), map[string]Login{"fake": login})
 	coord.timeout = 100 * time.Millisecond
 
-	_, err := coord.Login(context.Background(), "fake", "label", LoginOptions{}, func(string) {})
+	_, err := coord.Login(context.Background(), "fake", "label", LoginOptions{}, func(LoginEvent) {})
 	if err == nil {
 		t.Fatal("Login() error = nil, want a timeout error")
 	}
-	if !strings.Contains(err.Error(), "timed out") {
-		t.Errorf("Login() error = %q, want it to mention a timeout", err.Error())
-	}
+	requireLoginCode(t, err, LoginCodeTimeout)
 
 	// The listener must be torn down: rebinding the same address should
 	// now succeed.
@@ -255,16 +232,17 @@ func TestLoginCoordinator_Login_ConcurrentSameProvider(t *testing.T) {
 	urlCh := make(chan string, 1)
 	doneCh := make(chan error, 1)
 	go func() {
-		_, err := coord.Login(ctx, "fake", "first", LoginOptions{}, func(u string) { urlCh <- u })
+		_, err := coord.Login(ctx, "fake", "first", LoginOptions{}, func(e LoginEvent) { urlCh <- e.URL })
 		doneCh <- err
 	}()
 
 	<-urlCh // the first login's listener is bound and blocking on its callback
 
-	_, err := coord.Login(context.Background(), "fake", "second", LoginOptions{}, func(string) {})
+	_, err := coord.Login(context.Background(), "fake", "second", LoginOptions{}, func(LoginEvent) {})
 	if err == nil {
 		t.Fatal("second Login() error = nil, want \"already in progress\"")
 	}
+	requireLoginCode(t, err, LoginCodeInProgress)
 	if !strings.Contains(err.Error(), "already in progress") {
 		t.Errorf("second Login() error = %q, want it to say a login is already in progress", err.Error())
 	}
@@ -297,7 +275,7 @@ func TestLoginCoordinator_Login_ContextCancelled(t *testing.T) {
 	urlCh := make(chan string, 1)
 	doneCh := make(chan error, 1)
 	go func() {
-		_, err := coord.Login(ctx, "fake", "label", LoginOptions{}, func(u string) { urlCh <- u })
+		_, err := coord.Login(ctx, "fake", "label", LoginOptions{}, func(e LoginEvent) { urlCh <- e.URL })
 		doneCh <- err
 	}()
 
@@ -322,7 +300,7 @@ func TestLoginCoordinator_Login_ExchangeError(t *testing.T) {
 	urlCh := make(chan string, 1)
 	doneCh := make(chan error, 1)
 	go func() {
-		_, err := coord.Login(context.Background(), "fake", "label", LoginOptions{}, func(u string) { urlCh <- u })
+		_, err := coord.Login(context.Background(), "fake", "label", LoginOptions{}, func(e LoginEvent) { urlCh <- e.URL })
 		doneCh <- err
 	}()
 
@@ -356,7 +334,7 @@ func relogin(t *testing.T, coord *LoginCoordinator, login *fakeLogin, label stri
 	}
 	doneCh := make(chan outcome, 1)
 	go func() {
-		res, err := coord.Login(context.Background(), "fake", label, opts, func(u string) { urlCh <- u })
+		res, err := coord.Login(context.Background(), "fake", label, opts, func(e LoginEvent) { urlCh <- e.URL })
 		doneCh <- outcome{res, err}
 	}()
 

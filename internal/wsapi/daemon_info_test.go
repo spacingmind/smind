@@ -60,6 +60,7 @@ func newInfoAPI(t *testing.T) *API {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	t.Cleanup(api.Close)
 	return api
 }
 
