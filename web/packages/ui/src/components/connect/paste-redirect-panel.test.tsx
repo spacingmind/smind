@@ -53,4 +53,26 @@ describe("paste redirect panel", () => {
     fireEvent.keyDown(screen.getByLabelText("Sign-in redirect address"), { key: "Enter" });
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
+
+  it("paste panel clears the input after an accepted paste", () => {
+    const onSubmit = vi.fn();
+    const view = render(<PasteRedirectPanel onSubmit={onSubmit} pending={false} error={null} />);
+    const input = screen.getByLabelText("Sign-in redirect address");
+    fireEvent.change(input, { target: { value: "http://127.0.0.1:1/cb?code=SECRET" } });
+    view.rerender(<PasteRedirectPanel onSubmit={onSubmit} pending={true} error={null} />);
+    view.rerender(<PasteRedirectPanel onSubmit={onSubmit} pending={false} error={null} />);
+    expect(input).toHaveValue("");
+  });
+
+  it("paste panel clears the error display when the input is edited", () => {
+    const onSubmit = vi.fn();
+    const view = render(<PasteRedirectPanel onSubmit={onSubmit} pending={false} error="Nope." />);
+    expect(screen.getByTestId("paste-redirect-error")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Sign-in redirect address"), { target: { value: "http://x" } });
+    expect(screen.queryByTestId("paste-redirect-error")).not.toBeInTheDocument();
+    // The error stays dismissed across a pending cycle with no new error.
+    view.rerender(<PasteRedirectPanel onSubmit={onSubmit} pending={true} error="Nope." />);
+    view.rerender(<PasteRedirectPanel onSubmit={onSubmit} pending={false} error="Nope." />);
+    void view;
+  });
 });

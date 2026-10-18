@@ -192,7 +192,9 @@ describe("useAccountLogin", () => {
       call.resolve(null);
     });
     await flush();
-    expect(login().pasting).toBe(false);
+    // An accepted paste keeps Finish disabled (pasteSubmitted is exposed as
+    // pasting) until the login leaves waiting.
+    expect(login().pasting).toBe(true);
     expect(login().state).toMatchObject({ phase: "waiting", loginId: "l9" });
     expect(login().pasteError).toBeNull();
   });
@@ -287,6 +289,70 @@ describe("useAccountLogin", () => {
     });
     expect(explicit.nth("account.oauthStart").params).toEqual({ provider: "anthropic", label: "personal" });
     expect(ambient.calls.filter((c) => c.method === "account.oauthStart")).toHaveLength(0);
+  });
+
+  it("a second paste cannot flip a successful login into an error", async () => {
+    const { login, start, client, authorize } = await setup();
+    await start();
+    await authorize("l1");
+    await act(async () => {
+      void login().complete(PASTED_URL);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      client.nth("account.oauthComplete").resolve(null);
+    });
+    await flush();
+
+    // The accepted paste leaves the login waiting for its result, with the
+    // paste already submitted: a second paste must be a no-op.
+    await act(async () => {
+      void login().complete("http://127.0.0.1:1/callback?code=OTHER");
+      await Promise.resolve();
+    });
+    expect(client.calls.filter((c) => c.method === "account.oauthComplete")).toHaveLength(1);
+    expect(login().state).toMatchObject({ phase: "waiting", loginId: "l1" });
+    expect(login().pasteError).toBeNull();
+  });
+
+  it("a paste rejected after cancel does not touch state", async () => {
+    const { login, start, client, authorize } = await setup();
+    await start();
+    await authorize("l1");
+    await act(async () => {
+      void login().complete(PASTED_URL);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      login().cancel();
+    });
+    expect(login().state).toEqual({ phase: "idle" });
+    await act(async () => {
+      client.nth("account.oauthComplete").reject(new Error("account.oauthComplete: login_unknown: gone"));
+    });
+    await flush();
+    expect(login().state).toEqual({ phase: "idle" });
+    expect(login().pasteError).toBeNull();
+    expect(login().pasting).toBe(false);
+  });
+
+  it("finish stays disabled after an accepted paste", async () => {
+    const { login, start, client, authorize } = await setup();
+    await start();
+    await authorize("l1");
+    await act(async () => {
+      void login().complete(PASTED_URL);
+      await Promise.resolve();
+    });
+    expect(login().pasting).toBe(true);
+    await act(async () => {
+      client.nth("account.oauthComplete").resolve(null);
+    });
+    await flush();
+    // Still "pasting" (the panel's Finish stays disabled) until the login
+    // leaves waiting.
+    expect(login().pasting).toBe(true);
+    expect(login().state).toMatchObject({ phase: "waiting" });
   });
 
   it("login hook never keeps the pasted url in state", async () => {

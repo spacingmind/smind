@@ -62,6 +62,11 @@ export function useAccountLogin(opts?: {
   const [state, setState] = useState<LoginState>({ phase: "idle" });
   const [pasteError, setPasteError] = useState<string | null>(null);
   const [pasting, setPasting] = useState(false);
+  // An accepted account.oauthComplete leaves the login waiting for its
+  // result; this flag keeps Finish disabled (as `pasting`) until then, so a
+  // second Enter/click can't send a second paste.
+  const [pasteSubmitted, setPasteSubmitted] = useState(false);
+  const pasteSubmittedRef = useRef(false);
   const genRef = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
   const openedForRef = useRef<string | null>(null);
@@ -74,6 +79,9 @@ export function useAccountLogin(opts?: {
     const controller = new AbortController();
     controllerRef.current = controller;
     setPasteError(null);
+    pasteSubmittedRef.current = false;
+    setPasteSubmitted(false);
+    setPasting(false);
     setState({ phase: "starting", method: params.method ?? "browser" });
     if (!client) {
       setState({ phase: "error", code: "no_connection", message: "No connection to the daemon.", soft: false });
@@ -121,21 +129,36 @@ export function useAccountLogin(opts?: {
 
   async function complete(redirectUrl: string) {
     if (state.phase !== "waiting") return;
+    if (pasteSubmittedRef.current) return;
     if (!client) return;
+    const gen = genRef.current;
+    const { loginId } = state;
     setPasteError(null);
     setPasting(true);
+    let resolved = false;
     try {
-      await client.call("account.oauthComplete", { loginId: state.loginId, redirectUrl });
+      await client.call("account.oauthComplete", { loginId, redirectUrl });
+      resolved = true;
     } catch (err) {
+      // A cancelled or superseded login's late rejection must not touch
+      // state -- only a rejection for the still-current waiting login does.
+      if (gen !== genRef.current || state.phase !== "waiting" || state.loginId !== loginId) return;
       const { code, detail } = parseLoginError(err);
       if (code === "login_unknown" || code === "login_already_completed") {
         setState({ phase: "error", code, message: loginErrorMessage(code, detail), soft: false });
       } else {
         setPasteError(loginErrorMessage(code, detail));
       }
-    } finally {
       setPasting(false);
+      return;
     }
+    if (gen !== genRef.current || !resolved) return;
+    // Accepted: keep Finish disabled (as `pasting`) until the login leaves
+    // waiting -- its result is what ends the login. A second paste is a
+    // no-op while this is set.
+    pasteSubmittedRef.current = true;
+    setPasteSubmitted(true);
+    setPasting(false);
   }
 
   function cancel() {
@@ -143,11 +166,17 @@ export function useAccountLogin(opts?: {
     controllerRef.current?.abort();
     setState({ phase: "idle" });
     setPasteError(null);
+    pasteSubmittedRef.current = false;
+    setPasteSubmitted(false);
+    setPasting(false);
   }
 
   function reset() {
     setState({ phase: "idle" });
     setPasteError(null);
+    pasteSubmittedRef.current = false;
+    setPasteSubmitted(false);
+    setPasting(false);
   }
 
   useEffect(
@@ -158,5 +187,5 @@ export function useAccountLogin(opts?: {
     [],
   );
 
-  return { state, pasteError, pasting, start, complete, cancel, reset };
+  return { state, pasteError, pasting: pasting || pasteSubmitted, start, complete, cancel, reset };
 }

@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,20 @@ export function PasteRedirectPanel(props: {
   const [value, setValue] = useState("");
   const trimmed = value.trim();
   const disabled = props.pending || trimmed === "";
+  // An accepted paste is `pending` going true -> false with no error: the
+  // address (which carries the OAuth code) is spent, so it must not stay
+  // in the input or the DOM.
+  // An edited input invalidates the shown error; the next paste re-arms it.
+  const [dismissedError, setDismissedError] = useState(false);
+  const error = props.error && !dismissedError ? props.error : null;
+  const wasPending = useRef(false);
+  useEffect(() => {
+    if (wasPending.current && !props.pending && !props.error) {
+      setValue("");
+      setDismissedError(false);
+    }
+    wasPending.current = props.pending;
+  }, [props.pending, props.error]);
 
   function submit() {
     if (disabled) return;
@@ -40,7 +54,10 @@ export function PasteRedirectPanel(props: {
         type="text"
         autoFocus={props.autoFocus}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => {
+          setDismissedError(true);
+          setValue(e.target.value);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter") submit();
         }}
@@ -55,9 +72,9 @@ export function PasteRedirectPanel(props: {
           {props.pending ? "Finishing…" : "Finish"}
         </Button>
       </div>
-      {props.error && (
+      {error && (
         <p role="alert" data-testid="paste-redirect-error" className="text-ui-sm text-destructive">
-          {props.error}
+          {error}
         </p>
       )}
     </div>
