@@ -7,20 +7,24 @@ import (
 )
 
 // ApplyPatch replaces exactly one occurrence of oldStr in body with newStr.
-// Zero matches -> ReasonPatchTargetMissing, two or more (or an empty oldStr)
-// -> ReasonAmbiguousPatch.
+// Zero matches -> ReasonPatchTargetMissing; two or more (overlapping
+// occurrences count: "aa" is ambiguous in "aaa") or an empty oldStr ->
+// ReasonAmbiguousPatch; oldStr == newStr -> ReasonNoopPatch.
 func ApplyPatch(body, oldStr, newStr string) (string, Reason, bool) {
 	if oldStr == "" {
 		return "", ReasonAmbiguousPatch, false
 	}
-	switch strings.Count(body, oldStr) {
-	case 0:
+	if oldStr == newStr {
+		return "", ReasonNoopPatch, false
+	}
+	i := strings.Index(body, oldStr)
+	if i < 0 {
 		return "", ReasonPatchTargetMissing, false
-	case 1:
-		return strings.Replace(body, oldStr, newStr, 1), "", true
-	default:
+	}
+	if strings.Contains(body[i+1:], oldStr) {
 		return "", ReasonAmbiguousPatch, false
 	}
+	return body[:i] + newStr + body[i+len(oldStr):], "", true
 }
 
 // CheckHiddenText rejects runes that would bypass the ASCII-only guard

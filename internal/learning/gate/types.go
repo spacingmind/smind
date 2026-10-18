@@ -109,8 +109,23 @@ type Config struct {
 	// Redact, if non-nil, is the injected secret scrubber; a value that
 	// changes under Redact fails the gate.
 	Redact func(string) string
-	Mode   Mode
+	// Mode MUST be derived from the job type server-side (reflect job ->
+	// ModeReflect, curator job -> ModeCurate), never from model output or any
+	// field the model can influence: curate mode skips provenance. Anything
+	// other than ModeCurate is treated as reflect (fail closed).
+	Mode Mode
 }
+
+// DefaultConfig returns the production tunables: default limits, duplicate
+// threshold 0.85, possible-duplicate threshold 0.60, reflect mode.
+func DefaultConfig() Config {
+	return Config{Limits: DefaultLimits(), Duplicate: defaultDuplicate, Possible: defaultPossible, Mode: ModeReflect}
+}
+
+const (
+	defaultDuplicate = 0.85
+	defaultPossible  = 0.60
+)
 
 // Verdict is the gate's decision.
 type Verdict struct {

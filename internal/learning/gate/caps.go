@@ -35,6 +35,7 @@ const (
 	ReasonHiddenText          Reason = "hidden_text"
 	ReasonBadReason           Reason = "bad_reason"
 	ReasonUngroundedContent   Reason = "ungrounded_content"
+	ReasonNoopPatch           Reason = "noop_patch"
 )
 
 // Finding is one gate rejection reason. Detail is short and never echoes more

@@ -20,6 +20,7 @@ func isLearnedStatus(s LiveSkill) bool {
 // window. It is the only path that can bless a skill; a rejected intent
 // produces findings and nothing else.
 func Check(in Intent, w Window, live []LiveSkill, cfg Config) Verdict {
+	cfg = withDefaults(cfg)
 	var v Verdict
 	add := func(fs ...Finding) { v.Findings = append(v.Findings, fs...) }
 
@@ -37,6 +38,15 @@ func Check(in Intent, w Window, live []LiveSkill, cfg Config) Verdict {
 		add(Finding{Reason: ReasonBadReason, Detail: "reason is empty"})
 	} else if utf8.RuneCountInString(in.Reason) > 500 {
 		add(Finding{Reason: ReasonBadReason, Detail: "reason exceeds 500 runes"})
+	}
+	// The reason is never persisted, but it is shown to reviewers and may be
+	// echoed into later prompts, so it gets the same hostile-text scans.
+	var reasonFindings []Finding
+	reasonFindings = append(reasonFindings, CheckLinks(in.Reason)...)
+	reasonFindings = append(reasonFindings, CheckHiddenText(in.Reason)...)
+	reasonFindings = append(reasonFindings, GuardScan(in.Reason)...)
+	for _, f := range dedupeFindings(reasonFindings) {
+		add(finding(f.Reason, "reason: %s", f.Detail))
 	}
 
 	var learned, pending, human []LiveSkill
@@ -84,7 +94,11 @@ func Check(in Intent, w Window, live []LiveSkill, cfg Config) Verdict {
 			add(Finding{Reason: ReasonPatchTargetMissing, Detail: fmt.Sprintf("no learned skill named %q to patch", in.Name)})
 			skipContent = true
 		} else {
-			newBody, r, ok := ApplyPatch(patchTarget.Body, in.OldString, in.NewString)
+			newBody, r, ok := patchTarget.Body, Reason(""), true
+			metaOnly := in.OldString == "" && in.NewString == "" && (in.Description != "" || in.Category != "")
+			if !metaOnly {
+				newBody, r, ok = ApplyPatch(patchTarget.Body, in.OldString, in.NewString)
+			}
 			if !ok {
 				add(Finding{Reason: r, Detail: fmt.Sprintf("patch to %q failed: %s", in.Name, r)})
 				skipContent = true
@@ -109,9 +123,16 @@ func Check(in Intent, w Window, live []LiveSkill, cfg Config) Verdict {
 		skipContent = true
 	}
 
+	if cfg.Mode == ModeCurate && in.Action != ActionCreate {
+		add(checkCurateSpans(in, learned)...)
+	}
+
 	if !skipContent {
+		before := len(v.Findings)
 		v.checkContent(result, in, cfg, add)
-		v.checkSimilarity(result, patchTarget, learned, pending, human, cfg, add)
+		if len(v.Findings) == before {
+			v.checkSimilarity(result, patchTarget, learned, pending, human, cfg, add)
+		}
 	}
 
 	add(checkProvenance(in, w, cfg.Mode, proposedTexts(in))...)
@@ -123,9 +144,6 @@ func Check(in Intent, w Window, live []LiveSkill, cfg Config) Verdict {
 
 func (v *Verdict) checkContent(result Skill, in Intent, cfg Config, add func(...Finding)) {
 	lim := cfg.Limits
-	if lim == (Limits{}) {
-		lim = DefaultLimits()
-	}
 	add(CheckCategory(result.Category)...)
 	add(CheckDescription(result.Description, lim)...)
 	add(CheckBody(result.Body, lim)...)
@@ -145,17 +163,11 @@ func (v *Verdict) checkContent(result Skill, in Intent, cfg Config, add func(...
 }
 
 func (v *Verdict) checkSimilarity(result Skill, patchTarget *LiveSkill, learned, pending, human []LiveSkill, cfg Config, add func(...Finding)) {
-	proposalFull := stripPrefix(result.Name) + " " + result.Description + " " + result.Body
-	proposalHuman := stripPrefix(result.Name) + " " + result.Description
+	full := similarity.NewMatcher(stripPrefix(result.Name) + " " + result.Description + " " + result.Body)
+	humanOnly := similarity.NewMatcher(stripPrefix(result.Name) + " " + result.Description)
 
 	bestName, bestScore := "", 0.0
-	consider := func(name, otherFull, otherHuman string) {
-		var score float64
-		if otherHuman == "" {
-			score = similarity.Score(proposalFull, otherFull)
-		} else {
-			score = similarity.Score(proposalHuman, otherHuman)
-		}
+	consider := func(name string, score float64) {
 		if score > bestScore || (score == bestScore && score > 0 && name < bestName) {
 			bestName, bestScore = name, score
 		}
@@ -164,25 +176,25 @@ func (v *Verdict) checkSimilarity(result Skill, patchTarget *LiveSkill, learned,
 		if patchTarget != nil && s.Name == patchTarget.Name {
 			continue
 		}
-		consider(s.Name, stripPrefix(s.Name)+" "+s.Description+" "+s.Body, "")
+		consider(s.Name, full.Score(stripPrefix(s.Name)+" "+s.Description+" "+s.Body))
 	}
 	for _, s := range pending {
-		consider(s.Name, stripPrefix(s.Name)+" "+s.Description+" "+s.Body, "")
+		consider(s.Name, full.Score(stripPrefix(s.Name)+" "+s.Description+" "+s.Body))
 	}
 	for _, s := range human {
-		consider(s.Name, "", s.Name+" "+s.Description)
+		consider(s.Name, humanOnly.Score(s.Name+" "+s.Description))
 	}
 
 	if bestScore == 0 {
 		return
 	}
-	if cfg.Duplicate > 0 && bestScore >= cfg.Duplicate {
+	if bestScore >= cfg.Duplicate {
 		add(Finding{Reason: ReasonDuplicate, Detail: fmt.Sprintf("duplicate_of=%s score=%.2f", bestName, bestScore)})
 		v.DuplicateOf = bestName
-	} else if cfg.Possible > 0 && bestScore >= cfg.Possible {
+	} else if bestScore >= cfg.Possible {
 		v.PossibleDuplicateOf = bestName
 	}
-	if cfg.Possible > 0 && bestScore >= cfg.Possible {
+	if bestScore >= cfg.Possible {
 		v.Similarity = bestScore
 	}
 }
@@ -198,4 +210,47 @@ func proposedTexts(in Intent) []string {
 		return []string{in.Description, in.NewString}
 	}
 	return nil
+}
+
+// withDefaults fills unset tunables so a zero Config fails closed: dedupe is
+// never silently disabled and limits are never zero.
+func withDefaults(cfg Config) Config {
+	d := DefaultLimits()
+	if cfg.Limits.MaxBodyLines <= 0 {
+		cfg.Limits.MaxBodyLines = d.MaxBodyLines
+	}
+	if cfg.Limits.MaxBodyBytes <= 0 {
+		cfg.Limits.MaxBodyBytes = d.MaxBodyBytes
+	}
+	if cfg.Limits.MaxDescChars <= 0 {
+		cfg.Limits.MaxDescChars = d.MaxDescChars
+	}
+	if cfg.Duplicate <= 0 {
+		cfg.Duplicate = defaultDuplicate
+	}
+	if cfg.Possible <= 0 {
+		cfg.Possible = defaultPossible
+	}
+	return cfg
+}
+
+// checkCurateSpans binds a curator patch to already-approved content: every
+// code span in the new text must occur in the body of some live learned skill,
+// since curate mode has no evidence to ground it.
+func checkCurateSpans(in Intent, learned []LiveSkill) []Finding {
+	spans := codeSpans([]string{in.Description, in.NewString})
+	if len(spans) == 0 {
+		return nil
+	}
+	bodies := make([]string, 0, len(learned))
+	for _, s := range learned {
+		bodies = append(bodies, collapseSpace(s.Body))
+	}
+	var out []Finding
+	for _, sp := range spans {
+		if !spanInAny(sp, bodies) {
+			out = append(out, finding(ReasonUngroundedContent, "code span not in any live learned skill: %q", sp))
+		}
+	}
+	return out
 }

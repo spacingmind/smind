@@ -16,7 +16,7 @@ func TestRender_Frontmatter(t *testing.T) {
 	want := "---\n" +
 		"name: learned-go-race\n" +
 		"description: \"Use when tests fail: check \\\"shared state\\\" first.\"\n" +
-		"category: go\n" +
+		"category: \"go\"\n" +
 		"---\n\n" +
 		"Run `go test -race`.\n"
 	if got != want {

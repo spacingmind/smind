@@ -1,6 +1,10 @@
 package similarity
 
-import "testing"
+import (
+	"math/rand"
+	"strings"
+	"testing"
+)
 
 const skillBodyA = `Run the Go tests with the race detector before pushing.
 Use "go test ./... -race -count=1" from the repo root.
@@ -52,6 +56,33 @@ func TestSimilarity_Bands(t *testing.T) {
 		t.Logf("%s: score=%v", tc.name, got)
 		if got < tc.min || got > tc.max {
 			t.Errorf("%s: Score=%v, want in [%v, %v]", tc.name, got, tc.min, tc.max)
+		}
+	}
+}
+
+func TestMatcherEqualsScore(t *testing.T) {
+	words := strings.Fields("use when go test fails race detector tempdir parallel build lint commit rebase ci Déjà vu 日本語 a ab -race ./...")
+	rng := rand.New(rand.NewSource(42))
+	gen := func() string {
+		n := rng.Intn(14)
+		parts := make([]string, n)
+		for i := range parts {
+			parts[i] = words[rng.Intn(len(words))]
+		}
+		return strings.Join(parts, " ")
+	}
+	for i := 0; i < 50; i++ {
+		a, b := gen(), gen()
+		got := NewMatcher(a).Score(b)
+		if want := Score(a, b); got != want {
+			t.Fatalf("fixture %d: Matcher %v != Score %v for %q / %q", i, got, want, a, b)
+		}
+		if rev := NewMatcher(b).Score(a); rev != got {
+			t.Fatalf("fixture %d: not symmetric: %v vs %v for %q / %q", i, got, rev, a, b)
+		}
+		m := NewMatcher(a)
+		if m.Score(b) != m.Score(b) {
+			t.Fatalf("fixture %d: matcher not reusable", i)
 		}
 	}
 }
