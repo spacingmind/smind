@@ -436,8 +436,14 @@ func (s *Store) SetSkillStatus(id int64, status, actor, reason, absorbedInto str
 		return fmt.Errorf("set learned skill %d status: begin: %w", id, err)
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`UPDATE learned_skills SET status = ?, updated_at = ? WHERE id = ?`, status, now, id); err != nil {
+	// Conditional on the status read above: a concurrent transition must
+	// not be silently overwritten (and double-ledgered).
+	res, err := tx.Exec(`UPDATE learned_skills SET status = ?, updated_at = ? WHERE id = ? AND status = ?`, status, now, id, k.Status)
+	if err != nil {
 		return fmt.Errorf("set learned skill %d status: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("set learned skill %d status: changed concurrently: %w", id, ErrSkillVersionConflict)
 	}
 	if err := insertLedger(tx, LearnedLedgerEntry{
 		WorkspaceID: k.WorkspaceID, SkillID: &k.ID, SkillName: k.Name,
