@@ -80,33 +80,54 @@ non-generalizable to remote transports). The explicit login contract below is th
 
 **Data model.** `accounts` gains `identity TEXT NULL` and a partial unique index
 `UNIQUE (provider, identity) WHERE identity IS NOT NULL`.
-- `identity` = hex SHA-256 of `"<provider>:<subject>"`, where `<subject>` is, from the **token exchange response**
+- `identity` = hex SHA-256 of the **length-prefixed** provider and subject, `"<len>:<provider>|<len>:<subject>"` (length
+  prefixes make the hash input delimiter-safe: no provider/subject text can make two different pairs collide, which a plain
+  `"<provider>:<subject>"` join would allow), where `<subject>` is, from the **token exchange response**
   (no extra provider call, so ADR-0028's rate-limit rules are untouched): Anthropic → `account.uuid`
   (`refs/cliproxyapi/internal/auth/claude/anthropic_auth.go:134-139`); OpenAI → the id_token's
-  `sub` + `chatgpt_account_id` claims (`refs/cliproxyapi/internal/auth/codex/jwt_parser.go:19,43`). It is hashed so no
+  `sub` and `chatgpt_account_id` claims, length-prefixed the same way, **both required** (with either missing the login has
+  no identity, so two workspaces can never merge on `sub` alone;
+  `refs/cliproxyapi/internal/auth/codex/jwt_parser.go:19,43`). The id_token payload is decoded without signature
+  verification (it came straight from the token endpoint over TLS, the trust the access token already gets), and an
+  unexpected `account` / `id_token` shape means "no identity", never a failed login. It is hashed so no
   vendor id/e-mail is stored or logged; it never crosses the wire (the wire only gets `hasIdentity: bool`). API-key
-  and pasted-credential accounts keep `identity = NULL`.
+  and pasted-credential accounts keep `identity = NULL`; replacing a credential by paste (`account.updateCredential`)
+  **clears** the row's identity, since it described the old credential.
 - No e-mail is stored or exposed (ADR-0028's "no e-mail beyond the user's label" holds).
 
 **Semantics of `account.oauthStart`** (optional `accountId`):
 1. After the code exchange the daemon computes `identity`.
 2. An account with the same `(provider, identity)` exists → its credential is **replaced in place**: id, label, routing
-   links, workspace assignments, models, quota/cooldown rows are kept; the refresh-blocked state is cleared;
-   `account.updated` is emitted; the result carries `created: false`. The requested label is ignored (the UI says "Updated
-   'work' — already connected").
+   links, workspace assignments, models, quota/cooldown rows are kept (it is the same vendor account, still as
+   quota-exhausted as before, so the passive cooldown stays); the refresh-blocked state clears by itself (the poller's
+   rejected-credential state is keyed on a credential fingerprint); `account.updated` is emitted; the result carries
+   `created: false`. The requested label is ignored (the UI says "Updated 'work' — already connected"). Replacement is
+   serialized with an in-flight token refresh of the same account, so a refresh of the old credential cannot overwrite it.
 3. `accountId` is given (row-level Re-login) and that row has an identity that **differs** → error code
-   `identity_mismatch` (the user logged into a different vendor account); the UI offers "Connect as a new account".
+   `identity_mismatch` (the user logged into a different vendor account); the UI offers "Connect as a new account". If the
+   login yielded **no** identity at all (the exchange response lacked the subject) and the row has one → `identity_unverified`
+   and nothing is changed: a login that cannot prove who it is never overwrites an identity-bearing row.
 4. `accountId` is given and the row has **no** identity (legacy) → the credential is replaced and the identity is
-   **adopted** (`adopted: true`); the UI confirms first ("This replaces the credential of 'work'"). If another row
-   already owns that identity → error `identity_in_use` naming that row's id.
+   **adopted** (`adopted: true`); the UI confirms first ("This replaces the credential of 'work'"). The row may be a
+   different vendor account than the old credential, so its quota cooldowns are cleared (as for a pasted replace). If
+   another row already owns that identity → error `identity_in_use` naming that row's id. Only OAuth rows take part: an
+   `accountId` naming an API-key / pasted-credential row → `login_not_oauth_account`; one naming a missing row or another
+   provider's → `login_unknown_account` (both checked before the browser step).
 5. Otherwise a new account is created with the identity (`created: true`).
+
+The CLI (`smind account login <provider> <label>`) goes through the same RPC, so it too now updates an existing
+same-identity account instead of creating a second row, ignores the label in that case, and prints
+`updated <label> (already connected)`.
 
 **Migration.** `ALTER TABLE accounts ADD COLUMN identity TEXT` + the partial unique index via `internal/store/migrate.go`'s
 add-column helper, and `schema.sql`. Existing OAuth rows keep `NULL` and gain an identity at their first Re-login
 (adoption). They are **not** backfilled by a provider call (Anthropic would need `/api/oauth/profile`; ADR-0028 forbids
 calling vendor endpoints casually). OpenAI rows could be backfilled from the refresh response's id_token
 (`refresh_providers.go:361` already parses it) — allowed as a follow-up, not required. Legacy duplicates cannot be
-detected before adoption; the UI offers nothing automatic for them. Rollback is safe (an extra nullable column).
+detected before adoption; the UI offers nothing automatic for them. Rolling back is **not fully safe once identities have been written**: the column
+is nullable and an older binary ignores it, but an older binary's paste-replace would not clear the identity, so a stale
+identity could wrongly merge a later login into that row. Clear the column (`UPDATE accounts SET identity = NULL`) when
+downgrading.
 
 ### Login contract (the daemon half; the UI half is the plan's PR-B4)
 
@@ -115,7 +136,7 @@ detected before adoption; the UI offers nothing automatic for them. Rollback is 
 | `account.oauthStart` (streaming) | params `{provider, label, method?, accountId?}`; events `authorizeUrl {loginId,url}` or `deviceCode {loginId,verificationUrl,userCode,expiresAt,intervalSeconds}`; final result `{account…, created, adopted?}` |
 | `account.oauthComplete` | `{loginId, redirectUrl}` → `{}` |
 | cancel | aborting the in-flight `account.oauthStart` request (existing `task.cancel`-by-request-id path) cancels the login, frees the listener/poller and the per-provider claim |
-| errors | stable codes in the message prefix: `login_in_progress`, `login_unknown`, `state_mismatch`, `device_unsupported`, `device_expired`, `identity_mismatch`, `identity_in_use`, `denied`, `timeout` |
+| errors | stable codes in the message prefix: `login_in_progress`, `login_unknown`, `state_mismatch`, `device_unsupported`, `device_expired`, `identity_mismatch`, `identity_in_use`, `identity_unverified`, `login_unknown_account`, `login_not_oauth_account`, `denied`, `timeout`. On the wire the message is `account.oauthStart: <code>: <detail>` (the handler's method prefix, then the code): clients anchor on the code after that prefix, never on the detail text |
 
 The client keeps a **generation counter** per Connect attempt: events/results from an older generation (after Cancel or a
 restart of the flow) are dropped (cliproxyapi's TUI pattern). One login per provider at a time stays (existing claim).

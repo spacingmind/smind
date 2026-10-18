@@ -160,7 +160,15 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
   identity_mismatch`, `relogin adopts identity for a legacy account`, `relogin adopt is identity_in_use when another row owns it` --
   `internal/accounts/login_coordinator_test.go` (`TestLoginCoordinator_Relogin`; also covers unknown/foreign `accountId` ->
   `login_unknown_account` and a subject-less login). The same-identity test asserts routing_decisions, quota_snapshots, models and
-  label survive, the passive cooldown is cleared (ADR-0028 section 7), and the credential-replaced hook and `account.updated` fire.
+  label and the passive cooldown survive, the credential-replaced hook does not fire, and `account.updated` does.
+- Review fixes, same file unless noted (`TestLoginCoordinator_Relogin` subtests): `relogin without a subject cannot overwrite an
+  identity-bearing row` (`identity_unverified`); `relogin adopt clears cooldowns because the row may be a different vendor account`
+  (cooldowns cleared and hook fired on adopt); `adopt refuses a non-oauth account` (`login_not_oauth_account`).
+  In `internal/accounts/oauth_login_test.go`: `openai identity requires both sub and chatgpt_account_id` and `identity hash input is
+  delimiter safe` (`TestAccountIdentity_Derivation`); `exchange tolerates unexpected account and id_token shapes`
+  (`TestLoginExchange_UnexpectedShapes`, also a padded base64url payload). In `internal/accounts/registry_test.go`:
+  `relogin during an in-flight refresh keeps the new credential` (`TestRegistry_ReloginDuringRefresh`, the re-login waits on the
+  account's refresh lock). CLI: `TestPrintLoginResult` in `cmd/smind/account_login_test.go` (`updated <label> (already connected)`).
 - Wire: `TestServer_AccountOAuthStart_Relogin` and the extended `TestServer_AccountOAuthStart_HappyPath` in
   `internal/wsapi/oauth_test.go` (`created`/`adopted`, `identity_mismatch`/`login_unknown_account` through the `account.oauthStart:`
   wrapper); `TestAccount_ListExposesHasIdentityNeverIdentity` in `internal/wsapi/account_test.go` (raw JSON has `hasIdentity`, no
