@@ -1,6 +1,6 @@
 import { act } from "react";
-import { fireEvent, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   groupAccountsByProvider,
@@ -10,6 +10,7 @@ import {
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import "@/components/settings/providers-section";
 import type { ProviderInfo, RunSummary } from "@/lib/types";
+import { useProvidersViewStore } from "@/stores/providers-view-store";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 import { renderWithDaemon } from "@/test/render-with-daemon";
 
@@ -65,6 +66,9 @@ async function renderLoaded(accounts: ReturnType<typeof account>[], providers = 
   await flush();
   return daemon;
 }
+
+// The view store is module state: a provider selected by an earlier test must not leak into the next.
+beforeEach(() => useProvidersViewStore.getState().reset());
 
 describe("groupAccountsByProvider", () => {
   it("maps accounts to runtime-provider groups via accountProvider, in provider.list order", () => {
@@ -223,8 +227,7 @@ describe("providers-section actions", () => {
     fireEvent.click(screen.getByTestId("provider-rename-save-1"));
     await flush();
     expect(client.calls.find((c) => c.method === "account.rename")?.params).toEqual({ id: 1, label: "renamed" });
-    // Re-select the provider: the collapsed nav selection drops its detail on a sub-container-width false negative in jsdom.
-    await selectProvider("claude-native");
+    await flush(); // the mutation result reaches the cache a few microtasks after the call
 
     expect(screen.getByText("renamed")).toBeInTheDocument();
     expect(screen.queryByText("work-claude")).not.toBeInTheDocument();
