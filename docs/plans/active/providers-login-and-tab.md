@@ -39,7 +39,7 @@ Status: **spec**, nothing built. Supersedes the "Open issues" of PR #370 (which 
   `state` check, first delivery wins (listener or paste), unknown/expired `loginId` is an error, wrong `state` errors and
   keeps the login pending (max 5 attempts), URL/code never logged or echoed.
 - AC-B6 The callback listener binds loopback only.
-- AC-B7 Stable error codes (`login_in_progress`, `login_unknown`, `state_mismatch`, `denied`, `timeout`, `identity_*`).
+- AC-B7 Stable error codes (`login_in_progress`, `login_unknown`, `login_wrong_method`, `login_attempts_exceeded`, `login_bad_redirect`, `login_already_completed`, `state_mismatch`, `denied`, `timeout`, `identity_*`).
 
 **B3 — device code (daemon, PR-B3)**
 - AC-B8 `method:"device"` for `openai`: emits `deviceCode {loginId,verificationUrl,userCode,expiresAt,intervalSeconds}` to the
@@ -141,7 +141,7 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
 ## Progress
 - [ ] ADR-0033 + this plan (docs PR)
 - [x] PR-B1 identity (branch `feat/account-identity`)
-- [ ] PR-B2 loginId + oauthComplete
+- [x] PR-B2 loginId + oauthComplete (branch `feat/oauth-complete`)
 - [ ] PR-B3 device code
 - [ ] PR-B4 connect form
 - [ ] PR-A1 Providers master/detail
@@ -178,3 +178,48 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
   is not converted), and an OAuth re-login of the same account keeps its identity. Store side: `TestStore_AccountIdentity`.
 - Refresh-blocked clearing needs no new code: the quota poller's rejected-credential state is keyed on a credential fingerprint
   (`internal/quota/poller.go`), so a replaced credential unblocks by itself.
+
+**PR-B2 (AC-B4..AC-B7), all Go tests under `-race` (`go test -race -count=3 ./internal/accounts ./internal/wsapi -run 'Login|OAuth|Oauth|Complete|Callback|Redirect|Secrets|Pasted'`). Named scenarios are `t.Run` subtests (spaces become `_` for `-run`):**
+- `oauthStart emits authorizeUrl with a loginId` -- `internal/accounts/login_complete_test.go` (`TestLoginCoordinator_Complete`: 22-char
+  base64url id, distinct per login, registered while waiting) and `internal/wsapi/oauth_complete_test.go`
+  (`TestServer_AccountOAuthComplete`: the event is `{loginId,url}`, `url` stays first-class).
+- `oauthComplete finishes the login from a pasted redirect` -- both files above; the wsapi version drives the start from one
+  WebSocket and the paste from another, the paste answers `{}`, and the start request resolves with `created:true`.
+- `oauthComplete accepts bare query and code-hash forms` -- `internal/accounts/redirect_parse_test.go`
+  (`TestParsePastedRedirect_AcceptsBareQueryAndCodeHashForms`: full URL, fragment, schemeless, bare query, `?query`, `code#state`,
+  vendor `error=`; `TestParsePastedRedirect_Rejects`: empty, 5000 bytes, garbage, `code=`, no code, bad escape, and no error ever
+  echoes the input); end to end as `oauthComplete accepts bare query and code-hash forms (end to end)` in `login_complete_test.go`.
+- `oauthComplete wrong state errors and leaves login pending`, `oauthComplete unknown loginId errors`,
+  `oauthComplete rejects after five attempts` (malformed and wrong-state pastes both count; the 6th is `login_attempts_exceeded`, the
+  login stays pending and the listener still finishes it), `oauthComplete wrong method errors`, `oauthComplete pasted error fails the
+  login as denied` -- `login_complete_test.go`. Wire: `oauthComplete errors carry a code and never echo the paste` --
+  `oauth_complete_test.go`.
+- `first of listener callback and paste wins` -- `login_complete_test.go`: `listener then paste` and `paste then listener` (a gated
+  fake `Exchange` keeps the login registered, so the loser deterministically gets `login_already_completed`) and `simultaneous` x5;
+  exactly one account each time. The arbiter is `pendingLogin.resolved`, set under the coordinator mutex.
+- `cancel frees listener and provider claim` -- `login_complete_test.go`: `context.Canceled`, loginId gone (`login_unknown`), port
+  re-bindable, a second login for the provider starts.
+- `callback listener is loopback only` -- `internal/accounts/oauth_server_test.go` (`TestCallbackListenerIsLoopbackOnly`):
+  `localhost:0`, `127.0.0.1:0` (and `[::1]:0` when available) bind loopback; `0.0.0.0:0`, `:0`, `[::]:0`, `192.0.2.1:0`, a hostname
+  and a port-less address are rejected; the real `anthropicCallbackAddr`/`openaiCallbackAddr` pass `checkLoopbackAddr` (parse only,
+  no real port bound).
+- `login secrets never appear in logs or errors` -- `internal/accounts/login_secrets_test.go`
+  (`TestLoginSecretsNeverAppearInLogsOrErrors`, log and slog captured) and `internal/wsapi/oauth_complete_test.go`
+  (`TestServer_AccountOAuthComplete_NoSecretsLeak`, RPC error messages and logs): code, state and pasted URL absent. Neither wsapi
+  nor accounts logs request params at all (no `log.`/`slog.` call in `internal/wsapi/{conn,wsapi,server}.go` or `internal/accounts`),
+  so nothing needed redacting; `account.oauthComplete`'s own param errors are fixed text (a JSON decode error is not wrapped, it can
+  quote input).
+- Review fixes (`login_complete_test.go` unless noted): `simultaneous` no longer fails when the paste wins and the listener closes
+  under the racing GET (`tryCallback` ignores transport errors); `a paste acknowledged by oauthComplete is never dropped` (calls
+  `await` directly with the paste acknowledged first and a listener result / cancelled ctx / expired timeout ready too, 200
+  iterations each; removing the `pl.resolved` re-check under the mutex fails it); `oauthComplete error paste without matching state
+  does not fail the login` (an `error=` paste must prove state, missing or wrong -> `state_mismatch`, login stays pending; the
+  listener path is unchanged); `oauthComplete after cancel is login_unknown` (a login ended by ctx cancel or timeout reports
+  `login_unknown`, never `login_already_completed`); `callback listener is loopback only` also rejects `localhost.evil:0` and
+  `checkBoundLoopback` rejects a bound non-loopback address (`oauth_server_test.go`, fake listener).
+  Flake check, both modes: `go test -count=10 ./internal/accounts` and `go test -race -count=10 ./internal/accounts` pass.
+- AC-B7 codes `login_in_progress`, `timeout`, `state_mismatch`, `denied`, `login_bad_redirect` now come from `*LoginError` on the
+  listener path too (existing tests updated to assert codes via `requireLoginCode`). ADR-0033's error list gained
+  `login_wrong_method`, `login_attempts_exceeded`, `login_bad_redirect`, `login_already_completed`.
+- Gate: `account.oauthStart` has no run-scoped or local-only gate today (`runScoped` is set by nothing yet, ADR-0027), so
+  `account.oauthComplete` has none either; revisit when run tokens land.

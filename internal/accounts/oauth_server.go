@@ -2,12 +2,30 @@ package accounts
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"time"
 )
+
+// checkLoopbackAddr rejects any listen address that is not loopback-only:
+// the callback listener carries an authorization code, so it must never be
+// reachable from the network (ADR-0033 D1). Only "localhost" or a loopback IP
+// literal passes; an empty host, 0.0.0.0, :: and every other address are
+// refused.
+func checkLoopbackAddr(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("oauth callback address %q is not host:port: %w", addr, err)
+	}
+	if host == "localhost" {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return fmt.Errorf("oauth callback address %q is not loopback-only", addr)
+}
 
 // callbackResult is what the vendor's redirect to a callbackServer
 // delivered: either code+state on success, or a non-empty errCode
@@ -16,6 +34,18 @@ type callbackResult struct {
 	code    string
 	state   string
 	errCode string
+}
+
+// checkBoundLoopback verifies the address a listener actually bound is
+// loopback. checkLoopbackAddr only judges the requested string; a name such as
+// "localhost" is resolved by the OS, and a hosts file or resolver could point
+// it at a network-reachable address.
+func checkBoundLoopback(l net.Listener) error {
+	tcp, ok := l.Addr().(*net.TCPAddr)
+	if !ok || !tcp.IP.IsLoopback() {
+		return fmt.Errorf("oauth callback listener bound to %s, which is not loopback-only", l.Addr())
+	}
+	return nil
 }
 
 // callbackServer is a temporary local HTTP listener that serves exactly one
@@ -40,9 +70,16 @@ type callbackServer struct {
 // purely cosmetic: it's what the browser-facing success page names (see
 // oauth_callback_page.go), not used for any routing/matching decision.
 func newCallbackServer(addr, path, providerLabel string) (*callbackServer, error) {
+	if err := checkLoopbackAddr(addr); err != nil {
+		return nil, err
+	}
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("bind oauth callback listener on %s: %w", addr, err)
+	}
+	if err := checkBoundLoopback(listener); err != nil {
+		_ = listener.Close()
+		return nil, err
 	}
 
 	s := &callbackServer{listener: listener, result: make(chan callbackResult, 1), providerLabel: providerLabel}
@@ -93,19 +130,6 @@ func (s *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	fmt.Fprint(w, renderCallbackSuccessPage(s.providerLabel))
-}
-
-// waitForCallback blocks until the vendor's redirect lands, ctx is done, or
-// timeout elapses, whichever comes first.
-func (s *callbackServer) waitForCallback(ctx context.Context, timeout time.Duration) (callbackResult, error) {
-	select {
-	case res := <-s.result:
-		return res, nil
-	case <-ctx.Done():
-		return callbackResult{}, ctx.Err()
-	case <-time.After(timeout):
-		return callbackResult{}, errors.New("timed out waiting for the OAuth callback")
-	}
 }
 
 // close gracefully shuts the server down, releasing its bound port. Safe to
