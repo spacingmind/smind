@@ -39,7 +39,7 @@ function ConnectionsSection() {
   const [showHandoverNotice, setShowHandoverNotice] = useState(false);
   // The live state of the current connection when it is a relay one: pending
   // approval and revoked devices need to be told what to do about it.
-  const relayStatus = useRelayStatus(current?.kind === "relay");
+  const relayStatus = useRelayStatus(current?.kind === "relay", current?.id);
 
   const refresh = useCallback(() => {
     Promise.all([desktop.listConnections(), desktop.getCurrentConnection()])
@@ -117,7 +117,7 @@ function ConnectionsSection() {
                   )}
                 </span>
                 <span className="truncate font-mono text-ui-sm text-muted-foreground">{c.baseUrl}</span>
-                {current?.id === c.id && c.kind === "relay" && relayStatus && <RelayConnectionStatus status={relayStatus} />}
+                {current?.id === c.id && c.kind === "relay" && relayStatus && <RelayConnectionStatus status={relayStatus} connectionId={c.id} />}
               </div>
               <div className="flex shrink-0 gap-1">
                 {current?.id !== c.id && (

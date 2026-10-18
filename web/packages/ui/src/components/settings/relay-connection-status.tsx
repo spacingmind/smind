@@ -13,13 +13,13 @@ export const RELAY_STATUS_POLL_MS = 2000;
  * `active`; a failed read keeps the last known state rather than flashing an error, since the
  * next tick retries.
  */
-export function useRelayStatus(active: boolean): RelayStatus | null {
+export function useRelayStatus(active: boolean, connectionId?: string): RelayStatus | null {
   const [status, setStatus] = useState<RelayStatus | null>(null);
   useEffect(() => {
-    if (!active) {
-      setStatus(null);
-      return;
-    }
+    // A new connection id means a different relay: drop the previous one's state at once rather
+    // than showing it (and its password prompt) for a poll interval.
+    setStatus(null);
+    if (!active) return;
     let cancelled = false;
     const read = () => {
       desktop
@@ -35,7 +35,7 @@ export function useRelayStatus(active: boolean): RelayStatus | null {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [active]);
+  }, [active, connectionId]);
   return status;
 }
 
@@ -61,7 +61,7 @@ function Command({ deviceId }: { deviceId: string | undefined }) {
  * must act on — waiting for approval, and revoked — spell out the command to run on the machine
  * that runs the daemon.
  */
-export function RelayConnectionStatus({ status }: { status: RelayStatus }) {
+export function RelayConnectionStatus({ status, connectionId }: { status: RelayStatus; connectionId?: string }) {
   const quiet = "text-ui-sm text-muted-foreground";
   switch (status.state) {
     case "connected":
@@ -98,7 +98,7 @@ export function RelayConnectionStatus({ status }: { status: RelayStatus }) {
     case "passwordRequired":
     case "incorrectPassword":
     case "passwordLocked":
-      return <DaemonPasswordPrompt status={status} />;
+      return <DaemonPasswordPrompt status={status} connectionId={connectionId} />;
     case "refused":
       return (
         <div role="status" className="mt-1 flex flex-col gap-1" data-testid="connection-relay-status" data-state="refused">
@@ -121,7 +121,7 @@ export const MAX_DAEMON_PASSWORD_BYTES = 128;
  * dropped from this component immediately; Rust holds it in memory only and never sends it back, so
  * nothing in this tree can read it again. Nothing is written to any web storage.
  */
-function DaemonPasswordPrompt({ status }: { status: RelayStatus }) {
+function DaemonPasswordPrompt({ status, connectionId }: { status: RelayStatus; connectionId?: string }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -141,7 +141,7 @@ function DaemonPasswordPrompt({ status }: { status: RelayStatus }) {
     setError(null);
     setPassword(""); // gone from this component before the call even returns
     try {
-      await desktop.relaySetPassword(entered);
+      await desktop.relaySetPassword(connectionId ?? "", entered);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not hand the password to the app.");
     } finally {

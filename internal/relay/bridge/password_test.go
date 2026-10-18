@@ -111,7 +111,8 @@ func TestPasswordRefusalRevealsNothingAboutTheRegistry(t *testing.T) {
 
 func TestWrongPasswordsAreRateLimitedPerDevice(t *testing.T) {
 	clock := newFakeClock()
-	f := passwordFixture(t, Options{Clock: clock})
+	// 41 rotating device ids: lift the relay's own per-host attachment cap (16) out of the way.
+	f := newHubFixture(t, Options{Clock: clock, Password: testGate{required: true, want: daemonPassword}}, relaytestMaxDevices(100))
 	approvedWindow(t, f, 2)
 	f.start(nil)
 	d := f.newDevice(false, "guesser")
@@ -200,5 +201,73 @@ func TestPasswordProtectedDaemonRefusesLegacyClients(t *testing.T) {
 	r, err := d.request("workspace.list", nil)
 	if err != nil || r.Err == nil || r.Err.Code != codeHelloRequired {
 		t.Fatalf("legacy request on a password daemon = %+v, %v; want %q", r, err, codeHelloRequired)
+	}
+}
+
+// A device that fails the password must not be able to disturb a live, approved
+// session of the same device id (the attacker needs only the key, not the password).
+func TestWrongPasswordHelloDoesNotSupersedeALiveSession(t *testing.T) {
+	f := passwordFixture(t, Options{})
+	approvedWindow(t, f, 1)
+	f.start(nil)
+	d := f.newDevice(false, "laptop")
+	d.connectWithPassword(daemonPassword)
+	d.mustList()
+
+	// The same device key, a new session, no/wrong password: refused, and the first session keeps serving.
+	again := f.newDevice(false, "laptop")
+	again.priv, again.pub, again.id = d.priv, d.pub, d.id
+	wantCode(t, helloOutcome(t, again, ""), codePasswordRequired)
+	wantCode(t, helloOutcome(t, again, "wrong"), codeIncorrectPassword)
+	d.mustList()
+}
+
+func TestSilentClientOnAPasswordDaemonIsRefusedEvenWithLegacyOn(t *testing.T) {
+	f := passwordFixture(t, Options{LegacyDevices: true, HelloTimeout: 300 * time.Millisecond})
+	f.start(nil)
+	d := f.newDevice(false, "quiet-app")
+	d.id = DefaultDeviceID
+	if err := d.open(""); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(700 * time.Millisecond)
+	if f.logs.contains("as a legacy device") {
+		t.Fatal("a silent client was served as legacy on a password-protected daemon")
+	}
+}
+
+func TestHelloOnTheFixedRouteIsRefusedOnAPasswordDaemon(t *testing.T) {
+	f := passwordFixture(t, Options{})
+	f.start(nil)
+	d := f.newDevice(false, "x")
+	d.id = DefaultDeviceID // the fixed single-device route: no challenge, no identity hello
+	if err := d.open(DefaultSessionID); err != nil {
+		t.Fatal(err)
+	}
+	r, err := d.request(devices.HelloMethod, map[string]any{"v": 2, "password": daemonPassword})
+	if err != nil || r.Err == nil {
+		t.Fatalf("a hello on the fixed route = %+v, %v; want a refusal", r, err)
+	}
+}
+
+// More than 40 wrong attempts a minute across ALL devices (rotating device keys is free for an
+// attacker) lock every password check for a minute, correct password included; it then lifts.
+// Exercised on the hub's check directly: 41 rotating routes would hit the relay's own per-host cap.
+func TestGlobalWrongPasswordWindowLocksEveryDeviceThenLifts(t *testing.T) {
+	clock := newFakeClock()
+	h := NewHub(Options{Clock: clock, Password: testGate{required: true, want: daemonPassword}, Logf: func(string, ...any) {}})
+	for i := 0; i < 41; i++ {
+		ok, code, _, _ := h.checkPassword("rotating-"+string(rune('A'+i%26))+string(rune('a'+i/26)), "guess")
+		if ok || code != codeIncorrectPassword {
+			t.Fatalf("attempt %d: ok=%v code=%q", i, ok, code)
+		}
+	}
+	ok, code, _, retry := h.checkPassword("a-legitimate-device", daemonPassword)
+	if ok || code != codeTooManyAttempts || retry < 1 {
+		t.Fatalf("during the global lock: ok=%v code=%q retry=%d; want too_many_attempts with a retry_after", ok, code, retry)
+	}
+	clock.Advance(time.Duration(retry+1) * time.Second)
+	if ok, code, _, _ := h.checkPassword("a-legitimate-device", daemonPassword); !ok {
+		t.Fatalf("after the lock lifted: %q", code)
 	}
 }

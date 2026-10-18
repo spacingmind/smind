@@ -820,10 +820,19 @@ somebody else's nonce, which only counts as liveness); each (re)opened stream pr
   *Client rules (desktop, mobile):* send `password` only when the user entered one this run. On `password_required` or
   `incorrect_password` stop the automatic retry loop, show the password prompt, and on submit reconnect (a new session, a new
   challenge: the hello is per session) with the password; after `incorrect_password` forget the rejected value. On
-  `too_many_attempts` show "try again in N s", wait `retry_after` (at least 5 s) and do not resubmit the rejected password on your
-  own. Keep the password in memory only (Rust process memory on desktop, JS memory on mobile) for the rest of the app run so
+  `too_many_attempts` show "try again in N s" and wait `retry_after` (at least 5 s, at most an hour: clamp what a daemon says). The
+  daemon checks its rate limit *before* it looks at the password, so a lockout says nothing about the password that was sent: keep
+  it and try it again once after the wait (forgetting it would let anyone who can hold the daemon's global limit make every client
+  discard a correct password); only a password the daemon answered `incorrect_password` for is forgotten, and exactly that one
+  (not a newer one the user typed while the reply was in flight), and never re-sent. Keep the password in memory only (Rust process memory on desktop, JS memory on mobile) for the rest of the app run so
   transport blips and daemon restarts reconnect without asking again; never write it to disk, a keychain, logs, URLs, or the
-  webview. A daemon from before P13c ignores the field (an unknown JSON key), so a client holding a password still connects to it.
+  webview. A password is only ever sent to the daemon it was typed for: the desktop keys its in-memory password by connection id *and*
+  the daemon's public key (re-adding a link that changes the key starts empty), and the set-password command names the connection.
+  A daemon from before P13c ignores the field (an unknown JSON key), so a client holding a password still connects to it.
+  *Accepted residuals:* one attacker with relay access and any Ed25519 key can spend ~40 wrong guesses a minute across rotated device
+  ids (~58k a day, in addition to `/api/login`'s own budget) and can hold the global lock to delay every new session (existing and
+  resumed sessions are unaffected); a 12+ character unique password makes the guessing budget irrelevant, and a lockout never
+  makes a client forget a correct password.
 - *v1 is not accepted (2026-10-15):* v1 signed nothing the daemon contributed. No released client ever spoke it — the
   clients that do (desktop P13a, mobile P13b) ship after this change, and every released app lacks a hello altogether and is
   refused by default (`relay.legacyDevices` is false) — so there is nothing to keep compatible, and accepting v1 would keep the

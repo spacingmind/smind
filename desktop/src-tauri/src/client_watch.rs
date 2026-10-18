@@ -88,22 +88,52 @@ fn on_event(
 /// `proxy` (AC5's `/ws` bridge reads it from there) if any. Returns the
 /// new task handles for the caller to store; it does not abort anything
 /// -- see `restart`, which does that before calling this.
-/// The daemon passwords entered this run, by connection id: in memory only,
-/// never persisted. Shared between `activate` (which hands the cell to the
-/// connection) and the removal of a connection (which forgets it).
-fn password_cells() -> &'static Mutex<HashMap<String, relay::password::PasswordCell>> {
-    static CELLS: OnceLock<Mutex<HashMap<String, relay::password::PasswordCell>>> = OnceLock::new();
+/// The daemon passwords entered this run, in memory only, never persisted. Keyed by
+/// connection id AND the daemon's public key: re-adding a link with the same relay
+/// host id but a different daemon key replaces the connection, and a password the
+/// user typed for the old daemon must never be sent to the new one.
+fn password_cells() -> &'static Mutex<HashMap<(String, [u8; 32]), relay::password::PasswordCell>> {
+    static CELLS: OnceLock<Mutex<HashMap<(String, [u8; 32]), relay::password::PasswordCell>>> = OnceLock::new();
     CELLS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn password_cell(conn_id: &str) -> relay::password::PasswordCell {
-    password_cells().lock().unwrap().entry(conn_id.to_string()).or_default().clone()
+fn password_cell(conn_id: &str, daemon_key: &[u8; 32]) -> relay::password::PasswordCell {
+    password_cells()
+        .lock()
+        .unwrap()
+        .entry((conn_id.to_string(), *daemon_key))
+        .or_default()
+        .clone()
 }
 
-/// forget_password drops a removed connection's in-memory password.
+/// forget_password drops every in-memory password of a removed connection.
 pub fn forget_password(conn_id: &str) {
-    if let Some(cell) = password_cells().lock().unwrap().remove(conn_id) {
-        cell.clear();
+    password_cells().lock().unwrap().retain(|(id, _), cell| {
+        if id == conn_id {
+            cell.clear();
+            false
+        } else {
+            true
+        }
+    });
+}
+
+#[cfg(test)]
+mod password_tests {
+    use super::*;
+
+    #[test]
+    fn a_new_daemon_key_under_the_same_connection_id_gets_no_password() {
+        let (old_key, new_key) = ([1u8; 32], [2u8; 32]);
+        let old = password_cell("relay:test-host@relay.example:7400", &old_key);
+        old.set("typed-for-the-old-daemon".into());
+        let same = password_cell("relay:test-host@relay.example:7400", &old_key);
+        assert!(same.is_set(), "the same daemon keeps its password across restarts of the loop");
+        let other = password_cell("relay:test-host@relay.example:7400", &new_key);
+        assert!(!other.is_set(), "a different daemon key must start with no password");
+        forget_password("relay:test-host@relay.example:7400");
+        assert!(!password_cell("relay:test-host@relay.example:7400", &old_key).is_set(), "removal forgets every key's password");
+        assert!(!old.is_set());
     }
 }
 
@@ -146,7 +176,7 @@ fn activate(
                     let mut options = relay::client::RelayOptions::identity(Arc::new(key));
                     // The daemon password the user entered this run survives the
                     // restart a connection switch or a daemon bounce causes.
-                    options.password = password_cell(&conn.id);
+                    options.password = password_cell(&conn.id, &pairing.daemon_public_key);
                     options
                 }
                 Err(e) => {

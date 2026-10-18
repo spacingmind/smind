@@ -1073,8 +1073,10 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   legacy clients refused when a password is set, one warning per start when none; Rust `PasswordCell` (zeroized, redacted Debug) + three relay states +
   `connections_relay_set_password` (webview → Rust once, never back); web prompt in Settings → Connections; the harnesses gained `-password`. The
   signed bytes and the v2 vectors are unchanged (the password is in the params, outside the signature). Decisions inside the spec: the desktop does not
-  retry on `password_required`/`incorrect_password` (it parks until the user enters one); after `too_many_attempts` the discarded password is not re-sent
-  and the client waits `max(retry_after, 5)` s then asks again; the password cell is per connection id and survives connection switches within one app run.
+  retry on `password_required`/`incorrect_password` (it parks until the user enters one); after `too_many_attempts` the client keeps the (unjudged)
+  password and waits `clamp(retry_after, 5, 3600)` s then retries it once; the password cell is keyed by connection id AND daemon public key and survives
+  connection switches within one app run; `connections_relay_set_password` names the connection (refused if it is not the selected one). Independent review
+  fixes: the key-bound cell, the unjudged-password rule, the generation-guarded `clear_if`, the clamped `retry_after`, the stale-status reset on switch.
 
 ## Validation
 

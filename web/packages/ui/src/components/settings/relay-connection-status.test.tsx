@@ -82,7 +82,7 @@ describe("daemon password prompt (ADR-0031 P13c)", () => {
   it("asks for the daemon password when the relay host requires it and never stores it", async () => {
     const setItem = vi.spyOn(Storage.prototype, "setItem");
     const set = vi.spyOn(desktop, "relaySetPassword").mockResolvedValue(undefined);
-    render(<RelayConnectionStatus status={{ state: "passwordRequired" }} />);
+    render(<RelayConnectionStatus status={{ state: "passwordRequired" }} connectionId="relay:h1@r:7400" />);
     const line = screen.getByTestId("connection-relay-status");
     expect(line).toHaveAttribute("data-state", "passwordRequired");
     expect(line).toHaveTextContent("This daemon needs its password.");
@@ -94,13 +94,31 @@ describe("daemon password prompt (ADR-0031 P13c)", () => {
     fireEvent.change(input, { target: { value: "correct horse battery" } });
     fireEvent.click(screen.getByTestId("relay-password-submit"));
     expect(set).toHaveBeenCalledTimes(1);
-    expect(set).toHaveBeenCalledWith("correct horse battery");
+    expect(set).toHaveBeenCalledWith("relay:h1@r:7400", "correct horse battery");
     // Gone from the field at once, and written to no web storage.
     await waitFor(() => expect(input.value).toBe(""));
     expect(setItem).not.toHaveBeenCalled();
     expect(JSON.stringify({ ...localStorage })).not.toContain("correct horse");
     expect(JSON.stringify({ ...sessionStorage })).not.toContain("correct horse");
     expect(document.body.innerHTML).not.toContain("correct horse");
+  });
+
+  it("clears a previous connection's state at once when the selected connection changes", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(desktop, "relayStatus")
+      .mockResolvedValueOnce({ state: "passwordRequired" })
+      .mockImplementation(() => new Promise<never>(() => {})); // the new connection's first read never lands during the test
+    function Probe({ id }: { id: string }) {
+      const s = useRelayStatus(true, id);
+      return <span data-testid="state">{s ? s.state : "none"}</span>;
+    }
+    const { rerender } = render(<Probe id="a" />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("state")).toHaveTextContent("passwordRequired");
+    rerender(<Probe id="b" />);
+    expect(screen.getByTestId("state")).toHaveTextContent("none"); // not a stale prompt for the other relay
   });
 
   it("says a rejected password was not accepted and asks again", () => {
@@ -127,7 +145,7 @@ describe("daemon password prompt (ADR-0031 P13c)", () => {
 
   it("shows Rust's error and keeps the field empty when handing over fails", async () => {
     vi.spyOn(desktop, "relaySetPassword").mockRejectedValue(new Error("no relay connection is selected"));
-    render(<RelayConnectionStatus status={{ state: "passwordRequired" }} />);
+    render(<RelayConnectionStatus status={{ state: "passwordRequired" }} connectionId="relay:h1@r:7400" />);
     fireEvent.change(screen.getByTestId("relay-password-input"), { target: { value: "another long password" } });
     fireEvent.click(screen.getByTestId("relay-password-submit"));
     expect(await screen.findByTestId("relay-password-error")).toHaveTextContent("no relay connection is selected");
@@ -136,7 +154,7 @@ describe("daemon password prompt (ADR-0031 P13c)", () => {
 
   it("refuses an over-long password without sending it", async () => {
     const set = vi.spyOn(desktop, "relaySetPassword").mockResolvedValue(undefined);
-    render(<RelayConnectionStatus status={{ state: "passwordRequired" }} />);
+    render(<RelayConnectionStatus status={{ state: "passwordRequired" }} connectionId="relay:h1@r:7400" />);
     fireEvent.change(screen.getByTestId("relay-password-input"), { target: { value: "x".repeat(200) } });
     fireEvent.click(screen.getByTestId("relay-password-submit"));
     expect(set).not.toHaveBeenCalled();

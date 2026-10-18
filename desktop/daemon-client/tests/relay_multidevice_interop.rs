@@ -656,9 +656,10 @@ async fn repeated_wrong_passwords_are_rate_limited_by_the_daemon() {
     let st = submit_password(&a.handle, DAEMON_PASSWORD, 40, |s| matches!(s, Status::PasswordLocked { .. })).await;
     let Status::PasswordLocked { retry_after_secs } = st else { unreachable!() };
     assert!(retry_after_secs >= 5, "the client waits at least 5 s: {retry_after_secs}");
-    // After the wait it asks again (the locked-out password was discarded, not re-sent).
-    wait_status(&a.handle, 60, |s| *s == Status::PasswordRequired).await;
-    submit_password(&a.handle, DAEMON_PASSWORD, 60, |s| *s == Status::Connected).await;
+    // The lockout judged nothing about the password the user had just typed, so it is kept and
+    // tried again after the wait (a rejected one is cleared, see the first test): the right
+    // password then connects without asking again.
+    wait_status(&a.handle, 60, |s| *s == Status::Connected).await;
     served(&a, "a-after-lockout").await;
 }
 

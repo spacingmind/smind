@@ -917,6 +917,9 @@ enum RouteMode {
     Legacy,
 }
 
+/// The longest wait the client will honour from a daemon's `retry_after`.
+const MAX_RETRY_AFTER_SECS: u64 = 3600;
+
 /// Why a fresh session could not be established.
 #[derive(Debug)]
 enum Failure {
@@ -929,7 +932,13 @@ enum Failure {
     Refused { code: String, message: String },
     /// The daemon's password check refused the hello (P13c): `password_required`,
     /// `incorrect_password` or `too_many_attempts` (with its `retry_after`).
-    Password { code: String, retry_after: Option<u64> },
+    Password {
+        code: String,
+        retry_after: Option<u64>,
+        /// The `PasswordCell` generation this hello carried: an `incorrect_password`
+        /// answer forgets that password and nothing newer.
+        sent_generation: u64,
+    },
     /// The relay itself refused the stream (PermissionDenied: revoked).
     RelayDenied(String),
     /// The daemon does not do device identity (method not found / unsupported).
@@ -1039,7 +1048,7 @@ async fn identify_device<T: FrameTransport>(
     let request_id = "relay-hello-1";
     // The password (when the user entered one this run) goes into the encrypted
     // request only; the copy zeroizes when this function returns.
-    let pw = password.get();
+    let (pw, sent_generation) = password.snapshot();
     let request = device::hello_request_with_password(request_id, &hello, pw.as_ref().map(|p| p.as_str()));
     drop(pw);
     channel
@@ -1071,7 +1080,7 @@ async fn identify_device<T: FrameTransport>(
         HelloOutcome::Refused { code, retry_after, .. }
             if matches!(code.as_str(), "password_required" | "incorrect_password" | "too_many_attempts") =>
         {
-            Err(Failure::Password { code, retry_after })
+            Err(Failure::Password { code, retry_after, sent_generation })
         }
         HelloOutcome::Refused { code, message, .. } => Err(Failure::Refused { code, message }),
     }
@@ -1405,24 +1414,31 @@ async fn run(
                     data = Some(channel);
                     stats.fresh_sessions.fetch_add(1, Ordering::SeqCst);
                 }
-                Err(Failure::Password { code, retry_after }) => {
-                    // The daemon's password check (P13c). None of these retries by
-                    // itself: a missing or rejected password needs the user, and a
-                    // rejected one must not be re-sent (it would only count against
-                    // the daemon's limit).
+                Err(Failure::Password { code, retry_after, sent_generation }) => {
+                    // The daemon's password check (P13c). A missing or rejected password
+                    // needs the user, so neither retries by itself, and a rejected one is
+                    // never re-sent (it would only count against the daemon's limit).
                     eprintln!("smind desktop: relay: the daemon's password check answered {code}");
                     match code.as_str() {
                         "too_many_attempts" => {
-                            options.password.clear();
-                            let wait = retry_after.unwrap_or(60).max(5);
+                            // The daemon looked at the rate limit, not the password: nothing
+                            // was rejected, so the password (if any) is kept and tried again
+                            // after the wait. (Discarding it would let anyone who can hold the
+                            // daemon's global limit make every desktop forget a correct one.)
+                            // The wait is the daemon's, clamped to a sane range.
+                            let wait = retry_after.unwrap_or(60).clamp(5, MAX_RETRY_AFTER_SECS);
                             let _ = status_tx.send(Status::PasswordLocked { retry_after_secs: wait });
                             if sleep_or_stop(&mut outbound_rx, Duration::from_secs(wait)).await.is_none() {
                                 return;
                             }
+                            if options.password.is_set() {
+                                let _ = status_tx.send(Status::Connecting);
+                                continue;
+                            }
                             let _ = status_tx.send(Status::PasswordRequired);
                         }
                         "incorrect_password" => {
-                            options.password.clear();
+                            options.password.clear_if(sent_generation);
                             let _ = status_tx.send(Status::IncorrectPassword);
                         }
                         _ => {
@@ -1907,7 +1923,7 @@ mod tests {
             }
         );
         match res {
-            Err(Failure::Password { code, retry_after: None }) => assert_eq!(code, "incorrect_password"),
+            Err(Failure::Password { code, retry_after: None, .. }) => assert_eq!(code, "incorrect_password"),
             other => panic!("expected a password refusal, got {other:?}"),
         }
         assert_eq!(got["params"]["password"], "a-long-daemon-password");

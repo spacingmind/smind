@@ -345,7 +345,7 @@ pub fn connections_relay_status(state: State<'_, DesktopState>) -> Option<RelayS
     Some(RelayStatus::from(&status))
 }
 
-/// connections_relay_set_password hands the selected relay connection the
+/// connections_relay_set_password hands the relay connection `id` (which must be the selected one) the
 /// daemon password (ADR-0031 P13c) and wakes it. The password is typed in the
 /// webview and crosses this command once; from here it lives in Rust process
 /// memory only (`PasswordCell`: zeroized, redacted Debug), is never written to
@@ -353,13 +353,22 @@ pub fn connections_relay_status(state: State<'_, DesktopState>) -> Option<RelayS
 /// (`connections_relay_status`) carries state names only. A password the daemon
 /// rejects is forgotten by the connection.
 #[tauri::command]
-pub fn connections_relay_set_password(state: State<'_, DesktopState>, password: String) -> Result<(), String> {
+pub fn connections_relay_set_password(
+    state: State<'_, DesktopState>,
+    id: String,
+    password: String,
+) -> Result<(), String> {
     use smind_daemon_client::relay::password::MAX_PASSWORD_BYTES;
     if password.is_empty() {
         return Err("enter the daemon's password".into());
     }
     if password.len() > MAX_PASSWORD_BYTES {
         return Err("that is too long to be the daemon's password".into());
+    }
+    // Bound to a connection: the status the user saw may be a moment stale after a
+    // switch, and a password typed for one daemon must not go to another.
+    if state.proxy.registry.lock().unwrap().current().id != id {
+        return Err("that connection is no longer the selected one".into());
     }
     let handle = state
         .proxy

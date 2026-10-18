@@ -2,9 +2,12 @@
 //! (ADR-0031 P13c). It is typed by the user, handed to Rust once, and lives
 //! here, in this process's memory, until the app exits: never written to disk
 //! or a log, never returned to the webview, never part of a Debug/Display
-//! rendering. A rejected password is forgotten at once.
+//! rendering. A rejected password is forgotten at once. (The copy held here
+//! is zeroized when it is replaced or dropped; short-lived copies in the IPC
+//! argument and the request buffers are ordinary memory, not wiped.)
 
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::Notify;
@@ -18,6 +21,9 @@ pub const MAX_PASSWORD_BYTES: usize = 128;
 #[derive(Default)]
 struct Inner {
     value: Mutex<Option<Zeroizing<String>>>,
+    /// Bumped by every `set`: lets a caller forget exactly the password it sent
+    /// without erasing a newer one the user entered while the reply was in flight.
+    generation: AtomicU64,
     changed: Notify,
 }
 
@@ -35,6 +41,7 @@ impl PasswordCell {
         let password = Zeroizing::new(password);
         let mut slot = self.inner.value.lock().unwrap();
         *slot = if password.is_empty() { None } else { Some(password) };
+        self.inner.generation.fetch_add(1, Ordering::SeqCst);
         drop(slot);
         self.inner.changed.notify_waiters();
         // A permit too, so a set that lands just before the loop starts waiting
@@ -45,6 +52,22 @@ impl PasswordCell {
     /// A copy for one hello. The copy zeroizes itself when dropped.
     pub fn get(&self) -> Option<Zeroizing<String>> {
         self.inner.value.lock().unwrap().clone()
+    }
+
+    /// A copy and the generation it belongs to (see `clear_if`).
+    pub fn snapshot(&self) -> (Option<Zeroizing<String>>, u64) {
+        let slot = self.inner.value.lock().unwrap();
+        (slot.clone(), self.inner.generation.load(Ordering::SeqCst))
+    }
+
+    /// Forgets the password only if it is still the one `snapshot` returned for
+    /// `generation`: a daemon's "incorrect" answer applies to what was sent, not
+    /// to whatever the user typed since.
+    pub fn clear_if(&self, generation: u64) {
+        let mut slot = self.inner.value.lock().unwrap();
+        if self.inner.generation.load(Ordering::SeqCst) == generation {
+            *slot = None;
+        }
     }
 
     /// Forgets the password (it was rejected, or the connection was removed).
@@ -80,6 +103,21 @@ mod tests {
         let shown = format!("{cell:?}");
         assert!(!shown.contains("correct"), "{shown}");
         assert_eq!(shown, "PasswordCell(set, redacted)");
+    }
+
+    #[test]
+    fn a_rejected_password_is_forgotten_but_a_newer_one_is_not() {
+        let cell = PasswordCell::default();
+        cell.set("first-password-123".into());
+        let (sent, gen) = cell.snapshot();
+        assert_eq!(sent.unwrap().as_str(), "first-password-123");
+        // The user types another while the daemon is still answering the first.
+        cell.set("second-password-456".into());
+        cell.clear_if(gen);
+        assert_eq!(cell.get().unwrap().as_str(), "second-password-456", "the newer password must survive");
+        let (_, gen2) = cell.snapshot();
+        cell.clear_if(gen2);
+        assert!(cell.get().is_none(), "the rejected password is forgotten");
     }
 
     #[test]

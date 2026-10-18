@@ -254,9 +254,9 @@ func (s *Server) authorizeWS(r *http.Request) bool {
 }
 
 // RelayPasswordGate adapts the daemon password to the relay hub: relay devices
-// must present it in their device_hello (ADR-0031 P13c). Its Required is live
-// (it follows the configured password), and Check is the same bcrypt check
-// POST /api/login uses.
+// must present it in their device_hello (ADR-0031 P13c). The password is fixed
+// when the daemon starts (changing it needs a restart, which ends every relay
+// session too), and Check is the same bcrypt check POST /api/login uses.
 func (s *Server) RelayPasswordGate() relayPasswordGate { return relayPasswordGate{s.direct} }
 
 type relayPasswordGate struct{ d *directAuth }
