@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [default, tempD, noDefender]
+        scenario: [default, tempD]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
@@ -75,21 +75,9 @@ jobs:
           & "$dir\sb.exe" D:\sb
           exit 0
 
-      - name: go test ./internal/store (json) with per-test timings
+      - name: store open / commit costs under different durability settings
         shell: pwsh
         run: |
-          $sw = [Diagnostics.Stopwatch]::StartNew()
-          go test -json -count=1 -timeout 14m ./internal/store 2>&1 | Out-File -Encoding utf8 store.json
-          "go test exit $LASTEXITCODE after $($sw.Elapsed)"
-          $ev = Get-Content store.json | ForEach-Object { try { $_ | ConvertFrom-Json } catch { $null } } | Where-Object { $_ -and $_.Test -and $_.Action -in 'pass','fail' }
-          "tests finished: $(@($ev).Count)"
-          ($ev | Sort-Object Elapsed -Descending | Select-Object -First 25 | Format-Table Test, Action, Elapsed -AutoSize | Out-String)
-          "sum of test time: $([math]::Round(($ev | Measure-Object Elapsed -Sum).Sum,1)) s"
+          go test -count=1 -run TestDiagOpenCosts -v ./internal/store 2>&1 | Select-String 'DIAG|ok|FAIL|PASS'
           exit 0
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: store-json-${{ matrix.scenario }}
-          path: store.json
-          retention-days: 7
