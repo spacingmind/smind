@@ -366,7 +366,10 @@ func (o *orderLog) index(prefix string) int {
 // demands) and handed back by /Query /XML.
 type fakeSchtasks struct {
 	mu             sync.Mutex
-	xml            string // "" = no task
+	xml            string // the per-user task's definition; "" = no task
+	legacyXML      string // the old machine-wide \smind task; "" = none
+	queryFails     int    // the next n `/Query /TN` calls fail with exit 1 although the task state is unchanged (a transient error)
+	listFails      int    // the next n `/Query /FO CSV` listings fail with exit 1
 	daemon         *fakeDaemon
 	createDenied   bool
 	queryErr       bool
@@ -376,7 +379,8 @@ type fakeSchtasks struct {
 	daemonVersion  string
 	bad            string // reason /Create rejected the file, if any
 	order          *orderLog
-	chcp           bool // the last query went through chcp 65001
+	chcp           bool   // the last query went through chcp 65001
+	mainName       string // the per-user task's name, as te.windows sets it
 }
 
 func newFakeSchtasks(d *fakeDaemon) *fakeSchtasks {
@@ -424,15 +428,56 @@ func (f *fakeSchtasks) Run(_ context.Context, name string, args ...string) (Resu
 	if f.order != nil && args[0] != "/Query" {
 		f.order.add("schtasks " + args[0])
 	}
+	// tn is the task a verb names (/TN <name>); the per-user task and the old
+	// machine-wide "smind" are kept apart.
+	tn := ""
+	for i, a := range args {
+		if a == "/TN" && i+1 < len(args) {
+			tn = args[i+1]
+		}
+	}
+	legacy := strings.EqualFold(tn, legacyTaskName)
+	get := func() string {
+		if legacy {
+			return f.legacyXML
+		}
+		return f.xml
+	}
+	set := func(x string) {
+		if legacy {
+			f.legacyXML = x
+		} else {
+			f.xml = x
+		}
+	}
 	switch args[0] {
 	case "/Query":
 		if f.queryErr {
 			return Result{}, fmt.Errorf("schtasks.exe not found")
 		}
-		if f.xml == "" {
+		if tn == "" { // schtasks /Query /FO CSV /NH: every task, name first
+			if f.listFails > 0 {
+				f.listFails--
+				return Result{ExitCode: 1, Stderr: "ERROR: The service is not available.\n"}, nil
+			}
+			var b strings.Builder
+			if f.xml != "" {
+				fmt.Fprintf(&b, "\"\\%s\",\"N/A\",\"Ready\"\n", f.mainName)
+			}
+			if f.legacyXML != "" {
+				b.WriteString("\"\\smind\",\"N/A\",\"Ready\"\n")
+			}
+			b.WriteString("\"\\Microsoft\\Windows\\Other\",\"N/A\",\"Ready\"\n")
+			return Result{Stdout: b.String()}, nil
+		}
+		if f.queryFails > 0 {
+			f.queryFails--
 			return Result{ExitCode: 1, Stderr: "ERROR: The system cannot find the file specified.\n"}, nil
 		}
-		return Result{Stdout: f.xml}, nil
+		if get() == "" {
+			return Result{ExitCode: 1, Stderr: "ERROR: The system cannot find the file specified.\n"}, nil
+		}
+		return Result{Stdout: get()}, nil
 	case "/Create":
 		if f.createDenied {
 			return Result{ExitCode: 1, Stderr: "ERROR: Access is denied.\n"}, nil
@@ -454,10 +499,10 @@ func (f *fakeSchtasks) Run(_ context.Context, name string, args ...string) (Resu
 		if err := xml.Unmarshal([]byte(strings.Replace(x, `encoding="UTF-16"`, `encoding="UTF-8"`, 1)), new(struct{})); err != nil {
 			return Result{ExitCode: 1, Stderr: "ERROR: The task XML is malformed: " + err.Error()}, nil
 		}
-		f.xml = x
-		return Result{Stdout: "SUCCESS: The scheduled task \"smind\" has successfully been created.\n"}, nil
+		set(x)
+		return Result{Stdout: "SUCCESS: The scheduled task \"" + tn + "\" has successfully been created.\n"}, nil
 	case "/Run":
-		if f.xml == "" || f.runFails {
+		if get() == "" || f.runFails {
 			return Result{ExitCode: 1, Stderr: "ERROR: failed\n"}, nil
 		}
 		f.daemon.set(true, true, f.daemonVersion, SupervisorTask)
@@ -468,10 +513,10 @@ func (f *fakeSchtasks) Run(_ context.Context, name string, args ...string) (Resu
 		}
 		return Result{}, nil
 	case "/Delete":
-		if f.xml == "" {
+		if get() == "" {
 			return Result{ExitCode: 1, Stderr: "ERROR: The system cannot find the file specified.\n"}, nil
 		}
-		f.xml = ""
+		set("")
 		return Result{}, nil
 	}
 	return Result{ExitCode: 1, Stderr: "unknown verb " + args[0]}, nil
@@ -530,6 +575,7 @@ func (te *testEnv) windows(t *testing.T) (Manager, *fakeSchtasks, *winHooks) {
 	te.environ["SystemRoot"] = `C:\Windows`
 	te.environ["LOCALAPPDATA"] = `C:\Users\alice\AppData\Local`
 	fs := newFakeSchtasks(te.daemon)
+	fs.mainName = "smind-WORKGROUP_alice"
 	fs.order = &orderLog{}
 	hooks := &winHooks{daemon: te.daemon, shutdownStops: true, log: fs.order}
 	te.Env.Runner = fs

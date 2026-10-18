@@ -106,10 +106,15 @@ func TestWindowsInstallRegistersTheTaskAndStarts(t *testing.T) {
 	if err := m.Install(bg, Options{}); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	if fs.called("schtasks /Create /TN smind /XML") != 1 || !strings.HasSuffix(fs.calls[1], "/F") {
+	if fs.called("schtasks /Create /TN smind-WORKGROUP_alice /XML") != 1 || fs.called("schtasks /Create /TN smind /") != 0 {
 		t.Errorf("calls: %v", fs.calls)
 	}
-	if fs.called("schtasks /Run /TN smind") != 1 {
+	for _, c := range fs.calls {
+		if strings.HasPrefix(c, "schtasks /Create") && !strings.HasSuffix(c, "/F") {
+			t.Errorf("/Create must force-replace: %s", c)
+		}
+	}
+	if fs.called("schtasks /Run /TN smind-WORKGROUP_alice") != 1 {
 		t.Errorf("calls: %v", fs.calls)
 	}
 	if !strings.Contains(fs.xml, "service run") || !strings.Contains(fs.xml, `WORKGROUP\alice`) {
@@ -316,7 +321,7 @@ func TestWindowsTaskStopFallsBackToEnd(t *testing.T) {
 	if err := m.Stop(bg, Options{}); err != nil {
 		t.Fatal(err)
 	}
-	if fs.called("schtasks /End /TN smind") != 1 {
+	if fs.called("schtasks /End /TN smind-WORKGROUP_alice") != 1 {
 		t.Errorf("the task must be ended: %v", fs.calls)
 	}
 	if len(hooks.modes) == 0 || hooks.modes[len(hooks.modes)-1] != KillOurs {
@@ -508,7 +513,7 @@ func TestWindowsUninstallStopsThenDeletesAndKeepsSMINDHOME(t *testing.T) {
 	if err := m.Uninstall(bg, Options{}); err != nil {
 		t.Fatal(err)
 	}
-	if fs.xml != "" || fs.called("schtasks /Delete /TN smind /F") != 1 {
+	if fs.xml != "" || fs.called("schtasks /Delete /TN smind-WORKGROUP_alice /F") != 1 {
 		t.Errorf("the task must be deleted: %v", fs.calls)
 	}
 	if fs.order.index("shutdown") < 0 || fs.order.index("shutdown") > fs.order.index("schtasks /Delete") {
@@ -749,4 +754,206 @@ type runnerFunc func(name string, args ...string) (Result, error)
 
 func (f runnerFunc) Run(_ context.Context, name string, args ...string) (Result, error) {
 	return f(name, args...)
+}
+
+// ------------------------------------------------- per-user task name
+
+func TestWindowsTaskNameIsPerUserSID(t *testing.T) {
+	te := newTestEnv(t, "windows")
+	m, fs, _ := te.windows(t)
+	te.UserSID = "S-1-5-21-111-222-333-1001"
+	fs.mainName = "smind-" + te.UserSID
+	m, _ = New(te.Env)
+	if err := m.Install(bg, Options{NoStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	if fs.called("schtasks /Create /TN smind-S-1-5-21-111-222-333-1001 /XML") != 1 {
+		t.Errorf("calls: %v", fs.calls)
+	}
+	if !strings.Contains(te.out.String(), `\smind-S-1-5-21-111-222-333-1001`) {
+		t.Errorf("output = %q", te.out.String())
+	}
+}
+
+// TestWindowsSecondUserInstallsAlongsideTheFirst is the bug the machine-wide
+// name had: user A's task (even the old \smind) must not stop user B.
+func TestWindowsSecondUserInstallsAlongsideTheFirst(t *testing.T) {
+	te := newTestEnv(t, "windows")
+	m, fs, _ := te.windows(t)
+	// User A's old-style machine-wide task, owned by A's SID.
+	_ = m.Install(bg, Options{NoStart: true})
+	fs.legacyXML = strings.ReplaceAll(fs.xml, `<UserId>WORKGROUP\alice</UserId>`, `<UserId>S-1-5-21-111-222-333-1001</UserId>`)
+	fs.xml = ""
+
+	te.Username, te.UserSID = `WORKGROUP\bob`, "S-1-5-21-111-222-333-1002"
+	fs.mainName = "smind-S-1-5-21-111-222-333-1002"
+	mb, _ := New(te.Env)
+	te.resetOutput()
+	if err := mb.Install(bg, Options{NoStart: true}); err != nil {
+		t.Fatalf("the second user's install: %v", err)
+	}
+	if fs.xml == "" || !strings.Contains(fs.xml, `WORKGROUP\bob`) {
+		t.Errorf("bob's task was not registered: %q", fs.xml)
+	}
+	if fs.legacyXML == "" || fs.called("schtasks /Delete") != 0 {
+		t.Errorf("another user's \\smind must be left alone: %v", fs.calls)
+	}
+	if strings.Contains(te.out.String(), "moved the old") {
+		t.Errorf("output = %q", te.out.String())
+	}
+	// Status and uninstall only see bob's own task.
+	if st, err := mb.Status(bg, Options{}); err != nil || st == NotInstalled {
+		t.Errorf("status = %v, %v", st, err)
+	}
+	if err := mb.Uninstall(bg, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if fs.legacyXML == "" {
+		t.Error("uninstalling bob's service removed another user's task")
+	}
+}
+
+func TestWindowsInstallMigratesTheLegacyTaskOfThisUser(t *testing.T) {
+	te := newTestEnv(t, "windows")
+	m, fs, _ := te.windows(t)
+	_ = m.Install(bg, Options{NoStart: true})
+	fs.legacyXML, fs.xml = fs.xml, "" // what an older smind registered
+	te.resetOutput()
+
+	// Until it is migrated, status finds it and says so.
+	if st, err := m.Status(bg, Options{}); err != nil || st == NotInstalled {
+		t.Fatalf("status of a legacy task = %v, %v", st, err)
+	}
+	if out := te.out.String(); !strings.Contains(out, `\smind (enabled)`) || !strings.Contains(out, "old machine-wide task") {
+		t.Errorf("status output = %q", out)
+	}
+
+	te.resetOutput()
+	if err := m.Install(bg, Options{NoStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	if fs.xml == "" || fs.legacyXML != "" {
+		t.Errorf("after migration: per-user task %v, legacy task %v", fs.xml != "", fs.legacyXML != "")
+	}
+	if c, d := fs.order.index("schtasks /Create"), fs.order.index("schtasks /Delete"); c < 0 || d < 0 || c > d {
+		t.Errorf("the new task must exist before the old one is deleted: %v", fs.order.items)
+	}
+	if !strings.Contains(te.out.String(), `moved the old machine-wide task \smind to \smind-WORKGROUP_alice`) {
+		t.Errorf("output = %q", te.out.String())
+	}
+	// Idempotent afterwards.
+	te.resetOutput()
+	if err := m.Install(bg, Options{NoStart: true}); err != nil || !strings.Contains(te.out.String(), "up to date") {
+		t.Errorf("second install: %v %q", err, te.out.String())
+	}
+}
+
+func TestWindowsLegacyTaskIsStoppedAndRemovedByItsOwnName(t *testing.T) {
+	te := newTestEnv(t, "windows")
+	m, fs, _ := te.windows(t)
+	_ = m.Install(bg, Options{NoStart: true})
+	fs.legacyXML, fs.xml = fs.xml, ""
+	if err := m.Start(bg, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if fs.called("schtasks /Run /TN smind") != 1 || fs.called("schtasks /Run /TN smind-") != 0 {
+		t.Errorf("start must run the legacy task by its own name: %v", fs.calls)
+	}
+	if err := m.Uninstall(bg, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if fs.legacyXML != "" || fs.called("schtasks /Delete /TN smind /F") != 1 {
+		t.Errorf("legacy task not removed: %v", fs.calls)
+	}
+}
+
+func TestWindowsUninstallAlsoRemovesALeftoverLegacyTask(t *testing.T) {
+	te := newTestEnv(t, "windows")
+	m, fs, _ := te.windows(t)
+	_ = m.Install(bg, Options{NoStart: true})
+	fs.legacyXML = fs.xml // both exist (a migration that stopped half way)
+	if err := m.Uninstall(bg, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if fs.xml != "" || fs.legacyXML != "" {
+		t.Errorf("tasks left: per-user %v, legacy %v", fs.xml != "", fs.legacyXML != "")
+	}
+}
+
+// -------------------------------------------------------- query errors
+
+func TestWindowsNotInstalledIsOnlyReportedWhenTheTaskIsAbsentFromTheList(t *testing.T) {
+	te := newTestEnv(t, "windows")
+	m, fs, _ := te.windows(t)
+	st, err := m.Status(bg, Options{})
+	if err != nil || st != NotInstalled || !strings.Contains(te.out.String(), "not installed") {
+		t.Fatalf("a missing task: %v, %v, %q", st, err, te.out.String())
+	}
+	if fs.called("schtasks /Query /FO CSV /NH") == 0 {
+		t.Errorf("the not-found answer must be confirmed against the task list: %v", fs.calls)
+	}
+}
+
+func TestWindowsQueryErrorIsNotReadAsNotInstalled(t *testing.T) {
+	for name, setup := range map[string]func(fs *fakeSchtasks){
+		"the task list cannot be read":     func(fs *fakeSchtasks) { fs.queryFails = 100; fs.listFails = 2 },
+		"schtasks cannot be started":       func(fs *fakeSchtasks) { fs.queryErr = true },
+		"the task exists but never reads":  func(fs *fakeSchtasks) { fs.queryFails = 100 },
+		"the task exists, list fails once": func(fs *fakeSchtasks) { fs.queryFails = 100; fs.listFails = 1 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			te := newTestEnv(t, "windows")
+			m, fs, _ := te.windows(t)
+			_ = m.Install(bg, Options{NoStart: true}) // a task is installed
+			setup(fs)
+			te.resetOutput()
+			st, err := m.Status(bg, Options{})
+			if !errors.Is(err, ErrQueryFailed) || st != NotInstalled {
+				t.Fatalf("Status = %v, %v; want ErrQueryFailed", st, err)
+			}
+			if strings.Contains(te.out.String(), "not installed") || !strings.Contains(err.Error(), "could not query Task Scheduler") {
+				t.Errorf("output = %q, err = %v", te.out.String(), err)
+			}
+			for opName, op := range map[string]func() error{
+				"uninstall": func() error { return m.Uninstall(bg, Options{}) },
+				"start":     func() error { return m.Start(bg, Options{}) },
+				"stop":      func() error { return m.Stop(bg, Options{}) },
+			} {
+				fs.queryFails, fs.listFails, fs.queryErr = 100, 2, false
+				if name == "schtasks cannot be started" {
+					fs.queryErr = true
+				}
+				if err := op(); !errors.Is(err, ErrQueryFailed) {
+					t.Errorf("%s: err = %v, want ErrQueryFailed (and not \"not installed\")", opName, err)
+				}
+			}
+			if fs.called("schtasks /Delete") != 0 || fs.called("schtasks /Create") != 1 {
+				t.Errorf("a failed query must not change anything: %v", fs.calls)
+			}
+		})
+	}
+}
+
+func TestWindowsTransientQueryErrorsAreRetriedOnce(t *testing.T) {
+	te := newTestEnv(t, "windows")
+	m, fs, _ := te.windows(t)
+	_ = m.Install(bg, Options{NoStart: true})
+
+	// One failed XML query of an installed task: the list shows it, the retry reads it.
+	fs.queryFails = 1
+	te.resetOutput()
+	if st, err := m.Status(bg, Options{}); err != nil || st == NotInstalled {
+		t.Errorf("one transient /Query failure: %v, %v", st, err)
+	}
+	if !strings.Contains(te.out.String(), `\smind-WORKGROUP_alice (enabled)`) {
+		t.Errorf("output = %q", te.out.String())
+	}
+
+	// One failed listing of an absent task: the retry confirms it is absent.
+	fs.xml = ""
+	fs.listFails = 1
+	te.resetOutput()
+	if st, err := m.Status(bg, Options{}); err != nil || st != NotInstalled {
+		t.Errorf("one transient list failure: %v, %v", st, err)
+	}
 }

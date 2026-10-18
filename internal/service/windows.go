@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"html"
@@ -25,8 +26,11 @@ import (
 const SupervisorTask = "taskscheduler"
 
 const (
-	// TaskName is the scheduled task's name (it lives in the root folder).
-	TaskName = "smind"
+	// legacyTaskName is the machine-wide task name earlier versions registered
+	// (it lives in the root folder). Two users on one machine could not both
+	// have it, so the task is now named per user (taskSched.taskName) and a
+	// legacy task owned by the current user is migrated on install.
+	legacyTaskName = "smind"
 	// taskDefVersion is bumped when renderTaskXML changes in a way an existing
 	// task must pick up even though its action did not change.
 	taskDefVersion = "1"
@@ -212,6 +216,8 @@ func splitWinArgs(s string) []string {
 
 // task is what `schtasks /Query /XML` said about the installed task.
 type task struct {
+	name    string // the task's name in the root folder
+	legacy  bool   // the old machine-wide \smind task, not yet migrated
 	home    string // the --home of its action; "" = the user's default
 	enabled bool
 	defHash string
@@ -262,21 +268,163 @@ func parseTask(xml string) task {
 	return t
 }
 
-// query runs `schtasks /Query /TN smind /XML`; installed is false when the task
-// does not exist. (schtasks words that error in the user's language, so any
-// non-zero exit is read as "no such task".)
-func (t *taskSched) query(ctx context.Context) (tk task, installed bool, err error) {
-	// Through cmd with code page 65001: schtasks writes to a pipe in the console's
-	// OEM code page, which would garble a non-ASCII user name or --home path, and
-	// the exe and home recovered from the XML drive stop, status and logs.
-	res, err := t.env.Runner.Run(ctx, "cmd.exe", "/c", "chcp 65001 >nul & schtasks /Query /TN "+TaskName+" /XML")
+// taskName is this user's task: "smind-" plus the user's SID (a name that is
+// unique per account, needs no folder to be created and is allowed to a standard
+// user in the root folder, like the legacy name was). Without a SID (only in
+// tests) the user name stands in, made safe for a task name.
+func (t *taskSched) taskName() string {
+	id := t.env.UserSID
+	if id == "" {
+		id = strings.NewReplacer(`\`, "_", "/", "_", ":", "_", " ", "_", "*", "_", "?", "_", `"`, "_", "<", "_", ">", "_", "|", "_").Replace(t.env.Username)
+	}
+	return "smind-" + id
+}
+
+// ErrQueryFailed marks an error from asking Task Scheduler about the task:
+// the state of the service is unknown, which is not the same as "not installed".
+var ErrQueryFailed = errors.New("could not query Task Scheduler")
+
+// foundTask is the answer for one task name.
+type foundTask struct {
+	tk task
+	ok bool
+}
+
+// schtasksCmd runs schtasks through cmd with code page 65001: schtasks writes
+// to a pipe in the console's OEM code page, which would garble a non-ASCII user
+// name or --home path, and the exe and home recovered from the XML drive stop,
+// status and logs.
+func (t *taskSched) schtasksCmd(ctx context.Context, args string) (Result, error) {
+	return t.env.Runner.Run(ctx, "cmd.exe", "/c", "chcp 65001 >nul & schtasks "+args)
+}
+
+// queryXML is `schtasks /Query /TN name /XML`. ok is false for any failure: the
+// exit code is the only portable signal (schtasks words its errors in the user's
+// language), and it is 1 both for "no such task" and for a scheduler that could
+// not be reached; the caller tells them apart (see lookup).
+func (t *taskSched) queryXML(ctx context.Context, name string) (tk task, ok bool) {
+	res, err := t.schtasksCmd(ctx, "/Query /TN "+name+" /XML")
+	if err != nil || res.ExitCode != 0 {
+		return task{}, false
+	}
+	tk = parseTask(res.Stdout)
+	tk.name = name
+	return tk, true
+}
+
+// listTasks is the language-neutral list of task names: `schtasks /Query /FO
+// CSV /NH` prints one record per task whose first column is the task path
+// (\name), whatever the user's language. An error means the scheduler could not
+// be asked, as opposed to an empty list.
+func (t *taskSched) listTasks(ctx context.Context) (map[string]bool, error) {
+	res, err := t.schtasksCmd(ctx, "/Query /FO CSV /NH")
 	if err != nil {
-		return task{}, false, fmt.Errorf("run schtasks: %w", err)
+		return nil, err
 	}
 	if res.ExitCode != 0 {
-		return task{}, false, nil
+		msg := strings.TrimSpace(res.Stderr)
+		if msg == "" {
+			msg = strings.TrimSpace(res.Stdout)
+		}
+		return nil, fmt.Errorf("schtasks /Query exited %d: %s", res.ExitCode, msg)
 	}
-	return parseTask(res.Stdout), true, nil
+	names := map[string]bool{}
+	r := csv.NewReader(strings.NewReader(res.Stdout))
+	r.FieldsPerRecord = -1
+	r.LazyQuotes = true
+	for {
+		rec, err := r.Read()
+		if err != nil {
+			break // io.EOF, or noise (an INFO line) after the records
+		}
+		if len(rec) > 0 && strings.HasPrefix(rec[0], `\`) {
+			names[strings.ToLower(strings.TrimPrefix(rec[0], `\`))] = true
+		}
+	}
+	return names, nil
+}
+
+// wait pauses before the one retry of a failed query.
+func (t *taskSched) wait(ctx context.Context) {
+	d := t.env.Poll
+	if d <= 0 {
+		d = 250 * time.Millisecond
+	}
+	select {
+	case <-time.After(d):
+	case <-ctx.Done():
+	}
+}
+
+// lookup finds the tasks of the names given. A name whose XML query failed is
+// looked for in the task list: absent there is a real "not installed", present
+// is a transient failure (retried once), and a list that cannot be read is
+// ErrQueryFailed (retried once) -- never a silent "not installed".
+func (t *taskSched) lookup(ctx context.Context, names ...string) ([]foundTask, error) {
+	out := make([]foundTask, len(names))
+	var list map[string]bool
+	for i, name := range names {
+		if tk, ok := t.queryXML(ctx, name); ok {
+			out[i] = foundTask{tk, true}
+			continue
+		}
+		if list == nil {
+			var err error
+			if list, err = t.listTasks(ctx); err != nil {
+				t.wait(ctx)
+				if list, err = t.listTasks(ctx); err != nil {
+					return nil, fmt.Errorf("%w: %v; the service state is unknown, try again", ErrQueryFailed, err)
+				}
+			}
+		}
+		if !list[strings.ToLower(name)] {
+			continue
+		}
+		t.wait(ctx)
+		tk, ok := t.queryXML(ctx, name)
+		if !ok {
+			return nil, fmt.Errorf("%w: the scheduled task \\%s exists but could not be read; the service state is unknown, try again", ErrQueryFailed, name)
+		}
+		out[i] = foundTask{tk, true}
+	}
+	return out, nil
+}
+
+// ownedByMe reports whether a task belongs to the current user. A task whose
+// owner cannot be read is taken as ours.
+func (t *taskSched) ownedByMe(tk task) bool {
+	if tk.userID == "" || (t.env.UserSID == "" && t.env.Username == "") {
+		return true
+	}
+	for _, me := range []string{t.env.UserSID, t.env.Username} {
+		if me != "" && strings.EqualFold(tk.userID, me) {
+			return true
+		}
+	}
+	return false
+}
+
+// query returns this user's installed task: the per-user one, or else the old
+// machine-wide \smind when it belongs to this user (legacy is set; install
+// migrates it). Another user's \smind is not ours and is ignored: that is what
+// lets two accounts on one machine each have a service.
+func (t *taskSched) query(ctx context.Context) (tk task, installed bool, err error) {
+	found, err := t.lookup(ctx, t.taskName())
+	if err != nil {
+		return task{}, false, err
+	}
+	if found[0].ok {
+		return found[0].tk, true, nil
+	}
+	found, err = t.lookup(ctx, legacyTaskName)
+	if err != nil {
+		return task{}, false, err
+	}
+	if found[0].ok && t.ownedByMe(found[0].tk) {
+		found[0].tk.legacy = true
+		return found[0].tk, true, nil
+	}
+	return task{}, false, nil
 }
 
 func (t *taskSched) schtasksOK(ctx context.Context, args ...string) error {
@@ -347,16 +495,25 @@ func (t *taskSched) Install(ctx context.Context, o Options) error {
 			return err
 		}
 	}
-	// A disabled task is re-registered too (which enables it): otherwise "up to
-	// date" would hide a task that never runs.
-	changed := !installed || old.defHash != sp.defHash() || !old.enabled
+	// A legacy task is not "up to date": it has the wrong name. A disabled task
+	// is re-registered too (which enables it): otherwise "up to date" would hide
+	// a task that never runs.
+	name := t.taskName()
+	changed := !installed || old.legacy || old.defHash != sp.defHash() || !old.enabled
 	if changed {
-		if err := t.register(ctx, sp); err != nil {
+		if err := t.register(ctx, name, sp); err != nil {
 			return err
 		}
-		env.outf("registered the scheduled task \\%s for %s (runs at logon, not at boot)", TaskName, sp.User)
+		env.outf("registered the scheduled task \\%s for %s (runs at logon, not at boot)", name, sp.User)
 	} else {
-		env.outf("the scheduled task \\%s is up to date", TaskName)
+		env.outf("the scheduled task \\%s is up to date", name)
+	}
+	// Only after the new task exists: never leave the user with none. A legacy
+	// task left next to it would start a second supervisor at every logon.
+	if removed, err := t.removeLegacy(ctx); err != nil {
+		return err
+	} else if removed {
+		env.outf("moved the old machine-wide task \\%s to \\%s (the old name could belong to only one user per machine)", legacyTaskName, name)
 	}
 
 	port := env.port(smindHome)
@@ -366,7 +523,7 @@ func (t *taskSched) Install(ctx context.Context, o Options) error {
 		env.outf("not starting (--no-start); start it with `smind service start`")
 	case ours(h):
 		switch {
-		case changed && installed:
+		case changed && installed && !old.legacy:
 			env.outf("already running; run `smind service restart` to apply the new task")
 		case env.Version != "" && h.Version != "" && h.Version != env.Version:
 			env.outf("already running smind %s, but this binary is %s: run `smind service restart` to switch", h.Version, env.Version)
@@ -379,7 +536,7 @@ func (t *taskSched) Install(ctx context.Context, o Options) error {
 			return nil
 		}
 		t.sweepStale(ctx, env.Exe, port)
-		if err := t.schtasksOK(ctx, "/Run", "/TN", TaskName); err != nil {
+		if err := t.schtasksOK(ctx, "/Run", "/TN", name); err != nil {
 			return err
 		}
 		if err := env.waitHealthy(ctx, port, SupervisorTask); err != nil {
@@ -390,18 +547,29 @@ func (t *taskSched) Install(ctx context.Context, o Options) error {
 	return nil
 }
 
-// checkOwner refuses a task that belongs to another user: the name \smind is
-// machine-wide, and this service is per-user.
+// checkOwner refuses a task of this user's name that belongs to another user.
 func (t *taskSched) checkOwner(tk task) error {
-	if tk.userID == "" || (t.env.UserSID == "" && t.env.Username == "") {
+	if t.ownedByMe(tk) {
 		return nil
 	}
-	for _, me := range []string{t.env.UserSID, t.env.Username} {
-		if me != "" && strings.EqualFold(tk.userID, me) {
-			return nil
-		}
+	return fmt.Errorf("the scheduled task \\%s belongs to another user (%s): this service is per-user, so remove it from that account first", tk.name, tk.userID)
+}
+
+// removeLegacy deletes this user's old machine-wide \smind task, if there is
+// one (another user's is left alone). removed is true when a task was deleted.
+func (t *taskSched) removeLegacy(ctx context.Context) (removed bool, err error) {
+	found, err := t.lookup(ctx, legacyTaskName)
+	if err != nil {
+		return false, err
 	}
-	return fmt.Errorf("the scheduled task \\%s belongs to another user (%s): this service is per-user, so remove it from that account first", TaskName, tk.userID)
+	if !found[0].ok || !t.ownedByMe(found[0].tk) {
+		return false, nil
+	}
+	_ = t.schtasksOK(ctx, "/End", "/TN", legacyTaskName)
+	if err := t.schtasksOK(ctx, "/Delete", "/TN", legacyTaskName, "/F"); err != nil {
+		return false, fmt.Errorf("the new task is registered, but the old one could not be removed (it would start a second supervisor at logon): %w; remove it with `schtasks /Delete /TN %s /F`", err, legacyTaskName)
+	}
+	return true, nil
 }
 
 // sessionHint explains the usual reason a started task never answers.
@@ -424,7 +592,7 @@ func (t *taskSched) sweepStale(ctx context.Context, exe string, port int) {
 // register writes the task XML to a temp file and imports it, replacing any
 // previous definition. Registering a logon task for your own account needs no
 // elevation; when policy denies it the error says which step was refused.
-func (t *taskSched) register(ctx context.Context, sp taskSpec) error {
+func (t *taskSched) register(ctx context.Context, name string, sp taskSpec) error {
 	f, err := os.CreateTemp("", "smind-task-*.xml")
 	if err != nil {
 		return err
@@ -437,7 +605,7 @@ func (t *taskSched) register(ctx context.Context, sp taskSpec) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	res, err := t.env.Runner.Run(ctx, "schtasks", "/Create", "/TN", TaskName, "/XML", f.Name(), "/F")
+	res, err := t.env.Runner.Run(ctx, "schtasks", "/Create", "/TN", name, "/XML", f.Name(), "/F")
 	if err != nil {
 		return fmt.Errorf("run schtasks: %w", err)
 	}
@@ -473,7 +641,7 @@ func (t *taskSched) Uninstall(ctx context.Context, o Options) error {
 		return err
 	}
 	if !installed {
-		env.outf("not installed (no scheduled task \\%s); nothing to do", TaskName)
+		env.outf("not installed (no scheduled task \\%s); nothing to do", t.taskName())
 		return nil
 	}
 	if err := t.checkOwner(tk); err != nil {
@@ -482,13 +650,18 @@ func (t *taskSched) Uninstall(ctx context.Context, o Options) error {
 	// strict=false: a daemon on the port that this task did not start is left
 	// alone (with a note) rather than blocking the removal of the task. One this
 	// task did start, and cannot stop, aborts: nothing would manage it afterwards.
-	if err := t.stop(ctx, serviceHome(tk.home, env.Home), tk.exe, false); err != nil {
+	if err := t.stop(ctx, tk.name, serviceHome(tk.home, env.Home), tk.exe, false); err != nil {
 		return err
 	}
-	if err := t.schtasksOK(ctx, "/Delete", "/TN", TaskName, "/F"); err != nil {
+	if err := t.schtasksOK(ctx, "/Delete", "/TN", tk.name, "/F"); err != nil {
 		return err
 	}
-	env.outf("stopped and removed the scheduled task \\%s; your data in the smind home directory is untouched", TaskName)
+	if !tk.legacy {
+		if _, err := t.removeLegacy(ctx); err != nil {
+			return err
+		}
+	}
+	env.outf("stopped and removed the scheduled task \\%s; your data in the smind home directory is untouched", tk.name)
 	return nil
 }
 
@@ -527,7 +700,10 @@ func (t *taskSched) Status(ctx context.Context, o Options) (State, error) {
 	if !tk.enabled {
 		enabled = "DISABLED"
 	}
-	env.outf("  task:    \\%s (%s); runs at logon of %s, not at boot", TaskName, enabled, env.Username)
+	env.outf("  task:    \\%s (%s); runs at logon of %s, not at boot", tk.name, enabled, env.Username)
+	if tk.legacy {
+		env.outf("  note:    this is the old machine-wide task; `smind service install` moves it to \\%s", t.taskName())
+	}
 	run := "stopped"
 	if state == Running {
 		run = "running"
@@ -582,7 +758,7 @@ func (t *taskSched) Start(ctx context.Context, o Options) error {
 		return fmt.Errorf("not starting: %s; stop it first", msg)
 	}
 	t.sweepStale(ctx, tk.exe, port)
-	if err := t.schtasksOK(ctx, "/Run", "/TN", TaskName); err != nil {
+	if err := t.schtasksOK(ctx, "/Run", "/TN", tk.name); err != nil {
 		return err
 	}
 	if err := t.env.waitHealthy(ctx, port, SupervisorTask); err != nil {
@@ -597,7 +773,7 @@ func (t *taskSched) Stop(ctx context.Context, o Options) error {
 	if err != nil {
 		return err
 	}
-	if err := t.stop(ctx, serviceHome(tk.home, t.env.Home), tk.exe, true); err != nil {
+	if err := t.stop(ctx, tk.name, serviceHome(tk.home, t.env.Home), tk.exe, true); err != nil {
 		return err
 	}
 	t.env.outf("stopped")
@@ -610,14 +786,14 @@ func (t *taskSched) Restart(ctx context.Context, o Options) error {
 		return err
 	}
 	smindHome := serviceHome(tk.home, t.env.Home)
-	if err := t.stop(ctx, smindHome, tk.exe, true); err != nil {
+	if err := t.stop(ctx, tk.name, smindHome, tk.exe, true); err != nil {
 		return err
 	}
 	port := t.env.port(smindHome)
 	if msg := t.env.foreignDaemonMessage(ctx, port); msg != "" {
 		return fmt.Errorf("not restarting: %s; stop it first", msg)
 	}
-	if err := t.schtasksOK(ctx, "/Run", "/TN", TaskName); err != nil {
+	if err := t.schtasksOK(ctx, "/Run", "/TN", tk.name); err != nil {
 		return err
 	}
 	if err := t.env.waitHealthy(ctx, port, SupervisorTask); err != nil {
@@ -650,7 +826,7 @@ const (
 // and leaves the daemon running). A daemon on the port that this task did not
 // start is never touched: with strict (stop, restart) that is an error, without
 // it (uninstall) a note, so the task can still be removed.
-func (t *taskSched) stop(ctx context.Context, smindHome, exe string, strict bool) error {
+func (t *taskSched) stop(ctx context.Context, name, smindHome, exe string, strict bool) error {
 	env := t.env
 	port := env.port(smindHome)
 	h := env.Probe(ctx, port)
@@ -676,7 +852,7 @@ func (t *taskSched) stop(ctx context.Context, smindHome, exe string, strict bool
 	}
 	// Whatever the outcome, no instance of the task or its supervisor may stay
 	// behind (a daemon that crashed leaves `service run` waiting to restart it).
-	_ = t.schtasksOK(ctx, "/End", "/TN", TaskName)
+	_ = t.schtasksOK(ctx, "/End", "/TN", name)
 	if env.ForceStop != nil {
 		// After a graceful stop the daemon is still finishing its shutdown (killing
 		// setups and terminals, closing the store): give the supervisor time to
