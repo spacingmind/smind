@@ -255,3 +255,40 @@ describe('sendFollowUpPrompt with whenBusy (fake connection)', () => {
     expect(calls.map(([m]) => m)).toEqual(['run.start']);
   });
 });
+
+describe('sendFollowUpPrompt shouldAttach (fake connection)', () => {
+  it('a run another path already attached is not attached again and the optimistic line stands down', async () => {
+    const { conn, calls } = fakeConnection((method) => {
+      if (method === 'run.start') return { runId: 'run-new' };
+      if (method === 'run.attach') return {};
+      throw new Error(`unexpected method ${method}`);
+    });
+    const rec = recordingDeps();
+
+    const result = await sendFollowUpPrompt(conn, { ...rec.deps, shouldAttach: () => false }, 42, 'glm', 'next step', seqFrom(0));
+
+    expect(result).toEqual({ kind: 'started', runId: 'run-new' });
+    expect(calls.filter(([m]) => m === 'run.attach')).toEqual([]); // no second attach
+    expect(rec.removed).toEqual([{ key: 'f1', role: 'user', text: 'next step' }]); // the adopted stream replays the prompt
+    expect(rec.tails).toEqual([]);
+  });
+
+  it('shouldAttach true attaches as before', async () => {
+    const { conn, calls } = fakeConnection((method) => {
+      if (method === 'run.start') return { runId: 'run-new' };
+      if (method === 'run.attach') return {};
+      throw new Error(`unexpected method ${method}`);
+    });
+    const rec = recordingDeps();
+
+    const result = await sendFollowUpPrompt(conn, { ...rec.deps, shouldAttach: () => true }, 42, 'glm', 'next step', seqFrom(0));
+
+    expect(result).toEqual({ kind: 'started', runId: 'run-new' });
+    expect(calls).toEqual([
+      ['run.start', { taskId: 42, provider: 'glm', prompt: 'next step' }],
+      ['run.attach', { runId: 'run-new' }],
+    ]);
+    expect(rec.removed).toEqual([]);
+    expect(rec.tails).toHaveLength(1);
+  });
+});

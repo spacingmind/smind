@@ -30,6 +30,8 @@ export interface SendFollowUpDeps {
   trackTail: (tail: RunTail) => void;
   /** Sees every raw attach event, with the run's real id, before line rendering (permission events route to PermissionBoard here; they render as no lines). */
   onEvent?: (event: string, params: unknown, runId: string) => void;
+  /** Return false when another path (a run.status adoption) already attached this run. */
+  shouldAttach?: (runId: string) => boolean;
 }
 
 /** Optional send options: the busy-chat delivery mode and its target chat. */
@@ -74,6 +76,13 @@ export async function sendFollowUpPrompt(
     return result;
   }
   const runId = result.runId;
+  if (deps.shouldAttach && !deps.shouldAttach(runId)) {
+    // Another path (a run.status adoption) already attached this run;
+    // that stream replays the prompt itself, so the optimistic line
+    // stands down and this send attaches nothing.
+    deps.removeLines([userLine]);
+    return result;
+  }
   // run.attach backfills the new run's whole recorded history before the
   // live tail (internal/runs Registry.Subscribe) -- which includes the
   // prompt's own user_message. The optimistic line already rendered it,
