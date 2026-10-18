@@ -6,7 +6,7 @@ Providers study (local-only research notes). Builds on ADR-0032 (shared query/zu
 
 Size: **two L items.** B remote login — L (7): scope 2, PRs 2, risk 2 (credentials, concurrency), decisions 0 (ADR done), verify 1.
 A Providers tab — L (6): scope 1, PRs 2, risk 1, decisions 1, verify 1 (screenshots, every state).
-Status: **spec**, nothing built. Supersedes the "Open issues" of PR #370 (which only fixed external-link opening).
+Status: **built** — B1–B4 merged (#385, #389, #396, #409; org-uuid identity fix #404), A1+A2 in one PR (Providers tab). Remaining: real-account verification on a remote (homelab) daemon and the macOS app. Supersedes the "Open issues" of PR #370 (which only fixed external-link opening).
 
 ## Ground rules
 - Never complete a real OAuth login or call a real vendor endpoint in tests or screenshots. Daemon tests use `httptest`
@@ -139,13 +139,13 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
 - Deferred: "Reset cooldown" (needs a daemon method), identity backfill for OpenAI from refresh responses, Kimi/xAI device flows.
 
 ## Progress
-- [ ] ADR-0033 + this plan (docs PR)
+- [x] ADR-0033 + this plan (docs PR #384)
 - [x] PR-B1 identity (branch `feat/account-identity`)
 - [x] PR-B2 loginId + oauthComplete (branch `feat/oauth-complete`)
 - [x] PR-B3 device code (branch `feat/device-login`)
-- [ ] PR-B4 connect form
-- [ ] PR-A1 Providers master/detail
-- [ ] PR-A2 models/diagnostics/deep link
+- [x] PR-B4 connect form (#409)
+- [x] PR-A1 Providers master/detail (this PR)
+- [x] PR-A2 models/diagnostics/deep link (this PR; the plan split A1/A2 was merged into one PR)
 
 ## Validation
 - PR-A1 (models): `models lists the catalog with ids and the default badge`, `models shows the source note`, `models search appears only with eight or more models and filters`, `models shows an empty note when the catalog is empty` — `web/packages/ui/src/components/providers/provider-models.test.tsx`
