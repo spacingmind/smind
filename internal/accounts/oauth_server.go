@@ -9,6 +9,25 @@ import (
 	"time"
 )
 
+// checkLoopbackAddr rejects any listen address that is not loopback-only:
+// the callback listener carries an authorization code, so it must never be
+// reachable from the network (ADR-0033 D1). Only "localhost" or a loopback IP
+// literal passes; an empty host, 0.0.0.0, :: and every other address are
+// refused.
+func checkLoopbackAddr(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("oauth callback address %q is not host:port: %w", addr, err)
+	}
+	if host == "localhost" {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return fmt.Errorf("oauth callback address %q is not loopback-only", addr)
+}
+
 // callbackResult is what the vendor's redirect to a callbackServer
 // delivered: either code+state on success, or a non-empty errCode
 // describing what went wrong (e.g. the user denied consent).
@@ -40,6 +59,9 @@ type callbackServer struct {
 // purely cosmetic: it's what the browser-facing success page names (see
 // oauth_callback_page.go), not used for any routing/matching decision.
 func newCallbackServer(addr, path, providerLabel string) (*callbackServer, error) {
+	if err := checkLoopbackAddr(addr); err != nil {
+		return nil, err
+	}
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("bind oauth callback listener on %s: %w", addr, err)
