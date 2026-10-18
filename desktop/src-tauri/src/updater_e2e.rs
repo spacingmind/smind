@@ -208,7 +208,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn spike_check_reports_available_without_downloading() {
+    async fn check_reports_available_and_downloads_nothing() {
         let key = TestKey::generate();
         let feed = Feed::serve_release(&release(&key, "0.10.1", app_tarball("new")));
         let app = test_app(&key.pubkey(), &feed.latest_url());
@@ -216,8 +216,73 @@ mod tests {
         let got = check_with(app.updater_builder(), RUNNING, &state)
             .await
             .expect("check");
-        assert!(matches!(got, AppUpdateCheck::Available { ref version, .. } if version == "0.10.1"));
+        match got {
+            AppUpdateCheck::Available { version, notes, .. } => {
+                assert_eq!(version, "0.10.1");
+                assert!(notes.is_some());
+            }
+            other => panic!("expected Available, got {other:?}"),
+        }
         assert_eq!(feed.requests(), vec!["GET /latest.json"]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn same_version_is_up_to_date() {
+        let key = TestKey::generate();
+        let feed = Feed::serve_release(&release(&key, "0.10.0", app_tarball("new")));
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        let got = check_with(app.updater_builder(), RUNNING, &state)
+            .await
+            .expect("check");
+        assert!(matches!(
+            got,
+            AppUpdateCheck::UpToDate { ref current_version } if current_version == "0.10.0"
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn older_version_is_not_offered() {
+        let key = TestKey::generate();
+        let feed = Feed::serve_release(&release(&key, "0.9.9", app_tarball("new")));
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        let got = check_with(app.updater_builder(), RUNNING, &state)
+            .await
+            .expect("check");
+        assert!(matches!(
+            got,
+            AppUpdateCheck::UpToDate { ref current_version } if current_version == "0.10.0"
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn prerelease_version_is_not_offered() {
+        let key = TestKey::generate();
+        let feed = Feed::serve_release(&release(&key, "0.11.0-rc.1", app_tarball("new")));
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        let got = check_with(app.updater_builder(), RUNNING, &state)
+            .await
+            .expect("check");
+        assert!(matches!(
+            got,
+            AppUpdateCheck::UpToDate { ref current_version } if current_version == "0.10.0"
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dead_endpoint_is_an_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let app = test_app(&TestKey::generate().pubkey(), &format!("http://127.0.0.1:{port}/latest.json"));
+        let state = app.state::<UpdateState>();
+        let err = check_with(app.updater_builder(), RUNNING, &state)
+            .await
+            .expect_err("dead endpoint must error");
+        assert!(!err.is_empty());
+        assert!(state.pending.take().is_err());
     }
 
     /// A fake installed app the plugin can replace: `<tmp>/smind.app/Contents/...`.
@@ -232,7 +297,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[tokio::test(flavor = "multi_thread")]
-    async fn spike_install_replaces_the_bundle() {
+    async fn install_replaces_the_bundle_and_reports_progress() {
         let key = TestKey::generate();
         let feed = Feed::serve_release(&release(&key, "0.10.1", app_tarball("new")));
         let app = test_app(&key.pubkey(), &feed.latest_url());
@@ -251,6 +316,13 @@ mod tests {
         let events = events.into_inner().unwrap();
         assert_eq!(events.last().unwrap()["stage"], "installing");
         assert_eq!(events[0]["stage"], "downloading");
+        let last_download = events
+            .iter()
+            .rev()
+            .find(|e| e["stage"] == "downloading")
+            .unwrap();
+        assert!(last_download["downloaded"].as_u64().unwrap() > 0);
         assert_eq!(feed.requests(), vec!["GET /latest.json", "GET /smind.app.tar.gz"]);
+        assert!(state.pending.take().is_err());
     }
 }
