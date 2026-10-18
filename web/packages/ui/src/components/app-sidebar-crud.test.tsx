@@ -85,6 +85,138 @@ function mount(client: FakeWsClient, onSelectTask = vi.fn()) {
   return onSelectTask;
 }
 
+const CHILD: Task = {
+  ...TASK,
+  ID: 43,
+  ParentTaskID: 42,
+  Title: "Sub task",
+};
+
+async function openTaskMenu(title: string): Promise<void> {
+  const menu = await revealTaskActions(title);
+  fireEvent.pointerDown(menu, { button: 0, ctrlKey: false });
+  await flush();
+}
+
+describe("AppSidebar tree actions (PR-H11)", () => {
+  afterEach(() => {
+    clearToasts();
+  });
+
+  it("parent task menu offers archive finished and stop all in tree", async () => {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar
+          client={client as never}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          runStatus={new Map([[42, "running" as const], [43, "done" as const]])}
+        />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK, CHILD]);
+
+    await openTaskMenu("Fix the bug");
+    expect(screen.getByTestId("sidebar-task-archive-finished-action")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-task-stop-tree-action")).toBeInTheDocument();
+    fireEvent.pointerDown(document.body, { button: 0, ctrlKey: false });
+  });
+
+  it("a task without descendants offers neither archive finished nor a stop beyond its own run", async () => {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} onSelectTask={vi.fn()} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE);
+
+    await openTaskMenu("Fix the bug");
+    // The rule: no descendants -> neither entry, regardless of run state.
+    expect(screen.queryByTestId("sidebar-task-archive-finished-action")).toBeNull();
+    expect(screen.queryByTestId("sidebar-task-stop-tree-action")).toBeNull();
+    expect(screen.getByTestId("sidebar-task-archive-action")).toBeInTheDocument();
+    fireEvent.pointerDown(document.body, { button: 0, ctrlKey: false });
+  });
+
+  it("stop entry is disabled with its reason when nothing runs", async () => {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar
+          client={client as never}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          runStatus={new Map([[43, "done" as const]])}
+        />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK, CHILD]);
+
+    await openTaskMenu("Fix the bug");
+    const stop = screen.getByTestId("sidebar-task-stop-tree-action");
+    expect(stop).toHaveAttribute("aria-disabled", "true");
+    expect(stop).toHaveTextContent("No running tasks in this tree");
+    fireEvent.pointerDown(document.body, { button: 0, ctrlKey: false });
+  });
+
+  it("archive finished entry is disabled with its reason when nothing is finished", async () => {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar
+          client={client as never}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          runStatus={new Map([[43, "running" as const]])}
+        />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK, CHILD]);
+
+    await openTaskMenu("Fix the bug");
+    const archive = screen.getByTestId("sidebar-task-archive-finished-action");
+    expect(archive).toHaveAttribute("aria-disabled", "true");
+    expect(archive).toHaveTextContent("No finished sub-tasks");
+    fireEvent.pointerDown(document.body, { button: 0, ctrlKey: false });
+  });
+
+  it("choosing an entry opens its dialog", async () => {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar
+          client={client as never}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          runStatus={new Map([[42, "running" as const], [43, "done" as const]])}
+        />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK, CHILD]);
+
+    await openTaskMenu("Fix the bug");
+    fireEvent.click(screen.getByTestId("sidebar-task-stop-tree-action"));
+    // The dialog opens once its dry run has landed (no resize while animating in).
+    const stopDry = await waitFor(() => client.nth("task.stopTree", 0));
+    await act(async () => {
+      stopDry.resolve({ dryRun: true, runs: [{ id: 42, title: "Fix the bug", runId: "r1" }], queuedPrompts: 0, stopped: [], failed: [], queuedCancelled: 0 });
+    });
+    expect(await screen.findByRole("heading", { name: /Stop \d+ running task/ })).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    await flush();
+    await openTaskMenu("Fix the bug");
+    fireEvent.click(screen.getByTestId("sidebar-task-archive-finished-action"));
+    const archiveDry = await waitFor(() => client.nth("task.archiveFinished", 0));
+    await act(async () => {
+      archiveDry.resolve({ dryRun: true, eligible: [{ id: 43, title: "Child" }], archived: [], skipped: [], failed: [], remaining: 0 });
+    });
+    expect(await screen.findByRole("heading", { name: /Archive \d+ finished sub-task/ })).toBeInTheDocument();
+  });
+});
+
 describe("AppSidebar CRUD", () => {
   afterEach(() => {
     clearToasts();

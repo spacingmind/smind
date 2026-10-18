@@ -43,6 +43,8 @@ import {
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
 import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, taskSlotSignal, workspaceMonogram, workspaceTasks } from "@/lib/sidebar-signal";
 import { attentionRollup, nestTasks, type TaskNode } from "@/lib/task-tree";
+import { sidebarTreeActions, type TreeActionAvailability } from "@/lib/task-tree-actions";
+import { ArchiveFinishedDialog, StopTreeDialog } from "@/components/tree-action-dialogs";
 import { formatRelativeTime, formatRelativeTimeShort } from "@/lib/relative-time";
 import { useTaskStats, type TaskStats } from "@/hooks/use-task-stats";
 import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
@@ -91,6 +93,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FadeText } from "@/components/ui/fade-text";
+import { ignoreSelect, MENU_CLOSE_INSTANT, reachableDisabledProps } from "@/lib/menu-item-disabled";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -371,12 +374,28 @@ function useStatusOverrides(client: WsClient | null, events: DaemonEvents | null
   return overrides;
 }
 
+/**
+ * Tree-wide data for PR-H11's tree actions: per-task availability of
+ * "Archive finished sub-tasks" / "Stop all in tree" (computed once from the
+ * full task list + run statuses, keyed only for tasks with live
+ * descendants) and the handlers that open the two confirm dialogs. Carried
+ * by context because the rows sit four component levels below AppSidebar
+ * and none of the intermediates needs it.
+ */
+const TreeActionsContext = createContext<{
+  availability: ReadonlyMap<number, TreeActionAvailability>;
+  onArchiveFinished: (task: Task) => void;
+  onStopTree: (task: Task) => void;
+} | null>(null);
+
 /** Which create/archive dialog a sidebar row has opened, if any. */
 type CrudTarget =
   | { kind: "workspace" }
   | { kind: "space"; workspace: WorkspaceWithTree }
   | { kind: "task"; workspace: WorkspaceWithTree; spaceId: number | null }
   | { kind: "archive"; task: Task }
+  | { kind: "archiveFinished"; task: Task }
+  | { kind: "stopTree"; task: Task }
   | { kind: "scripts"; workspace: WorkspaceWithTree }
   | { kind: "deleteWorkspace"; workspace: WorkspaceWithTree }
   | { kind: "deleteSpace"; space: SpaceWithTasks };
@@ -475,6 +494,10 @@ export function AppSidebar({
   // its own SpaceID differs, so per-space nesting would be wrong. Each
   // space bucket filters these roots back down to its own afterwards.
   const taskForest = useMemo(() => nestTasks(allTasks), [allTasks]);
+  const treeActionAvailability = useMemo(
+    () => sidebarTreeActions(allTasks, runStatus ?? EMPTY_RUN_STATUS),
+    [allTasks, runStatus],
+  );
   // A selected task hidden under a collapsed parent must be revealed, or
   // the keyboard/palette "select task" flows would silently select
   // something the user cannot see. Only the collapsed ancestors on the
@@ -899,6 +922,13 @@ export function AppSidebar({
             <TooltipProvider>
             <ScrollArea className="min-h-0 flex-1 group-data-[collapsible=icon]:[&_[data-slot=scroll-area-scrollbar]]:hidden">
               <RowSignalContext.Provider value={rowSignal}>
+              <TreeActionsContext.Provider
+                value={treeActionAvailability.size > 0 ? {
+                  availability: treeActionAvailability,
+                  onArchiveFinished: (task) => setCrud({ kind: "archiveFinished", task }),
+                  onStopTree: (task) => setCrud({ kind: "stopTree", task }),
+                } : null}
+              >
                 <CollapsedNodesContext.Provider value={nodes}>
                 <SidebarMenu className="@container/sb">
                   {error && <StatusRow icon={<Icons.error className="size-3.5" />} className="text-destructive" text={error} />}
@@ -977,6 +1007,7 @@ export function AppSidebar({
                   ))}
                 </SidebarMenu>
                 </CollapsedNodesContext.Provider>
+              </TreeActionsContext.Provider>
               </RowSignalContext.Provider>
             </ScrollArea>
             </TooltipProvider>
@@ -1044,6 +1075,24 @@ export function AppSidebar({
               open
               onOpenChange={(o) => !o && setCrud(null)}
               onArchived={refresh}
+            />
+          )}
+          {crud?.kind === "archiveFinished" && (
+            <ArchiveFinishedDialog
+              client={client}
+              task={crud.task}
+              open
+              onOpenChange={(o) => !o && setCrud(null)}
+              onArchived={refresh}
+            />
+          )}
+          {crud?.kind === "stopTree" && (
+            <StopTreeDialog
+              client={client}
+              task={crud.task}
+              open
+              onOpenChange={(o) => !o && setCrud(null)}
+              onStopped={refresh}
             />
           )}
           {crud?.kind === "scripts" && (
@@ -1951,12 +2000,41 @@ const TaskRow = memo(function TaskRow({
   // caller's li also contains this task's nested children list, so a CSS
   // group on the li would reveal every descendant's actions on one hover
   // (see use-row-active.ts).
-  const { active, rowProps, setMenuOpen } = useRowActive();
+  const { active, rowProps, setMenuOpen: setRowMenuOpen } = useRowActive();
+  // The hover card must not sit on top of the row's menu (it hid the menu
+  // entries' reasons): it is controlled and held shut while a menu is open.
+  const [hoverOpen, setHoverOpen] = useState(false);
+  const [menuOpen, setMenuOpenState] = useState(false);
+  const [instantClose, setInstantClose] = useState(false);
+  const setMenuOpen = (open: boolean) => {
+    setRowMenuOpen(open);
+    setMenuOpenState(open);
+    if (open) setInstantClose(false);
+    // Forget a card that was open or pending when the menu opened, or it
+    // would pop back up the moment the menu closes.
+    if (open) setHoverOpen(false);
+  };
   // On a narrow sidebar the ⋯ is overlaid on the row's right end (the time
   // slot is dropped there), where the child-count chip, rollup and setup badge
   // sit -- hide them while it shows rather than draw it over them.
   const hideForActions = active && "@max-[14rem]/sb:invisible";
-  const menuEntries = taskMenuEntries(task, { spaces, onMoveTask, isPinned: isTaskPinned, onTogglePin, onMarkUnread, onArchiveTask });
+  const treeActions = useContext(TreeActionsContext);
+  const treeAvailability = treeActions?.availability.get(task.ID);
+  const menuEntries = taskMenuEntries(task, {
+    spaces,
+    onMoveTask,
+    isPinned: isTaskPinned,
+    onTogglePin,
+    onMarkUnread,
+    onArchiveTask,
+    tree: treeActions && treeAvailability
+      ? {
+          availability: treeAvailability,
+          onArchiveFinished: () => treeActions.onArchiveFinished(task),
+          onStopTree: () => treeActions.onStopTree(task),
+        }
+      : undefined,
+  });
   const onRowKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     if (handleTaskRowArrowKey(e.key, e.currentTarget, { hasChildren, isCollapsed, onToggle: () => onToggleCollapse?.(task.ID) })) {
@@ -2007,7 +2085,7 @@ const TaskRow = memo(function TaskRow({
               <Icons.chevronRight className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")} />
             </button>
           )}
-          <HoverCard openDelay={400} closeDelay={100}>
+          <HoverCard openDelay={400} closeDelay={100} open={hoverOpen && !menuOpen} onOpenChange={(o) => setHoverOpen(o && !menuOpen && !modalDialogOpen())}>
             <HoverCardTrigger asChild>
               <SidebarMenuSubButton
                 asChild
@@ -2155,16 +2233,16 @@ const TaskRow = memo(function TaskRow({
                     <Icons.more />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <TaskMenuItems entries={menuEntries} parts={DROPDOWN_PARTS} />
+                <DropdownMenuContent align="end" className={instantClose ? MENU_CLOSE_INSTANT : undefined}>
+                  <TaskMenuItems entries={menuEntries} parts={DROPDOWN_PARTS} onDialogSelect={() => setInstantClose(true)} />
                 </DropdownMenuContent>
               </DropdownMenu>
             </span>
           )}
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent data-testid="sidebar-task-context-menu">
-        <TaskMenuItems entries={menuEntries} parts={CONTEXT_PARTS} />
+      <ContextMenuContent data-testid="sidebar-task-context-menu" className={instantClose ? MENU_CLOSE_INSTANT : undefined}>
+        <TaskMenuItems entries={menuEntries} parts={CONTEXT_PARTS} onDialogSelect={() => setInstantClose(true)} />
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -2300,7 +2378,18 @@ function TaskRows({
  */
 type TaskMenuEntry =
   | { kind: "move"; targets: { id: number | null; label: string }[]; onMove: (spaceId: number | null) => void }
-  | { kind: "item"; testId: string; label: string; icon: ReactNode; onSelect: () => void };
+  | {
+      kind: "item";
+      testId: string;
+      label: string;
+      icon: ReactNode;
+      onSelect: () => void;
+      /** Unavailable but still focusable: the reason is `mutedNote` (see lib/menu-item-disabled.ts). */
+      disabled?: boolean;
+      mutedNote?: string;
+      /** Opening a dialog: the menu closes instantly rather than fading out under it. */
+      opensDialog?: boolean;
+    };
 
 /**
  * "Move to space" lists every other space in the task's workspace plus
@@ -2317,9 +2406,36 @@ function taskMenuEntries(
     onTogglePin: (taskId: number) => void;
     onMarkUnread: (taskId: number) => void;
     onArchiveTask: (task: Task) => void;
+    /** PR-H11 tree actions; present only on rows in the tree view whose task has live descendants. */
+    tree?: { availability: TreeActionAvailability; onArchiveFinished: () => void; onStopTree: () => void };
   },
 ): TaskMenuEntry[] {
   const entries: TaskMenuEntry[] = [];
+  if (o.tree) {
+    const { availability, onArchiveFinished, onStopTree } = o.tree;
+    entries.push(
+      {
+        kind: "item",
+        testId: "sidebar-task-archive-finished-action",
+        label: "Archive finished sub-tasks…",
+        icon: <Icons.archive />,
+        onSelect: onArchiveFinished,
+        opensDialog: true,
+        disabled: !availability.archive.enabled,
+        mutedNote: availability.archive.reason ?? undefined,
+      },
+      {
+        kind: "item",
+        testId: "sidebar-task-stop-tree-action",
+        label: "Stop all in tree…",
+        icon: <Icons.stop />,
+        onSelect: onStopTree,
+        opensDialog: true,
+        disabled: !availability.stop.enabled,
+        mutedNote: availability.stop.reason ?? undefined,
+      },
+    );
+  }
   if (o.spaces && o.onMoveTask) {
     const targets: { id: number | null; label: string }[] = [];
     if (task.SpaceID !== null) targets.push({ id: null, label: "Ungrouped" });
@@ -2350,6 +2466,7 @@ function taskMenuEntries(
       label: "Archive task",
       icon: <Icons.archive />,
       onSelect: () => o.onArchiveTask(task),
+      opensDialog: true,
     },
   );
   return entries;
@@ -2357,7 +2474,15 @@ function taskMenuEntries(
 
 /** The Radix wrappers one menu flavour renders with; dropdown and context menus share every prop used below. */
 interface MenuParts {
-  Item: ComponentType<{ onSelect?: () => void; children?: ReactNode; "data-testid"?: string; "data-space-id"?: string | number }>;
+  Item: ComponentType<{
+    onSelect?: (event: Event) => void;
+    children?: ReactNode;
+    className?: string;
+    "aria-disabled"?: boolean;
+    "aria-describedby"?: string;
+    "data-testid"?: string;
+    "data-space-id"?: string | number;
+  }>;
   Sub: ComponentType<{ children?: ReactNode }>;
   SubTrigger: ComponentType<{ children?: ReactNode; "data-testid"?: string }>;
   SubContent: ComponentType<{ children?: ReactNode }>;
@@ -2377,7 +2502,27 @@ const CONTEXT_PARTS: MenuParts = {
   SubContent: ContextMenuSubContent,
 };
 
-function TaskMenuItems({ entries, parts }: { entries: TaskMenuEntry[]; parts: MenuParts }) {
+/**
+ * True while a modal dialog is open. After a menu entry opens a dialog the
+ * menu vanishes under the pointer, so whichever row is beneath starts its
+ * hover-card timer; the card would then open over the dialog (a higher
+ * dismissable layer than it) and swallow its Escape. Open requests made while
+ * a dialog is up are ignored.
+ */
+function modalDialogOpen(): boolean {
+  return typeof document !== "undefined" && document.querySelector('[role="dialog"]') !== null;
+}
+
+function TaskMenuItems({
+  entries,
+  parts,
+  onDialogSelect,
+}: {
+  entries: TaskMenuEntry[];
+  parts: MenuParts;
+  /** Called when an entry that opens a dialog is chosen, before the menu closes. */
+  onDialogSelect?: () => void;
+}) {
   const { Item, Sub, SubTrigger, SubContent } = parts;
   return (
     <>
@@ -2401,8 +2546,25 @@ function TaskMenuItems({ entries, parts }: { entries: TaskMenuEntry[]; parts: Me
             </SubContent>
           </Sub>
         ) : (
-          <Item key={entry.testId} data-testid={entry.testId} onSelect={entry.onSelect}>
+          <Item
+            key={entry.testId}
+            data-testid={entry.testId}
+            {...(entry.disabled ? reachableDisabledProps(`${entry.testId}-reason`) : {})}
+            onSelect={
+              entry.disabled
+                ? ignoreSelect
+                : () => {
+                    if (entry.opensDialog) onDialogSelect?.();
+                    entry.onSelect();
+                  }
+            }
+          >
             {entry.icon} {entry.label}
+            {entry.mutedNote && (
+              <span id={`${entry.testId}-reason`} className="ml-auto pl-2 text-ui-xs text-muted-foreground">
+                {entry.mutedNote}
+              </span>
+            )}
           </Item>
         ),
       )}
