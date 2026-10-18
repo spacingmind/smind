@@ -126,7 +126,7 @@ type evidence struct {
 }
 
 const (
-	demoRun     = "run-demo-0001"
+	demoRun     = "7f3a91bc4d2e0a15"
 	skillTests  = "run-focused-tests"
 	skillPush   = "never-force-push"
 	skillCommit = "conventional-commits"

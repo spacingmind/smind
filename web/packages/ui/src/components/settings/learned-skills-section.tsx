@@ -21,7 +21,7 @@ import { Icons } from "@/lib/icons";
 type Tab = "proposed" | "active" | "archived";
 
 /** Keeps the list area the same height whichever tab is open, so switching tabs never shifts the page. */
-const LIST_MIN_HEIGHT = "min-h-72";
+const LIST_MIN_HEIGHT = "min-h-[26rem]";
 
 function ListFrame({ children }: { children: ReactNode }) {
   return <div className={`flex flex-col rounded-xl border bg-card p-3 ${LIST_MIN_HEIGHT}`}>{children}</div>;

@@ -306,7 +306,7 @@ export function SidebarFooterActions({
             icon={Icons.settings}
             testId="sidebar-settings-button"
             onClick={() => onOpenSettings?.()}
-            badge={<PendingProposalBadge className="absolute top-1.5 right-1.5" />}
+            badge={<PendingProposalBadge className="absolute top-1 right-1" />}
           />
         </div>
       </div>

@@ -39,7 +39,7 @@ describe("learning opt-in", () => {
     await flush();
     expect(screen.getByTestId("learning-optin-subtitle").textContent).toMatch(/transcripts/);
     expect(screen.getByTestId("learning-optin-subtitle").textContent).toMatch(/approve/);
-    fireEvent.click(screen.getByRole("radio", { name: "Propose skills" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Propose" }));
     await flush();
     expect(d.calls.find((c) => c.method === "learning.setMode")?.params).toEqual({ workspaceId: 1, mode: "propose" });
     // The status is re-read so the control reflects the daemon's answer.
@@ -50,7 +50,7 @@ describe("learning opt-in", () => {
     const d = setup({ ...STATUS, enabled: false });
     await flush();
     expect(screen.getByTestId("learning-kill-switch")).toBeTruthy();
-    const propose = screen.getByRole("radio", { name: "Propose skills" });
+    const propose = screen.getByRole("radio", { name: "Propose" });
     expect(propose.hasAttribute("disabled") || propose.getAttribute("data-disabled") !== null).toBe(true);
     fireEvent.click(propose);
     await flush();
@@ -70,7 +70,7 @@ describe("learning opt-in", () => {
     fireEvent.keyDown(screen.getByTestId("learning-workspace-select"), { key: "ArrowDown" });
     fireEvent.click(await screen.findByRole("option", { name: "beta" }));
     await flush();
-    expect(screen.getByRole("radio", { name: "Propose skills" }).getAttribute("data-state")).toBe("on");
+    expect(screen.getByRole("radio", { name: "Propose" }).getAttribute("data-state")).toBe("on");
     fireEvent.click(screen.getByRole("radio", { name: "Off" }));
     await flush();
     expect(d.calls.find((c) => c.method === "learning.setMode")?.params).toEqual({ workspaceId: 2, mode: "off" });
@@ -81,7 +81,7 @@ describe("learning opt-in", () => {
       throw new RpcError("workspace not found");
     });
     await flush();
-    fireEvent.click(screen.getByRole("radio", { name: "Propose skills" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Propose" }));
     await flush();
     expect(screen.getByTestId("learning-optin-error").textContent).toBe("workspace not found");
   });

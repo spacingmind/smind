@@ -5,7 +5,7 @@ import type { LearningMode, LearningWorkspaceStatus } from "@/lib/learning-types
 
 const MODE_OPTIONS: { value: LearningMode; label: string }[] = [
   { value: "off", label: "Off" },
-  { value: "propose", label: "Propose skills" },
+  { value: "propose", label: "Propose" },
 ];
 
 /**

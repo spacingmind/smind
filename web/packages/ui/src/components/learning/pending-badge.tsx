@@ -12,7 +12,7 @@ function Count({ className }: { className?: string }) {
       role="img"
       data-testid="learning-pending-badge"
       aria-label={`${count} pending skill proposal${count === 1 ? "" : "s"}`}
-      className={cn("size-1.5 shrink-0 rounded-full bg-foreground-muted", className)}
+      className={cn("size-1.5 shrink-0 rounded-full bg-foreground", className)}
     />
   );
 }
