@@ -205,6 +205,7 @@ pub fn connection_id_for_relay(workspace_id: &str, relay_native_addr: &str) -> S
 /// everything this build does not understand (unknown kinds, unknown
 /// fields) is kept verbatim so a newer app version's data survives a
 /// round trip through an older one.
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredRegistry {
     connections: Vec<Connection>,
@@ -390,8 +391,10 @@ impl Registry {
         if self.connections.len() == before {
             return Err(format!("no connection with id {id:?}"));
         }
+        self.entry_extras.remove(id);
         if self.selected_id == id {
             self.selected_id = LOCAL_ID.to_string();
+            self.preserved_selection = None;
         }
         Ok(())
     }
@@ -402,6 +405,7 @@ impl Registry {
             return Err(format!("no connection with id {id:?}"));
         }
         self.selected_id = id.to_string();
+        self.preserved_selection = None;
         Ok(())
     }
 
@@ -468,17 +472,38 @@ impl Registry {
     }
 
     /// save writes the registry to `path` as JSON, creating parent
-    /// directories as needed.
+    /// directories as needed. Unknown top-level fields, unknown fields
+    /// on known entries, and unparsed entries are written back verbatim,
+    /// so the file survives a round trip through an older build. Known
+    /// entries come first (in registry order), unsupported ones after.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let stored = StoredRegistry {
-            connections: self.connections.clone(),
-            selected_id: self.selected_id.clone(),
-        };
+        let mut root = Value::Object(self.top_extra.clone());
+        let connections: Vec<Value> = self
+            .connections
+            .iter()
+            .map(|conn| {
+                let mut obj = serde_json::to_value(conn)
+                    .expect("smind desktop: connection serializes")
+                    .as_object()
+                    .expect("smind desktop: connection serializes to an object")
+                    .clone();
+                if let Some(extras) = self.entry_extras.get(&conn.id) {
+                    for (k, v) in extras {
+                        obj.entry(k.clone()).or_insert_with(|| v.clone());
+                    }
+                }
+                Value::Object(obj)
+            })
+            .chain(self.unsupported.iter().cloned())
+            .collect();
+        root["connections"] = Value::Array(connections);
+        root["selectedId"] =
+            Value::String(self.preserved_selection.clone().unwrap_or(self.selected_id.clone()));
         let data =
-            serde_json::to_string_pretty(&stored).expect("smind desktop: registry serializes");
+            serde_json::to_string_pretty(&root).expect("smind desktop: registry serializes");
         fs::write(path, data)
     }
 }
