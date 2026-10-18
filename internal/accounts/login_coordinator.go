@@ -91,6 +91,17 @@ const (
 	LoginCodeUnknownAccount     = "login_unknown_account"
 	LoginCodeIdentityUnverified = "identity_unverified"
 	LoginCodeNotOAuthAccount    = "login_not_oauth_account"
+
+	// Codes of the paste-the-redirect flow and the listener path
+	// (ADR-0033 "Login contract").
+	LoginCodeUnknown          = "login_unknown"
+	LoginCodeWrongMethod      = "login_wrong_method"
+	LoginCodeAttemptsExceeded = "login_attempts_exceeded"
+	LoginCodeBadRedirect      = "login_bad_redirect"
+	LoginCodeAlreadyCompleted = "login_already_completed"
+	LoginCodeStateMismatch    = "state_mismatch"
+	LoginCodeDenied           = "denied"
+	LoginCodeTimeout          = "timeout"
 )
 
 // LoginError is an error with a stable machine-readable code. Detail never
