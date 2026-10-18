@@ -66,6 +66,16 @@ health | grep -q "\"managedBy\":\"$supervisor\"" || fail "healthz has no managed
 [ "$(status_code)" = 0 ] || fail "status after install should exit 0"
 "$bin" service status
 
+if [ "$supervisor" = launchd ]; then
+  step "status shows launchd's enabled/disabled override"
+  "$bin" service status | grep -q "enabled: yes" || fail "status after install should say 'enabled: yes'"
+  svc="gui/$(id -u)/com.spacingmind.smind"
+  launchctl disable "$svc"
+  "$bin" service status | grep -q "enabled: NO" || fail "status after launchctl disable should say 'enabled: NO'"
+  launchctl enable "$svc"
+  "$bin" service status | grep -q "enabled: yes" || fail "status after launchctl enable should say 'enabled: yes' again"
+fi
+
 step "install again is a no-op for the running daemon"
 out="$("$bin" service install)"
 printf '%s\n' "$out"
