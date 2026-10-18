@@ -197,3 +197,107 @@ func TestRunPromptIsolated_DoesNotTouchSessionStore(t *testing.T) {
 		t.Fatalf("claudeClients = %d entries, want none tracked", len(r.claudeClients))
 	}
 }
+
+func TestRunPromptIsolated_ToolAttemptAborts(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "tool-attempt")
+	r := claudeNativeRunner(t, wm)
+
+	got, err := runIsolated(t, r, task, ProviderClaudeNative, nil, IsolationOptions{SystemPrompt: "p"})
+	if !errors.Is(err, ErrIsolationViolated) {
+		t.Fatalf("error = %v, want ErrIsolationViolated", err)
+	}
+	if !strings.Contains(err.Error(), "Bash") {
+		t.Fatalf("error %q does not name the tool", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("no events")
+	}
+	last := got[len(got)-1]
+	if last.Type != EventTypeDone || last.StopReason != "isolation_violated" {
+		t.Fatalf("last event = %+v, want Done/isolation_violated", last)
+	}
+	for _, e := range got[:len(got)-1] {
+		if e.Type == EventTypeToolCall || e.Type == EventTypeText {
+			t.Fatalf("event after/at the violation leaked: %+v (all %+v)", e, got)
+		}
+	}
+}
+
+// isoRecordingDecider records the summaries it is asked about and denies.
+type isoRecordingDecider struct{ summaries []string }
+
+func (d *isoRecordingDecider) Decide(_ context.Context, summary string, _ []PermissionOption) (string, error) {
+	d.summaries = append(d.summaries, summary)
+	return claudeOptionDeny, nil
+}
+
+func TestRunPromptIsolated_PermissionRequestDenied(t *testing.T) {
+	t.Parallel()
+	t.Run("nil decider denies", func(t *testing.T) {
+		t.Parallel()
+		wm, task := newTestTask(t, "permission")
+		r := claudeNativeRunner(t, wm)
+		got, err := runIsolated(t, r, task, ProviderClaudeNative, nil, IsolationOptions{SystemPrompt: "p"})
+		if err != nil {
+			t.Fatalf("error = %v", err)
+		}
+		if txt := FinalText(got); txt != "chose:deny" {
+			t.Fatalf("final text = %q, want chose:deny", txt)
+		}
+	})
+	t.Run("custom decider consulted", func(t *testing.T) {
+		t.Parallel()
+		wm, task := newTestTask(t, "permission")
+		r := claudeNativeRunner(t, wm)
+		d := &isoRecordingDecider{}
+		got, err := runIsolated(t, r, task, ProviderClaudeNative, d, IsolationOptions{SystemPrompt: "p"})
+		if err != nil {
+			t.Fatalf("error = %v", err)
+		}
+		if len(d.summaries) != 1 || !strings.Contains(d.summaries[0], "Bash") {
+			t.Fatalf("decider summaries = %q, want one Bash request", d.summaries)
+		}
+		if txt := FinalText(got); txt != "chose:deny" {
+			t.Fatalf("final text = %q", txt)
+		}
+	})
+}
+
+func TestRunPromptIsolated_ReturnsFinalAssistantText(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "reply")
+	r := claudeNativeRunner(t, wm)
+	got, err := runIsolated(t, r, task, ProviderClaudeNative, nil, IsolationOptions{SystemPrompt: "p"})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if txt := FinalText(got); txt != "hello from claude" {
+		t.Fatalf("FinalText = %q", txt)
+	}
+}
+
+func TestFinalText(t *testing.T) {
+	t.Parallel()
+	txt := func(s string) Event { return Event{Type: EventTypeText, Text: s} }
+	for _, tc := range []struct {
+		name   string
+		events []Event
+		want   string
+	}{
+		{"empty", nil, ""},
+		{"single", []Event{txt("a")}, "a"},
+		{"chunks then done", []Event{txt("a"), txt("b"), {Type: EventTypeDone}}, "ab"},
+		{"last turn only", []Event{txt("old"), {Type: EventTypeToolCall}, txt("x"), txt("y"), {Type: EventTypeDone}}, "xy"},
+		{"thinking separates", []Event{txt("old"), {Type: EventTypeThinking, Text: "t"}, txt("new")}, "new"},
+		{"trailing non-text skipped", []Event{txt("a"), {Type: EventTypeUsage}, {Type: EventTypeDone}}, "a"},
+		{"no text", []Event{{Type: EventTypeDone}}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := FinalText(tc.events); got != tc.want {
+				t.Fatalf("FinalText = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

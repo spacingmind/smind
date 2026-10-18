@@ -329,6 +329,32 @@ func runFakeClaudeCLI() {
 			"result":     "ok",
 		})
 
+	case "tool-attempt":
+		// An assistant turn that calls a tool (which an isolated run, with
+		// --tools "", must never do), followed by more text that must never
+		// reach the caller, then blocks until the CLI is killed.
+		stdin.Scan() // consume the prompt line
+		writeLine(map[string]any{
+			"type":       "assistant",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"model": "claude-fake",
+				"content": []any{
+					map[string]any{"type": "tool_use", "id": "tool-1", "name": "Bash", "input": map[string]any{"command": "echo hi"}},
+				},
+			},
+		})
+		writeLine(map[string]any{
+			"type":       "assistant",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"model":   "claude-fake",
+				"content": []any{map[string]any{"type": "text", "text": "after the tool"}},
+			},
+		})
+		for stdin.Scan() {
+		}
+
 	case "permission":
 		// Mirrors claude-agent-sdk-go's own fakecli_test.go
 		// "streaming_and_permission" scenario: issues a real can_use_tool

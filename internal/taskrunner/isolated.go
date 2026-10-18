@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 )
@@ -24,6 +26,10 @@ var ErrIsolationUnsupported = errors.New("taskrunner: isolated runs are only sup
 
 // ErrIsolationViolated is returned when an isolated run attempted a tool call.
 var ErrIsolationViolated = errors.New("taskrunner: isolated run attempted a tool call")
+
+// isolationViolatedStop is the StopReason of the final Done event of a run
+// aborted for attempting a tool call.
+const isolationViolatedStop = "isolation_violated"
 
 // isolatedDenyMessage is the reason handed back for any permission request
 // raised inside an isolated run.
@@ -50,7 +56,17 @@ func (denyAllClaudePolicy) Decide(_ context.Context, _ claudecode.CanUseToolRequ
 // CLI's cwd (callers pass a task whose worktree is an empty temp dir).
 //
 // decider nil denies every permission request; a non-nil decider is
-// consulted instead. The caller reads the final message with FinalText.
+// consulted instead.
+//
+// Defense in depth: --tools "" means the model has no tool to call, but if
+// a tool_use block still arrives the run is cancelled (killing the CLI), a
+// final Done event with StopReason isolationViolatedStop is sent, and an
+// error wrapping ErrIsolationViolated and naming the tool is returned.
+// Nothing from the violating turn onward is forwarded.
+//
+// The caller reads the model's answer with FinalText(events): the text
+// chunks of the last assistant turn, i.e. the contiguous EventTypeText
+// events before the trailing usage/Done events.
 func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, provider Provider, prompt string, decider PermissionDecider, model string, iso IsolationOptions, events chan<- Event) error {
 	defer close(events)
 
@@ -119,22 +135,50 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 	}
 	defer client.Close()
 
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var (
+		mu       sync.Mutex
+		violated string // tool name of the first tool call; "" when none
+		tripped  bool
+	)
 	updates := make(chan claudecode.Message)
 	forwardDone := make(chan struct{})
 	go func() {
 		defer close(forwardDone)
 		for msg := range updates {
 			for _, e := range claudeEvents(msg) {
+				mu.Lock()
+				if e.Type == EventTypeToolCall && !tripped {
+					tripped, violated = true, e.ToolName
+					cancel()
+				}
+				drop := tripped
+				mu.Unlock()
+				if drop {
+					continue
+				}
 				select {
 				case events <- e:
-				case <-ctx.Done():
+				case <-runCtx.Done():
 				}
 			}
 		}
 	}()
 
-	result, err := client.Prompt(ctx, prompt, updates)
+	result, err := client.Prompt(runCtx, prompt, updates)
 	<-forwardDone
+	mu.Lock()
+	didTrip, toolName := tripped, violated
+	mu.Unlock()
+	if didTrip {
+		select {
+		case events <- Event{Type: EventTypeDone, StopReason: isolationViolatedStop}:
+		case <-ctx.Done():
+		}
+		return fmt.Errorf("%w: %q", ErrIsolationViolated, toolName)
+	}
 	if err != nil {
 		return fmt.Errorf("taskrunner: isolated claude code prompt: %w", err)
 	}
@@ -145,4 +189,24 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 	case <-ctx.Done():
 	}
 	return nil
+}
+
+// FinalText returns the text of the last assistant turn in events: the
+// contiguous EventTypeText chunks ending the stream, ignoring trailing
+// non-text events (usage, done). Any earlier non-text event (thinking, a
+// tool call) ends the turn's text. "" when there is none.
+func FinalText(events []Event) string {
+	end := len(events)
+	for end > 0 && events[end-1].Type != EventTypeText {
+		end--
+	}
+	start := end
+	for start > 0 && events[start-1].Type == EventTypeText {
+		start--
+	}
+	var b strings.Builder
+	for _, e := range events[start:end] {
+		b.WriteString(e.Text)
+	}
+	return b.String()
 }
