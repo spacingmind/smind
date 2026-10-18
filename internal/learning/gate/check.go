@@ -114,7 +114,7 @@ func Check(in Intent, w Window, live []LiveSkill, cfg Config) Verdict {
 		v.checkSimilarity(result, patchTarget, learned, pending, human, cfg, add)
 	}
 
-	add(checkProvenance(in, w, cfg.Mode)...)
+	add(checkProvenance(in, w, cfg.Mode, proposedTexts(in))...)
 
 	v.Result = result
 	v.OK = len(v.Findings) == 0
@@ -185,4 +185,17 @@ func (v *Verdict) checkSimilarity(result Skill, patchTarget *LiveSkill, learned,
 	if cfg.Possible > 0 && bestScore >= cfg.Possible {
 		v.Similarity = bestScore
 	}
+}
+
+// proposedTexts are the model-authored pieces an intent would persist:
+// create contributes description and body, patch its new description and
+// new_string.
+func proposedTexts(in Intent) []string {
+	switch in.Action {
+	case ActionCreate:
+		return []string{in.Description, in.Body}
+	case ActionPatch:
+		return []string{in.Description, in.NewString}
+	}
+	return nil
 }

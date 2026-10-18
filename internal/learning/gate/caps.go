@@ -34,6 +34,7 @@ const (
 	ReasonEvidenceNotVerbatim Reason = "evidence_not_verbatim"
 	ReasonHiddenText          Reason = "hidden_text"
 	ReasonBadReason           Reason = "bad_reason"
+	ReasonUngroundedContent   Reason = "ungrounded_content"
 )
 
 // Finding is one gate rejection reason. Detail is short and never echoes more

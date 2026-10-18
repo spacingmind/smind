@@ -50,12 +50,25 @@ type EventKey struct {
 // WindowEvent is one window event; Kind is one of the Ev* kinds for
 // qualifying events, or anything else (e.g. "tool_output", "assistant") for
 // non-qualifying ones.
+//
+// Collector contract (the gate cannot verify it; the code that builds the
+// Window MUST honour it, because Text is what grounds quotes and code spans):
+//   - user_message: text typed by a human in the composer or queue with
+//     source=human. NEVER tool results, hook or skill-index injections,
+//     slash-command expansions or pasted tool output.
+//   - failure_recovery: the failing tool call's one-line summary plus the
+//     AGENT's recovery action, but NOT the repo-controlled failing tool output.
+//   - permission_denied: the denied action's summary.
+//   - loaded_skill_wrong: the loaded skill's name plus the contradicting
+//     human or agent text.
 type WindowEvent struct {
 	Kind string
 	Text string
 }
 
-// Window maps event keys to events.
+// Window maps event keys to events. A Window must be built for ONE workspace
+// only: events from several workspaces would let evidence from one ground a
+// skill proposed for another.
 type Window map[EventKey]WindowEvent
 
 // Mode is which job produced the intent.
