@@ -239,7 +239,8 @@ type busAccountNotifier struct {
 func (b busAccountNotifier) NotifyAccountUpdated(a store.Account) {
 	result := accountResult{
 		ID: a.ID, Provider: a.Provider, Label: a.Label, CredentialType: a.CredentialType,
-		CreatedAt: a.CreatedAt.Format(time.RFC3339), UpdatedAt: a.UpdatedAt.Format(time.RFC3339),
+		HasIdentity: a.Identity != "",
+		CreatedAt:   a.CreatedAt.Format(time.RFC3339), UpdatedAt: a.UpdatedAt.Format(time.RFC3339),
 	}
 	b.bus.Publish(Event{Topic: TopicAccountUpdated, Payload: accountUpdatedPayload{Account: result}})
 }
