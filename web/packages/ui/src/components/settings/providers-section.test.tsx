@@ -312,23 +312,27 @@ describe("providers-section actions", () => {
 });
 
 describe("providers-section connect flows", () => {
-  it.skip("Connect account disclosure opens the shared ConnectAccountPanel and adds through it", async () => { // A1-6: connect flow
+  it("Connect account disclosure opens the shared ConnectAccountPanel and adds through it", async () => {
     const client = await renderLoaded([account(1, "anthropic", "work-claude")]);
 
-    // Collapsed by default -- the grouped list is the primary content.
-    expect(screen.queryByTestId("accounts-connect-anthropic")).not.toBeInTheDocument();
+    // The detail pane is the primary content; no connect form until asked.
+    expect(screen.queryByTestId("connect-close")).not.toBeInTheDocument();
 
+    // The header action targets the selected provider: Kimi is api-key, so
+    // the shared panel opens its form (no login starts for an api-key provider).
+    await selectProvider("kimi");
     fireEvent.click(screen.getByTestId("providers-connect-toggle"));
-    expect(screen.getByTestId("accounts-connect-anthropic")).toBeInTheDocument();
+    await flush();
+    expect(screen.getByLabelText("Credential")).toBeInTheDocument();
+    expect(client.calls.filter((c) => c.method === "account.oauthStart")).toHaveLength(0);
 
-    // The shared panel's manual-add path works from here: switch to the
-    // API key method, fill it, submit -- account.add fires with accountProvider.
-    fireEvent.click(screen.getByRole("radio", { name: "API key" }));
+    // The shared panel's manual-add path works from here: fill the api-key
+    // form, submit -- account.add fires with accountProvider.
     fireEvent.change(document.getElementById("account-oauth-label")!, { target: { value: "alt" } });
     fireEvent.change(document.getElementById("account-credential")!, { target: { value: "sk-new" } });
     fireEvent.click(screen.getByTestId("accounts-add-submit"));
     expect(client.calls.find((c) => c.method === "account.add")?.params).toMatchObject({
-      provider: "anthropic",
+      provider: "kimi",
       label: "alt",
       credential: "sk-new",
     });
@@ -338,11 +342,24 @@ describe("providers-section connect flows", () => {
     expect(screen.getByText("alt")).toBeInTheDocument();
   });
 
-  it.skip("a not-connected row's Connect opens the shared panel", async () => { // A1-6: connect flow
-    await renderLoaded([account(1, "anthropic", "work-claude")]);
+  it("a not-connected row's Connect opens the shared panel", async () => {
+    const client = await renderLoaded([account(1, "anthropic", "work-claude")]);
 
+    // An oauth provider's row-level Connect starts its login at once.
+    await selectProvider("codex-native");
+    fireEvent.click(screen.getByTestId("provider-connect-codex-native"));
+    await flush();
+    const start = client.calls.find((c) => c.method === "account.oauthStart");
+    expect(start?.params).toMatchObject({ provider: "openai", method: "browser" });
+    expect(typeof (start?.params as { label?: string })?.label).toBe("string");
+    // The api-key provider shows the form instead of starting.
+    await act(async () => {
+      useProvidersViewStore.getState().clearConnect();
+    });
+    await selectProvider("kimi");
     fireEvent.click(screen.getByTestId("provider-connect-kimi"));
     await flush();
-    expect(screen.getByTestId("providers-connect-toggle")).toHaveAttribute("aria-expanded", "true");
+    expect(client.calls.filter((c) => c.method === "account.oauthStart")).toHaveLength(1);
+    expect(screen.getByLabelText("Credential")).toBeInTheDocument();
   });
 });
