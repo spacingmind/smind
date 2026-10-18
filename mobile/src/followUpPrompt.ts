@@ -7,9 +7,11 @@
 // screen uses for viewing a run -- deliberately NOT task.prompt, whose
 // request-scoped cancellation would stop the run. A run.start failure
 // rolls the optimistic line back so the caller can re-show the draft for
-// a retry.
+// a retry. With opts.whenBusy (ADR-0021 §9) a busy chat may park the
+// prompt in the daemon's queue instead: the optimistic line is removed
+// (the queue UI shows the prompt) and nothing attaches.
 
-import { RunSummary, startRun } from './api';
+import { RunSummary, RunStartResult, startRun, startRunWhenBusy, WhenBusy } from './api';
 import { CONTINUE_PROMPT } from './runFooter';
 import { RelayConnection } from './relay/RelayConnection';
 import { lineFromAttachEvent, TimelineLine } from './runTimeline';
@@ -30,12 +32,20 @@ export interface SendFollowUpDeps {
   onEvent?: (event: string, params: unknown, runId: string) => void;
 }
 
+/** Optional send options: the busy-chat delivery mode and its target chat. */
+export interface SendFollowUpOpts {
+  whenBusy?: WhenBusy;
+  chatId?: number;
+}
+
 /**
  * Sends one follow-up prompt on a task whose most recent run's provider
  * is reused. The typed text renders as a user line immediately; the new
  * run's events then append live to the same timeline. On failure the
  * optimistic line is removed and the error re-thrown for the screen to
  * show next to the compose box (with the draft restored for retry).
+ * With whenBusy set, a queued result instead removes the optimistic line
+ * (the queue UI owns showing that prompt) and returns without attaching.
  */
 export async function sendFollowUpPrompt(
   conn: RelayConnection,
@@ -44,16 +54,26 @@ export async function sendFollowUpPrompt(
   provider: string,
   prompt: string,
   nextSeq: () => number,
-): Promise<void> {
+  opts?: SendFollowUpOpts,
+): Promise<RunStartResult> {
   const userLine = { key: `f${nextSeq()}`, role: 'user', text: prompt } as TimelineLine;
   deps.appendLines([userLine]);
-  let runId: string;
+  let result: RunStartResult;
   try {
-    runId = await startRun(conn, taskId, provider, prompt);
+    result = opts?.whenBusy
+      ? await startRunWhenBusy(conn, { taskId, chatId: opts.chatId, provider, prompt, whenBusy: opts.whenBusy })
+      : { kind: 'started', runId: await startRun(conn, taskId, provider, prompt) };
   } catch (err) {
     deps.removeLines([userLine]);
     throw err;
   }
+  if (result.kind === 'queued') {
+    // The daemon parked the prompt in the chat's queue; its own UI row
+    // shows it, so the optimistic line stands down and nothing attaches.
+    deps.removeLines([userLine]);
+    return result;
+  }
+  const runId = result.runId;
   // run.attach backfills the new run's whole recorded history before the
   // live tail (internal/runs Registry.Subscribe) -- which includes the
   // prompt's own user_message. The optimistic line already rendered it,
@@ -79,11 +99,14 @@ export async function sendFollowUpPrompt(
     // Detach (navigate-away cancel) or the connection ending: the new
     // run's streamed events simply stop, same as the initial run's tail.
   });
+  return result;
 }
 
 /**
  * The not-finished footer's Continue action (ADR-0027 D13): a follow-up
- * run with the prompt "Continue" on the capped run's own provider.
+ * run with the prompt "Continue" on the capped run's own provider. An
+ * idle chat starts at once; a busy one queues -- the same as the web's
+ * Continue.
  */
 export function continueRun(
   conn: RelayConnection,
@@ -91,6 +114,6 @@ export function continueRun(
   taskId: number,
   run: Pick<RunSummary, 'Provider'>,
   nextSeq: () => number,
-): Promise<void> {
-  return sendFollowUpPrompt(conn, deps, taskId, run.Provider, CONTINUE_PROMPT, nextSeq);
+): Promise<RunStartResult> {
+  return sendFollowUpPrompt(conn, deps, taskId, run.Provider, CONTINUE_PROMPT, nextSeq, { whenBusy: 'queue' });
 }
