@@ -93,6 +93,16 @@ func newConfigOptionTestEnv(t *testing.T, home string, agentArgs ...string) stri
 // for the fake agent (e.g. "modes:session", "live-opts").
 func newConfigOptionTestEnvArgs(t *testing.T, home string, agentArgs ...string) string {
 	t.Helper()
+	return newConfigOptionTestEnvCap(t, home, 0, agentArgs...)
+}
+
+// newConfigOptionTestEnvCap is newConfigOptionTestEnvArgs with the daemon's
+// per-task-tree run cap set to maxRunsPerTree (0 keeps the registry default
+// of 4) -- the same SetMaxConcurrentRunsPerTree call serve.go makes from
+// orchestration.maxConcurrentRunsPerTree, which this harness (it builds the
+// API directly, not through serve) would otherwise never apply.
+func newConfigOptionTestEnvCap(t *testing.T, home string, maxRunsPerTree int, agentArgs ...string) string {
+	t.Helper()
 	dir, err := os.MkdirTemp("", "smind-cli-configopt-")
 	if err != nil {
 		t.Fatal(err)
@@ -120,11 +130,14 @@ func newConfigOptionTestEnvArgs(t *testing.T, home string, agentArgs ...string) 
 	t.Cleanup(func() { _ = s.Close() })
 
 	wm := workspace.New(s)
-	handler, err := wsapi.Handler(wm, accounts.New(s), taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, append([]string{fakeAgent}, agentArgs...))), s, token)
+	api, err := wsapi.New(wm, accounts.New(s), taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, append([]string{fakeAgent}, agentArgs...))), s, token)
 	if err != nil {
-		t.Fatalf("wsapi.Handler() error = %v", err)
+		t.Fatalf("wsapi.New() error = %v", err)
 	}
-	srv := httptest.NewServer(handler)
+	if maxRunsPerTree > 0 {
+		api.Runs.SetMaxConcurrentRunsPerTree(maxRunsPerTree)
+	}
+	srv := httptest.NewServer(api.Handler)
 	t.Cleanup(srv.Close)
 
 	return srv.URL

@@ -149,6 +149,49 @@ and the task-hierarchy items of `docs/plans/completed/smind-control-parity.md`.
   resumes. If there is nothing to resume, the run says so explicitly
   (ADR-0016 §2 "never a silent fresh start").
 
+**O1 provenance — implementation spec** (Lead, 2026-10-18; Size: M (5) —
+scope 2, PRs 1, risk 1, decisions 0, verification 1). The stop/resume bullet
+above is already done (see Progress); this spec covers only the provenance
+bullet, quoted verbatim: *"`runs` gains nullable `base_sha`, `head_sha`, and
+`dirty` (worktree HEAD at start and at the terminal state). They are exposed
+on `run.list`, `task_status`, and the web run header. If git fails, they stay
+NULL and the run is never failed."*
+
+- **P1 store.** Migration `run_provenance` adds nullable `runs.base_sha TEXT`,
+  `runs.head_sha TEXT`, `runs.dirty INTEGER` (also in `schema.sql`). Existing
+  rows read back NULL. `store.Run` gains `BaseSHA, HeadSHA *string; Dirty
+  *bool`; `store.UpdateRunProvenance` writes only the non-nil fields.
+- **P2 capture.** `workspace.GitHead(ctx, dir)` (`git rev-parse HEAD`) and
+  `workspace.GitDirty(ctx, dir)` (`git status --porcelain` non-empty, so
+  untracked files count; ignored files do not), both bounded by the caller's
+  context. `internal/runs` captures `base_sha` + `dirty` at the start of the
+  run's drive goroutine, before the agent is spawned (so `Start` returns
+  without waiting on git and the agent cannot edit before the base is read),
+  and `head_sha` + `dirty` in `finish` before the terminal status is persisted
+  (so the row and the in-memory status agree). Both use a 3 s timeout. Both
+  run-construction sites are covered (`Start` and the queue's
+  `StartWhenBusy` path). A task with no worktree, a non-git dir, git missing,
+  or a timeout records NULL for what it could not read and logs one line; it
+  never changes the run's status and never emits a run event.
+- **P3 wire.** `runs.RunStatus` gains `BaseSHA *string; HeadSHA *string; Dirty
+  *bool` (no json tags, PascalCase like its siblings; JSON `null` when
+  unknown) → `run.list`. `run.logs` result and the `run.status` event payload
+  gain additive `baseSha`/`headSha`/`dirty` (omitempty). The MCP `task_status`
+  output gains the same three keys (omitempty).
+- **P4 web.** The run footer (the per-run line under each turn — the app has
+  no separate "run header") gets a provenance segment: commit icon
+  (`Icons.commit` added to `lib/icons.ts`), 7-char sha (head once the run is
+  terminal, else base), a dirty marker when `dirty`, a tooltip with the full
+  base/head shas and dirty state, and click-to-copy of the full head sha
+  (reusing the clipboard pattern of `message-actions.tsx`). Nothing renders
+  when both shas are null (old runs, non-git).
+
+**Dirty semantics (decided here, plan said only "dirty"):** one column, the
+worktree's dirty state at the *latest* successful capture — written at start,
+overwritten at the terminal state when that capture succeeds, otherwise the
+start value stays. A running run therefore shows its start state; a finished
+one shows what it left behind.
+
 ### O2 — MCP hierarchy + guards
 - `task_new` accepts `parentTaskId`; `task_list` accepts a
   `parentTaskId` filter.
@@ -633,6 +676,47 @@ smind itself (see the gap log).
 - Live smoke (GLM and claude-native): stop mid-turn, send a correction,
   and the transcript shows the earlier context.
 
+**O1 provenance — named tests** (file in parentheses):
+- `TestMigrate_RunProvenanceColumns` (`internal/store/migrate_test.go`): an
+  old-schema DB with a run row migrates; the row reads back nil/nil/nil;
+  re-running the migration is a no-op.
+- `TestUpdateRunProvenance_WritesOnlyNonNil` (`internal/store/runs_test.go`):
+  base then head writes keep the earlier fields; a round trip through
+  `GetRun`/`ListRecentRuns` returns them.
+- `TestGitHead_GitDirty` (`internal/workspace/provenance_test.go`), temp git
+  repo subtests: `clean`, `modified tracked file`, `untracked file`,
+  `ignored file is clean`, `non-git dir` (error), `git missing` (PATH emptied
+  → error, no panic), `no commits yet` (GitHead errors), `cancelled context`.
+- `TestRun_ProvenanceCapture_CommitDuringRun` (`internal/runs/provenance_test.go`):
+  a fake agent that commits mid-run → `head_sha != base_sha`, persisted and in
+  `RunSummary`.
+- `TestRun_ProvenanceCapture_DirtyEdit`: an uncommitted edit → `dirty=true`
+  at the terminal state; a clean run → `dirty=false`.
+- `TestRun_ProvenanceCapture_StartedDirty_EndsClean`: start dirty, run commits
+  everything → final `dirty=false` (overwrite semantics).
+- `TestRun_ProvenanceCapture_NonGitDir`: NULLs, status `done`, no run event
+  mentions git.
+- `TestRun_ProvenanceCapture_GitMissing`: PATH emptied → run still `done`,
+  NULLs.
+- `TestRun_ProvenanceCapture_QueueDeliveredRun`: a run started via the queue
+  path records provenance too.
+- `TestRun_ProvenanceCapture_StopMidRun`: a stopped run still records
+  `head_sha`.
+- `TestRehydratedRun_KeepsProvenance`: restart → `run.list` still reports it.
+- `TestRunList_ProvenanceFields` + `TestRunStatusEvent_ProvenanceFields`
+  (`internal/wsapi`): PascalCase `BaseSHA/HeadSHA/Dirty` in `run.list` (JSON
+  `null` when unknown); `baseSha/headSha/dirty` in `run.logs` / `run.status`.
+- `TestTaskStatus_ProvenanceFields` (`cmd/smind/mcp_run_tools_test.go`):
+  `task_status` structured output carries the three keys; absent when unknown.
+- `run-provenance.test.tsx` (`web/.../components/timeline/`): short sha, head
+  preferred over base, dirty marker present/absent, tooltip has both full
+  shas, click copies the full head sha, renders nothing for null shas, uses
+  the `Icons` registry. Plus a `run-footer` test that the segment mounts.
+  `use-run-timeline` test: `BaseSHA/HeadSHA/Dirty` from `run.list` and the
+  `run.status` event reach the `RunEntry`.
+- Screenshots, light + dark, of the run footer with stubbed data (clean,
+  dirty, running-with-base-only, no provenance).
+
 Validated (taskrunner-level, 2026-09-28):
 `TestRunner_RunPrompt_GLM_StoppedRunStillResumes`,
 `TestRunner_RunPrompt_CodexNative_StoppedRunStillResumes`, and
@@ -839,7 +923,12 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 - [x] M1: schema + async writer
 - [x] M1: usage extraction (4 cases) + tee'd passthrough + include_usage
 - [x] M1: wsapi `usage.*` + `smind usage`
-- [ ] O1: run provenance
+- [x] O1: run provenance — spec 2026-10-18, built 2026-10-18 on branch `feat/run-provenance` (see Validation "O1 provenance").
+  - [x] P1 store migration + `UpdateRunProvenance` — peer-glm, ACCEPTED (`fded1edd`)
+  - [x] P2 `workspace.GitHead/GitDirty` — peer-glm, ACCEPTED (`fee56ea0`; Lead later added `--no-optional-locks`)
+  - [x] P2 runs capture — peer-glm draft did not compile, Lead fixed the build (`ae16730f`); its tests ACCEPTED (`a8bb326d`)
+  - [x] P3 wsapi + MCP fields — peer-sonnet, ACCEPTED (`6110add2`, `a74e869a`)
+  - [x] P4 web — peer-glm; first candidate REJECTED (hook after early return, empty separator segment), fix ACCEPTED; its screenshots were blank, Lead re-took them
 - [x] O1: stop/resume keeps the session
 - [x] O2: MCP parent params + depth guard (Wave 1 slice; per-tree
       concurrency guard and guide stay Wave 2)
@@ -962,7 +1051,20 @@ Known limitation: when `profileId` is set, `task_send` sends `source=human` so t
 - **Not verified** — (a) a browser-composer send *while a real run is live*: the sandbox's only runnable provider (`claude-native`, not logged in) finishes in under a second, so the busy-send path is covered by unit/integration tests and by the CLI-queued delivery above, not by driving the composer through a live run; (b) the "Send now" button and Cmd/Ctrl+Enter interrupt end to end and its screenshot (unit-tested only); (c) the auto-cancel row screenshot; (d) mobile (out of scope); (e) the desktop app.
 - **Decisions beyond the spec** — per-row "send now"/"edit" for an already-queued item is not built (needs new server verbs); cancel-race handling and the auto-cancel string coupling (`"cancelled by user"` vs `"delivery failed:`) are documented in `use-chat-queue.ts`.
 
-Not started: O1 (run provenance columns), O2 Wave 2 items.
+**O1 provenance** (branch `feat/run-provenance`, 2026-10-18):
+
+- **Migration** — `TestMigrate_RunProvenanceColumns`: old rows read back nil/nil/nil; re-running is a no-op. `TestUpdateRunProvenance_WritesOnlyNonNil`.
+- **Capture** (real temp git worktrees, fake ACP agent) — `TestRun_ProvenanceCapture_CommitDuringRun` (head != base), `_DirtyEdit` (clean run `dirty=false`, edited run `dirty=true`), `_StartedDirty_EndsClean`, `_NonGitDir` (NULLs, `done`, no event mentions git), `_GitMissing`, `_QueueDeliveredRun`, `_StartWhenBusyImmediate`, `_StopMidRun`, `_HungGit` (status `done`, NULLs, bounded), `TestRehydratedRun_KeepsProvenance`. Helpers: `TestGitHead_GitDirty` (8 subtests), `TestGitHead_HungGitReturnsAtDeadline`, `TestGitDirty_DoesNotRunFsmonitorHook`, `TestGitHead_NotARepoInsideParentRepo` (the last three fail with their fix reverted — checked).
+- **Wire** — `TestRunList_ProvenanceFields`, `TestRunStatusEvent_ProvenanceFields` (also `run.logs`), `TestTaskStatus_ProvenanceFields`.
+- **Web** — `run-provenance.test.tsx` (9 cases incl. hooks-order rerender, copy-click), `run-footer-provenance.test.tsx` (mount / no stray separator), `use-run-timeline.test.tsx` provenance block (run.list seed, null/absent, run.status patch, run.logs recovery path — fails with the recovery patch removed).
+- **Screenshots** (light + dark, stubbed RunFooter in four states, 900 px, viewed by the Lead): `/tmp/o1-run-header-shots/run-footer-light.png`, `.../run-footer-dark.png`. The commit icon + 7-char sha sits between duration and age with the same dot separators as its neighbours; the dirty marker is a small orange dot that reads in both themes; the running state shows the base sha; a run with no provenance shows no segment and no stray separator.
+- **Independent review** (read-only, 10 findings). Fixed: (1) a git child that outlives the killed git defeated the 3 s deadline and could hang `finish`/`CloseAll` — `cmd.WaitDelay`; (2) `git status` honours an agent-editable `core.fsmonitor`, now run on every run — `-c core.fsmonitor=false`, `--ignore-submodules=all`, `--no-optional-locks`, `GIT_TERMINAL_PROMPT=0`; (3) the start capture now derives from the run's ctx (a Stop skips it) and the terminal capture drops to 1 s during `CloseAll`; (7) `GIT_CEILING_DIRECTORIES` so a worktree that lost its `.git` is not read as the parent repo; (6) web recovery paths take provenance from `run.logs`; (9) migration appended at the end; (10) missing tests added. Not changed: (4) the start capture still adds up to its git latency (≤3 s, normally ~10 ms) before the agent is spawned, by design (base must be read before the agent edits); (5) there is no second "running" `run.status` for the base — adding one broke `TestEvents_NoCrossDeliveryBetweenTopics` and other clients treat each event as a status change — so a live run's base shows on the next `run.list`, and the terminal event carries base + head.
+- **Existing exposure (not new class):** the daemon already runs `git status/add/diff` in task worktrees for diff/commit/archive (`stagedPaths`, `taskDiff`, `snapshotIndex`); those still honour `core.fsmonitor`. Provenance was hardened; the older calls were not touched (follow-up).
+- **Not verified:** a live run against a real provider (claude-native/GLM) in a sandbox daemon — no logged-in provider here; coverage is the real registry + real git + fake ACP agent. Screenshots are of stubbed data, not of the running app. The migration was exercised on a synthetic old-schema DB, not a copy of a real `smind.db`.
+- **`TestMCPTaskWait_ChildrenOf_CapsAt16` (cmd/smind)** — was failing on the base: it started 18 children in one task tree against the per-tree run cap of 4 and only passed when earlier runs finished before later ones started (timing-dependent; O1's start capture made it deterministic). Fixed in this PR: the MCP test env takes the cap (`newMCPSessionWithRunCap`, the same `SetMaxConcurrentRunsPerTree` call serve.go makes from `orchestration.maxConcurrentRunsPerTree`; the harness builds the API directly so it never applied config), the 18 children are genuinely concurrent (`hang`), and the assertion is stronger than before (exactly 16 resolved and `capped == true`; it used to only bound `len(ids)` and discarded `capped`). `go test -race -count=20` passes.
+- **Start is never held by the capture** — `TestRun_ProvenanceCapture_HungGitDoesNotBlockStart` (2 s capture timeout, git hangs 4 s: `Start` returns < 1 s; fails with the capture moved into `registerAndDrive`, checked); the run itself still ends, bounded by the two timeouts (`_HungGit`).
+
+Not started: O2 Wave 2 items. (O1 run provenance: see "O1 provenance" below.)
 
 **ADR-M AC 1–6 + 8 — per-run usage from agent events** (branch `feat/run-usage-adr-0020`, `task test` + `task lint` green, 2026-10-11):
 
