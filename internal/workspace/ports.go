@@ -26,8 +26,8 @@ func (m *Manager) worktreesSettings() WorktreesSettings {
 	return m.wt
 }
 
-// probePort reports whether 127.0.0.1:port can currently be bound. Swappable
-// for tests of the pure allocation logic.
+// probePort reports whether 127.0.0.1:port can currently be bound. A Manager
+// may override it (portProbe) for tests of the allocation logic.
 func probePort(port int) bool {
 	l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 	if err != nil {
@@ -68,7 +68,11 @@ func (m *Manager) claimPort(taskID int64) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		port, err := pickPort(cfg.PortLo, cfg.PortHi, live, probePort)
+		probe := m.portProbe
+		if probe == nil {
+			probe = probePort
+		}
+		port, err := pickPort(cfg.PortLo, cfg.PortHi, live, probe)
 		if err != nil {
 			return 0, err
 		}
