@@ -326,6 +326,41 @@ describe("ConnectAccountPanel connect flows", () => {
     expect(screen.getByRole("button", { name: "Connect Claude Code" })).toBeEnabled();
   });
 
+  it("provider and method are locked during a login", async () => {
+    const { client } = await setup();
+    await connect(client);
+
+    // The provider select's trigger and the method radios are disabled
+    // while a login is starting/waiting/device.
+    expect(screen.getByLabelText("Provider")).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Claude.ai subscription" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "API key" })).toBeDisabled();
+  });
+
+  it("switching provider clears the base url and form error", async () => {
+    await setup();
+
+    // Kimi is the api-key provider with the Base URL disclosure; leave a
+    // stale credential error behind by submitting an empty api-key form.
+    fireEvent.click(await screen.findByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "Kimi" }));
+    fireEvent.click(screen.getByTestId("accounts-add-submit"));
+    expect(screen.getByText(/all required/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("accounts-base-url-toggle"));
+    fireEvent.change(screen.getByLabelText("Base URL (optional)"), { target: { value: "http://127.0.0.1:8080" } });
+
+    // Switching providers (back to Claude Code) drops the form error and
+    // the base url.
+    fireEvent.click(screen.getByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "Claude Code" }));
+    expect(screen.queryByText(/all required/i)).not.toBeInTheDocument();
+
+    // The disclosure stays open across the switch; the field itself is empty.
+    fireEvent.click(screen.getByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "Kimi" }));
+    expect(screen.getByLabelText("Base URL (optional)")).toHaveValue("");
+  });
+
   it("the paste a credential disclosure is gone", async () => {
     await setup();
     expect(screen.queryByTestId("accounts-manual-toggle")).not.toBeInTheDocument();

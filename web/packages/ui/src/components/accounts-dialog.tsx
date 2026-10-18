@@ -241,6 +241,10 @@ export function ConnectAccountPanel({
     state.phase === "waiting" ||
     state.phase === "device" ||
     cancelling;
+  // Mid-login the provider and method are part of the in-flight request --
+  // switching either would desync the visible form from the daemon's login.
+  const methodLocked =
+    state.phase === "starting" || state.phase === "waiting" || state.phase === "device" || cancelling;
   const selectedLabel = selectedProvider?.label ?? selectedProvider?.accountProvider ?? provider;
 
   return (
@@ -265,7 +269,15 @@ export function ConnectAccountPanel({
           <label htmlFor="account-provider" className="text-ui-base font-medium">
             Provider
           </label>
-          <Select value={provider} onValueChange={setProvider}>
+          <Select
+            value={provider}
+            onValueChange={(v) => {
+              setProvider(v);
+              setError(null);
+              setBaseUrl("");
+            }}
+            disabled={methodLocked}
+          >
             <SelectTrigger id="account-provider" className="w-full">
               <SelectValue placeholder="Select provider" />
             </SelectTrigger>
@@ -286,9 +298,12 @@ export function ConnectAccountPanel({
             label="Sign-in method"
             options={methods}
             value={method}
+            disabled={methodLocked}
             onChange={(v) => {
               setMethodTouched(true);
               setMethod(v);
+              setError(null);
+              setBaseUrl("");
             }}
           />
         </div>
