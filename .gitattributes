@@ -6,6 +6,10 @@
 # Windows checkout with core.autocrlf=true would turn the LF into CRLF.
 internal/relay/devices/testdata/** text eol=lf
 
+# Verified byte for byte (a minisign signature over checksums.txt): CRLF would
+# make TestVerifyAcceptsRealTauriSignerOutput reject a genuine signature.
+internal/selfupdate/testdata/** text eol=lf
+
 # Embedded into the binary (go:embed bundle): a Windows checkout with
 # core.autocrlf=true would otherwise ship SKILL.md files with CRLF endings.
 internal/skills/bundle/** text eol=lf

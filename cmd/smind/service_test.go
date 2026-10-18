@@ -86,6 +86,9 @@ func TestServiceLogsWithoutALogFile(t *testing.T) {
 }
 
 func TestServiceLogsFollowStopsOnContextAndSeesAppends(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a process cannot send itself an os.Interrupt on Windows; internal/logging tests Follow's cancellation")
+	}
 	home := t.TempDir()
 	t.Setenv("SMIND_HOME", home)
 	isolateServiceEnv(t)
