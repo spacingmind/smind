@@ -103,6 +103,7 @@ type taskStatusOutput struct {
 	Status            string                `json:"status"`
 	StopReason        string                `json:"stopReason,omitempty"`
 	StopNote          string                `json:"stopNote,omitempty"`
+	Disposition       string                `json:"disposition,omitempty" jsonschema:"\"needs-continue\" when the run ended done at a turn, token or budget cap: it is NOT finished (send a follow-up such as \"continue\"); absent otherwise. Not a status: status stays done"`
 	Err               string                `json:"err,omitempty"`
 	Events            []mcpRunEvent         `json:"events"`
 	PendingPermission *pendingPermissionOut `json:"pendingPermission,omitempty"`
@@ -127,11 +128,12 @@ func mcpTaskStatus(client *wsclient.Client) mcp.ToolHandlerFor[runIDInput, taskS
 // still-pending permission.
 func buildTaskStatusOutput(result runLogsResult) taskStatusOutput {
 	out := taskStatusOutput{
-		RunID:      result.RunID,
-		Status:     result.Status,
-		StopReason: result.StopReason,
-		StopNote:   stopNote(result.StopReason),
-		Err:        result.Err,
+		RunID:       result.RunID,
+		Status:      result.Status,
+		StopReason:  result.StopReason,
+		StopNote:    stopNote(result.StopReason),
+		Disposition: result.Disposition,
+		Err:         result.Err,
 	}
 	events := result.Events
 	if len(events) > mcpStatusTail {
@@ -154,12 +156,14 @@ type taskLogsInput struct {
 // status plus its full (or tailed) transcript. events is empty rather
 // than null for an eventless run.
 type taskLogsOutput struct {
-	RunID      string        `json:"runId"`
-	Status     string        `json:"status"`
-	StopReason string        `json:"stopReason,omitempty"`
-	StopNote   string        `json:"stopNote,omitempty"`
-	Err        string        `json:"err,omitempty"`
-	Events     []mcpRunEvent `json:"events"`
+	RunID      string `json:"runId"`
+	Status     string `json:"status"`
+	StopReason string `json:"stopReason,omitempty"`
+	StopNote   string `json:"stopNote,omitempty"`
+	// Disposition is "needs-continue" for a run cut off at a cap; see taskStatusOutput.
+	Disposition string        `json:"disposition,omitempty"`
+	Err         string        `json:"err,omitempty"`
+	Events      []mcpRunEvent `json:"events"`
 }
 
 // mcpTaskLogs wraps run.logs: full or tailed transcript plus the run's
@@ -176,7 +180,7 @@ func mcpTaskLogs(client *wsclient.Client) mcp.ToolHandlerFor[taskLogsInput, task
 		}
 		return nil, taskLogsOutput{
 			RunID: result.RunID, Status: result.Status,
-			StopReason: result.StopReason, StopNote: stopNote(result.StopReason), Err: result.Err, Events: toMCPRunEvents(result.Events),
+			StopReason: result.StopReason, StopNote: stopNote(result.StopReason), Disposition: result.Disposition, Err: result.Err, Events: toMCPRunEvents(result.Events),
 		}, nil
 	}
 }
@@ -302,6 +306,10 @@ type taskWaitOutput struct {
 	PendingPermission *pendingPermissionOut `json:"pendingPermission,omitempty"`
 	TimedOut          bool                  `json:"timedOut"`
 	StopNote          string                `json:"stopNote,omitempty"`
+	// Disposition is "needs-continue" when the run ended done at a turn,
+	// token or budget cap: state is still "done" (no new status), but the
+	// work is not finished. Absent otherwise.
+	Disposition string `json:"disposition,omitempty"`
 	// State is the unambiguous summary of why task_wait returned:
 	// waiting_permission | running | done | error | stopped | timed_out.
 	// Only done/error/stopped mean the run ended.
@@ -317,7 +325,7 @@ type taskWaitOutput struct {
 // ignore holds request ids the caller already surfaced (they do not count as
 // waiting); timedOut marks the deadline having passed with the run going.
 func buildTaskWaitOutput(result runLogsResult, ignore map[string]bool, timedOut bool) taskWaitOutput {
-	out := taskWaitOutput{RunID: result.RunID, Status: result.Status, StopReason: result.StopReason, StopNote: stopNote(result.StopReason), Err: result.Err}
+	out := taskWaitOutput{RunID: result.RunID, Status: result.Status, StopReason: result.StopReason, StopNote: stopNote(result.StopReason), Disposition: result.Disposition, Err: result.Err}
 	var fresh []pendingPermissionOut
 	for _, p := range pendingPermissionsFrom(result) {
 		if !ignore[p.RequestID] {
@@ -336,6 +344,9 @@ func buildTaskWaitOutput(result runLogsResult, ignore map[string]bool, timedOut 
 		out.State = result.Status
 		if out.State != "done" && out.State != "stopped" {
 			out.State = "error"
+		}
+		if result.Disposition == "needs-continue" {
+			out.Message = "Run " + result.RunID + " ended at a cap (" + result.StopReason + "): its status is done but the work is NOT finished. Send a follow-up prompt such as \"continue\" with task_send (same task and chat) to resume it; do not treat this as complete."
 		}
 	case timedOut:
 		out.TimedOut = true

@@ -430,6 +430,15 @@ func runPromptScript(promptMsg message, cwd string) {
 		scenario = strings.TrimSpace(string(data))
 	}
 
+	// "stop <reason>": answer, then end the turn with that stop reason, e.g.
+	// "stop max_turn_requests" -- the agent hit a cap but exited cleanly, so the
+	// run finishes done with the cap only in its stop reason.
+	if reason, ok := strings.CutPrefix(scenario, "stop "); ok {
+		sessionUpdate("working on it")
+		respond(promptMsg.ID, map[string]any{"stopReason": strings.TrimSpace(reason)})
+		return
+	}
+
 	if scenario == "hang" {
 		sessionUpdate("before hang")
 		time.Sleep(time.Hour)

@@ -2081,3 +2081,51 @@ func TestRunsPermissionRequestEventCarriesDetail(t *testing.T) {
 		t.Fatalf("round trip detail = %+v, want %+v", back.PermissionDetail, detail)
 	}
 }
+
+// TestRegistry_DispositionNeedsContinueSurvivesRehydrate (D13): a run that ends
+// done at a turn cap reports the derived needs-continue disposition live and
+// again after a daemon restart, from the persisted stop reason alone; a normal
+// finish never does; the status stays done throughout.
+func TestRegistry_DispositionNeedsContinueSurvivesRehydrate(t *testing.T) {
+	wm, st := newTestWorkspaceManager(t)
+	capped := newTestTask(t, wm, "stop max_turn_requests")
+	normal := newTestTask(t, wm, "stop end_turn")
+	runner := taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath}))
+	reg1 := newTestRegistry(t, st)
+
+	start := func(taskID int64) string {
+		t.Helper()
+		id, err := reg1.Start(context.Background(), wm, runner, taskID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+		if err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
+		waitForStatus(t, reg1, id, StatusDone, 10*time.Second)
+		return id
+	}
+	cappedID, normalID := start(capped.ID), start(normal.ID)
+
+	check := func(label string, reg *Registry) {
+		t.Helper()
+		_, cs, err := reg.History(cappedID)
+		if err != nil {
+			t.Fatalf("%s: History(capped): %v", label, err)
+		}
+		if cs.Status != StatusDone || cs.StopReason != "max_turn_requests" || cs.Disposition != DispositionNeedsContinue {
+			t.Errorf("%s: capped run = status %s stop %q disposition %q, want done / max_turn_requests / needs-continue", label, cs.Status, cs.StopReason, cs.Disposition)
+		}
+		_, ns, err := reg.History(normalID)
+		if err != nil {
+			t.Fatalf("%s: History(normal): %v", label, err)
+		}
+		if ns.Status != StatusDone || ns.Disposition != "" {
+			t.Errorf("%s: normal run = status %s disposition %q, want done and none", label, ns.Status, ns.Disposition)
+		}
+		for _, s := range reg.List(0) {
+			if want := DispositionFor(s.Status, s.StopReason); s.Disposition != want {
+				t.Errorf("%s: List() run %s disposition %q, want %q", label, s.ID, s.Disposition, want)
+			}
+		}
+	}
+	check("live", reg1)
+	check("rehydrated", newTestRegistry(t, st))
+}
