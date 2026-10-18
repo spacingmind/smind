@@ -376,3 +376,119 @@ type RunUsageSummary struct {
 	// value). A reported 0 is not unreported.
 	Unreported []string
 }
+
+// Learned skill statuses (learned_skills.status). ADR-0026: proposals
+// (create/patch/bundle) all live in learned_skill_proposals; this table
+// holds only approved skills.
+const (
+	SkillActive   = "active"
+	SkillDisabled = "disabled"
+	SkillArchived = "archived"
+)
+
+// LearningModeOff / LearningModePropose are the workspace learning modes
+// (workspaces.learning_mode).
+const (
+	LearningModeOff     = "off"
+	LearningModePropose = "propose"
+)
+
+// LearnedSkill is an approved self-learning skill (ADR-0026). Evidence is a
+// JSON string the store does not interpret.
+type LearnedSkill struct {
+	ID                  int64
+	WorkspaceID         int64
+	Name                string
+	Category            string
+	Description         string
+	Body                string
+	Status              string
+	Pinned              bool
+	Source              string
+	CreatedByRun        string
+	Evidence            string
+	PossibleDuplicateOf string
+	Similarity          float64
+	Version             int
+	OfferedRuns         int
+	LoadedRuns          int
+	Loads               int
+	LoadsViaSkill       int
+	LoadsViaRead        int
+	Patched             int
+	ReusedAfterPatch    int
+	Measured            bool
+	LastOfferedAt       *time.Time
+	LastLoadedAt        *time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
+// LearnedSkillVersion is one historical version of a learned skill's
+// description/body.
+type LearnedSkillVersion struct {
+	SkillID     int64
+	Version     int
+	Description string
+	Body        string
+	Actor       string
+	CreatedAt   time.Time
+}
+
+// LearnedLedgerEntry is one append-only row of the skill audit ledger.
+// SkillID is nil for actions not tied to an approved skill (e.g. a rejected
+// proposal). Evidence is a JSON string the store does not interpret.
+type LearnedLedgerEntry struct {
+	ID           int64
+	WorkspaceID  int64
+	SkillID      *int64
+	SkillName    string
+	Action       string
+	Reason       string
+	Evidence     string
+	AbsorbedInto string
+	RunID        string
+	Actor        string
+	CreatedAt    time.Time
+}
+
+// LearnedProposal is a pending create/patch/bundle proposal awaiting human
+// approval. Intents/Evidence are JSON strings the store does not interpret.
+type LearnedProposal struct {
+	ID                  int64
+	WorkspaceID         int64
+	Kind                string // create|patch|bundle
+	Source              string // reflector|curator
+	Name                string
+	TargetSkillID       *int64
+	JobID               *int64
+	Intents             string
+	Evidence            string
+	PossibleDuplicateOf string
+	Similarity          float64
+	Status              string // pending|approved|rejected
+	Note                string
+	CreatedAt           time.Time
+	DecidedAt           *time.Time
+}
+
+// LearningJob is one reflection/curation job over a chat event window.
+// Verdicts is a JSON string the store does not interpret.
+type LearningJob struct {
+	ID                int64
+	WorkspaceID       int64
+	ChatID            *int64
+	Kind              string // reflect|curate
+	TriggerKind       string // cadence|explicit|tail|schedule
+	WindowFromEventID int64
+	WindowToEventID   int64
+	Status            string // queued|running|landed|empty|failed|skipped
+	SkipReason        string
+	Verdicts          string
+	RunID             string
+	CostUSD           *float64
+	Tokens            *int64
+	Error             string
+	CreatedAt         time.Time
+	FinishedAt        *time.Time
+}

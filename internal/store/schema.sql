@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS workspaces (
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
     setup_script TEXT,
-    teardown_script TEXT
+    teardown_script TEXT,
+    learning_mode TEXT NOT NULL DEFAULT 'off' -- 'off' | 'propose' (ADR-0026)
 );
 
 CREATE TABLE IF NOT EXISTS workspace_accounts (
@@ -75,7 +76,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     setup_status TEXT,
     setup_error TEXT,
     setup_log TEXT,
-    port INTEGER
+    port INTEGER,
+    kind TEXT NOT NULL DEFAULT 'task' -- 'task' | 'system' (ADR-0026)
 );
 
 CREATE TABLE IF NOT EXISTS chats (
@@ -85,7 +87,9 @@ CREATE TABLE IF NOT EXISTS chats (
     provider TEXT,
     agent_session TEXT,
     created_at TIMESTAMP NOT NULL,
-    archived_at TIMESTAMP
+    archived_at TIMESTAMP,
+    learn_watermark INTEGER NOT NULL DEFAULT 0,
+    learn_pending INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS runs (
@@ -108,7 +112,8 @@ CREATE TABLE IF NOT EXISTS runs (
     -- unknown (git failed or pre-dates O1).
     base_sha TEXT,
     head_sha TEXT,
-    dirty INTEGER
+    dirty INTEGER,
+    purpose TEXT NOT NULL DEFAULT 'user' -- 'user' | 'reflect' | 'curate' (ADR-0026)
 );
 
 CREATE TABLE IF NOT EXISTS run_events (
@@ -288,3 +293,110 @@ CREATE TABLE IF NOT EXISTS quota_cooldown (
     observed_at TIMESTAMP NOT NULL,
     PRIMARY KEY (account_id, scope_model)
 );
+
+-- Self-learning skills (ADR-0026): learned skills, their version history,
+-- an append-only ledger, pending patch/bundle proposals, and reflection/
+-- curation jobs. Additive tables: CREATE TABLE IF NOT EXISTS applies them
+-- to existing databases on the next Open. New columns on existing tables
+-- (workspaces.learning_mode, chats.learn_watermark/learn_pending,
+-- runs.purpose, tasks.kind) are added both here and by the learning_columns
+-- migration in migrate.go.
+
+CREATE TABLE IF NOT EXISTS learned_skills (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+    name TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL,
+    body TEXT NOT NULL,
+    status TEXT NOT NULL,                 -- active|disabled|archived (ADR-0026; proposals live in learned_skill_proposals)
+    pinned INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL,                 -- reflector|curator|human (who proposed it)
+    created_by_run TEXT NOT NULL DEFAULT '',
+    evidence TEXT NOT NULL DEFAULT '[]',  -- redacted JSON array
+    possible_duplicate_of TEXT NOT NULL DEFAULT '',
+    similarity REAL NOT NULL DEFAULT 0,
+    version INTEGER NOT NULL DEFAULT 1,
+    offered_runs INTEGER NOT NULL DEFAULT 0,
+    loaded_runs INTEGER NOT NULL DEFAULT 0,
+    loads INTEGER NOT NULL DEFAULT 0,
+    loads_via_skill INTEGER NOT NULL DEFAULT 0,
+    loads_via_read INTEGER NOT NULL DEFAULT 0,
+    patched INTEGER NOT NULL DEFAULT 0,
+    reused_after_patch INTEGER NOT NULL DEFAULT 0,
+    measured INTEGER NOT NULL DEFAULT 0,
+    last_offered_at TIMESTAMP,
+    last_loaded_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_learned_skills_ws_name_live ON learned_skills(workspace_id, name) WHERE status IN ('active','disabled');
+CREATE INDEX IF NOT EXISTS idx_learned_skills_ws_status ON learned_skills(workspace_id, status);
+
+CREATE TABLE IF NOT EXISTS learned_skill_versions (
+    skill_id INTEGER NOT NULL REFERENCES learned_skills(id),
+    version INTEGER NOT NULL,
+    description TEXT NOT NULL,
+    body TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (skill_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS learned_skill_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+    skill_id INTEGER,                     -- no FK: survives skill delete
+    skill_name TEXT NOT NULL DEFAULT '',
+    action TEXT NOT NULL,                 -- create|patch|merge|archive|restore|reject|delete|disable|enable|pin|unpin|undo
+    reason TEXT NOT NULL DEFAULT '',
+    evidence TEXT NOT NULL DEFAULT '[]',
+    absorbed_into TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    actor TEXT NOT NULL,                  -- reflector|curator|human|system
+    created_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_learned_skill_ledger_skill ON learned_skill_ledger(workspace_id, skill_id, id);
+
+-- ALL proposals (create, patch, bundle) pending human approval.
+-- learned_skills holds only approved skills. Rejected proposals stay
+-- (negative examples for the reflector).
+CREATE TABLE IF NOT EXISTS learned_skill_proposals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+    kind TEXT NOT NULL,                   -- create|patch|bundle
+    source TEXT NOT NULL,                 -- reflector|curator
+    name TEXT NOT NULL DEFAULT '',        -- create: proposed name; patch: target name; bundle: umbrella name
+    target_skill_id INTEGER,              -- patch/bundle target; NULL for create
+    job_id INTEGER,
+    intents TEXT NOT NULL,                -- JSON array of validated intents
+    evidence TEXT NOT NULL DEFAULT '[]',
+    possible_duplicate_of TEXT NOT NULL DEFAULT '',
+    similarity REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL,                 -- pending|approved|rejected
+    note TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    decided_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_learned_skill_proposals_ws ON learned_skill_proposals(workspace_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_learned_skill_proposals_ws_pending_create ON learned_skill_proposals(workspace_id, name) WHERE status = 'pending' AND kind = 'create';
+
+CREATE TABLE IF NOT EXISTS learning_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+    chat_id INTEGER,
+    kind TEXT NOT NULL,                   -- reflect|curate
+    trigger_kind TEXT NOT NULL,           -- cadence|explicit|tail|schedule
+    window_from_event_id INTEGER NOT NULL DEFAULT 0,
+    window_to_event_id INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL,                 -- queued|running|landed|empty|failed|skipped
+    skip_reason TEXT NOT NULL DEFAULT '',
+    verdicts TEXT NOT NULL DEFAULT '[]',
+    run_id TEXT NOT NULL DEFAULT '',
+    cost_usd REAL,
+    tokens INTEGER,
+    error TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    finished_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_learning_jobs_ws ON learning_jobs(workspace_id, id);
