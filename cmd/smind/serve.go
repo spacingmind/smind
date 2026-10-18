@@ -139,6 +139,11 @@ func cmdServe(args []string) int {
 	}
 	srv.API().AttachUsage(poller, registry, passive)
 	srv.API().Runs.SetMaxConcurrentRunsPerTree(cfg.Orchestration.MaxConcurrentRunsPerTree)
+	if svc := newDeliveryService(cfg.Learning, db, config.Dir()); svc != nil {
+		srv.API().Runs.SetDeliveryProvider(svc)
+		srv.API().Runs.AddObserver(svc)
+		defer svc.Close()
+	}
 	// The relay device admin methods must be registered before the first
 	// connection is served (SetRelayDevices is not safe against concurrent
 	// requests).
