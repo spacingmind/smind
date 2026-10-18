@@ -101,7 +101,7 @@ export function parseLoginError(err: unknown): { code: string; detail: string } 
 }
 
 export function loginErrorMessage(code: string, detail: string): string {
-  return LOGIN_ERROR_COPY[code] ?? detail || "Sign-in failed.";
+  return LOGIN_ERROR_COPY[code] ?? (detail || "Sign-in failed.");
 }
 
 export function isSoftLoginError(code: string): boolean {
