@@ -355,6 +355,39 @@ describe("useAccountLogin", () => {
     expect(login().state).toMatchObject({ phase: "waiting" });
   });
 
+  it("connect stays disabled until a cancelled login settles", async () => {
+    const { login, start, client } = await setup();
+    await start();
+    await act(async () => {
+      login().cancel();
+    });
+    expect(login().state).toEqual({ phase: "idle" });
+    expect(login().cancelling).toBe(true);
+    await act(async () => {
+      client.nth("account.oauthStart").reject(new Error("account.oauthStart: cancelled"));
+    });
+    await flush();
+    expect(login().cancelling).toBe(false);
+  });
+
+  it("a login that succeeds during cancel still updates the account cache", async () => {
+    const { login, start, client, queryClient, queryKeys, onConnected } = await setup();
+    await start();
+    await act(async () => {
+      login().cancel();
+    });
+    const result = accountResult();
+    await act(async () => {
+      client.nth("account.oauthStart").resolve(result);
+    });
+    await flush();
+    // Idle stays visible, but the account exists now: the cache and
+    // onConnected still reflect it.
+    expect(login().state).toEqual({ phase: "idle" });
+    expect(queryClient.getQueryData(queryKeys.accountList())).toEqual([result]);
+    expect(onConnected).toHaveBeenCalledWith(result);
+  });
+
   it("login hook never keeps the pasted url in state", async () => {
     const { login, start, client, authorize } = await setup();
     await start();

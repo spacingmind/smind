@@ -137,6 +137,7 @@ export function ConnectAccountPanel({
     client,
     onConnected: () => onConnected(),
   });
+  const { cancelling } = login;
   const accounts = useAccounts().data ?? [];
 
   const manualProviders = credentialProviders(providers);
@@ -235,7 +236,11 @@ export function ConnectAccountPanel({
   const state = login.state;
   const showPastePanel =
     state.phase === "waiting" && (remote || state.pasteOnly || pasteOpen);
-  const connecting = state.phase === "starting" || state.phase === "waiting" || state.phase === "device";
+  const connecting =
+    state.phase === "starting" ||
+    state.phase === "waiting" ||
+    state.phase === "device" ||
+    cancelling;
   const selectedLabel = selectedProvider?.label ?? selectedProvider?.accountProvider ?? provider;
 
   return (

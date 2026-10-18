@@ -313,6 +313,19 @@ describe("ConnectAccountPanel connect flows", () => {
     expect(screen.queryByTestId("accounts-connect-")).not.toBeInTheDocument();
   });
 
+  it("connect stays disabled until a cancelled login settles", async () => {
+    const { client } = await setup();
+    await connect(client);
+    fireEvent.click(screen.getByTestId("accounts-connect-cancel"));
+    const button = screen.getByRole("button", { name: "Connecting…" });
+    expect(button).toBeDisabled();
+    await act(async () => {
+      client.nth("account.oauthStart").reject(new Error("account.oauthStart: cancelled"));
+    });
+    await flush();
+    expect(screen.getByRole("button", { name: "Connect Claude Code" })).toBeEnabled();
+  });
+
   it("the paste a credential disclosure is gone", async () => {
     await setup();
     expect(screen.queryByTestId("accounts-manual-toggle")).not.toBeInTheDocument();

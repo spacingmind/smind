@@ -44,6 +44,8 @@ export interface AccountLogin {
   state: LoginState;
   /** Set when the last paste was rejected (login stays `waiting`); cleared on the next paste/start/cancel. */
   pasteError: string | null;
+  /** True from `cancel()` until the aborted call's promise settles -- Connect stays disabled meanwhile. */
+  cancelling: boolean;
   pasting: boolean;
   start(params: OAuthStartParams): void;
   complete(redirectUrl: string): Promise<void>;
@@ -62,6 +64,7 @@ export function useAccountLogin(opts?: {
   const [state, setState] = useState<LoginState>({ phase: "idle" });
   const [pasteError, setPasteError] = useState<string | null>(null);
   const [pasting, setPasting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   // An accepted account.oauthComplete leaves the login waiting for its
   // result; this flag keeps Finish disabled (as `pasting`) until then, so a
   // second Enter/click can't send a second paste.
@@ -75,6 +78,7 @@ export function useAccountLogin(opts?: {
 
   function start(params: OAuthStartParams) {
     const gen = ++genRef.current;
+    setCancelling(false);
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -114,7 +118,15 @@ export function useAccountLogin(opts?: {
       )
       .then(
         (result) => {
-          if (gen !== genRef.current) return;
+          if (gen !== genRef.current) {
+            // Cancelled but the account was still created: cache it and
+            // report it, without changing the visible (idle) phase.
+            if (controller.signal.aborted) {
+              upsertAccountInCache(queryClient, result);
+              onConnectedRef.current?.(result);
+            }
+            return;
+          }
           upsertAccountInCache(queryClient, result);
           setState({ phase: "done", result });
           onConnectedRef.current?.(result);
@@ -124,7 +136,10 @@ export function useAccountLogin(opts?: {
           const { code, detail } = parseLoginError(err);
           setState({ phase: "error", code, message: loginErrorMessage(code, detail), soft: isSoftLoginError(code) });
         },
-      );
+      )
+      .finally(() => {
+        if (gen !== genRef.current) setCancelling(false);
+      });
   }
 
   async function complete(redirectUrl: string) {
@@ -164,6 +179,7 @@ export function useAccountLogin(opts?: {
   function cancel() {
     genRef.current++;
     controllerRef.current?.abort();
+    setCancelling(true);
     setState({ phase: "idle" });
     setPasteError(null);
     pasteSubmittedRef.current = false;
@@ -174,6 +190,7 @@ export function useAccountLogin(opts?: {
   function reset() {
     setState({ phase: "idle" });
     setPasteError(null);
+    setCancelling(false);
     pasteSubmittedRef.current = false;
     setPasteSubmitted(false);
     setPasting(false);
@@ -187,5 +204,5 @@ export function useAccountLogin(opts?: {
     [],
   );
 
-  return { state, pasteError, pasting: pasting || pasteSubmitted, start, complete, cancel, reset };
+  return { state, pasteError, pasting: pasting || pasteSubmitted, cancelling, start, complete, cancel, reset };
 }
