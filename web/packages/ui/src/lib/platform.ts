@@ -39,10 +39,21 @@ export interface RelayPreview {
  * `smind relay devices approve` takes), `code`/`message` are the daemon's refusal.
  */
 export interface RelayStatus {
-  state: "connecting" | "connected" | "reconnecting" | "awaitingApproval" | "revoked" | "refused";
+  state:
+    | "connecting"
+    | "connected"
+    | "reconnecting"
+    | "awaitingApproval"
+    | "revoked"
+    | "refused"
+    | "passwordRequired"
+    | "incorrectPassword"
+    | "passwordLocked";
   deviceId?: string;
   code?: string;
   message?: string;
+  /** `passwordLocked`: seconds the daemon asks this device to wait before another try. */
+  retryAfterSecs?: number;
 }
 
 /** The longest pairing link the UI will send to Rust (Rust enforces the same limit). */
@@ -188,6 +199,11 @@ export interface DesktopApi {
   getCurrentConnection(): Promise<Connection>;
   /** The live state of the selected relay connection (connected, awaiting approval on the daemon, revoked, ...); `null` when the selected connection is not a relay one. */
   relayStatus(): Promise<RelayStatus | null>;
+  /**
+   * Hands the relay connection `connectionId` (it must still be the selected one) the daemon's password (ADR-0031 P13c) once. Rust keeps it in memory only -- never on disk, in a
+   * log, or returned to this UI -- and reconnects at once. Rejects with Rust's error text (which never contains the password).
+   */
+  relaySetPassword(connectionId: string, password: string): Promise<void>;
   /** Opens an http(s) URL in the OS's default browser -- Rust validates the scheme (AC5); this is the only escape hatch a bundled-UI link needs, since in-window navigation is restricted to the proxy origin (AC3). */
   openExternal(url: string): Promise<void>;
   /** Quits the app (`app_quit`). The renderer's Ctrl+Q on Windows/Linux, where the undecorated window has no menu to carry the accelerator. */
@@ -296,6 +312,7 @@ function unavailable(): DesktopApi {
     selectConnection: () => reject(),
     getCurrentConnection: () => reject(),
     relayStatus: () => reject(),
+    relaySetPassword: () => reject(),
     openExternal: () => reject(),
     quit: () => reject(),
     getSystemTheme: () => reject(),
@@ -452,6 +469,14 @@ function realDesktopApi(): DesktopApi {
     async relayStatus() {
       const invoke = await loadInvoke();
       return invoke<RelayStatus | null>("connections_relay_status");
+    },
+    async relaySetPassword(connectionId, password) {
+      const invoke = await loadInvoke();
+      try {
+        await invoke("connections_relay_set_password", { id: connectionId, password });
+      } catch (err) {
+        throw asError(err);
+      }
     },
     async openExternal(url) {
       const invoke = await loadInvoke();

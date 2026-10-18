@@ -64,6 +64,15 @@ func (h *Hub) respondError(t *deviceTransport, id, code, msg string) error {
 	return t.Send(mustJSON(map[string]any{"id": id, "error": map[string]string{"message": msg, "code": code}}))
 }
 
+// respondErrorRetry is respondError with error.retry_after (seconds) when
+// retry > 0: how long a rate-limited client should wait.
+func (h *Hub) respondErrorRetry(t *deviceTransport, id, code, msg string, retry int) error {
+	if retry <= 0 {
+		return h.respondError(t, id, code, msg)
+	}
+	return t.Send(mustJSON(map[string]any{"id": id, "error": map[string]any{"message": msg, "code": code, "retry_after": retry}}))
+}
+
 func mustJSON(v any) []byte {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -124,7 +133,9 @@ func (h *Hub) identify(s *session, r *sessionReader, t *deviceTransport) error {
 	if !timedOut {
 		_ = json.Unmarshal(first, &env)
 	}
-	if !h.opts.LegacyDevices || s.ref.device != DefaultDeviceID {
+	// A password-protected daemon has no legacy service: a client that predates
+	// device identity cannot carry the password.
+	if !h.opts.LegacyDevices || s.ref.device != DefaultDeviceID || h.passwordRequired() {
 		if !timedOut {
 			_ = h.respondError(t, env.ID, codeHelloRequired, "this daemon requires device identity (device_hello); update the app")
 		}
@@ -207,6 +218,17 @@ func (h *Hub) admitHello(s *session, r *sessionReader, t *deviceTransport, env r
 		h.logf("relay bridge: device_hello rejected: %v", errorKind(err))
 		h.refuse(t, r, env.ID, codeBadHello, "device_hello rejected")
 		return errSessionOver
+	}
+	// The daemon password (P13c) comes right after proof of the device key (so
+	// the rate limit is keyed on a proven id) and before anything else: a device
+	// that fails it is not recorded, not counted against room, and is told
+	// nothing about its registry state. Approved devices need it too.
+	if h.passwordRequired() {
+		if ok, code, msg, retry := h.checkPassword(s.ref.device, hello.Password); !ok {
+			h.logf("relay bridge: device %.8s refused: %s", s.ref.device, code)
+			h.refuseRetry(t, r, env.ID, code, msg, retry)
+			return errSessionOver
+		}
 	}
 	// The same device identifying on a new session (it reconnected with a
 	// fresh session id after a daemon restart, say) replaces its old session.
@@ -298,6 +320,12 @@ func errorKind(err error) string {
 // immediately could discard the unsent response).
 func (h *Hub) refuse(t *deviceTransport, r *sessionReader, id, code, msg string) {
 	_ = h.respondError(t, id, code, msg)
+	h.refuseGrace(r)
+}
+
+// refuseRetry is refuse with a retry_after hint.
+func (h *Hub) refuseRetry(t *deviceTransport, r *sessionReader, id, code, msg string, retry int) {
+	_ = h.respondErrorRetry(t, id, code, msg, retry)
 	h.refuseGrace(r)
 }
 
