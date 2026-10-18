@@ -1,5 +1,5 @@
 import { act } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RELAY_STATUS_POLL_MS, RelayConnectionStatus, useRelayStatus } from "@/components/settings/relay-connection-status";
@@ -75,6 +75,72 @@ describe("RelayConnectionStatus", () => {
     expect(line).toHaveAttribute("data-state", state);
     expect(line).toHaveTextContent(text);
     expect(line).not.toHaveAttribute("role");
+  });
+});
+
+describe("daemon password prompt (ADR-0031 P13c)", () => {
+  it("asks for the daemon password when the relay host requires it and never stores it", async () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    const set = vi.spyOn(desktop, "relaySetPassword").mockResolvedValue(undefined);
+    render(<RelayConnectionStatus status={{ state: "passwordRequired" }} />);
+    const line = screen.getByTestId("connection-relay-status");
+    expect(line).toHaveAttribute("data-state", "passwordRequired");
+    expect(line).toHaveTextContent("This daemon needs its password.");
+    const input = screen.getByTestId("relay-password-input") as HTMLInputElement;
+    expect(input).toHaveAttribute("type", "password");
+    expect(input).toHaveAttribute("autocomplete", "off");
+    expect(screen.getByTestId("relay-password-submit")).toBeDisabled();
+
+    fireEvent.change(input, { target: { value: "correct horse battery" } });
+    fireEvent.click(screen.getByTestId("relay-password-submit"));
+    expect(set).toHaveBeenCalledTimes(1);
+    expect(set).toHaveBeenCalledWith("correct horse battery");
+    // Gone from the field at once, and written to no web storage.
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(setItem).not.toHaveBeenCalled();
+    expect(JSON.stringify({ ...localStorage })).not.toContain("correct horse");
+    expect(JSON.stringify({ ...sessionStorage })).not.toContain("correct horse");
+    expect(document.body.innerHTML).not.toContain("correct horse");
+  });
+
+  it("says a rejected password was not accepted and asks again", () => {
+    render(<RelayConnectionStatus status={{ state: "incorrectPassword" }} />);
+    const line = screen.getByTestId("connection-relay-status");
+    expect(line).toHaveAttribute("data-state", "incorrectPassword");
+    expect(line).toHaveTextContent("That password was not accepted.");
+    expect(screen.getByTestId("relay-password-input")).toBeEnabled();
+  });
+
+  it("disables the form and counts down while the daemon rate-limits this device", async () => {
+    vi.useFakeTimers();
+    render(<RelayConnectionStatus status={{ state: "passwordLocked", retryAfterSecs: 8 }} />);
+    const line = screen.getByTestId("connection-relay-status");
+    expect(line).toHaveAttribute("data-state", "passwordLocked");
+    expect(line).toHaveTextContent("Try again in 8 s.");
+    expect(screen.getByTestId("relay-password-input")).toBeDisabled();
+    expect(screen.getByTestId("relay-password-submit")).toBeDisabled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(line).toHaveTextContent("Try again in 5 s.");
+  });
+
+  it("shows Rust's error and keeps the field empty when handing over fails", async () => {
+    vi.spyOn(desktop, "relaySetPassword").mockRejectedValue(new Error("no relay connection is selected"));
+    render(<RelayConnectionStatus status={{ state: "passwordRequired" }} />);
+    fireEvent.change(screen.getByTestId("relay-password-input"), { target: { value: "another long password" } });
+    fireEvent.click(screen.getByTestId("relay-password-submit"));
+    expect(await screen.findByTestId("relay-password-error")).toHaveTextContent("no relay connection is selected");
+    expect((screen.getByTestId("relay-password-input") as HTMLInputElement).value).toBe("");
+  });
+
+  it("refuses an over-long password without sending it", async () => {
+    const set = vi.spyOn(desktop, "relaySetPassword").mockResolvedValue(undefined);
+    render(<RelayConnectionStatus status={{ state: "passwordRequired" }} />);
+    fireEvent.change(screen.getByTestId("relay-password-input"), { target: { value: "x".repeat(200) } });
+    fireEvent.click(screen.getByTestId("relay-password-submit"));
+    expect(set).not.toHaveBeenCalled();
+    expect(await screen.findByTestId("relay-password-error")).toHaveTextContent("too long");
   });
 });
 
