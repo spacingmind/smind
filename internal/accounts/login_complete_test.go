@@ -425,6 +425,37 @@ func TestLoginCoordinator_Complete(t *testing.T) {
 		})
 	})
 
+	t.Run("oauthComplete after cancel is login_unknown", func(t *testing.T) {
+		t.Parallel()
+
+		// await ends the wait but, unlike Login, does not unregister: this
+		// is the window between the wait ending and Login returning, where a
+		// paste must not be told "already completed" about a login that
+		// never completed.
+		for name, end := range map[string]func(c *LoginCoordinator) context.Context{
+			"ctx cancel": func(c *LoginCoordinator) context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+			"timeout": func(c *LoginCoordinator) context.Context {
+				c.timeout = time.Millisecond
+				return context.Background()
+			},
+		} {
+			coord, _, _ := newCompleteCoordinator(t)
+			pl := &pendingLogin{provider: "fake", state: "st", method: loginMethodBrowser, paste: make(chan callbackResult, 1)}
+			coord.register("id", pl)
+			ctx := end(coord)
+
+			_, err := coord.await(ctx, "id", &callbackServer{result: make(chan callbackResult, 1)}, pl)
+			if err == nil {
+				t.Fatalf("%s: await() error = nil, want the cancel/timeout error", name)
+			}
+			requireLoginCode(t, coord.Complete("id", pasteURL("c", "st")), LoginCodeUnknown)
+		}
+	})
+
 	t.Run("cancel frees listener and provider claim", func(t *testing.T) {
 		t.Parallel()
 		coord, _, login := newCompleteCoordinator(t)

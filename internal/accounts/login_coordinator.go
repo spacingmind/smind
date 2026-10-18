@@ -70,6 +70,9 @@ type pendingLogin struct {
 	// resolved is the single arbiter of "first of listener callback and paste
 	// wins": whoever sets it under mu owns the login's outcome.
 	resolved bool
+	// ended is set with resolved when the login ended without a delivered
+	// result (ctx cancelled or timed out).
+	ended bool
 }
 
 // NewLoginCoordinator returns a LoginCoordinator backed by registry, using
@@ -206,7 +209,7 @@ func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, op
 
 	onAuthorizeURL(loginID, login.AuthorizeURL(state, pkce))
 
-	result, err := c.await(ctx, server, pl)
+	result, err := c.await(ctx, loginID, server, pl)
 	if err != nil {
 		var le *LoginError
 		if errors.As(err, &le) {
@@ -236,7 +239,7 @@ func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, op
 // redirect accepted by Complete, ctx being done, or the timeout. Exactly one
 // of them wins. pl.resolved, set under c.mu, is the arbiter, so a Complete
 // that already returned nil is never discarded in favour of a later event.
-func (c *LoginCoordinator) await(ctx context.Context, server *callbackServer, pl *pendingLogin) (callbackResult, error) {
+func (c *LoginCoordinator) await(ctx context.Context, loginID string, server *callbackServer, pl *pendingLogin) (callbackResult, error) {
 	timer := time.NewTimer(c.timeout)
 	defer timer.Stop()
 
@@ -261,6 +264,13 @@ func (c *LoginCoordinator) await(ctx context.Context, server *callbackServer, pl
 		return <-pl.paste, nil
 	}
 	pl.resolved = true
+	if werr != nil {
+		// Ended without a delivered result (ctx or timeout): the login is
+		// over, so a Complete racing with Login's return is told the id is
+		// unknown rather than "already completed".
+		pl.ended = true
+		delete(c.pending, loginID)
+	}
 	return res, werr
 }
 
@@ -308,6 +318,9 @@ func (c *LoginCoordinator) Complete(loginID, redirectURL string) error {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if pl.ended {
+		return &LoginError{Code: LoginCodeUnknown, Detail: "no login with that id is pending (it finished, expired, or was cancelled)"}
+	}
 	if pl.resolved {
 		return &LoginError{Code: LoginCodeAlreadyCompleted, Detail: "this login was already completed"}
 	}
