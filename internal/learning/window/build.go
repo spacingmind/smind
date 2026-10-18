@@ -1,6 +1,7 @@
 package window
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -17,6 +18,10 @@ const (
 	priorTurnBytes   = 200
 	runErrorBytes    = 200
 	contradictBytes  = 1024
+
+	learnedBodyBytes    = 2 * 1024
+	maxLearnedSkills    = 40
+	learnedSectionBytes = 24 * 1024
 )
 
 func (c Caps) withDefaults() Caps {
@@ -120,9 +125,9 @@ func Build(in Input) Output {
 	}
 
 	// Degrade the fixed parts only if they alone would blow the cap.
-	var fixed []string
-	for level := 0; level < 3; level++ {
-		fixed = r.fixedParts(in, loadedSection, level)
+	var fixed, shown []string
+	for level := 0; level <= maxDegradeLevel; level++ {
+		fixed, shown = r.fixedParts(in, loadedSection, level)
 		if len(fixed[0])+len(fixed[1])+len(fixed[2]) <= r.caps.WindowBytes {
 			break
 		}
@@ -133,6 +138,7 @@ func Build(in Input) Output {
 	}
 	body, kept, truncated := selectTail(blocks, budget)
 	out.Truncated = truncated
+	out.ShownLearned = shown
 	out.Text = fixed[0] + fixed[1] + body + fixed[2]
 	for bi, b := range blocks {
 		for k := kept[bi]; k < len(b.recs); k++ {
@@ -196,17 +202,26 @@ func selectTail(blocks []runBlock, budget int) (string, []int, bool) {
 	return sb.String(), kept, truncated
 }
 
+// maxDegradeLevel is the last fixedParts degrade level.
+const maxDegradeLevel = 3
+
 // fixedParts returns the skill index block, the transcript opening (loaded
-// skills, background turns) and the transcript closing. level 1 drops the
-// background turns, level 2 also empties the skill index.
-func (r renderer) fixedParts(in Input, loadedSection string, level int) []string {
+// skills, background turns), the transcript closing, and the names of the
+// learned skills whose bodies were rendered. Level 1 drops the learned
+// bodies (index lines only), level 2 also drops the background turns, level
+// 3 also empties the skill index.
+func (r renderer) fixedParts(in Input, loadedSection string, level int) ([]string, []string) {
 	var idx strings.Builder
+	var shown []string
 	idx.WriteString("<<<EXISTING_SKILLS\n## existing learned skills\n")
-	if level < 2 {
+	switch {
+	case level == 0:
+		shown = r.writeLearned(&idx, in.Learned)
+	case level < 3:
 		r.writeIndex(&idx, in.Learned)
 	}
 	idx.WriteString("\n## existing human skills\n")
-	if level < 2 {
+	if level < 3 {
 		r.writeIndex(&idx, in.Human)
 	}
 	idx.WriteString("EXISTING_SKILLS>>>\n\n")
@@ -214,7 +229,7 @@ func (r renderer) fixedParts(in Input, loadedSection string, level int) []string
 	var head strings.Builder
 	head.WriteString("<<<UNTRUSTED_TRANSCRIPT\n")
 	head.WriteString(loadedSection)
-	if level < 1 {
+	if level < 2 {
 		turns := in.PriorUserTurns
 		if len(turns) > maxPriorTurns {
 			turns = turns[len(turns)-maxPriorTurns:]
@@ -229,7 +244,62 @@ func (r renderer) fixedParts(in Input, loadedSection string, level int) []string
 			head.WriteString("## earlier user turns (background, NOT evidence)\n" + strings.Join(lines, "\n") + "\n\n")
 		}
 	}
-	return []string{idx.String(), head.String(), "UNTRUSTED_TRANSCRIPT>>>\n"}
+	return []string{idx.String(), head.String(), "UNTRUSTED_TRANSCRIPT>>>\n"}, shown
+}
+
+// writeLearned renders learned skills with their redacted, clipped bodies in
+// fences the body cannot close. It returns the names rendered, sorted.
+func (r renderer) writeLearned(sb *strings.Builder, skills []SkillRef) []string {
+	type entry struct{ name, block string }
+	var es []entry
+	for _, s := range skills {
+		n := r.line(s.Name, 128)
+		if n == "" {
+			continue
+		}
+		body := r.text(s.Body, learnedBodyBytes)
+		fence := fenceFor(body)
+		blk := "### " + n + "\ndescription: " + r.line(s.Description, indexDescBytes) + "\n" + fence + "\n" + body + "\n" + fence + "\n"
+		es = append(es, entry{n, blk})
+	}
+	sort.SliceStable(es, func(i, j int) bool {
+		if es[i].name != es[j].name {
+			return es[i].name < es[j].name
+		}
+		return es[i].block < es[j].block
+	})
+	var names []string
+	used := 0
+	for i, e := range es {
+		omit := fmt.Sprintf("[... %d more skills omitted ...]\n", len(es)-i)
+		if i >= maxLearnedSkills || used+len(e.block)+len(omit) > learnedSectionBytes {
+			sb.WriteString(omit)
+			break
+		}
+		sb.WriteString(e.block)
+		used += len(e.block)
+		names = append(names, e.name)
+	}
+	return names
+}
+
+// fenceFor returns a backtick fence longer than any backtick run in body.
+func fenceFor(body string) string {
+	longest, run := 0, 0
+	for _, c := range body {
+		if c == '`' {
+			run++
+			if run > longest {
+				longest = run
+			}
+		} else {
+			run = 0
+		}
+	}
+	if longest < 2 {
+		longest = 2
+	}
+	return strings.Repeat("`", longest+1)
 }
 
 func (r renderer) writeIndex(sb *strings.Builder, skills []SkillRef) {

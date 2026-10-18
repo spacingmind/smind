@@ -208,8 +208,11 @@ func TestWindow_SkillIndexAndPriorTurns(t *testing.T) {
 		prior = append(prior, "prior turn "+string(rune('A'+i))+strings.Repeat("p", 300))
 	}
 	out := Build(Input{Runs: []Run{humanRun("r1", "hello world there", nil)}, Redact: fakeRedact, Caps: defCaps(), Learned: learned, Human: human, PriorUserTurns: prior})
-	if strings.Count(out.Text, "\n- l") > 100 {
-		t.Errorf("learned index not capped at 100")
+	if n := strings.Count(out.Text, "\n### l"); n != 40 {
+		t.Errorf("learned skills rendered=%d want 40", n)
+	}
+	if !strings.Contains(out.Text, "[... 80 more skills omitted ...]") {
+		t.Errorf("omitted marker missing")
 	}
 	if !strings.Contains(out.Text, "## existing human skills\n- alpha: first\n- zeta: ddd") || strings.Contains(out.Text, "SECRET") {
 		t.Errorf("human index wrong/leaky:\n%s", out.Text)

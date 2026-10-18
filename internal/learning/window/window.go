@@ -42,8 +42,9 @@ type Run struct {
 	Events    []Event
 }
 
-// SkillRef is a skill's description-index entry; bodies are never passed.
-type SkillRef struct{ Name, Description string }
+// SkillRef is a skill reference. Body is rendered only for Input.Learned
+// skills; for Input.Human skills it is ignored.
+type SkillRef struct{ Name, Description, Body string }
 
 // Caps are the byte caps applied while rendering.
 type Caps struct {
@@ -81,6 +82,9 @@ type Output struct {
 	Truncated   bool
 	LastEventID int64
 	ToolCalls   int
+	// ShownLearned is the sorted names of the learned skills whose bodies
+	// are in Text, i.e. the skills the reflector may patch.
+	ShownLearned []string
 }
 
 // CountToolCalls counts distinct non-empty ToolCallIDs among tool-call events
