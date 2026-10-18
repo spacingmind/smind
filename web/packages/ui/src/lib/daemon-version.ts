@@ -70,7 +70,9 @@ export function updateCommands(daemonVersion: string | null): UpdateCommand[] {
 /** A `/healthz` or `daemon.info` `managedBy` value as a person would say it. */
 export function managedByLabel(managedBy: string): string {
   // `taskscheduler` is what the Windows scheduled task sets (ADR-0031 P9); `task` is the value the ADR first sketched.
-  return managedBy === "taskscheduler" || managedBy === "task" ? "Task Scheduler" : managedBy;
+  if (managedBy === "taskscheduler" || managedBy === "task") return "Task Scheduler";
+  if (managedBy === "docker") return "Docker";
+  return managedBy;
 }
 
 function isDismissedMap(value: unknown): value is Record<string, string> {

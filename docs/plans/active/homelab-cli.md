@@ -1062,6 +1062,27 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   in the release job, where it must pass (`REQUIRE_DIRECT_CONNECTIONS=1`) so an image that ignores `SMIND_LISTEN` is never pushed.
   **Dependency:** the password/`SMIND_LISTEN` behaviour is P4 (#349); until it is on develop the PR's image listens on loopback
   and the login test skips, and no release can push (the release job fails instead).
+- 2026-10-17 (P5): first-run and connection onboarding implemented on `feat/desktop-first-run` (Rust: `app_settings.rs`, `probe.rs`,
+  `ssh_tunnel.rs`, `proxy/{local_token,bounded}.rs`, proxy auth in `proxy/server.rs`; web: `components/first-run/*`, Settings →
+  Connections/Daemon). Decisions taken inside the spec: (1) a first launch with no upgrade signal **writes** `app-settings.json`
+  (`{false,true}`) immediately, so "absent" can only mean a pre-P5 install (otherwise a fresh install that skipped first-run and then
+  added a connection was misread as an upgrade on the next launch); (2) choices (b)/(b2)/(c) set `manageLocalDaemon=false` (the user
+  declined a local daemon; Settings can turn it back on), (a) sets it true, (d) false; (3) "Skip for now" dismisses for the session only,
+  so the screen returns next launch until completed, and Settings keeps "Finish setup"; (4) the SSH connection is a persistent
+  `kind: "ssh"` entry (`ssh://[user@]host[:port]?daemonPort=N`, Paseo's URI shape) whose tunnel (one long-lived `ssh -N -L`, not Paseo's
+  per-connection `ssh -W`, so HTTP keep-alive works and there is one authentication) is re-established on select and at launch; a dead
+  tunnel clears the proxy mapping and shows a 502 until re-selected; (5) **P4 follow-up in the proxy**: `/ws` forwards and echoes
+  `smind.bearer.*` subprotocols; the built-in `local` connection keeps today's `/api/token` flow and only after a 403 from a daemon whose
+  `/healthz` says `service=smind, authRequired=true` does the proxy synthesize the token and inject the token-file bearer (never for
+  url/relay/ssh); a url connection added with a password holds the session token in Rust memory (never the password) and the webview only
+  sees a placeholder; a refused session is dropped so the webview falls back to its own login screen; the tray/notification watcher
+  authenticates the same way. Review (independent, adversarial) drove: the upgrade-rule fix above, tunnel liveness/serialization,
+  bounded 64 KiB bodies, per-id start lock, IPv6/non-ASCII host rules, remove-cleanup on a failed save, userinfo rejection in
+  `validate_base_url`, token query no longer logged. **Not verified:** a real macOS first-run on a wiped profile and a real ssh host
+  (see the PR), Windows 11, and Windows-side ssh. **Verified against the real P4 daemon (#349, merged):** an opt-in test (`src-tauri/src/real_daemon_test.rs`, `SMIND_REAL_DAEMON_BIN=<smind> cargo test real_daemon`) drives a real `smind serve` with a password through probe, wrong/right login, the proxy's synthesized token + injected session bearer, local token-file injection after the real 403, session drop, and both watcher paths; it found that the real daemon selects the plain `smind` subprotocol (never the bearer entry), so the proxy now forwards `smind` along with `smind.bearer.*`. Known gaps: a
+  squatter that binds the picked tunnel port before ssh authenticates cannot be told apart from ssh's listener; a downgrade to an app
+  that does not know `kind: "ssh"` resets `connections.json` (pre-existing all-or-nothing registry load); sessions held in Rust expire
+  after ~24 h and then fall back to the webview login.
 
 - 2026-10-15: **P10 implemented** (PR "feat: daemon.info and an older-daemon notice (ADR-0031 P10)"): `daemon.info` WS method
   (`internal/wsapi/daemon_info.go`: version, commit, managedBy, platform, startedAt; readable over the relay channel); desktop
@@ -1073,6 +1094,17 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   `inflight`; fixed separately in the `fix/device-hello-replay` PR), and every shipped daemon behaves that way, so the banner
   treats a 4 s silence as "predates daemon.info". Not done: the `docker pull` variant for a daemon reporting it runs from an image (`image?` in `daemon.info`, needs
   P11), and the P5 setting that stops offering (a) while a service owns the port (P5 not started).
+
+- 2026-10-18: **P12c implemented** (PR "feat(relay): CA-verified TLS for relay clients and no silent trust-on-first-use (ADR-0031 P12c)"):
+  `client.Dial` with an empty fingerprint verifies chain + host name against the system roots (no `InsecureSkipVerify`; `WithRootCAs`
+  for tests), a non-empty one still pins the leaf only; `smind relay connect` tries normal verification first (stores an empty fingerprint),
+  otherwise shows the fingerprint and needs a typed yes or a matching `--fingerprint <hex>` (nothing saved on refusal/EOF/unreachable;
+  the prompt prints our own reason, never certificate-controlled text); `smind relay --tls-cert/--tls-key` serves an operator's
+  certificate on both listeners and reloads renewals; `smind relay offer` omits `fp` for a CA relay. **Follow-up for P13a (desktop,
+  not edited here):** `connections_preview_relay` rejects an offer without `fp` (`desktop/src-tauri/src/commands.rs:149`) and
+  `relay::client::dial` requires a 32-byte pin (`desktop/daemon-client/src/relay/client.rs:140`), so the desktop cannot yet join a CA
+  relay; the Rust offer parser already accepts a missing `fp`. Mobile parses a missing `fp` (`wire.fp ?? ''`) and never pins (platform
+  trust), so it works with a CA relay.
 
 ## Validation
 

@@ -111,6 +111,8 @@ async fn proxies_token_ws_and_reroutes_with_no_origin_leaked() {
 
     let real_secret = "test-secret-1234567890";
     let state = ProxyState::new(real_secret.to_string(), Registry::new(&local_url), Box::new(EmptyAssets));
+    // Hermetic: never read the developer machine's real daemon token file.
+    state.set_local_token_source(|| None);
     let (port, server_fut) = smind_daemon_client::proxy::serve(state.clone()).await.unwrap();
     tokio::spawn(server_fut);
 

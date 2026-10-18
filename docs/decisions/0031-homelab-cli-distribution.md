@@ -1354,6 +1354,6 @@ password, left this list on 2026-10-15: it is Accepted, see "Decisions".)
   remote daemons never updated by the app, loopback posture), ADR-0023 (updater keys), ADR-0029
   (`/api/shutdown`), ADR-0030 (Windows native daemon; rejected a service for the app).
 - `docs/plans/completed/desktop-relay-transport.md` (single-device limit),
-  `docs/plans/active/desktop-windows-native-daemon.md` and the `feat/windows-bundled-daemon` branch.
+  `docs/plans/completed/desktop-windows-native-daemon.md` and the `feat/windows-bundled-daemon` branch.
 - Paseo (`refs/paseo` @ `8d9e7d3a`): see the reference table above and each "Paseo reference" block.
 - Plan: [`docs/plans/active/homelab-cli.md`](../plans/active/homelab-cli.md).

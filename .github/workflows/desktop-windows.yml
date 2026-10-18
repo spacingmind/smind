@@ -18,8 +18,12 @@ name: desktop-windows
 # that run's `smind_<version>_windows_amd64` artifact (`daemon-version`
 # input); on a push/PR/manual run there is no such artifact, so it builds the
 # daemon itself with `task desktop:win:daemon`, as desktop-macos.yml does.
+#
+# Full installer builds run after a merge to develop, not on every PR branch
+# push; PRs get the cheaper Rust gate in desktop-check.yml.
 on:
   push:
+    branches: [develop]
     paths:
       - "desktop/**"
       - "web/packages/ui/**"

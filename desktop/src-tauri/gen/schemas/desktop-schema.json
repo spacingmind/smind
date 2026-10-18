@@ -357,6 +357,18 @@
           "markdownDescription": "Enables the app_quit command without any pre-configured scope."
         },
         {
+          "description": "Enables the app_settings_get command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-app-settings-get",
+          "markdownDescription": "Enables the app_settings_get command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the app_settings_set command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-app-settings-set",
+          "markdownDescription": "Enables the app_settings_set command without any pre-configured scope."
+        },
+        {
           "description": "Enables the app_update_check command without any pre-configured scope.",
           "type": "string",
           "const": "allow-app-update-check",
@@ -387,6 +399,12 @@
           "markdownDescription": "Enables the connections_add_relay command without any pre-configured scope."
         },
         {
+          "description": "Enables the connections_add_ssh command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-connections-add-ssh",
+          "markdownDescription": "Enables the connections_add_ssh command without any pre-configured scope."
+        },
+        {
           "description": "Enables the connections_get_current command without any pre-configured scope.",
           "type": "string",
           "const": "allow-connections-get-current",
@@ -403,6 +421,12 @@
           "type": "string",
           "const": "allow-connections-preview-relay",
           "markdownDescription": "Enables the connections_preview_relay command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the connections_probe command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-connections-probe",
+          "markdownDescription": "Enables the connections_probe command without any pre-configured scope."
         },
         {
           "description": "Enables the connections_relay_status command without any pre-configured scope.",
@@ -495,6 +519,18 @@
           "markdownDescription": "Denies the app_quit command without any pre-configured scope."
         },
         {
+          "description": "Denies the app_settings_get command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-app-settings-get",
+          "markdownDescription": "Denies the app_settings_get command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the app_settings_set command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-app-settings-set",
+          "markdownDescription": "Denies the app_settings_set command without any pre-configured scope."
+        },
+        {
           "description": "Denies the app_update_check command without any pre-configured scope.",
           "type": "string",
           "const": "deny-app-update-check",
@@ -525,6 +561,12 @@
           "markdownDescription": "Denies the connections_add_relay command without any pre-configured scope."
         },
         {
+          "description": "Denies the connections_add_ssh command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-connections-add-ssh",
+          "markdownDescription": "Denies the connections_add_ssh command without any pre-configured scope."
+        },
+        {
           "description": "Denies the connections_get_current command without any pre-configured scope.",
           "type": "string",
           "const": "deny-connections-get-current",
@@ -541,6 +583,12 @@
           "type": "string",
           "const": "deny-connections-preview-relay",
           "markdownDescription": "Denies the connections_preview_relay command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the connections_probe command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-connections-probe",
+          "markdownDescription": "Denies the connections_probe command without any pre-configured scope."
         },
         {
           "description": "Denies the connections_relay_status command without any pre-configured scope.",

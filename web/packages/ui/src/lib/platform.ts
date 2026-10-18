@@ -16,7 +16,7 @@ import { CONNECTION_CHANGED_EVENT } from "@/lib/local-paths";
 /** A saved daemon connection (AC4's Rust-side `Registry`/`Connection` shape, mirrored here). */
 export interface Connection {
   id: string;
-  kind: "local" | "url" | "relay";
+  kind: "local" | "url" | "relay" | "ssh";
   label: string;
   baseUrl: string;
 }
@@ -70,12 +70,46 @@ export interface DaemonStatus {
   logPath: string | null;
   /** Whether the managed binary exists on disk right now -- distinct from `managedState`, since a bare take-over (no prior Install/Update) can be "managed" with nothing installed. Restart is disabled unless this is true. */
   binaryInstalled: boolean;
+  /** ADR-0031 D7: the `service` field of the local `/healthz` ("smind" for a smind daemon), or null when nothing answers or the answer has none. */
+  localService: string | null;
+  /** ADR-0031 D7: a process owns the local daemon port but it is not answering HTTP (so "Run here" would collide with it). */
+  portOccupied: boolean;
   /** Windows only (AC6): an unmanaged port owner that is not an identifiable smind.exe -- typically the WSL relay forwarding a WSL daemon's port. Take over is hidden and an explanation is shown instead. */
   wslDaemonSuspected: boolean;
   /** Windows only (AC8): whether Git for Windows was found (null elsewhere). Install/start work without it. */
   gitFound: boolean | null;
   /** Set when a prerequisite is missing (AC8), e.g. Git for Windows. */
   prerequisiteMessage: string | null;
+}
+
+/** The Rust-owned `app-settings.json` (ADR-0031 D7): whether first-run has been completed, and whether the app manages (installs/starts/updates/takes over) a local daemon. */
+export interface AppSettings {
+  onboardingCompleted: boolean;
+  manageLocalDaemon: boolean;
+}
+
+/** What `connections_probe(url)` learned about a daemon URL, without saving anything (ADR-0031 D7 (b)). */
+export interface ProbeResult {
+  reachable: boolean;
+  /** The daemon's `/healthz` version. */
+  version: string | null;
+  /** The `/healthz` `service` field; anything but "smind" is not a smind daemon. */
+  service: string | null;
+  /** `/healthz` `authRequired`: the daemon wants a password (POST /api/login). */
+  authRequired: boolean;
+  /** The URL's host is a loopback address (a smind daemon is loopback-only unless a password is set). */
+  loopback: boolean;
+  /** Why it could not be probed (invalid URL, refused, timeout), when `reachable` is false. */
+  error: string | null;
+}
+
+/** The SSH-tunnel connection a first-run/Settings "Connect over SSH" form submits (ADR-0031 D7 (b2)). */
+export interface SshTarget {
+  host: string;
+  /** The ssh port; null = ssh's own default (22 / ssh_config). */
+  sshPort: number | null;
+  /** The smind daemon's port on the remote host (loopback there). */
+  daemonPort: number;
 }
 
 /** A progress update emitted while `daemonInstall`/`daemonUpdate`/`daemonRestart` run. */
@@ -134,7 +168,17 @@ export type NativeMenuActionId =
 /** The commands `capabilities/proxy.json` exposes to the bundled UI (AC5/ADR-0013 part D2), one method per command. */
 export interface DesktopApi {
   listConnections(): Promise<Connection[]>;
-  addConnection(label: string, url: string): Promise<Connection>;
+  /** Saves a daemon URL. With a `password` Rust logs in through `POST /api/login` first and holds the session token in memory (never the password); rejects with Rust's error text. */
+  addConnection(label: string, url: string, password?: string): Promise<Connection>;
+  /** Probes a daemon URL (`connections_probe`) without saving it. Never rejects for an unreachable URL: that is `reachable: false` with an `error`. */
+  probeConnection(url: string): Promise<ProbeResult>;
+  /** Saves an SSH-tunnel connection (`connections_add_ssh`): Rust validates host/ports, starts `ssh -N -L` and rejects with ssh's stderr on failure. */
+  addSshConnection(label: string, target: SshTarget): Promise<Connection>;
+  /** Reads/patches `app-settings.json` (`app_settings_get`/`app_settings_set`); a patch only changes the fields it names and the result is what is now stored. */
+  appSettingsGet(): Promise<AppSettings>;
+  appSettingsSet(patch: Partial<AppSettings>): Promise<AppSettings>;
+  /** The native Help menu's "Run Setup Again…" (`run-setup-requested`): reopens first-run without touching saved connections. */
+  onRunSetupRequested(cb: () => void): () => void;
   /** Validates a pasted relay pairing link in Rust and returns only its non-secret fields; saves nothing. Rejects with Rust's error text (which never contains the link). */
   previewRelayLink(pairingUrl: string): Promise<RelayPreview>;
   /** Saves the connection a relay pairing link describes (key material stays in Rust, `0600`). Rejects with Rust's error text. */
@@ -241,6 +285,11 @@ function unavailable(): DesktopApi {
   return {
     listConnections: () => reject(),
     addConnection: () => reject(),
+    probeConnection: () => reject(),
+    addSshConnection: () => reject(),
+    appSettingsGet: () => reject(),
+    appSettingsSet: () => reject(),
+    onRunSetupRequested: () => () => {},
     previewRelayLink: () => reject(),
     addRelayConnection: () => reject(),
     removeConnection: () => reject(),
@@ -305,11 +354,67 @@ function realDesktopApi(): DesktopApi {
       const invoke = await loadInvoke();
       return invoke<Connection[]>("connections_list");
     },
-    async addConnection(label, url) {
+    async addConnection(label, url, password) {
       const invoke = await loadInvoke();
-      const conn = await invoke<Connection>("connections_add", { label, url });
-      announceConnectionChange();
-      return conn;
+      try {
+        const conn = await invoke<Connection>("connections_add", { label, url, password: password ?? null });
+        announceConnectionChange();
+        return conn;
+      } catch (err) {
+        throw asError(err);
+      }
+    },
+    async probeConnection(url) {
+      const invoke = await loadInvoke();
+      try {
+        return await invoke<ProbeResult>("connections_probe", { url });
+      } catch (err) {
+        throw asError(err);
+      }
+    },
+    async addSshConnection(label, target) {
+      const invoke = await loadInvoke();
+      try {
+        const conn = await invoke<Connection>("connections_add_ssh", {
+          label,
+          host: target.host,
+          sshPort: target.sshPort,
+          daemonPort: target.daemonPort,
+        });
+        announceConnectionChange();
+        return conn;
+      } catch (err) {
+        throw asError(err);
+      }
+    },
+    async appSettingsGet() {
+      const invoke = await loadInvoke();
+      return invoke<AppSettings>("app_settings_get");
+    },
+    async appSettingsSet(patch) {
+      const invoke = await loadInvoke();
+      try {
+        return await invoke<AppSettings>("app_settings_set", { patch });
+      } catch (err) {
+        throw asError(err);
+      }
+    },
+    onRunSetupRequested(cb) {
+      let unlisten: (() => void) | null = null;
+      let cancelled = false;
+      import("@tauri-apps/api/event").then(({ listen }) =>
+        listen("run-setup-requested", () => cb()).then((fn) => {
+          if (cancelled) {
+            fn();
+          } else {
+            unlisten = fn;
+          }
+        }),
+      );
+      return () => {
+        cancelled = true;
+        unlisten?.();
+      };
     },
     async previewRelayLink(pairingUrl) {
       const invoke = await loadInvoke();
