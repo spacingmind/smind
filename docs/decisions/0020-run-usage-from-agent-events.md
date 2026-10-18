@@ -85,7 +85,7 @@ own events (`refs/paseo/packages/server/src/server/agent/agent-sdk-types.ts`,
      total across its model calls, per prompt and not session-cumulative.
      That is still right under process-per-run (each run is charged the
      whole figure); a shared-process design must not difference it. See
-     `docs/plans/active/dogfood-gap-fixes.md` (AC6) and
+     `docs/plans/completed/dogfood-gap-fixes.md` (AC6) and
      `internal/taskrunner/usage_glm_test.go`.
    - **First-run limitation.** A session or thread that predates this
      change has no stored snapshot, so its first run afterwards is charged

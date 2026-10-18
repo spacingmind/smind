@@ -7,7 +7,7 @@ import (
 )
 
 // TestStore_DeleteTaskDetachesChildren pins the no-automatic-cascade
-// decision (docs/plans/active/smind-control-parity.md): deleting a parent
+// decision (docs/plans/completed/smind-control-parity.md): deleting a parent
 // task succeeds (no raw FOREIGN KEY error from tasks.parent_task_id) and
 // leaves each child in place as a root task with ParentTaskID NULL --
 // children are detached, never deleted with the parent.
