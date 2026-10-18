@@ -314,8 +314,13 @@ func loginEventParams(e accounts.LoginEvent) any {
 // provider (accounts.LoginCoordinator.Login), emitting an "authorizeUrl"
 // event as soon as the vendor's authorize URL is ready -- before this
 // request blocks waiting for the callback -- so the caller can open it (CLI)
-// or render it (web UI) without polling. The event is {loginId, url}: loginId
-// names this login for account.oauthComplete (paste-the-redirect). See LoginCoordinator.Login's doc
+// or render it (web UI) without polling. The event is {loginId, url,
+// pasteOnly?}: loginId names this login for account.oauthComplete
+// (paste-the-redirect), and pasteOnly is present (true) when no callback
+// listener could be bound. With params method "device" (openai only) the
+// event is instead deviceCode {loginId, verificationUrl, userCode, expiresAt,
+// intervalSeconds}; either event goes only to the requesting connection. An
+// unknown method is login_bad_method. See LoginCoordinator.Login's doc
 // comment for the full flow: unsupported providers, a second concurrent
 // login for the same provider, callback timeout, and state mismatch all
 // surface as errors from coord.Login, wrapped here the same way every other
@@ -331,6 +336,8 @@ func handleAccountOAuthStart(coord *accounts.LoginCoordinator) handlerFunc {
 			// AccountID, when set, makes this a row-level Re-login of that
 			// account (ADR-0033 D6).
 			AccountID int64 `json:"accountId,omitempty"`
+			// Method is "browser" (the default) or "device" (ADR-0033 D2).
+			Method string `json:"method,omitempty"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("account.oauthStart: invalid params: %w", err)
@@ -338,8 +345,12 @@ func handleAccountOAuthStart(coord *accounts.LoginCoordinator) handlerFunc {
 		if p.Provider == "" || p.Label == "" {
 			return nil, fmt.Errorf("account.oauthStart: provider and label are required")
 		}
+		method, err := accounts.NormalizeLoginMethod(p.Method)
+		if err != nil {
+			return nil, fmt.Errorf("account.oauthStart: %w", err)
+		}
 
-		res, err := coord.Login(ctx, p.Provider, p.Label, accounts.LoginOptions{AccountID: p.AccountID}, func(e accounts.LoginEvent) {
+		res, err := coord.Login(ctx, p.Provider, p.Label, accounts.LoginOptions{AccountID: p.AccountID, Method: method}, func(e accounts.LoginEvent) {
 			rc.Emit(e.Kind, loginEventParams(e))
 		})
 		if err != nil {

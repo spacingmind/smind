@@ -224,6 +224,9 @@ func (l *AnthropicLogin) Exchange(ctx context.Context, code, state string, pkce 
 // refresh_providers.go.
 type OpenAILogin struct {
 	httpClient *http.Client
+	// deviceMinInterval lowers the floor of the device-code poll interval
+	// (default 1s); set by this package's tests only.
+	deviceMinInterval time.Duration
 }
 
 // OpenAILoginOption configures an OpenAILogin.
@@ -280,34 +283,51 @@ func (l *OpenAILogin) AuthorizeURL(state string, pkce PKCECodes) string {
 // token's JWT exp claim, exactly like OpenAIRefresher.Refresh (OpenAI's
 // token response carries no expires_in field for either grant).
 func (l *OpenAILogin) Exchange(ctx context.Context, code, _ string, pkce PKCECodes) (ExchangeResult, error) {
+	status, body, err := l.postTokenForm(ctx, code, "http://"+openaiCallbackAddr+openaiCallbackPath, pkce.CodeVerifier)
+	if err != nil {
+		return ExchangeResult{}, err
+	}
+	if status != http.StatusOK {
+		return ExchangeResult{}, fmt.Errorf("openai oauth exchange failed with status %d: %s", status, body)
+	}
+	return parseOpenAIExchange(body)
+}
+
+// postTokenForm posts an authorization_code grant to openai's token endpoint
+// and returns the status and body, leaving their interpretation (and the text
+// of any error about them) to the caller: the browser path reports the vendor's
+// body, the device path never does.
+func (l *OpenAILogin) postTokenForm(ctx context.Context, code, redirectURI, verifier string) (int, []byte, error) {
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
 		"client_id":     {openaiClientID},
 		"code":          {code},
-		"redirect_uri":  {"http://" + openaiCallbackAddr + openaiCallbackPath},
-		"code_verifier": {pkce.CodeVerifier},
+		"redirect_uri":  {redirectURI},
+		"code_verifier": {verifier},
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, openaiTokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return ExchangeResult{}, fmt.Errorf("create openai oauth exchange request: %w", err)
+		return 0, nil, fmt.Errorf("create openai oauth exchange request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := l.httpClient.Do(req)
 	if err != nil {
-		return ExchangeResult{}, fmt.Errorf("openai oauth exchange request: %w", err)
+		return 0, nil, fmt.Errorf("openai oauth exchange request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return ExchangeResult{}, fmt.Errorf("read openai oauth exchange response: %w", err)
+		return 0, nil, fmt.Errorf("read openai oauth exchange response: %w", err)
 	}
-	if resp.StatusCode != http.StatusOK {
-		return ExchangeResult{}, fmt.Errorf("openai oauth exchange failed with status %d: %s", resp.StatusCode, body)
-	}
+	return resp.StatusCode, body, nil
+}
 
+// parseOpenAIExchange turns a successful token response into the credential
+// and identity subject, whichever flow obtained it.
+func parseOpenAIExchange(body []byte) (ExchangeResult, error) {
 	var tok openAIExchangeResponse
 	if err := json.Unmarshal(body, &tok); err != nil {
 		return ExchangeResult{}, fmt.Errorf("parse openai oauth exchange response: %w", err)

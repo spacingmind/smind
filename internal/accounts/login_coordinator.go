@@ -26,9 +26,29 @@ const loginCallbackTimeout = 10 * time.Minute
 // answering pastes), until it times out or is cancelled.
 const maxCompleteAttempts = 5
 
-// loginMethodBrowser is the PKCE authorization-code flow with a callback
-// listener and/or a pasted redirect. (The device-code method joins it in B3.)
-const loginMethodBrowser = "browser"
+// Login methods (ADR-0033 D2). Browser is the PKCE authorization-code flow
+// with a callback listener and/or a pasted redirect; device is the vendor's
+// device-code flow, which binds no listener.
+const (
+	LoginMethodBrowser = "browser"
+	LoginMethodDevice  = "device"
+
+	loginMethodBrowser = LoginMethodBrowser
+	loginMethodDevice  = LoginMethodDevice
+)
+
+// NormalizeLoginMethod maps a requested method to a known one: "" is the
+// default, browser. Anything else unknown is a login_bad_method error whose
+// text does not echo the value.
+func NormalizeLoginMethod(method string) (string, error) {
+	switch method {
+	case "", LoginMethodBrowser:
+		return LoginMethodBrowser, nil
+	case LoginMethodDevice:
+		return LoginMethodDevice, nil
+	}
+	return "", &LoginError{Code: LoginCodeBadMethod, Detail: `the login method must be "browser" or "device"`}
+}
 
 // LoginCoordinator drives the browser-based OAuth login flow for the
 // providers in logins: generating PKCE/state, standing up the vendor's
@@ -49,6 +69,13 @@ type LoginCoordinator struct {
 	// not exposed as a constructor option, since there's no legitimate
 	// reason for a real caller to want a different value.
 	timeout time.Duration
+
+	// deviceTimeout (default deviceLoginTimeout) is how long a device login
+	// polls before device_expired, and minPoll (default deviceMinInterval)
+	// floors the interval between polls; both are fields so tests can shorten
+	// them, like timeout.
+	deviceTimeout time.Duration
+	minPoll       time.Duration
 
 	mu       sync.Mutex
 	inFlight map[string]bool
@@ -85,8 +112,11 @@ func NewLoginCoordinator(registry *Registry, logins map[string]Login) *LoginCoor
 		registry: registry,
 		logins:   logins,
 		timeout:  loginCallbackTimeout,
-		inFlight: make(map[string]bool),
-		pending:  make(map[string]*pendingLogin),
+
+		deviceTimeout: deviceLoginTimeout,
+		minPoll:       deviceMinInterval,
+		inFlight:      make(map[string]bool),
+		pending:       make(map[string]*pendingLogin),
 	}
 }
 
@@ -131,6 +161,8 @@ const (
 
 // LoginOptions are the optional inputs of Login.
 type LoginOptions struct {
+	// Method is "", "browser" (the default) or "device"; see NormalizeLoginMethod.
+	Method string
 	// AccountID, when non-zero, is the row a row-level Re-login targets
 	// (ADR-0033 D6): its credential is replaced, never a new row created.
 	// 0 = none.
@@ -169,6 +201,12 @@ const (
 	LoginCodeStateMismatch    = "state_mismatch"
 	LoginCodeDenied           = "denied"
 	LoginCodeTimeout          = "timeout"
+
+	// Codes of the method choice and the device-code flow.
+	LoginCodeBadMethod         = "login_bad_method"
+	LoginCodeDeviceUnsupported = "device_unsupported"
+	LoginCodeDeviceExpired     = "device_expired"
+	LoginCodeDeviceFailed      = "device_failed"
 )
 
 // LoginError is an error with a stable machine-readable code. Detail never
@@ -200,6 +238,19 @@ func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, op
 		return LoginResult{}, fmt.Errorf("oauth login: unsupported provider %q", provider)
 	}
 
+	method, err := NormalizeLoginMethod(opts.Method)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	var device DeviceLogin
+	if method == loginMethodDevice {
+		// Rejected before any claim, listener or request: only providers with
+		// a device flow take this method.
+		if device, ok = login.(DeviceLogin); !ok {
+			return LoginResult{}, &LoginError{Code: LoginCodeDeviceUnsupported, Detail: fmt.Sprintf("%s does not offer a device-code login", providerDisplayLabel(provider))}
+		}
+	}
+
 	// Fail fast on a Re-login aimed at a row that is gone or belongs to
 	// another provider, before a listener is bound or the user is sent to a
 	// browser. persist re-checks after the exchange.
@@ -213,6 +264,10 @@ func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, op
 		return LoginResult{}, &LoginError{Code: LoginCodeInProgress, Detail: fmt.Sprintf("a login for provider %q is already in progress", provider)}
 	}
 	defer c.release(provider)
+
+	if device != nil {
+		return c.loginDevice(ctx, provider, label, opts, device, onEvent)
+	}
 
 	pkce, err := GeneratePKCECodes()
 	if err != nil {
