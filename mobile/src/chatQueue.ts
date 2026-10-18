@@ -91,6 +91,11 @@ export class ChatQueue {
     }
   }
 
+  /** The prompt of the delivered item that started this run, if the snapshot has one. */
+  promptForRun(runId: string): string | undefined {
+    return this.all.find((i) => i.Status === 'delivered' && i.RunID === runId)?.Prompt;
+  }
+
   get items(): ChatQueueItem[] {
     return visibleQueueItems(this.all, Date.now(), this.firstSeen);
   }
