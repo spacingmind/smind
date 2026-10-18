@@ -17,7 +17,7 @@ import (
 )
 
 // TestTaskNewLs_ParentFlag proves the CLI half of the task-hierarchy plan
-// (docs/plans/active/smind-control-parity.md): `smind task new --parent`
+// (docs/plans/completed/smind-control-parity.md): `smind task new --parent`
 // stamps the child's parent task id, and `smind task ls --parent` narrows
 // the listing to that parent's direct children -- both end to end against
 // a real daemon, the same newConfigOptionTestEnv setup the task
