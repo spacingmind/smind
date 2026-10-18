@@ -256,6 +256,12 @@ func runFakeClaudeCLI() {
 			fmt.Fprintf(os.Stderr, "fake claude cli: write env: %v\n", err)
 			os.Exit(1)
 		}
+		// Same for the claude.ai-connectors opt-out, which only isolated
+		// runs set.
+		if err := os.WriteFile(filepath.Join(wd, "env-claudeai-mcp"), []byte(os.Getenv("ENABLE_CLAUDEAI_MCP_SERVERS")), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude cli: write env-claudeai-mcp: %v\n", err)
+			os.Exit(1)
+		}
 		// When --mcp-config names a file, snapshot its contents and the
 		// file/dir permission bits at spawn time (the runner removes the
 		// file once the run ends), so a test can assert on them.
@@ -328,6 +334,95 @@ func runFakeClaudeCLI() {
 			"session_id": "sess-1",
 			"result":     "ok",
 		})
+
+	case "init-with-tools", "init-clean":
+		// An init system message as the real CLI emits it: the isolated
+		// run must abort when it lists tools, and proceed when it lists
+		// only empty collections.
+		stdin.Scan() // consume the prompt line
+		initMsg := map[string]any{
+			"type":           "system",
+			"subtype":        "init",
+			"session_id":     "sess-1",
+			"tools":          []any{},
+			"mcp_servers":    []any{},
+			"slash_commands": []any{},
+			"skills":         []any{},
+			"plugins":        []any{},
+			"agents":         []any{"general-purpose"},
+		}
+		if scenario == "init-with-tools" {
+			initMsg["tools"] = []any{"Bash"}
+		}
+		writeLine(initMsg)
+		writeLine(map[string]any{
+			"type":       "assistant",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"model":   "claude-fake",
+				"content": []any{map[string]any{"type": "text", "text": "after init"}},
+			},
+		})
+		if scenario == "init-with-tools" {
+			for stdin.Scan() {
+			}
+			return
+		}
+		writeLine(map[string]any{
+			"type":        "result",
+			"is_error":    false,
+			"session_id":  "sess-1",
+			"stop_reason": "end_turn",
+			"result":      "done",
+		})
+
+	case "result-error":
+		stdin.Scan() // consume the prompt line
+		writeLine(map[string]any{
+			"type":        "result",
+			"subtype":     "error_max_turns",
+			"is_error":    true,
+			"session_id":  "sess-1",
+			"stop_reason": "tool_use",
+			"result":      "max turns reached",
+		})
+
+	case "result-permission-denials":
+		stdin.Scan() // consume the prompt line
+		writeLine(map[string]any{
+			"type":               "result",
+			"is_error":           false,
+			"session_id":         "sess-1",
+			"stop_reason":        "end_turn",
+			"result":             "done",
+			"permission_denials": []any{map[string]any{"tool_name": "Bash", "tool_use_id": "t1", "tool_input": map[string]any{}}},
+		})
+
+	case "tool-attempt":
+		// An assistant turn that calls a tool (which an isolated run, with
+		// --tools "", must never do), followed by more text that must never
+		// reach the caller, then blocks until the CLI is killed.
+		stdin.Scan() // consume the prompt line
+		writeLine(map[string]any{
+			"type":       "assistant",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"model": "claude-fake",
+				"content": []any{
+					map[string]any{"type": "tool_use", "id": "tool-1", "name": "Bash", "input": map[string]any{"command": "echo hi"}},
+				},
+			},
+		})
+		writeLine(map[string]any{
+			"type":       "assistant",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"model":   "claude-fake",
+				"content": []any{map[string]any{"type": "text", "text": "after the tool"}},
+			},
+		})
+		for stdin.Scan() {
+		}
 
 	case "permission":
 		// Mirrors claude-agent-sdk-go's own fakecli_test.go
