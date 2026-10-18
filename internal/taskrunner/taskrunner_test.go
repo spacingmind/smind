@@ -256,6 +256,12 @@ func runFakeClaudeCLI() {
 			fmt.Fprintf(os.Stderr, "fake claude cli: write env: %v\n", err)
 			os.Exit(1)
 		}
+		// Same for the claude.ai-connectors opt-out, which only isolated
+		// runs set.
+		if err := os.WriteFile(filepath.Join(wd, "env-claudeai-mcp"), []byte(os.Getenv("ENABLE_CLAUDEAI_MCP_SERVERS")), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude cli: write env-claudeai-mcp: %v\n", err)
+			os.Exit(1)
+		}
 		// When --mcp-config names a file, snapshot its contents and the
 		// file/dir permission bits at spawn time (the runner removes the
 		// file once the run ends), so a test can assert on them.

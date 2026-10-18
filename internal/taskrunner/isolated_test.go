@@ -7,10 +7,23 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/workspace"
 )
+
+// newIsolatedTask is newTestTask with the worktree's .git link removed, so
+// the cwd guard (ErrIsolationCwd) accepts it.
+func newIsolatedTask(t *testing.T, scenario string) (*workspace.Manager, store.Task) {
+	t.Helper()
+	wm, task := newTestTask(t, scenario)
+	if err := os.RemoveAll(filepath.Join(*task.WorktreePath, ".git")); err != nil {
+		t.Fatalf("remove .git: %v", err)
+	}
+	return wm, task
+}
 
 // runIsolated runs RunPromptIsolated to completion and returns the events
 // and the error.
@@ -65,7 +78,7 @@ func assertIsolatedFlags(t *testing.T, args []string, systemPrompt string) {
 
 func TestReflector_HasNoTools(t *testing.T) {
 	t.Parallel()
-	wm, task := newTestTask(t, "echo-args")
+	wm, task := newIsolatedTask(t, "echo-args")
 	r := claudeNativeRunner(t, wm)
 
 	got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "you reflect"})
@@ -83,6 +96,9 @@ func TestReflector_HasNoTools(t *testing.T) {
 func TestReflector_NoMcpNoAddDir(t *testing.T) {
 	t.Parallel()
 	r, st, task := newClaudeMcpEnv(t)
+	if err := os.RemoveAll(filepath.Join(*task.WorktreePath, ".git")); err != nil {
+		t.Fatalf("remove .git: %v", err)
+	}
 	if _, err := mcpservers.New(st).Create(store.McpServer{Name: "pw", Transport: "stdio", Command: "npx", Args: `["-y"]`, Enabled: true}); err != nil {
 		t.Fatalf("Create(): %v", err)
 	}
@@ -96,9 +112,114 @@ func TestReflector_NoMcpNoAddDir(t *testing.T) {
 	assertIsolatedFlags(t, readArgs(t, task), "p")
 }
 
+func TestRunPromptIsolated_DisablesClaudeAiConnectors(t *testing.T) {
+	t.Parallel()
+	wm, task := newIsolatedTask(t, "echo-args")
+	r := claudeNativeRunner(t, wm)
+	if _, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"}); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(*task.WorktreePath, "env-claudeai-mcp"))
+	if err != nil || string(data) != "false" {
+		t.Fatalf("ENABLE_CLAUDEAI_MCP_SERVERS = %q (err %v), want false", data, err)
+	}
+}
+
+func TestRunPromptIsolated_CwdGuard(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"CLAUDE.md", ".claude", ".mcp.json", "AGENTS.md", ".git"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			wm, task := newIsolatedTask(t, "echo-args")
+			r := claudeNativeRunner(t, wm)
+			path := filepath.Join(*task.WorktreePath, name)
+			if name == ".claude" || name == ".git" {
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
+			if !errors.Is(err, ErrIsolationCwd) {
+				t.Fatalf("error = %v, want ErrIsolationCwd", err)
+			}
+			if len(got) != 0 {
+				t.Fatalf("events = %+v, want none", got)
+			}
+			if _, statErr := os.Stat(filepath.Join(*task.WorktreePath, "args")); !os.IsNotExist(statErr) {
+				t.Fatal("a subprocess was started")
+			}
+		})
+	}
+}
+
+func TestRunPromptIsolated_CwdGuardRejectsMissingDir(t *testing.T) {
+	t.Parallel()
+	wm, task := newIsolatedTask(t, "echo-args")
+	r := claudeNativeRunner(t, wm)
+	if err := os.RemoveAll(*task.WorktreePath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"}); !errors.Is(err, ErrIsolationCwd) {
+		t.Fatalf("error = %v, want ErrIsolationCwd", err)
+	}
+}
+
+func TestRunPromptIsolated_TimeoutFails(t *testing.T) {
+	t.Parallel()
+	wm, task := newIsolatedTask(t, "hang")
+	r := claudeNativeRunner(t, wm)
+	start := time.Now()
+	_, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p", Timeout: 200 * time.Millisecond})
+	if !errors.Is(err, ErrIsolatedRunFailed) || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("error = %v, want ErrIsolatedRunFailed wrapping timeout", err)
+	}
+	if d := time.Since(start); d > 30*time.Second {
+		t.Fatalf("took %v", d)
+	}
+}
+
+func TestToolNameForError(t *testing.T) {
+	t.Parallel()
+	if got := safeToolName("mcp__x.y:z-1"); got != "mcp__x.y:z-1" {
+		t.Fatalf("got %q", got)
+	}
+	if got := safeToolName("a b\n\"é"); got != "a_b___" {
+		t.Fatalf("got %q", got)
+	}
+	if got := safeToolName(strings.Repeat("a", 100)); len(got) != 64 {
+		t.Fatalf("len = %d, want 64", len(got))
+	}
+}
+
+func TestRunPromptIsolated_ClosesClientBeforeDone(t *testing.T) {
+	t.Parallel()
+	// A consumer that never reads the final Done event must not keep the
+	// CLI alive: the run returns once ctx ends, and the client was closed
+	// before the Done send was attempted.
+	wm, task := newIsolatedTask(t, "tool-attempt")
+	r := claudeNativeRunner(t, wm)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	events := make(chan Event) // never drained after the first read
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPromptIsolated(ctx, task.ID, task.ID, ProviderClaudeNative, "hi", "", IsolationOptions{SystemPrompt: "p"}, events)
+	}()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, ErrIsolationViolated) {
+			t.Fatalf("error = %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("RunPromptIsolated blocked on a slow consumer")
+	}
+}
+
 func TestReflector_MaxTurnsOverride(t *testing.T) {
 	t.Parallel()
-	wm, task := newTestTask(t, "echo-args")
+	wm, task := newIsolatedTask(t, "echo-args")
 	r := claudeNativeRunner(t, wm)
 	if _, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p", MaxTurns: 3}); err != nil {
 		t.Fatalf("error = %v", err)
@@ -110,7 +231,7 @@ func TestReflector_MaxTurnsOverride(t *testing.T) {
 
 func TestReflector_UnchangedRunPromptFlags(t *testing.T) {
 	t.Parallel()
-	wm, task := newTestTask(t, "echo-args")
+	wm, task := newIsolatedTask(t, "echo-args")
 	r := claudeNativeRunner(t, wm)
 	events := make(chan Event)
 	errCh := make(chan error, 1)
@@ -127,6 +248,9 @@ func TestReflector_UnchangedRunPromptFlags(t *testing.T) {
 			t.Errorf("normal RunPrompt leaked %s=%q; args %q", f, v, args)
 		}
 	}
+	if data, err := os.ReadFile(filepath.Join(*task.WorktreePath, "env-claudeai-mcp")); err != nil || string(data) != "" {
+		t.Errorf("normal RunPrompt ENABLE_CLAUDEAI_MCP_SERVERS = %q (err %v), want unset", data, err)
+	}
 	if _, ok := flagValue(args, "--allow-dangerously-skip-permissions"); !ok {
 		t.Errorf("normal RunPrompt lost --allow-dangerously-skip-permissions; args %q", args)
 	}
@@ -137,7 +261,7 @@ func TestRunPromptIsolated_RefusesAcpProviders(t *testing.T) {
 	for _, p := range []Provider{ProviderGLM, ProviderKimi, ProviderCodexNative} {
 		t.Run(string(p), func(t *testing.T) {
 			t.Parallel()
-			wm, task := newTestTask(t, "echo-args")
+			wm, task := newIsolatedTask(t, "echo-args")
 			r := claudeNativeRunner(t, wm)
 			got, err := runIsolated(t, r, task, p, IsolationOptions{SystemPrompt: "p"})
 			if !errors.Is(err, ErrIsolationUnsupported) {
@@ -155,7 +279,7 @@ func TestRunPromptIsolated_RefusesAcpProviders(t *testing.T) {
 
 func TestRunPromptIsolated_RequiresSystemPromptAndTask(t *testing.T) {
 	t.Parallel()
-	wm, task := newTestTask(t, "echo-args")
+	wm, task := newIsolatedTask(t, "echo-args")
 	r := claudeNativeRunner(t, wm)
 	if _, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{}); err == nil {
 		t.Fatal("empty SystemPrompt: want error")
@@ -171,7 +295,7 @@ func TestRunPromptIsolated_RequiresSystemPromptAndTask(t *testing.T) {
 
 func TestRunPromptIsolated_DoesNotTouchSessionStore(t *testing.T) {
 	t.Parallel()
-	wm, task := newTestTask(t, "echo-args")
+	wm, task := newIsolatedTask(t, "echo-args")
 	r := claudeNativeRunner(t, wm)
 
 	if _, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"}); err != nil {
@@ -200,7 +324,7 @@ func TestRunPromptIsolated_DoesNotTouchSessionStore(t *testing.T) {
 
 func TestRunPromptIsolated_ToolAttemptAborts(t *testing.T) {
 	t.Parallel()
-	wm, task := newTestTask(t, "tool-attempt")
+	wm, task := newIsolatedTask(t, "tool-attempt")
 	r := claudeNativeRunner(t, wm)
 
 	got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
@@ -228,7 +352,7 @@ func TestRunPromptIsolated_PermissionRequestDenied(t *testing.T) {
 	t.Parallel()
 	t.Run("denies every permission request", func(t *testing.T) {
 		t.Parallel()
-		wm, task := newTestTask(t, "permission")
+		wm, task := newIsolatedTask(t, "permission")
 		r := claudeNativeRunner(t, wm)
 		got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
 		if err != nil {
@@ -242,7 +366,7 @@ func TestRunPromptIsolated_PermissionRequestDenied(t *testing.T) {
 
 func TestRunPromptIsolated_ReturnsFinalAssistantText(t *testing.T) {
 	t.Parallel()
-	wm, task := newTestTask(t, "reply")
+	wm, task := newIsolatedTask(t, "reply")
 	r := claudeNativeRunner(t, wm)
 	got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
 	if err != nil {
@@ -268,6 +392,7 @@ func TestFinalText(t *testing.T) {
 		{"thinking separates", []Event{txt("old"), {Type: EventTypeThinking, Text: "t"}, txt("new")}, "new"},
 		{"trailing non-text skipped", []Event{txt("a"), {Type: EventTypeUsage}, {Type: EventTypeDone}}, "a"},
 		{"no text", []Event{{Type: EventTypeDone}}, ""},
+		{"violated run yields nothing", []Event{txt("a"), {Type: EventTypeDone, StopReason: "isolation_violated"}}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -280,7 +405,7 @@ func TestFinalText(t *testing.T) {
 
 func TestRunPromptIsolated_InitWithToolsAborts(t *testing.T) {
 	t.Parallel()
-	wm, task := newTestTask(t, "init-with-tools")
+	wm, task := newIsolatedTask(t, "init-with-tools")
 	r := claudeNativeRunner(t, wm)
 	got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
 	if !errors.Is(err, ErrIsolationViolated) {
@@ -299,7 +424,7 @@ func TestRunPromptIsolated_InitWithToolsAborts(t *testing.T) {
 
 func TestRunPromptIsolated_InitCleanProceeds(t *testing.T) {
 	t.Parallel()
-	wm, task := newTestTask(t, "init-clean")
+	wm, task := newIsolatedTask(t, "init-clean")
 	r := claudeNativeRunner(t, wm)
 	got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
 	if err != nil {
@@ -312,7 +437,7 @@ func TestRunPromptIsolated_InitCleanProceeds(t *testing.T) {
 
 func TestRunPromptIsolated_ResultErrorFails(t *testing.T) {
 	t.Parallel()
-	wm, task := newTestTask(t, "result-error")
+	wm, task := newIsolatedTask(t, "result-error")
 	r := claudeNativeRunner(t, wm)
 	_, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
 	if !errors.Is(err, ErrIsolatedRunFailed) {
@@ -325,7 +450,7 @@ func TestRunPromptIsolated_ResultErrorFails(t *testing.T) {
 
 func TestRunPromptIsolated_PermissionDenialsViolate(t *testing.T) {
 	t.Parallel()
-	wm, task := newTestTask(t, "result-permission-denials")
+	wm, task := newIsolatedTask(t, "result-permission-denials")
 	r := claudeNativeRunner(t, wm)
 	got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
 	if !errors.Is(err, ErrIsolationViolated) {

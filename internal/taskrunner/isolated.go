@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
@@ -19,6 +22,62 @@ type IsolationOptions struct {
 	SystemPrompt string
 	// MaxTurns caps the agentic loop; 1 when <= 0.
 	MaxTurns int
+	// Timeout bounds the whole run; defaultIsolatedTimeout when <= 0.
+	Timeout time.Duration
+}
+
+// defaultIsolatedTimeout bounds an isolated run that sets no Timeout.
+const defaultIsolatedTimeout = 5 * time.Minute
+
+// claudeAiMcpEnv opts the CLI out of claude.ai account connectors (the
+// claude-code changelog's documented switch); isolated runs only.
+const claudeAiMcpEnv = "ENABLE_CLAUDEAI_MCP_SERVERS"
+
+// ErrIsolationCwd is returned when the run's working directory could leak
+// ambient context into the CLI (project instructions, MCP config, a git
+// checkout) or is not a usable absolute directory.
+var ErrIsolationCwd = errors.New("taskrunner: isolated run cwd is not clean")
+
+// isolationCwdForbidden are entries whose presence in the cwd makes the CLI
+// load ambient context.
+var isolationCwdForbidden = []string{"CLAUDE.md", ".claude", ".mcp.json", "AGENTS.md", ".git"}
+
+// checkIsolationCwd verifies dir is an absolute existing directory holding
+// none of isolationCwdForbidden.
+func checkIsolationCwd(dir string) error {
+	if !filepath.IsAbs(dir) {
+		return fmt.Errorf("%w: %q is not absolute", ErrIsolationCwd, dir)
+	}
+	fi, err := os.Stat(dir)
+	if err != nil || !fi.IsDir() {
+		return fmt.Errorf("%w: %q is not an existing directory", ErrIsolationCwd, dir)
+	}
+	for _, name := range isolationCwdForbidden {
+		if _, err := os.Lstat(filepath.Join(dir, name)); err == nil {
+			return fmt.Errorf("%w: contains %s", ErrIsolationCwd, name)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%w: lstat %s: %v", ErrIsolationCwd, name, err)
+		}
+	}
+	return nil
+}
+
+// safeToolName makes a model-supplied tool name safe to embed in an error:
+// at most 64 bytes, only [A-Za-z0-9_.:-], anything else becomes '_'.
+func safeToolName(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		if b.Len() >= 64 {
+			break
+		}
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '.', r == ':', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
 }
 
 // ErrIsolationUnsupported is returned by RunPromptIsolated for any provider
@@ -128,6 +187,9 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 		return fmt.Errorf("taskrunner: task %d has no worktree (never materialized by CreateTask, or already archived)", taskID)
 	}
 	worktreePath := *task.WorktreePath
+	if err := checkIsolationCwd(worktreePath); err != nil {
+		return err
+	}
 
 	if model != "" {
 		if catalog, ok := r.ProviderCatalogFor(provider); ok {
@@ -154,16 +216,17 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 		claudecode.WithPermissionMode(ClaudeModePlan),
 		claudecode.WithExtraArgs(map[string]*string{"disable-slash-commands": nil}),
 	}
+	// One WithEnv: the SDK's option replaces the list on every call.
+	env := []string{claudeAiMcpEnv + "=false"}
 	cliPath, launchEnv, err := r.claudeLaunchSpec()
 	if err != nil {
 		return fmt.Errorf("taskrunner: claude code cli: %w", err)
 	}
 	if cliPath != "" {
 		opts = append(opts, claudecode.WithCLIPath(cliPath))
-		if len(launchEnv) > 0 {
-			opts = append(opts, claudecode.WithEnv(launchEnv...))
-		}
+		env = append(env, launchEnv...)
 	}
+	opts = append(opts, claudecode.WithEnv(env...))
 	if model != "" && model != ClaudeModelDefault {
 		opts = append(opts, claudecode.WithModel(model))
 	}
@@ -175,7 +238,13 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 	}
 	defer client.Close()
 
-	runCtx, cancel := context.WithCancel(ctx)
+	timeout := iso.Timeout
+	if timeout <= 0 {
+		timeout = defaultIsolatedTimeout
+	}
+	tctx, cancelTimeout := context.WithTimeout(ctx, timeout)
+	defer cancelTimeout()
+	runCtx, cancel := context.WithCancel(tctx)
 	defer cancel()
 
 	var (
@@ -201,7 +270,7 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 			for _, e := range claudeEvents(msg) {
 				mu.Lock()
 				if e.Type == EventTypeToolCall && !tripped {
-					tripped, violated = true, fmt.Sprintf("tool call %q", e.ToolName)
+					tripped, violated = true, "tool call "+safeToolName(e.ToolName)
 					cancel()
 				}
 				drop := tripped
@@ -226,11 +295,18 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 		didTrip, reason = true, "permission denied for a tool request"
 	}
 	if didTrip {
+		// Kill the CLI first: a slow consumer must not keep it alive while
+		// the final Done event waits for a reader.
+		client.Close()
 		select {
 		case events <- Event{Type: EventTypeDone, StopReason: isolationViolatedStop}:
 		case <-ctx.Done():
+		case <-time.After(2 * time.Second):
 		}
 		return fmt.Errorf("%w: %s", ErrIsolationViolated, reason)
+	}
+	if err != nil && tctx.Err() != nil && ctx.Err() == nil {
+		return fmt.Errorf("%w: timeout after %s", ErrIsolatedRunFailed, timeout)
 	}
 	if err != nil {
 		return fmt.Errorf("taskrunner: isolated claude code prompt: %w", err)
@@ -273,11 +349,18 @@ func clipBytes(s string, n int) string {
 	return s[:n]
 }
 
-// FinalText returns the text of the last assistant turn in events: the
+// FinalText returns "" when the final Done event has StopReason
+// isolation_violated. err != nil from RunPromptIsolated means discard every
+// event, whatever FinalText says.
+//
+// Otherwise it returns the text of the last assistant turn in events: the
 // contiguous EventTypeText chunks ending the stream, ignoring trailing
 // non-text events (usage, done). Any earlier non-text event (thinking, a
 // tool call) ends the turn's text. "" when there is none.
 func FinalText(events []Event) string {
+	if n := len(events); n > 0 && events[n-1].Type == EventTypeDone && events[n-1].StopReason == isolationViolatedStop {
+		return ""
+	}
 	end := len(events)
 	for end > 0 && events[end-1].Type != EventTypeText {
 		end--
