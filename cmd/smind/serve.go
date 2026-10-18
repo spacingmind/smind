@@ -169,6 +169,8 @@ func cmdServe(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	stopLearning := startLearning(ctx, cfg, db, wm, runner, srv.API().Runs)
+
 	for _, ln := range listeners {
 		go func() {
 			log.Printf("smind listening on http://%s", ln.Addr())
@@ -189,6 +191,7 @@ func cmdServe(args []string) int {
 	case <-srv.ShutdownSignal():
 	}
 
+	stopLearning() // before the run registry closes: in-flight jobs end failed, watermarks untouched
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
