@@ -40,7 +40,7 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
-	if _, err := db.Exec(schema); err != nil {
+	if err := applySchema(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
@@ -56,10 +56,40 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// applySchema runs schema.sql in ONE transaction. SQLite commits every statement
+// of an autocommit script separately, and each commit is several fsyncs and a
+// journal file created and deleted: about 40 commits for a fresh database, which
+// cost 0.8 s on a Windows CI disk (C:, ~20 ms per commit) against 0.03 s as one
+// transaction. It is also atomic: a failure leaves no half-created schema.
+func applySchema(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(schema); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SynchronousEnv, when set to off, normal, full or extra, sets SQLite's
+// `synchronous` pragma for every connection. It exists for test runs on disks
+// where a durable commit is slow (a Windows CI runner's C: drive: ~20 ms per
+// commit, so the DB-heavy test packages needed minutes and hit SQLITE_BUSY under
+// concurrent writers) and is NOT set by the daemon: unset, SQLite's default
+// (FULL) applies, exactly as before. Any other value is ignored.
+const SynchronousEnv = "SMIND_SQLITE_SYNCHRONOUS"
+
 func sqliteDSN(path string) string {
 	separator := "?"
 	if strings.Contains(path, "?") {
 		separator = "&"
 	}
-	return path + separator + "_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
+	dsn := path + separator + "_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
+	switch mode := strings.ToLower(os.Getenv(SynchronousEnv)); mode {
+	case "off", "normal", "full", "extra":
+		dsn += "&_pragma=synchronous(" + strings.ToUpper(mode) + ")"
+	}
+	return dsn
 }
