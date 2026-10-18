@@ -3,7 +3,6 @@ package service
 import (
 	"log/slog"
 
-	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -27,7 +26,8 @@ func (s *Service) setStatus(job *store.LearningJob, status string, mutate func(*
 	if mutate != nil {
 		mutate(job)
 	}
-	if status != statusQueued && status != statusRunning {
+	terminal := status != statusQueued && status != statusRunning
+	if terminal {
 		t := s.now()
 		job.FinishedAt = &t
 	}
@@ -36,6 +36,9 @@ func (s *Service) setStatus(job *store.LearningJob, status string, mutate func(*
 		return
 	}
 	s.d.Notify.NotifyJob(job.WorkspaceID, job.ID, status)
+	if terminal {
+		s.d.Notify.NotifyChanged(job.WorkspaceID, "job")
+	}
 }
 
 func (s *Service) skip(job *store.LearningJob, reason string) {
@@ -76,11 +79,6 @@ func (s *Service) runJob(jobID int64) {
 		return
 	}
 	s.reflect(&job, cw, cfg)
-}
-
-// reflect is the reflect pipeline (filled in by the next commit).
-func (s *Service) reflect(job *store.LearningJob, cw store.ChatWorkspace, cfg config.LearningConfig) {
-	s.skip(job, "pipeline_pending")
 }
 
 const maxErrorBytes = 200

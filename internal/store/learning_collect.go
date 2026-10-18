@@ -222,3 +222,33 @@ func (s *Store) GetWorkspaceByChat(chatID int64) (ChatWorkspace, error) {
 	cw.TaskKind = strings.TrimSpace(cw.TaskKind)
 	return cw, nil
 }
+
+// ListChatPriorHumanPrompts returns up to limit prompts, oldest first, of the
+// chat's human-origin user runs whose prompt was already reflected: the run
+// has an event at or before afterEventID. They are background context for
+// the next window, never evidence.
+func (s *Store) ListChatPriorHumanPrompts(chatID, afterEventID int64, limit int) ([]string, error) {
+	rows, err := s.db.Query(
+		`SELECT r.prompt `+windowRunScope+` AND r.origin = 'human'
+		   AND EXISTS (SELECT 1 FROM run_events e WHERE e.run_id = r.id AND e.id <= ?)
+		 ORDER BY r.started_at DESC, r.id DESC LIMIT ?`, chatID, afterEventID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list prior prompts of chat %d: %w", chatID, err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}

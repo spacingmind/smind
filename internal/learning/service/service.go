@@ -93,7 +93,8 @@ type Service struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	wg     sync.WaitGroup // jobs
+	loops  sync.WaitGroup // the event loop
 
 	// onJobStart, if set (tests), runs at the top of every job goroutine.
 	onJobStart func(jobID int64)
@@ -140,7 +141,7 @@ func (s *Service) Start(ctx context.Context) {
 		return
 	}
 	s.started = true
-	s.wg.Add(1)
+	s.loops.Add(1)
 	s.mu.Unlock()
 
 	if n, err := s.d.Store.FailInterruptedLearningJobs("interrupted by restart"); err != nil {
@@ -165,6 +166,7 @@ func (s *Service) Close() {
 	s.closing = true
 	s.mu.Unlock()
 	s.cancel()
+	s.loops.Wait()
 	s.wg.Wait()
 }
 
@@ -180,7 +182,7 @@ func (s *Service) OnRunFinished(f runs.RunFinished) {
 }
 
 func (s *Service) loop() {
-	defer s.wg.Done()
+	defer s.loops.Done()
 	tick := time.NewTicker(s.d.TailEvery)
 	defer tick.Stop()
 	for {

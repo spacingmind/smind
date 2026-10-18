@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/learning/executor"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -52,6 +53,8 @@ func TestCollector_CadenceAt50ToolCalls(t *testing.T) {
 func TestCollector_ExplicitTriggerBypassesCooldown(t *testing.T) {
 	f := newFx(t, "propose")
 	f.addRun(f.chat, "hello", textEv("x"))
+	// The cadence job ends retryable (busy executor): pending is kept.
+	f.exec.fn = func(executor.Request) (executor.Result, error) { return executor.Result{}, executor.ErrBusy }
 	f.finished(f.chat, "claude-native", 50) // cadence job -> starts the cool-down
 	if len(f.jobs()) != 1 {
 		t.Fatalf("jobs = %d, want 1", len(f.jobs()))

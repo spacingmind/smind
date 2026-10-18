@@ -322,3 +322,34 @@ func TestGetWorkspaceByChat(t *testing.T) {
 		t.Fatal("unknown chat: want error")
 	}
 }
+
+func TestListChatPriorHumanPrompts(t *testing.T) {
+	t.Parallel()
+	f := newCollectFixture(t, "propose")
+	for i, id := range []string{"a", "b", "c", "d"} {
+		ev := f.run(t, id, f.chat.ID, f.task.ID, collectBase.Add(time.Duration(i)*time.Minute), nil, "done", "user", 1)
+		origin := "human"
+		if id == "b" {
+			origin = "orchestrator"
+		}
+		if _, err := f.s.db.Exec(`UPDATE runs SET origin = ? WHERE id = ?`, origin, id); err != nil {
+			t.Fatal(err)
+		}
+		_ = ev
+	}
+	var lastC int64
+	if evs, _ := f.s.ListRunEvents("c"); len(evs) == 1 {
+		lastC = evs[0].ID
+	}
+	// Reflected through run c: a (human), b (orchestrator, excluded), c (human); d is not.
+	got, err := f.s.ListChatPriorHumanPrompts(f.chat.ID, lastC, 10)
+	if err != nil || len(got) != 2 || got[0] != "p-a" || got[1] != "p-c" {
+		t.Fatalf("prompts = %v, %v", got, err)
+	}
+	if got, _ := f.s.ListChatPriorHumanPrompts(f.chat.ID, lastC, 1); len(got) != 1 || got[0] != "p-c" {
+		t.Fatalf("limit 1 = %v", got)
+	}
+	if got, _ := f.s.ListChatPriorHumanPrompts(f.chat.ID, 0, 10); len(got) != 0 {
+		t.Fatalf("nothing reflected = %v", got)
+	}
+}
