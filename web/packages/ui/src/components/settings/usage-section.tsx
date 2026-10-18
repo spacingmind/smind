@@ -74,10 +74,10 @@ function BlockTitle({ title, description, actions }: { title: string; descriptio
  * container -- it renders the same in the in-shell Settings, the full-screen
  * Settings screen's framed view and its narrow detail page (AC67). While it
  * is mounted it is a touching surface (one `touch` on open, then at most one
- * per TTL while the window is visible and focused); see useAccountUsage.
+ * per TTL while the window is visible and focused); see useUsageReports.
  */
-function PlanUsageBlock({ client, events }: SettingsSectionContext) {
-  const surface = useUsageSurface(client, events, { touch: true });
+function PlanUsageBlock() {
+  const surface = useUsageSurface({ touch: true });
   return (
     <section className="flex flex-col gap-3" data-testid="settings-plan-usage">
       <BlockTitle
@@ -107,7 +107,7 @@ function PlanUsageBlock({ client, events }: SettingsSectionContext) {
  * an em dash, and cost is an em dash when null or the row came from the
  * proxy (which reports no cost).
  */
-function UsageSection({ client, events }: SettingsSectionContext) {
+function UsageSection({ client }: SettingsSectionContext) {
   const [scope, setScope] = useState<UsageScope>("runs");
   const [groupBy, setGroupBy] = useState<UsageGroupBy>("task");
   const [range, setRange] = useState<UsageRange>("7d");
@@ -199,7 +199,7 @@ function UsageSection({ client, events }: SettingsSectionContext) {
 
   return (
     <div className="flex flex-col gap-8" data-testid="settings-section-usage">
-      <PlanUsageBlock client={client} events={events} />
+      <PlanUsageBlock />
       <section className="flex flex-col gap-3" data-testid="settings-token-usage">
         <BlockTitle
           title="Token usage"

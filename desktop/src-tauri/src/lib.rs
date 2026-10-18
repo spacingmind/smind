@@ -33,7 +33,10 @@ mod probe;
 mod ssh_tunnel;
 mod state;
 mod tray;
-mod updater;
+// `pub` (hidden) so the updater e2e integration test (tests/updater_e2e.rs)
+// can drive the same cores the commands call.
+#[doc(hidden)]
+pub mod updater;
 mod window_chrome;
 #[cfg(test)]
 mod capability_tests;
@@ -53,7 +56,7 @@ pub fn run() {
     // ADR-0023: updater plugin on macOS/Windows only; Linux (deb) has no
     // updater. Its JS-facing permissions are never granted.
     #[cfg(any(target_os = "macos", target_os = "windows"))]
-    let builder = builder.plugin(updater_plugin());
+    let builder = builder.plugin(updater::updater_plugin());
     builder
         // AC2: single instance must be registered before anything that
         // creates windows or tray icons.
@@ -114,6 +117,7 @@ pub fn run() {
             app_settings::app_settings_get,
             app_settings::app_settings_set,
             commands::connections_relay_status,
+            commands::connections_unsupported,
             commands::connections_relay_set_password,
             commands::connections_remove,
             commands::connections_select,
@@ -351,17 +355,6 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building smind desktop")
         .run(lifecycle::handle_run_event);
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn updater_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry, tauri_plugin_updater::Config> {
-    // ADR-0023.3: a candidate is offered only if strictly newer than the
-    // running version AND a stable release (no pre-release part).
-    tauri_plugin_updater::Builder::new()
-        .default_version_comparator(|current, update| {
-            crate::updater::is_offerable(&current.to_string(), &update.version.to_string())
-        })
-        .build()
 }
 
 fn toggle_main(app: &tauri::AppHandle) {

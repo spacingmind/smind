@@ -6,6 +6,8 @@ import { registerSettingsSection } from "@/components/settings/settings-registry
 import { SettingsScreen } from "@/components/settings/settings-screen";
 import { readStoredThemePreference } from "@/lib/theme";
 import { FakeWsClient } from "@/test/fake-ws-client";
+import { FakeUsageDaemon } from "@/test/usage-test-client";
+import { renderWithDaemon } from "@/test/render-with-daemon";
 
 async function flush(): Promise<void> {
   await act(async () => {
@@ -15,12 +17,14 @@ async function flush(): Promise<void> {
 }
 
 function renderScreen(client = new FakeWsClient(), initialSectionId?: string) {
-  render(
+  const daemon = new FakeUsageDaemon([], client);
+  renderWithDaemon(
     <SettingsScreen
-      client={client as never}
+      client={daemon.client as never}
       onNavigateBack={() => {}}
       initialSectionId={initialSectionId}
     />,
+    daemon,
   );
   return client;
 }

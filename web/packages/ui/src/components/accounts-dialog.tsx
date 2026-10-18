@@ -1,5 +1,8 @@
 import { Icons } from "@/lib/icons";
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { useAccounts, useProviderTestResult, useRunProviderTest } from "@/hooks/use-accounts";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -21,7 +24,9 @@ import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
 import { externalLinkProps, openExternalUrl } from "@/lib/external-link";
 import { isDesktop } from "@/lib/platform";
 import type { Account, ProviderInfo, ProviderListResult, ProviderTestResult } from "@/lib/types";
+
 import type { WsClient } from "@/lib/ws-client";
+import { queryKeys } from "@/lib/query-keys";
 
 /**
  * This dialog used to source its Connect buttons and manual-add dropdown
@@ -392,33 +397,14 @@ export function ConnectAccountPanel({
 }
 
 /**
- * useProviderTest runs the provider.test diagnostic on demand and tracks
- * per-provider results/pending state -- the shared "Test" flow behind both
- * the old Accounts dialog's rows and Settings -> Providers' rows. Returns
- * the call function plus the two maps (undefined result = never tested,
- * the neutral dot).
+ * One row's provider.test state, from the shared cache (ADR-0032): the
+ * cached result plus the pending flag of the run-mutation, replacing the
+ * per-dialog `useProviderTest` state.
  */
-export function useProviderTest(client: WsClient | null) {
-  const [testResults, setTestResults] = useState<Record<string, ProviderTestResult>>({});
-  const [testing, setTesting] = useState<Record<string, boolean>>({});
-
-  async function testProvider(providerId: string) {
-    if (!client) return;
-    setTesting((t) => ({ ...t, [providerId]: true }));
-    try {
-      const result = await client.call<ProviderTestResult>("provider.test", { provider: providerId });
-      setTestResults((r) => ({ ...r, [providerId]: result }));
-    } catch (err) {
-      setTestResults((r) => ({
-        ...r,
-        [providerId]: { ok: false, detail: err instanceof Error ? err.message : String(err) },
-      }));
-    } finally {
-      setTesting((t) => ({ ...t, [providerId]: false }));
-    }
-  }
-
-  return { testResults, testing, testProvider };
+function useRowTest(providerKey: string) {
+  const result = useProviderTestResult(providerKey);
+  const { isTesting } = useRunProviderTest();
+  return { result, testing: isTesting(providerKey) };
 }
 
 /**
@@ -437,7 +423,9 @@ export function AccountsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const [accounts, setAccounts] = useState<Account[] | null>(null);
+  const queryClient = useQueryClient();
+  const accountsQuery = useAccounts();
+  const accounts = accountsQuery.data;
   // The daemon's full provider catalog (internal/taskrunner.SupportedProviders,
   // served by provider.list) -- every row this dialog renders (managed-
   // externally, Connect buttons, manual-add dropdown) derives from this,
@@ -445,25 +433,16 @@ export function AccountsDialog({
   // above for the accountProvider indirection and its known gap.
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const { testResults, testing, testProvider } = useProviderTest(client);
+
+  useEffect(() => {
+    if (accountsQuery.error) {
+      setError(accountsQuery.error instanceof Error ? accountsQuery.error.message : String(accountsQuery.error));
+    }
+  }, [accountsQuery.error]);
 
   const externalProviders = providers.filter((p) => p.kind === "cli");
 
-  async function refresh() {
-    if (!client) return;
-    try {
-      const list = (await client.call<Account[]>("account.list")) ?? [];
-      setAccounts(list);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  useEffect(() => {
-    if (open) void refresh();
-  }, [open, client]);
-
-  // Separately fetch provider.list -- kept out of `refresh()` since it's a
+  // Separately fetch provider.list -- kept out of the account list since it's a
   // different RPC feeding purely display/config-driven sections, not the
   // account list itself. Non-fatal on failure (falls back to showing none
   // of the derived sections) since it's not the primary content of this
@@ -494,7 +473,7 @@ export function AccountsDialog({
         </DialogHeader>
         {error && <p className="text-ui-base text-destructive">{error}</p>}
         <div className="max-h-40 overflow-y-auto">
-          {accounts === null ? (
+          {accounts === undefined ? (
             <p className="text-ui-base text-muted-foreground">Loading…</p>
           ) : accounts.length === 0 ? (
             <p className="text-ui-base text-muted-foreground">
@@ -503,37 +482,7 @@ export function AccountsDialog({
           ) : (
             <ul className="grid gap-1 text-ui-base">
               {accounts.map((a) => (
-                <li key={a.id} className="flex flex-col gap-1 rounded-md px-2 py-1 hover:bg-hover" data-testid={`accounts-row-${a.provider}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <StatusDot result={testResults[a.provider]} />
-                      <span className="min-w-0 truncate font-medium">{a.label}</span>
-                    </span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">
-                        {providerLabel(providers, a.provider)} · {a.credentialType}
-                      </span>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="xs"
-                        disabled={testing[a.provider]}
-                        data-testid={`accounts-test-${a.provider}`}
-                        onClick={() => void testProvider(a.provider)}
-                      >
-                        {testing[a.provider] ? "Testing…" : "Test"}
-                      </Button>
-                    </span>
-                  </div>
-                  {testResults[a.provider] && (
-                    <p
-                      className={`pl-3.5 text-ui-sm ${testResults[a.provider].ok ? "text-success" : "text-destructive"}`}
-                      data-testid={`accounts-test-result-${a.provider}`}
-                    >
-                      {testResults[a.provider].detail}
-                    </p>
-                  )}
-                </li>
+                <AccountListRow key={a.id} account={a} providers={providers} />
               ))}
             </ul>
           )}
@@ -544,41 +493,7 @@ export function AccountsDialog({
             <p className="text-ui-base font-medium">Managed externally</p>
             <ul className="grid gap-1 text-ui-base">
               {externalProviders.map((p) => (
-                <li
-                  key={p.id}
-                  className="flex flex-col gap-1 rounded-md px-2 py-1"
-                  data-testid={`accounts-external-provider-${p.id}`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <StatusDot result={testResults[p.id]} />
-                      <span className="min-w-0 truncate font-medium">{p.label ?? p.id}</span>
-                    </span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">
-                        Managed externally via CLI
-                      </span>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="xs"
-                        disabled={testing[p.id]}
-                        data-testid={`accounts-test-${p.id}`}
-                        onClick={() => void testProvider(p.id)}
-                      >
-                        {testing[p.id] ? "Testing…" : "Test"}
-                      </Button>
-                    </span>
-                  </div>
-                  {testResults[p.id] && (
-                    <p
-                      className={`pl-3.5 text-ui-sm ${testResults[p.id].ok ? "text-success" : "text-destructive"}`}
-                      data-testid={`accounts-test-result-${p.id}`}
-                    >
-                      {testResults[p.id].detail}
-                    </p>
-                  )}
-                </li>
+                <ExternalProviderRow key={p.id} provider={p} />
               ))}
             </ul>
             <p className="text-ui-sm text-muted-foreground">
@@ -591,9 +506,87 @@ export function AccountsDialog({
         <ConnectAccountPanel
           client={client}
           providers={providers}
-          onConnected={() => void refresh()}
+          onConnected={() => void queryClient.invalidateQueries({ queryKey: queryKeys.accountList() })}
         />
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** One account row: the label (provider.list's name for its provider), a Test button and the cached test result. */
+function AccountListRow({ account, providers }: { account: Account; providers: ProviderInfo[] }) {
+  const { result, testing } = useRowTest(account.provider);
+  return (
+    <li key={account.id} className="flex flex-col gap-1 rounded-md px-2 py-1 hover:bg-hover" data-testid={`accounts-row-${account.provider}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <StatusDot result={result} />
+          <span className="min-w-0 truncate font-medium">{account.label}</span>
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">
+            {providerLabel(providers, account.provider)} · {account.credentialType}
+          </span>
+          <TestRowButton providerId={account.provider} testing={testing} />
+        </span>
+      </div>
+      {result && (
+        <p
+          className={`pl-3.5 text-ui-sm ${result.ok ? "text-success" : "text-destructive"}`}
+          data-testid={`accounts-test-result-${account.provider}`}
+        >
+          {result.detail}
+        </p>
+      )}
+    </li>
+  );
+}
+
+/** One cli-kind provider row: its cached test state and a Test button, like the account rows. */
+function ExternalProviderRow({ provider }: { provider: ProviderInfo }) {
+  const { result, testing } = useRowTest(provider.id);
+  return (
+    <li
+      key={provider.id}
+      className="flex flex-col gap-1 rounded-md px-2 py-1"
+      data-testid={`accounts-external-provider-${provider.id}`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <StatusDot result={result} />
+          <span className="min-w-0 truncate font-medium">{provider.label ?? provider.id}</span>
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">
+            Managed externally via CLI
+          </span>
+          <TestRowButton providerId={provider.id} testing={testing} />
+        </span>
+      </div>
+      {result && (
+        <p
+          className={`pl-3.5 text-ui-sm ${result.ok ? "text-success" : "text-destructive"}`}
+          data-testid={`accounts-test-result-${provider.id}`}
+        >
+          {result.detail}
+        </p>
+      )}
+    </li>
+  );
+}
+
+function TestRowButton({ providerId, testing }: { providerId: string; testing: boolean }) {
+  const { runTest } = useRunProviderTest();
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="xs"
+      disabled={testing}
+      data-testid={`accounts-test-${providerId}`}
+      onClick={() => runTest(providerId)}
+    >
+      {testing ? "Testing…" : "Test"}
+    </Button>
   );
 }

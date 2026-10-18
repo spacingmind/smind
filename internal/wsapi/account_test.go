@@ -422,3 +422,51 @@ func TestAccount_ModelsRoundTrip(t *testing.T) {
 		t.Fatalf("cleared models = %v, want empty", cleared.Models)
 	}
 }
+
+// TestAccount_ListExposesHasIdentityNeverIdentity: account.list tells the UI
+// whether a row carries a stable identity (ADR-0033 D6) as a boolean, and the
+// identity itself never reaches the wire -- asserted on the raw JSON.
+func TestAccount_ListExposesHasIdentityNeverIdentity(t *testing.T) {
+	t.Parallel()
+	srv, registry, _ := newAccountTestServer(t)
+	ws := dialWS(t, srv, "tok")
+
+	identity := accounts.AccountIdentity("anthropic", "vendor-subject-1")
+	withIdentity, err := registry.AddOAuthWithIdentity("anthropic", "has-identity", accounts.OAuthCredential{AccessToken: "a", RefreshToken: "r"}, identity)
+	if err != nil {
+		t.Fatalf("AddOAuthWithIdentity() error = %v", err)
+	}
+	plain, err := registry.AddAPIKey("anthropic", "plain", "sk-ant-plain")
+	if err != nil {
+		t.Fatalf("AddAPIKey() error = %v", err)
+	}
+
+	sendRequest(t, ws, "list", "account.list", nil)
+	resp := readEnvelopeFor(t, ws, "list", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("account.list error = %v", resp.Error.Message)
+	}
+	if bytes.Contains(resp.Result, []byte(`"identity"`)) || bytes.Contains(resp.Result, []byte(identity)) || bytes.Contains(resp.Result, []byte("vendor-subject-1")) {
+		t.Fatalf("account.list leaks the identity: %s", resp.Result)
+	}
+	var listed []accountResult
+	mustDecode(t, resp.Result, &listed)
+	if len(listed) != 2 {
+		t.Fatalf("account.list = %s, want 2 accounts", resp.Result)
+	}
+	for _, a := range listed {
+		switch a.ID {
+		case withIdentity.ID:
+			if !a.HasIdentity {
+				t.Errorf("account %d hasIdentity = false, want true", a.ID)
+			}
+		case plain.ID:
+			if a.HasIdentity {
+				t.Errorf("account %d hasIdentity = true, want false", a.ID)
+			}
+		}
+	}
+	if !bytes.Contains(resp.Result, []byte(`"hasIdentity":true`)) || !bytes.Contains(resp.Result, []byte(`"hasIdentity":false`)) {
+		t.Fatalf("account.list = %s, want the hasIdentity key on every row", resp.Result)
+	}
+}

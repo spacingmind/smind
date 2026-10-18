@@ -1,5 +1,5 @@
 import { act } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
@@ -24,10 +24,12 @@ async function startLogin(isDesktop: boolean) {
   vi.doMock("@/lib/platform", () => ({ isDesktop, desktop: { openExternal } }));
   const open = vi.spyOn(window, "open").mockReturnValue(null);
   const { AccountsDialog } = await import("@/components/accounts-dialog");
+  const { renderWithDaemon } = await import("@/test/render-with-daemon");
+  const { FakeUsageDaemon } = await import("@/test/usage-test-client");
 
   const client = new FakeWsClient();
-  render(<AccountsDialog client={client as never} open onOpenChange={() => {}} />);
-  client.nth("account.list", 0).resolve([]);
+  const daemon = new FakeUsageDaemon([], client);
+  renderWithDaemon(<AccountsDialog client={daemon.client as never} open onOpenChange={() => {}} />, daemon);
   client.nth("provider.list").resolve(PROVIDERS);
   await flush();
 

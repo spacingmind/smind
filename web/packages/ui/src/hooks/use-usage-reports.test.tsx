@@ -1,7 +1,11 @@
-import { act, renderHook } from "@testing-library/react";
+import { act } from "@testing-library/react";
+import type { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useAccountUsage } from "@/hooks/use-account-usage";
+import { useUsageReports } from "@/hooks/use-usage-reports";
+import { createQueryClient } from "@/lib/query/query-client";
+import { ConnectionClosedError } from "@/lib/ws-client";
+import { renderHookWithDaemon } from "@/test/render-with-daemon";
 import { claudeAccount, codexAccount } from "@/test/account-usage-fixtures";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 
@@ -33,9 +37,10 @@ async function advance(ms: number): Promise<void> {
   });
 }
 
-function mount(daemon: FakeUsageDaemon, touch: boolean) {
-  return renderHook(({ touch }) => useAccountUsage(daemon.client, daemon.events, { touch }), {
+function mount(daemon: FakeUsageDaemon, touch: boolean, queryClient?: QueryClient) {
+  return renderHookWithDaemon(({ touch }) => useUsageReports({ touch }), daemon, {
     initialProps: { touch },
+    queryClient,
   });
 }
 
@@ -64,7 +69,7 @@ describe("call discipline (AC54)", () => {
     const daemon = new FakeUsageDaemon([claudeAccount()]);
     const { rerender } = mount(daemon, false);
     await flush();
-    rerender({ touch: false });
+    rerender({ props: { touch: false } });
     await advance(TTL_MS * 3);
     expect(daemon.modes()).toEqual(["cached"]);
   });
@@ -137,11 +142,12 @@ describe("call discipline (AC54)", () => {
 
   it("closing and reopening within the TTL sends no second touch", async () => {
     const daemon = new FakeUsageDaemon([claudeAccount()]);
-    const first = mount(daemon, true);
+    const queryClient = createQueryClient();
+    const first = mount(daemon, true, queryClient);
     await flush();
     first.unmount();
     await advance(10_000);
-    mount(daemon, true);
+    mount(daemon, true, queryClient);
     await flush();
     expect(daemon.count("touch")).toBe(1);
   });
@@ -149,29 +155,87 @@ describe("call discipline (AC54)", () => {
   it("reconnect_relists_with_cached_mode", async () => {
     const first = new FakeUsageDaemon([claudeAccount()]);
     const second = new FakeUsageDaemon([claudeAccount()]);
-    const { rerender } = renderHook(
-      ({ d }) => useAccountUsage(d.client, d.events, { touch: false }),
-      { initialProps: { d: first } },
-    );
+    const { rerender } = renderHookWithDaemon(() => useUsageReports({ touch: false }), first, { initialProps: null });
     await flush();
-    rerender({ d: second });
+    rerender({ daemon: second });
     await flush();
     expect(first.modes()).toEqual(["cached"]);
     expect(second.modes()).toEqual(["cached"]);
   });
 
+  it("a reconnect to the same daemon keeps the reports on screen while it re-reads cached", async () => {
+    const first = new FakeUsageDaemon([claudeAccount()]);
+    const second = new FakeUsageDaemon([claudeAccount()]);
+    const { result, rerender } = renderHookWithDaemon(() => useUsageReports({ touch: false }), first, { initialProps: null });
+    await flush();
+    expect(result.current.snapshot.reports).toHaveLength(1);
+
+    rerender({ daemon: second });
+    // No loading flash: the cache survived the transport swap and shows until the re-read lands.
+    expect(result.current.snapshot.phase).toBe("ready");
+    expect(result.current.snapshot.reports).toHaveLength(1);
+    await flush();
+    expect(second.modes()).toEqual(["cached"]);
+    expect(second.count("touch") + second.count("refresh")).toBe(0);
+  });
+
+  it("a reconnect never sends a touch by itself, even when the TTL has already elapsed", async () => {
+    const first = new FakeUsageDaemon([claudeAccount()]);
+    const second = new FakeUsageDaemon([claudeAccount()]);
+    const { rerender } = renderHookWithDaemon(() => useUsageReports({ touch: true }), first, { initialProps: null });
+    await flush();
+    expect(first.modes()).toEqual(["touch"]);
+
+    // The clock jumps past the TTL without a timer firing (a sleeping laptop), then the socket is swapped.
+    vi.setSystemTime(Date.now() + TTL_MS + 5_000);
+    rerender({ daemon: second });
+    await flush();
+    expect(second.modes()).toEqual(["cached"]);
+
+    // The cadence resumes on its own timer, once.
+    await advance(TTL_MS);
+    expect(second.modes()).toEqual(["cached", "touch"]);
+  });
+
+  it("a touch that never left a closed socket does not burn the TTL", async () => {
+    const first = new FakeUsageDaemon([claudeAccount()]);
+    first.failWith = new ConnectionClosedError("wsclient: connection closed");
+    const { rerender } = renderHookWithDaemon(() => useUsageReports({ touch: true }), first, { initialProps: null });
+    await flush();
+    const second = new FakeUsageDaemon([claudeAccount()]);
+    rerender({ daemon: second });
+    await flush();
+    // The first touch failed at once on a dead socket; the TTL clock was not started by it, so the
+    // next window event on the live connection may touch.
+    setWindow({ focused: false });
+    setWindow({ focused: true });
+    await flush();
+    expect(second.count("touch")).toBe(1);
+  });
+
+  it("two touching surfaces mounting together send one touch", async () => {
+    const daemon = new FakeUsageDaemon([claudeAccount()]);
+    renderHookWithDaemon(
+      () => {
+        useUsageReports({ touch: true });
+        useUsageReports({ touch: true });
+      },
+      daemon,
+      { initialProps: null },
+    );
+    await flush();
+    expect(daemon.modes()).toEqual(["touch"]);
+  });
+
   it("a reconnect while a touching surface is open re-lists as cached and keeps counting the TTL", async () => {
     const first = new FakeUsageDaemon([claudeAccount()]);
     const second = new FakeUsageDaemon([claudeAccount()]);
-    const { rerender } = renderHook(
-      ({ d }) => useAccountUsage(d.client, d.events, { touch: true }),
-      { initialProps: { d: first } },
-    );
+    const { rerender } = renderHookWithDaemon(() => useUsageReports({ touch: true }), first, { initialProps: null });
     await flush();
     expect(first.modes()).toEqual(["touch"]);
 
     await advance(60_000);
-    rerender({ d: second });
+    rerender({ daemon: second });
     await flush();
     expect(second.modes()).toEqual(["cached"]);
 
@@ -191,7 +255,7 @@ describe("call discipline (AC54)", () => {
     await advance(TTL_MS * 3);
     expect(daemon.requests).toHaveLength(1);
     await act(async () => {
-      await result.current.store?.refreshAll();
+      await result.current.refreshAll();
     });
     expect(daemon.requests).toHaveLength(1);
   });
@@ -216,7 +280,7 @@ describe("refresh", () => {
     expect(daemon.count("refresh")).toBe(0);
 
     await act(async () => {
-      await result.current.store!.refreshOne(2);
+      await result.current.refreshOne(2);
     });
     expect(daemon.requests.at(-1)).toEqual({ accountIds: [2], mode: "refresh" });
     expect(daemon.count("refresh")).toBe(1);
@@ -227,7 +291,7 @@ describe("refresh", () => {
     const { result } = mount(daemon, false);
     await flush();
     await act(async () => {
-      await result.current.store!.refreshAll();
+      await result.current.refreshAll();
     });
     expect(daemon.requests.at(-1)).toEqual({ mode: "refresh" });
     expect(daemon.count("refresh")).toBe(1);
@@ -239,7 +303,7 @@ describe("refresh", () => {
     await flush();
     daemon.failWith = new Error("boom");
     await act(async () => {
-      await result.current.store!.refreshOne(1);
+      await result.current.refreshOne(1);
     });
     expect(result.current.snapshot.failed.has(1)).toBe(true);
     expect(result.current.snapshot.reports[0]?.report?.status).toBe("available");
@@ -250,16 +314,53 @@ describe("refresh", () => {
     const daemon = new FakeUsageDaemon([claudeAccount()]);
     const { result } = mount(daemon, false);
     await flush();
-    let done: Promise<void>;
-    act(() => {
-      done = result.current.store!.refreshOne(1);
+    let release!: () => void;
+    daemon.gate = new Promise<void>((resolve) => (release = resolve));
+    let done!: Promise<void>;
+    await act(async () => {
+      done = result.current.refreshOne(1);
     });
     expect(result.current.snapshot.refreshing.has(1)).toBe(true);
+    expect(result.current.snapshot.refreshingAll).toBe(false);
     expect(result.current.snapshot.pressedAt[1]).toBeTypeOf("number");
     await act(async () => {
+      release();
       await done;
     });
     expect(result.current.snapshot.refreshing.has(1)).toBe(false);
+  });
+
+  it("refresh all marks every account refreshing and stays per connection", async () => {
+    const daemon = new FakeUsageDaemon([claudeAccount(), codexAccount()]);
+    const { result } = mount(daemon, false);
+    await flush();
+    let release!: () => void;
+    daemon.gate = new Promise<void>((resolve) => (release = resolve));
+    let done!: Promise<void>;
+    await act(async () => {
+      done = result.current.refreshAll();
+    });
+    expect(result.current.snapshot.refreshingAll).toBe(true);
+    expect([...result.current.snapshot.refreshing].sort()).toEqual([1, 2]);
+    await act(async () => {
+      release();
+      await done;
+    });
+    expect(result.current.snapshot.refreshingAll).toBe(false);
+  });
+
+  it("a newer report clears a failed refresh", async () => {
+    const daemon = new FakeUsageDaemon([claudeAccount()]);
+    const { result } = mount(daemon, false);
+    await flush();
+    daemon.failWith = new Error("boom");
+    await act(async () => {
+      await result.current.refreshOne(1);
+    });
+    expect(result.current.snapshot.failed.has(1)).toBe(true);
+    const fresher = claudeAccount({ report: { ...claudeAccount().report!, fetchedAt: "2026-10-12T12:05:00Z" } });
+    await act(async () => daemon.emit("account.usage", { usage: fresher }));
+    expect(result.current.snapshot.failed.has(1)).toBe(false);
   });
 });
 
@@ -271,20 +372,34 @@ describe("live events", () => {
     const requests = daemon.requests.length;
 
     const fresher = claudeAccount({ report: { ...claudeAccount().report!, fetchedAt: "2026-10-12T12:05:00Z", windows: [{ id: "five_hour", label: "5-hour", usedPct: 80, remainingPct: 20 }] } });
-    act(() => daemon.emit("account.usage", { usage: fresher }));
+    await act(async () => daemon.emit("account.usage", { usage: fresher }));
     expect(result.current.snapshot.reports.find((r) => r.accountId === 1)?.report?.windows?.[0]?.usedPct).toBe(80);
 
-    act(() => daemon.emit("account.removed", { id: 2 }));
+    await act(async () => daemon.emit("account.removed", { id: 2 }));
     expect(result.current.snapshot.reports.map((r) => r.accountId)).toEqual([1]);
     expect(daemon.requests).toHaveLength(requests);
   });
 
-  it("ignores an event for an account it does not know", async () => {
+  it("an event for an account nothing knows settles with one cached read, never a touch (no ghost accounts)", async () => {
     const daemon = new FakeUsageDaemon([claudeAccount()]);
     const { result } = mount(daemon, false);
     await flush();
-    act(() => daemon.emit("account.usage", { usage: codexAccount() }));
+    await act(async () => daemon.emit("account.usage", { usage: codexAccount() }));
+    await flush();
+    // The daemon's own list (one account) wins: a report for an unknown account is not resurrected from the event alone.
     expect(result.current.snapshot.reports.map((r) => r.accountId)).toEqual([1]);
+    expect(daemon.modes()).toEqual(["cached", "cached"]);
+  });
+
+  it("a new account appears in plan usage without reload (ADR-0032 AC8)", async () => {
+    const daemon = new FakeUsageDaemon([claudeAccount()]);
+    const { result } = mount(daemon, false);
+    await flush();
+    daemon.reports = [claudeAccount(), codexAccount()];
+    await act(async () => daemon.emit("account.updated", { account: { id: 2, provider: "openai", label: "codex", credentialType: "oauth", createdAt: "", updatedAt: "" } }));
+    await flush();
+    expect(result.current.snapshot.reports.map((r) => r.accountId)).toEqual([1, 2]);
+    expect(daemon.count("touch") + daemon.count("refresh")).toBe(0);
   });
 
   it("older_fetchedat_never_replaces_newer (a refresh racing an event)", async () => {
@@ -293,8 +408,8 @@ describe("live events", () => {
     await flush();
     const newer = claudeAccount({ report: { ...claudeAccount().report!, fetchedAt: "2026-10-12T12:30:00Z", planLabel: "newer" } });
     const older = claudeAccount({ report: { ...claudeAccount().report!, fetchedAt: "2026-10-12T12:10:00Z", planLabel: "older" } });
-    act(() => daemon.emit("account.usage", { usage: newer }));
-    act(() => daemon.emit("account.usage", { usage: older }));
+    await act(async () => daemon.emit("account.usage", { usage: newer }));
+    await act(async () => daemon.emit("account.usage", { usage: older }));
     expect(result.current.snapshot.reports[0]?.report?.planLabel).toBe("newer");
   });
 
@@ -302,7 +417,7 @@ describe("live events", () => {
     const daemon = new FakeUsageDaemon([claudeAccount()]);
     const { result } = mount(daemon, false);
     await flush();
-    act(() => {
+    await act(async () => {
       daemon.emit("account.usage", null);
       daemon.emit("account.usage", { usage: 3 });
       daemon.emit("account.removed", { id: "x" });

@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -842,4 +843,86 @@ func TestMigrate_RunProvenanceColumns(t *testing.T) {
 		}
 		s.Close()
 	}
+}
+
+// TestMigrate_AccountsIdentity: a database whose accounts table predates
+// accounts.identity (ADR-0033 D6) gets the column and the partial unique
+// index on Open, keeps every row, and reads the old rows back with no
+// identity.
+func TestMigrate_AccountsIdentity(t *testing.T) {
+	t.Parallel()
+
+	t.Run("identity migration keeps existing rows null", func(t *testing.T) {
+		t.Parallel()
+
+		path := filepath.Join(t.TempDir(), "old-accounts-identity.db")
+		db, err := sql.Open("sqlite", sqliteDSN(path))
+		if err != nil {
+			t.Fatalf("open raw db error = %v", err)
+		}
+		now := time.Now().UTC().Truncate(time.Second)
+		if _, err := db.Exec(`CREATE TABLE accounts (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, label TEXT NOT NULL,
+			credential_type TEXT NOT NULL, credential_data TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, models TEXT)`); err != nil {
+			t.Fatalf("create old accounts table: %v", err)
+		}
+		for i, label := range []string{"one", "two"} {
+			if _, err := db.Exec(
+				`INSERT INTO accounts (id, provider, label, credential_type, credential_data, models, created_at, updated_at)
+				 VALUES (?, 'anthropic', ?, 'oauth', '{"k":"v"}', '["claude-*"]', ?, ?)`, i+1, label, now, now,
+			); err != nil {
+				t.Fatalf("seed old account: %v", err)
+			}
+		}
+		db.Close()
+
+		for i := 0; i < 2; i++ { // second Open proves idempotence
+			s, err := Open(path)
+			if err != nil {
+				t.Fatalf("Open() #%d error = %v", i, err)
+			}
+			accts, err := s.ListAccounts()
+			if err != nil {
+				t.Fatalf("ListAccounts() error = %v", err)
+			}
+			if len(accts) != 2 {
+				t.Fatalf("accounts = %d, want 2 kept", len(accts))
+			}
+			for _, a := range accts {
+				if a.Identity != "" || a.Models != `["claude-*"]` || a.CredentialData != `{"k":"v"}` {
+					t.Fatalf("migrated account = %+v, want intact row with no identity", a)
+				}
+			}
+			var nulls int
+			if err := s.db.QueryRow(`SELECT COUNT(*) FROM accounts WHERE identity IS NULL`).Scan(&nulls); err != nil || nulls != 2 {
+				t.Fatalf("identity IS NULL rows = %d, err = %v, want 2", nulls, err)
+			}
+			var idx int
+			if err := s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_accounts_provider_identity'`).Scan(&idx); err != nil || idx != 1 {
+				t.Fatalf("identity index count = %d, err = %v, want 1", idx, err)
+			}
+
+			// Many NULLs coexist (the two old rows); a duplicate
+			// (provider, identity) is rejected, a different provider is not.
+			if _, err := s.SetAccountIdentity(1, "id-a"); err != nil {
+				t.Fatalf("SetAccountIdentity(1) error = %v", err)
+			}
+			if _, err := s.SetAccountIdentity(2, "id-a"); !errors.Is(err, ErrIdentityInUse) {
+				t.Fatalf("SetAccountIdentity(2, dup) error = %v, want ErrIdentityInUse", err)
+			}
+			if _, err := s.db.Exec(`INSERT INTO accounts (provider, label, credential_type, credential_data, identity, created_at, updated_at)
+				VALUES ('openai', 'o', 'oauth', '{}', 'id-a', ?, ?)`, now, now); err != nil {
+				t.Fatalf("same identity under another provider rejected: %v", err)
+			}
+			// Reset so the second pass starts from NULLs again.
+			if _, err := s.db.Exec(`DELETE FROM accounts WHERE provider = 'openai'`); err != nil {
+				t.Fatalf("cleanup: %v", err)
+			}
+			if _, err := s.db.Exec(`UPDATE accounts SET identity = NULL`); err != nil {
+				t.Fatalf("cleanup: %v", err)
+			}
+			s.Close()
+		}
+	})
 }

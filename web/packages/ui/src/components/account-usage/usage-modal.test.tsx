@@ -1,10 +1,11 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UsageModalRoot } from "@/components/account-usage/usage-modal";
 import { closeUsageModal, openUsageModal } from "@/hooks/use-usage-modal";
 import { STORAGE_KEYS } from "@/lib/storage";
 import { claudeAccount, codexAccount, FIXTURE_NOW, problemAccount } from "@/test/account-usage-fixtures";
+import { renderWithDaemon } from "@/test/render-with-daemon";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 
 async function flush(): Promise<void> {
@@ -20,7 +21,7 @@ function setViewportWidth(width: number): void {
 }
 
 async function openModal(daemon: FakeUsageDaemon): Promise<void> {
-  render(<UsageModalRoot client={daemon.client} events={daemon.events} />);
+  renderWithDaemon(<UsageModalRoot />, daemon);
   act(() => openUsageModal());
   await flush();
 }
@@ -39,7 +40,7 @@ afterEach(() => {
 describe("UsageModalRoot", () => {
   it("no_account_usage_call_while_modal_is_closed_and_footer_off", async () => {
     const daemon = new FakeUsageDaemon([claudeAccount()]);
-    render(<UsageModalRoot client={daemon.client} events={daemon.events} />);
+    renderWithDaemon(<UsageModalRoot />, daemon);
     await flush();
     expect(screen.queryByTestId("usage-modal")).not.toBeInTheDocument();
     expect(daemon.requests).toHaveLength(0);
@@ -179,7 +180,7 @@ describe("UsageModalRoot", () => {
     expect(within(screen.getByTestId("usage-report-5")).getByTestId("usage-problem")).toHaveTextContent("Login rejected (HTTP 401). Reconnect it in Providers.");
 
     // The account recovers: a live event replaces its message with windows.
-    act(() => daemon.emit("account.usage", { usage: claudeAccount({ accountId: 4, key: "anthropic-4", displayName: "Old", report: { ...claudeAccount().report!, fetchedAt: new Date().toISOString() } }) }));
+    await act(async () => daemon.emit("account.usage", { usage: claudeAccount({ accountId: 4, key: "anthropic-4", displayName: "Old", report: { ...claudeAccount().report!, fetchedAt: new Date().toISOString() } }) }));
     expect(within(screen.getByTestId("usage-report-4")).queryByTestId("usage-problem")).not.toBeInTheDocument();
     expect(within(screen.getByTestId("usage-report-4")).getByText("31%")).toBeInTheDocument();
   });
@@ -201,7 +202,7 @@ describe("UsageModalRoot", () => {
     const daemon = new FakeUsageDaemon([claudeAccount(), codexAccount()]);
     await openModal(daemon);
     const requests = daemon.requests.length;
-    act(() => daemon.emit("account.removed", { id: 2 }));
+    await act(async () => daemon.emit("account.removed", { id: 2 }));
     expect(screen.queryByTestId("usage-report-2")).not.toBeInTheDocument();
     expect(screen.getByTestId("usage-report-1")).toBeInTheDocument();
     expect(daemon.requests).toHaveLength(requests);

@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UsageRefreshAllButton, UsageRefreshButton } from "@/components/account-usage/usage-refresh-button";
-import { REFRESH_COOLDOWN_MS } from "@/hooks/use-account-usage";
+import { REFRESH_COOLDOWN_MS } from "@/hooks/use-usage-reports";
 import { claudeAccount } from "@/test/account-usage-fixtures";
 
 const NOW = Date.parse("2026-10-12T12:00:00Z");

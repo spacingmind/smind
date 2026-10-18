@@ -4,10 +4,12 @@
 //! Tauri types, so it's unit-testable (including the persistence round
 //! trip) without a webview.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use url::Url;
 
 /// The built-in local entry's fixed id. Never removable (AC4).
@@ -199,12 +201,45 @@ pub fn connection_id_for_relay(workspace_id: &str, relay_native_addr: &str) -> S
     format!("relay:{workspace_id}@{relay_native_addr}")
 }
 
+/// Test-only: the old all-or-nothing file shape, used to write stale
+/// registries in tests.
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredRegistry {
     connections: Vec<Connection>,
     #[serde(rename = "selectedId")]
     selected_id: String,
 }
+
+/// The file as raw JSON: known entries are parsed into `Connection`s,
+/// everything this build does not understand (unknown kinds, unknown
+/// fields) is kept verbatim so a newer app version's data survives a
+/// round trip through an older one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RawRegistry {
+    #[serde(default)]
+    connections: Vec<Value>,
+    #[serde(rename = "selectedId")]
+    selected_id: Option<String>,
+    #[serde(flatten)]
+    extra: Map<String, Value>,
+}
+
+/// A display-only summary of an entry whose `kind` this build does not
+/// know. Carries only `id`/`label`/`kind` -- never `baseUrl` or other
+/// fields, which can hold credentials.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UnsupportedConnection {
+    pub id: Option<String>,
+    pub label: Option<String>,
+    pub kind: Option<String>,
+}
+
+fn string_field(v: &Value, key: &str) -> Option<String> {
+    v.get(key).and_then(Value::as_str).map(str::to_string)
+}
+
+const KNOWN_ENTRY_KEYS: [&str; 4] = ["id", "kind", "label", "baseUrl"];
 
 /// Registry holds the connection list, in-memory, plus which one is
 /// currently selected. The built-in `local` entry always exists at
@@ -214,6 +249,10 @@ struct StoredRegistry {
 pub struct Registry {
     connections: Vec<Connection>,
     selected_id: String,
+    unsupported: Vec<Value>,
+    entry_extras: HashMap<String, Map<String, Value>>,
+    top_extra: Map<String, Value>,
+    preserved_selection: Option<String>,
 }
 
 impl Registry {
@@ -224,7 +263,26 @@ impl Registry {
         Self {
             connections: vec![local_connection(local_base_url)],
             selected_id: LOCAL_ID.to_string(),
+            unsupported: Vec::new(),
+            entry_extras: HashMap::new(),
+            top_extra: Map::new(),
+            preserved_selection: None,
         }
+    }
+
+    /// unsupported lists the stored entries this build could not parse
+    /// (unknown kind, or a known kind with an invalid shape). They are
+    /// kept verbatim and written back on `save`; they never appear in
+    /// `list()`/`current()`.
+    pub fn unsupported(&self) -> Vec<UnsupportedConnection> {
+        self.unsupported
+            .iter()
+            .map(|v| UnsupportedConnection {
+                id: string_field(v, "id"),
+                label: string_field(v, "label"),
+                kind: string_field(v, "kind"),
+            })
+            .collect()
     }
 
     pub fn list(&self) -> &[Connection] {
@@ -335,8 +393,10 @@ impl Registry {
         if self.connections.len() == before {
             return Err(format!("no connection with id {id:?}"));
         }
+        self.entry_extras.remove(id);
         if self.selected_id == id {
             self.selected_id = LOCAL_ID.to_string();
+            self.preserved_selection = None;
         }
         Ok(())
     }
@@ -347,6 +407,7 @@ impl Registry {
             return Err(format!("no connection with id {id:?}"));
         }
         self.selected_id = id.to_string();
+        self.preserved_selection = None;
         Ok(())
     }
 
@@ -360,38 +421,91 @@ impl Registry {
         let Ok(data) = fs::read_to_string(path) else {
             return Self::new(local_base_url);
         };
-        let Ok(stored) = serde_json::from_str::<StoredRegistry>(&data) else {
+        let Ok(raw) = serde_json::from_str::<RawRegistry>(&data) else {
             return Self::new(local_base_url);
         };
-        let mut connections: Vec<Connection> = stored
-            .connections
-            .into_iter()
-            .filter(|c| c.id != LOCAL_ID)
-            .collect();
+        let mut connections: Vec<Connection> = Vec::new();
+        let mut unsupported: Vec<Value> = Vec::new();
+        let mut entry_extras: HashMap<String, Map<String, Value>> = HashMap::new();
+        for v in raw.connections {
+            match serde_json::from_value::<Connection>(v.clone()) {
+                // The local entry is always rebuilt from the current
+                // local_base_url; a stored one is dropped.
+                Ok(c) if c.id != LOCAL_ID => {
+                    if let Some(obj) = v.as_object() {
+                        let extras: Map<String, Value> = obj
+                            .iter()
+                            .filter(|(k, _)| !KNOWN_ENTRY_KEYS.contains(&k.as_str()))
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect();
+                        if !extras.is_empty() {
+                            entry_extras.insert(c.id.clone(), extras);
+                        }
+                    }
+                    connections.push(c);
+                }
+                Ok(_) => {}
+                Err(_) => unsupported.push(v),
+            }
+        }
         connections.insert(0, local_connection(local_base_url));
-        let selected_id = if connections.iter().any(|c| c.id == stored.selected_id) {
-            stored.selected_id
+        let stored_selected = raw.selected_id.unwrap_or_default();
+        // If the stored selection points at an entry we cannot use, keep
+        // the selection local in memory but remember it, so save() does
+        // not silently rewrite the user's choice.
+        let preserved_selection = (!connections.iter().any(|c| c.id == stored_selected)
+            && unsupported
+                .iter()
+                .any(|v| v.get("id").and_then(Value::as_str) == Some(stored_selected.as_str())))
+        .then(|| stored_selected.clone());
+        let selected_id = if connections.iter().any(|c| c.id == stored_selected) {
+            stored_selected
         } else {
             LOCAL_ID.to_string()
         };
         Self {
             connections,
             selected_id,
+            unsupported,
+            entry_extras,
+            top_extra: raw.extra,
+            preserved_selection,
         }
     }
 
     /// save writes the registry to `path` as JSON, creating parent
-    /// directories as needed.
+    /// directories as needed. Unknown top-level fields, unknown fields
+    /// on known entries, and unparsed entries are written back verbatim,
+    /// so the file survives a round trip through an older build. Known
+    /// entries come first (in registry order), unsupported ones after.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let stored = StoredRegistry {
-            connections: self.connections.clone(),
-            selected_id: self.selected_id.clone(),
-        };
+        let mut root = Value::Object(self.top_extra.clone());
+        let connections: Vec<Value> = self
+            .connections
+            .iter()
+            .map(|conn| {
+                let mut obj = serde_json::to_value(conn)
+                    .expect("smind desktop: connection serializes")
+                    .as_object()
+                    .expect("smind desktop: connection serializes to an object")
+                    .clone();
+                if let Some(extras) = self.entry_extras.get(&conn.id) {
+                    for (k, v) in extras {
+                        obj.entry(k.clone()).or_insert_with(|| v.clone());
+                    }
+                }
+                Value::Object(obj)
+            })
+            .chain(self.unsupported.iter().cloned())
+            .collect();
+        root["connections"] = Value::Array(connections);
+        root["selectedId"] =
+            Value::String(self.preserved_selection.clone().unwrap_or(self.selected_id.clone()));
         let data =
-            serde_json::to_string_pretty(&stored).expect("smind desktop: registry serializes");
+            serde_json::to_string_pretty(&root).expect("smind desktop: registry serializes");
         fs::write(path, data)
     }
 }
@@ -702,5 +816,183 @@ mod tests {
 
         let loaded = Registry::load(&path, &local_url());
         assert_eq!(loaded.current().id, LOCAL_ID);
+    }
+    fn write_raw(path: &Path, json: &str) {
+        fs::write(path, json).unwrap();
+    }
+
+    fn read_json(path: &Path) -> Value {
+        serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn registry_round_trips_unknown_kind_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        let unknown = serde_json::json!({"id":"vpn:1","kind":"wireguard","label":"Office","baseUrl":"wg://x","extra":{"a":[1,2]}});
+        write_raw(&path, &serde_json::json!({
+            "connections": [
+                {"id":"url:http://example.com:9000","kind":"url","label":"T","baseUrl":"http://example.com:9000"},
+                unknown.clone()
+            ],
+            "selectedId": "local"
+        }).to_string());
+
+        let reg = Registry::load(&path, &local_url());
+        assert!(reg.list().iter().all(|c| c.kind != ConnectionKind::Url || c.id != "vpn:1"));
+        assert!(!reg.list().iter().any(|c| c.id == "vpn:1"));
+        assert_eq!(
+            reg.unsupported(),
+            vec![UnsupportedConnection { id: Some("vpn:1".into()), label: Some("Office".into()), kind: Some("wireguard".into()) }]
+        );
+
+        let out = dir.path().join("out.json");
+        reg.save(&out).unwrap();
+        let saved = read_json(&out);
+        let conns = saved["connections"].as_array().unwrap();
+        assert!(conns.contains(&unknown), "{conns:?}");
+    }
+
+    #[test]
+    fn registry_round_trips_unknown_fields_in_known_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        write_raw(&path, &serde_json::json!({
+            "connections": [
+                {"id":"url:http://example.com:9000","kind":"url","label":"T","baseUrl":"http://example.com:9000",
+                 "futureField":{"x":1},"pinned":true}
+            ],
+            "selectedId": "local"
+        }).to_string());
+        let reg = Registry::load(&path, &local_url());
+        let out = dir.path().join("out.json");
+        reg.save(&out).unwrap();
+        let saved_entry = &read_json(&out)["connections"][1];
+        assert_eq!(saved_entry["futureField"], serde_json::json!({"x":1}));
+        assert_eq!(saved_entry["pinned"], serde_json::json!(true));
+        assert_eq!(saved_entry["baseUrl"], "http://example.com:9000");
+        assert_eq!(saved_entry["label"], "T");
+        assert_eq!(saved_entry["kind"], "url");
+    }
+
+    #[test]
+    fn registry_round_trips_unknown_top_level_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        write_raw(&path, &serde_json::json!({
+            "connections": [], "selectedId": "local", "version": 2, "futureTop": {"k": "v"}
+        }).to_string());
+        let reg = Registry::load(&path, &local_url());
+        let out = dir.path().join("out.json");
+        reg.save(&out).unwrap();
+        let saved = read_json(&out);
+        assert_eq!(saved["version"], serde_json::json!(2));
+        assert_eq!(saved["futureTop"], serde_json::json!({"k":"v"}));
+    }
+
+    #[test]
+    fn registry_keeps_a_selection_that_points_at_an_unsupported_entry_until_the_user_selects() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        write_raw(&path, &serde_json::json!({
+            "connections": [
+                {"id":"vpn:1","kind":"wireguard","label":"Office","baseUrl":"wg://x"}
+            ],
+            "selectedId": "vpn:1"
+        }).to_string());
+        let mut reg = Registry::load(&path, &local_url());
+        assert_eq!(reg.current().id, LOCAL_ID);
+
+        let out = dir.path().join("out.json");
+        reg.save(&out).unwrap();
+        assert_eq!(read_json(&out)["selectedId"], "vpn:1");
+
+        reg.select(LOCAL_ID).unwrap();
+        reg.save(&out).unwrap();
+        assert_eq!(read_json(&out)["selectedId"], "local");
+    }
+
+    #[test]
+    fn registry_keeps_unsupported_entries_through_add_remove_and_select() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        let unknown = serde_json::json!({"id":"vpn:1","kind":"wireguard","label":"Office","baseUrl":"wg://x"});
+        write_raw(&path, &serde_json::json!({
+            "connections": [unknown.clone()], "selectedId": "local"
+        }).to_string());
+        let mut reg = Registry::load(&path, &local_url());
+        let conn = reg.add("x", "http://example.com:9000").unwrap();
+        reg.select(&conn.id).unwrap();
+        reg.remove(&conn.id).unwrap();
+        let out = dir.path().join("out.json");
+        reg.save(&out).unwrap();
+        assert!(
+            read_json(&out)["connections"].as_array().unwrap().contains(&unknown)
+        );
+    }
+
+    #[test]
+    fn entry_with_a_known_kind_but_an_invalid_shape_is_kept_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        let bad = serde_json::json!({"id":"url:z","kind":"url","label":"z"});
+        write_raw(&path, &serde_json::json!({
+            "connections": [bad.clone()], "selectedId": "local"
+        }).to_string());
+        let reg = Registry::load(&path, &local_url());
+        assert!(!reg.list().iter().any(|c| c.id == "url:z"));
+        assert_eq!(reg.unsupported().len(), 1);
+        let out = dir.path().join("out.json");
+        reg.save(&out).unwrap();
+        assert!(read_json(&out)["connections"].as_array().unwrap().contains(&bad));
+    }
+
+    #[test]
+    fn unsupported_reports_only_id_label_and_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        write_raw(&path, &serde_json::json!({
+            "connections": [
+                {"id":"vpn:1","kind":"wireguard","label":"Office","baseUrl":"wg://sekrit/hunter2"}
+            ],
+            "selectedId": "local"
+        }).to_string());
+        let reg = Registry::load(&path, &local_url());
+        let json = serde_json::to_string(&reg.unsupported()).unwrap();
+        assert!(!json.contains("wg://"), "{json}");
+        assert!(!json.contains("hunter2"), "{json}");
+    }
+
+    #[test]
+    fn corrupt_file_is_never_overwritten_by_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        fs::write(&path, "{not json").unwrap();
+        let _reg = Registry::load(&path, &local_url());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{not json");
+    }
+
+    #[test]
+    fn corrupt_file_is_replaced_only_by_an_explicit_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        fs::write(&path, "{not json").unwrap();
+        let reg = Registry::load(&path, &local_url());
+        reg.save(&path).unwrap();
+        let saved = read_json(&path);
+        let conns = saved["connections"].as_array().unwrap();
+        assert_eq!(conns.len(), 1);
+        assert_eq!(conns[0]["id"], "local");
+        assert_eq!(saved["selectedId"], "local");
+    }
+
+    #[test]
+    fn a_top_level_that_is_not_an_object_is_treated_as_corrupt() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        fs::write(&path, "[1,2]").unwrap();
+        let reg = Registry::load(&path, &local_url());
+        assert_eq!(reg.list().len(), 1);
+        assert!(reg.unsupported().is_empty());
     }
 }

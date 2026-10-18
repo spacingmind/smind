@@ -4,7 +4,7 @@ import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { REFRESH_COOLDOWN_MS } from "@/hooks/use-account-usage";
+import { REFRESH_COOLDOWN_MS } from "@/hooks/use-usage-reports";
 import { usageCopy } from "@/lib/account-usage/copy";
 import { formatUsageFreshness, type UsageRefresh } from "@/lib/account-usage/model";
 import type { AccountUsage } from "@/lib/account-usage/types";

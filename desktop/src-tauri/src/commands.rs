@@ -8,7 +8,7 @@
 
 use tauri::{AppHandle, State};
 
-use smind_daemon_client::proxy::Connection;
+use smind_daemon_client::proxy::{Connection, UnsupportedConnection};
 use smind_daemon_client::relay;
 
 use crate::client_watch;
@@ -17,6 +17,14 @@ use crate::state::DesktopState;
 #[tauri::command]
 pub fn connections_list(state: State<'_, DesktopState>) -> Vec<Connection> {
     state.proxy.registry.lock().unwrap().list().to_vec()
+}
+
+/// connections_unsupported lists saved entries whose `kind` this build
+/// does not understand (written by a newer app version): id/label/kind
+/// only, never `baseUrl` or other fields.
+#[tauri::command]
+pub fn connections_unsupported(state: State<'_, DesktopState>) -> Vec<UnsupportedConnection> {
+    state.proxy.registry.lock().unwrap().unsupported()
 }
 
 #[tauri::command]

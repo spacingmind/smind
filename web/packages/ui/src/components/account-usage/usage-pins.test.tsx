@@ -11,6 +11,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { closeUsageModal, openUsageModal } from "@/hooks/use-usage-modal";
 import { STORAGE_KEYS } from "@/lib/storage";
 import { FIXTURE_NOW, claudeAccount, codexAccount } from "@/test/account-usage-fixtures";
+import { renderWithDaemon } from "@/test/render-with-daemon";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 
 async function flush(): Promise<void> {
@@ -91,7 +92,7 @@ describe("pins in the modal and Settings", () => {
   afterEach(() => vi.useRealTimers());
 
   async function openModal(daemon: FakeUsageDaemon) {
-    render(<UsageModalRoot client={daemon.client} events={daemon.events} />);
+    renderWithDaemon(<UsageModalRoot />, daemon);
     act(() => openUsageModal());
     await flush();
   }
@@ -183,13 +184,14 @@ describe("pins in the modal and Settings", () => {
     setPrefs({ pins: [] });
     const daemon = new FakeUsageDaemon([claudeAccount()]);
     const section = listSettingsSections().find((s) => s.id === "usage")!;
-    render(
+    renderWithDaemon(
       <SidebarProvider>
         <TooltipProvider>
-          <UsageSidebarItem client={daemon.client} events={daemon.events} />
+          <UsageSidebarItem />
         </TooltipProvider>
         {section.render({ client: daemon.client, events: daemon.events })}
       </SidebarProvider>,
+      daemon,
     );
     await flush();
     expect(screen.getByTestId("sidebar-usage-summary")).toHaveAttribute("data-layout", "plain");
@@ -200,13 +202,14 @@ describe("pins in the modal and Settings", () => {
   it("the footer and the modal it opens share one ttl clock: together still one touch per ttl", async () => {
     vi.useFakeTimers();
     const daemon = new FakeUsageDaemon([claudeAccount()]);
-    render(
+    renderWithDaemon(
       <SidebarProvider>
         <TooltipProvider>
-          <UsageSidebarItem client={daemon.client} events={daemon.events} />
+          <UsageSidebarItem />
         </TooltipProvider>
-        <UsageModalRoot client={daemon.client} events={daemon.events} />
+        <UsageModalRoot />
       </SidebarProvider>,
+      daemon,
     );
     await act(async () => void (await vi.advanceTimersByTimeAsync(0)));
     expect(daemon.modes()).toEqual(["touch"]);

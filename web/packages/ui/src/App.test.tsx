@@ -6,6 +6,7 @@ import { App } from "@/App";
 import { platformBindings, SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
 import { WsClient } from "@/lib/ws-client";
 import { FakeSocket } from "@/test/fake-socket";
+import "@/test/query-scheduler";
 import { openHoverCard } from "@/test/sidebar-helpers";
 import { resetTerminalSessions } from "@/lib/terminal-sessions";
 import type { Chat, RunLogsResult, RunSummary, Task, TerminalSessionStatus, Workspace } from "@/lib/types";
