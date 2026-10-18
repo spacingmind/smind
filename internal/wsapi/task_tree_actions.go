@@ -375,7 +375,11 @@ func handleTaskStopTree(db *store.Store, reg *runs.Registry) handlerFunc {
 			for _, tr := range targets {
 				// Already terminal (finished on its own) is nil: not an error.
 				if err := treeAwaitRun(deadlineCtx, reg, tr.RunID); err != nil {
-					res.Failed = append(res.Failed, treeRunFailed{ID: tr.ID, Title: tr.Title, RunID: tr.RunID, Error: err.Error()})
+					msg := err.Error()
+					if errors.Is(err, context.DeadlineExceeded) {
+						msg = fmt.Sprintf("still running %s after the stop request", treeStopDeadline)
+					}
+					res.Failed = append(res.Failed, treeRunFailed{ID: tr.ID, Title: tr.Title, RunID: tr.RunID, Error: msg})
 					continue
 				}
 				res.Stopped = append(res.Stopped, tr)

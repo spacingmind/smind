@@ -45,8 +45,9 @@ function ItemList({ testId, items }: { testId: string; items: TreeActionItem[] }
   const rest = items.length - visible.length;
   return (
     <ul data-testid={testId} className="mt-2 list-disc pl-5">
-      {visible.map((item) => (
-        <li key={item.id}>{item.title}</li>
+      {visible.map((item, i) => (
+        // A task with several running runs appears once per run, so the task id alone is not unique.
+        <li key={`${item.id}:${i}`}>{item.title}</li>
       ))}
       {rest > 0 && <li>and {rest} more</li>}
     </ul>
