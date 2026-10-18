@@ -37,9 +37,17 @@ func newMCPSession(t *testing.T) *mcpTestEnv {
 // daemon's fake GLM agent (e.g. "modes:session", "live-opts").
 func newMCPSessionWithAgentArgs(t *testing.T, agentArgs ...string) *mcpTestEnv {
 	t.Helper()
+	return newMCPSessionWithRunCap(t, 0, agentArgs...)
+}
+
+// newMCPSessionWithRunCap is newMCPSessionWithAgentArgs with the daemon's
+// per-task-tree concurrent-run cap raised to maxRunsPerTree (0 = default 4),
+// for tests that need many genuinely concurrent runs in one tree.
+func newMCPSessionWithRunCap(t *testing.T, maxRunsPerTree int, agentArgs ...string) *mcpTestEnv {
+	t.Helper()
 	home := t.TempDir()
 	t.Setenv("SMIND_HOME", home)
-	srvURL := newConfigOptionTestEnvArgs(t, home, agentArgs...)
+	srvURL := newConfigOptionTestEnvCap(t, home, maxRunsPerTree, agentArgs...)
 	writeTestConfig(t, home, srvURL)
 
 	client := dialTestClient(t, srvURL)

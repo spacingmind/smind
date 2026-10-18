@@ -1529,9 +1529,14 @@ type runLogsResult struct {
 	Status     string `json:"status"`
 	StopReason string `json:"stopReason,omitempty"`
 	// Disposition is runs.RunStatus.Disposition ("needs-continue" or absent).
-	Disposition string        `json:"disposition,omitempty"`
-	Err         string        `json:"err,omitempty"`
-	Events      []runLogEvent `json:"events"`
+	Disposition string `json:"disposition,omitempty"`
+	Err         string `json:"err,omitempty"`
+	// BaseSHA/HeadSHA/Dirty are the run's git provenance (O1), omitted
+	// while unknown.
+	BaseSHA string        `json:"baseSha,omitempty"`
+	HeadSHA string        `json:"headSha,omitempty"`
+	Dirty   *bool         `json:"dirty,omitempty"`
+	Events  []runLogEvent `json:"events"`
 }
 
 // handleRunLogs returns runID's full (or, with Tail set, last Tail)
@@ -1566,6 +1571,9 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 			StopReason:  status.StopReason,
 			Disposition: status.Disposition,
 			Err:         status.Err,
+			BaseSHA:     derefStr(status.BaseSHA),
+			HeadSHA:     derefStr(status.HeadSHA),
+			Dirty:       status.Dirty,
 			Events:      events,
 		}, nil
 	}
@@ -2075,4 +2083,13 @@ func handleProfileDelete(profReg *profiles.Registry) handlerFunc {
 		}
 		return struct{}{}, nil
 	}
+}
+
+// derefStr returns *p, or "" for nil -- the omitempty form of an unknown
+// optional string on the wire.
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }

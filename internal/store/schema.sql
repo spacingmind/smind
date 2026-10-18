@@ -97,7 +97,13 @@ CREATE TABLE IF NOT EXISTS runs (
     approval_policy TEXT NOT NULL DEFAULT 'manual',
     permission_mode TEXT NOT NULL DEFAULT '',
     auto_accept INTEGER NOT NULL DEFAULT 0,
-    model TEXT -- requested model (ADR-0025); NULL = provider default
+    model TEXT, -- requested model (ADR-0025); NULL = provider default
+    -- O1 provenance: worktree HEAD at start (base_sha) and at the terminal
+    -- state (head_sha), plus dirty at the latest successful capture. NULL =
+    -- unknown (git failed or pre-dates O1).
+    base_sha TEXT,
+    head_sha TEXT,
+    dirty INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS run_events (
