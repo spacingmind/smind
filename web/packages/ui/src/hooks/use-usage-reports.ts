@@ -23,6 +23,7 @@ import type {
   UsageQueryData,
 } from "@/lib/account-usage/types";
 import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
+import { ConnectionClosedError } from "@/lib/ws-client";
 import { queryKeys } from "@/lib/query-keys";
 
 /**
@@ -53,7 +54,7 @@ export const REFRESH_COOLDOWN_MS = 30_000;
  * (`lastTouchAt`) and the refresh cooldown are read from those entries, so they must outlive the
  * default 5 minutes (a daemon TTL can be longer).
  */
-const MUTATION_GC_MS = 60 * 60 * 1000;
+const MUTATION_GC_MS = 24 * 60 * 60 * 1000;
 
 export interface UsageSnapshot {
   /** `idle` = nothing asked yet, `loading` = first answer pending. */
@@ -137,6 +138,9 @@ export function windowIsActive(): boolean {
 function lastTouchAt(queryClient: QueryClient): number | null {
   let last: number | null = null;
   for (const mutation of queryClient.getMutationCache().findAll({ mutationKey: usageMutationKeys.touch })) {
+    // A touch that never left (the socket was already closed while the shell was reconnecting) did not
+    // reach the daemon, so it must not burn the TTL.
+    if (mutation.state.error instanceof ConnectionClosedError) continue;
     const at = mutation.state.submittedAt;
     if (at > 0 && (last === null || at > last)) last = at;
   }
@@ -169,6 +173,12 @@ export function useUsageReports({
   // The TTL clock survives a reconnect: the touch mutations live in the connection's QueryClient,
   // which a same-daemon reconnect keeps. The ref covers the unmounted-between case.
   const carriedTouch = useRef<number | null>(null);
+  // A different daemon's touch says nothing about this one's TTL.
+  const carriedFor = useRef(queryClient);
+  if (carriedFor.current !== queryClient) {
+    carriedFor.current = queryClient;
+    carriedTouch.current = null;
+  }
   const touchedAt = useCallback((): number | null => {
     const held = lastTouchAt(queryClient);
     const carried = carriedTouch.current;
@@ -344,33 +354,46 @@ export function useUsageReports({
     const { snapshot: s, touchMutate, hasClient } = latest.current;
     if (!hasClient || !s.supportsUsage || (!s.enabled && s.phase === "ready")) return false;
     if (msUntilTouch() > 0) return false;
-    carriedTouch.current = Date.now();
     touchMutate();
     return true;
   }, [msUntilTouch]);
 
+  const cadenceClient = useRef<typeof client>(null);
   useEffect(() => {
     if (!touch || !enabled || client === null) return;
+    // A new client after an earlier one is a reconnect, and a reconnect never sends a touch by itself
+    // (it re-reads `cached`, see useDaemonEvents): the cadence resumes on its own timer / the next
+    // window event, once per TTL as always.
+    const reconnected = cadenceClient.current !== null && cadenceClient.current !== client;
+    cadenceClient.current = client;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const clear = () => {
       if (timer !== null) clearTimeout(timer);
       timer = null;
     };
-    const tick = () => {
-      clear();
-      if (!windowIsActive()) return;
-      touchNow();
+    const schedule = () => {
       // Nothing is pending when polling is off or the daemon lacks the RPC (no touch sent, TTL clock
       // never started): check again once per TTL instead of every second, since a permanently
       // mounted footer would otherwise run a no-op timer for as long as the app is open.
       const wait = msUntilTouch();
       timer = setTimeout(tick, wait > 0 ? Math.max(1_000, wait) : latest.current.snapshot.ttlSeconds * 1000);
     };
+    const tick = () => {
+      clear();
+      if (!windowIsActive()) return;
+      touchNow();
+      schedule();
+    };
     const onChange = () => {
       if (windowIsActive()) tick();
       else clear();
     };
-    onChange();
+    if (reconnected) {
+      clear();
+      if (windowIsActive()) schedule();
+    } else {
+      onChange();
+    }
     document.addEventListener("visibilitychange", onChange);
     window.addEventListener("focus", onChange);
     window.addEventListener("blur", onChange);

@@ -52,12 +52,28 @@ afterEach(() => {
 describe("usage call budget", () => {
   it.each(["providers", "appearance", undefined])("opening settings performs zero usage refreshes (section %s)", async (sectionId) => {
     const daemon = new FakeUsageDaemon([claudeAccount(), codexAccount()]);
+    // Seed the account list so the Providers rows really mount (and so really read the usage cache).
+    daemon.accounts = [
+      { id: 1, provider: "anthropic", label: "Claude", credentialType: "oauth", createdAt: "", updatedAt: "" },
+      { id: 2, provider: "openai", label: "Codex", credentialType: "oauth", createdAt: "", updatedAt: "" },
+    ];
+    daemon.providers = {
+      providers: [
+        { id: "claude-native", label: "Claude Code", credentialKind: "oauth", accountProvider: "anthropic" },
+        { id: "codex-native", label: "Codex", credentialKind: "oauth", accountProvider: "openai" },
+      ],
+    };
     renderWithDaemon(
       <SettingsScreen client={daemon.client} events={daemon.events} onNavigateBack={() => {}} initialSectionId={sectionId} />,
       daemon,
     );
     await settle();
     expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+    // Positive control: the Providers rows are on screen, and they read the usage cache (one cached read).
+    if (sectionId === "providers") {
+      expect(screen.getByTestId("provider-row-1")).toBeInTheDocument();
+      expect(daemon.count("cached")).toBe(1);
+    }
     expectNoProviderCalls(daemon);
     expect(daemon.count("cached")).toBeLessThanOrEqual(1);
 

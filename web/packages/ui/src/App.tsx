@@ -269,7 +269,7 @@ function AppShell({
     closeTabsToRight,
     renameTab,
   } = useTaskTabs();
-  const queryClient = useDaemonQueryClient(client);
+  const queryClient = useDaemonQueryClient();
   const events = useDaemonEvents(client, queryClient);
   const { attention, runStatus, runningChatsByTask, loaded: runsLoaded } = useTaskAttention(client, selectedTask?.ID ?? null, events);
   // ADR-0016 P3: the selected task's own chats, live -- the "+" menu's

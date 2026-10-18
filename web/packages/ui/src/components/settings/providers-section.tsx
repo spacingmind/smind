@@ -214,7 +214,7 @@ function ProvidersSection({ client }: SettingsSectionContext) {
           onConnected={() => void queryClient.invalidateQueries({ queryKey: queryKeys.accountList() })}
         />
       )}
-      {accountsQuery.error && (
+      {accountsQuery.error && accountsQuery.data === undefined && (
         <p role="alert" className="text-ui-base text-destructive">
           {accountsQuery.error instanceof Error ? accountsQuery.error.message : String(accountsQuery.error)}
         </p>
@@ -406,6 +406,8 @@ function AccountRow({
               <StatusDot
                 status={state === "ok" ? "success" : state === "failed" ? "danger" : state === "warning" ? "warning" : "neutral"}
                 className="size-2"
+                role="img"
+                aria-label={status?.label ?? "Not tested yet"}
                 title={status?.label ?? "Not tested yet"}
                 data-testid={`provider-row-dot-${account.id}`}
                 data-status={state}

@@ -1,14 +1,11 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
-import { useEffect, type ReactElement, type ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 
-import { applyDaemonEvent } from "@/lib/query/event-bridge";
+import { useDaemonEvents } from "@/hooks/use-daemon-events";
 import { DaemonQueryProvider, useDaemonQueryClient } from "@/lib/query/daemon-query-provider";
 import "@/test/query-scheduler";
 import type { FakeUsageDaemon } from "@/test/usage-test-client";
-
-/** The topics the app's `useDaemonEvents` bridges into the cache (lib/query/event-bridge.ts). */
-const BRIDGED_TOPICS = ["account.updated", "account.usage", "account.removed", "profile.created", "profile.updated", "profile.deleted"];
 
 /**
  * What the app root does (App.tsx): one QueryClient per connection (a new daemon swaps it) provided
@@ -26,15 +23,11 @@ export function DaemonHarness({
   onQueryClient?: (queryClient: QueryClient) => void;
   children: ReactNode;
 }) {
-  const own = useDaemonQueryClient(daemon.client);
+  const own = useDaemonQueryClient();
   const queryClient = given ?? own;
   onQueryClient?.(queryClient);
-  useEffect(() => {
-    const offs = BRIDGED_TOPICS.map((topic) =>
-      daemon.events.subscribe(topic, (payload) => applyDaemonEvent(queryClient, topic, payload)),
-    );
-    return () => offs.forEach((off) => off());
-  }, [daemon, queryClient]);
+  // The real hook: it subscribes, bridges events into the cache and invalidates on a same-daemon reconnect.
+  useDaemonEvents(daemon.client, queryClient);
   return (
     <DaemonQueryProvider queryClient={queryClient} client={daemon.client} events={daemon.events}>
       {children}

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useUsageReports } from "@/hooks/use-usage-reports";
 import { createQueryClient } from "@/lib/query/query-client";
+import { ConnectionClosedError } from "@/lib/ws-client";
 import { renderHookWithDaemon } from "@/test/render-with-daemon";
 import { claudeAccount, codexAccount } from "@/test/account-usage-fixtures";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
@@ -178,6 +179,40 @@ describe("call discipline (AC54)", () => {
     expect(second.count("touch") + second.count("refresh")).toBe(0);
   });
 
+  it("a reconnect never sends a touch by itself, even when the TTL has already elapsed", async () => {
+    const first = new FakeUsageDaemon([claudeAccount()]);
+    const second = new FakeUsageDaemon([claudeAccount()]);
+    const { rerender } = renderHookWithDaemon(() => useUsageReports({ touch: true }), first, { initialProps: null });
+    await flush();
+    expect(first.modes()).toEqual(["touch"]);
+
+    // The clock jumps past the TTL without a timer firing (a sleeping laptop), then the socket is swapped.
+    vi.setSystemTime(Date.now() + TTL_MS + 5_000);
+    rerender({ daemon: second });
+    await flush();
+    expect(second.modes()).toEqual(["cached"]);
+
+    // The cadence resumes on its own timer, once.
+    await advance(TTL_MS);
+    expect(second.modes()).toEqual(["cached", "touch"]);
+  });
+
+  it("a touch that never left a closed socket does not burn the TTL", async () => {
+    const first = new FakeUsageDaemon([claudeAccount()]);
+    first.failWith = new ConnectionClosedError("wsclient: connection closed");
+    const { rerender } = renderHookWithDaemon(() => useUsageReports({ touch: true }), first, { initialProps: null });
+    await flush();
+    const second = new FakeUsageDaemon([claudeAccount()]);
+    rerender({ daemon: second });
+    await flush();
+    // The first touch failed at once on a dead socket; the TTL clock was not started by it, so the
+    // next window event on the live connection may touch.
+    setWindow({ focused: false });
+    setWindow({ focused: true });
+    await flush();
+    expect(second.count("touch")).toBe(1);
+  });
+
   it("two touching surfaces mounting together send one touch", async () => {
     const daemon = new FakeUsageDaemon([claudeAccount()]);
     renderHookWithDaemon(
@@ -345,14 +380,26 @@ describe("live events", () => {
     expect(daemon.requests).toHaveLength(requests);
   });
 
-  it("keeps an event for an account it does not know yet (ADR-0032 AC8: a new account appears without reload)", async () => {
+  it("an event for an account nothing knows settles with one cached read, never a touch (no ghost accounts)", async () => {
     const daemon = new FakeUsageDaemon([claudeAccount()]);
     const { result } = mount(daemon, false);
     await flush();
-    const requests = daemon.requests.length;
     await act(async () => daemon.emit("account.usage", { usage: codexAccount() }));
+    await flush();
+    // The daemon's own list (one account) wins: a report for an unknown account is not resurrected from the event alone.
+    expect(result.current.snapshot.reports.map((r) => r.accountId)).toEqual([1]);
+    expect(daemon.modes()).toEqual(["cached", "cached"]);
+  });
+
+  it("a new account appears in plan usage without reload (ADR-0032 AC8)", async () => {
+    const daemon = new FakeUsageDaemon([claudeAccount()]);
+    const { result } = mount(daemon, false);
+    await flush();
+    daemon.reports = [claudeAccount(), codexAccount()];
+    await act(async () => daemon.emit("account.updated", { account: { id: 2, provider: "openai", label: "codex", credentialType: "oauth", createdAt: "", updatedAt: "" } }));
+    await flush();
     expect(result.current.snapshot.reports.map((r) => r.accountId)).toEqual([1, 2]);
-    expect(daemon.requests).toHaveLength(requests);
+    expect(daemon.count("touch") + daemon.count("refresh")).toBe(0);
   });
 
   it("older_fetchedat_never_replaces_newer (a refresh racing an event)", async () => {

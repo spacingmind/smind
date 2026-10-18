@@ -51,10 +51,21 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
     case "account.usage": {
       const usage = (payload as AccountUsageEventPayload | null)?.usage;
       if (typeof usage !== "object" || usage === null || typeof (usage as AccountUsage).accountId !== "number") return;
-      // Unlike the old per-surface store, an event for an account the cache has not seen is kept:
-      // a newly added account shows up as soon as its first report arrives.
-      queryClient.setQueryData<UsageQueryData>(queryKeys.accountUsage(), (held) =>
-        held ? { ...held, reports: upsertReport(held.reports, usage) } : held,
+      const held = queryClient.getQueryData<UsageQueryData>(queryKeys.accountUsage());
+      if (!held) return;
+      // An account the usage cache has not seen is kept only when the account list says it exists (a
+      // new account's `account.updated` arrives first); otherwise a report published just after the
+      // account's removal would resurrect it. Anything else is settled by one more cached read.
+      const known = held.reports.some((r) => r.accountId === usage.accountId);
+      const listed = queryClient
+        .getQueryData<Account[]>(queryKeys.accountList())
+        ?.some((a) => a.id === usage.accountId);
+      if (!known && listed !== true) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.accountUsage() });
+        return;
+      }
+      queryClient.setQueryData<UsageQueryData>(queryKeys.accountUsage(), (current) =>
+        current ? { ...current, reports: upsertReport(current.reports, usage) } : current,
       );
       return;
     }

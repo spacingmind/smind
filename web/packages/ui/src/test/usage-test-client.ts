@@ -125,6 +125,11 @@ export class FakeUsageDaemon {
       const reports = ids ? this.reports.filter((r) => ids.includes(r.accountId)) : this.reports;
       return usageResult(reports, { enabled: this.enabled, ttlSeconds: this.ttlSeconds });
     },
+    /** What the real WsClient offers `useDaemonEvents`: the harness's bridge listens here, as in the app. */
+    onNotification: (listener: (n: { topic: string; payload: unknown }) => void): (() => void) => {
+      this.notificationListeners.add(listener);
+      return () => this.notificationListeners.delete(listener);
+    },
     callStream: async (method: string, params?: unknown, onEvent?: unknown, options?: unknown): Promise<unknown> => {
       if (this.wsClient) return this.wsClient.callStream(method, params, onEvent as never, options as never);
       return (this.client as { call: (m: string, p?: unknown) => Promise<unknown> }).call(method, params);
@@ -140,7 +145,11 @@ export class FakeUsageDaemon {
     },
   };
 
+  private notificationListeners = new Set<(n: { topic: string; payload: unknown }) => void>();
+
   emit(topic: string, payload: unknown): void {
+    // Like the app: the cache bridge (a notification listener) sees the event before any component listener.
+    for (const l of this.notificationListeners) l({ topic, payload });
     for (const l of this.listeners.get(topic) ?? []) l(payload);
   }
 

@@ -131,5 +131,15 @@ Live check: a throwaway Vite harness (not committed) mounting the real Settings 
   `use-usage-reports.test.tsx` reconnect + two-touching-surfaces-one-touch. Live counts (harness): Providers mount =
   1 `account.usage` `cached`, 0 touch, 0 refresh; after a rename event +1 `cached`, still 0 touch/refresh; Settings → Usage =
   1 `touch` (the ADR-0028 touching surface, once).
+Independent review (read-only `reviewer`, 2026-10-18) found no path to an unwanted `touch`/`refresh`, and these defects, all fixed
+with tests: same-daemon reconnect left inactive queries stale (now `refetchOnMount` when invalidated, invalidation runs after the
+new `events.subscribe` is answered; `use-daemon-events.query.test.tsx`), offline pausing then late-firing touch/refresh
+(`networkMode: "always"`), a reconnect re-arming an immediate touch / a touch on a dead socket burning the TTL
+(`use-usage-reports.test.tsx`), a late `account.usage` resurrecting a removed account (`event-bridge.test.ts`), usage read
+merging against a pre-await snapshot, touch clock leaking across daemons, a sticky transport-error `provider.test` result,
+StrictMode clearing the live cache, and a weak settings zero-refresh test (now seeds accounts + positive control).
+Known/deferred: a failed `provider.test` result stays until retested or the daemon identity changes; "expired 2h ago" text is
+not re-evaluated against time while Settings stays open; AccountsDialog/profiles keep their own test dots (S3); two daemons
+on the same host:port share an identity (the reconnect invalidation re-reads them).
 Unverified: real daemon + real provider accounts (deliberately not used); mid-transition frames (nothing in this PR animates);
 desktop app webview.

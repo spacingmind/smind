@@ -63,13 +63,23 @@ export interface DaemonEvents {
  */
 export function useDaemonEvents(client: WsClient | null, queryClient?: QueryClient): DaemonEvents | null {
   const listenersRef = useRef(new Map<string, Set<(payload: unknown) => void>>());
+  const lastClient = useRef<WsClient | null>(null);
 
   useEffect(() => {
     if (!client) return;
-    // Fire-and-forget: a failed subscribe just means no live events this
-    // connection -- consumers' own refetch-on-client-change remains the
-    // source of truth, so this must never surface as an error state.
-    client.call("events.subscribe", { topics: TOPICS }).catch(() => {});
+    // A new client after an earlier one is a reconnect: the cache outlived the transport and missed
+    // every event in the gap, so it is invalidated -- but only once the new subscription is in
+    // place, or an event between the re-read and the subscribe would be lost for good.
+    const reconnected = lastClient.current !== null && lastClient.current !== client;
+    lastClient.current = client;
+    // A failed subscribe just means no live events this connection; the invalidation still runs
+    // (the re-read is the source of truth), and nothing here surfaces as an error state.
+    client
+      .call("events.subscribe", { topics: TOPICS })
+      .catch(() => {})
+      .then(() => {
+        if (reconnected && queryClient) void queryClient.invalidateQueries();
+      });
 
     const off = client.onNotification((n: DaemonNotification) => {
       // ADR-0032: this is the single event -> query-cache bridge; it runs before listeners so a

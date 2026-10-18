@@ -1,5 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 
+import { refetchIfInvalidated } from "@/lib/query/query-client";
 import { queryKeys } from "@/lib/query-keys";
 import { RpcError, type WsClient } from "@/lib/ws-client";
 import { settleReports } from "./model";
@@ -41,7 +42,7 @@ export function usageDataFrom(result: AccountUsageResult | null | undefined, hel
  * The plan-usage query (ADR-0028 + ADR-0032): the daemon's *cached* reports
  * and nothing else. `mode: "cached"` never makes the daemon call a provider,
  * and the options below keep it from being asked again by anything but an
- * explicit action: no refetch on mount, focus or reconnect, no retry, and an
+ * explicit action: no refetch on focus or reconnect (and on mount only after an invalidation), no retry, and an
  * unknown-method answer is data (`supportsUsage: false`), not an error to
  * retry. Fresh numbers arrive through `account.usage` events and the explicit
  * touch/refresh mutations, never through this query re-running.
@@ -51,10 +52,13 @@ export function usageQueryOptions(client: WsClient | null) {
     queryKey: queryKeys.accountUsage(),
     enabled: client !== null,
     staleTime: Infinity,
-    refetchOnMount: false,
+    // Only an invalidated entry (an account.* event, a same-daemon reconnect) is re-read on mount; and
+    // that read is `cached`, never a provider call.
+    refetchOnMount: refetchIfInvalidated,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     retry: false,
+    networkMode: "always",
     queryFn: async ({ client: queryClient }): Promise<UsageQueryData> => {
       if (!client) throw new Error("no daemon connection");
       // A daemon that answered "unknown method" is never asked again, not even by an invalidation.
@@ -63,7 +67,8 @@ export function usageQueryOptions(client: WsClient | null) {
       const params: AccountUsageParams = { mode: "cached" };
       try {
         const result = await client.call<AccountUsageResult>("account.usage", params);
-        return usageDataFrom(result, held);
+        // Merge against what the cache holds *now*: an event may have written a fresher report while the read was in flight.
+        return usageDataFrom(result, queryClient.getQueryData<UsageQueryData>(queryKeys.accountUsage()));
       } catch (err) {
         if (isUnknownMethod(err)) {
           return { supportsUsage: false, enabled: true, ttlSeconds: DEFAULT_TTL_SECONDS, reports: [] };

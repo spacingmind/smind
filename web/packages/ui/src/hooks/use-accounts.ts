@@ -5,7 +5,7 @@ import { accountStatus, type AccountStatus } from "@/lib/account-status";
 import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
 import { queryKeys } from "@/lib/query-keys";
 import type { Account, ProviderTestResult } from "@/lib/types";
-import { RpcError } from "@/lib/ws-client";
+import { ConnectionClosedError, RpcError } from "@/lib/ws-client";
 
 /**
  * The account list and the account mutations on the shared React Query cache
@@ -26,9 +26,6 @@ export function useAccounts() {
     queryKey: queryKeys.accountList(),
     enabled: client !== null,
     staleTime: Infinity,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
     retry: false,
     queryFn: async (): Promise<Account[]> => {
       if (!client) throw new Error("no daemon connection");
@@ -124,6 +121,8 @@ export function useRunProviderTest() {
       queryClient.setQueryData(queryKeys.providerTest(provider), result);
     },
     onError: (err, provider) => {
+      // A dropped socket says nothing about the credential: keep whatever result was there.
+      if (err instanceof ConnectionClosedError) return;
       // Same shape the old per-dialog hook stored: an erroring diagnostic is a failed test, not a thrown UI.
       const message = err instanceof RpcError || err instanceof Error ? err.message : String(err);
       queryClient.setQueryData(queryKeys.providerTest(provider), { ok: false, detail: message });
