@@ -3,7 +3,7 @@
 //! logic in `smind_daemon_client::daemon_manager` with the OS calls it
 //! needs (spawning the daemon process, hitting the network) plus Tauri
 //! glue (app data dir, event emission, app version). See
-//! `docs/plans/active/desktop-managed-daemon.md`.
+//! `docs/plans/completed/desktop-managed-daemon.md`.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

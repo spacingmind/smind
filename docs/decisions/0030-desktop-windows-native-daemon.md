@@ -7,7 +7,7 @@ ADR-0013's app-managed-daemon host matrix: the **Windows + WSL2** host is
 removed and **Windows native** becomes the Windows host. Depends on ADR-0029
 (the native daemon runtime) and on the Windows release assets of
 `docs/plans/active/windows-daemon-runtime-parity.md` (AC9). Implementation
-plan: `docs/plans/active/desktop-windows-native-daemon.md`.
+plan: `docs/plans/completed/desktop-windows-native-daemon.md`.
 
 ## Decision
 
@@ -84,7 +84,7 @@ expected to work (ConPTY's minimum) but only Windows 11 has been validated.
   their WSL data stays where it is.
 - ADR-0013's "three hosts" becomes "macOS native and Windows native", and its
   note that Windows native is "not yet a supported daemon host" is retired.
-- `docs/plans/active/desktop-managed-daemon.md`'s WSL2 sections are
+- `docs/plans/completed/desktop-managed-daemon.md`'s WSL2 sections are
   superseded for Windows.
 
 ## Amendment (2026-10-13): the installer bundles `smind.exe`

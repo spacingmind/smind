@@ -100,7 +100,7 @@ Cross-platform:
   2026-10-10. Wrapped behind an internal seam so swapping to a hand-rolled
   backend later touches only the `_windows.go` file.
   **Superseded on Windows by ADR-0022** (2026-10-10): own ConPTY wrapper,
-  see `docs/plans/active/windows-conpty-wrapper.md`. Unix keeps xpty.
+  see `docs/plans/completed/windows-conpty-wrapper.md`. Unix keeps xpty.
 - **Kill on Windows = Job Object**, not `taskkill /T`: survives daemon
   crash, no process-spawn per kill, no PID-reuse race. xpty does not manage
   process trees, so this is ours.

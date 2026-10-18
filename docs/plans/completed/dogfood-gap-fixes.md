@@ -1,7 +1,7 @@
 # Dogfood gap fixes (G1, G3–G6, plus the G4 `task_wait` ergonomics)
 
 Spec for the "Dogfood gap fixes" subsection of
-[orchestration-and-metering.md](orchestration-and-metering.md). It lives in
+[orchestration-and-metering.md](../active/orchestration-and-metering.md). It lives in
 its own file because that plan's gap log (the "Step 3 dogfood gap log",
 G1–G11) is still on PR #265's branch; appending here avoids a merge conflict
 at the end of that file. Fold it back in when #265 lands.
