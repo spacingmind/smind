@@ -33,15 +33,17 @@ const initial = {
 
 export const useProvidersViewStore = create<ProvidersViewState>()((set) => ({
   ...initial,
-  select: (id) => set({ selectedProviderId: id, mobileView: "detail", query: "" }),
-  back: () => set({ mobileView: "list" }),
+  select: (id) =>
+    set({ selectedProviderId: id, mobileView: "detail", query: "", filter: "all", sort: "status", connectProviderId: null, reloginAccountId: null }),
+  back: () => set({ mobileView: "list", connectProviderId: null, reloginAccountId: null }),
   setQuery: (query) => set({ query }),
   setFilter: (filter) => set({ filter }),
   setSort: (sort) => set({ sort }),
-  requestConnect: (id) => set({ selectedProviderId: id, mobileView: "detail", query: "", connectProviderId: id }),
+  requestConnect: (id) =>
+    set({ selectedProviderId: id, mobileView: "detail", query: "", filter: "all", sort: "status", connectProviderId: id, reloginAccountId: null }),
   clearConnect: () => set({ connectProviderId: null }),
   requestRelogin: (accountId, providerNavId) =>
-    set({ selectedProviderId: providerNavId, mobileView: "detail", query: "", reloginAccountId: accountId }),
+    set({ selectedProviderId: providerNavId, mobileView: "detail", query: "", filter: "all", sort: "status", connectProviderId: null, reloginAccountId: accountId }),
   clearRelogin: () => set({ reloginAccountId: null }),
   reset: () => set({ ...initial }),
 }));

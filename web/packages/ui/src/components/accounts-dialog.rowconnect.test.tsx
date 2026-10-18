@@ -60,17 +60,16 @@ async function setup(
   const { createQueryClient } = await import("@/lib/query/query-client");
   const queryClient = createQueryClient();
   const onConnected = vi.fn();
-  renderWithDaemon(
+  const panel = (
     <ConnectAccountPanel
       client={daemon.client as never}
       providers={PROVIDERS.providers as never}
       onConnected={onConnected}
 
       {...props}
-    />,
-    daemon,
-    { queryClient },
+    />
   );
+  renderWithDaemon(panel, daemon, { queryClient });
   if (client.calls.some((c) => c.method === "account.list")) {
     await act(async () => {
       client.nth("account.list").resolve(accounts);
@@ -188,5 +187,11 @@ describe("ConnectAccountPanel row connect", () => {
     expect(screen.getByTestId("login-done-notice")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("login-notice-dismiss"));
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("relogin panel is headed Sign in again", async () => {
+    const legacy = account(7, "anthropic", "work", { hasIdentity: true });
+    await setup(undefined, [legacy], { relogin: legacy, onClose: () => {} });
+    expect(screen.getByText("Sign in again")).toBeInTheDocument();
   });
 });

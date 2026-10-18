@@ -47,6 +47,22 @@ describe("ProvidersScreen", () => {
     expect(screen.getByTestId("provider-detail")).toHaveTextContent("Claude");
   });
 
+  it("leaving Settings resets the providers view", async () => {
+    const d = daemon();
+    const view = renderWithDaemon(<ProvidersScreen client={d.client} />, d);
+    await flush();
+    act(() => {
+      useProvidersViewStore.getState().requestConnect("openai");
+    });
+    expect(useProvidersViewStore.getState().connectProviderId).toBe("openai");
+    view.unmount();
+    expect(useProvidersViewStore.getState()).toMatchObject({
+      selectedProviderId: null,
+      connectProviderId: null,
+      reloginAccountId: null,
+    });
+  });
+
   it("selecting a provider shows its detail", async () => {
     const d = daemon();
     renderWithDaemon(<ProvidersScreen client={d.client} />, d);

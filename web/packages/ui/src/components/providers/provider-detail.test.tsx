@@ -1,5 +1,7 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
+
+import { FakeWsClient } from "@/test/fake-ws-client";
 
 import { ProviderDetail } from "@/components/providers/provider-detail";
 import type { ProviderNavItem } from "@/lib/providers-view";
@@ -141,5 +143,72 @@ describe("ProviderDetail", () => {
     const text = screen.getByTestId("provider-diagnostics-text").textContent ?? "";
     expect(text).toContain("Account 1");
     expect(text).toContain("health=");
+  });
+
+  it("detail survives item going from null to a provider", async () => {
+    const d = daemon([]);
+    const view = renderWithDaemon(<ProviderDetail item={null} client={d.client} />, d);
+    expect(screen.getByTestId("provider-detail")).toHaveTextContent("Select a provider");
+    view.rerenderWith(d, <ProviderDetail item={item({ accountIds: [1], tone: "ok", connected: true })} client={d.client} />);
+    await flush();
+    expect(screen.getByTestId("provider-detail")).toHaveTextContent("Claude Code");
+  });
+
+  it("relogin of another account remounts the panel and keeps its confirm", async () => {
+    const ws = new FakeWsClient();
+    const work = { ...account(1, "anthropic"), hasIdentity: true };
+    const oldKey = { ...account(9, "anthropic"), label: "old-key", hasIdentity: false };
+    const d = new FakeUsageDaemon([]);
+    d.providers = { providers: PROVIDERS } as unknown as ProviderListResult;
+    d.accounts = [work, oldKey];
+    renderWithDaemon(
+      <ProviderDetail item={item({ accountIds: [1, 9], tone: "ok", connected: true })} client={ws as never} />,
+      d,
+    );
+    await flush();
+    act(() => {
+      useProvidersViewStore.getState().requestRelogin(1, "claude-native");
+    });
+    await flush();
+    const first = await waitFor(() => ws.nth("account.oauthStart", 0));
+    expect(first.params).toMatchObject({ accountId: 1 });
+    act(() => {
+      useProvidersViewStore.getState().requestRelogin(9, "claude-native");
+    });
+    await flush();
+    expect(first.options?.signal?.aborted).toBe(true);
+    expect(screen.getByTestId("relogin-confirm")).toHaveTextContent("old-key");
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("relogin-confirm-continue"));
+    });
+    const second = await waitFor(() => ws.nth("account.oauthStart", 1));
+    expect(second.params).toMatchObject({ accountId: 9, label: "old-key" });
+    expect(second.options?.signal?.aborted).not.toBe(true);
+  });
+
+  it("models search is cleared when the provider changes", async () => {
+    const withModels = [
+      { ...PROVIDERS[0], models: Array.from({ length: 9 }, (_, i) => ({ id: `m-${i}`, label: `Model ${i}` })) },
+      { id: "codex-native", label: "Codex", credentialKind: "oauth", accountProvider: "openai", models: Array.from({ length: 9 }, (_, i) => ({ id: `c-${i}`, label: `Codex Model ${i}` })) },
+    ];
+    const d = new FakeUsageDaemon([]);
+    d.providers = { providers: withModels } as unknown as ProviderListResult;
+    d.accounts = [];
+    const view = renderWithDaemon(
+      <ProviderDetail item={item({ accountIds: [], tone: "neutral", connected: false })} client={d.client} />,
+      d,
+    );
+    await flush();
+    fireEvent.change(screen.getByTestId("models-search"), { target: { value: "Model 3" } });
+    expect(screen.getByTestId("models-search")).toHaveValue("Model 3");
+    view.rerenderWith(
+      d,
+      <ProviderDetail
+        item={item({ id: "codex-native", label: "Codex", accountProvider: "openai", accountIds: [], tone: "neutral", connected: false })}
+        client={d.client}
+      />,
+    );
+    await flush();
+    expect(screen.getByTestId("models-search")).toHaveValue("");
   });
 });

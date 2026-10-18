@@ -276,13 +276,15 @@ export function ConnectAccountPanel({
     });
   }
 
-  // autoStart: one browser/device login on mount (the ref guards against a
-  // StrictMode double-mount or a re-render firing it twice). Never starts
-  // for an api-key-only provider -- the form shows instead -- and a legacy
-  // re-login waits for its Continue first.
+  // autoStart: one browser/device login per MOUNT (the ref resets in a
+  // mount-only cleanup, so a StrictMode simulated unmount/re-mount starts a
+  // fresh login after the hook's cleanup aborted the first -- exactly one
+  // login stays live). Never starts for an api-key-only provider -- the
+  // form shows instead -- and a legacy re-login waits for its Continue.
   const autoStartedRef = useRef(false);
   useEffect(() => {
     if (!autoStart || autoStartedRef.current || legacyConfirmPending) return;
+    if (login.state.phase !== "idle") return;
     if (!selectedProvider) return;
     const startMethod = methodTouched ? method : defaultConnectMethod(selectedProvider, remote);
     if (startMethod === "api-key") return;
@@ -296,6 +298,12 @@ export function ConnectAccountPanel({
       ...(relogin ? { accountId: relogin.id } : {}),
     });
   });
+  useEffect(
+    () => () => {
+      autoStartedRef.current = false;
+    },
+    [],
+  );
 
   const state = login.state;
   const showPastePanel =
@@ -314,7 +322,9 @@ export function ConnectAccountPanel({
   return (
     <div className="grid gap-3 border-t pt-4">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-ui-base font-medium">Connect an account</p>
+        <p className="text-ui-base font-medium" data-testid="connect-panel-heading">
+          {relogin ? "Sign in again" : "Connect an account"}
+        </p>
         {onClose ? (
           <Button
             type="button"

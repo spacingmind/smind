@@ -1,4 +1,4 @@
-import { useMemo, type JSX } from "react";
+import { Fragment, useMemo, type JSX } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import type { ProviderNavItem } from "@/lib/providers-view";
@@ -42,6 +42,19 @@ export function ProviderDetail({
   const clearConnect = useProvidersViewStore((s) => s.clearConnect);
   const clearRelogin = useProvidersViewStore((s) => s.clearRelogin);
   const requestRelogin = useProvidersViewStore((s) => s.requestRelogin);
+  const diagnosticText = useMemo(
+    () =>
+      !item || item.kind === "other"
+        ? null
+        : buildProviderDiagnostic({
+            provider: providers.find((p) => p.id === item.id) ?? null,
+            label: item.label,
+            navKind: item.kind,
+            rows: rows.filter((r) => item.accountIds.includes(r.account.id)),
+          }),
+    [item, providers, rows],
+  );
+
   if (!item) {
     return (
       <div data-testid="provider-detail" className="p-6">
@@ -54,13 +67,6 @@ export function ProviderDetail({
   const itemRows = rows.filter((r) => idSet.has(r.account.id));
   const attention = itemRows.filter((r) => r.badge.kind === "relogin" || r.badge.kind === "cooldown" || r.badge.kind === "error").length;
   const info = item.kind === "other" ? null : providers.find((p) => p.id === item.id) ?? null;
-  const diagnosticText = useMemo(
-    () =>
-      item.kind === "other"
-        ? null
-        : buildProviderDiagnostic({ provider: info, label: item.label, navKind: item.kind, rows: itemRows }),
-    [info, item, itemRows],
-  );
   // The connect panel never renders for the other bucket or cli items; the
   // three ways it can open are mutually exclusive (the store flags win over
   // the local + Connect toggle).
@@ -99,8 +105,13 @@ export function ProviderDetail({
         ) : null}
       </div>
 
+      {/* The body is keyed by provider: per-provider UI state (models search,
+          diagnostics open, the accounts card's action) resets when the
+          selection changes; the panels have their own identity keys. */}
+      <Fragment key={item.id}>
       {connectOpen ? (
         <ConnectAccountPanel
+          key={`connect-${item.id}`}
           client={client}
           providers={providers}
           initialProviderId={item.accountProvider}
@@ -111,6 +122,7 @@ export function ProviderDetail({
       ) : null}
       {reloginAccount ? (
         <ConnectAccountPanel
+          key={`relogin-${reloginAccount.id}`}
           client={client}
           providers={providers}
           relogin={reloginAccount}
@@ -164,6 +176,7 @@ export function ProviderDetail({
 
       {info ? <ProviderModels provider={info} /> : null}
       {diagnosticText ? <ProviderDiagnostics text={diagnosticText} /> : null}
+      </Fragment>
     </div>
   );
 }

@@ -15,7 +15,7 @@ describe("useProvidersViewStore", () => {
     expect(after.selectedProviderId).toBe("anthropic");
     expect(after.mobileView).toBe("detail");
     expect(after.query).toBe("");
-    expect(after.filter).toBe("attention");
+    expect(after.filter).toBe("all");
   });
 
   it("back returns to the list without losing the selection", () => {
@@ -61,5 +61,34 @@ describe("useProvidersViewStore", () => {
       connectProviderId: null,
       reloginAccountId: null,
     });
+  });
+
+  it("selecting a provider clears connect and relogin requests", () => {
+    const store = useProvidersViewStore.getState();
+    store.requestConnect("zai");
+    store.requestRelogin(5, "claude-native");
+    store.select("openai");
+    const after = useProvidersViewStore.getState();
+    expect(after.connectProviderId).toBeNull();
+    expect(after.reloginAccountId).toBeNull();
+  });
+
+  it("connect and relogin requests are mutually exclusive", () => {
+    useProvidersViewStore.getState().requestConnect("zai");
+    useProvidersViewStore.getState().requestRelogin(5, "claude-native");
+    expect(useProvidersViewStore.getState().connectProviderId).toBeNull();
+    expect(useProvidersViewStore.getState().reloginAccountId).toBe(5);
+    useProvidersViewStore.getState().requestConnect("kimi");
+    expect(useProvidersViewStore.getState().connectProviderId).toBe("kimi");
+    expect(useProvidersViewStore.getState().reloginAccountId).toBeNull();
+  });
+
+  it("select resets filter, sort and query", () => {
+    const store = useProvidersViewStore.getState();
+    store.setFilter("active");
+    store.setSort("name");
+    store.setQuery("q");
+    store.select("openai");
+    expect(useProvidersViewStore.getState()).toMatchObject({ filter: "all", sort: "status", query: "" });
   });
 });

@@ -1,4 +1,4 @@
-import { useMemo, type JSX } from "react";
+import { useEffect, useMemo, type JSX } from "react";
 
 import { Icons } from "@/lib/icons";
 import { buildProviderNav, type ProviderNavItem } from "@/lib/providers-view";
@@ -13,6 +13,8 @@ import { ProviderNav } from "@/components/providers/provider-nav";
 
 export function ProvidersScreen({ client }: { client: WsClient | null }): JSX.Element {
   const { providers } = useProviderCatalog();
+  // Leaving Settings Providers leaves no stale selection/connect flags behind.
+  useEffect(() => () => useProvidersViewStore.getState().reset(), []);
   const { rows, loaded } = useAccountRows();
   const isMobile = useIsMobile();
   const selectedProviderId = useProvidersViewStore((s) => s.selectedProviderId);
