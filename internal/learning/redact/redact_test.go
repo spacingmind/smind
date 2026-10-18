@@ -45,6 +45,11 @@ func corpus(r *Redactor) map[string]string {
 		"card year":        "4111111111111111 12 2026",
 		"card prefixed":    "order 99 4111 1111 1111 1111",
 		"timestamp":        "t=1760812345678 id=1000000000000000001 2026-10-18 12:30:45",
+		"hmac hex":         "HMAC f09e2e8c662248b483b7ffc050fec94dbca3a0aac36098b2cc2bd818319478da",
+		"commit hex":       "commit 6bd0c621de49f145fda9988c79fc35526f7eaed4",
+		"git log hex":      "git log: f09e2e8c662248b483b7ffc050fec94dbca3a0aac36098b2cc2bd818319478da",
+		"bare hex":         "6725a2a7b860dcd6c8a1f8b46287cced9041dff0",
+		"path deep":        "web/packages/ui/src/lib/v2/foo and see web/packages/ui/src/components/Button2/index",
 		"counters":         "max_tokens: 4096 and credentials: none",
 	}
 }
@@ -207,4 +212,53 @@ func TestRedact_CardWindows(t *testing.T) {
 			t.Errorf("%q: got %q, want %q", in, got, want)
 		}
 	}
+}
+
+func TestRedact_HexSecretsVsGitSha(t *testing.T) {
+	r := New(nil, nil)
+	const h64 = "f09e2e8c662248b483b7ffc050fec94dbca3a0aac36098b2cc2bd818319478da"
+	const h40 = "6bd0c621de49f145fda9988c79fc35526f7eaed4"
+	for in, want := range map[string]string{
+		"HMAC " + h64:                    "HMAC " + Placeholder,
+		"commit " + h40:                  "commit " + h40,
+		"git log: " + h64:                "git log: " + h64,
+		h40:                              Placeholder,
+		"web/packages/ui/src/lib/v2/foo": "web/packages/ui/src/lib/v2/foo",
+		"see web/packages/ui/src/components/Button2/index": "see web/packages/ui/src/components/Button2/index",
+	} {
+		if got := r.String(in); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+	}
+	for _, h := range hex24 {
+		if e := shannon(h); e < 3.0 {
+			t.Fatalf("fixture %s has entropy %.2f < 3.0", h, e)
+		}
+		if got := r.String("id " + h); got != "id "+Placeholder {
+			t.Errorf("%s: got %q, want redacted", h, got)
+		}
+	}
+}
+
+var hex24 = []string{
+	"149d439536b3216fdaeeb975",
+	"729fae923d5a4fd12aabfe22",
+	"8f219e9cb0eb53f16947ccf2",
+	"5ec84d8dbc74254770f58904",
+	"dba41ecccc3fc1626e53a130",
+	"43b026c48bbf33feff9243a8",
+	"f506b40928b5b7a767c76fb0",
+	"08f86bebb2737f6a6f0fb23c",
+	"6f5da2cec255404e4fb44003",
+	"4d6608697a8d41bed440e504",
+	"54f31af3176813e02ea68ef7",
+	"86e4d3cea27d26934b484e73",
+	"cf575dcad6ba2b0aee0ca923",
+	"732881584d8c4fa2815d2802",
+	"827283e0ad84173581569969",
+	"e58b081006f7e3dfc967a64c",
+	"b14028d512c9791e558e08ba",
+	"a7196b50ac2f86702824c1c0",
+	"99724caf4941d4072014b3ce",
+	"624a8940f1f836f99eee3692",
 }

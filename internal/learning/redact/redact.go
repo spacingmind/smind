@@ -38,7 +38,7 @@ var (
 		regexp.MustCompile(`/home/[^/\s]+`),
 		regexp.MustCompile(`(?i)c:\\users\\[^\\\s]+`),
 	}
-	entropyToken = regexp.MustCompile(`[A-Za-z0-9+/=]{24,}`)
+	entropyToken = regexp.MustCompile(`[A-Za-z0-9+=]{24,}`)
 	lowerHex     = regexp.MustCompile(`^[0-9a-f]+$`)
 )
 
@@ -100,13 +100,43 @@ func (r *Redactor) String(s string) string {
 			s = rl.re.ReplaceAllString(s, Placeholder)
 		}
 	}
-	s = entropyToken.ReplaceAllStringFunc(s, func(m string) string {
-		if isHighEntropy(m) {
-			return Placeholder
+	return redactEntropy(s)
+}
+
+// gitContext are words that mark a nearby hex token as a git object id or
+// checksum rather than a secret.
+var gitContext = []string{"commit", "sha", "hash", "rev", "digest", "checksum", "merge-base", "head", "parent", "tree", "blob", "git", "tag"}
+
+// redactEntropy replaces high-entropy tokens. A 40/64-char lowercase hex
+// token is kept only when one of the 24 bytes before it names a git/checksum
+// context.
+func redactEntropy(s string) string {
+	idx := entropyToken.FindAllStringIndex(s, -1)
+	if idx == nil {
+		return s
+	}
+	var out strings.Builder
+	last := 0
+	for _, loc := range idx {
+		tok := s[loc[0]:loc[1]]
+		exempt := false
+		if (len(tok) == 40 || len(tok) == 64) && lowerHex.MatchString(tok) {
+			before := strings.ToLower(s[max(0, loc[0]-24):loc[0]])
+			for _, w := range gitContext {
+				if strings.Contains(before, w) {
+					exempt = true
+					break
+				}
+			}
 		}
-		return m
-	})
-	return s
+		if !exempt && isHighEntropy(tok) {
+			out.WriteString(s[last:loc[0]])
+			out.WriteString(Placeholder)
+			last = loc[1]
+		}
+	}
+	out.WriteString(s[last:])
+	return out.String()
 }
 
 var (
@@ -239,17 +269,12 @@ func redactCards(run string) string {
 // Changed reports whether String would modify s.
 func (r *Redactor) Changed(s string) bool { return r.String(s) != s }
 
-// isHighEntropy reports whether token m should be redacted: it mixes digits
-// and letters, has Shannon entropy >= 3.5 bits/char, and is not a plain
-// lowercase-hex 40/64-char digest (git SHA / sha256).
+// isHighEntropy reports whether token m mixes digits and letters and has
+// Shannon entropy >= 3.5 bits/char (3.0 for all-lowercase-hex tokens, whose
+// alphabet tops out at 4 bits).
 func isHighEntropy(m string) bool {
-	if (len(m) == 40 || len(m) == 64) && lowerHex.MatchString(m) {
-		return false
-	}
 	hasDigit, hasLetter := false, false
-	counts := map[rune]int{}
 	for _, c := range m {
-		counts[c]++
 		if c >= '0' && c <= '9' {
 			hasDigit = true
 		}
@@ -260,10 +285,9 @@ func isHighEntropy(m string) bool {
 	if !hasDigit || !hasLetter {
 		return false
 	}
-	var h float64
-	for _, n := range counts {
-		p := float64(n) / float64(len(m))
-		h -= p * math.Log2(p)
+	h := shannon(m)
+	if lowerHex.MatchString(m) {
+		return h >= 3.0
 	}
 	return h >= 3.5
 }
@@ -286,4 +310,18 @@ func luhn(digits string) bool {
 		alt = !alt
 	}
 	return sum%10 == 0
+}
+
+// shannon returns the Shannon entropy of m in bits per character.
+func shannon(m string) float64 {
+	counts := map[rune]int{}
+	for _, c := range m {
+		counts[c]++
+	}
+	var h float64
+	for _, n := range counts {
+		p := float64(n) / float64(len(m))
+		h -= p * math.Log2(p)
+	}
+	return h
 }
