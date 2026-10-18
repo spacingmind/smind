@@ -8,7 +8,7 @@
 // would stop the run.
 
 import { describe, expect, it } from 'vitest';
-import { continueRun, sendFollowUpPrompt } from '../followUpPrompt';
+import { continueRun, isEchoOfOptimisticLine, sendFollowUpPrompt } from '../followUpPrompt';
 import { CloseableStream, RelayConnection } from '../relay/RelayConnection';
 import { PairingOffer } from '../relay/pairing';
 import { makeRelayHarness } from '../relayHarness';
@@ -91,7 +91,7 @@ describe('sendFollowUpPrompt (fake connection)', () => {
 
     await continueRun(conn, rec.deps, 7, { Provider: 'glm' }, seqFrom(0));
 
-    expect(calls[0]).toEqual(['run.start', { taskId: 7, provider: 'glm', prompt: 'Continue' }]);
+    expect(calls[0]).toEqual(['run.start', { taskId: 7, provider: 'glm', prompt: 'Continue', whenBusy: 'queue' }]);
     expect(rec.appended).toEqual([{ key: 'f1', role: 'user', text: 'Continue' }]);
   });
 
@@ -186,5 +186,126 @@ describe('sendFollowUpPrompt (relay harness)', () => {
     daemon.emitRequestEvent(attachReq.id!, 'chunk', { text: 'after detach' });
     await new Promise((r) => setTimeout(r, 10));
     expect(rec.appended.filter((l) => l.text === 'after detach')).toEqual([]); // no leaked handler
+  });
+});
+
+describe('sendFollowUpPrompt with whenBusy (fake connection)', () => {
+  it('queue mode that queues removes the optimistic line and does not attach', async () => {
+    const { conn, calls } = fakeConnection((method) => {
+      if (method === 'run.start') return { queued: true, queueItemId: 9 };
+      throw new Error(`unexpected method ${method}`);
+    });
+    const rec = recordingDeps();
+
+    const result = await sendFollowUpPrompt(conn, rec.deps, 42, 'glm', 'next step', seqFrom(0), { whenBusy: 'queue' });
+
+    expect(result).toEqual({ kind: 'queued', queueItemId: 9 });
+    expect(calls).toEqual([['run.start', { taskId: 42, provider: 'glm', prompt: 'next step', whenBusy: 'queue' }]]);
+    expect(rec.appended).toEqual([{ key: 'f1', role: 'user', text: 'next step' }]);
+    expect(rec.removed).toEqual([{ key: 'f1', role: 'user', text: 'next step' }]); // the queue row owns showing it
+    expect(rec.tails).toEqual([]); // nothing attached
+  });
+
+  it('queue mode that starts a run attaches as before', async () => {
+    const { conn, calls } = fakeConnection((method) => {
+      if (method === 'run.start') return { runId: 'run-new' };
+      if (method === 'run.attach') return {};
+      throw new Error(`unexpected method ${method}`);
+    });
+    const rec = recordingDeps();
+
+    const result = await sendFollowUpPrompt(conn, rec.deps, 42, 'glm', 'next step', seqFrom(0), { whenBusy: 'queue' });
+
+    expect(result).toEqual({ kind: 'started', runId: 'run-new' });
+    expect(calls).toEqual([
+      ['run.start', { taskId: 42, provider: 'glm', prompt: 'next step', whenBusy: 'queue' }],
+      ['run.attach', { runId: 'run-new' }],
+    ]);
+    expect(rec.removed).toEqual([]);
+    expect(rec.tails).toHaveLength(1);
+  });
+
+  it('interrupt mode passes whenBusy interrupt and may queue', async () => {
+    const { conn, calls } = fakeConnection((method) => {
+      if (method === 'run.start') return { queued: true, queueItemId: 3 };
+      throw new Error(`unexpected method ${method}`);
+    });
+    const rec = recordingDeps();
+
+    const result = await sendFollowUpPrompt(conn, rec.deps, 42, 'glm', 'urgent', seqFrom(0), { whenBusy: 'interrupt', chatId: 5 });
+
+    expect(result).toEqual({ kind: 'queued', queueItemId: 3 });
+    expect(calls[0]).toEqual(['run.start', { taskId: 42, chatId: 5, provider: 'glm', prompt: 'urgent', whenBusy: 'interrupt' }]);
+    expect(rec.tails).toEqual([]);
+  });
+
+  it('a queue-mode run.start failure rolls the optimistic line back', async () => {
+    const { conn, calls } = fakeConnection((method) => {
+      if (method === 'run.start') throw new Error('relay: connection is closed');
+      throw new Error(`unexpected method ${method}`);
+    });
+    const rec = recordingDeps();
+
+    await expect(
+      sendFollowUpPrompt(conn, rec.deps, 42, 'glm', 'try later', seqFrom(0), { whenBusy: 'queue' }),
+    ).rejects.toThrow('relay: connection is closed');
+    expect(rec.appended).toEqual([{ key: 'f1', role: 'user', text: 'try later' }]);
+    expect(rec.removed).toEqual([{ key: 'f1', role: 'user', text: 'try later' }]);
+    expect(rec.tails).toEqual([]);
+    expect(calls.map(([m]) => m)).toEqual(['run.start']);
+  });
+});
+
+describe('sendFollowUpPrompt shouldAttach (fake connection)', () => {
+  it('a run another path already attached is not attached again and the optimistic line stays', async () => {
+    const { conn, calls } = fakeConnection((method) => {
+      if (method === 'run.start') return { runId: 'run-new' };
+      if (method === 'run.attach') return {};
+      throw new Error(`unexpected method ${method}`);
+    });
+    const rec = recordingDeps();
+
+    const result = await sendFollowUpPrompt(conn, { ...rec.deps, shouldAttach: () => false }, 42, 'glm', 'next step', seqFrom(0));
+
+    expect(result).toEqual({ kind: 'started', runId: 'run-new' });
+    expect(calls.filter(([m]) => m === 'run.attach')).toEqual([]); // no second attach
+    expect(rec.removed).toEqual([]); // the prompt line stays: the daemon does not echo it as an event, the adopting stream dedupes an echo against it
+    expect(rec.appended).toEqual([{ key: 'f1', role: 'user', text: 'next step' }]);
+    expect(rec.tails).toEqual([]);
+  });
+
+  it('shouldAttach true attaches as before', async () => {
+    const { conn, calls } = fakeConnection((method) => {
+      if (method === 'run.start') return { runId: 'run-new' };
+      if (method === 'run.attach') return {};
+      throw new Error(`unexpected method ${method}`);
+    });
+    const rec = recordingDeps();
+
+    const result = await sendFollowUpPrompt(conn, { ...rec.deps, shouldAttach: () => true }, 42, 'glm', 'next step', seqFrom(0));
+
+    expect(result).toEqual({ kind: 'started', runId: 'run-new' });
+    expect(calls).toEqual([
+      ['run.start', { taskId: 42, provider: 'glm', prompt: 'next step' }],
+      ['run.attach', { runId: 'run-new' }],
+    ]);
+    expect(rec.removed).toEqual([]);
+    expect(rec.tails).toHaveLength(1);
+  });
+});
+
+describe('isEchoOfOptimisticLine', () => {
+  const optimistic = { key: 'f1', role: 'user', text: 'next step' } as TimelineLine;
+
+  it('is true for a user_message echoing an optimistic user line, so the prompt shows once', () => {
+    expect(isEchoOfOptimisticLine([optimistic], 'user_message', { text: 'next step' })).toBe(true);
+  });
+
+  it('is false for a different prompt, another event type, or a user line the daemon sent (not optimistic)', () => {
+    expect(isEchoOfOptimisticLine([optimistic], 'user_message', { text: 'something else' })).toBe(false);
+    expect(isEchoOfOptimisticLine([optimistic], 'chunk', { text: 'next step' })).toBe(false);
+    expect(isEchoOfOptimisticLine([{ key: 'e3', role: 'user', text: 'next step' } as TimelineLine], 'user_message', { text: 'next step' })).toBe(false);
+    expect(isEchoOfOptimisticLine([], 'user_message', { text: 'next step' })).toBe(false);
+    expect(isEchoOfOptimisticLine([optimistic], 'user_message', undefined)).toBe(false);
   });
 });
