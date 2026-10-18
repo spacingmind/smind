@@ -130,8 +130,8 @@ describe("ArchiveFinishedDialog (PR-H11)", () => {
     });
 
     const kept = screen.getByTestId("archive-finished-kept");
-    expect(kept.textContent).toContain("1 task is kept");
-    expect(kept.textContent).toContain("has unfinished descendants");
+    expect(kept.textContent).toContain("1 finished task is kept");
+    expect(kept.textContent).toContain("they still have unfinished sub-tasks");
   });
 
   it("archive finished partial failure keeps the dialog open and lists failures", async () => {
@@ -162,9 +162,10 @@ describe("ArchiveFinishedDialog (PR-H11)", () => {
     await flush();
 
     expect(onOpenChange).not.toHaveBeenCalled();
-    expect(screen.getByText("Coder two")).toBeInTheDocument();
-    expect(screen.getByTestId("archive-finished-list").textContent).toContain("Coder two");
+    expect(screen.getByTestId("archive-finished-failures").textContent).toContain("Coder two");
     expect(screen.getByText(/checkout conflict/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Archived 1 of 2 finished sub-tasks" })).toBeInTheDocument();
+    expect(screen.getByTestId("dialog-archive-finished-confirm")).toHaveTextContent("Try again");
   });
 });
 
@@ -269,8 +270,9 @@ describe("StopTreeDialog (PR-H11)", () => {
     const confirm = await waitFor(() => client.nth("task.stopTree", 1));
     await act(async () => {
       confirm.resolve({
+        // A non-dry task.stopTree leaves runs/queuedPrompts empty (wire contract).
         dryRun: false,
-        runs: [{ ...item(8, "Coder one"), runId: "r2" }],
+        runs: [],
         queuedPrompts: 0,
         stopped: [],
         failed: [{ ...item(8, "Coder one"), runId: "r2", error: "run did not stop within 10s" }],
@@ -281,7 +283,9 @@ describe("StopTreeDialog (PR-H11)", () => {
 
     expect(onOpenChange).not.toHaveBeenCalled();
     expect(screen.getByText(/run did not stop within 10s/)).toBeInTheDocument();
-    expect(screen.getByTestId("stop-tree-list").textContent).toContain("Coder one");
+    expect(screen.getByTestId("stop-tree-failures").textContent).toContain("Coder one");
+    expect(screen.getByRole("heading", { name: "Stopped 0 of 1 running tasks" })).toBeInTheDocument();
+    expect(screen.getByTestId("dialog-stop-tree-confirm")).toHaveTextContent("Try again");
   });
 });
 

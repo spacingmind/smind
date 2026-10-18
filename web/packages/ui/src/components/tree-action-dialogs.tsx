@@ -39,6 +39,20 @@ function FormError({ message }: { message: string | null }) {
 
 const MAX_VISIBLE = 8;
 
+/** Plain-language form of the daemon's skip reasons; an unknown reason is shown as-is. */
+function keptReason(reason: string): string {
+  switch (reason) {
+    case "has unfinished descendants":
+      return "they still have unfinished sub-tasks";
+    case "descendant failed to archive":
+      return "a sub-task could not be archived";
+    case "already archived":
+      return "already archived";
+    default:
+      return reason.replace(/`/g, "");
+  }
+}
+
 /** Capped item list: 8 rows then "and N more". */
 function ItemList({ testId, items }: { testId: string; items: TreeActionItem[] }) {
   const visible = items.slice(0, MAX_VISIBLE);
@@ -117,7 +131,10 @@ export function ArchiveFinishedDialog({
     }
   }, [open]);
 
-  const dry = outcome ?? result;
+  // The dry run stays the source of the selection even after a confirm: the
+  // confirm's own result (task.archiveFinished non-dry) is shown only as the
+  // outcome.
+  const dry = result;
   const eligible = dry?.eligible ?? [];
   const kept = dry?.skipped ?? [];
 
@@ -126,7 +143,9 @@ export function ArchiveFinishedDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            Archive {eligible.length === 1 ? "1 finished sub-task" : `${eligible.length} finished sub-tasks`}?
+            {outcome
+              ? `Archived ${outcome.archived.length} of ${eligible.length} finished sub-tasks`
+              : `Archive ${eligible.length === 1 ? "1 finished sub-task" : `${eligible.length} finished sub-tasks`}?`}
           </DialogTitle>
           <DialogDescription asChild>
             <div>
@@ -151,7 +170,7 @@ export function ArchiveFinishedDialog({
                   </ul>
                 </div>
               )}
-              {!loading && !error && eligible.length > 0 && (
+              {!loading && !error && !outcome && eligible.length > 0 && (
                 <>
                   <p className="mt-2">Finished sub-tasks to archive:</p>
                   <ItemList testId="archive-finished-list" items={eligible} />
@@ -162,13 +181,13 @@ export function ArchiveFinishedDialog({
                   )}
                   {kept.length > 0 && (
                     <p data-testid="archive-finished-kept" className="mt-2 font-normal text-foreground-muted">
-                      {kept.length === 1 ? "1 task is kept" : `${kept.length} tasks are kept`} because
-                      {" "}{[...new Set(kept.map((k) => k.reason.replace(/`/g, "")))].join(", ")}.
+                      {kept.length === 1 ? "1 finished task is kept" : `${kept.length} finished tasks are kept`}:{" "}
+                      {[...new Set(kept.map((k) => keptReason(k.reason)))].join("; ")}.
                     </p>
                   )}
                 </>
               )}
-              {!loading && !error && dry && eligible.length === 0 && (
+              {!loading && !error && !outcome && dry && eligible.length === 0 && (
                 <p data-testid="archive-finished-none" className="mt-2 font-normal text-foreground-muted">
                   No finished sub-tasks to archive.
                 </p>
@@ -205,11 +224,7 @@ export function ArchiveFinishedDialog({
               }
             }}
           >
-            {pending
-              ? "Archiving…"
-              : eligible.length > 0
-                ? `Archive ${eligible.length}`
-                : "Archive"}
+            {pending ? "Archiving…" : outcome ? "Try again" : eligible.length > 0 ? `Archive ${eligible.length}` : "Archive"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -242,7 +257,9 @@ export function StopTreeDialog({
     }
   }, [open]);
 
-  const dry = outcome ?? result;
+  // The dry run stays the source of the selection: a non-dry task.stopTree
+  // result leaves runs/queuedPrompts empty and reports stopped/failed instead.
+  const dry = result;
   const runs = dry?.runs ?? [];
   const queued = dry?.queuedPrompts ?? 0;
   const includesSelf = task != null && runs.some((r) => r.id === task.ID);
@@ -252,7 +269,9 @@ export function StopTreeDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            Stop {runs.length === 1 ? "1 running task" : `${runs.length} running tasks`} in this tree?
+            {outcome
+              ? `Stopped ${outcome.stopped.length} of ${runs.length} running tasks`
+              : `Stop ${runs.length === 1 ? "1 running task" : `${runs.length} running tasks`} in this tree?`}
           </DialogTitle>
           <DialogDescription asChild>
             <div>
@@ -274,13 +293,13 @@ export function StopTreeDialog({
                   </ul>
                 </div>
               )}
-              {!loading && !error && runs.length > 0 && (
+              {!loading && !error && !outcome && runs.length > 0 && (
                 <>
                   <p className="mt-2">Tasks that will be stopped:</p>
                   <ItemList testId="stop-tree-list" items={runs} />
                 </>
               )}
-              {!loading && !error && (
+              {!loading && !error && !outcome && (
                 <ul className="mt-2 list-none space-y-1 font-normal text-foreground-muted">
                   {includesSelf && (
                     <li data-testid="stop-tree-includes-self">Includes this task itself — it is running too.</li>
@@ -327,7 +346,7 @@ export function StopTreeDialog({
               }
             }}
           >
-            {pending ? "Stopping…" : runs.length > 0 ? `Stop ${runs.length}` : "Stop"}
+            {pending ? "Stopping…" : outcome ? "Try again" : runs.length > 0 ? `Stop ${runs.length}` : "Stop"}
           </Button>
         </DialogFooter>
       </DialogContent>
