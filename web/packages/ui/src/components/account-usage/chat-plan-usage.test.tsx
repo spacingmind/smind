@@ -4,11 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatUsageTotal } from "@/components/chat-usage-total";
 import { RunUsagePill } from "@/components/run-usage-pill";
-import { PlanUsageSourceProvider } from "@/hooks/use-chat-plan-usage";
 import { closeUsageModal, useUsageModalOpen } from "@/hooks/use-usage-modal";
 import { STORAGE_KEYS } from "@/lib/storage";
 import type { RunUsage } from "@/lib/types";
 import { claudeAccount, codexAccount, FIXTURE_NOW, problemAccount } from "@/test/account-usage-fixtures";
+import { renderWithDaemon } from "@/test/render-with-daemon";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 
 function tokens(overrides: Partial<RunUsage> = {}): RunUsage {
@@ -28,11 +28,12 @@ function ModalProbe() {
 }
 
 function renderWith(daemon: FakeUsageDaemon, ui: ReactNode) {
-  return render(
-    <PlanUsageSourceProvider client={daemon.client} events={daemon.events}>
+  return renderWithDaemon(
+    <>
       {ui}
       <ModalProbe />
-    </PlanUsageSourceProvider>,
+    </>,
+    daemon,
   );
 }
 

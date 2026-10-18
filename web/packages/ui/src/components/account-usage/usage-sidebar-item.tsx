@@ -6,7 +6,7 @@ import { UsageSourceIcon } from "@/components/account-usage/usage-source-icon";
 import { useSidebar } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
-import { useAccountUsage } from "@/hooks/use-account-usage";
+import { useUsageReports } from "@/hooks/use-usage-reports";
 import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useUsagePreferences } from "@/hooks/use-usage-preferences";
 import { resolveAccountFilter } from "@/lib/account-usage/model";
@@ -199,8 +199,8 @@ function PlainUsageTrigger() {
 }
 
 /** Mounted only while the row is on and visible: it is the touching surface (ADR-0028 AC54). */
-function UsageSidebarSummary({ client, events }: { client: WsClient | null; events: DaemonEvents | null }) {
-  const { snapshot } = useAccountUsage(client, events, { touch: true });
+function UsageSidebarSummary() {
+  const { snapshot } = useUsageReports({ touch: true });
   const { preferences } = useUsagePreferences();
   const filterKey = resolveAccountFilter(preferences.accountKey, snapshot.reports);
   const sources = useMemo(
@@ -217,10 +217,11 @@ function UsageSidebarSummary({ client, events }: { client: WsClient | null; even
  * provider logo and percent, one line, tone coloured; pressing it opens the Usage modal. The
  * caller renders it only while "Show summary in sidebar" is on. On the icon-collapsed rail it
  * renders nothing -- the rail already has the footer Usage icon, a line of percents cannot
- * fit 48px, and an unseen row must not keep touching the daemon.
+ * fit 48px, and an unseen row must not keep touching the daemon. The connection comes from
+ * `useDaemonConnection`; the props are accepted only until the sidebar stops passing them.
  */
-export function UsageSidebarItem({ client, events }: { client: WsClient | null; events: DaemonEvents | null }) {
+export function UsageSidebarItem(_props: { client?: WsClient | null; events?: DaemonEvents | null } = {}) {
   const { state, isMobile } = useSidebar();
   if (state === "collapsed" && !isMobile) return null;
-  return <UsageSidebarSummary client={client} events={events} />;
+  return <UsageSidebarSummary />;
 }

@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef } from "react";
 
+import type { QueryClient } from "@tanstack/react-query";
+
+import { applyDaemonEvent } from "@/lib/query/event-bridge";
 import type { DaemonNotification, WsClient } from "@/lib/ws-client";
 import { LIFECYCLE_TOPICS } from "@/lib/workspace-tree";
 
@@ -24,8 +27,8 @@ const MCP_TOPICS = ["mcpServer.created", "mcpServer.updated", "mcpServer.deleted
 /** ADR-0016's three chat lifecycle topics (P3: chat tabs, rename, archive all react to these). */
 const CHAT_TOPICS = ["chat.created", "chat.updated", "chat.archived", "chat.queueUpdated"];
 
-/** ADR-0028's plan-usage topics: a fetched report (`account.usage`) and an account removal. */
-const ACCOUNT_USAGE_TOPICS = ["account.usage", "account.removed"];
+/** ADR-0015/0028's account topics: a created/renamed/re-credentialed account, a removal, and a fetched usage report. */
+const ACCOUNT_TOPICS = ["account.updated", "account.usage", "account.removed"];
 
 const TOPICS = [
   "task.status",
@@ -35,7 +38,7 @@ const TOPICS = [
   ...PROFILE_TOPICS,
   ...MCP_TOPICS,
   ...CHAT_TOPICS,
-  ...ACCOUNT_USAGE_TOPICS,
+  ...ACCOUNT_TOPICS,
 ];
 
 /** Registration surface returned by useDaemonEvents -- topic-filtered, with per-listener try/catch isolation. */
@@ -58,17 +61,36 @@ export interface DaemonEvents {
  * client, this effect re-runs, listeners re-register via their own
  * client-keyed effects upstream).
  */
-export function useDaemonEvents(client: WsClient | null): DaemonEvents | null {
+export function useDaemonEvents(client: WsClient | null, queryClient?: QueryClient): DaemonEvents | null {
   const listenersRef = useRef(new Map<string, Set<(payload: unknown) => void>>());
+  const lastClient = useRef<WsClient | null>(null);
 
   useEffect(() => {
     if (!client) return;
-    // Fire-and-forget: a failed subscribe just means no live events this
-    // connection -- consumers' own refetch-on-client-change remains the
-    // source of truth, so this must never surface as an error state.
-    client.call("events.subscribe", { topics: TOPICS }).catch(() => {});
+    // A new client after an earlier one is a reconnect: the cache outlived the transport and missed
+    // every event in the gap, so it is invalidated -- but only once the new subscription is in
+    // place, or an event between the re-read and the subscribe would be lost for good.
+    const reconnected = lastClient.current !== null && lastClient.current !== client;
+    lastClient.current = client;
+    // A failed subscribe just means no live events this connection; the invalidation still runs
+    // (the re-read is the source of truth), and nothing here surfaces as an error state.
+    client
+      .call("events.subscribe", { topics: TOPICS })
+      .catch(() => {})
+      .then(() => {
+        if (reconnected && queryClient) void queryClient.invalidateQueries();
+      });
 
     const off = client.onNotification((n: DaemonNotification) => {
+      // ADR-0032: this is the single event -> query-cache bridge; it runs before listeners so a
+      // listener that reads the cache sees the event applied.
+      if (queryClient) {
+        try {
+          applyDaemonEvent(queryClient, n.topic, n.payload);
+        } catch (err) {
+          console.error("useDaemonEvents: query bridge threw", err);
+        }
+      }
       const set = listenersRef.current.get(n.topic);
       if (!set) return;
       for (const fn of set) {
@@ -83,7 +105,7 @@ export function useDaemonEvents(client: WsClient | null): DaemonEvents | null {
     return () => {
       off();
     };
-  }, [client]);
+  }, [client, queryClient]);
 
   return useMemo(
     () =>

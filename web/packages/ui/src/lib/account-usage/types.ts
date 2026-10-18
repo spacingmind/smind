@@ -135,3 +135,13 @@ export type UsageView =
   | { kind: "error"; message: string }
   | { kind: "disabled"; message: string }
   | { kind: "ready"; reports: AccountUsage[] };
+
+/** What the `account.usage` query holds (ADR-0032): the daemon's cached list, plus what its answer said about the RPC. */
+export interface UsageQueryData {
+  /** False once the daemon answered "unknown method": it predates `account.usage`; never asked again. */
+  supportsUsage: boolean;
+  /** `accountUsage.enabled` as the daemon last said. */
+  enabled: boolean;
+  ttlSeconds: number;
+  reports: AccountUsage[];
+}

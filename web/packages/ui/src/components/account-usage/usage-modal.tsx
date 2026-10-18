@@ -3,21 +3,19 @@ import { UsageControls } from "@/components/account-usage/usage-controls";
 import { useUsageSurface } from "@/components/account-usage/use-usage-surface";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { closeUsageModal, useUsageModalOpen } from "@/hooks/use-usage-modal";
-import type { WsClient } from "@/lib/ws-client";
 
 /**
  * Plan usage over the current screen (Paseo's UsageModal): a dialog on wide
  * layouts, a bottom sheet (at most 80% of the height, backdrop visible) on
  * narrow ones. Title row = account filter, Refresh all, Settings. It owns no
  * route: opening and closing leave the open task, tabs and scroll alone.
- * While it is mounted it is a touching surface (see useAccountUsage).
+ * While it is mounted it is a touching surface (see useUsageReports).
  */
-function UsageModal({ client, events }: { client: WsClient | null; events: DaemonEvents | null }) {
+function UsageModal() {
   const isMobile = useIsMobile();
-  const surface = useUsageSurface(client, events, { touch: true });
+  const surface = useUsageSurface({ touch: true });
   const body = (
     <div data-testid="usage-modal-body" className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
       <UsageBody
@@ -91,8 +89,8 @@ function TitleFor({ isMobile }: { isMobile: boolean }) {
  * sends nothing. Lives outside the shell's `inert` wrapper so it opens
  * above the Settings screen too (Radix portals above its z-40).
  */
-export function UsageModalRoot({ client, events }: { client: WsClient | null; events: DaemonEvents | null }) {
+export function UsageModalRoot() {
   const open = useUsageModalOpen();
   if (!open) return null;
-  return <UsageModal client={client} events={events} />;
+  return <UsageModal />;
 }

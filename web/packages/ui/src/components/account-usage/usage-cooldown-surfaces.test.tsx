@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UsageModalRoot } from "@/components/account-usage/usage-modal";
@@ -8,6 +8,7 @@ import "@/components/settings/usage-section";
 import { closeUsageModal, openUsageModal } from "@/hooks/use-usage-modal";
 import type { UsageCooldown } from "@/lib/account-usage/types";
 import { claudeAccount, codexAccount } from "@/test/account-usage-fixtures";
+import { renderWithDaemon } from "@/test/render-with-daemon";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 
 async function flush(): Promise<void> {
@@ -64,7 +65,7 @@ describe("cooldown on the usage surfaces", () => {
   it("usage_modal_and_settings_render_cooldown (both containers)", async () => {
     // The modal.
     const modalDaemon = daemon();
-    const modal = render(<UsageModalRoot client={modalDaemon.client} events={modalDaemon.events} />);
+    const modal = renderWithDaemon(<UsageModalRoot />, modalDaemon);
     act(() => openUsageModal());
     await flush();
     expect(screen.getByTestId("usage-modal")).toBeInTheDocument();
@@ -84,7 +85,7 @@ describe("cooldown on the usage surfaces", () => {
       ),
     ]) {
       const settingsDaemon = daemon();
-      const view = render(<>{wrap(settingsSection().render({ client: settingsDaemon.client, events: settingsDaemon.events }))}</>);
+      const view = renderWithDaemon(<>{wrap(settingsSection().render({ client: settingsDaemon.client, events: settingsDaemon.events }))}</>, settingsDaemon);
       await flush();
       expectCooldownOnlyOnAccountOne();
       view.unmount();
@@ -93,7 +94,7 @@ describe("cooldown on the usage surfaces", () => {
 
   it("a cooldown event shows on an open surface and clears when the daemon sends none", async () => {
     const d = new FakeUsageDaemon([claudeAccount(), codexAccount()]);
-    render(<UsageModalRoot client={d.client} events={d.events} />);
+    renderWithDaemon(<UsageModalRoot />, d);
     act(() => openUsageModal());
     await flush();
     expect(screen.queryByTestId("usage-cooldown")).toBeNull();

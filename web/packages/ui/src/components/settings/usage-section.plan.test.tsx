@@ -6,6 +6,7 @@ import { listSettingsSections } from "@/components/settings/settings-registry";
 import { SectionTitleInHeaderProvider } from "@/components/settings/settings-title";
 import "@/components/settings/usage-section";
 import { claudeAccount, codexAccount } from "@/test/account-usage-fixtures";
+import { renderWithDaemon } from "@/test/render-with-daemon";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 
 async function flush(): Promise<void> {
@@ -23,7 +24,7 @@ function usageSection() {
 }
 
 function renderSection(daemon: FakeUsageDaemon, wrap: (node: React.ReactNode) => React.ReactNode = (n) => n) {
-  return render(<>{wrap(usageSection().render({ client: daemon.client, events: daemon.events }))}</>);
+  return renderWithDaemon(<>{wrap(usageSection().render({ client: daemon.client, events: daemon.events }))}</>, daemon);
 }
 
 /** Test doubles of the two Settings containers: the in-shell layout, and the full-screen screen's framed view. */

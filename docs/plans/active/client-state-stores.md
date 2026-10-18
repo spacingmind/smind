@@ -24,8 +24,10 @@ audit is in the Supervisor's notes). Status: **spec**, nothing built.
 ## Acceptance Criteria
 
 ### S1 — foundation (PR 1)
-- AC1 `@tanstack/react-query` and `zustand` added to `web/packages/ui`; one `QueryClient` per `WsClient` provided at the
-  root; switching daemon connection never shows the previous daemon's data.
+- AC1 `@tanstack/react-query` and `zustand` added to `web/packages/ui`; one `QueryClient` per daemon **connection
+  identity** (the ws endpoint, `daemonWsBaseUrl()`; not per `WsClient` object), provided at the root. A transport
+  reconnect to the same daemon keeps the cache and invalidates it (background refetch, no loading flash); switching to
+  a different connection gets a new client and never shows the previous daemon's data.
 - AC2 `src/lib/query-keys.ts` is the only place query keys are built; a lint/test forbids inline key arrays elsewhere.
 - AC3 `useDaemonEvents` is the single event→cache bridge (invalidate or `setQueryData`); it subscribes to
   `account.updated` in addition to today's topics.
@@ -39,8 +41,10 @@ audit is in the Supervisor's notes). Status: **spec**, nothing built.
 - AC7 `displayName` is the account name everywhere (ADR-0028 AC58).
 - AC8 A rename/credential change from another tab or the CLI (`account.updated`) updates every surface without reload;
   a newly added account appears in Plan usage without reload.
-- AC9 No extra provider usage calls: mounting Providers, opening Settings, or focusing the window performs **zero**
-  `account.usage` refreshes (`touch`/`refresh`); count-asserting tests.
+- AC9 No extra provider usage calls: the new query hooks and the Providers surface never send `touch`/`refresh` on
+  mount, focus, retry, reconnect or an `account.*` event (a re-read is always `mode: "cached"`); count-asserting
+  tests. The existing ADR-0028 touching surfaces (Usage modal, Settings → Usage, sidebar summary) keep their
+  once-per-TTL `touch` while open and window visible+focused; `refresh` stays button-only. (Clarified 2026-10-18, Human.)
 
 ### S3 — catalog, profiles, health (PR 2)
 - AC10 `useProviderCatalog()`, `useProfiles()`, `useProviderHealth()` replace every `provider.list` / `profile.list` /
@@ -70,6 +74,7 @@ audit is in the Supervisor's notes). Status: **spec**, nothing built.
 
 ## Test Scenarios (named; the implementing PRs add the concrete files)
 - `query client is per connection and cleared on switch`
+- `a reconnect to the same daemon keeps the cache and invalidates it`
 - `query keys only come from query-keys.ts`
 - `account.updated renames the account in providers, usage card and chat pill`
 - `expired cached report shows expired in providers`
@@ -95,7 +100,7 @@ audit is in the Supervisor's notes). Status: **spec**, nothing built.
   add its own account/health state.
 
 ## Progress
-- [ ] PR 1 (S1+S2)
+- [x] PR 1 (S1+S2) — branch `feat/client-state-accounts` (awaiting merge)
 - [ ] PR 2 (S3)
 - [ ] PR 3 (S4)
 - [ ] PR 4 (AC17)
@@ -103,4 +108,38 @@ audit is in the Supervisor's notes). Status: **spec**, nothing built.
 - [ ] PR 6 (AC19)
 
 ## Validation
-(filled as PRs land)
+
+### PR 1 (S1 + S2), 2026-10-18
+Evidence: `task lint` exit 0, `bunx tsc -b packages/ui` clean, UI suite 212 files / 2604 tests green, `task test` no failures.
+Live check: a throwaway Vite harness (not committed) mounting the real Settings screen over a scripted fake client with an
+`expired` cached report; light + dark screenshots reviewed (`providers-*.png`, `usage-*.png`, renamed variants).
+- AC1 ✔ `lib/query/daemon-query-provider.test.tsx`: `query client is per connection and cleared on switch`,
+  `a reconnect to the same daemon keeps the cache and invalidates it`, first connect does not invalidate.
+- AC2 ✔ `lib/query-keys.test.ts` `query keys only come from query-keys.ts`.
+- AC3 ✔ `use-daemon-events.test.ts` (topic list includes `account.updated`), `lib/query/event-bridge.test.ts`.
+- AC4 ✔ `lib/query/query-client.ts` defaults (documented), `usageQueryOptions` retry/refetch off; failed query not retried
+  (`usage-call-budget.test.tsx`).
+- AC5 ✔ `lib/account-status.ts` + `useAccountStatus`; Providers, usage card, sidebar summary and chat pill all read the
+  single `account.usage`/`account.list` cache (sidebar *health count* is S3).
+- AC6 ✔ `providers-cache.test.tsx` `expired cached report shows expired in providers`; screenshot: `work` red
+  "Login expired 2h ago. Reconnect it in Providers." in Providers and in the Plan usage card.
+- AC7 ✔ account name = `displayName` (status.name) in Providers rows/aria-labels; rename form still edits `label`.
+- AC8 ✔ `providers-events.test.tsx` `account.updated renames the account in providers, usage card and chat pill`,
+  `a newly added account appears in plan usage without reload`; live: rename event updated the row with no reload.
+- AC9 ✔ `usage-call-budget.test.tsx` `opening settings performs zero usage refreshes` (providers/appearance/default,
+  focus/blur/visibility/timers), `providers-cache.test.tsx` `providers surface performs zero usage refreshes`,
+  `use-usage-reports.test.tsx` reconnect + two-touching-surfaces-one-touch. Live counts (harness): Providers mount =
+  1 `account.usage` `cached`, 0 touch, 0 refresh; after a rename event +1 `cached`, still 0 touch/refresh; Settings → Usage =
+  1 `touch` (the ADR-0028 touching surface, once).
+Independent review (read-only `reviewer`, 2026-10-18) found no path to an unwanted `touch`/`refresh`, and these defects, all fixed
+with tests: same-daemon reconnect left inactive queries stale (now `refetchOnMount` when invalidated, invalidation runs after the
+new `events.subscribe` is answered; `use-daemon-events.query.test.tsx`), offline pausing then late-firing touch/refresh
+(`networkMode: "always"`), a reconnect re-arming an immediate touch / a touch on a dead socket burning the TTL
+(`use-usage-reports.test.tsx`), a late `account.usage` resurrecting a removed account (`event-bridge.test.ts`), usage read
+merging against a pre-await snapshot, touch clock leaking across daemons, a sticky transport-error `provider.test` result,
+StrictMode clearing the live cache, and a weak settings zero-refresh test (now seeds accounts + positive control).
+Known/deferred: a failed `provider.test` result stays until retested or the daemon identity changes; "expired 2h ago" text is
+not re-evaluated against time while Settings stays open; AccountsDialog/profiles keep their own test dots (S3); two daemons
+on the same host:port share an identity (the reconnect invalidation re-reads them).
+Unverified: real daemon + real provider accounts (deliberately not used); mid-transition frames (nothing in this PR animates);
+desktop app webview.

@@ -3,11 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PlanUsageCompact } from "@/components/account-usage/plan-usage-compact";
 import { ChatUsageTotal } from "@/components/chat-usage-total";
-import { PlanUsageSourceProvider } from "@/hooks/use-chat-plan-usage";
 import { closeUsageModal } from "@/hooks/use-usage-modal";
 import { STORAGE_KEYS } from "@/lib/storage";
 import type { UsageCooldown, UsageWindow } from "@/lib/account-usage/types";
 import { claudeAccount, FIXTURE_NOW } from "@/test/account-usage-fixtures";
+import { renderWithDaemon } from "@/test/render-with-daemon";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 
 const MIN = 60_000;
@@ -140,10 +140,9 @@ describe("plan usage compact: passive cooldown and observed windows", () => {
     const daemon = new FakeUsageDaemon([
       claudeAccount({ cooldown: cooldown({ until: new Date(Date.now() + 10 * MIN).toISOString() }) }),
     ]);
-    render(
-      <PlanUsageSourceProvider client={daemon.client} events={daemon.events}>
-        <ChatUsageTotal runs={[{ usage: { inputTokens: 1, outputTokens: 1, source: "claude_result" } }]} provider="claude-native" />
-      </PlanUsageSourceProvider>,
+    renderWithDaemon(
+      <ChatUsageTotal runs={[{ usage: { inputTokens: 1, outputTokens: 1, source: "claude_result" } }]} provider="claude-native" />,
+      daemon,
     );
     await act(async () => {
       for (let i = 0; i < 4; i++) await Promise.resolve();
