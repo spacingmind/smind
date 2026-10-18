@@ -19,6 +19,7 @@ type Config struct {
 	Agents        AgentsConfig        `yaml:"agents"`
 	AccountUsage  AccountUsageConfig  `yaml:"accountUsage"`
 	Relay         RelayConfig         `yaml:"relay"`
+	Learning      LearningConfig      `yaml:"learning"`
 	Log           LogConfig           `yaml:"log"`
 }
 
@@ -367,8 +368,9 @@ func Default() Config {
 			ExhaustThresholdPct: 100,
 			Passive:             true,
 		},
-		Relay: RelayConfig{LegacyDevices: false, MaxDevices: DefaultRelayMaxDevices},
-		Log:   LogConfig{MaxSizeMB: DefaultLogMaxSizeMB, MaxFiles: DefaultLogMaxFiles},
+		Relay:    RelayConfig{LegacyDevices: false, MaxDevices: DefaultRelayMaxDevices},
+		Learning: DefaultLearning(),
+		Log:      LogConfig{MaxSizeMB: DefaultLogMaxSizeMB, MaxFiles: DefaultLogMaxFiles},
 	}
 }
 
@@ -387,17 +389,17 @@ func LoadFile(path string) (Config, error) {
 	if err != nil && !os.IsNotExist(err) {
 		// The environment still applies: a container's SMIND_LISTEN and
 		// SMIND_PASSWORD must not vanish because the file cannot be read.
-		applyServerEnv(&cfg.Server)
+		applyEnv(&cfg)
 		return cfg, fmt.Errorf("read config: %w", err)
 	}
 	if err == nil {
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
 			// Same for a typo in the file.
-			applyServerEnv(&cfg.Server)
+			applyEnv(&cfg)
 			return cfg, fmt.Errorf("parse config %s: %w", path, err)
 		}
 	}
-	applyServerEnv(&cfg.Server)
+	applyEnv(&cfg)
 	if err := validateServer(cfg.Server); err != nil {
 		return cfg, fmt.Errorf("config %s: %w", path, err)
 	}
@@ -428,7 +430,23 @@ func LoadFile(path string) (Config, error) {
 	if mt := cfg.Agents.GLM.MaxTurns; mt != nil && (*mt < 1 || *mt > MaxGLMTurns) {
 		return cfg, fmt.Errorf("config %s: agents.glm.maxTurns must be between 1 and %d, got %d", path, MaxGLMTurns, *mt)
 	}
+	if err := cfg.Learning.Validate(); err != nil {
+		return cfg, fmt.Errorf("config %s: %w", path, err)
+	}
 	return cfg, nil
+}
+
+// applyEnv applies every env override over the file. It runs on every exit
+// path of LoadFile (missing, unreadable or malformed file included): a
+// container's kill switch must not vanish because there is no config.yaml.
+func applyEnv(cfg *Config) {
+	applyServerEnv(&cfg.Server)
+	if v := strings.TrimSpace(os.Getenv(EnvLearning)); v != "" {
+		switch strings.ToLower(v) {
+		case "0", "false", "off":
+			cfg.Learning.Enabled = false
+		}
+	}
 }
 
 // applyServerEnv applies SMIND_LISTEN, SMIND_HOSTNAMES and SMIND_PASSWORD over
