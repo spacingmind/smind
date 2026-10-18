@@ -44,6 +44,8 @@ export interface RunSummary {
   Status: 'running' | 'done' | 'error' | 'stopped' | 'interrupted';
   StartedAt: string;
   FinishedAt: string | null;
+  /** The run's chat; run.list sends it. */
+  ChatID?: number;
   /** Why the run stopped (e.g. max_tokens); derived by the daemon. */
   StopReason?: string;
   /** The daemon's derived disposition (ADR-0027 D13): "needs-continue" when the run ended done at a turn/token/budget cap. */
@@ -68,9 +70,10 @@ export async function fetchOverview(
 }
 
 /** run.list, filtered to one task; most recent first (the daemon's own ordering). */
-export async function listRunsForTask(conn: RelayConnection, taskId: number): Promise<RunSummary[]> {
-  const all = (await conn.call('run.list')) as RunSummary[];
-  return all.filter((r) => r.TaskID === taskId);
+export async function listRunsForTask(conn: RelayConnection, taskId: number, chatId?: number): Promise<RunSummary[]> {
+  // With a chat the daemon filters (run.list {taskId, chatId}); a task has more than one chat, so "latest" is per chat.
+  const all = (await conn.call('run.list', chatId === undefined ? undefined : { taskId, chatId })) as RunSummary[];
+  return all.filter((r) => r.TaskID === taskId && (chatId === undefined || r.ChatID === chatId));
 }
 
 /**
@@ -96,4 +99,58 @@ export async function respondPermission(
   optionId: string,
 ): Promise<void> {
   await conn.call('run.respondPermission', { runId, requestId, optionId });
+}
+
+/** The daemon-side per-chat prompt queue (ADR-0021 §9): one pending item, wire shape as the Go field names. */
+export interface ChatQueueItem {
+  ID: number;
+  ChatID: number;
+  Prompt: string;
+  RunConfig: string;
+  Source: string;
+  FromTaskID: number | null;
+  FromChatID: number | null;
+  Priority: number;
+  Status: 'queued' | 'delivered' | 'cancelled';
+  RunID: string | null;
+  CancelReason: string;
+  CancelKind: string;
+  CreatedAt: string;
+  UpdatedAt: string;
+}
+
+/** ADR-0021 §2's busy-chat delivery mode for run.start. */
+export type WhenBusy = 'queue' | 'interrupt';
+
+/** run.start's two outcomes with whenBusy set: the run started, or the prompt was parked in the chat's queue. */
+export type RunStartResult = { kind: 'started'; runId: string } | { kind: 'queued'; queueItemId: number };
+
+/** run.start with whenBusy: {queued, queueItemId} becomes the queued variant, {runId} the started one. */
+export async function startRunWhenBusy(
+  conn: RelayConnection,
+  p: { taskId: number; chatId?: number; provider: string; prompt: string; whenBusy: WhenBusy },
+): Promise<RunStartResult> {
+  const params: Record<string, unknown> = { taskId: p.taskId, provider: p.provider, prompt: p.prompt, whenBusy: p.whenBusy };
+  if (p.chatId !== undefined) params.chatId = p.chatId;
+  const result = (await conn.call('run.start', params)) as { runId?: string; queued?: boolean; queueItemId?: number };
+  if (result.queued) return { kind: 'queued', queueItemId: result.queueItemId! };
+  return { kind: 'started', runId: result.runId! };
+}
+
+/** The task's default chat (internal/workspace's DefaultChat): chat.list's first entry. */
+export async function defaultChatId(conn: RelayConnection, taskId: number): Promise<number> {
+  const chats = (await conn.call('chat.list', { taskId, includeArchived: true })) as Array<{ ID: number }>;
+  if (chats.length === 0) throw new Error('task has no chat');
+  return chats[0].ID;
+}
+
+/** chat.queueList: the chat's queue snapshot (queued, delivered, cancelled). */
+export async function listChatQueue(conn: RelayConnection, chatId: number): Promise<ChatQueueItem[]> {
+  const result = (await conn.call('chat.queueList', { chatId })) as { items?: ChatQueueItem[] };
+  return result.items ?? [];
+}
+
+/** chat.queueCancel: cancel one queued item. */
+export async function cancelQueuedPrompt(conn: RelayConnection, itemId: number): Promise<void> {
+  await conn.call('chat.queueCancel', { itemId });
 }

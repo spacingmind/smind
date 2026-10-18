@@ -11,7 +11,10 @@
 // Commands: list | approve <id|peer label> | revoke <id|peer label> | window <maxNew> [seconds] |
 // peer-add <label> | peer-call <label> | peer-drop <label> | relay-restart |
 // daemon-restart | quit. With -fake-agent also:
-// seed-run <stopReason|end_turn> [title]. Diagnostics go to stderr, prefixed "devharness: ".
+// seed-run <stopReason|end_turn> [title] | seed-live <scenario> [title] |
+// set-scenario <taskId> <text...> | stop-run <runId> |
+// queue-prompt <taskId> <queue|interrupt> <prompt...> |
+// queue-list <chatId> | run-status <runId>. Diagnostics go to stderr, prefixed "devharness: ".
 package main
 
 import (
@@ -28,6 +31,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -501,6 +505,18 @@ func (h *harness) dispatch(cmd string, args []string) (map[string]any, error) {
 		return map[string]any{}, nil
 	case "seed-run":
 		return h.seedRun(args)
+	case "seed-live":
+		return h.seedLive(args)
+	case "set-scenario":
+		return h.setScenario(args)
+	case "stop-run":
+		return h.stopRun(args)
+	case "queue-prompt":
+		return h.queuePrompt(args)
+	case "queue-list":
+		return h.queueList(args)
+	case "run-status":
+		return h.runStatus(args)
 	case "daemon-restart":
 		// A new Hub loses every E2EE counter; waiting clients must re-handshake
 		// on a fresh session id. Registry and daemon key are kept.
@@ -699,6 +715,62 @@ func (p *peer) request(method string, params any, timeout time.Duration) (rpcRes
 	}
 }
 
+// newSeedTask creates (once) the shared seeded workspace and a task in it;
+// scenario, when non-empty, selects the fake agent's behaviour via a
+// "scenario" file in the task worktree.
+func (h *harness) newSeedTask(title, scenario string) (store.Workspace, store.Task, error) {
+	// One seeded workspace for every seed-run (the app lists the first workspace's tasks): created on first use.
+	if h.seedWS == nil {
+		repo, err := os.MkdirTemp(h.workDir, "seed-repo-")
+		if err != nil {
+			return store.Workspace{}, store.Task{}, err
+		}
+		git := func(gitArgs []string) error {
+			cmd := exec.Command("git", gitArgs...)
+			cmd.Dir = repo
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("git %v: %v: %s", gitArgs, err, out)
+			}
+			return nil
+		}
+		for _, g := range [][]string{
+			{"init"},
+			{"config", "core.autocrlf", "false"},
+			{"config", "user.email", "devharness@example.com"},
+			{"config", "user.name", "devharness"},
+		} {
+			if err := git(g); err != nil {
+				return store.Workspace{}, store.Task{}, err
+			}
+		}
+		if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("seeded\n"), 0o644); err != nil {
+			return store.Workspace{}, store.Task{}, err
+		}
+		if err := git([]string{"add", "README.md"}); err != nil {
+			return store.Workspace{}, store.Task{}, err
+		}
+		if err := git([]string{"commit", "-m", "initial commit"}); err != nil {
+			return store.Workspace{}, store.Task{}, err
+		}
+		created, err := h.wm.CreateWorkspace(repo, "Seeded", "hard", nil)
+		if err != nil {
+			return store.Workspace{}, store.Task{}, err
+		}
+		h.seedWS = &created
+	}
+	ws := *h.seedWS
+	task, err := h.wm.CreateTask(ws.ID, nil, title)
+	if err != nil {
+		return store.Workspace{}, store.Task{}, err
+	}
+	if scenario != "" {
+		if err := os.WriteFile(filepath.Join(*task.WorktreePath, "scenario"), []byte(scenario), 0o644); err != nil {
+			return store.Workspace{}, store.Task{}, err
+		}
+	}
+	return ws, task, nil
+}
+
 // seedRun creates a workspace, a task and a real run executed by the fake ACP
 // agent (D13): with a scenario "stop <reason>" the run ends done at a cap and
 // reports Disposition needs-continue; without one it ends end_turn normally.
@@ -714,54 +786,13 @@ func (h *harness) seedRun(args []string) (map[string]any, error) {
 	if len(args) > 1 {
 		title = strings.Join(args[1:], " ")
 	}
-	// One seeded workspace for every seed-run (the app lists the first workspace's tasks): created on first use.
-	if h.seedWS == nil {
-		repo, err := os.MkdirTemp(h.workDir, "seed-repo-")
-		if err != nil {
-			return nil, err
-		}
-		git := func(gitArgs ...string) error {
-			cmd := exec.Command("git", gitArgs...)
-			cmd.Dir = repo
-			if out, err := cmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("git %v: %v: %s", gitArgs, err, out)
-			}
-			return nil
-		}
-		for _, g := range [][]string{
-			{"init"},
-			{"config", "core.autocrlf", "false"},
-			{"config", "user.email", "devharness@example.com"},
-			{"config", "user.name", "devharness"},
-		} {
-			if err := git(g...); err != nil {
-				return nil, err
-			}
-		}
-		if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("seeded\n"), 0o644); err != nil {
-			return nil, err
-		}
-		if err := git("add", "README.md"); err != nil {
-			return nil, err
-		}
-		if err := git("commit", "-m", "initial commit"); err != nil {
-			return nil, err
-		}
-		created, err := h.wm.CreateWorkspace(repo, "Seeded", "hard", nil)
-		if err != nil {
-			return nil, err
-		}
-		h.seedWS = &created
+	scenario := ""
+	if reason != "end_turn" {
+		scenario = "stop " + reason
 	}
-	ws := *h.seedWS
-	task, err := h.wm.CreateTask(ws.ID, nil, title)
+	ws, task, err := h.newSeedTask(title, scenario)
 	if err != nil {
 		return nil, err
-	}
-	if reason != "end_turn" {
-		if err := os.WriteFile(filepath.Join(*task.WorktreePath, "scenario"), []byte("stop "+reason), 0o644); err != nil {
-			return nil, err
-		}
 	}
 
 	ctx := context.Background()
@@ -793,4 +824,159 @@ func (h *harness) seedRun(args []string) (map[string]any, error) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// seedLive seeds a task and starts a run that stays LIVE (e.g. scenario
+// "hang"); it answers once the run is running, not when it finishes.
+func (h *harness) seedLive(args []string) (map[string]any, error) {
+	if h.runner == nil {
+		return nil, errors.New("seed-live needs -fake-agent")
+	}
+	if err := need(args, 1, "seed-live <scenario> [title]"); err != nil {
+		return nil, err
+	}
+	title := "Live task"
+	if len(args) > 1 {
+		title = strings.Join(args[1:], " ")
+	}
+	ws, task, err := h.newSeedTask(title, args[0])
+	if err != nil {
+		return nil, err
+	}
+	runID, err := h.api.Runs.Start(context.Background(), h.wm, h.runner, task.ID, 0, taskrunner.ProviderGLM, "seed", taskrunner.PermissionSettings{}, taskrunner.ThinkingLevelUnspecified)
+	if err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		_, st, err := h.api.Runs.History(runID)
+		if err != nil {
+			return nil, err
+		}
+		if st.Status == runs.StatusRunning {
+			break
+		}
+		if st.Status == runs.StatusError {
+			return nil, fmt.Errorf("live run failed: %s", st.Err)
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.New("timed out waiting for the live run to start")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	chat, err := h.wm.DefaultChat(task.ID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"workspaceId": ws.ID,
+		"taskId":      task.ID,
+		"chatId":      chat.ID,
+		"runId":       runID,
+		"status":      "running",
+	}, nil
+}
+
+// setScenario overwrites the fake agent's scenario file in a task worktree.
+func (h *harness) setScenario(args []string) (map[string]any, error) {
+	if h.runner == nil {
+		return nil, errors.New("set-scenario needs -fake-agent")
+	}
+	if err := need(args, 2, "set-scenario <taskId> <text...>"); err != nil {
+		return nil, err
+	}
+	id, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("bad taskId %q", args[0])
+	}
+	task, err := h.wm.GetTask(id)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(*task.WorktreePath, "scenario"), []byte(strings.Join(args[1:], " ")), 0o644); err != nil {
+		return nil, err
+	}
+	return map[string]any{}, nil
+}
+
+func (h *harness) stopRun(args []string) (map[string]any, error) {
+	if h.runner == nil {
+		return nil, errors.New("stop-run needs -fake-agent")
+	}
+	if err := need(args, 1, "stop-run <runId>"); err != nil {
+		return nil, err
+	}
+	if err := h.api.Runs.Stop(args[0]); err != nil {
+		return nil, err
+	}
+	return map[string]any{}, nil
+}
+
+// queuePrompt enqueues a prompt on a busy chat (ADR-0021): queue waits for
+// the live run to end, interrupt also stops it.
+func (h *harness) queuePrompt(args []string) (map[string]any, error) {
+	if h.runner == nil {
+		return nil, errors.New("queue-prompt needs -fake-agent")
+	}
+	if err := need(args, 3, "queue-prompt <taskId> <queue|interrupt> <prompt...>"); err != nil {
+		return nil, err
+	}
+	taskID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("bad taskId %q", args[0])
+	}
+	var whenBusy runs.WhenBusy
+	switch args[1] {
+	case "queue":
+		whenBusy = runs.WhenBusyQueue
+	case "interrupt":
+		whenBusy = runs.WhenBusyInterrupt
+	default:
+		return nil, fmt.Errorf("bad whenBusy %q", args[1])
+	}
+	out, err := h.api.Runs.StartWhenBusy(context.Background(), h.wm, h.runner, taskID, 0, taskrunner.ProviderGLM, strings.Join(args[2:], " "), taskrunner.PermissionSettings{}, taskrunner.ThinkingLevelUnspecified, whenBusy, store.ChatQueueSourceHuman, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"queued": out.Queued, "queueItemId": out.QueueItemID, "runId": out.RunID}, nil
+}
+
+func (h *harness) queueList(args []string) (map[string]any, error) {
+	if h.runner == nil {
+		return nil, errors.New("queue-list needs -fake-agent")
+	}
+	if err := need(args, 1, "queue-list <chatId>"); err != nil {
+		return nil, err
+	}
+	chatID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("bad chatId %q", args[0])
+	}
+	items, err := h.api.Runs.ListChatQueue(chatID)
+	if err != nil {
+		return nil, err
+	}
+	list := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		runID := ""
+		if it.RunID != nil {
+			runID = *it.RunID
+		}
+		list = append(list, map[string]any{"id": it.ID, "status": it.Status, "priority": it.Priority, "prompt": it.Prompt, "runId": runID, "cancelKind": it.CancelKind})
+	}
+	return map[string]any{"items": list}, nil
+}
+
+func (h *harness) runStatus(args []string) (map[string]any, error) {
+	if h.runner == nil {
+		return nil, errors.New("run-status needs -fake-agent")
+	}
+	if err := need(args, 1, "run-status <runId>"); err != nil {
+		return nil, err
+	}
+	_, st, err := h.api.Runs.History(args[0])
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"status": st.Status, "stopReason": st.StopReason, "disposition": st.Disposition}, nil
 }

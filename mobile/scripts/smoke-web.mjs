@@ -314,6 +314,100 @@ async function needsContinue(page, harness) {
 }
 
 /**
+ * ADR-0021 §9 on mobile: the daemon-side prompt queue. A live run (the fake
+ * agent's `hang` scenario), two prompts sent while it runs are QUEUED on the
+ * daemon and shown with Cancel, one is cancelled, then the live run is stopped
+ * and the remaining prompt is delivered as a run the daemon starts itself,
+ * which the screen adopts and streams. Screenshots: idle, live with 2 queued,
+ * after cancel, after delivery.
+ */
+async function promptQueue(page, harness) {
+  const idle = await harness.cmd('seed-run end_turn Idle task');
+  const live = await harness.cmd('seed-live hang Queue task');
+  if (!idle.ok || !live.ok) {
+    fail(`seeding failed: ${JSON.stringify([idle, live])}`);
+    return;
+  }
+  await page.fill('textarea, input[type="text"]', harness.pairingUrl);
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  try {
+    await page.getByText('Queue task', { exact: true }).waitFor({ timeout: 30_000 });
+  } catch {
+    fail('the seeded tasks did not appear on the task list');
+    return;
+  }
+
+  // Idle: no queue, the plain compose placeholder.
+  await page.getByText('Idle task', { exact: true }).click();
+  await page.getByText(/^run [0-9a-f]{8} ·/).waitFor({ timeout: 20_000 });
+  if (await page.getByLabel('Queued prompts').isVisible().catch(() => false)) fail('an idle task shows a queue');
+  await shootBothSchemes(page, 'queue-idle');
+
+  // An idle send under whenBusy "queue" starts the run at once; the user's own prompt line shows exactly once, whichever of
+  // the run.start response and the run.status event reaches the screen first.
+  await page.locator('textarea').fill('hello idle');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  try {
+    await page.getByText('user: hello idle', { exact: true }).waitFor({ timeout: 20_000 });
+    await page.waitForFunction(() => document.body.innerText.split('assistant: world!').length - 1 >= 2, null, { timeout: 30_000 });
+  } catch {
+    fail('an idle send did not start a run showing the prompt and its reply');
+  }
+  if ((await page.getByText('user: hello idle', { exact: true }).count()) !== 1) fail('the sent prompt line is not shown exactly once');
+  await page.getByRole('button', { name: /Back/ }).click();
+
+  // Live: two prompts queue on the daemon.
+  await page.getByText('Queue task', { exact: true }).click();
+  try {
+    await page.getByText(/· glm · live$/).waitFor({ timeout: 20_000 });
+  } catch {
+    fail('the live run did not show as live');
+    return;
+  }
+  const send = async (text) => {
+    await page.locator('textarea').fill(text);
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+  };
+  await send('second prompt');
+  await page.getByText('second prompt', { exact: true }).waitFor({ timeout: 20_000 });
+  await send('third prompt');
+  try {
+    await page.getByText('third prompt', { exact: true }).waitFor({ timeout: 20_000 });
+  } catch {
+    fail('the second queued prompt did not appear');
+    return;
+  }
+  if ((await page.getByRole('button', { name: /^Cancel queued prompt/ }).count()) !== 2) fail('expected two queued rows with a Cancel button');
+  if (!(await page.locator('textarea').getAttribute('placeholder'))?.startsWith('Queue a follow-up')) fail('live placeholder is not the queue wording');
+  await shootBothSchemes(page, 'queue-live-2-queued');
+
+  // Cancel the first queued prompt.
+  await page.getByRole('button', { name: /Cancel queued prompt: second prompt/ }).click();
+  try {
+    await page.getByText('second prompt', { exact: true }).waitFor({ state: 'detached', timeout: 20_000 });
+  } catch {
+    fail('the cancelled prompt did not leave the queue');
+    return;
+  }
+  await shootBothSchemes(page, 'queue-after-cancel');
+
+  // Stop the live run: the daemon delivers the remaining prompt as a new run the screen adopts.
+  await harness.cmd(`set-scenario ${live.taskId} default`);
+  await harness.cmd(`stop-run ${live.runId}`);
+  try {
+    // The delivered run is the daemon's own: its streamed reply ("Hello, world!" from the fake agent's default scenario)
+    // appears after the first run's, and the header meta moves to the new run.
+    await page.getByText('assistant: world!', { exact: true }).waitFor({ timeout: 40_000 });
+    await page.getByText(/· glm · done$/).waitFor({ timeout: 20_000 });
+  } catch {
+    fail(`the delivered prompt did not appear in the transcript (daemon-started run not adopted); the page says: ${JSON.stringify(await page.evaluate(() => document.body.innerText).catch(() => '?'))}`);
+    return;
+  }
+  if (await page.getByRole('button', { name: /^Cancel queued prompt/ }).isVisible().catch(() => false)) fail('the delivered prompt is still shown as queued');
+  await shootBothSchemes(page, 'queue-after-delivery');
+}
+
+/**
  * ADR-0031 P13c: a daemon with a password. Connect -> "Daemon password
  * required" -> a wrong password -> "Incorrect password" -> more wrong ones until
  * the daemon rate-limits this device -> the correct password -> "Too many
@@ -412,6 +506,7 @@ async function run() {
   let outdated = null;
   let protectedDaemon = null;
   let seeded = null;
+  let queued = null;
   try {
     for (const scheme of ['light', 'dark']) {
       const context = await browser.newContext({ colorScheme: scheme, ignoreHTTPSErrors: true });
@@ -455,6 +550,15 @@ async function run() {
         await runPage.getByText('smind pairing', { exact: true }).waitFor({ timeout: 20_000 });
         await needsContinue(runPage, seeded);
         await runContext.close();
+
+        queued = await startHarness(['-fake-agent', fakeAgent, '-window-max', '1']);
+        const queueContext = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+        const queuePage = await queueContext.newPage();
+        trackErrors(queuePage, 'queue');
+        await queuePage.goto(url, { waitUntil: 'load' });
+        await queuePage.getByText('smind pairing', { exact: true }).waitFor({ timeout: 20_000 });
+        await promptQueue(queuePage, queued);
+        await queueContext.close();
       } finally {
         rmSync(agentDir, { recursive: true, force: true });
       }
@@ -480,6 +584,7 @@ async function run() {
     outdated?.cleanup();
     protectedDaemon?.cleanup();
     seeded?.cleanup();
+    queued?.cleanup();
   }
 
   if (pageErrors.length > 0) fail(`page/console errors during run:\n  ${pageErrors.join('\n  ')}`);
