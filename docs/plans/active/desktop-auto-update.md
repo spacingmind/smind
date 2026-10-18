@@ -377,6 +377,16 @@ own last step; `*.sig` added to checksums/artifact/release globs.
 
 ### Not verified, needs a human or the next release
 
+**Update (desktop-update-e2e, `desktop-update-e2e.md`):** the feed -> check ->
+download -> signature check -> install path is now covered hermetically in
+`cargo test` (macOS: a real install onto a fake `smind.app`; Windows: check +
+download + verify), including a tampered artifact, a signature from another key,
+an older release replayed under a newer announcement and an undecodable signature
+(all refused, bundle intact, update still pending), and the dialog renders the
+Rust-produced result. What stays below as manual: the real window (screenshots,
+menu click, Later/Esc, launch check), `app.restart()` and the relaunched version,
+the Windows installer hand-off, `daemon-survives-app-update`, the real release path.
+
 - **The in-window end-to-end on a real app** (`local-update-end-to-end`,
   `local-menu-check`, `local-bad-signature-rejected`, `local-later-dismiss`,
   `local-endpoint-down-launch-silent`, `daemon-survives-app-update`, and the

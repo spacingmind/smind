@@ -74,3 +74,28 @@ async fn proxy_ssh_without_tunnel_is_502() {
     let again = http.get(format!("{base}/api/ping")).header("cookie", &cookie).send().await.unwrap();
     assert_eq!(again.status(), 502);
 }
+
+/// The tunnel is up (ssh owns the port) but the daemon behind it is down: the
+/// far end of the forward closes every connection. The proxy must answer 502
+/// for the API and /ws, so the UI shows the connection as unreachable rather
+/// than connected.
+#[tokio::test]
+async fn a_tunnel_whose_daemon_is_down_reads_as_unreachable() {
+    let (state, id, base, http, cookie) = proxy_with_ssh_connection().await;
+    let dead = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = dead.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            // Accept and hang up, like ssh forwarding to a closed remote port.
+            let _ = dead.accept().await;
+        }
+    });
+    state.set_ssh_local(&id, format!("http://{addr}"));
+    for path in ["/api/token", "/api/ping"] {
+        let resp = http.get(format!("{base}{path}")).header("cookie", &cookie).send().await.unwrap();
+        assert_eq!(resp.status(), 502, "{path}");
+    }
+    let ws = http.get(format!("{base}/ws")).header("cookie", &cookie).send().await.unwrap();
+    assert_ne!(ws.status(), 200);
+    assert_ne!(ws.status(), 101);
+}
