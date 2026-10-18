@@ -59,8 +59,8 @@ export function ProviderModels(props: { provider: ProviderInfo }): JSX.Element {
       ) : null}
       <ul className="flex flex-col">
         {rows.map((row) => (
-          <li key={row.modelId} className="flex flex-col gap-0.5 py-1">
-            <span className="flex items-center gap-2">
+          <li key={row.modelId} className="flex flex-col gap-0.5 border-t py-1.5 first:border-t-0">
+            <span className="flex items-baseline gap-2">
               <span className="text-ui-base">{row.modelLabel}</span>
               {row.isDefault ? (
                 <StatusBadge
@@ -70,8 +70,10 @@ export function ProviderModels(props: { provider: ProviderInfo }): JSX.Element {
                   Default
                 </StatusBadge>
               ) : null}
+              <span className="min-w-0 flex-1 truncate text-right font-mono text-ui-xs text-muted-foreground">
+                {row.modelId}
+              </span>
             </span>
-            <span className="font-mono text-ui-xs text-muted-foreground truncate">{row.modelId}</span>
             {row.description && row.description !== row.modelId ? (
               <span className="text-ui-xs text-muted-foreground">{row.description}</span>
             ) : null}

@@ -56,6 +56,7 @@ export function AccountsCard(props: {
         <div className="flex flex-wrap items-center gap-2">
           <Input
             aria-label="Search accounts"
+            placeholder="Search accounts"
             data-testid="accounts-search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}

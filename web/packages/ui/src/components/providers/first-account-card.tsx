@@ -14,7 +14,7 @@ import type { ProviderInfo } from "@/lib/types";
 export function FirstAccountCard({ providers }: { providers: ProviderInfo[] }): JSX.Element {
   const requestConnect = useProvidersViewStore((s) => s.requestConnect);
   return (
-    <div data-testid="first-account-card" className="grid gap-3 rounded-xl border bg-muted/40 p-6">
+    <div data-testid="first-account-card" className="grid gap-3 p-6">
       <h4 className="text-ui-lg font-medium">Connect your first account</h4>
       <p className="text-ui-base text-muted-foreground">
         Accounts let sMind route the /v1 proxy across your subscriptions and keys.

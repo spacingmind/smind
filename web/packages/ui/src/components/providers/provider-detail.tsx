@@ -1,4 +1,4 @@
-import { useMemo, useState, type JSX } from "react";
+import { useMemo, type JSX } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import type { ProviderNavItem } from "@/lib/providers-view";
@@ -42,7 +42,6 @@ export function ProviderDetail({
   const clearConnect = useProvidersViewStore((s) => s.clearConnect);
   const clearRelogin = useProvidersViewStore((s) => s.clearRelogin);
   const requestRelogin = useProvidersViewStore((s) => s.requestRelogin);
-  const [showConnect, setShowConnect] = useState(false);
   if (!item) {
     return (
       <div data-testid="provider-detail" className="p-6">
@@ -68,7 +67,6 @@ export function ProviderDetail({
   const canConnect = item.kind !== "other" && item.kind !== "cli" && item.accountProvider !== undefined;
   const connectOpen = canConnect && connectProviderId === item.id;
   const reloginAccount = canConnect ? itemRows.find((r) => r.account.id === reloginAccountId)?.account ?? null : null;
-  const manualConnectOpen = canConnect && !connectOpen && !reloginAccount && showConnect;
   const onConnected = () => void queryClient.invalidateQueries({ queryKey: queryKeys.accountList() });
 
   return (
@@ -77,19 +75,6 @@ export function ProviderDetail({
         <div className="flex items-center gap-2">
           {item.id === "other" ? null : <ProviderGlyph provider={item.id} />}
           <h3 className="text-ui-lg font-medium">{item.label}</h3>
-          {canConnect ? (
-            <>
-              <span className="flex-1" />
-              <Button
-              variant="outline"
-              size="sm"
-              data-testid="provider-detail-connect"
-              onClick={() => setShowConnect((v) => !v)}
-            >
-                + Connect account
-              </Button>
-            </>
-          ) : null}
         </div>
         <p className="text-ui-sm text-muted-foreground">
           {KIND_LABEL[item.kind]}
@@ -131,15 +116,6 @@ export function ProviderDetail({
           relogin={reloginAccount}
           autoStart
           onClose={clearRelogin}
-          onConnected={onConnected}
-        />
-      ) : null}
-      {manualConnectOpen ? (
-        <ConnectAccountPanel
-          client={client}
-          providers={providers}
-          initialProviderId={item.accountProvider}
-          onClose={() => setShowConnect(false)}
           onConnected={onConnected}
         />
       ) : null}

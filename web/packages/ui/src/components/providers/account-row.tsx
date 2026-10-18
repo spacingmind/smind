@@ -107,6 +107,7 @@ export function AccountRow(props: {
           ) : null}
           <span className="flex-1" />
           {healthBadge(badge, id)}
+          <span className="flex shrink-0 items-center gap-1.5">
           {badge.kind === "relogin" && account.credentialType === "oauth" ? (
             <Button
               variant="outline"
@@ -159,6 +160,7 @@ export function AccountRow(props: {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          </span>
         </div>
       )}
       {action?.kind === "credential" ? (
