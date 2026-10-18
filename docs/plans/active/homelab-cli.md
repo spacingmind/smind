@@ -581,8 +581,13 @@ optional daemon password inside the encrypted hello is the model for `device_hel
 ### P13c — relay device password (after P4)
 
 1. When a daemon password is set (P4), `device_hello.password` must be present and correct before any session data;
-   missing/wrong → rejected and not recorded as pending; with no password set the daemon logs a one-line warning per start.
-2. Desktop and mobile prompt for the password when the daemon requires it (never stored; held in memory/Rust only).
+   missing → `password_required`, wrong → `incorrect_password`, rate limited → `too_many_attempts` + `retry_after`; none is
+   recorded as pending; with no password set the daemon logs a one-line warning per start. The signed bytes and vectors do
+   not change. Exact wire spec: ADR-0031 D9 "Daemon password (P13c, as built)".
+2. Desktop and mobile prompt for the password when the daemon requires it (never stored; held in memory/Rust only), stop
+   auto-retrying on `password_required`/`incorrect_password`, and honour `retry_after`. Desktop (this PR): the password goes from
+   the webview to Rust once (a Tauri command), is held in Rust memory only, and is never written to disk or logs nor sent back to
+   the webview; mobile follows the same rules in JS memory (its own PR).
 
 **Paseo reference — ported.** The password inside the encrypted hello (`refs/paseo/SECURITY.md` "Trust model";
 `packages/server/src/server/session-admission-auth.ts` → `password_required`/`incorrect_password`). Different: Paseo currently
