@@ -140,7 +140,7 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
 
 ## Progress
 - [ ] ADR-0033 + this plan (docs PR)
-- [ ] PR-B1 identity
+- [x] PR-B1 identity (branch `feat/account-identity`)
 - [ ] PR-B2 loginId + oauthComplete
 - [ ] PR-B3 device code
 - [ ] PR-B4 connect form
@@ -149,3 +149,21 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
 
 ## Validation
 (filled as PRs land)
+
+**PR-B1 (AC-B1..AC-B3), all Go tests under `-race`:**
+- `identity migration keeps existing rows null` -- `internal/store/migrate_test.go` (`TestMigrate_AccountsIdentity`, run twice for
+  idempotence; also asserts the partial unique index rejects a duplicate `(provider, identity)` and allows many NULLs and the same
+  identity under another provider). Store methods: `TestStore_AccountIdentity` in `internal/store/accounts_test.go`.
+- `oauth exchange derives a stable identity for anthropic and openai` -- `internal/accounts/oauth_login_test.go`
+  (`TestLoginExchange_Identity`, httptest token servers; stable, distinct, empty on missing subject, never the raw subject).
+- `relogin same identity replaces credential in place and keeps routing links`, `relogin with accountId and different identity is
+  identity_mismatch`, `relogin adopts identity for a legacy account`, `relogin adopt is identity_in_use when another row owns it` --
+  `internal/accounts/login_coordinator_test.go` (`TestLoginCoordinator_Relogin`; also covers unknown/foreign `accountId` ->
+  `login_unknown_account` and a subject-less login). The same-identity test asserts routing_decisions, quota_snapshots, models and
+  label survive, the passive cooldown is cleared (ADR-0028 section 7), and the credential-replaced hook and `account.updated` fire.
+- Wire: `TestServer_AccountOAuthStart_Relogin` and the extended `TestServer_AccountOAuthStart_HappyPath` in
+  `internal/wsapi/oauth_test.go` (`created`/`adopted`, `identity_mismatch`/`login_unknown_account` through the `account.oauthStart:`
+  wrapper); `TestAccount_ListExposesHasIdentityNeverIdentity` in `internal/wsapi/account_test.go` (raw JSON has `hasIdentity`, no
+  `identity` key or value).
+- Refresh-blocked clearing needs no new code: the quota poller's rejected-credential state is keyed on a credential fingerprint
+  (`internal/quota/poller.go`), so a replaced credential unblocks by itself.
