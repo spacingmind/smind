@@ -105,6 +105,7 @@ pub fn run() {
             commands::connections_add_relay,
             commands::connections_preview_relay,
             commands::connections_relay_status,
+            commands::connections_relay_set_password,
             commands::connections_remove,
             commands::connections_select,
             commands::connections_get_current,

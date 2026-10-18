@@ -5,8 +5,9 @@
 //! single fixed `SMIND_DAEMON_URL` -- including a `relay`-kind
 //! connection, whose transport this module also starts/stops.
 
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use tauri::AppHandle;
 use url::Url;
@@ -87,6 +88,25 @@ fn on_event(
 /// `proxy` (AC5's `/ws` bridge reads it from there) if any. Returns the
 /// new task handles for the caller to store; it does not abort anything
 /// -- see `restart`, which does that before calling this.
+/// The daemon passwords entered this run, by connection id: in memory only,
+/// never persisted. Shared between `activate` (which hands the cell to the
+/// connection) and the removal of a connection (which forgets it).
+fn password_cells() -> &'static Mutex<HashMap<String, relay::password::PasswordCell>> {
+    static CELLS: OnceLock<Mutex<HashMap<String, relay::password::PasswordCell>>> = OnceLock::new();
+    CELLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn password_cell(conn_id: &str) -> relay::password::PasswordCell {
+    password_cells().lock().unwrap().entry(conn_id.to_string()).or_default().clone()
+}
+
+/// forget_password drops a removed connection's in-memory password.
+pub fn forget_password(conn_id: &str) {
+    if let Some(cell) = password_cells().lock().unwrap().remove(conn_id) {
+        cell.clear();
+    }
+}
+
 fn activate(
     app: &AppHandle,
     proxy: &Arc<ProxyState>,
@@ -122,7 +142,13 @@ fn activate(
             // (Settings → Connections shows it): quietly speaking the
             // single-device protocol would only be refused by a current daemon.
             let options = match relay::device::load_or_create_key(app_data_dir, &conn.id) {
-                Ok(key) => relay::client::RelayOptions::identity(Arc::new(key)),
+                Ok(key) => {
+                    let mut options = relay::client::RelayOptions::identity(Arc::new(key));
+                    // The daemon password the user entered this run survives the
+                    // restart a connection switch or a daemon bounce causes.
+                    options.password = password_cell(&conn.id);
+                    options
+                }
                 Err(e) => {
                     eprintln!(
                         "smind desktop: relay connection {:?}: device key: {e}",

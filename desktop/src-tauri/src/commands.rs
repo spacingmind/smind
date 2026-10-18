@@ -53,6 +53,8 @@ pub fn connections_remove(
             .map_err(|e| e.to_string())?;
         (was_current, registry.current().clone())
     };
+    // A removed connection's password goes with it (it only ever lived in memory).
+    client_watch::forget_password(&id);
     // Unpairing deletes the keys: a no-op for local/url ids, since
     // `pairing_store::delete` only ever removes a file that a relay
     // connection's `connections_add_relay` would have created.
@@ -304,6 +306,9 @@ pub struct RelayStatus {
     pub code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// `passwordLocked`: seconds until the daemon will take another try.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_secs: Option<u64>,
 }
 
 impl From<&relay::client::Status> for RelayStatus {
@@ -316,11 +321,16 @@ impl From<&relay::client::Status> for RelayStatus {
             Status::Refused { code, message } => (None, Some(code.clone()), Some(message.clone())),
             _ => (None, None, None),
         };
+        let retry_after_secs = match s {
+            Status::PasswordLocked { retry_after_secs } => Some(*retry_after_secs),
+            _ => None,
+        };
         RelayStatus {
             state: s.state_name().to_string(),
             device_id,
             code,
             message,
+            retry_after_secs,
         }
     }
 }
@@ -333,6 +343,33 @@ pub fn connections_relay_status(state: State<'_, DesktopState>) -> Option<RelayS
     let handle = state.proxy.relay.lock().unwrap().clone()?;
     let status = handle.status().borrow().clone();
     Some(RelayStatus::from(&status))
+}
+
+/// connections_relay_set_password hands the selected relay connection the
+/// daemon password (ADR-0031 P13c) and wakes it. The password is typed in the
+/// webview and crosses this command once; from here it lives in Rust process
+/// memory only (`PasswordCell`: zeroized, redacted Debug), is never written to
+/// disk or logs, and is never returned to the webview — the status read-back
+/// (`connections_relay_status`) carries state names only. A password the daemon
+/// rejects is forgotten by the connection.
+#[tauri::command]
+pub fn connections_relay_set_password(state: State<'_, DesktopState>, password: String) -> Result<(), String> {
+    use smind_daemon_client::relay::password::MAX_PASSWORD_BYTES;
+    if password.is_empty() {
+        return Err("enter the daemon's password".into());
+    }
+    if password.len() > MAX_PASSWORD_BYTES {
+        return Err("that is too long to be the daemon's password".into());
+    }
+    let handle = state
+        .proxy
+        .relay
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "no relay connection is selected".to_string())?;
+    handle.set_password(password);
+    Ok(())
 }
 
 /// Quits the app. The renderer's Ctrl+Q on Windows/Linux calls this: the
@@ -404,14 +441,43 @@ mod tests {
             Status::AwaitingApproval { device_id: "x".into() },
             Status::Revoked { device_id: "x".into() },
             Status::Refused { code: "c".into(), message: "m".into() },
+            Status::PasswordRequired,
+            Status::IncorrectPassword,
+            Status::PasswordLocked { retry_after_secs: 8 },
         ]
         .iter()
         .map(|s| RelayStatus::from(s).state)
         .collect();
         assert_eq!(
             names,
-            ["connecting", "connected", "reconnecting", "awaitingApproval", "revoked", "refused"]
+            [
+                "connecting",
+                "connected",
+                "reconnecting",
+                "awaitingApproval",
+                "revoked",
+                "refused",
+                "passwordRequired",
+                "incorrectPassword",
+                "passwordLocked"
+            ]
         );
+    }
+
+    #[test]
+    fn password_lockout_reports_its_wait_and_nothing_secret() {
+        use relay::client::Status;
+        let locked = RelayStatus::from(&Status::PasswordLocked { retry_after_secs: 8 });
+        assert_eq!(locked.retry_after_secs, Some(8));
+        let json = serde_json::to_value(&locked).unwrap();
+        assert_eq!(json["state"], "passwordLocked");
+        assert_eq!(json["retryAfterSecs"], 8);
+        // No state carries a password or any field that could.
+        for st in [Status::PasswordRequired, Status::IncorrectPassword] {
+            let v = serde_json::to_value(RelayStatus::from(&st)).unwrap();
+            let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+            assert_eq!(keys, ["state"]);
+        }
     }
     use smind_daemon_client::proxy::connections::connection_id_for_relay;
     use smind_daemon_client::proxy::ConnectionKind;
