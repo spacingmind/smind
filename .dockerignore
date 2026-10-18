@@ -1,0 +1,5 @@
+# The build context is only the two per-arch binaries and the entrypoint.
+*
+!bin/amd64/smind
+!bin/arm64/smind
+!docker/entrypoint

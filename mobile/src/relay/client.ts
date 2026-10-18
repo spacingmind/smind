@@ -8,7 +8,7 @@
 // ({id: "1", result: ...}), since Milestone 1's tests parse it as such.
 
 import { PairingOffer } from './pairing';
-import { RelayConnection } from './RelayConnection';
+import { ConnectOptions, RelayConnection } from './RelayConnection';
 
 export interface ConnectResult {
   offer: PairingOffer;
@@ -20,10 +20,11 @@ export interface ConnectResult {
  * needs: parse the pairing offer, admit to the relay, open the bridged
  * E2EE data session as the mobile role, complete the handshake (verifying
  * the daemon's public key against the one the offer carries), send one
- * workspace.list request, and return the response as raw JSON text.
+ * workspace.list request, and return the response as raw JSON text. The
+ * connection must be an approved device, see RelayConnection.connect.
  */
-export async function connectAndFetchWorkspaceList(pairingUrl: string): Promise<ConnectResult> {
-  const conn = await RelayConnection.connect(pairingUrl);
+export async function connectAndFetchWorkspaceList(pairingUrl: string, opts: ConnectOptions): Promise<ConnectResult> {
+  const conn = await RelayConnection.connect(pairingUrl, opts);
   try {
     const result = await conn.call('workspace.list');
     return { offer: conn.offer, workspaceListJSON: JSON.stringify({ id: '1', result }) };

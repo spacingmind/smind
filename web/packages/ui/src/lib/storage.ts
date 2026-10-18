@@ -37,6 +37,8 @@ export const STORAGE_KEYS = {
   usage: "smind:usage-preferences",
   /** The editor the header's open-in-editor pill opens with (an `editors_list` id). */
   preferredEditor: "smind:preferred-editor",
+  /** Per connection, the daemon/app version pair whose "daemon is older" notice was dismissed; see lib/daemon-version.ts. */
+  dismissedDaemonNotices: "smind:dismissed-daemon-notices",
 } as const;
 
 /**

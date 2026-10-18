@@ -154,6 +154,19 @@ script instead (the install scripts verify the SHA-256 only). If that key is eve
 `smind` binaries built before the rotation cannot verify new releases, the same one-time
 manual reinstall as the desktop app.
 
+### Docker (homelab)
+
+`ghcr.io/spacingmind/smind` (amd64 and arm64) runs the daemon with the web UI. It listens on all interfaces, so it **requires a
+password** (`SMIND_PASSWORD`, at least 12 characters) and refuses to start without one:
+
+```sh
+docker run -d -p 4648:4648 -e SMIND_PASSWORD="$(openssl rand -base64 24)" \
+  -v smind-data:/data -v "$PWD/workspaces:/workspaces" ghcr.io/spacingmind/smind
+```
+
+See `docker/docker-compose.example.yml` and [docs/homelab.md](docs/homelab.md#docker) for volumes, the threat model, and adding
+the Claude/Codex agent CLIs with a child image.
+
 ### Installing the daemon from a release manually
 
 Each [GitHub Release](https://github.com/spacingmind/smind/releases) ships

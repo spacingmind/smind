@@ -15,6 +15,26 @@
 // "grpc-websockets", one leading control byte per client->server message,
 // and the relay's own header/trailer framing on responses.
 
+// gRPC status codes the relay's refusals use (google.golang.org/grpc/codes).
+export const GrpcCode = {
+  PermissionDenied: 7,
+  ResourceExhausted: 8,
+  Aborted: 10,
+} as const;
+
+/** A non-OK grpc-status trailer, with the numeric code so callers can tell a refusal (a revoked device) from a transport failure. */
+export class GrpcStatusError extends Error {
+  readonly code: number;
+  constructor(what: string, code: number, message: string) {
+    super(`grpc-web ${what}: status ${code}: ${message}`);
+    this.code = code;
+  }
+}
+
+function statusError(what: string, status: string, message: string): GrpcStatusError {
+  return new GrpcStatusError(what, Number(status), message);
+}
+
 // --- Unary calls (Admit / AdmitChallenge) ---
 
 interface GRPCWebTrailers {
@@ -83,7 +103,7 @@ export async function grpcWebUnary<Resp>(baseUrl: string, method: string, reques
   const buf = new Uint8Array(await resp.arrayBuffer());
   const { messages, trailers } = parseGRPCWebFrames(buf);
   if (trailers.status && trailers.status !== '0') {
-    throw new Error(`grpc-web ${method}: status ${trailers.status}: ${trailers.message}`);
+    throw statusError(method, trailers.status, trailers.message);
   }
   if (messages.length === 0) {
     throw new Error(`grpc-web ${method}: no response message (status ${trailers.status || 'unknown'})`);
@@ -92,6 +112,17 @@ export async function grpcWebUnary<Resp>(baseUrl: string, method: string, reques
 }
 
 // --- Bidi streaming (OpenData) over the websocket transport ---
+
+/** What RelayConnection needs from one OpenData stream; GRPCWebSocketStream is the real one, tests supply a fake relay. */
+export interface DataStream {
+  ready(): Promise<void>;
+  /** Sends one protobuf-encoded message. */
+  send(messageBytes: Uint8Array): void;
+  /** The next application message; rejects when the stream ends (with a GrpcStatusError for a relay refusal). */
+  receiveMessage<Msg>(decode: (b: Uint8Array) => Msg): Promise<Msg>;
+  /** Idempotent; wakes a blocked receiveMessage with an error. */
+  close(): void;
+}
 
 /**
  * GRPCWebSocketStream drives one bidi-streaming RPC (OpenData) over
@@ -106,18 +137,20 @@ export async function grpcWebUnary<Resp>(baseUrl: string, method: string, reques
  * calls for a frame's header and its payload, which arrive as two
  * distinct websocket messages.
  */
-export class GRPCWebSocketStream {
+export class GRPCWebSocketStream implements DataStream {
   private ws: WebSocket;
   private pending = new Uint8Array(0);
   private messageResolvers: Array<() => void> = [];
   private closedError: Error | null = null;
   private opened: Promise<void>;
+  private rejectOpened: (err: Error) => void = () => {};
 
   constructor(wsUrl: string, headers: Record<string, string>) {
     this.ws = new WebSocket(wsUrl, ['grpc-websockets']);
     this.ws.binaryType = 'arraybuffer';
 
     this.opened = new Promise((resolve, reject) => {
+      this.rejectOpened = reject;
       this.ws.onopen = () => {
         let headerText = 'content-type: application/grpc-web+proto\r\n';
         for (const [k, v] of Object.entries(headers)) headerText += `${k}: ${v}\r\n`;
@@ -136,8 +169,11 @@ export class GRPCWebSocketStream {
       const resolver = this.messageResolvers.shift();
       if (resolver) resolver();
     };
+    // A stream closed before it ever opened must not leave ready() hanging.
+    this.opened.catch(() => {});
     this.ws.onclose = () => {
       if (!this.closedError) this.closedError = new Error('grpc-web websocket: closed');
+      this.rejectOpened(this.closedError);
       while (this.messageResolvers.length > 0) this.messageResolvers.shift()!();
     };
   }
@@ -183,7 +219,7 @@ export class GRPCWebSocketStream {
       if (flag & 0x80) {
         const trailers = parseTrailerPayload(payload);
         if (trailers.status && trailers.status !== '0') {
-          throw new Error(`grpc-web OpenData: status ${trailers.status}: ${trailers.message}`);
+          throw statusError('OpenData', trailers.status, trailers.message);
         }
         continue; // it was the initial headers frame.
       }
@@ -192,6 +228,10 @@ export class GRPCWebSocketStream {
   }
 
   close(): void {
+    if (!this.closedError) this.closedError = new Error('grpc-web websocket: closed');
     this.ws.close();
+    // Wake a blocked receiveMessage now rather than when the close handshake
+    // finishes (which can take as long as a dead peer's TCP timeout).
+    while (this.messageResolvers.length > 0) this.messageResolvers.shift()!();
   }
 }

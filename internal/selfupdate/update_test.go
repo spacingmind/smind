@@ -402,6 +402,14 @@ func TestUpdateRefusesInsideContainer(t *testing.T) {
 	e.wantUntouched("0.11.1")
 }
 
+// Inside an image the answer is "pull a new image", even for a dev build.
+func TestUpdateInsideAContainerSaysPullEvenForADevBuild(t *testing.T) {
+	e := newEnv(t, "0.12.0-dev+abc1234", "0.12.0")
+	e.u.InContainer = func() bool { return true }
+	_, err := e.u.Update(context.Background(), Options{})
+	wantRefusal(t, err, "pulling a new image")
+}
+
 func TestInContainer(t *testing.T) {
 	exists := func(m ...string) func(string) bool {
 		return func(p string) bool {
@@ -829,6 +837,9 @@ func TestHealthzDaemonStatus(t *testing.T) {
 		{"service-managed", func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"status":"ok","version":"0.12.0","managedBy":"systemd"}`))
 		}, DaemonStatus{Running: true, Version: "0.12.0", Managed: true}},
+		{"container-managed is not restartable by update", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"status":"ok","version":"0.12.0","managedBy":"docker"}`))
+		}, DaemonStatus{Running: true, Version: "0.12.0"}},
 		{"something else owns the port", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("<html>")) },
 			DaemonStatus{Running: true}},
 	}

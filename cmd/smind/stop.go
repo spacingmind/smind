@@ -49,10 +49,7 @@ func cmdStop(args []string) int {
 		return 1
 	}
 
-	port := cfg.Server.Port
-	if port == 0 {
-		port = 4648
-	}
+	port := cfg.Server.ClientPort()
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	base := "http://" + addr
 

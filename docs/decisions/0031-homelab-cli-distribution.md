@@ -2,15 +2,15 @@
 
 ## Status
 
-**Accepted (2026-10-14), except decisions 9, 12, 27–32 and 36, which remain Open** (direct connections with a password,
-and the hosted relay with everything it gates). The accepted decisions are listed under "Decisions (accepted 2026-10-14)"
+**Accepted (2026-10-14), except decisions 12, 27–32 and 36, which remain Open** (the hosted relay and everything it gates).
+**Decision 9 (direct connections with a password, D8) was Accepted on 2026-10-15** with the recommended default. The accepted decisions are listed under "Decisions (accepted 2026-10-14)"
 with the default the Human approved; the Open ones stay under "Open decisions for Human", and **every PR they gate stays
 BLOCKED** in the plan
 ([`docs/plans/active/homelab-cli.md`](../plans/active/homelab-cli.md)). Decisions whose default changed *because of* the Paseo
 study are marked **★**. Builds on ADR-0007/0011 (relay, admission),
 ADR-0013/0023/0030 (desktop app, updater, native Windows daemon) and ADR-0029
 (`POST /api/shutdown`). Several decisions here **amend** earlier ones (loopback
-only — pending decision 9 —, one relay device per relay host, ephemeral device keys); each says so
+only — decision 9, accepted 2026-10-15 —, one relay device per relay host, ephemeral device keys); each says so
 and, once accepted, the amended ADR gets a one-line pointer here.
 
 **Human answers recorded 2026-10-13/14:** the relay-side "workspace" is renamed **relay host** and smind's own
@@ -428,10 +428,10 @@ non-publishing check); `workflow_dispatch` can republish.
   non-root `smind` user (uid/gid 1000, matching most host users) with `gosu`; if
   started as non-root it just runs. This fixes the bind-mount permission pain that
   `--user` workarounds only paper over.
-- **Listening and auth (depends on decision 9):** the image sets
+- **Listening and auth (decision 9, accepted; needs P4):** the image sets
   `SMIND_LISTEN=0.0.0.0:4648` and **refuses to start without `SMIND_PASSWORD`**
   (Paseo only warns, `paseo-docker-entrypoint:60-65`), serves the web UI on the same
-  origin, and `-p 4648:4648` works. Until decision 9 lands the image is relay-only
+  origin, and `-p 4648:4648` works. Until P4 lands the image is relay-only
   (loopback bind, do not publish 4648).
 - State: `SMIND_HOME=/data` (`VOLUME`), repositories under a second mount
   (`/workspaces`); stored paths are container paths. Agent credentials persist under
@@ -622,7 +622,7 @@ confirmation); deliberately different (first-run, quit behaviour).**
 
 ### D8. Direct connections with a password (amends "loopback only")
 
-**Status: OPEN — decision 9 is not accepted; everything that depends on it (P4, P5's password field, P8, P11, P13c) stays blocked.**
+**Status: ACCEPTED (2026-10-15, decision 9) — the recommended default below was approved; P4 implements it, and P5's password field, P8, P11 and P13c build on it. One amendment the same day (Human, on the P4 security review): with a password set, `/api/token` is closed even on loopback (see that bullet).**
 
 **Proposal.** Let the daemon listen on a non-loopback address, protected by a password,
 as Paseo does — making a LAN/Tailscale/VPN homelab work with **no relay at all** — while
@@ -637,12 +637,19 @@ keeping loopback-only as the default and refusing unsafe combinations.
   (Paseo only warns.) A weak password is rejected at `set-password` (minimum length 12;
   no default, no `change-me` in docs): anyone authenticated can run a shell through the
   terminal tab and every agent, so the password is an RCE credential.
-- **`GET /api/token` is only served to a loopback client talking to a loopback Host with
-  no forwarding headers** (`X-Forwarded-*`, `Forwarded`, `X-Real-IP`). Otherwise it is
-  403. This keeps the existing loopback UX (bundled UI, desktop proxy) unchanged while
-  closing the same-host-reverse-proxy leak: an external request carries an external
-  Host, so it is refused even though `RemoteAddr` is loopback (caveat: a proxy that
-  rewrites `Host` to `localhost` defeats this; documented).
+- **`GET /api/token`: without a password it is only served to a loopback client talking to a
+  loopback Host with no forwarding headers** (`X-Forwarded-*`, `Forwarded`, `X-Real-IP`, and
+  other proxy headers); otherwise it is 403. **With a password configured it is never served,
+  to anyone, loopback included** (**amended 2026-10-15, Human decision on the P4 review**): a
+  default same-host nginx (`proxy_pass http://127.0.0.1:4648;`) rewrites `Host` to the upstream
+  and adds no header, so a proxied request is indistinguishable from a local one and the
+  header heuristic alone would hand the token (a terminal, with no password) to anyone who can
+  reach the proxy. The bundled web UI therefore signs in with the password like every other
+  browser; the CLI and the desktop client authenticate with the token **file**
+  (`~/.smind/token`, readable only by the same OS user), sent as an `Authorization` bearer —
+  the `?token=` URL form is refused when a password is set. Without a password the daemon is
+  loopback-only by default and the old behaviour is unchanged (a same-host proxy in front of a
+  password-less daemon can still leak the token: set a password first).
 - **Non-loopback clients log in:** `POST /api/login {password}` → a **revocable,
   expiring session token** (random 256-bit, held in memory, not the daemon's long-lived
   token), accepted by `/ws` via the `Sec-WebSocket-Protocol` bearer and the
@@ -726,7 +733,8 @@ Message flows (D = daemon, R = relay, C1…C3 = clients; "route" = `(host, sessi
 3. Daemon spawns a device session  (one goroutine tree per device)
    b. D → R  OpenData: Frame{host, s1, d1, DAEMON_TO_DEVICE}      (attaches the daemon side of the route)
    c. R → D  buffered E2EE hello flushed; E2EE handshake completes (responder role, unchanged)
-   d. C1 → D (first encrypted app message) device_hello{device_pub, label, signature, [password]}
+   d. D → C1 (first encrypted app message) relay.device_challenge{challenge}            (fresh per session, hello v2)
+      C1 → D device_hello{v:2, device_pub, label, signature over keys‖session_id‖challenge, [password]}
       D      verifies the signature, derives device id, checks the device registry (see "Device identity")
    e. D      api.ServeTransport(ctx, dc)  — the same call a browser WebSocket gets, so C1 sees ALL of the
              daemon's workspaces, spaces and tasks; subscriptions and permission prompts are per connection
@@ -774,17 +782,38 @@ the matching nonce proves the relay supports keepalive (a relay without it forwa
 somebody else's nonce, which only counts as liveness); each (re)opened stream probes once.
 
 **Implementation notes (P12b, as built — the contract P13a/b implement).**
-- *`device_hello` is an ordinary wsapi request*: `{"id":"…","method":"relay.device_hello","params":{"v":1,"device_pub":b64,
-  "label":"…","signature":b64,"password"?:"…"}}`, the first message after the E2EE handshake. Success is an ordinary response
-  `{"id","result":{"v":1,"device_id","state":"approved"}}`; a refusal is `{"id","error":{"message","code"}}` with code
-  `awaiting_approval` (device recorded `pending`), `revoked`, `bad_hello` (bad signature / id mismatch / version / label),
+- *`device_hello` is an ordinary wsapi request* (version 2, see the replay fix below): `{"id":"…","method":"relay.device_hello",
+  "params":{"v":2,"device_pub":b64,"label":"…","signature":b64,"password"?:"…"}}`, sent right after the daemon's challenge.
+  Success is an ordinary response `{"id","result":{"v":2,"device_id","state":"approved"}}`; a refusal is
+  `{"id","error":{"message","code"}}` with code `awaiting_approval` (device recorded `pending`), `revoked`, `bad_hello` (bad
+  signature / id mismatch / label / malformed), `hello_version_unsupported` (a hello that is not version 2),
   `too_many_devices`, `device_hello_required` (legacy clients refused), `device_hello_unsupported` or `internal`; the daemon
-  then ends the route. A daemon from before P12b answers `method not found`, which is how a client detects it (legacy daemon).
-- *What is signed:* `"smind-device-hello" ‖ e2ee.TranscriptHash(daemon_pub, client_ephemeral_pub) ‖ daemon_pub`, where
-  `TranscriptHash` is the HKDF salt the session keys already use, `SHA-256("smind relay e2ee v1" ‖ daemon_pub ‖
-  client_pub)`; the E2EE core is unchanged (a test pins the equality). `device_id` = lowercase unpadded RFC 4648 base32 of
-  `SHA-256(device_pub)`, first 26 characters. Shared test vector: `internal/relay/devices/testdata/device_hello_vector.json`.
-  `device_hello.password` is not covered by the signature and is checked (P13c) only over the encrypted channel.
+  then ends the route.
+- *What a client does when no challenge arrives:* wait a bounded time (5 s) after the handshake, then treat the silence as "this daemon is too old for device hello v2" (a 0.12.0 daemon only accepts the retired v1 hello and sends no challenge) and tell the user to update the daemon. A client **never** falls back to a v1 hello and never signs without a challenge — that would reopen the replay. (A daemon from before P12b never opens a device route at all; clients detect it by the unanswered handshake.)
+- *The challenge (hello v2):* on a device route (any route but the fixed legacy one) the daemon's first encrypted message is
+  `{"event":"relay.device_challenge","params":{"v":2,"challenge":<standard base64, with padding, of 32 random bytes>}}` (no `id`; a client waits
+  for it before signing, and never lets it reach the application layer). One challenge per session, never reused across sessions: it is kept on the session, so a transport blip while the device is identifying does not invalidate a hello it already signed.
+- *What is signed (v2):* `"smind-device-hello-v2" ‖ TranscriptHash(daemon_pub, client_ephemeral_pub) ‖ daemon_pub ‖
+  uint16BE(len(session_id)) ‖ session_id ‖ challenge`, where `TranscriptHash` is the HKDF salt the session keys already use,
+  `SHA-256("smind relay e2ee v1" ‖ daemon_pub ‖ client_pub)`, `session_id` is the exact bytes of the route's `Frame.session_id` (ids are capped at 128 bytes)
+  and `challenge` the 32 bytes just received; the E2EE core is unchanged (a test pins the equality). `device_id` = lowercase
+  unpadded RFC 4648 base32 of `SHA-256(device_pub)`, first 26 characters. Shared test vector (v2, with the challenge message
+  and three negative vectors — other client key, other session id, other challenge):
+  `internal/relay/devices/testdata/device_hello_vector.json`; the retired v1 vector is kept for the record in
+  `device_hello_vector_v1.json` (the daemon refuses its hello). `device_hello.password` is not covered by the signature and is
+  checked (P13c) only over the encrypted channel.
+- *v1 is not accepted (2026-10-15):* v1 signed nothing the daemon contributed. No released client ever spoke it — the
+  clients that do (desktop P13a, mobile P13b) ship after this change, and every released app lacks a hello altogether and is
+  refused by default (`relay.legacyDevices` is false) — so there is nothing to keep compatible, and accepting v1 would keep the
+  replay open. A client that still sends it is told `hello_version_unsupported`.
+- *Residual (recorded, not fixed here):* with deterministic session keys a replayed transcript makes the daemon encrypt with
+  the same (key, nonce) pairs as the original session: the daemon's replies in the replay (the challenge, then a refusal)
+  reuse the keystream of the original session's first daemon frames. What an eavesdropper can learn from that is bounded by
+  what those frames contain (a random challenge; the hello response, whose content is public metadata). Nonce reuse also
+  leaks the Poly1305 one-time key for those two counters, so a replaying party could forge or splice daemon→client frames at
+  counters 0 and 1 — which the real client consumed long ago — i.e. at worst a denial of service. A handshake that mixes
+  a daemon ephemeral key into the key schedule would remove the property for good; it changes the E2EE core and is a separate
+  decision.
 - *Daemon behaviour:* one session per announced `(device_id, session_id)`; sessions survive a relay reconnect (orphaned, E2EE
   state kept up to 6 minutes) and are resumed in place when the next `Sync` lists their route, dropped when it does not;
   a client that lost its daemon (restart) must re-handshake with a **fresh session id** — it cannot tell by itself, so after
@@ -814,6 +843,36 @@ somebody else's nonce, which only counts as liveness); each (re)opened stream pr
   (ids may be unique prefixes; errors `not_found`, `ambiguous`); `relay.device.window {duration_seconds?,max_devices?}`
   (defaults 10 min / 1) → the window. `smind relay offer` opens the window (`--window`, `--max-devices`).
 
+**Implementation notes (P13a, desktop client as built — what the mobile client (P13b) mirrors).**
+- *Key:* one Ed25519 device key **per relay connection** (not per install: a stable id is visible to the relay in every frame, so a
+  per-install key would let a relay operator link one install across daemons), created when the pairing is saved, stored at `0600`
+  next to the pairing under a hashed file name, deleted with the connection, never returned by any command. A key file that cannot
+  be read is an error — it is never silently replaced (that would silently become a new, unapproved device).
+- *Per session:* a fresh random session id and a fresh ephemeral E2EE key for every fresh handshake (an ephemeral key reused across
+  fresh sessions repeats keys and nonces — the pre-P13a Rust loop did this; fixed); `device_hello` right after the handshake,
+  signed over this session's transcript. Frames use the device id (`base32(SHA-256(pub))[:26]`) as the route's device id.
+- *Hello outcomes:* approved → serve; `awaiting_approval` → status "awaiting approval" and retry every ~5 s (so approval takes effect
+  within seconds); `revoked` (from the daemon's hello, or the relay's `PermissionDenied` before the handshake) → "revoked", retry
+  every ~60 s (only the relay's "device revoked" counts as a revoke, not any PermissionDenied); any other refusal → shown with the
+  daemon's code, retry ~30 s; `device_hello_unsupported`/method-not-found, or no answer to the handshake on the identity route, →
+  one attempt on the fixed single-device route without a hello (a daemon from before device identity); a `device_hello_required`
+  error there → back to the identity route. The single-device route is kept only while it has answered; after two such switches
+  without a served session in between the client stops switching and shows the cause (so two daemon answers that contradict each
+  other cannot make it ping-pong), and every switch waits the ordinary backoff. A client that cannot read its device key does not
+  connect and says so; it never falls back to the single-device protocol on its own.
+- *Keepalive:* probes carry a per-connection random token (a correlation id, not a cryptographic nonce) in `Frame.sequence`; the relay echoes it; only a matching echo proves
+  support (a forwarded peer probe is liveness only); first echo within 10 s or keepalive is off for that stream, re-probed on every
+  (re)opened stream; probe every 30 s; 75 s without any relay frame = dead → resume. No HTTP/2 client pings.
+- *Resume and a lost daemon:* after a resume the client confirms the session with a request (`workspace.list`) and falls back to a
+  fresh session if it is not answered within 15 s; because the relay cannot tell a device that the daemon restarted, a request
+  unanswered for 30 s, or 90 s without anything from the daemon, makes the client run the same check. Requests in flight at a
+  hard connection drop can be lost (no acks in the relay protocol).
+- *Transport detail worth mirroring:* a gRPC client that waits for response headers before it may read hangs a resume that has
+  nothing buffered (the relay sends headers only with its first frame) — resolve the stream lazily and send the registration frame
+  at once. Bound dial + TLS + admission with a timeout (a path that swallows traffic otherwise hangs forever).
+- *UI:* Settings → Connections shows the live state of the selected relay connection; "waiting for approval" and "revoked" name
+  the command to run on the daemon's machine with the device's own id.
+
 **Trust model of the control stream (unchanged secret, new reach).** Both ends of a relay host authenticate with the same
 host secret (ADR-0011), so the relay cannot tell the daemon from a client holding the offer. Before this decision that
 mattered little (control carried only `Ping`/`Pong`); now whoever holds the secret can supersede the daemon's control
@@ -829,10 +888,18 @@ a fresh ephemeral X25519 key per session and the daemon cannot tell clients apar
 space). So the E2EE core stays untouched and identity is an **inner layer**:
 
 - Each client creates a persistent **Ed25519 device key** (desktop: app data dir, mode 0600 like
-  `pairing_store`; mobile: the platform secure store) and sends, as its first encrypted application message,
-  `device_hello{v, device_pub, label, signature, [password]}` where `signature` signs
-  `"smind-device-hello" ‖ SHA-256(handshake transcript) ‖ daemon_pub` — proof of possession bound to this session,
-  so it cannot be replayed.
+  `pairing_store`; mobile: the platform secure store). On a device route the daemon speaks first, inside the encrypted
+  channel, with a **fresh random challenge**; the client answers with
+  `device_hello{v:2, device_pub, label, signature, [password]}` where `signature` signs
+  `"smind-device-hello-v2" ‖ SHA-256(handshake transcript) ‖ daemon_pub ‖ session_id ‖ challenge` — proof of possession
+  bound to this one live session: the handshake keys, the relay route's session id and the daemon's challenge.
+  **Why the challenge (decided 2026-10-15, after the P13b review):** the session keys depend only on the daemon's
+  long-lived key and the client's *ephemeral* key, so anyone who can open a route (a relay operator, a host-secret
+  holder) can replay a *captured* client transcript — handshake frames plus the hello ciphertext — into a new route; the
+  daemon derives identical keys and decrypts it. A version-1 hello (signed over the handshake keys only) would be
+  admitted as that device, and the daemon's "one session per device" rule would drop the real session. Only something the
+  daemon chooses afresh per session proves the hello was made for *this* session; the E2EE handshake and key schedule are
+  deliberately unchanged (`TestE2EECoreUnchanged`).
 - `device_id` in the frame metadata **must equal** `base32(SHA-256(device_pub))[:26]`; the daemon drops a route
   whose id does not match, so a client cannot claim another's id.
 - The daemon keeps a registry `$SMIND_HOME/relay-devices.json` (mode 0600): `{device_id, device_pub, label,
@@ -1104,7 +1171,7 @@ are renamed opportunistically, never by a wire-breaking change; the new messages
 
 Human approved every decision below on 2026-10-14 with the default stated ("Ok làm đi"). **★ = the default changed, or the
 decision is new, because of the Paseo study; ✔ = answered earlier by the Human.** Decisions 10, 14 and 24 are accepted but only take effect together with the
-still-open decision 9 (direct connections with a password), so what depends on them waits for it (noted in the plan).
+decision 9 (direct connections with a password, accepted 2026-10-15), which P4 implements first (noted in the plan).
 
 1. **CLI signature verification.** Verify a minisign signature of `checksums.txt` in
    `smind update` with the existing desktop-updater public key (ADR-0023; no new secret),
@@ -1132,6 +1199,12 @@ still-open decision 9 (direct connections with a password), so what depends on t
 
 8. **★ `smind config get|set|unset`; no launch flags.** *Accepted: yes, no
    `--port/--listen` flags on `serve`* (Paseo removed the equivalent flags).
+
+9. **★ Direct connections with a password (D8).** *Accepted (2026-10-15): yes* — `server.listen`, `smind set-password`
+   (bcrypt hash, minimum 12 characters), the daemon refuses to start with a non-loopback `listen` and no password,
+   `/api/token` only for a true loopback caller, expiring session tokens from `POST /api/login` (not the standing daemon
+   token), Host allowlist, per-IP login backoff; **replaces "loopback only, no `--bind`"** and the "don't publish 4648" Docker
+   advice. (The relay-device password, decision 14, builds on the same `set-password`.)
 
 10. **★ Built-in TLS for direct connections.** *Accepted: not in v1* — document Tailscale,
     SSH, or a TLS reverse proxy (with the Host-rewrite caveat); revisit with `server.tls`.
@@ -1206,15 +1279,9 @@ still-open decision 9 (direct connections with a password), so what depends on t
 
 ## Open decisions for Human
 
-These remain **Open** (Human, 2026-10-14): the hosted relay (12 and everything it gates: 27–32, 36) and direct connections
-with a password (9). Each keeps its recommended default or its option list; **every PR they gate is BLOCKED in the plan.**
-
-9. **★ Direct connections with a password (D8).** *Recommended: yes* —
-   `server.listen`, `smind set-password`, refuse to start non-loopback without a password,
-   `/api/token` loopback-only, expiring session tokens, Host allowlist, login rate limit;
-   **replaces "loopback only, no `--bind`"** and the "don't publish 4648" Docker advice.
-   Alternative: stay loopback-only and rely on relay/tunnel (cheaper, leaves Docker and
-   homelab LAN users on the relay).
+These remain **Open** (Human, 2026-10-14): the hosted relay (12 and everything it gates: 27–32, 36). Each keeps its
+recommended default or its option list; **every PR they gate is BLOCKED in the plan.** (Decision 9, direct connections with a
+password, left this list on 2026-10-15: it is Accepted, see "Decisions".)
 
 12. **⏳ Hosted relay hosting — PENDING (Human, 2026-10-14).** Options in D11: **(D)** Cloudflare's gRPC proxy (Network →
     gRPC; origin on 443 with TLS + HTTP/2/ALPN; proxied record, SSL/TLS Full; 125 s read / 30 s write timeouts, so 30–60 s

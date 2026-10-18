@@ -18,9 +18,23 @@ import (
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
+// Subprotocol is the WebSocket subprotocol every client may offer. Browsers
+// cannot set an Authorization header on a WebSocket, so a session token (see
+// internal/auth.SessionStore) travels as a second offered subprotocol,
+// "smind.bearer.<token>"; the server always answers with Subprotocol itself,
+// never the token, and never reads a session token from the URL (proxies log
+// URLs).
+const Subprotocol = "smind"
+
+// BearerSubprotocolPrefix prefixes the token in the offered subprotocol.
+const BearerSubprotocolPrefix = "smind.bearer."
+
+// upgrader keeps gorilla's default CheckOrigin (a request with an Origin must
+// be same-origin with its Host), ADR-0013 / ADR-0031 D8.
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
+	Subprotocols:    []string{Subprotocol},
 }
 
 // wsTransport adapts a real gorilla *websocket.Conn to Transport: it always
@@ -55,9 +69,21 @@ type API struct {
 	Runs      *runs.Registry
 	Terminals *terminal.Registry
 
-	hs  map[string]handlerFunc
-	bus *eventBus
+	hs   map[string]handlerFunc
+	bus  *eventBus
+	info *DaemonInfo
+
+	// authorize decides whether a /ws upgrade may proceed. New installs the
+	// legacy rule (the daemon token in the "token" query parameter);
+	// SetAuthorizer replaces it. Set before the first request is served.
+	authorize func(*http.Request) bool
 }
+
+// SetAuthorizer replaces the /ws admission rule. internal/server uses it to
+// accept session tokens (direct connections with a password, ADR-0031 D8) and
+// to keep the daemon-token query rule for true loopback callers only. It is not
+// safe to call while requests are being served.
+func (a *API) SetAuthorizer(fn func(*http.Request) bool) { a.authorize = fn }
 
 // ServeTransport serves one RPC connection to completion over tr -- same
 // handler dispatch table and event subscription as a WebSocket /ws
@@ -123,10 +149,14 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 	acctReg.SetNotifier(busAccountNotifier{bus: bus})
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
 	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, mcpReg, coord, db)
-	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus}
+	info := newDaemonInfo(time.Now())
+	hs["daemon.info"] = handleDaemonInfo(info)
+	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus, info: info}
+	api.authorize = func(r *http.Request) bool {
+		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
+	}
 	api.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got := r.URL.Query().Get("token")
-		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
+		if !api.authorize(r) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

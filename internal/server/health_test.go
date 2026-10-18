@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/gorilla/websocket"
 
 	"github.com/spacingmind/smind/internal/version"
 )
@@ -20,7 +23,7 @@ func TestHandleHealth_ReportsVersion(t *testing.T) {
 	version.Version = "0.7.0-dev+abc1234"
 	t.Cleanup(func() { version.Version = prev })
 
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req := loopbackReq(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -53,7 +56,7 @@ func TestHandleHealth_ReportsVersion(t *testing.T) {
 func TestHealthzIncludesManagedByWhenEnvSet(t *testing.T) {
 	handler := newTestServer(t, "test-token", WithManagedBy("systemd")).Handler()
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	handler.ServeHTTP(rec, loopbackReq(http.MethodGet, "/healthz", nil))
 
 	var body map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
@@ -74,7 +77,7 @@ func TestHealthzIncludesManagedByWhenEnvSet(t *testing.T) {
 func TestHealthzOmitsManagedByWhenUnset(t *testing.T) {
 	handler := newTestServer(t, "test-token").Handler()
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	handler.ServeHTTP(rec, loopbackReq(http.MethodGet, "/healthz", nil))
 
 	var body map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
@@ -82,5 +85,34 @@ func TestHealthzOmitsManagedByWhenUnset(t *testing.T) {
 	}
 	if _, ok := body["managedBy"]; ok {
 		t.Errorf("managedBy must be absent when no supervisor is set, got %v", body)
+	}
+}
+
+// TestDaemonInfoReportsTheSameManagedByAsHealthz: the daemon.info method a
+// relay-connected client reads must agree with /healthz, which it cannot reach.
+func TestDaemonInfoReportsTheSameManagedByAsHealthz(t *testing.T) {
+	srv := httptest.NewServer(newTestServer(t, "test-token", WithManagedBy("systemd")).Handler())
+	t.Cleanup(srv.Close)
+
+	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/ws?token=test-token", nil)
+	if err != nil {
+		t.Fatalf("dial /ws: %v", err)
+	}
+	defer ws.Close()
+	if err := ws.WriteJSON(map[string]any{"id": "1", "method": "daemon.info"}); err != nil {
+		t.Fatal(err)
+	}
+	var env struct {
+		Result struct {
+			Version   string `json:"version"`
+			ManagedBy string `json:"managedBy"`
+		} `json:"result"`
+		Error any `json:"error"`
+	}
+	if err := ws.ReadJSON(&env); err != nil || env.Error != nil {
+		t.Fatalf("daemon.info = %+v, err %v", env, err)
+	}
+	if env.Result.ManagedBy != "systemd" || env.Result.Version != version.Version {
+		t.Errorf("daemon.info = %+v, want managedBy systemd and version %q", env.Result, version.Version)
 	}
 }

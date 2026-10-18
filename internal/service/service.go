@@ -333,10 +333,9 @@ func (e Env) port(home string) int {
 		e.warnf("%v (using the default port)", err)
 		return config.Default().Server.Port
 	}
-	if cfg.Server.Port == 0 {
-		return config.Default().Server.Port
-	}
-	return cfg.Server.Port
+	// The port local clients dial: the configured listen address's port (a
+	// password-protected daemon may listen elsewhere than loopback).
+	return cfg.Server.ClientPort()
 }
 
 // capturePath is the PATH to write into the unit.

@@ -1,5 +1,5 @@
 import { act } from "react";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const LOCAL = { id: "local", kind: "local" as const, label: "Local", baseUrl: "http://127.0.0.1:4648" };
@@ -308,5 +308,282 @@ describe("DesktopDaemonBanner", () => {
     await flush();
     expect(daemonUpdate).not.toHaveBeenCalled();
     expect(screen.getByTestId("desktop-daemon-banner-confirm")).toBeInTheDocument();
+  });
+});
+
+describe("ADR-0031 P10 — the older-daemon notice for daemons the app does not manage", () => {
+  const RELAY = { id: "relay:homelab@relay.example.test:7400", kind: "relay" as const, label: "Relay (homelab)", baseUrl: "relay://homelab@relay.example.test:7400" };
+  const older = (daemonVersion: string, extra: Record<string, unknown> = {}) => () =>
+    Promise.resolve({ reachable: true, daemonVersion, appVersion: "0.12.0", comparison: "older", ...extra });
+  const relayProbe = () => Promise.resolve({ reachable: false, daemonVersion: null, appVersion: "0.12.0", comparison: "unknown" });
+
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  async function mount(client: { call: ReturnType<typeof vi.fn> } | null = null) {
+    const { DesktopDaemonBanner } = await import("@/components/desktop-daemon-banner");
+    // The client prop is a WsClient; only `call` is used.
+    render(<DesktopDaemonBanner client={client as never} />);
+  }
+  const commandTexts = () => screen.queryAllByTestId("desktop-daemon-banner-command").map((el) => el.textContent);
+
+  it("shows smind update with a Copy button for a url connection whose daemon has the command", async () => {
+    mockPlatform({ current: TUNNEL, connectionVersion: older("0.12.0") });
+    await mount();
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
+    expect(commandTexts()).toEqual(["smind update"]);
+    // Icon-only copy button inside the chip, named by its aria-label.
+    expect(screen.getByTestId("desktop-daemon-banner-copy")).toHaveAttribute("aria-label", "Copy");
+    expect(screen.getByTestId("desktop-daemon-banner-copy")).toHaveTextContent("");
+    expect(screen.getByTestId("desktop-daemon-banner-command").parentElement).toContainElement(screen.getByTestId("desktop-daemon-banner-copy"));
+    expect(screen.queryByTestId("desktop-daemon-banner-update")).not.toBeInTheDocument();
+  });
+
+  it("shows the installer one-liners for a daemon older than the update command", async () => {
+    mockPlatform({ current: TUNNEL, connectionVersion: older("0.11.1") });
+    await mount();
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
+    expect(commandTexts()).toEqual(["curl -fsSL https://spacingmind.com/install.sh | sh", "irm https://spacingmind.com/install.ps1 | iex"]);
+    expect(screen.getAllByTestId("desktop-daemon-banner-copy")).toHaveLength(2);
+  });
+
+  it("copies exactly the displayed command to the clipboard and confirms without moving focus", async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    mockPlatform({ current: TUNNEL, connectionVersion: older("0.11.1") });
+    await mount();
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
+
+    const [shCopy, psCopy] = screen.getAllByTestId("desktop-daemon-banner-copy");
+    fireEvent.click(psCopy);
+    await flush();
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenCalledWith("irm https://spacingmind.com/install.ps1 | iex");
+    expect(psCopy).toHaveAttribute("aria-label", "Copied");
+    expect(shCopy).toHaveAttribute("aria-label", "Copy");
+    // The button confirms in place: nothing else grabbed focus.
+    expect(document.activeElement === document.body || document.activeElement === psCopy).toBe(true);
+  });
+
+  it("shows the notice for a relay connection using daemon.info", async () => {
+    const call = vi.fn(() => Promise.resolve({ version: "0.11.1", commit: "abc1234", managedBy: "systemd" }));
+    mockPlatform({ current: RELAY, connectionVersion: relayProbe });
+    await mount({ call });
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
+    expect(call).toHaveBeenCalledWith("daemon.info");
+    const banner = screen.getByTestId("desktop-daemon-banner");
+    expect(banner).toHaveTextContent("Daemon v0.11.1 is older than this app (v0.12.0)");
+    expect(banner).toHaveTextContent("managed by systemd");
+    expect(commandTexts()).toHaveLength(2); // 0.11.1 predates smind update
+  });
+
+  it("stays quiet for a relay daemon that reports the app's version or newer", async () => {
+    for (const version of ["0.12.0", "0.13.0"]) {
+      vi.resetModules();
+      mockPlatform({ current: RELAY, connectionVersion: relayProbe });
+      const call = vi.fn(() => Promise.resolve({ version }));
+      const { DesktopDaemonBanner } = await import("@/components/desktop-daemon-banner");
+      const { container, unmount } = render(<DesktopDaemonBanner client={{ call } as never} />);
+      await flush();
+      await flush();
+      expect(container).toBeEmptyDOMElement();
+      unmount();
+    }
+  });
+
+  it("shows version unknown plus installer commands when a relay daemon lacks daemon.info", async () => {
+    const call = vi.fn(() => Promise.reject(new Error("method not found: daemon.info")));
+    mockPlatform({ current: RELAY, connectionVersion: relayProbe });
+    await mount({ call });
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
+    const banner = screen.getByTestId("desktop-daemon-banner");
+    expect(banner).toHaveTextContent("Daemon version unknown");
+    expect(banner).not.toHaveTextContent(/up to date/i);
+    expect(commandTexts()).toEqual(["curl -fsSL https://spacingmind.com/install.sh | sh", "irm https://spacingmind.com/install.ps1 | iex"]);
+  });
+
+  it("treats a daemon that never answers daemon.info as predating it", async () => {
+    // Daemons before the method silently dropped an unknown request.
+    vi.useFakeTimers();
+    try {
+      const call = vi.fn(() => new Promise<never>(() => {}));
+      mockPlatform({ current: RELAY, connectionVersion: relayProbe });
+      const { DesktopDaemonBanner } = await import("@/components/desktop-daemon-banner");
+      const { container } = render(<DesktopDaemonBanner client={{ call } as never} />);
+      await flush();
+      expect(container).toBeEmptyDOMElement(); // still waiting: no verdict yet
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4500);
+      });
+      expect(screen.getByTestId("desktop-daemon-banner")).toHaveTextContent("Daemon version unknown");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says nothing about a relay connection whose daemon.info failed for another reason", async () => {
+    const call = vi.fn(() => Promise.reject(new Error("connection closed")));
+    mockPlatform({ current: RELAY, connectionVersion: relayProbe });
+    const { DesktopDaemonBanner } = await import("@/components/desktop-daemon-banner");
+    const { container } = render(<DesktopDaemonBanner client={{ call } as never} />);
+    await flush();
+    await flush();
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("keeps Update & restart for the managed local daemon and shows no copy block", async () => {
+    mockPlatform({
+      current: LOCAL,
+      connectionVersion: older("0.11.1"),
+      daemonStatus: () => Promise.resolve({ managedState: "managed", comparison: "older" }),
+    });
+    await mount();
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner-update")).toBeInTheDocument());
+    expect(commandTexts()).toEqual([]);
+    expect(screen.queryByTestId("desktop-daemon-banner-copy")).not.toBeInTheDocument();
+    // ...and, like every variant, can be dismissed (a restart may not be wanted mid-run).
+    expect(screen.getByTestId("desktop-daemon-banner-dismiss")).toBeInTheDocument();
+  });
+
+  it("dismissing the managed local notice hides it and stops the idle auto-update", async () => {
+    const daemonUpdate = vi.fn(() => Promise.resolve({ managedState: "managed" }));
+    mockPlatform({
+      current: LOCAL,
+      connectionVersion: older("0.11.1"),
+      daemonStatus: () => Promise.resolve({ managedState: "managed", comparison: "older" }),
+      daemonUpdate,
+    });
+    const { DesktopDaemonBanner } = await import("@/components/desktop-daemon-banner");
+    // Not loaded runs: nothing auto-updates yet.
+    const { rerender } = render(<DesktopDaemonBanner runsLoaded={false} runningRuns={0} />);
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner-update")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("desktop-daemon-banner-dismiss"));
+    await waitFor(() => expect(screen.queryByTestId("desktop-daemon-banner")).not.toBeInTheDocument());
+    // Runs load, the daemon is idle: a dismissed notice must not restart it.
+    rerender(<DesktopDaemonBanner runsLoaded runningRuns={0} />);
+    await flush();
+    await flush();
+    expect(daemonUpdate).not.toHaveBeenCalled();
+  });
+
+  it("puts the commands in one grid so the chips share a width", async () => {
+    mockPlatform({ current: TUNNEL, connectionVersion: older("0.11.1") });
+    await mount();
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
+    const [sh, ps] = screen.getAllByTestId("desktop-daemon-banner-command");
+    expect(sh.parentElement?.parentElement).toBe(ps.parentElement?.parentElement);
+    expect(sh.parentElement?.parentElement).toHaveStyle({ gridTemplateColumns: "max-content max-content" });
+  });
+
+  it("shows managed-by-service with the copy block for a service-managed local daemon", async () => {
+    mockPlatform({
+      current: LOCAL,
+      connectionVersion: older("0.12.0", { managedBy: "launchd" }),
+      daemonStatus: () => Promise.resolve({ managedState: "unmanaged", managedBy: "launchd", comparison: "older" }),
+    });
+    await mount();
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
+    expect(screen.getByTestId("desktop-daemon-banner")).toHaveTextContent("managed by launchd");
+    expect(commandTexts()).toEqual(["smind update"]);
+    expect(screen.queryByTestId("desktop-daemon-banner-update")).not.toBeInTheDocument();
+  });
+
+  it("is dismissable per version: a dismissed notice stays gone, a new daemon version brings it back", async () => {
+    mockPlatform({ current: TUNNEL, connectionVersion: older("0.11.1") });
+    await mount();
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("desktop-daemon-banner-dismiss"));
+    await waitFor(() => expect(screen.queryByTestId("desktop-daemon-banner")).not.toBeInTheDocument());
+
+    // A fresh mount (next app start): still dismissed for 0.11.1 -> 0.12.0 ...
+    cleanup();
+    vi.resetModules();
+    mockPlatform({ current: TUNNEL, connectionVersion: older("0.11.1") });
+    await mount();
+    await flush();
+    await flush();
+    expect(screen.queryByTestId("desktop-daemon-banner")).not.toBeInTheDocument();
+
+    // ... but a different daemon version is a new notice.
+    cleanup();
+    vi.resetModules();
+    mockPlatform({ current: TUNNEL, connectionVersion: older("0.11.2") });
+    await mount();
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
+  });
+
+  it("never flashes the copy-this-command notice for a managed local daemon while its status loads", async () => {
+    let resolveStatus!: (v: unknown) => void;
+    const status = new Promise((r) => {
+      resolveStatus = r;
+    });
+    mockPlatform({ current: LOCAL, connectionVersion: older("0.11.1"), daemonStatus: () => status });
+    await mount();
+    await flush();
+    await flush();
+    // The version is known, the app's management of the daemon is not yet: say nothing.
+    expect(screen.queryByTestId("desktop-daemon-banner")).not.toBeInTheDocument();
+    await act(async () => {
+      resolveStatus({ managedState: "managed", comparison: "older" });
+    });
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner-update")).toBeInTheDocument());
+    expect(commandTexts()).toEqual([]);
+  });
+
+  it("lets a late daemon.info answer replace the provisional version-unknown notice", async () => {
+    vi.useFakeTimers();
+    try {
+      let answer!: (v: unknown) => void;
+      const call = vi.fn(
+        () =>
+          new Promise((r) => {
+            answer = r;
+          }),
+      );
+      mockPlatform({ current: RELAY, connectionVersion: relayProbe });
+      const { DesktopDaemonBanner } = await import("@/components/desktop-daemon-banner");
+      render(<DesktopDaemonBanner client={{ call } as never} />);
+      await flush();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4500);
+      });
+      expect(screen.getByTestId("desktop-daemon-banner")).toHaveTextContent("Daemon version unknown");
+      await act(async () => {
+        answer({ version: "0.12.0" }); // a slow relay finally answers: it is current
+      });
+      await flush();
+      expect(screen.queryByTestId("desktop-daemon-banner")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-reads and forgets the old connection's dismissal when the connection changes", async () => {
+    const OTHER = { ...TUNNEL, id: "url:other", label: "Other" };
+    let current: unknown = TUNNEL;
+    const connectionVersion = vi.fn(older("0.11.1"));
+    vi.doMock("@/lib/platform", () => ({
+      isDesktop: true,
+      desktop: {
+        getCurrentConnection: () => Promise.resolve(current),
+        connectionVersion,
+        daemonStatus: () => Promise.resolve({ managedState: "notRunning" }),
+        daemonUpdate: vi.fn(),
+        onDaemonProgress: () => () => {},
+      },
+    }));
+    await mount();
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("desktop-daemon-banner-dismiss"));
+    await waitFor(() => expect(screen.queryByTestId("desktop-daemon-banner")).not.toBeInTheDocument());
+
+    // Switch to another connection with the same versions: its notice is its own.
+    current = OTHER;
+    await act(async () => {
+      window.dispatchEvent(new Event("smind:connection-changed"));
+    });
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
+    expect(connectionVersion).toHaveBeenLastCalledWith("url:other");
   });
 });

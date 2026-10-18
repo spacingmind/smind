@@ -18,6 +18,7 @@ import { Button } from '@expo/ui';
 import { UiHost } from '../ui/UiHost';
 import { fetchOverview, Space, Task, Workspace } from '../api';
 import { RelayConnection } from '../relay/RelayConnection';
+import { useConnectionState } from '../relay/useConnectionState';
 import { PendingApprovalSet, subscribeToPendingApprovals } from '../taskAttention';
 import { buildTaskSections } from '../taskSections';
 import { AppTheme } from '../theme';
@@ -70,9 +71,11 @@ export function TasksScreen({ conn, onOpenTask, onDisconnect }: Props) {
     }
   }, [conn, pendingApprovals]);
 
+  // Loaded again after every reconnect: a drop interrupts whatever was loading.
+  const { epoch } = useConnectionState(conn);
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, epoch]);
 
   useEffect(() => {
     return subscribeToPendingApprovals(conn, (taskId) => {
