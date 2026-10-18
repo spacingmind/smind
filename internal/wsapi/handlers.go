@@ -296,13 +296,13 @@ func handleAccountOAuthStart(coord *accounts.LoginCoordinator) handlerFunc {
 			return nil, fmt.Errorf("account.oauthStart: provider and label are required")
 		}
 
-		account, err := coord.Login(ctx, p.Provider, p.Label, func(url string) {
+		res, err := coord.Login(ctx, p.Provider, p.Label, accounts.LoginOptions{}, func(url string) {
 			rc.Emit("authorizeUrl", map[string]string{"url": url})
 		})
 		if err != nil {
 			return nil, fmt.Errorf("account.oauthStart: %w", err)
 		}
-		return accountResultFrom(account), nil
+		return accountResultFrom(res.Account), nil
 	}
 }
 

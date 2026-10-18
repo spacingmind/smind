@@ -1,7 +1,9 @@
 package accounts
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -19,11 +21,15 @@ type Account struct {
 	CredentialType string
 	// Models are path.Match globs of the models this account serves
 	// (empty = no list); see MatchesModel.
-	Models    []string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	APIKey    *APIKeyCredential
-	OAuth     *OAuthCredential
+	Models []string
+	// HasIdentity reports whether the account carries a stable vendor
+	// identity (ADR-0033 D6). The identity itself is deliberately not
+	// exposed on this type.
+	HasIdentity bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	APIKey      *APIKeyCredential
+	OAuth       *OAuthCredential
 }
 
 // Notifier receives account lifecycle notifications (ADR-0015): update
@@ -134,8 +140,15 @@ func (r *Registry) AddAPIKeyWithBaseURL(provider, label, key, baseURL string) (s
 	})
 }
 
-// AddOAuth creates a new oauth account.
+// AddOAuth creates a new oauth account with no identity.
 func (r *Registry) AddOAuth(provider, label string, cred OAuthCredential) (store.Account, error) {
+	return r.AddOAuthWithIdentity(provider, label, cred, "")
+}
+
+// AddOAuthWithIdentity creates a new oauth account carrying identity (see
+// AccountIdentity; "" = none). Another row of the same provider owning
+// identity is store.ErrIdentityInUse.
+func (r *Registry) AddOAuthWithIdentity(provider, label string, cred OAuthCredential, identity string) (store.Account, error) {
 	data, err := json.Marshal(cred)
 	if err != nil {
 		return store.Account{}, fmt.Errorf("marshal oauth credential: %w", err)
@@ -145,7 +158,58 @@ func (r *Registry) AddOAuth(provider, label string, cred OAuthCredential) (store
 		Label:          label,
 		CredentialType: CredentialTypeOAuth,
 		CredentialData: string(data),
+		Identity:       identity,
 	})
+}
+
+// ReplaceOAuth swaps the account's credential for the oauth credential cred
+// -- the re-login path (ADR-0033 D6): id, label, models and every row
+// referencing the account are kept. A non-empty adoptIdentity is stored in
+// the same transaction (a legacy row gaining its identity; another owner is
+// store.ErrIdentityInUse and nothing changes); "" leaves the stored identity
+// as is. Fires the credential-replaced hook (which drops the passive
+// cooldown) and then NotifyAccountUpdated, like ReplaceCredential. The
+// poller's rejected-credential state is keyed on a credential fingerprint,
+// so the new credential unblocks refresh by itself.
+func (r *Registry) ReplaceOAuth(id int64, cred OAuthCredential, adoptIdentity string) (store.Account, error) {
+	data, err := json.Marshal(cred)
+	if err != nil {
+		return store.Account{}, fmt.Errorf("marshal oauth credential: %w", err)
+	}
+	var updated store.Account
+	if adoptIdentity != "" {
+		updated, err = r.store.ReplaceAccountCredentialAdoptingIdentity(id, CredentialTypeOAuth, string(data), adoptIdentity)
+	} else {
+		updated, err = r.store.ReplaceAccountCredential(id, CredentialTypeOAuth, string(data))
+	}
+	if err != nil {
+		return store.Account{}, err
+	}
+	if fn := r.getCredentialReplacedHook(); fn != nil {
+		fn(id)
+	}
+	if n := r.getNotifier(); n != nil {
+		n.NotifyAccountUpdated(updated)
+	}
+	return updated, nil
+}
+
+// stored returns the raw store row (including its identity, which the typed
+// Account never carries).
+func (r *Registry) stored(id int64) (store.Account, error) {
+	return r.store.GetAccount(id)
+}
+
+// findByIdentity returns the provider's account owning identity, if any.
+func (r *Registry) findByIdentity(provider, identity string) (store.Account, bool, error) {
+	a, err := r.store.GetAccountByIdentity(provider, identity)
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.Account{}, false, nil
+	}
+	if err != nil {
+		return store.Account{}, false, err
+	}
+	return a, true, nil
 }
 
 // AddWithCredential creates a new account whose credential is parsed the
@@ -309,6 +373,7 @@ func decodeAccount(a store.Account) (Account, error) {
 		Provider:       a.Provider,
 		Label:          a.Label,
 		CredentialType: a.CredentialType,
+		HasIdentity:    a.Identity != "",
 		CreatedAt:      a.CreatedAt,
 		UpdatedAt:      a.UpdatedAt,
 	}

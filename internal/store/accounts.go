@@ -228,7 +228,7 @@ func (s *Store) GetAccount(id int64) (Account, error) {
 // ListAccounts returns all accounts, ordered by id.
 func (s *Store) ListAccounts() ([]Account, error) {
 	rows, err := s.db.Query(
-		`SELECT `+accountColumns+` FROM accounts ORDER BY id`,
+		`SELECT ` + accountColumns + ` FROM accounts ORDER BY id`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list accounts: %w", err)
