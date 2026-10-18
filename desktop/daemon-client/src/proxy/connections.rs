@@ -448,22 +448,22 @@ impl Registry {
         }
         connections.insert(0, local_connection(local_base_url));
         let stored_selected = raw.selected_id.unwrap_or_default();
+        // If the stored selection points at an entry we cannot use, keep
+        // the selection local in memory but remember it, so save() does
+        // not silently rewrite the user's choice.
+        let preserved_selection = (!connections.iter().any(|c| c.id == stored_selected)
+            && unsupported
+                .iter()
+                .any(|v| v.get("id").and_then(Value::as_str) == Some(stored_selected.as_str())))
+        .then(|| stored_selected.clone());
         let selected_id = if connections.iter().any(|c| c.id == stored_selected) {
             stored_selected
         } else {
             LOCAL_ID.to_string()
         };
-        // If the stored selection points at an entry we cannot use, keep
-        // the selection local in memory but remember it, so save() does
-        // not silently rewrite the user's choice.
-        let preserved_selection = unsupported
-            .iter()
-            .find(|v| v.get("id").and_then(Value::as_str) == Some(selected_id.as_str()))
-            .and_then(|_| Some(selected_id.clone()))
-            .filter(|id| *id != LOCAL_ID.to_string());
         Self {
             connections,
-            selected_id: if preserved_selection.is_some() { LOCAL_ID.to_string() } else { selected_id },
+            selected_id,
             unsupported,
             entry_extras,
             top_extra: raw.extra,
@@ -814,5 +814,183 @@ mod tests {
 
         let loaded = Registry::load(&path, &local_url());
         assert_eq!(loaded.current().id, LOCAL_ID);
+    }
+    fn write_raw(path: &Path, json: &str) {
+        fs::write(path, json).unwrap();
+    }
+
+    fn read_json(path: &Path) -> Value {
+        serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn registry_round_trips_unknown_kind_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        let unknown = serde_json::json!({"id":"vpn:1","kind":"wireguard","label":"Office","baseUrl":"wg://x","extra":{"a":[1,2]}});
+        write_raw(&path, &serde_json::json!({
+            "connections": [
+                {"id":"url:http://example.com:9000","kind":"url","label":"T","baseUrl":"http://example.com:9000"},
+                unknown.clone()
+            ],
+            "selectedId": "local"
+        }).to_string());
+
+        let reg = Registry::load(&path, &local_url());
+        assert!(reg.list().iter().all(|c| c.kind != ConnectionKind::Url || c.id != "vpn:1"));
+        assert!(!reg.list().iter().any(|c| c.id == "vpn:1"));
+        assert_eq!(
+            reg.unsupported(),
+            vec![UnsupportedConnection { id: Some("vpn:1".into()), label: Some("Office".into()), kind: Some("wireguard".into()) }]
+        );
+
+        let out = dir.path().join("out.json");
+        reg.save(&out).unwrap();
+        let saved = read_json(&out);
+        let conns = saved["connections"].as_array().unwrap();
+        assert!(conns.iter().any(|c| *c == unknown), "{conns:?}");
+    }
+
+    #[test]
+    fn registry_round_trips_unknown_fields_in_known_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        write_raw(&path, &serde_json::json!({
+            "connections": [
+                {"id":"url:http://example.com:9000","kind":"url","label":"T","baseUrl":"http://example.com:9000",
+                 "futureField":{"x":1},"pinned":true}
+            ],
+            "selectedId": "local"
+        }).to_string());
+        let reg = Registry::load(&path, &local_url());
+        let out = dir.path().join("out.json");
+        reg.save(&out).unwrap();
+        let saved_entry = &read_json(&out)["connections"][1];
+        assert_eq!(saved_entry["futureField"], serde_json::json!({"x":1}));
+        assert_eq!(saved_entry["pinned"], serde_json::json!(true));
+        assert_eq!(saved_entry["baseUrl"], "http://example.com:9000");
+        assert_eq!(saved_entry["label"], "T");
+        assert_eq!(saved_entry["kind"], "url");
+    }
+
+    #[test]
+    fn registry_round_trips_unknown_top_level_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        write_raw(&path, &serde_json::json!({
+            "connections": [], "selectedId": "local", "version": 2, "futureTop": {"k": "v"}
+        }).to_string());
+        let reg = Registry::load(&path, &local_url());
+        let out = dir.path().join("out.json");
+        reg.save(&out).unwrap();
+        let saved = read_json(&out);
+        assert_eq!(saved["version"], serde_json::json!(2));
+        assert_eq!(saved["futureTop"], serde_json::json!({"k":"v"}));
+    }
+
+    #[test]
+    fn registry_keeps_a_selection_that_points_at_an_unsupported_entry_until_the_user_selects() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        write_raw(&path, &serde_json::json!({
+            "connections": [
+                {"id":"vpn:1","kind":"wireguard","label":"Office","baseUrl":"wg://x"}
+            ],
+            "selectedId": "vpn:1"
+        }).to_string());
+        let mut reg = Registry::load(&path, &local_url());
+        assert_eq!(reg.current().id, LOCAL_ID);
+
+        let out = dir.path().join("out.json");
+        reg.save(&out).unwrap();
+        assert_eq!(read_json(&out)["selectedId"], "vpn:1");
+
+        reg.select(LOCAL_ID).unwrap();
+        reg.save(&out).unwrap();
+        assert_eq!(read_json(&out)["selectedId"], "local");
+    }
+
+    #[test]
+    fn registry_keeps_unsupported_entries_through_add_remove_and_select() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        let unknown = serde_json::json!({"id":"vpn:1","kind":"wireguard","label":"Office","baseUrl":"wg://x"});
+        write_raw(&path, &serde_json::json!({
+            "connections": [unknown.clone()], "selectedId": "local"
+        }).to_string());
+        let mut reg = Registry::load(&path, &local_url());
+        let conn = reg.add("x", "http://example.com:9000").unwrap();
+        reg.select(&conn.id).unwrap();
+        reg.remove(&conn.id).unwrap();
+        let out = dir.path().join("out.json");
+        reg.save(&out).unwrap();
+        assert!(
+            read_json(&out)["connections"].as_array().unwrap().contains(&unknown)
+        );
+    }
+
+    #[test]
+    fn entry_with_a_known_kind_but_an_invalid_shape_is_kept_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        let bad = serde_json::json!({"id":"url:z","kind":"url","label":"z"});
+        write_raw(&path, &serde_json::json!({
+            "connections": [bad.clone()], "selectedId": "local"
+        }).to_string());
+        let reg = Registry::load(&path, &local_url());
+        assert!(!reg.list().iter().any(|c| c.id == "url:z"));
+        assert_eq!(reg.unsupported().len(), 1);
+        let out = dir.path().join("out.json");
+        reg.save(&out).unwrap();
+        assert!(read_json(&out)["connections"].as_array().unwrap().contains(&bad));
+    }
+
+    #[test]
+    fn unsupported_reports_only_id_label_and_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        write_raw(&path, &serde_json::json!({
+            "connections": [
+                {"id":"vpn:1","kind":"wireguard","label":"Office","baseUrl":"wg://sekrit/hunter2"}
+            ],
+            "selectedId": "local"
+        }).to_string());
+        let reg = Registry::load(&path, &local_url());
+        let json = serde_json::to_string(&reg.unsupported()).unwrap();
+        assert!(!json.contains("wg://"), "{json}");
+        assert!(!json.contains("hunter2"), "{json}");
+    }
+
+    #[test]
+    fn corrupt_file_is_never_overwritten_by_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        fs::write(&path, "{not json").unwrap();
+        let _reg = Registry::load(&path, &local_url());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{not json");
+    }
+
+    #[test]
+    fn corrupt_file_is_replaced_only_by_an_explicit_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        fs::write(&path, "{not json").unwrap();
+        let reg = Registry::load(&path, &local_url());
+        reg.save(&path).unwrap();
+        let saved = read_json(&path);
+        let conns = saved["connections"].as_array().unwrap();
+        assert_eq!(conns.len(), 1);
+        assert_eq!(conns[0]["id"], "local");
+        assert_eq!(saved["selectedId"], "local");
+    }
+
+    #[test]
+    fn a_top_level_that_is_not_an_object_is_treated_as_corrupt() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        fs::write(&path, "[1,2]").unwrap();
+        let reg = Registry::load(&path, &local_url());
+        assert_eq!(reg.list().len(), 1);
+        assert!(reg.unsupported().is_empty());
     }
 }
