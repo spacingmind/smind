@@ -169,14 +169,67 @@ func (r renderer) runRecords(run Run) []record {
 	}
 	flush()
 
+	// Failure -> recovery pairs: a success of the same tool (and path, when
+	// both carry one) within the next recoveryWindow calls consumes the
+	// nearest preceding unpaired failure.
+	paired := make(map[*toolCall]bool)
+	recoveries := make(map[int]record) // keyed by the success call's record index
+	summaries := make(map[*toolCall]string, len(calls))
+	for _, c := range calls {
+		summaries[c] = r.summary(c)
+	}
+	for j, c := range calls {
+		if c.status != taskrunner.ToolStatusSuccess {
+			continue
+		}
+		for i := j - 1; i >= 0 && j-i <= recoveryWindow; i-- {
+			f := calls[i]
+			if f.status != taskrunner.ToolStatusFailure || paired[f] || f.name != c.name || !samePath(f, c) {
+				continue
+			}
+			paired[f] = true
+			prefix := "[RECOVERY #" + itoa64(c.seq) + "]"
+			name := r.line(c.name, 64)
+			body := "failed: " + name + " " + summaries[f] + " -> recovered: " + name + " " + summaries[c]
+			recoveries[recIdx[c]] = record{
+				prefix: prefix, body: r.fitBody(prefix, body),
+				key: gate.EventKey{RunID: run.ID, Seq: c.seq}, gated: true, kind: gate.EvFailureRecovery,
+			}
+			break
+		}
+	}
+
 	for _, c := range calls {
 		i := recIdx[c]
-		sum := r.summary(c)
 		prefix := "[TOOL #" + itoa64(c.seq) + " " + r.line(c.name, 64) + " " + c.status + "]"
-		body := r.fitBody(prefix, r.toolBody(c, sum))
+		tag := ""
+		if paired[c] {
+			tag = recoveredTag
+		}
+		body := clipRunes(r.toolBody(c, summaries[c]), r.caps.RecordBytes-len(prefix)-1-len(tag)) + tag
 		out[i].prefix, out[i].body = prefix, body
 	}
-	return out
+	if len(recoveries) == 0 {
+		return out
+	}
+	merged := make([]record, 0, len(out)+len(recoveries))
+	for i, rc := range out {
+		merged = append(merged, rc)
+		if rec, ok := recoveries[i]; ok {
+			merged = append(merged, rec)
+		}
+	}
+	return merged
+}
+
+const (
+	recoveryWindow = 10
+	recoveredTag   = " [recovered]"
+)
+
+func samePath(a, b *toolCall) bool {
+	pa, pb := pathOf(a.inputMap()), pathOf(b.inputMap())
+	return pa == "" || pb == "" || pa == pb
 }
 
 func itoa64(n int64) string { return strconv.FormatInt(n, 10) }
