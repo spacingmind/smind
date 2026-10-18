@@ -1021,6 +1021,9 @@ async fn establish(
 /// wait for the daemon's challenge, then send the hello bound to it. The
 /// hello is sent only after a well-formed challenge, so a daemon that sends
 /// none (one from before v2) never receives anything from this client.
+// Eight inputs that are all distinct facts of one hello (key, label, both public keys, session, timing,
+// password); a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 async fn identify_device<T: FrameTransport>(
     channel: &mut E2eeChannel<T>,
     key: &DeviceKey,
