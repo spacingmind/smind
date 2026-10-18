@@ -140,6 +140,14 @@ type Run struct {
 	// as NULL) means the provider's default. Distinct from run_usage.model,
 	// which records what the agent reported using.
 	Model string
+	// BaseSHA/HeadSHA/Dirty are the run's git provenance (O1): the
+	// worktree's HEAD at start and at the terminal state, and its dirty
+	// state at the latest successful capture. nil = unknown (git failed,
+	// no worktree, or a pre-O1 row); CreateRun never sets them -- they are
+	// written by UpdateRunProvenance after the run exists.
+	BaseSHA *string
+	HeadSHA *string
+	Dirty   *bool
 }
 
 // RunEvent is one persisted internal/runs.Event, in the order it was

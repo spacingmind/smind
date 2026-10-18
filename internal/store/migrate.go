@@ -174,6 +174,25 @@ var migrations = []migration{
 		},
 	},
 	{
+		// O1 run provenance: the worktree's git state for a run -- base_sha
+		// (HEAD at start), head_sha (HEAD at the terminal state) and dirty
+		// (latest successful capture). All NULL (unknown) for pre-existing
+		// rows: git may legitimately fail, and unknown is not false.
+		name: "run_provenance",
+		apply: func(db *sql.DB) error {
+			for _, c := range []struct{ col, ddl string }{
+				{"base_sha", "TEXT"},
+				{"head_sha", "TEXT"},
+				{"dirty", "INTEGER"},
+			} {
+				if err := addColumnIfMissing(db, "runs", c.col, c.ddl); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
+	{
 		// ADR-0028 §7.4: quota_cooldown.rejected_window records which window
 		// (five_hour, weekly, weekly_model, unified) a rejection cooldown came
 		// from, for display. Existing rows predate it: '' (unknown). Not named
