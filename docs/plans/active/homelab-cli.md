@@ -1110,8 +1110,8 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   reconnect without asking. It never reaches the secure store, any storage, logs, errors, state, analytics or the identity object
   (a test greps the files that handle it for persistence/logging APIs); the field is masked and sets `autoComplete="off"` (best
   effort: how iOS/Android password managers treat it is not verified); a password over 128 bytes or empty is refused locally (it would only spend a wrong attempt). The tests and the web
-  smoke detect whether the harness has `-password` (it arrives with #360), so this branch is green before and after #360 lands
-  (a failed `go build` fails instead of skipping, and `SMIND_REQUIRE_PASSWORD_HARNESS=1` turns a missing flag into a failure).
+  smoke detect whether the harness has `-password` (it arrives with #360), so this branch was green before #360 landed; with #360 in develop `npm run test:integration` sets
+  `SMIND_REQUIRE_PASSWORD_HARNESS=1` (a missing `-password` flag or a failed `go build` is a failure, never a skip).
   An independent review found no secrecy leak or spec violation; it drove: a daemon that keeps asking for the password it was just
   given reaches the person instead of looping; the thrown error no longer carries the plaintext as an enumerable property; the
   "reconnecting" banner also covers "connecting" after a submit over a live session; the locked card leaves "locked" when the wait
