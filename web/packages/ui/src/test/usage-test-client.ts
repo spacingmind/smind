@@ -20,6 +20,9 @@ export class FakeUsageDaemon {
   /** Per-mode answers override the default (a refresh can return fresher numbers). */
   onRequest: ((params: AccountUsageParams) => AccountUsage[] | void) | null = null;
 
+  /** When set, `account.usage` requests (recorded at once) answer only after it settles: holds a request in flight. */
+  gate: Promise<void> | null = null;
+
   private listeners = new Map<string, Set<(payload: unknown) => void>>();
 
   constructor(reports: AccountUsage[]) {
@@ -31,6 +34,7 @@ export class FakeUsageDaemon {
       if (method !== "account.usage") return null;
       const p = (params ?? {}) as AccountUsageParams;
       this.requests.push(p);
+      if (this.gate) await this.gate;
       if (this.failWith) throw this.failWith;
       const replaced = this.onRequest?.(p);
       if (replaced) this.reports = replaced;

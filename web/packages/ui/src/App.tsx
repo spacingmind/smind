@@ -58,7 +58,6 @@ import {
   type TabEntry,
   type TabKind,
 } from "@/components/tab-registry";
-import { PlanUsageSourceProvider } from "@/hooks/use-chat-plan-usage";
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
 import { DaemonQueryProvider, useDaemonQueryClient } from "@/lib/query/daemon-query-provider";
 import { openUsageModal } from "@/hooks/use-usage-modal";
@@ -1317,32 +1316,30 @@ function AppShell({
   // outside this wrapper and still render on top.
   return (
     <DaemonQueryProvider queryClient={queryClient} client={client} events={events}>
-      <PlanUsageSourceProvider client={client} events={events}>
-        <div className="relative h-svh w-full">
-          <UsageModalRoot client={client} events={events} />
-          <div
-            data-testid="app-shell"
-            className={cn("h-full w-full", settingsOpen && "invisible")}
-            inert={settingsOpen}
-            aria-hidden={settingsOpen || undefined}
-          >
-            {shellElement}
-          </div>
-          {settingsOpen && (
-            // No background here: on macOS the settings sidebar is a vibrancy
-            // surface and the screen paints its own opaque panes.
-            <div className="absolute inset-0 z-40">
-              <SettingsScreen
-                key={settingsOpenNonce}
-                client={client}
-                events={events}
-                onNavigateBack={closeSettings}
-                initialSectionId={settingsInitialSectionId ?? undefined}
-              />
-            </div>
-          )}
+      <div className="relative h-svh w-full">
+        <UsageModalRoot />
+        <div
+          data-testid="app-shell"
+          className={cn("h-full w-full", settingsOpen && "invisible")}
+          inert={settingsOpen}
+          aria-hidden={settingsOpen || undefined}
+        >
+          {shellElement}
         </div>
-      </PlanUsageSourceProvider>
+        {settingsOpen && (
+          // No background here: on macOS the settings sidebar is a vibrancy
+          // surface and the screen paints its own opaque panes.
+          <div className="absolute inset-0 z-40">
+            <SettingsScreen
+              key={settingsOpenNonce}
+              client={client}
+              events={events}
+              onNavigateBack={closeSettings}
+              initialSectionId={settingsInitialSectionId ?? undefined}
+            />
+          </div>
+        )}
+      </div>
     </DaemonQueryProvider>
   );
 }

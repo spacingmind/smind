@@ -5,6 +5,16 @@ import { RpcError, type WsClient } from "@/lib/ws-client";
 import { settleReports } from "./model";
 import type { AccountUsage, AccountUsageParams, AccountUsageResult, UsageQueryData } from "./types";
 
+/**
+ * Mutation keys of the two explicit actions (ADR-0032). Their entries in the mutation cache are what
+ * the touch cadence (`lastTouchAt`) and a card's refreshing / failed / cooldown state are read from,
+ * so both are per QueryClient (per connection) and shared by every surface.
+ */
+export const usageMutationKeys = {
+  touch: ["account.usage.touch"] as const,
+  refresh: ["account.usage.refresh"] as const,
+} as const;
+
 /** Used until the first answer says what the daemon's TTL is. */
 export const DEFAULT_TTL_SECONDS = 300;
 
@@ -47,10 +57,13 @@ export function usageQueryOptions(client: WsClient | null) {
     retry: false,
     queryFn: async ({ client: queryClient }): Promise<UsageQueryData> => {
       if (!client) throw new Error("no daemon connection");
+      // A daemon that answered "unknown method" is never asked again, not even by an invalidation.
+      const held = queryClient.getQueryData<UsageQueryData>(queryKeys.accountUsage());
+      if (held && !held.supportsUsage) return held;
       const params: AccountUsageParams = { mode: "cached" };
       try {
         const result = await client.call<AccountUsageResult>("account.usage", params);
-        return usageDataFrom(result, queryClient.getQueryData<UsageQueryData>(queryKeys.accountUsage()));
+        return usageDataFrom(result, held);
       } catch (err) {
         if (isUnknownMethod(err)) {
           return { supportsUsage: false, enabled: true, ttlSeconds: DEFAULT_TTL_SECONDS, reports: [] };
