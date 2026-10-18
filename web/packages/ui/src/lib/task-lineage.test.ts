@@ -83,6 +83,14 @@ describe("pillStatusWithSubtree", () => {
     expect(pillStatusWithSubtree(node({ id: 3, run: { state: "waiting_permission", runningRunIds: [], pendingPermissions: 1 } }))).toBe("warning");
   });
 
+  it("a done leaf cut off at a cap is a warning, not a calm success", () => {
+    const capped = node({ id: 3, run: { state: "done", runningRunIds: [], pendingPermissions: 0, disposition: "needs-continue" } });
+    expect(pillStatusWithSubtree(capped)).toBe("warning");
+    // ...but only when it is done: a failure stays red, a running run stays running.
+    expect(pillStatusWithSubtree(node({ id: 4, run: { state: "error", runningRunIds: [], pendingPermissions: 0, disposition: "needs-continue" } }))).toBe("danger");
+    expect(pillStatusWithSubtree(node({ id: 5, run: { state: "done", runningRunIds: [], pendingPermissions: 0 } }))).toBe("success");
+  });
+
   it("danger outranks warning outranks running", () => {
     const waiting = node({ id: 3, counts: counts({ waitingPermission: 1 }) });
     expect(pillStatusWithSubtree(waiting)).toBe("warning");

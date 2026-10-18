@@ -82,6 +82,28 @@ A brief states:
 The file lists in a brief are provisional. Give the Peer enough context to
 start without the earlier conversation.
 
+### Briefing `peer-glm` (default coder, low thinking)
+
+`peer-glm` runs with low thinking and a 20-turn limit, so the Lead does the
+thinking and the brief carries it. Use `peer-glm` for coding by default and
+make the brief detailed enough that it only has to type:
+- name the exact files, functions and types to add or change, with
+  signatures, and point at an existing function or test in the repo to copy
+  the pattern from (path:line);
+- give the algorithm or the code shape in a few lines (pseudocode or a
+  snippet), including error handling and the edge cases to cover;
+- list the exact test names and what each asserts, and the exact commands to
+  run (`go test ./pkg -run Name`, `bunx vitest run path`);
+- split the outcome into small numbered steps, one commit each, so a
+  20-turn cut leaves compiling, committed progress;
+- say what is out of scope and must not be touched.
+
+When a `peer-glm` candidate fails, first tighten the brief (what was
+ambiguous, the failing output, the exact fix shape) and retry once.
+Switch to `peer-sonnet` only after that, on a GLM 429, or for a genuinely
+hard outcome (crypto, concurrency, cross-language protocol), and say why in
+the Lead's report.
+
 ## Peer handoff (to the Lead)
 
 A writable Peer returns:

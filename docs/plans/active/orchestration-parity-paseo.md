@@ -570,15 +570,30 @@ Named tests: `TestMCPTools_TaskStatusWithEvents`, `TestMCPTools_TaskLogsWithEven
 
 New decisions raised by the fold-in (not built, recommendation attached):
 
-- **D12: CLI/UI to flip `autoAccept` live on one run** (D-G2). `run.setPermissionMode`
+- **D12: CLI/UI to flip `autoAccept` live on one run** (D-G2). **Decided 2026-10-18 (user): build the CLI** (`smind task mode`, below). `run.setPermissionMode`
   with a human source already allows it; the gap is discoverability. Recommend
   a `smind task mode <runId> [--auto-accept on|off] [mode]` human-only CLI,
   needs no ADR (it exposes an existing human-source RPC) but is your call.
+  *Decision recorded:* the CLI declares `source: "human"` explicitly; the MCP `task_set_mode` stays orchestrator-source with no
+  `autoAccept`/`source` input and no MCP tool is added. The source is a declaration by the surface, not a credential (every client
+  holds the daemon token), so the CLI adds a speed bump on the escalations (turning auto-accept on, or picking a mode the daemon would refuse an
+  agent, needs "yes" typed at a terminal, no `--yes`; the mode is probed as the orchestrator source so the daemon, not the CLI, decides which
+  modes auto-approve, failing closed); against a process that can run commands as the user the boundary stays the provider's permission mode or
+  sandbox (ADR-0019), as for `smind task approve`.
 - **D13: `needs-continue` run state for `max_turn_requests`** (D-G5). Today
   such a run ends `done` with only `stopReason` telling the truth. Recommend
   adding it as a distinct terminal status, which ripples through `run.status`,
   the CLI, `task_wait`, the web timeline and the queue's "finished" trigger;
   needs an ADR.
+  *Decided 2026-10-18 (user): ADR-0027's recommendation, not a status.* A derived `disposition` (`needs-continue`) beside the unchanged run
+  status, computed from status + stop reason (`runs.DispositionFor`: `done` ending at `max_turn_requests`, `max_tokens` or
+  `budget_exceeded`) and never stored, so it survives a restart for free. Additive on `run.list` (`Disposition`), `run.logs`,
+  `run.status` events and the `task.prompt`/`run.attach` result (`disposition`), MCP `task_status`/`task_wait`/`task_logs`/`run_list`
+  `task.tree`/`task_tree` (the node `run.disposition`, a "(N needs-continue)" note in the summary and in `task_wait {childrenOf}`
+  child states, and a warning pill in the web lineage) and `smind task runs` (`done (needs-continue)`). `task_wait` still returns `state: "done"` with a message saying the work is not
+  finished, so the queue's "finished" trigger and every status consumer are unchanged. The web run footer reads the disposition
+  (an unknown cap still offers Continue; an older daemon falls back to the stop-reason cases). Only `needs-continue` is built: the
+  rest of ADR-0027 section 4's dispositions need the handoff tools.
 
 ## Progress
 
@@ -586,21 +601,24 @@ New decisions raised by the fold-in (not built, recommendation attached):
 - [x] ADR-0024 (D1) and ADR-0025 (D2) written, Accepted; D1-D11 answered (2026-10-11)
 - [x] PR-A discovery tools + server instructions: #264 (merged)
 - [x] PR-B task from baseRef/branch/PR + `task_archive` + archive guard/latch: #266 (merged)
+- [x] D12 `smind task mode <runId> [--auto-accept on|off] [mode]` human-only CLI (2026-10-18, PR "feat(cli): smind task mode for humans (D12)")
 - [x] PR-E worktree setup/teardown + ports (backend + CLI): #270 (merged)
 - [ ] PR-C live settings + wait-any: #269 (open, CI green)
 - [ ] PR-G dogfood fixes (D-G1 blocker, D-G3..D-G10): #273 (open, stacked on #269)
 - [ ] PR-F model selection (backend + CLI + MCP): #272 (open); PR-F2 web: #276 (open, stacked on #272)
 - [ ] PR-E2 web setup editor/badge: #275 (open)
 - [ ] PR-D bundled skills + `smind skill install|ls|uninstall`: code complete in branch `feat/orchestration-skills` (carries temporary integration merges of #269/#273); PR opens after they merge, rebased onto develop
-- [ ] D12 (live `autoAccept` CLI) and D13 (`needs-continue` run state) answered by the user
+- [x] D12 (live `autoAccept` CLI) and D13 (`needs-continue`) answered by the user (2026-10-18); D13 shipped as a derived `disposition`, not a status (PR "feat(runs): derived needs-continue disposition (D13)")
 
 ## Validation
 
 Per PR, with what was and was not verified (details in each PR body):
 
+- **D12 (`smind task mode`):** `TestTaskModeParse`, `TestTaskModeDeclaresHumanSource` (the CLI sends `source: "human"` explicitly), `TestTaskModeAutoAcceptOnNeedsATerminalAndAYes` (an auto-approving mode or auto-accept on needs a terminal and `yes`, else no human-source call is made; off and safe modes never ask; an unverifiable mode fails closed), `TestTaskModeAgainstARealDaemon` (live ACP run: a human picks `bypass_permissions`, turns auto-accept on, then off), `TestRunSetPermissionMode_AgentSourceIsRefusedLikeOrchestrator` (source `agent` refused an auto-approving mode and `autoAccept=true`; `human` allowed), `TestMCPTools_NoToolCanEscalatePermissions` (no MCP tool takes `source`; only `task_send` takes `autoAccept`, which the daemon rejects: `TestMCPTools_TaskSendRejectsAutoApprovingMode`). Not verified: a real provider's auto-accept toggle (fake ACP agent only).
 - **PR-A (#264):** TestRunList_*, TestMCPTools_{WorkspaceList,TaskGet,RunList*,ProviderListMarksAutoApprovingModes,ProfileListIncludesNotes}, TestMCPServer_InstructionsNameEveryTool (fails when a tool is undocumented), TestCapRuns. Criteria 1-7 met.
 - **PR-B (#266):** ref validation and git argv safety (`TestManager_CreateTask_BaseRefRejectsOptionLikeInput`), single-level refs/SHAs, `prNumber <= 0` rejected at every layer; archive guard fails closed, latch set *before* the active check (`TestTryBeginArchive_LatchSetBeforeActiveCheck` fails on the old order), `run.start` refuses archived tasks. Not verified: PR path against a real GitHub remote (test seam only).
 - **PR-E (#270):** setup/teardown/port tests listed in the PR; review fixes: `Start` honors setup-busy, `RetrySetup` atomic, `discardTask` never deletes a pre-existing branch (regression `TestCreateTask_ExistingBranchPortExhaustionKeepsUserBranch`, verified to fail on the old behavior). Not verified: real `npm ci`, Windows.
 - **PR-C (#269):** source-guarded `run.setPermissionMode`/`run.setConfigOption` (fail-closed on catalog lookup error and on non-`thought_level|model` categories), wait-any. Not verified: GLM's real option category.
 - **PR-G (#273), PR-F (#272), PR-F2 (#276), PR-E2 (#275):** see PR bodies; web PRs include light+dark screenshot reviews against sandbox daemons (isolated `SMIND_HOME`/port). Not verified anywhere: real GLM/Codex agents for model lists and `--max-turns`.
 - **Recurring, unrelated:** `TestServer_TerminalAttach_*` and a few `@smind/ui` `App.test.tsx` tests time out intermittently under load; they pass when rerun alone.
+- **D13 (derived `needs-continue` disposition):** `TestDispositionFor`, `TestDispositionIsNotAStatus` (status values unchanged), `TestRegistry_DispositionNeedsContinueSurvivesRehydrate` (live, listed and after a restart), `TestRunDispositionNeedsContinueOnAMaxTurnStop` / `TestRunDispositionAbsentForANormalFinish` (run.list, run.logs and the run.status event of a real fake-agent run ending `max_turn_requests`/`max_tokens`), `TestMCPTools_DispositionNeedsContinue` (task_wait keeps `state: done` and says the work is not finished; task_status, task_logs, run_list), `TestTaskRunFacts_DispositionOfTheLatestFinishedRun` + `TestBuild_NodeRunCarriesTheDisposition` + `TestTreeSummaryAndChildStatesShowNeedsContinue` (task.tree and what a supervisor reads), `TestRunStatusCellShowsTheDisposition`; web: `describeRunFooter` cases (known caps, unknown cap, ignored unless done, older daemon unchanged), `RunTimeline` Continue on a disposition, `useRunTimeline` run.list/run.logs carry it. Light and dark screenshots of the run footer on a real daemon (`smind serve` with a fake GLM agent): "Hit the tool-turn limit · not finished · Continue" next to a normal run with no warning. Not done: the mobile app's run list still renders `done (max_turn_requests)` without a not-finished marker (owners of `mobile/`). Not verified: a real GLM agent hitting `--max-turns`; `budget_exceeded` (nothing emits it yet).

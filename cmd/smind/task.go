@@ -142,16 +142,17 @@ type runLogEvent struct {
 
 // runLogsResult is run.logs's terminal result.
 type runLogsResult struct {
-	RunID      string        `json:"runId"`
-	Status     string        `json:"status"`
-	StopReason string        `json:"stopReason,omitempty"`
-	Err        string        `json:"err,omitempty"`
-	Events     []runLogEvent `json:"events"`
+	RunID       string        `json:"runId"`
+	Status      string        `json:"status"`
+	StopReason  string        `json:"stopReason,omitempty"`
+	Disposition string        `json:"disposition,omitempty"`
+	Err         string        `json:"err,omitempty"`
+	Events      []runLogEvent `json:"events"`
 }
 
 func cmdTask(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|logs|stop|permissions|approve|deny|options|set-option|chat|queue> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|logs|stop|permissions|approve|deny|mode|options|set-option|chat|queue> ...")
 		return 2
 	}
 	switch args[0] {
@@ -175,6 +176,8 @@ func cmdTask(args []string) int {
 		return cmdTaskApprove(args[1:])
 	case "deny":
 		return cmdTaskDeny(args[1:])
+	case "mode":
+		return cmdTaskMode(args[1:])
 	case "options":
 		return cmdTaskOptions(args[1:])
 	case "set-option":
@@ -775,7 +778,11 @@ func printRunLogs(result runLogsResult) {
 
 	switch result.Status {
 	case "done":
-		fmt.Fprintf(os.Stderr, "run %s: done (%s)\n", result.RunID, result.StopReason)
+		if result.Disposition != "" {
+			fmt.Fprintf(os.Stderr, "run %s: done (%s) -- %s\n", result.RunID, result.StopReason, result.Disposition)
+		} else {
+			fmt.Fprintf(os.Stderr, "run %s: done (%s)\n", result.RunID, result.StopReason)
+		}
 		if note := stopNote(result.StopReason); note != "" {
 			fmt.Fprintln(os.Stderr, note)
 		}
@@ -1337,6 +1344,18 @@ type runSummaryRow struct {
 	Status     string
 	StartedAt  time.Time
 	StopReason string
+	// Disposition is "needs-continue" for a run that ended done at a cap.
+	Disposition string
+}
+
+// runStatusCell is a run's STATUS column: the status, and its disposition when
+// it has one (a run "done" at a turn cap reads "done (needs-continue)": not
+// finished).
+func runStatusCell(status, disposition string) string {
+	if disposition == "" {
+		return status
+	}
+	return status + " (" + disposition + ")"
 }
 
 // cmdTaskRuns lists a task's runs, most recent first (run.list's own
@@ -1410,7 +1429,7 @@ func cmdTaskRuns(args []string) int {
 		if r.TaskID != taskID {
 			continue
 		}
-		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n", r.ID, r.ChatID, r.Provider, r.Status)
+		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n", r.ID, r.ChatID, r.Provider, runStatusCell(r.Status, r.Disposition))
 	}
 	tw.Flush()
 	return 0

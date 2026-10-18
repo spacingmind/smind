@@ -99,7 +99,7 @@ func toTreeFacts(facts map[int64]runs.TaskRunFact) map[int64]tasktree.RunFact {
 	out := make(map[int64]tasktree.RunFact, len(facts))
 	for id, f := range facts {
 		out[id] = tasktree.RunFact{
-			State: f.State, RunningRunIDs: f.RunningRunIDs, PendingPermissions: f.PendingPermissions,
+			State: f.State, RunningRunIDs: f.RunningRunIDs, PendingPermissions: f.PendingPermissions, Disposition: f.Disposition,
 		}
 	}
 	return out

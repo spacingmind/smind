@@ -42,21 +42,13 @@ pub fn daemon_url_from(override_value: impl AsRef<str>) -> Result<Url, String> {
 
 /// local_token_path_from locates the token file the local daemon wrote
 /// (`internal/auth`, mirrored from `internal/config.Dir`): `$SMIND_HOME/token`,
-/// else `<home>/.smind/token`, with the legacy `<home>/.spacingmind` winning only
-/// when `.smind` does not exist yet. `None` when no home directory is known.
-pub fn local_token_path_from(
-    smind_home: Option<&str>,
-    home: Option<&str>,
-    exists: impl Fn(&std::path::Path) -> bool,
-) -> Option<std::path::PathBuf> {
+/// else `<home>/.smind/token`. `None` when no home directory is known.
+pub fn local_token_path_from(smind_home: Option<&str>, home: Option<&str>) -> Option<std::path::PathBuf> {
     use std::path::Path;
     if let Some(h) = smind_home.filter(|h| !h.is_empty()) {
         return Some(Path::new(h).join("token"));
     }
-    let home = Path::new(home.filter(|h| !h.is_empty())?);
-    let smind = home.join(".smind");
-    let legacy = home.join(".spacingmind");
-    Some(if !exists(&smind) && exists(&legacy) { legacy.join("token") } else { smind.join("token") })
+    Some(Path::new(home.filter(|h| !h.is_empty())?).join(".smind").join("token"))
 }
 
 /// read_local_token reads the local daemon's token file. A daemon with a
@@ -65,7 +57,7 @@ pub fn local_token_path_from(
 pub fn read_local_token() -> Option<String> {
     let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok();
     let smind_home = std::env::var("SMIND_HOME").ok();
-    let path = local_token_path_from(smind_home.as_deref(), home.as_deref(), |p| p.exists())?;
+    let path = local_token_path_from(smind_home.as_deref(), home.as_deref())?;
     let token = std::fs::read_to_string(path).ok()?.trim().to_string();
     if token.is_empty() { None } else { Some(token) }
 }
@@ -183,17 +175,11 @@ mod tests {
 
     #[test]
     fn local_token_path_follows_smind_home_then_home() {
-        use std::path::{Path, PathBuf};
-        let none = |_: &Path| false;
-        assert_eq!(local_token_path_from(Some("/data"), Some("/home/u"), none), Some(PathBuf::from("/data/token")));
-        assert_eq!(local_token_path_from(None, Some("/home/u"), none), Some(PathBuf::from("/home/u/.smind/token")));
-        assert_eq!(local_token_path_from(Some(""), Some("/home/u"), none), Some(PathBuf::from("/home/u/.smind/token")));
-        assert_eq!(local_token_path_from(None, None, none), None);
-        // The legacy directory only wins while ~/.smind does not exist.
-        let legacy_only = |p: &Path| p.ends_with(".spacingmind");
-        assert_eq!(local_token_path_from(None, Some("/home/u"), legacy_only), Some(PathBuf::from("/home/u/.spacingmind/token")));
-        let both = |_: &Path| true;
-        assert_eq!(local_token_path_from(None, Some("/home/u"), both), Some(PathBuf::from("/home/u/.smind/token")));
+        use std::path::PathBuf;
+        assert_eq!(local_token_path_from(Some("/data"), Some("/home/u")), Some(PathBuf::from("/data/token")));
+        assert_eq!(local_token_path_from(None, Some("/home/u")), Some(PathBuf::from("/home/u/.smind/token")));
+        assert_eq!(local_token_path_from(Some(""), Some("/home/u")), Some(PathBuf::from("/home/u/.smind/token")));
+        assert_eq!(local_token_path_from(None, None), None);
     }
 
     #[test]

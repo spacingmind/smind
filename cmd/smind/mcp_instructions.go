@@ -18,9 +18,10 @@ The loop:
      approve or deny it. This is NOT completion. Loop: task_wait, then
      (the human approves), then task_wait again -- passing
      ignorePermissionIds for the requests you already surfaced.
-   - done / error / stopped: the run ended. A done run with a stopNote
-     (e.g. it hit the agent's turn limit) may be incomplete: send a
-     follow-up prompt such as "continue".
+   - done / error / stopped: the run ended. A done run whose disposition
+     is "needs-continue" (it hit a turn, token or budget cap; status stays
+     done) is NOT finished: send a follow-up prompt such as "continue".
+     A stopNote on any other done run says it may be incomplete too.
    - timed_out: still running -- a timeout is not a failure; re-issue
      task_wait. task_status is the non-blocking check.
 5. Review: task_logs for the transcript, or read the git state in the
@@ -63,7 +64,9 @@ as is: for a write it carries the path, the size change, replacesExisting
 and a diff or preview. A write that replaces an existing file with much
 less content (largeShrink) is likely destructive; recommend rejecting it.
 There is no tool here that approves, denies, or responds to a permission
-request, and you must never claim to have resolved one.
+request, and you must never claim to have resolved one. If the prompts
+are too frequent, say so: the human can ease them for a live run with
+` + "`smind task mode <runId>`" + ` (auto-accept or another mode); you cannot.
 
 In a provider's default mode nearly every command asks (even grep and
 ls). To cut prompts, pass profileId of a human-authored profile with the

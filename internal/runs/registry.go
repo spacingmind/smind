@@ -439,6 +439,7 @@ func (r *run) statusLocked() RunStatus {
 		StartedAt:      r.startedAt,
 		FinishedAt:     r.finishedAt,
 		StopReason:     r.stopReason,
+		Disposition:    DispositionFor(r.status, r.stopReason),
 		Err:            r.errMsg,
 		PermissionMode: r.perm.Mode,
 		AutoAccept:     r.perm.AutoAccept,

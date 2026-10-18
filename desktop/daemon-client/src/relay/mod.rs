@@ -10,6 +10,7 @@ pub mod device;
 pub mod liveness;
 pub mod pairing;
 pub mod pairing_store;
+pub mod password;
 
 /// Generated from `internal/relay/relaypb/relay.proto` (see `build.rs`) —
 /// the same wire contract the Go daemon/relay/mobile all share.
