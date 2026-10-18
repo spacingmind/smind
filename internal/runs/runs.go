@@ -98,6 +98,14 @@ type RunStatus struct {
 	// nil until the run has emitted a usage event (a run whose backend
 	// reports nothing never gets one).
 	Usage *RunUsage `json:"usage,omitempty"`
+
+	// BaseSHA/HeadSHA/Dirty are the run's git provenance (O1): the
+	// worktree's HEAD at start and at the terminal state, and its dirty
+	// state at the latest successful capture. nil = unknown (git failed,
+	// no worktree, or a pre-O1 row).
+	BaseSHA *string
+	HeadSHA *string
+	Dirty   *bool
 }
 
 // RunUsage is RunStatus's usage totals. Every numeric field is nil when the
