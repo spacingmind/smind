@@ -105,6 +105,68 @@ impl Default for SshTunnels {
     }
 }
 
+/// Outcome of asking the OS who owns the local port picked for a tunnel.
+#[derive(Debug, PartialEq, Eq)]
+enum OwnerCheck {
+    Ours,
+    Foreign(u32),
+    Unidentified,
+    Unavailable,
+}
+
+/// `found` is what the platform port-owner helper returned for the local port.
+fn classify_owner(found: std::io::Result<Option<u32>>, child_pid: u32) -> OwnerCheck {
+    match found {
+        Ok(Some(pid)) if pid == child_pid => OwnerCheck::Ours,
+        Ok(Some(pid)) => OwnerCheck::Foreign(pid),
+        Ok(None) => OwnerCheck::Unidentified,
+        Err(_) => OwnerCheck::Unavailable,
+    }
+}
+
+/// Who listens on the local port, per the OS's own port-owner helper.
+fn port_owner(port: u16) -> std::io::Result<Option<u32>> {
+    #[cfg(target_os = "macos")]
+    {
+        smind_daemon_client::daemon_manager::native::find_port_owner(port)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        smind_daemon_client::daemon_manager::windows_native::find_port_owner(port)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = port;
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "no port-owner helper on this platform",
+        ))
+    }
+}
+
+/// Whether a tunnel whose local port answers may be used: the listener must
+/// be our ssh child (or unverifiable but answering as a sMind daemon), and
+/// anything that answers and is not a sMind daemon is refused.
+fn verdict(owner: &OwnerCheck, reachable: bool, service: Option<&str>) -> Result<(), String> {
+    match owner {
+        OwnerCheck::Foreign(pid) => {
+            Err(format!("another program (process {pid}) is listening on the local port picked for the SSH tunnel, not ssh; refusing to use it -- try again"))
+        }
+        OwnerCheck::Unidentified => {
+            Err("the program listening on the local port picked for the SSH tunnel could not be identified as ssh; refusing to use it -- try again".to_string())
+        }
+        OwnerCheck::Ours | OwnerCheck::Unavailable => {
+            if reachable && service != Some("smind") {
+                Err("the SSH tunnel is up, but what answers behind it is not a sMind daemon -- check the daemon port".to_string())
+            } else if !reachable && matches!(owner, OwnerCheck::Unavailable) {
+                Err("the SSH tunnel is up but nothing answered /healthz through it, and the listener could not be verified -- is the daemon running on the remote host?".to_string())
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
 fn free_port() -> Result<u16, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| format!("could not find a free local port: {e}"))?;
     Ok(listener.local_addr().map_err(|e| e.to_string())?.port())
@@ -245,11 +307,10 @@ impl SshTunnels {
                 return Err(failure_detail(&stderr.lock().unwrap(), status));
             }
             // The port accepting is not proof it is ssh's forward: also require
-            // the child to still be running. Residual window, not closed here:
-            // a local process that binds the picked port before ssh has
-            // authenticated would pass the connect check for a moment (a
-            // listener cannot be told apart from ssh's); ExitOnForwardFailure
-            // then makes ssh exit, which this loop reports on its next pass.
+            // the child to still be running. A local process that binds the
+            // picked port before ssh has authenticated still passes this
+            // connect check; that residual window is closed by the
+            // post-start owner + healthz check below.
             if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() && tunnel.alive() {
                 break;
             }
@@ -259,6 +320,14 @@ impl SshTunnels {
             }
             tokio::time::sleep(POLL_INTERVAL).await;
         }
+        // The listener on the local port must be OUR ssh child and answer as
+        // a sMind daemon; otherwise a local squatter would receive the
+        // proxied traffic (and any bearer). Dropping `tunnel` kills + reaps
+        // the child; nothing is inserted.
+        let child_pid = tunnel.child.lock().unwrap().id();
+        let owner = classify_owner(port_owner(local_port), child_pid);
+        let health = crate::probe::probe(&tunnel.url()).await;
+        verdict(&owner, health.reachable, health.service.as_deref())?;
         let url = tunnel.url();
         self.watch_exit(id, &tunnel);
         self.tunnels.lock().unwrap().insert(id.to_string(), tunnel);
@@ -348,6 +417,61 @@ mod tests {
     }
 
     #[test]
+    fn owner_check_ours_when_the_pid_matches() {
+        assert_eq!(classify_owner(Ok(Some(7)), 7), OwnerCheck::Ours);
+    }
+
+    #[test]
+    fn owner_check_foreign_when_the_pid_differs() {
+        assert_eq!(classify_owner(Ok(Some(9)), 7), OwnerCheck::Foreign(9));
+    }
+
+    #[test]
+    fn owner_check_unidentified_when_nobody_is_found() {
+        assert_eq!(classify_owner(Ok(None), 7), OwnerCheck::Unidentified);
+    }
+
+    #[test]
+    fn owner_check_unavailable_when_the_helper_errors() {
+        assert_eq!(
+            classify_owner(
+                Err(std::io::Error::other("boom")),
+                7
+            ),
+            OwnerCheck::Unavailable
+        );
+    }
+
+    #[test]
+    fn verdict_refuses_foreign_and_unidentified_owners() {
+        for owner in [&OwnerCheck::Foreign(42), &OwnerCheck::Unidentified] {
+            let err = verdict(owner, true, Some("smind")).unwrap_err();
+            assert!(err.contains("refusing"), "{err}");
+        }
+    }
+
+    #[test]
+    fn verdict_accepts_our_ssh_even_when_the_remote_daemon_is_down() {
+        assert_eq!(verdict(&OwnerCheck::Ours, false, None), Ok(()));
+    }
+
+    #[test]
+    fn verdict_refuses_a_non_smind_service() {
+        let err = verdict(&OwnerCheck::Ours, true, Some("other")).unwrap_err();
+        assert!(err.contains("not a sMind daemon"), "{err}");
+        assert!(verdict(&OwnerCheck::Unavailable, true, Some("other")).is_err());
+    }
+
+    #[test]
+    fn verdict_requires_a_smind_answer_when_the_owner_could_not_be_verified() {
+        assert!(verdict(&OwnerCheck::Unavailable, false, None).is_err());
+        assert_eq!(
+            verdict(&OwnerCheck::Unavailable, true, Some("smind")),
+            Ok(())
+        );
+    }
+
+    #[test]
     fn ssh_tunnel_args_use_batchmode_and_double_dash() {
         let args = tunnel_args(&target(), 51000);
         assert_eq!(
@@ -391,6 +515,7 @@ mod tests {
     mod with_fake_ssh {
         use super::*;
         use smind_daemon_client::proxy::Registry;
+        use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
         use std::path::Path;
 
@@ -429,9 +554,43 @@ mod tests {
             let args: Vec<&str> = argv.lines().collect();
             let spec = args[args.iter().position(|a| *a == "-L").unwrap() + 1];
             let port: u16 = spec.split(':').nth(1).unwrap().parse().unwrap();
+            let service = std::env::var("FAKE_SSH_SERVICE").unwrap_or_else(|_| "smind".into());
             let listener = TcpListener::bind(("127.0.0.1", port)).unwrap();
             for conn in listener.incoming() {
-                drop(conn);
+                let Ok(mut stream) = conn else { continue };
+                let service = service.clone();
+                std::thread::spawn(move || {
+                    // The readiness check and `reachable()` connect and close
+                    // without sending anything: read until the end of the
+                    // request headers, or a bare close, without hanging.
+                    let mut seen = Vec::new();
+                    let mut chunk = [0u8; 1024];
+                    loop {
+                        match stream.read(&mut chunk) {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => {
+                                seen.extend_from_slice(&chunk[..n]);
+                                if seen.windows(4).any(|w| w == b"\r\n\r\n") {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if service.as_str() == "down" {
+                        return;
+                    }
+                    let body = format!(
+                        "{{\"service\":\"{service}\",\"status\":\"ok\",\"version\":\"test\"}}"
+                    );
+                    let _ = stream.write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            body.len(),
+                            body
+                        )
+                        .as_bytes(),
+                    );
+                });
             }
         }
 
@@ -589,6 +748,120 @@ mod tests {
             assert!(crate::commands::remove_connection(&p, &tunnels, &unwritable, &conn.id).is_err());
             assert!(!reachable(&url), "the ssh child was stopped");
             assert_eq!(p.ssh_local(&conn.id), None);
+        }
+
+        fn serve_healthz(listener: TcpListener, service: &'static str) {
+            std::thread::spawn(move || {
+                for conn in listener.incoming() {
+                    let Ok(mut stream) = conn else { continue };
+                    std::thread::spawn(move || {
+                        let mut seen = Vec::new();
+                        let mut chunk = [0u8; 1024];
+                        loop {
+                            match stream.read(&mut chunk) {
+                                Ok(0) | Err(_) => return,
+                                Ok(n) => {
+                                    seen.extend_from_slice(&chunk[..n]);
+                                    if seen.windows(4).any(|w| w == b"\r\n\r\n") {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        let body = format!(
+                            "{{\"service\":\"{service}\",\"status\":\"ok\",\"version\":\"test\"}}"
+                        );
+                        let _ = stream.write_all(
+                            format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                body.len(),
+                                body
+                            )
+                            .as_bytes(),
+                        );
+                    });
+                }
+            });
+        }
+
+        /// A fake ssh that never listens; the test binds the picked port
+        /// itself, so only the OWNER check can reject it.
+        #[tokio::test]
+        async fn a_squatter_on_the_picked_port_is_refused() {
+            let dir = tempfile::tempdir().unwrap();
+            let argv_path = dir.path().join("argv.txt");
+            let idle = script(
+                dir.path(),
+                "idle-ssh",
+                &format!(
+                    "printf '%s\\n' \"$@\" > '{}'\nexec sleep 30",
+                    argv_path.display()
+                ),
+            );
+            let tunnels = std::sync::Arc::new(SshTunnels::with_program(idle));
+            let id = target().connection_id();
+            let t = tunnels.clone();
+            let started = {
+                let id = id.clone();
+                tokio::spawn(async move { t.start(&id, &target()).await })
+            };
+
+            // Wait for the fake ssh to report the -L spec, then squat the port.
+            let mut squatter = None;
+            for _ in 0..100 {
+                if let Ok(argv) = std::fs::read_to_string(&argv_path) {
+                    if let Some(line) = argv.lines().find(|l| l.starts_with("127.0.0.1:")) {
+                        let port: u16 = line.split(':').nth(1).unwrap().parse().unwrap();
+                        if let Ok(listener) = TcpListener::bind(("127.0.0.1", port)) {
+                            squatter = Some(listener);
+                            break;
+                        }
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            let listener = squatter.expect("bound the picked port");
+            serve_healthz(listener, "smind");
+
+            let result = started.await.unwrap();
+            let err = result.unwrap_err();
+            assert!(
+                err.contains("another program") || err.contains("could not be identified"),
+                "{err}"
+            );
+            assert!(tunnels.local_url(&id).is_none());
+        }
+
+        #[tokio::test]
+        async fn a_non_smind_service_behind_the_tunnel_is_refused() {
+            let dir = tempfile::tempdir().unwrap();
+            let fast = fake_ssh(dir.path());
+            script(
+                dir.path(),
+                "other-ssh",
+                &format!("FAKE_SSH_SERVICE='other' exec '{}' \"$@\"", fast.display()),
+            );
+            let tunnels = SshTunnels::with_program(dir.path().join("other-ssh"));
+            let id = target().connection_id();
+            let err = tunnels.start(&id, &target()).await.unwrap_err();
+            assert!(err.contains("not a sMind daemon"), "{err}");
+            assert!(tunnels.local_url(&id).is_none());
+        }
+
+        #[cfg(target_os = "macos")]
+        #[tokio::test]
+        async fn ssh_that_owns_the_port_is_accepted_even_when_the_daemon_behind_it_is_down() {
+            let dir = tempfile::tempdir().unwrap();
+            let fast = fake_ssh(dir.path());
+            script(
+                dir.path(),
+                "down-ssh",
+                &format!("FAKE_SSH_SERVICE='down' exec '{}' \"$@\"", fast.display()),
+            );
+            let tunnels = SshTunnels::with_program(dir.path().join("down-ssh"));
+            let id = target().connection_id();
+            let url = tunnels.start(&id, &target()).await.unwrap();
+            assert!(reachable(&url));
         }
 
         #[tokio::test]
