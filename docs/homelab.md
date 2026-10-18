@@ -31,7 +31,7 @@ $env:SMIND_SERVICE = 1; irm https://raw.githubusercontent.com/spacingmind/smind/
 | Command | What it does |
 |---|---|
 | `smind service install [--system] [--home <dir>] [--path <PATH>] [--no-start]` | Writes the unit, enables it, starts it. Safe to repeat: an unchanged unit is not rewritten and a running daemon is never restarted by it. |
-| `smind service status` | State, pid, port, and the daemon's version next to this binary's. Exit code 0 running, 3 stopped, 4 not installed. |
+| `smind service status` | State, whether the service is enabled, pid, port, and the daemon's version next to this binary's. Exit code 0 running, 3 stopped, 4 not installed. |
 | `smind service start` / `stop` / `restart` | Drive the unit. `smind update` calls `restart` for you when the daemon is service-managed. |
 | `smind service uninstall` | Stops and removes the unit. Your data in `$SMIND_HOME` is never touched. |
 | `smind service logs [-f] [-n N]` | Tails the daemon's own log file (below). |
@@ -65,14 +65,14 @@ which exists only while you are logged in to the Mac's graphical session, so it 
 be loaded over plain ssh on a Mac nobody is logged in to (the plist is still written and loads at the next login).
 `smind stop` (or `smind service stop`) leaves it stopped; a crash restarts it.
 
-**Windows.** A per-user **Scheduled Task** named `smind` (not a Windows Service, which would run as another identity
+**Windows.** A per-user **Scheduled Task** named `smind-<your SID>` (not a Windows Service, which would run as another identity
 without your `PATH`, agent logins and profile). It has a logon trigger for your account only, runs as you in your
 interactive session at the least privilege level, and registering it needs **no administrator rights** (a policy that
 forbids scheduled tasks can still refuse it; the error then names the refused `schtasks /Create` step). **It starts at
 logon, not at boot**: a headless Windows machine needs auto-logon, which smind does not set up. The daemon is launched
 through `conhost.exe --headless`, so it has no console window. It runs only in your own interactive Windows session
 (signed in at the console or over RDP): `smind service start` over plain ssh will time out. `status` exits 0 / 3 / 4 as on the other
-systems. The task is named `smind` machine-wide, so a second user on the same machine is refused rather than given their own.
+systems. The name carries your SID, so each user of a machine has their own task. An older machine-wide task `\smind` owned by you is moved to the per-user name by the next `smind service install` (another user's `\smind` is left alone). If Task Scheduler cannot be asked (a transient error), `status` says `could not query Task Scheduler` instead of `not installed`; `smind service status` retries once.
 
 - `smind service stop` asks the daemon to shut down (`POST /api/shutdown`) and only if it does not exit in time ends the
   task and kills what is left; it never stops a daemon this task did not start (the desktop app's, or one you started by
@@ -88,7 +88,7 @@ systems. The task is named `smind` machine-wide, so a second user on the same ma
 **Logs.** The daemon writes `$SMIND_HOME/daemon.log` itself (mode `0600`, rotated at 10 MiB, 5 files kept; change with
 `log.maxSizeMB` and `log.maxFiles` in `config.yaml`) in addition to stderr, so `smind service logs` works the same on
 every OS. On Linux `journalctl --user -u smind` (`journalctl -u smind` for a `--system` unit) shows the same lines plus
-anything the daemon prints outside its logger, such as a crash trace; on macOS that crash output is not captured.
+anything the daemon prints outside its logger. A Go panic or fatal error trace is also written to `daemon.log` itself, on every OS and supervisor, so `smind service logs` shows it.
 
 **Desktop app.** The app never starts a second daemon on a port that is already served, and `smind service install`
 does not start while the app's own daemon holds the port. The app sees a service-managed daemon as one it does not
