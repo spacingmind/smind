@@ -584,6 +584,19 @@ export function AppSidebar({
 
   const { inSidebar: showUsageSummary } = useUsagePreferences();
   const [crud, setCrud] = useState<CrudTarget | null>(null);
+  // The context value must be referentially stable: every task row reads
+  // TreeActionsContext, so a fresh object (or fresh handlers) on each AppSidebar
+  // render would re-render every row, defeating TaskRow's memo (see
+  // app-sidebar-memo.test.tsx).
+  const openArchiveFinished = useCallback((task: Task) => setCrud({ kind: "archiveFinished", task }), []);
+  const openStopTree = useCallback((task: Task) => setCrud({ kind: "stopTree", task }), []);
+  const treeActions = useMemo(
+    () =>
+      treeActionAvailability.size > 0
+        ? { availability: treeActionAvailability, onArchiveFinished: openArchiveFinished, onStopTree: openStopTree }
+        : null,
+    [treeActionAvailability, openArchiveFinished, openStopTree],
+  );
   // One stable callback for every task row: an inline arrow here is a new
   // prop on each AppSidebar render, which defeats TaskRow's memo (opening a
   // dialog would re-render every row of a large tree).
@@ -926,13 +939,7 @@ export function AppSidebar({
             <TooltipProvider>
             <ScrollArea className="min-h-0 flex-1 group-data-[collapsible=icon]:[&_[data-slot=scroll-area-scrollbar]]:hidden">
               <RowSignalContext.Provider value={rowSignal}>
-              <TreeActionsContext.Provider
-                value={treeActionAvailability.size > 0 ? {
-                  availability: treeActionAvailability,
-                  onArchiveFinished: (task) => setCrud({ kind: "archiveFinished", task }),
-                  onStopTree: (task) => setCrud({ kind: "stopTree", task }),
-                } : null}
-              >
+              <TreeActionsContext.Provider value={treeActions}>
                 <CollapsedNodesContext.Provider value={nodes}>
                 <SidebarMenu className="@container/sb">
                   {error && <StatusRow icon={<Icons.error className="size-3.5" />} className="text-destructive" text={error} />}

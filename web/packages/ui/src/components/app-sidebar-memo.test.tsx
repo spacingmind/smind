@@ -43,7 +43,9 @@ async function flush() {
 // re-render of AppSidebar that changes nothing a row reads leaves every row
 // alone. It was silently defeated for a while: the archive handler was an
 // inline arrow, a new prop on each render, so opening any dialog re-rendered
-// all of a 300-task tree.
+// all of a 300-task tree. The tree below has a parent with children, so it
+// also covers PR-H11's TreeActionsContext (read by every row, and once built
+// from a fresh object on each render).
 describe("AppSidebar memo guard (PR-U1)", () => {
   it("a 300-task wide tree renders without re-rendering unrelated rows", async () => {
     const tasks = [task(1, null), ...Array.from({ length: 299 }, (_, i) => task(i + 2, 1))];
