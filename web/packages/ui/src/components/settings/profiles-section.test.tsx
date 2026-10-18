@@ -80,20 +80,20 @@ describe("profiles-section", () => {
   });
 
   it("renders an empty state with zero profiles", async () => {
-    const { daemon, view } = await renderWithProfiles([]);
+    await renderWithProfiles([]);
 
     expect(screen.getByTestId("profiles-empty-state")).toBeInTheDocument();
   });
 
   it("lists profiles from profile.list", async () => {
-    const { daemon, view } = await renderWithProfiles([PROFILE]);
+    await renderWithProfiles([PROFILE]);
 
     expect(screen.getByTestId("profile-row-1")).toBeInTheDocument();
     expect(screen.getByText("UI work")).toBeInTheDocument();
   });
 
   it("the header's + New agent button opens the add card at the top of the list, and creating a profile through it appears below", async () => {
-    const { daemon, view } = await renderWithProfiles([PROFILE]);
+    const { daemon } = await renderWithProfiles([PROFILE]);
 
     expect(screen.queryByTestId("profile-form-name")).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("profile-new-button"));
@@ -121,7 +121,7 @@ describe("profiles-section", () => {
   });
 
   it("the form's permission-mode field lists the provider's own modes, saves permissionMode, and the card names the mode (W4)", async () => {
-    const { daemon, view } = await renderWithProfiles([PROFILE]);
+    const { daemon } = await renderWithProfiles([PROFILE]);
 
     // The stored profile's card line uses the provider's own mode label.
     expect(screen.getByTestId("profile-row-1")).toHaveTextContent("Plan Mode");
@@ -148,7 +148,7 @@ describe("profiles-section", () => {
   });
 
   it("Cancel closes the add card without creating anything, and opening Edit on a row closes an open add card", async () => {
-    const { daemon, view } = await renderWithProfiles([PROFILE]);
+    const { daemon } = await renderWithProfiles([PROFILE]);
 
     fireEvent.click(screen.getByTestId("profile-new-button"));
     await flush();
@@ -170,13 +170,13 @@ describe("profiles-section", () => {
   });
 
   it("keeps its own title when rendered outside the settings screen", async () => {
-    const { daemon, view } = await renderWithProfiles([]);
+    await renderWithProfiles([]);
 
     expect(screen.getByRole("heading", { level: 3, name: "Agents" })).toBeInTheDocument();
   });
 
   it("empty state shows a sentence and the one + New agent button (no second CTA in the body)", async () => {
-    const { daemon, view } = await renderWithProfiles([]);
+    await renderWithProfiles([]);
 
     expect(screen.getByTestId("profiles-empty-state")).toBeInTheDocument();
     expect(screen.queryByTestId("profiles-empty-new-button")).not.toBeInTheDocument();
@@ -192,7 +192,7 @@ describe("profiles-section", () => {
   // and Edit now expands inline in the row (profile-edit-form-{id}-*)
   // rather than repurposing the bottom "New agent" form.
   it("editing a profile opens inline in the row and persists changes", async () => {
-    const { daemon, view } = await renderWithProfiles([PROFILE]);
+    const { daemon } = await renderWithProfiles([PROFILE]);
 
     fireEvent.pointerDown(screen.getByTestId("profile-menu-1"), { button: 0 });
     fireEvent.click(await screen.findByTestId("profile-edit-1"));
@@ -219,7 +219,7 @@ describe("profiles-section", () => {
   });
 
   it("deleting a profile from the ⋯ menu calls profile.delete with its id", async () => {
-    const { daemon, view } = await renderWithProfiles([PROFILE]);
+    const { daemon } = await renderWithProfiles([PROFILE]);
 
     fireEvent.pointerDown(screen.getByTestId("profile-menu-1"), { button: 0 });
     fireEvent.click(await screen.findByTestId("profile-delete-1"));
@@ -234,7 +234,7 @@ describe("profiles-section", () => {
   });
 
   it("reflects a profile.created event from outside its own mutation, without a manual refresh", async () => {
-    const { daemon, view } = await renderWithProfiles([]);
+    const { daemon } = await renderWithProfiles([]);
 
     expect(screen.getByTestId("profiles-empty-state")).toBeInTheDocument();
 
@@ -248,7 +248,7 @@ describe("profiles-section", () => {
   });
 
   it("reflects a profile.deleted event by removing the row", async () => {
-    const { daemon, view } = await renderWithProfiles([PROFILE]);
+    const { daemon } = await renderWithProfiles([PROFILE]);
     expect(screen.getByTestId("profile-row-1")).toBeInTheDocument();
 
     act(() => {
@@ -276,7 +276,7 @@ describe("profiles-section model field (ADR-0025)", () => {
   };
 
   it("profile editor saves model", async () => {
-    const { daemon, view } = await renderWithProfiles([PROFILE], PROVIDERS);
+    const { daemon } = await renderWithProfiles([PROFILE], PROVIDERS);
 
     fireEvent.click(screen.getByTestId("profile-new-button"));
     await flush();
@@ -293,7 +293,7 @@ describe("profiles-section model field (ADR-0025)", () => {
   });
 
   it("profile editor hides the model field for a provider with no models", async () => {
-    const { daemon, view } = await renderWithProfiles([PROFILE], PROVIDERS);
+    await renderWithProfiles([PROFILE], PROVIDERS);
 
     fireEvent.click(screen.getByTestId("profile-new-button"));
     await flush();
@@ -305,7 +305,7 @@ describe("profiles-section model field (ADR-0025)", () => {
   });
 
   it("profile list shows the model", async () => {
-    const { daemon, view } = await renderWithProfiles([{ ...PROFILE, Model: "opus" }], PROVIDERS);
+    await renderWithProfiles([{ ...PROFILE, Model: "opus" }], PROVIDERS);
 
     expect(screen.getByTestId("profile-row-1")).toHaveTextContent("Opus");
   });
@@ -313,7 +313,7 @@ describe("profiles-section model field (ADR-0025)", () => {
 
 describe("profiles-section ★ default agent (run-config IA)", () => {
   it("marks a profile default, and clicking its star again clears it", async () => {
-    const { daemon, view } = await renderWithProfiles([PROFILE]);
+    await renderWithProfiles([PROFILE]);
 
     const star = screen.getByTestId("profile-default-1");
     expect(star).toHaveAttribute("aria-pressed", "false");
@@ -328,7 +328,7 @@ describe("profiles-section ★ default agent (run-config IA)", () => {
   });
 
   it("clears the default when its agent is deleted", async () => {
-    const { daemon, view } = await renderWithProfiles([PROFILE]);
+    const { daemon } = await renderWithProfiles([PROFILE]);
 
     fireEvent.click(screen.getByTestId("profile-default-1"));
     expect(window.localStorage.getItem("smind:settings:defaultAgentId")).toBe("1");
