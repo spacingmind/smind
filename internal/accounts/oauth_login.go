@@ -201,7 +201,9 @@ func (l *AnthropicLogin) Exchange(ctx context.Context, code, state string, pkce 
 		return ExchangeResult{}, fmt.Errorf("read anthropic oauth exchange response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return ExchangeResult{}, fmt.Errorf("anthropic oauth exchange failed with status %d: %s", resp.StatusCode, body)
+		// The status only: the body can carry codes and tokens, and this error
+		// reaches clients and logs.
+		return ExchangeResult{}, fmt.Errorf("anthropic oauth exchange failed with status %d", resp.StatusCode)
 	}
 
 	var tok anthropicExchangeResponse
@@ -288,15 +290,16 @@ func (l *OpenAILogin) Exchange(ctx context.Context, code, _ string, pkce PKCECod
 		return ExchangeResult{}, err
 	}
 	if status != http.StatusOK {
-		return ExchangeResult{}, fmt.Errorf("openai oauth exchange failed with status %d: %s", status, body)
+		// The status only, never the body (see AnthropicLogin.Exchange).
+		return ExchangeResult{}, fmt.Errorf("openai oauth exchange failed with status %d", status)
 	}
 	return parseOpenAIExchange(body)
 }
 
 // postTokenForm posts an authorization_code grant to openai's token endpoint
 // and returns the status and body, leaving their interpretation (and the text
-// of any error about them) to the caller: the browser path reports the vendor's
-// body, the device path never does.
+// of any error about them) to the caller; neither path puts the body in an
+// error.
 func (l *OpenAILogin) postTokenForm(ctx context.Context, code, redirectURI, verifier string) (int, []byte, error) {
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
