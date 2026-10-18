@@ -4,7 +4,7 @@
 // line on the harness's stdin, answered by one JSON line on stdout.
 
 /// <reference types="node" />
-import { spawn, ChildProcessWithoutNullStreams, execFileSync } from 'child_process';
+import { spawn, spawnSync, ChildProcessWithoutNullStreams, execFileSync } from 'child_process';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -25,6 +25,20 @@ const REPO_ROOT = join(__dirname, '..', '..', '..', '..');
 export function requireSelfSignedHarnessTrust(): void {
   if (process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0') {
     throw new Error('the integration tests talk to a self-signed relay: run them with `npm run test:integration` (it sets NODE_TLS_REJECT_UNAUTHORIZED=0 for that process)');
+  }
+}
+
+/** Whether the harness built from this tree can require a daemon password (-password, ADR-0031 P13c; it arrives with the daemon side, PR #360). */
+export function harnessSupportsPassword(): boolean {
+  const dir = mkdtempSync(join(tmpdir(), 'smind-devharness-probe-'));
+  try {
+    const binary = join(dir, 'devharness');
+    execFileSync('go', ['build', '-o', binary, './internal/relay/bridge/devharness'], { cwd: REPO_ROOT, stdio: 'inherit' });
+    // The flag package prints its usage to stderr and exits non-zero for -h.
+    const probe = spawnSync(binary, ['-h'], { encoding: 'utf8' });
+    return `${probe.stderr}${probe.stdout}`.includes('-password');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 
@@ -63,11 +77,11 @@ export class DevHarness {
    * device_hello v2 instead of the hub: it handshakes and then never sends a
    * device challenge.
    */
-  static async start(windowMax = 0, outdatedDaemon = false): Promise<DevHarness> {
+  static async start(windowMax = 0, outdatedDaemon = false, password?: string): Promise<DevHarness> {
     const tmpDir = mkdtempSync(join(tmpdir(), 'smind-devharness-bin-'));
     const binary = join(tmpDir, 'devharness');
     execFileSync('go', ['build', '-o', binary, './internal/relay/bridge/devharness'], { cwd: REPO_ROOT, stdio: 'inherit' });
-    const args = [...(windowMax > 0 ? ['-window-max', String(windowMax)] : []), ...(outdatedDaemon ? ['-outdated-daemon'] : [])];
+    const args = [...(windowMax > 0 ? ['-window-max', String(windowMax)] : []), ...(outdatedDaemon ? ['-outdated-daemon'] : []), ...(password ? ['-password', password] : [])];
     const proc = spawn(binary, args, { stdio: ['pipe', 'pipe', 'pipe'] });
     proc.stderr.on('data', (c: Buffer) => {
       if (process.env.DEVHARNESS_LOG) process.stderr.write(`[devharness] ${c}`);
