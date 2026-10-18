@@ -41,6 +41,9 @@ export interface RunFooterRun {
   err?: string;
   model?: string;
   usage?: RunUsage;
+  baseSha?: string;
+  headSha?: string;
+  dirty?: boolean;
 }
 
 /** `modelLabels` keys: `${provider}/${modelId}` for a catalog entry, `${provider}/` for the provider's default-model label. */
