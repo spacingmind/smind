@@ -379,6 +379,26 @@ func TestArchiveFinished_FailedChildKeepsItsAncestors(t *testing.T) {
 	}
 }
 
+// TestArchiveFinished_NeedsContinueRunIsNotFinished: a run that ended "done"
+// at a token/turn cap (disposition needs-continue, ADR-0027 D13) is unfinished
+// work, so it is never selected and it keeps its ancestors.
+func TestArchiveFinished_NeedsContinueRunIsNotFinished(t *testing.T) {
+	t.Parallel()
+	f := newTAFixture(t)
+	root := f.task("root", 0, "")
+	parent := f.task("parent", root, "reply")
+	capped := f.task("capped", parent, "stop max_tokens")
+	plain := f.task("plain", root, "reply")
+	f.finishDone(capped, root)
+	f.finishDone(parent, root)
+	f.finishDone(plain, root)
+
+	res := f.archiveFinished(root, true)
+	if !sameIDs(ids(res.Eligible), []int64{plain}) {
+		t.Fatalf("eligible = %v, want only %d (capped %d and its parent %d must stay)", ids(res.Eligible), plain, capped, parent)
+	}
+}
+
 func TestArchiveFinished_QueuedPromptMakesTaskNotFinished(t *testing.T) {
 	t.Parallel()
 	f := newTAFixture(t)

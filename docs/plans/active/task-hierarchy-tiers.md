@@ -333,7 +333,10 @@ still-eligible failures).
 
 - A task is **finished** when its latest run state (`task.tree` `run.state`,
   i.e. in-memory + rehydrated runs) is `done`, `error` or `stopped` **and**
-  it has no queued prompt. `idle` (never ran / no known run), `running`,
+  it has no queued prompt, and the run was not cut off at a cap (task.tree
+  `run.disposition` != `needs-continue`, ADR-0027 D13: a run that ended `done`
+  at a turn/token/budget cap is unfinished work that a "continue" resumes).
+  `idle` (never ran / no known run), `running`,
   `waiting_permission` are *not* finished.
 - **Archive eligible** (descendants only, never the task itself): finished
   AND every live descendant of it is also archive-eligible. A finished task
@@ -511,7 +514,40 @@ dialogs' counts equal the server selection and both actions work end to end.
 
 - 2026-10-11 Phase A: gap analysis and this spec written.
 - 2026-10-18 H11: spec written (PR-H11, §5) before implementation.
+- 2026-10-18 H11: built by two peers (backend Sonnet after GLM ran out of
+  turns with one commit; web GLM), reviewed by the read-only reviewer, then
+  fixed by the Lead: confirm pinned to the dry run via `ids`, stopTree
+  detached from the request ctx, partial results kept on cancel, dialogs keep
+  the dry-run selection after a confirm (a non-dry stopTree leaves `runs`
+  empty; found live), hover card held off open menus, header availability
+  refetched on menu open, needs-continue runs (merged from develop, D13)
+  excluded from "finished". Live pass on an isolated daemon found the
+  stopTree-dialog and hover-card bugs the mocks hid.
 
 ## Validation
 
-(filled as each criterion is confirmed)
+H11 (2026-10-18):
+
+- **AC1** `StopAndWait`: `go test -race ./internal/runs -run StopAndWait` green
+  (3 named tests).
+- **AC2/AC3** all named tests in `internal/wsapi/task_tree_actions_test.go`
+  green under `-race` (+ `TestArchiveFinished_IDsPinTheSelectionToTheDryRun`,
+  `TestArchiveFinished_NeedsContinueRunIsNotFinished` added after review/merge).
+  `error` run state is only covered via `isFinishedNode` (the fake agent has no
+  error scenario). MCP exclusion is a source scan, not a catalog check.
+- **AC4** all named web tests green (`lib/task-tree-actions.test.ts`,
+  `components/tree-action-dialogs.test.tsx`, sidebar + header additions);
+  `bunx tsc -b packages/ui` clean.
+- **AC5** light + dark screenshots from the real UI against an isolated daemon
+  (`/tmp/h11/shots/{light,dark}-*.png`): menu with both entries (01/10), leaf menu
+  without them (02), disabled-with-reason (07/13/16), archive dialog (04/11),
+  partial-failure result (12), stop dialog (06/14); dialog-open frames
+  (03-/05-*-frameN, every frame viewed). The context menu cross-fades behind the
+  dialog for ~200 ms, same as the existing "Archive task" flow (baseline frame
+  captured).
+- **AC6** live: isolated daemon (`SMIND_HOME=/tmp/h11/home`, port 47811), fake
+  ACP agent via an `npx` shim; 8-task 3-tier tree with running/done/stopped/idle
+  tasks. Archive finished: dialog count 3 == server selection, a real git
+  worktree-removal failure (read-only dir) produced the partial-failure state
+  ("Archived 2 of 3"), sidebar updated live; Stop all: 2 running runs (the root
+  included) stopped, entries then disabled with "No running tasks in this tree".

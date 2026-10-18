@@ -93,7 +93,9 @@ export function availabilityFromTaskTree(nodes: ReadonlyArray<TaskTreeNode>): Tr
   if (!selfNode || rest.length === 0) return null;
   return treeActionAvailability(
     selfNode.run.state,
-    rest.map((n) => n.run.state),
+    // A "done" run cut off at a cap (disposition needs-continue, ADR-0027
+    // D13) is unfinished work: it counts as neither running nor finished.
+    rest.map((n) => (n.run.disposition === "needs-continue" ? "idle" : n.run.state)),
   );
 }
 

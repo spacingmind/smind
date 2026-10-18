@@ -108,6 +108,13 @@ describe("availabilityFromTaskTree", () => {
     expect(a?.archive.enabled).toBe(true);
   });
 
+  it("a done run cut off at a cap (needs-continue) does not count as finished", () => {
+    const capped = treeNode(2, 1, "done");
+    capped.run.disposition = "needs-continue";
+    const a = availabilityFromTaskTree([treeNode(1, null, "idle"), capped]);
+    expect(a?.archive.enabled).toBe(false);
+  });
+
   it("returns null for an empty node list", () => {
     expect(availabilityFromTaskTree([])).toBeNull();
   });

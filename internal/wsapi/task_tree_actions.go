@@ -162,8 +162,18 @@ func queuedItemIDs(db *store.Store, taskID int64) ([]int64, error) {
 	return ids, nil
 }
 
-func isFinishedState(s tasktree.State) bool {
-	return s == tasktree.StateDone || s == tasktree.StateError || s == tasktree.StateStopped
+// isFinishedNode: the latest run reached a terminal state AND was not cut
+// off at a cap -- a "done" run with the needs-continue disposition
+// (runs.DispositionNeedsContinue, ADR-0027 D13) is unfinished work, and
+// archiving it would discard the task's chance to be continued.
+func isFinishedNode(n tasktree.Node) bool {
+	switch n.Run.State {
+	case tasktree.StateDone:
+		return n.Run.Disposition != runs.DispositionNeedsContinue
+	case tasktree.StateError, tasktree.StateStopped:
+		return true
+	}
+	return false
 }
 
 // handleTaskArchiveFinished is task.archiveFinished (PR-H11): archive the
@@ -185,7 +195,7 @@ func handleTaskArchiveFinished(wm *workspace.Manager, db *store.Store, reg *runs
 		// finished[id]: terminal state and no queued prompt.
 		finished := make(map[int64]bool, len(nodes))
 		for _, n := range nodes {
-			if !isFinishedState(n.Run.State) {
+			if !isFinishedNode(n) {
 				continue
 			}
 			_, queued, active, err := reg.ActiveRunForTask(n.ID)
