@@ -11,7 +11,7 @@ import type { Account, ProviderListResult, ProviderTestResult } from "@/lib/type
 import type { ProviderTestResult as PT } from "@/lib/types";
 
 const PROVIDERS = [
-  { id: "claude-native", label: "Claude Code", credentialKind: "oauth", accountProvider: "anthropic" },
+  { id: "claude-native", label: "Claude Code", credentialKind: "oauth", accountProvider: "anthropic", models: [{ id: "sonnet", label: "Sonnet" }, { id: "opus", label: "Opus", default: true }], modelsDiscovered: true },
   { id: "codex-native", label: "Codex", credentialKind: "oauth", accountProvider: "openai" },
   { id: "kimi", label: "Kimi", credentialKind: "api-key", accountProvider: "kimi" },
   { id: "glm", label: "GLM", kind: "cli" },
@@ -120,5 +120,26 @@ describe("ProviderDetail", () => {
     );
     await flush();
     expect(screen.queryByTestId("provider-group-note-kimi")).toBeNull();
+  });
+
+  it("detail shows models and a collapsed diagnostics block", async () => {
+    const d = daemon([account(1, "anthropic")]);
+    renderWithDaemon(<ProviderDetail item={item({ accountIds: [1], tone: "ok", connected: true })} client={d.client} />, d);
+    await flush();
+    const models = screen.getByTestId("provider-models");
+    expect(models).toHaveTextContent("Sonnet");
+    expect(models).toHaveTextContent("Reported by the agent");
+    expect(screen.getByTestId("provider-diagnostics-toggle").getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByTestId("provider-diagnostics-text")).toBeNull();
+  });
+
+  it("detail diagnostics reflects the account health", async () => {
+    const d = daemon([account(1, "anthropic")]);
+    const view = renderWithDaemon(<ProviderDetail item={item({ accountIds: [1], tone: "ok", connected: true })} client={d.client} />, d);
+    await flush();
+    fireEvent.click(screen.getByTestId("provider-diagnostics-toggle"));
+    const text = screen.getByTestId("provider-diagnostics-text").textContent ?? "";
+    expect(text).toContain("Account 1");
+    expect(text).toContain("health=");
   });
 });

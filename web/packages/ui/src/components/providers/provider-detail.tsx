@@ -1,10 +1,13 @@
-import { useState, type JSX } from "react";
+import { useMemo, useState, type JSX } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import type { ProviderNavItem } from "@/lib/providers-view";
 import { providerConsumer } from "@/lib/providers-groups";
+import { buildProviderDiagnostic } from "@/lib/provider-diagnostic";
 import { ProviderGlyph } from "@/components/composer/provider-glyph";
 import { AccountsCard } from "@/components/providers/accounts-card";
+import { ProviderModels } from "@/components/providers/provider-models";
+import { ProviderDiagnostics } from "@/components/providers/provider-diagnostics";
 import { TestButton } from "@/components/providers/account-actions";
 import { ConnectAccountPanel } from "@/components/accounts-dialog";
 import { Button } from "@/components/ui/button";
@@ -51,6 +54,14 @@ export function ProviderDetail({
   const idSet = new Set(item.accountIds);
   const itemRows = rows.filter((r) => idSet.has(r.account.id));
   const attention = itemRows.filter((r) => r.badge.kind === "relogin" || r.badge.kind === "cooldown" || r.badge.kind === "error").length;
+  const info = item.kind === "other" ? null : providers.find((p) => p.id === item.id) ?? null;
+  const diagnosticText = useMemo(
+    () =>
+      item.kind === "other"
+        ? null
+        : buildProviderDiagnostic({ provider: info, label: item.label, navKind: item.kind, rows: itemRows }),
+    [info, item, itemRows],
+  );
   // The connect panel never renders for the other bucket or cli items; the
   // three ways it can open are mutually exclusive (the store flags win over
   // the local + Connect toggle).
@@ -174,6 +185,9 @@ export function ProviderDetail({
           onRelogin={(a) => requestRelogin(a.id, item.id)}
         />
       )}
+
+      {info ? <ProviderModels provider={info} /> : null}
+      {diagnosticText ? <ProviderDiagnostics text={diagnosticText} /> : null}
     </div>
   );
 }
