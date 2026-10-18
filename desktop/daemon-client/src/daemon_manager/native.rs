@@ -89,10 +89,38 @@ pub fn spawn_detached(layout: &Layout) -> io::Result<Child> {
 /// same primitive used both to verify a managed pid is still the real
 /// server and to detect an unmanaged one (AC3).
 pub fn find_port_owner(port: u16) -> io::Result<Option<u32>> {
-    let mut cmd = Command::new("lsof");
+    let output = lsof_listeners(port)?;
+    Ok(parse_lsof_output(&output))
+}
+
+/// find_port_owners is every pid listening on `port` (IPv4 and IPv6, any
+/// local address), in lsof's order, without duplicates. An SSH tunnel's local
+/// port is trusted only when ALL of them are our own ssh child: a wildcard or
+/// IPv6 squatter next to the real listener must not be hidden by looking at
+/// the first line only.
+pub fn find_port_owners(port: u16) -> io::Result<Vec<u32>> {
+    Ok(parse_lsof_pids(&lsof_listeners(port)?))
+}
+
+/// lsof lives in /usr/sbin, which a Finder-launched app's PATH may lack;
+/// prefer the absolute path so a missing PATH entry is not a lookup failure
+/// (and a PATH-planted `lsof` is not what answers who owns a port).
+fn lsof_listeners(port: u16) -> io::Result<String> {
+    let program = if Path::new("/usr/sbin/lsof").exists() { "/usr/sbin/lsof" } else { "lsof" };
+    let mut cmd = Command::new(program);
     cmd.arg(format!("-tiTCP:{port}")).arg("-sTCP:LISTEN");
     let output = crate::windows_process::no_window(&mut cmd).output()?;
-    Ok(parse_lsof_output(&String::from_utf8_lossy(&output.stdout)))
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+pub fn parse_lsof_pids(stdout: &str) -> Vec<u32> {
+    let mut pids: Vec<u32> = Vec::new();
+    for pid in stdout.lines().filter_map(|l| l.trim().parse::<u32>().ok()) {
+        if !pids.contains(&pid) {
+            pids.push(pid);
+        }
+    }
+    pids
 }
 
 pub fn parse_lsof_output(stdout: &str) -> Option<u32> {
@@ -221,6 +249,13 @@ mod tests {
     fn extract_argv_shape() {
         let argv = extract_argv(Path::new("/tmp/x.tar.gz"), Path::new("/tmp/bin"));
         assert_eq!(argv, vec!["tar", "-xzf", "/tmp/x.tar.gz", "-C", "/tmp/bin", "smind"]);
+    }
+
+    #[test]
+    fn parse_lsof_pids_lists_every_listener_once() {
+        assert_eq!(parse_lsof_pids("1234\n5678\n1234\n"), vec![1234, 5678]);
+        assert_eq!(parse_lsof_pids(""), Vec::<u32>::new());
+        assert_eq!(parse_lsof_pids("not a pid\n42\n"), vec![42]);
     }
 
     #[test]
