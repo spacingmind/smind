@@ -147,7 +147,7 @@ export function ConnectAccountPanel({
   const [pasteHint, setPasteHint] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
 
-  const { remote, derivedRemote, setOverride } = useLoginRemote();
+  const { remote, derivedRemote, resolved, setOverride } = useLoginRemote();
   const login = useAccountLogin({
     client,
     onConnected: () => onConnected(),
@@ -285,6 +285,8 @@ export function ConnectAccountPanel({
   useEffect(() => {
     if (!autoStart || autoStartedRef.current || legacyConfirmPending) return;
     if (login.state.phase !== "idle") return;
+    // The desktop connection decides browser vs device: wait for it.
+    if (!resolved) return;
     if (!selectedProvider) return;
     const startMethod = methodTouched ? method : defaultConnectMethod(selectedProvider, remote);
     if (startMethod === "api-key") return;

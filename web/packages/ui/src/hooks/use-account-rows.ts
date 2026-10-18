@@ -22,8 +22,9 @@ export interface AccountRowData {
  * so mounting rows never adds a touch cadence) and the cached local
  * `provider.test` results, folded into the row's status and badge.
  */
-export function useAccountRows(): { rows: AccountRowData[]; loaded: boolean } {
-  const accounts = useAccounts().data;
+export function useAccountRows(): { rows: AccountRowData[]; loaded: boolean; error: Error | null } {
+  const accountsQuery = useAccounts();
+  const accounts = accountsQuery.data;
   const { snapshot } = useUsageReports();
 
   const providerKeys = [...new Set((accounts ?? []).map((a) => a.provider))];
@@ -51,5 +52,5 @@ export function useAccountRows(): { rows: AccountRowData[]; loaded: boolean } {
       badge: healthBadge({ usage, test }),
     };
   });
-  return { rows, loaded: accounts !== undefined };
+  return { rows, loaded: accounts !== undefined, error: accounts === undefined ? (accountsQuery.error ?? null) : null };
 }

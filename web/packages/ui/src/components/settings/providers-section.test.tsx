@@ -363,3 +363,22 @@ describe("providers-section connect flows", () => {
     expect(screen.getByLabelText("Credential")).toBeInTheDocument();
   });
 });
+
+describe("Connect account header button", () => {
+  it("header connect falls back to the first credential provider for a cli selection", async () => {
+    await renderLoaded([account(1, "anthropic", "work")]);
+    await selectProvider("glm");
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("providers-connect-toggle"));
+    });
+    expect(useProvidersViewStore.getState().connectProviderId).toBe("claude-native");
+  });
+
+  it("header connect is disabled without a credential provider", async () => {
+    await renderLoaded([], [{ id: "glm", label: "GLM", kind: "cli" }]);
+    const button = screen.getByTestId("providers-connect-toggle");
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(useProvidersViewStore.getState().connectProviderId).toBeNull();
+  });
+});

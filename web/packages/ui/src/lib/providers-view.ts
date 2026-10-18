@@ -106,8 +106,9 @@ export function mostHeadroomAccountIds(input: {
   const byProvider = new Map<string, { accountId: number; headroom: number }[]>();
   for (const row of input.rows) {
     if (row.badge.kind !== "active" || row.usage?.report?.status !== "available") continue;
-    const windows = row.usage.report?.windows ?? [];
-    const remaining = windows
+    const windows: unknown = row.usage.report?.windows;
+    const remaining = (Array.isArray(windows) ? windows : [])
+      .filter((window): window is UsageWindow => window !== null && typeof window === "object")
       .map((window) => windowRemaining(window))
       .filter((value): value is number => value != null);
     if (remaining.length === 0) continue;
@@ -120,6 +121,8 @@ export function mostHeadroomAccountIds(input: {
   for (const candidates of byProvider.values()) {
     if (candidates.length < 2) continue;
     candidates.sort((a, b) => b.headroom - a.headroom || a.accountId - b.accountId);
+    // A full tie has no better account to point at.
+    if (candidates.every((c) => c.headroom === candidates[0].headroom)) continue;
     best.add(candidates[0].accountId);
   }
   return best;

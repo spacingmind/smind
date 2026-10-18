@@ -186,6 +186,34 @@ describe("mostHeadroomAccountIds", () => {
     });
     expect(ids).toEqual(new Set());
   });
+
+  it("most headroom ignores reshaped windows", () => {
+    const reshaped = (windows: unknown): AccountUsage => ({
+      ...baseUsage(),
+      report: { status: "available", fetchedAt: "", windows } as never,
+    });
+    const ids = mostHeadroomAccountIds({
+      rows: [
+        row(1, "anthropic", active, reshaped([null, 7])),
+        row(2, "anthropic", active, reshaped({})),
+        row(3, "anthropic", active, reshaped([null, { id: "w", label: "w", remainingPct: 40 }])),
+        row(4, "anthropic", active, usageWith([{ remainingPct: 60 }])),
+      ],
+    });
+    expect(ids).toEqual(new Set([4]));
+  });
+
+  it("most headroom is not marked when candidates tie", () => {
+    const ids = mostHeadroomAccountIds({
+      rows: [
+        row(1, "anthropic", active, usageWith([{ remainingPct: 50 }])),
+        row(2, "anthropic", active, usageWith([{ remainingPct: 50 }])),
+        row(3, "openai", active, usageWith([{ remainingPct: 80 }])),
+        row(4, "openai", active, usageWith([{ remainingPct: 20 }])),
+      ],
+    });
+    expect(ids).toEqual(new Set([3]));
+  });
 });
 
 describe("filter and sort account rows", () => {

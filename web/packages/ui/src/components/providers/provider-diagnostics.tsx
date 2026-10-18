@@ -8,7 +8,7 @@ const COPY_LABEL_MS = 1500;
 export function ProviderDiagnostics(props: { text: string }): JSX.Element {
   const { text } = props;
   const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"copied" | "failed" | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -17,15 +17,19 @@ export function ProviderDiagnostics(props: { text: string }): JSX.Element {
     };
   }, []);
 
+  const flash = (outcome: "copied" | "failed") => {
+    setCopied(outcome);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopied(null), COPY_LABEL_MS);
+  };
+
   const onCopy = () => {
-    navigator.clipboard
-      .writeText(text)
-      .then(() => {
-        setCopied(true);
-        if (timer.current) clearTimeout(timer.current);
-        timer.current = setTimeout(() => setCopied(false), COPY_LABEL_MS);
-      })
-      .catch(() => {});
+    const write = navigator.clipboard?.writeText(text);
+    if (!write) {
+      flash("failed");
+      return;
+    }
+    write.then(() => flash("copied"), () => flash("failed"));
   };
 
   return (
@@ -60,7 +64,7 @@ export function ProviderDiagnostics(props: { text: string }): JSX.Element {
             onClick={onCopy}
             className="self-start"
           >
-            {copied ? "Copied" : "Copy"}
+            {copied === "copied" ? "Copied" : copied === "failed" ? "Couldn't copy" : "Copy"}
           </Button>
         </div>
       ) : null}

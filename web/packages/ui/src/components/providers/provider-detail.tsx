@@ -33,7 +33,7 @@ export function ProviderDetail({
   item: ProviderNavItem | null;
   client: WsClient | null;
 }): JSX.Element {
-  const { providers } = useProviderCatalog();
+  const { providersOrFallback: providers } = useProviderCatalog();
   const { rows } = useAccountRows();
   const { runTest, isTesting } = useRunProviderTest();
   const queryClient = useQueryClient();

@@ -12,10 +12,11 @@ import { ProviderDetail } from "@/components/providers/provider-detail";
 import { ProviderNav } from "@/components/providers/provider-nav";
 
 export function ProvidersScreen({ client }: { client: WsClient | null }): JSX.Element {
-  const { providers } = useProviderCatalog();
+  const { providersOrFallback: providers, settled } = useProviderCatalog();
   // Leaving Settings Providers leaves no stale selection/connect flags behind.
   useEffect(() => () => useProvidersViewStore.getState().reset(), []);
-  const { rows, loaded } = useAccountRows();
+  const { rows, loaded, error } = useAccountRows();
+  const connectProviderId = useProvidersViewStore((s) => s.connectProviderId);
   const isMobile = useIsMobile();
   const selectedProviderId = useProvidersViewStore((s) => s.selectedProviderId);
   const mobileView = useProvidersViewStore((s) => s.mobileView);
@@ -34,13 +35,22 @@ export function ProvidersScreen({ client }: { client: WsClient | null }): JSX.El
   const selected = items.find((item) => item.id === selectedProviderId) ?? items[0] ?? null;
 
   if (!loaded) {
+    if (error) {
+      return (
+        <p role="alert" className="text-ui-base text-destructive">
+          {error instanceof Error ? error.message : String(error)}
+        </p>
+      );
+    }
     return <p className="text-ui-base text-muted-foreground">Loading…</p>;
   }
 
-  // The empty state (AC-A5): no accounts at all and no provider explicitly
-  // selected -- the first-account card sits in the detail slot until the
-  // user picks a provider or connects one.
-  const empty = rows.length === 0 && selectedProviderId === null;
+  // The empty state (AC-A5): no accounts at all and neither a provider
+  // explicitly selected nor a connect in progress -- the first-account card
+  // takes the detail slot (desktop) or sits above the list (mobile) until
+  // the user picks a provider or connects one; no nav item is current then.
+  const empty = rows.length === 0 && selectedProviderId === null && connectProviderId === null;
+  const navSelectedId = empty ? null : (selected?.id ?? null);
 
   if (isMobile) {
     return (
@@ -51,7 +61,8 @@ export function ProvidersScreen({ client }: { client: WsClient | null }): JSX.El
       >
         {mobileView === "list" ? (
           <div className="w-full p-2">
-            <ProviderNav items={items} selectedId={selected?.id ?? null} onSelect={select} mode="full" />
+            {empty ? <FirstAccountCard providers={providers} settled={settled} /> : null}
+            <ProviderNav items={items} selectedId={navSelectedId} onSelect={select} mode="full" />
           </div>
         ) : (
           <div className="min-w-0 flex-1">
@@ -66,7 +77,7 @@ export function ProvidersScreen({ client }: { client: WsClient | null }): JSX.El
                 <span className="text-ui-base">Providers</span>
               </button>
             </div>
-            {empty ? <FirstAccountCard providers={providers} /> : <ProviderDetail item={selected} client={client} />}
+            {empty ? <FirstAccountCard providers={providers} settled={settled} /> : <ProviderDetail item={selected} client={client} />}
           </div>
         )}
       </div>
@@ -80,13 +91,13 @@ export function ProvidersScreen({ client }: { client: WsClient | null }): JSX.El
       className="@container/providers flex min-h-[28rem] overflow-hidden rounded-xl border bg-card"
     >
       <div className="hidden w-56 shrink-0 border-r p-2 @2xl/providers:block">
-        <ProviderNav items={items} selectedId={selected?.id ?? null} onSelect={select} mode="full" />
+        <ProviderNav items={items} selectedId={navSelectedId} onSelect={select} mode="full" />
       </div>
       <div className="flex w-14 shrink-0 border-r p-2 @2xl/providers:hidden">
-        <ProviderNav items={items} selectedId={selected?.id ?? null} onSelect={select} mode="rail" />
+        <ProviderNav items={items} selectedId={navSelectedId} onSelect={select} mode="rail" />
       </div>
       <div className="min-w-0 flex-1">
-        {empty ? <FirstAccountCard providers={providers} /> : <ProviderDetail item={selected} client={client} />}
+        {empty ? <FirstAccountCard providers={providers} settled={settled} /> : <ProviderDetail item={selected} client={client} />}
       </div>
     </div>
   );

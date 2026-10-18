@@ -93,6 +93,16 @@ describe("ProvidersScreen", () => {
     expect(screen.queryByTestId("provider-detail")).not.toBeInTheDocument();
   });
 
+  it("account list failure shows the error", async () => {
+    const d = daemon();
+    d.failNonUsageWith = new Error("daemon exploded");
+    renderWithDaemon(<ProvidersScreen client={d.client} />, d);
+    await flush();
+    await flush();
+    expect(screen.getByRole("alert")).toHaveTextContent("daemon exploded");
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+  });
+
   it("screen shows loading until accounts arrive", () => {
     const d = daemon();
     d.accounts = [];
@@ -158,5 +168,39 @@ describe("FirstAccountCard", () => {
     });
     expect(screen.queryByTestId("first-account-card")).not.toBeInTheDocument();
     expect(screen.getByTestId("provider-detail")).toBeInTheDocument();
+  });
+
+  it("empty catalog shows a message instead of an empty card", async () => {
+    const d = new FakeUsageDaemon([]);
+    d.providers = { providers: [{ id: "glm", label: "GLM", kind: "cli" }] } as unknown as ProviderListResult;
+    d.accounts = [];
+    renderWithDaemon(<ProvidersScreen client={d.client} />, d);
+    await flush();
+    const card = screen.getByTestId("first-account-card");
+    expect(card).toHaveTextContent("No providers available.");
+    expect(card.querySelectorAll("button")).toHaveLength(0);
+  });
+
+  it("first account card shows on mobile too", async () => {
+    vi.mocked(useIsMobile).mockReturnValue(true);
+    const d = new FakeUsageDaemon([]);
+    d.providers = daemon().providers;
+    d.accounts = [];
+    renderWithDaemon(<ProvidersScreen client={d.client} />, d);
+    await flush();
+    expect(screen.getByTestId("first-account-card")).toBeInTheDocument();
+    expect(screen.getByTestId("provider-nav")).toBeInTheDocument();
+  });
+
+  it("nav has no selected item while the first account card is shown", async () => {
+    const d = new FakeUsageDaemon([]);
+    d.providers = daemon().providers;
+    d.accounts = [];
+    renderWithDaemon(<ProvidersScreen client={d.client} />, d);
+    await flush();
+    expect(screen.getByTestId("first-account-card")).toBeInTheDocument();
+    for (const el of screen.getAllByTestId("provider-nav-item-anthropic")) {
+      expect(el).not.toHaveAttribute("aria-current");
+    }
   });
 });

@@ -19,12 +19,13 @@ export type { ProviderGroup, ProviderConsumer } from "@/lib/providers-groups";
  * rename/credential/remove flows move into the detail pane.
  */
 function ProvidersSection({ client }: SettingsSectionContext) {
-  const { providers } = useProviderCatalog();
+  const { providersOrFallback: providers } = useProviderCatalog();
   const selectedProviderId = useProvidersViewStore((s) => s.selectedProviderId);
   const requestConnect = useProvidersViewStore((s) => s.requestConnect);
-  // No explicit selection: the first credential provider is what the
-  // screen is showing (the nav's default) -- connect that one.
-  const fallback = credentialProviders(providers)[0]?.id;
+  // Connect the selected provider when it can connect; the other bucket, a
+  // CLI provider or no selection fall back to the first credential provider.
+  const credentials = credentialProviders(providers);
+  const target = credentials.find((p) => p.id === selectedProviderId) ?? credentials[0];
   return (
     <div className="flex flex-col gap-4" data-testid="settings-section-providers">
       <SettingsSectionTitle
@@ -34,7 +35,8 @@ function ProvidersSection({ client }: SettingsSectionContext) {
             variant="outline"
             size="sm"
             data-testid="providers-connect-toggle"
-            onClick={() => requestConnect(selectedProviderId ?? fallback ?? "")}
+            disabled={!target}
+            onClick={() => target && requestConnect(target.id)}
           >
             <Icons.add aria-hidden className="size-3.5" />
             Connect account

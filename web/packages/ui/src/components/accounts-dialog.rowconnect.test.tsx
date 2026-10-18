@@ -194,4 +194,17 @@ describe("ConnectAccountPanel row connect", () => {
     await setup(undefined, [legacy], { relogin: legacy, onClose: () => {} });
     expect(screen.getByText("Sign in again")).toBeInTheDocument();
   });
+
+  it("autoStart waits for the desktop connection and then uses the remote default", async () => {
+    const { client } = await setup({ isDesktop: true, connection: { id: "c1", kind: "url" } }, [], {
+      initialProviderId: "openai",
+      autoStart: true,
+      onClose: () => {},
+    });
+    await waitFor(() => client.nth("account.oauthStart"));
+    await flush();
+    const starts = client.calls.filter((c) => c.method === "account.oauthStart");
+    expect(starts).toHaveLength(1);
+    expect(starts[0].params).toMatchObject({ method: "device" });
+  });
 });

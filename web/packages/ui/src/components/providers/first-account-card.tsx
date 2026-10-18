@@ -11,16 +11,29 @@ import type { ProviderInfo } from "@/lib/types";
  * connect form starts or shows for that provider). CLI providers get only
  * a muted line: they sign in through their own CLI.
  */
-export function FirstAccountCard({ providers }: { providers: ProviderInfo[] }): JSX.Element {
+export function FirstAccountCard({
+  providers,
+  settled = true,
+}: {
+  providers: ProviderInfo[];
+  /** The catalog has loaded, failed or timed out: an empty card then says there is nothing to connect. */
+  settled?: boolean;
+}): JSX.Element {
   const requestConnect = useProvidersViewStore((s) => s.requestConnect);
+  const connectable = credentialProviders(providers);
   return (
     <div data-testid="first-account-card" className="grid gap-3 p-6">
       <h4 className="text-ui-lg font-medium">Connect your first account</h4>
       <p className="text-ui-base text-muted-foreground">
         Accounts let sMind route the /v1 proxy across your subscriptions and keys.
       </p>
+      {connectable.length === 0 ? (
+        <p className="text-ui-base text-muted-foreground">
+          {settled ? "No providers available." : "Loading providers…"}
+        </p>
+      ) : null}
       <div className="flex flex-wrap gap-2">
-        {credentialProviders(providers).map((p) => (
+        {connectable.map((p) => (
           <Button
             key={p.id}
             size="sm"
