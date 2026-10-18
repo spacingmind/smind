@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -192,6 +191,29 @@ func inJob(t *testing.T, pid int, job windows.Handle) bool {
 	return result != 0
 }
 
+// childPID returns the pid of a process named exe whose parent is parent, from a
+// Toolhelp snapshot, or 0 when there is none.
+func childPID(parent int, exe string) int {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return 0
+	}
+	defer windows.CloseHandle(snap)
+	var pe windows.ProcessEntry32
+	pe.Size = uint32(unsafe.Sizeof(pe))
+	if err := windows.Process32First(snap, &pe); err != nil {
+		return 0
+	}
+	for {
+		if int(pe.ParentProcessID) == parent && strings.EqualFold(windows.UTF16ToString(pe.ExeFile[:]), exe) {
+			return int(pe.ProcessID)
+		}
+		if err := windows.Process32Next(snap, &pe); err != nil {
+			return 0
+		}
+	}
+}
+
 func TestConPty_ChildStartsInJob(t *testing.T) {
 	t.Parallel()
 	// The shell starts ping immediately -- with post-start job assignment
@@ -202,16 +224,16 @@ func TestConPty_ChildStartsInJob(t *testing.T) {
 		t.Fatal("shell is not in its job right after spawn")
 	}
 
+	// Found with a process snapshot (a few microseconds), not by starting
+	// PowerShell and querying WMI on every poll: under the full suite's parallel
+	// load one such query took seconds, so the whole 10 s window held only a
+	// couple of attempts and the test failed on slow runners.
 	var pingPid int
 	deadline := time.Now().Add(10 * time.Second)
 	for pingPid == 0 && time.Now().Before(deadline) {
-		out, err := combinedOutput("powershell", "-NoProfile", "-Command",
-			fmt.Sprintf(`(Get-CimInstance Win32_Process -Filter "Name='PING.EXE'" | Where-Object { $_.ParentProcessId -eq %d }).ProcessId`, cmd.Process.Pid))
-		if err == nil {
-			pingPid, _ = strconv.Atoi(strings.TrimSpace(out))
-		}
+		pingPid = childPID(cmd.Process.Pid, "PING.EXE")
 		if pingPid == 0 {
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(25 * time.Millisecond)
 		}
 	}
 	if pingPid == 0 {
