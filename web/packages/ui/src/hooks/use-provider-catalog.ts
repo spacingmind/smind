@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 
 import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
 import { FALLBACK_PROVIDERS } from "@/lib/provider-catalog-fallback";
@@ -14,10 +15,18 @@ import type { ProviderInfo, ProviderListResult } from "@/lib/types";
  * never throws to the UI), and `providersOrFallback` is what surfaces that
  * must stay usable render.
  */
+/** A stable empty list: a fresh `[]` per render would re-run every effect/memo keyed on `providers`. */
+const NO_PROVIDERS: ProviderInfo[] = [];
+
+/** How long a picker waits on provider.list before it falls back to the built-in catalog. */
+const PROVIDER_LIST_TIMEOUT_MS = 8000;
+
 export function useProviderCatalog(): {
   providers: ProviderInfo[];
   providersOrFallback: ProviderInfo[];
   loaded: boolean;
+  /** `loaded`, or the list failed, or it did not answer within PROVIDER_LIST_TIMEOUT_MS: a picker stops showing "Loading…". */
+  settled: boolean;
   error: Error | null;
 } {
   const { client } = useDaemonConnection();
@@ -28,20 +37,32 @@ export function useProviderCatalog(): {
     retry: false,
     queryFn: async (): Promise<ProviderListResult> => {
       if (!client) throw new Error("no daemon connection");
-      const result = await client.call<ProviderListResult>("provider.list");
-      if (!result) throw new Error("provider.list returned nothing");
-      if (result.providers.length === 0) console.error("provider.list returned no providers, using fallback provider list");
-      return result;
+      try {
+        const result = await client.call<ProviderListResult>("provider.list");
+        if (!result) throw new Error("provider.list returned nothing");
+        if (result.providers.length === 0) console.error("provider.list returned no providers, using fallback provider list");
+        return result;
+      } catch (err) {
+        // Logged once per failed fetch (not per render); consumers fall back to FALLBACK_PROVIDERS.
+        console.error("provider.list failed, using fallback provider list", err);
+        throw err;
+      }
     },
   });
-  if (query.error && query.fetchStatus !== "fetching") {
-    console.error("provider.list failed, using fallback provider list", query.error);
-  }
-  const providers = query.data?.providers ?? [];
+  const providers = query.data?.providers ?? NO_PROVIDERS;
+  // A daemon that never answers must not leave a picker on "Loading…" forever: the fallback catalog takes over.
+  const [timedOut, setTimedOut] = useState(false);
+  const waiting = client !== null && query.data === undefined && !query.error;
+  useEffect(() => {
+    if (!waiting) return;
+    const giveUp = setTimeout(() => setTimedOut(true), PROVIDER_LIST_TIMEOUT_MS);
+    return () => clearTimeout(giveUp);
+  }, [waiting]);
   return {
     providers,
     providersOrFallback: providers.length > 0 ? providers : FALLBACK_PROVIDERS,
     loaded: query.data !== undefined,
+    settled: query.data !== undefined || !!query.error || timedOut,
     error: query.error ?? null,
   };
 }

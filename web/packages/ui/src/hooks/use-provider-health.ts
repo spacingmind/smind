@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { useQueries, useQueryClient, skipToken, type QueryClient } from "@tanstack/react-query";
+import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
 import type { ProviderHealth } from "@/lib/model-browser";
@@ -30,44 +30,49 @@ import type { WsClient } from "@/lib/ws-client";
 export function useProviderHealth(): {
   health: Record<string, ProviderHealth | undefined>;
   ensure: () => void;
-  summary: { healthy: number; total: number };
+  /** `tested`: providers with a cached answer; the footer shows its count once every provider has one. */
+  summary: { healthy: number; total: number; tested: number };
 } {
   const { client } = useDaemonConnection();
   const queryClient = useQueryClient();
   const { providers } = useProviderCatalog();
 
-  const tests = useQueries({
-    queries: providers.map((info) => ({
-      queryKey: queryKeys.providerTest(accountHealthTestKey(info.id, providers)),
-      queryFn: skipToken,
-      staleTime: Infinity,
-      gcTime: Infinity,
-    })),
-  });
-
-  const health = useMemo(() => {
+  // Read straight from the query cache through useSyncExternalStore with a snapshot that only changes
+  // when an answer does (compared by value): `useQueries` hands back a new array/object per render, and a
+  // consumer effect keyed on `health` then re-renders forever. Never fetches.
+  const cache = queryClient.getQueryCache();
+  const last = useRef<{ signature: string; map: Record<string, ProviderHealth | undefined> }>({ signature: "", map: {} });
+  const getSnapshot = (): Record<string, ProviderHealth | undefined> => {
     const map: Record<string, ProviderHealth | undefined> = {};
-    providers.forEach((info, i) => {
-      const result = tests[i].data as ProviderTestResult | undefined;
+    for (const info of providers) {
+      const result = queryClient.getQueryData<ProviderTestResult>(queryKeys.providerTest(accountHealthTestKey(info.id, providers)));
       map[info.id] = result ? { ok: result.ok, detail: result.detail } : undefined;
-    });
-    return map;
-  }, [providers, tests]);
+    }
+    const signature = JSON.stringify(map);
+    if (signature !== last.current.signature) last.current = { signature, map };
+    return last.current.map;
+  };
+  const health = useSyncExternalStore((onChange) => cache.subscribe(onChange), getSnapshot, getSnapshot);
 
   const summary = useMemo(() => {
     let healthy = 0;
+    let tested = 0;
     for (const info of providers) {
+      if (health[info.id]) tested++;
       if (health[info.id]?.ok) healthy++;
     }
-    return { healthy, total: providers.length };
+    return { healthy, total: providers.length, tested };
   }, [providers, health]);
 
-  function ensure(): void {
+  // Stable identity (a consumer's effect may be keyed on it); reads the latest providers through a ref.
+  const providersRef = useRef(providers);
+  providersRef.current = providers;
+  const ensure = useCallback((): void => {
     if (!client) return;
-    for (const info of providers) {
-      runProviderTest(queryClient, client, info, providers);
+    for (const info of providersRef.current) {
+      runProviderTest(queryClient, client, info, providersRef.current);
     }
-  }
+  }, [client, queryClient]);
 
   return { health, ensure, summary };
 }

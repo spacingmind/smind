@@ -16,14 +16,12 @@ import { useCommands } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
+import { useProfileList } from "@/hooks/use-profiles";
+import { useProviderHealth } from "@/hooks/use-provider-health";
 import { Icons } from "@/lib/icons";
 import { cn } from "@/lib/utils";
-import { accountHealthTestKey } from "@/lib/provider-health";
 import type { WsClient } from "@/lib/ws-client";
 import type {
-  AgentProfile,
-  ProviderListResult,
-  ProviderTestResult,
   Space,
   Task,
   TaskStat,
@@ -601,59 +599,26 @@ export function AppSidebar({
   // prop on each AppSidebar render, which defeats TaskRow's memo (opening a
   // dialog would re-render every row of a large tree).
   const archiveTask = useCallback((task: Task) => setCrud({ kind: "archive", task }), []);
-  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
 
-  // Profiles feed the footer's agent count and the palette's "Use agent:"
-  // entries. The composer fetches its own copy (its picker seeds on it);
-  // sharing one fetch would couple the two surfaces for the sake of one
-  // RPC that the daemon answers from its store. Failures fall back to an
-  // empty list -- both consumers already handle zero profiles.
-  useEffect(() => {
-    if (!client) return;
-    let cancelled = false;
-    client
-      .call<AgentProfile[]>("profile.list")
-      .then((list) => {
-        if (!cancelled) setProfiles(list ?? []);
-      })
-      .catch((err) => console.error("profile.list failed, hiding agent palette entries", err));
-    return () => {
-      cancelled = true;
-    };
-  }, [client]);
+  // One profile.list cache entry per connection (ADR-0032): the footer's
+  // agent count and the palette's "Use agent:" entries read the shared
+  // cache, so a profile created in Settings reaches them without a
+  // reconnect. Failures are an empty list.
+  const profiles = useProfileList();
 
-  // The footer's Providers row health dot + "N healthy" count (run-config
-  // IA plan) -- reuses the provider.test-based pattern profiles-section.tsx
-  // built for its own per-agent health dot (accountHealthTestKey resolves
-  // each provider's id to whichever vocabulary provider.test expects).
-  // Fetched (and tested) once per client, not on every render or on a
-  // polling interval -- `providerHealth` is the cache this effect fills,
-  // and the deps array of just `[client]` is what keeps it from re-testing
-  // on unrelated re-renders.
-  const [providerHealth, setProviderHealth] = useState<{ healthy: number; total: number } | null>(null);
+  // The footer's Providers row health dot + "N healthy" count, from the
+  // same shared provider.test cache the Providers dots read (ADR-0032
+  // AC12): `ensure()` runs each provider's local check once per
+  // connection (the effect keyed on client), never on a loop.
+  const { summary, ensure } = useProviderHealth();
+  // Hidden until every provider has an answer (the footer never shows a half-tested count).
+  const providerHealth =
+    summary.total > 0 && summary.tested === summary.total ? { healthy: summary.healthy, total: summary.total } : null;
+  // Runs when the catalog arrives (total 0 -> N) and per connection; `ensure` skips keys already cached
+  // or in flight, so each provider is tested once per connection, never on a loop.
   useEffect(() => {
-    if (!client) return;
-    let cancelled = false;
-    client
-      .call<ProviderListResult>("provider.list")
-      .then(async (result) => {
-        if (cancelled) return;
-        const providers = result.providers;
-        const oks = await Promise.all(
-          providers.map((p) =>
-            client
-              .call<ProviderTestResult>("provider.test", { provider: accountHealthTestKey(p.id, providers) })
-              .then((r) => r.ok)
-              .catch(() => false),
-          ),
-        );
-        if (!cancelled) setProviderHealth({ healthy: oks.filter(Boolean).length, total: providers.length });
-      })
-      .catch((err) => console.error("provider.list failed, hiding the footer's provider health count", err));
-    return () => {
-      cancelled = true;
-    };
-  }, [client]);
+    ensure();
+  }, [ensure, summary.total]);
 
   /**
    * Moving a task has no confirmation dialog (unlike archive/delete -- it's

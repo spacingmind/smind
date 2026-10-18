@@ -4,7 +4,8 @@
 // menu (S6), title fade + per-row indentation (S7) and persisted expansion
 // (S8). The older app-sidebar*.test.tsx files keep the pre-existing contracts.
 import { act } from "react";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AppSidebar } from "@/components/app-sidebar";

@@ -29,6 +29,13 @@ export function useProfiles() {
   });
 }
 
+const NO_PROFILES: AgentProfile[] = [];
+
+/** The cached profiles, `[]` (one stable array) until they load or if the list failed. */
+export function useProfileList(): AgentProfile[] {
+  return useProfiles().data ?? NO_PROFILES;
+}
+
 /** Writes a `profile.*` mutation's or event's profile into the cached list (upsert by ID). */
 export function upsertProfileInCache(queryClient: QueryClient, profile: AgentProfile): void {
   queryClient.setQueryData<AgentProfile[]>(queryKeys.profileList(), (held) => {

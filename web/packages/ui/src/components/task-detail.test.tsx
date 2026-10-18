@@ -1,8 +1,9 @@
 import { act } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { agentChipLabel, TaskDetailPane } from "@/components/task-detail";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import type { AgentProfile, Chat, ProviderListResult, RunLogsResult, RunSummary, Task } from "@/lib/types";
@@ -1034,7 +1035,6 @@ describe("run-config pill (run-config IA)", () => {
       ],
     };
     client.nth("provider.list", 0).resolve(providersResult);
-    client.nth("provider.list", 1).resolve(providersResult);
     await flush();
 
     expect(screen.getByTestId("composer-model-picker")).toBeInTheDocument();
@@ -1066,10 +1066,9 @@ describe("run-config pill (run-config IA)", () => {
       CreatedAt: "2026-09-25T00:00:00Z",
       UpdatedAt: "2026-09-25T00:00:00Z",
     };
-    // Both task-detail.tsx (the pill's own agent-name lookup) and
-    // composer.tsx fetch profile.list independently -- resolve both.
+    // task-detail.tsx (the pill's agent-name lookup) and composer.tsx share ONE profile.list fetch
+    // (ADR-0032): resolving it answers both.
     client.nth("profile.list", 0).resolve([profile]);
-    client.nth("profile.list", 1).resolve([profile]);
     await flush();
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
