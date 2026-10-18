@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -201,6 +202,25 @@ func runGitOutput(dir string, args ...string) (string, error) {
 // without touching the worktree's real one.
 func runGitOutputEnv(dir string, env []string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if env != nil {
+		cmd.Env = env
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %v: %w: %s", args, err, stderr.String())
+	}
+	return stdout.String(), nil
+}
+
+// runGitOutputEnvCtx is runGitOutputEnv bounded by ctx: the git subprocess
+// is killed (not merely waited on) when ctx is done, so a hung git can
+// never outlive the caller's deadline. O1's provenance capture runs on the
+// run's drive goroutine and must give up within its own timeout.
+func runGitOutputEnvCtx(ctx context.Context, dir string, env []string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	if env != nil {
 		cmd.Env = env
