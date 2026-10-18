@@ -8,7 +8,7 @@
 // would stop the run.
 
 import { describe, expect, it } from 'vitest';
-import { sendFollowUpPrompt } from '../followUpPrompt';
+import { continueRun, sendFollowUpPrompt } from '../followUpPrompt';
 import { CloseableStream, RelayConnection } from '../relay/RelayConnection';
 import { PairingOffer } from '../relay/pairing';
 import { makeRelayHarness } from '../relayHarness';
@@ -79,6 +79,20 @@ describe('sendFollowUpPrompt (fake connection)', () => {
     ]);
     expect(rec.tails).toHaveLength(1); // the attach is tracked for navigate-away cancel
     expect(rec.removed).toEqual([]); // nothing rolled back
+  });
+
+  it('continueRun starts a run with the prompt "Continue" on the run\'s provider', async () => {
+    const { conn, calls } = fakeConnection((method) => {
+      if (method === 'run.start') return { runId: 'r-new' };
+      if (method === 'run.attach') return {};
+      throw new Error(`unexpected method ${method}`);
+    });
+    const rec = recordingDeps();
+
+    await continueRun(conn, rec.deps, 7, { Provider: 'glm' }, seqFrom(0));
+
+    expect(calls[0]).toEqual(['run.start', { taskId: 7, provider: 'glm', prompt: 'Continue' }]);
+    expect(rec.appended).toEqual([{ key: 'f1', role: 'user', text: 'Continue' }]);
   });
 
   it('a run.start failure rolls the optimistic user line back and surfaces the error (draft preserved for retry)', async () => {

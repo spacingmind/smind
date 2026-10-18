@@ -26,10 +26,11 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View
 import { Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
 import { UiHost } from '../ui/UiHost';
 import { listRunsForTask, RunSummary } from '../api';
-import { sendFollowUpPrompt, RunTail } from '../followUpPrompt';
+import { continueRun, sendFollowUpPrompt, RunTail } from '../followUpPrompt';
 import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
 import { RelayConnection } from '../relay/RelayConnection';
 import { useConnectionState } from '../relay/useConnectionState';
+import { describeRunFooter } from '../runFooter';
 import { lineFromAttachEvent, TimelineLine, timelineFromLogs } from '../runTimeline';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
@@ -77,6 +78,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   // restore-on-failed-send path.
   const draftState = useNativeState('');
   const [sendError, setSendError] = useState<string | null>(null);
+  const [continued, setContinued] = useState(false);
   const [permissions, setPermissions] = useState<PermissionRequestState[]>([]);
   const [expandedToolCalls, setExpandedToolCalls] = useState<ReadonlySet<string>>(new Set());
   const { epoch } = useConnectionState(conn); // reload what a drop interrupted (the run attach) once reconnected
@@ -88,6 +90,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
     let cancelled = false;
     let attach: { cancel(): void } | null = null;
     setState({ kind: 'loading' });
+    setContinued(false);
     setLines([]);
     setPermissions([]);
     board.onChange = () => setPermissions(board.list());
@@ -190,6 +193,29 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
     }
   }, [appendLines, conn, draft, nextSeq, removeLines, state, taskId, trackTail]);
 
+  const handleContinue = useCallback(async () => {
+    if (continued || state.kind !== 'ready' || state.run === null) return;
+    setContinued(true);
+    setSendError(null);
+    try {
+      await continueRun(
+        conn,
+        {
+          appendLines,
+          removeLines,
+          trackTail,
+          onEvent: (event, params, runId) => feedPermissionEvent(board, runId, event, params),
+        },
+        taskId,
+        state.run,
+        nextSeq,
+      );
+    } catch (e) {
+      setContinued(false);
+      setSendError(e instanceof Error ? e.message : String(e));
+    }
+  }, [appendLines, board, conn, continued, nextSeq, removeLines, state, taskId, trackTail]);
+
   const handlePermissionTap = useCallback(
     (requestId: string, optionId: string) => {
       void respondToPermission(conn, board, requestId, optionId);
@@ -232,6 +258,17 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
           <Text style={styles.runMeta}>
             run {state.run.ID.slice(0, 8)} · {state.run.Provider} · {state.run.Status === 'running' ? 'live' : state.run.Status}
           </Text>
+          {(() => {
+            const footer = describeRunFooter(state.run);
+            return footer !== null && !continued ? (
+              <View style={styles.footerRow}>
+                <Text style={[styles.footerText, { color: theme.status.warning }]}>{footer.sentence}</Text>
+                <UiHost>
+                  <Button label="Continue" onPress={handleContinue} />
+                </UiHost>
+              </View>
+            ) : null;
+          })()}
           <ScrollView style={styles.transcript}>
             {lines.length === 0 && <Text style={styles.empty}>(empty transcript)</Text>}
             {lines.map((line) =>
@@ -356,6 +393,19 @@ function makeStyles(theme: AppTheme) {
       fontSize: theme.type.metadataLabel.fontSize,
       color: theme.foregroundMuted,
       marginBottom: theme.spacing[3],
+    },
+    footerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: theme.spacing[2],
+      marginBottom: theme.spacing[2],
+    },
+    footerText: {
+      flex: 1,
+      fontSize: theme.type.interface.fontSize,
+      lineHeight: theme.type.interface.lineHeight,
+      fontWeight: theme.type.interface.fontWeight,
     },
     spinner: {
       marginTop: theme.spacing[8],
