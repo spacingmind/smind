@@ -370,6 +370,21 @@ describe("RunTimeline", () => {
     expect(screen.getByTestId("run-prompt-copy")).toBeInTheDocument();
   });
 
+  it("a needs-continue disposition shows the not-finished warning and Continue, even for a cap this client does not know", () => {
+    const onContinue = vi.fn();
+    const r = run([{ type: "chunk", text: "x" }], { stopReason: "budget_exceeded", disposition: "needs-continue" });
+    render(
+      <ul>
+        <RunTimeline run={r} isLatest onContinue={onContinue} />
+      </ul>,
+    );
+    expect(screen.getByTestId("run-stop-reason")).toHaveTextContent("Stopped at the budget limit · not finished");
+    expect(screen.getByTestId("run-meta")).toHaveAttribute("data-disposition", "needs-continue");
+    expect(screen.getByTestId("run-meta")).toHaveAttribute("data-status", "done");
+    fireEvent.click(screen.getByTestId("run-continue"));
+    expect(onContinue).toHaveBeenCalledWith(r);
+  });
+
   it("Continue appears on the latest max_tokens run and calls onContinue", () => {
     const onContinue = vi.fn();
     const r = run([{ type: "chunk", text: "x" }], { stopReason: "max_tokens" });
