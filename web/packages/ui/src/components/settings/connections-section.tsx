@@ -5,7 +5,7 @@ import { SetupSection } from "@/components/first-run/setup-section";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { RelayConnectionStatus, useRelayStatus } from "@/components/settings/relay-connection-status";
-import { desktop, isDesktop, type AppSettings, type Connection } from "@/lib/platform";
+import { desktop, isDesktop, type AppSettings, type Connection, type UnsupportedConnection } from "@/lib/platform";
 import { Icons } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
@@ -60,6 +60,9 @@ const ADD_METHODS: ConnectMethodId[] = ["url", "ssh", "relay"];
 
 function ConnectionsSection() {
   const [connections, setConnections] = useState<Connection[]>([]);
+  // Saved entries written by a newer app version: shown only as a note,
+  // never as list rows (and never with their baseUrl).
+  const [unsupported, setUnsupported] = useState<UnsupportedConnection[]>([]);
   const [current, setCurrent] = useState<Connection | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -70,10 +73,16 @@ function ConnectionsSection() {
   const relayStatus = useRelayStatus(current?.kind === "relay", current?.id);
 
   const refresh = useCallback(() => {
-    Promise.all([desktop.listConnections(), desktop.getCurrentConnection()])
-      .then(([list, cur]) => {
+    Promise.all([
+      desktop.listConnections(),
+      desktop.getCurrentConnection(),
+      // A failure here must not break the list: the note is best-effort.
+      desktop.listUnsupportedConnections().catch(() => []),
+    ])
+      .then(([list, cur, unsupported]) => {
         setConnections(list);
         setCurrent(cur);
+        setUnsupported(unsupported);
       })
       .catch((err: unknown) => setError(errorMessage(err)));
   }, []);
@@ -209,6 +218,18 @@ function ConnectionsSection() {
             </li>
           ))}
         </ul>
+        {unsupported.length > 0 && (() => {
+          const n = unsupported.length;
+          const first = unsupported[0];
+          const example = ` (e.g. “${first.label ?? first.id ?? "unnamed"}”, ${first.kind ?? "unknown kind"})`;
+          return (
+            <p data-testid="connection-unsupported-note" className="text-ui-sm text-muted-foreground">
+              {n === 1 ? "1 saved connection needs" : `${n} saved connections need`} a newer version of sMind and{" "}
+              {n === 1 ? "is" : "are"} not shown here{example}. {n === 1 ? "It is" : "They are"} kept as is and will reappear
+              after you update the app.
+            </p>
+          );
+        })()}
         {error && (
           <p role="alert" data-testid="connection-list-error" className="text-ui-base text-destructive">
             {error}

@@ -52,6 +52,7 @@ fn main() {
             "app_settings_get",
             "app_settings_set",
             "connections_relay_status",
+            "connections_unsupported",
             "connections_relay_set_password",
             "connections_remove",
             "connections_select",

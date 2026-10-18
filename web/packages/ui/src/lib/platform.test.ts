@@ -20,6 +20,7 @@ describe("platform in a non-desktop build", () => {
 
     expect(isDesktop).toBe(false);
     await expect(desktop.listConnections()).rejects.toThrow(/unavailable/i);
+    await expect(desktop.listUnsupportedConnections()).rejects.toThrow(/unavailable/i);
     await expect(desktop.getCurrentConnection()).rejects.toThrow(/unavailable/i);
     await expect(desktop.addConnection("x", "http://example.com")).rejects.toThrow(/unavailable/i);
     await expect(desktop.addConnection("x", "http://example.com", "pw")).rejects.toThrow(/unavailable/i);
@@ -56,6 +57,8 @@ describe("platform in a desktop build", () => {
       switch (cmd) {
         case "connections_list":
           return [{ id: "local", kind: "local", label: "Local", baseUrl: "http://127.0.0.1:4648" }];
+        case "connections_unsupported":
+          return [{ id: "vpn:1", label: "Office", kind: "wireguard" }];
         case "connections_add":
           return { id: "url:example", kind: "url", label: args?.label, baseUrl: args?.url };
         case "connections_remove":
@@ -90,6 +93,10 @@ describe("platform in a desktop build", () => {
     const list = await desktop.listConnections();
     expect(list).toEqual([{ id: "local", kind: "local", label: "Local", baseUrl: "http://127.0.0.1:4648" }]);
     expect(invoke).toHaveBeenCalledWith("connections_list");
+
+    const unsupported = await desktop.listUnsupportedConnections();
+    expect(unsupported).toEqual([{ id: "vpn:1", label: "Office", kind: "wireguard" }]);
+    expect(invoke).toHaveBeenCalledWith("connections_unsupported");
 
     const added = await desktop.addConnection("Tunnel", "http://example.com:9000");
     expect(added).toEqual({ id: "url:example", kind: "url", label: "Tunnel", baseUrl: "http://example.com:9000" });
