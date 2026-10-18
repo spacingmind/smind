@@ -1,9 +1,10 @@
 import type { QueryClient } from "@tanstack/react-query";
 
+import { upsertProfileInCache } from "@/hooks/use-profiles";
 import { upsertReport } from "@/lib/account-usage/model";
 import type { AccountUsage, AccountUsageEventPayload, UsageQueryData } from "@/lib/account-usage/types";
 import { queryKeys } from "@/lib/query-keys";
-import type { Account } from "@/lib/types";
+import type { Account, AgentProfile } from "@/lib/types";
 
 /**
  * The daemon-event -> query-cache bridge (ADR-0032 decision 1). It is the one
@@ -70,13 +71,33 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       return;
     }
     case "profile.created":
-    case "profile.updated":
-    case "profile.deleted":
-      void queryClient.invalidateQueries({ queryKey: queryKeys.profileList() });
+    case "profile.updated": {
+      const profile = (payload as { profile?: AgentProfile } | null)?.profile;
+      // Upsert by ID is idempotent with the mutation's own write; a malformed
+      // payload (or a list not yet cached) falls back to one re-read.
+      if (isProfile(profile) && queryClient.getQueryData(queryKeys.profileList()) !== undefined) {
+        upsertProfileInCache(queryClient, profile);
+      } else {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.profileList() });
+      }
       return;
+    }
+    case "profile.deleted": {
+      const id = (payload as { id?: unknown } | null)?.id;
+      if (typeof id === "number" && queryClient.getQueryData(queryKeys.profileList()) !== undefined) {
+        queryClient.setQueryData<AgentProfile[]>(queryKeys.profileList(), (held) => held?.filter((p) => p.ID !== id));
+      } else {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.profileList() });
+      }
+      return;
+    }
     default:
       return;
   }
+}
+
+function isProfile(value: unknown): value is AgentProfile {
+  return typeof value === "object" && value !== null && typeof (value as AgentProfile).ID === "number";
 }
 
 function upsertById(list: Account[], account: Account): Account[] {

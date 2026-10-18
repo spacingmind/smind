@@ -164,7 +164,8 @@ export function Composer({
   // gets (AC15's regression requirement).
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
   // Lazy provider.test results for the combined picker: fetched when it first opens, not on render.
-  const providerHealth = useProviderHealth(client, providers);
+  // Migrated fully in step 3: for now the hook reads the shared catalog itself.
+  const providerHealth = useProviderHealth();
   // The run config itself lives in RunConfigToolbar's shared context
   // (run-config IA); this mirror is what the composer's own submit and
   // Shift+Tab cycle read, updated by the toolbar's onChange.

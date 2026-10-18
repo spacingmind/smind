@@ -1,60 +1,98 @@
-import { act, renderHook } from "@testing-library/react";
+import { act } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { useProviderHealth } from "@/hooks/use-provider-health";
 import type { ProviderInfo } from "@/lib/types";
-import { FakeWsClient } from "@/test/fake-ws-client";
+import { renderHookWithDaemon } from "@/test/render-with-daemon";
+import { queryKeys } from "@/lib/query-keys";
+import { createQueryClient } from "@/lib/query/query-client";
+import { FakeUsageDaemon } from "@/test/usage-test-client";
 
-const PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm", kind: "cli" }];
+const PROVIDERS: ProviderInfo[] = [
+  { id: "claude-native", accountProvider: "anthropic" },
+  { id: "glm", kind: "cli" },
+];
 
 async function flush() {
   await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 0));
   });
 }
 
 describe("useProviderHealth", () => {
   it("tests nothing until ensure is called, then each provider once per client", async () => {
-    const client = new FakeWsClient();
-    const { result } = renderHook(() => useProviderHealth(client, PROVIDERS));
-    expect(client.calls).toHaveLength(0);
-
-    act(() => result.current.ensure());
-    act(() => result.current.ensure());
-    expect(client.calls.filter((c) => c.method === "provider.test")).toHaveLength(2);
-
-    client.nth("provider.test", 0).resolve({ ok: true, detail: "found /usr/bin/claude" });
-    client.nth("provider.test", 1).resolve({ ok: false, detail: '"glm" not found on PATH' });
+    const daemon = new FakeUsageDaemon([]);
+    daemon.providers = { providers: PROVIDERS };
+    const { result } = renderHookWithDaemon(() => useProviderHealth(), daemon, { initialProps: undefined });
     await flush();
-    expect(result.current.health["claude-native"]).toEqual({ ok: true, detail: "found /usr/bin/claude" });
-    expect(result.current.health.glm).toEqual({ ok: false, detail: '"glm" not found on PATH' });
+    expect(daemon.countCalls("provider.test")).toBe(0);
 
     act(() => result.current.ensure());
-    expect(client.calls.filter((c) => c.method === "provider.test")).toHaveLength(2);
+    act(() => result.current.ensure());
+    expect(daemon.countCalls("provider.test")).toBe(2);
+    expect(daemon.calls.filter((c) => c.method === "provider.test").map((c) => (c.params as { provider: string }).provider)).toEqual([
+      "anthropic",
+      "glm",
+    ]);
+
+    await flush();
+    expect(result.current.health["claude-native"]).toEqual({ ok: true, detail: "ok" });
+    expect(result.current.health.glm).toEqual({ ok: true, detail: "ok" });
+    expect(result.current.summary).toEqual({ healthy: 2, total: 2 });
+
+    act(() => result.current.ensure());
+    expect(daemon.countCalls("provider.test")).toBe(2);
   });
 
   it("a failed provider.test leaves the provider untested and retries on the next open", async () => {
-    const client = new FakeWsClient();
-    const { result } = renderHook(() => useProviderHealth(client, [{ id: "claude-native" }]));
+    const daemon = new FakeUsageDaemon([]);
+    daemon.providers = { providers: [{ id: "claude-native" }] };
+    daemon.testResults = { "claude-native": { ok: false, detail: "not found" } };
+    // A failed *RPC* (not a not-ok result): reject the call outright.
+    daemon.failNonUsageWith = new Error("boom");
+    const seeded = createQueryClient();
+    seeded.setQueryData(queryKeys.providerList(), { providers: [{ id: "claude-native" }] });
+    const { result } = renderHookWithDaemon(() => useProviderHealth(), daemon, { initialProps: undefined, queryClient: seeded });
+    await flush();
 
     act(() => result.current.ensure());
-    client.nth("provider.test", 0).reject(new Error("boom"));
     await flush();
     expect(result.current.health["claude-native"]).toBeUndefined();
 
+    daemon.failNonUsageWith = null;
     act(() => result.current.ensure());
-    expect(client.calls.filter((c) => c.method === "provider.test")).toHaveLength(2);
+    expect(daemon.countCalls("provider.test")).toBe(2);
   });
 
-  it("tests only the newly listed providers on a later open", () => {
-    const client = new FakeWsClient();
-    const { result, rerender } = renderHook(({ list }) => useProviderHealth(client, list), {
-      initialProps: { list: [{ id: "claude-native" }] as ProviderInfo[] },
+  it("tests only the newly listed providers on a later open", async () => {
+    const daemon = new FakeUsageDaemon([]);
+    daemon.providers = { providers: [{ id: "claude-native", accountProvider: "anthropic" }] };
+    const { result, queryClient, rerender } = renderHookWithDaemon(() => useProviderHealth(), daemon, { initialProps: undefined });
+    await flush();
+    act(() => result.current.ensure());
+    await flush();
+    // provider.list answering after the first open (the cache keeps the old list until invalidated)
+    daemon.providers = { providers: PROVIDERS };
+    await act(async () => {
+      void queryClient().invalidateQueries({ queryKey: queryKeys.providerList() });
     });
+    rerender({});
+    await flush();
     act(() => result.current.ensure());
-    rerender({ list: PROVIDERS });
+    expect(daemon.calls.filter((c) => c.method === "provider.test").map((c) => (c.params as { provider: string }).provider)).toEqual([
+      "anthropic",
+      "glm",
+    ]);
+  });
+
+  it("counts only ok results in the summary", async () => {
+    const daemon = new FakeUsageDaemon([]);
+    daemon.providers = { providers: PROVIDERS };
+    daemon.testResults = { anthropic: { ok: false, detail: "no key" } };
+    const { result } = renderHookWithDaemon(() => useProviderHealth(), daemon, { initialProps: undefined });
+    await flush();
     act(() => result.current.ensure());
-    expect(client.calls.map((c) => (c.params as { provider: string }).provider)).toEqual(["claude-native", "glm"]);
+    await flush();
+    expect(result.current.summary).toEqual({ healthy: 1, total: 2 });
   });
 });

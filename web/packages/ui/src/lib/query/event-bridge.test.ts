@@ -4,7 +4,7 @@ import type { AccountUsage, UsageQueryData } from "@/lib/account-usage/types";
 import { applyDaemonEvent } from "@/lib/query/event-bridge";
 import { createQueryClient } from "@/lib/query/query-client";
 import { queryKeys } from "@/lib/query-keys";
-import type { Account } from "@/lib/types";
+import type { Account, AgentProfile } from "@/lib/types";
 
 const account = (id: number, label: string): Account => ({
   id,
@@ -14,6 +14,18 @@ const account = (id: number, label: string): Account => ({
   createdAt: "",
   updatedAt: "",
 });
+const profile = (id: number, name: string): AgentProfile => ({
+  ID: id,
+  Name: name,
+  Provider: "claude-native",
+  PermissionMode: "",
+  AutoAccept: false,
+  ThinkingLevel: "",
+  Notes: "",
+  CreatedAt: "",
+  UpdatedAt: "",
+});
+
 const usage = (accountId: number, displayName: string): AccountUsage => ({
   accountId,
   key: `anthropic-${accountId}`,
@@ -74,6 +86,26 @@ describe("applyDaemonEvent", () => {
     expect(qc.getQueryData<UsageQueryData>(queryKeys.accountUsage())?.reports.map((r) => r.accountId)).toEqual([1]);
     // Settled by one more *cached* read, never a provider call.
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.accountUsage() });
+  });
+
+  it("profile.created/updated upsert the cached list; deleted filters it", () => {
+    const qc = createQueryClient();
+    qc.setQueryData(queryKeys.profileList(), [profile(1, "Quick")]);
+    applyDaemonEvent(qc, "profile.created", { profile: profile(2, "New") });
+    applyDaemonEvent(qc, "profile.updated", { profile: profile(1, "Renamed") });
+    expect(qc.getQueryData<AgentProfile[]>(queryKeys.profileList())?.map((p) => p.Name)).toEqual(["Renamed", "New"]);
+    applyDaemonEvent(qc, "profile.deleted", { id: 2 });
+    expect(qc.getQueryData<AgentProfile[]>(queryKeys.profileList())?.map((p) => p.ID)).toEqual([1]);
+  });
+
+  it("profile events with a malformed payload or no cached list invalidate instead", () => {
+    const qc = createQueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    applyDaemonEvent(qc, "profile.created", { profile: profile(2, "New") });
+    applyDaemonEvent(qc, "profile.updated", {});
+    applyDaemonEvent(qc, "profile.deleted", {});
+    expect(qc.getQueryData(queryKeys.profileList())).toBeUndefined();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.profileList() });
   });
 
   it("does not create cache entries nobody asked for", () => {

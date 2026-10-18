@@ -3,7 +3,7 @@ import type { AccountUsage, AccountUsageParams } from "@/lib/account-usage/types
 import { RpcError, type WsClient } from "@/lib/ws-client";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { usageResult } from "@/test/account-usage-fixtures";
-import type { Account, ProviderListResult, ProviderTestResult, RunSummary } from "@/lib/types";
+import type { Account, AgentProfile, ProviderListResult, ProviderTestResult, RunSummary } from "@/lib/types";
 
 /**
  * A scripted daemon for the plan-usage tests: answers `account.usage` from a
@@ -35,6 +35,8 @@ export class FakeUsageDaemon {
   accounts: Account[] = [];
   /** Answers `provider.list`. */
   providers: ProviderListResult = { providers: [] };
+  /** Answers `profile.list`; mutated by the profile mutations below and by tests directly. */
+  profiles: AgentProfile[] = [];
   /** Answers `run.list` (the remove-account warning's running-run count). */
   runs: RunSummary[] = [];
   /** `provider.test` answers per provider key; a missing key answers `{ ok: true, detail: "ok" }`. */
@@ -62,6 +64,10 @@ export class FakeUsageDaemon {
 
   private nextId(): number {
     return this.accounts.reduce((max, a) => Math.max(max, a.id), 0) + 1;
+  }
+
+  private nextProfileId(): number {
+    return this.profiles.reduce((max, p) => Math.max(max, p.ID), 0) + 1;
   }
 
   readonly client = {
@@ -98,6 +104,52 @@ export class FakeUsageDaemon {
           }
           case "run.list":
             return this.runs;
+          case "profile.list":
+            return this.profiles;
+          case "profile.create": {
+            const p = (params ?? {}) as Record<string, unknown>;
+            const now = new Date().toISOString();
+            const profile: AgentProfile = {
+              ID: this.nextProfileId(),
+              Name: String(p.name ?? ""),
+              Provider: String(p.provider ?? ""),
+              PermissionMode: String(p.permissionMode ?? ""),
+              AutoAccept: Boolean(p.autoAccept),
+              ThinkingLevel: String(p.thinkingLevel ?? ""),
+              Model: p.model ? String(p.model) : "",
+              Notes: String(p.notes ?? ""),
+              CreatedAt: now,
+              UpdatedAt: now,
+            };
+            this.profiles = [...this.profiles, profile];
+            return profile;
+          }
+          case "profile.update": {
+            const p = params as { id: number } & Record<string, unknown>;
+            const index = this.profiles.findIndex((x) => x.ID === p.id);
+            if (index === -1) throw new RpcError(`profile ${p.id} not found`);
+            const fields: [keyof AgentProfile, unknown][] = [
+              ["Name", p.name],
+              ["Provider", p.provider],
+              ["PermissionMode", p.permissionMode],
+              ["AutoAccept", p.autoAccept],
+              ["ThinkingLevel", p.thinkingLevel],
+              ["Model", p.model],
+              ["Notes", p.notes],
+            ];
+            const next = { ...this.profiles[index] };
+            for (const [field, value] of fields) {
+              if (value !== undefined) (next as Record<string, unknown>)[field as string] = value;
+            }
+            next.UpdatedAt = new Date().toISOString();
+            this.profiles[index] = next;
+            return next;
+          }
+          case "profile.delete": {
+            const p = params as { id: number };
+            this.profiles = this.profiles.filter((x) => x.ID !== p.id);
+            return null;
+          }
           case "account.add": {
             const p = params as { provider: string; label: string; credentialType?: string };
             const account: Account = {

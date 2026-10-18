@@ -1,52 +1,100 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useMemo } from "react";
+import { useQueries, useQueryClient, skipToken, type QueryClient } from "@tanstack/react-query";
 
+import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
 import type { ProviderHealth } from "@/lib/model-browser";
 import { accountHealthTestKey } from "@/lib/provider-health";
+import { useProviderCatalog } from "@/hooks/use-provider-catalog";
+import { queryKeys } from "@/lib/query-keys";
 import type { ProviderInfo, ProviderTestResult } from "@/lib/types";
-import type { WsClientLike } from "@/lib/ws-client";
+import type { WsClient } from "@/lib/ws-client";
 
 /**
- * Lazy per-provider health for the combined model picker (Paseo disables an
- * unavailable provider with its reason). `provider.test` is a local PATH /
- * stored-credential check -- no network -- but it is still only run when the
- * picker is first opened, never on render or on an interval: `ensure()` is
- * single-flight per provider id, so opening the popover twice (or while the
- * first round is still in flight) tests each provider exactly once per
- * client. A provider list that grows after the first open (provider.list
- * answering after the fallback list) is tested on the next open for just the
- * new ids. A failed RPC leaves that provider untested, i.e. enabled -- never
- * disabled on a guess.
+ * Lazy per-provider health over the shared cache (ADR-0032 AC12):
+ * `provider.test` is a local PATH / stored-credential check -- no network --
+ * but it is still only run when something calls `ensure()` (the composer
+ * picker's first open, the sidebar footer's once-per-connection count) or
+ * when the user presses Test (`useRunProviderTest`) -- never on render,
+ * focus or a retry loop.
+ *
+ * Results live under `queryKeys.providerTest(accountHealthTestKey(id,
+ * providers))`, so the sidebar's "N healthy" footer and the Providers /
+ * Agents dots read the SAME answers. `health[id]` never triggers a fetch
+ * (skipToken cache read); `ensure()` fills the missing keys with
+ * `fetchQuery` -- single-flight per key (a key already fetching or cached is
+ * skipped), so two opens while the first round is in flight test each
+ * provider exactly once. A failed RPC leaves the key untested (undefined =
+ * enabled, never cached as failed) so a later open can try again. A new
+ * daemon connection is a new QueryClient, so all of it is per-connection.
  */
-export function useProviderHealth(
-  client: WsClientLike | null,
-  providers: ProviderInfo[],
-): { health: Record<string, ProviderHealth | undefined>; ensure: () => void } {
-  const [health, setHealth] = useState<Record<string, ProviderHealth | undefined>>({});
-  const requested = useRef<Set<string>>(new Set());
-  const providersRef = useRef(providers);
-  providersRef.current = providers;
+export function useProviderHealth(): {
+  health: Record<string, ProviderHealth | undefined>;
+  ensure: () => void;
+  summary: { healthy: number; total: number };
+} {
+  const { client } = useDaemonConnection();
+  const queryClient = useQueryClient();
+  const { providers } = useProviderCatalog();
 
-  // A new client is a new daemon: forget what was tested against the last one.
-  useEffect(() => {
-    requested.current = new Set();
-    setHealth({});
-  }, [client]);
+  const tests = useQueries({
+    queries: providers.map((info) => ({
+      queryKey: queryKeys.providerTest(accountHealthTestKey(info.id, providers)),
+      queryFn: skipToken,
+      staleTime: Infinity,
+      gcTime: Infinity,
+    })),
+  });
 
-  const ensure = useCallback(() => {
-    if (!client) return;
-    const all = providersRef.current;
-    for (const info of all) {
-      if (requested.current.has(info.id)) continue;
-      requested.current.add(info.id);
-      client
-        .call<ProviderTestResult>("provider.test", { provider: accountHealthTestKey(info.id, all) })
-        .then((r) => setHealth((prev) => ({ ...prev, [info.id]: { ok: r.ok, detail: r.detail } })))
-        .catch(() => {
-          // Untested, not unhealthy: allow a later open to try again.
-          requested.current.delete(info.id);
-        });
+  const health = useMemo(() => {
+    const map: Record<string, ProviderHealth | undefined> = {};
+    providers.forEach((info, i) => {
+      const result = tests[i].data as ProviderTestResult | undefined;
+      map[info.id] = result ? { ok: result.ok, detail: result.detail } : undefined;
+    });
+    return map;
+  }, [providers, tests]);
+
+  const summary = useMemo(() => {
+    let healthy = 0;
+    for (const info of providers) {
+      if (health[info.id]?.ok) healthy++;
     }
-  }, [client]);
+    return { healthy, total: providers.length };
+  }, [providers, health]);
 
-  return { health, ensure };
+  function ensure(): void {
+    if (!client) return;
+    for (const info of providers) {
+      runProviderTest(queryClient, client, info, providers);
+    }
+  }
+
+  return { health, ensure, summary };
+}
+
+/**
+ * Runs `provider.test` for one provider into the shared cache unless the key
+ * already has an answer or an in-flight request. Never throws: a failure
+ * leaves the key untested so a later `ensure()` (or a Test button) can retry.
+ */
+export function runProviderTest(
+  queryClient: QueryClient,
+  client: WsClient,
+  info: ProviderInfo,
+  providers: ProviderInfo[],
+): void {
+  const key = accountHealthTestKey(info.id, providers);
+  const queryKey = queryKeys.providerTest(key);
+  if (queryClient.getQueryData(queryKey) !== undefined) return;
+  if (queryClient.getQueryState(queryKey)?.fetchStatus === "fetching") return;
+  void queryClient
+    .fetchQuery({
+      queryKey,
+      queryFn: async (): Promise<ProviderTestResult> => client.call<ProviderTestResult>("provider.test", { provider: key }),
+      staleTime: Infinity,
+      retry: false,
+    })
+    .catch(() => {
+      // Untested, not unhealthy: allow a later open to try again.
+    });
 }
