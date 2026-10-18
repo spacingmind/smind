@@ -6,6 +6,7 @@ package bridge
 // the signature, before anything about the device is recorded or revealed.
 
 import (
+	"crypto/subtle"
 	"math"
 	"sync"
 	"time"
@@ -32,6 +33,18 @@ type PasswordGate interface {
 	// Check reports whether password matches it (constant time with respect to
 	// the password).
 	Check(password string) bool
+}
+
+// StaticPassword is a PasswordGate for a fixed clear password, with a
+// constant-time comparison: for the test harnesses (the daemon itself uses its
+// bcrypt hash through internal/server). "" means no password is required.
+func StaticPassword(password string) PasswordGate { return staticPassword(password) }
+
+type staticPassword string
+
+func (p staticPassword) Required() bool { return p != "" }
+func (p staticPassword) Check(candidate string) bool {
+	return subtle.ConstantTimeCompare([]byte(candidate), []byte(p)) == 1
 }
 
 // passwordSlots bounds concurrent bcrypt checks: each costs hundreds of
