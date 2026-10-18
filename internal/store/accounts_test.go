@@ -229,3 +229,61 @@ func TestStore_AccountModelsRoundTrip(t *testing.T) {
 		t.Fatal("SetAccountModels(missing id) succeeded, want not-found")
 	}
 }
+
+func TestStore_AccountIdentity(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+
+	// Create with identity; lookup by (provider, identity).
+	a, err := s.CreateAccount(Account{Provider: "anthropic", Label: "a", CredentialType: "oauth", CredentialData: `{}`, Identity: "id-1"})
+	if err != nil {
+		t.Fatalf("CreateAccount(identity) error = %v", err)
+	}
+	if got, err := s.GetAccountByIdentity("anthropic", "id-1"); err != nil || got.ID != a.ID || got.Identity != "id-1" {
+		t.Fatalf("GetAccountByIdentity() = %+v, %v", got, err)
+	}
+	if _, err := s.GetAccountByIdentity("openai", "id-1"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("GetAccountByIdentity(other provider) error = %v, want ErrNoRows", err)
+	}
+	if _, err := s.GetAccountByIdentity("anthropic", ""); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("GetAccountByIdentity(empty) error = %v, want ErrNoRows", err)
+	}
+
+	// A second row with the same identity is ErrIdentityInUse; no identity never collides.
+	if _, err := s.CreateAccount(Account{Provider: "anthropic", Label: "dup", CredentialType: "oauth", CredentialData: `{}`, Identity: "id-1"}); !errors.Is(err, ErrIdentityInUse) {
+		t.Fatalf("CreateAccount(dup identity) error = %v, want ErrIdentityInUse", err)
+	}
+	b := newTestAccount(t, s, "anthropic", "b")
+	c := newTestAccount(t, s, "anthropic", "c")
+	if b.Identity != "" || c.Identity != "" {
+		t.Fatalf("plain accounts carry identities %q/%q", b.Identity, c.Identity)
+	}
+
+	// Plain replace keeps the stored identity; adopting sets it and swaps the credential atomically.
+	if got, err := s.ReplaceAccountCredential(a.ID, "oauth", `{"n":1}`); err != nil || got.Identity != "id-1" {
+		t.Fatalf("ReplaceAccountCredential() = %+v, %v, want identity kept", got, err)
+	}
+	if _, err := s.ReplaceAccountCredentialAdoptingIdentity(b.ID, "oauth", `{"n":2}`, "id-1"); !errors.Is(err, ErrIdentityInUse) {
+		t.Fatalf("adopt owned identity error = %v, want ErrIdentityInUse", err)
+	}
+	if got, _ := s.GetAccount(b.ID); got.CredentialType != "api_key" || got.Identity != "" {
+		t.Fatalf("failed adopt changed the row: %+v", got)
+	}
+	got, err := s.ReplaceAccountCredentialAdoptingIdentity(b.ID, "oauth", `{"n":2}`, "id-2")
+	if err != nil || got.Identity != "id-2" || got.CredentialType != "oauth" {
+		t.Fatalf("adopt = %+v, %v", got, err)
+	}
+	if _, err := s.ReplaceAccountCredentialAdoptingIdentity(c.ID, "oauth", `{}`, ""); err == nil {
+		t.Fatal("adopt with empty identity succeeded")
+	}
+	if _, err := s.SetAccountIdentity(c.ID, "id-2"); !errors.Is(err, ErrIdentityInUse) {
+		t.Fatalf("SetAccountIdentity(owned) error = %v, want ErrIdentityInUse", err)
+	}
+	if got, err := s.SetAccountIdentity(c.ID, "id-3"); err != nil || got.Identity != "id-3" {
+		t.Fatalf("SetAccountIdentity() = %+v, %v", got, err)
+	}
+	if _, err := s.SetAccountIdentity(9999, "x"); err == nil {
+		t.Fatal("SetAccountIdentity(missing id) succeeded, want not-found")
+	}
+}

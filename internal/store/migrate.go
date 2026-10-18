@@ -202,6 +202,21 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		// ADR-0033 D6: accounts.identity, the hashed vendor account identity
+		// that lets a re-login update a row instead of orphaning it. NULL
+		// for every pre-existing row (no provider call backfills it; a row
+		// gains one at its first re-login). The partial unique index lives
+		// here, not in schema.sql, because it needs the column to exist first.
+		name: "accounts_identity",
+		apply: func(db *sql.DB) error {
+			if err := addColumnIfMissing(db, "accounts", "identity", "TEXT"); err != nil {
+				return err
+			}
+			_, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_provider_identity ON accounts(provider, identity) WHERE identity IS NOT NULL`)
+			return err
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and
