@@ -201,18 +201,7 @@ func runGitOutput(dir string, args ...string) (string, error) {
 // taskDiff to point git at a throwaway index file via GIT_INDEX_FILE
 // without touching the worktree's real one.
 func runGitOutputEnv(dir string, env []string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if env != nil {
-		cmd.Env = env
-	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("git %v: %w: %s", args, err, stderr.String())
-	}
-	return stdout.String(), nil
+	return runGitOutputEnvCtx(context.Background(), dir, env, args...)
 }
 
 // runGitOutputEnvCtx is runGitOutputEnv bounded by ctx: the git subprocess
