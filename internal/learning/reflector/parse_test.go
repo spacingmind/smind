@@ -20,7 +20,7 @@ func TestReflectorOutput_RejectsNonJSONAndUnknownAction(t *testing.T) {
 	intent := func(extra string) string {
 		return `{"intents":[{"action":"create","name":"learned-x"` + extra + `}]}`
 	}
-	six := strings.TrimSuffix(strings.Repeat(`{"action":"delete","name":"learned-a"},`, 6), ",")
+	six := strings.TrimSuffix(strings.Repeat(`{"action":"patch","name":"learned-a"},`, 6), ",")
 	cases := []struct{ name, in string }{
 		{"prose", "Here are the intents: nothing."},
 		{"fenced", "```json\n{\"intents\":[]}\n```"},
@@ -46,14 +46,14 @@ func TestReflectorOutput_RejectsNonJSONAndUnknownAction(t *testing.T) {
 		{"duplicate top key", `{"intents":[],"intents":[]}`},
 		{"duplicate intent field", intent(`,"name":"learned-y"`)},
 		{"duplicate evidence field", intent(`,"evidence":[{"kind":"a","kind":"b"}]`)},
-		{"invalid utf8", "{\"intents\":[{\"action\":\"delete\",\"name\":\"learned-\xff\"}]}"},
-		{"lone surrogate escape", `{"intents":[{"action":"delete","name":"learned-\ud800"}]}`},
-		{"wrong type", `{"intents":[{"action":"delete","name":5}]}`},
+		{"invalid utf8", "{\"intents\":[{\"action\":\"patch\",\"name\":\"learned-\xff\"}]}"},
+		{"lone surrogate escape", `{"intents":[{"action":"patch","name":"learned-\ud800"}]}`},
+		{"wrong type", `{"intents":[{"action":"patch","name":5}]}`},
 		{"truncated", `{"intents":[`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := ParseOutput(c.in)
+			got, err := ParseOutput(c.in, gate.ModeReflect)
 			if err == nil {
 				t.Fatalf("expected error, got %+v", got)
 			}
@@ -67,14 +67,14 @@ func TestReflectorOutput_RejectsNonJSONAndUnknownAction(t *testing.T) {
 	}
 
 	t.Run("unknown action names the action", func(t *testing.T) {
-		_, err := ParseOutput(`{"intents":[{"action":"rewrite","name":"learned-x"}]}`)
+		_, err := ParseOutput(`{"intents":[{"action":"rewrite","name":"learned-x"}]}`, gate.ModeReflect)
 		if err == nil || !strings.Contains(err.Error(), "rewrite") {
 			t.Fatalf("want error naming action, got %v", err)
 		}
 	})
 	t.Run("one bad intent fails the whole message", func(t *testing.T) {
-		in := `{"intents":[{"action":"delete","name":"learned-a","absorbed_into":"learned-b"},{"action":"nuke","name":"learned-c"}]}`
-		if got, err := ParseOutput(in); err == nil || got != nil {
+		in := `{"intents":[{"action":"patch","name":"learned-a"},{"action":"nuke","name":"learned-c"}]}`
+		if got, err := ParseOutput(in, gate.ModeReflect); err == nil || got != nil {
 			t.Fatalf("got %+v, %v", got, err)
 		}
 	})
@@ -83,22 +83,25 @@ func TestReflectorOutput_RejectsNonJSONAndUnknownAction(t *testing.T) {
 func TestReflectorOutput_Accepts(t *testing.T) {
 	patch := `{"action":"patch","name":"learned-a","category":"","description":"","body":null,"old_string":"foo","new_string":"bar","absorbed_into":"","reason":"r","evidence":[{"kind":"failure_recovery","run_id":"r1","seq":4,"quote":"retry with -count=1"}]}`
 	del := `{"action":"delete","name":"learned-a","body":null,"absorbed_into":"learned-b","reason":"dup","evidence":[]}`
+	curatePatch := `{"action":"patch","name":"learned-b","description":"Use when B.","old_string":"x","new_string":"y","reason":"merge","evidence":[]}`
 	cases := []struct {
 		name string
+		mode gate.Mode
 		in   string
 		n    int
 	}{
-		{"empty", `{"intents":[]}`, 0},
-		{"empty whitespace", " \n\r\n  {\n \"intents\" : [ ]\n}\n\n ", 0},
-		{"create null old_string", validCreate, 1},
-		{"patch", `{"intents":[` + patch + `]}`, 1},
-		{"delete absorbed", `{"intents":[` + del + `]}`, 1},
-		{"several", `{"intents":[` + patch + `,` + del + `]}`, 2},
-		{"five", `{"intents":[` + strings.TrimSuffix(strings.Repeat(del+",", MaxIntents), ",") + `]}`, 5},
+		{"empty", gate.ModeReflect, `{"intents":[]}`, 0},
+		{"empty whitespace", gate.ModeReflect, " \n\r\n\t {\n \"intents\" : [ ]\n}\n\n ", 0},
+		{"create null old_string", gate.ModeReflect, validCreate, 1},
+		{"patch", gate.ModeReflect, `{"intents":[` + patch + `]}`, 1},
+		{"curate patch", gate.ModeCurate, `{"intents":[` + curatePatch + `]}`, 1},
+		{"curate delete absorbed", gate.ModeCurate, `{"intents":[` + del + `]}`, 1},
+		{"several", gate.ModeReflect, `{"intents":[` + patch + `,` + patch + `]}`, 2},
+		{"five", gate.ModeCurate, `{"intents":[` + strings.TrimSuffix(strings.Repeat(del+",", MaxIntents), ",") + `]}`, 5},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := ParseOutput(c.in)
+			got, err := ParseOutput(c.in, c.mode)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -111,7 +114,7 @@ func TestReflectorOutput_Accepts(t *testing.T) {
 
 func TestParseOutput_RoundTripsFields(t *testing.T) {
 	in := `{"intents":[{"action":"patch","name":"learned-a","category":"testing","description":"Use when X.","body":"b\nline2","old_string":"o","new_string":"n","absorbed_into":"learned-z","reason":"because","evidence":[{"kind":"user_message","run_id":"run-1","seq":-1,"quote":"one two three four"},{"kind":"loaded_skill_wrong","run_id":"run-1","seq":-2,"quote":"five six seven eight"}]}]}`
-	got, err := ParseOutput(in)
+	got, err := ParseOutput(in, gate.ModeReflect)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +139,7 @@ func TestParseOutput_RoundTripsFields(t *testing.T) {
 }
 
 func TestParseOutput_NullBodyIsEmpty(t *testing.T) {
-	got, err := ParseOutput(validCreate)
+	got, err := ParseOutput(validCreate, gate.ModeReflect)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +171,7 @@ func TestParseOutput_FuzzNoPanic(t *testing.T) {
 				b = b[:p]
 			}
 		}
-		got, err := ParseOutput(string(b))
+		got, err := ParseOutput(string(b), gate.ModeReflect)
 		if err != nil && len(got) != 0 {
 			t.Fatalf("input %q returned %d intents and error %v", b, len(got), err)
 		}
@@ -180,7 +183,7 @@ func FuzzParseOutput(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {
-		got, err := ParseOutput(s)
+		got, err := ParseOutput(s, gate.ModeReflect)
 		if err != nil && got != nil {
 			t.Fatalf("error with non-nil result: %v", err)
 		}
@@ -188,4 +191,114 @@ func FuzzParseOutput(f *testing.F) {
 			t.Fatal("nil result without error")
 		}
 	})
+}
+
+func TestParseOutput_RejectsCaseFoldedKeys(t *testing.T) {
+	for name, in := range map[string]string{
+		"upper top":      `{"Intents":[]}`,
+		"all caps top":   `{"INTENTS":[]}`,
+		"kelvin sign":    "{\"intents\":[{\"action\":\"create\",\"name\":\"learned-x\",\"\u212aind\":\"x\"}]}",
+		"upper action":   `{"intents":[{"ACTION":"create","name":"learned-x"}]}`,
+		"mixed name":     `{"intents":[{"action":"create","Name":"learned-x"}]}`,
+		"evidence upper": `{"intents":[{"action":"create","name":"learned-x","evidence":[{"Kind":"user_message"}]}]}`,
+		"evidence quote": `{"intents":[{"action":"create","name":"learned-x","evidence":[{"kind":"user_message","QUOTE":"a b c"}]}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := ParseOutput(in, gate.ModeReflect)
+			if err == nil || !errors.Is(err, ErrBadOutput) || got != nil {
+				t.Fatalf("got %+v, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestParseOutput_ReflectRejectsDelete(t *testing.T) {
+	in := `{"intents":[{"action":"delete","name":"learned-a","absorbed_into":"learned-b","reason":"dup","evidence":[]}]}`
+	got, err := ParseOutput(in, gate.ModeReflect)
+	if err == nil || !errors.Is(err, ErrBadOutput) || got != nil {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	if _, err := ParseOutput(validCreate, gate.ModeReflect); err != nil {
+		t.Fatalf("create must stay valid: %v", err)
+	}
+}
+
+func TestParseOutput_CurateRules(t *testing.T) {
+	ev := `[{"kind":"user_message","run_id":"r","seq":-1,"quote":"one two three four"}]`
+	cases := []struct {
+		name, in string
+		ok       bool
+	}{
+		{"create rejected", `{"intents":[{"action":"create","name":"learned-a","reason":"r","evidence":[]}]}`, false},
+		{"patch with evidence rejected", `{"intents":[{"action":"patch","name":"learned-a","reason":"r","evidence":` + ev + `}]}`, false},
+		{"delete with evidence rejected", `{"intents":[{"action":"delete","name":"learned-a","absorbed_into":"learned-b","reason":"r","evidence":` + ev + `}]}`, false},
+		{"delete without absorbed_into", `{"intents":[{"action":"delete","name":"learned-a","reason":"r","evidence":[]}]}`, false},
+		{"delete null absorbed_into", `{"intents":[{"action":"delete","name":"learned-a","absorbed_into":null,"reason":"r","evidence":[]}]}`, false},
+		{"delete ok", `{"intents":[{"action":"delete","name":"learned-a","absorbed_into":"learned-b","reason":"r","evidence":[]}]}`, true},
+		{"patch ok", `{"intents":[{"action":"patch","name":"learned-a","reason":"r","evidence":[]}]}`, true},
+		{"patch missing evidence ok", `{"intents":[{"action":"patch","name":"learned-a","reason":"r"}]}`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := ParseOutput(c.in, gate.ModeCurate)
+			if c.ok && (err != nil || len(got) != 1) {
+				t.Fatalf("got %+v, %v", got, err)
+			}
+			if !c.ok && (err == nil || !errors.Is(err, ErrBadOutput) || got != nil) {
+				t.Fatalf("got %+v, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestParseOutput_RejectsUnicodeWhitespaceWrapper(t *testing.T) {
+	for name, ws := range map[string]string{"nbsp": "\u00a0", "ideographic": "\u3000", "line sep": "\u2028", "zero-width-ish em space": "\u2003"} {
+		for _, in := range []string{ws + `{"intents":[]}`, `{"intents":[]}` + ws} {
+			if got, err := ParseOutput(in, gate.ModeReflect); err == nil || !errors.Is(err, ErrBadOutput) || got != nil {
+				t.Fatalf("%s: got %+v, %v", name, got, err)
+			}
+		}
+	}
+	if _, err := ParseOutput(" \t\r\n"+`{"intents":[]}`+"\n\r\t ", gate.ModeReflect); err != nil {
+		t.Fatalf("ASCII whitespace must pass: %v", err)
+	}
+}
+
+func TestScopeCheck_Unknown(t *testing.T) {
+	shown := []string{"learned-b", "learned-a", "learned-a"}
+	patch := func(n string) gate.Intent { return gate.Intent{Action: gate.ActionPatch, Name: n} }
+	del := func(n, into string) gate.Intent {
+		return gate.Intent{Action: gate.ActionDelete, Name: n, AbsorbedInto: into}
+	}
+	cases := []struct {
+		name    string
+		mode    gate.Mode
+		intents []gate.Intent
+		ok      bool
+	}{
+		{"patch shown", gate.ModeReflect, []gate.Intent{patch("learned-a")}, true},
+		{"create any name", gate.ModeReflect, []gate.Intent{{Action: gate.ActionCreate, Name: "learned-new"}}, true},
+		{"patch unknown", gate.ModeReflect, []gate.Intent{patch("learned-zzz")}, false},
+		{"delete unknown name", gate.ModeCurate, []gate.Intent{patch("learned-a"), del("learned-zzz", "learned-a")}, false},
+		{"absorbed unknown", gate.ModeCurate, []gate.Intent{patch("learned-zzz"), del("learned-a", "learned-zzz")}, false},
+		{"mutual absorb", gate.ModeCurate, []gate.Intent{del("learned-a", "learned-b"), del("learned-b", "learned-a")}, false},
+		{"absorbed deleted too", gate.ModeCurate, []gate.Intent{patch("learned-a"), del("learned-b", "learned-a"), del("learned-a", "learned-b")}, false},
+		{"delete without paired patch", gate.ModeCurate, []gate.Intent{del("learned-a", "learned-b")}, false},
+		{"patch of other skill is not a pair", gate.ModeCurate, []gate.Intent{patch("learned-a"), del("learned-b", "learned-c")}, false},
+		{"double targeting patch", gate.ModeReflect, []gate.Intent{patch("learned-a"), patch("learned-a")}, false},
+		{"double targeting patch and delete", gate.ModeCurate, []gate.Intent{patch("learned-a"), del("learned-a", "learned-b")}, false},
+		{"curate pairing ok", gate.ModeCurate, []gate.Intent{patch("learned-a"), del("learned-b", "learned-a")}, true},
+		{"empty", gate.ModeCurate, nil, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := ScopeCheck(c.intents, c.mode, shown)
+			if c.ok && err != nil {
+				t.Fatal(err)
+			}
+			if !c.ok && (err == nil || !errors.Is(err, ErrBadOutput)) {
+				t.Fatalf("want ErrBadOutput, got %v", err)
+			}
+		})
+	}
 }

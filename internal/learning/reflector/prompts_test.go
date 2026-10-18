@@ -111,7 +111,7 @@ func TestPromptExampleParses(t *testing.T) {
 	if !ok {
 		t.Fatal("no </example> marker line")
 	}
-	intents, err := ParseOutput(ex)
+	intents, err := ParseOutput(ex, gate.ModeReflect)
 	if err != nil {
 		t.Fatal(err)
 	}

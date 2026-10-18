@@ -10,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/spacingmind/smind/internal/learning/gate"
@@ -37,11 +39,15 @@ func bad(format string, args ...any) error {
 }
 
 // ParseOutput accepts ONLY a single JSON object {"intents":[...]} as the
-// entire message (surrounding whitespace aside) and returns its intents. Any
-// violation returns an error wrapping ErrBadOutput and a nil slice: nothing
+// entire message (surrounding ASCII whitespace aside) and returns its intents.
+// Any violation returns an error wrapping ErrBadOutput and a nil slice: nothing
 // partial is ever returned, and one bad intent fails the whole message. It
 // does not run the gate and relaxes none of the gate's evidence rules.
-func ParseOutput(raw string) ([]gate.Intent, error) {
+//
+// mode selects the per-job rules: gate.ModeCurate allows only patch and delete
+// with no evidence; anything else is treated as reflect and allows only create
+// and patch (delete is curator-only).
+func ParseOutput(raw string, mode gate.Mode) ([]gate.Intent, error) {
 	if len(raw) > MaxOutputBytes {
 		return nil, bad("message is %d bytes, max %d", len(raw), MaxOutputBytes)
 	}
@@ -49,10 +55,13 @@ func ParseOutput(raw string) ([]gate.Intent, error) {
 		return nil, bad("invalid UTF-8")
 	}
 	s := strings.TrimSpace(raw)
+	if err := checkWrapper(raw, s); err != nil {
+		return nil, err
+	}
 	if !strings.HasPrefix(s, "{") || !strings.HasSuffix(s, "}") {
 		return nil, bad("message is not a single JSON object")
 	}
-	if err := rejectDuplicateKeys(s); err != nil {
+	if err := walkSchema(s); err != nil {
 		return nil, err
 	}
 
@@ -75,7 +84,7 @@ func ParseOutput(raw string) ([]gate.Intent, error) {
 		return nil, bad("%d intents, max %d", len(intents), MaxIntents)
 	}
 	for i, in := range intents {
-		if err := checkIntent(in); err != nil {
+		if err := checkIntent(in, mode); err != nil {
 			return nil, bad("intent %d: %v", i, err)
 		}
 	}
@@ -85,11 +94,39 @@ func ParseOutput(raw string) ([]gate.Intent, error) {
 	return intents, nil
 }
 
-func checkIntent(in gate.Intent) error {
+// checkWrapper rejects any surrounding whitespace that is not ASCII space,
+// tab, newline or CR (NBSP, U+3000, U+2028 and friends).
+func checkWrapper(raw, trimmed string) error {
+	lead := raw[:len(raw)-len(strings.TrimLeftFunc(raw, unicode.IsSpace))]
+	trail := raw[len(strings.TrimRightFunc(raw, unicode.IsSpace)):]
+	for _, r := range lead + trail {
+		switch r {
+		case ' ', '\t', '\n', '\r':
+		default:
+			return bad("message is wrapped in non-ASCII whitespace U+%04X", r)
+		}
+	}
+	return nil
+}
+
+func checkIntent(in gate.Intent, mode gate.Mode) error {
 	switch in.Action {
 	case gate.ActionCreate, gate.ActionPatch, gate.ActionDelete:
 	default:
 		return fmt.Errorf("unknown action %q", clip(string(in.Action)))
+	}
+	if mode == gate.ModeCurate {
+		if in.Action == gate.ActionCreate {
+			return errors.New("the curator may not create skills")
+		}
+		if len(in.Evidence) > 0 {
+			return errors.New("curator intents must have empty evidence")
+		}
+		if in.Action == gate.ActionDelete && in.AbsorbedInto == "" {
+			return errors.New("delete needs a non-empty absorbed_into")
+		}
+	} else if in.Action == gate.ActionDelete {
+		return errors.New("the reflector may not delete skills")
 	}
 	if len(in.Evidence) > maxEvidence {
 		return fmt.Errorf("%d evidence items, max %d", len(in.Evidence), maxEvidence)
@@ -120,12 +157,34 @@ func clip(s string) string {
 	return s
 }
 
-// rejectDuplicateKeys walks the JSON text token by token and fails on a
-// repeated key in any object (encoding/json would silently keep the last one)
-// or on nesting deeper than maxDepth.
-func rejectDuplicateKeys(s string) error {
+type nodeKind int
+
+const (
+	kindOther nodeKind = iota
+	kindTop
+	kindIntents
+	kindIntent
+	kindEvidenceList
+	kindEvidence
+)
+
+var allowedKeys = map[nodeKind]map[string]nodeKind{
+	kindTop: {"intents": kindIntents},
+	kindIntent: {
+		"action": kindOther, "name": kindOther, "category": kindOther, "description": kindOther,
+		"body": kindOther, "old_string": kindOther, "new_string": kindOther, "absorbed_into": kindOther,
+		"reason": kindOther, "evidence": kindEvidenceList,
+	},
+	kindEvidence: {"kind": kindOther, "run_id": kindOther, "seq": kindOther, "quote": kindOther},
+}
+
+// walkSchema walks the JSON text token by token and fails on a repeated key,
+// on a key that is not EXACTLY an allowed name for its depth (encoding/json
+// folds case, so it cannot be trusted to do this), or on nesting deeper than
+// maxDepth.
+func walkSchema(s string) error {
 	dec := json.NewDecoder(strings.NewReader(s))
-	if err := walkValue(dec, 1); err != nil {
+	if err := walkValue(dec, 1, kindTop); err != nil {
 		return err
 	}
 	if _, err := dec.Token(); err != io.EOF {
@@ -134,7 +193,7 @@ func rejectDuplicateKeys(s string) error {
 	return nil
 }
 
-func walkValue(dec *json.Decoder, depth int) error {
+func walkValue(dec *json.Decoder, depth int, kind nodeKind) error {
 	tok, err := dec.Token()
 	if err != nil {
 		return bad("decode: %v", err)
@@ -148,6 +207,7 @@ func walkValue(dec *json.Decoder, depth int) error {
 	}
 	switch d {
 	case '{':
+		keys := allowedKeys[kind]
 		seen := map[string]struct{}{}
 		for dec.More() {
 			kt, err := dec.Token()
@@ -155,23 +215,86 @@ func walkValue(dec *json.Decoder, depth int) error {
 				return bad("decode: %v", err)
 			}
 			key, _ := kt.(string)
+			child, allowed := keys[key]
+			if !allowed {
+				return bad("unknown key %q", clip(key))
+			}
 			if _, dup := seen[key]; dup {
 				return bad("duplicate key %q", clip(key))
 			}
 			seen[key] = struct{}{}
-			if err := walkValue(dec, depth+1); err != nil {
+			if err := walkValue(dec, depth+1, child); err != nil {
 				return err
 			}
 		}
 	case '[':
+		elem := kindOther
+		switch kind {
+		case kindIntents:
+			elem = kindIntent
+		case kindEvidenceList:
+			elem = kindEvidence
+		}
 		for dec.More() {
-			if err := walkValue(dec, depth+1); err != nil {
+			if err := walkValue(dec, depth+1, elem); err != nil {
 				return err
 			}
 		}
 	}
 	if _, err := dec.Token(); err != nil { // closing delimiter
 		return bad("decode: %v", err)
+	}
+	return nil
+}
+
+// ScopeCheck verifies the intents only touch skills the model was shown
+// (shown = names of the learned skills in its prompt) and that a reply is
+// internally coherent: a skill is the name of at most one intent, every delete
+// is paired with a patch of its absorbed_into umbrella, and in curate mode no
+// skill is both absorbed into and deleted. Errors wrap ErrBadOutput.
+func ScopeCheck(intents []gate.Intent, mode gate.Mode, shown []string) error {
+	known := append([]string(nil), shown...)
+	sort.Strings(known)
+	isShown := func(n string) bool {
+		i := sort.SearchStrings(known, n)
+		return i < len(known) && known[i] == n
+	}
+	targets := map[string]struct{}{}
+	patched := map[string]struct{}{}
+	deleted := map[string]struct{}{}
+	for i, in := range intents {
+		if _, dup := targets[in.Name]; dup {
+			return bad("intent %d: %q is targeted by more than one intent", i, clip(in.Name))
+		}
+		targets[in.Name] = struct{}{}
+		switch in.Action {
+		case gate.ActionPatch:
+			if !isShown(in.Name) {
+				return bad("intent %d: patch of %q, which was not shown", i, clip(in.Name))
+			}
+			patched[in.Name] = struct{}{}
+		case gate.ActionDelete:
+			if !isShown(in.Name) {
+				return bad("intent %d: delete of %q, which was not shown", i, clip(in.Name))
+			}
+			if !isShown(in.AbsorbedInto) {
+				return bad("intent %d: absorbed_into %q was not shown", i, clip(in.AbsorbedInto))
+			}
+			deleted[in.Name] = struct{}{}
+		}
+	}
+	for i, in := range intents {
+		if in.Action != gate.ActionDelete {
+			continue
+		}
+		if mode == gate.ModeCurate {
+			if _, ok := deleted[in.AbsorbedInto]; ok {
+				return bad("intent %d: absorbed_into %q is deleted in the same reply", i, clip(in.AbsorbedInto))
+			}
+		}
+		if _, ok := patched[in.AbsorbedInto]; !ok {
+			return bad("intent %d: delete into %q needs a patch of %q in the same reply", i, clip(in.AbsorbedInto), clip(in.AbsorbedInto))
+		}
 	}
 	return nil
 }
