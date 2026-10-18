@@ -42,9 +42,9 @@ function renderDialog(daemon: FakeUsageDaemon) {
   renderWithDaemon(<AccountsDialog client={daemon.client} open onOpenChange={() => {}} />, daemon);
 }
 
-/** The manual-paste form is collapsed behind a disclosure by default -- open it before interacting with its fields. */
+/** The manual-paste form is now the "API key" method of the sign-in segmented control. */
 async function openManualForm(): Promise<void> {
-  fireEvent.click(await screen.findByRole("button", { name: /Paste a credential instead/ }));
+  fireEvent.click(await screen.findByRole("radio", { name: "API key" }));
 }
 
 describe("AccountsDialog", () => {
@@ -85,7 +85,7 @@ describe("AccountsDialog", () => {
     expect(await screen.findByText(/No accounts yet/)).toBeInTheDocument();
   });
 
-  it("manual-paste form is collapsed until its disclosure is opened", async () => {
+  it("the api-key method is the credential form; browser is the default for an oauth provider", async () => {
     const client = new FakeWsClient();
     renderDialog(new FakeUsageDaemon([], client));
 
@@ -93,14 +93,14 @@ describe("AccountsDialog", () => {
     client.nth("provider.list").resolve(PROVIDERS);
     await flush();
 
-    expect(screen.queryByLabelText("Provider")).not.toBeInTheDocument();
-    const toggle = await screen.findByRole("button", { name: /Paste a credential instead/ });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // The default selection (Claude Code / oauth) starts on the browser
+    // method: a Connect button, no credential form.
+    expect(screen.getByRole("button", { name: "Connect Claude Code" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Credential")).not.toBeInTheDocument();
 
-    fireEvent.click(toggle);
+    await openManualForm();
 
-    expect(await screen.findByLabelText("Provider")).toBeInTheDocument();
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByLabelText("Credential")).toBeInTheDocument();
   });
 
   it("manual-add dropdown is derived from provider.list's credential-bearing providers, keyed by accountProvider not id", async () => {
@@ -111,7 +111,6 @@ describe("AccountsDialog", () => {
     await flush();
     client.nth("provider.list").resolve(PROVIDERS);
     await flush();
-    await openManualForm();
 
     fireEvent.click(await screen.findByLabelText("Provider"));
     const options = await screen.findAllByRole("option");
@@ -140,6 +139,7 @@ describe("AccountsDialog", () => {
     // absent from it, not that the dropdown is empty.
     client.nth("provider.list").resolve({
       providers: [
+        { id: "claude-native", label: "Claude Code", credentialKind: "oauth", accountProvider: "anthropic" },
         { id: "kimi", label: "Kimi", credentialKind: "api-key", accountProvider: "kimi" },
         { id: "glm", label: "GLM", kind: "cli" },
       ],
@@ -153,7 +153,6 @@ describe("AccountsDialog", () => {
     // No credential/add-account affordance for it: it must never appear in
     // the manual-add dropdown or as a Connect button.
     expect(screen.queryByTestId("accounts-connect-glm")).not.toBeInTheDocument();
-    await openManualForm();
     fireEvent.click(await screen.findByLabelText("Provider"));
     const options = await screen.findAllByRole("option");
     expect(options.map((o) => o.textContent)).not.toContain("GLM");
@@ -181,9 +180,11 @@ describe("AccountsDialog", () => {
     renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list").resolve([]);
+    client.nth("provider.list").resolve(PROVIDERS);
     await flush();
     await openManualForm();
 
+    fireEvent.change(screen.getByLabelText("Label", { selector: "#account-oauth-label" }), { target: { value: "" } });
     fireEvent.click(await screen.findByRole("button", { name: "Add account" }));
     await flush();
 
@@ -200,7 +201,8 @@ describe("AccountsDialog", () => {
     await flush();
     await openManualForm();
 
-    fireEvent.change(await screen.findByLabelText("Label", { selector: "#account-label" }), { target: { value: "main" } });
+    // The label field is prefilled with the default account-N label.
+    fireEvent.change(await screen.findByLabelText("Label", { selector: "#account-oauth-label" }), { target: { value: "main" } });
     fireEvent.change(screen.getByLabelText("Credential"), { target: { value: '{"apiKey":"sk"}' } });
     fireEvent.click(screen.getByRole("button", { name: "Add account" }));
 
@@ -228,11 +230,10 @@ describe("AccountsDialog", () => {
     client.nth("account.list", 0).resolve([]);
     client.nth("provider.list").resolve(PROVIDERS);
     await flush();
-    await openManualForm();
 
     // PROVIDERS' default selection is the first credential-bearing entry
-    // (Claude Code / oauth) -- switch to Kimi (api-key) before the Base URL
-    // disclosure is expected to appear.
+    // (Claude Code / oauth) -- switch to Kimi (api-key, whose only method
+    // is the credential form) before the Base URL disclosure appears.
     fireEvent.click(await screen.findByLabelText("Provider"));
     fireEvent.click(await screen.findByRole("option", { name: "Kimi" }));
 
@@ -240,7 +241,7 @@ describe("AccountsDialog", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(toggle);
 
-    fireEvent.change(await screen.findByLabelText("Label", { selector: "#account-label" }), { target: { value: "local" } });
+    fireEvent.change(await screen.findByLabelText("Label", { selector: "#account-oauth-label" }), { target: { value: "local" } });
     fireEvent.change(screen.getByLabelText("Credential"), { target: { value: "sk-test" } });
     fireEvent.change(screen.getByLabelText("Base URL (optional)"), { target: { value: "http://127.0.0.1:8080" } });
     fireEvent.click(screen.getByRole("button", { name: "Add account" }));
@@ -264,7 +265,7 @@ describe("AccountsDialog", () => {
     await openManualForm();
 
     // Default selection is Claude Code (oauth) -- no Base URL disclosure at all.
-    await screen.findByLabelText("Provider");
+    await screen.findByLabelText("Credential");
     expect(screen.queryByRole("button", { name: /Base URL \(optional\)/ })).not.toBeInTheDocument();
   });
 
@@ -277,7 +278,6 @@ describe("AccountsDialog", () => {
     await flush();
     await openManualForm();
 
-    fireEvent.change(await screen.findByLabelText("Label", { selector: "#account-label" }), { target: { value: "main" } });
     fireEvent.change(screen.getByLabelText("Credential"), { target: { value: "tok" } });
     fireEvent.click(screen.getByRole("button", { name: "Add account" }));
 
@@ -298,6 +298,7 @@ describe("AccountsDialog", () => {
     client.nth("provider.list").resolve(PROVIDERS);
     await flush();
 
+    fireEvent.change(screen.getByLabelText("Label", { selector: "#account-oauth-label" }), { target: { value: "" } });
     fireEvent.click(await screen.findByRole("button", { name: "Connect Claude Code" }));
     await flush();
 
@@ -317,10 +318,10 @@ describe("AccountsDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Connect Claude Code" }));
 
     const start = await waitFor(() => client.nth("account.oauthStart"));
-    expect(start.params).toEqual({ provider: "anthropic", label: "personal" });
+    expect(start.params).toEqual({ provider: "anthropic", label: "personal", method: "browser" });
 
     await act(async () => {
-      client.emit("account.oauthStart", 0, "authorizeUrl", { url: "https://claude.ai/oauth/authorize?state=abc" });
+      client.emit("account.oauthStart", 0, "authorizeUrl", { loginId: "l1", url: "https://claude.ai/oauth/authorize?state=abc" });
     });
     await flush();
 
@@ -348,7 +349,9 @@ describe("AccountsDialog", () => {
     client.nth("provider.list").resolve(PROVIDERS);
     await flush();
 
-    fireEvent.change(screen.getByLabelText("Label", { selector: "#account-oauth-label" }), { target: { value: "personal" } });
+    fireEvent.click(await screen.findByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "Codex" }));
+
     fireEvent.click(screen.getByRole("button", { name: "Connect Codex" }));
 
     const start = await waitFor(() => client.nth("account.oauthStart"));

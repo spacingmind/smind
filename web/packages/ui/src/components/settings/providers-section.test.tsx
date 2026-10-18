@@ -296,10 +296,10 @@ describe("providers-section connect flows", () => {
     fireEvent.click(screen.getByTestId("providers-connect-toggle"));
     expect(screen.getByTestId("accounts-connect-anthropic")).toBeInTheDocument();
 
-    // The shared panel's manual-add path works from here: open the paste
-    // form, fill it, submit -- account.add fires with accountProvider.
-    fireEvent.click(screen.getByTestId("accounts-manual-toggle"));
-    fireEvent.change(document.getElementById("account-label")!, { target: { value: "alt" } });
+    // The shared panel's manual-add path works from here: switch to the
+    // API key method, fill it, submit -- account.add fires with accountProvider.
+    fireEvent.click(screen.getByRole("radio", { name: "API key" }));
+    fireEvent.change(document.getElementById("account-oauth-label")!, { target: { value: "alt" } });
     fireEvent.change(document.getElementById("account-credential")!, { target: { value: "sk-new" } });
     fireEvent.click(screen.getByTestId("accounts-add-submit"));
     expect(client.calls.find((c) => c.method === "account.add")?.params).toMatchObject({
