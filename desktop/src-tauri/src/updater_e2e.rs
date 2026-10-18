@@ -307,6 +307,91 @@ mod tests {
         assert_eq!(serde_json::to_value(&got).unwrap(), fixture);
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn download_verifies_a_good_signature() {
+        let key = TestKey::generate();
+        let good = release(&key, "0.10.1", app_tarball("new"));
+        let feed = Feed::serve_release(&good);
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        check_with(app.updater_builder(), RUNNING, &state).await.expect("check");
+        let update = state.pending.take().unwrap();
+        let bytes = update.download(|_, _| {}, || {}).await.expect("download");
+        assert_eq!(bytes, good.artifact);
+        assert_eq!(feed.requests(), vec!["GET /latest.json", "GET /smind.app.tar.gz"]);
+    }
+
+    async fn refused(feed: Feed, app: App<MockRuntime>) -> String {
+        let state = app.state::<UpdateState>();
+        let update = state.pending.take().unwrap();
+        let err = update
+            .download(|_, _| {}, || {})
+            .await
+            .expect_err("refused")
+            .to_string();
+        assert_eq!(
+            feed.requests(),
+            vec!["GET /latest.json", "GET /smind.app.tar.gz"]
+        );
+        err
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tampered_artifact_is_refused() {
+        let key = TestKey::generate();
+        let good = release(&key, "0.10.1", app_tarball("new"));
+        let mut tampered = good.artifact.clone();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 0xff;
+        let feed = Feed::serve_release(&Release { artifact: tampered, ..good });
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        check_with(app.updater_builder(), RUNNING, &state).await.expect("check");
+        let err = refused(feed, app).await;
+        assert!(err.to_lowercase().contains("signature verification failed"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn signature_from_another_key_is_refused() {
+        let signing_key = TestKey::generate();
+        let verifying_key = TestKey::generate();
+        let feed = Feed::serve_release(&release(&signing_key, "0.10.1", app_tarball("new")));
+        let app = test_app(&verifying_key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        check_with(app.updater_builder(), RUNNING, &state).await.expect("check");
+        let err = refused(feed, app).await;
+        assert!(err.to_lowercase().contains("different key"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn artifact_signed_for_another_version_is_refused() {
+        let key = TestKey::generate();
+        let artifact = app_tarball("new");
+        let feed = Feed::serve_release(&Release {
+            signature: key.sign(&artifact, Some("0.9.0")),
+            ..release(&key, "0.10.1", artifact.clone())
+        });
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        check_with(app.updater_builder(), RUNNING, &state).await.expect("check");
+        let err = refused(feed, app).await;
+        assert!(err.to_lowercase().contains("signed for version"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn undecodable_signature_is_refused() {
+        let key = TestKey::generate();
+        let feed = Feed::serve_release(&Release {
+            signature: "!!!not-base64!!!".to_string(),
+            ..release(&key, "0.10.1", app_tarball("new"))
+        });
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        check_with(app.updater_builder(), RUNNING, &state).await.expect("check");
+        let err = refused(feed, app).await;
+        assert!(err.to_lowercase().contains("invalid symbol"));
+    }
+
     /// A fake installed app the plugin can replace: `<tmp>/smind.app/Contents/...`.
     #[cfg(target_os = "macos")]
     fn installed_app(dir: &std::path::Path, marker: &str) -> std::path::PathBuf {
