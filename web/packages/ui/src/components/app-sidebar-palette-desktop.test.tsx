@@ -1,5 +1,5 @@
 import { act } from "react";
-import { render } from "@testing-library/react";
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";

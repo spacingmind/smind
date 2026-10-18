@@ -1,7 +1,8 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { requestDiffReveal, resetDiffReveal } from "@/lib/diff-reveal";
 import { DIFF_PREFS_STORAGE_KEY } from "@/lib/diff-prefs";
 import { getReviewDrafts, resetReviewDrafts } from "@/lib/review-drafts";

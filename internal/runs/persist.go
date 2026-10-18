@@ -64,6 +64,10 @@ func encodeEvent(e Event) (string, error) {
 	return string(b), nil
 }
 
+// DecodeStoredEvent decodes one persisted run_events.event_data payload
+// (EncodeEvent's inverse).
+func DecodeStoredEvent(data string) (taskrunner.Event, error) { return decodeEvent(data) }
+
 func decodeEvent(data string) (Event, error) {
 	var p persistedEvent
 	if err := json.Unmarshal([]byte(data), &p); err != nil {

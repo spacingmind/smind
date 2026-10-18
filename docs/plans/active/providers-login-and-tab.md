@@ -25,7 +25,7 @@ Status: **spec**, nothing built. Supersedes the "Open issues" of PR #370 (which 
 **B1 — account identity (daemon, PR-B1)**
 - AC-B1 `accounts.identity` (nullable) + partial unique index `(provider, identity) WHERE identity IS NOT NULL`, via the
   store's add-column migration helper and `schema.sql`; migrating an existing DB leaves rows `NULL` and loses nothing.
-- AC-B2 `Login.Exchange` results carry a subject (Anthropic `account.uuid`; OpenAI `sub`+`chatgpt_account_id` from the
+- AC-B2 `Login.Exchange` results carry a subject (Anthropic length-prefixed `account.uuid`+`organization.uuid`, both required; OpenAI `sub`+`chatgpt_account_id` from the
   id_token); identity = hex SHA-256 of `"<provider>:<subject>"`; never logged, never on the wire except `account.list`'s `hasIdentity`.
 - AC-B3 Re-login (`account.oauthStart`) per ADR-0033 D6: same identity → in-place credential replace keeping id, label,
   routing links, workspace assignments, models, quota/cooldown rows, refresh-blocked cleared, `account.updated` emitted,
@@ -232,6 +232,13 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
 - `updateCredential clears identity` -- `internal/accounts/registry_test.go` (`TestRegistry_ReplaceCredentialIdentity`): a pasted
   credential clears the row's identity in the same UPDATE, a later OAuth login of that vendor account creates a new row (the pasted row
   is not converted), and an OAuth re-login of the same account keeps its identity. Store side: `TestStore_AccountIdentity`.
+- Anthropic identity includes the organization (ADR-0033 D6 amendment; B1 unreleased, so no migration), in
+  `internal/accounts/oauth_login_test.go`: `oauth exchange derives a stable identity for anthropic and openai` (now keyed on
+  account + org), `anthropic identity requires both account uuid and organization uuid` (missing org or account -> empty identity,
+  login still succeeds), `anthropic same account uuid in a different org yields a different identity` (also delimiter safety of the
+  account/org boundary), and organization shapes added to `exchange tolerates unexpected account and id_token shapes`. In
+  `internal/accounts/login_coordinator_test.go` (`TestLoginCoordinator_Relogin`): `relogin same account different org creates a second
+  row` (second row `created:true`, original untouched; row-level Re-login of the org-A row in org B -> `identity_mismatch`).
 - Refresh-blocked clearing needs no new code: the quota poller's rejected-credential state is keyed on a credential fingerprint
   (`internal/quota/poller.go`), so a replaced credential unblocks by itself.
 

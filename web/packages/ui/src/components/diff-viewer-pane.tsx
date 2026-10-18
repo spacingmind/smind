@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { providerListQueryOptions } from "@/hooks/use-provider-catalog";
 import { Icons } from "@/lib/icons";
 
 import { DiffRender, type DiffOutputFormat } from "@/components/diff-render";
@@ -28,7 +30,6 @@ import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
 import type {
   Provider,
-  ProviderListResult,
   RunStartResult,
   RunStatusEventPayload,
   Task,
@@ -72,6 +73,7 @@ export function DiffViewerPane({
   /** The app's single-subscription event stream; optional so existing tests/mounts render unchanged. A terminal run.status for this task refetches the files list. */
   events?: DaemonEvents | null;
 }) {
+  const queryClient = useQueryClient();
   const [files, setFiles] = useState<TaskFile[] | null>(null);
   const [fileStates, setFileStates] = useState<Record<string, FileState>>({});
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -284,7 +286,9 @@ export function DiffViewerPane({
     try {
       let provider: Provider = "claude-native";
       try {
-        const result = await client.call<ProviderListResult>("provider.list");
+        // The shared catalog's cache entry: served from the cache while it is fresh, re-read only if
+        // it was never fetched or was invalidated -- never a second one-off fetch.
+        const result = await queryClient.fetchQuery(providerListQueryOptions(client));
         if (result?.providers?.[0]) provider = result.providers[0].id;
       } catch {
         // provider.list failing shouldn't block the review -- the daemon's

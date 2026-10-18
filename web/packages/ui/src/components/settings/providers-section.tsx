@@ -10,6 +10,7 @@ import {
   useUpdateAccountCredential,
 } from "@/hooks/use-accounts";
 import { ConnectAccountPanel } from "@/components/accounts-dialog";
+import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import {
   registerSettingsSection,
   type SettingsSectionContext,
@@ -43,7 +44,6 @@ import { queryKeys } from "@/lib/query-keys";
 import type {
   Account,
   ProviderInfo,
-  ProviderListResult,
   RunSummary,
 } from "@/lib/types";
 
@@ -165,7 +165,7 @@ function ProvidersSection({ client }: SettingsSectionContext) {
   const queryClient = useQueryClient();
   const accountsQuery = useAccounts();
   const accounts = accountsQuery.data;
-  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const { providers } = useProviderCatalog();
   // The connect/login + manual-paste flows live in the shared
   // ConnectAccountPanel (accounts-dialog.tsx) -- the same flows the old
   // dialog hosted -- shown behind the header's "Connect account"
@@ -173,20 +173,6 @@ function ProvidersSection({ client }: SettingsSectionContext) {
   const [connecting, setConnecting] = useState(false);
   const [action, setAction] = useState<RowAction | null>(null);
   const { runTest, isTesting } = useRunProviderTest();
-
-  useEffect(() => {
-    if (!client) return;
-    let cancelled = false;
-    client
-      .call<ProviderListResult>("provider.list")
-      .then((result) => {
-        if (!cancelled && result.providers.length > 0) setProviders(result.providers);
-      })
-      .catch((err) => console.error("provider.list failed, hiding provider groups", err));
-    return () => {
-      cancelled = true;
-    };
-  }, [client]);
 
   const { groups, other } = groupAccountsByProvider(providers, accounts ?? []);
 

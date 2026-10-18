@@ -2,6 +2,7 @@ import { Icons } from "@/lib/icons";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
+import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useAccounts, useProviderTestResult, useRunProviderTest } from "@/hooks/use-accounts";
 import { useAccountLogin } from "@/hooks/use-account-login";
 import { useLoginRemote } from "@/hooks/use-login-remote";
@@ -30,7 +31,7 @@ import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
 import { externalLinkProps } from "@/lib/external-link";
 import { connectMethodsFor, defaultConnectMethod, type ConnectMethod } from "@/lib/login-methods";
 import { isDesktop } from "@/lib/platform";
-import type { Account, ProviderInfo, ProviderListResult, ProviderTestResult } from "@/lib/types";
+import type { Account, ProviderInfo, ProviderTestResult } from "@/lib/types";
 
 import type { WsClient } from "@/lib/ws-client";
 import { queryKeys } from "@/lib/query-keys";
@@ -542,7 +543,7 @@ export function AccountsDialog({
   // externally, Connect buttons, manual-add dropdown) derives from this,
   // rather than a hand-maintained frontend constant. See the doc comment
   // above for the accountProvider indirection and its known gap.
-  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const { providers } = useProviderCatalog();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -552,26 +553,6 @@ export function AccountsDialog({
   }, [accountsQuery.error]);
 
   const externalProviders = providers.filter((p) => p.kind === "cli");
-
-  // Separately fetch provider.list -- kept out of the account list since it's a
-  // different RPC feeding purely display/config-driven sections, not the
-  // account list itself. Non-fatal on failure (falls back to showing none
-  // of the derived sections) since it's not the primary content of this
-  // dialog.
-  useEffect(() => {
-    if (!open || !client) return;
-    let cancelled = false;
-    client
-      .call<ProviderListResult>("provider.list")
-      .then((result) => {
-        if (cancelled) return;
-        setProviders(result.providers);
-      })
-      .catch((err) => console.error("provider.list failed, hiding provider-derived sections", err));
-    return () => {
-      cancelled = true;
-    };
-  }, [open, client]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

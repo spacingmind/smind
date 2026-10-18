@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Icons } from "@/lib/icons";
 
 import { TaskLineageChips } from "@/components/task-lineage";
@@ -9,6 +9,8 @@ import { ChatUsageTotal } from "@/components/chat-usage-total";
 import { McpServersIndicator } from "@/components/mcp-servers-indicator";
 import { PortChip, SetupBadge, SetupDetails } from "@/components/task-setup";
 import { PermissionCard } from "@/components/permission/permission-card";
+import { useProviderCatalog } from "@/hooks/use-provider-catalog";
+import { useProfileList } from "@/hooks/use-profiles";
 import { useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
 import { ChatOutlineRail } from "@/components/timeline/chat-outline-rail";
@@ -29,7 +31,7 @@ import { useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import { useTaskDiff } from "@/hooks/use-task-diff";
 import { effectiveMode, providerModes, supportsAutoAccept, supportsLiveModeSwitch } from "@/lib/permission-modes";
 import type { ConnectionStatus } from "@/lib/reconnect";
-import type { AgentProfile, Chat, Provider, ProviderInfo, Task, ProviderListResult } from "@/lib/types";
+import type { AgentProfile, Chat, Provider, Task } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
 /**
@@ -109,7 +111,7 @@ export function TaskDetailPane({
   // header should say "Claude Code", not "claude-native". Empty until the
   // fetch resolves -- RunTimeline falls back to the raw id, its exact
   // pre-existing behavior.
-  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const providers = useProviderCatalog().providers;
   const providerLabels = useMemo(() => Object.fromEntries(providers.map((p) => [p.id, p.label ?? p.id])), [providers]);
   // The run footer's human model labels: every catalog entry plus the
   // provider's default model under a bare `${id}/` key (the footer's
@@ -124,38 +126,9 @@ export function TaskDetailPane({
     }
     return labels;
   }, [providers]);
-  useEffect(() => {
-    if (!client) return;
-    let cancelled = false;
-    client
-      .call<ProviderListResult>("provider.list")
-      .then((result) => {
-        if (cancelled) return;
-        setProviders(result.providers);
-      })
-      .catch((err) => console.error("provider.list failed, keeping raw provider ids in run headers", err));
-    return () => {
-      cancelled = true;
-    };
-  }, [client]);
-  // Feeds the header run-config pill's agent-name lookup (run-config IA) --
-  // the composer fetches its own copy too (its picker seeds on it); see
-  // app-sidebar.tsx's identical duplicate-fetch rationale for why sharing
-  // one fetch isn't worth coupling these two surfaces together.
-  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
-  useEffect(() => {
-    if (!client) return;
-    let cancelled = false;
-    client
-      .call<AgentProfile[]>("profile.list")
-      .then((result) => {
-        if (!cancelled) setProfiles(result ?? []);
-      })
-      .catch((err) => console.error("profile.list failed, hiding the agent name in the header pill", err));
-    return () => {
-      cancelled = true;
-    };
-  }, [client]);
+  // The header run-config pill's agent-name lookup (run-config IA), from
+  // the same shared profile.list cache the composer picker reads.
+  const profiles = useProfileList();
   // Mirrors RunConfigToolbar's own shared state (run-config IA): the
   // header pill is "display-only, derived from the same state the toolbar
   // reads" -- this is that read, not a second source of truth. Null until

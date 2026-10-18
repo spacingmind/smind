@@ -113,7 +113,9 @@ CREATE TABLE IF NOT EXISTS runs (
     base_sha TEXT,
     head_sha TEXT,
     dirty INTEGER,
-    purpose TEXT NOT NULL DEFAULT 'user' -- 'user' | 'reflect' | 'curate' (ADR-0026)
+    purpose TEXT NOT NULL DEFAULT 'user', -- 'user' | 'reflect' | 'curate' (ADR-0026)
+    origin TEXT NOT NULL DEFAULT '', -- who authored the prompt: human|orchestrator|agent; '' = unknown
+    interrupt INTEGER NOT NULL DEFAULT 0 -- 1 = delivered as a mid-run interrupt
 );
 
 CREATE TABLE IF NOT EXISTS run_events (
