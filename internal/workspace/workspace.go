@@ -41,6 +41,10 @@ type Manager struct {
 	wtMu   sync.Mutex
 	wt     WorktreesSettings
 	portMu sync.Mutex
+	// portProbe reports whether a port can be bound; nil means probePort.
+	// Tests inject a deterministic one so allocation never depends on which
+	// real ports other processes hold (ports in the OS ephemeral range).
+	portProbe func(int) bool
 
 	// Setup-script runtime (setup_run.go): tracked goroutines so archive and
 	// shutdown can cancel them; shLookup locates the POSIX shell the scripts

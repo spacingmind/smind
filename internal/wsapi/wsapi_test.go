@@ -161,21 +161,24 @@ func newTestRunner(wm *workspace.Manager) *taskrunner.Runner {
 
 func newTestWSServer(t *testing.T, wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string) *httptest.Server {
 	t.Helper()
-	handler, err := Handler(wm, newTestAccountsRegistry(t), runner, db, token)
+	api, err := New(wm, newTestAccountsRegistry(t), runner, db, token)
 	if err != nil {
-		t.Fatalf("Handler() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
-	srv := httptest.NewServer(handler)
+	t.Cleanup(api.Close)
+	srv := httptest.NewServer(api.Handler)
+	t.Cleanup(srv.Close)
 	return srv
 }
 
 func newTestWSServerWithAccounts(t *testing.T, wm *workspace.Manager, accounts *accounts.Registry, runner *taskrunner.Runner, db *store.Store, token string) *httptest.Server {
 	t.Helper()
-	handler, err := Handler(wm, accounts, runner, db, token)
+	api, err := New(wm, accounts, runner, db, token)
 	if err != nil {
-		t.Fatalf("Handler() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
-	srv := httptest.NewServer(handler)
+	t.Cleanup(api.Close)
+	srv := httptest.NewServer(api.Handler)
 	t.Cleanup(srv.Close)
 	return srv
 }

@@ -95,6 +95,7 @@ func newTestAPI(t *testing.T) *wsapi.API {
 	if err != nil {
 		t.Fatalf("wsapi.New: %v", err)
 	}
+	t.Cleanup(api.Close)
 	return api
 }
 
