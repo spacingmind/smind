@@ -3,9 +3,11 @@ package accounts
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"syscall"
 	"time"
 )
 
@@ -26,6 +28,23 @@ func checkLoopbackAddr(addr string) error {
 		return nil
 	}
 	return fmt.Errorf("oauth callback address %q is not loopback-only", addr)
+}
+
+// wsaeAddrInUse is Winsock's WSAEADDRINUSE. On Windows a failed bind reports
+// it rather than syscall.EADDRINUSE (which there is a synthetic value), so
+// errors.Is(err, syscall.EADDRINUSE) alone misses a busy port.
+const wsaeAddrInUse = 10048
+
+// isAddrInUse reports whether err (from net.Listen, possibly wrapped) says the
+// address is already bound: EADDRINUSE on Unix, WSAEADDRINUSE on Windows. It
+// compiles on every platform; the numeric check is inert where 10048 is not an
+// address-in-use code, since only a bind error can carry it here.
+func isAddrInUse(err error) bool {
+	if errors.Is(err, syscall.EADDRINUSE) {
+		return true
+	}
+	var errno syscall.Errno
+	return errors.As(err, &errno) && errno == wsaeAddrInUse
 }
 
 // callbackResult is what the vendor's redirect to a callbackServer

@@ -1,7 +1,11 @@
 package accounts
 
 import (
+	"errors"
+	"fmt"
 	"net"
+	"os"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -68,6 +72,43 @@ func TestCallbackListenerIsLoopbackOnly(t *testing.T) {
 	for name, addr := range map[string]string{"anthropic": anthropicCallbackAddr, "openai": openaiCallbackAddr} {
 		if err := checkLoopbackAddr(addr); err != nil {
 			t.Errorf("%s callback address %q rejected: %v", name, addr, err)
+		}
+	}
+}
+
+func TestIsAddrInUse(t *testing.T) {
+	t.Parallel()
+
+	// A real busy port, through the same bind newCallbackServer does.
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen() error = %v", err)
+	}
+	defer occupied.Close()
+	_, err = newCallbackServer(occupied.Addr().String(), "/callback", "Test", "st")
+	if err == nil {
+		t.Fatal("newCallbackServer() on a busy port error = nil")
+	}
+	if !isAddrInUse(err) {
+		t.Errorf("isAddrInUse(%v) = false, want true for a real busy port", err)
+	}
+
+	for name, tc := range map[string]struct {
+		err  error
+		want bool
+	}{
+		"nil":                    {nil, false},
+		"linux/darwin errno":     {&net.OpError{Op: "listen", Err: os.NewSyscallError("bind", syscall.EADDRINUSE)}, true},
+		"windows winsock errno":  {&net.OpError{Op: "listen", Err: os.NewSyscallError("bind", syscall.Errno(10048))}, true},
+		"wrapped winsock errno":  {fmt.Errorf("bind: %w", &net.OpError{Err: os.NewSyscallError("bind", syscall.Errno(10048))}), true},
+		"bare winsock errno":     {syscall.Errno(10048), true},
+		"other errno":            {&net.OpError{Err: os.NewSyscallError("bind", syscall.Errno(10013))}, false},
+		"permission denied":      {&net.OpError{Err: os.NewSyscallError("bind", syscall.EACCES)}, false},
+		"plain error":            {errors.New("address already in use"), false},
+		"loopback guard failure": {checkLoopbackAddr("0.0.0.0:1"), false},
+	} {
+		if got := isAddrInUse(tc.err); got != tc.want {
+			t.Errorf("%s: isAddrInUse(%v) = %v, want %v", name, tc.err, got, tc.want)
 		}
 	}
 }

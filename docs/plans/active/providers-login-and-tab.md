@@ -269,6 +269,15 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
   finishes through account.oauthStart` (`created:true`, identity), `device method errors carry stable codes` (`device_unsupported` for a
   provider without a device flow, `login_bad_method` without echoing the value).
 - ADR-0033's error list gained `device_failed` and `login_bad_method`.
-- Not in this PR: the CLI has no flag to ask for `method: device` yet (it only prints a `deviceCode` event if one arrives); the web
-  connect form is PR-B4. The browser path's existing error text (`openai/anthropic oauth exchange failed with status N: <body>`) is
-  untouched and still carries the vendor body; the device path's errors are fixed text.
+- CLI: `smind account login [--device] <provider> <label>` sends `method:"device"` -- `TestParseAccountLoginArgs` and
+  `TestRunAccountLoginDeviceFlag` (start params carry `method:"device"` only with the flag, the code and URL are printed, no browser)
+  in `cmd/smind/account_login_test.go`; usage text in `cmd/smind/main.go`.
+- `exchange errors never echo the vendor body` -- `internal/accounts/oauth_exchange_errors_test.go`
+  (`TestExchangeErrorsNeverEchoTheVendorBody`, log and slog captured): the anthropic and openai browser-path `Exchange` errors keep
+  `status N` and drop the body (non-200 at 400/401/500 and a garbage 200). Refresh errors (`refresh_providers.go`) still quote the
+  body; they are not part of the login flow and are untouched.
+- Windows: `isAddrInUse` (`oauth_server.go`) is `errors.Is(err, syscall.EADDRINUSE)` or a `syscall.Errno` of 10048 (WSAEADDRINUSE),
+  used by the paste-only fallback -- `TestIsAddrInUse` in `oauth_server_test.go` (real busy port, synthetic
+  `net.OpError{Err: os.NewSyscallError("bind", syscall.Errno(10048))}`, wrapped, other errnos and the loopback-guard error are
+  false). `GOOS=windows go build ./...` and `GOOS=windows go vet ./internal/accounts` pass.
+- Not in this PR: the web connect form (PR-B4).

@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/spacingmind/smind/internal/store"
@@ -289,7 +288,7 @@ func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, op
 	server, err := newCallbackServer(login.CallbackAddr(), login.CallbackPath(), providerDisplayLabel(provider), state)
 	pasteOnly := false
 	switch {
-	case errors.Is(err, syscall.EADDRINUSE):
+	case isAddrInUse(err):
 		server, pasteOnly = nil, true
 	case err != nil:
 		return LoginResult{}, fmt.Errorf("oauth login: %w", err)
