@@ -65,7 +65,7 @@ function UsageListView() {
 }
 
 describe("account.updated across surfaces", () => {
-  it.skip("account.updated renames the account in providers, usage card and chat pill", async () => { // A1-4/A1-5: moved into the provider detail
+  it("account.updated renames the account in providers, usage card and chat pill", async () => {
     const d = daemon([account(1, "anthropic", "work")]);
     const section = listSettingsSections().find((s) => s.id === "providers")!;
     renderWithDaemon(

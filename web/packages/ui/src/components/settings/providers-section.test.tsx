@@ -28,6 +28,7 @@ async function flush(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
   });
 }
 
@@ -35,6 +36,13 @@ function renderSection(daemon: FakeUsageDaemon) {
   const section = listSettingsSections().find((s) => s.id === "providers");
   if (!section) throw new Error("providers section did not register");
   renderWithDaemon(<>{section.render({ client: daemon.client, events: daemon.events })}</>, daemon);
+}
+
+/** Selects a provider in the nav (both nav variants render in jsdom, so the first match). */
+async function selectProvider(id: string) {
+  await act(async () => {
+    fireEvent.click(screen.getAllByTestId(`provider-nav-item-${id}`)[0]);
+  });
 }
 
 /** Opens the ⋯ menu on a row and clicks the named item, the way app-sidebar-crud.test.tsx drives Radix menus. */
@@ -86,56 +94,68 @@ describe("providers-section", () => {
     expect(section?.label).toBe("Providers");
   });
 
-  it.skip("renders accounts grouped under their runtime provider headers", async () => { // A1-4/A1-5: moved into the provider detail
+  it("renders accounts grouped under their runtime provider headers", async () => {
     await renderLoaded([
       account(1, "anthropic", "work-claude"),
       account(2, "openai", "codex-work"),
     ]);
-    expect(screen.getByTestId("provider-group-claude-native")).toHaveTextContent("work-claude");
-    expect(screen.getByTestId("provider-group-codex-native")).toHaveTextContent("codex-work");
-    expect(within(screen.getByTestId("provider-group-claude-native")).queryByText("codex-work")).not.toBeInTheDocument();
+    // One provider nav item per runtime provider; the first is selected by default.
+    expect(screen.getAllByTestId("provider-nav-item-claude-native")[0]).toHaveAttribute("aria-current", "true");
+    expect(screen.getByTestId("provider-row-1")).toHaveTextContent("work-claude");
+    await selectProvider("codex-native");
+    expect(screen.getByTestId("provider-row-2")).toHaveTextContent("codex-work");
+    expect(screen.queryByTestId("provider-row-1")).not.toBeInTheDocument();
   });
 
-  it.skip("renders a not-connected row for a provider with no accounts", async () => { // A1-4/A1-5: moved into the provider detail
+  it("renders a not-connected row for a provider with no accounts", async () => {
     await renderLoaded([account(1, "anthropic", "work-claude")]);
+    await selectProvider("kimi");
     expect(screen.getByTestId("provider-not-connected-kimi")).toHaveTextContent("Not connected");
+    await selectProvider("codex-native");
     expect(screen.getByTestId("provider-not-connected-codex-native")).toBeInTheDocument();
   });
 
-  it.skip("renders the CLI provider's managed-externally row, not a not-connected row", async () => { // A1-4/A1-5: moved into the provider detail
+  it("renders the CLI provider's managed-externally row, not a not-connected row", async () => {
     await renderLoaded([]);
+    await selectProvider("glm");
     expect(screen.getByTestId("provider-external-glm")).toHaveTextContent("Managed externally");
     expect(screen.getByTestId("provider-external-glm")).toHaveTextContent("own CLI login");
     expect(screen.queryByTestId("provider-not-connected-glm")).not.toBeInTheDocument();
   });
 
-  it.skip("notes the proxy-only groups (Claude Code, Codex) but not Kimi or GLM", async () => { // A1-4/A1-5: moved into the provider detail
+  it("notes the proxy-only groups (Claude Code, Codex) but not Kimi or GLM", async () => {
     await renderLoaded([]);
+    await selectProvider("claude-native");
     expect(screen.getByTestId("provider-group-note-claude-native")).toHaveTextContent(
       "Accounts here route sMind's /v1 proxy; agent runs use the CLI's own login.",
     );
+    await selectProvider("codex-native");
     expect(screen.getByTestId("provider-group-note-codex-native")).toHaveTextContent(
       "Accounts here route sMind's /v1 proxy; agent runs use the CLI's own login.",
     );
+    await selectProvider("kimi");
     expect(screen.queryByTestId("provider-group-note-kimi")).not.toBeInTheDocument();
+    await selectProvider("glm");
     expect(screen.queryByTestId("provider-group-note-glm")).not.toBeInTheDocument();
   });
 
-  it.skip("renders unmapped-provider accounts in the Other accounts group", async () => { // A1-4/A1-5: moved into the provider detail
+  it("renders unmapped-provider accounts in the Other accounts group", async () => {
     await renderLoaded([
       account(1, "xai", "grok"),
       account(2, "antigravity", "ag-1"),
       account(3, "anthropic", "work-claude"),
     ]);
-    const other = screen.getByTestId("provider-other-group");
-    expect(within(other).getByText("grok")).toBeInTheDocument();
-    expect(within(other).getByText("ag-1")).toBeInTheDocument();
-    expect(within(other).queryByText("work-claude")).not.toBeInTheDocument();
+    await selectProvider("other");
+    expect(screen.getByText("grok")).toBeInTheDocument();
+    expect(screen.getByText("ag-1")).toBeInTheDocument();
+    expect(screen.queryByText("work-claude")).not.toBeInTheDocument();
     // Not mixed into the runtime groups either.
-    expect(within(screen.getByTestId("provider-group-claude-native")).queryByText("grok")).not.toBeInTheDocument();
+    await selectProvider("claude-native");
+    expect(screen.queryByText("grok")).not.toBeInTheDocument();
+    expect(screen.getByText("work-claude")).toBeInTheDocument();
   });
 
-  it.skip("shows the auth-type badge per row and runs provider.test from a row", async () => { // A1-4/A1-5: moved into the provider detail
+  it("shows the auth-type badge per row and runs provider.test from a row", async () => {
     const client = await renderLoaded([account(1, "anthropic", "work-claude")]);
     expect(screen.getByText("OAuth")).toBeInTheDocument();
 
@@ -195,7 +215,7 @@ describe("removeWarning", () => {
 });
 
 describe("providers-section actions", () => {
-  it.skip("renames inline via account.rename and applies the result", async () => { // A1-4/A1-5: moved into the provider detail
+  it("renames inline via account.rename and applies the result", async () => {
     const client = await renderLoaded([account(1, "anthropic", "work-claude")]);
 
     await chooseMenuItem(1, "Rename");
@@ -203,12 +223,14 @@ describe("providers-section actions", () => {
     fireEvent.click(screen.getByTestId("provider-rename-save-1"));
     await flush();
     expect(client.calls.find((c) => c.method === "account.rename")?.params).toEqual({ id: 1, label: "renamed" });
+    // Re-select the provider: the collapsed nav selection drops its detail on a sub-container-width false negative in jsdom.
+    await selectProvider("claude-native");
 
     expect(screen.getByText("renamed")).toBeInTheDocument();
     expect(screen.queryByText("work-claude")).not.toBeInTheDocument();
   });
 
-  it.skip("updates a credential via account.updateCredential with the pasted value and optional baseUrl", async () => { // A1-4/A1-5: moved into the provider detail
+  it("updates a credential via account.updateCredential with the pasted value and optional baseUrl", async () => {
     const client = await renderLoaded([account(1, "anthropic", "work-claude")]);
     client.onAccountMutation = (_m, _p, a) => ({ ...a, credentialType: "api_key" });
 
@@ -227,7 +249,7 @@ describe("providers-section actions", () => {
     expect(screen.getByText("API key")).toBeInTheDocument();
   });
 
-  it.skip("removes via account.remove after showing the failover warning (sibling exists)", async () => { // A1-4/A1-5: moved into the provider detail
+  it("removes via account.remove after showing the failover warning (sibling exists)", async () => {
     const client = await renderLoaded([
       account(1, "anthropic", "work-claude"),
       account(2, "anthropic", "alt"),
@@ -249,7 +271,7 @@ describe("providers-section actions", () => {
     expect(screen.getByTestId("provider-row-2")).toBeInTheDocument();
   });
 
-  it.skip("shows the last-account failure branch in the remove warning", async () => { // A1-4/A1-5: moved into the provider detail
+  it("shows the last-account failure branch in the remove warning", async () => {
     const client = await renderLoaded([account(1, "anthropic", "work-claude")]);
 
     client.runs = [run("a", "claude-native", "running")];
@@ -261,7 +283,7 @@ describe("providers-section actions", () => {
     );
   });
 
-  it.skip("reflects account.updated / account.removed events without a manual refresh", async () => { // A1-4/A1-5: moved into the provider detail
+  it("reflects account.updated / account.removed events without a manual refresh", async () => {
     const client = new FakeUsageDaemon([]);
     client.accounts = [account(1, "anthropic", "work-claude")];
     client.providers = { providers: PROVIDERS };
@@ -287,7 +309,7 @@ describe("providers-section actions", () => {
 });
 
 describe("providers-section connect flows", () => {
-  it.skip("Connect account disclosure opens the shared ConnectAccountPanel and adds through it", async () => { // A1-4/A1-5: moved into the provider detail
+  it.skip("Connect account disclosure opens the shared ConnectAccountPanel and adds through it", async () => { // A1-6: connect flow
     const client = await renderLoaded([account(1, "anthropic", "work-claude")]);
 
     // Collapsed by default -- the grouped list is the primary content.
@@ -313,7 +335,7 @@ describe("providers-section connect flows", () => {
     expect(screen.getByText("alt")).toBeInTheDocument();
   });
 
-  it.skip("a not-connected row's Connect opens the shared panel", async () => { // A1-4/A1-5: moved into the provider detail
+  it.skip("a not-connected row's Connect opens the shared panel", async () => { // A1-6: connect flow
     await renderLoaded([account(1, "anthropic", "work-claude")]);
 
     fireEvent.click(screen.getByTestId("provider-connect-kimi"));

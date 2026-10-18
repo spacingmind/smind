@@ -46,7 +46,7 @@ async function flush(): Promise<void> {
 }
 
 describe("providers cache integration", () => {
-  it.skip("expired cached report shows expired in providers", async () => { // A1-4/A1-5: moved into the provider detail
+  it("expired cached report shows expired in providers", async () => {
     const d = daemon([account(1, "anthropic", "work")], [problemAccount("expired")]);
     renderProviders(d);
     await flush();
@@ -56,12 +56,13 @@ describe("providers cache integration", () => {
     const dot = screen.getByTestId("provider-row-dot-1");
     expect(dot).toHaveAttribute("data-status", "failed");
     expect(dot).toHaveAttribute("title", "Login expired");
+    expect(screen.getByTestId("provider-row-health-1")).toHaveTextContent("Needs re-login");
     expect(screen.getByTestId("provider-row-test-result-1")).toHaveTextContent(
       /Login expired.*Reconnect it in Providers\./,
     );
   });
 
-  it.skip("providers surface performs zero usage refreshes", async () => { // A1-4/A1-5: moved into the provider detail
+  it("providers surface performs zero usage refreshes", async () => {
     const d = daemon([account(1, "anthropic", "work")]);
     renderProviders(d);
     await flush();
