@@ -34,9 +34,20 @@ describe("useProvidersViewStore", () => {
     expect(useProvidersViewStore.getState().connectProviderId).toBeNull();
   });
 
+  it("requestRelogin selects the provider and flags the account", () => {
+    useProvidersViewStore.getState().requestRelogin(7, "claude-native");
+    const state = useProvidersViewStore.getState();
+    expect(state.selectedProviderId).toBe("claude-native");
+    expect(state.mobileView).toBe("detail");
+    expect(state.reloginAccountId).toBe(7);
+    useProvidersViewStore.getState().clearRelogin();
+    expect(useProvidersViewStore.getState().reloginAccountId).toBeNull();
+  });
+
   it("reset restores the defaults", () => {
     const store = useProvidersViewStore.getState();
     store.requestConnect("openai");
+    store.requestRelogin(3, "kimi");
     store.setQuery("q");
     store.setFilter("active");
     store.setSort("name");
@@ -48,6 +59,7 @@ describe("useProvidersViewStore", () => {
       filter: "all",
       sort: "status",
       connectProviderId: null,
+      reloginAccountId: null,
     });
   });
 });

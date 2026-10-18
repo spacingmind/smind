@@ -8,6 +8,7 @@ interface ProvidersViewState {
   filter: AccountFilter;
   sort: "name" | "status";
   connectProviderId: string | null;
+  reloginAccountId: number | null;
   select(id: string): void;
   back(): void;
   setQuery(q: string): void;
@@ -15,6 +16,8 @@ interface ProvidersViewState {
   setSort(s: "name" | "status"): void;
   requestConnect(id: string): void;
   clearConnect(): void;
+  requestRelogin(accountId: number, providerNavId: string): void;
+  clearRelogin(): void;
   reset(): void;
 }
 
@@ -25,6 +28,7 @@ const initial = {
   filter: "all" as AccountFilter,
   sort: "status" as "name" | "status",
   connectProviderId: null as string | null,
+  reloginAccountId: null as number | null,
 };
 
 export const useProvidersViewStore = create<ProvidersViewState>()((set) => ({
@@ -36,6 +40,9 @@ export const useProvidersViewStore = create<ProvidersViewState>()((set) => ({
   setSort: (sort) => set({ sort }),
   requestConnect: (id) => set({ selectedProviderId: id, mobileView: "detail", query: "", connectProviderId: id }),
   clearConnect: () => set({ connectProviderId: null }),
+  requestRelogin: (accountId, providerNavId) =>
+    set({ selectedProviderId: providerNavId, mobileView: "detail", query: "", reloginAccountId: accountId }),
+  clearRelogin: () => set({ reloginAccountId: null }),
   reset: () => set({ ...initial }),
 }));
 
