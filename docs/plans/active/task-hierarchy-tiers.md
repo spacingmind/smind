@@ -545,6 +545,18 @@ H11 (2026-10-18):
   (03-/05-*-frameN, every frame viewed). The context menu cross-fades behind the
   dialog for ~200 ms, same as the existing "Archive task" flow (baseline frame
   captured).
+- **AC5 transitions (revised after review):** the menu closes instantly when
+  an entry opens a dialog (`MENU_CLOSE_INSTANT`, no exit fade under the
+  dialog); the dialog panel no longer fades (opaque from its first frame, only
+  scale animates) with the overlay on the same 200 ms; the tree dialogs open
+  once their dry run has landed (no resize while animating in; loading state
+  after 400 ms). Re-captured frame0-3 for archive-finished, stop and the
+  existing Archive task dialog in light + dark at real speed and at 0.1x
+  (`/tmp/h11/shots/{light,dark}-r1-*` and `-r0.1-*`), every real-speed frame
+  viewed. Found on the way: with the menu gone instantly, the row under the
+  pointer started its hover-card timer and the card (a higher dismissable
+  layer) swallowed the dialog's Escape; hover-card opens are now ignored
+  while a dialog is open.
 - **AC6** live: isolated daemon (`SMIND_HOME=/tmp/h11/home`, port 47811), fake
   ACP agent via an `npx` shim; 8-task 3-tier tree with running/done/stopped/idle
   tasks. Archive finished: dialog count 3 == server selection, a real git

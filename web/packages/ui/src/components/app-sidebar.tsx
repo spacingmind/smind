@@ -93,6 +93,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FadeText } from "@/components/ui/fade-text";
+import { ignoreSelect, MENU_CLOSE_INSTANT, reachableDisabledProps } from "@/lib/menu-item-disabled";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -1982,9 +1983,11 @@ const TaskRow = memo(function TaskRow({
   // entries' reasons): it is controlled and held shut while a menu is open.
   const [hoverOpen, setHoverOpen] = useState(false);
   const [menuOpen, setMenuOpenState] = useState(false);
+  const [instantClose, setInstantClose] = useState(false);
   const setMenuOpen = (open: boolean) => {
     setRowMenuOpen(open);
     setMenuOpenState(open);
+    if (open) setInstantClose(false);
     // Forget a card that was open or pending when the menu opened, or it
     // would pop back up the moment the menu closes.
     if (open) setHoverOpen(false);
@@ -2060,7 +2063,7 @@ const TaskRow = memo(function TaskRow({
               <Icons.chevronRight className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")} />
             </button>
           )}
-          <HoverCard openDelay={400} closeDelay={100} open={hoverOpen && !menuOpen} onOpenChange={(o) => setHoverOpen(o && !menuOpen)}>
+          <HoverCard openDelay={400} closeDelay={100} open={hoverOpen && !menuOpen} onOpenChange={(o) => setHoverOpen(o && !menuOpen && !modalDialogOpen())}>
             <HoverCardTrigger asChild>
               <SidebarMenuSubButton
                 asChild
@@ -2208,16 +2211,16 @@ const TaskRow = memo(function TaskRow({
                     <Icons.more />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <TaskMenuItems entries={menuEntries} parts={DROPDOWN_PARTS} />
+                <DropdownMenuContent align="end" className={instantClose ? MENU_CLOSE_INSTANT : undefined}>
+                  <TaskMenuItems entries={menuEntries} parts={DROPDOWN_PARTS} onDialogSelect={() => setInstantClose(true)} />
                 </DropdownMenuContent>
               </DropdownMenu>
             </span>
           )}
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent data-testid="sidebar-task-context-menu">
-        <TaskMenuItems entries={menuEntries} parts={CONTEXT_PARTS} />
+      <ContextMenuContent data-testid="sidebar-task-context-menu" className={instantClose ? MENU_CLOSE_INSTANT : undefined}>
+        <TaskMenuItems entries={menuEntries} parts={CONTEXT_PARTS} onDialogSelect={() => setInstantClose(true)} />
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -2353,7 +2356,18 @@ function TaskRows({
  */
 type TaskMenuEntry =
   | { kind: "move"; targets: { id: number | null; label: string }[]; onMove: (spaceId: number | null) => void }
-  | { kind: "item"; testId: string; label: string; icon: ReactNode; onSelect: () => void; disabled?: boolean; mutedNote?: string };
+  | {
+      kind: "item";
+      testId: string;
+      label: string;
+      icon: ReactNode;
+      onSelect: () => void;
+      /** Unavailable but still focusable: the reason is `mutedNote` (see lib/menu-item-disabled.ts). */
+      disabled?: boolean;
+      mutedNote?: string;
+      /** Opening a dialog: the menu closes instantly rather than fading out under it. */
+      opensDialog?: boolean;
+    };
 
 /**
  * "Move to space" lists every other space in the task's workspace plus
@@ -2384,6 +2398,7 @@ function taskMenuEntries(
         label: "Archive finished sub-tasks…",
         icon: <Icons.archive />,
         onSelect: onArchiveFinished,
+        opensDialog: true,
         disabled: !availability.archive.enabled,
         mutedNote: availability.archive.reason ?? undefined,
       },
@@ -2393,6 +2408,7 @@ function taskMenuEntries(
         label: "Stop all in tree…",
         icon: <Icons.stop />,
         onSelect: onStopTree,
+        opensDialog: true,
         disabled: !availability.stop.enabled,
         mutedNote: availability.stop.reason ?? undefined,
       },
@@ -2428,6 +2444,7 @@ function taskMenuEntries(
       label: "Archive task",
       icon: <Icons.archive />,
       onSelect: () => o.onArchiveTask(task),
+      opensDialog: true,
     },
   );
   return entries;
@@ -2435,7 +2452,15 @@ function taskMenuEntries(
 
 /** The Radix wrappers one menu flavour renders with; dropdown and context menus share every prop used below. */
 interface MenuParts {
-  Item: ComponentType<{ onSelect?: () => void; children?: ReactNode; disabled?: boolean; "data-testid"?: string; "data-space-id"?: string | number }>;
+  Item: ComponentType<{
+    onSelect?: (event: Event) => void;
+    children?: ReactNode;
+    className?: string;
+    "aria-disabled"?: boolean;
+    "aria-describedby"?: string;
+    "data-testid"?: string;
+    "data-space-id"?: string | number;
+  }>;
   Sub: ComponentType<{ children?: ReactNode }>;
   SubTrigger: ComponentType<{ children?: ReactNode; "data-testid"?: string }>;
   SubContent: ComponentType<{ children?: ReactNode }>;
@@ -2455,7 +2480,27 @@ const CONTEXT_PARTS: MenuParts = {
   SubContent: ContextMenuSubContent,
 };
 
-function TaskMenuItems({ entries, parts }: { entries: TaskMenuEntry[]; parts: MenuParts }) {
+/**
+ * True while a modal dialog is open. After a menu entry opens a dialog the
+ * menu vanishes under the pointer, so whichever row is beneath starts its
+ * hover-card timer; the card would then open over the dialog (a higher
+ * dismissable layer than it) and swallow its Escape. Open requests made while
+ * a dialog is up are ignored.
+ */
+function modalDialogOpen(): boolean {
+  return typeof document !== "undefined" && document.querySelector('[role="dialog"]') !== null;
+}
+
+function TaskMenuItems({
+  entries,
+  parts,
+  onDialogSelect,
+}: {
+  entries: TaskMenuEntry[];
+  parts: MenuParts;
+  /** Called when an entry that opens a dialog is chosen, before the menu closes. */
+  onDialogSelect?: () => void;
+}) {
   const { Item, Sub, SubTrigger, SubContent } = parts;
   return (
     <>
@@ -2479,9 +2524,25 @@ function TaskMenuItems({ entries, parts }: { entries: TaskMenuEntry[]; parts: Me
             </SubContent>
           </Sub>
         ) : (
-          <Item key={entry.testId} data-testid={entry.testId} onSelect={entry.onSelect} disabled={entry.disabled}>
+          <Item
+            key={entry.testId}
+            data-testid={entry.testId}
+            {...(entry.disabled ? reachableDisabledProps(`${entry.testId}-reason`) : {})}
+            onSelect={
+              entry.disabled
+                ? ignoreSelect
+                : () => {
+                    if (entry.opensDialog) onDialogSelect?.();
+                    entry.onSelect();
+                  }
+            }
+          >
             {entry.icon} {entry.label}
-            {entry.mutedNote && <span className="ml-auto pl-2 text-ui-xs text-muted-foreground">{entry.mutedNote}</span>}
+            {entry.mutedNote && (
+              <span id={`${entry.testId}-reason`} className="ml-auto pl-2 text-ui-xs text-muted-foreground">
+                {entry.mutedNote}
+              </span>
+            )}
           </Item>
         ),
       )}

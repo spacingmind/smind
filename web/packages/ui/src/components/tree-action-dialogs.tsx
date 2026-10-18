@@ -39,6 +39,9 @@ function FormError({ message }: { message: string | null }) {
 
 const MAX_VISIBLE = 8;
 
+/** How long a dry run may take before its dialog opens in a loading state. */
+const SLOW_DRY_RUN_MS = 400;
+
 /** Plain-language form of the daemon's skip reasons; an unknown reason is shown as-is. */
 function keptReason(reason: string): string {
   switch (reason) {
@@ -74,10 +77,14 @@ function useDryRun<T>(
   task: Task | null,
   open: boolean,
   method: string,
-): { result: T | null; loading: boolean; error: string | null } {
+): { result: T | null; loading: boolean; error: string | null; ready: boolean } {
   const [result, setResult] = useState<T | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The dialog opens only once its content is known (a dry run is a local,
+  // millisecond call), so the panel never resizes while it is animating in.
+  // If the daemon is slow the dialog opens in its loading state instead.
+  const [slow, setSlow] = useState(false);
 
   useEffect(() => {
     if (!open || !task || !client) return;
@@ -86,6 +93,8 @@ function useDryRun<T>(
     setResult(null);
     setError(null);
     setLoading(true);
+    setSlow(false);
+    const slowTimer = setTimeout(() => setSlow(true), SLOW_DRY_RUN_MS);
     client
       .call<T>(method, { taskId: task.ID, dryRun: true })
       .then((r) => {
@@ -100,13 +109,14 @@ function useDryRun<T>(
       });
     return () => {
       cancelled = true;
+      clearTimeout(slowTimer);
     };
     // task.ID, not the task object: the header's live task is a new object on
     // every task.updated, which must not restart a dry run mid-confirm.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, task?.ID, client, method]);
 
-  return { result, loading, error };
+  return { result, loading, error, ready: !loading || slow };
 }
 
 export function ArchiveFinishedDialog({
@@ -122,7 +132,7 @@ export function ArchiveFinishedDialog({
   onOpenChange: (open: boolean) => void;
   onArchived: () => void;
 }) {
-  const { result, loading, error } = useDryRun<TaskArchiveFinishedResult>(client, task, open, "task.archiveFinished");
+  const { result, loading, error, ready } = useDryRun<TaskArchiveFinishedResult>(client, task, open, "task.archiveFinished");
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<TaskArchiveFinishedResult | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
@@ -142,13 +152,15 @@ export function ArchiveFinishedDialog({
   const kept = dry?.skipped ?? [];
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open && ready} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
             {outcome
               ? `Archived ${outcome.archived.length} of ${eligible.length} finished sub-tasks`
-              : `Archive ${eligible.length === 1 ? "1 finished sub-task" : `${eligible.length} finished sub-tasks`}?`}
+              : !dry
+                ? "Archive finished sub-tasks?"
+                : `Archive ${eligible.length === 1 ? "1 finished sub-task" : `${eligible.length} finished sub-tasks`}?`}
           </DialogTitle>
           <DialogDescription asChild>
             <div>
@@ -252,7 +264,7 @@ export function StopTreeDialog({
   onOpenChange: (open: boolean) => void;
   onStopped: () => void;
 }) {
-  const { result, loading, error } = useDryRun<TaskStopTreeResult>(client, task, open, "task.stopTree");
+  const { result, loading, error, ready } = useDryRun<TaskStopTreeResult>(client, task, open, "task.stopTree");
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<TaskStopTreeResult | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
@@ -272,13 +284,15 @@ export function StopTreeDialog({
   const includesSelf = task != null && runs.some((r) => r.id === task.ID);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open && ready} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
             {outcome
               ? `Stopped ${outcome.stopped.length} of ${runs.length} running tasks`
-              : `Stop ${runs.length === 1 ? "1 running task" : `${runs.length} running tasks`} in this tree?`}
+              : !dry
+                ? "Stop running tasks in this tree?"
+                : `Stop ${runs.length === 1 ? "1 running task" : `${runs.length} running tasks`} in this tree?`}
           </DialogTitle>
           <DialogDescription asChild>
             <div>

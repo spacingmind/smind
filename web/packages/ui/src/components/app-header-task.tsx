@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { ignoreSelect, MENU_CLOSE_INSTANT, reachableDisabledProps } from "@/lib/menu-item-disabled";
 import { toast } from "@/components/ui/toast";
 import { Tooltip, TooltipContent, TooltipTrigger, useMenuTooltip } from "@/components/ui/tooltip";
 import type { LocalPathActions } from "@/hooks/use-local-path-actions";
@@ -105,6 +106,8 @@ export function HeaderTaskMenu({
   // whose tree has no descendants offers neither entry, same rule as the
   // sidebar.
   const [treeRefresh, setTreeRefresh] = useState(0);
+  // An item that opens a dialog closes the menu instantly (no exit fade under the dialog).
+  const [instantClose, setInstantClose] = useState(false);
   // A different task starts with no availability (no leftovers from the last one).
   useEffect(() => {
     setTreeActions(null);
@@ -134,7 +137,10 @@ export function HeaderTaskMenu({
       <DropdownMenu
         onOpenChange={(open) => {
           onMenuOpenChange(open);
-          if (open) setTreeRefresh((n) => n + 1);
+          if (open) {
+            setTreeRefresh((n) => n + 1);
+            setInstantClose(false);
+          }
         }}
       >
         <Tooltip {...tooltip}>
@@ -154,7 +160,11 @@ export function HeaderTaskMenu({
           </TooltipTrigger>
           <TooltipContent side="bottom">Task actions</TooltipContent>
         </Tooltip>
-        <DropdownMenuContent align="start" data-testid="app-header-task-menu-content">
+        <DropdownMenuContent
+          align="start"
+          data-testid="app-header-task-menu-content"
+          className={instantClose ? MENU_CLOSE_INSTANT : undefined}
+        >
           {task.Branch && (
             <DropdownMenuItem data-testid="app-header-copy-branch" onSelect={() => copy(task.Branch!, "Branch name")}>
               <Icons.copy aria-hidden /> Copy branch name
@@ -175,28 +185,52 @@ export function HeaderTaskMenu({
             <>
               <DropdownMenuItem
                 data-testid="app-header-archive-finished"
-                disabled={!treeActions.archive.enabled}
-                onSelect={() => setArchiveFinished(true)}
+                {...(!treeActions.archive.enabled ? reachableDisabledProps("app-header-archive-finished-reason") : {})}
+                onSelect={
+                  treeActions.archive.enabled
+                    ? () => {
+                        setInstantClose(true);
+                        setArchiveFinished(true);
+                      }
+                    : ignoreSelect
+                }
               >
                 <Icons.archive aria-hidden /> Archive finished sub-tasks…
                 {!treeActions.archive.enabled && (
-                  <span className="ml-auto pl-2 text-ui-xs text-muted-foreground">{treeActions.archive.reason}</span>
+                  <span id="app-header-archive-finished-reason" className="ml-auto pl-2 text-ui-xs text-muted-foreground">
+                    {treeActions.archive.reason}
+                  </span>
                 )}
               </DropdownMenuItem>
               <DropdownMenuItem
                 data-testid="app-header-stop-tree"
-                disabled={!treeActions.stop.enabled}
-                onSelect={() => setStoppingTree(true)}
+                {...(!treeActions.stop.enabled ? reachableDisabledProps("app-header-stop-tree-reason") : {})}
+                onSelect={
+                  treeActions.stop.enabled
+                    ? () => {
+                        setInstantClose(true);
+                        setStoppingTree(true);
+                      }
+                    : ignoreSelect
+                }
               >
                 <Icons.stop aria-hidden /> Stop all in tree…
                 {!treeActions.stop.enabled && (
-                  <span className="ml-auto pl-2 text-ui-xs text-muted-foreground">{treeActions.stop.reason}</span>
+                  <span id="app-header-stop-tree-reason" className="ml-auto pl-2 text-ui-xs text-muted-foreground">
+                    {treeActions.stop.reason}
+                  </span>
                 )}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
             </>
           )}
-          <DropdownMenuItem data-testid="app-header-archive" onSelect={() => setArchiving(true)}>
+          <DropdownMenuItem
+            data-testid="app-header-archive"
+            onSelect={() => {
+              setInstantClose(true);
+              setArchiving(true);
+            }}
+          >
             <Icons.archive aria-hidden /> Archive task…
           </DropdownMenuItem>
         </DropdownMenuContent>

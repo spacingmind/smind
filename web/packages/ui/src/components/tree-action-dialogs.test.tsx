@@ -182,6 +182,40 @@ describe("dry run identity (PR-H11)", () => {
   });
 });
 
+describe("dialog open timing (PR-H11)", () => {
+  it("opens only once the dry run has landed, so the panel never resizes while animating in", async () => {
+    const client = wsFake();
+    render(<StopTreeDialog client={client} task={TASK} open onOpenChange={vi.fn()} onStopped={vi.fn()} />);
+    await waitFor(() => client.nth("task.stopTree", 0));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await resolveDryRun(client, "task.stopTree", {
+      dryRun: true,
+      runs: [{ ...item(8, "Coder one"), runId: "r1" }],
+      queuedPrompts: 0,
+      stopped: [],
+      failed: [],
+      queuedCancelled: 0,
+    });
+    expect(screen.getByRole("heading", { name: "Stop 1 running task in this tree?" })).toBeInTheDocument();
+  });
+
+  it("opens in a loading state without a made-up count when the daemon is slow", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = wsFake();
+      render(<StopTreeDialog client={client} task={TASK} open onOpenChange={vi.fn()} onStopped={vi.fn()} />);
+      expect(screen.queryByRole("dialog")).toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(450);
+      });
+      expect(screen.getByRole("heading", { name: "Stop running tasks in this tree?" })).toBeInTheDocument();
+      expect(screen.getByTestId("dialog-stop-tree-confirm")).toBeDisabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("StopTreeDialog (PR-H11)", () => {
   it("stop tree dialog title counts running tasks and is singular for one", async () => {
     const client = wsFake();
@@ -350,7 +384,8 @@ describe("tree action dialogs, shared (PR-H11)", () => {
     await flush();
 
     expect(screen.queryByText("Stale result")).toBeNull();
-    expect(screen.getByTestId("dialog-archive-finished-confirm")).toBeDisabled();
+    // Still waiting on the other task's own dry run: nothing is open yet.
+    expect(screen.queryByTestId("dialog-archive-finished-confirm")).toBeNull();
 
     // Landing after close: resolved while open=false must not surface either.
     const closed = await waitFor(() => client.nth("task.archiveFinished", 1));

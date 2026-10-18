@@ -111,6 +111,10 @@ describe("HeaderTaskMenu tree actions (PR-H11)", () => {
     expect(menu.querySelector('[data-testid="app-header-archive-finished"]')?.getAttribute("aria-disabled")).not.toBe("true");
 
     fireEvent.click(screen.getByTestId("app-header-stop-tree"));
+    const stopDry = await waitFor(() => client.nth("task.stopTree", 0));
+    await act(async () => {
+      stopDry.resolve({ dryRun: true, runs: [{ id: 2, title: "Child", runId: "r1" }], queuedPrompts: 0, stopped: [], failed: [], queuedCancelled: 0 });
+    });
     expect(await screen.findByRole("heading", { name: /Stop \d+ running task/ })).toBeInTheDocument();
   });
 
@@ -178,5 +182,34 @@ describe("HeaderTaskMenu tree actions (PR-H11)", () => {
     const archive = menu.querySelector('[data-testid="app-header-archive-finished"]');
     expect(archive?.getAttribute("aria-disabled")).toBe("true");
     expect(archive?.textContent).toContain("No finished sub-tasks");
+  });
+
+  it("disabled entries stay focusable, describe their reason, and do nothing when chosen", async () => {
+    const client = wsFake();
+    render(
+      <TooltipProvider>
+        <HeaderTaskMenu task={TASK} client={client as never} localPathActions={null} />
+      </TooltipProvider>,
+    );
+    const call = await waitFor(() => client.nth("task.tree", 0));
+    await act(async () => {
+      call.resolve(tree({ self: "idle", descendants: ["idle"] }));
+    });
+    await flush();
+
+    const menu = await openMenu();
+    const stop = menu.querySelector('[data-testid="app-header-stop-tree"]') as HTMLElement;
+    // Radix's own `disabled` would set data-disabled and drop it from roving focus.
+    expect(stop.hasAttribute("data-disabled")).toBe(false);
+    expect(stop.getAttribute("tabindex")).not.toBe(null);
+    const reason = document.getElementById(stop.getAttribute("aria-describedby") ?? "");
+    expect(reason?.textContent).toContain("No running tasks in this tree");
+    act(() => stop.focus());
+    expect(document.activeElement).toBe(stop);
+
+    fireEvent.click(stop);
+    expect(screen.queryByRole("heading", { name: /Stop \d+ running task/ })).toBeNull();
+    // The menu stays open: choosing a disabled entry is a no-op.
+    expect(document.querySelector('[data-testid="app-header-task-menu-content"]')).not.toBeNull();
   });
 });

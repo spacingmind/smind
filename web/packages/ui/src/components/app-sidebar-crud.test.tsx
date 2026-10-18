@@ -198,12 +198,21 @@ describe("AppSidebar tree actions (PR-H11)", () => {
 
     await openTaskMenu("Fix the bug");
     fireEvent.click(screen.getByTestId("sidebar-task-stop-tree-action"));
+    // The dialog opens once its dry run has landed (no resize while animating in).
+    const stopDry = await waitFor(() => client.nth("task.stopTree", 0));
+    await act(async () => {
+      stopDry.resolve({ dryRun: true, runs: [{ id: 42, title: "Fix the bug", runId: "r1" }], queuedPrompts: 0, stopped: [], failed: [], queuedCancelled: 0 });
+    });
     expect(await screen.findByRole("heading", { name: /Stop \d+ running task/ })).toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     await flush();
     await openTaskMenu("Fix the bug");
     fireEvent.click(screen.getByTestId("sidebar-task-archive-finished-action"));
+    const archiveDry = await waitFor(() => client.nth("task.archiveFinished", 0));
+    await act(async () => {
+      archiveDry.resolve({ dryRun: true, eligible: [{ id: 43, title: "Child" }], archived: [], skipped: [], failed: [], remaining: 0 });
+    });
     expect(await screen.findByRole("heading", { name: /Archive \d+ finished sub-task/ })).toBeInTheDocument();
   });
 });
