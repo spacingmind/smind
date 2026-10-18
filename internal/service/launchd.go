@@ -143,6 +143,37 @@ func (l *launchd) job(ctx context.Context) (job, error) {
 	return j, nil
 }
 
+// parseLaunchdDisabled reads `launchctl print-disabled` output and returns
+// launchd's override for LaunchdLabel: "enabled", "disabled", or "" when the
+// label is absent or the output unrecognisable (newer macOS prints
+// `=> disabled`, older prints `=> true` meaning disabled).
+func parseLaunchdDisabled(out string) string {
+	re := regexp.MustCompile(`(?m)^\s*"` + regexp.QuoteMeta(LaunchdLabel) + `"\s*=>\s*(\w+)\s*$`)
+	m := re.FindStringSubmatch(out)
+	if m == nil {
+		return ""
+	}
+	switch m[1] {
+	case "disabled", "true":
+		return "disabled"
+	case "enabled", "false":
+		return "enabled"
+	}
+	return ""
+}
+
+// enabledState is launchd's override for our label: "enabled", "disabled", or "" when it could not be read.
+func (l *launchd) enabledState(ctx context.Context) string {
+	res, err := l.ctl(ctx, "print-disabled", l.domain())
+	if err != nil || res.ExitCode != 0 {
+		return ""
+	}
+	if state := parseLaunchdDisabled(res.Stdout); state != "" {
+		return state
+	}
+	return "enabled" // no override listed for our label
+}
+
 func (l *launchd) rejectSystem(o Options) error {
 	if o.System {
 		return errors.New("--system is only available on Linux (macOS uses a per-user LaunchAgent)")
@@ -316,6 +347,14 @@ func (l *launchd) Status(ctx context.Context, o Options) (State, error) {
 		}
 	}
 	env.outf("  state:   %s", loaded)
+	switch l.enabledState(ctx) {
+	case "enabled":
+		env.outf("  enabled: yes (loads at every login of this user)")
+	case "disabled":
+		env.outf("  enabled: NO (disabled with launchctl; `smind service install` enables it again)")
+	default:
+		env.outf("  enabled: unknown (could not read launchctl print-disabled)")
+	}
 	env.outf("  home:    %s", smindHome)
 	env.outf("  port:    %d", port)
 	switch {
