@@ -12,8 +12,10 @@ import (
 
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/learning/approval"
+	"github.com/spacingmind/smind/internal/learning/export"
 	"github.com/spacingmind/smind/internal/learning/gate"
 	learningservice "github.com/spacingmind/smind/internal/learning/service"
+	"github.com/spacingmind/smind/internal/skills"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -33,6 +35,9 @@ const (
 	codeUnavailable  = "unavailable"
 	codeForbidden    = "forbidden"
 )
+
+// exportTargets are the accepted learning.skills.export targets.
+var exportTargets = []string{"repo", "claude", "agents", "codex"}
 
 // Learning event topics (ADR-0009 pattern).
 const (
@@ -104,6 +109,9 @@ type LearningDeps struct {
 	// learning.setMode to off, so a stale projection never lingers (the
 	// daemon removes the workspace's learned-skill projection here).
 	OnWorkspaceReset func(workspaceID int64)
+	// Home is the user's home directory, the base of the claude/agents/codex
+	// export targets. Empty means os.UserHomeDir() (tests set it).
+	Home string
 }
 
 // learningHost holds the (replaceable) learning collaborators.
@@ -136,6 +144,7 @@ func (h *learningHost) set(d LearningDeps) {
 	}
 	h.deps.Trigger = d.Trigger
 	h.deps.OnWorkspaceReset = d.OnWorkspaceReset
+	h.deps.Home = d.Home
 }
 
 // reset runs the optional OnWorkspaceReset hook.
@@ -481,6 +490,7 @@ func learningHandlers(h *learningHost) map[string]handlerFunc {
 		"learning.skills.restore":    skillAction(h, "learning.skills.restore", "restored", restore),
 		"learning.skills.delete":     skillAction(h, "learning.skills.delete", "deleted", (*approval.Service).Delete),
 		"learning.skills.undo":       learningMethod(h, "learning.skills.undo", undoLearning),
+		"learning.skills.export":     learningMethod(h, "learning.skills.export", exportLearning),
 		"learning.proposals.list":    learningMethod(h, "learning.proposals.list", listProposalsLearning),
 		"learning.proposals.get":     learningMethod(h, "learning.proposals.get", getProposalLearning),
 		"learning.proposals.approve": learningMethod(h, "learning.proposals.approve", approveLearning),
@@ -867,4 +877,59 @@ func triggerErr(method string, err error) error {
 		return &rpcCodeError{code: codeUnavailable, msg: method + ": not available yet (the curator job has not shipped)", err: err}
 	}
 	return err
+}
+
+// ExportResultView is the result of learning.skills.export.
+type ExportResultView struct {
+	Dir     string   `json:"dir"`
+	Files   []string `json:"files"`
+	Status  string   `json:"status"`
+	Skipped []string `json:"skipped"`
+}
+
+func exportLearning(_ context.Context, h *learningHost, p struct {
+	ID     int64  `json:"id"`
+	Target string `json:"target"`
+	Force  bool   `json:"force"`
+}) (any, error) {
+	const m = "learning.skills.export"
+	if !slices.Contains(exportTargets, p.Target) {
+		return nil, learningInvalid(m, "unknown target %q (want repo, claude, agents or codex)", p.Target)
+	}
+	k, err := h.db.GetLearnedSkill(p.ID)
+	if err != nil {
+		return nil, err
+	}
+	req := export.Request{Skill: k, Target: export.Target(p.Target), Home: h.get().Home, Force: p.Force}
+	if p.Target == "repo" {
+		ws, err := h.db.GetWorkspace(k.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		req.RepoPath = ws.Path
+	}
+	res, err := export.Export(req)
+	if err != nil {
+		if errors.Is(err, skills.ErrSymlinkedTarget) {
+			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": " + err.Error(), err: err}
+		}
+		return nil, err
+	}
+	// The ledger names the target and directory, never the skill text.
+	if err := h.db.AppendLedger(store.LearnedLedgerEntry{
+		WorkspaceID: k.WorkspaceID, SkillID: &k.ID, SkillName: k.Name, Action: "export", Actor: "human",
+		CreatedAt: time.Now().UTC(),
+		Reason:    fmt.Sprintf("exported to %s: %s", p.Target, res.Dir),
+	}); err != nil {
+		return nil, err
+	}
+	h.NotifyChanged(k.WorkspaceID, k.ID, 0, "exported")
+	return ExportResultView{Dir: res.Dir, Files: nonNil(res.Files), Status: res.Status, Skipped: nonNil(res.Skipped)}, nil
+}
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
