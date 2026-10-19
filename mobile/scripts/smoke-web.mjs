@@ -37,7 +37,14 @@ const MOBILE_DIR = fileURLToPath(new URL('..', import.meta.url));
 const REPO_ROOT = resolve(MOBILE_DIR, '..');
 const DIST = join(MOBILE_DIR, 'dist');
 const SMOKE_DIR = join(MOBILE_DIR, '.smoke');
-const PORT = 8931;
+const PORT = Number(process.env.SMOKE_PORT ?? 8931);
+
+// Phone-sized by default (390x844 @2x); SMOKE_VIEWPORT=WxH or WxH@dpr overrides.
+function contextViewport() {
+  const m = /^(\d+)x(\d+)(?:@(\d+(?:\.\d+)?))?$/.exec(process.env.SMOKE_VIEWPORT ?? '390x844@2');
+  if (!m) throw new Error(`bad SMOKE_VIEWPORT ${process.env.SMOKE_VIEWPORT}; want WxH or WxH@dpr`);
+  return { viewport: { width: Number(m[1]), height: Number(m[2]) }, deviceScaleFactor: Number(m[3] ?? 2) };
+}
 const FULL = process.argv.includes('--full');
 
 const MIME = {
@@ -164,6 +171,11 @@ function trackErrors(page, label) {
   });
 }
 
+// The native stack's header back button: on web a link named "<previous title>, back" (or "Go back").
+async function goBack(page) {
+  await page.getByRole('link', { name: /(, back|^Go back)$/ }).click();
+}
+
 async function assertPairingScreen(page, url) {
   await page.goto(url, { waitUntil: 'load' });
   const title = page.getByText('smind pairing', { exact: true });
@@ -288,7 +300,7 @@ async function needsContinue(page, harness) {
   if (await page.getByText(/not finished/).isVisible().catch(() => false)) fail('a normal done run shows a not-finished footer');
   if (await page.getByRole('button', { name: 'Continue', exact: true }).isVisible().catch(() => false)) fail('a normal done run shows Continue');
   await shootBothSchemes(page, 'run-normal');
-  await page.getByRole('button', { name: /Back/ }).click();
+  await goBack(page);
 
   // The capped run: the warning sentence and Continue.
   await page.getByText('Capped task', { exact: true }).click();
@@ -355,7 +367,7 @@ async function promptQueue(page, harness) {
     fail('an idle send did not start a run showing the prompt and its reply');
   }
   if ((await page.getByText('user: hello idle', { exact: true }).count()) !== 1) fail('the sent prompt line is not shown exactly once');
-  await page.getByRole('button', { name: /Back/ }).click();
+  await goBack(page);
 
   // Live: two prompts queue on the daemon.
   await page.getByText('Queue task', { exact: true }).click();
@@ -415,7 +427,7 @@ async function promptQueue(page, harness) {
   await shootBothSchemes(page, 'queue-after-delivery');
 
   // Stop: a live run has a Stop button (run.stop, no confirmation); the run ends as stopped and Stop goes away.
-  await page.getByRole('button', { name: /Back/ }).click();
+  await goBack(page);
   await page.getByText('Stop task', { exact: true }).click();
   try {
     await page.getByText(/· glm · live$/).waitFor({ timeout: 20_000 });
@@ -515,7 +527,8 @@ async function deviceLifecycle(page, harness) {
 
   await harness.cmd(`revoke ${deviceId}`);
   try {
-    await page.getByText('This device was revoked', { exact: true }).waitFor({ timeout: 30_000 });
+    // The status screen's native header repeats the card title: either match proves the screen.
+    await page.getByText('This device was revoked', { exact: true }).first().waitFor({ timeout: 30_000 });
   } catch {
     fail('"This device was revoked" did not appear after the daemon revoked the device');
     return;
@@ -538,7 +551,7 @@ async function run() {
   let queued = null;
   try {
     for (const scheme of ['light', 'dark']) {
-      const context = await browser.newContext({ colorScheme: scheme, ignoreHTTPSErrors: true });
+      const context = await browser.newContext({ ...contextViewport(), colorScheme: scheme, ignoreHTTPSErrors: true });
       const page = await context.newPage();
       trackErrors(page, scheme);
       await assertPairingScreen(page, url);
@@ -549,7 +562,7 @@ async function run() {
 
     if (FULL) {
       harness = await startHarness();
-      const context = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+      const context = await browser.newContext({ ...contextViewport(), colorScheme: 'light', ignoreHTTPSErrors: true });
       const page = await context.newPage();
       trackErrors(page, 'full');
       await page.goto(url, { waitUntil: 'load' });
@@ -558,7 +571,7 @@ async function run() {
       await context.close();
 
       outdated = await startHarness(['-outdated-daemon']);
-      const oldContext = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+      const oldContext = await browser.newContext({ ...contextViewport(), colorScheme: 'light', ignoreHTTPSErrors: true });
       const oldPage = await oldContext.newPage();
       trackErrors(oldPage, 'outdated');
       await oldPage.goto(url, { waitUntil: 'load' });
@@ -572,7 +585,7 @@ async function run() {
       execFileSync('go', ['build', '-o', fakeAgent, './internal/taskrunner/fakeagent'], { cwd: REPO_ROOT, stdio: 'inherit' });
       try {
         seeded = await startHarness(['-fake-agent', fakeAgent, '-window-max', '1']);
-        const runContext = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+        const runContext = await browser.newContext({ ...contextViewport(), colorScheme: 'light', ignoreHTTPSErrors: true });
         const runPage = await runContext.newPage();
         trackErrors(runPage, 'run-footer');
         await runPage.goto(url, { waitUntil: 'load' });
@@ -581,7 +594,7 @@ async function run() {
         await runContext.close();
 
         queued = await startHarness(['-fake-agent', fakeAgent, '-window-max', '1']);
-        const queueContext = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+        const queueContext = await browser.newContext({ ...contextViewport(), colorScheme: 'light', ignoreHTTPSErrors: true });
         const queuePage = await queueContext.newPage();
         trackErrors(queuePage, 'queue');
         await queuePage.goto(url, { waitUntil: 'load' });
@@ -595,7 +608,7 @@ async function run() {
       if (await harnessHasPasswordFlag()) {
         const secret = 'correct horse battery staple';
         protectedDaemon = await startHarness(['-password', secret, '-window-max', '1']);
-        const pwContext = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+        const pwContext = await browser.newContext({ ...contextViewport(), colorScheme: 'light', ignoreHTTPSErrors: true });
         const pwPage = await pwContext.newPage();
         trackErrors(pwPage, 'password');
         await pwPage.goto(url, { waitUntil: 'load' });
