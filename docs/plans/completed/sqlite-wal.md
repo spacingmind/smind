@@ -84,4 +84,17 @@ switches journal mode on first open), decisions 0 (decided), verification 1 (Win
 
 ## Validation
 
-Filled in as each criterion is confirmed.
+- AC1-AC9, AC8b: the tests in the table pass locally (macOS arm64) and under `-race`; the whole `internal/store` suite is
+  green on windows-latest (run 39237732452), including the concurrency test (241 ms, 0 BUSY), the kill-recovery test and
+  the Close test.
+- AC3 before/after: table in `TestStore_ConcurrentWritersNoBusy`'s comment (rollback journal 1-45 BUSY per run, WAL 0 in
+  12 of 12 runs), plus the unraced fsync-only profile: 134 BUSY in 47 s before.
+- AC10: audit above; `docs/homelab.md` "Backups and the database file".
+- AC11: `task build/test/lint` green; `go test -race` green on store, runs, wsapi, learning/..., quota, accounts, terminal,
+  cmd/smind; PR CI (ci, windows-terminal) green. Windows full suite on the branch vs develop at the same time
+  (runs 39236696196 vs 39236683784): the same failing set on both (pre-existing: `TestDaemonLogCrashHelperProcess`,
+  `learning/{executor,export,loads,reflector}`, `TestLearn*`/`TestLearningWiring*` in `cmd/smind`), plus one new failure
+  on the branch, `accounts.TestRegistry_EnsureFresh` (an `updated_at` tick tie, fixed). After the fixes, accounts, acp,
+  quota, runs, terminal, wsapi and store are all green on Windows (runs 39237313078, 39237732452). The SQLITE_BUSY the
+  `SMIND_SQLITE_SYNCHRONOUS=off` knob worked around did not reappear without it.
+- Live-only gap: the effect on a real, slow Windows `C:` drive with real agent starts is not measured beyond CI.
