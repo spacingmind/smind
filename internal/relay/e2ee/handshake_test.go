@@ -9,92 +9,29 @@ import (
 	"time"
 )
 
-const testTimeout = 5 * time.Second
-
-// pair is a daemon end and a mobile end joined by an in-process pipe — the
-// stand-in for "both sides connected through the relay".
-type pair struct {
-	daemon     *Channel
-	mobile     *Channel
-	daemonConn *memConn
-	mobileConn *memConn
-	daemonKey  *KeyPair
-	mobileKey  *KeyPair
-}
-
-func newPair(t *testing.T) *pair {
-	t.Helper()
-
-	daemonKey, err := GenerateKeyPair()
-	if err != nil {
-		t.Fatalf("daemon GenerateKeyPair: %v", err)
-	}
-	mobileKey, err := GenerateKeyPair()
-	if err != nil {
-		t.Fatalf("mobile GenerateKeyPair: %v", err)
-	}
-
-	daemonConn, mobileConn := newMemPipe()
-	daemon, err := NewChannel(daemonConn, daemonKey, RoleDaemon)
-	if err != nil {
-		t.Fatalf("NewChannel(daemon): %v", err)
-	}
-	mobile, err := NewChannel(mobileConn, mobileKey, RoleMobile)
-	if err != nil {
-		t.Fatalf("NewChannel(mobile): %v", err)
-	}
-	t.Cleanup(func() {
-		_ = daemon.Close()
-		_ = mobile.Close()
-	})
-
-	return &pair{
-		daemon:     daemon,
-		mobile:     mobile,
-		daemonConn: daemonConn,
-		mobileConn: mobileConn,
-		daemonKey:  daemonKey,
-		mobileKey:  mobileKey,
-	}
-}
-
-// handshake runs both ends' handshakes concurrently and fails the test if
-// either errors.
-func (p *pair) handshake(t *testing.T) {
-	t.Helper()
-
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
-
-	mobileErr := make(chan error, 1)
-	go func() { mobileErr <- p.mobile.Handshake(ctx) }()
-
-	if err := p.daemon.Handshake(ctx); err != nil {
-		t.Fatalf("daemon Handshake: %v", err)
-	}
-	if err := <-mobileErr; err != nil {
-		t.Fatalf("mobile Handshake: %v", err)
-	}
-}
-
-func establishedPair(t *testing.T) *pair {
-	t.Helper()
-	p := newPair(t)
-	p.handshake(t)
-	return p
-}
-
 func TestHandshakeHappyPath(t *testing.T) {
 	p := establishedPair(t)
 
 	if !p.daemon.Established() || !p.mobile.Established() {
 		t.Fatal("both ends should be established after a successful handshake")
 	}
-	if !bytes.Equal(p.daemon.PeerPublicKey(), p.mobileKey.Public()) {
-		t.Error("daemon did not learn the mobile public key")
+	if !bytes.Equal(p.mobile.DaemonPublicKey(), p.daemonKey.Public()) {
+		t.Error("client did not learn the daemon static key")
 	}
-	if !bytes.Equal(p.mobile.PeerPublicKey(), p.daemonKey.Public()) {
-		t.Error("mobile did not learn the daemon public key")
+	if !bytes.Equal(p.daemon.DaemonPublicKey(), p.daemonKey.Public()) {
+		t.Error("daemon reports another static key")
+	}
+	for name, get := range map[string]func(*Channel) []byte{
+		"transcript hash":      (*Channel).TranscriptHash,
+		"daemon ephemeral key": (*Channel).DaemonEphemeralPublicKey,
+		"client ephemeral key": (*Channel).ClientEphemeralPublicKey,
+	} {
+		if !bytes.Equal(get(p.daemon), get(p.mobile)) || len(get(p.daemon)) != 32 {
+			t.Errorf("the two ends disagree on the %s", name)
+		}
+	}
+	if !bytes.Equal(p.daemon.TranscriptHash(), TranscriptHash(p.daemonKey.Public(), p.daemon.DaemonEphemeralPublicKey(), p.daemon.ClientEphemeralPublicKey())) {
+		t.Error("TranscriptHash() is not the package-level transcript hash")
 	}
 
 	// Both directions encrypt and decrypt under the same agreed key.
@@ -144,6 +81,9 @@ func TestWireCarriesOnlyCiphertext(t *testing.T) {
 func TestSendAndReceiveBeforeHandshake(t *testing.T) {
 	p := newPair(t)
 
+	if p.mobile.TranscriptHash() != nil || p.daemon.DaemonEphemeralPublicKey() != nil {
+		t.Error("handshake values must be nil before the handshake completes")
+	}
 	if err := p.daemon.Send([]byte("early")); !errors.Is(err, ErrNotEstablished) {
 		t.Errorf("Send before handshake = %v, want ErrNotEstablished", err)
 	}
@@ -175,65 +115,56 @@ func TestHandshakeRejectsMalformedHello(t *testing.T) {
 	truncatedHello = truncatedHello[:10] // header promises more than follows
 
 	tests := []struct {
-		name         string
-		raw          []byte
-		closeAfter   bool
-		wantProtocol bool
+		name        string
+		raw         []byte
+		closeAfter  bool
+		wantErr     error // nil: any error
+		wantNoReply bool  // the daemon must write nothing
 	}{
-		{name: "truncated hello", raw: truncatedHello, closeAfter: true, wantProtocol: true},
+		{name: "truncated hello", raw: truncatedHello, closeAfter: true, wantErr: ErrProtocol},
 		{name: "empty stream", raw: nil, closeAfter: true},
-		{name: "zero length frame", raw: []byte{0, 0, 0, 0}, wantProtocol: true},
-		{name: "oversized length prefix", raw: oversized, wantProtocol: true},
+		{name: "zero length frame", raw: []byte{0, 0, 0, 0}, wantErr: ErrProtocol},
+		{name: "oversized length prefix", raw: oversized, wantErr: ErrProtocol},
 		{
-			name:         "wrong protocol version",
-			raw:          rawFrame(frameHello, helloPayload(ProtocolVersion+1, RoleMobile, peerKey.Public())),
-			wantProtocol: true,
+			name:        "other protocol version",
+			raw:         rawFrame(frameHello, helloPayload(ProtocolVersion+1, RoleMobile, peerKey.Public())),
+			wantErr:     ErrUnsupportedVersion,
+			wantNoReply: true,
 		},
 		{
-			name:         "peer claims the same role",
-			raw:          rawFrame(frameHello, helloPayload(ProtocolVersion, RoleDaemon, peerKey.Public())),
-			wantProtocol: true,
+			name:        "client claims the daemon role",
+			raw:         rawFrame(frameHello, helloPayload(ProtocolVersion, RoleDaemon, peerKey.Public())),
+			wantErr:     ErrProtocol,
+			wantNoReply: true,
 		},
 		{
-			name:         "unknown role",
-			raw:          rawFrame(frameHello, helloPayload(ProtocolVersion, Role(9), peerKey.Public())),
-			wantProtocol: true,
+			name:        "unknown role",
+			raw:         rawFrame(frameHello, helloPayload(ProtocolVersion, Role(9), peerKey.Public())),
+			wantErr:     ErrProtocol,
+			wantNoReply: true,
 		},
 		{
-			name:         "short public key",
-			raw:          rawFrame(frameHello, helloPayload(ProtocolVersion, RoleMobile, peerKey.Public()[:16])),
-			wantProtocol: true,
+			name:        "short public key",
+			raw:         rawFrame(frameHello, helloPayload(ProtocolVersion, RoleMobile, peerKey.Public()[:16])),
+			wantErr:     ErrProtocol,
+			wantNoReply: true,
 		},
 		{
-			name:         "long public key",
-			raw:          rawFrame(frameHello, helloPayload(ProtocolVersion, RoleMobile, append(peerKey.Public(), 0))),
-			wantProtocol: true,
+			name:        "long public key",
+			raw:         rawFrame(frameHello, helloPayload(ProtocolVersion, RoleMobile, append(peerKey.Public(), 0))),
+			wantErr:     ErrProtocol,
+			wantNoReply: true,
 		},
+		{name: "empty hello payload", raw: rawFrame(frameHello, nil), wantErr: ErrProtocol, wantNoReply: true},
+		{name: "unknown frame type", raw: rawFrame(0x7f, []byte("nope")), wantErr: ErrProtocol, wantNoReply: true},
+		{name: "data frame before hello", raw: rawFrame(frameData, make([]byte, 32)), wantErr: ErrProtocol, wantNoReply: true},
+		{name: "ready frame before hello", raw: rawFrame(frameReady, nil), wantErr: ErrProtocol, wantNoReply: true},
 		{
-			name:         "empty hello payload",
-			raw:          rawFrame(frameHello, nil),
-			wantProtocol: true,
-		},
-		{
-			name:         "unknown frame type",
-			raw:          rawFrame(0x7f, []byte("nope")),
-			wantProtocol: true,
-		},
-		{
-			name:         "data frame before hello",
-			raw:          rawFrame(frameData, make([]byte, 32)),
-			wantProtocol: true,
-		},
-		{
-			name:         "ready frame before hello",
-			raw:          rawFrame(frameReady, nil),
-			wantProtocol: true,
-		},
-		{
-			// A valid-looking hello whose key is the all-zero point: rejected
-			// at key agreement rather than parsing, but still rejected.
-			name: "degenerate public key",
-			raw:  rawFrame(frameHello, helloPayload(ProtocolVersion, RoleMobile, make([]byte, PublicKeySize))),
+			// The all-zero point parses, then fails key agreement: no M2.
+			name:        "degenerate ephemeral key",
+			raw:         rawFrame(frameHello, helloPayload(ProtocolVersion, RoleMobile, make([]byte, PublicKeySize))),
+			wantErr:     ErrKeyAgreement,
+			wantNoReply: true,
 		},
 	}
 
@@ -244,11 +175,7 @@ func TestHandshakeRejectsMalformedHello(t *testing.T) {
 				t.Fatalf("GenerateKeyPair: %v", err)
 			}
 			daemonConn, peerConn := newMemPipe()
-			daemon, err := NewChannel(daemonConn, kp, RoleDaemon)
-			if err != nil {
-				t.Fatalf("NewChannel: %v", err)
-			}
-			t.Cleanup(func() { _ = daemon.Close() })
+			daemon := newDaemonChannel(t, daemonConn, kp)
 
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 			defer cancel()
@@ -269,11 +196,14 @@ func TestHandshakeRejectsMalformedHello(t *testing.T) {
 				if err == nil {
 					t.Fatal("Handshake accepted a malformed hello")
 				}
-				if tc.wantProtocol && !errors.Is(err, ErrProtocol) {
-					t.Errorf("Handshake error = %v, want ErrProtocol", err)
+				if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+					t.Errorf("Handshake error = %v, want %v", err, tc.wantErr)
 				}
 				if !daemon.Closed() {
 					t.Error("channel should be closed after a failed handshake")
+				}
+				if tc.wantNoReply && len(daemonConn.written()) != 0 {
+					t.Errorf("daemon wrote %d frame(s) to an invalid hello, want none", len(daemonConn.written()))
 				}
 			case <-time.After(testTimeout):
 				t.Fatal("Handshake hung on a malformed hello")
@@ -290,10 +220,7 @@ func TestHandshakeDoesNotHangOnSilentPeer(t *testing.T) {
 	conn, peer := newMemPipe()
 	t.Cleanup(func() { _ = peer.Close() })
 
-	daemon, err := NewChannel(conn, kp, RoleDaemon)
-	if err != nil {
-		t.Fatalf("NewChannel: %v", err)
-	}
+	daemon := newDaemonChannel(t, conn, kp)
 
 	// The peer connects and then says nothing at all: the context deadline,
 	// not the peer, has to end the handshake.
@@ -316,21 +243,21 @@ func TestHandshakeDoesNotHangOnSilentPeer(t *testing.T) {
 	}
 }
 
-func TestNewChannelValidatesArguments(t *testing.T) {
+func TestNewChannelsValidateArguments(t *testing.T) {
 	kp, err := GenerateKeyPair()
 	if err != nil {
 		t.Fatalf("GenerateKeyPair: %v", err)
 	}
 	conn, _ := newMemPipe()
 
-	if _, err := NewChannel(nil, kp, RoleDaemon); err == nil {
-		t.Error("NewChannel(nil conn) = nil error, want error")
+	if _, err := NewDaemonChannel(nil, kp); err == nil {
+		t.Error("NewDaemonChannel(nil conn) = nil error, want error")
 	}
-	if _, err := NewChannel(conn, nil, RoleDaemon); err == nil {
-		t.Error("NewChannel(nil keypair) = nil error, want error")
+	if _, err := NewDaemonChannel(conn, nil); err == nil {
+		t.Error("NewDaemonChannel(nil keypair) = nil error, want error")
 	}
-	if _, err := NewChannel(conn, kp, Role(7)); err == nil {
-		t.Error("NewChannel(unknown role) = nil error, want error")
+	if _, err := NewClientChannel(nil); err == nil {
+		t.Error("NewClientChannel(nil conn) = nil error, want error")
 	}
 }
 
