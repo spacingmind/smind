@@ -223,6 +223,33 @@ func TestLearning_RPCRoundTrip(t *testing.T) {
 	f.fail("learning.skills.undo", map[string]any{"id": 1}, "invalid_params")
 }
 
+// TestLearning_SkillsGetIncludesEvidence: the skill detail carries the
+// provenance the skill was approved with (and [] when there is none).
+func TestLearning_SkillsGetIncludesEvidence(t *testing.T) {
+	t.Parallel()
+	f := newLearnFx(t)
+	with, err := f.db.LandSkill(store.LandSkillInput{
+		Skill: store.LearnedSkill{WorkspaceID: f.w.ID, Name: lSkillA.Name, Category: lSkillA.Category, Description: lSkillA.Description, Body: lSkillA.Body, Source: "reflector",
+			Evidence: `[{"kind":"user_message","run_id":"r1","seq":-1,"quote":"always run the focused test first"}]`},
+		Actor: "human",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var detail struct {
+		Evidence []EvidenceView `json:"evidence"`
+	}
+	f.ok("learning.skills.get", map[string]any{"id": with.ID}, &detail)
+	if len(detail.Evidence) != 1 || detail.Evidence[0].Kind != "user_message" || detail.Evidence[0].RunID != "r1" || detail.Evidence[0].Seq != -1 {
+		t.Fatalf("evidence = %+v", detail.Evidence)
+	}
+	none := f.land(lSkillB)
+	f.ok("learning.skills.get", map[string]any{"id": none.ID}, &detail)
+	if detail.Evidence == nil || len(detail.Evidence) != 0 {
+		t.Fatalf("evidence for a skill without provenance = %#v, want []", detail.Evidence)
+	}
+}
+
 func TestLearning_ProposalGetIncludesMergeDraftForLearnedDuplicate(t *testing.T) {
 	t.Parallel()
 	f := newLearnFx(t)

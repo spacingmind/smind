@@ -11,6 +11,8 @@ export interface ToastOptions {
   description?: string;
   /** Auto-dismiss after this many ms; 0 disables auto-dismiss. Defaults to 4000. */
   durationMs?: number;
+  /** One quiet text button under the message; pressing it runs `onClick` and dismisses the toast. */
+  action?: { label: string; onClick: () => void };
 }
 
 interface ToastItem {
@@ -19,6 +21,7 @@ interface ToastItem {
   title: string;
   description?: string;
   durationMs: number;
+  action?: { label: string; onClick: () => void };
 }
 
 const VARIANT_ICON: Record<AlertVariant, typeof Icons.info> = {
@@ -69,6 +72,7 @@ export function toast(options: ToastOptions): string {
       title: options.title,
       description: options.description,
       durationMs: options.durationMs ?? 4000,
+      action: options.action,
     },
   ];
   emit();
@@ -136,6 +140,19 @@ export function Toaster() {
             <div className="min-w-0 flex-1">
               <div className="font-medium text-foreground">{t.title}</div>
               {t.description && <div className="text-foreground-muted">{t.description}</div>}
+              {t.action && (
+                <button
+                  type="button"
+                  data-testid="toast-action"
+                  className="mt-1 rounded text-ui-sm font-medium text-foreground underline underline-offset-2 outline-none hover:text-foreground-muted focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => {
+                    t.action?.onClick();
+                    dismissToast(t.id);
+                  }}
+                >
+                  {t.action.label}
+                </button>
+              )}
             </div>
           </div>
         );

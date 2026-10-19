@@ -19,6 +19,7 @@ import {
   ArrowUp,
   Archive,
   Bell,
+  BookOpen,
   Boxes,
   Bot,
   Brain,
@@ -195,6 +196,8 @@ export const Icons = {
   permissionDanger: ShieldAlert,
   credentials: KeyRound,
   mcp: Plug,
+  /** Learned skills (Settings -> Skills (learned)). */
+  skills: BookOpen,
 
   // --- usage
   /** Account / plan usage windows. */
