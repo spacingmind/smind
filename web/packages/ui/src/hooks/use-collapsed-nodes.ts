@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 
-import { readCollapsedNodes, writeCollapsedNodes } from "@/lib/sidebar-preferences";
+import { useCollapsedNodesStore } from "@/stores/collapsed-nodes-store";
 
 export interface CollapsedNodes {
   /** The collapsed container ids (see readCollapsedNodes for the id scheme). */
@@ -17,8 +17,8 @@ const PRUNABLE = /^(ws|space|ungrouped):/;
 /**
  * The sidebar's persisted expand/collapse state for workspaces, spaces, the
  * Pinned section and status groups (sidebar-polish S8), the sibling of
- * useCollapsedTasks for the task tree. A per-mount useState is enough because
- * only AppSidebar's single live instance reads or writes it.
+ * useCollapsedTasks for the task tree, from the shared preference store so
+ * every reader sees collapses change live.
  *
  * `liveNodeIds` prunes ids of deleted workspaces/spaces with the same
  * `null`-means-not-loaded-yet contract as useCollapsedTasks, so the empty
@@ -26,42 +26,35 @@ const PRUNABLE = /^(ws|space|ungrouped):/;
  * so a deleted workspace's id, if the database ever reuses it, comes back open.
  */
 export function useCollapsedNodes(liveNodeIds: ReadonlySet<string> | null): CollapsedNodes {
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => readCollapsedNodes());
-
-  useEffect(() => {
-    writeCollapsedNodes(collapsed);
-  }, [collapsed]);
+  const collapsed = useCollapsedNodesStore((s) => s.value);
 
   useEffect(() => {
     if (liveNodeIds === null) return;
-    setCollapsed((prev) => {
-      let changed = false;
-      const next = new Set<string>();
-      for (const id of prev) {
-        if (!PRUNABLE.test(id) || liveNodeIds.has(id)) next.add(id);
-        else changed = true;
-      }
-      return changed ? next : prev;
-    });
+    const { value: prev, set } = useCollapsedNodesStore.getState();
+    let changed = false;
+    const next = new Set<string>();
+    for (const id of prev) {
+      if (!PRUNABLE.test(id) || liveNodeIds.has(id)) next.add(id);
+      else changed = true;
+    }
+    if (changed) set(next);
   }, [liveNodeIds]);
 
   const isOpen = useCallback((id: string) => !collapsed.has(id), [collapsed]);
 
   const toggle = useCallback((id: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
+    const { value: prev, set } = useCollapsedNodesStore.getState();
+    const next = new Set(prev);
+    if (!next.delete(id)) next.add(id);
+    set(next);
   }, []);
 
   const open = useCallback((id: string) => {
-    setCollapsed((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
+    const { value: prev, set } = useCollapsedNodesStore.getState();
+    if (!prev.has(id)) return;
+    const next = new Set(prev);
+    next.delete(id);
+    set(next);
   }, []);
 
   return useMemo(() => ({ collapsed, isOpen, toggle, open }), [collapsed, isOpen, toggle, open]);
