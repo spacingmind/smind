@@ -51,7 +51,7 @@ export function useAccountRows(): { rows: AccountRowData[]; loaded: boolean; err
       usage,
       test,
       status: accountStatus({ account, usage, test, now }),
-      badge: healthBadge({ usage, test, now }),
+      badge: healthBadge({ usage, test, credentialType: account.credentialType, now }),
     };
   });
   return { rows, loaded: accounts !== undefined, error: accounts === undefined ? (accountsQuery.error ?? null) : null };

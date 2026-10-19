@@ -108,6 +108,16 @@ describe("healthBadge", () => {
     expect(active).toMatchObject({ kind: "active", tone: "ok", detail: null });
   });
 
+  it("relogin detail names the fix on the row, not a pointer back to Providers", () => {
+    const usage = { report: { status: "unavailable", problem: { kind: "expired" }, fetchedAt: "" } } as Partial<AccountUsage>;
+    const full = { ...baseUsage(), ...usage } as AccountUsage;
+    const oauth = healthBadge({ usage: full, test: undefined, credentialType: "oauth", now, formatTime });
+    expect(oauth.detail).toMatch(/^Login expired.* — use Re-login\.$/);
+    expect(oauth.detail).not.toMatch(/Reconnect it in Providers/);
+    const key = healthBadge({ usage: full, test: undefined, credentialType: "api_key", now, formatTime });
+    expect(key.detail).toMatch(/ — use Update credential\.$/);
+  });
+
   it("a usage fetch error is a warning, not an error", () => {
     const result = badge({ report: { status: "error", fetchedAt: "" } });
     expect(result).toMatchObject({ kind: "error", label: "Usage unavailable", tone: "warning" });

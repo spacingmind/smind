@@ -71,6 +71,8 @@ export interface HealthBadge {
 export function healthBadge(input: {
   usage: AccountUsage | undefined;
   test: ProviderTestResult | undefined;
+  /** Account.credentialType: decides which fix the "needs re-login" detail points at (Re-login for OAuth, Update credential otherwise). */
+  credentialType?: string;
   now?: number;
   formatTime?: (ms: number) => string;
 }): HealthBadge {
@@ -80,7 +82,10 @@ export function healthBadge(input: {
   const { usage, test } = input;
   const problem = usage?.report?.problem?.kind;
   if (usage && (problem === "expired" || problem === "rejected")) {
-    return { kind: "relogin", label: "Needs re-login", tone: "danger", detail: usageCopy.problem(usage, now) };
+    // The usage copy points at Providers (right for the Usage card); here we already are in Providers, so name the fix on the row.
+    const base = (usageCopy.problem(usage, now) ?? "Login needs attention").replace(/\.?\s*Reconnect it in Providers\.?$/, "");
+    const fix = input.credentialType === undefined || input.credentialType === "oauth" ? "use Re-login" : "use Update credential";
+    return { kind: "relogin", label: "Needs re-login", tone: "danger", detail: `${base} — ${fix}.` };
   }
   const cooldown = activeCooldown(usage, now);
   if (cooldown) {

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 import { renderWithDaemon } from "@/test/render-with-daemon";
+import { runSettingsBackGuard } from "@/lib/settings-back-guard";
 import { ProvidersScreen } from "@/components/providers/providers-screen";
 import { useProvidersViewStore } from "@/stores/providers-view-store";
 import { queryKeys } from "@/lib/query-keys";
@@ -89,13 +90,27 @@ describe("ProvidersScreen", () => {
     expect(screen.queryByTestId("provider-nav")).not.toBeInTheDocument();
     expect(screen.getByTestId("provider-detail")).toHaveTextContent("OpenAI");
     await act(async () => {
-      fireEvent.click(screen.getByTestId("provider-detail-back"));
+      // The Settings header's back is the only back control: it pops the provider detail first.
+      expect(runSettingsBackGuard()).toBe(true);
     });
     expect(screen.getByTestId("provider-nav")).toBeInTheDocument();
     expect(screen.queryByTestId("provider-detail")).not.toBeInTheDocument();
+    // From the provider list the guard lets Settings leave the section.
+    expect(runSettingsBackGuard()).toBe(false);
   });
 
-  it("mobile push focuses the back button and pop restores the nav focus", async () => {
+  it("compact detail has no inner back header", async () => {
+    vi.mocked(useIsMobile).mockReturnValue(true);
+    const d = daemon();
+    renderWithDaemon(<ProvidersScreen client={d.client} />, d);
+    await flush();
+    await act(async () => {
+      fireEvent.click(screen.getAllByTestId("provider-nav-item-openai")[0]);
+    });
+    expect(screen.queryByTestId("provider-detail-back")).not.toBeInTheDocument();
+  });
+
+  it("mobile push focuses the detail and pop restores the nav focus", async () => {
     vi.mocked(useIsMobile).mockReturnValue(true);
     const d = daemon();
     renderWithDaemon(<ProvidersScreen client={d.client} />, d);
@@ -103,9 +118,9 @@ describe("ProvidersScreen", () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId("provider-nav-item-openai"));
     });
-    expect(screen.getByTestId("provider-detail-back")).toHaveFocus();
+    expect(screen.getByTestId("provider-detail").parentElement).toHaveFocus();
     await act(async () => {
-      fireEvent.click(screen.getByTestId("provider-detail-back"));
+      runSettingsBackGuard();
     });
     expect(screen.getByTestId("provider-nav-item-openai")).toHaveFocus();
   });

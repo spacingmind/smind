@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, type JSX } from "react";
 
-import { Icons } from "@/lib/icons";
 import { buildProviderNav, type ProviderNavItem } from "@/lib/providers-view";
 import type { WsClient } from "@/lib/ws-client";
 import { useAccountRows } from "@/hooks/use-account-rows";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
+import { setSettingsBackGuard } from "@/lib/settings-back-guard";
 import { useProvidersViewStore } from "@/stores/providers-view-store";
 import { FirstAccountCard } from "@/components/providers/first-account-card";
 import { ProviderDetail } from "@/components/providers/provider-detail";
@@ -21,7 +21,6 @@ export function ProvidersScreen({ client }: { client: WsClient | null }): JSX.El
   const selectedProviderId = useProvidersViewStore((s) => s.selectedProviderId);
   const mobileView = useProvidersViewStore((s) => s.mobileView);
   const select = useProvidersViewStore((s) => s.select);
-  const back = useProvidersViewStore((s) => s.back);
 
   const items = useMemo<ProviderNavItem[]>(
     () =>
@@ -34,21 +33,32 @@ export function ProvidersScreen({ client }: { client: WsClient | null }): JSX.El
   );
   const selected = items.find((item) => item.id === selectedProviderId) ?? items[0] ?? null;
 
-  // Mobile push/pop moves focus with the view: the back button when the
-  // detail opens, the previously selected nav item when it closes.
+  // Mobile push/pop moves focus with the view: the detail pane when it
+  // opens, the previously selected nav item when it closes.
   const screenRef = useRef<HTMLDivElement>(null);
-  const backRef = useRef<HTMLButtonElement>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
   const previousView = useRef(mobileView);
   const selectedId = selected?.id ?? null;
   useEffect(() => {
     const previous = previousView.current;
     previousView.current = mobileView;
     if (!isMobile) return;
-    if (mobileView === "detail" && previous !== "detail") backRef.current?.focus();
+    if (mobileView === "detail" && previous !== "detail") detailRef.current?.focus();
     if (mobileView === "list" && previous === "detail" && selectedId !== null) {
       screenRef.current?.querySelector<HTMLElement>(`[data-testid="provider-nav-item-${selectedId}"]`)?.focus();
     }
   }, [mobileView, isMobile, selectedId]);
+
+  // On a compact viewport the Settings header's back pops the provider detail first (one back control for the whole screen).
+  useEffect(() => {
+    if (!isMobile) return;
+    return setSettingsBackGuard(() => {
+      const state = useProvidersViewStore.getState();
+      if (state.mobileView !== "detail") return false;
+      state.back();
+      return true;
+    });
+  }, [isMobile]);
 
   if (!loaded) {
     if (error) {
@@ -82,19 +92,7 @@ export function ProvidersScreen({ client }: { client: WsClient | null }): JSX.El
             <ProviderNav items={items} selectedId={navSelectedId} onSelect={select} mode="full" />
           </div>
         ) : (
-          <div className="min-w-0 flex-1">
-            <div className="flex h-8 items-center gap-2 px-2">
-              <button
-                ref={backRef}
-                type="button"
-                data-testid="provider-detail-back"
-                onClick={back}
-                className="flex h-8 items-center gap-1.5 rounded-lg px-2 hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/50 outline-none"
-              >
-                <Icons.back aria-hidden className="size-4" />
-                <span className="text-ui-base">Providers</span>
-              </button>
-            </div>
+          <div ref={detailRef} tabIndex={-1} className="min-w-0 flex-1 outline-none">
             {empty ? <FirstAccountCard providers={providers} settled={settled} /> : <ProviderDetail item={selected} client={client} />}
           </div>
         )}

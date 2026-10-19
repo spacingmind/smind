@@ -58,8 +58,9 @@ describe("providers cache integration", () => {
     expect(dot).toHaveAttribute("title", "Needs re-login");
     expect(screen.getByTestId("provider-row-health-1")).toHaveTextContent("Needs re-login");
     expect(screen.getByTestId("provider-row-test-result-1")).toHaveTextContent(
-      /Login expired.*Reconnect it in Providers\./,
+      /Login expired.*use Re-login\./,
     );
+    expect(screen.getByTestId("provider-row-test-result-1")).not.toHaveTextContent(/Reconnect it in Providers/);
   });
 
   it("providers surface performs zero usage refreshes", async () => {
