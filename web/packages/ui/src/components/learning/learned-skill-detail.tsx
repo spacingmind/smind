@@ -1,11 +1,14 @@
 import { useState, type ReactNode } from "react";
 
-import { ConfirmDialog } from "@/components/learning/confirm-dialog";
+import { LoadingRows } from "@/components/ui/loading-rows";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EvidenceList } from "@/components/learning/evidence-list";
 import { Chip, SkillBadges, SourceChip } from "@/components/learning/learning-chips";
 import { RunLink } from "@/components/learning/run-link";
 import { DiffRender } from "@/components/diff-render";
 import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/form-error";
+
 import { Button } from "@/components/ui/button";
 import { useLearnedSkill, useSkillAction, useUndoSkill } from "@/hooks/use-learning";
 import { formatPercent } from "@/lib/learning-format";
@@ -165,11 +168,9 @@ export function LearnedSkillDetail({ id, onBack }: { id: number; onBack: () => v
       <div className="flex flex-col gap-3" data-testid="learned-skill-detail">
         {back}
         {detail.error ? (
-          <p role="alert" className="text-ui-base text-destructive">
-            {detail.error.message}
-          </p>
+          <FormError message={detail.error.message} />
         ) : (
-          <p className="text-ui-base text-muted-foreground">Loading…</p>
+          <LoadingRows rows={2} />
         )}
       </div>
     );

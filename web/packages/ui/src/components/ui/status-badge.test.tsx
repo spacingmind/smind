@@ -20,6 +20,23 @@ describe("StatusBadge", () => {
     expect(badge.querySelector('[data-slot="status-dot"]')).toHaveAttribute("data-status", "running");
   });
 
+  it("renders a quiet neutral pill with the neutral classes", () => {
+    render(<StatusBadge status="neutral">Managed externally</StatusBadge>);
+    const badge = screen.getByText("Managed externally").closest('[data-slot="status-badge"]')!;
+    expect(badge).toHaveAttribute("data-status", "neutral");
+    expect(badge).toHaveClass("border-border", "bg-muted", "text-muted-foreground");
+  });
+
+  it("renders a dot for the neutral status", () => {
+    render(
+      <StatusBadge status="neutral" dot>
+        Idle
+      </StatusBadge>,
+    );
+    const badge = screen.getByText("Idle").closest('[data-slot="status-badge"]')!;
+    expect(badge.querySelector('[data-slot="status-dot"]')).toHaveAttribute("data-status", "neutral");
+  });
+
   it("renders no dot by default", () => {
     render(<StatusBadge status="success">Ok</StatusBadge>);
     const badge = screen.getByText("Ok").closest('[data-slot="status-badge"]')!;

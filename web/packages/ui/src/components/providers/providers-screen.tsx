@@ -7,6 +7,8 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { setSettingsBackGuard } from "@/lib/settings-back-guard";
 import { useProvidersViewStore } from "@/stores/providers-view-store";
+import { LoadingRows } from "@/components/ui/loading-rows";
+import { Alert } from "@/components/ui/alert";
 import { FirstAccountCard } from "@/components/providers/first-account-card";
 import { ProviderDetail } from "@/components/providers/provider-detail";
 import { ProviderNav } from "@/components/providers/provider-nav";
@@ -63,12 +65,10 @@ export function ProvidersScreen({ client }: { client: WsClient | null }): JSX.El
   if (!loaded) {
     if (error) {
       return (
-        <p role="alert" className="text-ui-base text-destructive">
-          {error instanceof Error ? error.message : String(error)}
-        </p>
+        <Alert variant="error" description={error instanceof Error ? error.message : String(error)} />
       );
     }
-    return <p className="text-ui-base text-muted-foreground">Loading…</p>;
+    return <LoadingRows />;
   }
 
   // The empty state (AC-A5): no accounts at all and neither a provider

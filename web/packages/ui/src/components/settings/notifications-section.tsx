@@ -4,6 +4,8 @@ import { useCallback, useState } from "react";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
+import { FormError } from "@/components/ui/form-error";
+
 import { useNotificationPermission, type NotificationPermissionState } from "@/hooks/use-notification-permission";
 import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-preference";
 import { playNotificationSound } from "@/lib/notification-sound";
@@ -127,9 +129,7 @@ export function NotificationsSection(_ctx: SettingsSectionContext) {
           </p>
         )}
         {testState.status === "error" && (
-          <p data-testid="settings-notifications-test-error" className="text-ui-base text-destructive">
-            {testState.message}
-          </p>
+          <FormError message={testState.message} testId="settings-notifications-test-error" />
         )}
       </section>
     </div>

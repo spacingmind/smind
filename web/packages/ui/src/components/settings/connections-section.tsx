@@ -4,6 +4,8 @@ import { ConnectMethodPanel, CONNECT_METHOD_LABELS, useConnectMethod, type Conne
 import { SetupSection } from "@/components/first-run/setup-section";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
+import { FormError } from "@/components/ui/form-error";
+
 import { RelayConnectionStatus, useRelayStatus } from "@/components/settings/relay-connection-status";
 import { desktop, isDesktop, type AppSettings, type Connection, type UnsupportedConnection } from "@/lib/platform";
 import { Icons } from "@/lib/icons";
@@ -231,9 +233,7 @@ function ConnectionsSection() {
           );
         })()}
         {error && (
-          <p role="alert" data-testid="connection-list-error" className="text-ui-base text-destructive">
-            {error}
-          </p>
+          <FormError message={error} testId="connection-list-error" />
         )}
       </section>
       {method && (
@@ -360,9 +360,7 @@ function ManageLocalDaemon() {
         </div>
       )}
       {error && (
-        <p role="alert" data-testid="connection-manage-error" className="text-ui-base text-destructive">
-          {error}
-        </p>
+        <FormError message={error} testId="connection-manage-error" />
       )}
     </section>
   );

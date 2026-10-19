@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { FormError } from "@/components/ui/form-error";
+
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { Input } from "@/components/ui/input";
 import { desktop, MAX_RELAY_LINK_LENGTH, type Connection, type RelayPreview } from "@/lib/platform";
@@ -144,11 +146,7 @@ export function AddRelayLink({
     void review(link);
   }
 
-  const errorNode = error && (
-    <p role="alert" data-testid="relay-link-error" className="text-ui-base text-destructive">
-      {error}
-    </p>
-  );
+  const errorNode = error && <FormError message={error} testId="relay-link-error" />;
 
   if (preview) {
     const changed = preview.kind === "changedConnection";

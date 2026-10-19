@@ -2,7 +2,14 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { LoadingRows } from "@/components/ui/loading-rows";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useConfirmAction } from "@/hooks/use-confirm-action";
+import { useLastDefined } from "@/hooks/use-last-defined";
+import { FormError } from "@/components/ui/form-error";
+
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
@@ -101,7 +108,8 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<number | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteAction = useConfirmAction(deleting !== null);
+  const lastDeleting = useLastDefined(deleting);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
@@ -201,15 +209,11 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
 
   async function handleDelete(id: number) {
     if (!client) return;
-    setDeleteError(null);
-    try {
-      await client.call("mcp.delete", { id });
-      setServers((prev) => (prev ? prev.filter((s) => s.id !== id) : prev));
-      if (openCard === id) closeCard();
-      setDeleting(null);
-    } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : String(err));
-    }
+    const done = await deleteAction.run(() => client.call("mcp.delete", { id }));
+    if (!done) return;
+    setServers((prev) => (prev ? prev.filter((s) => s.id !== id) : prev));
+    if (openCard === id) closeCard();
+    setDeleting(null);
   }
 
   const newServerButton = (
@@ -226,9 +230,7 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
         {servers === null ? (
           loadError ? (
             <div className="flex items-center gap-2">
-              <p role="alert" data-testid="mcp-load-error" className="text-ui-base text-destructive">
-                {loadError}
-              </p>
+              <Alert variant="error" testId="mcp-load-error" description={loadError} />
               <Button
                 type="button"
                 variant="ghost"
@@ -243,7 +245,7 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
               </Button>
             </div>
           ) : (
-            <p className="text-ui-base text-muted-foreground">Loading…</p>
+            <LoadingRows />
           )
         ) : (
           <>
@@ -328,7 +330,7 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
                               data-testid={`mcp-delete-${m.id}`}
                               onSelect={() => {
                                 setDeleting(m.id);
-                                setDeleteError(null);
+                                deleteAction.reset();
                               }}
                             >
                               Delete
@@ -336,41 +338,6 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
-                      {deleting === m.id && (
-                        <div data-testid={`mcp-delete-row-${m.id}`} className="flex flex-col gap-1 px-2">
-                          <p className="text-ui-sm text-muted-foreground">
-                            Delete {m.name}? This removes its stored env/headers.
-                          </p>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              type="button"
-                              variant="destructive"
-                              size="sm"
-                              data-testid={`mcp-delete-confirm-${m.id}`}
-                              onClick={() => void handleDelete(m.id)}
-                            >
-                              Delete
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              data-testid={`mcp-delete-cancel-${m.id}`}
-                              onClick={() => {
-                                setDeleting(null);
-                                setDeleteError(null);
-                              }}
-                            >
-                              Cancel
-                            </Button>
-                            {deleteError && (
-                              <span role="alert" data-testid={`mcp-delete-error-${m.id}`} className="text-ui-sm text-destructive">
-                                {deleteError}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      )}
                       {editing && (
                         <McpServerForm
                           idPrefix={`mcp-edit-form-${m.id}`}
@@ -391,11 +358,38 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
           </>
         )}
         {error && servers !== null && openCard === null && (
-          <p role="alert" data-testid="mcp-error" className="text-ui-base text-destructive">
-            {error}
-          </p>
+          <FormError message={error} testId="mcp-error" />
         )}
       </section>
+      {(() => {
+        const targetId = lastDeleting;
+        const target = servers?.find((m) => m.id === targetId);
+        return (
+          <ConfirmDialog
+            open={deleting !== null}
+            onOpenChange={(open) => {
+              if (open) return;
+              setDeleting(null);
+              deleteAction.reset();
+            }}
+            title="Delete MCP server?"
+            description={
+              <>
+                Delete <span className="font-medium text-foreground">{target?.name}</span>? This removes its stored env/headers.
+              </>
+            }
+            confirmLabel="Delete"
+            pendingLabel="Deleting…"
+            pending={deleteAction.pending}
+            error={deleteAction.error}
+            testId="mcp-delete-dialog"
+            confirmTestId={`mcp-delete-confirm-${targetId}`}
+            cancelTestId={`mcp-delete-cancel-${targetId}`}
+            errorTestId={`mcp-delete-error-${targetId}`}
+            onConfirm={() => deleting !== null && void handleDelete(deleting)}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -517,9 +511,7 @@ function McpServerForm({
       </div>
 
       {error && (
-        <p role="alert" data-testid={`${idPrefix}-error`} className="text-ui-base text-destructive">
-          {error}
-        </p>
+        <FormError message={error} testId={`${idPrefix}-error`} />
       )}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" data-testid={`${idPrefix}-cancel`} onClick={onCancel}>

@@ -100,11 +100,11 @@ export function AccountRow(props: {
             data-status={DOT_STATE[badge.tone]}
           />
           <span className="min-w-0 truncate text-ui-base font-medium text-foreground">{status.name}</span>
-          <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">
+          <StatusBadge status="neutral">
             {authTypeLabel(account.credentialType)}
-          </span>
+          </StatusBadge>
           {usage?.report?.planLabel ? (
-            <StatusBadge status="success" className="border-border bg-muted text-muted-foreground">
+            <StatusBadge status="neutral">
               {usage.report.planLabel}
             </StatusBadge>
           ) : null}

@@ -8,14 +8,9 @@ import {
 import type { SettingsSectionContext } from "@/components/settings/settings-registry";
 import { removeWarning } from "@/lib/providers-groups";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { FormError } from "@/components/ui/form-error";
+import { useConfirmAction } from "@/hooks/use-confirm-action";
 import { Input } from "@/components/ui/input";
 import type { Account, ProviderInfo, RunSummary } from "@/lib/types";
 
@@ -112,7 +107,7 @@ export function RenameForm({
           Cancel
         </Button>
       </div>
-      {error && <p className="text-ui-sm text-destructive">{error}</p>}
+      {error && <FormError message={error} size="sm" />}
     </div>
   );
 }
@@ -195,7 +190,7 @@ export function UpdateCredentialForm({
           Cancel
         </Button>
       </div>
-      {error && <p className="text-ui-sm text-destructive">{error}</p>}
+      {error && <FormError message={error} size="sm" />}
     </div>
   );
 }
@@ -224,8 +219,7 @@ export function RemoveAccountDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const action = useConfirmAction();
   const remove = useRemoveAccount();
 
   useEffect(() => {
@@ -249,66 +243,45 @@ export function RemoveAccountDialog({
     runs === null ? null : removeWarning(account, providers, accounts, runs);
 
   return (
-    <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Remove account?</DialogTitle>
-          <DialogDescription asChild>
-            <div className="flex flex-col gap-1">
-              <span>
-                Removes <span className="font-medium text-foreground">{account.label}</span> and
-                its routing affinity, quota history, and workspace links.
+    <ConfirmDialog
+      open
+      onOpenChange={onOpenChange}
+      title="Remove account?"
+      description={
+        <div className="flex flex-col gap-1">
+          <span>
+            Removes <span className="font-medium text-foreground">{account.label}</span> and
+            its routing affinity, quota history, and workspace links.
+          </span>
+          {warning === null ? (
+            <span>Checking running tasks…</span>
+          ) : warning.runningCount > 0 ? (
+            warning.lastAccount ? (
+              <span className="text-warning" data-testid={`provider-remove-warning-${account.id}`}>
+                {warning.runningCount} running {warning.runningCount === 1 ? "task" : "tasks"} will
+                fail: this is the last {warning.providerLabel} account
               </span>
-              {warning === null ? (
-                <span>Checking running tasks…</span>
-              ) : warning.runningCount > 0 ? (
-                warning.lastAccount ? (
-                  <span className="text-warning" data-testid={`provider-remove-warning-${account.id}`}>
-                    {warning.runningCount} running {warning.runningCount === 1 ? "task" : "tasks"} will
-                    fail: this is the last {warning.providerLabel} account
-                  </span>
-                ) : (
-                  <span data-testid={`provider-remove-warning-${account.id}`}>
-                    {warning.runningCount} running {warning.runningCount === 1 ? "task" : "tasks"} will
-                    switch to another account
-                  </span>
-                )
-              ) : (
-                <span>No running tasks use this account.</span>
-              )}
-            </div>
-          </DialogDescription>
-        </DialogHeader>
-        <FormError message={error} />
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            disabled={pending}
-            data-testid={`provider-remove-confirm-${account.id}`}
-            onClick={async () => {
-              setPending(true);
-              setError(null);
-              try {
-                await remove.mutateAsync(account.id);
-                onRemoved();
-              } catch (err) {
-                setError(err instanceof Error ? err.message : String(err));
-                setPending(false);
-              }
-            }}
-          >
-            {pending ? "Removing…" : "Remove"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            ) : (
+              <span data-testid={`provider-remove-warning-${account.id}`}>
+                {warning.runningCount} running {warning.runningCount === 1 ? "task" : "tasks"} will
+                switch to another account
+              </span>
+            )
+          ) : (
+            <span>No running tasks use this account.</span>
+          )}
+        </div>
+      }
+      confirmLabel="Remove"
+      pendingLabel="Removing…"
+      pending={action.pending}
+      error={action.error}
+      testId={`provider-remove-dialog-${account.id}`}
+      confirmTestId={`provider-remove-confirm-${account.id}`}
+      onConfirm={async () => {
+        // On success the parent unmounts this dialog (onRemoved), so nothing else to reset.
+        if (await action.run(() => remove.mutateAsync(account.id))) onRemoved();
+      }}
+    />
   );
-}
-
-export function FormError({ message }: { message: string | null }) {
-  if (!message) return null;
-  return <p className="text-ui-base text-destructive">{message}</p>;
 }
