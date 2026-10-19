@@ -4,7 +4,6 @@ import {
   chatPlanAccounts,
   hasPlanWindows,
   planProviderFor,
-  planProviderName,
   summaryWindows,
 } from "@/lib/account-usage/chat-provider";
 import { claudeAccount, codexAccount, problemAccount } from "@/test/account-usage-fixtures";
@@ -16,8 +15,6 @@ describe("planProviderFor", () => {
     for (const other of ["glm", "kimi", "acp-gemini", "", null, undefined]) {
       expect(planProviderFor(other)).toBeNull();
     }
-    expect(planProviderName("anthropic")).toBe("Claude");
-    expect(planProviderName("openai")).toBe("Codex");
   });
 });
 

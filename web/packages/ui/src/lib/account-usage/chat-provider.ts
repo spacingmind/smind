@@ -20,11 +20,6 @@ export function planProviderFor(chatProvider: string | null | undefined): PlanPr
   }
 }
 
-/** "Claude" / "Codex": how the untracked-login note names the provider. */
-export function planProviderName(provider: PlanProvider): string {
-  return provider === "anthropic" ? "Claude" : "Codex";
-}
-
 /**
  * Every OAuth account of the provider (smind does not track which login a run
  * used, ADR-0020), the account the user filtered to first, the rest in the

@@ -41,15 +41,18 @@ const CODEX_PATH =
 
 /** Provider mark (Paseo's useProviderIcon): Claude and Codex SVG marks via `providerIdentity` (both id vocabularies), a fallback for providers without one (GLM, Kimi, ACP agents). */
 export function ProviderIcon({ provider, size = 16, className, testId = "provider-glyph", fallback = "agent" }: IconProps) {
-  const identity = providerIdentity(provider);
+  // The identity table covers both id vocabularies; an ACP agent that merely *names* a family
+  // ("claude-code-acp", "codex-acp") still wears that family's mark, as before.
+  const lower = provider.toLowerCase();
+  const family = providerIdentity(provider)?.key ?? (lower.includes("claude") ? "claude" : lower.includes("codex") ? "codex" : undefined);
   const fallbackIcon =
     fallback === "usage" ? (
       <Icons.usage aria-hidden size={size} className={className} data-testid={testId ?? undefined} />
     ) : (
       <Icons.agent aria-hidden size={size} className={className} data-testid={testId ?? undefined} />
     );
-  if (identity?.key === "claude") return <MarkSvg size={size} className={className} testId={testId} d={CLAUDE_PATH} />;
-  if (identity?.key === "codex") return <MarkSvg size={size} className={className} testId={testId} d={CODEX_PATH} />;
+  if (family === "claude") return <MarkSvg size={size} className={className} testId={testId} d={CLAUDE_PATH} />;
+  if (family === "codex") return <MarkSvg size={size} className={className} testId={testId} d={CODEX_PATH} />;
   return fallbackIcon;
 }
 

@@ -35,4 +35,11 @@ describe("provider-icon", () => {
     const { container } = render(<ProfileIcon size={20} />);
     expect(container.querySelector("svg")).toHaveAttribute("width", "20");
   });
+
+  it("an ACP agent that names a family keeps that family's mark", () => {
+    const mark = (provider: string) => render(<ProviderIcon provider={provider} />).container.querySelector("path")?.getAttribute("d");
+    expect(mark("claude-code-acp")).toBe(mark("claude-native"));
+    expect(mark("codex-acp")).toBe(mark("codex-native"));
+    expect(mark("gemini-acp")).not.toBe(mark("claude-native"));
+  });
 });
