@@ -252,6 +252,33 @@ var migrations = []migration{
 			return addColumnIfMissing(db, "runs", "interrupt", "INTEGER NOT NULL DEFAULT 0")
 		},
 	},
+	{
+		// ADR-0026 section 6: learned_skill_offers / learned_skill_loads are
+		// new tables, so schema.sql's CREATE TABLE IF NOT EXISTS already
+		// creates them on every Open; this entry is the explicit marker and
+		// re-creates them should a database somehow lack them.
+		name: "learning_counters",
+		apply: func(db *sql.DB) error {
+			for _, q := range []string{
+				`CREATE TABLE IF NOT EXISTS learned_skill_offers (
+					skill_id INTEGER NOT NULL REFERENCES learned_skills(id),
+					run_id TEXT NOT NULL,
+					created_at TIMESTAMP NOT NULL,
+					PRIMARY KEY (skill_id, run_id))`,
+				`CREATE TABLE IF NOT EXISTS learned_skill_loads (
+					skill_id INTEGER NOT NULL REFERENCES learned_skills(id),
+					run_id TEXT NOT NULL,
+					via TEXT NOT NULL,
+					created_at TIMESTAMP NOT NULL,
+					PRIMARY KEY (skill_id, run_id, via))`,
+			} {
+				if _, err := db.Exec(q); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and

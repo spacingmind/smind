@@ -402,3 +402,21 @@ CREATE TABLE IF NOT EXISTS learning_jobs (
     finished_at TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_learning_jobs_ws ON learning_jobs(workspace_id, id);
+
+-- Delivery counters (ADR-0026 section 6): one row per (skill, run) offer and
+-- per (skill, run, via) load, so the learned_skills counters are idempotent
+-- under re-delivered run-finished notifications.
+CREATE TABLE IF NOT EXISTS learned_skill_offers (
+    skill_id INTEGER NOT NULL REFERENCES learned_skills(id),
+    run_id TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (skill_id, run_id)
+);
+
+CREATE TABLE IF NOT EXISTS learned_skill_loads (
+    skill_id INTEGER NOT NULL REFERENCES learned_skills(id),
+    run_id TEXT NOT NULL,
+    via TEXT NOT NULL,                    -- skill|read
+    created_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (skill_id, run_id, via)
+);

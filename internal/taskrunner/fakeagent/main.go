@@ -275,6 +275,7 @@ func handle(msg message, sessionCwd *string) {
 	case msg.Method == "session/set_config_option":
 		handleSetConfigOption(msg, *sessionCwd)
 	case msg.Method == "session/prompt":
+		recordPromptBlocks(*sessionCwd, msg.Params)
 		go runPromptScript(msg, *sessionCwd)
 	case msg.Method == "" && len(msg.ID) > 0:
 		// A response to a call() this agent itself sent (e.g. the
@@ -376,6 +377,31 @@ func recordSessionMode(cwd, line string) {
 	}
 	defer f.Close()
 	_, _ = f.WriteString(line + "\n")
+}
+
+// recordPromptBlocks appends the "prompt" content blocks of a session/prompt
+// as one JSON line to "prompt-blocks" in cwd (one line per prompt). Opt-in:
+// only when a "record-prompt-blocks" file exists in cwd, so ordinary runs
+// leave their worktree clean.
+func recordPromptBlocks(cwd string, params json.RawMessage) {
+	if cwd == "" {
+		return
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "record-prompt-blocks")); err != nil {
+		return
+	}
+	var p struct {
+		Prompt json.RawMessage `json:"prompt"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || len(p.Prompt) == 0 {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(cwd, "prompt-blocks"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.Write(append(p.Prompt, '\n'))
 }
 
 // recordSessionInitMethod writes the method that started/resumed this
