@@ -110,6 +110,29 @@ func (e *treeGuardEnv) startOnNewChat(t *testing.T, taskID int64) string {
 	return runID
 }
 
+// newBoundChats creates n chats on taskID with their provider already
+// bound to GLM. Start binds an unbound chat's provider with a store write
+// before the tree guard runs, so 32 concurrent Starts on fresh chats would
+// also be 32 concurrent writers: on a slow disk one of them waits out the
+// store's 5 s busy_timeout and fails with SQLITE_BUSY, which is not what
+// the atomicity tests measure. Bound chats leave the guard's CreateRun as
+// the only write on the concurrent path.
+func (e *treeGuardEnv) newBoundChats(t *testing.T, taskID int64, n int) []int64 {
+	t.Helper()
+	ids := make([]int64, n)
+	for i := range ids {
+		chat, err := e.wm.CreateChat(taskID, "chat")
+		if err != nil {
+			t.Fatalf("CreateChat(task %d) error = %v", taskID, err)
+		}
+		if _, err := e.wm.BindChatProvider(chat.ID, string(taskrunner.ProviderGLM)); err != nil {
+			t.Fatalf("BindChatProvider(chat %d) error = %v", chat.ID, err)
+		}
+		ids[i] = chat.ID
+	}
+	return ids
+}
+
 func asTreeBusy(err error) (*TreeBusyError, bool) {
 	var tb *TreeBusyError
 	if errors.As(err, &tb) {
@@ -206,14 +229,7 @@ func TestTreeGuard_ConcurrentStartsAdmitExactlyLimit(t *testing.T) {
 	e := newTreeGuardEnv(t, 8, false)
 
 	const n = 32
-	chats := make([]int64, n)
-	for i := 0; i < n; i++ {
-		chat, err := e.wm.CreateChat(e.root.ID, "chat")
-		if err != nil {
-			t.Fatalf("CreateChat() error = %v", err)
-		}
-		chats[i] = chat.ID
-	}
+	chats := e.newBoundChats(t, e.root.ID, n)
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -250,14 +266,7 @@ func TestTreeGuard_ConcurrentStartWhenBusyAdmitsExactlyLimit(t *testing.T) {
 	e := newTreeGuardEnv(t, 8, false)
 
 	const n = 32
-	chats := make([]int64, n)
-	for i := 0; i < n; i++ {
-		chat, err := e.wm.CreateChat(e.root.ID, "chat")
-		if err != nil {
-			t.Fatalf("CreateChat() error = %v", err)
-		}
-		chats[i] = chat.ID
-	}
+	chats := e.newBoundChats(t, e.root.ID, n)
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
