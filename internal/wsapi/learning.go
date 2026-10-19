@@ -12,7 +12,10 @@ import (
 
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/learning/approval"
+	"github.com/spacingmind/smind/internal/learning/export"
 	"github.com/spacingmind/smind/internal/learning/gate"
+	learningservice "github.com/spacingmind/smind/internal/learning/service"
+	"github.com/spacingmind/smind/internal/skills"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -32,6 +35,9 @@ const (
 	codeUnavailable  = "unavailable"
 	codeForbidden    = "forbidden"
 )
+
+// exportTargets are the accepted learning.skills.export targets.
+var exportTargets = []string{"repo", "claude", "agents", "codex"}
 
 // Learning event topics (ADR-0009 pattern).
 const (
@@ -87,6 +93,10 @@ type LearningConfig struct {
 	Enabled bool
 	// ProbationRuns: a skill offered fewer runs than this is on probation.
 	ProbationRuns int
+	// DailyBudgetUSD and DailyBudgetTokens are the per-workspace caps the
+	// status budget is reported against.
+	DailyBudgetUSD    float64
+	DailyBudgetTokens int
 }
 
 // LearningDeps wires the learning RPCs; every field is optional.
@@ -95,6 +105,13 @@ type LearningDeps struct {
 	// Config is read per request, so a settings toggle takes effect at once.
 	Config  func() LearningConfig
 	Trigger LearningTrigger
+	// OnWorkspaceReset, when set, runs after learning.forget and after
+	// learning.setMode to off, so a stale projection never lingers (the
+	// daemon removes the workspace's learned-skill projection here).
+	OnWorkspaceReset func(workspaceID int64)
+	// Home is the user's home directory, the base of the claude/agents/codex
+	// export targets. Empty means os.UserHomeDir() (tests set it).
+	Home string
 }
 
 // learningHost holds the (replaceable) learning collaborators.
@@ -110,7 +127,9 @@ func newLearningHost(db *store.Store, bus *eventBus) *learningHost {
 	d := config.DefaultLearning()
 	return &learningHost{db: db, bus: bus, deps: LearningDeps{
 		Approval: approval.New(approval.Deps{Store: db}),
-		Config:   func() LearningConfig { return LearningConfig{Enabled: d.Enabled, ProbationRuns: d.ProbationRuns} },
+		Config: func() LearningConfig {
+			return LearningConfig{Enabled: d.Enabled, ProbationRuns: d.ProbationRuns, DailyBudgetUSD: d.DailyBudgetUSD, DailyBudgetTokens: d.DailyBudgetTokens}
+		},
 	}}
 }
 
@@ -124,6 +143,15 @@ func (h *learningHost) set(d LearningDeps) {
 		h.deps.Config = d.Config
 	}
 	h.deps.Trigger = d.Trigger
+	h.deps.OnWorkspaceReset = d.OnWorkspaceReset
+	h.deps.Home = d.Home
+}
+
+// reset runs the optional OnWorkspaceReset hook.
+func (h *learningHost) reset(workspaceID int64) {
+	if fn := h.get().OnWorkspaceReset; fn != nil {
+		fn(workspaceID)
+	}
 }
 
 func (h *learningHost) get() LearningDeps {
@@ -169,8 +197,9 @@ func (h *learningHost) systemChat(chatID *int64) bool {
 }
 
 // SetLearning replaces the learning collaborators (the daemon passes its
-// fully configured approval service, config and trigger). Nil Approval or
-// Config keep the current ones; Trigger is always replaced.
+// fully configured approval service, config, trigger and reset hook). Nil
+// Approval or Config keep the current ones; Trigger and OnWorkspaceReset are
+// always replaced.
 func (a *API) SetLearning(d LearningDeps) { a.learning.set(d) }
 
 // LearningNotifier returns the notifier the collector calls to announce
@@ -461,6 +490,7 @@ func learningHandlers(h *learningHost) map[string]handlerFunc {
 		"learning.skills.restore":    skillAction(h, "learning.skills.restore", "restored", restore),
 		"learning.skills.delete":     skillAction(h, "learning.skills.delete", "deleted", (*approval.Service).Delete),
 		"learning.skills.undo":       learningMethod(h, "learning.skills.undo", undoLearning),
+		"learning.skills.export":     learningMethod(h, "learning.skills.export", exportLearning),
 		"learning.proposals.list":    learningMethod(h, "learning.proposals.list", listProposalsLearning),
 		"learning.proposals.get":     learningMethod(h, "learning.proposals.get", getProposalLearning),
 		"learning.proposals.approve": learningMethod(h, "learning.proposals.approve", approveLearning),
@@ -504,12 +534,31 @@ type learningStatusWorkspace struct {
 	PendingProposals int    `json:"pendingProposals"`
 	ActiveSkills     int    `json:"activeSkills"`
 	DisabledSkills   int    `json:"disabledSkills"`
+	// Budget is the workspace's rolling 24h learning spend against the caps.
+	Budget learningBudget `json:"budget"`
+}
+
+// learningBudgetWindow is the budget's rolling window (the collector's).
+const learningBudgetWindow = 24 * time.Hour
+
+// learningBudget mirrors what the collector's budget check sees: usage of the
+// workspace's non-user (learning) runs in the last windowHours. UnreportedRuns
+// are runs with no cost/token figure; the collector prices those pessimistically,
+// so the budget may be spent sooner than usedUsd/usedTokens suggest.
+type learningBudget struct {
+	WindowHours    int     `json:"windowHours"`
+	UsedUSD        float64 `json:"usedUsd"`
+	UsedTokens     int64   `json:"usedTokens"`
+	CapUSD         float64 `json:"capUsd"`
+	CapTokens      int     `json:"capTokens"`
+	UnreportedRuns int     `json:"unreportedRuns"`
 }
 
 type learningStatusResult struct {
 	Enabled    bool                      `json:"enabled"`
 	Workspaces []learningStatusWorkspace `json:"workspaces"`
-	// Budget stays null until the collector reports one.
+	// Budget is always null; the budget is per workspace (workspaces[].budget).
+	// The field is kept so existing clients still find it.
 	Budget any `json:"budget"`
 }
 
@@ -518,7 +567,8 @@ func statusLearning(_ context.Context, h *learningHost, _ struct{}) (any, error)
 	if err != nil {
 		return nil, err
 	}
-	out := learningStatusResult{Enabled: h.cfg().Enabled, Workspaces: []learningStatusWorkspace{}}
+	cfg := h.cfg()
+	out := learningStatusResult{Enabled: cfg.Enabled, Workspaces: []learningStatusWorkspace{}}
 	for _, w := range wss {
 		pending, err := h.db.ListProposals(w.ID, "pending")
 		if err != nil {
@@ -528,7 +578,13 @@ func statusLearning(_ context.Context, h *learningHost, _ struct{}) (any, error)
 		if err != nil {
 			return nil, err
 		}
-		row := learningStatusWorkspace{ID: w.ID, Title: w.Title, LearningMode: w.LearningMode, PendingProposals: len(pending)}
+		cost, tokens, unreported, err := h.db.SumLearningUsageForWorkspace(w.ID, time.Now().Add(-learningBudgetWindow))
+		if err != nil {
+			return nil, err
+		}
+		row := learningStatusWorkspace{ID: w.ID, Title: w.Title, LearningMode: w.LearningMode, PendingProposals: len(pending),
+			Budget: learningBudget{WindowHours: int(learningBudgetWindow / time.Hour), UsedUSD: cost, UsedTokens: tokens,
+				CapUSD: cfg.DailyBudgetUSD, CapTokens: cfg.DailyBudgetTokens, UnreportedRuns: unreported}}
 		if row.LearningMode == "" {
 			row.LearningMode = store.LearningModeOff
 		}
@@ -558,6 +614,9 @@ func setModeLearning(_ context.Context, h *learningHost, p struct {
 	if err := h.get().Approval.SetLearningMode(p.WorkspaceID, p.Mode); err != nil {
 		return nil, err
 	}
+	if p.Mode == store.LearningModeOff {
+		h.reset(p.WorkspaceID)
+	}
 	h.NotifyChanged(p.WorkspaceID, 0, 0, "modeChanged")
 	return map[string]any{}, nil
 }
@@ -569,6 +628,7 @@ func forgetLearning(_ context.Context, h *learningHost, p workspaceParams) (any,
 	if err := h.get().Approval.Forget(p.WorkspaceID); err != nil {
 		return nil, err
 	}
+	h.reset(p.WorkspaceID)
 	h.NotifyChanged(p.WorkspaceID, 0, 0, "forgotten")
 	return map[string]any{}, nil
 }
@@ -789,7 +849,7 @@ func reflectLearning(ctx context.Context, h *learningHost, p struct {
 		return nil, learningInvalid(m, "cannot reflect on a system chat")
 	}
 	if err := t.Reflect(ctx, p.ChatID); err != nil {
-		return nil, err
+		return nil, triggerErr(m, err)
 	}
 	return map[string]any{}, nil
 }
@@ -804,7 +864,72 @@ func curateLearning(ctx context.Context, h *learningHost, p workspaceParams) (an
 		return nil, err
 	}
 	if err := t.Curate(ctx, p.WorkspaceID); err != nil {
-		return nil, err
+		return nil, triggerErr(m, err)
 	}
 	return map[string]any{}, nil
+}
+
+// triggerErr maps a collector refusal that is not a client mistake onto the
+// "unavailable" wire code; everything else goes through learningMethod's
+// generic mapping.
+func triggerErr(method string, err error) error {
+	if errors.Is(err, learningservice.ErrNotImplemented) {
+		return &rpcCodeError{code: codeUnavailable, msg: method + ": not available yet (the curator job has not shipped)", err: err}
+	}
+	return err
+}
+
+// ExportResultView is the result of learning.skills.export.
+type ExportResultView struct {
+	Dir     string   `json:"dir"`
+	Files   []string `json:"files"`
+	Status  string   `json:"status"`
+	Skipped []string `json:"skipped"`
+}
+
+func exportLearning(_ context.Context, h *learningHost, p struct {
+	ID     int64  `json:"id"`
+	Target string `json:"target"`
+	Force  bool   `json:"force"`
+}) (any, error) {
+	const m = "learning.skills.export"
+	if !slices.Contains(exportTargets, p.Target) {
+		return nil, learningInvalid(m, "unknown target %q (want repo, claude, agents or codex)", p.Target)
+	}
+	k, err := h.db.GetLearnedSkill(p.ID)
+	if err != nil {
+		return nil, err
+	}
+	req := export.Request{Skill: k, Target: export.Target(p.Target), Home: h.get().Home, Force: p.Force}
+	if p.Target == "repo" {
+		ws, err := h.db.GetWorkspace(k.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		req.RepoPath = ws.Path
+	}
+	res, err := export.Export(req)
+	if err != nil {
+		if errors.Is(err, skills.ErrSymlinkedTarget) {
+			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": " + err.Error(), err: err}
+		}
+		return nil, err
+	}
+	// The ledger names the target and directory, never the skill text.
+	if err := h.db.AppendLedger(store.LearnedLedgerEntry{
+		WorkspaceID: k.WorkspaceID, SkillID: &k.ID, SkillName: k.Name, Action: "export", Actor: "human",
+		CreatedAt: time.Now().UTC(),
+		Reason:    fmt.Sprintf("exported to %s: %s", p.Target, res.Dir),
+	}); err != nil {
+		return nil, err
+	}
+	h.NotifyChanged(k.WorkspaceID, k.ID, 0, "exported")
+	return ExportResultView{Dir: res.Dir, Files: nonNil(res.Files), Status: res.Status, Skipped: nonNil(res.Skipped)}, nil
+}
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
