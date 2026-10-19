@@ -503,7 +503,13 @@ mod tests {
         let names: Vec<_> = negatives.iter().map(|n| n["changed"].as_str().unwrap()).collect();
         assert_eq!(
             names,
-            ["daemon_pub", "mobile_pub", "daemon_eph_pub", "session_id", "challenge"]
+            [
+                "daemon_pub",
+                "mobile_pub",
+                "daemon_eph_pub",
+                "session_id",
+                "challenge"
+            ]
         );
         for neg in negatives {
             assert_eq!(neg["error"], "bad_signature");

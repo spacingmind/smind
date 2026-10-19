@@ -1942,7 +1942,13 @@ mod tests {
         assert_eq!(timing.challenge_timeout, Duration::from_secs(5));
         let started = Instant::now();
         let err = identify_device(
-            &mut mobile, &key, "laptop", &dpub, "sess", &timing, &PasswordCell::default(),
+            &mut mobile,
+            &key,
+            "laptop",
+            &dpub,
+            "sess",
+            &timing,
+            &PasswordCell::default(),
         )
         .await
         .unwrap_err();
@@ -1968,7 +1974,13 @@ mod tests {
         let timing = Timing::default();
         let started = Instant::now();
         let err = identify_device(
-            &mut mobile, &key, "laptop", &dpub, "sess", &timing, &PasswordCell::default(),
+            &mut mobile,
+            &key,
+            "laptop",
+            &dpub,
+            "sess",
+            &timing,
+            &PasswordCell::default(),
         )
         .await
         .unwrap_err();
@@ -1995,7 +2007,15 @@ mod tests {
         let timing = Timing::default();
         let no_password = PasswordCell::default();
         let (res, got) = tokio::join!(
-            identify_device(&mut mobile, &key, "laptop", &dpub, "sess-1", &timing, &no_password),
+            identify_device(
+                &mut mobile,
+                &key,
+                "laptop",
+                &dpub,
+                "sess-1",
+                &timing,
+                &no_password
+            ),
             async {
                 let msg = daemon.receive().await;
                 let v: serde_json::Value = serde_json::from_slice(&msg).unwrap();
@@ -2008,7 +2028,13 @@ mod tests {
         res.unwrap();
         assert_eq!(got["method"], "relay.device_hello");
         assert_eq!(got["params"]["v"], 2);
-        let expect = key.hello("laptop", &dpub, &mobile.transcript_hash().unwrap(), "sess-1", &challenge);
+        let expect = key.hello(
+            "laptop",
+            &dpub,
+            &mobile.transcript_hash().unwrap(),
+            "sess-1",
+            &challenge,
+        );
         assert_eq!(got["params"], serde_json::to_value(&expect).unwrap());
     }
 
@@ -2031,7 +2057,15 @@ mod tests {
         let password = PasswordCell::default();
         password.set("a-long-daemon-password".into());
         let (res, got) = tokio::join!(
-            identify_device(&mut mobile, &key, "laptop", &dpub, "sess-1", &timing, &password),
+            identify_device(
+                &mut mobile,
+                &key,
+                "laptop",
+                &dpub,
+                "sess-1",
+                &timing,
+                &password
+            ),
             async {
                 let msg = daemon.receive().await;
                 let v: serde_json::Value = serde_json::from_slice(&msg).unwrap();
@@ -2046,7 +2080,13 @@ mod tests {
             other => panic!("expected a password refusal, got {other:?}"),
         }
         assert_eq!(got["params"]["password"], "a-long-daemon-password");
-        let expect = key.hello("laptop", &dpub, &mobile.transcript_hash().unwrap(), "sess-1", &challenge);
+        let expect = key.hello(
+            "laptop",
+            &dpub,
+            &mobile.transcript_hash().unwrap(),
+            "sess-1",
+            &challenge,
+        );
         let mut params = got["params"].clone();
         params.as_object_mut().unwrap().remove("password");
         assert_eq!(params, serde_json::to_value(&expect).unwrap(), "the signed hello is unchanged");
@@ -2088,15 +2128,26 @@ mod tests {
     #[test]
     fn an_e2ee_version_mismatch_is_terminal_and_never_a_retry() {
         let older = classify_handshake_error(ChannelError::UnsupportedVersion { peer: 1 });
-        assert!(matches!(older, Failure::E2eeVersion { peer: 1 }), "{older:?}");
+        assert!(
+            matches!(older, Failure::E2eeVersion { peer: 1 }),
+            "{older:?}"
+        );
         let newer = classify_handshake_error(ChannelError::UnsupportedVersion { peer: 3 });
-        assert!(matches!(newer, Failure::E2eeVersion { peer: 3 }), "{newer:?}");
+        assert!(
+            matches!(newer, Failure::E2eeVersion { peer: 3 }),
+            "{newer:?}"
+        );
         // Other handshake trouble (including a bad key confirmation) still retries.
-        for e in [ChannelError::HandshakeConfirm, ChannelError::PinMismatch, ChannelError::Closed] {
+        for e in [
+            ChannelError::HandshakeConfirm,
+            ChannelError::PinMismatch,
+            ChannelError::Closed,
+        ] {
             assert!(matches!(classify_handshake_error(e), Failure::Retry(_)));
         }
         let revoked = tonic::Status::permission_denied("relay: device revoked");
-        let denied = classify_handshake_error(ChannelError::Transport(DataTransportError::Status(revoked)));
+        let denied =
+            classify_handshake_error(ChannelError::Transport(DataTransportError::Status(revoked)));
         assert!(matches!(denied, Failure::RelayDenied(_)), "{denied:?}");
     }
 
