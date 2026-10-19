@@ -78,6 +78,7 @@ describe("icon registry", () => {
         "settings": "Settings",
         "shortcuts": "Keyboard",
         "sidebarToggle": "PanelLeft",
+        "skills": "BookOpen",
         "space": "Layers",
         "spinner": "LoaderCircle",
         "splitColumns": "Columns2",

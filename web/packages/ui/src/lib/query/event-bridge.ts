@@ -3,8 +3,15 @@ import type { QueryClient } from "@tanstack/react-query";
 import { upsertProfileInCache } from "@/hooks/use-profiles";
 import { upsertReport } from "@/lib/account-usage/model";
 import type { AccountUsage, AccountUsageEventPayload, UsageQueryData } from "@/lib/account-usage/types";
+import { LEARNED_SKILLS_SECTION_ID } from "@/lib/learning-section";
+import type {
+  LearnedSkillChangedPayload,
+  LearnedSkillProposedPayload,
+  LearningJobPayload,
+} from "@/lib/learning-types";
 import { queryKeys } from "@/lib/query-keys";
 import type { Account, AgentProfile } from "@/lib/types";
+import { toast } from "@/components/ui/toast";
 
 /**
  * The daemon-event -> query-cache bridge (ADR-0032 decision 1). It is the one
@@ -105,6 +112,45 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       }
       return;
     }
+    case "learnedSkill.proposed": {
+      const p = payload as Partial<LearnedSkillProposedPayload> | null;
+      invalidateLearning(queryClient, p?.workspaceId);
+      // Announced, never interrupting: a run's completion is not blocked by it (ADR-0026 AC20).
+      toast({
+        title: `New skill proposal: ${p?.name ?? "untitled"}`,
+        durationMs: 8000,
+        action: {
+          label: "Review",
+          onClick: () =>
+            window.dispatchEvent(
+              new CustomEvent("smind:open-settings", { detail: { sectionId: LEARNED_SKILLS_SECTION_ID } }),
+            ),
+        },
+      });
+      return;
+    }
+    case "learnedSkill.changed": {
+      const p = payload as Partial<LearnedSkillChangedPayload> | null;
+      invalidateLearning(queryClient, p?.workspaceId);
+      if (typeof p?.skillId === "number") {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.learnedSkill(p.skillId) });
+      } else {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.learnedSkillAll() });
+      }
+      if (typeof p?.proposalId === "number") {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.proposal(p.proposalId) });
+      } else {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.proposalAll() });
+      }
+      return;
+    }
+    case "learning.job": {
+      const p = payload as Partial<LearningJobPayload> | null;
+      void queryClient.invalidateQueries({
+        queryKey: typeof p?.workspaceId === "number" ? queryKeys.learningJobsOf(p.workspaceId) : queryKeys.learningJobsAll(),
+      });
+      return;
+    }
     default:
       return;
   }
@@ -112,6 +158,18 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
 
 function isProfile(value: unknown): value is AgentProfile {
   return typeof value === "object" && value !== null && typeof (value as AgentProfile).ID === "number";
+}
+
+/** The workspace's skills, proposals and status counts; every workspace's when the payload names none. */
+function invalidateLearning(queryClient: QueryClient, workspaceId: number | undefined): void {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.learningStatus() });
+  if (typeof workspaceId === "number") {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.learnedSkillsOf(workspaceId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.proposalsOf(workspaceId) });
+  } else {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.learnedSkillsAll() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.proposalsAll() });
+  }
 }
 
 function upsertById(list: Account[], account: Account): Account[] {

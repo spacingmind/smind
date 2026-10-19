@@ -8,6 +8,8 @@ export interface SettingsSectionContext {
   client: WsClient | null;
   /** The app's single events.subscribe surface (useDaemonEvents), for a section that wants live topic updates (e.g. Profiles reflecting profile.created/updated/deleted) rather than a manual refresh. Optional (absent/undefined for a caller that predates this field, null until the app's own client/events are ready) -- a section that doesn't need it can ignore it entirely. */
   events?: DaemonEvents | null;
+  /** Leaves Settings and returns to the app (what Back/Escape do); a section that links into the app (a run's chat) calls it before navigating. */
+  closeSettings?: () => void;
 }
 
 /** One entry in the settings screen's section list (audit-paseo.md §4's list+detail shape). */
@@ -23,6 +25,8 @@ export interface SettingsSection {
    */
   groupLabel?: string;
   icon?: ReactNode;
+  /** An optional quiet indicator at the end of the nav row (e.g. a pending-count dot); it renders its own data. */
+  badge?: ReactNode;
   /** Lower renders first. Built-in sections use round numbers (100, 200, ...) leaving room for a section to insert itself between two others; ties break by registration order. */
   order: number;
   render: (ctx: SettingsSectionContext) => ReactNode;

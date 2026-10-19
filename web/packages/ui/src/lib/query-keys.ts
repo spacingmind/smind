@@ -11,6 +11,8 @@ export const queryKeys = {
    * Reading it never makes the daemon call a provider; see `usageQueryOptions`.
    */
   accountUsage: () => ["account.usage", { cached: true }] as const,
+  /** The daemon's run registry (`run.list`, all runs): resolves a cited run id to its task and chat. */
+  runList: () => ["run.list"] as const,
   providerList: () => ["provider.list"] as const,
   profileList: () => ["profile.list"] as const,
   /** One `provider.test` answer per account-vocabulary provider key (`accountHealthTestKey`). */
@@ -18,5 +20,22 @@ export const queryKeys = {
   providerTestAll: () => ["provider.test"] as const,
   providerTest: (providerKey: string) => ["provider.test", providerKey] as const,
   /** The `useRunProviderTest` mutation for that provider: its pending entries are the row's "Testing…". */
+  // Self-learning skills (ADR-0026): the RPC name plus the params that change its answer. The
+  // `*All` forms are partial keys: `invalidateQueries` matches every entry that starts with them.
+  learningStatus: () => ["learning.status"] as const,
+  learnedSkills: (workspaceId: number, statuses?: readonly string[], includeBody = false) =>
+    ["learning.skills.list", { workspaceId, statuses, includeBody }] as const,
+  learnedSkillsAll: () => ["learning.skills.list"] as const,
+  learnedSkillsOf: (workspaceId: number) => ["learning.skills.list", { workspaceId }] as const,
+  learnedSkill: (id: number) => ["learning.skills.get", { id }] as const,
+  learnedSkillAll: () => ["learning.skills.get"] as const,
+  proposals: (workspaceId: number, status?: string) => ["learning.proposals.list", { workspaceId, status }] as const,
+  proposalsAll: () => ["learning.proposals.list"] as const,
+  proposalsOf: (workspaceId: number) => ["learning.proposals.list", { workspaceId }] as const,
+  proposal: (id: number) => ["learning.proposals.get", { id }] as const,
+  proposalAll: () => ["learning.proposals.get"] as const,
+  learningJobs: (workspaceId: number, limit?: number) => ["learning.jobs.list", { workspaceId, limit }] as const,
+  learningJobsAll: () => ["learning.jobs.list"] as const,
+  learningJobsOf: (workspaceId: number) => ["learning.jobs.list", { workspaceId }] as const,
   providerTestMutation: (providerKey: string) => ["provider.test.run", providerKey] as const,
 } as const;

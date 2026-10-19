@@ -25,7 +25,7 @@ export interface WireEnvelope {
   method?: string;
   params?: unknown;
   result?: unknown;
-  error?: { message: string; code?: string };
+  error?: { message: string; code?: string; data?: unknown };
   event?: string;
 }
 
@@ -52,11 +52,14 @@ export interface DaemonNotification {
 export class RpcError extends Error {
   /** Machine-readable error kind from the daemon (rpcError.code), when it provides one -- e.g. "conflict" for a rejected conditional file.write. */
   readonly code?: string;
+  /** Structured detail the daemon attached to the error (rpcError.data), e.g. a `gate_rejected` error's `findings`. */
+  readonly data?: unknown;
 
-  constructor(message: string, code?: string) {
+  constructor(message: string, code?: string, data?: unknown) {
     super(message);
     this.name = "RpcError";
     this.code = code;
+    this.data = data;
   }
 }
 
@@ -451,7 +454,7 @@ function waitForAbort(signal: AbortSignal): Promise<void> {
 
 function decodeTerminal<TResult>(env: WireEnvelope): TResult {
   if (env.error) {
-    throw new RpcError(env.error.message, env.error.code);
+    throw new RpcError(env.error.message, env.error.code, env.error.data);
   }
   return env.result as TResult;
 }

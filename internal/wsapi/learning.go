@@ -616,7 +616,10 @@ func getSkillLearning(_ context.Context, h *learningHost, p idParams) (any, erro
 		Skill    LearnedSkillView  `json:"skill"`
 		Versions []VersionView     `json:"versions"`
 		Ledger   []LedgerEntryView `json:"ledger"`
-	}{Skill: skillView(k, h.cfg().ProbationRuns, true), Versions: []VersionView{}, Ledger: []LedgerEntryView{}}
+		// Evidence is the provenance the skill was approved with (redacted
+		// quotes the gate verified against the window), [] when none.
+		Evidence []EvidenceView `json:"evidence"`
+	}{Skill: skillView(k, h.cfg().ProbationRuns, true), Versions: []VersionView{}, Ledger: []LedgerEntryView{}, Evidence: decodeEvidence(k.Evidence)}
 	for _, v := range versions {
 		res.Versions = append(res.Versions, VersionView{
 			Version: v.Version, Description: v.Description, Body: v.Body, Actor: v.Actor,
