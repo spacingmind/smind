@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
 import { externalLinkProps } from "@/lib/external-link";
 import { connectMethodsFor, defaultConnectMethod, type ConnectMethod } from "@/lib/login-methods";
@@ -720,9 +721,9 @@ function AccountListRow({ account, providers }: { account: Account; providers: P
           <span className="min-w-0 truncate font-medium">{account.label}</span>
         </span>
         <span className="flex shrink-0 items-center gap-2">
-          <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">
+          <StatusBadge status="neutral">
             {accountProviderLabel(account.provider, providers)} · {account.credentialType}
-          </span>
+          </StatusBadge>
           <TestRowButton providerId={account.provider} testing={testing} />
         </span>
       </div>
@@ -753,9 +754,9 @@ function ExternalProviderRow({ provider }: { provider: ProviderInfo }) {
           <span className="min-w-0 truncate font-medium">{provider.label ?? provider.id}</span>
         </span>
         <span className="flex shrink-0 items-center gap-2">
-          <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">
+          <StatusBadge status="neutral">
             Managed externally via CLI
-          </span>
+          </StatusBadge>
           <TestRowButton providerId={provider.id} testing={testing} />
         </span>
       </div>
