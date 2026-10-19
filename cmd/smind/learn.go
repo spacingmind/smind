@@ -30,7 +30,9 @@ const cmdLearnUsage = `usage: smind learn <subcommand> [--json]
   curate [--workspace ID]                             curate a workspace's skills now
   mode <workspace-id> off|propose                     per-workspace learning mode
   forget <workspace-id> --yes                         hard-delete all learning data of a workspace
-  export                                              not available yet`
+  export <skill-id> --to repo|claude|agents|codex [--force]
+                                                      copy an approved skill to a repo or user skills dir
+                                                      (exit 1 if an edited file was left alone; --force overwrites)`
 
 // learnArgs is a parsed subcommand command line: flags may appear before or
 // after the positionals, as `--flag value` or `--flag=value`.
@@ -133,8 +135,7 @@ func cmdLearn(args []string) int {
 	case "forget":
 		return learnForget(rest)
 	case "export":
-		fmt.Fprintln(os.Stderr, "smind learn export: not available yet")
-		return 1
+		return learnExport(rest)
 	default:
 		fmt.Fprintf(os.Stderr, "smind learn: unknown subcommand %q\n%s\n", sub, cmdLearnUsage)
 		return 2
@@ -690,5 +691,47 @@ func learnForget(args []string) int {
 		return code
 	}
 	fmt.Printf("forgot all learning data of workspace %d\n", id)
+	return 0
+}
+
+func learnExport(args []string) int {
+	a, err := parseLearnArgs(args, []string{"--to"}, []string{"--force", "--json"})
+	if err != nil {
+		return learnUsageErr("export", err)
+	}
+	id, err := a.id(0, "<skill-id>")
+	if err != nil {
+		return learnUsageErr("export", err)
+	}
+	to := a.vals["--to"]
+	switch to {
+	case "repo", "claude", "agents", "codex":
+	case "":
+		return learnUsageErr("export", errors.New("--to repo|claude|agents|codex is required"))
+	default:
+		return learnUsageErr("export", fmt.Errorf("--to must be repo, claude, agents or codex, got %q", to))
+	}
+	var raw json.RawMessage
+	if code := learnCall("export", "learning.skills.export", map[string]any{"id": id, "target": to, "force": a.bools["--force"]}, &raw); code != 0 {
+		return code
+	}
+	var res wsapi.ExportResultView
+	if err := json.Unmarshal(raw, &res); err != nil {
+		fmt.Fprintf(os.Stderr, "smind learn export: decode: %v\n", err)
+		return 1
+	}
+	if a.bools["--json"] {
+		printLearnJSON(raw)
+	} else {
+		fmt.Printf("exported skill %d to %s\n", id, res.Dir)
+		for _, f := range res.Files {
+			fmt.Printf("  wrote %s\n", f)
+		}
+	}
+	if res.Status != "installed" || len(res.Skipped) > 0 {
+		fmt.Fprintf(os.Stderr, "smind learn export: left %d file(s) alone because they differ from what smind would write (edited, or not written by smind): %s\nrerun with --force to overwrite them\n",
+			len(res.Skipped), strings.Join(res.Skipped, ", "))
+		return 1
+	}
 	return 0
 }
