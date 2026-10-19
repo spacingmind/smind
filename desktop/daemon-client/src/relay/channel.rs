@@ -395,9 +395,11 @@ impl<T: FrameTransport> Channel<T> {
     }
 }
 
-/// Reads one frame during a handshake, refusing anything over the 128-byte
-/// handshake cap (ADR-0035 §1) so an unauthenticated peer cannot make either
-/// end handle more than the largest legitimate message (M2).
+/// Reads one frame during a handshake and refuses anything over the 128-byte
+/// handshake cap (ADR-0035 §1) before any of it is parsed or any key is derived.
+/// The transport has already buffered the frame by then (Go rejects on the
+/// 4-byte header instead); the bound on that allocation is the transport's own
+/// frame limit (`MAX_FRAME_LEN`), not this cap.
 async fn recv_handshake_frame<T: FrameTransport>(
     transport: &mut T,
 ) -> Result<(u8, Vec<u8>), ChannelError<T::Error>> {
