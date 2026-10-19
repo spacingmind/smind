@@ -10,9 +10,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { base64Decode, base64UrlEncode } from '../base64';
 import { describeState } from '../connectionStatus';
 import { helloSignedBytes, identityFromSeed } from '../deviceIdentity';
-import { transcriptHash } from '../e2ee';
+import { E2EEError, transcriptHash } from '../e2ee';
 import { GrpcStatusError } from '../grpcweb';
-import { ConnectionState, ConnectOptions, RelayConnection } from '../RelayConnection';
+import { answeredOrThrow, ConnectionState, ConnectOptions, DaemonError, RelayConnection } from '../RelayConnection';
 import { FakeRelay } from './fakeRelay';
 
 const identity = identityFromSeed(new Uint8Array(32).fill(7));
@@ -568,5 +568,57 @@ describe('first connect failures', () => {
     });
     open.push(conn);
     await expect(conn.whenConnected()).rejects.toThrow('not the one in the pairing offer');
+  });
+});
+
+describe('what counts as the daemon having answered a probe', () => {
+  it('only a daemon error envelope does; every local failure is rethrown', () => {
+    expect(() => answeredOrThrow(new DaemonError('method not found'))).not.toThrow();
+    for (const msg of ['e2ee: channel closed', 'e2ee: frame counter exhausted', 'relay: stream is closed', 'relay: connection lost', 'relay: not connected', 'relay: connection is closed']) {
+      expect(() => answeredOrThrow(new Error(msg)), msg).toThrow(msg);
+    }
+    expect(() => answeredOrThrow(new E2EEError('closed', 'e2ee: channel closed'))).toThrow('channel closed');
+  });
+
+  type Internals = { channel: { send: (b: Uint8Array) => void; closed: boolean } };
+
+  it('liveness probe: a closed channel is not "answered": the session is replaced by a fresh one', async () => {
+    const relay = new FakeRelay();
+    const conn = start(relay, { liveness: { pendingStaleMs: 100, idleStaleMs: 150, checkMs: 30 } });
+    await conn.whenConnected();
+    const epoch = conn.epoch;
+    ((conn as unknown as { channel: Internals['channel'] }).channel as unknown as { closed: boolean }).closed = true;
+    await vi.waitFor(() => expect(conn.epoch).toBeGreaterThan(epoch), { timeout: 5000 });
+    expect(relay.helloLog).toHaveLength(2); // a new handshake and hello, not the old session limping on
+    await expect(conn.call('workspace.list')).resolves.toEqual([]);
+  });
+
+  it('resume probe: counter exhaustion / a send that throws is not "answered": after the allowed failures a fresh session replaces it', async () => {
+    const relay = new FakeRelay();
+    const conn = start(relay);
+    await conn.whenConnected();
+    const epoch = conn.epoch;
+    const ch = (conn as unknown as { channel: Internals['channel'] }).channel;
+    ch.send = () => {
+      throw new E2EEError('counter_exhausted', 'e2ee: frame counter exhausted');
+    };
+    relay.dropCurrentStream();
+    await vi.waitFor(() => expect(conn.epoch).toBeGreaterThan(epoch), { timeout: 8000 });
+    expect(relay.helloLog).toHaveLength(2);
+    await expect(conn.call('workspace.list')).resolves.toEqual([]);
+  });
+
+  it('a stream that is closed when the probe is sent is not "answered" either', async () => {
+    const relay = new FakeRelay();
+    const conn = start(relay);
+    await conn.whenConnected();
+    const epoch = conn.epoch;
+    const ch = (conn as unknown as { channel: Internals['channel'] }).channel;
+    ch.send = () => {
+      throw new Error('relay: stream is closed');
+    };
+    relay.dropCurrentStream();
+    await vi.waitFor(() => expect(conn.epoch).toBeGreaterThan(epoch), { timeout: 8000 });
+    expect(relay.helloLog).toHaveLength(2);
   });
 });

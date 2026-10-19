@@ -205,6 +205,8 @@ export interface ConnectOptions {
   jitter?: (ms: number) => number;
 }
 
+/** The daemon answered a request with an error envelope: the only kind of rejection that proves the daemon is there (liveness and resume probes). */
+export class DaemonError extends Error {}
 /** The hello was refused because the daemon has not approved this device. */
 class AwaitingApprovalError extends Error {}
 /** The daemon or relay revoked this device. */
@@ -713,6 +715,8 @@ export class RelayConnection {
       } catch (e) {
         this.pending.delete(id);
         reject(e instanceof Error ? e : new Error(String(e)));
+        // A channel that failed on send is closed for good: end the stream so the supervisor opens a fresh session.
+        if (channel.isClosed) this.session?.transport.detach();
       }
     }) as CancellablePromise<unknown>;
     promise.cancel = () => {
@@ -772,7 +776,7 @@ export class RelayConnection {
       const p = this.pending.get(env.id);
       if (p) {
         this.pending.delete(env.id);
-        p.reject(new Error(env.error.message));
+        p.reject(new DaemonError(env.error.message));
       }
       return;
     }
@@ -1177,9 +1181,9 @@ export class RelayConnection {
   }
 }
 
-/** A daemon's error answer is still an answer; only a lost connection or a failed send is not. */
-function answeredOrThrow(e: Error): void {
-  if (e.message === 'relay: connection lost' || e.message === 'relay: not connected' || e.message === 'relay: connection is closed') throw e;
+/** Only a daemon's own error envelope is an answer; every other rejection (a lost connection, a failed local send, a closed channel) is not. */
+export function answeredOrThrow(e: Error): void {
+  if (!(e instanceof DaemonError)) throw e;
 }
 
 function rejected(err: Error): CancellablePromise<unknown> {
