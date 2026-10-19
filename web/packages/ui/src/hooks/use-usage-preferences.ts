@@ -1,46 +1,20 @@
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback } from "react";
 
 import type { UsageDisplayAs } from "@/lib/account-usage/format";
 import {
-  readUsagePreferences,
   toggleUsagePin,
   type PinnedWindow,
   setUsageAccount,
   setUsageDisplayAs,
   setUsageInSidebar,
-  writeUsagePreferences,
   type UsagePreferences,
 } from "@/lib/account-usage/preferences";
-
-/**
- * The plan-usage preferences (Used/Remaining, account filter, "Show summary
- * in sidebar", pins) as one module store shared by every surface -- Settings
- * -> Usage, the modal, and later the footer item and chat hover card -- so a
- * change in one is live in the others. Same shape as
- * use-notification-sound-preference.ts: `current` re-syncs from storage
- * whenever nobody is subscribed (a test-friendly escape hatch, and how a
- * change made in another tab is picked up on the next mount).
- */
-let current: UsagePreferences | null = null;
-const listeners = new Set<() => void>();
-
-function getSnapshot(): UsagePreferences {
-  if (listeners.size === 0 || current === null) current = readUsagePreferences();
-  return current;
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
+import { useUsagePreferencesStore } from "@/stores/usage-preferences-store";
 
 /** Applies a pure preference update, persists it and notifies every surface. */
 export function updateUsagePreferences(update: (prefs: UsagePreferences) => UsagePreferences): void {
-  const next = update(getSnapshot());
-  if (next === current) return;
-  current = next;
-  writeUsagePreferences(next);
-  for (const l of listeners) l();
+  const { value, set } = useUsagePreferencesStore.getState();
+  set(update(value));
 }
 
 export function useUsagePreferences(): {
@@ -54,7 +28,7 @@ export function useUsagePreferences(): {
   /** Pins or unpins one window; the first toggle snapshots `defaults` (what the surface shows pinned) before editing. */
   togglePin: (defaults: readonly PinnedWindow[], pin: PinnedWindow) => void;
 } {
-  const preferences = useSyncExternalStore(subscribe, getSnapshot);
+  const preferences = useUsagePreferencesStore((s) => s.value);
   const setDisplayAs = useCallback(
     (displayAs: UsageDisplayAs) => updateUsagePreferences((p) => setUsageDisplayAs(p, displayAs)),
     [],

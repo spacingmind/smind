@@ -6,6 +6,7 @@ import { ChatUsageTotal } from "@/components/chat-usage-total";
 import { RunUsagePill } from "@/components/run-usage-pill";
 import { closeUsageModal, useUsageModalOpen } from "@/hooks/use-usage-modal";
 import { STORAGE_KEYS } from "@/lib/storage";
+import { useUsagePreferencesStore } from "@/stores/usage-preferences-store";
 import type { RunUsage } from "@/lib/types";
 import { claudeAccount, codexAccount, FIXTURE_NOW, problemAccount } from "@/test/account-usage-fixtures";
 import { renderWithDaemon } from "@/test/render-with-daemon";
@@ -65,6 +66,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(FIXTURE_NOW);
   localStorage.removeItem(STORAGE_KEYS.usage);
+  useUsagePreferencesStore.getState().reload();
 });
 
 afterEach(() => {
@@ -166,6 +168,7 @@ describe("chat usage hover card: Plan usage", () => {
 
   it("several_oauth_accounts_all_listed_compactly_filter_selected_first_with_the_untracked_login_note", async () => {
     localStorage.setItem(STORAGE_KEYS.usage, JSON.stringify({ accountKey: "anthropic-3" }));
+    useUsagePreferencesStore.getState().reload();
     const daemon = new FakeUsageDaemon([
       claudeAccount(),
       claudeAccount({ accountId: 3, key: "anthropic-3", displayName: "Work" }),
@@ -251,6 +254,7 @@ describe("chat usage hover card: Plan usage", () => {
 
   it("filter_on_another_providers_account_still_lists_this_chats_accounts", async () => {
     localStorage.setItem(STORAGE_KEYS.usage, JSON.stringify({ accountKey: "openai-2" }));
+    useUsagePreferencesStore.getState().reload();
     const daemon = new FakeUsageDaemon([claudeAccount(), codexAccount()]);
     renderWith(daemon, chatPill());
     await flush();
@@ -338,6 +342,7 @@ describe("chat usage hover card: Plan usage", () => {
 
   it("honours_used_remaining", async () => {
     localStorage.setItem(STORAGE_KEYS.usage, JSON.stringify({ displayAs: "remaining" }));
+    useUsagePreferencesStore.getState().reload();
     const daemon = new FakeUsageDaemon([claudeAccount()]);
     renderWith(daemon, chatPill());
     await flush();

@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UsageModalRoot } from "@/components/account-usage/usage-modal";
 import { closeUsageModal, openUsageModal } from "@/hooks/use-usage-modal";
 import { STORAGE_KEYS } from "@/lib/storage";
+import { useUsagePreferencesStore } from "@/stores/usage-preferences-store";
+
 import { claudeAccount, codexAccount, FIXTURE_NOW, problemAccount } from "@/test/account-usage-fixtures";
 import { renderWithDaemon } from "@/test/render-with-daemon";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
@@ -136,6 +138,7 @@ describe("UsageModalRoot", () => {
 
   it("account_picked_in_the_modal_is_the_next_opens_account_after_a_reload", async () => {
     window.localStorage.setItem(STORAGE_KEYS.usage, JSON.stringify({ displayAs: "used", accountKey: "openai-2", inSidebar: false, pins: null }));
+    useUsagePreferencesStore.getState().reload();
     const daemon = new FakeUsageDaemon([claudeAccount(), codexAccount()]);
     await openModal(daemon);
     expect(screen.queryByTestId("usage-report-1")).not.toBeInTheDocument();
@@ -145,6 +148,7 @@ describe("UsageModalRoot", () => {
 
   it("vanished_account_pick_falls_back_to_all", async () => {
     window.localStorage.setItem(STORAGE_KEYS.usage, JSON.stringify({ displayAs: "used", accountKey: "anthropic-99", inSidebar: false, pins: null }));
+    useUsagePreferencesStore.getState().reload();
     const daemon = new FakeUsageDaemon([claudeAccount(), codexAccount()]);
     await openModal(daemon);
     expect(screen.getByTestId("usage-report-1")).toBeInTheDocument();
