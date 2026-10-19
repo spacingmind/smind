@@ -452,3 +452,19 @@ func TestHelloNegativeOtherDaemonEphemeral(t *testing.T) {
 	}
 	t.Fatal("vector has no other_daemon_eph negative")
 }
+
+// TestSigningRejectsAWrongSizedTranscriptHash: signing before the handshake
+// completed (a nil th) must fail loudly, and Verify reports ErrBadTranscript.
+func TestSigningRejectsAWrongSizedTranscriptHash(t *testing.T) {
+	_, priv := testKey(t)
+	for name, th := range map[string][]byte{"nil": nil, "short": fixedBytes(1)[:31], "long": append(fixedBytes(1), 0)} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("%s th: SignHello did not panic", name)
+				}
+			}()
+			SignHello(priv, "x", fixedBytes(1), th, testSession, testChallenge)
+		}()
+	}
+}

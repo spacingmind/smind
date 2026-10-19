@@ -145,10 +145,18 @@ const transcriptHashLen = sha256.Size
 // handshake yields a different th and a captured hello never verifies. The
 // session id ties the hello to one route, and the daemon's fresh challenge to
 // one live session. daemonPub is repeated outside the hash so the signed
-// bytes name the daemon explicitly.
+// bytes name the daemon explicitly. It panics unless th is 32 bytes, like an
+// oversized session id (SignHello inherits that; Verify returns ErrBadTranscript).
 func HelloSignedBytes(daemonPub, th, sessionID, challenge []byte) []byte {
 	if len(sessionID) > 0xFFFF {
 		panic("devices: session id too long to sign") // the relay caps ids at 128 bytes
+	}
+	if len(th) != transcriptHashLen {
+		// A nil th means the caller signed before the handshake completed
+		// (Channel.TranscriptHash is nil until then): a programming error that
+		// must not silently produce a signature over an empty transcript.
+		// Verify returns ErrBadTranscript for the same input instead.
+		panic("devices: transcript hash must be 32 bytes")
 	}
 	out := make([]byte, 0, len(helloDomain)+len(th)+len(daemonPub)+2+len(sessionID)+len(challenge))
 	out = append(out, helloDomain...)
