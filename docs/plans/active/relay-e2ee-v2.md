@@ -70,8 +70,10 @@ Manual: none beyond an isolated-`SMIND_HOME` daemon plus relay harness on loopba
 
 ## Decisions
 
-- ADR-0035 holds the design. Open choices (Human): one breaking 0.13.0, keep the challenge, landing order with a temporary live-suite gate, hand-rolled
-  rather than a Noise library. The work proceeds on the ADR's recommendations.
+- ADR-0035 holds the design (Accepted 2026-10-20). The Human accepted all four choices: one breaking 0.13.0 with E2EE v1 dropped and no dual
+  stack; the daemon challenge stays (`device_hello` stays v2); three non-stacked PRs Go → desktop → mobile with a temporary, explicit skip of the two
+  live cross-language suites in the Go PR (each client PR removes its skip), #352 held until all three land; hand-rolled NK-shaped handshake.
+- **No users yet, so breaking changes are fine: no compatibility shims** (no v1 code, no fallback routes, no deprecation paths, no migration code).
 - Each PR gets an independent, adversarial, crypto-focused review before the user is asked to merge.
 
 ## Progress

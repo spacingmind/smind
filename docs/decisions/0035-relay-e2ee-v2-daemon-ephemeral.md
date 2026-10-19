@@ -2,9 +2,9 @@
 
 ## Status
 
-**Proposed — 2026-10-20.** The Human decided on 2026-10-20 to remove the nonce-reuse residual recorded in ADR-0031 D9 by
-changing the E2EE core. This ADR is the design; the choices that are still the Human's are listed under
-[Open choices](#open-choices). Plan: [`docs/plans/active/relay-e2ee-v2.md`](../plans/active/relay-e2ee-v2.md).
+**Accepted — 2026-10-20.** The Human decided to remove the nonce-reuse residual recorded in ADR-0031 D9 by
+changing the E2EE core, and accepted all four [open choices](#open-choices) as recommended. The Human also stated that
+there are no users yet, so breaking changes are fine: no compatibility shims anywhere. Plan: [`docs/plans/active/relay-e2ee-v2.md`](../plans/active/relay-e2ee-v2.md).
 Amends ADR-0007 (c)/(e) (key schedule, handshake) and ADR-0031 D9 (device_hello signed bytes, "E2EE core unchanged").
 
 ## Context
@@ -260,16 +260,16 @@ reason. A dual-stack daemon (v1 and v2) is rejected: it keeps the nonce-reuse pa
 
 ## Open choices
 
-These are the Human's; each has a recommendation, and the plan proceeds on the recommendations unless told otherwise.
+**All four accepted as recommended by the Human, 2026-10-20** ("there are no users yet, so breaking changes are fine — don't add compatibility shims").
 
-1. **One breaking release (0.13.0), no v1 compatibility.** *Recommended: yes* (above). Alternative: a dual-stack daemon for one
+1. **One breaking release (0.13.0), no v1 compatibility.** *Recommended and accepted: yes* (above). Alternative: a dual-stack daemon for one
    minor release, which keeps the nonce-reuse path reachable.
-2. **Keep the daemon challenge in `device_hello` v2.** *Recommended: keep* (flow unchanged, one extra round trip per session,
+2. **Keep the daemon challenge in `device_hello` v2.** *Recommended and accepted: keep* (flow unchanged, one extra round trip per session,
    defense in depth). Alternative: drop it and save a round trip, a `device_hello` v3 and three client state-machine changes.
-3. **Landing order with gated live-interop suites** (Compatibility). *Recommended:* three non-stacked PRs, Go → desktop →
+3. **Landing order with gated live-interop suites** (Compatibility). *Recommended and accepted:* three non-stacked PRs, Go → desktop →
    mobile, the two live suites gated in the Go PR and ungated by their own PRs; hold #352 until all three have merged.
    Alternative: one combined PR with no gate and one large review.
-4. **Hand-rolled Noise-NK-shaped handshake rather than a Noise library.** *Recommended: hand-rolled* (§1). Alternative:
+4. **Hand-rolled Noise-NK-shaped handshake rather than a Noise library.** *Recommended and accepted: hand-rolled* (§1). Alternative:
    `Noise_NK_25519_ChaChaPoly_SHA256` through `flynn/noise`, `snow` and a TypeScript Noise library: standard, but three
    new dependencies (one untested under Hermes) and a different wire shape.
 
