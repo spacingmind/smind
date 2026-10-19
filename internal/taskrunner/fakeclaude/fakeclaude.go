@@ -269,10 +269,10 @@ func Run() {
 			"result":     "ok",
 		})
 
-	case "init-with-tools", "init-clean":
+	case "init-with-tools", "init-clean", "init-builtin-plugins", "init-user-plugin":
 		// An init system message as the real CLI emits it: the isolated
 		// run must abort when it lists tools, and proceed when it lists
-		// only empty collections.
+		// only empty collections and the CLI's built-in plugins.
 		stdin.Scan() // consume the prompt line
 		initMsg := map[string]any{
 			"type":           "system",
@@ -285,8 +285,18 @@ func Run() {
 			"plugins":        []any{},
 			"agents":         []any{"general-purpose"},
 		}
-		if scenario == "init-with-tools" {
+		builtin := func(name string) map[string]any {
+			return map[string]any{"name": name, "path": "builtin", "source": name + "@builtin"}
+		}
+		switch scenario {
+		case "init-with-tools":
 			initMsg["tools"] = []any{"Bash"}
+		case "init-builtin-plugins":
+			// The real CLI lists its compiled-in plugins even with
+			// --setting-sources= (live-confirmed, claude 2.1.293).
+			initMsg["plugins"] = []any{builtin("cc-plugin-sec-default"), builtin("cc-plugin-agents-md")}
+		case "init-user-plugin":
+			initMsg["plugins"] = []any{builtin("cc-plugin-sec-default"), map[string]any{"name": "mine", "path": "/home/u/.claude/plugins/mine", "source": "mine@local"}}
 		}
 		writeLine(initMsg)
 		writeLine(map[string]any{
@@ -297,7 +307,7 @@ func Run() {
 				"content": []any{map[string]any{"type": "text", "text": "after init"}},
 			},
 		})
-		if scenario == "init-with-tools" {
+		if scenario == "init-with-tools" || scenario == "init-user-plugin" {
 			for stdin.Scan() {
 			}
 			return

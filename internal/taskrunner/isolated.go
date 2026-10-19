@@ -99,10 +99,31 @@ var ErrIsolatedRunFailed = errors.New("taskrunner: isolated run failed")
 // definitions are not tools.
 var isolatedInitFields = []string{"tools", "mcp_servers", "slash_commands", "skills", "plugins"}
 
+// builtinPluginPath is the path the CLI reports for a plugin compiled into
+// the binary. Live-confirmed (claude 2.1.293): even with --setting-sources=
+// and --strict-mcp-config the init message lists four such plugins
+// ("cc-plugin-sec-default@builtin", ...). They are not user-installable and
+// bring no tools, so they are not an isolation leak.
+const builtinPluginPath = "builtin"
+
+// isBuiltinPlugin reports whether one init "plugins" entry is a plugin
+// compiled into the CLI: path "builtin" and source "<name>@builtin". Both
+// must agree, so a spoof needs two coordinated fields; anything else
+// (including a non-object entry) is not builtin.
+func isBuiltinPlugin(raw json.RawMessage) bool {
+	var p struct {
+		Name   string `json:"name"`
+		Path   string `json:"path"`
+		Source string `json:"source"`
+	}
+	return json.Unmarshal(raw, &p) == nil && p.Path == builtinPluginPath &&
+		p.Name != "" && p.Source == p.Name+"@"+builtinPluginPath
+}
+
 // initViolation returns the first isolatedInitFields entry that is present
 // and non-empty in the raw init message, or "". Missing keys and unparsable
-// payloads are ignored: the real init shape is not confirmed live, so the
-// check must never fail on what it cannot read.
+// payloads are ignored: the check must never fail on what it cannot read.
+// Built-in plugins (isBuiltinPlugin) do not count; any other plugin does.
 func initViolation(raw json.RawMessage) string {
 	var m map[string]json.RawMessage
 	if json.Unmarshal(raw, &m) != nil {
@@ -115,7 +136,10 @@ func initViolation(raw json.RawMessage) string {
 		}
 		var arr []json.RawMessage
 		if json.Unmarshal(v, &arr) == nil {
-			if len(arr) > 0 {
+			for _, item := range arr {
+				if f == "plugins" && isBuiltinPlugin(item) {
+					continue
+				}
 				return f
 			}
 			continue
