@@ -35,6 +35,13 @@ func TestMain(m *testing.M) {
 		fakeclaude.Run()
 		return
 	}
+	// Test stores skip the per-commit fsync (the daemon never sets this;
+	// durability is not what these tests check). With the default FULL, a
+	// slow disk lets concurrent writers starve each other past the store's
+	// 5 s busy_timeout and a plain read or write fails with SQLITE_BUSY.
+	if os.Getenv(store.SynchronousEnv) == "" {
+		os.Setenv(store.SynchronousEnv, "off")
+	}
 	dir, err := os.MkdirTemp("", "smind-runs-test-")
 	if err != nil {
 		panic(err)
