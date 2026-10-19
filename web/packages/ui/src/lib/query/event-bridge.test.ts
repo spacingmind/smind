@@ -139,4 +139,38 @@ describe("applyDaemonEvent", () => {
     applyDaemonEvent(qc, "account.removed", { id: 2 });
     expect(qc.getQueryData(queryKeys.providerTest("openai"))).toBeUndefined();
   });
+
+  describe("workspace tree (ADR 0009 lifecycle topics)", () => {
+    const ws = { ID: 1, Path: "/a", Title: "A", RoutingPolicy: "", CreatedAt: "", UpdatedAt: "" };
+    const task = (id: number, title: string) =>
+      ({ ID: id, WorkspaceID: 1, SpaceID: null, Title: title, Status: "idle", WorktreePath: null, Branch: null, CreatedAt: "", UpdatedAt: "", ArchivedAt: null }) as never;
+    const tree = () => [{ ...ws, spaces: [], ungroupedTasks: [task(1, "one")] }];
+
+    it("lifecycle events splice into the cached tree with no refetch", () => {
+      const qc = createQueryClient();
+      const invalidate = vi.spyOn(qc, "invalidateQueries");
+      qc.setQueryData(queryKeys.workspaceTree(), tree());
+      applyDaemonEvent(qc, "task.created", { task: task(2, "two") });
+      const held = qc.getQueryData<{ ungroupedTasks: { ID: number }[] }[]>(queryKeys.workspaceTree());
+      expect(held?.[0]?.ungroupedTasks.map((t) => t.ID)).toEqual([1, 2]);
+      applyDaemonEvent(qc, "task.archived", { task: task(1, "one") });
+      expect(qc.getQueryData<{ ungroupedTasks: { ID: number }[] }[]>(queryKeys.workspaceTree())?.[0]?.ungroupedTasks.map((t) => t.ID)).toEqual([2]);
+      applyDaemonEvent(qc, "workspace.deleted", { id: 1 });
+      expect(qc.getQueryData(queryKeys.workspaceTree())).toEqual([]);
+      expect(invalidate).not.toHaveBeenCalledWith({ queryKey: queryKeys.workspaceTree() });
+    });
+
+    it("an event before the first fetch is dropped (the fetch reads committed state), and creates no entry", () => {
+      const qc = createQueryClient();
+      applyDaemonEvent(qc, "task.created", { task: task(2, "two") });
+      expect(qc.getQueryData(queryKeys.workspaceTree())).toBeUndefined();
+    });
+
+    it("event.dropped re-reads the tree (a dropped event may have been a create or a delete)", () => {
+      const qc = createQueryClient();
+      const invalidate = vi.spyOn(qc, "invalidateQueries");
+      applyDaemonEvent(qc, "event.dropped", {});
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.workspaceTree() });
+    });
+  });
 });

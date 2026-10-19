@@ -17,21 +17,18 @@ import type { Command } from "@/palette/commands";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { useProfileList } from "@/hooks/use-profiles";
+import { useWorkspaceTree } from "@/hooks/use-workspace-tree";
 import { useProviderHealth } from "@/hooks/use-provider-health";
 import { Icons } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
 import type {
-  Space,
   Task,
   TaskStat,
   TaskStatusEventPayload,
   Workspace,
 } from "@/lib/types";
 import {
-  applyLifecycleEvent,
-  buildWorkspaceTree,
-  LIFECYCLE_TOPICS,
   recentWorkspaceParentDirs,
   searchTasks,
   type SpaceWithTasks,
@@ -181,95 +178,6 @@ const ATTENTION_LABEL: Record<AttentionReason, string> = {
   permission: "a permission is waiting",
   finished: "a run finished",
 };
-
-/**
- * Loads workspace.list plus, per workspace, space.list and task.list (both
- * scoped by workspaceId, fetched in parallel), over the given WsClient (a
- * live connection to the daemon's /ws) -- there is no mock/static data
- * path. task.list returns every task in the workspace regardless of space
- * (see internal/wsapi's handleTaskList), so grouping by Task.SpaceID
- * happens client-side here rather than via a per-space query. Returns a
- * discriminated status so the sidebar can render loading/error/empty/loaded
- * states distinctly.
- *
- * ADR 0009's lifecycle topics then keep that tree live: a workspace,
- * space or task created, archived or deleted anywhere -- a second browser
- * tab, or the CLI, both of which drive this same daemon -- is spliced into
- * the tree here without a refetch. Delivery is live-only with no replay,
- * so the full fetch remains the source of truth and re-runs on the two
- * occasions an event stream cannot cover: a new connection (`client`
- * changes on every reconnect) and `event.dropped`, the daemon's synthetic
- * notification that its per-connection queue overflowed.
- *
- * `refresh` bumps an internal counter that re-runs the fetch. The acting
- * client still calls it after its own successful mutation even though the
- * event covers that case too -- events.subscribe is fire-and-forget, so a
- * connection that failed to subscribe must not silently stop showing this
- * user's own new rows. `applyLifecycleEvent` upserts by ID, so the two
- * paths converge instead of double-inserting (ADR 0009: an event is not
- * ordered against the RPC response that caused it).
- */
-function useWorkspaceTree(client: WsClient | null, events: DaemonEvents | null) {
-  const [workspaces, setWorkspaces] = useState<WorkspaceWithTree[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshCounter, setRefreshCounter] = useState(0);
-  const refresh = useCallback(() => setRefreshCounter((c) => c + 1), []);
-
-  useEffect(() => {
-    if (!client) return;
-    let cancelled = false;
-
-    setWorkspaces(null);
-    setError(null);
-
-    (async () => {
-      // ?? [] tolerates a daemon that answers null for an empty list
-      // (defense in depth; the wire contract is backend-owned).
-      const list = (await client.call<Workspace[]>("workspace.list")) ?? [];
-      return await Promise.all(
-        list.map(async (ws) => {
-          const [spaces, tasks] = await Promise.all([
-            client.call<Space[]>("space.list", { workspaceId: ws.ID }).then((r) => r ?? []),
-            client.call<Task[]>("task.list", { workspaceId: ws.ID }).then((r) => r ?? []),
-          ]);
-          return buildWorkspaceTree(ws, spaces, tasks);
-        }),
-      );
-    })()
-      .then((withTree) => {
-        if (!cancelled) setWorkspaces(withTree);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [client, refreshCounter]);
-
-  useEffect(() => {
-    if (!events) return;
-    const offs = LIFECYCLE_TOPICS.map((topic) =>
-      events.subscribe(topic, (payload) => {
-        // A null tree means the initial fetch is still in flight; that
-        // fetch reads committed state, so it already includes whatever
-        // this event describes and splicing into nothing would be lost
-        // anyway.
-        setWorkspaces((prev) => (prev === null ? prev : applyLifecycleEvent(prev, topic, payload)));
-      }),
-    );
-    // The daemon dropped events for this connection, so the tree may have
-    // missed a create or a delete entirely -- ADR 0009's reconciliation
-    // rule is a full refetch, the same one a reconnect performs.
-    offs.push(events.subscribe("event.dropped", () => refresh()));
-    return () => {
-      for (const off of offs) off();
-    };
-  }, [events, refresh]);
-
-  return { workspaces, error, refresh };
-}
 
 /**
  * Everything a sidebar row needs to draw its signal, in one context
@@ -458,7 +366,7 @@ export function AppSidebar({
   connectionStatus?: ConnectionStatus;
   connectionStatusText?: string;
 }) {
-  const { workspaces, error, refresh } = useWorkspaceTree(client, events ?? null);
+  const { workspaces, error, refresh } = useWorkspaceTree();
   const statusOverrides = useStatusOverrides(client, events ?? null);
   const workspaceIds = useMemo(() => (workspaces ?? []).map((ws) => ws.ID), [workspaces]);
   const stats = useTaskStats(client, events ?? null, workspaceIds);

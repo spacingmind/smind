@@ -1,9 +1,11 @@
 import { act } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { describe, expect, it } from "vitest";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import "@/components/settings/usage-section";
+import { useWorkspaceTree } from "@/hooks/use-workspace-tree";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { UsageSummaryRow, Workspace } from "@/lib/types";
 
@@ -143,13 +145,42 @@ describe("usage-section", () => {
     const client = new FakeWsClient();
     renderSection(client);
     client.nth("usage.summary").resolve([runRow({ key: "11" }), runRow({ key: "999" })]);
+    // The names come from the shared workspace tree: workspace.list + that workspace's space.list/task.list.
     client.nth("workspace.list").resolve(WORKSPACES);
     await flush();
+    client.nth("space.list").resolve([]);
     client.nth("task.list").resolve(TASKS);
     await flush();
 
     expect(screen.getByTestId("usage-row-runs-11")).toHaveTextContent("Fix login");
     expect(screen.getByTestId("usage-row-runs-999")).toHaveTextContent("Task #999");
+  });
+
+  it("usage-section reads the shared workspace tree: with the sidebar's tree mounted too, each workspace's tasks are fetched once, not once more per consumer", async () => {
+    const client = new FakeWsClient();
+    const section = listSettingsSections().find((s) => s.id === "usage")!;
+    function SidebarTree() {
+      useWorkspaceTree(); // what AppSidebar mounts
+      return null;
+    }
+    render(
+      <>
+        <SidebarTree />
+        {section.render({ client: client as never, events: null })}
+      </>,
+    );
+    client.nth("usage.summary").resolve([runRow({ key: "11" })]);
+    client.nth("workspace.list").resolve([...WORKSPACES, { ...WORKSPACES[0]!, ID: 2, Title: "Beta" }]);
+    await flush();
+    for (const call of client.calls.filter((c) => c.method === "space.list")) call.resolve([]);
+    for (const call of client.calls.filter((c) => c.method === "task.list")) call.resolve(TASKS);
+    await flush();
+
+    expect(screen.getByTestId("usage-row-runs-11")).toHaveTextContent("Fix login");
+    // One tree for both consumers: 1 workspace.list, and one task.list per workspace (2) -- not a second
+    // workspace.list + per-workspace task.list from the usage section.
+    expect(client.calls.filter((c) => c.method === "workspace.list")).toHaveLength(1);
+    expect(client.calls.filter((c) => c.method === "task.list")).toHaveLength(2);
   });
 
   it("shows an empty state when there are no rows", async () => {

@@ -53,6 +53,19 @@ export class FakeWsClient implements WsClientLike {
     return call;
   }
 
+  private pushListeners = new Set<(n: { topic: string; payload: unknown }) => void>();
+
+  /** What the real WsClient offers `useDaemonEvents` (the event -> query-cache bridge). */
+  onNotification(listener: (n: { topic: string; payload: unknown }) => void): () => void {
+    this.pushListeners.add(listener);
+    return () => this.pushListeners.delete(listener);
+  }
+
+  /** Pushes a daemon notification (an ADR 0005/0009 event) to whoever bridged this client; wrap in `act`. */
+  pushNotification(topic: string, payload: unknown): void {
+    for (const listener of this.pushListeners) listener({ topic, payload });
+  }
+
   /** Fires a server-pushed event on the nth recorded call for method. */
   emit(method: string, index: number, event: string, params: unknown): void {
     this.nth(method, index).onEvent?.(event, params);
