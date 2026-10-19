@@ -1,4 +1,5 @@
 import { act } from "react";
+import { useDefaultAgentStore } from "@/stores/default-agent-store";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -1283,7 +1284,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
     });
 
     it("a task with no persisted run-config starts from the ★ default agent", async () => {
-      window.localStorage.setItem("smind:settings:defaultAgentId", "1");
+      useDefaultAgentStore.getState().set("1");
       const client = new FakeWsClient();
       renderComposer({ client, taskId: 5 });
 
@@ -1303,7 +1304,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
     });
 
     it("a task that already has a persisted run-config is not overridden by the ★ default agent", async () => {
-      window.localStorage.setItem("smind:settings:defaultAgentId", "1");
+      useDefaultAgentStore.getState().set("1");
       window.localStorage.setItem(
         "smind:run-config:5:10",
         JSON.stringify({ baseAgentId: null, custom: false, provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "" }),
