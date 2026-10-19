@@ -146,6 +146,8 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
     }
     case "learning.job": {
       const p = payload as Partial<LearningJobPayload> | null;
+      // A finished job changes what the workspace has spent, which the status entry carries.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.learningStatus() });
       void queryClient.invalidateQueries({
         queryKey: typeof p?.workspaceId === "number" ? queryKeys.learningJobsOf(p.workspaceId) : queryKeys.learningJobsAll(),
       });

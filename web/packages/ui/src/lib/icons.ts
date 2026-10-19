@@ -12,7 +12,7 @@
 // Ellipsis, ExternalLink, Undo2 for reset, CircleAlert / TriangleAlert /
 // CircleCheck for states, Bot for agents, Brain for thinking, Pencil for
 // edit); terminal is `>_` per the app-header-and-tabs plan (D8). Provider brand marks live in
-// components/composer/provider-glyph.tsx, file-type glyphs in lib/file-icons.tsx.
+// components/provider-icon.tsx, file-type glyphs in lib/file-icons.tsx.
 import {
   ArrowDown,
   ArrowLeft,

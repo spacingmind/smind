@@ -277,7 +277,7 @@ describe("browser providers", () => {
       {
         key: "kimi:",
         provider: "kimi",
-        providerLabel: "kimi",
+        providerLabel: "Kimi",
         modelId: "",
         modelLabel: "Default model",
         description: undefined,

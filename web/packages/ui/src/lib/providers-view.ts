@@ -1,4 +1,5 @@
 import { usageCopy } from "@/lib/account-usage/copy";
+import { providerLabel } from "@/lib/provider-catalog";
 import { activeCooldown } from "@/lib/account-usage/model";
 import type { AccountUsage, UsageWindow } from "@/lib/account-usage/types";
 import type { Account, ProviderInfo, ProviderTestResult } from "@/lib/types";
@@ -31,7 +32,7 @@ export function buildProviderNav(input: {
       : input.accounts.filter((account) => account.provider === info.accountProvider).map((a) => a.id);
     return {
       id: info.id,
-      label: info.label ?? info.id,
+      label: providerLabel(info.id, [info]),
       accountProvider: info.accountProvider,
       kind: isCli ? "cli" : (info.credentialKind ?? "other"),
       accountIds,

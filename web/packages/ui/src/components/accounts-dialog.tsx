@@ -1,4 +1,5 @@
 import { Icons } from "@/lib/icons";
+import { LoadingRows } from "@/components/ui/loading-rows";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -27,10 +28,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { FormError } from "@/components/ui/form-error";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
 import { externalLinkProps } from "@/lib/external-link";
 import { connectMethodsFor, defaultConnectMethod, type ConnectMethod } from "@/lib/login-methods";
 import { isDesktop } from "@/lib/platform";
+import { accountProviderLabel } from "@/lib/provider-catalog";
 import type { Account, ProviderInfo, ProviderTestResult } from "@/lib/types";
 
 import type { WsClient } from "@/lib/ws-client";
@@ -65,11 +69,6 @@ import { queryKeys } from "@/lib/query-keys";
 /** Providers with a credential row at all (kind is unset) -- feeds the manual-add dropdown. */
 export function credentialProviders(providers: ProviderInfo[]): ProviderInfo[] {
   return providers.filter((p) => p.credentialKind);
-}
-
-/** Friendly display label for an accounts-vocabulary provider id (Account.provider), falling back to the raw id for anything provider.list didn't describe (see the gap noted above). */
-export function providerLabel(providers: ProviderInfo[], id: string): string {
-  return providers.find((p) => p.accountProvider === id)?.label ?? id;
 }
 
 /** A small connection-status dot: green once provider.test reports ok, red once it reports not-ok, neutral (gray) until tested at all -- deepseek-harness's credential-configured-dot pattern, now on the shared StatusDot primitive (ui-redesign-parity plan, Item 2). */
@@ -455,7 +454,7 @@ export function ConnectAccountPanel({
       )}
       {method === "api-key" && selectedProvider && !relogin ? (
         <div className="grid gap-3">
-          {error && <p className="text-ui-base text-destructive">{error}</p>}
+          {error && <FormError message={error} />}
           <div className="grid gap-2">
             <label htmlFor="account-credential" className="text-ui-base font-medium">
               Credential
@@ -506,7 +505,7 @@ export function ConnectAccountPanel({
       ) : selectedProvider ? (
         <div className="grid gap-3">
           {error && (
-            <p className="text-ui-base text-destructive">{error}</p>
+            <FormError message={error} />
           )}
           <div>
             <Button
@@ -671,10 +670,10 @@ export function AccountsDialog({
             Provider accounts used for routing. No edit or removal yet.
           </DialogDescription>
         </DialogHeader>
-        {error && <p className="text-ui-base text-destructive">{error}</p>}
+        {error && <FormError message={error} />}
         <div className="max-h-40 overflow-y-auto">
           {accounts === undefined ? (
-            <p className="text-ui-base text-muted-foreground">Loading…</p>
+            <LoadingRows rows={2} />
           ) : accounts.length === 0 ? (
             <p className="text-ui-base text-muted-foreground">
               No accounts yet — connect one below.
@@ -724,9 +723,9 @@ function AccountListRow({ account, providers }: { account: Account; providers: P
           <span className="min-w-0 truncate font-medium">{account.label}</span>
         </span>
         <span className="flex shrink-0 items-center gap-2">
-          <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">
-            {providerLabel(providers, account.provider)} · {account.credentialType}
-          </span>
+          <StatusBadge status="neutral">
+            {accountProviderLabel(account.provider, providers)} · {account.credentialType}
+          </StatusBadge>
           <TestRowButton providerId={account.provider} testing={testing} />
         </span>
       </div>
@@ -757,9 +756,9 @@ function ExternalProviderRow({ provider }: { provider: ProviderInfo }) {
           <span className="min-w-0 truncate font-medium">{provider.label ?? provider.id}</span>
         </span>
         <span className="flex shrink-0 items-center gap-2">
-          <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">
+          <StatusBadge status="neutral">
             Managed externally via CLI
-          </span>
+          </StatusBadge>
           <TestRowButton providerId={provider.id} testing={testing} />
         </span>
       </div>

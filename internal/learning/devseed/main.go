@@ -24,6 +24,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/learning"
 	"github.com/spacingmind/smind/internal/learning/approval"
 	"github.com/spacingmind/smind/internal/learning/gate"
 	"github.com/spacingmind/smind/internal/store"
@@ -337,8 +338,35 @@ func seed(st *store.Store, home string) (store.Workspace, error) {
 	if err := svc.Reject(rej.ID, "Too broad and unsafe; the failure was a one-off.", "human"); err != nil {
 		return store.Workspace{}, err
 	}
+	if err := seedReflectUsage(st, ws); err != nil {
+		return store.Workspace{}, err
+	}
 	_ = home
 	return ws, nil
+}
+
+// seedReflectUsage records one finished reflect run, a few hours old, so the
+// Settings budget row has something to show: about $0.21 of the $0.25 daily
+// cap and 130k of 150k tokens, which is the warning level. The run belongs to
+// a hidden system task, like a real reflection job's.
+func seedReflectUsage(st *store.Store, ws store.Workspace) error {
+	task, chat, err := st.CreateSystemTask(ws.ID, "Learning: reflect", ws.Path)
+	if err != nil {
+		return err
+	}
+	finished := time.Now().UTC().Add(-3 * time.Hour)
+	const runID = "5c1e0b7a93d4f268"
+	if _, err := st.CreateRun(store.Run{
+		ID: runID, TaskID: task.ID, ChatID: chat.ID, Provider: "claude", Prompt: "reflect on a finished chat",
+		Status: "done", Purpose: learning.PurposeReflect, StartedAt: finished.Add(-4 * time.Minute), FinishedAt: &finished,
+	}); err != nil {
+		return err
+	}
+	in, out, cost := int64(118_000), int64(12_000), 0.21
+	return st.UpsertRunUsage(store.RunUsage{
+		RunID: runID, TaskID: task.ID, ChatID: &chat.ID, Provider: "claude",
+		InputTokens: &in, OutputTokens: &out, CostUSD: &cost, Source: "devseed",
+	})
 }
 
 // seedCounters sets the usage counters the lifecycle observer would have

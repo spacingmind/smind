@@ -40,7 +40,7 @@ describe("buildProviderNav", () => {
       connected: false,
     });
     expect(items[1].kind).toBe("api-key");
-    expect(items[2]).toMatchObject({ label: "glm", kind: "other", accountProvider: undefined });
+    expect(items[2]).toMatchObject({ label: "GLM", kind: "other", accountProvider: undefined });
   });
 
   it("nav item tone is the worst account tone", () => {

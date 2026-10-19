@@ -2,7 +2,7 @@ import type { JSX } from "react";
 
 import { Icons } from "@/lib/icons";
 import type { ProviderNavItem, NavTone } from "@/lib/providers-view";
-import { ProviderGlyph } from "@/components/composer/provider-glyph";
+import { ProviderIcon } from "@/components/provider-icon";
 import { StatusDot } from "@/components/ui/status-dot";
 
 const TONE_STATUS: Record<NavTone, "success" | "warning" | "danger" | "neutral"> = {
@@ -55,7 +55,7 @@ export function ProviderNav(props: {
                   onClick={() => onSelect(item.id)}
                   className={`relative size-10 grid place-items-center rounded-lg hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/50 outline-none ${selectedClasses}`}
                 >
-                  {item.id === "other" ? <Icons.credentials className="size-4" /> : <ProviderGlyph provider={item.id} size={16} />}
+                  {item.id === "other" ? <Icons.credentials className="size-4" /> : <ProviderIcon provider={item.id} size={16} />}
                   <StatusDot
                     status={TONE_STATUS[item.tone]}
                     title={toneLabel(item)}
@@ -79,7 +79,7 @@ export function ProviderNav(props: {
                 {item.id === "other" ? (
                   <Icons.credentials className="size-4 shrink-0" />
                 ) : (
-                  <ProviderGlyph provider={item.id} size={16} />
+                  <ProviderIcon provider={item.id} size={16} />
                 )}
                 <span className="truncate text-ui-base">{item.label}</span>
                 {item.accountIds.length > 0 && (

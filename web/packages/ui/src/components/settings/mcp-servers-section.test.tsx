@@ -230,7 +230,7 @@ describe("mcp-servers-section", () => {
     fireEvent.click(await screen.findByTestId("mcp-delete-1"));
     await flush();
 
-    // The menu item only armed the inline confirmation -- nothing sent yet.
+    // The menu item only opened the confirmation -- nothing sent yet.
     expect(client.calls.some((c) => c.method === "mcp.delete")).toBe(false);
     expect(screen.getByTestId("mcp-delete-confirm-1")).toBeInTheDocument();
 
@@ -241,6 +241,31 @@ describe("mcp-servers-section", () => {
     client.nth("mcp.delete").resolve({});
     await flush();
     expect(screen.queryByTestId("mcp-row-1")).not.toBeInTheDocument();
+  });
+
+  it("cancelling the delete confirmation sends nothing, and a failed delete stays open with the message", async () => {
+    const client = new FakeWsClient();
+    renderSection(client);
+    client.nth("mcp.list").resolve([STDIO_SERVER]);
+    await flush();
+
+    fireEvent.pointerDown(screen.getByTestId("mcp-menu-1"), { button: 0 });
+    fireEvent.click(await screen.findByTestId("mcp-delete-1"));
+    await flush();
+    fireEvent.click(screen.getByTestId("mcp-delete-cancel-1"));
+    await flush();
+    expect(screen.queryByTestId("mcp-delete-dialog")).not.toBeInTheDocument();
+    expect(client.calls.some((c) => c.method === "mcp.delete")).toBe(false);
+
+    fireEvent.pointerDown(screen.getByTestId("mcp-menu-1"), { button: 0 });
+    fireEvent.click(await screen.findByTestId("mcp-delete-1"));
+    await flush();
+    fireEvent.click(screen.getByTestId("mcp-delete-confirm-1"));
+    await flush();
+    client.nth("mcp.delete").reject(new Error("mcp server is attached to a running task"));
+    await flush();
+    expect(screen.getByTestId("mcp-delete-error-1")).toHaveTextContent("mcp server is attached to a running task");
+    expect(screen.getByTestId("mcp-row-1")).toBeInTheDocument();
   });
 
   it("edit keeps [redacted] placeholders when values untouched and sends new value when changed", async () => {

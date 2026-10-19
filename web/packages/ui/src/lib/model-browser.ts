@@ -3,6 +3,7 @@
 // ProviderInfo/ModelInfo wire types for the combined provider+model picker.
 
 import type { ProviderInfo } from "@/lib/types";
+import { providerLabel } from "@/lib/provider-catalog";
 import { compareMatchScores, scoreTextFields } from "./text-match";
 
 export interface ModelRow {
@@ -72,7 +73,7 @@ export function buildBrowserProviders(
   options?: { loading?: boolean },
 ): BrowserProvider[] {
   return providers.map((info) => {
-    const label = info.label ?? info.id;
+    const label = providerLabel(info.id, [info]);
     if (options?.loading) {
       const h = health[info.id];
       return h && h.ok === false
