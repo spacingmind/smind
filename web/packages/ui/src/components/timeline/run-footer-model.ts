@@ -63,7 +63,6 @@ const CAP_SENTENCES: Record<string, string> = {
 };
 
 const MINUTE_MS = 60_000;
-const DAY_MS = 86_400_000;
 
 /**
  * A duration as Paseo words it (`9s`, `1m 42s`, `1h 5m`); under a second
