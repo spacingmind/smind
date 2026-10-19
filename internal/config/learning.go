@@ -1,6 +1,9 @@
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // LearningConfig is the learning subsystem's knob surface (ADR-0026): a
 // global kill switch plus the caps and budgets the plan fixes as defaults.
@@ -54,6 +57,14 @@ type LearningConfig struct {
 	ClaudeIndexPreface bool `yaml:"claudeIndexPreface"`
 	// Similarity sets the duplicate thresholds.
 	Similarity LearningSimilarity `yaml:"similarity"`
+	// ReflectorModel is the claude-native model the reflector runs on.
+	// Default "haiku" (the CLI alias for the latest Haiku; a cheap model is
+	// recommended, the reflector only distils a bounded window). "" = the
+	// provider default.
+	ReflectorModel string `yaml:"reflectorModel"`
+	// CuratorModel is the model the curator runs on. Default "haiku"; "" =
+	// the provider default.
+	CuratorModel string `yaml:"curatorModel"`
 }
 
 // LearningSimilarity holds the near-duplicate thresholds: at/above Duplicate
@@ -91,6 +102,8 @@ func DefaultLearning() LearningConfig {
 		PrefaceBudgetBytes:     6144,
 		ClaudeIndexPreface:     false,
 		Similarity:             LearningSimilarity{Duplicate: 0.85, Possible: 0.60},
+		ReflectorModel:         "haiku",
+		CuratorModel:           "haiku",
 	}
 }
 
@@ -121,11 +134,36 @@ func (c LearningConfig) Validate() error {
 			return fmt.Errorf("learning.%s must be >= 1, got %d", kv.key, kv.val)
 		}
 	}
+	for key, m := range map[string]string{"reflectorModel": c.ReflectorModel, "curatorModel": c.CuratorModel} {
+		if err := validModel(m); err != nil {
+			return fmt.Errorf("learning.%s: %w", key, err)
+		}
+	}
 	if c.DailyBudgetUSD <= 0 {
 		return fmt.Errorf("learning.dailyBudgetUSD must be > 0, got %v", c.DailyBudgetUSD)
 	}
 	if s := c.Similarity; !(s.Possible > 0 && s.Duplicate > s.Possible && s.Duplicate <= 1) {
 		return fmt.Errorf("learning.similarity needs 0 < possible < duplicate <= 1, got duplicate %v, possible %v", s.Duplicate, s.Possible)
+	}
+	return nil
+}
+
+// validModel mirrors the shape rules of taskrunner.ValidateModelSyntax
+// (config cannot import it): the value reaches `--model <name>` as argv.
+func validModel(m string) error {
+	if len(m) > 100 {
+		return fmt.Errorf("model %q is longer than 100 characters", m)
+	}
+	if strings.HasPrefix(m, "-") {
+		return fmt.Errorf("model %q must not begin with '-'", m)
+	}
+	for _, c := range m {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case strings.ContainsRune("._:/@[]-", c):
+		default:
+			return fmt.Errorf("model %q: only letters, digits and . _ : / @ [ ] - are allowed", m)
+		}
 	}
 	return nil
 }

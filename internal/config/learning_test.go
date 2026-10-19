@@ -120,6 +120,7 @@ func TestConfig_LearningEnvKillSwitch(t *testing.T) {
 		"probationRuns": false, "capacity": false, "curatorEveryLandings": false,
 		"curatorMinSkills": false, "curatorMinIntervalDays": false,
 		"prefaceBudgetBytes": false, "claudeIndexPreface": false, "similarity": false,
+		"reflectorModel": false, "curatorModel": false,
 	}
 	got := reflect.TypeOf(LearningConfig{})
 	if got.NumField() != len(want) {
@@ -184,5 +185,35 @@ func TestConfig_LearningFailsClosedOnBrokenFile(t *testing.T) {
 	}
 	if cfg.Learning.Enabled {
 		t.Fatal("unreadable config left learning enabled")
+	}
+}
+
+// TestConfig_LearningModelKnobs covers the reflector/curator model knobs:
+// cheap-Claude defaults, override, "" = provider default, and rejection of
+// values that could be read as argv flags.
+func TestConfig_LearningModelKnobs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	t.Setenv(EnvLearning, "")
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, err := Load()
+	if err != nil || cfg.Learning.ReflectorModel != "haiku" || cfg.Learning.CuratorModel != "haiku" {
+		t.Fatalf("defaults = %q/%q, err %v", cfg.Learning.ReflectorModel, cfg.Learning.CuratorModel, err)
+	}
+	write("learning:\n  reflectorModel: claude-haiku-5-5\n  curatorModel: \"\"\n")
+	cfg, err = Load()
+	if err != nil || cfg.Learning.ReflectorModel != "claude-haiku-5-5" || cfg.Learning.CuratorModel != "" {
+		t.Fatalf("override = %q/%q, err %v", cfg.Learning.ReflectorModel, cfg.Learning.CuratorModel, err)
+	}
+	for _, bad := range []string{"--dangerously-skip-permissions", "a b", "x;y"} {
+		write("learning:\n  reflectorModel: \"" + bad + "\"\n")
+		if _, err := Load(); err == nil {
+			t.Fatalf("reflectorModel %q accepted", bad)
+		}
 	}
 }
