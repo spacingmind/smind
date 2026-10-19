@@ -240,6 +240,18 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		// ADR-0026: who authored a run's prompt (human|orchestrator|agent)
+		// and whether it was a mid-run interrupt, for the window builder.
+		// Pre-existing runs keep '' (unknown) / 0.
+		name: "run_origin",
+		apply: func(db *sql.DB) error {
+			if err := addColumnIfMissing(db, "runs", "origin", "TEXT NOT NULL DEFAULT ''"); err != nil {
+				return err
+			}
+			return addColumnIfMissing(db, "runs", "interrupt", "INTEGER NOT NULL DEFAULT 0")
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and

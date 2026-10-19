@@ -87,6 +87,9 @@ func (reg *Registry) starterDeps() (*workspace.Manager, *taskrunner.Runner, bool
 // configuration (ADR-0019 decision 6, at enqueue time per ADR-0021 §6).
 func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel, whenBusy WhenBusy, source string, fromTaskID, fromChatID int64, opts ...StartOption) (StartOutcome, error) {
 	model := startModel(opts)
+	if resolveStartOptions(opts).isolation != nil {
+		return StartOutcome{}, errors.New("runs: start: WithIsolation is only supported by Start, not StartWhenBusy")
+	}
 	if whenBusy == "" {
 		whenBusy = WhenBusyReject // the wire default: old clients unchanged
 	}
@@ -145,6 +148,8 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		thinkingLevel:      thinkingLevel,
 		model:              model,
 		purpose:            startPurpose(opts),
+		origin:             source,
+		interrupt:          resolveStartOptions(opts).interrupt,
 		worktree:           worktree,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
@@ -356,7 +361,11 @@ func (reg *Registry) deliverOne(chatID int64) {
 			continue
 		}
 
-		runID, err := reg.Start(context.Background(), wm, runner, chat.TaskID, chatID, taskrunner.Provider(cfg.Provider), deliverPrompt(item), taskrunner.PermissionSettings{Mode: cfg.PermissionMode, AutoAccept: cfg.AutoAccept}, taskrunner.ThinkingLevel(cfg.ThinkingLevel), WithModel(cfg.Model))
+		startOpts := []StartOption{WithModel(cfg.Model), WithOrigin(item.Source)}
+		if item.Priority == 1 {
+			startOpts = append(startOpts, WithInterrupt())
+		}
+		runID, err := reg.Start(context.Background(), wm, runner, chat.TaskID, chatID, taskrunner.Provider(cfg.Provider), deliverPrompt(item), taskrunner.PermissionSettings{Mode: cfg.PermissionMode, AutoAccept: cfg.AutoAccept}, taskrunner.ThinkingLevel(cfg.ThinkingLevel), startOpts...)
 		if err != nil {
 			var busyErr *ChatBusyError
 			var setupErr *SetupBusyError
@@ -481,8 +490,58 @@ func (reg *Registry) CancelQueuedItem(id int64) error {
 type StartOption func(*startOptions)
 
 type startOptions struct {
-	model   string
-	purpose string
+	model     string
+	purpose   string
+	origin    string
+	interrupt bool
+	isolation *taskrunner.IsolationOptions
+}
+
+// WithOrigin records who authored the run's prompt (store.ChatQueueSource*:
+// human, orchestrator, agent) on the run, for ADR-0026's window builder.
+// Omitted = ” (unknown). StartWhenBusy stamps its own source argument on an
+// immediate start, so callers only need this on a direct Start.
+func WithOrigin(source string) StartOption {
+	return func(o *startOptions) { o.origin = source }
+}
+
+// WithInterrupt marks the run's prompt as a mid-run interrupt (a delivered
+// priority-1 queue item).
+func WithInterrupt() StartOption {
+	return func(o *startOptions) { o.interrupt = true }
+}
+
+// WithIsolation runs the turn through Runner.RunPromptIsolated (no tools, no
+// MCP, no ambient context; ADR-0026) instead of RunPrompt. Only a system run
+// may be isolated -- it requires WithPurpose -- and only on claude-native
+// (D13); Start refuses anything else before registering or persisting a
+// run. The run's permission requests stay the system auto-deny. Start only:
+// StartWhenBusy rejects it, because a queued item cannot carry it.
+func WithIsolation(iso taskrunner.IsolationOptions) StartOption {
+	return func(o *startOptions) { o.isolation = &iso }
+}
+
+// validateIsolation is Start's pre-registration check of WithIsolation.
+func validateIsolation(provider taskrunner.Provider, opts []StartOption) error {
+	o := resolveStartOptions(opts)
+	if o.isolation == nil {
+		return nil
+	}
+	if startPurpose(opts) == "" {
+		return errors.New("runs: start: WithIsolation requires a system purpose (WithPurpose)")
+	}
+	if provider != taskrunner.ProviderClaudeNative {
+		return fmt.Errorf("runs: start: %w (got %q)", taskrunner.ErrIsolationUnsupported, provider)
+	}
+	return nil
+}
+
+func resolveStartOptions(opts []StartOption) startOptions {
+	var o startOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return o
 }
 
 // WithPurpose marks the run as a system run (ADR-0026: "reflect",

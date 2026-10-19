@@ -107,6 +107,16 @@ func WithCodexPermissionPolicy(p codex.PermissionPolicy) Option {
 	return func(r *Runner) { r.codexPermissionPolicy = p }
 }
 
+// WithClaudeCLIPath makes claude-native runs (RunPrompt and RunPromptIsolated)
+// start the CLI at path, with env appended to the CLI's environment, instead
+// of the platform default. The seam for tests that re-execute their own
+// binary as the fake CLI (internal/taskrunner/fakeclaude).
+func WithClaudeCLIPath(path string, env ...string) Option {
+	return func(r *Runner) {
+		r.claudeLaunch = func() (string, []string, error) { return path, env, nil }
+	}
+}
+
 // WithCodexCommand overrides the command spawned for ProviderCodexNative
 // turns, in place of the default codex.DefaultCommand(). Same reasoning and
 // use (pointing at a compiled fake-agent binary in tests) as

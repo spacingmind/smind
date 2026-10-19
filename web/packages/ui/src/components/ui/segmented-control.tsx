@@ -14,6 +14,7 @@ export function SegmentedControl<T extends string>({
   onChange,
   label,
   className,
+  disabled,
 }: {
   options: { value: T; label: string }[];
   value: T;
@@ -21,12 +22,14 @@ export function SegmentedControl<T extends string>({
   /** Accessible name of the whole group. */
   label: string;
   className?: string;
+  disabled?: boolean;
 }) {
   return (
     <ToggleGroup.Root
       type="single"
       value={value}
       aria-label={label}
+      disabled={disabled}
       onValueChange={(next) => {
         // Radix reports "" when the pressed segment is clicked again; a
         // segmented control always has a selection.

@@ -295,6 +295,13 @@ func mcpSecrets(rows []store.McpServer) []string {
 	return out
 }
 
+// McpSecrets is mcpSecrets for packages that scrub text of MCP server
+// secrets themselves (the learning collector).
+func McpSecrets(rows []store.McpServer) []string { return mcpSecrets(rows) }
+
+// MinSecretLen is the shortest value McpSecrets reports.
+const MinSecretLen = minSecretLen
+
 // scrubSecrets replaces every occurrence of each secret in s with
 // redactedPlaceholder. Longer secrets go first so one that contains
 // another is replaced whole.

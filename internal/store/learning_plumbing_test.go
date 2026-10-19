@@ -165,3 +165,20 @@ func TestWorkspaces_LearningModeRoundTrip(t *testing.T) {
 		t.Fatalf("got %q list %+v", got.LearningMode, list)
 	}
 }
+
+func TestGetSystemTask(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	user := newTestTaskForRuns(t, s)
+	if _, ok, err := s.GetSystemTask(user.WorkspaceID); err != nil || ok {
+		t.Fatalf("GetSystemTask before create = ok %v, err %v; want absent", ok, err)
+	}
+	sys, _, err := s.CreateSystemTask(user.WorkspaceID, "learning", "/cwd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := s.GetSystemTask(user.WorkspaceID)
+	if err != nil || !ok || got.ID != sys.ID || got.Kind != TaskKindSystem {
+		t.Fatalf("GetSystemTask = %+v, ok %v, err %v", got, ok, err)
+	}
+}

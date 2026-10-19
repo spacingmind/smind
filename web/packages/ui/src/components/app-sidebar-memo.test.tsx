@@ -1,5 +1,6 @@
 import { act } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { describe, expect, it, vi } from "vitest";
 
 import { AppSidebar } from "@/components/app-sidebar";

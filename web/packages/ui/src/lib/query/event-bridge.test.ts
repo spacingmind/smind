@@ -4,7 +4,7 @@ import type { AccountUsage, UsageQueryData } from "@/lib/account-usage/types";
 import { applyDaemonEvent } from "@/lib/query/event-bridge";
 import { createQueryClient } from "@/lib/query/query-client";
 import { queryKeys } from "@/lib/query-keys";
-import type { Account } from "@/lib/types";
+import type { Account, AgentProfile } from "@/lib/types";
 
 const account = (id: number, label: string): Account => ({
   id,
@@ -14,6 +14,18 @@ const account = (id: number, label: string): Account => ({
   createdAt: "",
   updatedAt: "",
 });
+const profile = (id: number, name: string): AgentProfile => ({
+  ID: id,
+  Name: name,
+  Provider: "claude-native",
+  PermissionMode: "",
+  AutoAccept: false,
+  ThinkingLevel: "",
+  Notes: "",
+  CreatedAt: "",
+  UpdatedAt: "",
+});
+
 const usage = (accountId: number, displayName: string): AccountUsage => ({
   accountId,
   key: `anthropic-${accountId}`,
@@ -76,11 +88,55 @@ describe("applyDaemonEvent", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.accountUsage() });
   });
 
+  it("profile.created/updated upsert the cached list; deleted filters it", () => {
+    const qc = createQueryClient();
+    qc.setQueryData(queryKeys.profileList(), [profile(1, "Quick")]);
+    applyDaemonEvent(qc, "profile.created", { profile: profile(2, "New") });
+    applyDaemonEvent(qc, "profile.updated", { profile: profile(1, "Renamed") });
+    expect(qc.getQueryData<AgentProfile[]>(queryKeys.profileList())?.map((p) => p.Name)).toEqual(["Renamed", "New"]);
+    applyDaemonEvent(qc, "profile.deleted", { id: 2 });
+    expect(qc.getQueryData<AgentProfile[]>(queryKeys.profileList())?.map((p) => p.ID)).toEqual([1]);
+  });
+
+  it("profile events with a malformed payload or no cached list invalidate instead", () => {
+    const qc = createQueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    applyDaemonEvent(qc, "profile.created", { profile: profile(2, "New") });
+    applyDaemonEvent(qc, "profile.updated", {});
+    applyDaemonEvent(qc, "profile.deleted", {});
+    expect(qc.getQueryData(queryKeys.profileList())).toBeUndefined();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.profileList() });
+  });
+
   it("does not create cache entries nobody asked for", () => {
     const qc = createQueryClient();
     applyDaemonEvent(qc, "account.usage", { usage: usage(2, "Fresh") });
     applyDaemonEvent(qc, "account.removed", { id: 2 });
     expect(qc.getQueryData(queryKeys.accountUsage())).toBeUndefined();
     expect(qc.getQueryData(queryKeys.accountList())).toBeUndefined();
+  });
+
+  it("profile.updated for a profile the cache does not hold re-reads instead of resurrecting it", () => {
+    const qc = createQueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    qc.setQueryData(queryKeys.profileList(), [{ ID: 1, Name: "A" }]);
+    applyDaemonEvent(qc, "profile.updated", { profile: { ID: 9, Name: "Ghost" } });
+    expect(qc.getQueryData<{ ID: number }[]>(queryKeys.profileList())?.map((p) => p.ID)).toEqual([1]);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.profileList() });
+    // A *created* profile is upserted.
+    applyDaemonEvent(qc, "profile.created", { profile: { ID: 2, Name: "B" } });
+    expect(qc.getQueryData<{ ID: number }[]>(queryKeys.profileList())?.map((p) => p.ID)).toEqual([1, 2]);
+  });
+
+  it("account.updated / account.removed drop the provider's cached health answer", () => {
+    const qc = createQueryClient();
+    qc.setQueryData(queryKeys.providerTest("anthropic"), { ok: false, detail: "old" });
+    qc.setQueryData(queryKeys.providerTest("openai"), { ok: true, detail: "ok" });
+    qc.setQueryData(queryKeys.accountList(), [account(1, "A"), { ...account(2, "B"), provider: "openai" }]);
+    applyDaemonEvent(qc, "account.updated", { account: account(1, "A") });
+    expect(qc.getQueryData(queryKeys.providerTest("anthropic"))).toBeUndefined();
+    expect(qc.getQueryData(queryKeys.providerTest("openai"))).toBeDefined();
+    applyDaemonEvent(qc, "account.removed", { id: 2 });
+    expect(qc.getQueryData(queryKeys.providerTest("openai"))).toBeUndefined();
   });
 });

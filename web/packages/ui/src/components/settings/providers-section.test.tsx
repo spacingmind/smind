@@ -112,10 +112,10 @@ describe("providers-section", () => {
   it("notes the proxy-only groups (Claude Code, Codex) but not Kimi or GLM", async () => {
     await renderLoaded([]);
     expect(screen.getByTestId("provider-group-note-claude-native")).toHaveTextContent(
-      "sMind's /v1 proxy, not by a task runner",
+      "Accounts here route sMind's /v1 proxy; agent runs use the CLI's own login.",
     );
     expect(screen.getByTestId("provider-group-note-codex-native")).toHaveTextContent(
-      "sMind's /v1 proxy, not by a task runner",
+      "Accounts here route sMind's /v1 proxy; agent runs use the CLI's own login.",
     );
     expect(screen.queryByTestId("provider-group-note-kimi")).not.toBeInTheDocument();
     expect(screen.queryByTestId("provider-group-note-glm")).not.toBeInTheDocument();
@@ -296,10 +296,10 @@ describe("providers-section connect flows", () => {
     fireEvent.click(screen.getByTestId("providers-connect-toggle"));
     expect(screen.getByTestId("accounts-connect-anthropic")).toBeInTheDocument();
 
-    // The shared panel's manual-add path works from here: open the paste
-    // form, fill it, submit -- account.add fires with accountProvider.
-    fireEvent.click(screen.getByTestId("accounts-manual-toggle"));
-    fireEvent.change(document.getElementById("account-label")!, { target: { value: "alt" } });
+    // The shared panel's manual-add path works from here: switch to the
+    // API key method, fill it, submit -- account.add fires with accountProvider.
+    fireEvent.click(screen.getByRole("radio", { name: "API key" }));
+    fireEvent.change(document.getElementById("account-oauth-label")!, { target: { value: "alt" } });
     fireEvent.change(document.getElementById("account-credential")!, { target: { value: "sk-new" } });
     fireEvent.click(screen.getByTestId("accounts-add-submit"));
     expect(client.calls.find((c) => c.method === "account.add")?.params).toMatchObject({
