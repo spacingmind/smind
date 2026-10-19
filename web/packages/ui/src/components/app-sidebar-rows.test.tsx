@@ -890,7 +890,7 @@ describe("expansion persistence (S8)", () => {
 
   it("a workspace created after its id was left persisted as collapsed lands expanded", async () => {
     window.localStorage.setItem(KEY, JSON.stringify(["ws:2"]))
-    useCollapsedNodesStore.getState().reload();;
+    useCollapsedNodesStore.getState().reload();
     const { client } = await mountSidebar([UNGROUPED]);
     // The id of a workspace that no longer exists is pruned on load...
     await waitFor(() => expect(stored()).toEqual([]));
@@ -912,7 +912,7 @@ describe("expansion persistence (S8)", () => {
 
   it("searching never writes the stored state, and clearing the query restores the tree as it was", async () => {
     window.localStorage.setItem(KEY, JSON.stringify(["space:10"]))
-    useCollapsedNodesStore.getState().reload();;
+    useCollapsedNodesStore.getState().reload();
     await mountSidebar([IN_A, UNGROUPED], {}, [SPACE_A]);
     const before = window.localStorage.getItem(KEY);
 
@@ -930,7 +930,7 @@ describe("expansion persistence (S8)", () => {
 
   it("a corrupt stored value falls back to everything expanded", async () => {
     window.localStorage.setItem(KEY, "{not json")
-    useCollapsedNodesStore.getState().reload();;
+    useCollapsedNodesStore.getState().reload();
     await mountSidebar([IN_A], {}, [SPACE_A]);
 
     expect(screen.getByTestId("sidebar-workspace-row")).toHaveAttribute("aria-expanded", "true");
@@ -939,7 +939,7 @@ describe("expansion persistence (S8)", () => {
 
   it("a stored value of the wrong shape falls back to everything expanded", async () => {
     window.localStorage.setItem(KEY, JSON.stringify([1, 2, 3]))
-    useCollapsedNodesStore.getState().reload();;
+    useCollapsedNodesStore.getState().reload();
     await mountSidebar([IN_A], {}, [SPACE_A]);
 
     expect(screen.getByTestId("sidebar-workspace-row")).toHaveAttribute("aria-expanded", "true");

@@ -1,4 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
+import { reloadAllPreferenceStores } from "@/stores/create-preference-store";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -54,7 +55,10 @@ describe("useSidebarWidth", () => {
       first.result.current[1](400);
     });
     expect(first.result.current[0]).toBe(400);
+    // It really reached storage (not just the in-memory store).
+    expect(window.localStorage.getItem("smind:sidebar-width")).toBe("400");
     first.unmount();
+    reloadAllPreferenceStores(); // a reload: the in-memory store starts over from storage
 
     // A brand-new hook instance, as a reload would produce -- reads back
     // whatever was last persisted instead of the default.
@@ -64,6 +68,7 @@ describe("useSidebarWidth", () => {
 
   it("a corrupt/non-numeric persisted value falls back to the default instead of throwing", () => {
     window.localStorage.setItem("smind:sidebar-width", "not-a-number");
+    reloadAllPreferenceStores(); // the width is a store: re-read what the test just wrote
     const { result } = renderHook(() => useSidebarWidth());
     expect(result.current[0]).toBe(SIDEBAR_DEFAULT_WIDTH);
   });

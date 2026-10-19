@@ -1,4 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
+import { reloadAllPreferenceStores } from "@/stores/create-preference-store";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { useSidebarGroupMode } from "@/hooks/use-sidebar-group-mode";
@@ -26,7 +27,9 @@ describe("useSidebarGroupMode", () => {
   it("persists across a remount", () => {
     const { result, unmount } = renderHook(() => useSidebarGroupMode());
     act(() => result.current.setGroupMode("status"));
+    expect(window.localStorage.getItem("smind:sidebar-group-mode")).toContain("status");
     unmount();
+    reloadAllPreferenceStores(); // a reload: the in-memory store starts over from storage
 
     const { result: second } = renderHook(() => useSidebarGroupMode());
     expect(second.current.groupMode).toBe("status");

@@ -36,9 +36,16 @@ export function workspaceTreeQueryOptions(client: WsClientLike | null) {
     enabled: client !== null,
     staleTime: Infinity,
     retry: false,
-    queryFn: () => {
+    queryFn: async () => {
       if (!client) throw new Error("no daemon connection");
-      return fetchWorkspaceTree(client);
+      try {
+        return await fetchWorkspaceTree(client);
+      } catch (err) {
+        // A failed re-read of an already-loaded tree (refresh, event.dropped, reconnect) keeps the stale
+        // tree on screen rather than blanking it, so it must not fail silently.
+        console.error("workspace tree re-read failed", err);
+        throw err;
+      }
     },
   });
 }

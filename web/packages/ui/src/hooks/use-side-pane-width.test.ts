@@ -1,4 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
+import { reloadAllPreferenceStores } from "@/stores/create-preference-store";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -40,7 +41,9 @@ describe("useSidePaneWidth", () => {
     const second = renderHook(() => useSidePaneWidth(2));
     expect(second.result.current[0]).toBe(SIDE_PANE_DEFAULT_WIDTH);
 
-    // A fresh mount for task 1, as a reload produces, reads back 500.
+    // It really reached storage (not just the in-memory store), and a reload reads it back.
+    expect(window.localStorage.getItem("smind:side-pane-width")).toContain("500");
+    reloadAllPreferenceStores();
     const reload = renderHook(() => useSidePaneWidth(1));
     expect(reload.result.current[0]).toBe(500);
   });

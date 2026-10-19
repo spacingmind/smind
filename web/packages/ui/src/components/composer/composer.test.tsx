@@ -1283,6 +1283,26 @@ describe("Composer diff-stat pill (Item 5)", () => {
       expect(screen.getByTestId("composer-model-picker")).toHaveTextContent("GLM");
     });
 
+    it("a live change of the default agent does not alter a toolbar that has already seeded", async () => {
+      useDefaultAgentStore.getState().set("1");
+      const client = new FakeWsClient();
+      renderComposer({ client, taskId: 5 });
+      client.nth("provider.list", 0).resolve({
+        providers: [
+          { id: "claude-native", label: "Claude Code" },
+          { id: "glm", label: "GLM" },
+        ],
+      });
+      client.nth("profile.list", 0).resolve([PROFILE]);
+      await flush();
+      expect(screen.getByTestId("composer-model-picker")).toHaveTextContent("GLM");
+
+      // Settings (or another tab) clears the ★ default: the already-seeded toolbar keeps its run config.
+      await act(async () => useDefaultAgentStore.getState().set(null));
+      await flush();
+      expect(screen.getByTestId("composer-model-picker")).toHaveTextContent("GLM");
+    });
+
     it("a task with no persisted run-config starts from the ★ default agent", async () => {
       useDefaultAgentStore.getState().set("1");
       const client = new FakeWsClient();

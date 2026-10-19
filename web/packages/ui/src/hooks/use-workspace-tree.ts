@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
 import { queryKeys } from "@/lib/query-keys";
 import { workspaceTreeQueryOptions } from "@/lib/workspace-tree-query";
+import { ConnectionClosedError } from "@/lib/ws-client";
 import type { WorkspaceWithTree } from "@/lib/workspace-tree";
 
 /**
@@ -24,6 +25,14 @@ export function useWorkspaceTree(): { workspaces: WorkspaceWithTree[] | null; er
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.workspaceTree() });
   }, [queryClient]);
-  const error = query.data === undefined && query.error ? (query.error instanceof Error ? query.error.message : String(query.error)) : null;
+  // A first load cut short by a reconnect (the old socket closed under it) is not an error to show: the new
+  // connection re-reads the tree as soon as its events.subscribe is answered.
+  const interrupted = query.error instanceof ConnectionClosedError;
+  const error =
+    query.data === undefined && query.error && !interrupted
+      ? query.error instanceof Error
+        ? query.error.message
+        : String(query.error)
+      : null;
   return { workspaces: query.data ?? null, error, refresh };
 }

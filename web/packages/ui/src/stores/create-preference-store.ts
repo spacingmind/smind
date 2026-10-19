@@ -9,8 +9,10 @@ import { create, type StoreApi, type UseBoundStore } from "zustand";
  * validating helpers in `lib/` (`lib/storage.ts` etc.), so the storage keys and shapes do not change and
  * a stale or corrupt value still falls back instead of throwing.
  *
- * `read()` runs once, when the store is created; `reload()` re-reads storage (tests, and any future
- * cross-tab sync). Every store registers itself so the test setup can reload them all between tests.
+ * `read()` runs once, when the store is created, and again whenever ANOTHER tab changes storage (the
+ * `storage` event fires only in the other tabs), so a default agent, width or preference changed in one tab
+ * reaches the rest -- the per-mount re-reads the old hooks did, now without waiting for a remount. `reload()`
+ * re-reads on demand. Every store registers itself so the test setup can reload them all between tests.
  */
 export interface PreferenceState<T> {
   value: T;
@@ -31,6 +33,9 @@ export function createPreferenceStore<T>(read: () => T, write: (value: T) => voi
     reload: () => set({ value: read() }),
   }));
   registry.add(() => store.getState().reload());
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", () => store.getState().reload());
+  }
   return store;
 }
 

@@ -41,4 +41,12 @@ describe("createPreferenceStore", () => {
     reloadAllPreferenceStores();
     expect(store.getState().value).toBe("default");
   });
+
+  it("re-reads when another tab changes storage (the storage event), so a change made there is not lost", () => {
+    const { store } = makeStore();
+    expect(store.getState().value).toBe("default");
+    window.localStorage.setItem("k", "from-another-tab");
+    window.dispatchEvent(new StorageEvent("storage", { key: "k", newValue: "from-another-tab" }));
+    expect(store.getState().value).toBe("from-another-tab");
+  });
 });
