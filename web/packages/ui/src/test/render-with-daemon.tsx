@@ -111,17 +111,25 @@ function clientPropOf(node: ReactNode): never | null {
   return null;
 }
 
+/** Runs the app's real event -> query-cache bridge for a client that can push notifications (FakeWsClient.notify). */
+function ClientEventBridge({ client, queryClient }: { client: never; queryClient: QueryClient }) {
+  useDaemonEvents(client, queryClient);
+  return null;
+}
+
 export function renderWithClientProp(ui: ReactElement): RenderResult {
   const queryClient = createQueryClient();
-  const wrap = (element: ReactElement) => (
-    <DaemonQueryProvider
-      queryClient={queryClient}
-      client={clientPropOf(element)}
-      events={null}
-    >
-      {element}
-    </DaemonQueryProvider>
-  );
+  const wrap = (element: ReactElement) => {
+    const client = clientPropOf(element);
+    return (
+      <DaemonQueryProvider queryClient={queryClient} client={client} events={null}>
+        {client && typeof (client as { onNotification?: unknown }).onNotification === "function" ? (
+          <ClientEventBridge client={client} queryClient={queryClient} />
+        ) : null}
+        {element}
+      </DaemonQueryProvider>
+    );
+  };
   const view = render(wrap(ui));
   return { ...view, rerender: (next: ReactNode) => view.rerender(wrap(next as ReactElement)) };
 }

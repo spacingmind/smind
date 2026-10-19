@@ -10,6 +10,7 @@ import type {
   LearningJobPayload,
 } from "@/lib/learning-types";
 import { queryKeys } from "@/lib/query-keys";
+import { applyLifecycleEvent, LIFECYCLE_TOPICS, type WorkspaceWithTree } from "@/lib/workspace-tree";
 import type { Account, AgentProfile } from "@/lib/types";
 import { toast } from "@/components/ui/toast";
 
@@ -153,7 +154,19 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       });
       return;
     }
+    case "event.dropped":
+      // The daemon dropped events for this connection (its per-connection queue overflowed): the tree may
+      // have missed a create or a delete entirely, so ADR 0009's reconciliation rule is a full re-read.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workspaceTree() });
+      return;
     default:
+      if ((LIFECYCLE_TOPICS as readonly string[]).includes(topic)) {
+        // A null tree means the first fetch is still in flight; that fetch reads committed state, so it
+        // already includes whatever this event describes and splicing into nothing would be lost anyway.
+        queryClient.setQueryData<WorkspaceWithTree[]>(queryKeys.workspaceTree(), (held) =>
+          held ? applyLifecycleEvent(held, topic, payload) : held,
+        );
+      }
       return;
   }
 }

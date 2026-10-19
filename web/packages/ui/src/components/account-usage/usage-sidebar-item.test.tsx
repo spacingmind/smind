@@ -5,6 +5,8 @@ import { UsageSidebarItem } from "@/components/account-usage/usage-sidebar-item"
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { STORAGE_KEYS } from "@/lib/storage";
+import { useUsagePreferencesStore } from "@/stores/usage-preferences-store";
+
 import type { UsageWindow } from "@/lib/account-usage/types";
 import { claudeAccount, codexAccount, problemAccount } from "@/test/account-usage-fixtures";
 import { renderWithDaemon } from "@/test/render-with-daemon";
@@ -51,6 +53,7 @@ async function flush(): Promise<void> {
 
 function setPrefs(prefs: Record<string, unknown>): void {
   window.localStorage.setItem(STORAGE_KEYS.usage, JSON.stringify({ displayAs: "used", accountKey: null, inSidebar: true, pins: null, ...prefs }));
+  useUsagePreferencesStore.getState().reload();
 }
 
 async function renderItem(daemon: FakeUsageDaemon, { open = true }: { open?: boolean } = {}) {

@@ -13,6 +13,8 @@ export const queryKeys = {
   accountUsage: () => ["account.usage", { cached: true }] as const,
   /** The daemon's run registry (`run.list`, all runs): resolves a cited run id to its task and chat. */
   runList: () => ["run.list"] as const,
+  /** The workspace -> spaces -> tasks tree the sidebar draws and Settings -> Usage names rows from: one fetch, live via the lifecycle events. */
+  workspaceTree: () => ["workspace.tree"] as const,
   providerList: () => ["provider.list"] as const,
   profileList: () => ["profile.list"] as const,
   /** One `provider.test` answer per account-vocabulary provider key (`accountHealthTestKey`). */

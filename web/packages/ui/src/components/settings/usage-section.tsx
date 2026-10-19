@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { UsageBody } from "@/components/account-usage/usage-body";
 import { UsageControls } from "@/components/account-usage/usage-controls";
@@ -9,8 +9,9 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { StepGroup } from "@/components/ui/step-group";
+import { useWorkspaceTree } from "@/hooks/use-workspace-tree";
 import { EM_DASH, formatCost, formatTokens, usageSince } from "@/lib/usage-format";
-import type { Task, UsageGroupBy, UsageRange, UsageScope, UsageSummaryRow, Workspace } from "@/lib/types";
+import type { UsageGroupBy, UsageRange, UsageScope, UsageSummaryRow } from "@/lib/types";
 import { Icons } from "@/lib/icons";
 
 const SCOPE_OPTIONS: { value: UsageScope; label: string }[] = [
@@ -115,9 +116,7 @@ function UsageSection({ client }: SettingsSectionContext) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshTick, setRefreshTick] = useState(0);
-  const [names, setNames] = useState<Record<string, string>>({});
   const summarySeq = useRef(0);
-  const namesSeq = useRef(0);
 
   useEffect(() => {
     if (!client) return;
@@ -138,33 +137,22 @@ function UsageSection({ client }: SettingsSectionContext) {
       });
   }, [client, scope, groupBy, range, refreshTick]);
 
-  useEffect(() => {
-    if (!client || (groupBy !== "task" && groupBy !== "workspace")) return;
-    const seq = ++namesSeq.current;
-    (async () => {
-      try {
-        const workspaces = await client.call<Workspace[]>("workspace.list");
-        if (seq !== namesSeq.current) return;
-        const resolved: Record<string, string> = {};
-        for (const w of workspaces ?? []) resolved[`workspace:${w.ID}`] = w.Title || `Workspace #${w.ID}`;
-        if (groupBy === "task") {
-          for (const w of workspaces ?? []) {
-            try {
-              const tasks = await client.call<Task[]>("task.list", { workspaceId: w.ID });
-              if (seq !== namesSeq.current) return;
-              for (const t of tasks ?? []) resolved[`task:${t.ID}`] = t.Title || `Task #${t.ID}`;
-            } catch {
-              // Best-effort: unknown tasks fall back to "Task #id" below.
-            }
-          }
-        }
-        if (seq !== namesSeq.current) return;
-        setNames(resolved);
-      } catch {
-        // Best-effort lookups never block or error the table.
+  // Row names come from the shared workspace tree (the sidebar's own query, live via lifecycle events): no
+  // workspace.list + one task.list per workspace of its own. A tree that has not loaded (or failed) just
+  // leaves rows on their "Task #id" / "Workspace #id" fallbacks, as the old best-effort lookup did.
+  const { workspaces } = useWorkspaceTree();
+  const names = useMemo(() => {
+    const resolved: Record<string, string> = {};
+    if (groupBy !== "task" && groupBy !== "workspace") return resolved;
+    for (const w of workspaces ?? []) {
+      resolved[`workspace:${w.ID}`] = w.Title || `Workspace #${w.ID}`;
+      if (groupBy !== "task") continue;
+      for (const t of [...w.ungroupedTasks, ...w.spaces.flatMap((sp) => sp.tasks)]) {
+        resolved[`task:${t.ID}`] = t.Title || `Task #${t.ID}`;
       }
-    })();
-  }, [client, groupBy, refreshTick]);
+    }
+    return resolved;
+  }, [workspaces, groupBy]);
 
   function changeScope(next: UsageScope) {
     // The proxy scope only accepts groupBy "model"; switching in one state

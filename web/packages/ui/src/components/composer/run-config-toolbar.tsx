@@ -6,7 +6,7 @@ import { ProviderModelPicker, type PickerProfileRow } from "@/components/pickers
 import { readRunConfigPreference, writeRunConfigPreference } from "@/components/composer/run-config-preference";
 import { setSettingsIntent } from "@/lib/settings-intent";
 import { buildBrowserProviders, type ProviderHealth } from "@/lib/model-browser";
-import { readStoredDefaultAgentId } from "@/lib/settings-preferences";
+import { useDefaultAgentStore } from "@/stores/default-agent-store";
 import { selectProvider } from "@/stores/providers-view-store";
 import {
   effectiveMode,
@@ -238,7 +238,7 @@ export function RunConfigToolbar({
   // agent" or a different agent.
   useEffect(() => {
     if (hadPersisted.current || seededFromDefault.current) return;
-    const defaultAgentId = readStoredDefaultAgentId();
+    const defaultAgentId = useDefaultAgentStore.getState().value;
     if (!defaultAgentId) return;
     const p = profiles.find((candidate) => String(candidate.ID) === defaultAgentId);
     if (!p) return;

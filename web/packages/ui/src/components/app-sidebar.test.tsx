@@ -608,8 +608,13 @@ describe("AppSidebar", () => {
   });
 });
 
-/** Minimal DaemonEvents stub: records listeners per topic, lets the test fire them (same shape as diff-viewer-pane.test.tsx's). */
-function makeEventsStub() {
+/**
+ * Minimal DaemonEvents stub: records listeners per topic, lets the test fire them (same shape as
+ * diff-viewer-pane.test.tsx's). `fire` also pushes the notification down the client, as the daemon would: the
+ * workspace tree reads it through the query-cache event bridge (renderWithClientProp mounts the real
+ * `useDaemonEvents`), while the status overrides still listen on the `events` prop.
+ */
+function makeEventsStub(client: FakeWsClient) {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   return {
     events: {
@@ -625,6 +630,7 @@ function makeEventsStub() {
     },
     fire(topic: string, payload: unknown): void {
       act(() => {
+        client.pushNotification(topic, payload);
         for (const l of listeners.get(topic) ?? []) l(payload);
       });
     },
@@ -641,7 +647,7 @@ function makeEventsStub() {
 describe("AppSidebar lifecycle events (ui-redesign-parity Item 16)", () => {
   it("a task created in another client appears without a reload and without a refetch", async () => {
     const client = new FakeWsClient();
-    const stub = makeEventsStub();
+    const stub = makeEventsStub(client);
 
     render(
       <SidebarProvider>
@@ -666,7 +672,7 @@ describe("AppSidebar lifecycle events (ui-redesign-parity Item 16)", () => {
     // caused it, so this client can see task.created for a row its own
     // refetch is about to return (or already returned).
     const client = new FakeWsClient();
-    const stub = makeEventsStub();
+    const stub = makeEventsStub(client);
 
     render(
       <SidebarProvider>
@@ -686,7 +692,7 @@ describe("AppSidebar lifecycle events (ui-redesign-parity Item 16)", () => {
 
   it("an archived task leaves the tree, and a deleted workspace takes its subtree with it", async () => {
     const client = new FakeWsClient();
-    const stub = makeEventsStub();
+    const stub = makeEventsStub(client);
 
     render(
       <SidebarProvider>
@@ -702,13 +708,13 @@ describe("AppSidebar lifecycle events (ui-redesign-parity Item 16)", () => {
     expect(screen.queryByText("Task in Space A")).not.toBeInTheDocument();
 
     stub.fire("workspace.deleted", { id: WORKSPACE.ID });
-    expect(screen.queryByText("My Workspace")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("My Workspace")).not.toBeInTheDocument());
     expect(screen.queryByText("Fix the bug")).not.toBeInTheDocument();
   });
 
   it("an event for a workspace this client does not hold leaves the tree alone", async () => {
     const client = new FakeWsClient();
-    const stub = makeEventsStub();
+    const stub = makeEventsStub(client);
 
     render(
       <SidebarProvider>
@@ -727,7 +733,7 @@ describe("AppSidebar lifecycle events (ui-redesign-parity Item 16)", () => {
 
   it("event.dropped refetches the tree, since a dropped event may have been a create or a delete", async () => {
     const client = new FakeWsClient();
-    const stub = makeEventsStub();
+    const stub = makeEventsStub(client);
 
     render(
       <SidebarProvider>
@@ -751,7 +757,7 @@ describe("AppSidebar lifecycle events (ui-redesign-parity Item 16)", () => {
     // only clearing the override (and letting the tree refetch supply the
     // real value) removes the stale shadow.
     const client = new FakeWsClient();
-    const stub = makeEventsStub();
+    const stub = makeEventsStub(client);
 
     render(
       <SidebarProvider>
@@ -1511,7 +1517,7 @@ describe("AppSidebar task tree (PR-U1)", () => {
 
   it("child created via task.created event nests live", async () => {
     const client = new FakeWsClient();
-    const stub = makeEventsStub();
+    const stub = makeEventsStub(client);
     render(
       <SidebarProvider>
         <AppSidebar client={client as never} selectedTaskId={null} events={stub.events} />
@@ -1522,15 +1528,15 @@ describe("AppSidebar task tree (PR-U1)", () => {
 
     stub.fire("task.created", { task: GRANDCHILD });
 
-    const grandchild = await waitFor(() => rowOf(GRANDCHILD.ID));
-    expect(rowOf(CHILD.ID).closest("li")!.contains(grandchild)).toBe(true);
+    // The splice lands through the query cache (one batched notification), so assert the settled nesting.
+    await waitFor(() => expect(rowOf(CHILD.ID).closest("li")!.contains(rowOf(GRANDCHILD.ID))).toBe(true));
     // The new grandchild promoted its parent to leader.
     expect(rowOf(CHILD.ID)).toHaveAccessibleName("Child task, leader with 1 sub-task, branch fix-bug");
   });
 
   it("task.archived of a parent leaves its live child as a root row", async () => {
     const client = new FakeWsClient();
-    const stub = makeEventsStub();
+    const stub = makeEventsStub(client);
     render(
       <SidebarProvider>
         <AppSidebar client={client as never} selectedTaskId={null} events={stub.events} />
@@ -1613,13 +1619,17 @@ describe("AppSidebar task tree (PR-U1)", () => {
     await resolveWorkspaceTree(client, WORKSPACE, [], [PARENT, CHILD, GRANDCHILD]);
     expect(rowOf(CHILD.ID).closest("li")!.contains(rowOf(GRANDCHILD.ID))).toBe(true);
 
-    // A reconnect swaps the client, forcing the full refetch.
+    // A reconnect swaps the client. The tree stays on screen (same daemon: the cache is kept) and is
+    // re-read in the background once the new connection's events.subscribe has been answered.
     const client2 = new FakeWsClient();
     rerender(
       <SidebarProvider>
         <AppSidebar client={client2 as never} selectedTaskId={null} />
       </SidebarProvider>,
     );
+    expect(rowOf(CHILD.ID)).toBeInTheDocument();
+    expect(client2.calls.some((c) => c.method === "workspace.list")).toBe(false);
+    await act(async () => client2.nth("events.subscribe").resolve(null));
     await resolveWorkspaceTree(client2, WORKSPACE, [], [PARENT, CHILD, GRANDCHILD]);
 
     const child = await waitFor(() => rowOf(CHILD.ID));

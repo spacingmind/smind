@@ -11,6 +11,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { FakeWsClient } from "@/test/fake-ws-client";
+import { usePinnedTasksStore } from "@/stores/pinned-tasks-store";
+import { useCollapsedNodesStore } from "@/stores/collapsed-nodes-store";
 import { hoverTask, keyboardFocus, openHoverCard, revealSpaceActions, revealWorkspaceActions, taskItem, taskTrigger, unhoverTask } from "@/test/sidebar-helpers";
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
 import type { Space, Task, Workspace } from "@/lib/types";
@@ -553,6 +555,7 @@ describe("container rows (S5)", () => {
 
   it("workspace, space, Pinned and status-group headers all use the same chevron", async () => {
     window.localStorage.setItem("smind:pinned-tasks", JSON.stringify([IN_SPACE.ID]));
+    usePinnedTasksStore.getState().reload();
     await mountSidebar([IN_SPACE], {}, [SPACE_A]);
 
     const chevronClass = (header: HTMLElement) =>
@@ -713,6 +716,7 @@ describe("title overflow and indentation (S7)", () => {
 
   it("flat views (pinned, search) render root rows with no gutter", async () => {
     window.localStorage.setItem("smind:pinned-tasks", JSON.stringify([ROOT.ID]));
+    usePinnedTasksStore.getState().reload();
     await mountSidebar(TREE);
 
     const pinnedRow = within(screen.getByTestId("sidebar-pinned-section")).getAllByTestId("sidebar-task-item")[0]!;
@@ -847,6 +851,7 @@ describe("expansion persistence (S8)", () => {
 
   it("a collapsed Pinned section persists across a remount", async () => {
     window.localStorage.setItem("smind:pinned-tasks", JSON.stringify([UNGROUPED.ID]));
+    usePinnedTasksStore.getState().reload();
     const first = await mountSidebar([UNGROUPED]);
     fireEvent.click(screen.getByTestId("sidebar-pinned-section-header"));
     expect(stored()).toEqual(["pinned"]);
@@ -884,7 +889,8 @@ describe("expansion persistence (S8)", () => {
   });
 
   it("a workspace created after its id was left persisted as collapsed lands expanded", async () => {
-    window.localStorage.setItem(KEY, JSON.stringify(["ws:2"]));
+    window.localStorage.setItem(KEY, JSON.stringify(["ws:2"]))
+    useCollapsedNodesStore.getState().reload();
     const { client } = await mountSidebar([UNGROUPED]);
     // The id of a workspace that no longer exists is pruned on load...
     await waitFor(() => expect(stored()).toEqual([]));
@@ -905,7 +911,8 @@ describe("expansion persistence (S8)", () => {
   });
 
   it("searching never writes the stored state, and clearing the query restores the tree as it was", async () => {
-    window.localStorage.setItem(KEY, JSON.stringify(["space:10"]));
+    window.localStorage.setItem(KEY, JSON.stringify(["space:10"]))
+    useCollapsedNodesStore.getState().reload();
     await mountSidebar([IN_A, UNGROUPED], {}, [SPACE_A]);
     const before = window.localStorage.getItem(KEY);
 
@@ -922,7 +929,8 @@ describe("expansion persistence (S8)", () => {
   });
 
   it("a corrupt stored value falls back to everything expanded", async () => {
-    window.localStorage.setItem(KEY, "{not json");
+    window.localStorage.setItem(KEY, "{not json")
+    useCollapsedNodesStore.getState().reload();
     await mountSidebar([IN_A], {}, [SPACE_A]);
 
     expect(screen.getByTestId("sidebar-workspace-row")).toHaveAttribute("aria-expanded", "true");
@@ -930,7 +938,8 @@ describe("expansion persistence (S8)", () => {
   });
 
   it("a stored value of the wrong shape falls back to everything expanded", async () => {
-    window.localStorage.setItem(KEY, JSON.stringify([1, 2, 3]));
+    window.localStorage.setItem(KEY, JSON.stringify([1, 2, 3]))
+    useCollapsedNodesStore.getState().reload();
     await mountSidebar([IN_A], {}, [SPACE_A]);
 
     expect(screen.getByTestId("sidebar-workspace-row")).toHaveAttribute("aria-expanded", "true");

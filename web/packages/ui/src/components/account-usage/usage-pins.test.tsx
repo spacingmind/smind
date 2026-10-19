@@ -10,6 +10,8 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { closeUsageModal, openUsageModal } from "@/hooks/use-usage-modal";
 import { STORAGE_KEYS } from "@/lib/storage";
+import { useUsagePreferencesStore } from "@/stores/usage-preferences-store";
+
 import { FIXTURE_NOW, claudeAccount, codexAccount } from "@/test/account-usage-fixtures";
 import { renderWithDaemon } from "@/test/render-with-daemon";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
@@ -24,6 +26,7 @@ async function flush(): Promise<void> {
 
 function setPrefs(prefs: Record<string, unknown>): void {
   window.localStorage.setItem(STORAGE_KEYS.usage, JSON.stringify({ displayAs: "used", accountKey: null, inSidebar: true, pins: null, ...prefs }));
+  useUsagePreferencesStore.getState().reload();
 }
 
 const stored = () => JSON.parse(window.localStorage.getItem(STORAGE_KEYS.usage)!);

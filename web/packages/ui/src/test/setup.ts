@@ -15,6 +15,7 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach } from "vitest";
 import { cleanup } from "@testing-library/react";
+import { reloadAllPreferenceStores } from "@/stores/create-preference-store";
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -68,4 +69,6 @@ afterEach(() => {
   // Persisted UI state (sidebar expansion, pins, ...) must not leak from one
   // test into the next file-mate.
   window.localStorage.clear();
+  // The zustand preference stores (src/stores) hold their value in memory: re-read the now-empty storage.
+  reloadAllPreferenceStores();
 });

@@ -32,6 +32,20 @@ describe("formatRelativeTime", () => {
   it("falls back to the raw string for an unparseable timestamp", () => {
     expect(formatRelativeTime("not-a-date", NOW)).toBe("not-a-date");
   });
+
+  it("takes a Date or epoch ms as well as an ISO string, and a Date for now (the run footer's callers)", () => {
+    const iso = "2024-06-01T11:55:00Z";
+    expect(formatRelativeTime(new Date(iso), new Date(NOW))).toBe("5m ago");
+    expect(formatRelativeTime(Date.parse(iso), NOW)).toBe("5m ago");
+  });
+
+  it("shortDateAfterDays switches to a short date once the age passes that many days (the run footer's rule)", () => {
+    const opts = { shortDateAfterDays: 7 };
+    expect(formatRelativeTime("2024-05-29T12:00:00Z", NOW, opts)).toBe("3d ago");
+    expect(formatRelativeTime("2024-05-25T12:00:00Z", NOW, opts)).toMatch(/^May \d{1,2}$/);
+    // Without the option the same age stays relative.
+    expect(formatRelativeTime("2024-05-25T12:00:00Z", NOW)).toBe("7d ago");
+  });
 });
 
 describe("formatRelativeTimeShort", () => {

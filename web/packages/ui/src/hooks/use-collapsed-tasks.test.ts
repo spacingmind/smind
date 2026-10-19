@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { useCollapsedTasks } from "@/hooks/use-collapsed-tasks";
 import { writeCollapsedTasks } from "@/lib/sidebar-preferences";
+import { useCollapsedTasksStore } from "@/stores/collapsed-tasks-store";
 
 afterEach(() => {
   window.localStorage.clear();
@@ -41,6 +42,7 @@ describe("useCollapsedTasks", () => {
 
   it("prunes a collapsed id once the live task list loads without it (e.g. archived)", () => {
     writeCollapsedTasks(new Set([42]));
+    useCollapsedTasksStore.getState().reload();
     const { result, rerender } = renderHook(
       ({ liveTaskIds }: { liveTaskIds: ReadonlySet<number> | null }) => useCollapsedTasks(liveTaskIds),
       { initialProps: { liveTaskIds: null as ReadonlySet<number> | null } },
