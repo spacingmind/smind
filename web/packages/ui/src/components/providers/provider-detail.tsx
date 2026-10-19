@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { ProviderNavItem } from "@/lib/providers-view";
 import { providerConsumer } from "@/lib/providers-groups";
 import { buildProviderDiagnostic } from "@/lib/provider-diagnostic";
-import { ProviderGlyph } from "@/components/composer/provider-glyph";
+import { ProviderIcon } from "@/components/provider-icon";
 import { AccountsCard } from "@/components/providers/accounts-card";
 import { ProviderModels } from "@/components/providers/provider-models";
 import { ProviderDiagnostics } from "@/components/providers/provider-diagnostics";
@@ -79,7 +79,7 @@ export function ProviderDetail({
     <div data-testid="provider-detail" className="flex flex-col gap-3 p-4">
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
-          {item.id === "other" ? null : <ProviderGlyph provider={item.id} />}
+          {item.id === "other" ? null : <ProviderIcon provider={item.id} />}
           <h3 className="text-ui-lg font-medium">{item.label}</h3>
         </div>
         <p className="text-ui-sm text-muted-foreground">

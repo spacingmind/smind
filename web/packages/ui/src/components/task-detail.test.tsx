@@ -609,7 +609,7 @@ describe("TaskDetailPane", () => {
     expect(rows.map((r) => r.textContent?.replace(/(\d+ models?|Default model)$/, ""))).toEqual(["Claude Code", "GLM", "Codex"]);
   });
 
-  it("falls back to the hardcoded two-provider list when provider.list rejects, and the form still submits", async () => {
+  it("falls back to the hardcoded two-provider list when provider.list rejects (catalog labels), and the form still submits", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
@@ -622,7 +622,7 @@ describe("TaskDetailPane", () => {
     fireEvent.click(await screen.findByTestId("model-picker-back"));
     const rows = await screen.findAllByTestId(/^model-provider-/);
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual(["model-provider-claude-native", "model-provider-glm"]);
-    expect(rows.map((r) => r.textContent?.replace(/(\d+ models?|Default model)$/, ""))).toEqual(["claude-native", "glm"]);
+    expect(rows.map((r) => r.textContent?.replace(/(\d+ models?|Default model)$/, ""))).toEqual(["Claude Code", "GLM"]);
     fireEvent.click(rows[0]);
     fireEvent.click(await screen.findByTestId("model-row-claude-native:"));
 

@@ -1,3 +1,4 @@
+import { accountProviderLabel } from "@/lib/provider-catalog";
 import type {
   Account,
   ProviderInfo,
@@ -45,8 +46,7 @@ export function removeWarning(
   accounts: Account[],
   runs: RunSummary[],
 ): { runningCount: number; lastAccount: boolean; providerLabel: string } {
-  const label =
-    providers.find((p) => p.accountProvider === account.provider)?.label ?? account.provider;
+  const label = accountProviderLabel(account.provider, providers);
   const siblings = accounts.filter((a) => a.provider === account.provider).length;
   const runnerIds = providers
     .filter((p) => p.accountProvider === account.provider)

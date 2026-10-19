@@ -2,7 +2,8 @@ import { PlanUsageCompact } from "@/components/account-usage/plan-usage-compact"
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import type { ChatPlanUsage as ChatPlanUsageState } from "@/hooks/use-chat-plan-usage";
 import { openUsageModal } from "@/hooks/use-usage-modal";
-import { hasPlanData, planProviderName } from "@/lib/account-usage/chat-provider";
+import { hasPlanData } from "@/lib/account-usage/chat-provider";
+import { providerShortName } from "@/lib/provider-catalog";
 
 const NO_DATA = "No plan data yet";
 
@@ -51,7 +52,7 @@ export function ChatPlanUsage({
       <>
         {accounts.length > 1 ? (
           <p data-testid="plan-usage-note" className="text-ui-sm leading-snug text-muted-foreground">
-            This chat's login isn't tracked; showing all {planProviderName(provider)} accounts
+            This chat's login isn't tracked; showing all {providerShortName(provider)} accounts
           </p>
         ) : null}
         <div className="flex flex-col gap-3">

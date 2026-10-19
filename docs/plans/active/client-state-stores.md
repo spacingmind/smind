@@ -108,7 +108,7 @@ audit is in the Supervisor's notes). Status: **spec**, nothing built.
 - [x] PR 1 (S1+S2) — branch `feat/client-state-accounts` (awaiting merge)
 - [x] PR 2 (S3) — branch `feat/client-state-catalog` (awaiting merge)
 - [x] PR 3 (S4) — branch `feat/client-state-pickers` (awaiting merge)
-- [ ] PR 4 (AC17)
+- [x] PR 4 (AC17) — branch `feat/client-state-provider-identity` (awaiting merge)
 - [ ] PR 5 (AC18)
 - [ ] PR 6 (AC19)
 
@@ -198,3 +198,19 @@ Process: `peer-glm` did steps 1–2 (describeProfile/supportsThinking, mode/thin
 the form/live-run migration. Not touched: `providers-section.tsx`, accounts dialog/connect forms (Providers redesign Lead's area).
 Unverified: real daemon; desktop webview; mobile sheet rendering of the field variant (covered by the pill's existing sheet tests only);
 mid-transition frames (the popover open/close animation was not frame-captured).
+
+### PR 4 (AC17), 2026-10-19
+Evidence: `task lint` 0, `bunx tsc -b packages/ui` clean, full UI suite green (see PR), light + dark screenshots of Providers (master/detail nav,
+detail header) and Usage (plan cards) in `/tmp/shots-adr32/out4/` — marks and labels unchanged for everything provider.list describes; an id the daemon
+did not label (Kimi) now reads "Kimi" instead of the raw id.
+- AC17 ✔ `lib/provider-catalog.ts`: `providerIdentity` (both id vocabularies + bare family words), `providerLabel` (daemon label wins, then the table,
+  then the raw id), `accountProviderLabel`, `providerShortName`; test `providerLabel maps both id vocabularies` (claude-native ↔ anthropic,
+  codex-native ↔ openai, kimi both, glm runtime-only, unknown → raw id, case-insensitive, null-safe). `ProviderIcon`/`ProfileIcon` live in
+  `components/provider-icon.tsx` (out of `composer/`), picked through `providerIdentity` so anthropic/openai render the Claude/Codex marks; an ACP
+  agent that merely names a family keeps that family's mark (test). The hardcoded maps are gone: `usage-source-icon`'s anthropic/openai switch,
+  `planProviderName` (→ `providerShortName`), `accounts-dialog`'s local `providerLabel`, and the inline `providers.find(...)?.label ?? id` copies in
+  `providers-groups.removeWarning`, `describe-profile`, `providers-view`, `model-browser`, the picker's bound label, `task-detail`, `first-account-card`.
+  Four tests asserting raw-id fallbacks were updated to the identity-table labels (accounts-dialog, task-detail, model-browser, providers-view).
+Process: `peer-glm` did all three steps; the Lead reviewed the diff, replaced `planProviderName`, restored the ACP family-mark tolerance and ran the
+visual pass. No separate reviewer agent for this mechanical PR (self-review of the full diff + the screenshot pass).
+Unverified: real daemon; desktop webview; the usage card still prints the raw account provider id ("anthropic") next to the account name (unchanged).
