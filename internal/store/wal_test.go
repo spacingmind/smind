@@ -403,6 +403,7 @@ func TestClose_DoesNotWaitOutBusyTimeoutForAReader(t *testing.T) {
 	start := time.Now()
 	err = s.Close()
 	elapsed := time.Since(start)
+	_ = rows.Close() // releases the last connection so Windows can remove the temp dir
 	if err != nil {
 		t.Errorf("Close() error = %v, want nil (an incomplete checkpoint is not a failure)", err)
 	}
