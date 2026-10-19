@@ -735,6 +735,29 @@ mod tests {
         }
     }
 
+    /// Which `FrameError` the transport hit, if any: the vector only says
+    /// `protocol`, so the framing negatives are also pinned to their variant.
+    fn frame_error<T>(r: &Result<T, ChannelError<RawErr>>) -> Option<&'static str> {
+        match r {
+            Err(ChannelError::Transport(RawErr::Frame(e))) => Some(match e {
+                FrameError::Truncated => "truncated",
+                FrameError::ZeroLength => "zero_length",
+                FrameError::TooLarge(_) => "too_large",
+            }),
+            _ => None,
+        }
+    }
+
+    /// The `FrameError` each framing negative must produce; every other negative none.
+    fn expected_frame_error(name: &str) -> Option<&'static str> {
+        match name {
+            "zero_length_frame_to_daemon" | "zero_length_frame_to_client" => Some("zero_length"),
+            "oversized_frame_to_daemon" | "oversized_frame_to_client" => Some("too_large"),
+            "truncated_frame_to_daemon" | "truncated_frame_to_client" => Some("truncated"),
+            _ => None,
+        }
+    }
+
     fn written(sent: &[(u8, Vec<u8>)]) -> Vec<&'static str> {
         sent.iter()
             .map(|(t, _)| match *t {
@@ -841,7 +864,7 @@ mod tests {
                 .iter()
                 .map(|f| hex_decode(f.as_str().unwrap()))
                 .collect();
-            let (kind_got, sent, peer_version) = match n["endpoint"].as_str().unwrap() {
+            let (kind_got, sent, peer_version, frame_err) = match n["endpoint"].as_str().unwrap() {
                 "client" => {
                     let mut c = scripted_client(&v, frames);
                     let pin_bytes = n
@@ -856,7 +879,12 @@ mod tests {
                         Err(ChannelError::UnsupportedVersion { peer }) => Some(*peer as i64),
                         _ => None,
                     };
-                    (kind(&r), c.transport_mut().sent.clone(), version)
+                    (
+                        kind(&r),
+                        c.transport_mut().sent.clone(),
+                        version,
+                        frame_error(&r),
+                    )
                 }
                 "daemon" => {
                     let mut t = RawTransport::new(frames);
@@ -867,7 +895,7 @@ mod tests {
                         Err(ChannelError::UnsupportedVersion { peer }) => Some(*peer as i64),
                         _ => None,
                     };
-                    (kind(&r), t.sent.clone(), version)
+                    (kind(&r), t.sent.clone(), version, frame_error(&r))
                 }
                 other => panic!("{name}: unknown endpoint {other}"),
             };
@@ -875,6 +903,11 @@ mod tests {
                 kind_got,
                 n["expect"].as_str().unwrap(),
                 "{name}: error kind"
+            );
+            assert_eq!(
+                frame_err,
+                expected_frame_error(name),
+                "{name}: framing error variant"
             );
             if let Some(want) = n.get("expect_peer_version").and_then(Value::as_i64) {
                 assert_eq!(peer_version, Some(want), "{name}: peer version");
@@ -1127,16 +1160,23 @@ mod tests {
     #[tokio::test]
     async fn handshake_frames_are_capped_at_128_bytes() {
         let v = load();
-        let mut big =
-            crypto::daemon_hello_payload(&pin(&v), &arr32(&v["public_keys"], "daemon_eph"))
-                .to_vec();
-        big.resize(200, 0);
-        let mut c = scripted_client(&v, vec![encode_frame(FRAME_HELLO, &big)]);
-        let r = c.handshake(None).await;
-        assert!(
-            matches!(&r, Err(ChannelError::Protocol(m)) if m.contains("128")),
-            "{r:?}"
-        );
+        let base = crypto::daemon_hello_payload(&pin(&v), &arr32(&v["public_keys"], "daemon_eph"));
+        // type + payload = 128 passes the cap (and then fails parsing on length);
+        // type + payload = 129 is refused by the cap itself.
+        for (payload_len, capped) in [(127, false), (128, true)] {
+            let mut big = base.to_vec();
+            big.resize(payload_len, 0);
+            let mut c = scripted_client(&v, vec![encode_frame(FRAME_HELLO, &big)]);
+            let r = c.handshake(None).await;
+            match &r {
+                Err(ChannelError::Protocol(m)) => assert_eq!(
+                    m.contains("exceeds the 128 byte limit"),
+                    capped,
+                    "payload {payload_len}: {m}"
+                ),
+                other => panic!("payload {payload_len}: {other:?}"),
+            }
+        }
     }
 
     #[tokio::test]

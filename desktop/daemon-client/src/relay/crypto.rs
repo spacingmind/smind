@@ -333,7 +333,9 @@ impl std::error::Error for FrameError {}
 /// frame — `frameConn.Write` in Go never splits or coalesces frames
 /// across relay envelopes). Returns `(type, payload)`.
 pub fn decode_frame(buf: &[u8]) -> Result<(u8, &[u8]), FrameError> {
-    if buf.len() < 5 {
+    // Like Go's readFrame, judge the 4-byte length header first: a bare
+    // header with length 0 or over the limit is a violation, not a truncation.
+    if buf.len() < 4 {
         return Err(FrameError::Truncated);
     }
     let len = u32::from_be_bytes(buf[0..4].try_into().unwrap());
