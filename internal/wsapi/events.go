@@ -49,34 +49,40 @@ const (
 	TopicMcpServerDeleted = "mcpServer.deleted"
 )
 
+// The learning topics (TopicLearnedSkillProposed/Changed, TopicLearningJob)
+// live in learning.go next to their payloads.
+
 // knownTopics is the set events.subscribe/events.unsubscribe accept;
 // subscribing to an unknown topic name is an error per the ADR.
 var knownTopics = map[string]bool{
-	TopicTaskStatus:         true,
-	TopicRunStatus:          true,
-	TopicPermissionPending:  true,
-	TopicPermissionResolved: true,
-	TopicWorkspaceCreated:   true,
-	TopicWorkspaceDeleted:   true,
-	TopicSpaceCreated:       true,
-	TopicSpaceDeleted:       true,
-	TopicTaskCreated:        true,
-	TopicTaskUpdated:        true,
-	TopicTaskArchived:       true,
-	TopicTaskDeleted:        true,
-	TopicChatCreated:        true,
-	TopicChatUpdated:        true,
-	TopicChatArchived:       true,
-	TopicChatQueueUpdated:   true,
-	TopicProfileCreated:     true,
-	TopicProfileUpdated:     true,
-	TopicProfileDeleted:     true,
-	TopicAccountUpdated:     true,
-	TopicAccountRemoved:     true,
-	TopicAccountUsage:       true,
-	TopicMcpServerCreated:   true,
-	TopicMcpServerUpdated:   true,
-	TopicMcpServerDeleted:   true,
+	TopicTaskStatus:           true,
+	TopicRunStatus:            true,
+	TopicPermissionPending:    true,
+	TopicPermissionResolved:   true,
+	TopicWorkspaceCreated:     true,
+	TopicWorkspaceDeleted:     true,
+	TopicSpaceCreated:         true,
+	TopicSpaceDeleted:         true,
+	TopicTaskCreated:          true,
+	TopicTaskUpdated:          true,
+	TopicTaskArchived:         true,
+	TopicTaskDeleted:          true,
+	TopicChatCreated:          true,
+	TopicChatUpdated:          true,
+	TopicChatArchived:         true,
+	TopicChatQueueUpdated:     true,
+	TopicProfileCreated:       true,
+	TopicProfileUpdated:       true,
+	TopicProfileDeleted:       true,
+	TopicAccountUpdated:       true,
+	TopicAccountRemoved:       true,
+	TopicAccountUsage:         true,
+	TopicMcpServerCreated:     true,
+	TopicMcpServerUpdated:     true,
+	TopicMcpServerDeleted:     true,
+	TopicLearnedSkillProposed: true,
+	TopicLearnedSkillChanged:  true,
+	TopicLearningJob:          true,
 }
 
 // subscriberQueueCap is the per-connection event queue bound (ADR 0005):

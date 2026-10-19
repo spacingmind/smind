@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -165,6 +166,23 @@ func TestClient_Call_ServerError(t *testing.T) {
 	var rpcErr *RPCError
 	if !errors.As(err, &rpcErr) {
 		t.Fatalf("Call() error = %v (%T), want an *RPCError", err, err)
+	}
+}
+
+// TestDecodeTerminal_KeepsErrorCodeAndData proves the error code and the
+// structured data of a terminal error survive on *RPCError (additive fields).
+func TestDecodeTerminal_KeepsErrorCodeAndData(t *testing.T) {
+	t.Parallel()
+	env := envelope{Error: &rpcError{Message: "boom", Code: "gate_rejected", Data: json.RawMessage(`{"findings":[{"reason":"guard","detail":"x"}]}`)}}
+	var rpcErr *RPCError
+	if err := decodeTerminal(env, nil); !errors.As(err, &rpcErr) {
+		t.Fatalf("decodeTerminal error = %v, want an *RPCError", err)
+	}
+	if rpcErr.Code != "gate_rejected" || !strings.Contains(string(rpcErr.Data), `"findings"`) {
+		t.Fatalf("RPCError = %+v, want code and data kept", rpcErr)
+	}
+	if err := decodeTerminal(envelope{Error: &rpcError{Message: "plain"}}, nil); !errors.As(err, &rpcErr) || rpcErr.Code != "" || rpcErr.Data != nil {
+		t.Fatalf("plain error = %+v, want empty code/data", rpcErr)
 	}
 }
 
