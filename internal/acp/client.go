@@ -656,7 +656,11 @@ type updateSub struct {
 // lookup, so it can't race with the delete below) makes that impossible:
 // once delete has run, no new send can start, and wg.Wait() blocks until
 // every send that did start has finished.
-func (c *Client) Prompt(ctx context.Context, sessionID, text string, updates chan<- SessionUpdate) (string, error) {
+func (c *Client) Prompt(ctx context.Context, sessionID, text string, updates chan<- SessionUpdate, opts ...PromptOption) (string, error) {
+	var po promptOptions
+	for _, o := range opts {
+		o(&po)
+	}
 	sub := &updateSub{ch: updates}
 	c.mu.Lock()
 	c.updateSubs[sessionID] = sub
@@ -672,7 +676,7 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string, updates cha
 
 	raw, err := c.conn.call(ctx, "session/prompt", promptParams{
 		SessionID: sessionID,
-		Prompt:    []ContentBlock{{Type: "text", Text: text}},
+		Prompt:    po.blocks(text),
 	})
 	if err != nil {
 		return "", fmt.Errorf("acp: session/prompt: %w", err)
@@ -688,6 +692,26 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string, updates cha
 		c.mu.Unlock()
 	}
 	return res.StopReason, nil
+}
+
+// PromptOption tunes one Prompt call.
+type PromptOption func(*promptOptions)
+
+type promptOptions struct{ prefix string }
+
+// WithPromptPrefix sends text as its own leading text content block, ahead
+// of the user's text block -- the user's block stays byte-identical, so the
+// prefix never leaks into anything derived from the user's text.
+func WithPromptPrefix(text string) PromptOption {
+	return func(o *promptOptions) { o.prefix = text }
+}
+
+func (o promptOptions) blocks(text string) []ContentBlock {
+	user := ContentBlock{Type: "text", Text: text}
+	if o.prefix == "" {
+		return []ContentBlock{user}
+	}
+	return []ContentBlock{{Type: "text", Text: o.prefix}, user}
 }
 
 // PromptUsage returns the PromptResponse.usage of sessionID's latest Prompt

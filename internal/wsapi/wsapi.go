@@ -43,12 +43,21 @@ type envelope struct {
 type rpcError struct {
 	Message string `json:"message"`
 	Code    string `json:"code,omitempty"`
+	// Data is optional structured detail for the code (e.g. the gate
+	// findings of a gate_rejected error); see rpcDataer.
+	Data any `json:"data,omitempty"`
 }
 
 // rpcCoder is implemented by typed errors that carry a machine-readable
 // code for the wire.
 type rpcCoder interface {
 	RPCCode() string
+}
+
+// rpcDataer is implemented by typed errors that carry structured detail
+// next to their code.
+type rpcDataer interface {
+	RPCData() any
 }
 
 // codedError builds a terminal error response for err, attaching err's
@@ -58,6 +67,9 @@ func codedError(err error) *rpcError {
 	for err != nil {
 		if c, ok := err.(rpcCoder); ok {
 			r.Code = c.RPCCode()
+			if d, ok := err.(rpcDataer); ok {
+				r.Data = d.RPCData()
+			}
 			break
 		}
 		err = errors.Unwrap(err)

@@ -7,8 +7,8 @@ import type { ThinkingLevel } from "@/lib/types";
  * profiles-section.tsx with slightly different id sets.
  *
  * Claude-only (see internal/taskrunner/thinking.go's doc comment): every
- * consuming surface already gates this list behind
- * `provider === "claude-native"` on its own, so it isn't repeated here.
+ * consuming surface gates this list behind `supportsThinking(provider)`,
+ * so it isn't repeated here.
  */
 export interface ThinkingLevelInfo {
   id: Exclude<ThinkingLevel, "">;
@@ -29,4 +29,13 @@ export const THINKING_LEVELS: ThinkingLevelInfo[] = [
 /** "" (unset) reads as "Standard" everywhere -- that's already the adaptive default in effect, just via no Option at all (see ThinkingLevelUnspecified's own doc comment on the Go side). */
 export function thinkingLevelLabel(level: ThinkingLevel): string {
   return THINKING_LEVELS.find((t) => t.id === (level || "standard"))?.label ?? "Standard";
+}
+
+/**
+ * Whether provider has a thinking level at all: a Claude-only, pre-run
+ * control (internal/taskrunner/thinking.go) -- every other provider takes
+ * no thinking option, so the control is omitted rather than disabled.
+ */
+export function supportsThinking(provider: string): boolean {
+  return provider === "claude-native";
 }

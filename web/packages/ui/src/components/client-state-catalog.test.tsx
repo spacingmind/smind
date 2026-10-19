@@ -288,6 +288,36 @@ describe("shared catalog / profile / health cache", () => {
     expect(d.countCalls("provider.list")).toBe(1);
   });
 
+  it("describeProfile is identical in picker pill and settings row", async () => {
+    const d = new FakeUsageDaemon([]);
+    d.providers = PROVIDERS as never;
+    d.profiles = [profile(1, "Plain"), { ...profile(2, "Pinned"), Model: "sonnet", PermissionMode: "plan", ThinkingLevel: "off" } as AgentProfile];
+    renderWithDaemon(
+      <KeyboardProvider>
+        <PaletteProvider>
+          {composer(d.client)}
+          {section("agents", d)}
+        </PaletteProvider>
+      </KeyboardProvider>,
+      d,
+    );
+    await flush();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    fireEvent.click(screen.getByTestId("composer-model-picker"));
+    fireEvent.click(await screen.findByTestId("model-picker-back"));
+
+    for (const id of [1, 2]) {
+      // The Agents row's metadata line and the picker row's summary: one function, one string.
+      const settings = within(screen.getByTestId(`profile-row-${id}`)).getByText(/^Claude Code ·/);
+      const picker = within(screen.getByTestId(`model-profile-row-${id}`)).getByText(/^Claude Code ·/);
+      expect(settings.textContent).toBe(picker.textContent);
+    }
+    // And it is the long form (provider · mode · thinking), not the old provider-only line.
+    expect(within(screen.getByTestId("profile-row-1")).getByText(/^Claude Code ·/).textContent).toContain("Standard");
+  });
+
   it("one fallback provider list constant", () => {
     const root = join(__dirname, "..");
     const declarations: string[] = [];

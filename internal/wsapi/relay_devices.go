@@ -43,7 +43,10 @@ type rpcCodeError struct {
 	code string
 	msg  string
 	err  error
+	data any
 }
+
+func (e *rpcCodeError) RPCData() any { return e.data }
 
 func (e *rpcCodeError) Error() string   { return e.msg }
 func (e *rpcCodeError) RPCCode() string { return e.code }

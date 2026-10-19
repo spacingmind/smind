@@ -81,6 +81,10 @@ type Registry struct {
 	observersMu sync.Mutex
 	observers   []Observer
 
+	// deliveryProvider, set by SetDeliveryProvider, prepares each user
+	// run's learned-skill delivery in drive. Guarded by observersMu.
+	deliveryProvider DeliveryProvider
+
 	// st persists every Run's row and event history so both survive a
 	// daemon restart -- see New's doc comment for reconciliation/rehydration
 	// and Start/record/finish for the write path.
@@ -382,6 +386,11 @@ type run struct {
 	// interrupt. Set at start, immutable, persisted on the row.
 	origin    string
 	interrupt bool
+
+	// offered is what the delivery provider offered this run (ADR-0026);
+	// set once in drive before the turn starts, read by finish. Guarded
+	// by mu.
+	offered OfferedInfo
 
 	// isolation, when set, drives the turn through RunPromptIsolated
 	// (system runs only; see WithIsolation). Not persisted: nothing
@@ -917,6 +926,7 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 	if r.isolation != nil {
 		err = runner.RunPromptIsolated(ctx, r.taskID, r.chatID, r.provider, r.prompt, r.model, *r.isolation, events)
 	} else {
+		ctx = reg.withDelivery(ctx, r)
 		err = runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, r.prompt, decider, r.getPerm(), r.thinkingLevel, r.model, events)
 	}
 	<-forwardDone
@@ -1222,6 +1232,7 @@ func (reg *Registry) finish(r *run, err error) {
 	stopReason := r.stopReason
 	usage := r.usage
 	toolCalls := len(r.toolCallIDs)
+	offered := r.offered
 	r.mu.Unlock()
 
 	// Idempotent re-upsert so the row reflects the final value. A run that
@@ -1278,6 +1289,7 @@ func (reg *Registry) finish(r *run, err error) {
 	reg.notifyObservers(RunFinished{
 		RunID: r.id, TaskID: r.taskID, ChatID: r.chatID, Provider: string(r.provider),
 		Purpose: observerPurpose(r.purpose), Status: string(status), StopReason: stopReason, ToolCalls: toolCalls,
+		OfferedSkillIDs: offered.SkillIDs, OfferedMeasured: offered.Measured,
 	})
 
 	// Close every subscriber still attached: their relay goroutines drain

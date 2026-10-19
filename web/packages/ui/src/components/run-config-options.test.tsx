@@ -40,6 +40,35 @@ describe("RunConfigOptions", () => {
     expect(screen.getByTestId("run-config-option-toggle").className).toContain("md:h-7");
   });
 
+  it("live thinking options are the toolbar's shared pill select: named by the option, choices from the agent", async () => {
+    const onSetOption = vi.fn().mockResolvedValue(undefined);
+    const option: ConfigOptionParams = {
+      ...THINKING,
+      description: "How hard the agent thinks",
+      options: [
+        { value: "max", name: "Max", description: "Think the most" },
+        { value: "low", name: "Low" },
+      ],
+    };
+    render(<RunConfigOptions options={[option]} error={null} onSetOption={onSetOption} />);
+    const trigger = screen.getByLabelText("Thinking");
+    // Same component as the composer's Thinking pill (ThinkingSelect): its accessible name is the option's own,
+    // its tooltip the option's description.
+    expect(trigger).toHaveAttribute("title", "How hard the agent thinks");
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("option", { name: "Low" }));
+    expect(onSetOption).toHaveBeenCalledWith("thinking", "low");
+  });
+
+  it("a live option with no description of its own keeps no tooltip (the current choice's help is not borrowed)", () => {
+    const option: ConfigOptionParams = {
+      ...THINKING,
+      options: [{ value: "max", name: "Max", description: "Think the most" }],
+    };
+    render(<RunConfigOptions options={[option]} error={null} onSetOption={vi.fn()} />);
+    expect(screen.getByLabelText("Thinking")).toHaveAttribute("title", "");
+  });
+
   it("keeps the mode option when the mode pill is not live", () => {
     render(<RunConfigOptions options={[MODE]} error={null} onSetOption={vi.fn()} />);
     expect(screen.getByLabelText("Mode")).toBeInTheDocument();

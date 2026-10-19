@@ -4,6 +4,7 @@ import { Icons } from "@/lib/icons";
 
 import { PILL_TRIGGER_CLASS } from "@/components/composer/pill-class";
 import { cn } from "@/lib/utils";
+import { ThinkingSelect } from "@/components/pickers/thinking-select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -116,23 +117,33 @@ function ConfigOptionControl({
     // Model picker, which sets the next run's -- so it is named apart from
     // it, both for sighted users (tooltip) and assistive tech/tests (label).
     const isModel = option.category === "model";
+    if (!isModel) {
+      // GLM/Kimi's thinking tiers and any other agent-advertised select: the toolbar's shared pill select.
+      return (
+        <ThinkingSelect
+          variant="pill"
+          label={option.name}
+          title={option.description ?? ""}
+          levels={option.options.map((choice) => ({ id: choice.value, label: choice.name, help: choice.description }))}
+          value={current}
+          onChange={change}
+          disabled={pending}
+        />
+      );
+    }
     return (
       <Select value={current} onValueChange={change} disabled={pending}>
         <SelectTrigger
-          aria-label={isModel ? `${option.name} (this session)` : option.name}
-          title={isModel ? (option.description ?? "Switch the model for this running session") : option.description}
-          data-testid={isModel ? "run-config-option-model" : undefined}
+          aria-label={`${option.name} (this session)`}
+          title={option.description ?? "Switch the model for this running session"}
+          data-testid="run-config-option-model"
           className={PILL_TRIGGER_CLASS}
         >
-          {isModel ? <Icons.model aria-hidden className="shrink-0" /> : <Icons.thinking aria-hidden className="shrink-0" />}
-          {isModel ? (
-            // Prefixed so it reads apart from the composer's next-run Model picker sitting beside it.
-            <SelectValue placeholder={option.name}>
-              This run: {option.options.find((c) => c.value === current)?.name ?? current}
-            </SelectValue>
-          ) : (
-            <SelectValue placeholder={option.name} />
-          )}
+          <Icons.model aria-hidden className="shrink-0" />
+          {/* Prefixed so it reads apart from the composer's next-run Model picker sitting beside it. */}
+          <SelectValue placeholder={option.name}>
+            This run: {option.options.find((c) => c.value === current)?.name ?? current}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           {option.options.map((choice) => (

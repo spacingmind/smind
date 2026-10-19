@@ -25,6 +25,11 @@ type RunFinished struct {
 	// ToolCalls is the number of distinct non-empty ToolCallIDs the run
 	// emitted, including runs that finished with error or cancel.
 	ToolCalls int
+	// OfferedSkillIDs are the learned skills the DeliveryProvider offered
+	// this run (nil without a provider or delivery) and OfferedMeasured is
+	// whether the run's provider can report skill loads (ADR-0026 s6).
+	OfferedSkillIDs []int64
+	OfferedMeasured bool
 }
 
 // Observer is notified once per finished run, synchronously from finish,

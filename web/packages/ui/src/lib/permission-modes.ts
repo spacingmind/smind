@@ -1,4 +1,4 @@
-import type { ModeInfo, ModelInfo, Provider, ProviderInfo } from "@/lib/types";
+import type { ModeInfo, Provider, ProviderInfo } from "@/lib/types";
 
 /**
  * Provider-native permission modes (ADR-0019): every surface -- composer,
@@ -81,7 +81,8 @@ export function describePermission(providers: ProviderInfo[], provider: string, 
   return autoAccept ? `${label} · ${AUTO_ACCEPT_LABEL}` : label;
 }
 
-/** provider's model catalog (ADR-0025), [] when provider.list lists none (unprobed ACP agent, older daemon, or the pre-answer fallback). */
-export function providerModels(providers: ProviderInfo[], provider: string): ModelInfo[] {
-  return infoFor(providers, provider)?.models ?? [];
+/** Whether the effective mode auto-approves prompts (or ACP Auto-accept is on): the pickers warn (shield + warning colour) without changing any mode semantics. */
+export function isDangerousMode(providers: ProviderInfo[], provider: string, mode: string, autoAccept: boolean): boolean {
+  const current = providerModes(providers, provider).find((m) => m.id === effectiveMode(providers, provider, mode));
+  return current?.autoApproves === true || autoAccept;
 }
