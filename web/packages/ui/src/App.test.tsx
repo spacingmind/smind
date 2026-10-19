@@ -7,6 +7,7 @@ import { platformBindings, SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
 import { WsClient } from "@/lib/ws-client";
 import { FakeSocket } from "@/test/fake-socket";
 import "@/test/query-scheduler";
+import { reloadAllPreferenceStores } from "@/stores/create-preference-store";
 import { openHoverCard } from "@/test/sidebar-helpers";
 import { resetTerminalSessions } from "@/lib/terminal-sessions";
 import type { Chat, RunLogsResult, RunSummary, Task, TerminalSessionStatus, Workspace } from "@/lib/types";
@@ -305,10 +306,13 @@ describe("App", () => {
     await advanceReconnectTimer();
     await flush();
 
-    // useWorkspaceTree's effect is keyed on the `client` reference -- if
-    // AppSidebar had been handed back the *same* WsClient instance (just
-    // reconnected in place), no new workspace.list would fire at all,
-    // since nothing about the effect's dependency would have changed.
+    // The tree is one query per daemon connection and survives a transport reconnect (no blank sidebar);
+    // once the new connection's events.subscribe is answered, useDaemonEvents invalidates it and the
+    // sidebar re-reads against the NEW client -- had it been handed back the same WsClient instance, no
+    // new workspace.list would ever reach socket2.
+    expect(screen.getByText("Fix the bug")).toBeInTheDocument();
+    respond(socket2, "events.subscribe", null);
+    await flush();
     expect(socket2.sent.some((e) => e.method === "workspace.list")).toBe(true);
     expect(socket1.sent.filter((e) => e.method === "workspace.list")).toHaveLength(1);
   });
@@ -1186,6 +1190,7 @@ describe("App sidebar resize", () => {
     // useSidebarWidth (see its own dedicated test for the clamp/persist
     // logic in isolation) reads this back instead of the default on mount.
     window.localStorage.setItem("smind:sidebar-width", "300");
+    reloadAllPreferenceStores(); // the width is a store now: re-read what a "previous session" left in storage
 
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
@@ -1199,6 +1204,7 @@ describe("App sidebar resize", () => {
 
   it("a persisted width past the max bound still clamps on read-back, never rendering wider than SIDEBAR_MAX_WIDTH", async () => {
     window.localStorage.setItem("smind:sidebar-width", "999999");
+    reloadAllPreferenceStores();
 
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));

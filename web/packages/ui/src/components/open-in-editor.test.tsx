@@ -2,8 +2,7 @@
 // is mocked per scenario (`isDesktop` is a module-load constant) and the
 // components are imported fresh, like desktop-daemon-banner.test.tsx.
 import { act } from "react";
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { renderWithClientProp as render } from "@/test/render-with-daemon";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
@@ -79,13 +78,18 @@ async function mountSidebar() {
   const { AppSidebar } = await import("@/components/app-sidebar");
   const { SidebarProvider } = await import("@/components/ui/sidebar");
   const { Toaster } = await import("@/components/ui/toast");
+  // Imported fresh with the rest: the harness's QueryClient/connection contexts must be the same module
+  // instances the freshly imported sidebar reads (this file resets the module registry per scenario).
+  const { renderWithClientProp } = await import("@/test/render-with-daemon");
   const client = new FakeWsClient();
-  render(
+  renderWithClientProp(
     <SidebarProvider>
       <Toaster />
       <AppSidebar client={client as never} selectedTaskId={null} />
     </SidebarProvider>,
   );
+  // The tree is a query now: its fetch starts a tick after mount.
+  await act(async () => {});
   client.nth("workspace.list", 0).resolve([WORKSPACE]);
   await flush();
   client.nth("space.list", 0).resolve([]);
