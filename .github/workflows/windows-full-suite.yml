@@ -52,15 +52,13 @@ jobs:
           "TMP=D:\gotmp" | Out-File -Append -Encoding ascii $env:GITHUB_ENV
 
       # -json so the summary can rank the slowest tests and packages; go-test.log
-      # is the plain output rebuilt from it. SMIND_SQLITE_SYNCHRONOUS=off drops
-      # the per-commit fsync of the test databases (durability is not what these
-      # tests check; the daemon never sets it): ~20 ms per commit on C:, which
-      # made the DB-heavy packages take minutes and hit SQLITE_BUSY.
+      # is the plain output rebuilt from it. No SMIND_SQLITE_SYNCHRONOUS here any
+      # more: the store runs WAL with synchronous=NORMAL (ADR-0034), which
+      # commits without a per-commit fsync, so the slow-disk SQLITE_BUSY that knob
+      # worked around is gone at the source.
       - name: go test
         id: test
         shell: bash
-        env:
-          SMIND_SQLITE_SYNCHRONOUS: "off"
         run: |
           set +e
           go test -json -timeout "${{ inputs.timeout || '10m' }}" ${{ inputs.packages || './...' }} > go-test.json 2>&1

@@ -399,6 +399,8 @@ does this: it reads `SMIND_PASSWORD` from `.env` and refuses to start without it
 - **Health and supervision.** The image has a healthcheck on `/healthz` (healthy within about 15 s) and sets
   `SMIND_SUPERVISOR=docker`, so `/healthz` reports `managedBy: docker`.
 - **State survives** removing and recreating the container on the same volumes (database, token, accounts, relay config).
+  Back up `/data` as described in "Backups and the database file" below: stop the container first, or use `VACUUM INTO`,
+  and keep the volume on a local disk (the database uses WAL, which a network-backed volume driver does not support).
   `docker exec --user smind smind smind relay connect <relay:port> <host-id> <secret>` stores its config in `/data`, and the
   restarted container dials the relay again; see Path B.
 - **Updating** means pulling a new tag. `smind update` inside the image refuses ("update by pulling a new image").
@@ -424,6 +426,41 @@ does this: it reads `SMIND_PASSWORD` from `.env` and refuses to start without it
   `ghcr.io/spacingmind/smind` public in the repository's package settings, or the documented `docker pull` fails for everyone else.
 - **The container is the isolation boundary:** agents read and write whatever you mount, including `/workspaces` and the
   home volume.
+
+## Backups and the database file
+
+The daemon keeps its state in `$SMIND_HOME/smind.db` (ADR-0034). It runs SQLite in WAL mode, so while the daemon is running
+the database is three files: `smind.db`, `smind.db-wal` and `smind.db-shm`. Recent commits live in the `-wal` until a
+checkpoint folds them into `smind.db`; a clean stop (`smind stop`, `docker stop`, a service stop) checkpoints and leaves
+`smind.db` alone complete.
+
+**Do not copy `smind.db` by itself while the daemon runs** (a file sync tool, `cp`, `rsync`, a volume snapshot of just that
+file): the copy misses committed rows and can be torn. Use one of these:
+
+- **A live backup** (daemon running, nothing to stop). Needs the `sqlite3` command-line tool, 3.27 or newer:
+
+  ```sh
+  sqlite3 "$SMIND_HOME/smind.db" "VACUUM INTO '/backups/smind-$(date +%F).db'"
+  # or:  sqlite3 "$SMIND_HOME/smind.db" ".backup '/backups/smind-$(date +%F).db'"
+  ```
+
+  The target file must not exist. The result is a single, consistent `.db` file with everything committed so far.
+- **A cold backup.** Stop the daemon, then copy the whole `$SMIND_HOME` directory (or at least every `smind.db*` file).
+  Docker: `docker stop smind`, then
+  `docker run --rm -v smind-data:/data -v "$PWD":/backup alpine tar czf /backup/smind-data.tgz -C /data .`, then
+  `docker start smind`. A volume snapshot taken while the container runs is also safe if it is atomic for the whole volume,
+  because the `-wal` is in it; the daemon replays it on the next start, as after a crash.
+
+**Restoring.** Stop the daemon, put the backup at `$SMIND_HOME/smind.db`, and **delete any `smind.db-wal` and `smind.db-shm`**
+left from the old database: a stale `-wal` does not belong to the restored file. Never delete those two files from a
+database you want to keep (for example after a crash): the `-wal` can hold committed rows the main file does not have yet.
+
+**Local disks only.** WAL needs a local filesystem. If `$SMIND_HOME` is on a network mount (NFS, SMB/CIFS, a NAS volume
+driver, WSL's `/mnt/c`), the daemon notices, logs `is on a network filesystem; using the rollback journal instead of WAL`
+and runs the slower, older journal mode there. Keep `$SMIND_HOME` (or the Docker data volume) on the host's own disk.
+
+**After a power loss** the last few commits may be missing; the database itself stays consistent. To make every commit
+survive a power loss at the cost of write speed, start the daemon with `SMIND_SQLITE_SYNCHRONOUS=full`.
 
 ## Which to use
 
