@@ -259,11 +259,34 @@ describe('E2EE v2 vectors: frames through the real client Channel', () => {
     expect(hex(await within(channel.receive()))).toBe(v.data.d2m[1].plaintext_hex);
   });
 
-  it('refuses a data frame whose counter has a non-zero high word', async () => {
+  it('a peer counter with a non-zero high word is beyond the 2^32 - 1 limit: fatal, the channel closes', async () => {
     const f0 = fromHex(v.data.d2m[0].frame_hex);
     f0[5] = 0x01; // high word of u64BE(counter)
     const { channel } = await established([hex(f0)]);
-    expect(errorKind(await rejection(channel.receive()))).toBe('replay');
+    expect(errorKind(await rejection(channel.receive()))).toBe('counter_exhausted');
+    expect(channel.isClosed).toBe(true);
+    expect(errorKind(await rejection(channel.receive()))).toBe('closed');
+  });
+
+  it('the send counter stops at 2^32 - 1: the last frame goes out, the next is fatal and closes the channel', async () => {
+    const { channel, t } = await established();
+    const session = (channel as unknown as { session: { sendCounter: number } }).session;
+    session.sendCounter = 0xfffffffd; // test seam: no 4-billion-frame loop
+    channel.send(new Uint8Array(1));
+    channel.send(new Uint8Array(1)); // counter 0xfffffffe, the last one
+    const last = t.sent[t.sent.length - 1];
+    expect(Array.from(last.slice(5, 13))).toEqual([0, 0, 0, 0, 0xff, 0xff, 0xff, 0xfe]);
+    expect(() => channel.send(new Uint8Array(1))).toThrow(/counter exhausted/);
+    expect(channel.isClosed).toBe(true);
+    expect(() => channel.send(new Uint8Array(1))).toThrow(/closed/);
+    expect(frameKinds(t.sent).filter((k) => k === 'data')).toHaveLength(2);
+  });
+
+  it('Session.seal reports counter_exhausted at the limit and does not advance', () => {
+    const s = Session.fromSchedule(Role.Mobile, { th: new Uint8Array(32), d2m: new Uint8Array(32).fill(1), m2d: new Uint8Array(32).fill(2), confirmD: new Uint8Array(32), confirmM: new Uint8Array(32) });
+    (s as unknown as { sendCounter: number }).sendCounter = 0xffffffff;
+    expect(() => s.seal(new Uint8Array(1))).toThrow(/counter exhausted/);
+    expect((s as unknown as { sendCounter: number }).sendCounter).toBe(0xffffffff);
   });
 
   it('the test responder reproduces the vector frames from the vector seeds, and its sealed frames equal the vector data frames', async () => {

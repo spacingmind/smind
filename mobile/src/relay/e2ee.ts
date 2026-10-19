@@ -206,8 +206,10 @@ export class Session {
   }
 
   seal(plaintext: Uint8Array): { counter: number; ciphertext: Uint8Array } {
-    // A session this long would need a new handshake anyway; stopping at 2^32-1
-    // keeps the counter exactly representable and the nonce's high word zero.
+    // Limit: this client carries the counter in the nonce's low 32-bit word only (JS bit
+    // arithmetic), so a session ends at 2^32 - 1 frames per direction, where Go/ADR-0035 allow
+    // 2^64 - 1. Hitting it is fatal for the channel (Channel.send closes it) and the supervisor
+    // opens a fresh session with a new handshake.
     if (this.sendCounter >= 0xffffffff) throw new E2EEError('counter_exhausted', 'e2ee: frame counter exhausted');
     const counter = this.sendCounter;
     const ciphertext = chacha20poly1305(this.sendKey, Session.nonceFor(counter)).encrypt(plaintext);
@@ -518,7 +520,14 @@ export class Channel {
 
   send(message: Uint8Array): void {
     const session = this.activeSession();
-    const { counter, ciphertext } = session.seal(message);
+    let sealed: { counter: number; ciphertext: Uint8Array };
+    try {
+      sealed = session.seal(message);
+    } catch (e) {
+      if (e instanceof E2EEError && e.kind === 'counter_exhausted') this.closed = true;
+      throw e;
+    }
+    const { counter, ciphertext } = sealed;
     const payload = new Uint8Array(8 + ciphertext.length);
     // u64BE(counter): the high word is always zero (see Session.seal).
     new DataView(payload.buffer).setUint32(4, counter, false);
@@ -545,7 +554,8 @@ export class Channel {
         const high = view.getUint32(0, false);
         const low = view.getUint32(4, false);
         // A counter above 2^32 can never be the next one expected.
-        if (high !== 0) throw new E2EEError('replay', `e2ee: frame counter replayed or out of order: got ${high} * 2^32 + ${low}`);
+        // Beyond this client's 2^32 - 1 limit the session can only stall: fatal, so a fresh session replaces it.
+        if (high !== 0) this.fail(new E2EEError('counter_exhausted', `e2ee: peer frame counter ${high} * 2^32 + ${low} is beyond this client's 2^32 - 1 limit`));
         return session.open(low, frame.payload.slice(8));
       }
       try {

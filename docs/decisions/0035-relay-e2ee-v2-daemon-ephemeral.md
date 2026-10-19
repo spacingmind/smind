@@ -283,5 +283,6 @@ reason. A dual-stack daemon (v1 and v2) is rejected: it keeps the nonce-reuse pa
 - The daemon API loses the ability to be handed an initiator key, and the client `Channel` generates its own: callers
   (relay client, harnesses, `relaytest`, desktop, mobile) change.
 - Residuals that remain, unchanged: the relay sees device ids and traffic metadata; an unpinned client trusts whoever answers
-  first; counter exhaustion at 2^64 − 1 frames ends a session; the daemon-only control credential and offer-as-secret
+  first; counter exhaustion at 2^64 − 1 frames ends a session (the TypeScript client limits a session to 2^32 − 1 frames
+  per direction (JS 32-bit nonce word); both ends then start a new session); the daemon-only control credential and offer-as-secret
   limits of ADR-0031.

@@ -622,3 +622,18 @@ describe('what counts as the daemon having answered a probe', () => {
     expect(relay.helloLog).toHaveLength(2);
   });
 });
+
+describe('counter limit', () => {
+  it('a session that runs out of send counters is replaced by a fresh one (the channel is closed, the stream ended)', async () => {
+    const relay = new FakeRelay();
+    const conn = start(relay);
+    await conn.whenConnected();
+    const epoch = conn.epoch;
+    const ch = (conn as unknown as { channel: { session: { sendCounter: number } } }).channel;
+    ch.session.sendCounter = 0xffffffff;
+    await expect(conn.call('workspace.list')).rejects.toThrow(/counter exhausted/);
+    await vi.waitFor(() => expect(conn.epoch).toBeGreaterThan(epoch), { timeout: 5000 });
+    expect(relay.helloLog).toHaveLength(2);
+    await expect(conn.call('workspace.list')).resolves.toEqual([]);
+  });
+});
