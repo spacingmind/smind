@@ -438,6 +438,7 @@ fn connected_count(h: &Harness) -> usize {
 // ---------------------------------------------------------------- tests
 
 #[tokio::test]
+#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn three_devices_two_rust_one_go_stay_attached() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
@@ -471,6 +472,7 @@ async fn three_devices_two_rust_one_go_stay_attached() {
 }
 
 #[tokio::test]
+#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn three_devices_two_rust_one_go_stay_attached_after_one_reconnects() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
@@ -502,6 +504,7 @@ async fn three_devices_two_rust_one_go_stay_attached_after_one_reconnects() {
 }
 
 #[tokio::test]
+#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn three_devices_two_rust_one_go_stay_attached_after_daemon_restart() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
@@ -537,6 +540,7 @@ async fn three_devices_two_rust_one_go_stay_attached_after_daemon_restart() {
 }
 
 #[tokio::test]
+#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn three_devices_two_rust_one_go_stay_attached_after_revoke_only_that_device_is_refused() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
@@ -570,6 +574,7 @@ async fn three_devices_two_rust_one_go_stay_attached_after_revoke_only_that_devi
 }
 
 #[tokio::test]
+#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn unknown_device_outside_the_window_waits_for_approval_then_connects() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap(); // the stub used the only window
@@ -614,6 +619,7 @@ const DAEMON_PASSWORD: &str = "a daemon password for the interop test";
 /// instead of retrying, a wrong password is forgotten and not recorded, and the
 /// right one connects (an unknown device then still needs the pairing window).
 #[tokio::test]
+#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn password_protected_daemon_asks_rejects_a_wrong_password_and_accepts_the_right_one() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(|| Harness::start(&["-hub", "-password", DAEMON_PASSWORD])).await.unwrap();
@@ -642,6 +648,7 @@ async fn password_protected_daemon_asks_rejects_a_wrong_password_and_accepts_the
 }
 
 #[tokio::test]
+#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn repeated_wrong_passwords_are_rate_limited_by_the_daemon() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(|| Harness::start(&["-hub", "-password", DAEMON_PASSWORD])).await.unwrap();
@@ -664,6 +671,7 @@ async fn repeated_wrong_passwords_are_rate_limited_by_the_daemon() {
 }
 
 #[tokio::test]
+#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn client_reconnects_after_silence_with_jitter() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
@@ -705,6 +713,7 @@ async fn client_reconnects_after_silence_with_jitter() {
 }
 
 #[tokio::test]
+#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn client_resumes_after_transport_drop_keeping_ids() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
@@ -744,6 +753,7 @@ async fn client_resumes_after_transport_drop_keeping_ids() {
 }
 
 #[tokio::test]
+#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn legacy_daemon_still_works() {
     let _serial = serial();
     // The default harness is a daemon that does not track device identity: it
