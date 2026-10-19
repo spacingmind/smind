@@ -2,6 +2,7 @@ package taskrunner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -432,6 +433,72 @@ func TestRunPromptIsolated_InitCleanProceeds(t *testing.T) {
 	}
 	if txt := FinalText(got); txt != "after init" {
 		t.Fatalf("FinalText = %q", txt)
+	}
+}
+
+func TestRunPromptIsolated_InitBuiltinPluginsProceed(t *testing.T) {
+	t.Parallel()
+	wm, task := newIsolatedTask(t, "init-builtin-plugins")
+	r := claudeNativeRunner(t, wm)
+	got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
+	if err != nil {
+		t.Fatalf("error = %v (the CLI's compiled-in plugins are not an isolation leak)", err)
+	}
+	if txt := FinalText(got); txt != "after init" {
+		t.Fatalf("FinalText = %q", txt)
+	}
+}
+
+func TestRunPromptIsolated_InitUserPluginAborts(t *testing.T) {
+	t.Parallel()
+	wm, task := newIsolatedTask(t, "init-user-plugin")
+	r := claudeNativeRunner(t, wm)
+	_, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
+	if !errors.Is(err, ErrIsolationViolated) || !strings.Contains(err.Error(), "init reported plugins") {
+		t.Fatalf("error = %v, want ErrIsolationViolated naming plugins", err)
+	}
+}
+
+func TestInitViolation_RealCLIShape(t *testing.T) {
+	t.Parallel()
+	// Trimmed from a live claude 2.1.293 init message (isolated flags).
+	const real = `{"type":"system","subtype":"init","tools":[],"mcp_servers":[],"slash_commands":[],"skills":[],` +
+		`"agents":["claude","Explore"],"plugins":[{"name":"cc-plugin-sec-default","path":"builtin","source":"cc-plugin-sec-default@builtin"},` +
+		`{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"}]}`
+	if got := initViolation(json.RawMessage(real)); got != "" {
+		t.Fatalf("initViolation(real isolated init) = %q, want none", got)
+	}
+	leak := strings.Replace(real, `"skills":[]`, `"skills":["learned-x"]`, 1)
+	if got := initViolation(json.RawMessage(leak)); got != "skills" {
+		t.Fatalf("initViolation(skills leak) = %q, want skills", got)
+	}
+}
+
+func TestInitViolation_PluginExemptionIsNarrow(t *testing.T) {
+	t.Parallel()
+	const builtin = `{"name":"cc-x","path":"builtin","source":"cc-x@builtin"}`
+	for _, tc := range []struct {
+		name string
+		init string
+		want string
+	}{
+		{"builtin only", `{"plugins":[` + builtin + `]}`, ""},
+		{"user plugin first", `{"plugins":[{"name":"mine","path":"/p/mine","source":"mine@local"},` + builtin + `]}`, "plugins"},
+		{"path builtin, foreign source", `{"plugins":[{"name":"mine","path":"builtin","source":"mine@local"}]}`, "plugins"},
+		{"path builtin, no source", `{"plugins":[{"name":"mine","path":"builtin"}]}`, "plugins"},
+		{"path builtin, no name", `{"plugins":[{"path":"builtin","source":"@builtin"}]}`, "plugins"},
+		{"non-object entry", `{"plugins":["x"]}`, "plugins"},
+		{"null entry", `{"plugins":[null]}`, "plugins"},
+		{"builtin plus skill", `{"plugins":[` + builtin + `],"skills":["s"]}`, "skills"},
+		{"builtin plus slash command", `{"plugins":[` + builtin + `],"slash_commands":["/x"]}`, "slash_commands"},
+		{"builtin plus mcp server", `{"plugins":[` + builtin + `],"mcp_servers":[{"name":"m"}]}`, "mcp_servers"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := initViolation(json.RawMessage(tc.init)); got != tc.want {
+				t.Fatalf("initViolation = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
