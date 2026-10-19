@@ -10,6 +10,7 @@ import { createQueryClient } from "@/lib/query/query-client";
 import "@/test/query-scheduler";
 import { RpcError } from "@/lib/ws-client";
 import { FakeWsClient } from "@/test/fake-ws-client";
+import { reloadAllPreferenceStores } from "@/stores/create-preference-store";
 
 function renderSidebar(client: FakeWsClient, open = true) {
   return render(
@@ -42,6 +43,7 @@ describe("AppSidebar plan-usage summary (ADR-0028 PR-D2)", () => {
 
   it("on: the footer row appears above the icon line and sends exactly one touch", async () => {
     window.localStorage.setItem(STORAGE_KEYS.usage, JSON.stringify({ displayAs: "used", accountKey: null, inSidebar: true, pins: null }));
+    reloadAllPreferenceStores(); // the usage preferences are a store now: re-read what the test just seeded
     const client = new FakeWsClient();
     renderSidebar(client);
     await act(async () => {});
@@ -56,6 +58,7 @@ describe("AppSidebar plan-usage summary (ADR-0028 PR-D2)", () => {
 
   it("on but the icon-collapsed rail: no row and no request", async () => {
     window.localStorage.setItem(STORAGE_KEYS.usage, JSON.stringify({ inSidebar: true }));
+    reloadAllPreferenceStores(); // the usage preferences are a store now: re-read what the test just seeded
     const client = new FakeWsClient();
     renderSidebar(client, false);
     await act(async () => {});
@@ -65,6 +68,7 @@ describe("AppSidebar plan-usage summary (ADR-0028 PR-D2)", () => {
 
   it("on with a daemon that has no account.usage: the empty rows wrapper hides itself", async () => {
     window.localStorage.setItem(STORAGE_KEYS.usage, JSON.stringify({ inSidebar: true }));
+    reloadAllPreferenceStores(); // the usage preferences are a store now: re-read what the test just seeded
     const client = new FakeWsClient();
     renderSidebar(client);
     await act(async () => {});
