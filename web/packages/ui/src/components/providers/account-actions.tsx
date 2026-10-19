@@ -16,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FormError } from "@/components/ui/form-error";
 import { Input } from "@/components/ui/input";
 import type { Account, ProviderInfo, RunSummary } from "@/lib/types";
 
@@ -112,7 +113,7 @@ export function RenameForm({
           Cancel
         </Button>
       </div>
-      {error && <p className="text-ui-sm text-destructive">{error}</p>}
+      {error && <FormError message={error} size="sm" />}
     </div>
   );
 }
@@ -195,7 +196,7 @@ export function UpdateCredentialForm({
           Cancel
         </Button>
       </div>
-      {error && <p className="text-ui-sm text-destructive">{error}</p>}
+      {error && <FormError message={error} size="sm" />}
     </div>
   );
 }
@@ -306,9 +307,4 @@ export function RemoveAccountDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-export function FormError({ message }: { message: string | null }) {
-  if (!message) return null;
-  return <p className="text-ui-base text-destructive">{message}</p>;
 }

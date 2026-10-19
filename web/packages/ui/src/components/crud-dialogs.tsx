@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { FolderPickerDialog } from "@/components/folder-picker-dialog";
+import { FormError } from "@/components/ui/form-error";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -21,12 +22,6 @@ import {
 import type { TaskTreeNode } from "@/lib/task-lineage";
 import type { Chat, Space, Task, Workspace } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
-
-/** Inline, per-dialog error text for a failed submit -- the daemon's message verbatim (e.g. workspace.create's "not a git repository"). */
-function FormError({ message }: { message: string | null }) {
-  if (!message) return null;
-  return <p className="text-ui-base text-destructive">{message}</p>;
-}
 
 /** Shared submit row: Create disabled while in flight, Cancel always closes. */
 function FormActions({

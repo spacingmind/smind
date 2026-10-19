@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { FormError } from "@/components/ui/form-error";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
 import { externalLinkProps } from "@/lib/external-link";
@@ -452,7 +453,7 @@ export function ConnectAccountPanel({
       )}
       {method === "api-key" && selectedProvider && !relogin ? (
         <div className="grid gap-3">
-          {error && <p className="text-ui-base text-destructive">{error}</p>}
+          {error && <FormError message={error} />}
           <div className="grid gap-2">
             <label htmlFor="account-credential" className="text-ui-base font-medium">
               Credential
@@ -503,7 +504,7 @@ export function ConnectAccountPanel({
       ) : selectedProvider ? (
         <div className="grid gap-3">
           {error && (
-            <p className="text-ui-base text-destructive">{error}</p>
+            <FormError message={error} />
           )}
           <div>
             <Button
@@ -668,7 +669,7 @@ export function AccountsDialog({
             Provider accounts used for routing. No edit or removal yet.
           </DialogDescription>
         </DialogHeader>
-        {error && <p className="text-ui-base text-destructive">{error}</p>}
+        {error && <FormError message={error} />}
         <div className="max-h-40 overflow-y-auto">
           {accounts === undefined ? (
             <p className="text-ui-base text-muted-foreground">Loading…</p>

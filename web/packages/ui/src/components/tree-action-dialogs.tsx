@@ -15,6 +15,7 @@ import type {
   TaskStopTreeResult,
   TreeActionItem,
 } from "@/lib/task-tree-actions";
+import { FormError } from "@/components/ui/form-error";
 import type { Task } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
@@ -30,12 +31,6 @@ import type { WsClient } from "@/lib/ws-client";
  * collection shown to the user (never hidden), retry possible on whatever is
  * still eligible.
  */
-
-/** Inline, per-dialog error text -- the daemon's message verbatim. */
-function FormError({ message }: { message: string | null }) {
-  if (!message) return null;
-  return <p className="text-ui-base text-destructive">{message}</p>;
-}
 
 const MAX_VISIBLE = 8;
 
