@@ -403,14 +403,17 @@ direct API call (second LLM client), Claude reflecting GLM transcripts
   learned skill, plain approve, curator bundle approve, stale patch. It found
   and fixed two real bugs (UI sent `mergeInto` as an id; the dev seed lacked
   the `learned-` prefix). No real model or provider CLI has been run.
+- 2026-10-19: live verification with the real `claude` CLI (4 calls, USD
+  0.2033, see Validation). Found and fixed the init `plugins` abort (#426);
+  noted the `haiku` alias cost finding. Plan moved to `completed/`.
 
 ## Validation
 
-Status: every acceptance criterion is confirmed by an automated test or
-reviewed evidence below, **except the live-only checks listed after the
-table**, which need one real `claude` CLI run (and the user's go-ahead: it
-spends a few cents of the user's Claude account). Per AGENTS.md (c) this plan
-therefore stays in `active/` until those are done.
+Status: **complete (2026-10-19).** Every acceptance criterion is confirmed by
+an automated test or reviewed evidence below, and the live-only checks ran
+once against the real `claude` CLI (see "Live verification"). The live pass
+found one real bug (fixed in PR #426) and one cost finding (model alias),
+both recorded there.
 
 | AC | Status | Confirming tests / evidence |
 |---|---|---|
@@ -421,7 +424,7 @@ therefore stays in `active/` until those are done.
 | AC5 | confirmed | `TestWindow_ExcludesEnvMcpThinkingAndSecretPathReads`, `TestWindow_CapsRecordInputResultAndTotal` |
 | AC6 | confirmed | `TestRedact_ExactMcpSecretsAndRunEnv`, `TestRedact_RuleCorpus`, `TestRedact_HomePrefix`, `TestWindow_RedactsBeforeClipping`, `TestWindow_RealRedactorScrubsEverySurface`, `TestReflect_EvidenceRedactedBeforeStore`; the "applied again to evidence before storage" clause is `TestReflect_EvidenceRedactedBeforeStore` (the planned name `TestRedact_AppliedToEvidenceOnStore` was not used) |
 | AC7 | confirmed | `TestCollector_CodexRunsDoNotCount`, `TestEmitsToolEvents` |
-| AC8 | confirmed (flags in the fake CLI); live flag check pending | `TestReflector_HasNoTools`, `TestReflector_NoMcpNoAddDir`, `TestRegistry_IsolatedRunUsesIsolatedRunner`, `TestExecutor_RunsHiddenIsolatedSystemRun`, `TestCanReflect_ClaudeNativeOnly`, `TestReflect_ProviderNoToolIsolationSkipped`; same-recipient is claude-native only by D13; there is no cross-provider override in v1, so `TestReflector_SameRecipientRule` / `TestReflector_OverrideNeedsAck` were not written (covered by the ACP refusal tests) |
+| AC8 | confirmed (fake CLI + live flag/init check, see Live verification) | `TestReflector_HasNoTools`, `TestReflector_NoMcpNoAddDir`, `TestRegistry_IsolatedRunUsesIsolatedRunner`, `TestExecutor_RunsHiddenIsolatedSystemRun`, `TestCanReflect_ClaudeNativeOnly`, `TestReflect_ProviderNoToolIsolationSkipped`; same-recipient is claude-native only by D13; there is no cross-provider override in v1, so `TestReflector_SameRecipientRule` / `TestReflector_OverrideNeedsAck` were not written (covered by the ACP refusal tests) |
 | AC9 | confirmed | `TestEligible_ExcludesReflectCurateAndSystemTasks`, `TestReflect_DoesNotRetriggerLearning`, `TestSystemTask_HiddenFromTaskList`, `TestReflect_MeteredUnderLearningBucket`, `TestUsage_LearningBucketSplit` |
 | AC10 | confirmed | `TestReflectorOutput_RejectsNonJSONAndUnknownAction`, `TestReflect_ParseFailureMarksJobFailed` |
 | AC11 | confirmed | `TestReflect_BudgetSkipsWithoutStartingRun`, `TestKillSwitch_StopsEverything`, `TestCurator_BudgetSkipsWithoutStartingRun`, `TestKillSwitch_StopsCurator` |
@@ -435,10 +438,10 @@ therefore stays in `active/` until those are done.
 | AC19 | confirmed | `TestApproval_ApproveRejectEditPinDisableDeleteUndo`, `TestLearning_SetModeAndForget`, `TestLearnCLI_*`, `TestLearning_ExportRoundTrip`, `TestCurator_ExplicitBypassesCadenceNotBudget`, `TestForgetWorkspace_HardDeletesAll`; web `proposal-actions.test.tsx` |
 | AC20 | confirmed | `TestLearning_EventsPublished`, `TestLearningWiring_SharedApprovalAndNotifier`; web `use-learning.test.tsx` (event -> toast + invalidation), the nav badge registration and pending count in `learned-skills-section.test.tsx` |
 | AC21 | confirmed | light + dark screenshots of every tab, detail, patch diff, possible-duplicate (learned + human), merge editor, bundle, edit, reject note, empty states, narrow 390 px, tab-switch / pane-open / dialog-open transition frames, budget and export dialog states (Lead-reviewed; two live-pass bugs fixed) |
-| AC22 | confirmed (fake CLI); live add-dir load pending | `TestClaudeRun_AddsProjectionDir`, `TestClaudeRun_NoSkillsNoOption` |
+| AC22 | confirmed (fake CLI + live add-dir load from the 0555 projection) | `TestClaudeRun_AddsProjectionDir`, `TestClaudeRun_NoSkillsNoOption` |
 | AC23 | confirmed | `TestACPRun_PrefacesFirstPromptOnly`, `TestACPRun_PersistedPromptUnchanged`, `TestACPRun_NoDeliveryNoLeadingBlock`, `TestPreface_OverBudgetFallsBackToIndexOnly`, `TestDelivery_PrefaceBudgetAndLoadRateOrder`; the planned `TestACPRun_BudgetFallsBackToIndexOnly` is covered by the two preface tests |
 | AC24 | confirmed | `TestCodexRun_Unchanged`, `TestExport_WritesRenderedSkill` |
-| AC25 | confirmed (matcher on fake events); live `Skill` input shape pending | `TestCounters_OfferedOncePerRunE2E`, `TestCounters_SkillToolLoadE2E`, `TestCounters_ReadUnderProjectionLoadE2E`, `TestCounters_ReflectorRunsNeverCount`, `TestMatch_SkillToolCall` |
+| AC25 | confirmed (fake events + live `Skill` input shape `{"skill": "<name>"}`, counter 1/3) | `TestCounters_OfferedOncePerRunE2E`, `TestCounters_SkillToolLoadE2E`, `TestCounters_ReadUnderProjectionLoadE2E`, `TestCounters_ReflectorRunsNeverCount`, `TestMatch_SkillToolCall` |
 | AC26 | confirmed | `TestCounters_UnmeasuredWhenNoSignalProvider`, `TestLifecycle_UnmeasuredNeverArchivedE2E`, `TestCounters_UnmeasuredGlmOffer` |
 | AC27 | confirmed | `TestLifecycle_Probation`, `TestLifecycle_GraduationArchivesZeroLoad`, `TestLifecycle_CapacityEvictsLowestRate`, `TestLifecycle_TieBreakDeterministic`, `TestLifecycle_PinnedExempt`, `TestLifecycle_GraduationArchivesZeroLoadE2E`, `TestPinDisableArchive_LedgerActions`; archive is a status change only (row, versions and ledger remain): `TestPinDisableArchive_LedgerActions`, `TestLearnedSkillsPartialUniqueIndexAllowsArchivedDuplicates` |
 | AC28 | confirmed | `TestVersions_UndoRestoresAsNewVersion`, `TestSnapshot_BeforeCuratorAndRotation`, `TestSnapshot_Restore`, `TestCurator_SnapshotTakenBeforeRunAndJobStopsIfSnapshotFails` |
@@ -450,27 +453,103 @@ therefore stays in `active/` until those are done.
 | AC34 | confirmed | `TestMergeIntoSkill_TurnsProposalIntoGatedPatch`, `TestMergeIntoSkill_RefusedForHumanSkill`; web "possible duplicate shows both skills and merge action"; live: real merge approved, new version + `merge` ledger row |
 
 
-### Still unverified (live only; waiting for the user's go-ahead)
+### Live verification (2026-10-19)
 
-1. Real `claude` CLI (2.1.293 installed) accepts and honours the isolated
-   run's flags: `--tools ""`, `--setting-sources=`, `--strict-mcp-config`,
-   `--disable-slash-commands`, `--permission-mode plan`, and `--max-turns`
-   (the SDK emits it but `--help` does not list it); its init message lists
-   no tools/skills/MCP servers (the runner aborts if it does); and
-   `ENABLE_CLAUDEAI_MCP_SERVERS=false` removes account connectors. (AC8)
-2. The real CLI loads `<add-dir>/.claude/skills` from a read-only (0555)
-   projection directory, and the real `Skill` tool input field name matches
-   what `loads.Match` accepts. (AC22, AC25; ADR open question 1)
-3. End to end in an opted-in repo: a seeded human correction makes the Haiku
-   reflector emit a proposal that passes the gate; approving it makes the
-   next claude-native run load the skill (counter increments) and a GLM run
-   receive the preface; `git status` of the repo stays clean throughout.
-4. Haiku actually follows the reflector/curator prompts (JSON-only reply,
-   verbatim quotes, code spans grounded in cited events) and the real cost of
-   a 120 KB window against the USD 0.25 / 150k-token daily cap (ADR open
-   question 4).
+One manual pass, user-approved, with the real `claude` 2.1.293 CLI. Setup: a
+`smind` built from `develop` + PR #426, an isolated `SMIND_HOME`
+(`/tmp/learning-live/home`) and port (`SMIND_LISTEN=127.0.0.1:4711`), a
+throwaway git repo as the workspace (`learning_mode = propose`, default
+budget), a seeded chat (one agent run with a recovered `go test` failure, one
+human correction run), and a tee wrapper named `claude` first on the daemon's
+`PATH` that logged argv and the raw stream-json of every invocation. The
+daemon's environment had the `CLAUDE_CODE_*` session variables removed and
+the fake GLM agent was `npx` -> the taskrunner `fakeagent` (no real GLM
+endpoint was called). `~/.smind`, port 4648 and `~/.claude` were not touched;
+the daemon was stopped afterwards and no orphan processes remained.
+
+**Real model calls: 4 (reflector #1, reflector #2, one 4-token probe, one
+claude-native run). Total cost USD 0.2033** (0.0339 + 0.0154 + 0.0005 +
+0.1535).
+
+1. **Isolated flags (AC8).** argv of the reflector call: `--output-format
+   stream-json --verbose --system-prompt <...> --tools "" --max-turns 1
+   --model haiku --permission-mode plan --strict-mcp-config
+   --setting-sources= --disable-slash-commands --input-format stream-json`,
+   with `ENABLE_CLAUDEAI_MCP_SERVERS=false` in the env; the CLI accepted all
+   of them (`--max-turns` included although `--help` omits it) and ended
+   `result success, num_turns 1`. Init message: `"tools":[]`,
+   `"mcp_servers":[]`, `"slash_commands":[]`, `"skills":[]`,
+   `"permissionMode":"plan"`, and `"plugins"` = four compiled-in entries
+   `{"name":"cc-plugin-sec-default","path":"builtin","source":"cc-plugin-sec-default@builtin"}`
+   (+ `-agents-md`, `-telemetry`, `-plugin-authoring`). **Bug found:** the
+   runner treated those as a violation, so reflector #1 failed with
+   `isolated run attempted a tool call: init reported plugins` even though the
+   model had answered. Fixed in PR #426 (exempt entries whose `path` is
+   `builtin` and `source` is `<name>@builtin`; anything else still aborts;
+   tests `TestInitViolation_RealCLIShape`,
+   `TestInitViolation_PluginExemptionIsNarrow`,
+   `TestRunPromptIsolated_InitBuiltinPluginsProceed`). With the fix,
+   reflector #2 ran clean. Not run: a control call without
+   `ENABLE_CLAUDEAI_MCP_SERVERS=false` to show the connectors it removes (USD
+   ~0.0005 to do); the isolated init lists no MCP server at all.
+2. **Add-dir skill loading and `Skill` input (AC22, AC25).** The claude-native
+   run's argv carried `--add-dir /tmp/learning-live/home/learning/projection/1/0f2301d8cbf20ad1`
+   (directories and `SKILL.md` all mode `dr-xr-xr-x` / `-r--r--r--`). Its init
+   `skills` listed `learned-go-tests-no-sleep-run-race` first, from that
+   read-only dir; the model then called `Skill` with input
+   `{"skill":"learned-go-tests-no-sleep-run-race"}` (field `skill`, matches
+   `loads.Match`). `learned_skill_loads` got `(skill 1, run, via=skill)` and
+   `smind learn ls` showed `LOADED/OFFERED 1/3`. The generated frontmatter's
+   extra `category:` key did not stop the CLI loading the skill.
+3. **End to end.** The seeded human correction (`seed-run-2`, Interrupt)
+   produced one proposal (`learned-go-tests-no-sleep-run-race`) that passed
+   the gate, job `landed`, verdict `accepted`; `smind learn approve 1` made it
+   active. A fresh fake-GLM session received the preface as a leading text
+   block (`<<<LEARNED_SKILLS ... LEARNED_SKILLS>>>`) followed by the user's
+   text block, while `runs.prompt` stayed the user's text only (AC23); both
+   GLM runs counted as offered. The next claude-native run loaded the skill
+   (item 2). `git status` of the workspace repo was empty before, between and
+   after every step.
+4. **Prompt adherence and cost.** Haiku-class prompt adherence (both reflector
+   replies): the final message was a single JSON object with no prose or
+   fences, the user quote was verbatim (`seq -1`), the `failure_recovery`
+   quote matched the `[RECOVERY #4]` record, and every code span in the body
+   came from a cited event; the gate accepted it with no findings. Measured
+   (window about 6 KB, 4.1k non-cache tokens): reflector #2 cost USD 0.0154,
+   `run_usage` 3649 in / 4812 cached / 2284 cache-write / 510 out, i.e. 6.1 %
+   of the USD 0.25 cap and 2.8 % of the 150k token cap; the daemon's budget
+   readout agreed (`usedUsd 0.0154`, `usedTokens 4159`). Not measured: a
+   120 KB window (no extra call was made). Extrapolated from the observed
+   per-token cost it is roughly USD 0.1 on the model that actually answered
+   (below) and well under 0.01 on real Haiku, i.e. inside the USD cap, and
+   about 30k tokens against the 150k cap.
+
+**Finding (cost, not fixed): `--model haiku` is answered by Sonnet.** In all
+three calls that passed the alias (`--model haiku`, as the daemon sends for
+`learning.reflectorModel: haiku`), the init message said `claude-haiku-5-5`
+but the assistant turn and the bulk of the cost were `claude-sonnet-5-5`
+(`modelUsage`: Sonnet USD 0.0333 / 0.0150, Haiku only a side call of 3.6k
+tokens, USD 0.0004-0.0005). The same prompt flags with the full id
+`--model claude-haiku-5-5` were answered by Haiku (USD 0.0005 for the 4-token
+probe). The cause was not isolated (alias resolution in this CLI/account vs
+something else); the practical effect is a reflection costing about 30x what
+Haiku would. The daemon did not force anything else, so users can pin the id
+in `learning.reflectorModel` / `learning.curatorModel` today. Follow-up: decide
+whether to default to a pinned id or verify the answering model from
+`modelUsage` and surface it in the job row.
+
+Other observations (recorded in Known limits): a failed isolated run's cost
+is not metered (reflector #1 spent USD 0.034 and `unreportedRuns` rose
+instead), and the token cap counts input and output tokens only, not cache
+read/write tokens.
 
 ### Known limits and follow-ups (not blockers)
+
+- `--model haiku` is answered by Sonnet on the live CLI (see Live
+  verification); pin `claude-haiku-5-5` in config until decided.
+- A failed isolated run (parse error, init violation, timeout after an
+  answer) records no `run_usage`: the spend is invisible to the daily cap
+  (`unreportedRuns` counts it). The token cap ignores cache read/write tokens.
 
 - `store.PatchSkill` persists description and body only: a category-only
   patch passes the gate but the new category is not stored.
