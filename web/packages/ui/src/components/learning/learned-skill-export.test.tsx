@@ -72,7 +72,7 @@ describe("export a learned skill", () => {
     const radios = within(dialog()).getAllByRole("radio") as HTMLInputElement[];
     expect(radios.map((r) => r.value)).toEqual(["repo", "claude", "agents", "codex"]);
     expect(radios[0]!.checked).toBe(true);
-    expect(dialog().textContent).toContain("This repository (.agents/skills)");
+    expect(dialog().textContent).toContain("This repository (its skills folder)");
     expect(dialog().textContent).toContain("~/.claude/skills");
     expect(dialog().textContent).toContain("smind stops managing it");
     expect(within(dialog()).queryByTestId("skill-export-force")).toBeNull();
@@ -128,6 +128,18 @@ describe("export a learned skill", () => {
     fireEvent.click(submit());
     await flush();
     expect(within(dialog()).getByTestId("skill-export-uptodate").textContent).toBe("Already up to date");
+  });
+
+  it("drops the daemon's method prefix from an error message", async () => {
+    setup(() => {
+      throw new RpcError("learning.skills.export: repo skills dir is a symlink", "invalid_params");
+    });
+    await open();
+    fireEvent.click(submit());
+    await flush();
+    const text = within(dialog()).getByTestId("skill-export-error").textContent ?? "";
+    expect(text).toContain("repo skills dir is a symlink");
+    expect(text).not.toContain("learning.skills.export:");
   });
 
   it("shows an invalid_params error verbatim", async () => {

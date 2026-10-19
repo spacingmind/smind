@@ -7,7 +7,7 @@ import { useExportSkill } from "@/hooks/use-learning";
 import type { ExportResult, ExportTarget, LearnedSkillView } from "@/lib/learning-types";
 
 const TARGETS: { value: ExportTarget; label: string }[] = [
-  { value: "repo", label: "This repository (.agents/skills)" },
+  { value: "repo", label: "This repository (its skills folder)" },
   { value: "claude", label: "~/.claude/skills" },
   { value: "agents", label: "~/.agents/skills" },
   { value: "codex", label: "~/.codex/skills" },
@@ -112,7 +112,7 @@ function ExportForm({ skill, onClose }: { skill: LearnedSkillView; onClose: () =
             Replace an edited copy
           </label>
         )}
-        {exportSkill.error && <Alert variant="error" testId="skill-export-error" description={exportSkill.error.message} />}
+        {exportSkill.error && <Alert variant="error" testId="skill-export-error" description={exportSkill.error.message.replace(/^learning\.skills\.export:\s*/, "")} />}
       </div>
       <DialogFooter>
         <Button type="button" variant="outline" disabled={pending} data-testid="skill-export-cancel" onClick={onClose}>
