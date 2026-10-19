@@ -843,6 +843,7 @@ func (s *Store) ForgetWorkspaceLearning(workspaceID int64) error {
 		`DELETE FROM learned_skills WHERE workspace_id = ?`,
 		`DELETE FROM learned_skill_ledger WHERE workspace_id = ?`,
 		`DELETE FROM learned_skill_proposals WHERE workspace_id = ?`,
+		`DELETE FROM learning_snapshots WHERE workspace_id = ?`,
 		`DELETE FROM learning_jobs WHERE workspace_id = ?`,
 		`UPDATE workspaces SET learning_mode = 'off' WHERE id = ?`,
 	} {
