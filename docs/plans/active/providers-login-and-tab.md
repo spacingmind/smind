@@ -6,7 +6,7 @@ Providers study (local-only research notes). Builds on ADR-0032 (shared query/zu
 
 Size: **two L items.** B remote login — L (7): scope 2, PRs 2, risk 2 (credentials, concurrency), decisions 0 (ADR done), verify 1.
 A Providers tab — L (6): scope 1, PRs 2, risk 1, decisions 1, verify 1 (screenshots, every state).
-Status: **spec**, nothing built. Supersedes the "Open issues" of PR #370 (which only fixed external-link opening).
+Status: **built** — B1–B4 merged (#385, #389, #396, #409; org-uuid identity fix #404), A1+A2 in one PR (Providers tab). Remaining: real-account verification on a remote (homelab) daemon and the macOS app. Supersedes the "Open issues" of PR #370 (which only fixed external-link opening).
 
 ## Ground rules
 - Never complete a real OAuth login or call a real vendor endpoint in tests or screenshots. Daemon tests use `httptest`
@@ -139,15 +139,25 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
 - Deferred: "Reset cooldown" (needs a daemon method), identity backfill for OpenAI from refresh responses, Kimi/xAI device flows.
 
 ## Progress
-- [ ] ADR-0033 + this plan (docs PR)
+- [x] ADR-0033 + this plan (docs PR #384)
 - [x] PR-B1 identity (branch `feat/account-identity`)
 - [x] PR-B2 loginId + oauthComplete (branch `feat/oauth-complete`)
 - [x] PR-B3 device code (branch `feat/device-login`)
-- [ ] PR-B4 connect form
-- [ ] PR-A1 Providers master/detail
-- [ ] PR-A2 models/diagnostics/deep link
+- [x] PR-B4 connect form (#409)
+- [x] PR-A1 Providers master/detail (this PR)
+- [x] PR-A2 models/diagnostics/deep link (this PR; the plan split A1/A2 was merged into one PR)
 
 ## Validation
+- PR-A1 (models): `models lists the catalog with ids and the default badge`, `models shows the source note`, `models search appears only with eight or more models and filters`, `models shows an empty note when the catalog is empty` — `web/packages/ui/src/components/providers/provider-models.test.tsx`
+- PR-A1 (diagnostic): `diagnostic lists provider, models and per-account health`, `diagnostic never includes credential-looking fields`, `diagnostic handles a provider with no accounts or models` — `web/packages/ui/src/lib/provider-diagnostic.test.ts`
+- PR-A1 (disclosure): `diagnostics is collapsed by default`, `diagnostics shows and copies the text` — `web/packages/ui/src/components/providers/provider-diagnostics.test.tsx`
+- PR-A1 (detail): `detail shows models and a collapsed diagnostics block`, `detail diagnostics reflects the account health` — `web/packages/ui/src/components/providers/provider-detail.test.tsx`
+- PR-A1 (deep link): `manage provider opens Providers with that provider selected` — `web/packages/ui/src/components/composer/run-config-toolbar.test.tsx`
+- PR-A1 (review, hooks/keys/flags): `detail survives item going from null to a provider`, `relogin of another account remounts the panel and keeps its confirm`, `models search is cleared when the provider changes` — `web/packages/ui/src/components/providers/provider-detail.test.tsx`; `selecting a provider clears connect and relogin requests`, `connect and relogin requests are mutually exclusive`, `select resets filter, sort and query` — `web/packages/ui/src/stores/providers-view-store.test.ts`; `leaving Settings resets the providers view` — `web/packages/ui/src/components/providers/providers-screen.test.tsx`
+- PR-A1 (review, login panel): `autoStart starts exactly one live login under StrictMode` — `web/packages/ui/src/components/accounts-dialog.strict.test.tsx` (plain RTL render: `renderWithDaemon` swallows StrictMode's double effect); `relogin panel is headed Sign in again`, `autoStart waits for the desktop connection and then uses the remote default` — `web/packages/ui/src/components/accounts-dialog.rowconnect.test.tsx`
+- PR-A1 (review, robustness): `most headroom ignores reshaped windows`, `most headroom is not marked when candidates tie` — `web/packages/ui/src/lib/providers-view.test.ts`; `account list failure shows the error`, `empty catalog shows a message instead of an empty card`, `first account card shows on mobile too`, `nav has no selected item while the first account card is shown` — `web/packages/ui/src/components/providers/providers-screen.test.tsx`; `header connect falls back to the first credential provider for a cli selection`, `header connect is disabled without a credential provider` — `web/packages/ui/src/components/settings/providers-section.test.tsx`; `diagnostics copy failure says so` — `web/packages/ui/src/components/providers/provider-diagnostics.test.tsx`
+- PR-A1 (review, one fold / a11y): `badge and dot agree when the test failed during a cooldown`, `row prefixes a provider test result with where it came from` — `web/packages/ui/src/components/providers/account-row.test.tsx`; `a usage fetch error is a warning, not an error` — `web/packages/ui/src/lib/providers-view.test.ts`; `nav buttons expose the tone in their accessible name` — `web/packages/ui/src/components/providers/provider-nav.test.tsx`; `mobile push focuses the back button and pop restores the nav focus`, `nav tone follows the health badge` — `web/packages/ui/src/components/providers/providers-screen.test.tsx`
+- PR-A1 (review, clock): `cooling down expires on the clock tick` — `web/packages/ui/src/hooks/use-account-rows.test.tsx` (`useNow` in `web/packages/ui/src/hooks/use-now.ts`)
 - PR-B4 (copy): `the remote hint only mentions a device code where one exists` — `web/packages/ui/src/components/accounts-dialog.connect.test.tsx`; decision 12 copy ("Accounts here route sMind's /v1 proxy; agent runs use the CLI's own login.") asserted in `components/settings/providers-section.test.tsx` (`notes the proxy-only groups (Claude Code, Codex) but not Kimi or GLM`).
 - PR-B4 (review): independent review fixes, each with a test — second paste cannot flip a successful login, paste rejected after cancel is ignored, Finish stays disabled after an accepted paste, no connect button without a provider, Connect stays disabled until a cancelled login settles, provider/method locked during a login, default label avoids collisions, paste input focused when revealed, non-http login URLs and bad expiry rejected, corrupt persisted login location dropped, early override ignored (`web/packages/ui/src/components/accounts-dialog.connect.test.tsx`, `hooks/use-account-login.test.tsx`, `lib/login-events.test.ts`, `components/connect/*.test.tsx`, `stores/login-location-store.test.ts`, `hooks/use-login-remote.test.tsx`).
 - PR-B4 (hook): `login hook goes starting then waiting on authorizeUrl` — `web/packages/ui/src/hooks/use-account-login.test.tsx`
@@ -205,6 +215,21 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
 - `remote is derived from connection kind and hostname` -- `web/packages/ui/src/lib/login-remote.test.ts`
 - `manual override beats the derived remote flag` -- `web/packages/ui/src/lib/login-remote.test.ts`
 - `override is stored per connection id and survives a reload` -- `web/packages/ui/src/stores/login-location-store.test.ts`
+
+**PR-A1 (logic): pure view logic in `web/packages/ui/src/lib/providers-view.ts`; run with
+`cd web/packages/ui && npx vitest run src/lib/providers-view.test.ts` (12 tests green; `bun run typecheck` and `task lint` clean):**
+- `nav has one item per provider in order` -- `src/lib/providers-view.test.ts`
+- `nav item tone is the worst account tone` -- `src/lib/providers-view.test.ts`
+- `nav puts unmapped accounts in an other bucket` -- `src/lib/providers-view.test.ts`
+- `nav treats cli providers as accountless` -- `src/lib/providers-view.test.ts`
+- `health badge order: relogin beats cooldown beats error beats active` -- `src/lib/providers-view.test.ts`
+- `health badge cooldown label shows the end time` -- `src/lib/providers-view.test.ts`
+- `health badge untested without data` -- `src/lib/providers-view.test.ts`
+- `most headroom picks the best active account per provider` -- `src/lib/providers-view.test.ts`
+- `most headroom needs two candidates and skips unhealthy accounts` -- `src/lib/providers-view.test.ts`
+- `filter matches label, display name and plan` -- `src/lib/providers-view.test.ts`
+- `filter by attention and active` -- `src/lib/providers-view.test.ts`
+- `sort by status puts attention first` -- `src/lib/providers-view.test.ts`
 
 **PR-B1 (AC-B1..AC-B3), all Go tests under `-race`:**
 - `identity migration keeps existing rows null` -- `internal/store/migrate_test.go` (`TestMigrate_AccountsIdentity`, run twice for
@@ -356,3 +381,7 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
   which never leaves the daemon; a squatter on `[::1]` is not detected. Windows `WSAEACCES` (10013, excluded port ranges) still
   fails the login -- follow-up.
 - Not in this PR: the web connect form (PR-B4).
+
+- PR-A1 (move/rows): `TestButton`/`RenameForm`/`UpdateCredentialForm`/`RemoveAccountDialog`/`FormError`/`authTypeLabel`/`RowAction` moved to `src/components/providers/account-actions.tsx`, grouping helpers to `src/lib/providers-groups.ts` (re-exported from `providers-section.tsx`), behavior and test-ids byte-identical — providers-section.test.tsx (21) and accounts-dialog.test.tsx (22) green unchanged; new `src/lib/providers-groups.test.ts` (4: groups/removeWarning/providerConsumer). New `useAccountRows` (`src/hooks/use-account-rows.test.tsx`, 3: `account rows combine accounts, cached usage and cached test results`, `account rows never trigger a usage refresh or touch`, `account rows are not loaded until the list arrives`). `bun run typecheck`, `task lint` clean.
+
+- PR-A1 (shell): `src/stores/providers-view-store.test.ts` (4: `selecting a provider opens its detail and clears the query`, `back returns to the list without losing the selection`, `requestConnect selects the provider and flags a connect`, `reset restores the defaults`); `src/components/providers/provider-nav.test.tsx` (4: `nav renders one button per provider with tone dots`, `nav marks the selected provider`, `nav calls onSelect with the provider id`, `rail mode shows icons only with titles`); `src/components/providers/providers-screen.test.tsx` (4: `screen derives the first provider as the default selection`, `selecting a provider shows its detail`, `compact viewport pushes the detail and back returns to the list`, `screen shows loading until accounts arrive`). `providers-section.tsx` now renders `SettingsSectionTitle` + `ProvidersScreen`; 17 old grouped-list tests marked `it.skip` (`// A1-4/A1-5: moved into the provider detail`) pending the detail task: 13 in providers-section.test.tsx, 2 in providers-cache.test.tsx, 1 in providers-events.test.tsx, 1 in settings-screen.test.tsx. `npx vitest run src/stores src/components/providers src/components/settings src/lib/providers-view.test.ts` (211 passed, 17 skipped), `bun run typecheck`, `task lint` clean.

@@ -29,7 +29,10 @@ export function useAccounts() {
     retry: false,
     queryFn: async (): Promise<Account[]> => {
       if (!client) throw new Error("no daemon connection");
-      return (await client.call<Account[]>("account.list")) ?? [];
+      // Copy: the cache must never alias an array the caller can still mutate in place. If it did,
+      // a later upsert would be structurally equal to what the cache already "holds", so
+      // setQueryData would keep the old reference and never notify the observers.
+      return [...((await client.call<Account[]>("account.list")) ?? [])];
     },
   });
 }

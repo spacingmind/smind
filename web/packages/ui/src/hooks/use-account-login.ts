@@ -127,6 +127,11 @@ export function useAccountLogin(opts?: {
             }
             return;
           }
+          // A reshaped/empty result must never reach the account list cache (it would put `null` in a list every surface maps over).
+          if (result === null || typeof result !== "object") {
+            setState({ phase: "error", code: "unknown", message: "Sign-in finished without an account.", soft: false });
+            return;
+          }
           upsertAccountInCache(queryClient, result);
           setState({ phase: "done", result });
           onConnectedRef.current?.(result);

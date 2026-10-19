@@ -1,3 +1,4 @@
+import { setSettingsBackGuard } from "@/lib/settings-back-guard";
 import { act } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -115,7 +116,7 @@ describe("SettingsScreen shell", () => {
     }
   });
 
-  it("does not repeat the section name as an in-body title (the header already shows it), but keeps the section's actions", () => {
+  it("does not repeat the section name as an in-body title (the header already shows it), but keeps the section's actions", async () => {
     renderScreen();
 
     for (const [id, label, action] of [
@@ -408,6 +409,25 @@ describe("SettingsScreen narrow", () => {
     expect(screen.getByTestId("settings-content")).toBeInTheDocument();
     expect(screen.getByTestId("settings-section-appearance")).toBeInTheDocument();
     expect(screen.getByTestId("settings-screen-header")).toHaveTextContent("Appearance");
+  });
+
+  it("the detail back runs a section's back guard before leaving the section", async () => {
+    const guard = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
+    const release = setSettingsBackGuard(guard);
+    await renderNarrow({});
+    fireEvent.click(screen.getByTestId("settings-nav-shortcuts"));
+    await flush();
+
+    fireEvent.click(screen.getByTestId("settings-detail-back"));
+    await flush();
+    // The guard handled the first press (an inner level popped): Settings stays on the section.
+    expect(guard).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("settings-detail-back"));
+    await flush();
+    expect(screen.getByTestId("settings-nav-shortcuts")).toBeInTheDocument();
+    release();
   });
 
   it("back from the detail returns to the list, and back from the list calls onNavigateBack", async () => {

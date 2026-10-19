@@ -1,6 +1,6 @@
 import { act } from "react";
-import { fireEvent, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   groupAccountsByProvider,
@@ -10,6 +10,7 @@ import {
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import "@/components/settings/providers-section";
 import type { ProviderInfo, RunSummary } from "@/lib/types";
+import { useProvidersViewStore } from "@/stores/providers-view-store";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 import { renderWithDaemon } from "@/test/render-with-daemon";
 
@@ -28,6 +29,7 @@ async function flush(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
   });
 }
 
@@ -35,6 +37,13 @@ function renderSection(daemon: FakeUsageDaemon) {
   const section = listSettingsSections().find((s) => s.id === "providers");
   if (!section) throw new Error("providers section did not register");
   renderWithDaemon(<>{section.render({ client: daemon.client, events: daemon.events })}</>, daemon);
+}
+
+/** Selects a provider in the nav (both nav variants render in jsdom, so the first match). */
+async function selectProvider(id: string) {
+  await act(async () => {
+    fireEvent.click(screen.getAllByTestId(`provider-nav-item-${id}`)[0]);
+  });
 }
 
 /** Opens the ⋯ menu on a row and clicks the named item, the way app-sidebar-crud.test.tsx drives Radix menus. */
@@ -57,6 +66,9 @@ async function renderLoaded(accounts: ReturnType<typeof account>[], providers = 
   await flush();
   return daemon;
 }
+
+// The view store is module state: a provider selected by an earlier test must not leak into the next.
+beforeEach(() => useProvidersViewStore.getState().reset());
 
 describe("groupAccountsByProvider", () => {
   it("maps accounts to runtime-provider groups via accountProvider, in provider.list order", () => {
@@ -91,19 +103,25 @@ describe("providers-section", () => {
       account(1, "anthropic", "work-claude"),
       account(2, "openai", "codex-work"),
     ]);
-    expect(screen.getByTestId("provider-group-claude-native")).toHaveTextContent("work-claude");
-    expect(screen.getByTestId("provider-group-codex-native")).toHaveTextContent("codex-work");
-    expect(within(screen.getByTestId("provider-group-claude-native")).queryByText("codex-work")).not.toBeInTheDocument();
+    // One provider nav item per runtime provider; the first is selected by default.
+    expect(screen.getAllByTestId("provider-nav-item-claude-native")[0]).toHaveAttribute("aria-current", "true");
+    expect(screen.getByTestId("provider-row-1")).toHaveTextContent("work-claude");
+    await selectProvider("codex-native");
+    expect(screen.getByTestId("provider-row-2")).toHaveTextContent("codex-work");
+    expect(screen.queryByTestId("provider-row-1")).not.toBeInTheDocument();
   });
 
   it("renders a not-connected row for a provider with no accounts", async () => {
     await renderLoaded([account(1, "anthropic", "work-claude")]);
+    await selectProvider("kimi");
     expect(screen.getByTestId("provider-not-connected-kimi")).toHaveTextContent("Not connected");
+    await selectProvider("codex-native");
     expect(screen.getByTestId("provider-not-connected-codex-native")).toBeInTheDocument();
   });
 
   it("renders the CLI provider's managed-externally row, not a not-connected row", async () => {
     await renderLoaded([]);
+    await selectProvider("glm");
     expect(screen.getByTestId("provider-external-glm")).toHaveTextContent("Managed externally");
     expect(screen.getByTestId("provider-external-glm")).toHaveTextContent("own CLI login");
     expect(screen.queryByTestId("provider-not-connected-glm")).not.toBeInTheDocument();
@@ -111,13 +129,17 @@ describe("providers-section", () => {
 
   it("notes the proxy-only groups (Claude Code, Codex) but not Kimi or GLM", async () => {
     await renderLoaded([]);
+    await selectProvider("claude-native");
     expect(screen.getByTestId("provider-group-note-claude-native")).toHaveTextContent(
       "Accounts here route sMind's /v1 proxy; agent runs use the CLI's own login.",
     );
+    await selectProvider("codex-native");
     expect(screen.getByTestId("provider-group-note-codex-native")).toHaveTextContent(
       "Accounts here route sMind's /v1 proxy; agent runs use the CLI's own login.",
     );
+    await selectProvider("kimi");
     expect(screen.queryByTestId("provider-group-note-kimi")).not.toBeInTheDocument();
+    await selectProvider("glm");
     expect(screen.queryByTestId("provider-group-note-glm")).not.toBeInTheDocument();
   });
 
@@ -127,12 +149,14 @@ describe("providers-section", () => {
       account(2, "antigravity", "ag-1"),
       account(3, "anthropic", "work-claude"),
     ]);
-    const other = screen.getByTestId("provider-other-group");
-    expect(within(other).getByText("grok")).toBeInTheDocument();
-    expect(within(other).getByText("ag-1")).toBeInTheDocument();
-    expect(within(other).queryByText("work-claude")).not.toBeInTheDocument();
+    await selectProvider("other");
+    expect(screen.getByText("grok")).toBeInTheDocument();
+    expect(screen.getByText("ag-1")).toBeInTheDocument();
+    expect(screen.queryByText("work-claude")).not.toBeInTheDocument();
     // Not mixed into the runtime groups either.
-    expect(within(screen.getByTestId("provider-group-claude-native")).queryByText("grok")).not.toBeInTheDocument();
+    await selectProvider("claude-native");
+    expect(screen.queryByText("grok")).not.toBeInTheDocument();
+    expect(screen.getByText("work-claude")).toBeInTheDocument();
   });
 
   it("shows the auth-type badge per row and runs provider.test from a row", async () => {
@@ -203,6 +227,7 @@ describe("providers-section actions", () => {
     fireEvent.click(screen.getByTestId("provider-rename-save-1"));
     await flush();
     expect(client.calls.find((c) => c.method === "account.rename")?.params).toEqual({ id: 1, label: "renamed" });
+    await flush(); // the mutation result reaches the cache a few microtasks after the call
 
     expect(screen.getByText("renamed")).toBeInTheDocument();
     expect(screen.queryByText("work-claude")).not.toBeInTheDocument();
@@ -290,20 +315,24 @@ describe("providers-section connect flows", () => {
   it("Connect account disclosure opens the shared ConnectAccountPanel and adds through it", async () => {
     const client = await renderLoaded([account(1, "anthropic", "work-claude")]);
 
-    // Collapsed by default -- the grouped list is the primary content.
-    expect(screen.queryByTestId("accounts-connect-anthropic")).not.toBeInTheDocument();
+    // The detail pane is the primary content; no connect form until asked.
+    expect(screen.queryByTestId("connect-close")).not.toBeInTheDocument();
 
+    // The header action targets the selected provider: Kimi is api-key, so
+    // the shared panel opens its form (no login starts for an api-key provider).
+    await selectProvider("kimi");
     fireEvent.click(screen.getByTestId("providers-connect-toggle"));
-    expect(screen.getByTestId("accounts-connect-anthropic")).toBeInTheDocument();
+    await flush();
+    expect(screen.getByLabelText("Credential")).toBeInTheDocument();
+    expect(client.calls.filter((c) => c.method === "account.oauthStart")).toHaveLength(0);
 
-    // The shared panel's manual-add path works from here: switch to the
-    // API key method, fill it, submit -- account.add fires with accountProvider.
-    fireEvent.click(screen.getByRole("radio", { name: "API key" }));
+    // The shared panel's manual-add path works from here: fill the api-key
+    // form, submit -- account.add fires with accountProvider.
     fireEvent.change(document.getElementById("account-oauth-label")!, { target: { value: "alt" } });
     fireEvent.change(document.getElementById("account-credential")!, { target: { value: "sk-new" } });
     fireEvent.click(screen.getByTestId("accounts-add-submit"));
     expect(client.calls.find((c) => c.method === "account.add")?.params).toMatchObject({
-      provider: "anthropic",
+      provider: "kimi",
       label: "alt",
       credential: "sk-new",
     });
@@ -314,10 +343,42 @@ describe("providers-section connect flows", () => {
   });
 
   it("a not-connected row's Connect opens the shared panel", async () => {
-    await renderLoaded([account(1, "anthropic", "work-claude")]);
+    const client = await renderLoaded([account(1, "anthropic", "work-claude")]);
 
+    // An oauth provider's row-level Connect starts its login at once.
+    await selectProvider("codex-native");
+    fireEvent.click(screen.getByTestId("provider-connect-codex-native"));
+    await flush();
+    const start = client.calls.find((c) => c.method === "account.oauthStart");
+    expect(start?.params).toMatchObject({ provider: "openai", method: "browser" });
+    expect(typeof (start?.params as { label?: string })?.label).toBe("string");
+    // The api-key provider shows the form instead of starting.
+    await act(async () => {
+      useProvidersViewStore.getState().clearConnect();
+    });
+    await selectProvider("kimi");
     fireEvent.click(screen.getByTestId("provider-connect-kimi"));
     await flush();
-    expect(screen.getByTestId("providers-connect-toggle")).toHaveAttribute("aria-expanded", "true");
+    expect(client.calls.filter((c) => c.method === "account.oauthStart")).toHaveLength(1);
+    expect(screen.getByLabelText("Credential")).toBeInTheDocument();
+  });
+});
+
+describe("Connect account header button", () => {
+  it("header connect falls back to the first credential provider for a cli selection", async () => {
+    await renderLoaded([account(1, "anthropic", "work")]);
+    await selectProvider("glm");
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("providers-connect-toggle"));
+    });
+    expect(useProvidersViewStore.getState().connectProviderId).toBe("claude-native");
+  });
+
+  it("header connect is disabled without a credential provider", async () => {
+    await renderLoaded([], [{ id: "glm", label: "GLM", kind: "cli" }]);
+    const button = screen.getByTestId("providers-connect-toggle");
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(useProvidersViewStore.getState().connectProviderId).toBeNull();
   });
 });
