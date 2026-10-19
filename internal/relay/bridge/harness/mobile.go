@@ -14,7 +14,6 @@ import (
 
 	"github.com/spacingmind/smind/internal/relay/client"
 	"github.com/spacingmind/smind/internal/relay/devices"
-	"github.com/spacingmind/smind/internal/relay/e2ee"
 	"github.com/spacingmind/smind/internal/relay/relaytest"
 )
 
@@ -115,11 +114,7 @@ func (m *mobileStub) connect(ctx context.Context, session string) error {
 	if err != nil {
 		return fmt.Errorf("admit: %w", err)
 	}
-	eph, err := e2ee.GenerateKeyPair()
-	if err != nil {
-		return err
-	}
-	dc, err := client.OpenData(sctx, rc, adm, m.workspace, session, m.id, eph, e2ee.RoleMobile,
+	dc, err := client.OpenClientData(sctx, rc, adm, m.workspace, session, m.id,
 		client.WithExpectedPeerKey(m.daemon))
 	if err != nil {
 		return fmt.Errorf("open data: %w", err)
@@ -159,7 +154,7 @@ func (m *mobileStub) connect(ctx context.Context, session string) error {
 	if err != nil {
 		return err
 	}
-	h := devices.SignHello(m.priv, mobileLabel, m.daemon, eph.Public(), []byte(session), challenge)
+	h := devices.SignHello(m.priv, mobileLabel, m.daemon, dc.TranscriptHash(), []byte(session), challenge)
 	resp, err := c.request(sctx, devices.HelloMethod, h)
 	if err != nil {
 		return err

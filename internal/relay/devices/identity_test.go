@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/relay/e2ee"
 )
 
 var updateVector = flag.Bool("update-vector", false, "rewrite testdata/device_hello_vector.json (v2)")
@@ -47,26 +49,26 @@ func TestDeviceIDMustMatchPublicKeyHash(t *testing.T) {
 	if got := DeviceID(pub); got != want || len(got) != 26 {
 		t.Fatalf("DeviceID = %q, want %q", got, want)
 	}
-	dpub, mpub := fixedBytes(1), fixedBytes(100)
-	h := SignHello(priv, "laptop", dpub, mpub, testSession, testChallenge)
+	dpub, th := fixedBytes(1), fixedBytes(100)
+	h := SignHello(priv, "laptop", dpub, th, testSession, testChallenge)
 
 	otherPub, _ := testKey(t)
-	if _, err := h.Verify(DeviceID(otherPub), dpub, mpub, testSession, testChallenge); !errors.Is(err, ErrIDMismatch) {
+	if _, err := h.Verify(DeviceID(otherPub), dpub, th, testSession, testChallenge); !errors.Is(err, ErrIDMismatch) {
 		t.Fatalf("frame id of another key: err = %v, want ErrIDMismatch", err)
 	}
-	if _, err := h.Verify(DeviceID(pub), dpub, mpub, testSession, testChallenge); err != nil {
+	if _, err := h.Verify(DeviceID(pub), dpub, th, testSession, testChallenge); err != nil {
 		t.Fatalf("matching id: %v", err)
 	}
 }
 
 func TestDeviceHelloValidSignatureAccepted(t *testing.T) {
 	pub, priv := testKey(t)
-	dpub, mpub := fixedBytes(1), fixedBytes(100)
-	h := SignHello(priv, "Pixel 9", dpub, mpub, testSession, testChallenge)
+	dpub, th := fixedBytes(1), fixedBytes(100)
+	h := SignHello(priv, "Pixel 9", dpub, th, testSession, testChallenge)
 	if h.V != HelloVersion || HelloVersion != 2 {
 		t.Fatalf("V = %d", h.V)
 	}
-	got, err := h.Verify(DeviceID(pub), dpub, mpub, testSession, testChallenge)
+	got, err := h.Verify(DeviceID(pub), dpub, th, testSession, testChallenge)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -77,9 +79,9 @@ func TestDeviceHelloValidSignatureAccepted(t *testing.T) {
 
 func TestDeviceHelloBadSignatureDropped(t *testing.T) {
 	pub, priv := testKey(t)
-	dpub, mpub := fixedBytes(1), fixedBytes(100)
+	dpub, th := fixedBytes(1), fixedBytes(100)
 	id := DeviceID(pub)
-	good := SignHello(priv, "ok", dpub, mpub, testSession, testChallenge)
+	good := SignHello(priv, "ok", dpub, th, testSession, testChallenge)
 
 	tests := []struct {
 		name   string
@@ -99,39 +101,43 @@ func TestDeviceHelloBadSignatureDropped(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h := good
 			tt.mutate(&h)
-			if _, err := h.Verify(id, dpub, mpub, testSession, testChallenge); !errors.Is(err, tt.want) {
+			if _, err := h.Verify(id, dpub, th, testSession, testChallenge); !errors.Is(err, tt.want) {
 				t.Fatalf("err = %v, want %v", err, tt.want)
 			}
 		})
 	}
 	// A 64-byte label is the boundary and is fine.
-	h := SignHello(priv, strings.Repeat("a", 64), dpub, mpub, testSession, testChallenge)
-	if _, err := h.Verify(id, dpub, mpub, testSession, testChallenge); err != nil {
+	h := SignHello(priv, strings.Repeat("a", 64), dpub, th, testSession, testChallenge)
+	if _, err := h.Verify(id, dpub, th, testSession, testChallenge); err != nil {
 		t.Fatalf("64-byte label: %v", err)
 	}
 }
 
 // TestDeviceHelloReplayInAnotherSessionRejected: a captured hello is useless
-// anywhere but the session it was made for — another client ephemeral key,
-// daemon, route session id, or daemon challenge each break the signature.
+// anywhere but the session it was made for — another transcript hash (a
+// different client or daemon ephemeral key), daemon, route session id, or
+// daemon challenge each break the signature.
 func TestDeviceHelloReplayInAnotherSessionRejected(t *testing.T) {
 	pub, priv := testKey(t)
-	dpub, mpub := fixedBytes(1), fixedBytes(100)
-	h := SignHello(priv, "x", dpub, mpub, testSession, testChallenge)
+	dpub, th := fixedBytes(1), fixedBytes(100)
+	h := SignHello(priv, "x", dpub, th, testSession, testChallenge)
 	id := DeviceID(pub)
 	for name, c := range map[string]struct{ d, m, s, c []byte }{
-		"other client ephemeral key": {dpub, fixedBytes(101), testSession, testChallenge},
-		"other daemon key":           {fixedBytes(2), mpub, testSession, testChallenge},
-		"other route session id":     {dpub, mpub, []byte("sess-another-route"), testChallenge},
-		"other daemon challenge":     {dpub, mpub, testSession, fixedBytes(0xC1)},
+		"other transcript hash":  {dpub, fixedBytes(101), testSession, testChallenge},
+		"other daemon key":       {fixedBytes(2), th, testSession, testChallenge},
+		"other route session id": {dpub, th, []byte("sess-another-route"), testChallenge},
+		"other daemon challenge": {dpub, th, testSession, fixedBytes(0xC1)},
 	} {
 		if _, err := h.Verify(id, c.d, c.m, c.s, c.c); !errors.Is(err, ErrBadSignature) {
 			t.Errorf("%s: err = %v, want ErrBadSignature", name, err)
 		}
 	}
+	if _, err := h.Verify(id, dpub, th[:31], testSession, testChallenge); !errors.Is(err, ErrBadTranscript) {
+		t.Errorf("short transcript hash: err = %v, want ErrBadTranscript", err)
+	}
 	// And the one thing the replaying party lacks is a challenge it has not
 	// already seen: the challenge must be the full 32 bytes.
-	if _, err := h.Verify(id, dpub, mpub, testSession, testChallenge[:31]); !errors.Is(err, ErrBadChallenge) {
+	if _, err := h.Verify(id, dpub, th, testSession, testChallenge[:31]); !errors.Is(err, ErrBadChallenge) {
 		t.Errorf("short challenge: err = %v, want ErrBadChallenge", err)
 	}
 }
@@ -140,17 +146,17 @@ func TestDeviceHelloReplayInAnotherSessionRejected(t *testing.T) {
 // contributed) is not accepted, whatever its signature.
 func TestV1HelloIsRefused(t *testing.T) {
 	pub, priv := testKey(t)
-	dpub, mpub := fixedBytes(1), fixedBytes(100)
-	// A well-formed v1 hello: domain "smind-device-hello", transcript, daemon key.
-	th := e2eeTranscript(dpub, mpub)
-	signed := append(append([]byte("smind-device-hello"), th...), dpub...)
+	dpub, th := fixedBytes(1), fixedBytes(100)
+	// A well-formed v1 hello: domain "smind-device-hello", v1 transcript, daemon key.
+	v1th := e2eeV1Transcript(dpub, fixedBytes(0x50))
+	signed := append(append([]byte("smind-device-hello"), v1th...), dpub...)
 	h := Hello{V: HelloVersionV1, DevicePub: pub, Label: "old", Signature: ed25519.Sign(priv, signed)}
-	if _, err := h.Verify(DeviceID(pub), dpub, mpub, testSession, testChallenge); !errors.Is(err, ErrBadVersion) {
+	if _, err := h.Verify(DeviceID(pub), dpub, th, testSession, testChallenge); !errors.Is(err, ErrBadVersion) {
 		t.Fatalf("v1 hello: err = %v, want ErrBadVersion", err)
 	}
 	// Relabelled as v2 it still fails: the v2 signed bytes are different.
 	h.V = HelloVersion
-	if _, err := h.Verify(DeviceID(pub), dpub, mpub, testSession, testChallenge); !errors.Is(err, ErrBadSignature) {
+	if _, err := h.Verify(DeviceID(pub), dpub, th, testSession, testChallenge); !errors.Is(err, ErrBadSignature) {
 		t.Fatalf("v1 signature under v2: err = %v, want ErrBadSignature", err)
 	}
 }
@@ -179,8 +185,10 @@ func TestChallengeMessageRoundTrip(t *testing.T) {
 	}
 }
 
-func e2eeTranscript(daemonPub, mobilePub []byte) []byte {
-	// SHA-256("smind relay e2ee v1" || daemon_pub || mobile_pub): the HKDF salt.
+// e2eeV1Transcript is the retired E2EE v1 transcript, only used to build a
+// well-formed v1 hello that must be refused.
+func e2eeV1Transcript(daemonPub, mobilePub []byte) []byte {
+	// SHA-256("smind relay e2ee v1" || daemon_pub || mobile_pub): the v1 HKDF salt.
 	h := sha256.New()
 	h.Write([]byte("smind relay e2ee v1"))
 	h.Write(daemonPub)
@@ -189,21 +197,23 @@ func e2eeTranscript(daemonPub, mobilePub []byte) []byte {
 }
 
 type vectorFile struct {
-	Comment          string           `json:"comment"`
-	Version          int              `json:"version"`
-	SeedHex          string           `json:"seed_hex"`
-	DevicePubHex     string           `json:"device_pub_hex"`
-	DeviceID         string           `json:"device_id"`
-	DaemonPubHex     string           `json:"daemon_pub_hex"`
-	MobilePubHex     string           `json:"mobile_pub_hex"`
-	SessionID        string           `json:"session_id"`
-	ChallengeHex     string           `json:"challenge_hex"`
-	ChallengeMessage json.RawMessage  `json:"challenge_message"`
-	Label            string           `json:"label"`
-	SignedBytesHex   string           `json:"signed_bytes_hex"`
-	SignatureHex     string           `json:"signature_hex"`
-	Hello            json.RawMessage  `json:"hello"`
-	Negative         []vectorNegative `json:"negative"`
+	Comment           string           `json:"comment"`
+	Version           int              `json:"version"`
+	SeedHex           string           `json:"seed_hex"`
+	DevicePubHex      string           `json:"device_pub_hex"`
+	DeviceID          string           `json:"device_id"`
+	DaemonPubHex      string           `json:"daemon_pub_hex"`
+	DaemonEphPubHex   string           `json:"daemon_eph_pub_hex"`
+	MobilePubHex      string           `json:"mobile_pub_hex"`
+	TranscriptHashHex string           `json:"transcript_hash_hex"`
+	SessionID         string           `json:"session_id"`
+	ChallengeHex      string           `json:"challenge_hex"`
+	ChallengeMessage  json.RawMessage  `json:"challenge_message"`
+	Label             string           `json:"label"`
+	SignedBytesHex    string           `json:"signed_bytes_hex"`
+	SignatureHex      string           `json:"signature_hex"`
+	Hello             json.RawMessage  `json:"hello"`
+	Negative          []vectorNegative `json:"negative"`
 }
 
 // vectorNegative is a hello signed over ONE different input, presented against
@@ -220,7 +230,8 @@ func buildVector(t *testing.T) []byte {
 	t.Helper()
 	priv := ed25519.NewKeyFromSeed(fixedBytes(0xA0))
 	pub := priv.Public().(ed25519.PublicKey)
-	dpub, mpub := fixedBytes(0x10), fixedBytes(0x50)
+	dpub, deph, mpub := fixedBytes(0x10), fixedBytes(0x30), fixedBytes(0x50)
+	th := e2ee.TranscriptHash(dpub, deph, mpub)
 	session, challenge := []byte("sess-0123456789abcdef"), fixedBytes(0xC0)
 	const label = "Pixel 9 (test vector)"
 	marshal := func(h Hello) json.RawMessage {
@@ -231,35 +242,49 @@ func buildVector(t *testing.T) []byte {
 		return b
 	}
 
-	h := SignHello(priv, label, dpub, mpub, session, challenge)
-	neg := func(name, changed string, d, m, s, c []byte) vectorNegative {
+	h := SignHello(priv, label, dpub, th, session, challenge)
+	// Each negative is signed over a hello that differs in ONE input of the
+	// session (for a key, over the transcript hash that key produces), and is
+	// presented against the top-level values.
+	neg := func(name, changed string, d, th, s, c []byte) vectorNegative {
 		return vectorNegative{
 			Name: name, Changed: changed,
-			SignedBytesHex: hex.EncodeToString(HelloSignedBytes(d, m, s, c)),
-			Hello:          marshal(SignHello(priv, label, d, m, s, c)),
+			SignedBytesHex: hex.EncodeToString(HelloSignedBytes(d, th, s, c)),
+			Hello:          marshal(SignHello(priv, label, d, th, s, c)),
 			Error:          "bad_signature",
 		}
 	}
+	otherDaemon, otherEph, otherMobile := fixedBytes(0x20), fixedBytes(0x70), fixedBytes(0x90)
 	v := vectorFile{
-		Comment:          "ADR-0031 D9 device_hello VERSION 2. signature = Ed25519(seed, signed_bytes); signed_bytes = \"smind-device-hello-v2\" || SHA256(\"smind relay e2ee v1\" || daemon_pub || mobile_pub) || daemon_pub || uint16BE(len(session_id)) || session_id || challenge. session_id is the exact bytes of the relay route's Frame.session_id (the vector's value is ASCII); challenge is the 32 bytes the daemon sent in challenge_message (standard base64 WITH padding) right after the E2EE handshake. Verify with device_id from the frame. Version 1 (device_hello_vector_v1.json) is retired and refused.",
-		Version:          HelloVersion,
-		SeedHex:          hex.EncodeToString(fixedBytes(0xA0)),
-		DevicePubHex:     hex.EncodeToString(pub),
-		DeviceID:         DeviceID(pub),
-		DaemonPubHex:     hex.EncodeToString(dpub),
-		MobilePubHex:     hex.EncodeToString(mpub),
-		SessionID:        string(session),
-		ChallengeHex:     hex.EncodeToString(challenge),
-		ChallengeMessage: ChallengeMessage(challenge),
-		Label:            label,
-		SignedBytesHex:   hex.EncodeToString(HelloSignedBytes(dpub, mpub, session, challenge)),
-		SignatureHex:     hex.EncodeToString(h.Signature),
-		Hello:            marshal(h),
+		Comment: "ADR-0031 D9 device_hello VERSION 2 over the E2EE v2 transcript (ADR-0035). signature = Ed25519(seed, signed_bytes); " +
+			"signed_bytes = \"smind-device-hello-v2\" || th || daemon_pub || uint16BE(len(session_id)) || session_id || challenge; " +
+			"th = transcript_hash_hex = SHA256(\"smind relay e2ee v2\" || daemon_pub || daemon_eph_pub || mobile_pub), " +
+			"taken from the established E2EE channel (mobile_pub is the client's ephemeral handshake key). " +
+			"session_id is the exact bytes of the relay route's Frame.session_id (the vector's value is ASCII); " +
+			"challenge is the 32 bytes the daemon sent in challenge_message (standard base64 WITH padding) right after the E2EE handshake. " +
+			"Verify with device_id from the frame. Each negative is a hello signed over one different input (a different key changes th too) and must fail with bad_signature. " +
+			"Version 1 (device_hello_vector_v1.json) is retired and refused.",
+		Version:           HelloVersion,
+		SeedHex:           hex.EncodeToString(fixedBytes(0xA0)),
+		DevicePubHex:      hex.EncodeToString(pub),
+		DeviceID:          DeviceID(pub),
+		DaemonPubHex:      hex.EncodeToString(dpub),
+		DaemonEphPubHex:   hex.EncodeToString(deph),
+		MobilePubHex:      hex.EncodeToString(mpub),
+		TranscriptHashHex: hex.EncodeToString(th),
+		SessionID:         string(session),
+		ChallengeHex:      hex.EncodeToString(challenge),
+		ChallengeMessage:  ChallengeMessage(challenge),
+		Label:             label,
+		SignedBytesHex:    hex.EncodeToString(HelloSignedBytes(dpub, th, session, challenge)),
+		SignatureHex:      hex.EncodeToString(h.Signature),
+		Hello:             marshal(h),
 		Negative: []vectorNegative{
-			neg("other_daemon_pub", "daemon_pub", fixedBytes(0x20), mpub, session, challenge),
-			neg("other_mobile_pub", "mobile_pub", dpub, fixedBytes(0x90), session, challenge),
-			neg("other_session_id", "session_id", dpub, mpub, []byte("sess-another-route"), challenge),
-			neg("other_challenge", "challenge", dpub, mpub, session, fixedBytes(0xC1)),
+			neg("other_daemon_pub", "daemon_pub", otherDaemon, e2ee.TranscriptHash(otherDaemon, deph, mpub), session, challenge),
+			neg("other_mobile_pub", "mobile_pub", dpub, e2ee.TranscriptHash(dpub, deph, otherMobile), session, challenge),
+			neg("other_daemon_eph", "daemon_eph_pub", dpub, e2ee.TranscriptHash(dpub, otherEph, mpub), session, challenge),
+			neg("other_session_id", "session_id", dpub, th, []byte("sess-another-route"), challenge),
+			neg("other_challenge", "challenge", dpub, th, session, fixedBytes(0xC1)),
 		},
 	}
 	out, err := json.MarshalIndent(v, "", "  ")
@@ -295,7 +320,9 @@ func TestHelloVectorMatchesFile(t *testing.T) {
 		t.Fatalf("vector version %d, want %d", v.Version, HelloVersion)
 	}
 	dpub, _ := hex.DecodeString(v.DaemonPubHex)
+	deph, _ := hex.DecodeString(v.DaemonEphPubHex)
 	mpub, _ := hex.DecodeString(v.MobilePubHex)
+	th, _ := hex.DecodeString(v.TranscriptHashHex)
 	challenge, _ := hex.DecodeString(v.ChallengeHex)
 	session := []byte(v.SessionID)
 	if c, ok, err := ParseChallengeMessage(v.ChallengeMessage); err != nil || !ok || !bytes.Equal(c, challenge) {
@@ -305,17 +332,22 @@ func TestHelloVectorMatchesFile(t *testing.T) {
 	if err := json.Unmarshal(v.Hello, &h); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Verify(v.DeviceID, dpub, mpub, session, challenge); err != nil {
+	if _, err := h.Verify(v.DeviceID, dpub, th, session, challenge); err != nil {
 		t.Fatalf("positive vector: %v", err)
 	}
-	if len(v.Negative) < 4 {
-		t.Fatalf("expected the four negative vectors, got %d", len(v.Negative))
+	if len(v.Negative) != 5 {
+		t.Fatalf("expected the five negative vectors, got %d", len(v.Negative))
+	}
+	// th is independently the documented SHA-256 over label and the three keys.
+	wantTh := sha256.Sum256(append(append(append([]byte("smind relay e2ee v2"), dpub...), deph...), mpub...))
+	if !bytes.Equal(th, wantTh[:]) {
+		t.Fatal("transcript_hash_hex is not SHA256(label || daemon_pub || daemon_eph_pub || mobile_pub)")
 	}
 	// The golden signed_bytes_hex is also assembled here from the written
 	// layout, independently of HelloSignedBytes, so a bug in that function
 	// cannot be baked into the vector unnoticed.
 	hand := []byte("smind-device-hello-v2")
-	hand = append(hand, e2eeTranscript(dpub, mpub)...)
+	hand = append(hand, th...)
 	hand = append(hand, dpub...)
 	hand = append(hand, byte(len(session)>>8), byte(len(session)))
 	hand = append(hand, session...)
@@ -328,7 +360,7 @@ func TestHelloVectorMatchesFile(t *testing.T) {
 		if err := json.Unmarshal(n.Hello, &nh); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := nh.Verify(v.DeviceID, dpub, mpub, session, challenge); !errors.Is(err, ErrBadSignature) {
+		if _, err := nh.Verify(v.DeviceID, dpub, th, session, challenge); !errors.Is(err, ErrBadSignature) {
 			t.Fatalf("negative vector %s (changed %s): err = %v, want ErrBadSignature", n.Name, n.Changed, err)
 		}
 	}
@@ -359,7 +391,64 @@ func TestV1VectorIsHistorical(t *testing.T) {
 	}
 	dpub, _ := hex.DecodeString(v.DaemonPubHex)
 	mpub, _ := hex.DecodeString(v.MobilePubHex)
-	if _, err := h.Verify(v.DeviceID, dpub, mpub, testSession, testChallenge); !errors.Is(err, ErrBadVersion) {
+	if _, err := h.Verify(v.DeviceID, dpub, e2eeV1Transcript(dpub, mpub), testSession, testChallenge); !errors.Is(err, ErrBadVersion) {
 		t.Fatalf("a v1 hello must be refused as a bad version: %v", err)
 	}
+}
+
+func loadVector(t *testing.T) vectorFile {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/device_hello_vector.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v vectorFile
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+// TestHelloVectorV2OverNewTranscript: the committed vector verifies with the
+// th that the E2EE v2 package computes from the three public keys.
+func TestHelloVectorV2OverNewTranscript(t *testing.T) {
+	v := loadVector(t)
+	dpub, _ := hex.DecodeString(v.DaemonPubHex)
+	deph, _ := hex.DecodeString(v.DaemonEphPubHex)
+	mpub, _ := hex.DecodeString(v.MobilePubHex)
+	challenge, _ := hex.DecodeString(v.ChallengeHex)
+	th := e2ee.TranscriptHash(dpub, deph, mpub)
+	if hex.EncodeToString(th) != v.TranscriptHashHex {
+		t.Fatalf("transcript_hash_hex = %s, e2ee.TranscriptHash = %x", v.TranscriptHashHex, th)
+	}
+	var h Hello
+	if err := json.Unmarshal(v.Hello, &h); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Verify(v.DeviceID, dpub, th, []byte(v.SessionID), challenge); err != nil {
+		t.Fatalf("vector over the v2 transcript: %v", err)
+	}
+}
+
+// TestHelloNegativeOtherDaemonEphemeral: a hello signed for the same client
+// and daemon but another daemon ephemeral (a replayed client handshake) fails.
+func TestHelloNegativeOtherDaemonEphemeral(t *testing.T) {
+	v := loadVector(t)
+	dpub, _ := hex.DecodeString(v.DaemonPubHex)
+	th, _ := hex.DecodeString(v.TranscriptHashHex)
+	challenge, _ := hex.DecodeString(v.ChallengeHex)
+	for _, n := range v.Negative {
+		if n.Name != "other_daemon_eph" {
+			continue
+		}
+		var h Hello
+		if err := json.Unmarshal(n.Hello, &h); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.Verify(v.DeviceID, dpub, th, []byte(v.SessionID), challenge); !errors.Is(err, ErrBadSignature) {
+			t.Fatalf("other_daemon_eph: err = %v, want ErrBadSignature", err)
+		}
+		return
+	}
+	t.Fatal("vector has no other_daemon_eph negative")
 }

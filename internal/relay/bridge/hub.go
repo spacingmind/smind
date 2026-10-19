@@ -533,7 +533,8 @@ var errSessionOver = errors.New("relay bridge: device session over")
 func isFatalSessionErr(err error) bool {
 	return errors.Is(err, e2ee.ErrDecrypt) || errors.Is(err, e2ee.ErrReplay) ||
 		errors.Is(err, e2ee.ErrCounterExhausted) || errors.Is(err, e2ee.ErrProtocol) ||
-		errors.Is(err, e2ee.ErrPeerKeyMismatch)
+		errors.Is(err, e2ee.ErrPeerKeyMismatch) || errors.Is(err, e2ee.ErrKeyRotation) ||
+		errors.Is(err, e2ee.ErrHandshakeConfirm) || errors.Is(err, e2ee.ErrUnsupportedVersion)
 }
 
 // serveSession runs one attach of a session on connection c: open/resume the
@@ -551,7 +552,7 @@ func (h *Hub) serveSession(s *session, c *relayConn) (err error) {
 		}
 	}()
 	if s.dc == nil {
-		dc, err := client.OpenData(s.ctx, c.rc, c.admissionID, h.cfg.WorkspaceID, s.ref.session, s.ref.device, h.kp, e2ee.RoleDaemon, client.WithKeepalive(h.keepaliveConfig()))
+		dc, err := client.OpenDaemonData(s.ctx, c.rc, c.admissionID, h.cfg.WorkspaceID, s.ref.session, s.ref.device, h.kp, client.WithKeepalive(h.keepaliveConfig()))
 		if err != nil {
 			return fmt.Errorf("open data: %w", err)
 		}

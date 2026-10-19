@@ -12,7 +12,6 @@ import (
 
 	"github.com/spacingmind/smind/internal/relay/client"
 	"github.com/spacingmind/smind/internal/relay/devices"
-	"github.com/spacingmind/smind/internal/relay/e2ee"
 	"github.com/spacingmind/smind/internal/relay/relaytest"
 )
 
@@ -183,12 +182,8 @@ func (d *goDevice) tryConnect(label string) (rpcResponse, error) {
 	if err != nil {
 		return rpcResponse{}, fmt.Errorf("admit: %w", err)
 	}
-	eph, err := e2ee.GenerateKeyPair()
-	if err != nil {
-		d.r.t.Fatal(err)
-	}
 	session := fmt.Sprintf("go-%s-%d", d.id[:6], time.Now().UnixNano())
-	d.dc, err = client.OpenData(ctx, rc, adm, d.r.ready.WorkspaceID, session, d.id, eph, e2ee.RoleMobile,
+	d.dc, err = client.OpenClientData(ctx, rc, adm, d.r.ready.WorkspaceID, session, d.id,
 		client.WithExpectedPeerKey(d.r.ready.DaemonPub))
 	if err != nil {
 		return rpcResponse{}, fmt.Errorf("open data: %w", err)
@@ -215,7 +210,7 @@ func (d *goDevice) tryConnect(label string) (rpcResponse, error) {
 	if err != nil {
 		return rpcResponse{}, fmt.Errorf("challenge: %w", err)
 	}
-	h := devices.SignHello(d.priv, label, d.r.ready.DaemonPub, eph.Public(), []byte(session), challenge)
+	h := devices.SignHello(d.priv, label, d.r.ready.DaemonPub, d.dc.TranscriptHash(), []byte(session), challenge)
 	resp, err := d.c.request(ctx, devices.HelloMethod, h)
 	if err != nil {
 		return rpcResponse{}, fmt.Errorf("hello: %w", err)
