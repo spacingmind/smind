@@ -1,4 +1,6 @@
 import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/form-error";
+
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useSetLearningMode } from "@/hooks/use-learning";
 import type { LearningMode, LearningWorkspaceStatus } from "@/lib/learning-types";
@@ -49,9 +51,7 @@ export function LearningOptIn({
         />
       </div>
       {setMode.error && (
-        <p role="alert" data-testid="learning-optin-error" className="text-ui-sm text-destructive">
-          {setMode.error.message}
-        </p>
+        <FormError message={setMode.error.message} testId="learning-optin-error" size="sm" />
       )}
     </div>
   );

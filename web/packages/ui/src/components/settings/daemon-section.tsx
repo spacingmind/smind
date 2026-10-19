@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { SetupSection } from "@/components/first-run/setup-section";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { managedByLabel } from "@/lib/daemon-version";
 import { desktop, isDesktop, type AppSettings, type DaemonProgress, type DaemonStatus } from "@/lib/platform";
@@ -78,11 +79,7 @@ function DaemonSection() {
   if (!status) {
     return (
       <div className="flex flex-col gap-2" data-testid="settings-section-daemon">
-        {error && (
-          <p role="alert" data-testid="daemon-error" className="text-ui-base text-destructive">
-            {error}
-          </p>
-        )}
+        {error && <Alert variant="error" testId="daemon-error" description={error} />}
       </div>
     );
   }
@@ -126,11 +123,7 @@ function DaemonSection() {
         </dd>
       </dl>
 
-      {error && (
-        <p role="alert" data-testid="daemon-error" className="text-ui-base text-destructive">
-          {error}
-        </p>
-      )}
+      {error && <Alert variant="error" testId="daemon-error" description={error} />}
       {status.prerequisiteMessage && (
         <p role="alert" data-testid="daemon-prerequisite" className="text-ui-base text-muted-foreground">
           {status.prerequisiteMessage}

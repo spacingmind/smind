@@ -39,9 +39,7 @@ function LoadState({
   if (error) {
     return (
       <div className="flex items-center gap-2">
-        <p role="alert" data-testid="learning-load-error" className="text-ui-base text-destructive">
-          {error.message}
-        </p>
+        <Alert variant="error" testId="learning-load-error" description={error.message} />
         <Button type="button" variant="ghost" size="sm" onClick={onRetry}>
           Retry
         </Button>

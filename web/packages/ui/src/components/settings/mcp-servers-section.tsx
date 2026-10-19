@@ -2,7 +2,10 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { FormError } from "@/components/ui/form-error";
+
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
@@ -226,9 +229,7 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
         {servers === null ? (
           loadError ? (
             <div className="flex items-center gap-2">
-              <p role="alert" data-testid="mcp-load-error" className="text-ui-base text-destructive">
-                {loadError}
-              </p>
+              <Alert variant="error" testId="mcp-load-error" description={loadError} />
               <Button
                 type="button"
                 variant="ghost"
@@ -364,9 +365,7 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
                               Cancel
                             </Button>
                             {deleteError && (
-                              <span role="alert" data-testid={`mcp-delete-error-${m.id}`} className="text-ui-sm text-destructive">
-                                {deleteError}
-                              </span>
+                              <FormError message={deleteError} testId={`mcp-delete-error-${m.id}`} size="sm" />
                             )}
                           </div>
                         </div>
@@ -391,9 +390,7 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
           </>
         )}
         {error && servers !== null && openCard === null && (
-          <p role="alert" data-testid="mcp-error" className="text-ui-base text-destructive">
-            {error}
-          </p>
+          <FormError message={error} testId="mcp-error" />
         )}
       </section>
     </div>
@@ -517,9 +514,7 @@ function McpServerForm({
       </div>
 
       {error && (
-        <p role="alert" data-testid={`${idPrefix}-error`} className="text-ui-base text-destructive">
-          {error}
-        </p>
+        <FormError message={error} testId={`${idPrefix}-error`} />
       )}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" data-testid={`${idPrefix}-cancel`} onClick={onCancel}>

@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
+import { FormError } from "@/components/ui/form-error";
+
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 
@@ -66,9 +68,7 @@ export function ConfirmDialog({
           </label>
         )}
         {error && (
-          <p role="alert" data-testid={`${testId}-error`} className="text-ui-base text-destructive">
-            {error}
-          </p>
+          <FormError message={error} testId={`${testId}-error`} />
         )}
         <DialogFooter>
           <Button type="button" variant="outline" disabled={pending} onClick={() => onOpenChange(false)}>

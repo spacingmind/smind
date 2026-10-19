@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
+import { FormError } from "@/components/ui/form-error";
+
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
@@ -417,9 +419,7 @@ function ProfileForm({
         onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
       />
       {error && (
-        <p role="alert" data-testid={`${idPrefix}-error`} className="text-ui-base text-destructive">
-          {error}
-        </p>
+        <FormError message={error} testId={`${idPrefix}-error`} />
       )}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" data-testid={`${idPrefix}-cancel`} onClick={onCancel}>

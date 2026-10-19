@@ -1,4 +1,5 @@
 import { editorProblems, MAX_BODY_LINES, MAX_DESCRIPTION_CHARS, nonBlankLines } from "@/lib/learning-format";
+import { FormError } from "@/components/ui/form-error";
 import { cn } from "@/lib/utils";
 
 const FIELD =
@@ -49,7 +50,7 @@ export function SkillEditor({
             value={description}
             onChange={(e) => onChange({ description: e.target.value, body })}
           />
-          {problems.description && <span className="text-ui-sm text-destructive">{problems.description}</span>}
+          {problems.description && <FormError message={problems.description} size="sm" />}
         </label>
       )}
       <label className="flex flex-col gap-1">
@@ -66,7 +67,7 @@ export function SkillEditor({
           value={body}
           onChange={(e) => onChange({ description, body: e.target.value })}
         />
-        {problems.body && <span className="text-ui-sm text-destructive">{problems.body}</span>}
+        {problems.body && <FormError message={problems.body} size="sm" />}
       </label>
     </div>
   );
