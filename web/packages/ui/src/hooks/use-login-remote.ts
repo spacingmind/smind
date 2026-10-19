@@ -30,9 +30,12 @@ export function useLoginRemote(): {
   remote: boolean;
   derivedRemote: boolean;
   override: LoginLocationOverride | null;
+  /** True once the connection is known: at once on web, after `getCurrentConnection` settles on desktop. */
+  resolved: boolean;
   setOverride(v: LoginLocationOverride | null): void;
 } {
   const [connection, setConnection] = useState<Pick<Connection, "id" | "kind"> | null>(null);
+  const [settled, setSettled] = useState(!isDesktop);
 
   useEffect(() => {
     if (!isDesktop) return;
@@ -42,7 +45,10 @@ export function useLoginRemote(): {
       .then((c) => {
         if (!cancelled) setConnection({ id: c.id, kind: c.kind });
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setSettled(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -58,6 +64,7 @@ export function useLoginRemote(): {
     remote,
     derivedRemote,
     override,
+    resolved: settled,
     // Before the desktop connection resolves the id is unknown -- never
     // persist an override under "".
     setOverride: (v) => {

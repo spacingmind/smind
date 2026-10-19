@@ -1,5 +1,5 @@
 import { Icons } from "@/lib/icons";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
@@ -111,12 +111,24 @@ export function ConnectAccountPanel({
   client,
   providers,
   onConnected,
+  initialProviderId,
+  autoStart = false,
+  relogin = null,
+  onClose,
 }: {
   client: WsClient | null;
   providers: ProviderInfo[];
   onConnected: () => void;
+  /** An accountProvider id (not a ProviderInfo.id) to pre-select. */
+  initialProviderId?: string;
+  /** Start the login once on mount when the resolved method is browser/device. */
+  autoStart?: boolean;
+  /** Re-login an existing account row: sends accountId, locks provider/label. */
+  relogin?: Account | null;
+  /** Removes the embedded form; a dismissed done notice also calls it. */
+  onClose?: () => void;
 }) {
-  const [provider, setProvider] = useState<string>("");
+  const [provider, setProvider] = useState<string>(initialProviderId ?? "");
   const [label, setLabel] = useState("");
   const [credential, setCredential] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -126,6 +138,7 @@ export function ConnectAccountPanel({
   const [showBaseUrl, setShowBaseUrl] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [reloginConfirmed, setReloginConfirmed] = useState(false);
 
   const [method, setMethod] = useState<ConnectMethod>("browser");
   const [methodTouched, setMethodTouched] = useState(false);
@@ -134,7 +147,7 @@ export function ConnectAccountPanel({
   const [pasteHint, setPasteHint] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
 
-  const { remote, derivedRemote, setOverride } = useLoginRemote();
+  const { remote, derivedRemote, resolved, setOverride } = useLoginRemote();
   const login = useAccountLogin({
     client,
     onConnected: () => onConnected(),
@@ -143,10 +156,16 @@ export function ConnectAccountPanel({
   const accounts = useAccounts().data ?? [];
 
   const manualProviders = credentialProviders(providers);
-  const selectedProvider = manualProviders.find((p) => p.accountProvider === provider);
+  // Re-login locks the provider to the account's own and never offers the
+  // api-key method (a pasted key can't produce an identity).
+  const selectedProviderId = relogin ? relogin.provider : provider;
+  const selectedProvider = manualProviders.find((p) => p.accountProvider === selectedProviderId);
   const methods = selectedProvider
-    ? connectMethodsFor(selectedProvider)
+    ? connectMethodsFor(selectedProvider).filter((m) => !relogin || m.value !== "api-key")
     : [{ value: "api-key" as ConnectMethod, label: "API key" }];
+  // A legacy row (hasIdentity === false) is adopted by whichever account the
+  // user signs in with -- one explicit Continue before anything starts.
+  const legacyConfirmPending = relogin !== null && relogin.hasIdentity === false && !reloginConfirmed;
 
   // Keep the provider selection valid as provider.list loads in (it starts
   // empty until the caller's fetch resolves): default to the first
@@ -161,6 +180,13 @@ export function ConnectAccountPanel({
     });
   }, [providers]);
 
+  // The embedded form follows its host's provider when the host re-targets
+  // it at another provider item (the detail pane).
+  useEffect(() => {
+    if (!initialProviderId || relogin) return;
+    setProvider((current) => (current === initialProviderId ? current : initialProviderId));
+  }, [initialProviderId, relogin]);
+
   // The default method follows the provider and whether the daemon is
   // remote (device code when signing in from another device); the user's
   // explicit choice survives a location flip but resets on provider change.
@@ -172,8 +198,9 @@ export function ConnectAccountPanel({
   useEffect(() => {
     if (methodTouched) return;
     if (!selectedProvider) return;
-    setMethod(defaultConnectMethod(selectedProvider, remote));
-  }, [selectedProvider, remote, methodTouched]);
+    const next = defaultConnectMethod(selectedProvider, remote);
+    setMethod(relogin && next === "api-key" ? "browser" : next);
+  }, [selectedProvider, remote, methodTouched, relogin]);
 
   // The default label (account-N) follows the provider until the user
   // edits the field; a finished login re-arms the prefill. N is the
@@ -181,10 +208,10 @@ export function ConnectAccountPanel({
   // name), and a just-added label counts until the accounts query
   // reflects it.
   const taken = new Set(
-    accounts.filter((a) => a.provider === provider).map((a) => a.label),
+    accounts.filter((a) => a.provider === selectedProviderId).map((a) => a.label),
   );
   const added = justAdded;
-  if (provider && added && added.provider === provider) taken.add(added.label);
+  if (selectedProviderId && added && added.provider === selectedProviderId) taken.add(added.label);
   let n = 1;
   while (taken.has(`account-${n}`)) n++;
   const defaultLabel = `account-${n}`;
@@ -209,7 +236,7 @@ export function ConnectAccountPanel({
   }, [login.state.phase, login.state.phase === "waiting" ? login.state.loginId : null, remote]);
 
   async function add() {
-    if (!provider || !label.trim() || !credential.trim()) {
+    if (!selectedProviderId || !label.trim() || !credential.trim()) {
       setError("Provider, label, and credential are all required.");
       return;
     }
@@ -217,7 +244,7 @@ export function ConnectAccountPanel({
     setError(null);
     try {
       await client!.call("account.add", {
-        provider,
+        provider: selectedProviderId,
         label: label.trim(),
         credential: credential.trim(),
         ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
@@ -235,17 +262,50 @@ export function ConnectAccountPanel({
   }
 
   function startLogin() {
-    if (!label.trim()) {
+    const labelValue = relogin ? relogin.label : label;
+    if (!labelValue.trim()) {
       setError("Label is required.");
       return;
     }
     setError(null);
     login.start({
-      provider,
-      label: label.trim(),
+      provider: selectedProviderId,
+      label: labelValue.trim(),
       method: method === "api-key" ? "browser" : method,
+      ...(relogin ? { accountId: relogin.id } : {}),
     });
   }
+
+  // autoStart: one browser/device login per MOUNT (the ref resets in a
+  // mount-only cleanup, so a StrictMode simulated unmount/re-mount starts a
+  // fresh login after the hook's cleanup aborted the first -- exactly one
+  // login stays live). Never starts for an api-key-only provider -- the
+  // form shows instead -- and a legacy re-login waits for its Continue.
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (!autoStart || autoStartedRef.current || legacyConfirmPending) return;
+    if (login.state.phase !== "idle") return;
+    // The desktop connection decides browser vs device: wait for it.
+    if (!resolved) return;
+    if (!selectedProvider) return;
+    const startMethod = methodTouched ? method : defaultConnectMethod(selectedProvider, remote);
+    if (startMethod === "api-key") return;
+    const labelValue = relogin ? relogin.label : defaultLabel;
+    if (!labelValue.trim()) return;
+    autoStartedRef.current = true;
+    login.start({
+      provider: selectedProviderId,
+      label: labelValue.trim(),
+      method: startMethod,
+      ...(relogin ? { accountId: relogin.id } : {}),
+    });
+  });
+  useEffect(
+    () => () => {
+      autoStartedRef.current = false;
+    },
+    [],
+  );
 
   const state = login.state;
   const showPastePanel =
@@ -259,11 +319,51 @@ export function ConnectAccountPanel({
   // switching either would desync the visible form from the daemon's login.
   const methodLocked =
     state.phase === "starting" || state.phase === "waiting" || state.phase === "device" || cancelling;
-  const selectedLabel = selectedProvider?.label ?? selectedProvider?.accountProvider ?? provider;
+  const selectedLabel = selectedProvider?.label ?? selectedProvider?.accountProvider ?? selectedProviderId;
 
   return (
     <div className="grid gap-3 border-t pt-4">
-      <p className="text-ui-base font-medium">Connect an account</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-ui-base font-medium" data-testid="connect-panel-heading">
+          {relogin ? "Sign in again" : "Connect an account"}
+        </p>
+        {onClose ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Close connect form"
+            data-testid="connect-close"
+            onClick={() => onClose?.()}
+          >
+            <Icons.close />
+          </Button>
+        ) : null}
+      </div>
+      {legacyConfirmPending ? (
+        <div data-testid="relogin-confirm" className="grid gap-2 rounded-md border bg-muted/50 px-3 py-2">
+          <p className="text-ui-base text-muted-foreground">
+            This replaces the credential of &lsquo;{relogin.label}&rsquo; with whichever account you sign in to.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => onClose?.()}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              data-testid="relogin-confirm-continue"
+              onClick={() => setReloginConfirmed(true)}
+            >
+              Continue
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <>
+      {relogin ? (
+        <p className="text-ui-sm text-muted-foreground">Signing in again as &lsquo;{relogin.label}&rsquo;</p>
+      ) : (
       <div className="grid gap-1">
         <label htmlFor="account-oauth-label" className="text-ui-base font-medium">
           Label
@@ -278,7 +378,8 @@ export function ConnectAccountPanel({
           placeholder="e.g. work, personal — however you'll tell accounts apart"
         />
       </div>
-      {manualProviders.length > 1 && (
+      )}
+      {!relogin && manualProviders.length > 1 && (
         <div className="grid gap-1">
           <label htmlFor="account-provider" className="text-ui-base font-medium">
             Provider
@@ -322,6 +423,7 @@ export function ConnectAccountPanel({
           />
         </div>
       )}
+      {!relogin && (
       <div data-testid="login-location" className="text-ui-sm text-muted-foreground">
         {remote ? (
           <p className="grid gap-1">
@@ -350,7 +452,8 @@ export function ConnectAccountPanel({
           </button>
         )}
       </div>
-      {method === "api-key" && selectedProvider ? (
+      )}
+      {method === "api-key" && selectedProvider && !relogin ? (
         <div className="grid gap-3">
           {error && <p className="text-ui-base text-destructive">{error}</p>}
           <div className="grid gap-2">
@@ -407,14 +510,14 @@ export function ConnectAccountPanel({
           )}
           <div>
             <Button
-              data-testid={`accounts-connect-${provider}`}
+              data-testid={`accounts-connect-${selectedProviderId}`}
               disabled={connecting}
               onClick={startLogin}
             >
               {connecting ? "Connecting…" : `Connect ${selectedLabel}`}
             </Button>
           </div>
-          {method === "browser" && (
+          {method === "browser" && !relogin && (
             <p className="text-ui-sm text-muted-foreground">
               Adding a second account for a provider you&rsquo;re already signed into in this
               browser may just reconnect the same one — sign out first, or use a private
@@ -496,7 +599,10 @@ export function ConnectAccountPanel({
                 created: state.result.created,
                 adopted: state.result.adopted,
               }}
-              onDismiss={login.reset}
+              onDismiss={() => {
+                login.reset();
+                onClose?.();
+              }}
             />
           )}
           {state.phase === "error" && (
@@ -504,6 +610,8 @@ export function ConnectAccountPanel({
           )}
         </div>
       ) : null}
+        </>
+      )}
     </div>
   );
 }
