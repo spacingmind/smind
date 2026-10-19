@@ -763,7 +763,37 @@ export interface Account {
   credentialType: string;
   createdAt: string;
   updatedAt: string;
+  /** ADR-0033: whether this account row has a signed-in identity (true) or only an API-key credential (false). Absent on an older daemon. */
+  hasIdentity?: boolean;
 }
+
+// ADR-0033's login contract (account.oauthStart/account.oauthComplete):
+// how the browser half of an OAuth connect is opened. "device" is offered
+// only when the daemon advertises it; "browser" is always available.
+export type LoginMethod = "browser" | "device";
+
+// Params of account.oauthStart (ADR-0033). accountId is present only when
+// signing in against an existing account row (adopting it).
+export interface OAuthStartParams {
+  provider: string;
+  label: string;
+  method?: LoginMethod;
+  accountId?: number;
+}
+
+// Terminal result of a successful account.oauthStart: the account row plus
+// whether it was newly created or adopted into an existing row.
+export interface OAuthStartResult extends Account {
+  created: boolean;
+  adopted?: boolean;
+}
+
+// Streaming events account.oauthStart emits (ADR-0033's login contract):
+// the browser-half URL to open (pasteOnly: no loopback listener, the user
+// must copy the redirect address back) or a device-code pair to show.
+export type LoginEvent =
+  | { kind: "authorizeUrl"; loginId: string; url: string; pasteOnly: boolean }
+  | { kind: "deviceCode"; loginId: string; verificationUrl: string; userCode: string; expiresAt: string; intervalSeconds: number };
 
 // One entry in an fs.listDir response (internal/wsapi/hostfs.go's
 // fsListDirEntry, mirroring internal/hostfs.Entry): a subdirectory of the

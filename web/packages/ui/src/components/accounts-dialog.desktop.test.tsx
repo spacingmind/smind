@@ -21,7 +21,10 @@ async function flush(): Promise<void> {
 async function startLogin(isDesktop: boolean) {
   vi.resetModules();
   const openExternal = vi.fn(() => Promise.resolve());
-  vi.doMock("@/lib/platform", () => ({ isDesktop, desktop: { openExternal } }));
+  vi.doMock("@/lib/platform", () => ({
+    isDesktop,
+    desktop: { openExternal, getCurrentConnection: () => Promise.resolve({ id: "c1", kind: "local" }) },
+  }));
   const open = vi.spyOn(window, "open").mockReturnValue(null);
   const { AccountsDialog } = await import("@/components/accounts-dialog");
   const { renderWithDaemon } = await import("@/test/render-with-daemon");
@@ -30,6 +33,7 @@ async function startLogin(isDesktop: boolean) {
   const client = new FakeWsClient();
   const daemon = new FakeUsageDaemon([], client);
   renderWithDaemon(<AccountsDialog client={daemon.client as never} open onOpenChange={() => {}} />, daemon);
+  client.nth("account.list").resolve([]);
   client.nth("provider.list").resolve(PROVIDERS);
   await flush();
 
@@ -37,7 +41,7 @@ async function startLogin(isDesktop: boolean) {
   fireEvent.click(screen.getByRole("button", { name: "Connect Claude Code" }));
   await waitFor(() => client.nth("account.oauthStart"));
   await act(async () => {
-    client.emit("account.oauthStart", 0, "authorizeUrl", { url: AUTHORIZE_URL });
+    client.emit("account.oauthStart", 0, "authorizeUrl", { loginId: "l1", url: AUTHORIZE_URL });
   });
   await flush();
   return { openExternal, open };
