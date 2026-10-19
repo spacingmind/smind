@@ -1,6 +1,6 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 
-import { readStored, STORAGE_KEYS, writeStored } from "@/lib/storage";
+import { useSidePaneWidthStore } from "@/stores/side-pane-width-store";
 
 /** Sane drag bounds for the side pane, in pixels -- narrower floor than the sidebar's, since it's splitting an already-narrower content area. */
 export const SIDE_PANE_MIN_WIDTH = 280;
@@ -11,13 +11,6 @@ function clamp(width: number): number {
   return Math.min(SIDE_PANE_MAX_WIDTH, Math.max(SIDE_PANE_MIN_WIDTH, width));
 }
 
-type PersistedWidths = Record<string, number>;
-
-function isPersistedWidths(value: unknown): value is PersistedWidths {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  return Object.values(value).every((v) => typeof v === "number" && Number.isFinite(v));
-}
-
 /**
  * The side pane's width in pixels, **persisted per task** (Item 6's
  * criterion) rather than as one global preference -- a task with a wide
@@ -25,7 +18,7 @@ function isPersistedWidths(value: unknown): value is PersistedWidths {
  * same way each task keeps its own open tabs.
  */
 export function useSidePaneWidth(taskId: number | null): [number, (next: number) => void] {
-  const [widths, setWidths] = useState<PersistedWidths>(() => readStored(STORAGE_KEYS.sidePaneWidth, {}, isPersistedWidths));
+  const widths = useSidePaneWidthStore((s) => s.value);
 
   const width = taskId === null ? SIDE_PANE_DEFAULT_WIDTH : clamp(widths[String(taskId)] ?? SIDE_PANE_DEFAULT_WIDTH);
 
@@ -33,12 +26,9 @@ export function useSidePaneWidth(taskId: number | null): [number, (next: number)
     (next: number) => {
       if (taskId === null) return;
       const clamped = clamp(next);
-      setWidths((prev) => {
-        if (prev[String(taskId)] === clamped) return prev;
-        const updated = { ...prev, [String(taskId)]: clamped };
-        writeStored(STORAGE_KEYS.sidePaneWidth, updated);
-        return updated;
-      });
+      const { value: prev, set } = useSidePaneWidthStore.getState();
+      if (prev[String(taskId)] === clamped) return;
+      set({ ...prev, [String(taskId)]: clamped });
     },
     [taskId],
   );
