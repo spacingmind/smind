@@ -22,6 +22,11 @@ const ProtocolVersion = 2
 // cannot make the reader allocate arbitrary memory.
 const maxFrameLen = 1 << 20
 
+// maxHandshakeFrameLen bounds a frame (type byte plus payload) while a
+// handshake is in progress: the largest legitimate one is M2 (1+66 bytes), so
+// an unauthenticated peer cannot make either end allocate more than this.
+const maxHandshakeFrameLen = 128
+
 // Frame types.
 const (
 	frameHello byte = 0x01
@@ -241,7 +246,7 @@ func (c *Channel) Handshake(ctx context.Context, opts ...HandshakeOption) error 
 
 // handshakeDaemon is the responder side.
 func (c *Channel) handshakeDaemon() error {
-	typ, payload, err := c.readFrame()
+	typ, payload, err := c.readFrame(maxHandshakeFrameLen)
 	if err != nil {
 		return err
 	}
@@ -297,7 +302,7 @@ func (c *Channel) handshakeDaemon() error {
 	// Wait for R_c. Nothing but handshake frames is acceptable until it
 	// verifies, and the daemon seals nothing.
 	for {
-		typ, payload, err := c.readFrame()
+		typ, payload, err := c.readFrame(maxHandshakeFrameLen)
 		if err != nil {
 			return err
 		}
@@ -350,7 +355,7 @@ func (c *Channel) handshakeClient(cfg *handshakeConfig) error {
 		return err
 	}
 
-	typ, m2, err := c.readFrame()
+	typ, m2, err := c.readFrame(maxHandshakeFrameLen)
 	if err != nil {
 		return err
 	}
@@ -389,7 +394,7 @@ func (c *Channel) handshakeClient(cfg *handshakeConfig) error {
 	replyReady := confirmTag(sched.confirmM, sched.th)
 
 	for {
-		typ, payload, err := c.readFrame()
+		typ, payload, err := c.readFrame(maxHandshakeFrameLen)
 		if err != nil {
 			return err
 		}
@@ -539,7 +544,7 @@ func (c *Channel) Receive() ([]byte, error) {
 	}
 
 	for {
-		typ, payload, err := c.readFrame()
+		typ, payload, err := c.readFrame(maxFrameLen)
 		if err != nil {
 			return nil, err
 		}
@@ -700,7 +705,7 @@ func (c *Channel) writeFrame(typ byte, payload []byte) error {
 // readFrame reads one length-prefixed frame. A truncated stream surfaces as
 // an error rather than a partially-parsed frame, and an oversized length
 // prefix is rejected before any allocation.
-func (c *Channel) readFrame() (byte, []byte, error) {
+func (c *Channel) readFrame(limit uint32) (byte, []byte, error) {
 	c.readMu.Lock()
 	defer c.readMu.Unlock()
 
@@ -712,8 +717,8 @@ func (c *Channel) readFrame() (byte, []byte, error) {
 	if length == 0 {
 		return 0, nil, fmt.Errorf("%w: zero-length frame", ErrProtocol)
 	}
-	if length > maxFrameLen {
-		return 0, nil, fmt.Errorf("%w: frame length %d exceeds the %d byte limit", ErrProtocol, length, maxFrameLen)
+	if length > limit {
+		return 0, nil, fmt.Errorf("%w: frame length %d exceeds the %d byte limit", ErrProtocol, length, limit)
 	}
 	buf := make([]byte, length)
 	if _, err := io.ReadFull(c.reader, buf); err != nil {
