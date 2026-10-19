@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type JSX, type KeyboardEvent } from "react";
 
 import { Icons } from "@/lib/icons";
+import { providerLabel } from "@/lib/provider-catalog";
 
 import {
   CreateProfileRow,
@@ -407,7 +408,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
 
   const inProviderView = view.kind === "provider";
   const viewProvider = view.kind === "provider" ? visibleProviders.find((p) => p.id === view.providerId) : undefined;
-  const boundLabel = boundProvider ? (providers.find((p) => p.id === boundProvider)?.label ?? boundProvider) : null;
+  const boundLabel = boundProvider ? providerLabel(boundProvider, providers.filter((p) => p.id === boundProvider)) : null;
 
   const shellFor = (entry: PickerRow): RowShellProps => ({
     id: rowDomId(entry.key),

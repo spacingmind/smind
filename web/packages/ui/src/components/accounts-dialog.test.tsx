@@ -64,15 +64,15 @@ describe("AccountsDialog", () => {
     expect(screen.getByText(/Claude Code · oauth/)).toBeInTheDocument();
   });
 
-  it("falls back to the raw provider id when provider.list hasn't described it", async () => {
+  it("falls back to the catalog label when provider.list hasn't described the provider", async () => {
     const client = new FakeWsClient();
     renderDialog(new FakeUsageDaemon([], client));
 
     client.nth("account.list").resolve(ACCOUNTS);
     await flush();
-    // provider.list left unresolved (or could resolve empty) -- no label to
-    // derive from yet.
-    expect(screen.getByText(/anthropic · oauth/)).toBeInTheDocument();
+    // provider.list left unresolved (or could resolve empty) -- the label
+    // comes from lib/provider-catalog's table instead of the raw id.
+    expect(screen.getByText(/Claude Code · oauth/)).toBeInTheDocument();
   });
 
   it("shows the empty hint when there are no accounts", async () => {

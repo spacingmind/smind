@@ -1,4 +1,10 @@
-import type { ProviderInfo } from "@/lib/types";
+
+/** The label lookup only needs the daemon's own row shape; ProviderInfo satisfies it. */
+interface ServedProvider {
+  id: string;
+  label?: string;
+  accountProvider?: string;
+}
 
 /**
  * The well-known provider identities (ADR-0032 AC17): one row per provider
@@ -34,13 +40,13 @@ export function providerIdentity(id: string | null | undefined): ProviderIdentit
 }
 
 /** Label for a runtime-vocabulary id: the daemon's own ProviderInfo.label wins, else the table, else the raw id. */
-export function providerLabel(id: string, providers?: ProviderInfo[]): string {
+export function providerLabel(id: string, providers?: readonly ServedProvider[]): string {
   const served = providers?.find((p) => p.id === id);
   return served?.label ?? providerIdentity(id)?.label ?? id;
 }
 
 /** Label for an account-vocabulary id (anthropic/openai/...): daemon label, else the table, else the raw id. */
-export function accountProviderLabel(accountProvider: string, providers?: ProviderInfo[]): string {
+export function accountProviderLabel(accountProvider: string, providers?: readonly ServedProvider[]): string {
   const served = providers?.find((p) => p.accountProvider === accountProvider);
   return served?.label ?? providerIdentity(accountProvider)?.label ?? accountProvider;
 }

@@ -31,6 +31,7 @@ import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
 import { externalLinkProps } from "@/lib/external-link";
 import { connectMethodsFor, defaultConnectMethod, type ConnectMethod } from "@/lib/login-methods";
 import { isDesktop } from "@/lib/platform";
+import { accountProviderLabel } from "@/lib/provider-catalog";
 import type { Account, ProviderInfo, ProviderTestResult } from "@/lib/types";
 
 import type { WsClient } from "@/lib/ws-client";
@@ -65,11 +66,6 @@ import { queryKeys } from "@/lib/query-keys";
 /** Providers with a credential row at all (kind is unset) -- feeds the manual-add dropdown. */
 export function credentialProviders(providers: ProviderInfo[]): ProviderInfo[] {
   return providers.filter((p) => p.credentialKind);
-}
-
-/** Friendly display label for an accounts-vocabulary provider id (Account.provider), falling back to the raw id for anything provider.list didn't describe (see the gap noted above). */
-export function providerLabel(providers: ProviderInfo[], id: string): string {
-  return providers.find((p) => p.accountProvider === id)?.label ?? id;
 }
 
 /** A small connection-status dot: green once provider.test reports ok, red once it reports not-ok, neutral (gray) until tested at all -- deepseek-harness's credential-configured-dot pattern, now on the shared StatusDot primitive (ui-redesign-parity plan, Item 2). */
@@ -725,7 +721,7 @@ function AccountListRow({ account, providers }: { account: Account; providers: P
         </span>
         <span className="flex shrink-0 items-center gap-2">
           <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">
-            {providerLabel(providers, account.provider)} · {account.credentialType}
+            {accountProviderLabel(account.provider, providers)} · {account.credentialType}
           </span>
           <TestRowButton providerId={account.provider} testing={testing} />
         </span>
