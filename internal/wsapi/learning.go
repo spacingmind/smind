@@ -13,6 +13,7 @@ import (
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/learning/approval"
 	"github.com/spacingmind/smind/internal/learning/gate"
+	learningservice "github.com/spacingmind/smind/internal/learning/service"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -95,6 +96,10 @@ type LearningDeps struct {
 	// Config is read per request, so a settings toggle takes effect at once.
 	Config  func() LearningConfig
 	Trigger LearningTrigger
+	// OnWorkspaceReset, when set, runs after learning.forget and after
+	// learning.setMode to off, so a stale projection never lingers (the
+	// daemon removes the workspace's learned-skill projection here).
+	OnWorkspaceReset func(workspaceID int64)
 }
 
 // learningHost holds the (replaceable) learning collaborators.
@@ -124,6 +129,14 @@ func (h *learningHost) set(d LearningDeps) {
 		h.deps.Config = d.Config
 	}
 	h.deps.Trigger = d.Trigger
+	h.deps.OnWorkspaceReset = d.OnWorkspaceReset
+}
+
+// reset runs the optional OnWorkspaceReset hook.
+func (h *learningHost) reset(workspaceID int64) {
+	if fn := h.get().OnWorkspaceReset; fn != nil {
+		fn(workspaceID)
+	}
 }
 
 func (h *learningHost) get() LearningDeps {
@@ -169,8 +182,9 @@ func (h *learningHost) systemChat(chatID *int64) bool {
 }
 
 // SetLearning replaces the learning collaborators (the daemon passes its
-// fully configured approval service, config and trigger). Nil Approval or
-// Config keep the current ones; Trigger is always replaced.
+// fully configured approval service, config, trigger and reset hook). Nil
+// Approval or Config keep the current ones; Trigger and OnWorkspaceReset are
+// always replaced.
 func (a *API) SetLearning(d LearningDeps) { a.learning.set(d) }
 
 // LearningNotifier returns the notifier the collector calls to announce
@@ -558,6 +572,9 @@ func setModeLearning(_ context.Context, h *learningHost, p struct {
 	if err := h.get().Approval.SetLearningMode(p.WorkspaceID, p.Mode); err != nil {
 		return nil, err
 	}
+	if p.Mode == store.LearningModeOff {
+		h.reset(p.WorkspaceID)
+	}
 	h.NotifyChanged(p.WorkspaceID, 0, 0, "modeChanged")
 	return map[string]any{}, nil
 }
@@ -569,6 +586,7 @@ func forgetLearning(_ context.Context, h *learningHost, p workspaceParams) (any,
 	if err := h.get().Approval.Forget(p.WorkspaceID); err != nil {
 		return nil, err
 	}
+	h.reset(p.WorkspaceID)
 	h.NotifyChanged(p.WorkspaceID, 0, 0, "forgotten")
 	return map[string]any{}, nil
 }
@@ -789,7 +807,7 @@ func reflectLearning(ctx context.Context, h *learningHost, p struct {
 		return nil, learningInvalid(m, "cannot reflect on a system chat")
 	}
 	if err := t.Reflect(ctx, p.ChatID); err != nil {
-		return nil, err
+		return nil, triggerErr(m, err)
 	}
 	return map[string]any{}, nil
 }
@@ -804,7 +822,17 @@ func curateLearning(ctx context.Context, h *learningHost, p workspaceParams) (an
 		return nil, err
 	}
 	if err := t.Curate(ctx, p.WorkspaceID); err != nil {
-		return nil, err
+		return nil, triggerErr(m, err)
 	}
 	return map[string]any{}, nil
+}
+
+// triggerErr maps a collector refusal that is not a client mistake onto the
+// "unavailable" wire code; everything else goes through learningMethod's
+// generic mapping.
+func triggerErr(method string, err error) error {
+	if errors.Is(err, learningservice.ErrNotImplemented) {
+		return &rpcCodeError{code: codeUnavailable, msg: method + ": not available yet (the curator job has not shipped)", err: err}
+	}
+	return err
 }

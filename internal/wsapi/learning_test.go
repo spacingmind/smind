@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/spacingmind/smind/internal/learning/approval"
 	"github.com/spacingmind/smind/internal/learning/gate"
+	learningservice "github.com/spacingmind/smind/internal/learning/service"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -547,5 +550,41 @@ func TestLearning_RunScopedCallerRefused(t *testing.T) {
 	}
 	if n < 20 {
 		t.Fatalf("only %d learning.* methods registered", n)
+	}
+}
+
+type errTrigger struct{ err error }
+
+func (e errTrigger) Reflect(context.Context, int64) error { return e.err }
+func (e errTrigger) Curate(context.Context, int64) error  { return e.err }
+
+func TestLearning_CurateNotImplementedIsUnavailable(t *testing.T) {
+	t.Parallel()
+	f := newLearnFx(t)
+	f.api.SetLearning(LearningDeps{Trigger: errTrigger{learningservice.ErrNotImplemented}, Config: func() LearningConfig { return LearningConfig{Enabled: true} }})
+	e := f.fail("learning.curate", map[string]any{"workspaceId": f.w.ID}, "unavailable")
+	if !strings.Contains(e.Message, "not available yet") {
+		t.Fatalf("message = %q", e.Message)
+	}
+}
+
+func TestLearning_ForgetAndOffRunResetHook(t *testing.T) {
+	t.Parallel()
+	f := newLearnFx(t)
+	var got []int64
+	var mu sync.Mutex
+	f.api.SetLearning(LearningDeps{OnWorkspaceReset: func(id int64) { mu.Lock(); got = append(got, id); mu.Unlock() }})
+	f.ok("learning.setMode", map[string]any{"workspaceId": f.w.ID, "mode": "propose"}, nil)
+	mu.Lock()
+	if len(got) != 0 {
+		t.Fatalf("hook ran for propose: %v", got)
+	}
+	mu.Unlock()
+	f.ok("learning.setMode", map[string]any{"workspaceId": f.w.ID, "mode": "off"}, nil)
+	f.ok("learning.forget", map[string]any{"workspaceId": f.w.ID}, nil)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 2 || got[0] != f.w.ID || got[1] != f.w.ID {
+		t.Fatalf("hook calls = %v", got)
 	}
 }

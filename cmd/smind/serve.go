@@ -138,13 +138,7 @@ func cmdServe(args []string) int {
 		log.Fatalf("server: %v", err)
 	}
 	srv.API().AttachUsage(poller, registry, passive)
-	srv.API().SetLearning(learningDeps(cfg, db, []string{token}))
 	srv.API().Runs.SetMaxConcurrentRunsPerTree(cfg.Orchestration.MaxConcurrentRunsPerTree)
-	if svc := newDeliveryService(cfg.Learning, db, config.Dir()); svc != nil {
-		srv.API().Runs.SetDeliveryProvider(svc)
-		srv.API().Runs.AddObserver(svc)
-		defer svc.Close()
-	}
 	// The relay device admin methods must be registered before the first
 	// connection is served (SetRelayDevices is not safe against concurrent
 	// requests).
@@ -175,7 +169,10 @@ func cmdServe(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	stopLearning := startLearning(ctx, cfg, db, wm, runner, srv.API().Runs)
+	stopLearning := wireLearning(ctx, learningWiring{
+		Cfg: cfg, DB: db, API: srv.API(), WM: wm, Runner: runner, Reg: srv.API().Runs,
+		Home: config.Dir(), Secrets: []string{token},
+	})
 
 	for _, ln := range listeners {
 		go func() {
