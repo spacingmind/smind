@@ -852,7 +852,7 @@ somebody else's nonce, which only counts as liveness); each (re)opened stream pr
   leaks the Poly1305 one-time key for those two counters, so a replaying party could forge or splice daemon→client frames at
   counters 0 and 1 — which the real client consumed long ago — i.e. at worst a denial of service. A handshake that mixes
   a daemon ephemeral key into the key schedule would remove the property for good; it changes the E2EE core and is a separate
-  decision.
+  decision. **Decided 2026-10-20: ADR-0035 (E2EE v2) does exactly that**, in the same unreleased 0.13.0.
 - *Daemon behaviour:* one session per announced `(device_id, session_id)`; sessions survive a relay reconnect (orphaned, E2EE
   state kept up to 6 minutes) and are resumed in place when the next `Sync` lists their route, dropped when it does not;
   a client that lost its daemon (restart) must re-handshake with a **fresh session id** — it cannot tell by itself, so after
@@ -937,8 +937,9 @@ space). So the E2EE core stays untouched and identity is an **inner layer**:
   holder) can replay a *captured* client transcript — handshake frames plus the hello ciphertext — into a new route; the
   daemon derives identical keys and decrypts it. A version-1 hello (signed over the handshake keys only) would be
   admitted as that device, and the daemon's "one session per device" rule would drop the real session. Only something the
-  daemon chooses afresh per session proves the hello was made for *this* session; the E2EE handshake and key schedule are
-  deliberately unchanged (`TestE2EECoreUnchanged`).
+  daemon chooses afresh per session proves the hello was made for *this* session; the E2EE handshake and key schedule were
+  deliberately unchanged (`TestE2EECoreUnchanged`) — **amended 2026-10-20 by ADR-0035**: E2EE v2 mixes a fresh daemon
+  ephemeral key into the key schedule and the hello signs the v2 transcript.
 - `device_id` in the frame metadata **must equal** `base32(SHA-256(device_pub))[:26]`; the daemon drops a route
   whose id does not match, so a client cannot claim another's id.
 - The daemon keeps a registry `$SMIND_HOME/relay-devices.json` (mode 0600): `{device_id, device_pub, label,
