@@ -96,8 +96,8 @@ and `Seal`/`Open` are unchanged (4 zero bytes ‖ `u64BE(counter)`; one key per 
   separately: it is fixed by the label, and a flipped version byte changes the schedule so `R_d`/`R_c` fail.
 - The transcript is **public**; the Go/Rust/TS `Channel` expose it once established (`TranscriptHash()`), and
   `device_hello` signs exactly that value (§5). Nothing else recomputes it.
-- Zeroise `c_eph_priv`, `d_eph_priv`, `es`, `ee` and the confirmation keys once the session is derived (best effort in Go
-  and TypeScript, `zeroize` in Rust).
+- Zeroise `c_eph_priv`, `d_eph_priv`, `es`, `ee` and the confirmation keys once the session is derived (best effort: Go's `ecdh.PrivateKey` cannot be wiped, so Go clears the DH outputs
+  and derived keys only; TypeScript clears its byte arrays; `zeroize` in Rust).
 
 ### 3. Why this removes the residual
 
@@ -255,7 +255,8 @@ reason. A dual-stack daemon (v1 and v2) is rejected: it keeps the nonce-reuse pa
   Rust interop suite (`desktop/daemon-client/tests/relay_*_interop.rs`, `go run`s the Go harness) and the mobile node
   integration tests (`integration.*.node.test.ts`, against `internal/relay/bridge/devharness`) speak v1 until their PRs
   land. The plan handles this with a named, temporary gate (an explicit skip with a message pointing at this ADR) in the
-  Go PR for those two live suites, removed by the matching client PR; the vector tests are never gated.
+  Go PR for those two live suites, removed by the matching client PR. The client unit tests that read the regenerated `device_hello_vector.json` (still the v1 transcript until their PR) are skipped
+  with the same message; no other unit or vector test is gated.
 - Commits are `feat(relay)!:`/`BREAKING CHANGE:` so release-please records it in the 0.13.0 changelog.
 
 ## Open choices
