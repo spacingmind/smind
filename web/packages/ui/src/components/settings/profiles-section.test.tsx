@@ -270,6 +270,11 @@ describe("profiles-section", () => {
     fireEvent.click(screen.getByTestId("profile-delete-confirm-1"));
     await flush();
     expect(daemon.calls.filter((c) => c.method === "profile.delete")).toHaveLength(2);
+    // The retry succeeded: the dialog closes and the row goes once the daemon's event arrives.
+    daemon.emit("profile.deleted", { id: 1 });
+    await flush();
+    expect(screen.queryByTestId("profile-delete-dialog")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("profile-row-1")).not.toBeInTheDocument();
   });
 
   it("reflects a profile.created event from outside its own mutation, without a manual refresh", async () => {

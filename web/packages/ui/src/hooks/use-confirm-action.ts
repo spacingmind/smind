@@ -1,12 +1,13 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 /**
  * The pending/error plumbing every confirm dialog repeated by hand: `run(fn)` flips `pending`, clears the
  * last error, awaits `fn`, and keeps the daemon's message (verbatim) when it throws. Resolves `true` on
  * success so the caller can close the dialog and run its follow-up, `false` on failure (the dialog stays
- * open with `error` visible). `reset()` clears a stale error (e.g. when the dialog reopens).
+ * open with `error` visible). `reset()` clears a stale error. Pass the dialog's `open` flag and the error is
+ * cleared whenever it closes, so a dialog that stays mounted never shows the previous target's failure.
  */
-export function useConfirmAction(): {
+export function useConfirmAction(open?: boolean): {
   pending: boolean;
   error: string | null;
   run: (action: () => Promise<unknown>) => Promise<boolean>;
@@ -28,5 +29,8 @@ export function useConfirmAction(): {
     }
   }, []);
   const reset = useCallback(() => setError(null), []);
+  useEffect(() => {
+    if (open === false) setError(null);
+  }, [open]);
   return { pending, error, run, reset };
 }

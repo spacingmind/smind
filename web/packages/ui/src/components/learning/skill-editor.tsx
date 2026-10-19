@@ -50,7 +50,7 @@ export function SkillEditor({
             value={description}
             onChange={(e) => onChange({ description: e.target.value, body })}
           />
-          {problems.description && <FormError message={problems.description} size="sm" />}
+          {problems.description && <FormError message={problems.description} size="sm" as="span" silent />}
         </label>
       )}
       <label className="flex flex-col gap-1">
@@ -67,7 +67,7 @@ export function SkillEditor({
           value={body}
           onChange={(e) => onChange({ description, body: e.target.value })}
         />
-        {problems.body && <FormError message={problems.body} size="sm" />}
+        {problems.body && <FormError message={problems.body} size="sm" as="span" silent />}
       </label>
     </div>
   );

@@ -67,4 +67,28 @@ describe("ConfirmDialog", () => {
     renderDialog({ destructive: false });
     expect(screen.getByTestId("confirm-dialog-confirm").className).not.toBe(destructiveClass);
   });
+
+  it("the typed confirmation does not survive closing by any path (Cancel, parent close after success)", () => {
+    const props = { onOpenChange: () => {}, title: "t", description: "d", confirmLabel: "Go", pending: false, onConfirm: () => {}, requireText: "ws" };
+    const { rerender } = render(<ConfirmDialog open {...props} />);
+    fireEvent.change(screen.getByTestId("confirm-dialog-input"), { target: { value: "ws" } });
+    expect(screen.getByTestId("confirm-dialog-confirm")).toBeEnabled();
+    // The parent closes it (what Cancel and a successful action both end up doing) and reopens it later.
+    rerender(<ConfirmDialog open={false} {...props} />);
+    rerender(<ConfirmDialog open {...props} />);
+    expect(screen.getByTestId("confirm-dialog-input")).toHaveValue("");
+    expect(screen.getByTestId("confirm-dialog-confirm")).toBeDisabled();
+  });
+
+  it("does not close (Esc, overlay, X) while the action is pending, so a failure cannot be hidden", () => {
+    const { onOpenChange } = renderDialog({ pending: true });
+    fireEvent.keyDown(screen.getByTestId("confirm-dialog"), { key: "Escape" });
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+
+  it("Esc closes it when nothing is pending", () => {
+    const { onOpenChange } = renderDialog();
+    fireEvent.keyDown(screen.getByTestId("confirm-dialog"), { key: "Escape" });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
 });

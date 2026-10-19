@@ -57,4 +57,18 @@ describe("useConfirmAction", () => {
     act(() => result.current.reset());
     expect(result.current.error).toBeNull();
   });
+
+  it("clears the error when the dialog it serves closes, so a mounted dialog never shows the previous target's failure", async () => {
+    const { result, rerender } = renderHook(({ open }) => useConfirmAction(open), { initialProps: { open: true } });
+    await act(async () => {
+      await result.current.run(async () => {
+        throw new Error("chat A failed");
+      });
+    });
+    expect(result.current.error).toBe("chat A failed");
+    rerender({ open: false });
+    expect(result.current.error).toBeNull();
+    rerender({ open: true });
+    expect(result.current.error).toBeNull();
+  });
 });

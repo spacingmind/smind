@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -51,11 +51,17 @@ export function ConfirmDialog({
 }) {
   const [typed, setTyped] = useState("");
   const blocked = requireText !== undefined && typed !== requireText;
+  // Whatever closes the dialog (Cancel, Esc, the overlay, the X, the parent after success), the typed
+  // confirmation does not survive into the next time it opens.
+  useEffect(() => {
+    if (!open) setTyped("");
+  }, [open]);
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) setTyped("");
+        // An action in flight keeps the dialog open: closing it would hide a failure the user is waiting on.
+        if (!next && pending) return;
         onOpenChange(next);
       }}
     >

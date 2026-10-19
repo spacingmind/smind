@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 
+import { LoadingRows } from "@/components/ui/loading-rows";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EvidenceList } from "@/components/learning/evidence-list";
 import { Chip, SkillBadges, SourceChip } from "@/components/learning/learning-chips";
@@ -169,7 +170,7 @@ export function LearnedSkillDetail({ id, onBack }: { id: number; onBack: () => v
         {detail.error ? (
           <FormError message={detail.error.message} />
         ) : (
-          <p className="text-ui-base text-muted-foreground">Loading…</p>
+          <LoadingRows rows={2} />
         )}
       </div>
     );

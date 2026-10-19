@@ -104,7 +104,7 @@ export function AccountRow(props: {
             {authTypeLabel(account.credentialType)}
           </StatusBadge>
           {usage?.report?.planLabel ? (
-            <StatusBadge status="success" className="border-border bg-muted text-muted-foreground">
+            <StatusBadge status="neutral">
               {usage.report.planLabel}
             </StatusBadge>
           ) : null}

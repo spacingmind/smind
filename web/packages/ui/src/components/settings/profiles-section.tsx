@@ -4,6 +4,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingRows } from "@/components/ui/loading-rows";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
+import { useLastDefined } from "@/hooks/use-last-defined";
 
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
@@ -185,7 +186,8 @@ function ProfilesSection(_props: SettingsSectionContext) {
   }
 
   const [deletingProfile, setDeletingProfile] = useState<AgentProfile | null>(null);
-  const deleteAction = useConfirmAction();
+  const deleteAction = useConfirmAction(deletingProfile !== null);
+  const shownDeleting = useLastDefined(deletingProfile);
 
   async function handleDelete(profile: AgentProfile) {
     const done = await deleteAction.run(() => deleteProfile.mutateAsync(profile.ID));
@@ -328,7 +330,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
         title="Delete agent?"
         description={
           <>
-            <span className="font-medium text-foreground">{deletingProfile?.Name}</span> is removed for good. Tasks that already
+            <span className="font-medium text-foreground">{shownDeleting?.Name}</span> is removed for good. Tasks that already
             ran with it keep their history.
           </>
         }
@@ -337,7 +339,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
         pending={deleteAction.pending}
         error={deleteAction.error}
         testId="profile-delete-dialog"
-        confirmTestId={deletingProfile ? `profile-delete-confirm-${deletingProfile.ID}` : undefined}
+        confirmTestId={shownDeleting ? `profile-delete-confirm-${shownDeleting.ID}` : undefined}
         onConfirm={() => deletingProfile && void handleDelete(deletingProfile)}
       />
     </div>

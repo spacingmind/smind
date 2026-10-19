@@ -10,7 +10,6 @@ export function LoadingRows({ rows = 3, label = "Loading…", className }: { row
   return (
     <div
       role="status"
-      aria-busy="true"
       data-slot="loading-rows"
       className={cn("flex flex-col gap-2 rounded-xl border bg-card p-3", className)}
     >

@@ -10,16 +10,26 @@ export function FormError({
   className,
   testId,
   size = "base",
+  as: Tag = "p",
+  silent = false,
 }: {
   message: string | null | undefined;
   className?: string;
   testId?: string;
   size?: "base" | "sm";
+  /** `span` where the message sits inside a `<label>` (a `<p>` there is invalid markup). */
+  as?: "p" | "span";
+  /** No `role="alert"`: for live validation while typing, which must not interrupt a screen reader. */
+  silent?: boolean;
 }) {
   if (!message) return null;
   return (
-    <p role="alert" data-testid={testId} className={cn(size === "sm" ? "text-ui-sm" : "text-ui-base", "text-destructive", className)}>
+    <Tag
+      role={silent ? undefined : "alert"}
+      data-testid={testId}
+      className={cn(size === "sm" ? "text-ui-sm" : "text-ui-base", "text-destructive", className)}
+    >
       {message}
-    </p>
+    </Tag>
   );
 }

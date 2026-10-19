@@ -1,4 +1,5 @@
 import { Icons } from "@/lib/icons";
+import { LoadingRows } from "@/components/ui/loading-rows";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -672,7 +673,7 @@ export function AccountsDialog({
         {error && <FormError message={error} />}
         <div className="max-h-40 overflow-y-auto">
           {accounts === undefined ? (
-            <p className="text-ui-base text-muted-foreground">Loading…</p>
+            <LoadingRows rows={2} />
           ) : accounts.length === 0 ? (
             <p className="text-ui-base text-muted-foreground">
               No accounts yet — connect one below.

@@ -7,7 +7,8 @@ describe("LoadingRows", () => {
   it("is one polite status named Loading…, with skeleton rows hidden from assistive tech", () => {
     const { container } = render(<LoadingRows rows={4} />);
     const status = screen.getByRole("status");
-    expect(status).toHaveAttribute("aria-busy", "true");
+    // No aria-busy: it would suppress the very announcement this status exists to make.
+    expect(status).not.toHaveAttribute("aria-busy");
     expect(screen.getByText("Loading…")).toBeInTheDocument();
     const rows = container.querySelectorAll('[data-slot="skeleton"]');
     expect(rows).toHaveLength(4);

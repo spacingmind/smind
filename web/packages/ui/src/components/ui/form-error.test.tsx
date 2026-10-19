@@ -38,4 +38,12 @@ describe("FormError", () => {
     const el = screen.getByTestId("err");
     expect(el).toHaveClass("text-destructive", "mt-2");
   });
+
+  it("silent renders no alert role, and as=span renders a span (for a message inside a label)", () => {
+    const { container } = render(<FormError message="Too long" silent as="span" testId="v" />);
+    const el = screen.getByTestId("v");
+    expect(el.tagName).toBe("SPAN");
+    expect(el).not.toHaveAttribute("role");
+    expect(container.querySelector("p")).toBeNull();
+  });
 });

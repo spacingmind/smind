@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { LoadingRows } from "@/components/ui/loading-rows";
 import { DuplicateBanner, DuplicateCompare } from "@/components/learning/duplicate-compare";
 import { EvidenceList } from "@/components/learning/evidence-list";
 import { Chip, SourceChip } from "@/components/learning/learning-chips";
@@ -60,7 +61,7 @@ export function ProposalReview({ id, onBack }: { id: number; onBack: () => void 
             {detail.error.message}
           </p>
         ) : (
-          <p className="text-ui-base text-muted-foreground">Loading…</p>
+          <LoadingRows rows={2} />
         )}
       </div>
     );

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { LoadingRows } from "@/components/ui/loading-rows";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
+import { useLastDefined } from "@/hooks/use-last-defined";
 import { FormError } from "@/components/ui/form-error";
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -107,7 +108,8 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<number | null>(null);
-  const deleteAction = useConfirmAction();
+  const deleteAction = useConfirmAction(deleting !== null);
+  const lastDeleting = useLastDefined(deleting);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
@@ -360,7 +362,8 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
         )}
       </section>
       {(() => {
-        const target = servers?.find((m) => m.id === deleting);
+        const targetId = lastDeleting;
+        const target = servers?.find((m) => m.id === targetId);
         return (
           <ConfirmDialog
             open={deleting !== null}
@@ -380,9 +383,9 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
             pending={deleteAction.pending}
             error={deleteAction.error}
             testId="mcp-delete-dialog"
-            confirmTestId={`mcp-delete-confirm-${deleting}`}
-            cancelTestId={`mcp-delete-cancel-${deleting}`}
-            errorTestId={`mcp-delete-error-${deleting}`}
+            confirmTestId={`mcp-delete-confirm-${targetId}`}
+            cancelTestId={`mcp-delete-cancel-${targetId}`}
+            errorTestId={`mcp-delete-error-${targetId}`}
             onConfirm={() => deleting !== null && void handleDelete(deleting)}
           />
         );

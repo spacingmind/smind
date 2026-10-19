@@ -13,6 +13,7 @@ import { FolderPickerDialog } from "@/components/folder-picker-dialog";
 import { FormError } from "@/components/ui/form-error";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
+import { useLastDefined } from "@/hooks/use-last-defined";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -389,7 +390,9 @@ export function DeleteWorkspaceDialog({
   onOpenChange: (open: boolean) => void;
   onDeleted: () => void;
 }) {
-  const action = useConfirmAction();
+  const action = useConfirmAction(open);
+  // The target is cleared on close; keep its name on screen while the dialog animates out.
+  const shown = useLastDefined(workspace);
 
   return (
     <ConfirmDialog
@@ -398,7 +401,7 @@ export function DeleteWorkspaceDialog({
       title="Delete workspace?"
       description={
         <>
-          <span className="font-medium text-foreground">{workspace?.Title || workspace?.Path}</span>
+          <span className="font-medium text-foreground">{shown?.Title || shown?.Path}</span>
           <DeleteConsequences tasksRemoved={tasksRemoved} spacesRemoved={spacesRemoved} />
         </>
       }
@@ -435,7 +438,9 @@ export function DeleteSpaceDialog({
   onOpenChange: (open: boolean) => void;
   onDeleted: () => void;
 }) {
-  const action = useConfirmAction();
+  const action = useConfirmAction(open);
+  // The target is cleared on close; keep its name on screen while the dialog animates out.
+  const shown = useLastDefined(space);
 
   return (
     <ConfirmDialog
@@ -444,7 +449,7 @@ export function DeleteSpaceDialog({
       title="Delete space?"
       description={
         <>
-          <span className="font-medium text-foreground">{space?.Title}</span>
+          <span className="font-medium text-foreground">{shown?.Title}</span>
           <DeleteConsequences tasksRemoved={tasksRemoved} spacesRemoved={0} />
         </>
       }
@@ -524,7 +529,9 @@ export function ArchiveTaskDialog({
   onOpenChange: (open: boolean) => void;
   onArchived: () => void;
 }) {
-  const action = useConfirmAction();
+  const action = useConfirmAction(open);
+  // The target is cleared on close; keep its name on screen while the dialog animates out.
+  const shown = useLastDefined(task);
   // null = fetch pending/never ran, [] = no children (today's dialog).
   const [childTasks, setChildTasks] = useState<Array<{ id: number; title: string; runState?: TaskTreeNode["run"]["state"] }> | null>(null);
   const [childError, setChildError] = useState(false);
@@ -571,7 +578,7 @@ export function ArchiveTaskDialog({
       title="Archive task?"
       description={
         <>
-          <span className="font-medium text-foreground">{task?.Title}</span>
+          <span className="font-medium text-foreground">{shown?.Title}</span>
           <p className="mt-2">
             Uncommitted work is checkpointed to the task branch before the
             worktree is removed.
@@ -618,7 +625,9 @@ export function ArchiveChatDialog({
   onOpenChange: (open: boolean) => void;
   onArchived: () => void;
 }) {
-  const action = useConfirmAction();
+  const action = useConfirmAction(open);
+  // The target is cleared on close; keep its name on screen while the dialog animates out.
+  const shown = useLastDefined(chat);
 
   return (
     <ConfirmDialog
@@ -627,7 +636,7 @@ export function ArchiveChatDialog({
       title="Archive chat?"
       description={
         <>
-          <span className="font-medium text-foreground">{chat?.Title || "Chat"}</span>
+          <span className="font-medium text-foreground">{shown?.Title || "Chat"}</span>
           <p className="mt-2">
             The chat's history stays on the task; its tab closes and it stops appearing in "New chat"'s reopen list.
           </p>
