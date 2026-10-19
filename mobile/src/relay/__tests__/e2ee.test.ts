@@ -630,6 +630,15 @@ describe('E2EE v2 named scenarios', () => {
     });
   });
 
+  it('a recorded daemon (M2, R_d) pair replayed into a FRESH, unseeded client fails confirmation: its new ephemeral derives other keys', async () => {
+    const t = scripted([M2, R_D]);
+    const channel = new Channel(t); // no seeding: a random ephemeral, as in production
+    expect(errorKind(await rejection(channel.handshake(daemonPub)))).toBe('handshake_confirm');
+    expect(channel.isEstablished).toBe(false);
+    expect(frameKinds(t.sent)).toEqual(['hello']); // no R_c
+    expect(hex(t.sent[0])).not.toBe(v.m1_frame_hex); // and its M1 is not the recorded one
+  });
+
   describe('handshake lifecycle guards', () => {
     it('refuses a second handshake while one runs, and after success', async () => {
       const { channel, daemon } = channelPair();
