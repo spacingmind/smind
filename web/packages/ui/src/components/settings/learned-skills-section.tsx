@@ -4,6 +4,7 @@ import { ConfirmDialog } from "@/components/learning/confirm-dialog";
 import { LearnedSkillDetail } from "@/components/learning/learned-skill-detail";
 import { ProposalReview } from "@/components/learning/proposal-review";
 import { RunLinkProvider } from "@/components/learning/run-link";
+import { LearningBudgetRow } from "@/components/learning/learning-budget-row";
 import { LearningOptIn } from "@/components/learning/learning-optin";
 import { PendingProposalBadge } from "@/components/learning/pending-badge";
 import { LearnedSkillRow, ProposalRow } from "@/components/learning/skill-row";
@@ -184,6 +185,7 @@ function LearnedSkillsSection({ closeSettings }: SettingsSectionContext) {
       </Select>
 
       <LearningOptIn workspace={workspace} enabled={status.data.enabled} />
+      {workspace.learningMode === "propose" && workspace.budget && <LearningBudgetRow budget={workspace.budget} />}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
         <TabsList variant="flat" aria-label="Learned skills">
