@@ -588,3 +588,70 @@ func TestLearning_ForgetAndOffRunResetHook(t *testing.T) {
 		t.Fatalf("hook calls = %v", got)
 	}
 }
+
+// learningRunWithUsage records a finished reflect-purpose run on ws's system
+// task, optionally with a usage row.
+func (f *learnFx) learningRunWithUsage(ws store.Workspace, id string, usage *store.RunUsage) {
+	f.t.Helper()
+	sys, ok, err := f.db.GetSystemTask(ws.ID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	var chatID int64
+	if !ok {
+		var c store.Chat
+		if sys, c, err = f.db.CreateSystemTask(ws.ID, "learning", "/cwd"); err != nil {
+			f.t.Fatal(err)
+		}
+		chatID = c.ID
+	}
+	now := time.Now()
+	if _, err := f.db.CreateRun(store.Run{ID: id, TaskID: sys.ID, ChatID: chatID, Provider: "claude-native", Status: "done",
+		StartedAt: now.Add(-time.Hour), FinishedAt: &now, Purpose: "reflect"}); err != nil {
+		f.t.Fatal(err)
+	}
+	if usage != nil {
+		usage.RunID, usage.TaskID, usage.Provider, usage.Source = id, sys.ID, "claude-native", "test"
+		if err := f.db.UpsertRunUsage(*usage); err != nil {
+			f.t.Fatal(err)
+		}
+	}
+}
+
+func TestLearning_StatusReportsBudget(t *testing.T) {
+	t.Parallel()
+	f := newLearnFx(t)
+	other, err := f.db.CreateWorkspace(store.Workspace{Path: "/learn-other-" + t.Name(), Title: "O", RoutingPolicy: "hard"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.api.SetLearning(LearningDeps{Config: func() LearningConfig {
+		return LearningConfig{Enabled: true, DailyBudgetUSD: 0.25, DailyBudgetTokens: 150000}
+	}})
+	in, out, cost := int64(100), int64(20), 0.05
+	f.learningRunWithUsage(f.w, "b1", &store.RunUsage{InputTokens: &in, OutputTokens: &out, CostUSD: &cost})
+	f.learningRunWithUsage(f.w, "b2", nil) // no usage row: unreported
+
+	var st struct {
+		Budget     any `json:"budget"`
+		Workspaces []struct {
+			ID     int64          `json:"id"`
+			Budget learningBudget `json:"budget"`
+		} `json:"workspaces"`
+	}
+	f.ok("learning.status", nil, &st)
+	if st.Budget != nil {
+		t.Fatalf("top-level budget = %v, want null", st.Budget)
+	}
+	got := map[int64]learningBudget{}
+	for _, w := range st.Workspaces {
+		got[w.ID] = w.Budget
+	}
+	want := learningBudget{WindowHours: 24, UsedUSD: 0.05, UsedTokens: 120, CapUSD: 0.25, CapTokens: 150000, UnreportedRuns: 1}
+	if got[f.w.ID] != want {
+		t.Fatalf("budget = %+v, want %+v", got[f.w.ID], want)
+	}
+	if o := (learningBudget{WindowHours: 24, CapUSD: 0.25, CapTokens: 150000}); got[other.ID] != o {
+		t.Fatalf("other workspace budget = %+v, want %+v", got[other.ID], o)
+	}
+}

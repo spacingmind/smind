@@ -142,7 +142,10 @@ func wireLearning(ctx context.Context, w learningWiring) (stop func()) {
 	deps := wsapi.LearningDeps{
 		Approval: approvals,
 		Config: func() wsapi.LearningConfig {
-			return wsapi.LearningConfig{Enabled: lc.Enabled, ProbationRuns: lc.ProbationRuns}
+			return wsapi.LearningConfig{
+				Enabled: lc.Enabled, ProbationRuns: lc.ProbationRuns,
+				DailyBudgetUSD: lc.DailyBudgetUSD, DailyBudgetTokens: lc.DailyBudgetTokens,
+			}
 		},
 	}
 	var deliv *delivery.Service

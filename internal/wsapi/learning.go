@@ -88,6 +88,10 @@ type LearningConfig struct {
 	Enabled bool
 	// ProbationRuns: a skill offered fewer runs than this is on probation.
 	ProbationRuns int
+	// DailyBudgetUSD and DailyBudgetTokens are the per-workspace caps the
+	// status budget is reported against.
+	DailyBudgetUSD    float64
+	DailyBudgetTokens int
 }
 
 // LearningDeps wires the learning RPCs; every field is optional.
@@ -115,7 +119,9 @@ func newLearningHost(db *store.Store, bus *eventBus) *learningHost {
 	d := config.DefaultLearning()
 	return &learningHost{db: db, bus: bus, deps: LearningDeps{
 		Approval: approval.New(approval.Deps{Store: db}),
-		Config:   func() LearningConfig { return LearningConfig{Enabled: d.Enabled, ProbationRuns: d.ProbationRuns} },
+		Config: func() LearningConfig {
+			return LearningConfig{Enabled: d.Enabled, ProbationRuns: d.ProbationRuns, DailyBudgetUSD: d.DailyBudgetUSD, DailyBudgetTokens: d.DailyBudgetTokens}
+		},
 	}}
 }
 
@@ -518,12 +524,31 @@ type learningStatusWorkspace struct {
 	PendingProposals int    `json:"pendingProposals"`
 	ActiveSkills     int    `json:"activeSkills"`
 	DisabledSkills   int    `json:"disabledSkills"`
+	// Budget is the workspace's rolling 24h learning spend against the caps.
+	Budget learningBudget `json:"budget"`
+}
+
+// learningBudgetWindow is the budget's rolling window (the collector's).
+const learningBudgetWindow = 24 * time.Hour
+
+// learningBudget mirrors what the collector's budget check sees: usage of the
+// workspace's non-user (learning) runs in the last windowHours. UnreportedRuns
+// are runs with no cost/token figure; the collector prices those pessimistically,
+// so the budget may be spent sooner than usedUsd/usedTokens suggest.
+type learningBudget struct {
+	WindowHours    int     `json:"windowHours"`
+	UsedUSD        float64 `json:"usedUsd"`
+	UsedTokens     int64   `json:"usedTokens"`
+	CapUSD         float64 `json:"capUsd"`
+	CapTokens      int     `json:"capTokens"`
+	UnreportedRuns int     `json:"unreportedRuns"`
 }
 
 type learningStatusResult struct {
 	Enabled    bool                      `json:"enabled"`
 	Workspaces []learningStatusWorkspace `json:"workspaces"`
-	// Budget stays null until the collector reports one.
+	// Budget is always null; the budget is per workspace (workspaces[].budget).
+	// The field is kept so existing clients still find it.
 	Budget any `json:"budget"`
 }
 
@@ -532,7 +557,8 @@ func statusLearning(_ context.Context, h *learningHost, _ struct{}) (any, error)
 	if err != nil {
 		return nil, err
 	}
-	out := learningStatusResult{Enabled: h.cfg().Enabled, Workspaces: []learningStatusWorkspace{}}
+	cfg := h.cfg()
+	out := learningStatusResult{Enabled: cfg.Enabled, Workspaces: []learningStatusWorkspace{}}
 	for _, w := range wss {
 		pending, err := h.db.ListProposals(w.ID, "pending")
 		if err != nil {
@@ -542,7 +568,13 @@ func statusLearning(_ context.Context, h *learningHost, _ struct{}) (any, error)
 		if err != nil {
 			return nil, err
 		}
-		row := learningStatusWorkspace{ID: w.ID, Title: w.Title, LearningMode: w.LearningMode, PendingProposals: len(pending)}
+		cost, tokens, unreported, err := h.db.SumLearningUsageForWorkspace(w.ID, time.Now().Add(-learningBudgetWindow))
+		if err != nil {
+			return nil, err
+		}
+		row := learningStatusWorkspace{ID: w.ID, Title: w.Title, LearningMode: w.LearningMode, PendingProposals: len(pending),
+			Budget: learningBudget{WindowHours: int(learningBudgetWindow / time.Hour), UsedUSD: cost, UsedTokens: tokens,
+				CapUSD: cfg.DailyBudgetUSD, CapTokens: cfg.DailyBudgetTokens, UnreportedRuns: unreported}}
 		if row.LearningMode == "" {
 			row.LearningMode = store.LearningModeOff
 		}
