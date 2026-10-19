@@ -1,10 +1,7 @@
 // routes.ts builds and parses the task-detail route (ADR-0036 decision 4):
 // route params are strings, so the id is parsed once here.
 
-export interface TaskRouteParams {
-  id: string;
-  title: string;
-}
+export type TaskRouteParams = { id: string; title: string };
 
 export function taskHref(task: { ID: number; Title: string }): { pathname: '/task/[id]'; params: TaskRouteParams } {
   return { pathname: '/task/[id]', params: { id: String(task.ID), title: task.Title } };

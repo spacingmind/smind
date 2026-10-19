@@ -126,7 +126,6 @@ export function PairingScreen({ onConnected }: Props) {
   return (
     <View style={styles.container}>
       <StatusBar style="auto" />
-      <Text style={styles.title}>smind pairing</Text>
       <Text style={styles.label}>Paste a pairing URL from `smind relay offer`:</Text>
       <UiHost style={styles.inputHost}>
         <ExpoTextInput
@@ -174,15 +173,7 @@ function makeStyles(theme: AppTheme) {
     container: {
       flex: 1,
       backgroundColor: theme.surface[0],
-      paddingTop: theme.spacing[16],
       paddingHorizontal: theme.spacing[4],
-    },
-    title: {
-      fontSize: theme.type.sectionTitle.fontSize,
-      lineHeight: theme.type.sectionTitle.lineHeight,
-      fontWeight: theme.type.sectionTitle.fontWeight,
-      color: theme.foreground,
-      marginBottom: theme.spacing[4],
     },
     label: {
       fontSize: theme.type.interface.fontSize,

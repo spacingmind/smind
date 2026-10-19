@@ -52,6 +52,7 @@ import { requestStop, stopControlView } from '../stopControl';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { useChatQueue } from '../useChatQueue';
+import { ReconnectingBanner } from './ConnectionStatusCard';
 import { QueuedPrompts } from './QueuedPrompts';
 
 type LoadState =
@@ -62,8 +63,6 @@ type LoadState =
 interface Props {
   conn: RelayConnection;
   taskId: number;
-  taskTitle: string;
-  onBack: () => void;
 }
 
 /** {icon, color} for a tool call's real 3-state status -- no "queued" state exists on the wire (internal/taskrunner/event.go). */
@@ -86,7 +85,7 @@ function permissionTint(theme: AppTheme, req: PermissionRequestState): string {
   return req.status === 'resolved' ? theme.status.success : theme.status.warning;
 }
 
-export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
+export function TaskDetailScreen({ conn, taskId }: Props) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
@@ -103,7 +102,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   const [expandedToolCalls, setExpandedToolCalls] = useState<ReadonlySet<string>>(new Set());
   const [chatId, setChatId] = useState<number | null>(null);
   const [liveRunId, setLiveRunId] = useState<string | null>(null);
-  const { epoch } = useConnectionState(conn); // reload what a drop interrupted (the run attach) once reconnected
+  const { epoch, state: connState } = useConnectionState(conn); // reload what a drop interrupted (the run attach) once reconnected
   const board = useRef(new PermissionBoard()).current;
   const liveSeq = useRef(0);
   const followUpTails = useRef<RunTail[]>([]);
@@ -418,119 +417,115 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   const stopView = stopControlView(liveRunId, stopping);
 
   return (
-    <View style={styles.container}>
-      <View style={styles.back}>
-        <UiHost>
-          <Button variant="text" label="&larr; Back" onPress={onBack} />
-        </UiHost>
-      </View>
-      <Text style={styles.title}>{taskTitle}</Text>
-
-      {state.kind === 'loading' && <ActivityIndicator style={styles.spinner} size="large" color={theme.primary} />}
-      {state.kind === 'error' && (
-        <View>
-          <Text style={styles.errorText}>Couldn't load this task's runs.</Text>
-          <Text style={styles.errorDetail}>{state.message}</Text>
-        </View>
-      )}
-      {state.kind === 'ready' && state.run === null && (
-        <Text style={styles.empty}>No runs yet for this task. Start one from the daemon or web UI.</Text>
-      )}
-      {state.kind === 'ready' && state.run !== null && (
-        <>
-          <Text style={styles.runMeta}>
-            run {state.run.ID.slice(0, 8)} · {state.run.Provider} · {state.run.Status === 'running' ? 'live' : state.run.Status}
-          </Text>
-          {(() => {
-            const footer = describeRunFooter(state.run);
-            return footer !== null && !continued && liveRunId === null ? (
-              <View style={styles.footerRow}>
-                <Text style={[styles.footerText, { color: theme.status.warning }]}>{footer.sentence}</Text>
-                <UiHost>
-                  <Button label="Continue" onPress={handleContinue} />
-                </UiHost>
-              </View>
-            ) : null;
-          })()}
-          <ScrollView style={styles.transcript}>
-            {lines.length === 0 && <Text style={styles.empty}>(empty transcript)</Text>}
-            {lines.map((line) =>
-              line.toolCall ? (
-                <ToolCallRow
-                  key={line.key}
-                  theme={theme}
-                  styles={styles}
-                  toolCall={line.toolCall}
-                  expanded={expandedToolCalls.has(line.key)}
-                  onToggle={() => toggleExpanded(line.key)}
-                />
-              ) : (
-                <Text
-                  key={line.key}
-                  style={line.role === 'user' ? styles.userLine : line.role === '' ? styles.metaLine : styles.assistantLine}
-                >
-                  {line.role !== '' ? `${line.role}: ` : ''}
-                  {line.text}
-                </Text>
-              ),
-            )}
-          </ScrollView>
-          {permissions.map((req) => {
-            const tint = permissionTint(theme, req);
-            return (
-              <View key={req.requestId} style={[styles.permissionCard, { borderColor: tint }]}>
-                <Text style={styles.permissionSummary}>{req.summary}</Text>
-                {req.status === 'pending' ? (
-                  <View style={styles.permissionOptions}>
-                    {req.options.map((opt) => (
-                      <UiHost key={opt.id} style={styles.permissionButton}>
-                        <Button label={opt.label} onPress={() => handlePermissionTap(req.requestId, opt.id)} />
-                      </UiHost>
-                    ))}
-                  </View>
-                ) : (
-                  <Text style={[styles.permissionResolved, { color: tint }]}>
-                    {req.resolvedWith?.by === 'tap' ? 'chosen: ' : 'resolved: '}
-                    {req.options.find((o) => o.id === req.resolvedWith?.optionId)?.label ?? req.resolvedWith?.optionId ?? '?'}
-                  </Text>
-                )}
-                {req.error !== null && <Text style={styles.permissionError}>Couldn't respond: {req.error}</Text>}
-              </View>
-            );
-          })}
-          {sendError !== null && <Text style={styles.sendError}>Couldn't send: {sendError}</Text>}
-          <QueuedPrompts items={queue.items} onCancel={(id) => void queue.cancel(id)} />
-          <View style={styles.composeRow}>
-            <UiHost style={styles.composeWrap}>
-              <ExpoTextInput
-                style={styles.composeField}
-                textStyle={styles.composeText}
-                value={draftState}
-                onChangeText={(text) => {
-                  draftState.value = text;
-                  setDraft(text);
-                }}
-                placeholder={liveRunId !== null ? 'Queue a follow-up — it sends when this run finishes' : 'Send a follow-up prompt…'}
-                placeholderTextColor={theme.foregroundMuted}
-                multiline
-              />
-            </UiHost>
-            {stopView.visible && (
-              <UiHost style={styles.sendHost}>
-                <Button label={stopView.label} onPress={handleStop} disabled={stopView.disabled} />
-              </UiHost>
-            )}
-            {liveRunId !== null && canSend && (
-              <UiHost style={styles.sendHost}>
-                <Button label="Send now" onPress={handleSendNow} />
-              </UiHost>
-            )}
-            <UiHost style={styles.sendHost}>
-              <Button label="Send" onPress={handleSend} disabled={!canSend} />
-            </UiHost>
+    <View style={styles.screen}>
+      {connState.kind === 'connecting' || connState.kind === 'reconnecting' ? <ReconnectingBanner>Reconnecting to the daemon…</ReconnectingBanner> : null}
+      <View style={styles.container}>
+        {state.kind === 'loading' && <ActivityIndicator style={styles.spinner} size="large" color={theme.primary} />}
+        {state.kind === 'error' && (
+          <View>
+            <Text style={styles.errorText}>Couldn't load this task's runs.</Text>
+            <Text style={styles.errorDetail}>{state.message}</Text>
           </View>
-        </>
-      )}
+        )}
+        {state.kind === 'ready' && state.run === null && (
+          <Text style={styles.empty}>No runs yet for this task. Start one from the daemon or web UI.</Text>
+        )}
+        {state.kind === 'ready' && state.run !== null && (
+          <>
+            <Text style={styles.runMeta}>
+              run {state.run.ID.slice(0, 8)} · {state.run.Provider} · {state.run.Status === 'running' ? 'live' : state.run.Status}
+            </Text>
+            {(() => {
+              const footer = describeRunFooter(state.run);
+              return footer !== null && !continued && liveRunId === null ? (
+                <View style={styles.footerRow}>
+                  <Text style={[styles.footerText, { color: theme.status.warning }]}>{footer.sentence}</Text>
+                  <UiHost>
+                    <Button label="Continue" onPress={handleContinue} />
+                  </UiHost>
+                </View>
+              ) : null;
+            })()}
+            <ScrollView style={styles.transcript}>
+              {lines.length === 0 && <Text style={styles.empty}>(empty transcript)</Text>}
+              {lines.map((line) =>
+                line.toolCall ? (
+                  <ToolCallRow
+                    key={line.key}
+                    theme={theme}
+                    styles={styles}
+                    toolCall={line.toolCall}
+                    expanded={expandedToolCalls.has(line.key)}
+                    onToggle={() => toggleExpanded(line.key)}
+                  />
+                ) : (
+                  <Text
+                    key={line.key}
+                    style={line.role === 'user' ? styles.userLine : line.role === '' ? styles.metaLine : styles.assistantLine}
+                  >
+                    {line.role !== '' ? `${line.role}: ` : ''}
+                    {line.text}
+                  </Text>
+                ),
+              )}
+            </ScrollView>
+            {permissions.map((req) => {
+              const tint = permissionTint(theme, req);
+              return (
+                <View key={req.requestId} style={[styles.permissionCard, { borderColor: tint }]}>
+                  <Text style={styles.permissionSummary}>{req.summary}</Text>
+                  {req.status === 'pending' ? (
+                    <View style={styles.permissionOptions}>
+                      {req.options.map((opt) => (
+                        <UiHost key={opt.id} style={styles.permissionButton}>
+                          <Button label={opt.label} onPress={() => handlePermissionTap(req.requestId, opt.id)} />
+                        </UiHost>
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={[styles.permissionResolved, { color: tint }]}>
+                      {req.resolvedWith?.by === 'tap' ? 'chosen: ' : 'resolved: '}
+                      {req.options.find((o) => o.id === req.resolvedWith?.optionId)?.label ?? req.resolvedWith?.optionId ?? '?'}
+                    </Text>
+                  )}
+                  {req.error !== null && <Text style={styles.permissionError}>Couldn't respond: {req.error}</Text>}
+                </View>
+              );
+            })}
+            {sendError !== null && <Text style={styles.sendError}>Couldn't send: {sendError}</Text>}
+            <QueuedPrompts items={queue.items} onCancel={(id) => void queue.cancel(id)} />
+            <View style={styles.composeRow}>
+              <UiHost style={styles.composeWrap}>
+                <ExpoTextInput
+                  style={styles.composeField}
+                  textStyle={styles.composeText}
+                  value={draftState}
+                  onChangeText={(text) => {
+                    draftState.value = text;
+                    setDraft(text);
+                  }}
+                  placeholder={liveRunId !== null ? 'Queue a follow-up — it sends when this run finishes' : 'Send a follow-up prompt…'}
+                  placeholderTextColor={theme.foregroundMuted}
+                  multiline
+                />
+              </UiHost>
+              {stopView.visible && (
+                <UiHost style={styles.sendHost}>
+                  <Button label={stopView.label} onPress={handleStop} disabled={stopView.disabled} />
+                </UiHost>
+              )}
+              {liveRunId !== null && canSend && (
+                <UiHost style={styles.sendHost}>
+                  <Button label="Send now" onPress={handleSendNow} />
+                </UiHost>
+              )}
+              <UiHost style={styles.sendHost}>
+                <Button label="Send" onPress={handleSend} disabled={!canSend} />
+              </UiHost>
+            </View>
+          </>
+        )}
+      </View>
     </View>
   );
 }
@@ -563,25 +558,29 @@ function ToolCallRow({
   );
 }
 
+/** Shown by the task route when its `id` param is not a positive integer (ADR-0036 decision 4). */
+export function TaskLoadError() {
+  const theme = useAppTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  return (
+    <View style={styles.container}>
+      <Text style={styles.errorText}>Couldn't load this task's runs.</Text>
+      <Text style={styles.errorDetail}>This task link is not valid.</Text>
+    </View>
+  );
+}
+
 function makeStyles(theme: AppTheme) {
   return StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: theme.surface[0],
+    },
     container: {
       flex: 1,
       backgroundColor: theme.surface[0],
-      paddingTop: theme.spacing[16],
       paddingHorizontal: theme.spacing[4],
       paddingBottom: theme.spacing[4],
-    },
-    back: {
-      alignSelf: 'flex-start',
-      marginBottom: theme.spacing[2],
-    },
-    title: {
-      fontSize: theme.type.sectionTitle.fontSize,
-      lineHeight: theme.type.sectionTitle.lineHeight,
-      fontWeight: theme.type.sectionTitle.fontWeight,
-      color: theme.foreground,
-      marginBottom: theme.spacing[1],
     },
     runMeta: {
       fontSize: theme.type.metadataLabel.fontSize,

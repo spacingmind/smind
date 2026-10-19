@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Stack } from 'expo-router';
 import { Button } from '@expo/ui';
 import { UiHost } from '../ui/UiHost';
 import { fetchOverview, Space, Task, Workspace } from '../api';
@@ -23,6 +24,7 @@ import { PendingApprovalSet, subscribeToPendingApprovals } from '../taskAttentio
 import { buildTaskSections } from '../taskSections';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
+import { ReconnectingBanner } from './ConnectionStatusCard';
 
 type LoadState =
   | { kind: 'loading' }
@@ -32,7 +34,6 @@ type LoadState =
 interface Props {
   conn: RelayConnection;
   onOpenTask: (task: Task) => void;
-  onDisconnect: () => void;
 }
 
 /** {icon, label, color} for a task's status badge -- an icon so the signal never rests on color alone. */
@@ -50,7 +51,7 @@ function statusBadge(theme: AppTheme, status: string): { icon: string; color: st
   }
 }
 
-export function TasksScreen({ conn, onOpenTask, onDisconnect }: Props) {
+export function TasksScreen({ conn, onOpenTask }: Props) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
@@ -72,7 +73,7 @@ export function TasksScreen({ conn, onOpenTask, onDisconnect }: Props) {
   }, [conn, pendingApprovals]);
 
   // Loaded again after every reconnect: a drop interrupts whatever was loading.
-  const { epoch } = useConnectionState(conn);
+  const { epoch, state: connState } = useConnectionState(conn);
   useEffect(() => {
     load();
   }, [load, epoch]);
@@ -108,14 +109,13 @@ export function TasksScreen({ conn, onOpenTask, onDisconnect }: Props) {
   const { workspace, spaces, tasks } = state;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <Text style={styles.header}>{workspace.Title}</Text>
-        <UiHost>
-          <Button variant="text" label="Disconnect" onPress={onDisconnect} />
-        </UiHost>
-      </View>
+    <View style={styles.screen}>
+      {/* expo-native-ui: the stack title is the workspace title, not a Text on the page. */}
+      <Stack.Screen options={{ title: workspace.Title }} />
+      {connState.kind === 'connecting' || connState.kind === 'reconnecting' ? <ReconnectingBanner>Reconnecting to the daemon…</ReconnectingBanner> : null}
       <FlatList
+        contentInsetAdjustmentBehavior="automatic" // expo-native-ui: the stack header owns the inset
+        contentContainerStyle={styles.listContent}
         data={buildTaskSections(spaces, tasks, pendingTaskIds)}
         keyExtractor={(item) => (item.kind === 'ungrouped' ? 'ungrouped' : `space-${item.space.ID}`)}
         refreshControl={
@@ -183,11 +183,13 @@ export async function loadTasks(conn: RelayConnection): Promise<{ workspace: Wor
 
 function makeStyles(theme: AppTheme) {
   return StyleSheet.create({
-    container: {
+    screen: {
       flex: 1,
       backgroundColor: theme.surface[0],
-      paddingTop: theme.spacing[16],
+    },
+    listContent: {
       paddingHorizontal: theme.spacing[4],
+      paddingBottom: theme.spacing[4],
     },
     centered: {
       flex: 1,
@@ -195,19 +197,6 @@ function makeStyles(theme: AppTheme) {
       alignItems: 'center',
       justifyContent: 'center',
       padding: theme.spacing[8],
-    },
-    headerRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: theme.spacing[4],
-    },
-    header: {
-      fontSize: theme.type.sectionTitle.fontSize,
-      lineHeight: theme.type.sectionTitle.lineHeight,
-      fontWeight: theme.type.sectionTitle.fontWeight,
-      color: theme.foreground,
-      flex: 1,
     },
     retryHost: {
       alignSelf: 'center',
