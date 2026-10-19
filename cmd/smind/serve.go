@@ -138,6 +138,7 @@ func cmdServe(args []string) int {
 		log.Fatalf("server: %v", err)
 	}
 	srv.API().AttachUsage(poller, registry, passive)
+	srv.API().SetLearning(learningDeps(cfg, db, []string{token}))
 	srv.API().Runs.SetMaxConcurrentRunsPerTree(cfg.Orchestration.MaxConcurrentRunsPerTree)
 	// The relay device admin methods must be registered before the first
 	// connection is served (SetRelayDevices is not safe against concurrent

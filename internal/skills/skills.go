@@ -18,6 +18,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -48,6 +49,20 @@ var targetDirs = map[string]string{
 	"codex":  ".codex/skills",
 }
 
+// RepoTargetDirs are the skills directories, relative to Options.Root, that a
+// repo install may use (Options.RepoSubdir).
+var RepoTargetDirs = []string{".agents/skills", ".claude/skills"}
+
+// RepoTarget is the target name used in Results when Options.Root is set.
+const RepoTarget = "repo"
+
+// ErrSymlinkedTarget is returned (wrapped) when a root-based install would
+// have to traverse a symlink inside the root; nothing is ever written through
+// one.
+var ErrSymlinkedTarget = errors.New("refusing to write through a symlink")
+
+var skillNameRe = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
 // Skill is one bundled skill: its name (directory) and file contents.
 type Skill struct {
 	Name  string
@@ -60,6 +75,16 @@ type Options struct {
 	Targets []string // subset of TargetNames; default all
 	Names   []string // bundled skill names; default all
 	Force   bool
+
+	// Skills, when non-nil, replaces the embedded bundle as the set of skills
+	// to operate on. Names and file keys are validated.
+	Skills []Skill
+	// Root, when set, makes the install target a repo: paths resolve against
+	// Root (an absolute, existing directory) instead of Home, under
+	// RepoSubdir (one of RepoTargetDirs, default ".agents/skills"). Targets is
+	// ignored. Symlinks below Root are refused with ErrSymlinkedTarget.
+	Root       string
+	RepoSubdir string
 }
 
 // Result describes the outcome for one skill in one target.
@@ -121,9 +146,62 @@ type env struct {
 	targets []string
 	skills  []Skill
 	force   bool
+	strict  bool // root mode: refuse any symlink below home
+}
+
+func validateSkills(in []Skill) ([]Skill, error) {
+	for _, s := range in {
+		if !skillNameRe.MatchString(s.Name) {
+			return nil, fmt.Errorf("invalid skill name %q", s.Name)
+		}
+		for rel := range s.Files {
+			if !validRel(rel) {
+				return nil, fmt.Errorf("skill %s: invalid file path %q", s.Name, rel)
+			}
+		}
+	}
+	return in, nil
+}
+
+func prepareRoot(opts Options) (*env, error) {
+	if !filepath.IsAbs(opts.Root) {
+		return nil, fmt.Errorf("root %q must be an absolute path", opts.Root)
+	}
+	resolved, err := realpath.Resolve(opts.Root)
+	if err != nil {
+		return nil, fmt.Errorf("resolve root %s: %w", opts.Root, err)
+	}
+	if fi, err := os.Stat(resolved); err != nil || !fi.IsDir() {
+		return nil, fmt.Errorf("root %s is not an existing directory", opts.Root)
+	}
+	sub := opts.RepoSubdir
+	if sub == "" {
+		sub = RepoTargetDirs[0]
+	}
+	ok := false
+	for _, d := range RepoTargetDirs {
+		ok = ok || d == sub
+	}
+	if !ok {
+		return nil, fmt.Errorf("unsupported repo subdir %q (want one of %v)", sub, RepoTargetDirs)
+	}
+	return &env{
+		home:    resolved,
+		roots:   map[string]string{RepoTarget: filepath.Join(resolved, filepath.FromSlash(sub))},
+		targets: []string{RepoTarget},
+		force:   opts.Force,
+		strict:  true,
+	}, nil
 }
 
 func prepare(opts Options) (*env, error) {
+	if opts.Root != "" {
+		e, err := prepareRoot(opts)
+		if err != nil {
+			return nil, err
+		}
+		return e, e.selectSkills(opts)
+	}
 	home := opts.Home
 	if home == "" {
 		h, err := os.UserHomeDir()
@@ -152,13 +230,23 @@ func prepare(opts Options) (*env, error) {
 		e.roots[t] = filepath.Join(home, filepath.FromSlash(rel))
 		e.targets = append(e.targets, t)
 	}
-	all, err := Bundle()
+	return e, e.selectSkills(opts)
+}
+
+func (e *env) selectSkills(opts Options) error {
+	var all []Skill
+	var err error
+	if opts.Skills != nil {
+		all, err = validateSkills(opts.Skills)
+	} else {
+		all, err = Bundle()
+	}
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if len(opts.Names) == 0 {
 		e.skills = all
-		return e, nil
+		return nil
 	}
 	byName := map[string]Skill{}
 	for _, s := range all {
@@ -168,14 +256,14 @@ func prepare(opts Options) (*env, error) {
 	for _, n := range opts.Names {
 		s, ok := byName[n]
 		if !ok {
-			return nil, fmt.Errorf("unknown skill %q", n)
+			return fmt.Errorf("unknown skill %q", n)
 		}
 		if !seen[n] {
 			seen[n] = true
 			e.skills = append(e.skills, s)
 		}
 	}
-	return e, nil
+	return nil
 }
 
 // within reports whether p is the home directory or lies under it.
@@ -187,6 +275,9 @@ func within(home, p string) bool {
 // checkContained refuses p when it (or its nearest existing ancestor)
 // resolves, through symlinks, to somewhere outside the home directory.
 func (e *env) checkContained(p string) error {
+	if e.strict {
+		return e.checkNoSymlinks(p)
+	}
 	cur := p
 	for {
 		if _, err := os.Lstat(cur); err == nil {
@@ -205,6 +296,42 @@ func (e *env) checkContained(p string) error {
 		}
 		cur = parent
 	}
+}
+
+// checkFile is checkContained for a file path: in root mode the file itself
+// must not be a symlink either; otherwise only its directory is checked.
+func (e *env) checkFile(p string) error {
+	if e.strict {
+		return e.checkContained(p)
+	}
+	return e.checkContained(filepath.Dir(p))
+}
+
+// checkNoSymlinks refuses p unless it lies lexically inside the (already
+// resolved) root and no existing component from the root down is a symlink.
+func (e *env) checkNoSymlinks(p string) error {
+	rel, err := filepath.Rel(e.home, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("refusing to touch %s: outside the root %s", p, e.home)
+	}
+	cur := e.home
+	if rel == "." {
+		return nil
+	}
+	for _, seg := range strings.Split(rel, string(filepath.Separator)) {
+		cur = filepath.Join(cur, seg)
+		fi, err := os.Lstat(cur)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%w: %s is a symlink; use a real directory", ErrSymlinkedTarget, cur)
+		}
+	}
+	return nil
 }
 
 func readManifest(dir string) (manifest, error) {
@@ -325,6 +452,9 @@ func Install(opts Options) ([]Result, error) {
 
 func (e *env) installOne(target, dir string, s Skill) (Result, error) {
 	res := Result{Skill: s.Name, Target: target, Dir: dir, Status: StatusInstalled}
+	if err := e.checkFile(filepath.Join(dir, ManifestName)); err != nil {
+		return res, err
+	}
 	m, err := readManifest(dir)
 	if err != nil {
 		return res, err
@@ -336,7 +466,7 @@ func (e *env) installOne(target, dir string, s Skill) (Result, error) {
 		p := filepath.Join(dir, filepath.FromSlash(rel))
 		// A subdirectory inside the skill dir could itself be a symlink out
 		// of the home directory; check every file path, not just the root.
-		if err := e.checkContained(filepath.Dir(p)); err != nil {
+		if err := e.checkFile(p); err != nil {
 			return res, err
 		}
 		disk, err := os.ReadFile(p)
@@ -413,6 +543,9 @@ func Uninstall(opts Options) ([]Result, error) {
 
 func (e *env) uninstallOne(target, dir string, s Skill) (Result, error) {
 	res := Result{Skill: s.Name, Target: target, Dir: dir, Status: StatusMissing}
+	if err := e.checkFile(filepath.Join(dir, ManifestName)); err != nil {
+		return res, err
+	}
 	m, err := readManifest(dir)
 	if err != nil {
 		return res, err
@@ -424,7 +557,7 @@ func (e *env) uninstallOne(target, dir string, s Skill) (Result, error) {
 	keep := manifest{Files: map[string]string{}}
 	for _, rel := range sortedKeys(m.Files) {
 		p := filepath.Join(dir, filepath.FromSlash(rel))
-		if err := e.checkContained(filepath.Dir(p)); err != nil {
+		if err := e.checkFile(p); err != nil {
 			return res, err
 		}
 		disk, err := os.ReadFile(p)
