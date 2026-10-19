@@ -5,7 +5,7 @@
 **Accepted** (2026-10-18). The user accepted D1-D11 exactly as recommended in
 "Decisions" below and added D12 (deterministic similarity check in the gate).
 Phase B (code) is unblocked; the spec is
-[`docs/plans/active/self-learning-skills.md`](../plans/active/self-learning-skills.md).
+[`docs/plans/completed/self-learning-skills.md`](../plans/completed/self-learning-skills.md).
 Originally proposed 2026-10-11.
 
 Numbering: 0023 (desktop auto-update), 0024 and 0025 are taken, so this is
