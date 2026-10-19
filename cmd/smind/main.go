@@ -80,6 +80,8 @@ func run(args []string) int {
 		return cmdMcp(args[1:])
 	case "skill":
 		return cmdSkill(args[1:])
+	case "learn":
+		return cmdLearn(args[1:])
 	case "config":
 		return cmdConfig(args[1:])
 	case "set-password":
@@ -164,6 +166,9 @@ Usage:
   smind skill ls [--target claude|agents|codex|all]       bundled orchestration skills x targets (installed/modified/missing)
   smind skill install [--target ...] [--force] [name...]  install the bundled skills (explicit; no daemon needed)
   smind skill uninstall [--target ...] [name...]          remove only the files smind installed
+
+  smind learn status|ls|show|approve|reject|pin|unpin|disable|enable|archive|restore|delete|undo|reflect|curate|mode|forget
+                                                           manage learned skills and proposals (humans only; run "smind learn" for flags)
 
   smind update [--check] [--version <v>] [--force]        update this binary to the latest release (SHA-256 verified)
       [--dry-run] [--json]                                 --check only reports; refuses while runs are active unless --force

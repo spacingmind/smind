@@ -73,6 +73,9 @@ type API struct {
 	bus  *eventBus
 	info *DaemonInfo
 
+	// learning backs the human-only learning.* RPCs (SetLearning).
+	learning *learningHost
+
 	// authorize decides whether a /ws upgrade may proceed. New installs the
 	// legacy rule (the daemon token in the "token" query parameter);
 	// SetAuthorizer replaces it. Set before the first request is served.
@@ -161,7 +164,11 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, mcpReg, coord, db)
 	info := newDaemonInfo(time.Now())
 	hs["daemon.info"] = handleDaemonInfo(info)
-	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus, info: info}
+	learning := newLearningHost(db, bus)
+	for method, h := range learningHandlers(learning) {
+		hs[method] = h
+	}
+	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus, info: info, learning: learning}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}

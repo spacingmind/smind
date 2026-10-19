@@ -503,8 +503,10 @@ func (s *Store) DeleteLearnedSkill(id int64, actor string) error {
 		return fmt.Errorf("delete learned skill %d: begin: %w", id, err)
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`DELETE FROM learned_skill_versions WHERE skill_id = ?`, id); err != nil {
-		return fmt.Errorf("delete learned skill %d: versions: %w", id, err)
+	for _, table := range []string{"learned_skill_offers", "learned_skill_loads", "learned_skill_versions"} {
+		if _, err := tx.Exec(`DELETE FROM `+table+` WHERE skill_id = ?`, id); err != nil {
+			return fmt.Errorf("delete learned skill %d: %s: %w", id, table, err)
+		}
 	}
 	if _, err := tx.Exec(`DELETE FROM learned_skills WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete learned skill %d: %w", id, err)
@@ -835,6 +837,8 @@ func (s *Store) ForgetWorkspaceLearning(workspaceID int64) error {
 	}
 	defer tx.Rollback()
 	for _, q := range []string{
+		`DELETE FROM learned_skill_offers WHERE skill_id IN (SELECT id FROM learned_skills WHERE workspace_id = ?)`,
+		`DELETE FROM learned_skill_loads WHERE skill_id IN (SELECT id FROM learned_skills WHERE workspace_id = ?)`,
 		`DELETE FROM learned_skill_versions WHERE skill_id IN (SELECT id FROM learned_skills WHERE workspace_id = ?)`,
 		`DELETE FROM learned_skills WHERE workspace_id = ?`,
 		`DELETE FROM learned_skill_ledger WHERE workspace_id = ?`,
