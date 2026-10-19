@@ -26,6 +26,17 @@ describe('describeState', () => {
     expect(v.command).toBe('smind update');
   });
 
+  it('tells a too-old daemon (E2EE peer version below ours) to update, with the command', () => {
+    const v = describeState({ kind: 'failed', message: 'update the daemon', versionMismatch: true, e2eePeerVersion: 1 })!;
+    expect(v).toMatchObject({ tone: 'danger', title: 'Daemon is too old for this app', detail: 'update the daemon', command: 'smind update' });
+  });
+
+  it('tells the person to update the app when the daemon speaks a newer E2EE version, with no daemon command', () => {
+    const v = describeState({ kind: 'failed', message: 'update this app', versionMismatch: true, e2eePeerVersion: 3 })!;
+    expect(v).toMatchObject({ tone: 'danger', title: 'This app is too old for the daemon', detail: 'update this app' });
+    expect(v.command).toBeUndefined();
+  });
+
   it('shows failures and reconnects, and nothing for connecting/connected/closed', () => {
     expect(describeState({ kind: 'failed', message: 'boom' })).toMatchObject({ tone: 'danger', detail: 'boom' });
     expect(describeState({ kind: 'reconnecting', attempt: 2, reason: 'closed' })).toMatchObject({ tone: 'info', title: 'Reconnecting…' });

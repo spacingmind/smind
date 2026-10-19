@@ -27,7 +27,7 @@
 import { computeProof, PROTOCOL_VERSION, randomNonce } from './admission';
 import { appDaemonPasswords, DaemonPasswords, passwordKey, passwordProblem } from './daemonPasswords';
 import { buildDeviceHello, ChallengeVersionError, DeviceIdentity, HELLO_METHOD, HELLO_VERSION, parseChallengeMessage } from './deviceIdentity';
-import { Channel, generateKeyPair, RawTransport, Role } from './e2ee';
+import { Channel, PeerKeyMismatchError, PROTOCOL_VERSION as E2EE_VERSION, RawTransport, UnsupportedVersionError } from './e2ee';
 import { DataStream, GrpcCode, GRPCWebSocketStream, GrpcStatusError, grpcWebUnary } from './grpcweb';
 import { DEFAULT_KEEPALIVE, Keepalive, KeepaliveTiming } from './keepalive';
 import { PairingOffer, parsePairingURL } from './pairing';
@@ -110,8 +110,11 @@ export type ConnectionState =
    * Cannot connect and will not retry on its own (bad offer secret, ...).
    * versionMismatch: the daemon is older than this app (no device challenge)
    * or speaks another hello version; update the daemon (or the app).
+   * e2eePeerVersion: the daemon's E2EE handshake carried this protocol version
+   * (ADR-0035): below this app's, update the daemon; above it, update this app.
+   * The connection does not retry and tries no other route or protocol.
    */
-  | { kind: 'failed'; message: string; versionMismatch?: boolean }
+  | { kind: 'failed'; message: string; versionMismatch?: boolean; e2eePeerVersion?: number }
   | { kind: 'closed' };
 
 /** Timings of the reconnect loop; tests shorten them. */
@@ -210,6 +213,16 @@ class RevokedError extends Error {}
 class FatalError extends Error {}
 /** The daemon and this app speak different device-identity versions: nothing to retry, someone has to update. */
 class VersionMismatchError extends FatalError {}
+/** The daemon's E2EE hello carries another protocol version (ADR-0035 §6): final, never retried, no other protocol is tried. */
+export class E2EEVersionError extends VersionMismatchError {
+  constructor(readonly peer: number) {
+    super(
+      peer < E2EE_VERSION
+        ? 'This daemon speaks an older E2EE version: update the daemon (smind update), then try again.'
+        : 'This daemon speaks a newer E2EE version than this app: update this app, then try again.',
+    );
+  }
+}
 /**
  * No challenge arrived in time. Final on a first connect (the daemon is older
  * than this app), but only a stall once a daemon has answered on this
@@ -446,7 +459,8 @@ function classify(err: unknown): Error {
   if (e instanceof GrpcStatusError && e.code === GrpcCode.ResourceExhausted) {
     return new RetryableError(e.message); // the relay host is full of devices or routes
   }
-  if (e.message.startsWith('e2ee: daemon public key does not match')) {
+  if (e instanceof UnsupportedVersionError) return new E2EEVersionError(e.peer);
+  if (e instanceof PeerKeyMismatchError) {
     return new FatalError('the daemon at the other end is not the one in the pairing offer (its key changed); pair again');
   }
   return e;
@@ -848,6 +862,9 @@ export class RelayConnection {
     while (!this.closed) {
       let link: Link;
       try {
+        // A channel that failed (a protocol violation, a key rotation) is closed for good and cannot
+        // be resumed: only a new session, with a new handshake, can replace it.
+        if (this.session?.channel.isClosed) this.dropSession();
         link = this.session ? await this.resumeSession(this.session) : await this.freshSession();
       } catch (raw) {
         if (this.closed) return;
@@ -860,7 +877,12 @@ export class RelayConnection {
         const stalled = e instanceof ChallengeSilenceError && (everConnected || reachedDaemon);
         if (e instanceof FatalError && !stalled) {
           this.dropSession();
-          this.setState({ kind: 'failed', message: e.message, versionMismatch: e instanceof VersionMismatchError || undefined });
+          this.setState({
+            kind: 'failed',
+            message: e.message,
+            versionMismatch: e instanceof VersionMismatchError || undefined,
+            e2eePeerVersion: e instanceof E2EEVersionError ? e.peer : undefined,
+          });
           return;
         }
         if (e instanceof PasswordError) {
@@ -1033,8 +1055,7 @@ export class RelayConnection {
     const { identity, label } = this.opts!;
     this.dropSession();
     const transport = new RouteTransport(this.offer.workspaceId, randomSessionId(), identity.deviceId, this.keepalive);
-    const keyPair = generateKeyPair();
-    const channel = new Channel(transport, keyPair, Role.Mobile);
+    const channel = new Channel(transport);
     this.connecting = transport;
     try {
       transport.attach(await this.openRoute());
@@ -1058,8 +1079,8 @@ export class RelayConnection {
             params: buildDeviceHello(
               identity,
               label,
+              channel.transcriptHash!,
               this.offer.publicKey,
-              keyPair.publicKey,
               new TextEncoder().encode(transport.sessionId),
               challenge,
               sentPassword,
@@ -1126,7 +1147,6 @@ export class RelayConnection {
         if (code === 'revoked') throw new RevokedError(message);
         if (code === 'hello_version_unsupported') throw new VersionMismatchError(VERSIONS_DIFFER);
         if (code === 'bad_hello' || code === 'device_hello_unsupported') throw new FatalError(message);
-        if (!code && /method not found/i.test(message)) throw new VersionMismatchError(DAEMON_OUTDATED);
         throw new RetryableError(message); // too_many_devices, too_many_pending, internal: worth retrying
       }
       const result = env.result as { v?: number; device_id?: string } | undefined;

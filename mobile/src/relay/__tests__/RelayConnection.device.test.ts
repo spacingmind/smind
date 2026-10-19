@@ -8,7 +8,9 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { base64Decode, base64UrlEncode } from '../base64';
+import { describeState } from '../connectionStatus';
 import { helloSignedBytes, identityFromSeed } from '../deviceIdentity';
+import { transcriptHash } from '../e2ee';
 import { GrpcStatusError } from '../grpcweb';
 import { ConnectionState, ConnectOptions, RelayConnection } from '../RelayConnection';
 import { FakeRelay } from './fakeRelay';
@@ -78,9 +80,11 @@ describe('device identity on the wire', () => {
     expect(logged.session).toBe(sessionId);
     const e2eeHello = relay.lastStream.sent.find((f) => !f.keepalive && f.payload.length > 0)!;
     const ephemeralPub = e2eeHello.payload.slice(-32); // the first non-empty frame carries the E2EE hello (key in the last 32 bytes)
-    expect(logged.mobilePub).toEqual(ephemeralPub);
+    // th is the handshake's transcript: this daemon's static key, its fresh ephemeral, and the client ephemeral that M1 carried.
+    expect(logged.clientEphPub).toEqual(ephemeralPub);
+    expect(logged.th).toEqual(transcriptHash(relay.daemonKeys.publicKey, logged.daemonEphPub, ephemeralPub));
     const bytes = (session: string, challenge: Uint8Array) =>
-      helloSignedBytes(relay.daemonKeys.publicKey, ephemeralPub, new TextEncoder().encode(session), challenge);
+      helloSignedBytes(logged.th, relay.daemonKeys.publicKey, new TextEncoder().encode(session), challenge);
     expect(ed25519.verify(base64Decode(hello.signature), bytes(sessionId, logged.challenge), identity.publicKey)).toBe(true);
     // Not valid for another route's session id, nor for another challenge (a replay into a new route/session fails both ways).
     expect(ed25519.verify(base64Decode(hello.signature), bytes('s-other-route', logged.challenge), identity.publicKey)).toBe(false);
@@ -284,13 +288,47 @@ describe('approval and revocation', () => {
     await vi.waitFor(() => expect(conn.state.kind).toBe('revoked'), { timeout: 3000 });
   });
 
-  it('a daemon that predates device identity is a clear failure, not a retry loop', async () => {
+  it('a daemon on E2EE v1 is refused at the handshake: a specific status, no retry, no other route', async () => {
     const relay = new FakeRelay();
-    relay.policy = () => 'legacy-daemon';
+    relay.e2eeVersion = 1;
     const conn = start(relay);
-    await expect(conn.whenConnected()).rejects.toThrow('older than this app');
-    expect(conn.state.kind).toBe('failed');
+    await expect(conn.whenConnected()).rejects.toThrow(/older E2EE version: update the daemon/);
+    expect(conn.state).toMatchObject({ kind: 'failed', versionMismatch: true, e2eePeerVersion: 1 });
+    const streams = relay.streams.length;
+    const routes = relay.routeKeys();
+    await new Promise((r) => setTimeout(r, 250)); // the retry loop would have opened more by now
+    expect(relay.streams.length).toBe(streams);
+    expect(relay.routeKeys()).toEqual(routes);
+    expect(relay.admissions).toBe(1);
+    expect(relay.hellos).toHaveLength(0); // no device_hello (nor anything else) was sent to it
+    expect(describeState(conn.state)).toMatchObject({ title: 'Daemon is too old for this app', command: 'smind update' });
   });
+
+  it('a daemon on a NEWER E2EE version says to update this app, and stops the same way', async () => {
+    const relay = new FakeRelay();
+    relay.e2eeVersion = 3;
+    const conn = start(relay);
+    await expect(conn.whenConnected()).rejects.toThrow(/update this app/);
+    expect(conn.state).toMatchObject({ kind: 'failed', e2eePeerVersion: 3 });
+    const streams = relay.streams.length;
+    await new Promise((r) => setTimeout(r, 250));
+    expect(relay.streams.length).toBe(streams);
+    expect(describeState(conn.state)).toMatchObject({ title: 'This app is too old for the daemon' });
+    expect(describeState(conn.state)?.command).toBeUndefined();
+  });
+
+  it('an E2EE version error after a connection had worked is still final (a daemon that downgraded is not retried)', async () => {
+    const relay = new FakeRelay();
+    const conn = start(relay);
+    await conn.whenConnected();
+    relay.e2eeVersion = 1;
+    relay.restartDaemon();
+    relay.dropCurrentStream();
+    await vi.waitFor(() => expect(conn.state).toMatchObject({ kind: 'failed', e2eePeerVersion: 1 }), { timeout: 5000 });
+    const streams = relay.streams.length;
+    await new Promise((r) => setTimeout(r, 250));
+    expect(relay.streams.length).toBe(streams);
+  }, 15000);
 
   it('a daemon rejecting the hello signature is a failure', async () => {
     const relay = new FakeRelay();
@@ -485,7 +523,7 @@ describe('hello v2: the daemon speaks first', () => {
     const verifies = (h: typeof a, against: typeof a) =>
       ed25519.verify(
         base64Decode(h.hello.signature),
-        helloSignedBytes(relay.daemonKeys.publicKey, against.mobilePub, new TextEncoder().encode(against.session), against.challenge),
+        helloSignedBytes(against.th, relay.daemonKeys.publicKey, new TextEncoder().encode(against.session), against.challenge),
         identity.publicKey,
       );
     expect(verifies(a, a)).toBe(true);
