@@ -75,7 +75,7 @@ describe('a password is memory only', () => {
   const read = code;
 
   it('the files that handle it import no persistence and call no logging or analytics API', () => {
-    for (const rel of ['src/relay/daemonPasswords.ts', 'src/screens/DaemonPasswordPrompt.tsx', 'src/relay/RelayConnection.ts', 'src/screens/PairingScreen.tsx', 'App.tsx']) {
+    for (const rel of ['src/relay/daemonPasswords.ts', 'src/screens/DaemonPasswordPrompt.tsx', 'src/relay/RelayConnection.ts', 'src/screens/PairingScreen.tsx', 'src/connection/ConnectionProvider.tsx', 'app/connection.tsx']) {
       const src = read(rel);
       expect(src, rel).not.toMatch(/expo-secure-store|async-storage|AsyncStorage|localStorage|sessionStorage|expo-file-system|expo-sqlite|MMKV/);
       expect(src, rel).not.toMatch(/console\.(log|info|warn|error|debug)/);
