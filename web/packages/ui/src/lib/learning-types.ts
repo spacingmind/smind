@@ -123,6 +123,18 @@ export interface JobView {
   finishedAt?: string;
 }
 
+/** A workspace's reflection spend in the daemon's rolling window; a cap of 0 means no limit. */
+export interface LearningWorkspaceBudget {
+  windowHours: number;
+  /** Reported cost only. */
+  usedUsd: number;
+  /** Includes an estimate for runs that reported no usage (`unreportedRuns`). */
+  usedTokens: number;
+  capUsd: number;
+  capTokens: number;
+  unreportedRuns: number;
+}
+
 export interface LearningWorkspaceStatus {
   id: number;
   title: string;
@@ -130,6 +142,8 @@ export interface LearningWorkspaceStatus {
   pendingProposals: number;
   activeSkills: number;
   disabledSkills: number;
+  /** Absent from daemons that predate the budget. */
+  budget?: LearningWorkspaceBudget;
 }
 
 export interface LearningStatus {
@@ -150,6 +164,25 @@ export interface ProposalDetail {
   proposal: ProposalView;
   /** Present iff a pending create's possibleDuplicateOf is a LEARNED live skill (target carries its body). */
   merge?: { target: LearnedSkillView; similarity: number };
+}
+
+export type ExportTarget = "repo" | "claude" | "agents" | "codex";
+
+export interface ExportSkillParams {
+  id: number;
+  target: ExportTarget;
+  /** Replace a SKILL.md smind found edited or unmanaged; only sent after a `modified` result. */
+  force?: boolean;
+}
+
+export interface ExportResult {
+  dir: string;
+  /** Files written; empty for an idempotent re-export. */
+  files: string[];
+  /** "installed" | "modified" | "outdated". */
+  status: string;
+  /** Files smind left alone because they differ from what it would write. */
+  skipped: string[];
 }
 
 export interface ApproveProposalParams {

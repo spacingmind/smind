@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   gateFindings,
   useApproveProposal,
+  useExportSkill,
+  useLearnedSkill,
   useLearnedSkills,
   useLearningStatus,
   usePendingProposalCount,
@@ -116,6 +118,37 @@ describe("learning mutations", () => {
     expect(d.calls.find((c) => c.method === "learning.skills.pin")?.params).toEqual({ id: 5 });
     const lists = d.calls.filter((c) => c.method === "learning.skills.list").map((c) => (c.params as { workspaceId: number }).workspaceId);
     expect(lists.sort()).toEqual([1, 1, 2]);
+  });
+
+  it("export sends the exact params, force only when set, and re-reads only that skill's detail", async () => {
+    const result = { dir: "/home/u/.claude/skills/x", files: ["/home/u/.claude/skills/x/SKILL.md"], status: "installed", skipped: [] };
+    const d = learningDaemon((method) => {
+      if (method === "learning.skills.export") return result;
+      if (method === "learning.skills.get") return { skill: skill({ id: 5 }), versions: [], ledger: [] };
+      return null;
+    });
+    const view = renderHookWithDaemon(
+      (_: null) => ({ detail: useLearnedSkill(5), other: useLearnedSkill(6), status: useLearningStatus(), exp: useExportSkill() }),
+      d,
+      { initialProps: null },
+    );
+    await flush();
+    expect(d.countCalls("learning.skills.get")).toBe(2);
+    expect(d.countCalls("learning.status")).toBe(1);
+    await act(async () => {
+      view.result.current.exp.mutate({ id: 5, target: "claude" });
+    });
+    await flush();
+    expect(d.calls.find((c) => c.method === "learning.skills.export")?.params).toEqual({ id: 5, target: "claude" });
+    expect(view.result.current.exp.data).toEqual(result);
+    const gets = d.calls.filter((c) => c.method === "learning.skills.get").map((c) => (c.params as { id: number }).id);
+    expect(gets.sort()).toEqual([5, 5, 6]);
+    expect(d.countCalls("learning.status")).toBe(1);
+    await act(async () => {
+      view.result.current.exp.mutate({ id: 5, target: "repo", force: true });
+    });
+    await flush();
+    expect(d.calls.filter((c) => c.method === "learning.skills.export")[1]?.params).toEqual({ id: 5, target: "repo", force: true });
   });
 
   it("a gate_rejected approve surfaces its findings and leaves the proposal list unread", async () => {
