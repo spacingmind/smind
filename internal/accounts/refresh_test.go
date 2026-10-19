@@ -78,6 +78,11 @@ func TestRegistry_EnsureFresh(t *testing.T) {
 			ExpiresAt:    newExpiry,
 		}}
 
+		// A commit no longer waits on an fsync (WAL, ADR-0034): let a coarse clock
+		// (Windows) tick so the refresh stamps a later updated_at than the create.
+		for !time.Now().UTC().After(created.UpdatedAt) {
+			time.Sleep(time.Millisecond)
+		}
 		got, err := r.EnsureFresh(context.Background(), created.ID, refresher)
 		if err != nil {
 			t.Fatalf("EnsureFresh() error = %v", err)

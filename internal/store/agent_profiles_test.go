@@ -67,6 +67,7 @@ func TestStore_UpdateAgentProfile(t *testing.T) {
 		t.Fatalf("CreateAgentProfile() error = %v", err)
 	}
 
+	advanceClock(created.UpdatedAt)
 	updated, err := s.UpdateAgentProfile(AgentProfile{
 		ID: created.ID, Name: "new", Provider: "glm", PermissionMode: "accept_edits", AutoAccept: true, ThinkingLevel: "", Notes: "updated",
 	})

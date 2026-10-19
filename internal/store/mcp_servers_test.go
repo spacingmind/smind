@@ -173,6 +173,7 @@ func TestStore_UpdateMcpServer(t *testing.T) {
 		Args: `["--headless"]`, Env: `{"A":"1"}`,
 	})
 
+	advanceClock(created.UpdatedAt)
 	updated, err := s.UpdateMcpServer(McpServer{
 		ID: created.ID, Name: "playwright", Transport: "http", URL: "https://mcp.pplx.ai/mcp",
 		Headers: `{"Authorization":"Bearer x"}`, Enabled: true,
@@ -264,6 +265,7 @@ func TestStore_SetMcpServerEnabled(t *testing.T) {
 	s := newTestStore(t)
 	created := newTestMcpServer(t, s, McpServer{Name: "playwright", Transport: "stdio", Command: "npx"})
 
+	advanceClock(created.UpdatedAt)
 	disabled, err := s.SetMcpServerEnabled(created.ID, false)
 	if err != nil {
 		t.Fatalf("SetMcpServerEnabled(false) error = %v", err)

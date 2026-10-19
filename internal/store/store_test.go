@@ -23,6 +23,15 @@ func newTestStore(t *testing.T) *Store {
 	return s
 }
 
+// advanceClock blocks until time.Now() is strictly after since. A commit no
+// longer waits on an fsync (WAL, ADR-0034), so an update can land inside one
+// tick of a coarse clock (Windows) and stamp the same updated_at as the create.
+func advanceClock(since time.Time) {
+	for !time.Now().UTC().After(since) {
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestOpen(t *testing.T) {
 	t.Parallel()
 
@@ -425,6 +434,7 @@ func TestStore_UpdateAccountCredential(t *testing.T) {
 		t.Fatalf("CreateAccount() error = %v", err)
 	}
 
+	advanceClock(created.UpdatedAt)
 	updated, err := s.UpdateAccountCredential(created.ID, "new-data")
 	if err != nil {
 		t.Fatalf("UpdateAccountCredential() error = %v", err)
