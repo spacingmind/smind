@@ -127,9 +127,9 @@ type evidence struct {
 
 const (
 	demoRun     = "7f3a91bc4d2e0a15"
-	skillTests  = "run-focused-tests"
-	skillPush   = "never-force-push"
-	skillCommit = "conventional-commits"
+	skillTests  = "learned-run-focused-tests"
+	skillPush   = "learned-never-force-push"
+	skillCommit = "learned-conventional-commits"
 )
 
 func evidenceJSON(ev ...evidence) string {
@@ -221,16 +221,16 @@ func seed(st *store.Store, home string) (store.Workspace, error) {
 	}
 	for _, s := range []struct{ name, cat, desc, body, source string }{
 		{skillCommit, "git", "Write commit subjects as conventional commits.", "# Commits\n\nUse `type(scope): subject`, 72 characters at most.\nTypes: feat, fix, docs, refactor, test, chore.\n", "curator"},
-		{"table-driven-go-tests", "go", "Write Go tests as table-driven subtests.", "# Table tests\n\nOne `[]struct{ name string; ... }` per behaviour.\nRun each case with `t.Run(tc.name, ...)`.\n", "reflector"},
-		{"pnpm-not-npm", "tooling", "Use bun in this repo, never npm or pnpm.", "# Package manager\n\nRun `bun install` and `bunx`.\nDo not create a package-lock.json.\n", "reflector"},
-		{"explain-before-edit", "workflow", "State the plan before editing more than three files.", "# Plan first\n\nWrite two lines on what changes and why before the first edit.\n", "reflector"},
+		{"learned-table-driven-go-tests", "go", "Write Go tests as table-driven subtests.", "# Table tests\n\nOne `[]struct{ name string; ... }` per behaviour.\nRun each case with `t.Run(tc.name, ...)`.\n", "reflector"},
+		{"learned-pnpm-not-npm", "tooling", "Use bun in this repo, never npm or pnpm.", "# Package manager\n\nRun `bun install` and `bunx`.\nDo not create a package-lock.json.\n", "reflector"},
+		{"learned-explain-before-edit", "workflow", "State the plan before editing more than three files.", "# Plan first\n\nWrite two lines on what changes and why before the first edit.\n", "reflector"},
 	} {
 		if _, err := land(s.name, s.cat, s.desc, s.body, s.source); err != nil {
 			return store.Workspace{}, err
 		}
 	}
 	// One disabled, one archived.
-	off, err := land("verbose-logging", "debug", "Add debug logs while investigating a bug.", "# Debug logs\n\nAdd `log.Printf` at each branch while reproducing.\nRemove them before committing.\n", "reflector")
+	off, err := land("learned-verbose-logging", "debug", "Add debug logs while investigating a bug.", "# Debug logs\n\nAdd `log.Printf` at each branch while reproducing.\nRemove them before committing.\n", "reflector")
 	if err != nil {
 		return store.Workspace{}, err
 	}
@@ -259,22 +259,22 @@ func seed(st *store.Store, home string) (store.Workspace, error) {
 	}
 
 	// 1. A plain create.
-	if _, err := propose("create", "reflector", "cite-file-and-line", "", 0, []approval.Item{create(
-		"cite-file-and-line", "workflow", "Cite file and line when explaining code.",
+	if _, err := propose("create", "reflector", "learned-cite-file-and-line", "", 0, []approval.Item{create(
+		"learned-cite-file-and-line", "workflow", "Cite file and line when explaining code.",
 		"# Cite sources\n\nWhen explaining behaviour, name the file and line (`internal/x/y.go:42`).\nQuote the code instead of paraphrasing it.\n",
 		"The user asked for file and line references three times in this session.")}); err != nil {
 		return store.Workspace{}, err
 	}
 	// 2. A create flagged as a possible duplicate of a LEARNED skill (similar bodies).
-	if _, err := propose("create", "reflector", "test-the-package-first", skillTests, 0.82, []approval.Item{create(
-		"test-the-package-first", "workflow", "Run the changed package's tests first, then the rest.",
+	if _, err := propose("create", "reflector", "learned-test-the-package-first", skillTests, 0.82, []approval.Item{create(
+		"learned-test-the-package-first", "workflow", "Run the changed package's tests first, then the rest.",
 		"# Package first\n\nRun `go test -race ./<pkg>/...` for the package you changed.\nRun `go test ./...` only after it passes.\nRerun a flaky test with `-count=5`.\n",
 		"The user interrupted a full test run and asked for the one package.")}); err != nil {
 		return store.Workspace{}, err
 	}
 	// 3. A create flagged as a duplicate of the HUMAN skill.
-	if _, err := propose("create", "reflector", "review-diff-before-commit", "human-skill", 0.71, []approval.Item{create(
-		"review-diff-before-commit", "git", "Read the staged diff for risky changes before committing.",
+	if _, err := propose("create", "reflector", "learned-review-diff-before-commit", "human-skill", 0.71, []approval.Item{create(
+		"learned-review-diff-before-commit", "git", "Read the staged diff for risky changes before committing.",
 		"# Review the diff\n\nRun `git diff --staged` and read it.\nLook for secrets, debug leftovers and unrelated edits.\n",
 		"A permission prompt for a commit was denied because the diff contained a stray debug line.")}); err != nil {
 		return store.Workspace{}, err
@@ -296,27 +296,41 @@ func seed(st *store.Store, home string) (store.Workspace, error) {
 	}}); err != nil {
 		return store.Workspace{}, err
 	}
-	// 5. A curator bundle: an umbrella skill that absorbs two others.
+	// 5. A curator bundle: an existing skill is patched into the umbrella and
+	// absorbs another (a real curator merge is umbrella patch + deletes).
+	var commitNow store.LearnedSkill
+	var explainID int64
+	if active, err := st.ListLearnedSkills(ws.ID, store.SkillActive); err != nil {
+		return store.Workspace{}, err
+	} else {
+		for _, k := range active {
+			switch k.Name {
+			case skillCommit:
+				commitNow = k
+			case "learned-explain-before-edit":
+				explainID = k.ID
+			}
+		}
+	}
 	umbrellaBody := "# Git hygiene\n\nUse conventional commits: `type(scope): subject`.\nNever force-push `main` or `develop`; ask before force-pushing shared work.\n"
-	if _, err := propose("bundle", "curator", "git-hygiene", "", 0, []approval.Item{
+	umbrellaDesc := "Use when committing or pushing: commit and push conventions for this repo."
+	if _, err := propose("bundle", "curator", skillCommit, "", 0, []approval.Item{
 		{
-			Intent: gate.Intent{Action: gate.ActionCreate, Name: "git-hygiene", Category: "git", Description: "Commit and push conventions for this repo.", Body: umbrellaBody, Reason: "Two small git skills overlap; one umbrella reads better."},
-			Result: gate.Skill{Name: "git-hygiene", Category: "git", Description: "Commit and push conventions for this repo.", Body: umbrellaBody},
+			Intent:        gate.Intent{Action: gate.ActionPatch, Name: skillCommit, Description: umbrellaDesc, OldString: "Use `type(scope): subject`, 72 characters at most.\n", NewString: "Use `type(scope): subject`.\nNever force-push `main` or `develop`; ask before force-pushing shared work.\n", Reason: "Two small git skills overlap; one umbrella reads better."},
+			Result:        gate.Skill{Name: skillCommit, Category: "git", Description: umbrellaDesc, Body: umbrellaBody},
+			TargetSkillID: commitNow.ID, BaseVersion: commitNow.Version,
 		},
 		{
-			Intent: gate.Intent{Action: gate.ActionDelete, Name: skillCommit, AbsorbedInto: "git-hygiene", Reason: "folded into git-hygiene"},
-			Result: gate.Skill{Name: skillCommit},
-		},
-		{
-			Intent: gate.Intent{Action: gate.ActionDelete, Name: "explain-before-edit", AbsorbedInto: "git-hygiene", Reason: "rarely loaded"},
-			Result: gate.Skill{Name: "explain-before-edit"},
+			Intent:        gate.Intent{Action: gate.ActionDelete, Name: "learned-explain-before-edit", AbsorbedInto: skillCommit, Reason: "rarely loaded"},
+			Result:        gate.Skill{Name: "learned-explain-before-edit"},
+			TargetSkillID: explainID,
 		},
 	}); err != nil {
 		return store.Workspace{}, err
 	}
 	// 6. A rejected proposal, with the note the reflector learns from.
-	rej, err := propose("create", "reflector", "always-use-sudo", "", 0, []approval.Item{create(
-		"always-use-sudo", "tooling", "Prefix shell commands with sudo.", "# Sudo\n\nPrefix commands with `sudo`.\n", "A command failed with a permission error once.")})
+	rej, err := propose("create", "reflector", "learned-always-use-sudo", "", 0, []approval.Item{create(
+		"learned-always-use-sudo", "tooling", "Prefix shell commands with sudo.", "# Sudo\n\nPrefix commands with `sudo`.\n", "A command failed with a permission error once.")})
 	if err != nil {
 		return store.Workspace{}, err
 	}
@@ -346,11 +360,11 @@ func seedCounters(dbPath string, workspaceID int64) error {
 	for _, c := range []counters{
 		{skillTests, 24, 17, 22, 15, 7, 1, true, 3 * time.Hour, 5 * time.Hour},
 		{skillPush, 31, 20, 26, 26, 0, 0, true, 2 * time.Hour, 26 * time.Hour},
-		{skillCommit, 18, 3, 3, 3, 0, 0, true, 6 * time.Hour, 5 * 24 * time.Hour}, // probation: offered a lot, rarely loaded
-		{"table-driven-go-tests", 2, 0, 0, 0, 0, 0, false, 4 * time.Hour, 0},      // unmeasured: too few offers
-		{"pnpm-not-npm", 12, 9, 11, 4, 7, 0, true, 9 * time.Hour, 12 * time.Hour},
-		{"explain-before-edit", 14, 4, 4, 4, 0, 0, true, 8 * time.Hour, 3 * 24 * time.Hour},
-		{"verbose-logging", 9, 1, 1, 0, 1, 0, true, 40 * time.Hour, 30 * 24 * time.Hour},
+		{skillCommit, 18, 3, 3, 3, 0, 0, true, 6 * time.Hour, 5 * 24 * time.Hour},    // probation: offered a lot, rarely loaded
+		{"learned-table-driven-go-tests", 2, 0, 0, 0, 0, 0, false, 4 * time.Hour, 0}, // unmeasured: too few offers
+		{"learned-pnpm-not-npm", 12, 9, 11, 4, 7, 0, true, 9 * time.Hour, 12 * time.Hour},
+		{"learned-explain-before-edit", 14, 4, 4, 4, 0, 0, true, 8 * time.Hour, 3 * 24 * time.Hour},
+		{"learned-verbose-logging", 9, 1, 1, 0, 1, 0, true, 40 * time.Hour, 30 * 24 * time.Hour},
 	} {
 		var lastOffered, lastLoaded any
 		if c.lastOffered > 0 {

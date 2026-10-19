@@ -75,10 +75,10 @@ describe("possible duplicate", () => {
     fireEvent.click(screen.getByTestId("proposal-approve-merge"));
     await flush();
 
-    // Merge sends the existing skill's id and the edited body.
+    // Merge sends the existing skill's NAME (the daemon identifies the target by name) and the edited body.
     expect(v.calls.find((c) => c.method === "learning.proposals.approve")?.params).toEqual({
       id: 9,
-      mergeInto: 77,
+      mergeInto: "focused-tests",
       body: "# Focused tests\nRun the package first, always.\n",
     });
     expect(v.backs()).toBe(1);

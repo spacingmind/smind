@@ -156,7 +156,8 @@ export interface ApproveProposalParams {
   id: number;
   description?: string;
   body?: string;
-  mergeInto?: number;
+  /** Name of the LEARNED skill to merge the (create) proposal into; the daemon identifies the target by name. */
+  mergeInto?: string;
 }
 
 /** `data.findings` of a `gate_rejected` error. */

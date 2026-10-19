@@ -260,7 +260,7 @@ export function ProposalReview({ id, onBack }: { id: number; onBack: () => void 
               type="button"
               disabled={busy || stale || invalid}
               data-testid="proposal-approve-merge"
-              onClick={() => approve.mutate({ ...ctx, mergeInto: merge.target.id, body: mergedBody }, finish)}
+              onClick={() => approve.mutate({ ...ctx, mergeInto: merge.target.name, body: mergedBody }, finish)}
             >
               Approve merge
             </Button>
