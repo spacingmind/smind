@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { usePinnedTasks } from "@/hooks/use-pinned-tasks";
 import { writePinnedTasks } from "@/lib/sidebar-preferences";
+import { usePinnedTasksStore } from "@/stores/pinned-tasks-store";
 
 afterEach(() => {
   window.localStorage.clear();
@@ -36,12 +37,14 @@ describe("usePinnedTasks", () => {
   describe("pruning against the live task list", () => {
     it("does not prune before the live task list has loaded (liveTaskIds === null)", () => {
       writePinnedTasks(new Set([42]));
+      usePinnedTasksStore.getState().reload();
       const { result } = renderHook(() => usePinnedTasks(null));
       expect(result.current.pinned.has(42)).toBe(true);
     });
 
     it("prunes a pinned id once the live task list loads without it (e.g. archived)", () => {
       writePinnedTasks(new Set([42]));
+      usePinnedTasksStore.getState().reload();
       const { result, rerender } = renderHook(
         ({ liveTaskIds }: { liveTaskIds: ReadonlySet<number> | null }) => usePinnedTasks(liveTaskIds),
         { initialProps: { liveTaskIds: null as ReadonlySet<number> | null } },
@@ -57,6 +60,7 @@ describe("usePinnedTasks", () => {
 
     it("keeps a pinned id that is still present in the live task list", () => {
       writePinnedTasks(new Set([42]));
+      usePinnedTasksStore.getState().reload();
       const { result, rerender } = renderHook(
         ({ liveTaskIds }: { liveTaskIds: ReadonlySet<number> | null }) => usePinnedTasks(liveTaskIds),
         { initialProps: { liveTaskIds: null as ReadonlySet<number> | null } },
