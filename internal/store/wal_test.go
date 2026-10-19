@@ -273,6 +273,8 @@ func TestWAL_KillMidWriteRecovers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var childErr strings.Builder
+	cmd.Stderr = &childErr
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start child: %v", err)
 	}
@@ -293,7 +295,7 @@ func TestWAL_KillMidWriteRecovers(t *testing.T) {
 		}
 	}
 	if len(acked) < killAfter {
-		t.Fatalf("child acknowledged only %d commits before exiting (scan err %v)", len(acked), sc.Err())
+		t.Fatalf("child acknowledged only %d commits before exiting (scan err %v), stderr: %s", len(acked), sc.Err(), childErr.String())
 	}
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatalf("kill child: %v", err)
@@ -370,5 +372,71 @@ func TestOpen_NetworkFilesystemKeepsRollbackJournal(t *testing.T) {
 	}
 	if _, err := s.CreateAccount(Account{Provider: "anthropic", Label: "x", CredentialType: "oauth", CredentialData: "x"}); err != nil {
 		t.Errorf("CreateAccount() on the rollback journal error = %v", err)
+	}
+}
+
+// TestClose_DoesNotWaitOutBusyTimeoutForAReader: a reader that is still open
+// makes the checkpoint busy; Close must give up after closeCheckpointWait, log
+// it and still close, not block for the 5 s busy_timeout.
+func TestClose_DoesNotWaitOutBusyTimeoutForAReader(t *testing.T) {
+	t.Setenv(SynchronousEnv, "")
+	s, err := Open(filepath.Join(t.TempDir(), "smind.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := s.CreateAccount(Account{Provider: "anthropic", Label: "a", CredentialType: "oauth", CredentialData: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.db.Query("SELECT id FROM accounts") // left open: a pinned read snapshot
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows.Next()
+	if _, err := s.CreateAccount(Account{Provider: "anthropic", Label: "b", CredentialType: "oauth", CredentialData: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	var logs strings.Builder
+	oldOut := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(oldOut) })
+
+	start := time.Now()
+	err = s.Close()
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Errorf("Close() error = %v, want nil (an incomplete checkpoint is not a failure)", err)
+	}
+	if elapsed > 3*time.Second {
+		t.Errorf("Close() took %s with a reader open, want well under busy_timeout (5s)", elapsed)
+	}
+	if !strings.Contains(logs.String(), "checkpoint on close incomplete") {
+		t.Errorf("log = %q, want the incomplete-checkpoint note", logs.String())
+	}
+}
+
+// TestOpen_JournalEnvOverrides: SMIND_SQLITE_JOURNAL=delete is the way back to
+// the rollback journal, and =wal forces WAL where the detector says network.
+func TestOpen_JournalEnvOverrides(t *testing.T) {
+	old := isNetworkFS
+	t.Cleanup(func() { isNetworkFS = old })
+	for _, tc := range []struct{ env, network, want string }{
+		{"delete", "local", "delete"},
+		{"wal", "network", "wal"},
+		{"bogus", "local", "wal"},
+		{"bogus", "network", "delete"},
+	} {
+		t.Run(tc.env+"_"+tc.network, func(t *testing.T) {
+			t.Setenv(JournalEnv, tc.env)
+			t.Setenv(SynchronousEnv, "")
+			isNetworkFS = func(string) bool { return tc.network == "network" }
+			s, err := Open(filepath.Join(t.TempDir(), "smind.db"))
+			if err != nil {
+				t.Fatalf("Open() error = %v", err)
+			}
+			t.Cleanup(func() { _ = s.Close() })
+			if got := pragmaString(t, s, "journal_mode"); got != tc.want {
+				t.Errorf("journal_mode = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

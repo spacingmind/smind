@@ -437,7 +437,8 @@ checkpoint folds them into `smind.db`; a clean stop (`smind stop`, `docker stop`
 **Do not copy `smind.db` by itself while the daemon runs** (a file sync tool, `cp`, `rsync`, a volume snapshot of just that
 file): the copy misses committed rows and can be torn. Use one of these:
 
-- **A live backup** (daemon running, nothing to stop). Needs the `sqlite3` command-line tool, 3.27 or newer:
+- **A live backup** (daemon running, nothing to stop). Needs the `sqlite3` command-line tool, 3.27 or newer (the Docker
+  image does not include it: use a cold backup there, or run `sqlite3` on the host against the volume's path):
 
   ```sh
   sqlite3 "$SMIND_HOME/smind.db" "VACUUM INTO '/backups/smind-$(date +%F).db'"
@@ -457,7 +458,10 @@ database you want to keep (for example after a crash): the `-wal` can hold commi
 
 **Local disks only.** WAL needs a local filesystem. If `$SMIND_HOME` is on a network mount (NFS, SMB/CIFS, a NAS volume
 driver, WSL's `/mnt/c`), the daemon notices, logs `is on a network filesystem; using the rollback journal instead of WAL`
-and runs the slower, older journal mode there. Keep `$SMIND_HOME` (or the Docker data volume) on the host's own disk.
+and runs the slower, older journal mode there. Keep `$SMIND_HOME` (or the Docker data volume) on the host's own disk. The
+detector does not recognise FUSE-based mounts (sshfs, rclone, mergerfs, Unraid shares, Docker Desktop file sharing): if the
+daemon fails to open its database there, start it with `SMIND_SQLITE_JOURNAL=delete`. Never bind-mount the single file
+`smind.db` into a container: the `-wal` and `-shm` files would land outside the mount; mount the directory.
 
 **After a power loss** the last few commits may be missing; the database itself stays consistent. To make every commit
 survive a power loss at the cost of write speed, start the daemon with `SMIND_SQLITE_SYNCHRONOUS=full`.

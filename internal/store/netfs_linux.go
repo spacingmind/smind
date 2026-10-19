@@ -6,7 +6,7 @@ import "golang.org/x/sys/unix"
 
 // statfs f_type magic numbers (linux/magic.h) of network filesystems.
 // 9p is what a WSL2 distro sees for /mnt/c.
-var networkFSMagic = map[int64]bool{
+var networkFSMagic = map[uint32]bool{
 	0x6969:     true, // NFS_SUPER_MAGIC
 	0x517B:     true, // SMB_SUPER_MAGIC
 	0xFF534D42: true, // CIFS_MAGIC_NUMBER
@@ -21,5 +21,7 @@ func networkFS(dir string) bool {
 	if err := unix.Statfs(dir, &st); err != nil {
 		return false
 	}
-	return networkFSMagic[int64(st.Type)]
+	// Type is int32 on 32-bit targets, where the CIFS and SMB2 magics would
+	// sign-extend and never match; compare as uint32.
+	return networkFSMagic[uint32(st.Type)]
 }

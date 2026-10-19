@@ -21,6 +21,8 @@ switches journal mode on first open), decisions 0 (decided), verification 1 (Win
 - AC7. `VACUUM INTO` of a running store yields a complete single-file backup.
 - AC8. On a network filesystem (Linux/macOS/Windows detectors, injectable in tests) `Open` logs a warning and keeps the
   rollback journal and SQLite's default `synchronous`; in-memory databases are left alone; an unknown filesystem counts as local.
+- AC8b. `SMIND_SQLITE_JOURNAL=delete|wal` forces the journal mode (escape hatch for mounts the detector does not
+  recognise); `Close` waits at most 250 ms for readers when checkpointing, logs an incomplete checkpoint, and never fails.
 - AC9. `SMIND_SQLITE_SYNCHRONOUS` still overrides the NORMAL default and does not turn WAL off. Nothing in tests or CI sets it
   (runs `TestMain`, `windows-full-suite.yml`).
 - AC10. Every place that copies, moves or exports the database was audited; `docs/homelab.md` documents backup, restore, Docker
@@ -40,6 +42,7 @@ switches journal mode on first open), decisions 0 (decided), verification 1 (Win
 | AC6 | `TestClose_CheckpointsWAL`; the existing `wsapi` store-close tests cover double close |
 | AC7 | `TestVacuumInto_ConsistentBackupWhileOpen` |
 | AC8 | `TestOpen_NetworkFilesystemKeepsRollbackJournal`, `TestNetworkFS_TempDirIsLocal`, `TestOpen_InMemoryKeepsDefaultJournal` |
+| AC8b | `TestOpen_JournalEnvOverrides`, `TestClose_DoesNotWaitOutBusyTimeoutForAReader` |
 | AC9 | `TestOpen_SynchronousEnvOverridesNormal` |
 | AC10 | audit below; docs review |
 | AC11 | Validation |
@@ -61,7 +64,12 @@ switches journal mode on first open), decisions 0 (decided), verification 1 (Win
 - [x] Tests above; knob removed from `internal/runs` `TestMain` and `windows-full-suite.yml`.
 - [x] ADR-0034, `docs/homelab.md` (new "Backups and the database file" section, Docker note).
 - [ ] Windows run of the store/runs/wsapi packages and the full suite.
-- [ ] Reviewer pass on the store change.
+- [x] Reviewer pass (read-only, `reviewer`-style): no blocking bug. Fixed: `Close` checkpoint bounded to 250 ms and busy
+  result logged; Linux magic numbers compared as uint32 (32-bit CIFS/SMB2); `SMIND_SQLITE_JOURNAL` escape hatch; pragma-order
+  wording; docs (FUSE mounts, single-file bind mount, no sqlite3 in the image). Not changed: concurrent second `Close` returns
+  before the first finishes (no such caller), CPU spinners in the concurrency test stay at NumCPU (measured table).
+- [x] Windows run 1 (store/runs/wsapi): runs and wsapi green; store red only on 4 `updated_at > created_at` tests (coarse
+  clock + no fsync), fixed with `advanceClock`. The new WAL tests passed on Windows (concurrency 241 ms, 0 BUSY; kill recovery).
 
 ## Audit of code that touches the database file
 

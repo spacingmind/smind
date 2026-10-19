@@ -3,15 +3,16 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	_ "embed"
-	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -71,18 +72,47 @@ func Open(path string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
+// closeCheckpointWait bounds how long Close waits for readers before giving up
+// on the checkpoint, so a stuck query cannot hold up daemon shutdown for the
+// full busy_timeout.
+const closeCheckpointWait = 250
+
 // Close checkpoints the write-ahead log into the main database file and closes
 // every connection. The checkpoint is what makes smind.db alone a complete
-// copy after a clean stop; it is best effort (another process holding a read
-// transaction leaves the tail of the log for the next opener), so its failure
-// is returned only alongside, never instead of, the close. Closing twice is a
-// no-op, as database/sql's own Close is.
+// copy after a clean stop. It is best effort: a reader that does not finish
+// within closeCheckpointWait (or another process holding a read transaction)
+// leaves the tail of the log for the next opener, which replays it; that is
+// logged, and never fails the close. Closing twice is a no-op, as
+// database/sql's own Close is.
 func (s *Store) Close() error {
 	if !s.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	_, cpErr := s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
-	return errors.Join(cpErr, s.db.Close())
+	s.checkpoint()
+	return s.db.Close()
+}
+
+func (s *Store) checkpoint() {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout=%d", closeCheckpointWait)); err != nil {
+		return
+	}
+	// wal_checkpoint reports "could not finish" as busy=1 in its result row, not
+	// as an error. A database that is not in WAL mode returns 0, -1, -1.
+	var busy, logFrames, done int
+	if err := conn.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &logFrames, &done); err != nil {
+		log.Printf("store: checkpoint on close: %v", err)
+		return
+	}
+	if busy != 0 {
+		log.Printf("store: checkpoint on close incomplete (a reader was still open); the next open replays the log")
+	}
 }
 
 // applySchema runs schema.sql in ONE transaction. SQLite commits every statement
@@ -109,6 +139,13 @@ func applySchema(db *sql.DB) error {
 // Any other value is ignored.
 const SynchronousEnv = "SMIND_SQLITE_SYNCHRONOUS"
 
+// JournalEnv, when set to delete or wal, forces the journal mode of every file
+// database and skips the network-filesystem check: delete is the way back to the
+// rollback journal when WAL does not work on a mount the detector does not
+// recognise (FUSE, virtiofs, vboxsf), wal forces WAL on a mount it flagged.
+// Any other value is ignored.
+const JournalEnv = "SMIND_SQLITE_JOURNAL"
+
 // isNetworkFS is networkFS (netfs_*.go), a variable so tests can stand in a
 // network filesystem.
 var isNetworkFS = networkFS
@@ -127,6 +164,12 @@ func journalMode(path string) (mode string, network bool) {
 	if isMemoryDSN(path) || strings.HasPrefix(path, "file:") {
 		return "DELETE", false
 	}
+	switch strings.ToLower(os.Getenv(JournalEnv)) {
+	case "delete":
+		return "DELETE", false
+	case "wal":
+		return "WAL", false
+	}
 	if isNetworkFS(filepath.Dir(path)) {
 		return "DELETE", true
 	}
@@ -140,8 +183,9 @@ func isMemoryDSN(path string) bool {
 
 // sqliteDSN returns path with the pragmas every connection must run: modernc
 // applies _pragma parameters, in order, to each connection the pool opens, so
-// they hold for all of them and not just the first. busy_timeout comes first so
-// that the journal_mode switch of an existing database waits for a lock.
+// they hold for all of them and not just the first. The driver sorts them with
+// busy_timeout first, so the journal_mode switch of an existing database waits
+// for a lock; synchronous comes after journal_mode.
 //
 // _txlock=immediate makes every db.Begin() a BEGIN IMMEDIATE. A deferred
 // transaction that reads first and then writes (the learning store has several)
