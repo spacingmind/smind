@@ -11,7 +11,6 @@ import (
 	"errors"
 	"io"
 	"testing"
-	"time"
 )
 
 // The ADR-0035 §7 reference values, asserted literally.
@@ -174,7 +173,7 @@ func TestTranscriptHashIsTheHKDFSalt(t *testing.T) {
 
 // replayInto feeds a recorded M1 to a fresh daemon channel (optionally with a
 // seeded ephemeral) and returns the channel, its wire record and the
-// handshake result.
+// handshake result. With no extra frames the attacker closes its end after M1.
 func replayInto(t *testing.T, kp *KeyPair, ephSeed, m1 []byte, extra ...[]byte) (*Channel, *memConn, <-chan error) {
 	t.Helper()
 	conn, attacker := newMemPipe()
@@ -182,7 +181,7 @@ func replayInto(t *testing.T, kp *KeyPair, ephSeed, m1 []byte, extra ...[]byte) 
 	if ephSeed != nil {
 		seedEphemeral(t, daemon, ephSeed)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	t.Cleanup(cancel)
 	errCh := make(chan error, 1)
 	go func() { errCh <- daemon.Handshake(ctx) }()
@@ -190,6 +189,11 @@ func replayInto(t *testing.T, kp *KeyPair, ephSeed, m1 []byte, extra ...[]byte) 
 		if _, err := attacker.Write(f); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if len(extra) == 0 {
+		// A silent attacker: nothing follows M1. End the stream explicitly
+		// rather than waiting for a deadline.
+		_ = attacker.Close()
 	}
 	return daemon, conn, errCh
 }
@@ -320,10 +324,10 @@ func TestClientEphemeralNeverReused(t *testing.T) {
 	for range 8 {
 		conn, peer := newMemPipe()
 		client := newClientChannel(t, conn)
-		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-		_ = client.Handshake(ctx) // the peer is silent: fails at the deadline
+		_ = peer.Close() // the peer hangs up after M1: the handshake fails at once
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		_ = client.Handshake(ctx)
 		cancel()
-		_ = peer.Close()
 		w := conn.written()
 		if len(w) != 1 {
 			t.Fatalf("client wrote %d frames, want M1 only", len(w))
