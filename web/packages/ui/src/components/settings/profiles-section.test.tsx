@@ -226,12 +226,50 @@ describe("profiles-section", () => {
     fireEvent.click(await screen.findByTestId("profile-delete-1"));
     await flush();
 
+    // The menu item only opens the confirmation -- nothing is sent until it is confirmed.
+    expect(daemon.calls.some((c) => c.method === "profile.delete")).toBe(false);
+    expect(screen.getByTestId("profile-delete-dialog")).toHaveTextContent("UI work");
+    fireEvent.click(screen.getByTestId("profile-delete-confirm-1"));
+    await flush();
+
     expect(daemon.calls.find((c) => c.method === "profile.delete")?.params).toEqual({ id: 1 });
 
     daemon.emit("profile.deleted", { id: 1 });
     await flush();
 
     expect(screen.queryByTestId("profile-row-1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("profile-delete-dialog")).not.toBeInTheDocument();
+  });
+
+  it("cancelling the delete confirmation keeps the profile and sends nothing", async () => {
+    const { daemon } = await renderWithProfiles([PROFILE]);
+    fireEvent.pointerDown(screen.getByTestId("profile-menu-1"), { button: 0 });
+    fireEvent.click(await screen.findByTestId("profile-delete-1"));
+    await flush();
+    fireEvent.click(screen.getByTestId("profile-delete-dialog-cancel"));
+    await flush();
+
+    expect(screen.queryByTestId("profile-delete-dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("profile-row-1")).toBeInTheDocument();
+    expect(daemon.calls.some((c) => c.method === "profile.delete")).toBe(false);
+  });
+
+  it("a failed delete stays open with the daemon's message visible (it used to vanish into console.error)", async () => {
+    const { daemon } = await renderWithProfiles([PROFILE]);
+    fireEvent.pointerDown(screen.getByTestId("profile-menu-1"), { button: 0 });
+    fireEvent.click(await screen.findByTestId("profile-delete-1"));
+    await flush();
+    daemon.failNonUsageWith = new Error("profile 1 is in use by a running task");
+    fireEvent.click(screen.getByTestId("profile-delete-confirm-1"));
+    await flush();
+
+    expect(screen.getByTestId("profile-delete-dialog-error")).toHaveTextContent("profile 1 is in use by a running task");
+    expect(screen.getByTestId("profile-row-1")).toBeInTheDocument();
+    // And it can be retried once the daemon allows it.
+    daemon.failNonUsageWith = null;
+    fireEvent.click(screen.getByTestId("profile-delete-confirm-1"));
+    await flush();
+    expect(daemon.calls.filter((c) => c.method === "profile.delete")).toHaveLength(2);
   });
 
   it("reflects a profile.created event from outside its own mutation, without a manual refresh", async () => {
@@ -395,6 +433,8 @@ describe("profiles-section ★ default agent (run-config IA)", () => {
 
     fireEvent.pointerDown(screen.getByTestId("profile-menu-1"), { button: 0 });
     fireEvent.click(await screen.findByTestId("profile-delete-1"));
+    await flush();
+    fireEvent.click(screen.getByTestId("profile-delete-confirm-1"));
     await flush();
     daemon.emit("profile.deleted", { id: 1 });
     await flush();

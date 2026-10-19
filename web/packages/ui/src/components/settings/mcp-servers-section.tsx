@@ -4,6 +4,8 @@ import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useConfirmAction } from "@/hooks/use-confirm-action";
 import { FormError } from "@/components/ui/form-error";
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -104,7 +106,7 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<number | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteAction = useConfirmAction();
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
@@ -204,15 +206,11 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
 
   async function handleDelete(id: number) {
     if (!client) return;
-    setDeleteError(null);
-    try {
-      await client.call("mcp.delete", { id });
-      setServers((prev) => (prev ? prev.filter((s) => s.id !== id) : prev));
-      if (openCard === id) closeCard();
-      setDeleting(null);
-    } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : String(err));
-    }
+    const done = await deleteAction.run(() => client.call("mcp.delete", { id }));
+    if (!done) return;
+    setServers((prev) => (prev ? prev.filter((s) => s.id !== id) : prev));
+    if (openCard === id) closeCard();
+    setDeleting(null);
   }
 
   const newServerButton = (
@@ -329,7 +327,7 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
                               data-testid={`mcp-delete-${m.id}`}
                               onSelect={() => {
                                 setDeleting(m.id);
-                                setDeleteError(null);
+                                deleteAction.reset();
                               }}
                             >
                               Delete
@@ -337,39 +335,6 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
-                      {deleting === m.id && (
-                        <div data-testid={`mcp-delete-row-${m.id}`} className="flex flex-col gap-1 px-2">
-                          <p className="text-ui-sm text-muted-foreground">
-                            Delete {m.name}? This removes its stored env/headers.
-                          </p>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              type="button"
-                              variant="destructive"
-                              size="sm"
-                              data-testid={`mcp-delete-confirm-${m.id}`}
-                              onClick={() => void handleDelete(m.id)}
-                            >
-                              Delete
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              data-testid={`mcp-delete-cancel-${m.id}`}
-                              onClick={() => {
-                                setDeleting(null);
-                                setDeleteError(null);
-                              }}
-                            >
-                              Cancel
-                            </Button>
-                            {deleteError && (
-                              <FormError message={deleteError} testId={`mcp-delete-error-${m.id}`} size="sm" />
-                            )}
-                          </div>
-                        </div>
-                      )}
                       {editing && (
                         <McpServerForm
                           idPrefix={`mcp-edit-form-${m.id}`}
@@ -393,6 +358,34 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
           <FormError message={error} testId="mcp-error" />
         )}
       </section>
+      {(() => {
+        const target = servers?.find((m) => m.id === deleting);
+        return (
+          <ConfirmDialog
+            open={deleting !== null}
+            onOpenChange={(open) => {
+              if (open) return;
+              setDeleting(null);
+              deleteAction.reset();
+            }}
+            title="Delete MCP server?"
+            description={
+              <>
+                Delete <span className="font-medium text-foreground">{target?.name}</span>? This removes its stored env/headers.
+              </>
+            }
+            confirmLabel="Delete"
+            pendingLabel="Deleting…"
+            pending={deleteAction.pending}
+            error={deleteAction.error}
+            testId="mcp-delete-dialog"
+            confirmTestId={`mcp-delete-confirm-${deleting}`}
+            cancelTestId={`mcp-delete-cancel-${deleting}`}
+            errorTestId={`mcp-delete-error-${deleting}`}
+            onConfirm={() => deleting !== null && void handleDelete(deleting)}
+          />
+        );
+      })()}
     </div>
   );
 }
