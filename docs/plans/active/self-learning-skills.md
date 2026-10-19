@@ -371,12 +371,10 @@ direct API call (second LLM client), Claude reflecting GLM transcripts
 (breaks D4).
 
 ## Progress
-
 - 2026-10-11: Phase A written (ADR-0026 Proposed, this plan). No feature code.
 - 2026-10-18: user accepted D1-D11 as recommended and added D12 (similarity
   check). ADR-0026 set to Accepted; D12 added to the ADR (gate list, inbox
   UX), ACs 33-34 and the named tests above. Phase B starts with B1.
-
 - 2026-10-18: B1 split into three non-stacked PRs, each reviewed by an
   independent read-only reviewer and hardened before opening:
   #392 (store schema, ledger/versions/proposals/jobs, lifecycle function),
@@ -386,13 +384,102 @@ direct API call (second LLM client), Claude reflecting GLM transcripts
   (`runs.purpose`, hidden system tasks, run-finished observer, Learning usage
   bucket), B2c isolated reflector runner (claude-native), B2d collector/job
   service; then B3 delivery, B4 wsapi/CLI/UI, B5 curator/export.
-
 - 2026-10-18: #390-#395 merged. User decided D13 (claude-native-only
   reflection in v1, GLM/Kimi windows skipped, delivery to GLM/Kimi kept);
   recorded in ADR-0026 and above. B2 starts with B2a (window builder).
+- 2026-10-18/19: Phase B landed as non-stacked PRs, each independently
+  reviewed (read-only reviewer on the redactor, gate, isolated runner and
+  reflector; findings fixed before merge): #392 store + lifecycle, #393
+  redact + config, #394 gate + similarity + human-skill loader, #395/#398
+  plan + D13, #400 window builder, #401 run plumbing, #402 isolated runner,
+  #403 reflector prompts + parser, #405 approval service, #406 projection +
+  preface + load matcher, #408 run origin + executor, #410 export, #411
+  wsapi + CLI + events, #412 UI inbox + settings + D12 duplicate view, #413
+  collector + reflect pipeline, #414 delivery + counters + lifecycle, #417
+  curator + snapshots, #418 integration + budget + export RPC; #420 (open)
+  export dialog + budget row.
+- 2026-10-19: live pass against a real daemon (isolated home, seeded DB, real
+  RPCs, real UI via Playwright): gate rejection with findings, merge into a
+  learned skill, plain approve, curator bundle approve, stale patch. It found
+  and fixed two real bugs (UI sent `mergeInto` as an id; the dev seed lacked
+  the `learned-` prefix). No real model or provider CLI has been run.
 
 ## Validation
 
-Empty until Phase B: each AC above gets its confirming test names and any
-live evidence here, and the file moves to `docs/plans/completed/` only when
-every AC is confirmed.
+Status: every acceptance criterion is confirmed by an automated test or
+reviewed evidence below, **except the live-only checks listed after the
+table**, which need one real `claude` CLI run (and the user's go-ahead: it
+spends a few cents of the user's Claude account). Per AGENTS.md (c) this plan
+therefore stays in `active/` until those are done.
+
+| AC | Status | Confirming tests / evidence |
+|---|---|---|
+| AC1 | confirmed | `TestCollector_OffByDefault`, `TestDelivery_OffWhenModeOffOrDisabled`, `TestCollector_CadenceAt50ToolCalls` |
+| AC2 | confirmed | `TestCollector_CadenceAt50ToolCalls`, `TestCollector_ExplicitTriggerBypassesCooldown`, `TestCollector_IdleTailFlush`, `TestCollector_OneJobPerWorkspace` |
+| AC3 | confirmed | `TestCollector_WatermarkAdvancesOnlyOnTerminalJob`, `TestCollector_CrashRetriesSameWindow` |
+| AC4 | confirmed | `TestWindow_TagsUserOriginAndCorrection`, `TestWindow_PairsFailureWithRecovery`, `TestWindow_IncludesHumanPermissionDenial`, `TestWindow_ListsLoadedSkills` |
+| AC5 | confirmed | `TestWindow_ExcludesEnvMcpThinkingAndSecretPathReads`, `TestWindow_CapsRecordInputResultAndTotal` |
+| AC6 | confirmed | `TestRedact_ExactMcpSecretsAndRunEnv`, `TestRedact_RuleCorpus`, `TestRedact_HomePrefix`, `TestWindow_RedactsBeforeClipping`, `TestWindow_RealRedactorScrubsEverySurface`, `TestReflect_EvidenceRedactedBeforeStore`; the "applied again to evidence before storage" clause is `TestReflect_EvidenceRedactedBeforeStore` (the planned name `TestRedact_AppliedToEvidenceOnStore` was not used) |
+| AC7 | confirmed | `TestCollector_CodexRunsDoNotCount`, `TestEmitsToolEvents` |
+| AC8 | confirmed (flags in the fake CLI); live flag check pending | `TestReflector_HasNoTools`, `TestReflector_NoMcpNoAddDir`, `TestRegistry_IsolatedRunUsesIsolatedRunner`, `TestExecutor_RunsHiddenIsolatedSystemRun`, `TestCanReflect_ClaudeNativeOnly`, `TestReflect_ProviderNoToolIsolationSkipped`; same-recipient is claude-native only by D13; there is no cross-provider override in v1, so `TestReflector_SameRecipientRule` / `TestReflector_OverrideNeedsAck` were not written (covered by the ACP refusal tests) |
+| AC9 | confirmed | `TestEligible_ExcludesReflectCurateAndSystemTasks`, `TestReflect_DoesNotRetriggerLearning`, `TestSystemTask_HiddenFromTaskList`, `TestReflect_MeteredUnderLearningBucket`, `TestUsage_LearningBucketSplit` |
+| AC10 | confirmed | `TestReflectorOutput_RejectsNonJSONAndUnknownAction`, `TestReflect_ParseFailureMarksJobFailed` |
+| AC11 | confirmed | `TestReflect_BudgetSkipsWithoutStartingRun`, `TestKillSwitch_StopsEverything`, `TestCurator_BudgetSkipsWithoutStartingRun`, `TestKillSwitch_StopsCurator` |
+| AC12 | confirmed | `TestGate_RejectsBadName`, `TestGate_RejectsOversizeBody`, `TestGate_RejectsBadDescription`, `TestGate_RejectsFrontmatterKeys`, `TestGate_RejectsUrlLinks`, `TestGate_RejectsGuardFamilies`, `TestGate_RejectsSecretHit`, `TestGate_RejectsAbsolutePathAndHost`, `TestGate_RejectsHumanSkillNameCollision`, `TestGate_RejectsBadAbsorbedInto`, `TestGate_RejectsAmbiguousPatch`, `TestGate_ScansCanonicalText`; atomic landing = AC14 |
+| AC13 | confirmed | `TestProvenance_RequiresUserMessageOrRecoveredFailure`, `TestProvenance_QuoteMustBeVerbatim`, `TestProvenance_ToolOutputOnlyEvidenceRejected`, `TestProvenance_CodeSpansMustBeInCitedEvidence` |
+| AC14 | confirmed | `TestLandSkill_AtomicAllOrNothing`, `TestApplyBundle_AtomicAllOrNothing`, `TestApproval_StaleSnapshotRejected`; the planned `TestGate_LandsAtomicallyOrNotAtAll` lives at the store/approval layer |
+| AC15 | confirmed | `TestNeverTouchesHumanSkills`, `TestExport_NeverTouchesHumanSkills`, `TestHumanSkills_SymlinkedSkillsDirIsReadNotWritten`, `TestInstall_RepoRefusesSymlinkedSkillsDir`, `TestExport_RefusesSymlinkedRepoSkillsDir` |
+| AC16 | confirmed | `TestProjection_IsReadOnlyAndContentAddressed`, `TestProjection_OnlyGivenSkills`, `TestProjection_RepairsTamperedDir` |
+| AC17 | confirmed | `TestProposedSkillNeverDelivered`, `TestProjection_OnlyActiveSkills` |
+| AC18 | confirmed (screenshots: Lead-reviewed light+dark) | web "possible duplicate shows both skills and merge action"; `TestLearning_RPCRoundTrip`; web files `learned-skills-section.test.tsx`, `learned-skill-detail.test.tsx` |
+| AC19 | confirmed | `TestApproval_ApproveRejectEditPinDisableDeleteUndo`, `TestLearning_SetModeAndForget`, `TestLearnCLI_*`, `TestLearning_ExportRoundTrip`, `TestCurator_ExplicitBypassesCadenceNotBudget`, `TestForgetWorkspace_HardDeletesAll`; web `proposal-actions.test.tsx` |
+| AC20 | confirmed | `TestLearning_EventsPublished`, `TestLearningWiring_SharedApprovalAndNotifier`; web `use-learning.test.tsx` (event -> toast + invalidation), the nav badge registration and pending count in `learned-skills-section.test.tsx` |
+| AC21 | confirmed | light + dark screenshots of every tab, detail, patch diff, possible-duplicate (learned + human), merge editor, bundle, edit, reject note, empty states, narrow 390 px, tab-switch / pane-open / dialog-open transition frames, budget and export dialog states (Lead-reviewed; two live-pass bugs fixed) |
+| AC22 | confirmed (fake CLI); live add-dir load pending | `TestClaudeRun_AddsProjectionDir`, `TestClaudeRun_NoSkillsNoOption` |
+| AC23 | confirmed | `TestACPRun_PrefacesFirstPromptOnly`, `TestACPRun_PersistedPromptUnchanged`, `TestACPRun_NoDeliveryNoLeadingBlock`, `TestPreface_OverBudgetFallsBackToIndexOnly`, `TestDelivery_PrefaceBudgetAndLoadRateOrder`; the planned `TestACPRun_BudgetFallsBackToIndexOnly` is covered by the two preface tests |
+| AC24 | confirmed | `TestCodexRun_Unchanged`, `TestExport_WritesRenderedSkill` |
+| AC25 | confirmed (matcher on fake events); live `Skill` input shape pending | `TestCounters_OfferedOncePerRunE2E`, `TestCounters_SkillToolLoadE2E`, `TestCounters_ReadUnderProjectionLoadE2E`, `TestCounters_ReflectorRunsNeverCount`, `TestMatch_SkillToolCall` |
+| AC26 | confirmed | `TestCounters_UnmeasuredWhenNoSignalProvider`, `TestLifecycle_UnmeasuredNeverArchivedE2E`, `TestCounters_UnmeasuredGlmOffer` |
+| AC27 | confirmed | `TestLifecycle_Probation`, `TestLifecycle_GraduationArchivesZeroLoad`, `TestLifecycle_CapacityEvictsLowestRate`, `TestLifecycle_TieBreakDeterministic`, `TestLifecycle_PinnedExempt`, `TestLifecycle_GraduationArchivesZeroLoadE2E`, `TestPinDisableArchive_LedgerActions`; archive is a status change only (row, versions and ledger remain): `TestPinDisableArchive_LedgerActions`, `TestLearnedSkillsPartialUniqueIndexAllowsArchivedDuplicates` |
+| AC28 | confirmed | `TestVersions_UndoRestoresAsNewVersion`, `TestSnapshot_BeforeCuratorAndRotation`, `TestSnapshot_Restore`, `TestCurator_SnapshotTakenBeforeRunAndJobStopsIfSnapshotFails` |
+| AC29 | confirmed | `TestCurator_CadenceAndWeeklyLimit`, `TestCurator_SeesOnlyLearnedSkills`, `TestCurator_MergeBundleApprovedAtomically`, `TestCurator_AbsorbedArchivedOnlyOnApproval` |
+| AC30 | confirmed | `TestLedger_MergeVsRetire` |
+| AC31 | confirmed by construction | `TestRegistry_IsolatedStartRefusesAcpProviders`, `TestRunPromptIsolated_RefusesAcpProviders`; the only egress added is the isolated claude-native reflector/curator call; v1 offers no provider override, so the acknowledgement clause has nothing to guard |
+| AC32 | confirmed | `TestForgetWorkspace_HardDeletesAll`, `TestLearningOff_KeepsDataStopsDelivery`, `TestSnapshot_ForgetDeletesSnapshots` |
+| AC33 | confirmed | `TestGate_RejectsNearDuplicateAboveHighThreshold`, `TestGate_FlagsPossibleDuplicateAboveMediumThreshold`, `TestGate_PassesDissimilarBelowMediumThreshold`, `TestGate_SimilarityThresholdsFromConfig`, `TestGate_SimilarityComparesLearnedAndHumanSkills`, `TestGate_HumanSkillBodiesNeverRead`, `TestGate_PatchNotComparedAgainstOwnTarget` |
+| AC34 | confirmed | `TestMergeIntoSkill_TurnsProposalIntoGatedPatch`, `TestMergeIntoSkill_RefusedForHumanSkill`; web "possible duplicate shows both skills and merge action"; live: real merge approved, new version + `merge` ledger row |
+
+
+### Still unverified (live only; waiting for the user's go-ahead)
+
+1. Real `claude` CLI (2.1.293 installed) accepts and honours the isolated
+   run's flags: `--tools ""`, `--setting-sources=`, `--strict-mcp-config`,
+   `--disable-slash-commands`, `--permission-mode plan`, and `--max-turns`
+   (the SDK emits it but `--help` does not list it); its init message lists
+   no tools/skills/MCP servers (the runner aborts if it does); and
+   `ENABLE_CLAUDEAI_MCP_SERVERS=false` removes account connectors. (AC8)
+2. The real CLI loads `<add-dir>/.claude/skills` from a read-only (0555)
+   projection directory, and the real `Skill` tool input field name matches
+   what `loads.Match` accepts. (AC22, AC25; ADR open question 1)
+3. End to end in an opted-in repo: a seeded human correction makes the Haiku
+   reflector emit a proposal that passes the gate; approving it makes the
+   next claude-native run load the skill (counter increments) and a GLM run
+   receive the preface; `git status` of the repo stays clean throughout.
+4. Haiku actually follows the reflector/curator prompts (JSON-only reply,
+   verbatim quotes, code spans grounded in cited events) and the real cost of
+   a 120 KB window against the USD 0.25 / 150k-token daily cap (ADR open
+   question 4).
+
+### Known limits and follow-ups (not blockers)
+
+- `store.PatchSkill` persists description and body only: a category-only
+  patch passes the gate but the new category is not stored.
+- Merge ledger rows name the merged proposal but do not copy its evidence.
+- A GLM/Kimi skill load cannot be observed in v1 (D7): those skills are
+  `unmeasured` and never auto-archived for zero use.
+- The cadence landing count reads the newest 500 ledger rows per workspace
+  per tick.
+- UI: restoring a library snapshot has no UI yet (store-level only).
+- Phase C (not started, by decision): `skill_get` MCP tool for ACP load
+  telemetry, Codex delivery, plain-text `references/`, optional auto-approve
+  for patches, index-preface A/B (D8).
