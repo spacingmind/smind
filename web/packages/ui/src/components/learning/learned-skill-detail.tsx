@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 
-import { ConfirmDialog } from "@/components/learning/confirm-dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EvidenceList } from "@/components/learning/evidence-list";
 import { Chip, SkillBadges, SourceChip } from "@/components/learning/learning-chips";
 import { RunLink } from "@/components/learning/run-link";

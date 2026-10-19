@@ -11,6 +11,8 @@ import {
 } from "@/components/ui/dialog";
 import { FolderPickerDialog } from "@/components/folder-picker-dialog";
 import { FormError } from "@/components/ui/form-error";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useConfirmAction } from "@/hooks/use-confirm-action";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -387,50 +389,33 @@ export function DeleteWorkspaceDialog({
   onOpenChange: (open: boolean) => void;
   onDeleted: () => void;
 }) {
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const action = useConfirmAction();
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Delete workspace?</DialogTitle>
-          <DialogDescription asChild>
-            <div>
-              <span className="font-medium text-foreground">{workspace?.Title || workspace?.Path}</span>
-              <DeleteConsequences tasksRemoved={tasksRemoved} spacesRemoved={spacesRemoved} />
-            </div>
-          </DialogDescription>
-        </DialogHeader>
-        <FormError message={error} />
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            disabled={pending}
-            data-testid="dialog-delete-workspace-confirm"
-            onClick={async () => {
-              if (!workspace) return;
-              setPending(true);
-              setError(null);
-              try {
-                await client!.call("workspace.delete", { id: workspace.ID });
-                onDeleted();
-                onOpenChange(false);
-              } catch (err) {
-                setError(err instanceof Error ? err.message : String(err));
-              } finally {
-                setPending(false);
-              }
-            }}
-          >
-            {pending ? "Deleting…" : "Delete"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ConfirmDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Delete workspace?"
+      description={
+        <>
+          <span className="font-medium text-foreground">{workspace?.Title || workspace?.Path}</span>
+          <DeleteConsequences tasksRemoved={tasksRemoved} spacesRemoved={spacesRemoved} />
+        </>
+      }
+      confirmLabel="Delete"
+      pendingLabel="Deleting…"
+      pending={action.pending}
+      error={action.error}
+      testId="dialog-delete-workspace"
+      confirmTestId="dialog-delete-workspace-confirm"
+      onConfirm={async () => {
+        if (!workspace) return;
+        if (await action.run(() => client!.call("workspace.delete", { id: workspace.ID }))) {
+          onDeleted();
+          onOpenChange(false);
+        }
+      }}
+    />
   );
 }
 
@@ -450,50 +435,33 @@ export function DeleteSpaceDialog({
   onOpenChange: (open: boolean) => void;
   onDeleted: () => void;
 }) {
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const action = useConfirmAction();
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Delete space?</DialogTitle>
-          <DialogDescription asChild>
-            <div>
-              <span className="font-medium text-foreground">{space?.Title}</span>
-              <DeleteConsequences tasksRemoved={tasksRemoved} spacesRemoved={0} />
-            </div>
-          </DialogDescription>
-        </DialogHeader>
-        <FormError message={error} />
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            disabled={pending}
-            data-testid="dialog-delete-space-confirm"
-            onClick={async () => {
-              if (!space) return;
-              setPending(true);
-              setError(null);
-              try {
-                await client!.call("space.delete", { id: space.ID });
-                onDeleted();
-                onOpenChange(false);
-              } catch (err) {
-                setError(err instanceof Error ? err.message : String(err));
-              } finally {
-                setPending(false);
-              }
-            }}
-          >
-            {pending ? "Deleting…" : "Delete"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ConfirmDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Delete space?"
+      description={
+        <>
+          <span className="font-medium text-foreground">{space?.Title}</span>
+          <DeleteConsequences tasksRemoved={tasksRemoved} spacesRemoved={0} />
+        </>
+      }
+      confirmLabel="Delete"
+      pendingLabel="Deleting…"
+      pending={action.pending}
+      error={action.error}
+      testId="dialog-delete-space"
+      confirmTestId="dialog-delete-space-confirm"
+      onConfirm={async () => {
+        if (!space) return;
+        if (await action.run(() => client!.call("space.delete", { id: space.ID }))) {
+          onDeleted();
+          onOpenChange(false);
+        }
+      }}
+    />
   );
 }
 
@@ -556,8 +524,7 @@ export function ArchiveTaskDialog({
   onOpenChange: (open: boolean) => void;
   onArchived: () => void;
 }) {
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const action = useConfirmAction();
   // null = fetch pending/never ran, [] = no children (today's dialog).
   const [childTasks, setChildTasks] = useState<Array<{ id: number; title: string; runState?: TaskTreeNode["run"]["state"] }> | null>(null);
   const [childError, setChildError] = useState(false);
@@ -596,52 +563,37 @@ export function ArchiveTaskDialog({
     };
   }, [open, task, client]);
 
+  const hasChildren = childTasks !== null && childTasks.length > 0;
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Archive task?</DialogTitle>
-          <DialogDescription asChild>
-            <div>
-              <span className="font-medium text-foreground">{task?.Title}</span>
-              <p className="mt-2">
-                Uncommitted work is checkpointed to the task branch before the
-                worktree is removed.
-              </p>
-              {childTasks !== null && childTasks.length > 0 && <ArchiveChildren>{childTasks}</ArchiveChildren>}
-              {childError && <p className="mt-2 font-normal text-foreground-muted">Could not check for child tasks.</p>}
-            </div>
-          </DialogDescription>
-        </DialogHeader>
-        <FormError message={error} />
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            disabled={pending}
-            data-testid="dialog-archive-task-confirm"
-            onClick={async () => {
-              if (!task) return;
-              setPending(true);
-              setError(null);
-              try {
-                await client!.call("task.archive", { id: task.ID });
-                onArchived();
-                onOpenChange(false);
-              } catch (err) {
-                setError(err instanceof Error ? err.message : String(err));
-              } finally {
-                setPending(false);
-              }
-            }}
-          >
-            {pending ? "Archiving…" : childTasks !== null && childTasks.length > 0 ? "Archive parent only" : "Archive"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ConfirmDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Archive task?"
+      description={
+        <>
+          <span className="font-medium text-foreground">{task?.Title}</span>
+          <p className="mt-2">
+            Uncommitted work is checkpointed to the task branch before the
+            worktree is removed.
+          </p>
+          {hasChildren && <ArchiveChildren>{childTasks}</ArchiveChildren>}
+          {childError && <p className="mt-2 font-normal text-foreground-muted">Could not check for child tasks.</p>}
+        </>
+      }
+      confirmLabel={hasChildren ? "Archive parent only" : "Archive"}
+      pendingLabel="Archiving…"
+      pending={action.pending}
+      error={action.error}
+      testId="dialog-archive-task"
+      confirmTestId="dialog-archive-task-confirm"
+      onConfirm={async () => {
+        if (!task) return;
+        if (await action.run(() => client!.call("task.archive", { id: task.ID }))) {
+          onArchived();
+          onOpenChange(false);
+        }
+      }}
+    />
   );
 }
 
@@ -666,51 +618,34 @@ export function ArchiveChatDialog({
   onOpenChange: (open: boolean) => void;
   onArchived: () => void;
 }) {
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const action = useConfirmAction();
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Archive chat?</DialogTitle>
-          <DialogDescription asChild>
-            <div>
-              <span className="font-medium text-foreground">{chat?.Title || "Chat"}</span>
-              <p className="mt-2">
-                The chat's history stays on the task; its tab closes and it stops appearing in "New chat"'s reopen list.
-              </p>
-            </div>
-          </DialogDescription>
-        </DialogHeader>
-        <FormError message={error} />
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            disabled={pending}
-            data-testid="dialog-archive-chat-confirm"
-            onClick={async () => {
-              if (!chat) return;
-              setPending(true);
-              setError(null);
-              try {
-                await client!.call("chat.archive", { id: chat.ID });
-                onArchived();
-                onOpenChange(false);
-              } catch (err) {
-                setError(err instanceof Error ? err.message : String(err));
-              } finally {
-                setPending(false);
-              }
-            }}
-          >
-            {pending ? "Archiving…" : "Archive"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ConfirmDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Archive chat?"
+      description={
+        <>
+          <span className="font-medium text-foreground">{chat?.Title || "Chat"}</span>
+          <p className="mt-2">
+            The chat's history stays on the task; its tab closes and it stops appearing in "New chat"'s reopen list.
+          </p>
+        </>
+      }
+      confirmLabel="Archive"
+      pendingLabel="Archiving…"
+      pending={action.pending}
+      error={action.error}
+      testId="dialog-archive-chat"
+      confirmTestId="dialog-archive-chat-confirm"
+      onConfirm={async () => {
+        if (!chat) return;
+        if (await action.run(() => client!.call("chat.archive", { id: chat.ID }))) {
+          onArchived();
+          onOpenChange(false);
+        }
+      }}
+    />
   );
 }
