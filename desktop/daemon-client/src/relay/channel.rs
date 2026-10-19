@@ -1,10 +1,14 @@
-//! The E2EE handshake/send/receive state machine, generic over a
-//! frame-oriented transport. Mirrors `internal/relay/e2ee.Channel` (Go)
-//! 1:1, including its rotation/retry rules (ADR-0007 (e)).
+//! The client end of the E2EE v2 handshake/send/receive state machine
+//! (ADR-0035), generic over a frame-oriented transport. Mirrors the
+//! initiator side of `internal/relay/e2ee.Channel` (Go), including its
+//! retry rules (§4) and typed errors. Every client is the initiator: the
+//! daemon's responder lives in Go; a test-only responder for this crate's
+//! own tests is in `test_daemon` below.
 
 use crate::relay::crypto::{
-    self, FrameError, HelloError, KeyPair, Role, Session, SessionError, FRAME_DATA, FRAME_HELLO,
-    FRAME_READY, PUBLIC_KEY_SIZE,
+    self, EphemeralSecret, FrameError, HelloError, KeyAgreementError, ReadyError, Role, Schedule,
+    Session, SessionError, FRAME_DATA, FRAME_HELLO, FRAME_READY, MAX_HANDSHAKE_FRAME_LEN,
+    PUBLIC_KEY_SIZE,
 };
 
 /// One raw frame transport: each `send`/`recv` call carries exactly one
@@ -26,16 +30,30 @@ pub trait FrameTransport: Send {
 pub enum ChannelError<E> {
     Transport(E),
     Frame(FrameError),
+    /// A wire-level protocol violation: a malformed or oversized frame, an
+    /// unexpected frame type, an empty ready, a role mismatch.
     Protocol(String),
-    /// A peer re-handshaked with a *different* key on an established (or
+    /// The peer's hello carried another E2EE protocol version (ADR-0035 §6).
+    /// `peer < 2` means the daemon is too old (update it); `peer > 2` means
+    /// this app is. Never answered with a retry, an older protocol or another
+    /// route.
+    UnsupportedVersion {
+        peer: u8,
+    },
+    /// A peer re-handshaked with a *different* hello on an established (or
     /// mid-handshake) session — rotation always means a new session, per
     /// ADR-0007 (e).
     KeyRotation(String),
-    /// The peer's hello carried a public key different from the one
-    /// pinned via `handshake`'s `pin_peer_public_key` (the pairing
-    /// offer's daemon key) — a fresh handshake attempt, not a rotation
-    /// of an already-established session.
+    /// The daemon hello carried a static public key different from the one
+    /// pinned via `handshake`'s `pin_daemon_public_key` (the pairing
+    /// offer's daemon key). Checked before any key agreement.
     PinMismatch,
+    /// Key confirmation failed: the peer's ready MAC did not verify, so the
+    /// two ends did not derive the same keys (a tampered ephemeral, a wrong
+    /// static key, a forged peer).
+    HandshakeConfirm,
+    /// An X25519 exchange produced the all-zero output (a low-order point).
+    KeyAgreement,
     Replay {
         got: u64,
         want: u64,
@@ -43,6 +61,8 @@ pub enum ChannelError<E> {
     Decrypt,
     NotEstablished,
     AlreadyEstablished,
+    /// The channel failed or was cancelled mid-handshake; open a new one.
+    Closed,
 }
 
 impl<E: std::fmt::Display> std::fmt::Display for ChannelError<E> {
@@ -51,6 +71,11 @@ impl<E: std::fmt::Display> std::fmt::Display for ChannelError<E> {
             ChannelError::Transport(e) => write!(f, "e2ee: transport: {e}"),
             ChannelError::Frame(e) => write!(f, "{e}"),
             ChannelError::Protocol(s) => write!(f, "e2ee: protocol violation: {s}"),
+            ChannelError::UnsupportedVersion { peer } => write!(
+                f,
+                "e2ee: peer speaks protocol version {peer}, this end speaks {}",
+                crypto::PROTOCOL_VERSION
+            ),
             ChannelError::KeyRotation(s) => {
                 write!(f, "e2ee: peer re-handshaked with a different key: {s}")
             }
@@ -60,6 +85,8 @@ impl<E: std::fmt::Display> std::fmt::Display for ChannelError<E> {
                     "e2ee: peer public key does not match the pinned pairing offer"
                 )
             }
+            ChannelError::HandshakeConfirm => write!(f, "e2ee: handshake key confirmation failed"),
+            ChannelError::KeyAgreement => write!(f, "e2ee: X25519 key agreement failed"),
             ChannelError::Replay { got, want } => {
                 write!(
                     f,
@@ -69,6 +96,7 @@ impl<E: std::fmt::Display> std::fmt::Display for ChannelError<E> {
             ChannelError::Decrypt => write!(f, "e2ee: frame failed to decrypt"),
             ChannelError::NotEstablished => write!(f, "e2ee: handshake not completed"),
             ChannelError::AlreadyEstablished => write!(f, "e2ee: handshake already completed"),
+            ChannelError::Closed => write!(f, "e2ee: channel closed"),
         }
     }
 }
@@ -85,33 +113,88 @@ impl<E> From<SessionError> for ChannelError<E> {
     }
 }
 
-/// One end of an E2EE session carried over `T`. Owns the keypair, role,
-/// and (once established) the session and peer public key.
+impl<E> From<KeyAgreementError> for ChannelError<E> {
+    fn from(_: KeyAgreementError) -> Self {
+        ChannelError::KeyAgreement
+    }
+}
+
+fn hello_error<E>(e: HelloError) -> ChannelError<E> {
+    match e {
+        HelloError::UnsupportedVersion(peer) => ChannelError::UnsupportedVersion { peer },
+        other => ChannelError::Protocol(other.to_string()),
+    }
+}
+
+fn ready_error<E>(e: ReadyError) -> ChannelError<E> {
+    match e {
+        ReadyError::WrongLength(n) => {
+            ChannelError::Protocol(format!("ready is {n} bytes, want {}", crypto::READY_LEN))
+        }
+        ReadyError::Mismatch => ChannelError::HandshakeConfirm,
+    }
+}
+
+/// What an established session retains (ADR-0035 §4): the public handshake
+/// values, `th`, and the peer's M2/R_d so a byte-identical repeat is
+/// tolerated and anything else is not.
+struct Established {
+    daemon_pub: [u8; PUBLIC_KEY_SIZE],
+    daemon_eph_pub: [u8; PUBLIC_KEY_SIZE],
+    client_eph_pub: [u8; PUBLIC_KEY_SIZE],
+    th: [u8; 32],
+    m2: Vec<u8>,
+    r_d: [u8; 32],
+}
+
+/// One end (the client/initiator) of an E2EE session carried over `T`.
+/// Generates its own ephemeral key inside `handshake`; no API takes one.
 pub struct Channel<T: FrameTransport> {
     transport: T,
-    role: Role,
-    peer_pub: Option<[u8; PUBLIC_KEY_SIZE]>,
     session: Option<Session>,
-    established: bool,
+    established: Option<Established>,
+    /// Set when a handshake starts and cleared only when it succeeds, so a
+    /// failed or cancelled handshake leaves a dead channel (no second
+    /// handshake over a transport that has already seen M1). A protocol
+    /// violation on an established session sets it too.
+    closed: bool,
+    /// Test hook: the seed of the next handshake's ephemeral (vectors).
+    #[cfg(test)]
+    test_ephemeral_seed: Option<[u8; 32]>,
 }
 
 impl<T: FrameTransport> Channel<T> {
-    pub fn new(transport: T, role: Role) -> Self {
+    pub fn new(transport: T) -> Self {
         Self {
             transport,
-            role,
-            peer_pub: None,
             session: None,
-            established: false,
+            established: None,
+            closed: false,
+            #[cfg(test)]
+            test_ephemeral_seed: None,
         }
     }
 
     pub fn established(&self) -> bool {
-        self.established
+        self.established.is_some() && !self.closed
     }
 
-    pub fn peer_public_key(&self) -> Option<[u8; PUBLIC_KEY_SIZE]> {
-        self.peer_pub
+    /// The handshake transcript hash `th` (ADR-0035 §2) once established:
+    /// public data that the device hello signature binds to.
+    pub fn transcript_hash(&self) -> Option<[u8; 32]> {
+        self.established.as_ref().map(|e| e.th)
+    }
+
+    pub fn daemon_public_key(&self) -> Option<[u8; PUBLIC_KEY_SIZE]> {
+        self.established.as_ref().map(|e| e.daemon_pub)
+    }
+
+    pub fn daemon_ephemeral_public_key(&self) -> Option<[u8; PUBLIC_KEY_SIZE]> {
+        self.established.as_ref().map(|e| e.daemon_eph_pub)
+    }
+
+    pub fn client_ephemeral_public_key(&self) -> Option<[u8; PUBLIC_KEY_SIZE]> {
+        self.established.as_ref().map(|e| e.client_eph_pub)
     }
 
     /// Gives a reconnect loop access to the underlying transport so it
@@ -124,63 +207,128 @@ impl<T: FrameTransport> Channel<T> {
         &mut self.transport
     }
 
-    /// Runs the X25519 handshake: send hello, read the peer's hello,
-    /// derive the session, then exchange ready frames. Starts a FRESH
-    /// session — for a transport-level reconnect that should keep the
-    /// existing session, don't call this again; see `crate::relay::client`.
+    #[cfg(test)]
+    fn seed_ephemeral(&mut self, seed: [u8; 32]) {
+        self.test_ephemeral_seed = Some(seed);
+    }
+
+    fn fresh_ephemeral(&mut self) -> EphemeralSecret {
+        #[cfg(test)]
+        if let Some(seed) = self.test_ephemeral_seed.take() {
+            return EphemeralSecret::from_seed(seed);
+        }
+        EphemeralSecret::generate()
+    }
+
+    fn fail<E>(&mut self, e: ChannelError<E>) -> ChannelError<E> {
+        self.closed = true;
+        e
+    }
+
+    /// Runs the ADR-0035 handshake: generate a fresh ephemeral key, send M1,
+    /// read M2 and R_d, pin-check the daemon key, derive the session, verify
+    /// R_d, send R_c. Returns only once key confirmation succeeded, so no
+    /// application frame is sent or accepted before the keys are confirmed.
+    /// Starts a FRESH session — for a transport-level reconnect that should
+    /// keep the existing session, don't call this again; see
+    /// `crate::relay::client`.
     ///
-    /// `pin_peer_public_key`, when `Some`, rejects a peer hello whose
-    /// public key doesn't match — the pairing-offer pinning check
-    /// `mobile/src/relay/e2ee.ts`'s `handshake()` does via its
-    /// `daemonPublicKeyIfMobile` parameter: a device (mobile role)
-    /// connecting to a specific paired daemon must refuse to complete a
-    /// handshake with anything else, even if the relay/admission layer
-    /// let the connection through. The daemon role passes `None` (it
-    /// accepts any device that reaches it, having already been through
-    /// its own admission check).
+    /// `pin_daemon_public_key`, when `Some`, rejects a daemon hello whose
+    /// static public key doesn't match — the pairing-offer pinning check: a
+    /// device connecting to a specific paired daemon must refuse to complete
+    /// a handshake with anything else, even if the relay let the connection
+    /// through. It is checked before any key agreement.
+    ///
+    /// Any error leaves the channel closed. A concurrent second handshake is
+    /// impossible by construction (`&mut self`).
     pub async fn handshake(
         &mut self,
-        kp: &KeyPair,
-        pin_peer_public_key: Option<&[u8; PUBLIC_KEY_SIZE]>,
+        pin_daemon_public_key: Option<&[u8; PUBLIC_KEY_SIZE]>,
     ) -> Result<(), ChannelError<T::Error>> {
-        if self.established {
+        if self.established.is_some() {
             return Err(ChannelError::AlreadyEstablished);
         }
+        if self.closed {
+            return Err(ChannelError::Closed);
+        }
+        self.closed = true;
+        let (session, established) = self.handshake_inner(pin_daemon_public_key).await?;
+        self.session = Some(session);
+        self.established = Some(established);
+        self.closed = false;
+        Ok(())
+    }
 
-        let hello = crypto::hello_payload(self.role, &kp.public());
+    async fn handshake_inner(
+        &mut self,
+        pin: Option<&[u8; PUBLIC_KEY_SIZE]>,
+    ) -> Result<(Session, Established), ChannelError<T::Error>> {
+        let eph = self.fresh_ephemeral();
+        let client_eph_pub = eph.public();
         self.transport
-            .send_frame(FRAME_HELLO, &hello)
+            .send_frame(FRAME_HELLO, &crypto::client_hello_payload(&client_eph_pub))
             .await
             .map_err(ChannelError::Transport)?;
 
-        let (peer_role, peer_pub) = self.read_hello().await?;
-        if let Some(expected) = pin_peer_public_key {
-            if &peer_pub != expected {
+        let (typ, m2) = recv_handshake_frame(&mut self.transport).await?;
+        if typ != FRAME_HELLO {
+            return Err(ChannelError::Protocol(format!(
+                "expected hello, got frame type 0x{typ:02x}"
+            )));
+        }
+        let (daemon_pub, daemon_eph_pub) = crypto::parse_daemon_hello(&m2).map_err(hello_error)?;
+        // The pin is checked before any key agreement.
+        if let Some(expected) = pin {
+            if &daemon_pub != expected {
                 return Err(ChannelError::PinMismatch);
             }
         }
-        let (daemon_pub, mobile_pub) = if self.role == Role::Mobile {
-            (peer_pub, kp.public())
-        } else {
-            (kp.public(), peer_pub)
-        };
-        let session = Session::new(kp, &peer_pub, self.role, &daemon_pub, &mobile_pub);
-        let _ = peer_role;
 
+        let es = eph.dh(&daemon_pub)?;
+        let ee = eph.dh(&daemon_eph_pub)?;
+        let sched: Schedule =
+            crypto::derive_schedule(&es, &ee, &daemon_pub, &daemon_eph_pub, &client_eph_pub);
+        drop((es, ee, eph));
+        let want_r_d = crypto::confirm_tag(&sched.confirm_d, &sched.th);
+        let r_c = crypto::confirm_tag(&sched.confirm_m, &sched.th);
+
+        loop {
+            let (typ, payload) = recv_handshake_frame(&mut self.transport).await?;
+            match typ {
+                FRAME_READY => {
+                    crypto::check_ready(&payload, &want_r_d).map_err(ready_error)?;
+                    break;
+                }
+                FRAME_HELLO => check_repeated_hello(&payload, &m2)?,
+                other => {
+                    return Err(ChannelError::Protocol(format!(
+                        "expected ready, got frame type 0x{other:02x}"
+                    )))
+                }
+            }
+        }
         self.transport
-            .send_frame(FRAME_READY, &[])
+            .send_frame(FRAME_READY, &r_c)
             .await
             .map_err(ChannelError::Transport)?;
-        self.await_ready(&peer_pub).await?;
 
-        self.peer_pub = Some(peer_pub);
-        self.session = Some(session);
-        self.established = true;
-        Ok(())
+        let session = Session::new(Role::Mobile, &sched);
+        let established = Established {
+            daemon_pub,
+            daemon_eph_pub,
+            client_eph_pub,
+            th: sched.th,
+            m2,
+            r_d: want_r_d,
+        };
+        Ok((session, established))
     }
 
     /// Encrypts and sends one application message.
     pub async fn send(&mut self, msg: &[u8]) -> Result<(), ChannelError<T::Error>> {
+        if self.closed {
+            return Err(ChannelError::Closed);
+        }
         let session = self.session.as_mut().ok_or(ChannelError::NotEstablished)?;
         let (counter, ciphertext) = session.seal(msg)?;
         let mut payload = Vec::with_capacity(8 + ciphertext.len());
@@ -193,117 +341,91 @@ impl<T: FrameTransport> Channel<T> {
     }
 
     /// Reads the next application message, decrypting and replay-checking
-    /// it. A hello frame arriving on an established session is a retry
-    /// (same key) or a rejected rotation attempt (different key); a
-    /// duplicate ready is silently ignored.
+    /// it. A replayed or out-of-order frame returns `Replay` and leaves the
+    /// channel usable; a protocol violation closes it. Handshake frames
+    /// arriving on an established session are handled here (ADR-0035 §4): a
+    /// byte-identical repeat of M2 or R_d is ignored, a different hello is
+    /// `KeyRotation`, a different ready is `HandshakeConfirm`.
     pub async fn receive(&mut self) -> Result<Vec<u8>, ChannelError<T::Error>> {
+        if self.closed {
+            return Err(ChannelError::Closed);
+        }
         if self.session.is_none() {
             return Err(ChannelError::NotEstablished);
         }
         loop {
-            let (typ, payload) = self.recv_frame().await?;
+            let (typ, payload) = self
+                .transport
+                .recv_frame()
+                .await
+                .map_err(ChannelError::Transport)?;
+            let est = self
+                .established
+                .as_ref()
+                .expect("established with the session");
             match typ {
                 FRAME_DATA => {
                     if payload.len() < 8 {
-                        return Err(ChannelError::Protocol(format!(
+                        let e = ChannelError::Protocol(format!(
                             "data frame is {} bytes, want at least 8",
                             payload.len()
-                        )));
+                        ));
+                        return Err(self.fail(e));
                     }
                     let counter = u64::from_be_bytes(payload[0..8].try_into().unwrap());
                     let session = self.session.as_mut().expect("checked above");
                     return Ok(session.open(counter, &payload[8..])?);
                 }
                 FRAME_HELLO => {
-                    let (_, new_pub) = parse_hello_checked(&payload, self.role)?;
-                    if Some(new_pub) != self.peer_pub {
-                        return Err(ChannelError::KeyRotation(
-                            "rotation requires a new session, not an in-session rekey".into(),
-                        ));
+                    if let Err(e) = check_repeated_hello(&payload, &est.m2) {
+                        return Err(self.fail(e));
                     }
-                    self.transport
-                        .send_frame(FRAME_READY, &[])
-                        .await
-                        .map_err(ChannelError::Transport)?;
                 }
                 FRAME_READY => {
-                    // Duplicate ready: harmless, the peer retried its handshake.
-                }
-                other => {
-                    return Err(ChannelError::Protocol(format!(
-                        "unknown frame type 0x{other:02x}"
-                    )));
-                }
-            }
-        }
-    }
-
-    async fn recv_frame(&mut self) -> Result<(u8, Vec<u8>), ChannelError<T::Error>> {
-        self.transport
-            .recv_frame()
-            .await
-            .map_err(ChannelError::Transport)
-    }
-
-    async fn read_hello(
-        &mut self,
-    ) -> Result<(Role, [u8; PUBLIC_KEY_SIZE]), ChannelError<T::Error>> {
-        let (typ, payload) = self.recv_frame().await?;
-        if typ != FRAME_HELLO {
-            return Err(ChannelError::Protocol(format!(
-                "expected hello, got frame type 0x{typ:02x}"
-            )));
-        }
-        parse_hello_checked(&payload, self.role)
-    }
-
-    async fn await_ready(
-        &mut self,
-        peer_pub: &[u8; PUBLIC_KEY_SIZE],
-    ) -> Result<(), ChannelError<T::Error>> {
-        loop {
-            let (typ, payload) = self.recv_frame().await?;
-            match typ {
-                FRAME_READY => return Ok(()),
-                FRAME_HELLO => {
-                    let (_, retry_pub) = parse_hello_checked(&payload, self.role)?;
-                    if &retry_pub != peer_pub {
-                        return Err(ChannelError::KeyRotation(
-                            "peer changed keys mid-handshake".into(),
-                        ));
+                    if let Err(e) = crypto::check_ready(&payload, &est.r_d).map_err(ready_error) {
+                        return Err(self.fail(e));
                     }
-                    self.transport
-                        .send_frame(FRAME_READY, &[])
-                        .await
-                        .map_err(ChannelError::Transport)?;
                 }
                 other => {
-                    return Err(ChannelError::Protocol(format!(
-                        "expected ready, got frame type 0x{other:02x}"
-                    )));
+                    let e = ChannelError::Protocol(format!("unknown frame type 0x{other:02x}"));
+                    return Err(self.fail(e));
                 }
             }
         }
     }
 }
 
-fn parse_hello_checked<E>(
-    payload: &[u8],
-    own_role: Role,
-) -> Result<(Role, [u8; PUBLIC_KEY_SIZE]), ChannelError<E>> {
-    crypto::parse_hello(payload, own_role).map_err(|e| {
-        ChannelError::Protocol(match e {
-            HelloError::WrongLength(n) => {
-                format!("hello is {n} bytes, want {}", crypto::HELLO_PAYLOAD_LEN)
-            }
-            HelloError::WrongVersion(v) => format!(
-                "peer protocol version {v}, want {}",
-                crypto::PROTOCOL_VERSION
-            ),
-            HelloError::UnknownRole(r) => format!("peer sent unknown role {r}"),
-            HelloError::SameRole(r) => format!("peer claims the same role ({r:?}) as this end"),
-        })
-    })
+/// Reads one frame during a handshake, refusing anything over the 128-byte
+/// handshake cap (ADR-0035 §1) so an unauthenticated peer cannot make either
+/// end handle more than the largest legitimate message (M2).
+async fn recv_handshake_frame<T: FrameTransport>(
+    transport: &mut T,
+) -> Result<(u8, Vec<u8>), ChannelError<T::Error>> {
+    let (typ, payload) = transport
+        .recv_frame()
+        .await
+        .map_err(ChannelError::Transport)?;
+    if 1 + payload.len() > MAX_HANDSHAKE_FRAME_LEN {
+        return Err(ChannelError::Protocol(format!(
+            "handshake frame of {} bytes exceeds the {MAX_HANDSHAKE_FRAME_LEN} byte limit",
+            1 + payload.len()
+        )));
+    }
+    Ok((typ, payload))
+}
+
+/// ADR-0035 §4 for a daemon hello that arrives after the first: a
+/// byte-identical repeat is a transport retry, anything else is
+/// `KeyRotation`. Parsed first, so a v1 or malformed repeat is reported as
+/// such rather than as rotation.
+fn check_repeated_hello<E>(payload: &[u8], first: &[u8]) -> Result<(), ChannelError<E>> {
+    crypto::parse_daemon_hello(payload).map_err(hello_error)?;
+    if payload != first {
+        return Err(ChannelError::KeyRotation(
+            "rotation requires a new session, not an in-session rekey".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -406,178 +528,669 @@ pub mod test_pipe {
     }
 }
 
+/// A test-only responder (the daemon end), mirroring Go's `handshakeDaemon`
+/// on the shared pure functions in `crypto`. Production daemons are Go; this
+/// exists so the client can be driven end to end in-process and so the
+/// vector file's `endpoint: "daemon"` negatives run through a real
+/// handshake state machine.
+#[cfg(test)]
+pub(crate) mod test_daemon {
+    use super::*;
+
+    pub struct DaemonSide {
+        pub session: Session,
+        pub th: [u8; 32],
+        pub client_eph_pub: [u8; PUBLIC_KEY_SIZE],
+    }
+
+    /// Responder handshake: read M1, send M2 and R_d, wait for a valid R_c.
+    /// The daemon seals nothing until R_c verifies.
+    pub async fn handshake<T: FrameTransport>(
+        transport: &mut T,
+        daemon_static: &EphemeralSecret,
+        daemon_eph: EphemeralSecret,
+    ) -> Result<DaemonSide, ChannelError<T::Error>> {
+        let (typ, m1) = recv_handshake_frame(transport).await?;
+        if typ != FRAME_HELLO {
+            return Err(ChannelError::Protocol(format!(
+                "expected hello, got frame type 0x{typ:02x}"
+            )));
+        }
+        let client_eph_pub = crypto::parse_client_hello(&m1).map_err(hello_error)?;
+        let (daemon_pub, daemon_eph_pub) = (daemon_static.public(), daemon_eph.public());
+        let es = daemon_static.dh(&client_eph_pub)?;
+        let ee = daemon_eph.dh(&client_eph_pub)?;
+        let sched =
+            crypto::derive_schedule(&es, &ee, &daemon_pub, &daemon_eph_pub, &client_eph_pub);
+        let m2 = crypto::daemon_hello_payload(&daemon_pub, &daemon_eph_pub);
+        let r_d = crypto::confirm_tag(&sched.confirm_d, &sched.th);
+        let want_r_c = crypto::confirm_tag(&sched.confirm_m, &sched.th);
+        let send = |typ, payload: Vec<u8>| (typ, payload);
+        for (typ, payload) in [
+            send(FRAME_HELLO, m2.to_vec()),
+            send(FRAME_READY, r_d.to_vec()),
+        ] {
+            transport
+                .send_frame(typ, &payload)
+                .await
+                .map_err(ChannelError::Transport)?;
+        }
+        loop {
+            let (typ, payload) = recv_handshake_frame(transport).await?;
+            match typ {
+                FRAME_READY => {
+                    crypto::check_ready(&payload, &want_r_c).map_err(ready_error)?;
+                    return Ok(DaemonSide {
+                        session: Session::new(Role::Daemon, &sched),
+                        th: sched.th,
+                        client_eph_pub,
+                    });
+                }
+                FRAME_HELLO => {
+                    crypto::parse_client_hello(&payload).map_err(hello_error)?;
+                    if payload != m1 {
+                        return Err(ChannelError::KeyRotation("different M1".into()));
+                    }
+                    transport
+                        .send_frame(FRAME_HELLO, &m2)
+                        .await
+                        .map_err(ChannelError::Transport)?;
+                    transport
+                        .send_frame(FRAME_READY, &r_d)
+                        .await
+                        .map_err(ChannelError::Transport)?;
+                }
+                other => {
+                    return Err(ChannelError::Protocol(format!(
+                        "expected ready, got frame type 0x{other:02x}"
+                    )))
+                }
+            }
+        }
+    }
+
+    /// An established test daemon over `T`, with the message-level `send` /
+    /// `receive` the hello tests drive (the daemon seals nothing before
+    /// R_c verified, and these only exist after it).
+    pub struct DaemonPeer<T: FrameTransport> {
+        pub transport: T,
+        pub side: DaemonSide,
+        pub daemon_pub: [u8; PUBLIC_KEY_SIZE],
+    }
+
+    impl<T: FrameTransport> DaemonPeer<T> {
+        /// Runs the responder handshake with the static key from `static_seed`
+        /// and a fresh daemon ephemeral; panics if it fails.
+        pub async fn establish(mut transport: T, static_seed: [u8; 32]) -> Self {
+            let static_secret = EphemeralSecret::from_seed(static_seed);
+            let side = handshake(&mut transport, &static_secret, EphemeralSecret::generate())
+                .await
+                .unwrap_or_else(|e| panic!("test daemon handshake: {}", e));
+            Self {
+                transport,
+                side,
+                daemon_pub: static_secret.public(),
+            }
+        }
+
+        pub async fn send(&mut self, msg: &[u8]) -> Result<(), T::Error> {
+            let payload = self.side.seal_frame(msg);
+            self.transport.send_frame(FRAME_DATA, &payload).await
+        }
+
+        pub async fn receive(&mut self) -> Vec<u8> {
+            loop {
+                let (typ, payload) = self.transport.recv_frame().await.ok().expect("daemon recv");
+                if typ == FRAME_DATA {
+                    return self.side.open_frame(&payload);
+                }
+            }
+        }
+    }
+
+    impl DaemonSide {
+        pub fn seal_frame(&mut self, msg: &[u8]) -> Vec<u8> {
+            let (counter, ct) = self.session.seal(msg).unwrap();
+            let mut payload = counter.to_be_bytes().to_vec();
+            payload.extend_from_slice(&ct);
+            payload
+        }
+
+        pub fn open_frame(&mut self, payload: &[u8]) -> Vec<u8> {
+            let counter = u64::from_be_bytes(payload[..8].try_into().unwrap());
+            self.session.open(counter, &payload[8..]).unwrap()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::test_pipe::{pipe, send_raw};
+    use super::test_daemon;
+    use super::test_pipe::pipe;
     use super::*;
-    use crate::relay::crypto::{hello_payload, KeyPair};
+    use crate::relay::crypto::testvec::{arr32, bytes, hex_decode, hex_encode, load, seed};
+    use crate::relay::crypto::{decode_frame, encode_frame};
+    use serde_json::Value;
+    use std::collections::VecDeque;
 
-    fn kp(seed: u8) -> KeyPair {
-        KeyPair::from_seed([seed; 32])
+    // ---- scripted raw transport: what the peer sends, as raw wire bytes ----
+
+    #[derive(Debug)]
+    enum RawErr {
+        /// The relay envelope did not hold exactly one whole frame.
+        Frame(FrameError),
+        /// The script ran out: the peer's stream ended.
+        Closed,
     }
 
+    impl std::fmt::Display for RawErr {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                RawErr::Frame(e) => write!(f, "{e}"),
+                RawErr::Closed => write!(f, "stream closed"),
+            }
+        }
+    }
+
+    struct RawTransport {
+        incoming: VecDeque<Vec<u8>>,
+        sent: Vec<(u8, Vec<u8>)>,
+    }
+
+    impl RawTransport {
+        fn new(frames: Vec<Vec<u8>>) -> Self {
+            Self {
+                incoming: frames.into(),
+                sent: vec![],
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl FrameTransport for RawTransport {
+        type Error = RawErr;
+
+        async fn send_frame(&mut self, frame_type: u8, payload: &[u8]) -> Result<(), RawErr> {
+            self.sent.push((frame_type, payload.to_vec()));
+            Ok(())
+        }
+
+        async fn recv_frame(&mut self) -> Result<(u8, Vec<u8>), RawErr> {
+            let raw = self.incoming.pop_front().ok_or(RawErr::Closed)?;
+            let (typ, payload) = decode_frame(&raw).map_err(RawErr::Frame)?;
+            Ok((typ, payload.to_vec()))
+        }
+    }
+
+    fn kind<T>(r: &Result<T, ChannelError<RawErr>>) -> String {
+        match r {
+            Ok(_) => "none".into(),
+            Err(ChannelError::UnsupportedVersion { .. }) => "unsupported_version".into(),
+            Err(ChannelError::PinMismatch) => "peer_key_mismatch".into(),
+            Err(ChannelError::HandshakeConfirm) => "handshake_confirm".into(),
+            Err(ChannelError::KeyAgreement) => "key_agreement".into(),
+            Err(ChannelError::Protocol(_) | ChannelError::Frame(_)) => "protocol".into(),
+            Err(ChannelError::Transport(RawErr::Frame(_))) => "protocol".into(),
+            Err(e) => format!("other: {e}"),
+        }
+    }
+
+    fn written(sent: &[(u8, Vec<u8>)]) -> Vec<&'static str> {
+        sent.iter()
+            .map(|(t, _)| match *t {
+                FRAME_HELLO => "hello",
+                FRAME_READY => "ready",
+                _ => "data",
+            })
+            .collect()
+    }
+
+    fn frame(v: &Value, key: &str) -> Vec<u8> {
+        bytes(v, key)
+    }
+
+    fn scripted_client(v: &Value, frames: Vec<Vec<u8>>) -> Channel<RawTransport> {
+        let mut c = Channel::new(RawTransport::new(frames));
+        c.seed_ephemeral(seed(v, "client_eph"));
+        c
+    }
+
+    fn pin(v: &Value) -> [u8; 32] {
+        arr32(&v["public_keys"], "daemon_static")
+    }
+
+    fn flip(frame: &[u8], offset: usize) -> Vec<u8> {
+        let mut f = frame.to_vec();
+        f[offset] ^= 0x01;
+        f
+    }
+
+    // ---- every vector in the file ----
+
+    /// Reproduces session A byte for byte through the real client channel:
+    /// M1/R_c written, th and keys equal the vector, and the vector's sealed
+    /// data frames decrypt (daemon to client) and re-seal (client to daemon).
     #[tokio::test]
-    async fn handshake_and_round_trip() {
-        let (a, b) = pipe();
-        let mut daemon = Channel::new(a, Role::Daemon);
-        let mut mobile = Channel::new(b, Role::Mobile);
-        let daemon_kp = kp(1);
-        let mobile_kp = kp(2);
+    async fn client_handshake_reproduces_the_vector_session() {
+        let v = load();
+        let mut c = scripted_client(
+            &v,
+            vec![frame(&v, "m2_frame_hex"), frame(&v, "r_d_frame_hex")],
+        );
+        c.handshake(Some(&pin(&v))).await.unwrap();
+        assert!(c.established());
+        assert_eq!(c.transcript_hash().unwrap(), arr32(&v, "th"));
+        assert_eq!(c.daemon_public_key().unwrap(), pin(&v));
+        assert_eq!(
+            c.client_ephemeral_public_key().unwrap(),
+            arr32(&v["public_keys"], "client_eph")
+        );
+        assert_eq!(
+            c.daemon_ephemeral_public_key().unwrap(),
+            arr32(&v["public_keys"], "daemon_eph")
+        );
+
+        let sent: Vec<Vec<u8>> = c
+            .transport_mut()
+            .sent
+            .iter()
+            .map(|(t, p)| encode_frame(*t, p))
+            .collect();
+        assert_eq!(
+            sent,
+            vec![frame(&v, "m1_frame_hex"), frame(&v, "r_c_frame_hex")]
+        );
+
+        for (d, m) in v["data"]["d2m"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(v["data"]["m2d"].as_array().unwrap())
+        {
+            c.transport_mut().incoming.push_back(frame(d, "frame_hex"));
+            assert_eq!(c.receive().await.unwrap(), bytes(d, "plaintext_hex"));
+            c.send(&bytes(m, "plaintext_hex")).await.unwrap();
+            let (t, p) = c.transport_mut().sent.last().unwrap().clone();
+            assert_eq!(
+                hex_encode(&encode_frame(t, &p)),
+                m["frame_hex"].as_str().unwrap()
+            );
+        }
+    }
+
+    /// Every entry of `negative` runs through a real channel; none is skipped.
+    /// `endpoint: "client"` drives `Channel::handshake`; `endpoint: "daemon"`
+    /// drives the test-only responder in `test_daemon` (production daemons are
+    /// Go), both over `RawTransport`, where each `frames_hex` entry is one
+    /// relay envelope. The wire-framing negatives (zero length, oversized
+    /// header, truncated frame) therefore surface as a transport-level
+    /// `FrameError`, which maps to kind `protocol` exactly as Go's length
+    /// checks do; `close_after` has no separate effect because the script
+    /// ending is already a closed stream.
+    #[tokio::test]
+    async fn every_negative_vector_runs_through_a_real_handshake() {
+        let v = load();
+        let negatives = v["negative"].as_array().unwrap();
+        assert!(negatives.len() >= 30, "vector file lost its negatives");
+        let mut consumed = 0;
+        for n in negatives {
+            let name = n["name"].as_str().unwrap();
+            let frames: Vec<Vec<u8>> = n["frames_hex"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|f| hex_decode(f.as_str().unwrap()))
+                .collect();
+            let (kind_got, sent, peer_version) = match n["endpoint"].as_str().unwrap() {
+                "client" => {
+                    let mut c = scripted_client(&v, frames);
+                    let pin_bytes = n
+                        .get("pin_hex")
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty());
+                    let pin: Option<[u8; 32]> =
+                        pin_bytes.map(|h| hex_decode(h).try_into().unwrap());
+                    let r = c.handshake(pin.as_ref()).await;
+                    assert!(!c.established(), "{name}: must not establish");
+                    let version = match &r {
+                        Err(ChannelError::UnsupportedVersion { peer }) => Some(*peer as i64),
+                        _ => None,
+                    };
+                    (kind(&r), c.transport_mut().sent.clone(), version)
+                }
+                "daemon" => {
+                    let mut t = RawTransport::new(frames);
+                    let static_secret = EphemeralSecret::from_seed(seed(&v, "daemon_static"));
+                    let eph = EphemeralSecret::from_seed(seed(&v, "daemon_eph"));
+                    let r = test_daemon::handshake(&mut t, &static_secret, eph).await;
+                    let version = match &r {
+                        Err(ChannelError::UnsupportedVersion { peer }) => Some(*peer as i64),
+                        _ => None,
+                    };
+                    (kind(&r), t.sent.clone(), version)
+                }
+                other => panic!("{name}: unknown endpoint {other}"),
+            };
+            assert_eq!(
+                kind_got,
+                n["expect"].as_str().unwrap(),
+                "{name}: error kind"
+            );
+            if let Some(want) = n.get("expect_peer_version").and_then(Value::as_i64) {
+                assert_eq!(peer_version, Some(want), "{name}: peer version");
+            }
+            let want: Vec<&str> = n["expect_written"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|w| match w.as_str().unwrap() {
+                    "m1" | "m2" => "hello",
+                    "r_d" | "r_c" => "ready",
+                    other => other,
+                })
+                .collect();
+            assert_eq!(written(&sent), want, "{name}: frames written");
+            consumed += 1;
+        }
+        assert_eq!(consumed, negatives.len());
+    }
+
+    // ---- named behaviours (ADR-0035 §7/§8, plan test list) ----
+
+    #[tokio::test]
+    async fn handshake_and_round_trip_with_a_responder() {
+        let v = load();
+        let (a, mut b) = pipe();
+        let mut client = Channel::new(a);
+        let daemon_static = EphemeralSecret::from_seed(seed(&v, "daemon_static"));
+        let daemon_eph = EphemeralSecret::from_seed(seed(&v, "daemon_eph"));
+        let daemon_pub = daemon_static.public();
 
         let (r1, r2) = tokio::join!(
-            daemon.handshake(&daemon_kp, None),
-            mobile.handshake(&mobile_kp, None)
+            client.handshake(Some(&daemon_pub)),
+            test_daemon::handshake(&mut b, &daemon_static, daemon_eph)
         );
         r1.unwrap();
-        r2.unwrap();
-        assert!(daemon.established());
-        assert!(mobile.established());
-        assert_eq!(daemon.peer_public_key().unwrap(), mobile_kp.public());
-        assert_eq!(mobile.peer_public_key().unwrap(), daemon_kp.public());
+        let mut daemon = r2.unwrap();
+        assert_eq!(client.transcript_hash().unwrap(), daemon.th);
+        assert_eq!(
+            client.client_ephemeral_public_key().unwrap(),
+            daemon.client_eph_pub
+        );
 
-        daemon.send(b"hello mobile").await.unwrap();
-        let got = mobile.receive().await.unwrap();
-        assert_eq!(got, b"hello mobile");
-
-        mobile.send(b"hello daemon").await.unwrap();
-        let got = daemon.receive().await.unwrap();
-        assert_eq!(got, b"hello daemon");
+        let payload = daemon.seal_frame(b"hello client");
+        crate::relay::channel::test_pipe::send_raw(&b, FRAME_DATA, payload);
+        assert_eq!(client.receive().await.unwrap(), b"hello client");
+        client.send(b"hello daemon").await.unwrap();
+        let (typ, payload) = b.recv_frame().await.unwrap();
+        assert_eq!(typ, FRAME_DATA);
+        assert_eq!(daemon.open_frame(&payload), b"hello daemon");
     }
 
     #[tokio::test]
-    async fn handshake_pins_expected_peer_public_key() {
-        let (a, b) = pipe();
-        let mut daemon = Channel::new(a, Role::Daemon);
-        let mut mobile = Channel::new(b, Role::Mobile);
-        let daemon_kp = kp(1);
-        let mobile_kp = kp(2);
-        let daemon_pub = daemon_kp.public();
-
-        let (r1, r2) = tokio::join!(
-            daemon.handshake(&daemon_kp, None),
-            mobile.handshake(&mobile_kp, Some(&daemon_pub))
-        );
-        r1.unwrap();
-        r2.unwrap();
-        assert!(mobile.established());
+    async fn tampered_daemon_eph_fails_handshake() {
+        let v = load();
+        let m2 = frame(&v, "m2_frame_hex");
+        // frame header (5) + version/role (2) + daemon_pub (32): first byte of daemon_eph.
+        let mut c = scripted_client(&v, vec![flip(&m2, 5 + 2 + 32), frame(&v, "r_d_frame_hex")]);
+        let r = c.handshake(Some(&pin(&v))).await;
+        assert!(matches!(r, Err(ChannelError::HandshakeConfirm)), "{r:?}");
+        assert!(!c.established());
     }
 
     #[tokio::test]
-    async fn handshake_rejects_wrong_pinned_peer_public_key() {
-        let (a, b) = pipe();
-        let mut daemon = Channel::new(a, Role::Daemon);
-        let mut mobile = Channel::new(b, Role::Mobile);
-        let daemon_kp = kp(1);
-        let mobile_kp = kp(2);
-        let wrong_expected_daemon_pub = kp(99).public();
-
-        // Only mobile's side is asserted on: it must reject before ever
-        // reading a ready frame, so daemon's own handshake never
-        // completes (mobile stops mid-handshake) -- run it in the
-        // background rather than joining it, or the two futures would
-        // deadlock waiting on each other.
-        tokio::spawn(async move {
-            let _ = daemon.handshake(&daemon_kp, None).await;
-        });
-        let err = mobile
-            .handshake(&mobile_kp, Some(&wrong_expected_daemon_pub))
-            .await
-            .unwrap_err();
-        assert!(matches!(err, ChannelError::PinMismatch));
+    async fn wrong_static_key_or_pin_mismatch_fails_before_any_dh() {
+        let v = load();
+        // M2 from the real daemon, pin = someone else: nothing but M1 goes out.
+        let other = EphemeralSecret::from_seed([0x55; 32]).public();
+        let mut c = scripted_client(
+            &v,
+            vec![frame(&v, "m2_frame_hex"), frame(&v, "r_d_frame_hex")],
+        );
+        let r = c.handshake(Some(&other)).await;
+        assert!(matches!(r, Err(ChannelError::PinMismatch)), "{r:?}");
+        assert_eq!(written(&c.transport_mut().sent), ["hello"]);
+        // A low-order daemon static key with a mismatching pin is a pin error,
+        // not a key agreement error: the pin comes first.
+        let zero_m2 = encode_frame(
+            FRAME_HELLO,
+            &crypto::daemon_hello_payload(&[0; 32], &arr32(&v["public_keys"], "daemon_eph")),
+        );
+        let mut c = scripted_client(&v, vec![zero_m2]);
+        let r = c.handshake(Some(&pin(&v))).await;
+        assert!(matches!(r, Err(ChannelError::PinMismatch)), "{r:?}");
     }
 
     #[tokio::test]
-    async fn duplicate_hello_with_same_key_is_tolerated_before_ready() {
-        let (a, b) = pipe();
-        let mut daemon = Channel::new(a, Role::Daemon);
-        let daemon_kp = kp(1);
-        let mobile_kp = kp(2);
-
-        // Simulate the mobile side racing two hellos with the *same* key
-        // (peer never observed our ready) before ever sending ready.
-        let hello = hello_payload(Role::Mobile, &mobile_kp.public());
-        send_raw(&b, crypto::FRAME_HELLO, hello.clone());
-        send_raw(&b, crypto::FRAME_HELLO, hello);
-        send_raw(&b, crypto::FRAME_READY, vec![]);
-
-        daemon.handshake(&daemon_kp, None).await.unwrap();
-        assert!(daemon.established());
+    async fn forged_r_d_fails() {
+        let v = load();
+        let r_d = frame(&v, "r_d_frame_hex");
+        let mut c = scripted_client(
+            &v,
+            vec![frame(&v, "m2_frame_hex"), flip(&r_d, r_d.len() - 1)],
+        );
+        let r = c.handshake(Some(&pin(&v))).await;
+        assert!(matches!(r, Err(ChannelError::HandshakeConfirm)), "{r:?}");
+        assert_eq!(
+            written(&c.transport_mut().sent),
+            ["hello"],
+            "no R_c for a forged R_d"
+        );
     }
 
     #[tokio::test]
-    async fn hello_with_different_key_before_ready_is_rejected() {
-        let (a, b) = pipe();
-        let mut daemon = Channel::new(a, Role::Daemon);
-        let daemon_kp = kp(1);
-        let mobile_kp = kp(2);
-        let other_kp = kp(3);
-
-        send_raw(
-            &b,
-            crypto::FRAME_HELLO,
-            hello_payload(Role::Mobile, &mobile_kp.public()),
+    async fn downgrade_refused_v1_hello_from_daemon() {
+        let v = load();
+        let mut v1 = vec![1u8, 1];
+        v1.extend_from_slice(&pin(&v));
+        let mut c = scripted_client(&v, vec![encode_frame(FRAME_HELLO, &v1)]);
+        let r = c.handshake(None).await;
+        assert!(
+            matches!(r, Err(ChannelError::UnsupportedVersion { peer: 1 })),
+            "{r:?}"
         );
-        send_raw(
-            &b,
-            crypto::FRAME_HELLO,
-            hello_payload(Role::Mobile, &other_kp.public()),
-        );
-
-        let err = daemon.handshake(&daemon_kp, None).await.unwrap_err();
-        assert!(matches!(err, ChannelError::KeyRotation(_)), "got {err:?}");
+        assert_eq!(written(&c.transport_mut().sent), ["hello"]);
+        // The channel is dead: no second handshake over it.
+        let again = c.handshake(None).await;
+        assert!(matches!(again, Err(ChannelError::Closed)), "{again:?}");
     }
 
     #[tokio::test]
-    async fn rehello_with_same_key_on_established_session_is_tolerated() {
-        let (a, b) = pipe();
-        let raw_to_daemon = b.raw_sender(); // pushes onto the queue `a` (daemon) reads
-        let mut daemon = Channel::new(a, Role::Daemon);
-        let mut mobile = Channel::new(b, Role::Mobile);
-        let daemon_kp = kp(1);
-        let mobile_kp = kp(2);
-        let (r1, r2) = tokio::join!(
-            daemon.handshake(&daemon_kp, None),
-            mobile.handshake(&mobile_kp, None)
-        );
-        r1.unwrap();
-        r2.unwrap();
+    async fn downgrade_refused_v1_hello_to_daemon_and_newer_peer_is_distinguished() {
+        let v = load();
+        let mut t = RawTransport::new(vec![encode_frame(
+            FRAME_HELLO,
+            &[&[1u8, 2][..], &arr32(&v["public_keys"], "client_eph")].concat(),
+        )]);
+        let static_secret = EphemeralSecret::from_seed(seed(&v, "daemon_static"));
+        let r = test_daemon::handshake(
+            &mut t,
+            &static_secret,
+            EphemeralSecret::from_seed(seed(&v, "daemon_eph")),
+        )
+        .await;
+        assert!(matches!(
+            r,
+            Err(ChannelError::UnsupportedVersion { peer: 1 })
+        ));
+        assert!(t.sent.is_empty(), "a v1 client gets no reply at all");
 
-        // A duplicate hello with the *same* key, as if mobile never saw
-        // our ready and retried: daemon must tolerate it (re-ack with
-        // ready, session stays usable), not tear the channel down.
-        raw_to_daemon.send(
-            crypto::FRAME_HELLO,
-            hello_payload(Role::Mobile, &mobile_kp.public()),
+        let mut v3 = vec![3u8, 1];
+        v3.extend_from_slice(&pin(&v));
+        let mut c = scripted_client(&v, vec![encode_frame(FRAME_HELLO, &v3)]);
+        let r = c.handshake(None).await;
+        assert!(
+            matches!(r, Err(ChannelError::UnsupportedVersion { peer: 3 })),
+            "{r:?}"
         );
-        mobile.send(b"still works").await.unwrap();
-        let got = daemon.receive().await.unwrap();
-        assert_eq!(got, b"still works");
     }
 
     #[tokio::test]
-    async fn rehello_with_different_key_after_established_is_rejected() {
-        let (a, b) = pipe();
-        let raw_to_daemon = b.raw_sender();
-        let mut daemon = Channel::new(a, Role::Daemon);
-        let mut mobile = Channel::new(b, Role::Mobile);
-        let daemon_kp = kp(1);
-        let mobile_kp = kp(2);
-        let other_kp = kp(3);
-        let (r1, r2) = tokio::join!(
-            daemon.handshake(&daemon_kp, None),
-            mobile.handshake(&mobile_kp, None)
+    async fn empty_ready_is_protocol_error() {
+        let v = load();
+        let mut c = scripted_client(
+            &v,
+            vec![frame(&v, "m2_frame_hex"), encode_frame(FRAME_READY, &[])],
         );
-        r1.unwrap();
-        r2.unwrap();
+        let r = c.handshake(Some(&pin(&v))).await;
+        assert!(matches!(r, Err(ChannelError::Protocol(_))), "{r:?}");
+    }
 
-        // A rogue re-handshake with a *different* key: daemon must reject
-        // it as rotation, per ADR-0007 (e) (a new session, never an
-        // in-place rekey).
-        raw_to_daemon.send(
-            crypto::FRAME_HELLO,
-            hello_payload(Role::Mobile, &other_kp.public()),
+    #[tokio::test]
+    async fn low_order_ephemeral_rejected_on_both_dh_outputs() {
+        let v = load();
+        let real_static = pin(&v);
+        let real_eph = arr32(&v["public_keys"], "daemon_eph");
+        // ee = DH(client eph, zero) and es = DH(client eph, zero), unpinned.
+        for m2 in [
+            crypto::daemon_hello_payload(&real_static, &[0; 32]),
+            crypto::daemon_hello_payload(&[0; 32], &real_eph),
+        ] {
+            let mut c = scripted_client(&v, vec![encode_frame(FRAME_HELLO, &m2)]);
+            let r = c.handshake(None).await;
+            assert!(matches!(r, Err(ChannelError::KeyAgreement)), "{r:?}");
+            assert_eq!(written(&c.transport_mut().sent), ["hello"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn duplicate_m2_and_r_d_are_tolerated_but_a_different_m2_is_key_rotation() {
+        let v = load();
+        let m2 = frame(&v, "m2_frame_hex");
+        let r_d = frame(&v, "r_d_frame_hex");
+
+        // Before R_d: an identical M2 repeat is ignored.
+        let mut c = scripted_client(&v, vec![m2.clone(), m2.clone(), r_d.clone()]);
+        c.handshake(Some(&pin(&v))).await.unwrap();
+
+        // After establishment: identical M2 and R_d repeats are ignored, data still flows.
+        c.transport_mut().incoming.extend([
+            m2.clone(),
+            r_d.clone(),
+            frame(&v["data"]["d2m"][0], "frame_hex"),
+        ]);
+        assert_eq!(
+            c.receive().await.unwrap(),
+            bytes(&v["data"]["d2m"][0], "plaintext_hex")
         );
-        let err = daemon.receive().await.unwrap_err();
-        assert!(matches!(err, ChannelError::KeyRotation(_)), "got {err:?}");
+
+        // A different R_d on the established session fails confirmation and closes it.
+        c.transport_mut()
+            .incoming
+            .push_back(flip(&r_d, r_d.len() - 1));
+        let r = c.receive().await;
+        assert!(matches!(r, Err(ChannelError::HandshakeConfirm)), "{r:?}");
+        assert!(matches!(c.receive().await, Err(ChannelError::Closed)));
+
+        // A different M2 before R_d is rotation.
+        let other = flip(&m2, m2.len() - 1);
+        let mut c = scripted_client(&v, vec![m2.clone(), other.clone()]);
+        let r = c.handshake(None).await;
+        assert!(matches!(r, Err(ChannelError::KeyRotation(_))), "{r:?}");
+
+        // A different M2 on an established session is rotation too.
+        let mut c = scripted_client(&v, vec![m2, r_d]);
+        c.handshake(Some(&pin(&v))).await.unwrap();
+        c.transport_mut().incoming.push_back(other);
+        let r = c.receive().await;
+        assert!(matches!(r, Err(ChannelError::KeyRotation(_))), "{r:?}");
+    }
+
+    #[tokio::test]
+    async fn no_data_before_ready() {
+        let v = load();
+        // A data frame where R_d is expected.
+        let mut c = scripted_client(
+            &v,
+            vec![
+                frame(&v, "m2_frame_hex"),
+                encode_frame(FRAME_DATA, &[0; 40]),
+            ],
+        );
+        let r = c.handshake(Some(&pin(&v))).await;
+        assert!(matches!(r, Err(ChannelError::Protocol(_))), "{r:?}");
+        assert!(!c.established());
+        // Before (or after a failed) handshake the channel neither sends nor receives.
+        let mut fresh = scripted_client(&v, vec![]);
+        assert!(matches!(
+            fresh.send(b"x").await,
+            Err(ChannelError::NotEstablished)
+        ));
+        assert!(matches!(
+            fresh.receive().await,
+            Err(ChannelError::NotEstablished)
+        ));
+        assert!(matches!(c.send(b"x").await, Err(ChannelError::Closed)));
+        assert!(fresh.transport_mut().sent.is_empty());
+    }
+
+    #[tokio::test]
+    async fn handshake_frames_are_capped_at_128_bytes() {
+        let v = load();
+        let mut big =
+            crypto::daemon_hello_payload(&pin(&v), &arr32(&v["public_keys"], "daemon_eph"))
+                .to_vec();
+        big.resize(200, 0);
+        let mut c = scripted_client(&v, vec![encode_frame(FRAME_HELLO, &big)]);
+        let r = c.handshake(None).await;
+        assert!(
+            matches!(&r, Err(ChannelError::Protocol(m)) if m.contains("128")),
+            "{r:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_ephemeral_is_never_reused_across_handshakes() {
+        // Two real (unseeded) handshakes: each draws its own ephemeral.
+        let mut m1s = vec![];
+        for _ in 0..2 {
+            let mut c = Channel::new(RawTransport::new(vec![]));
+            let _ = c.handshake(None).await; // fails on the empty script, after M1 went out
+            let (t, p) = c.transport_mut().sent[0].clone();
+            assert_eq!(t, FRAME_HELLO);
+            m1s.push(p);
+        }
+        assert_ne!(
+            m1s[0], m1s[1],
+            "two handshakes sent the same client ephemeral"
+        );
+        // And one channel cannot be handshaken twice.
+        let mut c = Channel::new(RawTransport::new(vec![]));
+        let _ = c.handshake(None).await;
+        assert!(matches!(c.handshake(None).await, Err(ChannelError::Closed)));
+        assert_eq!(c.transport_mut().sent.len(), 1);
+    }
+
+    /// Replaying a recorded M1 into a new responder yields different keys and
+    /// the responder writes only M2 and R_d, never a data frame; without the
+    /// client's ephemeral secret the replayer cannot produce R_c (the vector
+    /// `wrong_r_c` covers the rejection byte for byte).
+    #[tokio::test]
+    async fn replayed_m1_gets_no_data_and_fresh_keys() {
+        let v = load();
+        let m1 = frame(&v, "m1_frame_hex");
+        let static_secret = EphemeralSecret::from_seed(seed(&v, "daemon_static"));
+        let mut th = vec![];
+        for eph_seed in ["daemon_eph", "daemon_eph_replay"] {
+            let mut t = RawTransport::new(vec![m1.clone()]);
+            let r = test_daemon::handshake(
+                &mut t,
+                &static_secret,
+                EphemeralSecret::from_seed(seed(&v, eph_seed)),
+            )
+            .await;
+            assert!(
+                matches!(r, Err(ChannelError::Transport(RawErr::Closed))),
+                "waiting for R_c"
+            );
+            assert_eq!(written(&t.sent), ["hello", "ready"]);
+            let (dpub, deph) = crypto::parse_daemon_hello(&t.sent[0].1).unwrap();
+            th.push(crypto::transcript_hash(
+                &dpub,
+                &deph,
+                &arr32(&v["public_keys"], "client_eph"),
+            ));
+        }
+        assert_ne!(th[0], th[1]);
     }
 }

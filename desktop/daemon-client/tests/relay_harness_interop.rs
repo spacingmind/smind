@@ -18,7 +18,6 @@ use std::time::{Duration, Instant};
 
 use smind_daemon_client::relay::channel::Channel;
 use smind_daemon_client::relay::client as relay_client;
-use smind_daemon_client::relay::crypto::{KeyPair, Role};
 use smind_daemon_client::relay::pairing::Offer;
 use smind_daemon_client::relay::pairing_store::RelayPairing;
 use smind_daemon_client::relay::relaypb::relay_client::RelayClient as GrpcRelayClient;
@@ -137,7 +136,6 @@ fn parse_response(bytes: &[u8], expect_id: &str) -> serde_json::Value {
 }
 
 #[tokio::test]
-#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn pairs_handshakes_round_trips_and_resumes_after_a_transport_drop() {
     let harness = tokio::task::spawn_blocking(start_harness)
         .await
@@ -189,19 +187,19 @@ async fn pairs_handshakes_round_trips_and_resumes_after_a_transport_drop() {
     )
     .await;
     eprintln!("[interop] opened data stream");
-    let kp = KeyPair::generate();
-    let mut channel = Channel::new(transport, Role::Mobile);
+    let mut channel = Channel::new(transport);
     step(
         "handshake",
-        channel.handshake(&kp, Some(&pairing.daemon_public_key)),
+        channel.handshake(Some(&pairing.daemon_public_key)),
     )
     .await;
     eprintln!("[interop] handshake established");
     assert!(channel.established());
     assert_eq!(
-        channel.peer_public_key().unwrap(),
+        channel.daemon_public_key().unwrap(),
         pairing.daemon_public_key
     );
+    assert_eq!(channel.transcript_hash().unwrap().len(), 32);
 
     // --- a real JSON-RPC round trip through the bridged channel ---
     step(

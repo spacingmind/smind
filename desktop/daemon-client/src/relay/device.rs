@@ -19,7 +19,6 @@ use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::relay::crypto::transcript_hash;
 use crate::relay::pairing_store::{restrict_dir, set_restrictive_permissions, write_private};
 
 pub const HELLO_METHOD: &str = "relay.device_hello";
@@ -89,12 +88,13 @@ impl DeviceKey {
     }
 
     /// Signs the v2 bytes (see [`hello_signed_bytes`]): bound to the E2EE
-    /// session, the relay route's `session_id` and the daemon's challenge.
+    /// session (`th`, taken from the established channel), the relay route's
+    /// `session_id` and the daemon's challenge.
     pub fn hello(
         &self,
         label: &str,
         daemon_pub: &[u8; 32],
-        mobile_pub: &[u8; 32],
+        th: &[u8; 32],
         session_id: &str,
         challenge: &[u8; CHALLENGE_LEN],
     ) -> Hello {
@@ -104,7 +104,7 @@ impl DeviceKey {
             label: label.to_string(),
             signature: self
                 .key
-                .sign(&hello_signed_bytes(daemon_pub, mobile_pub, session_id, challenge))
+                .sign(&hello_signed_bytes(daemon_pub, th, session_id, challenge))
                 .to_bytes()
                 .to_vec(),
         }
@@ -140,12 +140,14 @@ mod std_b64 {
     }
 }
 
-/// "smind-device-hello-v2" ‖ transcript_hash ‖ daemon_pub ‖
+/// "smind-device-hello-v2" ‖ th ‖ daemon_pub ‖
 /// uint16BE(len(session_id)) ‖ session_id ‖ challenge — the Go
-/// `devices.HelloSignedBytes`, byte for byte.
+/// `devices.HelloSignedBytes`, byte for byte. `th` is the established
+/// channel's transcript hash (ADR-0035 §2, `Channel::transcript_hash`),
+/// never recomputed here.
 pub fn hello_signed_bytes(
     daemon_pub: &[u8; 32],
-    mobile_pub: &[u8; 32],
+    th: &[u8; 32],
     session_id: &str,
     challenge: &[u8; CHALLENGE_LEN],
 ) -> Vec<u8> {
@@ -153,7 +155,7 @@ pub fn hello_signed_bytes(
     let sid_len = u16::try_from(sid.len()).expect("session id longer than 65535 bytes");
     let mut out = Vec::with_capacity(HELLO_DOMAIN.len() + 64 + 2 + sid.len() + CHALLENGE_LEN);
     out.extend_from_slice(HELLO_DOMAIN);
-    out.extend_from_slice(&transcript_hash(daemon_pub, mobile_pub));
+    out.extend_from_slice(th);
     out.extend_from_slice(daemon_pub);
     out.extend_from_slice(&sid_len.to_be_bytes());
     out.extend_from_slice(sid);
@@ -453,13 +455,19 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "E2EE v2 pending in this client (ADR-0035)"]
     fn device_hello_signature_verifies_against_go_vector() {
         let v: Value = serde_json::from_str(VECTOR).unwrap();
         let s = |k: &str| v[k].as_str().unwrap().to_string();
         assert_eq!(v["version"], 2);
         let key = DeviceKey::from_seed(arr(&s("seed_hex")));
-        let (daemon, mobile) = (arr(&s("daemon_pub_hex")), arr(&s("mobile_pub_hex")));
+        let (daemon, daemon_eph, mobile) = (
+            arr(&s("daemon_pub_hex")),
+            arr(&s("daemon_eph_pub_hex")),
+            arr(&s("mobile_pub_hex")),
+        );
+        // `th` is what the channel exposes; the vector's value is the E2EE v2 transcript.
+        let th = crate::relay::crypto::transcript_hash(&daemon, &daemon_eph, &mobile);
+        assert_eq!(to_hex(&th), s("transcript_hash_hex"));
         let (session_id, challenge) = (s("session_id"), arr(&s("challenge_hex")));
         assert_eq!(to_hex(&key.public()), s("device_pub_hex"));
         assert_eq!(key.device_id(), s("device_id"));
@@ -469,10 +477,10 @@ mod tests {
         assert_eq!(parse_challenge(&msg), Some(Ok(challenge)));
 
         assert_eq!(
-            to_hex(&hello_signed_bytes(&daemon, &mobile, &session_id, &challenge)),
+            to_hex(&hello_signed_bytes(&daemon, &th, &session_id, &challenge)),
             s("signed_bytes_hex")
         );
-        let hello = key.hello(&s("label"), &daemon, &mobile, &session_id, &challenge);
+        let hello = key.hello(&s("label"), &daemon, &th, &session_id, &challenge);
         assert_eq!(to_hex(&hello.signature), s("signature_hex"));
         // Byte for byte against the Go JSON (same field order and encoding).
         let ours: Value = serde_json::to_value(&hello).unwrap();
@@ -483,17 +491,23 @@ mod tests {
         let vk = VerifyingKey::from_bytes(&key.public()).unwrap();
         let sig = Signature::from_slice(&hello.signature).unwrap();
         vk.verify_strict(
-            &hello_signed_bytes(&daemon, &mobile, &session_id, &challenge),
+            &hello_signed_bytes(&daemon, &th, &session_id, &challenge),
             &sig,
         )
         .unwrap();
 
         // Negatives: each signature covers bytes that differ from the real
         // ones in exactly one input; none may verify against the real bytes.
-        let real = hello_signed_bytes(&daemon, &mobile, &session_id, &challenge);
+        let real = hello_signed_bytes(&daemon, &th, &session_id, &challenge);
         let negatives = v["negative"].as_array().unwrap();
         let names: Vec<_> = negatives.iter().map(|n| n["changed"].as_str().unwrap()).collect();
-        assert_eq!(names, ["daemon_pub", "mobile_pub", "session_id", "challenge"]);
+        assert_eq!(
+            names,
+            ["daemon_pub", "mobile_pub", "daemon_eph_pub", "session_id", "challenge"]
+        );
+        for neg in negatives {
+            assert_eq!(neg["error"], "bad_signature");
+        }
         for neg in negatives {
             let name = neg["name"].as_str().unwrap();
             let their_bytes = hex(neg["signed_bytes_hex"].as_str().unwrap());
