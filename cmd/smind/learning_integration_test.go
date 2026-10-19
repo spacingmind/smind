@@ -306,11 +306,15 @@ func TestLearningWiring_TriggerReflectGoesToCollector(t *testing.T) {
 		t.Fatalf("jobs = %+v, %v", jobs, err)
 	}
 
-	// The curator has not shipped: the collector's ErrNotImplemented is the
-	// wire's "unavailable".
+	// learning.curate reaches the real collector either way: before the
+	// curator job exists its ErrNotImplemented is the wire's "unavailable";
+	// once it does, a workspace with no learned skills is refused by the
+	// curator itself ("not enough learned skills"). Both prove the routing.
 	code, msg := f.failCode("learning.curate", map[string]any{"workspaceId": w.ID})
-	if code != "unavailable" || !strings.Contains(msg, "not available yet") {
-		t.Fatalf("curate = %q %q", code, msg)
+	notShipped := code == "unavailable" && strings.Contains(msg, "not available yet")
+	refusedByCurator := strings.Contains(msg, "not enough learned skills")
+	if !notShipped && !refusedByCurator {
+		t.Fatalf("curate = %q %q, want the collector's refusal", code, msg)
 	}
 }
 
