@@ -110,7 +110,9 @@ func (e *Executor) Run(ctx context.Context, r Request) (Result, error) {
 		if msg == "" {
 			msg = "run " + string(status.Status)
 		}
-		return Result{RunID: runID}, fmt.Errorf("learning executor: run %s %s: %s", runID, status.Status, msg)
+		// A failed run may still have spent money: hand its usage to the
+		// caller so the job row records it (the budget reads run_usage).
+		return e.withUsage(Result{RunID: runID}), fmt.Errorf("learning executor: run %s %s: %s", runID, status.Status, msg)
 	}
 
 	rows, err := e.st.ListRunEvents(runID)
@@ -125,11 +127,15 @@ func (e *Executor) Run(ctx context.Context, r Request) (Result, error) {
 		}
 		events = append(events, ev)
 	}
-	res := Result{RunID: runID, FinalText: taskrunner.FinalText(events)}
-	if u, err := e.st.GetRunUsage(runID); err == nil {
+	return e.withUsage(Result{RunID: runID, FinalText: taskrunner.FinalText(events)}), nil
+}
+
+// withUsage fills res's usage fields from the run's run_usage row, if any.
+func (e *Executor) withUsage(res Result) Result {
+	if u, err := e.st.GetRunUsage(res.RunID); err == nil {
 		res.InputTokens, res.OutputTokens, res.CostUSD = u.InputTokens, u.OutputTokens, u.CostUSD
 	}
-	return res, nil
+	return res
 }
 
 // wait blocks until runID is terminal. On ctx cancel it stops the run,

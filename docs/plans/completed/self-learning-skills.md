@@ -545,12 +545,10 @@ read/write tokens.
 
 ### Known limits and follow-ups (not blockers)
 
-- `--model haiku` is answered by Sonnet on the live CLI (see Live
-  verification); pin `claude-haiku-5-5` in config until decided.
-- A failed isolated run (parse error, init violation, timeout after an
-  answer) records no `run_usage`: the spend is invisible to the daily cap
-  (`unreportedRuns` counts it). The token cap ignores cache read/write tokens.
-
+- Resolved after the live check (PR #428): the reflector/curator default
+  model is the full id `claude-haiku-5-5` (the `haiku` alias was answered by
+  Sonnet), a failed isolated run's reported usage is metered, and the token
+  cap counts cache read/write tokens.
 - `store.PatchSkill` persists description and body only: a category-only
   patch passes the gate but the new category is not stored.
 - Merge ledger rows name the merged proposal but do not copy its evidence.

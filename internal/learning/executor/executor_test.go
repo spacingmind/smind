@@ -180,6 +180,41 @@ func TestExecutor_FailedRunReturnsError(t *testing.T) {
 	}
 }
 
+// A failed run still spent money: its usage reaches the Result, the run_usage
+// row and the workspace's daily budget sum (counted, not unreported).
+func TestExecutor_FailedRunIsMetered(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"result-error-usage", "result-denials-usage"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			e := newEnv(t, scenario)
+			req := e.req()
+			res, err := e.ex.Run(context.Background(), req)
+			if err == nil {
+				t.Fatalf("Run = %+v, nil; want error", res)
+			}
+			if res.FinalText != "" {
+				t.Fatalf("FinalText = %q, want empty for a failed run", res.FinalText)
+			}
+			if res.CostUSD == nil || *res.CostUSD != 0.0339 || res.InputTokens == nil || *res.InputTokens != 2 || res.OutputTokens == nil || *res.OutputTokens != 494 {
+				t.Fatalf("failed run's usage = %+v, want cost 0.0339, 2 in, 494 out", res)
+			}
+			row, err := e.st.GetRunUsage(res.RunID)
+			if err != nil || row.CostUSD == nil || *row.CostUSD != 0.0339 {
+				t.Fatalf("run_usage row = %+v, err %v, want the failed run's cost", row, err)
+			}
+			cost, tokens, unreported, err := e.st.SumLearningUsageForWorkspace(req.WorkspaceID, time.Now().Add(-time.Hour))
+			if err != nil {
+				t.Fatal(err)
+			}
+			// 2 in + 494 out + 100 cache read + 7099 cache write.
+			if cost != 0.0339 || tokens != 7695 || unreported != 0 {
+				t.Fatalf("budget sum = cost %v tokens %d unreported %d, want 0.0339/7695/0", cost, tokens, unreported)
+			}
+		})
+	}
+}
+
 func TestExecutor_CtxCancelStopsRun(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, "init-hang")

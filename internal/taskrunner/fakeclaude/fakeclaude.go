@@ -331,6 +331,26 @@ func Run() {
 			"result":      "max turns reached",
 		})
 
+	case "result-error-usage", "result-denials-usage":
+		// The failing results above, carrying the usage the real CLI
+		// reports (a billed call): the isolated run must meter it.
+		stdin.Scan() // consume the prompt line
+		res := map[string]any{
+			"type":           "result",
+			"session_id":     "sess-1",
+			"total_cost_usd": 0.0339,
+			"modelUsage": map[string]any{"claude-sonnet-5-5": map[string]any{
+				"inputTokens": 2, "outputTokens": 494, "cacheReadInputTokens": 100, "cacheCreationInputTokens": 7099, "costUSD": 0.0339,
+			}},
+		}
+		if scenario == "result-error-usage" {
+			res["subtype"], res["is_error"], res["stop_reason"], res["result"] = "error_max_turns", true, "tool_use", "max turns reached"
+		} else {
+			res["is_error"], res["stop_reason"], res["result"] = false, "end_turn", "done"
+			res["permission_denials"] = []any{map[string]any{"tool_name": "Bash", "tool_use_id": "t1", "tool_input": map[string]any{}}}
+		}
+		writeLine(res)
+
 	case "result-permission-denials":
 		stdin.Scan() // consume the prompt line
 		writeLine(map[string]any{

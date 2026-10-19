@@ -34,8 +34,9 @@ type LearningConfig struct {
 	FailureResultKB int `yaml:"failureResultKB"`
 	// DailyBudgetUSD is the per-workspace daily USD budget. Default 0.25.
 	DailyBudgetUSD float64 `yaml:"dailyBudgetUSD"`
-	// DailyBudgetTokens is the per-workspace daily token budget.
-	// Default 150000.
+	// DailyBudgetTokens is the per-workspace daily token budget, counting
+	// input, output, cache-read and cache-write tokens as the CLI reports
+	// them. Default 150000.
 	DailyBudgetTokens int `yaml:"dailyBudgetTokens"`
 	// ProbationRuns is the offered-run count under which a skill is in
 	// probation. Default 25.
@@ -58,12 +59,16 @@ type LearningConfig struct {
 	// Similarity sets the duplicate thresholds.
 	Similarity LearningSimilarity `yaml:"similarity"`
 	// ReflectorModel is the claude-native model the reflector runs on.
-	// Default "haiku" (the CLI alias for the latest Haiku; a cheap model is
-	// recommended, the reflector only distils a bounded window). "" = the
-	// provider default.
+	// Default DefaultHaikuModel, a full model id and not the "haiku" alias:
+	// a live run of claude 2.1.293 answered `--model haiku` with Sonnet in
+	// 3 of 3 calls (about 30x the cost) while the full id was answered by
+	// Haiku. A cheap model is recommended, the reflector only distils a
+	// bounded window; set a newer id here when one ships. "" = the provider
+	// default.
 	ReflectorModel string `yaml:"reflectorModel"`
-	// CuratorModel is the model the curator runs on. Default "haiku"; "" =
-	// the provider default.
+	// CuratorModel is the model the curator runs on. Default
+	// DefaultHaikuModel (same reasoning as ReflectorModel); "" = the
+	// provider default.
 	CuratorModel string `yaml:"curatorModel"`
 }
 
@@ -78,6 +83,10 @@ type LearningSimilarity struct {
 // EnvLearning overrides learning.enabled at load time; SMIND_LEARNING=0
 // (or false/off/no/n/f/disabled) forces the kill switch off.
 const EnvLearning = "SMIND_LEARNING"
+
+// DefaultHaikuModel is the full id of the current Haiku, the default
+// reflector and curator model (ADR-0026 D4, section 3).
+const DefaultHaikuModel = "claude-haiku-5-5"
 
 // DefaultLearning returns the built-in learning defaults.
 func DefaultLearning() LearningConfig {
@@ -102,8 +111,8 @@ func DefaultLearning() LearningConfig {
 		PrefaceBudgetBytes:     6144,
 		ClaudeIndexPreface:     false,
 		Similarity:             LearningSimilarity{Duplicate: 0.85, Possible: 0.60},
-		ReflectorModel:         "haiku",
-		CuratorModel:           "haiku",
+		ReflectorModel:         DefaultHaikuModel,
+		CuratorModel:           DefaultHaikuModel,
 	}
 }
 

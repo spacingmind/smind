@@ -216,7 +216,8 @@ func TestSumLearningUsageForWorkspace(t *testing.T) {
 	f.run(t, "old", sysChat.ID, sys.ID, now.Add(-48*time.Hour), tp(now), "done", "reflect", 0)
 	f.run(t, "userrun", f.chat.ID, f.task.ID, now.Add(-time.Hour), tp(now), "done", "user", 0)
 	for _, u := range []RunUsage{
-		{RunID: "reported", TaskID: sys.ID, Provider: "claude-native", Source: "x", InputTokens: ptr(int64(100)), OutputTokens: ptr(int64(20)), CostUSD: ptr(0.05)},
+		{RunID: "reported", TaskID: sys.ID, Provider: "claude-native", Source: "x", InputTokens: ptr(int64(100)), OutputTokens: ptr(int64(20)),
+			CachedInputTokens: ptr(int64(4000)), CacheWriteTokens: ptr(int64(900)), CostUSD: ptr(0.05)},
 		{RunID: "nullcost", TaskID: sys.ID, Provider: "claude-native", Source: "x", InputTokens: ptr(int64(7)), OutputTokens: ptr(int64(3))},
 		{RunID: "old", TaskID: sys.ID, Provider: "claude-native", Source: "x", InputTokens: ptr(int64(1000)), OutputTokens: ptr(int64(1000)), CostUSD: ptr(9.0)},
 		{RunID: "userrun", TaskID: f.task.ID, Provider: "claude-native", Source: "x", InputTokens: ptr(int64(5000)), OutputTokens: ptr(int64(5000)), CostUSD: ptr(9.0)},
@@ -229,8 +230,10 @@ func TestSumLearningUsageForWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cost != 0.05 || tokens != 130 || unreported != 2 {
-		t.Fatalf("sum = cost %v tokens %d unreported %d, want 0.05/130/2", cost, tokens, unreported)
+	// reported: 100 in + 20 out + 4000 cache read + 900 cache write = 5020;
+	// nullcost: 7 + 3 = 10.
+	if cost != 0.05 || tokens != 5030 || unreported != 2 {
+		t.Fatalf("sum = cost %v tokens %d unreported %d, want 0.05/5030/2", cost, tokens, unreported)
 	}
 	// Another workspace sees nothing.
 	other, _ := f.s.CreateWorkspace(Workspace{Path: "/o", Title: "o", RoutingPolicy: "hard"})

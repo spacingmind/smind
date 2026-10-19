@@ -502,6 +502,66 @@ func TestInitViolation_PluginExemptionIsNarrow(t *testing.T) {
 	}
 }
 
+// usageEvents returns the EventTypeUsage events of got.
+func usageEvents(got []Event) []Usage {
+	var out []Usage
+	for _, e := range got {
+		if e.Type == EventTypeUsage && e.Usage != nil {
+			out = append(out, *e.Usage)
+		}
+	}
+	return out
+}
+
+func TestRunPromptIsolated_FailedRunsAreMetered(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		scenario string
+		wantErr  error
+	}{
+		{"error result", "result-error-usage", ErrIsolatedRunFailed},
+		{"violated run", "result-denials-usage", ErrIsolationViolated},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			wm, task := newIsolatedTask(t, tc.scenario)
+			r := claudeNativeRunner(t, wm)
+			got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tc.wantErr)
+			}
+			us := usageEvents(got)
+			if len(us) != 1 {
+				t.Fatalf("usage events = %d, want exactly 1 (events %+v)", len(us), got)
+			}
+			u := us[0]
+			if u.CostUSD == nil || *u.CostUSD != 0.0339 || u.Input == nil || *u.Input != 2 || u.Output == nil || *u.Output != 494 ||
+				u.CacheWrite == nil || *u.CacheWrite != 7099 || u.CachedInput == nil || *u.CachedInput != 100 {
+				t.Fatalf("usage = %+v, want cost 0.0339, in 2, out 494, cache write 7099, cache read 100", u)
+			}
+			if last := got[len(got)-1]; tc.wantErr == ErrIsolationViolated && (last.Type != EventTypeDone || last.StopReason != "isolation_violated") {
+				t.Fatalf("last event = %+v, want Done/isolation_violated after the usage", last)
+			}
+		})
+	}
+}
+
+func TestRunPromptIsolated_FailureWithoutUsageSendsNone(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"result-error", "tool-attempt", "init-with-tools"} {
+		wm, task := newIsolatedTask(t, scenario)
+		r := claudeNativeRunner(t, wm)
+		got, err := runIsolated(t, r, task, ProviderClaudeNative, IsolationOptions{SystemPrompt: "p"})
+		if err == nil {
+			t.Fatalf("%s: want an error", scenario)
+		}
+		if us := usageEvents(got); len(us) != 0 {
+			t.Fatalf("%s: usage events = %+v, want none (nothing is estimated)", scenario, us)
+		}
+	}
+}
+
 func TestRunPromptIsolated_ResultErrorFails(t *testing.T) {
 	t.Parallel()
 	wm, task := newIsolatedTask(t, "result-error")

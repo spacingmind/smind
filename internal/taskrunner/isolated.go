@@ -322,6 +322,7 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 		// Kill the CLI first: a slow consumer must not keep it alive while
 		// the final Done event waits for a reader.
 		client.Close()
+		r.sendFailedUsage(ctx, events, result)
 		select {
 		case events <- Event{Type: EventTypeDone, StopReason: isolationViolatedStop}:
 		case <-ctx.Done():
@@ -336,6 +337,7 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 		return fmt.Errorf("taskrunner: isolated claude code prompt: %w", err)
 	}
 	if result.IsError {
+		r.sendFailedUsage(ctx, events, result)
 		return fmt.Errorf("%w: %s", ErrIsolatedRunFailed, clipBytes(resultFailure(result), 200))
 	}
 	r.sendUsage(ctx, events, claudeUsage(result))
@@ -345,6 +347,24 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 	case <-ctx.Done():
 	}
 	return nil
+}
+
+// sendFailedUsage meters a run that is about to fail: the model call was made
+// and billed, so when the CLI's result message carries usage it is recorded
+// before the run is reported failed (the daily learning budget reads
+// run_usage whatever the run's final status). A result with no usage (the CLI
+// was killed, or timed out, before it reported) sends nothing: nothing is
+// estimated, and the budget prices such a run pessimistically instead.
+func (r *Runner) sendFailedUsage(ctx context.Context, events chan<- Event, result claudecode.ResultMessage) {
+	u := claudeUsage(result)
+	if u.Source == UsageSourceNotReported {
+		return
+	}
+	select {
+	case events <- Event{Type: EventTypeUsage, Usage: &u}:
+	case <-ctx.Done():
+	case <-time.After(2 * time.Second):
+	}
 }
 
 // resultFailure describes an error ResultMessage for an error string.
