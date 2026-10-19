@@ -1,4 +1,5 @@
 import { formatCost } from "@/lib/usage-format";
+import { formatRelativeTime } from "@/lib/relative-time";
 import type { RunStatusValue, RunUsage } from "@/lib/types";
 
 /**
@@ -62,9 +63,7 @@ const CAP_SENTENCES: Record<string, string> = {
 };
 
 const MINUTE_MS = 60_000;
-const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
-const WEEK_MS = 7 * DAY_MS;
 
 /**
  * A duration as Paseo words it (`9s`, `1m 42s`, `1h 5m`); under a second
@@ -100,17 +99,6 @@ export function formatPreciseDuration(durationMs: number): string {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
-}
-
-/** `just now` (<60s), `5m ago`, `2h ago`, `3d ago`, then a short date (`Jan 15`). */
-export function formatRelativeTime(date: Date, now: Date = new Date()): string {
-  const elapsed = now.getTime() - date.getTime();
-  if (elapsed < MINUTE_MS) return "just now";
-  if (elapsed < HOUR_MS) return `${Math.floor(elapsed / MINUTE_MS)}m ago`;
-  if (elapsed < DAY_MS) return `${Math.floor(elapsed / HOUR_MS)}h ago`;
-  if (elapsed < WEEK_MS) return `${Math.floor(elapsed / DAY_MS)}d ago`;
-  const month = date.toLocaleDateString("en-US", { month: "short" });
-  return `${month} ${date.getDate()}`;
 }
 
 /** The absolute local timestamp a relative age's title carries. */
@@ -204,7 +192,7 @@ export function describeRunFooter(
   const validFinishedAt = finishedAt !== null && !Number.isNaN(finishedAt.getTime()) ? finishedAt : null;
   const age =
     validFinishedAt !== null && now.getTime() - validFinishedAt.getTime() >= MINUTE_MS
-      ? { label: formatRelativeTime(validFinishedAt, now), title: formatAbsoluteTime(validFinishedAt) }
+      ? { label: formatRelativeTime(validFinishedAt, now, { shortDateAfterDays: 7 }), title: formatAbsoluteTime(validFinishedAt) }
       : null;
 
   const detail = (view: Omit<RunFooterView, "ariaLabel">): RunFooterView => ({

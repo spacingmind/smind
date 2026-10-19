@@ -4,7 +4,6 @@ import {
   describeRunFooter,
   formatAbsoluteTime,
   formatDuration,
-  formatRelativeTime,
   resolveRunModelLabel,
   type RunFooterRun,
 } from "@/components/timeline/run-footer-model";
@@ -206,15 +205,7 @@ describe("describeRunFooter: the aria label carries duration, model, cost and ag
   });
 });
 
-describe("formatRelativeTime and formatAbsoluteTime", () => {
-  it("words the ages", () => {
-    const now = new Date("2026-10-13T12:00:00Z");
-    expect(formatRelativeTime(new Date("2026-10-13T11:59:30Z"), now)).toBe("just now");
-    expect(formatRelativeTime(new Date("2026-10-13T11:55:00Z"), now)).toBe("5m ago");
-    expect(formatRelativeTime(new Date("2026-10-13T10:00:00Z"), now)).toBe("2h ago");
-    expect(formatRelativeTime(new Date("2026-10-10T12:00:00Z"), now)).toBe("3d ago");
-    expect(formatRelativeTime(new Date("2026-09-01T12:00:00Z"), now)).toMatch(/^[A-Z][a-z]{2} \d{1,2}$/);
-  });
+describe("formatAbsoluteTime", () => {
   it("formats the absolute title", () => {
     expect(formatAbsoluteTime(new Date("2026-10-13T10:00:00Z"))).toBe(
       new Date("2026-10-13T10:00:00Z").toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }),
