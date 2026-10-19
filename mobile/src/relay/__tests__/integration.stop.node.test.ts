@@ -13,7 +13,6 @@ import { RunFollower, RunStatusEvent } from '../../runFollower';
 import { requestStop } from '../../stopControl';
 import { RelayConnection } from '../RelayConnection';
 import { buildFakeAgent, DevHarness, requireSelfSignedHarnessTrust, testConnectOptions } from './devHarness';
-import { E2EE_V2_PENDING } from './e2eeV2Gate';
 
 let harness: DevHarness;
 let fakeAgent: { path: string; cleanup(): void };
@@ -34,7 +33,7 @@ afterAll(() => {
   fakeAgent?.cleanup();
 });
 
-describe.skip(`${E2EE_V2_PENDING}: Stop and delivered prompts on mobile, against a real daemon and a long-running fake agent`, () => {
+describe(`Stop and delivered prompts on mobile, against a real daemon and a long-running fake agent`, () => {
   it('requestStop ends a live run: it is stopped on the daemon and the follower clears the live run', { timeout: 60_000 }, async () => {
     const live = await harness.seedLive('hang', 'Stop task');
     const lives: Array<string | null> = [];

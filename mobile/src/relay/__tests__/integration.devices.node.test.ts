@@ -14,7 +14,6 @@ import { DataStream, GRPCWebSocketStream } from '../grpcweb';
 import { decodeFrame } from '../proto';
 import { ConnectOptions, grpcWebRelayNet, RelayConnection, RelayNet } from '../RelayConnection';
 import { DevHarness, requireSelfSignedHarnessTrust, testConnectOptions } from './devHarness';
-import { E2EE_V2_PENDING } from './e2eeV2Gate';
 
 let harness: DevHarness;
 const connections: RelayConnection[] = [];
@@ -58,7 +57,7 @@ afterAll(() => {
   harness?.stop();
 });
 
-describe.skip(`${E2EE_V2_PENDING}: three devices on one relay host: two Go desktop peers and the mobile TypeScript client`, () => {
+describe(`three devices on one relay host: two Go desktop peers and the mobile TypeScript client`, () => {
   const net = new RecordingNet();
   let mobile: RelayConnection;
   let mobileId = '';
@@ -167,7 +166,7 @@ describe.skip(`${E2EE_V2_PENDING}: three devices on one relay host: two Go deskt
   });
 });
 
-describe.skip(`${E2EE_V2_PENDING}: a daemon from before device_hello v2 (real relay, real E2EE handshake, then silence)`, () => {
+describe(`a daemon from before device_hello v2 (real relay, real E2EE handshake, then silence)`, () => {
   it('is reported as outdated: failed with versionMismatch, no hello ever sent, no retry loop', { timeout: 60_000 }, async () => {
     const old = await DevHarness.start(0, true);
     try {
