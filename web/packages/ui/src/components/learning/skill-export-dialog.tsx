@@ -98,7 +98,7 @@ function ExportForm({ skill, onClose }: { skill: LearnedSkillView; onClose: () =
           </label>
         ))}
       </fieldset>
-      <div className="flex min-h-20 flex-col gap-2" aria-live="polite">
+      <div className="flex min-h-32 min-w-0 flex-col gap-2 [overflow-wrap:anywhere]" aria-live="polite">
         {result && <ExportOutcome result={result} />}
         {canReplace && (
           <label className="flex items-center gap-2 text-ui-sm text-foreground-muted">
