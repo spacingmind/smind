@@ -106,6 +106,12 @@ func (f *reflectFx) proposals() []store.LearnedProposal {
 // system task, optionally with a usage row.
 func (f *reflectFx) learningRun(id string, usage *store.RunUsage) {
 	f.t.Helper()
+	f.learningRunStatus(id, "done", usage)
+}
+
+// learningRunStatus is learningRun for a run that ended in status.
+func (f *reflectFx) learningRunStatus(id, status string, usage *store.RunUsage) {
+	f.t.Helper()
 	sys, ok, err := f.st.GetSystemTask(f.ws.ID)
 	if err != nil {
 		f.t.Fatal(err)
@@ -120,7 +126,7 @@ func (f *reflectFx) learningRun(id string, usage *store.RunUsage) {
 		chatID = c.ID
 	}
 	fin := f.clk.Now()
-	if _, err := f.st.CreateRun(store.Run{ID: id, TaskID: sys.ID, ChatID: chatID, Provider: "claude-native", Status: "done",
+	if _, err := f.st.CreateRun(store.Run{ID: id, TaskID: sys.ID, ChatID: chatID, Provider: "claude-native", Status: status,
 		StartedAt: f.clk.Now(), FinishedAt: &fin, Purpose: "reflect"}); err != nil {
 		f.t.Fatal(err)
 	}
@@ -170,7 +176,7 @@ func TestReflect_HappyPathCreatesProposals(t *testing.T) {
 	}
 	req := f.exec.last()
 	if req.SystemPrompt != reflector.ReflectorPrompt() || req.Purpose != "reflect" || req.MaxTurns != 1 || req.Timeout != 5*time.Minute ||
-		req.Model != "haiku" || req.WorkspaceID != f.ws.ID {
+		req.Model != "claude-haiku-5-5" || req.WorkspaceID != f.ws.ID {
 		t.Fatalf("request = %+v", req)
 	}
 	if !strings.Contains(req.UserPrompt, userQuote) {
@@ -298,6 +304,19 @@ func TestReflect_ParseFailureMarksJobFailed(t *testing.T) {
 				t.Fatal("a poisoned window must advance the watermark")
 			}
 		})
+	}
+}
+
+// A run that failed after spending money records that spend on the job.
+func TestReflect_FailedRunCostRecordedOnJob(t *testing.T) {
+	f := newReflectFx(t)
+	f.exec.fn = func(executor.Request) (executor.Result, error) {
+		in, out, cost := int64(2), int64(494), 0.0339
+		return executor.Result{RunID: "failed-run", InputTokens: &in, OutputTokens: &out, CostUSD: &cost}, errors.New("isolated run failed")
+	}
+	job := f.reflect()
+	if job.Status != "failed" || job.RunID != "failed-run" || job.CostUSD == nil || *job.CostUSD != 0.0339 || job.Tokens == nil || *job.Tokens != 496 {
+		t.Fatalf("job = %+v (cost %v tokens %v), want failed with the run's cost 0.0339 and 496 tokens", job, job.CostUSD, job.Tokens)
 	}
 }
 
@@ -479,6 +498,28 @@ func TestReflect_BudgetSkipsWithoutStartingRun(t *testing.T) {
 		job := f.reflect()
 		if f.exec.count() != 0 || job.SkipReason != "budget" {
 			t.Fatalf("job = %+v, exec calls %d", job, f.exec.count())
+		}
+	})
+	t.Run("cache tokens count toward the token budget", func(t *testing.T) {
+		// 900 + 50 uncached stays under 1000 (the old behaviour ran); the
+		// 4000 cache-read and 2000 cache-write tokens push it over.
+		f := newReflectFx(t)
+		f.setConfig(func(c *config.LearningConfig) { c.DailyBudgetTokens = 5000 })
+		f.say(`{"intents":[]}`)
+		f.learningRun("spent", &store.RunUsage{CostUSD: ptrF(0.001), InputTokens: i64(900), OutputTokens: i64(50),
+			CachedInputTokens: i64(4000), CacheWriteTokens: i64(2000)})
+		job := f.reflect()
+		if f.exec.count() != 0 || job.Status != "skipped" || job.SkipReason != "budget" {
+			t.Fatalf("job = %+v, exec calls %d, want skipped: budget with no run", job, f.exec.count())
+		}
+	})
+	t.Run("a failed run's spend counts toward the dollar budget", func(t *testing.T) {
+		f := newReflectFx(t)
+		f.say(`{"intents":[]}`)
+		f.learningRunStatus("failed-run", "failed", &store.RunUsage{CostUSD: ptrF(config.DefaultLearning().DailyBudgetUSD), InputTokens: i64(10), OutputTokens: i64(10)})
+		job := f.reflect()
+		if f.exec.count() != 0 || job.SkipReason != "budget" {
+			t.Fatalf("job = %+v, exec calls %d, want skipped: budget with no run", job, f.exec.count())
 		}
 	})
 	t.Run("yesterday's spend does not count", func(t *testing.T) {

@@ -181,8 +181,14 @@ valuable property to keep.
 - **Provider and model (proposal):** the **same-recipient rule**: the
   reflector uses the same provider as the source run, so reflection never
   sends a transcript to a provider that did not already see it. For
-  claude-native that is the cheapest current Claude model (Haiku 5.5, as
-  autoharness uses `haiku`); for GLM/Kimi, the GLM default. The user can
+  claude-native that is the cheapest current Claude model (Haiku 5.5),
+  configured as the **full model id** `claude-haiku-5-5` and not autoharness's
+  `haiku` alias: the live check (2026-10-19, claude 2.1.293) saw `--model
+  haiku` answered by Sonnet in 3 of 3 calls (init said Haiku; `modelUsage`
+  and the assistant turn said Sonnet, about 30x the cost) while the full id
+  was answered by Haiku. `learning.reflectorModel` / `learning.curatorModel`
+  stay overridable (a newer id when one ships; `""` = provider default); for
+  GLM/Kimi, the GLM default. The user can
   override per workspace, which then needs an explicit "send transcripts
   summaries to <provider>" acknowledgement.
 - **Tools and permissions:** none. claude-native: empty tool allowlist and

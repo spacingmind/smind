@@ -202,12 +202,12 @@ func TestConfig_LearningModelKnobs(t *testing.T) {
 		}
 	}
 	cfg, err := Load()
-	if err != nil || cfg.Learning.ReflectorModel != "haiku" || cfg.Learning.CuratorModel != "haiku" {
+	if err != nil || cfg.Learning.ReflectorModel != "claude-haiku-5-5" || cfg.Learning.CuratorModel != "claude-haiku-5-5" {
 		t.Fatalf("defaults = %q/%q, err %v", cfg.Learning.ReflectorModel, cfg.Learning.CuratorModel, err)
 	}
-	write("learning:\n  reflectorModel: claude-haiku-5-5\n  curatorModel: \"\"\n")
+	write("learning:\n  reflectorModel: haiku\n  curatorModel: \"\"\n")
 	cfg, err = Load()
-	if err != nil || cfg.Learning.ReflectorModel != "claude-haiku-5-5" || cfg.Learning.CuratorModel != "" {
+	if err != nil || cfg.Learning.ReflectorModel != "haiku" || cfg.Learning.CuratorModel != "" {
 		t.Fatalf("override = %q/%q, err %v", cfg.Learning.ReflectorModel, cfg.Learning.CuratorModel, err)
 	}
 	for _, bad := range []string{"--dangerously-skip-permissions", "a b", "x;y"} {
