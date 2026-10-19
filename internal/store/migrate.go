@@ -279,6 +279,27 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		// ADR-0026 section 6: learning_snapshots is a new table (also in
+		// schema.sql); this entry re-creates it should a database lack it.
+		name: "learning_snapshots",
+		apply: func(db *sql.DB) error {
+			for _, q := range []string{
+				`CREATE TABLE IF NOT EXISTS learning_snapshots (
+					id INTEGER PRIMARY KEY AUTOINCREMENT,
+					workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+					created_at TIMESTAMP NOT NULL,
+					reason TEXT NOT NULL DEFAULT '',
+					payload TEXT NOT NULL)`,
+				`CREATE INDEX IF NOT EXISTS idx_learning_snapshots_ws ON learning_snapshots(workspace_id, id)`,
+			} {
+				if _, err := db.Exec(q); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and

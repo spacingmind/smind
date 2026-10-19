@@ -3,13 +3,14 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 
-export type StatusBadgeStatus = Exclude<StatusDotStatus, "neutral">;
+export type StatusBadgeStatus = StatusDotStatus;
 
 const STATUS_BADGE_CLASSES: Record<StatusBadgeStatus, string> = {
   success: "border-success/30 bg-success/10 text-success",
   danger: "border-destructive/30 bg-destructive/10 text-destructive",
   warning: "border-warning/30 bg-warning/10 text-warning",
   running: "border-warning/30 bg-warning/10 text-warning",
+  neutral: "border-border bg-muted text-muted-foreground",
 };
 
 /**
@@ -17,7 +18,8 @@ const STATUS_BADGE_CLASSES: Record<StatusBadgeStatus, string> = {
  * (refs/paseo/docs/design.md §13 -- "the neutral shell keeps the signal
  * legible without manufacturing translucent colors outside the theme").
  * The canonical pill primitive -- a new status surface uses this rather
- * than a bespoke `<span>` with its own color classes.
+ * than a bespoke `<span>` with its own color classes. `neutral` is a quiet
+ * pill (border/muted) for metadata labels, not a status signal.
  */
 export function StatusBadge({
   status,

@@ -47,13 +47,10 @@ func TestLearningDeps_HumanSkillsReachTheGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deps := learningDeps(config.Config{Learning: config.DefaultLearning()}, db, []string{"secret"})
-	if c := deps.Config(); !c.Enabled || c.ProbationRuns != 25 {
-		t.Fatalf("config = %+v", c)
-	}
+	approvals := newApprovalService(config.DefaultLearning(), db, t.TempDir(), []string{"secret"})
 	sk := gate.Skill{Name: "learned-flaky-tempdir", Category: "go", Description: "Use when a Go test fails on a shared TempDir.",
 		Body: "Run the failing test alone with -race.\nCheck for a shared t.TempDir across parallel tests.\nAdd t.Parallel guards or separate dirs."}
-	p, err := deps.Approval.CreateProposal(approval.NewProposal{
+	p, err := approvals.CreateProposal(approval.NewProposal{
 		WorkspaceID: w.ID, Source: "reflector", Kind: "create", Name: sk.Name,
 		Items: []approval.Item{{Intent: gate.Intent{Action: gate.ActionCreate, Name: sk.Name}, Result: sk}},
 	})
@@ -61,7 +58,7 @@ func TestLearningDeps_HumanSkillsReachTheGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	var ge *approval.GateError
-	if _, err := deps.Approval.Approve(p.ID, approval.ApproveOptions{}); !errors.As(err, &ge) {
+	if _, err := approvals.Approve(p.ID, approval.ApproveOptions{}); !errors.As(err, &ge) {
 		t.Fatalf("Approve() err = %v, want *GateError for the human name collision", err)
 	}
 }

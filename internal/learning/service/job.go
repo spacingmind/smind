@@ -65,6 +65,10 @@ func (s *Service) runJob(jobID int64) {
 		s.skip(&job, skipDisabled)
 		return
 	}
+	if job.Kind == jobKindCurate {
+		s.curate(&job, cfg)
+		return
+	}
 	if job.ChatID == nil {
 		s.fail(&job, "job has no chat")
 		return

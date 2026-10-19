@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type JSX, type KeyboardEvent } from "react";
 
 import { Icons } from "@/lib/icons";
+import { providerLabel } from "@/lib/provider-catalog";
 
 import {
   CreateProfileRow,
@@ -19,7 +20,7 @@ import {
   type RowShellProps,
 } from "@/components/pickers/provider-model-picker-rows";
 import { PILL_TRIGGER_CLASS } from "@/components/composer/pill-class";
-import { ProviderGlyph } from "@/components/composer/provider-glyph";
+import { ProviderIcon } from "@/components/provider-icon";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
@@ -407,7 +408,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
 
   const inProviderView = view.kind === "provider";
   const viewProvider = view.kind === "provider" ? visibleProviders.find((p) => p.id === view.providerId) : undefined;
-  const boundLabel = boundProvider ? (providers.find((p) => p.id === boundProvider)?.label ?? boundProvider) : null;
+  const boundLabel = boundProvider ? providerLabel(boundProvider, providers.filter((p) => p.id === boundProvider)) : null;
 
   const shellFor = (entry: PickerRow): RowShellProps => ({
     id: rowDomId(entry.key),
@@ -548,7 +549,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
         className={PILL_TRIGGER_CLASS}
         onClick={isMobile ? () => changeOpen(!open) : undefined}
       >
-        <ProviderGlyph provider={selectedProvider} className="shrink-0" />
+        <ProviderIcon provider={selectedProvider} className="shrink-0" />
         <span className="max-w-[12rem] min-w-0 truncate max-sm:hidden">{label}</span>
         <Icons.chevronDown aria-hidden className="shrink-0" />
       </Button>
@@ -564,7 +565,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
         onClick={isMobile ? () => changeOpen(!open) : undefined}
       >
         <span className="flex min-w-0 items-center gap-1.5">
-          <ProviderGlyph provider={selectedProvider} className="shrink-0" />
+          <ProviderIcon provider={selectedProvider} className="shrink-0" />
           <span className="min-w-0 truncate">{label}</span>
         </span>
         <Icons.chevronDown aria-hidden className="size-4 shrink-0 opacity-50" />

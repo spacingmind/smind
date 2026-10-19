@@ -98,6 +98,9 @@ type Service struct {
 
 	// onJobStart, if set (tests), runs at the top of every job goroutine.
 	onJobStart func(jobID int64)
+	// snapshotFn, if set (tests), replaces the library snapshot a curate job
+	// takes before its run.
+	snapshotFn func(workspaceID int64, reason string) error
 
 	mu      sync.Mutex
 	active  map[int64]bool // workspaces with a job between create and terminal state
@@ -193,11 +196,7 @@ func (s *Service) loop() {
 			s.handleFinished(f)
 		case <-tick.C:
 			s.tailFlush()
+			s.scheduleCurators()
 		}
 	}
-}
-
-// Curate is not implemented yet (curator job, ADR-0026 section 7).
-func (s *Service) Curate(ctx context.Context, workspaceID int64) error {
-	return ErrNotImplemented
 }

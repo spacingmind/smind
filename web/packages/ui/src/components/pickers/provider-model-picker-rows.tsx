@@ -2,7 +2,7 @@ import type { MouseEvent, ReactNode } from "react";
 
 import { Icons } from "@/lib/icons";
 
-import { ProfileGlyph, ProviderGlyph } from "@/components/composer/provider-glyph";
+import { ProfileIcon, ProviderIcon } from "@/components/provider-icon";
 import { Button } from "@/components/ui/button";
 import { getProviderModelCount, type BrowserProvider, type ModelRow } from "@/lib/model-browser";
 import { cn } from "@/lib/utils";
@@ -131,7 +131,7 @@ export function ProfileRow({
 }: RowShellProps & { profile: PickerProfileRow; checked: boolean; custom: boolean }) {
   return (
     <RowShell {...shell} testId={`model-profile-row-${profile.id}`} selected={checked}>
-      <ProfileGlyph className="shrink-0 text-foreground-muted" />
+      <ProfileIcon className="shrink-0 text-foreground-muted" />
       <span className="max-w-[50%] shrink-0 truncate text-ui-base text-foreground">{profile.name}</span>
       {checked && custom && (
         <span className="shrink-0 rounded bg-muted px-1 text-ui-xs text-foreground-muted">custom</span>
@@ -171,7 +171,7 @@ export function ProviderRow({
   }
   return (
     <RowShell {...shell} testId={`model-provider-${provider.id}`} className={cn(separator && "border-t border-border rounded-t-none")}>
-      <ProviderGlyph provider={provider.id} className="shrink-0 text-foreground-muted" />
+      <ProviderIcon provider={provider.id} className="shrink-0 text-foreground-muted" />
       <span className="min-w-0 shrink-0 truncate text-ui-base text-foreground">{provider.label}</span>
       <span className="flex min-w-0 flex-1 items-center justify-end gap-1 truncate text-ui-sm text-foreground-muted">
         {detail}
@@ -201,12 +201,12 @@ function ModelRowProfileButton({ row, action, onAct }: { row: ModelRow; action: 
     case "edit":
       testId = `model-edit-profile-${suffix}`;
       label = `Edit profile ${action.profile.name}`;
-      icon = <ProfileGlyph />;
+      icon = <ProfileIcon />;
       break;
     case "list":
       testId = `model-edit-profiles-${suffix}`;
       label = `Edit profiles (${action.count})`;
-      icon = <ProfileGlyph />;
+      icon = <ProfileIcon />;
       break;
   }
   const stop = (e: MouseEvent) => {
@@ -256,7 +256,7 @@ export function ModelRowItem({
     : row.description;
   return (
     <RowShell {...shell} testId={`model-row-${row.key}`} selected={selected}>
-      <ProviderGlyph provider={row.provider} className="shrink-0 text-foreground-muted" />
+      <ProviderIcon provider={row.provider} className="shrink-0 text-foreground-muted" />
       <span className="max-w-[55%] shrink-0 truncate text-ui-base text-foreground">{row.modelLabel}</span>
       <span className="min-w-0 flex-1 truncate text-ui-sm text-foreground-muted">{description}</span>
       {action && <ModelRowProfileButton row={row} action={action} onAct={onAction} />}
@@ -332,7 +332,7 @@ export function PickerHeader({
           <Icons.back aria-hidden />
         </Button>
       )}
-      {providerId && <ProviderGlyph provider={providerId} className={cn("shrink-0 text-foreground", !onBack && "ml-1")} />}
+      {providerId && <ProviderIcon provider={providerId} className={cn("shrink-0 text-foreground", !onBack && "ml-1")} />}
       <span className={cn("min-w-0 flex-1 truncate text-ui-sm font-medium text-foreground", !onBack && !providerId && "px-1")}>
         {title}
       </span>

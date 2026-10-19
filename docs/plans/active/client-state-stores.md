@@ -108,8 +108,8 @@ audit is in the Supervisor's notes). Status: **spec**, nothing built.
 - [x] PR 1 (S1+S2) — branch `feat/client-state-accounts` (awaiting merge)
 - [x] PR 2 (S3) — branch `feat/client-state-catalog` (awaiting merge)
 - [x] PR 3 (S4) — branch `feat/client-state-pickers` (awaiting merge)
-- [ ] PR 4 (AC17)
-- [ ] PR 5 (AC18)
+- [x] PR 4 (AC17) — branch `feat/client-state-provider-identity` (awaiting merge)
+- [x] PR 5 (AC18) — branch `feat/client-state-visual-primitives` (awaiting merge)
 - [ ] PR 6 (AC19)
 
 ## Validation
@@ -198,3 +198,42 @@ Process: `peer-glm` did steps 1–2 (describeProfile/supportsThinking, mode/thin
 the form/live-run migration. Not touched: `providers-section.tsx`, accounts dialog/connect forms (Providers redesign Lead's area).
 Unverified: real daemon; desktop webview; mobile sheet rendering of the field variant (covered by the pill's existing sheet tests only);
 mid-transition frames (the popover open/close animation was not frame-captured).
+
+### PR 4 (AC17), 2026-10-19
+Evidence: `task lint` 0, `bunx tsc -b packages/ui` clean, full UI suite green (see PR), light + dark screenshots of Providers (master/detail nav,
+detail header) and Usage (plan cards) in `/tmp/shots-adr32/out4/` — marks and labels unchanged for everything provider.list describes; an id the daemon
+did not label (Kimi) now reads "Kimi" instead of the raw id.
+- AC17 ✔ `lib/provider-catalog.ts`: `providerIdentity` (both id vocabularies + bare family words), `providerLabel` (daemon label wins, then the table,
+  then the raw id), `accountProviderLabel`, `providerShortName`; test `providerLabel maps both id vocabularies` (claude-native ↔ anthropic,
+  codex-native ↔ openai, kimi both, glm runtime-only, unknown → raw id, case-insensitive, null-safe). `ProviderIcon`/`ProfileIcon` live in
+  `components/provider-icon.tsx` (out of `composer/`), picked through `providerIdentity` so anthropic/openai render the Claude/Codex marks; an ACP
+  agent that merely names a family keeps that family's mark (test). The hardcoded maps are gone: `usage-source-icon`'s anthropic/openai switch,
+  `planProviderName` (→ `providerShortName`), `accounts-dialog`'s local `providerLabel`, and the inline `providers.find(...)?.label ?? id` copies in
+  `providers-groups.removeWarning`, `describe-profile`, `providers-view`, `model-browser`, the picker's bound label, `task-detail`, `first-account-card`.
+  Four tests asserting raw-id fallbacks were updated to the identity-table labels (accounts-dialog, task-detail, model-browser, providers-view).
+Process: `peer-glm` did all three steps; the Lead reviewed the diff, replaced `planProviderName`, restored the ACP family-mark tolerance and ran the
+visual pass. No separate reviewer agent for this mechanical PR (self-review of the full diff + the screenshot pass).
+Unverified: real daemon; desktop webview; the usage card still prints the raw account provider id ("anthropic") next to the account name (unchanged).
+
+### PR 5 (AC18), 2026-10-19
+Evidence: `task lint` 0, `bunx tsc -b packages/ui` clean, full UI suite green (see PR), light + dark screenshots (harness: real Settings screen
+over a scripted fake client) in `/tmp/shots-adr32/out5/`: `agents-loading-*` (skeleton), `agents-empty-*` (EmptyState), `agents-delete-confirm-*`,
+`agents-delete-error-*` (failed delete stays open with the daemon's message), `mcp-delete-confirm-*`, `mcp-load-error-*` (Alert), `providers-badge-*`
+(neutral badges).
+- AC18 ✔ `StatusBadge status="neutral"` (`ui/status-badge`) replaces the bespoke grey pills (accounts-dialog ×2, providers/account-row ×2).
+  `FormError` (`ui/form-error`, role="alert", `as="span"`/`silent` for a message inside a label) replaces the hand-rolled error paragraphs across
+  crud-dialogs, accounts-dialog, tree-action-dialogs, providers, settings and learning; section-level load errors (`mcp-load-error`,
+  `learning-load-error`, `daemon-error`, providers screen) use `Alert variant="error"`. `ConfirmDialog` (`ui/confirm-dialog`, promoted from
+  learning/) + `useConfirmAction(open)` + `useLastDefined` serve the workspace/space/task/chat delete/archive dialogs, `RemoveAccountDialog`,
+  MCP delete (was an inline row) and profile delete (**new** confirm; a failure is now visible and retryable instead of `console.error`).
+  Settings loading states use `LoadingRows` (skeleton, one `role="status"`), the profiles empty state uses `EmptyState`.
+  Tests: `ui/{status-badge,form-error,confirm-dialog,loading-rows}.test.tsx`, `hooks/use-{confirm-action,last-defined}.test.ts`, profile delete
+  (confirm / cancel / failure stays open and is retryable), MCP delete (confirm / cancel / failure).
+Independent review (read-only `reviewer`) found and we fixed: typed confirmation surviving Cancel, the delete target's name vanishing during the
+close animation, a stale error reopening in a permanently mounted dialog (ArchiveChat), closing while pending hiding a failure, `<p role="alert">`
+inside a `<label>` in SkillEditor, `aria-busy` on a status, leftover "Loading…" paragraphs and a plan-label pill using success + neutral classes.
+Known/deferred: `Alert variant="error"` shows its description in the muted foreground by design (border and icon carry the red), unlike the old
+red paragraphs; the Retry buttons beside the section Alerts are not yet in the Alert's `children` slot; `onDeleted()/onArchived()` callbacks now run
+outside the dialog's try (a throwing callback is an unhandled rejection instead of the dialog error); `StatusBadge` neutral is ~2px taller than the old pill.
+Process: `peer-glm` did the badge and FormError steps (3 commits); the Lead did ConfirmDialog, the migrations, LoadingRows/EmptyState and the review fixes.
+Unverified: real daemon; desktop webview; exit-animation frames of the confirm dialogs (name now persists through them; not frame-captured).

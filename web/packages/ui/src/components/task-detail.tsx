@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Icons } from "@/lib/icons";
+import { providerLabel } from "@/lib/provider-catalog";
 
 import { TaskLineageChips } from "@/components/task-lineage";
 import { Composer } from "@/components/composer/composer";
@@ -112,7 +113,7 @@ export function TaskDetailPane({
   // fetch resolves -- RunTimeline falls back to the raw id, its exact
   // pre-existing behavior.
   const providers = useProviderCatalog().providers;
-  const providerLabels = useMemo(() => Object.fromEntries(providers.map((p) => [p.id, p.label ?? p.id])), [providers]);
+  const providerLabels = useMemo(() => Object.fromEntries(providers.map((p) => [p.id, providerLabel(p.id, [p])])), [providers]);
   // The run footer's human model labels: every catalog entry plus the
   // provider's default model under a bare `${id}/` key (the footer's
   // fallback order lives in run-footer-model.ts).

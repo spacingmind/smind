@@ -101,7 +101,7 @@ func TestCollector_ExplicitErrors(t *testing.T) {
 		t.Fatalf("disabled: %v", err)
 	}
 	f.setConfig(func(c *config.LearningConfig) { c.Enabled = true })
-	if err := f.svc.Curate(context.Background(), f.ws.ID); !errors.Is(err, ErrNotImplemented) {
+	if err := f.svc.Curate(context.Background(), f.ws.ID); !errors.Is(err, ErrNotEnoughSkills) {
 		t.Fatalf("Curate = %v", err)
 	}
 	sys, sysChat, _ := f.st.CreateSystemTask(f.ws.ID, "learning", "/cwd")

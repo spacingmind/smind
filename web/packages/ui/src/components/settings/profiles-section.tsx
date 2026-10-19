@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
+import { EmptyState } from "@/components/ui/empty-state";
+import { LoadingRows } from "@/components/ui/loading-rows";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useConfirmAction } from "@/hooks/use-confirm-action";
+import { useLastDefined } from "@/hooks/use-last-defined";
+
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
+import { FormError } from "@/components/ui/form-error";
+
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
@@ -177,18 +185,20 @@ function ProfilesSection(_props: SettingsSectionContext) {
     }
   }
 
-  async function handleDelete(id: number) {
-    try {
-      await deleteProfile.mutateAsync(id);
-      if (openCard === id) closeCard();
-      // A deleted default agent can't stay ★ -- a stale id would silently
-      // stop seeding new tasks (run-config-toolbar.tsx's lookup just fails
-      // to find it), which reads as "the default stopped working" rather
-      // than the honest "there is no default agent anymore".
-      if (defaultAgentId === String(id)) setDefaultAgentId(null);
-    } catch (err) {
-      console.error("profile.delete failed", err);
-    }
+  const [deletingProfile, setDeletingProfile] = useState<AgentProfile | null>(null);
+  const deleteAction = useConfirmAction(deletingProfile !== null);
+  const shownDeleting = useLastDefined(deletingProfile);
+
+  async function handleDelete(profile: AgentProfile) {
+    const done = await deleteAction.run(() => deleteProfile.mutateAsync(profile.ID));
+    if (!done) return;
+    if (openCard === profile.ID) closeCard();
+    // A deleted default agent can't stay ★ -- a stale id would silently
+    // stop seeding new tasks (run-config-toolbar.tsx's lookup just fails
+    // to find it), which reads as "the default stopped working" rather
+    // than the honest "there is no default agent anymore".
+    if (defaultAgentId === String(profile.ID)) setDefaultAgentId(null);
+    setDeletingProfile(null);
   }
 
   const newAgentButton = (
@@ -203,16 +213,15 @@ function ProfilesSection(_props: SettingsSectionContext) {
         <SettingsSectionTitle title="Agents" actions={newAgentButton} />
 
         {profiles === null ? (
-          <p className="text-ui-base text-muted-foreground">Loading…</p>
+          <LoadingRows />
         ) : (
           <>
             {profiles.length === 0 && openCard !== "new" && (
-              <div data-testid="profiles-empty-state" className="flex flex-col items-start gap-2">
-                <p className="text-ui-base text-muted-foreground">
-                  No agents yet — create one with New agent to reuse a provider/mode/thinking bundle from the
-                  composer's Agents picker.
-                </p>
-              </div>
+              <EmptyState
+                testId="profiles-empty-state"
+                title="No agents yet"
+                description="Create one with New agent to reuse a provider/mode/thinking bundle from the composer's Agents picker"
+              />
             )}
             {(profiles.length > 0 || openCard === "new") && (
               <ul className="flex flex-col gap-1 rounded-xl border bg-card p-3">
@@ -277,7 +286,13 @@ function ProfilesSection(_props: SettingsSectionContext) {
                             >
                               {editing ? "Close" : "Edit"}
                             </DropdownMenuItem>
-                            <DropdownMenuItem data-testid={`profile-delete-${p.ID}`} onSelect={() => void handleDelete(p.ID)}>
+                            <DropdownMenuItem
+                              data-testid={`profile-delete-${p.ID}`}
+                              onSelect={() => {
+                                setDeletingProfile(p);
+                                deleteAction.reset();
+                              }}
+                            >
                               Delete
                             </DropdownMenuItem>
                           </DropdownMenuContent>
@@ -305,6 +320,28 @@ function ProfilesSection(_props: SettingsSectionContext) {
           </>
         )}
       </section>
+      <ConfirmDialog
+        open={deletingProfile !== null}
+        onOpenChange={(open) => {
+          if (open) return;
+          setDeletingProfile(null);
+          deleteAction.reset();
+        }}
+        title="Delete agent?"
+        description={
+          <>
+            <span className="font-medium text-foreground">{shownDeleting?.Name}</span> is removed for good. Tasks that already
+            ran with it keep their history.
+          </>
+        }
+        confirmLabel="Delete"
+        pendingLabel="Deleting…"
+        pending={deleteAction.pending}
+        error={deleteAction.error}
+        testId="profile-delete-dialog"
+        confirmTestId={shownDeleting ? `profile-delete-confirm-${shownDeleting.ID}` : undefined}
+        onConfirm={() => deletingProfile && void handleDelete(deletingProfile)}
+      />
     </div>
   );
 }
@@ -417,9 +454,7 @@ function ProfileForm({
         onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
       />
       {error && (
-        <p role="alert" data-testid={`${idPrefix}-error`} className="text-ui-base text-destructive">
-          {error}
-        </p>
+        <FormError message={error} testId={`${idPrefix}-error`} />
       )}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" data-testid={`${idPrefix}-cancel`} onClick={onCancel}>

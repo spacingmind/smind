@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 
-import { ConfirmDialog } from "@/components/learning/confirm-dialog";
+import { LoadingRows } from "@/components/ui/loading-rows";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { LearnedSkillDetail } from "@/components/learning/learned-skill-detail";
 import { ProposalReview } from "@/components/learning/proposal-review";
 import { RunLinkProvider } from "@/components/learning/run-link";
@@ -40,16 +41,14 @@ function LoadState({
   if (error) {
     return (
       <div className="flex items-center gap-2">
-        <p role="alert" data-testid="learning-load-error" className="text-ui-base text-destructive">
-          {error.message}
-        </p>
+        <Alert variant="error" testId="learning-load-error" description={error.message} />
         <Button type="button" variant="ghost" size="sm" onClick={onRetry}>
           Retry
         </Button>
       </div>
     );
   }
-  return loading ? <p className="text-ui-base text-muted-foreground">Loading…</p> : null;
+  return loading ? <LoadingRows /> : null;
 }
 
 function ProposedTab({ workspace, onOpen, openId }: { workspace: LearningWorkspaceStatus; onOpen?: (id: number) => void; openId?: number | null }) {

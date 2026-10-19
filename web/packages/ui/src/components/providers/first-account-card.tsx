@@ -3,6 +3,7 @@ import type { JSX } from "react";
 import { credentialProviders } from "@/components/accounts-dialog";
 import { Button } from "@/components/ui/button";
 import { useProvidersViewStore } from "@/stores/providers-view-store";
+import { providerLabel } from "@/lib/provider-catalog";
 import type { ProviderInfo } from "@/lib/types";
 
 /**
@@ -48,7 +49,7 @@ export function FirstAccountCard({
         .filter((p) => p.kind === "cli")
         .map((p) => (
           <p key={p.id} className="text-ui-sm text-muted-foreground">
-            {`${p.label ?? p.id} signs in through its own CLI.`}
+            {`${providerLabel(p.id, [p])} signs in through its own CLI.`}
           </p>
         ))}
     </div>

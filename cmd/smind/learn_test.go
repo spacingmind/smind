@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -260,16 +261,120 @@ func TestLearnCLI_ModeForgetExportReflect(t *testing.T) {
 		t.Fatal("forget left proposals")
 	}
 
-	code, _, errOut := learn(t, "export")
-	if code != 1 || !strings.Contains(errOut, "not available yet") {
-		t.Fatalf("export = %d %q", code, errOut)
-	}
-
 	// No collector is wired into the test daemon: reflect/curate report it.
 	if code, _, errOut := learn(t, "reflect", "1"); code != 1 || !strings.Contains(errOut, "not available") {
 		t.Fatalf("reflect = %d %q", code, errOut)
 	}
 	if code, _, errOut := learn(t, "curate"); code != 1 || !strings.Contains(errOut, "not available") {
 		t.Fatalf("curate = %d %q", code, errOut)
+	}
+}
+
+func TestLearnCLI_Export(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home) // the daemon's default export home; never the real one
+	f := newLearnCLIFx(t)
+	repo, _ := filepath.EvalSymlinks(t.TempDir())
+	ws, err := f.s.CreateWorkspace(store.Workspace{Path: repo, Title: "real", RoutingPolicy: "hard"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := f.s.LandSkill(store.LandSkillInput{
+		Skill: store.LearnedSkill{WorkspaceID: ws.ID, Name: learnSkillA.Name, Category: learnSkillA.Category, Description: learnSkillA.Description, Body: learnSkillA.Body, Source: "reflector"},
+		Actor: "human",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strconv.FormatInt(k.ID, 10)
+
+	// Usage errors exit 2 and name the problem.
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"export"}, "<skill-id>"},
+		{[]string{"export", id}, "--to"},
+		{[]string{"export", id, "--to", "nowhere"}, "nowhere"},
+		{[]string{"export", "abc", "--to", "repo"}, "positive integer"},
+		{[]string{"export", id, "--to", "repo", "--bogus"}, "unknown flag"},
+	} {
+		if code, _, errOut := learn(t, c.args...); code != 2 || !strings.Contains(errOut, c.want) {
+			t.Fatalf("%v = %d %q, want 2 containing %q", c.args, code, errOut, c.want)
+		}
+	}
+	// An unknown skill is an RPC error: exit 1.
+	if code, _, errOut := learn(t, "export", "99999", "--to", "claude"); code != 1 || !strings.Contains(errOut, "not found") {
+		t.Fatalf("unknown skill = %d %q", code, errOut)
+	}
+
+	// Each target writes the rendered SKILL.md and prints the directory.
+	want := gate.Render(learnSkillA)
+	for to, dir := range map[string]string{
+		"repo":   filepath.Join(repo, ".agents", "skills", learnSkillA.Name),
+		"claude": filepath.Join(home, ".claude", "skills", learnSkillA.Name),
+		"agents": filepath.Join(home, ".agents", "skills", learnSkillA.Name),
+		"codex":  filepath.Join(home, ".codex", "skills", learnSkillA.Name),
+	} {
+		code, out, errOut := learn(t, "export", id, "--to", to)
+		if code != 0 || !strings.HasPrefix(out, "exported skill "+id+" to "+dir+"\n") || !strings.Contains(out, "SKILL.md") {
+			t.Fatalf("export --to %s = %d %q (stderr %q)", to, code, out, errOut)
+		}
+		if b, err := os.ReadFile(filepath.Join(dir, "SKILL.md")); err != nil || string(b) != want {
+			t.Fatalf("export --to %s: SKILL.md = %q, %v", to, b, err)
+		}
+	}
+
+	// An edited file is left alone: exit 1 naming it; --force overwrites.
+	path := filepath.Join(repo, ".agents", "skills", learnSkillA.Name, "SKILL.md")
+	if err := os.WriteFile(path, []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errOut := learn(t, "export", id, "--to=repo")
+	if code != 1 || !strings.Contains(errOut, "SKILL.md") || !strings.Contains(errOut, "--force") {
+		t.Fatalf("export over an edit = %d %q", code, errOut)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "mine\n" {
+		t.Fatalf("edited file clobbered: %q", b)
+	}
+	if code, _, errOut := learn(t, "export", id, "--to", "repo", "--force"); code != 0 {
+		t.Fatalf("forced export = %d %q", code, errOut)
+	}
+	if b, _ := os.ReadFile(path); string(b) != want {
+		t.Fatalf("--force did not overwrite: %q", b)
+	}
+
+	// --json prints the wire result.
+	code, out, _ := learn(t, "export", id, "--to", "claude", "--json")
+	var res struct {
+		Dir    string `json:"dir"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); code != 0 || err != nil || res.Status != "installed" || !strings.HasSuffix(res.Dir, learnSkillA.Name) {
+		t.Fatalf("export --json = %d %q %v", code, out, err)
+	}
+
+	// A symlinked repo skills dir is refused (exit 1) and nothing is written through it.
+	other, _ := filepath.EvalSymlinks(t.TempDir())
+	repo2, _ := filepath.EvalSymlinks(t.TempDir())
+	if err := os.Symlink(other, filepath.Join(repo2, ".agents")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	ws2, _ := f.s.CreateWorkspace(store.Workspace{Path: repo2, Title: "sym", RoutingPolicy: "hard"})
+	k2, err := f.s.LandSkill(store.LandSkillInput{
+		Skill: store.LearnedSkill{WorkspaceID: ws2.ID, Name: learnSkillB.Name, Category: learnSkillB.Category, Description: learnSkillB.Description, Body: learnSkillB.Body, Source: "reflector"},
+		Actor: "human",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errOut := learn(t, "export", strconv.FormatInt(k2.ID, 10), "--to", "repo"); code != 1 || !strings.Contains(errOut, "symlink") {
+		t.Fatalf("symlinked repo dir = %d %q", code, errOut)
+	}
+	if ents, _ := os.ReadDir(other); len(ents) != 0 {
+		t.Fatalf("wrote through the symlink: %v", ents)
 	}
 }
