@@ -4,6 +4,7 @@ import { LoadingRows } from "@/components/ui/loading-rows";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EvidenceList } from "@/components/learning/evidence-list";
 import { Chip, SkillBadges, SourceChip } from "@/components/learning/learning-chips";
+import { SkillExportDialog } from "@/components/learning/skill-export-dialog";
 import { RunLink } from "@/components/learning/run-link";
 import { DiffRender } from "@/components/diff-render";
 import { Alert } from "@/components/ui/alert";
@@ -156,6 +157,7 @@ export function LearnedSkillDetail({ id, onBack }: { id: number; onBack: () => v
   const restore = useSkillAction("restore");
   const remove = useSkillAction("delete");
   const undo = useUndoSkill();
+  const [exporting, setExporting] = useState(false);
   const [confirm, setConfirm] = useState<{ kind: "delete" } | { kind: "undo"; version: number } | null>(null);
 
   const back = (
@@ -214,6 +216,7 @@ export function LearnedSkillDetail({ id, onBack }: { id: number; onBack: () => v
           {skill.status !== "archived"
             ? action("Archive", () => archive.mutate(ctx), "skill-archive", <Icons.archive aria-hidden />)
             : action("Restore", () => restore.mutate(ctx), "skill-restore")}
+          {action("Export…", () => setExporting(true), "skill-export", <Icons.download aria-hidden />)}
           <Button type="button" variant="destructive" size="sm" disabled={busy} data-testid="skill-delete" onClick={() => setConfirm({ kind: "delete" })}>
             <Icons.delete aria-hidden /> Delete…
           </Button>
@@ -271,6 +274,7 @@ export function LearnedSkillDetail({ id, onBack }: { id: number; onBack: () => v
         )}
       </Block>
 
+      <SkillExportDialog skill={skill} open={exporting} onOpenChange={setExporting} />
       <ConfirmDialog
         open={confirm?.kind === "delete"}
         onOpenChange={(open) => !open && setConfirm(null)}

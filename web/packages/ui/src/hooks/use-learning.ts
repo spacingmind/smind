@@ -2,6 +2,8 @@ import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient } f
 
 import type {
   ApproveProposalParams,
+  ExportResult,
+  ExportSkillParams,
   GateFinding,
   JobView,
   LearnedSkillDetail,
@@ -188,6 +190,21 @@ export function useUndoSkill() {
   return useMutation<unknown, Error, { id: number; version: number; workspaceId?: number }>({
     mutationFn: ({ id, version }) => requireClient(client).call("learning.skills.undo", { id, version }),
     onSuccess: (_result, { id, workspaceId }) => invalidateSkill(queryClient, workspaceId, id),
+  });
+}
+
+/**
+ * `learning.skills.export {id, target, force?}`: writes the skill's SKILL.md outside smind's store.
+ * The daemon records an `export` ledger row, so only the skill's detail (versions, ledger) is
+ * re-read; the exported file is the user's afterwards and changes nothing in the lists.
+ */
+export function useExportSkill() {
+  const client = useClient();
+  const queryClient = useQueryClient();
+  return useMutation<ExportResult, Error, ExportSkillParams>({
+    mutationFn: ({ id, target, force }) =>
+      requireClient(client).call<ExportResult>("learning.skills.export", { id, target, ...(force ? { force } : {}) }),
+    onSuccess: (_result, { id }) => void queryClient.invalidateQueries({ queryKey: queryKeys.learnedSkill(id) }),
   });
 }
 
