@@ -185,7 +185,7 @@ with `daemon_eph_replay`: a different `th`, keys and tags), and `negative`:
 | `tampered_daemon_eph` | M2 with one bit flipped in `daemon_eph_pub`, original R_d | client: `ErrHandshakeConfirm` |
 | `wrong_static_key` | M2 carrying a different `daemon_pub`, pin = the original | client: `ErrPeerKeyMismatch`, nothing sent after M1 |
 | `forged_daemon` | an attacker's M2/R_d built with its own static key, with the client's pin set to the real daemon's key; and, in a second case, the real `daemon_pub` in M2 but R_d made without the static private key | `ErrPeerKeyMismatch` / `ErrHandshakeConfirm` |
-| `v1_hello_from_daemon` | v1 daemon hello (`01 02 ‖ pub`, 34 bytes) | client: `ErrUnsupportedVersion{peer:1}` |
+| `v1_hello_from_daemon` | v1 daemon hello (`01 01 ‖ pub`: version 1, role daemon, 34 bytes) | client: `ErrUnsupportedVersion{peer:1}` |
 | `v1_hello_from_client` | v1 client hello | daemon: `ErrUnsupportedVersion{peer:1}`, nothing written |
 | `empty_ready` | R_d / R_c with an empty payload | `ErrProtocol` |
 | `low_order_client_eph` | M1 with the all-zero point | daemon: key agreement error, no M2 |
