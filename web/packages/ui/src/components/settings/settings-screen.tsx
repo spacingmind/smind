@@ -1,3 +1,4 @@
+import { runSettingsBackGuard } from "@/lib/settings-back-guard";
 import { Fragment, useEffect, useState } from "react";
 
 import "@/components/settings/appearance-section";
@@ -249,7 +250,9 @@ export function SettingsScreen({
             size="icon"
             aria-label="Back to settings"
             data-testid="settings-detail-back"
-            onClick={() => setView("list")}
+            onClick={() => {
+              if (!runSettingsBackGuard()) setView("list");
+            }}
           >
             <Icons.back className="size-4" />
           </Button>

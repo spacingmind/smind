@@ -420,3 +420,14 @@ CREATE TABLE IF NOT EXISTS learned_skill_loads (
     created_at TIMESTAMP NOT NULL,
     PRIMARY KEY (skill_id, run_id, via)
 );
+
+-- Library snapshots (ADR-0026 section 6): a JSON export of a workspace's
+-- learned skills and versions taken before each curator run; 5 kept.
+CREATE TABLE IF NOT EXISTS learning_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+    created_at TIMESTAMP NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_learning_snapshots_ws ON learning_snapshots(workspace_id, id);
