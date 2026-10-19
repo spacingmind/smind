@@ -96,6 +96,9 @@ var (
 	ErrNotEstablished = errors.New("e2ee: handshake not completed")
 	// ErrAlreadyEstablished is returned when Handshake is called twice.
 	ErrAlreadyEstablished = errors.New("e2ee: handshake already completed")
+	// ErrHandshakeInProgress is returned when Handshake is called while
+	// another Handshake call on the same channel is still running.
+	ErrHandshakeInProgress = errors.New("e2ee: handshake already in progress")
 	// ErrClosed is returned once the channel has been closed.
 	ErrClosed = errors.New("e2ee: channel closed")
 )
@@ -139,6 +142,7 @@ type Channel struct {
 	session     *Session
 	established bool
 	closed      bool
+	handshaking bool // a Handshake call is running
 
 	daemonPub, daemonEphPub, clientEphPub []byte
 	th                                    []byte
@@ -226,8 +230,17 @@ func (c *Channel) Handshake(ctx context.Context, opts ...HandshakeOption) error 
 	case c.established:
 		c.mu.Unlock()
 		return ErrAlreadyEstablished
+	case c.handshaking:
+		c.mu.Unlock()
+		return ErrHandshakeInProgress
 	}
+	c.handshaking = true
 	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		c.handshaking = false
+		c.mu.Unlock()
+	}()
 
 	stop := c.closeOnCancel(ctx)
 	defer stop()
