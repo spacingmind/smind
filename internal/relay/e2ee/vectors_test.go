@@ -47,8 +47,9 @@ type vectorNegative struct {
 	Description string   `json:"description"`
 	Endpoint    string   `json:"endpoint"` // "client" or "daemon": the end under test
 	PinHex      string   `json:"pin_hex,omitempty"`
-	FramesHex   []string `json:"frames_hex"` // what the peer sends, in order, as full wire frames
-	Expect      string   `json:"expect"`     // error kind, see errorKind
+	FramesHex   []string `json:"frames_hex"`            // what the peer sends, in order, as raw wire bytes (usually full frames)
+	CloseAfter  bool     `json:"close_after,omitempty"` // the peer's stream ends after frames_hex (a truncated frame)
+	Expect      string   `json:"expect"`                // error kind, see errorKind
 	PeerVersion *int     `json:"expect_peer_version,omitempty"`
 	// Written is what the endpoint under test must have written by the time it
 	// fails: any of "m1", "m2", "r_d", "r_c", "data", in order.
@@ -153,7 +154,7 @@ func buildVectors(t *testing.T) *vectorFile {
 			"hex strings are lowercase, *_frame_hex are full wire frames (u32BE(1+len) || type || payload). " +
 			"Session A is the reference session; `replay` is the same client ephemeral against daemon_eph_replay. " +
 			"`negative` entries drive the end under test (`endpoint`) with the client seeds/daemon seeds above: " +
-			"`frames_hex` are what the peer sends, `expect` the error kind, `expect_written` what the endpoint wrote first. " +
+			"`frames_hex` are what the peer sends as raw bytes (usually full frames; a few are bare headers or cut short), `close_after` means the peer's stream ends after them, `expect` the error kind, `expect_written` what the endpoint wrote first. " +
 			"The device_hello negatives live in internal/relay/devices/testdata/device_hello_vector.json.",
 		Label: hkdfLabel,
 	}
@@ -216,10 +217,48 @@ func buildNegatives(t *testing.T, a, b *refSession) []vectorNegative {
 	}
 	rd := rawFrame(frameReady, a.rd)
 	one := 1
+	m1Payload := payloadOfHello(a.clientEphPub)
+	truncated := func(n vectorNegative) vectorNegative { n.CloseAfter = true; return n }
+	withRole := func(p []byte, r byte) []byte { return append([]byte{p[0], r}, p[2:]...) }
+	grow := func(p []byte) []byte { return append(bytes.Clone(p), 0) }
+	shrink := func(p []byte) []byte { return bytes.Clone(p[:len(p)-1]) }
+	zeroLen := []byte{0, 0, 0, 0}
+	overLen := []byte{0x00, 0x10, 0x00, 0x01} // 1 MiB + 1
 	v1Client := append([]byte{1, byte(RoleMobile)}, a.clientEphPub...)
 	v1Daemon := append([]byte{1, byte(RoleDaemon)}, a.daemonPub...)
 
 	out := []vectorNegative{
+		// Wire-parse negatives: framing, length, role and version-first checks.
+		daemonCase("m1_wrong_role", "M1 whose role byte is the daemon's (02 01 ...)", "protocol", []string{},
+			rawFrame(frameHello, withRole(m1Payload, byte(RoleDaemon)))),
+		daemonCase("m1_unknown_role", "M1 with an unknown role byte", "protocol", []string{},
+			rawFrame(frameHello, withRole(m1Payload, 9))),
+		daemonCase("m1_length_plus_one", "M1 payload one byte too long (35)", "protocol", []string{},
+			rawFrame(frameHello, grow(m1Payload))),
+		daemonCase("m1_length_minus_one", "M1 payload one byte too short (33)", "protocol", []string{},
+			rawFrame(frameHello, shrink(m1Payload))),
+		daemonCase("v1_hello_wrong_length_from_client", "version 1 with a wrong length: still unsupported_version (version byte first)", "unsupported_version", []string{},
+			rawFrame(frameHello, append([]byte{1, byte(RoleMobile)}, a.clientEphPub[:16]...))),
+		daemonCase("zero_length_frame_to_daemon", "a frame header with length 0", "protocol", []string{}, zeroLen),
+		daemonCase("oversized_frame_to_daemon", "a frame header with length 1 MiB + 1", "protocol", []string{}, overLen),
+		truncated(daemonCase("truncated_frame_to_daemon", "the stream ends in the middle of M1", "protocol", []string{},
+			rawFrame(frameHello, m1Payload)[:10])),
+		clientCase("m2_wrong_role", "M2 whose role byte is the client's (02 02 ...)", "", "protocol",
+			rawFrame(frameHello, withRole(realM2, byte(RoleMobile)))),
+		clientCase("m2_unknown_role", "M2 with an unknown role byte", "", "protocol",
+			rawFrame(frameHello, withRole(realM2, 9))),
+		clientCase("m2_length_plus_one", "M2 payload one byte too long (67)", "", "protocol",
+			rawFrame(frameHello, grow(realM2))),
+		clientCase("m2_length_minus_one", "M2 payload one byte too short (65)", "", "protocol",
+			rawFrame(frameHello, shrink(realM2))),
+		clientCase("reflected_m1_to_client", "the client's own 34-byte M1 reflected back to it", "", "protocol",
+			rawFrame(frameHello, m1Payload)),
+		clientCase("v1_hello_wrong_length_from_daemon", "version 1 with a wrong length: still unsupported_version (version byte first)", "", "unsupported_version",
+			rawFrame(frameHello, append([]byte{1, byte(RoleDaemon)}, a.daemonPub[:16]...))),
+		clientCase("zero_length_frame_to_client", "a frame header with length 0", "", "protocol", zeroLen),
+		clientCase("oversized_frame_to_client", "a frame header with length 1 MiB + 1", "", "protocol", overLen),
+		truncated(clientCase("truncated_frame_to_client", "the stream ends in the middle of M2", "", "protocol",
+			rawFrame(frameHello, realM2)[:20])),
 		clientCase("tampered_daemon_eph", "M2 with one bit flipped in daemon_eph_pub, original R_d", "", "handshake_confirm",
 			rawFrame(frameHello, tampered), rd),
 		clientCase("wrong_static_key", "M2 carrying a different daemon_pub, pin = the original: rejected before any DH", pin, "peer_key_mismatch",
@@ -249,7 +288,7 @@ func buildNegatives(t *testing.T, a, b *refSession) []vectorNegative {
 	}
 	for i := range out {
 		switch out[i].Name {
-		case "v1_hello_from_daemon", "v1_hello_from_client":
+		case "v1_hello_from_daemon", "v1_hello_from_client", "v1_hello_wrong_length_from_client", "v1_hello_wrong_length_from_daemon":
 			out[i].PeerVersion = &one
 		}
 	}
@@ -366,6 +405,9 @@ func TestNegativeVectorsFromFile(t *testing.T) {
 				if _, err := peer.Write(mustHex(t, f)); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if n.CloseAfter {
+				_ = peer.Close()
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
