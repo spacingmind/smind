@@ -18,12 +18,16 @@ import { describe, expect, it, vi } from 'vitest';
 
 // The installed noble throws on a low-order point, but that is the library's behaviour, not ours:
 // this switch makes x25519.getSharedSecret return all zeros so the explicit check can be exercised.
-const libraryReturnsZeros = vi.hoisted(() => ({ on: false }));
+const libraryReturnsZeros = vi.hoisted(() => ({ on: false, zeroOnCall: 0, calls: 0 }));
 vi.mock('@noble/curves/ed25519.js', async (importOriginal) => {
   const real = await importOriginal<typeof import('@noble/curves/ed25519.js')>();
   return {
     ...real,
-    x25519: { ...real.x25519, getSharedSecret: (sk: Uint8Array, pk: Uint8Array) => (libraryReturnsZeros.on ? new Uint8Array(32) : real.x25519.getSharedSecret(sk, pk)) },
+    x25519: { ...real.x25519, getSharedSecret: (sk: Uint8Array, pk: Uint8Array) => {
+        libraryReturnsZeros.calls++;
+        return libraryReturnsZeros.on || libraryReturnsZeros.calls === libraryReturnsZeros.zeroOnCall ? new Uint8Array(32) : real.x25519.getSharedSecret(sk, pk);
+      },
+    },
   };
 });
 import {
@@ -467,6 +471,37 @@ describe('E2EE v2 named scenarios', () => {
         expect(String(err)).toMatch(/all-zero/);
       } finally {
         libraryReturnsZeros.on = false;
+      }
+    });
+
+    it('the handshake rejects an all-zero output of the 1st (es) and of the 2nd (ee) key agreement, whatever the library does', async () => {
+      for (const nth of [1, 2]) {
+        libraryReturnsZeros.calls = 0;
+        libraryReturnsZeros.zeroOnCall = nth;
+        try {
+          const t = scripted([M2, R_D]);
+          const err = await rejection(seeded(new Channel(t)).handshake(daemonPub));
+          expect(errorKind(err), `call ${nth}`).toBe('key_agreement');
+          expect(String(err)).toMatch(/all-zero/);
+          expect(libraryReturnsZeros.calls).toBeGreaterThanOrEqual(nth);
+          expect(frameKinds(t.sent)).toEqual(['hello']);
+        } finally {
+          libraryReturnsZeros.zeroOnCall = 0;
+        }
+      }
+    });
+
+    it('the test responder end rejects them the same way (its es and ee use the same dh())', async () => {
+      // (the daemon end too: the responder's es and ee go through the same dh())
+      for (const nth of [1, 2]) {
+        libraryReturnsZeros.calls = 0;
+        libraryReturnsZeros.zeroOnCall = nth;
+        try {
+          const daemon = new FakeV2Daemon(scripted([v.m1_frame_hex]), daemonKeysFrom(daemonStaticSeed), fromHex(v.seeds.daemon_eph));
+          expect(errorKind(await rejection(daemon.handshake())), `daemon call ${nth}`).toBe('key_agreement');
+        } finally {
+          libraryReturnsZeros.zeroOnCall = 0;
+        }
       }
     });
 
