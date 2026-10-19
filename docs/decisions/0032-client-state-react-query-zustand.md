@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-18, by the Human). Plan: [`docs/plans/active/client-state-stores.md`](../plans/active/client-state-stores.md).
+Accepted (2026-10-18, by the Human). Plan: [`docs/plans/completed/client-state-stores.md`](../plans/completed/client-state-stores.md).
 
 ## Decision
 

@@ -2,7 +2,7 @@
 
 Decision: [ADR-0032](../../decisions/0032-client-state-react-query-zustand.md) (TanStack Query for daemon data,
 zustand for shared UI state). Source: the 2026-10-18 reuse audit of `web/packages/ui/src` (summary below; the full
-audit is in the Supervisor's notes). Status: **spec**, nothing built.
+audit is in the Supervisor's notes). Status: **completed 2026-10-19** (PRs #386, #407, #415, #419, #422 and the zustand/relative-time/workspace-tree PR; see Validation).
 
 ## Problems this fixes (verified in code, 2026-10-18)
 
@@ -110,7 +110,7 @@ audit is in the Supervisor's notes). Status: **spec**, nothing built.
 - [x] PR 3 (S4) — branch `feat/client-state-pickers` (awaiting merge)
 - [x] PR 4 (AC17) — branch `feat/client-state-provider-identity` (awaiting merge)
 - [x] PR 5 (AC18) — branch `feat/client-state-visual-primitives` (awaiting merge)
-- [ ] PR 6 (AC19)
+- [x] PR 6 (AC19) — branch `feat/client-state-zustand`
 
 ## Validation
 
@@ -237,3 +237,48 @@ red paragraphs; the Retry buttons beside the section Alerts are not yet in the A
 outside the dialog's try (a throwing callback is an unhandled rejection instead of the dialog error); `StatusBadge` neutral is ~2px taller than the old pill.
 Process: `peer-glm` did the badge and FormError steps (3 commits); the Lead did ConfirmDialog, the migrations, LoadingRows/EmptyState and the review fixes.
 Unverified: real daemon; desktop webview; exit-animation frames of the confirm dialogs (name now persists through them; not frame-captured).
+
+### PR 6 (AC19), 2026-10-19
+Evidence: `task lint` 0, `bunx tsc -b packages/ui` clean, full UI suite green (see PR), light + dark screenshots in `/tmp/shots-adr32/out6/`
+(`usage-*`: Token-usage rows named from the shared workspace tree, an unknown id falling back to "Task #999"; `sidebar-*`: the tree with a task created
+in "another tab" appearing through the event bridge with no refetch). Calls per page in the harness: 1 `workspace.list`, 1 `space.list` and 1 `task.list`
+per workspace — the usage page adds none of its own.
+- AC19 ✔ **zustand stores.** `stores/create-preference-store.ts` (`createPreferenceStore(read, write)`; reads once through the existing PURE `lib/` readers,
+  writes through the pure writers, so storage keys and formats are unchanged; re-reads when another tab changes storage via the `storage` event;
+  `reloadAllPreferenceStores()` for tests). Migrated with their hook APIs unchanged: default agent id (`stores/default-agent-store`, Settings and the toolbar
+  now share one copy; the toolbar reads `getState()` only while seeding, so a live change never alters a seeded run config — tested), usage modal
+  (plain store), notification sound, usage preferences, window state, notification permission, sidebar group mode, sidebar width, side-pane width, font
+  sizes, pinned tasks, collapsed tasks and collapsed nodes. The hand-rolled `useSyncExternalStore` module stores are gone (`use-usage-modal`,
+  `use-notification-*`, `use-usage-preferences`, `use-window-state`); the dead `useSettingsOpen` is deleted (settings-open is derived from the route).
+  **One `formatRelativeTime`** (`lib/relative-time.ts`; the run footer's copy folded in via `shortDateAfterDays`; tests in `lib/relative-time.test.ts`).
+  **usage-section's N+1 is gone**: the workspace tree is one React Query entry (`lib/workspace-tree-query.ts`, `hooks/use-workspace-tree.ts`), ADR 0009
+  lifecycle topics splice into it through the event bridge, `event.dropped` and a same-daemon reconnect re-read it; AppSidebar and Settings → Usage
+  both read it (`usage-section reads the shared workspace tree…` test: one `workspace.list`, one `task.list` per workspace for two consumers).
+Independent review (read-only `reviewer`): no new lost-event path in the tree migration, no render loops, `formatRelativeTime` outputs unchanged;
+findings fixed: stores ignoring other tabs (storage listener), a first tree load cut short by a reconnect shown as an error, a failed background re-read
+invisible (now logged), four hook tests that proved only in-memory sharing (now seed storage / assert storage), stray `;;`.
+Known/deferred: `use-task-tabs` and `use-unread-tasks` (each has a single consumer and non-trivial logic) still hold their own state;
+`useSidePaneWidth` has no production caller (it had none before); a failed background tree re-read keeps the stale tree on screen (logged, no UI).
+Process: `peer-glm` migrated the ten hooks (8 commits); the Lead wrote the helper, default-agent/usage-modal stores, `formatRelativeTime`, the workspace-tree
+query, the usage-section change and the test-harness changes (`FakeWsClient.onNotification/pushNotification`, `renderWithClientProp` mounts the real bridge).
+Unverified: real daemon; desktop webview; real multi-tab storage events (jsdom dispatch only).
+
+## Final acceptance (AC1–AC19)
+| AC | Landed in | Where it is proven |
+|---|---|---|
+| AC1 per-connection QueryClient, same-daemon reconnect keeps the cache | #386 | `daemon-query-provider.test.tsx`, `use-daemon-events.query.test.tsx` |
+| AC2 one key module | #386 | `lib/query-keys.test.ts` (`query keys only come from query-keys.ts`) |
+| AC3 single event→cache bridge incl. `account.updated` | #386 (+ profile.* #407, lifecycle: this PR) | `event-bridge.test.ts`, `use-daemon-events.test.ts` |
+| AC4 query defaults, rate-limited keys off | #386 | `query-client.ts`, `usage-call-budget.test.tsx` |
+| AC5–AC9 accounts + plan usage on one cache, zero extra usage refreshes | #386 | `providers-cache.test.tsx`, `providers-events.test.tsx`, `usage-call-budget.test.tsx` |
+| AC10–AC13 catalog, profiles, health; one fallback list | #407 | `client-state-catalog.test.tsx` |
+| AC14–AC16 shared run-config pickers, one `describeProfile`, `supportsThinking` | #415 | `pickers.test.tsx`, `provider-model-picker.test.tsx`, profile-form tests |
+| AC17 provider identity + `ProviderIcon` | #419 | `provider-catalog.test.ts`, `provider-icon.test.tsx` |
+| AC18 StatusBadge neutral, FormError/Alert, ConfirmDialog, Loading/Empty states, profile delete confirm + error | #422 | `ui/*.test.tsx`, profile/MCP delete tests |
+| AC19 zustand stores, one `formatRelativeTime`, no usage-section N+1 | this PR | `stores/*.test.ts`, `relative-time.test.ts`, `use-workspace-tree.test.tsx`, usage-section shared-tree test |
+Named test scenarios from the spec: all eleven exist under their names (`query client is per connection and cleared on switch`,
+`query keys only come from query-keys.ts`, `account.updated renames the account in providers, usage card and chat pill`,
+`expired cached report shows expired in providers`, `opening settings performs zero usage refreshes`,
+`provider.list fetched once with composer, sidebar, task header and settings mounted`, `profile created in settings appears in composer picker and palette`,
+`sidebar health count matches providers dots`, `profile form uses the shared provider/model, mode and thinking pickers`,
+`describeProfile is identical in picker pill and settings row`, `providerLabel maps both id vocabularies`).
