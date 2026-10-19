@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { base64Decode, base64UrlEncode } from '../base64';
 import { describeState } from '../connectionStatus';
 import { helloSignedBytes, identityFromSeed } from '../deviceIdentity';
-import { E2EEError, transcriptHash } from '../e2ee';
+import { concatBytes, E2EEError, encodeFrame as encodeE2EEFrame, FRAME_HELLO, transcriptHash } from '../e2ee';
 import { GrpcStatusError } from '../grpcweb';
 import { answeredOrThrow, ConnectionState, ConnectOptions, DaemonError, RelayConnection } from '../RelayConnection';
 import { FakeRelay } from './fakeRelay';
@@ -635,5 +635,35 @@ describe('counter limit', () => {
     await vi.waitFor(() => expect(conn.epoch).toBeGreaterThan(epoch), { timeout: 5000 });
     expect(relay.helloLog).toHaveLength(2);
     await expect(conn.call('workspace.list')).resolves.toEqual([]);
+  });
+});
+
+describe('an E2EE version error inside an established session is final', () => {
+  const v1Hello = (relay: FakeRelay) => encodeE2EEFrame(FRAME_HELLO, concatBytes(new Uint8Array([1, 1]), relay.daemonKeys.publicKey));
+
+  it('receive path: a v1 hello arriving on a live session ends in failed with e2eePeerVersion, with no retry', async () => {
+    const relay = new FakeRelay();
+    const conn = start(relay);
+    await conn.whenConnected();
+    relay.toDevice(relay.routeKeys()[0], v1Hello(relay));
+    await vi.waitFor(() => expect(conn.state).toMatchObject({ kind: 'failed', versionMismatch: true, e2eePeerVersion: 1 }), { timeout: 3000 });
+    const streams = relay.streams.length;
+    await new Promise((r) => setTimeout(r, 250));
+    expect(relay.streams.length).toBe(streams);
+    expect(relay.admissions).toBe(1);
+  });
+
+  it('resume path: the resumed session answers with a v1 hello: failed at once, one resume attempt only', async () => {
+    const relay = new FakeRelay();
+    const conn = start(relay);
+    await conn.whenConnected();
+    relay.e2eeVersion = 1;
+    relay.restartDaemon(); // the new daemon route answers the probe's first frame with a v1 hello
+    relay.dropCurrentStream();
+    await vi.waitFor(() => expect(conn.state).toMatchObject({ kind: 'failed', e2eePeerVersion: 1 }), { timeout: 5000 });
+    expect(relay.admissions).toBe(2); // the original + the single resume; no further resume or fresh-session attempts
+    const streams = relay.streams.length;
+    await new Promise((r) => setTimeout(r, 250));
+    expect(relay.streams.length).toBe(streams);
   });
 });

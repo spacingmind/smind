@@ -970,6 +970,12 @@ export class RelayConnection {
         this.setState({ kind: 'revoked', deviceId: opts.identity.deviceId });
         return;
       }
+      if (err instanceof E2EEVersionError) {
+        // The daemon changed its E2EE version under a live session (ADR-0035 §6): final, no retry.
+        this.dropSession();
+        this.setState({ kind: 'failed', message: err.message, versionMismatch: true, e2eePeerVersion: err.peer });
+        return;
+      }
       // A drop after a stable stretch is a blip and is retried at once; one
       // right after connecting is a flapping path and backs off like any
       // failed attempt (the hub's minStableConnection rule).
@@ -1174,7 +1180,7 @@ export class RelayConnection {
     } catch (e) {
       session.transport.detach();
       const why = classify(await link.done);
-      if (why instanceof RevokedError) throw why;
+      if (why instanceof RevokedError || why instanceof E2EEVersionError) throw why;
       throw e instanceof TimeoutError ? e : classify(e);
     }
     return link;
