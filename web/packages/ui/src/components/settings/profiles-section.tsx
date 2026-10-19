@@ -1,20 +1,25 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
 import { useDefaultAgentId } from "@/hooks/use-default-agent";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useProviderHealth } from "@/hooks/use-provider-health";
 import { useCreateProfile, useDeleteProfile, useProfiles, useUpdateProfile } from "@/hooks/use-profiles";
-import { AUTO_ACCEPT_HELP, AUTO_ACCEPT_LABEL, describePermission, providerModels, providerModes, supportsAutoAccept } from "@/lib/permission-modes";
+import { AutoAcceptToggle } from "@/components/pickers/auto-accept-toggle";
+import { ModeSelect } from "@/components/pickers/mode-select";
+import { ProviderModelPicker } from "@/components/pickers/provider-model-picker";
+import { ThinkingSelect } from "@/components/pickers/thinking-select";
+import { buildBrowserProviders } from "@/lib/model-browser";
+import { isDangerousMode, providerModes, supportsAutoAccept } from "@/lib/permission-modes";
 import { subscribeSettingsIntent, takeSettingsIntent, type ProfileSeed } from "@/lib/settings-intent";
-import { thinkingLevelLabel } from "@/lib/thinking-levels";
-import type { AgentProfile, ModeInfo, ProviderInfo, ThinkingLevel } from "@/lib/types";
+import { supportsThinking, THINKING_LEVELS } from "@/lib/thinking-levels";
+import { describeProfile } from "@/lib/describe-profile";
+import type { AgentProfile, ModeInfo, ProviderInfo } from "@/lib/types";
 import { Icons } from "@/lib/icons";
 
 // "Provider default" (the empty id -- the provider's own default mode) is
@@ -22,12 +27,8 @@ import { Icons } from "@/lib/icons";
 // permission modes from provider.list (ADR-0019).
 const PROVIDER_DEFAULT_MODE = { id: "", label: "Provider default" };
 
-const THINKING_LEVELS = [
-  { id: "", label: "Composer default" },
-  { id: "off", label: "Off" },
-  { id: "standard", label: "Standard" },
-  { id: "extended", label: "Extended" },
-];
+/** The form's levels: the shared vocabulary (lib/thinking-levels.ts) plus "unset", which defers to the composer. */
+const FORM_THINKING_LEVELS = [{ id: "", label: "Composer default", help: "Use whatever the composer is set to for this agent's runs." }, ...THINKING_LEVELS];
 
 /** The add/edit form's field state -- one instance shared by whichever card is open (the "new agent" card or a row's own inline edit), since only one is ever open at a time. */
 interface ProfileFormState {
@@ -95,7 +96,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
   // composer picker and the palette immediately.
   const profilesQuery = useProfiles();
   const profiles = profilesQuery.data ?? null;
-  const { providersOrFallback: providers } = useProviderCatalog();
+  const { providersOrFallback: providers, settled: providersSettled } = useProviderCatalog();
   const [openCard, setOpenCard] = useState<OpenCard>(null);
   const [form, setForm] = useState<ProfileFormState>(EMPTY_FORM);
   const [pending, setPending] = useState(false);
@@ -227,6 +228,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
                       pending={pending}
                       error={error}
                       submitLabel={pending ? "Saving…" : "Add agent"}
+                      providersLoading={!providersSettled}
                     />
                   </li>
                 )}
@@ -252,7 +254,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
                         </Button>
                         <div className="flex min-w-0 flex-1 flex-col">
                           <span className="truncate text-ui-base font-medium text-foreground">{p.Name}</span>
-                          <span className="truncate text-ui-sm text-muted-foreground">{profileMetaLine(p, providers)}</span>
+                          <span className="truncate text-ui-sm text-muted-foreground">{describeProfile(p, providers)}</span>
                           {p.Notes && <span className="truncate text-ui-sm text-foreground-subtlest">{p.Notes}</span>}
                         </div>
                         <DropdownMenu>
@@ -292,6 +294,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
                           pending={pending}
                           error={error}
                           submitLabel={pending ? "Saving…" : "Save"}
+                          providersLoading={!providersSettled}
                         />
                       )}
                     </li>
@@ -331,6 +334,7 @@ function ProfileForm({
   pending,
   error,
   submitLabel,
+  providersLoading,
 }: {
   idPrefix: string;
   form: ProfileFormState;
@@ -341,7 +345,10 @@ function ProfileForm({
   pending: boolean;
   error: string | null;
   submitLabel: string;
+  /** provider.list has not settled: the picker says "Loading…" like the composer's, instead of fallback ids. */
+  providersLoading: boolean;
 }) {
+  const browserProviders = useMemo(() => buildBrowserProviders(providers, {}, { loading: providersLoading }), [providers, providersLoading]);
   return (
     <form className="flex flex-col gap-2" onSubmit={onSubmit}>
       <Input
@@ -352,63 +359,54 @@ function ProfileForm({
         onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
       />
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <Select
-            value={form.provider}
+        <div className="col-span-2 flex min-w-0 items-center gap-1.5">
+          {/* The composer's own provider+model picker (field variant). Provider health here is advisory (the dot): a profile may be
+              set up for a provider whose login is still to come, so an unhealthy provider is not made unselectable. */}
+          <ProviderModelPicker
+            variant="field"
+            testId={`${idPrefix}-provider`}
+            providers={browserProviders}
+            selectedProvider={form.provider}
+            selectedModel={form.model}
+            boundProvider={null}
+            disabled={false}
             // Modes and models are provider-scoped: a new provider starts from its own defaults.
-            onValueChange={(value) => setForm((f) => ({ ...f, provider: value, permissionMode: "", autoAccept: false, model: "" }))}
-          >
-            <SelectTrigger aria-label="Provider" data-testid={`${idPrefix}-provider`} className="w-full">
-              <SelectValue placeholder="Select provider" />
-            </SelectTrigger>
-            <SelectContent>
-              {providers.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.label ?? p.id}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            onSelect={(provider, model) =>
+              setForm((f) =>
+                provider === f.provider
+                  ? { ...f, model }
+                  : { ...f, provider, permissionMode: "", autoAccept: false, model },
+              )
+            }
+          />
           <ProviderHealthDot provider={form.provider} testId={`${idPrefix}-provider-health`} />
         </div>
-        <ProfileModelSelect form={form} setForm={setForm} providers={providers} idPrefix={idPrefix} />
-        <Select value={form.permissionMode} onValueChange={(value) => setForm((f) => ({ ...f, permissionMode: value }))}>
-          <SelectTrigger aria-label="Permission mode" data-testid={`${idPrefix}-permission-mode`} className="w-full">
-            <SelectValue placeholder="Permission mode" />
-          </SelectTrigger>
-          <SelectContent>
-            {[PROVIDER_DEFAULT_MODE as ModeInfo, ...providerModes(providers, form.provider)].map((o) => (
-              <SelectItem key={o.id} value={o.id} title={o.description}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {form.provider === "claude-native" ? (
-          <Select value={form.thinkingLevel} onValueChange={(value) => setForm((f) => ({ ...f, thinkingLevel: value }))}>
-            <SelectTrigger aria-label="Thinking level" data-testid={`${idPrefix}-thinking-level`} className="w-full">
-              <SelectValue placeholder="Thinking level" />
-            </SelectTrigger>
-            <SelectContent>
-              {THINKING_LEVELS.map((o) => (
-                <SelectItem key={o.id} value={o.id}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <ModeSelect
+          variant="field"
+          testId={`${idPrefix}-permission-mode`}
+          modes={providerModes(providers, form.provider)}
+          extraItems={[PROVIDER_DEFAULT_MODE as ModeInfo]}
+          value={form.permissionMode}
+          dangerous={isDangerousMode(providers, form.provider, form.permissionMode, form.autoAccept)}
+          onChange={(value) => setForm((f) => ({ ...f, permissionMode: value }))}
+        />
+        {supportsThinking(form.provider) ? (
+          <ThinkingSelect
+            variant="field"
+            testId={`${idPrefix}-thinking-level`}
+            levels={FORM_THINKING_LEVELS}
+            value={form.thinkingLevel}
+            onChange={(value) => setForm((f) => ({ ...f, thinkingLevel: value }))}
+          />
         ) : null}
       </div>
       {supportsAutoAccept(providers, form.provider) && (
-        <label className="flex items-center gap-2 text-ui-sm text-foreground-muted" title={AUTO_ACCEPT_HELP}>
-          <input
-            type="checkbox"
-            data-testid={`${idPrefix}-auto-accept`}
-            checked={form.autoAccept}
-            onChange={(e) => setForm((f) => ({ ...f, autoAccept: e.target.checked }))}
-          />
-          {AUTO_ACCEPT_LABEL} every permission prompt
-        </label>
+        <AutoAcceptToggle
+          variant="field"
+          testId={`${idPrefix}-auto-accept`}
+          checked={form.autoAccept}
+          onChange={(checked) => setForm((f) => ({ ...f, autoAccept: checked }))}
+        />
       )}
       <textarea
         aria-label="Notes"
@@ -469,64 +467,6 @@ function ProviderHealthDot({ provider, testId }: { provider: string; testId: str
       data-status={state}
     />
   );
-}
-
-/** Radix Select rejects an empty item value, so "Provider default" travels under this sentinel and maps back to "". */
-const DEFAULT_MODEL_VALUE = "__default__";
-
-/**
- * The profile's Model field (ADR-0025): the selected provider's catalog plus
- * "Provider default". Omitted -- not an empty select -- when the provider
- * lists no models and none is saved (an ACP agent not probed yet); a saved
- * id the catalog does not list still shows as itself so editing never
- * silently drops it.
- */
-function ProfileModelSelect({
-  form,
-  setForm,
-  providers,
-  idPrefix,
-}: {
-  form: ProfileFormState;
-  setForm: (update: (f: ProfileFormState) => ProfileFormState) => void;
-  providers: ProviderInfo[];
-  idPrefix: string;
-}) {
-  const models = providerModels(providers, form.provider);
-  if (models.length === 0 && !form.model) return null;
-  const listed = models.some((m) => m.id === form.model);
-  return (
-    <Select
-      value={form.model || DEFAULT_MODEL_VALUE}
-      onValueChange={(value) => setForm((f) => ({ ...f, model: value === DEFAULT_MODEL_VALUE ? "" : value }))}
-    >
-      <SelectTrigger aria-label="Model" data-testid={`${idPrefix}-model`} className="w-full">
-        <SelectValue placeholder="Model" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={DEFAULT_MODEL_VALUE}>Provider default</SelectItem>
-        {form.model && !listed && <SelectItem value={form.model}>{form.model}</SelectItem>}
-        {models.map((m) => (
-          <SelectItem key={m.id} value={m.id} title={m.description}>
-            {m.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
-function providerLabel(providers: ProviderInfo[], id: string): string {
-  return providers.find((p) => p.id === id)?.label ?? id;
-}
-
-/** The card's one metadata line ("<provider> · <mode> · <model> · <thinking>", run-config IA): the provider's own mode label (ADR-0019), not the raw wire id -- omitted when the profile leaves the mode to the provider default and auto-accept off. Thinking is omitted for a non-Claude provider, same rule as the composer's own Thinking control. */
-function profileMetaLine(p: AgentProfile, providers: ProviderInfo[]): string {
-  const parts = [providerLabel(providers, p.Provider)];
-  if (p.PermissionMode || p.AutoAccept) parts.push(describePermission(providers, p.Provider, p.PermissionMode, p.AutoAccept));
-  if (p.Model) parts.push(providerModels(providers, p.Provider).find((m) => m.id === p.Model)?.label ?? p.Model);
-  if (p.Provider === "claude-native" && p.ThinkingLevel) parts.push(thinkingLevelLabel(p.ThinkingLevel as ThinkingLevel));
-  return parts.join(" · ");
 }
 
 registerSettingsSection({

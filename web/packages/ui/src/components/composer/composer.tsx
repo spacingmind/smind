@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { useActionHandler, useKeyboard } from "@/keyboard/keyboard-provider";
 import { formatCombo } from "@/keyboard/shortcut-string";
 import { type DiffStat } from "@/lib/diff-stat";
+import { supportsThinking } from "@/lib/thinking-levels";
 import type {
   ChatQueueItem,
   ConfigOptionParams,
@@ -225,7 +226,7 @@ export function Composer({
           provider,
           text,
           { permissionMode, autoAccept },
-          provider === "claude-native" && thinkingLevel ? thinkingLevel : undefined,
+          supportsThinking(provider) && thinkingLevel ? thinkingLevel : undefined,
           whenBusy,
           model || undefined,
         );

@@ -2,30 +2,22 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import { Icons } from "@/lib/icons";
 
-import { ModelPicker, type PickerProfileRow } from "@/components/composer/model-picker";
-import { PILL_TRIGGER_CLASS } from "@/components/composer/pill-class";
+import { ProviderModelPicker, type PickerProfileRow } from "@/components/pickers/provider-model-picker";
 import { readRunConfigPreference, writeRunConfigPreference } from "@/components/composer/run-config-preference";
 import { setSettingsIntent } from "@/lib/settings-intent";
 import { buildBrowserProviders, type ProviderHealth } from "@/lib/model-browser";
 import { readStoredDefaultAgentId } from "@/lib/settings-preferences";
-import { cn } from "@/lib/utils";
 import {
-  AUTO_ACCEPT_HELP,
-  AUTO_ACCEPT_LABEL,
-  describePermission,
   effectiveMode,
   providerModes,
   supportsAutoAccept,
 } from "@/lib/permission-modes";
-import { THINKING_LEVELS, thinkingLevelLabel } from "@/lib/thinking-levels";
+import { supportsThinking } from "@/lib/thinking-levels";
+import { ModeSelect } from "@/components/pickers/mode-select";
+import { ThinkingSelect } from "@/components/pickers/thinking-select";
+import { AutoAcceptToggle } from "@/components/pickers/auto-accept-toggle";
+import { describeProfile } from "@/lib/describe-profile";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { AgentProfile, ModeInfo, Provider, ProviderInfo, ThinkingLevel } from "@/lib/types";
 
 /**
@@ -351,16 +343,6 @@ export function RunConfigToolbar({
   return <RunConfigContext.Provider value={value}>{children}</RunConfigContext.Provider>;
 }
 
-/** "<provider> · <model> · <mode> · <thinking>" -- the agent menu's per-row metadata and the header pill share this (Paseo's profile summary order). The model is shown only when the profile pins one (ADR-0025). The mode is the provider's own label (ADR-0019). Thinking is omitted for a non-Claude profile, mirroring the Thinking control's own visibility rule. */
-export function describeProfile(p: AgentProfile, providers: ProviderInfo[]): string {
-  const providerLabel = providers.find((candidate) => candidate.id === p.Provider)?.label ?? p.Provider;
-  const parts = [providerLabel];
-  if (p.Model) parts.push(providers.find((candidate) => candidate.id === p.Provider)?.models?.find((m) => m.id === p.Model)?.label ?? p.Model);
-  parts.push(describePermission(providers, p.Provider, p.PermissionMode, p.AutoAccept));
-  if (p.Provider === "claude-native") parts.push(thinkingLevelLabel(p.ThinkingLevel as ThinkingLevel));
-  return parts.join(" · ");
-}
-
 /**
  * The one combined provider + model selector (Paseo's combined-model-selector;
  * docs/plans/completed/composer-combined-model-picker.md) -- it replaced the
@@ -389,7 +371,7 @@ function RunConfigToolbarModelPicker() {
 
   return (
     <div className="flex shrink-0 items-center">
-      <ModelPicker
+      <ProviderModelPicker
         providers={browserProviders}
         selectedProvider={state.provider}
         selectedModel={state.model}
@@ -401,7 +383,7 @@ function RunConfigToolbarModelPicker() {
         onSelect={(provider, model) => actions.setProviderModel(provider as Provider, model)}
         onApplyProfile={actions.applyProfile}
         onClearAgent={actions.clearAgent}
-        currentConfig={{ permissionMode: state.permissionMode, autoAccept: state.autoAccept, thinkingLevel: state.provider === "claude-native" ? state.thinkingLevel : "" }}
+        currentConfig={{ permissionMode: state.permissionMode, autoAccept: state.autoAccept, thinkingLevel: supportsThinking(state.provider) ? state.thinkingLevel : "" }}
         onManageAgents={() => openSettings("agents")}
         onCreateProfile={(seed) => {
           setSettingsIntent({ kind: "newProfile", seed });
@@ -487,40 +469,9 @@ function RunConfigToolbarMode() {
   };
   return (
     <>
-      <Select value={modeId} onValueChange={pickMode} disabled={disabled}>
-        <SelectTrigger
-          aria-label="Permission mode"
-          title={current?.description}
-          data-danger={dangerous ? "true" : undefined}
-          className={cn(PILL_TRIGGER_CLASS, dangerous && "text-warning hover:text-warning")}
-        >
-          {dangerous ? <Icons.permissionDanger aria-hidden className="shrink-0" /> : <Icons.permission aria-hidden className="shrink-0" />}
-          <SelectValue placeholder="Select mode" />
-        </SelectTrigger>
-        <SelectContent>
-          {modes.map((m) => (
-            <SelectItem key={m.id} value={m.id} title={m.description} className={m.autoApproves ? "text-warning" : undefined}>
-              {m.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <ModeSelect modes={modes} value={modeId} onChange={pickMode} disabled={disabled} dangerous={dangerous} variant="pill" />
       {showAutoAccept && (
-        <Button
-          type="button"
-          variant="ghost"
-          aria-pressed={autoAccept}
-          aria-busy={pending || undefined}
-          title={AUTO_ACCEPT_HELP}
-          data-testid="composer-auto-accept"
-          disabled={disabled}
-          onClick={toggleAutoAccept}
-          aria-label="Auto-accept"
-          className={cn(PILL_TRIGGER_CLASS, autoAccept ? "text-warning hover:text-warning" : "text-foreground-muted")}
-        >
-          <Icons.checkAll aria-hidden className="shrink-0" />
-          <span className="max-sm:hidden">{AUTO_ACCEPT_LABEL}</span>
-        </Button>
+        <AutoAcceptToggle checked={autoAccept} onChange={toggleAutoAccept} disabled={disabled} pending={pending} variant="pill" />
       )}
       {error && (
         <span data-testid="permission-mode-error" role="alert" className="px-1 text-ui-sm text-destructive">
@@ -540,29 +491,15 @@ function RunConfigToolbarThinking() {
   // instead, once a live session exists (see run-config-options in
   // task-detail), since that option list is only ever known after ACP's
   // NewSession responds.
-  if (state.provider !== "claude-native") return null;
+  if (!supportsThinking(state.provider)) return null;
   return (
-    <Select
+    <ThinkingSelect
       value={state.thinkingLevel || "standard"}
-      onValueChange={(v) => actions.setThinkingLevel(v as ThinkingLevel)}
+      onChange={(v) => actions.setThinkingLevel(v as ThinkingLevel)}
       disabled={meta.disabled}
-    >
-      <SelectTrigger
-        aria-label="Thinking level"
-        title={THINKING_LEVELS.find((t) => t.id === (state.thinkingLevel || "standard"))?.help}
-        className={PILL_TRIGGER_CLASS}
-      >
-        <Icons.thinking aria-hidden className="shrink-0" />
-        <SelectValue placeholder="Select thinking level" />
-      </SelectTrigger>
-      <SelectContent>
-        {THINKING_LEVELS.map((t) => (
-          <SelectItem key={t.id} value={t.id} title={t.help}>
-            {t.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+      variant="pill"
+      placeholder="Select thinking level"
+    />
   );
 }
 

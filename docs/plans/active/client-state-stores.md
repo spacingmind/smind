@@ -99,10 +99,15 @@ audit is in the Supervisor's notes). Status: **spec**, nothing built.
 - The Providers tab redesign (separate research, `fix/providers-login-links` Lead) builds on S2/S3 stores; it must not
   add its own account/health state.
 
+- 2026-10-18 (S4, Lead): in Settings → Agents' profile form the provider/model picker keeps provider health **advisory**: the
+  health dot stays, but an unhealthy provider is not made unselectable (a profile may be set up before its login). The composer
+  keeps health-disabled providers. Deviation from AC14's "health-disabled providers identical"; flip `buildBrowserProviders`'s
+  health argument in `profiles-section.tsx` to align them if the Human prefers.
+
 ## Progress
 - [x] PR 1 (S1+S2) — branch `feat/client-state-accounts` (awaiting merge)
 - [x] PR 2 (S3) — branch `feat/client-state-catalog` (awaiting merge)
-- [ ] PR 3 (S4)
+- [x] PR 3 (S4) — branch `feat/client-state-pickers` (awaiting merge)
 - [ ] PR 4 (AC17)
 - [ ] PR 5 (AC18)
 - [ ] PR 6 (AC19)
@@ -169,3 +174,27 @@ Known/deferred: the Providers account rows' dot still folds usage state (S2) whi
 (an expired login with a passing local test shows red in Providers, healthy in the footer count); a unified provider-level health
 model belongs with the Providers redesign.
 Unverified: real daemon + real provider accounts; desktop webview; mid-transition frames (nothing in this PR animates).
+
+### PR 3 (S4), 2026-10-18
+Evidence: `task lint` 0, `bunx tsc -b packages/ui` clean, full UI suite green (see PR), light + dark screenshots of both variants
+(harness: real components over a scripted fake client) in `/tmp/shots-adr32/out3/` — `agents-list-*` (describeProfile line:
+"Claude Code · Ask for permission · Standard", "GLM · GLM 5.3 · Auto · Auto-accept"), `agents-form-*` and `agents-form-picker-*`
+(field variant: glyph, "Default model", model chips, opens downwards, no profiles band), `composer-toolbar-*` / `composer-picker-*` (pill).
+- AC14 ✔ `components/pickers/{provider-model-picker,mode-select,thinking-select,auto-accept-toggle}.tsx`, each with `variant: "pill"|"field"`;
+  used by the composer toolbar (`RunConfigToolbar`), the live-run options (`run-config-options.tsx`, thinking/select options) and the
+  Settings → Agents profile form. Tests: `pickers.test.tsx` (every component × variant), `provider-model-picker.test.tsx` (field variant:
+  own testid, full width, opens downwards, no profiles/create/no-agent rows without `onApplyProfile`, health-disabled provider with reason),
+  `profile form uses the shared provider/model, mode and thinking pickers`, `choosing another provider in the picker resets the model,
+  mode and auto-accept`, `an edit form keeps a saved model id the catalog does not list`, run-config-options shared-select tests.
+  Health-disabled providers: identical in the composer; **advisory in the form** (decision above).
+- AC15 ✔ one `describeProfile` in `lib/describe-profile.ts`: `describeProfile is identical in picker pill and settings row` renders both
+  and compares; `supportsThinking(provider)` replaces every raw `provider === "claude-native"` thinking gate (`lib/thinking-levels.test.ts`).
+- AC16 ✔ composer/toolbar/live-run tests pass unchanged; the form's `-provider` testid now names the picker trigger (aria-label
+  `Model: <provider · model>`) and `-model` is gone (migrated in `profiles-section.test.tsx` in the same PR); light+dark screenshots above.
+Independent review (read-only `reviewer`): no composer-toolbar regression; findings fixed with tests — form picker "Loading…" like the
+composer, empty-value defaults name themselves ("Provider default"/"Composer default"), field mode select warns in the warning colour,
+a11y override removed, live option with no description keeps no tooltip, vacuous/tautological tests replaced, dead `providerModels` removed.
+Process: `peer-glm` did steps 1–2 (describeProfile/supportsThinking, mode/thinking/auto-accept pickers); the Lead did the picker move and
+the form/live-run migration. Not touched: `providers-section.tsx`, accounts dialog/connect forms (Providers redesign Lead's area).
+Unverified: real daemon; desktop webview; mobile sheet rendering of the field variant (covered by the pill's existing sheet tests only);
+mid-transition frames (the popover open/close animation was not frame-captured).

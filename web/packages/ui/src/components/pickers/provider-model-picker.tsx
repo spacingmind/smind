@@ -17,7 +17,7 @@ import {
   type ModelRowAction,
   type PickerProfileRow,
   type RowShellProps,
-} from "@/components/composer/model-picker-rows";
+} from "@/components/pickers/provider-model-picker-rows";
 import { PILL_TRIGGER_CLASS } from "@/components/composer/pill-class";
 import { ProviderGlyph } from "@/components/composer/provider-glyph";
 import { Button } from "@/components/ui/button";
@@ -46,25 +46,36 @@ import type { ProfileSeed } from "@/lib/settings-intent";
 
 export type { PickerProfileRow };
 
-export interface ModelPickerProps {
+export interface ProviderModelPickerProps {
   providers: BrowserProvider[];
   selectedProvider: string;
   selectedModel: string;
   /** Chat bound => only that provider is offered (ADR-0016 P3). */
   boundProvider: string | null;
   disabled: boolean;
-  profileRows: PickerProfileRow[];
+  /**
+   * "pill" is the composer toolbar's compact trigger; "field" is a full-width form control (Settings -> Agents'
+   * profile form) that opens downwards. Same popover, same rows, same health-disabled providers.
+   */
+  variant?: "pill" | "field";
+  /** The trigger's data-testid (the composer keeps "composer-model-picker"). */
+  testId?: string;
+  /**
+   * Profiles ("agents") band, the create/edit-profile affordances and "No agent": present only when the owner
+   * can apply profiles (`onApplyProfile` set) -- a profile *form* picks a provider/model and nothing else.
+   */
+  profileRows?: PickerProfileRow[];
   /** Applied profile id, sticky even after hand edits. */
-  baseAgentId: string | null;
+  baseAgentId?: string | null;
   /** Fields hand-edited away from the applied profile. */
-  custom: boolean;
+  custom?: boolean;
   /** Live run config; seeds "create profile" from the selected model row. */
   currentConfig?: { permissionMode: string; autoAccept: boolean; thinkingLevel: string };
   onSelect: (provider: string, modelId: string) => void;
-  onApplyProfile: (profileId: string) => void;
-  onClearAgent: () => void;
+  onApplyProfile?: (profileId: string) => void;
+  onClearAgent?: () => void;
   /** Opens Settings -> Agents. */
-  onManageAgents: () => void;
+  onManageAgents?: () => void;
   onCreateProfile?: (seed: ProfileSeed) => void;
   onEditProfile?: (profileId: string) => void;
   onOpenProviderSettings?: (providerId: string) => void;
@@ -117,20 +128,25 @@ function modelEntries(rows: ModelRow[], qualified: boolean): PickerEntry[] {
   return rows.map((row) => ({ kind: "model", key: `model-${row.key}`, row, qualified }));
 }
 
+/** A stable empty list (a fresh `[]` default per render would re-run every memo keyed on it). */
+const NO_PROFILE_ROWS: PickerProfileRow[] = [];
+
 function hasFinePointer(): boolean {
   return window.matchMedia?.("(pointer: fine)").matches ?? false;
 }
 
-export function ModelPicker(props: ModelPickerProps): JSX.Element {
+export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Element {
   const {
     providers,
     selectedProvider,
     selectedModel,
     boundProvider,
     disabled,
-    profileRows,
-    baseAgentId,
-    custom,
+    variant = "pill",
+    testId = "composer-model-picker",
+    profileRows = NO_PROFILE_ROWS,
+    baseAgentId = null,
+    custom = false,
     currentConfig,
     onSelect,
     onApplyProfile,
@@ -158,6 +174,7 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
   const label = resolveTriggerLabel(triggerArgs);
   const title = resolveTriggerTitle(triggerArgs);
   const canGoBack = view.kind === "provider" && visibleProviders.length > 1;
+  const hasProfiles = onApplyProfile !== undefined;
   const normalizedQuery = query.trim().toLowerCase();
   // On the sheet the keyboard covers the list, so focusing an empty search shows every model (Paseo searchAllOnFocus).
   // A fine pointer (a narrow desktop window) has no on-screen keyboard and autofocuses the input, so it keeps the browse layout.
@@ -204,7 +221,7 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
       const profiles = profileRows.filter((p) => p.provider === view.providerId);
       return {
         kind: "entries",
-        band: bandEntries(profiles, baseAgentId),
+        band: hasProfiles ? bandEntries(profiles, baseAgentId) : [],
         entries: [{ kind: "heading", key: "h-models", label: "Models" }, ...modelEntries(rows, false)],
       };
     }
@@ -230,15 +247,16 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
     for (const provider of visibleProviders) {
       entries.push({ kind: "provider", key: `provider-${provider.id}`, provider });
     }
-    return { kind: "entries", band: bandEntries(profileRows, baseAgentId), entries };
-  }, [view, visibleProviders, normalizedQuery, query, searchFocused, profileRows, baseAgentId]);
+    return { kind: "entries", band: hasProfiles ? bandEntries(profileRows, baseAgentId) : [], entries };
+  }, [view, visibleProviders, normalizedQuery, query, searchFocused, profileRows, baseAgentId, hasProfiles]);
 
   // Popover height follows the browse layout of the view, not the search results, so typing doesn't resize it.
   const extraRows = useMemo(() => {
     const profiles = view.kind === "provider" ? profileRows.filter((p) => p.provider === view.providerId) : profileRows;
     // Heading + No agent + (profiles | Create row) + the Models/Providers heading.
+    if (!hasProfiles) return 1 + (boundProvider ? 1 : 0);
     return 1 + (baseAgentId !== null ? 1 : 0) + Math.max(profiles.length, 1) + 1 + (boundProvider ? 1 : 0);
-  }, [view, profileRows, baseAgentId, boundProvider]);
+  }, [view, profileRows, baseAgentId, boundProvider, hasProfiles]);
   const popoverHeight = resolveDesktopFixedHeight(view, visibleProviders, extraRows);
 
   // Arrow keys walk only the rows that can be activated; headings, disabled providers and row action buttons are skipped.
@@ -292,18 +310,18 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
         return;
       case "profile":
         changeOpen(false);
-        onApplyProfile(row.profile.id);
+        onApplyProfile?.(row.profile.id);
         return;
       case "noAgent":
         changeOpen(false);
-        onClearAgent();
+        onClearAgent?.();
         return;
       case "createProfile":
         changeOpen(false);
         if (view.kind === "provider" && onCreateProfile) {
           onCreateProfile({ name: "", provider: view.providerId, model: "" });
         } else {
-          onManageAgents();
+          onManageAgents?.();
         }
         return;
     }
@@ -321,12 +339,15 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
 
   const manageAgents = () => {
     changeOpen(false);
-    onManageAgents();
+    onManageAgents?.();
   };
 
   const modelAction = (row: ModelRow): { action?: ModelRowAction; run: () => void } => {
     // The synthetic default row (id "") names no model, so nothing to build a profile from.
     if (row.modelId === "") {
+      return { run: () => {} };
+    }
+    if (!hasProfiles) {
       return { run: () => {} };
     }
     const existing = profilesByModel.get(`${row.provider}:${row.modelId}`) ?? [];
@@ -515,22 +536,40 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
     </>
   );
 
-  const trigger = (
-    <Button
-      type="button"
-      variant="ghost"
-      data-testid="composer-model-picker"
-      aria-label={`Model: ${title}`}
-      title={title}
-      disabled={disabled}
-      className={PILL_TRIGGER_CLASS}
-      onClick={isMobile ? () => changeOpen(!open) : undefined}
-    >
-      <ProviderGlyph provider={selectedProvider} className="shrink-0" />
-      <span className="max-w-[12rem] min-w-0 truncate max-sm:hidden">{label}</span>
-      <Icons.chevronDown aria-hidden className="shrink-0" />
-    </Button>
-  );
+  const trigger =
+    variant === "pill" ? (
+      <Button
+        type="button"
+        variant="ghost"
+        data-testid={testId}
+        aria-label={`Model: ${title}`}
+        title={title}
+        disabled={disabled}
+        className={PILL_TRIGGER_CLASS}
+        onClick={isMobile ? () => changeOpen(!open) : undefined}
+      >
+        <ProviderGlyph provider={selectedProvider} className="shrink-0" />
+        <span className="max-w-[12rem] min-w-0 truncate max-sm:hidden">{label}</span>
+        <Icons.chevronDown aria-hidden className="shrink-0" />
+      </Button>
+    ) : (
+      // Looks like the Settings form's Select trigger (components/ui/select.tsx), so a form row reads as one field.
+      <button
+        type="button"
+        data-testid={testId}
+        aria-label={`Model: ${title}`}
+        title={title}
+        disabled={disabled}
+        className="flex h-8 w-full items-center justify-between gap-2 rounded-lg border border-input-border bg-input px-2.5 py-1 text-ui-lg whitespace-nowrap transition-colors outline-none hover:border-input-border-hover focus-visible:border-input-border-focused focus-visible:bg-input-focused disabled:cursor-not-allowed disabled:opacity-50 md:text-ui-base"
+        onClick={isMobile ? () => changeOpen(!open) : undefined}
+      >
+        <span className="flex min-w-0 items-center gap-1.5">
+          <ProviderGlyph provider={selectedProvider} className="shrink-0" />
+          <span className="min-w-0 truncate">{label}</span>
+        </span>
+        <Icons.chevronDown aria-hidden className="size-4 shrink-0 opacity-50" />
+      </button>
+    );
 
   // On desktop the search input owns focus (it keeps it while arrowing), so
   // Radix's own focus-the-container-on-open is redirected to it. The sheet
@@ -567,7 +606,7 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
     <Popover open={open} onOpenChange={changeOpen}>
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
       <PopoverContent
-        side="top"
+        side={variant === "field" ? "bottom" : "top"}
         align="start"
         className="flex w-[22rem] flex-col p-0"
         style={{ height: `min(${popoverHeight}px, var(--radix-popover-content-available-height))` }}

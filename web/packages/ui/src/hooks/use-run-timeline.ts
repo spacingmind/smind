@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
+import { supportsThinking } from "@/lib/thinking-levels";
 import type { WsClientLike } from "@/lib/ws-client";
 import type {
   PermissionSettings,
@@ -410,7 +411,7 @@ export function nextThinkingTier(level: ThinkingLevel): ThinkingLevel | null {
  * already at "extended" never qualifies.
  */
 export function canRetryWithHigherEffort(run: RunEntry): boolean {
-  return run.status === "error" && run.provider === "claude-native" && nextThinkingTier(run.thinkingLevel) !== null;
+  return run.status === "error" && supportsThinking(run.provider) && nextThinkingTier(run.thinkingLevel) !== null;
 }
 
 /** Tracks one task-selection's lifetime: guards async continuations from a superseded selection, and lets an active run.attach be aborted (detached, not stopped) on task switch or unmount. */
