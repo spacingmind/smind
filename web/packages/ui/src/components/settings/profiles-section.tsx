@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
+import { EmptyState } from "@/components/ui/empty-state";
+import { LoadingRows } from "@/components/ui/loading-rows";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
 
@@ -209,16 +211,15 @@ function ProfilesSection(_props: SettingsSectionContext) {
         <SettingsSectionTitle title="Agents" actions={newAgentButton} />
 
         {profiles === null ? (
-          <p className="text-ui-base text-muted-foreground">Loading…</p>
+          <LoadingRows />
         ) : (
           <>
             {profiles.length === 0 && openCard !== "new" && (
-              <div data-testid="profiles-empty-state" className="flex flex-col items-start gap-2">
-                <p className="text-ui-base text-muted-foreground">
-                  No agents yet — create one with New agent to reuse a provider/mode/thinking bundle from the
-                  composer's Agents picker.
-                </p>
-              </div>
+              <EmptyState
+                testId="profiles-empty-state"
+                title="No agents yet"
+                description="Create one with New agent to reuse a provider/mode/thinking bundle from the composer's Agents picker"
+              />
             )}
             {(profiles.length > 0 || openCard === "new") && (
               <ul className="flex flex-col gap-1 rounded-xl border bg-card p-3">

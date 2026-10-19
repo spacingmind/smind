@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 
+import { LoadingRows } from "@/components/ui/loading-rows";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { LearnedSkillDetail } from "@/components/learning/learned-skill-detail";
 import { ProposalReview } from "@/components/learning/proposal-review";
@@ -46,7 +47,7 @@ function LoadState({
       </div>
     );
   }
-  return loading ? <p className="text-ui-base text-muted-foreground">Loading…</p> : null;
+  return loading ? <LoadingRows /> : null;
 }
 
 function ProposedTab({ workspace, onOpen, openId }: { workspace: LearningWorkspaceStatus; onOpen?: (id: number) => void; openId?: number | null }) {

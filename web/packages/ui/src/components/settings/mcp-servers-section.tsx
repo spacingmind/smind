@@ -4,6 +4,7 @@ import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { LoadingRows } from "@/components/ui/loading-rows";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
 import { FormError } from "@/components/ui/form-error";
@@ -242,7 +243,7 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
               </Button>
             </div>
           ) : (
-            <p className="text-ui-base text-muted-foreground">Loading…</p>
+            <LoadingRows />
           )
         ) : (
           <>
