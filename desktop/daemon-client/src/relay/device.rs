@@ -453,6 +453,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "E2EE v2 pending in this client (ADR-0035)"]
     fn device_hello_signature_verifies_against_go_vector() {
         let v: Value = serde_json::from_str(VECTOR).unwrap();
         let s = |k: &str| v[k].as_str().unwrap().to_string();

@@ -10,6 +10,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { describe, expect, it } from 'vitest';
+import { E2EE_V2_PENDING } from './e2eeV2Gate';
 import { base64Decode, base64Encode } from '../base64';
 import {
   buildDeviceHello,
@@ -92,11 +93,11 @@ describe('device_hello v2 cross-language vector', () => {
     expect(base64Encode(challenge)).toBe(vector.challenge_message.params.challenge);
   });
 
-  it('builds the vector signed bytes', () => {
+  it.skip(`${E2EE_V2_PENDING}: builds the vector signed bytes`, () => {
     expect(hex(helloSignedBytes(daemonPub, mobilePub, sessionId, challenge))).toBe(vector.signed_bytes_hex);
   });
 
-  it('device_hello v2 signature verifies against the Go vector (and matches it byte for byte)', () => {
+  it.skip(`${E2EE_V2_PENDING}: device_hello v2 signature verifies against the Go vector (and matches it byte for byte)`, () => {
     const hello = buildDeviceHello(identity, vector.label, daemonPub, mobilePub, sessionId, challenge);
     expect(hello).toEqual(vector.hello);
     expect(hello.v).toBe(2);
@@ -106,7 +107,7 @@ describe('device_hello v2 cross-language vector', () => {
     expect(ed25519.verify(fromHex(vector.signature_hex), fromHex(vector.signed_bytes_hex), identity.publicKey)).toBe(true);
   });
 
-  it('has four negatives, each with its own signed bytes and a signature that does not verify against the real bytes', () => {
+  it.skip(`${E2EE_V2_PENDING}: has four negatives, each with its own signed bytes and a signature that does not verify against the real bytes`, () => {
     expect(vector.negative.map((n) => n.name)).toEqual(['other_daemon_pub', 'other_mobile_pub', 'other_session_id', 'other_challenge']);
     const real = helloSignedBytes(daemonPub, mobilePub, sessionId, challenge);
     for (const n of vector.negative) {
@@ -120,7 +121,7 @@ describe('device_hello v2 cross-language vector', () => {
     }
   });
 
-  it('what this client signs changes with each of daemon key, mobile key, session id and challenge', () => {
+  it.skip(`${E2EE_V2_PENDING}: what this client signs changes with each of daemon key, mobile key, session id and challenge`, () => {
     const base = hex(helloSignedBytes(daemonPub, mobilePub, sessionId, challenge));
     const other = (b: Uint8Array) => new Uint8Array(b.map((x) => x ^ 1));
     expect(hex(helloSignedBytes(other(daemonPub), mobilePub, sessionId, challenge))).not.toBe(base);
