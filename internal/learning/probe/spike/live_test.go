@@ -34,11 +34,10 @@ import (
 )
 
 const (
-	liveModel    = "claude-haiku-5-5"
-	liveTurns    = 6
-	liveTimeout  = 120 * time.Second
-	livePerCall  = 0.12 // --max-budget-usd, a per-call guard under the ledger
-	liveAuthNote = "NOT PROVEN: auth under scrubbed env"
+	liveModel   = "claude-haiku-5-5"
+	liveTurns   = 6
+	liveTimeout = 120 * time.Second
+	livePerCall = 0.12 // --max-budget-usd, a per-call guard under the ledger
 )
 
 func TestMain(m *testing.M) {
@@ -292,19 +291,9 @@ type callOpts struct {
 	prep     func()   // runs only when the call is actually made (after the budget check)
 }
 
-// scrubbedEnv builds the launcher allowlist by NAME from the test process:
-// HOME and CLAUDE_CONFIG_DIR (if set) so the CLI authenticates as the user's
-// normal login, PATH/LANG/TMPDIR, and the MCP connector opt-out. Values are
-// never printed.
-func scrubbedEnv() []string {
-	var env []string
-	for _, name := range []string{"PATH", "LANG", "TMPDIR", "HOME", "CLAUDE_CONFIG_DIR"} {
-		if v, ok := os.LookupEnv(name); ok {
-			env = append(env, name+"="+v)
-		}
-	}
-	return append(env, "ENABLE_CLAUDEAI_MCP_SERVERS=false")
-}
+// scrubbedEnv is the production allowlist (DefaultEnvAllowlist) taken by NAME
+// from the test process. Values are never printed.
+func scrubbedEnv() []string { return AllowlistEnv(os.LookupEnv) }
 
 const shimTemplate = `#!/bin/sh
 # Records env NAMES and argv (no values) of the process the launcher started.
@@ -555,32 +544,21 @@ func stepsReached(t testing.TB, arm string, want ...int) {
 
 // ---- auth decision ------------------------------------------------------------
 
-// decideAuth settles, once, whether the scrubbed-env launcher can authenticate.
-// It tries ONE tiny call; on failure it records "NOT PROVEN: auth under
-// scrubbed env", does not investigate, and every later call uses the
-// inherited env. SMIND_P0_INHERIT=1 skips the attempt (a rerun after the
-// fallback is already known; the failed attempt is in the ledger).
+// decideAuth: calls use the scrubbed launcher (DefaultEnvAllowlist) unless
+// SMIND_P0_INHERIT=1 opts out for debugging. The first batched call is itself
+// the authentication check: if it fails the tests fail, there is no silent
+// fallback to the inherited env. (History: the base allowlist without USER
+// answered "Not logged in"; see p0-findings.md Q7.)
 func (f *fixture) decideAuth(t *testing.T) {
 	t.Helper()
 	f.mu.Lock()
-	checked := f.authChecked
-	f.mu.Unlock()
-	if checked {
-		return
-	}
-	if os.Getenv("SMIND_P0_INHERIT") == "1" {
-		f.mu.Lock()
-		f.authChecked, f.authFallback = true, true
-		f.mu.Unlock()
-		return
-	}
-	r := f.call(t, callOpts{purpose: "ping-scrubbed-env", prompt: "Reply with exactly the single word PONG. Use no tools.", policy: f.newPolicy()})
-	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.authChecked = true
-	if !r.ok() {
-		f.authFallback = true
-		t.Logf("%s (call failed: %s); remaining calls use the inherited env", liveAuthNote, clip(fmt.Sprint(r.err)+" "+r.result.Result, 200))
+	if !f.authChecked {
+		f.authChecked = true
+		f.authFallback = os.Getenv("SMIND_P0_INHERIT") == "1"
+		if f.authFallback {
+			t.Logf("SMIND_P0_INHERIT=1: using the INHERITED env (debug opt-out); env assertions are skipped")
+		}
 	}
 }
 
@@ -591,9 +569,6 @@ func (f *fixture) newPolicy() *ArmPolicy {
 func TestLive_ModelCallSucceeds(t *testing.T) {
 	f := requireLive(t)
 	r := f.bashRun(t) // the model call is part of every batched run
-	if f.authFallback {
-		t.Logf("%s: the model call ran with the inherited env", liveAuthNote)
-	}
 	if !r.ok() {
 		t.Fatalf("model call failed: err=%v result=%v", r.err, clip(r.result.Result, 200))
 	}
@@ -631,7 +606,7 @@ func (f *fixture) probeScript() string {
 		fmt.Sprintf("step 17; curl -sS -m 5 -o \"$ARM/local.out\" -w 'local:%%{http_code}\\n' http://127.0.0.1:%d/curl-local", f.port),
 		"step 18; curl -sS -m 8 -o \"$ARM/example.out\" -w 'example:%{http_code}\\n' https://example.com/",
 		"step 19; echo ENVNAMES-BEGIN; env | cut -d= -f1 | sort; echo ENVNAMES-END",
-		"step 20; env | grep CANARY; echo grep-canary-rc=$?",
+		"step 20; env | grep -E 'CANARY|FAKE_API'; echo grep-canary-rc=$?",
 		"step 21; echo done",
 	}, "\n") + "\n"
 }
@@ -1035,45 +1010,57 @@ func TestLive_SandboxOffStillGatesBash(t *testing.T) {
 
 func TestLive_EnvIsAllowlist(t *testing.T) {
 	f := requireLive(t)
-	canary := f.canaries["envvar"]
-	r := f.bashRun(t)
-	if f.authFallback {
-		t.Skipf("%s: the live env test needs the scrubbed launcher (env scrubbing stays covered by TestSpike_LauncherScrubsEnv with a stub CLI). "+
-			"Observed with the INHERITED env: canary var values reached the agent's Bash=%v (SMIND_CANARY_SECRET/SMIND_FAKE_API_KEY)",
-			liveAuthNote, strings.Contains(r.transcript, f.canaries["envvar"]) || strings.Contains(r.transcript, f.canaries["envkey"]))
+	if os.Getenv("SMIND_P0_INHERIT") == "1" {
+		t.Skip("SMIND_P0_INHERIT=1 (debug opt-out): the env allowlist is not exercised")
 	}
+	r := f.bashRun(t)
 	if !r.ok() {
-		t.Fatalf("run failed: err=%v %s", r.err, clip(r.result.Result, 200))
+		t.Fatalf("run under the scrubbed launcher failed: err=%v %s", r.err, clip(r.result.Result, 200))
 	}
 	if len(r.envNames) == 0 {
 		t.Fatal("shim recorded no env names")
 	}
-	allowed := map[string]bool{"PATH": true, "LANG": true, "TMPDIR": true, "HOME": true, "CLAUDE_CONFIG_DIR": true,
-		"ENABLE_CLAUDEAI_MCP_SERVERS": true, "PWD": true, "SHLVL": true, "_": true}
+	allowed := map[string]bool{"ENABLE_CLAUDEAI_MCP_SERVERS": true, "PWD": true, "SHLVL": true, "_": true} // PWD/SHLVL/_ minted by the shim's /bin/sh
+	for _, n := range DefaultEnvAllowlist {
+		allowed[n] = true
+	}
 	for _, n := range r.envNames {
 		if !allowed[n] {
 			t.Errorf("env var %s reached the CLI process", n)
 		}
 	}
-	var secretish []string
-	for _, kv := range os.Environ() {
-		n, _, _ := strings.Cut(kv, "=")
+	for _, c := range []string{"envvar", "envkey"} {
+		if strings.Contains(r.transcript, f.canaries[c]) {
+			t.Errorf("canary env value %s reached the agent", c)
+		}
+	}
+	text := r.toolText()
+	if !strings.Contains(text, "grep-canary-rc=1") {
+		t.Errorf("`env | grep -E 'CANARY|FAKE_API'` in the arm's Bash did not come back empty (rc=1 missing): %q", clip(text, 300))
+	}
+	bashEnv := between(text, "ENVNAMES-BEGIN", "ENVNAMES-END")
+	if bashEnv == "" {
+		t.Fatal("arm's Bash env names not captured: INCONCLUSIVE")
+	}
+	var minted []string
+	for _, n := range strings.Fields(bashEnv) {
 		u := strings.ToUpper(n)
-		if !allowed[n] && (strings.Contains(u, "TOKEN") || strings.Contains(u, "KEY") || strings.Contains(u, "SECRET") || strings.Contains(u, "CANARY")) {
-			secretish = append(secretish, n)
+		if strings.Contains(u, "CANARY") || strings.Contains(u, "FAKE_API") {
+			t.Errorf("env var %s is visible to the arm's Bash", n)
+		}
+		if !allowed[n] {
+			minted = append(minted, n)
 		}
 	}
-	bashEnv := between(r.toolText(), "ENVNAMES-BEGIN", "ENVNAMES-END")
-	for _, n := range secretish {
-		if strings.Contains(bashEnv, n) {
-			t.Errorf("secret-looking env var %s is visible to the arm's Bash", n)
-		}
-	}
-	if strings.Contains(r.transcript, canary) {
-		t.Error("canary env value reached the agent")
-	}
-	t.Logf("INFO: %d secret-shaped names present in the test process env, none reached the CLI/Bash; CLI env names=%v; Bash env names=%v",
-		len(secretish), r.envNames, strings.Fields(bashEnv))
+	// Names the arm's Bash sees beyond the allowlist were minted by the CLI or
+	// the sandbox (e.g. CLAUDE_CODE_MESSAGING_TOKEN, proxy vars): they cannot
+	// have come from the parent, because the CLI process env was asserted above
+	// to be exactly the allowlist. They are logged for review, not asserted by
+	// name (a name match with the parent's env proves nothing without reading
+	// values).
+	t.Logf("INFO CLI env names: %v", r.envNames)
+	t.Logf("INFO arm Bash env names (%d): %v", len(strings.Fields(bashEnv)), strings.Fields(bashEnv))
+	t.Logf("INFO of those, not in the allowlist (CLI/sandbox-minted): %v", minted)
 }
 
 func between(s, a, b string) string {
@@ -1127,4 +1114,32 @@ func TestLive_ProbeScriptSyntax(t *testing.T) {
 			t.Errorf("step %d missing from the script", n)
 		}
 	}
+}
+
+// TestLive_ProjectionDenyWriteIsolation measures whether
+// sandbox.filesystem.denyWrite:[projection] is needed on top of the
+// permissions.deny edit rules: the SAME sandboxed `echo > <proj>/x` with only
+// denyWrite removed. It records the outcome (the file existing means
+// permissions.deny alone does NOT protect against Bash writes, i.e.
+// denyWrite is required); it asserts nothing about it. Spends a call, so it
+// runs only with SMIND_P0_RUN_DENYWRITE=1.
+func TestLive_ProjectionDenyWriteIsolation(t *testing.T) {
+	f := requireLive(t)
+	if os.Getenv("SMIND_P0_RUN_DENYWRITE") != "1" {
+		t.Skip("set SMIND_P0_RUN_DENYWRITE=1 to spend a call on this isolation")
+	}
+	f.decideAuth(t)
+	target := filepath.Join(f.proj, "isolation-write.txt")
+	var m map[string]map[string]any
+	if err := json.Unmarshal([]byte(SettingsJSON(f.arm, f.proj)), &m); err != nil {
+		t.Fatal(err)
+	}
+	delete(m["sandbox"]["filesystem"].(map[string]any), "denyWrite")
+	b, _ := json.Marshal(m)
+	cmd := "echo x > " + shQuote(target)
+	r := f.call(t, callOpts{purpose: "projection-without-denywrite", prompt: "Run exactly this one Bash command, then stop: " + cmd, policy: f.newPolicy(), inherit: f.authFallback, settings: string(b),
+		prep: func() { f.resetArm(t); _ = os.Remove(target) }})
+	wrote := exists(target)
+	_ = os.Remove(target)
+	t.Logf("INFO denyWrite removed, permissions.deny kept: sandboxed Bash write to the projection succeeded=%v (denyWrite needed=%v); toolResults=%q", wrote, wrote, clip(r.toolText(), 200))
 }

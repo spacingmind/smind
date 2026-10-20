@@ -85,6 +85,28 @@ func SettingsJSON(armDir, projectionDir string) string {
 	return string(b)
 }
 
+// DefaultEnvAllowlist is the set of variable NAMES the launcher passes to the
+// real CLI. Measured (claude 2.1.303, macOS): with HOME and CLAUDE_CONFIG_DIR
+// (the user's normal login) plus USER the CLI authenticates; without USER it
+// answers "Not logged in". SHELL, TERM, LOGNAME were not needed. Only names
+// the parent process has are passed. Values are never logged.
+var DefaultEnvAllowlist = []string{"PATH", "LANG", "TMPDIR", "HOME", "CLAUDE_CONFIG_DIR", "USER"}
+
+// connectorOptOut keeps claude.ai account connectors out of an isolated run.
+const connectorOptOut = "ENABLE_CLAUDEAI_MCP_SERVERS=false"
+
+// AllowlistEnv returns the KEY=VALUE entries for WriteLauncher: every name in
+// DefaultEnvAllowlist that lookup reports as set, plus the connector opt-out.
+func AllowlistEnv(lookup func(string) (string, bool)) []string {
+	var env []string
+	for _, n := range DefaultEnvAllowlist {
+		if v, ok := lookup(n); ok {
+			env = append(env, n+"="+v)
+		}
+	}
+	return append(env, connectorOptOut)
+}
+
 var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // WriteLauncher writes an executable `#!/bin/sh` wrapper into dir that runs
@@ -120,10 +142,11 @@ func shQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// Budget limits of the spike (brief: at most 12 model-backed calls, USD 0.60).
+// Budget limits of the spike (brief: at most 12 model-backed calls, USD 0.60;
+// the R3 follow-up extends them by 6 calls and USD 0.10 for that follow-up only).
 const (
-	MaxCalls = 12
-	MaxUSD   = 0.60
+	MaxCalls = 18
+	MaxUSD   = 0.70
 	// perCallReserveUSD is held back when deciding whether another call may
 	// start: a call's cost is only known afterwards, so the harness refuses a
 	// call unless a typical (generous, haiku) call still fits under MaxUSD.

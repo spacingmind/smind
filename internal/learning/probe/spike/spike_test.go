@@ -123,7 +123,7 @@ func TestSpike_LauncherScrubsEnv(t *testing.T) {
 	if err := os.WriteFile(stub, []byte("#!/bin/sh\n/usr/bin/env\necho \"ARGS:$*\"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	allow := []string{"PATH=/usr/bin:/bin", "HOME=/tmp/private home", "LANG=en_US.UTF-8", "TRICKY=it's $(touch " + filepath.Join(dir, "pwned") + ")"}
+	allow := []string{"PATH=/usr/bin:/bin", "HOME=/tmp/private home", "LANG=en_US.UTF-8", "USER=someone", "TRICKY=it's $(touch " + filepath.Join(dir, "pwned") + ")"}
 	launcher, err := WriteLauncher(dir, stub, allow)
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func TestSpike_LauncherScrubsEnv(t *testing.T) {
 		t.Fatalf("canary leaked through the launcher:\n%s", text)
 	}
 	// PWD, SHLVL and _ are minted by the stub's own /bin/sh, not inherited.
-	want := map[string]bool{"PATH": true, "HOME": true, "LANG": true, "TRICKY": true, "PWD": true, "SHLVL": true, "_": true}
+	want := map[string]bool{"PATH": true, "HOME": true, "LANG": true, "TRICKY": true, "USER": true, "PWD": true, "SHLVL": true, "_": true}
 	got := map[string]string{}
 	for _, line := range strings.Split(text, "\n") {
 		if line == "" || strings.HasPrefix(line, "ARGS:") {
@@ -189,11 +189,11 @@ func TestSpike_LedgerRefusesOverBudget(t *testing.T) {
 	}
 
 	l2 := &Ledger{Path: filepath.Join(t.TempDir(), "ledger.jsonl")}
-	if err := l2.Record(Entry{Purpose: "expensive", CostUSD: 0.56}); err != nil {
+	if err := l2.Record(Entry{Purpose: "expensive", CostUSD: MaxUSD - perCallReserveUSD + 0.01}); err != nil {
 		t.Fatal(err)
 	}
 	err := l2.Begin("would pass 0.60")
-	if !errors.Is(err, ErrBudget) || !strings.Contains(err.Error(), "0.56") {
+	if !errors.Is(err, ErrBudget) || !strings.Contains(err.Error(), "0.66") {
 		t.Fatalf("cost gate: want ErrBudget naming totals, got %v", err)
 	}
 }
@@ -250,5 +250,25 @@ func TestSpike_ArmPolicyDecisions(t *testing.T) {
 	}
 	if n := len(p.Records()); n != len(cases) {
 		t.Errorf("recorded %d requests, want %d", n, len(cases))
+	}
+}
+
+func TestSpike_AllowlistEnv(t *testing.T) {
+	have := map[string]string{"PATH": "/usr/bin", "HOME": "/h", "USER": "u", "SMIND_CANARY_SECRET": "CANARY-x", "GITHUB_TOKEN": "t", "LOGNAME": "u", "SHELL": "/bin/sh"}
+	got := AllowlistEnv(func(n string) (string, bool) { v, ok := have[n]; return v, ok })
+	names := map[string]bool{}
+	for _, kv := range got {
+		n, _, _ := strings.Cut(kv, "=")
+		names[n] = true
+	}
+	for _, want := range []string{"PATH", "HOME", "USER", "ENABLE_CLAUDEAI_MCP_SERVERS"} {
+		if !names[want] {
+			t.Errorf("%s missing from the allowlist env", want)
+		}
+	}
+	for _, bad := range []string{"SMIND_CANARY_SECRET", "GITHUB_TOKEN", "LOGNAME", "SHELL", "LANG"} {
+		if names[bad] {
+			t.Errorf("%s must not be in the allowlist env (absent or not allowlisted)", bad)
+		}
 	}
 }
