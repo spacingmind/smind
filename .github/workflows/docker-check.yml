@@ -9,6 +9,11 @@ on:
       - Dockerfile
       - .dockerignore
       - docker/**
+      # The image tests drive the CLI (relay connect, update, service guards),
+      # so CLI and relay changes must run them too.
+      - cmd/smind/**
+      - internal/relay/**
+      - internal/config/**
       - .github/workflows/docker-check.yml
   workflow_dispatch:
 
