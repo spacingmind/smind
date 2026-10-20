@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package spike is the P0 sandbox spike for the learning probe arm
 // (ADR-0037 §3): it holds the candidate `--settings` sandbox JSON, the env
 // allowlist launcher and the call/cost ledger used to measure, against the

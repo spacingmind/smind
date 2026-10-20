@@ -1,3 +1,5 @@
+//go:build !windows
+
 package spike
 
 import (
@@ -82,7 +84,19 @@ func TestSpike_SettingsJSONAllowListMode(t *testing.T) {
 	for _, p := range fs["allowRead"].([]any) {
 		allow[p.(string)] = true
 	}
-	for _, want := range []string{litArm, litProj, "/usr", "/bin", "/System", "/dev", "/private/var/select", "/var", "/tmp", "/etc"} {
+	// System paths are canonicalised when they exist (/bin is a symlink to
+	// /usr/bin on Linux); the symlink nodes are listed as given.
+	canon := func(p string) string {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return p
+	}
+	wants := []string{litArm, litProj, "/var", "/tmp", "/etc"}
+	for _, p := range []string{"/usr", "/bin", "/System", "/dev", "/private/var/select"} {
+		wants = append(wants, canon(p))
+	}
+	for _, want := range wants {
 		if !allow[want] {
 			t.Errorf("allowRead lacks %s: %v", want, fs["allowRead"])
 		}
