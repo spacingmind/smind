@@ -135,7 +135,7 @@ func ComposeRetryPrompt(original string, items []RetryItem) string {
 		sb.WriteByte('\n')
 	}
 	sb.WriteString("\n<<<GATE_FINDINGS\n")
-	sb.WriteString("Your previous reply was checked by a deterministic gate. These intents were rejected for fixable format reasons. Reply with the JSON object again containing ONLY corrected versions of these intents (same names, same evidence quotes). Do not add intents and do not repeat intents that were accepted.\n")
+	sb.WriteString("Your previous reply was checked by a deterministic gate. These intents were rejected for fixable format reasons. Reply with the JSON object again containing ONLY corrected versions of these intents (keep the evidence quotes; change the name only if a finding is about the name). Do not add intents and do not repeat intents that were accepted.\n")
 	for _, it := range items {
 		for _, f := range it.Findings {
 			sb.WriteString("- " + oneLine(it.Name, retryFieldCap) + " :: " + oneLine(f.Reason, retryFieldCap) + ": " + oneLine(f.Detail, retryFieldCap) + "\n")

@@ -216,7 +216,7 @@ func (s *Service) reflect(job *store.LearningJob, cw store.ChatWorkspace, cfg co
 	// findings appended; the result is re-gated by the same gate. A retry
 	// failure of any kind never fails the job.
 	if items := retryItems(verdicts); len(items) > 0 {
-		if v2, c2, res2 := s.retryReflect(job, cw, cfg, rd, out, learned, human, userPrompt, items); res2 != nil {
+		if v2, c2, res2 := s.retryReflect(job, cw, cfg, rd, out, learned, human, userPrompt, items, acceptedNames(verdicts)); res2 != nil {
 			retryRes = res2
 			for i := range v2 {
 				v2[i].Retry = true
@@ -237,12 +237,12 @@ func (s *Service) reflect(job *store.LearningJob, cw store.ChatWorkspace, cfg co
 
 // retryReflect runs the single reflector retry: the same executor request
 // with a GATE_FINDINGS block appended to the original user prompt, then the
-// same gate and store path. Retry intents whose name is not one of the
-// retried items are dropped, so accepted intents are never re-created. It
+// same gate and store path. Intents that re-emit an already accepted name
+// are dropped and at most len(items) are kept. It
 // never fails the job: on any error the first-pass verdicts stand, and only
 // the run result is returned for cost accounting.
 func (s *Service) retryReflect(job *store.LearningJob, cw store.ChatWorkspace, cfg config.LearningConfig, rd *redact.Redactor,
-	out window.Output, learned []store.LearnedSkill, human []gate.LiveSkill, userPrompt string, items []reflector.RetryItem) ([]verdict, int, *executor.Result) {
+	out window.Output, learned []store.LearnedSkill, human []gate.LiveSkill, userPrompt string, items []reflector.RetryItem, accepted map[string]bool) ([]verdict, int, *executor.Result) {
 	prompt2 := reflector.ComposeRetryPrompt(userPrompt, items)
 	if over, err := s.overBudget(cw.WorkspaceID, cfg, len(prompt2)); err != nil || over {
 		return nil, 0, nil
@@ -263,15 +263,15 @@ func (s *Service) retryReflect(job *store.LearningJob, cw store.ChatWorkspace, c
 	if err != nil {
 		return nil, 0, &res2
 	}
-	names := make(map[string]bool, len(items))
-	for _, it := range items {
-		names[it.Name] = true
-	}
+	// At most one corrected intent per retried item, and never one that
+	// re-emits an intent the first pass already stored. Matching by the
+	// retried names would drop a corrected bad_name (the fix renames it).
 	var kept []gate.Intent
 	for _, in := range intents2 {
-		if names[in.Name] {
-			kept = append(kept, in)
+		if accepted[in.Name] || len(kept) >= len(items) {
+			continue
 		}
+		kept = append(kept, in)
 	}
 	if len(kept) == 0 {
 		return nil, 0, &res2
@@ -392,6 +392,17 @@ var repairable = map[gate.Reason]bool{
 	gate.ReasonBadFrontmatter: true,
 	gate.ReasonURLLink:        true,
 	gate.ReasonBadReason:      true,
+}
+
+// acceptedNames is the set of intent names the verdicts stored as proposals.
+func acceptedNames(verdicts []verdict) map[string]bool {
+	out := map[string]bool{}
+	for _, v := range verdicts {
+		if v.Accepted {
+			out[v.Name] = true
+		}
+	}
+	return out
 }
 
 // retryItems returns the verdicts that were rejected only for repairable

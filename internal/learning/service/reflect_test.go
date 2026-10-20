@@ -880,3 +880,23 @@ func TestReflectRetry_ParseFailureKeepsFirstPass(t *testing.T) {
 		t.Fatalf("verdicts = %+v, want first pass only", vs)
 	}
 }
+
+// A corrected bad_name changes the name, so the retry must not be filtered by
+// the original names.
+func TestReflectRetry_BadNameCanBeRenamed(t *testing.T) {
+	f := newReflectFx(t)
+	f.reflectScript(
+		grounded(f.runID, func(in map[string]any) { in["name"] = "Flaky TempDir!" }),
+		grounded(f.runID, nil),
+	)
+	job := f.reflect()
+	if f.exec.count() != 2 {
+		t.Fatalf("executor calls = %d, want 2", f.exec.count())
+	}
+	if ps := f.proposals(); len(ps) != 1 || ps[0].Name != "learned-flaky-tempdir" {
+		t.Fatalf("proposals = %+v", ps)
+	}
+	if job.Status != "landed" {
+		t.Fatalf("job = %+v", job)
+	}
+}
