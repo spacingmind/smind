@@ -16,73 +16,195 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 )
 
-// SettingsJSON returns the candidate `--settings` value for the probe arm:
-// the command sandbox on and mandatory (failIfUnavailable, no unsandboxed
-// escape hatch), no network at all (strictAllowlist with an empty allowlist,
-// no local binding), writes limited to armDir, and reads denied under the
-// arm's parent directory and the real $HOME (the launcher keeps the user's
-// HOME so the CLI still authenticates, so the sandbox, not a private HOME,
-// is what protects it) except armDir and projectionDir.
+// ErrBadPath is returned by SettingsJSON for a path that cannot be put into
+// the sandbox settings safely: relative, unresolvable, containing "..", a
+// glob metacharacter, or a control character.
+var ErrBadPath = errors.New("spike: unusable sandbox path")
+
+// ReadMode selects how the sandbox restricts reads.
+type ReadMode int
+
+const (
+	// ReadDenyList denies reads under the real $HOME, the arm's parent and
+	// every extraDenyRead root; everything else stays readable (measured).
+	ReadDenyList ReadMode = iota
+	// ReadAllowList denies "/" and re-allows the arm, the projection and the
+	// system paths in SystemReadPaths (experiment E1).
+	ReadAllowList
+)
+
+// DefaultReadMode is the mode SettingsJSON uses. Set from the measured result
+// of experiment E1 (see p0-findings.md).
+const DefaultReadMode = ReadDenyList
+
+// SystemReadPaths are re-allowed under ReadAllowList: what sh, git, cat, ls,
+// curl and the CLI's per-session tmp need on macOS. Paths that do not exist
+// are kept as given (the CLI ignores them).
+func SystemReadPaths() []string {
+	return []string{"/usr", "/bin", "/sbin", "/System", "/Library", "/private/etc", "/dev",
+		"/opt/homebrew", "/private/var/db", "/private/tmp/claude-" + fmt.Sprint(os.Getuid())}
+}
+
+// SettingsOptions are the knobs of SettingsJSONWith. The zero value is the
+// deny-list production settings; the Omit* fields exist only for ablations.
+type SettingsOptions struct {
+	ReadMode      ReadMode
+	ExtraDenyRead []string // deny-list mode: the real repo root, worktree roots, ...
+
+	OmitNetworkKeys     bool // ablation: drop strictAllowlist and allowLocalBinding
+	OmitDenyWrite       bool // ablation: drop filesystem.denyWrite
+	OmitPermissionsDeny bool // ablation: drop permissions.deny
+}
+
+// SettingsJSON returns the `--settings` value for the probe arm in
+// DefaultReadMode, failing closed (an error, never a weaker config) on any
+// path problem; extraDenyRead are additional roots to deny in deny-list mode.
+func SettingsJSON(armDir, projectionDir string, extraDenyRead []string) (string, error) {
+	return SettingsJSONWith(armDir, projectionDir, SettingsOptions{ReadMode: DefaultReadMode, ExtraDenyRead: extraDenyRead})
+}
+
+// SettingsJSONWith is SettingsJSON with explicit options. The command sandbox
+// is on and mandatory (failIfUnavailable, no unsandboxed escape hatch), the
+// network is closed (strictAllowlist, empty allowlist, no local binding),
+// writes are limited to armDir, and the projection is read-only: it gets
+// permissions.deny on the edit tools (--add-dir makes it a working directory,
+// writable by the built-in tools under acceptEdits, measured) and
+// filesystem.denyWrite. Reads follow ReadMode. The launcher keeps the user's
+// real HOME so the CLI authenticates, so in deny-list mode the real $HOME is
+// denied explicitly: an unresolvable or relative $HOME is an error, not a
+// silently dropped rule.
 //
-// Measured live on macOS (claude 2.1.303, see the live tests): denyRead of
-// the real $HOME and of the arm's parent, with allowRead for the arm and the
-// projection, blocks decoy reads and writes outside the arm while the arm and
-// the projection stay readable. Two additions come from measurement:
-// --add-dir directories are working directories (acceptEdits auto-approves
-// edits there, and the CLI lists them in the sandbox write allowlist), so the
-// read-only projection gets permissions.deny on the edit tools and a
-// filesystem.denyWrite. Plain git inside the arm fails with the real $HOME
-// denied (it reads ~/.gitconfig): run it with GIT_CONFIG_GLOBAL=/dev/null.
-// armDir and projectionDir must be absolute; a relative path panics, because
-// a relative sandbox path would silently mean something else to the CLI.
-func SettingsJSON(armDir, projectionDir string) string {
-	for _, p := range []string{armDir, projectionDir} {
-		if !filepath.IsAbs(p) {
-			panic("spike: sandbox path is not absolute: " + p)
+// Every path must be absolute, free of ".." and of glob metacharacters, and is
+// canonicalised with filepath.EvalSymlinks (Clean only for the not-yet-existing
+// tail). Whether the CLI itself canonicalises was not measured, hence the
+// builder does.
+//
+// Plain git inside the arm fails with the real $HOME denied (it reads
+// ~/.gitconfig): run it with GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1.
+func SettingsJSONWith(armDir, projectionDir string, opt SettingsOptions) (string, error) {
+	arm, err := canonPath(armDir)
+	if err != nil {
+		return "", fmt.Errorf("arm dir: %w", err)
+	}
+	proj, err := canonPath(projectionDir)
+	if err != nil {
+		return "", fmt.Errorf("projection dir: %w", err)
+	}
+	var denyRead, allowRead []string
+	switch opt.ReadMode {
+	case ReadAllowList:
+		denyRead = []string{"/"}
+		allowRead = []string{arm, proj}
+		for _, p := range SystemReadPaths() {
+			c, err := canonPath(p)
+			if err != nil {
+				return "", fmt.Errorf("system read path %q: %w", p, err)
+			}
+			allowRead = append(allowRead, c)
 		}
+	case ReadDenyList:
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("%w: $HOME is not resolvable: %v", ErrBadPath, err)
+		}
+		if !filepath.IsAbs(home) {
+			return "", fmt.Errorf("%w: $HOME %q is not absolute", ErrBadPath, home)
+		}
+		homeC, err := canonPath(home)
+		if err != nil {
+			return "", fmt.Errorf("$HOME: %w", err)
+		}
+		denyRead = []string{homeC, filepath.Dir(arm)}
+		for _, p := range opt.ExtraDenyRead {
+			c, err := canonPath(p)
+			if err != nil {
+				return "", fmt.Errorf("extra deny-read path: %w", err)
+			}
+			denyRead = append(denyRead, c)
+		}
+		allowRead = []string{arm, proj}
+	default:
+		return "", fmt.Errorf("spike: unknown read mode %d", opt.ReadMode)
 	}
-	armDir, projectionDir = filepath.Clean(armDir), filepath.Clean(projectionDir)
-	denyRead := []string{filepath.Dir(armDir)}
-	if home, err := os.UserHomeDir(); err == nil && filepath.IsAbs(home) {
-		denyRead = append([]string{filepath.Clean(home)}, denyRead...)
+	denyRead, allowRead = dedupe(denyRead), dedupe(allowRead)
+
+	fs := map[string]any{"allowWrite": []string{arm}, "denyRead": denyRead, "allowRead": allowRead}
+	if !opt.OmitDenyWrite {
+		fs["denyWrite"] = []string{proj}
 	}
-	// --add-dir directories are working directories: acceptEdits auto-approves
-	// edits there (measured, run 1), so the read-only projection needs an
-	// explicit deny on the edit tools ("//" = absolute filesystem path).
-	denyEdit := make([]string, 0, 3)
-	for _, tool := range []string{"Edit", "Write", "NotebookEdit"} {
-		denyEdit = append(denyEdit, tool+"(/"+projectionDir+"/**)")
+	network := map[string]any{"allowedDomains": []string{}}
+	if !opt.OmitNetworkKeys {
+		network["strictAllowlist"] = true
+		network["allowLocalBinding"] = false
 	}
 	settings := map[string]any{
-		"permissions": map[string]any{"deny": denyEdit},
 		"sandbox": map[string]any{
 			"enabled":                  true,
 			"failIfUnavailable":        true,
 			"allowUnsandboxedCommands": false,
 			"autoAllowBashIfSandboxed": true,
-			"network": map[string]any{
-				"strictAllowlist":   true,
-				"allowedDomains":    []string{},
-				"allowLocalBinding": false,
-			},
-			"filesystem": map[string]any{
-				"allowWrite": []string{armDir},
-				"denyWrite":  []string{projectionDir},
-				"denyRead":   denyRead,
-				"allowRead":  []string{armDir, projectionDir},
-			},
+			"network":                  network,
+			"filesystem":               fs,
 		},
+	}
+	if !opt.OmitPermissionsDeny {
+		// "//" prefix = absolute filesystem path in permission rules.
+		var deny []string
+		for _, tool := range []string{"Edit", "Write", "NotebookEdit"} {
+			deny = append(deny, tool+"(//"+strings.TrimPrefix(proj, "/")+"/**)")
+		}
+		settings["permissions"] = map[string]any{"deny": deny}
 	}
 	b, err := json.Marshal(settings)
 	if err != nil {
-		panic("spike: marshal settings: " + err.Error()) // static shape; cannot fail
+		return "", fmt.Errorf("spike: marshal settings: %w", err) // static shape; cannot fail
 	}
-	return string(b)
+	return string(b), nil
+}
+
+// canonPath validates p and returns its canonical absolute form: symlinks
+// followed through the longest existing prefix, the rest Cleaned.
+func canonPath(p string) (string, error) {
+	if !filepath.IsAbs(p) {
+		return "", fmt.Errorf("%w: %q is not absolute", ErrBadPath, p)
+	}
+	if strings.ContainsAny(p, "*?[](){}!\n\r\x00\\") {
+		return "", fmt.Errorf("%w: %q contains a glob or control character", ErrBadPath, p)
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return "", fmt.Errorf("%w: %q contains ..", ErrBadPath, p)
+		}
+	}
+	clean := filepath.Clean(p)
+	rest := ""
+	for cur := clean; ; cur = filepath.Dir(cur) {
+		if real, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.Join(real, rest), nil
+		}
+		if cur == filepath.Dir(cur) {
+			return clean, nil
+		}
+		rest = filepath.Join(filepath.Base(cur), rest)
+	}
+}
+
+func dedupe(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // DefaultEnvAllowlist is the set of variable NAMES the launcher passes to the
@@ -113,12 +235,33 @@ var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // realCLI under `/usr/bin/env -i` with exactly the KEY=VALUE entries in env:
 // the SDK's transport inherits the daemon's whole environment and can only
 // add to it, so an allowlist needs a wrapper (WithCLIPath). It returns the
-// script path. An entry that is not KEY=VALUE with a valid name, a relative
-// realCLI or a relative dir is an error; values are single-quoted, so they
-// are never interpreted by the shell.
+// script path.
+//
+// The env VALUES are written to disk in the script (and are briefly visible
+// in env's argv): only ever pass the non-secret allowlist (PATH, LANG, TMPDIR,
+// HOME, CLAUDE_CONFIG_DIR, USER); never add a token or key. dir must be a
+// real directory (not a symlink) owned by the caller and not group/world
+// writable; the file is created with O_EXCL|O_NOFOLLOW and mode 0700, so a
+// pre-planted file or symlink is an error, never followed. dir must never be
+// inside the arm. An entry that is not KEY=VALUE with a valid name, or a
+// relative realCLI or dir, is an error; values are single-quoted, so they are
+// never interpreted by the shell.
 func WriteLauncher(dir, realCLI string, env []string) (string, error) {
 	if !filepath.IsAbs(dir) || !filepath.IsAbs(realCLI) {
 		return "", errors.New("spike: launcher dir and real CLI path must be absolute")
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return "", fmt.Errorf("spike: launcher dir: %w", err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("spike: launcher dir is not a real directory")
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return "", fmt.Errorf("spike: launcher dir %s is group/world writable (%v)", dir, info.Mode().Perm())
+	}
+	if st, ok := info.Sys().(*syscall.Stat_t); ok && int(st.Uid) != os.Getuid() {
+		return "", errors.New("spike: launcher dir is not owned by the current user")
 	}
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\nexec /usr/bin/env -i")
@@ -131,7 +274,15 @@ func WriteLauncher(dir, realCLI string, env []string) (string, error) {
 	}
 	b.WriteString(" " + shQuote(realCLI) + " \"$@\"\n")
 	path := filepath.Join(dir, "claude-launcher.sh")
-	if err := os.WriteFile(path, []byte(b.String()), 0o700); err != nil {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o700)
+	if err != nil {
+		return "", fmt.Errorf("spike: create launcher: %w", err)
+	}
+	if _, err := f.WriteString(b.String()); err != nil {
+		_ = f.Close()
+		return "", fmt.Errorf("spike: write launcher: %w", err)
+	}
+	if err := f.Close(); err != nil {
 		return "", fmt.Errorf("spike: write launcher: %w", err)
 	}
 	return path, nil
@@ -142,11 +293,12 @@ func shQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// Budget limits of the spike (brief: at most 12 model-backed calls, USD 0.60;
-// the R3 follow-up extends them by 6 calls and USD 0.10 for that follow-up only).
+// Budget limits of the spike: 12 calls / USD 0.60 originally, +6 / +0.10 for
+// the R3 follow-up, +6 / +0.10 for the hardening round (each extension was
+// authorised by the Lead for that round only).
 const (
-	MaxCalls = 18
-	MaxUSD   = 0.70
+	MaxCalls = 24
+	MaxUSD   = 0.80
 	// perCallReserveUSD is held back when deciding whether another call may
 	// start: a call's cost is only known afterwards, so the harness refuses a
 	// call unless a typical (generous, haiku) call still fits under MaxUSD.
@@ -154,6 +306,7 @@ const (
 )
 
 // ErrBudget is returned by Ledger.Begin when a call would breach the budget.
+// Begin returns the call's sequence number (its 1-based position in the ledger).
 var ErrBudget = errors.New("spike: live-call budget exhausted")
 
 // Entry is one ledger line. It carries no secret: the purpose is a label and
@@ -201,19 +354,19 @@ func (l *Ledger) Totals() (calls int, usd float64, err error) {
 
 // Begin checks the budget before a model-backed call starts. It returns an
 // ErrBudget-wrapping error that names the running totals when the call would
-// be the 13th, or when spent + the per-call reserve would pass MaxUSD.
-func (l *Ledger) Begin(purpose string) error {
+// exceed MaxCalls, or when spent + the per-call reserve would pass MaxUSD.
+func (l *Ledger) Begin(purpose string) (seq int, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	calls, usd, err := l.Totals()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if calls+1 > MaxCalls || usd+perCallReserveUSD > MaxUSD {
-		return fmt.Errorf("%w: refusing %q: %d/%d calls, USD %.4f/%.2f spent", ErrBudget, purpose, calls, MaxCalls, usd, MaxUSD)
+		return 0, fmt.Errorf("%w: refusing %q: %d/%d calls, USD %.4f/%.2f spent", ErrBudget, purpose, calls, MaxCalls, usd, MaxUSD)
 	}
 	fmt.Printf("spike ledger: starting call %d/%d (%q), USD %.4f/%.2f spent\n", calls+1, MaxCalls, purpose, usd, MaxUSD)
-	return nil
+	return calls + 1, nil
 }
 
 // Record appends one entry. Call it for every invocation, including failed

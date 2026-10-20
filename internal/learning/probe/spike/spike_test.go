@@ -4,113 +4,182 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 )
 
-func TestSpike_SettingsJSONShape(t *testing.T) {
-	arm, proj := "/tmp/x/arm", "/tmp/x/proj"
-	raw := SettingsJSON(arm, proj)
-	var got struct {
-		Sandbox struct {
-			Enabled                  *bool `json:"enabled"`
-			FailIfUnavailable        *bool `json:"failIfUnavailable"`
-			AllowUnsandboxedCommands *bool `json:"allowUnsandboxedCommands"`
-			AutoAllowBashIfSandboxed *bool `json:"autoAllowBashIfSandboxed"`
-			Network                  struct {
-				StrictAllowlist   *bool     `json:"strictAllowlist"`
-				AllowedDomains    *[]string `json:"allowedDomains"`
-				AllowLocalBinding *bool     `json:"allowLocalBinding"`
-			} `json:"network"`
-			Filesystem struct {
-				AllowWrite []string `json:"allowWrite"`
-				DenyWrite  []string `json:"denyWrite"`
-				DenyRead   []string `json:"denyRead"`
-				AllowRead  []string `json:"allowRead"`
-			} `json:"filesystem"`
-		} `json:"sandbox"`
-	}
-	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+// Fixed, non-existent paths: canonicalisation then only Cleans them, so the
+// expected strings below are plain literals, not a re-run of the formula.
+const (
+	litArm  = "/nonexistent-p0/arm"
+	litProj = "/nonexistent-p0/proj"
+	litHome = "/nonexistent-home"
+)
+
+func decode(t *testing.T, raw string) map[string]any {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
 		t.Fatalf("settings are not valid JSON: %v", err)
 	}
-	s := got.Sandbox
-	for name, p := range map[string]*bool{
-		"enabled": s.Enabled, "failIfUnavailable": s.FailIfUnavailable,
-		"allowUnsandboxedCommands": s.AllowUnsandboxedCommands,
-		"network.strictAllowlist":  s.Network.StrictAllowlist,
-	} {
-		if p == nil {
-			t.Fatalf("required key %s is missing", name)
-		}
+	return m
+}
+
+func TestSpike_SettingsJSONShape(t *testing.T) {
+	t.Setenv("HOME", litHome)
+	raw, err := SettingsJSONWith(litArm, litProj, SettingsOptions{ReadMode: ReadDenyList, ExtraDenyRead: []string{"/nonexistent-p0-real/checkout"}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !*s.Enabled || !*s.FailIfUnavailable || !*s.Network.StrictAllowlist {
-		t.Errorf("enabled, failIfUnavailable and strictAllowlist must all be true: %s", raw)
-	}
-	if *s.AllowUnsandboxedCommands {
-		t.Error("allowUnsandboxedCommands must be false")
+	want := `{
+	  "permissions": {"deny": ["Edit(//nonexistent-p0/proj/**)", "Write(//nonexistent-p0/proj/**)", "NotebookEdit(//nonexistent-p0/proj/**)"]},
+	  "sandbox": {
+	    "enabled": true,
+	    "failIfUnavailable": true,
+	    "allowUnsandboxedCommands": false,
+	    "autoAllowBashIfSandboxed": true,
+	    "network": {"strictAllowlist": true, "allowedDomains": [], "allowLocalBinding": false},
+	    "filesystem": {
+	      "allowWrite": ["/nonexistent-p0/arm"],
+	      "denyWrite": ["/nonexistent-p0/proj"],
+	      "denyRead": ["/nonexistent-home", "/nonexistent-p0", "/nonexistent-p0-real/checkout"],
+	      "allowRead": ["/nonexistent-p0/arm", "/nonexistent-p0/proj"]
+	    }
+	  }
+	}`
+	if !reflect.DeepEqual(decode(t, raw), decode(t, want)) {
+		t.Errorf("settings differ from the literal expectation:\n got  %s\n want %s", raw, want)
 	}
 	if strings.Contains(raw, `"allowUnsandboxedCommands":true`) {
-		t.Error("raw settings contain allowUnsandboxedCommands:true")
-	}
-	if s.Network.AllowedDomains == nil || len(*s.Network.AllowedDomains) != 0 {
-		t.Errorf("allowedDomains must be present and empty: %s", raw)
-	}
-	if s.Network.AllowLocalBinding == nil || *s.Network.AllowLocalBinding {
-		t.Error("allowLocalBinding must be present and false")
-	}
-	if len(s.Filesystem.AllowWrite) != 1 || s.Filesystem.AllowWrite[0] != arm {
-		t.Errorf("allowWrite must be exactly the arm dir, got %v", s.Filesystem.AllowWrite)
-	}
-	if len(s.Filesystem.DenyWrite) != 1 || s.Filesystem.DenyWrite[0] != proj {
-		t.Errorf("denyWrite must be exactly the projection dir, got %v", s.Filesystem.DenyWrite)
-	}
-	if len(s.Filesystem.DenyRead) == 0 || len(s.Filesystem.AllowRead) == 0 {
-		t.Errorf("denyRead and allowRead must both be set: %s", raw)
-	}
-	var perms struct {
-		Permissions struct {
-			Deny []string `json:"deny"`
-		} `json:"permissions"`
-	}
-	_ = json.Unmarshal([]byte(raw), &perms)
-	for _, tool := range []string{"Edit", "Write", "NotebookEdit"} {
-		want := tool + "(/" + proj + "/**)"
-		found := false
-		for _, d := range perms.Permissions.Deny {
-			found = found || d == want
-		}
-		if !found {
-			t.Errorf("permissions.deny lacks %q: %v", want, perms.Permissions.Deny)
-		}
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		found := false
-		for _, p := range s.Filesystem.DenyRead {
-			found = found || p == home
-		}
-		if !found {
-			t.Errorf("denyRead must contain the real $HOME %q, got %v", home, s.Filesystem.DenyRead)
-		}
-	}
-	for _, p := range append(append(append([]string{}, s.Filesystem.AllowWrite...), s.Filesystem.AllowRead...), s.Filesystem.DenyRead...) {
-		if !filepath.IsAbs(p) {
-			t.Errorf("sandbox path %q is not absolute", p)
-		}
+		t.Error("allowUnsandboxedCommands:true must never appear")
 	}
 }
 
-func TestSpike_SettingsJSONRejectsRelativePath(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("expected a panic for a relative arm dir")
+func TestSpike_SettingsJSONAllowListMode(t *testing.T) {
+	t.Setenv("HOME", litHome)
+	raw, err := SettingsJSONWith(litArm, litProj, SettingsOptions{ReadMode: ReadAllowList})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := decode(t, raw)["sandbox"].(map[string]any)["filesystem"].(map[string]any)
+	if got := fs["denyRead"]; !reflect.DeepEqual(got, []any{"/"}) {
+		t.Errorf("allow-list denyRead = %v, want [/]", got)
+	}
+	allow := map[string]bool{}
+	for _, p := range fs["allowRead"].([]any) {
+		allow[p.(string)] = true
+	}
+	for _, want := range []string{litArm, litProj, "/usr", "/bin", "/System", "/dev"} {
+		if !allow[want] {
+			t.Errorf("allowRead lacks %s: %v", want, fs["allowRead"])
 		}
-	}()
-	SettingsJSON("rel/arm", "/tmp/proj")
+	}
+	if allow[litHome] || allow["/"] {
+		t.Errorf("allowRead must not re-open $HOME or /: %v", fs["allowRead"])
+	}
+}
+
+func TestSpike_SettingsJSONAblationsOnlyRemoveTheirKey(t *testing.T) {
+	t.Setenv("HOME", litHome)
+	full, _ := SettingsJSONWith(litArm, litProj, SettingsOptions{})
+	for name, opt := range map[string]SettingsOptions{
+		"network": {OmitNetworkKeys: true}, "denyWrite": {OmitDenyWrite: true}, "permissions": {OmitPermissionsDeny: true},
+	} {
+		raw, err := SettingsJSONWith(litArm, litProj, opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if raw == full {
+			t.Errorf("%s ablation changed nothing", name)
+		}
+	}
+	raw, _ := SettingsJSONWith(litArm, litProj, SettingsOptions{OmitNetworkKeys: true})
+	if strings.Contains(raw, "strictAllowlist") || strings.Contains(raw, "allowLocalBinding") || !strings.Contains(raw, `"allowedDomains":[]`) {
+		t.Errorf("network ablation must drop exactly the two keys: %s", raw)
+	}
+}
+
+func TestSpike_SettingsJSONFailsClosed(t *testing.T) {
+	for name, home := range map[string]string{"empty": "", "relative": "rel/home"} {
+		t.Run("home "+name, func(t *testing.T) {
+			t.Setenv("HOME", home)
+			if raw, err := SettingsJSON(litArm, litProj, nil); err == nil {
+				t.Fatalf("deny-list settings were built without a usable $HOME: %s", raw)
+			}
+		})
+	}
+	t.Setenv("HOME", litHome)
+	for name, tc := range map[string][2]string{
+		"relative arm": {"rel/arm", litProj}, "relative projection": {litArm, "rel/proj"},
+		"dotdot arm": {"/nonexistent-p0/../arm", litProj}, "dotdot projection": {litArm, "/nonexistent-p0/x/../proj"},
+		"star": {litArm, "/nonexistent-p0/pr*oj"}, "question": {"/nonexistent-p0/a?m", litProj},
+		"bracket": {litArm, "/nonexistent-p0/p[r]oj"}, "paren": {litArm, "/nonexistent-p0/pr(oj"},
+		"newline": {"/nonexistent-p0/a\nrm", litProj},
+	} {
+		if raw, err := SettingsJSON(tc[0], tc[1], nil); !errors.Is(err, ErrBadPath) {
+			t.Errorf("%s: want ErrBadPath, got err=%v raw=%s", name, err, raw)
+		}
+	}
+	if _, err := SettingsJSON(litArm, litProj, []string{"/nonexistent-p0/x*"}); !errors.Is(err, ErrBadPath) {
+		t.Errorf("glob in extraDenyRead accepted: %v", err)
+	}
+	if _, err := SettingsJSON(litArm, litProj, []string{"relative"}); !errors.Is(err, ErrBadPath) {
+		t.Errorf("relative extraDenyRead accepted: %v", err)
+	}
+}
+
+func TestSpike_SettingsJSONCanonicalisesPaths(t *testing.T) {
+	t.Setenv("HOME", litHome)
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	realDir := filepath.Join(root, "real", "arm")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(filepath.Join(root, "real"), link); err != nil {
+		t.Fatal(err)
+	}
+	// Symlinked prefix, trailing slash and a not-yet-existing tail.
+	raw, err := SettingsJSON(link+"/arm/", link+"/not-yet/proj/", []string{link + "/arm"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := decode(t, raw)["sandbox"].(map[string]any)["filesystem"].(map[string]any)
+	if got := fs["allowWrite"]; !reflect.DeepEqual(got, []any{realDir}) {
+		t.Errorf("allowWrite = %v, want the symlink-resolved %s", got, realDir)
+	}
+	if got := fs["denyWrite"]; !reflect.DeepEqual(got, []any{filepath.Join(root, "real", "not-yet", "proj")}) {
+		t.Errorf("denyWrite = %v (not-yet-existing tail must be Cleaned onto the resolved prefix)", got)
+	}
+	deny := fs["denyRead"].([]any)
+	if len(deny) != 3 || deny[0] != litHome || deny[1] != filepath.Join(root, "real") || deny[2] != realDir {
+		t.Errorf("denyRead = %v, want [home, resolved parent, resolved extra]", deny)
+	}
+	if strings.Contains(raw, link) {
+		t.Errorf("the symlink path leaked into the settings: %s", raw)
+	}
+}
+
+func TestSpike_SettingsJSONDefaultMode(t *testing.T) {
+	t.Setenv("HOME", litHome)
+	got, err := SettingsJSON(litArm, litProj, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := SettingsJSONWith(litArm, litProj, SettingsOptions{ReadMode: DefaultReadMode})
+	if got != want {
+		t.Errorf("SettingsJSON is not DefaultReadMode:\n%s\n%s", got, want)
+	}
 }
 
 func TestSpike_LauncherScrubsEnv(t *testing.T) {
@@ -174,27 +243,99 @@ func TestSpike_LauncherRejectsBadEntries(t *testing.T) {
 	}
 }
 
+func TestSpike_LauncherRefusesUnsafeTargets(t *testing.T) {
+	newDir := func(mode os.FileMode) string {
+		d := filepath.Join(t.TempDir(), "d")
+		if err := os.Mkdir(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(d, mode); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	// A normal 0700 dir works, and the file is created 0700.
+	d := newDir(0o700)
+	path, err := WriteLauncher(d, "/bin/true", []string{"PATH=/usr/bin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o700 {
+		t.Errorf("launcher mode = %v, want 0700", fi.Mode().Perm())
+	}
+	// Second write to the same dir must not overwrite (O_EXCL).
+	if _, err := WriteLauncher(d, "/bin/true", nil); err == nil {
+		t.Error("an existing launcher file was overwritten")
+	}
+	// A pre-planted file (not ours to follow) in a fresh dir.
+	d = newDir(0o700)
+	if err := os.WriteFile(filepath.Join(d, "claude-launcher.sh"), []byte("planted"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteLauncher(d, "/bin/true", nil); err == nil {
+		t.Error("a pre-planted file was accepted")
+	}
+	// A pre-planted symlink must be refused, and its target must stay untouched.
+	d = newDir(0o700)
+	victim := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(victim, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, filepath.Join(d, "claude-launcher.sh")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteLauncher(d, "/bin/true", nil); err == nil {
+		t.Error("a pre-planted symlink was followed")
+	}
+	if b, _ := os.ReadFile(victim); string(b) != "keep" {
+		t.Errorf("symlink target was overwritten: %q", b)
+	}
+	// Group/world-writable dir.
+	for _, mode := range []os.FileMode{0o770, 0o707, 0o777} {
+		if _, err := WriteLauncher(newDir(mode), "/bin/true", nil); err == nil {
+			t.Errorf("dir mode %v accepted", mode)
+		}
+	}
+	// A symlinked dir.
+	real := newDir(0o700)
+	linkDir := filepath.Join(t.TempDir(), "linkdir")
+	if err := os.Symlink(real, linkDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteLauncher(linkDir, "/bin/true", nil); err == nil {
+		t.Error("a symlinked launcher dir was accepted")
+	}
+}
+
 func TestSpike_LedgerRefusesOverBudget(t *testing.T) {
 	l := &Ledger{Path: filepath.Join(t.TempDir(), "sub", "ledger.jsonl")}
 	for i := 0; i < MaxCalls; i++ {
-		if err := l.Begin("call"); err != nil {
+		seq, err := l.Begin("call")
+		if err != nil {
 			t.Fatalf("call %d refused early: %v", i+1, err)
+		}
+		if seq != i+1 {
+			t.Fatalf("Begin returned seq %d, want %d", seq, i+1)
 		}
 		if err := l.Record(Entry{Purpose: "call", CostUSD: 0.01}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := l.Begin("one too many"); !errors.Is(err, ErrBudget) {
-		t.Fatalf("13th call: want ErrBudget, got %v", err)
+	if _, err := l.Begin("one too many"); !errors.Is(err, ErrBudget) {
+		t.Fatalf("call %d (over MaxCalls=%d): want ErrBudget, got %v", MaxCalls+1, MaxCalls, err)
 	}
 
 	l2 := &Ledger{Path: filepath.Join(t.TempDir(), "ledger.jsonl")}
-	if err := l2.Record(Entry{Purpose: "expensive", CostUSD: MaxUSD - perCallReserveUSD + 0.01}); err != nil {
+	spent := MaxUSD - perCallReserveUSD + 0.01
+	if err := l2.Record(Entry{Purpose: "expensive", CostUSD: spent}); err != nil {
 		t.Fatal(err)
 	}
-	err := l2.Begin("would pass 0.60")
-	if !errors.Is(err, ErrBudget) || !strings.Contains(err.Error(), "0.66") {
-		t.Fatalf("cost gate: want ErrBudget naming totals, got %v", err)
+	_, err := l2.Begin("would pass the USD cap")
+	if !errors.Is(err, ErrBudget) || !strings.Contains(err.Error(), fmt.Sprintf("%.4f", spent)) {
+		t.Fatalf("cost gate: want ErrBudget naming the %.4f spent, got %v", spent, err)
+	}
+	if MaxCalls != 24 || MaxUSD != 0.80 {
+		t.Errorf("caps are %d/%.2f, the hardening round authorised 24/0.80", MaxCalls, MaxUSD)
 	}
 }
 
