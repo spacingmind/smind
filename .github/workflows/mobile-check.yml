@@ -1,0 +1,66 @@
+name: mobile-check
+
+# PR gate for the mobile app's relay client: typecheck, the unit suite, and
+# the integration suites that drive a real Go relay + daemon hub (the relay
+# devharness) from node. Nothing here needs Expo, a simulator or a secret.
+# The Go relay is under test too (the client speaks E2EE v2 to it, ADR-0035),
+# so a change under internal/relay/ runs these as well.
+on:
+  pull_request:
+    paths:
+      - "mobile/**"
+      - "internal/relay/**"
+      - ".github/workflows/mobile-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile:
+    name: typecheck, unit, integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: npm ci
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      # The integration tests build and start the devharness themselves and give
+      # it a bounded time to come up; on a cold runner the module download and
+      # compile alone can eat that, so build it once up front (the same warm-up
+      # desktop-check does for the relay harness). The build is discarded: only
+      # the Go build cache matters.
+      - name: Warm the Go build cache for the relay devharness
+        working-directory: .
+        run: go build -o "$RUNNER_TEMP/devharness" ./internal/relay/bridge/devharness
+
+      # Sets NODE_TLS_REJECT_UNAUTHORIZED=0 for this process only (the harness's relay
+      # serves a self-signed certificate) and SMIND_REQUIRE_PASSWORD_HARNESS=1 so a
+      # harness without -password fails the run instead of skipping the password suite.
+      - name: Integration tests (live Go devharness)
+        run: npm run test:integration
