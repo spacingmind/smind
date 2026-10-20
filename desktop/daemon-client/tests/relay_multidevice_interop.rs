@@ -15,9 +15,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use smind_daemon_client::relay::channel::{Channel, FrameTransport};
 use smind_daemon_client::relay::client::{
-    spawn, RelayHandle, RelayOptions, Status, Timing,
+    self as relay_client, spawn, RelayHandle, RelayOptions, Status, Timing,
 };
+use smind_daemon_client::relay::crypto::{self, FRAME_DATA, FRAME_HELLO, FRAME_READY};
+use smind_daemon_client::relay::relaypb::relay_client::RelayClient as GrpcRelayClient;
 use smind_daemon_client::relay::device::DeviceKey;
 use smind_daemon_client::relay::liveness::LivenessCfg;
 use smind_daemon_client::relay::pairing::Offer;
@@ -438,7 +441,6 @@ fn connected_count(h: &Harness) -> usize {
 // ---------------------------------------------------------------- tests
 
 #[tokio::test]
-#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn three_devices_two_rust_one_go_stay_attached() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
@@ -472,7 +474,6 @@ async fn three_devices_two_rust_one_go_stay_attached() {
 }
 
 #[tokio::test]
-#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn three_devices_two_rust_one_go_stay_attached_after_one_reconnects() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
@@ -504,7 +505,6 @@ async fn three_devices_two_rust_one_go_stay_attached_after_one_reconnects() {
 }
 
 #[tokio::test]
-#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn three_devices_two_rust_one_go_stay_attached_after_daemon_restart() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
@@ -540,7 +540,6 @@ async fn three_devices_two_rust_one_go_stay_attached_after_daemon_restart() {
 }
 
 #[tokio::test]
-#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn three_devices_two_rust_one_go_stay_attached_after_revoke_only_that_device_is_refused() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
@@ -574,7 +573,6 @@ async fn three_devices_two_rust_one_go_stay_attached_after_revoke_only_that_devi
 }
 
 #[tokio::test]
-#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn unknown_device_outside_the_window_waits_for_approval_then_connects() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap(); // the stub used the only window
@@ -619,7 +617,6 @@ const DAEMON_PASSWORD: &str = "a daemon password for the interop test";
 /// instead of retrying, a wrong password is forgotten and not recorded, and the
 /// right one connects (an unknown device then still needs the pairing window).
 #[tokio::test]
-#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn password_protected_daemon_asks_rejects_a_wrong_password_and_accepts_the_right_one() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(|| Harness::start(&["-hub", "-password", DAEMON_PASSWORD])).await.unwrap();
@@ -648,7 +645,6 @@ async fn password_protected_daemon_asks_rejects_a_wrong_password_and_accepts_the
 }
 
 #[tokio::test]
-#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn repeated_wrong_passwords_are_rate_limited_by_the_daemon() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(|| Harness::start(&["-hub", "-password", DAEMON_PASSWORD])).await.unwrap();
@@ -671,7 +667,6 @@ async fn repeated_wrong_passwords_are_rate_limited_by_the_daemon() {
 }
 
 #[tokio::test]
-#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn client_reconnects_after_silence_with_jitter() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
@@ -713,7 +708,6 @@ async fn client_reconnects_after_silence_with_jitter() {
 }
 
 #[tokio::test]
-#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn client_resumes_after_transport_drop_keeping_ids() {
     let _serial = serial();
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
@@ -753,16 +747,116 @@ async fn client_resumes_after_transport_drop_keeping_ids() {
 }
 
 #[tokio::test]
-#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn legacy_daemon_still_works() {
     let _serial = serial();
     // The default harness is a daemon that does not track device identity: it
-    // answers the hello "unsupported" (a daemon from before P12b would answer
-    // "method not found" or never open the identity route at all). The client
-    // falls back to the fixed single-device route and works as before.
+    // answers the hello "unsupported" (or "method not found"). The client falls
+    // back to the fixed single-device route and works as before, now over E2EE
+    // v2 (a daemon from before device identity speaks v1 and is refused at the
+    // handshake, not reached through this route).
     let h = tokio::task::spawn_blocking(|| Harness::start(&[])).await.unwrap();
     let pairing = h.pairing();
     let a = start_client(&pairing, None);
     wait_status(&a.handle, 60, |s| *s == Status::Connected).await;
     eventually_served(&a, 30, "legacy").await;
+}
+
+/// A transport wrapper that records every frame the channel sends, so a test can
+/// capture the client's M1 off the wire.
+struct Recording<T> {
+    inner: T,
+    sent: SentFrames,
+}
+
+type SentFrames = Arc<Mutex<Vec<(u8, Vec<u8>)>>>;
+
+#[async_trait::async_trait]
+impl<T: FrameTransport> FrameTransport for Recording<T> {
+    type Error = T::Error;
+
+    async fn send_frame(&mut self, frame_type: u8, payload: &[u8]) -> Result<(), Self::Error> {
+        self.sent.lock().unwrap().push((frame_type, payload.to_vec()));
+        self.inner.send_frame(frame_type, payload).await
+    }
+
+    async fn recv_frame(&mut self) -> Result<(u8, Vec<u8>), Self::Error> {
+        self.inner.recv_frame().await
+    }
+}
+
+/// ADR-0035 acceptance 1/2 against the real Go daemon: a client hello captured
+/// off one route and replayed into a NEW route makes the daemon answer with M2
+/// and R_d only: a fresh daemon ephemeral (so a different transcript hash and
+/// fresh keys), never an encrypted frame, in particular never the
+/// `relay.device_challenge` that the original session received. The replayer
+/// cannot confirm (it does not hold the client's ephemeral secret), so the
+/// daemon still sends nothing after a bogus R_c.
+#[tokio::test]
+async fn a_replayed_client_hello_gets_no_challenge_and_fresh_keys() {
+    let _serial = serial();
+    let h = tokio::task::spawn_blocking(|| Harness::start(&["-hub"])).await.unwrap();
+    let pairing = h.pairing();
+    let device_id = DeviceKey::generate().device_id();
+
+    async fn open(pairing: &RelayPairing, device_id: &str, session: &str) -> relay_client::DataFrameTransport {
+        let channel = relay_client::dial(&pairing.relay_native_addr, &pairing.relay_fingerprint).await.unwrap();
+        let mut grpc = GrpcRelayClient::new(channel);
+        let admission_id = relay_client::admit(
+            &mut grpc,
+            &pairing.workspace_id,
+            &pairing.daemon_id,
+            &pairing.admission_secret,
+        )
+        .await
+        .unwrap();
+        relay_client::open_data(&mut grpc, &admission_id, &pairing.workspace_id, session, device_id)
+            .await
+            .unwrap()
+    }
+
+    // The original session: a real handshake, then the daemon speaks first.
+    let sent = Arc::new(Mutex::new(vec![]));
+    let transport = Recording { inner: open(&pairing, &device_id, "replay-original").await, sent: sent.clone() };
+    let mut original = Channel::new(transport);
+    original.handshake(Some(&pairing.daemon_public_key)).await.expect("original handshake");
+    let first = tokio::time::timeout(Duration::from_secs(10), original.receive())
+        .await
+        .expect("the original session gets the daemon's challenge")
+        .unwrap();
+    assert!(String::from_utf8_lossy(&first).contains("relay.device_challenge"), "{}", String::from_utf8_lossy(&first));
+    let m1 = sent.lock().unwrap()[0].clone();
+    assert_eq!(m1.0, FRAME_HELLO);
+    assert_eq!(m1.1.len(), crypto::CLIENT_HELLO_LEN);
+
+    // The replay, on a new route (new session id), byte for byte.
+    let mut replay = open(&pairing, &device_id, "replay-attacker").await;
+    replay.send_frame(FRAME_HELLO, &m1.1).await.unwrap();
+    let (typ, m2) = tokio::time::timeout(Duration::from_secs(10), replay.recv_frame()).await.unwrap().unwrap();
+    assert_eq!(typ, FRAME_HELLO, "the daemon answers a replayed M1 with an M2");
+    let (daemon_pub, daemon_eph) = crypto::parse_daemon_hello(&m2).unwrap();
+    assert_eq!(daemon_pub, pairing.daemon_public_key);
+    assert_ne!(
+        daemon_eph,
+        original.daemon_ephemeral_public_key().unwrap(),
+        "a fresh daemon ephemeral in every session"
+    );
+    let client_eph: [u8; 32] = m1.1[2..].try_into().unwrap();
+    assert_ne!(
+        crypto::transcript_hash(&daemon_pub, &daemon_eph, &client_eph),
+        original.transcript_hash().unwrap(),
+        "the replayed handshake has a different transcript, so different keys"
+    );
+    let (typ, r_d) = tokio::time::timeout(Duration::from_secs(10), replay.recv_frame()).await.unwrap().unwrap();
+    assert_eq!((typ, r_d.len()), (FRAME_READY, crypto::READY_LEN));
+
+    // The replayer cannot produce R_c; whatever it sends, the daemon sends no data frame.
+    replay.send_frame(FRAME_READY, &[0u8; crypto::READY_LEN]).await.unwrap();
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+        match tokio::time::timeout(left, replay.recv_frame()).await {
+            Err(_) => break,        // silence until the deadline: what we want
+            Ok(Err(_)) => break,    // the daemon dropped the route: fine too
+            Ok(Ok((typ, _))) => assert_ne!(typ, FRAME_DATA, "the daemon sent an encrypted frame to a replayed handshake"),
+        }
+    }
 }
