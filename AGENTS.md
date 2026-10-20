@@ -78,6 +78,16 @@ repo's history.
   OAuth and account identity (`claude_account_oauth_provider.rs`), redacted
   export, per-account CLI instances, and its local Codex API gateway with
   account pools.
+- `refs/harness2` — Google Research's Harness²
+  (https://github.com/google-research/harness2, Apache-2.0, Python):
+  recursive agent harnessing with fixed model weights — a contrastive
+  Propose–Probe–Compose step edits eight harness components (system prompt,
+  guardrails, memory, tool guidance, subagents, skills, scripts, plugins),
+  probes candidates on the same task and composes a refined harness, plus a
+  persistent "improvement harness" of lessons (`harness2/core/{proposer,
+  recursion,judge,ledger,library}.py`; executors in `harness2/substrate/`
+  for OpenCode and Codex). Reference for validating learned skills and
+  profile edits (ADR-0026) by matched A/B runs.
 
 Day-to-day style (Go idioms, React/TS conventions) is enforced by linters
 (`go vet`/`gofmt`, and ESLint/Prettier once added to `web/`), not by reading
