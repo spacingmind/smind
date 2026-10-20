@@ -41,6 +41,7 @@ type verdict struct {
 	Name       string          `json:"name"`
 	Action     string          `json:"action"`
 	Accepted   bool            `json:"accepted"`
+	Retry      bool            `json:"retry,omitempty"`
 	ProposalID int64           `json:"proposalId,omitempty"`
 	Findings   []verdictFinder `json:"findings,omitempty"`
 }
@@ -137,22 +138,42 @@ func (s *Service) reflect(job *store.LearningJob, cw store.ChatWorkspace, cfg co
 	job.WindowToEventID = newest
 
 	// 5. Execute.
+	userPrompt := reflector.ComposeUserPrompt(out.Text, s.rejectedExamples(cw.WorkspaceID))
 	res, err := s.d.Exec.Run(s.ctx, executor.Request{
 		WorkspaceID: cw.WorkspaceID, Purpose: learning.PurposeReflect, Model: cfg.ReflectorModel,
 		SystemPrompt: reflector.ReflectorPrompt(),
-		UserPrompt:   reflector.ComposeUserPrompt(out.Text, s.rejectedExamples(cw.WorkspaceID)),
+		UserPrompt:   userPrompt,
 		MaxTurns:     1, Timeout: reflectTimeout,
 	})
+	var retryRes *executor.Result
 	usage := func(j *store.LearningJob) {
 		j.RunID = res.RunID
-		j.CostUSD = res.CostUSD
-		if res.InputTokens != nil || res.OutputTokens != nil {
+		if res.CostUSD != nil || (retryRes != nil && retryRes.CostUSD != nil) {
+			cost := 0.0
+			if res.CostUSD != nil {
+				cost = *res.CostUSD
+			}
+			if retryRes != nil && retryRes.CostUSD != nil {
+				cost += *retryRes.CostUSD
+			}
+			j.CostUSD = &cost
+		}
+		if res.InputTokens != nil || res.OutputTokens != nil ||
+			(retryRes != nil && (retryRes.InputTokens != nil || retryRes.OutputTokens != nil)) {
 			var n int64
 			if res.InputTokens != nil {
 				n += *res.InputTokens
 			}
 			if res.OutputTokens != nil {
 				n += *res.OutputTokens
+			}
+			if retryRes != nil {
+				if retryRes.InputTokens != nil {
+					n += *retryRes.InputTokens
+				}
+				if retryRes.OutputTokens != nil {
+					n += *retryRes.OutputTokens
+				}
 			}
 			j.Tokens = &n
 		}
@@ -180,8 +201,8 @@ func (s *Service) reflect(job *store.LearningJob, cw store.ChatWorkspace, cfg co
 
 	// 7. Gate each intent and store the survivors.
 	verdicts, created, err := s.gateAndStore(job, cw, cfg, rd, out, intents, learned, human)
-	vj, _ := json.Marshal(verdicts)
 	if err != nil {
+		vj, _ := json.Marshal(verdicts)
 		s.setStatus(job, statusFailed, func(j *store.LearningJob) {
 			usage(j)
 			j.Verdicts = string(vj)
@@ -190,12 +211,77 @@ func (s *Service) reflect(job *store.LearningJob, cw store.ChatWorkspace, cfg co
 		return
 	}
 
+	// 7b. One-shot retry (ADR-0037 D11): verdicts rejected only for
+	// repairable format reasons get one more executor call with the gate's
+	// findings appended; the result is re-gated by the same gate. A retry
+	// failure of any kind never fails the job.
+	if items := retryItems(verdicts); len(items) > 0 {
+		if v2, c2, res2 := s.retryReflect(job, cw, cfg, rd, out, learned, human, userPrompt, items); res2 != nil {
+			retryRes = res2
+			for i := range v2 {
+				v2[i].Retry = true
+			}
+			verdicts = append(verdicts, v2...)
+			created += c2
+		}
+	}
+	vj, _ := json.Marshal(verdicts)
+
 	// 8. Terminal.
 	status := statusEmpty
 	if created > 0 {
 		status = statusLanded
 	}
 	terminal(status, func(j *store.LearningJob) { usage(j); j.Verdicts = string(vj) })
+}
+
+// retryReflect runs the single reflector retry: the same executor request
+// with a GATE_FINDINGS block appended to the original user prompt, then the
+// same gate and store path. Retry intents whose name is not one of the
+// retried items are dropped, so accepted intents are never re-created. It
+// never fails the job: on any error the first-pass verdicts stand, and only
+// the run result is returned for cost accounting.
+func (s *Service) retryReflect(job *store.LearningJob, cw store.ChatWorkspace, cfg config.LearningConfig, rd *redact.Redactor,
+	out window.Output, learned []store.LearnedSkill, human []gate.LiveSkill, userPrompt string, items []reflector.RetryItem) ([]verdict, int, *executor.Result) {
+	prompt2 := reflector.ComposeRetryPrompt(userPrompt, items)
+	if over, err := s.overBudget(cw.WorkspaceID, cfg, len(prompt2)); err != nil || over {
+		return nil, 0, nil
+	}
+	res2, err := s.d.Exec.Run(s.ctx, executor.Request{
+		WorkspaceID: cw.WorkspaceID, Purpose: learning.PurposeReflect, Model: cfg.ReflectorModel,
+		SystemPrompt: reflector.ReflectorPrompt(),
+		UserPrompt:   prompt2,
+		MaxTurns:     1, Timeout: reflectTimeout,
+	})
+	if err != nil {
+		return nil, 0, &res2
+	}
+	intents2, err := reflector.ParseOutput(res2.FinalText, gate.ModeReflect)
+	if err == nil {
+		err = reflector.ScopeCheck(intents2, gate.ModeReflect, out.ShownLearned)
+	}
+	if err != nil {
+		return nil, 0, &res2
+	}
+	names := make(map[string]bool, len(items))
+	for _, it := range items {
+		names[it.Name] = true
+	}
+	var kept []gate.Intent
+	for _, in := range intents2 {
+		if names[in.Name] {
+			kept = append(kept, in)
+		}
+	}
+	if len(kept) == 0 {
+		return nil, 0, &res2
+	}
+	v2, c2, err := s.gateAndStore(job, cw, cfg, rd, out, kept, learned, human)
+	if err != nil {
+		slog.Warn("learning: reflector retry gate", "job", job.ID, "err", err)
+		return nil, 0, &res2
+	}
+	return v2, c2, &res2
 }
 
 // overBudget applies the per-workspace daily budget. Runs with no reported
