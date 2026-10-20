@@ -8,6 +8,9 @@ Phase B (code) is unblocked; the spec is
 [`docs/plans/completed/self-learning-skills.md`](../plans/completed/self-learning-skills.md).
 Originally proposed 2026-10-11.
 
+**Amended by [ADR-0037](0037-learning-probe-before-approve.md) (2026-10-20):** AC17 ("a `proposed` skill is
+never delivered to any agent") now has one exception, a probe arm inside an attested sandbox. Production delivery is unchanged.
+
 Numbering: 0023 (desktop auto-update), 0024 and 0025 are taken, so this is
 0026.
 
