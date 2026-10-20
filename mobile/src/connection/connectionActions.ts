@@ -15,3 +15,18 @@ export async function performResetIdentity(reset: () => Promise<void>, disconnec
   disconnect();
   return true;
 }
+
+/**
+ * A new session replaces the old one: a different previous connection is closed
+ * (close() is idempotent), the same one is left alone. Returns the connection to keep.
+ */
+export function replaceConnection<T extends { close(): void }>(prev: T | null, next: T): T {
+  if (prev !== null && prev !== next) prev.close();
+  return next;
+}
+
+/** Leaving the session closes the current connection (if any) and keeps none. */
+export function dropConnection(cur: { close(): void } | null): null {
+  cur?.close();
+  return null;
+}

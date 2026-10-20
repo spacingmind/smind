@@ -18,6 +18,16 @@ describe('parseTaskParams', () => {
   it('rejects non-positive-integer ids', () => {
     for (const id of ['abc', '0', '12abc', '-3', '1.5', '']) expect(parseTaskParams({ id })).toEqual({ ok: false });
   });
+  it('rejects ids that are not plain ASCII digits or are too large to be exact', () => {
+    for (const id of ['99999999999999999999', ' 5', '5 ', '+5', '٥']) expect(parseTaskParams({ id })).toEqual({ ok: false });
+  });
+  it('accepts leading zeros as the same id', () => {
+    expect(parseTaskParams({ id: '007' })).toEqual({ ok: true, id: 7, title: 'Task 7' });
+  });
+  it('rejects empty array params', () => {
+    expect(parseTaskParams({ id: [] })).toEqual({ ok: false });
+    expect(parseTaskParams({ id: [''] })).toEqual({ ok: false });
+  });
   it('rejects a missing id', () => {
     expect(parseTaskParams({})).toEqual({ ok: false });
     expect(parseTaskParams({ title: 'x' })).toEqual({ ok: false });

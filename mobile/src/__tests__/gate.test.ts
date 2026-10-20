@@ -20,6 +20,10 @@ describe('routeGate', () => {
     for (const { state } of Object.values(states)) expect(routeGate(false, state)).toBe('pairing');
   });
 
+  it('is app for a connection whose state is not known yet', () => {
+    expect(routeGate(true, null)).toBe('app');
+  });
+
   for (const [kind, { state, gate }] of Object.entries(states)) {
     it(`${kind} with a connection → ${gate}`, () => {
       expect(routeGate(true, state)).toBe(gate);

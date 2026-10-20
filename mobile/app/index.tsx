@@ -1,3 +1,4 @@
+import { View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Button } from '@expo/ui';
 import { useConnectionOrNull } from '../src/connection/ConnectionProvider';
@@ -15,10 +16,13 @@ export default function TasksRoute() {
       <Stack.Screen
         options={{
           title: 'Tasks',
+          // The Host sizes to its content and top-aligns on web; centre it on the header's own height.
           headerRight: () => (
-            <UiHost>
-              <Button variant="text" label="Disconnect" onPress={disconnect} />
-            </UiHost>
+            <View style={{ justifyContent: 'center', alignSelf: 'stretch' }}>
+              <UiHost>
+                <Button variant="text" label="Disconnect" onPress={disconnect} />
+              </UiHost>
+            </View>
           ),
         }}
       />

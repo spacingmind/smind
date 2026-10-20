@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useFocusEffect } from 'expo-router';
 import { Button } from '@expo/ui';
 import { UiHost } from '../ui/UiHost';
 import { fetchOverview, Space, Task, Workspace } from '../api';
@@ -74,9 +74,13 @@ export function TasksScreen({ conn, onOpenTask }: Props) {
 
   // Loaded again after every reconnect: a drop interrupts whatever was loading.
   const { epoch, state: connState } = useConnectionState(conn);
-  useEffect(() => {
-    load();
-  }, [load, epoch]);
+  // Also loaded again whenever the screen regains focus: the native stack keeps this screen mounted under a task
+  // (the old hand-rolled stack remounted it), so what was answered or sent there must show on return.
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load, epoch]),
+  );
 
   useEffect(() => {
     return subscribeToPendingApprovals(conn, (taskId) => {
@@ -86,22 +90,31 @@ export function TasksScreen({ conn, onOpenTask }: Props) {
     });
   }, [conn, pendingApprovals]);
 
+  const banner =
+    connState.kind === 'connecting' || connState.kind === 'reconnecting' ? <ReconnectingBanner>Reconnecting to the daemon…</ReconnectingBanner> : null;
+
   if (state.kind === 'loading') {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={theme.primary} />
+      <View style={styles.screen}>
+        {banner}
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={theme.primary} />
+        </View>
       </View>
     );
   }
 
   if (state.kind === 'error') {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.errorTitle}>Couldn't load the workspace</Text>
-        <Text style={styles.errorDetail}>{state.message}</Text>
-        <UiHost style={styles.retryHost}>
-          <Button label="Retry" onPress={load} />
-        </UiHost>
+      <View style={styles.screen}>
+        {banner}
+        <View style={styles.centered}>
+          <Text style={styles.errorTitle}>Couldn't load the workspace</Text>
+          <Text style={styles.errorDetail}>{state.message}</Text>
+          <UiHost style={styles.retryHost}>
+            <Button label="Retry" onPress={load} />
+          </UiHost>
+        </View>
       </View>
     );
   }
@@ -112,7 +125,7 @@ export function TasksScreen({ conn, onOpenTask }: Props) {
     <View style={styles.screen}>
       {/* expo-native-ui: the stack title is the workspace title, not a Text on the page. */}
       <Stack.Screen options={{ title: workspace.Title }} />
-      {connState.kind === 'connecting' || connState.kind === 'reconnecting' ? <ReconnectingBanner>Reconnecting to the daemon…</ReconnectingBanner> : null}
+      {banner}
       <FlatList
         contentInsetAdjustmentBehavior="automatic" // expo-native-ui: the stack header owns the inset
         contentContainerStyle={styles.listContent}

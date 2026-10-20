@@ -226,17 +226,17 @@ async function shootBothSchemes(page, name) {
 
 /**
  * Waits for the task list after the device was approved. TasksScreen's
- * post-connect states: 'ready' always renders a Disconnect button; 'error'
- * renders "Couldn't load the workspace". When ready, the harness daemon
- * tracks no workspaces, so the empty state -- "No workspaces yet" -- must
- * render.
+ * post-connect states: 'ready' renders the list (here the empty state, since
+ * the harness daemon tracks no workspaces) under a header with Disconnect;
+ * 'error' renders "Couldn't load the workspace".
  */
 async function assertTasks(page) {
-  const ready = page.getByRole('button', { name: 'Disconnect' });
+  // The header (with Disconnect) is also there while loading and on error, so wait for the content itself:
+  // the empty state when ready (the harness daemon tracks no workspaces), or the error text.
+  const empty = page.getByText('No workspaces yet', { exact: true });
   const errored = page.getByText("Couldn't load the workspace");
-  const loaded = ready.or(errored).first();
   try {
-    await loaded.waitFor({ timeout: 30_000 });
+    await empty.or(errored).first().waitFor({ timeout: 30_000 });
   } catch {
     fail('tasks screen did not render after approval');
     return false;
@@ -246,10 +246,8 @@ async function assertTasks(page) {
     fail(`tasks screen rendered the error state: ${bodyText}`);
     return false;
   }
-  try {
-    await page.getByText('No workspaces yet', { exact: true }).waitFor({ timeout: 5_000 });
-  } catch {
-    fail('tasks screen empty state ("No workspaces yet") not shown for the task-less harness workspace');
+  if (!(await page.getByRole('button', { name: 'Disconnect' }).isVisible().catch(() => false))) {
+    fail('tasks screen header has no Disconnect button');
   }
   return true;
 }
@@ -446,6 +444,15 @@ async function promptQueue(page, harness) {
   }
   if (await page.getByRole('button', { name: /^Stop(ping…)?$/ }).isVisible().catch(() => false)) fail('the Stop button is still shown after the run stopped');
   await shootBothSchemes(page, 'stop-after');
+
+  // The list stays mounted under the task (native stack): returning must refresh it (useFocusEffect), not show the stale "running".
+  await goBack(page);
+  try {
+    await page.getByText('stopped', { exact: true }).first().waitFor({ timeout: 15_000 });
+  } catch {
+    fail('the task list did not refresh after returning from a stopped run (still stale)');
+  }
+  await shootBothSchemes(page, 'list-after-stop');
 }
 
 /**

@@ -27,14 +27,14 @@ function RootStack() {
         }}
       >
         <Stack.Protected guard={gate === 'pairing'}>
-          <Stack.Screen name="pairing" />
+          <Stack.Screen name="pairing" options={{ title: 'smind pairing' }} />
         </Stack.Protected>
         <Stack.Protected guard={gate === 'status'}>
-          <Stack.Screen name="connection" />
+          <Stack.Screen name="connection" options={{ title: 'Connection' }} />
         </Stack.Protected>
         <Stack.Protected guard={gate === 'app'}>
-          <Stack.Screen name="index" />
-          <Stack.Screen name="task/[id]" />
+          <Stack.Screen name="index" options={{ title: 'Tasks' }} />
+          <Stack.Screen name="task/[id]" options={{ title: 'Task' }} />
         </Stack.Protected>
       </Stack>
     </>

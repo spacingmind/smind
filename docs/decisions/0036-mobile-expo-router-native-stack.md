@@ -24,7 +24,7 @@ constraint on how the app is routed.
 
 ## Decision
 
-1. **`expo-router` (SDK 57) with its native `Stack`** is the app's navigator. `mobile/package.json` `main` is
+1. **`expo-router` (SDK 58) with its native `Stack`** is the app's navigator. `mobile/package.json` `main` is
    `expo-router/entry`; `index.ts` and `App.tsx` are deleted. Routes live in `mobile/app/` and contain only route and
    `_layout` files; screens, hooks and logic stay in `mobile/src/` (the skill's rule: no co-located components in `app/`).
    Dependencies, installed with `npx expo install`: `expo-router`, `react-native-screens`, `react-native-safe-area-context`,
@@ -56,7 +56,7 @@ constraint on how the app is routed.
 ## Trade-offs accepted
 
 - **Seven new native dependencies** (above). All are Expo-managed and work in Expo Go and dev clients; `@expo/ui` stays the UI
-  layer (Expo Router 57 itself depends on it).
+  layer (Expo Router 58 needs no UI layer of its own).
 - **Connection lifetime moves from `App.tsx` state to a root context.** A bug there would drop the session; the provider is small,
   has the same three operations as before, and is covered by the existing node integration suites (which drive `RelayConnection`
   directly) plus the web smoke's full device lifecycle (pending → approved → tasks → revoked, password, queue, stop).

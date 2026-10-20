@@ -6,8 +6,8 @@
 // No root <Host> here: each @expo/ui subtree carries its own Host via
 // src/ui/UiHost (see UiHost.tsx's header).
 
-import { createContext, ReactNode, useCallback, useContext, useMemo, useState } from 'react';
-import { performResetIdentity } from './connectionActions';
+import { createContext, ReactNode, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { dropConnection, performResetIdentity, replaceConnection } from './connectionActions';
 import { ConnectionState, RelayConnection } from '../relay/RelayConnection';
 import { resetDeviceIdentity } from '../relay/platformKeyStore';
 import { useConnectionState } from '../relay/useConnectionState';
@@ -25,14 +25,20 @@ const ConnectionContext = createContext<ConnectionContextValue | null>(null);
 
 export function ConnectionProvider({ children }: { children: ReactNode }) {
   const [conn, setConn] = useState<RelayConnection | null>(null);
+  // The ref is the source of truth for what to close, so a stale callback (captured before `conn` changed)
+  // can never close one connection and null another.
+  const connRef = useRef<RelayConnection | null>(null);
   const { state } = useConnectionState(conn);
 
-  const connect = useCallback((c: RelayConnection) => setConn(c), []);
+  const connect = useCallback((c: RelayConnection) => {
+    connRef.current = replaceConnection(connRef.current, c);
+    setConn(c);
+  }, []);
 
   const disconnect = useCallback(() => {
-    conn?.close();
+    connRef.current = dropConnection(connRef.current);
     setConn(null);
-  }, [conn]);
+  }, []);
 
   const resetIdentity = useCallback(async () => {
     await performResetIdentity(resetDeviceIdentity, disconnect);
