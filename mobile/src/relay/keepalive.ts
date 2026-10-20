@@ -17,6 +17,7 @@
 // forwarded, which counts as liveness but not as support).
 
 import { Frame } from './proto';
+import { randomBytes } from './random';
 
 export interface KeepaliveTiming {
   /** How often an idle stream probes the relay (30 s). */
@@ -37,9 +38,9 @@ type Support = 'unknown' | 'yes' | 'no';
 
 /** A random probe nonce in [1, 2^52): exact as a JS number and as a protobuf uint64. */
 export function randomProbeNonce(): number {
-  const words = new Uint32Array(2);
   for (;;) {
-    crypto.getRandomValues(words);
+    const bytes = randomBytes(8);
+    const words = new Uint32Array(bytes.buffer, bytes.byteOffset, 2);
     const nonce = (words[0] & 0xfffff) * 2 ** 32 + words[1];
     if (nonce !== 0) return nonce;
   }

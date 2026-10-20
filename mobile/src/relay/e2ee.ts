@@ -14,6 +14,7 @@ import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { randomBytes } from './random';
 
 /** The E2EE wire protocol version (handshake.go ProtocolVersion). No negotiation, no older version. */
 export const PROTOCOL_VERSION = 2;
@@ -344,7 +345,7 @@ export class Channel {
   private readonly reader = new FrameReader();
   // Production: a fresh random key per handshake. Tests that must reproduce the
   // vectors replace this field (it is private, not part of the API).
-  private newEphemeral: () => Uint8Array = () => x25519.utils.randomSecretKey();
+  private newEphemeral: () => Uint8Array = () => randomBytes(32);
   private session: Session | null = null;
   private established = false;
   private closed = false;

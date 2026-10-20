@@ -40,6 +40,7 @@ import {
   encodeAdmitRequest,
   encodeFrame,
 } from './proto';
+import { randomBytes } from './random';
 
 /** One server-pushed eventNotification, already unwrapped from its envelope. */
 export interface RelayEvent {
@@ -321,9 +322,7 @@ function wsBaseURL(httpsBaseUrl: string): string {
 
 /** A fresh E2EE session id (Frame.session_id): 128 random bits, hex. */
 function randomSessionId(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return 's-' + hexEncode(bytes);
+  return 's-' + hexEncode(randomBytes(16));
 }
 
 function defaultJitter(ms: number): number {
