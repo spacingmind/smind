@@ -29,6 +29,10 @@ func TestConfig_LearningDefaultsAndValidation(t *testing.T) {
 		t.Fatalf("defaults = %+v, want %+v", cfg.Learning, DefaultLearning())
 	}
 
+	if cfg.Learning.Probe.PrevalenceDays != 30 || cfg.Learning.Probe.PrevalenceMaxEvents != 20000 {
+		t.Fatalf("probe defaults = %+v, want 30 days / 20000 events", cfg.Learning.Probe)
+	}
+
 	// A partial file leaves the other keys at their defaults.
 	write("learning:\n  enabled: false\n")
 	cfg, err = Load()
@@ -52,6 +56,9 @@ func TestConfig_LearningDefaultsAndValidation(t *testing.T) {
 		{"learning:\n  capacity: 0\n", true},
 		{"learning:\n  dailyBudgetUSD: 0\n", true},
 		{"learning:\n  windowKB: 200\n", false},
+		{"learning:\n  probe: {prevalenceDays: 0}\n", true},
+		{"learning:\n  probe: {prevalenceMaxEvents: 0}\n", true},
+		{"learning:\n  probe: {prevalenceDays: 7}\n", false},
 	} {
 		write(tc.yaml)
 		_, err := Load()
@@ -120,7 +127,7 @@ func TestConfig_LearningEnvKillSwitch(t *testing.T) {
 		"probationRuns": false, "capacity": false, "curatorEveryLandings": false,
 		"curatorMinSkills": false, "curatorMinIntervalDays": false,
 		"prefaceBudgetBytes": false, "claudeIndexPreface": false, "similarity": false,
-		"reflectorModel": false, "curatorModel": false,
+		"reflectorModel": false, "curatorModel": false, "probe": false,
 	}
 	got := reflect.TypeOf(LearningConfig{})
 	if got.NumField() != len(want) {

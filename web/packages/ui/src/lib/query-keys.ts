@@ -36,6 +36,7 @@ export const queryKeys = {
   proposalsOf: (workspaceId: number) => ["learning.proposals.list", { workspaceId }] as const,
   proposal: (id: number) => ["learning.proposals.get", { id }] as const,
   proposalAll: () => ["learning.proposals.get"] as const,
+  proposalPrevalence: (id: number) => ["learning.proposals.prevalence", { id }] as const,
   learningJobs: (workspaceId: number, limit?: number) => ["learning.jobs.list", { workspaceId, limit }] as const,
   learningJobsAll: () => ["learning.jobs.list"] as const,
   learningJobsOf: (workspaceId: number) => ["learning.jobs.list", { workspaceId }] as const,
