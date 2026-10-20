@@ -14,7 +14,7 @@ retention). Amends ADR-0026 AC17. Study: `docs/research/local/harness2-study.md`
 | 1 | **Docs**: ADR-0037 + this plan; ADR-0026 status cross-reference | S | none |
 | 2a | **S0** prevalence scan: signature derivation, store query, `learning.proposals.prevalence`, one UI line | S | none |
 | 2b | **D11** reflector one-shot retry with gate findings | S | none (fake LLM in tests) |
-| 3 | **P0 spike**: prove R1–R3 and the tool surface against the real CLI; ADR-0037 addendum; gated live suite | M | yes: 18 calls, USD 0.056 |
+| 3 | **P0 spike**: prove R1–R3 and the tool surface against the real CLI; ADR-0037 addendum; gated live suite | M | yes: 24 calls, USD 0.068 |
 | 4a | **Arm + sandbox**: `git archive` arm materialiser, sandbox settings/env/decider, attestation, caps, tripwires, probe projection builder | L | yes (gated suite) |
 | 4b | **Probe service**: eligibility, estimate, A/A′/B orchestration, `purpose='probe'`, Probe bucket, tier-1 contrasts + verdict, ledger, store, wsapi, CLI, events, retention janitor, `probeCheck` | M | yes (one end-to-end) |
 | 4c | **UI**: Probe card, states, estimate popover, disabled reasons, verdict chip, light+dark screenshots incl. transitions | M | none |
@@ -253,7 +253,7 @@ All numbers are defaults in `learning.probe.*` and are guesses until the first w
 - [x] PR 1: ADR-0037 + this plan (docs).
 - [ ] PR 2a: S0 prevalence scan.
 - [ ] PR 2b: D11 reflector retry.
-- [x] PR 3: P0 spike and ADR addendum: PASS on macOS (18 live calls, USD 0.056); Linux and Windows untested.
+- [x] PR 3: P0 spike and ADR addendum: conditional PASS on macOS (24 live calls, USD 0.068); keychain, Linux, Windows untested.
 - [ ] PR 4a: arm + sandbox.
 - [ ] PR 4b: probe service.
 - [ ] PR 4c: UI.
@@ -262,12 +262,15 @@ All numbers are defaults in `learning.probe.*` and are guesses until the first w
 
 (Filled in as each criterion is confirmed; every AC gets a line before this file moves to `docs/plans/completed/`.)
 
-### PR 3 — P0 spike (2026-10-20, claude 2.1.303, macOS 27 arm64, SDK v0.3.2; 18 live calls, USD 0.056)
+### PR 3 — P0 spike (2026-10-20, claude 2.1.303, macOS 27 arm64, SDK v0.3.2; 24 live calls, USD 0.068)
 
-- AC12 R1 write: `TestLive_WriteOutsideArmDenied`, `TestLive_WriteInsideArmAllowed` — confirmed (filesystem ground truth), also under the scrubbed launcher.
-- AC13 R1 read: `TestLive_ReadDecoyCredentialDenied`, `TestLive_BuiltinReadOutsideArmDenied` — confirmed for decoys and for a test-created file under the real `$HOME`; the user's real credential files were deliberately not read (partial).
-- AC14 R2 network: `TestLive_NetworkToNonModelHostDenied`, `TestLive_ModelCallSucceeds`, `TestLive_WebToolsDenied`, `TestLive_NoMCPLoaded` — confirmed (listener saw 0 connections).
+Staged evidence (a single live run of the final code was not possible within the cap); an independent read-only review found the first
+round's PASS overstated, and the hardening round re-measured or downgraded each flagged claim (ADR-0037 addendum has the table).
+
+- AC12 R1 write: `TestLive_WriteOutsideArmDenied`, `TestLive_WriteInsideArmAllowed` — confirmed; documented exception: the CLI's per-session `$TMPDIR` is writable.
+- AC13 R1 read: `TestLive_ReadDecoyCredentialDenied`, `TestLive_BuiltinReadOutsideArmDenied` — confirmed for decoys with the **allow-list** read policy (including an unlisted third-location path); the deny-list is partial by construction. Real credential files were deliberately not read; keychain reachability is **untested (open risk, needs the Human's approval)**.
+- AC14 R2 network: `TestLive_NetworkToNonModelHostDenied`, `TestLive_ModelCallSucceeds`, `TestLive_WebToolsDenied`, `TestLive_NoMCPLoaded` — confirmed for TCP/curl and DNS answers; DNS-query exfiltration, UDP, ICMP, unix sockets untested.
 - AC15 fail-if-unavailable: **partial**. `TestLive_FailIfUnavailableRefusesToRun` proves fail-closed at exec; the flag itself could not be isolated on macOS.
-- AC16 launch shape + R3: `TestLive_UnderSMINDLaunchShape`, `TestLive_EnvIsAllowlist`, `TestSpike_LauncherScrubsEnv` — confirmed; auth needs `USER`.
+- AC16 launch shape + R3: `TestLive_UnderSMINDLaunchShape`, `TestLive_EnvIsAllowlist`, `TestSpike_LauncherScrubsEnv` — confirmed for the process env; the login needs `USER`.
 - AC17 attestation: no model-free method exists; one canary call per probe (~USD 0.002) — recorded in ADR-0037 §3.
-- AC18 verdict: **PASS on macOS**; Linux and Windows not covered. See the ADR-0037 addendum.
+- AC18 verdict: **conditional PASS on macOS** (R1 write, R2, R3-env, read allow-list, built-ins as measured); PARTIAL items: keychain, `failIfUnavailable`, toolchains beyond sh/git/curl, Linux/Windows. The probe arm PR (4a) must not claim more than the addendum.
