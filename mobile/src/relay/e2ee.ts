@@ -1,10 +1,10 @@
 // e2ee.ts is the TypeScript mirror of internal/relay/e2ee's handshake.go +
-// session.go: X25519 key agreement, HKDF key derivation, and
-// ChaCha20-Poly1305 AEAD framing, byte-for-byte compatible with the Go
-// side (see mobile/src/relay/__tests__/e2ee.test.ts, which checks this
-// module's output against fixed vectors also computed Go-side in
-// internal/relay/e2ee/fixture_test.go -- per the plan's Test Scenarios,
-// this is the single highest-risk file in the whole milestone).
+// session.go for E2EE v2 (ADR-0035): a Noise-NK-shaped handshake with a fresh
+// ephemeral key on BOTH ends, a transcript hash, and key confirmation, then
+// ChaCha20-Poly1305 data frames. It is the initiator (client) end only: the
+// daemon is Go, and no v1 code exists here. __tests__/e2ee.test.ts checks this
+// module against the Go-generated vectors (internal/relay/e2ee/testdata/
+// e2ee_v2_vectors.json) and runs every negative vector.
 //
 // Pure JS crypto (@noble/curves, @noble/hashes, @noble/ciphers): no native
 // crypto module, so this runs the same way under Hermes as any other JS.
@@ -12,15 +12,25 @@
 import { x25519 } from '@noble/curves/ed25519.js';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
+import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { randomBytes } from './random';
 
-export const PROTOCOL_VERSION = 1;
+/** The E2EE wire protocol version (handshake.go ProtocolVersion). No negotiation, no older version. */
+export const PROTOCOL_VERSION = 2;
 const PUBLIC_KEY_SIZE = 32;
-const HELLO_PAYLOAD_LEN = 1 + 1 + PUBLIC_KEY_SIZE;
+const CLIENT_HELLO_LEN = 1 + 1 + PUBLIC_KEY_SIZE;
+const DAEMON_HELLO_LEN = 1 + 1 + PUBLIC_KEY_SIZE + PUBLIC_KEY_SIZE;
+const READY_LEN = 32;
 
-const FRAME_HELLO = 0x01;
-const FRAME_READY = 0x02;
-const FRAME_DATA = 0x03;
+/** Bound on one frame (type + payload) in an established session (handshake.go maxFrameLen). */
+export const MAX_FRAME_LEN = 1 << 20;
+/** Bound on one frame while the handshake runs: the largest legitimate one is M2 (1 + 66). */
+export const MAX_HANDSHAKE_FRAME_LEN = 128;
+
+export const FRAME_HELLO = 0x01;
+export const FRAME_READY = 0x02;
+export const FRAME_DATA = 0x03;
 
 export const Role = {
   Daemon: 1,
@@ -28,24 +38,64 @@ export const Role = {
 } as const;
 export type RoleValue = (typeof Role)[keyof typeof Role];
 
-const HKDF_LABEL = 'smind relay e2ee v1';
-const DIR_DAEMON_TO_MOBILE = `${HKDF_LABEL} daemon->mobile`;
-const DIR_MOBILE_TO_DAEMON = `${HKDF_LABEL} mobile->daemon`;
+const LABEL = 'smind relay e2ee v2';
+const DIR_DAEMON_TO_MOBILE = `${LABEL} daemon->mobile`;
+const DIR_MOBILE_TO_DAEMON = `${LABEL} mobile->daemon`;
+const CONFIRM_DAEMON = `${LABEL} confirm daemon`;
+const CONFIRM_MOBILE = `${LABEL} confirm mobile`;
 
 const textEncoder = new TextEncoder();
 
-export interface KeyPair {
-  publicKey: Uint8Array;
-  secretKey: Uint8Array;
+/** The error kinds of the vector file's `expect` field (plus the session-level ones). */
+export type E2EEErrorKind =
+  | 'protocol'
+  | 'key_rotation'
+  | 'peer_key_mismatch'
+  | 'handshake_confirm'
+  | 'key_agreement'
+  | 'unsupported_version'
+  | 'not_established'
+  | 'already_established'
+  | 'handshake_in_progress'
+  | 'closed'
+  | 'replay'
+  | 'decrypt'
+  | 'counter_exhausted';
+
+/** Every error this module throws, tagged with its kind (handshake.go's Err* sentinels). */
+export class E2EEError extends Error {
+  readonly kind: E2EEErrorKind;
+  constructor(kind: E2EEErrorKind, message: string) {
+    super(message);
+    this.name = 'E2EEError';
+    this.kind = kind;
+  }
 }
 
-/** A fresh, random per-session X25519 keypair -- what a mobile device uses (see e2ee/keypair.go's doc comment: the daemon persists one, mobile never does). */
-export function generateKeyPair(): KeyPair {
-  const secretKey = x25519.utils.randomSecretKey();
-  return { secretKey, publicKey: x25519.getPublicKey(secretKey) };
+/**
+ * The peer's hello carried another protocol version. `peer` is its version:
+ * below PROTOCOL_VERSION means "update the daemon", above means "update this app".
+ */
+export class UnsupportedVersionError extends E2EEError {
+  readonly peer: number;
+  constructor(peer: number) {
+    super('unsupported_version', `e2ee: peer speaks protocol version ${peer}, this end speaks ${PROTOCOL_VERSION}`);
+    this.name = 'UnsupportedVersionError';
+    this.peer = peer;
+  }
 }
 
-function concatBytes(...parts: Uint8Array[]): Uint8Array {
+/** The daemon's static key is not the one pinned from the pairing offer. */
+export class PeerKeyMismatchError extends E2EEError {
+  constructor() {
+    super('peer_key_mismatch', 'e2ee: peer public key does not match the pinned key');
+    this.name = 'PeerKeyMismatchError';
+  }
+}
+
+const protocolError = (message: string) => new E2EEError('protocol', `e2ee: protocol violation: ${message}`);
+
+export function concatBytes(...parts: Uint8Array[]): Uint8Array {
   const total = parts.reduce((n, p) => n + p.length, 0);
   const out = new Uint8Array(total);
   let offset = 0;
@@ -56,66 +106,135 @@ function concatBytes(...parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
+/** Comparison whose running time does not depend on where the inputs differ (there is no timingSafeEqual under Hermes). Lengths are public. */
+export function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
+/** handshake.go's TranscriptHash: SHA-256(label ‖ daemon_pub ‖ daemon_eph_pub ‖ client_eph_pub). Public data. */
+export function transcriptHash(daemonPub: Uint8Array, daemonEphPub: Uint8Array, clientEphPub: Uint8Array): Uint8Array {
+  return sha256(concatBytes(textEncoder.encode(LABEL), daemonPub, daemonEphPub, clientEphPub));
+}
+
+/** Everything the key schedule derives from one handshake; only th is public. */
+export interface Schedule {
+  th: Uint8Array;
+  d2m: Uint8Array;
+  m2d: Uint8Array;
+  confirmD: Uint8Array;
+  confirmM: Uint8Array;
+}
+
+/** ADR-0035 §2: ikm = es ‖ ee, salt = th, one HKDF-SHA256 expansion per purpose. */
+export function deriveSchedule(es: Uint8Array, ee: Uint8Array, daemonPub: Uint8Array, daemonEphPub: Uint8Array, clientEphPub: Uint8Array): Schedule {
+  const th = transcriptHash(daemonPub, daemonEphPub, clientEphPub);
+  const ikm = concatBytes(es, ee);
+  try {
+    const expand = (info: string) => hkdf(sha256, ikm, th, textEncoder.encode(info), 32);
+    return {
+      th,
+      d2m: expand(DIR_DAEMON_TO_MOBILE),
+      m2d: expand(DIR_MOBILE_TO_DAEMON),
+      confirmD: expand(CONFIRM_DAEMON),
+      confirmM: expand(CONFIRM_MOBILE),
+    };
+  } finally {
+    ikm.fill(0);
+  }
+}
+
+/** The key-confirmation MAC: HMAC-SHA256(confirmKey, th). */
+export function confirmTag(confirmKey: Uint8Array, th: Uint8Array): Uint8Array {
+  return hmac(sha256, confirmKey, th);
+}
+
 /**
- * Session holds the two directional ChaCha20-Poly1305 keys and per-
- * direction counters -- the exact TypeScript mirror of session.go's
- * Session/newSession/deriveKeys/Seal/Open/counterNonce.
+ * X25519 with the RFC 7748 §6.1 all-zero-output check made explicit: whatever
+ * the library does with a low-order point, an all-zero result aborts.
+ */
+export function dh(secretKey: Uint8Array, peerPublicKey: Uint8Array): Uint8Array {
+  if (peerPublicKey.length !== PUBLIC_KEY_SIZE) throw protocolError(`public key is ${peerPublicKey.length} bytes, want ${PUBLIC_KEY_SIZE}`);
+  let shared: Uint8Array;
+  try {
+    shared = x25519.getSharedSecret(secretKey, peerPublicKey);
+  } catch (e) {
+    throw new E2EEError('key_agreement', `e2ee: X25519 key agreement failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  let acc = 0;
+  for (const b of shared) acc |= b;
+  if (acc === 0) throw new E2EEError('key_agreement', 'e2ee: X25519 key agreement failed: all-zero output');
+  return shared;
+}
+
+function wipe(schedule: Schedule): void {
+  schedule.d2m.fill(0);
+  schedule.m2d.fill(0);
+  schedule.confirmD.fill(0);
+  schedule.confirmM.fill(0);
+}
+
+/**
+ * Session holds the two directional ChaCha20-Poly1305 keys and per-direction
+ * counters -- the TypeScript mirror of session.go's Session. Nonces are 4 zero
+ * bytes ‖ u64BE(counter); keys are unique per handshake, so counters restarting
+ * at zero never repeats a (key, nonce).
  */
 export class Session {
-  private sendKey: Uint8Array;
-  private recvKey: Uint8Array;
+  private readonly sendKey: Uint8Array;
+  private readonly recvKey: Uint8Array;
   private sendCounter = 0;
   private recvCounter = 0;
 
-  private constructor(sendKey: Uint8Array, recvKey: Uint8Array) {
+  constructor(sendKey: Uint8Array, recvKey: Uint8Array) {
     this.sendKey = sendKey;
     this.recvKey = recvKey;
   }
 
-  static derive(privateKey: Uint8Array, peerPublicKey: Uint8Array, role: RoleValue, daemonPub: Uint8Array, mobilePub: Uint8Array): Session {
-    const shared = x25519.getSharedSecret(privateKey, peerPublicKey);
-
-    // salt = SHA256(label || daemonPub || mobilePub), always daemon-then-
-    // mobile regardless of which end is deriving -- session.go's newSession.
-    const salt = sha256(concatBytes(textEncoder.encode(HKDF_LABEL), daemonPub, mobilePub));
-
-    const daemonToMobile = hkdf(sha256, shared, salt, textEncoder.encode(DIR_DAEMON_TO_MOBILE), 32);
-    const mobileToDaemon = hkdf(sha256, shared, salt, textEncoder.encode(DIR_MOBILE_TO_DAEMON), 32);
-
-    return role === Role.Mobile ? new Session(mobileToDaemon, daemonToMobile) : new Session(daemonToMobile, mobileToDaemon);
+  /** The session of `role` over a schedule (session.go newSession). */
+  static fromSchedule(role: RoleValue, sched: Schedule): Session {
+    const [d2m, m2d] = [sched.d2m.slice(), sched.m2d.slice()];
+    return role === Role.Mobile ? new Session(m2d, d2m) : new Session(d2m, m2d);
   }
 
-  /** Renders a frame counter as a 12-byte nonce: 4 zero bytes, then the counter big-endian -- counterNonce in session.go. */
+  /** Renders a frame counter as a 12-byte nonce: 4 zero bytes, then the counter big-endian. Counters stay below 2^32 (see seal), so the high word is zero. */
   private static nonceFor(counter: number): Uint8Array {
     const nonce = new Uint8Array(12);
-    const view = new DataView(nonce.buffer);
-    // Counters here never exceed 2^32 in this milestone's single-request
-    // proof; session.go's real limit is 2^64, tracked as a known gap if
-    // this module is ever reused for a long-lived connection.
-    view.setUint32(8, counter, false);
+    new DataView(nonce.buffer).setUint32(8, counter, false);
     return nonce;
   }
 
   seal(plaintext: Uint8Array): { counter: number; ciphertext: Uint8Array } {
+    // Limit: this client carries the counter in the nonce's low 32-bit word only (JS bit
+    // arithmetic), so a session ends at 2^32 - 1 frames per direction, where Go/ADR-0035 allow
+    // 2^64 - 1. Hitting it is fatal for the channel (Channel.send closes it) and the supervisor
+    // opens a fresh session with a new handshake.
+    if (this.sendCounter >= 0xffffffff) throw new E2EEError('counter_exhausted', 'e2ee: frame counter exhausted');
     const counter = this.sendCounter;
-    const cipher = chacha20poly1305(this.sendKey, Session.nonceFor(counter));
-    const ciphertext = cipher.encrypt(plaintext);
+    const ciphertext = chacha20poly1305(this.sendKey, Session.nonceFor(counter)).encrypt(plaintext);
     this.sendCounter++;
     return { counter, ciphertext };
   }
 
+  /** Opens a frame whose counter must be exactly the next one expected; a repeat or a skip is refused rather than decrypted. */
   open(counter: number, ciphertext: Uint8Array): Uint8Array {
     if (counter !== this.recvCounter) {
-      throw new Error(`e2ee: frame counter replayed or out of order: got ${counter}, want ${this.recvCounter}`);
+      throw new E2EEError('replay', `e2ee: frame counter replayed or out of order: got ${counter}, want ${this.recvCounter}`);
     }
-    const cipher = chacha20poly1305(this.recvKey, Session.nonceFor(counter));
-    const plaintext = cipher.decrypt(ciphertext);
+    let plaintext: Uint8Array;
+    try {
+      plaintext = chacha20poly1305(this.recvKey, Session.nonceFor(counter)).decrypt(ciphertext);
+    } catch (e) {
+      throw new E2EEError('decrypt', `e2ee: frame failed to decrypt: counter ${counter}: ${e instanceof Error ? e.message : String(e)}`);
+    }
     this.recvCounter++;
     return plaintext;
   }
 }
 
-/** One raw wire frame: 4-byte big-endian length (of type+payload), 1-byte type, payload -- writeFrame/readFrame in handshake.go. */
+/** One raw wire frame: 4-byte big-endian length (of type+payload), 1-byte type, payload -- writeFrame in handshake.go. */
 export function encodeFrame(type: number, payload: Uint8Array): Uint8Array {
   const frame = new Uint8Array(4 + 1 + payload.length);
   new DataView(frame.buffer).setUint32(0, 1 + payload.length, false);
@@ -124,7 +243,7 @@ export function encodeFrame(type: number, payload: Uint8Array): Uint8Array {
   return frame;
 }
 
-interface DecodedFrame {
+export interface DecodedFrame {
   type: number;
   payload: Uint8Array;
 }
@@ -148,11 +267,21 @@ export class FrameReader {
     this.buffer = new Uint8Array(0);
   }
 
-  /** Returns the next complete frame, or null if more bytes are needed. */
-  tryRead(): DecodedFrame | null {
+  /** True while bytes of an incomplete frame are buffered (a stream that ends now was cut mid-frame). */
+  get pending(): boolean {
+    return this.buffer.length > 0;
+  }
+
+  /**
+   * Returns the next complete frame, or null if more bytes are needed. `limit`
+   * bounds the length prefix (type + payload) and is checked as soon as the
+   * header is in, before the body is waited for or buffered.
+   */
+  tryRead(limit: number = MAX_FRAME_LEN): DecodedFrame | null {
     if (this.buffer.length < 4) return null;
     const length = new DataView(this.buffer.buffer, this.buffer.byteOffset, 4).getUint32(0, false);
-    if (length === 0) throw new Error('e2ee: zero-length frame');
+    if (length === 0) throw protocolError('zero-length frame');
+    if (length > limit) throw protocolError(`frame length ${length} exceeds the ${limit} byte limit`);
     if (this.buffer.length < 4 + length) return null;
     const type = this.buffer[4];
     const payload = this.buffer.slice(5, 4 + length);
@@ -168,102 +297,208 @@ export interface RawTransport {
   receiveChunk(): Promise<Uint8Array>;
 }
 
-function parseHello(payload: Uint8Array, ownRole: RoleValue): { peerPublicKey: Uint8Array } {
-  if (payload.length !== HELLO_PAYLOAD_LEN) {
-    throw new Error(`e2ee: hello is ${payload.length} bytes, want ${HELLO_PAYLOAD_LEN}`);
-  }
-  const version = payload[0];
-  if (version !== PROTOCOL_VERSION) {
-    throw new Error(`e2ee: peer protocol version ${version}, want ${PROTOCOL_VERSION}`);
-  }
-  const peerRole = payload[1];
-  if (peerRole !== Role.Daemon && peerRole !== Role.Mobile) {
-    throw new Error(`e2ee: peer sent unknown role ${peerRole}`);
-  }
-  if (peerRole === ownRole) {
-    throw new Error(`e2ee: peer claims the same role (${peerRole}) as this end`);
-  }
-  return { peerPublicKey: payload.slice(2) };
+/** The version byte is read first, before length or role, so a v1 hello is reported as such whatever its shape. */
+function parseVersion(payload: Uint8Array): void {
+  if (payload.length === 0) throw protocolError('empty hello');
+  if (payload[0] !== PROTOCOL_VERSION) throw new UnsupportedVersionError(payload[0]);
+}
+
+/** Validates M2 (`02 01 ‖ daemon_pub ‖ daemon_eph`) and returns the two public keys. */
+export function parseDaemonHello(payload: Uint8Array): { daemonPub: Uint8Array; daemonEphPub: Uint8Array } {
+  parseVersion(payload);
+  if (payload.length !== DAEMON_HELLO_LEN) throw protocolError(`daemon hello is ${payload.length} bytes, want ${DAEMON_HELLO_LEN}`);
+  if (payload[1] !== Role.Daemon) throw protocolError(`daemon hello carries role ${payload[1]}, want ${Role.Daemon}`);
+  return { daemonPub: payload.slice(2, 2 + PUBLIC_KEY_SIZE), daemonEphPub: payload.slice(2 + PUBLIC_KEY_SIZE) };
+}
+
+/** Validates M1 (`02 02 ‖ client_eph`) and returns the client ephemeral public key (the daemon's check, used by the test responder). */
+export function parseClientHello(payload: Uint8Array): Uint8Array {
+  parseVersion(payload);
+  if (payload.length !== CLIENT_HELLO_LEN) throw protocolError(`client hello is ${payload.length} bytes, want ${CLIENT_HELLO_LEN}`);
+  if (payload[1] !== Role.Mobile) throw protocolError(`client hello carries role ${payload[1]}, want ${Role.Mobile}`);
+  return payload.slice(2);
+}
+
+/** M1 for a client ephemeral public key. */
+export function clientHelloPayload(clientEphPub: Uint8Array): Uint8Array {
+  return concatBytes(new Uint8Array([PROTOCOL_VERSION, Role.Mobile]), clientEphPub);
+}
+
+/** A ready payload must be exactly 32 bytes and equal the expected MAC (compared in constant time); an empty ready (the retired v1 shape) is a protocol error. */
+export function checkReady(payload: Uint8Array, want: Uint8Array): void {
+  if (payload.length !== READY_LEN) throw protocolError(`ready is ${payload.length} bytes, want ${READY_LEN}`);
+  if (!constantTimeEqual(payload, want)) throw new E2EEError('handshake_confirm', 'e2ee: handshake key confirmation failed');
 }
 
 /**
- * Channel is one end of an E2EE session over a RawTransport -- the
- * TypeScript mirror of handshake.go's Channel. It supports exactly the
- * operations Item 3's mobile client needs: Handshake, then one Send and
- * one Receive (there is no long-lived Resume/reconnect story here, unlike
- * the Go daemon-side client -- Milestone 1's proof-of-life is a single
- * request/response).
+ * Channel is the initiator end of an E2EE v2 session over a RawTransport --
+ * the TypeScript mirror of handshake.go's client Channel.
+ *
+ * Its ephemeral X25519 key is generated INSIDE handshake(): no API takes a
+ * client key, so one can never be reused across sessions (ADR-0035 §3). A
+ * Channel runs one handshake; a retry after a failure uses a new Channel (and
+ * so a new ephemeral). Every failure is terminal: the channel is closed and
+ * refuses further use.
  */
 export class Channel {
   private readonly transport: RawTransport;
-  private readonly keyPair: KeyPair;
-  private readonly role: RoleValue;
   private readonly reader = new FrameReader();
+  // Production: a fresh random key per handshake. Tests that must reproduce the
+  // vectors replace this field (it is private, not part of the API).
+  private newEphemeral: () => Uint8Array = () => randomBytes(32);
   private session: Session | null = null;
-  private peerPublicKey: Uint8Array | null = null;
+  private established = false;
+  private closed = false;
+  private handshaking = false;
+  private daemonPub: Uint8Array | null = null;
+  private daemonEphPub: Uint8Array | null = null;
+  private clientEphPub: Uint8Array | null = null;
+  private th: Uint8Array | null = null;
+  // Retained for repeats on an established session (ADR-0035 §4): the daemon's
+  // M2 and R_d, of which a byte-identical repeat is tolerated.
+  private peerHello: Uint8Array | null = null;
+  private peerReady: Uint8Array | null = null;
 
-  constructor(transport: RawTransport, keyPair: KeyPair, role: RoleValue) {
+  constructor(transport: RawTransport) {
     this.transport = transport;
-    this.keyPair = keyPair;
-    this.role = role;
   }
 
-  /** The peer's ephemeral handshake public key once the handshake completed (null before); with ours it names the session's transcript. */
-  get peerKey(): Uint8Array | null {
-    return this.peerPublicKey;
+  /** The handshake transcript hash th (public) once established, else null. */
+  get transcriptHash(): Uint8Array | null {
+    return this.ifEstablished(this.th);
   }
 
-  private writeHello(): void {
-    const payload = concatBytes(new Uint8Array([PROTOCOL_VERSION, this.role]), this.keyPair.publicKey);
-    this.transport.send(encodeFrame(FRAME_HELLO, payload));
+  /** The daemon's static public key once established. */
+  get daemonPublicKey(): Uint8Array | null {
+    return this.ifEstablished(this.daemonPub);
   }
 
-  private async readFrame(): Promise<DecodedFrame> {
+  /** The daemon's per-handshake ephemeral public key once established. */
+  get daemonEphemeralPublicKey(): Uint8Array | null {
+    return this.ifEstablished(this.daemonEphPub);
+  }
+
+  /** This client's per-handshake ephemeral public key once established. */
+  get clientEphemeralPublicKey(): Uint8Array | null {
+    return this.ifEstablished(this.clientEphPub);
+  }
+
+  get isEstablished(): boolean {
+    return this.established;
+  }
+
+  get isClosed(): boolean {
+    return this.closed;
+  }
+
+  private ifEstablished(b: Uint8Array | null): Uint8Array | null {
+    return this.established && b ? b.slice() : null;
+  }
+
+  private fail(err: unknown): never {
+    this.closed = true;
+    throw err;
+  }
+
+  private async readFrame(limit: number): Promise<DecodedFrame> {
     for (;;) {
-      const frame = this.reader.tryRead();
+      const frame = this.reader.tryRead(limit);
       if (frame) return frame;
-      this.reader.push(await this.transport.receiveChunk());
+      let chunk: Uint8Array;
+      try {
+        chunk = await this.transport.receiveChunk();
+      } catch (e) {
+        // A stream that ends in the middle of a frame is a protocol violation, not a clean end.
+        if (this.reader.pending) throw protocolError('truncated frame');
+        throw e;
+      }
+      this.reader.push(chunk);
     }
   }
 
-  /** Runs the X25519 handshake: send hello, read peer hello, derive keys, exchange ready frames. */
-  async handshake(daemonPublicKeyIfMobile?: Uint8Array): Promise<void> {
-    this.writeHello();
-
-    const helloFrame = await this.readFrame();
-    if (helloFrame.type !== FRAME_HELLO) {
-      throw new Error(`e2ee: expected hello, got frame type 0x${helloFrame.type.toString(16)}`);
+  /**
+   * Runs the handshake: send M1, read M2 then R_d, verify, send R_c. Resolves
+   * only once key confirmation succeeded, so no application frame is sent or
+   * accepted before the keys are confirmed.
+   *
+   * `expectedDaemonKey` pins the daemon's static public key (from the pairing
+   * offer): any other key in M2 fails with PeerKeyMismatchError before any key
+   * agreement. The pin fails closed: pinning an empty or malformed key can
+   * never match. Omit it only to run unpinned (tests).
+   *
+   * A second call while one is running, after success, or after close rejects.
+   */
+  async handshake(expectedDaemonKey?: Uint8Array): Promise<void> {
+    if (this.closed) throw new E2EEError('closed', 'e2ee: channel closed');
+    if (this.established) throw new E2EEError('already_established', 'e2ee: handshake already completed');
+    if (this.handshaking) throw new E2EEError('handshake_in_progress', 'e2ee: handshake already in progress');
+    this.handshaking = true;
+    try {
+      await this.handshakeClient(expectedDaemonKey);
+    } catch (e) {
+      this.fail(e);
+    } finally {
+      this.handshaking = false;
     }
-    const { peerPublicKey } = parseHello(helloFrame.payload, this.role);
-    this.peerPublicKey = peerPublicKey;
+  }
 
-    // A mobile client that already knows the daemon's public key (from
-    // the pairing offer) should refuse to complete a handshake with a
-    // different one -- this is the mobile-side analogue of ADR-0007 (e)'s
-    // "peer changed keys" rejection, applied to the very first handshake
-    // rather than a re-handshake.
-    if (daemonPublicKeyIfMobile && !bytesEqual(peerPublicKey, daemonPublicKeyIfMobile)) {
-      throw new Error('e2ee: daemon public key does not match the pairing offer');
-    }
+  private async handshakeClient(expectedDaemonKey: Uint8Array | undefined): Promise<void> {
+    const eph = this.newEphemeral();
+    const clientEphPub = x25519.getPublicKey(eph);
+    let es: Uint8Array | null = null;
+    let ee: Uint8Array | null = null;
+    let sched: Schedule | null = null;
+    try {
+      this.transport.send(encodeFrame(FRAME_HELLO, clientHelloPayload(clientEphPub)));
 
-    const daemonPub = this.role === Role.Mobile ? peerPublicKey : this.keyPair.publicKey;
-    const mobilePub = this.role === Role.Mobile ? this.keyPair.publicKey : peerPublicKey;
-    this.session = Session.derive(this.keyPair.secretKey, peerPublicKey, this.role, daemonPub, mobilePub);
+      const m2Frame = await this.readFrame(MAX_HANDSHAKE_FRAME_LEN);
+      if (m2Frame.type !== FRAME_HELLO) throw protocolError(`expected hello, got frame type 0x${m2Frame.type.toString(16)}`);
+      const m2 = m2Frame.payload;
+      const { daemonPub, daemonEphPub } = parseDaemonHello(m2);
+      // The pin is checked before any key agreement.
+      if (expectedDaemonKey !== undefined && !constantTimeEqual(daemonPub, expectedDaemonKey)) throw new PeerKeyMismatchError();
 
-    this.transport.send(encodeFrame(FRAME_READY, new Uint8Array(0)));
+      es = dh(eph, daemonPub);
+      ee = dh(eph, daemonEphPub);
+      sched = deriveSchedule(es, ee, daemonPub, daemonEphPub, clientEphPub);
+      const wantReady = confirmTag(sched.confirmD, sched.th);
+      const replyReady = confirmTag(sched.confirmM, sched.th);
 
-    for (;;) {
-      const frame = await this.readFrame();
-      if (frame.type === FRAME_READY) return;
-      if (frame.type === FRAME_HELLO) {
-        const retry = parseHello(frame.payload, this.role);
-        if (!bytesEqual(retry.peerPublicKey, peerPublicKey)) {
-          throw new Error('e2ee: peer changed keys mid-handshake');
+      for (;;) {
+        const frame = await this.readFrame(MAX_HANDSHAKE_FRAME_LEN);
+        if (frame.type === FRAME_READY) {
+          checkReady(frame.payload, wantReady);
+          break;
         }
-        this.transport.send(encodeFrame(FRAME_READY, new Uint8Array(0)));
-        continue;
+        if (frame.type === FRAME_HELLO) {
+          this.checkRepeatedHello(frame.payload, m2);
+          continue;
+        }
+        throw protocolError(`expected ready, got frame type 0x${frame.type.toString(16)}`);
       }
-      throw new Error(`e2ee: expected ready, got frame type 0x${frame.type.toString(16)}`);
+
+      this.transport.send(encodeFrame(FRAME_READY, replyReady));
+      this.session = Session.fromSchedule(Role.Mobile, sched);
+      this.daemonPub = daemonPub;
+      this.daemonEphPub = daemonEphPub;
+      this.clientEphPub = clientEphPub;
+      this.th = sched.th;
+      this.peerHello = m2;
+      this.peerReady = wantReady;
+      this.established = true;
+    } finally {
+      eph.fill(0);
+      es?.fill(0);
+      ee?.fill(0);
+      if (sched) wipe(sched);
+    }
+  }
+
+  /** ADR-0035 §4: a byte-identical repeat of the daemon's hello is a transport retry; any other valid M2 is a key rotation. A v1 or malformed repeat is reported as such. */
+  private checkRepeatedHello(payload: Uint8Array, first: Uint8Array): void {
+    parseDaemonHello(payload);
+    if (!constantTimeEqual(payload, first)) {
+      throw new E2EEError('key_rotation', 'e2ee: peer re-handshaked with a different key: rotation requires a new session, not an in-session rekey');
     }
   }
 
@@ -274,47 +509,67 @@ export class Channel {
    * side. Call it only when no receive() is in flight.
    */
   resumeTransport(): void {
-    if (!this.session) throw new Error('e2ee: no established session to resume');
+    if (!this.session) throw new E2EEError('not_established', 'e2ee: no established session to resume');
     this.reader.clear();
   }
 
+  private activeSession(): Session {
+    if (this.closed) throw new E2EEError('closed', 'e2ee: channel closed');
+    if (!this.established || !this.session) throw new E2EEError('not_established', 'e2ee: handshake not completed');
+    return this.session;
+  }
+
   send(message: Uint8Array): void {
-    if (!this.session) throw new Error('e2ee: handshake not completed');
-    const { counter, ciphertext } = this.session.seal(message);
+    const session = this.activeSession();
+    let sealed: { counter: number; ciphertext: Uint8Array };
+    try {
+      sealed = session.seal(message);
+    } catch (e) {
+      if (e instanceof E2EEError && e.kind === 'counter_exhausted') this.closed = true;
+      throw e;
+    }
+    const { counter, ciphertext } = sealed;
     const payload = new Uint8Array(8 + ciphertext.length);
-    new DataView(payload.buffer).setUint32(0, 0, false); // high 32 bits of the counter, always 0 in this milestone's single-request use.
+    // u64BE(counter): the high word is always zero (see Session.seal).
     new DataView(payload.buffer).setUint32(4, counter, false);
     payload.set(ciphertext, 8);
     this.transport.send(encodeFrame(FRAME_DATA, payload));
   }
 
+  /**
+   * Reads the next application message. A replayed or out-of-order frame (or
+   * one that fails to decrypt) throws and leaves the channel usable, as in Go;
+   * a protocol violation closes it. Handshake frames on an established session
+   * follow ADR-0035 §4: a byte-identical repeat of M2 or R_d is ignored, a
+   * different M2 is a key rotation, a different ready fails confirmation.
+   */
   async receive(): Promise<Uint8Array> {
-    if (!this.session) throw new Error('e2ee: handshake not completed');
+    const session = this.activeSession();
     for (;;) {
-      const frame = await this.readFrame();
+      // A read failure does not close the channel (as in Go): the stream may just have
+      // dropped, and resumeTransport() then discards the half-read frame.
+      const frame = await this.readFrame(MAX_FRAME_LEN);
       if (frame.type === FRAME_DATA) {
-        if (frame.payload.length < 8) {
-          throw new Error(`e2ee: data frame is ${frame.payload.length} bytes, want at least 8`);
-        }
-        const counter = new DataView(frame.payload.buffer, frame.payload.byteOffset, 8).getUint32(4, false);
-        return this.session.open(counter, frame.payload.slice(8));
+        if (frame.payload.length < 8) this.fail(protocolError(`data frame is ${frame.payload.length} bytes, want at least 8`));
+        const view = new DataView(frame.payload.buffer, frame.payload.byteOffset, 8);
+        const high = view.getUint32(0, false);
+        const low = view.getUint32(4, false);
+        // A counter above 2^32 can never be the next one expected.
+        // Beyond this client's 2^32 - 1 limit the session can only stall: fatal, so a fresh session replaces it.
+        if (high !== 0) this.fail(new E2EEError('counter_exhausted', `e2ee: peer frame counter ${high} * 2^32 + ${low} is beyond this client's 2^32 - 1 limit`));
+        return session.open(low, frame.payload.slice(8));
       }
-      if (frame.type === FRAME_READY) continue; // a duplicate ready is harmless.
-      if (frame.type === FRAME_HELLO) {
-        const retry = parseHello(frame.payload, this.role);
-        if (!this.peerPublicKey || !bytesEqual(retry.peerPublicKey, this.peerPublicKey)) {
-          throw new Error('e2ee: peer re-handshaked with a different key');
+      try {
+        if (frame.type === FRAME_HELLO) {
+          this.checkRepeatedHello(frame.payload, this.peerHello!);
+        } else if (frame.type === FRAME_READY) {
+          checkReady(frame.payload, this.peerReady!);
+        } else {
+          throw protocolError(`unknown frame type 0x${frame.type.toString(16)}`);
         }
-        this.transport.send(encodeFrame(FRAME_READY, new Uint8Array(0)));
-        continue;
+      } catch (e) {
+        this.fail(e);
       }
-      throw new Error(`e2ee: unknown frame type 0x${frame.type.toString(16)}`);
     }
   }
-}
-
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-  return true;
 }

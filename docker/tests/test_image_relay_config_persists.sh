@@ -11,13 +11,18 @@ poll 30 sh -c "docker logs '$relay' 2>&1 | grep -qi 'listening\|serving'" || fai
 secret="$(docker exec --user smind "$relay" smind relay host new h1 | awk '/^  [0-9a-f]{32,}$/ {print $1}')"
 [ -n "$secret" ] || fail "could not enrol a relay host"
 docker restart "$relay" >/dev/null # the relay reads its host store at start
-poll 30 sh -c "docker logs --since '$(date -u +%Y-%m-%dT%H:%M:%SZ)' '$relay' 2>&1 | grep -qi 'listening\|serving'" || sleep 3
+relay_restarted_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+poll 30 sh -c "docker logs --since '$relay_restarted_at' '$relay' 2>&1 | grep -qi 'listening\|serving'" || sleep 3
+# The relay serves a self-signed certificate, so `relay connect` needs its pin
+# (it refuses to trust-on-first-use without confirmation, ADR-0031 P12c).
+fp="$(docker logs --since "$relay_restarted_at" "$relay" 2>&1 | grep -oE 'fingerprint [0-9a-f]{64}' | tail -1 | awk '{print $2}')"
+[ -n "$fp" ] || fail "could not read the relay's certificate fingerprint from its log"
 
 new_volume relaycfg; vol="$REPLY"
 d="$(new_name relayd)"
 start_daemon "$d" --network "$net" -v "$vol:/data"
 wait_healthy "$d" 30
-docker exec --user smind "$d" smind relay connect relay:7400 h1 "$secret" >/dev/null
+docker exec --user smind "$d" smind relay connect --fingerprint "$fp" relay:7400 h1 "$secret" >/dev/null
 docker exec "$d" test -s /data/relay-connect.json || fail "the relay config was not written to /data"
 [ "$(docker exec "$d" stat -c %a /data/relay-connect.json)" = 600 ] || fail "relay-connect.json is not mode 0600"
 

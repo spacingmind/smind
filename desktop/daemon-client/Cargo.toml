@@ -1,6 +1,6 @@
 [package]
 name = "smind-daemon-client"
-version = "0.12.0" # x-release-please-version
+version = "0.13.0" # x-release-please-version
 edition = "2021"
 description = "Pure-logic daemon client for the smind desktop shell (no GUI deps, tests run without webkit)"
 
@@ -24,6 +24,8 @@ x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }
 chacha20poly1305 = "0.11.0"
 hkdf = "0.13.0"
 zeroize = "1"
+# constant-time compare of the key-confirmation tags (already in the tree via the RustCrypto stack)
+subtle = "2"
 ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
 hmac = "0.13.0"
 tower = { version = "0.5.3", features = ["util"] }

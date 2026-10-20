@@ -17,12 +17,13 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { base64Decode, base64Encode } from '../base64';
 import { DeviceHello, deviceIdFor, helloSignedBytes } from '../deviceIdentity';
-import { Channel, generateKeyPair, RawTransport, Role } from '../e2ee';
+import { concatBytes, encodeFrame as encodeE2EEFrame, FRAME_HELLO, RawTransport, Role } from '../e2ee';
+import { DaemonKeys, daemonKeysFrom, FakeV2Daemon } from './fakeV2Daemon';
 import { DataStream } from '../grpcweb';
 import { Frame, decodeFrame, encodeFrame, Direction } from '../proto';
 import { RelayNet } from '../RelayConnection';
 
-export type DevicePolicy = 'approved' | 'pending' | 'revoked' | 'legacy-daemon' | 'silent' | 'too_many' | 'bad_hello' | 'version';
+export type DevicePolicy = 'approved' | 'pending' | 'revoked' | 'silent' | 'too_many' | 'bad_hello' | 'version';
 
 export class FakeStream implements DataStream {
   routeKey: string | null = null;
@@ -80,11 +81,12 @@ export class FakeStream implements DataStream {
   }
 }
 
-/** The daemon side of one route: an E2EE responder whose bytes ride the relay. */
+/** The daemon side of one route: an E2EE v2 responder whose bytes ride the relay. */
 class DaemonRoute {
   private chunks: Uint8Array[] = [];
   private waiter: ((c: Uint8Array) => void) | null = null;
-  readonly channel: Channel;
+  readonly channel: FakeV2Daemon;
+  private readonly transport: RawTransport;
   helloSeen = 0;
   deviceId = '';
   alive = true;
@@ -103,7 +105,8 @@ class DaemonRoute {
         return new Promise((resolve) => (this.waiter = resolve));
       },
     };
-    this.channel = new Channel(transport, relay.daemonKeys, Role.Daemon);
+    this.transport = transport;
+    this.channel = new FakeV2Daemon(transport, relay.daemonKeys);
   }
 
   feed(payload: Uint8Array): void {
@@ -119,6 +122,17 @@ class DaemonRoute {
     const decoder = new TextDecoder();
     const reply = (id: string, body: object) => this.channel.send(new TextEncoder().encode(JSON.stringify({ id, ...body })));
     try {
+      if (this.relay.e2eeVersion !== 2) {
+        // A daemon on another E2EE version: it answers the client's first frame with ITS hello and says nothing more.
+        await this.transport.receiveChunk();
+        const eph = new Uint8Array(32);
+        const hello =
+          this.relay.e2eeVersion === 1
+            ? concatBytes(new Uint8Array([1, Role.Daemon]), this.relay.daemonKeys.publicKey)
+            : concatBytes(new Uint8Array([this.relay.e2eeVersion, Role.Daemon]), this.relay.daemonKeys.publicKey, eph);
+        this.transport.send(encodeE2EEFrame(FRAME_HELLO, hello));
+        return;
+      }
       await this.channel.handshake();
       this.relay.sendChallenge(this);
       for (;;) {
@@ -144,7 +158,9 @@ class DaemonRoute {
 }
 
 export class FakeRelay implements RelayNet {
-  readonly daemonKeys = generateKeyPair();
+  readonly daemonKeys: DaemonKeys = daemonKeysFrom();
+  /** The E2EE protocol version the fake daemon speaks: 2 is real; anything else answers the client's hello with its own and stops (a v1 or a future daemon). */
+  e2eeVersion = 2;
   readonly streams: FakeStream[] = [];
   readonly hellos: DeviceHello[] = [];
   readonly requests: Array<{ route: string; method: string; params: unknown }> = [];
@@ -246,7 +262,7 @@ export class FakeRelay implements RelayNet {
   /** How the daemon opens a device route (hello v2: it speaks first, with a challenge). */
   challengeMode: 'v2' | 'none' | 'other-version' | 'short' = 'v2';
   /** Every hello the daemon received, with what it needs to verify it. */
-  readonly helloLog: Array<{ hello: DeviceHello; routeKey: string; session: string; challenge: Uint8Array; mobilePub: Uint8Array }> = [];
+  readonly helloLog: Array<{ hello: DeviceHello; routeKey: string; session: string; challenge: Uint8Array; th: Uint8Array; clientEphPub: Uint8Array; daemonEphPub: Uint8Array }> = [];
 
   /** The daemon's first message on a route. */
   sendChallenge(route: DaemonRoute): void {
@@ -258,18 +274,18 @@ export class FakeRelay implements RelayNet {
 
   /** The daemon's decision for a hello; false ends the route. */
   checkHello(route: DaemonRoute, id: string, hello: DeviceHello, reply: (id: string, body: object) => void): boolean {
-    const peer = route.channel.peerKey!;
+    const th = route.channel.th!;
     const pub = base64Decode(hello.device_pub);
     const sig = base64Decode(hello.signature);
     const session = route.key.split('|')[1];
-    this.helloLog.push({ hello, routeKey: route.key, session, challenge: route.challenge, mobilePub: peer });
+    this.helloLog.push({ hello, routeKey: route.key, session, challenge: route.challenge, th, clientEphPub: route.channel.clientEphPub!, daemonEphPub: route.channel.daemonEphPub! });
     if (hello.v !== 2) {
       reply(id, { error: { message: 'unsupported hello version', code: 'hello_version_unsupported' } });
       return false;
     }
     const verified =
       deviceIdFor(pub) === route.deviceId &&
-      ed25519.verify(sig, helloSignedBytes(this.daemonKeys.publicKey, peer, new TextEncoder().encode(session), route.challenge), pub);
+      ed25519.verify(sig, helloSignedBytes(th, this.daemonKeys.publicKey, new TextEncoder().encode(session), route.challenge), pub);
     const policy = this.policy(route.deviceId);
     // The daemon password (P13c) comes right after proof of the device key and before the registry:
     // a device that fails it is never recorded and learns nothing about its state. The rate limit is checked first.
@@ -294,10 +310,6 @@ export class FakeRelay implements RelayNet {
       return false;
     }
     if (policy === 'silent') return true; // what the real daemon does with a method it does not know: no answer
-    if (policy === 'legacy-daemon') {
-      reply(id, { error: { message: 'method not found: relay.device_hello' } });
-      return true;
-    }
     if (policy === 'too_many') {
       reply(id, { error: { message: 'too many connected devices', code: 'too_many_devices' } });
       return false;

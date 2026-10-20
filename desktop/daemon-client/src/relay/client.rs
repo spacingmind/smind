@@ -21,7 +21,7 @@ use crate::backoff::Backoff;
 use crate::relay::admission::{self, Transcript};
 use crate::relay::channel::ChannelError;
 use crate::relay::channel::{Channel as E2eeChannel, FrameTransport};
-use crate::relay::crypto::{decode_frame, encode_frame, FrameError, KeyPair, Role};
+use crate::relay::crypto::{decode_frame, encode_frame, FrameError};
 use crate::relay::device::{self, DeviceKey, HelloOutcome};
 use crate::relay::password::PasswordCell;
 use crate::relay::liveness::{self, Action, Liveness, LivenessCfg};
@@ -30,11 +30,13 @@ use crate::relay::relaypb::relay_client::RelayClient as GrpcRelayClient;
 use crate::relay::relaypb::{AdmitChallengeRequest, AdmitRequest, Direction, Frame};
 
 /// The fixed (session, device) pair of the single-device relay protocol
-/// (milestone 1). A daemon from before device identity (ADR-0031 P12b) only
-/// serves this route; a current daemon serves it only while its
-/// `relay.legacyDevices` is on (off by default). This client uses it as the
-/// FALLBACK for such a daemon: its normal route is the one named by its own
-/// device id and a fresh session id.
+/// (milestone 1). A current daemon serves it only while its
+/// `relay.legacyDevices` is on (off by default), or when it tracks no devices
+/// at all (it answers the hello `device_hello_unsupported`). This client uses
+/// it as the FALLBACK for such a daemon: its normal route is the one named by
+/// its own device id and a fresh session id. Daemons from before device
+/// identity speak E2EE v1, which this client does not (ADR-0035): they are
+/// refused at the handshake, not reached through this route.
 pub const DEFAULT_SESSION_ID: &str = "m1-default-session";
 pub const DEFAULT_DEVICE_ID: &str = "m1-default-device";
 
@@ -1014,9 +1016,10 @@ const MAX_RETRY_AFTER_SECS: u64 = 3600;
 enum Failure {
     /// Transport, admission or handshake trouble: back off and retry.
     Retry(String),
-    /// Nobody answered the handshake on the identity route: probably a
-    /// daemon from before device identity (it never opens that route).
-    HandshakeTimeout,
+    /// The daemon's E2EE hello carried another protocol version (ADR-0035
+    /// §6). Terminal: the client neither retries, nor tries another route or
+    /// protocol; the user has to update one end.
+    E2eeVersion { peer: u8 },
     /// The daemon answered the hello with a refusal.
     Refused { code: String, message: String },
     /// The daemon's password check refused the hello (P13c): `password_required`,
@@ -1042,10 +1045,10 @@ fn random_session_id() -> String {
     format!("dsk-{}", hex_encode(&b))
 }
 
-/// establish opens a FRESH session: a fresh ephemeral E2EE key (never reused
-/// across sessions — a reused key with restarted counters would repeat
-/// nonces), the E2EE handshake pinned to the daemon key, then, on the
-/// identity route, `device_hello` bound to this very session.
+/// establish opens a FRESH session: the E2EE v2 handshake pinned to the
+/// daemon key (it draws its own fresh ephemeral; no caller can supply one),
+/// then, on the identity route, `device_hello` bound to this very session's
+/// transcript hash.
 async fn establish(
     grpc: &mut GrpcRelayClient<GrpcChannel>,
     admission_id: &str,
@@ -1081,20 +1084,15 @@ async fn establish(
         l.set_cfg(options.timing.liveness);
         l.start_stream(Instant::now());
     }
-    let kp = KeyPair::generate();
-    let mut channel = E2eeChannel::new(transport, Role::Mobile);
+    let mut channel = E2eeChannel::new(transport);
     let handshake = tokio::time::timeout(
         options.timing.handshake_timeout,
-        channel.handshake(&kp, Some(&pairing.daemon_public_key)),
+        channel.handshake(Some(&pairing.daemon_public_key)),
     )
     .await;
     match handshake {
         Ok(Ok(())) => {}
-        Ok(Err(ChannelError::Transport(DataTransportError::Status(s)))) if is_revoked_by_relay(&s) => {
-            return Err(Failure::RelayDenied(s.message().to_string()));
-        }
-        Ok(Err(e)) => return Err(Failure::Retry(format!("handshake: {e}"))),
-        Err(_) if mode == RouteMode::Identity => return Err(Failure::HandshakeTimeout),
+        Ok(Err(e)) => return Err(classify_handshake_error(e)),
         Err(_) => return Err(Failure::Retry("handshake: timed out".into())),
     }
 
@@ -1106,7 +1104,6 @@ async fn establish(
         key,
         &options.label,
         &pairing.daemon_public_key,
-        &kp.public(),
         &session_id,
         &options.timing,
         &options.password,
@@ -1115,25 +1112,38 @@ async fn establish(
     Ok(channel)
 }
 
+/// classify_handshake_error maps a failed E2EE handshake to what the loop does
+/// next. A version mismatch is terminal (`E2eeVersion`); everything else is a
+/// retry, except the relay refusing a revoked device.
+fn classify_handshake_error(e: ChannelError<DataTransportError>) -> Failure {
+    match e {
+        ChannelError::Transport(DataTransportError::Status(s)) if is_revoked_by_relay(&s) => {
+            Failure::RelayDenied(s.message().to_string())
+        }
+        ChannelError::UnsupportedVersion { peer } => Failure::E2eeVersion { peer },
+        e => Failure::Retry(format!("handshake: {e}")),
+    }
+}
+
 /// identify_device runs the hello v2 exchange on an established channel:
 /// wait for the daemon's challenge, then send the hello bound to it. The
 /// hello is sent only after a well-formed challenge, so a daemon that sends
 /// none (one from before v2) never receives anything from this client.
-// Eight inputs that are all distinct facts of one hello (key, label, both public keys, session, timing,
-// password); a struct would only rename them.
-#[allow(clippy::too_many_arguments)]
 async fn identify_device<T: FrameTransport>(
     channel: &mut E2eeChannel<T>,
     key: &DeviceKey,
     label: &str,
     daemon_pub: &[u8; 32],
-    mobile_pub: &[u8; 32],
     session_id: &str,
     timing: &Timing,
     password: &PasswordCell,
 ) -> Result<(), Failure> {
     let challenge = await_challenge(channel, timing.challenge_timeout).await?;
-    let hello = key.hello(label, daemon_pub, mobile_pub, session_id, &challenge);
+    // `th` comes from the channel (ADR-0035 §5), never recomputed here.
+    let th = channel
+        .transcript_hash()
+        .ok_or_else(|| Failure::Retry("hello: no transcript hash before the handshake".into()))?;
+    let hello = key.hello(label, daemon_pub, &th, session_id, &challenge);
     let request_id = "relay-hello-1";
     // The password (when the user entered one this run) goes into the encrypted
     // request only; the copy zeroizes when this function returns.
@@ -1290,8 +1300,10 @@ const MAX_UNSERVED_FLIPS: u32 = 2;
 ///
 /// * the identity route is the default and is tried first, on every start;
 /// * it flips to the single-device route when the daemon says it does not do
-///   device identity, or when nobody answers the handshake on the identity
-///   route (a daemon from before device identity never opens it);
+///   device identity (`device_hello_unsupported` / method not found: a daemon
+///   that tracks no devices). It no longer flips when nobody answers the
+///   handshake: that was the way to a daemon from before device identity, which
+///   speaks E2EE v1 and cannot be reached any more (ADR-0035);
 /// * the single-device route flips back to identity when it is refused
 ///   (`device_hello_required`) or fails before ever being served — it is only
 ///   kept while it has proven to work;
@@ -1343,15 +1355,6 @@ impl ModeMachine {
         self.mode = to;
         self.legacy_proven = false;
         Transition::Flipped(to)
-    }
-
-    /// The identity route's handshake got no answer.
-    fn identity_unanswered(&mut self) -> Transition {
-        self.flip(
-            RouteMode::Legacy,
-            "daemon_not_answering",
-            "no daemon answered on this device's route",
-        )
     }
 
     /// The daemon does not do device identity (unsupported / method not found).
@@ -1542,6 +1545,23 @@ async fn run(
                     let _ = status_tx.send(Status::Connecting);
                     continue;
                 }
+                Err(Failure::E2eeVersion { peer }) => {
+                    // The daemon speaks another E2EE version (ADR-0035 §6). Nothing
+                    // here can fix that, and no other route or protocol is tried: show
+                    // the cause and stop connecting (updating either end and
+                    // reconnecting starts a fresh loop), like an unreadable device key.
+                    let (code, message) = e2ee_version_refusal(peer);
+                    eprintln!("smind desktop: relay: {message}");
+                    let _ = status_tx.send(Status::Refused {
+                        code: code.into(),
+                        message: message.into(),
+                    });
+                    while sleep_or_stop(&mut outbound_rx, Duration::from_secs(60))
+                        .await
+                        .is_some()
+                    {}
+                    return;
+                }
                 Err(failure) => {
                     let (status, delay) = match failure {
                         // Handled by the arm above; kept so the match stays exhaustive.
@@ -1554,11 +1574,8 @@ async fn run(
                                 (None, backoff.next())
                             }
                         }
-                        Failure::HandshakeTimeout => {
-                            eprintln!("smind desktop: relay: no daemon answered on the device route");
-                            let t = modes.identity_unanswered();
-                            (transition_status(&t), transition_delay(&t, &timing, &mut backoff))
-                        }
+                        // Handled by the arm above; kept so the match stays exhaustive.
+                        Failure::E2eeVersion { .. } => continue,
                         Failure::NoIdentitySupport => {
                             eprintln!("smind desktop: relay: the daemon does not support device identity");
                             let t = modes.identity_unsupported();
@@ -1681,6 +1698,23 @@ async fn run(
         {
             return;
         }
+    }
+}
+
+/// e2ee_version_refusal is the status for a daemon whose E2EE hello carried
+/// version `peer` (this client speaks 2): older means the daemon needs the
+/// update, newer means this app does.
+fn e2ee_version_refusal(peer: u8) -> (&'static str, &'static str) {
+    if peer < crate::relay::crypto::PROTOCOL_VERSION {
+        (
+            "daemon_outdated",
+            "The daemon speaks an older E2EE version: update the daemon (smind v0.12.0 and older cannot talk to this app version).",
+        )
+    } else {
+        (
+            "app_outdated",
+            "The daemon speaks a newer E2EE version: update this app.",
+        )
     }
 }
 
@@ -1883,19 +1917,17 @@ mod tests {
     // --- hello v2: the daemon's challenge ----------------------------------
 
     async fn established_pair() -> (
+        crate::relay::channel::test_daemon::DaemonPeer<crate::relay::channel::test_pipe::PipeEnd>,
         E2eeChannel<crate::relay::channel::test_pipe::PipeEnd>,
-        E2eeChannel<crate::relay::channel::test_pipe::PipeEnd>,
-        KeyPair,
-        KeyPair,
+        [u8; 32],
     ) {
+        use crate::relay::channel::test_daemon::DaemonPeer;
         let (a, b) = pipe();
-        let mut daemon = E2eeChannel::new(a, Role::Daemon);
-        let mut mobile = E2eeChannel::new(b, Role::Mobile);
-        let (dkp, mkp) = (KeyPair::from_seed([1; 32]), KeyPair::from_seed([2; 32]));
-        let (r1, r2) = tokio::join!(daemon.handshake(&dkp, None), mobile.handshake(&mkp, None));
-        r1.unwrap();
+        let mut mobile = E2eeChannel::new(b);
+        let (daemon, r2) = tokio::join!(DaemonPeer::establish(a, [1; 32]), mobile.handshake(None));
         r2.unwrap();
-        (daemon, mobile, dkp, mkp)
+        let dpub = daemon.daemon_pub;
+        (daemon, mobile, dpub)
     }
 
     /// A daemon from before hello v2 sends nothing after the handshake: the
@@ -1904,13 +1936,19 @@ mod tests {
     /// the retired v1 hello.
     #[tokio::test(start_paused = true)]
     async fn a_silent_daemon_is_outdated_and_is_never_sent_a_hello() {
-        let (mut daemon, mut mobile, dkp, mkp) = established_pair().await;
+        let (mut daemon, mut mobile, dpub) = established_pair().await;
         let key = DeviceKey::from_seed([7; 32]);
         let timing = Timing::default();
         assert_eq!(timing.challenge_timeout, Duration::from_secs(5));
         let started = Instant::now();
         let err = identify_device(
-            &mut mobile, &key, "laptop", &dkp.public(), &mkp.public(), "sess", &timing, &PasswordCell::default(),
+            &mut mobile,
+            &key,
+            "laptop",
+            &dpub,
+            "sess",
+            &timing,
+            &PasswordCell::default(),
         )
         .await
         .unwrap_err();
@@ -1927,7 +1965,7 @@ mod tests {
     /// and also gets no hello.
     #[tokio::test(start_paused = true)]
     async fn a_challenge_of_another_version_is_outdated_without_a_hello() {
-        let (mut daemon, mut mobile, dkp, mkp) = established_pair().await;
+        let (mut daemon, mut mobile, dpub) = established_pair().await;
         daemon
             .send(br#"{"event":"relay.device_challenge","params":{"v":3,"challenge":""}}"#)
             .await
@@ -1936,7 +1974,13 @@ mod tests {
         let timing = Timing::default();
         let started = Instant::now();
         let err = identify_device(
-            &mut mobile, &key, "laptop", &dkp.public(), &mkp.public(), "sess", &timing, &PasswordCell::default(),
+            &mut mobile,
+            &key,
+            "laptop",
+            &dpub,
+            "sess",
+            &timing,
+            &PasswordCell::default(),
         )
         .await
         .unwrap_err();
@@ -1949,7 +1993,7 @@ mod tests {
     /// challenge the daemon chose.
     #[tokio::test(start_paused = true)]
     async fn a_challenge_gets_a_v2_hello_bound_to_session_and_challenge() {
-        let (mut daemon, mut mobile, dkp, mkp) = established_pair().await;
+        let (mut daemon, mut mobile, dpub) = established_pair().await;
         let challenge = [9u8; device::CHALLENGE_LEN];
         let encoded = {
             use base64::Engine as _;
@@ -1961,12 +2005,19 @@ mod tests {
         daemon.send(event.as_bytes()).await.unwrap();
         let key = DeviceKey::from_seed([7; 32]);
         let timing = Timing::default();
-        let (dpub, mpub) = (dkp.public(), mkp.public());
         let no_password = PasswordCell::default();
         let (res, got) = tokio::join!(
-            identify_device(&mut mobile, &key, "laptop", &dpub, &mpub, "sess-1", &timing, &no_password),
+            identify_device(
+                &mut mobile,
+                &key,
+                "laptop",
+                &dpub,
+                "sess-1",
+                &timing,
+                &no_password
+            ),
             async {
-                let msg = daemon.receive().await.unwrap();
+                let msg = daemon.receive().await;
                 let v: serde_json::Value = serde_json::from_slice(&msg).unwrap();
                 let reply = serde_json::json!({"id": v["id"], "result": {"v": 2, "device_id": key.device_id(), "state": "approved"}})
                     .to_string();
@@ -1977,7 +2028,13 @@ mod tests {
         res.unwrap();
         assert_eq!(got["method"], "relay.device_hello");
         assert_eq!(got["params"]["v"], 2);
-        let expect = key.hello("laptop", &dkp.public(), &mkp.public(), "sess-1", &challenge);
+        let expect = key.hello(
+            "laptop",
+            &dpub,
+            &mobile.transcript_hash().unwrap(),
+            "sess-1",
+            &challenge,
+        );
         assert_eq!(got["params"], serde_json::to_value(&expect).unwrap());
     }
 
@@ -1985,7 +2042,7 @@ mod tests {
     /// there), and nothing else about the request changes.
     #[tokio::test(start_paused = true)]
     async fn the_hello_carries_the_password_when_the_user_entered_one() {
-        let (mut daemon, mut mobile, dkp, mkp) = established_pair().await;
+        let (mut daemon, mut mobile, dpub) = established_pair().await;
         let challenge = [9u8; device::CHALLENGE_LEN];
         let encoded = {
             use base64::Engine as _;
@@ -1997,13 +2054,20 @@ mod tests {
         daemon.send(event.as_bytes()).await.unwrap();
         let key = DeviceKey::from_seed([7; 32]);
         let timing = Timing::default();
-        let (dpub, mpub) = (dkp.public(), mkp.public());
         let password = PasswordCell::default();
         password.set("a-long-daemon-password".into());
         let (res, got) = tokio::join!(
-            identify_device(&mut mobile, &key, "laptop", &dpub, &mpub, "sess-1", &timing, &password),
+            identify_device(
+                &mut mobile,
+                &key,
+                "laptop",
+                &dpub,
+                "sess-1",
+                &timing,
+                &password
+            ),
             async {
-                let msg = daemon.receive().await.unwrap();
+                let msg = daemon.receive().await;
                 let v: serde_json::Value = serde_json::from_slice(&msg).unwrap();
                 let reply = serde_json::json!({"id": v["id"], "error": {"message": "wrong", "code": "incorrect_password"}})
                     .to_string();
@@ -2016,7 +2080,13 @@ mod tests {
             other => panic!("expected a password refusal, got {other:?}"),
         }
         assert_eq!(got["params"]["password"], "a-long-daemon-password");
-        let expect = key.hello("laptop", &dkp.public(), &mkp.public(), "sess-1", &challenge);
+        let expect = key.hello(
+            "laptop",
+            &dpub,
+            &mobile.transcript_hash().unwrap(),
+            "sess-1",
+            &challenge,
+        );
         let mut params = got["params"].clone();
         params.as_object_mut().unwrap().remove("password");
         assert_eq!(params, serde_json::to_value(&expect).unwrap(), "the signed hello is unchanged");
@@ -2053,6 +2123,44 @@ mod tests {
         assert_eq!(Status::PasswordLocked { retry_after_secs: 8 }.state_name(), "passwordLocked");
     }
 
+    // --- E2EE version errors (ADR-0035 §6) ---------------------------------
+
+    #[test]
+    fn an_e2ee_version_mismatch_is_terminal_and_never_a_retry() {
+        let older = classify_handshake_error(ChannelError::UnsupportedVersion { peer: 1 });
+        assert!(
+            matches!(older, Failure::E2eeVersion { peer: 1 }),
+            "{older:?}"
+        );
+        let newer = classify_handshake_error(ChannelError::UnsupportedVersion { peer: 3 });
+        assert!(
+            matches!(newer, Failure::E2eeVersion { peer: 3 }),
+            "{newer:?}"
+        );
+        // Other handshake trouble (including a bad key confirmation) still retries.
+        for e in [
+            ChannelError::HandshakeConfirm,
+            ChannelError::PinMismatch,
+            ChannelError::Closed,
+        ] {
+            assert!(matches!(classify_handshake_error(e), Failure::Retry(_)));
+        }
+        let revoked = tonic::Status::permission_denied("relay: device revoked");
+        let denied =
+            classify_handshake_error(ChannelError::Transport(DataTransportError::Status(revoked)));
+        assert!(matches!(denied, Failure::RelayDenied(_)), "{denied:?}");
+    }
+
+    #[test]
+    fn e2ee_version_refusals_say_which_end_to_update() {
+        let (code, message) = e2ee_version_refusal(1);
+        assert_eq!(code, "daemon_outdated");
+        assert!(message.contains("update the daemon"), "{message}");
+        let (code, message) = e2ee_version_refusal(3);
+        assert_eq!(code, "app_outdated");
+        assert!(message.contains("update this app"), "{message}");
+    }
+
     // --- ModeMachine -----------------------------------------------------
 
     #[test]
@@ -2082,7 +2190,7 @@ mod tests {
     #[test]
     fn the_single_device_route_is_kept_only_while_it_has_proven_to_work() {
         let mut m = ModeMachine::new(true);
-        m.identity_unanswered(); // an old daemon: nobody answers on the identity route
+        m.identity_unsupported(); // a daemon that tracks no devices
         assert_eq!(m.mode(), RouteMode::Legacy);
         m.served(); // the single-device route works
         assert_eq!(m.legacy_unserved(), None, "a proven route is kept across a blip");
@@ -2091,7 +2199,7 @@ mod tests {
         // A daemon outage must not leave the client on the single-device route
         // for good: an unproven legacy session that fails goes back to identity.
         let mut m = ModeMachine::new(true);
-        m.identity_unanswered();
+        m.identity_unsupported();
         assert_eq!(m.legacy_unserved(), Some(Transition::Flipped(RouteMode::Identity)));
         assert_eq!(m.mode(), RouteMode::Identity);
     }

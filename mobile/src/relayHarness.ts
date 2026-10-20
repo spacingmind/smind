@@ -1,36 +1,12 @@
-// relayHarness.ts is the in-memory E2EE pipe (two handshaked Channels
-// back-to-back) the RelayConnection unit tests and attachLifecycle.test.ts
+// relayHarness.ts is the in-memory E2EE pipe (the client Channel and the test-only v2
+// responder, handshaked back-to-back) the RelayConnection unit tests and attachLifecycle.test.ts
 // use -- shared here so Milestone 3's follow-up tests can script a
 // realistic fake daemon (respond to RPCs, emit request-scoped events)
 // against a real RelayConnection without any network.
 
-import { Channel, generateKeyPair, RawTransport, Role } from './relay/e2ee';
+import { Channel } from './relay/e2ee';
+import { daemonKeysFrom, FakeV2Daemon, memPipe } from './relay/__tests__/fakeV2Daemon';
 import { RelayConnection } from './relay/RelayConnection';
-
-function pipe(): [RawTransport, RawTransport] {
-  const queueA: Uint8Array[] = [];
-  const queueB: Uint8Array[] = [];
-  const waitersA: Array<(v: Uint8Array) => void> = [];
-  const waitersB: Array<(v: Uint8Array) => void> = [];
-  function makeSide(
-    sendQueue: Uint8Array[], sendWaiters: Array<(v: Uint8Array) => void>,
-    recvQueue: Uint8Array[], recvWaiters: Array<(v: Uint8Array) => void>,
-  ): RawTransport {
-    return {
-      send(bytes: Uint8Array) {
-        const waiter = sendWaiters.shift();
-        if (waiter) waiter(bytes);
-        else sendQueue.push(bytes);
-      },
-      receiveChunk(): Promise<Uint8Array> {
-        const chunk = recvQueue.shift();
-        if (chunk) return Promise.resolve(chunk);
-        return new Promise((resolve) => recvWaiters.push(resolve));
-      },
-    };
-  }
-  return [makeSide(queueA, waitersA, queueB, waitersB), makeSide(queueB, waitersB, queueA, waitersA)];
-}
 
 export interface WireRequest {
   id?: string;
@@ -44,11 +20,11 @@ export interface WireRequest {
  * events (run.attach's streamed chunks) or resolve a call outright.
  */
 export class FakeDaemon {
-  readonly channel: Channel;
+  readonly channel: FakeV2Daemon;
   private requests: WireRequest[] = [];
 
-  constructor(transport: RawTransport, kp = generateKeyPair()) {
-    this.channel = new Channel(transport, kp, Role.Daemon);
+  constructor(channel: FakeV2Daemon) {
+    this.channel = channel;
   }
 
   async start() {
@@ -93,11 +69,11 @@ export class FakeDaemon {
 
 /** One admitted (fake) relay session: a RelayConnection paired to a FakeDaemon. */
 export async function makeRelayHarness(): Promise<{ conn: RelayConnection; daemon: FakeDaemon }> {
-  const [daemonTransport, mobileTransport] = pipe();
-  const daemonKeyPair = generateKeyPair();
-  const daemon = new FakeDaemon(daemonTransport, daemonKeyPair);
+  const [daemonTransport, mobileTransport] = memPipe();
+  const daemonKeyPair = daemonKeysFrom();
+  const daemon = new FakeDaemon(new FakeV2Daemon(daemonTransport, daemonKeyPair));
   const daemonReady = daemon.start();
-  const mobileChannel = new Channel(mobileTransport, generateKeyPair(), Role.Mobile);
+  const mobileChannel = new Channel(mobileTransport);
   await mobileChannel.handshake(daemonKeyPair.publicKey);
   await daemonReady;
   const conn = new RelayConnection(
