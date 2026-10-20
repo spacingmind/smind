@@ -294,6 +294,48 @@ func (s *Service) rejectedExamples(workspaceID int64) []reflector.RejectedExampl
 	return out
 }
 
+// repairable is the set of gate reasons that describe a structurally fixable
+// formatting error: a retry that shows the model these findings can plausibly
+// fix them. Provenance, guard, secret, path/host, hidden-text, similarity and
+// patch-target rejections are never retried.
+var repairable = map[gate.Reason]bool{
+	gate.ReasonBadName:        true,
+	gate.ReasonBodyTooLong:    true,
+	gate.ReasonBadDescription: true,
+	gate.ReasonBadCategory:    true,
+	gate.ReasonBadFrontmatter: true,
+	gate.ReasonURLLink:        true,
+	gate.ReasonBadReason:      true,
+}
+
+// retryItems returns the verdicts that were rejected only for repairable
+// reasons, as retry prompt items. An accepted verdict or one carrying any
+// non-repairable finding does not qualify.
+func retryItems(verdicts []verdict) []reflector.RetryItem {
+	var items []reflector.RetryItem
+	for _, v := range verdicts {
+		if v.Accepted || len(v.Findings) == 0 {
+			continue
+		}
+		ok := true
+		for _, f := range v.Findings {
+			if !repairable[gate.Reason(f.Reason)] {
+				ok = false
+				break
+			}
+		}
+		if !ok {
+			continue
+		}
+		item := reflector.RetryItem{Name: v.Name}
+		for _, f := range v.Findings {
+			item.Findings = append(item.Findings, reflector.RetryFinding{Reason: f.Reason, Detail: f.Detail})
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
 // gateAndStore gates every intent independently and stores the accepted ones
 // as pending proposals. It returns every intent's verdict (rejections carry
 // their findings, clipped) and how many proposals were created.

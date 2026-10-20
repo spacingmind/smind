@@ -566,3 +566,51 @@ func TestReflect_UnboundChatFallsBackToRunProvider(t *testing.T) {
 		t.Fatalf("job = %+v, exec calls %d", job, f.exec.count())
 	}
 }
+
+func TestReflectRetry_RepairableSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		verdict verdict
+		want    bool
+	}{
+		{"bad_description", verdict{Name: "a", Findings: []verdictFinder{{Reason: "bad_description"}}}, true},
+		{"bad_name", verdict{Name: "a", Findings: []verdictFinder{{Reason: "bad_name"}}}, true},
+		{"body_too_long", verdict{Name: "a", Findings: []verdictFinder{{Reason: "body_too_long"}}}, true},
+		{"bad_category", verdict{Name: "a", Findings: []verdictFinder{{Reason: "bad_category"}}}, true},
+		{"bad_frontmatter", verdict{Name: "a", Findings: []verdictFinder{{Reason: "bad_frontmatter"}}}, true},
+		{"url_link", verdict{Name: "a", Findings: []verdictFinder{{Reason: "url_link"}}}, true},
+		{"bad_reason", verdict{Name: "a", Findings: []verdictFinder{{Reason: "bad_reason"}}}, true},
+		{"all repairable", verdict{Name: "a", Findings: []verdictFinder{{Reason: "bad_name"}, {Reason: "bad_description"}}}, true},
+		{"no findings", verdict{Name: "a"}, false},
+		{"accepted", verdict{Name: "a", Accepted: true, Findings: []verdictFinder{{Reason: "bad_description"}}}, false},
+		{"no_provenance", verdict{Name: "a", Findings: []verdictFinder{{Reason: "no_provenance"}}}, false},
+		{"bad_evidence", verdict{Name: "a", Findings: []verdictFinder{{Reason: "bad_evidence"}}}, false},
+		{"evidence_not_verbatim", verdict{Name: "a", Findings: []verdictFinder{{Reason: "evidence_not_verbatim"}}}, false},
+		{"ungrounded_content", verdict{Name: "a", Findings: []verdictFinder{{Reason: "ungrounded_content"}}}, false},
+		{"guard", verdict{Name: "a", Findings: []verdictFinder{{Reason: "guard"}}}, false},
+		{"secret_hit", verdict{Name: "a", Findings: []verdictFinder{{Reason: "secret_hit"}}}, false},
+		{"abs_path", verdict{Name: "a", Findings: []verdictFinder{{Reason: "abs_path"}}}, false},
+		{"host_name", verdict{Name: "a", Findings: []verdictFinder{{Reason: "host_name"}}}, false},
+		{"hidden_text", verdict{Name: "a", Findings: []verdictFinder{{Reason: "hidden_text"}}}, false},
+		{"duplicate", verdict{Name: "a", Findings: []verdictFinder{{Reason: "duplicate"}}}, false},
+		{"name_collision", verdict{Name: "a", Findings: []verdictFinder{{Reason: "name_collision"}}}, false},
+		{"ambiguous_patch", verdict{Name: "a", Findings: []verdictFinder{{Reason: "ambiguous_patch"}}}, false},
+		{"noop_patch", verdict{Name: "a", Findings: []verdictFinder{{Reason: "noop_patch"}}}, false},
+		{"patch_target_missing", verdict{Name: "a", Findings: []verdictFinder{{Reason: "patch_target_missing"}}}, false},
+		{"bad_action", verdict{Name: "a", Findings: []verdictFinder{{Reason: "bad_action"}}}, false},
+		{"repairable plus provenance", verdict{Name: "a", Findings: []verdictFinder{{Reason: "bad_description"}, {Reason: "no_provenance"}}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := retryItems([]verdict{tc.verdict})
+			if tc.want && (len(got) != 1 || got[0].Name != "a" || len(got[0].Findings) != len(tc.verdict.Findings)) {
+				t.Fatalf("got %+v, want one item", got)
+			}
+			if !tc.want && len(got) != 0 {
+				t.Fatalf("got %+v, want none", got)
+			}
+		})
+	}
+	if got := retryItems(nil); len(got) != 0 {
+		t.Fatalf("nil verdicts -> %+v", got)
+	}
+}
