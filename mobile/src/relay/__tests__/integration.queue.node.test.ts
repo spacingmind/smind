@@ -16,7 +16,6 @@ import { defaultChatId, listRunsForTask, startRunWhenBusy } from '../../api';
 import { RunFollower, RunStatusEvent } from '../../runFollower';
 import { RelayConnection } from '../RelayConnection';
 import { buildFakeAgent, DevHarness, requireSelfSignedHarnessTrust, testConnectOptions } from './devHarness';
-import { E2EE_V2_PENDING } from './e2eeV2Gate';
 
 let harness: DevHarness;
 let fakeAgent: { path: string; cleanup(): void };
@@ -52,7 +51,7 @@ afterAll(() => {
   fakeAgent?.cleanup();
 });
 
-describe.skip(`${E2EE_V2_PENDING}: the daemon prompt queue on mobile, against a real daemon and a long-running fake agent`, () => {
+describe(`the daemon prompt queue on mobile, against a real daemon and a long-running fake agent`, () => {
   it('an idle chat starts the run at once under whenBusy queue', { timeout: 60_000 }, async () => {
     const conn = await connect();
     const seeded = await harness.seedRun('end_turn', 'Idle task');

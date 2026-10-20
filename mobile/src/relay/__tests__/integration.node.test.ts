@@ -34,7 +34,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { connectAndFetchWorkspaceList } from '../client';
 import { DevHarness, requireSelfSignedHarnessTrust, testConnectOptions } from './devHarness';
-import { E2EE_V2_PENDING } from './e2eeV2Gate';
 
 let harness: DevHarness;
 
@@ -48,7 +47,7 @@ afterAll(() => {
   harness?.stop();
 });
 
-describe.skip(`${E2EE_V2_PENDING}: end-to-end against a real Go relay + daemon bridge`, () => {
+describe(`end-to-end against a real Go relay + daemon bridge`, () => {
   it('completes admission, E2EE handshake, device_hello and one workspace.list round trip', async () => {
     const result = await connectAndFetchWorkspaceList(harness.pairingUrl, testConnectOptions(1));
     expect(result.workspaceListJSON).toBeTruthy();
