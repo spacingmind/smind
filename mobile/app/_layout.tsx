@@ -6,6 +6,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ConnectionProvider, useConnection } from '../src/connection/ConnectionProvider';
 import { routeGate } from '../src/navigation/gate';
+import { taskHeaderTitle } from '../src/navigation/routes';
 import { AppThemeProvider, useAppTheme } from '../src/theme/ThemeProvider';
 
 function RootStack() {
@@ -34,7 +35,7 @@ function RootStack() {
         </Stack.Protected>
         <Stack.Protected guard={gate === 'app'}>
           <Stack.Screen name="index" options={{ title: 'Tasks' }} />
-          <Stack.Screen name="task/[id]" options={{ title: 'Task' }} />
+          <Stack.Screen name="task/[id]" options={({ route }) => ({ title: taskHeaderTitle(route.params as { id?: string; title?: string } | undefined) })} />
         </Stack.Protected>
       </Stack>
     </>

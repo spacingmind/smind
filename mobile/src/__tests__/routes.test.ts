@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseTaskParams, taskHref } from '../navigation/routes';
+import { parseTaskParams, taskHeaderTitle, taskHref } from '../navigation/routes';
 
 describe('taskHref', () => {
   it('stringifies the id and carries the title', () => {
@@ -34,5 +34,16 @@ describe('parseTaskParams', () => {
   });
   it('takes the first element of array params', () => {
     expect(parseTaskParams({ id: ['5', '6'], title: ['A', 'B'] })).toEqual({ ok: true, id: 5, title: 'A' });
+  });
+});
+
+describe('taskHeaderTitle', () => {
+  it('is the task title straight from the params', () => {
+    expect(taskHeaderTitle({ id: '12', title: 'Fix' })).toBe('Fix');
+  });
+  it('falls back to "Task <id>" without a title and to "Task" for bad params', () => {
+    expect(taskHeaderTitle({ id: '12' })).toBe('Task 12');
+    expect(taskHeaderTitle({ id: 'abc' })).toBe('Task');
+    expect(taskHeaderTitle(undefined)).toBe('Task');
   });
 });

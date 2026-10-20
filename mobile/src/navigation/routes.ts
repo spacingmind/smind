@@ -22,3 +22,12 @@ export function parseTaskParams(params: { id?: Param; title?: Param }): { ok: tr
   const title = first(params.title);
   return { ok: true, id, title: title ? title : `Task ${id}` };
 }
+
+/**
+ * The task screen's header title straight from the route params, so the header is right on the first
+ * frame of the push (a screen-level `Stack.Screen` only applies after the screen has rendered).
+ */
+export function taskHeaderTitle(params: { id?: Param; title?: Param } | undefined): string {
+  const parsed = parseTaskParams(params ?? {});
+  return parsed.ok ? parsed.title : 'Task';
+}

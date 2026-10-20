@@ -129,7 +129,8 @@ describe('relay sources use only the explicit CSPRNG', () => {
   };
   walk(srcRoot);
   walk(join(srcRoot, '..', 'scripts'));
-  files.push(join(srcRoot, '..', 'App.tsx'), join(srcRoot, '..', 'index.ts'));
+  walk(join(srcRoot, '..', 'app')); // the Expo Router routes (ADR-0036) replaced App.tsx
+  files.push(join(srcRoot, '..', 'index.ts'));
 
   // Comments may name the things this guard forbids; only code counts.
   const code = (f: string) => readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
