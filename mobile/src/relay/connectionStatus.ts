@@ -4,6 +4,7 @@
 // about it. The pending copy names the exact daemon command, since approval
 // happens on the computer running smind (ADR-0031 D9).
 
+import { PROTOCOL_VERSION as E2EE_VERSION } from './e2ee';
 import { ConnectionState } from './RelayConnection';
 
 export type StatusTone = 'info' | 'warning' | 'danger';
@@ -33,6 +34,12 @@ export function describeState(state: ConnectionState): StatusView | null {
         detail: 'The daemon no longer accepts this device. Reset its identity to ask for approval again as a new device.',
       };
     case 'failed':
+      if (state.e2eePeerVersion !== undefined) {
+        // The daemon's end-to-end encryption protocol is not this app's (ADR-0035): nothing else is tried.
+        return state.e2eePeerVersion < E2EE_VERSION
+          ? { tone: 'danger', title: 'Daemon is too old for this app', detail: state.message, command: 'smind update' }
+          : { tone: 'danger', title: 'This app is too old for the daemon', detail: state.message };
+      }
       if (state.versionMismatch) {
         return { tone: 'danger', title: 'Daemon outdated or on a different version', detail: state.message, command: 'smind update' };
       }

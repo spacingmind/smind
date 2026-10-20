@@ -8,37 +8,9 @@
 // event dispatch.
 
 import { describe, expect, it, vi } from 'vitest';
-import { Channel, generateKeyPair, RawTransport, Role } from '../e2ee';
+import { Channel } from '../e2ee';
 import { CallOptions, RelayConnection, RelayEvent } from '../RelayConnection';
-
-function pipe(): [RawTransport, RawTransport] {
-  const queueA: Uint8Array[] = [];
-  const queueB: Uint8Array[] = [];
-  const waitersA: Array<(v: Uint8Array) => void> = [];
-  const waitersB: Array<(v: Uint8Array) => void> = [];
-
-  function makeSide(
-    sendQueue: Uint8Array[],
-    sendWaiters: Array<(v: Uint8Array) => void>,
-    recvQueue: Uint8Array[],
-    recvWaiters: Array<(v: Uint8Array) => void>,
-  ): RawTransport {
-    return {
-      send(bytes: Uint8Array) {
-        const waiter = sendWaiters.shift();
-        if (waiter) waiter(bytes);
-        else sendQueue.push(bytes);
-      },
-      receiveChunk(): Promise<Uint8Array> {
-        const chunk = recvQueue.shift();
-        if (chunk) return Promise.resolve(chunk);
-        return new Promise((resolve) => recvWaiters.push(resolve));
-      },
-    };
-  }
-
-  return [makeSide(queueA, waitersA, queueB, waitersB), makeSide(queueB, waitersB, queueA, waitersA)];
-}
+import { DaemonKeys, daemonKeysFrom, FakeV2Daemon, memPipe } from './fakeV2Daemon';
 
 interface WireRequest {
   id?: string;
@@ -48,11 +20,11 @@ interface WireRequest {
 
 /** Minimal fake wsapi daemon peer: handshake, then echo/dispatch per request. */
 class FakeDaemon {
-  readonly channel: Channel;
+  readonly channel: FakeV2Daemon;
   private requests: WireRequest[] = [];
 
-  constructor(transport: RawTransport, daemonKeyPair = generateKeyPair()) {
-    this.channel = new Channel(transport, daemonKeyPair, Role.Daemon);
+  constructor(channel: FakeV2Daemon) {
+    this.channel = channel;
   }
 
   async start() {
@@ -104,16 +76,15 @@ class FakeDaemon {
 
 /** A connected RelayConnection<->FakeDaemon pair. */
 async function makePair(): Promise<{ conn: RelayConnection; daemon: FakeDaemon }> {
-  const [daemonTransport, mobileTransport] = pipe();
-  const daemonKeyPair = generateKeyPair();
-  const daemon = new FakeDaemon(daemonTransport, daemonKeyPair);
+  const [daemonTransport, mobileTransport] = memPipe();
+  const daemonKeyPair: DaemonKeys = daemonKeysFrom();
+  const daemon = new FakeDaemon(new FakeV2Daemon(daemonTransport, daemonKeyPair));
   // Not awaited to completion on its own: the daemon's handshake can only
   // finish once the mobile side (created below) participates, so start it
   // concurrently like Channel's own tests do.
   const daemonReady = daemon.start();
 
-  const mobileKeyPair = generateKeyPair();
-  const mobileChannel = new Channel(mobileTransport, mobileKeyPair, Role.Mobile);
+  const mobileChannel = new Channel(mobileTransport);
   await mobileChannel.handshake(daemonKeyPair.publicKey);
   await daemonReady;
 

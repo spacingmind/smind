@@ -220,6 +220,7 @@ function refusalHeadline(code: string | undefined): string {
     case "device_key_unavailable":
       return "This device's key cannot be read.";
     case "daemon_outdated":
+    case "app_outdated":
     case "hello_version_unsupported":
       return "This daemon and this app are on different versions.";
     case "device_hello_unsupported":

@@ -31,7 +31,6 @@ import { join } from 'path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RelayConnection } from '../RelayConnection';
 import { DevHarness, requireSelfSignedHarnessTrust, testConnectOptions } from './devHarness';
-import { E2EE_V2_PENDING } from './e2eeV2Gate';
 
 let harness: DevHarness;
 let wsDir: string;
@@ -57,7 +56,7 @@ afterAll(() => {
   if (wsDir) rmSync(wsDir, { recursive: true, force: true });
 });
 
-describe.skip(`${E2EE_V2_PENDING}: persistent connection against a real Go relay + daemon bridge`, () => {
+describe(`persistent connection against a real Go relay + daemon bridge`, () => {
   it(
     'sustains multiple sequential calls and a pushed eventNotification over one connection',
     { timeout: 30_000 },

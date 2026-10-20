@@ -10,7 +10,6 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { describe, expect, it } from 'vitest';
-import { E2EE_V2_PENDING } from './e2eeV2Gate';
 import { base64Decode, base64Encode } from '../base64';
 import {
   buildDeviceHello,
@@ -24,6 +23,7 @@ import {
   parseChallengeMessage,
   sanitizeLabel,
 } from '../deviceIdentity';
+import { transcriptHash } from '../e2ee';
 import { secureStoreDeviceKeyStore, SecureStoreLike } from '../deviceKeyStore';
 
 interface Hello {
@@ -39,7 +39,9 @@ interface Vector {
   device_pub_hex: string;
   device_id: string;
   daemon_pub_hex: string;
+  daemon_eph_pub_hex: string;
   mobile_pub_hex: string;
+  transcript_hash_hex: string;
   session_id: string;
   challenge_hex: string;
   challenge_message: { event: string; params: { v: number; challenge: string } };
@@ -71,7 +73,9 @@ const utf8 = (s: string) => new TextEncoder().encode(s);
 describe('device_hello v2 cross-language vector', () => {
   const identity = identityFromSeed(fromHex(vector.seed_hex));
   const daemonPub = fromHex(vector.daemon_pub_hex);
+  const daemonEphPub = fromHex(vector.daemon_eph_pub_hex);
   const mobilePub = fromHex(vector.mobile_pub_hex);
+  const th = fromHex(vector.transcript_hash_hex);
   const sessionId = utf8(vector.session_id);
   const challenge = fromHex(vector.challenge_hex);
 
@@ -93,12 +97,13 @@ describe('device_hello v2 cross-language vector', () => {
     expect(base64Encode(challenge)).toBe(vector.challenge_message.params.challenge);
   });
 
-  it.skip(`${E2EE_V2_PENDING}: builds the vector signed bytes`, () => {
-    expect(hex(helloSignedBytes(daemonPub, mobilePub, sessionId, challenge))).toBe(vector.signed_bytes_hex);
+  it('the vector transcript hash is what the E2EE v2 client computes for the vector keys, and the signed bytes use it', () => {
+    expect(hex(transcriptHash(daemonPub, daemonEphPub, mobilePub))).toBe(vector.transcript_hash_hex);
+    expect(hex(helloSignedBytes(th, daemonPub, sessionId, challenge))).toBe(vector.signed_bytes_hex);
   });
 
-  it.skip(`${E2EE_V2_PENDING}: device_hello v2 signature verifies against the Go vector (and matches it byte for byte)`, () => {
-    const hello = buildDeviceHello(identity, vector.label, daemonPub, mobilePub, sessionId, challenge);
+  it('device_hello v2 signature verifies against the Go vector (and matches it byte for byte)', () => {
+    const hello = buildDeviceHello(identity, vector.label, th, daemonPub, sessionId, challenge);
     expect(hello).toEqual(vector.hello);
     expect(hello.v).toBe(2);
     // Ed25519 is deterministic, so the signature is the Go one...
@@ -107,12 +112,22 @@ describe('device_hello v2 cross-language vector', () => {
     expect(ed25519.verify(fromHex(vector.signature_hex), fromHex(vector.signed_bytes_hex), identity.publicKey)).toBe(true);
   });
 
-  it.skip(`${E2EE_V2_PENDING}: has four negatives, each with its own signed bytes and a signature that does not verify against the real bytes`, () => {
-    expect(vector.negative.map((n) => n.name)).toEqual(['other_daemon_pub', 'other_mobile_pub', 'other_session_id', 'other_challenge']);
-    const real = helloSignedBytes(daemonPub, mobilePub, sessionId, challenge);
+  it('has five negatives, each rebuilt from one changed input here and with a signature that does not verify against the real bytes', () => {
+    expect(vector.negative.map((n) => n.name)).toEqual(['other_daemon_pub', 'other_mobile_pub', 'other_daemon_eph', 'other_session_id', 'other_challenge']);
+    // The Go generator's alternatives: fixedBytes(0x20), (0x70), (0x90) are 32 ascending bytes from that start.
+    const run = (start: number) => Uint8Array.from({ length: 32 }, (_, i) => start + i);
+    const rebuilt: Record<string, Uint8Array> = {
+      other_daemon_pub: helloSignedBytes(transcriptHash(run(0x20), daemonEphPub, mobilePub), run(0x20), sessionId, challenge),
+      other_mobile_pub: helloSignedBytes(transcriptHash(daemonPub, daemonEphPub, run(0x90)), daemonPub, sessionId, challenge),
+      other_daemon_eph: helloSignedBytes(transcriptHash(daemonPub, run(0x70), mobilePub), daemonPub, sessionId, challenge),
+      other_session_id: helloSignedBytes(th, daemonPub, utf8('sess-another-route'), challenge),
+      other_challenge: helloSignedBytes(th, daemonPub, sessionId, run(0xc1)),
+    };
+    const real = helloSignedBytes(th, daemonPub, sessionId, challenge);
     for (const n of vector.negative) {
       expect(n.error).toBe('bad_signature');
       expect(n.signed_bytes_hex, n.name).not.toBe(vector.signed_bytes_hex);
+      expect(hex(rebuilt[n.name]), n.name).toBe(n.signed_bytes_hex);
       const sig = base64Decode(n.hello.signature);
       // It IS a valid signature over its own bytes (the file is honest about what was signed)...
       expect(ed25519.verify(sig, fromHex(n.signed_bytes_hex), identity.publicKey), n.name).toBe(true);
@@ -121,27 +136,20 @@ describe('device_hello v2 cross-language vector', () => {
     }
   });
 
-  it.skip(`${E2EE_V2_PENDING}: what this client signs changes with each of daemon key, mobile key, session id and challenge`, () => {
-    const base = hex(helloSignedBytes(daemonPub, mobilePub, sessionId, challenge));
+  it('what this client signs changes with each of th, daemon key, session id and challenge', () => {
+    const base = hex(helloSignedBytes(th, daemonPub, sessionId, challenge));
     const other = (b: Uint8Array) => new Uint8Array(b.map((x) => x ^ 1));
-    expect(hex(helloSignedBytes(other(daemonPub), mobilePub, sessionId, challenge))).not.toBe(base);
-    expect(hex(helloSignedBytes(daemonPub, other(mobilePub), sessionId, challenge))).not.toBe(base);
-    expect(hex(helloSignedBytes(daemonPub, mobilePub, utf8('sess-another-route'), challenge))).not.toBe(base);
-    expect(hex(helloSignedBytes(daemonPub, mobilePub, sessionId, other(challenge)))).not.toBe(base);
-    // and the negatives' bytes are exactly those variants
-    // and the vector's negatives are exactly those variants (where the file carries enough to rebuild them)
-    const byName = Object.fromEntries(vector.negative.map((n) => [n.name, n.signed_bytes_hex]));
-    expect(hex(helloSignedBytes(daemonPub, mobilePub, utf8('sess-another-route'), challenge))).toBe(byName.other_session_id);
-    expect(hex(helloSignedBytes(daemonPub, mobilePub, sessionId, new Uint8Array(challenge.map((x) => x + 1))))).toBe(byName.other_challenge);
-    expect(hex(helloSignedBytes(fromHex('202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f'), mobilePub, sessionId, challenge))).toBe(
-      byName.other_daemon_pub,
-    );
-    for (const n of vector.negative) expect(vector.signed_bytes_hex).not.toBe(n.signed_bytes_hex);
+    expect(hex(helloSignedBytes(other(th), daemonPub, sessionId, challenge))).not.toBe(base);
+    expect(hex(helloSignedBytes(th, other(daemonPub), sessionId, challenge))).not.toBe(base);
+    expect(hex(helloSignedBytes(th, daemonPub, utf8('sess-another-route'), challenge))).not.toBe(base);
+    expect(hex(helloSignedBytes(th, daemonPub, sessionId, other(challenge)))).not.toBe(base);
   });
 
-  it('refuses to sign without a 32-byte challenge or with an oversized session id', () => {
-    expect(() => helloSignedBytes(daemonPub, mobilePub, sessionId, new Uint8Array(31))).toThrow('challenge');
-    expect(() => helloSignedBytes(daemonPub, mobilePub, new Uint8Array(129), challenge)).toThrow('session id');
+  it('refuses to sign without a 32-byte transcript hash or challenge, or with an oversized session id', () => {
+    expect(() => helloSignedBytes(th.slice(0, 31), daemonPub, sessionId, challenge)).toThrow('transcript hash');
+    expect(() => helloSignedBytes(new Uint8Array(33), daemonPub, sessionId, challenge)).toThrow('transcript hash');
+    expect(() => helloSignedBytes(th, daemonPub, sessionId, new Uint8Array(31))).toThrow('challenge');
+    expect(() => helloSignedBytes(th, daemonPub, new Uint8Array(129), challenge)).toThrow('session id');
   });
 });
 
