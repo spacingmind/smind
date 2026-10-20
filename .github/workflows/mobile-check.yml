@@ -5,12 +5,12 @@ name: mobile-check
 # devharness) from node. Nothing here needs Expo, a simulator or a secret.
 # The Go relay is under test too (the client speaks E2EE v2 to it, ADR-0035),
 # so a change under internal/relay/ runs these as well.
+#
+# The check is required on develop, so it runs on every PR and reports
+# success straight away when nothing under the paths below changed (a
+# path-filtered required check would leave unrelated PRs waiting forever).
 on:
   pull_request:
-    paths:
-      - "mobile/**"
-      - "internal/relay/**"
-      - ".github/workflows/mobile-check.yml"
   workflow_dispatch:
 
 permissions:
@@ -30,24 +30,50 @@ jobs:
         working-directory: mobile
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Detect mobile or relay changes
+        id: changes
+        working-directory: .
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "origin/$BASE_REF...HEAD" |
+            grep -qE '^(mobile/|internal/relay/|\.github/workflows/mobile-check\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "No mobile/ or internal/relay/ changes; nothing to check."
+          fi
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.changes.outputs.relevant == 'true'
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: mobile/package-lock.json
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        if: steps.changes.outputs.relevant == 'true'
         with:
           go-version-file: go.mod
 
       - name: npm ci
+        if: steps.changes.outputs.relevant == 'true'
         run: npm ci
 
       - name: Typecheck
+        if: steps.changes.outputs.relevant == 'true'
         run: npm run typecheck
 
       - name: Unit tests
+        if: steps.changes.outputs.relevant == 'true'
         run: npm test
 
       # The integration tests build and start the devharness themselves and give
@@ -56,6 +82,7 @@ jobs:
       # desktop-check does for the relay harness). The build is discarded: only
       # the Go build cache matters.
       - name: Warm the Go build cache for the relay devharness
+        if: steps.changes.outputs.relevant == 'true'
         working-directory: .
         run: go build -o "$RUNNER_TEMP/devharness" ./internal/relay/bridge/devharness
 
@@ -63,4 +90,5 @@ jobs:
       # serves a self-signed certificate) and SMIND_REQUIRE_PASSWORD_HARNESS=1 so a
       # harness without -password fails the run instead of skipping the password suite.
       - name: Integration tests (live Go devharness)
+        if: steps.changes.outputs.relevant == 'true'
         run: npm run test:integration
