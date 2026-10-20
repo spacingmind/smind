@@ -35,5 +35,8 @@
     "smoke:web": "node scripts/smoke-web.mjs",
     "smoke:web:full": "node scripts/smoke-web.mjs --full"
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "shell-quote": "^1.11.0"
+  }
 }
