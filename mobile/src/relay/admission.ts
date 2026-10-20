@@ -6,6 +6,7 @@
 
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { randomBytes } from './random';
 
 /** Admission protocol version; v1 (HMAC keyed by the relay's stored hash) is rejected by the relay. */
 export const PROTOCOL_VERSION = 2;
@@ -81,7 +82,5 @@ export function computeProof(secret: Uint8Array, t: AdmitTranscript): Uint8Array
 
 /** A fresh random client nonce, NONCE_SIZE bytes. */
 export function randomNonce(): Uint8Array {
-  const nonce = new Uint8Array(NONCE_SIZE);
-  crypto.getRandomValues(nonce);
-  return nonce;
+  return randomBytes(NONCE_SIZE);
 }

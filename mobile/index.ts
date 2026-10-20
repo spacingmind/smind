@@ -1,3 +1,6 @@
+// First, before anything can ask for a key or a nonce: installs the native CSPRNG (see src/relay/random.ts).
+import './src/relay/platformRandom';
+
 import { registerRootComponent } from 'expo';
 
 import App from './App';

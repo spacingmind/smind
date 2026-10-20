@@ -20,6 +20,7 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { base64Decode, base64Encode } from './base64';
+import { randomBytes } from './random';
 
 /** Method name of the first application message (devices.HelloMethod). */
 export const HELLO_METHOD = 'relay.device_hello';
@@ -184,7 +185,7 @@ export class MemoryDeviceKeyStore implements DeviceKeyStore {
 export async function loadOrCreateIdentity(store: DeviceKeyStore): Promise<DeviceIdentity> {
   const stored = await store.load();
   if (stored && stored.length === SEED_LEN) return identityFromSeed(stored);
-  const seed = ed25519.utils.randomSecretKey();
+  const seed = randomBytes(SEED_LEN);
   await store.save(seed);
   return identityFromSeed(seed);
 }
