@@ -68,7 +68,7 @@ func Normalise(s string) string {
 type call struct {
 	name, title, status string
 	input, result       json.RawMessage
-	seq                 int64 // first-seen seq
+	seq, lastSeq        int64 // first-seen and latest contributing seq
 }
 
 func mergeCalls(events []window.Event) []*call {
@@ -90,6 +90,7 @@ func mergeCalls(events []window.Event) []*call {
 			}
 			calls = append(calls, c)
 		}
+		c.lastSeq = ev.Seq
 		if e.ToolName != "" {
 			c.name = e.ToolName
 		}
@@ -132,16 +133,30 @@ func (c *call) secret() bool { return window.TouchesSecretPath(c.input, c.title)
 // Derive computes the signature of ev from its run's events (ordered by
 // seq). ok is false when the evidence carries no signature.
 func Derive(ev gate.Evidence, events []window.Event) (Signature, bool) {
+	return DeriveWith(ev, events, nil)
+}
+
+// DeriveWith is Derive with redact applied to the raw failure or request text
+// before it is normalised: normalisation destroys the shape secrets are
+// recognised by, so redacting afterwards would leak them. nil = no redaction.
+func DeriveWith(ev gate.Evidence, events []window.Event, redact func(string) string) (Signature, bool) {
 	switch ev.Kind {
 	case gate.EvFailureRecovery:
-		return deriveFailure(ev, events)
+		return deriveFailure(ev, events, redact)
 	case gate.EvPermissionDenied:
-		return derivePermission(ev, events)
+		return derivePermission(ev, events, redact)
 	}
 	return Signature{}, false
 }
 
-func deriveFailure(ev gate.Evidence, events []window.Event) (Signature, bool) {
+func normalise(s string, redact func(string) string) string {
+	if redact != nil {
+		s = redact(s)
+	}
+	return Normalise(s)
+}
+
+func deriveFailure(ev gate.Evidence, events []window.Event, redact func(string) string) (Signature, bool) {
 	calls := mergeCalls(events)
 	// Replay the renderer's pairing so the failure is the one it consumed.
 	paired := map[*call]bool{}
@@ -161,7 +176,7 @@ func deriveFailure(ev gate.Evidence, events []window.Event) (Signature, bool) {
 			if f.secret() {
 				return Signature{}, false
 			}
-			detail := Normalise(window.ResultText(f.result))
+			detail := normalise(window.ResultText(f.result), redact)
 			if detail == "" {
 				return Signature{}, false
 			}
@@ -171,7 +186,7 @@ func deriveFailure(ev gate.Evidence, events []window.Event) (Signature, bool) {
 	return Signature{}, false
 }
 
-func derivePermission(ev gate.Evidence, events []window.Event) (Signature, bool) {
+func derivePermission(ev gate.Evidence, events []window.Event, redact func(string) string) (Signature, bool) {
 	var resolved *taskrunner.Event
 	for i := range events {
 		if events[i].Seq == ev.Seq && events[i].E.Type == taskrunner.EventTypePermissionResolved {
@@ -184,7 +199,7 @@ func derivePermission(ev gate.Evidence, events []window.Event) (Signature, bool)
 	}
 	for _, e := range events {
 		if e.E.Type == taskrunner.EventTypePermissionRequest && e.E.PermissionRequestID == resolved.PermissionRequestID {
-			if d := Normalise(e.E.PermissionSummary); d != "" {
+			if d := normalise(e.E.PermissionSummary, redact); d != "" {
 				return Signature{Kind: gate.EvPermissionDenied, Detail: d}, true
 			}
 			return Signature{}, false
@@ -194,22 +209,28 @@ func derivePermission(ev gate.Evidence, events []window.Event) (Signature, bool)
 }
 
 // Count returns how many times sig occurs in events.
-func Count(events []window.Event, sig Signature) int {
-	n := 0
+func Count(events []window.Event, sig Signature) int { return len(MatchSeqs(events, sig, nil)) }
+
+// MatchSeqs returns, per occurrence of sig in events, the seq of the latest
+// event that contributed to it (the result event of a failed call, the
+// request event of a permission). redact must be the one sig was derived
+// with (see DeriveWith).
+func MatchSeqs(events []window.Event, sig Signature, redact func(string) string) []int64 {
+	var out []int64
 	switch sig.Kind {
 	case gate.EvFailureRecovery:
 		for _, c := range mergeCalls(events) {
 			if c.status == taskrunner.ToolStatusFailure && strings.EqualFold(c.name, sig.Tool) &&
-				!c.secret() && Normalise(window.ResultText(c.result)) == sig.Detail {
-				n++
+				!c.secret() && normalise(window.ResultText(c.result), redact) == sig.Detail {
+				out = append(out, c.lastSeq)
 			}
 		}
 	case gate.EvPermissionDenied:
 		for _, e := range events {
-			if e.E.Type == taskrunner.EventTypePermissionRequest && Normalise(e.E.PermissionSummary) == sig.Detail {
-				n++
+			if e.E.Type == taskrunner.EventTypePermissionRequest && normalise(e.E.PermissionSummary, redact) == sig.Detail {
+				out = append(out, e.Seq)
 			}
 		}
 	}
-	return n
+	return out
 }

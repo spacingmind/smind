@@ -145,3 +145,15 @@ func TestSignature_NoFailureFound(t *testing.T) {
 		t.Fatal("derived with empty detail")
 	}
 }
+
+func TestSignature_RedactRunsBeforeNormalise(t *testing.T) {
+	evs, seq := failThenFix("bad token SECRETSECRET1234 rejected")
+	red := func(s string) string { return strings.ReplaceAll(s, "SECRETSECRET1234", "[REDACTED]") }
+	sig, ok := DeriveWith(recov(seq), evs, red)
+	if !ok || strings.Contains(sig.Detail, "secret") || !strings.Contains(sig.Detail, "[redacted]") {
+		t.Fatalf("sig = %+v ok=%v", sig, ok)
+	}
+	if n := len(MatchSeqs(evs, sig, red)); n != 1 {
+		t.Fatalf("matches = %d, want 1", n)
+	}
+}
