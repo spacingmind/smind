@@ -172,6 +172,22 @@ function trackErrors(page, label) {
 }
 
 // The native stack's header back button: on web a link named "<previous title>, back" (or "Go back").
+/**
+ * Transition frames (every mid-animation glitch is a defect): runs `act` (a click that navigates) and screenshots
+ * the page at ~0, 90 and 220 ms while the stack animates, in `scheme`. Frames: <name>-t<ms>-<scheme>.png.
+ */
+async function shootTransition(page, name, scheme, act) {
+  await page.emulateMedia({ colorScheme: scheme });
+  await page.waitForTimeout(200);
+  const done = act();
+  for (const t of [0, 90, 220]) {
+    if (t > 0) await page.waitForTimeout(t === 90 ? 90 : 130);
+    await page.screenshot({ path: join(SMOKE_DIR, `${name}-t${t}-${scheme}.png`) });
+  }
+  await done;
+  console.log(`wrote ${name}-t{0,90,220}-${scheme}.png`);
+}
+
 async function goBack(page) {
   await page.getByRole('link', { name: /(, back|^Go back)$/ }).click();
 }
@@ -349,6 +365,14 @@ async function promptQueue(page, harness) {
   }
 
   // Idle: no queue, the plain compose placeholder.
+  // Push and pop transition frames, light then dark, before the stage's own assertions.
+  for (const scheme of ['light', 'dark']) {
+    await shootTransition(page, 'push-task', scheme, () => page.getByText('Idle task', { exact: true }).click());
+    await page.getByText(/^run [0-9a-f]{8} ·/).waitFor({ timeout: 20_000 });
+    await shootTransition(page, 'pop-task', scheme, () => goBack(page));
+    await page.getByText('Idle task', { exact: true }).waitFor({ timeout: 10_000 });
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
   await page.getByText('Idle task', { exact: true }).click();
   await page.getByText(/^run [0-9a-f]{8} ·/).waitFor({ timeout: 20_000 });
   if (await page.getByLabel('Queued prompts').isVisible().catch(() => false)) fail('an idle task shows a queue');
@@ -445,12 +469,15 @@ async function promptQueue(page, harness) {
   if (await page.getByRole('button', { name: /^Stop(ping…)?$/ }).isVisible().catch(() => false)) fail('the Stop button is still shown after the run stopped');
   await shootBothSchemes(page, 'stop-after');
 
-  // The list stays mounted under the task (native stack): returning must refresh it (useFocusEffect), not show the stale "running".
+  // The list stays mounted under the task (native stack): returning must reload it (useFocusEffect), so a task the
+  // daemon gained meanwhile shows up (the old hand-rolled stack remounted the list on every return).
+  const late = await harness.cmd('seed-run end_turn Late task');
+  if (!late.ok) fail(`seeding the late task failed: ${JSON.stringify(late)}`);
   await goBack(page);
   try {
-    await page.getByText('stopped', { exact: true }).first().waitFor({ timeout: 15_000 });
+    await page.getByText('Late task', { exact: true }).waitFor({ timeout: 15_000 });
   } catch {
-    fail('the task list did not refresh after returning from a stopped run (still stale)');
+    fail('the task list did not reload after returning from a task (a task created meanwhile is missing)');
   }
   await shootBothSchemes(page, 'list-after-stop');
 }

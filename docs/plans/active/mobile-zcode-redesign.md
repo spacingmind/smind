@@ -118,8 +118,16 @@ web smoke (`smoke:web:full`, Playwright, 390 px) and the node integration suites
 
 ## Progress
 
-- 2026-10-20 — Research and proposal done (local doc); user decisions received; R0 started (branch `feat/mobile-router-r0`).
+- 2026-10-20 — Research and proposal done (local doc); user decisions received.
+- 2026-10-20 — **R-1** (Expo SDK 57 → 58) split out and merged first (#430): the SDK 58 router rework made writing R0 against 57 pointless. `vitest.config.mjs` + `tsconfig.vitest.json` because SDK 58's `expo` package has no `./tsconfig.base` export.
+- 2026-10-20 — **R0** (Expo Router, ADR-0036): implemented by a Peer on SDK 57, rebased by cherry-pick onto develop after #430/#431 (ADR-0035 Go core), dependencies reinstalled on SDK 58. Independent read-only review found: stale task list under a pushed task (fixed: `useFocusEffect` reload), banner missing while loading/error (fixed), weak `assertTasks` wait (fixed), stale-closure connection ref (fixed with `replaceConnection`/`dropConnection`), test gaps (added). Accepted as-is: the `title` route param is a display hint only (deep links can set any text); header title repeats the card title on the revoked screen (M2 redesigns it).
+- Verification constraint found: develop's live-harness suites (`test:integration`) are skipped until the mobile E2EE v2 change lands (ADR-0035 gate), and the mobile v1 client cannot talk to the v2 Go harness, so `smoke:web:full` is run from an overlay: Go tree of 661bb08f (pre-v2) + this branch's `mobile/` (`git worktree add --detach /tmp/r0-v1 661bb08f`, `rsync mobile/`). Every M-PR needs the same until the mobile E2EE v2 PR merges.
 
 ## Validation
 
-(filled per PR: commands run, results, screenshot paths, unverified items — native rendering on iOS/Android is unverified in every PR.)
+### R0
+- `npx tsc --noEmit` clean; `npm test` 30 files, 241 passed + 4 skipped (the 4 are the ADR-0035 gate); `npx expo-doctor` 20/20; `npx expo install --check` up to date.
+- `npm run test:integration`: all live-harness suites skipped by the ADR-0035 gate (not a regression of this PR).
+- `smoke:web:full` (390×844 @2x, Playwright, overlay above) passed: pairing → pending → approved list → revoked, outdated daemon, needs-continue, queue (cancel, delivery), stop, password (required/incorrect/locked/ok), plus new stages: push/pop transition frames (`push-task-t{0,90,220}-{light,dark}`, `pop-task-…`; web transitions finish inside 90 ms and no frame is blank or half-drawn), "task created meanwhile appears after returning" (proves the refocus reload).
+- Screenshots reviewed (light + dark): native header with back arrow + task title, no 64 px gap, Disconnect centred in the list header, status screen, queue/stop screens unchanged.
+- **Unverified:** everything native (iOS/Android header, swipe-back, hardware back, SwiftUI/Compose rendering of the header `Host`), Expo Go for SDK 58 does not exist yet and there is no simulator here; live-harness suites against the E2EE v2 daemon (gated).
