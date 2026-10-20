@@ -3,10 +3,7 @@ package e2ee
 import (
 	"bytes"
 	"crypto/ecdh"
-	"crypto/hkdf"
-	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"math"
 	"testing"
@@ -17,77 +14,82 @@ import (
 // testSessions derives both ends of a session directly, without a transport.
 func testSessions(t *testing.T) (daemonSide, mobileSide *Session) {
 	t.Helper()
-
-	daemonKey, err := GenerateKeyPair()
-	if err != nil {
-		t.Fatalf("daemon GenerateKeyPair: %v", err)
-	}
-	mobileKey, err := GenerateKeyPair()
-	if err != nil {
-		t.Fatalf("mobile GenerateKeyPair: %v", err)
-	}
-	daemonPub, mobilePub := daemonKey.Public(), mobileKey.Public()
-
-	mobileParsed, err := ParsePublicKey(mobilePub)
-	if err != nil {
-		t.Fatalf("ParsePublicKey(mobile): %v", err)
-	}
-	daemonParsed, err := ParsePublicKey(daemonPub)
-	if err != nil {
-		t.Fatalf("ParsePublicKey(daemon): %v", err)
-	}
-
-	daemonSide, err = newSession(daemonKey.private(), mobileParsed, RoleDaemon, daemonPub, mobilePub)
-	if err != nil {
-		t.Fatalf("newSession(daemon): %v", err)
-	}
-	mobileSide, err = newSession(mobileKey.private(), daemonParsed, RoleMobile, daemonPub, mobilePub)
-	if err != nil {
-		t.Fatalf("newSession(mobile): %v", err)
-	}
+	daemonSide, mobileSide, _ = testSessionsWithSchedule(t)
 	return daemonSide, mobileSide
 }
 
+// testSessionsWithSchedule runs the key schedule from fresh random keys.
+func testSessionsWithSchedule(t *testing.T) (daemonSide, mobileSide *Session, sched *schedule) {
+	t.Helper()
+	static, eph, client := randomPriv(t), randomPriv(t), randomPriv(t)
+	cpub := client.PublicKey().Bytes()
+	es, err := dh(static, cpub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ee, err := dh(eph, cpub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sched, err = deriveSchedule(es, ee, static.PublicKey().Bytes(), eph.PublicKey().Bytes(), cpub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if daemonSide, err = newSession(RoleDaemon, sched); err != nil {
+		t.Fatal(err)
+	}
+	if mobileSide, err = newSession(RoleMobile, sched); err != nil {
+		t.Fatal(err)
+	}
+	return daemonSide, mobileSide, sched
+}
+
+func randomPriv(t *testing.T) *ecdh.PrivateKey {
+	t.Helper()
+	priv, err := generateEphemeral()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return priv
+}
+
 func TestBothEndsDeriveTheSameKeys(t *testing.T) {
-	daemonKey, err := GenerateKeyPair()
-	if err != nil {
-		t.Fatalf("daemon GenerateKeyPair: %v", err)
-	}
-	mobileKey, err := GenerateKeyPair()
-	if err != nil {
-		t.Fatalf("mobile GenerateKeyPair: %v", err)
-	}
-	daemonPub, mobilePub := daemonKey.Public(), mobileKey.Public()
+	static, eph, client := randomPriv(t), randomPriv(t), randomPriv(t)
+	spub, epub, cpub := static.PublicKey().Bytes(), eph.PublicKey().Bytes(), client.PublicKey().Bytes()
 
-	mobileParsed, err := ParsePublicKey(mobilePub)
-	if err != nil {
-		t.Fatalf("ParsePublicKey(mobile): %v", err)
+	derive := func(es, ee []byte) *schedule {
+		sched, err := deriveSchedule(es, ee, spub, epub, cpub)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sched
 	}
-	daemonParsed, err := ParsePublicKey(daemonPub)
-	if err != nil {
-		t.Fatalf("ParsePublicKey(daemon): %v", err)
-	}
+	// Daemon side: DH(static, c_eph), DH(d_eph, c_eph). Client side:
+	// DH(c_eph, static), DH(c_eph, d_eph). X25519 is symmetric.
+	daemonEs, _ := dh(static, cpub)
+	daemonEe, _ := dh(eph, cpub)
+	clientEs, _ := dh(client, spub)
+	clientEe, _ := dh(client, epub)
+	d, c := derive(daemonEs, daemonEe), derive(clientEs, clientEe)
 
-	d2mFromDaemon, m2dFromDaemon, err := deriveKeys(daemonKey.private(), mobileParsed, daemonPub, mobilePub)
-	if err != nil {
-		t.Fatalf("deriveKeys(daemon side): %v", err)
+	for name, pair := range map[string][2][]byte{
+		"th": {d.th, c.th}, "d2m": {d.d2m, c.d2m}, "m2d": {d.m2d, c.m2d},
+		"confirm_d": {d.confirmD, c.confirmD}, "confirm_m": {d.confirmM, c.confirmM},
+	} {
+		if !bytes.Equal(pair[0], pair[1]) {
+			t.Errorf("the two ends derived different %s", name)
+		}
+		if len(pair[0]) != 32 {
+			t.Errorf("%s is %d bytes, want 32", name, len(pair[0]))
+		}
 	}
-	d2mFromMobile, m2dFromMobile, err := deriveKeys(mobileKey.private(), daemonParsed, daemonPub, mobilePub)
-	if err != nil {
-		t.Fatalf("deriveKeys(mobile side): %v", err)
-	}
-
-	if !bytes.Equal(d2mFromDaemon, d2mFromMobile) {
-		t.Error("the two ends derived different daemon->mobile keys")
-	}
-	if !bytes.Equal(m2dFromDaemon, m2dFromMobile) {
-		t.Error("the two ends derived different mobile->daemon keys")
-	}
-	if bytes.Equal(d2mFromDaemon, m2dFromDaemon) {
-		t.Error("both directions share one key; they must be independent")
-	}
-	if len(d2mFromDaemon) != chacha20poly1305.KeySize {
-		t.Errorf("derived key is %d bytes, want %d", len(d2mFromDaemon), chacha20poly1305.KeySize)
+	keys := [][]byte{d.d2m, d.m2d, d.confirmD, d.confirmM}
+	for i := range keys {
+		for j := i + 1; j < len(keys); j++ {
+			if bytes.Equal(keys[i], keys[j]) {
+				t.Errorf("derived keys %d and %d are equal; they must be independent", i, j)
+			}
+		}
 	}
 }
 
@@ -289,75 +291,5 @@ func TestChannelRejectsShortDataFrame(t *testing.T) {
 	}
 	if !p.mobile.Closed() {
 		t.Error("channel should be closed after a malformed data frame")
-	}
-}
-
-// TestTranscriptHashIsTheHKDFSalt pins TranscriptHash to the salt deriveKeys
-// actually uses, so a device_hello signature bound to it is bound to the
-// session's real transcript (and the key schedule is provably unchanged).
-func TestTranscriptHashIsTheHKDFSalt(t *testing.T) {
-	d, err := GenerateKeyPair()
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := GenerateKeyPair()
-	if err != nil {
-		t.Fatal(err)
-	}
-	mPub := m.Public()
-	peer, err := ecdh.X25519().NewPublicKey(mPub)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d2m, _, err := deriveKeys(d.priv, peer, d.Public(), mPub)
-	if err != nil {
-		t.Fatal(err)
-	}
-	shared, err := d.priv.ECDH(peer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := hkdf.Key(sha256.New, shared, TranscriptHash(d.Public(), mPub), dirDaemonToMobile, 32)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(d2m, want) {
-		t.Fatal("TranscriptHash is not the salt deriveKeys uses")
-	}
-}
-
-// TestE2EECoreUnchanged pins the key schedule with fixed X25519 identities:
-// the directional keys and the transcript digest must stay byte-for-byte what
-// they were before device identity was layered on top (ADR-0031 P12b AC 8).
-// The expected values were produced by the pre-P12b implementation.
-func TestE2EECoreUnchanged(t *testing.T) {
-	dseed, mseed := make([]byte, 32), make([]byte, 32)
-	for i := range dseed {
-		dseed[i], mseed[i] = byte(i+1), byte(0xa0+i)
-	}
-	dpriv, err := ecdh.X25519().NewPrivateKey(dseed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mpriv, err := ecdh.X25519().NewPrivateKey(mseed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dpub, mpub := dpriv.PublicKey().Bytes(), mpriv.PublicKey().Bytes()
-	d2m, m2d, err := deriveKeys(dpriv, mpriv.PublicKey(), dpub, mpub)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, c := range map[string]struct {
-		got  []byte
-		want string
-	}{
-		"daemon->mobile key": {d2m, "f57bf827270072d43e15823abba27a6f3deebde29d524beccc6bee6fd2510acc"},
-		"mobile->daemon key": {m2d, "b091892c20de8617fb4a2e1af589144aeee8395af58df7daafcedfc4445c1ccb"},
-		"transcript hash":    {TranscriptHash(dpub, mpub), "5cdbc91f0f22aea3df1d15bf8c3b7040cab7530cc6b851cb1c4e31ca8a096e40"},
-	} {
-		if hex.EncodeToString(c.got) != c.want {
-			t.Errorf("%s changed: got %x, want %s", name, c.got, c.want)
-		}
 	}
 }

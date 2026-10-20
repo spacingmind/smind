@@ -1,7 +1,9 @@
 // Package e2ee implements the end-to-end encrypted session crypto shared by
-// the smind daemon and a paired mobile device: X25519 key agreement plus
-// ChaCha20-Poly1305 AEAD with 12-byte counter-based nonces, per
-// docs/decisions/0007-relay-architecture.md (c)/(d)/(e)/(g).
+// the smind daemon and a paired client (mobile or desktop app): a Noise-NK
+// shaped X25519 handshake with a fresh ephemeral key on both ends and key
+// confirmation, then ChaCha20-Poly1305 AEAD with 12-byte counter-based
+// nonces, per docs/decisions/0007-relay-architecture.md (c)/(d)/(e)/(g) as
+// amended by docs/decisions/0035-relay-e2ee-v2-daemon-ephemeral.md.
 //
 // The relay itself never sees any of this material: it forwards opaque
 // ciphertext frames between the two ends (ADR-0007 (a)/(b)).
@@ -33,9 +35,9 @@ const (
 // public key.
 var ErrInvalidPublicKey = errors.New("e2ee: invalid X25519 public key")
 
-// KeyPair is an X25519 keypair. The daemon persists one long-lived keypair
-// (ADR-0007 (g)); mobile devices generate a fresh ephemeral one per pairing
-// session and never persist it.
+// KeyPair is an X25519 keypair. The daemon persists one long-lived static
+// keypair (ADR-0007 (g)); per-handshake ephemeral keys (both ends) are
+// generated inside Channel.Handshake and never leave the package.
 type KeyPair struct {
 	priv *ecdh.PrivateKey
 }

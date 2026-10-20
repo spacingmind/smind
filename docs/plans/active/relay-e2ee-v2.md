@@ -20,7 +20,9 @@ Non-stacked, each off `develop`, merged in this order (the user merges; release 
 
 The gate in PR 1: the Rust interop tests and the mobile node integration tests `skip` with the message
 `E2EE v2 pending in this client (ADR-0035)`; PR 2 and PR 3 each delete their own gate in the same change as their
-implementation. Vector, unit and negative tests are never gated.
+implementation. The same message also gates the client unit tests that read the regenerated `device_hello_vector.json` and still compute the v1
+transcript (Rust `device_hello_signature_verifies_against_go_vector`; four tests in mobile `deviceIdentity.test.ts`); the matching client PR un-gates
+them. No other unit, vector or negative test is gated.
 
 ## Acceptance criteria
 

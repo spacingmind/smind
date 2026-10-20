@@ -172,7 +172,7 @@ func OpenControl(ctx context.Context, c relaypb.RelayClient, admissionID, worksp
 // New session vs resume (ADR-0007 (e) + 2026-09-17 amendment) is an
 // explicit caller choice, never implicit:
 //
-//   - Handshake starts a FRESH session: fresh ephemeral key agreement,
+//   - Handshake starts a FRESH session: fresh ephemeral keys on both ends,
 //     counters reset. For first pairing, explicit re-pair, suspected
 //     compromise, or lost session state.
 //   - Resume reopens the transport after a network drop and KEEPS the
@@ -243,10 +243,11 @@ func (d *DataConn) Resume(ctx context.Context, c relaypb.RelayClient, admissionI
 	return nil
 }
 
-// PeerPublicKey is the peer's ephemeral X25519 handshake key once the
-// handshake completed (nil before). With the local key it names the session's
-// transcript, which an application-layer identity proof can be bound to.
-func (d *DataConn) PeerPublicKey() []byte { return d.channel.PeerPublicKey() }
+// TranscriptHash is the E2EE v2 transcript hash th once the handshake
+// completed (nil before): SHA-256(label ‖ daemon key ‖ daemon ephemeral ‖
+// client ephemeral). It names this very session, so an application-layer
+// identity proof (device_hello) can be bound to it.
+func (d *DataConn) TranscriptHash() []byte { return d.channel.TranscriptHash() }
 
 // Send encrypts and forwards one application message.
 func (d *DataConn) Send(msg []byte) error { return d.channel.Send(msg) }
@@ -264,11 +265,27 @@ func (d *DataConn) DropTransport() { d.frames.drop() }
 // Close tears down the stream and session.
 func (d *DataConn) Close() error { return d.channel.Close() }
 
-// OpenData opens a data stream for (relay host, session, device) under the
-// admission, wraps it as an io.ReadWriteCloser of framed ciphertext, and
-// layers an e2ee.Channel on top using the given keypair and role. The
-// returned DataConn must complete Handshake before Send/Receive.
-func OpenData(ctx context.Context, c relaypb.RelayClient, admissionID, workspaceID, sessionID, deviceID string, kp *e2ee.KeyPair, role e2ee.Role, opts ...DataOption) (*DataConn, error) {
+// OpenDaemonData opens a data stream for (relay host, session, device) under
+// the admission as the E2EE responder (the daemon): the stream is wrapped as
+// an io.ReadWriteCloser of framed ciphertext with an e2ee.Channel on top,
+// using the daemon's persisted static keypair. The returned DataConn must
+// complete Handshake before Send/Receive.
+func OpenDaemonData(ctx context.Context, c relaypb.RelayClient, admissionID, workspaceID, sessionID, deviceID string, kp *e2ee.KeyPair, opts ...DataOption) (*DataConn, error) {
+	return openData(ctx, c, admissionID, workspaceID, sessionID, deviceID, e2ee.RoleDaemon, func(fc *frameConn) (*e2ee.Channel, error) {
+		return e2ee.NewDaemonChannel(fc, kp)
+	}, opts)
+}
+
+// OpenClientData is OpenDaemonData for the initiator (a device or test
+// client). There is no key parameter by design: the E2EE client generates a
+// fresh ephemeral key inside every Handshake (ADR-0035).
+func OpenClientData(ctx context.Context, c relaypb.RelayClient, admissionID, workspaceID, sessionID, deviceID string, opts ...DataOption) (*DataConn, error) {
+	return openData(ctx, c, admissionID, workspaceID, sessionID, deviceID, e2ee.RoleMobile, func(fc *frameConn) (*e2ee.Channel, error) {
+		return e2ee.NewClientChannel(fc)
+	}, opts)
+}
+
+func openData(ctx context.Context, c relaypb.RelayClient, admissionID, workspaceID, sessionID, deviceID string, role e2ee.Role, newChannel func(*frameConn) (*e2ee.Channel, error), opts []DataOption) (*DataConn, error) {
 	// The stream gets its own cancellable context so the keepalive dead-stream
 	// rule can break a blocked Receive (see keepalive.go).
 	sctx, cancel := context.WithCancel(ctx)
@@ -291,7 +308,7 @@ func OpenData(ctx context.Context, c relaypb.RelayClient, admissionID, workspace
 	// Registration: the relay derives a stream's route from its first
 	// frame, so an empty-payload registration frame is sent immediately.
 	fc.register()
-	channel, err := e2ee.NewChannel(fc, kp, role)
+	channel, err := newChannel(fc)
 	if err != nil {
 		fc.Close()
 		return nil, fmt.Errorf("relay client: e2ee channel: %w", err)

@@ -115,12 +115,11 @@ func pairedThroughShim(t *testing.T, opts ...DataOption) (daemon, device *DataCo
 		t.Fatal(err)
 	}
 	daemonKey, _ := e2ee.GenerateKeyPair()
-	deviceKey, _ := e2ee.GenerateKeyPair()
-	daemon, err = OpenData(ctx, rc, admissionID, "ws-idle", "s1", "d1", daemonKey, e2ee.RoleDaemon, opts...)
+	daemon, err = OpenDaemonData(ctx, rc, admissionID, "ws-idle", "s1", "d1", daemonKey, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	device, err = OpenData(ctx, rc, admissionID, "ws-idle", "s1", "d1", deviceKey, e2ee.RoleMobile,
+	device, err = OpenClientData(ctx, rc, admissionID, "ws-idle", "s1", "d1",
 		append([]DataOption{WithExpectedPeerKey(daemonKey.Public())}, opts...)...)
 	if err != nil {
 		t.Fatal(err)

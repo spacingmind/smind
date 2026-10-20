@@ -234,22 +234,23 @@ func TestRevokedDeviceRefusedWithReasonAtHello(t *testing.T) {
 }
 
 // TestCapturedHelloSessionCannotBeReplayedIntoANewRoute is the attack the
-// challenge exists for. The E2EE session keys depend only on the daemon's
-// long-lived key and the client's ephemeral key, so whoever can open a route
-// (a relay operator, a host-secret holder) can replay a CAPTURED client
-// transcript — handshake frames and the hello ciphertext — and the daemon
-// derives the identical keys and decrypts it. The signed hello must not carry
-// over: the daemon's fresh per-session challenge (and the route session id) are
-// part of what was signed.
+// E2EE v2 handshake (ADR-0035) and the device challenge both exist for. Whoever
+// can open a route (a relay operator, a host-secret holder) can replay a
+// CAPTURED client transcript — handshake frames and the hello ciphertext.
+// Under v1 the daemon derived identical keys and decrypted it; under v2 the
+// daemon draws a fresh ephemeral key per handshake, the attacker cannot
+// produce the key-confirmation MAC, and the handshake fails before the daemon
+// sends anything encrypted: the replay never reaches the challenge, let alone
+// the hello. (The challenge and the session-id binding remain as defence in
+// depth; the devices package tests cover them directly.)
 //
-// Two variants isolate the two bindings: a replay into ANOTHER session id is
-// also stopped by the session-id binding; a replay into the SAME session id,
-// after the original session is gone, is stopped only by the challenge.
+// Two variants: a replay into ANOTHER session id, and a replay into the SAME
+// session id after the original session is gone.
 func TestCapturedHelloSessionCannotBeReplayedIntoANewRoute(t *testing.T) {
 	for _, sameSession := range []bool{false, true} {
 		name := "another session id"
 		if sameSession {
-			name = "the same session id after the original ended (only the challenge stops this)"
+			name = "the same session id after the original ended"
 		}
 		t.Run(name, func(t *testing.T) {
 			f := newHubFixture(t, Options{})
@@ -295,6 +296,7 @@ func TestCapturedHelloSessionCannotBeReplayedIntoANewRoute(t *testing.T) {
 				})
 			}
 			rejectedBefore := f.logs.count("device_hello rejected")
+			confirmFailedBefore := f.logs.count("handshake key confirmation failed")
 
 			// The attacker replays them verbatim.
 			rc := relaytest.NativeClient(t, f.relay)
@@ -316,12 +318,37 @@ func TestCapturedHelloSessionCannotBeReplayedIntoANewRoute(t *testing.T) {
 				}
 			}
 
-			// The daemon answers the handshake (the attacker cannot read it),
-			// reaches the replayed hello, and refuses it: nothing was signed
-			// over THIS session's challenge.
-			waitFor(t, "the daemon to reject the replayed hello", func() bool {
-				return f.logs.count("device_hello rejected") > rejectedBefore
+			// What the daemon sends back to the attacker: only M2 and R_d. The
+			// attacker cannot confirm the handshake, so no data frame (and so
+			// no challenge) is ever written.
+			var back [][]byte
+			recvDone := make(chan struct{})
+			go func() {
+				defer close(recvDone)
+				for {
+					fr, err := stream.Recv()
+					if err != nil {
+						return
+					}
+					back = append(back, fr.GetPayload())
+				}
+			}()
+			waitFor(t, "the daemon to fail the replayed handshake", func() bool {
+				return f.logs.count("handshake key confirmation failed") > confirmFailedBefore
 			})
+			cancel()
+			<-recvDone
+			for _, p := range back {
+				if len(p) >= 5 && p[4] == 0x03 {
+					t.Fatalf("the daemon sent a data frame to a replayed handshake: %x", p)
+				}
+				if bytes.Contains(p, []byte("device_challenge")) {
+					t.Fatal("the daemon's challenge reached a replayed handshake")
+				}
+			}
+			if got := f.logs.count("device_hello rejected"); got != rejectedBefore {
+				t.Fatalf("the replay reached the hello check (%d rejections)", got-rejectedBefore)
+			}
 			hub.mu.Lock()
 			for ref, s := range hub.sessions {
 				if ref.session == replaySession && s.admitted {
@@ -356,7 +383,7 @@ func TestHelloBoundToTheChallengeAndTheSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	stale := bytes.Repeat([]byte{7}, devices.ChallengeLen)
-	r, err := a.request(devices.HelloMethod, devices.SignHello(a.priv, a.label, f.kp.Public(), a.eph.Public(), []byte(a.session), stale))
+	r, err := a.request(devices.HelloMethod, devices.SignHello(a.priv, a.label, f.kp.Public(), a.dc.TranscriptHash(), []byte(a.session), stale))
 	if err != nil || r.Err == nil || r.Err.Code != codeBadHello {
 		t.Fatalf("hello over a stale challenge = %+v, %v; want %q", r, err, codeBadHello)
 	}
@@ -370,7 +397,7 @@ func TestHelloBoundToTheChallengeAndTheSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err = b.request(devices.HelloMethod, devices.SignHello(b.priv, b.label, f.kp.Public(), b.eph.Public(), []byte("another-route"), c))
+	r, err = b.request(devices.HelloMethod, devices.SignHello(b.priv, b.label, f.kp.Public(), b.dc.TranscriptHash(), []byte("another-route"), c))
 	if err != nil || r.Err == nil || r.Err.Code != codeBadHello {
 		t.Fatalf("hello for another session id = %+v, %v; want %q", r, err, codeBadHello)
 	}
@@ -417,7 +444,7 @@ func TestHelloVersion1IsRefusedWithAClearReason(t *testing.T) {
 	if _, err := d.awaitChallenge(); err != nil {
 		t.Fatal(err)
 	}
-	h := devices.SignHello(d.priv, d.label, f.kp.Public(), d.eph.Public(), []byte(d.session), bytes.Repeat([]byte{1}, devices.ChallengeLen))
+	h := devices.SignHello(d.priv, d.label, f.kp.Public(), d.dc.TranscriptHash(), []byte(d.session), bytes.Repeat([]byte{1}, devices.ChallengeLen))
 	h.V = devices.HelloVersionV1
 	r, err := d.request(devices.HelloMethod, h)
 	if err != nil || r.Err == nil || r.Err.Code != codeHelloVersion {

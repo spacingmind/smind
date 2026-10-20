@@ -137,6 +137,7 @@ fn parse_response(bytes: &[u8], expect_id: &str) -> serde_json::Value {
 }
 
 #[tokio::test]
+#[ignore = "E2EE v2 pending in this client (ADR-0035)"]
 async fn pairs_handshakes_round_trips_and_resumes_after_a_transport_drop() {
     let harness = tokio::task::spawn_blocking(start_harness)
         .await

@@ -314,7 +314,7 @@ func outdatedDaemon(ctx context.Context, h *harness) {
 			return
 		}
 		go func() {
-			dc, err := client.OpenData(ctx, rc, adm, harnessHostID, string(session), device, h.daemonKP, e2ee.RoleDaemon)
+			dc, err := client.OpenDaemonData(ctx, rc, adm, harnessHostID, string(session), device, h.daemonKP)
 			if err != nil {
 				return
 			}
@@ -605,12 +605,8 @@ func (h *harness) peerAdd(label string) (map[string]any, error) {
 	if err != nil {
 		return fail(fmt.Errorf("admit: %w", err))
 	}
-	eph, err := e2ee.GenerateKeyPair()
-	if err != nil {
-		return fail(err)
-	}
 	session := fmt.Sprintf("peer-%s-%d", deviceID[:6], time.Now().UnixNano())
-	dc, err := client.OpenData(ctx, rc, adm, harnessHostID, session, deviceID, eph, e2ee.RoleMobile,
+	dc, err := client.OpenClientData(ctx, rc, adm, harnessHostID, session, deviceID,
 		client.WithExpectedPeerKey(h.daemonKP.Public()), client.WithKeepalive(client.KeepaliveConfig{}))
 	if err != nil {
 		return fail(fmt.Errorf("open data: %w", err))
@@ -636,7 +632,7 @@ func (h *harness) peerAdd(label string) (map[string]any, error) {
 	case <-time.After(callTimeout):
 		return fail(errors.New("no device challenge from the daemon"))
 	}
-	hello := devices.SignHello(priv, label, h.daemonKP.Public(), eph.Public(), []byte(session), challenge)
+	hello := devices.SignHello(priv, label, h.daemonKP.Public(), dc.TranscriptHash(), []byte(session), challenge)
 	r, err := p.request(devices.HelloMethod, hello, callTimeout)
 	if err != nil {
 		return fail(err)

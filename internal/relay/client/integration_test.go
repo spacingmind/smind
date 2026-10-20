@@ -260,12 +260,12 @@ func pairWithClients(
 ) (daemon, device *DataConn) {
 	t.Helper()
 	ctx := context.Background()
-	daemon, err := OpenData(ctx, dc, admissionID, "ws-int", sessionID, deviceID, daemonKey, e2ee.RoleDaemon)
+	daemon, err := OpenDaemonData(ctx, dc, admissionID, "ws-int", sessionID, deviceID, daemonKey)
 	if err != nil {
 		t.Fatalf("daemon OpenData: %v", err)
 	}
 	// The device pins the daemon key it learned from the pairing offer.
-	device, err = OpenData(ctx, vc, admissionID, "ws-int", sessionID, deviceID, deviceKey, e2ee.RoleMobile, WithExpectedPeerKey(daemonKey.Public()))
+	device, err = OpenClientData(ctx, vc, admissionID, "ws-int", sessionID, deviceID, WithExpectedPeerKey(daemonKey.Public()))
 	if err != nil {
 		t.Fatalf("device OpenData: %v", err)
 	}
@@ -324,7 +324,6 @@ func TestIntegrationSubstitutedDaemonKeyFailsHandshake(t *testing.T) {
 
 	offeredKey, _ := e2ee.LoadOrCreateKeyPair(t.TempDir()) // what the offer named
 	imposterKey, _ := e2ee.GenerateKeyPair()               // who actually answers
-	deviceKey, _ := e2ee.GenerateKeyPair()
 	offer := daemonOffer(t, offeredKey, rp)
 	_, admissionID := dialAdmitted(t, rp)
 
@@ -333,11 +332,11 @@ func TestIntegrationSubstitutedDaemonKeyFailsHandshake(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	imposter, err := OpenData(ctx, dc, admissionID, "ws-int", "sess-x", "dev-x", imposterKey, e2ee.RoleDaemon)
+	imposter, err := OpenDaemonData(ctx, dc, admissionID, "ws-int", "sess-x", "dev-x", imposterKey)
 	if err != nil {
 		t.Fatalf("imposter OpenData: %v", err)
 	}
-	device, err := OpenData(ctx, vc, admissionID, "ws-int", "sess-x", "dev-x", deviceKey, e2ee.RoleMobile, WithExpectedPeerKey(offer.PublicKey))
+	device, err := OpenClientData(ctx, vc, admissionID, "ws-int", "sess-x", "dev-x", WithExpectedPeerKey(offer.PublicKey))
 	if err != nil {
 		t.Fatalf("device OpenData: %v", err)
 	}

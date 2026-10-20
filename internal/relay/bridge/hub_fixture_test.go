@@ -177,7 +177,6 @@ type device struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	dc     *client.DataConn
-	eph    *e2ee.KeyPair // this session's ephemeral handshake key
 	msgs   chan []byte
 	rerr   chan error
 
@@ -219,11 +218,7 @@ func (d *device) open(session string) error {
 		session = fmt.Sprintf("sess-%s-%d", d.id[:6], time.Now().UnixNano())
 	}
 	d.session = session
-	d.eph, err = e2ee.GenerateKeyPair()
-	if err != nil {
-		return err
-	}
-	d.dc, err = client.OpenData(d.ctx, rc, adm, d.f.relay.HostID, session, d.id, d.eph, e2ee.RoleMobile,
+	d.dc, err = client.OpenClientData(d.ctx, rc, adm, d.f.relay.HostID, session, d.id,
 		client.WithExpectedPeerKey(d.f.kp.Public()))
 	if err != nil {
 		return fmt.Errorf("open data: %w", err)
@@ -340,7 +335,7 @@ func (d *device) helloWithPassword(password string) (rpcResp, error) {
 	if err != nil {
 		return rpcResp{}, err
 	}
-	h := devices.SignHello(d.priv, d.label, d.f.kp.Public(), d.eph.Public(), []byte(d.session), c)
+	h := devices.SignHello(d.priv, d.label, d.f.kp.Public(), d.dc.TranscriptHash(), []byte(d.session), c)
 	h.Password = password // not covered by the signature
 	return d.request(devices.HelloMethod, h)
 }

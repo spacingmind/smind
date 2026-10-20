@@ -44,7 +44,7 @@ type endpointConfig struct {
 	rc                   relaypb.RelayClient
 	admID, host, session string
 	deviceID             string
-	kp                   *e2ee.KeyPair
+	kp                   *e2ee.KeyPair // the daemon's static key; nil for a client endpoint
 	role                 e2ee.Role
 	pin                  []byte // expected peer key, nil = none
 	onMsg                func([]byte)
@@ -59,7 +59,13 @@ func openEndpoint(cfg endpointConfig) (*endpoint, error) {
 	if cfg.pin != nil {
 		opts = append(opts, client.WithExpectedPeerKey(cfg.pin))
 	}
-	conn, err := client.OpenData(ctx, tap, cfg.admID, cfg.host, cfg.session, cfg.deviceID, cfg.kp, cfg.role, opts...)
+	var conn *client.DataConn
+	var err error
+	if cfg.role == e2ee.RoleDaemon {
+		conn, err = client.OpenDaemonData(ctx, tap, cfg.admID, cfg.host, cfg.session, cfg.deviceID, cfg.kp, opts...)
+	} else {
+		conn, err = client.OpenClientData(ctx, tap, cfg.admID, cfg.host, cfg.session, cfg.deviceID, opts...)
+	}
 	if err != nil {
 		cancel()
 		return nil, err

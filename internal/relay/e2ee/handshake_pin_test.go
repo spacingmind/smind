@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// TestHandshakePinMismatchFails: a mobile end pinned to the daemon key from
-// its pairing offer must refuse a handshake with a different daemon key —
-// the same semantics as mobile/src/relay/e2ee.ts (daemonPublicKeyIfMobile)
-// and desktop channel.rs (pin_peer_public_key -> PinMismatch).
+// TestHandshakePinMismatchFails: a client pinned to the daemon key from its
+// pairing offer must refuse a handshake with a different daemon key — the same
+// semantics as mobile/src/relay/e2ee.ts (daemonPublicKeyIfMobile) and desktop
+// channel.rs (pin_peer_public_key -> PinMismatch).
 func TestHandshakePinMismatchFails(t *testing.T) {
 	p := newPair(t)
 	offerKey, err := GenerateKeyPair() // the key the pairing offer named
@@ -33,15 +33,37 @@ func TestHandshakePinMismatchFails(t *testing.T) {
 	if p.mobile.Session() != nil {
 		t.Fatal("no session may be derived for a mismatched peer")
 	}
-	// Only the hello went out: no ready frame confirming the session.
-	for _, w := range p.mobileConn.written() {
-		if len(w) >= 5 && w[4] == frameReady {
-			t.Fatal("mobile sent a ready frame to a peer whose key did not match the pin")
-		}
+	// Only M1 went out: no ready frame confirming the session.
+	if w := p.mobileConn.written(); len(w) != 1 || w[0][4] != frameHello {
+		t.Fatalf("client wrote %d frame(s) after a pin mismatch, want only M1", len(w))
 	}
 	// The substituted daemon never completes either.
 	if err := <-daemonErr; err == nil {
-		t.Fatal("daemon handshake succeeded against a mobile that rejected its key")
+		t.Fatal("daemon handshake succeeded against a client that rejected its key")
+	}
+}
+
+// TestPinMismatchBeforeAnyDH: with a pin that does not match, the client
+// rejects on the static key alone. A daemon_eph_pub that would make the key
+// agreement fail (the all-zero point) must therefore still surface as
+// ErrPeerKeyMismatch, not ErrKeyAgreement.
+func TestPinMismatchBeforeAnyDH(t *testing.T) {
+	conn, peer := newMemPipe()
+	client := newClientChannel(t, conn)
+	daemon := newScriptedDaemon(t, seedFrom(0x01), seedFrom(0x40))
+
+	m2 := append([]byte{ProtocolVersion, byte(RoleDaemon)}, daemon.static.PublicKey().Bytes()...)
+	m2 = append(m2, make([]byte, PublicKeySize)...) // low-order daemon ephemeral
+	if _, err := peer.Write(rawFrame(frameHello, m2)); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	other := keyPairFromSeed(t, seedFrom(0x80))
+	err := client.Handshake(ctx, WithExpectedPeerKey(other.Public()))
+	if !errors.Is(err, ErrPeerKeyMismatch) {
+		t.Fatalf("Handshake = %v, want ErrPeerKeyMismatch (pin is checked before any DH)", err)
 	}
 }
 
@@ -57,10 +79,10 @@ func TestHandshakePinMatchSucceeds(t *testing.T) {
 		t.Fatalf("daemon Handshake: %v", err)
 	}
 	if err := <-mobileErr; err != nil {
-		t.Fatalf("pinned mobile Handshake with the right key: %v", err)
+		t.Fatalf("pinned client Handshake with the right key: %v", err)
 	}
 	if !p.mobile.Established() {
-		t.Fatal("mobile not established")
+		t.Fatal("client not established")
 	}
 }
 
@@ -80,9 +102,8 @@ func TestHandshakePinFailsClosed(t *testing.T) {
 	}
 }
 
-// TestHandshakeNoPinUnchanged: without the option the behavior is exactly
-// as before (the existing happy-path tests cover this too; this one names
-// the contract).
+// TestHandshakeNoPinUnchanged: without the option the handshake runs unpinned
+// (the happy-path tests cover this too; this one names the contract).
 func TestHandshakeNoPinUnchanged(t *testing.T) {
 	p := newPair(t)
 	p.handshake(t)

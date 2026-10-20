@@ -122,7 +122,7 @@ func dialDeviceDataConn(t *testing.T, ctx context.Context, cfg Config, deviceKP 
 	if err != nil {
 		t.Fatalf("device admit: %v", err)
 	}
-	dc, err := client.OpenData(ctx, rc, admissionID, cfg.WorkspaceID, DefaultSessionID, DefaultDeviceID, deviceKP, e2ee.RoleMobile, client.WithExpectedPeerKey(daemonPub))
+	dc, err := client.OpenClientData(ctx, rc, admissionID, cfg.WorkspaceID, DefaultSessionID, DefaultDeviceID, client.WithExpectedPeerKey(daemonPub))
 	if err != nil {
 		t.Fatalf("device OpenData: %v", err)
 	}

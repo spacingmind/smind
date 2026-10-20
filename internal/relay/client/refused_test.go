@@ -11,7 +11,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/spacingmind/smind/internal/relay/e2ee"
 	relaypb "github.com/spacingmind/smind/internal/relay/relaypb"
 )
 
@@ -60,11 +59,7 @@ func TestHandshakeOnRefusedStreamReportsTheRelaysStatus(t *testing.T) {
 	for name, drain := range map[string]int{"status first": 0, "buffered frames ahead of the status": 3} {
 		t.Run(name, func(t *testing.T) {
 			rc := &refusingRelay{stream: &refusedStream{status: status.Error(codes.PermissionDenied, "relay: device revoked"), drain: drain}}
-			kp, err := e2ee.GenerateKeyPair()
-			if err != nil {
-				t.Fatal(err)
-			}
-			dc, err := OpenData(context.Background(), rc, "adm", "host", "sess", "dev", kp, e2ee.RoleMobile)
+			dc, err := OpenClientData(context.Background(), rc, "adm", "host", "sess", "dev")
 			if err != nil {
 				t.Fatal(err)
 			}

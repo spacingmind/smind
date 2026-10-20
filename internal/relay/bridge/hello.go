@@ -2,10 +2,11 @@ package bridge
 
 // hello.go — who is on the other end of a freshly handshaken route
 // (ADR-0031 D9 "Device identity", decision 35). The E2EE handshake gives each
-// session an ephemeral key; the device proves it holds its persistent
-// Ed25519 key by signing, inside the encrypted channel, a message bound to
-// this very session (internal/relay/devices.Hello), so the hello cannot be
-// replayed into another session. The device id in the route must equal the
+// session fresh ephemeral keys on both ends (E2EE v2, ADR-0035); the device
+// proves it holds its persistent Ed25519 key by signing, inside the encrypted
+// channel, a message bound to this very session (internal/relay/devices.Hello,
+// over the channel's transcript hash), so the hello cannot be replayed into
+// another session. The device id in the route must equal the
 // hash of that key, so a client cannot claim another's id.
 //
 // Wire form: the hello is an ordinary request of the wsapi protocol
@@ -87,12 +88,13 @@ func mustJSON(v any) []byte {
 // when the device is refused (the caller drops the session).
 func (h *Hub) identify(s *session, r *sessionReader, t *deviceTransport) error {
 	// On a device route the daemon speaks first: a fresh challenge the device
-	// must sign into its hello. The session keys depend only on the daemon's
-	// long-lived key and the client's ephemeral key, so a captured client
-	// transcript replays into an identical session — only something the daemon
-	// chooses afresh per session proves the hello was made for THIS one. (The
-	// fixed single-device route, which pre-identity clients use, gets no
-	// challenge: they ignore unknown events but need not be sent one.)
+	// must sign into its hello. The E2EE v2 handshake already refuses a replayed
+	// client transcript (the daemon's fresh ephemeral key changes every key and
+	// the replayer cannot confirm, ADR-0035), and the hello is signed over the
+	// channel's transcript hash; the challenge stays as defence in depth, proving
+	// the hello was made for THIS live session. (The fixed single-device route,
+	// which pre-identity clients use, gets no challenge: they ignore unknown
+	// events but need not be sent one.)
 	//
 	// Also without a registry: that daemon refuses the hello with
 	// device_hello_unsupported, and a client only reaches the hello (and so
@@ -212,7 +214,7 @@ func (h *Hub) admitHello(s *session, r *sessionReader, t *deviceTransport, env r
 		h.refuse(t, r, env.ID, codeBadHello, "device_hello is not accepted on this route")
 		return errSessionOver
 	}
-	pub, err := hello.Verify(s.ref.device, h.kp.Public(), s.dc.PeerPublicKey(), []byte(s.ref.session), challenge)
+	pub, err := hello.Verify(s.ref.device, h.kp.Public(), s.dc.TranscriptHash(), []byte(s.ref.session), challenge)
 	if err != nil {
 		// Reason deliberately coarse; the cause is logged without key material.
 		h.logf("relay bridge: device_hello rejected: %v", errorKind(err))

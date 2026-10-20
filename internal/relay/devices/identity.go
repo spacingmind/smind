@@ -2,7 +2,8 @@
 // (ADR-0031 D9). A device is a long-lived Ed25519 key; its id is a hash of
 // the public key, so the id can never be claimed by anyone who does not hold
 // the private key. The device proves possession with a signed hello bound to
-// the one end-to-end session it is sent over — the handshake keys, the relay
+// the one end-to-end session it is sent over — the E2EE v2 transcript hash
+// (which covers the daemon's fresh per-handshake ephemeral key), the relay
 // route's session id and a fresh challenge the daemon sends first — so a
 // captured hello is useless on any other session.
 package devices
@@ -19,8 +20,6 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/spacingmind/smind/internal/relay/e2ee"
 )
 
 const (
@@ -32,8 +31,10 @@ const (
 	// client's captured handshake, so anyone able to open a route could replay
 	// a captured session (handshake frames plus the hello ciphertext) and be
 	// admitted as that device. Version 2 adds the route's session id and a
-	// per-session challenge from the daemon. No released client ever spoke v1
-	// (the first clients ship after this change), so v1 is not accepted.
+	// per-session challenge from the daemon, and (ADR-0035) signs the E2EE v2
+	// transcript hash, which now also covers the daemon's fresh ephemeral key.
+	// No released client ever spoke v1 (the first clients ship after this
+	// change), so v1 is not accepted.
 	HelloVersion = 2
 	// HelloVersionV1 is the retired format, kept so a v1 hello is recognised
 	// and refused with a clear reason.
@@ -52,12 +53,13 @@ const (
 )
 
 var (
-	ErrBadVersion   = errors.New("devices: unsupported hello version")
-	ErrBadKey       = errors.New("devices: device public key must be 32 bytes")
-	ErrIDMismatch   = errors.New("devices: device id does not match public key")
-	ErrBadSignature = errors.New("devices: bad hello signature")
-	ErrBadLabel     = errors.New("devices: invalid device label")
-	ErrBadChallenge = errors.New("devices: bad hello challenge")
+	ErrBadVersion    = errors.New("devices: unsupported hello version")
+	ErrBadKey        = errors.New("devices: device public key must be 32 bytes")
+	ErrIDMismatch    = errors.New("devices: device id does not match public key")
+	ErrBadSignature  = errors.New("devices: bad hello signature")
+	ErrBadLabel      = errors.New("devices: invalid device label")
+	ErrBadChallenge  = errors.New("devices: bad hello challenge")
+	ErrBadTranscript = errors.New("devices: transcript hash must be 32 bytes")
 )
 
 var idEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
@@ -125,25 +127,37 @@ func ParseChallengeMessage(msg []byte) (challenge []byte, ok bool, err error) {
 	return env.Params.Challenge, true, nil
 }
 
+// transcriptHashLen is the size of the E2EE transcript hash (SHA-256).
+const transcriptHashLen = sha256.Size
+
 // HelloSignedBytes is the message a device signs (version 2):
 //
 //	"smind-device-hello-v2"
-//	‖ TranscriptHash(daemonPub, mobilePub)   32 bytes, the HKDF salt of the session
+//	‖ th                                      32 bytes, e2ee Channel.TranscriptHash()
 //	‖ daemonPub                               32 bytes
 //	‖ uint16BE(len(sessionID)) ‖ sessionID    the exact bytes of the route's Frame.session_id
 //	‖ challenge                               32 bytes, fresh from the daemon
 //
-// mobilePub is the client's ephemeral X25519 handshake key. The E2EE session
-// keys depend only on the daemon's long-lived key and that ephemeral key, so a
-// captured client transcript replays into an identical session; the session id
-// ties the hello to one route, and the daemon's fresh challenge — which a
-// replaying party cannot have seen — to one live session. daemonPub is
-// repeated outside the hash so the signed bytes name the daemon explicitly.
-func HelloSignedBytes(daemonPub, mobilePub, sessionID, challenge []byte) []byte {
+// th is the E2EE v2 transcript hash, SHA-256(label ‖ daemon static key ‖
+// daemon ephemeral key ‖ client ephemeral key), which is also the HKDF salt of
+// the session (ADR-0035): taking it from the established channel binds the
+// signature to this handshake's fresh daemon ephemeral, so a replayed client
+// handshake yields a different th and a captured hello never verifies. The
+// session id ties the hello to one route, and the daemon's fresh challenge to
+// one live session. daemonPub is repeated outside the hash so the signed
+// bytes name the daemon explicitly. It panics unless th is 32 bytes, like an
+// oversized session id (SignHello inherits that; Verify returns ErrBadTranscript).
+func HelloSignedBytes(daemonPub, th, sessionID, challenge []byte) []byte {
 	if len(sessionID) > 0xFFFF {
 		panic("devices: session id too long to sign") // the relay caps ids at 128 bytes
 	}
-	th := e2ee.TranscriptHash(daemonPub, mobilePub)
+	if len(th) != transcriptHashLen {
+		// A nil th means the caller signed before the handshake completed
+		// (Channel.TranscriptHash is nil until then): a programming error that
+		// must not silently produce a signature over an empty transcript.
+		// Verify returns ErrBadTranscript for the same input instead.
+		panic("devices: transcript hash must be 32 bytes")
+	}
 	out := make([]byte, 0, len(helloDomain)+len(th)+len(daemonPub)+2+len(sessionID)+len(challenge))
 	out = append(out, helloDomain...)
 	out = append(out, th...)
@@ -154,29 +168,32 @@ func HelloSignedBytes(daemonPub, mobilePub, sessionID, challenge []byte) []byte 
 	return out
 }
 
-// SignHello builds a signed hello for the session identified by the two
-// handshake public keys, the relay route's session id and the daemon's
-// challenge.
-func SignHello(priv ed25519.PrivateKey, label string, daemonPub, mobilePub, sessionID, challenge []byte) Hello {
+// SignHello builds a signed hello for the session identified by the daemon's
+// static key, the channel's transcript hash th, the relay route's session id
+// and the daemon's challenge.
+func SignHello(priv ed25519.PrivateKey, label string, daemonPub, th, sessionID, challenge []byte) Hello {
 	pub := priv.Public().(ed25519.PublicKey)
 	return Hello{
 		V:         HelloVersion,
 		DevicePub: append([]byte(nil), pub...),
 		Label:     label,
-		Signature: ed25519.Sign(priv, HelloSignedBytes(daemonPub, mobilePub, sessionID, challenge)),
+		Signature: ed25519.Sign(priv, HelloSignedBytes(daemonPub, th, sessionID, challenge)),
 	}
 }
 
 // Verify checks the hello against the session and the device id the frame
-// claimed, returning the device's public key. The label is checked too:
-// it is shown to humans approving devices, so control characters must not
-// get through.
-func (h Hello) Verify(frameDeviceID string, daemonPub, mobilePub, sessionID, challenge []byte) (ed25519.PublicKey, error) {
+// claimed, returning the device's public key. th is the verifying channel's
+// own TranscriptHash(). The label is checked too: it is shown to humans
+// approving devices, so control characters must not get through.
+func (h Hello) Verify(frameDeviceID string, daemonPub, th, sessionID, challenge []byte) (ed25519.PublicKey, error) {
 	if h.V != HelloVersion {
 		return nil, fmt.Errorf("%w: %d", ErrBadVersion, h.V)
 	}
 	if len(challenge) != ChallengeLen {
 		return nil, ErrBadChallenge
+	}
+	if len(th) != transcriptHashLen {
+		return nil, ErrBadTranscript
 	}
 	if len(h.DevicePub) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("%w: got %d bytes", ErrBadKey, len(h.DevicePub))
@@ -188,7 +205,7 @@ func (h Hello) Verify(frameDeviceID string, daemonPub, mobilePub, sessionID, cha
 	if err := ValidateLabel(h.Label); err != nil {
 		return nil, err
 	}
-	if !ed25519.Verify(pub, HelloSignedBytes(daemonPub, mobilePub, sessionID, challenge), h.Signature) {
+	if !ed25519.Verify(pub, HelloSignedBytes(daemonPub, th, sessionID, challenge), h.Signature) {
 		return nil, ErrBadSignature
 	}
 	return append(ed25519.PublicKey(nil), pub...), nil

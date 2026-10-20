@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createDaemonPasswords } from '../daemonPasswords';
 import { ConnectOptions, RelayConnection } from '../RelayConnection';
 import { DevHarness, harnessSupportsPassword, requireSelfSignedHarnessTrust, testConnectOptions } from './devHarness';
+import { E2EE_V2_PENDING } from './e2eeV2Gate';
 
 // A failed `go build` (or a missing `go`) throws here and fails the file: only a harness that really lacks the flag
 // (a tree without the daemon side, PR #360) skips. SMIND_REQUIRE_PASSWORD_HARNESS=1 turns even that into a failure.
@@ -44,7 +45,7 @@ function open(harness: DevHarness, seed: number, over: Partial<ConnectOptions> =
 
 const registry = async (harness: DevHarness) => (await harness.devices()).map((d) => ({ label: d.label, state: d.state }));
 
-describe.skipIf(!supported)('daemon password (P13c) against a real relay and daemon hub', () => {
+describe.skip(`${E2EE_V2_PENDING}: daemon password (P13c) against a real relay and daemon hub`, () => {
   beforeAll(async () => {
     requireSelfSignedHarnessTrust();
     withPassword = await DevHarness.start(10, false, PASSWORD); // a pairing window, so a device that gets in is approved at once

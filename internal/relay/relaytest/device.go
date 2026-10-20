@@ -45,7 +45,6 @@ type Device struct {
 
 	relay *Relay
 	rc    relaypb.RelayClient
-	kp    *e2ee.KeyPair
 	pin   []byte
 
 	admID string
@@ -58,10 +57,6 @@ type Device struct {
 // to run unpinned. The device is closed when the test ends.
 func NewDevice(t testing.TB, r *Relay, kind Kind, id string, daemon *Daemon) *Device {
 	t.Helper()
-	kp, err := e2ee.GenerateKeyPair()
-	if err != nil {
-		t.Fatalf("relaytest: device keypair: %v", err)
-	}
 	var sess [8]byte
 	if _, err := rand.Read(sess[:]); err != nil {
 		t.Fatalf("relaytest: session id: %v", err)
@@ -71,7 +66,6 @@ func NewDevice(t testing.TB, r *Relay, kind Kind, id string, daemon *Daemon) *De
 		SessionID: "sess-" + id + "-" + hex.EncodeToString(sess[:]),
 		Kind:      kind,
 		relay:     r,
-		kp:        kp,
 		msgs:      make(chan []byte, 256),
 	}
 	if daemon != nil {
@@ -100,7 +94,7 @@ func (d *Device) Connect() error {
 	d.admID = admID
 	ep, err := openEndpoint(endpointConfig{
 		rc: d.rc, admID: admID, host: d.relay.HostID, session: d.SessionID, deviceID: d.ID,
-		kp: d.kp, role: e2ee.RoleMobile, pin: d.pin, onMsg: d.deliver,
+		role: e2ee.RoleMobile, pin: d.pin, onMsg: d.deliver,
 	})
 	if err != nil {
 		return err
