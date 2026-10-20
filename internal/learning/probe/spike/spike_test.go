@@ -1,6 +1,7 @@
 package spike
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -8,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 )
 
 func TestSpike_SettingsJSONShape(t *testing.T) {
@@ -26,6 +29,7 @@ func TestSpike_SettingsJSONShape(t *testing.T) {
 			} `json:"network"`
 			Filesystem struct {
 				AllowWrite []string `json:"allowWrite"`
+				DenyWrite  []string `json:"denyWrite"`
 				DenyRead   []string `json:"denyRead"`
 				AllowRead  []string `json:"allowRead"`
 			} `json:"filesystem"`
@@ -62,11 +66,39 @@ func TestSpike_SettingsJSONShape(t *testing.T) {
 	if len(s.Filesystem.AllowWrite) != 1 || s.Filesystem.AllowWrite[0] != arm {
 		t.Errorf("allowWrite must be exactly the arm dir, got %v", s.Filesystem.AllowWrite)
 	}
+	if len(s.Filesystem.DenyWrite) != 1 || s.Filesystem.DenyWrite[0] != proj {
+		t.Errorf("denyWrite must be exactly the projection dir, got %v", s.Filesystem.DenyWrite)
+	}
 	if len(s.Filesystem.DenyRead) == 0 || len(s.Filesystem.AllowRead) == 0 {
 		t.Errorf("denyRead and allowRead must both be set: %s", raw)
 	}
+	var perms struct {
+		Permissions struct {
+			Deny []string `json:"deny"`
+		} `json:"permissions"`
+	}
+	_ = json.Unmarshal([]byte(raw), &perms)
+	for _, tool := range []string{"Edit", "Write", "NotebookEdit"} {
+		want := tool + "(/" + proj + "/**)"
+		found := false
+		for _, d := range perms.Permissions.Deny {
+			found = found || d == want
+		}
+		if !found {
+			t.Errorf("permissions.deny lacks %q: %v", want, perms.Permissions.Deny)
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		found := false
+		for _, p := range s.Filesystem.DenyRead {
+			found = found || p == home
+		}
+		if !found {
+			t.Errorf("denyRead must contain the real $HOME %q, got %v", home, s.Filesystem.DenyRead)
+		}
+	}
 	for _, p := range append(append(append([]string{}, s.Filesystem.AllowWrite...), s.Filesystem.AllowRead...), s.Filesystem.DenyRead...) {
-		if p != "~" && !filepath.IsAbs(p) {
+		if !filepath.IsAbs(p) {
 			t.Errorf("sandbox path %q is not absolute", p)
 		}
 	}
@@ -163,5 +195,60 @@ func TestSpike_LedgerRefusesOverBudget(t *testing.T) {
 	err := l2.Begin("would pass 0.60")
 	if !errors.Is(err, ErrBudget) || !strings.Contains(err.Error(), "0.56") {
 		t.Fatalf("cost gate: want ErrBudget naming totals, got %v", err)
+	}
+}
+
+func TestSpike_ArmPolicyDecisions(t *testing.T) {
+	root := t.TempDir()
+	arm := filepath.Join(root, "arm")
+	proj := filepath.Join(root, "proj")
+	sibling := filepath.Join(root, "sibling")
+	for _, d := range []string{arm, proj, sibling} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(sibling, "REAL.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(sibling, filepath.Join(arm, "link")); err != nil {
+		t.Fatal(err)
+	}
+	p := &ArmPolicy{ArmDir: arm, ReadOnlyDirs: []string{proj}, AllowBash: func(c string) bool { return c == "allowed-cmd" }}
+	cases := []struct {
+		name  string
+		tool  string
+		input map[string]any
+		want  bool
+	}{
+		{"read inside", "Read", map[string]any{"file_path": filepath.Join(arm, "a.txt")}, true},
+		{"read relative inside", "Read", map[string]any{"file_path": "a.txt"}, true},
+		{"read outside", "Read", map[string]any{"file_path": filepath.Join(sibling, "REAL.txt")}, false},
+		{"read traversal", "Read", map[string]any{"file_path": "../sibling/REAL.txt"}, false},
+		{"read via symlink", "Read", map[string]any{"file_path": filepath.Join(arm, "link", "REAL.txt")}, false},
+		{"read projection", "Read", map[string]any{"file_path": filepath.Join(proj, "s.txt")}, true},
+		{"write projection", "Write", map[string]any{"file_path": filepath.Join(proj, "s.txt")}, false},
+		{"write inside", "Write", map[string]any{"file_path": filepath.Join(arm, "n.txt")}, true},
+		{"write new nested inside", "Write", map[string]any{"file_path": filepath.Join(arm, "d", "e", "n.txt")}, true},
+		{"edit outside", "Edit", map[string]any{"file_path": filepath.Join(sibling, "REAL.txt")}, false},
+		{"notebook outside", "NotebookEdit", map[string]any{"notebook_path": filepath.Join(root, "x.ipynb")}, false},
+		{"grep no path", "Grep", map[string]any{"pattern": "x"}, true},
+		{"grep outside", "Grep", map[string]any{"pattern": "x", "path": sibling}, false},
+		{"glob absolute pattern", "Glob", map[string]any{"pattern": sibling + "/*"}, false},
+		{"glob traversal pattern", "Glob", map[string]any{"pattern": "../*"}, false},
+		{"glob inside", "Glob", map[string]any{"pattern": "*.txt"}, true},
+		{"bash default deny", "Bash", map[string]any{"command": "ls"}, false},
+		{"bash allowed by test", "Bash", map[string]any{"command": "allowed-cmd"}, true},
+		{"webfetch", "WebFetch", map[string]any{"url": "http://x"}, false},
+		{"unknown tool", "Mystery", nil, false},
+	}
+	for _, tc := range cases {
+		got, _, _, _, _, err := p.Decide(context.Background(), claudecode.CanUseToolRequest{ToolName: tc.tool, Input: tc.input})
+		if err != nil || got != tc.want {
+			t.Errorf("%s: allow=%v err=%v, want %v", tc.name, got, err, tc.want)
+		}
+	}
+	if n := len(p.Records()); n != len(cases) {
+		t.Errorf("recorded %d requests, want %d", n, len(cases))
 	}
 }

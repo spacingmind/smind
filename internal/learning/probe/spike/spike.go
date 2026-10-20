@@ -7,6 +7,7 @@
 package spike
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,17 +17,27 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 )
 
 // SettingsJSON returns the candidate `--settings` value for the probe arm:
 // the command sandbox on and mandatory (failIfUnavailable, no unsandboxed
 // escape hatch), no network at all (strictAllowlist with an empty allowlist,
-// no local binding), writes limited to armDir, and reads denied everywhere
-// under the arm's parent and $HOME except armDir and projectionDir.
+// no local binding), writes limited to armDir, and reads denied under the
+// arm's parent directory and the real $HOME (the launcher keeps the user's
+// HOME so the CLI still authenticates, so the sandbox, not a private HOME,
+// is what protects it) except armDir and projectionDir.
 //
-// UNPROVEN until the live tests run: the denyRead/allowRead shape is the
-// documented mechanism (CHANGELOG "allowRead ... re-allow read access within
-// denyRead regions") but its macOS behaviour is what the spike measures.
+// Measured live on macOS (claude 2.1.303, see the live tests): denyRead of
+// the real $HOME and of the arm's parent, with allowRead for the arm and the
+// projection, blocks decoy reads and writes outside the arm while the arm and
+// the projection stay readable. Two additions come from measurement:
+// --add-dir directories are working directories (acceptEdits auto-approves
+// edits there, and the CLI lists them in the sandbox write allowlist), so the
+// read-only projection gets permissions.deny on the edit tools and a
+// filesystem.denyWrite. Plain git inside the arm fails with the real $HOME
+// denied (it reads ~/.gitconfig): run it with GIT_CONFIG_GLOBAL=/dev/null.
 // armDir and projectionDir must be absolute; a relative path panics, because
 // a relative sandbox path would silently mean something else to the CLI.
 func SettingsJSON(armDir, projectionDir string) string {
@@ -36,7 +47,19 @@ func SettingsJSON(armDir, projectionDir string) string {
 		}
 	}
 	armDir, projectionDir = filepath.Clean(armDir), filepath.Clean(projectionDir)
+	denyRead := []string{filepath.Dir(armDir)}
+	if home, err := os.UserHomeDir(); err == nil && filepath.IsAbs(home) {
+		denyRead = append([]string{filepath.Clean(home)}, denyRead...)
+	}
+	// --add-dir directories are working directories: acceptEdits auto-approves
+	// edits there (measured, run 1), so the read-only projection needs an
+	// explicit deny on the edit tools ("//" = absolute filesystem path).
+	denyEdit := make([]string, 0, 3)
+	for _, tool := range []string{"Edit", "Write", "NotebookEdit"} {
+		denyEdit = append(denyEdit, tool+"(/"+projectionDir+"/**)")
+	}
 	settings := map[string]any{
+		"permissions": map[string]any{"deny": denyEdit},
 		"sandbox": map[string]any{
 			"enabled":                  true,
 			"failIfUnavailable":        true,
@@ -49,7 +72,8 @@ func SettingsJSON(armDir, projectionDir string) string {
 			},
 			"filesystem": map[string]any{
 				"allowWrite": []string{armDir},
-				"denyRead":   []string{"~", filepath.Dir(armDir)},
+				"denyWrite":  []string{projectionDir},
+				"denyRead":   denyRead,
 				"allowRead":  []string{armDir, projectionDir},
 			},
 		},
@@ -191,4 +215,136 @@ func (l *Ledger) Record(e Entry) error {
 	}
 	_, err = f.Write(append(line, '\n'))
 	return err
+}
+
+// PolicyRecord is one can_use_tool request the CLI routed to ArmPolicy and
+// what was decided. Input values are not stored, only the resolved path.
+type PolicyRecord struct {
+	Tool    string
+	Path    string
+	Allowed bool
+	Reason  string
+}
+
+// ArmPolicy is the permission decider for the probe arm (a
+// claudecode.PermissionPolicy). It allows the built-in file tools only on
+// paths that resolve (symlinks followed) inside ArmDir (read and write) or
+// ReadOnlyDirs (Read/Glob/Grep only), denies every other tool, and records
+// every request so a test can tell whether a call reached the decider at all.
+// AllowBash, when set, lets a Bash request through if it returns true for
+// the command; the default denies Bash (autoAllowBashIfSandboxed already runs
+// sandboxed commands without asking, so a Bash request means the CLI wants to
+// leave the sandbox).
+type ArmPolicy struct {
+	ArmDir       string
+	ReadOnlyDirs []string
+	AllowBash    func(command string) bool
+
+	mu  sync.Mutex
+	log []PolicyRecord
+}
+
+var (
+	policyReadTools  = map[string]bool{"Read": true, "Glob": true, "Grep": true}
+	policyWriteTools = map[string]bool{"Edit": true, "Write": true, "NotebookEdit": true, "MultiEdit": true}
+)
+
+// Records returns a copy of every request seen so far.
+func (p *ArmPolicy) Records() []PolicyRecord {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]PolicyRecord(nil), p.log...)
+}
+
+// Decide implements claudecode.PermissionPolicy.
+func (p *ArmPolicy) Decide(_ context.Context, req claudecode.CanUseToolRequest) (bool, map[string]any, string, []claudecode.PermissionUpdate, bool, error) {
+	allow, path, reason := p.decide(req)
+	p.mu.Lock()
+	p.log = append(p.log, PolicyRecord{Tool: req.ToolName, Path: path, Allowed: allow, Reason: reason})
+	p.mu.Unlock()
+	if !allow {
+		return false, nil, "denied by the probe arm policy: " + reason, nil, false, nil
+	}
+	return true, req.Input, "", nil, false, nil
+}
+
+func (p *ArmPolicy) decide(req claudecode.CanUseToolRequest) (allow bool, path, reason string) {
+	if req.ToolName == "Bash" {
+		cmd, _ := req.Input["command"].(string)
+		if p.AllowBash != nil && p.AllowBash(cmd) {
+			return true, "", "bash command allowed by test"
+		}
+		return false, "", "bash outside the sandbox is never allowed"
+	}
+	read, write := policyReadTools[req.ToolName], policyWriteTools[req.ToolName]
+	if !read && !write {
+		return false, "", "tool " + req.ToolName + " is not allowed"
+	}
+	var paths []string
+	for _, k := range []string{"file_path", "path", "notebook_path"} {
+		if v, ok := req.Input[k].(string); ok && v != "" {
+			paths = append(paths, v)
+		}
+	}
+	if pat, ok := req.Input["pattern"].(string); ok && req.ToolName == "Glob" {
+		paths = append(paths, globPrefix(pat))
+	}
+	if len(paths) == 0 {
+		paths = []string{p.ArmDir} // Glob/Grep without a path search the cwd
+	}
+	for _, raw := range paths {
+		resolved := p.resolve(raw)
+		path = resolved
+		roots := []string{p.ArmDir}
+		if read {
+			roots = append(roots, p.ReadOnlyDirs...)
+		}
+		ok := false
+		for _, root := range roots {
+			if within(resolved, p.resolve(root)) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return false, resolved, "path is outside the arm"
+		}
+	}
+	return true, path, "inside the arm"
+}
+
+// globPrefix is the literal directory part of a glob pattern, so an
+// absolute or "../" pattern is judged by where it starts.
+func globPrefix(pattern string) string {
+	if i := strings.IndexAny(pattern, "*?[{"); i >= 0 {
+		pattern = pattern[:i]
+	}
+	if pattern == "" {
+		return "."
+	}
+	return pattern
+}
+
+// resolve makes raw absolute (relative to ArmDir), cleans it and follows
+// symlinks through the longest existing prefix.
+func (p *ArmPolicy) resolve(raw string) string {
+	if !filepath.IsAbs(raw) {
+		raw = filepath.Join(p.ArmDir, raw)
+	}
+	raw = filepath.Clean(raw)
+	rest := ""
+	for cur := raw; ; cur = filepath.Dir(cur) {
+		if real, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.Join(real, rest)
+		}
+		if cur == filepath.Dir(cur) {
+			return raw
+		}
+		rest = filepath.Join(filepath.Base(cur), rest)
+	}
+}
+
+func within(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
