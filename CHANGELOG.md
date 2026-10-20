@@ -1,5 +1,88 @@
 # Changelog
 
+## [0.13.0](https://github.com/spacingmind/smind/compare/v0.12.0...v0.13.0) (2026-10-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **mobile:** E2EE v2 in the TypeScript relay client (ADR-0035) ([#434](https://github.com/spacingmind/smind/issues/434))
+* **desktop:** E2EE v2 in the Rust relay client (ADR-0035) ([#433](https://github.com/spacingmind/smind/issues/433))
+* **relay:** E2EE v1 is removed; v1 and v2 peers refuse each other.
+
+### Features
+
+* **accounts:** loginId and account.oauthComplete paste-the-redirect (ADR-0033 B2) ([#389](https://github.com/spacingmind/smind/issues/389)) ([011a8ec](https://github.com/spacingmind/smind/commit/011a8ecefb93d5bbe4c064f24302dd3e97c75826))
+* **accounts:** OpenAI device-code login, listener hardening and paste-only fallback (ADR-0033 B3) ([#396](https://github.com/spacingmind/smind/issues/396)) ([a0cba25](https://github.com/spacingmind/smind/commit/a0cba254b1dd6364b46de54c037cd67118d8b6ec))
+* **accounts:** stable account identity and in-place re-login (ADR-0033 B1) ([#385](https://github.com/spacingmind/smind/issues/385)) ([cace011](https://github.com/spacingmind/smind/commit/cace0114fbbac89bd96d5f7c38bbef2d9cedd860))
+* **cli:** smind service for systemd and launchd (ADR-0031 P8) ([#348](https://github.com/spacingmind/smind/issues/348)) ([0714031](https://github.com/spacingmind/smind/commit/07140310cc635aa516b5649e47669aebb7cd023a))
+* **cli:** smind service for Windows via a per-user scheduled task (ADR-0031 P9) ([#353](https://github.com/spacingmind/smind/issues/353)) ([f82dceb](https://github.com/spacingmind/smind/commit/f82dceb6faddddf866c22ca5b1e44627ed6a435c))
+* **cli:** smind task mode for humans (D12) ([#369](https://github.com/spacingmind/smind/issues/369)) ([96aa2ae](https://github.com/spacingmind/smind/commit/96aa2ae872d332d32186b97b6ebe2cf919fcb0ee))
+* daemon.info and an older-daemon notice (ADR-0031 P10) ([#356](https://github.com/spacingmind/smind/issues/356)) ([a2a73b5](https://github.com/spacingmind/smind/commit/a2a73b5d13434ae665b5e1b3f1175deee2a69764))
+* **desktop:** connect to relays with a CA-issued certificate (ADR-0031 P12c follow-up) ([#363](https://github.com/spacingmind/smind/issues/363)) ([3a0d6f5](https://github.com/spacingmind/smind/commit/3a0d6f5cb990729df52cd14d6b5f6540e35078d4))
+* **desktop:** E2EE v2 in the Rust relay client (ADR-0035) ([#433](https://github.com/spacingmind/smind/issues/433)) ([8437454](https://github.com/spacingmind/smind/commit/8437454bd2f6c0c1f58981a7e520ae9b35bf65d8))
+* **desktop:** first-run and connection onboarding (ADR-0031 P5) ([#357](https://github.com/spacingmind/smind/issues/357)) ([b517e53](https://github.com/spacingmind/smind/commit/b517e53d22988c5bc7f89fa6229fb3db7108f70a))
+* **desktop:** relay device identity, keepalive and multi-device (ADR-0031 P13a) ([#351](https://github.com/spacingmind/smind/issues/351)) ([b59cc8a](https://github.com/spacingmind/smind/commit/b59cc8a3bc51bcadbae9683aecbce80a0795e2a1))
+* direct connections with a daemon password and smind config (ADR-0031 P4) ([#349](https://github.com/spacingmind/smind/issues/349)) ([9bc05fb](https://github.com/spacingmind/smind/commit/9bc05fbe4e918533436fcc93dd10cff89c755dc8))
+* Docker image for homelab daemons (ADR-0031 P11) ([#358](https://github.com/spacingmind/smind/issues/358)) ([769c18a](https://github.com/spacingmind/smind/commit/769c18ae3a9ac6709ce5cddcf75bb454d2b85be4))
+* **learning:** approval service and landing re-check (ADR-0026 B4a) ([#405](https://github.com/spacingmind/smind/issues/405)) ([9f1cf4e](https://github.com/spacingmind/smind/commit/9f1cf4e2e8b4674bdf7a5569d6b37420b5f38544))
+* **learning:** collector, reflect job pipeline and daemon wiring (ADR-0026 B2d) ([#413](https://github.com/spacingmind/smind/issues/413)) ([8d1fc4b](https://github.com/spacingmind/smind/commit/8d1fc4b1cdf1d6344bf8dde1f2eb3ebf9aeb471d))
+* **learning:** connect collector, delivery, wsapi; budget in status; export RPC and CLI (ADR-0026 B6) ([#418](https://github.com/spacingmind/smind/issues/418)) ([06a0500](https://github.com/spacingmind/smind/commit/06a050021593fc1563a838ac5c3b78494d51111c))
+* **learning:** curator job and library snapshots (ADR-0026 B5b) ([#417](https://github.com/spacingmind/smind/issues/417)) ([2da418b](https://github.com/spacingmind/smind/commit/2da418baad2ed8a069dbffbfc9cabc9d80a110a0))
+* **learning:** deterministic gate, similarity check, human-skill loader (ADR-0026 B1c) ([#394](https://github.com/spacingmind/smind/issues/394)) ([adbd009](https://github.com/spacingmind/smind/commit/adbd009d010cee1201223ef90e5c5f4405a2aac3))
+* **learning:** explicit skill export with symlink-safe install (ADR-0026 B5a) ([#410](https://github.com/spacingmind/smind/issues/410)) ([88a590e](https://github.com/spacingmind/smind/commit/88a590e42fc44470273ac3196f6ae1b9080862e4))
+* **learning:** learned-skill delivery, load counting and lifecycle application (ADR-0026 B3b) ([#414](https://github.com/spacingmind/smind/issues/414)) ([ddf7d8c](https://github.com/spacingmind/smind/commit/ddf7d8ca402de82ac314072d56439fdd4e8efc43))
+* **learning:** read-only projection, ACP preface and load matcher (ADR-0026 B3a) ([#406](https://github.com/spacingmind/smind/issues/406)) ([4203507](https://github.com/spacingmind/smind/commit/42035074dcf726c9638ee95bc628fd5440192d1d))
+* **learning:** redactor and learning config section (ADR-0026 B1b) ([#393](https://github.com/spacingmind/smind/issues/393)) ([162dbaf](https://github.com/spacingmind/smind/commit/162dbafc43439ab79661e4899c2ae99f1608520d))
+* **learning:** reflector/curator prompts and strict output parser (ADR-0026 B2e) ([#403](https://github.com/spacingmind/smind/issues/403)) ([f2f544c](https://github.com/spacingmind/smind/commit/f2f544cddc1627f981ff5d4a9947b00061b8c8bc))
+* **learning:** run origin persistence, isolated start option and executor (ADR-0026 B2f) ([#408](https://github.com/spacingmind/smind/issues/408)) ([e340314](https://github.com/spacingmind/smind/commit/e340314337c78efc29bea0779aa80f0866deb375))
+* **learning:** run purpose, hidden system tasks, run-finished observer (ADR-0026 B2b) ([#401](https://github.com/spacingmind/smind/issues/401)) ([897920a](https://github.com/spacingmind/smind/commit/897920a9d1f086bca0ae2be95531d3666ab2a148))
+* **learning:** store schema, ledger/versions, lifecycle function (ADR-0026 B1a) ([#392](https://github.com/spacingmind/smind/issues/392)) ([152c67c](https://github.com/spacingmind/smind/commit/152c67ca4e081480429d30111b6519c9fb9b93c3))
+* **learning:** window builder and eligibility predicates (ADR-0026 B2a) ([#400](https://github.com/spacingmind/smind/issues/400)) ([90a6750](https://github.com/spacingmind/smind/commit/90a675060fb4e7a727aa6b5b940a8ebec9f54890))
+* **learning:** wsapi RPCs, lifecycle events and smind learn CLI (ADR-0026 B4b) ([#411](https://github.com/spacingmind/smind/issues/411)) ([6809aed](https://github.com/spacingmind/smind/commit/6809aed82c004c5c345dc70001fe14337930bdec))
+* **mobile:** E2EE v2 in the TypeScript relay client (ADR-0035) ([#434](https://github.com/spacingmind/smind/issues/434)) ([5f3f352](https://github.com/spacingmind/smind/commit/5f3f35208ac9e28bfba84f9c3c743a540c267149))
+* **mobile:** prompt for the daemon password on relay connections (ADR-0031 P13c) ([#362](https://github.com/spacingmind/smind/issues/362)) ([9d83182](https://github.com/spacingmind/smind/commit/9d831827d7f835b7ff79944086703a2353284d87))
+* **mobile:** relay device identity, keepalive and multi-device (ADR-0031 P13b) ([#350](https://github.com/spacingmind/smind/issues/350)) ([fa22f59](https://github.com/spacingmind/smind/commit/fa22f594613d375c234257e795b86cf9b18466d0))
+* **mobile:** show the needs-continue state and a Continue action for capped runs (ADR-0027 D13) ([#379](https://github.com/spacingmind/smind/issues/379)) ([b8b26ca](https://github.com/spacingmind/smind/commit/b8b26caf044868932ba04e624cb9bb7fc395da95))
+* **mobile:** stop a live run; show delivered queued prompts ([#387](https://github.com/spacingmind/smind/issues/387)) ([d4b3647](https://github.com/spacingmind/smind/commit/d4b364766cf0f14a780b2b6428df83682cfe0b7f))
+* **mobile:** use the daemon prompt queue while a run is live ([#383](https://github.com/spacingmind/smind/issues/383)) ([46d71c8](https://github.com/spacingmind/smind/commit/46d71c83f069b3e9de57032d66cacb07b9479393))
+* **palette:** open the daemon settings sections from the palette ([#375](https://github.com/spacingmind/smind/issues/375)) ([5c9ddce](https://github.com/spacingmind/smind/commit/5c9ddceda4f1cc9a4c842962cb93d8b1d5a4ca41))
+* **relay:** CA-verified TLS for relay clients and no silent trust-on-first-use (ADR-0031 P12c) ([#361](https://github.com/spacingmind/smind/issues/361)) ([eecd40b](https://github.com/spacingmind/smind/commit/eecd40bc30619de6bc7321813a19d786859a9b51))
+* **relay:** E2EE v2 Go core — fresh daemon ephemeral key (ADR-0035) ([#431](https://github.com/spacingmind/smind/issues/431)) ([87b7496](https://github.com/spacingmind/smind/commit/87b7496d09a5ba0a21d75124597c0c43f06773bd))
+* **relay:** require the daemon password from relay devices (ADR-0031 P13c) ([#360](https://github.com/spacingmind/smind/issues/360)) ([660080a](https://github.com/spacingmind/smind/commit/660080adba6fa0a2e909b5e071112132d5d7dcfc))
+* **runs:** derived needs-continue disposition (D13) ([#373](https://github.com/spacingmind/smind/issues/373)) ([ff5a182](https://github.com/spacingmind/smind/commit/ff5a18220000b64279472a3516c39c2688606c74))
+* **runs:** record base/head sha and dirty state for each run (O1) ([#367](https://github.com/spacingmind/smind/issues/367)) ([b230b83](https://github.com/spacingmind/smind/commit/b230b8303e4ddabf6c70f15e987942cfa321826b))
+* **store:** SQLite WAL mode with synchronous=NORMAL ([#424](https://github.com/spacingmind/smind/issues/424)) ([ff7e3fc](https://github.com/spacingmind/smind/commit/ff7e3fca311aa8181ff865e80da4b4056c567a37))
+* **taskrunner:** isolated no-tools claude-native run (ADR-0026 B2c) ([#402](https://github.com/spacingmind/smind/issues/402)) ([db2ef6a](https://github.com/spacingmind/smind/commit/db2ef6acaa675661e059d54168f15ae9a4a6917a))
+* **tasks:** archive finished descendants and stop a whole task tree (H11) ([#376](https://github.com/spacingmind/smind/issues/376)) ([bc37b09](https://github.com/spacingmind/smind/commit/bc37b09f982f4425872a315bab251e24b6b96353))
+* **ui:** export a learned skill and show the learning budget (ADR-0026 B4d) ([#420](https://github.com/spacingmind/smind/issues/420)) ([12bd4a0](https://github.com/spacingmind/smind/commit/12bd4a016ed4aa179c02c61f295ef580c7ced518))
+* **ui:** learned skills inbox, detail and settings with the possible-duplicate view (ADR-0026 B4c) ([#412](https://github.com/spacingmind/smind/issues/412)) ([b94d5dd](https://github.com/spacingmind/smind/commit/b94d5ddc91dee5f3020d2b98478c4e7ac8ab87d4))
+* **ui:** provider catalog, profiles and health on the shared query cache (ADR-0032 S3) ([#407](https://github.com/spacingmind/smind/issues/407)) ([2a783d6](https://github.com/spacingmind/smind/commit/2a783d64f6bd3236cbff2b4430708757bc30e519))
+* **ui:** shared run-config pickers and one describeProfile (ADR-0032 S4) ([#415](https://github.com/spacingmind/smind/issues/415)) ([e0ba6af](https://github.com/spacingmind/smind/commit/e0ba6afa5432bbcaf6fe50a5d88907c441c5c869))
+* **ui:** shared status, error, confirm and empty/loading primitives (ADR-0032 S5) ([#422](https://github.com/spacingmind/smind/issues/422)) ([9a6cf4a](https://github.com/spacingmind/smind/commit/9a6cf4a923379b3eeced079c6195adb88168a024))
+* **ui:** TanStack Query foundation; accounts and plan usage share one cache (ADR-0032) ([#386](https://github.com/spacingmind/smind/issues/386)) ([4822d30](https://github.com/spacingmind/smind/commit/4822d302df8a1ef97a569f32a4f640108271fd31))
+* **ui:** zustand preference stores, one formatRelativeTime and a shared workspace tree (ADR-0032 S6) ([#425](https://github.com/spacingmind/smind/issues/425)) ([a97f373](https://github.com/spacingmind/smind/commit/a97f373b39236d716e5875fc717adf2d5832f20b))
+* **web:** connect form with sign-in methods, device code and paste-the-redirect (ADR-0033 B4) ([#409](https://github.com/spacingmind/smind/issues/409)) ([215e6fb](https://github.com/spacingmind/smind/commit/215e6fb0215435d7dae5cf59e74c382cc1659ed1))
+* **web:** Providers tab redesign — master/detail, health badges, connect and re-login (ADR-0033 A1) ([#416](https://github.com/spacingmind/smind/issues/416)) ([682d3eb](https://github.com/spacingmind/smind/commit/682d3ebc6fc6ae33956c7a3be3ead8f9effa1e24))
+
+
+### Bug Fixes
+
+* **accounts:** Anthropic identity includes the organization uuid (ADR-0033 D6) ([#404](https://github.com/spacingmind/smind/issues/404)) ([c0be48c](https://github.com/spacingmind/smind/commit/c0be48c21559f6e88c2582e04505dd386abe99af))
+* **cli:** race-free stdBuffer in serve tests ([#364](https://github.com/spacingmind/smind/issues/364)) ([3d0d7c9](https://github.com/spacingmind/smind/commit/3d0d7c93f92fb764da1ea24c2622e59fd6815468))
+* **desktop:** keep connections the app doesn't understand instead of resetting the file ([#382](https://github.com/spacingmind/smind/issues/382)) ([55198f4](https://github.com/spacingmind/smind/commit/55198f40574bf6a6cbffd2697f1d950122566e43))
+* **desktop:** open provider login pages and external links in the system browser ([#370](https://github.com/spacingmind/smind/issues/370)) ([6da752f](https://github.com/spacingmind/smind/commit/6da752f0b591d0f7dc78e1f709d520ef6a875021))
+* **desktop:** verify an SSH tunnel's local port belongs to our ssh ([#381](https://github.com/spacingmind/smind/issues/381)) ([9ad9838](https://github.com/spacingmind/smind/commit/9ad98385147d13221878b4a5ac3172a5fb66db7c))
+* **learning:** isolated run accepts the CLI's built-in plugins at init ([#426](https://github.com/spacingmind/smind/issues/426)) ([12d9ebd](https://github.com/spacingmind/smind/commit/12d9ebdc9bb3aee63b091a04c326aafd3dd505ad))
+* **learning:** pin the Haiku model id; meter failed runs and cache tokens ([#428](https://github.com/spacingmind/smind/issues/428)) ([e7ae521](https://github.com/spacingmind/smind/commit/e7ae5217a03d11d8ef3904c238e7a97b4cbc6a50))
+* **mobile:** explicit CSPRNG for relay keys and nonces ([#437](https://github.com/spacingmind/smind/issues/437)) ([3e6d030](https://github.com/spacingmind/smind/commit/3e6d030d4589ddfe8af4e442d9710fe7e44aa103))
+* **relay:** bind device_hello to a daemon challenge; answer unknown methods ([#354](https://github.com/spacingmind/smind/issues/354)) ([f25fafb](https://github.com/spacingmind/smind/commit/f25fafb1773ef35b4446ade0ee260a5ee061ef45))
+* **relay:** pin the relay's leaf certificate, not any certificate in the chain ([#355](https://github.com/spacingmind/smind/issues/355)) ([41d1154](https://github.com/spacingmind/smind/commit/41d115498721d03e5e6fa154533e376df5918ec5))
+* **runs:** tree guard concurrency flakes ([#423](https://github.com/spacingmind/smind/issues/423)) ([eee600f](https://github.com/spacingmind/smind/commit/eee600f0a7d1adf6309b1ab7d8c491a02f4fa306))
+* **service:** per-user Windows task, query errors, launchd enabled state, crash output in daemon.log ([#391](https://github.com/spacingmind/smind/issues/391)) ([cb5154e](https://github.com/spacingmind/smind/commit/cb5154ee1e5027577c2b6e8749775a39f823ba19))
+* **test:** relay hello-replay and real-shell terminal flakes ([#397](https://github.com/spacingmind/smind/issues/397)) ([c78aaa6](https://github.com/spacingmind/smind/commit/c78aaa6ad1a1d6dd680d8f063e5811c8d4a83976))
+* **test:** remove the root causes of recurring CI flakes ([#388](https://github.com/spacingmind/smind/issues/388)) ([8d5336d](https://github.com/spacingmind/smind/commit/8d5336df3d766bd547f795ed01191e80ab9b7c02))
+* **windows:** make the nightly full suite pass on windows-latest ([#366](https://github.com/spacingmind/smind/issues/366)) ([9a773e5](https://github.com/spacingmind/smind/commit/9a773e52502793a90314df1f79175c32d28c0325))
+
 ## [0.12.0](https://github.com/spacingmind/smind/compare/v0.11.1...v0.12.0) (2026-10-15)
 
 
