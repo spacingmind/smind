@@ -158,6 +158,10 @@ func (s *Service) enqueue(cw store.ChatWorkspace, chatID int64, trigger string, 
 	if err != nil {
 		return store.LearningJob{}, fmt.Errorf("create reflect job: %w", err)
 	}
+	// Announce "queued" BEFORE the goroutine can announce "running": started
+	// first, a busy scheduler (or a slow notifier) let a client see running or
+	// even a terminal status before queued.
+	s.d.Notify.NotifyJob(cw.WorkspaceID, job.ID, statusQueued)
 	s.active[cw.WorkspaceID] = true
 	s.wg.Add(1)
 	go func() {
@@ -169,6 +173,5 @@ func (s *Service) enqueue(cw store.ChatWorkspace, chatID int64, trigger string, 
 		}()
 		s.runJob(job.ID)
 	}()
-	s.d.Notify.NotifyJob(cw.WorkspaceID, job.ID, "queued")
 	return job, nil
 }
