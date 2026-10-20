@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/spacingmind/smind/compare/v0.13.0...v0.13.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **docker:** pin the relay fingerprint in the image's relay-connect test ([#443](https://github.com/spacingmind/smind/issues/443)) ([9fe47e2](https://github.com/spacingmind/smind/commit/9fe47e2ca06af8ffbfbf70c25142db39abb74b65))
+
 ## [0.13.0](https://github.com/spacingmind/smind/compare/v0.12.0...v0.13.0) (2026-10-20)
 
 

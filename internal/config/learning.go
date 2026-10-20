@@ -70,6 +70,16 @@ type LearningConfig struct {
 	// DefaultHaikuModel (same reasoning as ReflectorModel); "" = the
 	// provider default.
 	CuratorModel string `yaml:"curatorModel"`
+	// Probe holds the learning-probe knobs (ADR-0037).
+	Probe LearningProbe `yaml:"probe"`
+}
+
+// LearningProbe holds the stage-0 prevalence scan knobs (ADR-0037).
+type LearningProbe struct {
+	// PrevalenceDays is how far back the scan looks. Default 30.
+	PrevalenceDays int `yaml:"prevalenceDays"`
+	// PrevalenceMaxEvents caps the run events one scan reads. Default 20000.
+	PrevalenceMaxEvents int `yaml:"prevalenceMaxEvents"`
 }
 
 // LearningSimilarity holds the near-duplicate thresholds: at/above Duplicate
@@ -113,6 +123,7 @@ func DefaultLearning() LearningConfig {
 		Similarity:             LearningSimilarity{Duplicate: 0.85, Possible: 0.60},
 		ReflectorModel:         DefaultHaikuModel,
 		CuratorModel:           DefaultHaikuModel,
+		Probe:                  LearningProbe{PrevalenceDays: 30, PrevalenceMaxEvents: 20000},
 	}
 }
 
@@ -138,6 +149,8 @@ func (c LearningConfig) Validate() error {
 		{"curatorMinSkills", c.CuratorMinSkills},
 		{"curatorMinIntervalDays", c.CuratorMinIntervalDays},
 		{"prefaceBudgetBytes", c.PrefaceBudgetBytes},
+		{"probe.prevalenceDays", c.Probe.PrevalenceDays},
+		{"probe.prevalenceMaxEvents", c.Probe.PrevalenceMaxEvents},
 	} {
 		if kv.val < 1 {
 			return fmt.Errorf("learning.%s must be >= 1, got %d", kv.key, kv.val)

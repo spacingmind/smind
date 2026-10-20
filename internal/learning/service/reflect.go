@@ -300,8 +300,14 @@ func (s *Service) overBudget(workspaceID int64, cfg config.LearningConfig, windo
 }
 
 func (s *Service) redactor(cw store.ChatWorkspace) *redact.Redactor {
+	return NewRedactor(s.d.Store, s.d.Home, cw.WorkspacePath)
+}
+
+// NewRedactor builds the workspace redactor: MCP secrets plus the home,
+// workspace and smind-home directories.
+func NewRedactor(st *store.Store, home, workspacePath string) *redact.Redactor {
 	var secrets []string
-	if rows, err := s.d.Store.ListMcpServers(); err == nil {
+	if rows, err := st.ListMcpServers(); err == nil {
 		secrets = taskrunner.McpSecrets(rows)
 	} else {
 		slog.Warn("learning: load MCP servers for redaction", "err", err)
@@ -310,7 +316,7 @@ func (s *Service) redactor(cw store.ChatWorkspace) *redact.Redactor {
 	if h, err := os.UserHomeDir(); err == nil {
 		dirs = append(dirs, h)
 	}
-	dirs = append(dirs, cw.WorkspacePath, s.d.Home)
+	dirs = append(dirs, workspacePath, home)
 	return redact.New(secrets, dirs)
 }
 
