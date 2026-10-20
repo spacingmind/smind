@@ -12,9 +12,12 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/spacingmind/smind/internal/learning/approval"
+	"github.com/spacingmind/smind/internal/learning/executor"
 	"github.com/spacingmind/smind/internal/learning/gate"
+	"github.com/spacingmind/smind/internal/learning/probe/prevalence"
 	learningservice "github.com/spacingmind/smind/internal/learning/service"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
 type learnFx struct {
@@ -654,4 +657,106 @@ func TestLearning_StatusReportsBudget(t *testing.T) {
 	if o := (learningBudget{WindowHours: 24, CapUSD: 0.25, CapTokens: 150000}); got[other.ID] != o {
 		t.Fatalf("other workspace budget = %+v, want %+v", got[other.ID], o)
 	}
+}
+
+// failExec fails the test if the learning executor is ever used.
+type failExec struct{ t *testing.T }
+
+func (e failExec) Run(context.Context, executor.Request) (executor.Result, error) {
+	e.t.Error("prevalence scan must not call the model executor")
+	return executor.Result{}, nil
+}
+
+// prevalenceFx wires a real Store-backed prevalence service plus a
+// collector holding a failing executor, and seeds a proposal whose
+// failure_recovery evidence points at a user run.
+func prevalenceFx(t *testing.T, failure string) (*learnFx, store.LearnedProposal) {
+	t.Helper()
+	f := newLearnFx(t)
+	coll := learningservice.New(learningservice.Deps{Store: f.db, Exec: failExec{t}, Approval: f.svc})
+	f.api.SetLearning(LearningDeps{
+		Approval:   f.svc,
+		Trigger:    coll,
+		Prevalence: prevalence.New(prevalence.Deps{Store: f.db}),
+	})
+	task, chat := f.userChat()
+	tcType := strconv.Itoa(int(taskrunner.EventTypeToolCall))
+	var successSeq int64
+	for i, runID := range []string{"pr1", "pr2"} {
+		if _, err := f.db.CreateRun(store.Run{ID: runID, TaskID: task.ID, ChatID: chat.ID, Provider: "claude-native", Prompt: "p",
+			Status: "completed", StartedAt: time.Now().UTC(), Purpose: "user"}); err != nil {
+			t.Fatal(err)
+		}
+		evs := []string{
+			`{"type":` + tcType + `,"toolCallId":"a","toolName":"Bash","toolStatus":"failure","toolResult":` + strconv.Quote(failure) + `}`,
+			`{"type":` + tcType + `,"toolCallId":"b","toolName":"Bash","toolStatus":"success","toolResult":"ok"}`,
+		}
+		for seq, e := range evs {
+			if _, err := f.db.AppendRunEvent(runID, int64(seq), e); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if i == 0 {
+			successSeq = 1
+		}
+	}
+	ev := `[{"kind":"failure_recovery","run_id":"pr1","seq":` + strconv.FormatInt(successSeq, 10) + `,"quote":"q"}]`
+	p, err := f.db.CreateProposal(store.LearnedProposal{WorkspaceID: f.w.ID, Kind: "create", Source: "reflector", Name: "learned-x", Evidence: ev})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f, p
+}
+
+func TestPrevalenceRPC_NoModelCall(t *testing.T) {
+	t.Parallel()
+	f, p := prevalenceFx(t, "make: *** [build] Error 2")
+	var got struct {
+		WindowDays int `json:"windowDays"`
+		Signatures []struct {
+			Kind       string  `json:"kind"`
+			Tool       string  `json:"tool"`
+			Label      string  `json:"label"`
+			Runs       int     `json:"runs"`
+			Chats      int     `json:"chats"`
+			LastSeenAt *string `json:"lastSeenAt"`
+			Truncated  bool    `json:"truncated"`
+		} `json:"signatures"`
+	}
+	f.ok("learning.proposals.prevalence", map[string]any{"id": p.ID}, &got)
+	if got.WindowDays != 30 || len(got.Signatures) != 1 {
+		t.Fatalf("got = %+v", got)
+	}
+	s := got.Signatures[0]
+	if s.Kind != "failure_recovery" || s.Tool != "Bash" || s.Runs != 2 || s.Chats != 1 || s.LastSeenAt == nil || s.Truncated {
+		t.Fatalf("signature = %+v", s)
+	}
+
+	// A proposal without signature evidence yields [] (never null).
+	q := f.propose(lSkillA)
+	res, e := f.call("learning.proposals.prevalence", map[string]any{"id": q.ID})
+	if e != nil || !strings.Contains(string(res), `"signatures":[]`) {
+		t.Fatalf("empty result = %s err=%+v", res, e)
+	}
+}
+
+func TestPrevalenceRPC_OutputRedacted(t *testing.T) {
+	t.Parallel()
+	token := "ghp_" + strings.Repeat("aB3dE5gH7j", 4)
+	f, p := prevalenceFx(t, "auth failed with token "+token)
+	res, e := f.call("learning.proposals.prevalence", map[string]any{"id": p.ID})
+	if e != nil {
+		t.Fatalf("error = %+v", e)
+	}
+	if strings.Contains(strings.ToLower(string(res)), "ghp_") || strings.Contains(string(res), "aB3dE5") {
+		t.Fatalf("result leaks the token: %s", res)
+	}
+}
+
+func TestPrevalenceRPC_Errors(t *testing.T) {
+	t.Parallel()
+	f := newLearnFx(t)
+	f.fail("learning.proposals.prevalence", map[string]any{"id": 1}, "unavailable")
+	f.api.SetLearning(LearningDeps{Prevalence: prevalence.New(prevalence.Deps{Store: f.db})})
+	f.fail("learning.proposals.prevalence", map[string]any{"id": 99999}, "not_found")
 }

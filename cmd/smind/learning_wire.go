@@ -12,6 +12,7 @@ import (
 	"github.com/spacingmind/smind/internal/learning/executor"
 	"github.com/spacingmind/smind/internal/learning/gate"
 	"github.com/spacingmind/smind/internal/learning/humanskills"
+	"github.com/spacingmind/smind/internal/learning/probe/prevalence"
 	"github.com/spacingmind/smind/internal/learning/projection"
 	"github.com/spacingmind/smind/internal/learning/redact"
 	learningservice "github.com/spacingmind/smind/internal/learning/service"
@@ -148,6 +149,13 @@ func wireLearning(ctx context.Context, w learningWiring) (stop func()) {
 			}
 		},
 	}
+	// The prevalence scan is read-only and calls no model, so it is wired
+	// even with the collector off (data stays manageable).
+	deps.Prevalence = prevalence.New(prevalence.Deps{
+		Store:  w.DB,
+		Config: func() config.LearningConfig { return lc },
+		Home:   w.Home,
+	})
 	var deliv *delivery.Service
 	var coll *learningservice.Service
 	if lc.Enabled {
