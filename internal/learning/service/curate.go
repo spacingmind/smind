@@ -109,6 +109,8 @@ func (s *Service) enqueueCurate(workspaceID int64, trigger string, due func() (b
 	if err != nil {
 		return store.LearningJob{}, fmt.Errorf("create curate job: %w", err)
 	}
+	// "queued" is announced before the goroutine can announce "running".
+	s.d.Notify.NotifyJob(workspaceID, job.ID, statusQueued)
 	s.active[workspaceID] = true
 	s.wg.Add(1)
 	go func() {
@@ -120,7 +122,6 @@ func (s *Service) enqueueCurate(workspaceID int64, trigger string, due func() (b
 		}()
 		s.runJob(job.ID)
 	}()
-	s.d.Notify.NotifyJob(workspaceID, job.ID, statusQueued)
 	return job, nil
 }
 
