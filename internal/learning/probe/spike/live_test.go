@@ -918,7 +918,9 @@ func TestLive_WriteOutsideArmDenied(t *testing.T) {
 	}
 	// S6, documented exception: the CLI's per-session $TMPDIR IS writable, so
 	// the effective write set is the arm PLUS that tmp dir (the requested set is
-	// the arm only). Asserted so a change in this behaviour is noticed.
+	// the arm only). Asserted so a change in this behaviour is noticed. (Under an
+	// allow-list WITHOUT the /var,/tmp,/etc symlink nodes it was not writable,
+	// calls #20-#21; with them it is, call #24.)
 	s := r.step(t, stWTmpdir)
 	if s.rc != 0 {
 		t.Errorf("documented exception no longer holds: write to the sandboxed shell's $TMPDIR failed: %q", clip(s.out, 200))
@@ -1026,12 +1028,18 @@ func TestLive_NetworkToNonModelHostDenied(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(f.arm, "example.out")); strings.Contains(string(b), "Example Domain") {
 		t.Error("sandboxed curl fetched https://example.com")
 	}
-	// DNS: recorded, not asserted (mDNSResponder is outside the sandbox; whether
-	// resolution works from the arm is a finding about an exfiltration channel).
-	for name, n := range map[string]int{"example.com": stDNSExample, "unique .invalid": stDNSUnique} {
-		s := r.step(t, n)
-		t.Logf("INFO DNS lookup %s from the arm: rc=%d out=%q", name, s.rc, clip(s.out, 240))
+	// DNS: positive control first - the same lookup in the test process (outside
+	// the sandbox) must answer, otherwise an empty in-arm answer proves nothing.
+	// mDNSResponder is outside the sandbox, so a working lookup from the arm would
+	// be an exfiltration channel (name -> resolver). Whether anything is sent to a
+	// resolver for the unique name cannot be observed from here; only the answer.
+	ctl, _ := exec.Command("dscacheutil", "-q", "host", "-a", "name", "example.com").Output()
+	armDNS := r.step(t, stDNSExample)
+	t.Logf("INFO DNS example.com: control outside the sandbox answers=%v; in the arm rc=%d out=%q", strings.Contains(string(ctl), "address"), armDNS.rc, clip(armDNS.out, 240))
+	if strings.Contains(string(ctl), "address") && strings.Contains(armDNS.out, "address") {
+		t.Errorf("name resolution WORKS from the arm (exfiltration channel): %q", clip(armDNS.out, 240))
 	}
+	t.Logf("INFO DNS unique .invalid name from the arm: %q", clip(r.step(t, stDNSUnique).out, 240))
 }
 
 // TestLive_AblationRecordsWhichKeysMatter runs the Bash batch with
@@ -1134,7 +1142,10 @@ func (f *fixture) builtinPrompt() string {
 
 func (f *fixture) builtinRun(t *testing.T) *liveRun {
 	t.Helper()
-	return f.call(t, callOpts{purpose: "builtin-final-config", prompt: f.builtinPrompt(), settings: f.settings(t, SettingsOptions{ReadMode: DefaultReadMode}),
+	// Measured (call #22) with the deny-list settings; the built-in tools'
+	// permission rules do not depend on the sandbox read mode, but the combination
+	// with the allow-list was not re-measured (budget).
+	return f.call(t, callOpts{purpose: "builtin-final-config", prompt: f.builtinPrompt(), settings: f.settings(t, SettingsOptions{ReadMode: ReadDenyList}),
 		policy: f.newPolicy(), inherit: f.inherit(), prep: func() {
 			f.resetArm(t)
 			f.resetOutside(t)
@@ -1256,7 +1267,7 @@ func TestLive_UnderSMINDLaunchShape(t *testing.T) {
 	if len(r.argv) == 0 {
 		t.Fatal("no argv captured from the shim")
 	}
-	settings := f.settings(t, SettingsOptions{ReadMode: DefaultReadMode})
+	settings := f.settings(t, SettingsOptions{ReadMode: ReadDenyList}) // what builtinRun was measured with
 	for _, c := range [][]string{
 		{"--setting-sources", ""}, {"--strict-mcp-config"}, {"--disable-slash-commands"},
 		{"--permission-mode", "acceptEdits"}, {"--permission-prompts", "none"},

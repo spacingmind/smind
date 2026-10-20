@@ -32,6 +32,12 @@ func decode(t *testing.T, raw string) map[string]any {
 	return m
 }
 
+// denyList builds deny-list settings (the fallback mode) for the tests that
+// exercise its $HOME / extraDenyRead handling.
+func denyList(arm, proj string, extra []string) (string, error) {
+	return SettingsJSONWith(arm, proj, SettingsOptions{ReadMode: ReadDenyList, ExtraDenyRead: extra})
+}
+
 func TestSpike_SettingsJSONShape(t *testing.T) {
 	t.Setenv("HOME", litHome)
 	raw, err := SettingsJSONWith(litArm, litProj, SettingsOptions{ReadMode: ReadDenyList, ExtraDenyRead: []string{"/nonexistent-p0-real/checkout"}})
@@ -76,7 +82,7 @@ func TestSpike_SettingsJSONAllowListMode(t *testing.T) {
 	for _, p := range fs["allowRead"].([]any) {
 		allow[p.(string)] = true
 	}
-	for _, want := range []string{litArm, litProj, "/usr", "/bin", "/System", "/dev"} {
+	for _, want := range []string{litArm, litProj, "/usr", "/bin", "/System", "/dev", "/private/var/select", "/var", "/tmp", "/etc"} {
 		if !allow[want] {
 			t.Errorf("allowRead lacks %s: %v", want, fs["allowRead"])
 		}
@@ -110,7 +116,7 @@ func TestSpike_SettingsJSONFailsClosed(t *testing.T) {
 	for name, home := range map[string]string{"empty": "", "relative": "rel/home"} {
 		t.Run("home "+name, func(t *testing.T) {
 			t.Setenv("HOME", home)
-			if raw, err := SettingsJSON(litArm, litProj, nil); err == nil {
+			if raw, err := denyList(litArm, litProj, nil); err == nil {
 				t.Fatalf("deny-list settings were built without a usable $HOME: %s", raw)
 			}
 		})
@@ -123,7 +129,7 @@ func TestSpike_SettingsJSONFailsClosed(t *testing.T) {
 		"bracket": {litArm, "/nonexistent-p0/p[r]oj"}, "paren": {litArm, "/nonexistent-p0/pr(oj"},
 		"newline": {"/nonexistent-p0/a\nrm", litProj},
 	} {
-		if raw, err := SettingsJSON(tc[0], tc[1], nil); !errors.Is(err, ErrBadPath) {
+		if raw, err := denyList(tc[0], tc[1], nil); !errors.Is(err, ErrBadPath) {
 			t.Errorf("%s: want ErrBadPath, got err=%v raw=%s", name, err, raw)
 		}
 	}
@@ -150,7 +156,7 @@ func TestSpike_SettingsJSONCanonicalisesPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Symlinked prefix, trailing slash and a not-yet-existing tail.
-	raw, err := SettingsJSON(link+"/arm/", link+"/not-yet/proj/", []string{link + "/arm"})
+	raw, err := denyList(link+"/arm/", link+"/not-yet/proj/", []string{link + "/arm"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +185,11 @@ func TestSpike_SettingsJSONDefaultMode(t *testing.T) {
 	want, _ := SettingsJSONWith(litArm, litProj, SettingsOptions{ReadMode: DefaultReadMode})
 	if got != want {
 		t.Errorf("SettingsJSON is not DefaultReadMode:\n%s\n%s", got, want)
+	}
+	// The recommended mode is the allow-list (E1 passed): denyRead is exactly "/".
+	fs := decode(t, got)["sandbox"].(map[string]any)["filesystem"].(map[string]any)
+	if !reflect.DeepEqual(fs["denyRead"], []any{"/"}) {
+		t.Errorf("default denyRead = %v, want [/]", fs["denyRead"])
 	}
 }
 

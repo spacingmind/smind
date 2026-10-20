@@ -39,17 +39,26 @@ const (
 	ReadAllowList
 )
 
-// DefaultReadMode is the mode SettingsJSON uses. Set from the measured result
-// of experiment E1 (see p0-findings.md).
-const DefaultReadMode = ReadDenyList
+// DefaultReadMode is the mode SettingsJSON uses: the allow-list, because
+// experiment E1 (call #24) showed it works on macOS (sh, git with a scrubbed
+// config, cat, ls, curl all run; the unlisted sibling, the real checkout and
+// every decoy are unreadable). The deny-list stays available as a fallback
+// (ReadDenyList): it only denies what it names (measured negative control).
+const DefaultReadMode = ReadAllowList
 
 // SystemReadPaths are re-allowed under ReadAllowList: what sh, git, cat, ls,
 // curl and the CLI's per-session tmp need on macOS. Paths that do not exist
 // are kept as given (the CLI ignores them).
 func SystemReadPaths() []string {
 	return []string{"/usr", "/bin", "/sbin", "/System", "/Library", "/private/etc", "/dev",
-		"/opt/homebrew", "/private/var/db", "/private/tmp/claude-" + fmt.Sprint(os.Getuid())}
+		"/opt/homebrew", "/private/var/db", "/private/var/select", "/private/tmp/claude-" + fmt.Sprint(os.Getuid())}
 }
+
+// SystemSymlinkNodes are the top-level symlinks (/var -> private/var, ...) whose
+// link nodes must themselves be readable under the allow-list, otherwise every
+// path that goes through them fails (xcode-select reads /var/select/developer_dir).
+// They are added as given, NOT canonicalised.
+var SystemSymlinkNodes = []string{"/var", "/tmp", "/etc"}
 
 // SettingsOptions are the knobs of SettingsJSONWith. The zero value is the
 // deny-list production settings; the Omit* fields exist only for ablations.
@@ -75,7 +84,10 @@ func SettingsJSON(armDir, projectionDir string, extraDenyRead []string) (string,
 // writes are limited to armDir, and the projection is read-only: it gets
 // permissions.deny on the edit tools (--add-dir makes it a working directory,
 // writable by the built-in tools under acceptEdits, measured) and
-// filesystem.denyWrite. Reads follow ReadMode. The launcher keeps the user's
+// filesystem.denyWrite. Measured: with BOTH removed a sandboxed Bash write into
+// the projection succeeds (call #23); with only denyWrite removed it was
+// refused (call #18, earlier JSON); denyWrite alone (without permissions.deny)
+// was not measured. Keep both. Reads follow ReadMode. The launcher keeps the user's
 // real HOME so the CLI authenticates, so in deny-list mode the real $HOME is
 // denied explicitly: an unresolvable or relative $HOME is an error, not a
 // silently dropped rule.
@@ -96,6 +108,16 @@ func SettingsJSONWith(armDir, projectionDir string, opt SettingsOptions) (string
 	if err != nil {
 		return "", fmt.Errorf("projection dir: %w", err)
 	}
+	// Extra roots are validated in every mode (bad input fails closed); only the
+	// deny-list mode needs them, the allow-list already denies everything.
+	var extra []string
+	for _, p := range opt.ExtraDenyRead {
+		c, err := canonPath(p)
+		if err != nil {
+			return "", fmt.Errorf("extra deny-read path: %w", err)
+		}
+		extra = append(extra, c)
+	}
 	var denyRead, allowRead []string
 	switch opt.ReadMode {
 	case ReadAllowList:
@@ -108,6 +130,7 @@ func SettingsJSONWith(armDir, projectionDir string, opt SettingsOptions) (string
 			}
 			allowRead = append(allowRead, c)
 		}
+		allowRead = append(allowRead, SystemSymlinkNodes...)
 	case ReadDenyList:
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -120,14 +143,7 @@ func SettingsJSONWith(armDir, projectionDir string, opt SettingsOptions) (string
 		if err != nil {
 			return "", fmt.Errorf("$HOME: %w", err)
 		}
-		denyRead = []string{homeC, filepath.Dir(arm)}
-		for _, p := range opt.ExtraDenyRead {
-			c, err := canonPath(p)
-			if err != nil {
-				return "", fmt.Errorf("extra deny-read path: %w", err)
-			}
-			denyRead = append(denyRead, c)
-		}
+		denyRead = append([]string{homeC, filepath.Dir(arm)}, extra...)
 		allowRead = []string{arm, proj}
 	default:
 		return "", fmt.Errorf("spike: unknown read mode %d", opt.ReadMode)
