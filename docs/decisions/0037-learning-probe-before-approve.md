@@ -11,7 +11,7 @@ human approval, projection of `active` skills only) is unchanged. Plan:
 
 **The isolation tier in §3 is contingent on the P0 spike.** If P0 cannot show R1–R3 with the Claude CLI's own command
 sandbox, the decision is the container tier (§3, fallback), and if neither is available, there are no probes. The P0
-outcome is recorded in a dated addendum at the end of this ADR.
+outcome (2026-10-20: **PASS on macOS**; Linux and Windows not covered) is recorded in the addendum at the end of this ADR.
 
 ## Context
 
@@ -63,7 +63,7 @@ says "fixes the observed failure here", not "generalises".
 **Eligibility** (otherwise the button is disabled with a stated reason, fail closed): the proposal is pending and passed the
 gate; the evidence run is claude-native (D4; a GLM/Kimi ACP agent owns un-gateable tools, ADR-0026 D13); it has a persisted
 `runs.prompt`, a captured `base_sha` and `dirty = false`; it was a single-prompt run, not a mid-chat continuation or a session
-resume; the sandbox self-check (§3) passes; the budget and quota checks (§5) pass. Windows daemons (ADR-0029) are not
+resume; the sandbox canary attestation (§3) passes; the budget and quota checks (§5) pass. Windows daemons (ADR-0029) are not
 eligible in v1: there is no command sandbox to attest.
 
 ### 2. Delivery: the one place AC17 is relaxed
@@ -76,7 +76,7 @@ delivery uses (ADR-0026 §5). The amendment, stated as a rule:
 > (`internal/learning/projection`, `delivery`) keeps filtering to `active` skills and never sees a proposal.
 
 Enforcement is structural, not procedural: the probe projection builder takes a `sandbox.Attestation` value that only the
-sandbox package can mint after a passing self-check, so a code path that skips the sandbox does not compile. The arm's
+sandbox package can mint after a passing canary call, so a code path that skips the sandbox does not compile. The arm's
 projection hash is recorded on the run (ADR-0026 §9.7). A probe run is excluded from the collector, the cadence counter, the
 offered/loaded counters and every learning trigger, exactly like a reflector run (`runs.purpose` already exists), and runs
 under a hidden `tasks.kind = 'system'` task.
@@ -88,9 +88,9 @@ CLI are proven by the P0 spike and then kept as a gated live suite.
 
 | # | Requirement | Mechanism |
 |---|---|---|
-| R1 | **Filesystem**: writes only inside the arm directory and a private temp/HOME; no read of the real checkout, `~/.smind`, `~/.claude` (beyond what the CLI process itself needs), `~/.ssh`, other worktrees or other arms | arm dir is a fresh `git archive` export with its own `git init`, no link to the real `.git`; agent Bash runs in the CLI command sandbox with `denyRead` on credential dirs; built-in Read/Edit/Write are held to the arm dir by a smind permission decider that auto-denies anything outside it (no human is attending) |
-| R2 | **Network**: the model endpoint only; no web fetch/search, no package registries, no git remotes | CLI sandbox network allowlist, `failIfUnavailable`, unsandboxed commands disabled, Bash auto-allowed only *inside* the sandbox; `WebFetch`/`WebSearch` denied; MCP closed with the flags the isolated runner already uses; connectors off |
-| R3 | **Credentials**: the arm gets only the model credential through normal account routing; the environment is an **allowlist** built from scratch, not a deny-list | PATH, private HOME, LANG, the one auth variable the CLI needs |
+| R1 | **Filesystem**: writes only inside the arm directory and a private temp/HOME; no read of the real checkout, `~/.smind`, `~/.claude` (beyond what the CLI process itself needs), `~/.ssh`, other worktrees or other arms | arm dir is a fresh `git archive` export with its own `git init`, no link to the real `.git`; agent Bash runs in the CLI command sandbox (`allowWrite` = the arm only; `denyRead` on the real `$HOME`, `CLAUDE_CONFIG_DIR` and the arm's parent, `allowRead` on the arm and the projection); built-in Read/Edit/Write outside the arm are refused by the CLI itself under `acceptEdits` + `--permission-prompts none` (P0: the SDK decider is never consulted headless, so it is belt-and-braces only), and the read-only projection is protected from the built-in write tools by `permissions.deny` |
+| R2 | **Network**: the model endpoint only; no web fetch/search, no package registries, no git remotes | CLI sandbox `strictAllowlist` with no allowed domains and no local binding, `failIfUnavailable`, unsandboxed commands disabled, Bash auto-allowed only *inside* the sandbox; a `--tools` **allowlist** (Bash, Read, Edit, Write, Glob, Grep, NotebookEdit; P0: the default set has 27 tools including outward-facing ones, so a Web* denylist is not enough); MCP closed with the flags the isolated runner already uses; connectors off |
+| R3 | **Credentials**: the arm gets only the model credential through normal account routing; the environment is an **allowlist** built from scratch, not a deny-list | a generated `/usr/bin/env -i` launcher script passed as the CLI path (the SDK inherits the daemon's whole environment and `WithEnv` cannot remove variables; P0 measured daemon canary variables reaching the agent's Bash without it) that keeps only `PATH`, `LANG`, `TMPDIR`, `HOME`, `CLAUDE_CONFIG_DIR` (if set) and `USER` (the login needs it). The arm uses the user's real login location, not a private HOME; the sandbox `denyRead` is what keeps the credential files from the arm's Bash |
 | R4 | **Resources**: per-arm wall timeout, turn cap, cost cap, output cap; one probe per workspace and one per daemon | process-group kill (ADR-0024); caps in §5; probes must self-clean (every arm dir removed at arm end, orphans swept at daemon start) |
 | R5 | **Side effects**: no push, publish, network write or file outside the arm | follows from R1–R3; no remote and no git credentials exist in the arm |
 | R6 | **Data**: transcripts and diffs stored redacted; purged with the decision (D13) | existing redactor (`internal/learning/redact`); see §6 |
@@ -103,8 +103,10 @@ button; it never degrades to an unsandboxed probe.
 
 Honest limits, restated from the study: the CLI command sandbox covers Bash, not necessarily built-in tools (so R1 relies on
 the decider for those); a past CLI bug interacted with `--setting-sources=` and `--settings` (so P0 tests exactly smind's
-launch shape); a sandbox attestation can go stale (so the self-check is repeated per daemon start and on a TTL, and every arm
+launch shape); a sandbox attestation can go stale (so the canary below is repeated per probe, and every arm
 re-checks the tripwires).
+
+**Attestation (P0):** the CLI offers no model-free way to report command-sandbox status, so the `sandbox.Attestation` is minted by **one tiny canary call per probe** (about USD 0.002–0.003, charged to the probe bucket, 2 turns): the agent tries one write outside the arm and one inside, and the daemon asserts on the filesystem (outside absent, inside present) and on the init tool list (exactly the allowlist). A failing canary disables the probe.
 
 ### 4. What is measured (tier 1 only in this ADR's scope)
 
@@ -235,14 +237,36 @@ Accepted by the Human on 2026-10-20, all as recommended.
   such contrasts; the chip vocabulary and disclaimer are the guard, and the verdict never gates approval.
 - Windows daemons and ACP providers get no probes in v1.
 
-## Open questions (resolved by the P0 spike, not by the Human)
+## Open questions (resolved by the P0 spike; answers in the addendum)
 
 1. Does Bash network denial and `denyRead` on credential dirs hold under smind's exact launch (SDK, `--setting-sources=`,
    `--settings`)?
 2. Are built-in Read/Edit/Write outside the arm directory denied non-interactively, and by which mechanism?
 3. Does `failIfUnavailable` stop the CLI from running a command when the sandbox cannot start?
-4. Which single auth variable does a private-HOME arm need, and how does the self-check attest the sandbox without a model call?
+4. Which variables does an arm need to authenticate, and how is the sandbox attested without a model call? (Answer: no private HOME; `USER` + the user's real `HOME`/`CLAUDE_CONFIG_DIR`; no model-free attestation exists, one canary call per probe.)
 
 ## Addendum: P0 outcome
 
-*(Filled in by the P0 PR.)*
+**P0 sandbox spike, 2026-10-20: PASS on macOS.** claude 2.1.303 (native binary), SDK claude-agent-sdk-go v0.3.2, macOS 27 arm64,
+model `claude-haiku-5-5`; **18 live calls, USD 0.056** (cap 18 calls / USD 0.70: the first 12 calls, USD 0.043, measured R1, R2 and
+the built-in tools; the last 6 settled R3). The live suite is `internal/learning/probe/spike` (`-tags liveprobe`,
+`SMIND_LIVE_PROBE=1`); every assertion is on ground truth (filesystem, a local listener's connection count, canary strings), never on
+what the model said. Linux (bubblewrap) and Windows were **not** tested.
+
+| Req | Result | Detail |
+|---|---|---|
+| R1 write | PASS | `filesystem.allowWrite:[arm]` confines Bash; the arm's own `.git` is writable (`git commit` lands); the sibling dir, the real checkout, a decoy HOME, `/tmp` and a dir under the real `$HOME` are denied. Holds with `--setting-sources=` empty under the SDK launch. Arm git needs `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1` (the denied `$HOME` hides `~/.gitconfig`). |
+| R1 read | PASS for decoys, PARTIAL for real credential files | `denyRead:[real $HOME, parent(arm)]` + `allowRead:[arm, projection]`: no decoy canary leaked, the projection stayed readable. The user's actual credential files were deliberately never read; the deny is proven with a file the test created under the real `$HOME`. The implementation must also deny `CLAUDE_CONFIG_DIR` when it lies outside `$HOME`. |
+| R1 built-in tools | PASS with caveats | Outside Read/Write/Glob/Grep are refused by the CLI itself, headless; the SDK decider was consulted **0 times** in every mode, so enforcement and audit come from the CLI (`result.permission_denials`, tool_result text), not the decider. Under `default` even in-arm edits are refused; use `acceptEdits` + `--permission-prompts none`. `--add-dir` makes the projection writable to the built-in tools: `permissions.deny` on `Edit/Write/NotebookEdit` for the projection closes it (`sandbox.filesystem.denyWrite` proved redundant, kept as belt-and-braces). Not observed: a *permission* refusal for Edit/NotebookEdit on an existing outside file (the read-before-write check fires first; the files are unchanged). |
+| R2 network | PASS | `network:{strictAllowlist:true, allowedDomains:[], allowLocalBinding:false}`: a local listener saw 0 connections, `example.com` was unreachable, the model call (the CLI process, outside the command sandbox) was unaffected; init lists 0 MCP servers, only built-in plugins, 0 skills. |
+| R3 env | PASS | The `env -i` launcher keeps `PATH, LANG, TMPDIR, HOME, CLAUDE_CONFIG_DIR, USER`: the CLI's own env was exactly that set, and the canary variables reached neither it nor the arm's Bash. `USER` is required for the login (found by name tuning); `SHELL`, `TERM`, `LOGNAME` are not. With the inherited environment the canaries **did** reach the arm's Bash, so the launcher is mandatory. The arm sees the real `HOME`, `CLAUDE_CONFIG_DIR` and `USER` values (non-secret; the contents are protected by `denyRead`). |
+| `failIfUnavailable` | PARTIAL | Documented by the CLI but not isolatable on macOS: no trigger made the sandbox unavailable (`sandbox.ripgrep` and `enabledPlatforms` do not). Fail-closed at exec time is proven (an outer `deny process-exec /usr/bin/sandbox-exec` makes the command fail with exit 126). Hence the per-probe canary. |
+| Violations (R7) | no native log | Only tool_result text (`Operation not permitted`, `haven't granted`) and `result.permission_denials`; CLI stderr was empty. R7's "violation log empty" is implemented from those plus the filesystem canaries. |
+
+Consequences recorded in §3: the `--tools` allowlist, `acceptEdits` + `--permission-prompts none`, the `env -i` launcher, the
+projection write-deny, `denyRead` of `CLAUDE_CONFIG_DIR`, the per-probe canary attestation, and git's config env.
+
+**Not covered / residual:** Linux and Windows; `dontAsk`; symlink races; toolchains beyond sh/git/curl (a Go build inside the arm
+needs `~/go` and `~/.cache` readable, to be settled in the arm PR); `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` and `sandbox.credentials`
+(untested); `USER` was found on one machine, so the canary attestation also re-runs the scrubbed login. The arm can read the real
+`HOME` path; confidentiality of the credential files rests entirely on `denyRead`.
