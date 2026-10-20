@@ -814,3 +814,69 @@ func jsonMap(one string) map[string]any {
 	}
 	return w.Intents[0]
 }
+
+func TestReflectRetry_OverBudgetSkipsRetry(t *testing.T) {
+	f := newReflectFx(t)
+	f.reflectScript(
+		func(executor.Request) (executor.Result, error) {
+			f.learningRun("refl-1", &store.RunUsage{CostUSD: ptrF(f.config().DailyBudgetUSD), InputTokens: i64(10), OutputTokens: i64(10)})
+			return executor.Result{RunID: "refl-1", FinalText: grounded(f.runID, func(in map[string]any) {
+				in["description"] = "A note about tests failing on CI only."
+			})}, nil
+		},
+		"never reached",
+	)
+	job := f.reflect()
+	if f.exec.count() != 1 {
+		t.Fatalf("executor calls = %d, want 1 (budget blocks the retry)", f.exec.count())
+	}
+	vs := f.jobVerdicts(t, job)
+	if len(vs) != 1 || vs[0].Accepted || vs[0].Retry {
+		t.Fatalf("first-pass verdicts must stand: %+v", vs)
+	}
+}
+
+func TestReflectRetry_CostAddedToSameJob(t *testing.T) {
+	f := newReflectFx(t)
+	f.reflectScript(
+		func(executor.Request) (executor.Result, error) {
+			in, out, cost := i64(100), i64(50), 0.01
+			return executor.Result{RunID: "refl-1", FinalText: grounded(f.runID, func(m map[string]any) {
+				m["description"] = "A note about tests failing on CI only."
+			}), InputTokens: in, OutputTokens: out, CostUSD: &cost}, nil
+		},
+		func(executor.Request) (executor.Result, error) {
+			in, out, cost := i64(200), i64(80), 0.02
+			return executor.Result{RunID: "refl-2", FinalText: grounded(f.runID, nil), InputTokens: in, OutputTokens: out, CostUSD: &cost}, nil
+		},
+	)
+	job := f.reflect()
+	if job.RunID != "refl-1" {
+		t.Fatalf("job keeps the first run id, got %q", job.RunID)
+	}
+	if job.CostUSD == nil || *job.CostUSD != 0.03 {
+		t.Fatalf("cost = %v, want 0.03", job.CostUSD)
+	}
+	if job.Tokens == nil || *job.Tokens != 430 {
+		t.Fatalf("tokens = %v, want 430", job.Tokens)
+	}
+}
+
+func TestReflectRetry_ParseFailureKeepsFirstPass(t *testing.T) {
+	f := newReflectFx(t)
+	f.reflectScript(
+		grounded(f.runID, func(in map[string]any) { in["description"] = "A note about tests failing on CI only." }),
+		"not json at all",
+	)
+	job := f.reflect()
+	if job.Status != "empty" || job.Error != "" {
+		t.Fatalf("job = %+v, want empty with no error", job)
+	}
+	if f.exec.count() != 2 || len(f.proposals()) != 0 {
+		t.Fatalf("calls = %d, proposals = %+v", f.exec.count(), f.proposals())
+	}
+	vs := f.jobVerdicts(t, job)
+	if len(vs) != 1 || vs[0].Accepted || vs[0].Retry {
+		t.Fatalf("verdicts = %+v, want first pass only", vs)
+	}
+}
