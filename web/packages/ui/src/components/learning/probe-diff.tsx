@@ -15,7 +15,7 @@ export function ProbeDiff({ diff, diffBytes }: { diff: string; diffBytes: number
         type="button"
         variant="quiet"
         size="sm"
-        className="self-start"
+        className="-ml-2 self-start"
         aria-expanded={open}
         data-testid="probe-diff-toggle"
         onClick={() => setOpen((v) => !v)}
@@ -23,7 +23,7 @@ export function ProbeDiff({ diff, diffBytes }: { diff: string; diffBytes: number
         <Chevron aria-hidden /> Changes made with this skill ({formatBytes(diffBytes)})
       </Button>
       {open && (
-        <div className="max-h-96 overflow-auto rounded-lg border border-border" tabIndex={0} role="region" aria-label="Changes made with this skill">
+        <div className="max-h-96 overflow-auto rounded-lg" tabIndex={0} role="region" aria-label="Changes made with this skill">
           <DiffRender diff={diff} outputFormat="line-by-line" testId="probe-diff-body" />
         </div>
       )}

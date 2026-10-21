@@ -46,7 +46,7 @@ function ProbeStart({ id, workspaceId, again, quick, onQuick }: { id: number; wo
   const label = again ? "Run probe again" : "Run probe";
   return (
     <div className="flex flex-col gap-2" data-testid="probe-start">
-      <SegmentedControl label="Probe size" options={MODE_OPTIONS} value={quick ? "quick" : "full"} onChange={(v) => onQuick(v === "quick")} />
+      <SegmentedControl className="self-start" label="Probe size" options={MODE_OPTIONS} value={quick ? "quick" : "full"} onChange={(v) => onQuick(v === "quick")} />
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
@@ -218,7 +218,7 @@ export function ProbeCard({ id, workspaceId }: { id: number; workspaceId: number
       >
         <Chevron aria-hidden className="size-3.5 text-foreground-subtle" />
         <h3 className="text-ui-base font-medium text-foreground">Probe</h3>
-        {summary(p)}
+        {!open && summary(p)}
       </button>
       {open && (
         <div id={`probe-card-body-${id}`} data-testid="probe-body" className="flex flex-col gap-3 rounded-xl border border-border p-3">

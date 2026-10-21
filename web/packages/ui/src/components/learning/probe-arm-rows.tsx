@@ -18,7 +18,7 @@ export function ProbeArmRows({ arms, workspaceId }: { arms: ProbeArmView[]; work
         return (
           <li key={arm.role} data-testid="probe-arm" data-role={arm.role} data-status={arm.status} className="flex items-center gap-3 px-3 py-2">
             <StatusDot status={dotFor(arm.status)} aria-hidden />
-            <span className="min-w-0 flex-1 truncate text-ui-base text-foreground">{ARM_LABELS[arm.role]}</span>
+            <span className="min-w-0 flex-1 truncate text-ui-sm text-foreground">{ARM_LABELS[arm.role]}</span>
             <span data-testid="probe-arm-status" className="text-ui-sm text-foreground-muted">
               {armStatusLabel(arm.status)}
             </span>

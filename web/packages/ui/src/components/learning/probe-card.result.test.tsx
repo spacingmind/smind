@@ -1,3 +1,4 @@
+import { act } from "react";
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
@@ -24,7 +25,15 @@ describe("ProbeCard result", () => {
   it("never reads as an approval", async () => {
     await renderProbeCard({ probe: probeView({ verdict: "helped" }) });
     expect(screen.getByTestId("probe-card").textContent).not.toMatch(/approv/i);
-    expect(screen.getAllByTestId("probe-verdict").map((c) => c.getAttribute("data-status"))).toEqual(["neutral", "neutral"]);
+    expect(screen.getAllByTestId("probe-verdict").map((c) => c.getAttribute("data-status"))).toEqual(["neutral"]);
+  });
+
+  it("shows the verdict in the collapsed header once and not twice when open", async () => {
+    await renderProbeCard({ probe: probeView({ verdict: "no_effect" }) });
+    expect(screen.getAllByTestId("probe-verdict")).toHaveLength(1);
+    await act(async () => screen.getByTestId("probe-toggle").click());
+    expect(screen.getByTestId("probe-toggle").textContent).toContain("No observed effect");
+    expect(screen.queryByTestId("probe-body")).toBeNull();
   });
 
   it("hurt uses the warning tone and unsafe the danger tone", async () => {

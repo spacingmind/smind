@@ -1,3 +1,4 @@
+import { act } from "react";
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
@@ -10,6 +11,7 @@ describe("ProbeCard cancelled", () => {
     expect(screen.getByTestId("probe-cancelled").textContent).toContain("Probe cancelled after 2m 10s; $0.6200 was spent. No verdict.");
     expect(screen.queryByTestId("probe-verdict")).toBeNull();
     expect(screen.getByTestId("probe-run").textContent).toContain("Run probe again");
+    await act(async () => screen.getByTestId("probe-toggle").click());
     expect(screen.getByTestId("probe-toggle").textContent).toContain("Cancelled");
   });
 });
