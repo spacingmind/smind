@@ -37,7 +37,14 @@ const MOBILE_DIR = fileURLToPath(new URL('..', import.meta.url));
 const REPO_ROOT = resolve(MOBILE_DIR, '..');
 const DIST = join(MOBILE_DIR, 'dist');
 const SMOKE_DIR = join(MOBILE_DIR, '.smoke');
-const PORT = 8931;
+const PORT = Number(process.env.SMOKE_PORT ?? 8931);
+
+// Phone-sized by default (390x844 @2x); SMOKE_VIEWPORT=WxH or WxH@dpr overrides.
+function contextViewport() {
+  const m = /^(\d+)x(\d+)(?:@(\d+(?:\.\d+)?))?$/.exec(process.env.SMOKE_VIEWPORT ?? '390x844@2');
+  if (!m) throw new Error(`bad SMOKE_VIEWPORT ${process.env.SMOKE_VIEWPORT}; want WxH or WxH@dpr`);
+  return { viewport: { width: Number(m[1]), height: Number(m[2]) }, deviceScaleFactor: Number(m[3] ?? 2) };
+}
 const FULL = process.argv.includes('--full');
 
 const MIME = {
@@ -164,6 +171,27 @@ function trackErrors(page, label) {
   });
 }
 
+// The native stack's header back button: on web a link named "<previous title>, back" (or "Go back").
+/**
+ * Transition frames (every mid-animation glitch is a defect): runs `act` (a click that navigates) and screenshots
+ * the page at ~0, 90 and 220 ms while the stack animates, in `scheme`. Frames: <name>-t<ms>-<scheme>.png.
+ */
+async function shootTransition(page, name, scheme, act) {
+  await page.emulateMedia({ colorScheme: scheme });
+  await page.waitForTimeout(200);
+  const done = act();
+  for (const t of [0, 90, 220]) {
+    if (t > 0) await page.waitForTimeout(t === 90 ? 90 : 130);
+    await page.screenshot({ path: join(SMOKE_DIR, `${name}-t${t}-${scheme}.png`) });
+  }
+  await done;
+  console.log(`wrote ${name}-t{0,90,220}-${scheme}.png`);
+}
+
+async function goBack(page) {
+  await page.getByRole('link', { name: /(, back|^Go back)$/ }).click();
+}
+
 async function assertPairingScreen(page, url) {
   await page.goto(url, { waitUntil: 'load' });
   const title = page.getByText('smind pairing', { exact: true });
@@ -214,17 +242,17 @@ async function shootBothSchemes(page, name) {
 
 /**
  * Waits for the task list after the device was approved. TasksScreen's
- * post-connect states: 'ready' always renders a Disconnect button; 'error'
- * renders "Couldn't load the workspace". When ready, the harness daemon
- * tracks no workspaces, so the empty state -- "No workspaces yet" -- must
- * render.
+ * post-connect states: 'ready' renders the list (here the empty state, since
+ * the harness daemon tracks no workspaces) under a header with Disconnect;
+ * 'error' renders "Couldn't load the workspace".
  */
 async function assertTasks(page) {
-  const ready = page.getByRole('button', { name: 'Disconnect' });
+  // The header (with Disconnect) is also there while loading and on error, so wait for the content itself:
+  // the empty state when ready (the harness daemon tracks no workspaces), or the error text.
+  const empty = page.getByText('No workspaces yet', { exact: true });
   const errored = page.getByText("Couldn't load the workspace");
-  const loaded = ready.or(errored).first();
   try {
-    await loaded.waitFor({ timeout: 30_000 });
+    await empty.or(errored).first().waitFor({ timeout: 30_000 });
   } catch {
     fail('tasks screen did not render after approval');
     return false;
@@ -234,10 +262,8 @@ async function assertTasks(page) {
     fail(`tasks screen rendered the error state: ${bodyText}`);
     return false;
   }
-  try {
-    await page.getByText('No workspaces yet', { exact: true }).waitFor({ timeout: 5_000 });
-  } catch {
-    fail('tasks screen empty state ("No workspaces yet") not shown for the task-less harness workspace');
+  if (!(await page.getByRole('button', { name: 'Disconnect' }).isVisible().catch(() => false))) {
+    fail('tasks screen header has no Disconnect button');
   }
   return true;
 }
@@ -288,7 +314,7 @@ async function needsContinue(page, harness) {
   if (await page.getByText(/not finished/).isVisible().catch(() => false)) fail('a normal done run shows a not-finished footer');
   if (await page.getByRole('button', { name: 'Continue', exact: true }).isVisible().catch(() => false)) fail('a normal done run shows Continue');
   await shootBothSchemes(page, 'run-normal');
-  await page.getByRole('button', { name: /Back/ }).click();
+  await goBack(page);
 
   // The capped run: the warning sentence and Continue.
   await page.getByText('Capped task', { exact: true }).click();
@@ -339,6 +365,14 @@ async function promptQueue(page, harness) {
   }
 
   // Idle: no queue, the plain compose placeholder.
+  // Push and pop transition frames, light then dark, before the stage's own assertions.
+  for (const scheme of ['light', 'dark']) {
+    await shootTransition(page, 'push-task', scheme, () => page.getByText('Idle task', { exact: true }).click());
+    await page.getByText(/^run [0-9a-f]{8} ·/).waitFor({ timeout: 20_000 });
+    await shootTransition(page, 'pop-task', scheme, () => goBack(page));
+    await page.getByText('Idle task', { exact: true }).waitFor({ timeout: 10_000 });
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
   await page.getByText('Idle task', { exact: true }).click();
   await page.getByText(/^run [0-9a-f]{8} ·/).waitFor({ timeout: 20_000 });
   if (await page.getByLabel('Queued prompts').isVisible().catch(() => false)) fail('an idle task shows a queue');
@@ -355,7 +389,7 @@ async function promptQueue(page, harness) {
     fail('an idle send did not start a run showing the prompt and its reply');
   }
   if ((await page.getByText('user: hello idle', { exact: true }).count()) !== 1) fail('the sent prompt line is not shown exactly once');
-  await page.getByRole('button', { name: /Back/ }).click();
+  await goBack(page);
 
   // Live: two prompts queue on the daemon.
   await page.getByText('Queue task', { exact: true }).click();
@@ -415,7 +449,7 @@ async function promptQueue(page, harness) {
   await shootBothSchemes(page, 'queue-after-delivery');
 
   // Stop: a live run has a Stop button (run.stop, no confirmation); the run ends as stopped and Stop goes away.
-  await page.getByRole('button', { name: /Back/ }).click();
+  await goBack(page);
   await page.getByText('Stop task', { exact: true }).click();
   try {
     await page.getByText(/· glm · live$/).waitFor({ timeout: 20_000 });
@@ -434,6 +468,18 @@ async function promptQueue(page, harness) {
   }
   if (await page.getByRole('button', { name: /^Stop(ping…)?$/ }).isVisible().catch(() => false)) fail('the Stop button is still shown after the run stopped');
   await shootBothSchemes(page, 'stop-after');
+
+  // The list stays mounted under the task (native stack): returning must reload it (useFocusEffect), so a task the
+  // daemon gained meanwhile shows up (the old hand-rolled stack remounted the list on every return).
+  const late = await harness.cmd('seed-run end_turn Late task');
+  if (!late.ok) fail(`seeding the late task failed: ${JSON.stringify(late)}`);
+  await goBack(page);
+  try {
+    await page.getByText('Late task', { exact: true }).waitFor({ timeout: 15_000 });
+  } catch {
+    fail('the task list did not reload after returning from a task (a task created meanwhile is missing)');
+  }
+  await shootBothSchemes(page, 'list-after-stop');
 }
 
 /**
@@ -515,7 +561,8 @@ async function deviceLifecycle(page, harness) {
 
   await harness.cmd(`revoke ${deviceId}`);
   try {
-    await page.getByText('This device was revoked', { exact: true }).waitFor({ timeout: 30_000 });
+    // The status screen's native header repeats the card title: either match proves the screen.
+    await page.getByText('This device was revoked', { exact: true }).first().waitFor({ timeout: 30_000 });
   } catch {
     fail('"This device was revoked" did not appear after the daemon revoked the device');
     return;
@@ -538,7 +585,7 @@ async function run() {
   let queued = null;
   try {
     for (const scheme of ['light', 'dark']) {
-      const context = await browser.newContext({ colorScheme: scheme, ignoreHTTPSErrors: true });
+      const context = await browser.newContext({ ...contextViewport(), colorScheme: scheme, ignoreHTTPSErrors: true });
       const page = await context.newPage();
       trackErrors(page, scheme);
       await assertPairingScreen(page, url);
@@ -549,7 +596,7 @@ async function run() {
 
     if (FULL) {
       harness = await startHarness();
-      const context = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+      const context = await browser.newContext({ ...contextViewport(), colorScheme: 'light', ignoreHTTPSErrors: true });
       const page = await context.newPage();
       trackErrors(page, 'full');
       await page.goto(url, { waitUntil: 'load' });
@@ -558,7 +605,7 @@ async function run() {
       await context.close();
 
       outdated = await startHarness(['-outdated-daemon']);
-      const oldContext = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+      const oldContext = await browser.newContext({ ...contextViewport(), colorScheme: 'light', ignoreHTTPSErrors: true });
       const oldPage = await oldContext.newPage();
       trackErrors(oldPage, 'outdated');
       await oldPage.goto(url, { waitUntil: 'load' });
@@ -572,7 +619,7 @@ async function run() {
       execFileSync('go', ['build', '-o', fakeAgent, './internal/taskrunner/fakeagent'], { cwd: REPO_ROOT, stdio: 'inherit' });
       try {
         seeded = await startHarness(['-fake-agent', fakeAgent, '-window-max', '1']);
-        const runContext = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+        const runContext = await browser.newContext({ ...contextViewport(), colorScheme: 'light', ignoreHTTPSErrors: true });
         const runPage = await runContext.newPage();
         trackErrors(runPage, 'run-footer');
         await runPage.goto(url, { waitUntil: 'load' });
@@ -581,7 +628,7 @@ async function run() {
         await runContext.close();
 
         queued = await startHarness(['-fake-agent', fakeAgent, '-window-max', '1']);
-        const queueContext = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+        const queueContext = await browser.newContext({ ...contextViewport(), colorScheme: 'light', ignoreHTTPSErrors: true });
         const queuePage = await queueContext.newPage();
         trackErrors(queuePage, 'queue');
         await queuePage.goto(url, { waitUntil: 'load' });
@@ -595,7 +642,7 @@ async function run() {
       if (await harnessHasPasswordFlag()) {
         const secret = 'correct horse battery staple';
         protectedDaemon = await startHarness(['-password', secret, '-window-max', '1']);
-        const pwContext = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+        const pwContext = await browser.newContext({ ...contextViewport(), colorScheme: 'light', ignoreHTTPSErrors: true });
         const pwPage = await pwContext.newPage();
         trackErrors(pwPage, 'password');
         await pwPage.goto(url, { waitUntil: 'load' });
