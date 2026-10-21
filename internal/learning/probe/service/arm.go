@@ -29,6 +29,9 @@ const (
 // kindSurvivors is the finding for arm processes that outlived the kill.
 const kindSurvivors = "survivors"
 
+// truncatedMarker ends a stored artifact that was clipped.
+const truncatedMarker = "\n[truncated]\n"
+
 const (
 	maxDiffBytes  = 64 << 10
 	maxFinalBytes = 8 << 10
@@ -184,7 +187,9 @@ func (s *Service) runOneArm(ctx context.Context, ap armParams, role string) *arm
 	}
 
 	// Collect before the directory goes.
-	diff, diffBytes, derr := arm.Diff(context.WithoutCancel(ctx), ap.baseDir, armDir, maxDiffBytes)
+	// Up to twice the stored cap, so a secret straddling the stored cut is
+	// redacted whole before the text is clipped.
+	diff, diffBytes, derr := arm.Diff(context.WithoutCancel(ctx), ap.baseDir, armDir, 2*maxDiffBytes)
 	if derr != nil {
 		slog.Warn("learning probe: arm diff", "probe", ap.rn.probeID, "role", role, "err", s.short(derr))
 	}
@@ -218,8 +223,18 @@ func (s *Service) runOneArm(ctx context.Context, ap armParams, role string) *arm
 	am.FailureRecurred = contrast.FailureRecurred(events, ap.sig)
 
 	rec.status = string(rec.end)
-	s.finishArm(ap, rec, row, clipText(s.d.Redact(diff), maxDiffBytes), clipText(s.d.Redact(final), maxFinalBytes), am)
+	s.finishArm(ap, rec, row, s.storable(diff, maxDiffBytes), s.storable(final, maxFinalBytes), am)
 	return rec
+}
+
+// storable redacts text whole and only then clips it to limit bytes: the
+// other order would leave a prefix of a secret that straddles the cut.
+func (s *Service) storable(text string, limit int) string {
+	red := s.d.Redact(text)
+	if len(red) <= limit {
+		return red
+	}
+	return clipText(red, limit) + truncatedMarker
 }
 
 // finishArm persists the arm's end and tells the notifier.

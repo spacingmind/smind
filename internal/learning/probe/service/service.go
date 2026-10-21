@@ -324,7 +324,7 @@ func (s *Service) run(ctx context.Context, rn *running, pl plan) {
 	defer s.cleanupProbe(rn.probeID, pl.ws.ID)
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("learning probe: panic", "probe", rn.probeID, "panic", fmt.Sprint(r))
+			slog.Error("learning probe: panic", "probe", rn.probeID, "panic", clipText(s.d.Redact(fmt.Sprint(r)), 300))
 			s.failProbe(rn, pl, "the probe stopped on an internal error")
 		}
 	}()

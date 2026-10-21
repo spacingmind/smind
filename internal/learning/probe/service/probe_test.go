@@ -14,6 +14,7 @@ import (
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/learning/probe/arm"
 	"github.com/spacingmind/smind/internal/learning/probe/sandbox"
+	"github.com/spacingmind/smind/internal/learning/redact"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
@@ -434,11 +435,17 @@ func TestTripwire_WrongToolSurfaceIsUnsafe(t *testing.T) {
 	}
 }
 
+// realRedact is the production redactor, not a literal replace.
+func realRedact(secrets ...string) func(string) string {
+	return redact.New(secrets, nil).String
+}
+
 func TestStoredArtifacts_Redacted(t *testing.T) {
 	t.Parallel()
-	p := newPfx(t, nil)
+	p := newPfx(t, func(d *Deps) { d.Redact = realRedact("SECRET-TOKEN-123") })
 	p.arms.behave = func(armJob, int) fakeArm {
-		return fakeArm{cost: cost(0.05), writes: map[string]string{"notes.txt": "key=SECRET-TOKEN-123\n"}, final: "done, token SECRET-TOKEN-123"}
+		return fakeArm{cost: cost(0.05), writes: map[string]string{"notes.txt": "key=SECRET-TOKEN-123\nANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789\n"},
+			final: "done, token SECRET-TOKEN-123 and sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"}
 	}
 	pr := p.start(false)
 	p.wait(pr.ID)
@@ -446,7 +453,7 @@ func TestStoredArtifacts_Redacted(t *testing.T) {
 	var stored []string
 	for _, a := range rows {
 		stored = append(stored, a.Diff, a.FinalMessage, a.Metrics, a.CheckResult)
-		if !strings.Contains(a.Diff, "[redacted]") || !strings.Contains(a.FinalMessage, "[redacted]") {
+		if !strings.Contains(a.Diff, redact.Placeholder) || !strings.Contains(a.FinalMessage, redact.Placeholder) {
 			t.Fatalf("arm %s not redacted: %+v", a.Role, a)
 		}
 	}
@@ -456,14 +463,88 @@ func TestStoredArtifacts_Redacted(t *testing.T) {
 	for _, l := range ledger {
 		stored = append(stored, l.Reason, l.Evidence)
 	}
-	for _, s := range stored {
-		if strings.Contains(s, "SECRET-TOKEN-123") {
-			t.Fatalf("secret stored: %q", s)
+	assertNoSecret(t, stored)
+	v, _, _ := p.svc.Get(p.prop.ID)
+	assertNoSecret(t, []string{mustJSON(v)})
+
+	// Error strings and the verdict reason: a canary failure that echoes the
+	// secret is stored short and redacted.
+	q := newPfx(t, func(d *Deps) { d.Redact = realRedact("SECRET-TOKEN-123") })
+	q.att = func() (sandbox.Attestation, float64, error) {
+		return sandbox.Attestation{}, 0, fmt.Errorf("canary said token SECRET-TOKEN-123 and ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789")
+	}
+	pq := q.start(false)
+	got := q.wait(pq.ID)
+	if got.Status != "failed" || got.Error == "" || got.VerdictReason == "" {
+		t.Fatalf("probe = %+v", got)
+	}
+	stored = []string{got.Error, got.VerdictReason}
+	ledger, _ = q.st.ListLedger(q.ws.ID, 0, 0)
+	for _, l := range ledger {
+		stored = append(stored, l.Reason, l.Evidence)
+	}
+	assertNoSecret(t, stored)
+	if !strings.Contains(got.Error, redact.Placeholder) {
+		t.Fatalf("error not redacted: %q", got.Error)
+	}
+}
+
+func assertNoSecret(t *testing.T, texts []string) {
+	t.Helper()
+	for _, s := range texts {
+		for _, secret := range []string{"SECRET-TOKEN-123", "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"} {
+			if strings.Contains(s, secret) {
+				t.Fatalf("secret %q stored: %q", secret, s)
+			}
 		}
 	}
-	v, _, _ := p.svc.Get(p.prop.ID)
-	if strings.Contains(mustJSON(v), "SECRET-TOKEN-123") {
-		t.Fatal("secret in the view")
+}
+
+// A secret that straddles the stored cut (64 KB of diff) must be redacted
+// before clipping, or its prefix is stored.
+func TestStoredArtifacts_RedactedAcrossClipBoundary(t *testing.T) {
+	t.Parallel()
+	const secret = "SECRET-TOKEN-123"
+	// Measure where the secret lands in the diff for a given filler size.
+	posFor := func(filler int) int {
+		base, armDir := t.TempDir(), t.TempDir()
+		if err := os.WriteFile(filepath.Join(base, "README.md"), []byte("hello\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(armDir, "README.md"), []byte("hello\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(armDir, "big.txt"), []byte(strings.Repeat("a", filler)+secret+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		d, _, err := arm.Diff(context.Background(), base, armDir, 1<<20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Index(d, secret)
+	}
+	filler := 64<<10 - 6 // aim: the cut falls 6 bytes into the 16-byte secret
+	filler += (64<<10 - 6) - posFor(filler)
+	if pos := posFor(filler); pos != 64<<10-6 {
+		t.Fatalf("could not place the secret at the cut: pos %d", pos)
+	}
+	p := newPfx(t, func(d *Deps) { d.Redact = realRedact(secret) })
+	p.arms.behave = func(armJob, int) fakeArm {
+		return fakeArm{cost: cost(0.05), writes: map[string]string{"big.txt": strings.Repeat("a", filler) + secret + "\n"}}
+	}
+	pr := p.start(true)
+	p.wait(pr.ID)
+	rows, _ := p.st.ListProbeArms(pr.ID)
+	for _, a := range rows {
+		if len(a.Diff) <= 64<<10-100 {
+			t.Fatalf("arm %s diff not clipped near the cap: %d bytes", a.Role, len(a.Diff))
+		}
+		if strings.Contains(a.Diff, "SECRET") || strings.Contains(a.Diff, secret[:5]) {
+			t.Fatalf("arm %s stored a prefix of the secret: ...%q", a.Role, a.Diff[len(a.Diff)-60:])
+		}
+		if !strings.HasSuffix(a.Diff, truncatedMarker) {
+			t.Fatalf("arm %s clipped diff lacks the marker", a.Role)
+		}
 	}
 }
 
