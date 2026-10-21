@@ -136,6 +136,7 @@ func TestTripwire_ViolationLogMarksUnsafe(t *testing.T) {
 	for name, o := range map[string]Observation{
 		"extra tool":     {InitTools: append(AllowedTools(), "WebFetch")},
 		"missing tool":   {InitTools: AllowedTools()[1:]},
+		"skill missing":  {InitTools: dropTool(AllowedTools(), "Skill")},
 		"mcp server":     {InitTools: AllowedTools(), MCPServers: 1},
 		"plugin":         {InitTools: AllowedTools(), Plugins: 2},
 		"no init at all": {},
@@ -161,5 +162,32 @@ func TestTripwire_UnreadableRepoFailsClosed(t *testing.T) {
 	got := f.tw.Check()
 	if len(got) == 0 || got[0].Kind != KindRepoChanged || !strings.Contains(got[0].Detail, "cannot re-read") {
 		t.Errorf("findings = %v, want a fail-closed repo_changed", got)
+	}
+}
+
+func dropTool(in []string, drop string) []string {
+	var out []string
+	for _, s := range in {
+		if s != drop {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func TestSandboxTools_SkillIsPartOfTheSurface(t *testing.T) {
+	has := false
+	for _, n := range AllowedTools() {
+		has = has || n == "Skill"
+	}
+	if !has || len(AllowedTools()) != 8 {
+		t.Fatalf("AllowedTools = %v, want the 7 built-ins plus Skill", AllowedTools())
+	}
+	if got := CheckInit(Observation{InitTools: AllowedTools()}); len(got) != 0 {
+		t.Errorf("the allowlist itself was flagged: %v", got)
+	}
+	// The init list must EQUAL the allowlist: an extra tool is flagged too.
+	if got := CheckInit(Observation{InitTools: append(AllowedTools(), "WebFetch")}); len(got) == 0 {
+		t.Error("an extra tool beside Skill was not flagged")
 	}
 }

@@ -93,6 +93,9 @@ func (p *Policy) Decide(_ context.Context, req claudecode.CanUseToolRequest) (bo
 }
 
 func (p *Policy) decide(req claudecode.CanUseToolRequest) (allow bool, path, reason string) {
+	if req.ToolName == "Skill" { // loads a skill file; reads no path of the arm
+		return true, "", "skill load"
+	}
 	if req.ToolName == "Bash" {
 		cmd, _ := req.Input["command"].(string)
 		if p.AllowBash != nil && p.AllowBash(cmd) {

@@ -68,19 +68,19 @@ func TestSandboxLaunch_OptionsShape(t *testing.T) {
 		return false
 	}
 	for flag, value := range map[string]string{
-		"--tools": "Bash,Read,Edit,Write,Glob,Grep,NotebookEdit", "--permission-mode": "acceptEdits",
-		"--permission-prompts": "none", "--settings": l.SettingsJSON, "--add-dir": proj,
+		"--tools": "Bash,Read,Edit,Write,Glob,Grep,NotebookEdit,Skill", "--permission-mode": "acceptEdits",
+		"--permission-prompts": "none", "--settings": l.SettingsJSON, "--add-dir": proj, "--plugin-dir": proj,
 	} {
 		if !follows(flag, value) {
 			t.Errorf("argv lacks %s %s:\n%s", flag, value, strings.Join(argv, " "))
 		}
 	}
-	for _, f := range []string{"--setting-sources=", "--strict-mcp-config", "--disable-slash-commands", "--disallowedTools"} {
+	for _, f := range []string{"--setting-sources=", "--strict-mcp-config", "--disallowedTools"} {
 		if !has(f) {
 			t.Errorf("argv lacks %s:\n%s", f, strings.Join(argv, " "))
 		}
 	}
-	for _, f := range []string{"--permission-prompt-tool", "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--mcp-config"} {
+	for _, f := range []string{"--permission-prompt-tool", "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--mcp-config", "--disable-slash-commands"} {
 		for _, x := range argv {
 			if x == f || strings.HasPrefix(x, f+"=") {
 				t.Errorf("argv must not contain %s", f)
@@ -96,8 +96,10 @@ func TestSandboxLaunch_OptionsShape(t *testing.T) {
 	}
 	_ = c.Close()
 	b, _ = os.ReadFile(argsFile)
-	if strings.Contains(string(b), "--add-dir") {
-		t.Errorf("--add-dir present without a projection:\n%s", b)
+	for _, f := range []string{"--add-dir", "--plugin-dir"} {
+		if strings.Contains(string(b), f) {
+			t.Errorf("%s present without a projection:\n%s", f, b)
+		}
 	}
 }
 
@@ -128,7 +130,7 @@ func TestSandboxLaunch_PrepareValidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if l.Policy == nil || l.PidFile == "" || filepath.Dir(l.PidFile) != priv || len(l.Tools) != 7 {
+	if l.Policy == nil || l.PidFile == "" || filepath.Dir(l.PidFile) != priv || len(l.Tools) != 8 {
 		t.Errorf("launch = %+v", l)
 	}
 	// An empty projection is legal.

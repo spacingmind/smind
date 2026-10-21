@@ -526,7 +526,7 @@ func Run() {
 				_ = os.WriteFile(filepath.Join(wd, "child.pid"), []byte(fmt.Sprint(cmd.Process.Pid)), 0o644)
 			}
 		}
-		tools := []any{"Bash", "Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit"}
+		tools := []any{"Bash", "Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit", "Skill"}
 		if scenario == "probe-bad-tools" {
 			tools = append(tools, "WebFetch")
 		}

@@ -11,7 +11,7 @@ import (
 
 // tools is the arm's complete built-in tool surface; the CLI's init report
 // must list exactly these (see Verify and CheckInit).
-var tools = []string{"Bash", "Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit"}
+var tools = []string{"Bash", "Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit", "Skill"}
 
 // AllowedTools returns a copy of the arm's tool allowlist.
 func AllowedTools() []string { return append([]string(nil), tools...) }
@@ -111,8 +111,9 @@ func nested(child, parent string) bool {
 // permission prompt tool and no bypass flag: P0 measured the policy is never
 // consulted headless, so the settings sandbox is the boundary and the policy
 // is belt and braces. A Launch that did not come from Prepare yields nil.
-// WithEnv is called once: the SDK replaces the list on
-// every call.
+// Slash commands stay enabled: --disable-slash-commands would also remove
+// the Skill tool (measured), and a probe needs the arm to load a candidate
+// skill. WithEnv is called once: the SDK replaces the list on every call.
 func (l *Launch) Options() []claudecode.Option {
 	if !l.Prepared() {
 		return nil
@@ -121,7 +122,7 @@ func (l *Launch) Options() []claudecode.Option {
 	opts := []claudecode.Option{
 		claudecode.WithSettingSources(),
 		claudecode.WithStrictMCPConfig(),
-		claudecode.WithExtraArgs(map[string]*string{"disable-slash-commands": nil, "permission-prompts": &none}),
+		claudecode.WithExtraArgs(map[string]*string{"permission-prompts": &none}),
 		claudecode.WithPermissionMode("acceptEdits"),
 		claudecode.WithPermissionPolicy(l.Policy),
 		claudecode.WithTools(l.Tools...),
@@ -131,7 +132,10 @@ func (l *Launch) Options() []claudecode.Option {
 		claudecode.WithEnv("ENABLE_CLAUDEAI_MCP_SERVERS=false"),
 	}
 	if l.ProjectionDir != "" {
-		opts = append(opts, claudecode.WithAddDirs(l.ProjectionDir))
+		// The projection is an add-dir (the built-in Read needs it to read a
+		// skill file) and a plugin root: measured with --setting-sources= a
+		// skill under --add-dir is not discovered, a --plugin-dir plugin is.
+		opts = append(opts, claudecode.WithAddDirs(l.ProjectionDir), claudecode.WithPluginDirs(l.ProjectionDir))
 	}
 	return opts
 }
