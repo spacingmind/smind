@@ -36,10 +36,11 @@ type Service struct {
 	wg     sync.WaitGroup
 	cancel func()
 
-	// Test seams; production leaves them nil.
-	lookPath  func(string) (string, error)
-	canaryRun canaryFunc
-	armRun    armFunc
+	// Test seams; production leaves canaryRun and armRun nil.
+	lookPath     func(string) (string, error)
+	canaryRun    canaryFunc
+	armRun       armFunc
+	janitorEvery time.Duration
 }
 
 // New builds a Service. Config defaults to config.DefaultLearning.
@@ -84,6 +85,12 @@ func reason(code, msg string) Reason { return Reason{Code: code, Message: msg} }
 
 // assess collects every reason (not only the first) and the estimate.
 func (s *Service) assess(proposalID int64, quick bool) (plan, error) {
+	return s.assessInner(proposalID, quick, false)
+}
+
+// assessInner is assess; skipInProc leaves out this process's in-flight
+// guard (Start has just taken it itself) but still honours a stored probe.
+func (s *Service) assessInner(proposalID int64, quick, skipInProc bool) (plan, error) {
 	st := s.d.Store
 	cfg := s.d.Config()
 	now := s.d.Now()
@@ -188,7 +195,7 @@ func (s *Service) assess(proposalID int64, quick bool) (plan, error) {
 		}
 	}
 
-	busy, err := s.busy()
+	busy, err := s.busy(skipInProc)
 	if err != nil {
 		return plan{}, err
 	}
@@ -201,11 +208,11 @@ func (s *Service) assess(proposalID int64, quick bool) (plan, error) {
 }
 
 // busy reports a probe in flight: this process's guard or a stored one.
-func (s *Service) busy() (bool, error) {
+func (s *Service) busy(skipInProc bool) (bool, error) {
 	s.mu.Lock()
 	inProc := s.starting || s.active != nil
 	s.mu.Unlock()
-	if inProc {
+	if inProc && !skipInProc {
 		return true, nil
 	}
 	_, ok, err := s.d.Store.ActiveProbe()
