@@ -35,8 +35,9 @@ async function deviceLifecycle(page, harness) {
 
   await harness.cmd(`revoke ${deviceId}`);
   try {
-    // The status screen's native header repeats the card title: either match proves the screen.
-    await page.getByText('This device was revoked', { exact: true }).first().waitFor({ timeout: 30_000 });
+    // The header is the constant 'Connection' (ADR-0036 §5); the card carries the specific title.
+    await page.getByText('Connection', { exact: true }).first().waitFor({ timeout: 30_000 });
+    await page.getByText('This device was revoked', { exact: true }).waitFor({ timeout: 30_000 });
   } catch {
     lib.fail('"This device was revoked" did not appear after the daemon revoked the device');
     return;
