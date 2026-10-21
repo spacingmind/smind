@@ -116,8 +116,8 @@ func (fa *fakeArms) run(ctx context.Context, job armJob) (armOutcome, error) {
 	if _, err := fa.f.st.CreateRun(r); err != nil {
 		fa.t.Error(err)
 	}
-	fa.started <- struct{}{}
 	job.setRun(runID)
+	fa.started <- struct{}{}
 	if b.block {
 		<-ctx.Done()
 		return armOutcome{RunID: runID, Report: taskrunner.ProbeReport{End: arm.EndKilled, InitTools: sandbox.AllowedTools()}}, ctx.Err()
@@ -783,4 +783,23 @@ func TestProbe_HoldsExecutorSlotForItsDuration(t *testing.T) {
 	if ex3.isHeld() {
 		t.Fatal("slot leaked after a failed probe")
 	}
+}
+
+func TestProbe_RunIDPersistedBeforeArmEnds(t *testing.T) {
+	t.Parallel()
+	p := newPfx(t, nil)
+	p.arms.behave = func(armJob, int) fakeArm { return fakeArm{block: true} }
+	pr := p.start(false)
+	<-p.arms.started
+	rows, err := p.st.ListProbeArms(pr.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("probe-run-%d-A", pr.ID)
+	if rows[0].Status != "running" || rows[0].RunID != want {
+		t.Fatalf("running arm row = %+v, want run id %q already stored", rows[0], want)
+	}
+	// A daemon crash here leaves the row; the purge must still reach the run.
+	_ = p.svc.Cancel(p.prop.ID)
+	p.wait(pr.ID)
 }

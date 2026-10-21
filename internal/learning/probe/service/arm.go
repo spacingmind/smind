@@ -151,7 +151,13 @@ func (s *Service) runOneArm(ctx context.Context, ap armParams, role string) *arm
 	job := armJob{ProbeID: ap.rn.probeID, WorkspaceID: ap.ws.ID, Role: role, ArmDir: armDir, PrivateDir: launchDir,
 		ProjectionDir: ap.proj.of(role).Dir, Prompt: ap.prompt, Model: ap.model, MaxTurns: ap.maxTurns,
 		CostCapUSD: ap.capUSD, OutputCap: int64(cfg.OutputCapKB) * 1024, Timeout: time.Duration(cfg.ArmTimeoutMinutes) * time.Minute,
-		Attestation: ap.att, setRun: func(id string) { s.setRunning(ap.rn, id) }}
+		Attestation: ap.att, setRun: func(id string) {
+			s.setRunning(ap.rn, id)
+			if id != "" { // persist at once: a crash must not orphan the run from PurgeDecidedProbes
+				row.RunID = id
+				s.saveArm(ap.rn, row)
+			}
+		}}
 	run := s.realArm
 	if s.armRun != nil {
 		run = s.armRun
