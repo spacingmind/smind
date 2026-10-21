@@ -38,20 +38,14 @@ async function transcript(page, harness) {
     return;
   }
 
-  // Warm-up push/pop: on web the task route is a lazily fetched chunk (expo-router async routes), so the FIRST push
-  // shows the stack header over an empty body until the chunk arrives -- before any screen code exists. Native bundles
-  // are not split. The assertion below therefore runs on warm pushes.
+  // The FIRST push is asserted too: web async routes are off (app.json expo-router plugin `asyncRoutes.web: false`), so the
+  // task route is not a lazily fetched chunk that would show the stack header over an empty body before any screen code runs.
   const listRow = async () => {
     for (let i = 0; i < 100; i++) {
       if ((await page.getByText(title, { exact: true }).count()) === 1) return; // the popped screen's header title is gone
       await page.waitForTimeout(100);
     }
   };
-  await page.getByText(title, { exact: true }).click();
-  await page.getByText(/^run [0-9a-f]{8} ·/).waitFor({ timeout: 20_000 });
-  await lib.goBack(page);
-  await listRow();
-
   // Push/pop in both schemes: the loading state (a skeleton, never a blank body) is asserted at ~90 ms.
   await pushWithLoadingAssertion(page, 'light');
   await page.getByText(/^run [0-9a-f]{8} ·/).waitFor({ timeout: 20_000 });
