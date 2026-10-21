@@ -18,6 +18,7 @@ export type ProbeReasonCode =
   | "busy"
   | "windows"
   | "platform_unsupported"
+  | "candidate_invalid"
   | "learning_off";
 
 /** `message` is user-facing, one sentence; the UI shows it verbatim and never invents reasons. */
@@ -111,4 +112,6 @@ export interface LearnedSkillProbePayload {
   status: ProbeStatus;
   role?: ProbeArmRole;
   armStatus?: ProbeArmStatus;
+  /** Only on `finished`. */
+  verdict?: ProbeVerdict;
 }

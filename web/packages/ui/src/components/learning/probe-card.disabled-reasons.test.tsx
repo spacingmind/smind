@@ -17,6 +17,7 @@ const BUTTON_REASONS: ProbeReasonCode[] = [
   "budget",
   "quota",
   "busy",
+  "candidate_invalid",
   "learning_off",
 ];
 
