@@ -2,7 +2,6 @@ package taskrunner
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -158,7 +157,7 @@ func (r *Runner) RunPromptProbe(ctx context.Context, taskID, chatID int64, provi
 		for msg := range updates {
 			if sys, ok := msg.(claudecode.SystemMessage); ok && sys.Subtype == "init" {
 				mu.Lock()
-				obs.InitTools, obs.MCPServers, obs.Plugins = parseProbeInit(sys.Raw)
+				obs.InitTools, obs.MCPServers, obs.Plugins = sandbox.ParseInit(sys.Raw, po.Launch.ProjectionDir)
 				if f := sandbox.CheckInit(obs); len(f) > 0 && !tripped {
 					tripped, violated = true, "init reported a wrong tool surface: "+f[0].Detail
 					cancel()
@@ -294,35 +293,4 @@ func probeResultEnd(res claudecode.ResultMessage) (arm.End, string) {
 		return arm.EndError, resultFailure(res)
 	}
 	return arm.EndDone, ""
-}
-
-// parseProbeInit reads the init message: tool names, MCP server count and the
-// count of plugins that are not compiled into the CLI. An unparsable tool
-// entry becomes "?" so it can never match the allowlist.
-func parseProbeInit(raw json.RawMessage) (tools []string, mcp, plugins int) {
-	var m map[string]json.RawMessage
-	if json.Unmarshal(raw, &m) != nil {
-		return nil, 0, 0
-	}
-	var items []json.RawMessage
-	_ = json.Unmarshal(m["tools"], &items)
-	for _, it := range items {
-		var s string
-		if json.Unmarshal(it, &s) == nil {
-			tools = append(tools, s)
-		} else {
-			tools = append(tools, "?")
-		}
-	}
-	items = nil
-	_ = json.Unmarshal(m["mcp_servers"], &items)
-	mcp = len(items)
-	items = nil
-	_ = json.Unmarshal(m["plugins"], &items)
-	for _, it := range items {
-		if !isBuiltinPlugin(it) {
-			plugins++
-		}
-	}
-	return tools, mcp, plugins
 }

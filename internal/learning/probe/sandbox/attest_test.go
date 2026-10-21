@@ -282,3 +282,40 @@ func TestRunCanary_StandIn(t *testing.T) {
 		t.Errorf("a leaked secret past the clip attested or was not clipped: %v", err)
 	}
 }
+
+func TestIsProbePlugin(t *testing.T) {
+	dir := t.TempDir()
+	other := t.TempDir()
+	entry := func(name, path, source string) json.RawMessage {
+		b, _ := json.Marshal(map[string]string{"name": name, "path": path, "source": source})
+		return b
+	}
+	for name, tc := range map[string]struct {
+		raw  json.RawMessage
+		proj string
+		want bool
+	}{
+		"the arm's own plugin": {entry("smindprobe", dir, "smindprobe@inline"), dir, true},
+		"no projection":        {entry("smindprobe", dir, "smindprobe@inline"), "", false},
+		"another directory":    {entry("smindprobe", other, "smindprobe@inline"), dir, false},
+		"another plugin name":  {entry("evil", dir, "evil@inline"), dir, false},
+		"marketplace source":   {entry("smindprobe", dir, "smindprobe@marketplace"), dir, false},
+		"empty path":           {entry("smindprobe", "", "smindprobe@inline"), dir, false},
+		"not an object":        {json.RawMessage(`"smindprobe"`), dir, false},
+	} {
+		if got := IsProbePlugin(tc.raw, tc.proj); got != tc.want {
+			t.Errorf("%s: IsProbePlugin = %v, want %v", name, got, tc.want)
+		}
+	}
+	// Through ParseInit: only the arm's own plugin is exempt from the count.
+	init := json.RawMessage(`{"tools":["Bash"],"plugins":[` +
+		`{"name":"smindprobe","path":"` + dir + `","source":"smindprobe@inline"},` +
+		`{"name":"other","path":"/x","source":"other@inline"},` +
+		`{"name":"cc-plugin-sec-default","path":"builtin","source":"cc-plugin-sec-default@builtin"}]}`)
+	if _, _, plugins := ParseInit(init, dir); plugins != 1 {
+		t.Errorf("non-builtin plugins = %d, want 1 (only `other`)", plugins)
+	}
+	if _, _, plugins := ParseInit(init, ""); plugins != 2 {
+		t.Errorf("without a projection both non-builtin plugins count: %d", plugins)
+	}
+}
