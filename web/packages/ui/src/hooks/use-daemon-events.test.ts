@@ -64,6 +64,10 @@ describe("useDaemonEvents", () => {
         "learnedSkill.proposed",
         "learnedSkill.changed",
         "learning.job",
+        "learnedSkill.probe.started",
+        "learnedSkill.probe.arm",
+        "learnedSkill.probe.finished",
+        "learnedSkill.probe.failed",
       ],
     });
 
