@@ -77,3 +77,15 @@ describe("ProbeCard running", () => {
     expect(v.calls.find((c) => c.method === "learning.probe.cancel")?.params).toEqual({ id: 9 });
   });
 });
+
+describe("ProbeCard arm that never ran", () => {
+  it("shows an arm stopped before it started as not started, not as 0s and $0.0000", async () => {
+    await renderProbeCard({
+      probe: runningProbe({ arms: [arm({ role: "A", status: "done" }), arm({ role: "B", status: "killed", startedAt: undefined, elapsedMs: 0, costUSD: 0 })] }),
+    });
+    const [, b] = screen.getAllByTestId("probe-arm") as [HTMLElement, HTMLElement];
+    expect(within(b).getByTestId("probe-arm-status").textContent).toBe("Stopped");
+    expect(within(b).getByTestId("probe-arm-elapsed").textContent).toBe("–");
+    expect(within(b).getByTestId("probe-arm-cost").textContent).toBe("–");
+  });
+});

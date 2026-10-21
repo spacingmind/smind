@@ -5,7 +5,10 @@ import { Button } from "@/components/ui/button";
 import { formatBytes } from "@/lib/probe-format";
 import { Icons } from "@/lib/icons";
 
-/** What the skill arm changed in its sandbox checkout, collapsed until asked for (a pure UI toggle). */
+/**
+ * What the skill arm changed in its sandbox checkout, collapsed until asked for (a pure UI toggle). diff2html's "Viewed"
+ * checkbox is meaningless on a read-only diff and sets `display: flex` inline when it draws, so the hide must be `!important`.
+ */
 export function ProbeDiff({ diff, diffBytes }: { diff: string; diffBytes: number }) {
   const [open, setOpen] = useState(false);
   const Chevron = open ? Icons.chevronDown : Icons.chevronRight;
@@ -23,7 +26,7 @@ export function ProbeDiff({ diff, diffBytes }: { diff: string; diffBytes: number
         <Chevron aria-hidden /> Changes made with this skill ({formatBytes(diffBytes)})
       </Button>
       {open && (
-        <div className="max-h-96 overflow-auto rounded-lg [&_.d2h-file-collapse]:hidden" tabIndex={0} role="region" aria-label="Changes made with this skill">
+        <div className="max-h-96 overflow-auto rounded-lg [&_.d2h-file-collapse]:hidden!" tabIndex={0} role="region" aria-label="Changes made with this skill">
           <DiffRender diff={diff} outputFormat="line-by-line" testId="probe-diff-body" />
         </div>
       )}

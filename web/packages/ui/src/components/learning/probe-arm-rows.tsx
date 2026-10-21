@@ -14,7 +14,8 @@ export function ProbeArmRows({ arms, workspaceId }: { arms: ProbeArmView[]; work
   return (
     <ul className="flex flex-col divide-y divide-border rounded-lg border border-border" data-testid="probe-arms">
       {arms.map((arm) => {
-        const started = arm.status !== "pending";
+        // An arm stopped before it ever ran (restart recovery, an earlier arm failing) has no start, no time and no cost.
+        const started = arm.status !== "pending" && !(arm.startedAt === undefined && arm.elapsedMs === 0 && arm.costUSD === 0);
         return (
           <li key={arm.role} data-testid="probe-arm" data-role={arm.role} data-status={arm.status} className="flex items-center gap-3 px-3 py-2">
             <StatusDot status={dotFor(arm.status)} aria-hidden />
