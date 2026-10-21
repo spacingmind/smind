@@ -49,6 +49,8 @@ type fakeArm struct {
 	noInit  bool
 	noRun   bool
 	nothing bool
+	// survivors is the report's count of processes that outlived the kill.
+	survivors int
 }
 
 func cost(v float64) *float64 { return &v }
@@ -149,7 +151,7 @@ func (fa *fakeArms) run(ctx context.Context, job armJob) (armOutcome, error) {
 	if end == "" {
 		end = arm.EndDone
 	}
-	rep := taskrunner.ProbeReport{End: end, Turns: 3, InitTools: sandbox.AllowedTools()}
+	rep := taskrunner.ProbeReport{End: end, Turns: 3, InitTools: sandbox.AllowedTools(), Survivors: b.survivors}
 	if b.noInit {
 		rep.InitTools = []string{"Bash", "WebFetch"}
 	}
@@ -802,4 +804,33 @@ func TestProbe_RunIDPersistedBeforeArmEnds(t *testing.T) {
 	// A daemon crash here leaves the row; the purge must still reach the run.
 	_ = p.svc.Cancel(p.prop.ID)
 	p.wait(pr.ID)
+}
+
+func TestTripwire_FindingKindInVerdictReason(t *testing.T) {
+	t.Parallel()
+	p := newPfx(t, nil)
+	p.arms.behave = func(armJob, int) fakeArm { return fakeArm{cost: cost(0.05), trip: true} }
+	pr := p.start(false)
+	got := p.wait(pr.ID)
+	if got.Status != "unsafe" || !strings.Contains(got.VerdictReason, "a tripwire fired: repo_changed") {
+		t.Fatalf("probe = %+v", got)
+	}
+	v, _, _ := p.svc.Get(p.prop.ID)
+	if !strings.Contains(v.VerdictReason, "repo_changed") {
+		t.Fatalf("view reason = %q", v.VerdictReason)
+	}
+}
+
+func TestProbe_SurvivorsMakeUnsafe(t *testing.T) {
+	t.Parallel()
+	p := newPfx(t, nil)
+	p.arms.behave = func(armJob, int) fakeArm { return fakeArm{cost: cost(0.05), survivors: 2} }
+	pr := p.start(false)
+	got := p.wait(pr.ID)
+	if got.Status != "unsafe" || got.Verdict != "unsafe" || !strings.Contains(got.VerdictReason, "a tripwire fired: survivors") {
+		t.Fatalf("probe = %+v", got)
+	}
+	if n := p.arms.count(); n != 1 {
+		t.Fatalf("arms started = %d, want 1: survivors stop the rest", n)
+	}
 }

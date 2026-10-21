@@ -600,6 +600,14 @@ func (s *Service) settle(rn *running, pl plan, proj probeProjections, sig *signa
 		res = verdict.Decide(verdict.Input{Quick: p.Quick, HasSignature: sig != nil, Contrast: con, Ends: ends, Planned: planned, Unsafe: unsafe})
 	}
 
+	if unsafe {
+		for _, r := range recs {
+			if len(r.findings) > 0 {
+				res.Reason = fmt.Sprintf("a tripwire fired: %s; the probe was quarantined.", r.findings[0].Kind)
+				break
+			}
+		}
+	}
 	now := s.d.Now().UTC()
 	p.Verdict, p.VerdictReason, p.FinishedAt = string(res.Code), res.Reason, &now
 	switch {

@@ -26,6 +26,9 @@ const (
 	roleB  = "B"
 )
 
+// kindSurvivors is the finding for arm processes that outlived the kill.
+const kindSurvivors = "survivors"
+
 const (
 	maxDiffBytes  = 64 << 10
 	maxFinalBytes = 8 << 10
@@ -188,6 +191,13 @@ func (s *Service) runOneArm(ctx context.Context, ap armParams, role string) *arm
 	rec.findings = trip.Check()
 	if rep.End == arm.EndDone || len(rep.InitTools) > 0 || rep.MCPServers > 0 || rep.Plugins > 0 {
 		rec.findings = append(rec.findings, sandbox.CheckInit(sandbox.Observation{InitTools: rep.InitTools, MCPServers: rep.MCPServers, Plugins: rep.Plugins})...)
+	}
+
+	if rep.Survivors > 0 {
+		rec.findings = append(rec.findings, sandbox.Finding{Kind: kindSurvivors, Detail: fmt.Sprintf("%d process(es) outlived the kill pass", rep.Survivors)})
+	}
+	for _, f := range rec.findings {
+		slog.Warn("learning probe: tripwire fired", "probe", ap.rn.probeID, "role", role, "kind", f.Kind, "detail", clipText(s.d.Redact(f.Detail), 200))
 	}
 
 	events, final := s.collectEvents(out.RunID)
