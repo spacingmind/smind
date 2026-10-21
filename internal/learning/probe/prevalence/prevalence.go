@@ -87,7 +87,7 @@ func (s *Service) Scan(ctx context.Context, proposalID int64) (Result, error) {
 	}
 	rdx := service.NewRedactor(s.d.Store, s.d.Home, ws.Path)
 
-	sigs, err := s.derive(p, rdx.String)
+	sigs, err := s.Derive(p, rdx.String)
 	if err != nil {
 		return Result{}, err
 	}
@@ -153,10 +153,10 @@ func (s *Service) Scan(ctx context.Context, proposalID int64) (Result, error) {
 	return res, nil
 }
 
-// derive returns up to maxSignatures distinct signatures from the
+// Derive returns up to maxSignatures distinct signatures from the
 // proposal's evidence. A run is only read when it belongs to the
 // proposal's workspace.
-func (s *Service) derive(p store.LearnedProposal, redact func(string) string) ([]signature.Signature, error) {
+func (s *Service) Derive(p store.LearnedProposal, redact func(string) string) ([]signature.Signature, error) {
 	var items []gate.Evidence
 	if p.Evidence == "" || json.Unmarshal([]byte(p.Evidence), &items) != nil {
 		return nil, nil
