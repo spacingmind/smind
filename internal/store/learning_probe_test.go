@@ -319,3 +319,153 @@ func TestLearningBucket_ExcludesProbeRuns(t *testing.T) {
 		t.Fatalf("SummarizeProbeUsageWindow() = %d runs, %v USD; want 1, 0.40", pRuns, pCost)
 	}
 }
+
+func TestForgetWorkspace_DeletesProbeArtifacts(t *testing.T) {
+	t.Parallel()
+	s, ws, task := newProbeFixture(t)
+	other := newTestWorkspace(t, s, "/other")
+	otherTask, _ := s.CreateTask(Task{WorkspaceID: other.ID, Title: "t2", Status: "created"})
+
+	seed := func(wsID int64, taskID int64, pid int64, runID string) {
+		p, err := s.CreateProbe(LearningProbe{WorkspaceID: wsID, ProposalID: pid, Status: "done"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.UpsertProbeArm(LearningProbeArm{ProbeID: p.ID, Role: "A", Seq: 0, Status: "done", RunID: runID}); err != nil {
+			t.Fatal(err)
+		}
+		probeRun(t, s, taskID, wsID, runID, time.Now().UTC(), "probe", nil)
+		if _, err := s.AppendRunEvent(runID, 0, `{"type":"text"}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed(ws.ID, task.ID, 1, "ws-run")
+	seed(other.ID, otherTask.ID, 2, "other-run")
+
+	if err := s.ForgetWorkspaceLearning(ws.ID); err != nil {
+		t.Fatalf("ForgetWorkspaceLearning() error = %v", err)
+	}
+	if n := countRows(t, s, "SELECT COUNT(*) FROM learning_probes WHERE workspace_id = ?", ws.ID); n != 0 {
+		t.Fatalf("probes left = %d", n)
+	}
+	if n := countRows(t, s, `SELECT COUNT(*) FROM runs WHERE id = 'ws-run'`); n != 0 {
+		t.Fatal("probe run left")
+	}
+	if n := countRows(t, s, `SELECT COUNT(*) FROM run_events WHERE run_id = 'ws-run'`); n != 0 {
+		t.Fatal("probe run events left")
+	}
+	if n := countRows(t, s, `SELECT COUNT(*) FROM run_usage WHERE run_id = 'ws-run'`); n != 0 {
+		t.Fatal("probe run usage left")
+	}
+	if n := countRows(t, s, "SELECT COUNT(*) FROM learning_probe_arms a JOIN learning_probes p ON p.id = a.probe_id WHERE p.workspace_id = ?", ws.ID); n != 0 {
+		t.Fatal("probe arms left")
+	}
+	// The other workspace keeps its probe.
+	if n := countRows(t, s, "SELECT COUNT(*) FROM learning_probes WHERE workspace_id = ?", other.ID); n != 1 {
+		t.Fatalf("other workspace probes = %d, want 1", n)
+	}
+	if n := countRows(t, s, `SELECT COUNT(*) FROM runs WHERE id = 'other-run'`); n != 1 {
+		t.Fatalf("other workspace run = %d, want 1", n)
+	}
+}
+
+func TestPurge_FourteenDaysAfterDecision(t *testing.T) {
+	t.Parallel()
+	s, ws, task := newProbeFixture(t)
+	now := time.Now().UTC()
+
+	mk := func(name string, decidedDaysAgo int, runID string) {
+		prop, err := s.CreateProposal(LearnedProposal{WorkspaceID: ws.ID, Kind: "create", Source: "reflector", Name: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decidedDaysAgo >= 0 {
+			if err := s.DecideProposal(prop.ID, "approved", "ok", "human"); err != nil {
+				t.Fatal(err)
+			}
+			d := now.AddDate(0, 0, -decidedDaysAgo)
+			if _, err := s.db.Exec(`UPDATE learned_skill_proposals SET decided_at = ? WHERE id = ?`, d, prop.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		p, err := s.CreateProbe(LearningProbe{WorkspaceID: ws.ID, ProposalID: prop.ID, Status: "done"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.UpsertProbeArm(LearningProbeArm{ProbeID: p.ID, Role: "A", Seq: 0, Status: "done", RunID: runID}); err != nil {
+			t.Fatal(err)
+		}
+		probeRun(t, s, task.ID, ws.ID, runID, now, "probe", nil)
+	}
+	mk("old", 15, "run-old")     // decided 15 days ago: purged
+	mk("young", 13, "run-young") // decided 13 days ago: kept
+	mk("pending", -1, "run-pending")
+
+	probes, runIDs, err := s.PurgeDecidedProbes(now.AddDate(0, 0, -14))
+	if err != nil {
+		t.Fatalf("PurgeDecidedProbes() error = %v", err)
+	}
+	if probes != 1 || len(runIDs) != 1 || runIDs[0] != "run-old" {
+		t.Fatalf("PurgeDecidedProbes() = %d probes, %v; want 1, [run-old]", probes, runIDs)
+	}
+	if n := countRows(t, s, "SELECT COUNT(*) FROM learning_probes"); n != 2 {
+		t.Fatalf("probes left = %d, want 2 (young + pending)", n)
+	}
+	if n := countRows(t, s, `SELECT COUNT(*) FROM runs WHERE id = 'run-old'`); n != 0 {
+		t.Fatal("run-old left")
+	}
+	if n := countRows(t, s, `SELECT COUNT(*) FROM runs WHERE id = 'run-young'`); n != 1 {
+		t.Fatal("run-young deleted")
+	}
+
+	// A probe of a missing proposal row counts as decided.
+	p, err := s.CreateProbe(LearningProbe{WorkspaceID: ws.ID, ProposalID: 99999, Status: "done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	probes, _, err = s.PurgeDecidedProbes(now.AddDate(0, 0, -14))
+	if err != nil || probes != 1 {
+		t.Fatalf("missing-proposal purge = %d, %v; want 1", probes, err)
+	}
+	if _, err := s.GetProbe(p.ID); err == nil {
+		t.Fatal("missing-proposal probe survived")
+	}
+}
+
+func TestPurge_OnlyProbeRuns(t *testing.T) {
+	t.Parallel()
+	s, ws, task := newProbeFixture(t)
+	now := time.Now().UTC()
+
+	prop, err := s.CreateProposal(LearnedProposal{WorkspaceID: ws.ID, Kind: "create", Source: "reflector", Name: "n1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DecideProposal(prop.ID, "approved", "ok", "human"); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.CreateProbe(LearningProbe{WorkspaceID: ws.ID, ProposalID: prop.ID, Status: "done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertProbeArm(LearningProbeArm{ProbeID: p.ID, Role: "A", Seq: 0, Status: "done", RunID: "probe-r"}); err != nil {
+		t.Fatal(err)
+	}
+	c := 1.0
+	probeRun(t, s, task.ID, ws.ID, "probe-r", now, "probe", &c)
+	probeRun(t, s, task.ID, ws.ID, "user-r", now, "user", &c)
+	probeRun(t, s, task.ID, ws.ID, "refl-r", now, "reflect", &c)
+
+	probes, runIDs, err := s.PurgeDecidedProbes(now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probes != 1 || len(runIDs) != 1 || runIDs[0] != "probe-r" {
+		t.Fatalf("PurgeDecidedProbes() = %d, %v", probes, runIDs)
+	}
+	for _, id := range []string{"user-r", "refl-r"} {
+		if n := countRows(t, s, `SELECT COUNT(*) FROM runs WHERE id = ?`, id); n != 1 {
+			t.Fatalf("run %s deleted by probe purge", id)
+		}
+	}
+}

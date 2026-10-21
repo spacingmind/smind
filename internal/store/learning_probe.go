@@ -254,3 +254,78 @@ func b2i(b bool) int {
 	}
 	return 0
 }
+
+// PurgeDecidedProbes deletes every probe whose proposal is decided --
+// learned_skill_proposals.status != 'pending' with decided_at < cutoff;
+// probes of a missing proposal row also count as decided -- together with
+// their arm rows and their runs (+ run_events, run_usage), in one
+// transaction. A pending proposal's probe is never purged. Returns the
+// number of probes deleted and the ids of the runs deleted.
+func (s *Store) PurgeDecidedProbes(cutoff time.Time) (probes int, runIDs []string, err error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, nil, fmt.Errorf("purge decided probes: begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(`SELECT p.id FROM learning_probes p
+		LEFT JOIN learned_skill_proposals pr ON pr.id = p.proposal_id
+		WHERE (pr.id IS NULL OR (pr.status != 'pending' AND pr.decided_at < ?))`, cutoff.UTC())
+	if err != nil {
+		return 0, nil, fmt.Errorf("purge decided probes: select: %w", err)
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, nil, fmt.Errorf("purge decided probes: scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, nil, fmt.Errorf("purge decided probes: %w", err)
+	}
+
+	for _, id := range ids {
+		armRows, err := tx.Query(`SELECT run_id FROM learning_probe_arms WHERE probe_id = ? AND run_id != ''`, id)
+		if err != nil {
+			return 0, nil, fmt.Errorf("purge decided probes: arms of probe %d: %w", id, err)
+		}
+		var runs []string
+		for armRows.Next() {
+			var r string
+			if err := armRows.Scan(&r); err != nil {
+				armRows.Close()
+				return 0, nil, fmt.Errorf("purge decided probes: scan arm: %w", err)
+			}
+			runs = append(runs, r)
+		}
+		armRows.Close()
+
+		for _, r := range runs {
+			for _, q := range []string{
+				`DELETE FROM run_events WHERE run_id = ?`,
+				`DELETE FROM run_usage WHERE run_id = ?`,
+				`DELETE FROM runs WHERE id = ?`,
+			} {
+				if _, err := tx.Exec(q, r); err != nil {
+					return 0, nil, fmt.Errorf("purge decided probes: delete run %s: %w", r, err)
+				}
+			}
+			runIDs = append(runIDs, r)
+		}
+		if _, err := tx.Exec(`DELETE FROM learning_probe_arms WHERE probe_id = ?`, id); err != nil {
+			return 0, nil, fmt.Errorf("purge decided probes: arms of probe %d: %w", id, err)
+		}
+		if _, err := tx.Exec(`DELETE FROM learning_probes WHERE id = ?`, id); err != nil {
+			return 0, nil, fmt.Errorf("purge decided probes: probe %d: %w", id, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, nil, fmt.Errorf("purge decided probes: commit: %w", err)
+	}
+	return len(ids), runIDs, nil
+}
