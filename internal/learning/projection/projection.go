@@ -1,8 +1,10 @@
 // Package projection materialises the active learned skills of a workspace as
 // a read-only, content-addressed directory the agent CLI loads through an
 // add-dir (ADR-0026 §5). It is pure filesystem logic under a caller-given
-// root: the caller decides which skills are active; nothing here ever sees a
-// proposed, disabled or archived skill, and nothing outside root is touched.
+// root: the caller decides which skills go in. Production callers of Project
+// filter to active skills; the only path by which a proposed skill reaches an
+// agent is ProjectProbe (probe.go), which needs a valid sandbox attestation
+// (ADR-0037). Nothing outside root is touched.
 package projection
 
 import (
@@ -64,6 +66,13 @@ func Project(root string, workspaceID int64, skills []Skill) (Projection, error)
 	if err != nil {
 		return Projection{}, err
 	}
+	return projectFiles(root, workspaceID, files, hash)
+}
+
+// projectFiles publishes an already rendered, hashed file set under root
+// (content addressed: the directory name is hash), shared by Project and
+// ProjectProbe.
+func projectFiles(root string, workspaceID int64, files map[string][]byte, hash string) (Projection, error) {
 	root = filepath.Clean(root)
 	wsDir := filepath.Join(root, strconv.FormatInt(workspaceID, 10))
 	final := filepath.Join(wsDir, hash)

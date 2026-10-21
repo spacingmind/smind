@@ -50,6 +50,8 @@ const (
 // Run purposes (runs.purpose, ADR-0026).
 const RunPurposeUser = "user"
 
+const RunPurposeProbe = "probe"
+
 func insertTask(db execer, t Task) (Task, error) {
 	res, err := db.Exec(
 		`INSERT INTO tasks (workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, kind)

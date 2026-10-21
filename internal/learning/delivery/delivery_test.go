@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/learning/probe/sandbox"
+	"github.com/spacingmind/smind/internal/learning/projection"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -176,6 +178,35 @@ func TestProposedSkillNeverDelivered(t *testing.T) {
 	}
 	if _, err := os.Stat(f.root); !os.IsNotExist(err) {
 		t.Fatalf("projection root created with nothing to project: %v", err)
+	}
+}
+
+func TestProposedSkillOnlyDeliveredToProbeSandbox(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, store.LearningModePropose)
+	if _, err := f.st.CreateProposal(store.LearnedProposal{WorkspaceID: f.ws.ID, Kind: "create", Source: "reflector", Name: "proposed-one", Intents: "[]", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	// Production delivery never contains the pending proposal.
+	if d, info := prepare(f, taskrunner.ProviderClaudeNative); !d.Empty() || len(info.SkillIDs) != 0 {
+		t.Fatalf("production delivery carried a pending proposal: %+v %+v", d, info)
+	}
+	// The probe path, with a valid attestation, materialises the candidate at
+	// <root>/<ws>/<hash>/.claude/skills/<name>/SKILL.md under its own root.
+	now := time.Now()
+	probeRoot := filepath.Join(t.TempDir(), "probe-projections")
+	t.Cleanup(func() { _ = projection.Remove(probeRoot, f.ws.ID) }) // the tree is read-only
+	p, err := projection.ProjectProbe(sandbox.AttestationForTest(t, now), now, probeRoot, f.ws.ID,
+		[]projection.Skill{{Name: "learned-proposed-one", Category: "go", Description: "Use when probing", Body: "candidate"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(probeRoot, strconv.FormatInt(f.ws.ID, 10), p.Hash, ".claude", "skills", "learned-proposed-one", "SKILL.md")
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("candidate not in the probe projection: %v", err)
+	}
+	if _, err := os.Stat(f.root); !os.IsNotExist(err) {
+		t.Fatalf("the production projection root was touched: %v", err)
 	}
 }
 

@@ -397,6 +397,10 @@ type run struct {
 	// re-drives a rehydrated run.
 	isolation *taskrunner.IsolationOptions
 
+	// probe, when set, drives the turn through RunPromptProbe (a sandboxed
+	// learning probe arm, system runs only; see WithProbe). Not persisted.
+	probe *taskrunner.ProbeOptions
+
 	// toolCallIDs is the set of distinct non-empty ToolCallIDs record saw
 	// on EventTypeToolCall events; its size is RunFinished.ToolCalls.
 	// Guarded by mu.
@@ -632,6 +636,9 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	if err := validateIsolation(provider, opts); err != nil {
 		return "", err
 	}
+	if err := validateProbe(provider, opts); err != nil {
+		return "", err
+	}
 	p, err := prepareStart(wm, runner, taskID, chatID, provider, prompt, perm, thinkingLevel, model)
 	if err != nil {
 		return "", err
@@ -680,6 +687,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		origin:             resolveStartOptions(opts).origin,
 		interrupt:          resolveStartOptions(opts).interrupt,
 		isolation:          resolveStartOptions(opts).isolation,
+		probe:              resolveStartOptions(opts).probe,
 		worktree:           worktree,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
@@ -923,7 +931,9 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 
 	decider := runPermissionDecider{reg: reg, r: r}
 	var err error
-	if r.isolation != nil {
+	if r.probe != nil {
+		err = runner.RunPromptProbe(ctx, r.taskID, r.chatID, r.provider, r.prompt, r.model, *r.probe, events)
+	} else if r.isolation != nil {
 		err = runner.RunPromptIsolated(ctx, r.taskID, r.chatID, r.provider, r.prompt, r.model, *r.isolation, events)
 	} else {
 		ctx = reg.withDelivery(ctx, r)
@@ -1249,7 +1259,7 @@ func (reg *Registry) finish(r *run, err error) {
 	case err != nil:
 		status = StatusError
 		errMsg = err.Error()
-		if r.isolation != nil {
+		if r.isolation != nil || r.probe != nil {
 			errMsg = clipErrMsg(errMsg)
 		}
 	default:

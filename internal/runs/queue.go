@@ -90,6 +90,9 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	if resolveStartOptions(opts).isolation != nil {
 		return StartOutcome{}, errors.New("runs: start: WithIsolation is only supported by Start, not StartWhenBusy")
 	}
+	if resolveStartOptions(opts).probe != nil {
+		return StartOutcome{}, errors.New("runs: start: WithProbe is only supported by Start, not StartWhenBusy")
+	}
 	if whenBusy == "" {
 		whenBusy = WhenBusyReject // the wire default: old clients unchanged
 	}
@@ -495,6 +498,7 @@ type startOptions struct {
 	origin    string
 	interrupt bool
 	isolation *taskrunner.IsolationOptions
+	probe     *taskrunner.ProbeOptions
 }
 
 // WithOrigin records who authored the run's prompt (store.ChatQueueSource*:
@@ -532,6 +536,36 @@ func validateIsolation(provider taskrunner.Provider, opts []StartOption) error {
 	}
 	if provider != taskrunner.ProviderClaudeNative {
 		return fmt.Errorf("runs: start: %w (got %q)", taskrunner.ErrIsolationUnsupported, provider)
+	}
+	return nil
+}
+
+// WithProbe runs the turn through Runner.RunPromptProbe: one sandboxed
+// learning probe arm (ADR-0037) instead of RunPrompt. It is a system run of
+// purpose store.RunPurposeProbe on claude-native with a sandbox launch, and
+// cannot be combined with WithIsolation; Start refuses anything else before
+// registering or persisting a run. Start only: StartWhenBusy rejects it.
+func WithProbe(po taskrunner.ProbeOptions) StartOption {
+	return func(o *startOptions) { o.probe = &po }
+}
+
+// validateProbe is Start's pre-registration check of WithProbe.
+func validateProbe(provider taskrunner.Provider, opts []StartOption) error {
+	o := resolveStartOptions(opts)
+	if o.probe == nil {
+		return nil
+	}
+	if o.purpose != store.RunPurposeProbe {
+		return errors.New("runs: start: WithProbe requires WithPurpose(store.RunPurposeProbe)")
+	}
+	if o.isolation != nil {
+		return errors.New("runs: start: WithProbe and WithIsolation are mutually exclusive")
+	}
+	if provider != taskrunner.ProviderClaudeNative {
+		return fmt.Errorf("runs: start: %w (got %q)", taskrunner.ErrIsolationUnsupported, provider)
+	}
+	if !o.probe.Launch.Prepared() {
+		return errors.New("runs: start: WithProbe requires a launch from sandbox.Prepare")
 	}
 	return nil
 }
