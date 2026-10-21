@@ -87,7 +87,11 @@ func TestLiveProbe_EndToEnd(t *testing.T) {
 	f.setCost("src", 0.03)
 	// user_message evidence has no failure signature: the verdict can reach
 	// no_effect, never_loaded or inconclusive, never helped.
-	f.prop = f.addProposal("create", f.run.ID, "user_message", createItems("learned-write-result"))
+	items := createItems("learned-write-result")
+	items[0].Result.Category = "files"
+	items[0].Result.Description = "Use when asked to create a file named result.txt: follow this exact recipe."
+	items[0].Result.Body = "To create result.txt run exactly: printf ok > result.txt\nThen confirm with cat result.txt.\n"
+	f.prop = f.addProposal("create", f.run.ID, "user_message", items)
 
 	wm := workspace.New(st)
 	reg, err := runs.New(st)
