@@ -47,6 +47,9 @@ var (
 
 // Records returns a copy of every request seen so far.
 func (p *Policy) Records() []PolicyRecord {
+	if p == nil {
+		return nil
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]PolicyRecord(nil), p.log...)
@@ -54,6 +57,9 @@ func (p *Policy) Records() []PolicyRecord {
 
 // Counts returns how many requests were allowed and denied so far.
 func (p *Policy) Counts() Counts {
+	if p == nil {
+		return Counts{}
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	var c Counts
@@ -73,6 +79,9 @@ func (p *Policy) Denials() int { return p.Counts().Denied }
 
 // Decide implements claudecode.PermissionPolicy.
 func (p *Policy) Decide(_ context.Context, req claudecode.CanUseToolRequest) (bool, map[string]any, string, []claudecode.PermissionUpdate, bool, error) {
+	if p == nil { // no policy configured = deny everything
+		return false, nil, "denied by the probe arm policy: no policy", nil, false, nil
+	}
 	allow, path, reason := p.decide(req)
 	p.mu.Lock()
 	p.log = append(p.log, PolicyRecord{Tool: req.ToolName, Path: path, Allowed: allow, Reason: reason})

@@ -58,7 +58,7 @@ func newProbeFixture(t *testing.T, scenario string) *probeFixture {
 		t.Fatal(err)
 	}
 	f := &probeFixture{r: New(nil), launch: l, report: &ProbeReport{}, calls: &atomic.Int32{}}
-	f.po = ProbeOptions{Launch: l, MaxTurns: 3, CostCapUSD: 0.05, Timeout: 20 * time.Second, OnReport: func(r ProbeReport) {
+	f.po = ProbeOptions{Launch: l, Attestation: sandbox.AttestationForTest(t, time.Now()), MaxTurns: 3, CostCapUSD: 0.05, Timeout: 20 * time.Second, OnReport: func(r ProbeReport) {
 		f.calls.Add(1)
 		*f.report = r
 	}}
@@ -82,18 +82,23 @@ func TestRunPromptProbe_RequiresLaunchAndCaps(t *testing.T) {
 		spawned.Add(1)
 		return nil, errors.New("must not spawn")
 	}
-	f := &probeFixture{}
-	if sandbox.Supported() {
-		f = newProbeFixture(t, "probe-ok")
-	}
+	f := newProbeFixture(t, "probe-ok")
 	good := f.po
-	good.Launch = f.launch
+	mod := func(fn func(po *ProbeOptions)) ProbeOptions { po := good; fn(&po); return po }
 	cases := map[string]ProbeOptions{
-		"no launch":      {MaxTurns: 1, CostCapUSD: 1, Timeout: time.Second},
-		"no turns":       {Launch: f.launch, CostCapUSD: 1, Timeout: time.Second},
-		"no cost cap":    {Launch: f.launch, MaxTurns: 1, Timeout: time.Second},
-		"no timeout":     {Launch: f.launch, MaxTurns: 1, CostCapUSD: 1},
-		"negative turns": {Launch: f.launch, MaxTurns: -1, CostCapUSD: 1, Timeout: time.Second},
+		"no launch":      mod(func(po *ProbeOptions) { po.Launch = nil }),
+		"unprepared":     mod(func(po *ProbeOptions) { po.Launch = &sandbox.Launch{ArmDir: po.Launch.ArmDir} }),
+		"no turns":       mod(func(po *ProbeOptions) { po.MaxTurns = 0 }),
+		"no cost cap":    mod(func(po *ProbeOptions) { po.CostCapUSD = 0 }),
+		"no timeout":     mod(func(po *ProbeOptions) { po.Timeout = 0 }),
+		"negative turns": mod(func(po *ProbeOptions) { po.MaxTurns = -1 }),
+		"no attestation": mod(func(po *ProbeOptions) { po.Attestation = sandbox.Attestation{} }),
+		"stale attestation": mod(func(po *ProbeOptions) {
+			po.Attestation = sandbox.AttestationForTest(t, time.Now().Add(-sandbox.AttestationTTL-time.Minute))
+		}),
+		"future attestation": mod(func(po *ProbeOptions) {
+			po.Attestation = sandbox.AttestationForTest(t, time.Now().Add(time.Hour))
+		}),
 	}
 	for name, po := range cases {
 		var reports []ProbeReport
@@ -297,5 +302,30 @@ func TestRunPromptProbe_OrphanResultFailsClosed(t *testing.T) {
 	}
 	if f.report.End != arm.EndError {
 		t.Errorf("End = %s, want error", f.report.End)
+	}
+}
+
+func TestRunPromptProbe_AttestationIsAGate(t *testing.T) {
+	f := newProbeFixture(t, "probe-ok")
+	var spawned atomic.Int32
+	f.r.newClaudeClient = func(string, ...claudecode.Option) (claudeBackend, error) {
+		spawned.Add(1)
+		return nil, errors.New("must not spawn")
+	}
+	for name, tc := range map[string]struct {
+		att  sandbox.Attestation
+		want error
+	}{
+		"zero":  {sandbox.Attestation{}, sandbox.ErrNoAttestation},
+		"stale": {sandbox.AttestationForTest(t, time.Now().Add(-sandbox.AttestationTTL-time.Minute)), sandbox.ErrStaleAttestation},
+	} {
+		f.po.Attestation = tc.att
+		_, err := f.run(context.Background())
+		if !errors.Is(err, tc.want) || f.report.End != arm.EndError {
+			t.Errorf("%s: err = %v, End = %q", name, err, f.report.End)
+		}
+	}
+	if spawned.Load() != 0 {
+		t.Errorf("a client was spawned %d time(s) without a valid attestation", spawned.Load())
 	}
 }

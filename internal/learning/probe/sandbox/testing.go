@@ -15,5 +15,8 @@ import (
 // outside _test.go files.
 func AttestationForTest(tb testing.TB, now time.Time) Attestation {
 	tb.Helper()
-	return Attestation{armDir: tb.TempDir(), settingsSHA: "test", at: now, minted: true}
+	if !testing.Testing() {
+		panic("sandbox: AttestationForTest called outside a test binary")
+	}
+	return Attestation{armDir: tb.TempDir(), at: now, minted: true}
 }

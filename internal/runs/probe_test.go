@@ -28,9 +28,7 @@ func newProbeEnv(t *testing.T, scenario string) *probeEnv {
 	e := &probeEnv{isolatedEnv: newIsolatedEnv(t, "")}
 	e.runner = taskrunner.New(e.wm) // the launcher is the CLI path: no WithClaudeCLIPath
 	if !sandbox.Supported() {
-		// Enough for the validation-only tests; the launch is never run.
-		e.po = taskrunner.ProbeOptions{Launch: &sandbox.Launch{ArmDir: t.TempDir()}, MaxTurns: 3, CostCapUSD: 0.05, Timeout: 10 * time.Second}
-		return e
+		t.Skip("a prepared launch needs macOS")
 	}
 	self, err := os.Executable()
 	if err != nil {
@@ -55,7 +53,7 @@ func newProbeEnv(t *testing.T, scenario string) *probeEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.po = taskrunner.ProbeOptions{Launch: l, MaxTurns: 3, CostCapUSD: 0.05, Timeout: 20 * time.Second}
+	e.po = taskrunner.ProbeOptions{Launch: l, Attestation: sandbox.AttestationForTest(t, time.Now()), MaxTurns: 3, CostCapUSD: 0.05, Timeout: 20 * time.Second}
 	return e
 }
 
@@ -73,9 +71,9 @@ func TestWithProbe_RequiresSystemPurposeAndClaude(t *testing.T) {
 		t.Error("a non-probe purpose was accepted")
 	}
 	noLaunch := e.po
-	noLaunch.Launch = nil
+	noLaunch.Launch = &sandbox.Launch{ArmDir: t.TempDir()} // a literal, not from Prepare
 	if _, err := e.startProbe(WithPurpose(store.RunPurposeProbe), WithProbe(noLaunch)); err == nil {
-		t.Error("a probe without a launch was accepted")
+		t.Error("a probe whose launch did not come from Prepare was accepted")
 	}
 	for _, p := range []taskrunner.Provider{taskrunner.ProviderGLM, taskrunner.ProviderKimi, taskrunner.ProviderCodexNative} {
 		_, err := e.reg.Start(context.Background(), e.wm, e.runner, e.task.ID, 0, p, "hi", taskrunner.PermissionSettings{}, "", WithPurpose(store.RunPurposeProbe), WithProbe(e.po))

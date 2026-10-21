@@ -25,7 +25,7 @@ func canaryFixture(t *testing.T) (*Canary, *Launch) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return c, &Launch{ArmDir: c.ArmDir, SettingsJSON: `{"x":1}`}
+	return c, &Launch{ArmDir: c.ArmDir, SettingsJSON: `{"x":1}`, prepared: true}
 }
 
 func TestAttestation_OnlyFromPassingSelfCheck(t *testing.T) {
@@ -80,6 +80,10 @@ func TestAttestation_OnlyFromPassingSelfCheck(t *testing.T) {
 			write(filepath.Join(c.ArmDir, "i.txt"), c.token)
 			o.Plugins = 1
 		}, "plugin"},
+		{"launch not from Prepare", func(c *Canary, l *Launch, o *Observation) {
+			write(filepath.Join(c.ArmDir, "i.txt"), c.token)
+			l.prepared = false
+		}, "Prepare"},
 		{"launch for another arm", func(c *Canary, l *Launch, o *Observation) {
 			write(filepath.Join(c.ArmDir, "i.txt"), c.token)
 			l.ArmDir = c.OutsideDir

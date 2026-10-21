@@ -17,7 +17,11 @@ import (
 // ProbeOptions configures ONE sandboxed arm run (ADR-0037). Launch is
 // required and comes from sandbox.Prepare.
 type ProbeOptions struct {
-	Launch         *sandbox.Launch
+	Launch *sandbox.Launch
+	// Attestation is the canary's proof that the sandbox confines a real CLI;
+	// RunPromptProbe re-checks it before every arm start and spawns nothing
+	// without a valid one.
+	Attestation    sandbox.Attestation
 	MaxTurns       int               // > 0 required
 	CostCapUSD     float64           // > 0 required: passed as --max-budget-usd AND enforced by the arm.Meter
 	OutputCapBytes int64             // 0 = no output cap
@@ -70,12 +74,17 @@ func (r *Runner) RunPromptProbe(ctx context.Context, taskID, chatID int64, provi
 	switch {
 	case po.Launch == nil:
 		return fail(errors.New("taskrunner: probe run requires a sandbox launch"))
+	case !po.Launch.Prepared():
+		return fail(errors.New("taskrunner: probe run requires a launch from sandbox.Prepare"))
 	case po.MaxTurns <= 0:
 		return fail(errors.New("taskrunner: probe run requires MaxTurns > 0"))
 	case po.CostCapUSD <= 0:
 		return fail(errors.New("taskrunner: probe run requires CostCapUSD > 0"))
 	case po.Timeout <= 0:
 		return fail(errors.New("taskrunner: probe run requires Timeout > 0"))
+	}
+	if aerr := po.Attestation.Require(time.Now()); aerr != nil {
+		return fail(fmt.Errorf("taskrunner: probe arm refused: %w", aerr))
 	}
 	if !sandbox.Supported() {
 		return fail(sandbox.ErrUnsupported)

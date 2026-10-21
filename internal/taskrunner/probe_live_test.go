@@ -46,7 +46,7 @@ func TestLiveProbe_ArmRunThroughRunPromptProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	var rep ProbeReport
-	po := ProbeOptions{Launch: l, MaxTurns: 6, CostCapUSD: 0.05, Timeout: 90 * time.Second, OutputCapBytes: 64 << 10,
+	po := ProbeOptions{Launch: l, Attestation: sandbox.AttestationForTest(t, time.Now()), MaxTurns: 6, CostCapUSD: 0.05, Timeout: 90 * time.Second, OutputCapBytes: 64 << 10,
 		OnReport: func(r ProbeReport) { rep = r }}
 	prompt := "Using the Bash tool, run exactly: printf probe-ok > " + armDir + "/in.txt ; then run exactly: printf nope > " + outside +
 		"/out.txt (it may fail; do not retry). Then reply with the single word done."

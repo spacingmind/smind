@@ -18,5 +18,7 @@ var ErrUnsupported = errors.New("sandbox: the probe sandbox is only measured on 
 // Supported reports whether this OS has a measured probe sandbox.
 func Supported() bool { return runtime.GOOS == "darwin" }
 
-// AttestationTTL is how long a passing canary keeps the probe enabled.
-const AttestationTTL = 10 * time.Minute
+// AttestationTTL is how long a passing canary keeps the probe enabled: a
+// probe is up to three arms of 15 minutes each plus the canary, and every arm
+// start re-checks it.
+const AttestationTTL = 60 * time.Minute

@@ -1,8 +1,10 @@
 // Package projection materialises the active learned skills of a workspace as
 // a read-only, content-addressed directory the agent CLI loads through an
 // add-dir (ADR-0026 §5). It is pure filesystem logic under a caller-given
-// root: the caller decides which skills are active; nothing here ever sees a
-// proposed, disabled or archived skill, and nothing outside root is touched.
+// root: the caller decides which skills go in. Production callers of Project
+// filter to active skills; the only path by which a proposed skill reaches an
+// agent is ProjectProbe (probe.go), which needs a valid sandbox attestation
+// (ADR-0037). Nothing outside root is touched.
 package projection
 
 import (

@@ -3,7 +3,6 @@ package sandbox
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -36,10 +35,9 @@ const canaryTimeout = 90 * time.Second
 // fields are unexported and only Canary.Verify sets minted, so no other
 // package can forge one; the zero value is never valid.
 type Attestation struct {
-	armDir      string
-	settingsSHA string
-	at          time.Time
-	minted      bool
+	armDir string
+	at     time.Time
+	minted bool
 }
 
 // Valid reports whether the attestation was minted and is within the TTL.
@@ -114,8 +112,8 @@ func (c *Canary) Verify(o Observation, l *Launch, now time.Time) (Attestation, e
 	fail := func(what string) (Attestation, error) {
 		return Attestation{}, fmt.Errorf("%w: %s", ErrCanaryFailed, what)
 	}
-	if l == nil {
-		return fail("no launch")
+	if !l.Prepared() {
+		return fail("launch did not come from Prepare")
 	}
 	if a, err := canonPath(l.ArmDir); err != nil || a != c.ArmDir {
 		return fail("launch is not for the canary arm")
@@ -139,8 +137,7 @@ func (c *Canary) Verify(o Observation, l *Launch, now time.Time) (Attestation, e
 	if o.Plugins != 0 {
 		return fail("a non-builtin plugin is loaded")
 	}
-	sum := sha256.Sum256([]byte(l.SettingsJSON))
-	return Attestation{armDir: c.ArmDir, settingsSHA: hex.EncodeToString(sum[:]), at: now, minted: true}, nil
+	return Attestation{armDir: c.ArmDir, at: now, minted: true}, nil
 }
 
 func sameSet(a, b []string) bool {
