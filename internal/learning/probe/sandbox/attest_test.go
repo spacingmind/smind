@@ -70,7 +70,7 @@ func TestAttestation_OnlyFromPassingSelfCheck(t *testing.T) {
 		{"all good", func(c *Canary, l *Launch, o *Observation) { inside(c) }, ""},
 		{"tools in another order", func(c *Canary, l *Launch, o *Observation) {
 			inside(c)
-			o.InitTools = []string{"NotebookEdit", "Grep", "Glob", "Write", "Edit", "Read", "Bash"}
+			o.InitTools = []string{"Skill", "NotebookEdit", "Grep", "Glob", "Write", "Edit", "Read", "Bash"}
 		}, ""},
 		{"outside file present", func(c *Canary, l *Launch, o *Observation) {
 			inside(c)
@@ -87,6 +87,7 @@ func TestAttestation_OnlyFromPassingSelfCheck(t *testing.T) {
 		}, "inside"},
 		{"extra tool", func(c *Canary, l *Launch, o *Observation) { inside(c); o.InitTools = append(o.InitTools, "WebFetch") }, "tool list"},
 		{"missing tool", func(c *Canary, l *Launch, o *Observation) { inside(c); o.InitTools = o.InitTools[1:] }, "tool list"},
+		{"Skill missing", func(c *Canary, l *Launch, o *Observation) { inside(c); o.InitTools = dropTool(o.InitTools, "Skill") }, "tool list"},
 		{"duplicate hides a missing tool", func(c *Canary, l *Launch, o *Observation) {
 			inside(c)
 			o.InitTools = append(o.InitTools[1:], o.InitTools[1])

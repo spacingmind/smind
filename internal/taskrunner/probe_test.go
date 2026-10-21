@@ -159,7 +159,7 @@ func TestRunPromptProbe_AppliesLaunchOptionsOnly(t *testing.T) {
 			t.Errorf("argv lacks %s: %q", want, argv)
 		}
 	}
-	for _, bad := range []string{"--mcp-config", "--resume", "--continue", "--add-dir", "--permission-prompt-tool", "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--session-id", "--model"} {
+	for _, bad := range []string{"--mcp-config", "--resume", "--continue", "--add-dir", "--disable-slash-commands", "--permission-prompt-tool", "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--session-id", "--model"} {
 		if has(bad) {
 			t.Errorf("argv must not contain %s: %q", bad, argv)
 		}
@@ -176,7 +176,7 @@ func TestRunPromptProbe_AppliesLaunchOptionsOnly(t *testing.T) {
 		t.Errorf("OnReport called %d times", f.calls.Load())
 	}
 	rep := *f.report
-	if rep.End != arm.EndDone || rep.Turns != 2 || rep.PermissionDenials != 2 || len(rep.InitTools) != 7 || rep.CostUSD != 0.001 {
+	if rep.End != arm.EndDone || rep.Turns != 2 || rep.PermissionDenials != 2 || len(rep.InitTools) != 8 || rep.CostUSD != 0.001 {
 		t.Errorf("report = %+v", rep)
 	}
 }

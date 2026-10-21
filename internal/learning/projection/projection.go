@@ -66,6 +66,13 @@ func Project(root string, workspaceID int64, skills []Skill) (Projection, error)
 	if err != nil {
 		return Projection{}, err
 	}
+	return projectFiles(root, workspaceID, files, hash)
+}
+
+// projectFiles publishes an already rendered, hashed file set under root
+// (content addressed: the directory name is hash), shared by Project and
+// ProjectProbe.
+func projectFiles(root string, workspaceID int64, files map[string][]byte, hash string) (Projection, error) {
 	root = filepath.Clean(root)
 	wsDir := filepath.Join(root, strconv.FormatInt(workspaceID, 10))
 	final := filepath.Join(wsDir, hash)

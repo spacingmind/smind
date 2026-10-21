@@ -62,6 +62,7 @@ func TestDecider_AllowsInsideArmOnly(t *testing.T) {
 		{"grep outside", "Grep", map[string]any{"pattern": "x", "path": f.sibling}, false},
 		{"glob absolute pattern", "Glob", map[string]any{"pattern": f.sibling + "/*"}, false},
 		{"glob traversal pattern", "Glob", map[string]any{"pattern": "../*"}, false},
+		{"skill tool", "Skill", map[string]any{"skill": "smindprobe:learned-a"}, true},
 		{"glob inside", "Glob", map[string]any{"pattern": "*.txt"}, true},
 	}
 	denied := 0
