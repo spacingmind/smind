@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -493,6 +494,81 @@ func Run() {
 			"stop_reason": "end_turn",
 			"result":      "done",
 		})
+
+	case "probe-ok", "probe-unreported", "probe-bad-tools", "probe-max-turns", "probe-max-budget",
+		"probe-flood", "probe-hang", "probe-child", "probe-env":
+		// Probe arm (ADR-0037) stand-ins. Every one reports the arm's exact
+		// tool allowlist at init except probe-bad-tools; the others differ in
+		// how the run ends. They run with cwd = the arm dir.
+		if scenario == "probe-env" {
+			// Dump argv and the environment NAMES (never values) for the test.
+			_ = os.WriteFile(filepath.Join(wd, "args"), []byte(strings.Join(os.Args[1:], "\n")), 0o644)
+			var names []string
+			for _, kv := range os.Environ() {
+				k, v, _ := strings.Cut(kv, "=")
+				if k == "ENABLE_CLAUDEAI_MCP_SERVERS" {
+					k += "=" + v
+				}
+				names = append(names, k)
+			}
+			_ = os.WriteFile(filepath.Join(wd, "env-names"), []byte(strings.Join(names, "\n")), 0o644)
+		}
+		stdin.Scan() // consume the prompt line
+		if scenario == "probe-child" {
+			// A background process in the CLI's process group, like a command
+			// the agent detached with &.
+			cmd := exec.Command("sleep", "300")
+			if err := cmd.Start(); err == nil {
+				_ = os.WriteFile(filepath.Join(wd, "child.pid"), []byte(fmt.Sprint(cmd.Process.Pid)), 0o644)
+			}
+		}
+		tools := []any{"Bash", "Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit"}
+		if scenario == "probe-bad-tools" {
+			tools = append(tools, "WebFetch")
+		}
+		writeLine(map[string]any{
+			"type": "system", "subtype": "init", "session_id": "sess-1",
+			"tools": tools, "mcp_servers": []any{}, "plugins": []any{},
+			"slash_commands": []any{}, "skills": []any{},
+		})
+		text := func(s string) {
+			writeLine(map[string]any{
+				"type": "assistant", "session_id": "sess-1",
+				"message": map[string]any{"model": "claude-fake", "content": []any{map[string]any{"type": "text", "text": s}}},
+			})
+		}
+		text("after init")
+		switch scenario {
+		case "probe-flood":
+			text(strings.Repeat("x", 200_000))
+			for stdin.Scan() {
+			}
+			return
+		case "probe-hang":
+			for stdin.Scan() {
+			}
+			return
+		case "probe-bad-tools":
+			for stdin.Scan() {
+			}
+			return
+		}
+		result := map[string]any{
+			"type": "result", "subtype": "success", "is_error": false, "session_id": "sess-1",
+			"stop_reason": "end_turn", "result": "done", "num_turns": 2,
+			"permission_denials": []any{"denied-1", "denied-2"},
+		}
+		if scenario != "probe-unreported" {
+			result["total_cost_usd"] = 0.001
+		}
+		switch scenario {
+		case "probe-max-turns":
+			result["subtype"], result["is_error"], result["terminal_reason"] = "error_max_turns", true, "max_turns"
+		case "probe-max-budget":
+			result["subtype"], result["is_error"], result["terminal_reason"] = "error_max_budget_usd", true, "max_budget"
+			result["total_cost_usd"] = 0.02
+		}
+		writeLine(result)
 
 	default:
 		fmt.Fprintf(os.Stderr, "fake claude cli: unknown scenario %q\n", scenario)
