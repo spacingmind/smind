@@ -25,26 +25,19 @@
 // static file server), not the Metro dev server, so the run does not
 // depend on dev-server timing.
 
-import { spawn, spawnSync, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { extname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { extname, join } from 'node:path';
 import { chromium } from 'playwright';
+import {
+  MOBILE_DIR, REPO_ROOT, SMOKE_DIR, contextViewport, fail, failures, pageErrors, harnessHasPasswordFlag,
+  startHarness, trackErrors, shootTransition, goBack, shootBothSchemes, assertTasks,
+} from './smoke/lib.mjs';
 
-const MOBILE_DIR = fileURLToPath(new URL('..', import.meta.url));
-const REPO_ROOT = resolve(MOBILE_DIR, '..');
 const DIST = join(MOBILE_DIR, 'dist');
-const SMOKE_DIR = join(MOBILE_DIR, '.smoke');
 const PORT = Number(process.env.SMOKE_PORT ?? 8931);
-
-// Phone-sized by default (390x844 @2x); SMOKE_VIEWPORT=WxH or WxH@dpr overrides.
-function contextViewport() {
-  const m = /^(\d+)x(\d+)(?:@(\d+(?:\.\d+)?))?$/.exec(process.env.SMOKE_VIEWPORT ?? '390x844@2');
-  if (!m) throw new Error(`bad SMOKE_VIEWPORT ${process.env.SMOKE_VIEWPORT}; want WxH or WxH@dpr`);
-  return { viewport: { width: Number(m[1]), height: Number(m[2]) }, deviceScaleFactor: Number(m[3] ?? 2) };
-}
 const FULL = process.argv.includes('--full');
 
 const MIME = {
@@ -55,14 +48,6 @@ const MIME = {
   '.json': 'application/json',
   '.png': 'image/png',
 };
-
-const failures = [];
-const pageErrors = [];
-
-function fail(message) {
-  failures.push(message);
-  console.error(`FAIL: ${message}`);
-}
 
 function buildWeb() {
   execFileSync('npx', ['expo', 'export', '--platform', 'web'], { cwd: MOBILE_DIR, stdio: 'inherit' });
@@ -83,114 +68,6 @@ async function startStaticServer() {
   return server;
 }
 
-/** Whether the harness built from this tree takes -password (the daemon side of P13c). */
-function harnessHasPasswordFlag() {
-  const dir = mkdtempSync(join(tmpdir(), 'smind-smoke-probe-'));
-  try {
-    const binary = join(dir, 'devharness');
-    execFileSync('go', ['build', '-o', binary, './internal/relay/bridge/devharness'], { cwd: REPO_ROOT, stdio: 'inherit' });
-    const probe = spawnSync(binary, ['-h'], { encoding: 'utf8' });
-    return `${probe.stderr}${probe.stdout}`.includes('-password');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-async function startHarness(extraArgs = []) {
-  // Same build/spawn + "READY <url>" handshake as devHarness.ts, minus the
-  // NODE_TLS_REJECT_UNAUTHORIZED override: the browser context uses
-  // ignoreHTTPSErrors for the harness's self-signed cert instead. stdin takes
-  // one command per line (approve/revoke/list...), each answered by one JSON
-  // line on stdout.
-  const tmpDir = mkdtempSync(join(tmpdir(), 'smind-smoke-harness-'));
-  const binary = join(tmpDir, 'devharness');
-  execFileSync('go', ['build', '-o', binary, './internal/relay/bridge/devharness'], {
-    cwd: REPO_ROOT,
-    stdio: 'inherit',
-  });
-  const proc = spawn(binary, extraArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
-  proc.stderr.on('data', (c) => process.stderr.write(`[harness] ${c}`));
-  const lines = [];
-  const waiters = [];
-  let buf = '';
-  proc.stdout.on('data', (chunk) => {
-    buf += chunk.toString('utf8');
-    let i;
-    while ((i = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, i);
-      buf = buf.slice(i + 1);
-      const w = waiters.shift();
-      if (w) w(line);
-      else lines.push(line);
-    }
-  });
-  const nextLine = (ms) =>
-    new Promise((resolveLine, reject) => {
-      const queued = lines.shift();
-      if (queued !== undefined) return resolveLine(queued);
-      const timer = setTimeout(() => reject(new Error('harness: no output in time')), ms);
-      waiters.push((l) => {
-        clearTimeout(timer);
-        resolveLine(l);
-      });
-    });
-  const exited = new Promise((_, reject) => proc.on('exit', (code) => reject(new Error(`harness exited early with code ${code}`))));
-  let pairingUrl = '';
-  for (;;) {
-    const line = await Promise.race([nextLine(20_000), exited]);
-    if (line.startsWith('READY ')) {
-      pairingUrl = line.slice('READY '.length).trim();
-      break;
-    }
-  }
-  const cmd = async (line) => {
-    proc.stdin.write(line + '\n');
-    for (;;) {
-      const raw = await nextLine(30_000);
-      if (raw.startsWith('{')) return JSON.parse(raw);
-    }
-  };
-  return {
-    pairingUrl,
-    cmd,
-    cleanup: () => {
-      // SIGKILL, not the default SIGTERM: server.Run installs its own
-      // signal handler, which disables the Go runtime's default terminate-on-
-      // SIGTERM behaviour, so a plain kill can leave the harness process
-      // alive (confirmed by hand with the first harness).
-      proc.kill('SIGKILL');
-      rmSync(tmpDir, { recursive: true, force: true });
-    },
-  };
-}
-
-function trackErrors(page, label) {
-  page.on('pageerror', (e) => pageErrors.push(`[${label}] pageerror: ${e.message}`));
-  page.on('console', (msg) => {
-    if (msg.type() === 'error') pageErrors.push(`[${label}] console.error: ${msg.text()}`);
-  });
-}
-
-// The native stack's header back button: on web a link named "<previous title>, back" (or "Go back").
-/**
- * Transition frames (every mid-animation glitch is a defect): runs `act` (a click that navigates) and screenshots
- * the page at ~0, 90 and 220 ms while the stack animates, in `scheme`. Frames: <name>-t<ms>-<scheme>.png.
- */
-async function shootTransition(page, name, scheme, act) {
-  await page.emulateMedia({ colorScheme: scheme });
-  await page.waitForTimeout(200);
-  const done = act();
-  for (const t of [0, 90, 220]) {
-    if (t > 0) await page.waitForTimeout(t === 90 ? 90 : 130);
-    await page.screenshot({ path: join(SMOKE_DIR, `${name}-t${t}-${scheme}.png`) });
-  }
-  await done;
-  console.log(`wrote ${name}-t{0,90,220}-${scheme}.png`);
-}
-
-async function goBack(page) {
-  await page.getByRole('link', { name: /(, back|^Go back)$/ }).click();
-}
 
 async function assertPairingScreen(page, url) {
   await page.goto(url, { waitUntil: 'load' });
@@ -227,45 +104,6 @@ async function assertPairingScreen(page, url) {
   if (leftBg === 'rgb(255, 255, 255)' && await page.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches)) {
     fail(`dark scheme renders white background (${leftBg}) at viewport edges`);
   }
-}
-
-/** Screenshots the current state in both color schemes (one live connection; page.emulateMedia flips the theme). */
-async function shootBothSchemes(page, name) {
-  for (const scheme of ['light', 'dark']) {
-    await page.emulateMedia({ colorScheme: scheme });
-    await page.waitForTimeout(200); // theme re-render after the media-query flip
-    await page.screenshot({ path: join(SMOKE_DIR, `${name}-${scheme}.png`), fullPage: true });
-    console.log(`wrote ${name}-${scheme}.png`);
-  }
-  await page.emulateMedia({ colorScheme: 'light' });
-}
-
-/**
- * Waits for the task list after the device was approved. TasksScreen's
- * post-connect states: 'ready' renders the list (here the empty state, since
- * the harness daemon tracks no workspaces) under a header with Disconnect;
- * 'error' renders "Couldn't load the workspace".
- */
-async function assertTasks(page) {
-  // The header (with Disconnect) is also there while loading and on error, so wait for the content itself:
-  // the empty state when ready (the harness daemon tracks no workspaces), or the error text.
-  const empty = page.getByText('No workspaces yet', { exact: true });
-  const errored = page.getByText("Couldn't load the workspace");
-  try {
-    await empty.or(errored).first().waitFor({ timeout: 30_000 });
-  } catch {
-    fail('tasks screen did not render after approval');
-    return false;
-  }
-  if (await errored.isVisible().catch(() => false)) {
-    const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '(unknown)');
-    fail(`tasks screen rendered the error state: ${bodyText}`);
-    return false;
-  }
-  if (!(await page.getByRole('button', { name: 'Disconnect' }).isVisible().catch(() => false))) {
-    fail('tasks screen header has no Disconnect button');
-  }
-  return true;
 }
 
 /**
