@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -375,4 +376,41 @@ func waitRunning(t *testing.T, e *env) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("run never started")
+}
+
+func TestExecutor_SystemTaskCreatesAndReusesWithoutRunning(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, "reply")
+	t1, err := e.ex.SystemTask(e.ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if t1.Kind != store.TaskKindSystem || t1.WorktreePath == nil {
+		t.Fatalf("task = %+v", t1)
+	}
+	want := filepath.Join(e.home, "learning", "cwd", strconv.FormatInt(e.ws.ID, 10))
+	if filepath.Clean(*t1.WorktreePath) != want {
+		t.Fatalf("cwd = %s, want %s", *t1.WorktreePath, want)
+	}
+	if fi, err := os.Stat(want); err != nil || fi.Mode().Perm() != 0o700 {
+		t.Fatalf("cwd = %v, %v; want 0700 dir", fi, err)
+	}
+	t2, err := e.ex.SystemTask(e.ws.ID)
+	if err != nil || t2.ID != t1.ID {
+		t.Fatalf("second = %+v, %v; want id %d", t2, err, t1.ID)
+	}
+	if n := len(e.reg.List(0)); n != 0 {
+		t.Fatalf("SystemTask started %d runs", n)
+	}
+	// A task recorded with a foreign cwd is refused.
+	other, err := e.st.CreateWorkspace(store.Workspace{Path: t.TempDir(), Title: "o", RoutingPolicy: "hard"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.wm.CreateSystemTask(other.ID, systemTaskTitle, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.ex.SystemTask(other.ID); err == nil {
+		t.Fatal("foreign cwd accepted")
+	}
 }

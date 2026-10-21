@@ -168,6 +168,7 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 	for method, h := range learningHandlers(learning) {
 		hs[method] = h
 	}
+	hs["workspace.delete"] = learning.beforeWorkspaceDelete(hs["workspace.delete"])
 	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus, info: info, learning: learning}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1

@@ -175,9 +175,9 @@ func (s *Store) SummarizeRunUsage(since, until *time.Time, groupBy string) ([]Ru
 	return out, rows.Err()
 }
 
-// SummarizeLearningUsage totals run_usage of non-user runs (the "Learning"
-// bucket, ADR-0026) started at or after since; SummarizeRunUsage excludes
-// them.
+// SummarizeLearningUsage totals run_usage of learning runs (the Learning
+// bucket: reflect and curate runs; probe runs are their own bucket,
+// ADR-0037 §5) started at or after since; SummarizeRunUsage excludes them.
 func (s *Store) SummarizeLearningUsage(since time.Time) (runs int, inputTokens, outputTokens int64, costUSD float64, err error) {
 	return s.SummarizeLearningUsageWindow(&since, nil)
 }
@@ -187,7 +187,7 @@ func (s *Store) SummarizeLearningUsage(since time.Time) (runs int, inputTokens, 
 func (s *Store) SummarizeLearningUsageWindow(since, until *time.Time) (runs int, inputTokens, outputTokens int64, costUSD float64, err error) {
 	query := `SELECT COUNT(*), COALESCE(SUM(u.input_tokens), 0), COALESCE(SUM(u.output_tokens), 0), COALESCE(SUM(u.cost_usd), 0)
 		FROM run_usage u JOIN runs r ON r.id = u.run_id
-		WHERE r.purpose != 'user'`
+		WHERE r.purpose IN ('reflect', 'curate')`
 	var args []any
 	if since != nil {
 		query += ` AND r.started_at >= ?`
@@ -199,6 +199,27 @@ func (s *Store) SummarizeLearningUsageWindow(since, until *time.Time) (runs int,
 	}
 	if err = s.db.QueryRow(query, args...).Scan(&runs, &inputTokens, &outputTokens, &costUSD); err != nil {
 		err = fmt.Errorf("summarize learning usage: %w", err)
+	}
+	return
+}
+
+// SummarizeProbeUsageWindow is the probe counterpart of
+// SummarizeLearningUsageWindow: purpose='probe' runs only.
+func (s *Store) SummarizeProbeUsageWindow(since, until *time.Time) (runs int, inputTokens, outputTokens int64, costUSD float64, err error) {
+	query := `SELECT COUNT(*), COALESCE(SUM(u.input_tokens), 0), COALESCE(SUM(u.output_tokens), 0), COALESCE(SUM(u.cost_usd), 0)
+		FROM run_usage u JOIN runs r ON r.id = u.run_id
+		WHERE r.purpose = 'probe'`
+	var args []any
+	if since != nil {
+		query += ` AND r.started_at >= ?`
+		args = append(args, *since)
+	}
+	if until != nil {
+		query += ` AND r.started_at < ?`
+		args = append(args, *until)
+	}
+	if err = s.db.QueryRow(query, args...).Scan(&runs, &inputTokens, &outputTokens, &costUSD); err != nil {
+		err = fmt.Errorf("summarize probe usage: %w", err)
 	}
 	return
 }
