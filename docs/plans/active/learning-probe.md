@@ -86,8 +86,7 @@ All against a throwaway repo, an isolated `SMIND_HOME` and a non-4648 port; neve
 - AC19. `arm.Materialise(repo, baseSHA, dir)` exports `baseSHA` with `git archive`, `git init` + one commit, no remote, no
   credentials, no link to the real `.git`; refuses a dirty/unknown sha; the real repo's HEAD, index and refs are byte-unchanged.
 - AC20. **R1/R2/R3** (as measured by P0, ADR-0037 addendum): the sandbox package builds the CLI settings (sandbox on,
-  `failIfUnavailable`, strict network allowlist, `allowWrite` = arm, `denyRead` of `$HOME`, `CLAUDE_CONFIG_DIR` and the arm's parent with
-  `allowRead` on arm + projection, unsandboxed commands off, `permissions.deny` write tools on the projection), the `--tools`
+  `failIfUnavailable`, strict network allowlist, `allowWrite` = arm, read **allow-list** (`denyRead:["/"]`, `allowRead` = arm, projection and the minimal system paths; no deny-list mode), unsandboxed commands off, `permissions.deny` write tools on the projection), the `--tools`
   **allowlist**, `acceptEdits` + `--permission-prompts none`, the MCP-closed flags, git's `GIT_CONFIG_GLOBAL=/dev/null
   GIT_CONFIG_NOSYSTEM=1`, and the `env -i` **launcher** with the allowlist `PATH, LANG, TMPDIR, HOME, CLAUDE_CONFIG_DIR, USER`. A table test asserts no daemon env key leaks and
   that the argv/env contain no secret value in logs or events.
@@ -110,7 +109,7 @@ All against a throwaway repo, an isolated `SMIND_HOME` and a non-4648 port; neve
 
 - AC26. Eligibility reasons (each a stable code, each shown in the UI): `not_pending`, `provider_not_claude_native`,
   `no_prompt`, `no_base_sha`, `dirty_checkout`, `continuation_run`, `source_cost_unknown`, `sandbox_unavailable`, `budget`,
-  `quota`, `busy`, `windows`, `learning_off`.
+  `quota`, `busy`, `windows`, `platform_unsupported` (Linux: no measured sandbox, decision 2026-10-22), `learning_off`.
 - AC27. **Estimate**: `est_arm = 1.2 × source run cost`, `est_probe = n_arms × est_arm`; `dry-run` returns it with the expected
   duration and writes nothing; disabled when `est_probe > perProbeBudgetUSD` or `est_probe + spent_24h > dailyBudgetUSD`.
 - AC28. **Budget enforcement** (count-asserting): the probe bucket (`run_usage` with `purpose = 'probe'`) is separate from the
@@ -151,6 +150,62 @@ All against a throwaway repo, an isolated `SMIND_HOME` and a non-4648 port; neve
   check result, the produced-diff viewer and the disclaimer line "behavioural contrast on one replay of the source episode, not a
   measurement" plus "fixes the observed failure here". The chip is never styled like an approval.
 - AC42. Light and dark screenshots of every state **including the transition frames** are captured on the real app and reviewed.
+
+## Probe wire contract (4b daemon ↔ 4c UI, frozen 2026-10-22)
+
+4c builds against a typed fake client implementing exactly this; 4b implements it in `internal/wsapi` + `internal/learning/probe`.
+JSON is camelCase, ids are numbers except run ids (strings), times are RFC 3339, money is USD as a number, durations are ms.
+`id` in every `learning.probe.*` param is the **proposal id**. Platforms other than macOS get `eligible:false` with reason
+`platform_unsupported` (Linux) / `windows`; there is no Probe button there, only the explanation.
+
+RPCs (no MCP tool, no CLI-only fields):
+
+| Method | Params | Result |
+|---|---|---|
+| `learning.probe.estimate` | `{id, quick?}` | `ProbeEstimate` (no write, no model call) |
+| `learning.probe.start` | `{id, quick?}` | `ProbeView` (status `queued`/`running`); error `failed_precondition` (message = first reason) when ineligible or `busy` |
+| `learning.probe.cancel` | `{id}` | `{}` (no-op when nothing runs) |
+| `learning.probe.get` | `{id}` | `ProbeView \| null` (the proposal's latest probe, with diffs and final messages) |
+| `learning.probe.list` | `{workspaceId, limit?}` | `ProbeView[]` (summaries: no diff/finalMessage) |
+
+```ts
+type ProbeReasonCode = "not_pending" | "provider_not_claude_native" | "no_prompt" | "no_base_sha" | "dirty_checkout" | "continuation_run"
+  | "source_cost_unknown" | "sandbox_unavailable" | "budget" | "quota" | "busy" | "windows" | "platform_unsupported" | "learning_off";
+interface ProbeReason { code: ProbeReasonCode; message: string }            // message is user-facing, one sentence
+interface ProbeEstimate {
+  eligible: boolean; reasons: ProbeReason[];                                // empty iff eligible
+  quick: boolean; arms: 2 | 3; estUSD: number; estArmUSD: number; expectedMinutes: number;
+  perProbeCapUSD: number; dailyCapUSD: number; spentTodayUSD: number; quotaPercent: number | null;
+}
+type ProbeStatus = "queued" | "running" | "done" | "failed" | "cancelled" | "unsafe";
+type ProbeVerdict = "helped" | "no_effect" | "never_loaded" | "hurt" | "inconclusive" | "probe_failed" | "unsafe";
+type ProbeArmRole = "A" | "A2" | "B";                                      // Control / Control replicate / With this skill
+type ProbeArmStatus = "pending" | "running" | "done" | "capped" | "timeout" | "turns" | "output" | "killed" | "error";
+interface ProbeArmView {
+  role: ProbeArmRole; status: ProbeArmStatus; runId?: string;              // hidden run; link target
+  startedAt?: string; elapsedMs: number; costUSD: number;
+  turns: number; toolCalls: number; failedToolCalls: number; permissionDenials: number;
+  loadedSkill?: boolean;                                                    // role B only
+  failureRecurred?: boolean | null;                                         // null = evidence has no signature
+  producedDiff: boolean; diffBytes: number;
+  diff?: string; finalMessage?: string;                                     // get only; redacted; diff <= 64 KB, finalMessage <= 8 KB
+  check?: { passed: boolean; output?: string };                             // present only when probeCheck is configured
+}
+interface ProbeMetricRow { key: "toolCalls" | "failedToolCalls" | "permissionDenials" | "turns" | "costUSD" | "durationMs" | "diffBytes";
+  a: number; a2: number | null; b: number; deltaAB: number; noise: number | null; worse: boolean }   // worse = B worse than A by more than the noise floor
+interface ProbeView {
+  id: number; proposalId: number; workspaceId: number; quick: boolean; status: ProbeStatus;
+  verdict: ProbeVerdict | null; verdictReason: string;                      // one sentence, advisory
+  estUSD: number; costUSD: number; startedAt: string; finishedAt?: string; elapsedMs: number;
+  arms: ProbeArmView[];                                                     // planned arms in order, pending ones included
+  contrast?: { loaded: boolean; noiseFloor: boolean; metrics: ProbeMetricRow[] };   // done probes only
+}
+```
+
+Events (published on the existing bus; payload is a hint, the UI refetches `learning.probe.get`/`list`):
+`learnedSkill.probe.started | arm | finished | failed` with `{probeId, proposalId, workspaceId, status, role?, armStatus?}`.
+UI query keys: `["learning.probe.estimate",{id,quick}]`, `["learning.probe.get",{id}]`, `["learning.probe.list",{workspaceId,limit}]`;
+the event bridge invalidates get/list (and estimate) on any `learnedSkill.probe.*` event.
 
 ## Test scenarios
 
@@ -246,6 +301,8 @@ All numbers are defaults in `learning.probe.*` and are guesses until the first w
   review, no stacking.
 - The P0 spike is a **real PR** (findings + gated live suite), not a throwaway: the live tests become the regression suite for the
   sandbox in 4a.
+- **Probe-lite on macOS only** (Human, 2026-10-22): Linux/Windows have no Probe button and a stated reason; read allow-list and the per-probe canary are mandatory; the keychain test was approved and run (ADR-0037 addendum).
+- **PR sequencing:** 4a (arm + sandbox) is off `develop`; 4b stacks on 4a's branch because it needs the arm (retarget to `develop` after 4a merges); 4c is built against the frozen wire contract above in parallel and merges after 4b.
 - No users yet (2026-10): no compatibility shims or migration code for the new tables/config; the break is noted in the PR.
 
 ## Progress
@@ -254,7 +311,7 @@ All numbers are defaults in `learning.probe.*` and are guesses until the first w
 - [ ] PR 2a: S0 prevalence scan.
 - [ ] PR 2b: D11 reflector retry.
 - [x] PR 3: P0 spike and ADR addendum: conditional PASS on macOS (24 live calls, USD 0.068); keychain, Linux, Windows untested.
-- [ ] PR 4a: arm + sandbox.
+- [ ] PR 4a: arm + sandbox, reviewed (macOS only; keychain test done 2026-10-22: unreachable under the allow-list, ADR-0037 addendum).
 - [ ] PR 4b: probe service.
 - [ ] PR 4c: UI.
 
@@ -274,3 +331,14 @@ round's PASS overstated, and the hardening round re-measured or downgraded each 
 - AC16 launch shape + R3: `TestLive_UnderSMINDLaunchShape`, `TestLive_EnvIsAllowlist`, `TestSpike_LauncherScrubsEnv` — confirmed for the process env; the login needs `USER`.
 - AC17 attestation: no model-free method exists; one canary call per probe (~USD 0.002) — recorded in ADR-0037 §3.
 - AC18 verdict: **conditional PASS on macOS** (R1 write, R2, R3-env, read allow-list, built-ins as measured); PARTIAL items: keychain, `failIfUnavailable`, toolchains beyond sh/git/curl, Linux/Windows. The probe arm PR (4a) must not claim more than the addendum.
+
+### PR 4a — arm + sandbox (2026-10-22, claude 2.1.303, macOS arm64; macOS only)
+
+- AC19 `TestMaterialise_ExportsBaseSHA`, `_NoRemoteNoCredentialsNoRealGit`, `_RefusesDirtyOrUnknownSHA`, `_RealRepoUnchanged` (+ streaming limit, `.git` entries refused) — confirmed.
+- AC20 `TestSandboxSettings_Table`, `TestSandboxEnv_AllowlistOnly`, `_NoDaemonEnvLeak`, `TestSandboxLogs_NoSecrets`, `TestSandboxLaunch_OptionsShape` — confirmed. Differences from the AC text: allow-list read policy only (no deny-list mode); `GIT_CONFIG_*` and the connector opt-out are fixed launcher extras; the launcher execs through `/usr/bin/perl setpgrp` so the CLI leads a process group.
+- AC21 `TestDecider_AllowsInsideArmOnly`, `_BashOnlyInSandbox`, `_NeverPromptsHuman` — confirmed (belt and braces; the CLI's own refusal is the boundary, measured live incl. the symlink pivot).
+- AC22 `TestAttestation_OnlyFromPassingSelfCheck`, `TestAttestation_StaleDisablesProbe`, `TestProbeProjection_RequiresAttestation` — confirmed; live `TestLive_CanaryAttests` (four calls, USD 0.0020). `RunPromptProbe` also requires the attestation.
+- AC23 `TestProposedSkillOnlyDeliveredToProbeSandbox`, `TestProbeProjection_HashRecordedOnRun`, existing `TestProposedSkillNeverDelivered` — confirmed. (Hash recording on the arm's run row is the service's job, PR 4b.)
+- AC24 `TestArmCaps_TimeoutTurnsCostOutputEachEndArm`, `TestArmEnd_NoSurvivingChildProcess`, `TestArmEnd_ArmDirRemoved`, `TestStartupSweep_RemovesOrphanArmDirs` — confirmed; live `TestLiveProbe_ArmRunThroughRunPromptProbe` (USD 0.0014). The per-usage-event cap is not implementable (the CLI reports usage once, at the end): `--max-budget-usd` + the end-of-run meter instead (ADR addendum 2).
+- AC25 `TestTripwire_*` — confirmed (state changes only; denied attempts are metrics, ADR addendum 2). The tripwire is *wired* into the arm loop in PR 4b.
+- Live evidence of this PR (all gated, USD < 0.02 in total): keychain unreachable (2 calls, then re-measured with production settings, 1 call), built-in tools refuse a symlink pivot (2 calls), canary, arm run.
