@@ -165,6 +165,14 @@ func (e *Executor) wait(ctx context.Context, runID string) error {
 	}
 }
 
+// SystemTask returns the workspace's hidden system task, creating it on
+// first use with its cwd under <home>/learning/cwd/<ws>. It runs nothing and
+// does not clean the cwd: callers that start their own runs under the task
+// (the learning probe) use it only for the task id.
+func (e *Executor) SystemTask(workspaceID int64) (store.Task, error) {
+	return e.systemTask(workspaceID, e.cwdFor(workspaceID))
+}
+
 func (e *Executor) acquire(workspaceID int64) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
