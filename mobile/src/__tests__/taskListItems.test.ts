@@ -47,16 +47,15 @@ describe('taskListItems (flattening)', () => {
   it('the ungrouped section is titled "Ungrouped" and attention is carried per task', () => {
     const items = taskListItems(buildTaskSections([space], [task(1, null), task(2, null, 'running')], new Set([2])), new Set([2]));
     expect(items[0]).toEqual({ key: 'header-ungrouped', type: 'header', title: 'Ungrouped' });
-    expect(items[1]).toMatchObject({ taskId: 1, attention: false });
-    expect(items[2]).toMatchObject({ taskId: 2, attention: true, status: 'running' });
+    // buildTaskSections sorts attention-first: task 2 leads the section.
+    expect(items[1]).toMatchObject({ taskId: 2, attention: true, status: 'running' });
+    expect(items[2]).toMatchObject({ taskId: 1, attention: false });
   });
 
   it('keys are unique across sections and stable', () => {
-    const items = taskListItems(
-      buildTaskSections([space], [task(1, null), task(1, 7)], new Set()), // same id in two sections can't happen; keys still unique per section prefix
-      new Set(),
-    );
+    const items = taskListItems(buildTaskSections([space], [task(1, null), task(2, 7), task(3, 7)], new Set()), new Set());
     const keys = items.map((i) => i.key);
+    expect(keys).toEqual(['header-ungrouped', 'task-1', 'header-space-7', 'task-2', 'task-3']);
     expect(new Set(keys).size).toBe(keys.length);
   });
 });
