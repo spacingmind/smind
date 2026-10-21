@@ -285,3 +285,37 @@ func TestProbe_UsageWindowAndWorkspaceScoped(t *testing.T) {
 		t.Fatalf("SumProbeUsageForWorkspace() = %v, want 0.5 (window + workspace scoped)", got)
 	}
 }
+
+func TestLearningBucket_ExcludesProbeRuns(t *testing.T) {
+	t.Parallel()
+	s, ws, task := newProbeFixture(t)
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	one, quarter, probeCost := 1.0, 0.25, 0.40
+	probeRun(t, s, task.ID, ws.ID, "ru", base, "user", &one)
+	probeRun(t, s, task.ID, ws.ID, "rr", base, "reflect", &quarter)
+	probeRun(t, s, task.ID, ws.ID, "rp", base, "probe", &probeCost)
+	since := base.Add(-time.Hour)
+
+	lc, _, _, err := s.SumLearningUsageForWorkspace(ws.ID, since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lc != 0.25 {
+		t.Fatalf("SumLearningUsageForWorkspace() = %v, want 0.25 (probe runs excluded)", lc)
+	}
+
+	lRuns, _, _, lCost, err := s.SummarizeLearningUsageWindow(&since, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lRuns != 1 || lCost != 0.25 {
+		t.Fatalf("SummarizeLearningUsageWindow() = %d runs, %v USD; want 1, 0.25", lRuns, lCost)
+	}
+	pRuns, _, _, pCost, err := s.SummarizeProbeUsageWindow(&since, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pRuns != 1 || pCost != 0.40 {
+		t.Fatalf("SummarizeProbeUsageWindow() = %d runs, %v USD; want 1, 0.40", pRuns, pCost)
+	}
+}
