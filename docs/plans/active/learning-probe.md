@@ -311,7 +311,7 @@ All numbers are defaults in `learning.probe.*` and are guesses until the first w
 - [ ] PR 2a: S0 prevalence scan.
 - [ ] PR 2b: D11 reflector retry.
 - [x] PR 3: P0 spike and ADR addendum: conditional PASS on macOS (24 live calls, USD 0.068); keychain, Linux, Windows untested.
-- [ ] PR 4a: arm + sandbox (macOS only; keychain test done 2026-10-22: unreachable under the allow-list, ADR-0037 addendum).
+- [ ] PR 4a: arm + sandbox, reviewed (macOS only; keychain test done 2026-10-22: unreachable under the allow-list, ADR-0037 addendum).
 - [ ] PR 4b: probe service.
 - [ ] PR 4c: UI.
 

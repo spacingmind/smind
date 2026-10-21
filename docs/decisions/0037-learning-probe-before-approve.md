@@ -302,3 +302,21 @@ Recorded here because they refine §3 and were forced by measurement:
   delivers a proposed skill. All arm projections of a probe are built when the probe starts, under that attestation.
 - **Cap enforcement.** The CLI enforces `--max-turns` and `--max-budget-usd`; the arm additionally enforces wall time, output bytes and (via the usage
   event) an unreported cost charged at the cap. Each end has a distinct status (`timeout`, `turns`, `capped`, `output`, `killed`).
+- **Independent security review (2026-10-22) and what it changed.** A read-only review of the arm code found no blocker in the unwired code and
+  these items, all fixed in the arm PR unless noted: the attestation was only a gate on the projection builder, so `RunPromptProbe` now requires a valid
+  `Attestation` (TTL 60 minutes) and a `Prepare`-built launch; the canary now makes four Bash calls and fails unless it *observes* the refusals (outside
+  write, outside read of a planted secret, write into the read-only projection) besides the file assertions; `KillTree` checks that the pid is a
+  group leader and a child of the daemon, re-snapshots before the KILL and reports survivors for every end state; `git archive` is streamed with a byte
+  limit and `.git` entries are refused; the Homebrew read path is narrowed to formula runtime directories; **the diff of an arm is never computed with
+  git inside the arm** (the agent can write `arm/.git/config`, whose `core.fsmonitor`, textconv and filter settings would execute as the daemon user):
+  the service diffs a sanitised copy of the arm (no `.git`, no symlinks) against a pristine export held outside the arm with `git diff --no-index`.
+- **Measured live (2026-10-22, claude 2.1.303):** the built-in tools do not follow a symlink the agent creates with Bash. With `arm/k -> <outside dir>`, Read,
+  Write, Edit, Grep and Glob were all attempted and refused by the CLI ("resolves through a symlink to ..., which is outside the allowed working
+  directories"); no outside file was read, created or changed (`TestLive_BuiltinToolsRefuseSymlinkPivot`, 2 calls, USD 0.0051). The keychain result above was
+  re-measured with the production sandbox settings (`TestLive_KeychainUnreachableFromProductionArm`, 1 call, USD 0.0017; throwaway item deleted and deletion
+  asserted). The four-call canary costs about USD 0.002. A live arm through `RunPromptProbe` ended `done` (USD 0.0014) and exposed one bug fixed before
+  shipping: the CLI reports a tool *result* as a tool-call event that carries the call id but no tool name.
+- **Accepted residuals (stated, not fixed):** the tripwire marks a probe `unsafe` if the human edits the real checkout while it runs; the CLI's per-session
+  tmp (`/private/tmp/claude-<uid>`) is shared with the user's other sessions; the CLI reports usage only at the end of a run, so the cost cap is the CLI's
+  `--max-budget-usd` plus the end-of-run meter (there is no per-usage-event cap); `/private/var/db` and `/Library` stay readable in full; a skill body's
+  dynamic-context syntax is unverified; routed-account and token logins are unsupported (the env allowlist drops tokens; they fail closed as "Not logged in").
