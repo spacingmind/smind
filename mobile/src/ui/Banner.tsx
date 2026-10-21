@@ -1,13 +1,13 @@
 // Banner.tsx is the full-width status strip primitive (expo-design-system:
 // a nameable role, an API smaller than its implementation): ReconnectingBanner
 // moved here from ConnectionStatusCard.tsx. Mount/unmount animate via
-// Reanimated entering/exiting -- FadeIn/FadeOut at duration.hover, skipped
+// Reanimated entering/exiting (only honoured on an Animated.View) -- FadeIn/FadeOut at duration.hover, skipped
 // entirely when the user prefers reduced motion (expo-animation: respect
 // useReducedMotion). Tokens only, never a hex literal.
 
 import { ReactNode, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { FadeIn, FadeOut, useReducedMotion } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, useReducedMotion } from 'react-native-reanimated';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 
@@ -22,10 +22,10 @@ export function Banner({ children, tone = 'neutral' }: { children: ReactNode; to
     ? {}
     : { entering: FadeIn.duration(theme.duration.hover), exiting: FadeOut.duration(theme.duration.hover) };
   return (
-    <View style={styles.container} accessibilityRole="alert" accessibilityLiveRegion="polite" {...motion}>
+    <Animated.View style={styles.container} accessibilityRole="alert" accessibilityLiveRegion="polite" {...motion}>
       <View style={[styles.dot, { backgroundColor: dot }]} />
       <Text style={styles.text}>{children}</Text>
-    </View>
+    </Animated.View>
   );
 }
 
