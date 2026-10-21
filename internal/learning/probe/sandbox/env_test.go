@@ -35,18 +35,27 @@ func writeStub(t *testing.T, dir, body string) string {
 
 func TestSandboxEnv_AllowlistOnly(t *testing.T) {
 	have := map[string]string{"PATH": "/usr/bin", "HOME": "/h", "USER": "u", "SMIND_CANARY_SECRET": "CANARY-x", "GITHUB_TOKEN": "t", "LOGNAME": "u", "SHELL": "/bin/sh"}
-	got := AllowlistEnv(func(n string) (string, bool) { v, ok := have[n]; return v, ok })
+	const tok = "0123456789abcdef"
+	got, err := AllowlistEnv(func(n string) (string, bool) { v, ok := have[n]; return v, ok }, tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"", "short", "0123456789ABCDEF", "0123456789abcdeg", "0123456789abcdef\n", strings.Repeat("a", 65)} {
+		if _, err := AllowlistEnv(os.LookupEnv, bad); err == nil {
+			t.Errorf("token %q accepted", bad)
+		}
+	}
 	names := map[string]string{}
 	for _, kv := range got {
 		n, v, _ := strings.Cut(kv, "=")
 		names[n] = v
 	}
-	for _, want := range []string{"PATH", "HOME", "USER", "ENABLE_CLAUDEAI_MCP_SERVERS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM"} {
+	for _, want := range []string{"PATH", "HOME", "USER", "ENABLE_CLAUDEAI_MCP_SERVERS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", TokenEnv} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("%s missing from the allowlist env", want)
 		}
 	}
-	if names["ENABLE_CLAUDEAI_MCP_SERVERS"] != "false" || names["GIT_CONFIG_GLOBAL"] != "/dev/null" || names["GIT_CONFIG_NOSYSTEM"] != "1" {
+	if names["ENABLE_CLAUDEAI_MCP_SERVERS"] != "false" || names["GIT_CONFIG_GLOBAL"] != "/dev/null" || names["GIT_CONFIG_NOSYSTEM"] != "1" || names[TokenEnv] != tok {
 		t.Errorf("fixed extras wrong: %v", names)
 	}
 	for _, bad := range []string{"SMIND_CANARY_SECRET", "GITHUB_TOKEN", "LOGNAME", "SHELL", "LANG"} {
@@ -68,7 +77,10 @@ func TestSandboxEnv_NoDaemonEnvLeak(t *testing.T) {
 	stub := writeStub(t, dir, "/usr/bin/env\n")
 	pid := filepath.Join(dir, "cli.pid")
 	lookup := func(n string) (string, bool) { return os.LookupEnv(n) }
-	env := AllowlistEnv(lookup)
+	env, err := AllowlistEnv(lookup, "0123456789abcdef0123")
+	if err != nil {
+		t.Fatal(err)
+	}
 	launcher, err := WriteLauncher(dir, stub, env, pid)
 	if err != nil {
 		t.Fatal(err)
