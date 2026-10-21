@@ -72,3 +72,20 @@ func TestLearning_NotExposedOnMcp(t *testing.T) {
 		t.Fatal("found no callWS calls; the scan is vacuous")
 	}
 }
+
+// TestMCPCatalog_HasNoProbeTool pins the same recursion guard for the probe
+// RPCs (ADR-0037): no MCP tool mentions probes, and nothing maps to a
+// learning.probe.* method (the callWS literal scan above covers the source).
+func TestMCPCatalog_HasNoProbeTool(t *testing.T) {
+	env := newMCPSession(t)
+	res, err := env.cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range res.Tools {
+		text := strings.ToLower(tool.Name + " " + tool.Description)
+		if strings.Contains(text, "probe") {
+			t.Errorf("MCP tool %q mentions %q; probes must not be exposed to agents", tool.Name, "probe")
+		}
+	}
+}
