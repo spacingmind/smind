@@ -1,10 +1,9 @@
 import { View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
-import { Button } from '@expo/ui';
 import { useConnectionOrNull } from '../src/connection/ConnectionProvider';
 import { taskHref } from '../src/navigation/routes';
 import { TasksScreen } from '../src/screens/TasksScreen';
-import { UiHost } from '../src/ui/UiHost';
+import { TextButton } from '../src/ui/TextButton';
 
 export default function TasksRoute() {
   const ctx = useConnectionOrNull();
@@ -19,9 +18,7 @@ export default function TasksRoute() {
           // The Host sizes to its content and top-aligns on web; centre it on the header's own height.
           headerRight: () => (
             <View style={{ justifyContent: 'center', alignSelf: 'stretch' }}>
-              <UiHost>
-                <Button variant="text" label="Disconnect" onPress={disconnect} />
-              </UiHost>
+              <TextButton label="Disconnect" onPress={disconnect} />
             </View>
           ),
         }}

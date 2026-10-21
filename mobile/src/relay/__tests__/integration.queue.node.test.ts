@@ -38,6 +38,22 @@ function queueFor(conn: RelayConnection, chatId: number): ChatQueue {
 
 const prompts = (q: ChatQueue) => q.items.map((i) => i.Prompt);
 
+/**
+ * seed-live returns as soon as the run is `running`, which can be a moment BEFORE the fake agent has read its
+ * scenario file (it reads it when the prompt starts). Overwriting the file for the runs that follow before that
+ * makes the "hanging" run read `default` and finish `done` on a slow machine (seen on CI). The `hang` scenario
+ * streams "before hang" first, so wait for that chunk, then it is safe to switch the scenario.
+ */
+async function waitForHangToStream(conn: RelayConnection, runId: string): Promise<void> {
+  await vi.waitFor(
+    async () => {
+      const logs = (await conn.call('run.logs', { runId })) as { events?: Array<{ type: string; text?: string }> };
+      expect((logs.events ?? []).some((e) => e.type === 'chunk' && e.text === 'before hang')).toBe(true);
+    },
+    { timeout: 15_000, interval: 100 },
+  );
+}
+
 beforeAll(async () => {
   requireSelfSignedHarnessTrust();
   fakeAgent = buildFakeAgent();
@@ -113,6 +129,7 @@ describe(`the daemon prompt queue on mobile, against a real daemon and a long-ru
       follower.markKnown(liveRunId, 'running');
       conn.subscribe(['run.status'], (e) => follower.onRunStatus(e.payload as RunStatusEvent));
 
+      await waitForHangToStream(conn, liveRunId);
       await harness.setScenario(taskId, 'default'); // delivered runs finish
       await harness.stopRun(liveRunId);
 
@@ -133,6 +150,7 @@ describe(`the daemon prompt queue on mobile, against a real daemon and a long-ru
   it('interrupt stops the live run and its prompt goes ahead of earlier queued ones', { timeout: 90_000 }, async () => {
     const conn = await connect();
     const live = await harness.seedLive('hang', 'Interrupt task');
+    await waitForHangToStream(conn, live.runId);
     await harness.setScenario(live.taskId, 'default'); // the delivered runs finish; the live one is already running `hang`
     const queue = queueFor(conn, live.chatId);
 

@@ -52,7 +52,7 @@ import { requestStop, stopControlView } from '../stopControl';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { useChatQueue } from '../useChatQueue';
-import { ReconnectingBanner } from './ConnectionStatusCard';
+import { ReconnectingBanner } from '../ui/Banner';
 import { QueuedPrompts } from './QueuedPrompts';
 
 type LoadState =

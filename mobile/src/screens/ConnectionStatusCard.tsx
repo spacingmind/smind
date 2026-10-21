@@ -1,10 +1,10 @@
 // ConnectionStatusCard.tsx is the full-width card the pairing screen and the
 // app shell show when a connection is waiting for approval on the daemon, was
-// revoked, or failed (relay/connectionStatus.ts words them), and the thin
-// banner shown over a live session while it reconnects. Colors come from the
-// token system only.
+// revoked, or failed (relay/connectionStatus.ts words them). The thin
+// ReconnectingBanner shown over a live session moved to src/ui/Banner.tsx
+// with the other UI primitives. Colors come from the token system only.
 
-import { ReactNode, useMemo } from 'react';
+import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Button } from '@expo/ui';
 import { StatusView } from '../relay/connectionStatus';
@@ -46,17 +46,6 @@ export function ConnectionStatusCard({ view, actions }: { view: StatusView; acti
   );
 }
 
-/** A thin strip over a live session while the connection recovers. */
-export function ReconnectingBanner({ children }: { children: ReactNode }) {
-  const theme = useAppTheme();
-  const styles = useMemo(() => makeStyles(theme), [theme]);
-  return (
-    <View style={styles.banner} accessibilityRole="alert" accessibilityLiveRegion="polite">
-      <Text style={styles.bannerText}>{children}</Text>
-    </View>
-  );
-}
-
 function makeStyles(theme: AppTheme) {
   return StyleSheet.create({
     card: {
@@ -90,18 +79,5 @@ function makeStyles(theme: AppTheme) {
       padding: theme.spacing[3],
     },
     actions: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing[2], marginTop: theme.spacing[2] },
-    banner: {
-      backgroundColor: theme.surface[2],
-      borderBottomWidth: 1,
-      borderBottomColor: theme.border,
-      paddingVertical: theme.spacing[2],
-      paddingHorizontal: theme.spacing[4],
-    },
-    bannerText: {
-      fontSize: theme.type.metadataLabel.fontSize,
-      lineHeight: theme.type.metadataLabel.lineHeight,
-      fontWeight: theme.type.metadataLabel.fontWeight,
-      color: theme.foregroundMuted,
-    },
   });
 }
