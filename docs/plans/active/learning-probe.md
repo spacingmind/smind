@@ -303,6 +303,7 @@ All numbers are defaults in `learning.probe.*` and are guesses until the first w
   sandbox in 4a.
 - **Probe-lite on macOS only** (Human, 2026-10-22): Linux/Windows have no Probe button and a stated reason; read allow-list and the per-probe canary are mandatory; the keychain test was approved and run (ADR-0037 addendum).
 - **PR sequencing:** 4a (arm + sandbox) is off `develop`; 4b stacks on 4a's branch because it needs the arm (retarget to `develop` after 4a merges); 4c is built against the frozen wire contract above in parallel and merges after 4b.
+- **`probeCheck` (AC33, D8) is deferred out of PR 4b.** Running a human-authored command "inside the same sandbox" needs a way to run a command in the CLI's command sandbox *without a model call*, which does not exist (the sandbox is only applied by the CLI to its own Bash tool). The alternatives are a second, hand-written `sandbox-exec` profile (new isolation design, needs its own measurement and review) or asking the model to run it (not deterministic, costs money). Neither was decided; the contract already allows it (`ProbeArmView.check` is optional and absent). Follow-up PR with its own ADR note once the Human picks.
 - No users yet (2026-10): no compatibility shims or migration code for the new tables/config; the break is noted in the PR.
 
 ## Progress
@@ -312,7 +313,7 @@ All numbers are defaults in `learning.probe.*` and are guesses until the first w
 - [ ] PR 2b: D11 reflector retry.
 - [x] PR 3: P0 spike and ADR addendum: conditional PASS on macOS (24 live calls, USD 0.068); keychain, Linux, Windows untested.
 - [ ] PR 4a: arm + sandbox, reviewed (macOS only; keychain test done 2026-10-22: unreachable under the allow-list, ADR-0037 addendum).
-- [ ] PR 4b: probe service.
+- [ ] PR 4b: probe service (stacked on 4a; AC33 `probeCheck` deferred, see Decisions).
 - [ ] PR 4c: UI.
 
 ## Validation
@@ -342,3 +343,13 @@ round's PASS overstated, and the hardening round re-measured or downgraded each 
 - AC24 `TestArmCaps_TimeoutTurnsCostOutputEachEndArm`, `TestArmEnd_NoSurvivingChildProcess`, `TestArmEnd_ArmDirRemoved`, `TestStartupSweep_RemovesOrphanArmDirs` — confirmed; live `TestLiveProbe_ArmRunThroughRunPromptProbe` (USD 0.0014). The per-usage-event cap is not implementable (the CLI reports usage once, at the end): `--max-budget-usd` + the end-of-run meter instead (ADR addendum 2).
 - AC25 `TestTripwire_*` — confirmed (state changes only; denied attempts are metrics, ADR addendum 2). The tripwire is *wired* into the arm loop in PR 4b.
 - Live evidence of this PR (all gated, USD < 0.02 in total): keychain unreachable (2 calls, then re-measured with production settings, 1 call), built-in tools refuse a symlink pivot (2 calls), canary, arm run.
+
+### PR 4b — probe service (2026-10-22; stacked on 4a)
+
+- AC26 `TestEligibility_EachReasonCode` — every code incl. `platform_unsupported`; confirmed. AC27 `TestEstimate_*` — confirmed. AC28 `TestBudget_*`, `TestQuota_ReadsCacheOnlyZeroEndpointCalls`, store `TestLearningBucket_ExcludesProbeRuns` (the learning bucket is now `purpose IN ('reflect','curate')`; before this PR probe runs would have counted against the USD 0.25 learning cap) — confirmed.
+- AC29–AC31 `TestProbe_RunsExactlyPlannedArms`, `_NoDuplicateRunIDs`, `_ProjectionHashMatchesRole`, `TestProbeRuns_ExcludedFromCollectorAndCounters`, `TestContrast_*` — confirmed. AC32 `TestVerdict_*` — confirmed (cost/time worse than the noise floor falls to `inconclusive`, not `hurt`; `hurt` only on failed tool calls, denials, check or a recurrence regression: a documented reading of ADR §4, to be calibrated on real data).
+- AC33 `probeCheck`: **not met, deferred** (see Decisions).
+- AC34 `TestStoredArtifacts_Redacted` — confirmed; the diff is computed by `arm.Diff` from a sanitised copy against a pristine export, never with git inside the arm (review B2). AC35 `TestRetention_*`, `TestForgetWorkspace_DeletesProbeArtifacts`, `TestPurge_*` — confirmed.
+- AC36 `TestProbeRPC_Surface`, `TestMCPCatalog_HasNoProbeTool`, `TestEvents_ProbeLifecycle`, `TestLedger_ProbedRow`, CLI `TestLearnProbe_*` — confirmed (CLI: `smind learn probe <id> [--quick] [--dry-run]`, `smind learn probe show <id>`). `usage.probe` returns the Probe bucket; the Settings → Usage UI row is a follow-up.
+- AC37 `TestProbe_SecondStartIsBusy`, `TestProbe_CancelStopsAndCleans`, `TestTripwire_StopsRemainingArms` — confirmed.
+- Live end-to-end `TestLiveProbe_EndToEnd` (isolated temp home, throwaway repo, haiku, gated): canary + A + A2 + B in 25 s, **USD 0.0053 total** (estimate 0.108), verdict `never_loaded` (the candidate was irrelevant to the task, as intended for a cheap smoke), all arms `done`, tripwires clean, arm/launch dirs empty afterwards, real checkout untouched, event order started → arm… → finished. It found one bug (the contrast row dropped the replicate's value, `a2` null): fixed with a regression test.
