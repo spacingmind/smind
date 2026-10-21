@@ -11,6 +11,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/learning/approval"
 	"github.com/spacingmind/smind/internal/learning/gate"
+	"github.com/spacingmind/smind/internal/learning/projection"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -77,7 +78,7 @@ func newFx(t *testing.T) *fx {
 	f := &fx{t: t, st: st, ws: ws, task: task, chat: chat.ID, repo: repo, base: base, home: t.TempDir()}
 	f.run = f.addRun("src", func(r *store.Run) {})
 	f.setCost("src", 0.10)
-	f.prop = f.addProposal("create", f.run.ID, gate.EvFailureRecovery, createItems("skill-a"))
+	f.prop = f.addProposal("create", f.run.ID, gate.EvFailureRecovery, createItems("learned-skill-a"))
 	return f
 }
 
@@ -149,6 +150,8 @@ func (f *fx) svc(mut func(*Deps)) *Service {
 	s := New(d)
 	s.lookPath = func(string) (string, error) { return "/usr/bin/perl", nil }
 	f.t.Cleanup(s.Close)
+	// Projections are read-only trees; make them removable before TempDir goes.
+	f.t.Cleanup(func() { _ = projection.Remove(filepath.Join(f.home, "learning", "probe-projections"), f.ws.ID) })
 	return s
 }
 
