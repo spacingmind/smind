@@ -119,6 +119,9 @@ func (r *Runner) RunPromptProbe(ctx context.Context, taskID, chatID int64, provi
 		violated string
 		tripped  bool
 		obs      sandbox.Observation
+		// callTool remembers the tool name of each call id: the CLI's result
+		// event for a call carries the id but not the name.
+		callTool = map[string]string{}
 	)
 	updates := make(chan claudecode.Message)
 	forwardDone := make(chan struct{})
@@ -137,9 +140,17 @@ func (r *Runner) RunPromptProbe(ctx context.Context, taskID, chatID int64, provi
 			}
 			for _, e := range claudeEvents(msg) {
 				mu.Lock()
-				if e.Type == EventTypeToolCall && !tripped && !allowedProbeTool(e.ToolName) {
-					tripped, violated = true, "tool call "+safeToolName(e.ToolName)
-					cancel()
+				if e.Type == EventTypeToolCall && !tripped {
+					name := e.ToolName
+					if name == "" {
+						name = callTool[e.ToolCallID]
+					} else if e.ToolCallID != "" {
+						callTool[e.ToolCallID] = name
+					}
+					if !allowedProbeTool(name) {
+						tripped, violated = true, "tool call "+safeToolName(name)
+						cancel()
+					}
 				}
 				if !tripped && meter.Output(len(e.Text)+len(e.ToolInput)+len(e.ToolResult)) == arm.EndOutput {
 					cancel()
@@ -212,9 +223,11 @@ func (r *Runner) RunPromptProbe(ctx context.Context, taskID, chatID int64, provi
 	// Done event waits for a reader.
 	_ = client.Close()
 	r.sendFailedUsage(ctx, events, result)
+	// Not selecting on ctx.Done: a cancelled caller (end killed) still reads
+	// the final event, and select would pick the closed ctx at random. The
+	// timer bounds the wait when nobody reads.
 	select {
 	case events <- Event{Type: EventTypeDone, StopReason: "probe_" + string(end)}:
-	case <-ctx.Done():
 	case <-time.After(2 * time.Second):
 	}
 	if didTrip {

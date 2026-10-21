@@ -261,3 +261,41 @@ func TestRunPromptProbe_WrongToolSurfaceFailsClosed(t *testing.T) {
 		}
 	}
 }
+
+// The real CLI reports a tool result as a tool-call event with the call id and
+// no tool name: it belongs to the call seen earlier and must not trip the
+// allowlist (found by the live arm run, 2026-10-22).
+func TestRunPromptProbe_ResultEventWithoutNameBelongsToItsCall(t *testing.T) {
+	f := newProbeFixture(t, "probe-tools")
+	events, err := f.run(context.Background())
+	if err != nil {
+		t.Fatalf("err = %v, want nil (report %+v)", err, *f.report)
+	}
+	if f.report.End != arm.EndDone {
+		t.Errorf("End = %s, want done", f.report.End)
+	}
+	var calls, results int
+	for _, e := range events {
+		if e.Type == EventTypeToolCall {
+			calls++
+			if e.ToolStatus != ToolStatusRunning {
+				results++
+			}
+		}
+	}
+	if calls < 2 || results < 1 {
+		t.Errorf("tool-call events = %d (finished %d), want the call and its result", calls, results)
+	}
+}
+
+// A result for a call id the arm never started has no allowed tool behind it.
+func TestRunPromptProbe_OrphanResultFailsClosed(t *testing.T) {
+	f := newProbeFixture(t, "probe-orphan-result")
+	_, err := f.run(context.Background())
+	if !errors.Is(err, ErrIsolationViolated) {
+		t.Fatalf("err = %v, want ErrIsolationViolated", err)
+	}
+	if f.report.End != arm.EndError {
+		t.Errorf("End = %s, want error", f.report.End)
+	}
+}
