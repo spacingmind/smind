@@ -827,9 +827,11 @@ func (s *Store) HasActiveLearningJob(workspaceID int64) (bool, error) {
 }
 
 // ForgetWorkspaceLearning hard-deletes every learning row of the workspace
-// (skills, versions, ledger, proposals, jobs) and resets learning_mode to
-// 'off', in one transaction. DeleteWorkspace calls this before removing the
-// workspace row (FK).
+// (skills, versions, ledger, proposals, jobs, and the probes with their arms
+// and probe runs) and resets learning_mode to 'off', in one transaction.
+// DeleteWorkspace calls this before removing the workspace row (FK). Callers
+// cancel the workspace's running probe first (probesvc.Service.CancelWorkspace),
+// so no probe goroutine writes to rows deleted here.
 func (s *Store) ForgetWorkspaceLearning(workspaceID int64) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -837,6 +839,15 @@ func (s *Store) ForgetWorkspaceLearning(workspaceID int64) error {
 	}
 	defer tx.Rollback()
 	for _, q := range []string{
+		`DELETE FROM run_events WHERE run_id IN (
+			SELECT r.id FROM runs r JOIN tasks t ON t.id = r.task_id
+			WHERE t.workspace_id = ? AND r.purpose = 'probe')`,
+		`DELETE FROM run_usage WHERE run_id IN (
+			SELECT r.id FROM runs r JOIN tasks t ON t.id = r.task_id
+			WHERE t.workspace_id = ? AND r.purpose = 'probe')`,
+		`DELETE FROM runs WHERE purpose = 'probe' AND task_id IN (SELECT id FROM tasks WHERE workspace_id = ?)`,
+		`DELETE FROM learning_probe_arms WHERE probe_id IN (SELECT id FROM learning_probes WHERE workspace_id = ?)`,
+		`DELETE FROM learning_probes WHERE workspace_id = ?`,
 		`DELETE FROM learned_skill_offers WHERE skill_id IN (SELECT id FROM learned_skills WHERE workspace_id = ?)`,
 		`DELETE FROM learned_skill_loads WHERE skill_id IN (SELECT id FROM learned_skills WHERE workspace_id = ?)`,
 		`DELETE FROM learned_skill_versions WHERE skill_id IN (SELECT id FROM learned_skills WHERE workspace_id = ?)`,

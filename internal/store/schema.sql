@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS runs (
     base_sha TEXT,
     head_sha TEXT,
     dirty INTEGER,
-    purpose TEXT NOT NULL DEFAULT 'user', -- 'user' | 'reflect' | 'curate' (ADR-0026)
+    purpose TEXT NOT NULL DEFAULT 'user', -- 'user' | 'reflect' | 'curate' | 'probe' (ADR-0026, ADR-0037)
     origin TEXT NOT NULL DEFAULT '', -- who authored the prompt: human|orchestrator|agent; '' = unknown
     interrupt INTEGER NOT NULL DEFAULT 0 -- 1 = delivered as a mid-run interrupt
 );
@@ -402,6 +402,46 @@ CREATE TABLE IF NOT EXISTS learning_jobs (
     finished_at TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_learning_jobs_ws ON learning_jobs(workspace_id, id);
+
+-- Learning probes (ADR-0037): one A/A2/B experiment before a skill
+-- proposal is approved. Contrast JSON, arm metrics and check results are
+-- stored uninterpreted; the verdict is decided by internal/learning/probe.
+CREATE TABLE IF NOT EXISTS learning_probes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+    proposal_id INTEGER NOT NULL,         -- no FK: forget-workspace deletes both
+    quick INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL,                 -- queued|running|done|failed|cancelled|unsafe
+    verdict TEXT NOT NULL DEFAULT '',     -- helped|no_effect|never_loaded|hurt|inconclusive|probe_failed|unsafe ('' until decided)
+    verdict_reason TEXT NOT NULL DEFAULT '',
+    est_usd REAL NOT NULL DEFAULT 0,
+    canary_cost_usd REAL NOT NULL DEFAULT 0,
+    source_run_id TEXT NOT NULL DEFAULT '',
+    base_sha TEXT NOT NULL DEFAULT '',
+    contrast TEXT NOT NULL DEFAULT '',    -- JSON, uninterpreted by the store
+    error TEXT NOT NULL DEFAULT '',
+    started_at TIMESTAMP NOT NULL,
+    finished_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_learning_probes_ws ON learning_probes(workspace_id, id);
+CREATE INDEX IF NOT EXISTS idx_learning_probes_proposal ON learning_probes(proposal_id, id);
+
+CREATE TABLE IF NOT EXISTS learning_probe_arms (
+    probe_id INTEGER NOT NULL REFERENCES learning_probes(id),
+    role TEXT NOT NULL,                   -- A|A2|B
+    seq INTEGER NOT NULL,                 -- execution order, 0-based
+    status TEXT NOT NULL,                 -- pending|running|done|capped|timeout|turns|output|killed|error
+    run_id TEXT NOT NULL DEFAULT '',
+    projection_hash TEXT NOT NULL DEFAULT '',
+    metrics TEXT NOT NULL DEFAULT '{}',   -- JSON, uninterpreted
+    diff TEXT NOT NULL DEFAULT '',        -- redacted, clipped by the caller (<= 64 KB)
+    final_message TEXT NOT NULL DEFAULT '', -- redacted (<= 8 KB)
+    check_result TEXT NOT NULL DEFAULT '', -- JSON or ''
+    cost_usd REAL NOT NULL DEFAULT 0,
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+    PRIMARY KEY (probe_id, role)
+);
 
 -- Delivery counters (ADR-0026 section 6): one row per (skill, run) offer and
 -- per (skill, run, via) load, so the learned_skills counters are idempotent

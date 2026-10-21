@@ -94,6 +94,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"usage.list":               handleUsageList(db),
 		"usage.summary":            handleUsageSummary(db),
 		"usage.learning":           handleUsageLearning(db),
+		"usage.probe":              handleUsageProbe(db),
 		"mcp.create":               handleMcpCreate(mcpReg),
 		"mcp.list":                 handleMcpList(mcpReg),
 		"mcp.get":                  handleMcpGet(mcpReg),

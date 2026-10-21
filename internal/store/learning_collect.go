@@ -144,8 +144,9 @@ func (s *Store) ListTailCandidates(minPending int64, idleBefore time.Time) ([]Ch
 	return out, rows.Err()
 }
 
-// SumLearningUsageForWorkspace totals the workspace's learning (non-user)
-// runs started at or after since, whatever their final status (a failed run
+// SumLearningUsageForWorkspace totals the workspace's learning runs (the
+// Learning bucket: reflect and curate runs; probe runs are their own
+// bucket, ADR-0037 §5) started at or after since, whatever their final status (a failed run
 // still spent money). costUSD and tokens sum only what runs reported; tokens
 // are input + output + cache-read + cache-write, the fields the CLI reports
 // (cache tokens are real model work and real spend, so the cap counts them). unreportedRuns counts runs the budget cannot see
@@ -158,7 +159,7 @@ func (s *Store) SumLearningUsageForWorkspace(workspaceID int64, since time.Time)
 				COALESCE(u.cached_input_tokens, 0) + COALESCE(u.cache_write_tokens, 0)), 0),
 			COALESCE(SUM(CASE WHEN u.run_id IS NULL OR u.cost_usd IS NULL OR (u.input_tokens IS NULL AND u.output_tokens IS NULL) THEN 1 ELSE 0 END), 0)
 		 FROM runs r JOIN tasks t ON t.id = r.task_id LEFT JOIN run_usage u ON u.run_id = r.id
-		 WHERE t.workspace_id = ? AND r.purpose != 'user' AND r.started_at >= ?`, workspaceID, since.UTC(),
+		 WHERE t.workspace_id = ? AND r.purpose IN ('reflect', 'curate') AND r.started_at >= ?`, workspaceID, since.UTC(),
 	).Scan(&costUSD, &tokens, &unreportedRuns)
 	if err != nil {
 		err = fmt.Errorf("sum learning usage for workspace %d: %w", workspaceID, err)
