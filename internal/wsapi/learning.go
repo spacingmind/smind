@@ -114,6 +114,8 @@ type LearningDeps struct {
 	Trigger LearningTrigger
 	// Prevalence serves learning.proposals.prevalence.
 	Prevalence LearningPrevalence
+	// Probe serves learning.probe.* (ADR-0037); nil = "unavailable".
+	Probe LearningProbe
 	// OnWorkspaceReset, when set, runs after learning.forget and after
 	// learning.setMode to off, so a stale projection never lingers (the
 	// daemon removes the workspace's learned-skill projection here).
@@ -153,8 +155,31 @@ func (h *learningHost) set(d LearningDeps) {
 	}
 	h.deps.Trigger = d.Trigger
 	h.deps.Prevalence = d.Prevalence
+	h.deps.Probe = d.Probe
 	h.deps.OnWorkspaceReset = d.OnWorkspaceReset
 	h.deps.Home = d.Home
+}
+
+// cancelProbe stops the workspace's probe (if any) and waits for it to
+// clean up, before its rows are deleted or learning is turned off.
+func (h *learningHost) cancelProbe(workspaceID int64) {
+	if p := h.get().Probe; p != nil {
+		p.CancelWorkspace(workspaceID)
+	}
+}
+
+// beforeWorkspaceDelete wraps the workspace.delete handler so the
+// workspace's probe is cancelled and settled before its rows cascade away.
+func (h *learningHost) beforeWorkspaceDelete(next handlerFunc) handlerFunc {
+	return func(ctx context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ID int64 `json:"id"`
+		}
+		if json.Unmarshal(raw, &p) == nil && p.ID > 0 {
+			h.cancelProbe(p.ID)
+		}
+		return next(ctx, rc, raw)
+	}
 }
 
 // reset runs the optional OnWorkspaceReset hook.
@@ -486,6 +511,14 @@ type workspaceParams struct {
 
 // learningHandlers returns the learning.* RPC table.
 func learningHandlers(h *learningHost) map[string]handlerFunc {
+	m := learningHandlersBase(h)
+	for k, v := range probeHandlers(h) {
+		m[k] = v
+	}
+	return m
+}
+
+func learningHandlersBase(h *learningHost) map[string]handlerFunc {
 	return map[string]handlerFunc{
 		"learning.status":               learningMethod(h, "learning.status", statusLearning),
 		"learning.setMode":              learningMethod(h, "learning.setMode", setModeLearning),
@@ -626,6 +659,7 @@ func setModeLearning(_ context.Context, h *learningHost, p struct {
 		return nil, err
 	}
 	if p.Mode == store.LearningModeOff {
+		h.cancelProbe(p.WorkspaceID)
 		h.reset(p.WorkspaceID)
 	}
 	h.NotifyChanged(p.WorkspaceID, 0, 0, "modeChanged")
@@ -636,6 +670,7 @@ func forgetLearning(_ context.Context, h *learningHost, p workspaceParams) (any,
 	if _, err := h.workspace("learning.forget", p.WorkspaceID); err != nil {
 		return nil, err
 	}
+	h.cancelProbe(p.WorkspaceID) // no probe goroutine may write to rows Forget deletes
 	if err := h.get().Approval.Forget(p.WorkspaceID); err != nil {
 		return nil, err
 	}
