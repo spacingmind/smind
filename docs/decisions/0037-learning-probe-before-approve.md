@@ -316,6 +316,18 @@ Recorded here because they refine §3 and were forced by measurement:
   re-measured with the production sandbox settings (`TestLive_KeychainUnreachableFromProductionArm`, 1 call, USD 0.0017; throwaway item deleted and deletion
   asserted). The four-call canary costs about USD 0.002. A live arm through `RunPromptProbe` ended `done` (USD 0.0014) and exposed one bug fixed before
   shipping: the CLI reports a tool *result* as a tool-call event that carries the call id but no tool name.
+- **Skill delivery in an arm (measured 2026-10-22, claude 2.1.303).** (a) `--disable-slash-commands` disables *all* skills and removes the `Skill` tool;
+  (b) with `--setting-sources=` (mandatory for isolation) a skill under `--add-dir <dir>/.claude/skills` is **not** discovered, so a candidate could never be
+  loaded and every probe ended `never_loaded`; (c) working: no `--disable-slash-commands`, `Skill` in `--tools`, `--setting-sources ""` and `--plugin-dir <dir>`
+  where `<dir>` is a plugin root (`.claude-plugin/plugin.json` + `skills/<name>/SKILL.md`): init then lists the `Skill` tool and the skill as
+  `<plugin>:<name>`. Consequences: the arm tool surface is the seven built-ins plus `Skill` (the init list must still equal it); the learned skills reach the
+  arm as the plugin `smindprobe` (skill ids `smindprobe:<name>`; `loads.Match` strips the prefix), and `projection.ProjectProbe` writes both the
+  `.claude/skills/<name>/SKILL.md` form (the read form `loads.Match` understands, and what a built-in `Read` needs via `--add-dir`) and the plugin layout into
+  the same read-only content-addressed directory, which is hashed as a whole; production `Project` is unchanged. Arms run with the CLI's bundled skills
+  available (they are part of the binary and appear without `--disable-slash-commands`; this also keeps `Skill` in the init tool list for the canary).
+  `--setting-sources=` stays, so the repository's own CLAUDE.md/AGENTS.md/`.claude` settings and the user's skills are **not** loaded in an arm. That is a
+  fidelity limit, accepted on purpose: loading them would let the agent edit hook-bearing settings whose hooks run outside the command sandbox. A follow-up
+  may inject the base commit's CLAUDE.md statically through `--append-system-prompt-file`.
 - **Accepted residuals (stated, not fixed):** the tripwire marks a probe `unsafe` if the human edits the real checkout while it runs; the CLI's per-session
   tmp (`/private/tmp/claude-<uid>`) is shared with the user's other sessions; the CLI reports usage only at the end of a run, so the cost cap is the CLI's
   `--max-budget-usd` plus the end-of-run meter (there is no per-usage-event cap); `/private/var/db` and `/Library` stay readable in full; a skill body's
