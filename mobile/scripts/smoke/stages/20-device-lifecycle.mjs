@@ -10,7 +10,9 @@ import * as lib from '../lib.mjs';
  */
 async function deviceLifecycle(page, harness) {
   await page.fill('textarea, input[type="text"]', harness.pairingUrl);
-  await page.getByRole('button', { name: 'Connect' }).click();
+  // Connect -> status-card transition frames (light only: the connection happens
+  // once, so the dark frame would need a second full lifecycle to be cheap).
+  await lib.shootTransition(page, 'connect-card', 'light', () => page.getByRole('button', { name: 'Connect' }).click());
 
   try {
     await page.getByText('Waiting for approval', { exact: true }).waitFor({ timeout: 30_000 });
