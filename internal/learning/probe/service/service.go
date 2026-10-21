@@ -485,7 +485,7 @@ func (s *Service) execute(ctx context.Context, rn *running, pl plan) {
 				total = p.CanaryCostUSD + sumCost(recs)
 			}
 		}
-		capUSD := min(2*pl.estArm, cfg.PerProbeBudgetUSD-total)
+		capUSD := min(2*pl.estArm, cfg.PerProbeBudgetUSD-total, s.dailyHeadroom(pl))
 		if capUSD <= 0 {
 			budgetStop = true
 			break
@@ -512,6 +512,19 @@ func (s *Service) execute(ctx context.Context, rn *running, pl plan) {
 		return
 	}
 	s.settle(rn, pl, proj, sig, roles, recs, budgetStop, unsafe)
+}
+
+// dailyHeadroom is what is left of the daily probe budget right now (the
+// sum includes this probe's own finished arms and canaries), so a probe that
+// started eligible cannot run the day over its cap.
+func (s *Service) dailyHeadroom(pl plan) float64 {
+	spent, unreported, err := s.d.Store.SumProbeUsageForWorkspace(pl.ws.ID, s.d.Now().Add(-24*time.Hour))
+	if err != nil {
+		slog.Warn("learning probe: daily headroom", "err", err)
+		return 0 // cannot read the spend: fail closed
+	}
+	spent += float64(unreported) * pl.estArm
+	return s.d.Config().Probe.DailyBudgetUSD - spent
 }
 
 func sumCost(recs []*armRecord) float64 {

@@ -834,3 +834,29 @@ func TestProbe_SurvivorsMakeUnsafe(t *testing.T) {
 		t.Fatalf("arms started = %d, want 1: survivors stop the rest", n)
 	}
 }
+
+func TestBudget_DailyHeadroomClampsPerProbe(t *testing.T) {
+	t.Parallel()
+	p := newPfx(t, func(d *Deps) {
+		d.Config = func() config.LearningConfig {
+			c := config.DefaultLearning()
+			c.Probe.PerProbeBudgetUSD, c.Probe.DailyBudgetUSD = 1.5, 2.0
+			return c
+		}
+	})
+	p.setCost("src", 0.5) // est arm 0.60, quick probe 1.20
+	p.seedProbeSpend(0.7) // 1.20 + 0.70 fits the 2.00 day
+	p.arms.behave = func(armJob, int) fakeArm { return fakeArm{cost: cost(0.6)} }
+	pr := p.start(true)
+	p.wait(pr.ID)
+	p.arms.mu.Lock()
+	defer p.arms.mu.Unlock()
+	if len(p.arms.jobs) < 2 {
+		t.Fatalf("arms run = %d, want 2", len(p.arms.jobs))
+	}
+	// Arm B: per-probe room would be ~0.90, the day has 2.00-0.70-0.60-canary left.
+	got := p.arms.jobs[1].CostCapUSD
+	if got > 0.70 || got < 0.69 {
+		t.Fatalf("second arm cap = %v, want the daily headroom ~0.698 (not the per-probe room ~0.898)", got)
+	}
+}
