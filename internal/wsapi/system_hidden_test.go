@@ -254,3 +254,27 @@ func TestUsage_LearningBucketSplit(t *testing.T) {
 		t.Fatalf("task.tree usage = %+v", tree.Nodes)
 	}
 }
+
+func TestUsage_ProbeBucketSeparate(t *testing.T) {
+	t.Parallel()
+	f := newSysFixture(t)
+	reflectRun := f.startRun(t, f.sys.ID, f.sysCh.ID, runs.WithPurpose("reflect"))
+	f.waitFinished(t, reflectRun)
+	probeRun := f.startRun(t, f.sys.ID, f.sysCh.ID, runs.WithPurpose("probe"))
+	f.waitFinished(t, probeRun)
+	for id, cost := range map[string]float64{reflectRun: 0.5, probeRun: 0.3} {
+		if err := f.db.UpsertRunUsage(store.RunUsage{RunID: id, TaskID: f.sys.ID, Provider: "glm", Source: "t",
+			InputTokens: ptr(int64(100)), OutputTokens: ptr(int64(10)), CostUSD: ptr(cost)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var learning, probe learningUsageResult
+	callResult(t, f, "usage.learning", map[string]any{}, &learning)
+	callResult(t, f, "usage.probe", map[string]any{}, &probe)
+	if learning.Runs != 1 || learning.CostUSD != 0.5 {
+		t.Errorf("usage.learning = %+v, want only the reflect run (0.5)", learning)
+	}
+	if probe.Runs != 1 || probe.CostUSD != 0.3 {
+		t.Errorf("usage.probe = %+v, want only the probe run (0.3)", probe)
+	}
+}

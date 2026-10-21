@@ -114,6 +114,8 @@ type LearningDeps struct {
 	Trigger LearningTrigger
 	// Prevalence serves learning.proposals.prevalence.
 	Prevalence LearningPrevalence
+	// Probe serves learning.probe.* (ADR-0037); nil = "unavailable".
+	Probe LearningProbe
 	// OnWorkspaceReset, when set, runs after learning.forget and after
 	// learning.setMode to off, so a stale projection never lingers (the
 	// daemon removes the workspace's learned-skill projection here).
@@ -153,6 +155,7 @@ func (h *learningHost) set(d LearningDeps) {
 	}
 	h.deps.Trigger = d.Trigger
 	h.deps.Prevalence = d.Prevalence
+	h.deps.Probe = d.Probe
 	h.deps.OnWorkspaceReset = d.OnWorkspaceReset
 	h.deps.Home = d.Home
 }
@@ -486,6 +489,14 @@ type workspaceParams struct {
 
 // learningHandlers returns the learning.* RPC table.
 func learningHandlers(h *learningHost) map[string]handlerFunc {
+	m := learningHandlersBase(h)
+	for k, v := range probeHandlers(h) {
+		m[k] = v
+	}
+	return m
+}
+
+func learningHandlersBase(h *learningHost) map[string]handlerFunc {
 	return map[string]handlerFunc{
 		"learning.status":               learningMethod(h, "learning.status", statusLearning),
 		"learning.setMode":              learningMethod(h, "learning.setMode", setModeLearning),
