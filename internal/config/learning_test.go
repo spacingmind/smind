@@ -32,6 +32,11 @@ func TestConfig_LearningDefaultsAndValidation(t *testing.T) {
 	if cfg.Learning.Probe.PrevalenceDays != 30 || cfg.Learning.Probe.PrevalenceMaxEvents != 20000 {
 		t.Fatalf("probe defaults = %+v, want 30 days / 20000 events", cfg.Learning.Probe)
 	}
+	if p := cfg.Learning.Probe; p.PerProbeBudgetUSD != 1.50 || p.DailyBudgetUSD != 3.00 ||
+		p.QuotaSkipPercent != 80 || p.ArmTimeoutMinutes != 15 || p.MaxTurnsCap != 80 ||
+		p.RetentionDays != 14 || p.OutputCapKB != 256 {
+		t.Fatalf("probe defaults = %+v", p)
+	}
 
 	// A partial file leaves the other keys at their defaults.
 	write("learning:\n  enabled: false\n")
@@ -59,6 +64,20 @@ func TestConfig_LearningDefaultsAndValidation(t *testing.T) {
 		{"learning:\n  probe: {prevalenceDays: 0}\n", true},
 		{"learning:\n  probe: {prevalenceMaxEvents: 0}\n", true},
 		{"learning:\n  probe: {prevalenceDays: 7}\n", false},
+		{"learning:\n  probe: {quotaSkipPercent: 0}\n", true},
+		{"learning:\n  probe: {quotaSkipPercent: 101}\n", true},
+		{"learning:\n  probe: {quotaSkipPercent: 1}\n", false},
+		{"learning:\n  probe: {quotaSkipPercent: 100}\n", false},
+		{"learning:\n  probe: {perProbeBudgetUSD: 0}\n", true},
+		{"learning:\n  probe: {dailyBudgetUSD: 0}\n", true},
+		{"learning:\n  probe: {perProbeBudgetUSD: 3, dailyBudgetUSD: 2}\n", true},
+		{"learning:\n  probe: {perProbeBudgetUSD: 2, dailyBudgetUSD: 2}\n", false},
+		{"learning:\n  probe: {perProbeBudgetUSD: 0.5, dailyBudgetUSD: 1}\n", false},
+		{"learning:\n  probe: {armTimeoutMinutes: 0}\n", true},
+		{"learning:\n  probe: {maxTurnsCap: 0}\n", true},
+		{"learning:\n  probe: {retentionDays: 0}\n", true},
+		{"learning:\n  probe: {outputCapKB: 0}\n", true},
+		{"learning:\n  probe: {armTimeoutMinutes: 30, maxTurnsCap: 100, retentionDays: 7, outputCapKB: 128}\n", false},
 	} {
 		write(tc.yaml)
 		_, err := Load()
