@@ -32,6 +32,11 @@ var (
 	ErrUnknownSHA = errors.New("arm: base commit not found in the repository")
 	// ErrBadDir is returned for an arm directory that is not usable.
 	ErrBadDir = errors.New("arm: arm directory is not usable")
+	// ErrUnsafeEntry is returned for an archive entry that must never be
+	// written: one that escapes the arm, or any path with a .git component
+	// (the arm's own repository is created afterwards; an exported .git would
+	// carry the source repository's config and hooks into it).
+	ErrUnsafeEntry = errors.New("arm: archive entry is unsafe")
 	// ErrTooLarge is returned when the export exceeds MaxBytes or MaxFiles.
 	ErrTooLarge = errors.New("arm: export is too large")
 )
@@ -140,12 +145,7 @@ func Materialise(ctx context.Context, s Spec) (res Result, err error) {
 		return Result{}, fmt.Errorf("arm: chmod arm dir: %w", err)
 	}
 
-	tarData, err := runGit(ctx, s.Repo, nil, "archive", "--format=tar", s.BaseSHA)
-	if err != nil {
-		return Result{}, err
-	}
-	res, err = extract(bytes.NewReader(tarData), s.Dir)
-	if err != nil {
+	if res, err = streamArchive(ctx, s.Repo, s.BaseSHA, s.Dir); err != nil {
 		return Result{}, err
 	}
 	if _, err := runGit(ctx, s.Dir, nil, "init", "-q", "-b", "probe"); err != nil {
@@ -165,6 +165,41 @@ func Materialise(ctx context.Context, s Spec) (res Result, err error) {
 		return Result{}, err
 	}
 	res.Head = strings.TrimSpace(string(head))
+	return res, nil
+}
+
+// streamArchive runs `git archive` in repo and extracts its output into dir as
+// it is produced, so a huge repository is never held in memory: the raw stream
+// is cut off past the size limits, which also kills git.
+func streamArchive(ctx context.Context, repo, sha, dir string) (Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "archive", "--format=tar", sha)
+	cmd.Dir = repo
+	cmd.Env = gitEnv()
+	var errb bytes.Buffer
+	cmd.Stderr = &errb
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return Result{}, fmt.Errorf("arm: git archive: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return Result{}, fmt.Errorf("arm: git archive: %w", err)
+	}
+	res, xerr := extractLimit(out, dir, MaxBytes, MaxFiles)
+	if xerr == nil {
+		// Let git finish: read the stream's tail (tar padding) to EOF, bounded.
+		_, _ = io.Copy(io.Discard, io.LimitReader(out, 1<<20))
+	} else {
+		cancel() // stop git before waiting on it
+	}
+	werr := cmd.Wait()
+	if xerr != nil {
+		return Result{}, xerr
+	}
+	if werr != nil {
+		return Result{}, fmt.Errorf("git archive: %w: %s", werr, strings.TrimSpace(clip(errb.String(), 300)))
+	}
 	return res, nil
 }
 
@@ -203,9 +238,51 @@ func checkDir(dir string) error {
 // a repository symlink could point out of the arm, and the point of the arm
 // is that nothing outside it is reachable.
 func extract(r io.Reader, dir string) (Result, error) {
+	return extractLimit(r, dir, MaxBytes, MaxFiles)
+}
+
+// tarOverheadPerFile bounds the tar header and padding bytes one entry adds
+// on top of its content.
+const tarOverheadPerFile = 1536
+
+// limitedReader fails with ErrTooLarge once more than n bytes were read, so a
+// stream that lies about entry sizes (or has endless entries) is cut off.
+type limitedReader struct {
+	r io.Reader
+	n int64
+}
+
+func (l *limitedReader) Read(p []byte) (int, error) {
+	if l.n <= 0 {
+		return 0, ErrTooLarge
+	}
+	if int64(len(p)) > l.n {
+		p = p[:l.n]
+	}
+	n, err := l.r.Read(p)
+	l.n -= int64(n)
+	return n, err
+}
+
+// unsafeName reports whether a cleaned archive path must be refused: it
+// escapes the arm, contains a NUL, or has a component equal to .git in any
+// case (macOS and Windows file systems are case-insensitive).
+func unsafeName(name string) bool {
+	if path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") || strings.ContainsRune(name, 0) {
+		return true
+	}
+	for _, c := range strings.Split(name, "/") {
+		if strings.EqualFold(c, ".git") {
+			return true
+		}
+	}
+	return false
+}
+
+func extractLimit(r io.Reader, dir string, maxBytes int64, maxFiles int) (Result, error) {
 	var res Result
 	var total int64
-	tr := tar.NewReader(r)
+	tr := tar.NewReader(&limitedReader{r: r, n: maxBytes + int64(maxFiles)*tarOverheadPerFile})
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -221,8 +298,8 @@ func extract(r io.Reader, dir string) (Result, error) {
 		if name == "." {
 			continue
 		}
-		if path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") || strings.ContainsRune(name, 0) {
-			return Result{}, fmt.Errorf("arm: archive entry %q escapes the arm", clip(h.Name, 120))
+		if unsafeName(name) {
+			return Result{}, fmt.Errorf("%w: %q", ErrUnsafeEntry, clip(h.Name, 120))
 		}
 		target := filepath.Join(dir, filepath.FromSlash(name))
 		switch h.Typeflag {
@@ -233,7 +310,7 @@ func extract(r io.Reader, dir string) (Result, error) {
 		case tar.TypeReg:
 			res.Files++
 			total += h.Size
-			if res.Files > MaxFiles || total > MaxBytes {
+			if res.Files > maxFiles || total > maxBytes {
 				return Result{}, ErrTooLarge
 			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
