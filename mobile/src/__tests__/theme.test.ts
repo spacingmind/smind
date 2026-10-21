@@ -157,11 +157,7 @@ describe('WCAG contrast (Zai tokens)', () => {
       for (const bg of [theme.background, theme.card]) {
         const r = contrast(theme.foregroundSubtle, bg);
         ratios.push(`${theme.mode} foregroundSubtle/${bg === theme.background ? 'background' : 'card'} ${r.toFixed(2)}`);
-        // REPORTED: dark foregroundSubtle (rgba(212,212,212,0.6)) on card #2b2b2b
-        // measures 4.44:1, just under 4.5. Token left as specified in the brief;
-        // threshold relaxed to 4.4 for that one pair rather than changing the token.
-        const floor = theme.mode === 'dark' && bg === theme.card ? 4.4 : 4.5;
-        expect(r).toBeGreaterThanOrEqual(floor);
+        expect(r).toBeGreaterThanOrEqual(4.5);
       }
     }
   });

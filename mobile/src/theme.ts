@@ -178,8 +178,8 @@ export const darkTheme: AppTheme = {
   border: 'rgba(255, 255, 255, 0.1)',
   borderStrong: 'rgba(255, 255, 255, 0.15)',
   foreground: '#d4d4d4',
-  foregroundMuted: 'rgba(212, 212, 212, 0.6)',
-  foregroundSubtle: 'rgba(212, 212, 212, 0.6)',
+  foregroundMuted: 'rgba(212, 212, 212, 0.64)', // 0.64 (ZCode: 0.6): keeps AA (4.85:1) on the card too
+  foregroundSubtle: 'rgba(212, 212, 212, 0.64)',
   foregroundSubtlest: 'rgba(212, 212, 212, 0.3)',
   primary: '#ffffff',
   primaryForeground: '#000000',
