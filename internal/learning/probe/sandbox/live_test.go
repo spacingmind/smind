@@ -37,7 +37,7 @@ func TestLive_CanaryAttests(t *testing.T) {
 	if err := os.Mkdir(priv, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	l, err := Prepare(Config{ArmDir: c.ArmDir, PrivateDir: priv, RealCLI: cli})
+	l, err := Prepare(Config{ArmDir: c.ArmDir, ProjectionDir: c.ProjectionDir, PrivateDir: priv, RealCLI: cli})
 	if err != nil {
 		t.Fatal(err)
 	}

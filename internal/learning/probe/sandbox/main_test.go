@@ -20,6 +20,8 @@ import (
 //	SANDBOX_FAKE_INIT   JSON object: the init system message body
 //	SANDBOX_FAKE_RESULT JSON object: extra result message fields
 //	SANDBOX_FAKE_WRITES JSON object path->content written when the prompt arrives
+//	SANDBOX_FAKE_CALLS  JSON list of fakeCall: Bash tool_use + tool_result pairs to stream
+//	SANDBOX_FAKE_TEXT   an assistant text message to stream
 const fakeCLIEnv = "SANDBOX_FAKE_CLI"
 
 func TestMain(m *testing.M) {
@@ -57,6 +59,8 @@ func runFakeCLI() {
 	for p, c := range writes {
 		_ = os.WriteFile(p, []byte(c), 0o600)
 	}
+	calls := []fakeCall{}
+	_ = json.Unmarshal([]byte(os.Getenv("SANDBOX_FAKE_CALLS")), &calls)
 	init := map[string]any{"type": "system", "subtype": "init", "session_id": "s1"}
 	var body map[string]any
 	if json.Unmarshal([]byte(os.Getenv("SANDBOX_FAKE_INIT")), &body) == nil {
@@ -65,6 +69,16 @@ func runFakeCLI() {
 		}
 	}
 	out(init)
+	for _, c := range calls {
+		out(map[string]any{"type": "assistant", "session_id": "s1", "message": map[string]any{"role": "assistant", "model": "m",
+			"content": []any{map[string]any{"type": "tool_use", "id": c.ID, "name": "Bash", "input": map[string]any{"command": c.Command}}}}})
+		out(map[string]any{"type": "user", "session_id": "s1", "message": map[string]any{"role": "user",
+			"content": []any{map[string]any{"type": "tool_result", "tool_use_id": c.ID, "content": c.Result, "is_error": c.IsError}}}})
+	}
+	if t := os.Getenv("SANDBOX_FAKE_TEXT"); t != "" {
+		out(map[string]any{"type": "assistant", "session_id": "s1", "message": map[string]any{"role": "assistant", "model": "m",
+			"content": []any{map[string]any{"type": "text", "text": t}}}})
+	}
 	res := map[string]any{"type": "result", "subtype": "success", "session_id": "s1", "result": "ok", "num_turns": 2}
 	var extra map[string]any
 	if json.Unmarshal([]byte(os.Getenv("SANDBOX_FAKE_RESULT")), &extra) == nil {
@@ -96,4 +110,10 @@ func fakeCLI(t *testing.T, dir string, env map[string]string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// fakeCall is one Bash call the stand-in streams.
+type fakeCall struct {
+	ID, Command, Result string
+	IsError             bool
 }
