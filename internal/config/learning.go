@@ -74,12 +74,29 @@ type LearningConfig struct {
 	Probe LearningProbe `yaml:"probe"`
 }
 
-// LearningProbe holds the stage-0 prevalence scan knobs (ADR-0037).
+// LearningProbe holds the learning-probe knobs (ADR-0037): the prevalence
+// scan plus the run budgets, caps and retention of the probe itself.
 type LearningProbe struct {
 	// PrevalenceDays is how far back the scan looks. Default 30.
 	PrevalenceDays int `yaml:"prevalenceDays"`
 	// PrevalenceMaxEvents caps the run events one scan reads. Default 20000.
 	PrevalenceMaxEvents int `yaml:"prevalenceMaxEvents"`
+	// PerProbeBudgetUSD caps the spend of a single probe. Default 1.50.
+	PerProbeBudgetUSD float64 `yaml:"perProbeBudgetUSD"`
+	// DailyBudgetUSD caps all probes of a workspace per day. Default 3.00.
+	DailyBudgetUSD float64 `yaml:"dailyBudgetUSD"`
+	// QuotaSkipPercent is the account-quota threshold, 1..100: a probe is
+	// ineligible once the cached quota use is at or above it. An unknown or
+	// missing quota does not skip a probe. Default 80.
+	QuotaSkipPercent int `yaml:"quotaSkipPercent"`
+	// ArmTimeoutMinutes bounds one probe arm. Default 15.
+	ArmTimeoutMinutes int `yaml:"armTimeoutMinutes"`
+	// MaxTurnsCap bounds the turns of one probe arm. Default 80.
+	MaxTurnsCap int `yaml:"maxTurnsCap"`
+	// RetentionDays is how long decided probes are kept. Default 14.
+	RetentionDays int `yaml:"retentionDays"`
+	// OutputCapKB caps one arm's output. Default 256.
+	OutputCapKB int `yaml:"outputCapKB"`
 }
 
 // LearningSimilarity holds the near-duplicate thresholds: at/above Duplicate
@@ -123,7 +140,17 @@ func DefaultLearning() LearningConfig {
 		Similarity:             LearningSimilarity{Duplicate: 0.85, Possible: 0.60},
 		ReflectorModel:         DefaultHaikuModel,
 		CuratorModel:           DefaultHaikuModel,
-		Probe:                  LearningProbe{PrevalenceDays: 30, PrevalenceMaxEvents: 20000},
+		Probe: LearningProbe{
+			PrevalenceDays:      30,
+			PrevalenceMaxEvents: 20000,
+			PerProbeBudgetUSD:   1.50,
+			DailyBudgetUSD:      3.00,
+			QuotaSkipPercent:    80,
+			ArmTimeoutMinutes:   15,
+			MaxTurnsCap:         80,
+			RetentionDays:       14,
+			OutputCapKB:         256,
+		},
 	}
 }
 
@@ -151,6 +178,10 @@ func (c LearningConfig) Validate() error {
 		{"prefaceBudgetBytes", c.PrefaceBudgetBytes},
 		{"probe.prevalenceDays", c.Probe.PrevalenceDays},
 		{"probe.prevalenceMaxEvents", c.Probe.PrevalenceMaxEvents},
+		{"probe.armTimeoutMinutes", c.Probe.ArmTimeoutMinutes},
+		{"probe.maxTurnsCap", c.Probe.MaxTurnsCap},
+		{"probe.retentionDays", c.Probe.RetentionDays},
+		{"probe.outputCapKB", c.Probe.OutputCapKB},
 	} {
 		if kv.val < 1 {
 			return fmt.Errorf("learning.%s must be >= 1, got %d", kv.key, kv.val)
@@ -163,6 +194,15 @@ func (c LearningConfig) Validate() error {
 	}
 	if c.DailyBudgetUSD <= 0 {
 		return fmt.Errorf("learning.dailyBudgetUSD must be > 0, got %v", c.DailyBudgetUSD)
+	}
+	if p := c.Probe; p.PerProbeBudgetUSD <= 0 {
+		return fmt.Errorf("learning.probe.perProbeBudgetUSD must be > 0, got %v", p.PerProbeBudgetUSD)
+	} else if p.DailyBudgetUSD <= 0 {
+		return fmt.Errorf("learning.probe.dailyBudgetUSD must be > 0, got %v", p.DailyBudgetUSD)
+	} else if p.PerProbeBudgetUSD > p.DailyBudgetUSD {
+		return fmt.Errorf("learning.probe.perProbeBudgetUSD (%v) must be <= learning.probe.dailyBudgetUSD (%v)", p.PerProbeBudgetUSD, p.DailyBudgetUSD)
+	} else if p.QuotaSkipPercent < 1 || p.QuotaSkipPercent > 100 {
+		return fmt.Errorf("learning.probe.quotaSkipPercent must be in 1..100, got %d", p.QuotaSkipPercent)
 	}
 	if s := c.Similarity; !(s.Possible > 0 && s.Duplicate > s.Possible && s.Duplicate <= 1) {
 		return fmt.Errorf("learning.similarity needs 0 < possible < duplicate <= 1, got duplicate %v, possible %v", s.Duplicate, s.Possible)

@@ -165,6 +165,14 @@ func (e *Executor) wait(ctx context.Context, runID string) error {
 	}
 }
 
+// SystemTask returns the workspace's hidden system task, creating it on
+// first use with its cwd under <home>/learning/cwd/<ws>. It runs nothing and
+// does not clean the cwd: callers that start their own runs under the task
+// (the learning probe) use it only for the task id.
+func (e *Executor) SystemTask(workspaceID int64) (store.Task, error) {
+	return e.systemTask(workspaceID, e.cwdFor(workspaceID))
+}
+
 func (e *Executor) acquire(workspaceID int64) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -173,6 +181,17 @@ func (e *Executor) acquire(workspaceID int64) bool {
 	}
 	e.busy[workspaceID] = true
 	return true
+}
+
+// Acquire takes the workspace's single executor slot for a caller that runs
+// its own work in the shared system-task chat (the learning probe). ok=false
+// means a run already holds it. release is idempotent.
+func (e *Executor) Acquire(workspaceID int64) (release func(), ok bool) {
+	if !e.acquire(workspaceID) {
+		return nil, false
+	}
+	var once sync.Once
+	return func() { once.Do(func() { e.release(workspaceID) }) }, true
 }
 
 func (e *Executor) release(workspaceID int64) {
