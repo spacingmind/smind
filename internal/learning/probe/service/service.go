@@ -60,6 +60,7 @@ type running struct {
 	proposal int64
 	cancel   context.CancelFunc
 	done     chan struct{}
+	release  func() // the executor slot, nil when none was taken
 	// guarded by Service.mu
 	cancelled bool
 	runID     string // the arm run executing now, "" between arms
@@ -119,6 +120,22 @@ func (s *Service) Start(ctx context.Context, proposalID int64, quick bool) (stor
 	if !pl.est.Eligible {
 		return store.LearningProbe{}, &IneligibleError{Reasons: pl.est.Reasons}
 	}
+	// The probe's arms run in the workspace's system-task chat, which holds
+	// one run at a time: keep reflect and curate out for the whole probe.
+	release := func() {}
+	if s.d.Exec != nil {
+		rel, ok := s.d.Exec.Acquire(pl.ws.ID)
+		if !ok {
+			return store.LearningProbe{}, &IneligibleError{Reasons: []Reason{reason(ReasonBusy, "A learning job is running for this workspace.")}}
+		}
+		release = rel
+	}
+	handedOver := false
+	defer func() {
+		if !handedOver {
+			release()
+		}
+	}()
 	probe, err := s.d.Store.CreateProbe(store.LearningProbe{
 		WorkspaceID: pl.ws.ID, ProposalID: proposalID, Quick: quick, Status: statusQueued, EstUSD: pl.est.EstUSD,
 		SourceRunID: pl.run.ID, BaseSHA: *pl.run.BaseSHA, Contrast: "{}", StartedAt: s.d.Now().UTC(),
@@ -134,11 +151,12 @@ func (s *Service) Start(ctx context.Context, proposalID int64, quick bool) (stor
 	}
 
 	runCtx, cancel := context.WithCancel(s.ctx)
-	rn := &running{probeID: probe.ID, proposal: proposalID, cancel: cancel, done: make(chan struct{})}
+	rn := &running{probeID: probe.ID, proposal: proposalID, cancel: cancel, done: make(chan struct{}), release: release}
 	s.mu.Lock()
 	s.active, s.starting = rn, false
 	started = true
 	s.wg.Add(1)
+	handedOver = true
 	s.mu.Unlock()
 	if s.d.Notify != nil {
 		s.d.Notify.ProbeStarted(pl.ws.ID, probe.ID, proposalID)
@@ -213,6 +231,9 @@ func (s *Service) run(ctx context.Context, rn *running, pl plan) {
 		s.mu.Lock()
 		s.active = nil
 		s.mu.Unlock()
+		if rn.release != nil {
+			rn.release()
+		}
 		close(rn.done)
 		rn.cancel()
 	}()

@@ -202,6 +202,11 @@ func (s *Service) assessInner(proposalID int64, quick, skipInProc bool) (plan, e
 	if busy {
 		add(ReasonBusy, "Another probe is already running.")
 	}
+	if job, err := st.HasActiveLearningJob(ws.ID); err != nil {
+		return plan{}, err
+	} else if job {
+		add(ReasonBusy, "A learning job is running for this workspace.")
+	}
 	est.Eligible = len(est.Reasons) == 0
 	pl.est = est
 	return pl, nil

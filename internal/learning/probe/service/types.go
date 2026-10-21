@@ -129,10 +129,13 @@ type Notifier interface {
 	ProbeFailed(workspaceID, probeID, proposalID int64, reason string)
 }
 
-// SystemTasker yields the workspace's hidden system task (satisfied by
-// executor.Executor).
+// SystemTasker yields the workspace's hidden system task and its single
+// executor slot (satisfied by executor.Executor). Probe arms and reflect or
+// curate runs share the system task's chat, so a probe holds the slot for
+// its whole duration.
 type SystemTasker interface {
 	SystemTask(workspaceID int64) (store.Task, error)
+	Acquire(workspaceID int64) (release func(), ok bool)
 }
 
 // Deps are the service's collaborators.

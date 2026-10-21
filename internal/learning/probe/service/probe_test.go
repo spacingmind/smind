@@ -691,3 +691,96 @@ func TestRecover_FailsInterruptedAndSweeps(t *testing.T) {
 		t.Fatal("probe still active after Recover")
 	}
 }
+
+// slotExec is a SystemTasker whose executor slot the test can observe.
+type slotExec struct {
+	mu       sync.Mutex
+	held     bool
+	acquires int
+	releases int
+	refuse   bool
+}
+
+func (e *slotExec) SystemTask(int64) (store.Task, error) { return store.Task{}, nil }
+func (e *slotExec) Acquire(int64) (func(), bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.refuse || e.held {
+		return nil, false
+	}
+	e.held = true
+	e.acquires++
+	return func() { e.mu.Lock(); e.held = false; e.releases++; e.mu.Unlock() }, true
+}
+func (e *slotExec) isHeld() bool { e.mu.Lock(); defer e.mu.Unlock(); return e.held }
+
+func TestProbe_BusyWhileLearningJobRuns(t *testing.T) {
+	t.Parallel()
+	p := newPfx(t, nil)
+	if _, err := p.st.CreateLearningJob(store.LearningJob{WorkspaceID: p.ws.ID, Kind: "reflect", TriggerKind: "tail", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	est, err := p.svc.Estimate(context.Background(), p.prop.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if est.Eligible || !hasCode(est, ReasonBusy) {
+		t.Fatalf("estimate = %+v, want busy", est)
+	}
+	var msg string
+	for _, r := range est.Reasons {
+		if r.Code == ReasonBusy {
+			msg = r.Message
+		}
+	}
+	if msg != "A learning job is running for this workspace." {
+		t.Fatalf("message = %q", msg)
+	}
+	_, err = p.svc.Start(context.Background(), p.prop.ID, false)
+	var ie *IneligibleError
+	if !asIneligible(err, &ie) || ie.Code() != ReasonBusy {
+		t.Fatalf("Start err = %v, want busy", err)
+	}
+	if n, _, _ := p.countRows(); n != 0 {
+		t.Fatalf("a probe row was written (%d)", n)
+	}
+}
+
+func TestProbe_HoldsExecutorSlotForItsDuration(t *testing.T) {
+	t.Parallel()
+	ex := &slotExec{}
+	p := newPfx(t, func(d *Deps) { d.Exec = ex })
+	p.arms.behave = func(armJob, int) fakeArm { return fakeArm{block: true} }
+	pr := p.start(false)
+	<-p.arms.started
+	if !ex.isHeld() {
+		t.Fatal("the slot is not held while the probe runs")
+	}
+	_ = p.svc.Cancel(p.prop.ID)
+	p.wait(pr.ID)
+	if ex.isHeld() || ex.releases != 1 {
+		t.Fatalf("slot held=%v releases=%d after the probe ended", ex.isHeld(), ex.releases)
+	}
+
+	// A taken slot is busy and writes nothing.
+	q := newPfx(t, func(d *Deps) { d.Exec = &slotExec{refuse: true} })
+	_, err := q.svc.Start(context.Background(), q.prop.ID, false)
+	var ie *IneligibleError
+	if !asIneligible(err, &ie) || ie.Code() != ReasonBusy {
+		t.Fatalf("Start with the slot taken = %v, want busy", err)
+	}
+	if n, _, _ := q.countRows(); n != 0 {
+		t.Fatalf("a probe row was written (%d)", n)
+	}
+	// And a failed Start (ineligible later) frees the slot it took.
+	ex3 := &slotExec{}
+	r := newPfx(t, func(d *Deps) { d.Exec = ex3 })
+	r.svc.canaryRun = func(context.Context, int64) (sandbox.Attestation, float64, error) {
+		return sandbox.Attestation{}, 0, fmt.Errorf("%w: no", sandbox.ErrCanaryFailed)
+	}
+	pr3 := r.start(false)
+	r.wait(pr3.ID)
+	if ex3.isHeld() {
+		t.Fatal("slot leaked after a failed probe")
+	}
+}

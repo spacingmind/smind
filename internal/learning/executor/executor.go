@@ -183,6 +183,17 @@ func (e *Executor) acquire(workspaceID int64) bool {
 	return true
 }
 
+// Acquire takes the workspace's single executor slot for a caller that runs
+// its own work in the shared system-task chat (the learning probe). ok=false
+// means a run already holds it. release is idempotent.
+func (e *Executor) Acquire(workspaceID int64) (release func(), ok bool) {
+	if !e.acquire(workspaceID) {
+		return nil, false
+	}
+	var once sync.Once
+	return func() { once.Do(func() { e.release(workspaceID) }) }, true
+}
+
 func (e *Executor) release(workspaceID int64) {
 	e.mu.Lock()
 	delete(e.busy, workspaceID)
