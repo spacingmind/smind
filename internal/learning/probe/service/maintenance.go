@@ -2,6 +2,7 @@ package probesvc
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -20,13 +21,14 @@ const (
 // Recover runs once at daemon start, when no probe can be live: probes left
 // queued or running are failed, leftover arm and launch directories and
 // projections are removed, and decided probes past retention are purged.
-func (s *Service) Recover(_ context.Context) {
+func (s *Service) Recover(ctx context.Context) {
 	st := s.d.Store
 	if n, err := st.FailInterruptedProbes("interrupted by restart"); err != nil {
 		slog.Warn("learning probe: fail interrupted probes", "err", err)
 	} else if n > 0 {
 		slog.Info("learning probe: failed interrupted probes", "count", n)
 	}
+	s.killStaleLaunches(ctx)
 	if _, err := arm.SweepOrphans(s.armsRoot(), 0, s.d.Now()); err != nil {
 		slog.Warn("learning probe: sweep arm dirs", "err", err)
 	}
@@ -57,9 +59,45 @@ func (s *Service) Janitor(ctx context.Context) {
 	}
 }
 
+// killStaleLaunches ends the processes a crashed daemon left behind: every
+// launch directory's pidfile names an arm (or canary) CLI whose process
+// group is killed before the directory is removed. Best effort: a pid that
+// is no longer this daemon's arm CLI is left alone.
+func (s *Service) killStaleLaunches(ctx context.Context) {
+	ents, err := os.ReadDir(s.launchRoot())
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		dir := filepath.Join(s.launchRoot(), e.Name())
+		if fi, err := os.Lstat(dir); err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+			continue
+		}
+		pidFile, armDir := filepath.Join(dir, "claude.pid"), filepath.Join(s.armsRoot(), arm.DirPrefix+e.Name())
+		if _, err := os.Stat(filepath.Join(dir, "private", "claude.pid")); err == nil { // the canary's layout
+			pidFile, armDir = filepath.Join(dir, "private", "claude.pid"), filepath.Join(dir, "home", "canary-arm")
+		}
+		if resolved, err := filepath.EvalSymlinks(armDir); err == nil {
+			armDir = resolved
+		}
+		switch err := arm.KillTree(ctx, pidFile, armDir, stopWait/2); {
+		case err == nil, errors.Is(err, arm.ErrNotArmProcess):
+		default:
+			slog.Warn("learning probe: stale arm processes", "launch", e.Name(), "err", err)
+		}
+	}
+}
+
 // sweepStale removes arm and launch directories older than an hour that no
-// running probe could own.
+// running probe could own. It does nothing while a probe runs or starts: its
+// directories are in use and a sweep could never tell them from orphans.
 func (s *Service) sweepStale() {
+	s.mu.Lock()
+	busy := s.starting || s.active != nil
+	s.mu.Unlock()
+	if busy {
+		return
+	}
 	now := s.d.Now()
 	if _, err := arm.SweepOrphans(s.armsRoot(), orphanAge, now); err != nil {
 		slog.Warn("learning probe: sweep arm dirs", "err", err)
