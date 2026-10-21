@@ -110,3 +110,12 @@ export function armStatusLabel(status: ProbeArmStatus): string {
 export function isProbeActive(status: ProbeStatus | undefined): boolean {
   return status === "queued" || status === "running";
 }
+
+/**
+ * Elapsed time that keeps moving between polls: `baseMs` is what the daemon reported when the data
+ * arrived (`updatedAt`, the query's `dataUpdatedAt`), and the hook adds the local time since then,
+ * re-rendering once a second while `active`. Inactive: the reported value, unchanged.
+ */
+export function elapsedSince(baseMs: number, updatedAt: number, now: number): number {
+  return baseMs + Math.max(0, now - updatedAt);
+}

@@ -1,11 +1,13 @@
 import { act } from "react";
 import { screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { arm, runningProbe } from "@/test/probe-fixtures";
 import { flush, renderProbeCard } from "@/test/probe-render";
 
 describe("ProbeCard running", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("shows the three rows with status, elapsed, cost so far and a run link", async () => {
     await renderProbeCard({ probe: runningProbe() });
     const rows = screen.getAllByTestId("probe-arm");
@@ -30,6 +32,19 @@ describe("ProbeCard running", () => {
     // Runs known to the card are shown as a labelled run reference.
     expect(a.textContent).toContain("run run-a");
     expect(screen.getByTestId("probe-running").textContent).toContain("2m 10s elapsed · $0.6200 of about USD 1.4");
+  });
+
+  it("keeps the elapsed time moving between polls (footer and the running arm, not the finished one)", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    await renderProbeCard({ probe: runningProbe() });
+    expect(screen.getByTestId("probe-running").textContent).toContain("2m 10s elapsed");
+    await act(async () => {
+      vi.advanceTimersByTime(1000); // below the 2 s refetch: only the local tick fires
+    });
+    expect(screen.getByTestId("probe-running").textContent).toContain("2m 11s elapsed");
+    const [a, a2] = screen.getAllByTestId("probe-arm") as [HTMLElement, HTMLElement];
+    expect(within(a2).getByTestId("probe-arm-elapsed").textContent).toBe("59s");
+    expect(within(a).getByTestId("probe-arm-elapsed").textContent).toBe("1m 12s");
   });
 
   it("announces progress politely and offers no start button", async () => {

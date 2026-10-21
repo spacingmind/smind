@@ -19,7 +19,8 @@ describe("ProbeCard error", () => {
 
   it("a failed read shows the message and Retry re-reads the probe", async () => {
     const v = await renderProbeCard({ probe: new Error("connection lost") });
-    expect(screen.getByTestId("probe-error").textContent).toContain("The probe could not be read: connection lost");
+    expect(screen.getByTestId("probe-error").textContent).toContain("The probe could not be loaded.");
+    expect(screen.getByTestId("probe-error").textContent).not.toContain("connection lost");
     const before = v.calls.filter((c) => c.method === "learning.probe.get").length;
     await act(async () => screen.getByTestId("probe-retry").click());
     await flush();

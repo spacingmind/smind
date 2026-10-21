@@ -9,8 +9,9 @@ import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { LoadingRows } from "@/components/ui/loading-rows";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useCancelProbe, useProbe, useProbeEstimate, useStartProbe } from "@/hooks/use-learning";
+import { useNow } from "@/hooks/use-now";
 import { Icons } from "@/lib/icons";
-import { ARM_LABELS, formatCostUSD, formatDurationMs, formatEstimateUSD, isProbeActive } from "@/lib/probe-format";
+import { ARM_LABELS, elapsedSince, formatCostUSD, formatDurationMs, formatEstimateUSD, isProbeActive } from "@/lib/probe-format";
 import type { ProbeEstimate, ProbeView } from "@/lib/probe-types";
 
 type RunMode = "full" | "quick";
@@ -74,13 +75,16 @@ function ProbeStart({ id, workspaceId, again, quick, onQuick }: { id: number; wo
   );
 }
 
-function ProbeRunning({ probe, onCancel, cancelling }: { probe: ProbeView; onCancel: () => void; cancelling: boolean }) {
+function ProbeRunning({ probe, updatedAt, onCancel, cancelling }: { probe: ProbeView; updatedAt: number; onCancel: () => void; cancelling: boolean }) {
+  // The daemon reports elapsed time only when the query refetches (events, 2 s safety net): tick locally in between.
+  const now = useNow(1000);
+  const arms = probe.arms.map((a) => (a.status === "running" ? { ...a, elapsedMs: elapsedSince(a.elapsedMs, updatedAt, now) } : a));
   return (
     <div className="flex flex-col gap-2" data-testid="probe-running" aria-live="polite">
-      <ProbeArmRows arms={probe.arms} workspaceId={probe.workspaceId} />
+      <ProbeArmRows arms={arms} workspaceId={probe.workspaceId} />
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-ui-sm text-foreground-muted">
-          {formatDurationMs(probe.elapsedMs)} elapsed · {formatCostUSD(probe.costUSD)} of about {formatEstimateUSD(probe.estUSD)}
+          {formatDurationMs(elapsedSince(probe.elapsedMs, updatedAt, now))} elapsed · {formatCostUSD(probe.costUSD)} of about {formatEstimateUSD(probe.estUSD)}
         </span>
         <Button type="button" size="sm" variant="ghost" disabled={cancelling} data-testid="probe-cancel" onClick={onCancel}>
           Cancel probe
@@ -166,14 +170,16 @@ export function ProbeCard({ id, workspaceId }: { id: number; workspaceId: number
   } else if (probe.error) {
     body = (
       <div className="flex flex-wrap items-center gap-2" data-testid="probe-error">
-        <Quiet role="alert">The probe could not be read: {probe.error.message}</Quiet>
+        <Quiet role="alert">
+          <span title={probe.error.message}>The probe could not be loaded.</span>
+        </Quiet>
         <Button type="button" size="sm" variant="ghost" data-testid="probe-retry" onClick={() => void probe.refetch()}>
           <Icons.retry aria-hidden /> Retry
         </Button>
       </div>
     );
   } else if (p && isProbeActive(p.status)) {
-    body = <ProbeRunning probe={p} cancelling={cancel.isPending} onCancel={() => cancel.mutate({ id, workspaceId })} />;
+    body = <ProbeRunning probe={p} updatedAt={probe.dataUpdatedAt} cancelling={cancel.isPending} onCancel={() => cancel.mutate({ id, workspaceId })} />;
   } else {
     const rerun = <ProbeStart id={id} workspaceId={workspaceId} again={p != null} quick={quick} onQuick={setQuick} />;
     if (!p) {
