@@ -20,10 +20,10 @@ describe("ProbeCard running", () => {
     const [a, a2, b] = rows as [HTMLElement, HTMLElement, HTMLElement];
     expect(within(a).getByTestId("probe-arm-status").textContent).toBe("Done");
     expect(within(a).getByTestId("probe-arm-elapsed").textContent).toBe("1m 12s");
-    expect(within(a).getByTestId("probe-arm-cost").textContent).toBe("$0.4100");
+    expect(within(a).getByTestId("probe-arm-cost").textContent).toBe("$0.41");
     expect(within(a2).getByTestId("probe-arm-status").textContent).toBe("Running");
     expect(within(a2).getByTestId("probe-arm-elapsed").textContent).toBe("58s");
-    expect(within(a2).getByTestId("probe-arm-cost").textContent).toBe("$0.2100");
+    expect(within(a2).getByTestId("probe-arm-cost").textContent).toBe("$0.21");
     // A pending arm has not started: no elapsed, no cost, no run to open.
     expect(within(b).getByTestId("probe-arm-status").textContent).toBe("Waiting");
     expect(within(b).getByTestId("probe-arm-elapsed").textContent).toBe("–");

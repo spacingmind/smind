@@ -6,7 +6,7 @@ import {
   formatCostUSD,
   formatDelta,
   formatDurationMs,
-  formatEstimateUSD,
+  formatMoney,
   formatMetric,
   formatSpendLine,
   isProbeActive,
@@ -32,10 +32,10 @@ describe("probe formatting", () => {
   });
 
   it("formats the estimate for the button", () => {
-    expect(formatEstimateUSD(1.44)).toBe("$1.44");
-    expect(formatEstimateUSD(0.96)).toBe("$0.96");
-    expect(formatEstimateUSD(0.0013)).toBe("$0.0013");
-    expect(formatEstimateUSD(0)).toBe("$0.00");
+    expect(formatMoney(1.44)).toBe("$1.44");
+    expect(formatMoney(0.96)).toBe("$0.96");
+    expect(formatMoney(0.0013)).toBe("$0.0013");
+    expect(formatMoney(0)).toBe("$0.00");
   });
 
   it("formats bytes and metrics in their units", () => {

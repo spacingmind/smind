@@ -20,8 +20,8 @@ export function formatCostUSD(usd: number): string {
   return n < 1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
 }
 
-/** One dollar format for every amount outside the metric table: "$1.40", "$0.45", and "$0.0013" for sub-cent costs. */
-export function formatEstimateUSD(usd: number): string {
+/** One dollar format for every amount outside the metric table (button, footer, arm rows, cancelled note): "$1.40", "$0.45", and "$0.0013" for sub-cent costs. */
+export function formatMoney(usd: number): string {
   const n = Number.isFinite(usd) ? Math.max(0, usd) : 0;
   return n > 0 && n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
 }
@@ -32,8 +32,8 @@ export function formatEstimateUSD(usd: number): string {
  */
 export function formatSpendLine(costUSD: number, estUSD: number): { text: string; over: boolean } {
   const over = Number.isFinite(costUSD) && Number.isFinite(estUSD) && estUSD > 0 && costUSD > estUSD;
-  const spent = formatEstimateUSD(costUSD);
-  const est = formatEstimateUSD(estUSD);
+  const spent = formatMoney(costUSD);
+  const est = formatMoney(estUSD);
   return { over, text: over ? `${spent} so far, over the ${est} estimate` : `${spent} so far (estimate ${est})` };
 }
 

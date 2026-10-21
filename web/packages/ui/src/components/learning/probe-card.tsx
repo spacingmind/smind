@@ -11,7 +11,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useCancelProbe, useProbe, useProbeEstimate, useStartProbe } from "@/hooks/use-learning";
 import { useNow } from "@/hooks/use-now";
 import { Icons } from "@/lib/icons";
-import { ARM_LABELS, elapsedSince, formatDurationMs, formatEstimateUSD, formatSpendLine, isProbeActive, OVER_ESTIMATE_HINT } from "@/lib/probe-format";
+import { ARM_LABELS, elapsedSince, formatDurationMs, formatMoney, formatSpendLine, isProbeActive, OVER_ESTIMATE_HINT } from "@/lib/probe-format";
 import type { ProbeEstimate, ProbeView } from "@/lib/probe-types";
 
 type RunMode = "full" | "quick";
@@ -58,7 +58,7 @@ function ProbeStart({ id, workspaceId, again, quick, onQuick }: { id: number; wo
           onClick={() => start.mutate({ id, workspaceId, quick })}
         >
           {start.isPending && <Icons.spinner className="animate-spin" aria-hidden />}
-          {e.eligible ? `${label} (about ${formatEstimateUSD(e.estUSD)}, about ${e.expectedMinutes} min)` : label}
+          {e.eligible ? `${label} (about ${formatMoney(e.estUSD)}, about ${e.expectedMinutes} min)` : label}
         </Button>
       </div>
       {e.reasons.length > 0 && (
@@ -188,7 +188,7 @@ export function ProbeCard({ id, workspaceId }: { id: number; workspaceId: number
     } else if (p.status === "cancelled") {
       body = (
         <div className="flex flex-col gap-3" data-testid="probe-cancelled">
-          <Quiet>Probe cancelled after {formatDurationMs(p.elapsedMs)}; {formatEstimateUSD(p.costUSD)} was spent. No verdict.</Quiet>
+          <Quiet>Probe cancelled after {formatDurationMs(p.elapsedMs)}; {formatMoney(p.costUSD)} was spent. No verdict.</Quiet>
           {rerun}
         </div>
       );
