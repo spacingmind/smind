@@ -93,6 +93,9 @@ func (s *Service) view(p store.LearningProbe, full bool) (View, error) {
 		verdict := p.Verdict
 		v.Verdict = &verdict
 	}
+	if v.VerdictReason == "" && p.Status == statusFailed && p.Error != "" {
+		v.VerdictReason = p.Error // belt and braces: a failed probe always says why
+	}
 	end := now
 	if p.FinishedAt != nil {
 		v.FinishedAt = p.FinishedAt.UTC().Format(time.RFC3339)

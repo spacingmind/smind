@@ -175,7 +175,7 @@ func TestProbe_ActiveAndFailInterrupted(t *testing.T) {
 		t.Fatalf("ActiveProbe() = %+v, %v, %v", act, ok, err)
 	}
 
-	n, err := s.FailInterruptedProbes("interrupted by restart")
+	n, err := s.FailInterruptedProbes("interrupted by restart", "The daemon restarted while this probe was running.")
 	if err != nil || n != 2 {
 		t.Fatalf("FailInterruptedProbes() = %d, %v; want 2", n, err)
 	}
@@ -183,6 +183,9 @@ func TestProbe_ActiveAndFailInterrupted(t *testing.T) {
 		got, _ := s.GetProbe(id)
 		if got.Status != "failed" || got.Error != "interrupted by restart" || got.FinishedAt == nil {
 			t.Fatalf("probe %d after fail = %+v", id, got)
+		}
+		if got.Verdict != "probe_failed" || got.VerdictReason != "The daemon restarted while this probe was running." {
+			t.Fatalf("probe %d: a failed probe must say why: verdict %q reason %q", id, got.Verdict, got.VerdictReason)
 		}
 	}
 	if got, _ := s.GetProbe(p2.ID); got.Status != "done" {
