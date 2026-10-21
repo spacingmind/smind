@@ -151,3 +151,29 @@ func TestSandboxSettings_SystemPathsIncludeClaudeTmp(t *testing.T) {
 		t.Error("the /private/tmp/claude-<uid> entry is missing")
 	}
 }
+
+func TestSandboxSettings_HomebrewIsNarrowed(t *testing.T) {
+	paths := SystemReadPaths()
+	have := map[string]bool{}
+	for _, p := range paths {
+		have[p] = true
+	}
+	if have["/opt/homebrew"] {
+		t.Error("the whole /opt/homebrew is readable")
+	}
+	for _, sub := range []string{"bin", "Cellar", "opt", "lib", "share", "include", "Library"} {
+		if !have["/opt/homebrew/"+sub] {
+			t.Errorf("/opt/homebrew/%s missing", sub)
+		}
+	}
+	raw, err := Settings("/nonexistent-p0/arm", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	allow := fsOf(decode(t, raw))["allowRead"].([]any)
+	for _, a := range allow {
+		if s, _ := a.(string); s == "/opt/homebrew" {
+			t.Error("allowRead holds the whole /opt/homebrew")
+		}
+	}
+}

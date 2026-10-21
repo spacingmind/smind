@@ -16,10 +16,13 @@ var ErrBadPath = errors.New("sandbox: unusable sandbox path")
 
 // SystemReadPaths are re-allowed under the read allow-list: what sh, git, cat,
 // ls, curl and the CLI's per-session tmp need on macOS. Paths that do not
-// exist are kept as given (the CLI ignores them).
+// exist are kept as given (the CLI ignores them). Homebrew is listed by its
+// formula-runtime subdirectories, never as a whole: /opt/homebrew also holds
+// the user's taps, caches and etc.
 func SystemReadPaths() []string {
 	return []string{"/usr", "/bin", "/sbin", "/System", "/Library", "/private/etc", "/dev",
-		"/opt/homebrew", "/private/var/db", "/private/var/select", "/private/tmp/claude-" + fmt.Sprint(os.Getuid())}
+		"/opt/homebrew/bin", "/opt/homebrew/Cellar", "/opt/homebrew/opt", "/opt/homebrew/lib", "/opt/homebrew/share",
+		"/opt/homebrew/include", "/opt/homebrew/Library", "/private/var/db", "/private/var/select", "/private/tmp/claude-" + fmt.Sprint(os.Getuid())}
 }
 
 // SystemSymlinkNodes are the top-level symlinks (/var -> private/var, ...) whose
