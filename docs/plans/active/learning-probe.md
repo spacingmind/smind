@@ -331,3 +331,14 @@ round's PASS overstated, and the hardening round re-measured or downgraded each 
 - AC16 launch shape + R3: `TestLive_UnderSMINDLaunchShape`, `TestLive_EnvIsAllowlist`, `TestSpike_LauncherScrubsEnv` — confirmed for the process env; the login needs `USER`.
 - AC17 attestation: no model-free method exists; one canary call per probe (~USD 0.002) — recorded in ADR-0037 §3.
 - AC18 verdict: **conditional PASS on macOS** (R1 write, R2, R3-env, read allow-list, built-ins as measured); PARTIAL items: keychain, `failIfUnavailable`, toolchains beyond sh/git/curl, Linux/Windows. The probe arm PR (4a) must not claim more than the addendum.
+
+### PR 4a — arm + sandbox (2026-10-22, claude 2.1.303, macOS arm64; macOS only)
+
+- AC19 `TestMaterialise_ExportsBaseSHA`, `_NoRemoteNoCredentialsNoRealGit`, `_RefusesDirtyOrUnknownSHA`, `_RealRepoUnchanged` (+ streaming limit, `.git` entries refused) — confirmed.
+- AC20 `TestSandboxSettings_Table`, `TestSandboxEnv_AllowlistOnly`, `_NoDaemonEnvLeak`, `TestSandboxLogs_NoSecrets`, `TestSandboxLaunch_OptionsShape` — confirmed. Differences from the AC text: allow-list read policy only (no deny-list mode); `GIT_CONFIG_*` and the connector opt-out are fixed launcher extras; the launcher execs through `/usr/bin/perl setpgrp` so the CLI leads a process group.
+- AC21 `TestDecider_AllowsInsideArmOnly`, `_BashOnlyInSandbox`, `_NeverPromptsHuman` — confirmed (belt and braces; the CLI's own refusal is the boundary, measured live incl. the symlink pivot).
+- AC22 `TestAttestation_OnlyFromPassingSelfCheck`, `TestAttestation_StaleDisablesProbe`, `TestProbeProjection_RequiresAttestation` — confirmed; live `TestLive_CanaryAttests` (four calls, USD 0.0020). `RunPromptProbe` also requires the attestation.
+- AC23 `TestProposedSkillOnlyDeliveredToProbeSandbox`, `TestProbeProjection_HashRecordedOnRun`, existing `TestProposedSkillNeverDelivered` — confirmed. (Hash recording on the arm's run row is the service's job, PR 4b.)
+- AC24 `TestArmCaps_TimeoutTurnsCostOutputEachEndArm`, `TestArmEnd_NoSurvivingChildProcess`, `TestArmEnd_ArmDirRemoved`, `TestStartupSweep_RemovesOrphanArmDirs` — confirmed; live `TestLiveProbe_ArmRunThroughRunPromptProbe` (USD 0.0014). The per-usage-event cap is not implementable (the CLI reports usage once, at the end): `--max-budget-usd` + the end-of-run meter instead (ADR addendum 2).
+- AC25 `TestTripwire_*` — confirmed (state changes only; denied attempts are metrics, ADR addendum 2). The tripwire is *wired* into the arm loop in PR 4b.
+- Live evidence of this PR (all gated, USD < 0.02 in total): keychain unreachable (2 calls, then re-measured with production settings, 1 call), built-in tools refuse a symlink pivot (2 calls), canary, arm run.
