@@ -52,14 +52,10 @@ export function ConnectionSheet({ open, onClose, onDisconnect, state }: Props) {
       <BottomSheet isPresented={open} onDismiss={onClose} snapPoints={['half']}>
         <View style={styles.content}>
           <List>
-            <ListItem>
-              <Text style={styles.rowLabel}>Status</Text>
-              <Text style={styles.rowValue}>{statusText(state)}</Text>
-            </ListItem>
-            <ListItem>
-              <Text style={styles.rowLabel}>Device</Text>
-              <Text style={styles.rowValue}>{deviceLabel}</Text>
-            </ListItem>
+            {/* expo-ui slots: the label is the row's headline, the value sits in the
+                trailing slot -- two distinct, spaced elements on web and native. */}
+            <ListItem trailing={<Text style={styles.rowValue}>{statusText(state)}</Text>}>Status</ListItem>
+            <ListItem trailing={<Text style={styles.rowValue}>{deviceLabel}</Text>}>Device</ListItem>
           </List>
           <TextButton label="Disconnect" tone="danger" onPress={() => { onClose(); onDisconnect(); }} style={styles.disconnect} />
         </View>
@@ -74,7 +70,6 @@ function makeStyles(theme: AppTheme) {
       gap: theme.spacing[4],
       paddingBottom: theme.spacing[4],
     },
-    rowLabel: { ...theme.type.small, color: theme.foregroundSubtle },
     rowValue: { ...theme.type.label, color: theme.foreground },
     disconnect: { alignSelf: 'flex-start' },
   });
