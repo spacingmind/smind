@@ -166,6 +166,22 @@ export interface ProposalDetail {
   merge?: { target: LearnedSkillView; similarity: number };
 }
 
+/** One failure/permission signature of a proposal and how often it was seen in the workspace (ADR-0037 S0). */
+export interface ProposalPrevalenceSignature {
+  kind: "failure_recovery" | "permission_denied";
+  tool: string;
+  label: string;
+  runs: number;
+  chats: number;
+  lastSeenAt?: string;
+  truncated: boolean;
+}
+
+export interface ProposalPrevalence {
+  windowDays: number;
+  signatures: ProposalPrevalenceSignature[];
+}
+
 export type ExportTarget = "repo" | "claude" | "agents" | "codex";
 
 export interface ExportSkillParams {

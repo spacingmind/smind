@@ -14,6 +14,7 @@ import (
 	"github.com/spacingmind/smind/internal/learning/approval"
 	"github.com/spacingmind/smind/internal/learning/export"
 	"github.com/spacingmind/smind/internal/learning/gate"
+	"github.com/spacingmind/smind/internal/learning/probe/prevalence"
 	learningservice "github.com/spacingmind/smind/internal/learning/service"
 	"github.com/spacingmind/smind/internal/skills"
 	"github.com/spacingmind/smind/internal/store"
@@ -87,6 +88,12 @@ type LearningTrigger interface {
 	Curate(ctx context.Context, workspaceID int64) error
 }
 
+// LearningPrevalence runs the read-only stage-0 prevalence scan (ADR-0037).
+// It is optional; without one the RPC reports "unavailable".
+type LearningPrevalence interface {
+	Scan(ctx context.Context, proposalID int64) (prevalence.Result, error)
+}
+
 // LearningConfig is the slice of config.Learning the RPCs need.
 type LearningConfig struct {
 	// Enabled is the global kill switch.
@@ -105,6 +112,8 @@ type LearningDeps struct {
 	// Config is read per request, so a settings toggle takes effect at once.
 	Config  func() LearningConfig
 	Trigger LearningTrigger
+	// Prevalence serves learning.proposals.prevalence.
+	Prevalence LearningPrevalence
 	// OnWorkspaceReset, when set, runs after learning.forget and after
 	// learning.setMode to off, so a stale projection never lingers (the
 	// daemon removes the workspace's learned-skill projection here).
@@ -143,6 +152,7 @@ func (h *learningHost) set(d LearningDeps) {
 		h.deps.Config = d.Config
 	}
 	h.deps.Trigger = d.Trigger
+	h.deps.Prevalence = d.Prevalence
 	h.deps.OnWorkspaceReset = d.OnWorkspaceReset
 	h.deps.Home = d.Home
 }
@@ -477,27 +487,28 @@ type workspaceParams struct {
 // learningHandlers returns the learning.* RPC table.
 func learningHandlers(h *learningHost) map[string]handlerFunc {
 	return map[string]handlerFunc{
-		"learning.status":            learningMethod(h, "learning.status", statusLearning),
-		"learning.setMode":           learningMethod(h, "learning.setMode", setModeLearning),
-		"learning.forget":            learningMethod(h, "learning.forget", forgetLearning),
-		"learning.skills.list":       learningMethod(h, "learning.skills.list", listSkillsLearning),
-		"learning.skills.get":        learningMethod(h, "learning.skills.get", getSkillLearning),
-		"learning.skills.pin":        skillAction(h, "learning.skills.pin", "pinned", (*approval.Service).Pin),
-		"learning.skills.unpin":      skillAction(h, "learning.skills.unpin", "unpinned", (*approval.Service).Unpin),
-		"learning.skills.disable":    skillAction(h, "learning.skills.disable", "disabled", (*approval.Service).Disable),
-		"learning.skills.enable":     skillAction(h, "learning.skills.enable", "enabled", (*approval.Service).Enable),
-		"learning.skills.archive":    skillAction(h, "learning.skills.archive", "archived", archive),
-		"learning.skills.restore":    skillAction(h, "learning.skills.restore", "restored", restore),
-		"learning.skills.delete":     skillAction(h, "learning.skills.delete", "deleted", (*approval.Service).Delete),
-		"learning.skills.undo":       learningMethod(h, "learning.skills.undo", undoLearning),
-		"learning.skills.export":     learningMethod(h, "learning.skills.export", exportLearning),
-		"learning.proposals.list":    learningMethod(h, "learning.proposals.list", listProposalsLearning),
-		"learning.proposals.get":     learningMethod(h, "learning.proposals.get", getProposalLearning),
-		"learning.proposals.approve": learningMethod(h, "learning.proposals.approve", approveLearning),
-		"learning.proposals.reject":  learningMethod(h, "learning.proposals.reject", rejectLearning),
-		"learning.jobs.list":         learningMethod(h, "learning.jobs.list", listJobsLearning),
-		"learning.reflect":           learningMethod(h, "learning.reflect", reflectLearning),
-		"learning.curate":            learningMethod(h, "learning.curate", curateLearning),
+		"learning.status":               learningMethod(h, "learning.status", statusLearning),
+		"learning.setMode":              learningMethod(h, "learning.setMode", setModeLearning),
+		"learning.forget":               learningMethod(h, "learning.forget", forgetLearning),
+		"learning.skills.list":          learningMethod(h, "learning.skills.list", listSkillsLearning),
+		"learning.skills.get":           learningMethod(h, "learning.skills.get", getSkillLearning),
+		"learning.skills.pin":           skillAction(h, "learning.skills.pin", "pinned", (*approval.Service).Pin),
+		"learning.skills.unpin":         skillAction(h, "learning.skills.unpin", "unpinned", (*approval.Service).Unpin),
+		"learning.skills.disable":       skillAction(h, "learning.skills.disable", "disabled", (*approval.Service).Disable),
+		"learning.skills.enable":        skillAction(h, "learning.skills.enable", "enabled", (*approval.Service).Enable),
+		"learning.skills.archive":       skillAction(h, "learning.skills.archive", "archived", archive),
+		"learning.skills.restore":       skillAction(h, "learning.skills.restore", "restored", restore),
+		"learning.skills.delete":        skillAction(h, "learning.skills.delete", "deleted", (*approval.Service).Delete),
+		"learning.skills.undo":          learningMethod(h, "learning.skills.undo", undoLearning),
+		"learning.skills.export":        learningMethod(h, "learning.skills.export", exportLearning),
+		"learning.proposals.list":       learningMethod(h, "learning.proposals.list", listProposalsLearning),
+		"learning.proposals.get":        learningMethod(h, "learning.proposals.get", getProposalLearning),
+		"learning.proposals.prevalence": learningMethod(h, "learning.proposals.prevalence", prevalenceLearning),
+		"learning.proposals.approve":    learningMethod(h, "learning.proposals.approve", approveLearning),
+		"learning.proposals.reject":     learningMethod(h, "learning.proposals.reject", rejectLearning),
+		"learning.jobs.list":            learningMethod(h, "learning.jobs.list", listJobsLearning),
+		"learning.reflect":              learningMethod(h, "learning.reflect", reflectLearning),
+		"learning.curate":               learningMethod(h, "learning.curate", curateLearning),
 	}
 }
 
@@ -755,6 +766,38 @@ func getProposalLearning(_ context.Context, h *learningHost, p idParams) (any, e
 		}
 	}
 	return res, nil
+}
+
+// prevalenceView is the wire shape of one signature's prevalence.
+type prevalenceView struct {
+	Kind       string     `json:"kind"`
+	Tool       string     `json:"tool"`
+	Label      string     `json:"label"`
+	Runs       int        `json:"runs"`
+	Chats      int        `json:"chats"`
+	LastSeenAt *time.Time `json:"lastSeenAt,omitempty"`
+	Truncated  bool       `json:"truncated"`
+}
+
+func prevalenceLearning(ctx context.Context, h *learningHost, p idParams) (any, error) {
+	pv := h.get().Prevalence
+	if pv == nil {
+		return nil, &rpcCodeError{code: codeUnavailable, msg: "learning.proposals.prevalence: prevalence scan is not available"}
+	}
+	res, err := pv.Scan(ctx, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := struct {
+		WindowDays int              `json:"windowDays"`
+		Signatures []prevalenceView `json:"signatures"`
+	}{WindowDays: res.WindowDays, Signatures: make([]prevalenceView, 0, len(res.Signatures))}
+	for _, s := range res.Signatures {
+		out.Signatures = append(out.Signatures, prevalenceView{
+			Kind: s.Kind, Tool: s.Tool, Label: s.Label, Runs: s.Runs, Chats: s.Chats, LastSeenAt: s.LastSeenAt, Truncated: s.Truncated,
+		})
+	}
+	return out, nil
 }
 
 func approveLearning(_ context.Context, h *learningHost, p struct {

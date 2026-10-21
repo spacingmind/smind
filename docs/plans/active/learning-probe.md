@@ -14,7 +14,7 @@ retention). Amends ADR-0026 AC17. Study: `docs/research/local/harness2-study.md`
 | 1 | **Docs**: ADR-0037 + this plan; ADR-0026 status cross-reference | S | none |
 | 2a | **S0** prevalence scan: signature derivation, store query, `learning.proposals.prevalence`, one UI line | S | none |
 | 2b | **D11** reflector one-shot retry with gate findings | S | none (fake LLM in tests) |
-| 3 | **P0 spike**: prove R1–R3 and the tool denylist against the real CLI; ADR-0037 addendum; gated live suite | M | yes, minimal (count + cost reported) |
+| 3 | **P0 spike**: prove R1–R3 and the tool surface against the real CLI; ADR-0037 addendum; gated live suite | M | yes: 24 calls, USD 0.068 |
 | 4a | **Arm + sandbox**: `git archive` arm materialiser, sandbox settings/env/decider, attestation, caps, tripwires, probe projection builder | L | yes (gated suite) |
 | 4b | **Probe service**: eligibility, estimate, A/A′/B orchestration, `purpose='probe'`, Probe bucket, tier-1 contrasts + verdict, ledger, store, wsapi, CLI, events, retention janitor, `probeCheck` | M | yes (one end-to-end) |
 | 4c | **UI**: Probe card, states, estimate popover, disabled reasons, verdict chip, light+dark screenshots incl. transitions | M | none |
@@ -85,15 +85,19 @@ All against a throwaway repo, an isolated `SMIND_HOME` and a non-4648 port; neve
 
 - AC19. `arm.Materialise(repo, baseSHA, dir)` exports `baseSHA` with `git archive`, `git init` + one commit, no remote, no
   credentials, no link to the real `.git`; refuses a dirty/unknown sha; the real repo's HEAD, index and refs are byte-unchanged.
-- AC20. **R1/R2/R3**: the sandbox package builds the CLI settings (sandbox on, `failIfUnavailable`, network allowlist,
-  `denyRead` credential dirs, unsandboxed commands off), the tool denylist, the MCP-closed flags and the **allowlist env**
-  (nothing from the daemon env except PATH, LANG and the single auth variable). A table test asserts no daemon env key leaks and
+- AC20. **R1/R2/R3** (as measured by P0, ADR-0037 addendum): the sandbox package builds the CLI settings (sandbox on,
+  `failIfUnavailable`, strict network allowlist, `allowWrite` = arm, `denyRead` of `$HOME`, `CLAUDE_CONFIG_DIR` and the arm's parent with
+  `allowRead` on arm + projection, unsandboxed commands off, `permissions.deny` write tools on the projection), the `--tools`
+  **allowlist**, `acceptEdits` + `--permission-prompts none`, the MCP-closed flags, git's `GIT_CONFIG_GLOBAL=/dev/null
+  GIT_CONFIG_NOSYSTEM=1`, and the `env -i` **launcher** with the allowlist `PATH, LANG, TMPDIR, HOME, CLAUDE_CONFIG_DIR, USER`. A table test asserts no daemon env key leaks and
   that the argv/env contain no secret value in logs or events.
-- AC21. The permission decider auto-allows Read/Edit/Write/Glob/Grep inside the arm dir and the read-only projection, allows Bash
+- AC21. (P0: the SDK decider is never consulted headless, so this is belt-and-braces; the audit signal is `result.permission_denials`
+  and tool_result text.) The permission decider auto-allows Read/Edit/Write/Glob/Grep inside the arm dir and the read-only projection, allows Bash
   only inside the sandbox, and denies everything else, never prompting a human; denials are counted as events identically for all
   arms.
-- AC22. `sandbox.Attestation` can only be produced by a passing self-check; the probe projection builder does not accept a nil or
-  zero attestation (compile-level and runtime). A failing or stale self-check disables probes with a stated reason.
+- AC22. `sandbox.Attestation` can only be produced by a passing **canary call** (one 2-turn haiku call, about USD 0.002, charged to the
+  probe bucket: outside write absent, inside write present, init tools == allowlist; there is no model-free attestation); the probe projection builder does not accept a nil or
+  zero attestation (compile-level and runtime). A failing or stale canary disables probes with a stated reason.
 - AC23. **AC17 amendment**: production delivery still never includes a `proposed` skill; the probe projection includes the
   candidate only with an attestation. The projection hash is recorded on the arm's run.
 - AC24. **R4**: arm timeout, `min(2 × source turns, 80)` turn cap, cumulative cost cap from usage events, output cap and
@@ -156,7 +160,7 @@ Names are the contract; Peers use these exact names.
 `TestSignature_PermissionDeniedUsesToolAndKind`, `TestSignature_NoneForUserMessageAndLoadedSkillWrong`,
 `TestSignature_StableAcrossPathsAndNumbers`, `TestPrevalence_CountsDistinctRunsAndChats`, `TestPrevalence_ExcludesNonUserPurpose`,
 `TestPrevalence_WorkspaceScoped`, `TestPrevalence_WindowBoundary`, `TestPrevalence_TruncatedFlag`,
-`TestPrevalenceRPC_NoModelCall`, `TestPrevalenceRPC_OutputRedacted`. Web: `ProposalPrevalence.test.tsx` (counts, none for
+`TestPrevalenceRPC_NoModelCall`, `TestPrevalenceRPC_OutputRedacted`. Web: `proposal-prevalence.test.tsx` (counts, none for
 unsigned evidence, truncated "at least", error quiet).
 
 **D11** (`internal/learning/service`, fake LLM harness): `TestReflectRetry_RepairableFindingRetriedOnce`,
@@ -249,7 +253,7 @@ All numbers are defaults in `learning.probe.*` and are guesses until the first w
 - [x] PR 1: ADR-0037 + this plan (docs).
 - [ ] PR 2a: S0 prevalence scan.
 - [ ] PR 2b: D11 reflector retry.
-- [ ] PR 3: P0 spike and ADR addendum.
+- [x] PR 3: P0 spike and ADR addendum: conditional PASS on macOS (24 live calls, USD 0.068); keychain, Linux, Windows untested.
 - [ ] PR 4a: arm + sandbox.
 - [ ] PR 4b: probe service.
 - [ ] PR 4c: UI.
@@ -257,3 +261,16 @@ All numbers are defaults in `learning.probe.*` and are guesses until the first w
 ## Validation
 
 (Filled in as each criterion is confirmed; every AC gets a line before this file moves to `docs/plans/completed/`.)
+
+### PR 3 — P0 spike (2026-10-20, claude 2.1.303, macOS 27 arm64, SDK v0.3.2; 24 live calls, USD 0.068)
+
+Staged evidence (a single live run of the final code was not possible within the cap); an independent read-only review found the first
+round's PASS overstated, and the hardening round re-measured or downgraded each flagged claim (ADR-0037 addendum has the table).
+
+- AC12 R1 write: `TestLive_WriteOutsideArmDenied`, `TestLive_WriteInsideArmAllowed` — confirmed; documented exception: the CLI's per-session `$TMPDIR` is writable.
+- AC13 R1 read: `TestLive_ReadDecoyCredentialDenied`, `TestLive_BuiltinReadOutsideArmDenied` — confirmed for decoys with the **allow-list** read policy (including an unlisted third-location path); the deny-list is partial by construction. Real credential files were deliberately not read; keychain reachability is **untested (open risk, needs the Human's approval)**.
+- AC14 R2 network: `TestLive_NetworkToNonModelHostDenied`, `TestLive_ModelCallSucceeds`, `TestLive_WebToolsDenied`, `TestLive_NoMCPLoaded` — confirmed for TCP/curl and DNS answers; DNS-query exfiltration, UDP, ICMP, unix sockets untested.
+- AC15 fail-if-unavailable: **partial**. `TestLive_FailIfUnavailableRefusesToRun` proves fail-closed at exec; the flag itself could not be isolated on macOS.
+- AC16 launch shape + R3: `TestLive_UnderSMINDLaunchShape`, `TestLive_EnvIsAllowlist`, `TestSpike_LauncherScrubsEnv` — confirmed for the process env; the login needs `USER`.
+- AC17 attestation: no model-free method exists; one canary call per probe (~USD 0.002) — recorded in ADR-0037 §3.
+- AC18 verdict: **conditional PASS on macOS** (R1 write, R2, R3-env, read allow-list, built-ins as measured); PARTIAL items: keychain, `failIfUnavailable`, toolchains beyond sh/git/curl, Linux/Windows. The probe arm PR (4a) must not claim more than the addendum.

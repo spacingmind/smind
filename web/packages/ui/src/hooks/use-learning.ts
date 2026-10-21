@@ -12,6 +12,7 @@ import type {
   LearningMode,
   LearningStatus,
   ProposalDetail,
+  ProposalPrevalence,
   ProposalStatus,
   ProposalView,
 } from "@/lib/learning-types";
@@ -116,6 +117,19 @@ export function useProposal(id: number | null) {
     enabled: client !== null && id !== null,
     retry: false,
     queryFn: (): Promise<ProposalDetail> => requireClient(client).call<ProposalDetail>("learning.proposals.get", { id }),
+  });
+}
+
+/** How often the failure/permission signature behind a pending proposal's evidence was seen recently (ADR-0037 S0). */
+export function useProposalPrevalence(id: number | null, enabled: boolean) {
+  const client = useClient();
+  return useQuery({
+    queryKey: queryKeys.proposalPrevalence(id ?? 0),
+    enabled: client !== null && id !== null && enabled,
+    retry: false,
+    staleTime: 60_000,
+    queryFn: (): Promise<ProposalPrevalence> =>
+      requireClient(client).call<ProposalPrevalence>("learning.proposals.prevalence", { id }),
   });
 }
 

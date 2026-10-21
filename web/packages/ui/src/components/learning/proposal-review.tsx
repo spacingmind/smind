@@ -3,6 +3,7 @@ import { useState } from "react";
 import { LoadingRows } from "@/components/ui/loading-rows";
 import { DuplicateBanner, DuplicateCompare } from "@/components/learning/duplicate-compare";
 import { EvidenceList } from "@/components/learning/evidence-list";
+import { ProposalPrevalenceLine } from "@/components/learning/proposal-prevalence";
 import { Chip, SourceChip } from "@/components/learning/learning-chips";
 import { ProposalItemView, staleReason } from "@/components/learning/proposal-items";
 import { SkillEditor } from "@/components/learning/skill-editor";
@@ -184,6 +185,7 @@ export function ProposalReview({ id, onBack }: { id: number; onBack: () => void 
       <section className="flex flex-col gap-2" data-testid="proposal-evidence">
         <h3 className="text-ui-base font-medium text-foreground">Evidence</h3>
         <EvidenceList evidence={proposal.evidence} workspaceId={proposal.workspaceId} />
+        <ProposalPrevalenceLine id={proposal.id} pending={pending} />
       </section>
 
       {pending && editing && (

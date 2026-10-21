@@ -30,6 +30,8 @@ const (
 	maxCuratorBodyBytes = 4 * 1024
 	maxCuratorBytes     = 120 * 1024
 	markerReserve       = 128 // room for the omitted-skills marker and closing delimiter
+
+	retryFieldCap = 200
 )
 
 // RejectedExample is a proposal the gate or a human rejected earlier, shown
@@ -37,6 +39,15 @@ const (
 type RejectedExample struct {
 	Name, Description, Note string
 }
+
+// RetryItem is one rejected intent and the gate findings to repair.
+type RetryItem struct {
+	Name     string
+	Findings []RetryFinding
+}
+
+// RetryFinding is one gate finding about a rejected intent.
+type RetryFinding struct{ Reason, Detail string }
 
 // SkillBody is one learned skill as the curator sees it.
 type SkillBody struct {
@@ -111,6 +122,27 @@ func rejectedNote(note string) string {
 		return ""
 	}
 	return oneLine(note, rejectedNoteCap)
+}
+
+// ComposeRetryPrompt appends a GATE_FINDINGS block to the original user
+// prompt: the gate's findings about the rejected intents, so the reflector can
+// repair format errors in one more reply. Every field is one-line clipped so
+// data cannot break out of the block.
+func ComposeRetryPrompt(original string, items []RetryItem) string {
+	var sb strings.Builder
+	sb.WriteString(original)
+	if !strings.HasSuffix(original, "\n") {
+		sb.WriteByte('\n')
+	}
+	sb.WriteString("\n<<<GATE_FINDINGS\n")
+	sb.WriteString("Your previous reply was checked by a deterministic gate. These intents were rejected for fixable format reasons. Reply with the JSON object again containing ONLY corrected versions of these intents (keep the evidence quotes; change the name only if a finding is about the name). Do not add intents and do not repeat intents that were accepted.\n")
+	for _, it := range items {
+		for _, f := range it.Findings {
+			sb.WriteString("- " + oneLine(it.Name, retryFieldCap) + " :: " + oneLine(f.Reason, retryFieldCap) + ": " + oneLine(f.Detail, retryFieldCap) + "\n")
+		}
+	}
+	sb.WriteString("GATE_FINDINGS>>>\n\nReply with the JSON object only.\n")
+	return sb.String()
 }
 
 // ComposeCuratorPrompt builds the curator user prompt: skills in name order
