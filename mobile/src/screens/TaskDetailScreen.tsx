@@ -37,7 +37,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
+import { Button, useNativeState } from '@expo/ui';
 import { UiHost } from '../ui/UiHost';
 import { adoptedPromptText } from '../adoptedPrompt';
 import { defaultChatId, listRunsForTask, RunSummary } from '../api';
@@ -53,7 +53,7 @@ import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { useChatQueue } from '../useChatQueue';
 import { ReconnectingBanner } from '../ui/Banner';
-import { QueuedPrompts } from './QueuedPrompts';
+import { Composer } from './task/Composer';
 
 type LoadState =
   | { kind: 'loading' }
@@ -492,37 +492,19 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
                 </View>
               );
             })}
-            {sendError !== null && <Text style={styles.sendError}>Couldn't send: {sendError}</Text>}
-            <QueuedPrompts items={queue.items} onCancel={(id) => void queue.cancel(id)} />
-            <View style={styles.composeRow}>
-              <UiHost style={styles.composeWrap}>
-                <ExpoTextInput
-                  style={styles.composeField}
-                  textStyle={styles.composeText}
-                  value={draftState}
-                  onChangeText={(text) => {
-                    draftState.value = text;
-                    setDraft(text);
-                  }}
-                  placeholder={liveRunId !== null ? 'Queue a follow-up — it sends when this run finishes' : 'Send a follow-up prompt…'}
-                  placeholderTextColor={theme.foregroundMuted}
-                  multiline
-                />
-              </UiHost>
-              {stopView.visible && (
-                <UiHost style={styles.sendHost}>
-                  <Button label={stopView.label} onPress={handleStop} disabled={stopView.disabled} />
-                </UiHost>
-              )}
-              {liveRunId !== null && canSend && (
-                <UiHost style={styles.sendHost}>
-                  <Button label="Send now" onPress={handleSendNow} />
-                </UiHost>
-              )}
-              <UiHost style={styles.sendHost}>
-                <Button label="Send" onPress={handleSend} disabled={!canSend} />
-              </UiHost>
-            </View>
+            <Composer
+              draftState={draftState}
+              onChangeDraft={setDraft}
+              liveRunId={liveRunId}
+              stopView={stopView}
+              canSend={canSend}
+              sendError={sendError}
+              queueItems={queue.items}
+              onCancelQueued={(id) => void queue.cancel(id)}
+              onStop={handleStop}
+              onSend={handleSend}
+              onSendNow={handleSendNow}
+            />
           </>
         )}
       </View>
@@ -692,39 +674,6 @@ function makeStyles(theme: AppTheme) {
       fontSize: theme.type.metadataLabel.fontSize,
       color: theme.status.danger,
       marginTop: theme.spacing[1],
-    },
-    sendError: {
-      color: theme.status.danger,
-      fontSize: theme.type.metadataLabel.fontSize,
-      marginTop: theme.spacing[2],
-      marginBottom: theme.spacing[1],
-    },
-    composeRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-end',
-      gap: theme.spacing[2],
-      borderTopWidth: 1,
-      borderTopColor: theme.border,
-      paddingTop: theme.spacing[2],
-      marginTop: theme.spacing[2],
-    },
-    composeWrap: {
-      flex: 1,
-      maxHeight: 120,
-    },
-    sendHost: {
-      alignSelf: 'flex-end',
-    },
-    composeField: {
-      width: '100%',
-      backgroundColor: theme.surface[2],
-      borderRadius: theme.radius.md,
-      paddingHorizontal: theme.spacing[2.5],
-      paddingVertical: theme.spacing[2],
-    },
-    composeText: {
-      fontSize: theme.type.interface.fontSize,
-      color: theme.foreground,
     },
   });
 }
