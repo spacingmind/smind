@@ -108,11 +108,11 @@ func clip(s string, n int) string {
 	return s
 }
 
-// Materialise exports s.BaseSHA into s.Dir and makes it a one-commit git
-// repository with no remote and no credentials. It never writes to s.Repo:
-// the real checkout's HEAD, index, refs and worktree are untouched (R1, R5).
-// On any error the partly built directory is removed.
-func Materialise(ctx context.Context, s Spec) (res Result, err error) {
+// Export extracts s.BaseSHA's tree into s.Dir with `git archive`: no `.git`,
+// no repository of any kind. It never writes to s.Repo. On error the partly
+// built directory is removed. Materialise builds on it; the probe service
+// also keeps one pristine export outside every arm as the diff base.
+func Export(ctx context.Context, s Spec) (res Result, err error) {
 	if s.Dirty {
 		return Result{}, ErrDirty
 	}
@@ -139,15 +139,27 @@ func Materialise(ctx context.Context, s Spec) (res Result, err error) {
 	if err := os.Chmod(s.Dir, 0o700); err != nil {
 		return Result{}, fmt.Errorf("arm: chmod arm dir: %w", err)
 	}
-
 	tarData, err := runGit(ctx, s.Repo, nil, "archive", "--format=tar", s.BaseSHA)
 	if err != nil {
 		return Result{}, err
 	}
-	res, err = extract(bytes.NewReader(tarData), s.Dir)
+	return extract(bytes.NewReader(tarData), s.Dir)
+}
+
+// Materialise exports s.BaseSHA into s.Dir and makes it a one-commit git
+// repository with no remote and no credentials. It never writes to s.Repo:
+// the real checkout's HEAD, index, refs and worktree are untouched (R1, R5).
+// On any error the partly built directory is removed.
+func Materialise(ctx context.Context, s Spec) (res Result, err error) {
+	res, err = Export(ctx, s)
 	if err != nil {
 		return Result{}, err
 	}
+	defer func() {
+		if err != nil {
+			_ = os.RemoveAll(s.Dir)
+		}
+	}()
 	if _, err := runGit(ctx, s.Dir, nil, "init", "-q", "-b", "probe"); err != nil {
 		return Result{}, err
 	}

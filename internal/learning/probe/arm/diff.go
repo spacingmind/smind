@@ -3,104 +3,163 @@ package arm
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
 const truncatedMarker = "\n[truncated]\n"
 
-// Diff renders what the arm changed relative to its one base commit: the
-// tracked changes of `git diff HEAD` plus every untracked, non-ignored
-// regular file as a `new file` entry (each read at most maxBytes). It never
-// mutates the arm repository (no `add -N`), and runs git with the scrubbed
-// gitEnv and the arm-writable config neutralised (no hooks, no fsmonitor, no
-// external diff or textconv). The text is clipped to maxBytes with a
-// "[truncated]" marker; n is the size before clipping (a lower bound once
-// the untracked files alone exceed maxBytes, where only their sizes are
-// summed).
-func Diff(ctx context.Context, dir string, maxBytes int) (diff string, n int, err error) {
-	if !filepath.IsAbs(dir) {
-		return "", 0, fmt.Errorf("arm: diff dir %q is not absolute", dir)
+// maxCopyBytes bounds the sanitized copy of an arm made for diffing.
+const maxCopyBytes = 128 << 20
+
+// Diff renders what the arm changed relative to baseDir, a pristine export of
+// the same commit (see Export) kept outside the arm. It NEVER runs git
+// inside armDir: the agent controls that directory, and a planted
+// `.git/config` (fsmonitor, textconv, pager, filters) or a symlink would
+// execute or read outside the sandbox as the daemon.
+//
+// Instead the arm is copied into a daemon temp dir by walking it with Lstat
+// and ReadDir: the top-level `.git` entry is skipped, every symlink and
+// non-regular file is skipped, and nothing is opened through a link. Then
+// `git diff --no-index` runs between baseDir and that copy from a temp
+// working directory outside any repository, with a scrubbed environment and
+// no textconv, external diff, fsmonitor or pager. The a/ and b/ path
+// prefixes are rewritten to repo-relative paths. The text is clipped to
+// maxBytes with a "[truncated]" marker; n is its size before clipping.
+func Diff(ctx context.Context, baseDir, armDir string, maxBytes int) (diff string, n int, err error) {
+	for _, d := range []string{baseDir, armDir} {
+		if !filepath.IsAbs(d) {
+			return "", 0, fmt.Errorf("arm: diff dir %q is not absolute", d)
+		}
 	}
 	if maxBytes <= 0 {
 		return "", 0, fmt.Errorf("arm: diff maxBytes %d", maxBytes)
 	}
-	tracked, err := runGit(ctx, dir, nil, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
-		"diff", "--no-ext-diff", "--no-textconv", "--no-color", "HEAD")
+	tmp, err := os.MkdirTemp("", "smind-probe-diff-")
 	if err != nil {
-		return "", 0, err
+		return "", 0, fmt.Errorf("arm: diff temp dir: %w", err)
 	}
-	names, err := runGit(ctx, dir, nil, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
-		"ls-files", "--others", "--exclude-standard", "-z")
-	if err != nil {
+	defer func() { _ = os.RemoveAll(tmp) }()
+	copyDir := filepath.Join(tmp, "arm")
+	cwd := filepath.Join(tmp, "cwd")
+	for _, d := range []string{copyDir, cwd} {
+		if err := os.Mkdir(d, 0o700); err != nil {
+			return "", 0, fmt.Errorf("arm: diff temp dir: %w", err)
+		}
+	}
+	var total int64
+	if err := copySanitized(armDir, copyDir, true, &total); err != nil {
 		return "", 0, err
 	}
 
-	var out bytes.Buffer
-	out.Write(tracked)
-	n = out.Len()
-	for _, name := range strings.Split(string(names), "\x00") {
-		if name == "" {
-			continue
-		}
-		entry, size := untrackedEntry(dir, name, maxBytes, n < maxBytes)
-		n += size
-		if n-size < maxBytes { // keep text only while it can still be shown
-			out.WriteString(entry)
+	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-c", "core.fsmonitor=false", "-c", "core.pager=cat",
+		"diff", "--no-index", "--no-textconv", "--no-ext-diff", "--no-color", "--", baseDir, copyDir)
+	cmd.Dir = cwd
+	cmd.Env = append(gitEnv(), "GIT_ATTR_NOSYSTEM=1")
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if err := cmd.Run(); err != nil {
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) || ee.ExitCode() != 1 { // 1 = differences found
+			return "", 0, fmt.Errorf("git diff: %w: %s", err, strings.TrimSpace(clip(errb.String(), 300)))
 		}
 	}
-
-	text := out.String()
+	text := rewritePrefixes(out.String(), baseDir, copyDir)
+	n = len(text)
 	if len(text) > maxBytes {
 		text = strings.ToValidUTF8(text[:maxBytes], "") + truncatedMarker
 	}
 	return text, n, nil
 }
 
-// untrackedEntry renders one untracked file. size is the rendered length (or
-// the file's size when read is false and nothing is rendered).
-func untrackedEntry(dir, name string, maxBytes int, read bool) (string, int) {
-	full := filepath.Join(dir, filepath.FromSlash(name))
-	fi, err := os.Lstat(full)
-	if err != nil || !fi.Mode().IsRegular() { // links are never followed
-		return "", 0
-	}
-	header := fmt.Sprintf("diff --git a/%s b/%s\nnew file mode 100%o\n", name, name, fi.Mode().Perm())
-	if !read {
-		return "", len(header) + int(min(fi.Size(), int64(1<<40)))
-	}
-	f, err := os.Open(full)
+// rewritePrefixes turns the temp-path a/ and b/ prefixes git printed into
+// repo-relative ones.
+func rewritePrefixes(s, baseDir, copyDir string) string {
+	rel := func(p string) string { return strings.TrimPrefix(filepath.ToSlash(p), "/") }
+	return strings.NewReplacer(
+		"a/"+rel(baseDir)+"/", "a/",
+		"b/"+rel(copyDir)+"/", "b/",
+		// For a new or deleted file git prints the existing side's path on
+		// both halves of the `diff --git` line.
+		"b/"+rel(baseDir)+"/", "b/",
+		"a/"+rel(copyDir)+"/", "a/",
+	).Replace(s)
+}
+
+// copySanitized copies the regular files and directories of src into dst
+// (which exists). Symlinks and every other entry type are skipped and never
+// followed; the top-level `.git` entry is skipped.
+func copySanitized(src, dst string, top bool, total *int64) error {
+	ents, err := os.ReadDir(src)
 	if err != nil {
-		return "", 0
+		return fmt.Errorf("arm: diff read %q: %w", clip(src, 120), err)
+	}
+	for _, e := range ents {
+		name := e.Name()
+		if top && name == ".git" {
+			continue
+		}
+		from, to := filepath.Join(src, name), filepath.Join(dst, name)
+		fi, err := os.Lstat(from)
+		if err != nil {
+			continue // vanished: the arm is over, not running
+		}
+		switch {
+		case fi.Mode()&os.ModeSymlink != 0:
+			continue
+		case fi.IsDir():
+			if err := os.Mkdir(to, 0o700); err != nil {
+				return fmt.Errorf("arm: diff mkdir: %w", err)
+			}
+			if err := copySanitized(from, to, false, total); err != nil {
+				return err
+			}
+		case fi.Mode().IsRegular():
+			*total += fi.Size()
+			if *total > maxCopyBytes {
+				return ErrTooLarge
+			}
+			if err := copyRegular(from, to, fi); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// copyRegular copies one file, refusing it if what was opened is not the
+// regular file that was lstat'd (a swapped-in link).
+func copyRegular(from, to string, lfi os.FileInfo) error {
+	f, err := os.Open(from)
+	if err != nil {
+		return nil
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, int64(maxBytes)))
+	ofi, err := f.Stat()
+	if err != nil || !ofi.Mode().IsRegular() || !os.SameFile(lfi, ofi) {
+		return nil
+	}
+	mode := os.FileMode(0o644)
+	if lfi.Mode()&0o100 != 0 {
+		mode = 0o755
+	}
+	w, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
-		return "", 0
+		return fmt.Errorf("arm: diff copy: %w", err)
 	}
-	if bytes.IndexByte(data, 0) >= 0 {
-		e := header + fmt.Sprintf("Binary files /dev/null and b/%s differ\n", name)
-		return e, len(e)
+	_, cerr := io.Copy(w, io.LimitReader(f, lfi.Size()))
+	if err := w.Close(); cerr == nil {
+		cerr = err
 	}
-	var b strings.Builder
-	b.WriteString(header)
-	b.WriteString("--- /dev/null\n+++ b/" + name + "\n")
-	if len(data) > 0 {
-		lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
-		fmt.Fprintf(&b, "@@ -0,0 +1,%d @@\n", len(lines))
-		for _, l := range lines {
-			b.WriteString("+" + l + "\n")
-		}
-		if !bytes.HasSuffix(data, []byte("\n")) {
-			b.WriteString("\\ No newline at end of file\n")
-		}
+	if cerr != nil {
+		return fmt.Errorf("arm: diff copy: %w", cerr)
 	}
-	if fi.Size() > int64(len(data)) {
-		b.WriteString("[file truncated]\n")
-	}
-	e := b.String()
-	return e, len(e)
+	return os.Chmod(to, mode) // umask must not change what the diff sees
 }
