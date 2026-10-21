@@ -83,6 +83,11 @@ var knownTopics = map[string]bool{
 	TopicLearnedSkillProposed: true,
 	TopicLearnedSkillChanged:  true,
 	TopicLearningJob:          true,
+
+	TopicLearnedSkillProbeStarted:  true,
+	TopicLearnedSkillProbeArm:      true,
+	TopicLearnedSkillProbeFinished: true,
+	TopicLearnedSkillProbeFailed:   true,
 }
 
 // subscriberQueueCap is the per-connection event queue bound (ADR 0005):

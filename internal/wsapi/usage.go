@@ -253,6 +253,39 @@ func handleUsageLearning(db *store.Store) handlerFunc {
 	}
 }
 
+// handleUsageProbe totals probe-run usage over since/until: the "Probe" bucket
+// (ADR-0037 section 5), separate from the Learning bucket and the user
+// buckets. Same params and result shape as usage.learning.
+func handleUsageProbe(db *store.Store) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		if db == nil {
+			return nil, fmt.Errorf("usage.probe: store is unavailable")
+		}
+		var p struct {
+			Since string `json:"since"`
+			Until string `json:"until"`
+		}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return nil, fmt.Errorf("usage.probe: invalid params: %w", err)
+			}
+		}
+		since, err := parseUsageTime("usage.probe", "since", p.Since)
+		if err != nil {
+			return nil, err
+		}
+		until, err := parseUsageTime("usage.probe", "until", p.Until)
+		if err != nil {
+			return nil, err
+		}
+		n, in, out, cost, err := db.SummarizeProbeUsageWindow(since, until)
+		if err != nil {
+			return nil, fmt.Errorf("usage.probe: %w", err)
+		}
+		return learningUsageResult{Runs: n, InputTokens: in, OutputTokens: out, CostUSD: cost}, nil
+	}
+}
+
 // parseUsageTime parses an optional RFC3339 timestamp param (empty ->
 // nil, an open bound), naming method/field in any error so usage.list and
 // usage.summary's since/until both report which one failed.
