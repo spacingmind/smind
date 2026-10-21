@@ -79,7 +79,9 @@ func Build(a, b ArmInput, a2 *ArmInput, skill, projectionDirB string, sig *signa
 		row := Row{Key: ro.key, A: av, B: bv, DeltaAB: bv - av}
 		var noise float64
 		if a2m != nil {
-			n := ro.get(*a2m) - av
+			a2v := ro.get(*a2m)
+			row.A2 = &a2v
+			n := a2v - av
 			if n < 0 {
 				n = -n
 			}

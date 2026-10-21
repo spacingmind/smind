@@ -111,3 +111,26 @@ func TestContrast_CheckWorse(t *testing.T) {
 		})
 	}
 }
+
+// The replicate's own value must reach the row (found by the live end-to-end:
+// every row had a2 null although the noise was computed from it).
+func TestContrast_ReplicateValueIsCarried(t *testing.T) {
+	a := ArmInput{Role: RoleA, Turns: 2}
+	b := ArmInput{Role: RoleB, Turns: 2}
+	a2 := ArmInput{Role: RoleA2, Turns: 5}
+	c := Build(a, b, &a2, "learned-x", "/proj", nil)
+	var row Row
+	for _, r := range c.Metrics {
+		if r.Key == KeyTurns {
+			row = r
+		}
+	}
+	if row.A2 == nil || *row.A2 != 5 || row.Noise == nil || *row.Noise != 3 {
+		t.Fatalf("turns row = %+v (A2 %v)", row, row.A2)
+	}
+	for _, r := range Build(a, b, nil, "learned-x", "/proj", nil).Metrics {
+		if r.A2 != nil {
+			t.Errorf("row %s has A2 without a replicate", r.Key)
+		}
+	}
+}
