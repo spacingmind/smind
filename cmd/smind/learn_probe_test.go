@@ -42,7 +42,8 @@ func (f *fakeProbe) Start(_ context.Context, _ int64, _ bool) (store.LearningPro
 	return store.LearningProbe{ID: 9, ProposalID: 1, Status: "queued"}, nil
 }
 
-func (f *fakeProbe) Cancel(int64) error { return nil }
+func (f *fakeProbe) Cancel(int64) error    { return nil }
+func (f *fakeProbe) CancelWorkspace(int64) {}
 
 func (f *fakeProbe) Get(_ int64) (probesvc.View, bool, error) {
 	if learnProbeJSON == "null" {

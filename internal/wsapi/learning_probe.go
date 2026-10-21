@@ -27,6 +27,9 @@ type LearningProbe interface {
 	Estimate(ctx context.Context, proposalID int64, quick bool) (probesvc.Estimate, error)
 	Start(ctx context.Context, proposalID int64, quick bool) (store.LearningProbe, error)
 	Cancel(proposalID int64) error
+	// CancelWorkspace stops the workspace's probe and waits (bounded) for it
+	// to finish cleaning up; callers delete the workspace's rows after it.
+	CancelWorkspace(workspaceID int64)
 	Get(proposalID int64) (probesvc.View, bool, error)
 	List(workspaceID int64, limit int) ([]probesvc.View, error)
 }

@@ -3,6 +3,7 @@ package probesvc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -35,6 +36,15 @@ const (
 // cancelWait bounds how long Cancel waits for the probe goroutine to clean up.
 const cancelWait = 30 * time.Second
 
+// workspaceCancelWait bounds how long CancelWorkspace waits before its
+// caller deletes the workspace's rows.
+const workspaceCancelWait = 10 * time.Second
+
+var (
+	errStartCancelled = errors.New("the probe was cancelled before it started")
+	errClosing        = errors.New("the probe service is shutting down")
+)
+
 // IneligibleError is returned by Start when the probe cannot run now. Its
 // message names the first reason code; Reasons has all of them.
 type IneligibleError struct{ Reasons []Reason }
@@ -56,11 +66,12 @@ func (e *IneligibleError) Code() string {
 
 // running is the in-flight probe.
 type running struct {
-	probeID  int64
-	proposal int64
-	cancel   context.CancelFunc
-	done     chan struct{}
-	release  func() // the executor slot, nil when none was taken
+	probeID   int64
+	proposal  int64
+	workspace int64
+	cancel    context.CancelFunc
+	done      chan struct{}
+	release   func() // the executor slot, nil when none was taken
 	// guarded by Service.mu
 	cancelled bool
 	runID     string // the arm run executing now, "" between arms
@@ -102,7 +113,7 @@ func (s *Service) Start(ctx context.Context, proposalID int64, quick bool) (stor
 		s.mu.Unlock()
 		return store.LearningProbe{}, &IneligibleError{Reasons: []Reason{reason(ReasonBusy, "Another probe is already running.")}}
 	}
-	s.starting = true
+	s.starting, s.startingProp, s.startingWS, s.startCancelled = true, proposalID, 0, false
 	s.mu.Unlock()
 	started := false
 	defer func() {
@@ -117,8 +128,14 @@ func (s *Service) Start(ctx context.Context, proposalID int64, quick bool) (stor
 	if err != nil {
 		return store.LearningProbe{}, err
 	}
+	s.mu.Lock()
+	s.startingWS = pl.ws.ID
+	s.mu.Unlock()
 	if !pl.est.Eligible {
 		return store.LearningProbe{}, &IneligibleError{Reasons: pl.est.Reasons}
+	}
+	if s.startAborted() {
+		return store.LearningProbe{}, errStartCancelled
 	}
 	// The probe's arms run in the workspace's system-task chat, which holds
 	// one run at a time: keep reflect and curate out for the whole probe.
@@ -151,8 +168,18 @@ func (s *Service) Start(ctx context.Context, proposalID int64, quick bool) (stor
 	}
 
 	runCtx, cancel := context.WithCancel(s.ctx)
-	rn := &running{probeID: probe.ID, proposal: proposalID, cancel: cancel, done: make(chan struct{}), release: release}
+	rn := &running{probeID: probe.ID, proposal: proposalID, workspace: pl.ws.ID, cancel: cancel, done: make(chan struct{}), release: release}
 	s.mu.Lock()
+	if s.ctx.Err() != nil || s.startCancelled { // Close or Cancel arrived while the row was written
+		closing := s.ctx.Err() != nil
+		s.mu.Unlock()
+		cancel()
+		s.markCancelled(probe.ID)
+		if closing {
+			return store.LearningProbe{}, errClosing
+		}
+		return store.LearningProbe{}, errStartCancelled
+	}
 	s.active, s.starting = rn, false
 	started = true
 	s.wg.Add(1)
@@ -163,6 +190,27 @@ func (s *Service) Start(ctx context.Context, proposalID int64, quick bool) (stor
 	}
 	go s.run(runCtx, rn, pl)
 	return probe, nil
+}
+
+// startAborted reports a Cancel or Close that arrived while Start was still
+// checking eligibility.
+func (s *Service) startAborted() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.startCancelled || s.ctx.Err() != nil
+}
+
+// markCancelled settles a probe row that was cancelled before it ran.
+func (s *Service) markCancelled(probeID int64) {
+	p, err := s.d.Store.GetProbe(probeID)
+	if err != nil {
+		return
+	}
+	now := s.d.Now().UTC()
+	p.Status, p.VerdictReason, p.FinishedAt = statusCancelled, "the probe was cancelled before it finished.", &now
+	if err := s.d.Store.UpdateProbe(p); err != nil {
+		slog.Warn("learning probe: settle cancelled start", "probe", probeID, "err", err)
+	}
 }
 
 // markFailed settles a probe row that never got to run.
@@ -178,26 +226,62 @@ func (s *Service) markFailed(probeID int64, why string) {
 
 // Cancel stops the proposal's running probe: it cancels the probe's context,
 // stops the running arm and waits (bounded) for the arm and launch
-// directories to be removed. It is a no-op when nothing runs.
+// directories to be removed. A probe still being started is cancelled too.
+// It is a no-op when nothing runs.
 func (s *Service) Cancel(proposalID int64) error {
+	s.stop(func(rn *running) bool { return rn.proposal == proposalID },
+		func() bool { return s.startingProp == proposalID }, cancelWait)
+	return nil
+}
+
+// CancelWorkspace stops the workspace's running or starting probe and waits
+// (bounded) for it to clean up, so the caller can delete the workspace's
+// rows without a probe goroutine writing to them afterwards.
+func (s *Service) CancelWorkspace(workspaceID int64) {
+	s.stop(func(rn *running) bool { return rn.workspace == workspaceID },
+		func() bool { return s.startingWS == 0 || s.startingWS == workspaceID }, workspaceCancelWait)
+}
+
+// stop cancels the active probe when mineActive matches and a start in
+// progress when mineStarting matches (called under s.mu), then waits up to
+// wait for both to settle. Marking the start cancelled happens in the same
+// critical section that reads s.active, so a Start cannot slip between.
+func (s *Service) stop(mineActive func(*running) bool, mineStarting func() bool, wait time.Duration) {
+	deadline := time.Now().Add(wait)
 	s.mu.Lock()
 	rn := s.active
-	if rn == nil || rn.proposal != proposalID {
-		s.mu.Unlock()
-		return nil
+	if rn != nil && !mineActive(rn) {
+		rn = nil
 	}
-	rn.cancelled = true
-	runID := rn.runID
+	starting := s.starting && mineStarting()
+	if starting {
+		s.startCancelled = true
+	}
+	var runID string
+	if rn != nil {
+		rn.cancelled = true
+		runID = rn.runID
+	}
 	s.mu.Unlock()
-	rn.cancel()
-	if runID != "" && s.d.Reg != nil {
-		_ = s.d.Reg.Stop(runID)
+	if rn != nil {
+		rn.cancel()
+		if runID != "" && s.d.Reg != nil {
+			_ = s.d.Reg.Stop(runID)
+		}
+		select {
+		case <-rn.done:
+		case <-time.After(time.Until(deadline)):
+		}
 	}
-	select {
-	case <-rn.done:
-	case <-time.After(cancelWait):
+	for starting && time.Now().Before(deadline) {
+		s.mu.Lock()
+		still := s.starting
+		s.mu.Unlock()
+		if !still {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
-	return nil
 }
 
 func (s *Service) setRunning(rn *running, runID string) {

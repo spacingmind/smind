@@ -21,6 +21,19 @@ type fakeProbe struct {
 	cancels  int
 	startErr error
 	view     *probesvc.View
+	// cancelWS records CancelWorkspace calls; onCancelWS runs inside it.
+	cancelWS   []int64
+	onCancelWS func(int64)
+}
+
+func (p *fakeProbe) CancelWorkspace(id int64) {
+	p.mu.Lock()
+	p.cancelWS = append(p.cancelWS, id)
+	fn := p.onCancelWS
+	p.mu.Unlock()
+	if fn != nil {
+		fn(id)
+	}
 }
 
 func (p *fakeProbe) Estimate(_ context.Context, id int64, quick bool) (probesvc.Estimate, error) {
@@ -179,5 +192,42 @@ func TestEvents_ProbeLifecycle(t *testing.T) {
 		if raw, _ := json.Marshal(ev.Payload); strings.Contains(string(raw), "secret reason") {
 			t.Errorf("%s leaked the failure reason: %s", w.topic, raw)
 		}
+	}
+}
+
+// TestProbeRPC_ForgetCancelsProbe: forget, setMode off and workspace.delete
+// each cancel the workspace's probe first, while its rows still exist.
+func TestProbeRPC_ForgetCancelsProbe(t *testing.T) {
+	t.Parallel()
+	fp := &fakeProbe{}
+	f := probeFx(t, fp)
+	stillThere := true
+	fp.onCancelWS = func(id int64) {
+		if _, err := f.db.GetWorkspace(id); err != nil {
+			stillThere = false
+		}
+	}
+
+	f.ok("learning.setMode", map[string]any{"workspaceId": f.w.ID, "mode": "propose"}, nil)
+	if len(fp.cancelWS) != 0 {
+		t.Fatalf("turning learning on cancelled a probe: %v", fp.cancelWS)
+	}
+	f.ok("learning.setMode", map[string]any{"workspaceId": f.w.ID, "mode": "off"}, nil)
+	if len(fp.cancelWS) != 1 || fp.cancelWS[0] != f.w.ID {
+		t.Fatalf("setMode off cancels = %v", fp.cancelWS)
+	}
+	f.ok("learning.forget", map[string]any{"workspaceId": f.w.ID}, nil)
+	if len(fp.cancelWS) != 2 || fp.cancelWS[1] != f.w.ID {
+		t.Fatalf("forget cancels = %v", fp.cancelWS)
+	}
+	f.ok("workspace.delete", map[string]any{"id": f.w.ID}, nil)
+	if len(fp.cancelWS) != 3 || fp.cancelWS[2] != f.w.ID {
+		t.Fatalf("workspace.delete cancels = %v", fp.cancelWS)
+	}
+	if !stillThere {
+		t.Fatal("a probe was cancelled after its workspace was already gone")
+	}
+	if _, err := f.db.GetWorkspace(f.w.ID); err == nil {
+		t.Fatal("workspace.delete did not delete")
 	}
 }

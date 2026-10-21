@@ -28,9 +28,14 @@ const (
 type Service struct {
 	d Deps
 
-	mu       sync.Mutex // guards starting, active
+	mu       sync.Mutex // guards starting, startingWS, startingProp, startCancelled, active
 	starting bool
 	active   *running
+	// While starting: the proposal being started, its workspace (0 until
+	// eligibility resolved it) and whether a Cancel arrived meanwhile.
+	startingProp   int64
+	startingWS     int64
+	startCancelled bool
 
 	ctx    context.Context
 	wg     sync.WaitGroup
