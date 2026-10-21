@@ -31,6 +31,13 @@ type probeFixture struct {
 
 func newProbeFixture(t *testing.T, scenario string) *probeFixture {
 	t.Helper()
+	return newProbeFixtureEnv(t, scenario, "")
+}
+
+// newProbeFixtureEnv is newProbeFixture with extra NAME=VALUE text spliced
+// into the stand-in's wrapper environment.
+func newProbeFixtureEnv(t *testing.T, scenario, extraEnv string) *probeFixture {
+	t.Helper()
 	if !sandbox.Supported() {
 		t.Skip("the probe sandbox is macOS only")
 	}
@@ -49,7 +56,7 @@ func newProbeFixture(t *testing.T, scenario string) *probeFixture {
 		}
 	}
 	wrapper := filepath.Join(root, "fake-claude")
-	script := "#!/bin/sh\nTASKRUNNER_FAKE_CLAUDE_CLI=1 FAKE_CLAUDE_SCENARIO='" + scenario + "' exec '" + self + "' \"$@\"\n"
+	script := "#!/bin/sh\nTASKRUNNER_FAKE_CLAUDE_CLI=1 FAKE_CLAUDE_SCENARIO='" + scenario + "' " + strings.ReplaceAll(extraEnv, "@PRIV@", priv) + " exec '" + self + "' \"$@\"\n"
 	if err := os.WriteFile(wrapper, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -327,5 +334,33 @@ func TestRunPromptProbe_AttestationIsAGate(t *testing.T) {
 	}
 	if spawned.Load() != 0 {
 		t.Errorf("a client was spawned %d time(s) without a valid attestation", spawned.Load())
+	}
+}
+
+// A failed cleanup is surfaced whatever the end state: here the run itself ends
+// `capped`, and the corrupted pidfile (so the arm's processes cannot be proven
+// gone) is still reported, wrapped beside ErrProbeEnded.
+func TestArmEnd_CleanupFailureSurfacedOnEveryEnd(t *testing.T) {
+	for _, tc := range []struct {
+		scenario string
+		want     arm.End
+		wantErr  error
+	}{
+		{"probe-max-budget", arm.EndCapped, ErrProbeEnded},
+		{"probe-ok", arm.EndError, nil}, // a normal end becomes an error
+	} {
+		t.Run(tc.scenario, func(t *testing.T) {
+			f := newProbeFixtureEnv(t, tc.scenario, "FAKE_CLAUDE_CLOBBER_PIDFILE='@PRIV@/claude.pid'")
+			_, err := f.run(context.Background())
+			if err == nil || !strings.Contains(err.Error(), "processes survived") {
+				t.Fatalf("err = %v, want it to mention surviving processes", err)
+			}
+			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				t.Errorf("err = %v, want it to still wrap %v", err, tc.wantErr)
+			}
+			if f.report.End != tc.want {
+				t.Errorf("End = %q, want %q", f.report.End, tc.want)
+			}
+		})
 	}
 }

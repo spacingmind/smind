@@ -39,6 +39,8 @@ type ProbeReport struct {
 	MCPServers        int // non-builtin
 	Plugins           int // non-builtin
 	StopReason        string
+	// Survivors is how many processes of the arm outlived the kill pass.
+	Survivors int
 }
 
 // ErrProbeEnded is returned (wrapped, with the End) when the arm ended
@@ -111,9 +113,26 @@ func (r *Runner) RunPromptProbe(ctx context.Context, taskID, chatID int64, provi
 	defer func() {
 		_ = client.Close()
 		kerr := arm.KillTree(context.Background(), po.Launch.PidFile, po.Launch.ArmDir, probeKillGrace)
-		if kerr != nil && !errors.Is(kerr, arm.ErrNotArmProcess) && rep.End == arm.EndDone {
+		if kerr == nil {
+			return
+		}
+		// Whatever the end state, a cleanup that did not finish is surfaced: a
+		// survivor, or a pid that is not this arm's CLI (never swallowed).
+		var se *arm.SurvivorsError
+		if errors.As(kerr, &se) {
+			rep.Survivors = len(se.PIDs)
+		}
+		if rep.End == arm.EndDone {
 			rep.End = arm.EndError
-			err = fmt.Errorf("taskrunner: probe arm processes survived: %w", kerr)
+		}
+		cleanup := fmt.Errorf("probe arm processes survived: %w", kerr)
+		if errors.Is(kerr, arm.ErrNotArmProcess) {
+			cleanup = fmt.Errorf("probe arm cleanup refused (processes may have survived): %w", kerr)
+		}
+		if err == nil {
+			err = fmt.Errorf("taskrunner: %w", cleanup)
+		} else {
+			err = fmt.Errorf("%w; %w", err, cleanup)
 		}
 	}()
 

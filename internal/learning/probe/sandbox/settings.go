@@ -108,7 +108,7 @@ func canonPath(p string) (string, error) {
 	if !filepath.IsAbs(p) {
 		return "", fmt.Errorf("%w: %q is not absolute", ErrBadPath, p)
 	}
-	if strings.ContainsAny(p, "*?[](){}!\n\r\x00\\") || strings.ContainsFunc(p, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+	if strings.ContainsAny(p, "*?[](){}!\n\r\x00\\\"$;~&<>|`") || strings.ContainsFunc(p, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
 		return "", fmt.Errorf("%w: %q contains a glob or control character", ErrBadPath, p)
 	}
 	for _, seg := range strings.Split(p, "/") {

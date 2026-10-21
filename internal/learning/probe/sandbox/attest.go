@@ -14,6 +14,7 @@ import (
 	"time"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
+	"github.com/spacingmind/smind/internal/learning/probe/arm"
 )
 
 var (
@@ -272,8 +273,7 @@ func uniq(s []string) []string {
 // RunCanary launches the canary arm for real, observes it and calls Verify.
 // The canary's cost is in the returned Observation even on failure, so the
 // caller can bill it. A failure returns a zero Attestation.
-func RunCanary(ctx context.Context, l *Launch, c *Canary, model string, now func() time.Time) (Attestation, Observation, error) {
-	var obs Observation
+func RunCanary(ctx context.Context, l *Launch, c *Canary, model string, now func() time.Time) (att Attestation, obs Observation, err error) {
 	if !Supported() {
 		return Attestation{}, obs, ErrUnsupported
 	}
@@ -290,10 +290,18 @@ func RunCanary(ctx context.Context, l *Launch, c *Canary, model string, now func
 		return Attestation{}, obs, errors.New("sandbox: RunCanary needs a launch from Prepare")
 	}
 	opts := append(base, claudecode.WithModel(model), claudecode.WithMaxTurns(8), claudecode.WithMaxBudgetUSD(0.05))
-	client, err := claudecode.New(c.ArmDir, opts...)
-	if err != nil {
-		return Attestation{}, obs, fmt.Errorf("sandbox: spawn canary: %w", err)
+	client, cerr := claudecode.New(c.ArmDir, opts...)
+	if cerr != nil {
+		return Attestation{}, obs, fmt.Errorf("sandbox: spawn canary: %w", cerr)
 	}
+	// Registered before Close so it runs after it: the whole process group of
+	// the canary is taken down, and a survivor (or an arm identity mismatch)
+	// fails the canary.
+	defer func() {
+		if kerr := arm.KillTree(context.Background(), l.PidFile, l.ArmDir, 2*time.Second); kerr != nil {
+			att, err = Attestation{}, fmt.Errorf("%w: canary cleanup: %v", ErrCanaryFailed, kerr)
+		}
+	}()
 	defer client.Close()
 
 	updates := make(chan claudecode.Message)
@@ -320,7 +328,7 @@ func RunCanary(ctx context.Context, l *Launch, c *Canary, model string, now func
 	if res.IsError {
 		return Attestation{}, obs, fmt.Errorf("%w: the CLI ended the run with an error result", ErrCanaryFailed)
 	}
-	att, err := c.Verify(obs, l, now())
+	att, err = c.Verify(obs, l, now())
 	return att, obs, err
 }
 

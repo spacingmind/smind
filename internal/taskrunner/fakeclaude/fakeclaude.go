@@ -514,6 +514,10 @@ func Run() {
 			_ = os.WriteFile(filepath.Join(wd, "env-names"), []byte(strings.Join(names, "\n")), 0o644)
 		}
 		stdin.Scan() // consume the prompt line
+		if pf := os.Getenv("FAKE_CLAUDE_CLOBBER_PIDFILE"); pf != "" {
+			// Corrupt the launcher's pidfile, so the arm cleanup cannot trust it.
+			_ = os.WriteFile(pf, []byte("garbage"), 0o600)
+		}
 		if scenario == "probe-child" {
 			// A background process in the CLI's process group, like a command
 			// the agent detached with &.
