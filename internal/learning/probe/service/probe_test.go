@@ -61,6 +61,7 @@ type fakeArms struct {
 	sys     store.Task
 	behave  func(job armJob, n int) fakeArm
 	started chan struct{}
+	now     func() time.Time // the service clock; nil = time.Now
 }
 
 func newFakeArms(t *testing.T, f *fx) *fakeArms {
@@ -89,6 +90,15 @@ func (fa *fakeArms) run(ctx context.Context, job armJob) (armOutcome, error) {
 	n := len(fa.jobs)
 	fa.jobs = append(fa.jobs, job)
 	fa.mu.Unlock()
+	// Like the real runner, refuse a stale or zero attestation.
+	now := time.Now
+	if fa.now != nil {
+		now = fa.now
+	}
+	if err := job.Attestation.Require(now()); err != nil {
+		fa.t.Errorf("arm %s got an unusable attestation: %v", job.Role, err)
+		return armOutcome{}, err
+	}
 	// The arm is a real materialised checkout and the launch dir exists.
 	if _, err := os.Stat(filepath.Join(job.ArmDir, "README.md")); err != nil {
 		fa.t.Errorf("arm dir not materialised: %v", err)
@@ -168,6 +178,7 @@ func newPfx(t *testing.T, mut func(*Deps)) *pfx {
 	})
 	p.arms = newFakeArms(t, f)
 	p.svc.armRun = p.arms.run
+	p.arms.now = func() time.Time { return p.svc.d.Now() }
 	p.att = func() (sandbox.Attestation, float64, error) {
 		return sandbox.AttestationForTest(t, p.svc.d.Now()), 0.002, nil
 	}

@@ -375,6 +375,7 @@ func (s *Service) execute(ctx context.Context, rn *running, pl plan) {
 				s.failProbe(rn, pl, "sandbox could not be attested: "+s.short(err))
 				return
 			}
+			ap.att = att
 			if p, err := st.GetProbe(rn.probeID); err == nil {
 				total = p.CanaryCostUSD + sumCost(recs)
 			}
