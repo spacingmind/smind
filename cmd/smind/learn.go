@@ -30,6 +30,8 @@ const cmdLearnUsage = `usage: smind learn <subcommand> [--json]
   curate [--workspace ID]                             curate a workspace's skills now
   mode <workspace-id> off|propose                     per-workspace learning mode
   forget <workspace-id> --yes                         hard-delete all learning data of a workspace
+  probe <proposal-id> [--quick] [--dry-run]           run an A/A2/B probe of a proposal (--dry-run: estimate only)
+  probe show <proposal-id> [--json]                    one probe: status, arms, contrast
   export <skill-id> --to repo|claude|agents|codex [--force]
                                                       copy an approved skill to a repo or user skills dir
                                                       (exit 1 if an edited file was left alone; --force overwrites)`
@@ -134,6 +136,8 @@ func cmdLearn(args []string) int {
 		return learnMode(rest)
 	case "forget":
 		return learnForget(rest)
+	case "probe":
+		return learnProbe(rest)
 	case "export":
 		return learnExport(rest)
 	default:
