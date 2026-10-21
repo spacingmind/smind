@@ -116,7 +116,7 @@ function makeStyles(theme: AppTheme) {
     bold: { fontWeight: '600' },
     italic: { fontStyle: 'italic' },
     inlineCode: { fontFamily: theme.type.mono.fontFamily, fontSize: theme.type.mono.fontSize, backgroundColor: theme.surfaceSubtle },
-    link: { color: theme.status.running, textDecorationLine: 'underline' },
+    link: { color: theme.foreground, textDecorationLine: 'underline' },
     list: { gap: theme.spacing[1] },
     listItem: { flexDirection: 'row', gap: theme.spacing[2] },
     bullet: { ...body, minWidth: 16 },
