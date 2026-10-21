@@ -24,7 +24,7 @@ import { PendingApprovalSet, subscribeToPendingApprovals } from '../taskAttentio
 import { buildTaskSections } from '../taskSections';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
-import { ReconnectingBanner } from './ConnectionStatusCard';
+import { ReconnectingBanner } from '../ui/Banner';
 
 type LoadState =
   | { kind: 'loading' }
