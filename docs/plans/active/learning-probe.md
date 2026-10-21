@@ -109,7 +109,9 @@ All against a throwaway repo, an isolated `SMIND_HOME` and a non-4648 port; neve
 
 - AC26. Eligibility reasons (each a stable code, each shown in the UI): `not_pending`, `provider_not_claude_native`,
   `no_prompt`, `no_base_sha`, `dirty_checkout`, `continuation_run`, `source_cost_unknown`, `sandbox_unavailable`, `budget`,
-  `quota`, `busy`, `windows`, `platform_unsupported` (Linux: no measured sandbox, decision 2026-10-22), `learning_off`.
+  `quota`, `busy`, `windows`, `platform_unsupported` (Linux: no measured sandbox, decision 2026-10-22), `learning_off`, `candidate_invalid` (the proposal changes
+  nothing, targets a missing/disabled/archived skill, or was made against a stale version of it). `busy` also covers a running
+  reflect/curate job of the workspace.
 - AC27. **Estimate**: `est_arm = 1.2 × source run cost`, `est_probe = n_arms × est_arm`; `dry-run` returns it with the expected
   duration and writes nothing; disabled when `est_probe > perProbeBudgetUSD` or `est_probe + spent_24h > dailyBudgetUSD`.
 - AC28. **Budget enforcement** (count-asserting): the probe bucket (`run_usage` with `purpose = 'probe'`) is separate from the
@@ -170,7 +172,7 @@ RPCs (no MCP tool, no CLI-only fields):
 
 ```ts
 type ProbeReasonCode = "not_pending" | "provider_not_claude_native" | "no_prompt" | "no_base_sha" | "dirty_checkout" | "continuation_run"
-  | "source_cost_unknown" | "sandbox_unavailable" | "budget" | "quota" | "busy" | "windows" | "platform_unsupported" | "learning_off";
+  | "source_cost_unknown" | "sandbox_unavailable" | "budget" | "quota" | "busy" | "windows" | "platform_unsupported" | "learning_off" | "candidate_invalid";
 interface ProbeReason { code: ProbeReasonCode; message: string }            // message is user-facing, one sentence
 interface ProbeEstimate {
   eligible: boolean; reasons: ProbeReason[];                                // empty iff eligible

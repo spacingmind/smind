@@ -124,3 +124,23 @@ func TestProbe_ProjectionHashMatchesRole(t *testing.T) {
 		t.Fatal("projection built without an attestation")
 	}
 }
+
+func TestCandidateSkills_PatchAppliesOnlyDescriptionAndBody(t *testing.T) {
+	t.Parallel()
+	items := []approval.Item{{Intent: gate.Intent{Action: gate.ActionPatch}, TargetSkillID: 1,
+		Result: gate.Skill{Name: "renamed", Category: "other", Description: "Use when changed.", Body: "new\n"}}}
+	got, err := candidateSkills(active("one"), "patch", items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].Name != "one" || got[0].Category != "c" || got[0].Description != "Use when changed." || got[0].Body != "new\n" {
+		t.Fatalf("got %+v: only description and body may change", got[0])
+	}
+	// A stale base version is refused.
+	stale := active("one")
+	stale[0].Version = 3
+	items[0].BaseVersion = 2
+	if _, err := candidateSkills(stale, "patch", items); !errors.Is(err, errStaleBase) {
+		t.Fatalf("err = %v, want errStaleBase", err)
+	}
+}

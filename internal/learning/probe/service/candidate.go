@@ -17,6 +17,10 @@ import (
 // it was: there would be nothing for arm B to differ by.
 var errNoChange = errors.New("the proposal does not change the active skill set")
 
+// errStaleBase is returned when a patch was computed against a version of
+// its target that is no longer the live one (approval would refuse it too).
+var errStaleBase = errors.New("the target skill changed after the proposal was made")
+
 func asProjection(k store.LearnedSkill) projection.Skill {
 	return projection.Skill{Name: k.Name, Category: k.Category, Description: k.Description, Body: k.Body}
 }
@@ -77,13 +81,11 @@ func candidateSkills(active []store.LearnedSkill, kind string, items []approval.
 			if at < 0 {
 				return nil, fmt.Errorf("item %d: patch target %d is not an active skill", i, it.TargetSkillID)
 			}
+			if k := active[slices.IndexFunc(active, func(k store.LearnedSkill) bool { return k.ID == it.TargetSkillID })]; k.Version != it.BaseVersion {
+				return nil, fmt.Errorf("item %d: skill %q is at version %d, proposal was made against %d: %w", i, k.Name, k.Version, it.BaseVersion, errStaleBase)
+			}
+			// Like approvePatch: only description and body change.
 			sk := set[at].skill
-			if res.Name != "" {
-				sk.Name = res.Name
-			}
-			if res.Category != "" {
-				sk.Category = res.Category
-			}
 			sk.Description, sk.Body = res.Description, res.Body
 			set[at].skill = sk
 		case gate.ActionDelete:
@@ -106,9 +108,15 @@ func candidateSkills(active []store.LearnedSkill, kind string, items []approval.
 	return out, nil
 }
 
-// candidateName is the skill arm B is expected to load: the first item's
-// final name, falling back to the proposal's.
-func candidateName(p store.LearnedProposal, items []approval.Item) string {
+// candidateName is the skill arm B is expected to load: a patch or bundle
+// keeps its target's name, a create takes the first item's final name,
+// falling back to the proposal's.
+func candidateName(p store.LearnedProposal, active []store.LearnedSkill, items []approval.Item) string {
+	if len(items) > 0 && (p.Kind == "patch" || p.Kind == "bundle" || items[0].Intent.Action == gate.ActionPatch) {
+		if at := slices.IndexFunc(active, func(k store.LearnedSkill) bool { return k.ID == items[0].TargetSkillID }); at >= 0 {
+			return active[at].Name
+		}
+	}
 	if len(items) > 0 && items[0].Result.Name != "" {
 		return items[0].Result.Name
 	}
@@ -161,5 +169,5 @@ func (s *Service) projections(prop store.LearnedProposal, att sandbox.Attestatio
 	if a.Hash == b.Hash {
 		return probeProjections{}, errNoChange
 	}
-	return probeProjections{a: a, b: b, name: candidateName(prop, items)}, nil
+	return probeProjections{a: a, b: b, name: candidateName(prop, live, items)}, nil
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/learning/approval"
 	"github.com/spacingmind/smind/internal/learning/gate"
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -285,5 +286,84 @@ func TestQuota_ReadsCacheOnlyZeroEndpointCalls(t *testing.T) {
 	// no provider usage function exists to call.
 	if _, ok := any(Deps{}).(interface{ FetchUsage() }); ok {
 		t.Fatal("Deps exposes a usage fetcher")
+	}
+}
+
+func TestEligibility_CandidateInvalid(t *testing.T) {
+	t.Parallel()
+	land := func(f *fx, name string) store.LearnedSkill {
+		t.Helper()
+		k, err := f.st.LandSkill(store.LandSkillInput{
+			Skill: store.LearnedSkill{WorkspaceID: f.ws.ID, Name: name, Category: "c", Description: "Use when " + name + ".", Body: "live body\n", Source: "reflector"},
+			Actor: "human", Reason: "seed", Action: "approve"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return k
+	}
+	patchOf := func(f *fx, k store.LearnedSkill, target int64, base int, body string) int64 {
+		t.Helper()
+		items := []approval.Item{{Intent: gate.Intent{Action: gate.ActionPatch, Name: k.Name}, TargetSkillID: target, BaseVersion: base,
+			Result: gate.Skill{Name: k.Name, Category: "c", Description: k.Description, Body: body}}}
+		return f.addProposal("patch", f.run.ID, gate.EvFailureRecovery, items).ID
+	}
+	cases := []struct {
+		name    string
+		invalid bool
+		setup   func(f *fx) int64
+	}{
+		{"create is valid", false, func(f *fx) int64 { return f.prop.ID }},
+		{"patch against the live version is valid", false, func(f *fx) int64 {
+			k := land(f, "learned-x")
+			return patchOf(f, k, k.ID, k.Version, "new body\n")
+		}},
+		{"patch that changes nothing", true, func(f *fx) int64 {
+			k := land(f, "learned-x")
+			return patchOf(f, k, k.ID, k.Version, k.Body)
+		}},
+		{"patch of a missing skill", true, func(f *fx) int64 {
+			k := land(f, "learned-x")
+			return patchOf(f, k, k.ID+999, k.Version, "new body\n")
+		}},
+		{"patch of a disabled skill", true, func(f *fx) int64 {
+			k := land(f, "learned-x")
+			if err := f.st.SetSkillStatus(k.ID, store.SkillDisabled, "human", "t", ""); err != nil {
+				t.Fatal(err)
+			}
+			return patchOf(f, k, k.ID, k.Version, "new body\n")
+		}},
+		{"patch of an archived skill", true, func(f *fx) int64 {
+			k := land(f, "learned-x")
+			if err := f.st.SetSkillStatus(k.ID, store.SkillArchived, "human", "t", ""); err != nil {
+				t.Fatal(err)
+			}
+			return patchOf(f, k, k.ID, k.Version, "new body\n")
+		}},
+		{"patch against a stale version", true, func(f *fx) int64 {
+			k := land(f, "learned-x")
+			id := patchOf(f, k, k.ID, k.Version, "new body\n")
+			if _, err := f.st.PatchSkill(store.PatchSkillInput{ID: k.ID, ExpectVersion: k.Version, Description: k.Description, Body: "someone else\n",
+				Actor: "human", Action: "patch", Reason: "t"}); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newFx(t)
+			id := tc.setup(f)
+			est, err := f.svc(nil).Estimate(context.Background(), id, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := hasCode(est, ReasonCandidateInvalid); got != tc.invalid {
+				t.Fatalf("candidate_invalid = %v, want %v (reasons %v)", got, tc.invalid, est.Reasons)
+			}
+			if !tc.invalid && !est.Eligible {
+				t.Fatalf("a valid candidate is ineligible: %v", est.Reasons)
+			}
+		})
 	}
 }

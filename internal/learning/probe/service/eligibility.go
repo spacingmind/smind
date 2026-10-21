@@ -3,6 +3,7 @@ package probesvc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/learning/approval"
 	"github.com/spacingmind/smind/internal/learning/gate"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -128,6 +130,12 @@ func (s *Service) assessInner(proposalID int64, quick, skipInProc bool) (plan, e
 	}
 	if p.Status != "pending" {
 		add(ReasonNotPending, "This proposal has already been decided.")
+	}
+
+	if p.Status == "pending" {
+		if why := s.candidateProblem(p); why != "" {
+			add(ReasonCandidateInvalid, why)
+		}
 	}
 
 	run, haveRun := s.sourceRun(p)
@@ -285,4 +293,29 @@ func (s *Service) sourceRun(p store.LearnedProposal) (store.Run, bool) {
 		return store.Run{}, false
 	}
 	return r, true
+}
+
+// candidateProblem validates the proposal as a candidate skill set (no
+// projection, no filesystem): "" when it can be probed, else one plain
+// sentence. It is checked before any money is spent.
+func (s *Service) candidateProblem(p store.LearnedProposal) string {
+	live, err := s.d.Store.ListLearnedSkills(p.WorkspaceID, store.SkillActive)
+	if err != nil {
+		return "The workspace's skills could not be read."
+	}
+	items, err := approval.DecodeItems(p.Intents)
+	if err != nil {
+		return "The proposal could not be read."
+	}
+	_, err = candidateSkills(live, p.Kind, items)
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, errNoChange):
+		return "Applying this proposal would not change the active skills."
+	case errors.Is(err, errStaleBase):
+		return "The skill this proposal patches has changed since it was made."
+	default:
+		return "The proposal no longer applies to the active skills."
+	}
 }

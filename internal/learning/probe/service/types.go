@@ -32,6 +32,10 @@ const (
 	ReasonWindows             = "windows"
 	ReasonPlatformUnsupported = "platform_unsupported"
 	ReasonLearningOff         = "learning_off"
+	// ReasonCandidateInvalid: the proposal changes nothing, targets a skill
+	// that is missing, disabled or archived, or was made against a stale
+	// version of it, so there is no candidate skill set to probe.
+	ReasonCandidateInvalid = "candidate_invalid"
 )
 
 // Reason is one stated cause of ineligibility; Message is one plain,
