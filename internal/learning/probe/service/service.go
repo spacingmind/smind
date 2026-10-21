@@ -213,6 +213,54 @@ func (s *Service) markCancelled(probeID int64) {
 	}
 }
 
+// settleRetries and settleBackoff bound the retries of a final probe-row write.
+const (
+	settleRetries = 3
+	settleBackoff = 50 * time.Millisecond
+)
+
+// loadProbe reads the probe row, retrying a transient failure.
+func (s *Service) loadProbe(probeID int64) (store.LearningProbe, error) {
+	var err error
+	for i := 0; i < settleRetries; i++ {
+		var p store.LearningProbe
+		if p, err = s.d.Store.GetProbe(probeID); err == nil {
+			return p, nil
+		}
+		time.Sleep(time.Duration(i+1) * settleBackoff)
+	}
+	return store.LearningProbe{}, err
+}
+
+// saveFinal writes the probe's final row, retrying a transient failure. If
+// it cannot be written, the probe is forced to failed through the one write
+// that does not depend on the row's contents, so the probe never stays
+// `running` (which would make every later probe busy until a restart). At
+// most one probe is in flight, so failing "interrupted" probes names this one.
+func (s *Service) saveFinal(p store.LearningProbe) bool {
+	update := s.d.Store.UpdateProbe
+	if s.updateProbe != nil {
+		update = s.updateProbe
+	}
+	var err error
+	for i := 0; i < settleRetries; i++ {
+		if err = update(p); err == nil {
+			return true
+		}
+		time.Sleep(time.Duration(i+1) * settleBackoff)
+	}
+	s.forceFailed(p.ID, err)
+	return false
+}
+
+// forceFailed is saveFinal's fallback (see there).
+func (s *Service) forceFailed(probeID int64, cause error) {
+	slog.Error("learning probe: store final state; forcing failed", "probe", probeID, "err", s.short(cause))
+	if _, err := s.d.Store.FailInterruptedProbes("the probe result could not be stored"); err != nil {
+		slog.Error("learning probe: force failed", "probe", probeID, "err", s.short(err))
+	}
+}
+
 // markFailed settles a probe row that never got to run.
 func (s *Service) markFailed(probeID int64, why string) {
 	p, err := s.d.Store.GetProbe(probeID)
@@ -347,8 +395,9 @@ func (s *Service) cleanupProbe(probeID, workspaceID int64) {
 // failProbe settles a probe that could not produce a verdict from its arms.
 func (s *Service) failProbe(rn *running, pl plan, why string) {
 	st := s.d.Store
-	p, err := st.GetProbe(rn.probeID)
+	p, err := s.loadProbe(rn.probeID)
 	if err != nil {
+		s.forceFailed(rn.probeID, err)
 		return
 	}
 	if arms, err := st.ListProbeArms(rn.probeID); err == nil {
@@ -362,9 +411,7 @@ func (s *Service) failProbe(rn *running, pl plan, why string) {
 	}
 	now := s.d.Now().UTC()
 	p.Status, p.Verdict, p.VerdictReason, p.Error, p.FinishedAt = statusFailed, string(verdict.ProbeFailed), why, why, &now
-	if err := st.UpdateProbe(p); err != nil {
-		slog.Warn("learning probe: settle failed probe", "probe", rn.probeID, "err", err)
-	}
+	s.saveFinal(p)
 	s.appendLedger(pl, p, "", "")
 	if s.d.Notify != nil {
 		s.d.Notify.ProbeFailed(pl.ws.ID, rn.probeID, rn.proposal, why)
@@ -556,16 +603,14 @@ func (s *Service) armTurns(runID string) int {
 
 // settleCancelled records a cancelled probe.
 func (s *Service) settleCancelled(rn *running, pl plan) {
-	st := s.d.Store
-	p, err := st.GetProbe(rn.probeID)
+	p, err := s.loadProbe(rn.probeID)
 	if err != nil {
+		s.forceFailed(rn.probeID, err)
 		return
 	}
 	now := s.d.Now().UTC()
 	p.Status, p.VerdictReason, p.FinishedAt = statusCancelled, "the probe was cancelled before it finished.", &now
-	if err := st.UpdateProbe(p); err != nil {
-		slog.Warn("learning probe: settle cancelled", "probe", rn.probeID, "err", err)
-	}
+	s.saveFinal(p)
 	if s.d.Notify != nil {
 		s.d.Notify.ProbeFinished(pl.ws.ID, rn.probeID, rn.proposal, statusCancelled, "")
 	}
@@ -575,9 +620,10 @@ func (s *Service) settleCancelled(rn *running, pl plan) {
 // stores it. The verdict never touches the proposal.
 func (s *Service) settle(rn *running, pl plan, proj probeProjections, sig *signature.Signature, roles []string, recs []*armRecord,
 	budgetStop, unsafe bool) {
-	st := s.d.Store
-	p, err := st.GetProbe(rn.probeID)
+	p, err := s.loadProbe(rn.probeID)
 	if err != nil {
+		s.forceFailed(rn.probeID, err)
+		s.notifyFailed(rn, pl, "the probe result could not be stored")
 		return
 	}
 	byRole := map[string]*armRecord{}
@@ -635,16 +681,26 @@ func (s *Service) settle(rn *running, pl plan, proj probeProjections, sig *signa
 	if len(con.Metrics) > 0 {
 		p.Contrast = mustJSON(toContrastView(con))
 	}
-	if err := st.UpdateProbe(p); err != nil {
-		slog.Warn("learning probe: store verdict", "probe", rn.probeID, "err", err)
+	if !s.saveFinal(p) {
+		s.notifyFailed(rn, pl, "the probe result could not be stored")
+		return
 	}
 	bRun := ""
 	if r := byRole[roleB]; r != nil {
 		bRun = r.runID
 	}
 	s.appendLedger(pl, p, bRun, s.armSummary(recs, proj))
-	if s.d.Notify != nil {
+	if p.Status == statusFailed {
+		s.notifyFailed(rn, pl, p.VerdictReason)
+	} else if s.d.Notify != nil {
 		s.d.Notify.ProbeFinished(pl.ws.ID, rn.probeID, rn.proposal, p.Status, p.Verdict)
+	}
+}
+
+// notifyFailed publishes ProbeFailed (ids and a short reason only).
+func (s *Service) notifyFailed(rn *running, pl plan, why string) {
+	if s.d.Notify != nil {
+		s.d.Notify.ProbeFailed(pl.ws.ID, rn.probeID, rn.proposal, why)
 	}
 }
 

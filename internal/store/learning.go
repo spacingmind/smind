@@ -827,9 +827,11 @@ func (s *Store) HasActiveLearningJob(workspaceID int64) (bool, error) {
 }
 
 // ForgetWorkspaceLearning hard-deletes every learning row of the workspace
-// (skills, versions, ledger, proposals, jobs) and resets learning_mode to
-// 'off', in one transaction. DeleteWorkspace calls this before removing the
-// workspace row (FK).
+// (skills, versions, ledger, proposals, jobs, and the probes with their arms
+// and probe runs) and resets learning_mode to 'off', in one transaction.
+// DeleteWorkspace calls this before removing the workspace row (FK). Callers
+// cancel the workspace's running probe first (probesvc.Service.CancelWorkspace),
+// so no probe goroutine writes to rows deleted here.
 func (s *Store) ForgetWorkspaceLearning(workspaceID int64) error {
 	tx, err := s.db.Begin()
 	if err != nil {

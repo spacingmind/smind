@@ -85,8 +85,9 @@ type LearningProbe struct {
 	PerProbeBudgetUSD float64 `yaml:"perProbeBudgetUSD"`
 	// DailyBudgetUSD caps all probes of a workspace per day. Default 3.00.
 	DailyBudgetUSD float64 `yaml:"dailyBudgetUSD"`
-	// QuotaSkipPercent is the skip probability when quota is missing or
-	// unknown, 1..100. Default 80.
+	// QuotaSkipPercent is the account-quota threshold, 1..100: a probe is
+	// ineligible once the cached quota use is at or above it. An unknown or
+	// missing quota does not skip a probe. Default 80.
 	QuotaSkipPercent int `yaml:"quotaSkipPercent"`
 	// ArmTimeoutMinutes bounds one probe arm. Default 15.
 	ArmTimeoutMinutes int `yaml:"armTimeoutMinutes"`

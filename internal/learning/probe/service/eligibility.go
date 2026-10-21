@@ -48,6 +48,7 @@ type Service struct {
 	canaryRun    canaryFunc
 	armRun       armFunc
 	janitorEvery time.Duration
+	updateProbe  func(store.LearningProbe) error // final-row write; nil = Store.UpdateProbe
 }
 
 // New builds a Service. Config defaults to config.DefaultLearning.

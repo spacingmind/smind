@@ -941,3 +941,52 @@ func TestBudget_DailyHeadroomClampsPerProbe(t *testing.T) {
 		t.Fatalf("second arm cap = %v, want the daily headroom ~0.698 (not the per-probe room ~0.898)", got)
 	}
 }
+
+func TestSettle_StoreFailureForcesFailedNotStuckRunning(t *testing.T) {
+	t.Parallel()
+	p := newPfx(t, nil)
+	p.svc.updateProbe = func(store.LearningProbe) error { return fmt.Errorf("disk full") }
+	pr := p.start(false)
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok, _ := p.st.ActiveProbe(); !ok {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	p.svc.wg.Wait()
+	got, err := p.st.GetProbe(pr.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "failed" {
+		t.Fatalf("status = %q, want failed (not stuck running)", got.Status)
+	}
+	if _, ok, _ := p.st.ActiveProbe(); ok {
+		t.Fatal("the probe still counts as active")
+	}
+	p.svc.updateProbe = nil
+	if est, _ := p.svc.Estimate(context.Background(), p.prop.ID, false); hasCode(est, ReasonBusy) {
+		t.Fatalf("later probes are busy: %v", est.Reasons)
+	}
+}
+
+func TestEvents_FailedProbePublishesFailedNotFinished(t *testing.T) {
+	t.Parallel()
+	p := newPfx(t, nil)
+	p.arms.behave = func(armJob, int) fakeArm { return fakeArm{end: arm.EndError} }
+	pr := p.start(false)
+	got := p.wait(pr.ID)
+	if got.Status != "failed" {
+		t.Fatalf("probe = %+v", got)
+	}
+	evs := p.notify.events()
+	if last := evs[len(evs)-1]; last != "failed" {
+		t.Fatalf("events = %v, want the last to be failed", evs)
+	}
+	for _, e := range evs {
+		if strings.HasPrefix(e, "finished:failed") {
+			t.Fatalf("a failed probe was published as finished: %v", evs)
+		}
+	}
+}
