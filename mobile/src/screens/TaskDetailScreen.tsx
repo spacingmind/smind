@@ -201,7 +201,8 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
     setLiveRunId(null);
     setChatId(null);
     chatIdRef.current = null;
-    board.onChange = () => setPermissions(board.list());
+    // PermissionBoard mutates its request objects in place: hand the memoised PermissionCard fresh copies so a state change re-renders it.
+    board.onChange = () => setPermissions(board.list().map((r) => ({ ...r })));
 
     // Subscribe to run.status BEFORE the first await: a run the daemon delivers (or starts) while this screen is still
     // loading must not be missed. Events wait in `early` until the follower (which needs the chat id) exists.
