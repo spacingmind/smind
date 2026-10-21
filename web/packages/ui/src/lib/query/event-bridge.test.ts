@@ -173,4 +173,30 @@ describe("applyDaemonEvent", () => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.workspaceTree() });
     });
   });
+
+  describe("learnedSkill.probe.*", () => {
+    const topics = ["learnedSkill.probe.started", "learnedSkill.probe.arm", "learnedSkill.probe.finished", "learnedSkill.probe.failed"];
+
+    it.each(topics)("%s invalidates that proposal's probe, estimate and its workspace's list only", (topic) => {
+      const qc = createQueryClient();
+      const invalidate = vi.spyOn(qc, "invalidateQueries");
+      applyDaemonEvent(qc, topic, { probeId: 5, proposalId: 9, workspaceId: 1, status: "running" });
+      expect(invalidate.mock.calls.map((c) => c[0]?.queryKey)).toEqual([
+        queryKeys.probe(9),
+        queryKeys.probeEstimateOf(9),
+        queryKeys.probesOfWorkspace(1),
+      ]);
+    });
+
+    it("falls back to every probe entry when the payload names nothing", () => {
+      const qc = createQueryClient();
+      const invalidate = vi.spyOn(qc, "invalidateQueries");
+      applyDaemonEvent(qc, "learnedSkill.probe.arm", null);
+      expect(invalidate.mock.calls.map((c) => c[0]?.queryKey)).toEqual([
+        queryKeys.probeAll(),
+        queryKeys.probeEstimateAll(),
+        queryKeys.probesAll(),
+      ]);
+    });
+  });
 });
