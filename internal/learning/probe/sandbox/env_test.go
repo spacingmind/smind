@@ -3,11 +3,13 @@
 package sandbox
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -132,7 +134,7 @@ func TestSandboxEnv_ValuesVerbatimAndArgs(t *testing.T) {
 
 func TestSandboxEnv_PidFileHoldsCLIPid(t *testing.T) {
 	dir := newPrivDir(t, 0o700)
-	stub := writeStub(t, dir, "echo $$ > "+shQuote(filepath.Join(dir, "self.pid"))+"\nsleep 1\n")
+	stub := writeStub(t, dir, "echo $$ > "+shQuote(filepath.Join(dir, "self.pid"))+"\nsleep 30 &\necho $! > "+shQuote(filepath.Join(dir, "child.pid"))+"\nsleep 2\n")
 	pidFile := filepath.Join(dir, "cli.pid")
 	launcher, err := WriteLauncher(dir, stub, []string{"PATH=/usr/bin:/bin"}, pidFile)
 	if err != nil {
@@ -142,18 +144,66 @@ func TestSandboxEnv_PidFileHoldsCLIPid(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	var got, self string
+	var childPid int
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		if childPid > 0 {
+			_ = syscall.Kill(childPid, syscall.SIGKILL)
+		}
+	})
+	read := func(name string) string {
+		b, _ := os.ReadFile(filepath.Join(dir, name))
+		return strings.TrimSpace(string(b))
+	}
+	var got, self, child string
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
-		b1, _ := os.ReadFile(pidFile)
-		b2, _ := os.ReadFile(filepath.Join(dir, "self.pid"))
-		got, self = strings.TrimSpace(string(b1)), strings.TrimSpace(string(b2))
-		if got != "" && self != "" {
+		got, self, child = read("cli.pid"), read("self.pid"), read("child.pid")
+		if got != "" && self != "" && child != "" {
 			break
 		}
 	}
 	if got != strconv.Itoa(cmd.Process.Pid) || self != got {
-		t.Errorf("pidfile=%q stub-pid=%q launcher-pid=%d: exec must keep one pid", got, self, cmd.Process.Pid)
+		t.Fatalf("pidfile=%q stub-pid=%q launcher-pid=%d: exec must keep one pid", got, self, cmd.Process.Pid)
+	}
+	childPid, _ = strconv.Atoi(child)
+	pid := cmd.Process.Pid
+	if pgid, err := syscall.Getpgid(pid); err != nil || pgid != pid {
+		t.Errorf("getpgid(%d) = %d, %v: the CLI must lead its own group", pid, pgid, err)
+	}
+	if pgid, err := syscall.Getpgid(childPid); err != nil || pgid != pid {
+		t.Errorf("background child %d is in group %d (%v), want %d", childPid, pgid, err, pid)
+	}
+	// kill(-pgid) takes the whole group down, which is what the arm cleanup does.
+	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
+		t.Fatalf("kill(-pgid): %v", err)
+	}
+	_ = cmd.Wait()
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if syscall.Kill(childPid, 0) != nil {
+			return
+		}
+	}
+	t.Errorf("background child %d survived kill(-pgid)", childPid)
+}
+
+// Not parallel: it swaps the package-level perlPath.
+func TestSandboxEnv_LauncherNeedsPerl(t *testing.T) {
+	defer func(old string) { perlPath = old }(perlPath)
+	dir := newPrivDir(t, 0o700)
+	notExec := filepath.Join(dir, "perl-not-exec")
+	if err := os.WriteFile(notExec, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, p := range map[string]string{"missing": filepath.Join(dir, "nope"), "not executable": notExec, "directory": dir} {
+		perlPath = p
+		pid := filepath.Join(dir, "p")
+		if _, err := WriteLauncher(dir, "/bin/true", nil, pid); !errors.Is(err, ErrUnsupported) {
+			t.Errorf("%s: want ErrUnsupported, got %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "claude-launcher.sh")); err == nil {
+			t.Errorf("%s: a launcher was written without perl", name)
+		}
 	}
 }
 

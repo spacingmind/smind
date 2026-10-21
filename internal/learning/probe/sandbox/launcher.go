@@ -11,13 +11,35 @@ import (
 
 var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// perlPath is the system perl the launcher uses to make the CLI a
+// process-group leader (there is no setsid/setpgid utility on macOS). A var so
+// a test can point it elsewhere.
+var perlPath = "/usr/bin/perl"
+
+// perlExec makes the process its own group leader and execs the rest of the
+// argv: after setpgrp(0,0) pgid == pid, and exec keeps the pid, so the pid
+// file holds both the CLI's pid and its process group, and the caller can
+// kill(-pgid) to take down everything the agent spawned.
+const perlExec = `setpgrp(0,0) or die "setpgrp: $!"; exec @ARGV or die "exec: $!"`
+
+// checkPerl fails closed, wrapping ErrUnsupported, when perl is not an
+// executable regular file: without it the CLI would not lead a group.
+func checkPerl() error {
+	info, err := os.Stat(perlPath)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		return fmt.Errorf("%w: %s is not an executable file", ErrUnsupported, perlPath)
+	}
+	return nil
+}
+
 // WriteLauncher writes an executable `#!/bin/sh` wrapper into dir that records
-// its pid in pidFile and then execs realCLI under `/usr/bin/env -i` with
+// its pid in pidFile and then execs realCLI, as a process-group leader (via
+// perl, see perlExec), under `/usr/bin/env -i` with
 // exactly the NAME=VALUE entries in env: the SDK's transport inherits the
 // daemon's whole environment and can only add to it, so an allowlist needs a
 // wrapper (WithCLIPath). `exec` keeps the pid, so pidFile holds the CLI's own
-// pid and the caller can kill the process tree from it (the SDK only signals
-// the CLI itself). It returns the script path.
+// pid, which is also its process group id: the caller kills the whole group
+// from it (the SDK only signals the CLI itself). It returns the script path.
 //
 // The env VALUES are written to disk in the script (and are briefly visible
 // in env's argv): only ever pass the non-secret allowlist (see AllowlistEnv);
@@ -38,8 +60,11 @@ func WriteLauncher(dir, realCLI string, env []string, pidFile string) (string, e
 	if err := checkLauncherDir(dir); err != nil {
 		return "", err
 	}
+	if err := checkPerl(); err != nil {
+		return "", err
+	}
 	var b strings.Builder
-	b.WriteString("#!/bin/sh\necho $$ > " + shQuote(pidFile) + "\nexec /usr/bin/env -i")
+	b.WriteString("#!/bin/sh\necho $$ > " + shQuote(pidFile) + "\nexec " + shQuote(perlPath) + " -e " + shQuote(perlExec) + " /usr/bin/env -i")
 	for _, kv := range env {
 		name, val, ok := strings.Cut(kv, "=")
 		if !ok || !envNameRE.MatchString(name) {
