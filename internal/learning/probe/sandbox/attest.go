@@ -313,7 +313,7 @@ func RunCanary(ctx context.Context, l *Launch, c *Canary, model string, now func
 		for msg := range updates {
 			if sys, ok := msg.(claudecode.SystemMessage); ok && sys.Subtype == "init" && !sawInit {
 				sawInit = true
-				obs.InitTools, obs.MCPServers, obs.Plugins = parseInit(sys.Raw)
+				obs.InitTools, obs.MCPServers, obs.Plugins = ParseInit(sys.Raw, l.ProjectionDir)
 			}
 			col.add(msg)
 		}
@@ -332,9 +332,9 @@ func RunCanary(ctx context.Context, l *Launch, c *Canary, model string, now func
 	return att, obs, err
 }
 
-// parseInit reads the init message: tool names, MCP server count and the
+// ParseInit reads the init message (the shared reader of the canary and the arm run): tool names, MCP server count and the
 // count of plugins that are not compiled into the CLI.
-func parseInit(raw json.RawMessage) (tools []string, mcp, plugins int) {
+func ParseInit(raw json.RawMessage, projectionDir string) (tools []string, mcp, plugins int) {
 	var m map[string]json.RawMessage
 	if json.Unmarshal(raw, &m) != nil {
 		return nil, 0, 0
@@ -355,7 +355,7 @@ func parseInit(raw json.RawMessage) (tools []string, mcp, plugins int) {
 	items = nil
 	_ = json.Unmarshal(m["plugins"], &items)
 	for _, it := range items {
-		if !isBuiltinPlugin(it) {
+		if !isBuiltinPlugin(it) && !IsProbePlugin(it, projectionDir) {
 			plugins++
 		}
 	}
@@ -448,4 +448,38 @@ func clipStr(s string, n int) string {
 		return s[:n]
 	}
 	return s
+}
+
+// ProbePluginName is the plugin the projection is loaded as (ProjectProbe
+// writes its plugin.json): the only non-builtin plugin an arm may report.
+const ProbePluginName = "smindprobe"
+
+// IsProbePlugin reports whether one init "plugins" entry is the arm's own
+// projection plugin: the name, the inline source the CLI reports for a
+// --plugin-dir plugin, and the path, which must be projectionDir itself (a
+// different directory, or any other plugin, is not allowed). Paths are
+// compared after resolving symlinks, because the CLI may report the
+// canonical form of a temp dir.
+func IsProbePlugin(raw json.RawMessage, projectionDir string) bool {
+	if projectionDir == "" {
+		return false
+	}
+	var p struct {
+		Name   string `json:"name"`
+		Path   string `json:"path"`
+		Source string `json:"source"`
+	}
+	if json.Unmarshal(raw, &p) != nil || p.Name != ProbePluginName || p.Source != ProbePluginName+"@inline" || p.Path == "" {
+		return false
+	}
+	return samePath(p.Path, projectionDir)
+}
+
+func samePath(a, b string) bool {
+	ra, ea := filepath.EvalSymlinks(a)
+	rb, eb := filepath.EvalSymlinks(b)
+	if ea != nil || eb != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return ra == rb
 }
