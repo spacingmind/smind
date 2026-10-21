@@ -4,7 +4,9 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sync"
 
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/learning/approval"
@@ -13,9 +15,11 @@ import (
 	"github.com/spacingmind/smind/internal/learning/gate"
 	"github.com/spacingmind/smind/internal/learning/humanskills"
 	"github.com/spacingmind/smind/internal/learning/probe/prevalence"
+	probesvc "github.com/spacingmind/smind/internal/learning/probe/service"
 	"github.com/spacingmind/smind/internal/learning/projection"
 	"github.com/spacingmind/smind/internal/learning/redact"
 	learningservice "github.com/spacingmind/smind/internal/learning/service"
+	"github.com/spacingmind/smind/internal/quota"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -114,6 +118,58 @@ func (c collectorNotifier) NotifyChanged(ws int64, reason string) {
 	c.n.NotifyChanged(ws, 0, 0, reason)
 }
 
+// cachedQuotaPercent is the probe service's QuotaPercent: it reads only
+// stored quota snapshots (the poller's cache), never a provider endpoint,
+// and returns the highest window utilisation of the cached claude accounts.
+func cachedQuotaPercent(db *store.Store) (float64, bool) {
+	accs, err := db.ListAccounts()
+	if err != nil {
+		return 0, false
+	}
+	claude := map[int64]bool{}
+	for _, a := range accs {
+		if a.Provider == string(taskrunner.ProviderClaudeNative) {
+			claude[a.ID] = true
+		}
+	}
+	snaps, err := db.ListQuotaSnapshots()
+	if err != nil {
+		return 0, false
+	}
+	// Rows are ordered by id, so the last row per account is the latest.
+	latest := map[int64]store.QuotaSnapshot{}
+	for _, s := range snaps {
+		latest[s.AccountID] = s
+	}
+	var max float64
+	found := false
+	for id, s := range latest {
+		if !claude[id] {
+			continue
+		}
+		rep, ok := quota.DecodeReport(s.UsageData)
+		if !ok {
+			continue
+		}
+		for _, w := range rep.Windows {
+			if w.UsedPct != nil && *w.UsedPct > max {
+				max = *w.UsedPct
+				found = true
+			}
+		}
+	}
+	if !found {
+		return 0, false
+	}
+	if max < 0 {
+		max = 0
+	}
+	if max > 100 {
+		max = 100
+	}
+	return max, true
+}
+
 // learningWiring is everything wireLearning needs.
 type learningWiring struct {
 	Cfg    config.Config
@@ -156,6 +212,33 @@ func wireLearning(ctx context.Context, w learningWiring) (stop func()) {
 		Config: func() config.LearningConfig { return lc },
 		Home:   w.Home,
 	})
+	// The probe service is wired unconditionally too: with learning off its
+	// estimate answers learning_off and the data stays manageable.
+	realExec := executor.New(w.DB, w.WM, w.Runner, w.Reg, w.Home)
+	probeSvc := probesvc.New(probesvc.Deps{
+		Store: w.DB, WM: w.WM, Runner: w.Runner, Reg: w.Reg, Exec: realExec,
+		Config:       func() config.LearningConfig { return lc },
+		Home:         w.Home,
+		Redact:       newLearningRedactor(w.DB, w.Secrets, userHomeDirs(w.Home)),
+		Notify:       w.API.ProbeNotifier(),
+		QuotaPercent: func() (float64, bool) { return cachedQuotaPercent(w.DB) },
+		RealCLI: func() (string, error) {
+			p, err := exec.LookPath("claude")
+			if err != nil {
+				return "", err
+			}
+			return filepath.EvalSymlinks(p)
+		},
+		HumanSkillDirs: func(ws int64) []string {
+			path := ""
+			if wsr, err := w.DB.GetWorkspace(ws); err == nil {
+				path = wsr.Path
+			}
+			home, _ := os.UserHomeDir()
+			return humanSkillDirs(path, home)
+		},
+	})
+	deps.Probe = probeSvc
 	var deliv *delivery.Service
 	var coll *learningservice.Service
 	if lc.Enabled {
@@ -201,7 +284,10 @@ func wireLearning(ctx context.Context, w learningWiring) (stop func()) {
 		}
 	}
 	w.API.SetLearning(deps)
+	probeSvc.Recover(ctx)
+	go probeSvc.Janitor(ctx)
 
+	var once sync.Once
 	return func() {
 		if coll != nil {
 			coll.Close()
@@ -209,5 +295,6 @@ func wireLearning(ctx context.Context, w learningWiring) (stop func()) {
 		if deliv != nil {
 			deliv.Close()
 		}
+		once.Do(func() { probeSvc.Close() })
 	}
 }
