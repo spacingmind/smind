@@ -1,15 +1,20 @@
 package arm
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -240,3 +245,90 @@ func TestMaterialise_ExtractRejectsTraversal(t *testing.T) {
 		t.Error("traversal wrote outside the arm")
 	}
 }
+
+func TestMaterialise_ExtractRejectsDotGit(t *testing.T) {
+	for _, name := range []string{".git/config", ".git/hooks/pre-commit", "sub/.git/HEAD", ".GIT/config", "a/.Git/x", ".git", "x/.GiT"} {
+		dir := filepath.Join(t.TempDir(), "arm-1")
+		_ = os.Mkdir(dir, 0o700)
+		if _, err := extract(tarOf(t, name, "x"), dir); !errors.Is(err, ErrUnsafeEntry) {
+			t.Errorf("entry %q: err = %v, want ErrUnsafeEntry", name, err)
+		}
+		if ents, _ := os.ReadDir(dir); len(ents) != 0 {
+			t.Errorf("entry %q: wrote %v before refusing", name, ents)
+		}
+	}
+	// Names that merely start with .git are ordinary files.
+	dir := filepath.Join(t.TempDir(), "arm-1")
+	_ = os.Mkdir(dir, 0o700)
+	for _, name := range []string{".gitignore", ".github/workflows/ci.yml", "dir/.gitattributes"} {
+		if _, err := extract(tarOf(t, name, "x"), dir); err != nil {
+			t.Errorf("entry %q refused: %v", name, err)
+		}
+	}
+	// A traversal entry is the same typed error.
+	if _, err := extract(tarOf(t, "../x", "x"), dir); !errors.Is(err, ErrUnsafeEntry) {
+		t.Errorf("traversal err = %v, want ErrUnsafeEntry", err)
+	}
+}
+
+// countingReader counts the bytes read through it.
+type countingReader struct {
+	r io.Reader
+	n atomic.Int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n.Add(int64(n))
+	return n, err
+}
+
+func TestMaterialise_ExtractStopsAtTheByteLimitWithoutReadingEverything(t *testing.T) {
+	// An endless archive of 1 KiB files, produced on demand.
+	pr, pw := io.Pipe()
+	go func() {
+		tw := tar.NewWriter(pw)
+		body := bytes.Repeat([]byte("x"), 1024)
+		for i := 0; ; i++ {
+			if err := tw.WriteHeader(&tar.Header{Name: fmt.Sprintf("f%d", i), Mode: 0o644, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
+				return
+			}
+			if _, err := tw.Write(body); err != nil {
+				return
+			}
+		}
+	}()
+	defer pr.Close()
+	cr := &countingReader{r: pr}
+	dir := filepath.Join(t.TempDir(), "arm-1")
+	_ = os.Mkdir(dir, 0o700)
+	const limit = 1 << 20
+	_, err := extractLimit(cr, dir, limit, 1<<30)
+	if !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("err = %v, want ErrTooLarge", err)
+	}
+	// Content over the limit is refused as soon as the budget is spent; the raw
+	// stream is cut off shortly after, never read to the end (there is none).
+	if got := cr.n.Load(); got > 3*limit {
+		t.Errorf("read %d bytes past a %d limit", got, limit)
+	}
+}
+
+func TestMaterialise_ExtractRefusesALyingHeaderBeforeReadingIt(t *testing.T) {
+	var b bytes.Buffer
+	tw := tar.NewWriter(&b)
+	_ = tw.WriteHeader(&tar.Header{Name: "big", Mode: 0o644, Size: 1 << 40, Typeflag: tar.TypeReg})
+	cr := &countingReader{r: io.MultiReader(&b, zeroReader{})}
+	dir := filepath.Join(t.TempDir(), "arm-1")
+	_ = os.Mkdir(dir, 0o700)
+	if _, err := extractLimit(cr, dir, 1<<20, 10); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("err = %v, want ErrTooLarge", err)
+	}
+	if got := cr.n.Load(); got > 1<<16 {
+		t.Errorf("read %d bytes for a header that already exceeds the limit", got)
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) { clear(p); return len(p), nil }

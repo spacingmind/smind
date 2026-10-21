@@ -128,3 +128,16 @@ func TestDecider_NeverPromptsHuman(t *testing.T) {
 		t.Error("deciding consumed the context deadline")
 	}
 }
+
+func TestDecider_NilPolicyDeniesAll(t *testing.T) {
+	var p *Policy
+	for _, tool := range []string{"Read", "Write", "Bash", "Glob", ""} {
+		ok, _, msg, _, _, err := p.Decide(context.Background(), claudecode.CanUseToolRequest{ToolName: tool, Input: map[string]any{"file_path": "x"}})
+		if ok || err != nil || msg == "" {
+			t.Errorf("%q: allow=%v err=%v msg=%q", tool, ok, err, msg)
+		}
+	}
+	if p.Denials() != 0 || p.Records() != nil {
+		t.Error("nil policy must report nothing")
+	}
+}

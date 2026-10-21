@@ -5,6 +5,7 @@ package arm
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -29,7 +30,8 @@ var ErrNotArmProcess = errors.New("arm: pid is not this arm's CLI")
 // group), plus the process tree below the CLI (a command that moved itself
 // to another group with setpgid still has its parent chain, unless it was
 // also reparented; that residual case runs inside the command sandbox and is
-// reported as a survivor). armDir must appear in the CLI's command line (the
+// reported as a survivor). A live CLI must be a group leader, a child of this
+// daemon and carry armDir as a whole path element in its command line (the
 // --settings value carries it), which keeps a reused pid from being killed.
 // A pidfile that is absent or names a process that is already gone and an
 // empty group is not an error. This is cleanup, not a security boundary.
@@ -42,56 +44,120 @@ func KillTree(ctx context.Context, pidFile, armDir string, grace time.Duration) 
 	if err != nil || root == 0 {
 		return err
 	}
-	table, err := processTable(ctx)
+	t1, err := processTable(ctx)
 	if err != nil {
 		return err
 	}
-	if len(table.members(root)) == 0 {
+	if len(t1.members(root)) == 0 {
 		return nil
 	}
-	if cmd, cerr := commandOf(ctx, root); cerr == nil && !strings.Contains(cmd, armDir) {
-		return ErrNotArmProcess
-	} else if cerr != nil && alive(root) {
-		return ErrNotArmProcess
+	// Identity. While the CLI itself is alive it must be a process-group
+	// leader (the launcher's setpgrp), a child of this daemon, and carry the
+	// arm dir as a whole path element in its command line. Once it is gone
+	// only its group is left, and a group id is never reused while the group
+	// has members, so kill(-root) cannot hit a stranger.
+	if _, live := t1.ppid[root]; live {
+		cmd, cerr := commandOf(ctx, root)
+		switch {
+		case t1.pgid[root] != root:
+			return fmt.Errorf("%w: %d is not a process-group leader (pgid %d)", ErrNotArmProcess, root, t1.pgid[root])
+		case t1.ppid[root] != os.Getpid():
+			return fmt.Errorf("%w: %d is not a child of this daemon", ErrNotArmProcess, root)
+		case cerr != nil || !cmdHasPath(cmd, armDir):
+			return ErrNotArmProcess
+		}
 	}
-	// A pgid that is not the CLI's own pid means setpgrp did not run: do not
-	// signal a group we do not own.
-	if pg, ok := table.pgid[root]; ok && pg != root {
-		return fmt.Errorf("arm: cli %d is not a process-group leader (pgid %d)", root, pg)
-	}
-	pids := table.members(root)
-	signalAll := func(sig syscall.Signal) {
+	pids := t1.members(root)
+	signal := func(sig syscall.Signal, targets []int) {
 		_ = syscall.Kill(-root, sig) // the whole group
-		for _, p := range pids {     // and escapees below the CLI
+		for _, p := range targets {  // and escapees below the CLI
 			_ = syscall.Kill(p, sig)
 		}
 	}
-	signalAll(syscall.SIGTERM)
+	signal(syscall.SIGTERM, pids)
 	deadline := time.Now().Add(grace)
 	for time.Now().Before(deadline) && anyAlive(pids) {
 		time.Sleep(25 * time.Millisecond)
 	}
-	// Re-collect: the TERM may have let a trap start something.
+	// Re-snapshot before the KILL: a pid may have died and been recycled
+	// during the grace, and the TERM may have let a trap start something. Only
+	// processes that are still in the arm's group/tree now, or that still have
+	// the same parent and group as when collected, are signalled again.
+	killSet := pids
 	if t2, err := processTable(ctx); err == nil {
-		pids = append(pids, t2.members(root)...)
+		killSet = stable(pids, t1, t2)
+		killSet = append(killSet, t2.members(root)...)
+	} else {
+		killSet = nil // cannot prove identity: rely on the group kill alone
 	}
-	signalAll(syscall.SIGKILL)
+	signal(syscall.SIGKILL, killSet)
 	deadline = time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && anyAlive(pids) {
+	for time.Now().Before(deadline) && anyAlive(killSet) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	var left []int
 	seen := map[int]bool{}
-	for _, p := range pids {
+	for _, p := range killSet {
 		if !seen[p] && alive(p) {
 			seen[p] = true
 			left = append(left, p)
 		}
 	}
+	if t3, err := processTable(ctx); err == nil {
+		for _, p := range t3.members(root) {
+			if !seen[p] && alive(p) {
+				seen[p] = true
+				left = append(left, p)
+			}
+		}
+	}
 	if len(left) > 0 {
-		return fmt.Errorf("arm: processes survived kill: %v", left)
+		return &SurvivorsError{PIDs: left}
 	}
 	return nil
+}
+
+// stable returns the pids of old that are still present in t2 with the same
+// parent and process group as in t1: a recycled pid almost surely differs.
+func stable(old []int, t1, t2 procTable) []int {
+	var out []int
+	for _, p := range old {
+		pp2, ok := t2.ppid[p]
+		if ok && pp2 == t1.ppid[p] && t2.pgid[p] == t1.pgid[p] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// cmdHasPath reports whether cmd contains dir as a whole path: not preceded
+// or followed by a path-name character (so /x/arm-1 does not match /x/arm-12
+// nor /y/x/arm-1). The JSON-escaped form is accepted too, since the
+// --settings value is json.Marshal output, which escapes & < > as \u00XX.
+func cmdHasPath(cmd, dir string) bool {
+	forms := []string{dir}
+	if b, err := json.Marshal(dir); err == nil && len(b) > 2 {
+		if esc := string(b[1 : len(b)-1]); esc != dir {
+			forms = append(forms, esc)
+		}
+	}
+	nameChar := func(c byte) bool {
+		return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-' || c == '/'
+	}
+	for _, f := range forms {
+		for i := 0; ; {
+			j := strings.Index(cmd[i:], f)
+			if j < 0 {
+				break
+			}
+			start, end := i+j, i+j+len(f)
+			if (start == 0 || !nameChar(cmd[start-1])) && (end == len(cmd) || !nameChar(cmd[end])) {
+				return true
+			}
+			i = start + 1
+		}
+	}
+	return false
 }
 
 // readPid returns the pid in pidFile, 0 when the file is absent.

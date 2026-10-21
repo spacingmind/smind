@@ -42,7 +42,7 @@ func (s *Service) realCanary(ctx context.Context, probeID int64) (sandbox.Attest
 	if err != nil {
 		return sandbox.Attestation{}, 0, err
 	}
-	l, err := sandbox.Prepare(sandbox.Config{ArmDir: c.ArmDir, PrivateDir: priv, RealCLI: cli})
+	l, err := sandbox.Prepare(sandbox.Config{ArmDir: c.ArmDir, ProjectionDir: c.ProjectionDir, PrivateDir: priv, RealCLI: cli})
 	if err != nil {
 		return sandbox.Attestation{}, 0, err
 	}

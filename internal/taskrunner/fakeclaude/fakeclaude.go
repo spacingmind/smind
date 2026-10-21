@@ -496,7 +496,7 @@ func Run() {
 		})
 
 	case "probe-ok", "probe-unreported", "probe-bad-tools", "probe-max-turns", "probe-max-budget",
-		"probe-flood", "probe-hang", "probe-child", "probe-env":
+		"probe-flood", "probe-hang", "probe-child", "probe-env", "probe-tools", "probe-orphan-result":
 		// Probe arm (ADR-0037) stand-ins. Every one reports the arm's exact
 		// tool allowlist at init except probe-bad-tools; the others differ in
 		// how the run ends. They run with cwd = the arm dir.
@@ -514,6 +514,10 @@ func Run() {
 			_ = os.WriteFile(filepath.Join(wd, "env-names"), []byte(strings.Join(names, "\n")), 0o644)
 		}
 		stdin.Scan() // consume the prompt line
+		if pf := os.Getenv("FAKE_CLAUDE_CLOBBER_PIDFILE"); pf != "" {
+			// Corrupt the launcher's pidfile, so the arm cleanup cannot trust it.
+			_ = os.WriteFile(pf, []byte("garbage"), 0o600)
+		}
 		if scenario == "probe-child" {
 			// A background process in the CLI's process group, like a command
 			// the agent detached with &.
@@ -539,6 +543,25 @@ func Run() {
 		}
 		text("after init")
 		switch scenario {
+		case "probe-tools", "probe-orphan-result":
+			// A Bash call and its result: the result event carries the call id
+			// but not the tool name (the real CLI does the same). The orphan
+			// variant sends a result for an id that never had a tool_use.
+			id := "tool-1"
+			if scenario == "probe-tools" {
+				writeLine(map[string]any{
+					"type": "assistant", "session_id": "sess-1",
+					"message": map[string]any{"model": "claude-fake", "content": []any{
+						map[string]any{"type": "tool_use", "id": id, "name": "Bash", "input": map[string]any{"command": "echo hi"}}}},
+				})
+			} else {
+				id = "tool-never-started"
+			}
+			writeLine(map[string]any{
+				"type": "user", "session_id": "sess-1",
+				"message": map[string]any{"content": []any{
+					map[string]any{"type": "tool_result", "tool_use_id": id, "content": "hi", "is_error": false}}},
+			})
 		case "probe-flood":
 			text(strings.Repeat("x", 200_000))
 			for stdin.Scan() {

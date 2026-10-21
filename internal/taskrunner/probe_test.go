@@ -31,6 +31,13 @@ type probeFixture struct {
 
 func newProbeFixture(t *testing.T, scenario string) *probeFixture {
 	t.Helper()
+	return newProbeFixtureEnv(t, scenario, "")
+}
+
+// newProbeFixtureEnv is newProbeFixture with extra NAME=VALUE text spliced
+// into the stand-in's wrapper environment.
+func newProbeFixtureEnv(t *testing.T, scenario, extraEnv string) *probeFixture {
+	t.Helper()
 	if !sandbox.Supported() {
 		t.Skip("the probe sandbox is macOS only")
 	}
@@ -49,7 +56,7 @@ func newProbeFixture(t *testing.T, scenario string) *probeFixture {
 		}
 	}
 	wrapper := filepath.Join(root, "fake-claude")
-	script := "#!/bin/sh\nTASKRUNNER_FAKE_CLAUDE_CLI=1 FAKE_CLAUDE_SCENARIO='" + scenario + "' exec '" + self + "' \"$@\"\n"
+	script := "#!/bin/sh\nTASKRUNNER_FAKE_CLAUDE_CLI=1 FAKE_CLAUDE_SCENARIO='" + scenario + "' " + strings.ReplaceAll(extraEnv, "@PRIV@", priv) + " exec '" + self + "' \"$@\"\n"
 	if err := os.WriteFile(wrapper, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +65,7 @@ func newProbeFixture(t *testing.T, scenario string) *probeFixture {
 		t.Fatal(err)
 	}
 	f := &probeFixture{r: New(nil), launch: l, report: &ProbeReport{}, calls: &atomic.Int32{}}
-	f.po = ProbeOptions{Launch: l, MaxTurns: 3, CostCapUSD: 0.05, Timeout: 20 * time.Second, OnReport: func(r ProbeReport) {
+	f.po = ProbeOptions{Launch: l, Attestation: sandbox.AttestationForTest(t, time.Now()), MaxTurns: 3, CostCapUSD: 0.05, Timeout: 20 * time.Second, OnReport: func(r ProbeReport) {
 		f.calls.Add(1)
 		*f.report = r
 	}}
@@ -82,18 +89,23 @@ func TestRunPromptProbe_RequiresLaunchAndCaps(t *testing.T) {
 		spawned.Add(1)
 		return nil, errors.New("must not spawn")
 	}
-	f := &probeFixture{}
-	if sandbox.Supported() {
-		f = newProbeFixture(t, "probe-ok")
-	}
+	f := newProbeFixture(t, "probe-ok")
 	good := f.po
-	good.Launch = f.launch
+	mod := func(fn func(po *ProbeOptions)) ProbeOptions { po := good; fn(&po); return po }
 	cases := map[string]ProbeOptions{
-		"no launch":      {MaxTurns: 1, CostCapUSD: 1, Timeout: time.Second},
-		"no turns":       {Launch: f.launch, CostCapUSD: 1, Timeout: time.Second},
-		"no cost cap":    {Launch: f.launch, MaxTurns: 1, Timeout: time.Second},
-		"no timeout":     {Launch: f.launch, MaxTurns: 1, CostCapUSD: 1},
-		"negative turns": {Launch: f.launch, MaxTurns: -1, CostCapUSD: 1, Timeout: time.Second},
+		"no launch":      mod(func(po *ProbeOptions) { po.Launch = nil }),
+		"unprepared":     mod(func(po *ProbeOptions) { po.Launch = &sandbox.Launch{ArmDir: po.Launch.ArmDir} }),
+		"no turns":       mod(func(po *ProbeOptions) { po.MaxTurns = 0 }),
+		"no cost cap":    mod(func(po *ProbeOptions) { po.CostCapUSD = 0 }),
+		"no timeout":     mod(func(po *ProbeOptions) { po.Timeout = 0 }),
+		"negative turns": mod(func(po *ProbeOptions) { po.MaxTurns = -1 }),
+		"no attestation": mod(func(po *ProbeOptions) { po.Attestation = sandbox.Attestation{} }),
+		"stale attestation": mod(func(po *ProbeOptions) {
+			po.Attestation = sandbox.AttestationForTest(t, time.Now().Add(-sandbox.AttestationTTL-time.Minute))
+		}),
+		"future attestation": mod(func(po *ProbeOptions) {
+			po.Attestation = sandbox.AttestationForTest(t, time.Now().Add(time.Hour))
+		}),
 	}
 	for name, po := range cases {
 		var reports []ProbeReport
@@ -259,5 +271,96 @@ func TestRunPromptProbe_WrongToolSurfaceFailsClosed(t *testing.T) {
 		if e.Type == EventTypeText {
 			t.Errorf("an event was forwarded after the bad init: %+v", e)
 		}
+	}
+}
+
+// The real CLI reports a tool result as a tool-call event with the call id and
+// no tool name: it belongs to the call seen earlier and must not trip the
+// allowlist (found by the live arm run, 2026-10-22).
+func TestRunPromptProbe_ResultEventWithoutNameBelongsToItsCall(t *testing.T) {
+	f := newProbeFixture(t, "probe-tools")
+	events, err := f.run(context.Background())
+	if err != nil {
+		t.Fatalf("err = %v, want nil (report %+v)", err, *f.report)
+	}
+	if f.report.End != arm.EndDone {
+		t.Errorf("End = %s, want done", f.report.End)
+	}
+	var calls, results int
+	for _, e := range events {
+		if e.Type == EventTypeToolCall {
+			calls++
+			if e.ToolStatus != ToolStatusRunning {
+				results++
+			}
+		}
+	}
+	if calls < 2 || results < 1 {
+		t.Errorf("tool-call events = %d (finished %d), want the call and its result", calls, results)
+	}
+}
+
+// A result for a call id the arm never started has no allowed tool behind it.
+func TestRunPromptProbe_OrphanResultFailsClosed(t *testing.T) {
+	f := newProbeFixture(t, "probe-orphan-result")
+	_, err := f.run(context.Background())
+	if !errors.Is(err, ErrIsolationViolated) {
+		t.Fatalf("err = %v, want ErrIsolationViolated", err)
+	}
+	if f.report.End != arm.EndError {
+		t.Errorf("End = %s, want error", f.report.End)
+	}
+}
+
+func TestRunPromptProbe_AttestationIsAGate(t *testing.T) {
+	f := newProbeFixture(t, "probe-ok")
+	var spawned atomic.Int32
+	f.r.newClaudeClient = func(string, ...claudecode.Option) (claudeBackend, error) {
+		spawned.Add(1)
+		return nil, errors.New("must not spawn")
+	}
+	for name, tc := range map[string]struct {
+		att  sandbox.Attestation
+		want error
+	}{
+		"zero":  {sandbox.Attestation{}, sandbox.ErrNoAttestation},
+		"stale": {sandbox.AttestationForTest(t, time.Now().Add(-sandbox.AttestationTTL-time.Minute)), sandbox.ErrStaleAttestation},
+	} {
+		f.po.Attestation = tc.att
+		_, err := f.run(context.Background())
+		if !errors.Is(err, tc.want) || f.report.End != arm.EndError {
+			t.Errorf("%s: err = %v, End = %q", name, err, f.report.End)
+		}
+	}
+	if spawned.Load() != 0 {
+		t.Errorf("a client was spawned %d time(s) without a valid attestation", spawned.Load())
+	}
+}
+
+// A failed cleanup is surfaced whatever the end state: here the run itself ends
+// `capped`, and the corrupted pidfile (so the arm's processes cannot be proven
+// gone) is still reported, wrapped beside ErrProbeEnded.
+func TestArmEnd_CleanupFailureSurfacedOnEveryEnd(t *testing.T) {
+	for _, tc := range []struct {
+		scenario string
+		want     arm.End
+		wantErr  error
+	}{
+		{"probe-max-budget", arm.EndCapped, ErrProbeEnded},
+		{"probe-ok", arm.EndError, nil}, // a normal end becomes an error
+	} {
+		t.Run(tc.scenario, func(t *testing.T) {
+			f := newProbeFixtureEnv(t, tc.scenario, "FAKE_CLAUDE_CLOBBER_PIDFILE='@PRIV@/claude.pid'")
+			_, err := f.run(context.Background())
+			if err == nil || !strings.Contains(err.Error(), "processes survived") {
+				t.Fatalf("err = %v, want it to mention surviving processes", err)
+			}
+			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				t.Errorf("err = %v, want it to still wrap %v", err, tc.wantErr)
+			}
+			if f.report.End != tc.want {
+				t.Errorf("End = %q, want %q", f.report.End, tc.want)
+			}
+		})
 	}
 }

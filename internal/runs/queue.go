@@ -564,8 +564,8 @@ func validateProbe(provider taskrunner.Provider, opts []StartOption) error {
 	if provider != taskrunner.ProviderClaudeNative {
 		return fmt.Errorf("runs: start: %w (got %q)", taskrunner.ErrIsolationUnsupported, provider)
 	}
-	if o.probe.Launch == nil {
-		return errors.New("runs: start: WithProbe requires a sandbox launch")
+	if !o.probe.Launch.Prepared() {
+		return errors.New("runs: start: WithProbe requires a launch from sandbox.Prepare")
 	}
 	return nil
 }

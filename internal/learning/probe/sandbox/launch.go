@@ -35,7 +35,15 @@ type Launch struct {
 	SettingsJSON          string
 	Tools                 []string
 	Policy                *Policy
+
+	// prepared is set only by Prepare: a Launch built any other way (a
+	// literal, a copy of a zero value) cannot produce Options and is
+	// rejected by every consumer.
+	prepared bool
 }
+
+// Prepared reports whether l came from Prepare.
+func (l *Launch) Prepared() bool { return l != nil && l.prepared }
 
 // String omits the settings and paths' contents beyond the identifiers
 // needed to debug: never an env value.
@@ -89,7 +97,7 @@ func Prepare(cfg Config) (*Launch, error) {
 		policy.ReadOnlyDirs = []string{proj}
 	}
 	return &Launch{ArmDir: arm, ProjectionDir: proj, CLIPath: path, PidFile: pidFile, SettingsJSON: settings,
-		Tools: AllowedTools(), Policy: policy}, nil
+		Tools: AllowedTools(), Policy: policy, prepared: true}, nil
 }
 
 // nested reports whether child is parent or lies inside it.
@@ -102,9 +110,13 @@ func nested(child, parent string) bool {
 // add model, max turns and budget themselves. There is deliberately no
 // permission prompt tool and no bypass flag: P0 measured the policy is never
 // consulted headless, so the settings sandbox is the boundary and the policy
-// is belt and braces. WithEnv is called once: the SDK replaces the list on
+// is belt and braces. A Launch that did not come from Prepare yields nil.
+// WithEnv is called once: the SDK replaces the list on
 // every call.
 func (l *Launch) Options() []claudecode.Option {
+	if !l.Prepared() {
+		return nil
+	}
 	none := "none"
 	opts := []claudecode.Option{
 		claudecode.WithSettingSources(),

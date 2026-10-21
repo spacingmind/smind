@@ -46,8 +46,8 @@ type armJob struct {
 	CostCapUSD    float64
 	OutputCap     int64
 	Timeout       time.Duration
-	// Attestation is the canary's proof for this probe; the real runner
-	// hands it to the launch (ProbeOptions.Attestation once 4a lands it).
+	// Attestation is the canary's proof for this probe; RunPromptProbe
+	// requires it before it spawns anything.
 	Attestation sandbox.Attestation
 	setRun      func(runID string)
 }
@@ -276,7 +276,7 @@ func (s *Service) realArm(ctx context.Context, job armJob) (armOutcome, error) {
 	}
 	var mu sync.Mutex
 	var rep taskrunner.ProbeReport
-	po := taskrunner.ProbeOptions{Launch: l, MaxTurns: job.MaxTurns, CostCapUSD: job.CostCapUSD, OutputCapBytes: job.OutputCap,
+	po := taskrunner.ProbeOptions{Launch: l, Attestation: job.Attestation, MaxTurns: job.MaxTurns, CostCapUSD: job.CostCapUSD, OutputCapBytes: job.OutputCap,
 		Timeout: job.Timeout, OnReport: func(r taskrunner.ProbeReport) { mu.Lock(); rep = r; mu.Unlock() }}
 	runID, err := s.d.Reg.Start(context.Background(), s.d.WM, s.d.Runner, task.ID, 0, taskrunner.ProviderClaudeNative, job.Prompt,
 		taskrunner.PermissionSettings{}, taskrunner.ThinkingLevelUnspecified,

@@ -17,7 +17,11 @@ import (
 // ProbeOptions configures ONE sandboxed arm run (ADR-0037). Launch is
 // required and comes from sandbox.Prepare.
 type ProbeOptions struct {
-	Launch         *sandbox.Launch
+	Launch *sandbox.Launch
+	// Attestation is the canary's proof that the sandbox confines a real CLI;
+	// RunPromptProbe re-checks it before every arm start and spawns nothing
+	// without a valid one.
+	Attestation    sandbox.Attestation
 	MaxTurns       int               // > 0 required
 	CostCapUSD     float64           // > 0 required: passed as --max-budget-usd AND enforced by the arm.Meter
 	OutputCapBytes int64             // 0 = no output cap
@@ -35,6 +39,8 @@ type ProbeReport struct {
 	MCPServers        int // non-builtin
 	Plugins           int // non-builtin
 	StopReason        string
+	// Survivors is how many processes of the arm outlived the kill pass.
+	Survivors int
 }
 
 // ErrProbeEnded is returned (wrapped, with the End) when the arm ended
@@ -70,12 +76,17 @@ func (r *Runner) RunPromptProbe(ctx context.Context, taskID, chatID int64, provi
 	switch {
 	case po.Launch == nil:
 		return fail(errors.New("taskrunner: probe run requires a sandbox launch"))
+	case !po.Launch.Prepared():
+		return fail(errors.New("taskrunner: probe run requires a launch from sandbox.Prepare"))
 	case po.MaxTurns <= 0:
 		return fail(errors.New("taskrunner: probe run requires MaxTurns > 0"))
 	case po.CostCapUSD <= 0:
 		return fail(errors.New("taskrunner: probe run requires CostCapUSD > 0"))
 	case po.Timeout <= 0:
 		return fail(errors.New("taskrunner: probe run requires Timeout > 0"))
+	}
+	if aerr := po.Attestation.Require(time.Now()); aerr != nil {
+		return fail(fmt.Errorf("taskrunner: probe arm refused: %w", aerr))
 	}
 	if !sandbox.Supported() {
 		return fail(sandbox.ErrUnsupported)
@@ -102,9 +113,26 @@ func (r *Runner) RunPromptProbe(ctx context.Context, taskID, chatID int64, provi
 	defer func() {
 		_ = client.Close()
 		kerr := arm.KillTree(context.Background(), po.Launch.PidFile, po.Launch.ArmDir, probeKillGrace)
-		if kerr != nil && !errors.Is(kerr, arm.ErrNotArmProcess) && rep.End == arm.EndDone {
+		if kerr == nil {
+			return
+		}
+		// Whatever the end state, a cleanup that did not finish is surfaced: a
+		// survivor, or a pid that is not this arm's CLI (never swallowed).
+		var se *arm.SurvivorsError
+		if errors.As(kerr, &se) {
+			rep.Survivors = len(se.PIDs)
+		}
+		if rep.End == arm.EndDone {
 			rep.End = arm.EndError
-			err = fmt.Errorf("taskrunner: probe arm processes survived: %w", kerr)
+		}
+		cleanup := fmt.Errorf("probe arm processes survived: %w", kerr)
+		if errors.Is(kerr, arm.ErrNotArmProcess) {
+			cleanup = fmt.Errorf("probe arm cleanup refused (processes may have survived): %w", kerr)
+		}
+		if err == nil {
+			err = fmt.Errorf("taskrunner: %w", cleanup)
+		} else {
+			err = fmt.Errorf("%w; %w", err, cleanup)
 		}
 	}()
 
@@ -119,6 +147,9 @@ func (r *Runner) RunPromptProbe(ctx context.Context, taskID, chatID int64, provi
 		violated string
 		tripped  bool
 		obs      sandbox.Observation
+		// callTool remembers the tool name of each call id: the CLI's result
+		// event for a call carries the id but not the name.
+		callTool = map[string]string{}
 	)
 	updates := make(chan claudecode.Message)
 	forwardDone := make(chan struct{})
@@ -137,9 +168,17 @@ func (r *Runner) RunPromptProbe(ctx context.Context, taskID, chatID int64, provi
 			}
 			for _, e := range claudeEvents(msg) {
 				mu.Lock()
-				if e.Type == EventTypeToolCall && !tripped && !allowedProbeTool(e.ToolName) {
-					tripped, violated = true, "tool call "+safeToolName(e.ToolName)
-					cancel()
+				if e.Type == EventTypeToolCall && !tripped {
+					name := e.ToolName
+					if name == "" {
+						name = callTool[e.ToolCallID]
+					} else if e.ToolCallID != "" {
+						callTool[e.ToolCallID] = name
+					}
+					if !allowedProbeTool(name) {
+						tripped, violated = true, "tool call "+safeToolName(name)
+						cancel()
+					}
 				}
 				if !tripped && meter.Output(len(e.Text)+len(e.ToolInput)+len(e.ToolResult)) == arm.EndOutput {
 					cancel()
@@ -212,9 +251,11 @@ func (r *Runner) RunPromptProbe(ctx context.Context, taskID, chatID int64, provi
 	// Done event waits for a reader.
 	_ = client.Close()
 	r.sendFailedUsage(ctx, events, result)
+	// Not selecting on ctx.Done: a cancelled caller (end killed) still reads
+	// the final event, and select would pick the closed ctx at random. The
+	// timer bounds the wait when nobody reads.
 	select {
 	case events <- Event{Type: EventTypeDone, StopReason: "probe_" + string(end)}:
-	case <-ctx.Done():
 	case <-time.After(2 * time.Second):
 	}
 	if didTrip {

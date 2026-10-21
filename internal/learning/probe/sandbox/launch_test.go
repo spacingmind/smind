@@ -31,7 +31,7 @@ func prepDirs(t *testing.T) (root, arm, priv, proj string) {
 func TestSandboxLaunch_OptionsShape(t *testing.T) {
 	_, arm, priv, proj := prepDirs(t)
 	argsFile := filepath.Join(priv, "argv.txt")
-	l := &Launch{ArmDir: arm, ProjectionDir: proj, Tools: AllowedTools(), Policy: &Policy{ArmDir: arm}}
+	l := &Launch{ArmDir: arm, ProjectionDir: proj, Tools: AllowedTools(), Policy: &Policy{ArmDir: arm}, prepared: true}
 	var err error
 	if l.SettingsJSON, err = Settings(arm, proj); err != nil {
 		t.Fatal(err)
@@ -189,3 +189,19 @@ func TestSandboxLogs_NoSecrets(t *testing.T) {
 }
 
 func fmtSprint(v any) string { return fmt.Sprint(v) }
+
+func TestSandboxLaunch_UnpreparedHasNoOptions(t *testing.T) {
+	for name, l := range map[string]*Launch{"nil": nil, "zero": {}, "literal": {ArmDir: "/x", CLIPath: "/y", Tools: AllowedTools(), Policy: &Policy{}}} {
+		if l.Prepared() || l.Options() != nil {
+			t.Errorf("%s launch: Prepared=%v options=%d", name, l.Prepared(), len(l.Options()))
+		}
+	}
+	if !Supported() {
+		return
+	}
+	_, arm, priv, _ := prepDirs(t)
+	l, err := Prepare(Config{ArmDir: arm, PrivateDir: priv, RealCLI: fakeCLI(t, t.TempDir(), nil)})
+	if err != nil || !l.Prepared() || len(l.Options()) == 0 {
+		t.Errorf("prepared launch: %v prepared=%v", err, l.Prepared())
+	}
+}

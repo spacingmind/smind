@@ -53,6 +53,15 @@ func TestSandboxSettings_Table(t *testing.T) {
 		{"control char in arm", "/nonexistent-p0/a\x01m", proj, ""},
 		{"newline in arm", "/nonexistent-p0/a\nm", proj, ""},
 		{"empty arm", "", proj, ""},
+		{"quote in arm", "/nonexistent-p0/a\"m", proj, ""},
+		{"dollar in arm", "/nonexistent-p0/a$m", proj, ""},
+		{"semicolon in arm", "/nonexistent-p0/a;m", proj, ""},
+		{"tilde in arm", "/nonexistent-p0/~m", proj, ""},
+		{"ampersand in arm", "/nonexistent-p0/a&m", proj, ""},
+		{"angle in arm", "/nonexistent-p0/a<m", proj, ""},
+		{"pipe in arm", "/nonexistent-p0/a|m", proj, ""},
+		{"backtick in arm", "/nonexistent-p0/a`m", proj, ""},
+		{"ampersand in projection", "/nonexistent-p0/arm", "/nonexistent-p0/p&roj", ""},
 		{"relative projection", "/nonexistent-p0/arm", "rel/proj", ""},
 		{"glob in projection", "/nonexistent-p0/arm", "/nonexistent-p0/pr?oj", ""},
 	}
@@ -140,5 +149,31 @@ func TestSandboxSettings_SystemPathsIncludeClaudeTmp(t *testing.T) {
 	}
 	if !found {
 		t.Error("the /private/tmp/claude-<uid> entry is missing")
+	}
+}
+
+func TestSandboxSettings_HomebrewIsNarrowed(t *testing.T) {
+	paths := SystemReadPaths()
+	have := map[string]bool{}
+	for _, p := range paths {
+		have[p] = true
+	}
+	if have["/opt/homebrew"] {
+		t.Error("the whole /opt/homebrew is readable")
+	}
+	for _, sub := range []string{"bin", "Cellar", "opt", "lib", "share", "include", "Library"} {
+		if !have["/opt/homebrew/"+sub] {
+			t.Errorf("/opt/homebrew/%s missing", sub)
+		}
+	}
+	raw, err := Settings("/nonexistent-p0/arm", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	allow := fsOf(decode(t, raw))["allowRead"].([]any)
+	for _, a := range allow {
+		if s, _ := a.(string); s == "/opt/homebrew" {
+			t.Error("allowRead holds the whole /opt/homebrew")
+		}
 	}
 }
