@@ -106,3 +106,132 @@ describe("composer consumes queued inserts", () => {
     expect(sent[0]!.attachments).toBeUndefined();
   });
 });
+
+// --- Diff pane entry points ---------------------------------------------------------------------------------------
+
+import { DiffViewerPane } from "@/components/diff-viewer-pane";
+import { useFocusedChatStore } from "@/stores/focused-chat-store";
+import type { Task, TaskFilesResult } from "@/lib/types";
+
+const TASK: Task = {
+  ID: 1,
+  WorkspaceID: 1,
+  SpaceID: null,
+  Title: "Task A",
+  Status: "active",
+  WorktreePath: "/tmp/a",
+  Branch: "task-a",
+  CreatedAt: "2024-01-01T00:00:00Z",
+  UpdatedAt: "2024-01-01T00:00:00Z",
+  ArchivedAt: null,
+};
+
+const hunkDiff = (path: string, headers: string[]) =>
+  `diff --git a/${path} b/${path}\nindex a29bdeb..0226208 100644\n--- a/${path}\n+++ b/${path}\n${headers.map((h) => `${h}\n line\n+added\n`).join("")}`;
+
+const RANGE_DIFF = hunkDiff("a.go", ["@@ -10,3 +12,9 @@"]);
+const TWO_HUNKS = hunkDiff("a.go", ["@@ -1,2 +1,5 @@", "@@ -30,2 +33,8 @@"]);
+const DELETION_DIFF = "diff --git a/a.go b/a.go\nindex a29bdeb..0226208 100644\n--- a/a.go\n+++ b/a.go\n@@ -5,2 +4,0 @@\n-gone\n-gone2\n";
+
+const attachmentKindsOf = (l: AttachmentLimits) => l.kinds ?? ["image", "file", "file_ref"];
+
+async function renderPanes(files: TaskFilesResult["files"], diff: string, limits: AttachmentLimits = LIMITS) {
+  useFocusedChatStore.setState({ byTask: { 1: 10 } });
+  const client = new FakeWsClient();
+  const sent: { prompt: string; attachments?: AttachmentRequest[] }[] = [];
+  render(
+    <>
+      <DiffViewerPane client={client} task={TASK} />
+      <Composer
+        client={client}
+        taskId={1}
+        chatId={10}
+        isDefaultChat
+        boundProvider={null}
+        connected
+        runningRunId={null}
+        queuedItems={[]}
+        onCancelQueued={async () => {}}
+        onSubmit={async (_p, prompt, _perm, _t, _w, _m, attachments) => {
+          sent.push({ prompt, attachments });
+          return { kind: "started", runId: "run-x" };
+        }}
+        onStop={async () => {}}
+      />
+    </>,
+  );
+  client.nth("daemon.info", 0).resolve({ attachments: limits });
+  client.nth("task.files", 0).resolve({ files });
+  await flush();
+  for (let i = 0; i < client.calls.filter((c) => c.method === "task.fileDiff").length; i++) {
+    client.nth("task.fileDiff", i).resolve({ diff });
+  }
+  await flush();
+  await flush();
+  // The file button appears once the daemon info lands; the hunk buttons one effect later.
+  if (attachmentKindsOf(limits).includes("file_ref")) await screen.findAllByRole("button", { name: /Add (hunk )?to chat/ });
+  return { client, sent };
+}
+
+describe("diff pane Add to chat", () => {
+  it("the file header button inserts @path and the next send carries a file_ref with no range", async () => {
+    const { sent } = await renderPanes([{ path: "a.go", status: "modified", staged: false }], RANGE_DIFF);
+    fireEvent.click(screen.getByRole("button", { name: "Add to chat" }));
+    await flush();
+    expect(area()).toHaveValue("@a.go ");
+    fireEvent.click(screen.getByTestId("chat-send-button"));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.attachments).toEqual([{ kind: "file_ref", path: "a.go" }]);
+  });
+
+  it("a hunk header inserts @path#L12-L20 and the send carries line and endLine", async () => {
+    const { sent } = await renderPanes([{ path: "a.go", status: "modified", staged: false }], RANGE_DIFF);
+    fireEvent.click(screen.getByRole("button", { name: "Add hunk to chat" }));
+    await flush();
+    expect(area()).toHaveValue("@a.go#L12-L20 ");
+    fireEvent.click(screen.getByTestId("chat-send-button"));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.attachments).toEqual([{ kind: "file_ref", path: "a.go", line: 12, endLine: 20 }]);
+  });
+
+  it("two hunks of one file both go out with their own ranges", async () => {
+    const { sent } = await renderPanes([{ path: "a.go", status: "modified", staged: false }], TWO_HUNKS);
+    for (const b of screen.getAllByRole("button", { name: "Add hunk to chat" })) fireEvent.click(b);
+    await flush();
+    expect(area()).toHaveValue("@a.go#L1-L5 @a.go#L33-L40 ");
+    fireEvent.click(screen.getByTestId("chat-send-button"));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.attachments).toEqual([
+      { kind: "file_ref", path: "a.go", line: 1, endLine: 5 },
+      { kind: "file_ref", path: "a.go", line: 33, endLine: 40 },
+    ]);
+  });
+
+  it("a pure-deletion hunk adds the file without a range", async () => {
+    await renderPanes([{ path: "a.go", status: "modified", staged: false }], DELETION_DIFF);
+    fireEvent.click(screen.getByRole("button", { name: "Add hunk to chat" }));
+    await flush();
+    expect(area()).toHaveValue("@a.go ");
+  });
+
+  it("a deleted file's button is disabled with its reason and it has no hunk buttons", async () => {
+    await renderPanes([{ path: "a.go", status: "deleted", staged: false }], DELETION_DIFF);
+    const button = screen.getByRole("button", { name: "Add to chat" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAccessibleDescription("Deleted in this task");
+    expect(screen.queryByRole("button", { name: "Add hunk to chat" })).toBeNull();
+  });
+
+  it("a renamed file uses its new path", async () => {
+    await renderPanes([{ path: "new/name.go", status: "R", staged: false }], RANGE_DIFF);
+    fireEvent.click(screen.getByRole("button", { name: "Add to chat" }));
+    await flush();
+    expect(area()).toHaveValue("@new/name.go ");
+  });
+
+  it("the buttons are absent when the daemon lacks file_ref in kinds", async () => {
+    await renderPanes([{ path: "a.go", status: "modified", staged: false }], RANGE_DIFF, { ...LIMITS, kinds: ["image", "file"] });
+    expect(screen.queryByRole("button", { name: "Add to chat" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add hunk to chat" })).toBeNull();
+  });
+});

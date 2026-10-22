@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Diff2HtmlUI } from "diff2html/lib/ui/js/diff2html-ui.js";
 import "diff2html/bundles/css/diff2html.min.css";
 
-import { resolveDiffLine, type DiffLineRef } from "@/lib/diff-lines";
+import { parseHunkHeader, resolveDiffLine, type DiffLineRef, type HunkRange } from "@/lib/diff-lines";
 
 /** Unified (one column) vs side-by-side (two) -- diff2html's own `outputFormat` values, kept verbatim so there's no second vocabulary to translate. */
 export type DiffOutputFormat = "line-by-line" | "side-by-side";
@@ -26,6 +27,7 @@ export function DiffRender({
   diff,
   outputFormat,
   onSelectLine,
+  renderHunkAction,
   testId,
 }: {
   diff: string;
@@ -38,8 +40,12 @@ export function DiffRender({
    * belongs to -- there's no React parent per file to read it from.
    */
   onSelectLine?: (line: DiffLineRef, element: Element) => void;
+  /** Content appended to each `@@` hunk header row (the new-side range of that hunk); rendered into the row through a portal. */
+  renderHunkAction?: (hunk: HunkRange) => ReactNode;
   testId?: string;
 }) {
+  const [hunkHosts, setHunkHosts] = useState<{ host: HTMLElement; hunk: HunkRange }[]>([]);
+  const wantsHunks = renderHunkAction !== undefined;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const onSelectLineRef = useRef(onSelectLine);
   onSelectLineRef.current = onSelectLine;
@@ -48,6 +54,7 @@ export function DiffRender({
     const el = containerRef.current;
     if (!el) return;
     el.innerHTML = "";
+    setHunkHosts([]);
     if (!diff) return;
     const ui = new Diff2HtmlUI(el, diff, {
       outputFormat,
@@ -57,7 +64,8 @@ export function DiffRender({
     });
     ui.draw();
     ui.highlightCode();
-  }, [diff, outputFormat]);
+    if (wantsHunks) setHunkHosts(mountHunkHosts(el, outputFormat));
+  }, [diff, outputFormat, wantsHunks]);
 
   return (
     <div
@@ -71,6 +79,30 @@ export function DiffRender({
         const line = resolveDiffLine(element);
         if (line) handler(line, element);
       }}
-    />
+    >
+      {renderHunkAction && hunkHosts.map(({ host, hunk }, i) => createPortal(renderHunkAction(hunk), host, String(i)))}
+    </div>
   );
+}
+
+/**
+ * One empty host span at the end of each `@@` header row, for the hunk action. Side-by-side draws the header text on the
+ * left side only (the right one is blank), so that is where the hunk's one button goes.
+ */
+function mountHunkHosts(container: HTMLElement, format: DiffOutputFormat): { host: HTMLElement; hunk: HunkRange }[] {
+  const scope = format === "side-by-side" ? Array.from(container.querySelectorAll(".d2h-file-side-diff")).slice(0, 1) : [container];
+  const out: { host: HTMLElement; hunk: HunkRange }[] = [];
+  for (const root of scope) {
+    for (const line of root.querySelectorAll<HTMLElement>("td.d2h-info > .d2h-code-line, td.d2h-info > .d2h-code-side-line")) {
+      const hunk = parseHunkHeader(line.textContent ?? "");
+      if (!hunk) continue;
+      const host = document.createElement("span");
+      host.className = "ml-2 inline-flex align-middle";
+      host.dataset.hunkAction = "";
+      line.classList.add("group");
+      line.appendChild(host);
+      out.push({ host, hunk });
+    }
+  }
+  return out;
 }

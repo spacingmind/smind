@@ -18,6 +18,9 @@ import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTaskDiff } from "@/hooks/use-task-diff";
 import { useFocusedChatId } from "@/stores/focused-chat-store";
+import { AddToChatButton } from "@/components/add-to-chat-button";
+import { useAddToChat } from "@/hooks/use-add-to-chat";
+import type { MentionRef } from "@/lib/file-mention";
 import { suggestCommitMessage } from "@/lib/commit-suggestion";
 import { formatDiffStat } from "@/lib/diff-stat";
 import { subscribeDiffReveal, takeDiffReveal } from "@/lib/diff-reveal";
@@ -85,6 +88,7 @@ export function DiffViewerPane({
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
   const focusedChatId = useFocusedChatId(task.ID);
+  const addToChat = useAddToChat(task.ID);
   const [files, setFiles] = useState<TaskFile[] | null>(null);
   const [fileStates, setFileStates] = useState<Record<string, FileState>>({});
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -493,6 +497,7 @@ export function DiffViewerPane({
         {prefs.view === "by-file" &&
           files?.map((file) => (
             <FileRow
+              onAddToChat={addToChat.canAdd ? addToChat.add : undefined}
               key={file.path}
               taskId={task.ID}
               file={file}
@@ -607,6 +612,7 @@ function FileRow({
   onToggleCollapse,
   onStage,
   onMarkViewed,
+  onAddToChat,
   disabled,
 }: {
   taskId: number;
@@ -622,6 +628,8 @@ function FileRow({
   onToggleCollapse: () => void;
   onStage: (staged: boolean) => void;
   onMarkViewed: () => void;
+  /** Present when the daemon accepts `file_ref` and a chat can receive it. */
+  onAddToChat?: (ref: MentionRef) => void;
   disabled: boolean;
 }) {
   const diff = state?.diff ?? null;
@@ -630,7 +638,7 @@ function FileRow({
     <div className="mb-1 rounded-lg" data-testid={`diff-file-${file.path}`}>
       <div
         className={cn(
-          "flex h-8 items-center gap-2 rounded-lg px-2 transition-colors hover:bg-surface-hover",
+          "group flex h-8 items-center gap-2 rounded-lg px-2 transition-colors hover:bg-surface-hover",
           !collapsed && "bg-surface-hover",
         )}
       >
@@ -656,6 +664,14 @@ function FileRow({
           <span className="min-w-0 flex-1 truncate">{file.path}</span>
           <FileStatusMarker status={file.status} />
         </button>
+        {onAddToChat && (
+          <AddToChatButton
+            label="Add to chat"
+            disabledReason={file.status === "deleted" ? "Deleted in this task" : undefined}
+            onAdd={() => onAddToChat({ path: file.path })}
+            testId={`add-to-chat-${file.path}`}
+          />
+        )}
         <label className="flex shrink-0 items-center gap-1 text-ui-sm text-foreground-subtle">
           <input
             type="checkbox"
@@ -677,6 +693,18 @@ function FileRow({
               diff={diff}
               outputFormat={outputFormat}
               onSelectLine={onSelectLine}
+              renderHunkAction={
+                onAddToChat && file.status !== "deleted"
+                  ? (hunk) => (
+                      <AddToChatButton
+                        label="Add hunk to chat"
+                        className="size-5"
+                        onAdd={() => onAddToChat({ path: file.path, ...hunk })}
+                        testId="add-hunk-to-chat"
+                      />
+                    )
+                  : undefined
+              }
               testId={`diff-container-${file.path}`}
             />
           )}
