@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/ghctx"
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
@@ -94,7 +95,7 @@ func newTestWSServerWithCoordinator(t *testing.T, wm *workspace.Manager, acctReg
 	profReg := profiles.New(db)
 	mcpReg := mcpservers.New(db)
 
-	hs := methodHandlers(wm, acctReg, nil, reg, treg, profReg, mcpReg, coord, db)
+	hs := methodHandlers(wm, acctReg, nil, reg, treg, profReg, mcpReg, coord, db, &githubHolder{c: ghctx.New()})
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.URL.Query().Get("token")
 		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {

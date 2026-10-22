@@ -185,7 +185,8 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 
 	acctReg.SetNotifier(busAccountNotifier{bus: bus})
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
-	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, mcpReg, coord, db)
+	gh := &githubHolder{c: ghctx.New()}
+	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, mcpReg, coord, db, gh)
 	info := newDaemonInfo(time.Now())
 	for method, h := range gitHandlers(gitSvc, focus) {
 		hs[method] = h
@@ -195,7 +196,6 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	}
 	hs["daemon.info"] = handleDaemonInfo(info, reg)
 	hs["run.attachment"] = handleRunAttachment(reg)
-	gh := &githubHolder{c: ghctx.New()}
 	hs["forge.search"] = handleForgeSearch(wm, gh)
 	learning := newLearningHost(db, bus)
 	for method, h := range learningHandlers(learning) {
