@@ -194,7 +194,7 @@ pub async fn run_with_auth(
         if stable {
             backoff.reset();
         }
-        tokio::time::sleep(backoff.next()).await;
+        tokio::time::sleep(backoff.next_delay()).await;
     }
 }
 

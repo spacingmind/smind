@@ -30,6 +30,11 @@ describe("query keys", () => {
     expect(queryKeys.providerTest("anthropic")).toEqual(["provider.test", "anthropic"]);
   });
 
+  it("attachment keys are the RPC name plus its params", () => {
+    expect(queryKeys.daemonInfo()).toEqual(["daemon.info"]);
+    expect(queryKeys.runAttachment("run_1", "2")).toEqual(["run.attachment", { runId: "run_1", id: "2" }]);
+  });
+
   it("learning keys are the RPC name plus its params, and the partial keys prefix the full ones", () => {
     expect(queryKeys.learningStatus()).toEqual(["learning.status"]);
     expect(queryKeys.learnedSkills(3, ["active"])).toEqual([

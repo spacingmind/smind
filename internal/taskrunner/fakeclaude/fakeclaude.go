@@ -224,6 +224,9 @@ func Run() {
 			}
 		}
 		stdin.Scan() // consume the prompt line
+		// The raw stream-json user message, for tests asserting what the
+		// prompt text carried (e.g. appended attachment blocks).
+		_ = os.WriteFile(filepath.Join(wd, "prompt-line"), []byte(stdin.Text()), 0o644)
 		writeLine(map[string]any{
 			"type":       "assistant",
 			"session_id": "sess-1",

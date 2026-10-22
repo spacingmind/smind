@@ -24,13 +24,13 @@ else. History, queued prompts and reconnects show the same attachments.
 | 3 | **Native image delivery**: ACP `image` blocks gated on `promptCapabilities.image`, codex `localImage`, `provider.list` `images` field | M | peer-sonnet | one gated live call per runner |
 | 3s | **SDK** (DEPENDENCY, repo `claude-agent-sdk-go`): `ContentBlock`, `QueryBlocks`/`PromptBlocks`, fake-CLI test, release v0.4.0. Then **3b** smind `go.mod` bump + claude-native native blocks | S + S | Lead drafts SDK PR if asked (O7) | one live call |
 | 4 | **`@file`** (daemon half is small, folded into PR 2's wiring): exported `files.Resolve`, the `file_ref` resolver and its tests. No new RPC: `task.searchIndex` already lists the paths | S | with PR 2 | none |
-| 5 | **GitHub**: `github.search`, accept-time `gh` fetch and snapshot, `<github-pr>`/`<github-issue>` rendering | M | peer-glm | none (`runGH` stub); one manual `gh` check |
+| 5 | **GitHub**: `forge.search`, accept-time `gh` fetch and snapshot, `<pr>`/`<issue>` rendering | M | peer-glm | none (`runGH` stub); one manual `gh` check |
 | 6a | **Web composer + timeline**: store, queries, tray, attach menu, paste/drop/picker, submit, errors, thumbnails/chips in the timeline and queue, lightbox, `reuse` on Re-run/Continue/Retry | L | peer-glm | none |
 | 6b | **Web `@` popover** | M | peer-glm | none |
 | 6c | **Web GitHub picker** | M | peer-glm | none |
 | 7 | **Desktop**: confirm paste/drop reach the webview in the macOS app; set `dragDropEnabled` only if they do not | S | Lead | macOS app, no model call |
 
-Order: 1 → 2 → (3 ‖ 5, disjoint write scopes: runners / a new github package) → 6a (needs 2) → 6b (needs only `task.searchIndex`, already on develop; independent of the daemon PRs) → 6c
+Order: 1 → 2 → (3 ‖ 5, disjoint write scopes: runners / a new ghctx package) → 6a (needs 2) → 6b (needs only `task.searchIndex`, already on develop; independent of the daemon PRs) → 6c
 (needs 5) → 7. 3s runs in parallel from acceptance; 3b waits for the SDK release. PR 6a may start as soon as PR 2's wire contract is
 merged (the contract is frozen in ADR §1).
 
@@ -63,7 +63,7 @@ forges, audio/video, restoring attachments on "Edit & resend" (O6), attachment q
   runs with the same set.
 - AC9. **`run.attachment`** returns the bytes of an `image`/`file` of that run, `not_found` for any other id, kind or run.
 - AC10. **`reuse`** copies a stored attachment of an earlier run of the same task into a new set; a run of another task, an unknown id and a
-  `file_ref`/`github_*` target are rejected; deleting the old run leaves the new one intact.
+  `file_ref`/`pr`/`issue` target are rejected; deleting the old run leaves the new one intact.
 - AC11. **Fallback delivery.** With no native image path, every runner (claude-native, ACP, codex) receives the user text followed by rendered
   context blocks exactly as ADR §3.1 (golden-tested), image notes carry the absolute path, and claude-native gets `Delivery.AddDirs` for the set.
 - AC12. **Never logged.** A sentinel inside a base64 payload appears in none of: daemon log output, the event bus, `run_events`, `request_log`,
@@ -92,16 +92,16 @@ forges, audio/video, restoring attachments on "Edit & resend" (O6), attachment q
 - AC21. The `@` popover lists paths from `task.searchIndex` (tracked + untracked-not-ignored), filtered and ranked client-side by `lib/fuzzy-match.ts`; at most 30 rows.
 - AC22. A `file_ref` is accepted only for an existing path inside the worktree after symlink resolution; `..`, an outside absolute path and a symlink
   pointing out are `outside_workspace`; the stored path is normalised, relative, forward-slashed. Nothing reads the file's contents.
-- AC23. A ref already present literally in the prompt text is not repeated in the prompt; one that is not present is listed under "Referenced paths".
+- AC23. A ref already present literally in the prompt text is not repeated in the prompt; one that is not present is listed under "Referenced paths". A ref with `line`/`endLine` is always listed with its range (`(line 12)`, `(lines 12–20)`); a range on a directory, `endLine` without `line`, or `endLine` < `line` is `invalid_attachment`.
 
 ### GitHub (PR 5)
 
-- AC24. `github.search` runs `gh pr list` / `gh issue list` in the worktree with a fixed `--json` list, 30 results max; a numeric or URL query resolves by number;
+- AC24. `forge.search` runs `gh pr list` / `gh issue list` in the worktree with a fixed `--json` list, 30 results max; a numeric or URL query resolves by number;
   results are cached 10 s and single-flighted per (repo, kind, query); a missing/unauthenticated `gh` or a repo without a GitHub remote returns the
   typed error, not a crash.
-- AC25. `github_pr` / `github_issue` attachments are fetched at accept time with argv-only `gh … view`, `repo` regex-validated, a 20 s timeout and the body
+- AC25. `pr` / `issue` (with `forge`) attachments are fetched at accept time with argv-only `gh … view`, `repo` regex-validated, a 20 s timeout and the body
   clipped to 32 KiB; the snapshot is stored in metadata; a failed fetch rejects the request and creates no run or queue row.
-- AC26. The agent sees `<github-pr …>…</github-pr>` / `<github-issue …>` with the third-party-content notice (ADR §3.1); the body is not in learning
+- AC26. The agent sees `<pr forge="github" …>…</pr>` / `<issue …>` with the third-party-content notice (ADR §3.1); the body is not in learning
   transcripts; no GitHub call is made on replay, reconnect or queued delivery.
 
 ### Web composer and timeline (PR 6a, 6b, 6c)
@@ -119,7 +119,7 @@ forges, audio/video, restoring attachments on "Edit & resend" (O6), attachment q
 - AC32. Re-run, Continue and Retry-with-higher-effort resend the run's attachments via `reuse`.
 - AC33. `@` after whitespace opens the popover (not inside an email); results come from `task.searchIndex` via a TanStack `useQuery`, filtered client-side;
   ↑/↓/Enter/Tab/Esc work; selecting inserts `@path` (quoted when needed), records the mention, and submit sends a `file_ref` for each mention still in the text.
-- AC34. The GitHub picker lists PRs/issues from `github.search`, shows loading, empty and error (incl. `gh` missing) states, and adds a PR/issue pill.
+- AC34. The GitHub picker lists PRs/issues from `forge.search`, shows loading, empty and error (incl. `gh` missing) states, and adds a PR/issue pill.
 - AC35. A provider with `images: "no"` shows the pill hint and still sends. All query keys come from `lib/query-keys.ts`; icons come from `lib/icons.ts`;
   shared state lives in the zustand store; no per-component `client.call` effects.
 - AC36. **Visuals.** Light and dark screenshots of: composer with tray (image + file + PR), drop-over state, `@` popover, attach menu, GitHub picker, timeline with
@@ -184,6 +184,15 @@ flicker, reload/reconnect shows them), `resubmit-reuse.test.tsx` (Re-run, Contin
 
 **Desktop**: manual on the macOS app: paste image, drop file, drop image, attach picker; `cargo test` and clippy (AC37).
 
+## Amendment 2026-10-22 (forge-neutral names) and follow-ups
+
+The Human changed the wire to forge-neutral names (ADR-0038 status block): kinds `pr` / `issue` with `forge` (only `"github"` in v1, other values `invalid_attachment`),
+the picker RPC `forge.search`, the single `forge_*` error vocabulary of ADR-0039 §6, `file_ref` optional `line` / `endLine`, and the forge capability as the top-level `daemon.info.forge`
+object (`{provider, cli}`). Tests added by this: `TestValidate_ForgeDefaultsToGithubAndRejectsOthers`, `TestValidate_FileRefLineRange`, `TestRender_GoldenFileRefLines`,
+`TestForgeSearchRPC_RejectsOtherForges` (PR #459), `TestDaemonInfo_ReportsAttachmentLimits` (asserts no `attachments.forge` and `daemon.info.forge`). Follow-ups, not in this plan: auto-attach a pasted PR URL (own remote only), a structured `review`
+kind with daemon-side context, richer PR metadata (`isDraft`, `mergeable`, `headRepository`), `forge.github.authenticated/login/host` in `daemon.info`, non-GitHub forges. PR polling, PR
+status and linking a task to a PR are ADR-0039's, not this item's.
+
 ## Implementation notes (deviations from the ADR text, same behaviour)
 
 - Attachments reach the runners through a context value (`taskrunner.WithPromptAttachments`, the `DeliveryFrom(ctx)` pattern) and a `runs.WithAttachments` StartOption, instead of changing
@@ -199,7 +208,7 @@ Taken from ADR-0038 (Accepted 2026-10-22).
 | # | Decision | Status |
 |---|---|---|
 | D1–D3 | inline base64 (cap 10 MiB direct); `@file` is a path; web + desktop first | Human, fixed |
-| A1 | one typed `attachments` list; `image`, `file`, `file_ref`, `github_pr`, `github_issue`, `reuse` | accepted |
+| A1 | one typed `attachments` list; `image`, `file`, `file_ref`, `pr`, `issue`, `reuse` | accepted |
 | A2 | bytes on disk under `$SMIND_HOME/attachments/<set>`, metadata in SQLite | accepted (O2, O3) |
 | A3 | claude-native native blocks wait for the SDK; fallback until then | accepted (O7: Lead drafts the SDK PR; Human merges and releases) |
 | A4 | GitHub fetched on the daemon at accept time, snapshot stored | accepted (O5) |

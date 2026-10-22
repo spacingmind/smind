@@ -172,7 +172,8 @@ Names are the exact `it(...)` / `Test...` titles.
 - [x] W — workspace row context menu (single `items` list feeds "..." and the context menu)
 - [x] C — CLI `task approve <run> <req> <opt>`
 - [x] Adversarial review, light/dark screenshots, real-browser terminal check
-- [ ] Windows re-test by the user (see PR description); then `git mv` to `completed/`
+- [x] Merged: #284 (`fix: terminal keeps shell keys, live runs via permission.pending, workspace context menu, CLI task approve (Windows QA)`).
+- [ ] Windows re-test by the user (see PR description); then `git mv` to `completed/`. **Still open as of 2026-10-22 (plans hygiene): no evidence of a real Windows re-test. Kept in `active/` for the Human to either run it or accept the plan as closed.**
 
 ## Validation
 

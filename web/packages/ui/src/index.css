@@ -370,6 +370,25 @@
     --diff-deletion: var(--diff-removed);
 
     /*
+     * Diff syntax-highlight tokens (highlight.js classes, wired below at
+     * `.hljs-*`). Every value clears 4.5:1 (WCAG AA) against the card
+     * (context rows), the +/- row tints and their word-level highlights
+     * -- lib/syntax-contrast.test.ts enforces it, so retune with that
+     * test, not by eye.
+     */
+    --syntax-keyword: #90218f;
+    --syntax-string: #09622b;
+    --syntax-comment: #4f5560;
+    --syntax-number: #814600;
+    --syntax-function: #1b49c9;
+    --syntax-type: #0d5c78;
+    --syntax-attr: #754d00;
+    --syntax-meta: #693ca9;
+    --syntax-regexp: #a3232a;
+    --syntax-symbol: #913b00;
+    --syntax-builtin: #095f5f;
+
+    /*
      * `--content-size`/`--content-line-height` are the one surviving pair
      * from the retired type-role scale -- see the `@theme inline` comment
      * above.
@@ -525,6 +544,19 @@
     --diff-addition: var(--diff-added);
     --diff-deletion: var(--diff-removed);
 
+    /* Diff syntax tokens: see :root's comment above (same AA rule, against the dark rows). */
+    --syntax-keyword: #eab1ff;
+    --syntax-string: #8fdc9a;
+    --syntax-comment: #c3c6cc;
+    --syntax-number: #ffb86b;
+    --syntax-function: #a3c8ff;
+    --syntax-type: #65d5e9;
+    --syntax-attr: #f0c674;
+    --syntax-meta: #d1baff;
+    --syntax-regexp: #ffb1b1;
+    --syntax-symbol: #ffb491;
+    --syntax-builtin: #6ee0c8;
+
     /* `--content-size`/`--content-line-height`: see :root's comment above. */
     --content-size: calc(15px * var(--font-scale-content, 1));
     --content-line-height: 1.6;
@@ -597,24 +629,118 @@
 }
 
 /*
- * diff-render.tsx's other import, highlight.js's `github.css` theme, has
- * no CSS-var API of its own (unlike diff2html above) -- it's a fixed
- * light theme, and its `.hljs` base rule hardcodes a white background
- * and near-black text on every line of code, painting a solid white bar
- * across every diff line regardless of this app's theme (zcode-visual-
- * parity plan, P4 screenshot pass -- glaring in dark mode). Only the
- * base rule is neutralized here: `background: transparent` lets the
- * diff2html row underneath show through (context lines fall back to the
- * pane's own background; +/- lines keep their `--d2h-ins/del-bg-color`),
- * and `color: inherit` lets un-highlighted characters follow the app's
- * `--foreground`. Every `.hljs-*` token-specific rule (keywords,
- * strings, ...) is untouched -- per-token dark-mode syntax colors are a
- * separate concern this phase doesn't take on (docs/design.md: syntax
- * highlighting is its own static token set, left alone).
+ * highlight.js's classes carry no color of their own now (diff-render.tsx
+ * no longer imports a fixed `github.css` theme -- it painted a solid white
+ * bar behind every diff line in dark mode and made strings unreadable
+ * there, zcode-visual-parity P4 / git-github-ux G6). The base rule keeps
+ * `background: transparent` so the diff2html row underneath shows through
+ * (context lines fall back to the pane's own background; +/- lines keep
+ * their `--d2h-ins/del-bg-color`), and `color: inherit` lets
+ * un-highlighted characters follow the app's `--foreground`.
  */
 .hljs {
   background: transparent !important;
   color: inherit !important;
+}
+
+/*
+ * Per-token colors for the same highlight.js markup, off the
+ * `--syntax-*` theme tokens above (light and dark each get their own,
+ * AA-checked against the diff rows) -- replaces the fixed light-only
+ * `github.css` theme diff-render.tsx used to import, whose blue strings
+ * and comments were near-invisible on the dark card. Related token
+ * classes share a color; `!important` only matches the base rule's
+ * (and beats the library stylesheet's own load order).
+ */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-doctag,
+.hljs-template-tag,
+.hljs-template-variable,
+.hljs-variable.language_ {
+  color: var(--syntax-keyword) !important;
+}
+.hljs-string,
+.hljs-addition,
+.hljs-bullet {
+  color: var(--syntax-string) !important;
+}
+.hljs-comment,
+.hljs-quote,
+.hljs-formula {
+  color: var(--syntax-comment) !important;
+  font-style: italic;
+}
+.hljs-number,
+.hljs-literal {
+  color: var(--syntax-number) !important;
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-section,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: var(--syntax-function) !important;
+}
+.hljs-type,
+.hljs-title.class_,
+.hljs-class .hljs-title,
+.hljs-name,
+.hljs-tag {
+  color: var(--syntax-type) !important;
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-variable,
+.hljs-params {
+  color: var(--syntax-attr) !important;
+}
+.hljs-meta,
+.hljs-meta .hljs-keyword,
+.hljs-link,
+.hljs-deletion {
+  color: var(--syntax-meta) !important;
+}
+.hljs-regexp,
+.hljs-selector-attr,
+.hljs-selector-pseudo {
+  color: var(--syntax-regexp) !important;
+}
+.hljs-symbol,
+.hljs-subst {
+  color: var(--syntax-symbol) !important;
+}
+.hljs-built_in,
+.hljs-code {
+  color: var(--syntax-builtin) !important;
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 700;
+}
+
+/*
+ * diff2html's line-number gutters (`.d2h-code-linenumber`,
+ * `.d2h-code-side-linenumber`) are `position: absolute` with no
+ * positioned ancestor, so they escape the file block's
+ * `overflow: hidden` / scroller and paint over whatever overlaps the
+ * diff -- the review drafts, the submit bar, the commit bar (git-github-ux
+ * G6). Making each scroller and the file wrapper their own containing
+ * block clips them to the file, and `isolation: isolate` keeps the
+ * gutters' stacking inside it so outside overlays only need an ordinary
+ * `relative z-10` + opaque background to cover them.
+ */
+.d2h-wrapper .d2h-file-wrapper {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.d2h-wrapper .d2h-file-diff,
+.d2h-wrapper .d2h-file-side-diff {
+  position: relative;
 }
 
 /*

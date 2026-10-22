@@ -47,7 +47,7 @@ export function ReviewComments({
   if (drafts.length === 0 && !pending) return null;
 
   return (
-    <div className="mt-2 space-y-2 border-l-2 border-warning/40 pl-3" data-testid="review-comments">
+    <div className="relative z-10 mt-2 space-y-2 border-l-2 border-warning/40 bg-background pl-3" data-testid="review-comments">
       {drafts.map((draft) => (
         <div
           key={draft.id}

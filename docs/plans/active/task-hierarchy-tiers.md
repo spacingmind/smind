@@ -512,6 +512,13 @@ dialogs' counts equal the server selection and both actions work end to end.
 
 ## Progress
 
+**Status 2026-10-22 (plans hygiene): PARTIAL, effectively shipped.** Every PR below is merged (#289, #291, #293, #295, #376; also #373 `disposition`, #423 tree-guard flake fix). What is left is evidence, not code:
+
+- U1-AC4 (nested sidebar tree, light/dark screenshots): recorded as partially verified.
+- U2-AC3 (task header lineage, screenshots): recorded as unverified.
+- Decision 6.1 (an explicit `role` column) is not built and waits on the Human only if wanted; the tier stays derived from structure.
+- Suggested close: the Human accepts the two screenshot gaps (the sidebar was later restyled in `completed/sidebar-polish.md`) or asks for one screenshot pass, then the plan moves to `completed/`.
+
 - 2026-10-11 Phase A: gap analysis and this spec written.
 - [x] PR-G per-tree concurrency guard (H6): #289 (merged 2026-10-11)
 - [x] PR-T `task.tree` read model + MCP `task_tree` and `task_wait {childrenOf}` (H5, H7, H8, H10): #291 (merged)

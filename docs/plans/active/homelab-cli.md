@@ -928,6 +928,31 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
 
 ## Progress
 
+**Status 2026-10-22 (plans hygiene): PARTIAL — 18 of 21 PRs merged; the other three are blocked on the Human.**
+
+| PR | Merged as |
+|---|---|
+| P0 relay-host rename | #338 |
+| P1 install scripts | #339 |
+| P2 relay offer QR + quickstart | #340 |
+| P3 desktop "Add via relay link" | #342 |
+| P4 direct connections + password | #349 |
+| P5 first-run + onboarding | #357 |
+| P6 `smind update` | #341 |
+| P7 release signing + CLI verification | #343 |
+| P8 `smind service` (systemd, launchd) | #348 |
+| P9 `smind service` Windows | #353 (fix #391) |
+| P10 older-daemon notice + `daemon.info` | #356 |
+| P11 Docker image | #358 (fix #443) |
+| P12a / P12b multi-device relay | #345 / #346 |
+| P12c CA-verified TLS | #361, #363 |
+| P13a desktop / P13b mobile multi-device | #351 / #350 |
+| P13c relay device password | #360, #362 |
+
+- **Not started, BLOCKED on ADR-0031 decision 12 (hosted-relay hosting; also 27–32, 36): P14 (deploy and ops), P15 (open enrolment), P16 (`relay connect` with no address).** No `deploy/relay` content exists in the tree. This is the roadmap's "deploy the relay" item.
+- **Unverified (the plan's own "not verified" lists, none recorded as closed):** a real signed release with `smind update` end to end on Linux/Windows 11; a real reboot/logout cycle for `smind service`; Windows 10 and the Windows 11 client (CI is Server 2025 only); a real phone or simulator for the mobile relay and password paths; the published Docker image on real amd64 and arm64 hosts; the real Tauri app against a real relay with a password; a real macOS first-run and a real ssh host (P5); a real proxy (Cloudflare) in front of the relay.
+- The AC list was not re-audited per criterion in this pass; the per-PR Validation sections below remain the record.
+
 - 2026-10-13: ADR-0031 and this plan written (docs only), revised after studying Paseo, then for the Human's first
   hosted-relay answers.
 - 2026-10-14: revised for the Human's new decisions: hosted-relay hosting is **pending** (options D/C/B recorded, B no longer

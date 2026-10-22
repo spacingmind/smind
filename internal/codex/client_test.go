@@ -2,8 +2,10 @@ package codex
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -270,5 +272,41 @@ func TestClient_WithThreadPolicy(t *testing.T) {
 				t.Fatalf("thread/start policy = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestCodex_LocalImageInput(t *testing.T) {
+	t.Parallel()
+	c, cwd := newTestClient(t, "")
+	if err := os.WriteFile(filepath.Join(cwd, "record-prompt-blocks"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	threadID, err := c.NewSession(ctx, cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updates := make(chan Update, 16)
+	if _, err := c.Prompt(ctx, threadID, "look", updates, WithLocalImages([]string{"/abs/a.png", "/abs/b.png"})); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(cwd, "turn-input"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Input []map[string]string `json:"input"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode %q: %v", raw, err)
+	}
+	want := []map[string]string{
+		{"type": "text", "text": "look"},
+		{"type": "localImage", "path": "/abs/a.png"},
+		{"type": "localImage", "path": "/abs/b.png"},
+	}
+	if !reflect.DeepEqual(got.Input, want) {
+		t.Fatalf("input = %v, want %v", got.Input, want)
 	}
 }

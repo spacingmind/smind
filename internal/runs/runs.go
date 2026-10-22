@@ -13,6 +13,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/spacingmind/smind/internal/attach"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
@@ -119,6 +120,10 @@ type RunStatus struct {
 	// Origin is who authored the run's prompt (human, orchestrator,
 	// agent); omitted when unknown.
 	Origin string `json:"origin,omitempty"`
+
+	// Attachments is the public metadata of the prompt's attachments
+	// (ADR-0038); never bytes. Omitted when the run had none.
+	Attachments []attach.Item `json:"attachments,omitempty"`
 }
 
 // RunUsage is RunStatus's usage totals. Every numeric field is nil when the

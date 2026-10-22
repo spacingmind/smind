@@ -2,10 +2,10 @@ import { act } from "react";
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { useRunTimeline } from "@/hooks/use-run-timeline";
+import { mergeAttachments, useRunTimeline } from "@/hooks/use-run-timeline";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
-import type { RunLogsResult, RunSummary, RunUsage } from "@/lib/types";
+import type { AttachmentMeta, RunLogsResult, RunSummary, RunUsage } from "@/lib/types";
 
 function usage(overrides: Partial<RunUsage> = {}): RunUsage {
   return { inputTokens: 100, outputTokens: 20, source: "claude_result", ...overrides };
@@ -337,5 +337,48 @@ describe("useRunTimeline live adoption", () => {
 
     expect(client.calls.filter((c) => c.method === "run.list")).toHaveLength(1);
     expect(result.current.runs).toEqual([]);
+  });
+});
+
+describe("useRunTimeline attachments (ADR-0038)", () => {
+  const preview: AttachmentMeta = { id: "1", kind: "image", name: "a.png", mimeType: "image/png", size: 4, previewUrl: "blob:local" };
+  const stored: AttachmentMeta = { id: "1", kind: "image", name: "a.png", mimeType: "image/png", size: 4, width: 2, height: 2 };
+
+  it("run.list attachments seed the entry (a reload shows them)", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+    client.nth("run.list", 0).resolve([summary({ attachments: [stored] })]);
+    await flush();
+    expect(result.current.runs?.[0]?.attachments).toEqual([stored]);
+  });
+
+  it("sends attachments only when non-empty and echoes the previews optimistically", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+    client.nth("run.list", 0).resolve([]);
+    await flush();
+    const req = [{ kind: "image" as const, name: "a.png", mimeType: "image/png", data: "AAAA" }];
+    let submitted!: Promise<unknown>;
+    await act(async () => {
+      submitted = result.current.submitPrompt("claude-native", "hi", undefined, undefined, "queue", undefined, req, [preview]);
+    });
+    expect(client.nth("run.start", 0).params).toMatchObject({ attachments: req });
+    await act(async () => {
+      client.nth("run.start", 0).resolve({ runId: "run-2" });
+      await submitted;
+    });
+    expect(result.current.runs?.[0]?.attachments).toEqual([preview]);
+
+    await act(async () => {
+      void result.current.submitPrompt("claude-native", "plain");
+    });
+    expect(client.nth("run.start", 1).params).not.toHaveProperty("attachments");
+  });
+
+  it("mergeAttachments keeps the local thumbnail when the daemon's metadata arrives", () => {
+    expect(mergeAttachments([preview], [stored])).toEqual([{ ...stored, previewUrl: "blob:local" }]);
+    expect(mergeAttachments([preview], undefined)).toEqual([preview]);
+    expect(mergeAttachments(undefined, [stored])).toEqual([stored]);
+    expect(mergeAttachments([{ ...preview, id: "2" }], [stored])).toEqual([stored]);
   });
 });

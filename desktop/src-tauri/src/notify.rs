@@ -133,7 +133,7 @@ mod linux {
 
 /// MAX_CLICK_WAITERS bounds how many macOS notifications may be parked
 /// waiting for a click at once.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 const MAX_CLICK_WAITERS: usize = 4;
 
 /// should_wait_for_click is the pure cap policy: a notification only gets
