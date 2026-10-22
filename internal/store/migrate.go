@@ -241,6 +241,26 @@ var migrations = []migration{
 		},
 	},
 	{
+		// ADR-0039 section 2: the base a task forked from, whether smind
+		// created its branch, and the workspace's default-base override.
+		// Existing tasks are backfilled at daemon start by the workspace
+		// package (it needs git), not here.
+		name: "task_base",
+		apply: func(db *sql.DB) error {
+			for _, c := range []struct{ table, col, ddl string }{
+				{"tasks", "base_ref", "TEXT"},
+				{"tasks", "base_sha", "TEXT"},
+				{"tasks", "branch_owned", "INTEGER NOT NULL DEFAULT 0"},
+				{"workspaces", "default_base", "TEXT"},
+			} {
+				if err := addColumnIfMissing(db, c.table, c.col, c.ddl); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
+	{
 		// ADR-0026: who authored a run's prompt (human|orchestrator|agent)
 		// and whether it was a mid-run interrupt, for the window builder.
 		// Pre-existing runs keep '' (unknown) / 0.

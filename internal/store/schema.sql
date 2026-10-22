@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS workspaces (
     updated_at TIMESTAMP NOT NULL,
     setup_script TEXT,
     teardown_script TEXT,
-    learning_mode TEXT NOT NULL DEFAULT 'off' -- 'off' | 'propose' (ADR-0026)
+    learning_mode TEXT NOT NULL DEFAULT 'off', -- 'off' | 'propose' (ADR-0026)
+    default_base TEXT -- ADR-0039: '' / NULL = auto-detect
 );
 
 CREATE TABLE IF NOT EXISTS workspace_accounts (
@@ -77,7 +78,10 @@ CREATE TABLE IF NOT EXISTS tasks (
     setup_error TEXT,
     setup_log TEXT,
     port INTEGER,
-    kind TEXT NOT NULL DEFAULT 'task' -- 'task' | 'system' (ADR-0026)
+    kind TEXT NOT NULL DEFAULT 'task', -- 'task' | 'system' (ADR-0026)
+    base_ref TEXT, -- ADR-0039: branch the task is based on / its PR targets
+    base_sha TEXT, -- ADR-0039: commit the task branch forked from (diff base)
+    branch_owned INTEGER NOT NULL DEFAULT 0 -- ADR-0039: 1 when CreateTask created the branch
 );
 
 CREATE TABLE IF NOT EXISTS chats (

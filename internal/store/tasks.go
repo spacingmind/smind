@@ -54,11 +54,12 @@ const RunPurposeProbe = "probe"
 
 func insertTask(db execer, t Task) (Task, error) {
 	res, err := db.Exec(
-		`INSERT INTO tasks (workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, kind)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO tasks (workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, kind, base_ref, base_sha, branch_owned)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.WorkspaceID, int64PtrToNull(t.SpaceID), int64PtrToNull(t.ParentTaskID), t.Title, t.Status,
 		stringPtrToNull(t.WorktreePath), stringPtrToNull(t.Branch),
 		t.CreatedAt, t.UpdatedAt, timePtrToNull(t.ArchivedAt), t.Kind,
+		nullString(t.BaseRef), nullString(t.BaseSha), t.BranchOwned,
 	)
 	if err != nil {
 		return Task{}, fmt.Errorf("insert task: %w", err)
@@ -362,7 +363,7 @@ func (s *Store) DeleteTask(id int64) error {
 }
 
 // taskCols is the column list scanTask reads.
-const taskCols = "id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, setup_status, setup_error, setup_log, port, kind"
+const taskCols = "id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, setup_status, setup_error, setup_log, port, kind, base_ref, base_sha, branch_owned"
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -371,13 +372,14 @@ type rowScanner interface {
 func scanTask(row rowScanner) (Task, error) {
 	var t Task
 	var spaceID, parentTaskID sql.NullInt64
-	var worktreePath, branch, setupStatus, setupError, setupLog sql.NullString
+	var worktreePath, branch, setupStatus, setupError, setupLog, baseRef, baseSha sql.NullString
 	var archivedAt sql.NullTime
 	var port sql.NullInt64
 
 	if err := row.Scan(&t.ID, &t.WorkspaceID, &spaceID, &parentTaskID, &t.Title, &t.Status,
 		&worktreePath, &branch, &t.CreatedAt, &t.UpdatedAt, &archivedAt,
-		&setupStatus, &setupError, &setupLog, &port, &t.Kind); err != nil {
+		&setupStatus, &setupError, &setupLog, &port, &t.Kind,
+		&baseRef, &baseSha, &t.BranchOwned); err != nil {
 		return Task{}, err
 	}
 
@@ -390,6 +392,7 @@ func scanTask(row rowScanner) (Task, error) {
 	t.SetupError = setupError.String
 	t.SetupLog = setupLog.String
 	t.Port = nullToInt64Ptr(port)
+	t.BaseRef, t.BaseSha = baseRef.String, baseSha.String
 	return t, nil
 }
 
@@ -442,4 +445,29 @@ func nullToTimePtr(n sql.NullTime) *time.Time {
 // means "unset" (runs.model, agent_profiles.model).
 func nullString(v string) sql.NullString {
 	return sql.NullString{String: v, Valid: v != ""}
+}
+
+// SetTaskBase records the branch task id is based on and the commit its
+// branch forked from (ADR-0039). Either may be "" (unknown).
+func (s *Store) SetTaskBase(id int64, ref, sha string) error {
+	res, err := s.db.Exec(
+		`UPDATE tasks SET base_ref = ?, base_sha = ?, updated_at = ? WHERE id = ?`,
+		nullString(ref), nullString(sha), time.Now().UTC(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("set task %d base: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("set task %d base: %w", id, sql.ErrNoRows)
+	}
+	return nil
+}
+
+// SetTaskBranchOwned records whether smind created task id's branch
+// (ADR-0039); used by the one-time startup backfill.
+func (s *Store) SetTaskBranchOwned(id int64, owned bool) error {
+	if _, err := s.db.Exec(`UPDATE tasks SET branch_owned = ? WHERE id = ?`, owned, id); err != nil {
+		return fmt.Errorf("set task %d branch_owned: %w", id, err)
+	}
+	return nil
 }
