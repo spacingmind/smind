@@ -40,6 +40,9 @@ type requestContext struct {
 	// local is true when the caller holds the daemon token on /ws, false for
 	// a relay-served (paired-device) session; see conn.local.
 	local bool
+	// deviceID is the verified relay device id of this session, "" for the
+	// local /ws connection and for legacy relay clients; see conn.deviceID.
+	deviceID string
 }
 
 // Emit sends a server -> client event carrying params, correlated to this
@@ -102,6 +105,10 @@ type conn struct {
 	// session (ServeTransport) is not local, so handlers that administer the
 	// daemon itself (relay.device.*) refuse it.
 	local bool
+
+	// deviceID is the verified relay device id of this session, "" for the
+	// local /ws connection and for legacy relay clients.
+	deviceID string
 
 	// focus, when non-nil, is the daemon-wide task.gitFocus registry; this
 	// connection's entry is dropped when serve returns.
@@ -204,7 +211,7 @@ func (c *conn) dispatch(connCtx context.Context, env envelope) {
 	c.inflight[env.ID] = &inflightRequest{cancel: cancel}
 	c.mu.Unlock()
 
-	rc := &requestContext{conn: c, id: env.ID, runScoped: c.runScoped, local: c.local}
+	rc := &requestContext{conn: c, id: env.ID, runScoped: c.runScoped, local: c.local, deviceID: c.deviceID}
 	result, err := h(reqCtx, rc, env.Params)
 	if err != nil {
 		c.sendError(env.ID, err)

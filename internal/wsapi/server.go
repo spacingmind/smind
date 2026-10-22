@@ -123,18 +123,24 @@ func (a *API) SetAuthorizer(fn func(*http.Request) bool) { a.authorize = fn }
 // *client.DataConn, so a mobile-originated request gets the same answer a
 // browser tab's would.
 func (a *API) ServeTransport(ctx context.Context, tr Transport) {
-	a.serve(ctx, tr, false, RelayMaxMessage)
+	a.serve(ctx, tr, false, RelayMaxMessage, "")
+}
+
+// ServeDevice is ServeTransport for a relay session whose device proved its identity (device_hello): handlers see its device id in requestContext.deviceID.
+func (a *API) ServeDevice(ctx context.Context, tr Transport, deviceID string) {
+	a.serve(ctx, tr, false, RelayMaxMessage, deviceID)
 }
 
 // serveLocal is ServeTransport for the token-authenticated /ws connection:
 // the one surface allowed to administer the daemon itself (relay.device.*).
 func (a *API) serveLocal(ctx context.Context, tr Transport) {
-	a.serve(ctx, tr, true, DirectMaxMessage)
+	a.serve(ctx, tr, true, DirectMaxMessage, "")
 }
 
-func (a *API) serve(ctx context.Context, tr Transport, local bool, maxMessage int) {
+func (a *API) serve(ctx context.Context, tr Transport, local bool, maxMessage int, deviceID string) {
 	c := newConn(tr, a.hs)
 	c.local = local
+	c.deviceID = deviceID
 	c.maxMessage = maxMessage
 	c.runScoped = false // no run-scoped identity exists yet (ADR-0027)
 	c.eventsSub = newSubscriber()
