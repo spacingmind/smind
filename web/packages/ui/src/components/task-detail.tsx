@@ -12,7 +12,7 @@ import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
 import { ChatUsageTotal } from "@/components/chat-usage-total";
 import { McpServersIndicator } from "@/components/mcp-servers-indicator";
-import { PortChip, SetupBadge, SetupDetails } from "@/components/task-setup";
+import { PortChip, SetupBadge, SetupDetails, UntrustedBanner } from "@/components/task-setup";
 import { PermissionCard } from "@/components/permission/permission-card";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useProfileList } from "@/hooks/use-profiles";
@@ -352,6 +352,7 @@ export function TaskDetailPane({
         }
       />
 
+      <UntrustedBanner task={task} onTask={applyTask} />
       <SetupDetails client={client} task={task} onTask={applyTask} />
 
       {connectionStatus === "reconnecting" && (

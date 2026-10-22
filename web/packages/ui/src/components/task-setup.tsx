@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { Icons } from "@/lib/icons";
 
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { useRetrySetup } from "@/hooks/use-retry-setup";
 import { cn } from "@/lib/utils";
 import type { SetupStatus, Task } from "@/lib/types";
 import { getWorkspaceScripts, retryTaskSetup } from "@/lib/worktree-setup";
@@ -12,6 +14,7 @@ const LABELS: Record<Exclude<SetupStatus, "">, string> = {
   running: "Setup running",
   ok: "Setup done",
   failed: "Setup failed",
+  blocked: "Setup blocked",
 };
 
 /**
@@ -27,6 +30,8 @@ export function SetupBadge({ status, compact = false, className }: { status: Set
       <Icons.spinner className="size-3 shrink-0 animate-spin" aria-hidden="true" />
     ) : status === "ok" ? (
       <Icons.check className="size-3 shrink-0" aria-hidden="true" />
+    ) : status === "blocked" ? (
+      <Icons.lock className="size-3 shrink-0" aria-hidden="true" />
     ) : (
       <Icons.warning className="size-3 shrink-0" aria-hidden="true" />
     );
@@ -41,7 +46,7 @@ export function SetupBadge({ status, compact = false, className }: { status: Set
         className={cn(
           "flex shrink-0 items-center",
           className,
-          status === "failed" ? "text-destructive" : status === "running" ? "text-warning" : "text-success/70",
+          status === "failed" ? "text-destructive" : status === "running" || status === "blocked" ? "text-warning" : "text-success/70",
         )}
       >
         {icon}
@@ -50,7 +55,7 @@ export function SetupBadge({ status, compact = false, className }: { status: Set
   }
   return (
     <StatusBadge
-      status={status === "failed" ? "danger" : status === "running" ? "running" : "success"}
+      status={status === "failed" ? "danger" : status === "running" ? "running" : status === "blocked" ? "warning" : "success"}
       data-testid="task-setup-badge"
       data-setup-status={status}
     >
@@ -180,6 +185,43 @@ export function SetupDetails({
           {log}
         </pre>
       )}
+    </div>
+  );
+}
+
+/**
+ * The task view's notice for a task started from a fork PR (ADR-0039 §7): its setup script is blocked until the user
+ * runs it. Keyed on `UntrustedSource`, not on `SetupStatus`: a workspace without a setup script has an empty status
+ * but its task is still untrusted. "Run setup" clears the flag daemon-side, so the banner goes with the next task.updated.
+ */
+export function UntrustedBanner({ task, onTask }: { task: Task; onTask: (task: Task) => void }) {
+  const retry = useRetrySetup();
+  if (!task.UntrustedSource) return null;
+  return (
+    <div data-testid="task-untrusted-banner" className="border-b px-4 py-2">
+      <Alert
+        variant="warning"
+        title="From a fork — setup scripts are blocked until you run them."
+        description="Review the code first."
+        className="items-center"
+      >
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          data-testid="task-untrusted-run-setup"
+          disabled={retry.isPending}
+          onClick={() => retry.mutate(task.ID, { onSuccess: onTask })}
+        >
+          <Icons.play className="size-3" />
+          Run setup
+        </Button>
+        {retry.isError && (
+          <span role="alert" className="text-ui-sm text-destructive">
+            {retry.error.message}
+          </span>
+        )}
+      </Alert>
     </div>
   );
 }

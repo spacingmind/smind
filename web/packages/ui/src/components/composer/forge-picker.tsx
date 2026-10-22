@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { ForgeKind } from "@/components/composer/attach-menu";
 import { Input } from "@/components/ui/input";
@@ -6,6 +6,7 @@ import { useForgeSearch, type ForgeSearchItem } from "@/hooks/use-forge-search";
 import { attachmentErrorMessage } from "@/lib/attachments/errors";
 import { Icons } from "@/lib/icons";
 import { formatRelativeTime } from "@/lib/relative-time";
+import type { ForgeScope } from "@/lib/query-keys";
 import type { AttachmentLimits } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -18,13 +19,17 @@ const DEBOUNCE_MS = 300;
  */
 export function ForgePicker({
   kind,
-  taskId,
+  scope,
   limits,
   onPick,
+  renderBadge,
 }: {
   kind: ForgeKind;
-  taskId: number;
+  /** The composer searches a task; the New Task dialog a workspace. */
+  scope: ForgeScope;
   limits: AttachmentLimits | null;
+  /** Extra per-row content under the meta line (the New Task dialog's fork badge). */
+  renderBadge?: (item: ForgeSearchItem) => ReactNode;
   onPick: (item: ForgeSearchItem, repo: string) => void;
 }) {
   const [text, setText] = useState("");
@@ -39,7 +44,7 @@ export function ForgePicker({
     return () => clearTimeout(timer);
   }, [text, query]);
 
-  const search = useForgeSearch({ taskId, kind, query, enabled: true });
+  const search = useForgeSearch({ scope, kind, query, enabled: true });
   const items = search.data?.items ?? [];
   const activeIndex = Math.min(active, Math.max(items.length - 1, 0));
   const noun = kind === "pr" ? "pull requests" : "issues";
@@ -111,6 +116,7 @@ export function ForgePicker({
                   <span className="truncate text-ui-xs text-foreground-muted">
                     {item.author} · {item.state} · {formatRelativeTime(item.updatedAt)}
                   </span>
+                  {renderBadge?.(item)}
                 </span>
               </div>
             );

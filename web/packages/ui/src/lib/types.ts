@@ -31,7 +31,7 @@ export interface WorkspaceWithScripts extends Workspace {
 }
 
 /** A task's worktree setup state (ADR-0024): "" = no setup script ran. */
-export type SetupStatus = "" | "running" | "ok" | "failed";
+export type SetupStatus = "" | "running" | "ok" | "failed" | "blocked";
 
 export interface Task {
   ID: number;
@@ -54,6 +54,13 @@ export interface Task {
   Port?: number | null;
   /** The parent task id; null/absent for a root task. */
   ParentTaskID?: number | null;
+  /** ADR-0039 §7: the task came from a fork PR, so its setup script is blocked until the user runs it (`task.retrySetup`). Absent on an older daemon. */
+  UntrustedSource?: boolean;
+  /** The PR the task was started from (ADR-0039 G4), when it was. */
+  PRNumber?: number | null;
+  PRRepo?: string;
+  PRHeadRef?: string;
+  BaseRef?: string;
 }
 
 // Mirrors internal/store.Space field-for-field -- same no-json-tags,
@@ -990,4 +997,20 @@ export interface TaskGitListResult {
 export interface TaskGitEventPayload {
   taskId: number;
   git: TaskGit;
+}
+
+// ---- New Task "Start from" (ADR-0039 G4) --------------------------------------------------------------------------
+/** One row of `workspace.branches`. `ahead`/`behind` are omitted when unknown: no chip, never 0. */
+export interface WorkspaceBranch {
+  name: string;
+  remote: "local" | "origin";
+  ahead?: number;
+  behind?: number;
+}
+
+/** `workspace.branches` {workspaceId, query?, limit?}: newest first; `current` may be "". */
+export interface WorkspaceBranches {
+  defaultBase: string;
+  current: string;
+  branches: WorkspaceBranch[];
 }
