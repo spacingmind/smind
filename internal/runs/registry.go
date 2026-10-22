@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/spacingmind/smind/internal/attach"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -69,6 +70,10 @@ const defaultPermissionTimeout = 5 * time.Minute
 type Registry struct {
 	mu   sync.Mutex
 	runs map[string]*run
+
+	// attachStore holds queued prompts' attachment sets (ADR-0038); nil
+	// when the feature is off. Guarded by mu.
+	attachStore *attach.Store
 
 	// finishedOrder records finished run IDs in finish order, so eviction
 	// (see finishedRetentionCap) always drops the oldest first.
@@ -321,6 +326,7 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 		purpose:            rowPurpose(row.Purpose),
 		origin:             row.Origin,
 		interrupt:          row.Interrupt,
+		attachments:        decodeStoredAttachments(row.Attachments),
 		startedAt:          row.StartedAt,
 		ctx:                ctx,
 		cancel:             cancel,
@@ -386,6 +392,12 @@ type run struct {
 	// interrupt. Set at start, immutable, persisted on the row.
 	origin    string
 	interrupt bool
+
+	// attachments is the accepted prompt attachment set (ADR-0038) and
+	// attachStore the store holding its files; set at start, immutable,
+	// persisted on the row. attachStore is nil on a rehydrated run.
+	attachments attach.Set
+	attachStore *attach.Store
 
 	// offered is what the delivery provider offered this run (ADR-0026);
 	// set once in drive before the turn starts, read by finish. Guarded
@@ -521,6 +533,7 @@ func (r *run) statusLocked() RunStatus {
 		Usage:          UsageFromEvent(r.usage),
 		Purpose:        r.purpose,
 		Origin:         r.origin,
+		Attachments:    publicItems(r.attachments),
 	}
 	rs.BaseSHA = cloneStrPtr(r.baseSHA)
 	rs.HeadSHA = cloneStrPtr(r.headSHA)
@@ -686,6 +699,8 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		purpose:            startPurpose(opts),
 		origin:             resolveStartOptions(opts).origin,
 		interrupt:          resolveStartOptions(opts).interrupt,
+		attachments:        resolveStartOptions(opts).attachments,
+		attachStore:        resolveStartOptions(opts).attachStore,
 		isolation:          resolveStartOptions(opts).isolation,
 		probe:              resolveStartOptions(opts).probe,
 		worktree:           worktree,
@@ -775,6 +790,7 @@ func (reg *Registry) registerAndDrive(r *run, runCtx context.Context, runner *ta
 		ID: r.id, TaskID: r.taskID, ChatID: r.chatID, Provider: string(r.provider), Prompt: r.prompt,
 		Status: string(StatusRunning), StartedAt: r.startedAt,
 		PermissionMode: r.perm.Mode, AutoAccept: r.perm.AutoAccept, Model: r.model, Purpose: r.purpose, Origin: r.origin, Interrupt: r.interrupt,
+		Attachments: attach.EncodeSet(r.attachments),
 	}); err != nil {
 		reg.mu.Lock()
 		delete(reg.runs, r.id)
@@ -937,6 +953,9 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 		err = runner.RunPromptIsolated(ctx, r.taskID, r.chatID, r.provider, r.prompt, r.model, *r.isolation, events)
 	} else {
 		ctx = reg.withDelivery(ctx, r)
+		if pa, ok := r.promptAttachments(); ok {
+			ctx = taskrunner.WithPromptAttachments(ctx, pa)
+		}
 		err = runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, r.prompt, decider, r.getPerm(), r.thinkingLevel, r.model, events)
 	}
 	<-forwardDone

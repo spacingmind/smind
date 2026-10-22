@@ -75,9 +75,11 @@ func (m *Manager) DeleteTask(id int64) (DeleteSummary, error) {
 	if err := m.checkpointAndRemoveWorktree(t); err != nil {
 		return DeleteSummary{}, fmt.Errorf("delete task %d: %w", id, err)
 	}
+	sets := m.attachmentSetsOf([]store.Task{t})
 	if err := m.store.DeleteTask(id); err != nil {
 		return DeleteSummary{}, fmt.Errorf("delete task %d: %w", id, err)
 	}
+	m.releaseAttachments(sets)
 	if n := m.getNotifier(); n != nil {
 		n.NotifyTaskDeleted(t.ID, t.WorkspaceID, t.SpaceID)
 	}
@@ -105,9 +107,11 @@ func (m *Manager) DeleteSpace(id int64) (DeleteSummary, error) {
 		}
 	}
 
+	sets := m.attachmentSetsOf(tasks)
 	if err := m.store.DeleteSpace(id); err != nil {
 		return DeleteSummary{}, fmt.Errorf("delete space %d: %w", id, err)
 	}
+	m.releaseAttachments(sets)
 	// Only the root space.deleted event is published, not one per cascaded
 	// task -- see ADR 0009 ("cascades emit only the root event"): a client
 	// pruning the space subtree needs nothing more.
@@ -154,13 +158,45 @@ func (m *Manager) DeleteWorkspace(id int64) (DeleteSummary, error) {
 		}
 	}
 
+	sets := m.attachmentSetsOf(tasks)
 	if err := m.store.DeleteWorkspace(id); err != nil {
 		return DeleteSummary{}, fmt.Errorf("delete workspace %d: %w", id, err)
 	}
+	m.releaseAttachments(sets)
 	// Only the root workspace.deleted event is published, not one per
 	// cascaded space/task -- see ADR 0009.
 	if n := m.getNotifier(); n != nil {
 		n.NotifyWorkspaceDeleted(id)
 	}
 	return DeleteSummary{TasksRemoved: len(tasks), SpacesRemoved: len(spaces)}, nil
+}
+
+// SetAttachmentCleanup registers fn, called with the attachment set ids of
+// tasks a Delete* call has just removed from the store (ADR-0038). Never
+// called before the rows are gone, so a failed delete keeps its attachments;
+// store stays free of file I/O. Set it at startup.
+func (m *Manager) SetAttachmentCleanup(fn func(setIDs []string)) {
+	m.attachmentCleanup = fn
+}
+
+// attachmentSetsOf lists the attachment sets of tasks' runs and queued
+// prompts, read before their rows are deleted. A read failure only means
+// those sets are left for the startup sweep.
+func (m *Manager) attachmentSetsOf(tasks []store.Task) []string {
+	if m.attachmentCleanup == nil {
+		return nil
+	}
+	var out []string
+	for _, t := range tasks {
+		if ids, err := m.store.AttachmentSetsOfTask(t.ID); err == nil {
+			out = append(out, ids...)
+		}
+	}
+	return out
+}
+
+func (m *Manager) releaseAttachments(sets []string) {
+	if m.attachmentCleanup != nil && len(sets) > 0 {
+		m.attachmentCleanup(sets)
+	}
 }

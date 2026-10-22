@@ -102,6 +102,10 @@ type conn struct {
 	// session (ServeTransport) is not local, so handlers that administer the
 	// daemon itself (relay.device.*) refuse it.
 	local bool
+
+	// maxMessage is the largest message this connection's transport carries
+	// (DirectMaxMessage on /ws, RelayMaxMessage over a relay); 0 = relay's.
+	maxMessage int
 }
 
 func newConn(tr Transport, handlers map[string]handlerFunc) *conn {

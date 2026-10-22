@@ -350,6 +350,8 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider P
 		}
 	}
 
+	prompt = r.promptWithAttachments(ctx, provider, prompt, events)
+
 	switch provider {
 	case ProviderGLM, ProviderKimi:
 		return r.runACP(ctx, chatID, task.WorkspaceID, provider, worktreePath, prompt, decider, perm, model, events)
@@ -770,10 +772,12 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 	if model != "" && model != ClaudeModelDefault {
 		opts = append(opts, claudecode.WithModel(model))
 	}
-	if d, _ := DeliveryFrom(ctx); len(d.AddDirs) > 0 {
-		// ADR-0026 section 5: the read-only learned-skill projection; no
-		// option at all without a delivery keeps the argv unchanged.
-		opts = append(opts, claudecode.WithAddDirs(d.AddDirs...))
+	d, _ := DeliveryFrom(ctx)
+	if dirs := append(append([]string(nil), d.AddDirs...), attachmentAddDirs(ctx, prompt)...); len(dirs) > 0 {
+		// ADR-0026 section 5: the read-only learned-skill projection, plus
+		// the prompt's attachment set (ADR-0038); no option at all without
+		// either keeps the argv unchanged.
+		opts = append(opts, claudecode.WithAddDirs(dirs...))
 	}
 	mode := perm.Mode
 	if mode == "" {
