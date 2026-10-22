@@ -41,7 +41,7 @@ Coordination: ADR-0038's PR #459 (`internal/ghctx`) lands as is before PR 4 star
 
 ### PR 1 — docs
 
-- AC1. ADR-0039 exists (Proposed) with the schema, wire (RPCs, `TaskGit`, topic), poll budget and backoff, GitHub rate-limit handling, gh-auth
+- AC1. ADR-0039 exists (Accepted) with the schema, wire (RPCs, `TaskGit`, topic), poll budget and backoff, GitHub rate-limit handling, gh-auth
   surface, error codes, UI placement with ZCode/Paseo references, security, and open questions each with a recommendation; it records H1–H4 as given.
 - AC2. This plan has a size line, ACs, named tests and a non-stacked PR split; the Supervisor accepted the ADR before PR 2 started.
 
