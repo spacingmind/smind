@@ -3,10 +3,17 @@ import { createPortal } from "react-dom";
 import { Diff2HtmlUI } from "diff2html/lib/ui/js/diff2html-ui.js";
 import "diff2html/bundles/css/diff2html.min.css";
 
+import { findAnnotationRow, mountAnnotationRow, type AnnotationTarget, type MountedAnnotation } from "@/lib/diff-annotations";
 import { parseHunkHeader, resolveDiffLine, type DiffLineRef, type HunkRange } from "@/lib/diff-lines";
 
 /** Unified (one column) vs side-by-side (two) -- diff2html's own `outputFormat` values, kept verbatim so there's no second vocabulary to translate. */
 export type DiffOutputFormat = "line-by-line" | "side-by-side";
+
+/** Something shown inline, directly under a diff line (a review comment or its composer). */
+export interface DiffAnnotation extends AnnotationTarget {
+  id: string;
+  node: ReactNode;
+}
 
 /**
  * One diff2html render, shared by the per-file rows and the whole-diff
@@ -29,6 +36,7 @@ export function DiffRender({
   onSelectLine,
   renderHunkAction,
   hideFileHeader = false,
+  annotations,
   testId,
 }: {
   diff: string;
@@ -50,6 +58,12 @@ export function DiffRender({
    * diff2html's stylesheet is unlayered, so it beats Tailwind's layered utilities unless this one is important.
    */
   hideFileHeader?: boolean;
+  /**
+   * Inline annotations: each is rendered, through a portal, into a row inserted directly under its line, and in
+   * a side-by-side render the other side gets a spacer so the two stay aligned. One that cannot be placed (its line
+   * is not in this diff any more) is shown after the diff instead, so it never silently disappears.
+   */
+  annotations?: DiffAnnotation[];
   testId?: string;
 }) {
   const [hunkHosts, setHunkHosts] = useState<{ host: HTMLElement; hunk: HunkRange }[]>([]);
@@ -58,12 +72,50 @@ export function DiffRender({
   const onSelectLineRef = useRef(onSelectLine);
   onSelectLineRef.current = onSelectLine;
 
+  // Inline annotations: `mounted` is what is in the DOM, `hosts`/`unplaced` its React-visible mirror.
+  const annotationsRef = useRef(annotations);
+  annotationsRef.current = annotations;
+  const formatRef = useRef(outputFormat);
+  formatRef.current = outputFormat;
+  const mounted = useRef(new Map<string, MountedAnnotation>());
+  const [hosts, setHosts] = useState<Record<string, HTMLElement>>({});
+  const [unplaced, setUnplaced] = useState<DiffAnnotation[]>([]);
+
+  const syncAnnotations = useRef(() => {
+    const el = containerRef.current;
+    const wanted = annotationsRef.current ?? [];
+    const live = mounted.current;
+    for (const [id, m] of live) {
+      if (!wanted.some((a) => a.id === id)) {
+        m.remove();
+        live.delete(id);
+      }
+    }
+    if (el) {
+      for (const a of wanted) {
+        if (live.has(a.id)) continue;
+        const row = findAnnotationRow(el, formatRef.current, a);
+        if (row) live.set(a.id, mountAnnotationRow(row, formatRef.current));
+      }
+    }
+    const nextHosts: Record<string, HTMLElement> = {};
+    for (const [id, m] of live) nextHosts[id] = m.host;
+    const nextUnplaced = wanted.filter((a) => !live.has(a.id));
+    setHosts((prev) => (sameHosts(prev, nextHosts) ? prev : nextHosts));
+    setUnplaced((prev) => (prev.length === nextUnplaced.length && prev.every((a, i) => a === nextUnplaced[i]) ? prev : nextUnplaced));
+  }).current;
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+    for (const m of mounted.current.values()) m.remove();
+    mounted.current.clear();
     el.innerHTML = "";
     setHunkHosts([]);
-    if (!diff) return;
+    if (!diff) {
+      syncAnnotations();
+      return;
+    }
     const ui = new Diff2HtmlUI(el, diff, {
       outputFormat,
       drawFileList: false,
@@ -73,9 +125,16 @@ export function DiffRender({
     ui.draw();
     ui.highlightCode();
     if (wantsHunks) setHunkHosts(mountHunkHosts(el, outputFormat));
-  }, [diff, outputFormat, wantsHunks]);
+    syncAnnotations();
+  }, [diff, outputFormat, wantsHunks, syncAnnotations]);
+
+  // Annotations added or removed without a redraw: a comment is saved, removed, or the composer opens on another line.
+  useEffect(() => {
+    syncAnnotations();
+  }, [annotations, syncAnnotations]);
 
   return (
+    <>
     <div
       ref={containerRef}
       data-testid={testId}
@@ -91,8 +150,22 @@ export function DiffRender({
       }}
     >
       {renderHunkAction && hunkHosts.map(({ host, hunk }, i) => createPortal(renderHunkAction(hunk), host, String(i)))}
+      {annotations?.map((a) => (hosts[a.id] ? createPortal(a.node, hosts[a.id]!, a.id) : null))}
     </div>
+    {unplaced.length > 0 && (
+      <div data-testid="diff-unplaced-annotations" className="mt-2 space-y-2">
+        {unplaced.map((a) => (
+          <div key={a.id}>{a.node}</div>
+        ))}
+      </div>
+    )}
+    </>
   );
+}
+
+function sameHosts(a: Record<string, HTMLElement>, b: Record<string, HTMLElement>): boolean {
+  const ak = Object.keys(a);
+  return ak.length === Object.keys(b).length && ak.every((k) => a[k] === b[k]);
 }
 
 /**

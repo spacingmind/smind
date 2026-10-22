@@ -5,7 +5,7 @@ import { FakeWsClient } from "@/test/fake-ws-client";
 import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { requestDiffReveal, resetDiffReveal } from "@/lib/diff-reveal";
 import { DIFF_PREFS_STORAGE_KEY } from "@/lib/diff-prefs";
-import { getReviewDrafts, resetReviewDrafts } from "@/lib/review-drafts";
+import { addReviewDraft, getReviewDrafts, resetReviewDrafts } from "@/lib/review-drafts";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
 import { runConfigStorageKey } from "@/components/composer/run-config-preference";
 import { useFocusedChatStore } from "@/stores/focused-chat-store";
@@ -740,9 +740,106 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
     fireEvent.click(screen.getAllByTestId("review-draft-remove")[0]!);
     await flush();
 
+    // Drafts sit under their own lines now, so the DOM order is the diff's (line 1 first), not the order written:
+    // the first remove button belongs to "second" (on line1), and "first" (on the added line) is what remains.
     const remaining = screen.getAllByTestId("review-draft");
     expect(remaining).toHaveLength(1);
-    expect(remaining[0]).toHaveTextContent("second");
+    expect(remaining[0]).toHaveTextContent("first");
+  });
+
+  /** The diff row (`tr`) of the line whose text contains `text`. */
+  function lineRow(container: HTMLElement, text: string): HTMLElement {
+    const line = [...container.querySelectorAll(".d2h-code-line-ctn")].find((el) => el.textContent?.includes(text));
+    const row = line?.closest("tr");
+    if (!row) throw new Error(`no diff row containing ${JSON.stringify(text)}`);
+    return row as HTMLElement;
+  }
+
+  function setPrefs(format: "line-by-line" | "side-by-side", view: "by-file" | "whole" = "by-file"): void {
+    window.localStorage.setItem(DIFF_PREFS_STORAGE_KEY, JSON.stringify({ view, format }));
+  }
+
+  it("opens the composer and shows the saved draft directly under the clicked line, not after the whole diff", async () => {
+    setPrefs("line-by-line");
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+    const container = screen.getByTestId("diff-container-file.txt");
+
+    clickDiffLine("diff-container-file.txt", "line2 added");
+    await flush();
+    const composerRow = lineRow(container, "line2 added").nextElementSibling as HTMLElement;
+    expect(composerRow.className).toContain("smind-annotation-row");
+    expect(composerRow).toContainElement(screen.getByTestId("review-composer"));
+
+    await writeComment("explain this");
+    const draftRow = lineRow(container, "line2 added").nextElementSibling as HTMLElement;
+    expect(draftRow.className).toContain("smind-annotation-row");
+    expect(draftRow).toContainElement(screen.getByTestId("review-draft"));
+    expect(draftRow).toHaveTextContent("explain this");
+    // The comment is not in a list under the diff any more.
+    expect(screen.queryByTestId("review-comments")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("diff-unplaced-annotations")).not.toBeInTheDocument();
+  });
+
+  it("keeps the two sides of a side-by-side diff aligned with a spacer of the same height", async () => {
+    setPrefs("side-by-side");
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+    const container = screen.getByTestId("diff-container-file.txt");
+
+    clickDiffLine("diff-container-file.txt", "line2 added");
+    await flush();
+    await writeComment("why");
+    const annotationRows = container.querySelectorAll("tr.smind-annotation-row");
+    expect(annotationRows).toHaveLength(2); // the comment's host row and the other side's spacer
+    const sides = container.querySelectorAll(".d2h-file-side-diff");
+    expect(sides[0]!.querySelectorAll("tr.smind-annotation-row")).toHaveLength(1);
+    expect(sides[1]!.querySelectorAll("tr.smind-annotation-row")).toHaveLength(1);
+    // The comment itself is on the side of the line it is about (the added line is on the new side, the right table).
+    expect(sides[1]!.querySelector("[data-testid=review-draft]")).not.toBeNull();
+  });
+
+  it("whole-diff view shows each comment under its own line in the right file", async () => {
+    setPrefs("line-by-line", "whole");
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+    client.nth("task.diff", 0).resolve({ diff: WHOLE_DIFF });
+    await flush();
+
+    clickDiffLine("whole-diff-container", "brand new");
+    await flush();
+    await writeComment("new file note");
+    const whole = screen.getByTestId("whole-diff-container");
+    const wrapper = [...whole.querySelectorAll(".d2h-file-wrapper")].find((w) => w.querySelector(".d2h-file-name")?.textContent?.trim() === "new.txt")!;
+    const draft = screen.getByTestId("review-draft");
+    expect(wrapper).toContainElement(draft);
+    expect(lineRow(whole, "brand new").nextElementSibling).toContainElement(draft);
+  });
+
+  it("lists a draft whose line is no longer in the diff after the diff, so it never disappears", async () => {
+    setPrefs("line-by-line");
+    const client = new FakeWsClient();
+    addReviewDraft(TASK.ID, { path: "file.txt", line: 99, side: "new", snippet: "gone line", body: "stale note" });
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+    const unplaced = screen.getByTestId("diff-unplaced-annotations");
+    expect(unplaced).toHaveTextContent("stale note");
+    expect(screen.getByTestId("diff-container-file.txt").querySelector("tr.smind-annotation-row")).toBeNull();
+  });
+
+  it("does not move the pane when a comment is added (focus does not scroll)", async () => {
+    setPrefs("line-by-line");
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+    const focus = vi.spyOn(HTMLTextAreaElement.prototype, "focus");
+    clickDiffLine("diff-container-file.txt", "line2 added");
+    await flush();
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    focus.mockRestore();
   });
 
   it("ignores a click that didn't land on a diff line", async () => {
