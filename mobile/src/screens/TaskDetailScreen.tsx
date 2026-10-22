@@ -38,7 +38,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, ListRenderItemInfo, NativeScrollEvent, NativeSyntheticEvent, StyleSheet, View } from 'react-native';
 import { Button, useNativeState } from '@expo/ui';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { UiHost } from '../ui/UiHost';
+import { useScreenInsets } from '../ui/useScreenInsets';
 import { adoptedPromptText } from '../adoptedPrompt';
 import { defaultChatId, listRunsForTask, RunSummary } from '../api';
 import { continueRun, isEchoOfOptimisticLine, sendFollowUpPrompt, RunTail } from '../followUpPrompt';
@@ -79,7 +81,8 @@ interface Props {
 
 export function TaskDetailScreen({ conn, taskId }: Props) {
   const theme = useAppTheme();
-  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const insets = useScreenInsets();
+  const styles = useMemo(() => makeStyles(theme, insets.bottom), [theme, insets.bottom]);
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [lines, setLines] = useState<TimelineLine[]>([]);
   const [draft, setDraft] = useState('');
@@ -507,7 +510,8 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
               </View>
             ) : null}
           </View>
-          <View style={styles.dock}>
+          {/* keyboard-controller (expo-animation): the dock pads by the keyboard height, so the list shrinks above it */}
+          <KeyboardAvoidingView behavior="padding" style={styles.dock}>
             <Composer
               draftState={draftState}
               onChangeDraft={setDraft}
@@ -521,7 +525,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
               onSend={handleSend}
               onSendNow={handleSendNow}
             />
-          </View>
+          </KeyboardAvoidingView>
         </>
       ) : null}
     </View>
@@ -542,7 +546,7 @@ export function TaskLoadError() {
   );
 }
 
-function makeStyles(theme: AppTheme) {
+function makeStyles(theme: AppTheme, bottomInset = 0) {
   return StyleSheet.create({
     screen: {
       flex: 1,
@@ -556,8 +560,10 @@ function makeStyles(theme: AppTheme) {
       paddingVertical: theme.spacing[4],
     },
     dock: {
-      paddingHorizontal: theme.spacing[4],
-      paddingBottom: theme.spacing[4],
+      backgroundColor: theme.background,
+      paddingHorizontal: theme.spacing[3],
+      paddingTop: theme.spacing[2],
+      paddingBottom: Math.max(bottomInset, theme.spacing[2]),
     },
     jumpWrap: {
       position: 'absolute',

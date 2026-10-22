@@ -4,6 +4,7 @@
 
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { ConnectionProvider, useConnection } from '../src/connection/ConnectionProvider';
 import { routeGate } from '../src/navigation/gate';
 import { taskHeaderTitle } from '../src/navigation/routes';
@@ -44,10 +45,12 @@ function RootStack() {
 
 export default function RootLayout() {
   return (
-    <AppThemeProvider>
-      <ConnectionProvider>
-        <RootStack />
-      </ConnectionProvider>
-    </AppThemeProvider>
+    <KeyboardProvider>
+      <AppThemeProvider>
+        <ConnectionProvider>
+          <RootStack />
+        </ConnectionProvider>
+      </AppThemeProvider>
+    </KeyboardProvider>
   );
 }
