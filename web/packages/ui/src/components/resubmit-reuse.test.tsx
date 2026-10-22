@@ -15,13 +15,13 @@ const ATTACHMENTS: AttachmentMeta[] = [
   { id: "1", kind: "image", name: "a.png", mimeType: "image/png", size: 10 },
   { id: "2", kind: "file", name: "b.pdf", mimeType: "application/pdf", size: 10 },
   { id: "3", kind: "file_ref", path: "internal/x.go", isDir: false },
-  { id: "4", kind: "github_pr", number: 7, repo: "o/r", title: "t", url: "https://github.com/o/r/pull/7" },
+  { id: "4", kind: "pr", number: 7, repo: "o/r", title: "t", url: "https://github.com/o/r/pull/7" },
 ];
 const REUSE = [
   { kind: "reuse", runId: "run-1", id: "1" },
   { kind: "reuse", runId: "run-1", id: "2" },
   { kind: "file_ref", path: "internal/x.go" },
-  { kind: "github_pr", number: 7, repo: "o/r" },
+  { kind: "pr", forge: "github", number: 7, repo: "o/r" },
 ];
 
 async function flush(): Promise<void> {
@@ -63,7 +63,7 @@ async function renderRun(overrides: Partial<RunSummary>, withAttachments = true)
 describe("resubmit carries attachments via reuse", () => {
   it("resendRequests maps each kind and ignores items it cannot rebuild", () => {
     expect(resendRequests("run-1", ATTACHMENTS)).toEqual(REUSE);
-    expect(resendRequests("run-1", [{ id: "1", kind: "file_ref" }, { id: "2", kind: "github_issue" }])).toEqual([]);
+    expect(resendRequests("run-1", [{ id: "1", kind: "file_ref" }, { id: "2", kind: "issue" }])).toEqual([]);
     expect(resendRequests("run-1", undefined)).toEqual([]);
   });
 

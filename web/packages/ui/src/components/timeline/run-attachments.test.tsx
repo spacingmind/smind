@@ -19,8 +19,8 @@ const image: AttachmentMeta = { id: "1", kind: "image", name: "shot.png", mimeTy
 const file: AttachmentMeta = { id: "2", kind: "file", name: "report.pdf", mimeType: "application/pdf", size: 90311 };
 const ref: AttachmentMeta = { id: "3", kind: "file_ref", path: "internal/runs/registry.go", isDir: false };
 const dir: AttachmentMeta = { id: "4", kind: "file_ref", path: "internal/runs", isDir: true };
-const pr: AttachmentMeta = { id: "5", kind: "github_pr", number: 123, title: "fix queue", url: "https://github.com/o/r/pull/123" };
-const issue: AttachmentMeta = { id: "6", kind: "github_issue", number: 45, title: "bug" };
+const pr: AttachmentMeta = { id: "5", kind: "pr", number: 123, title: "fix queue", url: "https://github.com/o/r/pull/123" };
+const issue: AttachmentMeta = { id: "6", kind: "issue", number: 45, title: "bug" };
 
 let revoked: string[];
 beforeEach(() => {
@@ -152,5 +152,20 @@ describe("reload", () => {
     expect(screen.getByTestId("run-attachments")).toBeInTheDocument();
     expect(screen.getAllByTestId("attachment-chip")).toHaveLength(2);
     expect(client.nth("run.attachment", 0).params).toEqual({ runId: "run-1", id: "1" });
+  });
+
+  it("shows a file_ref's line range on its chip", () => {
+    render(
+      <RunAttachments
+        runId="run-1"
+        attachments={[
+          { id: "1", kind: "file_ref", path: "a/b.go", line: 12, endLine: 20 },
+          { id: "2", kind: "file_ref", path: "c.go", line: 7 },
+        ]}
+      />,
+    );
+    const chips = screen.getAllByTestId("attachment-chip");
+    expect(chips[0]).toHaveTextContent("a/b.go:12-20");
+    expect(chips[1]).toHaveTextContent("c.go:7");
   });
 });

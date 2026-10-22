@@ -1057,7 +1057,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
     const client = new FakeWsClient();
     renderComposer({ client });
     client.nth("daemon.info", 0).resolve({
-      attachments: { maxCount: 10, maxImageBytes: 5 << 20, maxFileBytes: 10 << 20, maxTotalBytes: 10 << 20, maxMessageBytes: 16 << 20, images: ["image/png"], github: false },
+      attachments: { maxCount: 10, maxImageBytes: 5 << 20, maxFileBytes: 10 << 20, maxTotalBytes: 10 << 20, maxMessageBytes: 16 << 20, images: ["image/png"], forge: { github: { installed: false } } },
     });
     await flush();
     expect(screen.getByTestId("composer-attach-button")).toBeInTheDocument();

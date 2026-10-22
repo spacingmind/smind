@@ -12,7 +12,7 @@ const limits: AttachmentLimits = {
   maxTotalBytes: 250,
   maxMessageBytes: 16 << 20,
   images: ["image/png", "image/jpeg", "image/gif", "image/webp"],
-  github: false,
+  forge: { github: { installed: false } },
 };
 const key = attachmentDraftKey(1, 2);
 const file = (name: string, type: string, size: number) => new File([new Uint8Array(size)], name, { type });
@@ -68,7 +68,7 @@ describe("attachmentErrorMessage", () => {
     expect(attachmentErrorMessage(new RpcError("attachment 2 too big", "attachment_too_large"), limits)).toContain("too large");
     expect(attachmentErrorMessage(new RpcError("x", "mime_mismatch"), limits)).toContain("do not match");
     expect(attachmentErrorMessage(new RpcError("bad b64", "invalid_base64"), limits)).toBe("Could not read an attachment.");
-    expect(attachmentErrorMessage(new RpcError("gh is not installed", "github_unavailable"), limits)).toBe("gh is not installed");
+    expect(attachmentErrorMessage(new RpcError("gh is not installed", "forge_unavailable"), limits)).toBe("gh is not installed");
     expect(attachmentErrorMessage(new Error("boom"), null)).toBe("boom");
   });
 });

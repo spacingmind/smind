@@ -875,14 +875,14 @@ export type UsageRange = "today" | "7d" | "30d";
 // ADR-0038 prompt attachments (frozen wire contract). Requests carry bytes as standard base64; stored metadata never does.
 export type AttachmentRequest =
   | { kind: "image" | "file"; name: string; mimeType: string; data: string }
-  | { kind: "file_ref"; path: string }
-  | { kind: "github_pr" | "github_issue"; number: number; repo?: string }
+  | { kind: "file_ref"; path: string; line?: number; endLine?: number }
+  | { kind: "pr" | "issue"; forge?: "github"; number: number; repo?: string }
   | { kind: "reuse"; runId: string; id: string };
 
 /** A stored attachment as the daemon reports it (`run.list`, `run.logs`, queue rows). `id` is the 1-based position as a string. */
 export interface AttachmentMeta {
   id: string;
-  kind: "image" | "file" | "file_ref" | "github_pr" | "github_issue";
+  kind: "image" | "file" | "file_ref" | "pr" | "issue";
   name?: string;
   mimeType?: string;
   size?: number;
@@ -890,6 +890,9 @@ export interface AttachmentMeta {
   height?: number;
   path?: string;
   isDir?: boolean;
+  line?: number;
+  endLine?: number;
+  forge?: string;
   number?: number;
   repo?: string;
   title?: string;
@@ -907,7 +910,8 @@ export interface AttachmentLimits {
   maxTotalBytes: number;
   maxMessageBytes: number;
   images: string[];
-  github: boolean;
+  /** Per-forge availability on the daemon host; an object so more fields can be added (authenticated, login, host). */
+  forge: { github: { installed: boolean } };
 }
 
 /** `run.attachment` result. */

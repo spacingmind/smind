@@ -19,7 +19,7 @@ const LIMITS: AttachmentLimits = {
   maxTotalBytes: 10 << 20,
   maxMessageBytes: 16 << 20,
   images: ["image/png", "image/jpeg", "image/gif", "image/webp"],
-  github: false,
+  forge: { github: { installed: false } },
 };
 
 async function flush(): Promise<void> {

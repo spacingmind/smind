@@ -9,9 +9,11 @@ export function resendRequests(runId: string, attachments: AttachmentMeta[] | un
   const out: AttachmentRequest[] = [];
   for (const a of attachments ?? []) {
     if (a.kind === "image" || a.kind === "file") out.push({ kind: "reuse", runId, id: a.id });
-    else if (a.kind === "file_ref" && a.path) out.push({ kind: "file_ref", path: a.path });
-    else if ((a.kind === "github_pr" || a.kind === "github_issue") && a.number) {
-      out.push({ kind: a.kind, number: a.number, ...(a.repo ? { repo: a.repo } : {}) });
+    else if (a.kind === "file_ref" && a.path) {
+      out.push({ kind: "file_ref", path: a.path, ...(a.line ? { line: a.line } : {}), ...(a.endLine ? { endLine: a.endLine } : {}) });
+    }
+    else if ((a.kind === "pr" || a.kind === "issue") && a.number) {
+      out.push({ kind: a.kind, forge: "github", number: a.number, ...(a.repo ? { repo: a.repo } : {}) });
     }
   }
   return out;
