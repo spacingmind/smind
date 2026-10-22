@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1268,6 +1269,7 @@ func (reg *Registry) finish(r *run, err error) {
 	usage := r.usage
 	toolCalls := len(r.toolCallIDs)
 	offered := r.offered
+	cause := agentErrorCause(r.history)
 	r.mu.Unlock()
 
 	// Idempotent re-upsert so the row reflects the final value. A run that
@@ -1284,6 +1286,11 @@ func (reg *Registry) finish(r *run, err error) {
 	case err != nil:
 		status = StatusError
 		errMsg = err.Error()
+		if cause != "" {
+			// The agent said why in its own words before the generic error
+			// ("[error] 429 Usage limit reached ... resets 17:35"): lead with it.
+			errMsg = cause + " (" + errMsg + ")"
+		}
 		if r.isolation != nil || r.probe != nil {
 			errMsg = clipErrMsg(errMsg)
 		}
@@ -1719,6 +1726,41 @@ func (reg *Registry) ActiveRunForTask(taskID int64) (runID string, queued bool, 
 const maxIsolatedErrMsg = 500
 
 // clipErrMsg truncates s to maxIsolatedErrMsg bytes on a rune boundary.
+// maxAgentErrorCause bounds the cause text promoted into a run's error.
+const maxAgentErrorCause = 300
+
+// agentErrorCause is the reason an ACP agent gave for a failed turn: some
+// agents (GLM) write "[error] <cause>" as a message chunk and then fail the
+// prompt with a generic JSON-RPC error ("Internal error") that hides it. It
+// looks at the text chunks at the very end of history (nothing but text after
+// the last non-text event, so an old error the agent got past does not count),
+// finds the last "[error]" marker and returns what follows up to the end of
+// that line, whitespace-collapsed and bounded; "" when there is none.
+func agentErrorCause(history []Event) string {
+	i := len(history)
+	for i > 0 && history[i-1].Type == taskrunner.EventTypeText {
+		i--
+	}
+	var b strings.Builder
+	for _, e := range history[i:] {
+		b.WriteString(e.Text)
+	}
+	text := b.String()
+	k := strings.LastIndex(text, "[error]")
+	if k < 0 {
+		return ""
+	}
+	cause := text[k+len("[error]"):]
+	if nl := strings.IndexByte(cause, '\n'); nl >= 0 {
+		cause = cause[:nl]
+	}
+	cause = strings.Join(strings.Fields(cause), " ")
+	if r := []rune(cause); len(r) > maxAgentErrorCause {
+		cause = string(r[:maxAgentErrorCause]) + "…"
+	}
+	return cause
+}
+
 func clipErrMsg(s string) string {
 	if len(s) <= maxIsolatedErrMsg {
 		return s
