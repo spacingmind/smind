@@ -23,6 +23,13 @@ export const queryKeys = {
   taskSearchIndex: (taskId: number) => ["task.searchIndex", { taskId }] as const,
   /** One `forge.search` answer (the PR/issue picker). */
   forgeSearch: (taskId: number, kind: "pr" | "issue", query: string) => ["forge.search", { taskId, kind, query }] as const,
+  /** One task's git/PR state (`task.git`); live via the `task.git` event. */
+  taskGit: (taskId: number) => ["task.git", { taskId }] as const,
+  /** Every task's git/PR state in one workspace (`task.gitList`); the sidebar/header chips read it. */
+  workspaceTaskGit: (workspaceId: number) => ["task.gitList", { workspaceId }] as const,
+  /** Partial keys: every cached `task.git` / `task.gitList` entry (the event bridge and a reconnect address them). */
+  taskGitAll: () => ["task.git"] as const,
+  workspaceTaskGitAll: () => ["task.gitList"] as const,
   providerList: () => ["provider.list"] as const,
   profileList: () => ["profile.list"] as const,
   /** One `provider.test` answer per account-vocabulary provider key (`accountHealthTestKey`). */

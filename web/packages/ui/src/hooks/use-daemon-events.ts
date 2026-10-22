@@ -45,6 +45,9 @@ const LEARNING_TOPICS = [
   "learnedSkill.probe.failed",
 ];
 
+/** ADR-0039's task git state: the daemon's recomputed `{taskId, git}` snapshot (the bridge patches the caches). */
+const GIT_TOPICS = ["task.git"];
+
 const TOPICS = [
   "task.status",
   "run.status",
@@ -55,6 +58,7 @@ const TOPICS = [
   ...CHAT_TOPICS,
   ...ACCOUNT_TOPICS,
   ...LEARNING_TOPICS,
+  ...GIT_TOPICS,
 ];
 
 /** Registration surface returned by useDaemonEvents -- topic-filtered, with per-listener try/catch isolation. */
