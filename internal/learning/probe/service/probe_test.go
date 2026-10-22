@@ -764,6 +764,15 @@ func TestRecover_FailsInterruptedAndSweeps(t *testing.T) {
 	if arms[0].Status != "killed" {
 		t.Fatalf("arm = %+v", arms[0])
 	}
+	// The card must be able to explain the failure: the wire view carries a
+	// verdict and a non-empty reason for a probe failed by recovery.
+	view, ok, err := s.Get(f.prop.ID)
+	if err != nil || !ok {
+		t.Fatalf("Get after Recover = %v, %v", ok, err)
+	}
+	if view.Status != "failed" || view.Verdict == nil || *view.Verdict != "probe_failed" || strings.TrimSpace(view.VerdictReason) == "" {
+		t.Fatalf("restart-recovered probe has no explanation on the wire: %+v", view)
+	}
 	for _, d := range append(orphans, proj) {
 		if _, err := os.Stat(d); !os.IsNotExist(err) {
 			t.Fatalf("%s survived Recover (%v)", d, err)
