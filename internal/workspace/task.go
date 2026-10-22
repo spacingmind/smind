@@ -285,11 +285,27 @@ func (m *Manager) validateParentDepth(workspaceID, parentID int64) error {
 
 var slugInvalidRunRE = regexp.MustCompile(`[^a-z0-9]+`)
 
+// maxSlugLen caps the slug used in task branch and worktree names; the
+// "-<stamp>" suffix the caller appends is not counted against it.
+const maxSlugLen = 40
+
 // slugify lowercases title and collapses any run of non-alphanumeric
 // characters into a single hyphen, for use in worktree directory and branch
-// names. An empty or all-punctuation title falls back to "task".
+// names. An empty or all-punctuation title falls back to "task". Slugs
+// longer than maxSlugLen are cut, backing up to a word boundary when the
+// cut lands mid-word and a hyphen sits in the latter half of the cut; the
+// slug is pure ASCII at this point, so byte slicing is safe.
 func slugify(title string) string {
 	slug := strings.Trim(slugInvalidRunRE.ReplaceAllString(strings.ToLower(title), "-"), "-")
+	if len(slug) > maxSlugLen {
+		cut := slug[:maxSlugLen]
+		if slug[maxSlugLen] != '-' {
+			if i := strings.LastIndex(cut, "-"); i >= maxSlugLen/2 {
+				cut = cut[:i]
+			}
+		}
+		slug = strings.Trim(cut, "-")
+	}
 	if slug == "" {
 		return "task"
 	}
