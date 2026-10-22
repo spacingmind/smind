@@ -48,11 +48,11 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 		now = in.Now
 	}
 	g = TaskGit{TaskID: in.TaskID, Forge: in.Forge, Untrusted: in.Untrusted, PR: in.PR}
-	noOrigin := false
+	noOrigin, notForge := false, false
 	defer func() {
 		g.ComputedAt = now().UTC()
 		g.Actions = Actions(g, ActionCtx{
-			RunActive: in.RunActive, NoOrigin: noOrigin,
+			RunActive: in.RunActive, NoOrigin: noOrigin, OriginNotForge: notForge,
 			ForgeCode: in.ForgeCode, ForgeReason: in.ForgeReason,
 		})
 	}()
@@ -67,7 +67,12 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 		repo = in.WorktreePath
 	}
 	branchRef := "refs/heads/" + in.Branch
-	noOrigin = !hasForgeOrigin(ctx, run, repo)
+	switch originKind(ctx, run, repo) {
+	case originNone:
+		noOrigin = true
+	case originNotForge:
+		notForge = true
+	}
 
 	g.Worktree = worktreeStatus(ctx, run, in.WorktreePath)
 
@@ -115,16 +120,27 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 	return g
 }
 
-// hasForgeOrigin reports whether the repository's `origin` remote is set and
-// is a URL a forge can host: https, ssh or scp-like. A local path, file:// or
-// git:// remote cannot open a pull request (U7). The configured value is read
-// without insteadOf rewriting, which is what the forge CLI matches on.
-func hasForgeOrigin(ctx context.Context, run Runner, dir string) bool {
+type originState int
+
+const (
+	originForge    originState = iota // a URL a forge can host
+	originNone                        // no `origin` remote at all
+	originNotForge                    // an origin that is a local path, file:// or git:// URL
+)
+
+// originKind classifies the repository's `origin` remote for the Create PR
+// preconditions (U7). Only an https, ssh or scp-like URL can open a pull
+// request; the configured value is read without insteadOf rewriting, which is
+// what the forge CLI matches on.
+func originKind(ctx context.Context, run Runner, dir string) originState {
 	out, err := run(ctx, dir, "config", "--get", "remote."+originRemote+".url")
-	if err != nil {
-		return false
+	if err != nil || strings.TrimSpace(out) == "" {
+		return originNone
 	}
-	return forgeRemoteURL(strings.TrimSpace(out))
+	if forgeRemoteURL(strings.TrimSpace(out)) {
+		return originForge
+	}
+	return originNotForge
 }
 
 // forgeRemoteURL accepts https://, ssh:// and the scp-like host:path form

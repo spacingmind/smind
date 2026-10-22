@@ -192,8 +192,8 @@ func TestActions_NoOrigin_DisabledForgeNoRemote(t *testing.T) {
 
 	// The fixture's origin is a local bare path: not a forge remote.
 	g := Compute(context.Background(), DefaultRunner, in)
-	if a := g.Actions["createPr"]; a.Enabled || a.Code != "forge_no_remote" || !strings.Contains(a.Reason, "no `origin` remote") {
-		t.Fatalf("local-path origin: createPr = %+v, want forge_no_remote", a)
+	if a := g.Actions["createPr"]; a.Enabled || a.Code != "forge_no_remote" || !strings.Contains(a.Reason, "isn't a GitHub repository URL") {
+		t.Fatalf("local-path origin: createPr = %+v, want forge_no_remote saying origin isn't a GitHub URL", a)
 	}
 
 	// A forge URL is accepted (the transport still goes to the bare repo
@@ -208,8 +208,8 @@ func TestActions_NoOrigin_DisabledForgeNoRemote(t *testing.T) {
 	// No origin at all.
 	git(t, f.repo, "remote", "remove", "origin")
 	g = Compute(context.Background(), DefaultRunner, in)
-	if a := g.Actions["createPr"]; a.Enabled || a.Code != "forge_no_remote" {
-		t.Fatalf("no origin: createPr = %+v, want forge_no_remote", a)
+	if a := g.Actions["createPr"]; a.Enabled || a.Code != "forge_no_remote" || !strings.Contains(a.Reason, "no `origin` remote") {
+		t.Fatalf("no origin: createPr = %+v, want forge_no_remote saying there is no origin", a)
 	}
 }
 

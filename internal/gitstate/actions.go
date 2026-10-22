@@ -12,6 +12,8 @@ type ActionCtx struct {
 	RunActive bool
 	// NoOrigin: the workspace has no usable `origin` remote (U7).
 	NoOrigin bool
+	// OriginNotForge: `origin` exists but is a local path or another URL no forge hosts.
+	OriginNotForge bool
 	// ForgeCode passes a forge_* blocker through (the forge CLI is missing or
 	// not signed in on the daemon host). ForgeReason overrides the standard
 	// sentence for the code, which names the action.
@@ -48,6 +50,8 @@ func createPrAction(g TaskGit, c ActionCtx) Action {
 		return disabled("run_active", "Create PR isn't available yet because an agent is still working in this task. Wait for the run to finish, or stop it.")
 	case c.NoOrigin:
 		return disabled(forge.CodeNoRemote, "Create PR isn't available because this workspace has no `origin` remote, so there's nowhere to open a pull request. Add one with `git remote add origin <url>`.")
+	case c.OriginNotForge:
+		return disabled(forge.CodeNoRemote, "Create PR isn't available because this workspace's `origin` remote isn't a GitHub repository URL (it is a local path or another kind of remote), so there's nowhere to open a pull request.")
 	case g.PR != nil && g.PR.State == "open":
 		return disabled("pr_exists", "A pull request is already open for this branch.")
 	case g.Commits != nil && g.Commits.SinceFork != nil && *g.Commits.SinceFork == 0:

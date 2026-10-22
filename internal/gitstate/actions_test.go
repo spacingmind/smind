@@ -92,6 +92,15 @@ func TestActions_DisabledReasons_Table(t *testing.T) {
 			updateMsg:  "Update PR isn't available because this branch has no pull request. Create one first.",
 		},
 		{
+			name:       "origin that is not a forge URL (U7)",
+			g:          TaskGit{Branch: branch, Base: known, Commits: withCommits},
+			c:          ActionCtx{OriginNotForge: true},
+			createCode: "forge_no_remote",
+			createMsg:  "Create PR isn't available because this workspace's `origin` remote isn't a GitHub repository URL (it is a local path or another kind of remote), so there's nowhere to open a pull request.",
+			updateCode: "no_pr",
+			updateMsg:  "Update PR isn't available because this branch has no pull request. Create one first.",
+		},
+		{
 			name:       "run active beats no origin",
 			g:          TaskGit{Branch: branch, Base: known, Commits: withCommits},
 			c:          ActionCtx{NoOrigin: true, RunActive: true},
