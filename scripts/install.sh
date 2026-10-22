@@ -6,6 +6,8 @@
 #
 # Options:
 #   --version <v>      release to install, e.g. 0.11.1 (default: latest)
+#   --desktop          macOS only: install the sMind desktop app instead of the
+#                      CLI (see below)
 #   --service          after installing, run `smind service install` (a
 #                      systemd user unit on Linux, a LaunchAgent on macOS)
 #   --system           with --service on Linux: a system unit that runs as the
@@ -16,11 +18,21 @@
 #   SMIND_VERSION      same as --version; the flag wins if both are given
 #   SMIND_INSTALL_DIR  target directory (default: /usr/local/bin if writable,
 #                      otherwise ~/.local/bin)
+#   SMIND_APP_DIR      with --desktop: where sMind.app goes (default:
+#                      /Applications if writable, otherwise ~/Applications)
 #
 # Downloads smind_<version>_<os>_<arch>.tar.gz plus checksums.txt, verifies
 # the SHA-256 (mandatory), and installs the `smind` binary. Re-running it
 # installs the requested (or latest) release over the previous one.
 # Linux and macOS only: on Windows use scripts/install.ps1 (PowerShell).
+#
+# --desktop (macOS) installs sMind.app from the release's
+# smind-desktop-<version>-macos-<arm64|x86_64>.app.tar.gz, verified against the
+# same checksums.txt. The app is ad-hoc signed and not notarized, so a copy
+# downloaded in a browser is quarantined and Gatekeeper blocks it; curl does
+# not set the quarantine flag, so installing it with this script opens without
+# a prompt. It is swapped in atomically (the previous app stays until the new
+# one is in place), and refuses while sMind is running -- it never kills it.
 set -eu
 
 REPO="spacingmind/smind"
@@ -32,9 +44,10 @@ need() { command -v "$1" >/dev/null 2>&1 || err "required command not found: $1"
 
 usage() {
   cat <<'EOF'
-Usage: install.sh [--version <version>] [--service [--system]] [--help]
+Usage: install.sh [--version <version>] [--service [--system]] [--desktop] [--help]
 
-Installs the smind daemon/CLI from a GitHub Release (Linux and macOS).
+Installs the smind daemon/CLI from a GitHub Release (Linux and macOS), or with
+--desktop the sMind desktop app (macOS).
 
 Options:
   --version <v>   release to install, e.g. 0.11.1 (default: latest)
@@ -44,12 +57,18 @@ Options:
   --system        with --service on Linux: install a system-wide unit that
                   runs as the invoking user (needs sudo; never runs as root):
                     curl -fsSL https://spacingmind.com/install.sh | sudo sh -s -- --service --system
+  --desktop       macOS only: install the sMind desktop app (sMind.app) instead
+                  of the CLI. The app is not notarized; downloading it with
+                  this script avoids the Gatekeeper quarantine prompt. Refuses
+                  while sMind is running. Not combinable with --service.
   -h, --help      print this help
 
 Environment:
   SMIND_VERSION      same as --version (the flag wins if both are given)
   SMIND_INSTALL_DIR  target directory (default: /usr/local/bin if writable,
                      otherwise ~/.local/bin)
+  SMIND_APP_DIR      with --desktop: where sMind.app goes (default:
+                     /Applications if writable, otherwise ~/Applications)
 EOF
 }
 
@@ -69,6 +88,7 @@ set_version() {
 version="${SMIND_VERSION:-}"
 service=0
 system=0
+desktop=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -h | --help)
@@ -96,6 +116,10 @@ while [ $# -gt 0 ]; do
       system=1
       shift
       ;;
+    --desktop)
+      desktop=1
+      shift
+      ;;
     *)
       usage >&2
       printf 'smind-install: unknown option: %s\n' "$1" >&2
@@ -110,6 +134,12 @@ if [ "$system" = 1 ] && [ "$service" = 0 ]; then
   exit 2
 fi
 
+if [ "$desktop" = 1 ] && { [ "$service" = 1 ] || [ "$system" = 1 ]; }; then
+  usage >&2
+  printf 'smind-install: --desktop installs the app only; --service/--system apply to the CLI install\n' >&2
+  exit 2
+fi
+
 case "$(uname -s)" in
   Linux) os=linux ;;
   Darwin) os=darwin ;;
@@ -121,6 +151,10 @@ esac
 
 if [ "$system" = 1 ] && [ "$os" != linux ]; then
   err "--system is only available on Linux (macOS uses a per-user LaunchAgent)"
+fi
+
+if [ "$desktop" = 1 ] && [ "$os" != darwin ]; then
+  err "--desktop is only supported on macOS (there is no Linux desktop app; install the CLI without --desktop)"
 fi
 
 need curl
@@ -158,21 +192,120 @@ case "$version" in
   "" | [!0-9]* | *[!0-9A-Za-z.+-]*) err "could not determine a valid version (got '$version')" ;;
 esac
 
-name="smind_${version}_${os}_${arch}.tar.gz"
 base="https://github.com/$REPO/releases/download/v${version}"
 
 tmp="$(mktemp -d 2>/dev/null || mktemp -d -t smind)"
 stage=
-trap 'rm -rf "$tmp"; [ -z "$stage" ] || rm -f "$stage"' EXIT INT TERM
+stage_dir=
+dest=
+cleanup() {
+  # Interrupted between the two renames of the app swap: put the previous app
+  # back before the scratch directory (which still holds it) is removed.
+  if [ -n "$stage_dir" ] && [ -d "$stage_dir/previous.app" ] && [ -n "$dest" ] && [ ! -e "$dest" ]; then
+    mv "$stage_dir/previous.app" "$dest" || true
+  fi
+  rm -rf "$tmp"
+  [ -z "$stage" ] || rm -f "$stage"
+  [ -z "$stage_dir" ] || rm -rf "$stage_dir"
+}
+trap cleanup EXIT
+trap "exit 130" INT
+trap "exit 143" TERM
 
+# download_verified <asset>: fetches the asset and checksums.txt into $tmp and
+# checks the asset's SHA-256 (mandatory), for the CLI archive and the app alike.
+download_verified() {
+  asset="$1"
+  curl -fsSL -o "$tmp/$asset" "$base/$asset" || err "download failed: $base/$asset"
+  curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt" || err "download failed: $base/checksums.txt"
+  expected="$(awk -v f="$asset" '$2 == f || $2 == "*" f { print $1 }' "$tmp/checksums.txt")"
+  [ -n "$expected" ] || err "no checksum for $asset in checksums.txt"
+  actual="$(sha256 "$tmp/$asset")"
+  [ "$expected" = "$actual" ] || err "checksum mismatch for $asset"
+}
+
+# sMind refuses to be replaced while it runs (a running app would keep its old
+# code, and the new bundle would be swapped under it). Never kills it.
+refuse_if_running() {
+  need pgrep
+  if pgrep -f 'sMind\.app/Contents/MacOS/' >/dev/null 2>&1; then
+    err "sMind is running; quit it (Cmd+Q) and run this again -- this script never closes it for you"
+  fi
+}
+
+install_desktop() {
+  case "$arch" in
+    amd64) app_arch=x86_64 ;;
+    *) app_arch=$arch ;;
+  esac
+  app_asset="smind-desktop-${version}-macos-${app_arch}.app.tar.gz"
+
+  appdir="${SMIND_APP_DIR:-}"
+  if [ -z "$appdir" ]; then
+    if [ -w /Applications ]; then
+      appdir=/Applications
+    else
+      appdir="$HOME/Applications"
+    fi
+  fi
+  mkdir -p "$appdir" || err "could not create $appdir"
+  [ -w "$appdir" ] || err "$appdir is not writable; set SMIND_APP_DIR"
+  dest="$appdir/sMind.app"
+
+  refuse_if_running
+
+  say "Downloading sMind v${version} (macos/${app_arch})..."
+  download_verified "$app_asset"
+
+  # Extract next to the destination (same filesystem, so the swap below is a
+  # rename) into a scratch dir that the exit trap removes.
+  stage_dir="$(mktemp -d "$appdir/.sMind-install.XXXXXX")" || err "could not create a scratch directory in $appdir"
+  tar -xzf "$tmp/$app_asset" -C "$stage_dir" || err "could not extract $app_asset"
+  new_app=
+  for candidate in "$stage_dir"/*.app; do
+    [ -d "$candidate" ] || continue
+    [ -z "$new_app" ] || err "$app_asset contains more than one .app"
+    new_app="$candidate"
+  done
+  [ -n "$new_app" ] || err "$app_asset does not contain an app bundle"
+  [ -d "$new_app/Contents/MacOS" ] || err "$app_asset is not a macOS app bundle"
+
+  # Re-check right before the swap: the download took a while.
+  refuse_if_running
+
+  # The previous app stays in place until the new one is: move it aside (a
+  # rename), move the new one in, and only then delete the old. If the second
+  # rename fails the old app is put back.
+  if [ -e "$dest" ]; then
+    mv "$dest" "$stage_dir/previous.app" || err "could not move the existing $dest aside; it was left untouched"
+    if ! mv "$new_app" "$dest"; then
+      mv "$stage_dir/previous.app" "$dest" || true
+      err "could not install $dest; the previous app was restored"
+    fi
+  else
+    mv "$new_app" "$dest" || err "could not install $dest"
+  fi
+
+  # Only the app just installed: curl downloads carry no quarantine flag, so
+  # this is belt and braces (e.g. an archive that kept one).
+  xattr -dr com.apple.quarantine "$dest" 2>/dev/null || say "note: could not clear the quarantine flag on $dest"
+
+  say "Installed sMind v${version} to $dest"
+  if [ "$appdir" != /Applications ] && [ -e /Applications/sMind.app ]; then
+    say "note: /Applications/sMind.app also exists; this install went to $appdir"
+  fi
+  say ""
+  say "Next: open sMind from $appdir (or: open \"$dest\")"
+}
+
+if [ "$desktop" = 1 ]; then
+  install_desktop
+  exit 0
+fi
+
+name="smind_${version}_${os}_${arch}.tar.gz"
 say "Downloading smind v${version} (${os}/${arch})..."
-curl -fsSL -o "$tmp/$name" "$base/$name" || err "download failed: $base/$name"
-curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt" || err "download failed: $base/checksums.txt"
-
-expected="$(awk -v f="$name" '$2 == f || $2 == "*" f { print $1 }' "$tmp/checksums.txt")"
-[ -n "$expected" ] || err "no checksum for $name in checksums.txt"
-actual="$(sha256 "$tmp/$name")"
-[ "$expected" = "$actual" ] || err "checksum mismatch for $name"
+download_verified "$name"
 
 tar -xzf "$tmp/$name" -C "$tmp" smind || err "could not extract smind from $name"
 

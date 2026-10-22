@@ -54,6 +54,9 @@ with `--version` (`curl -fsSL https://spacingmind.com/install.sh | sh -s --
 and choose the target directory with `SMIND_INSTALL_DIR`. Re-running it
 installs over the previous version, so it is also the update path.
 
+On macOS, add `--desktop` to install the sMind desktop app instead of the CLI;
+see [macOS desktop app](#macos-desktop-app) (the app is not notarized yet).
+
 On Windows, in PowerShell (5.1 or 7):
 
 ```powershell
@@ -95,13 +98,39 @@ matching `smind` daemon and starts it for you on first launch, so there is
 nothing else to install. Quitting the app leaves the daemon running; reopen
 it from the Dock to reconnect.
 
-The app is not signed or notarized, so Gatekeeper blocks a DMG downloaded
-through a browser. After dragging `sMind.app` to `/Applications`, clear the
-quarantine flag once:
+**The macOS app is not notarized yet.** It is ad-hoc signed only (there is no
+Apple Developer ID behind it), so a DMG or `.app` downloaded in a browser is
+quarantined and Gatekeeper blocks it, or warns that it "cannot be verified", on
+first open. That is expected, not a corrupt download. Either:
+
+- drag `sMind.app` to `/Applications`, then **right-click it → Open** (and
+  confirm **Open** in the dialog); or
+- clear the quarantine flag once from Terminal:
+
+  ```sh
+  xattr -dr com.apple.quarantine /Applications/sMind.app
+  ```
+
+Why: Gatekeeper checks apps that carry the `com.apple.quarantine` attribute,
+which browsers set on downloads, and an app without a notarized Developer ID
+signature fails that check. Developer ID signing and notarization are deferred
+until there are users who need them
+([plan](docs/plans/active/desktop-macos-app.md)).
+
+Or skip the prompt altogether and install with the script, which downloads the
+app with `curl` (that sets no quarantine flag), verifies it against
+`checksums.txt` like the CLI install, and swaps it into `/Applications`
+(`~/Applications` if that isn't writable) without touching a copy that is
+running:
 
 ```sh
-xattr -dr com.apple.quarantine /Applications/sMind.app
+curl -fsSL https://spacingmind.com/install.sh | sh -s -- --desktop
 ```
+
+(`SMIND_APP_DIR` picks another folder; `--version` pins a release; quit sMind
+first, because the script refuses to replace a running app and never closes it
+for you.) The command-line install above is unaffected by any of this: `curl`
+downloads aren't quarantined, so `smind` itself opens without a prompt.
 
 (Installs from releases before 0.12 are named `smind.app`; they keep updating
 in place under that name.)

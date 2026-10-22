@@ -59,8 +59,9 @@ References:
    prompt.
 4. The app is **unsigned/ad-hoc** (user decision). No Apple credentials
    are needed anywhere. The README "Install" section documents the
-   one-time `xattr -dr com.apple.quarantine /Applications/smind.app` for
-   a DMG downloaded from GitHub.
+   one-time `xattr -dr com.apple.quarantine /Applications/sMind.app` (or
+   right-click → Open) for a DMG downloaded from GitHub, and
+   `install.sh --desktop` avoids it (see *Distribution trust*, 2026-10-22).
 5. App name, icon and identifier are correct:
    - Finder, the Dock and the About panel show "smind" with the smind
      logo (`icons/icon.icns`);
@@ -286,6 +287,25 @@ Web (vitest, `desktop-daemon-banner.test.tsx` + `use-task-attention.test.ts`):
 - **Unsigned / ad-hoc, personal use (user, 2026-10-10).** No Developer
   ID or notarization for now. Add it later behind an opt-in env, the
   way ZCode does (`ZCODE_ENABLE_MAC_SIGN`), if the app gets distributed.
+- **Distribution trust (interim, 2026-10-22).** The Human decided not to buy
+  the Apple Developer Program yet. The macOS app stays **ad-hoc signed and
+  un-notarized**, so a `.dmg`/`.app` downloaded through a browser is
+  quarantined (`com.apple.quarantine`) and Gatekeeper blocks or warns on first
+  open. Interim measures, both shipped without any Apple credential:
+  1. README documents it plainly: it is not notarized, the two ways to open it
+     (right-click → Open, or `xattr -dr com.apple.quarantine
+     /Applications/sMind.app`), and why. The CLI installed by `install.sh` is
+     not affected (`curl` downloads carry no quarantine flag).
+  2. `scripts/install.sh --desktop` (macOS) downloads
+     `smind-desktop-<ver>-macos-<arm64|x86_64>.app.tar.gz` from the release,
+     verifies it against `checksums.txt` (SHA-256, as the CLI install does),
+     and installs `sMind.app` to `/Applications` (else `~/Applications`) by
+     extracting next to the target and swapping, keeping the old app until the
+     new one is in place. It clears the quarantine flag on the installed app
+     only, refuses while sMind is running and never kills a process.
+  **Deferred:** Developer ID signing and notarization, until there are real
+  users who need them. Add them then, behind an opt-in env as the earlier
+  decision above says.
 - **Bundled daemon sidecar on macOS (user, 2026-10-10).** This replaces
   the release download for macOS. It is one of the two options ADR-0013
   already lists for macOS native ("a launchd agent or a sidecar"), so no
