@@ -1272,26 +1272,44 @@ function RowChevron({ open }: { open: boolean }) {
  * while its row is hovered/focused/menu-open (use-row-active.ts); `onOpenChange`
  * is how the row learns its menu is open so it stays mounted.
  */
+/** One entry of a workspace/space row menu. `fadeOut` keeps the menu's exit animation for items that do not open a dialog. */
+type RowMenuItem = { label: string; icon: ReactNode; onSelect: () => void; fadeOut?: boolean };
+
 function RowMenu({
   items,
   triggerProps,
   onOpenChange,
 }: {
-  items: { label: string; icon: ReactNode; onSelect: () => void }[];
+  items: RowMenuItem[];
   /** Extra DOM attributes (data-testid, data-*-id) so callers can disambiguate this shared trigger's otherwise-identical "Row actions" label between workspace and space rows. */
   triggerProps?: Record<string, string | number>;
   onOpenChange?: (open: boolean) => void;
 }) {
+  // An item that opens a dialog closes the menu with no exit animation (the
+  // task rows' rule, MENU_CLOSE_INSTANT): the menu's fade-out would otherwise
+  // overlap the dialog's fade-in and ghost through the overlay.
+  const [instantClose, setInstantClose] = useState(false);
   return (
-    <DropdownMenu onOpenChange={onOpenChange}>
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (open) setInstantClose(false);
+        onOpenChange?.(open);
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon-sm" aria-label="Row actions" className="size-5 p-0" {...triggerProps}>
           <Icons.more />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="right">
+      <DropdownMenuContent align="start" side="right" className={instantClose ? MENU_CLOSE_INSTANT : undefined}>
         {items.map((item) => (
-          <DropdownMenuItem key={item.label} onSelect={item.onSelect}>
+          <DropdownMenuItem
+            key={item.label}
+            onSelect={() => {
+              if (item.fadeOut !== true) setInstantClose(true);
+              item.onSelect();
+            }}
+          >
             {item.icon}
             {item.label}
           </DropdownMenuItem>
@@ -1360,7 +1378,7 @@ function WorkspaceItem({
   const flat = workspace.spaces.length === 0;
   const { attention, runStatus } = useRowSignal();
   const aggregate = aggregateStatus(workspaceTasks(workspace), attention, runStatus);
-  const items = [
+  const items: RowMenuItem[] = [
     { label: "Add task", icon: <Icons.add />, onSelect: () => onAddTask(null) },
     { label: "Add space", icon: <Icons.add />, onSelect: onAddSpace },
     ...(localPathActions
@@ -1369,11 +1387,13 @@ function WorkspaceItem({
             label: localPathActions.revealLabel,
             icon: <Icons.folderOpen />,
             onSelect: () => localPathActions.reveal(workspace.Path),
+            fadeOut: true,
           },
           ...localPathActions.editors.map((editor) => ({
             label: `Open in ${editor.label}`,
             icon: <Icons.externalLink />,
             onSelect: () => localPathActions.open(editor.id, workspace.Path),
+            fadeOut: true,
           })),
         ]
       : []),
@@ -1382,6 +1402,7 @@ function WorkspaceItem({
   ];
 
   const { active, rowProps, setMenuOpen } = useRowActive();
+  const [contextInstantClose, setContextInstantClose] = useState(false);
   const { state: sidebarState, setOpen: setSidebarOpen } = useSidebar();
   const name = workspace.Title || workspace.Path;
   const monogram = workspaceMonogram(workspace.Title || workspace.Path.split(/[\\/]/).filter(Boolean).pop() || "");
@@ -1399,7 +1420,7 @@ function WorkspaceItem({
   };
   return (
     <SidebarMenuItem>
-      <ContextMenu>
+      <ContextMenu onOpenChange={(open) => open && setContextInstantClose(false)}>
         {/*
           * The hover/focus scope is this wrapper -- the header line only --
           * not the li, which also contains the workspace's whole subtree.
@@ -1468,9 +1489,18 @@ function WorkspaceItem({
             </RowActions>
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent data-testid="sidebar-workspace-context-menu">
+        <ContextMenuContent
+          data-testid="sidebar-workspace-context-menu"
+          className={contextInstantClose ? MENU_CLOSE_INSTANT : undefined}
+        >
           {items.map((item) => (
-            <ContextMenuItem key={item.label} onSelect={item.onSelect}>
+            <ContextMenuItem
+              key={item.label}
+              onSelect={() => {
+                if (item.fadeOut !== true) setContextInstantClose(true);
+                item.onSelect();
+              }}
+            >
               {item.icon}
               {item.label}
             </ContextMenuItem>
@@ -1621,7 +1651,7 @@ function SpaceLikeItem({
   spaces: SpaceWithTasks[];
   onMoveTask: (task: Task, spaceId: number | null) => void;
   /** The ⋯ menu's items; absent for the synthetic "Ungrouped" bucket, which has nothing to add to or delete. */
-  menuItems?: { label: string; icon: ReactNode; onSelect: () => void }[];
+  menuItems?: RowMenuItem[];
   /** Only set for a real Space (not the synthetic "Ungrouped" bucket, which has no Space to key on). */
   testId?: string;
   spaceId?: number;
