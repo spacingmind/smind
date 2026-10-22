@@ -99,6 +99,7 @@ tasks:
       - go test ./...
       - node --test 'desktop/scripts/*.test.mjs'
       - sh scripts/install_test.sh
+      - sh scripts/task_setup_test.sh
 
   test:install:ps:
     desc: Run the install.ps1 tests (needs PowerShell 7, `pwsh`)
@@ -119,7 +120,7 @@ tasks:
       - test -z "$(gofmt -l $(git ls-files '*.go'))"
       - |
         if command -v shellcheck >/dev/null 2>&1; then
-          shellcheck scripts/install.sh scripts/install_test.sh scripts/service_smoke.sh
+          shellcheck scripts/install.sh scripts/install_test.sh scripts/service_smoke.sh scripts/task-setup.sh scripts/task_setup_test.sh
         else
           echo "shellcheck not installed; skipping install script lint" >&2
         fi
