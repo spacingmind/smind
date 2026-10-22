@@ -43,6 +43,11 @@ type Server interface {
 	ServeTransport(ctx context.Context, tr wsapi.Transport)
 }
 
+// DeviceServer is implemented by servers that want the verified device id (wsapi.API does). The hub prefers it over Server.ServeTransport for an identified device.
+type DeviceServer interface {
+	ServeDevice(ctx context.Context, tr wsapi.Transport, deviceID string)
+}
+
 const (
 	// DefaultMaxDevices bounds concurrently SERVED device sessions (the relay
 	// bounds attached devices the same way, ADR-0031 limits).
@@ -583,8 +588,13 @@ func (h *Hub) serveSession(s *session, c *relayConn) (err error) {
 	defer h.setServing(s, false)
 	h.mu.Lock()
 	srv := h.server
+	id := s.deviceID
 	h.mu.Unlock()
-	srv.ServeTransport(s.ctx, tr)
+	if ds, ok := srv.(DeviceServer); ok && id != "" {
+		ds.ServeDevice(s.ctx, tr, id)
+	} else {
+		srv.ServeTransport(s.ctx, tr)
+	}
 	if tr.closedByServer() {
 		return errSessionOver
 	}

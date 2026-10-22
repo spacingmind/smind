@@ -154,6 +154,8 @@ func cmdServe(args []string) int {
 	// connection is served (SetRelayDevices is not safe against concurrent
 	// requests).
 	hub := newRelayHub(srv, cfg.Relay)
+	// Same startup-only rule for the push.* methods (ADR-0040).
+	pushRT := wirePush(srv.API(), hub, db, cfg.Push)
 	httpSrv := &http.Server{
 		Addr:              srv.Addr(),
 		Handler:           srv.Handler(),
@@ -210,6 +212,7 @@ func cmdServe(args []string) int {
 
 	stopLearning() // before the run registry closes: in-flight jobs end failed, watermarks untouched
 	stopGitState()
+	pushRT.Close() // no push goroutine may outlive the daemon
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {

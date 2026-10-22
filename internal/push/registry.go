@@ -272,3 +272,9 @@ func syncDir(dir string) {
 		_ = d.Close()
 	}
 }
+
+// RegistryFileName is the registry's file under the daemon's home directory.
+const RegistryFileName = "push-registrations.json"
+
+// RegistryPath is the registry file under dir (the daemon's $SMIND_HOME).
+func RegistryPath(dir string) string { return filepath.Join(dir, RegistryFileName) }

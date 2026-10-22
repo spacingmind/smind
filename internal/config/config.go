@@ -20,6 +20,7 @@ type Config struct {
 	Providers     map[string]ProviderConfig `yaml:"providers"`
 	AccountUsage  AccountUsageConfig        `yaml:"accountUsage"`
 	Relay         RelayConfig               `yaml:"relay"`
+	Push          PushConfig                `yaml:"push"`
 	Learning      LearningConfig            `yaml:"learning"`
 	Log           LogConfig                 `yaml:"log"`
 }
@@ -41,6 +42,25 @@ const (
 	DefaultLogMaxSizeMB = 10
 	DefaultLogMaxFiles  = 5
 )
+
+// Env overrides for the push settings (ADR-0040).
+const (
+	// EnvPush set to 0/false/off/no/n/f/disabled turns push notifications off.
+	EnvPush = "SMIND_PUSH"
+	// EnvExpoAccessToken overrides push.expoAccessToken (prefer it over the file).
+	EnvExpoAccessToken = "SMIND_EXPO_ACCESS_TOKEN"
+)
+
+// PushConfig tunes mobile push notifications (ADR-0040).
+type PushConfig struct {
+	// Enabled defaults to true: registration is already an explicit opt-in on
+	// the phone, so a daemon that nobody registered sends nothing.
+	Enabled bool `yaml:"enabled"`
+	// ExpoAccessToken is optional and only needed if the Expo project enables
+	// "enhanced push security". It is a secret: it is never logged; prefer the
+	// SMIND_EXPO_ACCESS_TOKEN env var over writing it to the file.
+	ExpoAccessToken string `yaml:"expoAccessToken"`
+}
 
 // RelayConfig tunes this daemon's relay client side (ADR-0031 D9).
 type RelayConfig struct {
@@ -435,6 +455,7 @@ func Default() Config {
 			Passive:             true,
 		},
 		Relay:    RelayConfig{LegacyDevices: false, MaxDevices: DefaultRelayMaxDevices},
+		Push:     PushConfig{Enabled: true},
 		Learning: DefaultLearning(),
 		Log:      LogConfig{MaxSizeMB: DefaultLogMaxSizeMB, MaxFiles: DefaultLogMaxFiles},
 	}
@@ -516,6 +537,15 @@ func LoadFile(path string) (Config, error) {
 // container's kill switch must not vanish because there is no config.yaml.
 func applyEnv(cfg *Config) {
 	applyServerEnv(&cfg.Server)
+	if v := strings.TrimSpace(os.Getenv(EnvPush)); v != "" {
+		switch strings.ToLower(v) {
+		case "0", "false", "off", "no", "n", "f", "disabled":
+			cfg.Push.Enabled = false
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv(EnvExpoAccessToken)); v != "" {
+		cfg.Push.ExpoAccessToken = v
+	}
 	if v := strings.TrimSpace(os.Getenv(EnvLearning)); v != "" {
 		switch strings.ToLower(v) {
 		case "0", "false", "off", "no", "n", "f", "disabled":

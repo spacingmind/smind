@@ -439,6 +439,17 @@ func (s *subscriber) wait(ctx context.Context) bool {
 type eventBus struct {
 	mu   sync.Mutex
 	subs map[*subscriber]bool
+	// tap, when set, sees every published event (guarded by mu). It is called
+	// synchronously on the publisher's goroutine, so it MUST NOT block: no
+	// network I/O, no waiting on locks held across I/O.
+	tap func(Event)
+}
+
+// setTap installs (or, with nil, removes) the tap.
+func (b *eventBus) setTap(fn func(Event)) {
+	b.mu.Lock()
+	b.tap = fn
+	b.mu.Unlock()
 }
 
 func newEventBus() *eventBus {
@@ -468,9 +479,13 @@ func (b *eventBus) Publish(e Event) {
 	for s := range b.subs {
 		subs = append(subs, s)
 	}
+	tap := b.tap
 	b.mu.Unlock()
 	for _, s := range subs {
 		s.offer(e)
+	}
+	if tap != nil {
+		tap(e)
 	}
 }
 
