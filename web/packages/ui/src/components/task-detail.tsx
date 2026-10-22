@@ -3,7 +3,11 @@ import { Icons } from "@/lib/icons";
 import { providerLabel } from "@/lib/provider-catalog";
 
 import { TaskLineageChips } from "@/components/task-lineage";
+import { resendRequests } from "@/lib/attachments/reuse";
+import { AttachmentDropOverlay } from "@/components/composer/attachment-drop-overlay";
 import { Composer } from "@/components/composer/composer";
+import { useAttachmentDraft } from "@/components/composer/use-attachment-draft";
+import { useAttachmentDrop } from "@/components/composer/use-attachment-drop";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
 import { ChatUsageTotal } from "@/components/chat-usage-total";
@@ -140,8 +144,9 @@ export function TaskDetailPane({
   // same task.diff this is -- the same hook the diff pane itself uses, so
   // the pill and the pane's header stat can't disagree and no extra RPC
   // is introduced. It stays mounted even when the Diff tab isn't (the
-  // fetch is cheap and the refresh signal is identical).
-  const wholeDiff = useTaskDiff(client, task, undefined);
+  // fetch is cheap), and it takes the same `events` so a run ending
+  // refreshes the pill live instead of leaving it stale until a reload.
+  const wholeDiff = useTaskDiff(client, task, events);
 
   // Every run currently holding an unanswered permission request -- in
   // practice at most one (a task has one active run at a time), but this
@@ -262,8 +267,19 @@ export function TaskDetailPane({
       composer && composer.provider === run.provider
         ? { permissionMode: composer.permissionMode, autoAccept: composer.autoAccept }
         : { permissionMode: run.permissionMode, autoAccept: run.autoAccept };
+    // ADR-0038: the earlier run's attachments ride along as `reuse`/ref requests (the daemon copies the stored files).
+    const reuse = resendRequests(run.id, run.attachments);
     submitPromptRef
-      .current(run.provider, prompt, permission, run.thinkingLevel, "queue", run.model || undefined)
+      .current(
+        run.provider,
+        prompt,
+        permission,
+        run.thinkingLevel,
+        "queue",
+        run.model || undefined,
+        reuse.length > 0 ? reuse : undefined,
+        reuse.length > 0 ? run.attachments : undefined,
+      )
       .then((result) => {
         // A queued prompt shows up in the composer's queue list straight away.
         if (result.kind === "queued") queueRefreshRef.current();
@@ -287,10 +303,15 @@ export function TaskDetailPane({
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const focusToolbar = useCallback(() => toolbarRef.current?.focus(), []);
 
+  // Dropping files anywhere on the pane attaches them to this chat's draft (ADR-0038 §7); inert without daemon support.
+  const attachDraft = useAttachmentDraft(task.ID, chat.ID);
+  const dropZone = useAttachmentDrop({ enabled: attachDraft.limits !== null, onFiles: attachDraft.add });
+
   const agentLabel = runConfigState ? agentChipLabel(runConfigState, profiles) : null;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col" {...dropZone.handlers}>
+      {attachDraft.limits && <AttachmentDropOverlay active={dropZone.dragging} />}
       {/*
        * The task's title, branch and status live in the app header (and its
        * hover card); this row keeps only what is specific to this chat.
@@ -476,6 +497,7 @@ export function TaskDetailPane({
         toolbarRef={toolbarRef}
         onRunConfigChange={setRunConfigState}
         liveRun={liveRun}
+        dropActive={dropZone.dragging}
         otherRunningChat={otherRunningChat}
         onJumpToChat={onJumpToChat}
         configOptions={{ options: configOptions.options, error: configOptions.error, onSetOption: configOptions.setOption }}

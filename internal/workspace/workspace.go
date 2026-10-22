@@ -36,6 +36,10 @@ type Manager struct {
 	// it from the loaded config via SetMaxDepth.
 	maxTaskDepth int
 
+	// attachmentCleanup, if set via SetAttachmentCleanup, is handed the
+	// attachment set ids of deleted tasks once their rows are gone.
+	attachmentCleanup func(setIDs []string)
+
 	// wt holds the worktrees: config (ADR-0024); portMu serialises port
 	// allocation.
 	wtMu   sync.Mutex

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/ghctx"
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
@@ -73,6 +74,9 @@ type API struct {
 	bus  *eventBus
 	info *DaemonInfo
 
+	// github backs forge.search (SetGithubClient).
+	github *githubHolder
+
 	// learning backs the human-only learning.* RPCs (SetLearning).
 	learning *learningHost
 
@@ -107,18 +111,19 @@ func (a *API) SetAuthorizer(fn func(*http.Request) bool) { a.authorize = fn }
 // *client.DataConn, so a mobile-originated request gets the same answer a
 // browser tab's would.
 func (a *API) ServeTransport(ctx context.Context, tr Transport) {
-	a.serve(ctx, tr, false)
+	a.serve(ctx, tr, false, RelayMaxMessage)
 }
 
 // serveLocal is ServeTransport for the token-authenticated /ws connection:
 // the one surface allowed to administer the daemon itself (relay.device.*).
 func (a *API) serveLocal(ctx context.Context, tr Transport) {
-	a.serve(ctx, tr, true)
+	a.serve(ctx, tr, true, DirectMaxMessage)
 }
 
-func (a *API) serve(ctx context.Context, tr Transport, local bool) {
+func (a *API) serve(ctx context.Context, tr Transport, local bool, maxMessage int) {
 	c := newConn(tr, a.hs)
 	c.local = local
+	c.maxMessage = maxMessage
 	c.runScoped = false // no run-scoped identity exists yet (ADR-0027)
 	c.eventsSub = newSubscriber()
 	c.eventsBus = a.bus
@@ -163,13 +168,16 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
 	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, mcpReg, coord, db)
 	info := newDaemonInfo(time.Now())
-	hs["daemon.info"] = handleDaemonInfo(info)
+	hs["daemon.info"] = handleDaemonInfo(info, reg)
+	hs["run.attachment"] = handleRunAttachment(reg)
+	gh := &githubHolder{c: ghctx.New()}
+	hs["forge.search"] = handleForgeSearch(wm, gh)
 	learning := newLearningHost(db, bus)
 	for method, h := range learningHandlers(learning) {
 		hs[method] = h
 	}
 	hs["workspace.delete"] = learning.beforeWorkspaceDelete(hs["workspace.delete"])
-	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus, info: info, learning: learning}
+	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus, info: info, learning: learning, github: gh}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}
@@ -184,6 +192,8 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 			return
 		}
 		defer ws.Close()
+		// Gorilla answers an oversized message with close code 1009.
+		ws.SetReadLimit(DirectMaxMessage)
 
 		api.serveLocal(r.Context(), wsTransport{ws})
 	})

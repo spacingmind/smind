@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Diff2HtmlUI } from "diff2html/lib/ui/js/diff2html-ui.js";
 import "diff2html/bundles/css/diff2html.min.css";
-import "highlight.js/styles/github.css";
 
 import { resolveDiffLine, type DiffLineRef } from "@/lib/diff-lines";
 
