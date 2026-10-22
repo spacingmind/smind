@@ -264,10 +264,13 @@ static JITTER_CALLS: AtomicUsize = AtomicUsize::new(0);
 /// harness plus several clients, so they run one at a time (cargo runs tests
 /// in parallel by default, which on a loaded CI machine starves the shrunk
 /// protocol timeouts).
-static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+///
+/// A tokio mutex, because every test holds the guard across `.await`s (and it
+/// has no poisoning to recover from: a panicking test just drops its guard).
+static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-fn serial() -> std::sync::MutexGuard<'static, ()> {
-    ONE_AT_A_TIME.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+async fn serial() -> tokio::sync::MutexGuard<'static, ()> {
+    ONE_AT_A_TIME.lock().await
 }
 
 fn counting_jitter(d: Duration) -> Duration {
@@ -442,7 +445,7 @@ fn connected_count(h: &Harness) -> usize {
 
 #[tokio::test]
 async fn three_devices_two_rust_one_go_stay_attached() {
-    let _serial = serial();
+    let _serial = serial().await;
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
     assert!(h.cmd("window 2 600").starts_with("OK window"));
     let pairing = h.pairing();
@@ -475,7 +478,7 @@ async fn three_devices_two_rust_one_go_stay_attached() {
 
 #[tokio::test]
 async fn three_devices_two_rust_one_go_stay_attached_after_one_reconnects() {
-    let _serial = serial();
+    let _serial = serial().await;
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
     h.cmd("window 2 600");
     let pairing = h.pairing();
@@ -506,7 +509,7 @@ async fn three_devices_two_rust_one_go_stay_attached_after_one_reconnects() {
 
 #[tokio::test]
 async fn three_devices_two_rust_one_go_stay_attached_after_daemon_restart() {
-    let _serial = serial();
+    let _serial = serial().await;
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
     h.cmd("window 2 600");
     let pairing = h.pairing();
@@ -541,7 +544,7 @@ async fn three_devices_two_rust_one_go_stay_attached_after_daemon_restart() {
 
 #[tokio::test]
 async fn three_devices_two_rust_one_go_stay_attached_after_revoke_only_that_device_is_refused() {
-    let _serial = serial();
+    let _serial = serial().await;
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
     h.cmd("window 2 600");
     let pairing = h.pairing();
@@ -574,7 +577,7 @@ async fn three_devices_two_rust_one_go_stay_attached_after_revoke_only_that_devi
 
 #[tokio::test]
 async fn unknown_device_outside_the_window_waits_for_approval_then_connects() {
-    let _serial = serial();
+    let _serial = serial().await;
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap(); // the stub used the only window
     let pairing = h.pairing();
     let a = start_client(&pairing, None);
@@ -618,7 +621,7 @@ const DAEMON_PASSWORD: &str = "a daemon password for the interop test";
 /// right one connects (an unknown device then still needs the pairing window).
 #[tokio::test]
 async fn password_protected_daemon_asks_rejects_a_wrong_password_and_accepts_the_right_one() {
-    let _serial = serial();
+    let _serial = serial().await;
     let h = tokio::task::spawn_blocking(|| Harness::start(&["-hub", "-password", DAEMON_PASSWORD])).await.unwrap();
     assert!(h.cmd("window 3 600").starts_with("OK window"));
     let pairing = h.pairing();
@@ -646,7 +649,7 @@ async fn password_protected_daemon_asks_rejects_a_wrong_password_and_accepts_the
 
 #[tokio::test]
 async fn repeated_wrong_passwords_are_rate_limited_by_the_daemon() {
-    let _serial = serial();
+    let _serial = serial().await;
     let h = tokio::task::spawn_blocking(|| Harness::start(&["-hub", "-password", DAEMON_PASSWORD])).await.unwrap();
     assert!(h.cmd("window 3 600").starts_with("OK window"));
     let a = start_client(&h.pairing(), None);
@@ -668,7 +671,7 @@ async fn repeated_wrong_passwords_are_rate_limited_by_the_daemon() {
 
 #[tokio::test]
 async fn client_reconnects_after_silence_with_jitter() {
-    let _serial = serial();
+    let _serial = serial().await;
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
     h.cmd("window 1 600");
     let pairing = h.pairing();
@@ -709,7 +712,7 @@ async fn client_reconnects_after_silence_with_jitter() {
 
 #[tokio::test]
 async fn client_resumes_after_transport_drop_keeping_ids() {
-    let _serial = serial();
+    let _serial = serial().await;
     let h = tokio::task::spawn_blocking(harness_with_mobile).await.unwrap();
     h.cmd("window 1 600");
     let pairing = h.pairing();
@@ -748,7 +751,7 @@ async fn client_resumes_after_transport_drop_keeping_ids() {
 
 #[tokio::test]
 async fn legacy_daemon_still_works() {
-    let _serial = serial();
+    let _serial = serial().await;
     // The default harness is a daemon that does not track device identity: it
     // answers the hello "unsupported" (or "method not found"). The client falls
     // back to the fixed single-device route and works as before, now over E2EE
@@ -793,7 +796,7 @@ impl<T: FrameTransport> FrameTransport for Recording<T> {
 /// daemon still sends nothing after a bogus R_c.
 #[tokio::test]
 async fn a_replayed_client_hello_gets_no_challenge_and_fresh_keys() {
-    let _serial = serial();
+    let _serial = serial().await;
     let h = tokio::task::spawn_blocking(|| Harness::start(&["-hub"])).await.unwrap();
     let pairing = h.pairing();
     let device_id = DeviceKey::generate().device_id();

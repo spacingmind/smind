@@ -568,10 +568,14 @@ fn effective_managed_state(platform: Platform, reachable: bool, record: Option<&
     managed::classify(record, port_owner)
 }
 
+// The Windows-only helpers below are pure so their unit tests run on every
+// platform; outside tests they are compiled only where they are used.
+
 /// windows_install_conflict_hint is the AC6 half of install's
 /// port-conflict refusal on Windows: the base refusal comes from
 /// `assert_safe_to_install`; this adds the WSL possibility and names the
 /// port the Windows daemon needs free.
+#[cfg(any(target_os = "windows", test))]
 fn windows_install_conflict_hint(port: u16) -> String {
     format!("If that daemon runs in WSL, stop it inside WSL first -- installing the Windows daemon needs port {port} free.")
 }
@@ -580,6 +584,7 @@ fn windows_install_conflict_hint(port: u16) -> String {
 /// Windows: a running exe cannot be replaced, so a managed running
 /// daemon is stopped strictly before the binary is installed -- and a
 /// failed stop aborts before anything on disk is touched.
+#[cfg(any(target_os = "windows", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WindowsUpdateStep {
     StopRunningDaemon,
@@ -587,6 +592,7 @@ enum WindowsUpdateStep {
     StartDaemon,
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn windows_update_plan(stop_result: Option<Result<(), String>>) -> Result<&'static [WindowsUpdateStep], String> {
     const WITH_STOP: &[WindowsUpdateStep] = &[WindowsUpdateStep::StopRunningDaemon, WindowsUpdateStep::InstallBinary, WindowsUpdateStep::StartDaemon];
     const NO_STOP: &[WindowsUpdateStep] = &[WindowsUpdateStep::InstallBinary, WindowsUpdateStep::StartDaemon];
@@ -599,12 +605,14 @@ fn windows_update_plan(stop_result: Option<Result<(), String>>) -> Result<&'stat
 
 /// The AC8 message shown when Git for Windows is missing: worktrees need
 /// git, and setup/teardown scripts need its `sh`.
+#[cfg(any(target_os = "windows", test))]
 const GIT_MISSING_MESSAGE: &str =
     "Git for Windows was not found. Worktrees need git, and setup scripts need its sh. Install Git for Windows and restart smind.";
 
 /// git_lookup finds `git.exe` (AC8): on PATH, then in the standard
 /// Git for Windows install dirs. Pure over injected env values and an
 /// `exists` closure so the search order is unit-testable.
+#[cfg(any(target_os = "windows", test))]
 fn git_lookup(getenv: impl Fn(&str) -> Option<String>, exists: impl Fn(&Path) -> bool) -> Option<PathBuf> {
     if let Some(path) = getenv("PATH") {
         for dir in std::env::split_paths(&path) {
@@ -634,6 +642,7 @@ fn git_lookup(getenv: impl Fn(&str) -> Option<String>, exists: impl Fn(&Path) ->
 /// git_prerequisite_fields maps "was git found" to the DTO's AC8 fields:
 /// found -> `(Some(true), None)`; missing -> the message; non-Windows
 /// (`None`) -> no fields at all.
+#[cfg(any(target_os = "windows", test))]
 fn git_prerequisite_fields(found_git: Option<bool>) -> (Option<bool>, Option<String>) {
     match found_git {
         None => (None, None),
