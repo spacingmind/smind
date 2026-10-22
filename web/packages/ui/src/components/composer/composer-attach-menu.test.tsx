@@ -99,4 +99,31 @@ describe("composer attach menu", () => {
     await screen.findByRole("menu");
     expect(screen.queryByRole("menuitem", { name: "Mention a file" })).toBeNull();
   });
+
+  it("closes without an exit animation when an entry opens something, but keeps its fade on Esc", async () => {
+    await renderComposer();
+    openMenu();
+    const content = await screen.findByRole("menu");
+    expect(content.className).not.toContain("animate-none");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Mention a file" }));
+    await flush();
+    // The mention list is up on this frame; the menu was told to skip its fade-out so it cannot ghost under it.
+    expect(content.className).toContain("animate-none");
+
+    // Reopened, the rule resets: leaving with Esc keeps the normal fade.
+    openMenu();
+    const again = await screen.findByRole("menu");
+    expect(again.className).not.toContain("animate-none");
+  });
+
+  it("the picker opens on the frame the menu closes, with no fade-in of its own", async () => {
+    await renderComposer({ attachments: { ...LIMITS, kinds: ["image", "file", "file_ref", "pr", "issue"] }, forge: { provider: "github", cli: true } });
+    openMenu();
+    const content = await screen.findByRole("menu");
+    fireEvent.click(screen.getByRole("menuitem", { name: /GitHub pull request/ }));
+    await flush();
+    expect(content.className).toContain("animate-none");
+    const picker = await screen.findByTestId("forge-picker");
+    expect(picker.closest('[data-slot="popover-content"]')!.className).toContain("data-[state=open]:animate-none!");
+  });
 });

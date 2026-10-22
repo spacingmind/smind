@@ -1,8 +1,9 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Icons } from "@/lib/icons";
+import { MENU_CLOSE_INSTANT } from "@/lib/menu-item-disabled";
 
 export type ForgeKind = "pr" | "issue";
 
@@ -44,29 +45,36 @@ export function AttachMenu({
   /** Radix returns focus to the trigger on close; the composer redirects it to the textarea after a mention. */
   onCloseAutoFocus?: (e: Event) => void;
 }) {
+  // Choosing an entry closes the menu on the very frame the thing it opens appears (the picker, the mention list), so
+  // the menu never fades out underneath it; Esc or a click outside keep the normal fade. Reset when the menu reopens.
+  const [instantClose, setInstantClose] = useState(false);
+  const choose = (action: () => void) => () => {
+    setInstantClose(true);
+    action();
+  };
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={(open) => open && setInstantClose(false)}>
       <DropdownMenuTrigger asChild>
         <Button type="button" variant="ghost" className="size-8 rounded-lg" disabled={disabled} aria-label="Attach" title="Attach" data-testid="composer-attach-button">
           <Icons.attach aria-hidden />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="top" className="min-w-56" onCloseAutoFocus={onCloseAutoFocus}>
-        <DropdownMenuItem data-testid="attach-menu-files" onSelect={onPickFiles}>
+      <DropdownMenuContent align="start" side="top" className={instantClose ? `min-w-56 ${MENU_CLOSE_INSTANT}` : "min-w-56"} onCloseAutoFocus={onCloseAutoFocus}>
+        <DropdownMenuItem data-testid="attach-menu-files" onSelect={choose(onPickFiles)}>
           <Entry icon={<Icons.attach aria-hidden />} label="Image or file…" />
         </DropdownMenuItem>
         {onMention && (
-          <DropdownMenuItem data-testid="attach-menu-mention" onSelect={onMention}>
+          <DropdownMenuItem data-testid="attach-menu-mention" onSelect={choose(onMention)}>
             <Entry icon={<Icons.mention aria-hidden />} label="Mention a file" />
           </DropdownMenuItem>
         )}
         {forge?.kinds.includes("pr") && (
-          <DropdownMenuItem data-testid="attach-menu-pr" disabled={forge.disabledReason !== null} onSelect={() => forge.onOpen("pr")}>
+          <DropdownMenuItem data-testid="attach-menu-pr" disabled={forge.disabledReason !== null} onSelect={choose(() => forge.onOpen("pr"))}>
             <Entry icon={<Icons.pullRequest aria-hidden />} label="GitHub pull request…" description={forge.disabledReason ?? undefined} />
           </DropdownMenuItem>
         )}
         {forge?.kinds.includes("issue") && (
-          <DropdownMenuItem data-testid="attach-menu-issue" disabled={forge.disabledReason !== null} onSelect={() => forge.onOpen("issue")}>
+          <DropdownMenuItem data-testid="attach-menu-issue" disabled={forge.disabledReason !== null} onSelect={choose(() => forge.onOpen("issue"))}>
             <Entry icon={<Icons.issue aria-hidden />} label="GitHub issue…" description={forge.disabledReason ?? undefined} />
           </DropdownMenuItem>
         )}

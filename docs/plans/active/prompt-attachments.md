@@ -223,6 +223,8 @@ Taken from ADR-0038 (Accepted 2026-10-22).
   it; every PR carries its local check results instead, and PRs that need an earlier PR's code wait rather than stack. Independent starts: PR 2, the SDK PR (3s),
   and the web composer (6a, 6b) and the `gh` fetch/search library (5).
 
+- 2026-10-22 (live checks and cost): three live calls so far: USD 0.317 (the first UI run, default model), about 0.3 (an unintended Opus run from a screenshot script that clicked Send), and two on haiku with every tool denied (0.0053 native image, 0.0060 PR fetch). Friction to log in the dogfood notes: **claude-native with no `model` runs the Claude CLI's default model** (Opus on this account; `ClaudeModelDefault` = "default" sends no `--model`), the run-config picker shows "default" rather than what that resolves to, and **`smind task send` has no `--model`**, so a CLI user cannot pin a cheap model for a one-off. Live-check scripts must pin haiku with tools denied (a project `.claude/settings.json` deny list) or not send at all; the screenshot harness now blocks `run.start`/`task.prompt` frames by default and records them instead.
+
 ## Validation
 
 How each AC gets satisfied is recorded here per PR as it lands (command output, screenshots, live-call counts). Empty until implementation.

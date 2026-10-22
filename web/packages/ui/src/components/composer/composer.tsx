@@ -597,14 +597,15 @@ export function Composer({
                           if (pendingPicker.current) {
                             const kind = pendingPicker.current;
                             pendingPicker.current = null;
-                            // Next frame: the menu's dismissal events have settled by then.
-                            requestAnimationFrame(() => setForgePicker(kind));
+                            // The menu closes without an exit animation (attach-menu.tsx), so by now it is gone: the
+                            // picker appears on the same frame, with no fade-in either, so nothing shows between them.
+                            setForgePicker(kind);
                           }
                         }}
                       />
                     </span>
                   </PopoverAnchor>
-                  <PopoverContent side="top" align="start" className="w-96 max-w-[calc(100vw-2rem)] rounded-lg bg-menu p-0">
+                  <PopoverContent side="top" align="start" className="w-96 max-w-[calc(100vw-2rem)] rounded-lg bg-menu p-0 data-[state=open]:animate-none!">
                     {forgePicker && taskId !== null && (
                       <ForgePicker
                         kind={forgePicker}
