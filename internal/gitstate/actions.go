@@ -55,6 +55,8 @@ func updatePrAction(g TaskGit, c ActionCtx) Action {
 		return disabled("no_pr", "Update PR isn't available because this branch has no pull request. Create one first.")
 	case g.PR.State != "open":
 		return disabled("pr_not_open", fmt.Sprintf("Update PR isn't available because the pull request is %s. Create a new pull request from this branch instead.", g.PR.State))
+	case g.PR.FromFork:
+		return disabled("fork_pr_readonly", "Update PR isn't available because this pull request comes from a fork, and smind can't push to forks yet.")
 	case c.ForgeCode != "":
 		return disabled(c.ForgeCode, c.ForgeReason)
 	}

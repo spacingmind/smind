@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -60,6 +61,19 @@ type Options struct {
 	FetchEvery   time.Duration
 	FetchFloor   time.Duration
 	FetchTimeout time.Duration
+
+	// Forge and Ledger turn on the PR poller (ADR-0039 §4); without both the
+	// service reports no PR state. Forge returns the current provider (nil =
+	// none), since wsapi lets tests swap it.
+	Forge  func() forge.Provider
+	Ledger Ledger
+	// PollTick, when non-nil, replaces the poller's 5 s ticker.
+	PollTick <-chan time.Time
+	// Jitter returns [-1, 1] for the poller's ±10 % spread; default random.
+	Jitter func() float64
+	// OnAdopt is called after the poller adopts a PR for a task (wsapi
+	// publishes task.updated).
+	OnAdopt func(taskID int64)
 }
 
 type entry struct {
@@ -86,6 +100,7 @@ type Service struct {
 	cancel context.CancelFunc
 
 	conflicts *ConflictCache
+	poller    *Poller // nil without Options.Forge/Ledger
 
 	mu         sync.Mutex
 	closed     bool
@@ -129,45 +144,72 @@ func New(o Options) *Service {
 		s.opts.FetchTimeout = NetworkTimeout
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+	if o.Forge != nil && o.Ledger != nil && o.Source != nil {
+		s.poller = NewPoller(PollerOptions{
+			Source: o.Source, Interest: o.Interest, Runner: o.Runner,
+			Provider: o.Forge, Ledger: o.Ledger, Now: o.Now, Jitter: o.Jitter,
+			Tasks:    s.cachedIDs,
+			OnChange: s.Invalidate,
+			OnAdopt:  o.OnAdopt,
+		})
+	}
 	return s
 }
 
-// Start runs the loop until ctx is done or Stop is called. Idempotent.
+// cachedIDs lists the tasks someone has read: the poller's watched set.
+func (s *Service) cachedIDs() []int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := make([]int64, 0, len(s.cache))
+	for id := range s.cache {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// Start runs the local-status loop and, when configured, the PR poller loop
+// until ctx is done or Stop is called. Idempotent.
 func (s *Service) Start(ctx context.Context) {
 	s.loopOnce.Do(func() {
-		tick := s.opts.Tick
-		var ticker *time.Ticker
-		if tick == nil {
-			ticker = time.NewTicker(TickEvery)
-			tick = ticker.C
+		s.startLoop(ctx, s.opts.Tick, TickEvery, s.Tick)
+		if s.poller != nil {
+			s.startLoop(ctx, s.opts.PollTick, PollEvery, s.poller.Tick)
 		}
-		s.mu.Lock()
-		if s.closed {
-			s.mu.Unlock()
-			if ticker != nil {
-				ticker.Stop()
-			}
-			return
-		}
-		s.wg.Add(1)
-		s.mu.Unlock()
-		go func() {
-			defer s.wg.Done()
-			if ticker != nil {
-				defer ticker.Stop()
-			}
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-s.ctx.Done():
-					return
-				case <-tick:
-					s.Tick()
-				}
-			}
-		}()
 	})
+}
+
+func (s *Service) startLoop(ctx context.Context, tick <-chan time.Time, every time.Duration, beat func()) {
+	var ticker *time.Ticker
+	if tick == nil {
+		ticker = time.NewTicker(every)
+		tick = ticker.C
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		if ticker != nil {
+			ticker.Stop()
+		}
+		return
+	}
+	s.wg.Add(1)
+	s.mu.Unlock()
+	go func() {
+		defer s.wg.Done()
+		if ticker != nil {
+			defer ticker.Stop()
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-s.ctx.Done():
+				return
+			case <-tick:
+				beat()
+			}
+		}
+	}()
 }
 
 // Stop (like Drop and Invalidate) is a no-op on a nil Service. It cancels in-flight git, stops timers and waits for every goroutine.
@@ -184,6 +226,7 @@ func (s *Service) Stop() {
 			}
 		}
 		s.mu.Unlock()
+		s.poller.Stop()
 		s.cancel()
 		s.wg.Wait()
 	})
@@ -272,8 +315,9 @@ func (s *Service) Drop(taskID int64) {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.dropLocked(taskID)
+	s.mu.Unlock()
+	s.poller.Forget(taskID)
 }
 
 func (s *Service) dropLocked(taskID int64) {
@@ -427,7 +471,33 @@ func (s *Service) compute(taskID int64) (g TaskGit, ws int64, base string, err e
 	if t.Branch != nil {
 		in.Branch = *t.Branch
 	}
+	if t.PRNumber > 0 {
+		in.Forge = t.PRForge
+		in.PR = s.poller.PR(t) // cached snapshot only; never calls the forge
+	}
 	return Compute(s.ctx, s.run, in), t.WorkspaceID, in.BaseRef, nil
+}
+
+// Refresh is task.gitRefresh: one forced poll of the task's workspace under
+// the explicit-refresh floor and the host budget, then the recomputed
+// snapshot. A forge failure is returned only when the task has no cached PR
+// snapshot to show; otherwise the snapshot carries its stale flag. Over its
+// floor or hourly cap it returns *RefreshLimitedError.
+func (s *Service) Refresh(taskID int64) (TaskGit, error) {
+	t, err := s.opts.Source.GetTask(taskID)
+	if err != nil || t.Kind == store.TaskKindSystem || t.Status == "archived" {
+		return TaskGit{}, ErrNotTracked
+	}
+	if s.poller != nil {
+		if err := s.poller.Refresh(taskID); err != nil {
+			var lim *RefreshLimitedError
+			if errors.As(err, &lim) || s.poller.PR(t) == nil {
+				return TaskGit{}, err
+			}
+		}
+	}
+	s.InvalidateSync(taskID)
+	return s.Get(taskID)
 }
 
 // Tick is one loop beat: nothing without a watcher; otherwise recompute the
@@ -530,9 +600,14 @@ func (s *Service) fetch(ws int64, bases []string) {
 }
 
 // canonicalKey is the snapshot's JSON without the timestamps that change on
-// every recompute (computedAt, conflict.checkedAt); equal keys = no news.
+// every recompute (computedAt, conflict.checkedAt, pr.fetchedAt, pr.refreshAvailableAt); equal keys = no news.
 func canonicalKey(g TaskGit) string {
 	g.ComputedAt = time.Time{}
+	if g.PR != nil {
+		pr := *g.PR
+		pr.FetchedAt, pr.RefreshAvailableAt = time.Time{}, ""
+		g.PR = &pr
+	}
 	if g.Conflict != nil {
 		c := *g.Conflict
 		c.CheckedAt = time.Time{}

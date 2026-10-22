@@ -63,6 +63,20 @@ func TestActions_DisabledReasons_Table(t *testing.T) {
 			updateMsg:  "Update PR isn't available because the pull request is merged. Create a new pull request from this branch instead.",
 		},
 		{
+			name:       "fork pr is read-only",
+			g:          TaskGit{Branch: branch, Base: known, Commits: withCommits, PR: &PRInfo{State: "open", FromFork: true}},
+			createCode: "pr_exists",
+			createMsg:  "A pull request is already open for this branch.",
+			updateCode: "fork_pr_readonly",
+			updateMsg:  "Update PR isn't available because this pull request comes from a fork, and smind can't push to forks yet.",
+		},
+		{
+			name:       "closed fork pr reports not open first",
+			g:          TaskGit{Branch: branch, Base: known, Commits: withCommits, PR: &PRInfo{State: "closed", FromFork: true}},
+			updateCode: "pr_not_open",
+			updateMsg:  "Update PR isn't available because the pull request is closed. Create a new pull request from this branch instead.",
+		},
+		{
 			name:       "forge passthrough",
 			g:          TaskGit{Branch: branch, Base: known, Commits: withCommits},
 			c:          ActionCtx{ForgeCode: "forge_unauthenticated", ForgeReason: "GitHub isn't connected. Sign in under Settings → GitHub."},
