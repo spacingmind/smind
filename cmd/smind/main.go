@@ -84,6 +84,8 @@ func run(args []string) int {
 		return cmdSkill(args[1:])
 	case "learn":
 		return cmdLearn(args[1:])
+	case "push":
+		return cmdPush(args[1:])
 	case "config":
 		return cmdConfig(args[1:])
 	case "set-password":
@@ -172,6 +174,8 @@ Usage:
 
   smind learn status|ls|show|approve|reject|pin|unpin|disable|enable|archive|restore|delete|undo|reflect|curate|mode|forget
                                                            manage learned skills and proposals (humans only; run "smind learn" for flags)
+
+  smind push test [<device id prefix>]                    send a test notification to phones registered for push
 
   smind update [--check] [--version <v>] [--force]        update this binary to the latest release (SHA-256 verified)
       [--dry-run] [--json]                                 --check only reports; refuses while runs are active unless --force
