@@ -6,8 +6,9 @@ import {
   formatCostUSD,
   formatDelta,
   formatDurationMs,
-  formatEstimateUSD,
+  formatMoney,
   formatMetric,
+  formatSpendLine,
   isProbeActive,
   VERDICT_LABELS,
   VERDICT_TONES,
@@ -31,8 +32,10 @@ describe("probe formatting", () => {
   });
 
   it("formats the estimate for the button", () => {
-    expect(formatEstimateUSD(1.44)).toBe("USD 1.4");
-    expect(formatEstimateUSD(0.96)).toBe("USD 0.96");
+    expect(formatMoney(1.44)).toBe("$1.44");
+    expect(formatMoney(0.96)).toBe("$0.96");
+    expect(formatMoney(0.0013)).toBe("$0.0013");
+    expect(formatMoney(0)).toBe("$0.00");
   });
 
   it("formats bytes and metrics in their units", () => {
@@ -71,5 +74,17 @@ describe("probe formatting", () => {
     expect(isProbeActive("running")).toBe(true);
     expect(isProbeActive("done")).toBe(false);
     expect(isProbeActive(undefined)).toBe(false);
+  });
+});
+
+describe("formatSpendLine", () => {
+  it("one dollar format; under the estimate it shows the estimate in brackets", () => {
+    expect(formatSpendLine(0.3, 0.36)).toEqual({ over: false, text: "$0.30 so far (estimate $0.36)" });
+  });
+  it("past the estimate it says so instead of showing an 'of about'", () => {
+    expect(formatSpendLine(0.45, 0.36)).toEqual({ over: true, text: "$0.45 so far, over the $0.36 estimate" });
+  });
+  it("no estimate is never 'over'", () => {
+    expect(formatSpendLine(0.45, 0).over).toBe(false);
   });
 });

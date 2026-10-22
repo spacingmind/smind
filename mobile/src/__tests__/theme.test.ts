@@ -97,10 +97,12 @@ describe('Zai token values', () => {
     expect(darkTheme.radius).toEqual(lightTheme.radius);
   });
 
-  it('surface aliases foregroundSubtle === foregroundMuted', () => {
+  it('has none of the legacy keys (surface[], foregroundMuted, ring, elevation, the old type roles)', () => {
     for (const theme of [lightTheme, darkTheme]) {
-      expect(theme.surface).toEqual([theme.background, theme.card, theme.surfaceSubtle, theme.accent]);
-      expect(theme.foregroundMuted).toBe(theme.foregroundSubtle);
+      for (const key of ['surface', 'foregroundMuted', 'ring', 'elevation']) expect(key in theme).toBe(false);
+      for (const role of ['workspaceTitle', 'sectionTitle', 'panelTitle', 'metadataLabel', 'codeAnnotation', 'interface', 'content']) {
+        expect(role in theme.type).toBe(false);
+      }
     }
   });
 });

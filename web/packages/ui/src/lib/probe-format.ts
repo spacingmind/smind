@@ -20,11 +20,25 @@ export function formatCostUSD(usd: number): string {
   return n < 1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
 }
 
-/** The rounded estimate in the button: "USD 1.4", "USD 0.96". */
-export function formatEstimateUSD(usd: number): string {
+/** One dollar format for every amount outside the metric table (button, footer, arm rows, cancelled note): "$1.40", "$0.45", and "$0.0013" for sub-cent costs. */
+export function formatMoney(usd: number): string {
   const n = Number.isFinite(usd) ? Math.max(0, usd) : 0;
-  return `USD ${n < 1 ? n.toFixed(2) : n.toFixed(1)}`;
+  return n > 0 && n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
 }
+
+/**
+ * The running footer's money: "$0.45 so far (estimate $0.36)". Arms may cost up to twice their estimate (each arm's cap
+ * is 2x its estimate, bounded by the per-probe and daily limits), so spend can pass the estimate: then it says so.
+ */
+export function formatSpendLine(costUSD: number, estUSD: number): { text: string; over: boolean } {
+  const over = Number.isFinite(costUSD) && Number.isFinite(estUSD) && estUSD > 0 && costUSD > estUSD;
+  const spent = formatMoney(costUSD);
+  const est = formatMoney(estUSD);
+  return { over, text: over ? `${spent} so far, over the ${est} estimate` : `${spent} so far (estimate ${est})` };
+}
+
+/** Why spend can pass the estimate (tooltip of the over-estimate wording). */
+export const OVER_ESTIMATE_HINT = "The estimate is a guess from the source run. Each arm may cost up to twice its estimate; a probe stops at its per-probe limit.";
 
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
