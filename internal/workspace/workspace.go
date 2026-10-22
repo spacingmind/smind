@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -55,6 +56,11 @@ type Manager struct {
 	// run under (sh on Unix; PATH then Git for Windows on Windows,
 	// ADR-0029 D1) and is the seam tests use to simulate a machine without
 	// one.
+	// forgeFn yields the forge provider CreateTask asks about a PR (fork
+	// gate, ADR-0039 section 7); nil or a nil result means unavailable.
+	forgeMu sync.Mutex
+	forgeFn func() forge.Provider
+
 	setupMu       sync.Mutex
 	setupRuns     map[int64]*setupRun
 	setupFinished func(taskID int64)

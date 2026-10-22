@@ -14,6 +14,10 @@ const (
 	SetupRunning = "running"
 	SetupOK      = "ok"
 	SetupFailed  = "failed"
+	// SetupBlocked: the task came from an untrusted source (a fork PR, or
+	// a PR the forge could not describe); its setup script has not run and
+	// only task.retrySetup starts it (ADR-0039 section 7).
+	SetupBlocked = "blocked"
 )
 
 // setupRun tracks one in-flight setup goroutine so archive/delete and daemon
@@ -172,7 +176,9 @@ func (m *Manager) CancelSetups() {
 }
 
 // RetrySetup re-runs the workspace's setup script on a non-running task
-// (ADR-0024 §3). It errors if setup is running, the task is archived or has
+// (ADR-0024 §3). It is also the user's explicit "run setup" for an untrusted
+// task: starting the script clears untrusted_source (ADR-0039 section 7);
+// nothing else does. It errors if setup is running, the task is archived or has
 // no worktree, or the workspace has no setup script.
 func (m *Manager) RetrySetup(id int64) (store.Task, error) {
 	t, err := m.store.GetTask(id)
@@ -190,7 +196,19 @@ func (m *Manager) RetrySetup(id int64) (store.Task, error) {
 		return store.Task{}, fmt.Errorf("retry setup: %w", err)
 	}
 	if ws.SetupScript == "" {
-		return store.Task{}, fmt.Errorf("retry setup: workspace %d has no setup script", ws.ID)
+		if !t.UntrustedSource {
+			return store.Task{}, fmt.Errorf("retry setup: workspace %d has no setup script", ws.ID)
+		}
+		// Nothing to run, but the user's "run setup" still clears the gate
+		// (it also lifts the teardown skip).
+		if _, err := m.store.ClearTaskUntrusted(id); err != nil {
+			return store.Task{}, fmt.Errorf("retry setup: %w", err)
+		}
+		if t, err = m.store.GetTask(id); err != nil {
+			return store.Task{}, fmt.Errorf("retry setup: %w", err)
+		}
+		m.setupChanged(t)
+		return t, nil
 	}
 	if err := m.checkSetupSupported(ws.SetupScript); err != nil {
 		return store.Task{}, fmt.Errorf("retry setup: %w", err)
@@ -222,9 +240,16 @@ func (m *Manager) runTeardown(t store.Task, ws store.Workspace) {
 		m.appendSetupLog(t.ID, "teardown skipped: "+err.Error())
 		return
 	}
-	// Re-read so SMIND_PORT reflects the stored row.
+	// Re-read so SMIND_PORT reflects the stored row (and an untrusted flag
+	// the user cleared since t was loaded).
 	if fresh, err := m.store.GetTask(t.ID); err == nil {
 		t = fresh
+	}
+	if t.UntrustedSource {
+		// A fork's code must not run under a script the user never ran
+		// setup for (ADR-0039 section 7).
+		m.appendSetupLog(t.ID, "teardown skipped: this task came from an untrusted source and its setup was never run")
+		return
 	}
 	tail, err := runScript(context.Background(), *t.WorktreePath, ws.TeardownScript, setupEnv(ws, t), m.worktreesSettings().TeardownTimeout, setupLogCap)
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -45,6 +46,9 @@ type createTaskParams struct {
 	branch       string
 	prNumber     int
 	prSupplied   bool
+	// prBaseRef is the PR's target branch as the forge reported it, set by
+	// CreateTask itself (never by an option) once it validated it.
+	prBaseRef string
 }
 
 // WithParentTask makes the new task a child of parentID, which CreateTask
@@ -129,6 +133,20 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 		return store.Task{}, fmt.Errorf("create task: %w", err)
 	}
 
+	// ADR-0039 section 7: one forge call describes the PR. A fork PR, or a
+	// forge that cannot answer, makes the task untrusted (fail closed).
+	var pr *forge.PR
+	untrusted := false
+	if p.prSupplied {
+		if got, ok := m.lookupPR(ws.Path, p.prNumber); ok {
+			pr = &got
+			untrusted = got.FromFork
+			p.prBaseRef = validPRBase(ws.Path, got.BaseRef)
+		} else {
+			untrusted = true
+		}
+	}
+
 	name := slugify(title) + "-" + strconv.FormatInt(taskStamp(), 36)
 	worktreePath := filepath.Join(config.Dir(), "worktrees", strconv.FormatInt(workspaceID, 10), name)
 	branch := "smind/task-" + name
@@ -169,9 +187,14 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 
 	// The base is recorded in the same insert as the task, so a failed
 	// creation leaves no row; an unresolvable base is empty, never fatal.
+	if p.prBaseRef != "" && baseCompareRef(ws.Path, p.prBaseRef) == "" {
+		// The PR targets a branch this checkout never fetched; one bounded
+		// best-effort fetch so the merge base (the diff base) can resolve.
+		fetchRemoteBranchBestEffort(ws.Path, originRemote, p.prBaseRef)
+	}
 	baseRef, baseSha := computeTaskBase(ws, p, worktreePath)
 
-	t, err := m.store.CreateTask(store.Task{
+	row := store.Task{
 		WorkspaceID:  workspaceID,
 		SpaceID:      spaceID,
 		ParentTaskID: p.parentTaskID,
@@ -182,7 +205,14 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 		BaseRef:      baseRef,
 		BaseSha:      baseSha,
 		BranchOwned:  branchOwned,
-	})
+
+		UntrustedSource: untrusted,
+	}
+	if pr != nil && pr.URL != "" {
+		row.PRForge, row.PRRepo, row.PRNumber = "github", pr.Repo, int64(pr.Number)
+		row.PRURL, row.PRHeadRef = pr.URL, pr.HeadRef
+	}
+	t, err := m.store.CreateTask(row)
 	if err != nil {
 		if createdBranch != "" || dirExists(worktreePath) {
 			// The worktree exists but the row could not be written: undo it
@@ -204,8 +234,13 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 		m.discardTask(ws, t, createdBranch)
 		return store.Task{}, fmt.Errorf("create task: %w", err)
 	}
+	runSetup := ws.SetupScript != "" && !untrusted
 	if ws.SetupScript != "" {
-		if _, err := m.store.UpdateTaskSetup(t.ID, SetupRunning, "", ""); err != nil {
+		status := SetupRunning
+		if untrusted {
+			status = SetupBlocked
+		}
+		if _, err := m.store.UpdateTaskSetup(t.ID, status, "", ""); err != nil {
 			return store.Task{}, fmt.Errorf("create task %d: %w", t.ID, err)
 		}
 	}
@@ -226,13 +261,13 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 	// CreateWorkspace's own doc comment already documents for this
 	// codebase.
 	if _, err := m.createDefaultChat(t.ID); err != nil {
-		if ws.SetupScript != "" {
+		if runSetup {
 			_, _ = m.store.UpdateTaskSetup(t.ID, SetupFailed, "setup not started: task creation failed", "")
 		}
 		return store.Task{}, fmt.Errorf("create task %d: %w", t.ID, err)
 	}
 
-	if ws.SetupScript != "" {
+	if runSetup {
 		m.startSetup(t, ws)
 	}
 	return t, nil

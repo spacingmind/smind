@@ -3,9 +3,12 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"log"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/spacingmind/smind/internal/forge"
 )
 
 // remoteFetchTimeout bounds the best-effort `git fetch <remote> <branch>`
@@ -178,4 +181,52 @@ func createTaskFromPR(repoPath, worktreePath, branch string, n int) error {
 		return fmt.Errorf("fetch pull request %d from %s: %w (tasks from pull requests require a GitHub-hosted %s remote)", n, remote, err, remote)
 	}
 	return gitWorktreeAddFrom(repoPath, worktreePath, branch, "FETCH_HEAD")
+}
+
+// prLookupTimeout bounds the one forge call CreateTask makes for a PR.
+const prLookupTimeout = 25 * time.Second
+
+// SetForge registers the forge provider source CreateTask asks about a PR
+// (ADR-0039 section 7). fn may return nil (no provider); a nil Manager
+// accepts the call like SetNotifier.
+func (m *Manager) SetForge(fn func() forge.Provider) {
+	if m == nil {
+		return
+	}
+	m.forgeMu.Lock()
+	m.forgeFn = fn
+	m.forgeMu.Unlock()
+}
+
+// lookupPR asks the forge for PR n of dir's repo, once. ok is false when no
+// provider is wired or the call fails: the caller fails closed (untrusted).
+func (m *Manager) lookupPR(dir string, n int) (forge.PR, bool) {
+	m.forgeMu.Lock()
+	fn := m.forgeFn
+	m.forgeMu.Unlock()
+	if fn == nil {
+		return forge.PR{}, false
+	}
+	prov := fn()
+	if prov == nil {
+		return forge.PR{}, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), prLookupTimeout)
+	defer cancel()
+	pr, err := prov.PR(ctx, dir, n)
+	if err != nil {
+		log.Printf("workspace: forge lookup of PR %d failed, task starts untrusted: %v", n, err)
+		return forge.PR{}, false
+	}
+	return pr, true
+}
+
+// validPRBase returns base when it is a usable branch name, else "": the
+// value came from the forge, so it gets the same checks as a user ref.
+func validPRBase(dir, base string) string {
+	base = strings.TrimSpace(base)
+	if base == "" || validateRefName(dir, base, true) != nil {
+		return ""
+	}
+	return base
 }
