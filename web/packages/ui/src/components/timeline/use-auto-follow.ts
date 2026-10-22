@@ -35,16 +35,37 @@ function distanceFromBottom(el: HTMLElement): number {
  * The scroll is applied in a layout effect so it lands in the same frame
  * the new content does — an ordinary effect lets the browser paint the
  * grown, unscrolled container first, which reads as a visible jolt.
+ *
+ * The item count is not the only thing that grows the log: an attachment
+ * image decoding, a markdown block settling or the composer's chip row
+ * changing the viewport height all move the tail without adding an item.
+ * Those used to leave a freshly opened chat a few dozen pixels short of the
+ * bottom (hiding the last run's footer, and past FOLLOW_THRESHOLD_PX the
+ * next scroll flipped `following` off and showed "Jump to latest"), so a
+ * ResizeObserver on the container and its content re-pins while following.
  */
 export function useAutoFollow<T extends HTMLElement>(revision: unknown): AutoFollow<T> {
   const ref = useRef<T | null>(null);
   const [following, setFollowing] = useState(true);
+  const followingRef = useRef(true);
+  followingRef.current = following;
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || !following) return;
     el.scrollTop = el.scrollHeight;
   }, [revision, following]);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (followingRef.current) el.scrollTop = el.scrollHeight;
+    });
+    observer.observe(el);
+    if (el.firstElementChild) observer.observe(el.firstElementChild);
+    return () => observer.disconnect();
+  }, []);
 
   const onScroll = useCallback(() => {
     const el = ref.current;
