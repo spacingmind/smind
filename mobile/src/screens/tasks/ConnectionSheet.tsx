@@ -19,6 +19,7 @@ import { AppTheme } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { TextButton } from '../../ui/TextButton';
 import { UiHost } from '../../ui/UiHost';
+import { NotificationsRow } from './NotificationsRow';
 
 interface Props {
   open: boolean;
@@ -62,12 +63,13 @@ export function ConnectionSheet({ open, onClose, onDisconnect, state }: Props) {
                 {statusText(state)}
               </Text>
             </View>
-            <View style={styles.row}>
+            <View style={[styles.row, styles.rowDivider]}>
               <Text style={styles.rowLabel}>Device</Text>
               <Text style={styles.rowValue} selectable>
                 {deviceLabel}
               </Text>
             </View>
+            <NotificationsRow />
           </View>
           <TextButton label="Disconnect" tone="danger" onPress={() => { onClose(); onDisconnect(); }} style={styles.disconnect} />
         </View>
