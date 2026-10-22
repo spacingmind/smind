@@ -21,7 +21,7 @@ describe("ProbeCard idle", () => {
   it("shows the estimate and expected duration on the run button", async () => {
     await renderProbeCard();
     const run = screen.getByTestId("probe-run") as HTMLButtonElement;
-    expect(run.textContent).toBe("Run probe (about USD 1.4, about 8 min)");
+    expect(run.textContent).toBe("Run probe (about $1.44, about 8 min)");
     expect(run.disabled).toBe(false);
     expect(screen.queryByTestId("probe-reasons")).toBeNull();
   });
@@ -54,6 +54,6 @@ describe("ProbeCard idle", () => {
 
   it("uses a lower estimate for a quick probe", async () => {
     await renderProbeCard({ estimate: estimate({ quick: true, arms: 2, estUSD: 0.96, expectedMinutes: 5 }) });
-    expect(screen.getByTestId("probe-run").textContent).toBe("Run probe (about USD 0.96, about 5 min)");
+    expect(screen.getByTestId("probe-run").textContent).toBe("Run probe (about $0.96, about 5 min)");
   });
 });

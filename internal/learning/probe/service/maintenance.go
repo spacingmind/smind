@@ -23,7 +23,7 @@ const (
 // projections are removed, and decided probes past retention are purged.
 func (s *Service) Recover(ctx context.Context) {
 	st := s.d.Store
-	if n, err := st.FailInterruptedProbes("interrupted by restart"); err != nil {
+	if n, err := st.FailInterruptedProbes("interrupted by restart", "The daemon restarted while this probe was running, so it was stopped. Run it again."); err != nil {
 		slog.Warn("learning probe: fail interrupted probes", "err", err)
 	} else if n > 0 {
 		slog.Info("learning probe: failed interrupted probes", "count", n)

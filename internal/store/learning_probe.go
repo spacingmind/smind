@@ -197,10 +197,12 @@ func (s *Store) ActiveProbe() (LearningProbe, bool, error) {
 }
 
 // FailInterruptedProbes marks every queued or running probe failed with
-// error=reason and a finish time, and marks their non-terminal arms
-// 'killed'; called once at daemon start, when no probe can still be
-// running. Returns the number of probes changed.
-func (s *Store) FailInterruptedProbes(reason string) (int, error) {
+// error=reason, verdict probe_failed, a finish time and userReason as the
+// sentence the card shows (a failed probe must always say why; an existing
+// verdict reason is kept), and marks their non-terminal arms 'killed';
+// called once at daemon start, when no probe can still be running. Returns
+// the number of probes changed.
+func (s *Store) FailInterruptedProbes(reason, userReason string) (int, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, fmt.Errorf("fail interrupted learning probes: begin: %w", err)
@@ -208,8 +210,10 @@ func (s *Store) FailInterruptedProbes(reason string) (int, error) {
 	defer tx.Rollback()
 	now := time.Now().UTC()
 	res, err := tx.Exec(
-		`UPDATE learning_probes SET status = 'failed', error = ?, finished_at = ? WHERE status IN ('queued', 'running')`,
-		reason, now)
+		`UPDATE learning_probes SET status = 'failed', verdict = 'probe_failed',
+		 verdict_reason = CASE WHEN verdict_reason = '' THEN ? ELSE verdict_reason END, error = ?, finished_at = ?
+		 WHERE status IN ('queued', 'running')`,
+		userReason, reason, now)
 	if err != nil {
 		return 0, fmt.Errorf("fail interrupted learning probes: %w", err)
 	}

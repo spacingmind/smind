@@ -256,7 +256,7 @@ func (s *Service) saveFinal(p store.LearningProbe) bool {
 // forceFailed is saveFinal's fallback (see there).
 func (s *Service) forceFailed(probeID int64, cause error) {
 	slog.Error("learning probe: store final state; forcing failed", "probe", probeID, "err", s.short(cause))
-	if _, err := s.d.Store.FailInterruptedProbes("the probe result could not be stored"); err != nil {
+	if _, err := s.d.Store.FailInterruptedProbes("the probe result could not be stored", "The probe finished but its result could not be saved."); err != nil {
 		slog.Error("learning probe: force failed", "probe", probeID, "err", s.short(err))
 	}
 }

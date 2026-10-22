@@ -217,7 +217,7 @@ function makeStyles(theme: AppTheme) {
   return StyleSheet.create({
     screen: {
       flex: 1,
-      backgroundColor: theme.surface[0],
+      backgroundColor: theme.background,
     },
     content: {
       flex: 1,

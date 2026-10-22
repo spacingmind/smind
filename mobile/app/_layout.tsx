@@ -4,6 +4,7 @@
 
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { ConnectionProvider, useConnection } from '../src/connection/ConnectionProvider';
 import { routeGate } from '../src/navigation/gate';
 import { taskHeaderTitle } from '../src/navigation/routes';
@@ -19,12 +20,12 @@ function RootStack() {
       <Stack
         screenOptions={{
           // expo-native-ui / expo-router: native stack header, tokens only.
-          headerStyle: { backgroundColor: theme.surface[0] },
+          headerStyle: { backgroundColor: theme.background },
           headerTintColor: theme.foreground,
-          headerTitleStyle: { fontSize: theme.type.panelTitle.fontSize, fontWeight: theme.type.panelTitle.fontWeight },
+          headerTitleStyle: { fontSize: theme.type.label.fontSize, fontWeight: theme.type.label.fontWeight },
           headerShadowVisible: false,
           headerBackButtonDisplayMode: 'minimal',
-          contentStyle: { backgroundColor: theme.surface[0] },
+          contentStyle: { backgroundColor: theme.background },
         }}
       >
         <Stack.Protected guard={gate === 'pairing'}>
@@ -44,10 +45,12 @@ function RootStack() {
 
 export default function RootLayout() {
   return (
-    <AppThemeProvider>
-      <ConnectionProvider>
-        <RootStack />
-      </ConnectionProvider>
-    </AppThemeProvider>
+    <KeyboardProvider>
+      <AppThemeProvider>
+        <ConnectionProvider>
+          <RootStack />
+        </ConnectionProvider>
+      </AppThemeProvider>
+    </KeyboardProvider>
   );
 }

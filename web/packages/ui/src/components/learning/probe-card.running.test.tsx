@@ -20,10 +20,10 @@ describe("ProbeCard running", () => {
     const [a, a2, b] = rows as [HTMLElement, HTMLElement, HTMLElement];
     expect(within(a).getByTestId("probe-arm-status").textContent).toBe("Done");
     expect(within(a).getByTestId("probe-arm-elapsed").textContent).toBe("1m 12s");
-    expect(within(a).getByTestId("probe-arm-cost").textContent).toBe("$0.4100");
+    expect(within(a).getByTestId("probe-arm-cost").textContent).toBe("$0.41");
     expect(within(a2).getByTestId("probe-arm-status").textContent).toBe("Running");
     expect(within(a2).getByTestId("probe-arm-elapsed").textContent).toBe("58s");
-    expect(within(a2).getByTestId("probe-arm-cost").textContent).toBe("$0.2100");
+    expect(within(a2).getByTestId("probe-arm-cost").textContent).toBe("$0.21");
     // A pending arm has not started: no elapsed, no cost, no run to open.
     expect(within(b).getByTestId("probe-arm-status").textContent).toBe("Waiting");
     expect(within(b).getByTestId("probe-arm-elapsed").textContent).toBe("–");
@@ -31,7 +31,7 @@ describe("ProbeCard running", () => {
     expect(b.textContent).not.toContain("run ");
     // Runs known to the card are shown as a labelled run reference.
     expect(a.textContent).toContain("run run-a");
-    expect(screen.getByTestId("probe-running").textContent).toContain("2m 10s elapsed · $0.6200 of about USD 1.4");
+    expect(screen.getByTestId("probe-running").textContent).toContain("2m 10s elapsed · $0.62 so far (estimate $1.44)");
   });
 
   it("keeps the elapsed time moving between polls (footer and the running arm, not the finished one)", async () => {
@@ -87,5 +87,19 @@ describe("ProbeCard arm that never ran", () => {
     expect(within(b).getByTestId("probe-arm-status").textContent).toBe("Stopped");
     expect(within(b).getByTestId("probe-arm-elapsed").textContent).toBe("–");
     expect(within(b).getByTestId("probe-arm-cost").textContent).toBe("–");
+  });
+});
+
+describe("ProbeCard running past the estimate", () => {
+  it("says so in words and explains why on hover, in one dollar format", async () => {
+    await renderProbeCard({ probe: runningProbe({ costUSD: 0.45, estUSD: 0.36 }) });
+    const spend = screen.getByTestId("probe-spend");
+    expect(spend.textContent).toContain("$0.45 so far, over the $0.36 estimate");
+    expect(spend.textContent).not.toContain("USD");
+    expect(spend.getAttribute("title")).toMatch(/twice its estimate/);
+  });
+  it("under the estimate there is no hover hint", async () => {
+    await renderProbeCard({ probe: runningProbe({ costUSD: 0.1, estUSD: 0.36 }) });
+    expect(screen.getByTestId("probe-spend").getAttribute("title")).toBeNull();
   });
 });
