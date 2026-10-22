@@ -7,10 +7,6 @@ import (
 	"github.com/spacingmind/smind/internal/forge"
 )
 
-// CherryPickBranchPrefix starts the name of the throwaway branch a Create PR
-// from a diverged base is pushed from (smind/pr-task-<id>).
-const CherryPickBranchPrefix = "smind/pr-task-"
-
 // ActionCtx carries what the pure policy cannot read from TaskGit.
 type ActionCtx struct {
 	RunActive bool
@@ -81,7 +77,7 @@ func forgeReason(action string, c ActionCtx) string {
 // cherryPickPR reports whether pr was opened from the throwaway
 // smind/pr-task-<id> branch (Update PR cannot follow a rebased copy).
 func cherryPickPR(pr *PRInfo) bool {
-	return pr != nil && strings.HasPrefix(pr.HeadRef, CherryPickBranchPrefix)
+	return pr != nil && strings.HasPrefix(pr.HeadRef, forge.CherryPickBranchPrefix)
 }
 
 func updatePrAction(g TaskGit, c ActionCtx) Action {

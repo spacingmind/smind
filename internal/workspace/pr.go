@@ -77,7 +77,7 @@ type prTarget struct {
 // cherryPickBranchName is the throwaway branch the diverged-base path pushes.
 // It is distinct from a PR-start task's own smind/pr-<n>-<slug> branch.
 func cherryPickBranchName(taskID int64) string {
-	return "smind/pr-task-" + strconv.FormatInt(taskID, 10)
+	return forge.CherryPickBranchPrefix + strconv.FormatInt(taskID, 10)
 }
 
 // prTarget resolves task id and the base branch (baseBranch, else the task's

@@ -41,6 +41,12 @@ func TestTaskGitRefresh_RPC(t *testing.T) {
 	t.Parallel()
 	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
+	if ws, err := wm.GetWorkspace(task.WorkspaceID); err != nil {
+		t.Fatal(err)
+	} else {
+		// A forge remote, so createPr's origin blocker (U7) does not hide pr_exists.
+		runGitT(t, ws.Path, "remote", "add", "origin", "https://github.com/o/r.git")
+	}
 	stub := &prListStub{branch: *task.Branch}
 	api, srv := newGitTestAPI(t, wm, db, nil)
 	api.SetGithubClient(ghctx.New(ghctx.WithRunner(stub.run)))

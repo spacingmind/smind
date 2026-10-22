@@ -2,6 +2,11 @@ package forge
 
 import "fmt"
 
+// CherryPickBranchPrefix starts the name of the throwaway branch Create PR
+// pushes when the task's base has diverged from origin (smind/pr-task-<id>).
+// A PR-start task's own branch is smind/pr-<n>-<slug>, hence "pr-task".
+const CherryPickBranchPrefix = "smind/pr-task-"
+
 // Codes of the Create PR / Update PR actions that are not forge_* codes
 // (ADR-0039 section 6). The forge_* codes are Error's.
 const (

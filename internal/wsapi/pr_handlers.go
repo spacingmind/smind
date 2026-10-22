@@ -410,7 +410,7 @@ func (h *prHost) update(ctx context.Context, rc *requestContext, raw json.RawMes
 	if head == "" || t.Branch == nil {
 		return nil, forge.NewPRError(forge.CodeInvalidBranch, "")
 	}
-	if strings.HasPrefix(head, gitstate.CherryPickBranchPrefix) {
+	if strings.HasPrefix(head, forge.CherryPickBranchPrefix) {
 		return nil, forge.UpdateUnsupported(head)
 	}
 	if err := h.wm.PushUpdate(ctx, p.TaskID, head); err != nil {
