@@ -86,7 +86,9 @@ async function transcript(page, harness) {
   // Tap the primary option: the card resolves, the run answers and finishes.
   await page.getByRole('button', { name: 'Allow', exact: true }).click();
   try {
-    await page.getByText('chosen: Allow', { exact: true }).waitFor({ timeout: 20_000 });
+    // The card first reads `chosen: Allow` (this device's optimistic tap), then the daemon's permission_resolved event --
+    // authoritative by design -- flips it to `resolved: Allow` within moments: either one proves the tap resolved it.
+    await page.getByText(/^(chosen|resolved): Allow$/).waitFor({ timeout: 20_000 });
     await page.getByText('chose:allow-1', { exact: true }).waitFor({ timeout: 30_000 });
     await page.getByText(/· glm · done$/).waitFor({ timeout: 30_000 });
   } catch {
