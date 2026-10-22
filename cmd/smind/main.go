@@ -62,6 +62,8 @@ func run(args []string) int {
 		return cmdServe(args[1:])
 	case "stop":
 		return cmdStop(args[1:])
+	case "status":
+		return cmdStatus(args[1:])
 	case "relay":
 		return cmdRelay(args[1:])
 	case "workspace":
@@ -109,6 +111,7 @@ Usage:
   smind serve                                             start the daemon
 
   smind stop                                              ask the running daemon to shut down gracefully
+  smind status                                            which daemon (address, home, config) the CLI talks to
 
   smind config get [path]                                 show server.port / listen / hostnames as stored
   smind config set <path> <value>                         change one (comments kept; restart to apply)
