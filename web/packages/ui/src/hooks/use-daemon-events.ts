@@ -31,8 +31,19 @@ const CHAT_TOPICS = ["chat.created", "chat.updated", "chat.archived", "chat.queu
 /** ADR-0015/0028's account topics: a created/renamed/re-credentialed account, a removal, and a fetched usage report. */
 const ACCOUNT_TOPICS = ["account.updated", "account.usage", "account.removed"];
 
-/** ADR-0026's self-learning topics: a new proposal, any skill/proposal change, and a reflect/curate job's status. */
-const LEARNING_TOPICS = ["learnedSkill.proposed", "learnedSkill.changed", "learning.job"];
+/**
+ * ADR-0026's self-learning topics: a new proposal, any skill/proposal change, and a reflect/curate job's status;
+ * ADR-0037's probe lifecycle (started, an arm changed, finished, failed).
+ */
+const LEARNING_TOPICS = [
+  "learnedSkill.proposed",
+  "learnedSkill.changed",
+  "learning.job",
+  "learnedSkill.probe.started",
+  "learnedSkill.probe.arm",
+  "learnedSkill.probe.finished",
+  "learnedSkill.probe.failed",
+];
 
 const TOPICS = [
   "task.status",

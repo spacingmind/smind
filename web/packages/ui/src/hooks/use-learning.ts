@@ -16,6 +16,7 @@ import type {
   ProposalStatus,
   ProposalView,
 } from "@/lib/learning-types";
+import type { ProbeEstimate, ProbeView } from "@/lib/probe-types";
 import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
 import { queryKeys } from "@/lib/query-keys";
 import type { RunSummary } from "@/lib/types";
@@ -130,6 +131,85 @@ export function useProposalPrevalence(id: number | null, enabled: boolean) {
     staleTime: 60_000,
     queryFn: (): Promise<ProposalPrevalence> =>
       requireClient(client).call<ProposalPrevalence>("learning.proposals.prevalence", { id }),
+  });
+}
+
+/** What a probe of this pending proposal would cost and whether it may run (`learning.probe.estimate`: no write, no model call). */
+export function useProbeEstimate(id: number | null, quick: boolean, enabled: boolean) {
+  const client = useClient();
+  return useQuery({
+    queryKey: queryKeys.probeEstimate(id ?? 0, quick),
+    enabled: client !== null && id !== null && enabled,
+    retry: false,
+    staleTime: 30_000,
+    queryFn: (): Promise<ProbeEstimate> => requireClient(client).call<ProbeEstimate>("learning.probe.estimate", { id, quick }),
+  });
+}
+
+/**
+ * The proposal's latest probe (null when none). Kept live by `learnedSkill.probe.*` events; while it
+ * is queued or running a 2 s refetch is only a safety net for a missed event.
+ */
+export function useProbe(id: number | null, enabled = true) {
+  const client = useClient();
+  return useQuery({
+    queryKey: queryKeys.probe(id ?? 0),
+    enabled: client !== null && id !== null && enabled,
+    retry: false,
+    queryFn: async (): Promise<ProbeView | null> =>
+      (await requireClient(client).call<ProbeView | null>("learning.probe.get", { id })) ?? null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "queued" || status === "running" ? 2000 : false;
+    },
+  });
+}
+
+/** Probe summaries (no diffs or final messages) of a workspace. */
+export function useProbes(workspaceId: number | null, limit?: number) {
+  const client = useClient();
+  return useQuery({
+    queryKey: queryKeys.probesOf(workspaceId ?? 0, limit),
+    enabled: client !== null && workspaceId !== null,
+    retry: false,
+    queryFn: async (): Promise<ProbeView[]> =>
+      (await requireClient(client).call<ProbeView[] | null>("learning.probe.list", {
+        workspaceId,
+        ...(limit ? { limit } : {}),
+      })) ?? [],
+  });
+}
+
+function invalidateProbe(queryClient: QueryClient, id: number, workspaceId: number | undefined): void {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.probe(id) });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.probeEstimateOf(id) });
+  void queryClient.invalidateQueries({
+    queryKey: workspaceId === undefined ? queryKeys.probesAll() : queryKeys.probesOfWorkspace(workspaceId),
+  });
+}
+
+/** `learning.probe.start {id, quick?}`; an ineligible or busy start fails `failed_precondition` and leaves the card as it was. */
+export function useStartProbe() {
+  const client = useClient();
+  const queryClient = useQueryClient();
+  return useMutation<ProbeView, Error, { id: number; quick?: boolean; workspaceId?: number }>({
+    mutationFn: ({ id, quick }) =>
+      requireClient(client).call<ProbeView>("learning.probe.start", { id, ...(quick ? { quick } : {}) }),
+    onSuccess: (view, { id, workspaceId }) => {
+      queryClient.setQueryData(queryKeys.probe(id), view);
+      invalidateProbe(queryClient, id, workspaceId);
+    },
+    onError: (_err, { id, workspaceId }) => invalidateProbe(queryClient, id, workspaceId),
+  });
+}
+
+/** `learning.probe.cancel {id}`: a no-op when nothing runs. */
+export function useCancelProbe() {
+  const client = useClient();
+  const queryClient = useQueryClient();
+  return useMutation<unknown, Error, { id: number; workspaceId?: number }>({
+    mutationFn: ({ id }) => requireClient(client).call("learning.probe.cancel", { id }),
+    onSuccess: (_result, { id, workspaceId }) => invalidateProbe(queryClient, id, workspaceId),
   });
 }
 

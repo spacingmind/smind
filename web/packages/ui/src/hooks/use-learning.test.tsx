@@ -1,6 +1,6 @@
 import { act } from "react";
 import { screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   gateFindings,
@@ -11,12 +11,17 @@ import {
   useLearningStatus,
   usePendingProposalCount,
   useProposals,
+  useCancelProbe,
+  useProbe,
+  useProbeEstimate,
+  useStartProbe,
   useSetLearningMode,
   useSkillAction,
 } from "@/hooks/use-learning";
 import { clearToasts, Toaster } from "@/components/ui/toast";
 import { RpcError } from "@/lib/ws-client";
 import { learningDaemon, learningStatus } from "@/test/learning-test-client";
+import { estimate, probeView, runningProbe } from "@/test/probe-fixtures";
 import { proposal, skill } from "@/test/learning-fixtures";
 import { renderHookWithDaemon, renderWithDaemon } from "@/test/render-with-daemon";
 
@@ -229,5 +234,90 @@ describe("learning events", () => {
     await act(async () => d.emit("learning.job", { workspaceId: 1, jobId: 3, status: "done" }));
     await flush();
     expect(d.countCalls("learning.jobs.list")).toBe(2);
+  });
+});
+
+describe("probe hooks", () => {
+  it("useProbeEstimate is keyed by quick and calls the RPC with it", async () => {
+    const d = learningDaemon((method) => (method === "learning.probe.estimate" ? estimate() : undefined));
+    renderHookWithDaemon((q: boolean) => useProbeEstimate(9, q, true), d, { initialProps: false });
+    await flush();
+    expect(d.calls.filter((c) => c.method === "learning.probe.estimate").map((c) => c.params)).toEqual([{ id: 9, quick: false }]);
+  });
+
+  it("useProbeEstimate does nothing while disabled", async () => {
+    const d = learningDaemon(() => estimate());
+    renderHookWithDaemon((_: null) => useProbeEstimate(9, false, false), d, { initialProps: null });
+    await flush();
+    expect(d.countCalls("learning.probe.estimate")).toBe(0);
+  });
+
+  it("useProbe reads once when done and re-reads on a probe event", async () => {
+    const d = learningDaemon((method) => (method === "learning.probe.get" ? probeView() : undefined));
+    const view = renderHookWithDaemon((_: null) => useProbe(9), d, { initialProps: null });
+    await flush();
+    expect(view.result.current.data?.verdict).toBe("helped");
+    expect(d.countCalls("learning.probe.get")).toBe(1);
+    await act(async () => d.emit("learnedSkill.probe.finished", { probeId: 5, proposalId: 9, workspaceId: 1, status: "done" }));
+    await flush();
+    expect(d.countCalls("learning.probe.get")).toBe(2);
+  });
+
+  it("useProbe maps an absent probe to null", async () => {
+    const d = learningDaemon(() => null);
+    const view = renderHookWithDaemon((_: null) => useProbe(9), d, { initialProps: null });
+    await flush();
+    expect(view.result.current.data).toBeNull();
+  });
+
+  it("useProbe polls every 2 s only while queued or running", async () => {
+    const running = runningProbe();
+    const d = learningDaemon(() => running);
+    const view = renderHookWithDaemon((_: null) => useProbe(9), d, { initialProps: null });
+    await flush();
+    const query = view.queryClient().getQueryCache().find({ queryKey: ["learning.probe.get", { id: 9 }] });
+    const options = query?.observers[0]?.options as { refetchInterval?: (q: unknown) => unknown } | undefined;
+    expect(options?.refetchInterval?.(query)).toBe(2000);
+    query?.setData(probeView());
+    expect(options?.refetchInterval?.(query)).toBe(false);
+  });
+
+  it("useStartProbe sends quick only when set, seeds the probe entry and surfaces a precondition error", async () => {
+    const d = learningDaemon((method, params) => {
+      if (method === "learning.probe.start") {
+        if ((params as { id: number }).id === 8) throw new RpcError("Another probe is running.", "failed_precondition");
+        return runningProbe();
+      }
+      return null;
+    });
+    const view = renderHookWithDaemon((_: null) => ({ start: useStartProbe(), probe: useProbe(9, false) }), d, { initialProps: null });
+    await act(async () => view.result.current.start.mutate({ id: 9, quick: true, workspaceId: 1 }));
+    await flush();
+    expect(d.calls.find((c) => c.method === "learning.probe.start")?.params).toEqual({ id: 9, quick: true });
+    expect(view.queryClient().getQueryData(["learning.probe.get", { id: 9 }])).toMatchObject({ status: "running" });
+    await act(async () => view.result.current.start.mutate({ id: 8 }));
+    await flush();
+    expect(view.result.current.start.error?.message).toBe("Another probe is running.");
+  });
+
+  it("useCancelProbe calls cancel and invalidates the probe and estimate", async () => {
+    const d = learningDaemon(() => ({}));
+    const view = renderHookWithDaemon((_: null) => useCancelProbe(), d, { initialProps: null });
+    const invalidate = vi.spyOn(view.queryClient(), "invalidateQueries");
+    await act(async () => view.result.current.mutate({ id: 9, workspaceId: 1 }));
+    await flush();
+    expect(d.calls.find((c) => c.method === "learning.probe.cancel")?.params).toEqual({ id: 9 });
+    expect(invalidate.mock.calls.map((c) => c[0]?.queryKey)).toEqual(
+      expect.arrayContaining([["learning.probe.get", { id: 9 }], ["learning.probe.estimate", { id: 9 }]]),
+    );
+  });
+
+  it("learnedSkill.probe.finished raises one quiet toast with a Review action", async () => {
+    const d = learningDaemon(() => null);
+    renderWithDaemon(<Toaster />, d);
+    await flush();
+    await act(async () => d.emit("learnedSkill.probe.finished", { probeId: 5, proposalId: 9, workspaceId: 1, status: "done" }));
+    expect(screen.getAllByTestId("toast")).toHaveLength(1);
+    expect(screen.getByTestId("toast-action").textContent).toBe("Review");
   });
 });
