@@ -100,7 +100,9 @@ function makeStyles(theme: AppTheme) {
       padding: theme.spacing[2],
     },
     fieldHost: { alignSelf: 'stretch', maxHeight: 120 },
-    field: { width: '100%', borderWidth: 0, backgroundColor: 'transparent', paddingHorizontal: theme.spacing[1], paddingVertical: theme.spacing[1] },
+    // boxShadow: the web TextInput carries a base drop-shadow hairline that borderWidth/background overrides do not clear
+    // (the shell is the field's surface); native ignores the key.
+    field: { width: '100%', borderWidth: 0, backgroundColor: 'transparent', boxShadow: 'none', paddingHorizontal: theme.spacing[1], paddingVertical: theme.spacing[1] } as never,
     fieldText: {
       fontSize: process.env.EXPO_OS === 'web' ? 16 : theme.type.body.fontSize, // web: 16px avoids browser zoom-on-focus
       lineHeight: theme.type.body.lineHeight,

@@ -515,21 +515,24 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
               </View>
             ) : null}
           </View>
-          {/* keyboard-controller (expo-animation): the dock pads by the keyboard height, so the list shrinks above it */}
-          <KeyboardAvoidingView behavior="padding" style={styles.dock}>
-            <Composer
-              draftState={draftState}
-              onChangeDraft={setDraft}
-              liveRunId={liveRunId}
-              stopView={stopView}
-              canSend={canSend}
-              sendError={sendError}
-              queueItems={queue.items}
-              onCancelQueued={(id) => void queue.cancel(id)}
-              onStop={handleStop}
-              onSend={handleSend}
-              onSendNow={handleSendNow}
-            />
+          {/* keyboard-controller (expo-animation): the wrapper pads by the keyboard height, so the list shrinks above the dock. The dock's own padding (bottom inset)
+              lives on an inner View: the animated paddingBottom of the avoiding view would override it. */}
+          <KeyboardAvoidingView behavior="padding">
+            <View style={styles.dock}>
+              <Composer
+                draftState={draftState}
+                onChangeDraft={setDraft}
+                liveRunId={liveRunId}
+                stopView={stopView}
+                canSend={canSend}
+                sendError={sendError}
+                queueItems={queue.items}
+                onCancelQueued={(id) => void queue.cancel(id)}
+                onStop={handleStop}
+                onSend={handleSend}
+                onSendNow={handleSendNow}
+              />
+            </View>
           </KeyboardAvoidingView>
         </>
       ) : null}
