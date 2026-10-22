@@ -122,3 +122,73 @@ func TestTaskSendThinkingFlag(t *testing.T) {
 		waitForRunStatus(t, client, runID, "stopped")
 	}
 }
+
+func TestUnpinnedModelNote(t *testing.T) {
+	tests := []struct {
+		provider, model string
+		wantNote        bool
+	}{
+		{"claude-native", "", true},
+		{"claude-native", "sonnet", false},
+		{"claude-native", "default", false},
+		{"glm", "", false},
+		{"codex-native", "", false},
+	}
+	for _, tt := range tests {
+		got := unpinnedModelNote(tt.provider, tt.model)
+		if (got != "") != tt.wantNote {
+			t.Errorf("unpinnedModelNote(%q, %q) = %q, want note=%v", tt.provider, tt.model, got, tt.wantNote)
+		}
+		if got != "" && (!strings.Contains(got, "Claude CLI's own default") || !strings.HasSuffix(got, "\n")) {
+			t.Errorf("unpinnedModelNote note = %q, want the default-model wording and a trailing newline", got)
+		}
+	}
+}
+
+func TestRunModelCell(t *testing.T) {
+	reported := "claude-opus-5-5"
+	usage := &struct {
+		Model *string `json:"model"`
+	}{Model: &reported}
+	tests := []struct {
+		name string
+		row  runSummaryRow
+		want string
+	}{
+		{"requested", runSummaryRow{Model: "sonnet"}, "sonnet"},
+		{"reported only, in parens", runSummaryRow{Usage: usage}, "(claude-opus-5-5)"},
+		{"requested wins over reported", runSummaryRow{Model: "sonnet", Usage: usage}, "sonnet"},
+		{"neither", runSummaryRow{}, "-"},
+	}
+	for _, tt := range tests {
+		if got := runModelCell(tt.row); got != tt.want {
+			t.Errorf("%s: runModelCell = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestTaskRunsShowsModel(t *testing.T) {
+	client, id := hangingTask(t)
+	code, stdout, stderr := sendCaptured(t, []string{"task", "send", id, "glm", "hi", "--detach"})
+	if code != 0 {
+		t.Fatalf("send: exit %d stderr %q", code, stderr)
+	}
+	runID := strings.TrimSpace(stdout)
+	defer stopRun(t, client, runID)
+	waitForRunStatus(t, client, runID, "running")
+
+	code, out, stderr := sendCaptured(t, []string{"task", "runs", id})
+	if code != 0 {
+		t.Fatalf("task runs: exit %d stderr %q", code, stderr)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], "MODEL") || !strings.HasPrefix(lines[1], runID) {
+		t.Fatalf("task runs output = %q, want a MODEL header and the run row", out)
+	}
+	if f := strings.Fields(lines[0]); f[3] != "MODEL" {
+		t.Fatalf("header fields = %v, want MODEL fourth", f)
+	}
+	if f := strings.Fields(lines[1]); f[3] != "-" {
+		t.Fatalf("row fields = %v, want model cell %q for an unpinned run", f, "-")
+	}
+}

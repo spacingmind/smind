@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/wsclient"
 )
 
@@ -361,6 +362,17 @@ func cmdTaskList(args []string) int {
 // cmdTaskSendUsage is printed on any argument error in cmdTaskSend.
 const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking off|standard|extended] [--detach]"
 
+// unpinnedModelNote is the stderr note printed when a claude-native run
+// starts without --model: the Claude CLI then runs its own default model for
+// the login, which may be a costly one. "" for every other case, including
+// the explicit --model default (a deliberate choice of the provider default).
+func unpinnedModelNote(provider, model string) string {
+	if provider != string(taskrunner.ProviderClaudeNative) || model != "" {
+		return ""
+	}
+	return "note: no --model given; claude-native uses the Claude CLI's own default model for this login (it may be Opus). Pin one with --model sonnet|haiku|opus or a full id.\n"
+}
+
 // approvalPolicyRemovedMsg is printed for the removed --approval-policy
 // flag (ADR-0019): a hard error pointing at the replacement.
 const approvalPolicyRemovedMsg = "--approval-policy was removed; use --mode <mode> (the provider's own permission mode, e.g. acceptEdits, plan or bypassPermissions for claude-native) and --auto-accept for ACP providers"
@@ -534,6 +546,7 @@ func cmdTaskSend(args []string) int {
 			return 2
 		}
 	}
+	fmt.Fprint(os.Stderr, unpinnedModelNote(provider, model))
 	var start struct {
 		RunID       string `json:"runId"`
 		Queued      bool   `json:"queued"`
@@ -1381,8 +1394,27 @@ type runSummaryRow struct {
 	StopReason string
 	// ThinkingLevel is the run's thinking level ("" when unspecified).
 	ThinkingLevel string
+	// Model is the requested model ("" = the provider's default); Usage.Model
+	// is the model the agent reported using, when it reported one.
+	Model string
+	Usage *struct {
+		Model *string `json:"model"`
+	} `json:"usage"`
 	// Disposition is "needs-continue" for a run that ended done at a cap.
 	Disposition string
+}
+
+// runModelCell is a run's MODEL column: the requested model; when none was
+// requested, the model the agent reported using in parentheses (that is what
+// "Default" resolved to); "-" when neither is known.
+func runModelCell(r runSummaryRow) string {
+	if r.Model != "" {
+		return r.Model
+	}
+	if r.Usage != nil && r.Usage.Model != nil && *r.Usage.Model != "" {
+		return "(" + *r.Usage.Model + ")"
+	}
+	return "-"
 }
 
 // runStatusCell is a run's STATUS column: the status, and its disposition when
@@ -1461,12 +1493,12 @@ func cmdTaskRuns(args []string) int {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tCHAT\tPROVIDER\tSTATUS")
+	fmt.Fprintln(tw, "ID\tCHAT\tPROVIDER\tMODEL\tSTATUS")
 	for _, r := range all {
 		if r.TaskID != taskID {
 			continue
 		}
-		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n", r.ID, r.ChatID, r.Provider, runStatusCell(r.Status, r.Disposition))
+		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\n", r.ID, r.ChatID, r.Provider, runModelCell(r), runStatusCell(r.Status, r.Disposition))
 	}
 	tw.Flush()
 	return 0
