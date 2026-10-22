@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -199,6 +200,31 @@ func TestServer_ProviderTest_CLIMissing(t *testing.T) {
 	}
 	if result.Detail == "" {
 		t.Fatalf("provider.test detail is empty, want it to name the missing binary")
+	}
+}
+
+// TestTestProviderCLI_MissingDetailNamesPathSource proves the not-found
+// detail stays as-is without SMIND_PATH_SOURCE and, with it (set by the
+// desktop app when it starts the daemon), names the source and the effective
+// PATH.
+func TestTestProviderCLI_MissingDetailNamesPathSource(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	t.Setenv("SMIND_PATH_SOURCE", "")
+
+	plain := testProviderCLI([]string{"smind-no-such-cli"})
+	if plain.OK {
+		t.Fatalf("ok = true for a missing binary: %q", plain.Detail)
+	}
+	if !strings.HasPrefix(plain.Detail, `"smind-no-such-cli" not found on PATH: `) || strings.Contains(plain.Detail, "daemon started by") {
+		t.Fatalf("detail without SMIND_PATH_SOURCE = %q, want the plain not-found message", plain.Detail)
+	}
+
+	t.Setenv("SMIND_PATH_SOURCE", "desktop app, PATH from login shell")
+	withSrc := testProviderCLI([]string{"smind-no-such-cli"})
+	want := " (daemon started by the desktop app, PATH from login shell: " + dir + ")"
+	if withSrc.OK || !strings.HasSuffix(withSrc.Detail, want) {
+		t.Fatalf("detail = %q (ok=%v), want suffix %q", withSrc.Detail, withSrc.OK, want)
 	}
 }
 

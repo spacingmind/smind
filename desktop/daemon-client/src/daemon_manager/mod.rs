@@ -10,6 +10,8 @@
 //! logic it drives, kept separable so tests can inject fakes.
 
 pub mod checksums;
+#[cfg(unix)]
+pub mod login_path;
 pub mod managed;
 pub mod native;
 pub mod release;
