@@ -221,6 +221,11 @@ func handle(msg message, sessionCwd *string) {
 				caps["mcpCapabilities"] = m
 			}
 		}
+		if os.Getenv("FAKEAGENT_IMAGE_CAP") != "" {
+			caps["promptCapabilities"] = map[string]any{"image": true}
+		} else if os.Getenv("FAKEAGENT_PROMPT_CAPS_EMPTY") != "" {
+			caps["promptCapabilities"] = map[string]any{}
+		}
 		switch capsMode {
 		case "loadSession":
 			caps["loadSession"] = true
@@ -615,6 +620,22 @@ func runPromptScript(promptMsg message, cwd string) {
 			},
 		})
 		sessionUpdate("done")
+		respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+
+	if scenario == "echo-image" {
+		// Echoes the prompt back the way an agent that replays user turns
+		// does: an image user_message_chunk (ADR-0038: its data must never
+		// reach an event) followed by an ordinary text reply.
+		notify("session/update", map[string]any{
+			"sessionId": sessionID,
+			"update": map[string]any{
+				"sessionUpdate": "user_message_chunk",
+				"content":       map[string]any{"type": "image", "mimeType": "image/png", "data": "ECHOED-IMAGE-SENTINEL-DATA"},
+			},
+		})
+		sessionUpdate("reply after the echo")
 		respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
 		return
 	}

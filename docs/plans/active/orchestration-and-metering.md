@@ -919,7 +919,17 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 
 ## Progress
 
-- [ ] Step 0: mcp-server, agent-mcp-servers, task hierarchy landed
+**Status 2026-10-22 (plans hygiene): PARTIAL.**
+
+- Landed: M1 request log (#226); ADR-0020 per-run usage from agent events (#254) and proxy base-URL/model routing (#253); web usage UI (#262); ADR-0021 per-chat prompt queue (#248), web composer on the server queue (#259), `cancel_kind` plus the Step 3 gap log (#265), mobile queue and Stop (#383, #387); O1 provenance; O2 parent params and depth guard, per-tree concurrency guard (#289), `task.tree` / `task_tree` (#291); MCP gap-log fixes (#271, #273, #284, #369).
+- Checkbox bookkeeping, corrected 2026-10-22: **Step 0** is landed (`completed/mcp-server.md`, `completed/agent-mcp-servers.md`, parent/child tasks, tree guard); **ADR-M implemented** is landed (AC 1–6 and 8 in #254, AC 7 in #253).
+- **Remaining:**
+  - Step 3 as specified (a lead plus at least two peers on a **non-smind** project, via smind only) has not been done; only the one-peer first pass on the smind repo is recorded (gap log below).
+  - The live-provider usage check (a real claude/codex/GLM turn producing a `usage` event) is **unverified**.
+  - Step 4 stays demand-gated.
+  - Orchestration of this repo's own work still runs through Paseo.
+
+- [x] Step 0: mcp-server, agent-mcp-servers, task hierarchy landed (ticked 2026-10-22)
 - [x] M1: schema + async writer
 - [x] M1: usage extraction (4 cases) + tee'd passthrough + include_usage
 - [x] M1: wsapi `usage.*` + `smind usage`
@@ -936,7 +946,7 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 - [x] ADR-0020 accepted (2026-10-11, rewritten: usage from agent events, runs off the proxy)
 - [x] ADR-O drafted as ADR-0021 (Proposed)
 - [x] ADR-0021 accepted (2026-10-10; §5 amended: queue keeps delivering after restart)
-- [ ] ADR-M implemented — AC 1–6 + 8 in the run-usage PR (branch `feat/run-usage-adr-0020`); AC 7 (proxy) in its own PR (branch `feat/proxy-baseurl-model-routing`, see Validation). Tick once both merge.
+- [x] ADR-M implemented (ticked 2026-10-22: #254 and #253 both merged) — AC 1–6 + 8 in the run-usage PR (branch `feat/run-usage-adr-0020`); AC 7 (proxy) in its own PR (branch `feat/proxy-baseurl-model-routing`, see Validation). Tick once both merge.
 - [x] ADR-O implemented
 - [x] ADR-O web composer follow-up (server queue replaces the client-side queue; branch `feat/composer-server-queue`, see Validation). Mobile: done in `feat/mobile-prompt-queue` (see Validation).
 - [ ] Step 3 dogfood + gap log — first pass done 2026-10-11 (one GLM peer on the smind repo, via MCP; see "Step 3 dogfood gap log"). The full Step 3 shape (lead + ≥2 peers on a non-smind project) is not done.

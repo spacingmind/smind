@@ -47,9 +47,24 @@ type threadStartResponse struct {
 	Thread thread `json:"thread"`
 }
 
+// userInput is one turn/start input entry: {type:"text", text} or
+// {type:"localImage", path}. Text is a pointer so an empty text input still
+// serialises its "text" key while a localImage entry carries none.
 type userInput struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type string  `json:"type"`
+	Text *string `json:"text,omitempty"`
+	Path string  `json:"path,omitempty"`
+}
+
+// PromptOption tunes one Prompt call.
+type PromptOption func(*promptOptions)
+
+type promptOptions struct{ images []string }
+
+// WithLocalImages appends {type:"localImage", path} inputs after the text
+// input; paths must be absolute.
+func WithLocalImages(paths []string) PromptOption {
+	return func(o *promptOptions) { o.images = paths }
 }
 
 type threadLoadedListResponse struct {
@@ -418,7 +433,15 @@ func isArchivedThreadError(err error, threadID string) bool {
 // in flight, every item/agentMessage/delta notification for threadID is
 // forwarded onto updates as it arrives, in order; updates is closed when
 // Prompt returns, whether it returns an error or not.
-func (c *Client) Prompt(ctx context.Context, threadID, text string, updates chan<- Update) (string, error) {
+func (c *Client) Prompt(ctx context.Context, threadID, text string, updates chan<- Update, opts ...PromptOption) (string, error) {
+	var po promptOptions
+	for _, o := range opts {
+		o(&po)
+	}
+	input := []userInput{{Type: "text", Text: &text}}
+	for _, p := range po.images {
+		input = append(input, userInput{Type: "localImage", Path: p})
+	}
 	sub := &updateSub{ch: updates}
 	waiter := make(chan turnResult, 1)
 	c.mu.Lock()
@@ -437,7 +460,7 @@ func (c *Client) Prompt(ctx context.Context, threadID, text string, updates chan
 
 	raw, err := c.conn.call(ctx, "turn/start", turnStartParams{
 		ThreadID: threadID,
-		Input:    []userInput{{Type: "text", Text: text}},
+		Input:    input,
 	})
 	if err != nil {
 		return "", fmt.Errorf("codex: turn/start: %w", err)

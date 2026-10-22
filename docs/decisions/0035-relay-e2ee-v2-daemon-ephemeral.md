@@ -4,7 +4,7 @@
 
 **Accepted — 2026-10-20.** The Human decided to remove the nonce-reuse residual recorded in ADR-0031 D9 by
 changing the E2EE core, and accepted all four [open choices](#open-choices) as recommended. The Human also stated that
-there are no users yet, so breaking changes are fine: no compatibility shims anywhere. Plan: [`docs/plans/active/relay-e2ee-v2.md`](../plans/active/relay-e2ee-v2.md).
+there are no users yet, so breaking changes are fine: no compatibility shims anywhere. Plan: [`docs/plans/completed/relay-e2ee-v2.md`](../plans/completed/relay-e2ee-v2.md).
 Amends ADR-0007 (c)/(e) (key schedule, handshake) and ADR-0031 D9 (device_hello signed bytes, "E2EE core unchanged").
 
 ## Context

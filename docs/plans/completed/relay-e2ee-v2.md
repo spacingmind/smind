@@ -80,12 +80,37 @@ Manual: none beyond an isolated-`SMIND_HOME` daemon plus relay harness on loopba
 
 ## Progress
 
-- [x] ADR-0035 and this plan (docs PR).
-- [ ] PR 1: Go core, vectors, bridge/harness, gate.
-- [ ] PR 2: desktop Rust, un-gate.
-- [ ] PR 3: mobile TS, un-gate.
-- [ ] Hold #352 until all three merged; then CHANGELOG/docs sweep (`docs/homelab.md` E2EE wording, ADR-0007 status note).
+- [x] ADR-0035 and this plan (docs PR #429).
+- [x] PR 1: Go core, vectors, bridge/harness, gate — #431.
+- [x] PR 2: desktop Rust, un-gate — #433.
+- [x] PR 3: mobile TS, un-gate — #434. Follow-ups: explicit CSPRNG for mobile keys and nonces (#437); relay-connect test fingerprint pin in the Docker image (#443).
+- [x] Release held until all three merged; 0.13.0 / 0.13.1 shipped with E2EE v2 (GitHub releases `v0.13.0` 2026-10-20, `v0.13.1`).
+- [ ] CHANGELOG/docs sweep (`docs/homelab.md` E2EE wording, ADR-0007 status note): not done as far as the tree shows — `docs/homelab.md` has no E2EE wording and ADR-0007's header still reads "Accepted — 2026-09-11". Cosmetic; not an acceptance criterion; left for the Human to keep or drop.
+
+Closed 2026-10-22 (plans hygiene): moved to `completed/`; every acceptance criterion has evidence below.
 
 ## Validation
 
-(Filled in as each criterion is confirmed.)
+Checked on `develop` @ `5b90afae` (2026-10-22). Re-run locally: `go test -race -count=1 ./internal/relay/...`
+— all 11 packages `ok` (admission, bridge, bridge/devharness, bridge/harness, client, devices, e2ee, pairing, relaypb,
+relaytest, server). The Rust and TypeScript suites were not re-run in this pass; their evidence is the merged PRs' CI
+(#433, #434) plus the test names found in the tree.
+
+| AC | Evidence |
+|---|---|
+| 1 key uniqueness | `TestReplayedClientHandshakeDerivesFreshKeys`, `TestNoNonceReuseAcrossSessions` (`internal/relay/e2ee/v2_test.go`) |
+| 2 replay gets nothing | `TestReplayedClientHandshakeWritesNoDataFrame`; Rust `replayed_m1_gets_no_data_and_fresh_keys`, `a_replayed_client_hello_gets_no_challenge_and_fresh_keys`; TS `integration.replay.node.test.ts` ("fresh M2 and R_d but never a data frame") |
+| 3 key confirmation | `TestTamperedDaemonEphemeralFailsHandshake`, `TestWrongStaticKeyFailsHandshake`, `TestForgedDaemonReadyFails`, `TestEmptyReadyIsProtocolError`, `TestNoDataBeforeClientReady` |
+| 4 daemon auth | `TestPinMismatchBeforeAnyDH` (`handshake_pin_test.go`) |
+| 5 no downgrade | `TestDowngradeRefused`; Rust `downgrade_refused_v1_hello_from_daemon`, `downgrade_refused_v1_hello_to_daemon_and_newer_peer_is_distinguished`; TS vector negatives in `e2ee.test.ts` |
+| 6 fresh initiator key | `TestPublicAPIHasNoInitiatorKeyParameter`, `TestClientEphemeralNeverReused`, `TestDaemonEphemeralIsFreshPerHandshake` |
+| 7 cross-language identity | one vector file `internal/relay/e2ee/testdata/e2ee_v2_vectors.json`; Go `TestE2EEV2KeyScheduleVectors` + `TestWriteVectors`; Rust `crypto.rs` reads it; TS `e2ee.test.ts` ("E2EE v2 vectors: key schedule", "frames through the real client Channel") |
+| 8 `device_hello` bound to `th` | `TestHelloVectorV2OverNewTranscript`, `TestHelloNegativeOtherDaemonEphemeral` (`internal/relay/devices/identity_test.go`); Rust `device_hello_signature_verifies_against_go_vector`; TS `deviceIdentity.test.ts` |
+| 9 duplicates and resume | `TestDuplicateM1ResendsStoredM2AndReady`, `TestDifferentM1AfterEstablishedIsKeyRotation` (`rotation_test.go`) |
+| 10 replaces `TestE2EECoreUnchanged` | `TestE2EECoreUnchanged` no longer exists in the tree; `TestTranscriptHashIsTheHKDFSalt` and the §8 invariants pass under `-race` (run above) |
+| 11 user-visible | `mobile/src/relay/connectionStatus.ts` maps an older peer to "Daemon is too old for this app" / "Daemon outdated or on a different version" with the `smind update` command (`connectionStatus.test.ts`). Desktop: `desktop/daemon-client/src/relay/client.rs` returns "The daemon speaks an older E2EE version: update the daemon …" / "… newer E2EE version: update this app." (test section "E2EE version errors (ADR-0035 §6)"). |
+| 12 nothing else moves | `git diff` of `internal/relay/{relaypb,admission,pairing,server}` between the parent of #431 and `develop` @ `5b90afae` is empty; their tests pass in the run above. |
+
+The `E2EE v2 pending in this client (ADR-0035)` skip gate is gone from the tree (grep over `*.go`, `*.rs`, `*.ts` finds nothing); the Rust interop tests (`relay_harness_interop.rs`, `relay_multidevice_interop.rs`) and the mobile `integration.*.node.test.ts` suites are present and un-gated.
+
+Unverified: a real phone / real desktop app against a real relay on v2 (only the in-process harnesses and the loopback relay were used).

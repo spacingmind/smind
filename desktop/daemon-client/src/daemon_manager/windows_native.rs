@@ -336,10 +336,6 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    fn fake_layout(dir: &Path) -> Layout {
-        Layout::new(dir)
-    }
-
     #[test]
     fn exe_matches_is_case_insensitive() {
         assert!(exe_matches(" C:\\Users\\Me\\AppData\\Local\\smind\\Bin\\SMIND.EXE ", Path::new(r"C:\Users\Me\AppData\Local\smind\bin\smind.exe")));

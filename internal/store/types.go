@@ -67,6 +67,9 @@ type Workspace struct {
 	UpdatedAt         time.Time
 	// LearningMode is "off" or "propose" (ADR-0026); "" on write = "off".
 	LearningMode string `json:"learningMode"`
+	// DefaultBase is the user's default-base-branch override (ADR-0039);
+	// "" = auto-detect.
+	DefaultBase string
 }
 
 // Space is an optional grouping layer within a workspace, carrying its own
@@ -108,6 +111,13 @@ type Task struct {
 	// Kind is "task" or "system" (ADR-0026: hidden tasks that own learning
 	// runs); "" on write = "task". List queries return only non-system rows.
 	Kind string
+	// BaseRef is the branch the task is based on and its PR targets (a
+	// branch name, not origin/<name>); BaseSha is the commit the task
+	// branch forked from, the diff base. Either is "" when unknown.
+	// BranchOwned is true when CreateTask created the branch (ADR-0039).
+	BaseRef     string
+	BaseSha     string
+	BranchOwned bool
 }
 
 // Run is a persisted record of one internal/runs.Registry Run: a
@@ -166,6 +176,9 @@ type Run struct {
 	// Interrupt is true when the prompt was delivered as a mid-run
 	// interrupt (a priority-1 queue item).
 	Interrupt bool
+	// Attachments is attach.EncodeSet of the prompt's accepted attachments
+	// (ADR-0038); "" = none.
+	Attachments string
 }
 
 // RunEvent is one persisted internal/runs.Event, in the order it was

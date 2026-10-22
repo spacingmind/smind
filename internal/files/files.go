@@ -182,6 +182,13 @@ func Write(root, path, content string, expectedMtime *time.Time) (time.Time, err
 	return info.ModTime(), nil
 }
 
+// Resolve returns the real, symlink-resolved absolute path reqPath names
+// inside root, or an error when it would escape root (".." traversal, an
+// absolute path outside root, or any symlink pointing outside). The leaf may
+// not exist yet. It is the exported form of the containment check List,
+// Read and Write use.
+func Resolve(root, reqPath string) (string, error) { return resolveInRoot(root, reqPath) }
+
 // resolveInRoot resolves reqPath against root (a task's real worktree path)
 // and returns the real, symlink-resolved absolute path it names --
 // guaranteed to be root itself or a descendant of it -- or an error if it

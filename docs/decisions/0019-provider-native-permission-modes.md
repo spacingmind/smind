@@ -5,7 +5,7 @@
 Accepted (2026-09-28). The direction ("handle it like Paseo, don't build a
 custom mode") and every recommendation in Resolved decisions below were
 accepted by the user on 2026-09-28. Implementation is tracked in
-[`docs/plans/active/provider-native-permission-modes.md`](../plans/active/provider-native-permission-modes.md).
+[`docs/plans/completed/provider-native-permission-modes.md`](../plans/completed/provider-native-permission-modes.md).
 
 ## Context
 

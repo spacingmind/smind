@@ -9,9 +9,11 @@ package wsapi
 import (
 	"context"
 	"encoding/json"
+	"os/exec"
 	"runtime"
 	"time"
 
+	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/version"
 )
 
@@ -26,6 +28,27 @@ type DaemonInfo struct {
 	// Platform is GOOS/GOARCH, e.g. "linux/amd64".
 	Platform  string `json:"platform"`
 	StartedAt string `json:"startedAt"` // RFC 3339, UTC
+	// Forge is the forge CLI capability of the daemon host (ADR-0039 §8, which
+	// ADR-0038 §8 defers to): `cli` is a PATH lookup, never a process spawn.
+	// An object so authentication and host details can join it.
+	Forge *ForgeInfo `json:"forge,omitempty"`
+	// Attachments are the prompt-attachment limits of this connection;
+	// absent on a daemon without an attachment store (ADR-0038).
+	Attachments *AttachmentsInfo `json:"attachments,omitempty"`
+}
+
+// ForgeInfo is daemon.info's `forge` field.
+type ForgeInfo struct {
+	// Provider is the forge this daemon talks to; "github" is the only one.
+	Provider string `json:"provider"`
+	// CLI reports whether the provider's CLI (gh) is on the daemon's PATH.
+	CLI bool `json:"cli"`
+}
+
+// forgeCLIInstalled is a seam so tests do not depend on the host's PATH.
+var forgeCLIInstalled = func() bool {
+	_, err := exec.LookPath("gh")
+	return err == nil
 }
 
 // newDaemonInfo describes this process, started at start.
@@ -45,8 +68,13 @@ func (a *API) SetManagedBy(supervisor string) {
 	a.info.ManagedBy = supervisor
 }
 
-func handleDaemonInfo(info *DaemonInfo) handlerFunc {
-	return func(_ context.Context, _ *requestContext, _ json.RawMessage) (any, error) {
-		return *info, nil
+func handleDaemonInfo(info *DaemonInfo, reg *runs.Registry) handlerFunc {
+	return func(_ context.Context, rc *requestContext, _ json.RawMessage) (any, error) {
+		out := *info
+		out.Forge = &ForgeInfo{Provider: "github", CLI: forgeCLIInstalled()}
+		if reg != nil && reg.AttachmentStore() != nil {
+			out.Attachments = attachmentsInfo(connMaxMessage(rc))
+		}
+		return out, nil
 	}
 }
