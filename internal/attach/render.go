@@ -36,7 +36,7 @@ func mentioned(text, path string) bool {
 
 // Render turns a set into runner input. text is the user's prompt text; a
 // file_ref it already mentions is not repeated. Render never fails: an
-// unreadable GitHub body is simply omitted.
+// unreadable forge body is simply omitted.
 func (s *Store) Render(set Set, text string, nativeImages bool) Rendered {
 	var out Rendered
 	var refs []string
@@ -60,16 +60,21 @@ func (s *Store) Render(set Set, text string, nativeImages bool) Rendered {
 				"The user attached a file from their machine: %s (%s, %s)\nPath: %s\nRead it with your file tools if it is relevant.",
 				it.Name, it.MimeType, humanSize(it.Size), abs))
 		case KindFileRef:
-			if mentioned(text, it.Path) {
+			if it.Line == 0 && mentioned(text, it.Path) {
 				continue
 			}
 			line := "- " + it.Path
-			if it.IsDir {
+			switch {
+			case it.IsDir:
 				line += " (directory)"
+			case it.EndLine > it.Line:
+				line += fmt.Sprintf(" (lines %d\u2013%d)", it.Line, it.EndLine)
+			case it.Line > 0:
+				line += fmt.Sprintf(" (line %d)", it.Line)
 			}
 			refs = append(refs, line)
-		case KindGithubPR, KindGithubIssue:
-			out.Context = append(out.Context, s.renderGithub(set.ID, it))
+		case KindPR, KindIssue:
+			out.Context = append(out.Context, s.renderForge(set.ID, it))
 		}
 	}
 	if len(refs) > 0 {
@@ -78,10 +83,10 @@ func (s *Store) Render(set Set, text string, nativeImages bool) Rendered {
 	return out
 }
 
-func (s *Store) renderGithub(setID string, it Item) string {
-	tag := "github-pr"
-	if it.Kind == KindGithubIssue {
-		tag = "github-issue"
+func (s *Store) renderForge(setID string, it Item) string {
+	tag := "pr"
+	if it.Kind == KindIssue {
+		tag = "issue"
 	}
 	var body string
 	if it.File != "" {
@@ -90,10 +95,10 @@ func (s *Store) renderGithub(setID string, it Item) string {
 		}
 	}
 	attrs := []struct{ k, v string }{
-		{"number", ""}, {"repo", it.Repo}, {"state", it.State}, {"url", it.URL}, {"base", it.BaseRef}, {"head", it.HeadRef},
+		{"forge", it.Forge}, {"number", ""}, {"repo", it.Repo}, {"state", it.State}, {"url", it.URL}, {"base", it.BaseRef}, {"head", it.HeadRef},
 	}
 	if it.Number > 0 {
-		attrs[0].v = fmt.Sprint(it.Number)
+		attrs[1].v = fmt.Sprint(it.Number)
 	}
 	var b strings.Builder
 	b.WriteString("<" + tag)
@@ -129,7 +134,7 @@ func neutralise(s, tag string) string {
 }
 
 // Markers returns one short marker per item, for display in the transcript.
-// Never bytes, never a GitHub title or body.
+// Never bytes, never a forge title or body.
 func Markers(set Set) []string {
 	out := make([]string, 0, len(set.Items))
 	for _, it := range set.Items {
@@ -138,7 +143,7 @@ func Markers(set Set) []string {
 			out = append(out, fmt.Sprintf("[attachment: %s %s]", it.Kind, it.Name))
 		case KindFileRef:
 			out = append(out, fmt.Sprintf("[attachment: file_ref %s]", it.Path))
-		case KindGithubPR, KindGithubIssue:
+		case KindPR, KindIssue:
 			out = append(out, fmt.Sprintf("[attachment: %s #%d]", it.Kind, it.Number))
 		}
 	}

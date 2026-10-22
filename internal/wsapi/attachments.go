@@ -34,14 +34,25 @@ const (
 func (a *API) SetAttachmentStore(st *attach.Store) { a.Runs.SetAttachmentStore(st) }
 
 // AttachmentsInfo is daemon.info's `attachments` field.
+// ForgeInfo reports per-forge availability; an object so more fields can be
+// added without a wire break.
+type ForgeInfo struct {
+	Github ForgeStatus `json:"github"`
+}
+
+// ForgeStatus is one forge's availability on this daemon.
+type ForgeStatus struct {
+	Installed bool `json:"installed"`
+}
+
 type AttachmentsInfo struct {
-	MaxCount        int      `json:"maxCount"`
-	MaxImageBytes   int      `json:"maxImageBytes"`
-	MaxFileBytes    int      `json:"maxFileBytes"`
-	MaxTotalBytes   int      `json:"maxTotalBytes"`
-	MaxMessageBytes int      `json:"maxMessageBytes"`
-	Images          []string `json:"images"`
-	Github          bool     `json:"github"`
+	MaxCount        int       `json:"maxCount"`
+	MaxImageBytes   int       `json:"maxImageBytes"`
+	MaxFileBytes    int       `json:"maxFileBytes"`
+	MaxTotalBytes   int       `json:"maxTotalBytes"`
+	MaxMessageBytes int       `json:"maxMessageBytes"`
+	Images          []string  `json:"images"`
+	Forge           ForgeInfo `json:"forge"`
 }
 
 func attachmentsInfo(maxMessage int) *AttachmentsInfo {

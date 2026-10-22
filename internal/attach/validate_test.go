@@ -287,8 +287,8 @@ func TestValidate_Resolvers(t *testing.T) {
 	lim := DefaultLimits()
 	_, err := validate(ctx, []Request{{Kind: KindFileRef, Path: "a"}}, lim, Resolvers{})
 	wantCode(t, err, CodeInvalid)
-	_, err = validate(ctx, []Request{{Kind: KindGithubPR, Number: 1}}, lim, Resolvers{})
-	wantCode(t, err, CodeGithubUnavailable)
+	_, err = validate(ctx, []Request{{Kind: KindPR, Number: 1}}, lim, Resolvers{})
+	wantCode(t, err, CodeForgeUnavailable)
 	_, err = validate(ctx, []Request{{Kind: KindReuse, RunID: "r", ID: "1"}}, lim, Resolvers{})
 	wantCode(t, err, CodeInvalid)
 
@@ -299,11 +299,11 @@ func TestValidate_Resolvers(t *testing.T) {
 			}
 			return "rel/" + p, p == "dir", nil
 		},
-		Github: func(_ context.Context, kind string, n int, repo string) (GithubSnapshot, error) {
-			return GithubSnapshot{Number: n, Title: "T", Body: strings.Repeat("é", 100)}, nil
+		Forge: func(_ context.Context, _ string, kind string, n int, repo string) (ForgeSnapshot, error) {
+			return ForgeSnapshot{Number: n, Title: "T", Body: strings.Repeat("é", 100)}, nil
 		},
 	}
-	ps, err := validate(ctx, []Request{{Kind: KindFileRef, Path: "dir"}, {Kind: KindGithubIssue, Number: 3, Repo: "o/r"}}, lim, r)
+	ps, err := validate(ctx, []Request{{Kind: KindFileRef, Path: "dir"}, {Kind: KindIssue, Number: 3, Repo: "o/r"}}, lim, r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,26 +315,26 @@ func TestValidate_Resolvers(t *testing.T) {
 	_, err = validate(ctx, []Request{{Kind: KindFileRef, Path: strings.Repeat("a", 4097)}}, lim, r)
 	wantCode(t, err, CodeInvalid)
 	for _, repo := range []string{"nope", "a/b/c", "a/ b", "/b"} {
-		_, err = validate(ctx, []Request{{Kind: KindGithubPR, Number: 1, Repo: repo}}, lim, r)
+		_, err = validate(ctx, []Request{{Kind: KindPR, Number: 1, Repo: repo}}, lim, r)
 		wantCode(t, err, CodeInvalid)
 	}
-	_, err = validate(ctx, []Request{{Kind: KindGithubPR, Number: 0}}, lim, r)
+	_, err = validate(ctx, []Request{{Kind: KindPR, Number: 0}}, lim, r)
 	wantCode(t, err, CodeInvalid)
 
 	// typed resolver errors pass through with the index set
-	r.Github = func(context.Context, string, int, string) (GithubSnapshot, error) {
-		return GithubSnapshot{}, &Error{Code: CodeGithubNotFound, Message: "no such pr", Index: -1}
+	r.Forge = func(context.Context, string, string, int, string) (ForgeSnapshot, error) {
+		return ForgeSnapshot{}, &Error{Code: CodeForgeNotFound, Message: "no such pr", Index: -1}
 	}
-	_, err = validate(ctx, []Request{{Kind: KindFileRef, Path: "a"}, {Kind: KindGithubPR, Number: 9}}, lim, r)
-	wantCode(t, err, CodeGithubNotFound)
+	_, err = validate(ctx, []Request{{Kind: KindFileRef, Path: "a"}, {Kind: KindPR, Number: 9}}, lim, r)
+	wantCode(t, err, CodeForgeNotFound)
 	if err.(*Error).Index != 1 {
 		t.Fatalf("index %d", err.(*Error).Index)
 	}
 
-	r.Github = func(context.Context, string, int, string) (GithubSnapshot, error) { return GithubSnapshot{}, nil }
+	r.Forge = func(context.Context, string, string, int, string) (ForgeSnapshot, error) { return ForgeSnapshot{}, nil }
 	many := make([]Request, 6)
 	for i := range many {
-		many[i] = Request{Kind: KindGithubPR, Number: i + 1}
+		many[i] = Request{Kind: KindPR, Number: i + 1}
 	}
 	_, err = validate(ctx, many, lim, r)
 	wantCode(t, err, CodeTooMany)
@@ -358,5 +358,53 @@ func TestValidate_FileDeclaredMimeCannotCarryInstructions(t *testing.T) {
 	}
 	if got := fileMime([]byte("plain text"), "text/markdown"); got != "text/markdown" {
 		t.Fatalf("fileMime = %q, want the well-formed declared type", got)
+	}
+}
+
+func TestValidate_ForgeDefaultsToGithubAndRejectsOthers(t *testing.T) {
+	ctx := context.Background()
+	var seen string
+	r := Resolvers{Forge: func(_ context.Context, forge, _ string, _ int, _ string) (ForgeSnapshot, error) {
+		seen = forge
+		return ForgeSnapshot{}, nil
+	}}
+	for _, f := range []string{"", "github"} {
+		ps, err := validate(ctx, []Request{{Kind: KindPR, Number: 1, Forge: f}}, DefaultLimits(), r)
+		if err != nil || ps[0].item.Forge != "github" || seen != "github" {
+			t.Fatalf("forge %q: %+v, %v, resolver saw %q", f, ps, err, seen)
+		}
+	}
+	_, err := validate(ctx, []Request{{Kind: KindIssue, Number: 1, Forge: "gitlab"}}, DefaultLimits(), r)
+	wantCode(t, err, CodeInvalid)
+	if !strings.Contains(err.Error(), `unsupported forge "gitlab" (only "github")`) {
+		t.Fatalf("message = %v", err)
+	}
+	_, err = validate(ctx, []Request{{Kind: KindPR, Number: 1}}, DefaultLimits(), Resolvers{})
+	wantCode(t, err, CodeForgeUnavailable)
+	if !strings.Contains(err.Error(), "no forge available") {
+		t.Fatalf("message = %v", err)
+	}
+}
+
+func TestValidate_FileRefLineRange(t *testing.T) {
+	ctx := context.Background()
+	r := Resolvers{FileRef: func(p string) (string, bool, error) { return p, p == "dir", nil }}
+	ok, err := validate(ctx, []Request{{Kind: KindFileRef, Path: "a.go", Line: 12, EndLine: 20}}, DefaultLimits(), r)
+	if err != nil || ok[0].item.Line != 12 || ok[0].item.EndLine != 20 {
+		t.Fatalf("%+v, %v", ok, err)
+	}
+	for name, req := range map[string]Request{
+		"negative line":     {Kind: KindFileRef, Path: "a.go", Line: -1},
+		"endLine no line":   {Kind: KindFileRef, Path: "a.go", EndLine: 5},
+		"endLine < line":    {Kind: KindFileRef, Path: "a.go", Line: 9, EndLine: 3},
+		"line too large":    {Kind: KindFileRef, Path: "a.go", Line: 10_000_001},
+		"endLine too large": {Kind: KindFileRef, Path: "a.go", Line: 1, EndLine: 10_000_001},
+		"line on a dir":     {Kind: KindFileRef, Path: "dir", Line: 2},
+	} {
+		if _, err := validate(ctx, []Request{req}, DefaultLimits(), r); err == nil {
+			t.Errorf("%s accepted", name)
+		} else {
+			wantCode(t, err, CodeInvalid)
+		}
 	}
 }

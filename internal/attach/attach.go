@@ -1,5 +1,5 @@
 // Package attach validates, stores and renders prompt attachments
-// (ADR-0038). It is self-contained: callers inject the workspace, GitHub and
+// (ADR-0038). It is self-contained: callers inject the workspace, forge and
 // reuse lookups through Resolvers.
 package attach
 
@@ -10,26 +10,26 @@ import (
 
 // Attachment kinds.
 const (
-	KindImage       = "image"
-	KindFile        = "file"
-	KindFileRef     = "file_ref"
-	KindGithubPR    = "github_pr"
-	KindGithubIssue = "github_issue"
-	KindReuse       = "reuse"
+	KindImage   = "image"
+	KindFile    = "file"
+	KindFileRef = "file_ref"
+	KindPR      = "pr"
+	KindIssue   = "issue"
+	KindReuse   = "reuse"
 )
 
 // Error codes carried by *Error.
 const (
-	CodeInvalid           = "invalid_attachment"
-	CodeTooMany           = "too_many_attachments"
-	CodeTooLarge          = "attachment_too_large"
-	CodeUnsupportedImage  = "unsupported_image_type"
-	CodeMimeMismatch      = "mime_mismatch"
-	CodeInvalidBase64     = "invalid_base64"
-	CodeOutsideWorkspace  = "outside_workspace"
-	CodeNotFound          = "not_found"
-	CodeGithubUnavailable = "github_unavailable"
-	CodeGithubNotFound    = "github_not_found"
+	CodeInvalid          = "invalid_attachment"
+	CodeTooMany          = "too_many_attachments"
+	CodeTooLarge         = "attachment_too_large"
+	CodeUnsupportedImage = "unsupported_image_type"
+	CodeMimeMismatch     = "mime_mismatch"
+	CodeInvalidBase64    = "invalid_base64"
+	CodeOutsideWorkspace = "outside_workspace"
+	CodeNotFound         = "not_found"
+	CodeForgeUnavailable = "forge_unavailable"
+	CodeForgeNotFound    = "forge_not_found"
 )
 
 // Request is one client-sent attachment (wire form, ADR §1).
@@ -41,6 +41,9 @@ type Request struct {
 	Path     string `json:"path,omitempty"`
 	Number   int    `json:"number,omitempty"`
 	Repo     string `json:"repo,omitempty"`
+	Forge    string `json:"forge,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	EndLine  int    `json:"endLine,omitempty"`
 	RunID    string `json:"runId,omitempty"`
 	ID       string `json:"id,omitempty"`
 }
@@ -48,7 +51,7 @@ type Request struct {
 // Limits bounds what Accept admits.
 type Limits struct {
 	MaxCount, MaxImageBytes, MaxFileBytes, MaxTotalBytes, MaxImageDim int
-	MaxFileRefs, MaxGithub, MaxPathLen, MaxNameBytes, MaxBodyBytes    int
+	MaxFileRefs, MaxForge, MaxPathLen, MaxNameBytes, MaxBodyBytes     int
 }
 
 // DefaultLimits returns the ADR-0038 limits.
@@ -60,7 +63,7 @@ func DefaultLimits() Limits {
 		MaxTotalBytes: 10 << 20,
 		MaxImageDim:   8000,
 		MaxFileRefs:   20,
-		MaxGithub:     5,
+		MaxForge:      5,
 		MaxPathLen:    4096,
 		MaxNameBytes:  120,
 		MaxBodyBytes:  32 << 10,
@@ -99,9 +102,12 @@ type Item struct {
 	Width    int    `json:"width,omitempty"`
 	Height   int    `json:"height,omitempty"`
 
-	Path  string `json:"path,omitempty"`
-	IsDir bool   `json:"isDir,omitempty"`
+	Path    string `json:"path,omitempty"`
+	IsDir   bool   `json:"isDir,omitempty"`
+	Line    int    `json:"line,omitempty"`
+	EndLine int    `json:"endLine,omitempty"`
 
+	Forge   string `json:"forge,omitempty"`
 	Number  int    `json:"number,omitempty"`
 	Repo    string `json:"repo,omitempty"`
 	Title   string `json:"title,omitempty"`

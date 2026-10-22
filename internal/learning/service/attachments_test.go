@@ -15,7 +15,7 @@ func TestLearningWindow_MarkersOnly(t *testing.T) {
 	set := attach.Set{ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Items: []attach.Item{
 		{ID: "1", Kind: attach.KindImage, Name: "shot.png", MimeType: "image/png", Size: 99, File: "01-shot-STORED.png"},
 		{ID: "2", Kind: attach.KindFileRef, Path: "src/a.go"},
-		{ID: "3", Kind: attach.KindGithubPR, Number: 7, Repo: "o/r", Title: "SECRET-TITLE", URL: "https://example.test/SECRET-URL"},
+		{ID: "3", Kind: attach.KindPR, Number: 7, Repo: "o/r", Title: "SECRET-TITLE", URL: "https://example.test/SECRET-URL"},
 	}}
 	wr := store.ChatWindowRun{PromptInWindow: true, Run: store.Run{ID: "r1", Prompt: "fix it", Origin: "human", Attachments: attach.EncodeSet(set)}}
 	got := (&Service{}).windowRuns([]store.ChatWindowRun{wr})
@@ -23,7 +23,7 @@ func TestLearningWindow_MarkersOnly(t *testing.T) {
 		t.Fatalf("windowRuns = %+v", got)
 	}
 	joined := strings.Join(got[0].Attachments, "\n")
-	for _, want := range []string{"[attachment: image shot.png]", "[attachment: file_ref src/a.go]", "[attachment: github_pr #7]"} {
+	for _, want := range []string{"[attachment: image shot.png]", "[attachment: file_ref src/a.go]", "[attachment: pr #7]"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("markers lack %q: %s", want, joined)
 		}

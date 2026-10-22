@@ -28,13 +28,13 @@ func TestStore_WritesSetWithModes(t *testing.T) {
 	s, root := newTestStore(t)
 	png := pngBytes(t, 2, 2)
 	set := accept(t, s, Resolvers{
-		Github: func(context.Context, string, int, string) (GithubSnapshot, error) {
-			return GithubSnapshot{Title: "t", Body: "body"}, nil
+		Forge: func(context.Context, string, string, int, string) (ForgeSnapshot, error) {
+			return ForgeSnapshot{Title: "t", Body: "body"}, nil
 		},
 	},
 		imgReq(png, "image/png"),
 		Request{Kind: KindFile, Name: "n.txt", Data: b64([]byte("hi"))},
-		Request{Kind: KindGithubPR, Number: 4},
+		Request{Kind: KindPR, Number: 4},
 	)
 	if len(set.ID) != 32 || len(set.Items) != 3 {
 		t.Fatalf("%+v", set)
@@ -113,11 +113,13 @@ func TestStore_FailureLeavesNoFiles(t *testing.T) {
 	boom := errors.New("boom")
 	_, err := s.Accept(context.Background(), []Request{
 		imgReq(pngBytes(t, 2, 2), "image/png"),
-		{Kind: KindGithubPR, Number: 1},
+		{Kind: KindPR, Number: 1},
 	}, DefaultLimits(), Resolvers{
-		Github: func(context.Context, string, int, string) (GithubSnapshot, error) { return GithubSnapshot{}, boom },
+		Forge: func(context.Context, string, string, int, string) (ForgeSnapshot, error) {
+			return ForgeSnapshot{}, boom
+		},
 	})
-	wantCode(t, err, CodeGithubUnavailable)
+	wantCode(t, err, CodeForgeUnavailable)
 	if es := rootEntries(t, root); len(es) != 0 {
 		t.Fatalf("rejected Accept left %v", es)
 	}

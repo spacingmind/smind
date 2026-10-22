@@ -17,6 +17,8 @@ import (
 	"unicode/utf8"
 )
 
+const maxLine = 10_000_000
+
 const truncatedSuffix = "\n[… truncated]"
 
 // mimePattern is the shape of a media type this package will echo into agent
@@ -26,8 +28,8 @@ var mimePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}/[A
 
 var repoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$`)
 
-// GithubSnapshot is what a Github resolver returns.
-type GithubSnapshot struct {
+// ForgeSnapshot is what a Forge resolver returns.
+type ForgeSnapshot struct {
 	Number                                          int
 	Repo, Title, URL, State, BaseRef, HeadRef, Body string
 }
@@ -36,8 +38,8 @@ type GithubSnapshot struct {
 type Resolvers struct {
 	// FileRef maps a client path to a workspace-relative one.
 	FileRef func(path string) (rel string, isDir bool, err error)
-	// Github fetches PR/issue context. Called during validation.
-	Github func(ctx context.Context, kind string, number int, repo string) (GithubSnapshot, error)
+	// Forge fetches PR/issue context. Called during validation.
+	Forge func(ctx context.Context, forge, kind string, number int, repo string) (ForgeSnapshot, error)
 	// Reuse returns the source item and the ABSOLUTE source file path.
 	Reuse func(runID, id string) (Item, string, error)
 }
@@ -46,7 +48,7 @@ type Resolvers struct {
 type prepared struct {
 	item Item
 	blob []byte // image/file/reuse bytes
-	body []byte // github body, written as NN-body.md
+	body []byte // forge body, written as NN-body.md
 }
 
 var allowedImages = map[string]bool{
@@ -235,21 +237,38 @@ func validate(ctx context.Context, reqs []Request, lim Limits, r Resolvers) ([]p
 				}
 				return nil, newErr(CodeOutsideWorkspace, i, "%v", err)
 			}
+			if req.Line < 0 || req.EndLine < 0 || req.Line > maxLine || req.EndLine > maxLine {
+				return nil, newErr(CodeInvalid, i, "line numbers must be between 1 and %d", maxLine)
+			}
+			if req.EndLine > 0 && (req.Line == 0 || req.EndLine < req.Line) {
+				return nil, newErr(CodeInvalid, i, "endLine needs a line and must not be before it")
+			}
+			if isDir && req.Line > 0 {
+				return nil, newErr(CodeInvalid, i, "a directory has no line")
+			}
 			p.item.Path, p.item.IsDir = rel, isDir
-		case KindGithubPR, KindGithubIssue:
+			p.item.Line, p.item.EndLine = req.Line, req.EndLine
+		case KindPR, KindIssue:
+			forge := req.Forge
+			if forge == "" {
+				forge = "github"
+			}
+			if forge != "github" {
+				return nil, newErr(CodeInvalid, i, "unsupported forge %q (only \"github\")", forge)
+			}
 			if req.Number <= 0 {
 				return nil, newErr(CodeInvalid, i, "number must be positive")
 			}
 			if req.Repo != "" && !repoPattern.MatchString(req.Repo) {
 				return nil, newErr(CodeInvalid, i, "repo must look like owner/name")
 			}
-			if gh++; gh > lim.MaxGithub {
-				return nil, newErr(CodeTooMany, i, "at most %d GitHub attachments", lim.MaxGithub)
+			if gh++; gh > lim.MaxForge {
+				return nil, newErr(CodeTooMany, i, "at most %d PR/issue attachments", lim.MaxForge)
 			}
-			if r.Github == nil {
-				return nil, newErr(CodeGithubUnavailable, i, "GitHub is not available")
+			if r.Forge == nil {
+				return nil, newErr(CodeForgeUnavailable, i, "no forge available")
 			}
-			snap, err := r.Github(ctx, req.Kind, req.Number, req.Repo)
+			snap, err := r.Forge(ctx, forge, req.Kind, req.Number, req.Repo)
 			if err != nil {
 				var ae *Error
 				if errors.As(err, &ae) {
@@ -257,7 +276,7 @@ func validate(ctx context.Context, reqs []Request, lim Limits, r Resolvers) ([]p
 					cp.Index = i
 					return nil, &cp
 				}
-				return nil, newErr(CodeGithubUnavailable, i, "%v", err)
+				return nil, newErr(CodeForgeUnavailable, i, "%v", err)
 			}
 			repo := snap.Repo
 			if repo == "" {
@@ -267,6 +286,7 @@ func validate(ctx context.Context, reqs []Request, lim Limits, r Resolvers) ([]p
 			if num == 0 {
 				num = req.Number
 			}
+			p.item.Forge = forge
 			p.item.Number, p.item.Repo, p.item.Title = num, repo, snap.Title
 			p.item.URL, p.item.State, p.item.BaseRef, p.item.HeadRef = snap.URL, snap.State, snap.BaseRef, snap.HeadRef
 			if snap.Body != "" {

@@ -514,8 +514,8 @@ func TestDaemonInfo_ReportsAttachmentLimits(t *testing.T) {
 	if imgs, _ := att["images"].([]any); len(imgs) != 4 {
 		t.Errorf("images = %v", att["images"])
 	}
-	if att["github"] != false {
-		t.Errorf("github = %v", att["github"])
+	if gh, _ := att["forge"].(map[string]any)["github"].(map[string]any); gh["installed"] != false {
+		t.Errorf("forge = %v", att["forge"])
 	}
 	env := rpcPipe(t, e.relayClient(t), "i", "daemon.info", nil)
 	var viaRelay map[string]any

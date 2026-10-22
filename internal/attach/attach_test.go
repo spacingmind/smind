@@ -44,7 +44,7 @@ func TestSet_EncodeDecodeRoundTrip(t *testing.T) {
 	in := Set{ID: "ab", Items: []Item{
 		{ID: "1", Kind: KindImage, Name: "a.png", MimeType: "image/png", Size: 3, Width: 1, Height: 2, File: "01-a.png"},
 		{ID: "2", Kind: KindFileRef, Path: "x/y.go", IsDir: false},
-		{ID: "3", Kind: KindGithubPR, Number: 7, Repo: "o/r", Title: "t", URL: "u", State: "open", BaseRef: "b", HeadRef: "h", File: "03-body.md"},
+		{ID: "3", Kind: KindPR, Number: 7, Repo: "o/r", Title: "t", URL: "u", State: "open", BaseRef: "b", HeadRef: "h", File: "03-body.md"},
 	}}
 	out, err := DecodeSet(EncodeSet(in))
 	if err != nil || !reflect.DeepEqual(in, out) {
