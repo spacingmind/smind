@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,6 +26,9 @@ const (
 var AllKinds = []string{KindPermission, KindNeedsContinue, KindDone, KindError}
 
 const (
+	// QueueSize bounds the async queue Enqueue feeds.
+	QueueSize = 256
+
 	dedupeCap      = 512
 	rateLimitCount = 6
 	rateLimitSpan  = 60 * time.Second
@@ -70,6 +74,16 @@ type Notifier struct {
 	seen    map[string]struct{}
 	order   []string               // FIFO of seen keys, oldest first
 	history map[string][]time.Time // per device: done/error push times
+
+	queue   chan Input
+	ctx     context.Context // cancelled by Close; passed to Notify by the worker
+	cancel  context.CancelFunc
+	dropped atomic.Uint64
+	closed  atomic.Bool
+
+	lifeMu  sync.Mutex
+	started bool
+	done    chan struct{} // closed when the worker exits
 }
 
 // NewNotifier returns a Notifier using d, filling defaults for Now, NewID and Logf.
@@ -83,10 +97,87 @@ func NewNotifier(d Deps) *Notifier {
 	if d.Logf == nil {
 		d.Logf = func(string, ...any) {}
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Notifier{
 		d:       d,
 		seen:    make(map[string]struct{}),
 		history: make(map[string][]time.Time),
+		queue:   make(chan Input, QueueSize),
+		ctx:     ctx,
+		cancel:  cancel,
+		done:    make(chan struct{}),
+	}
+}
+
+// Start launches the single worker goroutine that drains the queue. It is
+// idempotent and does nothing after Close.
+func (n *Notifier) Start() {
+	n.lifeMu.Lock()
+	defer n.lifeMu.Unlock()
+	if n.started || n.closed.Load() {
+		return
+	}
+	n.started = true
+	go n.run()
+}
+
+func (n *Notifier) run() {
+	defer close(n.done)
+	for {
+		select {
+		case <-n.ctx.Done():
+			return
+		case in := <-n.queue:
+			n.safeNotify(in)
+		}
+	}
+}
+
+// safeNotify keeps a panic in one delivery from killing the daemon.
+func (n *Notifier) safeNotify(in Input) {
+	defer func() {
+		if recover() != nil {
+			n.d.Logf("push: notifier panic recovered")
+		}
+	}()
+	n.Notify(n.ctx, in)
+}
+
+// Enqueue hands in to the worker without ever blocking. It returns false when
+// the queue is full or Close was called.
+func (n *Notifier) Enqueue(in Input) bool {
+	if n.closed.Load() {
+		return false
+	}
+	select {
+	case n.queue <- in:
+		return true
+	default:
+		c := n.dropped.Add(1)
+		if isPowerOfTen(c) {
+			n.d.Logf("push: queue full, dropped %d events so far", c)
+		}
+		return false
+	}
+}
+
+func isPowerOfTen(c uint64) bool {
+	for c >= 10 && c%10 == 0 {
+		c /= 10
+	}
+	return c == 1
+}
+
+// Close stops accepting events, aborts an in-flight Send through its context
+// and waits for the worker to exit. It is idempotent and safe without Start.
+func (n *Notifier) Close() {
+	n.lifeMu.Lock()
+	n.closed.Store(true)
+	started := n.started
+	n.lifeMu.Unlock()
+	n.cancel()
+	if started {
+		<-n.done
 	}
 }
 

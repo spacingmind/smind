@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/push"
+	"github.com/spacingmind/smind/internal/runs"
 )
 
 // Wire codes for the push.* RPCs (see rpcCodeError); the generic ones
@@ -20,9 +21,6 @@ const (
 	codeInvalidKey          = "invalid_key"
 	codeInvalidKinds        = "invalid_kinds"
 )
-
-// pushKinds is the canonical kind order; registering with no kinds means all.
-var pushKinds = []string{"permission", "needs_continue", "done", "error"}
 
 var expoTokenRE = regexp.MustCompile(`^Expo(nent)?PushToken\[[^\[\]\s]{1,200}\]$`)
 
@@ -41,6 +39,9 @@ type PushOptions struct {
 	// device registry; nil treats every identified device as approved.
 	Approved func(deviceID string) bool
 	Now      func() time.Time // default time.Now
+	// Notifier turns bus events into pushes; nil means nothing is sent.
+	// SetPush starts it and taps the event bus when Enabled.
+	Notifier *push.Notifier
 }
 
 // SetPush registers push.register, push.unregister and push.status. Like
@@ -49,6 +50,14 @@ type PushOptions struct {
 func (a *API) SetPush(o PushOptions) {
 	if o.Now == nil {
 		o.Now = time.Now
+	}
+	if o.Enabled && o.Notifier != nil {
+		o.Notifier.Start()
+		a.bus.setTap(func(e Event) {
+			if in, ok := pushInput(e); ok {
+				o.Notifier.Enqueue(in)
+			}
+		})
 	}
 	a.hs["push.register"] = pushGuard(o, func(rc *requestContext, raw json.RawMessage) (any, error) {
 		return pushRegister(o, rc, raw)
@@ -157,12 +166,12 @@ func pushRegister(o PushOptions, rc *requestContext, raw json.RawMessage) (any, 
 // canonical order; empty means all.
 func normalizePushKinds(in []string) ([]string, error) {
 	if len(in) == 0 {
-		return append([]string(nil), pushKinds...), nil
+		return append([]string(nil), push.AllKinds...), nil
 	}
 	want := make(map[string]bool, len(in))
 	for _, k := range in {
 		known := false
-		for _, c := range pushKinds {
+		for _, c := range push.AllKinds {
 			if k == c {
 				known = true
 				break
@@ -174,10 +183,44 @@ func normalizePushKinds(in []string) ([]string, error) {
 		want[k] = true
 	}
 	out := make([]string, 0, len(want))
-	for _, c := range pushKinds {
+	for _, c := range push.AllKinds {
 		if want[c] {
 			out = append(out, c)
 		}
 	}
 	return out, nil
+}
+
+// pushInput maps a bus event to a notifier input; ok is false for events that
+// never notify.
+func pushInput(e Event) (push.Input, bool) {
+	switch e.Topic {
+	case TopicPermissionPending:
+		p, ok := e.Payload.(permissionPendingPayload)
+		if !ok {
+			return push.Input{}, false
+		}
+		return push.Input{Kind: push.KindPermission, Key: p.RequestID, TaskID: p.TaskID, ChatID: p.ChatID, RunID: p.RunID, Summary: p.Summary}, true
+	case TopicRunStatus:
+		p, ok := e.Payload.(runStatusPayload)
+		if !ok {
+			return push.Input{}, false
+		}
+		in := push.Input{TaskID: p.TaskID, ChatID: p.ChatID, RunID: p.RunID}
+		switch p.Status {
+		case "done":
+			in.Kind = push.KindDone
+			if p.Disposition == runs.DispositionNeedsContinue {
+				in.Kind = push.KindNeedsContinue
+			}
+		case "error":
+			in.Kind = push.KindError
+			in.Err = p.Err
+		default:
+			return push.Input{}, false
+		}
+		in.Key = p.RunID + ":" + in.Kind
+		return in, true
+	}
+	return push.Input{}, false
 }
