@@ -215,3 +215,40 @@ func TestACPDeciderAdapter_SummaryDescribesWriteAndPassesDetail(t *testing.T) {
 		}
 	}
 }
+
+// TestClaudeDeciderAdapter_BashCarriesCommandDetail: a Bash can_use_tool
+// request reaches a detail-aware decider with the command (so the approver can
+// see what they are allowing); other tools and a plain decider are unchanged.
+func TestClaudeDeciderAdapter_BashCarriesCommandDetail(t *testing.T) {
+	t.Parallel()
+	d := &detailRecordingDecider{recordingDecider: recordingDecider{optionID: claudeOptionAllow}}
+	_, _, _, _, _, err := claudeDeciderAdapter{decider: d}.Decide(context.Background(), claudecode.CanUseToolRequest{
+		ToolName: "Bash", Input: map[string]any{"command": "gofmt -l ."},
+	})
+	if err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+	if d.gotDetail == nil || d.gotDetail.Kind != "execute" || d.gotDetail.Command != "gofmt -l ." {
+		t.Fatalf("detail = %+v (detailed used: %v), want execute with command %q", d.gotDetail, d.gotDetail != nil, "gofmt -l .")
+	}
+
+	// A non-Bash tool carries no detail: the plain Decide path is used.
+	d2 := &detailRecordingDecider{recordingDecider: recordingDecider{optionID: claudeOptionAllow}}
+	if _, _, _, _, _, err := (claudeDeciderAdapter{decider: d2}).Decide(context.Background(), claudecode.CanUseToolRequest{
+		ToolName: "Read", Input: map[string]any{"file_path": "a.txt"},
+	}); err != nil {
+		t.Fatalf("Decide(Read) error = %v", err)
+	}
+	if d2.gotDetail != nil {
+		t.Fatalf("a Read request carried detail %+v, want none", d2.gotDetail)
+	}
+
+	// A decider without detail support still gets the request.
+	plain := &recordingDecider{optionID: claudeOptionDeny}
+	allow, _, _, _, _, err := claudeDeciderAdapter{decider: plain}.Decide(context.Background(), claudecode.CanUseToolRequest{
+		ToolName: "Bash", Input: map[string]any{"command": "ls"},
+	})
+	if err != nil || allow || plain.gotSummary != "run Bash" {
+		t.Fatalf("plain decider: allow=%v err=%v summary=%q, want a deny with the bare summary", allow, err, plain.gotSummary)
+	}
+}

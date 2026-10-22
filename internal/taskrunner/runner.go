@@ -731,6 +731,17 @@ func acpToolStatus(status string) string {
 // docs/plans/active/claude-native-permission-cancellation.md.
 const claudeDialogTimeoutEnv = "CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS"
 
+// claudePermissionPromptTool is the value of the CLI's --permission-prompt-tool
+// that makes it send each permission prompt to the host (us) as a can_use_tool
+// control request over stdio. Without it, a current `claude` (verified with
+// 2.1.303) never asks anyone: in a mode that would prompt (default,
+// acceptEdits) the command is denied on the spot with "This command requires
+// approval", no request reaches the PermissionPolicy, and nothing is ever
+// pending for `smind task approve` or the UI. Older CLIs forwarded the
+// requests without it. The TypeScript SDK (and so Paseo) passes the same
+// flag whenever it has a canUseTool callback.
+const claudePermissionPromptTool = "stdio"
+
 // claudeDialogTimeoutMS is the value wired into the CLI when a human
 // decider is attached: 60 minutes, comfortably above internal/runs'
 // 5-minute defaultPermissionTimeout (registry.go) so smind's own timeout
@@ -824,7 +835,9 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 		// Installed for every mode, bypassPermissions included: in bypass
 		// the CLI never asks, but a mid-run switch to an asking mode must
 		// still reach a human.
-		opts = append(opts, claudecode.WithPermissionPolicy(claudeDeciderAdapter{decider: decider, cwd: worktreePath}))
+		opts = append(opts,
+			claudecode.WithPermissionPolicy(claudeDeciderAdapter{decider: decider, cwd: worktreePath}),
+			claudecode.WithPermissionPromptTool(claudePermissionPromptTool))
 		// Hold the CLI's own permission-dialog deadline open well past
 		// smind's 5-minute manual-approval window, so the CLI's internal
 		// auto-deny fallback can't silently cancel a pending request
@@ -839,7 +852,9 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 			env = append(env, claudeDialogTimeoutEnv+"="+claudeDialogTimeoutMS)
 		}
 	case r.claudePermissionPolicy != nil:
-		opts = append(opts, claudecode.WithPermissionPolicy(r.claudePermissionPolicy))
+		opts = append(opts,
+			claudecode.WithPermissionPolicy(r.claudePermissionPolicy),
+			claudecode.WithPermissionPromptTool(claudePermissionPromptTool))
 	}
 	if len(env) > 0 {
 		opts = append(opts, claudecode.WithEnv(env...))
