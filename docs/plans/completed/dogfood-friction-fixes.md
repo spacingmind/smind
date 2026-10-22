@@ -29,7 +29,7 @@ All branch from `origin/develop`; none stack. PR 1 and PR 2 both edit `cmdTaskSe
 
 | PR | Content | Files |
 |---|---|---|
-| 0 | this plan | `docs/plans/active/dogfood-friction-fixes.md` |
+| 0 | this plan | `docs/plans/completed/dogfood-friction-fixes.md` |
 | 1 | `task send --detach`, `--thinking <off\|standard\|extended>`, claude-native unpinned-model note, `task runs` MODEL column | `cmd/smind/task.go` + tests |
 | 2 | hide `raw` events unless `--verbose` (send, attach, logs); one line per permission decision with `--auto-accept` | `cmd/smind/task.go`, `permission_detail.go` + tests |
 | 3 | `task new … [--base <ref>] [--branch <name>] [--pr <n>]` | `cmd/smind/task.go` + tests |
@@ -106,8 +106,32 @@ Both were answered by the Supervisor on 2026-10-22 ("Supervisor default 2026-10-
 
 ## Progress
 
-- 2026-10-22: code verified against develop; plan written.
+- 2026-10-22: code verified against develop; plan written (#486).
+- 2026-10-22: shipped: #489 setup script, #492 slug cap, #494 `task new` start options, #495 `--detach`/`--thinking`/MODEL, #496 `defaultModel`, #500 quiet output, #502 claude-native permission prompts (`--permission-prompt-tool stdio`). Peers ran as smind tasks (GLM until its 5-hour 429, then claude-native Sonnet 5.5); the claude-native Peers could not run commands before #502, so the Lead ran the checks and finished what they had not (see the dogfood log).
+- 2026-10-22: re-verified on the rebuilt dogfood daemon (develop e63f2a23, "dev" build) with the matching CLI. Closed.
 
 ## Validation
 
-(filled per PR as each AC is confirmed)
+"Unit" = a named test in the PR; "live" = run by hand on the dogfood daemon (:4870, develop e63f2a23) on 2026-10-22; "isolated" = a daemon built from the PR branch with its own home and port. Each PR also ran `go vet`, gofmt and the full `go test` for the touched packages locally; the full `task test`/`task lint` ran in CI.
+
+| AC | Result | Evidence |
+|---|---|---|
+| AC1 `--detach` | confirmed | unit `TestTaskSendDetachPrintsRunIDAndSkipsAttach` (the command returns while the run is still `running`); live: returned in 0 s with only the run id on stdout, `run <id> started` on stderr |
+| AC2 `--thinking` | confirmed | unit `TestTaskSendThinkingFlag` (invalid value exits 2 before dialing; the run row carries the level); live: `--thinking off` accepted |
+| AC3 unpinned note | unit only | `TestUnpinnedModelNote`, `TestUnpinnedModelNote_ConfiguredDefault`; not run live because an unpinned claude-native send would start the CLI's default model (possibly Opus) |
+| AC4 MODEL column | confirmed | unit `TestRunModelCell`, `TestTaskRunsShowsModel`; live: `task runs` shows `haiku` |
+| AC5 raw hidden | confirmed | unit `TestRunViewer_RawHiddenByDefault/Verbose`, `TestPrintRunLogs_...`; live: `task logs` on a stored GLM run hides the several-KB `available_commands_update` and `--verbose` shows it |
+| AC6 one-line auto-accept | confirmed by test, not live | unit `TestRunViewer_*`, `TestPrintRunLogs_AutoAcceptCollapsesAndHidesRaw`, and `TestTaskSend_AutoAcceptPrintsOnePermissionLine` (real daemon + the fake ACP agent: `send`, `logs`, `attach` each print exactly one permission line); the live GLM check could not run because GLM was inside its 5-hour 429 window |
+| AC7 `task new --base/--branch/--pr` | confirmed (`--base`, `--branch` by test) | unit `TestTaskNewBase`, `...ExistingBranch`, `...StartFlagOrder`, `...StartFlagRejection`; live: `--base origin/develop` gave a worktree whose HEAD equals `origin/develop`. `--pr` was not run (needs a GitHub remote) |
+| AC8 slug cap | confirmed | unit `TestSlugifyCapsLength`, `TestCreateTaskLongTitleBranchLength`; live: a 100-character title produced `smind/task-base-probe-a-deliberately-very-long-task-<stamp>` (84-character worktree path) |
+| AC9 setup script | confirmed locally | `scripts/task_setup_test.sh` (stub bun/npm: both installs, idempotent, missing lockfile, missing tool) and shellcheck; not installed on a real workspace |
+| AC10 config key | confirmed | unit `TestProviderDefaultModel*` (load, set/get/unset keeping comments, rejects, absent = today), `TestDefaultModelProvidersMatchTaskrunner` |
+| AC11 default applied at run start | confirmed | unit `TestStart_ConfiguredDefaultModel` (default applied and recorded, explicit wins, none stays empty), `TestRunnerDefaultModel`. Not run with a live Claude login |
+| AC12 `provider.list` + picker | confirmed | unit `configured default model` suite; isolated: Playwright light and dark against a daemon with `providers.claude-native.defaultModel: sonnet` showed the trigger "Sonnet (latest)" and the Default row "Currently Sonnet (latest)" |
+| AC13 claude-native approve/deny | confirmed | isolated and live (:4870): the Bash request is pending with `command: gofmt -l .`; `task approve` runs it, `task deny` reaches the agent as "denied by human reviewer" |
+| AC14 argv and detail | confirmed | unit `TestRunner_RunPrompt_ClaudeNative_PermissionModeFlags`, `TestClaudeDeciderAdapter_BashCarriesCommandDetail` |
+| AC15 auto-accept refusal names the modes | confirmed | unit `TestValidatePermissionSettings_AutoAcceptHintsAtTheProvidersOwnModes` |
+
+Also confirmed live: `--mode auto` runs a claude-native Bash command unattended with nothing pending (README documents it, including that the classifier is not a sandbox: it let `git push --force origin main` through in a throwaway repo with no remote).
+
+**Not verified, carried forward:** the one-line auto-accept against a real GLM run (re-check once GLM's quota resets); `task new --pr` against GitHub; a real claude-native run with a configured `defaultModel`; the web and mobile permission cards against a claude-native run; older Claude CLI versions with `--permission-prompt-tool stdio`. Follow-up work (CLI batch 2: `task wait`, run error surfacing, richer `task runs`, chat/provider binding and setup-busy messages) is planned in `docs/plans/active/dogfood-cli-batch-2.md`.
