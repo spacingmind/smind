@@ -50,12 +50,13 @@ export function ForgePicker({
   const noun = kind === "pr" ? "pull requests" : "issues";
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    // Enter must never submit a surrounding form (the New Task dialog), even on an empty list.
+    if (e.key === "Enter") e.preventDefault();
     if (items.length === 0) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       setActive((activeIndex + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length);
     } else if (e.key === "Enter") {
-      e.preventDefault();
       onPick(items[activeIndex]!, search.data!.repo);
     }
   }
