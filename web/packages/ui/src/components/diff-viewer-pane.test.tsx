@@ -1,5 +1,5 @@
-import { act, fireEvent, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { renderWithClientProp as render } from "@/test/render-with-daemon";
@@ -7,7 +7,9 @@ import { requestDiffReveal, resetDiffReveal } from "@/lib/diff-reveal";
 import { DIFF_PREFS_STORAGE_KEY } from "@/lib/diff-prefs";
 import { getReviewDrafts, resetReviewDrafts } from "@/lib/review-drafts";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
-import type { Task, TaskCreatePrResult, TaskFileDiffResult, TaskFilesResult } from "@/lib/types";
+import { runConfigStorageKey } from "@/components/composer/run-config-preference";
+import { useFocusedChatStore } from "@/stores/focused-chat-store";
+import type { Chat, Task, TaskCreatePrResult, TaskFileDiffResult, TaskFilesResult } from "@/lib/types";
 
 const TASK: Task = {
   ID: 1,
@@ -37,6 +39,10 @@ const FILES: TaskFilesResult = {
     { path: "new.txt", status: "added", staged: false },
   ],
 };
+
+function chat(id: number, over: Partial<Chat> = {}): Chat {
+  return { ID: id, TaskID: TASK.ID, Title: `Chat ${id}`, Provider: null, AgentSession: null, CreatedAt: "2024-01-01T00:00:00Z", ArchivedAt: null, ...over };
+}
 
 /** Flushes pending microtasks, wrapped in `act` so React commits any resulting state updates before the caller asserts. */
 async function flush(): Promise<void> {
@@ -302,6 +308,30 @@ describe("DiffViewerPane Create PR", () => {
     expect(screen.queryByTestId("pr-url")).not.toBeInTheDocument();
   });
 
+  it("shows a gh failure as one line with the raw argv behind a Details disclosure", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+
+    fireEvent.click(screen.getByTestId("create-pr-button"));
+    client
+      .nth("task.createPr", 0)
+      .reject(
+        new Error(
+          "task.createPr: create pr 1: gh pr create: gh [pr create --base develop --head smind/task-x --title T --body B]: exit status 1: none of the git remotes configured for this repository point to a known GitHub host. To tell gh about a new GitHub host, please use `gh auth login`",
+        ),
+      );
+    await flush();
+
+    const error = screen.getByTestId("pr-error");
+    const line = error.querySelector("p")!;
+    expect(line).toHaveTextContent("Couldn't create the PR: none of the git remotes configured for this repository point to a known GitHub host.");
+    expect(line.textContent).not.toContain("--base");
+    const details = screen.getByTestId("pr-error-details") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(details).toHaveTextContent("--base develop");
+  });
+
   it("disables the Create PR control when there is no client", () => {
     render(<DiffViewerPane client={null} task={TASK} />);
     expect(screen.getByTestId("create-pr-button")).toBeDisabled();
@@ -441,6 +471,7 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
     resetReviewDrafts();
     resetDiffReveal();
     window.localStorage.clear();
+    useFocusedChatStore.setState({ byTask: {} });
   });
 
   /** Clicks the rendered diff line whose text contains `text`, inside `containerTestId`. */
@@ -539,11 +570,8 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
     expect(screen.getByTestId("review-draft")).toHaveTextContent("this leaks the connection");
   });
 
-  it("submits every draft as one prompt and clears them", async () => {
-    const client = new FakeWsClient();
-    render(<DiffViewerPane client={client} task={TASK} />);
-    await resolveFilesAndDiffs(client);
-
+  /** Writes two drafts into two files and returns once both are in the list. */
+  async function writeTwoDrafts(): Promise<void> {
     clickDiffLine("diff-container-file.txt", "line2 added");
     await flush();
     await writeComment("first comment");
@@ -551,21 +579,40 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
     clickDiffLine("diff-container-new.txt", "line2 added");
     await flush();
     await writeComment("second comment");
+  }
 
+  it("submits every draft as one prompt to the focused chat's own config, queued when busy, and clears them", async () => {
+    const client = new FakeWsClient();
+    const chats = [chat(10), chat(11, { Provider: "glm" })];
+    // Chat 11's composer toolbar state: its model and permission settings travel with the review.
+    window.localStorage.setItem(
+      runConfigStorageKey(TASK.ID, 11),
+      JSON.stringify({ baseAgentId: "3", custom: false, provider: "glm", permissionMode: "plan", autoAccept: true, thinkingLevel: "", model: "glm-5" }),
+    );
+    useFocusedChatStore.getState().setFocusedChat(TASK.ID, 11);
+    render(<DiffViewerPane client={client} task={TASK} chats={chats} />);
+    await resolveFilesAndDiffs(client);
+
+    await writeTwoDrafts();
     expect(screen.getAllByTestId("review-draft")).toHaveLength(2);
     expect(screen.getByTestId("submit-review-button")).toHaveTextContent("Submit review (2)");
+    expect(screen.getByTestId("review-recipient")).toHaveTextContent("Chat 11");
 
     fireEvent.click(screen.getByTestId("submit-review-button"));
     await flush();
 
-    // The provider comes from the daemon's list, never a hardcoded one.
-    expect(client.nth("provider.list", 0)).toBeTruthy();
-    client.nth("provider.list", 0).resolve({ providers: [{ id: "glm" }, { id: "claude-native" }] });
-    await flush();
-
-    const started = client.nth("run.start", 0).params as { taskId: number; provider: string; prompt: string };
-    expect(started.taskId).toBe(TASK.ID);
-    expect(started.provider).toBe("glm");
+    // The chat names its provider, so the shared catalog is never consulted.
+    expect(client.calls.filter((c) => c.method === "provider.list")).toHaveLength(0);
+    const started = client.nth("run.start", 0).params as Record<string, unknown>;
+    expect(started).toMatchObject({
+      taskId: TASK.ID,
+      chatId: 11,
+      provider: "glm",
+      whenBusy: "queue",
+      model: "glm-5",
+      permissionMode: "plan",
+      autoAccept: true,
+    });
     expect(started.prompt).toContain("first comment");
     expect(started.prompt).toContain("second comment");
     // One prompt, not one run per comment.
@@ -579,9 +626,55 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
     expect(getReviewDrafts(TASK.ID)).toEqual([]);
   });
 
+  it("sends to the default chat when none is focused, and still clears on a queued result", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} chats={[chat(10, { Provider: "claude-native" }), chat(11)]} />);
+    await resolveFilesAndDiffs(client);
+
+    clickDiffLine("diff-container-file.txt", "line2 added");
+    await flush();
+    await writeComment("queue me");
+    fireEvent.click(screen.getByTestId("submit-review-button"));
+    await flush();
+
+    expect(client.nth("run.start", 0).params).toMatchObject({ chatId: 10, provider: "claude-native", whenBusy: "queue" });
+    client.nth("run.start", 0).resolve({ queued: true, queueItemId: 7 });
+    await flush();
+    expect(getReviewDrafts(TASK.ID)).toEqual([]);
+  });
+
+  it("falls back to the catalog's first provider only for a chat with no provider and no saved config", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} chats={[chat(10)]} />);
+    await resolveFilesAndDiffs(client);
+
+    clickDiffLine("diff-container-file.txt", "line2 added");
+    await flush();
+    await writeComment("who gets this");
+    fireEvent.click(screen.getByTestId("submit-review-button"));
+    await flush();
+
+    client.nth("provider.list", 0).resolve({ providers: [{ id: "glm" }, { id: "claude-native" }] });
+    await flush();
+    expect(client.nth("run.start", 0).params).toMatchObject({ chatId: 10, provider: "glm", whenBusy: "queue" });
+  });
+
+  it("disables Submit review when there is no chat to send to", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} chats={[]} />);
+    await resolveFilesAndDiffs(client);
+
+    clickDiffLine("diff-container-file.txt", "line2 added");
+    await flush();
+    await writeComment("nowhere to go");
+
+    expect(screen.getByTestId("submit-review-button")).toBeDisabled();
+    expect(screen.getByTestId("review-recipient")).toHaveTextContent("No chat to send to");
+  });
+
   it("keeps the drafts and surfaces the error when submitting fails", async () => {
     const client = new FakeWsClient();
-    render(<DiffViewerPane client={client} task={TASK} />);
+    render(<DiffViewerPane client={client} task={TASK} chats={[chat(10, { Provider: "claude-native" })]} />);
     await resolveFilesAndDiffs(client);
 
     clickDiffLine("diff-container-file.txt", "line2 added");
@@ -589,8 +682,6 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
     await writeComment("keep me");
 
     fireEvent.click(screen.getByTestId("submit-review-button"));
-    await flush();
-    client.nth("provider.list", 0).resolve({ providers: [{ id: "claude-native" }] });
     await flush();
     client.nth("run.start", 0).reject(new Error("daemon said no"));
     await flush();
@@ -649,5 +740,40 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
     await writeComment("nice");
 
     expect(getReviewDrafts(TASK.ID)[0]!.path).toBe("new.txt");
+  });
+});
+
+describe("DiffViewerPane header below md", () => {
+  const widthBefore = window.innerWidth;
+  beforeEach(() => {
+    window.localStorage.removeItem(DIFF_PREFS_STORAGE_KEY);
+    window.innerWidth = 390;
+  });
+  afterEach(() => {
+    window.innerWidth = widthBefore;
+  });
+
+  it("collapses the toggles, Refresh and Create PR into one menu", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+
+    expect(screen.queryByTestId("create-pr-button")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("diff-view-toggle")).not.toBeInTheDocument();
+
+    fireEvent.pointerDown(screen.getByTestId("diff-actions-menu"), { button: 0, ctrlKey: false });
+    await waitFor(() => expect(screen.getByTestId("diff-actions-menu-content")).toBeInTheDocument());
+
+    expect(screen.getByTestId("diff-menu-side-by-side")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("diff-menu-unified")).toHaveAttribute("aria-checked", "false");
+
+    fireEvent.click(screen.getByTestId("diff-menu-unified"));
+    await flush();
+    expect(screen.getByTestId("diff-container-file.txt")).toHaveAttribute("data-output-format", "line-by-line");
+
+    fireEvent.pointerDown(screen.getByTestId("diff-actions-menu"), { button: 0, ctrlKey: false });
+    await waitFor(() => expect(screen.getByTestId("diff-menu-create-pr")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("diff-menu-create-pr"));
+    expect(client.nth("task.createPr", 0).params).toEqual({ taskId: TASK.ID });
   });
 });

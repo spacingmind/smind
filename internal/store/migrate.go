@@ -253,6 +253,17 @@ var migrations = []migration{
 		},
 	},
 	{
+		// ADR-0038: the accepted attachment set of a run / queued prompt, as
+		// attach.EncodeSet JSON. Pre-existing rows keep '' (none).
+		name: "attachment_columns",
+		apply: func(db *sql.DB) error {
+			if err := addColumnIfMissing(db, "runs", "attachments", "TEXT NOT NULL DEFAULT ''"); err != nil {
+				return err
+			}
+			return addColumnIfMissing(db, "chat_queue", "attachments", "TEXT NOT NULL DEFAULT ''")
+		},
+	},
+	{
 		// ADR-0026 section 6: learned_skill_offers / learned_skill_loads are
 		// new tables, so schema.sql's CREATE TABLE IF NOT EXISTS already
 		// creates them on every Open; this entry is the explicit marker and

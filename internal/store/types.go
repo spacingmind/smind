@@ -166,6 +166,9 @@ type Run struct {
 	// Interrupt is true when the prompt was delivered as a mid-run
 	// interrupt (a priority-1 queue item).
 	Interrupt bool
+	// Attachments is attach.EncodeSet of the prompt's accepted attachments
+	// (ADR-0038); "" = none.
+	Attachments string
 }
 
 // RunEvent is one persisted internal/runs.Event, in the order it was

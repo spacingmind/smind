@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spacingmind/smind/internal/attach"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/learning"
 	"github.com/spacingmind/smind/internal/learning/approval"
@@ -331,6 +332,9 @@ func (s *Service) windowRuns(wruns []store.ChatWindowRun) []window.Run {
 		// A prompt reflected in an earlier window is background, not evidence.
 		if wr.PromptInWindow {
 			wrun.Prompt = r.Prompt
+			if set, err := attach.DecodeSet(r.Attachments); err == nil {
+				wrun.Attachments = attach.Markers(set)
+			}
 		}
 		for _, e := range wr.Events {
 			ev, err := s.d.DecodeEvent(e.EventData)
