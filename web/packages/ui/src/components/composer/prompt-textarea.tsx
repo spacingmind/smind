@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type KeyboardEvent, type Ref } from "react";
+import { useLayoutEffect, useRef, type ClipboardEvent, type KeyboardEvent, type Ref } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -61,6 +61,7 @@ export function PromptTextarea({
   rows = 1,
   onFocus,
   onBlur,
+  onPaste,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -76,6 +77,8 @@ export function PromptTextarea({
   rows?: number;
   onFocus?: () => void;
   onBlur?: () => void;
+  /** Called before the default paste; the handler `preventDefault`s only when it took files, so a plain-text paste is untouched. */
+  onPaste?: (e: ClipboardEvent<HTMLTextAreaElement>) => void;
 }) {
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -101,6 +104,7 @@ export function PromptTextarea({
       onChange={(e) => onChange(e.target.value)}
       onFocus={onFocus}
       onBlur={onBlur}
+      onPaste={onPaste}
       onKeyDown={(e) => {
         if (isSubmitKey(e)) {
           e.preventDefault();
