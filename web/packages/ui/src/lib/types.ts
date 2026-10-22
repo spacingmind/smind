@@ -716,6 +716,8 @@ export interface PrPreview {
   /** Oldest first, at most 50. */
   commits: CommitSummary[];
   commitCount: number;
+  /** The committed change the pull request will contain (not the uncommitted files). Absent when there are no commits. */
+  diff?: { files: number; insertions: number; deletions: number };
   uncommitted: { staged: number; unstaged: number; untracked: number };
   existingPr?: TaskGitPr;
   defaults: { title: string; body: string; draft: boolean };

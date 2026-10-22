@@ -282,6 +282,10 @@ func TestPrPreview_CommitsAndUncommitted(t *testing.T) {
 	if res.Uncommitted != (prUncommitted{Staged: 1, Unstaged: 1, Untracked: 2}) {
 		t.Fatalf("uncommitted = %+v", res.Uncommitted)
 	}
+	// the stat is the pull request's own change (two committed files), not the worktree's
+	if res.Diff == nil || *res.Diff != (prDiffStat{Files: 2, Insertions: 2, Deletions: 0}) {
+		t.Fatalf("diff = %+v, want the committed change only (2 files, +2 -0)", res.Diff)
+	}
 	if len(res.Blockers) != 0 || !res.Defaults.Draft || res.Defaults.Title != "Add feature" || res.ExistingPR != nil {
 		t.Fatalf("blockers %+v defaults %+v existing %+v", res.Blockers, res.Defaults, res.ExistingPR)
 	}

@@ -120,6 +120,13 @@ type prForgeInfo struct {
 	Host string `json:"host"`
 }
 
+// prDiffStat is the committed change the pull request will contain.
+type prDiffStat struct {
+	Files      int `json:"files"`
+	Insertions int `json:"insertions"`
+	Deletions  int `json:"deletions"`
+}
+
 type prBlocker struct {
 	Code   string `json:"code"`
 	Reason string `json:"reason"`
@@ -131,6 +138,7 @@ type prPreviewResult struct {
 	Head        prHead        `json:"head"`
 	Commits     []prCommit    `json:"commits"`
 	CommitCount int           `json:"commitCount"`
+	Diff        *prDiffStat   `json:"diff,omitempty"`
 	Uncommitted prUncommitted `json:"uncommitted"`
 	ExistingPR  *forge.PR     `json:"existingPr,omitempty"`
 	Defaults    prDefaults    `json:"defaults"`
@@ -179,6 +187,9 @@ func (h *prHost) preview(ctx context.Context, _ *requestContext, raw json.RawMes
 	res.Base = prRef{Ref: info.Base, Sha: info.BaseSha}
 	res.Head = prHead{Branch: info.Head, Ref: info.Branch, Strategy: info.Strategy}
 	res.CommitCount = info.CommitCount
+	if info.CommitCount > 0 {
+		res.Diff = &prDiffStat{Files: info.Diff.Files, Insertions: info.Diff.Insertions, Deletions: info.Diff.Deletions}
+	}
 	for _, c := range info.Commits {
 		res.Commits = append(res.Commits, prCommit{Sha: c.SHA, Subject: c.Subject})
 	}

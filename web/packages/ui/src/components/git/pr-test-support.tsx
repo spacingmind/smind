@@ -58,6 +58,7 @@ export function preview(over: Partial<PrPreview> = {}): PrPreview {
       { sha: "c".repeat(40), subject: "Fix the other thing" },
     ],
     commitCount: 2,
+    diff: { files: 3, insertions: 12, deletions: 4 },
     uncommitted: { staged: 0, unstaged: 0, untracked: 0 },
     defaults: { title: "Task X", body: "## Summary\n- Add the thing\n- Fix the other thing\n\nOpened from smind task #1.", draft: true },
     blockers: [],

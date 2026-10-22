@@ -54,7 +54,13 @@ type PRPreviewInfo struct {
 	// first, at most prCommitLimit; CommitCount is the full count.
 	Commits     []PRCommit
 	CommitCount int
+	// Diff is the size of the committed change only (fork point to branch
+	// tip): what the pull request will contain, not the uncommitted files.
+	Diff PRDiffStat
 }
+
+// PRDiffStat is a `git diff --shortstat` summary.
+type PRDiffStat struct{ Files, Insertions, Deletions int }
 
 // PRPush is the outcome of PushForPR: the branch now on origin and how it
 // was made.
@@ -151,6 +157,16 @@ func (m *Manager) PRPreview(ctx context.Context, id int64, baseBranch string) (P
 	info.Commits, err = prSubjects(ctx, tg.worktree, shas[:min(len(shas), prCommitLimit)])
 	if err != nil {
 		return PRPreviewInfo{}, err
+	}
+	if len(shas) > 0 {
+		// Best effort: a failing stat leaves the preview without it.
+		if out, _, derr := execGit(ctx, tg.worktree, nil, "diff", "--shortstat", tg.forkPoint, "refs/heads/"+tg.branch); derr == nil {
+			if m := shortstatRe.FindStringSubmatch(out); m != nil {
+				info.Diff.Files, _ = strconv.Atoi(m[1])
+				info.Diff.Insertions, _ = strconv.Atoi(m[2])
+				info.Diff.Deletions, _ = strconv.Atoi(m[3])
+			}
+		}
 	}
 	return info, nil
 }

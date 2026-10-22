@@ -98,7 +98,8 @@ function CreatePrForm({
   const loading = !data && preview.isPending;
   const canCreate = !!data && !blocker && !create.isPending && !titleInvalid && !bodyInvalid;
   const headBranch = data?.head.branch ?? git?.branch?.name ?? "";
-  const diff = git?.diff;
+  // The PR's own change (committed work only); uncommitted files are listed separately as "not included".
+  const diff = data?.diff;
   const error = create.error ? describePrError(create.error, "create") : null;
 
   const submit = () => {
