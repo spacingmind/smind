@@ -118,9 +118,10 @@ describe("shared catalog / profile / health cache", () => {
     const count = (method: string) => d.calls.filter((c) => c.method === method).length;
     expect(count("provider.list")).toBe(1);
     expect(count("profile.list")).toBe(1);
-    // One local health check per provider key (anthropic, openai, glm), run by the sidebar's ensure() and
-    // shared by the picker and the dots: not zero, not one per surface.
-    expect(count("provider.test")).toBe(3);
+    // One local health check per key: each provider's own id (claude-native, codex-native, glm) plus the
+    // account ids behind the Providers rows (anthropic, openai), run by the sidebar's ensure() and shared
+    // by the picker and the dots: not zero, not one per surface.
+    expect(count("provider.test")).toBe(5);
     // And nothing here may ever ask a provider for plan usage (ADR-0028).
     expect(d.count("touch")).toBe(0);
     expect(d.count("refresh")).toBe(0);
@@ -187,14 +188,18 @@ describe("shared catalog / profile / health cache", () => {
     expect(commands.some((c) => c.title.startsWith("Use agent:"))).toBe(false);
   });
 
-  it("sidebar health count matches providers dots", async () => {
+  it("the footer counts run readiness by provider id while an account row's dot tests its credential", async () => {
     const d = new FakeUsageDaemon([]);
     d.providers = PROVIDERS as never;
     d.accounts = [account(1, "anthropic", "work"), account(2, "openai", "codex")];
     d.testResults = {
+      // Run readiness (the provider's own id): the CLIs are on PATH.
+      "claude-native": { ok: true, detail: "found /usr/local/bin/claude" },
+      "codex-native": { ok: true, detail: "found /usr/local/bin/codex" },
+      glm: { ok: true, detail: "ok" },
+      // Account credentials (the accounts vocabulary): the Codex account has none usable.
       anthropic: { ok: true, detail: "ok" },
       openai: { ok: false, detail: "no credential" },
-      glm: { ok: true, detail: "ok" },
     };
     renderWithDaemon(
       <KeyboardProvider>
@@ -210,18 +215,16 @@ describe("shared catalog / profile / health cache", () => {
     await flush();
 
     fireEvent.click(screen.getByTestId("sidebar-footer-host"));
-    const healthy = Number(/(\d+) healthy/.exec(screen.getByTestId("sidebar-footer-host-providers").textContent ?? "")?.[1]);
-    // The Providers detail shows one provider at a time: Claude Code (anthropic) is selected first and is ok; Codex (openai) fails.
+    // Every provider can start a run, whatever its account's state: three healthy.
+    expect(screen.getByTestId("sidebar-footer-host-providers")).toHaveTextContent("3 healthy");
+    // The Providers detail shows account rows: Claude Code's credential is ok; Codex's account fails.
     expect(screen.getByTestId("provider-row-dot-1")).toHaveAttribute("data-status", "ok");
-    // The footer counts providers through the same cache: every provider whose test answered ok (anthropic, glm).
-    const okProviders = Object.values(d.testResults).filter((r) => r.ok).length;
-    expect(healthy).toBe(okProviders);
     await act(async () => {
       fireEvent.click(screen.getAllByTestId("provider-nav-item-codex-native")[0]);
     });
     expect(within(screen.getByTestId("provider-row-2")).getByTestId("provider-row-dot-2")).toHaveAttribute("data-status", "failed");
 
-    // Pressing Test on the failing row after it recovers flips the dot AND the footer count together.
+    // Pressing Test on the failing account row after it recovers flips that row's dot; run readiness was never in question.
     d.testResults = { ...d.testResults, openai: { ok: true, detail: "ok" } };
     fireEvent.click(within(screen.getByTestId("provider-row-2")).getByRole("button", { name: /test/i }));
     await flush();
@@ -245,14 +248,19 @@ describe("shared catalog / profile / health cache", () => {
     );
     await flush();
     fireEvent.click(screen.getByTestId("sidebar-footer-host"));
-    // anthropic + openai answer ok, glm's check errored: 2 of 3, and the count is not hidden.
+    // claude-native + codex-native answer ok, glm's check errored: 2 of 3, and the count is not hidden.
     expect(screen.getByTestId("sidebar-footer-host-providers")).toHaveTextContent("2 healthy");
   });
 
-  it("account.updated drops that provider's health answer and the footer re-tests it", async () => {
+  it("account.updated drops that account provider's health answer and the footer re-tests it (kimi's id is its account id)", async () => {
     const d = new FakeUsageDaemon([]);
-    d.providers = PROVIDERS as never;
-    d.accounts = [account(1, "anthropic", "work")];
+    d.providers = {
+      providers: [
+        ...PROVIDERS.providers,
+        { id: "kimi" as const, label: "Kimi", credentialKind: "api-key" as const, accountProvider: "kimi" },
+      ],
+    } as never;
+    d.accounts = [account(1, "anthropic", "work"), account(3, "kimi", "key")];
     renderWithDaemon(
       <KeyboardProvider>
         <PaletteProvider>
@@ -265,12 +273,21 @@ describe("shared catalog / profile / health cache", () => {
     );
     await flush();
     const tests = (key: string) => d.calls.filter((c) => c.method === "provider.test" && (c.params as { provider: string }).provider === key).length;
+    // Run readiness is asked by the provider's own id, never the account id.
+    expect(tests("claude-native")).toBe(1);
+    expect(tests("kimi")).toBe(1);
+    // The account id is asked as well, but only to fill the Providers rows' credential dot.
     expect(tests("anthropic")).toBe(1);
-    // Credential re-login: the provider's earlier answer is stale; exactly that provider is re-tested.
+    // Credential re-login for Kimi (credential-checked by its id): its earlier answer is stale; exactly it is re-tested.
+    await act(async () => d.emit("account.updated", { account: account(3, "kimi", "key") }));
+    await flush();
+    expect(tests("kimi")).toBe(2);
+    expect(tests("claude-native")).toBe(1);
+    // Re-login of the Anthropic account: only its credential answer is re-tested; claude-native's run readiness is not touched.
     await act(async () => d.emit("account.updated", { account: account(1, "anthropic", "work") }));
     await flush();
     expect(tests("anthropic")).toBe(2);
-    expect(tests("openai")).toBe(1);
+    expect(tests("claude-native")).toBe(1);
   });
 
   it("a failed provider.list is not re-sent by every component that mounts afterwards", async () => {

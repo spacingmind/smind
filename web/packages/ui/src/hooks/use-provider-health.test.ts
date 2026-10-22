@@ -29,8 +29,10 @@ describe("useProviderHealth", () => {
 
     act(() => result.current.ensure());
     act(() => result.current.ensure());
-    expect(daemon.countCalls("provider.test")).toBe(2);
+    // claude-native by its own id (run readiness) and by its account id (the Providers rows' credential check), glm once.
+    expect(daemon.countCalls("provider.test")).toBe(3);
     expect(daemon.calls.filter((c) => c.method === "provider.test").map((c) => (c.params as { provider: string }).provider)).toEqual([
+      "claude-native",
       "anthropic",
       "glm",
     ]);
@@ -41,7 +43,22 @@ describe("useProviderHealth", () => {
     expect(result.current.summary).toEqual({ healthy: 2, total: 2, tested: 2 });
 
     act(() => result.current.ensure());
-    expect(daemon.countCalls("provider.test")).toBe(2);
+    expect(daemon.countCalls("provider.test")).toBe(3);
+  });
+
+  it("asks about a provider by its own id, never its account id (claude-native runs on the CLI's login)", async () => {
+    const daemon = new FakeUsageDaemon([]);
+    daemon.providers = { providers: [{ id: "claude-native", accountProvider: "anthropic" }] };
+    // No anthropic account exists; the CLI is on PATH. Run readiness must be ok.
+    daemon.testResults = { anthropic: { ok: false, detail: 'no account configured for "anthropic"' }, "claude-native": { ok: true, detail: "found /usr/local/bin/claude" } };
+    const { result } = renderHookWithDaemon(() => useProviderHealth(), daemon, { initialProps: undefined });
+    await flush();
+    act(() => result.current.ensure());
+    await flush();
+    expect(result.current.health["claude-native"]).toEqual({ ok: true, detail: "found /usr/local/bin/claude" });
+    expect(result.current.health["claude-native"]?.ok).toBe(true);
+    // The account id is asked too, but only to fill the Providers rows: it never feeds a provider's health.
+    expect(daemon.calls.filter((c) => c.method === "provider.test").map((c) => (c.params as { provider: string }).provider)).toEqual(["claude-native", "anthropic"]);
   });
 
   it("a failed provider.test leaves the provider untested and retries on the next open", async () => {
@@ -128,6 +145,7 @@ describe("useProviderHealth", () => {
     await flush();
     act(() => result.current.ensure());
     expect(daemon.calls.filter((c) => c.method === "provider.test").map((c) => (c.params as { provider: string }).provider)).toEqual([
+      "claude-native",
       "anthropic",
       "glm",
     ]);
@@ -136,7 +154,7 @@ describe("useProviderHealth", () => {
   it("counts only ok results in the summary", async () => {
     const daemon = new FakeUsageDaemon([]);
     daemon.providers = { providers: PROVIDERS };
-    daemon.testResults = { anthropic: { ok: false, detail: "no key" } };
+    daemon.testResults = { "claude-native": { ok: false, detail: "claude not found on PATH" } };
     const { result } = renderHookWithDaemon(() => useProviderHealth(), daemon, { initialProps: undefined });
     await flush();
     act(() => result.current.ensure());
