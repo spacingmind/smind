@@ -701,12 +701,61 @@ export interface TaskCommitResult {
   files: number;
 }
 
-// Result of task.createPr (internal/wsapi/handlers.go's
-// taskCreatePRResult): the URL of the pull request opened for the task's
-// branch (directly, or from a clean smind/pr-<id> branch if the task
-// branch's base had diverged -- see internal/workspace.Manager.CreatePR).
+// ---- Create / Update PR (ADR-0039 §5; docs/research/local/git-pr-g5-briefs.md "PR 6 wire contract") -----------
+
+/** One commit of a PR preview. */
+export interface CommitSummary {
+  sha: string;
+  subject: string;
+}
+
+/** `task.prPreview`: local git and cache only, never a forge call. */
+export interface PrPreview {
+  base: { ref: string; sha: string };
+  head: { branch: string; ref: string; strategy: "direct" | "cherry-pick" };
+  /** Oldest first, at most 50. */
+  commits: CommitSummary[];
+  commitCount: number;
+  uncommitted: { staged: number; unstaged: number; untracked: number };
+  existingPr?: TaskGitPr;
+  defaults: { title: string; body: string; draft: boolean };
+  forge?: { name: string; repo: string; host: string };
+  /** Empty, or the single reason `actions.createPr` is disabled. */
+  blockers: { code: string; reason: string }[];
+}
+
+/** Params of `task.createPr`; an empty `baseBranch` means the task's `base_ref`. */
+export interface TaskCreatePrParams {
+  taskId: number;
+  baseBranch?: string;
+  title: string;
+  body: string;
+  draft: boolean;
+}
+
+/** Result of `task.createPr`. */
 export interface TaskCreatePrResult {
+  pr: TaskGitPr;
+}
+
+/** Result of `task.updatePr`. */
+export interface TaskUpdatePrResult {
+  pr: TaskGitPr;
+  pushed: { from: string; to: string };
+}
+
+/** `data` of a typed `pr_exists` error. */
+export interface PrExistsErrorData {
   url: string;
+  number: number;
+  detail?: string;
+}
+
+/** `workspace.branches` (ADR-0039 §4, PR 7); the Create PR dialog tolerates its absence. */
+export interface WorkspaceBranchesResult {
+  defaultBase: string;
+  current: string;
+  branches: { name: string; remote: "local" | "origin"; ahead: number; behind: number }[];
 }
 
 // Payloads of ADR 0005 notifications (internal/wsapi/events.go) -- see

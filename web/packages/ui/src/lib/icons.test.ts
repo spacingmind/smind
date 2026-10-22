@@ -19,6 +19,7 @@ describe("icon registry", () => {
         "agent": "Bot",
         "appearance": "Palette",
         "archive": "Archive",
+        "arrowRight": "ArrowRight",
         "attach": "Paperclip",
         "back": "ArrowLeft",
         "branch": "GitBranch",

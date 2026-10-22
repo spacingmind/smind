@@ -37,6 +37,11 @@ export const queryKeys = {
   /** Partial keys: every cached `task.git` / `task.gitList` entry (the event bridge and a reconnect address them). */
   taskGitAll: () => ["task.git"] as const,
   workspaceTaskGitAll: () => ["task.gitList"] as const,
+  /** `task.prPreview` for one task and base branch ("" = the task's base_ref); the Create PR dialog's prefill. */
+  prPreview: (taskId: number, base: string) => ["task.prPreview", { taskId, base }] as const,
+  prPreviewAll: () => ["task.prPreview"] as const,
+  /** `workspace.branches` (base picker options; the RPC may not exist on an older daemon). */
+  workspaceBranches: (workspaceId: number) => ["workspace.branches", { workspaceId }] as const,
   providerList: () => ["provider.list"] as const,
   profileList: () => ["profile.list"] as const,
   /** One `provider.test` answer per key: a provider's own id for run readiness (use-provider-health), an account id for an account's credential (accounts). */
