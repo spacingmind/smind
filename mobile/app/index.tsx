@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { useConnectionOrNull } from '../src/connection/ConnectionProvider';
-import { taskHref } from '../src/navigation/routes';
+import { NEW_TASK_HREF, taskHref } from '../src/navigation/routes';
 import { TasksScreen } from '../src/screens/TasksScreen';
 import { ConnectionSheet } from '../src/screens/tasks/ConnectionSheet';
 import { TextButton } from '../src/ui/TextButton';
@@ -19,9 +19,15 @@ export default function TasksRoute() {
         options={{
           title: 'Tasks',
           // The Host sizes to its content and top-aligns on web; centre it on the header's own height.
-          headerRight: () => (
+          // Connection moved left so "New task" owns the right side; both stay labelled 44 pt TextButtons.
+          headerLeft: () => (
             <View style={{ justifyContent: 'center', alignSelf: 'stretch' }}>
               <TextButton label="Connection" onPress={() => setSheetOpen(true)} />
+            </View>
+          ),
+          headerRight: () => (
+            <View style={{ justifyContent: 'center', alignSelf: 'stretch' }}>
+              <TextButton label="New task" onPress={() => router.push(NEW_TASK_HREF)} />
             </View>
           ),
         }}

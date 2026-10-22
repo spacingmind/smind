@@ -28,6 +28,7 @@ export function Composer({
   onStop,
   onSend,
   onSendNow,
+  placeholder,
 }: {
   draftState: ReturnType<typeof useNativeState<string>>;
   onChangeDraft: (text: string) => void;
@@ -40,6 +41,8 @@ export function Composer({
   onStop: () => void;
   onSend: () => void;
   onSendNow: () => void;
+  /** Field placeholder; defaults to the follow-up wording. */
+  placeholder?: string;
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -62,7 +65,7 @@ export function Composer({
               draftState.value = text;
               onChangeDraft(text);
             }}
-            placeholder={liveRunId !== null ? 'Queue a follow-up — it sends when this run finishes' : 'Send a follow-up prompt…'}
+            placeholder={placeholder ?? (liveRunId !== null ? 'Queue a follow-up — it sends when this run finishes' : 'Send a follow-up prompt…')}
             placeholderTextColor={theme.foregroundSubtlest}
             multiline
           />

@@ -31,3 +31,6 @@ export function taskHeaderTitle(params: { id?: Param; title?: Param } | undefine
   const parsed = parseTaskParams(params ?? {});
   return parsed.ok ? parsed.title : 'Task';
 }
+
+// The create-a-task form's route (a const, no logic).
+export const NEW_TASK_HREF = '/new-task' as const;
