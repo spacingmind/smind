@@ -8,8 +8,9 @@ answered the same day: **O1 → (b)** and **O7 → yes** as decisions, **O2–O6
 
 **Amended — 2026-10-22, by the Human: forge-neutral wire names.** The attachment kinds `github_pr` / `github_issue` are `pr` / `issue`
 each with a `forge` field (only `"github"` in v1; any other value is rejected; omitted means `github`), the picker RPC is `forge.search`
-instead of `github.search`, and the error codes are `forge_unavailable` / `forge_not_found`. Two cheap additions from the git/GitHub UX study came
-with it: `file_ref` takes an optional `line` / `endLine`, and `daemon.info.attachments.forge` is an object (not a bool). Everything below is
+instead of `github.search`, and the forge errors use ADR-0039 §6's single `forge_*` vocabulary (`forge_cli_missing`, `forge_unauthenticated`, `forge_no_remote`, `forge_not_found`,
+`forge_rate_limited`, `forge_timeout`, `forge_error`). Two cheap additions from the git/GitHub UX study came with it: `file_ref` takes an optional
+`line` / `endLine`, and the forge capability is the top-level `daemon.info.forge` object (`{provider, cli}`, ADR-0039 §8), not a bool inside `attachments`. Everything below is
 written in the amended names. Attaching a PR or issue is *context* only; linking a task to a PR (identity, status, polling) is ADR-0039's.
 
 ## Context
@@ -150,7 +151,8 @@ transport, alongside `local`) so a future mobile client gets `attachments_too_la
 instead of a dropped channel. How mobile gets past 780 KiB is [open question O1](#open-questions).
 
 **Errors** are a new typed set (`attachment_too_large`, `too_many_attachments`, `unsupported_image_type`,
-`mime_mismatch`, `invalid_base64`, `outside_workspace`, `not_found`, `forge_unavailable`, `forge_not_found`), each with
+`mime_mismatch`, `invalid_base64`, `outside_workspace`, `not_found`, and the forge codes of ADR-0039 §6: `forge_cli_missing`, `forge_unauthenticated`, `forge_no_remote`, `forge_not_found`,
+`forge_rate_limited`, `forge_timeout`, `forge_error`), each with
 the offending `index`. The composer shows them inline under the card, next to the existing `formError`.
 
 **Breaking changes** (no installed base; no compatibility shims):
@@ -246,8 +248,9 @@ worktree: writing there would show up in `task.diff`, branch checkpoints and `gi
   (and `gh issue view`), argv only (no shell), `--repo` only when the client named one, 20 s timeout, stderr scrubbed
   and clipped. Auth is whatever `gh` on the daemon host has. The result (title, url, state, base/head and the clipped
   body) is stored in the attachment metadata, so the agent sees what the user saw even if the PR changes, a queued prompt
-  is delivered later, or the fetch would fail on replay. A failed fetch rejects the request (`forge_unavailable`:
-  `gh` missing, not logged in, no GitHub remote; `forge_not_found`), nothing is queued.
+  is delivered later, or the fetch would fail on replay. A failed fetch rejects the request with the forge code that
+  says why (`forge_cli_missing`, `forge_unauthenticated`, `forge_no_remote`, `forge_not_found`, `forge_rate_limited`, `forge_timeout`, else `forge_error`),
+  nothing is queued. A daemon with no forge wired in answers `forge_error`.
 - **The body is untrusted input.** It is delimited and labelled as above and never given more authority than a
   user-pasted blob. It is excluded from learning transcripts (§2).
 - **Picker.** `forge.search` `{forge?: "github", taskId, kind: "pr"|"issue", query, limit ≤ 30}` → `{forge, repo, items: [{number, title, state, author, url, updatedAt}]}`
@@ -331,10 +334,9 @@ All new web code follows ADR-0032 and `docs/design.md`; no bespoke `useEffect` +
 ### 8. Capability and limits discovery
 
 `daemon.info` (already per connection) gains `attachments: {maxCount, maxImageBytes, maxFileBytes, maxTotalBytes,
-maxMessageBytes, images: ["image/png", …], forge: {github: {installed: bool}}}`. `maxMessageBytes` is per transport (16 MiB direct, 1,048,551
-relay), which is how a client learns the relay ceiling before it builds a request. `forge.github.installed` is whether `gh` is on the
-daemon's PATH; it is an object so `authenticated`, `login` and `host` can be added without a wire break (the composer will need them to say
-why the GitHub picker is disabled). `provider.list` entries gain `images: "yes" | "no" | "unknown"` (claude-native and codex `yes`, GLM
+maxMessageBytes, images: ["image/png", …]}`. `maxMessageBytes` is per transport (16 MiB direct, 1,048,551
+relay), which is how a client learns the relay ceiling before it builds a request. The forge capability is the top-level `daemon.info.forge: {provider: "github", cli: bool}` (a PATH lookup for `gh`, no process spawn; ADR-0039 §8 grows it
+with authentication details), which the composer reads to say why the GitHub picker is disabled. `provider.list` entries gain `images: "yes" | "no" | "unknown"` (claude-native and codex `yes`, GLM
 `no`, other ACP `unknown` until a session reports `promptCapabilities`), which drives the pill hint in §3.
 
 ### 9. Security

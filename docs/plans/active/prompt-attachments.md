@@ -187,9 +187,9 @@ flicker, reload/reconnect shows them), `resubmit-reuse.test.tsx` (Re-run, Contin
 ## Amendment 2026-10-22 (forge-neutral names) and follow-ups
 
 The Human changed the wire to forge-neutral names (ADR-0038 status block): kinds `pr` / `issue` with `forge` (only `"github"` in v1, other values `invalid_attachment`),
-the picker RPC `forge.search`, error codes `forge_unavailable` / `forge_not_found`, `file_ref` optional `line` / `endLine`, and `daemon.info.attachments.forge` as an object
-(`{github: {installed}}`). Tests added by this: `TestValidate_ForgeDefaultsToGithubAndRejectsOthers`, `TestValidate_FileRefLineRange`, `TestRender_GoldenFileRefLines`,
-`TestForgeSearchRPC_RejectsOtherForges` (PR #459), `TestDaemonInfo_ReportsForgeObject`. Follow-ups, not in this plan: auto-attach a pasted PR URL (own remote only), a structured `review`
+the picker RPC `forge.search`, the single `forge_*` error vocabulary of ADR-0039 §6, `file_ref` optional `line` / `endLine`, and the forge capability as the top-level `daemon.info.forge`
+object (`{provider, cli}`). Tests added by this: `TestValidate_ForgeDefaultsToGithubAndRejectsOthers`, `TestValidate_FileRefLineRange`, `TestRender_GoldenFileRefLines`,
+`TestForgeSearchRPC_RejectsOtherForges` (PR #459), `TestDaemonInfo_ReportsAttachmentLimits` (asserts no `attachments.forge` and `daemon.info.forge`). Follow-ups, not in this plan: auto-attach a pasted PR URL (own remote only), a structured `review`
 kind with daemon-side context, richer PR metadata (`isDraft`, `mergeable`, `headRepository`), `forge.github.authenticated/login/host` in `daemon.info`, non-GitHub forges. PR polling, PR
 status and linking a task to a PR are ADR-0039's, not this item's.
 
