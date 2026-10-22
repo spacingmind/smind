@@ -96,8 +96,8 @@ func Available() bool {
 
 // Error codes for the wire (wsapi picks Code up via RPCCode).
 const (
-	CodeUnavailable = "github_unavailable"
-	CodeNotFound    = "github_not_found"
+	CodeUnavailable = "forge_unavailable"
+	CodeNotFound    = "forge_not_found"
 )
 
 // Error is ghctx's typed error: a machine-readable Code plus a

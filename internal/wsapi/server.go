@@ -74,7 +74,7 @@ type API struct {
 	bus  *eventBus
 	info *DaemonInfo
 
-	// github backs github.search (SetGithubClient).
+	// github backs forge.search (SetGithubClient).
 	github *githubHolder
 
 	// learning backs the human-only learning.* RPCs (SetLearning).
@@ -169,7 +169,7 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 	info := newDaemonInfo(time.Now())
 	hs["daemon.info"] = handleDaemonInfo(info)
 	gh := &githubHolder{c: ghctx.New()}
-	hs["github.search"] = handleGithubSearch(wm, gh)
+	hs["forge.search"] = handleForgeSearch(wm, gh)
 	learning := newLearningHost(db, bus)
 	for method, h := range learningHandlers(learning) {
 		hs[method] = h

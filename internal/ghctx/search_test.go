@@ -157,7 +157,7 @@ func atoi(s string) int {
 }
 
 // TestGithubSearch_GhMissingTypedError: a missing gh binary surfaces as
-// github_unavailable.
+// forge_unavailable.
 func TestGithubSearch_GhMissingTypedError(t *testing.T) {
 	s := &stubRunner{fn: func(call stubCall) (string, error) {
 		if call.args[0] == "repo" {
@@ -177,7 +177,7 @@ func TestGithubSearch_GhMissingTypedError(t *testing.T) {
 }
 
 // TestGithubSearch_NoGithubRemoteTypedError: a dir with no GitHub remote
-// surfaces as github_unavailable with the no-remote message.
+// surfaces as forge_unavailable with the no-remote message.
 func TestGithubSearch_NoGithubRemoteTypedError(t *testing.T) {
 	s := &stubRunner{fn: func(call stubCall) (string, error) {
 		return "", fmt.Errorf("gh: none of the git remotes point to a known GitHub host")

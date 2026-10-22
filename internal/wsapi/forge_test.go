@@ -12,9 +12,9 @@ import (
 	"github.com/spacingmind/smind/internal/ghctx"
 )
 
-// githubTestServer serves a real API whose gh client runs stub instead of the
+// forgeTestServer serves a real API whose gh client runs stub instead of the
 // real gh binary.
-func githubTestServer(t *testing.T, stub ghctx.Runner) (*httptest.Server, int64) {
+func forgeTestServer(t *testing.T, stub ghctx.Runner) (*httptest.Server, int64) {
 	t.Helper()
 	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
@@ -29,9 +29,9 @@ func githubTestServer(t *testing.T, stub ghctx.Runner) (*httptest.Server, int64)
 	return srv, task.ID
 }
 
-func TestGithubSearchRPC_ReturnsItems(t *testing.T) {
+func TestForgeSearchRPC_ReturnsItems(t *testing.T) {
 	t.Parallel()
-	srv, taskID := githubTestServer(t, func(_ context.Context, _ string, args ...string) (string, error) {
+	srv, taskID := forgeTestServer(t, func(_ context.Context, _ string, args ...string) (string, error) {
 		if args[0] == "repo" {
 			return `{"nameWithOwner":"o/r"}`, nil
 		}
@@ -39,36 +39,51 @@ func TestGithubSearchRPC_ReturnsItems(t *testing.T) {
 	})
 	ws := dialWS(t, srv, "tok")
 
-	sendRequest(t, ws, "1", "github.search", map[string]any{"taskId": taskID, "kind": "pr", "query": "fix"})
+	sendRequest(t, ws, "1", "forge.search", map[string]any{"taskId": taskID, "kind": "pr", "query": "fix"})
 	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
 	if resp.Error != nil {
-		t.Fatalf("github.search error = %v", resp.Error.Message)
+		t.Fatalf("forge.search error = %v", resp.Error.Message)
 	}
-	var got ghctx.SearchResult
+	var got forgeSearchResult
 	if err := json.Unmarshal(resp.Result, &got); err != nil {
 		t.Fatalf("decode result: %v", err)
 	}
-	if got.Repo != "o/r" || len(got.Items) != 1 || got.Items[0].Number != 7 || got.Items[0].Author != "ann" || got.Items[0].State != "open" {
+	if got.Forge != "github" || got.Repo != "o/r" || len(got.Items) != 1 || got.Items[0].Number != 7 || got.Items[0].Author != "ann" || got.Items[0].State != "open" {
 		t.Fatalf("result = %+v", got)
 	}
 }
 
-func TestGithubSearchRPC_TypedErrorCode(t *testing.T) {
+func TestForgeSearchRPC_TypedErrorCode(t *testing.T) {
 	t.Parallel()
-	srv, taskID := githubTestServer(t, func(context.Context, string, ...string) (string, error) {
+	srv, taskID := forgeTestServer(t, func(context.Context, string, ...string) (string, error) {
 		return "", errors.New("gh: To get started with GitHub CLI, please run:  gh auth login")
 	})
 	ws := dialWS(t, srv, "tok")
 
-	sendRequest(t, ws, "1", "github.search", map[string]any{"taskId": taskID, "kind": "issue"})
+	sendRequest(t, ws, "1", "forge.search", map[string]any{"taskId": taskID, "kind": "issue"})
 	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
 	if resp.Error == nil || resp.Error.Code != ghctx.CodeUnavailable || !strings.Contains(resp.Error.Message, "gh auth login") {
 		t.Fatalf("error = %+v, want code %q mentioning gh auth login", resp.Error, ghctx.CodeUnavailable)
 	}
 
-	sendRequest(t, ws, "2", "github.search", map[string]any{"taskId": taskID, "kind": "bogus"})
+	sendRequest(t, ws, "2", "forge.search", map[string]any{"taskId": taskID, "kind": "bogus"})
 	resp = readEnvelopeFor(t, ws, "2", 5*time.Second)
 	if resp.Error == nil || !strings.Contains(resp.Error.Message, "kind") {
 		t.Fatalf("bad kind error = %+v", resp.Error)
+	}
+}
+
+func TestForgeSearchRPC_RejectsOtherForges(t *testing.T) {
+	t.Parallel()
+	srv, taskID := forgeTestServer(t, func(context.Context, string, ...string) (string, error) {
+		t.Error("runner must not run for an unsupported forge")
+		return "", nil
+	})
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "forge.search", map[string]any{"forge": "gitlab", "taskId": taskID, "kind": "pr"})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "unsupported forge") {
+		t.Fatalf("error = %+v, want unsupported forge", resp.Error)
 	}
 }
