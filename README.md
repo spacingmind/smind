@@ -249,6 +249,25 @@ list an agent advertises, several KB of JSON) are hidden, and with
 the approve/deny block. Pass `--verbose` to `send`, `attach` or `logs` to see
 the raw events. A prompt that needs a human still prints in full.
 
+**Unattended Claude agents.** `--auto-accept` is for ACP agents (GLM, Kimi) only;
+Claude Code has its own permission modes ([ADR-0019](docs/decisions/0019-provider-native-permission-modes.md)).
+To run a claude-native agent without anyone approving each command, pick its
+classifier mode, and always pin the model (an unpinned run uses the CLI's own
+default, which may be Opus):
+
+```sh
+smind task send <taskId> claude-native "<prompt>" --model claude-sonnet-5-5 --mode auto --detach
+```
+
+`--mode auto` lets Claude Code's own model classifier approve each prompt, so no
+`task approve` is needed. It is not a sandbox: the classifier follows what the
+prompt asks for, so an explicit instruction to do something destructive will
+probably be approved. Keep briefs narrow and run agents in their own task
+worktree. `--mode bypassPermissions` skips prompts with no classifier at all.
+With the default `acceptEdits` mode a command that needs approval becomes a
+pending permission instead: `smind task permissions <runId>`, then
+`smind task approve|deny <runId>`.
+
 ### Choosing a task's starting point
 
 By default a task forks from the workspace checkout's current `HEAD`, so a stale
