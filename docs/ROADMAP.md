@@ -151,6 +151,7 @@ noted here so Phase 3 design starts from this rather than re-litigating it.
       amendment — while rotation starts a fresh session)
 - [ ] Mobile app (Expo + @expo/ui): pairing + workspace/task list, realtime
       agent timeline + follow-up, push notifications, mobile permission approval
+      (push notifications: ADR-0040 Proposed, `docs/plans/active/mobile-push-notifications.md`)
   - [x] Pairing, workspace/task list, realtime timeline, follow-up
         prompts, mobile permission approval (PRs #175, #176, #178) --
         design-token/native-control polish on top (PRs #181, #183)
