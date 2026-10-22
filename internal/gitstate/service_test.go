@@ -394,3 +394,24 @@ func TestTaskGitList_ReturnsAllWorkspaceTasks(t *testing.T) {
 		t.Fatalf("archived task Get err = %v, want ErrNotTracked", err)
 	}
 }
+
+func TestTaskGit_UntrustedFlag(t *testing.T) {
+	untrusted := task(1, "a")
+	untrusted.UntrustedSource = true
+	s := newSvc(t, newFakeSource(untrusted, task(2, "b")), &countRunner{}, &fakeInterest{}, newClock(), nil)
+
+	g, err := s.Get(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !g.Untrusted {
+		t.Fatal("TaskGit.untrusted = false for a task with untrusted_source set")
+	}
+	if g, err = s.Get(2); err != nil || g.Untrusted {
+		t.Fatalf("trusted task: untrusted = %v, err = %v, want false", g.Untrusted, err)
+	}
+	list, err := s.List(1)
+	if err != nil || len(list) != 2 || !list[0].Untrusted || list[1].Untrusted {
+		t.Fatalf("List untrusted flags = %+v (err %v), want [true false]", list, err)
+	}
+}

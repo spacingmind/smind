@@ -3,12 +3,14 @@ package wsapi
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/ghctx"
 	"github.com/spacingmind/smind/internal/gitstate"
 	"github.com/spacingmind/smind/internal/mcpservers"
@@ -177,6 +179,14 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	focus := newFocusRegistry()
 	gh := &githubHolder{c: ghctx.New()}
 	gitSvc := newGitService(wm, db, bus, focus, gh, gopts)
+	// task.create with a prNumber asks the same provider, looked up per
+	// call, whether the PR comes from a fork (ADR-0039 section 7).
+	wm.SetForge(func() forge.Provider {
+		if gh.c == nil {
+			return nil
+		}
+		return gh.c
+	})
 	wm.SetNotifier(busWorkspaceNotifier{bus: bus, db: db, git: gitSvc})
 	reg.SetNotifier(busRunNotifier{bus: bus, db: db, git: gitSvc})
 	profReg.SetNotifier(busProfileNotifier{bus: bus})
@@ -201,6 +211,21 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	}
 	for _, method := range []string{"task.commit", "task.stage", "task.setBase"} {
 		hs[method] = invalidateAfter(hs[method], gitSvc)
+	}
+	// task.retrySetup carries the task as "id" and may clear untrusted_source,
+	// which TaskGit.untrusted mirrors (ADR-0039 section 7).
+	retrySetup := hs["task.retrySetup"]
+	hs["task.retrySetup"] = func(ctx context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+		res, err := retrySetup(ctx, rc, raw)
+		if err == nil {
+			var p struct {
+				ID int64 `json:"id"`
+			}
+			if json.Unmarshal(raw, &p) == nil && p.ID != 0 {
+				gitSvc.Invalidate(p.ID)
+			}
+		}
+		return res, err
 	}
 	hs["daemon.info"] = handleDaemonInfo(info, reg)
 	hs["run.attachment"] = handleRunAttachment(reg)
