@@ -198,6 +198,13 @@ pub fn run() {
             )
             .title("sMind")
             .inner_size(1280.0, 800.0)
+            // Prompt attachments (ADR-0038): the composer takes dropped files
+            // through the web `drop` event. Tauri's own drag-drop handler
+            // always claims file drops (wry's handler returns true, so
+            // WKWebView's performDragOperation never reaches the page), and
+            // nothing in the app listens for Tauri's DragDropEvent, so turn it
+            // off and let the webview deliver HTML5 drops.
+            .disable_drag_drop_handler()
             .on_navigation(move |url| {
                 if url.origin() == nav_origin {
                     true
@@ -376,4 +383,22 @@ fn show_main(app: &tauri::AppHandle) {
 fn show_main_window(win: &tauri::WebviewWindow) {
     let _ = win.show();
     let _ = win.set_focus();
+}
+
+#[cfg(test)]
+mod file_drop_tests {
+    /// The main window must not install Tauri's drag-drop handler: it swallows
+    /// OS file drops before the web `drop` event, which the composer's attach
+    /// drop zone depends on (ADR-0038). Tauri exposes no getter for the
+    /// attribute, so this guards the builder call itself.
+    #[test]
+    fn main_window_leaves_html5_file_drops_to_the_webview() {
+        let src = include_str!("lib.rs");
+        let builder = src.split("WebviewWindowBuilder::new(").nth(1).expect("main window builder");
+        let chain = builder.split(".build()?").next().expect("builder chain");
+        assert!(
+            chain.contains(".disable_drag_drop_handler()"),
+            "the main window builder must call disable_drag_drop_handler()"
+        );
+    }
 }

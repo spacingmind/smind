@@ -256,7 +256,8 @@ Settled for this plan:
 - 2026-10-18: **AC8 closed** (`fix/windows-nightly-suite`, PR #366): `windows-full-suite.yml` had failed every
   scheduled run since 2026-10-13 (a dozen packages hit the 10-minute timeout; `internal/wsapi` among them) and now
   passes in about 5 minutes: 42 of 42 packages on two consecutive `workflow_dispatch` runs. See Validation.
-- Open: the first release carrying the Windows zips (AC9). The ADR-0024 wording (the "Amended by ADR-0029" note on
+- 2026-10-22 (plans hygiene): AC9 confirmed by the real release v0.13.1 (see Validation). All ten ACs are met; moved to `completed/`. Merged PRs: #310 (runtime parity: setup scripts, shutdown API, secret ACLs, `claude.exe` launcher), #312 (ADRs + plans), #313 (Windows daemon binaries on every release), #366 (nightly full suite green on `windows-latest`), #245 (native Windows terminal, ADR-0022). Not covered, still **unverified**: a real logged-in `claude` turn through the Windows launcher, and Windows 10 / the Windows 11 *client* SKU (all runs were Windows 11 25H2 locally and Windows Server 2025 on CI).
+- Previously open: the first release carrying the Windows zips (AC9) — now done. The ADR-0024 wording (the "Amended by ADR-0029" note on
   the setup shell) and the README (install.ps1, the Windows zips, the native daemon, the WSL note) are already done.
 
 ## Validation
@@ -358,3 +359,5 @@ All on Windows 11 25H2 build 26200, amd64, Go 1.27.0, branch
   tests) -- first evidence comes from the next release or a dry run.
 - **AC10** — `internal/realpath` + `internal/testutil.Link`; four junction
   escape tests failed before, pass now.
+
+- **AC9, confirmed 2026-10-22 on a real release.** v0.13.1 (release-please run 39379008532) attaches `smind_0.13.1_windows_amd64.zip` and `smind_0.13.1_windows_arm64.zip`, both listed in that release's `checksums.txt`; the run's `verify-windows-amd64` and `verify-windows-arm64` jobs succeeded (the arm64 job also runs `go test ./internal/terminal/...` on `windows-11-arm`). The earlier "Not verifiable here" caveat is resolved.

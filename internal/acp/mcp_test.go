@@ -232,3 +232,50 @@ func TestClient_McpCapabilityFlags(t *testing.T) {
 		}
 	})
 }
+
+func TestACP_SupportsImagePromptParsesCaps(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		caps string
+		want bool
+	}{
+		{"empty prompt caps", `{"promptCapabilities":{}}`, false},
+		{"image true", `{"promptCapabilities":{"image":true}}`, true},
+		{"image false", `{"promptCapabilities":{"image":false}}`, false},
+		{"missing key", `{"loadSession":true}`, false},
+		{"image with other caps", `{"loadSession":true,"promptCapabilities":{"audio":true,"image":true,"embeddedContext":true},"mcpCapabilities":{"http":true}}`, true},
+		{"audio only", `{"promptCapabilities":{"audio":true}}`, false},
+		{"no caps at all", ``, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := &Client{AgentCapabilities: json.RawMessage(tt.caps)}
+			if got := c.SupportsImagePrompt(); got != tt.want {
+				t.Errorf("SupportsImagePrompt() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestACP_PromptOptionsImageBlocks(t *testing.T) {
+	t.Parallel()
+	var po promptOptions
+	WithPromptPrefix("pre")(&po)
+	WithPromptImages([]ImageBlock{{Data: "QUJD", MimeType: "image/png"}})(&po)
+	got := po.blocks("user")
+	want := []ContentBlock{
+		{Type: "text", Text: "pre"},
+		{Type: "text", Text: "user"},
+		{Type: "image", Data: "QUJD", MimeType: "image/png"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("blocks = %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("block %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}

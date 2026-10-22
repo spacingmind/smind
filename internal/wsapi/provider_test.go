@@ -230,3 +230,34 @@ func TestServer_ProviderTest_CLIPresent(t *testing.T) {
 		t.Fatalf("provider.test ok = false, want true (fake npx on PATH): detail = %q", result.Detail)
 	}
 }
+
+func TestProviderList_ImagesField(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	srv := newTestWSServer(t, wm, newTestRunner(wm), db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "provider.list", nil)
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("provider.list error = %v", resp.Error.Message)
+	}
+	var raw struct {
+		Providers []struct {
+			ID     string `json:"id"`
+			Images string `json:"images"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(resp.Result, &raw); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"claude-native": "yes", "codex-native": "yes", "glm": "no", "kimi": "unknown"}
+	if len(raw.Providers) != len(want) {
+		t.Fatalf("providers = %+v", raw.Providers)
+	}
+	for _, p := range raw.Providers {
+		if p.Images != want[p.ID] {
+			t.Errorf("%s images = %q, want %q", p.ID, p.Images, want[p.ID])
+		}
+	}
+}
