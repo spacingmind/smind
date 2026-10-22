@@ -140,8 +140,9 @@ export function TaskDetailPane({
   // same task.diff this is -- the same hook the diff pane itself uses, so
   // the pill and the pane's header stat can't disagree and no extra RPC
   // is introduced. It stays mounted even when the Diff tab isn't (the
-  // fetch is cheap and the refresh signal is identical).
-  const wholeDiff = useTaskDiff(client, task, undefined);
+  // fetch is cheap), and it takes the same `events` so a run ending
+  // refreshes the pill live instead of leaving it stale until a reload.
+  const wholeDiff = useTaskDiff(client, task, events);
 
   // Every run currently holding an unanswered permission request -- in
   // practice at most one (a task has one active run at a time), but this
