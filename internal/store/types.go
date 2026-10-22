@@ -118,6 +118,13 @@ type Task struct {
 	BaseRef     string
 	BaseSha     string
 	BranchOwned bool
+	// PR identity (ADR-0039 section 4): set when the poller adopts or a
+	// create-PR records the task's PR; PRNumber 0 means none. PRURL is
+	// validated against the forge host before it is stored.
+	PRForge, PRRepo string
+	PRNumber        int64
+	PRURL           string
+	PRHeadRef       string
 }
 
 // Run is a persisted record of one internal/runs.Registry Run: a

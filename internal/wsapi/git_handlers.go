@@ -3,11 +3,13 @@ package wsapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/gitstate"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -86,23 +88,42 @@ func (g gitInterest) Focused() []int64 { return g.focus.ids() }
 
 // gitOptions overrides the production wiring of the git state service (tests).
 type gitOptions struct {
-	Runner gitstate.Runner
-	Tick   <-chan time.Time
-	After  func(time.Duration, func()) func()
-	Now    func() time.Time
+	Runner   gitstate.Runner
+	Tick     <-chan time.Time
+	PollTick <-chan time.Time
+	After    func(time.Duration, func()) func()
+	Now      func() time.Time
+	Jitter   func() float64
 }
 
-func newGitService(wm *workspace.Manager, bus *eventBus, focus *focusRegistry, o gitOptions) *gitstate.Service {
+// newGitService wires the git state service and its forge poller. The forge
+// provider is the same gh client forge.search uses, looked up on every call
+// because SetGithubClient can swap it.
+func newGitService(wm *workspace.Manager, db *store.Store, bus *eventBus, focus *focusRegistry, gh *githubHolder, o gitOptions) *gitstate.Service {
 	return gitstate.New(gitstate.Options{
 		Source: gitSource{wm}, Runner: o.Runner, Now: o.Now, After: o.After, Tick: o.Tick,
 		Interest: gitInterest{bus: bus, focus: focus},
 		Publisher: func(taskID int64, g gitstate.TaskGit) {
 			bus.Publish(Event{Topic: TopicTaskGit, Payload: taskGitPayload{TaskID: taskID, Git: g}})
 		},
+		Forge: func() forge.Provider {
+			if gh == nil || gh.c == nil {
+				return nil
+			}
+			return gh.c
+		},
+		Ledger: db, PollTick: o.PollTick, Jitter: o.Jitter,
+		// Adoption changed the task row: tell the clients (ADR-0039 §4).
+		OnAdopt: func(taskID int64) {
+			if t, err := db.GetTask(taskID); err == nil && t.Kind != store.TaskKindSystem {
+				bus.Publish(Event{Topic: TopicTaskUpdated, Payload: taskUpdatedPayload{Task: t}})
+			}
+		},
 	})
 }
 
-// gitHandlers returns the task.git* RPCs. Reads only ever run local git.
+// gitHandlers returns the task.git* RPCs. Reads only ever run local git;
+// task.gitRefresh is the one that may spend a forge call.
 func gitHandlers(svc *gitstate.Service, focus *focusRegistry) map[string]handlerFunc {
 	return map[string]handlerFunc{
 		"task.git": func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
@@ -130,6 +151,27 @@ func gitHandlers(svc *gitstate.Service, focus *focusRegistry) map[string]handler
 				return nil, fmt.Errorf("task.gitList: %w", err)
 			}
 			return taskGitListResult{Items: items}, nil
+		},
+		"task.gitRefresh": func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+			if rc != nil && rc.runScoped {
+				return nil, &rpcCodeError{code: codeForbidden, msg: "task.gitRefresh is not available to agents"}
+			}
+			var p struct {
+				TaskID int64 `json:"taskId"`
+			}
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return nil, fmt.Errorf("task.gitRefresh: invalid params: %w", err)
+			}
+			g, err := svc.Refresh(p.TaskID)
+			if err != nil {
+				var lim *gitstate.RefreshLimitedError
+				var fe *forge.Error
+				if errors.As(err, &lim) || errors.As(err, &fe) {
+					return nil, err // typed on the wire: refresh_limited, forge_*
+				}
+				return nil, fmt.Errorf("task.gitRefresh: %w", err)
+			}
+			return g, nil
 		},
 		"task.gitFocus": func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 			var p struct {

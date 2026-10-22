@@ -261,6 +261,25 @@ var migrations = []migration{
 		},
 	},
 	{
+		// ADR-0039 section 4: the task's PR identity. task_pr_state and
+		// forge_budget are new tables, created by schema.sql.
+		name: "task_pr",
+		apply: func(db *sql.DB) error {
+			for _, c := range []struct{ col, ddl string }{
+				{"pr_forge", "TEXT"},
+				{"pr_repo", "TEXT"},
+				{"pr_number", "INTEGER"},
+				{"pr_url", "TEXT"},
+				{"pr_head_ref", "TEXT"},
+			} {
+				if err := addColumnIfMissing(db, "tasks", c.col, c.ddl); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
+	{
 		// ADR-0026: who authored a run's prompt (human|orchestrator|agent)
 		// and whether it was a mid-run interrupt, for the window builder.
 		// Pre-existing runs keep '' (unknown) / 0.

@@ -81,7 +81,12 @@ CREATE TABLE IF NOT EXISTS tasks (
     kind TEXT NOT NULL DEFAULT 'task', -- 'task' | 'system' (ADR-0026)
     base_ref TEXT, -- ADR-0039: branch the task is based on / its PR targets
     base_sha TEXT, -- ADR-0039: commit the task branch forked from (diff base)
-    branch_owned INTEGER NOT NULL DEFAULT 0 -- ADR-0039: 1 when CreateTask created the branch
+    branch_owned INTEGER NOT NULL DEFAULT 0, -- ADR-0039: 1 when CreateTask created the branch
+    pr_forge TEXT, -- ADR-0039 section 4: the task's PR identity (forge name,
+    pr_repo TEXT, --   owner/name, number, validated URL, head branch)
+    pr_number INTEGER,
+    pr_url TEXT,
+    pr_head_ref TEXT
 );
 
 CREATE TABLE IF NOT EXISTS chats (
@@ -477,3 +482,23 @@ CREATE TABLE IF NOT EXISTS learning_snapshots (
     payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_learning_snapshots_ws ON learning_snapshots(workspace_id, id);
+
+-- task_pr_state: the forge poller's per-task cache and call ledger (ADR-0039
+-- section 2). snapshot is the forge.PR JSON ('' = none yet). Additive, like
+-- quota_poll_state; DeleteTask removes the row.
+CREATE TABLE IF NOT EXISTS task_pr_state (
+    task_id INTEGER PRIMARY KEY REFERENCES tasks(id),
+    snapshot TEXT NOT NULL DEFAULT '',
+    fetched_at TIMESTAMP,
+    next_allowed_at TIMESTAMP,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    last_error_code TEXT NOT NULL DEFAULT '',
+    forced_at TEXT NOT NULL DEFAULT '[]'
+);
+
+-- forge_budget: rolling-hour forge call counter per host (ADR-0039 section 4).
+CREATE TABLE IF NOT EXISTS forge_budget (
+    host TEXT PRIMARY KEY,
+    window_start TIMESTAMP NOT NULL,
+    calls INTEGER NOT NULL
+);

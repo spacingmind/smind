@@ -74,6 +74,7 @@ type Client struct {
 	ttl     time.Duration
 	now     func() time.Time
 	repos   *ttlCache
+	known   *ttlCache // dir -> forge.Repo last returned by Repo, for OpenPRs/PR's URL check
 	results *ttlCache
 	flights inflight
 }
@@ -90,6 +91,7 @@ func New(opts ...Option) *Client {
 	}
 	// Built after the options so WithNow and WithTTL apply to the caches.
 	c.repos = newTTLCache(60*time.Second, func() time.Time { return c.now() })
+	c.known = newTTLCache(knownRepoTTL, func() time.Time { return c.now() })
 	c.results = newTTLCache(c.ttl, func() time.Time { return c.now() })
 	return c
 }
@@ -99,13 +101,6 @@ func Available() bool {
 	_, err := exec.LookPath("gh")
 	return err == nil
 }
-
-// aliases for ADR-0038 PR 5b; delete in the poller PR.
-type (
-	Snapshot     = forge.Snapshot
-	Item         = forge.Item
-	SearchResult = forge.SearchResult
-)
 
 var _ forge.Provider = (*Client)(nil)
 

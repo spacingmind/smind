@@ -155,6 +155,9 @@ func TestRunnerError_ScrubsTokens(t *testing.T) {
 
 func TestGhctx_ImplementsForgeProvider(t *testing.T) {
 	var p forge.Provider = New()
+	_ = p.Repo
+	_ = p.OpenPRs
+	_ = p.PR
 	if p.Name() != "github" {
 		t.Fatalf("Name() = %q", p.Name())
 	}

@@ -4,7 +4,11 @@
 // internal/workspace; callers hand it what it needs through Input.
 package gitstate
 
-import "time"
+import (
+	"time"
+
+	"github.com/spacingmind/smind/internal/forge"
+)
 
 // TaskGit is the one status payload per task. Every nested object is optional:
 // an absent object or pointer means "not known", never zero.
@@ -95,34 +99,13 @@ type Merged struct {
 	Via   string `json:"via"`
 }
 
-// PRInfo is the forge-neutral PR snapshot (ADR §3). It is always nil in
-// gitstate's local pass; the poller fills it later.
-type PRInfo struct {
-	Number             int       `json:"number"`
-	Repo               string    `json:"repo"`
-	URL                string    `json:"url"`
-	Title              string    `json:"title"`
-	State              string    `json:"state"`
-	Draft              bool      `json:"draft"`
-	HeadRef            string    `json:"headRef"`
-	HeadSha            string    `json:"headSha"`
-	BaseRef            string    `json:"baseRef"`
-	FromFork           bool      `json:"fromFork"`
-	Mergeable          string    `json:"mergeable"`
-	ReviewDecision     string    `json:"reviewDecision"`
-	Checks             *Checks   `json:"checks,omitempty"`
-	FetchedAt          time.Time `json:"fetchedAt"`
-	Stale              string    `json:"stale"`
-	RefreshAvailableAt string    `json:"refreshAvailableAt"`
-}
+// PRInfo is the forge-neutral PR snapshot (ADR §3); forge.PR is the single
+// definition, so the wire shape cannot drift from what the provider returns.
+// It is always nil in gitstate's local pass; the poller fills it later.
+type PRInfo = forge.PR
 
-type Checks struct {
-	State   string `json:"state"`
-	Passed  int    `json:"passed"`
-	Failed  int    `json:"failed"`
-	Pending int    `json:"pending"`
-	Total   int    `json:"total"`
-}
+// Checks is PRInfo's CI rollup.
+type Checks = forge.Checks
 
 // Action is one advisory entry of TaskGit.Actions. The RPC re-checks.
 type Action struct {

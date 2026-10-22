@@ -175,7 +175,8 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	mcpReg := mcpservers.New(db)
 	bus := newEventBus()
 	focus := newFocusRegistry()
-	gitSvc := newGitService(wm, bus, focus, gopts)
+	gh := &githubHolder{c: ghctx.New()}
+	gitSvc := newGitService(wm, db, bus, focus, gh, gopts)
 	wm.SetNotifier(busWorkspaceNotifier{bus: bus, db: db, git: gitSvc})
 	reg.SetNotifier(busRunNotifier{bus: bus, db: db, git: gitSvc})
 	profReg.SetNotifier(busProfileNotifier{bus: bus})
@@ -193,7 +194,6 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 
 	acctReg.SetNotifier(busAccountNotifier{bus: bus})
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
-	gh := &githubHolder{c: ghctx.New()}
 	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, mcpReg, coord, db, gh)
 	info := newDaemonInfo(time.Now())
 	for method, h := range gitHandlers(gitSvc, focus) {

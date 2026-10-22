@@ -349,6 +349,7 @@ func (s *Store) DeleteTask(id int64) error {
 		{"delete runs", `DELETE FROM runs WHERE task_id = ?`},
 		{"delete chat queue", `DELETE FROM chat_queue WHERE chat_id IN (SELECT id FROM chats WHERE task_id = ?)`},
 		{"delete chats", `DELETE FROM chats WHERE task_id = ?`},
+		{"delete pr state", `DELETE FROM task_pr_state WHERE task_id = ?`},
 		{"delete terminal sessions", `DELETE FROM terminal_sessions WHERE task_id = ?`},
 		{"delete task", `DELETE FROM tasks WHERE id = ?`},
 	} {
@@ -364,7 +365,7 @@ func (s *Store) DeleteTask(id int64) error {
 }
 
 // taskCols is the column list scanTask reads.
-const taskCols = "id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, setup_status, setup_error, setup_log, port, kind, base_ref, base_sha, branch_owned"
+const taskCols = "id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, setup_status, setup_error, setup_log, port, kind, base_ref, base_sha, branch_owned, pr_forge, pr_repo, pr_number, pr_url, pr_head_ref"
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -374,13 +375,16 @@ func scanTask(row rowScanner) (Task, error) {
 	var t Task
 	var spaceID, parentTaskID sql.NullInt64
 	var worktreePath, branch, setupStatus, setupError, setupLog, baseRef, baseSha sql.NullString
+	var prForge, prRepo, prURL, prHeadRef sql.NullString
+	var prNumber sql.NullInt64
 	var archivedAt sql.NullTime
 	var port sql.NullInt64
 
 	if err := row.Scan(&t.ID, &t.WorkspaceID, &spaceID, &parentTaskID, &t.Title, &t.Status,
 		&worktreePath, &branch, &t.CreatedAt, &t.UpdatedAt, &archivedAt,
 		&setupStatus, &setupError, &setupLog, &port, &t.Kind,
-		&baseRef, &baseSha, &t.BranchOwned); err != nil {
+		&baseRef, &baseSha, &t.BranchOwned,
+		&prForge, &prRepo, &prNumber, &prURL, &prHeadRef); err != nil {
 		return Task{}, err
 	}
 
@@ -394,6 +398,8 @@ func scanTask(row rowScanner) (Task, error) {
 	t.SetupLog = setupLog.String
 	t.Port = nullToInt64Ptr(port)
 	t.BaseRef, t.BaseSha = baseRef.String, baseSha.String
+	t.PRForge, t.PRRepo, t.PRNumber = prForge.String, prRepo.String, prNumber.Int64
+	t.PRURL, t.PRHeadRef = prURL.String, prHeadRef.String
 	return t, nil
 }
 
@@ -460,6 +466,37 @@ func (s *Store) SetTaskBase(id int64, ref, sha string) error {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("set task %d base: %w", id, sql.ErrNoRows)
+	}
+	return nil
+}
+
+// SetTaskPR records task id's PR identity (ADR-0039 section 4). The caller
+// validates url against the forge host first.
+func (s *Store) SetTaskPR(id int64, forge, repo string, number int64, url, headRef string) error {
+	res, err := s.db.Exec(
+		`UPDATE tasks SET pr_forge = ?, pr_repo = ?, pr_number = ?, pr_url = ?, pr_head_ref = ?, updated_at = ? WHERE id = ?`,
+		nullString(forge), nullString(repo), number, nullString(url), nullString(headRef), time.Now().UTC(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("set task %d pr: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("set task %d pr: %w", id, sql.ErrNoRows)
+	}
+	return nil
+}
+
+// ClearTaskPR removes task id's PR identity.
+func (s *Store) ClearTaskPR(id int64) error {
+	res, err := s.db.Exec(
+		`UPDATE tasks SET pr_forge = NULL, pr_repo = NULL, pr_number = NULL, pr_url = NULL, pr_head_ref = NULL, updated_at = ? WHERE id = ?`,
+		time.Now().UTC(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("clear task %d pr: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("clear task %d pr: %w", id, sql.ErrNoRows)
 	}
 	return nil
 }

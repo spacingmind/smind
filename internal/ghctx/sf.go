@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	"github.com/spacingmind/smind/internal/forge"
 )
 
 // call is one in-flight (or completed) Search/Get computation keyed by its
@@ -63,10 +65,10 @@ func getCacheKey(dir, kind string, number int, repo string) string {
 }
 
 // cachedSearch is Search wrapped in cache + single-flight.
-func (c *Client) cachedSearch(ctx context.Context, dir, kind, query string, limit int) (SearchResult, error) {
+func (c *Client) cachedSearch(ctx context.Context, dir, kind, query string, limit int) (forge.SearchResult, error) {
 	key := searchCacheKey(dir, kind, query, limit)
 	if v, ok := c.results.get(key); ok {
-		return v.(SearchResult), nil
+		return v.(forge.SearchResult), nil
 	}
 	v, err := c.flights.do("s\x00"+key, func() (any, error) {
 		if v2, ok := c.results.get(key); ok {
@@ -79,16 +81,16 @@ func (c *Client) cachedSearch(ctx context.Context, dir, kind, query string, limi
 		return res, err
 	})
 	if err != nil {
-		return SearchResult{}, err
+		return forge.SearchResult{}, err
 	}
-	return v.(SearchResult), nil
+	return v.(forge.SearchResult), nil
 }
 
 // cachedGet is Get wrapped in cache + single-flight.
-func (c *Client) cachedGet(ctx context.Context, dir, kind string, number int, repo string) (*Snapshot, error) {
+func (c *Client) cachedGet(ctx context.Context, dir, kind string, number int, repo string) (*forge.Snapshot, error) {
 	key := getCacheKey(dir, kind, number, repo)
 	if v, ok := c.results.get(key); ok {
-		return v.(*Snapshot), nil
+		return v.(*forge.Snapshot), nil
 	}
 	v, err := c.flights.do("g\x00"+key, func() (any, error) {
 		if v2, ok := c.results.get(key); ok {
@@ -103,16 +105,16 @@ func (c *Client) cachedGet(ctx context.Context, dir, kind string, number int, re
 	if err != nil {
 		return nil, err
 	}
-	return v.(*Snapshot), nil
+	return v.(*forge.Snapshot), nil
 }
 
 // Search is the cached, single-flight Search: identical concurrent or
 // repeat-within-TTL calls share one gh invocation.
-func (c *Client) Search(ctx context.Context, dir, kind, query string, limit int) (SearchResult, error) {
+func (c *Client) Search(ctx context.Context, dir, kind, query string, limit int) (forge.SearchResult, error) {
 	return c.cachedSearch(ctx, dir, kind, query, limit)
 }
 
 // Get is the cached, single-flight Get.
-func (c *Client) Get(ctx context.Context, dir, kind string, number int, repo string) (*Snapshot, error) {
+func (c *Client) Get(ctx context.Context, dir, kind string, number int, repo string) (*forge.Snapshot, error) {
 	return c.cachedGet(ctx, dir, kind, number, repo)
 }

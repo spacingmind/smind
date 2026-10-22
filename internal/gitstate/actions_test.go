@@ -57,10 +57,30 @@ func TestActions_DisabledReasons_Table(t *testing.T) {
 			createMsg:  "A pull request is already open for this branch.",
 		},
 		{
+			name:       "pr exists beats no commits",
+			g:          TaskGit{Branch: branch, Base: known, Commits: &Commits{SinceFork: ip(0)}, PR: open},
+			createCode: "pr_exists",
+			createMsg:  "A pull request is already open for this branch.",
+		},
+		{
 			name:       "pr merged",
 			g:          TaskGit{Branch: branch, Base: known, Commits: withCommits, PR: &PRInfo{State: "merged"}},
 			updateCode: "pr_not_open",
 			updateMsg:  "Update PR isn't available because the pull request is merged. Create a new pull request from this branch instead.",
+		},
+		{
+			name:       "fork pr is read-only",
+			g:          TaskGit{Branch: branch, Base: known, Commits: withCommits, PR: &PRInfo{State: "open", FromFork: true}},
+			createCode: "pr_exists",
+			createMsg:  "A pull request is already open for this branch.",
+			updateCode: "fork_pr_readonly",
+			updateMsg:  "Update PR isn't available because this pull request comes from a fork, and smind can't push to forks yet.",
+		},
+		{
+			name:       "closed fork pr reports not open first",
+			g:          TaskGit{Branch: branch, Base: known, Commits: withCommits, PR: &PRInfo{State: "closed", FromFork: true}},
+			updateCode: "pr_not_open",
+			updateMsg:  "Update PR isn't available because the pull request is closed. Create a new pull request from this branch instead.",
 		},
 		{
 			name:       "forge passthrough",
