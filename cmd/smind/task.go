@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/wsclient"
 )
 
@@ -425,7 +426,18 @@ func cmdTaskList(args []string) int {
 }
 
 // cmdTaskSendUsage is printed on any argument error in cmdTaskSend.
-const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept] [--model <model>] [--when-busy reject|queue|interrupt]"
+const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking off|standard|extended] [--detach]"
+
+// unpinnedModelNote is the stderr note printed when a claude-native run
+// starts without --model: the Claude CLI then runs its own default model for
+// the login, which may be a costly one. "" for every other case, including
+// the explicit --model default (a deliberate choice of the provider default).
+func unpinnedModelNote(provider, model string) string {
+	if provider != string(taskrunner.ProviderClaudeNative) || model != "" {
+		return ""
+	}
+	return "note: no --model given; claude-native uses the Claude CLI's own default model for this login (it may be Opus). Pin one with --model sonnet|haiku|opus or a full id.\n"
+}
 
 // approvalPolicyRemovedMsg is printed for the removed --approval-policy
 // flag (ADR-0019): a hard error pointing at the replacement.
@@ -447,16 +459,33 @@ const approvalPolicyRemovedMsg = "--approval-policy was removed; use --mode <mod
 // --chat targets the run at one of the task's chats (ADR-0016 P4) and is
 // likewise passed through to run.start's chatId field; omitted, the task's
 // default chat is used, so pre-chats invocations keep working unchanged.
+//
+// --thinking (off, standard or extended; Claude-only) is passed through to
+// run.start's thinkingLevel field and omitted when not given. --detach
+// prints the runId alone on stdout and returns as soon as the run has
+// started, without streaming it.
 func cmdTaskSend(args []string) int {
 	// Parsed by hand for the same reason as cmdTaskLogs: the prompt is
 	// free-form positional text, so stdlib flag parsing can't reliably
 	// separate it from flags.
 	var taskIDArg, provider, mode, chatArg, whenBusy, model string
-	var autoAccept bool
+	var autoAccept, detach bool
+	var thinking string
 	var promptParts []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
+		case a == "--detach":
+			detach = true
+		case a == "--thinking":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
+				return 2
+			}
+			i++
+			thinking = args[i]
+		case strings.HasPrefix(a, "--thinking="):
+			thinking = strings.TrimPrefix(a, "--thinking=")
 		case a == "--when-busy":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
@@ -527,6 +556,12 @@ func cmdTaskSend(args []string) int {
 			return 2
 		}
 	}
+	switch thinking {
+	case "", "off", "standard", "extended":
+	default:
+		fmt.Fprintf(os.Stderr, "task send: invalid --thinking %q (want off, standard, or extended)\n", thinking)
+		return 2
+	}
 	prompt := strings.Join(promptParts, " ")
 
 	client, err := dialDaemon(context.Background())
@@ -560,6 +595,9 @@ func cmdTaskSend(args []string) int {
 	if model != "" {
 		params["model"] = model
 	}
+	if thinking != "" {
+		params["thinkingLevel"] = thinking
+	}
 	if chatID != 0 {
 		params["chatId"] = chatID
 	}
@@ -574,6 +612,7 @@ func cmdTaskSend(args []string) int {
 			return 2
 		}
 	}
+	fmt.Fprint(os.Stderr, unpinnedModelNote(provider, model))
 	var start struct {
 		RunID       string `json:"runId"`
 		Queued      bool   `json:"queued"`
@@ -589,6 +628,10 @@ func cmdTaskSend(args []string) int {
 		return 0
 	}
 	fmt.Fprintf(os.Stderr, "run %s started\n", start.RunID)
+	if detach {
+		fmt.Println(start.RunID)
+		return 0
+	}
 
 	return streamRun(ctx, client, start.RunID)
 }
@@ -1415,8 +1458,29 @@ type runSummaryRow struct {
 	Status     string
 	StartedAt  time.Time
 	StopReason string
+	// ThinkingLevel is the run's thinking level ("" when unspecified).
+	ThinkingLevel string
+	// Model is the requested model ("" = the provider's default); Usage.Model
+	// is the model the agent reported using, when it reported one.
+	Model string
+	Usage *struct {
+		Model *string `json:"model"`
+	} `json:"usage"`
 	// Disposition is "needs-continue" for a run that ended done at a cap.
 	Disposition string
+}
+
+// runModelCell is a run's MODEL column: the requested model; when none was
+// requested, the model the agent reported using in parentheses (that is what
+// "Default" resolved to); "-" when neither is known.
+func runModelCell(r runSummaryRow) string {
+	if r.Model != "" {
+		return r.Model
+	}
+	if r.Usage != nil && r.Usage.Model != nil && *r.Usage.Model != "" {
+		return "(" + *r.Usage.Model + ")"
+	}
+	return "-"
 }
 
 // runStatusCell is a run's STATUS column: the status, and its disposition when
@@ -1495,12 +1559,12 @@ func cmdTaskRuns(args []string) int {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tCHAT\tPROVIDER\tSTATUS")
+	fmt.Fprintln(tw, "ID\tCHAT\tPROVIDER\tMODEL\tSTATUS")
 	for _, r := range all {
 		if r.TaskID != taskID {
 			continue
 		}
-		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n", r.ID, r.ChatID, r.Provider, runStatusCell(r.Status, r.Disposition))
+		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\n", r.ID, r.ChatID, r.Provider, runModelCell(r), runStatusCell(r.Status, r.Disposition))
 	}
 	tw.Flush()
 	return 0

@@ -354,7 +354,7 @@ func TestTaskRuns_ListsAndFiltersByChat(t *testing.T) {
 		t.Fatalf("run(task runs) = %d, want 0", code)
 	}
 	rows := collapseSpaces(out)
-	if want := "ID CHAT PROVIDER STATUS"; !strings.Contains(rows, want) {
+	if want := "ID CHAT PROVIDER MODEL STATUS"; !strings.Contains(rows, want) {
 		t.Fatalf("task runs output = %q, want header %q", out, want)
 	}
 	// Run ids are bare hex; count data rows by provider mentions instead
