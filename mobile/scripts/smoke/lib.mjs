@@ -170,8 +170,25 @@ export async function assertTasks(page) {
     fail(`tasks screen rendered the error state: ${bodyText}`);
     return false;
   }
-  if (!(await page.getByRole('button', { name: 'Disconnect' }).isVisible().catch(() => false))) {
-    fail('tasks screen header has no Disconnect button');
+  if (!(await page.getByRole('button', { name: 'Connection' }).isVisible().catch(() => false))) {
+    fail('tasks screen header has no Connection button');
+  }
+  // The Connection action opens the sheet (Disconnect lives in it now); the empty state's Refresh button must exist too.
+  await page.getByRole('button', { name: 'Connection' }).click();
+  try {
+    await page.getByRole('button', { name: 'Disconnect' }).waitFor({ timeout: 10_000 });
+  } catch {
+    fail('the connection sheet did not show a Disconnect button');
+    return false;
+  }
+  await page.keyboard.press('Escape');
+  try {
+    await page.getByRole('button', { name: 'Disconnect' }).waitFor({ state: 'detached', timeout: 10_000 });
+  } catch {
+    fail('the connection sheet did not close');
+  }
+  if (!(await page.getByRole('button', { name: 'Refresh' }).isVisible().catch(() => false))) {
+    fail('the empty state has no Refresh button');
   }
   return true;
 }
