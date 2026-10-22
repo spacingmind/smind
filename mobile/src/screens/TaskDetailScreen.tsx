@@ -291,7 +291,9 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
           // Registry.Subscribe), so a separate run.logs fetch here would
           // double-render every historical line -- the web UI's
           // streamRun makes the same choice.
-          attachRun(latest.ID, () => cancelled);
+          // A run.start-initiated run's history has no user message, so the run row's own prompt is shown first (a backfilled
+          // user_message, if the daemon sends one, is skipped as an echo of that line).
+          attachRun(latest.ID, () => cancelled, latest.Prompt ? () => Promise.resolve(latest.Prompt) : undefined);
         } else {
           // A finished run: one run.logs fetch, the full transcript.
           const logs = (await conn.call('run.logs', { runId: latest.ID })) as { events?: unknown[] };
