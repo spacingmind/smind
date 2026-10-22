@@ -204,6 +204,8 @@ export interface ProviderInfo {
   models?: ModelInfo[];
   /** True once `models` came from the agent itself rather than a static catalog. */
   modelsDiscovered?: boolean;
+  /** Config `providers.<id>.defaultModel`: the model a run that names none resolves to. Absent = the provider's own default. */
+  defaultModel?: string;
 }
 
 // Result of provider.list (internal/wsapi/handlers.go's providerListResult).

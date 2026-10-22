@@ -120,6 +120,19 @@ func WithClaudeCLIPath(path string, env ...string) Option {
 	}
 }
 
+// WithDefaultModel sets the model a run of provider uses when it names none
+// (config providers.<id>.defaultModel). Empty or unset keeps the provider's
+// own default. See Runner.DefaultModel.
+func WithDefaultModel(provider Provider, model string) Option {
+	return func(r *Runner) {
+		if model == "" {
+			delete(r.defaultModels, provider)
+			return
+		}
+		r.defaultModels[provider] = model
+	}
+}
+
 // WithCodexCommand overrides the command spawned for ProviderCodexNative
 // turns, in place of the default codex.DefaultCommand(). Same reasoning and
 // use (pointing at a compiled fake-agent binary in tests) as
@@ -167,6 +180,10 @@ type Runner struct {
 	// Provider constant this package defines) fails fast in runACP rather
 	// than spawning an empty command.
 	acpCommands map[Provider][]string
+
+	// defaultModels maps a provider to the configured default model
+	// (WithDefaultModel); a provider with no entry runs its own default.
+	defaultModels map[Provider]string
 
 	// codexCommand is the command spawned for ProviderCodexNative turns.
 	// Defaults to codex.DefaultCommand(); overridable via WithCodexCommand.
@@ -243,6 +260,7 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 		claudeClients: map[int64]claudeBackend{},
 		claudeModels:  map[int64]string{},
 		sessionStore:  NewMemorySessionStore(),
+		defaultModels: map[Provider]string{},
 		acpCommands: map[Provider][]string{
 			ProviderGLM:  acp.GLMCommand(),
 			ProviderKimi: acp.KimiCommand(),

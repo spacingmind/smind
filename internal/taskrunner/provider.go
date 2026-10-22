@@ -107,8 +107,12 @@ type ProviderInfo struct {
 	// is static and ModelsDiscovered is false (any syntax-valid id is still
 	// accepted); for ACP providers and Codex it is what the lazy probe found,
 	// and ModelsDiscovered true means an id outside it is rejected up front.
-	Models           []ModelInfo `json:"models,omitempty"`
-	ModelsDiscovered bool        `json:"modelsDiscovered,omitempty"`
+	Models []ModelInfo `json:"models,omitempty"`
+	// DefaultModel is the configured default model (config providers.<id>.
+	// defaultModel): what a run that names no model resolves to. Empty when
+	// unset, in which case the provider's own default applies.
+	DefaultModel     string `json:"defaultModel,omitempty"`
+	ModelsDiscovered bool   `json:"modelsDiscovered,omitempty"`
 	// SupportsAutoAccept marks an ACP provider, which additionally takes
 	// PermissionSettings.AutoAccept (approve every permission prompt).
 	SupportsAutoAccept bool `json:"supportsAutoAccept,omitempty"`

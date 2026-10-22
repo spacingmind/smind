@@ -120,6 +120,11 @@ func cmdServe(args []string) int {
 	if mt := cfg.Agents.GLM.MaxTurns; mt != nil {
 		runnerOpts = append(runnerOpts, taskrunner.WithACPCommand(taskrunner.ProviderGLM, acp.GLMCommand(acp.WithMaxTurns(*mt))))
 	}
+	for _, id := range config.DefaultModelProviders {
+		if m := cfg.DefaultModel(id); m != "" {
+			runnerOpts = append(runnerOpts, taskrunner.WithDefaultModel(taskrunner.Provider(id), m))
+		}
+	}
 	if cmd := os.Getenv("SMIND_ACP_COMMAND"); cmd != "" {
 		// Testing-only hook: lets a manual/integration test point
 		// ProviderGLM turns at a fake ACP agent binary (see

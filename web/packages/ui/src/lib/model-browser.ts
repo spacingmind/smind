@@ -16,6 +16,8 @@ export interface ModelRow {
   modelLabel: string;
   description?: string;
   isDefault?: boolean;
+  /** Synthetic default row only: the label of the configured default model (config providers.<id>.defaultModel) a run resolves to. */
+  resolvedDefaultLabel?: string;
 }
 
 export type ProviderModelSelection =
@@ -56,8 +58,8 @@ function buildModelRowKey(provider: string, modelId: string): string {
   return `${provider}:${modelId}`;
 }
 
-function buildSyntheticDefaultRow(provider: string, providerLabel: string): ModelRow {
-  return {
+function buildSyntheticDefaultRow(provider: string, providerLabel: string, resolved?: string): ModelRow {
+  const row: ModelRow = {
     key: buildModelRowKey(provider, ""),
     provider,
     providerLabel,
@@ -65,6 +67,17 @@ function buildSyntheticDefaultRow(provider: string, providerLabel: string): Mode
     modelLabel: DEFAULT_MODEL_LABEL,
     isDefault: true,
   };
+  if (resolved) {
+    row.resolvedDefaultLabel = resolved;
+    row.description = `Currently ${resolved}`;
+  }
+  return row;
+}
+
+/** The label a configured default model id resolves to: the catalog's label when it lists the id, else the id itself. */
+function resolveConfiguredDefault(info: ProviderInfo): string | undefined {
+  if (!info.defaultModel) return undefined;
+  return info.models?.find((m) => m.id === info.defaultModel)?.label ?? info.defaultModel;
 }
 
 export function buildBrowserProviders(
@@ -80,7 +93,7 @@ export function buildBrowserProviders(
         ? { id: info.id, label, modelSelection: { kind: "loading" as const }, unavailableReason: h.detail || "Unavailable" }
         : { id: info.id, label, modelSelection: { kind: "loading" as const } };
     }
-    const rows: ModelRow[] = [buildSyntheticDefaultRow(info.id, label)];
+    const rows: ModelRow[] = [buildSyntheticDefaultRow(info.id, label, resolveConfiguredDefault(info))];
     for (const model of info.models ?? []) {
       rows.push({
         key: buildModelRowKey(info.id, model.id),
@@ -279,7 +292,9 @@ export function resolveTriggerLabel({
   const rows = getProviderModelRows(provider);
   if (!selectedModel) {
     const defaultRow = rows.find((row) => row.isDefault && row.modelId !== "");
-    return defaultRow?.modelLabel ?? provider.label;
+    if (defaultRow) return defaultRow.modelLabel;
+    // The synthetic default row: when a default is configured, show what a run resolves to.
+    return rows.find((row) => row.modelId === "")?.resolvedDefaultLabel ?? provider.label;
   }
   const row = rows.find((entry) => entry.modelId === selectedModel);
   return row?.modelLabel ?? selectedModel;

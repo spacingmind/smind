@@ -27,6 +27,7 @@ const (
 	kindString
 	kindList
 	kindSecret // passwordHash: never printed, only removable here
+	kindModel  // a model id, validated by ValidateModelName
 )
 
 type keyInfo struct {
@@ -39,6 +40,13 @@ var knownKeys = map[string]keyInfo{
 	"server.listen":       {kindString, "host:port to bind; a non-loopback host needs a password (smind set-password)"},
 	"server.hostnames":    {kindList, "extra Host header names, comma separated; a leading . matches subdomains"},
 	"server.passwordHash": {kindSecret, "set with `smind set-password`; shown only as <set>"},
+}
+
+func init() {
+	// providers.<id>.defaultModel (ADR-0025 follow-up): one key per provider.
+	for _, id := range DefaultModelProviders {
+		knownKeys["providers."+id+".defaultModel"] = keyInfo{kindModel, "model a " + id + " run uses when none is given (e.g. sonnet); unset = the provider's own default"}
+	}
 }
 
 // KnownKeys lists the editable keys, sorted, for help and error messages.
@@ -121,6 +129,15 @@ func Set(path, value string) error {
 			return fmt.Errorf("%s: %q is not a valid port (1-65535)", path, value)
 		}
 		node = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: strconv.Itoa(n)}
+	case kindModel:
+		v := strings.TrimSpace(value)
+		if v == "" {
+			return fmt.Errorf("%s: empty value (use `smind config unset %s` to remove it)", path, path)
+		}
+		if err := ValidateModelName(v); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		node = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v}
 	case kindString:
 		v := strings.TrimSpace(value)
 		if v == "" {

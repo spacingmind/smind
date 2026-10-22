@@ -349,6 +349,45 @@ describe("search ranking", () => {
   });
 });
 
+describe("configured default model", () => {
+  const withDefault = (defaultModel?: string) =>
+    buildBrowserProviders(
+      [{ ...info("claude", "Claude Code", [model("sonnet", "Sonnet (latest)"), model("opus", "Opus (latest)")]), defaultModel }],
+      {},
+    );
+
+  it("the Default row says what a run resolves to, using the catalog label", () => {
+    const [claude] = withDefault("sonnet");
+    expect(getProviderModelRows(claude!)[0]).toMatchObject({
+      modelId: "",
+      modelLabel: "Default model",
+      resolvedDefaultLabel: "Sonnet (latest)",
+      description: "Currently Sonnet (latest)",
+    });
+  });
+
+  it("an id the catalog does not list is shown as is", () => {
+    const [claude] = withDefault("claude-sonnet-5-5");
+    expect(getProviderModelRows(claude!)[0]?.resolvedDefaultLabel).toBe("claude-sonnet-5-5");
+  });
+
+  it("without a configured default the row is unchanged", () => {
+    const [claude] = withDefault(undefined);
+    const row = getProviderModelRows(claude!)[0]!;
+    expect(row.resolvedDefaultLabel).toBeUndefined();
+    expect(row.description).toBeUndefined();
+  });
+
+  it("the trigger shows the resolved model when nothing is picked", () => {
+    expect(
+      resolveTriggerLabel({ providers: withDefault("opus"), selectedProvider: "claude", selectedModel: "" }),
+    ).toBe("Opus (latest)");
+    expect(
+      resolveTriggerLabel({ providers: withDefault(undefined), selectedProvider: "claude", selectedModel: "" }),
+    ).toBe("Claude Code");
+  });
+});
+
 describe("trigger label", () => {
   const providers = buildBrowserProviders(
     [info("claude", "Claude Code", [model("opus-5", "Opus 5"), model("sonnet-4.6", "Sonnet 4.6", { default: true })])],

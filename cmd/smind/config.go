@@ -14,7 +14,8 @@ const cmdConfigUsage = `usage:
   smind config set <path> <value>  change a setting (comments in config.yaml are kept)
   smind config unset <path>        remove a setting, restoring its default
 
-settable paths: server.port, server.listen, server.hostnames, (server.passwordHash: unset only; use smind set-password)
+settable paths: server.port, server.listen, server.hostnames, providers.<id>.defaultModel (id: claude-native, codex-native, glm, kimi),
+  (server.passwordHash: unset only; use smind set-password)
 changes apply when the daemon restarts (smind stop && smind serve)`
 
 // cmdConfig implements `smind config get|set|unset` (ADR-0031 D10): the one
