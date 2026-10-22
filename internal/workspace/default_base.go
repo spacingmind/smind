@@ -205,36 +205,48 @@ func workspaceDefaultBase(ws store.Workspace) string {
 // recorded with, per ADR-0039 section 2's table. The worktree already exists
 // and is checked out on the task branch, so HEAD there is the branch tip.
 // Every step is best effort: a base that cannot be resolved is "".
+//
+// base_sha is the diff base. For the modes that create the branch (default
+// and baseRef) it is the commit the branch was created at, so the diff shows
+// exactly the task's own work even when the workspace checkout carried
+// unrelated unpushed commits. base_ref is only ever a branch name (the PR
+// target): a baseRef that is not a branch (a tag, a sha, HEAD~3) falls back
+// to the workspace default base. No network is used here.
 func computeTaskBase(ws store.Workspace, p createTaskParams, worktreePath string) (ref, sha string) {
-	if p.baseRef != "" {
-		ref = p.baseRef
-		if remote, b, ok := splitRemoteBranch(p.baseRef); ok && remoteConfigured(ws.Path, remote) {
-			ref = b
+	switch {
+	case p.baseRef != "":
+		ref = baseBranchOf(ws.Path, p.baseRef)
+		if ref == "" {
+			ref = workspaceDefaultBase(ws)
 		}
 		return ref, gitHeadSha(worktreePath, "HEAD")
-	}
-
-	ref = workspaceDefaultBase(ws)
-	switch {
 	case p.branch != "":
-		// Existing branch: unrelated histories leave the sha empty.
+		// Existing branch: the fork point is unknown, so the base is the
+		// merge base with the default base; unrelated histories leave it empty.
+		ref = workspaceDefaultBase(ws)
 	case p.prSupplied:
 		// TODO(ADR-0039 section 2): use the PR's baseRefName from the forge
 		// PR once the forge provider exists; until then the workspace
 		// default base stands in.
+		ref = workspaceDefaultBase(ws)
 	default:
-		if ref != "" && remoteConfigured(ws.Path, originRemote) {
-			fetchRemoteBranchBestEffort(ws.Path, originRemote, ref)
-		}
-		if cmp := baseCompareRef(ws.Path, ref); cmp != "" {
-			if sha = gitMergeBase(worktreePath, "HEAD", cmp); sha != "" {
-				return ref, sha
-			}
-		}
-		return ref, gitHeadSha(worktreePath, "HEAD")
+		return workspaceDefaultBase(ws), gitHeadSha(worktreePath, "HEAD")
 	}
 	if cmp := baseCompareRef(ws.Path, ref); cmp != "" {
 		sha = gitMergeBase(worktreePath, "HEAD", cmp)
 	}
 	return ref, sha
+}
+
+// baseBranchOf names the branch a baseRef refers to: "<remote>/<branch>" for
+// a configured remote gives <branch>; a name that is an existing local branch
+// gives itself; anything else (tag, sha, relative rev) gives "".
+func baseBranchOf(dir, baseRef string) string {
+	if remote, b, ok := splitRemoteBranch(baseRef); ok && remoteConfigured(dir, remote) {
+		return b
+	}
+	if gitRefCommitExists(dir, "refs/heads/"+baseRef) {
+		return baseRef
+	}
+	return ""
 }

@@ -53,6 +53,33 @@ func TestCreateTask_StoresBase_DefaultMode(t *testing.T) {
 	}
 }
 
+// A workspace checkout ahead of origin/<base> with unpushed commits must not
+// leak them into the task's diff base: base_sha is the fork commit (HEAD),
+// not merge-base(HEAD, origin/<base>).
+func TestCreateTask_StoresBase_DefaultMode_CheckoutAheadOfBase(t *testing.T) {
+	m, wsID, repo, _, _, _ := newTaskRefEnv(t)
+	writeAndCommit(t, repo, "unpushed.txt", "unrelated\n", "unpushed work")
+	ahead := worktreeHead(t, repo)
+	task, err := m.CreateTask(wsID, nil, "Ahead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := getTask(t, m, task.ID); got.BaseRef != "develop" || got.BaseSha != ahead {
+		t.Fatalf("base = %q/%s, want develop/%s (the fork commit)", got.BaseRef, got.BaseSha, ahead)
+	}
+}
+
+func TestCreateTask_StoresBase_BaseRefModeNonBranchFallsBack(t *testing.T) {
+	m, wsID, _, _, _, headSHA := newTaskRefEnv(t)
+	task, err := m.CreateTask(wsID, nil, "From a sha", WithBaseRef(headSHA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := getTask(t, m, task.ID); got.BaseRef != "develop" || got.BaseSha != headSHA {
+		t.Fatalf("base = %q/%s, want develop/%s", got.BaseRef, got.BaseSha, headSHA)
+	}
+}
+
 func TestCreateTask_StoresBase_DefaultMode_NoOrigin(t *testing.T) {
 	repo := newTestRepo(t)
 	runGitT(t, repo, "branch", "-M", "main")

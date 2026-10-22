@@ -142,9 +142,7 @@ func TestManager_CreatePR_CleanBase(t *testing.T) {
 // moment the task's worktree was created, so the task branch's fork point
 // is not an ancestor of the base. CreatePR must cherry-pick only the
 // task's own commit(s) onto a clean smind/pr-task-<id> branch rather than
-// opening a PR stuffed with the unrelated history. (Default-mode tasks now
-// record merge-base(HEAD, origin/<base>) as their fork point, so the test
-// pins the old fork point -- the checkout's HEAD -- via the store.)
+// opening a PR stuffed with the unrelated history.
 func TestManager_CreatePR_DivergedBase(t *testing.T) {
 	repo, bare := newRepoWithOrigin(t)
 	// Simulate Session 1's gap: the workspace repo's checkout gains a real
@@ -160,10 +158,6 @@ func TestManager_CreatePR_DivergedBase(t *testing.T) {
 	task, err := m.CreateTask(w.ID, nil, "Fix bug")
 	if err != nil {
 		t.Fatalf("CreateTask() error = %v", err)
-	}
-	forkHead := strings.TrimSpace(runGitOutputT(t, *task.WorktreePath, "rev-parse", "HEAD"))
-	if err := m.store.SetTaskBase(task.ID, "develop", forkHead); err != nil {
-		t.Fatalf("SetTaskBase() error = %v", err)
 	}
 	writeAndCommit(t, *task.WorktreePath, "taskwork.txt", "the task's own change\n", "add taskwork")
 
