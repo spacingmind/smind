@@ -64,7 +64,7 @@ describe("prChipModel", () => {
 
   it("never throws on missing checks or unknown values", () => {
     expect(() => prChipModel(pr({ checks: undefined, reviewDecision: undefined as unknown as TaskGitPr["reviewDecision"], mergeable: undefined as unknown as TaskGitPr["mergeable"] }), NOW)).not.toThrow();
-    const m = prChipModel(pr({ state: "weird" as unknown as TaskGitPr["state"], stale: "future" as unknown as PrStaleKeys, fetchedAt: "not a date", title: undefined, repo: undefined }), NOW);
+    const m = prChipModel(pr({ state: "weird" as unknown as TaskGitPr["state"], stale: "future" as unknown as TaskGitPr["stale"], fetchedAt: "not a date", title: undefined, repo: undefined }), NOW);
     expect(m.label).toBe("#42 · Open");
     expect(m.detail).toContain(" — ");
   });
@@ -85,5 +85,3 @@ describe("prChipModel", () => {
     expect(m.detail.length).toBeLessThan(300);
   });
 });
-
-type PrStaleKeys = string & {};
