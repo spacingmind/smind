@@ -233,3 +233,20 @@ func TestStore_EmptyRequestList(t *testing.T) {
 		t.Fatalf("%+v %v", set, err)
 	}
 }
+
+func TestStore_PathRefusesTraversalAndBadSetID(t *testing.T) {
+	t.Parallel()
+	st := NewStore(t.TempDir())
+	id := strings.Repeat("ab", 16)
+	if p, err := st.Path(id, Item{File: "01-a.png"}); err != nil || filepath.Base(p) != "01-a.png" || filepath.Base(filepath.Dir(p)) != id {
+		t.Fatalf("Path = %q, %v", p, err)
+	}
+	for _, f := range []string{"", ".", "../x", "a/b", `a\b`, "a\x00b"} {
+		if _, err := st.Path(id, Item{File: f}); err == nil {
+			t.Fatalf("Path accepted file name %q", f)
+		}
+	}
+	if _, err := st.Path("../etc", Item{File: "a"}); err == nil {
+		t.Fatal("Path accepted a bad set id")
+	}
+}

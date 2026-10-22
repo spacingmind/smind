@@ -91,17 +91,27 @@ func writeNew(path string, data []byte) error {
 	return securefile.Restrict(path)
 }
 
-// ReadFile reads the stored file of an item. Names with separators or ".."
-// are refused.
-func (s *Store) ReadFile(setID string, it Item) ([]byte, error) {
+// Path returns the absolute path of an item's stored file. Set ids that are
+// not 32 hex chars and file names with separators, ".." or NUL are refused,
+// so a corrupted row can never point outside the set.
+func (s *Store) Path(setID string, it Item) (string, error) {
 	dir := s.Dir(setID)
 	if dir == "" {
-		return nil, errors.New("attach: invalid set id")
+		return "", errors.New("attach: invalid set id")
 	}
 	if it.File == "" || it.File == "." || strings.Contains(it.File, "..") || strings.ContainsAny(it.File, `/\`+"\x00") {
-		return nil, errors.New("attach: invalid file name")
+		return "", errors.New("attach: invalid file name")
 	}
-	return os.ReadFile(filepath.Join(dir, it.File))
+	return filepath.Join(dir, it.File), nil
+}
+
+// ReadFile reads the stored file of an item (see Path for what is refused).
+func (s *Store) ReadFile(setID string, it Item) ([]byte, error) {
+	p, err := s.Path(setID, it)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(p)
 }
 
 // Remove deletes a whole set; a missing set is not an error.
