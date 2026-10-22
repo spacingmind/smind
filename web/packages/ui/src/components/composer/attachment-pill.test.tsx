@@ -84,4 +84,21 @@ describe("AttachmentTray", () => {
     fireEvent.keyDown(box, { key: "Escape" });
     expect(screen.queryByTestId("attachment-lightbox")).toBeNull();
   });
+
+  it("renders a PR/issue pill with #number title, kind and repo, opens its url and removes", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const onRemove = vi.fn();
+    const prItem: DraftAttachment = { localId: "p", kind: "pr", forge: "github", number: 123, repo: "o/r", title: "Fix it", url: "https://github.com/o/r/pull/123" };
+    render(<AttachmentPill item={prItem} onRemove={onRemove} />);
+    expect(screen.getByText("#123 Fix it")).toBeInTheDocument();
+    expect(screen.getByText("PR · o/r")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("#123 Fix it"));
+    expect(open).toHaveBeenCalledWith("https://github.com/o/r/pull/123", "_blank", "noopener,noreferrer");
+    fireEvent.click(screen.getByRole("button", { name: "Remove #123 Fix it" }));
+    expect(onRemove).toHaveBeenCalled();
+    cleanup();
+    render(<AttachmentPill item={{ ...prItem, kind: "issue" }} onRemove={onRemove} />);
+    expect(screen.getByText("Issue · o/r")).toBeInTheDocument();
+    open.mockRestore();
+  });
 });

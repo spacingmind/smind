@@ -5,7 +5,7 @@ import { AttachmentTray } from "@/components/composer/attachment-tray";
 import { useAttachmentDraft } from "@/components/composer/use-attachment-draft";
 import { attachmentErrorMessage } from "@/lib/attachments/errors";
 import { encodeAttachment } from "@/lib/attachments/encode";
-import { useComposerAttachmentsStore, type DraftAttachment } from "@/stores/composer-attachments-store";
+import { isDraftFile, useComposerAttachmentsStore, type DraftAttachment } from "@/stores/composer-attachments-store";
 import { cn } from "@/lib/utils";
 
 import { ComposerStatusChips } from "@/components/composer/composer-status-chips";
@@ -40,6 +40,9 @@ const ICON_ACTION_BUTTON_CLASS = "size-11 rounded-xl md:size-8";
 
 /** The metadata the optimistic run entry shows for a draft item, thumbnail URL included so no fetch is needed. */
 function draftPreview(item: DraftAttachment, index: number): AttachmentMeta {
+  if (!isDraftFile(item)) {
+    return { id: String(index + 1), kind: item.kind, forge: item.forge, number: item.number, repo: item.repo, title: item.title, url: item.url };
+  }
   return { id: String(index + 1), kind: item.kind, name: item.name, mimeType: item.mimeType, size: item.size, previewUrl: item.previewUrl };
 }
 
