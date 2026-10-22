@@ -46,7 +46,8 @@ export function DiffRender({
   /**
    * Hide diff2html's own per-file header (icon, name, CHANGED tag, "Viewed" box). The by-file view already has a row
    * header with the name, status and viewed toggle above each diff, so showing both read as two headers and two
-   * "viewed" boxes per file. The whole-diff view has no row headers and keeps diff2html's.
+   * "viewed" boxes per file. The whole-diff view has no row headers and keeps diff2html's. The `!` matters:
+   * diff2html's stylesheet is unlayered, so it beats Tailwind's layered utilities unless this one is important.
    */
   hideFileHeader?: boolean;
   testId?: string;
@@ -80,7 +81,7 @@ export function DiffRender({
       data-testid={testId}
       data-output-format={outputFormat}
       data-file-header={hideFileHeader ? "hidden" : "shown"}
-      className={hideFileHeader ? "[&_.d2h-file-header]:hidden" : undefined}
+      className={hideFileHeader ? "[&_.d2h-file-header]:hidden!" : undefined}
       onClick={(e) => {
         const handler = onSelectLineRef.current;
         if (!handler) return;

@@ -527,7 +527,7 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
     // The row header (stage box, name, viewed) is the one header; diff2html's second one (name, CHANGED, Viewed) is hidden.
     const container = screen.getByTestId("diff-container-file.txt");
     expect(container).toHaveAttribute("data-file-header", "hidden");
-    expect(container.className).toContain("[&_.d2h-file-header]:hidden");
+    expect(container.className).toContain("[&_.d2h-file-header]:hidden!");
     expect(screen.getByTestId("viewed-file.txt")).toBeInTheDocument();
 
     // The whole-diff view has no row headers, so it keeps diff2html's.
