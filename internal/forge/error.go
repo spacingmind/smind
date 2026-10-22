@@ -25,7 +25,7 @@ const (
 // never carries argv or stderr (those go in Error.Detail, scrubbed).
 const (
 	msgCLIMissing      = "The GitHub CLI (`gh`) isn't installed on the daemon host."
-	msgUnauthenticated = "GitHub isn't signed in on the daemon host. Run `gh auth login` there, or paste a token in Settings → GitHub."
+	msgUnauthenticated = "GitHub isn't signed in on the daemon host. Run `gh auth login` on that host."
 	msgNoRemote        = "This workspace's `origin` isn't a GitHub remote."
 	msgNotFound        = "That pull request or issue wasn't found, or you don't have access."
 	msgRateLimited     = "GitHub is rate-limiting requests. Try again later."
