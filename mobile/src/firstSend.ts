@@ -1,8 +1,6 @@
-// firstSend.ts is M6-B2's pure provider resolution for a task with no
-// run: the latest run's provider (follow-up path) is moot here, but the
-// function also covers the general shape so the screen has one entry
-// point. Kept pure -- no react-native import -- per providerCatalog's
-// discipline.
+// firstSend.ts resolves the provider a task's first prompt sends with
+// when the task has no run. Kept pure -- no react-native import -- per
+// providerCatalog's discipline.
 
 import { ProviderInfo } from './api';
 import { defaultSelection, RememberedSelection } from './providerCatalog';

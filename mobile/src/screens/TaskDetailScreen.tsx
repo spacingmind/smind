@@ -94,7 +94,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   // restore-on-failed-send path.
   const draftState = useNativeState('');
   const [sendError, setSendError] = useState<string | null>(null);
-  // M6-B2: the provider catalog for a task with no run (its first prompt has no run to inherit a provider from); null = not loaded yet.
+  // The provider catalog for a task with no run (its first prompt has no run to inherit a provider from); null = not loaded yet.
   const [providers, setProviders] = useState<ProviderInfo[] | null>(null);
   const [continued, setContinued] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -316,7 +316,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
     };
   }, [conn, taskId, epoch, refreshLatest]);
 
-  // M6-B2: the provider a send uses — the run's own when it has one, else the first-send resolution over the catalog.
+  // The provider a send uses — the run's own when it has one, else the first-send resolution over the catalog.
   const sendProvider = state.kind === 'ready' ? firstSendProvider(providers ?? [], state.run?.Provider ?? null, recallSelection()) : null;
 
   const nextSeq = useCallback(() => {
@@ -368,7 +368,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
           { whenBusy, chatId: chatId ?? undefined },
         );
         if (result.kind === 'queued') queue.refresh(); // covers a missed snapshot
-        else void refreshLatest(); // a first send's run must adopt (RunStrip/footer) like a task that had one
+        else if (state.run === null) void refreshLatest(); // a first send's run must adopt (RunStrip/footer) like a task that had one
       } catch (e) {
         hapticFor('error');
         setDraft(text); // the typed text is never silently lost
@@ -566,7 +566,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
 
 const keyExtractor = (item: TranscriptItem) => item.key;
 const emptyTranscript = <EmptyState title="(empty transcript)" body="Nothing has been said in this run yet." />;
-/** A task with no run: either no providers to send with, or ready for its first prompt (M6-B2). */
+/** A task with no run: either no providers to send with, or ready for its first prompt. */
 function ZeroRunEmptyState({ providers }: { providers: ProviderInfo[] | null }) {
   if (providers !== null && providers.length === 0) return <EmptyState title="This daemon has no providers." body="Add one to start a run." />;
   return <EmptyState title="No prompts yet" body="Send the first prompt to start a run." />;
