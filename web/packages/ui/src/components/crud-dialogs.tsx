@@ -72,6 +72,7 @@ function CrudForm({
   children,
   submitTestId,
   cancelTestId,
+  contentClassName,
 }: {
   title: string;
   description?: string;
@@ -81,11 +82,13 @@ function CrudForm({
   children: ReactNode;
   submitTestId?: string;
   cancelTestId?: string;
+  /** Extra classes for the dialog surface (e.g. anchoring it to the top so a growing body does not re-centre it). */
+  contentClassName?: string;
 }) {
   const [pending, setPending] = useState(false);
 
   return (
-    <DialogContent>
+    <DialogContent className={contentClassName}>
       <DialogHeader>
         <DialogTitle>{title}</DialogTitle>
         {description && <DialogDescription>{description}</DialogDescription>}
@@ -320,6 +323,8 @@ export function CreateTaskDialog({
       {open && (
         <CrudForm
           title="New task"
+          // Anchored to the top: the Start-from step changes the body's height, and a centred dialog would jump with it.
+          contentClassName="top-[12vh] translate-y-0"
           description={`A task worktree in ${workspace.Title || workspace.Path}.`}
           submitLabel="Create task"
           onOpenChange={onOpenChange}

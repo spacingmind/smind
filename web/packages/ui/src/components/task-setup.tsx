@@ -146,7 +146,7 @@ export function SetupDetails({
           </p>
         ) : (
           <span className="min-w-0 flex-1 truncate text-foreground-muted">
-            {status === "running" ? "Setup output" : "Setup finished"}
+            {status === "running" ? "Setup output" : status === "blocked" ? "Setup has not run" : "Setup finished"}
           </span>
         )}
         {log && (
