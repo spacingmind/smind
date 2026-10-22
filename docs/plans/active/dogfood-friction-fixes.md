@@ -41,7 +41,7 @@ All branch from `origin/develop`; none stack. PR 1 and PR 2 both edit `cmdTaskSe
 - **AC1** `smind task send <id> <provider> <prompt> --detach` calls `run.start`, prints the run id on stdout (one line, `run <id> started` on stderr as today), makes no `run.attach` call, and exits 0. A queued result (`--when-busy queue`) behaves as today.
 - **AC2** `task send --thinking off|standard|extended` sends `thinkingLevel` in `run.start`; any other value exits 2 with the allowed list; omitted sends no field (unchanged).
 - **AC3** When the provider is `claude-native` and no `--model` was given, `task send` prints one stderr line saying the model is the Claude CLI's own default and how to pin one. Nothing is printed when `--model` is given or for other providers.
-- **AC4** `task runs` shows the requested model per run (empty when unpinned).
+- **AC4** `task runs` has a MODEL column: the requested model; when unpinned, the model the agent reported using, in parentheses (this is how a user sees what "Default" resolved to); `-` when neither is known.
 - **AC5** `raw` events are not printed by `task send`, `task attach` or `task logs` unless `--verbose` is passed; with `--verbose` the output is byte-identical to today.
 - **AC6** With `--auto-accept`, a permission request that the daemon resolves automatically prints exactly one line (`[permission] auto-accepted <summary> -> <optionId>`), not the block. Without `--auto-accept`, output is unchanged. `task attach`/`logs` on a run started with auto-accept print the same one-liner (the decision is derived from the `permission_resolved` reason `auto_accept`, not from a flag on the viewer).
 - **AC7** `task new <ws> <title> --base <ref>` sends `baseRef`; `--branch <name>` sends `branch`; `--pr <n>` sends `prNumber`. More than one of the three exits 2 with a message, before any dial. Existing `--space`/`--parent` still work, in any order with the new flags.
@@ -56,7 +56,7 @@ All branch from `origin/develop`; none stack. PR 1 and PR 2 both edit `cmdTaskSe
 | `TestTaskSendDetachQueuedUnchanged` | AC1 | same |
 | `TestTaskSendThinkingFlag` (table: valid, invalid, omitted) | AC2 | same |
 | `TestTaskSendUnpinnedClaudeNote` (claude-native unpinned, pinned, glm) | AC3 | same, captured stderr |
-| `TestTaskRunsShowsModel` | AC4 | same |
+| `TestRunModelCell`, `TestTaskRunsShowsModel` | AC4 | pure function + CLI against the fake daemon |
 | `TestRenderRawHiddenByDefault` / `TestRenderRawVerbose` | AC5 | `printRunLogs` and `streamRun` with a raw event |
 | `TestPermissionAutoAcceptOneLine` / `TestPermissionManualUnchanged` | AC6 | event renderers |
 | `TestTaskNewBaseBranchPR` (each flag, two flags, flag order) | AC7 | fake server |
