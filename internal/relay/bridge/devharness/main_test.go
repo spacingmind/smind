@@ -362,6 +362,27 @@ func TestQueueInterruptStopsTheLiveRunAndGoesFirst(t *testing.T) {
 	p.mustOK("quit")
 }
 
+// TestSetTaskStatus: set-task-status writes the status column of an
+// existing task and refuses a bad status or taskId.
+func TestSetTaskStatus(t *testing.T) {
+	p := startFake(t)
+
+	m := p.mustOK("seed-run end_turn Status task")
+	taskID := int64(m["taskId"].(float64))
+	for _, status := range []string{"created", "running", "error", "stopped", "done"} {
+		if m := p.mustOK("set-task-status " + fmtInt(taskID) + " " + status); int64(m["taskId"].(float64)) != taskID || m["status"] != status {
+			t.Fatalf("set-task-status %s: %v", status, m)
+		}
+	}
+	if m := p.do("set-task-status " + fmtInt(taskID) + " bogus"); m["ok"] != false {
+		t.Fatalf("set-task-status bogus status: %v", m)
+	}
+	if m := p.do("set-task-status 999999 done"); m["ok"] != false {
+		t.Fatalf("set-task-status unknown task: %v", m)
+	}
+	p.mustOK("quit")
+}
+
 func fmtInt(i int64) string { return strconv.FormatInt(i, 10) }
 
 func m2s(v any) string { return v.(string) }
