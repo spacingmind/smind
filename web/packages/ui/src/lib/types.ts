@@ -13,6 +13,8 @@ export interface Workspace {
   HasTeardownScript?: boolean;
   CreatedAt: string;
   UpdatedAt: string;
+  /** ADR-0038: the queued prompt's attachments (metadata only). */
+  attachments?: AttachmentMeta[];
 }
 
 /** workspace.get's result: the workspace plus its setup/teardown script text ("" = none) -- the only wire method that returns it (ADR-0024). */
@@ -175,6 +177,8 @@ export type ProviderCredentialKind = "oauth" | "api-key";
 // docs/plans/active/task-permission-ux.md's Item 7d note for that gap.
 export interface ProviderInfo {
   id: Provider;
+  /** ADR-0038: whether the provider can view images natively ("no" = the file path is sent instead). Absent on a daemon without attachments. */
+  images?: "yes" | "no" | "unknown";
   label?: string;
   kind?: ProviderKind;
   credentialKind?: ProviderCredentialKind;
@@ -264,6 +268,8 @@ export interface RunSummary {
   HeadSHA?: string | null;
   /** O1 provenance: the worktree's dirty state at the latest successful capture (start, overwritten at the terminal state). */
   Dirty?: boolean | null;
+  /** ADR-0038: the prompt's attachments as metadata (never bytes). Absent/empty when it had none. */
+  attachments?: AttachmentMeta[];
 }
 
 // internal/runs.WhenBusy's values (ADR-0021 §2), run.start's optional
@@ -551,6 +557,8 @@ export interface RunLogsResult {
   baseSha?: string;
   headSha?: string;
   dirty?: boolean;
+  /** ADR-0038: the run's attachments (metadata only). */
+  attachments?: AttachmentMeta[];
   events: RunLogEvent[];
 }
 
@@ -863,3 +871,49 @@ export interface UsageSummaryRow {
 export type UsageScope = "runs" | "proxy" | "all";
 export type UsageGroupBy = "task" | "provider" | "model" | "workspace";
 export type UsageRange = "today" | "7d" | "30d";
+
+// ADR-0038 prompt attachments (frozen wire contract). Requests carry bytes as standard base64; stored metadata never does.
+export type AttachmentRequest =
+  | { kind: "image" | "file"; name: string; mimeType: string; data: string }
+  | { kind: "file_ref"; path: string }
+  | { kind: "github_pr" | "github_issue"; number: number; repo?: string }
+  | { kind: "reuse"; runId: string; id: string };
+
+/** A stored attachment as the daemon reports it (`run.list`, `run.logs`, queue rows). `id` is the 1-based position as a string. */
+export interface AttachmentMeta {
+  id: string;
+  kind: "image" | "file" | "file_ref" | "github_pr" | "github_issue";
+  name?: string;
+  mimeType?: string;
+  size?: number;
+  width?: number;
+  height?: number;
+  path?: string;
+  isDir?: boolean;
+  number?: number;
+  repo?: string;
+  title?: string;
+  url?: string;
+  state?: string;
+  /** Client-only: an object URL for a thumbnail the client already holds (the optimistic echo), never sent by the daemon. */
+  previewUrl?: string;
+}
+
+/** `daemon.info.attachments`: the caps the composer mirrors. Absent on a daemon without the feature. */
+export interface AttachmentLimits {
+  maxCount: number;
+  maxImageBytes: number;
+  maxFileBytes: number;
+  maxTotalBytes: number;
+  maxMessageBytes: number;
+  images: string[];
+  github: boolean;
+}
+
+/** `run.attachment` result. */
+export interface RunAttachmentResult {
+  name: string;
+  mimeType: string;
+  size: number;
+  data: string;
+}
