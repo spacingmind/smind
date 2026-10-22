@@ -210,11 +210,21 @@ func runGitOutputEnv(dir string, env []string, args ...string) (string, error) {
 // never outlive the caller's deadline. O1's provenance capture runs on the
 // run's drive goroutine and must give up within its own timeout.
 func runGitOutputEnvCtx(ctx context.Context, dir string, env []string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	// core.fsmonitor is agent-editable repo config that git would execute as
+	// a program; force it off for every daemon call. It must precede the
+	// subcommand. GIT_TERMINAL_PROMPT=0 keeps a credential prompt from
+	// hanging the daemon; GIT_OPTIONAL_LOCKS=0 stops read-only commands
+	// (status) from taking index.lock under a running agent.
+	full := append([]string{"-c", "core.fsmonitor=false"}, args...)
+	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Dir = dir
-	if env != nil {
-		cmd.Env = env
+	// env != nil replaces the environment, so the hardening is appended to
+	// whichever base applies.
+	base := env
+	if base == nil {
+		base = os.Environ()
 	}
+	cmd.Env = append(append([]string(nil), base...), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
 	// CommandContext kills only git itself; a grandchild (an fsmonitor hook,
 	// a credential helper) that outlives it keeps the stdout/stderr pipes
 	// open and Run would wait for it indefinitely. WaitDelay bounds that

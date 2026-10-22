@@ -213,6 +213,16 @@ fork-PR task via a stub; one read-only `gh pr list` against `spacingmind/smind` 
 
 Filled in as work proceeds (deviations from the ADR text with the same behaviour).
 
+**PR 3 (G5 daemon), decided 2026-10-22 with the Supervisor:**
+
+- `task.stats` is **not** removed in PR 3: the web sidebar still calls it. PR 5 deletes the web hook and the daemon RPC together, so AC10's "`task.stats` no longer exists" is satisfied there.
+- `TaskGit.commits` gains an additive `sinceFork` (commits past `base_sha`): the Create-PR precondition is "at least one commit past the fork point", which `aheadOfBase` (against `origin/<base>`) cannot answer.
+- `actions.createPr`'s `run_active` blocker is an input flag of `gitstate.Actions`; PR 3 passes false and PR 6 supplies it from the run registry.
+- `internal/gitstate` does not import `internal/workspace`; it receives what it needs through `Input` and the `Source` interface that `wsapi` adapts from `*workspace.Manager`.
+- `ComputeConflict`/`ComputeMerged` (not `Conflict`/`Merged`, which are the payload types). `ComputeMerged` takes `sinceFork` so an empty branch is not reported as merged. The conflict file list is capped at 100.
+- The service is built inside `wsapi.New` (it needs the bus and the focus registry); `serve.go` starts and stops it. Cold `task.gitList` computes with 4 workers.
+- Interest is connection-level: any `task.git` subscriber turns the loop on; focus comes from `task.gitFocus`. A fetch runs for each workspace with a cached task, at most every 180 s (floor 60 s), only while someone subscribes.
+
 ## Decisions
 
 Taken from ADR-0039 (Accepted 2026-10-22).
@@ -235,10 +245,15 @@ Taken from ADR-0039 (Accepted 2026-10-22).
 
 ## Progress
 
+- 2026-10-22: G1 merged (#469), forge interface merged (#471). PR 3 (G5 daemon) implemented: `internal/gitstate` (hardened runner, local status, merge-tree conflict token, merged verdict, actions policy, service with coalesced `task.git` events and the interest-gated fetch loop), `task.git`/`task.gitList`/`task.gitFocus`, invalidation on run end / commit / stage / setBase.
 - 2026-10-22: research read (G1–G19 list, appendices A–C), ADR-0038/#459/0009/0028/0032/0033/0035 and the code seams re-checked, one live read-only
   `gh pr list` against `spacingmind/smind` to confirm the single-call-per-repo batching (4 PRs, ~1 s); ADR-0039 and this plan written; PR 1
   opened for review. Nothing else started.
 
 ## Validation
 
-How each AC gets satisfied is recorded here per PR as it lands (command output, screenshots, call counts). Empty until implementation.
+How each AC gets satisfied is recorded here per PR as it lands (command output, screenshots, call counts).
+
+**PR 2 (G1, #469):** AC3–AC9 by the named tests under "store / migration", live on an isolated daemon (`main`-only repo: `base_ref=main`, fork-commit `base_sha` also with an unpushed checkout commit) and screenshots of the settings dialog.
+
+**PR 3 (G5 daemon):** AC10–AC16 by the `TestGitStatus_*`, `TestGitRunner_*`, `TestFetch_*`, `TestTaskGitEvent_*`, `TestActions_*`, `TestTaskGit_*` tests. AC10's `task.stats` removal moves to PR 5. Live (isolated daemon on port 4821, throwaway repo with a bare origin, `git` wrapped on PATH to log every call): with **no `task.git` subscriber, 70 s of idle plus `task.git`/`task.gitList` reads made 12 local git calls and 0 `fetch`**; after subscribing and focusing, the first tick ran exactly one `git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main`, the payload then showed `behindBase 1 / aheadOfBase 1 / sinceFork 1`, `conflict: conflicts [shared.txt] against origin/main`, `origin.published false`, dirty counts, and the next focus tick published one `task.git` event (untracked 1 → 2).

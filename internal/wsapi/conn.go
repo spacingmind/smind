@@ -103,6 +103,10 @@ type conn struct {
 	// daemon itself (relay.device.*) refuse it.
 	local bool
 
+	// focus, when non-nil, is the daemon-wide task.gitFocus registry; this
+	// connection's entry is dropped when serve returns.
+	focus *focusRegistry
+
 	// maxMessage is the largest message this connection's transport carries
 	// (DirectMaxMessage on /ws, RelayMaxMessage over a relay); 0 = relay's.
 	maxMessage int
@@ -124,6 +128,9 @@ func newConn(tr Transport, handlers map[string]handlerFunc) *conn {
 func (c *conn) serve(ctx context.Context) {
 	connCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if c.focus != nil {
+		defer c.focus.drop(c)
+	}
 
 	if c.eventsSub != nil {
 		hs := make(map[string]handlerFunc, len(c.handlers)+2)
