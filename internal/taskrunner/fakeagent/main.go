@@ -221,6 +221,11 @@ func handle(msg message, sessionCwd *string) {
 				caps["mcpCapabilities"] = m
 			}
 		}
+		if os.Getenv("FAKEAGENT_IMAGE_CAP") != "" {
+			caps["promptCapabilities"] = map[string]any{"image": true}
+		} else if os.Getenv("FAKEAGENT_PROMPT_CAPS_EMPTY") != "" {
+			caps["promptCapabilities"] = map[string]any{}
+		}
 		switch capsMode {
 		case "loadSession":
 			caps["loadSession"] = true
