@@ -2,11 +2,15 @@
 
 ## Status
 
-**Proposed — 2026-10-22.** Written by the git/PR Lead for the Supervisor's review. The Human decided H1–H4 on 2026-10-22 (recorded under
-[Decisions made by the Human](#decisions-made-by-the-human)); everything else here is a recommendation until accepted. Plan:
+**Accepted — 2026-10-22, by the Human.** H1–H4 were decided before the ADR was written (recorded under
+[Decisions made by the Human](#decisions-made-by-the-human)); the open questions O1–O10 were accepted as recommended. G12 placement is
+accepted: the contract is [§8](#8-github-auth-surface-h4) and the implementation is a separate PR after G3/G4. Plan:
 [`docs/plans/active/git-pr-state.md`](../plans/active/git-pr-state.md). Scope: research items G1–G5 (P0), plus the policy and data
 that P1 items G8 (archive) and G12 (GitHub login) need. Research behind it is a local-only study (`docs/research/local/git-github-ux*.md`,
 not committed).
+
+Coordination decided with the Supervisor: PR #459 (`internal/ghctx`) lands as is; **this work owns the follow-up** that moves `ghctx` onto
+`internal/forge` and the `forge.Error`/`forge_*` codes, in the first forge PR after #459 is on `develop`.
 
 Builds on ADR-0006 (human-authored commits), ADR-0009 (lifecycle topics; this is the "own topic" it left open), ADR-0024 (worktrees and
 archive), ADR-0028 (call-budget rules), ADR-0032 (TanStack Query + zustand), ADR-0033 and ADR-0035 (remote daemons, relay E2EE),

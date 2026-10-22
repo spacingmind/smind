@@ -7,7 +7,7 @@ off `develop`** (a PR that needs an earlier PR's code waits for it to merge). Th
 `reviewer` pass on the exact commit before the Human is asked to merge.
 
 Spec for [ADR-0039](../../decisions/0039-git-pr-state.md) (read it first: schema, wire, budget, errors, security). Human decisions H1–H4, forge
-neutrality and read-only-mobile-later are fixed. Status: **ADR proposed 2026-10-22; nothing implemented until the Supervisor accepts.**
+neutrality and read-only-mobile-later are fixed. Status: **ADR accepted 2026-10-22 (O1–O10 as recommended); implementation starting with PR 2.**
 
 ## Goal
 
@@ -35,7 +35,7 @@ Order: 1 → 2 → 3 → (4 ‖ 5, disjoint write scopes: daemon forge vs web; 5
 after 4 merges) → 6 → 7. PR 6 mounts one component in the Diff header and rebases after the G6 Lead's PR merges. PR 7 needs 2 and 4 (it
 calls `Provider.PR`).
 
-Coordination: ADR-0038's PR #459 (`internal/ghctx`) merges before PR 4 starts (DEPENDENCY_REQUEST). Nothing in `mobile/`.
+Coordination: ADR-0038's PR #459 (`internal/ghctx`) lands as is before PR 4 starts; PR 4 owns moving `ghctx` onto `internal/forge` and the `forge_*` codes (the ADR-0038 Lead does not touch ghctx internals). Nothing in `mobile/`.
 
 ## Acceptance criteria
 
@@ -215,7 +215,7 @@ Filled in as work proceeds (deviations from the ADR text with the same behaviour
 
 ## Decisions
 
-Taken from ADR-0039 (Proposed 2026-10-22).
+Taken from ADR-0039 (Accepted 2026-10-22).
 
 | # | Decision | Status |
 |---|---|---|
@@ -224,14 +224,14 @@ Taken from ADR-0039 (Proposed 2026-10-22).
 | H4 | paste-a-token over E2EE → `gh auth login --with-token` on stdin; device flow later; surface fixed in ADR §8, implemented as G12 | Human, fixed |
 | Forge neutrality | `forge`/`pr`/`issue` vocabulary; provider interface, GitHub only in v1 | Human, fixed |
 | Mobile | read-only, later (P2) | Human, fixed |
-| D1 | `internal/forge` interface, `ghctx` (ADR-0038, #459) is the only `gh` client | proposed |
-| D2 | `tasks.base_ref/base_sha/branch_owned/pr_*/untrusted_source`, `workspaces.default_base`, `task_pr_state`, `forge_budget` | proposed |
-| D3 | one `TaskGit` payload, `task.git` read + `task.gitList` + one topic `task.git`; `task.stats` removed | proposed |
-| D4 | server-computed `actions` with sentence reasons | proposed |
-| D5 | interest-driven poller, one list call per repo, 20/120/300 s, 15 s floor, 240/h/host, backoff to 300 s, persisted ledger | proposed |
-| D6 | typed `forge_*` + git/PR codes in `rpcError.code`, no argv | proposed |
-| D7 | fork PR: untrusted flag blocks setup, fail closed, user clears via `task.retrySetup` | proposed |
-| O1–O10 | see ADR "Open questions" (each with a recommendation) | pending the Supervisor |
+| D1 | `internal/forge` interface, `ghctx` (ADR-0038, #459) is the only `gh` client | accepted |
+| D2 | `tasks.base_ref/base_sha/branch_owned/pr_*/untrusted_source`, `workspaces.default_base`, `task_pr_state`, `forge_budget` | accepted |
+| D3 | one `TaskGit` payload, `task.git` read + `task.gitList` + one topic `task.git`; `task.stats` removed | accepted |
+| D4 | server-computed `actions` with sentence reasons | accepted |
+| D5 | interest-driven poller, one list call per repo, 20/120/300 s, 15 s floor, 240/h/host, backoff to 300 s, persisted ledger | accepted |
+| D6 | typed `forge_*` + git/PR codes in `rpcError.code`, no argv | accepted |
+| D7 | fork PR: untrusted flag blocks setup, fail closed, user clears via `task.retrySetup` | accepted |
+| O1–O10 | see ADR "Open questions" (each with a recommendation) | accepted as recommended |
 
 ## Progress
 
