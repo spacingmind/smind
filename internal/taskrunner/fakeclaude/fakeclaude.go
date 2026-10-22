@@ -117,6 +117,69 @@ func Run() {
 			"result":      "done",
 		})
 
+	case "stale-notification":
+		// Resuming a session whose previous run left a background shell
+		// command behind: before it handles the prompt the CLI reports the
+		// command lost (task_notification) and answers that with its own
+		// empty zero-turn result (observed against claude 2.1.303). The real
+		// reply is the next result. The runner must not stop at the first.
+		stdin.Scan() // consume the prompt line
+
+		writeLine(map[string]any{
+			"type":       "system",
+			"subtype":    "task_notification",
+			"task_id":    "bg-1",
+			"status":     "stopped",
+			"summary":    "Background shell command didn't finish before the previous session ended",
+			"session_id": "sess-1",
+		})
+		writeLine(map[string]any{
+			"type":        "result",
+			"subtype":     "success",
+			"is_error":    false,
+			"num_turns":   0,
+			"session_id":  "sess-1",
+			"stop_reason": nil,
+			"result":      "",
+			"usage":       map[string]any{"input_tokens": 0, "output_tokens": 0},
+			// Under the SDK's session the stale result repeats the previous
+			// turn's modelUsage (observed live), so it is not empty.
+			"modelUsage": map[string]any{"claude-fake": map[string]any{"inputTokens": 1220, "outputTokens": 185}},
+		})
+		writeLine(map[string]any{
+			"type":       "assistant",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"model": "claude-fake",
+				"content": []any{
+					map[string]any{"type": "text", "text": "pong"},
+				},
+			},
+		})
+		writeLine(map[string]any{
+			"type":        "result",
+			"is_error":    false,
+			"num_turns":   1,
+			"session_id":  "sess-1",
+			"stop_reason": "end_turn",
+			"result":      "pong",
+		})
+
+	case "empty-result-no-notification":
+		// A genuinely empty result with no task_notification before it (a
+		// local slash command with no output): the run must end here, not
+		// wait for another result.
+		stdin.Scan() // consume the prompt line
+		writeLine(map[string]any{
+			"type":        "result",
+			"is_error":    false,
+			"num_turns":   0,
+			"session_id":  "sess-1",
+			"stop_reason": nil,
+			"result":      "",
+			"modelUsage":  map[string]any{},
+		})
+
 	case "usage", "usage-no-model":
 		// A result carrying per-model usage and cost, for the usage event.
 		stdin.Scan() // consume the prompt line

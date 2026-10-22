@@ -100,7 +100,7 @@ func (r *Runner) attachmentsFor(ctx context.Context, provider Provider, prompt s
 }
 
 // claudePrompt sends one claude-native turn. Without attachments it is
-// exactly client.Prompt(prompt). Images ride as native blocks, text first; for
+// exactly client.Prompt(prompt) (claudeSendText: Prompt, minus the stale-result bug). Images ride as native blocks, text first; for
 // a slash command the CLI only expands it when it is the last block, so the
 // context text (if any) and the images go before it. A slash command with
 // nothing to send natively still goes out unchanged, with the session note.
@@ -111,14 +111,14 @@ func (r *Runner) claudePrompt(ctx context.Context, client claudeBackend, prompt 
 		if len(blocks) > 0 {
 			r.sendSessionNote(ctx, events, attachmentSlashNote)
 		}
-		return client.Prompt(ctx, prompt, updates)
+		return claudeSendText(ctx, client, prompt, updates)
 	}
 	joined := strings.Join(blocks, "\n\n")
 	if len(images) == 0 {
 		if joined != "" {
 			prompt += "\n\n" + joined
 		}
-		return client.Prompt(ctx, prompt, updates)
+		return claudeSendText(ctx, client, prompt, updates)
 	}
 	var out []claudecode.PromptBlock
 	if slash {
@@ -138,7 +138,7 @@ func (r *Runner) claudePrompt(ctx context.Context, client claudeBackend, prompt 
 	if slash {
 		out = append(out, claudecode.PromptText(prompt))
 	}
-	return client.PromptBlocks(ctx, out, updates)
+	return claudeSendBlocks(ctx, client, out, updates)
 }
 
 // attachmentAddDirs returns the extra directories the claude-native CLI needs
