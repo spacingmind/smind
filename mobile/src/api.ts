@@ -128,10 +128,12 @@ export type RunStartResult = { kind: 'started'; runId: string } | { kind: 'queue
 /** run.start with whenBusy: {queued, queueItemId} becomes the queued variant, {runId} the started one. */
 export async function startRunWhenBusy(
   conn: RelayConnection,
-  p: { taskId: number; chatId?: number; provider: string; prompt: string; whenBusy: WhenBusy },
+  p: { taskId: number; chatId?: number; provider: string; prompt: string; whenBusy: WhenBusy; model?: string; permissionMode?: string },
 ): Promise<RunStartResult> {
   const params: Record<string, unknown> = { taskId: p.taskId, provider: p.provider, prompt: p.prompt, whenBusy: p.whenBusy };
   if (p.chatId !== undefined) params.chatId = p.chatId;
+  if (p.model) params.model = p.model;
+  if (p.permissionMode) params.permissionMode = p.permissionMode;
   const result = (await conn.call('run.start', params)) as { runId?: string; queued?: boolean; queueItemId?: number };
   if (result.queued) return { kind: 'queued', queueItemId: result.queueItemId! };
   return { kind: 'started', runId: result.runId! };
@@ -228,14 +230,15 @@ export async function createTask(
   return (await conn.call('task.create', params)) as Task;
 }
 
-/** run.start for a task's first prompt; empty model/permissionMode are omitted so the daemon default applies. */
-export async function startFirstRun(
+/**
+ * run.start for a task's first prompt. ADR-0024 §2: while the workspace's
+ * setup script runs the task is busy and unset whenBusy errors naming the
+ * setup, so the first prompt always goes with whenBusy 'queue' -- it starts
+ * at once, or is parked in the daemon queue until setup ends (both fine).
+ */
+export function startFirstRun(
   conn: RelayConnection,
   p: { taskId: number; provider: string; prompt: string; model?: string; permissionMode?: string },
-): Promise<string> {
-  const params: Record<string, unknown> = { taskId: p.taskId, provider: p.provider, prompt: p.prompt };
-  if (p.model) params.model = p.model;
-  if (p.permissionMode) params.permissionMode = p.permissionMode;
-  const result = (await conn.call('run.start', params)) as { runId: string };
-  return result.runId;
+): Promise<RunStartResult> {
+  return startRunWhenBusy(conn, { ...p, whenBusy: 'queue' });
 }

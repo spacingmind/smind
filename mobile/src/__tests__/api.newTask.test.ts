@@ -69,16 +69,23 @@ describe('createTask', () => {
 });
 
 describe('startFirstRun', () => {
-  it('sends taskId/provider/prompt plus model and permissionMode when given', async () => {
+  it('sends taskId/provider/prompt plus model and permissionMode when given, with whenBusy queue', async () => {
     const { conn, calls } = fakeConnection(() => ({ runId: 'run-1' }));
-    const runId = await startFirstRun(conn, { taskId: 5, provider: 'glm', prompt: 'hi', model: 'glm-4.7', permissionMode: 'acceptEdits' });
-    expect(runId).toBe('run-1');
-    expect(calls).toEqual([['run.start', { taskId: 5, provider: 'glm', prompt: 'hi', model: 'glm-4.7', permissionMode: 'acceptEdits' }]]);
+    const result = await startFirstRun(conn, { taskId: 5, provider: 'glm', prompt: 'hi', model: 'glm-4.7', permissionMode: 'acceptEdits' });
+    expect(result).toEqual({ kind: 'started', runId: 'run-1' });
+    expect(calls).toEqual([['run.start', { taskId: 5, provider: 'glm', prompt: 'hi', whenBusy: 'queue', model: 'glm-4.7', permissionMode: 'acceptEdits' }]]);
   });
 
-  it('omits empty model and permissionMode', async () => {
+  it('omits empty model and permissionMode (still whenBusy queue)', async () => {
     const { conn, calls } = fakeConnection(() => ({ runId: 'run-2' }));
     await startFirstRun(conn, { taskId: 5, provider: 'glm', prompt: 'hi', model: '', permissionMode: '' });
-    expect(calls).toEqual([['run.start', { taskId: 5, provider: 'glm', prompt: 'hi' }]]);
+    expect(calls).toEqual([['run.start', { taskId: 5, provider: 'glm', prompt: 'hi', whenBusy: 'queue' }]]);
+  });
+
+  it('a queued outcome comes back as {kind: queued, queueItemId}', async () => {
+    const { conn, calls } = fakeConnection(() => ({ queued: true, queueItemId: 33 }));
+    const result = await startFirstRun(conn, { taskId: 5, provider: 'glm', prompt: 'hi' });
+    expect(result).toEqual({ kind: 'queued', queueItemId: 33 });
+    expect(calls).toEqual([['run.start', { taskId: 5, provider: 'glm', prompt: 'hi', whenBusy: 'queue' }]]);
   });
 });

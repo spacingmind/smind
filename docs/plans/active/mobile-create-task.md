@@ -54,9 +54,10 @@ relay, E2EE, `chatQueue`, `runFollower`, `permissionRequests`, theme tokens, `sr
    Provider/Model/Mode options come from `provider.list`; changing the provider resets model and mode to that provider's remembered or default values.
 3. `Create task` is disabled for an empty/whitespace title and while a submit is in flight; a title or prompt over the limit is clamped.
 4. Submitting calls exactly `task.create` (`workspaceId`, `spaceId?`, `title` trimmed, plus `startModeParams(start)` = `{}` for HEAD) and, only with a non-empty prompt, `run.start`
-   (`taskId`, `provider`, `prompt`, `model?`, `permissionMode?`). No other fields; no large payloads.
+   (`taskId`, `provider`, `prompt`, `model?`, `permissionMode?`, `whenBusy: 'queue'`). A `queued` result is a success. No other fields; no large payloads.
 5. On success the form closes and the new task's detail screen is pushed with `id`+`title` params (header correct on the first frame); with a prompt the run is visible and
    streaming (user bubble, then agent output); without a prompt the task opens with a live composer.
+5a. With a setup script running the prompt is queued and the task opens showing the queued prompt chip; it starts when setup ends.
 6. Partial failure (task created, `run.start` rejected) never creates a second task: the error is shown inline, `Open task` navigates to the created task, and retry only calls
    `run.start`. A `task.create` failure shows the daemon's message inline and keeps the input.
 7. A task with no runs can send its first prompt from the detail composer (provider = remembered or first from `provider.list`); a daemon with no providers shows a clear empty

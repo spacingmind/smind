@@ -42,8 +42,9 @@ describe('creating a task from the phone, against a real daemon', () => {
     expect(task.Title).toBe('M6 created task');
     expect(task.WorkspaceID).toBe(seeded.workspaceId);
 
-    const runId = await startFirstRun(conn, { taskId: task.ID, provider: 'glm', prompt: 'do the thing' });
-    expect(runId).toBeTruthy();
+    const result = await startFirstRun(conn, { taskId: task.ID, provider: 'glm', prompt: 'do the thing' });
+    expect(result.kind).toBe('started');
+    const runId = (result as { runId: string }).runId;
     await vi.waitFor(async () => {
       const runs = await listRunsForTask(conn, task.ID);
       expect(runs.find((r) => r.ID === runId)?.Status).toBe('done');

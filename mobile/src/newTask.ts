@@ -7,7 +7,7 @@
 // double taps. No react-native import: vitest covers it with a fake
 // connection (the followUpPrompt discipline).
 
-import { ProviderInfo, StartMode, Task, createTask, startFirstRun } from './api';
+import { ProviderInfo, RunStartResult, StartMode, Task, createTask, startFirstRun } from './api';
 import { RelayConnection } from './relay/RelayConnection';
 import { wireModelMode } from './providerCatalog';
 
@@ -45,7 +45,7 @@ export function validateNewTask(input: NewTaskInput): NewTaskIssue[] {
 }
 
 export type SubmitResult =
-  | { kind: 'ok'; task: Task; runId?: string }
+  | { kind: 'ok'; task: Task; run?: RunStartResult }
   | { kind: 'invalid'; issues: NewTaskIssue[] }
   | { kind: 'create-failed'; message: string }
   | { kind: 'run-failed'; task: Task; message: string };
@@ -76,13 +76,13 @@ export async function submitNewTask(conn: RelayConnection, input: NewTaskInput, 
   if (input.prompt.trim().length === 0) return { kind: 'ok', task };
   const catalogEntry = providers.find((p) => p.id === input.provider);
   try {
-    const runId = await startFirstRun(conn, {
+    const run = await startFirstRun(conn, {
       taskId: task.ID,
       provider: input.provider,
       prompt: clampPrompt(input.prompt),
       ...wireModelMode(catalogEntry, { provider: input.provider, model: input.model, mode: input.mode }),
     });
-    return { kind: 'ok', task, runId };
+    return { kind: 'ok', task, run };
   } catch (e) {
     return { kind: 'run-failed', task, message: errMessage(e) };
   }
@@ -92,13 +92,13 @@ export async function submitNewTask(conn: RelayConnection, input: NewTaskInput, 
 export async function retryFirstRun(conn: RelayConnection, task: Task, input: NewTaskInput, providers: ProviderInfo[]): Promise<SubmitResult> {
   const catalogEntry = providers.find((p) => p.id === input.provider);
   try {
-    const runId = await startFirstRun(conn, {
+    const run = await startFirstRun(conn, {
       taskId: task.ID,
       provider: input.provider,
       prompt: clampPrompt(input.prompt),
       ...wireModelMode(catalogEntry, { provider: input.provider, model: input.model, mode: input.mode }),
     });
-    return { kind: 'ok', task, runId };
+    return { kind: 'ok', task, run };
   } catch (e) {
     return { kind: 'run-failed', task, message: errMessage(e) };
   }

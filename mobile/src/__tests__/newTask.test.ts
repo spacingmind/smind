@@ -99,10 +99,10 @@ describe('submitNewTask', () => {
   it('(b) title+prompt: task.create then run.start with the created taskId, model/mode per wireModelMode', async () => {
     const { conn, calls } = fakeConnection((method) => (method === 'task.create' ? created : { runId: 'run-1' }));
     const result = await submitNewTask(conn, input({ prompt: 'do it', model: 'glm-air', mode: 'acceptEdits' }), providers);
-    expect(result).toEqual({ kind: 'ok', task: created, runId: 'run-1' });
+    expect(result).toEqual({ kind: 'ok', task: created, run: { kind: 'started', runId: 'run-1' } });
     expect(calls).toEqual([
       ['task.create', { workspaceId: 3, title: 'Fix crash' }],
-      ['run.start', { taskId: 11, provider: 'glm', prompt: 'do it', model: 'glm-air', permissionMode: 'acceptEdits' }],
+      ['run.start', { taskId: 11, provider: 'glm', prompt: 'do it', whenBusy: 'queue', model: 'glm-air', permissionMode: 'acceptEdits' }],
     ]);
   });
 
@@ -128,9 +128,19 @@ describe('submitNewTask', () => {
 
     fail = false;
     const retried = await retryFirstRun(conn, created, in_, providers);
-    expect(retried).toEqual({ kind: 'ok', task: created, runId: 'run-2' });
+    expect(retried).toEqual({ kind: 'ok', task: created, run: { kind: 'started', runId: 'run-2' } });
     expect(calls.filter(([m]) => m === 'task.create')).toHaveLength(1); // no second task
     expect(calls.filter(([m]) => m === 'run.start')).toHaveLength(2);
+  });
+
+  it('a queued outcome (setup script running) flows through as run: {kind: queued, queueItemId}', async () => {
+    const { conn, calls } = fakeConnection((method) => (method === 'task.create' ? created : { queued: true, queueItemId: 7 }));
+    const result = await submitNewTask(conn, input({ prompt: 'during setup' }), providers);
+    expect(result).toEqual({ kind: 'ok', task: created, run: { kind: 'queued', queueItemId: 7 } });
+    expect(calls).toEqual([
+      ['task.create', { workspaceId: 3, title: 'Fix crash' }],
+      ['run.start', { taskId: 11, provider: 'glm', prompt: 'during setup', whenBusy: 'queue' }],
+    ]);
   });
 
   it('(e) invalid input makes no calls at all', async () => {
