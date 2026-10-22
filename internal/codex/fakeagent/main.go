@@ -264,6 +264,7 @@ func handle(msg message, threadCwd *string) {
 			"nextCursor": nil,
 		})
 	case msg.Method == "turn/start":
+		recordTurnInput(*threadCwd, msg.Params)
 		respond(msg.ID, map[string]any{"turn": map[string]any{"id": turnID, "status": "inProgress"}})
 		go runTurnScript(*threadCwd)
 	case msg.Method == "" && len(msg.ID) > 0:
@@ -452,4 +453,22 @@ func recordThreadPolicy(cwd, approvalPolicy, sandbox string) {
 		return
 	}
 	_ = os.WriteFile(filepath.Join(cwd, "thread-policy"), []byte(approvalPolicy+" "+sandbox), 0o644)
+}
+
+// recordTurnInput appends the raw turn/start params as one JSON line to
+// "turn-input" in cwd. Opt-in: only when a "record-prompt-blocks" file exists
+// in cwd, so ordinary runs leave their worktree clean.
+func recordTurnInput(cwd string, params json.RawMessage) {
+	if cwd == "" {
+		return
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "record-prompt-blocks")); err != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(cwd, "turn-input"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.Write(append(append([]byte(nil), params...), '\n'))
 }

@@ -223,6 +223,8 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 		}
 	}
 
+	prompt = r.promptWithAttachments(ctx, provider, prompt, events)
+
 	maxTurns := iso.MaxTurns
 	if maxTurns <= 0 {
 		maxTurns = 1
