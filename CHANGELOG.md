@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.14.0](https://github.com/spacingmind/smind/compare/v0.13.1...v0.14.0) (2026-10-22)
+
+
+### Features
+
+* **attach:** prompt attachments on the daemon (ADR-0038 PR 2) ([#463](https://github.com/spacingmind/smind/issues/463)) ([8cb01c1](https://github.com/spacingmind/smind/commit/8cb01c1cdb9d7589951dc925dfaed34e9bdd92fe))
+* **forge:** gh client and forge.search RPC (ADR-0038 §4) ([#459](https://github.com/spacingmind/smind/issues/459)) ([c023a15](https://github.com/spacingmind/smind/commit/c023a15496e575300b008cc27dcc20641899abc9))
+* **learning:** one-shot reflector retry with gate findings (ADR-0037 D11) ([#442](https://github.com/spacingmind/smind/issues/442)) ([06e9e84](https://github.com/spacingmind/smind/commit/06e9e84b75a67be0efbf98bec69dd399a3bcd624))
+* **learning:** prevalence scan for pending proposals (ADR-0037 stage 0) ([#441](https://github.com/spacingmind/smind/issues/441)) ([4aa4282](https://github.com/spacingmind/smind/commit/4aa4282d70128f3b3fc07c606b3f48658278c9df))
+* **learning:** probe arm, sandbox and attested projection (ADR-0037 4a) ([#450](https://github.com/spacingmind/smind/issues/450)) ([f9ade77](https://github.com/spacingmind/smind/commit/f9ade77f4769804e7459a95573919979e194346a))
+* **learning:** probe service, wire API and CLI (ADR-0037 4b) ([#451](https://github.com/spacingmind/smind/issues/451)) ([#452](https://github.com/spacingmind/smind/issues/452)) ([2735e52](https://github.com/spacingmind/smind/commit/2735e52d5f43348e3e1bdea7260ef1a6bd56f751))
+* **mobile:** composer, queue strip and Stop/Send in the ZCode look (M5) ([#460](https://github.com/spacingmind/smind/issues/460)) ([2dc4f11](https://github.com/spacingmind/smind/commit/2dc4f11daec567d237d336deefb846eb3a038aaf))
+* **mobile:** Expo Router native stack (ADR-0036) ([#436](https://github.com/spacingmind/smind/issues/436)) ([a36d543](https://github.com/spacingmind/smind/commit/a36d543210ecfc3dca55c559221efd8f4ccafb25))
+* **mobile:** foundations — Zai tokens, UiHost tint, UI primitives, icon registry, modular smoke ([#449](https://github.com/spacingmind/smind/issues/449)) ([a865784](https://github.com/spacingmind/smind/commit/a865784f380076a43367f933f4ca3e0032cba6d3))
+* **mobile:** pairing, status cards and password prompt in the ZCode look (M2) ([#454](https://github.com/spacingmind/smind/issues/454)) ([f0b157f](https://github.com/spacingmind/smind/commit/f0b157f19a5df820cbef73fed4cec1475b8b2bdc))
+* **mobile:** task list in the ZCode look with a connection sheet (M3) ([#455](https://github.com/spacingmind/smind/issues/455)) ([1c0edd0](https://github.com/spacingmind/smind/commit/1c0edd08096dffb51f1861608325b3b231170a80))
+* **mobile:** task transcript in the ZCode look (M4) ([#453](https://github.com/spacingmind/smind/issues/453)) ([0ca95de](https://github.com/spacingmind/smind/commit/0ca95de2bb77dd755974694a5b8954cd11bba4aa))
+* **ui:** learning probe card (ADR-0037 4c) ([#448](https://github.com/spacingmind/smind/issues/448)) ([c0efd7e](https://github.com/spacingmind/smind/commit/c0efd7e3aed7921fab09870bcecadeb0d910bb12))
+* **ui:** prompt attachments in the composer and timeline (ADR-0038 6a) ([#465](https://github.com/spacingmind/smind/issues/465)) ([15ebcd0](https://github.com/spacingmind/smind/commit/15ebcd06ca2b6915230d20a62a17612a8dea0569))
+
+
+### Bug Fixes
+
+* **desktop:** clippy --all-targets -D warnings passes; run it in desktop-check ([#470](https://github.com/spacingmind/smind/issues/470)) ([dac1a67](https://github.com/spacingmind/smind/commit/dac1a671329d1e5eb469e34e9e8f743175d0e9b5))
+* **desktop:** let the webview receive dropped files ([#468](https://github.com/spacingmind/smind/issues/468)) ([03019ec](https://github.com/spacingmind/smind/commit/03019eceb0529a8ad4680c517b8ed1e2a4af4b61))
+* **learning:** announce a job as queued before its goroutine can announce running ([#447](https://github.com/spacingmind/smind/issues/447)) ([121edd0](https://github.com/spacingmind/smind/commit/121edd066da1ad99956b19b51e8f1cf8fff4d523))
+* **learning:** probe failed by restart explains itself; one dollar format on the probe card ([#456](https://github.com/spacingmind/smind/issues/456)) ([faf155e](https://github.com/spacingmind/smind/commit/faf155e7af60967d18bb8c89c17e8bf2fa1d4b0a))
+* **ui:** diff pane quality — gutters, dark syntax, narrow header, errors, review routing ([#462](https://github.com/spacingmind/smind/issues/462)) ([5b90afa](https://github.com/spacingmind/smind/commit/5b90afae47769b54a0016783a02721bd242dcb5e))
+
 ## [0.13.1](https://github.com/spacingmind/smind/compare/v0.13.0...v0.13.1) (2026-10-20)
 
 
