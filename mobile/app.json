@@ -2,13 +2,15 @@
   "expo": {
     "name": "mobile",
     "slug": "mobile",
+    "owner": "spacing-mind",
     "version": "1.0.0",
     "scheme": "smind",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.spacingmind.smind"
     },
     "android": {
       "adaptiveIcon": {
@@ -17,7 +19,8 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.spacingmind.smind"
     },
     "web": {
       "bundler": "metro",
@@ -35,6 +38,11 @@
           }
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "7184c9e3-0a46-44b5-befd-5a29f7f47675"
+      }
+    }
   }
 }
