@@ -1,6 +1,6 @@
 import { RunLink } from "@/components/learning/run-link";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
-import { ARM_LABELS, armStatusLabel, formatCostUSD, formatDurationMs } from "@/lib/probe-format";
+import { ARM_LABELS, armStatusLabel, formatDurationMs, formatMoney } from "@/lib/probe-format";
 import type { ProbeArmStatus, ProbeArmView } from "@/lib/probe-types";
 
 function dotFor(status: ProbeArmStatus): StatusDotStatus {
@@ -27,7 +27,7 @@ export function ProbeArmRows({ arms, workspaceId }: { arms: ProbeArmView[]; work
               {started ? formatDurationMs(arm.elapsedMs) : "–"}
             </span>
             <span data-testid="probe-arm-cost" className="w-16 text-right text-ui-sm tabular-nums text-foreground-muted">
-              {started ? formatCostUSD(arm.costUSD) : "–"}
+              {started ? formatMoney(arm.costUSD) : "–"}
             </span>
             <span className="w-28 text-right">{arm.runId ? <RunLink runId={arm.runId} workspaceId={workspaceId} /> : null}</span>
           </li>

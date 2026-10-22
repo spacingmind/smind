@@ -1,14 +1,18 @@
-// Composer: the queue list + compose row + Send/Stop/Send now, moved verbatim
-// out of TaskDetailScreen (M4 step 3) with explicit props; M5 redesigns it.
-// No visual or behavioural change from the inline version.
+// Composer: the queue strip, send error and the rounded composer shell (M5):
+// the field on top at full width, a right-aligned toolbar below with
+// Send now (text) / Stop (outlined) / Send (filled) -- all native @expo/ui
+// Buttons in their own UiHost, tinted by the Host's seedColor (expo-ui: no
+// custom Pressable wrappers). Which actions show comes from composerActions.
 
 import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
 import { ChatQueueItem } from '../../api';
+import { composerActions } from '../../composerActions';
 import { StopControlView } from '../../stopControl';
 import { AppTheme } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
+import { TextButton } from '../../ui/TextButton';
 import { UiHost } from '../../ui/UiHost';
 import { QueuedPrompts } from '../QueuedPrompts';
 
@@ -39,38 +43,41 @@ export function Composer({
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
+  const actions = composerActions({ liveRunId, canSend, stopping: stopView.disabled });
   return (
     <>
-      {sendError !== null && <Text style={styles.sendError}>Couldn't send: {sendError}</Text>}
       <QueuedPrompts items={queueItems} onCancel={onCancelQueued} />
-      <View style={styles.composeRow}>
-        <UiHost style={styles.composeWrap}>
+      {sendError !== null && (
+        <Text style={styles.sendError} selectable>
+          Couldn't send: {sendError}
+        </Text>
+      )}
+      <View style={styles.shell}>
+        <UiHost style={styles.fieldHost}>
           <ExpoTextInput
-            style={styles.composeField}
-            textStyle={styles.composeText}
+            style={styles.field}
+            textStyle={styles.fieldText}
             value={draftState}
             onChangeText={(text) => {
               draftState.value = text;
               onChangeDraft(text);
             }}
             placeholder={liveRunId !== null ? 'Queue a follow-up — it sends when this run finishes' : 'Send a follow-up prompt…'}
-            placeholderTextColor={theme.foregroundMuted}
+            placeholderTextColor={theme.foregroundSubtlest}
             multiline
           />
         </UiHost>
-        {stopView.visible && (
-          <UiHost style={styles.sendHost}>
-            <Button label={stopView.label} onPress={onStop} disabled={stopView.disabled} />
+        <View style={styles.toolbar}>
+          {actions.sendNow.visible && <TextButton label="Send now" onPress={onSendNow} />}
+          {actions.stop.visible && (
+            <UiHost>
+              <Button label={actions.stop.label} variant="outlined" onPress={onStop} disabled={actions.stop.disabled} style={styles.action} />
+            </UiHost>
+          )}
+          <UiHost>
+            <Button label="Send" variant="filled" onPress={onSend} disabled={actions.send.disabled} style={styles.action} />
           </UiHost>
-        )}
-        {liveRunId !== null && canSend && (
-          <UiHost style={styles.sendHost}>
-            <Button label="Send now" onPress={onSendNow} />
-          </UiHost>
-        )}
-        <UiHost style={styles.sendHost}>
-          <Button label="Send" onPress={onSend} disabled={!canSend} />
-        </UiHost>
+        </View>
       </View>
     </>
   );
@@ -80,36 +87,34 @@ function makeStyles(theme: AppTheme) {
   return StyleSheet.create({
     sendError: {
       color: theme.status.danger,
-      fontSize: theme.type.metadataLabel.fontSize,
-      marginTop: theme.spacing[2],
-      marginBottom: theme.spacing[1],
+      fontSize: theme.type.small.fontSize,
+      lineHeight: theme.type.small.lineHeight,
+      marginBottom: theme.spacing[2],
     },
-    composeRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-end',
-      gap: theme.spacing[2],
-      borderTopWidth: 1,
-      borderTopColor: theme.border,
-      paddingTop: theme.spacing[2],
-      marginTop: theme.spacing[2],
+    shell: {
+      backgroundColor: theme.card,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: theme.radius['2xl'],
+      borderCurve: 'continuous',
+      padding: theme.spacing[2],
     },
-    composeWrap: {
-      flex: 1,
-      maxHeight: 120,
-    },
-    sendHost: {
-      alignSelf: 'flex-end',
-    },
-    composeField: {
-      width: '100%',
-      backgroundColor: theme.surface[2],
-      borderRadius: theme.radius.md,
-      paddingHorizontal: theme.spacing[2.5],
-      paddingVertical: theme.spacing[2],
-    },
-    composeText: {
-      fontSize: theme.type.interface.fontSize,
+    fieldHost: { alignSelf: 'stretch', maxHeight: 120 },
+    // boxShadow: the web TextInput carries a base drop-shadow hairline that borderWidth/background overrides do not clear
+    // (the shell is the field's surface); native ignores the key.
+    field: { width: '100%', borderWidth: 0, backgroundColor: 'transparent', boxShadow: 'none', paddingHorizontal: theme.spacing[1], paddingVertical: theme.spacing[1] } as never,
+    fieldText: {
+      fontSize: process.env.EXPO_OS === 'web' ? 16 : theme.type.body.fontSize, // web: 16px avoids browser zoom-on-focus
+      lineHeight: theme.type.body.lineHeight,
       color: theme.foreground,
     },
+    toolbar: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      alignItems: 'center',
+      gap: theme.spacing[2],
+      marginTop: theme.spacing[2],
+    },
+    action: { height: 44 },
   });
 }
