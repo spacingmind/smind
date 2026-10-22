@@ -328,6 +328,25 @@ task test       # go test ./... (plus the web UI's test suite)
 task lint       # go vet + gofmt check
 ```
 
+### Dependencies in task worktrees
+
+Each task gets a fresh git worktree, which has no `node_modules`. A workspace's
+setup script (ADR-0024) runs once, in the background, when the task is created;
+[`scripts/task-setup.sh`](scripts/task-setup.sh) is a sample for this repo that
+installs `web/` (`bun install --frozen-lockfile`) and `mobile/` (`npm ci`):
+
+```sh
+smind workspace setup set <workspaceId> --setup-file scripts/task-setup.sh
+smind workspace setup show <workspaceId>
+```
+
+The script runs with `sh -c` using the daemon's `PATH`, so `bun` and `npm` must
+be on it (a missing tool is a warning, not a failed task). Only newly created
+tasks run it. While it runs the task counts as busy, so a `smind task send`
+right after `smind task new` is rejected unless it passes `--when-busy queue`
+(the prompt is delivered when setup finishes). The web UI shows the setup
+status.
+
 See [docs/](docs/) for architecture and design decisions.
 
 ## Contributing
