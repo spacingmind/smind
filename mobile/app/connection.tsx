@@ -16,7 +16,8 @@ export default function ConnectionRoute() {
   const body = { flex: 1, paddingHorizontal: theme.spacing[4] } as const;
 
   // The daemon got a password (or its password changed) while this session was
-  // down: ask for it here instead of retrying blindly.
+  // down: ask for it here instead of retrying blindly. The header stays the
+  // constant 'Connection' (ADR-0036 §5): the card carries the specific title.
   if (state.kind === 'password' || state.kind === 'locked') {
     return (
       <View style={body}>
@@ -39,7 +40,7 @@ export default function ConnectionRoute() {
       : [{ label: 'Back', onPress: disconnect }];
   return (
     <View style={body}>
-      <Stack.Screen options={{ title: view.title }} />
+      <Stack.Screen options={{ title: 'Connection' }} />
       <ConnectionStatusCard view={view} actions={actions} />
     </View>
   );
