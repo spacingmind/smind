@@ -63,39 +63,47 @@ async function newTaskFlow(page, harness) {
     }
   }
 
-  // Headless submit flow: title + prompt.
-  await page.getByRole('button', { name: 'New task' }).click();
-  await page.getByRole('button', { name: 'Create task' }).waitFor({ timeout: 10_000 });
-  const title = 'Created from phone';
-  await pickFakeProvider(page);
-  await page.getByRole('textbox').nth(0).fill(title);
-  await page.getByRole('textbox').nth(1).fill('A first prompt');
-  await lib.shootTransition(page, 'new-task-submit', 'light', () => page.getByRole('button', { name: 'Create task' }).click());
-  // A second tap during submit must create no second task.
-  await page.getByRole('button', { name: 'Create task' }).click({ force: true }).catch(() => {});
-  try {
-    await page.getByRole('heading', { name: title }).waitFor({ timeout: 20_000 });
-  } catch {
-    lib.fail(`the task screen did not open after submit; page says: ${JSON.stringify(await page.evaluate(() => document.body.innerText).catch(() => '?'))}`);
-    return;
-  }
-  // The user bubble renders when the screen attaches to a live run (adoptedPromptText); a run that
-  // finished before the push has no user_message in run.logs, so the run strip + output also count.
-  // The bubble gap in the finished-before-attach path is TaskDetailScreen's (frozen here), flagged in handoff.
-  if (!(await page.getByText('A first prompt', { exact: false }).first().isVisible().catch(() => false))) {
-    console.log('note: the first prompt bubble is not rendered (run finished before attach); requiring the run strip instead');
-    if (!(await page.getByText(/^run [0-9a-f]{8} ·/).isVisible().catch(() => false))) {
-      lib.fail('the task screen shows neither the first prompt nor a run strip');
+  // Headless submit flow: title + prompt, once per scheme (submit transition + created frame in each).
+  for (const scheme of ['light', 'dark']) {
+    const title = scheme === 'light' ? 'Created from phone' : 'Created from phone dark';
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.getByRole('button', { name: 'New task' }).click();
+    await page.getByRole('button', { name: 'Create task' }).waitFor({ timeout: 10_000 });
+    await pickFakeProvider(page);
+    await page.getByRole('textbox').nth(0).fill(title);
+    await page.getByRole('textbox').nth(1).fill('A first prompt');
+    await lib.shootTransition(page, 'new-task-submit', scheme, () => page.getByRole('button', { name: 'Create task' }).click());
+    // A second tap during submit must create no second task (counted in the list below).
+    await page.getByRole('button', { name: 'Create task' }).click({ force: true }).catch(() => {});
+    try {
+      await page.getByRole('heading', { name: title }).waitFor({ timeout: 20_000 });
+    } catch {
+      lib.fail(`the task screen did not open after submit (${scheme}); page says: ${JSON.stringify(await page.evaluate(() => document.body.innerText).catch(() => '?'))}`);
+      return;
     }
+    // The first prompt is the user's own line, whether the run was still live or already finished when the screen loaded.
+    try {
+      await page.getByText('A first prompt', { exact: true }).first().waitFor({ timeout: 10_000 });
+    } catch {
+      lib.fail(`the first prompt is not shown as a user line on the new task (${scheme})`);
+    }
+    if (!(await page.getByText(/^run [0-9a-f]{8} ·/).isVisible().catch(() => false))) {
+      lib.fail(`the new task screen shows no run strip (${scheme})`);
+    }
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: `${lib.SMOKE_DIR}/new-task-created-${scheme}.png`, fullPage: true });
+    console.log(`wrote new-task-created-${scheme}.png`);
+    await lib.goBack(page);
+    try {
+      await page.getByText(title, { exact: true }).waitFor({ timeout: 10_000 });
+    } catch {
+      lib.fail(`the new task is not in the list after going back (${scheme})`);
+      return;
+    }
+    const copies = await page.getByText(title, { exact: true }).count();
+    if (copies !== 1) lib.fail(`expected exactly one "${title}" in the list after a double tap, found ${copies}`);
   }
-  await lib.shootBothSchemes(page, 'new-task-created');
-  await lib.goBack(page);
-  try {
-    await page.getByText(title, { exact: true }).waitFor({ timeout: 10_000 });
-  } catch {
-    lib.fail('the new task is not in the list after going back');
-    return;
-  }
+  await page.emulateMedia({ colorScheme: 'light' });
 
   // Title-only task: the screen opens, not blank.
   const title2 = 'Title only task';

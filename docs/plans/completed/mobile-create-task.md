@@ -1,5 +1,7 @@
 # Mobile: create a task from the phone (M6)
 
+Status: **completed 2026-10-22** (PR #480 and the follow-up below); native (device) verification is the one open item.
+
 Size: M (5) — scope 2 (mobile + one api surface, no daemon change), PRs 1, risk 1 (zero-run task flow, partial failure), decisions 0, verification 1 (390 px light+dark smoke, web only).
 
 Closes a Phase 3 gap: the phone can read, follow and answer tasks (mobile-zcode-redesign, completed) but cannot start one. Presentation follows ZCode's narrow
@@ -125,8 +127,18 @@ Frames (not committed): `/tmp/m6-final-frames/` (full smoke), `new-task-*`; `/tm
 
 Acceptance: 1–4, 5 (with the recorded deviation), 6, 7, 8, 9, 10 confirmed on web. Unverified: the queued first prompt during a setup script (AC 5a) beyond unit tests/code walk; everything native.
 
+**Correction (follow-up PR).** The table above said the created task showed its first prompt; the `new-task-created-*` frames of #480 actually showed only the reply. The
+run was still live when the screen loaded, and only the finished-run path added the run's own prompt; the live-attach branch had no prompt line. Fixed by passing the
+run row's prompt as the attach prelude, and the stage's assertion (which had tolerated the missing bubble) is now strict, per scheme, with a count of one task after a double
+tap and the submit transition captured in dark too. Re-validated on the tree `origin/develop` (54b79b8e) + the follow-up: typecheck clean; `npm test` 49 files / 539 passed;
+`test:integration` 28 passed, 1 skipped; `expo-doctor` 20/20 and `expo install --check` up to date (expo 58.0.17 and six more patches, `expo-dev-client ~58.0.14` added for the
+EAS `development` profile); `smoke:web:full` passed, 125 frames. One earlier full-smoke run on this tree failed in `queue-stop` ("the delivered prompt did not appear",
+the delivered run's reply merged into the previous assistant chunk, i.e. no user line for the daemon-delivered prompt); `queue-stop` alone passed twice and two further full
+runs passed. The cause is not proven; suspected pre-existing adoption race (queue snapshot vs `run.status`), see Follow-ups.
+
 ## Follow-ups
 
+- Investigate the rare `queue-stop` miss above (daemon-delivered prompt without its user line); a deterministic repro is needed before touching `TaskDetailScreen`'s adoption path.
 - Persist the last provider/model/mode across launches (secure store or async storage).
 - ADR-0039 G4 start modes (HEAD / branch / PR / issue) in this form; ADR-0038 attachments in the first prompt.
 - Thinking level (Claude only) is not exposed on mobile yet.
