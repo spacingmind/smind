@@ -1,4 +1,4 @@
-// NewTaskScreen is M6's create-a-task form (docs/plans/active/
+// NewTaskScreen is the create-a-task form (docs/plans/active/
 // mobile-create-task.md): a keyboard-safe ScrollView of Card sections
 // (PairingScreen's rhythm) whose submit runs newTask.ts's pure pipeline.
 // All submit state lives here; pure shaping lives in newTaskForm.ts and
@@ -72,7 +72,7 @@ export function NewTaskScreen({ conn }: { conn: RelayConnection }) {
         if (!alive) return;
         setLoad({ kind: 'ready', workspaces, spaces: spaces as Space[], providers });
         setWorkspaceId(first ? first.ID : null);
-        setSelection(defaultSelection(providers, recallSelection()));
+        setSelection(defaultSelection(providers, recallSelection()) ?? defaultSelection(providers, {}));
       } catch {
         if (alive) setLoad({ kind: 'error' });
       }
@@ -190,13 +190,11 @@ export function NewTaskScreen({ conn }: { conn: RelayConnection }) {
                 onValueChange={(v) => {
                   setWorkspaceId(Number(v));
                   setSpaceId(null);
-                  if (ready) {
-                    // Changing workspace reloads its spaces; until then the Space picker hides.
-                    conn
-                      .call('space.list', { workspaceId: Number(v) })
-                      .then((s) => setLoad({ ...ready, spaces: s as Space[] }))
-                      .catch(() => {});
-                  }
+                  // Changing workspace reloads its spaces; until then the Space picker hides.
+                  conn
+                    .call('space.list', { workspaceId: Number(v) })
+                    .then((s) => setLoad((l) => (l.kind === 'ready' ? { ...l, spaces: s as Space[] } : l)))
+                    .catch(() => {});
                 }}
               >
                 {workspaces.map((w) => (
@@ -255,7 +253,7 @@ export function NewTaskScreen({ conn }: { conn: RelayConnection }) {
         <StartModeField start={start} onChange={setStart} />
       </Card>
 
-      {selection && provider ? (
+      {providers.length > 0 && selection && provider ? (
         <Card style={styles.formCard}>
           <FieldRow label="Provider">
             <UiHost style={styles.controlHost}>

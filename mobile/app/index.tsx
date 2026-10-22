@@ -19,7 +19,7 @@ export default function TasksRoute() {
         options={{
           title: 'Tasks',
           // The Host sizes to its content and top-aligns on web; centre it on the header's own height.
-          // M6: Connection moved left so "New task" owns the right side; both stay labelled 44 pt TextButtons.
+          // Connection moved left so "New task" owns the right side; both stay labelled 44 pt TextButtons.
           headerLeft: () => (
             <View style={{ justifyContent: 'center', alignSelf: 'stretch' }}>
               <TextButton label="Connection" onPress={() => setSheetOpen(true)} />
