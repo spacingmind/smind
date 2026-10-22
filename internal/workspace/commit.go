@@ -145,6 +145,17 @@ func (m *Manager) taskWorktreeBase(id int64) (worktreePath, base string, err err
 	return *t.WorktreePath, base, nil
 }
 
+// TaskDiffStat returns the size of id's base→worktree diff (the same
+// computation task.diff uses) or the typed base_unknown error when the task's
+// base commit was never recorded. gitstate consumes it through an interface.
+func (m *Manager) TaskDiffStat(id int64) (files, insertions, deletions int, err error) {
+	wt, base, err := m.taskWorktreeBase(id)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return taskDiffStat(wt, base)
+}
+
 // TaskStat is the sidebar's per-task git signal: the task's branch and the
 // size of the same base→worktree diff task.diff/task.files compute,
 // reduced to counts. It exists so the sidebar can show every task's diff
