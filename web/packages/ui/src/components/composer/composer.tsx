@@ -8,7 +8,7 @@ import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { useDaemonForge } from "@/hooks/use-attachment-limits";
 import { FileMentionPopover } from "@/components/composer/file-mention-popover";
 import { useFileMention } from "@/components/composer/use-file-mention";
-import { mentionedPaths } from "@/lib/file-mention";
+import { mentionedRefs } from "@/lib/file-mention";
 import { supportsKind } from "@/lib/attachments/kinds";
 import { useAttachmentDraft } from "@/components/composer/use-attachment-draft";
 import { attachmentErrorMessage } from "@/lib/attachments/errors";
@@ -271,13 +271,13 @@ export function Composer({
         // No await without items: a plain prompt must reach onSubmit in the same tick.
         const encoded = attachItems.length > 0 ? await Promise.all(attachItems.map(encodeAttachment)) : [];
         // Only mentions whose `@path` is still in the prompt are sent: the daemon dedupes against the text.
-        const refs = mentionedPaths(text, (attachKey && useComposerAttachmentsStore.getState().mentions[attachKey]) || []);
+        const refs = mentionedRefs(text, (attachKey && useComposerAttachmentsStore.getState().mentions[attachKey]) || []);
         const attachments: AttachmentRequest[] | undefined =
-          encoded.length + refs.length > 0 ? [...encoded, ...refs.map((path): AttachmentRequest => ({ kind: "file_ref", path }))] : undefined;
+          encoded.length + refs.length > 0 ? [...encoded, ...refs.map((r): AttachmentRequest => ({ kind: "file_ref", ...r }))] : undefined;
         const previews: AttachmentMeta[] | undefined =
           attachments && [
             ...attachItems.map(draftPreview),
-            ...refs.map((path, i): AttachmentMeta => ({ id: String(attachItems.length + i + 1), kind: "file_ref", path })),
+            ...refs.map((r, i): AttachmentMeta => ({ id: String(attachItems.length + i + 1), kind: "file_ref", ...r })),
           ];
         const result = await onSubmit(
           provider,
