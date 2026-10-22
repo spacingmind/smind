@@ -928,6 +928,7 @@ scratch).
 
 ## Progress
 
+- **Status 2026-10-22 (plans hygiene): PARTIAL; the header line "spec, docs-only so far" above is stale.** Merged: #296 (ADR + plan), A1 #298, A2 #302, B #304 (routing around exhausted accounts), C #305 (RPC/CLI/MCP), D1 #307, E #309, D2 #315, F core #308, cooldown surfaces #317, plus #386 (shared query cache). Remaining: (1) the manual live check against one real account per provider, and the Human go-ahead it needs — **unverified**, still the only source of real-provider data; (2) close-out docs (AC43: ROADMAP/README/stale backlog text) — `docs/ROADMAP.md` still described the quota `Fetcher` as a stub until this pass.
 - 2026-10-11: ADR-0028 (Proposed) and this plan written, docs only, on
   `docs/account-usage-windows`. Source reading done: `internal/quota`,
   `internal/routing/router.go`, `internal/accounts/{refresh,credential}.go`,

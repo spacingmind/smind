@@ -2,7 +2,7 @@
 
 Implements ADR-0030. On Windows the Tauri app installs, starts, stops and
 updates a native `smind.exe` and drops every WSL2 code path. Depends on
-`docs/plans/active/windows-daemon-runtime-parity.md` (the daemon runtime,
+`docs/plans/completed/windows-daemon-runtime-parity.md` (the daemon runtime,
 `POST /api/shutdown`, and the `smind_<version>_windows_<arch>.zip` release
 assets). Out of scope: an ARM64 desktop installer (the app is still an x64
 installer; the daemon asset follows the OS architecture), code signing,

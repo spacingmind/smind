@@ -135,7 +135,7 @@ resolved decision 1). Breakdown as dispatched to implementation agents
    returns a `runId` immediately; a separate `run.attach`/`run.logs` call
    confirms the run actually started. **Permission guard (ADR-0019
    decision 6, carried over from
-   `docs/plans/active/provider-native-permission-modes.md` AC11/S17):**
+   `docs/plans/completed/provider-native-permission-modes.md` AC11/S17):**
    the tool takes `permissionMode?`/`autoAccept?` (not the removed
    `approvalPolicy`) plus an optional `profileId`. It must reject a
    `permissionMode` whose catalog entry has `autoApproves: true`

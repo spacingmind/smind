@@ -273,8 +273,12 @@ Web (`web/packages/ui`, vitest):
   permission-mode/auto-accept switches to the run row
   (`store.UpdateRunPermission`), `2116559` fixes `profile add
   --auto-accept[=bool]` flag parsing.
-- This plan stays in `active/` until AC11 lands with `task_send` and the
-  manual checks below are done.
+- Merged: #231 (`refactor!: replace ApprovalPolicy with provider-native permission modes`),
+  #246 (MCP `task_send` with the permission guard, AC11), #269 (`task_set_mode`/`task_options`/
+  `task_set_option`, ADR-0019 #6 guarded) and #369 (`smind task mode` for humans).
+- Closed 2026-10-22 (plans hygiene): AC1–AC13 are all confirmed below, so the plan moved to
+  `completed/`. The five live-provider checks are **unverified** (nothing in the repo records
+  that they were ever run); they are kept below as an open list rather than silently dropped.
 
 ## Validation
 
@@ -299,7 +303,7 @@ passed on every rerun. That's a pre-existing flake.
 | 12 | ✅ | ADR-0014/0018 notes, ADR-0017 `task_send` row, README "Permission modes", `cmd/smind/main.go` usage. |
 | 13 | ✅ | `task test`/`task lint` green. Light and dark screenshots (Playwright against a sandbox daemon with the fake ACP agent in `modes:session`): composer mode picker (Claude catalog, GLM discovered catalog), Auto-accept toggle off/on, live mid-run control, Settings → Agents mode field. Local only (`/tmp/smind-shot/out`), not committed. |
 
-### Manual verification still needed (needs a live provider)
+### Unverified live-provider checks (open as of 2026-10-22; need a real provider)
 
 1. **GLM's and Kimi's real advertised modes**: run `smind serve`, open
    the composer on GLM/Kimi, and confirm `provider.list` shows the agent's

@@ -139,6 +139,13 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
 - Deferred: "Reset cooldown" (needs a daemon method), identity backfill for OpenAI from refresh responses, Kimi/xAI device flows.
 
 ## Progress
+
+**Status 2026-10-22 (plans hygiene): PARTIAL (built and merged, verification gaps).**
+
+- Merged: #384 (ADR-0033 + plan), #385 (B1 identity), #389 (B2 loginId/`oauthComplete`), #396 (B3 device code), #404 (org-uuid identity fix), #409 (B4 connect form), #416 (A1+A2 Providers tab, one PR), #457 (test fix).
+- **Remaining (unverified):**
+  - Real-account verification of remote login on a homelab daemon and in the macOS app (the plan's own Status line; never recorded as done). By the ground rules no test completes a real OAuth login.
+  - AC-A11: light and dark screenshots of every state are required, but Validation below records unit tests only, no screenshot evidence.
 - [x] ADR-0033 + this plan (docs PR #384)
 - [x] PR-B1 identity (branch `feat/account-identity`)
 - [x] PR-B2 loginId + oauthComplete (branch `feat/oauth-complete`)
