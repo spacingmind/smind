@@ -288,7 +288,7 @@ func TestValidate_Resolvers(t *testing.T) {
 	_, err := validate(ctx, []Request{{Kind: KindFileRef, Path: "a"}}, lim, Resolvers{})
 	wantCode(t, err, CodeInvalid)
 	_, err = validate(ctx, []Request{{Kind: KindPR, Number: 1}}, lim, Resolvers{})
-	wantCode(t, err, CodeForgeUnavailable)
+	wantCode(t, err, CodeForgeError)
 	_, err = validate(ctx, []Request{{Kind: KindReuse, RunID: "r", ID: "1"}}, lim, Resolvers{})
 	wantCode(t, err, CodeInvalid)
 
@@ -380,7 +380,7 @@ func TestValidate_ForgeDefaultsToGithubAndRejectsOthers(t *testing.T) {
 		t.Fatalf("message = %v", err)
 	}
 	_, err = validate(ctx, []Request{{Kind: KindPR, Number: 1}}, DefaultLimits(), Resolvers{})
-	wantCode(t, err, CodeForgeUnavailable)
+	wantCode(t, err, CodeForgeError)
 	if !strings.Contains(err.Error(), "no forge available") {
 		t.Fatalf("message = %v", err)
 	}

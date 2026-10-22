@@ -266,7 +266,7 @@ func validate(ctx context.Context, reqs []Request, lim Limits, r Resolvers) ([]p
 				return nil, newErr(CodeTooMany, i, "at most %d PR/issue attachments", lim.MaxForge)
 			}
 			if r.Forge == nil {
-				return nil, newErr(CodeForgeUnavailable, i, "no forge available")
+				return nil, newErr(CodeForgeError, i, "no forge available")
 			}
 			snap, err := r.Forge(ctx, forge, req.Kind, req.Number, req.Repo)
 			if err != nil {
@@ -276,7 +276,7 @@ func validate(ctx context.Context, reqs []Request, lim Limits, r Resolvers) ([]p
 					cp.Index = i
 					return nil, &cp
 				}
-				return nil, newErr(CodeForgeUnavailable, i, "%v", err)
+				return nil, newErr(CodeForgeError, i, "%v", err)
 			}
 			repo := snap.Repo
 			if repo == "" {

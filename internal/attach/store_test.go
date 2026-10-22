@@ -119,7 +119,7 @@ func TestStore_FailureLeavesNoFiles(t *testing.T) {
 			return ForgeSnapshot{}, boom
 		},
 	})
-	wantCode(t, err, CodeForgeUnavailable)
+	wantCode(t, err, CodeForgeError)
 	if es := rootEntries(t, root); len(es) != 0 {
 		t.Fatalf("rejected Accept left %v", es)
 	}

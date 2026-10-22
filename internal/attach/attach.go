@@ -28,8 +28,16 @@ const (
 	CodeInvalidBase64    = "invalid_base64"
 	CodeOutsideWorkspace = "outside_workspace"
 	CodeNotFound         = "not_found"
-	CodeForgeUnavailable = "forge_unavailable"
-	CodeForgeNotFound    = "forge_not_found"
+
+	// The forge_* vocabulary is ADR-0039 §6's. A forge resolver returns an
+	// *Error with one of these; any other resolver failure is CodeForgeError.
+	CodeForgeCLIMissing      = "forge_cli_missing"
+	CodeForgeUnauthenticated = "forge_unauthenticated"
+	CodeForgeNoRemote        = "forge_no_remote"
+	CodeForgeNotFound        = "forge_not_found"
+	CodeForgeRateLimited     = "forge_rate_limited"
+	CodeForgeTimeout         = "forge_timeout"
+	CodeForgeError           = "forge_error"
 )
 
 // Request is one client-sent attachment (wire form, ADR §1).

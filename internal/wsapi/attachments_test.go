@@ -514,8 +514,13 @@ func TestDaemonInfo_ReportsAttachmentLimits(t *testing.T) {
 	if imgs, _ := att["images"].([]any); len(imgs) != 4 {
 		t.Errorf("images = %v", att["images"])
 	}
-	if gh, _ := att["forge"].(map[string]any)["github"].(map[string]any); gh["installed"] != false {
-		t.Errorf("forge = %v", att["forge"])
+	if _, has := att["forge"]; has {
+		t.Errorf("attachments.forge = %v, want none: the forge capability is daemon.info.forge (ADR-0039)", att["forge"])
+	}
+	forge, _ := direct["forge"].(map[string]any)
+	// cli is a PATH lookup for gh, so only its type is asserted: the host decides the value.
+	if _, isBool := forge["cli"].(bool); forge["provider"] != "github" || !isBool {
+		t.Errorf("daemon.info.forge = %v, want {provider: github, cli: <bool>}", direct["forge"])
 	}
 	env := rpcPipe(t, e.relayClient(t), "i", "daemon.info", nil)
 	var viaRelay map[string]any
