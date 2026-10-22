@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { Composer } from "@/components/composer/composer";
+import { clearToasts, Toaster } from "@/components/ui/toast";
 import type { AttachmentLimits, AttachmentRequest } from "@/lib/types";
 import { attachmentDraftKey, useComposerAttachmentsStore } from "@/stores/composer-attachments-store";
 import { FakeWsClient } from "@/test/fake-ws-client";
@@ -57,7 +58,10 @@ beforeEach(() => {
   useComposerAttachmentsStore.setState({ byKey: {}, mentions: {}, pendingInserts: {} });
   localStorage.clear();
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  clearToasts();
+});
 
 describe("composer consumes queued inserts", () => {
   it("puts @path and a space into an empty draft, focuses with the caret at the end, and opens no popover", async () => {
@@ -142,6 +146,7 @@ async function renderPanes(files: TaskFilesResult["files"], diff: string, limits
   const sent: { prompt: string; attachments?: AttachmentRequest[] }[] = [];
   render(
     <>
+      <Toaster />
       <DiffViewerPane client={client} task={TASK} />
       <Composer
         client={client}
@@ -183,6 +188,18 @@ describe("diff pane Add to chat", () => {
     fireEvent.click(screen.getByTestId("chat-send-button"));
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]!.attachments).toEqual([{ kind: "file_ref", path: "a.go" }]);
+  });
+
+  it("adding shows a toast and never switches tabs; its Open chat action asks for the chat", async () => {
+    await renderPanes([{ path: "a.go", status: "modified", staged: false }], RANGE_DIFF);
+    useFocusedChatStore.setState({ revealRequest: null });
+    fireEvent.click(screen.getByRole("button", { name: "Add to chat" }));
+    await flush();
+    expect(useFocusedChatStore.getState().revealRequest).toBeNull();
+    expect(await screen.findByText("Added to chat")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("@a.go");
+    fireEvent.click(screen.getByRole("button", { name: "Open chat" }));
+    expect(useFocusedChatStore.getState().revealRequest).toMatchObject({ taskId: 1, chatId: 10 });
   });
 
   it("a hunk header inserts @path#L12-L20 and the send carries line and endLine", async () => {

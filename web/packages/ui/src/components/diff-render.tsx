@@ -99,7 +99,8 @@ function mountHunkHosts(container: HTMLElement, format: DiffOutputFormat): { hos
       const host = document.createElement("span");
       host.className = "ml-2 inline-flex align-middle";
       host.dataset.hunkAction = "";
-      line.classList.add("group");
+      // The whole header row reveals the button, not just the text span (which is only as wide as the header text).
+      (line.closest("tr") ?? line).classList.add("group");
       line.appendChild(host);
       out.push({ host, hunk });
     }
