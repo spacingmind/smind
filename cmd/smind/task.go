@@ -1576,10 +1576,6 @@ type runSummaryRow struct {
 	HeadSHA    *string
 	// Disposition is "needs-continue" for a run that ended done at a cap.
 	Disposition string
-	FinishedAt  *time.Time
-	Err         string
-	BaseSHA     *string
-	HeadSHA     *string
 }
 
 // runModelCell is a run's MODEL column: the requested model; when none was
