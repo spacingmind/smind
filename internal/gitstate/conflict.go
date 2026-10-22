@@ -106,13 +106,17 @@ func isTooOld(err error) bool {
 	return re.ExitCode == 129 || strings.Contains(re.Stderr, "unknown option")
 }
 
+// maxConflictFiles bounds the payload: a huge conflict set lists its first
+// files only (the state is still "conflicts").
+const maxConflictFiles = 100
+
 // parseConflictFiles reads the file names after the first (tree id) line, up
-// to the first blank line.
+// to the first blank line, at most maxConflictFiles.
 func parseConflictFiles(out string) []string {
 	files := []string{}
 	lines := strings.Split(out, "\n")
 	for i := 1; i < len(lines); i++ {
-		if lines[i] == "" {
+		if lines[i] == "" || len(files) >= maxConflictFiles {
 			break
 		}
 		files = append(files, lines[i])

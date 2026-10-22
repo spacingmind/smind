@@ -2,7 +2,9 @@ package gitstate
 
 import (
 	"context"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -114,5 +116,16 @@ func TestGitStatus_ConflictCheckedAtUsesClock(t *testing.T) {
 	g := Compute(context.Background(), DefaultRunner, in)
 	if !g.Conflict.CheckedAt.Equal(at) {
 		t.Fatalf("checkedAt = %v, want %v", g.Conflict.CheckedAt, at)
+	}
+}
+
+func TestParseConflictFiles_CapsAtMax(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("deadbeef\n")
+	for i := 0; i < maxConflictFiles+50; i++ {
+		fmt.Fprintf(&b, "f%d.txt\n", i)
+	}
+	if got := parseConflictFiles(b.String()); len(got) != maxConflictFiles {
+		t.Fatalf("len = %d, want %d", len(got), maxConflictFiles)
 	}
 }
