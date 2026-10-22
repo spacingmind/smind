@@ -198,15 +198,21 @@ func cmdTask(args []string) int {
 }
 
 // cmdTaskNewUsage is printed on any argument error in cmdTaskNew.
-const cmdTaskNewUsage = "usage: smind task new <workspaceId> <title> [--space <spaceId>] [--parent <parentTaskId>]"
+const cmdTaskNewUsage = "usage: smind task new <workspaceId> <title> [--space <spaceId>] [--parent <parentTaskId>] [--base <ref> | --branch <existingBranch> | --pr <number>]"
 
-// cmdTaskNew accepts optional trailing "--space <spaceId>" and/or "--parent
-// <parentTaskId>" pairs, in either order, after the title -- unlike
-// cmdTaskLogs's flags, which can appear anywhere relative to its
-// positional runId, these only need to work in this one documented
-// position (title text comes last otherwise, so trailing flag pairs can be
-// unambiguously stripped off before the remaining args are joined into the
-// title).
+// cmdTaskNew accepts optional trailing flag pairs after the title:
+// "--space <spaceId>", "--parent <parentTaskId>", and the start-point
+// pickers "--base <ref>", "--branch <existingBranch>", "--pr <number>",
+// in any order among themselves -- unlike cmdTaskLogs's flags, which can
+// appear anywhere relative to its positional runId, these only need to
+// work in this one documented position (title text comes last otherwise,
+// so trailing flag pairs can be unambiguously stripped off before the
+// remaining args are joined into the title). --base forks a NEW branch at
+// that ref's commit (use origin/develop for a fresh remote base, the
+// daemon fetches it first). --branch checks out an existing branch (e.g.
+// an unmerged PR branch) with no new branch. --pr builds from a GitHub
+// PR. At most one of the three may be given; the daemon's task.create
+// enforces the same exclusivity.
 func cmdTaskNew(args []string) int {
 	if len(args) < 2 {
 		fmt.Fprintln(os.Stderr, cmdTaskNewUsage)
@@ -218,23 +224,59 @@ func cmdTaskNew(args []string) int {
 		return 2
 	}
 
+	// Value kinds for the trailing flags, so one strip loop serves them
+	// all: each flag knows whether its value is an int64 id, a ref or
+	// branch name taken as-is, or a positive PR number.
+	const (
+		flagValueID = iota
+		flagValueRef
+		flagValuePR
+	)
+	flagKinds := map[string]int{
+		"--space":  flagValueID,
+		"--parent": flagValueID,
+		"--base":   flagValueRef,
+		"--branch": flagValueRef,
+		"--pr":     flagValuePR,
+	}
 	rest := args[1:]
-	var spaceID, parentID *int64
+	var spaceID, parentID, prNum *int64
+	var baseRef, branch string
 	for len(rest) >= 2 {
-		flag := rest[len(rest)-2]
-		if flag != "--space" && flag != "--parent" {
+		flag, value := rest[len(rest)-2], rest[len(rest)-1]
+		kind, ok := flagKinds[flag]
+		if !ok {
 			break
 		}
-		id, err := parseInt64(rest[len(rest)-1])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "task new: invalid %s value %q: %v\n", flag, rest[len(rest)-1], err)
-			return 2
-		}
-		switch flag {
-		case "--space":
-			spaceID = &id
-		case "--parent":
-			parentID = &id
+		switch kind {
+		case flagValueID:
+			id, err := parseInt64(value)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "task new: invalid %s value %q: %v\n", flag, value, err)
+				return 2
+			}
+			if flag == "--space" {
+				spaceID = &id
+			} else {
+				parentID = &id
+			}
+		case flagValueRef:
+			if flag == "--base" {
+				baseRef = value
+			} else {
+				branch = value
+			}
+		case flagValuePR:
+			n, err := parseInt64(value)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "task new: invalid --pr value %q: %v\n", value, err)
+				return 2
+			}
+			if n <= 0 {
+				fmt.Fprintf(os.Stderr, "task new: invalid --pr value %q: must be > 0\n", value)
+				return 2
+			}
+			prNum = &n
 		}
 		rest = rest[:len(rest)-2]
 	}
@@ -243,6 +285,21 @@ func cmdTaskNew(args []string) int {
 		return 2
 	}
 	title := strings.Join(rest, " ")
+
+	startModes := 0
+	if baseRef != "" {
+		startModes++
+	}
+	if branch != "" {
+		startModes++
+	}
+	if prNum != nil {
+		startModes++
+	}
+	if startModes > 1 {
+		fmt.Fprintln(os.Stderr, "task new: pass at most one of --base, --branch, --pr")
+		return 2
+	}
 
 	client, err := dialDaemon(context.Background())
 	if err != nil {
@@ -257,6 +314,15 @@ func cmdTaskNew(args []string) int {
 	}
 	if parentID != nil {
 		params["parentTaskId"] = *parentID
+	}
+	if baseRef != "" {
+		params["baseRef"] = baseRef
+	}
+	if branch != "" {
+		params["branch"] = branch
+	}
+	if prNum != nil {
+		params["prNumber"] = *prNum
 	}
 
 	var task store.Task
