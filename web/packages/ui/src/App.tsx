@@ -63,6 +63,7 @@ import { DaemonQueryProvider, useDaemonQueryClient } from "@/lib/query/daemon-qu
 import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useInitialValue } from "@/hooks/use-initial-value";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useFocusedChatStore } from "@/stores/focused-chat-store";
 import { useTheme } from "@/hooks/use-theme";
 import type { ActionId } from "@/keyboard/actions";
 import { KeyboardProvider, useActionHandler, useActionRestriction } from "@/keyboard/keyboard-provider";
@@ -657,6 +658,27 @@ function AppShell({
       ),
     [taskState],
   );
+
+  // The chat the user is working in, for task-level surfaces with no chat of
+  // their own (the Diff pane's "Submit review" addresses it -- G6). A chat
+  // tab in front wins; while a non-chat tab (the Diff itself) is in front the
+  // last focused chat stays, so long as its tab is still open; with none,
+  // the first open chat tab.
+  const setFocusedChat = useFocusedChatStore((state) => state.setFocusedChat);
+  const selectedTaskId = selectedTask?.ID ?? null;
+  useEffect(() => {
+    if (selectedTaskId === null || !taskState) return;
+    const panes = collectAllPanes(taskState.root);
+    const chatInFront = (pane: (typeof panes)[number] | null) => {
+      const front = pane?.tabs.find((t) => t.key === pane.activeKey);
+      return front?.kind === "chat" && front.chatId !== undefined ? front.chatId : null;
+    };
+    const inFront = chatInFront(focusedPane) ?? panes.map(chatInFront).find((id) => id !== null) ?? null;
+    const current = useFocusedChatStore.getState().byTask[selectedTaskId] ?? null;
+    const open = collectAllTabs(taskState.root).filter((t) => t.kind === "chat" && t.chatId !== undefined);
+    const stillOpen = current !== null && open.some((t) => t.chatId === current);
+    setFocusedChat(selectedTaskId, inFront ?? (stillOpen ? current : (open[0]?.chatId ?? null)));
+  }, [selectedTaskId, taskState, focusedPane, setFocusedChat]);
 
   // --- Routing (Item 3) ------------------------------------------------
   //
@@ -2318,7 +2340,7 @@ function TabContent({
       />
     ),
     file: <FileEditorPane client={client} task={task} path={filePathFromTabKey(entry.key)} events={events} />,
-    diff: <DiffViewerPane client={client} task={task} events={events} />,
+    diff: <DiffViewerPane client={client} task={task} events={events} chats={chats} />,
     terminal: (
       <TerminalPane
         client={client}

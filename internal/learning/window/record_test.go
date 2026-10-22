@@ -193,3 +193,14 @@ func TestWindow_PermissionDenialNotLeakingRequestBody(t *testing.T) {
 		t.Errorf("request rendered")
 	}
 }
+
+func TestWindow_AttachmentMarkersAppendedToPrompt(t *testing.T) {
+	run := humanRun("r1", "look at this", nil)
+	run.Attachments = []string{"[attachment: image shot.png]", "[attachment: file_ref src/a.go]"}
+	out := build(run)
+	for _, want := range []string{"look at this", "[attachment: image shot.png]", "[attachment: file_ref src/a.go]"} {
+		if !strings.Contains(out.Text, want) {
+			t.Errorf("window lacks %q:\n%s", want, out.Text)
+		}
+	}
+}

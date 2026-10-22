@@ -15,6 +15,10 @@ export const queryKeys = {
   runList: () => ["run.list"] as const,
   /** The workspace -> spaces -> tasks tree the sidebar draws and Settings -> Usage names rows from: one fetch, live via the lifecycle events. */
   workspaceTree: () => ["workspace.tree"] as const,
+  /** `daemon.info` (per connection): the attachment limits the composer mirrors. */
+  daemonInfo: () => ["daemon.info"] as const,
+  /** The bytes of one stored image/file attachment of a run (`run.attachment`); immutable, so cached forever. */
+  runAttachment: (runId: string, id: string) => ["run.attachment", { runId, id }] as const,
   providerList: () => ["provider.list"] as const,
   profileList: () => ["profile.list"] as const,
   /** One `provider.test` answer per account-vocabulary provider key (`accountHealthTestKey`). */

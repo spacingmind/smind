@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -53,8 +54,11 @@ type ChatQueueItem struct {
 	RunID        *string
 	CancelReason string
 	CancelKind   string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// Attachments is attach.EncodeSet of the prompt's accepted attachments
+	// (ADR-0038); "" = none.
+	Attachments string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // EnqueueChatPrompt appends an item to chatID's queue in one statement
@@ -65,6 +69,12 @@ type ChatQueueItem struct {
 // fromChatID (the agent sender, ADR-0021 §4) are stored as NULL when 0 --
 // only meaningful for source='agent'.
 func (s *Store) EnqueueChatPrompt(chatID int64, prompt, runConfig, source string, priority int, fromTaskID, fromChatID int64) (ChatQueueItem, error) {
+	return s.EnqueueChatPromptAttach(chatID, prompt, runConfig, source, priority, fromTaskID, fromChatID, "")
+}
+
+// EnqueueChatPromptAttach is EnqueueChatPrompt with the prompt's encoded
+// attachment set (attach.EncodeSet; "" = none) stored on the row.
+func (s *Store) EnqueueChatPromptAttach(chatID int64, prompt, runConfig, source string, priority int, fromTaskID, fromChatID int64, attachments string) (ChatQueueItem, error) {
 	var queued int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM chat_queue WHERE chat_id = ? AND status = 'queued'`, chatID).Scan(&queued); err != nil {
 		return ChatQueueItem{}, fmt.Errorf("count queued prompts for chat %d: %w", chatID, err)
@@ -75,9 +85,9 @@ func (s *Store) EnqueueChatPrompt(chatID int64, prompt, runConfig, source string
 
 	now := time.Now().UTC()
 	res, err := s.db.Exec(
-		`INSERT INTO chat_queue (chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', NULL, '', ?, ?)`,
-		chatID, prompt, runConfig, source, nullID(fromTaskID), nullID(fromChatID), priority, now, now,
+		`INSERT INTO chat_queue (chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, attachments, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', NULL, '', ?, ?, ?)`,
+		chatID, prompt, runConfig, source, nullID(fromTaskID), nullID(fromChatID), priority, attachments, now, now,
 	)
 	if err != nil {
 		return ChatQueueItem{}, fmt.Errorf("insert chat queue item for chat %d: %w", chatID, err)
@@ -99,7 +109,7 @@ func nullID(id int64) any {
 
 // GetChatQueueItem returns the queue item with the given id.
 func (s *Store) GetChatQueueItem(id int64) (ChatQueueItem, error) {
-	row := s.db.QueryRow(`SELECT id, chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, cancel_kind, created_at, updated_at FROM chat_queue WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT id, chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, cancel_kind, attachments, created_at, updated_at FROM chat_queue WHERE id = ?`, id)
 	item, err := scanChatQueueItem(row)
 	if err != nil {
 		return ChatQueueItem{}, fmt.Errorf("get chat queue item %d: %w", id, err)
@@ -112,7 +122,7 @@ func (s *Store) GetChatQueueItem(id int64) (ChatQueueItem, error) {
 // priority). ok is false when the chat has nothing queued.
 func (s *Store) NextQueued(chatID int64) (ChatQueueItem, bool, error) {
 	row := s.db.QueryRow(
-		`SELECT id, chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, cancel_kind, created_at, updated_at
+		`SELECT id, chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, cancel_kind, attachments, created_at, updated_at
 		 FROM chat_queue WHERE chat_id = ? AND status = 'queued'
 		 ORDER BY priority DESC, id LIMIT 1`, chatID,
 	)
@@ -164,7 +174,7 @@ func (s *Store) MarkCancelled(id int64, kind, reason string) error {
 // (newest last) first.
 func (s *Store) ListChatQueue(chatID int64) ([]ChatQueueItem, error) {
 	rows, err := s.db.Query(
-		`SELECT id, chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, cancel_kind, created_at, updated_at
+		`SELECT id, chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, cancel_kind, attachments, created_at, updated_at
 		 FROM chat_queue WHERE chat_id = ? ORDER BY id`, chatID,
 	)
 	if err != nil {
@@ -211,7 +221,7 @@ func scanChatQueueItem(row rowScanner) (ChatQueueItem, error) {
 	if err := row.Scan(
 		&item.ID, &item.ChatID, &item.Prompt, &item.RunConfig, &item.Source,
 		&fromTaskID, &fromChatID, &item.Priority, &item.Status,
-		&runID, &item.CancelReason, &item.CancelKind, &item.CreatedAt, &item.UpdatedAt,
+		&runID, &item.CancelReason, &item.CancelKind, &item.Attachments, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
 		return ChatQueueItem{}, err
 	}
@@ -228,4 +238,71 @@ func scanChatQueueItem(row rowScanner) (ChatQueueItem, error) {
 		item.RunID = &v
 	}
 	return item, nil
+}
+
+// attachmentSetID extracts the set id from an attach.EncodeSet value without
+// importing internal/attach; "" when raw is empty or malformed.
+func attachmentSetID(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	var v struct {
+		Set string `json:"set"`
+	}
+	if json.Unmarshal([]byte(raw), &v) != nil {
+		return ""
+	}
+	return v.Set
+}
+
+func (s *Store) attachmentSets(query string, args ...any) ([]string, error) {
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list attachment sets: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("scan attachment set: %w", err)
+		}
+		if id := attachmentSetID(raw); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out, rows.Err()
+}
+
+// AttachmentSetsOfTask returns the attachment set ids held by taskID's runs
+// and by queue items of its chats (ADR-0038). Call it before DeleteTask.
+func (s *Store) AttachmentSetsOfTask(taskID int64) ([]string, error) {
+	runs, err := s.attachmentSets(`SELECT attachments FROM runs WHERE task_id = ? AND attachments != ''`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	queued, err := s.attachmentSets(
+		`SELECT attachments FROM chat_queue WHERE attachments != '' AND chat_id IN (SELECT id FROM chats WHERE task_id = ?)`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return append(runs, queued...), nil
+}
+
+// ReferencedAttachmentSets returns every set id still referenced by a run or
+// a queued prompt -- the keep-list for attach.Store.Sweep.
+func (s *Store) ReferencedAttachmentSets() (map[string]bool, error) {
+	runs, err := s.attachmentSets(`SELECT attachments FROM runs WHERE attachments != ''`)
+	if err != nil {
+		return nil, err
+	}
+	queued, err := s.attachmentSets(`SELECT attachments FROM chat_queue WHERE attachments != '' AND status = 'queued'`)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(runs)+len(queued))
+	for _, id := range append(runs, queued...) {
+		out[id] = true
+	}
+	return out, nil
 }
