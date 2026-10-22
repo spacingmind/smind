@@ -20,12 +20,12 @@ function RootStack() {
       <Stack
         screenOptions={{
           // expo-native-ui / expo-router: native stack header, tokens only.
-          headerStyle: { backgroundColor: theme.surface[0] },
+          headerStyle: { backgroundColor: theme.background },
           headerTintColor: theme.foreground,
-          headerTitleStyle: { fontSize: theme.type.panelTitle.fontSize, fontWeight: theme.type.panelTitle.fontWeight },
+          headerTitleStyle: { fontSize: theme.type.label.fontSize, fontWeight: theme.type.label.fontWeight },
           headerShadowVisible: false,
           headerBackButtonDisplayMode: 'minimal',
-          contentStyle: { backgroundColor: theme.surface[0] },
+          contentStyle: { backgroundColor: theme.background },
         }}
       >
         <Stack.Protected guard={gate === 'pairing'}>
