@@ -17,46 +17,48 @@ import (
 // (hence zero-valued), and this shape needs no store schema migration --
 // event_data is already a free-form JSON column.
 type persistedEvent struct {
-	Type                taskrunner.EventType          `json:"type"`
-	Text                string                        `json:"text,omitempty"`
-	StopReason          string                        `json:"stopReason,omitempty"`
-	PermissionRequestID string                        `json:"permissionRequestId,omitempty"`
-	PermissionSummary   string                        `json:"permissionSummary,omitempty"`
-	PermissionOptions   []taskrunner.PermissionOption `json:"permissionOptions,omitempty"`
-	PermissionOptionID  string                        `json:"permissionOptionId,omitempty"`
-	PermissionDetail    *taskrunner.PermissionDetail  `json:"permissionDetail,omitempty"`
-	ToolCallID          string                        `json:"toolCallId,omitempty"`
-	ToolName            string                        `json:"toolName,omitempty"`
-	ToolTitle           string                        `json:"toolTitle,omitempty"`
-	ToolStatus          string                        `json:"toolStatus,omitempty"`
-	ToolInput           json.RawMessage               `json:"toolInput,omitempty"`
-	ToolResult          json.RawMessage               `json:"toolResult,omitempty"`
-	RawKind             string                        `json:"rawKind,omitempty"`
-	RawPayload          json.RawMessage               `json:"rawPayload,omitempty"`
-	Usage               *taskrunner.Usage             `json:"usage,omitempty"`
-	McpServers          []taskrunner.McpServerState   `json:"mcpServers,omitempty"`
+	Type                 taskrunner.EventType            `json:"type"`
+	Text                 string                          `json:"text,omitempty"`
+	StopReason           string                          `json:"stopReason,omitempty"`
+	PermissionRequestID  string                          `json:"permissionRequestId,omitempty"`
+	PermissionSummary    string                          `json:"permissionSummary,omitempty"`
+	PermissionOptions    []taskrunner.PermissionOption   `json:"permissionOptions,omitempty"`
+	PermissionOptionID   string                          `json:"permissionOptionId,omitempty"`
+	PermissionResolution taskrunner.PermissionResolution `json:"permissionResolution,omitempty"`
+	PermissionDetail     *taskrunner.PermissionDetail    `json:"permissionDetail,omitempty"`
+	ToolCallID           string                          `json:"toolCallId,omitempty"`
+	ToolName             string                          `json:"toolName,omitempty"`
+	ToolTitle            string                          `json:"toolTitle,omitempty"`
+	ToolStatus           string                          `json:"toolStatus,omitempty"`
+	ToolInput            json.RawMessage                 `json:"toolInput,omitempty"`
+	ToolResult           json.RawMessage                 `json:"toolResult,omitempty"`
+	RawKind              string                          `json:"rawKind,omitempty"`
+	RawPayload           json.RawMessage                 `json:"rawPayload,omitempty"`
+	Usage                *taskrunner.Usage               `json:"usage,omitempty"`
+	McpServers           []taskrunner.McpServerState     `json:"mcpServers,omitempty"`
 }
 
 func encodeEvent(e Event) (string, error) {
 	b, err := json.Marshal(persistedEvent{
-		Type:                e.Type,
-		Text:                e.Text,
-		StopReason:          e.StopReason,
-		PermissionRequestID: e.PermissionRequestID,
-		PermissionSummary:   e.PermissionSummary,
-		PermissionOptions:   e.PermissionOptions,
-		PermissionOptionID:  e.PermissionOptionID,
-		PermissionDetail:    e.PermissionDetail,
-		ToolCallID:          e.ToolCallID,
-		ToolName:            e.ToolName,
-		ToolTitle:           e.ToolTitle,
-		ToolStatus:          e.ToolStatus,
-		ToolInput:           e.ToolInput,
-		ToolResult:          e.ToolResult,
-		RawKind:             e.RawKind,
-		RawPayload:          e.RawPayload,
-		Usage:               e.Usage,
-		McpServers:          e.McpServers,
+		Type:                 e.Type,
+		Text:                 e.Text,
+		StopReason:           e.StopReason,
+		PermissionRequestID:  e.PermissionRequestID,
+		PermissionSummary:    e.PermissionSummary,
+		PermissionOptions:    e.PermissionOptions,
+		PermissionOptionID:   e.PermissionOptionID,
+		PermissionResolution: e.PermissionResolution,
+		PermissionDetail:     e.PermissionDetail,
+		ToolCallID:           e.ToolCallID,
+		ToolName:             e.ToolName,
+		ToolTitle:            e.ToolTitle,
+		ToolStatus:           e.ToolStatus,
+		ToolInput:            e.ToolInput,
+		ToolResult:           e.ToolResult,
+		RawKind:              e.RawKind,
+		RawPayload:           e.RawPayload,
+		Usage:                e.Usage,
+		McpServers:           e.McpServers,
 	})
 	if err != nil {
 		return "", err
@@ -74,23 +76,24 @@ func decodeEvent(data string) (Event, error) {
 		return Event{}, err
 	}
 	return Event{
-		Type:                p.Type,
-		Text:                p.Text,
-		StopReason:          p.StopReason,
-		PermissionRequestID: p.PermissionRequestID,
-		PermissionSummary:   p.PermissionSummary,
-		PermissionOptions:   p.PermissionOptions,
-		PermissionOptionID:  p.PermissionOptionID,
-		PermissionDetail:    p.PermissionDetail,
-		ToolCallID:          p.ToolCallID,
-		ToolName:            p.ToolName,
-		ToolTitle:           p.ToolTitle,
-		ToolStatus:          p.ToolStatus,
-		ToolInput:           p.ToolInput,
-		ToolResult:          p.ToolResult,
-		RawKind:             p.RawKind,
-		RawPayload:          p.RawPayload,
-		Usage:               p.Usage,
-		McpServers:          p.McpServers,
+		Type:                 p.Type,
+		Text:                 p.Text,
+		StopReason:           p.StopReason,
+		PermissionRequestID:  p.PermissionRequestID,
+		PermissionSummary:    p.PermissionSummary,
+		PermissionOptions:    p.PermissionOptions,
+		PermissionOptionID:   p.PermissionOptionID,
+		PermissionResolution: p.PermissionResolution,
+		PermissionDetail:     p.PermissionDetail,
+		ToolCallID:           p.ToolCallID,
+		ToolName:             p.ToolName,
+		ToolTitle:            p.ToolTitle,
+		ToolStatus:           p.ToolStatus,
+		ToolInput:            p.ToolInput,
+		ToolResult:           p.ToolResult,
+		RawKind:              p.RawKind,
+		RawPayload:           p.RawPayload,
+		Usage:                p.Usage,
+		McpServers:           p.McpServers,
 	}, nil
 }
