@@ -354,3 +354,85 @@ func (n *Notifier) event(in Input, info TaskInfo, now time.Time) Event {
 		At:     now.Unix(),
 	}
 }
+
+// TestResult is the outcome of one device of a test push.
+type TestResult struct {
+	DeviceID string `json:"deviceId"`
+	Sent     bool   `json:"sent"`
+	Error    string `json:"error,omitempty"`
+}
+
+// Test seals a kind "test" event for each listed device and sends ONE batch.
+// It is an operator action, so it bypasses the kinds filter, dedupe and the
+// rate limit, but not the approved check. Results come back in the order of
+// deviceIDs; Error is one of not_registered, not_approved, seal_failed,
+// send_failed or the provider's error code (DeviceNotRegistered also removes
+// the registration, as in Notify). Nothing secret is logged.
+func (n *Notifier) Test(ctx context.Context, deviceIDs []string) []TestResult {
+	out := make([]TestResult, len(deviceIDs))
+	var msgs []Message
+	var slot []int // out index per msgs entry
+	now := n.d.Now()
+	for i, id := range deviceIDs {
+		out[i].DeviceID = id
+		reg, ok := n.d.Registry.Get(id)
+		if !ok {
+			out[i].Error = "not_registered"
+			continue
+		}
+		if n.d.Approved != nil && !n.d.Approved(id) {
+			out[i].Error = "not_approved"
+			continue
+		}
+		blob, err := Seal(reg.Key, reg.DeviceID, Event{
+			ID:    n.d.NewID(),
+			Kind:  KindTest,
+			Title: "smind",
+			Body:  "Test notification",
+			At:    now.Unix(),
+		})
+		if err != nil {
+			n.d.Logf("push: seal failed for device %s", idPrefix(id))
+			out[i].Error = "seal_failed"
+			continue
+		}
+		msgs = append(msgs, Message{Token: reg.Token, Platform: reg.Platform, Data: blob})
+		slot = append(slot, i)
+	}
+	if len(msgs) == 0 {
+		return out
+	}
+
+	results, err := n.d.Sender.Send(ctx, msgs)
+	if err != nil {
+		n.d.Logf("push: test send failed: %s", redactTokens(err.Error(), msgs))
+		results = nil
+	}
+	removed := 0
+	for j, i := range slot {
+		if j >= len(results) {
+			out[i].Error = "send_failed"
+			continue
+		}
+		res := results[j]
+		if res.OK {
+			out[i].Sent = true
+			continue
+		}
+		out[i].Error = res.ErrCode
+		if out[i].Error == "" {
+			out[i].Error = "send_failed"
+		}
+		if res.ErrCode == errDeviceGone {
+			if c, rerr := n.d.Registry.RemoveToken(msgs[j].Token); rerr == nil {
+				removed += c
+			}
+			continue
+		}
+		n.d.Logf("push: provider rejected a test message (code %s, device %s)", res.ErrCode, idPrefix(deviceIDs[i]))
+	}
+	if removed > 0 {
+		n.d.Logf("push: removed %d unregistered device(s)", removed)
+	}
+	return out
+}
