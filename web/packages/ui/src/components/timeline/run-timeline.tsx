@@ -121,7 +121,7 @@ export const RunTimeline = memo(function RunTimeline({
           </div>
         )}
 
-        <RunFooter run={run} providerLabels={providerLabels} modelLabels={modelLabels} isLatest={isLatest} onContinue={onContinue} onRerun={onRerun}>
+        <RunFooter run={run} providerLabels={providerLabels} modelLabels={modelLabels} isLatest={isLatest} waiting={Boolean(run.pendingPermission)} onContinue={onContinue} onRerun={onRerun}>
           <MessageActions group="run" className="ml-auto" data-testid="run-actions">
             <RunCopyMenu run={run} />
             {onRerun && run.status !== "running" && (
