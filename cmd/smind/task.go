@@ -1552,10 +1552,17 @@ type runSummaryRow struct {
 	// is the model the agent reported using, when it reported one.
 	Model string
 	Usage *struct {
-		Model *string `json:"model"`
+		Model        *string  `json:"model"`
+		InputTokens  *int64   `json:"inputTokens"`
+		OutputTokens *int64   `json:"outputTokens"`
+		CostUSD      *float64 `json:"costUsd"`
 	} `json:"usage"`
 	// Disposition is "needs-continue" for a run that ended done at a cap.
 	Disposition string
+	FinishedAt  *time.Time
+	Err         string
+	BaseSHA     *string
+	HeadSHA     *string
 }
 
 // runModelCell is a run's MODEL column: the requested model; when none was
@@ -1573,8 +1580,11 @@ func runModelCell(r runSummaryRow) string {
 
 // runStatusCell is a run's STATUS column: the status, and its disposition when
 // it has one (a run "done" at a turn cap reads "done (needs-continue)": not
-// finished).
-func runStatusCell(status, disposition string) string {
+// finished). A failed run with an error text reads "error: <cause>".
+func runStatusCell(status, disposition, errText string) string {
+	if status == "error" && strings.TrimSpace(errText) != "" {
+		return status + ": " + runErrCause(errText)
+	}
 	if disposition == "" {
 		return status
 	}
@@ -1646,13 +1656,34 @@ func cmdTaskRuns(args []string) int {
 		return 1
 	}
 
-	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tCHAT\tPROVIDER\tMODEL\tSTATUS")
+	var rows []runSummaryRow
+	needGit := false
 	for _, r := range all {
 		if r.TaskID != taskID {
 			continue
 		}
-		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\n", r.ID, r.ChatID, r.Provider, runModelCell(r), runStatusCell(r.Status, r.Disposition))
+		rows = append(rows, r)
+		if r.BaseSHA != nil && r.HeadSHA != nil && *r.BaseSHA != "" && *r.HeadSHA != "" {
+			needGit = true
+		}
+	}
+	worktree := ""
+	if needGit {
+		var task struct {
+			WorktreePath *string
+		}
+		if err := client.Call(context.Background(), "task.get", map[string]any{"id": taskID}, &task); err == nil && task.WorktreePath != nil {
+			worktree = *task.WorktreePath
+		}
+	}
+	now := time.Now()
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tCHAT\tPROVIDER\tMODEL\tSTARTED\tDURATION\tUSAGE\tCOMMITS\tSTATUS")
+	for _, r := range rows {
+		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.ID, r.ChatID, r.Provider, runModelCell(r),
+			runStartedCell(r.StartedAt, now), runDurationCell(r, now), runUsageCell(r), runCommitsCell(r, worktree),
+			runStatusCell(r.Status, r.Disposition, r.Err))
 	}
 	tw.Flush()
 	return 0
