@@ -10,7 +10,7 @@ import { DiffViewerPane } from "@/components/diff-viewer-pane";
 import { clearToasts, Toaster } from "@/components/ui/toast";
 import { runConfigStorageKey } from "@/components/composer/run-config-preference";
 import { useFocusedChatStore } from "@/stores/focused-chat-store";
-import type { Chat, Task, TaskCreatePrResult, TaskFileDiffResult, TaskFilesResult } from "@/lib/types";
+import type { Chat, Task, TaskFileDiffResult, TaskFilesResult, TaskGit } from "@/lib/types";
 
 const TASK: Task = {
   ID: 1,
@@ -279,58 +279,30 @@ describe("DiffViewerPane commit bar", () => {
 });
 
 describe("DiffViewerPane Create PR", () => {
-  it("calls task.createPr and renders the returned URL as a link", async () => {
+  async function renderWithGit(git: Partial<TaskGit> | null) {
     const client = new FakeWsClient();
     render(<DiffViewerPane client={client} task={TASK} />);
     await resolveFilesAndDiffs(client);
+    if (git) {
+      client.nth("task.git", 0).resolve({ taskId: TASK.ID, untrusted: false, computedAt: "2026-01-01T00:00:00Z", ...git } satisfies TaskGit);
+      await flush();
+    }
+    return client;
+  }
+  const enabled = { createPr: { enabled: true }, updatePr: { enabled: false, code: "no_pr", reason: "Update PR isn't available because there is no pull request." } };
 
+  it("mounts the PR action in the header and opens the preview dialog instead of calling task.createPr", async () => {
+    const client = await renderWithGit({ actions: enabled });
     fireEvent.click(screen.getByTestId("create-pr-button"));
-    const call = client.nth("task.createPr", 0);
-    expect(call.params).toEqual({ taskId: TASK.ID });
-    call.resolve({ url: "https://github.com/example/repo/pull/42" } satisfies TaskCreatePrResult);
     await flush();
-
-    const link = screen.getByTestId("pr-url-link");
-    expect(link).toHaveTextContent("https://github.com/example/repo/pull/42");
-    expect(link).toHaveAttribute("href", "https://github.com/example/repo/pull/42");
-    expect(screen.queryByTestId("pr-error")).not.toBeInTheDocument();
+    expect(client.nth("task.prPreview", 0).params).toEqual({ taskId: TASK.ID });
+    expect(client.calls.some((c) => c.method === "task.createPr")).toBe(false);
+    expect(screen.getByTestId("create-pr-dialog")).toBeInTheDocument();
   });
 
-  it("surfaces a task.createPr failure inline instead of failing silently", async () => {
-    const client = new FakeWsClient();
-    render(<DiffViewerPane client={client} task={TASK} />);
-    await resolveFilesAndDiffs(client);
-
-    fireEvent.click(screen.getByTestId("create-pr-button"));
-    client.nth("task.createPr", 0).reject(new Error("gh pr create: HTTP 429: rate limited"));
-    await flush();
-
-    expect(screen.getByTestId("pr-error")).toHaveTextContent("429");
-    expect(screen.queryByTestId("pr-url")).not.toBeInTheDocument();
-  });
-
-  it("shows a gh failure as one line with the raw argv behind a Details disclosure", async () => {
-    const client = new FakeWsClient();
-    render(<DiffViewerPane client={client} task={TASK} />);
-    await resolveFilesAndDiffs(client);
-
-    fireEvent.click(screen.getByTestId("create-pr-button"));
-    client
-      .nth("task.createPr", 0)
-      .reject(
-        new Error(
-          "task.createPr: create pr 1: gh pr create: gh [pr create --base develop --head smind/task-x --title T --body B]: exit status 1: none of the git remotes configured for this repository point to a known GitHub host. To tell gh about a new GitHub host, please use `gh auth login`",
-        ),
-      );
-    await flush();
-
-    const error = screen.getByTestId("pr-error");
-    const line = error.querySelector("p")!;
-    expect(line).toHaveTextContent("Couldn't create the PR: none of the git remotes configured for this repository point to a known GitHub host.");
-    expect(line.textContent).not.toContain("--base");
-    const details = screen.getByTestId("pr-error-details") as HTMLDetailsElement;
-    expect(details.open).toBe(false);
-    expect(details).toHaveTextContent("--base develop");
+  it("disables Create PR while the task's git state is unknown", async () => {
+    await renderWithGit(null);
+    expect(screen.getByTestId("create-pr-button")).toBeDisabled();
   });
 
   it("disables the Create PR control when there is no client", () => {
@@ -936,12 +908,12 @@ describe("DiffViewerPane header below md", () => {
     window.innerWidth = widthBefore;
   });
 
-  it("collapses the toggles, Refresh and Create PR into one menu", async () => {
+  it("collapses the toggles and Refresh into one menu next to the PR action", async () => {
     const client = new FakeWsClient();
     render(<DiffViewerPane client={client} task={TASK} />);
     await resolveFilesAndDiffs(client);
 
-    expect(screen.queryByTestId("create-pr-button")).not.toBeInTheDocument();
+    expect(screen.getByTestId("create-pr-button")).toBeInTheDocument();
     expect(screen.queryByTestId("diff-view-toggle")).not.toBeInTheDocument();
 
     fireEvent.pointerDown(screen.getByTestId("diff-actions-menu"), { button: 0, ctrlKey: false });
@@ -957,8 +929,7 @@ describe("DiffViewerPane header below md", () => {
     expect(screen.getByTestId("diff-container-file.txt")).toHaveAttribute("data-output-format", "side-by-side");
 
     fireEvent.pointerDown(screen.getByTestId("diff-actions-menu"), { button: 0, ctrlKey: false });
-    await waitFor(() => expect(screen.getByTestId("diff-menu-create-pr")).toBeInTheDocument());
-    fireEvent.click(screen.getByTestId("diff-menu-create-pr"));
-    expect(client.nth("task.createPr", 0).params).toEqual({ taskId: TASK.ID });
+    await waitFor(() => expect(screen.getByTestId("diff-menu-refresh")).toBeInTheDocument());
+    expect(screen.queryByTestId("diff-menu-create-pr")).not.toBeInTheDocument();
   });
 });
