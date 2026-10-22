@@ -101,9 +101,9 @@ export function WorkspaceScriptsDialog({
         <DialogHeader>
           <DialogTitle>Worktree settings</DialogTitle>
           <DialogDescription>
-            {workspace.Title || workspace.Path} — runs in each new task&apos;s worktree with SMIND_WORKTREE_PATH,
-            SMIND_SOURCE_CHECKOUT_PATH, SMIND_BRANCH, SMIND_PORT. Authored by you only — agents and repositories cannot
-            change it.
+            {workspace.Title || workspace.Path} — the branch new tasks are measured against and open pull requests into, and
+            the scripts that run in each new task&apos;s worktree with SMIND_WORKTREE_PATH, SMIND_SOURCE_CHECKOUT_PATH,
+            SMIND_BRANCH, SMIND_PORT. Scripts are authored by you only — agents and repositories cannot change them.
           </DialogDescription>
         </DialogHeader>
         <form

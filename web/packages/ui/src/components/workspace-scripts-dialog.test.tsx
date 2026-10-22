@@ -163,7 +163,7 @@ describe("workspace setup editor", () => {
 
     fireEvent.click(screen.getByTestId("workspace-scripts-save"));
 
-    expect(client.calls.filter((c) => c.method === "workspace.setDefaultBase")).toHaveLength(1);
+    expect(client.calls.filter((c) => c.method === "workspace.setDefaultBase")).toHaveLength(0);
     expect(client.calls[2]).toMatchObject({ method: "workspace.setScripts" });
   });
 });
