@@ -42,6 +42,16 @@ const usage = (accountId: number, displayName: string): AccountUsage => ({
 const usageData = (reports: AccountUsage[]): UsageQueryData => ({ supportsUsage: true, enabled: true, ttlSeconds: 300, reports });
 
 describe("applyDaemonEvent", () => {
+  it("a terminal run.status invalidates that task's path index only", () => {
+    const qc = createQueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    applyDaemonEvent(qc, "run.status", { runId: "r", taskId: 4, chatId: 1, status: "running" });
+    expect(invalidate).not.toHaveBeenCalled();
+    applyDaemonEvent(qc, "run.status", { runId: "r", taskId: 4, chatId: 1, status: "done" });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.taskSearchIndex(4) });
+    expect(invalidate).toHaveBeenCalledTimes(1);
+  });
+
   it("account.updated upserts the account list and re-reads the cached usage list", () => {
     const qc = createQueryClient();
     const invalidate = vi.spyOn(qc, "invalidateQueries");

@@ -8,7 +8,7 @@ import { Icons } from "@/lib/icons";
 import type { AttachmentMeta } from "@/lib/types";
 
 /** Fixed box: the skeleton and the loaded thumbnail share it, so nothing reflows when the bytes arrive. */
-const THUMB_CLASS = "size-40 shrink-0 rounded-lg border border-border";
+const THUMB_CLASS = "size-28 shrink-0 sm:size-40 rounded-lg border border-border";
 
 /**
  * One image under a sent message. A thumbnail the client already holds (`previewUrl`, from the optimistic echo)

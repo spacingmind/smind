@@ -24,4 +24,8 @@ describe("attachments encode", () => {
     const req = await encodeAttachment({ kind: "image", name: "a.png", mimeType: "image/png", file: new Blob(["hi"]) });
     expect(req).toEqual({ kind: "image", name: "a.png", mimeType: "image/png", data: "aGk=" });
   });
+
+  it("encodes a PR or issue as a reference without reading anything", async () => {
+    expect(await encodeAttachment({ kind: "pr", forge: "github", number: 12, repo: "o/r" })).toEqual({ kind: "pr", forge: "github", number: 12, repo: "o/r" });
+  });
 });

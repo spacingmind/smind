@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type ClipboardEvent, type KeyboardEvent, type Ref } from "react";
+import { useLayoutEffect, useRef, type AriaAttributes, type ClipboardEvent, type KeyboardEvent, type Ref } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -62,6 +62,9 @@ export function PromptTextarea({
   onFocus,
   onBlur,
   onPaste,
+  interceptKey,
+  onCaret,
+  textareaProps,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -79,6 +82,12 @@ export function PromptTextarea({
   onBlur?: () => void;
   /** Called before the default paste; the handler `preventDefault`s only when it took files, so a plain-text paste is untouched. */
   onPaste?: (e: ClipboardEvent<HTMLTextAreaElement>) => void;
+  /** Runs before the submit rule; returning true means the key was consumed (the `@` popover's arrows, Enter, Tab, Esc). */
+  interceptKey?: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
+  /** The caret position after every change, selection move, key release and click. */
+  onCaret?: (index: number) => void;
+  /** Extra ARIA attributes (the combobox wiring of the `@` popover). */
+  textareaProps?: AriaAttributes & { role?: string };
 }) {
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -101,11 +110,19 @@ export function PromptTextarea({
       placeholder={placeholder}
       disabled={disabled}
       style={{ maxHeight: MAX_COMPOSER_HEIGHT }}
-      onChange={(e) => onChange(e.target.value)}
+      {...textareaProps}
+      onChange={(e) => {
+        onChange(e.target.value);
+        onCaret?.(e.target.selectionStart);
+      }}
+      onSelect={(e) => onCaret?.(e.currentTarget.selectionStart)}
+      onKeyUp={(e) => onCaret?.(e.currentTarget.selectionStart)}
+      onClick={(e) => onCaret?.(e.currentTarget.selectionStart)}
       onFocus={onFocus}
       onBlur={onBlur}
       onPaste={onPaste}
       onKeyDown={(e) => {
+        if (interceptKey?.(e)) return;
         if (isSubmitKey(e)) {
           e.preventDefault();
           onSubmit();

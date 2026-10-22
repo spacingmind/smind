@@ -3,17 +3,42 @@ import { create } from "zustand";
 import { formatBytes } from "@/lib/attachments/format";
 import type { AttachmentLimits } from "@/lib/types";
 
-export interface DraftAttachment {
+interface DraftBase {
   localId: string;
-  file: File;
+  /** Why this item cannot be sent (client cap); submit is blocked while any item has one. */
+  error?: string;
+}
+
+/** A picked or pasted image/file: bytes stay in the `File` until submit. */
+export interface DraftFile extends DraftBase {
   kind: "image" | "file";
+  file: File;
   name: string;
   mimeType: string;
   size: number;
   /** Object URL of an image (revoked on remove/clear). */
   previewUrl?: string;
-  /** Why this item cannot be sent (client cap); submit is blocked while any item has one. */
-  error?: string;
+}
+
+/** A picked pull request or issue: just the daemon-side reference plus what the pill shows. No bytes, no size cap. */
+export interface DraftForgeRef extends DraftBase {
+  kind: "pr" | "issue";
+  forge: "github";
+  number: number;
+  repo: string;
+  title: string;
+  url: string;
+}
+
+export type DraftAttachment = DraftFile | DraftForgeRef;
+
+export function isDraftFile(item: DraftAttachment): item is DraftFile {
+  return item.kind === "image" || item.kind === "file";
+}
+
+/** What a pill and an aria-label call the item: the file name, or number plus title for a PR/issue. */
+export function draftLabel(item: DraftAttachment): string {
+  return isDraftFile(item) ? item.name : `#${item.number} ${item.title}`;
 }
 
 /** The store key: one draft tray per task and chat. */
@@ -28,7 +53,7 @@ let nextId = 0;
 let pastedImages = 0;
 
 function revoke(item: DraftAttachment): void {
-  if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+  if (isDraftFile(item) && item.previewUrl) URL.revokeObjectURL(item.previewUrl);
 }
 
 /** A pasted image has no meaningful name: `clipboard-<n>.<ext>` (ADR-0038 §6). */
@@ -46,13 +71,15 @@ function validate(items: DraftAttachment[], limits: AttachmentLimits): DraftAtta
   let accepted = 0;
   return items.map((item) => {
     let error: string | undefined;
+    // A PR/issue counts toward the item cap only: it carries no bytes.
+    const size = isDraftFile(item) ? item.size : 0;
     const cap = item.kind === "image" ? limits.maxImageBytes : limits.maxFileBytes;
-    if (item.size > cap) error = `Larger than ${formatBytes(cap)}`;
+    if (isDraftFile(item) && size > cap) error = `Larger than ${formatBytes(cap)}`;
     else if (accepted >= limits.maxCount) error = `Over the ${limits.maxCount} attachment limit`;
-    else if (total + item.size > limits.maxTotalBytes) error = `Over the ${formatBytes(limits.maxTotalBytes)} total`;
+    else if (total + size > limits.maxTotalBytes) error = `Over the ${formatBytes(limits.maxTotalBytes)} total`;
     if (!error) {
       accepted += 1;
-      total += item.size;
+      total += size;
     }
     return error === item.error ? item : { ...item, error };
   });
@@ -60,7 +87,13 @@ function validate(items: DraftAttachment[], limits: AttachmentLimits): DraftAtta
 
 interface ComposerAttachmentsState {
   byKey: Record<string, DraftAttachment[]>;
+  /** The paths picked from the `@` popover, per key; only those whose `@path` is still in the prompt are sent as `file_ref`s. */
+  mentions: Record<string, string[]>;
   add: (key: string, files: File[], limits: AttachmentLimits) => void;
+  /** Adds a picked PR/issue (a duplicate of one already in the tray is ignored). */
+  addForgeRef: (key: string, ref: Omit<DraftForgeRef, "localId" | "error">, limits: AttachmentLimits) => void;
+  addMention: (key: string, path: string) => void;
+  clearMentions: (key: string) => void;
   remove: (key: string, localId: string, limits?: AttachmentLimits | null) => void;
   /** Drops the tray and revokes its object URLs (on unmount). */
   clear: (key: string) => void;
@@ -74,6 +107,7 @@ interface ComposerAttachmentsState {
  */
 export const useComposerAttachmentsStore = create<ComposerAttachmentsState>()((set, get) => ({
   byKey: {},
+  mentions: {},
   add: (key, files, limits) => {
     if (files.length === 0) return;
     const added: DraftAttachment[] = files.map((file) => {
@@ -90,6 +124,22 @@ export const useComposerAttachmentsStore = create<ComposerAttachmentsState>()((s
     });
     set({ byKey: { ...get().byKey, [key]: validate([...(get().byKey[key] ?? NONE), ...added], limits) } });
   },
+  addForgeRef: (key, ref, limits) => {
+    const current = get().byKey[key] ?? NONE;
+    if (current.some((i) => i.kind === ref.kind && !isDraftFile(i) && i.number === ref.number && i.repo === ref.repo)) return;
+    const added: DraftForgeRef = { ...ref, localId: `att-${++nextId}` };
+    set({ byKey: { ...get().byKey, [key]: validate([...current, added], limits) } });
+  },
+  addMention: (key, path) => {
+    const held = get().mentions[key] ?? [];
+    if (held.includes(path)) return;
+    set({ mentions: { ...get().mentions, [key]: [...held, path] } });
+  },
+  clearMentions: (key) => {
+    if (!get().mentions[key]) return;
+    const { [key]: _gone, ...rest } = get().mentions;
+    set({ mentions: rest });
+  },
   remove: (key, localId, limits) => {
     const current = get().byKey[key] ?? NONE;
     const gone = current.find((i) => i.localId === localId);
@@ -101,6 +151,7 @@ export const useComposerAttachmentsStore = create<ComposerAttachmentsState>()((s
     set({ byKey: { ...get().byKey, [key]: next } });
   },
   clear: (key) => {
+    get().clearMentions(key);
     const current = get().byKey[key];
     if (!current) return;
     current.forEach(revoke);
@@ -120,4 +171,11 @@ export const useComposerAttachmentsStore = create<ComposerAttachmentsState>()((s
 /** The draft tray of one key (a stable empty array when there is none). */
 export function useDraftAttachments(key: string | null): DraftAttachment[] {
   return useComposerAttachmentsStore((s) => (key ? (s.byKey[key] ?? NONE) : NONE));
+}
+
+const NO_MENTIONS: string[] = [];
+
+/** The paths remembered from the `@` popover for one key (a stable empty array when there are none). */
+export function useDraftMentions(key: string | null): string[] {
+  return useComposerAttachmentsStore((s) => (key ? (s.mentions[key] ?? NO_MENTIONS) : NO_MENTIONS));
 }

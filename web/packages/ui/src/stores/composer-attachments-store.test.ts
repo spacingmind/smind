@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { attachmentDraftKey, useComposerAttachmentsStore } from "@/stores/composer-attachments-store";
+import { attachmentDraftKey, useComposerAttachmentsStore, type DraftFile } from "@/stores/composer-attachments-store";
 import { attachmentErrorMessage } from "@/lib/attachments/errors";
 import { RpcError } from "@/lib/ws-client";
 import type { AttachmentLimits } from "@/lib/types";
@@ -15,7 +15,9 @@ const limits: AttachmentLimits = {
 };
 const key = attachmentDraftKey(1, 2);
 const file = (name: string, type: string, size: number) => new File([new Uint8Array(size)], name, { type });
-const items = () => useComposerAttachmentsStore.getState().byKey[key] ?? [];
+const items = () => (useComposerAttachmentsStore.getState().byKey[key] ?? []) as DraftFile[];
+const all = () => useComposerAttachmentsStore.getState().byKey[key] ?? [];
+const pr = (number: number) => ({ kind: "pr" as const, forge: "github" as const, number, repo: "o/r", title: `PR ${number}`, url: `https://github.com/o/r/pull/${number}` });
 
 describe("composer attachments store", () => {
   const revoked: string[] = [];
@@ -23,7 +25,7 @@ describe("composer attachments store", () => {
     revoked.length = 0;
     let n = 0;
     vi.stubGlobal("URL", { createObjectURL: () => `blob:${++n}`, revokeObjectURL: (u: string) => revoked.push(u) });
-    useComposerAttachmentsStore.setState({ byKey: {} });
+    useComposerAttachmentsStore.setState({ byKey: {}, mentions: {} });
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -71,5 +73,45 @@ describe("attachmentErrorMessage", () => {
     expect(attachmentErrorMessage(new RpcError("raw daemon text", "forge_unauthenticated"), limits)).toBe("GitHub is unavailable: gh is not logged in on the daemon host.");
     expect(attachmentErrorMessage(new RpcError("kept", "forge_error"), limits)).toBe("kept");
     expect(attachmentErrorMessage(new Error("boom"), null)).toBe("boom");
+  });
+
+  it("holds PRs and issues next to files; they count toward maxCount but not the byte total", () => {
+    useComposerAttachmentsStore.setState({ byKey: {}, mentions: {} });
+    const s = useComposerAttachmentsStore.getState();
+    s.addForgeRef(key, pr(1), limits);
+    s.addForgeRef(key, { ...pr(2), kind: "issue" }, limits);
+    s.add(key, [file("a.txt", "text/plain", 200), file("b.txt", "text/plain", 1)], limits);
+    expect(all().map((i) => [i.kind, i.error])).toEqual([
+      ["pr", undefined],
+      ["issue", undefined],
+      ["file", undefined],
+      ["file", "Over the 3 attachment limit"],
+    ]);
+  });
+
+  it("ignores a PR already in the tray and revalidates after removing one", () => {
+    useComposerAttachmentsStore.setState({ byKey: {}, mentions: {} });
+    const s = useComposerAttachmentsStore.getState();
+    s.addForgeRef(key, pr(1), limits);
+    s.addForgeRef(key, pr(1), limits);
+    expect(all()).toHaveLength(1);
+    s.add(key, [file("a", "text/plain", 1), file("b", "text/plain", 1), file("c", "text/plain", 1)], limits);
+    expect(all()[3]?.error).toBeDefined();
+    s.remove(key, all()[0].localId, limits);
+    expect(all().every((i) => !i.error)).toBe(true);
+  });
+
+  it("remembers each mention once and clears them with the tray", () => {
+    useComposerAttachmentsStore.setState({ byKey: {}, mentions: {} });
+    const s = useComposerAttachmentsStore.getState();
+    s.addMention(key, "src/a.go");
+    s.addMention(key, "src/a.go");
+    s.addMention(key, "b.md");
+    expect(useComposerAttachmentsStore.getState().mentions[key]).toEqual(["src/a.go", "b.md"]);
+    s.clearMentions(key);
+    expect(useComposerAttachmentsStore.getState().mentions[key]).toBeUndefined();
+    s.addMention(key, "x");
+    s.clear(key);
+    expect(useComposerAttachmentsStore.getState().mentions[key]).toBeUndefined();
   });
 });

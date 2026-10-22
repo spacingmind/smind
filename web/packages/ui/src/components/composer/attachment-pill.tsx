@@ -2,9 +2,10 @@ import type { KeyboardEvent } from "react";
 
 import { useCanHover } from "@/hooks/use-can-hover";
 import { formatBytes } from "@/lib/attachments/format";
+import { openExternalUrl } from "@/lib/external-link";
 import { Icons } from "@/lib/icons";
 import { cn } from "@/lib/utils";
-import type { DraftAttachment } from "@/stores/composer-attachments-store";
+import { draftLabel, isDraftFile, type DraftAttachment } from "@/stores/composer-attachments-store";
 
 /** The type label under a file name: its extension ("PDF", "TXT"), else the MIME subtype ("text/plain" is "PLAIN" only as a last resort). */
 function typeLabel(name: string, mimeType: string): string {
@@ -13,6 +14,11 @@ function typeLabel(name: string, mimeType: string): string {
   if (ext.length > 0 && ext.length <= 5 && /^[A-Za-z0-9]+$/.test(ext)) return ext.toUpperCase();
   const sub = mimeType.split("/")[1];
   return sub ? sub.replace(/^x-/, "").split("+")[0].toUpperCase() : mimeType;
+}
+
+function ForgeIcon({ kind }: { kind: "pr" | "issue" }) {
+  const Icon = kind === "pr" ? Icons.pullRequest : Icons.issue;
+  return <Icon aria-hidden className="size-4 shrink-0 text-foreground-muted" />;
 }
 
 /**
@@ -33,7 +39,11 @@ export function AttachmentPill({
   onOpen?: () => void;
 }) {
   const canHover = useCanHover();
-  const openable = item.kind === "image" && !!item.previewUrl && !item.error && !!onOpen;
+  const label = draftLabel(item);
+  const file = isDraftFile(item) ? item : null;
+  const forge = isDraftFile(item) ? null : item;
+  const previewUrl = file?.previewUrl;
+  const openable = item.kind === "image" && !!previewUrl && !item.error && !!onOpen;
 
   function handleKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     // Keys typed into the close badge itself (Enter/Space) keep their default; only the pill's own keys act here.
@@ -44,15 +54,18 @@ export function AttachmentPill({
     } else if (openable && (e.key === "Enter" || e.key === " ")) {
       e.preventDefault();
       onOpen?.();
+    } else if (forge && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault();
+      openExternalUrl(forge.url);
     }
   }
 
-  const asImage = item.kind === "image" && !!item.previewUrl && !item.error;
+  const asImage = item.kind === "image" && !!previewUrl && !item.error;
   return (
     <div
       role="group"
       tabIndex={0}
-      aria-label={item.error ? `${item.name}: ${item.error}` : item.name}
+      aria-label={item.error ? `${label}: ${item.error}` : label}
       data-testid="attachment-pill"
       data-kind={item.kind}
       data-error={item.error ? "true" : undefined}
@@ -63,32 +76,36 @@ export function AttachmentPill({
         <button
           type="button"
           tabIndex={-1}
-          aria-label={`Preview ${item.name}`}
+          aria-label={`Preview ${label}`}
           onClick={onOpen}
           className="block size-12 cursor-zoom-in overflow-hidden rounded-lg"
         >
-          <img src={item.previewUrl} alt={item.name} className="size-12 rounded-lg border border-border object-cover" />
+          <img src={previewUrl} alt={label} className="size-12 rounded-lg border border-border object-cover" />
         </button>
       ) : (
         <div
+          onClick={forge ? () => openExternalUrl(forge.url) : undefined}
           className={cn(
             "flex h-12 min-w-0 items-center gap-2 rounded-lg border bg-surface px-2.5",
             item.error ? "border-destructive/50" : "border-border",
+            forge && "cursor-pointer hover:bg-surface-hover",
           )}
         >
           {item.error ? (
             <Icons.warning aria-hidden className="size-4 shrink-0 text-destructive" />
+          ) : forge ? (
+            <ForgeIcon kind={forge.kind} />
           ) : item.kind === "image" ? (
             <Icons.image aria-hidden className="size-4 shrink-0 text-foreground-muted" />
           ) : (
             <Icons.file aria-hidden className="size-4 shrink-0 text-foreground-muted" />
           )}
           <span className="flex min-w-0 flex-col">
-            <span className="truncate text-ui-sm text-foreground" title={item.name}>
-              {item.name}
+            <span className="truncate text-ui-sm text-foreground" title={label}>
+              {label}
             </span>
             <span className={cn("truncate text-ui-xs", item.error ? "text-destructive" : "text-foreground-muted")}>
-              {item.error ?? `${typeLabel(item.name, item.mimeType)} · ${formatBytes(item.size)}`}
+              {item.error ?? (file ? `${typeLabel(file.name, file.mimeType)} · ${formatBytes(file.size)}` : `${forge!.kind === "pr" ? "PR" : "Issue"} · ${forge!.repo}`)}
             </span>
           </span>
         </div>
@@ -97,7 +114,7 @@ export function AttachmentPill({
       <button
         type="button"
         tabIndex={canHover ? -1 : 0}
-        aria-label={`Remove ${item.name}`}
+        aria-label={`Remove ${label}`}
         data-testid="attachment-pill-close"
         onClick={(e) => {
           e.stopPropagation();

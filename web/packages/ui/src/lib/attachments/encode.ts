@@ -16,6 +16,12 @@ export async function fileToBase64(file: Blob): Promise<string> {
 /**
  * Encodes one draft item at submit time (never on add: ADR-0038 §6).
  */
-export async function encodeAttachment(item: { kind: "image" | "file"; name: string; mimeType: string; file: Blob }): Promise<AttachmentRequest> {
+export async function encodeAttachment(
+  item:
+    | { kind: "image" | "file"; name: string; mimeType: string; file: Blob }
+    | { kind: "pr" | "issue"; forge: "github"; number: number; repo: string },
+): Promise<AttachmentRequest> {
+  // A PR/issue is a reference the daemon resolves: nothing to read.
+  if (!("file" in item)) return { kind: item.kind, forge: item.forge, number: item.number, repo: item.repo };
   return { kind: item.kind, name: item.name, mimeType: item.mimeType, data: await fileToBase64(item.file) };
 }

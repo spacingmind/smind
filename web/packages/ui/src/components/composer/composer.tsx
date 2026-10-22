@@ -1,11 +1,19 @@
-import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent, type Ref } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent, type Ref } from "react";
 
 import { Icons } from "@/lib/icons";
 import { AttachmentTray } from "@/components/composer/attachment-tray";
+import { AttachMenu, type ForgeKind } from "@/components/composer/attach-menu";
+import { ForgePicker } from "@/components/composer/forge-picker";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
+import { useDaemonForge } from "@/hooks/use-attachment-limits";
+import { FileMentionPopover } from "@/components/composer/file-mention-popover";
+import { useFileMention } from "@/components/composer/use-file-mention";
+import { mentionedPaths } from "@/lib/file-mention";
+import { supportsKind } from "@/lib/attachments/kinds";
 import { useAttachmentDraft } from "@/components/composer/use-attachment-draft";
 import { attachmentErrorMessage } from "@/lib/attachments/errors";
 import { encodeAttachment } from "@/lib/attachments/encode";
-import { useComposerAttachmentsStore, type DraftAttachment } from "@/stores/composer-attachments-store";
+import { isDraftFile, useComposerAttachmentsStore, type DraftAttachment } from "@/stores/composer-attachments-store";
 import { cn } from "@/lib/utils";
 
 import { ComposerStatusChips } from "@/components/composer/composer-status-chips";
@@ -40,6 +48,9 @@ const ICON_ACTION_BUTTON_CLASS = "size-11 rounded-xl md:size-8";
 
 /** The metadata the optimistic run entry shows for a draft item, thumbnail URL included so no fetch is needed. */
 function draftPreview(item: DraftAttachment, index: number): AttachmentMeta {
+  if (!isDraftFile(item)) {
+    return { id: String(index + 1), kind: item.kind, forge: item.forge, number: item.number, repo: item.repo, title: item.title, url: item.url };
+  }
   return { id: String(index + 1), kind: item.kind, name: item.name, mimeType: item.mimeType, size: item.size, previewUrl: item.previewUrl };
 }
 
@@ -198,6 +209,17 @@ export function Composer({
   const [formError, setFormError] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
   const attach = useAttachmentDraft(taskId, chatId);
+  const [caret, setCaret] = useState(0);
+  // The caret to restore once the controlled value lands (after accepting a mention).
+  const pendingCaret = useRef<number | null>(null);
+  const focusAfterMenu = useRef<"textarea" | "picker" | null>(null);
+  // The picker opens only once the Attach menu has finished closing (see onCloseAutoFocus): opening it while the menu
+  // is still closing makes the popover read the menu's own dismissal as an outside interaction and close at once.
+  const pendingPicker = useRef<ForgeKind | null>(null);
+  // Set once the mention state exists (it is built below the submit callbacks that need it).
+  const dismissMentionRef = useRef<(restored: string) => void>(() => {});
+  const [forgePicker, setForgePicker] = useState<ForgeKind | null>(null);
+  const daemonForge = useDaemonForge();
   const fileInput = useRef<HTMLInputElement | null>(null);
   const textareaNode = useRef<HTMLTextAreaElement | null>(null);
   const setTextareaNode = useCallback(
@@ -246,8 +268,17 @@ export function Composer({
       setFormError(null);
       try {
         // Bytes are encoded here, at submit, never when the file was added (ADR-0038 §6).
-        const attachments = attachItems.length > 0 ? await Promise.all(attachItems.map(encodeAttachment)) : undefined;
-        const previews = attachItems.length > 0 ? attachItems.map(draftPreview) : undefined;
+        // No await without items: a plain prompt must reach onSubmit in the same tick.
+        const encoded = attachItems.length > 0 ? await Promise.all(attachItems.map(encodeAttachment)) : [];
+        // Only mentions whose `@path` is still in the prompt are sent: the daemon dedupes against the text.
+        const refs = mentionedPaths(text, (attachKey && useComposerAttachmentsStore.getState().mentions[attachKey]) || []);
+        const attachments: AttachmentRequest[] | undefined =
+          encoded.length + refs.length > 0 ? [...encoded, ...refs.map((path): AttachmentRequest => ({ kind: "file_ref", path }))] : undefined;
+        const previews: AttachmentMeta[] | undefined =
+          attachments && [
+            ...attachItems.map(draftPreview),
+            ...refs.map((path, i): AttachmentMeta => ({ id: String(attachItems.length + i + 1), kind: "file_ref", path })),
+          ];
         const result = await onSubmit(
           provider,
           text,
@@ -260,6 +291,7 @@ export function Composer({
         );
         // The optimistic run entry now owns the thumbnails' object URLs, so the tray lets go without revoking.
         if (attachKey && attachItems.length > 0) useComposerAttachmentsStore.getState().release(attachKey, attachItems.map((i) => i.localId));
+        if (attachKey) useComposerAttachmentsStore.getState().clearMentions(attachKey);
         if (result.kind === "queued") onQueued?.();
         return true;
       } catch (err) {
@@ -281,7 +313,10 @@ export function Composer({
     draft.clear();
     void send(trimmed, "queue").then((ok) => {
       // Restore the text if the prompt never landed, so it isn't lost.
-      if (!ok) draft.setValue(trimmed);
+      if (!ok) {
+        draft.setValue(trimmed);
+        dismissMentionRef.current(trimmed);
+      }
     });
   }, [draft, canSend, submitting, attachHasError, send]);
 
@@ -292,7 +327,10 @@ export function Composer({
     if (!trimmed || !canSend || submitting || attachHasError) return;
     draft.clear();
     void send(trimmed, "interrupt").then((ok) => {
-      if (!ok) draft.setValue(trimmed);
+      if (!ok) {
+        draft.setValue(trimmed);
+        dismissMentionRef.current(trimmed);
+      }
     });
   }, [draft, canSend, submitting, attachHasError, send]);
 
@@ -308,6 +346,56 @@ export function Composer({
       // it has to re-enable itself rather than counting on unmounting.
       setStopping(false);
     }
+  }
+
+  const inactive = !canSend || submitting;
+  const mentionState = useFileMention({
+    text: draft.value,
+    caret,
+    enabled: attachLimits !== null && supportsKind(attachLimits, "file_ref") && !inactive,
+    taskId,
+    onAccept: (path, next) => {
+      if (attachKey) useComposerAttachmentsStore.getState().addMention(attachKey, path);
+      pendingCaret.current = next.cursor;
+      draft.setValue(next.text);
+      setCaret(next.cursor);
+    },
+  });
+  dismissMentionRef.current = mentionState.dismissForText;
+
+  // The controlled value has landed: put the caret after the inserted mention.
+  useLayoutEffect(() => {
+    if (pendingCaret.current === null) return;
+    textareaNode.current?.setSelectionRange(pendingCaret.current, pendingCaret.current);
+    pendingCaret.current = null;
+  }, [draft.value]);
+
+  // GitHub entries only for kinds the daemon lists (no dead affordances); shown disabled with the reason when `gh` is missing.
+  const forgeKinds = (["pr", "issue"] as const).filter((k) => supportsKind(attachLimits, k));
+  const forgeMenu =
+    forgeKinds.length > 0
+      ? {
+          kinds: [...forgeKinds],
+          disabledReason: daemonForge?.cli === false ? "gh is not installed on the daemon host" : null,
+          onOpen: (kind: ForgeKind) => {
+            focusAfterMenu.current = "picker";
+            pendingPicker.current = kind;
+          },
+        }
+      : undefined;
+
+  /** "Mention a file": puts an `@` at the caret (after a space when it would touch a word) and focuses the textarea so the popover opens. */
+  function insertMentionTrigger() {
+    const node = textareaNode.current;
+    const value = draft.value;
+    const at = Math.min(node?.selectionStart ?? value.length, value.length);
+    const prefix = at > 0 && !/\s/.test(value[at - 1]!) ? " " : "";
+    const next = `${value.slice(0, at)}${prefix}@${value.slice(at)}`;
+    const cursor = at + prefix.length + 1;
+    focusAfterMenu.current = "textarea";
+    pendingCaret.current = cursor;
+    draft.setValue(next);
+    setCaret(cursor);
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -359,7 +447,6 @@ export function Composer({
     submit();
   }
 
-  const inactive = !canSend || submitting;
   const hasText = draft.value.trim() !== "";
   const noImageProvider = providers.find((p) => p.id === provider);
   const showImageHint = attachLimits !== null && noImageProvider?.images === "no" && attachItems.some((i) => i.kind === "image");
@@ -401,6 +488,15 @@ export function Composer({
           dropActive && "border-input-border-focused",
         )}
       >
+        {mentionState.open && (
+          <FileMentionPopover
+            rows={mentionState.rows}
+            activeIndex={mentionState.activeIndex}
+            loading={mentionState.loading}
+            onPick={mentionState.pick}
+            onHover={mentionState.setActive}
+          />
+        )}
         {attachLimits && <AttachmentTray items={attachItems} onRemove={attach.remove} />}
         {showImageHint && (
           <p data-testid="attachment-image-hint" className="px-4 pt-2 text-ui-xs text-foreground-muted">
@@ -415,6 +511,9 @@ export function Composer({
           onChange={draft.setValue}
           onSubmit={submit}
           onKeyDown={handleKeyDown}
+          interceptKey={mentionState.interceptKey}
+          onCaret={setCaret}
+          textareaProps={mentionState.textareaProps}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onPaste={handlePaste}
@@ -482,18 +581,44 @@ export function Composer({
                     e.target.value = "";
                   }}
                 />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="size-8 rounded-lg"
-                  disabled={inactive}
-                  aria-label="Attach"
-                  title="Attach"
-                  data-testid="composer-attach-button"
-                  onClick={() => fileInput.current?.click()}
-                >
-                  <Icons.attach aria-hidden />
-                </Button>
+                <Popover open={forgePicker !== null} onOpenChange={(open) => !open && setForgePicker(null)}>
+                  <PopoverAnchor asChild>
+                    <span className="inline-flex">
+                      <AttachMenu
+                        disabled={inactive}
+                        onPickFiles={() => fileInput.current?.click()}
+                        onMention={supportsKind(attachLimits, "file_ref") ? insertMentionTrigger : undefined}
+                        forge={forgeMenu}
+                        onCloseAutoFocus={(e) => {
+                          // Focus goes where the chosen entry wants it (the textarea, or the picker's field), not back to the button.
+                          if (focusAfterMenu.current === "textarea") textareaNode.current?.focus();
+                          if (focusAfterMenu.current) e.preventDefault();
+                          focusAfterMenu.current = null;
+                          if (pendingPicker.current) {
+                            const kind = pendingPicker.current;
+                            pendingPicker.current = null;
+                            // Next frame: the menu's dismissal events have settled by then.
+                            requestAnimationFrame(() => setForgePicker(kind));
+                          }
+                        }}
+                      />
+                    </span>
+                  </PopoverAnchor>
+                  <PopoverContent side="top" align="start" className="w-96 max-w-[calc(100vw-2rem)] rounded-lg bg-menu p-0">
+                    {forgePicker && taskId !== null && (
+                      <ForgePicker
+                        kind={forgePicker}
+                        taskId={taskId}
+                        limits={attachLimits}
+                        onPick={(item, repo) => {
+                          attach.addForgeRef({ kind: forgePicker, forge: "github", number: item.number, repo, title: item.title, url: item.url });
+                          setForgePicker(null);
+                          textareaNode.current?.focus();
+                        }}
+                      />
+                    )}
+                  </PopoverContent>
+                </Popover>
               </>
             )}
             <RunConfigToolbar.ModelPicker />

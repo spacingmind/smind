@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { AttachmentLightbox } from "@/components/attachment-lightbox";
 import { AttachmentPill } from "@/components/composer/attachment-pill";
-import type { DraftAttachment } from "@/stores/composer-attachments-store";
+import { isDraftFile, type DraftAttachment } from "@/stores/composer-attachments-store";
 
 /**
  * The draft attachments inside the composer card, above the textarea (ADR-0038 §7). Renders nothing while empty,
@@ -11,7 +11,7 @@ import type { DraftAttachment } from "@/stores/composer-attachments-store";
 export function AttachmentTray({ items, onRemove }: { items: DraftAttachment[]; onRemove: (localId: string) => void }) {
   const [previewId, setPreviewId] = useState<string | null>(null);
   if (items.length === 0) return null;
-  const previewing = items.find((i) => i.localId === previewId && i.previewUrl);
+  const previewing = items.find((i) => i.localId === previewId && isDraftFile(i) && i.previewUrl);
   return (
     <>
       <div data-testid="attachment-tray" role="list" aria-label="Attachments" className="flex flex-wrap gap-2 px-3 pt-3">
@@ -21,7 +21,7 @@ export function AttachmentTray({ items, onRemove }: { items: DraftAttachment[]; 
           </div>
         ))}
       </div>
-      {previewing?.previewUrl && (
+      {previewing && isDraftFile(previewing) && previewing.previewUrl && (
         <AttachmentLightbox src={previewing.previewUrl} name={previewing.name} open onOpenChange={(open) => !open && setPreviewId(null)} />
       )}
     </>

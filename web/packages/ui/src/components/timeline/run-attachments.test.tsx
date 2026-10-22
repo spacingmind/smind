@@ -44,6 +44,18 @@ describe("RunAttachments", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it("sizes thumbnails size-28 on a phone and sm:size-40 above, the skeleton identically", async () => {
+    const client = new FakeWsClient();
+    render(<Probe attachments={[image, { ...image, id: "7", previewUrl: "blob:local" }]} client={client} />);
+    const sized = (el: HTMLElement) => {
+      expect(el.className).toContain("size-28");
+      expect(el.className).toContain("sm:size-40");
+      expect(el.className).not.toMatch(/(^|\s)size-40/);
+    };
+    sized(screen.getByTestId("run-attachment-skeleton"));
+    sized(screen.getByTestId("run-attachment-image"));
+  });
+
   it("fetches a thumbnail with run.attachment once per id and caches it", async () => {
     const client = new FakeWsClient();
     const view = render(<Probe attachments={[image]} client={client} />);
