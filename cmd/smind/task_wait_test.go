@@ -273,3 +273,31 @@ func TestTaskWait_PrintsPendingPermissionHint(t *testing.T) {
 		t.Fatalf("stderr = %q, want it to contain %q", stderrBuf, want)
 	}
 }
+
+// TestTaskWait_ErrorRun is the live-run half of the error exit: a run that
+// fails like GLM on a usage limit (an "[error] ..." chunk, then a generic
+// JSON-RPC error) makes `task wait` exit 1 and show the agent's own cause, and
+// `task runs` carries the same cause in its STATUS cell.
+func TestTaskWait_ErrorRun(t *testing.T) {
+	_, taskID := waitEnv(t, "quota-error")
+	runID := detachedRun(t, taskID)
+
+	code, stdout, stderr := sendCaptured(t, []string{"task", "wait", runID})
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1; stdout = %q, stderr = %q", code, stdout, stderr)
+	}
+	for _, want := range []string{
+		"error after",
+		"error: 429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18",
+		"rpc error -32603: Internal error",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("wait stdout %q missing %q", stdout, want)
+		}
+	}
+
+	code, out, stderr := sendCaptured(t, []string{"task", "runs", taskID})
+	if code != 0 || !strings.Contains(out, "error: 429 Usage limit reached") {
+		t.Fatalf("task runs: exit %d, out %q, stderr %q, want the cause in the STATUS cell", code, out, stderr)
+	}
+}
