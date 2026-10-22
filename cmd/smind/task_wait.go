@@ -15,7 +15,7 @@ import (
 	"github.com/spacingmind/smind/internal/wsclient"
 )
 
-const cmdTaskWaitUsage = "usage: smind task wait <runId> [--timeout <duration>]"
+const cmdTaskWaitUsage = "usage: smind task wait <runId|item:ID> [--timeout <duration>]"
 
 // cmdTaskWait blocks until a run is terminal and reports the outcome in its
 // exit code: 0 done, 1 error, 3 stopped, 4 done at a cap (needs-continue),
@@ -56,6 +56,17 @@ func cmdTaskWait(args []string) int {
 		fmt.Fprintln(os.Stderr, cmdTaskWaitUsage)
 		return 2
 	}
+	// item:<id> is what `task send --detach` prints for a prompt that was
+	// queued instead of started: wait for it to be delivered, then for its run.
+	var itemID int64
+	if rest, ok := strings.CutPrefix(runID, "item:"); ok {
+		id, err := parseInt64(rest)
+		if err != nil || id <= 0 {
+			fmt.Fprintf(os.Stderr, "task wait: invalid queue item %q (want item:<number>)\n%s\n", runID, cmdTaskWaitUsage)
+			return 2
+		}
+		itemID, runID = id, ""
+	}
 
 	client, err := dialDaemon(context.Background())
 	if err != nil {
@@ -71,6 +82,14 @@ func cmdTaskWait(args []string) int {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(sigCtx, timeout)
 		defer cancel()
+	}
+
+	if itemID != 0 {
+		rid, code := waitForQueueItem(ctx, sigCtx, client, itemID, timeout)
+		if rid == "" {
+			return code
+		}
+		runID = rid
 	}
 
 	var finalText strings.Builder

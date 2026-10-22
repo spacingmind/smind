@@ -669,6 +669,10 @@ func cmdTaskSend(args []string) int {
 	}
 	if start.Queued {
 		fmt.Fprintf(os.Stderr, "queued as item %d -- it runs when the chat's current run finishes (smind task queue ls to watch, task queue cancel %d to undo)\n", start.QueueItemID, start.QueueItemID)
+		if detach {
+			// stdout carries the reference a script can hand to `task wait`.
+			fmt.Printf("item:%d\n", start.QueueItemID)
+		}
 		return 0
 	}
 	fmt.Fprintf(os.Stderr, "run %s started\n", start.RunID)
