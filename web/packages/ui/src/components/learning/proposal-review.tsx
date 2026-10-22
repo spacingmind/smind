@@ -3,6 +3,7 @@ import { useState } from "react";
 import { LoadingRows } from "@/components/ui/loading-rows";
 import { DuplicateBanner, DuplicateCompare } from "@/components/learning/duplicate-compare";
 import { EvidenceList } from "@/components/learning/evidence-list";
+import { ProbeCard } from "@/components/learning/probe-card";
 import { ProposalPrevalenceLine } from "@/components/learning/proposal-prevalence";
 import { Chip, SourceChip } from "@/components/learning/learning-chips";
 import { ProposalItemView, staleReason } from "@/components/learning/proposal-items";
@@ -187,6 +188,8 @@ export function ProposalReview({ id, onBack }: { id: number; onBack: () => void 
         <EvidenceList evidence={proposal.evidence} workspaceId={proposal.workspaceId} />
         <ProposalPrevalenceLine id={proposal.id} pending={pending} />
       </section>
+
+      {pending && !proposal.malformed && <ProbeCard id={proposal.id} workspaceId={proposal.workspaceId} />}
 
       {pending && editing && (
         <SkillEditor

@@ -9,6 +9,7 @@ import type {
   LearnedSkillProposedPayload,
   LearningJobPayload,
 } from "@/lib/learning-types";
+import type { LearnedSkillProbePayload } from "@/lib/probe-types";
 import { queryKeys } from "@/lib/query-keys";
 import { applyLifecycleEvent, LIFECYCLE_TOPICS, type WorkspaceWithTree } from "@/lib/workspace-tree";
 import type { Account, AgentProfile } from "@/lib/types";
@@ -142,6 +143,37 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
         void queryClient.invalidateQueries({ queryKey: queryKeys.proposal(p.proposalId) });
       } else {
         void queryClient.invalidateQueries({ queryKey: queryKeys.proposalAll() });
+      }
+      return;
+    }
+    case "learnedSkill.probe.started":
+    case "learnedSkill.probe.arm":
+    case "learnedSkill.probe.finished":
+    case "learnedSkill.probe.failed": {
+      const p = payload as Partial<LearnedSkillProbePayload> | null;
+      if (typeof p?.proposalId === "number") {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.probe(p.proposalId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.probeEstimateOf(p.proposalId) });
+      } else {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.probeAll() });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.probeEstimateAll() });
+      }
+      void queryClient.invalidateQueries({
+        queryKey: typeof p?.workspaceId === "number" ? queryKeys.probesOfWorkspace(p.workspaceId) : queryKeys.probesAll(),
+      });
+      if (topic === "learnedSkill.probe.finished" && p?.status === "done") {
+        // Announced, never interrupting (same style as a new proposal); the verdict is read in the card.
+        toast({
+          title: "Probe finished",
+          durationMs: 8000,
+          action: {
+            label: "Review",
+            onClick: () =>
+              window.dispatchEvent(
+                new CustomEvent("smind:open-settings", { detail: { sectionId: LEARNED_SKILLS_SECTION_ID } }),
+              ),
+          },
+        });
       }
       return;
     }

@@ -47,4 +47,19 @@ describe("query keys", () => {
     expect(qc.getQueryCache().findAll({ queryKey: queryKeys.learnedSkillsOf(3) })).toHaveLength(1);
     expect(qc.getQueryCache().findAll({ queryKey: queryKeys.learnedSkillsAll() })).toHaveLength(2);
   });
+
+  it("probe keys are the RPC name plus its params, and the partial keys prefix the full ones", () => {
+    expect(queryKeys.probeEstimate(9, true)).toEqual(["learning.probe.estimate", { id: 9, quick: true }]);
+    expect(queryKeys.probe(9)).toEqual(["learning.probe.get", { id: 9 }]);
+    expect(queryKeys.probesOf(1, 5)).toEqual(["learning.probe.list", { workspaceId: 1, limit: 5 }]);
+    const qc = new QueryClient();
+    qc.setQueryData(queryKeys.probeEstimate(9, true), 1);
+    qc.setQueryData(queryKeys.probeEstimate(9, false), 1);
+    qc.setQueryData(queryKeys.probeEstimate(8, false), 1);
+    qc.setQueryData(queryKeys.probesOf(1, 5), 1);
+    qc.setQueryData(queryKeys.probesOf(2), 1);
+    expect(qc.getQueryCache().findAll({ queryKey: queryKeys.probeEstimateOf(9) })).toHaveLength(2);
+    expect(qc.getQueryCache().findAll({ queryKey: queryKeys.probesOfWorkspace(1) })).toHaveLength(1);
+    expect(qc.getQueryCache().findAll({ queryKey: queryKeys.probesAll() })).toHaveLength(2);
+  });
 });
