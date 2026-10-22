@@ -271,6 +271,30 @@ describe("useRunTimeline live adoption", () => {
     expect(attaches(client)).toHaveLength(1);
   });
 
+  it("a live Deny lands a permission row annotated with the reject option's kind", async () => {
+    const { client, ev, result } = await setup();
+
+    await ev.fire("run.status", runStatus("cli-1"));
+    client.nth("run.list", 1).resolve([running("cli-1")]);
+    await flush();
+    await act(async () => {
+      client.emit("run.attach", 0, "permission_request", {
+        requestId: "req-1",
+        summary: "run ls",
+        options: [
+          { id: "allow", label: "Allow", kind: "allow_once" },
+          { id: "deny", label: "Deny", kind: "reject_once" },
+        ],
+      });
+    });
+    await act(async () => {
+      client.emit("run.attach", 0, "permission_resolved", { requestId: "req-1", optionId: "deny", reason: "human" });
+    });
+
+    const item = result.current.runs?.[0]?.items.find((i) => i.kind === "permission");
+    expect(item).toMatchObject({ kind: "permission", optionId: "deny", optionKind: "reject_once", reason: "human" });
+  });
+
   it("permission.pending for a known run does not touch its pendingPermission", async () => {
     const { client, ev, result } = await setup();
 

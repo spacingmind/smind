@@ -161,6 +161,32 @@ describe("RunTimeline", () => {
     expect(screen.getByTestId("timeline-permission")).toHaveTextContent(label);
   });
 
+  it("a person's Deny reads You denied, from the request's own option kinds (replayed log)", () => {
+    const request = {
+      type: "permission_request",
+      requestId: "r1",
+      summary: "run Bash",
+      options: [
+        { id: "allow", label: "Allow", kind: "allow_once" },
+        { id: "deny", label: "Deny", kind: "reject_once" },
+      ],
+    };
+    const { unmount } = render(
+      <ul>
+        <RunTimeline run={run([request, { type: "permission_resolved", requestId: "r1", optionId: "deny", reason: "human" }])} />
+      </ul>,
+    );
+    expect(screen.getByTestId("timeline-permission")).toHaveTextContent("You denied");
+    expect(screen.getByTestId("timeline-permission")).not.toHaveTextContent("You approved");
+    unmount();
+    render(
+      <ul>
+        <RunTimeline run={run([request, { type: "permission_resolved", requestId: "r1", optionId: "allow", reason: "human" }])} />
+      </ul>,
+    );
+    expect(screen.getByTestId("timeline-permission")).toHaveTextContent("You approved");
+  });
+
   it("renders a resolved permission with no reason (an older server payload) without crashing, and no reason label", () => {
     expect(() =>
       render(

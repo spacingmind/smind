@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { Icons } from "@/lib/icons";
 
-import { PERMISSION_REASON_LABEL } from "@/components/timeline/permission-reason";
+import { permissionResolutionLabel } from "@/components/timeline/permission-reason";
 import { TimelineMarkdown } from "@/components/timeline/timeline-markdown";
 import { ToolCall } from "@/components/timeline/tool-call";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -132,7 +132,7 @@ export const TimelineRow = memo(function TimelineRow({
  * this build has never heard of) still renders, just without that detail.
  */
 function PermissionRow({ item }: { item: TimelinePermissionItem }) {
-  const resolution = item.reason ? PERMISSION_REASON_LABEL[item.reason] : undefined;
+  const resolution = permissionResolutionLabel(item);
   return (
     <p className="flex items-center gap-2 text-ui-sm text-foreground-muted">
       <Icons.permission className="size-3 shrink-0" />

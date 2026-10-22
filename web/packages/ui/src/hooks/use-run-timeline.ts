@@ -90,6 +90,12 @@ export interface TimelinePermissionItem {
   id: string;
   requestId: string;
   optionId: string;
+  /**
+   * The chosen option's kind ("allow_once", "reject_once", …), looked up from the request's own options --
+   * the resolved event only names the option id. Absent when the request was never seen (a log that starts
+   * mid-run); the row then falls back to the reason alone.
+   */
+  optionKind?: string;
   /** Absent for an older server payload with no reason field -- renders with no reason badge, not a crash. */
   reason?: PermissionResolutionReason;
 }
@@ -223,6 +229,7 @@ export function appendTimelineEvent(items: TimelineItem[], event: RunLogEvent): 
         id: `permission-${items.length}`,
         requestId: event.requestId ?? "",
         optionId: event.optionId ?? "",
+        ...(event.optionKind ? { optionKind: event.optionKind } : {}),
         reason: event.reason,
       },
     ];
@@ -245,7 +252,33 @@ export function appendTimelineEvent(items: TimelineItem[], event: RunLogEvent): 
 
 /** Folds a whole backfilled event batch (run.logs) into the same item list the live stream builds. */
 export function buildTimeline(events: RunLogEvent[]): TimelineItem[] {
-  return events.reduce<TimelineItem[]>(appendTimelineEvent, []);
+  const requests = new PermissionRequestKinds();
+  let items: TimelineItem[] = [];
+  for (const event of events) items = appendTimelineEvent(items, requests.annotate(event));
+  return items;
+}
+
+/**
+ * Remembers each permission request's options so the later "permission_resolved" event, which only
+ * carries the chosen option's id, can be annotated with that option's kind (Deny must not read as
+ * "You approved"). One per run's event stream: the backfill builds its own, a live attach keeps one on
+ * its Session.
+ */
+class PermissionRequestKinds {
+  private readonly kindsByRequest = new Map<string, Map<string, string>>();
+
+  /** Records a request's options; returns the event unchanged. For a resolution, returns it with `optionKind` set when known. */
+  annotate(event: RunLogEvent): RunLogEvent {
+    if (event.type === "permission_request" && event.requestId) {
+      this.kindsByRequest.set(event.requestId, new Map((event.options ?? []).map((o) => [o.id, o.kind])));
+      return event;
+    }
+    if (event.type === "permission_resolved" && event.requestId && event.optionId) {
+      const kind = this.kindsByRequest.get(event.requestId)?.get(event.optionId);
+      return kind ? { ...event, optionKind: kind } : event;
+    }
+    return event;
+  }
 }
 
 /** One run in a task's timeline, as rendered by the detail pane. */
@@ -426,6 +459,8 @@ export function canRetryWithHigherEffort(run: RunEntry): boolean {
 interface Session {
   cancelled: boolean;
   controller: AbortController;
+  /** The live attach's permission requests, so a resolution can be annotated with the chosen option's kind. */
+  permissionRequests: PermissionRequestKinds;
 }
 
 /**
@@ -539,7 +574,9 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
       (event, params) => {
         if (session.cancelled) return;
         if (event === "permission_request") {
-          setPendingPermission(setRuns, runId, params as PermissionRequestEventParams);
+          const request = params as PermissionRequestEventParams;
+          session.permissionRequests.annotate({ ...request, type: event });
+          setPendingPermission(setRuns, runId, request);
           return;
         }
         if (event === "mcp_servers") {
@@ -561,7 +598,7 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
         // streamed shape is the batched one minus its `type` field
         // (internal/wsapi/handlers.go emits the same params either way),
         // so re-attaching the name is the whole translation.
-        appendEvent(setRuns, runId, { ...(params as object), type: event } as RunLogEvent);
+        appendEvent(setRuns, runId, session.permissionRequests.annotate({ ...(params as object), type: event } as RunLogEvent));
       },
       { signal: session.controller.signal },
     )
@@ -676,7 +713,7 @@ export function useRunTimeline(
       return;
     }
 
-    const session: Session = { cancelled: false, controller: new AbortController() };
+    const session: Session = { cancelled: false, controller: new AbortController(), permissionRequests: new PermissionRequestKinds() };
     sessionRef.current = session;
     knownRuns.current = new Set();
     adopting.current = new Set();
