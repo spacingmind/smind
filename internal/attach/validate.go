@@ -19,6 +19,11 @@ import (
 
 const truncatedSuffix = "\n[… truncated]"
 
+// mimePattern is the shape of a media type this package will echo into agent
+// text: a client-declared type outside it is ignored (it could carry a newline
+// and a forged instruction).
+var mimePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$`)
+
 var repoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$`)
 
 // GithubSnapshot is what a Github resolver returns.
@@ -141,7 +146,7 @@ func validateImageBytes(index int, b []byte, declared string, lim Limits) (mime 
 func fileMime(b []byte, declared string) string {
 	sniffed := http.DetectContentType(b)
 	base, _, _ := strings.Cut(sniffed, ";")
-	if (base == "text/plain" || base == "application/octet-stream") && declared != "" && !strings.Contains(declared, ";") {
+	if (base == "text/plain" || base == "application/octet-stream") && mimePattern.MatchString(declared) {
 		return declared
 	}
 	return sniffed
