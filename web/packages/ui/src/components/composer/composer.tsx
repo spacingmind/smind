@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Clipboa
 
 import { Icons } from "@/lib/icons";
 import { AttachmentTray } from "@/components/composer/attachment-tray";
+import { AttachMenu } from "@/components/composer/attach-menu";
 import { FileMentionPopover } from "@/components/composer/file-mention-popover";
 import { useFileMention } from "@/components/composer/use-file-mention";
 import { mentionedPaths } from "@/lib/file-mention";
@@ -208,6 +209,7 @@ export function Composer({
   const [caret, setCaret] = useState(0);
   // The caret to restore once the controlled value lands (after accepting a mention).
   const pendingCaret = useRef<number | null>(null);
+  const focusAfterMenu = useRef(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const textareaNode = useRef<HTMLTextAreaElement | null>(null);
   const setTextareaNode = useCallback(
@@ -350,6 +352,20 @@ export function Composer({
     textareaNode.current?.setSelectionRange(pendingCaret.current, pendingCaret.current);
     pendingCaret.current = null;
   }, [draft.value]);
+
+  /** "Mention a file": puts an `@` at the caret (after a space when it would touch a word) and focuses the textarea so the popover opens. */
+  function insertMentionTrigger() {
+    const node = textareaNode.current;
+    const value = draft.value;
+    const at = Math.min(node?.selectionStart ?? value.length, value.length);
+    const prefix = at > 0 && !/\s/.test(value[at - 1]!) ? " " : "";
+    const next = `${value.slice(0, at)}${prefix}@${value.slice(at)}`;
+    const cursor = at + prefix.length + 1;
+    focusAfterMenu.current = true;
+    pendingCaret.current = cursor;
+    draft.setValue(next);
+    setCaret(cursor);
+  }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
@@ -534,18 +550,18 @@ export function Composer({
                     e.target.value = "";
                   }}
                 />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="size-8 rounded-lg"
+                <AttachMenu
                   disabled={inactive}
-                  aria-label="Attach"
-                  title="Attach"
-                  data-testid="composer-attach-button"
-                  onClick={() => fileInput.current?.click()}
-                >
-                  <Icons.attach aria-hidden />
-                </Button>
+                  onPickFiles={() => fileInput.current?.click()}
+                  onMention={supportsKind(attachLimits, "file_ref") ? insertMentionTrigger : undefined}
+                  onCloseAutoFocus={(e) => {
+                    if (focusAfterMenu.current) {
+                      e.preventDefault();
+                      textareaNode.current?.focus();
+                      focusAfterMenu.current = false;
+                    }
+                  }}
+                />
               </>
             )}
             <RunConfigToolbar.ModelPicker />

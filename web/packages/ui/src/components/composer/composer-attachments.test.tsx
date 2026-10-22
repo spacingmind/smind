@@ -98,10 +98,11 @@ describe("composer attachments", () => {
     expect(screen.queryByTestId("attachment-tray")).toBeNull();
   });
 
-  it("the Attach button opens the native picker and picked files become pills", async () => {
+  it("the Attach menu's Image or file… opens the native picker and picked files become pills", async () => {
     await renderComposer();
     const click = vi.spyOn(screen.getByTestId("composer-attach-input") as HTMLInputElement, "click");
-    fireEvent.click(screen.getByTestId("composer-attach-button"));
+    fireEvent.pointerDown(screen.getByTestId("composer-attach-button"), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Image or file…" }));
     expect(click).toHaveBeenCalled();
     expect(screen.getByTestId("composer-attach-input")).toHaveAttribute("multiple");
     expect(screen.getByTestId("composer-attach-input")).not.toHaveAttribute("accept");

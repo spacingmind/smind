@@ -1,6 +1,6 @@
 import { act } from "react";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { Composer } from "@/components/composer/composer";
 import type { AttachmentLimits, AttachmentMeta, AttachmentRequest } from "@/lib/types";
