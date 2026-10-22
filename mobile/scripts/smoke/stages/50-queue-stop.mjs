@@ -14,8 +14,9 @@ async function promptQueue(page, harness) {
   const idle = await harness.cmd('seed-run end_turn Idle task');
   const live = await harness.cmd('seed-live hang Queue task');
   const stoppable = await harness.cmd('seed-live hang Stop task');
-  if (!idle.ok || !live.ok || !stoppable.ok) {
-    lib.fail(`seeding failed: ${JSON.stringify([idle, live, stoppable])}`);
+  const stoppableDark = await harness.cmd('seed-live hang Stop dark task');
+  if (!idle.ok || !live.ok || !stoppable.ok || !stoppableDark.ok) {
+    lib.fail(`seeding failed: ${JSON.stringify([idle, live, stoppable, stoppableDark])}`);
     return;
   }
   await page.fill('textarea, input[type="text"]', harness.pairingUrl);
@@ -40,6 +41,9 @@ async function promptQueue(page, harness) {
   await page.getByText('Idle task', { exact: true }).click();
   await page.getByText(/^run [0-9a-f]{8} ·/).waitFor({ timeout: 20_000 });
   if (await page.getByLabel('Queued prompts').isVisible().catch(() => false)) lib.fail('an idle task shows a queue');
+  // Idle toolbar: only Send (disabled until there is text); no Stop, no Send now.
+  if (!(await page.getByRole('button', { name: 'Send', exact: true }).isVisible())) lib.fail('idle: Send is not visible');
+  if ((await page.getByRole('button', { name: /^(Stop(ping…)?|Send now)$/ }).count()) !== 0) lib.fail('idle: Stop or Send now is shown');
   await lib.shootBothSchemes(page, 'queue-idle');
 
   // An idle send under whenBusy "queue" starts the run at once; the user's own prompt line shows exactly once, whichever of
@@ -67,6 +71,14 @@ async function promptQueue(page, harness) {
     await page.locator('textarea').fill(text);
     await page.getByRole('button', { name: 'Send', exact: true }).click();
   };
+  // Live toolbar with text: Send now, Stop and Send all visible, and the field is not squeezed beside them.
+  await page.locator('textarea').fill('toolbar probe');
+  for (const name of ['Send now', 'Stop', 'Send']) {
+    if (!(await page.getByRole('button', { name, exact: true }).isVisible())) lib.fail(`live with text: ${name} is not visible`);
+  }
+  const fieldWidth = (await page.locator('textarea').boundingBox())?.width ?? 0;
+  if (fieldWidth < 0.6 * lib.contextViewport().viewport.width) lib.fail(`the text field is squeezed: ${fieldWidth}px wide`);
+  await page.locator('textarea').fill('');
   await send('second prompt');
   // A queued prompt shows first as an optimistic user bubble, then as a queue row: wait for the row (its Cancel button).
   await page.getByRole('button', { name: /Cancel queued prompt: second prompt/ }).waitFor({ timeout: 20_000 });
@@ -92,6 +104,16 @@ async function promptQueue(page, harness) {
   }
   await lib.shootBothSchemes(page, 'queue-after-cancel');
 
+  // Queue chip enter/exit transitions, both schemes: queue one more prompt, then cancel it.
+  for (const scheme of ['light', 'dark']) {
+    const text = `chip ${scheme}`;
+    await lib.shootTransition(page, 'queue-chip-in', scheme, () => send(text));
+    const cancel = page.getByRole('button', { name: new RegExp(`Cancel queued prompt: ${text}`) });
+    await cancel.waitFor({ timeout: 20_000 });
+    await lib.shootTransition(page, 'queue-chip-out', scheme, () => cancel.click());
+    await page.getByText(text, { exact: true }).waitFor({ state: 'detached', timeout: 20_000 });
+  }
+
   // Stop the live run: the daemon delivers the remaining prompt as a new run the screen adopts.
   await harness.cmd(`set-scenario ${live.taskId} default`);
   await harness.cmd(`stop-run ${live.runId}`);
@@ -104,6 +126,8 @@ async function promptQueue(page, harness) {
     lib.fail(`the delivered prompt did not appear in the transcript (daemon-started run not adopted); the page says: ${JSON.stringify(await page.evaluate(() => document.body.innerText).catch(() => '?'))}`);
     return;
   }
+  // The chip fades out (Reanimated exiting) before it leaves the DOM: wait for that, then assert.
+  await page.getByRole('button', { name: /^Cancel queued prompt/ }).waitFor({ state: 'detached', timeout: 10_000 }).catch(() => {});
   if (await page.getByRole('button', { name: /^Cancel queued prompt/ }).isVisible().catch(() => false)) lib.fail('the delivered prompt is still shown as queued');
   // The prompt of a daemon-delivered run shows as a user bubble (its streamed events do not carry it), once, before the reply.
   try {
@@ -125,7 +149,7 @@ async function promptQueue(page, harness) {
     return;
   }
   await lib.shootBothSchemes(page, 'stop-live');
-  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await lib.shootTransition(page, 'stop-click', 'light', () => page.getByRole('button', { name: 'Stop', exact: true }).click());
   try {
     await page.getByText(/· glm · stopped$/).waitFor({ timeout: 30_000 });
   } catch {
@@ -134,6 +158,19 @@ async function promptQueue(page, harness) {
   }
   if (await page.getByRole('button', { name: /^Stop(ping…)?$/ }).isVisible().catch(() => false)) lib.fail('the Stop button is still shown after the run stopped');
   await lib.shootBothSchemes(page, 'stop-after');
+
+  // Dark Stop transition on a second live task.
+  await lib.goBack(page);
+  await page.getByText('Stop dark task', { exact: true }).click();
+  try {
+    await page.getByText(/· glm · live$/).waitFor({ timeout: 20_000 });
+    await page.getByRole('button', { name: 'Stop', exact: true }).waitFor({ timeout: 10_000 });
+    await lib.shootTransition(page, 'stop-click', 'dark', () => page.getByRole('button', { name: 'Stop', exact: true }).click());
+    await page.getByText(/· glm · stopped$/).waitFor({ timeout: 30_000 });
+  } catch {
+    lib.fail('the second Stop task did not stop');
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
 
   // The list stays mounted under the task (native stack): returning must reload it (useFocusEffect), so a task the
   // daemon gained meanwhile shows up (the old hand-rolled stack remounted the list on every return).
