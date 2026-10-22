@@ -371,8 +371,12 @@ fn install_bundled_binary(bundled: &Path, bin_path: &Path) -> Result<(), String>
 const RENAME_RETRIES: u32 = 5;
 const RENAME_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
 
+// The startup decision (and its pure helpers, tested on every platform) is only
+// used by the macOS-only `auto_start`.
+
 /// LaunchAction is what the app does about the local daemon at startup
 /// (desktop-macos-app M2.3/M2.4).
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LaunchAction {
     /// Nothing is serving: install the bundled daemon and start it.
@@ -392,6 +396,7 @@ enum LaunchAction {
 /// launch_decision is the pure startup policy, over the same three facts
 /// `DaemonStatus` already carries. The one rule above all: an unmanaged
 /// daemon (the user's own `smind serve`) is never killed automatically.
+#[cfg(any(target_os = "macos", test))]
 fn launch_decision(reachable: bool, managed_state: ManagedState, comparison: version::Comparison) -> LaunchAction {
     match (reachable, managed_state) {
         (_, ManagedState::Unmanaged) => LaunchAction::UnmanagedBanner,
@@ -408,6 +413,7 @@ fn launch_decision(reachable: bool, managed_state: ManagedState, comparison: ver
 /// (ADR-0031 D7): until onboarding is done, or when the user turned local
 /// daemon management off, or when another connection is selected, the app
 /// never installs, starts or updates anything.
+#[cfg(any(target_os = "macos", test))]
 fn startup_decision(
     settings: AppSettings,
     local_selected: bool,
@@ -446,6 +452,7 @@ fn guard_management(state: &DesktopState) -> Result<(), String> {
 /// local one, and nothing at all until first-run is complete and local
 /// management is on (`startup_decision`). Failures surface as a progress event plus the log; the
 /// banner and Settings -> Daemon keep working for a manual retry.
+#[cfg(target_os = "macos")]
 pub async fn auto_start(app: AppHandle) {
     let state = app.state::<DesktopState>();
     if detect_platform() != Platform::Macos {
