@@ -226,19 +226,45 @@ func (s *Service) List(workspaceID int64) ([]TaskGit, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]TaskGit, 0, len(tasks))
+	// Uncached tasks cost several local git calls each (one of them builds a
+	// snapshot index), so a cold workspace is computed by a few workers, like
+	// the old task.stats, with results kept in id order.
+	var ids []int64
 	for _, t := range tasks {
-		if t.Kind == store.TaskKindSystem {
-			continue
+		if t.Kind != store.TaskKindSystem {
+			ids = append(ids, t.ID)
 		}
-		g, err := s.Get(t.ID)
-		if err != nil {
-			continue
+	}
+	res := make([]*TaskGit, len(ids))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range listWorkers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				if g, err := s.Get(ids[i]); err == nil {
+					res[i] = &g
+				}
+			}
+		}()
+	}
+	for i := range ids {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	out := make([]TaskGit, 0, len(ids))
+	for _, g := range res {
+		if g != nil {
+			out = append(out, *g)
 		}
-		out = append(out, g)
 	}
 	return out, nil
 }
+
+// listWorkers bounds the concurrent cold computations in List.
+const listWorkers = 4
 
 // Drop forgets a task's snapshot (archive/delete).
 func (s *Service) Drop(taskID int64) {
