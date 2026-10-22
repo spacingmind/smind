@@ -348,6 +348,12 @@ Web (vitest, `desktop-daemon-banner.test.tsx` + `use-task-attention.test.ts`):
 
 ## Progress
 
+**Status 2026-10-22 (plans hygiene): PARTIAL.** M1, M2, M4 and M5 are built and shipped; M3's manual interactions were never recorded as done.
+
+- Merged: #238 (macOS app build, bundled daemon, Dock lifecycle, CI) and #243 (`update the managed daemon only when no runs are in flight`, M5). First shipped in v0.10.0; v0.13.1 carries per-arch DMGs.
+- The release path that was "wired, not run" (M2.6 artifact reuse, M4.2) is now confirmed by the v0.13.1 release run 39379008532: `build-desktop-macos / build arm64` and `x86_64` succeeded, with `Download bundled daemon` and `Stage bundled daemon from the release build` succeeding, then `Verify bundle`, `Stage dmg`, and `Stage updater artifacts`.
+- **Remaining (unverified, need a human on a Mac):** red button / `Cmd+W` hides and Dock click reopens (`close-keeps-dock-reopen`); Dock badge rendering and notification click (`dock-badge-on-permission`); light-theme screenshot; downloaded-DMG quarantine flow (`downloaded-dmg-quarantine`); Settings → Daemon banner Restart and take-over in the UI. Code signing / notarization stay out of scope (ad-hoc signature).
+
 - [x] M1 — macOS app build (`tauri.macos.conf.json`, `task desktop:mac`, install, README)
 - [x] M2 — bundled daemon sidecar + auto-start/auto-update (Rust, built and run for real; release-path artifact reuse not yet exercised, see Validation)
 - [~] M3 — Dock lifecycle, no tray, Dock badge (implemented and partly verified; four interactions need a human, see "Not verified")

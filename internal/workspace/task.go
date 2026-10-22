@@ -138,6 +138,9 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 	// delete. A task from an existing branch must never delete the user's
 	// own branch on a later failure.
 	createdBranch := branch
+	// branchOwned: CreateTask created the branch (every mode but an
+	// existing branch), ADR-0039 section 2.
+	branchOwned := true
 	var wtErr error
 	switch {
 	case p.baseRef != "":
@@ -146,6 +149,7 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 		wtErr = createTaskFromBranch(ws.Path, worktreePath, p.branch)
 		branch = p.branch
 		createdBranch = ""
+		branchOwned = false
 	case p.prSupplied:
 		branch = "smind/pr-" + strconv.Itoa(p.prNumber) + "-" + name
 		createdBranch = branch
@@ -163,6 +167,10 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 		return store.Task{}, fmt.Errorf("create task worktree: %w", wtErr)
 	}
 
+	// The base is recorded in the same insert as the task, so a failed
+	// creation leaves no row; an unresolvable base is empty, never fatal.
+	baseRef, baseSha := computeTaskBase(ws, p, worktreePath)
+
 	t, err := m.store.CreateTask(store.Task{
 		WorkspaceID:  workspaceID,
 		SpaceID:      spaceID,
@@ -171,8 +179,19 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 		Status:       "created",
 		WorktreePath: &worktreePath,
 		Branch:       &branch,
+		BaseRef:      baseRef,
+		BaseSha:      baseSha,
+		BranchOwned:  branchOwned,
 	})
 	if err != nil {
+		if createdBranch != "" || dirExists(worktreePath) {
+			// The worktree exists but the row could not be written: undo it
+			// so a failed creation leaves nothing behind.
+			_ = gitWorktreeRemove(ws.Path, worktreePath)
+			if createdBranch != "" {
+				_ = runGit(ws.Path, "branch", "-D", createdBranch)
+			}
+		}
 		return store.Task{}, fmt.Errorf("create task: %w", err)
 	}
 
@@ -442,7 +461,11 @@ func (m *Manager) Diff(id int64) (string, error) {
 	if t.WorktreePath == nil || t.Branch == nil {
 		return "", fmt.Errorf("task diff %d: task has no worktree", id)
 	}
-	diff, err := taskDiff(*t.WorktreePath, *t.Branch)
+	base, err := taskBaseSha(t)
+	if err != nil {
+		return "", fmt.Errorf("task diff %d: %w", id, err)
+	}
+	diff, err := taskDiff(*t.WorktreePath, base)
 	if err != nil {
 		return "", fmt.Errorf("task diff %d: %w", id, err)
 	}

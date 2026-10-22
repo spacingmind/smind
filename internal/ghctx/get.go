@@ -9,20 +9,6 @@ import (
 	"time"
 )
 
-// Snapshot is one PR/issue's full state, the payload an agent attaches
-// for context (ADR-0038 §4). State is lowercase gh state ("open"/"closed"
-// /"merged").
-type Snapshot struct {
-	Number  int
-	Repo    string
-	Title   string
-	URL     string
-	State   string
-	BaseRef string
-	HeadRef string
-	Body    string
-}
-
 // repoRe bounds an explicit --repo argument: owner/repo of GitHub-legal
 // characters, so a repo like "a/b;rm -rf" is rejected before any gh
 // invocation (the runner is argv-only anyway, but rejecting early keeps
@@ -76,7 +62,7 @@ func (c *Client) get(ctx context.Context, dir, kind string, number int, repo str
 	}
 	out, err := c.run(ctx, dir, args...)
 	if err != nil {
-		return nil, mapRunError(err)
+		return nil, c.mapRunError(ctx, err)
 	}
 	var v ghViewJSON
 	if err := json.Unmarshal([]byte(out), &v); err != nil {
@@ -103,7 +89,7 @@ func (c *Client) repoOf(ctx context.Context, dir string) (string, error) {
 	}
 	out, err := c.run(ctx, dir, "repo", "view", "--json", "nameWithOwner")
 	if err != nil {
-		return "", mapRunError(err)
+		return "", c.mapRunError(ctx, err)
 	}
 	var v struct {
 		NameWithOwner string `json:"nameWithOwner"`

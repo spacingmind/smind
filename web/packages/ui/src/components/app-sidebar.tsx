@@ -1397,7 +1397,7 @@ function WorkspaceItem({
           })),
         ]
       : []),
-    { label: "Worktree scripts", icon: <Icons.terminal />, onSelect: onEditScripts },
+    { label: "Worktree settings", icon: <Icons.terminal />, onSelect: onEditScripts },
     { label: "Delete workspace", icon: <Icons.delete />, onSelect: onDeleteWorkspace },
   ];
 

@@ -3,19 +3,26 @@ import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
+import { Input } from "@/components/ui/input";
 import type { Workspace } from "@/lib/types";
-import { getWorkspaceScripts, setWorkspaceScripts } from "@/lib/worktree-setup";
+import {
+  getWorkspaceDefaultBase,
+  getWorkspaceScripts,
+  setWorkspaceDefaultBase,
+  setWorkspaceScripts,
+} from "@/lib/worktree-setup";
 import type { WsClientLike } from "@/lib/ws-client";
 
 const SCRIPT_TEXTAREA_CLASS =
   "h-32 w-full resize-y rounded-lg border border-input-border bg-input px-2.5 py-2 font-mono text-ui-base leading-relaxed transition-colors outline-none placeholder:text-foreground-subtlest hover:border-input-border-hover focus-visible:border-input-border-focused focus-visible:bg-input-focused disabled:cursor-not-allowed disabled:opacity-50";
 
 /**
- * The workspace's worktree setup/teardown script editor (ADR-0024). The
- * script text is only ever returned by workspace.get, so the dialog loads
- * it fresh on open rather than reading it off the sidebar's workspace
- * list. Saving sends both fields: an empty string clears a script,
- * which is how workspace.setScripts distinguishes "clear" from "keep".
+ * The workspace's worktree settings: the default base branch (ADR-0039)
+ * and the setup/teardown script editor (ADR-0024). The script text is only
+ * ever returned by workspace.get, so the dialog loads it fresh on open
+ * rather than reading it off the sidebar's workspace list. Saving sends
+ * both script fields: an empty string clears a script, which is how
+ * workspace.setScripts distinguishes "clear" from "keep".
  */
 export function WorkspaceScriptsDialog({
   client,
@@ -33,6 +40,8 @@ export function WorkspaceScriptsDialog({
 }) {
   const [setup, setSetup] = useState("");
   const [teardown, setTeardown] = useState("");
+  const [defaultBase, setDefaultBase] = useState("");
+  const [baseInfo, setBaseInfo] = useState<{ ref: string; detected: boolean; override: string } | null>(null);
   const [loading, setLoading] = useState(true);
   // A failed load leaves the textareas empty and saving then would clear
   // both scripts, so Save stays disabled until a load succeeded.
@@ -47,11 +56,13 @@ export function WorkspaceScriptsDialog({
     setLoading(true);
     setLoaded(false);
     setError(null);
-    getWorkspaceScripts(client, workspace.ID)
-      .then((ws) => {
+    Promise.all([getWorkspaceScripts(client, workspace.ID), getWorkspaceDefaultBase(client, workspace.ID)])
+      .then(([ws, base]) => {
         if (cancelled) return;
         setSetup(ws.SetupScript ?? "");
         setTeardown(ws.TeardownScript ?? "");
+        setBaseInfo(base);
+        setDefaultBase(base.override);
         setLoaded(true);
         setLoading(false);
       })
@@ -70,6 +81,10 @@ export function WorkspaceScriptsDialog({
     setPending(true);
     setError(null);
     try {
+      const trimmed = defaultBase.trim();
+      if (baseInfo && trimmed !== baseInfo.override) {
+        await setWorkspaceDefaultBase(client, workspace.ID, trimmed);
+      }
       await setWorkspaceScripts(client, workspace.ID, { setupScript: setup, teardownScript: teardown });
       onSaved();
       onOpenChange(false);
@@ -84,11 +99,11 @@ export function WorkspaceScriptsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Worktree scripts</DialogTitle>
+          <DialogTitle>Worktree settings</DialogTitle>
           <DialogDescription>
-            {workspace.Title || workspace.Path} — runs in each new task&apos;s worktree with SMIND_WORKTREE_PATH,
-            SMIND_SOURCE_CHECKOUT_PATH, SMIND_BRANCH, SMIND_PORT. Authored by you only — agents and repositories cannot
-            change it.
+            {workspace.Title || workspace.Path} — the branch new tasks are measured against and open pull requests into, and
+            the scripts that run in each new task&apos;s worktree with SMIND_WORKTREE_PATH, SMIND_SOURCE_CHECKOUT_PATH,
+            SMIND_BRANCH, SMIND_PORT. Scripts are authored by you only — agents and repositories cannot change them.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -102,6 +117,27 @@ export function WorkspaceScriptsDialog({
             <InlineSpinner label="Loading scripts…" />
           ) : (
             <>
+              <div className="grid gap-1.5">
+                <label htmlFor={`${id}-default-base`} className="text-ui-base font-medium">
+                  Default base branch
+                </label>
+                <Input
+                  id={`${id}-default-base`}
+                  data-testid="workspace-default-base"
+                  placeholder={baseInfo?.ref ?? ""}
+                  value={defaultBase}
+                  onChange={(e) => setDefaultBase(e.target.value)}
+                  disabled={pending}
+                  spellCheck={false}
+                />
+                {baseInfo && (
+                  <p className="text-ui-sm text-muted-foreground">
+                    {baseInfo.detected
+                      ? `Auto-detected: ${baseInfo.ref}. Leave empty to keep auto-detecting.`
+                      : `Override in use. Clear the field to go back to auto-detect (${baseInfo.ref}).`}
+                  </p>
+                )}
+              </div>
               <div className="grid gap-1.5">
                 <label htmlFor={`${id}-setup`} className="text-ui-base font-medium">
                   Setup script

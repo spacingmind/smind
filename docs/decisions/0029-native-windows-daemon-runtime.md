@@ -3,7 +3,7 @@
 ## Status
 
 Accepted (2026-10-11, chosen by the user as D1–D3 of
-[`docs/plans/active/windows-daemon-runtime-parity.md`](../plans/active/windows-daemon-runtime-parity.md)).
+[`docs/plans/completed/windows-daemon-runtime-parity.md`](../plans/completed/windows-daemon-runtime-parity.md)).
 Amends ADR-0024's "On Windows setup/teardown are not run in v1". It does not
 change ADR-0013's host matrix: the desktop app still manages the daemon via
 WSL2 on Windows until that is decided separately.
