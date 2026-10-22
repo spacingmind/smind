@@ -64,9 +64,10 @@ func WithNow(now func() time.Time) Option { return func(c *Client) { c.now = now
 
 // Client is a gh CLI client with a small result cache and single-flight.
 type Client struct {
-	run Runner
-	ttl time.Duration
-	now func() time.Time
+	run   Runner
+	ttl   time.Duration
+	now   func() time.Time
+	repos *ttlCache
 }
 
 // New returns a Client with the default runner and a 10s TTL.
@@ -76,9 +77,11 @@ func New(opts ...Option) *Client {
 		ttl: 10 * time.Second,
 		now: time.Now,
 	}
+	c.repos = newTTLCache(60*time.Second, c.now)
 	for _, o := range opts {
 		o(c)
 	}
+	c.repos.now = c.now
 	return c
 }
 
