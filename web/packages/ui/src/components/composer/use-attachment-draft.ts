@@ -1,5 +1,6 @@
 import { useCallback, useEffect } from "react";
 
+import type { DraftForgeRef } from "@/stores/composer-attachments-store";
 import { useAttachmentLimits } from "@/hooks/use-attachment-limits";
 import { attachmentDraftKey, useComposerAttachmentsStore, useDraftAttachments } from "@/stores/composer-attachments-store";
 
@@ -12,6 +13,7 @@ export function useAttachmentDraft(taskId: number | null, chatId: number | null)
   const key = taskId !== null && chatId !== null ? attachmentDraftKey(taskId, chatId) : null;
   const items = useDraftAttachments(key);
   const addToStore = useComposerAttachmentsStore((s) => s.add);
+  const addForgeToStore = useComposerAttachmentsStore((s) => s.addForgeRef);
   const removeFromStore = useComposerAttachmentsStore((s) => s.remove);
 
   const add = useCallback(
@@ -19,6 +21,12 @@ export function useAttachmentDraft(taskId: number | null, chatId: number | null)
       if (key && limits && files.length > 0) addToStore(key, files, limits);
     },
     [key, limits, addToStore],
+  );
+  const addForgeRef = useCallback(
+    (ref: Omit<DraftForgeRef, "localId" | "error">) => {
+      if (key && limits) addForgeToStore(key, ref, limits);
+    },
+    [key, limits, addForgeToStore],
   );
   const remove = useCallback((localId: string) => key && removeFromStore(key, localId, limits), [key, limits, removeFromStore]);
 
@@ -28,5 +36,5 @@ export function useAttachmentDraft(taskId: number | null, chatId: number | null)
     return () => useComposerAttachmentsStore.getState().clear(key);
   }, [key]);
 
-  return { limits, key, items, add, remove, hasError: items.some((i) => i.error) };
+  return { limits, key, items, add, addForgeRef, remove, hasError: items.some((i) => i.error) };
 }

@@ -2,7 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Clipboa
 
 import { Icons } from "@/lib/icons";
 import { AttachmentTray } from "@/components/composer/attachment-tray";
-import { AttachMenu } from "@/components/composer/attach-menu";
+import { AttachMenu, type ForgeKind } from "@/components/composer/attach-menu";
+import { ForgePicker } from "@/components/composer/forge-picker";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
+import { useDaemonForge } from "@/hooks/use-attachment-limits";
 import { FileMentionPopover } from "@/components/composer/file-mention-popover";
 import { useFileMention } from "@/components/composer/use-file-mention";
 import { mentionedPaths } from "@/lib/file-mention";
@@ -209,7 +212,9 @@ export function Composer({
   const [caret, setCaret] = useState(0);
   // The caret to restore once the controlled value lands (after accepting a mention).
   const pendingCaret = useRef<number | null>(null);
-  const focusAfterMenu = useRef(false);
+  const focusAfterMenu = useRef<"textarea" | "picker" | null>(null);
+  const [forgePicker, setForgePicker] = useState<ForgeKind | null>(null);
+  const daemonForge = useDaemonForge();
   const fileInput = useRef<HTMLInputElement | null>(null);
   const textareaNode = useRef<HTMLTextAreaElement | null>(null);
   const setTextareaNode = useCallback(
@@ -353,6 +358,20 @@ export function Composer({
     pendingCaret.current = null;
   }, [draft.value]);
 
+  // GitHub entries only for kinds the daemon lists (no dead affordances); shown disabled with the reason when `gh` is missing.
+  const forgeKinds = (["pr", "issue"] as const).filter((k) => supportsKind(attachLimits, k));
+  const forgeMenu =
+    forgeKinds.length > 0
+      ? {
+          kinds: [...forgeKinds],
+          disabledReason: daemonForge?.cli === false ? "gh is not installed on the daemon host" : null,
+          onOpen: (kind: ForgeKind) => {
+            focusAfterMenu.current = "picker";
+            setForgePicker(kind);
+          },
+        }
+      : undefined;
+
   /** "Mention a file": puts an `@` at the caret (after a space when it would touch a word) and focuses the textarea so the popover opens. */
   function insertMentionTrigger() {
     const node = textareaNode.current;
@@ -361,7 +380,7 @@ export function Composer({
     const prefix = at > 0 && !/\s/.test(value[at - 1]!) ? " " : "";
     const next = `${value.slice(0, at)}${prefix}@${value.slice(at)}`;
     const cursor = at + prefix.length + 1;
-    focusAfterMenu.current = true;
+    focusAfterMenu.current = "textarea";
     pendingCaret.current = cursor;
     draft.setValue(next);
     setCaret(cursor);
@@ -550,18 +569,38 @@ export function Composer({
                     e.target.value = "";
                   }}
                 />
-                <AttachMenu
-                  disabled={inactive}
-                  onPickFiles={() => fileInput.current?.click()}
-                  onMention={supportsKind(attachLimits, "file_ref") ? insertMentionTrigger : undefined}
-                  onCloseAutoFocus={(e) => {
-                    if (focusAfterMenu.current) {
-                      e.preventDefault();
-                      textareaNode.current?.focus();
-                      focusAfterMenu.current = false;
-                    }
-                  }}
-                />
+                <Popover open={forgePicker !== null} onOpenChange={(open) => !open && setForgePicker(null)}>
+                  <PopoverAnchor asChild>
+                    <span className="inline-flex">
+                      <AttachMenu
+                        disabled={inactive}
+                        onPickFiles={() => fileInput.current?.click()}
+                        onMention={supportsKind(attachLimits, "file_ref") ? insertMentionTrigger : undefined}
+                        forge={forgeMenu}
+                        onCloseAutoFocus={(e) => {
+                          // Focus goes where the chosen entry wants it (the textarea, or the picker's field), not back to the button.
+                          if (focusAfterMenu.current === "textarea") textareaNode.current?.focus();
+                          if (focusAfterMenu.current) e.preventDefault();
+                          focusAfterMenu.current = null;
+                        }}
+                      />
+                    </span>
+                  </PopoverAnchor>
+                  <PopoverContent side="top" align="start" className="w-96 max-w-[calc(100vw-2rem)] rounded-lg bg-menu p-0">
+                    {forgePicker && taskId !== null && (
+                      <ForgePicker
+                        kind={forgePicker}
+                        taskId={taskId}
+                        limits={attachLimits}
+                        onPick={(item, repo) => {
+                          attach.addForgeRef({ kind: forgePicker, forge: "github", number: item.number, repo, title: item.title, url: item.url });
+                          setForgePicker(null);
+                          textareaNode.current?.focus();
+                        }}
+                      />
+                    )}
+                  </PopoverContent>
+                </Popover>
               </>
             )}
             <RunConfigToolbar.ModelPicker />
