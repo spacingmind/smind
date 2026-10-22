@@ -408,6 +408,16 @@ func (h *Hub) RenameDevice(id, label string) (devices.Device, error) {
 	return h.opts.Registry.Rename(id, label)
 }
 
+// DeviceApproved reports whether id is currently an approved device in the
+// registry (false when there is no registry or no such device).
+func (h *Hub) DeviceApproved(id string) bool {
+	if h.opts.Registry == nil {
+		return false
+	}
+	d, ok := h.opts.Registry.Get(id)
+	return ok && d.State == devices.StateApproved
+}
+
 // RevokeDevice marks the device revoked, ends its live sessions immediately
 // and tells the relay to close its routes and refuse it (best effort: the
 // registry is authoritative and a reconnect is refused at hello anyway).
