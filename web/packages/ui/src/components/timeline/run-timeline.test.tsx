@@ -146,6 +146,25 @@ describe("RunTimeline", () => {
     }
   });
 
+  it("a running run blocked on a permission says it is waiting for the user, not Working…", () => {
+    render(
+      <ul>
+        <RunTimeline
+          run={run([], {
+            status: "running",
+            finishedAt: undefined,
+            pendingPermission: { requestId: "r1", summary: "run Bash", options: [{ id: "allow", label: "Allow", kind: "allow_once" }] },
+          })}
+        />
+      </ul>,
+    );
+    const meta = screen.getByTestId("run-meta");
+    expect(within(meta).getByRole("status")).toHaveTextContent("Waiting for you…");
+    expect(meta).toHaveAttribute("aria-label", "Waiting for your response");
+    expect(meta.textContent).not.toContain("Working");
+    expect(within(meta).getByTestId("run-working-elapsed")).toBeInTheDocument();
+  });
+
   it.each([
     ["human", "You approved"],
     ["auto_accept", "Auto-accepted"],

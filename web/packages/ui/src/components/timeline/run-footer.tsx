@@ -27,6 +27,7 @@ export function RunFooter<T extends RunFooterRun>({
   providerLabels,
   modelLabels,
   isLatest = false,
+  waiting = false,
   onContinue,
   onRerun,
   children,
@@ -38,6 +39,8 @@ export function RunFooter<T extends RunFooterRun>({
   modelLabels?: RunModelLabels;
   /** Continue/Retry are offered on the chat's latest run only. */
   isLatest?: boolean;
+  /** The live run is blocked on the user (an unanswered permission): the label says so instead of "Working…". */
+  waiting?: boolean;
   /** Continue: re-submits with the prompt "Continue" on the run's own config (task-detail wires it). */
   onContinue?: (run: T) => void;
   /** Retry: the existing Re-run path, offered on a failed latest run. */
@@ -46,6 +49,7 @@ export function RunFooter<T extends RunFooterRun>({
   children?: ReactNode;
 }) {
   const running = run.status === "running";
+  const waitingOnUser = running && waiting;
   // The tickers only force a re-render; `now` is read fresh each render so an
   // unrelated re-render never works from a stale tick. A running label ticks
   // every second; an age label needs 30 s only in its first hour, then 5 min,
@@ -62,7 +66,7 @@ export function RunFooter<T extends RunFooterRun>({
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-ui-sm text-foreground-muted" data-testid="run-footer">
       <div
         role="group"
-        aria-label={view.ariaLabel}
+        aria-label={waitingOnUser ? "Waiting for your response" : view.ariaLabel}
         className={cn(
           "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 sm:gap-x-2 transition-opacity",
           view.kind === "done" &&
@@ -73,10 +77,14 @@ export function RunFooter<T extends RunFooterRun>({
         data-disposition={run.disposition}
       >
         {running ? (
-          <span className={cn(SEGMENT, "gap-1.5")}>
-            <Icons.spinner aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
+          <span className={cn(SEGMENT, "gap-1.5", waitingOnUser && "text-warning")}>
+            {waitingOnUser ? (
+              <StatusDot status="warning" />
+            ) : (
+              <Icons.spinner aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
+            )}
             {/* The static word is the polite live region; the ticking number is a timer (implicitly aria-live=off) so a screen reader is not read a new value every second. */}
-            <span role="status">Working…</span>
+            <span role="status">{waitingOnUser ? "Waiting for you…" : "Working…"}</span>
             {view.duration && (
               <span role="timer" data-testid="run-working-elapsed">
                 {view.duration}
