@@ -100,6 +100,10 @@ func (f *fakeForge) PR(_ context.Context, _ string, number int) (forge.PR, error
 	return pr, nil
 }
 
+func (f *fakeForge) CreatePR(context.Context, string, forge.CreatePRInput) (forge.PR, error) {
+	return forge.PR{}, errors.New("not used")
+}
+
 func (f *fakeForge) setOpen(dir string, prs ...forge.PR) {
 	f.mu.Lock()
 	f.open[dir] = prs
