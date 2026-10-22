@@ -11,8 +11,17 @@ export interface Workspace {
   /** Whether a worktree setup/teardown script is configured (ADR-0024); the script text itself is only returned by workspace.get. */
   HasSetupScript?: boolean;
   HasTeardownScript?: boolean;
+  /** ADR-0039: the stored default-base override ("" = auto-detect); mirrors store.Workspace's field. */
+  DefaultBase?: string;
   CreatedAt: string;
   UpdatedAt: string;
+}
+
+/** Result of workspace.defaultBase/workspace.setDefaultBase (ADR-0039): the effective default base ref, whether it was auto-detected, and the stored override ("" when none). */
+export interface WorkspaceDefaultBase {
+  ref: string;
+  detected: boolean;
+  override: string;
 }
 
 /** workspace.get's result: the workspace plus its setup/teardown script text ("" = none) -- the only wire method that returns it (ADR-0024). */
