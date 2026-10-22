@@ -1,30 +1,36 @@
-// TasksScreen.tsx is Milestone 2's Item 2 list screen: resolve the paired
-// daemon's workspaces (workspace.list), then list the first one's spaces
-// and tasks (space.list/task.list) over the existing RelayConnection --
-// never a new admit/handshake. Pull-to-refresh re-fetches over the same
-// connection; an empty daemon renders an honest empty state; a call
-// failure shows the error with a retry. Tapping a task hands off to the
-// task detail screen (Item 3).
+// TasksScreen.tsx is the task list: resolve the paired daemon's workspaces
+// (workspace.list), then list the first one's spaces and tasks
+// (space.list/task.list) over the existing RelayConnection -- never a new
+// admit/handshake. Pull-to-refresh re-fetches over the same connection; an
+// empty daemon renders an honest empty state; a call failure shows the error
+// with a retry. Tapping a task hands off to the task detail screen.
 //
-// Rebuilt on the token system as a run-card list (mobile-ui-polish plan
-// Item 2): each task is a card with a status badge (icon + text, never
-// color alone), sorted attention-first via a live permission.pending
-// subscription (taskAttention.ts -- see its header for why the pending
-// set is session-scoped, not persisted ground truth).
+// The ZCode-look list (mobile-zcode-redesign M3): ONE virtualized FlatList
+// (vercel-react-native-skills) whose data is flattened by taskListItems --
+// section headers, memoised rows grouped into one card per section, and
+// per-section empties. Tasks are sorted attention-first via a live
+// permission.pending subscription (taskAttention.ts -- see its header for
+// why the pending set is session-scoped, not persisted ground truth).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
 import { Stack, useFocusEffect } from 'expo-router';
 import { Button } from '@expo/ui';
-import { UiHost } from '../ui/UiHost';
 import { fetchOverview, Space, Task, Workspace } from '../api';
 import { RelayConnection } from '../relay/RelayConnection';
 import { useConnectionState } from '../relay/useConnectionState';
 import { PendingApprovalSet, subscribeToPendingApprovals } from '../taskAttention';
 import { buildTaskSections } from '../taskSections';
+import { TaskListItem, taskListItems } from '../taskListItems';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { ReconnectingBanner } from '../ui/Banner';
+import { EmptyState } from '../ui/EmptyState';
+import { UiHost } from '../ui/UiHost';
+import { EmptySection } from './tasks/EmptySection';
+import { SectionHeader } from './tasks/SectionHeader';
+import { TaskListSkeleton } from './tasks/TaskListSkeleton';
+import { TaskRow } from './tasks/TaskRow';
 
 type LoadState =
   | { kind: 'loading' }
@@ -34,21 +40,6 @@ type LoadState =
 interface Props {
   conn: RelayConnection;
   onOpenTask: (task: Task) => void;
-}
-
-/** {icon, label, color} for a task's status badge -- an icon so the signal never rests on color alone. */
-function statusBadge(theme: AppTheme, status: string): { icon: string; color: string } {
-  switch (status) {
-    case 'running':
-      return { icon: '●', color: theme.status.running };
-    case 'error':
-    case 'stopped':
-      return { icon: '✕', color: theme.status.danger };
-    case 'done':
-      return { icon: '✓', color: theme.status.success };
-    default:
-      return { icon: '○', color: theme.foregroundMuted };
-  }
 }
 
 export function TasksScreen({ conn, onOpenTask }: Props) {
@@ -97,8 +88,8 @@ export function TasksScreen({ conn, onOpenTask }: Props) {
     return (
       <View style={styles.screen}>
         {banner}
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={theme.primary} />
+        <View style={styles.content}>
+          <TaskListSkeleton />
         </View>
       </View>
     );
@@ -108,12 +99,12 @@ export function TasksScreen({ conn, onOpenTask }: Props) {
     return (
       <View style={styles.screen}>
         {banner}
-        <View style={styles.centered}>
-          <Text style={styles.errorTitle}>Couldn't load the workspace</Text>
-          <Text style={styles.errorDetail}>{state.message}</Text>
-          <UiHost style={styles.retryHost}>
-            <Button label="Retry" onPress={load} />
-          </UiHost>
+        <View style={styles.state}>
+          <EmptyState title="Couldn't load the workspace" body={state.message}>
+            <UiHost>
+              <Button label="Retry" onPress={load} style={{ height: 44 }} />
+            </UiHost>
+          </EmptyState>
         </View>
       </View>
     );
@@ -126,55 +117,83 @@ export function TasksScreen({ conn, onOpenTask }: Props) {
       {/* expo-native-ui: the stack title is the workspace title, not a Text on the page. */}
       <Stack.Screen options={{ title: workspace.Title }} />
       {banner}
-      <FlatList
-        contentInsetAdjustmentBehavior="automatic" // expo-native-ui: the stack header owns the inset
-        contentContainerStyle={styles.listContent}
-        data={buildTaskSections(spaces, tasks, pendingTaskIds)}
-        keyExtractor={(item) => (item.kind === 'ungrouped' ? 'ungrouped' : `space-${item.space.ID}`)}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              load();
-            }}
-          />
-        }
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>No workspaces yet</Text>
-            <Text style={styles.emptyDetail}>
-              The paired daemon tracks no workspaces. Create one from the daemon or web UI, then pull to refresh.
-            </Text>
-          </View>
-        }
-        renderItem={({ item }) => (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{item.kind === 'ungrouped' ? 'Ungrouped' : item.space.Title}</Text>
-            {item.tasks.length === 0 ? (
-              <Text style={styles.sectionEmpty}>No tasks</Text>
-            ) : (
-              item.tasks.map((task) => {
-                const badge = statusBadge(theme, task.Status);
-                const attention = pendingTaskIds.has(task.ID);
-                return (
-                  <TouchableOpacity key={task.ID} style={styles.taskCard} onPress={() => onOpenTask(task)}>
-                    <View style={styles.taskCardTop}>
-                      <Text style={styles.taskTitle}>{task.Title}</Text>
-                      <View style={styles.statusBadge}>
-                        <Text style={[styles.statusIcon, { color: badge.color }]}>{badge.icon}</Text>
-                        <Text style={[styles.statusText, { color: badge.color }]}>{task.Status}</Text>
-                      </View>
-                    </View>
-                    {attention && <Text style={styles.attentionLine}>Needs your approval (since you last checked)</Text>}
-                  </TouchableOpacity>
-                );
-              })
-            )}
-          </View>
-        )}
+      <TasksFlatList
+        spaces={spaces}
+        tasks={tasks}
+        pendingTaskIds={pendingTaskIds}
+        refreshing={refreshing}
+        onRefresh={() => {
+          setRefreshing(true);
+          load();
+        }}
+        onOpenTask={onOpenTask}
       />
     </View>
+  );
+}
+
+/** The list itself, split out so the ready state's identity stays stable across re-renders. */
+function TasksFlatList({
+  spaces,
+  tasks,
+  pendingTaskIds,
+  refreshing,
+  onRefresh,
+  onOpenTask,
+}: {
+  spaces: Space[];
+  tasks: Task[];
+  pendingTaskIds: ReadonlySet<number>;
+  refreshing: boolean;
+  onRefresh: () => void;
+  onOpenTask: (task: Task) => void;
+}) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const items = useMemo(() => taskListItems(buildTaskSections(spaces, tasks, pendingTaskIds), pendingTaskIds), [spaces, tasks, pendingTaskIds]);
+
+  // vercel-react-native-skills: rows take PRIMITIVE props and a stable
+  // callback that receives the id; the task object is looked up here.
+  const tasksById = useRef(new Map<number, Task>());
+  tasksById.current = new Map(tasks.map((t) => [t.ID, t]));
+  const openById = useCallback(
+    (id: number) => {
+      const task = tasksById.current.get(id);
+      if (task) onOpenTask(task);
+    },
+    [onOpenTask],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: TaskListItem }) => {
+      if (item.type === 'header') return <SectionHeader title={item.title} />;
+      if (item.type === 'empty') return <EmptySection text={item.text} />;
+      return <TaskRow id={item.taskId} title={item.title} status={item.status} attention={item.attention} position={item.position} onPress={openById} />;
+    },
+    [openById],
+  );
+
+  return (
+    <FlatList
+      contentInsetAdjustmentBehavior="automatic" // expo-native-ui: the stack header owns the inset
+      contentContainerStyle={styles.listContent}
+      data={items}
+      keyExtractor={(item) => item.key}
+      renderItem={renderItem}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      ListEmptyComponent={
+        <View style={styles.state}>
+          <EmptyState
+            title="No workspaces yet"
+            body="The paired daemon tracks no workspaces. Create one from the daemon or web UI, then pull to refresh."
+          >
+            <UiHost>
+              <Button variant="outlined" label="Refresh" onPress={onRefresh} style={{ height: 44 }} />
+            </UiHost>
+          </EmptyState>
+        </View>
+      }
+    />
   );
 }
 
@@ -200,107 +219,19 @@ function makeStyles(theme: AppTheme) {
       flex: 1,
       backgroundColor: theme.surface[0],
     },
+    content: {
+      flex: 1,
+      padding: theme.spacing[4],
+    },
     listContent: {
       paddingHorizontal: theme.spacing[4],
       paddingBottom: theme.spacing[4],
     },
-    centered: {
+    state: {
       flex: 1,
-      backgroundColor: theme.surface[0],
       alignItems: 'center',
       justifyContent: 'center',
       padding: theme.spacing[8],
-    },
-    retryHost: {
-      alignSelf: 'center',
-      marginTop: theme.spacing[2],
-    },
-    section: {
-      marginBottom: theme.spacing[6],
-    },
-    sectionTitle: {
-      fontSize: theme.type.metadataLabel.fontSize,
-      lineHeight: theme.type.metadataLabel.lineHeight,
-      fontWeight: theme.type.metadataLabel.fontWeight,
-      color: theme.foregroundMuted,
-      textTransform: 'uppercase',
-      marginBottom: theme.spacing[2],
-      letterSpacing: 0.5,
-    },
-    sectionEmpty: {
-      color: theme.foregroundMuted,
-      fontSize: theme.type.interface.fontSize,
-    },
-    taskCard: {
-      backgroundColor: theme.surface[1],
-      borderWidth: 1,
-      borderColor: theme.border,
-      borderRadius: theme.radius.md,
-      padding: theme.spacing[3],
-      marginBottom: theme.spacing[2],
-      ...theme.elevation.sm,
-    },
-    taskCardTop: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    taskTitle: {
-      fontSize: theme.type.interface.fontSize,
-      lineHeight: theme.type.interface.lineHeight,
-      color: theme.foreground,
-      flex: 1,
-      marginRight: theme.spacing[2],
-    },
-    statusBadge: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    statusIcon: {
-      fontSize: theme.type.metadataLabel.fontSize,
-      marginRight: theme.spacing[1],
-    },
-    statusText: {
-      fontSize: theme.type.metadataLabel.fontSize,
-      fontWeight: theme.type.interface.fontWeight,
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
-    },
-    attentionLine: {
-      fontSize: theme.type.metadataLabel.fontSize,
-      color: theme.status.warning,
-      marginTop: theme.spacing[1],
-    },
-    empty: {
-      alignItems: 'center',
-      marginTop: theme.spacing[16],
-      padding: theme.spacing[4],
-    },
-    emptyTitle: {
-      fontSize: theme.type.panelTitle.fontSize,
-      lineHeight: theme.type.panelTitle.lineHeight,
-      fontWeight: theme.type.panelTitle.fontWeight,
-      color: theme.foreground,
-      marginBottom: theme.spacing[2],
-    },
-    emptyDetail: {
-      fontSize: theme.type.interface.fontSize,
-      color: theme.foregroundMuted,
-      textAlign: 'center',
-    },
-    errorTitle: {
-      fontSize: theme.type.panelTitle.fontSize,
-      lineHeight: theme.type.panelTitle.lineHeight,
-      fontWeight: theme.type.panelTitle.fontWeight,
-      color: theme.status.danger,
-      marginBottom: theme.spacing[2],
-    },
-    errorDetail: {
-      fontSize: theme.type.codeAnnotation.fontSize,
-      color: theme.foregroundMuted,
-      textAlign: 'center',
-      fontFamily: theme.type.codeAnnotation.fontFamily,
-      marginBottom: theme.spacing[6],
     },
   });
 }

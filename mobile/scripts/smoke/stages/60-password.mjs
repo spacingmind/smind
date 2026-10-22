@@ -18,7 +18,8 @@ async function daemonPassword(page, harness) {
     await page.getByRole('button', { name: 'Connect', exact: true }).click();
   };
   await page.fill('textarea, input[type="text"]', harness.pairingUrl);
-  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  // Dark connect -> password-card transition frames (light is captured in 20-device-lifecycle).
+  await lib.shootTransition(page, 'connect-password', 'dark', () => page.getByRole('button', { name: 'Connect', exact: true }).click());
   try {
     await page.getByText('Daemon password required', { exact: true }).waitFor({ timeout: 30_000 });
   } catch {

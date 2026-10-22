@@ -8,6 +8,10 @@
 // reason to autofill it or offer to save it (best effort: how iOS/Android
 // password managers treat it is not verified); the app itself never writes it
 // to a keychain or any storage.
+//
+// Presentation: same Card anatomy as ConnectionStatusCard (StatusDot + title,
+// detail) on the frozen Card primitive with a NEUTRAL border; the field sits
+// in a token input box. Logic is unchanged.
 
 import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -17,8 +21,12 @@ import { passwordProblem } from '../relay/daemonPasswords';
 import { ConnectionState } from '../relay/RelayConnection';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
+import { Card } from '../ui/Card';
+import { StatusDot } from '../ui/StatusDot';
+import { TextButton } from '../ui/TextButton';
 import { UiHost } from '../ui/UiHost';
 import { StatusAction } from './ConnectionStatusCard';
+import { statusDotTone } from './statusCardView';
 
 interface Props {
   state: ConnectionState;
@@ -45,7 +53,6 @@ export function DaemonPasswordPrompt({ state, onSubmit, actions }: Props) {
 
   const view: PasswordPromptView | null = describePasswordState(state, now);
   if (!view) return null;
-  const accent = theme.status[view.tone === 'danger' ? 'danger' : 'warning'];
 
   function submit() {
     const bad = passwordProblem(typed);
@@ -66,89 +73,85 @@ export function DaemonPasswordPrompt({ state, onSubmit, actions }: Props) {
   }
 
   return (
-    <View style={[styles.card, { borderColor: accent }]} accessibilityRole="alert">
-      <View style={styles.titleRow}>
-        <View style={[styles.dot, { backgroundColor: accent }]} />
-        <Text style={styles.title}>{view.title}</Text>
-      </View>
-      <Text style={styles.detail}>{view.detail}</Text>
-      {!view.locked && (
-        <>
-          <UiHost style={styles.inputHost}>
-            <ExpoTextInput
-              style={styles.inputBox}
-              textStyle={styles.inputText}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoComplete="off"
-              placeholder="Daemon password"
-              placeholderTextColor={theme.foregroundMuted}
-              value={field}
-              onChangeText={(text) => {
-                field.value = text;
-                setTyped(text);
-                setProblem(null);
-              }}
-              onSubmitEditing={submit}
-            />
-          </UiHost>
-          {problem ? <Text style={styles.problem}>{problem}</Text> : null}
-        </>
-      )}
-      <View style={styles.actions}>
+    <Card style={styles.card}>
+      <View style={styles.cardInner} accessibilityRole="alert">
+        <View style={styles.titleRow}>
+          <StatusDot tone={statusDotTone(view.tone)} />
+          <Text style={styles.title}>{view.title}</Text>
+        </View>
+        <Text style={styles.detail}>{view.detail}</Text>
         {!view.locked && (
-          <UiHost>
-            <Button label="Connect" onPress={submit} disabled={typed.length === 0} />
-          </UiHost>
+          <>
+            <UiHost style={styles.inputHost}>
+              <ExpoTextInput
+                style={styles.inputBox}
+                textStyle={styles.inputText}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="off"
+                placeholder="Daemon password"
+                placeholderTextColor={theme.foregroundSubtlest}
+                value={field}
+                onChangeText={(text) => {
+                  field.value = text;
+                  setTyped(text);
+                  setProblem(null);
+                }}
+                onSubmitEditing={submit}
+              />
+            </UiHost>
+            {problem ? <Text style={styles.problem}>{problem}</Text> : null}
+          </>
         )}
-        {actions?.map((a) => (
-          <UiHost key={a.label}>
-            <Button label={a.label} onPress={a.onPress} />
-          </UiHost>
-        ))}
+        <View style={styles.actions}>
+          {!view.locked && (
+            <UiHost>
+              <Button variant="filled" label="Connect" onPress={submit} disabled={typed.length === 0} style={{ height: 44 }} />
+            </UiHost>
+          )}
+          {actions?.map((a) => (
+            <TextButton key={a.label} label={a.label} onPress={a.onPress} />
+          ))}
+        </View>
       </View>
-    </View>
+    </Card>
   );
 }
 
 function makeStyles(theme: AppTheme) {
   return StyleSheet.create({
-    card: {
-      borderWidth: 1,
-      borderRadius: theme.radius.md,
-      backgroundColor: theme.surface[1],
-      padding: theme.spacing[4],
-      marginTop: theme.spacing[4],
-      gap: theme.spacing[2],
-    },
+    card: { marginTop: 0 },
+    cardInner: { gap: theme.spacing[2] },
     titleRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2] },
-    dot: { width: 6, height: 6, borderRadius: theme.radius.full },
     title: {
-      fontSize: theme.type.panelTitle.fontSize,
-      lineHeight: theme.type.panelTitle.lineHeight,
-      fontWeight: theme.type.panelTitle.fontWeight,
+      fontSize: theme.type.label.fontSize,
+      lineHeight: theme.type.label.lineHeight,
+      fontWeight: theme.type.label.fontWeight,
       color: theme.foreground,
     },
     detail: {
-      fontSize: theme.type.interface.fontSize,
-      lineHeight: theme.type.interface.lineHeight,
-      color: theme.foregroundMuted,
+      fontSize: theme.type.body.fontSize,
+      lineHeight: theme.type.body.lineHeight,
+      color: theme.foregroundSubtle,
     },
     inputHost: { alignSelf: 'stretch' },
     inputBox: {
+      backgroundColor: theme.input.background,
       borderWidth: 1,
-      borderColor: theme.border,
-      borderRadius: theme.radius.md,
-      padding: theme.spacing[3],
+      borderColor: theme.input.border,
+      borderRadius: theme.radius.lg,
+      borderCurve: 'continuous',
+      minHeight: 44,
+      paddingHorizontal: theme.spacing[3],
     },
     inputText: {
-      fontSize: theme.type.interface.fontSize,
+      fontSize: process.env.EXPO_OS === 'web' ? 16 : theme.type.body.fontSize,
       color: theme.foreground,
     },
     problem: {
-      fontSize: theme.type.metadataLabel.fontSize,
-      lineHeight: theme.type.metadataLabel.lineHeight,
+      fontSize: theme.type.small.fontSize,
+      lineHeight: theme.type.small.lineHeight,
       color: theme.status.danger,
     },
     actions: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing[2], marginTop: theme.spacing[2] },

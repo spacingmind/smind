@@ -12,7 +12,7 @@
 // peer-add <label> | peer-call <label> | peer-drop <label> | relay-restart |
 // daemon-restart | quit. With -fake-agent also:
 // seed-run <stopReason|end_turn> [title] | seed-live <scenario> [title] |
-// set-scenario <taskId> <text...> | stop-run <runId> |
+// set-scenario <taskId> <text...> | set-task-status <taskId> <status> | stop-run <runId> |
 // queue-prompt <taskId> <queue|interrupt> <prompt...> |
 // queue-list <chatId> | run-status <runId>. Diagnostics go to stderr, prefixed "devharness: ".
 package main
@@ -155,6 +155,7 @@ type harness struct {
 	api       *wsapi.API
 	wm        *workspace.Manager
 	runner    *taskrunner.Runner
+	store     *store.Store
 	fakeAgent string
 	workDir   string
 	seedWS    *store.Workspace // the workspace seed-run puts its tasks in
@@ -216,6 +217,7 @@ func run(windowMax int, outdated bool, password, fakeAgent string) error {
 		return err
 	}
 	defer db.Close()
+	h.store = db
 	acctDB, err := store.Open(filepath.Join(workDir, "accounts.db"))
 	if err != nil {
 		return err
@@ -509,6 +511,8 @@ func (h *harness) dispatch(cmd string, args []string) (map[string]any, error) {
 		return h.seedLive(args)
 	case "set-scenario":
 		return h.setScenario(args)
+	case "set-task-status":
+		return h.setTaskStatus(args)
 	case "stop-run":
 		return h.stopRun(args)
 	case "queue-prompt":
@@ -893,6 +897,29 @@ func (h *harness) setScenario(args []string) (map[string]any, error) {
 		return nil, err
 	}
 	return map[string]any{}, nil
+}
+
+// setTaskStatus force-writes a task's status column (created|running|done|
+// error|stopped), bypassing the run lifecycle, so the mobile smoke can show
+// the task list in every state. It does not start or stop any run.
+func (h *harness) setTaskStatus(args []string) (map[string]any, error) {
+	if err := need(args, 2, "set-task-status <taskId> <status>"); err != nil {
+		return nil, err
+	}
+	id, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("bad taskId %q", args[0])
+	}
+	switch args[1] {
+	case "created", "running", "done", "error", "stopped":
+	default:
+		return nil, fmt.Errorf("bad status %q (want created|running|done|error|stopped)", args[1])
+	}
+	task, err := h.store.UpdateTaskStatus(id, args[1])
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"taskId": task.ID, "status": task.Status}, nil
 }
 
 func (h *harness) stopRun(args []string) (map[string]any, error) {
