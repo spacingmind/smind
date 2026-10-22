@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -12,12 +11,19 @@ import (
 // ErrBaseUnknown is returned by diff and PR actions for a task whose
 // base_sha is empty (ADR-0039 section 2). The wsapi layer maps it to the
 // base_unknown code.
-var ErrBaseUnknown = errors.New("base_unknown")
+var ErrBaseUnknown error = codedError{"base_unknown"}
 
 // ErrBaseNotFound is returned by SetTaskBase when the named base resolves to
 // no branch (neither origin/<ref> nor a local branch) or shares no history
 // with the task's branch.
-var ErrBaseNotFound = errors.New("base_not_found")
+var ErrBaseNotFound error = codedError{"base_not_found"}
+
+// codedError is a sentinel that also carries its wire code (ADR-0039
+// section 6): wsapi's error mapper finds RPCCode anywhere in the wrap chain.
+type codedError struct{ code string }
+
+func (e codedError) Error() string   { return e.code }
+func (e codedError) RPCCode() string { return e.code }
 
 func baseUnknownError() error {
 	return fmt.Errorf("%w: This task's base commit is unknown. Set it with task.setBase.", ErrBaseUnknown)

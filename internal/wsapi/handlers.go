@@ -58,6 +58,9 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.stage":               handleTaskStage(wm),
 		"task.commit":              handleTaskCommit(wm),
 		"task.createPr":            handleTaskCreatePR(wm),
+		"task.setBase":             handleTaskSetBase(wm),
+		"workspace.defaultBase":    handleWorkspaceDefaultBase(wm),
+		"workspace.setDefaultBase": handleWorkspaceSetDefaultBase(wm),
 		"chat.create":              handleChatCreate(wm),
 		"chat.list":                handleChatList(wm),
 		"chat.get":                 handleChatGet(wm),
@@ -913,7 +916,8 @@ type taskCreatePRResult struct {
 }
 
 // handleTaskCreatePR opens a pull request for a task's branch against
-// baseBranch (or workspace.defaultBaseBranch if empty) -- see
+// baseBranch (or the task's stored base, else the workspace default base, if
+// empty) -- see
 // workspace.Manager.CreatePR for the push-directly-vs-cherry-pick-onto-a-
 // clean-branch decision (task-permission-ux.md Item 5). Every failure mode
 // (no worktree, fetch/push/gh failure, a diverged base with no commits to
