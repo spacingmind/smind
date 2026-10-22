@@ -23,3 +23,21 @@ export const PERMISSION_REASON_LABEL: Partial<Record<PermissionResolutionReason,
   timeout: { label: "Timed out", status: "warning" },
   provider_cancellation: { label: "Cancelled by provider", status: "warning" },
 };
+
+/** The kind prefix ACP and claude-native use for a refusal ("reject_once", "reject_always"). */
+function isRejection(optionKind: string | undefined): boolean {
+  return optionKind !== undefined && optionKind.startsWith("reject");
+}
+
+/**
+ * The label for a resolved permission row. Same as PERMISSION_REASON_LABEL, except that a person who
+ * chose a reject option reads "You denied", not "You approved" (reason `human` only says a person decided).
+ */
+export function permissionResolutionLabel(item: {
+  reason?: PermissionResolutionReason;
+  optionKind?: string;
+}): { label: string; status: StatusBadgeStatus } | undefined {
+  if (!item.reason) return undefined;
+  if (item.reason === "human" && isRejection(item.optionKind)) return { label: "You denied", status: "warning" };
+  return PERMISSION_REASON_LABEL[item.reason];
+}

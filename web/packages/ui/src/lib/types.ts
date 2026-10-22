@@ -545,6 +545,8 @@ export interface RunLogEvent extends Partial<RunToolCallEventParams> {
   /** Populated for a "permission_request" entry -- see PermissionDetail. */
   detail?: PermissionDetail;
   optionId?: string;
+  /** Client-side only: the kind of `optionId`, filled in from the matching "permission_request" by the timeline hook. */
+  optionKind?: string;
   reason?: PermissionResolutionReason;
   /** Populated for a "raw" entry (ADR 0010) -- the ACP session-update kind the normalizer didn't recognize (e.g. "plan"). */
   kind?: string;
