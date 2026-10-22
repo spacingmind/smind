@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyFileMentionReplacement, findActiveFileMention, mentionedPaths, rankPaths } from "@/lib/file-mention";
+import { applyFileMentionReplacement, findActiveFileMention, formatMentionToken, mentionedPaths, mentionedRefs, parseMentionToken, rankPaths } from "@/lib/file-mention";
 
 describe("findActiveFileMention", () => {
   const at = (text: string, cursorIndex = text.length) => findActiveFileMention({ text, cursorIndex });
@@ -52,5 +52,27 @@ describe("rankPaths", () => {
     const ranked = rankPaths(many, "");
     expect(ranked).toHaveLength(30);
     expect(ranked[0]!.path).toBe("f0.ts");
+  });
+});
+
+describe("mention tokens", () => {
+  const refs = [
+    { path: "src/a.go" },
+    { path: "src/a.go", line: 12 },
+    { path: "src/a.go", line: 12, endLine: 20 },
+    { path: "a b/c.md", line: 3, endLine: 4 },
+    { path: "a b/c.md" },
+  ];
+  it("formats and parses round trip, quoting paths with spaces", () => {
+    expect(refs.map(formatMentionToken)).toEqual(["@src/a.go", "@src/a.go#L12", "@src/a.go#L12-L20", '@"a b/c.md"#L3-L4', '@"a b/c.md"']);
+    for (const r of refs) expect(parseMentionToken(formatMentionToken(r))).toEqual(r);
+    expect(parseMentionToken("src/a.go")).toBeNull();
+    expect(parseMentionToken("@src/a.go#Lx")).toBeNull();
+  });
+  it("mentionedRefs keeps a ref only while its exact token is in the text", () => {
+    const text = "see @src/a.go#L12-L20 and @src/a.go#L12.";
+    expect(mentionedRefs(text, refs)).toEqual([{ path: "src/a.go", line: 12, endLine: 20 }]);
+    expect(mentionedRefs("@src/a.go#L12, @src/a.go", refs)).toEqual([{ path: "src/a.go" }, { path: "src/a.go", line: 12 }]);
+    expect(mentionedRefs("@src/a.go#L12-L21", refs)).toEqual([]);
   });
 });

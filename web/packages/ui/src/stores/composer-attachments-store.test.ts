@@ -101,17 +101,44 @@ describe("attachmentErrorMessage", () => {
     expect(all().every((i) => !i.error)).toBe(true);
   });
 
-  it("remembers each mention once and clears them with the tray", () => {
+  it("remembers each mention once and clears them on request", () => {
     useComposerAttachmentsStore.setState({ byKey: {}, mentions: {} });
     const s = useComposerAttachmentsStore.getState();
     s.addMention(key, "src/a.go");
     s.addMention(key, "src/a.go");
     s.addMention(key, "b.md");
-    expect(useComposerAttachmentsStore.getState().mentions[key]).toEqual(["src/a.go", "b.md"]);
+    expect(useComposerAttachmentsStore.getState().mentions[key]).toEqual([{ path: "src/a.go" }, { path: "b.md" }]);
     s.clearMentions(key);
     expect(useComposerAttachmentsStore.getState().mentions[key]).toBeUndefined();
-    s.addMention(key, "x");
+  });
+
+  it("keeps mentions when the tray is dropped on unmount: the draft text and its @tokens outlive the chat tab", () => {
+    useComposerAttachmentsStore.setState({ byKey: {}, mentions: {}, pendingInserts: {} });
+    const s = useComposerAttachmentsStore.getState();
+    s.addMention(key, "src/a.go");
     s.clear(key);
-    expect(useComposerAttachmentsStore.getState().mentions[key]).toBeUndefined();
+    expect(useComposerAttachmentsStore.getState().mentions[key]).toEqual([{ path: "src/a.go" }]);
+  });
+
+  it("dedupes mentions on path, line and endLine", () => {
+    useComposerAttachmentsStore.setState({ byKey: {}, mentions: {}, pendingInserts: {} });
+    const s = useComposerAttachmentsStore.getState();
+    s.rememberMention(key, { path: "a.go" });
+    s.rememberMention(key, { path: "a.go", line: 1, endLine: 5 });
+    s.rememberMention(key, { path: "a.go", line: 1, endLine: 5 });
+    s.rememberMention(key, { path: "a.go", line: 7, endLine: 9 });
+    expect(useComposerAttachmentsStore.getState().mentions[key]).toHaveLength(3);
+  });
+
+  it("queues inserts per key and hands them out once", () => {
+    useComposerAttachmentsStore.setState({ byKey: {}, mentions: {}, pendingInserts: {} });
+    const s = useComposerAttachmentsStore.getState();
+    s.queueInsert(key, { path: "a.go" });
+    s.queueInsert(key, { path: "a.go" });
+    s.queueInsert(key, { path: "a.go", line: 2, endLine: 3 });
+    s.queueInsert("other", { path: "z" });
+    expect(s.takeInserts(key)).toEqual([{ path: "a.go" }, { path: "a.go", line: 2, endLine: 3 }]);
+    expect(useComposerAttachmentsStore.getState().takeInserts(key)).toEqual([]);
+    expect(useComposerAttachmentsStore.getState().pendingInserts.other).toHaveLength(1);
   });
 });

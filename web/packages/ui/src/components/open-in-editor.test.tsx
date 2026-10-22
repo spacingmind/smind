@@ -2,7 +2,7 @@
 // is mocked per scenario (`isDesktop` is a module-load constant) and the
 // components are imported fresh, like desktop-daemon-banner.test.tsx.
 import { act } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
@@ -104,8 +104,9 @@ async function mountSidebar() {
 async function mountExplorer() {
   const { FileExplorerPane } = await import("@/components/file-explorer-pane");
   const { Toaster } = await import("@/components/ui/toast");
+  const { renderWithClientProp } = await import("@/test/render-with-daemon");
   const client = new FakeWsClient();
-  render(
+  renderWithClientProp(
     <>
       <Toaster />
       <FileExplorerPane client={client} task={TASK} />
@@ -228,8 +229,9 @@ describe("open in editor", () => {
   it("file rows have no items when the task has no worktree", async () => {
     mockPlatform({ current: LOCAL });
     const { FileExplorerPane } = await import("@/components/file-explorer-pane");
+    const { renderWithClientProp } = await import("@/test/render-with-daemon");
     const client = new FakeWsClient();
-    render(<FileExplorerPane client={client} task={{ ...TASK, WorktreePath: null }} />);
+    renderWithClientProp(<FileExplorerPane client={client} task={{ ...TASK, WorktreePath: null }} />);
     client.nth("file.list", 0).resolve([{ name: "README.md", isDir: false, size: 1 }]);
     await flush();
     fireEvent.contextMenu(await screen.findByTestId("file-row"));

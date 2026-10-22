@@ -692,6 +692,20 @@ function AppShell({
     setFocusedChat(selectedTaskId, inFront ?? (stillOpen ? current : (open[0]?.chatId ?? null)));
   }, [selectedTaskId, taskState, focusedPane, setFocusedChat]);
 
+  // "Add to chat" (Diff / Files panes) queued a token for a chat: make sure that chat's composer is on screen.
+  const revealRequest = useFocusedChatStore((state) => state.revealRequest);
+  const handledReveal = useRef(revealRequest?.nonce);
+  useEffect(() => {
+    if (!revealRequest || revealRequest.nonce === handledReveal.current) return;
+    handledReveal.current = revealRequest.nonce;
+    if (!taskState || revealRequest.taskId !== selectedTaskId) return;
+    const visible = collectAllPanes(taskState.root).some((pane) => {
+      const front = pane.tabs.find((t) => t.key === pane.activeKey);
+      return front?.kind === "chat" && front.chatId === revealRequest.chatId;
+    });
+    if (!visible) openChatById(revealRequest.chatId);
+  });
+
   // --- Routing (Item 3) ------------------------------------------------
   //
   // Hash routing: the URL is a *mirror* of selection state, not its

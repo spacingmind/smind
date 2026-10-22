@@ -8,8 +8,13 @@ import { create } from "zustand";
 export const useFocusedChatStore = create<{
   byTask: Readonly<Record<number, number>>;
   setFocusedChat: (taskId: number, chatId: number | null) => void;
+  /** A pane asking App to bring the chat's tab forward (no-op there when its composer is already in front). */
+  revealRequest: Readonly<{ taskId: number; chatId: number; nonce: number }> | null;
+  requestRevealChat: (taskId: number, chatId: number) => void;
 }>()((set) => ({
   byTask: {},
+  revealRequest: null,
+  requestRevealChat: (taskId, chatId) => set((state) => ({ revealRequest: { taskId, chatId, nonce: (state.revealRequest?.nonce ?? 0) + 1 } })),
   setFocusedChat: (taskId, chatId) =>
     set((state) => {
       if ((state.byTask[taskId] ?? null) === chatId) return state;

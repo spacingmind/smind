@@ -1,7 +1,7 @@
 import { html } from "diff2html";
 import { describe, expect, it } from "vitest";
 
-import { filePathForElement, resolveDiffLine } from "@/lib/diff-lines";
+import { filePathForElement, parseHunkHeader, resolveDiffLine } from "@/lib/diff-lines";
 
 const DIFF = `diff --git a/file.txt b/file.txt
 index a29bdeb..0226208 100644
@@ -67,5 +67,14 @@ describe("filePathForElement", () => {
 
   it("returns null outside any file wrapper", () => {
     expect(filePathForElement(document.body)).toBeNull();
+  });
+});
+
+describe("parseHunkHeader", () => {
+  it("reads the new-side range", () => {
+    expect(parseHunkHeader("@@ -10,3 +12,9 @@ func x()")).toEqual({ line: 12, endLine: 20 });
+    expect(parseHunkHeader("@@ -1 +1 @@")).toEqual({ line: 1 });
+    expect(parseHunkHeader("@@ -5,2 +4,0 @@")).toEqual({});
+    expect(parseHunkHeader("not a header")).toBeNull();
   });
 });

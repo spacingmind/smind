@@ -63,3 +63,19 @@ export function filePathForElement(target: Element | null): string | null {
   const name = target?.closest(".d2h-file-wrapper")?.querySelector(".d2h-file-name")?.textContent?.trim();
   return name || null;
 }
+
+/** A hunk's new-side line range; both absent when the hunk has no new-side lines (a pure deletion). */
+export interface HunkRange {
+  line?: number;
+  endLine?: number;
+}
+
+/** The new-side range of a `@@ -a,b +c,d @@` header (`+c,d` → `c` to `c+d-1`; a missing count is 1); null when the text is not a hunk header. */
+export function parseHunkHeader(text: string): HunkRange | null {
+  const m = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(text.trim());
+  if (!m) return null;
+  const start = Number(m[1]);
+  const count = m[2] === undefined ? 1 : Number(m[2]);
+  if (count === 0 || start < 1) return {};
+  return count === 1 ? { line: start } : { line: start, endLine: start + count - 1 };
+}

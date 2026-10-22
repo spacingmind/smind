@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { formatBytes } from "@/lib/attachments/format";
+import { sameMentionRef, type MentionRef } from "@/lib/file-mention";
 import type { AttachmentLimits } from "@/lib/types";
 
 interface DraftBase {
@@ -48,6 +49,7 @@ export function attachmentDraftKey(taskId: number, chatId: number): string {
 
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 const NONE: DraftAttachment[] = [];
+const NO_MENTIONS: MentionRef[] = [];
 
 let nextId = 0;
 let pastedImages = 0;
@@ -87,12 +89,20 @@ function validate(items: DraftAttachment[], limits: AttachmentLimits): DraftAtta
 
 interface ComposerAttachmentsState {
   byKey: Record<string, DraftAttachment[]>;
-  /** The paths picked from the `@` popover, per key; only those whose `@path` is still in the prompt are sent as `file_ref`s. */
-  mentions: Record<string, string[]>;
+  /** The refs picked from the `@` popover or added from the diff/Files panes, per key; only those whose exact token is still in the prompt are sent as `file_ref`s. */
+  mentions: Record<string, MentionRef[]>;
+  /** Refs waiting for the composer of that key to put their token into the draft. */
+  pendingInserts: Record<string, MentionRef[]>;
   add: (key: string, files: File[], limits: AttachmentLimits) => void;
   /** Adds a picked PR/issue (a duplicate of one already in the tray is ignored). */
   addForgeRef: (key: string, ref: Omit<DraftForgeRef, "localId" | "error">, limits: AttachmentLimits) => void;
   addMention: (key: string, path: string) => void;
+  /** Remembers a ref (deduped on path, line, endLine) without touching the draft. */
+  rememberMention: (key: string, ref: MentionRef) => void;
+  /** Asks the composer of `key` to append the ref's token to its draft. */
+  queueInsert: (key: string, ref: MentionRef) => void;
+  /** Returns and clears the queued inserts of `key`. */
+  takeInserts: (key: string) => MentionRef[];
   clearMentions: (key: string) => void;
   remove: (key: string, localId: string, limits?: AttachmentLimits | null) => void;
   /** Drops the tray and revokes its object URLs (on unmount). */
@@ -108,6 +118,7 @@ interface ComposerAttachmentsState {
 export const useComposerAttachmentsStore = create<ComposerAttachmentsState>()((set, get) => ({
   byKey: {},
   mentions: {},
+  pendingInserts: {},
   add: (key, files, limits) => {
     if (files.length === 0) return;
     const added: DraftAttachment[] = files.map((file) => {
@@ -130,10 +141,23 @@ export const useComposerAttachmentsStore = create<ComposerAttachmentsState>()((s
     const added: DraftForgeRef = { ...ref, localId: `att-${++nextId}` };
     set({ byKey: { ...get().byKey, [key]: validate([...current, added], limits) } });
   },
-  addMention: (key, path) => {
-    const held = get().mentions[key] ?? [];
-    if (held.includes(path)) return;
-    set({ mentions: { ...get().mentions, [key]: [...held, path] } });
+  addMention: (key, path) => get().rememberMention(key, { path }),
+  rememberMention: (key, ref) => {
+    const held = get().mentions[key] ?? NO_MENTIONS;
+    if (held.some((h) => sameMentionRef(h, ref))) return;
+    set({ mentions: { ...get().mentions, [key]: [...held, ref] } });
+  },
+  queueInsert: (key, ref) => {
+    const held = get().pendingInserts[key] ?? NO_MENTIONS;
+    if (held.some((h) => sameMentionRef(h, ref))) return;
+    set({ pendingInserts: { ...get().pendingInserts, [key]: [...held, ref] } });
+  },
+  takeInserts: (key) => {
+    const held = get().pendingInserts[key];
+    if (!held) return NO_MENTIONS;
+    const { [key]: _gone, ...rest } = get().pendingInserts;
+    set({ pendingInserts: rest });
+    return held;
   },
   clearMentions: (key) => {
     if (!get().mentions[key]) return;
@@ -151,7 +175,9 @@ export const useComposerAttachmentsStore = create<ComposerAttachmentsState>()((s
     set({ byKey: { ...get().byKey, [key]: next } });
   },
   clear: (key) => {
-    get().clearMentions(key);
+    // Mentions are not cleared here: the chat tab unmounts whenever another tab is in front, while the draft TEXT (and
+    // so the `@path` tokens) survives. A mention is only sent while its token is still in the text, so a stale one is
+    // harmless; a send clears them (clearMentions).
     const current = get().byKey[key];
     if (!current) return;
     current.forEach(revoke);
@@ -173,9 +199,7 @@ export function useDraftAttachments(key: string | null): DraftAttachment[] {
   return useComposerAttachmentsStore((s) => (key ? (s.byKey[key] ?? NONE) : NONE));
 }
 
-const NO_MENTIONS: string[] = [];
-
-/** The paths remembered from the `@` popover for one key (a stable empty array when there are none). */
-export function useDraftMentions(key: string | null): string[] {
+/** The refs remembered for one key (a stable empty array when there are none). */
+export function useDraftMentions(key: string | null): MentionRef[] {
   return useComposerAttachmentsStore((s) => (key ? (s.mentions[key] ?? NO_MENTIONS) : NO_MENTIONS));
 }

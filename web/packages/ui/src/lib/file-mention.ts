@@ -42,14 +42,51 @@ export function applyFileMentionReplacement({ text, mention, path }: { text: str
   return { text: `${before}${insert}${after}`, cursor: before.length + insert.length };
 }
 
-/** The remembered paths whose `@path` / `@"path"` is still a token in the prompt (the daemon dedupes against the text). */
-export function mentionedPaths(text: string, remembered: readonly string[]): string[] {
-  const out: string[] = [];
-  for (const path of remembered) {
-    if (out.includes(path)) continue;
-    if (hasToken(text, formatMention(path))) out.push(path);
+/** A reference to a file, directory or line range: what `@path#L12-L20` stands for and what a `file_ref` carries. */
+export interface MentionRef {
+  path: string;
+  line?: number;
+  /** Only with `line`. */
+  endLine?: number;
+}
+
+/** `@path`, `@path#L12`, `@path#L12-L20`; a path with whitespace is quoted: `@"a b"#L12-L20`. */
+export function formatMentionToken(ref: MentionRef): string {
+  const base = formatMention(ref.path);
+  if (!ref.line) return base;
+  return ref.endLine && ref.endLine > ref.line ? `${base}#L${ref.line}-L${ref.endLine}` : `${base}#L${ref.line}`;
+}
+
+/** The reverse of `formatMentionToken` for one whole token; null when it is not one. */
+export function parseMentionToken(token: string): MentionRef | null {
+  const m = /^@(?:"([^"]+)"|([^\s"#]+))(?:#L(\d+)(?:-L(\d+))?)?$/.exec(token);
+  if (!m) return null;
+  const path = m[1] ?? m[2]!;
+  if (m[3] === undefined) return { path };
+  const line = Number(m[3]);
+  if (line < 1) return null;
+  const end = m[4] === undefined ? 0 : Number(m[4]);
+  return end > line ? { path, line, endLine: end } : { path, line };
+}
+
+/** Two refs name the same thing (an `endLine` equal to `line` is no range). */
+export function sameMentionRef(a: MentionRef, b: MentionRef): boolean {
+  return a.path === b.path && (a.line ?? 0) === (b.line ?? 0) && (a.endLine ?? 0) === (b.endLine ?? 0);
+}
+
+/** The remembered refs whose exact token is still in the prompt (the daemon dedupes against the text). */
+export function mentionedRefs(text: string, remembered: readonly MentionRef[]): MentionRef[] {
+  const out: MentionRef[] = [];
+  for (const ref of remembered) {
+    if (out.some((o) => sameMentionRef(o, ref))) continue;
+    if (hasToken(text, formatMentionToken(ref))) out.push(ref);
   }
   return out;
+}
+
+/** The remembered paths whose `@path` / `@"path"` is still a token in the prompt. */
+export function mentionedPaths(text: string, remembered: readonly string[]): string[] {
+  return mentionedRefs(text, remembered.map((path) => ({ path }))).map((r) => r.path);
 }
 
 function hasToken(text: string, token: string): boolean {
