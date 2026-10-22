@@ -44,6 +44,7 @@ import { useScreenInsets } from '../ui/useScreenInsets';
 import { adoptedPromptText } from '../adoptedPrompt';
 import { defaultChatId, listProviders, listRunsForTask, ProviderInfo, RunSummary } from '../api';
 import { firstSendProvider } from '../firstSend';
+import { withRunPrompt } from '../promptLine';
 import { recallSelection } from '../newTaskPrefs';
 import { continueRun, isEchoOfOptimisticLine, sendFollowUpPrompt, RunTail } from '../followUpPrompt';
 import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
@@ -298,7 +299,13 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
           board.applyLogEvents(latest.ID, logs.events ?? []);
           // Merge, do not overwrite: a prompt sent or a run adopted while the logs were loading has already appended lines.
           const logLines = timelineFromLogs(logs as { events?: never[] });
-          setLines((prev) => [...logLines, ...prev]);
+          // A run started by run.start carries no user message in its logs: show the run row's own prompt when the logs
+          // have no user line (and a prompt sent while the logs loaded has not already rendered it).
+          setLines((prev) => {
+            // The optimistic line of this very prompt may already have rendered while the logs loaded.
+            if (prev.some((l) => l.role === 'user' && l.text === latest.Prompt)) return [...logLines, ...prev];
+            return [...withRunPrompt(logLines, latest.Prompt), ...prev];
+          });
         }
       } catch (e) {
         if (!cancelled) setState({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
