@@ -23,14 +23,14 @@ else. History, queued prompts and reconnects show the same attachments.
 | 2 | **Daemon core**: `internal/attach` (validate, sniff, on-disk set, render), `attachments` on `task.prompt`/`run.start`, `runs.attachments`/`chat_queue.attachments`, metadata on `run.list`/`chat.queueList`/`run.logs`, `run.attachment`, `reuse`, `/ws` read limit, `daemon.info.attachments`; all four runners get the **text/path fallback** through a `PromptInput` value | L | peer-glm (attach pkg, store, render) + peer-sonnet (runs/taskrunner/wsapi plumbing) | none (fake backends) |
 | 3 | **Native image delivery**: ACP `image` blocks gated on `promptCapabilities.image`, codex `localImage`, `provider.list` `images` field | M | peer-sonnet | one gated live call per runner |
 | 3s | **SDK** (DEPENDENCY, repo `claude-agent-sdk-go`): `ContentBlock`, `QueryBlocks`/`PromptBlocks`, fake-CLI test, release v0.4.0. Then **3b** smind `go.mod` bump + claude-native native blocks | S + S | Lead drafts SDK PR if asked (O7) | one live call |
-| 4 | **`@file`**: `file.search`, exported `files.Resolve`, `file_ref` validation and rendering | M | peer-glm | none |
+| 4 | **`@file`** (daemon half is small, folded into PR 2's wiring): exported `files.Resolve`, the `file_ref` resolver and its tests. No new RPC: `task.searchIndex` already lists the paths | S | with PR 2 | none |
 | 5 | **GitHub**: `github.search`, accept-time `gh` fetch and snapshot, `<github-pr>`/`<github-issue>` rendering | M | peer-glm | none (`runGH` stub); one manual `gh` check |
 | 6a | **Web composer + timeline**: store, queries, tray, attach menu, paste/drop/picker, submit, errors, thumbnails/chips in the timeline and queue, lightbox, `reuse` on Re-run/Continue/Retry | L | peer-glm | none |
 | 6b | **Web `@` popover** | M | peer-glm | none |
 | 6c | **Web GitHub picker** | M | peer-glm | none |
 | 7 | **Desktop**: confirm paste/drop reach the webview in the macOS app; set `dragDropEnabled` only if they do not | S | Lead | macOS app, no model call |
 
-Order: 1 → 2 → (3 ‖ 4 ‖ 5, disjoint write scopes: runners / `files`+`wsapi/files.go` / a new github package) → 6a (needs 2) → 6b (needs 4) → 6c
+Order: 1 → 2 → (3 ‖ 5, disjoint write scopes: runners / a new github package) → 6a (needs 2) → 6b (needs only `task.searchIndex`, already on develop; independent of the daemon PRs) → 6c
 (needs 5) → 7. 3s runs in parallel from acceptance; 3b waits for the SDK release. PR 6a may start as soon as PR 2's wire contract is
 merged (the contract is frozen in ADR §1).
 
@@ -88,8 +88,7 @@ forges, audio/video, restoring attachments on "Edit & resend" (O6), attachment q
 
 ### `@file` (PR 4)
 
-- AC21. `file.search` returns at most 30 `{path, isDir}` entries scoped to the task's worktree; git worktrees use tracked + untracked-not-ignored files;
-  ignored paths and entries resolving outside the root are never returned; ranking is basename prefix > substring > subsequence.
+- AC21. The `@` popover lists paths from `task.searchIndex` (tracked + untracked-not-ignored), filtered and ranked client-side by `lib/fuzzy-match.ts`; at most 30 rows.
 - AC22. A `file_ref` is accepted only for an existing path inside the worktree after symlink resolution; `..`, an outside absolute path and a symlink
   pointing out are `outside_workspace`; the stored path is normalised, relative, forward-slashed. Nothing reads the file's contents.
 - AC23. A ref already present literally in the prompt text is not repeated in the prompt; one that is not present is listed under "Referenced paths".
@@ -117,7 +116,7 @@ forges, audio/video, restoring attachments on "Edit & resend" (O6), attachment q
 - AC31. A finished run and a queued row show their attachments after reload and reconnect: thumbnails loaded lazily via `run.attachment` (TanStack Query,
   no bespoke fetch), chips for files/refs/PR/issue, lightbox for images, `file_ref` chip opens the file tab, PR/issue chip opens its URL.
 - AC32. Re-run, Continue and Retry-with-higher-effort resend the run's attachments via `reuse`.
-- AC33. `@` after whitespace opens the popover (not inside an email); results come from `file.search` via a `useQuery` with `keepPreviousData`, debounced;
+- AC33. `@` after whitespace opens the popover (not inside an email); results come from `task.searchIndex` via a TanStack `useQuery`, filtered client-side;
   ↑/↓/Enter/Tab/Esc work; selecting inserts `@path` (quoted when needed), records the mention, and submit sends a `file_ref` for each mention still in the text.
 - AC34. The GitHub picker lists PRs/issues from `github.search`, shows loading, empty and error (incl. `gh` missing) states, and adds a PR/issue pill.
 - AC35. A provider with `images: "no"` shows the pill hint and still sends. All query keys come from `lib/query-keys.ts`; icons come from `lib/icons.ts`;
@@ -161,9 +160,8 @@ Names are the contract; Peers use these exact names.
 `TestACPEcho_ImageChunkNotPersisted`; SDK repo: `TestPromptBlocks_WritesContentArray`, `TestPromptBlocks_TextOnlyUnchanged`; smind after
 bump: `TestClaudeNative_SendsImageBlocks`, `TestClaudeNative_SlashCommandTextLast`.
 
-**files** (`internal/files`, `internal/wsapi`): `TestResolve_InsideRoot`, `TestResolve_RejectsDotDotAndAbsoluteOutside`,
-`TestResolve_RejectsSymlinkEscape`, `TestFileSearch_GitTrackedAndUntrackedNotIgnored`, `TestFileSearch_ExcludesIgnoredAndEscapingLinks`,
-`TestFileSearch_RankingAndLimit`, `TestFileSearch_NonGitBoundedWalk`, `TestFileRef_AcceptedNormalised`, `TestFileRef_OutsideWorkspaceRejected`,
+**files** (`internal/files`, `internal/wsapi`; no `file.search`): `TestResolve_InsideRoot`, `TestResolve_RejectsDotDotAndAbsoluteOutside`,
+`TestResolve_RejectsSymlinkEscape`, `TestFileRef_AcceptedNormalised`, `TestFileRef_OutsideWorkspaceRejected`,
 `TestFileRef_ContentsNeverRead`.
 
 **GitHub** (`internal/…/github`, `internal/wsapi`, `runGH`-style stub): `TestGithubSearch_ArgvAndJSONFields`,

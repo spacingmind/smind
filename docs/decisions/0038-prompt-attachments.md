@@ -251,16 +251,15 @@ worktree: writing there would show up in `task.diff`, branch checkpoints and `gi
 
 ### 5. `@file` on the daemon machine
 
-- **Listing.** `file.search` `{taskId, query, limit ≤ 30}` → `[{path, isDir}]`, scoped to the task's worktree via
-  `taskWorktreePath`. Source: `git ls-files -co --exclude-standard` (cached ~2 s per worktree) in a git worktree, a
-  bounded walk (20k entries, skipping `node_modules` and `.git`) otherwise. Ranking: basename prefix, then path
-  substring, then subsequence. This is a new RPC because `file.list` is one directory at a time; the sandbox logic is
-  reused, not rewritten.
+- **Listing.** No new RPC. The existing `task.searchIndex` (`internal/workspace/search.go`: `git ls-files -co --exclude-standard`,
+  the list quick-open already fuzzy-matches client-side) returns every eligible path; the popover filters and ranks it
+  in the browser with `lib/fuzzy-match.ts`. (The first draft proposed a server-side `file.search`; the audit found this
+  RPC and the matcher already exist, so reuse wins.) The web hook for it today is a pre-ADR-0032 `useEffect` fetch; the
+  popover gets a TanStack `useQuery` over the same RPC instead, refetched on a terminal `run.status` of the task.
 - **Containment.** `internal/files`'s unexported `resolveInRoot` (symlink-aware via `resolveExistingPrefix`) gets an
   exported `Resolve(root, path)`. `file_ref` is accepted only if the cleaned path is relative or an absolute path
   inside the worktree, resolves (following symlinks) inside the worktree root, and exists. `..` escapes, absolute paths
-  elsewhere and symlinks pointing out are `outside_workspace`; the stored path is the normalised relative form. Listing
-  also omits entries that resolve outside the root.
+  elsewhere and symlinks pointing out are `outside_workspace`; the stored path is the normalised relative form. 
 - **What the agent gets.** The path only (§3.1); contents are never read or inlined by smind (D2).
 
 ### 6. Composer and `@` mention behaviour
@@ -280,9 +279,9 @@ worktree: writing there would show up in `task.diff`, branch checkpoints and `gi
 
 All new web code follows ADR-0032 and `docs/design.md`; no bespoke `useEffect` + `client.call` fetches.
 
-- **Queries** (`lib/query-keys.ts`, the only place keys are built): `fileSearch(taskId, query)`,
-  `githubItems(taskId, kind, query)`, `runAttachment(runId, id)`. `useQuery` with `keepPreviousData` for the two
-  searches; `runAttachment` has `staleTime: Infinity` and revokes its object URL on unmount. Submitting goes through the
+- **Queries** (`lib/query-keys.ts`, the only place keys are built): `taskSearchIndex(taskId)`,
+  `githubItems(taskId, kind, query)`, `runAttachment(runId, id)`. `useQuery` over `task.searchIndex` (filtered client-side) and `keepPreviousData` for the
+  GitHub search; `runAttachment` has `staleTime: Infinity` and revokes its object URL on unmount. Submitting goes through the
   existing `submitPrompt` mutation path in `use-run-timeline.ts`, extended with `attachments`.
 - **Store**: `stores/composer-attachments-store.ts` (zustand, in memory, keyed by task and chat) holds the draft
   attachments and confirmed mentions, because the composer, the drop overlay on the whole task pane and the toolbar
@@ -360,8 +359,8 @@ daemon's PATH. `provider.list` entries gain `images: "yes" | "no" | "unknown"` (
 
 ## Consequences
 
-- One new package `internal/attach` (validate, sniff, store, render), a thin delivery change in four runners, three small
-  RPCs (`run.attachment`, `file.search`, `github.search`), two columns, and a web feature that touches the composer, the
+- One new package `internal/attach` (validate, sniff, store, render), a thin delivery change in four runners, two small
+  RPCs (`run.attachment`, `github.search`), two columns, and a web feature that touches the composer, the
   timeline and the query/store layers.
 - claude-native images upgrade from "Read a file" to inline blocks when the SDK ships; nothing else changes then.
 - The relay cannot carry meaningful attachments until O1 is decided; mobile work must start from that.
