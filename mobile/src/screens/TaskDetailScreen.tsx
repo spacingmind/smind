@@ -48,6 +48,7 @@ import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondTo
 import { RelayConnection } from '../relay/RelayConnection';
 import { useConnectionState } from '../relay/useConnectionState';
 import { RunFollower, RunStatusEvent } from '../runFollower';
+import { hapticFor } from '../haptics';
 import { describeRunFooter } from '../runFooter';
 import { lineFromAttachEvent, TimelineLine, timelineFromLogs } from '../runTimeline';
 import { requestStop, stopControlView } from '../stopControl';
@@ -316,6 +317,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
       if (!text || state.kind !== 'ready' || state.run === null) return;
       if (sending.current) return; // one send at a time: a second press before the re-render must not queue the prompt twice
       sending.current = true;
+      hapticFor('send'); // same frame as the draft clearing, before the await
       setDraft('');
       draftState.value = '';
       setSendError(null);
@@ -341,6 +343,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
         );
         if (result.kind === 'queued') queue.refresh(); // covers a missed snapshot
       } catch (e) {
+        hapticFor('error');
         setDraft(text); // the typed text is never silently lost
         draftState.value = text;
         setSendError(e instanceof Error ? e.message : String(e));
@@ -356,6 +359,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
 
   const handleStop = useCallback(async () => {
     if (liveRunId === null || stopping) return;
+    hapticFor('stop');
     setStopping(true);
     setSendError(null);
     const failure = await requestStop(conn, liveRunId);
@@ -395,6 +399,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
 
   const handlePermissionTap = useCallback(
     (requestId: string, optionId: string) => {
+      hapticFor('permission');
       void respondToPermission(conn, board, requestId, optionId);
     },
     [conn, board],
