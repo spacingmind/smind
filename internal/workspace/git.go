@@ -44,7 +44,7 @@ func gitWorktreeAdd(repoPath, worktreePath, branch string) error {
 // gitWorktreeAddFrom is gitWorktreeAdd with an explicit start point (e.g. a
 // remote-tracking ref like "origin/develop") instead of branching off
 // repoPath's current HEAD -- used by createPR to fork its clean
-// smind/pr-<id> branch from the base branch rather than from whatever the
+// smind/pr-task-<id> branch from the base branch rather than from whatever the
 // workspace checkout happens to have checked out.
 func gitWorktreeAddFrom(repoPath, worktreePath, branch, startPoint string) error {
 	return runWorktreeGit(repoPath, "worktree", "add", worktreePath, "-b", branch, startPoint)
@@ -291,7 +291,8 @@ func snapshotIndex(worktreePath string) (env []string, cleanup func(), err error
 }
 
 // taskDiff returns the unified diff of everything changed in worktreePath
-// (checked out on branch) relative to the commit branch was created from:
+// relative to base, the commit the task's branch forked from (the task's
+// stored base_sha, ADR-0039 -- never recovered from the reflog):
 // any real commits made on branch since it forked off its base, plus
 // whatever is currently sitting uncommitted in the worktree (staged,
 // unstaged, and untracked new files) -- combined into a single diff, as if
@@ -309,8 +310,7 @@ func snapshotIndex(worktreePath string) (env []string, cleanup func(), err error
 // changes all present at once (see docs/plans/active/web-ui-diff-viewer.md's
 // Decisions section):
 //
-//  1. Find base, the commit branch's ref pointed at immediately after
-//     `git worktree add -b branch` created it (see taskDiffBase).
+//  1. Take base, the task's stored base_sha.
 //  2. Copy the worktree's real index into a throwaway temp file, then run
 //     `git add -A` against *that* copy (via GIT_INDEX_FILE) so it ends up
 //     holding a snapshot of the full current working-tree state --
@@ -322,11 +322,7 @@ func snapshotIndex(worktreePath string) (env []string, cleanup func(), err error
 //     unified diff: base's tree vs. the fully-snapshotted working tree,
 //     which is exactly "everything this task has changed" a reviewer would
 //     want to see, committed or not.
-func taskDiff(worktreePath, branch string) (string, error) {
-	base, err := taskDiffBase(worktreePath, branch)
-	if err != nil {
-		return "", fmt.Errorf("resolve base commit: %w", err)
-	}
+func taskDiff(worktreePath, base string) (string, error) {
 	env, cleanup, err := snapshotIndex(worktreePath)
 	if err != nil {
 		return "", fmt.Errorf("snapshot worktree index: %w", err)
@@ -340,30 +336,6 @@ func taskDiff(worktreePath, branch string) (string, error) {
 	return diff, nil
 }
 
-// taskDiffBase returns the full commit hash branch pointed at the moment it
-// was created, found via branch's own reflog rather than any named "base
-// branch" -- CreateTask never records which branch/commit a task's branch
-// was forked from, and `git worktree add -b branch` (no explicit start
-// point) always branches from repoPath's HEAD at that instant, so the
-// oldest entry in branch's reflog *is* that fork point, regardless of
-// whatever the source branch does afterward (further commits, deletion,
-// rename, etc.) or what the workspace repo's checkout currently has
-// checked out. Confirmed for real: `git worktree add -b <branch>` records
-// a "branch: Created from HEAD" reflog entry as branch's very first (i.e.
-// last-listed) entry.
-func taskDiffBase(worktreePath, branch string) (string, error) {
-	out, err := runGitOutput(worktreePath, "log", "-g", "--format=%H", branch)
-	if err != nil {
-		return "", fmt.Errorf("read reflog for branch %q: %w", branch, err)
-	}
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	last := lines[len(lines)-1]
-	if last == "" {
-		return "", fmt.Errorf("branch %q has no reflog entries; cannot determine its base commit", branch)
-	}
-	return last, nil
-}
-
 // taskChangedFiles returns one entry per path in the same base→worktree
 // snapshot diff taskDiff computes (`git diff --name-status` against the
 // snapshot index -- identical computation, names-and-status instead of
@@ -372,11 +344,7 @@ func taskDiffBase(worktreePath, branch string) (string, error) {
 // staged. Status maps git's letter codes onto "added" (A), "modified"
 // (M), "deleted" (D); any other code (e.g. R for renames) is carried
 // through lowercased rather than collapsed, so callers never see a lie.
-func taskChangedFiles(worktreePath, branch string) ([]TaskFile, error) {
-	base, err := taskDiffBase(worktreePath, branch)
-	if err != nil {
-		return nil, fmt.Errorf("resolve base commit: %w", err)
-	}
+func taskChangedFiles(worktreePath, base string) ([]TaskFile, error) {
 	env, cleanup, err := snapshotIndex(worktreePath)
 	if err != nil {
 		return nil, fmt.Errorf("snapshot worktree index: %w", err)
@@ -423,11 +391,7 @@ func taskChangedFiles(worktreePath, branch string) ([]TaskFile, error) {
 // base→worktree snapshot diff taskDiff computes: the identical invocation
 // with a pathspec appended, so a per-file view is always a consistent
 // slice of the whole-task diff. A path with no changes yields "".
-func taskFileDiff(worktreePath, branch, path string) (string, error) {
-	base, err := taskDiffBase(worktreePath, branch)
-	if err != nil {
-		return "", fmt.Errorf("resolve base commit: %w", err)
-	}
+func taskFileDiff(worktreePath, base, path string) (string, error) {
 	env, cleanup, err := snapshotIndex(worktreePath)
 	if err != nil {
 		return "", fmt.Errorf("snapshot worktree index: %w", err)
@@ -532,11 +496,7 @@ var shortstatRe = regexp.MustCompile(`(\d+) files? changed(?:, (\d+) insertions?
 //
 // A task with no changes yields three zeros and no error; git prints
 // nothing at all in that case, which the regexp simply doesn't match.
-func taskDiffStat(worktreePath, branch string) (files, insertions, deletions int, err error) {
-	base, err := taskDiffBase(worktreePath, branch)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("resolve base commit: %w", err)
-	}
+func taskDiffStat(worktreePath, base string) (files, insertions, deletions int, err error) {
 	env, cleanup, err := snapshotIndex(worktreePath)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("snapshot worktree index: %w", err)
