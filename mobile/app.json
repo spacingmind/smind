@@ -29,6 +29,7 @@
     },
     "plugins": [
       "expo-secure-store",
+      "expo-notifications",
       "expo-status-bar",
       [
         "expo-router",
