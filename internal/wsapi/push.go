@@ -62,6 +62,9 @@ func (a *API) SetPush(o PushOptions) {
 			}
 		})
 	}
+	if o.Enabled && o.Registry != nil {
+		a.pushRegistered = func(id string) bool { _, ok := o.Registry.Get(id); return ok }
+	}
 	a.hs["push.register"] = pushGuard(o, func(rc *requestContext, raw json.RawMessage) (any, error) {
 		return pushRegister(o, rc, raw)
 	})

@@ -13,4 +13,7 @@ func RegistryPath(dir string) string { return filepath.Join(dir, RegistryFileNam
 type Info struct {
 	Device
 	Connected bool `json:"connected"`
+	// Push is whether the device has a push registration (ADR-0040); nil =
+	// unknown (no daemon, or push not wired), so the field is omitted.
+	Push *bool `json:"push,omitempty"`
 }
