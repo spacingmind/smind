@@ -175,6 +175,9 @@ func cmdServe(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// ADR-0039 §4: the git state loop idles until a client subscribes to task.git.
+	stopGitState := srv.API().StartGitState(ctx)
+
 	stopLearning := wireLearning(ctx, learningWiring{
 		Cfg: cfg, DB: db, API: srv.API(), WM: wm, Runner: runner, Reg: srv.API().Runs,
 		Home: config.Dir(), Secrets: []string{token},
@@ -201,6 +204,7 @@ func cmdServe(args []string) int {
 	}
 
 	stopLearning() // before the run registry closes: in-flight jobs end failed, watermarks untouched
+	stopGitState()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {

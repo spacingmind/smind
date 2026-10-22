@@ -47,6 +47,10 @@ const (
 	TopicMcpServerCreated = "mcpServer.created"
 	TopicMcpServerUpdated = "mcpServer.updated"
 	TopicMcpServerDeleted = "mcpServer.deleted"
+	// TopicTaskGit carries {taskId, git} when a task's git state changed
+	// (ADR-0039 §3). Subscribing is also the interest signal that turns on the
+	// daemon's periodic git work.
+	TopicTaskGit = "task.git"
 )
 
 // The learning topics (TopicLearnedSkillProposed/Changed, TopicLearningJob)
@@ -80,6 +84,7 @@ var knownTopics = map[string]bool{
 	TopicMcpServerCreated:     true,
 	TopicMcpServerUpdated:     true,
 	TopicMcpServerDeleted:     true,
+	TopicTaskGit:              true,
 	TopicLearnedSkillProposed: true,
 	TopicLearnedSkillChanged:  true,
 	TopicLearningJob:          true,
@@ -467,6 +472,25 @@ func (b *eventBus) Publish(e Event) {
 	for _, s := range subs {
 		s.offer(e)
 	}
+}
+
+// HasSubscribers reports whether any registered connection is subscribed to topic.
+func (b *eventBus) HasSubscribers(topic string) bool {
+	b.mu.Lock()
+	subs := make([]*subscriber, 0, len(b.subs))
+	for s := range b.subs {
+		subs = append(subs, s)
+	}
+	b.mu.Unlock()
+	for _, s := range subs {
+		s.mu.Lock()
+		on := !s.closed && s.topics[topic]
+		s.mu.Unlock()
+		if on {
+			return true
+		}
+	}
+	return false
 }
 
 // subscribeResult is the result of events.subscribe and

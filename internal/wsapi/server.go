@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/ghctx"
+	"github.com/spacingmind/smind/internal/gitstate"
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
@@ -70,9 +71,11 @@ type API struct {
 	Runs      *runs.Registry
 	Terminals *terminal.Registry
 
-	hs   map[string]handlerFunc
-	bus  *eventBus
-	info *DaemonInfo
+	hs    map[string]handlerFunc
+	bus   *eventBus
+	git   *gitstate.Service
+	focus *focusRegistry
+	info  *DaemonInfo
 
 	// github backs forge.search (SetGithubClient).
 	github *githubHolder
@@ -86,12 +89,21 @@ type API struct {
 	authorize func(*http.Request) bool
 }
 
+// StartGitState runs the git state service's loop (ADR-0039 §4) until ctx is
+// done or the returned stop func is called. The loop does nothing while no
+// connection is subscribed to task.git.
+func (a *API) StartGitState(ctx context.Context) (stop func()) {
+	a.git.Start(ctx)
+	return a.git.Stop
+}
+
 // Close stops every still-running agent run and terminal session the API
 // owns and waits for their goroutines to finish (runs.Registry.CloseAll,
 // terminal.Registry.CloseAll). Call it after the HTTP server stops
 // accepting connections and before the store closes, so no background
 // writer is left touching the database or a worktree directory.
 func (a *API) Close() {
+	a.git.Stop()
 	a.Runs.CloseAll()
 	a.Terminals.CloseAll()
 }
@@ -127,6 +139,7 @@ func (a *API) serve(ctx context.Context, tr Transport, local bool, maxMessage in
 	c.runScoped = false // no run-scoped identity exists yet (ADR-0027)
 	c.eventsSub = newSubscriber()
 	c.eventsBus = a.bus
+	c.focus = a.focus
 	c.serve(ctx)
 }
 
@@ -138,6 +151,10 @@ func (a *API) serve(ctx context.Context, tr Transport, local bool, maxMessage in
 // comment for why a Run or terminal session's lifetime must be independent
 // of any one connection), plus the http.Handler itself.
 func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, db *store.Store, token string) (*API, error) {
+	return newAPI(wm, acctReg, runner, db, token, gitOptions{})
+}
+
+func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, db *store.Store, token string, gopts gitOptions) (*API, error) {
 	reg, err := runs.New(db)
 	if err != nil {
 		return nil, fmt.Errorf("wsapi: new: %w", err)
@@ -149,8 +166,10 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 	profReg := profiles.New(db)
 	mcpReg := mcpservers.New(db)
 	bus := newEventBus()
-	wm.SetNotifier(busWorkspaceNotifier{bus: bus, db: db})
-	reg.SetNotifier(busRunNotifier{bus: bus, db: db})
+	focus := newFocusRegistry()
+	gitSvc := newGitService(wm, bus, focus, gopts)
+	wm.SetNotifier(busWorkspaceNotifier{bus: bus, db: db, git: gitSvc})
+	reg.SetNotifier(busRunNotifier{bus: bus, db: db, git: gitSvc})
 	profReg.SetNotifier(busProfileNotifier{bus: bus})
 	mcpReg.SetNotifier(busMcpServerNotifier{bus: bus})
 
@@ -168,6 +187,12 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
 	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, mcpReg, coord, db)
 	info := newDaemonInfo(time.Now())
+	for method, h := range gitHandlers(gitSvc, focus) {
+		hs[method] = h
+	}
+	for _, method := range []string{"task.commit", "task.stage", "task.setBase"} {
+		hs[method] = invalidateAfter(hs[method], gitSvc)
+	}
 	hs["daemon.info"] = handleDaemonInfo(info, reg)
 	hs["run.attachment"] = handleRunAttachment(reg)
 	gh := &githubHolder{c: ghctx.New()}
@@ -177,7 +202,7 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 		hs[method] = h
 	}
 	hs["workspace.delete"] = learning.beforeWorkspaceDelete(hs["workspace.delete"])
-	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus, info: info, learning: learning, github: gh}
+	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus, info: info, learning: learning, github: gh, git: gitSvc, focus: focus}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}
@@ -206,6 +231,7 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 type busWorkspaceNotifier struct {
 	bus *eventBus
 	db  *store.Store
+	git *gitstate.Service
 }
 
 // isSystemTask reports whether taskID is a hidden system task (ADR-0026);
@@ -257,6 +283,7 @@ func (b busWorkspaceNotifier) NotifyTaskUpdated(t store.Task) {
 }
 
 func (b busWorkspaceNotifier) NotifyTaskArchived(t store.Task) {
+	b.git.Drop(t.ID)
 	if t.Kind == store.TaskKindSystem {
 		return
 	}
@@ -264,6 +291,7 @@ func (b busWorkspaceNotifier) NotifyTaskArchived(t store.Task) {
 }
 
 func (b busWorkspaceNotifier) NotifyTaskDeleted(id, workspaceID int64, spaceID *int64) {
+	b.git.Drop(id)
 	if isSystemTask(b.db, id) {
 		return
 	}
@@ -358,11 +386,15 @@ func (b busMcpServerNotifier) NotifyMcpServerDeleted(id int64) {
 type busRunNotifier struct {
 	bus *eventBus
 	db  *store.Store
+	git *gitstate.Service
 }
 
 func (b busRunNotifier) NotifyRunStatus(s runs.RunStatus) {
 	if s.Purpose != "" {
 		return
+	}
+	if s.Status != runs.StatusRunning {
+		b.git.Invalidate(s.TaskID) // the run ended: its commits/edits may have changed the branch
 	}
 	b.bus.Publish(Event{Topic: TopicRunStatus, Payload: runStatusPayload{
 		RunID: s.ID, TaskID: s.TaskID, ChatID: s.ChatID, Status: string(s.Status),

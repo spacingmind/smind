@@ -170,8 +170,11 @@ func (s *Service) Start(ctx context.Context) {
 	})
 }
 
-// Stop cancels in-flight git, stops timers and waits for every goroutine.
+// Stop (like Drop and Invalidate) is a no-op on a nil Service. It cancels in-flight git, stops timers and waits for every goroutine.
 func (s *Service) Stop() {
+	if s == nil {
+		return
+	}
 	s.stopOnce.Do(func() {
 		s.mu.Lock()
 		s.closed = true
@@ -239,6 +242,9 @@ func (s *Service) List(workspaceID int64) ([]TaskGit, error) {
 
 // Drop forgets a task's snapshot (archive/delete).
 func (s *Service) Drop(taskID int64) {
+	if s == nil {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.dropLocked(taskID)
@@ -256,6 +262,9 @@ func (s *Service) dropLocked(taskID int64) {
 // one task coalesce into at most one trailing recompute. A task nobody has
 // read and nobody watches is not computed.
 func (s *Service) Invalidate(taskID int64) {
+	if s == nil {
+		return
+	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
