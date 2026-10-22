@@ -644,6 +644,17 @@ func cmdTaskSend(args []string) int {
 	if provider == string(taskrunner.ProviderClaudeNative) && model == "" {
 		fmt.Fprint(os.Stderr, unpinnedModelNote(provider, model, providerDefaultModel(ctx, client, provider)))
 	}
+	// Right after `task new` the workspace setup script may still be
+	// running, which rejects a plain run.start. With no explicit
+	// --when-busy, ask for queue ourselves (ADR-0024 §2); a task.get
+	// failure is ignored and the send proceeds as before.
+	if whenBusy == "" {
+		var t store.Task
+		if err := client.Call(ctx, "task.get", map[string]any{"id": taskID}, &t); err == nil && t.SetupStatus == "running" {
+			params["whenBusy"] = "queue"
+			fmt.Fprintln(os.Stderr, "note: the task's setup script is still running; queued, it starts when setup finishes (override with --when-busy reject)")
+		}
+	}
 	var start struct {
 		RunID       string `json:"runId"`
 		Queued      bool   `json:"queued"`
