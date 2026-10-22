@@ -57,6 +57,7 @@ class FakeTerminalHandle implements TerminalHandle {
   opened: HTMLElement | null = null;
   disposed = false;
   fitCalls = 0;
+  focusCalls = 0;
   writes: (string | Uint8Array)[] = [];
   /** Unset by default (like a handle that can't report its size); a test assigns it to exercise the send-size-on-attach path. */
   size?: () => { cols: number; rows: number };
@@ -64,6 +65,10 @@ class FakeTerminalHandle implements TerminalHandle {
   private resizeCallback: ((size: { cols: number; rows: number }) => void) | null = null;
   private selection = "";
   private selectionCallback: (() => void) | null = null;
+
+  focus(): void {
+    this.focusCalls++;
+  }
 
   getSelection(): string {
     return this.selection;
@@ -176,6 +181,31 @@ describe("TerminalPane", () => {
     const attachCall = client.nth("terminal.attach", 0);
     expect(attachCall.params).toEqual({ terminalId: "term-1" });
     expect(screen.getByTestId("terminal-status")).toHaveTextContent("term-1");
+  });
+
+  it("focuses the terminal when its tab is in front, and again when it is re-activated; not while behind", async () => {
+    const client = new FakeWsClient();
+    const fake = new FakeTerminalHandle();
+    const { rerender } = render(<TerminalPane client={client} task={TASK_A} active={false} createTerminal={() => fake} />);
+    await flush();
+    expect(fake.focusCalls).toBe(0);
+
+    rerender(<TerminalPane client={client} task={TASK_A} active createTerminal={() => fake} />);
+    await flush();
+    expect(fake.focusCalls).toBe(1);
+
+    rerender(<TerminalPane client={client} task={TASK_A} active={false} createTerminal={() => fake} />);
+    rerender(<TerminalPane client={client} task={TASK_A} active createTerminal={() => fake} />);
+    await flush();
+    expect(fake.focusCalls).toBe(2);
+  });
+
+  it("focuses a terminal that mounts already in front", async () => {
+    const client = new FakeWsClient();
+    const fake = new FakeTerminalHandle();
+    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
+    await flush();
+    expect(fake.focusCalls).toBe(1);
   });
 
   it("writes incoming base64-encoded 'data' events into the terminal handle, decoded to bytes", async () => {

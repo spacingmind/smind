@@ -58,6 +58,8 @@ export interface TerminalHandle {
   fit(): void;
   /** The terminal's current size in cells, sent once on attach -- the mount-time fit() fires onResize before any session id exists, so that resize never reaches the PTY. Optional for the same reason setTheme is. */
   size?(): { cols: number; rows: number };
+  /** Gives the terminal keyboard focus, so a freshly opened or re-activated terminal takes typing without a click first. Optional for the same reason setTheme is. */
+  focus?(): void;
   /** Re-applies the terminal's chrome colors (background/foreground/cursor/selection) -- optional so FakeTerminalHandle (this file's own test suite) doesn't need to implement it; xterm.js's own `options.theme` setter triggers a redraw. */
   setTheme?(theme: ITheme): void;
   /** The currently selected text, for the Copy affordance (Item 20). Optional for the same reason setTheme is. */
@@ -82,8 +84,22 @@ export interface TerminalFindHandle {
   onDidChangeResults(callback: (result: TerminalFindResult) => void): { dispose(): void };
 }
 
+/**
+ * xterm's own default is `courier-new, courier, monospace` at 15px, which renders as a bold serif
+ * Courier in a UI that is otherwise Geist. The platform's UI monospace stack at 13px (Tailwind's
+ * `font-mono` stack, i.e. SF Mono / Menlo on macOS) reads like every other terminal.
+ */
+const TERMINAL_FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+const TERMINAL_FONT_SIZE = 13;
+
 function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHandle {
-  const term = new Terminal({ convertEol: true, cursorBlink: true, scrollback });
+  const term = new Terminal({
+    convertEol: true,
+    cursorBlink: true,
+    scrollback,
+    fontFamily: TERMINAL_FONT_FAMILY,
+    fontSize: TERMINAL_FONT_SIZE,
+  });
   const fit = new FitAddon();
   term.loadAddon(fit);
   const search = new SearchAddon();
@@ -94,6 +110,7 @@ function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHan
     onResize: (callback) => term.onResize(callback),
     write: (data) => term.write(data),
     fit: () => fit.fit(),
+    focus: () => term.focus(),
     size: () => ({ cols: term.cols, rows: term.rows }),
     setTheme: (theme) => {
       term.options.theme = theme;
@@ -258,6 +275,12 @@ export function TerminalPane({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [createTerminal]);
+
+  // Opening a terminal tab (or coming back to one) puts the keyboard in it: focus used to stay on the
+  // button that opened the tab, so typing went nowhere until the user clicked into the terminal.
+  useEffect(() => {
+    if (active) termRef.current?.focus?.();
+  }, [active]);
 
   // Re-applies the terminal's chrome whenever the app's resolved theme
   // changes (a live toggle, or the OS query flipping while on "system") --

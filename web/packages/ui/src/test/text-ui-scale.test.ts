@@ -33,8 +33,11 @@ const INLINE_FONT_SIZE = /font-size\s*:|fontSize\s*[:=]/;
  * `code-mirror-editor.tsx`'s one `text-sm` sets the CodeMirror container's
  * ambient font-size, which `.cm-content` (the code itself) inherits -- the
  * code-content exception, not app-UI chrome.
+ *
+ * `terminal-pane.tsx` passes xterm's `fontSize` option (the terminal
+ * content's own size, named above); its chrome still uses `text-ui-*`.
  */
-const EXEMPT_FILES = new Set(["components/code-mirror-editor.tsx"]);
+const EXEMPT_FILES = new Set(["components/code-mirror-editor.tsx", "components/terminal-pane.tsx"]);
 
 function listFiles(dir: string): string[] {
   const out: string[] = [];
