@@ -11,8 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/spacingmind/smind/internal/forge"
 )
 
 // Runner executes a gh command with argv (never a shell) in dir, returning
@@ -36,7 +40,9 @@ func defaultRunner(ctx context.Context, dir string, args ...string) (string, err
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("gh %v: %w: %s", args, err, clip(stderr.String()))
+		// No argv in the error: it can carry a user's search text, and
+		// stderr is scrubbed of tokens before it is clipped and wrapped.
+		return "", fmt.Errorf("gh: %w: %s", err, clip(forge.Scrub(stderr.String())))
 	}
 	return stdout.String(), nil
 }
@@ -94,47 +100,67 @@ func Available() bool {
 	return err == nil
 }
 
-// Error codes for the wire (wsapi picks Code up via RPCCode).
-const (
-	CodeUnavailable = "forge_unavailable"
-	CodeNotFound    = "forge_not_found"
+// aliases for ADR-0038 PR 5b; delete in the poller PR.
+type (
+	Snapshot     = forge.Snapshot
+	Item         = forge.Item
+	SearchResult = forge.SearchResult
 )
 
-// Error is ghctx's typed error: a machine-readable Code plus a
-// human-presentable Message. Code is CodeUnavailable (gh missing /
-// logged out / no GitHub remote -- environmental, retrying won't help)
-// or CodeNotFound (no such PR/issue).
-type Error struct {
-	Code    string
-	Message string
-}
+var _ forge.Provider = (*Client)(nil)
 
-func (e *Error) Error() string { return e.Message }
+// Name is the forge name this client serves.
+func (c *Client) Name() string { return "github" }
 
-func (e *Error) RPCCode() string { return e.Code }
+// rateLimitFallback is how long a rate-limited error asks callers to wait
+// when gh gives no retry hint.
+const rateLimitFallback = 10 * time.Minute
 
-// mapRunError classifies a runner error into a typed *Error, or returns a
-// plain wrapped error carrying gh's (clipped) stderr for anything the
-// classification doesn't recognize. Matching is on lowercase text because
-// gh's stderr wording varies across versions and locales.
-func mapRunError(err error) error {
+var (
+	retryAfterRe = regexp.MustCompile(`(?i)retry[- ]after:?\s*(\d+)`)
+	resetRe      = regexp.MustCompile(`(?i)reset[^0-9]{0,40}(\d{10})\b`)
+)
+
+// mapRunError classifies a runner error into a typed *forge.Error. Matching
+// is on lowercase text because gh's stderr wording varies across versions
+// and locales. Detail carries the scrubbed, clipped error text (never argv:
+// the runner doesn't put argv in its errors).
+func (c *Client) mapRunError(ctx context.Context, err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, exec.ErrNotFound) {
-		return &Error{Code: CodeUnavailable, Message: "gh is not installed on the daemon host"}
-	}
-	low := strings.ToLower(err.Error())
+	text := err.Error()
+	low := strings.ToLower(text)
+	var code string
 	switch {
-	case strings.Contains(low, "executable file not found"):
-		return &Error{Code: CodeUnavailable, Message: "gh is not installed on the daemon host"}
-	case strings.Contains(low, "gh auth login") || strings.Contains(low, "not logged in") || strings.Contains(low, "authentication"):
-		return &Error{Code: CodeUnavailable, Message: "gh is not logged in on the daemon host (run gh auth login)"}
-	case strings.Contains(low, "no git remotes") || strings.Contains(low, "none of the git remotes") || strings.Contains(low, "could not determine base repo") || strings.Contains(low, "not a git repository"):
-		return &Error{Code: CodeUnavailable, Message: "this workspace has no GitHub remote"}
-	case strings.Contains(low, "could not resolve to") || strings.Contains(low, "not found") || strings.Contains(low, "no pull requests match"):
-		return &Error{Code: CodeNotFound, Message: "pull request or issue not found"}
+	case errors.Is(err, context.DeadlineExceeded) || (ctx != nil && ctx.Err() != nil):
+		code = forge.CodeTimeout
+	case errors.Is(err, exec.ErrNotFound) || strings.Contains(low, "executable file not found"):
+		code = forge.CodeCLIMissing
+	case strings.Contains(low, "rate limit") || strings.Contains(low, "http 429") ||
+		(strings.Contains(low, "http 403") && (strings.Contains(low, "secondary") || strings.Contains(low, "rate"))):
+		code = forge.CodeRateLimited
+	case strings.Contains(low, "gh auth login") || strings.Contains(low, "not logged in") || strings.Contains(low, "authentication") || strings.Contains(low, "http 401"):
+		code = forge.CodeUnauthenticated
+	case strings.Contains(low, "no git remotes") || strings.Contains(low, "none of the git remotes") || strings.Contains(low, "could not determine base repo") || strings.Contains(low, "not a git repository") || strings.Contains(low, "unsupported host"):
+		code = forge.CodeNoRemote
+	case strings.Contains(low, "could not resolve to") || strings.Contains(low, "not found") || strings.Contains(low, "http 404") || strings.Contains(low, "no pull requests match"):
+		code = forge.CodeNotFound
 	default:
-		return fmt.Errorf("gh: %w", err)
+		code = forge.CodeError
 	}
+	fe := forge.NewError(code, text)
+	if code == forge.CodeRateLimited {
+		fe.RetryAt = c.ttlNow().Add(rateLimitFallback)
+		if m := retryAfterRe.FindStringSubmatch(text); m != nil {
+			if n, perr := strconv.Atoi(m[1]); perr == nil && n > 0 {
+				fe.RetryAt = c.ttlNow().Add(time.Duration(n) * time.Second)
+			}
+		} else if m := resetRe.FindStringSubmatch(text); m != nil {
+			if n, perr := strconv.ParseInt(m[1], 10, 64); perr == nil {
+				fe.RetryAt = time.Unix(n, 0)
+			}
+		}
+	}
+	return fe
 }
