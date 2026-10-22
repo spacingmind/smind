@@ -140,6 +140,8 @@ Evidence so far (automated; each row names the test or check). Real-device items
 
 ## Native verification runbook (Human, PR 7)
 
+Builds needed: a **daemon** built from `develop` after #499 and #520 are merged (or the release that contains them: older daemons answer `push.*` with method-not-found and the app shows "Update the daemon"), and a **phone app** built from `develop` after #517 is merged. Both must be run from the same machine/network setup used for the relay.
+
 Prerequisites (H3, done by the Human, never by an agent): a Firebase project with an Android app `com.spacingmind.smind`; its `google-services.json`; the FCM V1 service-account key uploaded to the EAS project (Expo docs: "Add Android FCM V1 credentials"); an EAS environment variable of type file named `GOOGLE_SERVICES_JSON` holding `google-services.json` (or, for a local build, `GOOGLE_SERVICES_JSON=/path/google-services.json npx expo run:android`). A daemon reachable through a relay with a paired, approved phone (docs/homelab.md Path B), a cheap model for the runs (Haiku), and `adb` for the Doze and force-stop steps.
 
 Build and install: `cd mobile && eas build --profile development --platform android`, install the APK, then `npx expo start --dev-client` and open the app (or the local `expo run:android` build). Expo Go cannot be used.
