@@ -203,7 +203,7 @@ Taken from ADR-0038 (Accepted 2026-10-22).
   string-only content, `Delivery.AddDirs`); ADR-0038 and this plan written; PR 1 opened for review. Nothing else started.
 - 2026-10-22: ADR accepted (O1 b, O7 yes, O2–O6 as recommended). The `CI` workflow is intentionally disabled, so nothing merges until the Human re-enables
   it; every PR carries its local check results instead, and PRs that need an earlier PR's code wait rather than stack. Independent starts: PR 2, the SDK PR (3s),
-  and the code-independent halves of 4 (`file.search`, `files.Resolve`) and 5 (`gh` fetch/search library).
+  and the web composer (6a, 6b) and the `gh` fetch/search library (5).
 
 ## Validation
 
