@@ -520,6 +520,39 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
     expect(screen.queryByTestId("diff-container-file.txt")).not.toBeInTheDocument();
   });
 
+  it("shows one header per file: the by-file row's, with diff2html's own header hidden", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+    // The row header (stage box, name, viewed) is the one header; diff2html's second one (name, CHANGED, Viewed) is hidden.
+    const container = screen.getByTestId("diff-container-file.txt");
+    expect(container).toHaveAttribute("data-file-header", "hidden");
+    expect(container.className).toContain("[&_.d2h-file-header]:hidden");
+    expect(screen.getByTestId("viewed-file.txt")).toBeInTheDocument();
+
+    // The whole-diff view has no row headers, so it keeps diff2html's.
+    client.nth("task.diff", 0).resolve({ diff: WHOLE_DIFF });
+    await flush();
+    fireEvent.click(screen.getByTestId("diff-view-toggle-whole"));
+    await flush();
+    expect(screen.getByTestId("whole-diff-container")).toHaveAttribute("data-file-header", "shown");
+  });
+
+  it("the commit bar belongs to the by-file view: the whole-diff view has no stage boxes beside it", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+    client.nth("task.diff", 0).resolve({ diff: WHOLE_DIFF });
+    await flush();
+    expect(screen.getByTestId("commit-bar")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("diff-view-toggle-whole"));
+    await flush();
+    expect(screen.queryByTestId("commit-bar")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("diff-view-toggle-by-file"));
+    await flush();
+    expect(screen.getByTestId("commit-bar")).toBeInTheDocument();
+  });
+
   it("switches rendering mode with the side-by-side / unified toggle, and persists the choice", async () => {
     const client = new FakeWsClient();
     const { unmount } = render(<DiffViewerPane client={client} task={TASK} />);
