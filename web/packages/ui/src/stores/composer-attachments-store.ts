@@ -36,7 +36,7 @@ export function isDraftFile(item: DraftAttachment): item is DraftFile {
   return item.kind === "image" || item.kind === "file";
 }
 
-/** What a pill and an aria-label call the item: the file name, or `#123 title` for a PR/issue. */
+/** What a pill and an aria-label call the item: the file name, or number plus title for a PR/issue. */
 export function draftLabel(item: DraftAttachment): string {
   return isDraftFile(item) ? item.name : `#${item.number} ${item.title}`;
 }
