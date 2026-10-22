@@ -408,3 +408,49 @@ func TestValidate_FileRefLineRange(t *testing.T) {
 		}
 	}
 }
+
+// TestValidate_FullDecodeCatchesCorruptBodies: a valid header over a truncated
+// or garbled body is rejected for png/jpeg/gif, within the pixel budget.
+func TestValidate_FullDecodeCatchesCorruptBodies(t *testing.T) {
+	cases := []struct {
+		name, mime string
+		b          []byte
+	}{
+		{"png", "image/png", pngBytes(t, 64, 64)},
+		{"jpeg", "image/jpeg", jpegBytes(t, 64, 64)},
+		{"gif", "image/gif", gifBytes(t, 64, 64)},
+	}
+	for _, c := range cases {
+		t.Run(c.name+" intact", func(t *testing.T) {
+			if _, err := run(imgReq(c.b, c.mime)); err != nil {
+				t.Fatalf("intact image rejected: %v", err)
+			}
+		})
+		t.Run(c.name+" truncated", func(t *testing.T) {
+			_, err := run(imgReq(c.b[:len(c.b)*2/3], c.mime))
+			wantCode(t, err, CodeInvalid)
+		})
+	}
+	// A png whose pixel data is garbage after a good header and IHDR.
+	p := pngBytes(t, 64, 64)
+	for i := 40; i < len(p)-12; i++ {
+		p[i] ^= 0xff
+	}
+	_, err := run(imgReq(p, "image/png"))
+	wantCode(t, err, CodeInvalid)
+}
+
+// TestValidate_FullDecodeSkippedOverPixelBudget: over MaxDecodePixels only the
+// header is checked, so a daemon never allocates a huge canvas for a request.
+func TestValidate_FullDecodeSkippedOverPixelBudget(t *testing.T) {
+	lim := DefaultLimits()
+	lim.MaxDecodePixels = 100 // 64x64 is over it
+	b := pngBytes(t, 64, 64)
+	trunc := b[:len(b)*2/3]
+	if _, err := validate(context.Background(), []Request{imgReq(trunc, "image/png")}, lim, Resolvers{}); err != nil {
+		t.Fatalf("over the pixel budget the header alone should pass, got %v", err)
+	}
+	lim.MaxDecodePixels = 64 * 64
+	_, err := validate(context.Background(), []Request{imgReq(trunc, "image/png")}, lim, Resolvers{})
+	wantCode(t, err, CodeInvalid)
+}
