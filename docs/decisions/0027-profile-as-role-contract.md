@@ -17,6 +17,10 @@ run status: `runs.DispositionFor(status, stopReason)`, additive on `run.list`, `
 `task_logs`/`run_list`, `smind task runs` and the web run footer (orchestration-parity plan, decision D13). Everything else in this ADR
 (the rest of the dispositions, `handoff_submit`/`handoff_review`, tiers, sizing) remains Proposed as above.
 
+**Amended by [ADR-0041](0041-in-smind-orchestration.md) (2026-10-23, Proposed):** the seat slice of this design (contract columns `orchestrationTools`, `instructions`/`skills`,
+`childPolicy`; daemon-side profile; a daemon-built `smind` MCP entry with run identity; admission) is pulled forward in reduced form, without the run token and method allowlist. Limits
+(R5), `handoff_submit`/`handoff_review` (R6), sizing and the brief (R8) stay parked behind the trigger below. This ADR stays Proposed.
+
 Spec: [`docs/plans/active/orchestration-roles.md`](../plans/active/orchestration-roles.md).
 
 ## Context
