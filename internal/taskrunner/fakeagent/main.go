@@ -480,6 +480,12 @@ func runPromptScript(promptMsg message, cwd string) {
 		sessionUpdate("[error] 429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18")
 		writeMessage(message{JSONRPC: "2.0", ID: promptMsg.ID, Error: &rpcError{Code: -32603, Message: "Internal error"}})
 		return
+	case "quota-error-and-data":
+		// What the real GLM does: the cause is both the "[error]" chunk and
+		// the JSON-RPC error's data.
+		sessionUpdate("[error] 429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18")
+		writeMessage(message{JSONRPC: "2.0", ID: promptMsg.ID, Error: &rpcError{Code: -32603, Message: "Internal error", Data: map[string]any{"details": "429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18"}}})
+		return
 	case "plain-error":
 		writeMessage(message{JSONRPC: "2.0", ID: promptMsg.ID, Error: &rpcError{Code: -32603, Message: "Internal error"}})
 		return

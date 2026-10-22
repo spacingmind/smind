@@ -283,6 +283,11 @@ func renderWaitSummary(row runSummaryRow, finalText string, now time.Time) strin
 		}
 	}
 
+	// A failed run's last message is often the agent's own "[error] ..." line,
+	// which the error line below already carries (the run's Err leads with it).
+	if row.Status == "error" && strings.HasPrefix(strings.TrimSpace(finalText), "[error]") {
+		finalText = ""
+	}
 	out := fmt.Sprintf("run %s %s%s after %s; model %s; %s; %s.", row.ID, outcome, stop, dur, model, usage, git)
 	if text := trimFinalText(finalText); text != "" {
 		out += "\n\n" + text

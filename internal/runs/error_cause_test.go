@@ -82,3 +82,28 @@ func TestFinish_RPCErrorDataReachesTheRunError(t *testing.T) {
 		t.Fatalf("run error = %q, want the JSON-RPC error's data in the message", got)
 	}
 }
+
+// TestFinish_CauseInRPCDataIsNotRepeated: GLM puts the same cause in the
+// "[error]" chunk and in the JSON-RPC error's data; the run's error says it
+// once, up front, and keeps the rest of the original for context.
+func TestFinish_CauseInRPCDataIsNotRepeated(t *testing.T) {
+	t.Parallel()
+	got := runToError(t, "quota-error-and-data")
+	const cause = "429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18"
+	if !strings.HasPrefix(got, cause+" (") || strings.Count(got, cause) != 1 || !strings.Contains(got, "rpc error -32603: Internal error") {
+		t.Fatalf("run error = %q, want the cause once at the front and the original (without a second copy) in parentheses", got)
+	}
+}
+
+func TestJoinErrorCause(t *testing.T) {
+	t.Parallel()
+	if got := joinErrorCause("short", "xx short yy"); got != "short (xx short yy)" {
+		t.Errorf("a short cause is left in the original: %q", got)
+	}
+	if got := joinErrorCause("a long enough cause", "boom: a long enough cause!"); got != "a long enough cause (boom: …!)" {
+		t.Errorf("a long cause is not repeated: %q", got)
+	}
+	if got := joinErrorCause("cause that is not in it", "plain"); got != "cause that is not in it (plain)" {
+		t.Errorf("no match: %q", got)
+	}
+}

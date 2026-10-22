@@ -1289,7 +1289,7 @@ func (reg *Registry) finish(r *run, err error) {
 		if cause != "" {
 			// The agent said why in its own words before the generic error
 			// ("[error] 429 Usage limit reached ... resets 17:35"): lead with it.
-			errMsg = cause + " (" + errMsg + ")"
+			errMsg = joinErrorCause(cause, errMsg)
 		}
 		if r.isolation != nil || r.probe != nil {
 			errMsg = clipErrMsg(errMsg)
@@ -1726,6 +1726,21 @@ func (reg *Registry) ActiveRunForTask(taskID int64) (runID string, queued bool, 
 const maxIsolatedErrMsg = 500
 
 // clipErrMsg truncates s to maxIsolatedErrMsg bytes on a rune boundary.
+// minDedupeCause is the shortest cause worth removing from the original error
+// text: a few characters could match inside unrelated words.
+const minDedupeCause = 12
+
+// joinErrorCause is "<cause> (<original>)", the cause leading. Some agents
+// (GLM) also put the same text in the JSON-RPC error's data, so the original
+// already contains it; that second copy becomes an ellipsis instead of
+// repeating the sentence.
+func joinErrorCause(cause, orig string) string {
+	if len([]rune(cause)) >= minDedupeCause {
+		orig = strings.ReplaceAll(orig, cause, "…")
+	}
+	return cause + " (" + orig + ")"
+}
+
 // maxAgentErrorCause bounds the cause text promoted into a run's error.
 const maxAgentErrorCause = 300
 
