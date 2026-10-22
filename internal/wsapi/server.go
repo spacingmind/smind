@@ -178,7 +178,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	bus := newEventBus()
 	focus := newFocusRegistry()
 	gh := &githubHolder{c: ghctx.New()}
-	gitSvc := newGitService(wm, db, bus, focus, gh, gopts)
+	gitSvc := newGitService(wm, db, bus, focus, gh, reg, gopts)
 	// task.create with a prNumber asks the same provider, looked up per
 	// call, whether the PR comes from a fork (ADR-0039 section 7).
 	wm.SetForge(func() forge.Provider {
@@ -207,6 +207,9 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, mcpReg, coord, db, gh)
 	info := newDaemonInfo(time.Now())
 	for method, h := range gitHandlers(gitSvc, focus) {
+		hs[method] = h
+	}
+	for method, h := range prHandlers(wm, gitSvc, gh) {
 		hs[method] = h
 	}
 	for _, method := range []string{"task.commit", "task.stage", "task.setBase"} {
@@ -426,9 +429,9 @@ func (b busRunNotifier) NotifyRunStatus(s runs.RunStatus) {
 	if s.Purpose != "" {
 		return
 	}
-	if s.Status != runs.StatusRunning {
-		b.git.Invalidate(s.TaskID) // the run ended: its commits/edits may have changed the branch
-	}
+	// A run starting blocks Create PR (run_active); one ending may have
+	// changed the branch.
+	b.git.Invalidate(s.TaskID)
 	b.bus.Publish(Event{Topic: TopicRunStatus, Payload: runStatusPayload{
 		RunID: s.ID, TaskID: s.TaskID, ChatID: s.ChatID, Status: string(s.Status),
 		StopReason: s.StopReason, Disposition: s.Disposition, Err: s.Err,
