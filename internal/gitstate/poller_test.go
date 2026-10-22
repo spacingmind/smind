@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -797,6 +798,28 @@ func TestPoller_DoesNotAdoptForkPR(t *testing.T) {
 	}
 }
 
+// waitJoined blocks until n callers wait on workspace ws's poll in flight. It
+// polls state, not the clock: the outcome never depends on how long it takes.
+func (f *pollerFix) waitJoined(ws int64, n int) {
+	f.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		f.p.mu.Lock()
+		got := 0
+		if fl := f.p.flights[ws]; fl != nil {
+			got = fl.joined
+		}
+		f.p.mu.Unlock()
+		if got >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			f.t.Fatalf("only %d of %d callers joined the poll in flight", got, n)
+		}
+		runtime.Gosched()
+	}
+}
+
 func TestPoller_SingleFlightConcurrentRefresh(t *testing.T) {
 	f := newPollerFix(t)
 	ws := f.workspace("/repo")
@@ -819,7 +842,7 @@ func TestPoller_SingleFlightConcurrentRefresh(t *testing.T) {
 		wg.Add(1)
 		go run(id) // join the call in flight
 	}
-	time.Sleep(50 * time.Millisecond) // let the joiners reach the flight
+	f.waitJoined(ws.ID, 3) // all three joiners are waiting on the flight
 	close(f.fg.gate)
 	wg.Wait()
 	close(errs)
@@ -893,7 +916,7 @@ func TestTaskGit_ReadNeverSpawnsForge(t *testing.T) {
 	f.tick() // seeds the persisted snapshot
 	seeded := f.fg.total()
 
-	r := &countRunner{}
+	r := &countRunner{origin: "https://github.com/org/repo.git"}
 	src := storeSource{f.db}
 	s := New(Options{
 		Source: src, Runner: r.run, Now: f.clk.Now, Interest: f.in,
@@ -968,5 +991,93 @@ func TestService_RefreshReturnsTaskGit(t *testing.T) {
 	f.clk.Advance(11 * time.Minute)
 	if _, err := s.Refresh(lone.ID); err == nil || forgeCode(err) != forge.CodeUnauthenticated {
 		t.Fatalf("Refresh without a snapshot error = %v, want forge_unauthenticated", err)
+	}
+}
+
+func TestPoller_ForgeBlock_UnauthenticatedAndCLIMissing(t *testing.T) {
+	f := newPollerFix(t)
+	wsA, wsB := f.workspace("/a"), f.workspace("/b")
+	a := f.task(wsA, "a")
+	b := f.task(wsB, "b")
+	if got := f.p.ForgeBlock(f.reload(a)); got != "" {
+		t.Fatalf("ForgeBlock before any poll = %q, want none", got)
+	}
+	f.fg.setOpen("/a", mkPR(1, "other"))
+	f.in.focused = []int64{a.ID}
+	f.tick()
+	if got := f.p.ForgeBlock(f.reload(a)); got != "" {
+		t.Fatalf("ForgeBlock after a good poll = %q, want none", got)
+	}
+
+	// Signed out: the host is suspended, and every workspace on it is blocked.
+	f.fg.openErr = forge.NewError(forge.CodeUnauthenticated, "")
+	f.step(121 * time.Second)
+	for _, tk := range []store.Task{a, b} {
+		if got := f.p.ForgeBlock(f.reload(tk)); got != forge.CodeUnauthenticated {
+			t.Fatalf("task %d ForgeBlock = %q, want forge_unauthenticated", tk.ID, got)
+		}
+	}
+	// The suspension ends by itself; the next poll is the re-probe.
+	f.fg.openErr = nil
+	f.step(11 * time.Minute)
+	if got := f.p.ForgeBlock(f.reload(a)); got != "" {
+		t.Fatalf("ForgeBlock after the suspension = %q, want none", got)
+	}
+
+	// gh missing: a per-task backoff, not a host suspension.
+	f.fg.openErr = forge.NewError(forge.CodeCLIMissing, "")
+	f.step(121 * time.Second)
+	if got := f.p.ForgeBlock(f.reload(a)); got != forge.CodeCLIMissing {
+		t.Fatalf("ForgeBlock = %q, want forge_cli_missing", got)
+	}
+	f.fg.openErr = nil // gh got installed
+	f.step(10 * time.Minute)
+	if got := f.p.ForgeBlock(f.reload(a)); got != "" {
+		t.Fatalf("ForgeBlock after the backoff and a good poll = %q, want none", got)
+	}
+	var nilPoller *Poller
+	if nilPoller.ForgeBlock(a) != "" {
+		t.Fatal("nil poller must report no block")
+	}
+}
+
+func TestPoller_AdoptAndRecord(t *testing.T) {
+	f := newPollerFix(t)
+	ws := f.workspace("/repo")
+	a := f.task(ws, "a")
+	pr := mkPR(7, "a")
+	f.p.Adopt(f.reload(a), pr, forge.Repo{Host: "github.com", NameWithOwner: "org/repo"})
+	got := f.reload(a)
+	if got.PRNumber != 7 || got.PRRepo != "org/repo" || got.PRURL != "https://github.com/org/repo/pull/7" || got.PRHeadRef != "a" || got.PRForge != "github" {
+		t.Fatalf("identity = %+v", got)
+	}
+	if len(f.adopted) != 1 || f.adopted[0] != a.ID {
+		t.Fatalf("OnAdopt = %v", f.adopted)
+	}
+	if v := f.p.PR(got); v == nil || v.Number != 7 || v.FetchedAt.IsZero() {
+		t.Fatalf("snapshot after adopt = %+v", v)
+	}
+
+	// A URL off the forge host is never stored.
+	b := f.task(ws, "b")
+	evil := mkPR(8, "b", func(p *forge.PR) { p.URL = "https://evil.example.com/org/repo/pull/8" })
+	f.p.Adopt(f.reload(b), evil, forge.Repo{Host: "github.com", NameWithOwner: "org/repo"})
+	if f.reload(b).PRNumber != 0 {
+		t.Fatal("a PR with a foreign url was adopted")
+	}
+
+	// Record refreshes the snapshot and leaves the identity alone.
+	merged := mkPR(7, "a", func(p *forge.PR) { p.State = forge.PRStateMerged })
+	f.p.Record(got, merged, forge.Repo{Host: "github.com", NameWithOwner: "org/repo"})
+	if v := f.p.PR(got); v == nil || v.State != forge.PRStateMerged {
+		t.Fatalf("snapshot after Record = %+v", v)
+	}
+	if len(f.adopted) != 1 {
+		t.Fatalf("Record must not signal an adoption: %v", f.adopted)
+	}
+
+	f.p.NoteCalls("github.com", 2)
+	if calls, _, _ := f.db.GetForgeBudget("github.com", f.clk.Now()); calls != 2 {
+		t.Fatalf("budget = %d, want the 2 noted calls", calls)
 	}
 }

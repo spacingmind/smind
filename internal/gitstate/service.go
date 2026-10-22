@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"sort"
 	"sync"
 	"time"
@@ -74,6 +75,10 @@ type Options struct {
 	// OnAdopt is called after the poller adopts a PR for a task (wsapi
 	// publishes task.updated).
 	OnAdopt func(taskID int64)
+	// RunActive reports whether an agent run is active or queued in the task
+	// (the run registry); it feeds the createPr run_active blocker. Nil means
+	// never.
+	RunActive func(taskID int64) bool
 }
 
 type entry struct {
@@ -476,8 +481,67 @@ func (s *Service) compute(taskID int64) (g TaskGit, ws int64, base string, err e
 		in.Forge = t.PRForge
 		in.PR = s.poller.PR(t) // cached snapshot only; never calls the forge
 	}
+	if s.opts.RunActive != nil {
+		in.RunActive = s.opts.RunActive(t.ID)
+	}
+	in.ForgeCode = s.poller.ForgeBlock(t)
 	return Compute(s.ctx, s.run, in), t.WorkspaceID, in.BaseRef, nil
 }
+
+// Fresh recomputes the task's local snapshot now (no network) and returns it;
+// Create PR, Update PR and the preview use it so their preconditions are never
+// a stale cache read. The recompute publishes like any other.
+func (s *Service) Fresh(taskID int64) (TaskGit, error) { return s.recompute(taskID) }
+
+// ForgeRepo is the forge repo the poller resolved for the workspace, if it
+// has (cache only; never calls the forge).
+func (s *Service) ForgeRepo(workspaceID int64) (forge.Repo, bool) {
+	return s.poller.RepoOf(workspaceID)
+}
+
+// AdoptPR stores pr as the task's pull request (identity and snapshot) and
+// recomputes the task so task.git carries it before the caller replies. The
+// repo host is the one in pr.URL, which the provider already validated.
+func (s *Service) AdoptPR(taskID int64, pr forge.PR) error {
+	t, repo, err := s.prTarget(taskID, pr)
+	if err != nil {
+		return err
+	}
+	s.poller.Adopt(t, pr, repo)
+	s.InvalidateSync(taskID)
+	return nil
+}
+
+// RecordPR stores a freshly fetched snapshot of the task's existing pull
+// request (after Update PR pushed to it) and recomputes the task.
+func (s *Service) RecordPR(taskID int64, pr forge.PR) error {
+	t, repo, err := s.prTarget(taskID, pr)
+	if err != nil {
+		return err
+	}
+	s.poller.Record(t, pr, repo)
+	s.InvalidateSync(taskID)
+	return nil
+}
+
+func (s *Service) prTarget(taskID int64, pr forge.PR) (store.Task, forge.Repo, error) {
+	if s.poller == nil {
+		return store.Task{}, forge.Repo{}, errors.New("gitstate: pull request state is not enabled")
+	}
+	t, err := s.opts.Source.GetTask(taskID)
+	if err != nil {
+		return store.Task{}, forge.Repo{}, err
+	}
+	u, err := url.Parse(pr.URL)
+	if err != nil || u.Host == "" {
+		return store.Task{}, forge.Repo{}, errors.New("gitstate: pull request has no usable url")
+	}
+	return t, forge.Repo{Host: u.Host, NameWithOwner: pr.Repo}, nil
+}
+
+// NoteForgeCalls books n explicit forge calls made for the task's workspace
+// (Create/Update PR) against its host's hourly budget.
+func (s *Service) NoteForgeCalls(host string, n int) { s.poller.NoteCalls(host, n) }
 
 // Refresh is task.gitRefresh: one forced poll of the task's workspace under
 // the explicit-refresh floor and the host budget, then the recomputed

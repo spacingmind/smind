@@ -130,8 +130,9 @@ type hostMem struct {
 }
 
 type wsFlight struct {
-	done chan struct{}
-	err  error
+	done   chan struct{}
+	err    error
+	joined int // callers waiting on this flight instead of polling (tests wait on it)
 }
 
 type tracked struct {
@@ -279,6 +280,76 @@ func (p *Poller) PR(t store.Task) *forge.PR {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.decorateLocked(t, p.memLocked(t.ID), p.now())
+}
+
+// ForgeBlock names the forge_* code that currently keeps the forge unusable
+// for t's workspace, or "": the host is suspended because nobody is signed
+// in, or the last attempt found the CLI missing or the origin not a forge
+// remote and its backoff has not passed. It reads the poller's state only
+// and never calls the forge.
+func (p *Poller) ForgeBlock(t store.Task) string {
+	if p == nil {
+		return ""
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := p.now()
+	if h := p.hosts[p.hostOfLocked(t.WorkspaceID)]; h != nil && h.suspendedUntil.After(now) && h.suspendStale == staleFor(forge.CodeUnauthenticated) {
+		return forge.CodeUnauthenticated
+	}
+	m := p.memLocked(t.ID)
+	if m.st.NextAllowedAt.After(now) {
+		switch m.st.LastErrorCode {
+		case forge.CodeCLIMissing, forge.CodeNoRemote:
+			return m.st.LastErrorCode
+		}
+	}
+	return ""
+}
+
+// RepoOf returns the forge repo the poller resolved for a workspace, from its
+// in-memory cache only.
+func (p *Poller) RepoOf(ws int64) (forge.Repo, bool) {
+	if p == nil {
+		return forge.Repo{}, false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if w := p.ws[ws]; w != nil && w.haveRepo {
+		return w.repo, true
+	}
+	return forge.Repo{}, false
+}
+
+// Adopt stores pr as t's pull request: its identity (forge, repo, number,
+// validated url, head ref), the snapshot, and the task.updated notification.
+// Create PR uses it for the PR it just opened.
+func (p *Poller) Adopt(t store.Task, pr forge.PR, repo forge.Repo) {
+	if p == nil {
+		return
+	}
+	p.adopt(t, pr, repo, p.now())
+}
+
+// Record stores a freshly fetched pr as t's snapshot without touching its
+// identity (Update PR refreshes the PR it just pushed to).
+func (p *Poller) Record(t store.Task, pr forge.PR, repo forge.Repo) {
+	if p == nil {
+		return
+	}
+	p.succeed(t, pr, repo, p.now())
+}
+
+// NoteCalls books n explicit forge calls (Create PR, Update PR) against
+// host's hourly budget so the poller sees them. A ledger failure is logged,
+// not returned: the action already happened.
+func (p *Poller) NoteCalls(host string, n int) {
+	if p == nil || n <= 0 {
+		return
+	}
+	if _, err := p.o.Ledger.AddForgeCalls(host, n, p.now()); err != nil {
+		slog.Warn("gitstate: book forge calls", "err", err)
+	}
 }
 
 func (p *Poller) decorateLocked(t store.Task, m *taskMem, now time.Time) *forge.PR {
@@ -558,6 +629,7 @@ func (p *Poller) saveLocked(m *taskMem) {
 func (p *Poller) pollWS(ws, forceTask int64) error {
 	p.mu.Lock()
 	if f := p.flights[ws]; f != nil {
+		f.joined++
 		p.mu.Unlock()
 		select {
 		case <-f.done:

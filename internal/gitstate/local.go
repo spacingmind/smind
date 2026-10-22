@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const originRemote = "origin"
@@ -27,6 +28,10 @@ type Input struct {
 	Forge        string
 	PR           *PRInfo // always nil in the local pass
 	RunActive    bool
+	// ForgeCode/ForgeReason are the poller's host state (forge CLI missing or
+	// not signed in), passed through to the createPr/updatePr actions.
+	ForgeCode   string
+	ForgeReason string
 	// DiffStat returns the base→worktree diff size, or the typed base_unknown
 	// error. Nil omits Diff.
 	DiffStat  func() (files, insertions, deletions int, err error)
@@ -43,9 +48,13 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 		now = in.Now
 	}
 	g = TaskGit{TaskID: in.TaskID, Forge: in.Forge, Untrusted: in.Untrusted, PR: in.PR}
+	noOrigin := false
 	defer func() {
 		g.ComputedAt = now().UTC()
-		g.Actions = Actions(g, ActionCtx{RunActive: in.RunActive})
+		g.Actions = Actions(g, ActionCtx{
+			RunActive: in.RunActive, NoOrigin: noOrigin,
+			ForgeCode: in.ForgeCode, ForgeReason: in.ForgeReason,
+		})
 	}()
 
 	g.Base = &Base{Ref: in.BaseRef, Sha: in.BaseSha, Known: in.BaseSha != ""}
@@ -58,6 +67,7 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 		repo = in.WorktreePath
 	}
 	branchRef := "refs/heads/" + in.Branch
+	noOrigin = !hasForgeOrigin(ctx, run, repo)
 
 	g.Worktree = worktreeStatus(ctx, run, in.WorktreePath)
 
@@ -103,6 +113,43 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 	m := ComputeMerged(ctx, run, repo, cmp, branchRef, commitsSinceFork(g.Commits), in.PR)
 	g.Merged = &m
 	return g
+}
+
+// hasForgeOrigin reports whether the repository's `origin` remote is set and
+// is a URL a forge can host: https, ssh or scp-like. A local path, file:// or
+// git:// remote cannot open a pull request (U7). The configured value is read
+// without insteadOf rewriting, which is what the forge CLI matches on.
+func hasForgeOrigin(ctx context.Context, run Runner, dir string) bool {
+	out, err := run(ctx, dir, "config", "--get", "remote."+originRemote+".url")
+	if err != nil {
+		return false
+	}
+	return forgeRemoteURL(strings.TrimSpace(out))
+}
+
+// forgeRemoteURL accepts https://, ssh:// and the scp-like host:path form
+// (git@github.com:owner/repo.git); a plain path or any other scheme is not a
+// forge remote.
+func forgeRemoteURL(u string) bool {
+	switch {
+	case u == "" || strings.HasPrefix(u, "-") || strings.ContainsFunc(u, unicode.IsSpace) || strings.Contains(u, "::"):
+		return false // "ext::<command>" and friends are git transports, not forges
+	case strings.HasPrefix(u, "https://"), strings.HasPrefix(u, "ssh://"):
+		rest := u[strings.Index(u, "://")+3:]
+		return rest != "" && !strings.HasPrefix(rest, "/")
+	case strings.Contains(u, "://"):
+		return false
+	}
+	// scp-like: [user@]host:path. A one-letter host is a Windows drive.
+	i := strings.Index(u, ":")
+	if i <= 0 || i == len(u)-1 {
+		return false
+	}
+	host := u[:i]
+	if strings.Contains(host, "/") || len(host) == 1 {
+		return false // C:\repo or a path containing a colon later on
+	}
+	return true
 }
 
 func commitsSinceFork(c *Commits) *int {
