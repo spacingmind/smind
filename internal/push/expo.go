@@ -81,9 +81,12 @@ func NewExpo(o ExpoOptions) *Expo {
 }
 
 // Send delivers msgs, splitting into batches of at most maxBatch sent
-// sequentially; the returned results line up with msgs by index. A failure on
-// any batch fails the whole call: a partial push would wake some devices with
-// an event the others miss, so the caller retries everything or nothing.
+// sequentially; the returned results line up with msgs by index. If a batch
+// fails (after its retries), Send stops and returns the results of the
+// batches that completed together with the error: those pushes were already
+// accepted and cannot be un-sent. The messages after len(results) were not
+// delivered and may be retried; a retry may duplicate a push the phone
+// already received, which the phone dedupes by event id.
 func (e *Expo) Send(ctx context.Context, msgs []Message) ([]Result, error) {
 	if len(msgs) == 0 {
 		return nil, nil
@@ -93,7 +96,7 @@ func (e *Expo) Send(ctx context.Context, msgs []Message) ([]Result, error) {
 		batch := msgs[start:min(start+maxBatch, len(msgs))]
 		results, err := e.sendBatch(ctx, batch)
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		out = append(out, results...)
 	}

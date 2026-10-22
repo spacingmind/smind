@@ -140,6 +140,36 @@ func TestExpoBatching100(t *testing.T) {
 	}
 }
 
+func TestExpoPartialResultsOnLaterBatchFailure(t *testing.T) {
+	f, ts := newExpoFake(t, func(w http.ResponseWriter, reqNo, msgs int) {
+		if reqNo > 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		writeTickets(w, msgs)
+	})
+	msgs := make([]Message, 150)
+	for i := range msgs {
+		msgs[i] = Message{Token: fmt.Sprintf("tok-%d", i), Platform: PlatformAndroid, Data: Blob{V: 1, N: "n", C: "c"}}
+	}
+	got, err := NewExpo(ExpoOptions{BaseURL: ts.URL, Sleep: instantSleep(&[]time.Duration{})}).
+		Send(context.Background(), msgs)
+	if err == nil {
+		t.Fatal("Send succeeded, want an error from the second batch")
+	}
+	if len(got) != 100 {
+		t.Fatalf("got %d results, want 100 (the first batch)", len(got))
+	}
+	for i, res := range got {
+		if !res.OK || res.Token != msgs[i].Token {
+			t.Fatalf("result %d = %+v, want ok for %s", i, res, msgs[i].Token)
+		}
+	}
+	if n := f.count(); n != 2 {
+		t.Fatalf("%d requests, want 2 (400 is not retried)", n)
+	}
+}
+
 func TestExpoRequestHasNoPlaintext(t *testing.T) {
 	f, ts := newExpoFake(t, func(w http.ResponseWriter, _, msgs int) { writeTickets(w, msgs) })
 	nonce := make([]byte, 12)
