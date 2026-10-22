@@ -163,3 +163,54 @@ func TestReuse_SurvivesOldRunDeletion(t *testing.T) {
 		t.Fatalf("reused copy = %q, %v", b, err)
 	}
 }
+
+// TestSweepOnStart_KeepsReferenced: the startup sweep removes old sets nothing
+// references and keeps those a run row or a still-queued prompt holds (and
+// anything younger than the age).
+func TestSweepOnStart_KeepsReferenced(t *testing.T) {
+	t.Parallel()
+	e := newQueuedTestEnv(t, "")
+	root := filepath.Join(t.TempDir(), "attachments")
+	st := attach.NewStore(root)
+	mk := func() attach.Set {
+		set, err := st.Accept(context.Background(), []attach.Request{{Kind: attach.KindFile, Name: "a.txt", Data: base64.StdEncoding.EncodeToString([]byte("x"))}}, attach.DefaultLimits(), attach.Resolvers{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return set
+	}
+	onRun, onQueue, cancelled, orphan, young := mk(), mk(), mk(), mk(), mk()
+	if _, err := e.st.CreateRun(store.Run{ID: "r1", TaskID: e.task.ID, Provider: "glm", Prompt: "p", Status: "done", StartedAt: time.Now().UTC(), Attachments: attach.EncodeSet(onRun)}); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := e.st.CreateChat(e.task.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.EnqueueChatPromptAttach(chat.ID, "p", "{}", store.ChatQueueSourceHuman, 0, 0, 0, attach.EncodeSet(onQueue)); err != nil {
+		t.Fatal(err)
+	}
+	c, err := e.st.EnqueueChatPromptAttach(chat.ID, "p", "{}", store.ChatQueueSourceHuman, 0, 0, 0, attach.EncodeSet(cancelled))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.MarkCancelled(c.ID, store.ChatQueueCancelUser, "x"); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-48 * time.Hour)
+	for _, s := range []attach.Set{onRun, onQueue, cancelled, orphan} {
+		if err := os.Chtimes(st.Dir(s.ID), old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := SweepAttachments(st, e.st, 24*time.Hour, time.Now())
+	if err != nil || n != 2 {
+		t.Fatalf("SweepAttachments = %d, %v; want 2 (orphan, cancelled)", n, err)
+	}
+	for set, want := range map[string]bool{onRun.ID: true, onQueue.ID: true, young.ID: true, cancelled.ID: false, orphan.ID: false} {
+		_, err := os.Stat(st.Dir(set))
+		if (err == nil) != want {
+			t.Errorf("set %s exists=%v, want %v", set, err == nil, want)
+		}
+	}
+}

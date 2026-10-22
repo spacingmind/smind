@@ -3,8 +3,10 @@ package runs
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/spacingmind/smind/internal/attach"
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
@@ -141,4 +143,15 @@ func (reg *Registry) DiscardAttachments(set attach.Set) {
 		return
 	}
 	_ = st.Remove(set.ID)
+}
+
+// SweepAttachments removes attachment sets nothing references -- no run row
+// and no queued prompt -- once older than olderThan. It is the startup
+// reconcile for sets orphaned by a crash between accepting and recording.
+func SweepAttachments(st *attach.Store, db *store.Store, olderThan time.Duration, now time.Time) (int, error) {
+	ref, err := db.ReferencedAttachmentSets()
+	if err != nil {
+		return 0, err
+	}
+	return st.Sweep(ref, olderThan, now)
 }
