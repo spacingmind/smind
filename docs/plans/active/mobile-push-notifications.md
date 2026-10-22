@@ -46,7 +46,7 @@ Daemon
 3. `push.register` over a relay-served approved device stores `{token, provider, platform, key, kinds}` under **that session's device id**; the id cannot be set by params; a local `/ws` connection gets `forbidden`.
 4. `push.register` validates: unknown provider → `unsupported_provider`; a token that is not `ExponentPushToken[…]`/`ExpoPushToken[…]` → `invalid_token`; a key that is not 32 bytes → `invalid_key`; unknown kinds → `invalid_kinds`; daemon `push.enabled: false` → `push_disabled` with no outbound call ever.
 5. A token registered under device B is removed from device A (token takeover); `push.unregister` removes the caller's registration; `push.status` never returns the token or the key.
-6. Revoking a device stops pushes to it even if the registry file is edited offline (the sender checks `approved` at send time); `relay host rotate` clears every registration; a pending device cannot register.
+6. Revoking a device stops pushes to it even if the registry file is edited offline (the sender checks `approved` at send time); a pending device cannot register. (`relay host rotate` is relay-side and does not touch daemon registrations.)
 7. `push-registrations.json` is mode 0600, written atomically, survives a restart, and a corrupt or unknown-version file is an error, not a silent reset.
 8. Event rules (ADR-0040 §4): `permission.pending` → one `permission` push per requestId per device; `run.status` done at `needs-continue` → `needs_continue` (and no `done`); done/error for root tasks only; `stopped`, system tasks and `Purpose` runs → nothing; a device whose `kinds` excludes the kind gets nothing.
 9. Rate limit: 7 `done` events in a minute for one device send 6; `permission` and `needs_continue` are never dropped.
@@ -80,7 +80,7 @@ Go (`internal/push`, `internal/wsapi`, `internal/relay/bridge`, `cmd/smind`)
 - `TestSealOpenVector` — AC1; `TestSealPadsToBucket` — padded length is a multiple of 256, ≤ 1 KiB; `TestOpenRejects{WrongDeviceID,FlippedCiphertext,FlippedNonce,BadVersion,Truncated}` — AC2.
 - `TestRegistryPersistsAtomically0600`, `TestRegistryCorruptFileIsError`, `TestRegistryTokenTakeover`, `TestRegistryRemoveOnUnregister` — AC5, AC7.
 - `TestPushRegisterBindsToSessionDeviceID` (a params `deviceId` is ignored), `TestPushRegisterForbiddenOnLocalWS`, `TestPushRegisterValidation` (table: provider, token shape, key length, kinds), `TestPushRegisterDisabled` (no sender call), `TestPushStatusRedactsSecrets` — AC3–AC5.
-- `TestRevokeStopsPushes`, `TestRevokedByFileEditStopsPushes` (approved-at-send check), `TestHostRotateClearsRegistrations`, `TestPendingDeviceCannotRegister` — AC6.
+- `TestRevokeStopsPushes`, `TestRevokedByFileEditStopsPushes` (approved-at-send check), `TestPendingDeviceCannotRegister` — AC6.
 - `TestPushRules` (table: permission, needs-continue, done root, done child, error root, stopped, system task, `Purpose` run, kinds filter) — AC8; `TestPermissionDedupePerRequest`; `TestDoneErrorRateLimit` + `TestPermissionNeverRateLimited` — AC9.
 - `TestMultiDeviceSealedSeparately` (three payloads differ; one bad registration is skipped) — AC10.
 - `TestExpoRequestHasNoPlaintext` (marshals a real request for a known title/summary/task id and asserts none occurs in the body; Android body has no `title`/`body`, iOS body has the fixed generic text) — AC11.
@@ -109,6 +109,10 @@ Manual: AC24's checklist items (a)–(j), one line each in Validation with devic
 ## Progress
 
 - 2026-10-22: research (Expo SDK 58 notifications and Push API docs, FCM/APNs limits, Paseo's push code); ADR-0040 and this plan written, docs PR opened. **Stopped for Supervisor acceptance.** No code, no live calls, no accounts.
+- 2026-10-22: ADR-0040 Accepted (#481, H1–H8 as recommended). EAS link and app identifiers merged (#485, not in the original PR table: `owner`, `projectId`, `com.spacingmind.smind`, `eas.json`). #480 (M6) merged, so mobile PRs 5–6 are unblocked once PR 2 lands.
+- 2026-10-22: **PR 2 opened as #487** (`internal/push`: seal/open + vector, registry, Expo sender; not wired). Orchestrated through smind (dogfood daemon, GLM peer, four steps); friction is logged in the local dogfood notes.
+- Correction found while briefing PR 3: `smind relay host rotate` is relay-side and does not clear daemon registrations (AC6 and the ADR no longer claim it); revoke and the approved-at-send check are the controls.
+- PR 3 is split into five Peer steps (one commit each): (a) device id on wsapi conns via an optional `DeviceServer` interface, (b) `push.register/unregister/status`, (c) notifier core (`internal/push/notifier.go`: rules, titles, dedupe, rate limit, per-device sealing, `DeviceNotRegistered` removal; pure and injectable), (d) async queue + bus tap in wsapi + `API.SetPush`, (e) `push` config block + `cmd/smind/serve.go` wiring + hub passes the device id.
 
 ## Validation
 
