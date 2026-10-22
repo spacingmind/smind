@@ -221,7 +221,8 @@ text still delivers them.
 
 **DEPENDENCY: `claude-agent-sdk-go` image support.** v0.3.2 (and v0.3.3 on the SDK repo's main) has
 `wireUserContent.Content string` and `Client.Prompt(ctx, text string, …)`. The CLI itself accepts block arrays, so the
-change is small and belongs in the SDK, not a vendored fork in smind: `ContentBlock{Type, Text, Source *ImageSource}`,
+change is small and belongs in the SDK, not a vendored fork in smind: `PromptBlock{Type, Text, Source}` with `PromptText`/`PromptImage` constructors (the
+names `ContentBlock`/`TextBlock` are taken by the response side),
 `Client.QueryBlocks(ctx, blocks)` and `PromptBlocks(ctx, blocks, updates)`, `Content any` on the wire struct, and a
 fake-CLI test that asserts the exact JSON. It needs a release (v0.4.0) and a `go.mod` bump in smind. Owner: the
 SDK repo's maintainer (the Human; the Lead can draft the SDK PR if asked). **It does not block this item**: claude-native
