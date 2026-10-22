@@ -2,7 +2,6 @@ import { act } from "react";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { agentChipLabel, TaskDetailPane } from "@/components/task-detail";
@@ -228,27 +227,31 @@ describe("TaskDetailPane", () => {
     expect(client.calls.some((c) => c.method === "run.stop")).toBe(false);
   });
 
-  it("refreshes the composer's diff-stat source when a run for the task ends", async () => {
+  it("shows the composer's diff chip from task.git, follows task.git events, and focuses the open task", async () => {
     const client = new FakeWsClient();
-    const listeners = new Set<(payload: unknown) => void>();
-    const events: DaemonEvents = {
-      subscribe: (topic, listener) => {
-        if (topic === "run.status") listeners.add(listener);
-        return () => listeners.delete(listener);
-      },
-    };
-    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat events={events} />);
+    const onOpenDiffTab = () => {};
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat onOpenDiffTab={onOpenDiffTab} />);
     client.nth("run.list", 0).resolve([]);
-    client.nth("task.diff", 0).resolve({ diff: "" });
     await flush();
-    expect(client.calls.filter((c) => c.method === "task.diff")).toHaveLength(1);
-
-    await act(async () => {
-      for (const fn of listeners) fn({ taskId: TASK_A.ID, runId: "run-1", status: "done" });
+    expect(client.nth("task.gitFocus", 0).params).toEqual({ taskId: TASK_A.ID });
+    client.nth("task.git", 0).resolve({
+      taskId: TASK_A.ID,
+      untrusted: false,
+      computedAt: "2026-10-22T00:00:00Z",
+      diff: { files: 1, insertions: 3, deletions: 1 },
     });
     await flush();
+    expect(screen.getByTestId("composer-diff-stat")).toHaveTextContent("+3");
 
-    expect(client.calls.filter((c) => c.method === "task.diff")).toHaveLength(2);
+    act(() =>
+      client.pushNotification("task.git", {
+        taskId: TASK_A.ID,
+        git: { taskId: TASK_A.ID, untrusted: false, computedAt: "2026-10-22T00:00:01Z", diff: { files: 2, insertions: 9, deletions: 1 } },
+      }),
+    );
+    await flush();
+    expect(screen.getByTestId("composer-diff-stat")).toHaveTextContent("+9");
+    expect(client.calls.some((c) => c.method === "task.diff")).toBe(false);
   });
 
   it("submits the prompt form via run.start then run.attach, never task.prompt", async () => {

@@ -2,9 +2,10 @@
 // is mocked per scenario (`isDesktop`/`desktopOS` are module-load constants)
 // and the components are imported fresh, like desktop-chrome.test.tsx.
 import { act } from "react";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import type { Connection, DesktopOS, EditorInfo } from "@/lib/platform";

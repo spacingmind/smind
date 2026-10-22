@@ -3,6 +3,9 @@ import { Icons } from "@/lib/icons";
 
 import { ArchiveTaskDialog } from "@/components/crud-dialogs";
 import { ArchiveFinishedDialog, StopTreeDialog } from "@/components/tree-action-dialogs";
+import { GitBranchLine } from "@/components/git/git-branch-line";
+import { GitTokens } from "@/components/git/git-tokens";
+import { PrChip } from "@/components/git/pr-chip";
 import { PortChip, SetupBadge } from "@/components/task-setup";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +20,7 @@ import { ignoreSelect, MENU_CLOSE_INSTANT, reachableDisabledProps } from "@/lib/
 import { toast } from "@/components/ui/toast";
 import { Tooltip, TooltipContent, TooltipTrigger, useMenuTooltip } from "@/components/ui/tooltip";
 import type { LocalPathActions } from "@/hooks/use-local-path-actions";
+import { useTaskGit } from "@/hooks/use-task-git";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { availabilityFromTaskTree, type TreeActionAvailability } from "@/lib/task-tree-actions";
 import type { TaskTreeResult } from "@/lib/task-lineage";
@@ -30,45 +34,49 @@ import type { WsClient } from "@/lib/ws-client";
  * worktree), so it stays one click-free glance away without taking a row.
  */
 export function HeaderTaskTitle({ task }: { task: Task }) {
+  const git = useTaskGit(task.ID);
   return (
-    <HoverCard openDelay={400} closeDelay={100}>
-      <HoverCardTrigger asChild>
-        <button
-          type="button"
-          data-testid="app-header-title"
-          className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-ui-base font-medium text-foreground outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <Icons.folder aria-hidden className="size-4 shrink-0 text-foreground-muted" />
-          <span className="min-w-0 truncate">{task.Title}</span>
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent data-testid="app-header-task-card" side="bottom" align="start" className="flex flex-col gap-1.5">
-        <p className="text-ui-base font-medium text-foreground [overflow-wrap:anywhere]">{task.Title}</p>
-        {task.Branch && (
-          <div className="flex items-center gap-1.5 text-ui-sm text-muted-foreground">
-            <Icons.branch aria-hidden className="size-3 shrink-0" />
-            <span data-testid="app-header-task-branch" className="min-w-0 truncate">
-              {task.Branch}
-            </span>
-          </div>
-        )}
-        {task.WorktreePath && (
-          <p data-testid="app-header-task-worktree" className="truncate font-mono text-ui-xs text-muted-foreground" title={task.WorktreePath}>
-            {task.WorktreePath}
+    <>
+      <HoverCard openDelay={400} closeDelay={100}>
+        <HoverCardTrigger asChild>
+          <button
+            type="button"
+            data-testid="app-header-title"
+            className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-ui-base font-medium text-foreground outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Icons.folder aria-hidden className="size-4 shrink-0 text-foreground-muted" />
+            <span className="min-w-0 truncate">{task.Title}</span>
+          </button>
+        </HoverCardTrigger>
+        <HoverCardContent data-testid="app-header-task-card" side="bottom" align="start" className="flex flex-col gap-1.5">
+          <p className="text-ui-base font-medium text-foreground [overflow-wrap:anywhere]">{task.Title}</p>
+          {(git?.branch?.name ?? task.Branch) && (
+            <GitBranchLine
+              branch={(git?.branch?.name ?? task.Branch)!}
+              base={git?.base?.known ? git.base.ref : undefined}
+              testId="app-header-task-branch"
+            />
+          )}
+          {git && <GitTokens git={git} />}
+          {task.WorktreePath && (
+            <p data-testid="app-header-task-worktree" className="truncate font-mono text-ui-xs text-muted-foreground" title={task.WorktreePath}>
+              {task.WorktreePath}
+            </p>
+          )}
+          <p className="text-ui-sm text-muted-foreground">
+            Last activity <span data-testid="app-header-task-activity">{formatRelativeTime(task.UpdatedAt)}</span>
           </p>
-        )}
-        <p className="text-ui-sm text-muted-foreground">
-          Last activity <span data-testid="app-header-task-activity">{formatRelativeTime(task.UpdatedAt)}</span>
-        </p>
-        <div className="flex items-center gap-2 text-ui-sm text-muted-foreground">
-          <span data-testid="app-header-task-status" className="uppercase">
-            {task.Status}
-          </span>
-          <SetupBadge status={task.SetupStatus} />
-          <PortChip port={task.Port} />
-        </div>
-      </HoverCardContent>
-    </HoverCard>
+          <div className="flex items-center gap-2 text-ui-sm text-muted-foreground">
+            <span data-testid="app-header-task-status" className="uppercase">
+              {task.Status}
+            </span>
+            <SetupBadge status={task.SetupStatus} />
+            <PortChip port={task.Port} />
+          </div>
+        </HoverCardContent>
+      </HoverCard>
+      {git?.pr && <PrChip pr={git.pr} />}
+    </>
   );
 }
 
