@@ -20,9 +20,9 @@ impl Backoff {
         self.next
     }
 
-    /// next advances the schedule: returns the delay for this attempt
+    /// next_delay advances the schedule: returns the delay for this attempt
     /// and grows (2x, capped) the delay for the following one.
-    pub fn next(&mut self) -> Duration {
+    pub fn next_delay(&mut self) -> Duration {
         let out = self.next;
         self.next = self.next.saturating_mul(2).min(self.max);
         out
@@ -48,30 +48,30 @@ mod tests {
     #[test]
     fn grows_and_caps() {
         let mut b = Backoff::new(Duration::from_millis(500), Duration::from_secs(2));
-        assert_eq!(b.next(), Duration::from_millis(500));
-        assert_eq!(b.next(), Duration::from_millis(1000));
-        assert_eq!(b.next(), Duration::from_millis(2000));
-        assert_eq!(b.next(), Duration::from_millis(2000)); // capped
-        assert_eq!(b.next(), Duration::from_millis(2000));
+        assert_eq!(b.next_delay(), Duration::from_millis(500));
+        assert_eq!(b.next_delay(), Duration::from_millis(1000));
+        assert_eq!(b.next_delay(), Duration::from_millis(2000));
+        assert_eq!(b.next_delay(), Duration::from_millis(2000)); // capped
+        assert_eq!(b.next_delay(), Duration::from_millis(2000));
     }
 
     #[test]
     fn resets_to_base() {
         let mut b = Backoff::new(Duration::from_millis(500), Duration::from_secs(30));
-        b.next();
-        b.next();
+        b.next_delay();
+        b.next_delay();
         b.reset();
-        assert_eq!(b.next(), Duration::from_millis(500));
+        assert_eq!(b.next_delay(), Duration::from_millis(500));
     }
 
     #[test]
     fn saturates_instead_of_overflow() {
         let mut b = Backoff::new(Duration::from_secs(1), Duration::from_secs(u64::MAX));
-        b.next();
+        b.next_delay();
         // 2s -> 4s -> ... ; saturating_mul keeps this bounded and .min
         // with max keeps max authoritative.
         for _ in 0..70 {
-            b.next();
+            b.next_delay();
         }
         assert!(b.current() >= Duration::from_secs(1));
     }
@@ -79,8 +79,8 @@ mod tests {
     #[test]
     fn default_schedule() {
         let mut b = Backoff::default();
-        assert_eq!(b.next(), Duration::from_millis(500));
-        assert_eq!(b.next(), Duration::from_secs(1));
-        assert_eq!(b.next(), Duration::from_secs(2));
+        assert_eq!(b.next_delay(), Duration::from_millis(500));
+        assert_eq!(b.next_delay(), Duration::from_secs(1));
+        assert_eq!(b.next_delay(), Duration::from_secs(2));
     }
 }
