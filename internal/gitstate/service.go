@@ -383,18 +383,18 @@ func (s *Service) InvalidateSync(taskID int64) {
 	}
 }
 
-func (s *Service) recompute(taskID int64) {
+func (s *Service) recompute(taskID int64) (TaskGit, error) {
 	g, ws, base, err := s.compute(taskID)
 	if err != nil {
 		s.Drop(taskID) // archived, system or deleted
-		return
+		return TaskGit{}, err
 	}
 	key := canonicalKey(g)
 	now := s.now()
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		return
+		return g, nil
 	}
 	e := s.cache[taskID]
 	if e == nil {
@@ -405,19 +405,20 @@ func (s *Service) recompute(taskID int64) {
 	if key == e.pubKey {
 		e.pending = false
 		s.mu.Unlock()
-		return
+		return g, nil
 	}
 	if e.pubAt.IsZero() || now.Sub(e.pubAt) >= publishGap {
 		e.pubKey, e.pubAt, e.pending = key, now, false
 		s.mu.Unlock()
 		s.publish(taskID, g)
-		return
+		return g, nil
 	}
 	if !e.pending {
 		e.pending = true
 		e.stop = s.after(publishGap-now.Sub(e.pubAt), func() { s.flush(taskID) })
 	}
 	s.mu.Unlock()
+	return g, nil
 }
 
 // flush publishes the latest snapshot of a task whose event was held back by
@@ -496,8 +497,10 @@ func (s *Service) Refresh(taskID int64) (TaskGit, error) {
 			}
 		}
 	}
-	s.InvalidateSync(taskID)
-	return s.Get(taskID)
+	// Recompute here rather than through the single-flight path: a flight
+	// already running may have started before the poll and would hand back
+	// the old snapshot.
+	return s.recompute(taskID)
 }
 
 // Tick is one loop beat: nothing without a watcher; otherwise recompute the
