@@ -83,7 +83,12 @@ func TestServer_AccountOAuthComplete(t *testing.T) {
 
 		loginID, state, authorizeURL, raw := startOAuthRaw(t, ws, "1")
 		if strings.Contains(string(raw), "pasteOnly") {
-			t.Errorf("authorizeUrl params = %s, want pasteOnly omitted when the listener is bound", raw)
+			if l, err := net.Listen("tcp", env.login.addr); err == nil {
+				l.Close()
+				t.Errorf("authorizeUrl params = %s, want pasteOnly omitted when the listener is bound", raw)
+			} else {
+				t.Skip("callback port was taken by another process between freeAddr and bind; pasteOnly is covered by the busy-port subtest")
+			}
 		}
 		if len(loginID) != 22 {
 			t.Errorf("loginId = %q, want 22 base64url characters", loginID)
