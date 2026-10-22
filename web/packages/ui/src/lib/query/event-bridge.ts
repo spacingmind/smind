@@ -12,7 +12,7 @@ import type {
 import type { LearnedSkillProbePayload } from "@/lib/probe-types";
 import { queryKeys } from "@/lib/query-keys";
 import { applyLifecycleEvent, LIFECYCLE_TOPICS, type WorkspaceWithTree } from "@/lib/workspace-tree";
-import type { Account, AgentProfile } from "@/lib/types";
+import type { Account, AgentProfile, RunStatusEventPayload } from "@/lib/types";
 import { toast } from "@/components/ui/toast";
 
 /**
@@ -184,6 +184,14 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       void queryClient.invalidateQueries({
         queryKey: typeof p?.workspaceId === "number" ? queryKeys.learningJobsOf(p.workspaceId) : queryKeys.learningJobsAll(),
       });
+      return;
+    }
+    case "run.status": {
+      // A run that just ended may have created or removed files: the `@` mention's path index is stale.
+      const p = payload as Partial<RunStatusEventPayload> | null;
+      if (typeof p?.taskId === "number" && (p.status === "done" || p.status === "error" || p.status === "stopped")) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.taskSearchIndex(p.taskId) });
+      }
       return;
     }
     case "event.dropped":

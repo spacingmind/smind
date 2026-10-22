@@ -910,6 +910,8 @@ export interface AttachmentLimits {
   maxTotalBytes: number;
   maxMessageBytes: number;
   images: string[];
+  /** The attachment kinds this daemon accepts. Absent means ["image", "file", "file_ref"]. */
+  kinds?: string[];
 }
 
 /** `daemon.info.forge` (ADR-0039 §8): the forge CLI capability of the daemon host. `cli` is whether `gh` is on its PATH. */

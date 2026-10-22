@@ -19,6 +19,10 @@ export const queryKeys = {
   daemonInfo: () => ["daemon.info"] as const,
   /** The bytes of one stored image/file attachment of a run (`run.attachment`); immutable, so cached forever. */
   runAttachment: (runId: string, id: string) => ["run.attachment", { runId, id }] as const,
+  /** The task worktree's path index (`task.searchIndex`) the composer's `@` mention ranks; refreshed when a run ends. */
+  taskSearchIndex: (taskId: number) => ["task.searchIndex", { taskId }] as const,
+  /** One `forge.search` answer (the PR/issue picker). */
+  forgeSearch: (taskId: number, kind: "pr" | "issue", query: string) => ["forge.search", { taskId, kind, query }] as const,
   providerList: () => ["provider.list"] as const,
   profileList: () => ["profile.list"] as const,
   /** One `provider.test` answer per account-vocabulary provider key (`accountHealthTestKey`). */
