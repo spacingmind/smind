@@ -38,7 +38,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, ListRenderItemInfo, NativeScrollEvent, NativeSyntheticEvent, StyleSheet, View } from 'react-native';
 import { Button, useNativeState } from '@expo/ui';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { UiHost } from '../ui/UiHost';
+import { useScreenInsets } from '../ui/useScreenInsets';
 import { adoptedPromptText } from '../adoptedPrompt';
 import { defaultChatId, listRunsForTask, RunSummary } from '../api';
 import { continueRun, isEchoOfOptimisticLine, sendFollowUpPrompt, RunTail } from '../followUpPrompt';
@@ -46,6 +48,7 @@ import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondTo
 import { RelayConnection } from '../relay/RelayConnection';
 import { useConnectionState } from '../relay/useConnectionState';
 import { RunFollower, RunStatusEvent } from '../runFollower';
+import { hapticFor } from '../haptics';
 import { describeRunFooter } from '../runFooter';
 import { lineFromAttachEvent, TimelineLine, timelineFromLogs } from '../runTimeline';
 import { requestStop, stopControlView } from '../stopControl';
@@ -79,7 +82,8 @@ interface Props {
 
 export function TaskDetailScreen({ conn, taskId }: Props) {
   const theme = useAppTheme();
-  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const insets = useScreenInsets();
+  const styles = useMemo(() => makeStyles(theme, insets.bottom), [theme, insets.bottom]);
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [lines, setLines] = useState<TimelineLine[]>([]);
   const [draft, setDraft] = useState('');
@@ -313,6 +317,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
       if (!text || state.kind !== 'ready' || state.run === null) return;
       if (sending.current) return; // one send at a time: a second press before the re-render must not queue the prompt twice
       sending.current = true;
+      hapticFor('send'); // same frame as the draft clearing, before the await
       setDraft('');
       draftState.value = '';
       setSendError(null);
@@ -338,6 +343,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
         );
         if (result.kind === 'queued') queue.refresh(); // covers a missed snapshot
       } catch (e) {
+        hapticFor('error');
         setDraft(text); // the typed text is never silently lost
         draftState.value = text;
         setSendError(e instanceof Error ? e.message : String(e));
@@ -353,6 +359,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
 
   const handleStop = useCallback(async () => {
     if (liveRunId === null || stopping) return;
+    hapticFor('stop');
     setStopping(true);
     setSendError(null);
     const failure = await requestStop(conn, liveRunId);
@@ -392,6 +399,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
 
   const handlePermissionTap = useCallback(
     (requestId: string, optionId: string) => {
+      hapticFor('permission');
       void respondToPermission(conn, board, requestId, optionId);
     },
     [conn, board],
@@ -507,21 +515,25 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
               </View>
             ) : null}
           </View>
-          <View style={styles.dock}>
-            <Composer
-              draftState={draftState}
-              onChangeDraft={setDraft}
-              liveRunId={liveRunId}
-              stopView={stopView}
-              canSend={canSend}
-              sendError={sendError}
-              queueItems={queue.items}
-              onCancelQueued={(id) => void queue.cancel(id)}
-              onStop={handleStop}
-              onSend={handleSend}
-              onSendNow={handleSendNow}
-            />
-          </View>
+          {/* keyboard-controller (expo-animation): the wrapper pads by the keyboard height, so the list shrinks above the dock. The dock's own padding (bottom inset)
+              lives on an inner View: the animated paddingBottom of the avoiding view would override it. */}
+          <KeyboardAvoidingView behavior="padding">
+            <View style={styles.dock}>
+              <Composer
+                draftState={draftState}
+                onChangeDraft={setDraft}
+                liveRunId={liveRunId}
+                stopView={stopView}
+                canSend={canSend}
+                sendError={sendError}
+                queueItems={queue.items}
+                onCancelQueued={(id) => void queue.cancel(id)}
+                onStop={handleStop}
+                onSend={handleSend}
+                onSendNow={handleSendNow}
+              />
+            </View>
+          </KeyboardAvoidingView>
         </>
       ) : null}
     </View>
@@ -542,7 +554,7 @@ export function TaskLoadError() {
   );
 }
 
-function makeStyles(theme: AppTheme) {
+function makeStyles(theme: AppTheme, bottomInset = 0) {
   return StyleSheet.create({
     screen: {
       flex: 1,
@@ -556,8 +568,10 @@ function makeStyles(theme: AppTheme) {
       paddingVertical: theme.spacing[4],
     },
     dock: {
-      paddingHorizontal: theme.spacing[4],
-      paddingBottom: theme.spacing[4],
+      backgroundColor: theme.background,
+      paddingHorizontal: theme.spacing[3],
+      paddingTop: theme.spacing[2],
+      paddingBottom: Math.max(bottomInset, theme.spacing[2]),
     },
     jumpWrap: {
       position: 'absolute',

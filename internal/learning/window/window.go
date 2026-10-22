@@ -39,7 +39,10 @@ type Run struct {
 	Origin Origin
 	// Interrupt is true when the prompt was delivered mid-run.
 	Interrupt bool
-	Events    []Event
+	// Attachments are the prompt's attachment markers (attach.Markers):
+	// one short line per item, never bytes, titles or bodies (ADR-0038).
+	Attachments []string
+	Events      []Event
 }
 
 // SkillRef is a skill reference. Body is rendered only for Input.Learned

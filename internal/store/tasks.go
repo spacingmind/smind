@@ -346,6 +346,7 @@ func (s *Store) DeleteTask(id int64) error {
 		{"delete run events", `DELETE FROM run_events WHERE run_id IN (SELECT id FROM runs WHERE task_id = ?)`},
 		{"delete run usage", `DELETE FROM run_usage WHERE task_id = ?`},
 		{"delete runs", `DELETE FROM runs WHERE task_id = ?`},
+		{"delete chat queue", `DELETE FROM chat_queue WHERE chat_id IN (SELECT id FROM chats WHERE task_id = ?)`},
 		{"delete chats", `DELETE FROM chats WHERE task_id = ?`},
 		{"delete terminal sessions", `DELETE FROM terminal_sessions WHERE task_id = ?`},
 		{"delete task", `DELETE FROM tasks WHERE id = ?`},

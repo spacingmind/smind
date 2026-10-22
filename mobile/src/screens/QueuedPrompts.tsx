@@ -1,11 +1,14 @@
 // QueuedPrompts renders the daemon-side prompt queue's rows (ADR-0021 §9),
-// the mobile counterpart of web's composer queued-prompts.tsx: a status word
+// the mobile counterpart of web's composer queued-prompts.tsx: a floating
+// card above the composer with one chip per prompt -- a status word
 // (queueRows.ts), the prompt itself, and per-row Cancel -- or the auto-cancel
-// reason when the daemon gave up on the prompt. Colors come from the token
-// system only.
+// reason when the daemon gave up on the prompt. Chips fade in/out with
+// Reanimated (expo-animation: entering/exiting on Animated.View, <= 8px
+// travel, none under reduced motion). Colors come from the token system only.
 
 import { useMemo } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeIn, FadeOut, useReducedMotion } from 'react-native-reanimated';
 import { ChatQueueItem } from '../api';
 import { cancelAccessibilityLabel, queueRowLabel } from '../queueRows';
 import { AppTheme } from '../theme';
@@ -14,14 +17,17 @@ import { useAppTheme } from '../theme/ThemeProvider';
 export function QueuedPrompts({ items, onCancel }: { items: ChatQueueItem[]; onCancel: (itemId: number) => void }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
+  const reduceMotion = useReducedMotion();
   if (items.length === 0) return null;
+  const entering = reduceMotion ? undefined : FadeIn.duration(theme.duration.hover);
+  const exiting = reduceMotion ? undefined : FadeOut.duration(theme.duration.hover);
   return (
-    <View accessibilityLabel="Queued prompts">
+    <View accessibilityLabel="Queued prompts" style={styles.strip}>
       {items.map((item) => {
         const label = queueRowLabel(item);
         const cancelled = label === 'NOT SENT';
         return (
-          <View key={item.ID} style={styles.row}>
+          <Animated.View key={item.ID} entering={entering} exiting={exiting} style={styles.row}>
             <Text style={[styles.label, cancelled && styles.labelDanger]}>{label}</Text>
             <Text style={styles.prompt} numberOfLines={1}>
               {item.Prompt}
@@ -29,16 +35,17 @@ export function QueuedPrompts({ items, onCancel }: { items: ChatQueueItem[]; onC
             {cancelled ? (
               <Text style={styles.reason}>{item.CancelReason}</Text>
             ) : (
-              <TouchableOpacity
+              <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={cancelAccessibilityLabel(item)}
-                hitSlop={{ top: 14, bottom: 14, left: 10, right: 10 }}
+                hitSlop={{ top: 12, bottom: 12, left: 10, right: 10 }}
                 onPress={() => onCancel(item.ID)}
+                style={styles.cancelHit}
               >
                 <Text style={styles.cancel}>Cancel</Text>
-              </TouchableOpacity>
+              </Pressable>
             )}
-          </View>
+          </Animated.View>
         );
       })}
     </View>
@@ -47,41 +54,47 @@ export function QueuedPrompts({ items, onCancel }: { items: ChatQueueItem[]; onC
 
 function makeStyles(theme: AppTheme) {
   return StyleSheet.create({
+    strip: {
+      backgroundColor: theme.overlay,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: theme.radius['2xl'],
+      borderCurve: 'continuous',
+      boxShadow: theme.boxShadow.overlay,
+      padding: theme.spacing[2],
+      marginBottom: theme.spacing[2],
+    },
     row: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: theme.spacing[2],
-      backgroundColor: theme.surface[2],
-      borderRadius: theme.radius.sm,
-      paddingVertical: theme.spacing[1],
-      paddingHorizontal: theme.spacing[2],
-      marginBottom: theme.spacing[1],
+      minHeight: 44,
+      paddingHorizontal: theme.spacing[1],
     },
+    cancelHit: { minHeight: 44, justifyContent: 'center' },
     label: {
-      fontSize: theme.type.metadataLabel.fontSize,
-      lineHeight: theme.type.metadataLabel.lineHeight,
-      fontWeight: theme.type.metadataLabel.fontWeight,
-      color: theme.foregroundMuted,
+      fontSize: theme.type.micro.fontSize,
+      lineHeight: theme.type.micro.lineHeight,
+      fontWeight: theme.type.micro.fontWeight,
+      color: theme.foregroundSubtle,
     },
     labelDanger: { color: theme.status.danger },
     prompt: {
       flex: 1,
-      fontSize: theme.type.interface.fontSize,
-      lineHeight: theme.type.interface.lineHeight,
-      color: theme.foregroundMuted,
+      fontSize: theme.type.small.fontSize,
+      lineHeight: theme.type.small.lineHeight,
+      color: theme.foreground,
     },
     reason: {
       flexShrink: 1, // a long reason must not crush the prompt column
-      fontSize: theme.type.metadataLabel.fontSize,
-      lineHeight: theme.type.metadataLabel.lineHeight,
-      fontWeight: theme.type.metadataLabel.fontWeight,
+      fontSize: theme.type.small.fontSize,
+      lineHeight: theme.type.small.lineHeight,
       color: theme.status.danger,
     },
     cancel: {
-      fontSize: theme.type.metadataLabel.fontSize,
-      lineHeight: theme.type.metadataLabel.lineHeight,
-      fontWeight: theme.type.metadataLabel.fontWeight,
-      color: theme.primary,
+      fontSize: theme.type.small.fontSize,
+      lineHeight: theme.type.small.lineHeight,
+      color: theme.foreground,
     },
   });
 }
