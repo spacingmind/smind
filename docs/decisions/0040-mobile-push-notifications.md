@@ -168,11 +168,12 @@ in the foreground; it just gets no remote notifications. This is stated in the m
 
 ### 7. Development build, not Expo Go
 
-`expo-notifications` and `expo-task-manager` (plus `expo-device` for the physical-device check) are native modules in a **development build** (`expo run:android`
+`expo-notifications` and `expo-task-manager` are native modules in a **development build** (`expo run:android`
 or EAS Build); Expo Go cannot receive remote push. The Android build needs `android.package`, `extra.eas.projectId` and `android.googleServicesFile`
 (from an environment value so a Firebase project is not baked into the open-source repo; H3, H5). The background task must be registered where the headless
-JS context loads it, so the entry becomes a one-line custom file that imports the task module and then `expo-router/entry` (a small amendment to ADR-0036's
-`main: "expo-router/entry"`). The mobile native-verification checklist (owned by the mobile Lead) gets a push section; the plan lists the items (AC24).
+JS context loads it, so the entry (`mobile/index.ts`, which already sets up the CSPRNG before `expo-router/entry`) gets one early side-effect import of the task module.
+There is no `expo-device` check: a physical-device test would wrongly block Android emulators with Google Play services, which Expo documents as supported.
+The real-device runbook is in the plan (AC24).
 
 ### 8. Operator surface and failure handling
 

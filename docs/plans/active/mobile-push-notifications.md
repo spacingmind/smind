@@ -28,7 +28,7 @@ and anything in the M6 create-task, prompt-attachments and git/PR-state work (ot
 | 3 | **Daemon wiring**: device id on `wsapi` conns (`ServeDevice`), `push.register/unregister/status`, event consumer on the bus (rules, dedupe, rate limit, approved-at-send check), config `push.*`, hook in the hub | M | peer-sonnet (concurrency, wsapi) + peer-glm (config, rules table tests) | PR 2 merged |
 | 4 | **Operator surface**: `push.test` (local only) + `smind push test [device]`, `smind relay devices ls` shows a push column, `docs/homelab.md` section (what leaves the daemon, config), logging audit test | S | peer-glm | PR 3 merged |
 | 5 | **Mobile logic, no native deps**: `mobile/src/push/` — `open.ts` (vector-tested trial decrypt, padding strip, 24 h age check), `keys.ts` (secure-store push key per connection, deleted with the connection), `register.ts` (opt-in flow against `push.*`), `target.ts` (`resolveNotificationTarget`, pending-target store released by `routeGate`), `foreground.ts` (suppression rule); all vitest | M | peer-glm (detailed brief) | PR 2 merged (the vector) **and** PR #480 merged (shared `mobile/package.json`, `app/_layout.tsx`) |
-| 6 | **Mobile native wiring (dev build)**: `expo install expo-notifications expo-task-manager expo-device`, config plugin and `app.config` (`android.package`, `extra.eas.projectId`, `googleServicesFile` from env), custom entry that registers the background task before `expo-router/entry`, Android channel `attention`, Settings → Notifications row, tap/cold-start routing, web no-op | L | peer-sonnet (headless task, entry, native config) + peer-glm (settings row) | PR 5 merged, H3/H5 answered |
+| 6 | **Mobile native wiring (dev build)**: `expo install expo-notifications expo-task-manager` (`expo-device` was dropped: a physical-device check would block Android emulators with Play services), config plugin and `app.config` (`android.package`, `extra.eas.projectId`, `googleServicesFile` from env), an early import in `mobile/index.ts` that registers the background task before `expo-router/entry`, Android channel `attention`, Settings → Notifications row, tap/cold-start routing, web no-op | L | peer-sonnet (headless task, entry, native config) + peer-glm (settings row) | PR 5 merged, H3/H5 answered |
 | 7 | **Verification + docs**: run the native checklist (AC24) on a real Android device with the Human's Firebase/Expo project, record results, mobile docs ("what works without the Apple program"), close or update this plan | S | Lead + Human | PRs 3, 4, 6 merged |
 | 8 | **iOS (blocked on H2)**: Notification Service Extension target (config plugin), CryptoKit decrypt, keychain access group, APNs credential via EAS, the iOS half of AC24 | L | peer-sonnet | H2 decided, PR 7 |
 
@@ -113,7 +113,50 @@ Manual: AC24's checklist items (a)–(j), one line each in Validation with devic
 - 2026-10-22: **PR 2 opened as #487** (`internal/push`: seal/open + vector, registry, Expo sender; not wired). Orchestrated through smind (dogfood daemon, GLM peer, four steps); friction is logged in the local dogfood notes.
 - Correction found while briefing PR 3: `smind relay host rotate` is relay-side and does not clear daemon registrations (AC6 and the ADR no longer claim it); revoke and the approved-at-send check are the controls.
 - PR 3 is split into five Peer steps (one commit each): (a) device id on wsapi conns via an optional `DeviceServer` interface, (b) `push.register/unregister/status`, (c) notifier core (`internal/push/notifier.go`: rules, titles, dedupe, rate limit, per-device sealing, `DeviceNotRegistered` removal; pure and injectable), (d) async queue + bus tap in wsapi + `API.SetPush`, (e) `push` config block + `cmd/smind/serve.go` wiring + hub passes the device id.
+- 2026-10-22: **PR 3 merged (#499)** (device id on wsapi conns, `push.register/unregister/status`, notifier with rules, dedupe and rate limit, async queue and bus tap, `push.*` config, wiring); #499 needed one rebase (config struct conflict with #496). **PR 5 merged (#493)** (pure mobile logic). **PR 6 opened (#517)** (native wiring: packages and `app.config.js`, Android background task, Notifications row, controller). **PR 4 opened (#520)** (`push.test` + `smind push test`, `relay devices ls` PUSH column, homelab guide). Peers ran through smind (GLM until its 5-hour limit, then `claude-native --model claude-sonnet-5-5 --mode auto`); the friction log is local.
+- `expo-device` was installed in PR 6 step a and removed in step c-2 (unused; ADR §7 and this plan corrected).
+- **Next: PR 7** is the real-device run (runbook below) and needs the Human's Firebase/Expo setup (H3). iOS (PR 8) stays blocked on H2.
 
 ## Validation
 
-Not started. Each acceptance criterion gets its confirming test or manual check here when the work lands.
+Evidence so far (automated; each row names the test or check). Real-device items are the runbook below and are not yet run.
+
+| AC | Evidence |
+|---|---|
+| 1, 2 | `TestSealOpenVector`, `TestOpenRejects*` (internal/push, #487); the same vector is opened by `mobile/src/push/__tests__/open.test.ts` (#493), a second implementation |
+| 3, 4, 5 | `TestPushRegisterStoresUnderSessionDeviceID`, `TestPushRegisterForbiddenOnLocalWS`, `TestPushRegisterValidation`, `TestPushTokenTakeoverViaRPC`, `TestPushStatusRedactsSecrets` (internal/wsapi, #499) |
+| 6 | approved-at-send check (`TestNotifyUnapprovedDeviceSkipped`), `Hub.DeviceApproved` (#499) |
+| 7 | `TestRegistry*` (0600, atomic, corrupt = error) (#487) |
+| 8, 9, 10 | `TestNotifyRulesTable`, `TestNotifyPermissionDedupePerRequest`, `TestNotifyRateLimitDoneError`, `TestNotifyMultiDeviceSealedSeparately` (#499) |
+| 11, 12 | `TestExpoRequestHasNoPlaintext`, `TestExpo*` (#487); ticket handling in the notifier (#499) |
+| 13 | `TestNotifyLogsAreSecretFree` (#499) |
+| 14 | `TestTestPush*`, `TestPushTestRPC*`, `TestPushTest*` (CLI) (#520) |
+| 15 | every sender test uses `httptest`; nothing calls `exp.host` by default |
+| 16, 17, 19, 20, 23 | `mobile/src/push/__tests__/*` (#493, #517) |
+| 18 | `backgroundHandler.test.ts`, `backgroundTask.test.ts` (#517) (module-scope definition, Android only) |
+| 21, 22 | `npm test`, `npm run smoke:web` and `smoke:web:full` pass; Connection-sheet screenshots light + dark show "Not available on web" (#517) |
+| 24 | **not run**: needs a physical Android device and the Human's Firebase project (runbook below) |
+| 25 | no agent created an account or held a credential |
+
+## Native verification runbook (Human, PR 7)
+
+Builds needed: a **daemon** built from `develop` after #499 and #520 are merged (or the release that contains them: older daemons answer `push.*` with method-not-found and the app shows "Update the daemon"), and a **phone app** built from `develop` after #517 is merged.
+
+Prerequisites (H3, done by the Human, never by an agent): a Firebase project with an Android app `com.spacingmind.smind`; its `google-services.json`; the FCM V1 service-account key uploaded to the EAS project (Expo docs: "Add Android FCM V1 credentials"); an EAS environment variable of type file named `GOOGLE_SERVICES_JSON` holding `google-services.json` (or, for a local build, `GOOGLE_SERVICES_JSON=/path/google-services.json npx expo run:android`). A daemon reachable through a relay with a paired, approved phone (docs/homelab.md Path B), a cheap model for the runs (Haiku), and `adb` for the Doze and force-stop steps.
+
+Build and install: `cd mobile && eas build --profile development --platform android`, install the APK, then `npx expo start --dev-client` and open the app (or the local `expo run:android` build). Expo Go cannot be used.
+
+Record each item as pass / fail / notes (device, Android version, build id), one line each, in this plan's Validation:
+
+1. **Turn on.** Connection -> Notifications shows "Off"; tap Turn on; on Android 13+ the permission prompt appears; the row shows "On". `smind relay devices ls` shows PUSH `yes`.
+2. **Test push, foreground.** `smind push test` prints "1 of 1 sent"; with the app open and no task open the notification shows "smind / Test notification".
+3. **Test push, background and swiped away.** Same command with the app backgrounded, then swiped from recents: both show the notification. (If the swiped-away case shows nothing, capture `adb logcat | grep -i -E "smind|ReactNativeJS|expo"` around the push: this is the unproven headless path.)
+4. **Doze.** `adb shell dumpsys deviceidle force-idle`, then `smind push test`: the notification arrives (possibly after a short delay). `adb shell dumpsys deviceidle unforce` afterwards.
+5. **Force stop.** `adb shell am force-stop com.spacingmind.smind`, then `smind push test`: nothing is shown until the app is opened again. This is expected and documented, not a failure.
+6. **Real events.** A task whose run needs approval (a manual-approval workspace): the notification names the task and "Needs approval: ..."; tap it from the background and from swiped-away (cold start): it opens that task; with a daemon password set, the password prompt comes first, then the task. A run that hits the turn cap (set a low `agents.glm.maxTurns`): "Reached the turn cap". A run that finishes and one that errors: "Run finished." / "Run failed...". A child task's completion sends nothing.
+7. **Revoke and re-pair.** `smind relay devices revoke <id>`: `smind push test` reports no phone registered; re-pair, Turn on again, push works.
+8. **Two phones** on one daemon both receive `smind push test` (`2 of 2 sent`).
+9. **Unproven facts, state them explicitly:** which payload shape reached the task (from the logs), that the push key was readable in the headless context (item 3 passing proves it), and that the cold-start tap in item 6 found the task route (no flash of the list, no missed navigation).
+10. **Privacy spot check (optional):** run the daemon with `HTTPS_PROXY` pointed at a local TLS-inspecting proxy (and `SSL_CERT_FILE` trusting its CA) and confirm the request body to `exp.host` carries only `to`, `data` (`v`, `n`, `c`), `priority`, `ttl`, `channelId`; nothing readable. (`TestExpoRequestHasNoPlaintext` already asserts this for the daemon's request builder.)
+
+If item 3 fails while item 2 passes, the fallback in ADR-0040 Consequences applies: an Android notification message with the generic text; the encryption and the wire do not change.
