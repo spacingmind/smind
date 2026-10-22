@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/spacingmind/smind/internal/attach"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -153,6 +154,8 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		purpose:            startPurpose(opts),
 		origin:             source,
 		interrupt:          resolveStartOptions(opts).interrupt,
+		attachments:        resolveStartOptions(opts).attachments,
+		attachStore:        resolveStartOptions(opts).attachStore,
 		worktree:           worktree,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
@@ -265,7 +268,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	if whenBusy == WhenBusyInterrupt {
 		priority = 1
 	}
-	item, err := reg.st.EnqueueChatPrompt(chatID, prompt, string(cfg), source, priority, fromTaskID, fromChatID)
+	item, err := reg.st.EnqueueChatPromptAttach(chatID, prompt, string(cfg), source, priority, fromTaskID, fromChatID, attach.EncodeSet(resolveStartOptions(opts).attachments))
 	if err != nil {
 		return StartOutcome{}, fmt.Errorf("runs: start: %w", err)
 	}
@@ -368,6 +371,7 @@ func (reg *Registry) deliverOne(chatID int64) {
 		if item.Priority == 1 {
 			startOpts = append(startOpts, WithInterrupt())
 		}
+		startOpts = append(startOpts, reg.attachmentStartOption(item.Attachments)...)
 		runID, err := reg.Start(context.Background(), wm, runner, chat.TaskID, chatID, taskrunner.Provider(cfg.Provider), deliverPrompt(item), taskrunner.PermissionSettings{Mode: cfg.PermissionMode, AutoAccept: cfg.AutoAccept}, taskrunner.ThinkingLevel(cfg.ThinkingLevel), startOpts...)
 		if err != nil {
 			var busyErr *ChatBusyError
@@ -499,6 +503,9 @@ type startOptions struct {
 	interrupt bool
 	isolation *taskrunner.IsolationOptions
 	probe     *taskrunner.ProbeOptions
+
+	attachments attach.Set
+	attachStore *attach.Store
 }
 
 // WithOrigin records who authored the run's prompt (store.ChatQueueSource*:

@@ -1,3 +1,4 @@
+import { RunAttachments } from "@/components/timeline/run-attachments";
 import { memo } from "react";
 import { Icons } from "@/lib/icons";
 
@@ -73,6 +74,7 @@ export const RunTimeline = memo(function RunTimeline({
         >
           {run.prompt}
         </p>
+        <RunAttachments runId={run.id} attachments={run.attachments} />
         <MessageActions group="prompt" data-testid="run-prompt-actions">
           <CopyAction getText={() => run.prompt} data-testid="run-prompt-copy" />
           {onEditPrompt && (

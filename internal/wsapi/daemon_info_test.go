@@ -95,8 +95,13 @@ func TestDaemonInfoReturnsVersionCommitAndPlatform(t *testing.T) {
 	if err != nil || started.Before(before) || started.After(time.Now().Add(time.Second)) {
 		t.Errorf("startedAt = %v (err %v), want roughly now", got["startedAt"], err)
 	}
-	// No secrets: the result is exactly these fields and nothing else.
-	if len(got) != len(want)+1 {
+	// The forge capability (ADR-0039 §8) is an object of provider and a CLI bool; nothing about auth or tokens.
+	forge, _ := got["forge"].(map[string]any)
+	if _, isBool := forge["cli"].(bool); forge["provider"] != "github" || !isBool || len(forge) != 2 {
+		t.Errorf("forge = %v, want {provider: github, cli: <bool>}", got["forge"])
+	}
+	// No secrets: the result is exactly these fields (plus startedAt and forge) and nothing else.
+	if len(got) != len(want)+2 {
 		t.Errorf("daemon.info returned unexpected fields: %v", got)
 	}
 }

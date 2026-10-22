@@ -76,7 +76,11 @@ func (r renderer) promptRecord(run Run, correction bool) (record, bool) {
 	if origin == OriginHuman {
 		kind = gate.EvUserMessage
 	}
-	return r.textRecord(prefix, run.Prompt, gate.EventKey{RunID: run.ID, Seq: seqPrompt}, kind)
+	text := run.Prompt
+	if len(run.Attachments) > 0 {
+		text += "\n" + strings.Join(run.Attachments, "\n")
+	}
+	return r.textRecord(prefix, text, gate.EventKey{RunID: run.ID, Seq: seqPrompt}, kind)
 }
 
 // runRecords renders one run's records in order (tool calls merged by id,
