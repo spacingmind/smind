@@ -30,7 +30,7 @@ interface Sent {
   previews?: AttachmentMeta[];
 }
 
-async function renderComposer(limits: AttachmentLimits = LIMITS) {
+async function renderComposer(limits: AttachmentLimits = LIMITS, opts: { rejectSend?: boolean } = {}) {
   const client = new FakeWsClient();
   const sent: Sent[] = [];
   render(
@@ -45,6 +45,7 @@ async function renderComposer(limits: AttachmentLimits = LIMITS) {
       queuedItems={[]}
       onCancelQueued={async () => {}}
       onSubmit={async (_p, prompt, _perm, _t, _w, _m, attachments, previews) => {
+        if (opts.rejectSend) throw new Error("no forge available");
         sent.push({ prompt, attachments, previews });
         return { kind: "started", runId: "run-x" };
       }}
@@ -204,5 +205,20 @@ describe("@ file mention", () => {
     await flush();
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(client.calls.filter((c) => c.method === "task.searchIndex")).toHaveLength(0);
+  });
+
+  it("a failed send puts the text back without popping the list up again over the error", async () => {
+    const { client } = await renderComposer(LIMITS, { rejectSend: true });
+    await open(client, "see @README.md");
+    expect(options().length).toBeGreaterThan(0);
+    key("Escape");
+    await flush();
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.click(screen.getByTestId("chat-send-button"));
+    await flush();
+    await flush();
+    expect(area().value).toBe("see @README.md");
+    expect(screen.getByRole("alert")).toHaveTextContent("no forge available");
+    expect(screen.queryByRole("listbox")).toBeNull();
   });
 });

@@ -38,6 +38,12 @@ export function useFileMention({
   useEffect(() => setActive(0), [query]);
   const activeIndex = Math.min(active, Math.max(rows.length - 1, 0));
 
+  /** After a failed send put the text back: its trailing `@token` must not pop the list up again over the error. */
+  function dismissForText(restored: string) {
+    const m = findActiveFileMention({ text: restored, cursorIndex: caret });
+    if (m) setDismissedAt(m.start);
+  }
+
   function pick(path: string) {
     if (!mention) return;
     onAccept(path, applyFileMentionReplacement({ text, mention, path }));
@@ -75,6 +81,7 @@ export function useFileMention({
     loading,
     setActive,
     pick,
+    dismissForText,
     interceptKey,
     textareaProps: {
       role: "combobox",

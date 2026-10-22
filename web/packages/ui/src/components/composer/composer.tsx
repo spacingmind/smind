@@ -213,6 +213,11 @@ export function Composer({
   // The caret to restore once the controlled value lands (after accepting a mention).
   const pendingCaret = useRef<number | null>(null);
   const focusAfterMenu = useRef<"textarea" | "picker" | null>(null);
+  // The picker opens only once the Attach menu has finished closing (see onCloseAutoFocus): opening it while the menu
+  // is still closing makes the popover read the menu's own dismissal as an outside interaction and close at once.
+  const pendingPicker = useRef<ForgeKind | null>(null);
+  // Set once the mention state exists (it is built below the submit callbacks that need it).
+  const dismissMentionRef = useRef<(restored: string) => void>(() => {});
   const [forgePicker, setForgePicker] = useState<ForgeKind | null>(null);
   const daemonForge = useDaemonForge();
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -308,7 +313,10 @@ export function Composer({
     draft.clear();
     void send(trimmed, "queue").then((ok) => {
       // Restore the text if the prompt never landed, so it isn't lost.
-      if (!ok) draft.setValue(trimmed);
+      if (!ok) {
+        draft.setValue(trimmed);
+        dismissMentionRef.current(trimmed);
+      }
     });
   }, [draft, canSend, submitting, attachHasError, send]);
 
@@ -319,7 +327,10 @@ export function Composer({
     if (!trimmed || !canSend || submitting || attachHasError) return;
     draft.clear();
     void send(trimmed, "interrupt").then((ok) => {
-      if (!ok) draft.setValue(trimmed);
+      if (!ok) {
+        draft.setValue(trimmed);
+        dismissMentionRef.current(trimmed);
+      }
     });
   }, [draft, canSend, submitting, attachHasError, send]);
 
@@ -350,6 +361,7 @@ export function Composer({
       setCaret(next.cursor);
     },
   });
+  dismissMentionRef.current = mentionState.dismissForText;
 
   // The controlled value has landed: put the caret after the inserted mention.
   useLayoutEffect(() => {
@@ -367,7 +379,7 @@ export function Composer({
           disabledReason: daemonForge?.cli === false ? "gh is not installed on the daemon host" : null,
           onOpen: (kind: ForgeKind) => {
             focusAfterMenu.current = "picker";
-            setForgePicker(kind);
+            pendingPicker.current = kind;
           },
         }
       : undefined;
@@ -582,6 +594,12 @@ export function Composer({
                           if (focusAfterMenu.current === "textarea") textareaNode.current?.focus();
                           if (focusAfterMenu.current) e.preventDefault();
                           focusAfterMenu.current = null;
+                          if (pendingPicker.current) {
+                            const kind = pendingPicker.current;
+                            pendingPicker.current = null;
+                            // Next frame: the menu's dismissal events have settled by then.
+                            requestAnimationFrame(() => setForgePicker(kind));
+                          }
                         }}
                       />
                     </span>
