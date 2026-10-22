@@ -141,6 +141,23 @@ type PermissionSettings struct {
 	AutoAccept bool
 }
 
+// autoApprovingModeHint points a caller who asked for autoAccept on a provider
+// without it at that provider's own auto-approving modes (ADR-0019: Claude and
+// Codex have modes for this, only ACP agents have the autoAccept toggle), so the
+// error says what to use instead. "" when the catalog has no such mode.
+func autoApprovingModeHint(catalog ProviderInfo) string {
+	var ids []string
+	for _, m := range catalog.Modes {
+		if m.AutoApproves {
+			ids = append(ids, m.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (this provider has its own permission modes: pass --mode with one that approves for you: %s; a human must choose it)", strings.Join(ids, ", "))
+}
+
 // ValidatePermissionSettings checks s against provider's catalog, as
 // served by catalog (Runner.ProviderCatalog's entry for provider). An
 // unknown mode fails with the valid ids listed; AutoAccept on a provider
@@ -150,7 +167,7 @@ type PermissionSettings struct {
 // run with the agent's own error if it rejects the id.
 func ValidatePermissionSettings(catalog ProviderInfo, s PermissionSettings) error {
 	if s.AutoAccept && !catalog.SupportsAutoAccept {
-		return fmt.Errorf("autoAccept is not supported for provider %q", catalog.ID)
+		return fmt.Errorf("autoAccept is not supported for provider %q%s", catalog.ID, autoApprovingModeHint(catalog))
 	}
 	if s.Mode == "" {
 		return nil

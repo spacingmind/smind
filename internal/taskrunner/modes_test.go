@@ -136,3 +136,28 @@ func TestModeAutoApproves_GLMAcceptEditsIsNotAutoApproving(t *testing.T) {
 		t.Error("bypass_permissions does not auto-approve, want true")
 	}
 }
+
+// TestValidatePermissionSettings_AutoAcceptHintsAtTheProvidersOwnModes: the
+// refusal of autoAccept on a provider that has its own auto-approving modes
+// (ADR-0019) names them, instead of leaving the caller at a dead end.
+func TestValidatePermissionSettings_AutoAcceptHintsAtTheProvidersOwnModes(t *testing.T) {
+	claude, _ := ProviderInfoFor(ProviderClaudeNative)
+	codex, _ := ProviderInfoFor(ProviderCodexNative)
+	for _, tc := range []struct {
+		catalog ProviderInfo
+		want    string
+	}{
+		{claude, "bypassPermissions"},
+		{codex, "full-access"},
+	} {
+		err := ValidatePermissionSettings(tc.catalog, PermissionSettings{AutoAccept: true})
+		if err == nil || !strings.Contains(err.Error(), "autoAccept is not supported") || !strings.Contains(err.Error(), "--mode") || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want the unsupported message naming mode %q", tc.catalog.ID, err, tc.want)
+		}
+	}
+	// A provider with no auto-approving mode gets the bare message.
+	bare := ProviderInfo{ID: "x", Modes: []ModeInfo{{ID: "default"}}}
+	if err := ValidatePermissionSettings(bare, PermissionSettings{AutoAccept: true}); err == nil || strings.Contains(err.Error(), "--mode") {
+		t.Errorf("bare provider: err = %v, want the message without a --mode hint", err)
+	}
+}
