@@ -22,6 +22,13 @@ func TestDispositionFor(t *testing.T) {
 		{StatusStopped, "max_turn_requests", ""},
 		{StatusInterrupted, "max_tokens", ""},
 		{StatusRunning, "max_turn_requests", ""},
+		// The daemon going down cut the run off: continue picks it back up (only with a session to resume).
+		{StatusStopped, StopReasonDaemonRestart, DispositionNeedsContinue},
+		{StatusInterrupted, StopReasonDaemonRestart, DispositionNeedsContinue},
+		{StatusStopped, StopReasonDaemonRestartFresh, ""},
+		{StatusInterrupted, StopReasonDaemonRestartFresh, ""},
+		{StatusDone, StopReasonDaemonRestart, ""},
+		{StatusError, StopReasonDaemonRestart, ""},
 	}
 	for _, tt := range tests {
 		if got := DispositionFor(tt.status, tt.reason); got != tt.want {

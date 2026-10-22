@@ -254,7 +254,7 @@ func (reg *Registry) notifyRunStatus(r *run) {
 func New(st *store.Store) (*Registry, error) {
 	reg := &Registry{runs: make(map[string]*run), st: st, deliveryAttempts: make(map[int64]int), archiving: make(map[int64]bool)}
 
-	if _, err := st.MarkRunningRunsInterrupted(string(StatusInterrupted)); err != nil {
+	if _, err := st.MarkRunningRunsInterrupted(string(StatusInterrupted), func(chatID int64) string { return restartStopReason(st, chatID) }); err != nil {
 		return nil, fmt.Errorf("runs: reconcile interrupted runs: %w", err)
 	}
 
@@ -277,6 +277,16 @@ func New(st *store.Store) (*Registry, error) {
 	}
 
 	return reg, nil
+}
+
+// restartStopReason is the stop reason for a run the daemon's going down cut
+// off: StopReasonDaemonRestart when its chat has a stored agent session (a
+// "continue" resumes it), StopReasonDaemonRestartFresh when it has not.
+func restartStopReason(st *store.Store, chatID int64) string {
+	if chat, err := st.GetChat(chatID); err == nil && chat.AgentSession != nil && chat.Provider != nil {
+		return StopReasonDaemonRestart
+	}
+	return StopReasonDaemonRestartFresh
 }
 
 // closedChan returns an already-closed channel, used for rehydrated runs:
@@ -1559,6 +1569,13 @@ func (reg *Registry) CloseAll() {
 
 		var wg sync.WaitGroup
 		for _, r := range running {
+			// Say why it ends: shutdown, not the user's Stop. A "done" event
+			// from the agent's own finish still overrides this.
+			r.mu.Lock()
+			if r.stopReason == "" {
+				r.stopReason = restartStopReason(reg.st, r.chatID)
+			}
+			r.mu.Unlock()
 			wg.Add(1)
 			go func(r *run) {
 				defer wg.Done()

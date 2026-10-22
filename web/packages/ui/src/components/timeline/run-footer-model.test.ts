@@ -160,6 +160,37 @@ describe("describeRunFooter: the daemon's needs-continue disposition (ADR-0027 D
   });
 });
 
+describe("describeRunFooter: a run the daemon's restart cut off", () => {
+  it("a graceful restart (stopped + daemon_restart + needs-continue) reads as interrupted and offers Continue", () => {
+    const view = describeRunFooter(
+      freshRun({ status: "stopped", stopReason: "daemon_restart", disposition: "needs-continue" }),
+      { now: NOW, modelLabel: "Haiku 5.5" },
+    );
+    expect(view.sentence).toBe("Interrupted when the daemon restarted · not finished");
+    expect(view.tone).toBe("warning");
+    expect(view.action).toBe("continue");
+  });
+  it("a crash (interrupted status) reads the same", () => {
+    const view = describeRunFooter(
+      freshRun({ status: "interrupted", stopReason: "daemon_restart", disposition: "needs-continue" }),
+      { now: NOW, modelLabel: "" },
+    );
+    expect(view.sentence).toBe("Interrupted when the daemon restarted · not finished");
+    expect(view.action).toBe("continue");
+  });
+  it("with no session to resume it says why but offers nothing", () => {
+    const view = describeRunFooter(freshRun({ status: "stopped", stopReason: "daemon_restart_fresh" }), { now: NOW, modelLabel: "" });
+    expect(view.sentence).toBe("Interrupted when the daemon restarted");
+    expect(view.tone).toBe("warning");
+    expect(view.action).toBeNull();
+  });
+  it("a plain Stop with no reason is still just Stopped", () => {
+    const view = describeRunFooter(freshRun({ status: "stopped", stopReason: undefined }), { now: NOW, modelLabel: "" });
+    expect(view.sentence).toBe("Stopped");
+    expect(view.action).toBeNull();
+  });
+});
+
 describe("describeRunFooter: refusal is a warning with no action", () => {
   it("words a refusal", () => {
     const view = describeRunFooter(freshRun({ stopReason: "refusal" }), { now: NOW, modelLabel: "" });

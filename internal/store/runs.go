@@ -109,16 +109,51 @@ func (s *Store) UpdateRunProvenance(id string, p RunProvenance) error {
 // new Run exists, since a "running" row surviving to a fresh process start
 // means the subprocess that was driving it is definitely gone (see
 // internal/runs.Registry.CloseAll's doc comment on why nothing else
-// guarantees that subprocess died with the old daemon process). Returns the
-// number of rows transitioned.
-func (s *Store) MarkRunningRunsInterrupted(interruptedStatus string) (int64, error) {
-	res, err := s.db.Exec(`UPDATE runs SET status = ? WHERE status = 'running'`, interruptedStatus)
+// guarantees that subprocess died with the old daemon process). stopReason,
+// when non-nil, picks each row's stop_reason from its chat id (so the run
+// says why it ended instead of leaving the column empty). Returns the number
+// of rows transitioned.
+func (s *Store) MarkRunningRunsInterrupted(interruptedStatus string, stopReason func(chatID int64) string) (int64, error) {
+	rows, err := s.db.Query(`SELECT id, chat_id FROM runs WHERE status = 'running'`)
 	if err != nil {
 		return 0, fmt.Errorf("mark running runs interrupted: %w", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("mark running runs interrupted: rows affected: %w", err)
+	type pending struct {
+		id     string
+		chatID sql.NullInt64
+	}
+	var running []pending
+	for rows.Next() {
+		var p pending
+		if err := rows.Scan(&p.id, &p.chatID); err != nil {
+			_ = rows.Close()
+			return 0, fmt.Errorf("mark running runs interrupted: scan: %w", err)
+		}
+		running = append(running, p)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, fmt.Errorf("mark running runs interrupted: %w", err)
+	}
+	_ = rows.Close()
+
+	var n int64
+	for _, p := range running {
+		reason := ""
+		if stopReason != nil {
+			reason = stopReason(p.chatID.Int64)
+		}
+		res, err := s.db.Exec(
+			`UPDATE runs SET status = ?, stop_reason = CASE WHEN stop_reason = '' THEN ? ELSE stop_reason END WHERE id = ? AND status = 'running'`,
+			interruptedStatus, reason, p.id)
+		if err != nil {
+			return n, fmt.Errorf("mark running runs interrupted: %w", err)
+		}
+		c, err := res.RowsAffected()
+		if err != nil {
+			return n, fmt.Errorf("mark running runs interrupted: rows affected: %w", err)
+		}
+		n += c
 	}
 	return n, nil
 }

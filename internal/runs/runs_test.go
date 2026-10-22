@@ -2137,3 +2137,87 @@ func TestRegistry_DispositionNeedsContinueSurvivesRehydrate(t *testing.T) {
 	check("live", reg1)
 	check("rehydrated", newTestRegistry(t, st))
 }
+
+// bindResumableSession gives runID's chat a stored agent session, as a turn that
+// got as far as the agent's init message would have.
+func bindResumableSession(t *testing.T, st *store.Store, runID string, provider taskrunner.Provider) {
+	t.Helper()
+	row, err := st.GetRun(runID)
+	if err != nil {
+		t.Fatalf("GetRun(%q) error = %v", runID, err)
+	}
+	sessions := taskrunner.NewChatSessionStore(st)
+	sessions.Set(row.ChatID, taskrunner.SessionHandle{Provider: provider, SessionID: "sess-1"})
+}
+
+// A run the daemon's shutdown stops says so: a stop reason of daemon_restart and
+// "needs-continue" when its chat has a session to resume, and daemon_restart_fresh
+// with no continue when it has none.
+func TestRegistry_CloseAll_RecordsWhyTheRunEnded(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	reg := newTestRegistry(t, st)
+
+	resumableTask := newTestTask(t, wm, "hang")
+	resumable, err := reg.Start(context.Background(), wm, runner, resumableTask.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	freshTask := newTestTask(t, wm, "hang")
+	fresh, err := reg.Start(context.Background(), wm, runner, freshTask.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForHistoryLen(t, reg, resumable, 1, 5*time.Second)
+	waitForHistoryLen(t, reg, fresh, 1, 5*time.Second)
+	bindResumableSession(t, st, resumable, taskrunner.ProviderGLM)
+
+	reg.CloseAll()
+
+	for id, want := range map[string]struct{ reason, disposition string }{
+		resumable: {StopReasonDaemonRestart, DispositionNeedsContinue},
+		fresh:     {StopReasonDaemonRestartFresh, ""},
+	} {
+		_, status, err := reg.History(id)
+		if err != nil {
+			t.Fatalf("History(%q) error = %v", id, err)
+		}
+		if status.Status != StatusStopped || status.StopReason != want.reason || status.Disposition != want.disposition {
+			t.Fatalf("run %q after CloseAll = status %q reason %q disposition %q, want stopped %q %q", id, status.Status, status.StopReason, status.Disposition, want.reason, want.disposition)
+		}
+		row, err := st.GetRun(id)
+		if err != nil {
+			t.Fatalf("store.GetRun(%q) error = %v", id, err)
+		}
+		if row.StopReason != want.reason {
+			t.Fatalf("persisted stop reason for %q = %q, want %q", id, row.StopReason, want.reason)
+		}
+	}
+}
+
+// After a crash (no CloseAll) the startup reconciliation records the same reason.
+func TestRegistry_InterruptedReconciliation_RecordsWhyTheRunEnded(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "hang")
+	runner := newTestRunner(wm)
+	reg1 := newTestRegistry(t, st)
+
+	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForHistoryLen(t, reg1, runID, 1, 5*time.Second)
+	t.Cleanup(func() { _ = reg1.Stop(runID) })
+	bindResumableSession(t, st, runID, taskrunner.ProviderGLM)
+
+	reg2 := newTestRegistry(t, st)
+	_, status, err := reg2.History(runID)
+	if err != nil {
+		t.Fatalf("History() on reg2 error = %v", err)
+	}
+	if status.Status != StatusInterrupted || status.StopReason != StopReasonDaemonRestart || status.Disposition != DispositionNeedsContinue {
+		t.Fatalf("rehydrated run = status %q reason %q disposition %q, want interrupted %q needs-continue", status.Status, status.StopReason, status.Disposition, StopReasonDaemonRestart)
+	}
+}
