@@ -410,6 +410,11 @@ func TestRunner_RunPrompt_ClaudeNative_PermissionModeFlags(t *testing.T) {
 			if v, ok := flagValue(args, "--allowedTools"); ok {
 				t.Fatalf("--allowedTools = %q, want none (no smind allowlist)", v)
 			}
+			// Without --permission-prompt-tool stdio a current claude CLI
+			// denies anything that would prompt and never asks the daemon.
+			if v, _ := flagValue(args, "--permission-prompt-tool"); v != "stdio" {
+				t.Fatalf("--permission-prompt-tool = %q, want stdio (args %v)", v, args)
+			}
 		})
 	}
 }

@@ -179,7 +179,19 @@ func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseT
 		summary = fmt.Sprintf("run Write %s (%s)", path, describeWrite(a.cwd, path, content, false, ""))
 	}
 
-	optionID, err := a.decider.Decide(ctx, summary, opts)
+	var optionID string
+	var err error
+	if detail := claudeBashDetail(req); detail != nil {
+		// The command is what a human approving a Bash call must see; the
+		// summary alone says only "run Bash".
+		if dd, ok := a.decider.(DetailedPermissionDecider); ok {
+			optionID, err = dd.DecideDetailed(ctx, summary, detail, opts)
+		} else {
+			optionID, err = a.decider.Decide(ctx, summary, opts)
+		}
+	} else {
+		optionID, err = a.decider.Decide(ctx, summary, opts)
+	}
 	if err != nil {
 		return false, nil, "", nil, false, err
 	}
@@ -187,6 +199,20 @@ func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseT
 		return true, req.Input, "", nil, false, nil
 	}
 	return false, nil, claudeFixedDenyMessage, nil, false, nil
+}
+
+// claudeBashDetail is the structured detail of a Bash can_use_tool request:
+// the same execute shape ACP execute tool calls produce (command, capped), so
+// the CLI, MCP and web render it the way they do for GLM. nil for any other
+// tool or a request without a command string.
+func claudeBashDetail(req claudecode.CanUseToolRequest) *PermissionDetail {
+	cmd, ok := req.Input["command"].(string)
+	if !ok || req.ToolName != "Bash" {
+		return nil
+	}
+	d := &PermissionDetail{Kind: "execute"}
+	d.Command, d.Truncated = capBytes(cmd, detailCommandMaxBytes)
+	return d
 }
 
 // Synthesized PermissionOption IDs for Codex-native turns, whose wire
