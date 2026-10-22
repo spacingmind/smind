@@ -68,8 +68,9 @@ forges, audio/video, restoring attachments on "Edit & resend" (O6), attachment q
   context blocks exactly as ADR §3.1 (golden-tested), image notes carry the absolute path, and claude-native gets `Delivery.AddDirs` for the set.
 - AC12. **Never logged.** A sentinel inside a base64 payload appears in none of: daemon log output, the event bus, `run_events`, `request_log`,
   `run.logs`, error messages, and learning transcripts (which carry `[attachment: …]` markers only).
-- AC13. **Limits.** `/ws` closes a message over 16 MiB with 1009. A relay-bridged connection rejects a request over 1,048,551 bytes with
-  `attachment_too_large` naming the limit. `daemon.info.attachments` reports the per-transport `maxMessageBytes`.
+- AC13. **Limits.** `/ws` closes a message over 16 MiB with 1009. `daemon.info.attachments` reports the per-transport `maxMessageBytes` (16 MiB direct, 1,048,551
+  relay). Over a relay-bridged connection `run.attachment` refuses with `attachment_too_large` when the base64 payload would not fit (a request that large cannot
+  arrive at all: the E2EE channel would have failed on the client's `Send`).
 - AC14. **Cleanup.** Deleting a task removes its sets; the start-up sweep removes unreferenced sets older than 24 h and keeps younger ones and
   referenced ones.
 - AC15. **Queue and interrupt parity.** Attachments work with `whenBusy` `queue`, `interrupt` and `reject` identically to text.
@@ -182,6 +183,14 @@ flicker, reload/reconnect shows them), `resubmit-reuse.test.tsx` (Re-run, Contin
 `TestLive_CodexReceivesLocalImage`, `TestLive_GLMReceivesFallbackAndTextFile`, `TestLive_AtFileRead`, `TestLive_GithubPRQuoted`.
 
 **Desktop**: manual on the macOS app: paste image, drop file, drop image, attach picker; `cargo test` and clippy (AC37).
+
+## Implementation notes (deviations from the ADR text, same behaviour)
+
+- Attachments reach the runners through a context value (`taskrunner.WithPromptAttachments`, the `DeliveryFrom(ctx)` pattern) and a `runs.WithAttachments` StartOption, instead of changing
+  the `RunPrompt`/`Prompt` signatures; the render step runs inside the runner because only it knows whether it can send images natively.
+- The attachment store is optional on the API (`SetAttachmentStore`); nil means the feature is off and `daemon.info` has no `attachments` field, which is how clients feature-detect.
+- SDK names are `PromptBlock`/`PromptText`/`PromptImage` (`spacingmind/claude-agent-sdk-go#22`).
+- PR 6a's Attach button opens the file picker directly; it becomes a menu when 6b/6c add the mention and GitHub items.
 
 ## Decisions
 
