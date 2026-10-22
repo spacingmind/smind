@@ -426,17 +426,44 @@ func cmdTaskList(args []string) int {
 }
 
 // cmdTaskSendUsage is printed on any argument error in cmdTaskSend.
-const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking off|standard|extended] [--detach]"
+const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking off|standard|extended] [--detach] [--verbose]"
 
 // unpinnedModelNote is the stderr note printed when a claude-native run
-// starts without --model: the Claude CLI then runs its own default model for
-// the login, which may be a costly one. "" for every other case, including
-// the explicit --model default (a deliberate choice of the provider default).
-func unpinnedModelNote(provider, model string) string {
+// starts without --model. With a configured default (config
+// providers.claude-native.defaultModel, reported by provider.list) it says
+// which model the run will use; without one the Claude CLI runs its own
+// default for the login, which may be a costly one, so the note says how to
+// pin. "" for every other case, including the explicit --model default (a
+// deliberate choice of the provider default).
+func unpinnedModelNote(provider, model, configuredDefault string) string {
 	if provider != string(taskrunner.ProviderClaudeNative) || model != "" {
 		return ""
 	}
+	if configuredDefault != "" {
+		return fmt.Sprintf("note: no --model given; using the configured default model %s (providers.%s.defaultModel). Override with --model.\n", configuredDefault, provider)
+	}
 	return "note: no --model given; claude-native uses the Claude CLI's own default model for this login (it may be Opus). Pin one with --model sonnet|haiku|opus or a full id.\n"
+}
+
+// providerDefaultModel is provider's configured default model as provider.list
+// reports it, "" when none is set or the lookup fails (the note then falls
+// back to the unconfigured wording).
+func providerDefaultModel(ctx context.Context, client *wsclient.Client, provider string) string {
+	var res struct {
+		Providers []struct {
+			ID           string `json:"id"`
+			DefaultModel string `json:"defaultModel"`
+		} `json:"providers"`
+	}
+	if err := client.Call(ctx, "provider.list", nil, &res); err != nil {
+		return ""
+	}
+	for _, p := range res.Providers {
+		if p.ID == provider {
+			return p.DefaultModel
+		}
+	}
+	return ""
 }
 
 // approvalPolicyRemovedMsg is printed for the removed --approval-policy
@@ -469,7 +496,7 @@ func cmdTaskSend(args []string) int {
 	// free-form positional text, so stdlib flag parsing can't reliably
 	// separate it from flags.
 	var taskIDArg, provider, mode, chatArg, whenBusy, model string
-	var autoAccept, detach bool
+	var autoAccept, detach, verbose bool
 	var thinking string
 	var promptParts []string
 	for i := 0; i < len(args); i++ {
@@ -477,6 +504,8 @@ func cmdTaskSend(args []string) int {
 		switch {
 		case a == "--detach":
 			detach = true
+		case a == "--verbose":
+			verbose = true
 		case a == "--thinking":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
@@ -612,7 +641,9 @@ func cmdTaskSend(args []string) int {
 			return 2
 		}
 	}
-	fmt.Fprint(os.Stderr, unpinnedModelNote(provider, model))
+	if provider == string(taskrunner.ProviderClaudeNative) && model == "" {
+		fmt.Fprint(os.Stderr, unpinnedModelNote(provider, model, providerDefaultModel(ctx, client, provider)))
+	}
 	var start struct {
 		RunID       string `json:"runId"`
 		Queued      bool   `json:"queued"`
@@ -633,8 +664,11 @@ func cmdTaskSend(args []string) int {
 		return 0
 	}
 
-	return streamRun(ctx, client, start.RunID)
+	return streamRun(ctx, client, start.RunID, viewOptions{verbose: verbose, autoAccept: autoAccept})
 }
+
+// cmdTaskAttachUsage is printed on any argument error in cmdTaskAttach.
+const cmdTaskAttachUsage = "usage: smind task attach <runId> [--verbose]"
 
 // cmdTaskAttach streams an existing run's output, standalone -- the same
 // run.attach mechanics as `task send`'s foreground streaming, minus the
@@ -643,11 +677,23 @@ func cmdTaskSend(args []string) int {
 // internal/runs.Registry.Subscribe) means this prints history and exits
 // cleanly rather than hanging.
 func cmdTaskAttach(args []string) int {
-	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: smind task attach <runId>")
+	var runID string
+	var verbose bool
+	for _, a := range args {
+		switch {
+		case a == "--verbose":
+			verbose = true
+		case strings.HasPrefix(a, "-"), runID != "":
+			fmt.Fprintln(os.Stderr, cmdTaskAttachUsage)
+			return 2
+		default:
+			runID = a
+		}
+	}
+	if runID == "" {
+		fmt.Fprintln(os.Stderr, cmdTaskAttachUsage)
 		return 2
 	}
-	runID := args[0]
 
 	client, err := dialDaemon(context.Background())
 	if err != nil {
@@ -659,7 +705,23 @@ func cmdTaskAttach(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return streamRun(ctx, client, runID)
+	return streamRun(ctx, client, runID, viewOptions{verbose: verbose, autoAccept: runAutoAccept(ctx, client, runID)})
+}
+
+// runAutoAccept reports whether run runID auto-approves its permission
+// prompts, so a viewer attaching to it can print each as one line. Best
+// effort: any failure is false, which only means the full blocks are printed.
+func runAutoAccept(ctx context.Context, client *wsclient.Client, runID string) bool {
+	var rows []runSummaryRow
+	if err := client.Call(ctx, "run.list", map[string]any{}, &rows); err != nil {
+		return false
+	}
+	for _, r := range rows {
+		if r.ID == runID {
+			return r.AutoAccept
+		}
+	}
+	return false
 }
 
 // streamRun drives one run.attach call, printing each "chunk" event's text
@@ -675,9 +737,9 @@ func cmdTaskAttach(args []string) int {
 // stops the run -- see internal/wsapi/handlers.go's attachAndStream) --
 // distinct from a real terminal error/stop reported by the run itself,
 // which arrives as a plain *wsclient.RPCError instead.
-func streamRun(ctx context.Context, client *wsclient.Client, runID string) int {
+func streamRun(ctx context.Context, client *wsclient.Client, runID string, opts viewOptions) int {
 	var result attachResult
-	names := toolCallNames{}
+	v := newRunViewer(runID, opts)
 	err := client.CallStream(ctx, "run.attach", map[string]any{"runId": runID}, func(event string, params json.RawMessage) {
 		switch event {
 		case "chunk", "user_message", "thinking":
@@ -690,19 +752,19 @@ func streamRun(ctx context.Context, client *wsclient.Client, runID string) int {
 			if err := json.Unmarshal(params, &p); err != nil {
 				return
 			}
-			fmt.Print(p.Text)
+			v.text(p.Text)
 		case "tool_call":
 			var p toolCallEventParams
 			if err := json.Unmarshal(params, &p); err != nil {
 				return
 			}
-			fmt.Print(names.render(p))
+			v.toolCall(p)
 		case "raw":
 			var p rawEventParams
 			if err := json.Unmarshal(params, &p); err != nil {
 				return
 			}
-			fmt.Print(renderRaw(p))
+			v.raw(p)
 		case "permission_request":
 			var p struct {
 				RequestID string                   `json:"requestId"`
@@ -713,7 +775,7 @@ func streamRun(ctx context.Context, client *wsclient.Client, runID string) int {
 			if err := json.Unmarshal(params, &p); err != nil {
 				return
 			}
-			fmt.Print(renderPermissionRequest(runID, p.RequestID, p.Summary, p.Options, p.Detail))
+			v.permissionRequest(p.RequestID, p.Summary, p.Options, p.Detail)
 		case "permission_resolved":
 			var p struct {
 				RequestID string `json:"requestId"`
@@ -723,9 +785,10 @@ func streamRun(ctx context.Context, client *wsclient.Client, runID string) int {
 			if err := json.Unmarshal(params, &p); err != nil {
 				return
 			}
-			fmt.Print(renderPermissionResolved(p.RequestID, p.OptionID, p.Reason))
+			v.permissionResolved(p.RequestID, p.OptionID, p.Reason)
 		}
 	}, &result)
+	v.flush()
 	fmt.Println()
 
 	if err != nil {
@@ -743,7 +806,7 @@ func streamRun(ctx context.Context, client *wsclient.Client, runID string) int {
 // cmdTaskLogsUsage is printed on any argument error -- kept as a constant
 // (rather than inline at each call site) so it's identical whichever
 // invalid-argument branch in cmdTaskLogs triggers it.
-const cmdTaskLogsUsage = "usage: smind task logs <runId> [-f|--follow] [--tail N]"
+const cmdTaskLogsUsage = "usage: smind task logs <runId> [-f|--follow] [--tail N] [--verbose]"
 
 // cmdTaskLogs is a one-shot run.logs by default (prints history + status,
 // exits). --tail N passes tail through unchanged. -f/--follow streams
@@ -760,13 +823,15 @@ func cmdTaskLogs(args []string) int {
 	// "--tail" and "5" as unparsed positional args and fail. This loop
 	// accepts the runId and the flags in any order/position instead.
 	var runID string
-	var follow bool
+	var follow, verbose bool
 	var tail int
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
 		case a == "-f" || a == "--follow":
 			follow = true
+		case a == "--verbose":
+			verbose = true
 		case a == "--tail":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, cmdTaskLogsUsage)
@@ -812,7 +877,7 @@ func cmdTaskLogs(args []string) int {
 	if follow {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		return streamRun(ctx, client, runID)
+		return streamRun(ctx, client, runID, viewOptions{verbose: verbose, autoAccept: runAutoAccept(ctx, client, runID)})
 	}
 
 	var result runLogsResult
@@ -821,7 +886,7 @@ func cmdTaskLogs(args []string) int {
 		fmt.Fprintf(os.Stderr, "task logs: %v\n", err)
 		return 1
 	}
-	printRunLogs(result)
+	printRunLogs(result, viewOptions{verbose: verbose})
 	return 0
 }
 
@@ -872,20 +937,41 @@ func (n toolCallNames) render(p toolCallEventParams) string {
 	}
 }
 
-func printRunLogs(result runLogsResult) {
-	names := toolCallNames{}
+func printRunLogs(result runLogsResult, opts viewOptions) {
+	v := newRunViewer(result.RunID, opts)
+	// The listing already holds every outcome, so a request that was
+	// auto-accepted collapses to one line without any holding: index the
+	// resolutions first, and skip the resolution line a collapsed request
+	// already covered.
+	autoAccepted := map[string]string{}
+	for _, e := range result.Events {
+		if e.Type == "permission_resolved" && e.Reason == permissionReasonAutoAccept {
+			autoAccepted[e.RequestID] = e.OptionID
+		}
+	}
 	for _, e := range result.Events {
 		switch e.Type {
 		case "chunk", "user_message", "thinking":
-			fmt.Print(e.Text)
+			v.text(e.Text)
 		case "tool_call":
-			fmt.Print(names.render(e.toolCallEventParams))
+			v.toolCall(e.toolCallEventParams)
 		case "raw":
-			fmt.Print(renderRaw(e.rawEventParams))
+			v.raw(e.rawEventParams)
 		case "permission_request":
-			fmt.Print(renderPermissionRequest(result.RunID, e.RequestID, e.Summary, e.Options, e.Detail))
+			if optionID, ok := autoAccepted[e.RequestID]; ok {
+				v.autoAcceptedLine(e.Summary, e.Detail, optionID)
+				continue
+			}
+			v.mu.Lock()
+			v.print(renderPermissionRequest(result.RunID, e.RequestID, e.Summary, e.Options, e.Detail))
+			v.mu.Unlock()
 		case "permission_resolved":
-			fmt.Print(renderPermissionResolved(e.RequestID, e.OptionID, e.Reason))
+			if _, ok := autoAccepted[e.RequestID]; ok {
+				continue
+			}
+			v.mu.Lock()
+			v.print(renderPermissionResolved(e.RequestID, e.OptionID, e.Reason))
+			v.mu.Unlock()
 		}
 	}
 	fmt.Println()
@@ -1460,6 +1546,8 @@ type runSummaryRow struct {
 	StopReason string
 	// ThinkingLevel is the run's thinking level ("" when unspecified).
 	ThinkingLevel string
+	// AutoAccept is whether the run auto-approves its permission prompts.
+	AutoAccept bool
 	// Model is the requested model ("" = the provider's default); Usage.Model
 	// is the model the agent reported using, when it reported one.
 	Model string

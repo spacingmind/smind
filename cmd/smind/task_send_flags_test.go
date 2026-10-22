@@ -135,13 +135,28 @@ func TestUnpinnedModelNote(t *testing.T) {
 		{"codex-native", "", false},
 	}
 	for _, tt := range tests {
-		got := unpinnedModelNote(tt.provider, tt.model)
+		got := unpinnedModelNote(tt.provider, tt.model, "")
 		if (got != "") != tt.wantNote {
 			t.Errorf("unpinnedModelNote(%q, %q) = %q, want note=%v", tt.provider, tt.model, got, tt.wantNote)
 		}
 		if got != "" && (!strings.Contains(got, "Claude CLI's own default") || !strings.HasSuffix(got, "\n")) {
 			t.Errorf("unpinnedModelNote note = %q, want the default-model wording and a trailing newline", got)
 		}
+	}
+}
+
+// TestUnpinnedModelNote_ConfiguredDefault: with a configured default the note
+// names the model instead of warning about the CLI's own default.
+func TestUnpinnedModelNote_ConfiguredDefault(t *testing.T) {
+	got := unpinnedModelNote("claude-native", "", "sonnet")
+	if !strings.Contains(got, "configured default model sonnet") || strings.Contains(got, "may be Opus") {
+		t.Fatalf("note = %q, want the configured model named and no Opus warning", got)
+	}
+	if got := unpinnedModelNote("claude-native", "haiku", "sonnet"); got != "" {
+		t.Fatalf("pinned run note = %q, want none", got)
+	}
+	if got := unpinnedModelNote("glm", "", "x"); got != "" {
+		t.Fatalf("glm note = %q, want none", got)
 	}
 }
 

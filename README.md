@@ -231,6 +231,24 @@ smind task new <workspaceId> "fix the failing test"
 smind task send <taskId> glm "fix the failing test"   # or open the web UI and use the Chat tab
 ```
 
+### Driving agents from a script
+
+`smind task send` streams the run and blocks until it ends. For orchestration,
+start it and come back later:
+
+```sh
+RUN=$(smind task send <taskId> glm "<prompt>" --auto-accept --detach)   # prints just the run id
+smind task logs "$RUN" -f      # follow it (also: smind task attach "$RUN")
+smind task runs <taskId>       # status, and the MODEL each run used
+```
+
+Output stays readable by default: raw ACP session updates (such as the skill
+list an agent advertises, several KB of JSON) are hidden, and with
+`--auto-accept` each permission the daemon approves prints as one line
+(`[permission] auto-accepted Run command: go test ./... -> allow`) instead of
+the approve/deny block. Pass `--verbose` to `send`, `attach` or `logs` to see
+the raw events. A prompt that needs a human still prints in full.
+
 ### Choosing a task's starting point
 
 By default a task forks from the workspace checkout's current `HEAD`, so a stale
