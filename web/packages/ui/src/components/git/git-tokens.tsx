@@ -51,9 +51,9 @@ export function GitTokens({ git }: { git: TaskGit }) {
   return (
     <p
       data-testid="git-tokens"
-      className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-ui-xs tabular-nums text-foreground-muted"
+      className="flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-ui-xs tabular-nums text-foreground-muted"
     >
-      {tokens.flatMap((token, i) => (i === 0 ? [token] : [<span key={`sep-${i}`} aria-hidden>·</span>, token]))}
+      {tokens}
     </p>
   );
 }

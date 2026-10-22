@@ -79,6 +79,13 @@ describe("prChipModel", () => {
     expect(fresh.detail).toContain("GitHub isn't answering; showing the last known state.");
   });
 
+  it("shows the age in the label of a stale snapshot, not only in the tooltip", () => {
+    const nineMinAgo = new Date(NOW - 9 * 60 * 1000).toISOString();
+    expect(prChipModel(pr({ fetchedAt: nineMinAgo, stale: "budget" }), NOW).label).toBe("#42 · Open · 9 min ago");
+    // fresh or merely old-but-not-stale snapshots keep the plain label
+    expect(prChipModel(pr({ fetchedAt: nineMinAgo, stale: "" }), NOW).label).toBe("#42 · Open");
+  });
+
   it("clips a long title", () => {
     const m = prChipModel(pr({ title: "x".repeat(300) }), NOW);
     expect(m.detail.startsWith("x".repeat(119) + "…")).toBe(true);

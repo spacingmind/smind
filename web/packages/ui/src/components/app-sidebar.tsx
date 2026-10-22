@@ -2103,8 +2103,8 @@ const TaskRow = memo(function TaskRow({
                       className="shrink-0 text-ui-xs tabular-nums @max-[14rem]/sb:hidden"
                       title={`${git.diff.files} changed, +${git.diff.insertions} -${git.diff.deletions}`}
                     >
-                      <span className="text-success">+{git.diff.insertions}</span>{" "}
-                      <span className="text-destructive">-{git.diff.deletions}</span>
+                      <span className={cn("text-success", git.diff.insertions === 0 && "opacity-50")}>+{git.diff.insertions}</span>{" "}
+                      <span className={cn("text-destructive", git.diff.deletions === 0 && "opacity-50")}>-{git.diff.deletions}</span>
                     </span>
                   )}
                   {git && (

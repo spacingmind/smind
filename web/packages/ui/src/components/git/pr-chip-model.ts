@@ -32,12 +32,16 @@ export function prChipModel(pr: TaskGitPr, nowMs: number): PrChipModel {
   const danger = segment === "Changes requested" || segment === "Conflicts" || (pr.checks?.failed ?? 0) > 0;
   const tone: "neutral" | "danger" = danger && pr.state === "open" ? "danger" : "neutral";
 
-  const label = segment ? `#${pr.number} · ${state} · ${segment}` : `#${pr.number} · ${state}`;
+  let label = segment ? `#${pr.number} · ${state} · ${segment}` : `#${pr.number} · ${state}`;
+  // A snapshot the daemon could not refresh says how old it is (never by tooltip alone).
+  const fetchedAt = Date.parse(pr.fetchedAt ?? "");
+  if (pr.stale && !Number.isNaN(fetchedAt)) {
+    label += ` · ${Math.max(1, Math.round((nowMs - fetchedAt) / 60000))} min ago`;
+  }
 
   const parts: string[] = [`${clip(pr.title, 120)} — ${pr.repo ?? ""}`];
-  const fetchedMs = Date.parse(pr.fetchedAt ?? "");
-  if (!Number.isNaN(fetchedMs) && nowMs - fetchedMs > 2 * 60 * 1000) {
-    parts.push(`updated ${Math.max(1, Math.round((nowMs - fetchedMs) / 60000))} min ago`);
+  if (!Number.isNaN(fetchedAt) && nowMs - fetchedAt > 2 * 60 * 1000) {
+    parts.push(`updated ${Math.max(1, Math.round((nowMs - fetchedAt) / 60000))} min ago`);
   }
   const staleSentence = pr.stale ? STALE_SENTENCES[pr.stale] : undefined;
   if (staleSentence) parts.push(staleSentence);
