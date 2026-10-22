@@ -555,6 +555,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
                 onStop={handleStop}
                 onSend={handleSend}
                 onSendNow={handleSendNow}
+                placeholder={state.run === null ? 'Send the first prompt…' : undefined}
               />
             </View>
           </KeyboardAvoidingView>
