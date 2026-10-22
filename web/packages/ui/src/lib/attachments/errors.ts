@@ -20,6 +20,19 @@ export function attachmentErrorMessage(err: unknown, limits: AttachmentLimits | 
       return "An image's contents do not match its file type.";
     case "invalid_base64":
       return "Could not read an attachment.";
+    // ADR-0039 §6's forge vocabulary, for the PR/issue attachments the GitHub picker adds in a later PR.
+    case "forge_cli_missing":
+      return "GitHub is unavailable: gh is not installed on the daemon host.";
+    case "forge_unauthenticated":
+      return "GitHub is unavailable: gh is not logged in on the daemon host.";
+    case "forge_no_remote":
+      return "This workspace has no GitHub remote.";
+    case "forge_not_found":
+      return "That pull request or issue was not found.";
+    case "forge_rate_limited":
+      return "GitHub is rate limiting the daemon; try again in a few minutes.";
+    case "forge_timeout":
+      return "GitHub took too long to answer.";
     default:
       return message;
   }

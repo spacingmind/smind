@@ -6,8 +6,11 @@ import { Icons } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import type { DraftAttachment } from "@/stores/composer-attachments-store";
 
-/** The type label under a file name: "pdf" from application/pdf, else the MIME as sent. */
-function typeLabel(mimeType: string): string {
+/** The type label under a file name: its extension ("PDF", "TXT"), else the MIME subtype ("text/plain" is "PLAIN" only as a last resort). */
+function typeLabel(name: string, mimeType: string): string {
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot + 1) : "";
+  if (ext.length > 0 && ext.length <= 5 && /^[A-Za-z0-9]+$/.test(ext)) return ext.toUpperCase();
   const sub = mimeType.split("/")[1];
   return sub ? sub.replace(/^x-/, "").split("+")[0].toUpperCase() : mimeType;
 }
@@ -85,7 +88,7 @@ export function AttachmentPill({
               {item.name}
             </span>
             <span className={cn("truncate text-ui-xs", item.error ? "text-destructive" : "text-foreground-muted")}>
-              {item.error ?? `${typeLabel(item.mimeType)} · ${formatBytes(item.size)}`}
+              {item.error ?? `${typeLabel(item.name, item.mimeType)} · ${formatBytes(item.size)}`}
             </span>
           </span>
         </div>

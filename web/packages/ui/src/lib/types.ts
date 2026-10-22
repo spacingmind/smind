@@ -910,8 +910,12 @@ export interface AttachmentLimits {
   maxTotalBytes: number;
   maxMessageBytes: number;
   images: string[];
-  /** Per-forge availability on the daemon host; an object so more fields can be added (authenticated, login, host). */
-  forge: { github: { installed: boolean } };
+}
+
+/** `daemon.info.forge` (ADR-0039 §8): the forge CLI capability of the daemon host. `cli` is whether `gh` is on its PATH. */
+export interface DaemonForge {
+  provider: "github";
+  cli: boolean;
 }
 
 /** `run.attachment` result. */

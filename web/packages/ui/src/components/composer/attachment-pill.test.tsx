@@ -30,6 +30,14 @@ describe("AttachmentPill", () => {
     expect(screen.getByText("PDF · 88 KiB")).toBeInTheDocument();
   });
 
+  it("labels a file by its extension, not by the MIME subtype", () => {
+    render(<AttachmentPill item={{ ...doc, name: "notes.txt", mimeType: "text/plain", size: 550 }} onRemove={() => {}} />);
+    expect(screen.getByText("TXT · 550 B")).toBeInTheDocument();
+    cleanup();
+    render(<AttachmentPill item={{ ...doc, name: "Makefile", mimeType: "text/plain", size: 10 }} onRemove={() => {}} />);
+    expect(screen.getByText("PLAIN · 10 B")).toBeInTheDocument();
+  });
+
   it("close badge: hidden until hover/focus on pointer devices, always shown on touch", () => {
     stubHover(true);
     render(<AttachmentPill item={doc} onRemove={() => {}} />);

@@ -363,7 +363,8 @@ export function Composer({
   const hasText = draft.value.trim() !== "";
   const noImageProvider = providers.find((p) => p.id === provider);
   const showImageHint = attachLimits !== null && noImageProvider?.images === "no" && attachItems.some((i) => i.kind === "image");
-  const showFocusHint = focusCombo !== null && canSend && !focused && draft.value === "";
+  // Not while the tray is showing: the hint sits at the card's top-right and would read as part of the tray row.
+  const showFocusHint = focusCombo !== null && canSend && !focused && draft.value === "" && attachItems.length === 0;
 
   return (
     <form onSubmit={handleFormSubmit} data-testid="composer" className="mx-auto flex w-full max-w-3xl shrink-0 flex-col gap-2 px-4 pb-3 pt-2">
