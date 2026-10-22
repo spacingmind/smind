@@ -35,6 +35,20 @@ describe('RunFollower', () => {
     expect(f.liveRunId).toBe('r1');
   });
 
+  // The race behind the intermittent "delivered prompt has no user line": when the previous run ends, the screen refreshes
+  // (markKnown with the daemon's own list) and can see the queue-delivered run before its run.status arrives. The follower then
+  // never signals an adoption for that run, so the refresh's own attach is the only one -- it must carry the run's prompt itself.
+  it('a refresh that finds a delivered run first suppresses its later adoption', () => {
+    const onAdopt = vi.fn();
+    const f = new RunFollower(1, onAdopt, vi.fn());
+    f.markKnown('r1', 'running');
+    f.markKnown('r1', 'stopped');
+    f.markKnown('r2', 'running'); // refresh after r1 ended already lists r2
+    f.onRunStatus({ runId: 'r2', chatId: 1, status: 'running' }); // the status event that would have adopted it
+    expect(onAdopt).not.toHaveBeenCalled();
+    expect(f.liveRunId).toBe('r2');
+  });
+
   it('markKnown with running sets the live run without adopting', () => {
     const onAdopt = vi.fn();
     const onLiveChange = vi.fn();

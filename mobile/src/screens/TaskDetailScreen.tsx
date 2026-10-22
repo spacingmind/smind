@@ -126,9 +126,15 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
     };
   }, []);
 
-  /** Attach to a run and stream its events into the timeline; every run is attached at most once (attachedRuns guard).
-   * With a `prelude`, events are buffered until it settles so its line (the adopted run's prompt) precedes the run's lines. */
-  const attachRun = (runId: string, isCancelled: () => boolean, prelude?: () => Promise<string | undefined>) => {
+  /**
+   * Attach to a run and stream its events into the timeline; every run is attached at most once (attachedRuns guard).
+   * The run's own prompt comes first and its events are buffered until that line is in: a run.start / queue-delivered run's
+   * history has no user message, and the attach sites (the load, a run.status adoption, a refresh that finds a run already
+   * live) race each other, so the prompt cannot depend on which one wins.
+   */
+  const attachRun = (runId: string, isCancelled: () => boolean) => {
+    const prelude = () =>
+      adoptedPromptText({ promptForRun: (id) => queueRef.current.promptForRun(id) }, () => listRunsForTask(conn, taskId, chatIdRef.current ?? undefined), runId);
     if (attachedRuns.current.has(runId)) return;
     attachedRuns.current.add(runId);
     const handle = (event: string, params: unknown) => {
@@ -142,7 +148,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
       if (event === 'user_message') setLines((prev) => (isEchoOfOptimisticLine(prev, event, params) ? prev : [...prev, ...newLines]));
       else setLines((prev) => [...prev, ...newLines]);
     };
-    let ready = prelude === undefined;
+    let ready = false;
     const buffered: Array<[string, unknown]> = [];
     const p = conn.call('run.attach', { runId }, {
       onEvent: (event: string, params: unknown) => {
@@ -155,21 +161,19 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
       // Detach (navigate-away cancel) or the connection ending:
       // either way the screen state already says what it needs to.
     });
-    if (prelude) {
-      void prelude()
-        .then((text) => {
-          if (text && !isCancelled() && !promptShown.current.has(runId)) {
-            promptShown.current.add(runId);
-            const line = { key: `p${runId}`, role: 'user', text } as TimelineLine;
-            setLines((prev) => (prev.some((l) => l.role === 'user' && l.key.startsWith('f') && l.text === text) ? prev : [...prev, line]));
-          }
-        })
-        .catch(() => {})
-        .finally(() => {
-          ready = true;
-          for (const [e, params] of buffered.splice(0)) handle(e, params);
-        });
-    }
+    void prelude()
+      .then((text) => {
+        if (text && !isCancelled() && !promptShown.current.has(runId)) {
+          promptShown.current.add(runId);
+          const line = { key: `p${runId}`, role: 'user', text } as TimelineLine;
+          setLines((prev) => (prev.some((l) => l.role === 'user' && l.key.startsWith('f') && l.text === text) ? prev : [...prev, line]));
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        ready = true;
+        for (const [e, params] of buffered.splice(0)) handle(e, params);
+      });
   };
 
   /** Keeps the header meta and the not-finished footer in step with the latest run (e.g. a queued prompt the daemon delivered). */
@@ -267,9 +271,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
           follower = new RunFollower(
             resolved,
             (runId) => {
-              attachRun(runId, () => cancelled, () =>
-                adoptedPromptText({ promptForRun: (id) => queueRef.current.promptForRun(id) }, () => listRunsForTask(conn, taskId, chatIdRef.current ?? undefined), runId),
-              );
+              attachRun(runId, () => cancelled);
               void refreshLatest();
             },
             (live) => {
@@ -291,9 +293,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
           // Registry.Subscribe), so a separate run.logs fetch here would
           // double-render every historical line -- the web UI's
           // streamRun makes the same choice.
-          // A run.start-initiated run's history has no user message, so the run row's own prompt is shown first (a backfilled
-          // user_message, if the daemon sends one, is skipped as an echo of that line).
-          attachRun(latest.ID, () => cancelled, latest.Prompt ? () => Promise.resolve(latest.Prompt) : undefined);
+          attachRun(latest.ID, () => cancelled);
         } else {
           // A finished run: one run.logs fetch, the full transcript.
           const logs = (await conn.call('run.logs', { runId: latest.ID })) as { events?: unknown[] };

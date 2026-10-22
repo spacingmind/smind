@@ -138,7 +138,14 @@ runs passed. The cause is not proven; suspected pre-existing adoption race (queu
 
 ## Follow-ups
 
-- Investigate the rare `queue-stop` miss above (daemon-delivered prompt without its user line); a deterministic repro is needed before touching `TaskDetailScreen`'s adoption path.
+- ~~Investigate the rare `queue-stop` miss~~ **Resolved** (`fix/mobile-adopted-prompt-race`). Root cause: three places attach to a run (the load, a `run.status` adoption, and
+  `refreshLatest`), but only the adoption carried the run's prompt. When the previous run ends, `refreshLatest` runs (`onLiveChange(null)`); if it lists the queue-delivered run
+  before that run's `run.status` arrives, it marks the run known and attaches it without a prompt line, and the follower then never signals an adoption, so the delivered prompt
+  has no user line and its reply merges into the previous assistant chunk. Reproduction (deterministic): delay the follower's `onAdopt` by 150, 400 or 1000 ms (a three-line
+  local patch: wrap the adopt callback's body in `setTimeout(..., Number(process.env.EXPO_PUBLIC_JITTER_MS))`, never committed) and run
+  `SMOKE_PORT=… EXPO_PUBLIC_JITTER_MS=400 node scripts/smoke-web.mjs --stage queue-stop`: 3/3 failed with the exact symptom before the fix and 3/3 passed after it, while 16
+  un-jittered runs (two lanes in parallel) all passed. Fix: `attachRun` always prepends the run's own prompt (queue snapshot, else `run.list`) whichever site attaches.
+  The follower contract that makes the refresh path the only attach is pinned in `runFollower.test.ts`.
 - Persist the last provider/model/mode across launches (secure store or async storage).
 - ADR-0039 G4 start modes (HEAD / branch / PR / issue) in this form; ADR-0038 attachments in the first prompt.
 - Thinking level (Claude only) is not exposed on mobile yet.
