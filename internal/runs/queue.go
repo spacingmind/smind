@@ -476,6 +476,13 @@ func (reg *Registry) ListChatQueue(chatID int64) ([]store.ChatQueueItem, error) 
 	return reg.st.ListChatQueue(chatID)
 }
 
+// GetChatQueueItem returns one queue item by id, for the chat.queueGet RPC: a
+// caller that holds only the item id of a queued prompt (the CLI's `task send
+// --detach`) can follow it to the run it becomes.
+func (reg *Registry) GetChatQueueItem(id int64) (store.ChatQueueItem, error) {
+	return reg.st.GetChatQueueItem(id)
+}
+
 // CancelQueuedItem cancels a still-queued item by id, for the
 // chat.queueCancel RPC (ADR-0021 §8). Anything not queued (already
 // delivered, already cancelled, unknown) is an error, never a silent

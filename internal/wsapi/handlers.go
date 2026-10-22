@@ -70,6 +70,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"chat.archive":             handleChatArchive(wm, reg),
 		"chat.queueList":           handleChatQueueList(reg),
 		"chat.queueCancel":         handleChatQueueCancel(reg),
+		"chat.queueGet":            handleChatQueueGet(reg),
 		"task.prompt":              handleTaskPrompt(wm, runner, reg, gh),
 		"run.start":                handleRunStart(wm, runner, reg, gh),
 		"run.list":                 handleRunList(reg),
@@ -1108,6 +1109,33 @@ func toChatQueueItemParams(items []store.ChatQueueItem) []chatQueueItemParams {
 // chatQueueListResult is the terminal result of chat.queueList.
 type chatQueueListResult struct {
 	Items []chatQueueItemParams `json:"items"`
+}
+
+// chatQueueGetResult is the terminal result of chat.queueGet.
+type chatQueueGetResult struct {
+	Item chatQueueItemParams `json:"item"`
+}
+
+// handleChatQueueGet returns one queue item by id (any status), so a caller
+// holding only the id of a queued prompt can see when it was delivered and
+// which run it became (RunID) or why it was cancelled.
+func handleChatQueueGet(reg *runs.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ItemID int64 `json:"itemId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("chat.queueGet: invalid params: %w", err)
+		}
+		if p.ItemID <= 0 {
+			return nil, fmt.Errorf("chat.queueGet: itemId is required")
+		}
+		item, err := reg.GetChatQueueItem(p.ItemID)
+		if err != nil {
+			return nil, fmt.Errorf("chat.queueGet: %w", err)
+		}
+		return chatQueueGetResult{Item: toChatQueueItemParams([]store.ChatQueueItem{item})[0]}, nil
+	}
 }
 
 // handleChatQueueCancel cancels a queued item; anything not queued
