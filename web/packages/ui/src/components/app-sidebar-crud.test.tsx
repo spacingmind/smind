@@ -522,6 +522,26 @@ describe("AppSidebar CRUD", () => {
     expect(client.calls.filter((c) => c.method === "workspace.delete")).toHaveLength(1);
   });
 
+  it("workspace row menu closes without an exit animation when an item opens a dialog (no fade overlap)", async () => {
+    const client = new FakeWsClient();
+    mount(client);
+    await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A], [TASK]);
+
+    const trigger = await revealWorkspaceActions();
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    await flush();
+    const content = await screen.findByRole("menu");
+    expect(content.className).not.toContain("animate-none");
+
+    fireEvent.click(await screen.findByText("Delete workspace"));
+    await flush();
+
+    // The dialog is up, and the menu that opened it was told to skip its
+    // fade-out (MENU_CLOSE_INSTANT) so it cannot ghost through the overlay.
+    expect(await screen.findByText("Delete workspace?")).toBeInTheDocument();
+    expect(content.className).toContain("animate-none");
+  });
+
   it("Delete workspace confirm: cancel calls no RPC", async () => {
     const client = new FakeWsClient();
     mount(client);
