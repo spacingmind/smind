@@ -10,7 +10,9 @@ import * as lib from '../lib.mjs';
  */
 async function deviceLifecycle(page, harness) {
   await page.fill('textarea, input[type="text"]', harness.pairingUrl);
-  await page.getByRole('button', { name: 'Connect' }).click();
+  // Connect -> status-card transition frames (light only: the connection happens
+  // once, so the dark frame would need a second full lifecycle to be cheap).
+  await lib.shootTransition(page, 'connect-card', 'light', () => page.getByRole('button', { name: 'Connect' }).click());
 
   try {
     await page.getByText('Waiting for approval', { exact: true }).waitFor({ timeout: 30_000 });
@@ -33,8 +35,9 @@ async function deviceLifecycle(page, harness) {
 
   await harness.cmd(`revoke ${deviceId}`);
   try {
-    // The status screen's native header repeats the card title: either match proves the screen.
-    await page.getByText('This device was revoked', { exact: true }).first().waitFor({ timeout: 30_000 });
+    // The header is the constant 'Connection' (ADR-0036 §5); the card carries the specific title.
+    await page.getByText('Connection', { exact: true }).first().waitFor({ timeout: 30_000 });
+    await page.getByText('This device was revoked', { exact: true }).waitFor({ timeout: 30_000 });
   } catch {
     lib.fail('"This device was revoked" did not appear after the daemon revoked the device');
     return;

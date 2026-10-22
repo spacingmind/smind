@@ -47,12 +47,12 @@ async function promptQueue(page, harness) {
   await page.locator('textarea').fill('hello idle');
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   try {
-    await page.getByText('user: hello idle', { exact: true }).waitFor({ timeout: 20_000 });
-    await page.waitForFunction(() => document.body.innerText.split('assistant: world!').length - 1 >= 2, null, { timeout: 30_000 });
+    await page.getByText('hello idle', { exact: true }).waitFor({ timeout: 20_000 });
+    await page.waitForFunction(() => document.body.innerText.split('Hello, world!').length - 1 >= 2, null, { timeout: 30_000 });
   } catch {
     lib.fail('an idle send did not start a run showing the prompt and its reply');
   }
-  if ((await page.getByText('user: hello idle', { exact: true }).count()) !== 1) lib.fail('the sent prompt line is not shown exactly once');
+  if ((await page.getByText('hello idle', { exact: true }).count()) !== 1) lib.fail('the sent prompt bubble is not shown exactly once');
   await lib.goBack(page);
 
   // Live: two prompts queue on the daemon.
@@ -68,15 +68,17 @@ async function promptQueue(page, harness) {
     await page.getByRole('button', { name: 'Send', exact: true }).click();
   };
   await send('second prompt');
-  await page.getByText('second prompt', { exact: true }).waitFor({ timeout: 20_000 });
+  // A queued prompt shows first as an optimistic user bubble, then as a queue row: wait for the row (its Cancel button).
+  await page.getByRole('button', { name: /Cancel queued prompt: second prompt/ }).waitFor({ timeout: 20_000 });
   await send('third prompt');
   try {
-    await page.getByText('third prompt', { exact: true }).waitFor({ timeout: 20_000 });
+    await page.getByRole('button', { name: /Cancel queued prompt: third prompt/ }).waitFor({ timeout: 20_000 });
   } catch {
     lib.fail('the second queued prompt did not appear');
     return;
   }
-  if ((await page.getByRole('button', { name: /^Cancel queued prompt/ }).count()) !== 2) lib.fail('expected two queued rows with a Cancel button');
+  const cancelCount = await page.getByRole('button', { name: /^Cancel queued prompt/ }).count();
+  if (cancelCount !== 2) lib.fail(`expected two queued rows with a Cancel button, got ${cancelCount}: ${JSON.stringify(await page.evaluate(() => document.body.innerText))}`);
   if (!(await page.locator('textarea').getAttribute('placeholder'))?.startsWith('Queue a follow-up')) lib.fail('live placeholder is not the queue wording');
   await lib.shootBothSchemes(page, 'queue-live-2-queued');
 
@@ -96,20 +98,20 @@ async function promptQueue(page, harness) {
   try {
     // The delivered run is the daemon's own: its streamed reply ("Hello, world!" from the fake agent's default scenario)
     // appears after the first run's, and the header meta moves to the new run.
-    await page.getByText('assistant: world!', { exact: true }).waitFor({ timeout: 40_000 });
+    await page.getByText('Hello, world!', { exact: true }).last().waitFor({ timeout: 40_000 });
     await page.getByText(/· glm · done$/).waitFor({ timeout: 20_000 });
   } catch {
     lib.fail(`the delivered prompt did not appear in the transcript (daemon-started run not adopted); the page says: ${JSON.stringify(await page.evaluate(() => document.body.innerText).catch(() => '?'))}`);
     return;
   }
   if (await page.getByRole('button', { name: /^Cancel queued prompt/ }).isVisible().catch(() => false)) lib.fail('the delivered prompt is still shown as queued');
-  // The prompt of a daemon-delivered run shows as a "user:" line (its streamed events do not carry it), once, before the reply.
+  // The prompt of a daemon-delivered run shows as a user bubble (its streamed events do not carry it), once, before the reply.
   try {
-    await page.getByText('user: third prompt', { exact: true }).waitFor({ timeout: 20_000 });
+    await page.getByText('third prompt', { exact: true }).waitFor({ timeout: 20_000 });
   } catch {
-    lib.fail('the delivered queued prompt is not shown as a "user:" line');
+    lib.fail('the delivered queued prompt is not shown as a user bubble');
   }
-  if ((await page.getByText('user: third prompt', { exact: true }).count()) !== 1) lib.fail('the delivered prompt line is not shown exactly once');
+  if ((await page.getByText('third prompt', { exact: true }).count()) !== 1) lib.fail('the delivered prompt bubble is not shown exactly once');
   await lib.shootBothSchemes(page, 'queue-after-delivery');
 
   // Stop: a live run has a Stop button (run.stop, no confirmation); the run ends as stopped and Stop goes away.

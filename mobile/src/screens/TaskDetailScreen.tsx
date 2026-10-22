@@ -36,8 +36,8 @@
 // prepends the prompt as a user line (keyed p<runId>).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
+import { FlatList, ListRenderItemInfo, NativeScrollEvent, NativeSyntheticEvent, StyleSheet, View } from 'react-native';
+import { Button, useNativeState } from '@expo/ui';
 import { UiHost } from '../ui/UiHost';
 import { adoptedPromptText } from '../adoptedPrompt';
 import { defaultChatId, listRunsForTask, RunSummary } from '../api';
@@ -53,7 +53,19 @@ import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { useChatQueue } from '../useChatQueue';
 import { ReconnectingBanner } from '../ui/Banner';
-import { QueuedPrompts } from './QueuedPrompts';
+import { buildTranscript, TranscriptItem } from '../transcript/coalesceMessages';
+import { nextFollowState } from '../transcript/stickToBottom';
+import { EmptyState } from '../ui/EmptyState';
+import { AssistantMessage } from './task/AssistantMessage';
+import { Composer } from './task/Composer';
+import { FooterBanner } from './task/FooterBanner';
+import { LoadingState } from './task/LoadingState';
+import { MetaLine } from './task/MetaLine';
+import { PermissionCard } from './task/PermissionCard';
+import { RunStrip } from './task/RunStrip';
+import { ThinkingRow } from './task/ThinkingRow';
+import { ToolCallRow } from './task/ToolCallRow';
+import { UserBubble } from './task/UserBubble';
 
 type LoadState =
   | { kind: 'loading' }
@@ -63,26 +75,6 @@ type LoadState =
 interface Props {
   conn: RelayConnection;
   taskId: number;
-}
-
-/** {icon, color} for a tool call's real 3-state status -- no "queued" state exists on the wire (internal/taskrunner/event.go). */
-function toolStatusIcon(theme: AppTheme, status: string): { icon: string; color: string } {
-  switch (status) {
-    case 'running':
-      return { icon: '●', color: theme.status.running };
-    case 'success':
-      return { icon: '✓', color: theme.status.success };
-    case 'failure':
-      return { icon: '✕', color: theme.status.danger };
-    default:
-      return { icon: '○', color: theme.foregroundMuted };
-  }
-}
-
-/** The permission card's tint: pending is warning-adjacent, resolved is success, an inline respond error is danger (Item 3's Acceptance Criteria). */
-function permissionTint(theme: AppTheme, req: PermissionRequestState): string {
-  if (req.error !== null) return theme.status.danger;
-  return req.status === 'resolved' ? theme.status.success : theme.status.warning;
 }
 
 export function TaskDetailScreen({ conn, taskId }: Props) {
@@ -209,7 +201,8 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
     setLiveRunId(null);
     setChatId(null);
     chatIdRef.current = null;
-    board.onChange = () => setPermissions(board.list());
+    // PermissionBoard mutates its request objects in place: hand the memoised PermissionCard fresh copies so a state change re-renders it.
+    board.onChange = () => setPermissions(board.list().map((r) => ({ ...r })));
 
     // Subscribe to run.status BEFORE the first await: a run the daemon delivers (or starts) while this screen is still
     // loading must not be missed. Events wait in `early` until the follower (which needs the chat id) exists.
@@ -416,156 +409,135 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   const canSend = draft.trim().length > 0 && state.kind === 'ready' && state.run !== null;
   const stopView = stopControlView(liveRunId, stopping);
 
+  // The not-finished footer: same visibility rule as before, now the last transcript item.
+  const footer = useMemo(() => {
+    if (state.kind !== 'ready' || state.run === null || continued || liveRunId !== null) return null;
+    return describeRunFooter(state.run);
+  }, [continued, liveRunId, state]);
+  const items = useMemo(() => buildTranscript(lines, permissions, footer), [lines, permissions, footer]);
+
+  // Stick-to-bottom (vercel-react-native-skills: never track scroll position in useState per frame): `following` is a
+  // ref written by onScroll; React state (`showJump`) changes only when the boolean flips.
+  const listRef = useRef<FlatList<TranscriptItem>>(null);
+  const following = useRef(true);
+  const [showJump, setShowJump] = useState(false);
+  const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    const next = nextFollowState(
+      { following: following.current },
+      { contentOffsetY: contentOffset.y, contentHeight: contentSize.height, layoutHeight: layoutMeasurement.height },
+    );
+    if (next.following !== following.current) {
+      following.current = next.following;
+      setShowJump(!next.following);
+    }
+  }, []);
+  const handleContentSizeChange = useCallback(() => {
+    if (following.current) listRef.current?.scrollToEnd({ animated: false });
+  }, []);
+  const handleJump = useCallback(() => {
+    following.current = true;
+    setShowJump(false);
+    listRef.current?.scrollToEnd({ animated: true });
+  }, []);
+
+  // vercel-react-native-skills: stable keys (the first line's key), memoised item components that take ids/primitives
+  // and stable callbacks. (RN's FlatList has no getItemType -- that is FlashList's, which this app does not depend on.)
+  const renderItem = useCallback(
+    ({ item }: ListRenderItemInfo<TranscriptItem>) => {
+      switch (item.type) {
+        case 'user':
+          return <UserBubble text={item.text} />;
+        case 'assistant':
+          return <AssistantMessage text={item.text} />;
+        case 'thinking':
+          return <ThinkingRow text={item.text} />;
+        case 'tool':
+          return (
+            <ToolCallRow
+              id={item.key}
+              toolName={item.toolName}
+              title={item.title}
+              status={item.status}
+              expanded={expandedToolCalls.has(item.key)}
+              onToggle={toggleExpanded}
+            />
+          );
+        case 'meta':
+          return <MetaLine text={item.text} />;
+        case 'permission':
+          return <PermissionCard request={item.request} onRespond={handlePermissionTap} />;
+        case 'footer':
+          return <FooterBanner sentence={item.sentence} onContinue={handleContinue} />;
+      }
+    },
+    [expandedToolCalls, handleContinue, handlePermissionTap, toggleExpanded],
+  );
+
   return (
     <View style={styles.screen}>
       {connState.kind === 'connecting' || connState.kind === 'reconnecting' ? <ReconnectingBanner>Reconnecting to the daemon…</ReconnectingBanner> : null}
-      <View style={styles.container}>
-        {state.kind === 'loading' && <ActivityIndicator style={styles.spinner} size="large" color={theme.primary} />}
-        {state.kind === 'error' && (
-          <View>
-            <Text style={styles.errorText}>Couldn't load this task's runs.</Text>
-            <Text style={styles.errorDetail}>{state.message}</Text>
+      {state.kind === 'loading' ? <LoadingState /> : null}
+      {state.kind === 'error' ? <EmptyState title="Couldn't load this task's runs." body={state.message} /> : null}
+      {state.kind === 'ready' && state.run === null ? (
+        <EmptyState title="No runs yet for this task." body="Start one from the daemon or web UI." />
+      ) : null}
+      {state.kind === 'ready' && state.run !== null ? (
+        <>
+          <RunStrip runId={state.run.ID} provider={state.run.Provider} status={state.run.Status} />
+          <View style={styles.listWrap}>
+            <FlatList
+              ref={listRef}
+              style={styles.list}
+              contentContainerStyle={styles.listContent}
+              data={items}
+              keyExtractor={keyExtractor}
+              renderItem={renderItem}
+              ListEmptyComponent={emptyTranscript}
+              contentInsetAdjustmentBehavior="automatic"
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
+              onContentSizeChange={handleContentSizeChange}
+            />
+            {showJump ? (
+              <View style={styles.jumpWrap} pointerEvents="box-none">
+                <UiHost>
+                  <Button label="Jump to latest" variant="outlined" onPress={handleJump} style={styles.jumpButton} />
+                </UiHost>
+              </View>
+            ) : null}
           </View>
-        )}
-        {state.kind === 'ready' && state.run === null && (
-          <Text style={styles.empty}>No runs yet for this task. Start one from the daemon or web UI.</Text>
-        )}
-        {state.kind === 'ready' && state.run !== null && (
-          <>
-            <Text style={styles.runMeta}>
-              run {state.run.ID.slice(0, 8)} · {state.run.Provider} · {state.run.Status === 'running' ? 'live' : state.run.Status}
-            </Text>
-            {(() => {
-              const footer = describeRunFooter(state.run);
-              return footer !== null && !continued && liveRunId === null ? (
-                <View style={styles.footerRow}>
-                  <Text style={[styles.footerText, { color: theme.status.warning }]}>{footer.sentence}</Text>
-                  <UiHost>
-                    <Button label="Continue" onPress={handleContinue} />
-                  </UiHost>
-                </View>
-              ) : null;
-            })()}
-            <ScrollView style={styles.transcript}>
-              {lines.length === 0 && <Text style={styles.empty}>(empty transcript)</Text>}
-              {lines.map((line) =>
-                line.toolCall ? (
-                  <ToolCallRow
-                    key={line.key}
-                    theme={theme}
-                    styles={styles}
-                    toolCall={line.toolCall}
-                    expanded={expandedToolCalls.has(line.key)}
-                    onToggle={() => toggleExpanded(line.key)}
-                  />
-                ) : (
-                  <Text
-                    key={line.key}
-                    style={line.role === 'user' ? styles.userLine : line.role === '' ? styles.metaLine : styles.assistantLine}
-                  >
-                    {line.role !== '' ? `${line.role}: ` : ''}
-                    {line.text}
-                  </Text>
-                ),
-              )}
-            </ScrollView>
-            {permissions.map((req) => {
-              const tint = permissionTint(theme, req);
-              return (
-                <View key={req.requestId} style={[styles.permissionCard, { borderColor: tint }]}>
-                  <Text style={styles.permissionSummary}>{req.summary}</Text>
-                  {req.status === 'pending' ? (
-                    <View style={styles.permissionOptions}>
-                      {req.options.map((opt) => (
-                        <UiHost key={opt.id} style={styles.permissionButton}>
-                          <Button label={opt.label} onPress={() => handlePermissionTap(req.requestId, opt.id)} />
-                        </UiHost>
-                      ))}
-                    </View>
-                  ) : (
-                    <Text style={[styles.permissionResolved, { color: tint }]}>
-                      {req.resolvedWith?.by === 'tap' ? 'chosen: ' : 'resolved: '}
-                      {req.options.find((o) => o.id === req.resolvedWith?.optionId)?.label ?? req.resolvedWith?.optionId ?? '?'}
-                    </Text>
-                  )}
-                  {req.error !== null && <Text style={styles.permissionError}>Couldn't respond: {req.error}</Text>}
-                </View>
-              );
-            })}
-            {sendError !== null && <Text style={styles.sendError}>Couldn't send: {sendError}</Text>}
-            <QueuedPrompts items={queue.items} onCancel={(id) => void queue.cancel(id)} />
-            <View style={styles.composeRow}>
-              <UiHost style={styles.composeWrap}>
-                <ExpoTextInput
-                  style={styles.composeField}
-                  textStyle={styles.composeText}
-                  value={draftState}
-                  onChangeText={(text) => {
-                    draftState.value = text;
-                    setDraft(text);
-                  }}
-                  placeholder={liveRunId !== null ? 'Queue a follow-up — it sends when this run finishes' : 'Send a follow-up prompt…'}
-                  placeholderTextColor={theme.foregroundMuted}
-                  multiline
-                />
-              </UiHost>
-              {stopView.visible && (
-                <UiHost style={styles.sendHost}>
-                  <Button label={stopView.label} onPress={handleStop} disabled={stopView.disabled} />
-                </UiHost>
-              )}
-              {liveRunId !== null && canSend && (
-                <UiHost style={styles.sendHost}>
-                  <Button label="Send now" onPress={handleSendNow} />
-                </UiHost>
-              )}
-              <UiHost style={styles.sendHost}>
-                <Button label="Send" onPress={handleSend} disabled={!canSend} />
-              </UiHost>
-            </View>
-          </>
-        )}
-      </View>
+          <View style={styles.dock}>
+            <Composer
+              draftState={draftState}
+              onChangeDraft={setDraft}
+              liveRunId={liveRunId}
+              stopView={stopView}
+              canSend={canSend}
+              sendError={sendError}
+              queueItems={queue.items}
+              onCancelQueued={(id) => void queue.cancel(id)}
+              onStop={handleStop}
+              onSend={handleSend}
+              onSendNow={handleSendNow}
+            />
+          </View>
+        </>
+      ) : null}
     </View>
   );
 }
 
-/** One collapsed-by-default tool-call row: icon for the real status, name + title, tap to expand a long title. */
-function ToolCallRow({
-  theme,
-  styles,
-  toolCall,
-  expanded,
-  onToggle,
-}: {
-  theme: AppTheme;
-  styles: ReturnType<typeof makeStyles>;
-  toolCall: { toolName: string; title: string; status: string };
-  expanded: boolean;
-  onToggle: () => void;
-}) {
-  const { icon, color } = toolStatusIcon(theme, toolCall.status);
-  return (
-    <TouchableOpacity style={styles.toolCallRow} onPress={onToggle} activeOpacity={0.7}>
-      <Text style={[styles.toolCallIcon, { color }]}>{icon}</Text>
-      <Text style={styles.toolCallName}>{toolCall.toolName}</Text>
-      {toolCall.title.length > 0 && (
-        <Text style={styles.toolCallTitle} numberOfLines={expanded ? undefined : 1}>
-          {toolCall.title}
-        </Text>
-      )}
-    </TouchableOpacity>
-  );
-}
+const keyExtractor = (item: TranscriptItem) => item.key;
+const emptyTranscript = <EmptyState title="(empty transcript)" body="Nothing has been said in this run yet." />;
 
 /** Shown by the task route when its `id` param is not a positive integer (ADR-0036 decision 4). */
 export function TaskLoadError() {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   return (
-    <View style={styles.container}>
-      <Text style={styles.errorText}>Couldn't load this task's runs.</Text>
-      <Text style={styles.errorDetail}>This task link is not valid.</Text>
+    <View style={styles.screen}>
+      <EmptyState title="Couldn't load this task's runs." body="This task link is not valid." />
     </View>
   );
 }
@@ -574,157 +546,26 @@ function makeStyles(theme: AppTheme) {
   return StyleSheet.create({
     screen: {
       flex: 1,
-      backgroundColor: theme.surface[0],
+      backgroundColor: theme.background,
     },
-    container: {
-      flex: 1,
-      backgroundColor: theme.surface[0],
+    listWrap: { flex: 1 },
+    list: { flex: 1 },
+    listContent: {
+      gap: theme.spacing[3],
+      paddingHorizontal: theme.spacing[4],
+      paddingVertical: theme.spacing[4],
+    },
+    dock: {
       paddingHorizontal: theme.spacing[4],
       paddingBottom: theme.spacing[4],
     },
-    runMeta: {
-      fontSize: theme.type.metadataLabel.fontSize,
-      color: theme.foregroundMuted,
-      marginBottom: theme.spacing[3],
-    },
-    footerRow: {
-      flexDirection: 'row',
+    jumpWrap: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: theme.spacing[3],
       alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: theme.spacing[2],
-      marginBottom: theme.spacing[2],
     },
-    footerText: {
-      flex: 1,
-      fontSize: theme.type.interface.fontSize,
-      lineHeight: theme.type.interface.lineHeight,
-      fontWeight: theme.type.interface.fontWeight,
-    },
-    spinner: {
-      marginTop: theme.spacing[8],
-    },
-    transcript: {
-      flex: 1,
-    },
-    userLine: {
-      fontFamily: theme.type.codeAnnotation.fontFamily,
-      fontSize: theme.type.codeAnnotation.fontSize,
-      color: theme.primary,
-      marginBottom: theme.spacing[2],
-    },
-    assistantLine: {
-      fontFamily: theme.type.codeAnnotation.fontFamily,
-      fontSize: theme.type.codeAnnotation.fontSize,
-      color: theme.foreground,
-      marginBottom: theme.spacing[2],
-    },
-    metaLine: {
-      fontFamily: theme.type.codeAnnotation.fontFamily,
-      fontSize: theme.type.metadataLabel.fontSize,
-      color: theme.foregroundMuted,
-      marginBottom: theme.spacing[2],
-    },
-    toolCallRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: theme.surface[2],
-      borderRadius: theme.radius.sm,
-      paddingVertical: theme.spacing[1.5],
-      paddingHorizontal: theme.spacing[2],
-      marginBottom: theme.spacing[2],
-    },
-    toolCallIcon: {
-      fontSize: theme.type.metadataLabel.fontSize,
-      marginRight: theme.spacing[1.5],
-    },
-    toolCallName: {
-      fontFamily: theme.type.codeAnnotation.fontFamily,
-      fontSize: theme.type.codeAnnotation.fontSize,
-      fontWeight: theme.type.codeAnnotation.fontWeight,
-      color: theme.foreground,
-      marginRight: theme.spacing[1.5],
-    },
-    toolCallTitle: {
-      fontFamily: theme.type.codeAnnotation.fontFamily,
-      fontSize: theme.type.codeAnnotation.fontSize,
-      color: theme.foregroundMuted,
-      flex: 1,
-    },
-    empty: {
-      color: theme.foregroundMuted,
-      fontSize: theme.type.interface.fontSize,
-      marginTop: theme.spacing[4],
-    },
-    errorText: {
-      color: theme.status.danger,
-      fontWeight: theme.type.metadataLabel.fontWeight,
-      marginBottom: theme.spacing[1],
-    },
-    errorDetail: {
-      fontFamily: theme.type.codeAnnotation.fontFamily,
-      fontSize: theme.type.codeAnnotation.fontSize,
-      color: theme.foregroundMuted,
-    },
-    permissionCard: {
-      backgroundColor: theme.surface[1],
-      borderWidth: 1,
-      borderRadius: theme.radius.md,
-      padding: theme.spacing[3],
-      marginTop: theme.spacing[2],
-    },
-    permissionSummary: {
-      fontSize: theme.type.codeAnnotation.fontSize,
-      color: theme.foreground,
-      marginBottom: theme.spacing[2],
-    },
-    permissionOptions: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-    },
-    permissionButton: {
-      marginBottom: theme.spacing[1],
-      marginRight: theme.spacing[2],
-    },
-    permissionResolved: {
-      fontSize: theme.type.metadataLabel.fontSize,
-    },
-    permissionError: {
-      fontSize: theme.type.metadataLabel.fontSize,
-      color: theme.status.danger,
-      marginTop: theme.spacing[1],
-    },
-    sendError: {
-      color: theme.status.danger,
-      fontSize: theme.type.metadataLabel.fontSize,
-      marginTop: theme.spacing[2],
-      marginBottom: theme.spacing[1],
-    },
-    composeRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-end',
-      gap: theme.spacing[2],
-      borderTopWidth: 1,
-      borderTopColor: theme.border,
-      paddingTop: theme.spacing[2],
-      marginTop: theme.spacing[2],
-    },
-    composeWrap: {
-      flex: 1,
-      maxHeight: 120,
-    },
-    sendHost: {
-      alignSelf: 'flex-end',
-    },
-    composeField: {
-      width: '100%',
-      backgroundColor: theme.surface[2],
-      borderRadius: theme.radius.md,
-      paddingHorizontal: theme.spacing[2.5],
-      paddingVertical: theme.spacing[2],
-    },
-    composeText: {
-      fontSize: theme.type.interface.fontSize,
-      color: theme.foreground,
-    },
+    jumpButton: { height: 44 },
   });
 }

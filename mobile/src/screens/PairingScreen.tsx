@@ -5,19 +5,25 @@
 // RelayConnection is handed to the app's screen stack instead of closing
 // it after one workspace.list.
 //
-// Rebuilt on the token system (mobile-ui-polish plan Item 1): every
-// color comes from useAppTheme(), never a hardcoded hex literal.
+// Rebuilt in the ZCode look (mobile-zcode-redesign M2): a keyboard-safe
+// scroll view over theme.background, the form in the frozen Card, every
+// color from useAppTheme(). A native @expo/ui FieldGroup was NOT used: the
+// universal FieldGroup is a full-screen web ScrollView with its own
+// hardcoded gray[50] background and padding (node_modules/@expo/ui/src/
+// universal/FieldGroup/FieldGroup.tsx), which would break the theme
+// background and the keyboard-safe scrolling here -- the documented
+// fallback (Card + the same TextInput/Button) is used instead.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text } from 'react-native';
 import { Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
 import { UiHost } from '../ui/UiHost';
-import { StatusBar } from 'expo-status-bar';
 import { CERTIFICATE_HELP, describeState } from '../relay/connectionStatus';
 import { defaultDeviceLabel, loadPlatformIdentity, resetDeviceIdentity } from '../relay/platformKeyStore';
 import { ConnectionState, RelayConnection } from '../relay/RelayConnection';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
+import { Card } from '../ui/Card';
 import { ConnectionStatusCard } from './ConnectionStatusCard';
 import { DaemonPasswordPrompt } from './DaemonPasswordPrompt';
 
@@ -124,90 +130,93 @@ export function PairingScreen({ onConnected }: Props) {
           : [];
 
   return (
-    <View style={styles.container}>
-      <StatusBar style="auto" />
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      contentInsetAdjustmentBehavior="automatic"
+      keyboardShouldPersistTaps="handled"
+    >
       <Text style={styles.label}>Paste a pairing URL from `smind relay offer`:</Text>
-      <UiHost style={styles.inputHost}>
-        <ExpoTextInput
-          style={styles.inputBox}
-          textStyle={styles.inputText}
-          multiline
-          numberOfLines={3}
-          autoCapitalize="none"
-          autoCorrect={false}
-          placeholder="https://spacingmind.sh/pair#offer=..."
-          placeholderTextColor={theme.foregroundMuted}
-          value={pairingUrlState}
-          onChangeText={(text) => {
-            pairingUrlState.value = text;
-            setPairingUrl(text);
-          }}
-        />
-      </UiHost>
-      <View style={styles.connectWrap}>
-        <UiHost>
+      <Card style={styles.formCard}>
+        <UiHost style={styles.inputHost}>
+          <ExpoTextInput
+            style={styles.inputBox}
+            textStyle={styles.inputText}
+            multiline
+            numberOfLines={3}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="https://spacingmind.sh/pair#offer=..."
+            placeholderTextColor={theme.foregroundSubtlest}
+            value={pairingUrlState}
+            onChangeText={(text) => {
+              pairingUrlState.value = text;
+              setPairingUrl(text);
+            }}
+          />
+        </UiHost>
+        <UiHost style={styles.connectHost}>
           <Button
+            variant="filled"
             label={busy ? 'Connecting…' : 'Connect'}
             onPress={handleConnect}
             disabled={!pairingUrl.trim() || busy}
+            style={{ height: 44 }}
           />
         </UiHost>
-      </View>
+      </Card>
       {connState && (connState.kind === 'password' || connState.kind === 'locked') ? (
         <DaemonPasswordPrompt
           state={connState}
           onSubmit={(password) => attempt.current?.submitPassword(password)}
           actions={[{ label: 'Cancel', onPress: cancelAttempt }]}
         />
-      ) : (
-        view && <ConnectionStatusCard view={view} actions={actions} />
-      )}
+      ) : view ? (
+        <ConnectionStatusCard view={view} actions={actions} />
+      ) : null}
       {status.kind === 'error' && <Text style={styles.error}>{status.message}</Text>}
-      <Text style={styles.help}>{CERTIFICATE_HELP}</Text>
-    </View>
+      <Text style={styles.help} selectable>
+        {CERTIFICATE_HELP}
+      </Text>
+    </ScrollView>
   );
 }
 
 function makeStyles(theme: AppTheme) {
   return StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: theme.surface[0],
-      paddingHorizontal: theme.spacing[4],
-    },
+    container: { flex: 1, backgroundColor: theme.background },
+    content: { padding: theme.spacing[4], gap: theme.spacing[4] },
     label: {
-      fontSize: theme.type.interface.fontSize,
-      lineHeight: theme.type.interface.lineHeight,
-      color: theme.foregroundMuted,
-      marginBottom: theme.spacing[2],
+      fontSize: theme.type.body.fontSize,
+      lineHeight: theme.type.body.lineHeight,
+      color: theme.foregroundSubtle,
     },
-    inputHost: {
-      alignSelf: 'stretch',
-    },
+    formCard: { gap: theme.spacing[3] },
+    inputHost: { alignSelf: 'stretch' },
     inputBox: {
+      backgroundColor: theme.input.background,
       borderWidth: 1,
-      borderColor: theme.border,
-      borderRadius: theme.radius.md,
+      borderColor: theme.input.border,
+      borderRadius: theme.radius.lg,
+      borderCurve: 'continuous',
       padding: theme.spacing[3],
     },
     inputText: {
-      fontSize: theme.type.codeAnnotation.fontSize,
-      fontFamily: theme.type.codeAnnotation.fontFamily,
+      // Web: 16px keeps iOS Safari from zooming on focus (expo-native-ui input floor).
+      fontSize: process.env.EXPO_OS === 'web' ? 16 : theme.type.body.fontSize,
+      fontFamily: theme.type.mono.fontFamily,
       color: theme.foreground,
     },
-    connectWrap: {
-      marginTop: theme.spacing[4],
-    },
+    connectHost: { alignSelf: 'stretch' },
     help: {
-      fontSize: theme.type.metadataLabel.fontSize,
-      lineHeight: theme.type.metadataLabel.lineHeight,
-      color: theme.foregroundMuted,
-      marginTop: theme.spacing[6],
+      fontSize: theme.type.small.fontSize,
+      lineHeight: theme.type.small.lineHeight,
+      color: theme.foregroundSubtle,
     },
     error: {
+      fontSize: theme.type.body.fontSize,
+      lineHeight: theme.type.body.lineHeight,
       color: theme.status.danger,
-      fontFamily: theme.type.codeAnnotation.fontFamily,
-      marginTop: theme.spacing[4],
     },
   });
 }

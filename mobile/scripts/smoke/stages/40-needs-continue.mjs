@@ -43,9 +43,10 @@ async function needsContinue(page, harness) {
 
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   try {
-    await page.getByText('user: Continue', { exact: true }).waitFor({ timeout: 20_000 });
+    // The follow-up prompt is a user bubble (the footer, with its Continue button, is gone the moment it is pressed).
+    await page.getByText('Continue', { exact: true }).first().waitFor({ timeout: 20_000 });
   } catch {
-    lib.fail('Continue did not start a follow-up run (no "Continue" user line)');
+    lib.fail('Continue did not start a follow-up run (no "Continue" user bubble)');
     return;
   }
   if (await page.getByText('Hit the tool-turn limit · not finished', { exact: true }).isVisible().catch(() => false)) {
