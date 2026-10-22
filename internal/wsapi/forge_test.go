@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/ghctx"
 )
 
@@ -62,8 +63,8 @@ func TestForgeSearchRPC_TypedErrorCode(t *testing.T) {
 
 	sendRequest(t, ws, "1", "forge.search", map[string]any{"taskId": taskID, "kind": "issue"})
 	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
-	if resp.Error == nil || resp.Error.Code != ghctx.CodeUnavailable || !strings.Contains(resp.Error.Message, "gh auth login") {
-		t.Fatalf("error = %+v, want code %q mentioning gh auth login", resp.Error, ghctx.CodeUnavailable)
+	if resp.Error == nil || resp.Error.Code != forge.CodeUnauthenticated || !strings.Contains(resp.Error.Message, "gh auth login") {
+		t.Fatalf("error = %+v, want code %q mentioning gh auth login", resp.Error, forge.CodeUnauthenticated)
 	}
 
 	sendRequest(t, ws, "2", "forge.search", map[string]any{"taskId": taskID, "kind": "bogus"})
@@ -85,5 +86,30 @@ func TestForgeSearchRPC_RejectsOtherForges(t *testing.T) {
 	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
 	if resp.Error == nil || !strings.Contains(resp.Error.Message, "unsupported forge") {
 		t.Fatalf("error = %+v, want unsupported forge", resp.Error)
+	}
+}
+
+func TestForgeSearch_ErrorCarriesCodeAndDetail(t *testing.T) {
+	t.Parallel()
+	srv, taskID := forgeTestServer(t, func(context.Context, string, ...string) (string, error) {
+		return "", errors.New("gh: exit status 1: HTTP 404: Not Found secretquery-ghp_" + strings.Repeat("k", 30))
+	})
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "forge.search", map[string]any{"taskId": taskID, "kind": "pr"})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error == nil || resp.Error.Code != forge.CodeNotFound {
+		t.Fatalf("error = %+v, want code %q", resp.Error, forge.CodeNotFound)
+	}
+	data, ok := resp.Error.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("error data = %#v, want an object", resp.Error.Data)
+	}
+	detail, _ := data["detail"].(string)
+	if !strings.Contains(detail, "404") || strings.Contains(detail, "ghp_") {
+		t.Fatalf("detail = %q, want scrubbed stderr", detail)
+	}
+	if strings.Contains(resp.Error.Message, "404") {
+		t.Fatalf("message must be the fixed sentence, got %q", resp.Error.Message)
 	}
 }
