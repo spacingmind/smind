@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/version"
 )
 
@@ -26,6 +27,9 @@ type DaemonInfo struct {
 	// Platform is GOOS/GOARCH, e.g. "linux/amd64".
 	Platform  string `json:"platform"`
 	StartedAt string `json:"startedAt"` // RFC 3339, UTC
+	// Attachments are the prompt-attachment limits of this connection;
+	// absent on a daemon without an attachment store (ADR-0038).
+	Attachments *AttachmentsInfo `json:"attachments,omitempty"`
 }
 
 // newDaemonInfo describes this process, started at start.
@@ -45,8 +49,12 @@ func (a *API) SetManagedBy(supervisor string) {
 	a.info.ManagedBy = supervisor
 }
 
-func handleDaemonInfo(info *DaemonInfo) handlerFunc {
-	return func(_ context.Context, _ *requestContext, _ json.RawMessage) (any, error) {
-		return *info, nil
+func handleDaemonInfo(info *DaemonInfo, reg *runs.Registry) handlerFunc {
+	return func(_ context.Context, rc *requestContext, _ json.RawMessage) (any, error) {
+		out := *info
+		if reg != nil && reg.AttachmentStore() != nil {
+			out.Attachments = attachmentsInfo(connMaxMessage(rc))
+		}
+		return out, nil
 	}
 }

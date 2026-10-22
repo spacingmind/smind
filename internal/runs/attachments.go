@@ -77,24 +77,38 @@ func (reg *Registry) ReuseAttachment(st *attach.Store, taskID int64, runID, id s
 	if err != nil || row.TaskID != taskID {
 		return attach.Item{}, "", errors.New("source run not found")
 	}
-	set, err := attach.DecodeSet(row.Attachments)
+	set, it, ok := storedItem(row.Attachments, id)
+	if !ok || (it.Kind != attach.KindImage && it.Kind != attach.KindFile) {
+		return attach.Item{}, "", fmt.Errorf("attachment %q not found", id)
+	}
+	p, err := st.Path(set.ID, it)
 	if err != nil {
 		return attach.Item{}, "", err
 	}
-	for _, it := range set.Items {
-		if it.ID != id {
-			continue
-		}
-		if it.Kind != attach.KindImage && it.Kind != attach.KindFile {
-			break
-		}
-		p, err := st.Path(set.ID, it)
-		if err != nil {
-			return attach.Item{}, "", err
-		}
-		return it, p, nil
+	return it, p, nil
+}
+
+// StoredAttachment returns runID's stored item id and its set, read from the
+// run row (so it also works for a run evicted from memory).
+func (reg *Registry) StoredAttachment(runID, id string) (attach.Set, attach.Item, bool) {
+	row, err := reg.st.GetRun(runID)
+	if err != nil {
+		return attach.Set{}, attach.Item{}, false
 	}
-	return attach.Item{}, "", fmt.Errorf("attachment %q not found", id)
+	return storedItem(row.Attachments, id)
+}
+
+func storedItem(raw, id string) (attach.Set, attach.Item, bool) {
+	set, err := attach.DecodeSet(raw)
+	if err != nil {
+		return attach.Set{}, attach.Item{}, false
+	}
+	for _, it := range set.Items {
+		if it.ID == id {
+			return set, it, true
+		}
+	}
+	return attach.Set{}, attach.Item{}, false
 }
 
 func decodeStoredAttachments(raw string) attach.Set {
@@ -110,4 +124,21 @@ func publicItems(set attach.Set) []attach.Item {
 		return nil
 	}
 	return set.Public()
+}
+
+// AttachmentStore returns the attachment store, nil when the feature is off.
+func (reg *Registry) AttachmentStore() *attach.Store { return reg.attachmentStore() }
+
+// DiscardAttachments removes a freshly accepted set whose start failed. A
+// set that a queue item or run row did reference (a failure after the
+// enqueue, e.g. the interrupt's stop) is left alone.
+func (reg *Registry) DiscardAttachments(set attach.Set) {
+	st := reg.attachmentStore()
+	if st == nil || set.ID == "" {
+		return
+	}
+	if ref, err := reg.st.ReferencedAttachmentSets(); err != nil || ref[set.ID] {
+		return
+	}
+	_ = st.Remove(set.ID)
 }

@@ -1272,6 +1272,9 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 			// empty means the provider's default. Validated against the
 			// provider's catalog by the runs registry before any spawn.
 			Model string `json:"model"`
+			// Attachments (ADR-0038) are the prompt's images, files, file
+			// references and GitHub context; omitted = today's behaviour.
+			Attachments []attach.Request `json:"attachments"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.prompt: invalid params: %w", err)
@@ -1283,8 +1286,13 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 			return nil, fmt.Errorf("task.prompt: invalid thinkingLevel %q", p.ThinkingLevel)
 		}
 
-		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, store.ChatQueueSourceHuman, 0, 0, runs.WithModel(p.Model))
+		set, err := acceptAttachments(ctx, wm, reg, p.TaskID, p.Attachments)
 		if err != nil {
+			return nil, fmt.Errorf("task.prompt: %w", err)
+		}
+		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, store.ChatQueueSourceHuman, 0, 0, startOptions(p.Model, set, reg)...)
+		if err != nil {
+			reg.DiscardAttachments(set)
 			return nil, fmt.Errorf("task.prompt: %w", err)
 		}
 		if out.Queued {
@@ -1315,7 +1323,7 @@ type runStartResult struct {
 // not stop the run, which task.prompt's own request-scoped stop-on-detach
 // behavior cannot support).
 func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry) handlerFunc {
-	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+	return func(ctx context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			TaskID int64 `json:"taskId"`
 			// ChatID is optional (ADR-0016 P1.3): omitted or 0 resolves to
@@ -1352,6 +1360,8 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			Source     string `json:"source"`
 			FromTaskID int64  `json:"fromTaskId"`
 			FromChatID int64  `json:"fromChatId"`
+			// Attachments (ADR-0038): see task.prompt.
+			Attachments []attach.Request `json:"attachments"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.start: invalid params: %w", err)
@@ -1374,8 +1384,13 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			return nil, fmt.Errorf("run.start: source %q requires fromTaskId and fromChatId", p.Source)
 		}
 
-		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, p.Source, p.FromTaskID, p.FromChatID, runs.WithModel(p.Model))
+		set, err := acceptAttachments(ctx, wm, reg, p.TaskID, p.Attachments)
 		if err != nil {
+			return nil, fmt.Errorf("run.start: %w", err)
+		}
+		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, p.Source, p.FromTaskID, p.FromChatID, startOptions(p.Model, set, reg)...)
+		if err != nil {
+			reg.DiscardAttachments(set)
 			return nil, fmt.Errorf("run.start: %w", err)
 		}
 		if out.Queued {
@@ -1635,10 +1650,13 @@ type runLogsResult struct {
 	Err         string `json:"err,omitempty"`
 	// BaseSHA/HeadSHA/Dirty are the run's git provenance (O1), omitted
 	// while unknown.
-	BaseSHA string        `json:"baseSha,omitempty"`
-	HeadSHA string        `json:"headSha,omitempty"`
-	Dirty   *bool         `json:"dirty,omitempty"`
-	Events  []runLogEvent `json:"events"`
+	BaseSHA string `json:"baseSha,omitempty"`
+	HeadSHA string `json:"headSha,omitempty"`
+	Dirty   *bool  `json:"dirty,omitempty"`
+	// Attachments is the public metadata of the prompt's attachments
+	// (ADR-0038); never bytes.
+	Attachments []attach.Item `json:"attachments,omitempty"`
+	Events      []runLogEvent `json:"events"`
 }
 
 // handleRunLogs returns runID's full (or, with Tail set, last Tail)
@@ -1676,6 +1694,7 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 			BaseSHA:     derefStr(status.BaseSHA),
 			HeadSHA:     derefStr(status.HeadSHA),
 			Dirty:       status.Dirty,
+			Attachments: status.Attachments,
 			Events:      events,
 		}, nil
 	}
