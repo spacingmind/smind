@@ -471,3 +471,43 @@ func (s *Store) SetTaskBranchOwned(id int64, owned bool) error {
 	}
 	return nil
 }
+
+// ListTasksNeedingBase returns the non-system, non-archived tasks that have
+// a worktree but no recorded base_sha: the one-time ADR-0039 backfill's
+// work list.
+func (s *Store) ListTasksNeedingBase() ([]Task, error) {
+	rows, err := s.db.Query(
+		`SELECT ` + taskCols + ` FROM tasks
+		 WHERE kind = 'task' AND archived_at IS NULL AND worktree_path IS NOT NULL
+		   AND (base_sha IS NULL OR base_sha = '') ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("list tasks needing base: %w", err)
+	}
+	defer rows.Close()
+	var out []Task
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan task: %w", err)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// BackfillTaskBase writes the ADR-0039 base fields for a pre-existing task
+// in one statement, only if its base_sha is still empty (so a concurrent
+// task.setBase or a second run never gets overwritten). Reports whether a
+// row changed.
+func (s *Store) BackfillTaskBase(id int64, ref, sha string, owned bool) (bool, error) {
+	res, err := s.db.Exec(
+		`UPDATE tasks SET base_ref = ?, base_sha = ?, branch_owned = ?
+		 WHERE id = ? AND (base_sha IS NULL OR base_sha = '')`,
+		nullString(ref), nullString(sha), owned, id,
+	)
+	if err != nil {
+		return false, fmt.Errorf("backfill task %d base: %w", id, err)
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}

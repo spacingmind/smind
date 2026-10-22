@@ -99,6 +99,11 @@ func cmdServe(args []string) int {
 		routing.WithExhaustThresholdPct(uc.ExhaustThresholdPct))
 	wm := workspace.New(db)
 	wm.SetMaxDepth(cfg.Orchestration.MaxDepth)
+	// ADR-0039: one-time, best-effort fill of base_sha/base_ref/branch_owned
+	// for tasks that predate them (idempotent; unrecoverable ones stay empty).
+	if n := wm.BackfillTaskBases(); n > 0 {
+		log.Printf("backfilled the base commit of %d task(s)", n)
+	}
 	wtSettings := workspace.WorktreesSettings{
 		SetupTimeout:    time.Duration(cfg.Worktrees.SetupTimeoutSeconds) * time.Second,
 		TeardownTimeout: time.Duration(cfg.Worktrees.TeardownTimeoutSeconds) * time.Second,

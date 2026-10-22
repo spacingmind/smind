@@ -22,7 +22,7 @@ func newBareRepo(t *testing.T) string {
 }
 
 // newRepoWithOrigin creates a real repo (newTestRepo) with its default
-// branch renamed to "develop" (matching defaultBaseBranch), an "origin"
+// branch renamed to "develop" (the workspace default base), an "origin"
 // remote pointing at a fresh bare repo, and "develop" already pushed there
 // -- the shared clean-base starting point every CreatePR test builds on.
 func newRepoWithOrigin(t *testing.T) (repo, bare string) {
@@ -141,8 +141,10 @@ func TestManager_CreatePR_CleanBase(t *testing.T) {
 // workspace checkout carried an unrelated, not-yet-pushed commit at the
 // moment the task's worktree was created, so the task branch's fork point
 // is not an ancestor of the base. CreatePR must cherry-pick only the
-// task's own commit(s) onto a clean smind/pr-<id> branch rather than
-// opening a PR stuffed with the unrelated history.
+// task's own commit(s) onto a clean smind/pr-task-<id> branch rather than
+// opening a PR stuffed with the unrelated history. (Default-mode tasks now
+// record merge-base(HEAD, origin/<base>) as their fork point, so the test
+// pins the old fork point -- the checkout's HEAD -- via the store.)
 func TestManager_CreatePR_DivergedBase(t *testing.T) {
 	repo, bare := newRepoWithOrigin(t)
 	// Simulate Session 1's gap: the workspace repo's checkout gains a real
@@ -159,6 +161,10 @@ func TestManager_CreatePR_DivergedBase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask() error = %v", err)
 	}
+	forkHead := strings.TrimSpace(runGitOutputT(t, *task.WorktreePath, "rev-parse", "HEAD"))
+	if err := m.store.SetTaskBase(task.ID, "develop", forkHead); err != nil {
+		t.Fatalf("SetTaskBase() error = %v", err)
+	}
 	writeAndCommit(t, *task.WorktreePath, "taskwork.txt", "the task's own change\n", "add taskwork")
 
 	calls := stubGH(t, func(_ string, _ ...string) (string, error) {
@@ -173,7 +179,7 @@ func TestManager_CreatePR_DivergedBase(t *testing.T) {
 		t.Fatalf("CreatePR().URL = %q", result.URL)
 	}
 
-	wantHead := "smind/pr-" + strconv.FormatInt(task.ID, 10)
+	wantHead := "smind/pr-task-" + strconv.FormatInt(task.ID, 10)
 	if len(*calls) != 1 {
 		t.Fatalf("gh calls = %+v, want exactly 1", *calls)
 	}
