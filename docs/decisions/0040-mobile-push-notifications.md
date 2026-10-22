@@ -119,7 +119,8 @@ Lifecycle:
 
 - **Revoke.** The registration is deleted when the device is revoked, and, as defence in depth (revocation by editing the registry file with no daemon
   running), the sender checks that the device is still `approved` in the registry at send time. A revoked phone keeps `K_push` but the daemon sends nothing
-  to it. `smind relay host rotate` (the hard reset) clears all registrations.
+  to it. (`smind relay host rotate` is relay-side: it invalidates the host secret and old offers, but the daemon's device registry and these registrations are untouched, so
+  a paired device that should stop receiving pushes is revoked with `smind relay devices revoke`.)
 - **Re-pair.** A re-paired phone has a new device key, hence a new device id, hence no registration until it registers again; the app deletes its push key
   with the connection (`resetIdentity`). A token belongs to at most one device id per daemon: registering a token under a new id removes it from any other id, so an
   old, revoked or abandoned id can never share a live phone's token.
