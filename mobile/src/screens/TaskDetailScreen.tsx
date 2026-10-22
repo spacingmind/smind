@@ -42,7 +42,9 @@ import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { UiHost } from '../ui/UiHost';
 import { useScreenInsets } from '../ui/useScreenInsets';
 import { adoptedPromptText } from '../adoptedPrompt';
-import { defaultChatId, listRunsForTask, RunSummary } from '../api';
+import { defaultChatId, listProviders, listRunsForTask, ProviderInfo, RunSummary } from '../api';
+import { firstSendProvider } from '../firstSend';
+import { recallSelection } from '../newTaskPrefs';
 import { continueRun, isEchoOfOptimisticLine, sendFollowUpPrompt, RunTail } from '../followUpPrompt';
 import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
 import { RelayConnection } from '../relay/RelayConnection';
@@ -92,6 +94,8 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   // restore-on-failed-send path.
   const draftState = useNativeState('');
   const [sendError, setSendError] = useState<string | null>(null);
+  // M6-B2: the provider catalog for a task with no run (its first prompt has no run to inherit a provider from); null = not loaded yet.
+  const [providers, setProviders] = useState<ProviderInfo[] | null>(null);
   const [continued, setContinued] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [permissions, setPermissions] = useState<PermissionRequestState[]>([]);
@@ -191,11 +195,30 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
     }
   }, [conn, taskId]);
 
+  // A zero-run task loads the provider catalog once so its composer can resolve a first-send provider;
+  // a failure leaves the composer disabled and surfaces through sendError like a failed send.
+  const zeroRun = state.kind === 'ready' && state.run === null;
+  useEffect(() => {
+    if (!zeroRun) return;
+    let cancelled = false;
+    listProviders(conn)
+      .then((catalog) => {
+        if (!cancelled) setProviders(catalog);
+      })
+      .catch((e) => {
+        if (!cancelled) setSendError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conn, zeroRun]);
+
   useEffect(() => {
     let cancelled = false;
     let offStatus: (() => void) | null = null;
     let offDropped: (() => void) | null = null;
     setState({ kind: 'loading' });
+    setProviders(null);
     setContinued(false);
     setLines([]);
     setPermissions([]);
@@ -293,6 +316,9 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
     };
   }, [conn, taskId, epoch, refreshLatest]);
 
+  // M6-B2: the provider a send uses — the run's own when it has one, else the first-send resolution over the catalog.
+  const sendProvider = state.kind === 'ready' ? firstSendProvider(providers ?? [], state.run?.Provider ?? null, recallSelection()) : null;
+
   const nextSeq = useCallback(() => {
     liveSeq.current++;
     return 1_000_000 + liveSeq.current;
@@ -314,7 +340,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   const send = useCallback(
     async (whenBusy: 'queue' | 'interrupt') => {
       const text = draft.trim();
-      if (!text || state.kind !== 'ready' || state.run === null) return;
+      if (!text || state.kind !== 'ready' || sendProvider === null) return;
       if (sending.current) return; // one send at a time: a second press before the re-render must not queue the prompt twice
       sending.current = true;
       hapticFor('send'); // same frame as the draft clearing, before the await
@@ -336,12 +362,13 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
             },
           },
           taskId,
-          state.run.Provider,
+          sendProvider,
           text,
           nextSeq,
           { whenBusy, chatId: chatId ?? undefined },
         );
         if (result.kind === 'queued') queue.refresh(); // covers a missed snapshot
+        else void refreshLatest(); // a first send's run must adopt (RunStrip/footer) like a task that had one
       } catch (e) {
         hapticFor('error');
         setDraft(text); // the typed text is never silently lost
@@ -351,7 +378,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
         sending.current = false;
       }
     },
-    [appendLines, board, chatId, conn, draft, nextSeq, queue, removeLines, state, taskId, trackTail],
+    [appendLines, board, chatId, conn, draft, nextSeq, queue, refreshLatest, removeLines, sendProvider, taskId, trackTail],
   );
 
   const handleSend = useCallback(() => send('queue'), [send]);
@@ -414,7 +441,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
     });
   }, []);
 
-  const canSend = draft.trim().length > 0 && state.kind === 'ready' && state.run !== null;
+  const canSend = draft.trim().length > 0 && sendProvider !== null;
   const stopView = stopControlView(liveRunId, stopping);
 
   // The not-finished footer: same visibility rule as before, now the last transcript item.
@@ -487,12 +514,9 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
       {connState.kind === 'connecting' || connState.kind === 'reconnecting' ? <ReconnectingBanner>Reconnecting to the daemon…</ReconnectingBanner> : null}
       {state.kind === 'loading' ? <LoadingState /> : null}
       {state.kind === 'error' ? <EmptyState title="Couldn't load this task's runs." body={state.message} /> : null}
-      {state.kind === 'ready' && state.run === null ? (
-        <EmptyState title="No runs yet for this task." body="Start one from the daemon or web UI." />
-      ) : null}
-      {state.kind === 'ready' && state.run !== null ? (
+      {state.kind === 'ready' ? (
         <>
-          <RunStrip runId={state.run.ID} provider={state.run.Provider} status={state.run.Status} />
+          {state.run !== null ? <RunStrip runId={state.run.ID} provider={state.run.Provider} status={state.run.Status} /> : null}
           <View style={styles.listWrap}>
             <FlatList
               ref={listRef}
@@ -501,7 +525,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
               data={items}
               keyExtractor={keyExtractor}
               renderItem={renderItem}
-              ListEmptyComponent={emptyTranscript}
+              ListEmptyComponent={state.run === null ? <ZeroRunEmptyState providers={providers} /> : emptyTranscript}
               contentInsetAdjustmentBehavior="automatic"
               onScroll={handleScroll}
               scrollEventThrottle={16}
@@ -542,6 +566,11 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
 
 const keyExtractor = (item: TranscriptItem) => item.key;
 const emptyTranscript = <EmptyState title="(empty transcript)" body="Nothing has been said in this run yet." />;
+/** A task with no run: either no providers to send with, or ready for its first prompt (M6-B2). */
+function ZeroRunEmptyState({ providers }: { providers: ProviderInfo[] | null }) {
+  if (providers !== null && providers.length === 0) return <EmptyState title="This daemon has no providers." body="Add one to start a run." />;
+  return <EmptyState title="No prompts yet" body="Send the first prompt to start a run." />;
+}
 
 /** Shown by the task route when its `id` param is not a positive integer (ADR-0036 decision 4). */
 export function TaskLoadError() {
