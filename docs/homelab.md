@@ -128,6 +128,7 @@ Settings (`smind config get|set|unset`, comments in `config.yaml` are kept, a re
 | `server.listen` | `host:port` to bind. A non-loopback host needs a password; the daemon **refuses to start** otherwise |
 | `server.hostnames` | Extra `Host` names to accept. A leading dot matches the domain and its subdomains (`.example.com`) |
 | `server.passwordHash` | Written by `smind set-password` (shown as `<set>`, never printed); `smind config unset server.passwordHash` removes it |
+| `providers.<id>.defaultModel` | The model a run of that provider uses when none is given (`<id>`: `claude-native`, `codex-native`, `glm`, `kimi`), e.g. `smind config set providers.claude-native.defaultModel sonnet`. Unset keeps the provider's own default (for claude-native, whatever the Claude CLI picks for the login). A run's own model and a profile's model win over it; `--model default` on claude-native bypasses it |
 
 For containers, `SMIND_LISTEN`, `SMIND_HOSTNAMES` (comma separated) and `SMIND_PASSWORD` (at least 12 characters, hashed in
 memory, never written to disk) override the file. `smind serve` itself takes no flags.

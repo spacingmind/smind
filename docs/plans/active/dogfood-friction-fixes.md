@@ -34,7 +34,8 @@ All branch from `origin/develop`; none stack. PR 1 and PR 2 both edit `cmdTaskSe
 | 2 | hide `raw` events unless `--verbose` (send, attach, logs); one line per permission decision with `--auto-accept` | `cmd/smind/task.go`, `permission_detail.go` + tests |
 | 3 | `task new … [--base <ref>] [--branch <name>] [--pr <n>]` | `cmd/smind/task.go` + tests |
 | 4 | cap the task slug | `internal/workspace/task.go` + test |
-| 5 | sample task-worktree setup script + docs; close this plan | `scripts/`, `docs/` |
+| 5 | sample task-worktree setup script + docs (merged, #489) | `scripts/`, `docs/` |
+| 6 | per-provider `defaultModel` in config, applied at run start, shown in `provider.list`, web picker and `task runs` (O1) | `internal/config`, `internal/taskrunner`, `internal/runs`, `cmd/smind`, `web/` |
 
 ## Acceptance criteria
 
@@ -46,6 +47,9 @@ All branch from `origin/develop`; none stack. PR 1 and PR 2 both edit `cmdTaskSe
 - **AC6** With `--auto-accept`, a permission request that the daemon resolves automatically prints exactly one line (`[permission] auto-accepted <summary> -> <optionId>`), not the block. Without `--auto-accept`, output is unchanged. `task attach`/`logs` on a run started with auto-accept print the same one-liner (the decision is derived from the `permission_resolved` reason `auto_accept`, not from a flag on the viewer).
 - **AC7** `task new <ws> <title> --base <ref>` sends `baseRef`; `--branch <name>` sends `branch`; `--pr <n>` sends `prNumber`. More than one of the three exits 2 with a message, before any dial. Existing `--space`/`--parent` still work, in any order with the new flags.
 - **AC8** A task title longer than the cap yields a slug of at most 40 characters (cut on a word boundary where possible, no trailing hyphen) plus the existing `-<stamp>` suffix; short titles are unchanged; an all-punctuation title still yields `task`.
+- **AC10** `providers.<id>.defaultModel` loads from `config.yaml`, can be set, read and unset with `smind config set/get/unset` (comments and unrelated keys kept), and is rejected at load/set for an unknown provider id or a malformed model string. With nothing configured every provider behaves exactly as before.
+- **AC11** A run that names no model resolves to the provider's configured default and records it as its requested model; an explicit model wins over it; with no default configured the run's model stays empty.
+- **AC12** `provider.list` reports `defaultModel` for a provider that has one; web's model picker shows the resolved model on the Default row and in the trigger.
 - **AC9** `scripts/` has a sample setup script that installs `web` and `mobile` dependencies from lockfiles when the directories exist, is idempotent, and passes `shellcheck`; the docs say how to install it with `smind workspace setup set`.
 
 ## Test scenarios
@@ -62,6 +66,11 @@ All branch from `origin/develop`; none stack. PR 1 and PR 2 both edit `cmdTaskSe
 | `TestTaskNewBaseBranchPR` (each flag, two flags, flag order) | AC7 | fake server |
 | `TestSlugifyCapsLength` (long, exact, short, punctuation, multibyte) | AC8 | `internal/workspace` |
 | `TestCreateTaskLongTitleBranchLength` | AC8 | real throwaway repo |
+| `TestProviderDefaultModelLoad`, `...AbsentIsToday`, `...LoadRejects`, `...SetGetUnset`, `...SetValidates` | AC10 | `internal/config` |
+| `TestDefaultModelProvidersMatchTaskrunner` | AC10 | keeps the provider list in step with taskrunner |
+| `TestRunnerDefaultModel` | AC11, AC12 | `internal/taskrunner` (also checks `ProviderCatalog().DefaultModel`) |
+| `TestStart_ConfiguredDefaultModel` | AC11 | `internal/runs` with the fake ACP agent |
+| `configured default model` suite in `model-browser.test.ts` | AC12 | vitest |
 | `shellcheck scripts/task-setup.sh` + run twice in a temp dir with a stub `npm`/`bun` | AC9 | script test |
 
 Checks per PR: `task test`, `task lint`.
@@ -74,10 +83,12 @@ Checks per PR: `task test`, `task lint`.
 - D4: the task slug is capped in `slugify`, so every entry point (UI, CLI, MCP) gets short names. Existing tasks keep their names.
 - D5: `--branch` on `task new` means "check out an existing branch" (the daemon's meaning); it does not name the new branch.
 
-## Open questions (do not block these PRs)
+## Open questions: resolved
 
-- **O1: default model for claude-native.** The CLI's own default is whatever the account has (Opus here). Options: (a) leave it and rely on `--model` or a profile (this plan); (b) a `providers.<id>.default_model` in `~/.smind/config.yaml`/workspace settings (config-schema change, and "Default" in the picker would show the resolved model); (c) make the daemon default claude-native to a named alias. (b) is the real fix but changes the config schema, so it needs a Human decision.
-- **O2: default fork point.** ADR-0039 §2 forks the default mode from the checkout's HEAD. Forking from `origin/<default_base>` (after a fetch) would remove the stale-develop trap entirely but contradicts a decided ADR and surprises people with unpushed local commits. This plan leaves it and gives the CLI `--base origin/develop`.
+Both were answered by the Supervisor on 2026-10-22 ("Supervisor default 2026-10-22, Human may veto").
+
+- **O1: default model for claude-native. Yes: an optional per-provider default model in config.** `providers.<id>.defaultModel` in `config.yaml` (id: `claude-native`, `codex-native`, `glm`, `kimi`), settable with `smind config set providers.claude-native.defaultModel sonnet`. Additive and optional: absent means today's behaviour. Precedence for a run's model: the run's own `model` (CLI `--model`, web picker, MCP `task_send`), then a profile's `model`, then this default, then the provider's own default. It is applied in one place, `runs.Registry.Start`, so CLI, web, MCP, queued prompts and learning runs all get it; the run row records it as the requested model, so `task runs` shows what was actually asked for. For claude-native the literal `--model default` still means "the CLI's own default" and bypasses it. Like every `smind config` change it applies when the daemon restarts. `provider.list` reports it as `defaultModel` (additive wire field), and web's model picker shows "Currently <label>" on the Default row and uses the resolved label for the picker trigger. No ADR: nothing here changes an existing contract. Validation: unknown provider ids and malformed model strings are errors at config load (same syntax rule as ADR-0025), so a typo is never a silent no-op. Not done: a per-workspace default and a Settings UI for it.
+- **O2: default fork point. No.** ADR-0039 §2 stands. `task new --base origin/develop` covers the stale-checkout case, and the README's CLI section recommends it for agents.
 
 ## Progress
 

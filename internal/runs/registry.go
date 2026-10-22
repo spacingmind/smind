@@ -646,6 +646,12 @@ func (reg *Registry) withStoredUsage(out []RunSummary) {
 // empty means the provider's default and the spawn is unchanged.
 func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel, opts ...StartOption) (string, error) {
 	model := startModel(opts)
+	if model == "" {
+		// A run that names no model gets the provider's configured default
+		// (config providers.<id>.defaultModel), recorded as the requested
+		// model; "default" is the explicit way to keep the provider's own.
+		model = runner.DefaultModel(provider)
+	}
 	if err := validateIsolation(provider, opts); err != nil {
 		return "", err
 	}

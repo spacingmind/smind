@@ -13,14 +13,15 @@ import (
 
 // Config is the root daemon configuration.
 type Config struct {
-	Server        ServerConfig        `yaml:"server"`
-	Orchestration OrchestrationConfig `yaml:"orchestration"`
-	Worktrees     WorktreesConfig     `yaml:"worktrees"`
-	Agents        AgentsConfig        `yaml:"agents"`
-	AccountUsage  AccountUsageConfig  `yaml:"accountUsage"`
-	Relay         RelayConfig         `yaml:"relay"`
-	Learning      LearningConfig      `yaml:"learning"`
-	Log           LogConfig           `yaml:"log"`
+	Server        ServerConfig              `yaml:"server"`
+	Orchestration OrchestrationConfig       `yaml:"orchestration"`
+	Worktrees     WorktreesConfig           `yaml:"worktrees"`
+	Agents        AgentsConfig              `yaml:"agents"`
+	Providers     map[string]ProviderConfig `yaml:"providers"`
+	AccountUsage  AccountUsageConfig        `yaml:"accountUsage"`
+	Relay         RelayConfig               `yaml:"relay"`
+	Learning      LearningConfig            `yaml:"learning"`
+	Log           LogConfig                 `yaml:"log"`
 }
 
 // LogConfig tunes the daemon's own rotating log file, $SMIND_HOME/daemon.log
@@ -119,6 +120,71 @@ func (p PortsConfig) PortRange() (lo, hi int, ok bool, err error) {
 		return 0, 0, false, fmt.Errorf("worktrees.ports.range %q: need 1024 <= lo <= hi <= 65535", p.Range)
 	}
 	return lo, hi, true, nil
+}
+
+// ProviderConfig is the per-provider block under `providers:`, keyed by
+// provider id (see DefaultModelProviders).
+type ProviderConfig struct {
+	// DefaultModel is the model a run of this provider uses when nothing
+	// else names one: not the run's own model, and not a profile's. Unset
+	// keeps each provider's own default (for claude-native, whatever the
+	// Claude CLI picks for the login). For claude-native, naming the
+	// model "default" on a run still means "the CLI's own default" and
+	// bypasses this.
+	DefaultModel string `yaml:"defaultModel"`
+}
+
+// DefaultModelProviders are the provider ids that accept providers.<id>.
+// defaultModel. Kept in step with taskrunner.SupportedProviders by a test in
+// cmd/smind (config cannot import taskrunner).
+var DefaultModelProviders = []string{"claude-native", "codex-native", "glm", "kimi"}
+
+// DefaultModel returns providers.<id>.defaultModel, "" when unset.
+func (c Config) DefaultModel(provider string) string {
+	return c.Providers[provider].DefaultModel
+}
+
+// validateProviders rejects unknown provider ids and malformed model strings,
+// so a typo is an error at load rather than a setting that never applies.
+func validateProviders(path string, providers map[string]ProviderConfig) error {
+	for id, pc := range providers {
+		known := false
+		for _, k := range DefaultModelProviders {
+			known = known || k == id
+		}
+		if !known {
+			return fmt.Errorf("config %s: providers.%s: unknown provider (known: %s)", path, id, strings.Join(DefaultModelProviders, ", "))
+		}
+		if err := ValidateModelName(pc.DefaultModel); err != nil {
+			return fmt.Errorf("config %s: providers.%s.defaultModel: %w", path, id, err)
+		}
+	}
+	return nil
+}
+
+// ValidateModelName checks a model string's shape: empty (unset) is fine;
+// otherwise 1-100 characters from [A-Za-z0-9._:/@\[\]-], not beginning with
+// '-'. The same rule as taskrunner.ValidateModelSyntax (ADR-0025): the string
+// reaches `--model <name>` as argv, never a shell.
+func ValidateModelName(model string) error {
+	if model == "" {
+		return nil
+	}
+	if len(model) > 100 {
+		return fmt.Errorf("invalid model: longer than 100 characters")
+	}
+	if model[0] == '-' {
+		return fmt.Errorf("invalid model %q: must not begin with '-'", model)
+	}
+	for _, c := range model {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case strings.ContainsRune("._:/@[]-", c):
+		default:
+			return fmt.Errorf("invalid model %q: only letters, digits and . _ : / @ [ ] - are allowed", model)
+		}
+	}
+	return nil
 }
 
 // AgentsConfig holds per-agent tuning.
@@ -435,6 +501,9 @@ func LoadFile(path string) (Config, error) {
 	}
 	if mt := cfg.Agents.GLM.MaxTurns; mt != nil && (*mt < 1 || *mt > MaxGLMTurns) {
 		return cfg, fmt.Errorf("config %s: agents.glm.maxTurns must be between 1 and %d, got %d", path, MaxGLMTurns, *mt)
+	}
+	if err := validateProviders(path, cfg.Providers); err != nil {
+		return cfg, err
 	}
 	if err := cfg.Learning.Validate(); err != nil {
 		return cfg, fmt.Errorf("config %s: %w", path, err)

@@ -193,6 +193,9 @@ func ModeAutoApproves(catalog ProviderInfo, s PermissionSettings) bool {
 // discovery.
 func (r *Runner) ProviderCatalog() []ProviderInfo {
 	providers := SupportedProviders()
+	for i := range providers {
+		providers[i].DefaultModel = r.DefaultModel(providers[i].ID)
+	}
 	for i, p := range providers {
 		switch {
 		case acpProvider(p.ID):
@@ -221,6 +224,14 @@ func (r *Runner) ProviderCatalog() []ProviderInfo {
 		}
 	}
 	return providers
+}
+
+// DefaultModel is the configured default model for provider
+// (WithDefaultModel), "" when none is set: what a run that names no model
+// resolves to. Runs and ProviderInfo.DefaultModel both read it, so the UI shows
+// exactly what a run will use.
+func (r *Runner) DefaultModel(provider Provider) string {
+	return r.defaultModels[provider]
 }
 
 // ProviderCatalogFor returns ProviderCatalog's entry for provider, and
