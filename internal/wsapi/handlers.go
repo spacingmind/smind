@@ -9,6 +9,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/attach"
 	"github.com/spacingmind/smind/internal/codex"
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/profiles"
@@ -1079,12 +1080,22 @@ type chatQueueItemParams struct {
 	CancelKind   string    `json:"CancelKind"`
 	CreatedAt    time.Time `json:"CreatedAt"`
 	UpdatedAt    time.Time `json:"UpdatedAt"`
+	// Attachments is the public metadata of the prompt's attachments
+	// (ADR-0038); never bytes. Lowercase key, absent when none.
+	Attachments []attach.Item `json:"attachments,omitempty"`
 }
 
 func toChatQueueItemParams(items []store.ChatQueueItem) []chatQueueItemParams {
 	out := make([]chatQueueItemParams, len(items))
 	for i, item := range items {
-		out[i] = chatQueueItemParams(item)
+		out[i] = chatQueueItemParams{
+			ID: item.ID, ChatID: item.ChatID, Prompt: item.Prompt, RunConfig: item.RunConfig,
+			Source: item.Source, FromTaskID: item.FromTaskID, FromChatID: item.FromChatID,
+			Priority: item.Priority, Status: item.Status, RunID: item.RunID,
+			CancelReason: item.CancelReason, CancelKind: item.CancelKind,
+			CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+			Attachments: publicAttachments(item.Attachments),
+		}
 	}
 	return out
 }
@@ -2183,4 +2194,15 @@ func derefStr(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// publicAttachments decodes a stored attachment set into its wire metadata
+// (never bytes, never the on-disk file name); nil when there is none or the
+// stored value is unreadable.
+func publicAttachments(raw string) []attach.Item {
+	set, err := attach.DecodeSet(raw)
+	if err != nil || len(set.Items) == 0 {
+		return nil
+	}
+	return set.Public()
 }
