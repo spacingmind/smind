@@ -113,7 +113,7 @@ Manual: AC24's checklist items (a)–(j), one line each in Validation with devic
 - 2026-10-22: **PR 2 opened as #487** (`internal/push`: seal/open + vector, registry, Expo sender; not wired). Orchestrated through smind (dogfood daemon, GLM peer, four steps); friction is logged in the local dogfood notes.
 - Correction found while briefing PR 3: `smind relay host rotate` is relay-side and does not clear daemon registrations (AC6 and the ADR no longer claim it); revoke and the approved-at-send check are the controls.
 - PR 3 is split into five Peer steps (one commit each): (a) device id on wsapi conns via an optional `DeviceServer` interface, (b) `push.register/unregister/status`, (c) notifier core (`internal/push/notifier.go`: rules, titles, dedupe, rate limit, per-device sealing, `DeviceNotRegistered` removal; pure and injectable), (d) async queue + bus tap in wsapi + `API.SetPush`, (e) `push` config block + `cmd/smind/serve.go` wiring + hub passes the device id.
-- 2026-10-22: **PR 3 merged (#499)** (device id on wsapi conns, `push.register/unregister/status`, notifier with rules, dedupe and rate limit, async queue and bus tap, `push.*` config, wiring); #499 needed one rebase (config struct conflict with #496). **PR 5 merged (#493)** (pure mobile logic). **PR 6 opened (#517)** (native wiring: packages and `app.config.js`, Android background task, Notifications row, controller). **PR 4 opened** (`push.test` + `smind push test`, `relay devices ls` PUSH column, homelab guide). Peers ran through smind (GLM until its 5-hour limit, then `claude-native --model claude-sonnet-5-5 --mode auto`); the friction log is local.
+- 2026-10-22: **PR 3 merged (#499)** (device id on wsapi conns, `push.register/unregister/status`, notifier with rules, dedupe and rate limit, async queue and bus tap, `push.*` config, wiring); #499 needed one rebase (config struct conflict with #496). **PR 5 merged (#493)** (pure mobile logic). **PR 6 opened (#517)** (native wiring: packages and `app.config.js`, Android background task, Notifications row, controller). **PR 4 opened (#520)** (`push.test` + `smind push test`, `relay devices ls` PUSH column, homelab guide). Peers ran through smind (GLM until its 5-hour limit, then `claude-native --model claude-sonnet-5-5 --mode auto`); the friction log is local.
 - `expo-device` was installed in PR 6 step a and removed in step c-2 (unused; ADR §7 and this plan corrected).
 - **Next: PR 7** is the real-device run (runbook below) and needs the Human's Firebase/Expo setup (H3). iOS (PR 8) stays blocked on H2.
 
@@ -130,7 +130,7 @@ Evidence so far (automated; each row names the test or check). Real-device items
 | 8, 9, 10 | `TestNotifyRulesTable`, `TestNotifyPermissionDedupePerRequest`, `TestNotifyRateLimitDoneError`, `TestNotifyMultiDeviceSealedSeparately` (#499) |
 | 11, 12 | `TestExpoRequestHasNoPlaintext`, `TestExpo*` (#487); ticket handling in the notifier (#499) |
 | 13 | `TestNotifyLogsAreSecretFree` (#499) |
-| 14 | `TestTestPush*`, `TestPushTestRPC*`, `TestPushTest*` (CLI) (PR 4) |
+| 14 | `TestTestPush*`, `TestPushTestRPC*`, `TestPushTest*` (CLI) (#520) |
 | 15 | every sender test uses `httptest`; nothing calls `exp.host` by default |
 | 16, 17, 19, 20, 23 | `mobile/src/push/__tests__/*` (#493, #517) |
 | 18 | `backgroundHandler.test.ts`, `backgroundTask.test.ts` (#517) (module-scope definition, Android only) |
