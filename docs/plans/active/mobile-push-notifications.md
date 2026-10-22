@@ -7,7 +7,7 @@ wire and the crypto vector are fixed in ADR-0040 and the vector is the only thin
 Every PR is **non-stacked off `develop`** (a PR that needs an earlier PR's code waits for it to merge). iOS (PR 8) is blocked on a Human decision.
 
 Spec for [ADR-0040](../../decisions/0040-mobile-push-notifications.md) (read it first: privacy model, wire, registration lifecycle, event rules, platform limits).
-Status: **ADR Proposed 2026-10-22; nothing is implemented until the Human accepts it and answers H1–H3.**
+Status: **ADR-0040 Accepted 2026-10-22 (H1–H8 as recommended; no credentials until the Human supplies them, so build against fakes).** Implementation starts with the daemon PRs; Peers run as smind tasks (dogfood).
 
 ## Goal
 
@@ -24,7 +24,7 @@ and anything in the M6 create-task, prompt-attachments and git/PR-state work (ot
 | PR | Content | Size | Peer | Depends on |
 |---|---|---|---|---|
 | 1 | **Docs**: ADR-0040 + this plan + a pointer in ROADMAP Phase 3 | S | — | — |
-| 2 | **Daemon core, no wiring**: `internal/push` — `Seal`/`Open` (ChaCha20-Poly1305, AAD `smind-push-v1‖device_id`, padding), the shared vector `internal/push/testdata/push_seal_vector.json` (`-update`), `Registry` (file store, 0600, atomic, token takeover, kinds), `Sender` interface + `expo` sender (batch 100, retry/backoff, ticket handling, injectable base URL), message builder (Android data-only / iOS generic alert + `mutableContent`) | M | peer-sonnet (crypto, error handling) + peer-glm (registry, tests) | PR 1 accepted |
+| 2 | **Daemon core, no wiring**: `internal/push` — `Seal`/`Open` (ChaCha20-Poly1305, AAD `smind-push-v1‖device_id`, padding), the shared vector `internal/push/testdata/push_seal_vector.json` (`-update`), `Registry` (file store, 0600, atomic, token takeover, kinds), `Sender` interface + `expo` sender (batch 100, retry/backoff, ticket handling, injectable base URL), message builder (Android data-only / iOS generic alert + `mutableContent`) | M | peer-sonnet (crypto, error handling) + peer-glm (registry, tests) | PR 1 merged |
 | 3 | **Daemon wiring**: device id on `wsapi` conns (`ServeDevice`), `push.register/unregister/status`, event consumer on the bus (rules, dedupe, rate limit, approved-at-send check), config `push.*`, hook in the hub | M | peer-sonnet (concurrency, wsapi) + peer-glm (config, rules table tests) | PR 2 merged |
 | 4 | **Operator surface**: `push.test` (local only) + `smind push test [device]`, `smind relay devices ls` shows a push column, `docs/homelab.md` section (what leaves the daemon, config), logging audit test | S | peer-glm | PR 3 merged |
 | 5 | **Mobile logic, no native deps**: `mobile/src/push/` — `open.ts` (vector-tested trial decrypt, padding strip, 24 h age check), `keys.ts` (secure-store push key per connection, deleted with the connection), `register.ts` (opt-in flow against `push.*`), `target.ts` (`resolveNotificationTarget`, pending-target store released by `routeGate`), `foreground.ts` (suppression rule); all vitest | M | peer-glm (detailed brief) | PR 2 merged (the vector) **and** PR #480 merged (shared `mobile/package.json`, `app/_layout.tsx`) |
@@ -101,8 +101,8 @@ Manual: AC24's checklist items (a)–(j), one line each in Validation with devic
 
 ## Decisions
 
-- ADR-0040 (Proposed): encrypted push payload + generic fallback; daemon sends through Expo behind a `Sender` seam; registration over the E2EE channel keyed by device id; Android first.
-- Open (Human): H1 privacy model, H2 Apple program, H3 Expo/Firebase credentials, H4 sender, H5 app identifiers, H6 event defaults, H7 daemon default, H8 hosted relay gateway. Recorded in the ADR with recommendations.
+- ADR-0040 (Accepted): encrypted push payload + generic fallback; daemon sends through Expo behind a `Sender` seam; registration over the E2EE channel keyed by device id; Android first.
+- Human, 2026-10-22: H1–H8 accepted as recommended (H2: no Apple program, iOS blocked; H3: Human creates Expo/Firebase and uploads the FCM key, agents hold nothing).
 - Coordination: PRs 5–6 wait for PR #480 (M6) to merge because both edit `mobile/package.json` and `mobile/app/_layout.tsx`; the native checklist is the mobile Lead's document, this plan only supplies its push section (AC24).
 - Orchestration note: the PR table is written so each row can be handed to a smind-orchestrated agent with a short brief (files, signatures, test names are in the scenarios above).
 

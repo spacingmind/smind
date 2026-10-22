@@ -2,9 +2,11 @@
 
 ## Status
 
-**Proposed — 2026-10-22.** Not accepted: the Human decisions in [Open questions](#open-questions-for-the-human) (H1–H8) are open, and
-H1 (privacy model, a Supervisor default the Human may veto), H2 (Apple Developer Program) and H3 (Expo/Firebase credentials) gate the
-implementation PRs. Plan: [`docs/plans/active/mobile-push-notifications.md`](../plans/active/mobile-push-notifications.md).
+**Accepted — 2026-10-22, by the Human** (via the Supervisor). H1: encrypted payload with the generic fallback, as recommended. H2: no Apple Developer
+Program for now; v1 is Android, iOS stays designed but blocked. H3: the Human creates the Expo organization and the Firebase project and uploads the FCM key;
+no agent holds a credential, so implementation is built and tested against fakes and the real-device run comes later from the plan's checklist. H4–H8 accepted as recommended
+(see [Open questions](#open-questions-for-the-human), which now record the accepted answers).
+Plan: [`docs/plans/active/mobile-push-notifications.md`](../plans/active/mobile-push-notifications.md).
 Closes the "push notifications" gap in ROADMAP Phase 3. Builds on ADR-0031 D9 (device identity, revoke, multi-device),
 ADR-0035 (relay E2EE v2), ADR-0036 (Expo Router, `smind://` scheme) and ADR-0009 (lifecycle events).
 Research behind it is local-only (`docs/research/local/mobile-push-notifications.md`, not committed).
@@ -197,7 +199,7 @@ The user docs (`docs/homelab.md`) state what leaves the daemon: the daemon's IP 
 
 ## Open questions for the Human
 
-Each has a recommendation; none blocks writing the plan. H1–H3 gate the implementation PRs.
+**All accepted as recommended, 2026-10-22** (H1–H8). H3 means the credentials come later from the Human; until then everything is built against fakes.
 
 - **H1. Privacy model.** *Recommended: encrypted payload with a generic fallback (§1).* Alternatives: always-generic (more private, less useful), plaintext (Paseo-style, rejected above).
 - **H2. Apple Developer Program (USD 99 a year, an external cost).** *Recommended: not now.* Ship Android first; iOS push (APNs key, Notification Service Extension) waits. Without it nothing about iOS push can be tested or shipped.
