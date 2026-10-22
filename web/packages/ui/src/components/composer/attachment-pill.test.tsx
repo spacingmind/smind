@@ -90,12 +90,18 @@ describe("AttachmentTray", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview shot.png" }));
     const box = screen.getByTestId("attachment-lightbox");
     const close = screen.getByTestId("attachment-lightbox-close");
-    // Outside the content (so never drawn on the picture) and a dark chip with a light ring: visible on a white image.
-    expect(box.contains(close)).toBe(false);
+    // Not on the picture, and a dark chip with a light ring so it shows on a white image. It lives inside the dialog
+    // content: Radix switches off pointer events outside it, so a chip beside the content could not be clicked.
+    expect(box.contains(close)).toBe(true);
+    expect(close.closest("img")).toBeNull();
+    expect(box.querySelector("img")!.contains(close)).toBe(false);
     expect(close.className).toContain("bg-black/70");
     expect(close.className).toContain("text-white");
     expect(box.className).not.toContain("bg-background");
     expect(box.className).not.toContain("border");
+    // A click on the empty area closes it like the overlay would; a click on the picture does not.
+    fireEvent.click(box.querySelector("img")!);
+    expect(screen.getByTestId("attachment-lightbox")).toBeInTheDocument();
     fireEvent.click(close);
     expect(screen.queryByTestId("attachment-lightbox")).toBeNull();
   });
