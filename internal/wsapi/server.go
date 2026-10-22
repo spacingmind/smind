@@ -76,6 +76,8 @@ type API struct {
 	git   *gitstate.Service
 	focus *focusRegistry
 	info  *DaemonInfo
+	// pushRegistered reports whether a device has a push registration; set by SetPush when enabled.
+	pushRegistered func(string) bool
 
 	// github backs forge.search (SetGithubClient).
 	github *githubHolder

@@ -31,7 +31,7 @@ type RelayDeviceAdmin interface {
 // relay-served session (ServeTransport) gets a "forbidden" error, so a paired
 // device can never approve or revoke devices.
 func (a *API) SetRelayDevices(admin RelayDeviceAdmin) {
-	a.hs["relay.device.list"] = localOnly("relay.device.list", handleRelayDeviceList(admin))
+	a.hs["relay.device.list"] = localOnly("relay.device.list", handleRelayDeviceList(a, admin))
 	a.hs["relay.device.approve"] = localOnly("relay.device.approve", handleRelayDeviceByID(admin, "approve", func(id string, _ relayDeviceParams) (devices.Device, error) { return admin.ApproveDevice(id) }))
 	a.hs["relay.device.revoke"] = localOnly("relay.device.revoke", handleRelayDeviceByID(admin, "revoke", func(id string, _ relayDeviceParams) (devices.Device, error) { return admin.RevokeDevice(id) }))
 	a.hs["relay.device.rename"] = localOnly("relay.device.rename", handleRelayDeviceByID(admin, "rename", func(id string, p relayDeviceParams) (devices.Device, error) { return admin.RenameDevice(id, p.Label) }))
@@ -95,11 +95,21 @@ func relayDeviceError(method string, err error) error {
 	return fmt.Errorf("%s: %w", method, err)
 }
 
-func handleRelayDeviceList(admin RelayDeviceAdmin) handlerFunc {
+func handleRelayDeviceList(a *API, admin RelayDeviceAdmin) handlerFunc {
 	return func(context.Context, *requestContext, json.RawMessage) (any, error) {
 		list := admin.Devices()
 		if list == nil {
 			list = []devices.Info{}
+		}
+		// SetPush runs after SetRelayDevices, so read the lookup per request.
+		if lookup := a.pushRegistered; lookup != nil {
+			withPush := make([]devices.Info, len(list))
+			for i, d := range list {
+				reg := lookup(d.ID)
+				d.Push = &reg
+				withPush[i] = d
+			}
+			list = withPush
 		}
 		w, ok := admin.PairingWindow()
 		return relayDeviceListResult{Devices: list, Window: windowResult(w, ok)}, nil

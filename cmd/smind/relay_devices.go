@@ -315,7 +315,7 @@ func renderDevices(w io.Writer, list []devices.Info, pendingOnly, connectedKnown
 		return
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tLABEL\tSTATE\tCONNECTED\tFIRST SEEN\tLAST SEEN")
+	fmt.Fprintln(tw, "ID\tLABEL\tSTATE\tCONNECTED\tPUSH\tFIRST SEEN\tLAST SEEN")
 	for _, d := range rows {
 		conn := "-"
 		if connectedKnown {
@@ -328,7 +328,14 @@ func renderDevices(w io.Writer, list []devices.Info, pendingOnly, connectedKnown
 		if label == "" {
 			label = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", d.ID, label, d.State, conn, deviceTime(d.FirstSeen), deviceTime(d.LastSeen))
+		pushCol := "-"
+		if d.Push != nil {
+			pushCol = "no"
+			if *d.Push {
+				pushCol = "yes"
+			}
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", d.ID, label, d.State, conn, pushCol, deviceTime(d.FirstSeen), deviceTime(d.LastSeen))
 	}
 	_ = tw.Flush()
 	if nPending > 0 {

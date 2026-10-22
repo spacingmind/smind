@@ -100,7 +100,7 @@ func TestDevicesLsAndPendingFlag(t *testing.T) {
 		t.Fatalf("ls = %d, stderr %q", code, errOut)
 	}
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if got := strings.Fields(lines[0]); !reflect.DeepEqual(got, []string{"ID", "LABEL", "STATE", "CONNECTED", "FIRST", "SEEN", "LAST", "SEEN"}) {
+	if got := strings.Fields(lines[0]); !reflect.DeepEqual(got, []string{"ID", "LABEL", "STATE", "CONNECTED", "PUSH", "FIRST", "SEEN", "LAST", "SEEN"}) {
 		t.Fatalf("header = %q", lines[0])
 	}
 	wantFirst := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC).Local().Format("2006-01-02T15:04Z07:00")
@@ -113,7 +113,7 @@ func TestDevicesLsAndPendingFlag(t *testing.T) {
 		t.Fatalf("no row for %s in:\n%s", id, out)
 		return nil
 	}
-	if got := row("bbbb2222bbbb2222bbbb2222bb"); got[1] != "tablet" || got[2] != "approved" || got[3] != "yes" || got[4] != wantFirst {
+	if got := row("bbbb2222bbbb2222bbbb2222bb"); got[1] != "tablet" || got[2] != "approved" || got[3] != "yes" || got[4] != "-" || got[5] != wantFirst {
 		t.Fatalf("tablet row = %v", got)
 	}
 	if got := row("aaaa1111aaaa1111aaaa1111aa"); got[2] != "pending" || got[3] != "no" {
@@ -339,5 +339,37 @@ func TestDevicesCLIDoesNotEditFileWhenDaemonIsUnreachableForOtherReasons(t *test
 	}
 	if _, err := os.Stat(devices.RegistryPath(home)); err == nil {
 		t.Fatal("the registry file was written although the daemon could not be reached")
+	}
+}
+
+func TestDevicesListPrintsPushColumn(t *testing.T) {
+	yes, no := true, false
+	withPush := func(i devices.Info, p *bool) devices.Info { i.Push = p; return i }
+	d := &fakeDaemon{results: map[string]any{"relay.device.list": map[string]any{
+		"devices": []devices.Info{
+			withPush(info("aaaa1111aaaa1111aaaa1111aa", "phone", devices.StateApproved, true), &yes),
+			withPush(info("bbbb2222bbbb2222bbbb2222bb", "tablet", devices.StateApproved, true), &no),
+			info("cccc3333cccc3333cccc3333cc", "laptop", devices.StateApproved, true),
+		},
+		"window": nil,
+	}}}
+	home := useDaemon(t, d)
+	code, out, errOut := runDevices(t, home, "ls")
+	if code != 0 || errOut != "" {
+		t.Fatalf("ls = %d, stderr %q", code, errOut)
+	}
+	for id, want := range map[string]string{"aaaa1111": "yes", "bbbb2222": "no", "cccc3333": "-"} {
+		found := false
+		for _, l := range strings.Split(out, "\n") {
+			if strings.HasPrefix(l, id) {
+				found = true
+				if f := strings.Fields(l); f[4] != want {
+					t.Errorf("%s PUSH = %q, want %q (%q)", id, f[4], want, l)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("no row for %s:\n%s", id, out)
+		}
 	}
 }

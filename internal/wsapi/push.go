@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/spacingmind/smind/internal/push"
@@ -20,6 +21,7 @@ const (
 	codeInvalidToken        = "invalid_token"
 	codeInvalidKey          = "invalid_key"
 	codeInvalidKinds        = "invalid_kinds"
+	codeAmbiguous           = "ambiguous"
 )
 
 var expoTokenRE = regexp.MustCompile(`^Expo(nent)?PushToken\[[^\[\]\s]{1,200}\]$`)
@@ -29,6 +31,7 @@ type PushRegistry interface {
 	Put(reg push.Registration) error
 	Get(deviceID string) (push.Registration, bool)
 	Remove(deviceID string) (bool, error)
+	List() []push.Registration
 }
 
 // PushOptions configures SetPush. Later steps add fields (a notifier); keep it a struct.
@@ -44,7 +47,7 @@ type PushOptions struct {
 	Notifier *push.Notifier
 }
 
-// SetPush registers push.register, push.unregister and push.status. Like
+// SetPush registers push.register, push.unregister, push.status and push.test. Like
 // SetRelayDevices it must be called once at startup, before the API serves
 // anything (it writes a.hs without locking).
 func (a *API) SetPush(o PushOptions) {
@@ -58,6 +61,9 @@ func (a *API) SetPush(o PushOptions) {
 				o.Notifier.Enqueue(in)
 			}
 		})
+	}
+	if o.Enabled && o.Registry != nil {
+		a.pushRegistered = func(id string) bool { _, ok := o.Registry.Get(id); return ok }
 	}
 	a.hs["push.register"] = pushGuard(o, func(rc *requestContext, raw json.RawMessage) (any, error) {
 		return pushRegister(o, rc, raw)
@@ -78,6 +84,72 @@ func (a *API) SetPush(o PushOptions) {
 		}
 		return res, nil
 	})
+	a.hs["push.test"] = func(ctx context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+		return pushTest(ctx, o, rc, raw)
+	}
+}
+
+const minPushPrefix = 4
+
+type pushTestParams struct {
+	DeviceID string `json:"deviceId"`
+}
+
+type pushTestResult struct {
+	Results []push.TestResult `json:"results"`
+}
+
+// pushTest sends a test push to one (by id prefix) or every registered device.
+// Local connection only; it does not use pushGuard because the local /ws
+// connection has no device id.
+func pushTest(ctx context.Context, o PushOptions, rc *requestContext, raw json.RawMessage) (any, error) {
+	if !o.Enabled || o.Notifier == nil {
+		return nil, &rpcCodeError{code: codePushDisabled, msg: "push notifications are disabled on this daemon"}
+	}
+	if !rc.local {
+		return nil, &rpcCodeError{code: codeForbidden, msg: "push.test is only available on the local connection"}
+	}
+	var p pushTestParams
+	if len(raw) > 0 && string(raw) != "null" {
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, &rpcCodeError{code: codeInvalid, msg: "push.test: invalid params"}
+		}
+	}
+	prefix := strings.ToLower(p.DeviceID)
+	if prefix != "" && len(prefix) < minPushPrefix {
+		return nil, &rpcCodeError{code: codeInvalid, msg: "push.test: deviceId prefix must be at least 4 characters"}
+	}
+	regs := o.Registry.List()
+	ids := make([]string, 0, len(regs))
+	var matches []string
+	for _, r := range regs {
+		ids = append(ids, r.DeviceID)
+		if prefix == "" {
+			continue
+		}
+		lid := strings.ToLower(r.DeviceID)
+		if lid == prefix {
+			matches = []string{r.DeviceID}
+			break
+		}
+		if strings.HasPrefix(lid, prefix) {
+			matches = append(matches, r.DeviceID)
+		}
+	}
+	if prefix != "" {
+		switch len(matches) {
+		case 0:
+			return nil, &rpcCodeError{code: codeNotFound, msg: "no push registration for that device"}
+		case 1:
+			ids = matches
+		default:
+			return nil, &rpcCodeError{code: codeAmbiguous, msg: "deviceId prefix matches more than one push registration"}
+		}
+	}
+	if len(ids) == 0 {
+		return pushTestResult{Results: []push.TestResult{}}, nil
+	}
+	return pushTestResult{Results: o.Notifier.Test(ctx, ids)}, nil
 }
 
 type pushRegisterParams struct {
