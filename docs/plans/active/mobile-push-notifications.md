@@ -155,6 +155,6 @@ Record each item as pass / fail / notes (device, Android version, build id), one
 7. **Revoke and re-pair.** `smind relay devices revoke <id>`: `smind push test` reports no phone registered; re-pair, Turn on again, push works.
 8. **Two phones** on one daemon both receive `smind push test` (`2 of 2 sent`).
 9. **Unproven facts, state them explicitly:** which payload shape reached the task (from the logs), that the push key was readable in the headless context (item 3 passing proves it), and that the cold-start tap in item 6 found the task route (no flash of the list, no missed navigation).
-10. **Privacy spot check (optional):** run the daemon with `HTTPS_PROXY` pointed at a local inspecting proxy and confirm the request body to `exp.host` carries only `to`, `data` (`v`, `n`, `c`), `priority`, `ttl`, `channelId`; nothing readable. (`TestExpoRequestHasNoPlaintext` already asserts this for the daemon's request builder.)
+10. **Privacy spot check (optional):** run the daemon with `HTTPS_PROXY` pointed at a local TLS-inspecting proxy (and `SSL_CERT_FILE` trusting its CA) and confirm the request body to `exp.host` carries only `to`, `data` (`v`, `n`, `c`), `priority`, `ttl`, `channelId`; nothing readable. (`TestExpoRequestHasNoPlaintext` already asserts this for the daemon's request builder.)
 
 If item 3 fails while item 2 passes, the fallback in ADR-0040 Consequences applies: an Android notification message with the generic text; the encryption and the wire do not change.
