@@ -158,7 +158,7 @@ type runLogsResult struct {
 
 func cmdTask(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|logs|stop|permissions|approve|deny|mode|options|set-option|chat|queue> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|wait|logs|stop|permissions|approve|deny|mode|options|set-option|chat|queue> ...")
 		return 2
 	}
 	switch args[0] {
@@ -172,6 +172,8 @@ func cmdTask(args []string) int {
 		return cmdTaskRuns(args[1:])
 	case "attach":
 		return cmdTaskAttach(args[1:])
+	case "wait":
+		return cmdTaskWait(args[1:])
 	case "logs":
 		return cmdTaskLogs(args[1:])
 	case "stop":
@@ -1552,8 +1554,15 @@ type runSummaryRow struct {
 	// is the model the agent reported using, when it reported one.
 	Model string
 	Usage *struct {
-		Model *string `json:"model"`
+		Model        *string  `json:"model"`
+		InputTokens  *int64   `json:"inputTokens"`
+		OutputTokens *int64   `json:"outputTokens"`
+		CostUSD      *float64 `json:"costUsd"`
 	} `json:"usage"`
+	FinishedAt *time.Time
+	Err        string
+	BaseSHA    *string
+	HeadSHA    *string
 	// Disposition is "needs-continue" for a run that ended done at a cap.
 	Disposition string
 }

@@ -163,7 +163,10 @@ func TestUnpinnedModelNote_ConfiguredDefault(t *testing.T) {
 func TestRunModelCell(t *testing.T) {
 	reported := "claude-opus-5-5"
 	usage := &struct {
-		Model *string `json:"model"`
+		Model        *string  `json:"model"`
+		InputTokens  *int64   `json:"inputTokens"`
+		OutputTokens *int64   `json:"outputTokens"`
+		CostUSD      *float64 `json:"costUsd"`
 	}{Model: &reported}
 	tests := []struct {
 		name string
