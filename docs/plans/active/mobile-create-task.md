@@ -56,7 +56,9 @@ relay, E2EE, `chatQueue`, `runFollower`, `permissionRequests`, theme tokens, `sr
 4. Submitting calls exactly `task.create` (`workspaceId`, `spaceId?`, `title` trimmed, plus `startModeParams(start)` = `{}` for HEAD) and, only with a non-empty prompt, `run.start`
    (`taskId`, `provider`, `prompt`, `model?`, `permissionMode?`, `whenBusy: 'queue'`). A `queued` result is a success. No other fields; no large payloads.
 5. On success the form closes and the new task's detail screen is pushed with `id`+`title` params (header correct on the first frame); with a prompt the run is visible and
-   streaming (user bubble, then agent output); without a prompt the task opens with a live composer.
+   streaming (user bubble, then agent output); without a prompt the task opens with a live composer. **Deviation:** a finished run's transcript has no user line in `run.logs`,
+   so the detail screen now shows the run's own `Prompt` as the user bubble when the logs carry none (`withRunPrompt`; this also fixes every historical run). Only the latest
+   run is shown, as before.
 5a. With a setup script running the prompt is queued and the task opens showing the queued prompt chip; it starts when setup ends.
 6. Partial failure (task created, `run.start` rejected) never creates a second task: the error is shown inline, `Open task` navigates to the created task, and retry only calls
    `run.start`. A `task.create` failure shows the daemon's message inline and keeps the input.
@@ -101,6 +103,11 @@ daemon has the task (via `task.list`), the header shows the title, and a second 
 ## Progress
 
 - 2026-10-22 — Plan written (this file). Contract read from `handlers.go`, web's dialog, Paseo's launch/preferences code.
+- 2026-10-22 — Lead review of the contract found ADR-0024's setup busy window: the first prompt is sent with `whenBusy: 'queue'` and `queued` counts as success (AC 4/5a).
+- 2026-10-22 — M6-A data layer (api additions, provider catalog, prefs, submit pipeline, live integration test); then in parallel M6-B1 (route, form, header entry, smoke
+  stage 55) and M6-B2 (zero-run composer, first-send provider, run prompt on finished runs) in two worktrees, cherry-picked onto one branch. Review fixes: stale-closure
+  `setLoad`, the empty-catalog note, first-send-only `refreshLatest`, milestone labels removed from comments, the `.smoke` PNGs a Peer had committed were dropped from history.
+- Header entry fit at 390 px in both schemes (`Connection` left, `New task` right), so no bottom button was needed.
 
 ## Validation
 
@@ -111,4 +118,10 @@ daemon has the task (via `task.list`), the header shows the title, and a second 
 - Persist the last provider/model/mode across launches (secure store or async storage).
 - ADR-0039 G4 start modes (HEAD / branch / PR / issue) in this form; ADR-0038 attachments in the first prompt.
 - Thinking level (Claude only) is not exposed on mobile yet.
-- Native (device/simulator) verification of the form: see the native checklist handed to the Supervisor.
+- Native (device/simulator) verification of the form: see the native checklist handed to the Supervisor. Risks specific to this PR: `UiHost` (`matchContents`) sizing
+  inside the form's `ScrollView`/`Card` on native, the `router.dismiss()` then `router.push()` sequence out of a native modal, the native `Picker` menus, keyboard avoidance
+  with the multiline prompt.
+- The queued-first-prompt window (workspace setup script running → `queued` → queue chip → run adopted on delivery) is covered by unit tests and a code walk only; no live
+  setup-script scenario exists in the harness.
+- The web renderer of `@expo/ui` `Picker` paints its own palette (a blue-black box in dark), unlike the neutral inputs; native pickers are system controls.
+- Only the latest run's transcript is shown on the task screen; earlier prompts and runs are not (pre-existing).
