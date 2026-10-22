@@ -2,7 +2,7 @@
 
 Size: **M (5)** by the protocol table: scope 1 (CLI plus three small daemon messages), PRs 2 (six, non-stacked), risk 1 (a new exit-code contract; one error-reason change), decisions 1 (two choices recorded below, neither changes an ADR), verification 0 (unit and fake-daemon CLI tests, re-checked on the dogfood daemon).
 
-Follows [`dogfood-friction-fixes`](../completed/dogfood-friction-fixes.md). Source: the local dogfood log (2026-10-22) items 17-30 and the Human's request to fix the CLI bugs found while orchestrating through smind. A separate Lead owns the web UI findings.
+Follows [`dogfood-friction-fixes`](dogfood-friction-fixes.md). Source: the local dogfood log (2026-10-22) items 17-30 and the Human's request to fix the CLI bugs found while orchestrating through smind. A separate Lead owns the web UI findings.
 
 ## Goal
 
@@ -71,8 +71,25 @@ Checks per PR: `task test`, `task lint`; then re-check the behaviour on the rebu
 
 ## Progress
 
-- 2026-10-22: plan written.
+- 2026-10-22: plan written (#504).
+- 2026-10-22: shipped: #505 run error cause, #506 `task wait`, #507 `task runs` columns, #508 setup-busy queueing, #509 `smind status`, #510 chat/provider binding message. #506 and #507 both added the same `runSummaryRow` fields and merged into a duplicate declaration that broke the build (fixed by #513); the lesson is to rebase the second of two PRs that touch one struct before it merges.
+- 2026-10-22: re-verified live on the rebuilt dogfood daemon (develop e9583ec5). Closed.
 
 ## Validation
 
-(filled per PR)
+"Unit" = a named test in the PR; "live" = run by hand on the dogfood daemon (:4870, develop e9583ec5, 2026-10-22, real claude-native Haiku runs and a real GLM run).
+
+| AC | Result | Evidence |
+|---|---|---|
+| AC1 `task wait` | confirmed | unit `TestWaitExitCode`, `TestRenderWaitSummary`, `TestTaskWait_ExitCodes` (done 0, needs-continue 4, stopped 3, timeout 5), `TestTaskWait_AlreadyFinished`, `TestTaskWait_UnknownRun`, `TestTaskWait_Usage`, `TestTaskWait_PrintsPendingPermissionHint`, and (after this plan) `TestTaskWait_ErrorRun`; live: exit 0 with `1198 in / 127 out tokens / $0.01; no new commits`, exit 1 on a GLM 429 run, exit 3 after `task stop`, exit 5 with `--timeout 4s` and the run still `running` afterwards, summary with `head ab39bf5 (base e9583ec)` for a run that committed. **Exit 4 (needs-continue) is unit-tested only**; it could not be triggered live |
+| AC2 error cause | confirmed | unit `TestAgentErrorCause`, `TestFinish_PromotesAgentErrorText`, `TestFinish_NoAgentErrorTextUnchanged`, `TestFinish_RPCErrorDataReachesTheRunError`, `TestRPCErrorIncludesData`; live: a real GLM 429 run reads `error: 429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18 (taskrunner: glm prompt: ... rpc error -32603: Internal error ({"details":"429 ..."}))` in `task wait` and `task runs`. GLM puts the cause in the JSON-RPC `data` too, so the text appears twice (cosmetic) |
+| AC3 `task runs` columns | confirmed | unit `TestRunStartedCell`, `TestRunDurationCell`, `TestCompactCount`, `TestRunUsageCell`, `TestRunStatusCell`, `TestRunCommitCount`, `TestTaskRunsColumns`; live: STARTED, DURATION, USAGE `1.2k/671 tok $0.01`, COMMITS `2` for a run that made 2 commits (matches `git log` in the worktree), `error: 429 ...` in STATUS |
+| AC4 chat binding message | confirmed by test | unit `TestStart_ChatProviderMismatchNamesFix`; the message was seen live earlier in the dogfood (the original friction), the new text was not re-triggered live |
+| AC5 setup-busy | confirmed | unit `TestTaskSend_QueuesWhileSetupRuns`, `TestTaskSend_ExplicitRejectKept`, `TestTaskSend_NoSetupNoNote`, `TestSetupBusyErrorNamesCLIFlag`; live: on a workspace with a 12 s setup script, `task send` right after `task new` printed the notice and `queued as item 1`, the run started when setup finished (5 s run at 16:35:04); `--when-busy reject` failed with the message naming `--when-busy queue` |
+| AC6 `smind status` | confirmed | unit `TestRenderStatus`, `TestStatusReportsDaemon`, `TestStatusUnreachable`, `TestStatusWrongService`, `TestStatusRejectsArgs`; live: `reachable, smind dev` for :4870, `NOT reachable: ... connection refused` with exit 1 for a closed port. Not run against a desktop-managed daemon (`managedBy`) |
+
+**Known gaps, carried forward (none blocks the plan):**
+- `--detach` combined with the queued path prints no run id (a queued prompt has no run yet), so a script cannot `task wait` on it. A possible fix is `task wait` accepting a queue item id.
+- A run's error text can say the cause twice when the agent also puts it in the RPC error's `data` (GLM does).
+- Exit code 4 has no live evidence.
+- The task owner or lead column in `task ls` and provider failover on a quota error remain undone (see "Not doing"); both need a Human decision.
