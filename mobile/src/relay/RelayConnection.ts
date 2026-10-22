@@ -207,7 +207,14 @@ export interface ConnectOptions {
 }
 
 /** The daemon answered a request with an error envelope: the only kind of rejection that proves the daemon is there (liveness and resume probes). */
-export class DaemonError extends Error {}
+export class DaemonError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+  }
+}
 /** The hello was refused because the daemon has not approved this device. */
 class AwaitingApprovalError extends Error {}
 /** The daemon or relay revoked this device. */
@@ -775,7 +782,7 @@ export class RelayConnection {
       const p = this.pending.get(env.id);
       if (p) {
         this.pending.delete(env.id);
-        p.reject(new DaemonError(env.error.message));
+        p.reject(new DaemonError(env.error.message, typeof env.error.code === 'string' ? env.error.code : undefined));
       }
       return;
     }
