@@ -350,6 +350,55 @@ Without a password a relay device is admitted by your approval alone, and the da
 bridge starts. With a password, a client that predates device identity (`relay.legacyDevices: true`) is refused regardless: the
 legacy route cannot carry a password. The mobile app takes the same password (its own prompt follows).
 
+### 9. Push notifications (Android)
+
+The phone gets a notification when a run needs a permission approval, reaches the turn cap and needs Continue, or finishes or
+fails (finished and failed are sent for top-level tasks only), even with the app in the background or swiped away. Tapping it
+opens that task. Android only for now: on iOS the app has no remote notifications yet (they need Apple's paid Developer
+Program). The app must be a development build or an installed build; Expo Go cannot receive push.
+
+Turn it on in the mobile app: Connection → Notifications → Turn on. Nothing is registered, and no permission is asked, until you
+do. It works over the relay with a paired and approved device. `smind relay devices ls` has a PUSH column (`yes` or `no`; `-`
+when the daemon is not running). To test it without running an agent:
+
+```sh
+smind push test                 # every phone registered for push
+smind push test <device id prefix>   # one phone; the prefix is at least 4 characters
+```
+
+The exit code is 0 only if every phone was sent. "No phone is registered" means notifications are not turned on in the app yet.
+
+To turn push off for the whole daemon, set it in `config.yaml` or the environment (the app's Notifications row then shows "Off
+on this daemon" and nothing is sent). The default is on, which does nothing until a phone registers:
+
+```yaml
+push:
+  enabled: false
+```
+
+```sh
+SMIND_PUSH=off    # also 0, false, no, n, f, disabled
+```
+
+- **What leaves your daemon.** One HTTPS request to `https://exp.host` (Expo's push service) per notification. It carries an
+  opaque, padded, encrypted blob and the phone's push token, and the daemon's IP address is the connection source. Task titles,
+  prompts, file names and permission text are encrypted for the phone with a per-device key that only your daemon and that phone
+  hold (exchanged over the end-to-end encrypted relay channel); Expo, Google and Apple cannot read them. If the phone cannot
+  decrypt a push it shows a generic "Open smind to see what happened". The relay never sees the token or the key.
+- **Credentials.** The daemon needs none by default. The Firebase (FCM) credential that makes delivery work belongs to whoever
+  built the app (it lives in their Expo/EAS project), not to your daemon. Optional: if the app's Expo project turns on
+  "enhanced push security", set `push.expoAccessToken` in `config.yaml` or the environment variable `SMIND_EXPO_ACCESS_TOKEN`
+  (the variable wins). It is a secret and is never logged.
+- **Revoking and re-pairing.** `smind relay devices revoke <id>` stops pushes to that device. Re-pairing a phone gives it a new
+  device identity, so turn notifications on again afterwards.
+- **Where it is stored.** Registrations live in `push-registrations.json` in the daemon's home directory (mode 0600). It holds
+  each phone's token and key: treat it like the relay device registry. Losing it only means phones must turn notifications on
+  again.
+- **Limits.** Delivery is best effort and goes through Expo and Google, so a notification can be late or lost. A force-stopped
+  app or an aggressive battery saver stops Android from receiving pushes until the app is opened. A notification already in
+  flight is not retracted when a permission is answered elsewhere, so a stale one can arrive after you approved on another
+  device; tapping it opens the task, which shows the true state. The daemon needs outbound HTTPS to `exp.host`.
+
 ### Limits today
 
 - A relay host serves up to 16 devices at once (`smind relay --max-devices-per-host` on the relay,
@@ -361,6 +410,7 @@ legacy route cannot carry a password. The mobile app takes the same password (it
 - Requests in flight at the moment a connection drops hard can be lost; clients time out and open a fresh session.
 - A self-signed relay is trusted by confirming its fingerprint in `relay connect` (step 3): compare it with the one the
   relay printed, and pass `--fingerprint` to make that check explicit. A CA certificate needs no such step.
+- Push notifications are Android only; iOS needs the Apple Developer Program (step 9).
 
 ## Docker
 
@@ -466,6 +516,9 @@ daemon fails to open its database there, start it with `SMIND_SQLITE_JOURNAL=del
 
 **After a power loss** the last few commits may be missing; the database itself stays consistent. To make every commit
 survive a power loss at the cost of write speed, start the daemon with `SMIND_SQLITE_SYNCHRONOUS=full`.
+
+Optionally also keep `push-registrations.json` from `$SMIND_HOME` (step 9 of Path B): it is a small file, and without it phones
+only have to turn notifications on again.
 
 ## Which to use
 
