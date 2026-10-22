@@ -1,6 +1,7 @@
 import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import { Icons } from "@/lib/icons";
 
+import { AddToChatButton } from "@/components/add-to-chat-button";
 import { FileStatusMarker } from "@/components/file-status-marker";
 import {
   ContextMenu,
@@ -12,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { FileIcon } from "@/lib/file-icons";
 import { requestDiffReveal } from "@/lib/diff-reveal";
+import { useAddToChat } from "@/hooks/use-add-to-chat";
 import { useFileExplorer, type DirNode } from "@/hooks/use-file-explorer";
 import { useLocalPathActions, type LocalPathActions } from "@/hooks/use-local-path-actions";
 import { useTaskFileStatus } from "@/hooks/use-task-file-status";
@@ -68,6 +70,8 @@ export function FileExplorerPane({
   const { statusByPath } = useTaskFileStatus(client, task, events);
   const dirStatus = rollUpDirStatus(statusByPath);
   const localPathActions = useLocalPathActions();
+  const addToChat = useAddToChat(task.ID);
+  const onAddToChat = addToChat.canAdd ? (path: string) => addToChat.add({ path }) : undefined;
   // The tree's paths are relative to the worktree root; the actions need
   // the absolute path on the daemon's machine, so no worktree, no items.
   const worktreeRoot = task.WorktreePath?.replace(/\/+$/, "") ?? null;
@@ -94,6 +98,7 @@ export function FileExplorerPane({
         }}
         onRevealInDiff={revealInDiff}
         onOpenToSide={onOpenFileToSide}
+        onAddToChat={onAddToChat}
         pathActions={pathActions}
       />
     </div>
@@ -138,6 +143,7 @@ function DirChildren({
   onSelectFile,
   onRevealInDiff,
   onOpenToSide,
+  onAddToChat,
   pathActions,
 }: {
   path: string;
@@ -150,6 +156,8 @@ function DirChildren({
   onSelectFile: (path: string) => void;
   onRevealInDiff: (path: string) => void;
   onOpenToSide?: (path: string) => void;
+  /** Present when the daemon accepts `file_ref` and a chat can receive it (a file or a directory). */
+  onAddToChat?: (path: string) => void;
   pathActions: RowPathActions | null;
 }) {
   const node = dirs.get(path);
@@ -183,6 +191,7 @@ function DirChildren({
               path={childPath}
               onRevealInDiff={onRevealInDiff}
               onOpenToSide={onOpenToSide}
+              onAddToChat={onAddToChat}
               pathActions={pathActions}
               changed={statusByPath.has(childPath)}
             >
@@ -193,6 +202,7 @@ function DirChildren({
                 status={statusByPath.get(childPath)}
                 active={selectedPath === childPath}
                 onClick={() => onSelectFile(childPath)}
+                action={onAddToChat && <AddToChatButton label={`Add "${entry.name}" to chat`} onAdd={() => onAddToChat(childPath)} />}
                 testId="file-row"
                 dataPath={childPath}
               />
@@ -204,20 +214,30 @@ function DirChildren({
         const expanded = childNode?.expanded ?? false;
         return (
           <div key={childPath}>
-            <TreeRow
-              depth={depth}
-              icon={
-                <>
-                  <Icons.chevronRight aria-hidden="true" className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} />
-                  {expanded ? <Icons.folderOpen aria-hidden="true" className="size-3.5" /> : <Icons.folder aria-hidden="true" className="size-3.5" />}
-                </>
-              }
-              label={entry.name}
-              status={dirStatus.get(childPath)}
-              onClick={() => onToggleDir(childPath)}
-              testId="dir-row"
-              dataPath={childPath}
-            />
+            <DirContextMenu path={childPath} onAddToChat={onAddToChat}>
+              <TreeRow
+                depth={depth}
+                icon={
+                  <>
+                    <Icons.chevronRight
+                      aria-hidden="true"
+                      className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")}
+                    />
+                    {expanded ? (
+                      <Icons.folderOpen aria-hidden="true" className="size-3.5" />
+                    ) : (
+                      <Icons.folder aria-hidden="true" className="size-3.5" />
+                    )}
+                  </>
+                }
+                label={entry.name}
+                status={dirStatus.get(childPath)}
+                onClick={() => onToggleDir(childPath)}
+                action={onAddToChat && <AddToChatButton label={`Add "${entry.name}" to chat`} onAdd={() => onAddToChat(childPath)} />}
+                testId="dir-row"
+                dataPath={childPath}
+              />
+            </DirContextMenu>
             {expanded && (
               <DirChildren
                 path={childPath}
@@ -230,6 +250,7 @@ function DirChildren({
                 onSelectFile={onSelectFile}
                 onRevealInDiff={onRevealInDiff}
                 onOpenToSide={onOpenToSide}
+                onAddToChat={onAddToChat}
                 pathActions={pathActions}
               />
             )}
@@ -262,6 +283,7 @@ function RowContextMenu({
   changed,
   onRevealInDiff,
   onOpenToSide,
+  onAddToChat,
   pathActions,
   children,
 }: {
@@ -269,6 +291,7 @@ function RowContextMenu({
   changed: boolean;
   onRevealInDiff: (path: string) => void;
   onOpenToSide?: (path: string) => void;
+  onAddToChat?: (path: string) => void;
   pathActions: RowPathActions | null;
   children: ReactNode;
 }) {
@@ -293,6 +316,12 @@ function RowContextMenu({
           <Icons.openToSide />
           Open to side
         </ContextMenuItem>
+        {onAddToChat && (
+          <ContextMenuItem onSelect={() => onAddToChat(path)} data-testid="file-menu-add-to-chat">
+            <Icons.mention />
+            Add to chat
+          </ContextMenuItem>
+        )}
         <ContextMenuItem
           onSelect={() => {
             void navigator.clipboard?.writeText(path).catch(() => {});
@@ -327,6 +356,22 @@ function RowContextMenu({
   );
 }
 
+/** A directory row's menu: only "Add to chat" (a directory reference is valid), so without it the row has no menu. */
+function DirContextMenu({ path, onAddToChat, children }: { path: string; onAddToChat?: (path: string) => void; children: ReactNode }) {
+  if (!onAddToChat) return <>{children}</>;
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent data-testid="dir-row-menu" data-path={path}>
+        <ContextMenuItem onSelect={() => onAddToChat(path)} data-testid="dir-menu-add-to-chat">
+          <Icons.mention />
+          Add to chat
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
 /**
  * The dashed vertical guide line under each depth level (ported from
  * ZCode's `workspace-file-tree/hierarchyGuides.ts`), so a deeply nested
@@ -338,7 +383,10 @@ const HIERARCHY_GUIDE_BACKGROUND =
 
 function hierarchyGuideStyle(depth: number): CSSProperties | undefined {
   if (depth <= 0) return undefined;
-  return { width: `calc(${depth} * 0.75rem)`, backgroundImage: HIERARCHY_GUIDE_BACKGROUND };
+  return {
+    width: `calc(${depth} * 0.75rem)`,
+    backgroundImage: HIERARCHY_GUIDE_BACKGROUND,
+  };
 }
 
 function TreeRow({
@@ -351,6 +399,7 @@ function TreeRow({
   className,
   testId,
   dataPath,
+  action,
   ...props
 }: {
   depth: number;
@@ -363,6 +412,8 @@ function TreeRow({
   className?: string;
   testId?: string;
   dataPath?: string;
+  /** A hover/focus-revealed trailing control (it must stop its own click and key events from reaching the row). */
+  action?: ReactNode;
   // The rest is what Radix's ContextMenuTrigger injects through `asChild`
   // (onContextMenu, onPointerDown, ref, ...) -- the row's own props are
   // omitted from it so this isn't an unsatisfiable intersection.
@@ -385,7 +436,7 @@ function TreeRow({
           : undefined
       }
       className={cn(
-        "relative flex h-7 w-full items-center gap-1.5 truncate rounded-lg pr-2 text-left text-ui-base",
+        "group relative flex h-7 w-full items-center gap-1.5 truncate rounded-lg pr-2 text-left text-ui-base",
         onClick && "cursor-pointer hover:bg-surface-hover",
         active && "bg-selected font-medium",
         className,
@@ -398,6 +449,7 @@ function TreeRow({
       )}
       <span className="flex shrink-0 items-center gap-1.5">{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
+      {action}
       {status && <FileStatusMarker status={status} />}
     </div>
   );

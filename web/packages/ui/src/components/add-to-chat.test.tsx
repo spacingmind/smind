@@ -110,6 +110,7 @@ describe("composer consumes queued inserts", () => {
 // --- Diff pane entry points ---------------------------------------------------------------------------------------
 
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
+import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { useFocusedChatStore } from "@/stores/focused-chat-store";
 import type { Task, TaskFilesResult } from "@/lib/types";
 
@@ -233,5 +234,84 @@ describe("diff pane Add to chat", () => {
     await renderPanes([{ path: "a.go", status: "modified", staged: false }], RANGE_DIFF, { ...LIMITS, kinds: ["image", "file"] });
     expect(screen.queryByRole("button", { name: "Add to chat" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Add hunk to chat" })).toBeNull();
+  });
+});
+
+// --- Files tab entry points ---------------------------------------------------------------------------------------
+
+async function renderFiles(limits: AttachmentLimits = LIMITS) {
+  useFocusedChatStore.setState({ byTask: { 1: 10 } });
+  const client = new FakeWsClient();
+  render(
+    <>
+      <FileExplorerPane client={client} task={TASK} />
+      <Composer
+        client={client}
+        taskId={1}
+        chatId={10}
+        isDefaultChat
+        boundProvider={null}
+        connected
+        runningRunId={null}
+        queuedItems={[]}
+        onCancelQueued={async () => {}}
+        onSubmit={async () => ({ kind: "started", runId: "run-x" })}
+        onStop={async () => {}}
+      />
+    </>,
+  );
+  client.nth("daemon.info", 0).resolve({ attachments: limits });
+  client.nth("file.list", 0).resolve([
+    { name: "src", isDir: true, size: 0 },
+    { name: "README.md", isDir: false, size: 42 },
+  ]);
+  client.nth("task.files", 0).resolve({ files: [] });
+  await flush();
+  await flush();
+}
+
+describe("Files tab Add to chat", () => {
+  it("a file row's button adds the file", async () => {
+    await renderFiles();
+    fireEvent.click(await screen.findByRole("button", { name: 'Add "README.md" to chat' }));
+    await flush();
+    expect(area()).toHaveValue("@README.md ");
+  });
+
+  it("the row menu has Add to chat for a file", async () => {
+    await renderFiles();
+    await screen.findByRole("button", { name: 'Add "README.md" to chat' });
+    fireEvent.contextMenu(screen.getByTestId("file-row"));
+    fireEvent.click(screen.getByTestId("file-menu-add-to-chat"));
+    await flush();
+    expect(area()).toHaveValue("@README.md ");
+  });
+
+  it("a directory row adds the directory, from its button and its menu", async () => {
+    await renderFiles();
+    fireEvent.click(await screen.findByRole("button", { name: 'Add "src" to chat' }));
+    await flush();
+    expect(area()).toHaveValue("@src ");
+    fireEvent.change(area(), { target: { value: "" } });
+    fireEvent.contextMenu(screen.getByTestId("dir-row"));
+    fireEvent.click(screen.getByTestId("dir-menu-add-to-chat"));
+    await flush();
+    expect(area()).toHaveValue("@src ");
+  });
+
+  it("adding does not open or toggle the row", async () => {
+    await renderFiles();
+    fireEvent.click(await screen.findByRole("button", { name: 'Add "src" to chat' }));
+    await flush();
+    expect(screen.getByTestId("dir-row").nextElementSibling).toBeNull();
+  });
+
+  it("has no buttons or menu entries when the daemon lacks file_ref", async () => {
+    await renderFiles({ ...LIMITS, kinds: ["image", "file"] });
+    expect(screen.queryByRole("button", { name: /to chat/ })).toBeNull();
+    fireEvent.contextMenu(screen.getByTestId("file-row"));
+    expect(screen.queryByTestId("file-menu-add-to-chat")).toBeNull();
+    fireEvent.contextMenu(screen.getByTestId("dir-row"));
+    expect(screen.queryByTestId("dir-menu-add-to-chat")).toBeNull();
   });
 });

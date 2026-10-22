@@ -1,10 +1,11 @@
 import { act } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { resetDiffReveal, takeDiffReveal } from "@/lib/diff-reveal";
 import { FakeWsClient } from "@/test/fake-ws-client";
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import type { FileEntry, Task, TaskFile } from "@/lib/types";
 
 const TASK: Task = {
