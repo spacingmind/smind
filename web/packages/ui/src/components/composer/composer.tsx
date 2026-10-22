@@ -8,7 +8,7 @@ import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { useDaemonForge } from "@/hooks/use-attachment-limits";
 import { FileMentionPopover } from "@/components/composer/file-mention-popover";
 import { useFileMention } from "@/components/composer/use-file-mention";
-import { mentionedRefs } from "@/lib/file-mention";
+import { formatMentionToken, mentionedRefs } from "@/lib/file-mention";
 import { supportsKind } from "@/lib/attachments/kinds";
 import { useAttachmentDraft } from "@/components/composer/use-attachment-draft";
 import { attachmentErrorMessage } from "@/lib/attachments/errors";
@@ -261,6 +261,23 @@ export function Composer({
   const running = runningRunId !== null;
 
   const { limits: attachLimits, key: attachKey, items: attachItems, hasError: attachHasError } = attach;
+
+  // "Add to chat" from the Diff and Files panes: append each queued token after a space and remember the ref, so the
+  // next send carries it as a `file_ref`. The caret ends after the trailing space, so the `@` popover stays shut.
+  const queuedInserts = useComposerAttachmentsStore((s) => (attachKey ? s.pendingInserts[attachKey] : undefined));
+  useEffect(() => {
+    if (!attachKey || !queuedInserts?.length) return;
+    const store = useComposerAttachmentsStore.getState();
+    let text = draftRef.current.value;
+    for (const ref of store.takeInserts(attachKey)) {
+      store.rememberMention(attachKey, ref);
+      text += `${text === "" || /\s$/.test(text) ? "" : " "}${formatMentionToken(ref)} `;
+    }
+    pendingCaret.current = text.length;
+    draftRef.current.setValue(text);
+    setCaret(text.length);
+    textareaNode.current?.focus();
+  }, [attachKey, queuedInserts]);
 
   const send = useCallback(
     async (text: string, whenBusy: "queue" | "interrupt") => {
