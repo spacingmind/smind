@@ -378,7 +378,8 @@ impl std::fmt::Display for DataTransportError {
 /// therefore runs in the background and the stream is picked up on the first
 /// read; the send half works from the start.
 pub enum Inbound {
-    Ready(tonic::Streaming<Frame>),
+    /// Boxed: a `Streaming` is much larger than the other variants.
+    Ready(Box<tonic::Streaming<Frame>>),
     Pending(PendingCall),
     /// The call failed; further reads report the stream closed.
     Failed,
@@ -418,7 +419,7 @@ impl Inbound {
                     let stream = result
                         .map_err(|_| DataTransportError::Closed)?
                         .map_err(DataTransportError::Status)?;
-                    *self = Inbound::Ready(stream);
+                    *self = Inbound::Ready(Box::new(stream));
                 }
                 Inbound::Failed => return Err(DataTransportError::Closed),
             }
@@ -1466,7 +1467,7 @@ async fn run(
                 if !matches!(*status_tx.borrow(), Status::Connecting | Status::Reconnecting) {
                     let _ = status_tx.send(Status::Reconnecting);
                 }
-                if sleep_or_stop(&mut outbound_rx, (timing.jitter)(backoff.next()))
+                if sleep_or_stop(&mut outbound_rx, (timing.jitter)(backoff.next_delay()))
                     .await
                     .is_none()
                 {
@@ -1571,7 +1572,7 @@ async fn run(
                             if let Some(t) = modes.legacy_unserved() {
                                 (transition_status(&t), transition_delay(&t, &timing, &mut backoff))
                             } else {
-                                (None, backoff.next())
+                                (None, backoff.next_delay())
                             }
                         }
                         // Handled by the arm above; kept so the match stays exhaustive.
@@ -1692,7 +1693,7 @@ async fn run(
         // escalate, not retry at the base rate forever.
         if connected_at.elapsed() >= timing.min_stable_connection {
             backoff.reset();
-        } else if sleep_or_stop(&mut outbound_rx, (timing.jitter)(backoff.next()))
+        } else if sleep_or_stop(&mut outbound_rx, (timing.jitter)(backoff.next_delay()))
             .await
             .is_none()
         {
@@ -1733,7 +1734,7 @@ fn transition_status(t: &Transition) -> Option<Status> {
 /// stuck retries at the slow refusal rate.
 fn transition_delay(t: &Transition, timing: &Timing, backoff: &mut Backoff) -> Duration {
     match t {
-        Transition::Flipped(_) => backoff.next(),
+        Transition::Flipped(_) => backoff.next_delay(),
         Transition::Stuck { .. } => timing.refused_retry,
     }
 }

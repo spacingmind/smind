@@ -209,6 +209,8 @@ the trigger in section 2.
 
 ## Progress
 
+- 2026-10-22 (plans hygiene) — **STALE BY DESIGN, flagged for the Human.** Nothing here is built and ADR-0027 is still Proposed; the plan is deliberately parked until the trigger in section 2 fires. No occurrence of that trigger is recorded below. Since 2026-10-11 the neighbouring pieces landed: D12 (a human-only live mode switch) as #369 `smind task mode`; D13 stayed a derived `disposition` (#373); the tree guard and `task.tree` (see `task-hierarchy-tiers.md`). The Supervisor/Lead/Peer workflow still runs on Paseo plus `docs/WORKSPACE_PROTOCOL.md`. **Decision for the Human:** keep this parked, or move it to `completed/` with "not built, trigger never fired" so `active/` only holds live work. Not deleted.
+
 - 2026-10-11: ADR-0027 and this plan written as Proposed, docs-only. Not
   built, per the user. PR #290 (protocol) is on `develop`.
 

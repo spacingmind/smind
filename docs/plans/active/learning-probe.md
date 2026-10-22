@@ -310,13 +310,20 @@ All numbers are defaults in `learning.probe.*` and are guesses until the first w
 
 ## Progress
 
+**Status 2026-10-22 (plans hygiene): PARTIAL; the checkboxes below were stale and are corrected.** All six PRs merged: 2a #441, 2b #442, 3 #445, 4a #450, 4b #452 (its stacked branch was #451), 4c #448, plus follow-ups #447 and #456. Open items:
+
+- **AC33 `probeCheck` is not met** (deferred, needs a Human decision, see Decisions); `TestProbeCheck_*` do not exist.
+- Validation has **no entries** for AC3–AC11 (2a, 2b) or AC38–AC42 (4c UI). The code and tests are in the tree (all D11 and S0 named tests exist, except that `TestReflectRetry_AtMostOnce` is not present under that name; UI tests live in `probe-card.*.test.tsx`, not `ProbeCard.*`). AC42 (light/dark screenshots including transition frames) is **unverified**: no record in this plan.
+- The Settings → Usage row for the Probe bucket is a noted follow-up.
+- PARTIAL per the plan's own P0 addendum: keychain was tested on macOS, but `failIfUnavailable` isolation, Linux and Windows are untested (probes are macOS-only by decision).
+
 - [x] PR 1: ADR-0037 + this plan (docs).
-- [ ] PR 2a: S0 prevalence scan.
-- [ ] PR 2b: D11 reflector retry.
+- [x] PR 2a: S0 prevalence scan — #441.
+- [x] PR 2b: D11 reflector retry — #442.
 - [x] PR 3: P0 spike and ADR addendum: conditional PASS on macOS (24 live calls, USD 0.068); keychain, Linux, Windows untested.
-- [ ] PR 4a: arm + sandbox, reviewed (macOS only; keychain test done 2026-10-22: unreachable under the allow-list, ADR-0037 addendum).
-- [ ] PR 4b: probe service (stacked on 4a; AC33 `probeCheck` deferred, see Decisions).
-- [ ] PR 4c: UI.
+- [x] PR 4a (#450): arm + sandbox, reviewed (macOS only; keychain test done 2026-10-22: unreachable under the allow-list, ADR-0037 addendum).
+- [x] PR 4b (#452): probe service (stacked on 4a; AC33 `probeCheck` deferred, see Decisions).
+- [x] PR 4c (#448): UI.
 
 ## Validation
 

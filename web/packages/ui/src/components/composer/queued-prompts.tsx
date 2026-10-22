@@ -1,5 +1,6 @@
 import { Icons } from "@/lib/icons";
 
+import { AttachmentChip } from "@/components/timeline/attachment-chip";
 import { Button } from "@/components/ui/button";
 import type { ChatQueueItem } from "@/lib/types";
 
@@ -45,6 +46,13 @@ export function QueuedPrompts({
             <span className="min-w-0 flex-1 truncate" title={item.Prompt}>
               {item.Prompt}
             </span>
+            {item.attachments && item.attachments.length > 0 && (
+              <span data-testid="queued-attachments" className="flex shrink-0 items-center gap-1">
+                {item.attachments.map((a) => (
+                  <AttachmentChip key={a.id} attachment={a} compact />
+                ))}
+              </span>
+            )}
             <Button
               type="button"
               variant="ghost"
