@@ -417,7 +417,7 @@ func (reg *Registry) deliverOne(chatID int64) {
 type SetupBusyError struct{ TaskID int64 }
 
 func (e *SetupBusyError) Error() string {
-	return fmt.Sprintf("runs: start: task %d's worktree setup script is still running; wait for it to finish or pass whenBusy=queue", e.TaskID)
+	return fmt.Sprintf("runs: start: task %d's worktree setup script is still running; wait for it to finish or pass whenBusy=queue (CLI: --when-busy queue)", e.TaskID)
 }
 
 // setupRunningForChat reports whether chatID's task has a setup script
