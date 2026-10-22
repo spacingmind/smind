@@ -10,7 +10,17 @@ export interface DiffPrefs {
 
 export const DIFF_PREFS_STORAGE_KEY = "smind.diff-prefs";
 
-const DEFAULTS: DiffPrefs = { view: "by-file", format: "side-by-side" };
+/** Same breakpoint as hooks/use-mobile.ts: below it the pane is a phone-width column. */
+const NARROW_VIEWPORT_PX = 768;
+
+/**
+ * Side by side halves an already narrow pane (about 140px a side on a phone, where every line is cut
+ * off), so a person who has never chosen gets unified there. An explicit stored choice always wins.
+ */
+function defaults(): DiffPrefs {
+  const narrow = typeof window !== "undefined" && window.innerWidth < NARROW_VIEWPORT_PX;
+  return { view: "by-file", format: narrow ? "line-by-line" : "side-by-side" };
+}
 
 /**
  * The diff pane's two view toggles (ui-redesign-parity plan, Item 19),
@@ -27,15 +37,16 @@ const DEFAULTS: DiffPrefs = { view: "by-file", format: "side-by-side" };
 export function loadDiffPrefs(): DiffPrefs {
   try {
     const raw = window.localStorage.getItem(DIFF_PREFS_STORAGE_KEY);
-    if (!raw) return DEFAULTS;
+    if (!raw) return defaults();
     const parsed = JSON.parse(raw) as Partial<DiffPrefs> | null;
+    const fallback = defaults();
     return {
-      view: parsed?.view === "whole" || parsed?.view === "by-file" ? parsed.view : DEFAULTS.view,
+      view: parsed?.view === "whole" || parsed?.view === "by-file" ? parsed.view : fallback.view,
       format:
-        parsed?.format === "line-by-line" || parsed?.format === "side-by-side" ? parsed.format : DEFAULTS.format,
+        parsed?.format === "line-by-line" || parsed?.format === "side-by-side" ? parsed.format : fallback.format,
     };
   } catch {
-    return DEFAULTS;
+    return defaults();
   }
 }
 
