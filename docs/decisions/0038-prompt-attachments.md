@@ -2,11 +2,9 @@
 
 ## Status
 
-**Proposed — 2026-10-22.** Decisions D1–D3 below were made by the Human before this ADR was written and are recorded
-as given. Everything else is the Lead's proposal for Supervisor review; the points that need a call are listed under
-[Open questions](#open-questions). Plan: [`docs/plans/active/prompt-attachments.md`](../plans/active/prompt-attachments.md).
-
-No implementation starts until the Supervisor accepts this ADR.
+**Accepted — 2026-10-22, by the Human.** D1–D3 were decided before this ADR was written. The open questions were
+answered the same day: **O1 → (b)** and **O7 → yes** as decisions, **O2–O6 accepted as recommended** (see
+[Open questions](#open-questions)). Plan: [`docs/plans/active/prompt-attachments.md`](../plans/active/prompt-attachments.md).
 
 ## Context
 
@@ -371,22 +369,21 @@ daemon's PATH. `provider.list` entries gain `images: "yes" | "no" | "unknown"` (
 
 ## Open questions
 
-These are not decided here. Each has a recommendation; the plan assumes it unless the Supervisor says otherwise.
+All answered by the Human on 2026-10-22.
 
-- **O1: How does mobile get past the 1 MiB relay frame?** (a) fragment large messages inside the E2EE channel (an
-  ADR-0035 amendment: new frame type, reassembly cap, protocol version bump), or (b) the phone downscales images to
-  fit (JPEG, long edge ≤ 1568 px, which Claude resizes to anyway, typically 150–400 KiB) and refuses larger non-image
-  files. *Recommend (b) for mobile v1, (a) only if phone-to-daemon file transfer is wanted.* Not needed for this item.
-- **O2: Retention and quota for `$SMIND_HOME/attachments`.** Recommend: keep with the run, delete with the task, orphan
-  sweep at start, no quota in v1; revisit when someone reports disk use.
-- **O3: Blob location.** Recommend `$SMIND_HOME/attachments/<set>/` outside the worktree plus `Delivery.AddDirs`
-  (§3), over writing into the worktree. Confirms the Supervisor's "temp file under the run's dir" idea with the one
-  change that there is no run dir today and a worktree path would show up in diffs.
-- **O4: Image-incapable provider selected: warn or block?** Recommend warn on the pill, send anyway with the path
+- **O1: How does mobile get past the 1 MiB relay frame? Decided (b).** The phone downscales images to fit (JPEG, long
+  edge ≤ 1568 px, which Claude resizes to anyway, typically 150–400 KiB) and refuses non-image files that do not fit.
+  No ADR-0035 change, no fragmentation. Not needed for this item (mobile starts after M5).
+- **O2: Retention and quota. Accepted as recommended:** keep with the run, delete with the task, orphan sweep at start,
+  no quota in v1; revisit when someone reports disk use.
+- **O3: Blob location. Accepted as recommended:** `$SMIND_HOME/attachments/<set>/` outside the worktree plus
+  `Delivery.AddDirs` (§3). There is no run dir today and a worktree path would show up in diffs.
+- **O4: Image-incapable provider selected. Accepted as recommended:** warn on the pill, send anyway with the path
   fallback.
-- **O5: Fetch GitHub at accept time (snapshot) or at delivery?** Recommend accept time, as in §4, so a queued prompt is
-  deterministic and a replay shows what was sent.
-- **O6: "Edit & resend" with attachments.** Re-run/Continue/Retry carry attachments through `reuse`; the composer's
-  prefill path (`prefill` prop) restores text only. Recommend deferring attachment restore on edit to a follow-up.
-- **O7: SDK dependency.** Who drafts the `claude-agent-sdk-go` change and when does v0.4.0 ship? Recommend the Lead
-  drafts it as a separate PR on that repo after this ADR is accepted, and smind bumps `go.mod` in its own PR.
+- **O5: GitHub fetch timing. Accepted as recommended:** at accept time (§4), so a queued prompt is deterministic and a
+  replay shows what was sent.
+- **O6: "Edit & resend" with attachments. Accepted as recommended:** Re-run/Continue/Retry carry attachments through
+  `reuse`; the composer's prefill path restores text only; attachment restore on edit is a follow-up.
+- **O7: SDK dependency. Decided yes:** the Lead drafts the multi-block prompt change as a PR on
+  `spacingmind/claude-agent-sdk-go`. Merging it and releasing v0.4.0 is the Human's call; smind bumps `go.mod` in its own
+  PR after the release. Until then claude-native uses the path fallback.

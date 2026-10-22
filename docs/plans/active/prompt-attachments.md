@@ -7,7 +7,7 @@ PRs (2, 4, 5) get an independent `reviewer` pass on the exact commit before the 
 
 Spec for [ADR-0038](../../decisions/0038-prompt-attachments.md) (read it first: wire shape, caps, delivery, security). Human decisions
 D1 (inline base64, capped), D2 (`@file` is a path reference), D3 (web + desktop first, no `mobile/`) are fixed. Status: **ADR
-proposed, no implementation started.**
+accepted 2026-10-22; implementation starting.**
 
 ## Goal
 
@@ -41,10 +41,10 @@ forges, audio/video, restoring attachments on "Edit & resend" (O6), attachment q
 
 ### PR 1 — docs
 
-- AC1. ADR-0038 exists with status Proposed, records D1–D3, the wire JSON, caps with the measured real ceilings (direct `/ws` vs the 1 MiB
+- AC1. ADR-0038 exists with status Accepted, records D1–D3, the wire JSON, caps with the measured real ceilings (direct `/ws` vs the 1 MiB
   E2EE frame), persistence/replay, per-runner delivery incl. GLM and the fallback, the SDK dependency, GitHub, security table, UI treatment,
   and open questions O1–O7.
-- AC2. This plan has ACs, named tests and the PR split; the Supervisor has accepted the ADR before PR 2 starts.
+- AC2. This plan has ACs, named tests and the PR split; the Human accepted the ADR 2026-10-22 before PR 2 started.
 
 ### Daemon core (PR 2)
 
@@ -187,22 +187,25 @@ flicker, reload/reconnect shows them), `resubmit-reuse.test.tsx` (Re-run, Contin
 
 ## Decisions
 
-Taken from ADR-0038 (Proposed); this section is updated when the Supervisor answers the open questions.
+Taken from ADR-0038 (Accepted 2026-10-22).
 
 | # | Decision | Status |
 |---|---|---|
 | D1–D3 | inline base64 (cap 10 MiB direct); `@file` is a path; web + desktop first | Human, fixed |
-| A1 | one typed `attachments` list; `image`, `file`, `file_ref`, `github_pr`, `github_issue`, `reuse` | proposed |
-| A2 | bytes on disk under `$SMIND_HOME/attachments/<set>`, metadata in SQLite | proposed (O2, O3) |
-| A3 | claude-native native blocks wait for the SDK; fallback until then | proposed (O7) |
-| A4 | GitHub fetched on the daemon at accept time, snapshot stored | proposed (O5) |
-| A5 | relay ceiling 1,048,551 bytes enforced per connection; mobile strategy deferred | proposed (O1) |
-| O1–O7 | see ADR "Open questions" | awaiting Supervisor |
+| A1 | one typed `attachments` list; `image`, `file`, `file_ref`, `github_pr`, `github_issue`, `reuse` | accepted |
+| A2 | bytes on disk under `$SMIND_HOME/attachments/<set>`, metadata in SQLite | accepted (O2, O3) |
+| A3 | claude-native native blocks wait for the SDK; fallback until then | accepted (O7: Lead drafts the SDK PR; Human merges and releases) |
+| A4 | GitHub fetched on the daemon at accept time, snapshot stored | accepted (O5) |
+| A5 | relay ceiling 1,048,551 bytes enforced per connection; mobile strategy deferred | accepted (O1 = b: mobile downscales to fit the relay frame) |
+| O1–O7 | see ADR "Open questions" | answered 2026-10-22 (O1 b, O7 yes, O2–O6 as recommended) |
 
 ## Progress
 
 - 2026-10-22: facts re-verified against the code (text-only wire, runners, 1 MiB E2EE frame, unlimited `/ws` read, GLM `promptCapabilities: {}`, SDK
   string-only content, `Delivery.AddDirs`); ADR-0038 and this plan written; PR 1 opened for review. Nothing else started.
+- 2026-10-22: ADR accepted (O1 b, O7 yes, O2–O6 as recommended). The `CI` workflow is intentionally disabled, so nothing merges until the Human re-enables
+  it; every PR carries its local check results instead, and PRs that need an earlier PR's code wait rather than stack. Independent starts: PR 2, the SDK PR (3s),
+  and the code-independent halves of 4 (`file.search`, `files.Resolve`) and 5 (`gh` fetch/search library).
 
 ## Validation
 
