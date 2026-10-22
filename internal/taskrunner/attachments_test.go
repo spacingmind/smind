@@ -2,6 +2,7 @@ package taskrunner
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,5 +136,30 @@ func TestPromptInput_SlashCommandNotAppended(t *testing.T) {
 	}
 	if !noted {
 		t.Fatalf("no slash-command session note in %+v", events)
+	}
+}
+
+// TestACPEcho_ImageChunkNotPersisted: an agent that echoes an image
+// user_message_chunk does not get its base64 data into any event (events are
+// what run_events stores and run.logs serves).
+func TestACPEcho_ImageChunkNotPersisted(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "echo-image")
+	got := runWithCtx(t, context.Background(), glmRunnerWithCaps(wm, "loadSession"), task, ProviderGLM, "hi")
+	sawReply := false
+	for _, e := range got {
+		b, err := json.Marshal(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(b), "ECHOED-IMAGE-SENTINEL-DATA") {
+			t.Fatalf("event carries the echoed image data: %s", b)
+		}
+		if e.Type == EventTypeText && e.Text == "reply after the echo" {
+			sawReply = true
+		}
+	}
+	if !sawReply {
+		t.Fatalf("the text reply after the echo was lost: %+v", got)
 	}
 }

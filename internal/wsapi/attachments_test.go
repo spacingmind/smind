@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"hash/crc32"
 	"image"
 	"image/png"
+	"log"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -608,5 +610,108 @@ func TestFileRef_ContentsNeverRead(t *testing.T) {
 	e.waitDone(t, runID)
 	if blocks := e.promptBlocks(t); !strings.Contains(blocks, "unreadable.txt") || strings.Contains(blocks, "file-ref-content-sentinel") {
 		t.Fatalf("agent prompt = %s", blocks)
+	}
+}
+
+// pngWithComment is a valid PNG with a tEXt chunk carrying marker: it still
+// decodes, so the sentinel travels inside the base64 payload.
+func pngWithComment(t *testing.T, marker string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	raw := buf.Bytes()
+	const ihdrEnd = 8 + 4 + 4 + 13 + 4 // signature + IHDR chunk
+	body := append([]byte("Comment\x00"), marker...)
+	chunk := make([]byte, 0, len(body)+12)
+	chunk = append(chunk, byte(len(body)>>24), byte(len(body)>>16), byte(len(body)>>8), byte(len(body)))
+	chunk = append(chunk, "tEXt"...)
+	chunk = append(chunk, body...)
+	crc := crc32.ChecksumIEEE(append([]byte("tEXt"), body...))
+	chunk = append(chunk, byte(crc>>24), byte(crc>>16), byte(crc>>8), byte(crc))
+	out := append(append(append([]byte{}, raw[:ihdrEnd]...), chunk...), raw[ihdrEnd:]...)
+	if _, err := png.DecodeConfig(bytes.NewReader(out)); err != nil {
+		t.Fatalf("test PNG does not decode: %v", err)
+	}
+	return out
+}
+
+// TestAttachmentPayloadNeverLogged: attachment bytes appear in no log line, no
+// run.logs result, no run_events row, no request_log row, no stored metadata
+// and no error response. Not parallel: it captures the process-wide logger.
+func TestAttachmentPayloadNeverLogged(t *testing.T) {
+	const sentinel = "ATTACH-SENTINEL-7f3a9c1e-must-never-leak"
+	var logBuf bytes.Buffer
+	prevOut, prevFlags := log.Writer(), log.Flags()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) })
+
+	imgBytes := pngWithComment(t, sentinel)
+	imgB64 := base64.StdEncoding.EncodeToString(imgBytes)
+	fileB64 := base64.StdEncoding.EncodeToString([]byte(sentinel + " file body"))
+	// The base64 text itself: a window from the middle of each payload, so
+	// the check does not depend on the sentinel's base64 alignment.
+	needles := []string{sentinel, imgB64[len(imgB64)/2-20 : len(imgB64)/2+20], fileB64}
+
+	e := newAttachEnv(t, "", true)
+	runID := e.startOK(t, map[string]any{"attachments": []any{
+		map[string]any{"kind": "image", "name": "s.png", "mimeType": "image/png", "data": imgB64},
+		map[string]any{"kind": "file", "name": "n.txt", "mimeType": "text/plain", "data": fileB64},
+	}})
+	e.waitDone(t, runID)
+
+	// Rejected requests: their error responses must not echo the payload.
+	var errBodies []string
+	for _, bad := range []map[string]any{
+		{"kind": "image", "name": "s.png", "mimeType": "image/jpeg", "data": imgB64},
+		{"kind": "file", "name": "n.txt", "data": sentinel + "!!not-base64!!"},
+		{"kind": "image", "name": "x.png", "mimeType": "image/png", "data": sentinel + "AAAA"},
+	} {
+		env := e.start(t, map[string]any{"attachments": []any{bad}})
+		if env.Error == nil {
+			t.Fatalf("bad attachment accepted: %v", bad["kind"])
+		}
+		b, _ := json.Marshal(env.Error)
+		errBodies = append(errBodies, string(b))
+	}
+
+	surfaces := map[string]string{"log output": logBuf.String(), "error responses": strings.Join(errBodies, "\n")}
+	logs := e.call(t, "run.logs", map[string]any{"runId": runID})
+	surfaces["run.logs"] = string(logs.Result)
+	list := e.call(t, "run.list", map[string]any{})
+	surfaces["run.list"] = string(list.Result)
+	events, err := e.db.ListRunEvents(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var evs strings.Builder
+	for _, ev := range events {
+		evs.WriteString(ev.EventData)
+	}
+	surfaces["run_events"] = evs.String()
+	row, err := e.db.GetRun(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	surfaces["runs row"] = row.Prompt + row.Attachments + row.ErrMsg
+	rl, err := e.db.ListRequestLogs(store.RequestLogFilter{Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rlJSON, _ := json.Marshal(rl)
+	surfaces["request_log"] = string(rlJSON)
+	info := e.call(t, "daemon.info", nil)
+	surfaces["daemon.info"] = string(info.Result)
+
+	for name, text := range surfaces {
+		for _, needle := range needles {
+			if strings.Contains(text, needle) {
+				t.Errorf("%s contains attachment payload %.30q...", name, needle)
+			}
+		}
+	}
+	if logBuf.Len() == 0 {
+		t.Log("note: the captured log was empty")
 	}
 }
