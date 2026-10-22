@@ -59,6 +59,8 @@ const searches = (c: FakeWsClient) => c.calls.filter((x) => x.method === "forge.
 async function openPicker(client: FakeWsClient, name = "GitHub pull request…") {
   openMenu();
   fireEvent.click(await screen.findByRole("menuitem", { name: new RegExp(name) }));
+  // The picker opens on the frame after the menu has closed (see composer.tsx pendingPicker).
+  await screen.findByTestId("forge-picker");
   await flush();
   return client;
 }
