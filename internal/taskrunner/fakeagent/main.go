@@ -97,6 +97,7 @@ type message struct {
 type rpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
 }
 
 // mcpCaps holds the transports advertised under
@@ -467,6 +468,23 @@ func runPromptScript(promptMsg message, cwd string) {
 	if reason, ok := strings.CutPrefix(scenario, "stop "); ok {
 		sessionUpdate("working on it")
 		respond(promptMsg.ID, map[string]any{"stopReason": strings.TrimSpace(reason)})
+		return
+	}
+
+	// "quota-error": like the real GLM agent on a usage limit, the cause is an
+	// "[error] ..." text chunk and the prompt then fails with a generic
+	// JSON-RPC error. "plain-error" is the same generic failure with no cause
+	// text; "data-error" carries the cause only in the JSON-RPC error's data.
+	switch scenario {
+	case "quota-error":
+		sessionUpdate("[error] 429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18")
+		writeMessage(message{JSONRPC: "2.0", ID: promptMsg.ID, Error: &rpcError{Code: -32603, Message: "Internal error"}})
+		return
+	case "plain-error":
+		writeMessage(message{JSONRPC: "2.0", ID: promptMsg.ID, Error: &rpcError{Code: -32603, Message: "Internal error"}})
+		return
+	case "data-error":
+		writeMessage(message{JSONRPC: "2.0", ID: promptMsg.ID, Error: &rpcError{Code: -32603, Message: "Internal error", Data: "rate limited: retry after 17:35"}})
 		return
 	}
 

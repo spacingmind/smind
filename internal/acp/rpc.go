@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,7 +26,33 @@ type RPCError struct {
 }
 
 func (e *RPCError) Error() string {
+	if d := e.dataText(); d != "" {
+		return fmt.Sprintf("acp: rpc error %d: %s (%s)", e.Code, e.Message, d)
+	}
 	return fmt.Sprintf("acp: rpc error %d: %s", e.Code, e.Message)
+}
+
+// maxRPCErrorData bounds how much of an error's data field Error() repeats.
+const maxRPCErrorData = 300
+
+// dataText is the error's data field as one short line: a string as is, any
+// other value as compact JSON. Agents put the real cause there while the
+// message stays generic ("Internal error"). "" when there is none.
+func (e *RPCError) dataText() string {
+	if e.Data == nil {
+		return ""
+	}
+	var s string
+	if str, ok := e.Data.(string); ok {
+		s = str
+	} else if b, err := json.Marshal(e.Data); err == nil {
+		s = string(b)
+	}
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > maxRPCErrorData {
+		s = string(r[:maxRPCErrorData]) + "…"
+	}
+	return s
 }
 
 // JSON-RPC and ACP-specific error codes, per
