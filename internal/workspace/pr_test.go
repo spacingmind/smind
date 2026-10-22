@@ -22,7 +22,7 @@ func newBareRepo(t *testing.T) string {
 }
 
 // newRepoWithOrigin creates a real repo (newTestRepo) with its default
-// branch renamed to "develop" (matching defaultBaseBranch), an "origin"
+// branch renamed to "develop" (the workspace default base), an "origin"
 // remote pointing at a fresh bare repo, and "develop" already pushed there
 // -- the shared clean-base starting point every CreatePR test builds on.
 func newRepoWithOrigin(t *testing.T) (repo, bare string) {
@@ -141,7 +141,7 @@ func TestManager_CreatePR_CleanBase(t *testing.T) {
 // workspace checkout carried an unrelated, not-yet-pushed commit at the
 // moment the task's worktree was created, so the task branch's fork point
 // is not an ancestor of the base. CreatePR must cherry-pick only the
-// task's own commit(s) onto a clean smind/pr-<id> branch rather than
+// task's own commit(s) onto a clean smind/pr-task-<id> branch rather than
 // opening a PR stuffed with the unrelated history.
 func TestManager_CreatePR_DivergedBase(t *testing.T) {
 	repo, bare := newRepoWithOrigin(t)
@@ -173,7 +173,7 @@ func TestManager_CreatePR_DivergedBase(t *testing.T) {
 		t.Fatalf("CreatePR().URL = %q", result.URL)
 	}
 
-	wantHead := "smind/pr-" + strconv.FormatInt(task.ID, 10)
+	wantHead := "smind/pr-task-" + strconv.FormatInt(task.ID, 10)
 	if len(*calls) != 1 {
 		t.Fatalf("gh calls = %+v, want exactly 1", *calls)
 	}

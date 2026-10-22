@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/forge"
 )
 
 // TestGithubSearch_ArgvAndJSONFields asserts the pr/issue list argv and
@@ -167,11 +169,11 @@ func TestGithubSearch_GhMissingTypedError(t *testing.T) {
 	}}
 	c := New(WithRunner(s.run))
 	_, err := c.Search(context.Background(), "/w", "pr", "", 0)
-	te, ok := err.(*Error)
+	te, ok := err.(*forge.Error)
 	if !ok {
-		t.Fatalf("err = %v (%T), want *Error", err, err)
+		t.Fatalf("err = %v (%T), want *forge.Error", err, err)
 	}
-	if te.Code != CodeUnavailable || te.Message != "gh is not installed on the daemon host" {
+	if te.Code != forge.CodeCLIMissing {
 		t.Fatalf("err = %+v", te)
 	}
 }
@@ -184,11 +186,11 @@ func TestGithubSearch_NoGithubRemoteTypedError(t *testing.T) {
 	}}
 	c := New(WithRunner(s.run))
 	_, err := c.Search(context.Background(), "/w", "pr", "", 0)
-	te, ok := err.(*Error)
+	te, ok := err.(*forge.Error)
 	if !ok {
-		t.Fatalf("err = %v (%T), want *Error", err, err)
+		t.Fatalf("err = %v (%T), want *forge.Error", err, err)
 	}
-	if te.Code != CodeUnavailable || te.Message != "this workspace has no GitHub remote" {
+	if te.Code != forge.CodeNoRemote {
 		t.Fatalf("err = %+v", te)
 	}
 }

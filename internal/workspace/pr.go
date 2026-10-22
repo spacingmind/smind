@@ -8,44 +8,33 @@ import (
 	"strings"
 )
 
-// defaultBaseBranch is the base branch Manager.CreatePR opens a PR against
-// when the caller doesn't specify one. This repo's own CONTRIBUTING.md
-// documents "develop" as the integration branch every feature/fix branch
-// targets; workspace has no per-workspace base-branch config field yet
-// (store.Workspace carries no such column), so this is a fixed default
-// rather than something read per-workspace -- see
-// docs/plans/active/task-permission-ux.md's Item 5 Validation note.
-const defaultBaseBranch = "develop"
-
 // PRResult is the result of Manager.CreatePR.
 type PRResult struct {
 	URL string
 }
 
 // CreatePR opens a pull request for task id's branch against baseBranch (or
-// defaultBaseBranch if empty), via the gh CLI.
+// the task's stored base_ref, else the workspace's default base, if empty),
+// via the gh CLI.
 //
-// The task's branch was forked (by CreateTask) from whatever commit the
-// workspace repo's checkout had as HEAD at the time -- not necessarily an
-// ancestor of the base branch. If the workspace checkout itself was ahead
-// of the base with unrelated, not-yet-pushed commits when the task's
-// worktree was created (exactly the gap task-permission-ux.md's Item 5
-// documents, from this project's own Session 1), pushing the task branch
-// as-is and opening a PR against the base would stuff that unrelated
-// history into the PR. So CreatePR always checks first: if the task
-// branch's fork point is an ancestor of the (freshly-fetched) base branch,
-// it pushes the task branch directly and opens the PR from it; otherwise
-// it cherry-picks just the task's own commits (fork point..branch) onto a
-// clean smind/pr-<id> branch forked from the base, pushes that instead, and
-// opens the PR from it.
+// The task's fork point is its stored base_sha (ADR-0039); a task without
+// one fails with ErrBaseUnknown. The fork point is not necessarily an
+// ancestor of the base branch: if the workspace checkout was ahead of the
+// base with unrelated, not-yet-pushed commits when the task's worktree was
+// created, pushing the task branch as-is and opening a PR against the base
+// would stuff that unrelated history into the PR. So CreatePR always checks
+// first: if the fork point is an ancestor of the (freshly-fetched) base
+// branch, it pushes the task branch directly and opens the PR from it;
+// otherwise it cherry-picks just the task's own commits (fork point..branch)
+// onto a clean smind/pr-task-<id> branch forked from the base, pushes that
+// instead, and opens the PR from it. (A PR-start task's own branch is
+// smind/pr-<n>-<slug>, hence the distinct "pr-task" name.)
 //
 // Requires the task to have at least one commit beyond its fork point --
 // uncommitted worktree changes are not swept in; commit them first (via
 // task.commit) before calling this.
 func (m *Manager) CreatePR(id int64, baseBranch string) (PRResult, error) {
-	if strings.TrimSpace(baseBranch) == "" {
-		baseBranch = defaultBaseBranch
-	}
+	baseBranch = strings.TrimSpace(baseBranch)
 
 	t, err := m.store.GetTask(id)
 	if err != nil {
@@ -59,13 +48,30 @@ func (m *Manager) CreatePR(id int64, baseBranch string) (PRResult, error) {
 		return PRResult{}, fmt.Errorf("create pr %d: %w", id, err)
 	}
 
+	if baseBranch == "" {
+		baseBranch = t.BaseRef
+	}
+	if baseBranch == "" {
+		baseBranch = workspaceDefaultBase(ws)
+	}
+	if baseBranch == "" {
+		return PRResult{}, fmt.Errorf("create pr %d: no base branch: pass baseBranch or set the workspace default base", id)
+	}
+	if err := validateRefName(ws.Path, baseBranch, true); err != nil {
+		return PRResult{}, fmt.Errorf("create pr %d: base branch: %w", id, err)
+	}
+	forkPoint, err := taskBaseSha(t)
+	if err != nil {
+		return PRResult{}, fmt.Errorf("create pr %d: %w", id, err)
+	}
+
 	title := strings.TrimSpace(t.Title)
 	if title == "" {
 		title = fmt.Sprintf("smind task %d", id)
 	}
 	body := fmt.Sprintf("Opened from smind task #%d via task.createPr.", id)
 
-	url, err := createPR(ws.Path, *t.WorktreePath, *t.Branch, baseBranch, id, title, body)
+	url, err := createPR(ws.Path, *t.WorktreePath, *t.Branch, baseBranch, forkPoint, id, title, body)
 	if err != nil {
 		return PRResult{}, fmt.Errorf("create pr %d: %w", id, err)
 	}
@@ -75,18 +81,13 @@ func (m *Manager) CreatePR(id int64, baseBranch string) (PRResult, error) {
 // createPR is CreatePR's git/gh implementation, split out so Manager.CreatePR
 // stays a thin store-lookup-then-delegate wrapper matching every other
 // Manager method in this package.
-func createPR(repoPath, worktreePath, branch, baseBranch string, taskID int64, title, body string) (string, error) {
+func createPR(repoPath, worktreePath, branch, baseBranch, forkPoint string, taskID int64, title, body string) (string, error) {
 	const remote = "origin"
 
 	if err := gitFetchBranch(worktreePath, remote, baseBranch); err != nil {
 		return "", err
 	}
 	remoteBase := remote + "/" + baseBranch
-
-	forkPoint, err := taskDiffBase(worktreePath, branch)
-	if err != nil {
-		return "", fmt.Errorf("resolve base commit: %w", err)
-	}
 
 	commits, err := gitRevListReverse(worktreePath, forkPoint+".."+branch)
 	if err != nil {
@@ -119,6 +120,12 @@ func createPR(repoPath, worktreePath, branch, baseBranch string, taskID int64, t
 	return createCleanPRBranchAndOpen(repoPath, remote, remoteBase, baseBranch, taskID, commits, title, body)
 }
 
+// cherryPickBranchName is the throwaway branch the diverged-base path pushes.
+// It is distinct from a PR-start task's own smind/pr-<n>-<slug> branch.
+func cherryPickBranchName(taskID int64) string {
+	return "smind/pr-task-" + strconv.FormatInt(taskID, 10)
+}
+
 // openGhPR runs `gh pr create` in dir (a worktree/repo checkout with the
 // right git remote configured) and returns the created PR's URL -- gh
 // prints exactly that to stdout on success when given explicit
@@ -136,30 +143,38 @@ func openGhPR(dir, baseBranch, head, title, body string) (string, error) {
 }
 
 // createCleanPRBranchAndOpen materializes a throwaway worktree checked out
-// on a fresh smind/pr-<taskID> branch forked from remoteBase, cherry-picks
+// on a fresh smind/pr-task-<taskID> branch forked from remoteBase, cherry-picks
 // commits (oldest first) onto it, pushes it to remote, and opens the PR
 // from it -- the diverged-base path createPR falls back to. The throwaway
 // worktree is always cleaned up before returning, success or failure; the
 // gh pr create call must happen before that cleanup, while the worktree
 // (and the branch's remote push) are still in place.
 func createCleanPRBranchAndOpen(repoPath, remote, remoteBase, baseBranch string, taskID int64, commits []string, title, body string) (url string, err error) {
-	prBranch := "smind/pr-" + strconv.FormatInt(taskID, 10)
+	prBranch := cherryPickBranchName(taskID)
 
 	container, err := os.MkdirTemp("", "smind-pr-")
 	if err != nil {
 		return "", fmt.Errorf("create throwaway pr worktree dir: %w", err)
 	}
 	wt := filepath.Join(container, "wt")
+	createdBranch := false
 	defer func() {
-		if rmErr := gitWorktreeRemove(repoPath, wt); rmErr != nil && err == nil {
+		rmErr := gitWorktreeRemove(repoPath, wt)
+		if rmErr != nil && err == nil {
 			err = fmt.Errorf("clean up throwaway pr worktree: %w", rmErr)
 		}
 		_ = os.RemoveAll(container)
+		// The branch is checked out in the throwaway worktree, so it can only
+		// be deleted once that is gone.
+		if createdBranch && err != nil {
+			_ = runGit(repoPath, "branch", "-D", prBranch)
+		}
 	}()
 
 	if err := gitWorktreeAddFrom(repoPath, wt, prBranch, remoteBase); err != nil {
 		return "", fmt.Errorf("create clean %s branch from %s: %w", prBranch, baseBranch, err)
 	}
+	createdBranch = true
 	for _, sha := range commits {
 		if err := gitCherryPick(wt, sha); err != nil {
 			return "", fmt.Errorf("replay task commits onto clean %s branch: %w", prBranch, err)

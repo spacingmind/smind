@@ -3,31 +3,15 @@ package ghctx
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/spacingmind/smind/internal/forge"
 )
-
-// Item is one PR/issue row in a Search result.
-type Item struct {
-	Number    int    `json:"number"`
-	Title     string `json:"title"`
-	State     string `json:"state"`
-	Author    string `json:"author"`
-	URL       string `json:"url"`
-	UpdatedAt string `json:"updatedAt"`
-	HeadRef   string `json:"headRef,omitempty"`
-}
-
-// SearchResult is Search's answer: the repo the results belong to (the
-// dir's repo, or the URL-named repo for a direct link) plus items in
-// gh's own order.
-type SearchResult struct {
-	Repo  string `json:"repo"`
-	Items []Item `json:"items"`
-}
 
 // searchTimeout bounds a single Search (list, or view for a number/URL
 // query).
@@ -86,7 +70,7 @@ func (c *Client) search(ctx context.Context, dir, kind, query string, limit int)
 	}
 	out, err := c.run(ctx, dir, args...)
 	if err != nil {
-		return SearchResult{}, mapRunError(err)
+		return SearchResult{}, c.mapRunError(ctx, err)
 	}
 	var rows []ghItemJSON
 	if err := json.Unmarshal([]byte(out), &rows); err != nil {
@@ -113,7 +97,8 @@ func (c *Client) search(ctx context.Context, dir, kind, query string, limit int)
 func (c *Client) searchOne(ctx context.Context, dir, kind string, number int, repo string) (SearchResult, error) {
 	snap, err := c.Get(ctx, dir, kind, number, repo)
 	if err != nil {
-		if e, ok := err.(*Error); ok && e.Code == CodeNotFound {
+		var fe *forge.Error
+		if errors.As(err, &fe) && fe.Code == forge.CodeNotFound {
 			return SearchResult{Repo: repo}, nil
 		}
 		return SearchResult{}, err

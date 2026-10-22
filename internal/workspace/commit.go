@@ -37,11 +37,11 @@ var ErrNothingStaged = fmt.Errorf("nothing staged to commit")
 // worktree's real index state so each entry says whether it's staged.
 // A task with no changes returns an empty slice, not an error.
 func (m *Manager) TaskFiles(id int64) ([]TaskFile, error) {
-	wt, branch, err := m.taskWorktree(id)
+	wt, base, err := m.taskWorktreeBase(id)
 	if err != nil {
 		return nil, err
 	}
-	files, err := taskChangedFiles(wt, branch)
+	files, err := taskChangedFiles(wt, base)
 	if err != nil {
 		return nil, fmt.Errorf("task files %d: %w", id, err)
 	}
@@ -53,11 +53,11 @@ func (m *Manager) TaskFiles(id int64) ([]TaskFile, error) {
 // path -- no new git invocation shape). A path with no changes returns an
 // empty string, not an error.
 func (m *Manager) TaskFileDiff(id int64, path string) (string, error) {
-	wt, branch, err := m.taskWorktree(id)
+	wt, base, err := m.taskWorktreeBase(id)
 	if err != nil {
 		return "", err
 	}
-	diff, err := taskFileDiff(wt, branch, path)
+	diff, err := taskFileDiff(wt, base, path)
 	if err != nil {
 		return "", fmt.Errorf("task file diff %d %q: %w", id, path, err)
 	}
@@ -128,6 +128,23 @@ func (m *Manager) taskWorktree(id int64) (worktreePath, branch string, err error
 	return *t.WorktreePath, *t.Branch, nil
 }
 
+// taskWorktreeBase resolves id's worktree path and stored base commit, or
+// ErrBaseUnknown when the base was never recorded (ADR-0039).
+func (m *Manager) taskWorktreeBase(id int64) (worktreePath, base string, err error) {
+	t, err := m.store.GetTask(id)
+	if err != nil {
+		return "", "", fmt.Errorf("task %d: %w", id, err)
+	}
+	if t.WorktreePath == nil || t.Branch == nil {
+		return "", "", fmt.Errorf("task %d: task has no worktree", id)
+	}
+	base, err = taskBaseSha(t)
+	if err != nil {
+		return "", "", fmt.Errorf("task %d: %w", id, err)
+	}
+	return *t.WorktreePath, base, nil
+}
+
 // TaskStat is the sidebar's per-task git signal: the task's branch and the
 // size of the same base→worktree diff task.diff/task.files compute,
 // reduced to counts. It exists so the sidebar can show every task's diff
@@ -151,8 +168,8 @@ const taskStatWorkers = 4
 //
 // Deliberately partial: a task with no worktree yet (created but never
 // run) has nothing to diff and is omitted, and a task whose stat *fails*
-// -- a worktree deleted out from under the daemon, a branch with no
-// reflog -- is also omitted rather than failing the whole call. One
+// -- a worktree deleted out from under the daemon, a task with no
+// stored base -- is also omitted rather than failing the whole call. One
 // broken worktree must not blank every other row's signal, and the UI's
 // rule for this surface is that a number it cannot compute is absent, not
 // zero (a zeroed stat would read as "no changes", which is a different
@@ -177,7 +194,10 @@ func (m *Manager) TaskStats(workspaceID int64) ([]TaskStat, error) {
 				if t.WorktreePath == nil || t.Branch == nil {
 					continue
 				}
-				files, ins, del, err := taskDiffStat(*t.WorktreePath, *t.Branch)
+				if t.BaseSha == "" {
+					continue // base unknown: absent, never zero
+				}
+				files, ins, del, err := taskDiffStat(*t.WorktreePath, t.BaseSha)
 				if err != nil {
 					continue
 				}

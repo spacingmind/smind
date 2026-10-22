@@ -1,9 +1,11 @@
 name: desktop-check
 
-# PR gate for the desktop Rust code: cargo test for the Tauri shell and the
-# daemon client on macOS and Windows, without building the web UI, the
-# bundled daemon or the installers. The full app builds (desktop-macos.yml,
-# desktop-windows.yml) run after the merge to develop. build.rs creates the
+# PR gate for the desktop Rust code: cargo clippy (-D warnings) and cargo test
+# for the Tauri shell and the daemon client on macOS and Windows, without
+# building the web UI, the bundled daemon or the installers. (The job keeps its
+# "cargo test" name so a required-check rule on it keeps matching.) The full
+# app builds (desktop-macos.yml, desktop-windows.yml) run after the merge to
+# develop. build.rs creates the
 # externalBin placeholder, so no daemon binary is needed here.
 on:
   pull_request:
@@ -40,6 +42,8 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: clippy
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -57,6 +61,16 @@ jobs:
       - name: Warm the Go build cache for the relay harness
         shell: bash
         run: go build -o "$RUNNER_TEMP/relay-harness" ./internal/relay/bridge/harness
+
+      # Lints the Windows-only code too (the matrix runs on Windows): a
+      # helper that only one platform uses must be cfg-gated, not allowed.
+      - name: cargo clippy (desktop shell)
+        working-directory: desktop/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo clippy (daemon client)
+        working-directory: desktop/daemon-client
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: cargo test (desktop shell)
         working-directory: desktop/src-tauri

@@ -82,6 +82,9 @@ Web (`bunx vitest run src/components/desktop-update-dialog.test.tsx`):
 - [x] Independent review (read-only): production plugin config as the test base, guard held across the relaunch, `installing` only after verification, tokio `rt-multi-thread` explicit
 - [x] Docs: `desktop-auto-update.md` Not verified updated
 - [x] CI evidence (macOS + Windows `cargo test`, run 39105531439 on `aabe92d5`)
+- [x] Merged as #377 (`test(desktop): end-to-end updater test with a local signed feed`).
+
+Closed 2026-10-22 (plans hygiene): moved to `completed/`; all six acceptance criteria are confirmed in Validation. The `requireSignedVersion` follow-up under Decisions is **still not done** (`desktop/src-tauri/tauri.conf.json` has no `requireSignedVersion`); the real-window items under "Still manual" stay unverified.
 
 ## Validation
 

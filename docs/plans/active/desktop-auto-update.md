@@ -289,6 +289,18 @@ workflow's `publish` job end to end.
 
 ## Progress
 
+**Status 2026-10-22 (plans hygiene): PARTIAL.** Shipped and in use; kept in `active/` because several acceptance criteria were only partly verified and nothing in the repo shows that a human closed them.
+
+- Merged: #274 (`feat(desktop): signed auto-update via the Tauri 2 updater`), #333 (release notes rendered as markdown), #377 (hermetic end-to-end updater test; see `completed/desktop-update-e2e.md`).
+- U6 release path is now exercised for real: the v0.13.1 release run (39379008532, `publish` job success) attached `latest.json` plus `.sig` files for both macOS arches (`smind-desktop-0.13.1-macos-{arm64,x86_64}.app.tar.gz.sig`) and the Windows NSIS installer (`sMind_0.13.1_x64-setup.exe.sig`). The earlier note "Not run on GitHub" is obsolete.
+- **Remaining ACs (unverified):**
+  - U3: the menu item was never clicked in a real app (`update_menu_location` logic only).
+  - U4: only a mocked-bridge render, not a screenshot of the real window.
+  - U7 daemon interplay: no code change, never verified live (`daemon-survives-app-update`).
+  - Local end-to-end in a real window (`local-update-end-to-end`, `local-menu-check`, `local-bad-signature-rejected`, `local-later-dismiss`, `local-endpoint-down-launch-silent`).
+  - The Windows NSIS updater path on a real Windows machine; the first real in-app update from one published release to the next (two releases with updater artifacts now exist, but no evidence it was done).
+  - Follow-up from `desktop-update-e2e`: `requireSignedVersion` is not enabled in `tauri.conf.json`.
+
 - [x] U1 config, keys, plugin (`ecaaccf`)
 - [x] U2 Rust check/install (`05bd511`, review fixes `4cf553e`)
 - [x] U3 menu (`b902554`)

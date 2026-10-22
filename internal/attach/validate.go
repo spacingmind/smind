@@ -142,6 +142,17 @@ func validateImageBytes(index int, b []byte, declared string, lim Limits) (mime 
 	if w > lim.MaxImageDim || h > lim.MaxImageDim {
 		return "", 0, 0, newErr(CodeTooLarge, index, "image is %dx%d, larger than %d px", w, h, lim.MaxImageDim)
 	}
+	// A valid header over a corrupt body would reach the model API, which
+	// rejects the whole turn. Prove png/jpeg/gif bodies are intact with a real
+	// decode, within a pixel budget (see Limits.MaxDecodePixels). webp has no
+	// decoder in the standard library, and an image over the budget is trusted
+	// on its header: in both cases the failure mode is the model API's error
+	// for that one turn, not harm to the daemon.
+	if mime != "image/webp" && int64(w)*int64(h) <= int64(lim.MaxDecodePixels) {
+		if _, _, derr := image.Decode(bytes.NewReader(b)); derr != nil {
+			return "", 0, 0, newErr(CodeInvalid, index, "image data is corrupt or truncated")
+		}
+	}
 	return mime, w, h, nil
 }
 

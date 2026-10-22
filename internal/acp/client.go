@@ -31,6 +31,9 @@ const closeTimeout = 5 * time.Second
 type ContentBlock struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
+	// Data and MimeType carry an "image" block (base64 payload).
+	Data     string `json:"data,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
 }
 
 // SessionUpdate is a client-side view of an ACP SessionUpdate notification
@@ -201,6 +204,9 @@ type agentCapabilityFlags struct {
 		HTTP json.RawMessage `json:"http"`
 		SSE  json.RawMessage `json:"sse"`
 	} `json:"mcpCapabilities"`
+	PromptCapabilities struct {
+		Image json.RawMessage `json:"image"`
+	} `json:"promptCapabilities"`
 }
 
 // truthy reports whether a capability's raw JSON value means "supported":
@@ -234,6 +240,13 @@ func (c *Client) SupportsLoadSession() bool {
 // resumes a session without replaying its history.
 func (c *Client) SupportsResumeSession() bool {
 	return c.capabilityFlags().SessionCapabilities.Resume != nil
+}
+
+// SupportsImagePrompt reports whether the agent advertised
+// promptCapabilities.image at Initialize, i.e. it accepts image content
+// blocks in session/prompt. Missing or malformed => false.
+func (c *Client) SupportsImagePrompt() bool {
+	return truthy(c.capabilityFlags().PromptCapabilities.Image)
 }
 
 // SupportsMcpStdio reports whether the connected agent can take
@@ -697,7 +710,19 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string, updates cha
 // PromptOption tunes one Prompt call.
 type PromptOption func(*promptOptions)
 
-type promptOptions struct{ prefix string }
+type promptOptions struct {
+	prefix string
+	images []ImageBlock
+}
+
+// ImageBlock is one base64 image sent as an ACP image content block.
+type ImageBlock struct{ Data, MimeType string }
+
+// WithPromptImages appends image content blocks after the user's text block.
+// Callers must only use it when SupportsImagePrompt is true.
+func WithPromptImages(imgs []ImageBlock) PromptOption {
+	return func(o *promptOptions) { o.images = imgs }
+}
 
 // WithPromptPrefix sends text as its own leading text content block, ahead
 // of the user's text block -- the user's block stays byte-identical, so the
@@ -708,10 +733,15 @@ func WithPromptPrefix(text string) PromptOption {
 
 func (o promptOptions) blocks(text string) []ContentBlock {
 	user := ContentBlock{Type: "text", Text: text}
-	if o.prefix == "" {
-		return []ContentBlock{user}
+	var out []ContentBlock
+	if o.prefix != "" {
+		out = append(out, ContentBlock{Type: "text", Text: o.prefix})
 	}
-	return []ContentBlock{{Type: "text", Text: o.prefix}, user}
+	out = append(out, user)
+	for _, img := range o.images {
+		out = append(out, ContentBlock{Type: "image", Data: img.Data, MimeType: img.MimeType})
+	}
+	return out
 }
 
 // PromptUsage returns the PromptResponse.usage of sessionID's latest Prompt

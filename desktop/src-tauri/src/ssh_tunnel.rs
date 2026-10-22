@@ -370,7 +370,7 @@ impl SshTunnels {
         self.tunnels.lock().unwrap().clear();
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn kill_for_test(&self, id: &str) {
         let tunnels = self.tunnels.lock().unwrap();
         let t = tunnels.get(id).expect("tunnel exists");
