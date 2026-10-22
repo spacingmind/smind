@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -82,29 +83,44 @@ func (c *Client) get(ctx context.Context, dir, kind string, number int, repo str
 	}, nil
 }
 
-// repoOf resolves dir's GitHub repository ("owner/name") via `gh repo
-// view --json nameWithOwner` run in dir. Cached per dir for 60s so a
-// task's search + snapshot pair doesn't pay for it twice.
+// repoOf resolves dir's GitHub repository ("owner/name"); see repoInfo.
 func (c *Client) repoOf(ctx context.Context, dir string) (string, error) {
-	if r, ok := c.repos.get(dir); ok {
-		return r.(string), nil
-	}
-	out, err := c.run(ctx, dir, "repo", "view", "--json", "nameWithOwner")
+	r, err := c.repoInfo(ctx, dir)
 	if err != nil {
-		return "", c.mapRunError(ctx, err)
+		return "", err
+	}
+	return r.NameWithOwner, nil
+}
+
+// repoInfo resolves dir's GitHub repository via `gh repo view --json
+// nameWithOwner,url` run in dir: "owner/name" plus the forge host taken from
+// the repo URL ("" when gh gives no parsable URL). Cached per dir for 60s so
+// a task's search + snapshot pair doesn't pay for it twice.
+func (c *Client) repoInfo(ctx context.Context, dir string) (forge.Repo, error) {
+	if r, ok := c.repos.get(dir); ok {
+		return r.(forge.Repo), nil
+	}
+	out, err := c.run(ctx, dir, "repo", "view", "--json", "nameWithOwner,url")
+	if err != nil {
+		return forge.Repo{}, c.mapRunError(ctx, err)
 	}
 	var v struct {
 		NameWithOwner string `json:"nameWithOwner"`
+		URL           string `json:"url"`
 	}
 	if err := json.Unmarshal([]byte(out), &v); err != nil {
-		return "", fmt.Errorf("parse gh repo view output: %w", err)
+		return forge.Repo{}, fmt.Errorf("parse gh repo view output: %w", err)
 	}
 	name := strings.TrimSpace(v.NameWithOwner)
 	if name == "" {
-		return "", fmt.Errorf("gh repo view returned no nameWithOwner for %s", dir)
+		return forge.Repo{}, fmt.Errorf("gh repo view returned no nameWithOwner for %s", dir)
 	}
-	c.repos.set(dir, name)
-	return name, nil
+	r := forge.Repo{NameWithOwner: name}
+	if u, err := url.Parse(strings.TrimSpace(v.URL)); err == nil && u.Scheme == "https" {
+		r.Host = strings.ToLower(u.Host)
+	}
+	c.repos.set(dir, r)
+	return r, nil
 }
 
 // ttlNow is the clock the cache reads (the injected clock, if any).

@@ -49,7 +49,7 @@ func TestTaskGit_FieldListPinned(t *testing.T) {
 		PR: &PRInfo{
 			Number: 1, Repo: "o/r", URL: "u", Title: "t", State: "open", Draft: true, HeadRef: "h", HeadSha: "s",
 			BaseRef: "b", FromFork: true, Mergeable: "mergeable", ReviewDecision: "approved",
-			Checks:    &Checks{"success", 1, 2, 3, 6},
+			Checks:    &Checks{State: "success", Passed: 1, Failed: 2, Pending: 3, Total: 6},
 			FetchedAt: ts, Stale: "budget", RefreshAvailableAt: "x",
 		},
 		Actions:    map[string]Action{"createPr": {Enabled: false, Code: "c", Reason: "r"}},

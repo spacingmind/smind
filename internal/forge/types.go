@@ -45,10 +45,17 @@ type AuthStatus struct {
 	Source        string
 }
 
-// Provider is a forge client (GitHub today). PR 4 of the ADR-0039 plan
-// extends it with OpenPRs/PR/CreatePR/Status. Failures are *Error.
+// Provider is a forge client (GitHub today). Repo, OpenPRs and PR serve the
+// PR poller (ADR-0039 section 4); CreatePR and Status arrive with their
+// callers in later PRs. Failures are *Error.
 type Provider interface {
 	Name() string
 	Search(ctx context.Context, dir, kind, query string, limit int) (SearchResult, error)
 	Get(ctx context.Context, dir, kind string, number int, repo string) (*Snapshot, error)
+	// Repo resolves dir's origin to its forge host and owner/name.
+	Repo(ctx context.Context, dir string) (Repo, error)
+	// OpenPRs lists the open PRs of dir's repo (one call, no cache).
+	OpenPRs(ctx context.Context, dir string) ([]PR, error)
+	// PR fetches one PR of dir's repo by number.
+	PR(ctx context.Context, dir string, number int) (PR, error)
 }
