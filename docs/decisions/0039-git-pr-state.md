@@ -128,13 +128,13 @@ second tiny table `forge_budget(host, window_start, calls)`. Local git status (d
 The forge's `defaultBranchRef` (`gh repo view`) is consulted only on an explicit "Detect" press, cached 1 h, never on a hot path. (The
 research's order put the forge query second; a network call in the task-creation path is what this ADR avoids.)
 
-**Per-task base, by start mode** (all written in `CreateTask`, before the worktree exists; failures leave no row):
+**Per-task base, by start mode** (all written in `CreateTask` in the same insert as the row, with no network call; failures leave no row). `base_sha` is the diff base and is the *fork commit* where the daemon created the branch, so the diff never absorbs unrelated commits; `base_ref` is the PR target, and ahead/behind is measured against it:
 
 | Mode | `base_ref` | `base_sha` |
 |---|---|---|
-| default (workspace HEAD) | workspace default base | `git merge-base HEAD origin/<base>` (after a bounded fetch); if none, `HEAD`'s sha |
-| `baseRef` | that ref, remote prefix stripped | the resolved start-point sha |
-| `branch` (existing) | workspace default base | `git merge-base <branch> origin/<base>`; empty if unrelated |
+| default (workspace HEAD) | workspace default base | the commit the branch was created at (the workspace checkout's `HEAD`): the **fork commit**, so the diff shows the task's own work even when the checkout carried unpushed commits |
+| `baseRef` | the branch it names (`origin/x` or a local branch → `x`); a tag, sha or relative rev falls back to the workspace default base | the resolved start-point sha (the fork commit) |
+| `branch` (existing) | workspace default base | `git merge-base <branch> origin/<base>` (the fork commit is unknown); empty if unrelated |
 | `prNumber` | the PR's `baseRefName` (forge `PR`, best effort); else workspace default base | `git merge-base FETCH_HEAD origin/<base>` |
 
 **Migration of existing tasks** (once, at startup, best effort, in a transaction per task): for a task with a worktree and an empty
