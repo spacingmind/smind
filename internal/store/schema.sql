@@ -86,7 +86,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     pr_repo TEXT, --   owner/name, number, validated URL, head branch)
     pr_number INTEGER,
     pr_url TEXT,
-    pr_head_ref TEXT
+    pr_head_ref TEXT,
+    untrusted_source INTEGER NOT NULL DEFAULT 0 -- ADR-0039 section 7: 1 = fork PR / unknown forge; setup blocked until the user runs it
 );
 
 CREATE TABLE IF NOT EXISTS chats (

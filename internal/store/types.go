@@ -125,6 +125,11 @@ type Task struct {
 	PRNumber        int64
 	PRURL           string
 	PRHeadRef       string
+	// UntrustedSource is true for a task started from a fork PR, or from a
+	// PR the forge could not describe (fail closed): its setup script does
+	// not run and its teardown is skipped until the user clears the flag
+	// with task.retrySetup (ADR-0039 section 7).
+	UntrustedSource bool
 }
 
 // Run is a persisted record of one internal/runs.Registry Run: a
