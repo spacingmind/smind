@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 
@@ -2059,7 +2060,14 @@ func testProviderCLI(cmd []string) providerTestResult {
 	select {
 	case r := <-done:
 		if r.err != nil {
-			return providerTestResult{Detail: fmt.Sprintf("%q not found on PATH: %v", cmd[0], r.err)}
+			detail := fmt.Sprintf("%q not found on PATH: %v", cmd[0], r.err)
+			// The desktop app tells the daemon where its PATH came from
+			// (see desktop/daemon-client login_path), so a missing CLI there
+			// is explainable.
+			if src := os.Getenv("SMIND_PATH_SOURCE"); src != "" {
+				detail += fmt.Sprintf(" (daemon started by the %s: %s)", src, os.Getenv("PATH"))
+			}
+			return providerTestResult{Detail: detail}
 		}
 		return providerTestResult{OK: true, Detail: fmt.Sprintf("found %s", r.path)}
 	case <-time.After(providerTestTimeout):

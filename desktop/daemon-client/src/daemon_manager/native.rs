@@ -69,7 +69,10 @@ pub fn install_binary(tarball: &Path, layout: &Layout) -> io::Result<()> {
 }
 
 /// spawn_detached starts `layout.bin_path serve` as its own process group
-/// leader, with stdout/stderr appended to the log file.
+/// leader, with stdout/stderr appended to the log file. On unix the child
+/// gets the user's login-shell PATH (`login_path`) plus `SMIND_PATH_SOURCE`;
+/// the first call may block up to the login-shell timeout, so async callers
+/// run it on a blocking thread.
 pub fn spawn_detached(layout: &Layout) -> io::Result<Child> {
     let log_out = File::options().create(true).append(true).open(&layout.log_path)?;
     let log_err = log_out.try_clone()?;
@@ -81,7 +84,16 @@ pub fn spawn_detached(layout: &Layout) -> io::Result<Child> {
     // The native path only runs on macOS; the module still has to compile
     // on Windows and Linux, where process groups are unix-only.
     #[cfg(unix)]
-    cmd.process_group(0);
+    {
+        cmd.process_group(0);
+        // A GUI-launched app's PATH is just /usr/bin:/bin:..., so the daemon
+        // could not find `claude`/`npx`. Give it the login shell's PATH
+        // (and say where it came from); nothing else of the login
+        // environment is imported. Blocks at most the resolve timeout if the
+        // app-start prewarm hasn't finished.
+        let resolved = super::login_path::cached();
+        cmd.env("PATH", &resolved.path).env("SMIND_PATH_SOURCE", resolved.source_env());
+    }
     crate::windows_process::no_window(&mut cmd).spawn()
 }
 
@@ -377,6 +389,28 @@ mod tests {
         let _ = child.wait();
         std::thread::sleep(std::time::Duration::from_millis(100));
         assert!(!is_pid_alive(pid));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_detached_gives_the_child_the_resolved_path_and_its_source() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let layout = Layout::new(dir.path());
+        fs::create_dir_all(layout.bin_path.parent().unwrap()).unwrap();
+        let out = dir.path().join("env.out");
+        fs::write(&layout.bin_path, format!("#!/bin/sh\nprintf '%s\\n%s\\n' \"$PATH\" \"$SMIND_PATH_SOURCE\" > '{}'\n", out.display())).unwrap();
+        fs::set_permissions(&layout.bin_path, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut child = spawn_detached(&layout).unwrap();
+        child.wait().unwrap();
+
+        let resolved = super::super::login_path::cached();
+        let printed = fs::read_to_string(&out).unwrap();
+        let mut lines = printed.lines();
+        assert_eq!(lines.next(), Some(resolved.path.as_str()));
+        assert_eq!(lines.next(), Some(resolved.source_env().as_str()));
+        assert!(resolved.source_env().starts_with("desktop app, PATH from "));
     }
 
     async fn serve_fixture(tarball: Vec<u8>, checksums_text: String, asset_name: String) -> (String, tokio::task::JoinHandle<()>) {

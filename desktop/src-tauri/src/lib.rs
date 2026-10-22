@@ -139,6 +139,12 @@ pub fn run() {
             updater::app_update_install,
         ])
         .setup(|app| {
+            // Resolve the user's login-shell PATH in the background so the
+            // managed daemon can find `claude`/`npx` (a GUI app's own PATH is
+            // /usr/bin:/bin:...); the first daemon start reuses the result.
+            #[cfg(unix)]
+            dclient::daemon_manager::login_path::prewarm();
+
             // AC4: the built-in `local` entry always tracks
             // SMIND_DAEMON_URL/the default, re-derived from the current
             // env on every launch (see Registry::load) rather than

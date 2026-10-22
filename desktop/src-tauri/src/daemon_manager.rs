@@ -267,6 +267,17 @@ fn macos_layout(app: &AppHandle) -> Result<native::Layout, String> {
     Ok(native::Layout::new(&base))
 }
 
+/// `native::spawn_detached` may wait on the login-shell PATH resolution
+/// (bounded; normally already prewarmed at app start), so keep that off the
+/// async worker threads.
+async fn spawn_native_daemon(layout: &native::Layout) -> Result<std::process::Child, String> {
+    let layout = layout.clone();
+    tauri::async_runtime::spawn_blocking(move || native::spawn_detached(&layout))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
 /// Where install/update gets the daemon binary from. macOS takes it from
 /// inside the app bundle (desktop-macos-app M2: the release the app itself
 /// shipped with, so app and daemon versions always match); Windows does the
@@ -889,7 +900,7 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
                 }
             }
 
-            let child = native::spawn_detached(&layout).map_err(|e| e.to_string())?;
+            let child = spawn_native_daemon(&layout).await?;
             drop(child); // detached (its own process group); tracked by pid below, not by this handle.
 
             // Don't trust "whoever now owns the port" on its own -- verify
@@ -1065,7 +1076,7 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
     match platform {
         Platform::Macos => {
             let layout = macos_layout(app)?;
-            let child = native::spawn_detached(&layout).map_err(|e| e.to_string())?;
+            let child = spawn_native_daemon(&layout).await?;
             drop(child);
 
             let _ = wait_for_healthz(&base_url).await;
