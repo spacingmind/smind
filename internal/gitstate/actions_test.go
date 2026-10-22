@@ -57,6 +57,12 @@ func TestActions_DisabledReasons_Table(t *testing.T) {
 			createMsg:  "A pull request is already open for this branch.",
 		},
 		{
+			name:       "pr exists beats no commits",
+			g:          TaskGit{Branch: branch, Base: known, Commits: &Commits{SinceFork: ip(0)}, PR: open},
+			createCode: "pr_exists",
+			createMsg:  "A pull request is already open for this branch.",
+		},
+		{
 			name:       "pr merged",
 			g:          TaskGit{Branch: branch, Base: known, Commits: withCommits, PR: &PRInfo{State: "merged"}},
 			updateCode: "pr_not_open",
