@@ -16,9 +16,6 @@ const attachBlock = "<attachment>ctx-block-sentinel</attachment>"
 func attachCtx(dirs ...string) context.Context {
 	return WithPromptAttachments(context.Background(), PromptAttachments{
 		Render: func(native bool) ([]PromptImage, []string) {
-			if native {
-				panic("native rendering is not used in this PR")
-			}
 			return nil, []string{attachBlock, "second-block"}
 		},
 		AddDirs: dirs,

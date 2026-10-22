@@ -1099,6 +1099,9 @@ type fakeClaudeModeClient struct {
 func (f *fakeClaudeModeClient) Prompt(context.Context, string, chan<- claudecode.Message) (claudecode.ResultMessage, error) {
 	return claudecode.ResultMessage{}, nil
 }
+func (f *fakeClaudeModeClient) PromptBlocks(context.Context, []claudecode.PromptBlock, chan<- claudecode.Message) (claudecode.ResultMessage, error) {
+	return claudecode.ResultMessage{}, nil
+}
 func (f *fakeClaudeModeClient) SetPermissionMode(_ context.Context, mode string) error {
 	f.mode = mode
 	return nil
