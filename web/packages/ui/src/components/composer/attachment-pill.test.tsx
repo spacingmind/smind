@@ -85,6 +85,21 @@ describe("AttachmentTray", () => {
     expect(screen.queryByTestId("attachment-lightbox")).toBeNull();
   });
 
+  it("the lightbox close button is a contrasting chip outside the image, and the image is not framed", () => {
+    render(<AttachmentTray items={[image]} onRemove={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Preview shot.png" }));
+    const box = screen.getByTestId("attachment-lightbox");
+    const close = screen.getByTestId("attachment-lightbox-close");
+    // Outside the content (so never drawn on the picture) and a dark chip with a light ring: visible on a white image.
+    expect(box.contains(close)).toBe(false);
+    expect(close.className).toContain("bg-black/70");
+    expect(close.className).toContain("text-white");
+    expect(box.className).not.toContain("bg-background");
+    expect(box.className).not.toContain("border");
+    fireEvent.click(close);
+    expect(screen.queryByTestId("attachment-lightbox")).toBeNull();
+  });
+
   it("renders a PR/issue pill with #number title, kind and repo, opens its url and removes", () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     const onRemove = vi.fn();
