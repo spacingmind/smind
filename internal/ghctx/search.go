@@ -56,7 +56,7 @@ var ghURLRe = regexp.MustCompile(`^https://github\.com/([A-Za-z0-9_.-]{1,100})/(
 // by query when non-empty. A query that is a bare/#-prefixed number or a
 // github.com pull/issues URL resolves that one item instead of listing:
 // an empty Items (not an error) if gh says it doesn't exist.
-func (c *Client) Search(ctx context.Context, dir, kind, query string, limit int) (SearchResult, error) {
+func (c *Client) search(ctx context.Context, dir, kind, query string, limit int) (SearchResult, error) {
 	if kind != "pr" && kind != "issue" {
 		return SearchResult{}, fmt.Errorf("invalid arguments")
 	}

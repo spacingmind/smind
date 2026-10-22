@@ -54,7 +54,7 @@ type ghViewJSON struct {
 // Get fetches kind's ("pr"|"issue") snapshot for number, running gh in
 // dir. repo "" infers the repo from dir via `gh repo view`; a non-empty
 // repo is passed as --repo and must match repoRe.
-func (c *Client) Get(ctx context.Context, dir, kind string, number int, repo string) (*Snapshot, error) {
+func (c *Client) get(ctx context.Context, dir, kind string, number int, repo string) (*Snapshot, error) {
 	if number <= 0 || (repo != "" && !repoRe.MatchString(repo)) || (kind != "pr" && kind != "issue") {
 		return nil, fmt.Errorf("invalid arguments")
 	}
