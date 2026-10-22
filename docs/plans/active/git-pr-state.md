@@ -223,6 +223,15 @@ Filled in as work proceeds (deviations from the ADR text with the same behaviour
 - The service is built inside `wsapi.New` (it needs the bus and the focus registry); `serve.go` starts and stops it. Cold `task.gitList` computes with 4 workers.
 - Interest is connection-level: any `task.git` subscriber turns the loop on; focus comes from `task.gitFocus`. A fetch runs for each workspace with a cached task, at most every 180 s (floor 60 s), only while someone subscribes.
 
+**PR 4 (forge poller + PR identity), decided 2026-10-22:**
+
+- `forge.Provider` gains `Repo`, `OpenPRs`, `PR`. `CreatePR` moves to PR 6 (its only caller) and `Status` to G12: the poller needs no `Status` (an unauthenticated result suspends the host for 10 minutes and the next attempt is the re-probe). The `ghctx.Snapshot/Item/SearchResult` aliases are deleted (ADR-0038 PR 5b has merged).
+- Polling groups by **workspace** (all its tasks share `origin`); the repo is resolved once per workspace via `Provider.Repo` (cached 1 h, counted against the budget). Workspaces are polled one after another within a tick, so a failing host is known before the next workspace calls.
+- A rate limit pauses the **whole host** (GitHub limits are per token), in memory; an unauthenticated result suspends the host 10 minutes. Per-task backoff 30/60/120/300 s and the explicit-refresh ledger are persisted.
+- `task.gitRefresh`: joins an in-flight poll for free, honours the task's `next_allowed_at` (it cannot bypass a backoff or rate limit), stamps the 12/hour ledger only when a call is actually allowed, returns the cached snapshot with `stale: "budget"` when blocked, and `refresh_limited {retryAt}` when over its own floor/cap. Run-scoped (agent) callers are refused.
+- `actions.createPr` reports `pr_exists` before `base_unknown`, `run_active` and `no_commits`; `actions.updatePr` is `fork_pr_readonly` for a fork PR.
+- A closed PR re-arms one fetch only when the local branch tip changes after the first observation and differs from `pr.headSha`.
+
 ## Decisions
 
 Taken from ADR-0039 (Accepted 2026-10-22).
@@ -255,5 +264,7 @@ Taken from ADR-0039 (Accepted 2026-10-22).
 How each AC gets satisfied is recorded here per PR as it lands (command output, screenshots, call counts).
 
 **PR 2 (G1, #469):** AC3–AC9 by the named tests under "store / migration", live on an isolated daemon (`main`-only repo: `base_ref=main`, fork-commit `base_sha` also with an unpushed checkout commit) and screenshots of the settings dialog.
+
+**PR 4 (forge poller):** AC17–AC27 by the 20 named `TestPoller_*`/`TestRefresh_*`/`TestTaskGit_*`/`TestPRIdentity_*` tests with a counting fake provider and an injected clock (poller tests also run 15× under `-race`). Live (isolated daemon, port 4841, a clone of spacingmind/smind, `gh` wrapped on PATH to log every call, read-only GitHub calls only, no write of any kind): no subscriber, 60 s → **0 gh calls**; subscribed + focused on a task whose branch is the head of open PR #498 → `repo view` once, then exactly **one `pr list` per tick** (20 s pending cadence + 5 s beat), the PR was **adopted** (`task.updated` with `PRNumber 498`) and `TaskGit.pr` showed the real state, review decision, mergeability and checks (`pending 3 passed / 1 pending`), `createPr` disabled `pr_exists`, `updatePr` enabled; restarted with `GH_TOKEN=<bogus>` → exactly **one failed `repo view`**, then the host was suspended (`pr.stale: "unauthenticated"`, `refreshAvailableAt` +10 min), no further calls in 70 s, and the last known snapshot stayed visible; no token text in the daemon log.
 
 **PR 3 (G5 daemon):** AC10–AC16 by the `TestGitStatus_*`, `TestGitRunner_*`, `TestFetch_*`, `TestTaskGitEvent_*`, `TestActions_*`, `TestTaskGit_*` tests. AC10's `task.stats` removal moves to PR 5. Live (isolated daemon on port 4821, throwaway repo with a bare origin, `git` wrapped on PATH to log every call): with **no `task.git` subscriber, 70 s of idle plus `task.git`/`task.gitList` reads made 12 local git calls and 0 `fetch`**; after subscribing and focusing, the first tick ran exactly one `git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main`, the payload then showed `behindBase 1 / aheadOfBase 1 / sinceFork 1`, `conflict: conflicts [shared.txt] against origin/main`, `origin.published false`, dirty counts, and the next focus tick published one `task.git` event (untracked 1 → 2).
