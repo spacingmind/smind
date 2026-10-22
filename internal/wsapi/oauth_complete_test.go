@@ -93,10 +93,11 @@ func TestServer_AccountOAuthComplete(t *testing.T) {
 		}
 		// url stays a first-class field next to loginId (the CLI reads it).
 		sendRequest(t, ws, "2", "account.oauthComplete", map[string]any{"loginId": loginID, "redirectUrl": "http://localhost:54545/callback?code=c&state=" + state})
-		if resp := readEnvelopeFor(t, ws, "2", 5*time.Second); resp.Error != nil {
-			t.Fatalf("account.oauthComplete error = %v", resp.Error.Message)
+		// The complete response and the start's terminal envelope race; read both in one loop.
+		got := readEnvelopesFor(t, ws, []string{"2", "1"}, 5*time.Second)
+		if got["2"].Error != nil {
+			t.Fatalf("account.oauthComplete error = %v", got["2"].Error.Message)
 		}
-		readEnvelopeFor(t, ws, "1", 5*time.Second)
 	})
 
 	t.Run("oauthStart flags pasteOnly when the callback port is busy", func(t *testing.T) {
@@ -119,11 +120,13 @@ func TestServer_AccountOAuthComplete(t *testing.T) {
 			t.Fatalf("authorizeUrl params = %s, want pasteOnly:true", raw)
 		}
 		sendRequest(t, ws, "2", "account.oauthComplete", map[string]any{"loginId": loginID, "redirectUrl": "http://localhost:54545/callback?code=c&state=" + state})
-		if resp := readEnvelopeFor(t, ws, "2", 5*time.Second); resp.Error != nil {
-			t.Fatalf("account.oauthComplete error = %v", resp.Error.Message)
+		// The complete response and the start's terminal envelope race; read both in one loop.
+		got := readEnvelopesFor(t, ws, []string{"2", "1"}, 5*time.Second)
+		if got["2"].Error != nil {
+			t.Fatalf("account.oauthComplete error = %v", got["2"].Error.Message)
 		}
-		if term := readEnvelopeFor(t, ws, "1", 5*time.Second); term.Error != nil {
-			t.Fatalf("account.oauthStart error = %v", term.Error.Message)
+		if got["1"].Error != nil {
+			t.Fatalf("account.oauthStart error = %v", got["1"].Error.Message)
 		}
 	})
 
