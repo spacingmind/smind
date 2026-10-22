@@ -3,7 +3,10 @@ import { Icons } from "@/lib/icons";
 import { providerLabel } from "@/lib/provider-catalog";
 
 import { TaskLineageChips } from "@/components/task-lineage";
+import { AttachmentDropOverlay } from "@/components/composer/attachment-drop-overlay";
 import { Composer } from "@/components/composer/composer";
+import { useAttachmentDraft } from "@/components/composer/use-attachment-draft";
+import { useAttachmentDrop } from "@/components/composer/use-attachment-drop";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
 import { ChatUsageTotal } from "@/components/chat-usage-total";
@@ -287,10 +290,15 @@ export function TaskDetailPane({
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const focusToolbar = useCallback(() => toolbarRef.current?.focus(), []);
 
+  // Dropping files anywhere on the pane attaches them to this chat's draft (ADR-0038 §7); inert without daemon support.
+  const attachDraft = useAttachmentDraft(task.ID, chat.ID);
+  const dropZone = useAttachmentDrop({ enabled: attachDraft.limits !== null, onFiles: attachDraft.add });
+
   const agentLabel = runConfigState ? agentChipLabel(runConfigState, profiles) : null;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col" {...dropZone.handlers}>
+      {attachDraft.limits && <AttachmentDropOverlay active={dropZone.dragging} />}
       {/*
        * The task's title, branch and status live in the app header (and its
        * hover card); this row keeps only what is specific to this chat.
@@ -476,6 +484,7 @@ export function TaskDetailPane({
         toolbarRef={toolbarRef}
         onRunConfigChange={setRunConfigState}
         liveRun={liveRun}
+        dropActive={dropZone.dragging}
         otherRunningChat={otherRunningChat}
         onJumpToChat={onJumpToChat}
         configOptions={{ options: configOptions.options, error: configOptions.error, onSetOption: configOptions.setOption }}

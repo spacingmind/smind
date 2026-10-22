@@ -1038,10 +1038,29 @@ describe("Composer diff-stat pill (Item 5)", () => {
     expect(card).toContainElement(screen.getByLabelText("Prompt"));
     expect(card).toContainElement(screen.getByTestId("composer-model-picker"));
     expect(card).toContainElement(screen.getByTestId("chat-send-button"));
-    // No dead affordances: Stop only exists while a run is live, and
-    // there is no attachment "+" until attachments exist.
+    // No dead affordances: Stop only exists while a run is live.
     expect(screen.queryByTestId("chat-stop-button")).not.toBeInTheDocument();
-    expect(card.querySelector("[aria-label~=attachment]")).not.toBeInTheDocument();
+  });
+
+  it("shows no Attach button until daemon.info reports attachment support (ADR-0038)", async () => {
+    const client = new FakeWsClient();
+    renderComposer({ client });
+    // Without the field (an older daemon) there is no attach affordance at all.
+    client.nth("daemon.info", 0).resolve({ version: "0.1.0" });
+    await flush();
+    expect(screen.queryByTestId("composer-attach-button")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Attach")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("attachment-tray")).not.toBeInTheDocument();
+  });
+
+  it("shows the Attach button when daemon.info carries attachment limits", async () => {
+    const client = new FakeWsClient();
+    renderComposer({ client });
+    client.nth("daemon.info", 0).resolve({
+      attachments: { maxCount: 10, maxImageBytes: 5 << 20, maxFileBytes: 10 << 20, maxTotalBytes: 10 << 20, maxMessageBytes: 16 << 20, images: ["image/png"], github: false },
+    });
+    await flush();
+    expect(screen.getByTestId("composer-attach-button")).toBeInTheDocument();
   });
 
   /** Applies profile `id` through the picker's pinned Profiles section (Back from the current provider's view reaches every profile). */

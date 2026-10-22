@@ -62,8 +62,10 @@ interface ComposerAttachmentsState {
   byKey: Record<string, DraftAttachment[]>;
   add: (key: string, files: File[], limits: AttachmentLimits) => void;
   remove: (key: string, localId: string, limits?: AttachmentLimits | null) => void;
-  /** Drops the tray and revokes its object URLs (after a successful send, or on unmount). */
+  /** Drops the tray and revokes its object URLs (on unmount). */
   clear: (key: string) => void;
+  /** Removes the sent items after a successful send WITHOUT revoking: the optimistic run entry now owns the preview URLs. */
+  release: (key: string, localIds: string[]) => void;
 }
 
 /**
@@ -104,6 +106,14 @@ export const useComposerAttachmentsStore = create<ComposerAttachmentsState>()((s
     current.forEach(revoke);
     const { [key]: _gone, ...rest } = get().byKey;
     set({ byKey: rest });
+  },
+  release: (key, localIds) => {
+    const left = (get().byKey[key] ?? NONE).filter((i) => !localIds.includes(i.localId));
+    if (left.length > 0) set({ byKey: { ...get().byKey, [key]: left } });
+    else {
+      const { [key]: _gone, ...rest } = get().byKey;
+      set({ byKey: rest });
+    }
   },
 }));
 

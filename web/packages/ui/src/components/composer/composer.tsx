@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent, type Ref } from "react";
 
 import { Icons } from "@/lib/icons";
+import { AttachmentTray } from "@/components/composer/attachment-tray";
+import { useAttachmentDraft } from "@/components/composer/use-attachment-draft";
+import { attachmentErrorMessage } from "@/lib/attachments/errors";
+import { encodeAttachment } from "@/lib/attachments/encode";
+import { useComposerAttachmentsStore, type DraftAttachment } from "@/stores/composer-attachments-store";
+import { cn } from "@/lib/utils";
 
 import { ComposerStatusChips } from "@/components/composer/composer-status-chips";
 import { QueuedPrompts } from "@/components/composer/queued-prompts";
@@ -19,6 +25,8 @@ import { formatCombo } from "@/keyboard/shortcut-string";
 import { type DiffStat } from "@/lib/diff-stat";
 import { supportsThinking } from "@/lib/thinking-levels";
 import type {
+  AttachmentMeta,
+  AttachmentRequest,
   ChatQueueItem,
   ConfigOptionParams,
   PermissionSettings,
@@ -29,6 +37,11 @@ import type { WsClientLike } from "@/lib/ws-client";
 
 /** Icon-only send cluster: 44px touch targets below md (Item 21), ZCode's 32px rounded squares from md up. */
 const ICON_ACTION_BUTTON_CLASS = "size-11 rounded-xl md:size-8";
+
+/** The metadata the optimistic run entry shows for a draft item, thumbnail URL included so no fetch is needed. */
+function draftPreview(item: DraftAttachment, index: number): AttachmentMeta {
+  return { id: String(index + 1), kind: item.kind, name: item.name, mimeType: item.mimeType, size: item.size, previewUrl: item.previewUrl };
+}
 
 /**
  * Why the composer can't send right now, phrased for the placeholder. A
@@ -60,8 +73,9 @@ export function composerPlaceholder({
  * at rest) and whose bottom edge is the toolbar -- icon+label run-config
  * pills on the left, the icon-only Send/Stop cluster on the right -- with
  * the status chips (Working, diff stat) above the card. The only
- * affordances shown are ones that work -- no attachment "+", mic or voice
- * buttons until those features exist.
+ * affordances shown are ones that work: the Attach button and tray exist
+ * only when the daemon reports attachment support (`daemon.info`), and
+ * there are no mic or voice buttons until those features exist.
  *
  * **Queue, not steer.** The daemon exposes no "send more input to a run
  * already in flight" RPC, so submitting while a run is live hands the
@@ -94,6 +108,7 @@ export function Composer({
   otherRunningChat,
   onJumpToChat,
   liveRun,
+  dropActive = false,
 }: {
   client: WsClientLike | null;
   /** null when no task is selected -- the composer renders, disabled, and says so. */
@@ -124,6 +139,8 @@ export function Composer({
     thinkingLevel?: ThinkingLevel,
     whenBusy?: "queue" | "interrupt",
     model?: string,
+    attachments?: AttachmentRequest[],
+    previews?: AttachmentMeta[],
   ) => Promise<SubmitResult>;
   onStop: (runId: string) => Promise<void>;
   /** Exposes the prompt textarea's DOM node -- what lets a plan review's "Chat about it" (Item 11) move focus into the composer without resolving the pending request. */
@@ -140,6 +157,8 @@ export function Composer({
   onJumpToChat?: (chatId: number) => void;
   /** The running run's mode controls (D1): while set, the toolbar's Mode/Auto-accept pills drive that run via run.setPermissionMode instead of the next run's config. Omit when there is no live-switch-capable run. */
   liveRun?: LiveRunControls | null;
+  /** Files are being dragged over the task pane: the card takes its focused border (the pane draws the "Drop to attach" label). */
+  dropActive?: boolean;
   /** GLM/Kimi's live ACP config options for the currently-running run, if any -- rendered inside this row per run-config IA's "same row, not a separate control" requirement. */
   configOptions?: {
     options: ConfigOptionParams[];
@@ -178,6 +197,8 @@ export function Composer({
   const [stopping, setStopping] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
+  const attach = useAttachmentDraft(taskId, chatId);
+  const fileInput = useRef<HTMLInputElement | null>(null);
   const textareaNode = useRef<HTMLTextAreaElement | null>(null);
   const setTextareaNode = useCallback(
     (node: HTMLTextAreaElement | null) => {
@@ -217,11 +238,16 @@ export function Composer({
   const canSend = connected && taskId !== null;
   const running = runningRunId !== null;
 
+  const { limits: attachLimits, key: attachKey, items: attachItems, hasError: attachHasError } = attach;
+
   const send = useCallback(
     async (text: string, whenBusy: "queue" | "interrupt") => {
       setSubmitting(true);
       setFormError(null);
       try {
+        // Bytes are encoded here, at submit, never when the file was added (ADR-0038 §6).
+        const attachments = attachItems.length > 0 ? await Promise.all(attachItems.map(encodeAttachment)) : undefined;
+        const previews = attachItems.length > 0 ? attachItems.map(draftPreview) : undefined;
         const result = await onSubmit(
           provider,
           text,
@@ -229,17 +255,21 @@ export function Composer({
           supportsThinking(provider) && thinkingLevel ? thinkingLevel : undefined,
           whenBusy,
           model || undefined,
+          attachments,
+          previews,
         );
+        // The optimistic run entry now owns the thumbnails' object URLs, so the tray lets go without revoking.
+        if (attachKey && attachItems.length > 0) useComposerAttachmentsStore.getState().release(attachKey, attachItems.map((i) => i.localId));
         if (result.kind === "queued") onQueued?.();
         return true;
       } catch (err) {
-        setFormError(err instanceof Error ? err.message : String(err));
+        setFormError(attachmentErrorMessage(err, attachLimits));
         return false;
       } finally {
         setSubmitting(false);
       }
     },
-    [onSubmit, provider, permissionMode, autoAccept, thinkingLevel, model, onQueued],
+    [onSubmit, provider, permissionMode, autoAccept, thinkingLevel, model, onQueued, attachItems, attachKey, attachLimits],
   );
 
   // A plain submit always hands the prompt to the daemon's queue whenBusy
@@ -247,24 +277,24 @@ export function Composer({
   // busy one queues instead of failing on a stale "running" flag.
   const submit = useCallback(() => {
     const trimmed = draft.value.trim();
-    if (!trimmed || !canSend || submitting) return;
+    if (!trimmed || !canSend || submitting || attachHasError) return;
     draft.clear();
     void send(trimmed, "queue").then((ok) => {
       // Restore the text if the prompt never landed, so it isn't lost.
       if (!ok) draft.setValue(trimmed);
     });
-  }, [draft, canSend, submitting, send]);
+  }, [draft, canSend, submitting, attachHasError, send]);
 
   // Paseo's alternate-send shortcut: while a run is live, Cmd/Ctrl+Enter
   // interrupts it rather than queueing behind it.
   const sendNow = useCallback(() => {
     const trimmed = draft.value.trim();
-    if (!trimmed || !canSend || submitting) return;
+    if (!trimmed || !canSend || submitting || attachHasError) return;
     draft.clear();
     void send(trimmed, "interrupt").then((ok) => {
       if (!ok) draft.setValue(trimmed);
     });
-  }, [draft, canSend, submitting, send]);
+  }, [draft, canSend, submitting, attachHasError, send]);
 
   async function handleStop() {
     if (!runningRunId) return;
@@ -311,6 +341,19 @@ export function Composer({
     }
   }
 
+  /** A pasted file (a screenshot, a copied file) becomes a pill; a plain-text paste is left to the textarea. */
+  function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    if (!attachLimits) return;
+    const fromItems = Array.from(e.clipboardData.items ?? [])
+      .filter((i) => i.kind === "file")
+      .map((i) => i.getAsFile())
+      .filter((f): f is File => f !== null);
+    const files = e.clipboardData.files.length > 0 ? Array.from(e.clipboardData.files) : fromItems;
+    if (files.length === 0) return;
+    e.preventDefault();
+    attach.add(files);
+  }
+
   function handleFormSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     submit();
@@ -318,6 +361,8 @@ export function Composer({
 
   const inactive = !canSend || submitting;
   const hasText = draft.value.trim() !== "";
+  const noImageProvider = providers.find((p) => p.id === provider);
+  const showImageHint = attachLimits !== null && noImageProvider?.images === "no" && attachItems.some((i) => i.kind === "image");
   const showFocusHint = focusCombo !== null && canSend && !focused && draft.value === "";
 
   return (
@@ -350,8 +395,17 @@ export function Composer({
        */}
       <div
         data-testid="composer-card"
-        className="relative flex flex-col rounded-2xl border border-input-border bg-input transition-colors hover:border-input-border-hover focus-within:border-input-border-focused focus-within:bg-input-focused"
+        className={cn(
+          "relative flex flex-col rounded-2xl border border-input-border bg-input transition-colors hover:border-input-border-hover focus-within:border-input-border-focused focus-within:bg-input-focused",
+          dropActive && "border-input-border-focused",
+        )}
       >
+        {attachLimits && <AttachmentTray items={attachItems} onRemove={attach.remove} />}
+        {showImageHint && (
+          <p data-testid="attachment-image-hint" className="px-4 pt-2 text-ui-xs text-foreground-muted">
+            {noImageProvider?.label ?? noImageProvider?.id} can&apos;t view images; the file path is sent instead
+          </p>
+        )}
         <PromptTextarea
           ref={setTextareaNode}
           label="Prompt"
@@ -362,6 +416,7 @@ export function Composer({
           onKeyDown={handleKeyDown}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
+          onPaste={handlePaste}
           placeholder={composerPlaceholder({ connected, hasTask: taskId !== null, running })}
           disabled={inactive}
           className="rounded-none border-0 bg-transparent px-4 pb-1 pt-3.5 focus-visible:border-transparent focus-visible:ring-0"
@@ -410,6 +465,36 @@ export function Composer({
             data-testid="composer-toolbar-row"
             className="flex flex-wrap items-center px-2 pb-2 pt-1 focus-visible:ring-3 focus-visible:ring-ring/50 rounded-xl"
           >
+            {attachLimits && (
+              <>
+                <input
+                  ref={fileInput}
+                  type="file"
+                  multiple
+                  hidden
+                  tabIndex={-1}
+                  aria-hidden
+                  data-testid="composer-attach-input"
+                  onChange={(e) => {
+                    attach.add(Array.from(e.target.files ?? []));
+                    // Picking the same file twice must fire change again.
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="size-8 rounded-lg"
+                  disabled={inactive}
+                  aria-label="Attach"
+                  title="Attach"
+                  data-testid="composer-attach-button"
+                  onClick={() => fileInput.current?.click()}
+                >
+                  <Icons.attach aria-hidden />
+                </Button>
+              </>
+            )}
             <RunConfigToolbar.ModelPicker />
             <RunConfigToolbar.Thinking />
             <RunConfigToolbar.Mode />
@@ -454,7 +539,7 @@ export function Composer({
                 type="submit"
                 variant={running ? "default" : "execute"}
                 className={ICON_ACTION_BUTTON_CLASS}
-                disabled={inactive || !hasText}
+                disabled={inactive || !hasText || attachHasError}
                 aria-label={running ? "Queue" : "Send"}
                 title={running ? "Queue this prompt — it sends when the run finishes (Enter)" : "Send (Enter)"}
                 data-testid="chat-send-button"
