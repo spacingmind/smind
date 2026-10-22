@@ -111,7 +111,19 @@ daemon has the task (via `task.list`), the header shows the title, and a second 
 
 ## Validation
 
-(filled when the PR is ready)
+Run on the merged tree (this branch + `origin/develop` at 6ce16377), all local:
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | clean |
+| `npm test` | 49 files / 539 passed |
+| `npm run test:integration` | 8 files / 28 passed, 1 skipped (the pre-existing password-harness guard); includes the new `integration.newtask.node.test.ts` (provider.list, task.create, first run to `done`, run-less task) |
+| `npm run smoke:web:full` | passed, 122 frames at 390×844@2x, light + dark, incl. stage 55 (form, filled, open/close transitions, submit transition with a non-blank t90, created, title-only task) and every earlier stage unchanged |
+| Run-less task, live (throwaway harness test, not committed) | empty state + live composer in both schemes; first send shows the user line, adopts the run, strip + reply (the provider was the machine's real `claude-native` with an expired token, so the reply was its 401 text; the `glm` path is covered by the integration suite and unit tests) |
+
+Frames (not committed): `/tmp/m6-final-frames/` (full smoke), `new-task-*`; `/tmp/m6-b2-frames/zerorun-*`.
+
+Acceptance: 1–4, 5 (with the recorded deviation), 6, 7, 8, 9, 10 confirmed on web. Unverified: the queued first prompt during a setup script (AC 5a) beyond unit tests/code walk; everything native.
 
 ## Follow-ups
 
