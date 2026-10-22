@@ -175,7 +175,9 @@ export const useComposerAttachmentsStore = create<ComposerAttachmentsState>()((s
     set({ byKey: { ...get().byKey, [key]: next } });
   },
   clear: (key) => {
-    get().clearMentions(key);
+    // Mentions are not cleared here: the chat tab unmounts whenever another tab is in front, while the draft TEXT (and
+    // so the `@path` tokens) survives. A mention is only sent while its token is still in the text, so a stale one is
+    // harmless; a send clears them (clearMentions).
     const current = get().byKey[key];
     if (!current) return;
     current.forEach(revoke);
