@@ -7,6 +7,7 @@ import { requestDiffReveal, resetDiffReveal } from "@/lib/diff-reveal";
 import { DIFF_PREFS_STORAGE_KEY } from "@/lib/diff-prefs";
 import { getReviewDrafts, resetReviewDrafts } from "@/lib/review-drafts";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
+import { clearToasts, Toaster } from "@/components/ui/toast";
 import { runConfigStorageKey } from "@/components/composer/run-config-preference";
 import { useFocusedChatStore } from "@/stores/focused-chat-store";
 import type { Chat, Task, TaskCreatePrResult, TaskFileDiffResult, TaskFilesResult } from "@/lib/types";
@@ -471,7 +472,8 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
     resetReviewDrafts();
     resetDiffReveal();
     window.localStorage.clear();
-    useFocusedChatStore.setState({ byTask: {} });
+    clearToasts();
+    useFocusedChatStore.setState({ byTask: {}, revealRequest: null });
   });
 
   /** Clicks the rendered diff line whose text contains `text`, inside `containerTestId`. */
@@ -657,6 +659,54 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
     expect(screen.queryByTestId("review-draft")).not.toBeInTheDocument();
     expect(screen.queryByTestId("submit-review-button")).not.toBeInTheDocument();
     expect(getReviewDrafts(TASK.ID)).toEqual([]);
+    // The reviewer is taken to the chat that received it.
+    expect(useFocusedChatStore.getState().revealRequest).toMatchObject({ taskId: TASK.ID, chatId: 11 });
+  });
+
+  it("confirms a submitted review with a toast naming the chat and the comment count, and shows that chat", async () => {
+    const client = new FakeWsClient();
+    useFocusedChatStore.getState().setFocusedChat(TASK.ID, 10);
+    useFocusedChatStore.setState({ revealRequest: null });
+    render(
+      <>
+        <Toaster />
+        <DiffViewerPane client={client} task={TASK} chats={[chat(10, { Provider: "claude-native" })]} />
+      </>,
+    );
+    await resolveFilesAndDiffs(client);
+    await writeTwoDrafts();
+    fireEvent.click(screen.getByTestId("submit-review-button"));
+    await flush();
+    // Nothing is announced before the daemon has accepted the prompt.
+    expect(screen.queryByText(/Review sent/)).not.toBeInTheDocument();
+    expect(useFocusedChatStore.getState().revealRequest).toBeNull();
+
+    client.nth("run.start", 0).resolve({ runId: "run-1" });
+    await flush();
+    const note = await screen.findByRole("status");
+    expect(note).toHaveTextContent("Review sent to Chat 10");
+    expect(note).toHaveTextContent("2 comments");
+    expect(useFocusedChatStore.getState().revealRequest).toMatchObject({ taskId: TASK.ID, chatId: 10 });
+  });
+
+  it("says a review was queued when the chat is busy", async () => {
+    const client = new FakeWsClient();
+    useFocusedChatStore.getState().setFocusedChat(TASK.ID, 10);
+    render(
+      <>
+        <Toaster />
+        <DiffViewerPane client={client} task={TASK} chats={[chat(10, { Provider: "claude-native" })]} />
+      </>,
+    );
+    await resolveFilesAndDiffs(client);
+    await writeTwoDrafts();
+    fireEvent.click(screen.getByTestId("submit-review-button"));
+    await flush();
+    client.nth("run.start", 0).resolve({ queued: true, queueItemId: 5 });
+    await flush();
+    const note = await screen.findByRole("status");
+    expect(note).toHaveTextContent("Review queued in Chat 10");
+    expect(note).toHaveTextContent("sends when the current run finishes");
   });
 
   it("sends to the default chat when none is focused, and still clears on a queued result", async () => {
@@ -721,6 +771,9 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
 
     expect(screen.getByTestId("review-error")).toHaveTextContent("daemon said no");
     expect(screen.getByTestId("review-draft")).toHaveTextContent("keep me");
+    // A failed submit announces nothing and does not move the reviewer.
+    expect(screen.queryByText(/Review sent/)).not.toBeInTheDocument();
+    expect(useFocusedChatStore.getState().revealRequest).toBeNull();
   });
 
   it("removes a single draft without touching the others", async () => {
