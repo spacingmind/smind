@@ -60,6 +60,10 @@ type Request struct {
 type Limits struct {
 	MaxCount, MaxImageBytes, MaxFileBytes, MaxTotalBytes, MaxImageDim int
 	MaxFileRefs, MaxForge, MaxPathLen, MaxNameBytes, MaxBodyBytes     int
+	// MaxDecodePixels bounds the full decode that proves a png/jpeg/gif body is
+	// intact: above it only the header is checked, because decoding allocates
+	// width*height*4 bytes (or more) for a request any client can send.
+	MaxDecodePixels int
 }
 
 // DefaultLimits returns the ADR-0038 limits.
@@ -75,6 +79,9 @@ func DefaultLimits() Limits {
 		MaxPathLen:    4096,
 		MaxNameBytes:  120,
 		MaxBodyBytes:  32 << 10,
+
+		// 16 MP: a 4000x4000 photo, about 64 MB of RGBA while it is decoded.
+		MaxDecodePixels: 16_000_000,
 	}
 }
 

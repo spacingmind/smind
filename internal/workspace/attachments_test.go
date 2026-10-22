@@ -87,3 +87,70 @@ func TestDeleteTask_RemovesAttachmentSets(t *testing.T) {
 		}
 	}
 }
+
+// TestDeleteSpaceAndWorkspace_RemoveAttachmentSets: the same cleanup runs when
+// a task goes away through its space or its workspace (the cascade), and only
+// for the tasks that cascade removes.
+func TestDeleteSpaceAndWorkspace_RemoveAttachmentSets(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t)
+	repo := newTestRepo(t)
+	w, err := m.CreateWorkspace(repo, "W", "hard", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp, err := m.CreateSpace(w.ID, "feature-x", "{}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inSpace, err := m.CreateTask(w.ID, &sp.ID, "in space")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside, err := m.CreateTask(w.ID, nil, "outside")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "attachments")
+	st := attach.NewStore(root)
+	mk := func(id string) string {
+		if err := os.MkdirAll(filepath.Join(root, id), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	spaceSet, outsideSet := mk("dddddddddddddddddddddddddddddddd"), mk("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	for _, r := range []store.Run{
+		{ID: "rs", TaskID: inSpace.ID, Provider: "glm", Prompt: "p", Status: "done", StartedAt: time.Now().UTC(), Attachments: setWith(spaceSet)},
+		{ID: "ro", TaskID: outside.ID, Provider: "glm", Prompt: "p", Status: "done", StartedAt: time.Now().UTC(), Attachments: setWith(outsideSet)},
+	} {
+		if _, err := m.store.CreateRun(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.SetAttachmentCleanup(func(ids []string) {
+		for _, id := range ids {
+			_ = st.Remove(id)
+		}
+	})
+	exists := func(id string) bool {
+		_, err := os.Stat(filepath.Join(root, id))
+		return err == nil
+	}
+
+	if _, err := m.DeleteSpace(sp.ID); err != nil {
+		t.Fatal(err)
+	}
+	if exists(spaceSet) {
+		t.Error("the deleted space's task set is still on disk")
+	}
+	if !exists(outsideSet) {
+		t.Error("a task outside the space lost its set")
+	}
+	if _, err := m.DeleteWorkspace(w.ID); err != nil {
+		t.Fatal(err)
+	}
+	if exists(outsideSet) {
+		t.Error("the deleted workspace's task set is still on disk")
+	}
+}
