@@ -23,7 +23,7 @@ export default function NewTaskRoute() {
           ),
         }}
       />
-      <NewTaskScreen />
+      <NewTaskScreen conn={ctx.conn} />
     </>
   );
 }
