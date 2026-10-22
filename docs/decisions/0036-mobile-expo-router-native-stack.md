@@ -47,7 +47,7 @@ constraint on how the app is routed.
    difference: after a mid-session `password`/`revoked` card the user returns to the task list, not to the task that was open.
 4. **Task detail takes `id` (and a display `title`) as route params**, not the whole `Task` object. The title is the stack
    header title; a deep link without one shows `Task <id>`.
-5. **Headers are native.** Screen titles, the back button and the Disconnect action are stack options
+5. **Headers are native.** Screen titles, the back button and the Disconnect action are stack options (the status screen's header is the constant 'Connection'; the status card in the screen body carries the specific title)
    (`Stack.Screen`'s `title`, `headerRight`, token colours), not custom text; the in-screen "← Back" and title `Text`s and the
    `paddingTop: 64` hacks go. Transient banners render inside the screens, not above the navigator (the header owns the top inset).
 6. **Web (the Playwright smoke target only) exports a single-page app** (`web.output: "single"`, Metro bundler), served by the
