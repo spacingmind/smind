@@ -1,0 +1,79 @@
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { AttachmentPill } from "@/components/composer/attachment-pill";
+import { AttachmentTray } from "@/components/composer/attachment-tray";
+import type { DraftAttachment } from "@/stores/composer-attachments-store";
+
+const image: DraftAttachment = { localId: "a", file: new File(["x"], "shot.png"), kind: "image", name: "shot.png", mimeType: "image/png", size: 2048, previewUrl: "blob:shot" };
+const doc: DraftAttachment = { localId: "b", file: new File(["x"], "report.pdf"), kind: "file", name: "report.pdf", mimeType: "application/pdf", size: 90311 };
+
+function stubHover(hover: boolean) {
+  vi.stubGlobal("matchMedia", (q: string) => ({ matches: q === "(hover: none)" ? !hover : false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
+}
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("AttachmentPill", () => {
+  it("renders an image as a thumbnail and a file as a two-line pill", () => {
+    render(<AttachmentPill item={image} onRemove={() => {}} />);
+    const img = screen.getByRole("img", { name: "shot.png" });
+    expect(img).toHaveAttribute("src", "blob:shot");
+    expect(img.className).toContain("size-12");
+    cleanup();
+    render(<AttachmentPill item={doc} onRemove={() => {}} />);
+    expect(screen.queryByRole("img", { name: "report.pdf" })).toBeNull();
+    expect(screen.getByText("report.pdf")).toBeInTheDocument();
+    expect(screen.getByText("PDF · 88 KiB")).toBeInTheDocument();
+  });
+
+  it("close badge: hidden until hover/focus on pointer devices, always shown on touch", () => {
+    stubHover(true);
+    render(<AttachmentPill item={doc} onRemove={() => {}} />);
+    expect(screen.getByTestId("attachment-pill-close").className).toContain("md:opacity-0");
+    expect(screen.getByTestId("attachment-pill-close").className).toContain("md:group-hover:opacity-100");
+    cleanup();
+    stubHover(false);
+    render(<AttachmentPill item={doc} onRemove={() => {}} />);
+    expect(screen.getByTestId("attachment-pill-close").className).not.toContain("opacity-0");
+  });
+
+  it("removes on the close badge, and on Backspace/Delete of the focused pill", () => {
+    const onRemove = vi.fn();
+    render(<AttachmentPill item={doc} onRemove={onRemove} />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove report.pdf" }));
+    expect(onRemove).toHaveBeenCalledTimes(1);
+    const pill = screen.getByTestId("attachment-pill");
+    fireEvent.keyDown(pill, { key: "Backspace" });
+    fireEvent.keyDown(pill, { key: "Delete" });
+    expect(onRemove).toHaveBeenCalledTimes(3);
+  });
+
+  it("an error pill shows the warning and the reason in destructive color", () => {
+    render(<AttachmentPill item={{ ...image, error: "Larger than 5 MiB" }} onRemove={() => {}} />);
+    const pill = screen.getByTestId("attachment-pill");
+    expect(pill).toHaveAttribute("data-error", "true");
+    expect(screen.getByText("Larger than 5 MiB").className).toContain("text-destructive");
+    // No thumbnail for a rejected image, so it cannot be opened.
+    expect(screen.queryByRole("img", { name: "shot.png" })).toBeNull();
+  });
+});
+
+describe("AttachmentTray", () => {
+  it("renders nothing when empty", () => {
+    const { container } = render(<AttachmentTray items={[]} onRemove={() => {}} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("opens the lightbox for an image and closes it with Escape", () => {
+    render(<AttachmentTray items={[image, doc]} onRemove={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Preview shot.png" }));
+    const box = screen.getByTestId("attachment-lightbox");
+    expect(box.querySelector("img")).toHaveAttribute("alt", "shot.png");
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(screen.queryByTestId("attachment-lightbox")).toBeNull();
+  });
+});
