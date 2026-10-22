@@ -240,6 +240,10 @@ func TestServer_AccountOAuthStart_HappyPath(t *testing.T) {
 // login's fake vendor, playing the browser's part (GET the callback with the
 // state from the streamed authorizeUrl event), and returns the terminal
 // envelope. A fresh callback address per call keeps sequential logins apart.
+//
+// freeAddr's port can be taken by another process before the login binds it;
+// the login then goes paste-only and the port belongs to someone else, so the
+// helper finishes it with account.oauthComplete instead of a GET.
 func oauthStartOverWS(t *testing.T, ws *websocket.Conn, reqID string, login *fakeOAuthLogin, subject string, params map[string]any) envelope {
 	t.Helper()
 	login.addr = freeAddr(t)
@@ -252,7 +256,9 @@ func oauthStartOverWS(t *testing.T, ws *websocket.Conn, reqID string, login *fak
 		return event
 	}
 	var ev struct {
-		URL string `json:"url"`
+		LoginID   string `json:"loginId"`
+		URL       string `json:"url"`
+		PasteOnly bool   `json:"pasteOnly"`
 	}
 	if err := json.Unmarshal(event.Params, &ev); err != nil {
 		t.Fatalf("decode authorizeUrl params: %v", err)
@@ -260,6 +266,16 @@ func oauthStartOverWS(t *testing.T, ws *websocket.Conn, reqID string, login *fak
 	u, err := url.Parse(ev.URL)
 	if err != nil {
 		t.Fatalf("url.Parse(%q) error = %v", ev.URL, err)
+	}
+	if ev.PasteOnly {
+		completeID := reqID + "-complete"
+		redirect := "http://localhost/callback?code=test-code&state=" + url.QueryEscape(u.Query().Get("state"))
+		sendRequest(t, ws, completeID, "account.oauthComplete", map[string]any{"loginId": ev.LoginID, "redirectUrl": redirect})
+		got := readEnvelopesFor(t, ws, []string{completeID, reqID}, 5*time.Second)
+		if got[completeID].Error != nil {
+			t.Fatalf("account.oauthComplete error = %v", got[completeID].Error.Message)
+		}
+		return got[reqID]
 	}
 	resp, err := http.Get(fmt.Sprintf("http://%s/callback?code=test-code&state=%s", login.addr, url.QueryEscape(u.Query().Get("state"))))
 	if err != nil {
