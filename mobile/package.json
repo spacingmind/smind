@@ -41,7 +41,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "test": "vitest run --exclude \"**/*.node.test.ts\"",
-    "test:integration": "NODE_TLS_REJECT_UNAUTHORIZED=0 SMIND_REQUIRE_PASSWORD_HARNESS=1 vitest run src/relay/__tests__/integration.node.test.ts src/relay/__tests__/integration.persistent.node.test.ts src/relay/__tests__/integration.devices.node.test.ts src/relay/__tests__/integration.password.node.test.ts src/relay/__tests__/integration.queue.node.test.ts src/relay/__tests__/integration.stop.node.test.ts src/relay/__tests__/integration.replay.node.test.ts",
+    "test:integration": "NODE_TLS_REJECT_UNAUTHORIZED=0 SMIND_REQUIRE_PASSWORD_HARNESS=1 vitest run src/relay/__tests__/integration.node.test.ts src/relay/__tests__/integration.persistent.node.test.ts src/relay/__tests__/integration.devices.node.test.ts src/relay/__tests__/integration.password.node.test.ts src/relay/__tests__/integration.queue.node.test.ts src/relay/__tests__/integration.stop.node.test.ts src/relay/__tests__/integration.replay.node.test.ts src/relay/__tests__/integration.newtask.node.test.ts",
     "typecheck": "tsc --noEmit",
     "smoke:web": "node scripts/smoke-web.mjs",
     "smoke:web:full": "node scripts/smoke-web.mjs --full"
