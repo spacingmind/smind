@@ -764,12 +764,14 @@ describe("DiffViewerPane header below md", () => {
     fireEvent.pointerDown(screen.getByTestId("diff-actions-menu"), { button: 0, ctrlKey: false });
     await waitFor(() => expect(screen.getByTestId("diff-actions-menu-content")).toBeInTheDocument());
 
-    expect(screen.getByTestId("diff-menu-side-by-side")).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByTestId("diff-menu-unified")).toHaveAttribute("aria-checked", "false");
-
-    fireEvent.click(screen.getByTestId("diff-menu-unified"));
-    await flush();
+    // A phone-width pane starts unified (side by side would leave ~140px a side); the choice is still one tap away.
+    expect(screen.getByTestId("diff-menu-unified")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("diff-menu-side-by-side")).toHaveAttribute("aria-checked", "false");
     expect(screen.getByTestId("diff-container-file.txt")).toHaveAttribute("data-output-format", "line-by-line");
+
+    fireEvent.click(screen.getByTestId("diff-menu-side-by-side"));
+    await flush();
+    expect(screen.getByTestId("diff-container-file.txt")).toHaveAttribute("data-output-format", "side-by-side");
 
     fireEvent.pointerDown(screen.getByTestId("diff-actions-menu"), { button: 0, ctrlKey: false });
     await waitFor(() => expect(screen.getByTestId("diff-menu-create-pr")).toBeInTheDocument());
