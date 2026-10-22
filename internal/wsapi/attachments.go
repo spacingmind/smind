@@ -10,12 +10,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/spacingmind/smind/internal/attach"
 	"github.com/spacingmind/smind/internal/files"
+	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/workspace"
 )
@@ -41,6 +43,10 @@ type AttachmentsInfo struct {
 	MaxTotalBytes   int      `json:"maxTotalBytes"`
 	MaxMessageBytes int      `json:"maxMessageBytes"`
 	Images          []string `json:"images"`
+	// Kinds are the attachment kinds this daemon accepts, so a client shows
+	// only affordances that work (absent on an older daemon = image, file,
+	// file_ref).
+	Kinds []string `json:"kinds"`
 }
 
 func attachmentsInfo(maxMessage int) *AttachmentsInfo {
@@ -49,6 +55,7 @@ func attachmentsInfo(maxMessage int) *AttachmentsInfo {
 		MaxCount: lim.MaxCount, MaxImageBytes: lim.MaxImageBytes, MaxFileBytes: lim.MaxFileBytes,
 		MaxTotalBytes: lim.MaxTotalBytes, MaxMessageBytes: maxMessage,
 		Images: []string{"image/png", "image/jpeg", "image/gif", "image/webp"},
+		Kinds:  []string{attach.KindImage, attach.KindFile, attach.KindFileRef, attach.KindPR, attach.KindIssue},
 	}
 }
 
@@ -63,7 +70,7 @@ func connMaxMessage(rc *requestContext) int {
 // acceptAttachments validates reqs for a prompt to taskID and writes the
 // accepted set to the store. No requests yield the zero Set and no error;
 // a daemon without a store refuses any. A rejection leaves nothing on disk.
-func acceptAttachments(ctx context.Context, wm *workspace.Manager, reg *runs.Registry, taskID int64, reqs []attach.Request) (attach.Set, error) {
+func acceptAttachments(ctx context.Context, wm *workspace.Manager, reg *runs.Registry, gh *githubHolder, taskID int64, reqs []attach.Request) (attach.Set, error) {
 	if len(reqs) == 0 {
 		return attach.Set{}, nil
 	}
@@ -73,11 +80,47 @@ func acceptAttachments(ctx context.Context, wm *workspace.Manager, reg *runs.Reg
 	}
 	res := attach.Resolvers{
 		FileRef: func(path string) (string, bool, error) { return resolveFileRef(wm, taskID, path) },
+		Forge: func(ctx context.Context, forgeName, kind string, number int, repo string) (attach.ForgeSnapshot, error) {
+			return fetchForgeSnapshot(ctx, wm, gh, taskID, forgeName, kind, number, repo)
+		},
 		Reuse: func(runID, id string) (attach.Item, string, error) {
 			return reg.ReuseAttachment(st, taskID, runID, id)
 		},
 	}
 	return st.Accept(ctx, reqs, attach.DefaultLimits(), res)
+}
+
+// fetchForgeSnapshot is the attach.Resolvers.Forge of a prompt to taskID: one
+// read-only fetch of the PR or issue, in the task's worktree, through the
+// daemon host's own forge login (ADR-0038 §4). It runs at accept time, so the
+// agent sees what the user saw even if the PR changes, a queued prompt is
+// delivered later, or a replay would fail. A *forge.Error keeps its code
+// (forge_cli_missing, forge_unauthenticated, forge_no_remote, forge_not_found,
+// forge_rate_limited, forge_timeout, forge_error) and its fixed message; it
+// never carries argv or stderr.
+func fetchForgeSnapshot(ctx context.Context, wm *workspace.Manager, gh *githubHolder, taskID int64, forgeName, kind string, number int, repo string) (attach.ForgeSnapshot, error) {
+	if forgeName != "github" {
+		return attach.ForgeSnapshot{}, &attach.Error{Code: attach.CodeInvalid, Message: fmt.Sprintf("unsupported forge %q (only \"github\")", forgeName), Index: -1}
+	}
+	if gh == nil || gh.c == nil {
+		return attach.ForgeSnapshot{}, &attach.Error{Code: attach.CodeForgeError, Message: "no forge available", Index: -1}
+	}
+	dir, err := taskWorktreePath(wm, taskID)
+	if err != nil {
+		return attach.ForgeSnapshot{}, &attach.Error{Code: attach.CodeNotFound, Message: "task has no workspace", Index: -1}
+	}
+	snap, err := gh.c.Get(ctx, dir, kind, number, repo)
+	if err != nil {
+		var fe *forge.Error
+		if errors.As(err, &fe) {
+			return attach.ForgeSnapshot{}, &attach.Error{Code: fe.Code, Message: fe.Message, Index: -1}
+		}
+		return attach.ForgeSnapshot{}, &attach.Error{Code: attach.CodeForgeError, Message: "the forge returned an error", Index: -1}
+	}
+	return attach.ForgeSnapshot{
+		Number: snap.Number, Repo: snap.Repo, Title: snap.Title, URL: snap.URL, State: snap.State,
+		BaseRef: snap.BaseRef, HeadRef: snap.HeadRef, Body: snap.Body,
+	}, nil
 }
 
 // resolveFileRef maps a client path to a workspace-relative one. It checks

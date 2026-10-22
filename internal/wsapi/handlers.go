@@ -22,7 +22,7 @@ import (
 
 // methodHandlers returns the full set of RPC methods this package serves,
 // bound to wm, runner, reg, treg, profReg, mcpReg, coord, and db.
-func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry, profReg *profiles.Registry, mcpReg *mcpservers.Registry, coord *accounts.LoginCoordinator, db *store.Store) map[string]handlerFunc {
+func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry, profReg *profiles.Registry, mcpReg *mcpservers.Registry, coord *accounts.LoginCoordinator, db *store.Store, gh *githubHolder) map[string]handlerFunc {
 	return map[string]handlerFunc{
 		"account.add":              handleAccountAdd(acctReg),
 		"account.oauthStart":       handleAccountOAuthStart(coord),
@@ -69,8 +69,8 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"chat.archive":             handleChatArchive(wm, reg),
 		"chat.queueList":           handleChatQueueList(reg),
 		"chat.queueCancel":         handleChatQueueCancel(reg),
-		"task.prompt":              handleTaskPrompt(wm, runner, reg),
-		"run.start":                handleRunStart(wm, runner, reg),
+		"task.prompt":              handleTaskPrompt(wm, runner, reg, gh),
+		"run.start":                handleRunStart(wm, runner, reg, gh),
 		"run.list":                 handleRunList(reg),
 		"run.attach":               handleRunAttach(reg),
 		"run.logs":                 handleRunLogs(reg),
@@ -1246,7 +1246,7 @@ type permissionResolvedParams struct {
 // matching task.prompt's pre-Registry behavior where the run's context
 // *was* this request's context. run.attach's context going Done, by
 // contrast, only detaches -- see handleRunAttach.
-func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry) handlerFunc {
+func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry, gh *githubHolder) handlerFunc {
 	return func(ctx context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			TaskID int64 `json:"taskId"`
@@ -1290,7 +1290,7 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 			return nil, fmt.Errorf("task.prompt: invalid thinkingLevel %q", p.ThinkingLevel)
 		}
 
-		set, err := acceptAttachments(ctx, wm, reg, p.TaskID, p.Attachments)
+		set, err := acceptAttachments(ctx, wm, reg, gh, p.TaskID, p.Attachments)
 		if err != nil {
 			return nil, fmt.Errorf("task.prompt: %w", err)
 		}
@@ -1326,7 +1326,7 @@ type runStartResult struct {
 // matters (Ctrl+C during a foreground `task send` must detach the watch,
 // not stop the run, which task.prompt's own request-scoped stop-on-detach
 // behavior cannot support).
-func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry) handlerFunc {
+func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry, gh *githubHolder) handlerFunc {
 	return func(ctx context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			TaskID int64 `json:"taskId"`
@@ -1388,7 +1388,7 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			return nil, fmt.Errorf("run.start: source %q requires fromTaskId and fromChatId", p.Source)
 		}
 
-		set, err := acceptAttachments(ctx, wm, reg, p.TaskID, p.Attachments)
+		set, err := acceptAttachments(ctx, wm, reg, gh, p.TaskID, p.Attachments)
 		if err != nil {
 			return nil, fmt.Errorf("run.start: %w", err)
 		}

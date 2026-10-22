@@ -334,7 +334,7 @@ All new web code follows ADR-0032 and `docs/design.md`; no bespoke `useEffect` +
 ### 8. Capability and limits discovery
 
 `daemon.info` (already per connection) gains `attachments: {maxCount, maxImageBytes, maxFileBytes, maxTotalBytes,
-maxMessageBytes, images: ["image/png", …]}`. `maxMessageBytes` is per transport (16 MiB direct, 1,048,551
+maxMessageBytes, images: ["image/png", …], kinds: ["image", "file", "file_ref", "pr", "issue"]}`. `kinds` is what this daemon accepts, so a client shows only affordances that work (absent on an older daemon means image, file and file_ref). `maxMessageBytes` is per transport (16 MiB direct, 1,048,551
 relay), which is how a client learns the relay ceiling before it builds a request. The forge capability is the top-level `daemon.info.forge: {provider: "github", cli: bool}` (a PATH lookup for `gh`, no process spawn; ADR-0039 §8 grows it
 with authentication details), which the composer reads to say why the GitHub picker is disabled. `provider.list` entries gain `images: "yes" | "no" | "unknown"` (claude-native and codex `yes`, GLM
 `no`, other ACP `unknown` until a session reports `promptCapabilities`), which drives the pill hint in §3.

@@ -166,11 +166,11 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 
 	acctReg.SetNotifier(busAccountNotifier{bus: bus})
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
-	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, mcpReg, coord, db)
+	gh := &githubHolder{c: ghctx.New()}
+	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, mcpReg, coord, db, gh)
 	info := newDaemonInfo(time.Now())
 	hs["daemon.info"] = handleDaemonInfo(info, reg)
 	hs["run.attachment"] = handleRunAttachment(reg)
-	gh := &githubHolder{c: ghctx.New()}
 	hs["forge.search"] = handleForgeSearch(wm, gh)
 	learning := newLearningHost(db, bus)
 	for method, h := range learningHandlers(learning) {
