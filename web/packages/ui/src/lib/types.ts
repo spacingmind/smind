@@ -13,8 +13,6 @@ export interface Workspace {
   HasTeardownScript?: boolean;
   CreatedAt: string;
   UpdatedAt: string;
-  /** ADR-0038: the queued prompt's attachments (metadata only). */
-  attachments?: AttachmentMeta[];
 }
 
 /** workspace.get's result: the workspace plus its setup/teardown script text ("" = none) -- the only wire method that returns it (ADR-0024). */
@@ -308,6 +306,8 @@ export interface ChatQueueItem {
   CancelKind: "" | "user" | "auto";
   CreatedAt: string;
   UpdatedAt: string;
+  /** ADR-0038: the queued prompt's attachments (metadata only). */
+  attachments?: AttachmentMeta[];
 }
 
 // Result of run.setPermissionMode (internal/wsapi/handlers.go's
