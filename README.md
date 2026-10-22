@@ -202,6 +202,21 @@ smind task new <workspaceId> "fix the failing test"
 smind task send <taskId> glm "fix the failing test"   # or open the web UI and use the Chat tab
 ```
 
+### Choosing a task's starting point
+
+By default a task forks from the workspace checkout's current `HEAD`, so a stale
+local `develop` gives a stale base. Pick the start point explicitly instead; at
+most one of these:
+
+```sh
+smind task new <ws> "title" --base origin/develop   # new branch at a fresh remote ref (recommended for agents)
+smind task new <ws> "title" --branch some-branch    # check out an existing branch (e.g. an unmerged PR branch), no new branch
+smind task new <ws> "title" --pr 123                # build from a GitHub pull request
+```
+
+`--base origin/<branch>` fetches that branch first (best effort), so the main
+checkout is never touched. Agents that create tasks should use it.
+
 ### Permission modes
 
 ```sh
