@@ -30,7 +30,7 @@ export function PrAction({ taskId, workspaceId = null }: { taskId: number; works
   const error = update.error ? describePrError(update.error, "update") : null;
 
   return (
-    <div className="flex flex-col items-end gap-1" data-testid="pr-action">
+    <div className="relative flex flex-col items-end gap-1" data-testid="pr-action">
       <div className="flex items-center gap-2" title={reason}>
         {pr ? (
           <>
@@ -76,7 +76,18 @@ export function PrAction({ taskId, workspaceId = null }: { taskId: number; works
           {reason}
         </p>
       )}
-      {error && <PrErrorLine error={error} testId="pr-error" className="max-w-80 text-right" />}
+      {error && (
+        // A card anchored under the buttons, out of flow: an inline error would grow the header and shove the diff down.
+        <div
+          className="absolute top-full right-0 z-30 mt-2 flex w-80 max-w-[calc(100vw-2rem)] items-start gap-2 rounded-lg border border-input-border bg-background p-3 text-left shadow-md"
+          data-testid="pr-error-card"
+        >
+          <PrErrorLine error={error} testId="pr-error" className="min-w-0 flex-1" />
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Dismiss" data-testid="pr-error-dismiss" onClick={() => update.reset()}>
+            <Icons.close aria-hidden />
+          </Button>
+        </div>
+      )}
       <CreatePrDialog taskId={taskId} workspaceId={workspaceId} open={dialogOpen} onOpenChange={setDialogOpen} />
     </div>
   );

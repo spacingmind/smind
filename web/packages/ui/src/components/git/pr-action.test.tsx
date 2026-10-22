@@ -88,4 +88,17 @@ describe("PrAction", () => {
     fireEvent.click(screen.getByTestId("pr-error-copy"));
     expect(writeText).toHaveBeenCalledWith("! [rejected] x -> x (fetch first)");
   });
+
+  it("shows the update error in an out-of-flow card that can be dismissed (it must not grow the header)", async () => {
+    const client = await mount(gitState({ pr: openPr(), actions: { updatePr: { enabled: true } } }));
+    fireEvent.click(screen.getByTestId("update-pr-button"));
+    await flush();
+    client.nth("task.updatePr", 0).reject(new RpcError("GitHub rejected the push. Update this branch first.", "push_rejected", {}));
+    await flush();
+    const card = screen.getByTestId("pr-error-card");
+    expect(card.className).toContain("absolute");
+    fireEvent.click(screen.getByTestId("pr-error-dismiss"));
+    await flush();
+    expect(screen.queryByTestId("pr-error-card")).toBeNull();
+  });
 });
