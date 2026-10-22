@@ -84,17 +84,15 @@ fn on_event(
     }
 }
 
-/// activate starts fresh watcher (+ relay transport, if `conn` is
-/// `relay`-kind) tasks for `conn`, installing the relay handle into
-/// `proxy` (AC5's `/ws` bridge reads it from there) if any. Returns the
-/// new task handles for the caller to store; it does not abort anything
-/// -- see `restart`, which does that before calling this.
+/// The in-memory password cells, keyed by (connection id, daemon public key).
+type PasswordCells = Mutex<HashMap<(String, [u8; 32]), relay::password::PasswordCell>>;
+
 /// The daemon passwords entered this run, in memory only, never persisted. Keyed by
 /// connection id AND the daemon's public key: re-adding a link with the same relay
 /// host id but a different daemon key replaces the connection, and a password the
 /// user typed for the old daemon must never be sent to the new one.
-fn password_cells() -> &'static Mutex<HashMap<(String, [u8; 32]), relay::password::PasswordCell>> {
-    static CELLS: OnceLock<Mutex<HashMap<(String, [u8; 32]), relay::password::PasswordCell>>> = OnceLock::new();
+fn password_cells() -> &'static PasswordCells {
+    static CELLS: OnceLock<PasswordCells> = OnceLock::new();
     CELLS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -119,25 +117,11 @@ pub fn forget_password(conn_id: &str) {
     });
 }
 
-#[cfg(test)]
-mod password_tests {
-    use super::*;
-
-    #[test]
-    fn a_new_daemon_key_under_the_same_connection_id_gets_no_password() {
-        let (old_key, new_key) = ([1u8; 32], [2u8; 32]);
-        let old = password_cell("relay:test-host@relay.example:7400", &old_key);
-        old.set("typed-for-the-old-daemon".into());
-        let same = password_cell("relay:test-host@relay.example:7400", &old_key);
-        assert!(same.is_set(), "the same daemon keeps its password across restarts of the loop");
-        let other = password_cell("relay:test-host@relay.example:7400", &new_key);
-        assert!(!other.is_set(), "a different daemon key must start with no password");
-        forget_password("relay:test-host@relay.example:7400");
-        assert!(!password_cell("relay:test-host@relay.example:7400", &old_key).is_set(), "removal forgets every key's password");
-        assert!(!old.is_set());
-    }
-}
-
+/// activate starts fresh watcher (+ relay transport, if `conn` is
+/// `relay`-kind) tasks for `conn`, installing the relay handle into
+/// `proxy` (AC5's `/ws` bridge reads it from there) if any. Returns the
+/// new task handles for the caller to store; it does not abort anything
+/// -- see `restart`, which does that before calling this.
 fn activate(
     app: &AppHandle,
     proxy: &Arc<ProxyState>,
@@ -272,4 +256,23 @@ pub fn spawn_initial(
     Option<tokio::task::JoinHandle<()>>,
 ) {
     activate(app, proxy, tray, cache, proxy_url, conn, connections_path)
+}
+
+#[cfg(test)]
+mod password_tests {
+    use super::*;
+
+    #[test]
+    fn a_new_daemon_key_under_the_same_connection_id_gets_no_password() {
+        let (old_key, new_key) = ([1u8; 32], [2u8; 32]);
+        let old = password_cell("relay:test-host@relay.example:7400", &old_key);
+        old.set("typed-for-the-old-daemon".into());
+        let same = password_cell("relay:test-host@relay.example:7400", &old_key);
+        assert!(same.is_set(), "the same daemon keeps its password across restarts of the loop");
+        let other = password_cell("relay:test-host@relay.example:7400", &new_key);
+        assert!(!other.is_set(), "a different daemon key must start with no password");
+        forget_password("relay:test-host@relay.example:7400");
+        assert!(!password_cell("relay:test-host@relay.example:7400", &old_key).is_set(), "removal forgets every key's password");
+        assert!(!old.is_set());
+    }
 }

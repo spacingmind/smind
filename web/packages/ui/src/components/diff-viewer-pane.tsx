@@ -3,7 +3,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { providerListQueryOptions } from "@/hooks/use-provider-catalog";
 import { Icons } from "@/lib/icons";
 
+import { DiffHeaderMenu } from "@/components/diff-header-menu";
 import { DiffRender, type DiffOutputFormat } from "@/components/diff-render";
+import { ErrorWithDetails } from "@/components/error-with-details";
 import { FileStatusMarker } from "@/components/file-status-marker";
 import { ReviewComments, type PendingComment } from "@/components/review-comments";
 import { Alert } from "@/components/ui/alert";
@@ -13,7 +15,9 @@ import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
 import { externalLinkProps } from "@/lib/external-link";
 import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useTaskDiff } from "@/hooks/use-task-diff";
+import { useFocusedChatId } from "@/stores/focused-chat-store";
 import { suggestCommitMessage } from "@/lib/commit-suggestion";
 import { formatDiffStat } from "@/lib/diff-stat";
 import { subscribeDiffReveal, takeDiffReveal } from "@/lib/diff-reveal";
@@ -26,9 +30,11 @@ import {
   type ReviewDraft,
 } from "@/lib/review-drafts";
 import { loadDiffPrefs, saveDiffPrefs } from "@/lib/diff-prefs";
+import { recipientRunParams, resolveReviewRecipient } from "@/lib/review-recipient";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
 import type {
+  Chat,
   Provider,
   RunStartResult,
   RunStatusEventPayload,
@@ -67,13 +73,18 @@ export function DiffViewerPane({
   client,
   task,
   events,
+  chats,
 }: {
   client: WsClientLike | null;
   task: Task;
   /** The app's single-subscription event stream; optional so existing tests/mounts render unchanged. A terminal run.status for this task refetches the files list. */
   events?: DaemonEvents | null;
+  /** The task's active chats (App.tsx's chat.list) -- a review is addressed to one of them. Without any, "Submit review" is disabled. */
+  chats?: Chat[] | null;
 }) {
   const queryClient = useQueryClient();
+  const isMobile = useIsMobile();
+  const focusedChatId = useFocusedChatId(task.ID);
   const [files, setFiles] = useState<TaskFile[] | null>(null);
   const [fileStates, setFileStates] = useState<Record<string, FileState>>({});
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -268,36 +279,47 @@ export function DiffViewerPane({
     setPending(null);
   }
 
+  // Who the review goes to: the focused chat, with that chat's own run config (lib/review-recipient.ts).
+  const recipientResult = resolveReviewRecipient({ taskId: task.ID, chats, focusedChatId, connected: client !== null });
+  const recipient = recipientResult.kind === "ready" ? recipientResult.recipient : null;
+
   /**
    * Sends every draft as one prompt (Item 19: "submitted as a single
    * prompt back to the agent"), then clears them so the same review can't
    * be sent twice.
    *
-   * The provider is the daemon's first reported one (the same
-   * daemon-derived list the composer uses -- never a hardcoded client-side
-   * list, per audit-smind-current.md §10's guarantees). Choosing a
-   * provider *per review* belongs to Item 10's composer toolbar; this
-   * surface deliberately doesn't grow a second provider control.
+   * The prompt goes to the *focused chat* (`chatId`), queued when that chat
+   * is mid-run (`whenBusy: "queue"`, the composer's own default), under the
+   * provider/model/permission settings that chat is using -- not "the
+   * first provider the daemon lists" into whichever chat was oldest. Only
+   * a chat that has never run and has no saved run config falls back to
+   * the shared provider catalog's first entry, the composer's default.
    */
   const submitReview = async () => {
-    if (!client || drafts.length === 0) return;
+    if (!client || !recipient || drafts.length === 0) return;
     setSubmittingReview(true);
     setReviewError(null);
     try {
-      let provider: Provider = "claude-native";
-      try {
-        // The shared catalog's cache entry: served from the cache while it is fresh, re-read only if
-        // it was never fetched or was invalidated -- never a second one-off fetch.
-        const result = await queryClient.fetchQuery(providerListQueryOptions(client));
-        if (result?.providers?.[0]) provider = result.providers[0].id;
-      } catch {
-        // provider.list failing shouldn't block the review -- the daemon's
-        // own default is the same fallback the composer uses.
+      let provider: Provider | null = recipient.provider;
+      if (!provider) {
+        provider = "claude-native";
+        try {
+          // The shared catalog's cache entry: served from the cache while it is fresh, re-read only if
+          // it was never fetched or was invalidated -- never a second one-off fetch.
+          const result = await queryClient.fetchQuery(providerListQueryOptions(client));
+          if (result?.providers?.[0]) provider = result.providers[0].id;
+        } catch {
+          // provider.list failing shouldn't block the review -- the daemon's
+          // own default is the same fallback the composer uses.
+        }
       }
       await client.call<RunStartResult>("run.start", {
         taskId: task.ID,
+        chatId: recipient.chatId,
         provider,
         prompt: buildReviewPrompt(drafts),
+        whenBusy: "queue",
+        ...recipientRunParams(recipient),
       });
       clearReviewDrafts(task.ID);
       setPending(null);
@@ -323,6 +345,11 @@ export function DiffViewerPane({
       .finally(() => {
         setCreatingPR(false);
       });
+  };
+
+  const refreshAll = () => {
+    fetchFiles();
+    wholeDiff.refresh();
   };
 
   const stagedCount = files?.filter((f) => f.staged).length ?? 0;
@@ -353,50 +380,53 @@ export function DiffViewerPane({
           </span>
         }
         actions={
-          <>
-            <SegmentedToggle
-              testId="diff-view-toggle"
-              label="Diff view"
-              value={prefs.view}
-              onChange={(view) => updatePrefs({ view })}
-              options={[
-                { value: "by-file", label: "By file" },
-                { value: "whole", label: "Whole diff" },
-              ]}
+          isMobile ? (
+            <DiffHeaderMenu
+              prefs={prefs}
+              onChangePrefs={updatePrefs}
+              onRefresh={refreshAll}
+              onCreatePr={createPR}
+              refreshDisabled={!client || loading}
+              createPrDisabled={!client || creatingPR}
+              creatingPr={creatingPR}
             />
-            <SegmentedToggle
-              testId="diff-format-toggle"
-              label="Diff layout"
-              value={prefs.format}
-              onChange={(format) => updatePrefs({ format })}
-              options={[
-                { value: "line-by-line", label: "Unified" },
-                { value: "side-by-side", label: "Side by side" },
-              ]}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={!client || loading}
-              onClick={() => {
-                fetchFiles();
-                wholeDiff.refresh();
-              }}
-            >
-              Refresh
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={!client || creatingPR}
-              onClick={createPR}
-              data-testid="create-pr-button"
-            >
-              {creatingPR ? "Creating PR…" : "Create PR"}
-            </Button>
-          </>
+          ) : (
+            <>
+              <SegmentedToggle
+                testId="diff-view-toggle"
+                label="Diff view"
+                value={prefs.view}
+                onChange={(view) => updatePrefs({ view })}
+                options={[
+                  { value: "by-file", label: "By file" },
+                  { value: "whole", label: "Whole diff" },
+                ]}
+              />
+              <SegmentedToggle
+                testId="diff-format-toggle"
+                label="Diff layout"
+                value={prefs.format}
+                onChange={(format) => updatePrefs({ format })}
+                options={[
+                  { value: "line-by-line", label: "Unified" },
+                  { value: "side-by-side", label: "Side by side" },
+                ]}
+              />
+              <Button type="button" variant="outline" size="sm" disabled={!client || loading} onClick={refreshAll}>
+                Refresh
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!client || creatingPR}
+                onClick={createPR}
+                data-testid="create-pr-button"
+              >
+                {creatingPR ? "Creating PR…" : "Create PR"}
+              </Button>
+            </>
+          )
         }
       />
 
@@ -410,11 +440,7 @@ export function DiffViewerPane({
               </a>
             </p>
           )}
-          {prError && (
-            <p className="text-ui-base text-destructive" data-testid="pr-error">
-              {prError}
-            </p>
-          )}
+          {prError && <ErrorWithDetails message={prError} prefix="Couldn't create the PR" testId="pr-error" />}
         </div>
       )}
 
@@ -494,7 +520,7 @@ export function DiffViewerPane({
       </div>
 
       {(drafts.length > 0 || reviewError) && (
-        <div className="border-t px-4 py-2" data-testid="review-bar">
+        <div className="relative z-10 border-t bg-background px-4 py-2" data-testid="review-bar">
           {reviewError && (
             <Alert variant="error" description={`Submit failed: ${reviewError}`} className="mb-2" testId="review-error" />
           )}
@@ -502,20 +528,24 @@ export function DiffViewerPane({
             <Button
               type="button"
               size="sm"
-              disabled={!client || drafts.length === 0 || submittingReview}
+              disabled={!client || !recipient || drafts.length === 0 || submittingReview}
               onClick={() => void submitReview()}
               data-testid="submit-review-button"
             >
               {submittingReview ? "Submitting…" : `Submit review (${drafts.length})`}
             </Button>
-            <span className="text-ui-sm text-foreground-muted">
-              Sent as one prompt to the agent, then cleared
+            <span className="min-w-0 truncate text-ui-sm text-foreground-muted" data-testid="review-recipient">
+              {recipient
+                ? `Sent as one prompt to ${recipient.title || "the chat"}, then cleared`
+                : recipientResult.kind === "unavailable" && recipientResult.reason === "no-chats"
+                  ? "No chat to send to"
+                  : "Not connected"}
             </span>
           </div>
         </div>
       )}
 
-      <div className="border-t px-4 py-3" data-testid="commit-bar">
+      <div className="relative z-10 border-t bg-background px-4 py-3" data-testid="commit-bar">
         {lastCommit && (
           <p className="mb-2 text-ui-base text-foreground-subtle" data-testid="commit-success">
             Committed {lastCommit.subject} ({lastCommit.commit.slice(0, 8)}) — {lastCommit.files} file

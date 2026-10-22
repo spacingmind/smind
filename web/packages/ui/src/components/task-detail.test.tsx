@@ -2,6 +2,7 @@ import { act } from "react";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { agentChipLabel, TaskDetailPane } from "@/components/task-detail";
@@ -225,6 +226,29 @@ describe("TaskDetailPane", () => {
 
     expect(attachCall.options?.signal?.aborted).toBe(true);
     expect(client.calls.some((c) => c.method === "run.stop")).toBe(false);
+  });
+
+  it("refreshes the composer's diff-stat source when a run for the task ends", async () => {
+    const client = new FakeWsClient();
+    const listeners = new Set<(payload: unknown) => void>();
+    const events: DaemonEvents = {
+      subscribe: (topic, listener) => {
+        if (topic === "run.status") listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat events={events} />);
+    client.nth("run.list", 0).resolve([]);
+    client.nth("task.diff", 0).resolve({ diff: "" });
+    await flush();
+    expect(client.calls.filter((c) => c.method === "task.diff")).toHaveLength(1);
+
+    await act(async () => {
+      for (const fn of listeners) fn({ taskId: TASK_A.ID, runId: "run-1", status: "done" });
+    });
+    await flush();
+
+    expect(client.calls.filter((c) => c.method === "task.diff")).toHaveLength(2);
   });
 
   it("submits the prompt form via run.start then run.attach, never task.prompt", async () => {

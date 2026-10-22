@@ -90,6 +90,11 @@ type ProviderInfo struct {
 	CredentialKind  ProviderCredentialKind `json:"credentialKind,omitempty"`
 	AccountProvider string                 `json:"accountProvider,omitempty"`
 
+	// Images reports whether the provider takes images natively (ADR-0038
+	// section 3): "yes", "no" (path fallback only) or "unknown" (depends on
+	// what the agent advertises at initialize).
+	Images string `json:"images,omitempty"`
+
 	// Modes is the provider's own permission mode catalog (ADR-0019), in
 	// display order, and DefaultMode the id a run gets when it names none.
 	// For an ACP provider these are the agent's own advertised session
@@ -126,10 +131,10 @@ type ProviderInfo struct {
 // on top.
 func SupportedProviders() []ProviderInfo {
 	providers := []ProviderInfo{
-		{ID: ProviderClaudeNative, Label: "Claude Code", CredentialKind: CredentialKindOAuth, AccountProvider: "anthropic", LiveModeSwitch: true},
-		{ID: ProviderGLM, Label: "GLM", Kind: ProviderKindCLI, SupportsAutoAccept: true, LiveModeSwitch: true},
-		{ID: ProviderKimi, Label: "Kimi", CredentialKind: CredentialKindAPIKey, AccountProvider: "kimi", SupportsAutoAccept: true, LiveModeSwitch: true},
-		{ID: ProviderCodexNative, Label: "Codex", CredentialKind: CredentialKindOAuth, AccountProvider: "openai"},
+		{ID: ProviderClaudeNative, Label: "Claude Code", CredentialKind: CredentialKindOAuth, AccountProvider: "anthropic", LiveModeSwitch: true, Images: "yes"},
+		{ID: ProviderGLM, Label: "GLM", Kind: ProviderKindCLI, SupportsAutoAccept: true, LiveModeSwitch: true, Images: "no"},
+		{ID: ProviderKimi, Label: "Kimi", CredentialKind: CredentialKindAPIKey, AccountProvider: "kimi", SupportsAutoAccept: true, LiveModeSwitch: true, Images: "unknown"},
+		{ID: ProviderCodexNative, Label: "Codex", CredentialKind: CredentialKindOAuth, AccountProvider: "openai", Images: "yes"},
 	}
 	for i := range providers {
 		providers[i].Modes, providers[i].DefaultMode = staticModes(providers[i].ID)

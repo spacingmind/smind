@@ -3,7 +3,10 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { supportsThinking } from "@/lib/thinking-levels";
 import type { WsClientLike } from "@/lib/ws-client";
+import { resendRequests } from "@/lib/attachments/reuse";
 import type {
+  AttachmentMeta,
+  AttachmentRequest,
   PermissionSettings,
   PermissionQuestion,
   PermissionDetail,
@@ -299,6 +302,8 @@ export interface RunEntry {
    * Undefined when the run has no usage row (not an empty object).
    */
   usage?: RunUsage;
+  /** ADR-0038: the prompt's attachments (metadata; an image may carry a local `previewUrl` from the optimistic echo). Undefined when it had none. */
+  attachments?: AttachmentMeta[];
   /** O1 provenance: worktree HEAD at the run's start (undefined when unknown). */
   baseSha?: string;
   /** O1 provenance: worktree HEAD at the terminal state (undefined while running/unknown). */
@@ -352,6 +357,9 @@ interface TimelineState {
     thinkingLevel?: ThinkingLevel,
     whenBusy?: WhenBusy,
     model?: string,
+    /** ADR-0038: base64 attachments sent inline; `previews` is their metadata for the optimistic echo (thumbnails the client already holds). */
+    attachments?: AttachmentRequest[],
+    previews?: AttachmentMeta[],
   ) => Promise<SubmitResult>;
   /**
    * Actually stops runId server-side (run.stop) -- unlike task switch/
@@ -420,8 +428,33 @@ interface Session {
   controller: AbortController;
 }
 
+/**
+ * The daemon's attachment metadata, keeping the local thumbnail URL for ids that had one: the optimistic echo's
+ * object URL stays on screen when the daemon's row replaces its metadata, so the thumbnail never flickers.
+ */
+export function mergeAttachments(local: AttachmentMeta[] | undefined, remote: AttachmentMeta[] | undefined): AttachmentMeta[] | undefined {
+  if (!remote || remote.length === 0) return local;
+  return remote.map((a) => {
+    const previewUrl = local?.find((l) => l.id === a.id)?.previewUrl;
+    return previewUrl ? { ...a, previewUrl } : a;
+  });
+}
+
 function patch(setRuns: Dispatch<SetStateAction<RunEntry[] | null>>, id: string, changes: Partial<RunEntry>): void {
-  setRuns((prev) => (prev ? prev.map((r) => (r.id === id ? { ...r, ...changes } : r)) : prev));
+  setRuns((prev) =>
+    prev
+      ? prev.map((r) => {
+          if (r.id !== id) return r;
+          const merged = { ...r, ...changes };
+          if ("attachments" in changes) {
+            const attachments = mergeAttachments(r.attachments, changes.attachments);
+            if (attachments) merged.attachments = attachments;
+            else delete merged.attachments;
+          }
+          return merged;
+        })
+      : prev,
+  );
 }
 
 function appendEvent(setRuns: Dispatch<SetStateAction<RunEntry[] | null>>, id: string, event: RunLogEvent): void {
@@ -548,6 +581,7 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
             disposition: logs.disposition,
             err: logs.err,
             ...provenanceOf(logs),
+            ...attachmentsOf(logs),
             finishedAt: new Date().toISOString(),
           });
         })
@@ -567,6 +601,11 @@ function provenanceOf(logs: RunLogsResult): Pick<RunEntry, "baseSha" | "headSha"
   };
 }
 
+/** `attachments` only when run.logs carries some, so an older daemon (or a prompt without any) never clears a list-seeded value. */
+function attachmentsOf(logs: RunLogsResult): Pick<RunEntry, "attachments"> | Record<string, never> {
+  return logs.attachments && logs.attachments.length > 0 ? { attachments: logs.attachments } : {};
+}
+
 /** Maps one run.list entry to its timeline entry -- shared by the initial load and the adopt-unknown-runs path below, so the two can't drift. */
 function toRunEntry(r: RunSummary): RunEntry {
   return {
@@ -584,6 +623,7 @@ function toRunEntry(r: RunSummary): RunEntry {
     autoAccept: r.AutoAccept,
     thinkingLevel: r.ThinkingLevel,
     model: r.Model ?? "",
+    ...(r.attachments && r.attachments.length > 0 ? { attachments: r.attachments } : {}),
     ...(r.usage ? { usage: r.usage } : {}),
     ...(r.BaseSHA ? { baseSha: r.BaseSHA } : {}),
     ...(r.HeadSHA ? { headSha: r.HeadSHA } : {}),
@@ -672,6 +712,7 @@ export function useRunTimeline(
                   // undefined.
                   ...(usage !== undefined ? { usage } : {}),
                   ...provenanceOf(logs),
+                  ...attachmentsOf(logs),
                   status: logs.status,
                   stopReason: logs.stopReason,
                   disposition: logs.disposition,
@@ -703,6 +744,8 @@ export function useRunTimeline(
       thinkingLevel?: ThinkingLevel,
       whenBusy: WhenBusy = "queue",
       model?: string,
+      attachments?: AttachmentRequest[],
+      previews?: AttachmentMeta[],
     ) => {
       const session = sessionRef.current;
       if (!client || taskId === null || chatId === null || !session) {
@@ -719,6 +762,7 @@ export function useRunTimeline(
         ...(permission?.autoAccept ? { autoAccept: true } : {}),
         ...(thinkingLevel ? { thinkingLevel } : {}),
         ...(model ? { model } : {}),
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
       });
       // ADR-0021 §2: a queued result has no run yet -- no entry is
       // appended; the server delivers it later and run.status adopts it.
@@ -745,10 +789,16 @@ export function useRunTimeline(
           autoAccept: permission?.autoAccept ?? false,
           thinkingLevel: thinkingLevel ?? "",
           model: model ?? "",
+          ...(previews && previews.length > 0 ? { attachments: previews } : {}),
         };
         setRuns((prev) => (prev ? [...prev, entry] : [entry]));
 
         streamRun(client, session, setRuns, runId);
+      } else if (previews && previews.length > 0) {
+        // run.status adopted the run first (attachments seeded from run.list): graft the local thumbnails onto it.
+        setRuns((prev) =>
+          prev ? prev.map((r) => (r.id === runId ? { ...r, attachments: mergeAttachments(previews, r.attachments) ?? previews } : r)) : prev,
+        );
       }
       return { kind: "started" as const, runId };
     },
@@ -804,6 +854,7 @@ export function useRunTimeline(
                   if (session.cancelled) return;
                   patch(setRuns, r.ID, {
                     items: buildTimeline(logs.events),
+                    ...attachmentsOf(logs),
                     status: logs.status,
                     stopReason: logs.stopReason,
                     disposition: logs.disposition,
@@ -858,7 +909,17 @@ export function useRunTimeline(
     async (run: RunEntry) => {
       const tier = nextThinkingTier(run.thinkingLevel);
       if (!tier) return;
-      await submitPrompt(run.provider, run.prompt, { permissionMode: run.permissionMode, autoAccept: run.autoAccept }, tier);
+      const reuse = resendRequests(run.id, run.attachments);
+      await submitPrompt(
+        run.provider,
+        run.prompt,
+        { permissionMode: run.permissionMode, autoAccept: run.autoAccept },
+        tier,
+        undefined,
+        undefined,
+        reuse.length > 0 ? reuse : undefined,
+        reuse.length > 0 ? run.attachments : undefined,
+      );
     },
     [submitPrompt],
   );

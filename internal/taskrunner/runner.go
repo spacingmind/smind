@@ -2,6 +2,7 @@ package taskrunner
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -31,6 +32,7 @@ type acpBackend interface {
 	SupportsMcpStdio() bool
 	SupportsMcpHttp() bool
 	SupportsMcpSSE() bool
+	SupportsImagePrompt() bool
 	SetSessionConfigOption(ctx context.Context, sessionID, configID, value string) ([]acp.ConfigOption, error)
 	SessionModes(sessionID string) (acp.SessionModeState, bool)
 	SetSessionMode(ctx context.Context, sessionID, modeID string) error
@@ -46,6 +48,7 @@ type acpBackend interface {
 // test-substitution reason as acpBackend.
 type claudeBackend interface {
 	Prompt(ctx context.Context, text string, updates chan<- claudecode.Message) (claudecode.ResultMessage, error)
+	PromptBlocks(ctx context.Context, blocks []claudecode.PromptBlock, updates chan<- claudecode.Message) (claudecode.ResultMessage, error)
 	SetPermissionMode(ctx context.Context, mode string) error
 	SetModel(ctx context.Context, model *string) error
 	Close() error
@@ -59,7 +62,7 @@ type codexBackend interface {
 	Initialize(ctx context.Context) error
 	NewSession(ctx context.Context, cwd string) (string, error)
 	ResumeSession(ctx context.Context, threadID, cwd string) (string, error)
-	Prompt(ctx context.Context, threadID, text string, updates chan<- codex.Update) (string, error)
+	Prompt(ctx context.Context, threadID, text string, updates chan<- codex.Update, opts ...codex.PromptOption) (string, error)
 	ThreadTokenUsage(threadID string) (codex.TokenUsage, bool)
 	ListModels(ctx context.Context) ([]codex.ModelInfo, error)
 	Close() error
@@ -490,6 +493,14 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	if d, _ := DeliveryFrom(ctx); d.Preface != "" && !resumed {
 		promptOpts = append(promptOpts, acp.WithPromptPrefix(d.Preface))
 	}
+	prompt, images := r.attachmentsFor(ctx, provider, prompt, client.SupportsImagePrompt(), events)
+	if len(images) > 0 {
+		blocks := make([]acp.ImageBlock, len(images))
+		for i, img := range images {
+			blocks[i] = acp.ImageBlock{Data: base64.StdEncoding.EncodeToString(img.data), MimeType: img.MimeType}
+		}
+		promptOpts = append(promptOpts, acp.WithPromptImages(blocks))
+	}
 	stopReason, err := client.Prompt(ctx, sessionID, prompt, updates, promptOpts...)
 	<-forwardDone
 	if err != nil {
@@ -770,10 +781,12 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 	if model != "" && model != ClaudeModelDefault {
 		opts = append(opts, claudecode.WithModel(model))
 	}
-	if d, _ := DeliveryFrom(ctx); len(d.AddDirs) > 0 {
-		// ADR-0026 section 5: the read-only learned-skill projection; no
-		// option at all without a delivery keeps the argv unchanged.
-		opts = append(opts, claudecode.WithAddDirs(d.AddDirs...))
+	d, _ := DeliveryFrom(ctx)
+	if dirs := append(append([]string(nil), d.AddDirs...), attachmentAddDirs(ctx, prompt)...); len(dirs) > 0 {
+		// ADR-0026 section 5: the read-only learned-skill projection, plus
+		// the prompt's attachment set (ADR-0038); no option at all without
+		// either keeps the argv unchanged.
+		opts = append(opts, claudecode.WithAddDirs(dirs...))
 	}
 	mode := perm.Mode
 	if mode == "" {
@@ -865,7 +878,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 		}
 	}()
 
-	result, err := client.Prompt(ctx, prompt, updates)
+	result, err := r.claudePrompt(ctx, client, prompt, updates, events)
 	<-forwardDone
 	if err != nil {
 		return fmt.Errorf("taskrunner: claude code prompt: %w", err)
@@ -1063,7 +1076,16 @@ func (r *Runner) runCodexNative(ctx context.Context, chatID, workspaceID int64, 
 		}
 	}()
 
-	stopReason, err := client.Prompt(ctx, threadID, prompt, updates)
+	prompt, images := r.attachmentsFor(ctx, ProviderCodexNative, prompt, true, events)
+	var codexOpts []codex.PromptOption
+	if len(images) > 0 {
+		paths := make([]string, len(images))
+		for i, img := range images {
+			paths[i] = img.Path
+		}
+		codexOpts = append(codexOpts, codex.WithLocalImages(paths))
+	}
+	stopReason, err := client.Prompt(ctx, threadID, prompt, updates, codexOpts...)
 	<-forwardDone
 	if err != nil {
 		return fmt.Errorf("taskrunner: codex prompt: %w", err)

@@ -119,7 +119,8 @@ CREATE TABLE IF NOT EXISTS runs (
     dirty INTEGER,
     purpose TEXT NOT NULL DEFAULT 'user', -- 'user' | 'reflect' | 'curate' | 'probe' (ADR-0026, ADR-0037)
     origin TEXT NOT NULL DEFAULT '', -- who authored the prompt: human|orchestrator|agent; '' = unknown
-    interrupt INTEGER NOT NULL DEFAULT 0 -- 1 = delivered as a mid-run interrupt
+    interrupt INTEGER NOT NULL DEFAULT 0, -- 1 = delivered as a mid-run interrupt
+    attachments TEXT NOT NULL DEFAULT '' -- attach.EncodeSet of the prompt's attachments (ADR-0038); '' = none
 );
 
 CREATE TABLE IF NOT EXISTS run_events (
@@ -241,6 +242,7 @@ CREATE TABLE IF NOT EXISTS chat_queue (
     run_id TEXT,                           -- set on delivery
     cancel_reason TEXT NOT NULL DEFAULT '',
     cancel_kind TEXT NOT NULL DEFAULT '',  -- 'user' | 'auto' once cancelled
+    attachments TEXT NOT NULL DEFAULT '',  -- attach.EncodeSet of the prompt's attachments (ADR-0038)
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );

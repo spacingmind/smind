@@ -6,7 +6,7 @@ Accepted (2026-10-12, chosen by the user: "replace it outright"). Amends
 ADR-0013's app-managed-daemon host matrix: the **Windows + WSL2** host is
 removed and **Windows native** becomes the Windows host. Depends on ADR-0029
 (the native daemon runtime) and on the Windows release assets of
-`docs/plans/active/windows-daemon-runtime-parity.md` (AC9). Implementation
+`docs/plans/completed/windows-daemon-runtime-parity.md` (AC9). Implementation
 plan: `docs/plans/completed/desktop-windows-native-daemon.md`.
 
 ## Decision
@@ -90,7 +90,7 @@ expected to work (ConPTY's minimum) but only Windows 11 has been validated.
 ## Amendment (2026-10-13): the installer bundles `smind.exe`
 
 Chosen by the user: "thống nhất theo macOS" (make Windows match macOS).
-Implementation plan: `docs/plans/active/windows-bundled-daemon.md`.
+Implementation plan: `docs/plans/completed/windows-bundled-daemon.md`.
 
 **Install source is the bundled sidecar.** `tauri.windows.conf.json` lists
 `binaries/smind` as an `externalBin` (Tauri stages it as
