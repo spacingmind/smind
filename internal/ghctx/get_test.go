@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spacingmind/smind/internal/forge"
 )
 
 // stubRunner is a Runner that records every invocation and answers from a
@@ -174,10 +176,10 @@ func TestGithubAttach_Timeout(t *testing.T) {
 	}
 }
 
-// Compile-time: Snapshot JSON round-trip sanity for the fields handlers
+// Compile-time: forge.Snapshot JSON round-trip sanity for the fields handlers
 // serialize.
 func TestSnapshotJSONFields(t *testing.T) {
-	b, err := json.Marshal(Snapshot{Number: 1, Repo: "o/r", Title: "t", URL: "u", State: "open", BaseRef: "main", HeadRef: "fix", Body: "b"})
+	b, err := json.Marshal(forge.Snapshot{Number: 1, Repo: "o/r", Title: "t", URL: "u", State: "open", BaseRef: "main", HeadRef: "fix", Body: "b"})
 	if err != nil {
 		t.Fatal(err)
 	}

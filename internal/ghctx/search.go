@@ -40,9 +40,9 @@ var ghURLRe = regexp.MustCompile(`^https://github\.com/([A-Za-z0-9_.-]{1,100})/(
 // by query when non-empty. A query that is a bare/#-prefixed number or a
 // github.com pull/issues URL resolves that one item instead of listing:
 // an empty Items (not an error) if gh says it doesn't exist.
-func (c *Client) search(ctx context.Context, dir, kind, query string, limit int) (SearchResult, error) {
+func (c *Client) search(ctx context.Context, dir, kind, query string, limit int) (forge.SearchResult, error) {
 	if kind != "pr" && kind != "issue" {
-		return SearchResult{}, fmt.Errorf("invalid arguments")
+		return forge.SearchResult{}, fmt.Errorf("invalid arguments")
 	}
 	if limit <= 0 || limit > 30 {
 		limit = 30
@@ -58,7 +58,7 @@ func (c *Client) search(ctx context.Context, dir, kind, query string, limit int)
 
 	repo, err := c.repoOf(ctx, dir)
 	if err != nil {
-		return SearchResult{}, err
+		return forge.SearchResult{}, err
 	}
 	fields := "number,title,state,author,url,updatedAt,headRefName"
 	if kind == "issue" {
@@ -70,15 +70,15 @@ func (c *Client) search(ctx context.Context, dir, kind, query string, limit int)
 	}
 	out, err := c.run(ctx, dir, args...)
 	if err != nil {
-		return SearchResult{}, c.mapRunError(ctx, err)
+		return forge.SearchResult{}, c.mapRunError(ctx, err)
 	}
 	var rows []ghItemJSON
 	if err := json.Unmarshal([]byte(out), &rows); err != nil {
-		return SearchResult{}, fmt.Errorf("parse gh %s list output: %w", kind, err)
+		return forge.SearchResult{}, fmt.Errorf("parse gh %s list output: %w", kind, err)
 	}
-	items := make([]Item, len(rows))
+	items := make([]forge.Item, len(rows))
 	for i, r := range rows {
-		items[i] = Item{
+		items[i] = forge.Item{
 			Number:    r.Number,
 			Title:     r.Title,
 			State:     strings.ToLower(r.State),
@@ -88,29 +88,29 @@ func (c *Client) search(ctx context.Context, dir, kind, query string, limit int)
 			HeadRef:   r.HeadRefName,
 		}
 	}
-	return SearchResult{Repo: repo, Items: items}, nil
+	return forge.SearchResult{Repo: repo, Items: items}, nil
 }
 
 // searchOne resolves a number/URL query to a one-item result. A gh
 // not-found surfaces as empty Items (the attach UI's "nothing to show"),
 // not an error.
-func (c *Client) searchOne(ctx context.Context, dir, kind string, number int, repo string) (SearchResult, error) {
+func (c *Client) searchOne(ctx context.Context, dir, kind string, number int, repo string) (forge.SearchResult, error) {
 	snap, err := c.Get(ctx, dir, kind, number, repo)
 	if err != nil {
 		var fe *forge.Error
 		if errors.As(err, &fe) && fe.Code == forge.CodeNotFound {
-			return SearchResult{Repo: repo}, nil
+			return forge.SearchResult{Repo: repo}, nil
 		}
-		return SearchResult{}, err
+		return forge.SearchResult{}, err
 	}
-	item := Item{
+	item := forge.Item{
 		Number:  snap.Number,
 		Title:   snap.Title,
 		State:   snap.State,
 		URL:     snap.URL,
 		HeadRef: snap.HeadRef,
 	}
-	return SearchResult{Repo: snap.Repo, Items: []Item{item}}, nil
+	return forge.SearchResult{Repo: snap.Repo, Items: []forge.Item{item}}, nil
 }
 
 // resolveQuery detects a bare-number ("123", "#123") or github.com

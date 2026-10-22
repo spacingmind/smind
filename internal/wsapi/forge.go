@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/ghctx"
 	"github.com/spacingmind/smind/internal/workspace"
 )
@@ -21,7 +22,7 @@ func (a *API) SetGithubClient(c *ghctx.Client) { a.github.c = c }
 // with the forge that answered.
 type forgeSearchResult struct {
 	Forge string `json:"forge"`
-	ghctx.SearchResult
+	forge.SearchResult
 }
 
 // handleForgeSearch serves forge.search (ADR-0038 §4, forge-neutral wire names

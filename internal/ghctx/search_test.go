@@ -10,7 +10,7 @@ import (
 )
 
 // TestGithubSearch_ArgvAndJSONFields asserts the pr/issue list argv and
-// that gh's JSON fields land on Item (author is flattened from {login},
+// that gh's JSON fields land on forge.Item (author is flattened from {login},
 // state lowercased).
 func TestGithubSearch_ArgvAndJSONFields(t *testing.T) {
 	s := &stubRunner{fn: func(call stubCall) (string, error) {

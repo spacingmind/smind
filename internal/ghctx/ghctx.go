@@ -100,13 +100,6 @@ func Available() bool {
 	return err == nil
 }
 
-// aliases for ADR-0038 PR 5b; delete in the poller PR.
-type (
-	Snapshot     = forge.Snapshot
-	Item         = forge.Item
-	SearchResult = forge.SearchResult
-)
-
 var _ forge.Provider = (*Client)(nil)
 
 // Name is the forge name this client serves.

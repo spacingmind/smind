@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/spacingmind/smind/internal/forge"
 )
 
 // repoRe bounds an explicit --repo argument: owner/repo of GitHub-legal
@@ -40,7 +42,7 @@ type ghViewJSON struct {
 // Get fetches kind's ("pr"|"issue") snapshot for number, running gh in
 // dir. repo "" infers the repo from dir via `gh repo view`; a non-empty
 // repo is passed as --repo and must match repoRe.
-func (c *Client) get(ctx context.Context, dir, kind string, number int, repo string) (*Snapshot, error) {
+func (c *Client) get(ctx context.Context, dir, kind string, number int, repo string) (*forge.Snapshot, error) {
 	if number <= 0 || (repo != "" && !repoRe.MatchString(repo)) || (kind != "pr" && kind != "issue") {
 		return nil, fmt.Errorf("invalid arguments")
 	}
@@ -68,7 +70,7 @@ func (c *Client) get(ctx context.Context, dir, kind string, number int, repo str
 	if err := json.Unmarshal([]byte(out), &v); err != nil {
 		return nil, fmt.Errorf("parse gh %s view %d output: %w", kind, number, err)
 	}
-	return &Snapshot{
+	return &forge.Snapshot{
 		Number:  v.Number,
 		Repo:    repo,
 		Title:   v.Title,
