@@ -301,3 +301,21 @@ func TestTaskWait_ErrorRun(t *testing.T) {
 		t.Fatalf("task runs: exit %d, out %q, stderr %q, want the cause in the STATUS cell", code, out, stderr)
 	}
 }
+
+// TestRenderWaitSummary_ErrorRunDoesNotRepeatTheAgentErrorLine: the agent's
+// "[error] ..." closing message is not printed as the final text of a failed
+// run, since the error line already says it; other final text is kept.
+func TestRenderWaitSummary_ErrorRunDoesNotRepeatTheAgentErrorLine(t *testing.T) {
+	row := runSummaryRow{ID: "r", Status: "error", Err: "429 Usage limit reached (taskrunner: ...)", StartedAt: time.Now()}
+	got := renderWaitSummary(row, "\n\n[error] 429 Usage limit reached", time.Now())
+	if strings.Count(got, "429 Usage limit reached") != 1 || !strings.Contains(got, "\nerror: 429 Usage limit reached") {
+		t.Fatalf("summary = %q, want the cause once, on the error line", got)
+	}
+	if kept := renderWaitSummary(row, "I could not finish: the build failed", time.Now()); !strings.Contains(kept, "I could not finish: the build failed") {
+		t.Fatalf("summary = %q, want ordinary final text of a failed run kept", kept)
+	}
+	done := runSummaryRow{ID: "r", Status: "done", StartedAt: time.Now()}
+	if got := renderWaitSummary(done, "[error] is the literal output I was asked for", time.Now()); !strings.Contains(got, "[error] is the literal output") {
+		t.Fatalf("summary = %q, want a done run's text untouched", got)
+	}
+}
