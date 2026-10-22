@@ -11,7 +11,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useCancelProbe, useProbe, useProbeEstimate, useStartProbe } from "@/hooks/use-learning";
 import { useNow } from "@/hooks/use-now";
 import { Icons } from "@/lib/icons";
-import { ARM_LABELS, elapsedSince, formatCostUSD, formatDurationMs, formatEstimateUSD, isProbeActive } from "@/lib/probe-format";
+import { ARM_LABELS, elapsedSince, formatDurationMs, formatMoney, formatSpendLine, isProbeActive, OVER_ESTIMATE_HINT } from "@/lib/probe-format";
 import type { ProbeEstimate, ProbeView } from "@/lib/probe-types";
 
 type RunMode = "full" | "quick";
@@ -58,7 +58,7 @@ function ProbeStart({ id, workspaceId, again, quick, onQuick }: { id: number; wo
           onClick={() => start.mutate({ id, workspaceId, quick })}
         >
           {start.isPending && <Icons.spinner className="animate-spin" aria-hidden />}
-          {e.eligible ? `${label} (about ${formatEstimateUSD(e.estUSD)}, about ${e.expectedMinutes} min)` : label}
+          {e.eligible ? `${label} (about ${formatMoney(e.estUSD)}, about ${e.expectedMinutes} min)` : label}
         </Button>
       </div>
       {e.reasons.length > 0 && (
@@ -78,13 +78,14 @@ function ProbeStart({ id, workspaceId, again, quick, onQuick }: { id: number; wo
 function ProbeRunning({ probe, updatedAt, onCancel, cancelling }: { probe: ProbeView; updatedAt: number; onCancel: () => void; cancelling: boolean }) {
   // The daemon reports elapsed time only when the query refetches (events, 2 s safety net): tick locally in between.
   const now = useNow(1000);
+  const spend = formatSpendLine(probe.costUSD, probe.estUSD);
   const arms = probe.arms.map((a) => (a.status === "running" ? { ...a, elapsedMs: elapsedSince(a.elapsedMs, updatedAt, now) } : a));
   return (
     <div className="flex flex-col gap-2" data-testid="probe-running" aria-live="polite">
       <ProbeArmRows arms={arms} workspaceId={probe.workspaceId} />
       <div className="flex flex-wrap items-center gap-3">
-        <span className="text-ui-sm text-foreground-muted">
-          {formatDurationMs(elapsedSince(probe.elapsedMs, updatedAt, now))} elapsed · {formatCostUSD(probe.costUSD)} of about {formatEstimateUSD(probe.estUSD)}
+        <span className="text-ui-sm text-foreground-muted" data-testid="probe-spend" title={spend.over ? OVER_ESTIMATE_HINT : undefined}>
+          {formatDurationMs(elapsedSince(probe.elapsedMs, updatedAt, now))} elapsed · {spend.text}
         </span>
         <Button type="button" size="sm" variant="ghost" disabled={cancelling} data-testid="probe-cancel" onClick={onCancel}>
           Cancel probe
@@ -187,7 +188,7 @@ export function ProbeCard({ id, workspaceId }: { id: number; workspaceId: number
     } else if (p.status === "cancelled") {
       body = (
         <div className="flex flex-col gap-3" data-testid="probe-cancelled">
-          <Quiet>Probe cancelled after {formatDurationMs(p.elapsedMs)}; {formatCostUSD(p.costUSD)} was spent. No verdict.</Quiet>
+          <Quiet>Probe cancelled after {formatDurationMs(p.elapsedMs)}; {formatMoney(p.costUSD)} was spent. No verdict.</Quiet>
           {rerun}
         </div>
       );
