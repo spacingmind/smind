@@ -634,6 +634,49 @@ func runPromptScript(promptMsg message, cwd string) {
 		return
 	}
 
+	// "markdown-permission": what the mobile transcript smoke needs on one
+	// run -- markdown streamed as several chunks (a heading, bold, inline
+	// code, a list, a fenced block), a tool call, then a permission request
+	// that blocks the run until answered; the answer is echoed as the final
+	// chunk ("chose:<optionId>").
+	if scenario == "markdown-permission" {
+		for _, chunk := range []string{"## Plan\n\nI will **fix** the `retry` loop:\n\n", "- read the test\n- patch the backoff\n\n", "```go\nbackoff = base\n```\n"} {
+			sessionUpdate(chunk)
+		}
+		notify("session/update", map[string]any{
+			"sessionId": sessionID,
+			"update": map[string]any{
+				"sessionUpdate": "tool_call",
+				"toolCallId":    "tc-md-1",
+				"title":         "retry_test.go",
+				"kind":          "read",
+				"status":        "completed",
+			},
+		})
+		permResp := call("session/request_permission", map[string]any{
+			"sessionId": sessionID,
+			"toolCall":  map[string]any{"toolCallId": "tc-md-2", "title": "Run go test ./..."},
+			"options": []map[string]any{
+				{"optionId": "allow-1", "name": "Allow", "kind": "allow_once"},
+				{"optionId": "allow-2", "name": "Always allow", "kind": "allow_always"},
+				{"optionId": "deny-1", "name": "Deny", "kind": "reject_once"},
+			},
+		})
+		optionID := ""
+		if permResp.Error == nil {
+			var result struct {
+				Outcome struct {
+					OptionID string `json:"optionId"`
+				} `json:"outcome"`
+			}
+			_ = json.Unmarshal(permResp.Result, &result)
+			optionID = result.Outcome.OptionID
+		}
+		sessionUpdate("chose:" + optionID)
+		respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+
 	if scenario == "structured" || scenario == "structured-permission" {
 		if scenario == "structured-permission" {
 			// Same as "structured" but behind a permission request, with a
