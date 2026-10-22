@@ -7,7 +7,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { PaletteProvider, useRegisteredCommands } from "@/palette/palette-provider";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { FakeWsClient } from "@/test/fake-ws-client";
-import { openHoverCard, revealWorkspaceActions, taskTrigger } from "@/test/sidebar-helpers";
+import { gitItem, openHoverCard, revealWorkspaceActions, taskTrigger } from "@/test/sidebar-helpers";
 import type { AttentionReason, TaskAttention } from "@/hooks/use-task-attention";
 import type { LocalPathActions } from "@/hooks/use-local-path-actions";
 import type { AgentProfile, Space, Task, Workspace } from "@/lib/types";
@@ -499,8 +499,8 @@ describe("AppSidebar", () => {
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
       await screen.findByText("Fix the bug");
 
-      client.nth("task.stats", 0).resolve({
-        stats: [{ taskId: TASK.ID, branch: "feat/fix-bug", filesChanged: 2, insertions: 5, deletions: 1 }],
+      client.nth("task.gitList", 0).resolve({
+        items: [gitItem(TASK.ID, "feat/fix-bug", 2, 5, 1)],
       });
       await flush();
 
@@ -517,7 +517,7 @@ describe("AppSidebar", () => {
 
       const card = await screen.findByTestId("task-hover-card");
       expect(within(card).getByText("feat/fix-bug")).toBeInTheDocument();
-      expect(within(card).getByText(/2 files changed/)).toBeInTheDocument();
+      expect(within(card).getByTestId("git-tokens")).toHaveTextContent("+5 −1");
       expect(within(card).getByTestId("task-hover-card-last-activity")).toBeInTheDocument();
     });
   });
@@ -866,13 +866,13 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     expect(screen.getByTestId("sidebar-workspace-row").querySelector('[data-testid="row-aggregate"]')).not.toBeInTheDocument();
   });
 
-  it("a task row shows its diff stat on the row and its branch in the hover card once task.stats reports them", async () => {
+  it("a task row shows its diff stat on the row and its branch in the hover card once task.gitList reports them", async () => {
     const client = renderSidebar();
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
     await screen.findByText("Fix the bug");
 
-    client.nth("task.stats", 0).resolve({
-      stats: [{ taskId: TASK.ID, branch: "feat/fix-bug", filesChanged: 3, insertions: 12, deletions: 4 }],
+    client.nth("task.gitList", 0).resolve({
+      items: [gitItem(TASK.ID, "feat/fix-bug", 3, 12, 4)],
     });
     await flush();
 
@@ -886,12 +886,12 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     expect(screen.getByTestId("sidebar-task-row")).toHaveAccessibleName(/branch feat\/fix-bug/);
   });
 
-  it("a task the daemon reports no stat for shows no diff stat, and its lifecycle status is in the hover card, never a fabricated zero", async () => {
+  it("a task the daemon reports no git state for shows no diff stat, and its lifecycle status is in the hover card, never a fabricated zero", async () => {
     const client = renderSidebar();
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
     await screen.findByText("Fix the bug");
 
-    client.nth("task.stats", 0).resolve({ stats: [] });
+    client.nth("task.gitList", 0).resolve({ items: [] });
     await flush();
 
     expect(screen.queryByTestId("sidebar-task-diffstat")).not.toBeInTheDocument();
@@ -899,13 +899,82 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     expect(within(card).getByTestId("sidebar-task-status")).toHaveTextContent(TASK.Status);
   });
 
+  it("it shows the diff stat from task.gitList and nothing when diff is absent", async () => {
+    const client = renderSidebar();
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    await screen.findByText("Fix the bug");
+
+    client.nth("task.gitList", 0).resolve({ items: [{ ...gitItem(TASK.ID, "feat/fix-bug", 1, 8, 2), diff: undefined }] });
+    await flush();
+    expect(screen.queryByTestId("sidebar-task-diffstat")).not.toBeInTheDocument();
+
+    act(() => client.pushNotification("task.git", { taskId: TASK.ID, git: gitItem(TASK.ID, "feat/fix-bug", 1, 8, 2) }));
+    await flush();
+    expect(screen.getByTestId("sidebar-task-diffstat")).toHaveTextContent("+8 -2");
+  });
+
+  it("the hover card shows `branch → base` and the git tokens", async () => {
+    const client = renderSidebar();
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    await screen.findByText("Fix the bug");
+
+    client.nth("task.gitList", 0).resolve({
+      items: [gitItem(TASK.ID, "feat/fix-bug", 3, 12, 4, { base: { ref: "develop", known: true } })],
+    });
+    await flush();
+
+    const card = await openHoverCard(TASK.ID);
+    expect(within(card).getByTestId("sidebar-task-branch")).toHaveTextContent("feat/fix-bug → develop");
+    expect(within(card).getByTestId("git-tokens")).toHaveTextContent("+12");
+  });
+
+  it("sidebar-git-glyph mount: it renders at most one glyph and one dot in a row", async () => {
+    const client = renderSidebar();
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    await screen.findByText("Fix the bug");
+
+    client.nth("task.gitList", 0).resolve({
+      items: [
+        gitItem(TASK.ID, "feat/fix-bug", 1, 1, 0, {
+          pr: {
+            number: 7,
+            repo: "o/r",
+            url: "https://github.com/o/r/pull/7",
+            title: "t",
+            state: "open",
+            draft: false,
+            headRef: "h",
+            headSha: "s",
+            baseRef: "develop",
+            fromFork: false,
+            mergeable: "mergeable",
+            reviewDecision: "none",
+            fetchedAt: "2026-10-22T00:00:00Z",
+            stale: "",
+            refreshAvailableAt: "",
+          },
+          base: { ref: "develop", known: true },
+          conflict: { state: "conflicts", files: ["a"], checkedAt: "2026-10-22T00:00:00Z" },
+          origin: { published: false },
+          commits: { sinceFork: 2 },
+        }),
+      ],
+    });
+    await flush();
+
+    const row = screen.getByTestId("sidebar-task-row");
+    expect(within(row).getAllByTestId("sidebar-git-glyph")).toHaveLength(1);
+    expect(within(row).getAllByRole("img", { name: /Pull request #7/ })).toHaveLength(1);
+    expect(within(row).getAllByTestId("sidebar-git-dot")).toHaveLength(1);
+  });
+
   it("a clean task shows no diff stat -- zero changed files is not a count worth printing", async () => {
     const client = renderSidebar();
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
     await screen.findByText("Fix the bug");
 
-    client.nth("task.stats", 0).resolve({
-      stats: [{ taskId: TASK.ID, branch: "feat/clean", filesChanged: 0, insertions: 0, deletions: 0 }],
+    client.nth("task.gitList", 0).resolve({
+      items: [gitItem(TASK.ID, "feat/clean", 0, 0, 0)],
     });
     await flush();
 
@@ -920,8 +989,8 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     const itemBefore = (await screen.findByTestId("sidebar-task-item")).className;
     expect(screen.queryByTestId("sidebar-task-meta")).not.toBeInTheDocument();
 
-    client.nth("task.stats", 0).resolve({
-      stats: [{ taskId: TASK.ID, branch: "feat/fix-bug", filesChanged: 3, insertions: 12, deletions: 4 }],
+    client.nth("task.gitList", 0).resolve({
+      items: [gitItem(TASK.ID, "feat/fix-bug", 3, 12, 4)],
     });
     await flush();
 

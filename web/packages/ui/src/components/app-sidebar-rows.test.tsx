@@ -13,7 +13,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { usePinnedTasksStore } from "@/stores/pinned-tasks-store";
 import { useCollapsedNodesStore } from "@/stores/collapsed-nodes-store";
-import { hoverTask, keyboardFocus, openHoverCard, revealSpaceActions, revealWorkspaceActions, taskItem, taskTrigger, unhoverTask } from "@/test/sidebar-helpers";
+import { gitItem, hoverTask, keyboardFocus, openHoverCard, revealSpaceActions, revealWorkspaceActions, taskItem, taskTrigger, unhoverTask } from "@/test/sidebar-helpers";
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
 import type { Space, Task, Workspace } from "@/lib/types";
 
@@ -375,10 +375,10 @@ describe("task row, single line (S4)", () => {
 
   it("shows +n -n only when files changed", async () => {
     const { client } = await mountSidebar([makeTask(1, "Dirty"), makeTask(2, "Clean")]);
-    client.nth("task.stats", 0).resolve({
-      stats: [
-        { taskId: 1, branch: "b1", filesChanged: 2, insertions: 7, deletions: 3 },
-        { taskId: 2, branch: "b2", filesChanged: 0, insertions: 0, deletions: 0 },
+    client.nth("task.gitList", 0).resolve({
+      items: [
+        gitItem(1, "b1", 2, 7, 3),
+        gitItem(2, "b2", 0, 0, 0),
       ],
     });
     await flush();

@@ -1,14 +1,15 @@
 // AH-AC3: the header title's hover/focus card. PR-H11: the header ⋯ menu's
 // tree actions.
-import { act } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, type ReactNode } from "react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { HeaderTaskMenu, HeaderTaskTitle } from "@/components/app-header-task";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { TaskTreeResult } from "@/lib/task-lineage";
-import type { Task } from "@/lib/types";
+import type { Task, TaskGit, TaskGitPr } from "@/lib/types";
 
 const TASK: Task = {
   ID: 7,
@@ -38,6 +39,74 @@ describe("HeaderTaskTitle", () => {
     expect(screen.getByTestId("app-header-task-worktree")).toHaveTextContent("/home/dev/repo-wt");
     expect(screen.getByTestId("app-header-task-status")).toHaveTextContent(/active/i);
     expect(screen.getByTestId("app-header-task-activity").textContent).not.toBe("");
+    fireEvent.blur(screen.getByTestId("app-header-title"));
+  });
+});
+
+const PR: TaskGitPr = {
+  number: 42,
+  repo: "o/r",
+  url: "https://github.com/o/r/pull/42",
+  title: "Fix the bug",
+  state: "open",
+  draft: false,
+  headRef: "fix-bug",
+  headSha: "abc",
+  baseRef: "develop",
+  fromFork: false,
+  mergeable: "mergeable",
+  reviewDecision: "none",
+  fetchedAt: "2026-10-22T00:00:00Z",
+  stale: "",
+  refreshAvailableAt: "",
+};
+
+function taskGit(over: Partial<TaskGit> = {}): TaskGit {
+  return { taskId: TASK.ID, untrusted: false, computedAt: "2026-10-22T00:00:00Z", ...over };
+}
+
+/** Gives renderWithClientProp a client to find (HeaderTaskTitle takes none as a prop). */
+function WithClient({ children }: { client: FakeWsClient; children: ReactNode }) {
+  return <>{children}</>;
+}
+
+describe("HeaderTaskTitle git state (ADR-0039)", () => {
+  it("it renders the PR chip when the task has a PR and nothing otherwise", async () => {
+    const client = new FakeWsClient();
+    render(
+      <WithClient client={client}>
+        <HeaderTaskTitle task={TASK} />
+      </WithClient>,
+    );
+    await act(async () => client.nth("task.git", 0).resolve(taskGit()));
+    expect(screen.queryByTestId("pr-chip")).not.toBeInTheDocument();
+
+    act(() => client.pushNotification("task.git", { taskId: TASK.ID, git: taskGit({ pr: PR }) }));
+    await waitFor(() => expect(screen.getByTestId("pr-chip")).toHaveTextContent("#42"));
+  });
+
+  it("the hover card shows `branch → base` and the git tokens", async () => {
+    const client = new FakeWsClient();
+    render(
+      <WithClient client={client}>
+        <HeaderTaskTitle task={TASK} />
+      </WithClient>,
+    );
+    await act(async () =>
+      client.nth("task.git", 0).resolve(
+        taskGit({
+          branch: { name: "fix-bug", owned: true },
+          base: { ref: "develop", known: true },
+          diff: { files: 1, insertions: 4, deletions: 2 },
+        }),
+      ),
+    );
+    await act(async () => {
+      screen.getByTestId("app-header-title").focus();
+    });
+    await screen.findByTestId("app-header-task-card");
+    expect(screen.getByTestId("app-header-task-branch")).toHaveTextContent("fix-bug → develop");
+    expect(screen.getByTestId("git-tokens")).toHaveTextContent("+4");
     fireEvent.blur(screen.getByTestId("app-header-title"));
   });
 });

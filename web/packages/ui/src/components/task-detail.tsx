@@ -33,7 +33,8 @@ import { useTaskLineage } from "@/hooks/use-task-lineage";
 import { useChatQueue } from "@/hooks/use-chat-queue";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
-import { useTaskDiff } from "@/hooks/use-task-diff";
+import { useTaskGit } from "@/hooks/use-task-git";
+import { useTaskGitFocus } from "@/lib/task-git-focus";
 import { effectiveMode, providerModes, supportsAutoAccept, supportsLiveModeSwitch } from "@/lib/permission-modes";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import type { AgentProfile, Chat, Provider, Task } from "@/lib/types";
@@ -140,13 +141,11 @@ export function TaskDetailPane({
   // the composer's first onChange fires (its own mount effect, near-
   // immediate).
   const [runConfigState, setRunConfigState] = useState<RunConfigState | null>(null);
-  // The composer's diff-stat pill (web-ui-dogfood-polish Item 5) reads the
-  // same task.diff this is -- the same hook the diff pane itself uses, so
-  // the pill and the pane's header stat can't disagree and no extra RPC
-  // is introduced. It stays mounted even when the Diff tab isn't (the
-  // fetch is cheap), and it takes the same `events` so a run ending
-  // refreshes the pill live instead of leaving it stale until a reload.
-  const wholeDiff = useTaskDiff(client, task, events);
+  // The composer's chips (diff stat, PR, conflicts) read the task's shared git state (ADR-0039); the Diff
+  // pane keeps its own task.diff query. This is the one place the daemon is asked to keep the open task's
+  // git state fresh (task.gitFocus): TaskDetail is mounted exactly while a task is open.
+  const git = useTaskGit(task.ID);
+  useTaskGitFocus(task.ID);
 
   // Every run currently holding an unanswered permission request -- in
   // practice at most one (a task has one active run at a time), but this
@@ -485,7 +484,7 @@ export function TaskDetailPane({
         boundProvider={chat.Provider as Provider | null}
         connected={client !== null && connectionStatus === "connected"}
         runningRunId={runningRunId}
-        diffStat={wholeDiff.stat}
+        git={git}
         onOpenDiff={onOpenDiffTab}
         queuedItems={queue.items}
         onCancelQueued={queue.cancel}

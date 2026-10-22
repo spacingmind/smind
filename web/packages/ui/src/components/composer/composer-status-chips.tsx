@@ -1,6 +1,7 @@
-import { Icons } from "@/lib/icons";
-
+import { PrChip } from "@/components/git/pr-chip";
 import { type DiffStat } from "@/lib/diff-stat";
+import { Icons } from "@/lib/icons";
+import type { TaskGit } from "@/lib/types";
 
 const CHIP_CLASS =
   "flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-input-border bg-surface px-3 text-ui-sm text-foreground-muted";
@@ -15,9 +16,8 @@ export function formatCompactCount(n: number): string {
 /**
  * The task's diff stat as a compact chip above the input card
  * (web-ui-dogfood-polish Item 5): additions green, deletions red, and a
- * click jumps to the task's Diff tab. The numbers are the same stat the
- * diff pane renders (hooks/use-task-diff.ts), so nothing new is fetched
- * here -- the parent hands the already-derived stat in.
+ * click jumps to the task's Diff tab. The numbers are the task's
+ * `TaskGit.diff` (ADR-0039), handed in by the parent.
  */
 function DiffStatChip({ stat, onOpenDiff }: { stat: DiffStat; onOpenDiff: () => void }) {
   return (
@@ -29,8 +29,23 @@ function DiffStatChip({ stat, onOpenDiff }: { stat: DiffStat; onOpenDiff: () => 
       className={`${CHIP_CLASS} transition-colors hover:bg-hover hover:text-foreground`}
     >
       <Icons.diff aria-hidden className="size-3 opacity-70" />
-      <span className="font-medium text-success">+{formatCompactCount(stat.additions)}</span>
-      <span className="font-medium text-destructive">−{formatCompactCount(stat.deletions)}</span>
+      <span className={`font-medium text-success${stat.additions === 0 ? " opacity-50" : ""}`}>+{formatCompactCount(stat.additions)}</span>
+      <span className={`font-medium text-destructive${stat.deletions === 0 ? " opacity-50" : ""}`}>−{formatCompactCount(stat.deletions)}</span>
+    </button>
+  );
+}
+
+/** The task's branch cannot merge cleanly into its base (ADR-0039): destructive text, click opens the Diff tab. */
+function ConflictsChip({ base, onOpenDiff }: { base: string; onOpenDiff: () => void }) {
+  return (
+    <button
+      type="button"
+      data-testid="composer-conflicts-chip"
+      onClick={onOpenDiff}
+      className={`${CHIP_CLASS} text-destructive transition-colors hover:bg-hover`}
+    >
+      <Icons.warning aria-hidden className="size-3" />
+      <span>Conflicts with {base}</span>
     </button>
   );
 }
@@ -60,14 +75,14 @@ function ConcurrencyChip({ chat, onJump }: { chat: { id: number; title: string }
 
 /**
  * Paseo's chip row above the composer: a "Working" chip while the chat has a
- * live run, plus the diff-stat chip when the task has changes and there is a
- * Diff tab to jump to. Only real data -- the run state is the same
- * `runningRunId` that drives Stop, the stat is use-task-diff's -- and the
- * row renders nothing when neither applies.
+ * live run, the diff-stat chip when the task has changes and there is a
+ * Diff tab to jump to, the PR chip, and a conflicts chip. Only real data --
+ * the run state is the same `runningRunId` that drives Stop, the rest is
+ * the task's `TaskGit` -- and the row renders nothing when none applies.
  */
 export function ComposerStatusChips({
   running,
-  diffStat,
+  git,
   onOpenDiff,
   otherRunningChat,
   onJumpToChat,
@@ -77,16 +92,21 @@ export function ComposerStatusChips({
   otherRunningChat?: { id: number; title: string } | null;
   /** Jumps to otherRunningChat's tab. */
   onJumpToChat?: (chatId: number) => void;
-  diffStat?: DiffStat | null;
+  /** The task's git/PR state (`useTaskGit`); undefined until it is known. */
+  git?: TaskGit;
   onOpenDiff?: () => void;
 }) {
+  const diffStat: DiffStat | null = git?.diff
+    ? { files: git.diff.files, additions: git.diff.insertions, deletions: git.diff.deletions }
+    : null;
   const hasChanges =
     diffStat !== null &&
     diffStat !== undefined &&
     (diffStat.files > 0 || diffStat.additions > 0 || diffStat.deletions > 0);
   const showDiff = hasChanges && onOpenDiff !== undefined;
+  const showConflicts = git?.conflict?.state === "conflicts" && onOpenDiff !== undefined;
   const showOther = otherRunningChat !== null && otherRunningChat !== undefined;
-  if (!running && !showDiff && !showOther) return null;
+  if (!running && !showDiff && !git?.pr && !showConflicts && !showOther) return null;
   return (
     <div data-testid="composer-status-chips" className="flex flex-wrap items-center gap-2">
       {running && (
@@ -97,6 +117,8 @@ export function ComposerStatusChips({
       )}
       {showOther && <ConcurrencyChip chat={otherRunningChat} onJump={() => onJumpToChat?.(otherRunningChat.id)} />}
       {showDiff && <DiffStatChip stat={diffStat} onOpenDiff={onOpenDiff} />}
+      {git?.pr && <PrChip pr={git.pr} />}
+      {showConflicts && <ConflictsChip base={git?.conflict?.against || git?.base?.ref || "base"} onOpenDiff={onOpenDiff} />}
     </div>
   );
 }

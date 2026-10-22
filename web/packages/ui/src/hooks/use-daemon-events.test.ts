@@ -68,6 +68,7 @@ describe("useDaemonEvents", () => {
         "learnedSkill.probe.arm",
         "learnedSkill.probe.finished",
         "learnedSkill.probe.failed",
+        "task.git",
       ],
     });
 

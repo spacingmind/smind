@@ -30,7 +30,6 @@ import { RunConfigOptions } from "@/components/run-config-options";
 import { Button } from "@/components/ui/button";
 import { useActionHandler, useKeyboard } from "@/keyboard/keyboard-provider";
 import { formatCombo } from "@/keyboard/shortcut-string";
-import { type DiffStat } from "@/lib/diff-stat";
 import { supportsThinking } from "@/lib/thinking-levels";
 import type {
   AttachmentMeta,
@@ -39,6 +38,7 @@ import type {
   ConfigOptionParams,
   PermissionSettings,
   Provider,
+  TaskGit,
   ThinkingLevel,
 } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
@@ -104,7 +104,7 @@ export function Composer({
   boundProvider,
   connected,
   runningRunId,
-  diffStat,
+  git,
   onOpenDiff,
   queuedItems,
   onCancelQueued,
@@ -133,8 +133,8 @@ export function Composer({
   connected: boolean;
   /** The task's currently-running run, or null. Drives Stop, "Send now", and the queue placeholder. */
   runningRunId: string | null;
-  /** The task's diff stat (use-task-diff) for the pill above the card -- pill omitted when null/unchanged. */
-  diffStat?: DiffStat | null;
+  /** The task's git/PR state (useTaskGit) for the chips above the card -- each chip omitted when it does not apply. */
+  git?: TaskGit;
   /** Brings the task's Diff tab forward when the pill is clicked; without it (no tab strip above) the pill is omitted entirely. */
   onOpenDiff?: () => void;
   /** The chat's daemon-side queue rows (useChatQueue in task-detail.tsx) -- the only queue this composer shows. */
@@ -461,7 +461,7 @@ export function Composer({
           stat -- real data only, nothing when neither applies. */}
       <ComposerStatusChips
         running={running}
-        diffStat={diffStat}
+        git={git}
         onOpenDiff={onOpenDiff}
         otherRunningChat={otherRunningChat}
         onJumpToChat={onJumpToChat}

@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "@/components/composer/composer";
 import { TaskDetailPane } from "@/components/task-detail";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
-import type { ChatQueueItem, RunSummary, Task } from "@/lib/types";
+import type { ChatQueueItem, RunSummary, Task, TaskGit } from "@/lib/types";
 import { autoGrow, isSubmitKey, MAX_COMPOSER_HEIGHT } from "@/components/composer/prompt-textarea";
 import { draftStorageKey } from "@/components/composer/use-composer-draft";
 import { FakeWsClient } from "@/test/fake-ws-client";
@@ -61,6 +61,10 @@ async function flush(): Promise<void> {
     await Promise.resolve();
     await Promise.resolve();
   });
+}
+
+function gitWithDiff(files: number, insertions: number, deletions: number): TaskGit {
+  return { taskId: 1, untrusted: false, computedAt: "2026-10-22T00:00:00Z", diff: { files, insertions, deletions } };
 }
 
 function renderComposer(
@@ -1007,7 +1011,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
   it("renders the pill when the task has changes, and clicking it opens the diff tab", () => {
     const onOpenDiff = vi.fn();
     renderComposer({
-      diffStat: { files: 2, additions: 12, deletions: 3 },
+      git: gitWithDiff(2, 12, 3),
       onOpenDiff,
     });
 
@@ -1020,19 +1024,19 @@ describe("Composer diff-stat pill (Item 5)", () => {
   });
 
   it("omits the pill when the task has no changes, no stat, or no diff tab to open", () => {
-    const { rerender } = renderComposer({ diffStat: { files: 0, additions: 0, deletions: 0 }, onOpenDiff: vi.fn() });
+    const { rerender } = renderComposer({ git: gitWithDiff(0, 0, 0), onOpenDiff: vi.fn() });
     expect(screen.queryByTestId("composer-diff-stat")).not.toBeInTheDocument();
 
     // Changes exist but there is no Diff tab to jump to (no onOpenDiff).
-    rerender({ diffStat: { files: 1, additions: 5, deletions: 0 }, onOpenDiff: undefined });
+    rerender({ git: gitWithDiff(1, 5, 0), onOpenDiff: undefined });
     expect(screen.queryByTestId("composer-diff-stat")).not.toBeInTheDocument();
 
-    rerender({ diffStat: null, onOpenDiff: vi.fn() });
+    rerender({ git: undefined, onOpenDiff: vi.fn() });
     expect(screen.queryByTestId("composer-diff-stat")).not.toBeInTheDocument();
   });
 
   it("wraps the textarea and toolbar in one input card with no placeholder + button", () => {
-    renderComposer({ diffStat: { files: 1, additions: 4, deletions: 1 }, onOpenDiff: vi.fn() });
+    renderComposer({ git: gitWithDiff(1, 4, 1), onOpenDiff: vi.fn() });
 
     const card = screen.getByTestId("composer-card");
     expect(card).toContainElement(screen.getByLabelText("Prompt"));
@@ -1461,7 +1465,7 @@ describe("Composer redesign (composer-redesign plan)", () => {
 
   it("diff-stat chip compact-formats thousands and opens the diff", () => {
     const onOpenDiff = vi.fn();
-    renderComposer({ diffStat: { files: 40, additions: 33500, deletions: 940 }, onOpenDiff });
+    renderComposer({ git: gitWithDiff(40, 33500, 940), onOpenDiff });
     const chip = screen.getByTestId("composer-diff-stat");
     expect(chip).toHaveTextContent("+33.5k");
     expect(chip).toHaveTextContent("\u2212940");

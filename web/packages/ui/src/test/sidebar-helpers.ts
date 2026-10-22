@@ -1,6 +1,7 @@
 import { act } from "react";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { vi } from "vitest";
+import type { TaskGit } from "@/lib/types";
 
 /** The per-row wrapper that owns a task row's hover/focus/menu state (see hooks/use-row-active.ts). */
 export function taskItem(taskId: number): HTMLElement {
@@ -77,4 +78,23 @@ export async function revealSpaceActions(): Promise<HTMLElement> {
 export function keyboardFocus(el: HTMLElement): void {
   fireEvent.keyDown(document.body, { key: "Tab" });
   act(() => el.focus());
+}
+
+/** A `task.gitList` item: the task's branch and diff size (ADR-0039); `over` adds PR/conflict/etc. */
+export function gitItem(
+  taskId: number,
+  branch: string,
+  files: number,
+  insertions: number,
+  deletions: number,
+  over: Partial<TaskGit> = {},
+): TaskGit {
+  return {
+    taskId,
+    branch: { name: branch, owned: true },
+    diff: { files, insertions, deletions },
+    untrusted: false,
+    computedAt: "2026-10-22T00:00:00Z",
+    ...over,
+  };
 }

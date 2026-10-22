@@ -12,7 +12,7 @@ import type {
 import type { LearnedSkillProbePayload } from "@/lib/probe-types";
 import { queryKeys } from "@/lib/query-keys";
 import { applyLifecycleEvent, LIFECYCLE_TOPICS, type WorkspaceWithTree } from "@/lib/workspace-tree";
-import type { Account, AgentProfile, RunStatusEventPayload } from "@/lib/types";
+import type { Account, AgentProfile, RunStatusEventPayload, TaskGit, TaskGitEventPayload, TaskGitListResult } from "@/lib/types";
 import { toast } from "@/components/ui/toast";
 
 /**
@@ -194,6 +194,12 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       }
       return;
     }
+    case "task.git": {
+      const p = payload as Partial<TaskGitEventPayload> | null;
+      if (typeof p?.taskId !== "number" || typeof p.git !== "object" || p.git === null) return;
+      patchTaskGit(queryClient, p.taskId, p.git);
+      return;
+    }
     case "event.dropped":
       // The daemon dropped events for this connection (its per-connection queue overflowed): the tree may
       // have missed a create or a delete entirely, so ADR 0009's reconciliation rule is a full re-read.
@@ -208,6 +214,18 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
         );
       }
       return;
+  }
+}
+
+/** The event carries the whole snapshot: write it for the task and into every cached workspace list holding it (no refetch). */
+function patchTaskGit(queryClient: QueryClient, taskId: number, git: TaskGit): void {
+  queryClient.setQueryData<TaskGit>(queryKeys.taskGit(taskId), git);
+  for (const [key, list] of queryClient.getQueriesData<TaskGitListResult>({ queryKey: queryKeys.workspaceTaskGitAll() })) {
+    if (!list?.items.some((item) => item.taskId === taskId)) continue;
+    queryClient.setQueryData<TaskGitListResult>(key, {
+      ...list,
+      items: list.items.map((item) => (item.taskId === taskId ? git : item)),
+    });
   }
 }
 

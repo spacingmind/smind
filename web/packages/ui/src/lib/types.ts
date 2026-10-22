@@ -669,25 +669,6 @@ export interface TaskFilesResult {
   files: TaskFile[];
 }
 
-// One entry in a task.stats response (internal/workspace.TaskStat): a
-// task's branch and the size of the same base->worktree diff task.diff
-// renders. Tasks with no worktree, and tasks whose stat could not be
-// computed, are absent from the list -- zero changed files is a real and
-// different statement from "not known", so the sidebar must be able to
-// tell them apart.
-export interface TaskStat {
-  taskId: number;
-  branch: string;
-  filesChanged: number;
-  insertions: number;
-  deletions: number;
-}
-
-// Result of task.stats (internal/wsapi/handlers.go's taskStatsResult).
-export interface TaskStatsResult {
-  stats: TaskStat[];
-}
-
 // Result of task.fileDiff (internal/wsapi/handlers.go's
 // taskFileDiffResult): one file's slice of the task's unified diff, or ""
 // for a path with no changes.
@@ -939,4 +920,74 @@ export interface RunAttachmentResult {
   mimeType: string;
   size: number;
   data: string;
+}
+
+// ---- Task git state (ADR-0039 §3): `task.git`, `task.gitList` and the `task.git` event --------------------------
+// Every nested object is optional: an absent object or field means "not known", never zero.
+
+export type GitConflictState = "none" | "conflicts" | "unknown";
+export type GitMergedState = "merged" | "unmerged" | "unknown";
+export type PrState = "open" | "closed" | "merged";
+export type PrMergeable = "mergeable" | "conflicting" | "unknown";
+export type PrReviewDecision = "approved" | "changes_requested" | "review_required" | "none";
+export type PrChecksState = "success" | "failure" | "pending" | "none";
+/** Why a PR snapshot is not fresh: "" = fresh. */
+export type PrStale = "" | "budget" | "backoff" | "rate_limited" | "unauthenticated" | "unavailable";
+
+export interface TaskGitPr {
+  number: number;
+  repo: string;
+  url: string;
+  title: string;
+  state: PrState;
+  draft: boolean;
+  headRef: string;
+  headSha: string;
+  baseRef: string;
+  fromFork: boolean;
+  mergeable: PrMergeable;
+  reviewDecision: PrReviewDecision;
+  checks?: { state: PrChecksState; passed: number; failed: number; pending: number; total: number };
+  /** RFC 3339. */
+  fetchedAt: string;
+  stale: PrStale;
+  /** RFC 3339 or "" (when an explicit refresh is possible again). */
+  refreshAvailableAt: string;
+}
+
+export interface TaskGitAction {
+  enabled: boolean;
+  /** Machine code when disabled (e.g. "no_commits", "pr_exists"). */
+  code?: string;
+  /** A full sentence saying why it is disabled and what to do next. */
+  reason?: string;
+}
+
+export interface TaskGit {
+  taskId: number;
+  forge?: string;
+  branch?: { name: string; owned: boolean };
+  base?: { ref?: string; sha?: string; tip?: string; known: boolean };
+  diff?: { files: number; insertions: number; deletions: number };
+  worktree?: { dirty: boolean; staged: number; unstaged: number; untracked: number };
+  commits?: { aheadOfBase?: number; behindBase?: number; sinceFork?: number };
+  origin?: { upstream?: string; published: boolean; ahead?: number; behind?: number };
+  conflict?: { state: GitConflictState; files: string[]; against?: string; checkedAt: string; reason?: string };
+  merged?: { state: GitMergedState; via: string };
+  pr?: TaskGitPr;
+  actions?: Record<string, TaskGitAction>;
+  untrusted: boolean;
+  /** RFC 3339. */
+  computedAt: string;
+}
+
+/** `task.gitList` result. */
+export interface TaskGitListResult {
+  items: TaskGit[];
+}
+
+/** Payload of a `task.git` event. */
+export interface TaskGitEventPayload {
+  taskId: number;
+  git: TaskGit;
 }

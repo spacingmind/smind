@@ -231,9 +231,6 @@ func TestTaskDiff_UsesStoredBaseSha_ReflogExpired(t *testing.T) {
 	if err != nil || len(files) != 2 {
 		t.Fatalf("TaskFiles() = %v, %v; want 2 files", files, err)
 	}
-	if stats, err := m.TaskStats(wsID); err != nil || len(stats) == 0 {
-		t.Fatalf("TaskStats() = %v, %v; want the task present", stats, err)
-	}
 }
 
 func TestTaskDiff_BaseUnknown_TypedError(t *testing.T) {
@@ -258,15 +255,6 @@ func TestTaskDiff_BaseUnknown_TypedError(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "task.setBase") {
 			t.Fatalf("%s error = %q, want the task.setBase sentence", name, err)
-		}
-	}
-	stats, err := m.TaskStats(wsID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, s := range stats {
-		if s.TaskID == task.ID {
-			t.Fatalf("TaskStats included base-unknown task: %+v (absent, never zero)", s)
 		}
 	}
 }

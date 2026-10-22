@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
 import type {
   Task,
-  TaskStat,
+  TaskGit,
   TaskStatusEventPayload,
   Workspace,
 } from "@/lib/types";
@@ -41,7 +41,10 @@ import { attentionRollup, nestTasks, type TaskNode } from "@/lib/task-tree";
 import { sidebarTreeActions, type TreeActionAvailability } from "@/lib/task-tree-actions";
 import { ArchiveFinishedDialog, StopTreeDialog } from "@/components/tree-action-dialogs";
 import { formatRelativeTime, formatRelativeTimeShort } from "@/lib/relative-time";
-import { useTaskStats, type TaskStats } from "@/hooks/use-task-stats";
+import { useWorkspaceTaskGit } from "@/hooks/use-task-git";
+import { GitBranchLine } from "@/components/git/git-branch-line";
+import { GitTokens } from "@/components/git/git-tokens";
+import { SidebarGitGlyph } from "@/components/git/sidebar-git-glyph";
 import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission } from "@/hooks/use-notification-permission";
 import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-preference";
@@ -193,8 +196,8 @@ interface RowSignal {
   statusOverrides: Map<number, string>;
   /** Latest run status per task (see useTaskAttention). */
   runStatus: TaskRunStatus;
-  /** Per-task branch and diff size (see useTaskStats). */
-  stats: TaskStats;
+  /** Per-task git state (see useWorkspaceTaskGit). */
+  gitByTask: ReadonlyMap<number, TaskGit>;
   /** Task ids the user hasn't opened since their last attention-worthy event, or a manual "Mark unread" (AC2). */
   unread: ReadonlySet<number>;
   /** The task context menu's "Mark unread" action -- lives on the context (like the rest of this interface) rather than threaded as a prop through every intermediate row component. */
@@ -210,7 +213,7 @@ interface RowSignal {
 const EMPTY_SIGNAL: RowSignal = {
   statusOverrides: new Map(),
   runStatus: new Map(),
-  stats: new Map(),
+  gitByTask: new Map(),
   unread: new Set(),
   onMarkUnread: () => {},
   pinned: new Set(),
@@ -369,7 +372,7 @@ export function AppSidebar({
   const { workspaces, error, refresh } = useWorkspaceTree();
   const statusOverrides = useStatusOverrides(client, events ?? null);
   const workspaceIds = useMemo(() => (workspaces ?? []).map((ws) => ws.ID), [workspaces]);
-  const stats = useTaskStats(client, events ?? null, workspaceIds);
+  const gitByTask = useWorkspaceTaskGit(workspaceIds);
 
   // Out-of-tab attention notifications (Item 4): every task across the
   // whole tree, flattened just far enough to label a Notification by
@@ -448,13 +451,13 @@ export function AppSidebar({
       attention,
       statusOverrides,
       runStatus: runStatus ?? EMPTY_RUN_STATUS,
-      stats,
+      gitByTask,
       unread: unread ?? EMPTY_UNREAD,
       onMarkUnread: onMarkUnread ?? EMPTY_SIGNAL.onMarkUnread,
       pinned,
       onTogglePin: togglePin,
     }),
-    [now, attention, statusOverrides, runStatus, stats, unread, onMarkUnread, pinned, togglePin],
+    [now, attention, statusOverrides, runStatus, gitByTask, unread, onMarkUnread, pinned, togglePin],
   );
 
   const pinnedTasks = useMemo(() => allTasks.filter((t) => pinned.has(t.ID)), [allTasks, pinned]);
@@ -1761,14 +1764,14 @@ function AggregateSlot({ status, label, className }: { status: StatusDotStatus |
  */
 function TaskHoverCardBody({
   task,
-  stat,
+  git,
   status,
   tier,
   childCount,
   now,
 }: {
   task: Task;
-  stat?: TaskStat;
+  git?: TaskGit;
   status: string;
   tier: string | null;
   childCount: number;
@@ -1783,21 +1786,14 @@ function TaskHoverCardBody({
           {childCount > 0 && ` · ${childCount} sub-task${childCount === 1 ? "" : "s"}`}
         </p>
       )}
-      {(stat?.branch ?? task.Branch) && (
-        <div className="flex items-center gap-1.5 text-ui-sm text-muted-foreground">
-          <Icons.branch className="size-3 shrink-0" />
-          <span data-testid="sidebar-task-branch" className="min-w-0 truncate">
-            {stat?.branch ?? task.Branch}
-          </span>
-        </div>
+      {(git?.branch?.name ?? task.Branch) && (
+        <GitBranchLine
+          branch={(git?.branch?.name ?? task.Branch)!}
+          base={git?.base?.known ? git.base.ref : undefined}
+          testId="sidebar-task-branch"
+        />
       )}
-      {stat && stat.filesChanged > 0 && (
-        <p className="text-ui-sm tabular-nums text-muted-foreground">
-          {stat.filesChanged} file{stat.filesChanged === 1 ? "" : "s"} changed,{" "}
-          <span className="text-success">+{stat.insertions}</span>{" "}
-          <span className="text-destructive">-{stat.deletions}</span>
-        </p>
-      )}
+      {git && <GitTokens git={git} />}
       <p className="text-ui-sm text-muted-foreground">
         Last activity <span data-testid="task-hover-card-last-activity">{formatRelativeTime(task.UpdatedAt, now)}</span>
       </p>
@@ -1899,18 +1895,18 @@ const TaskRow = memo(function TaskRow({
   spaces?: SpaceWithTasks[];
   onMoveTask?: (task: Task, spaceId: number | null) => void;
 }) {
-  const { attention, statusOverrides, runStatus, stats, unread, onMarkUnread, pinned, onTogglePin, now } = useRowSignal();
+  const { attention, statusOverrides, runStatus, gitByTask, unread, onMarkUnread, pinned, onTogglePin, now } = useRowSignal();
   const hasChildren = childCount > 0;
   const reason = primaryAttentionReason(attention?.get(task.ID));
   const runState = runStatus.get(task.ID);
   const runDot = runDotStatus(runState);
-  const stat = stats.get(task.ID);
+  const git = gitByTask.get(task.ID);
   const isUnread = unread.has(task.ID);
   const slotSignal = taskSlotSignal(reason, runState, isUnread);
   const isTaskPinned = pinned.has(task.ID);
   const isSelected = task.ID === selectedTaskId;
   const status = statusOverrides.get(task.ID) ?? task.Status;
-  const branch = stat?.branch ?? task.Branch;
+  const branch = git?.branch?.name ?? task.Branch;
   // Hover/focus/menu-open state lives on a wrapper around THIS row only. The
   // caller's li also contains this task's nested children list, so a CSS
   // group on the li would reveal every descendant's actions on one hover
@@ -2101,14 +2097,19 @@ const TaskRow = memo(function TaskRow({
                   )}
                   <SetupBadge status={task.SetupStatus} compact className={cn(hideForActions) || undefined} />
                   {/* Dropped on a narrow sidebar (container query on the list) so the title keeps its width. */}
-                  {stat && stat.filesChanged > 0 && (
+                  {git?.diff && git.diff.files > 0 && (
                     <span
                       data-testid="sidebar-task-diffstat"
                       className="shrink-0 text-ui-xs tabular-nums @max-[14rem]/sb:hidden"
-                      title={`${stat.filesChanged} changed, +${stat.insertions} -${stat.deletions}`}
+                      title={`${git.diff.files} changed, +${git.diff.insertions} -${git.diff.deletions}`}
                     >
-                      <span className="text-success">+{stat.insertions}</span>{" "}
-                      <span className="text-destructive">-{stat.deletions}</span>
+                      <span className={cn("text-success", git.diff.insertions === 0 && "opacity-50")}>+{git.diff.insertions}</span>{" "}
+                      <span className={cn("text-destructive", git.diff.deletions === 0 && "opacity-50")}>-{git.diff.deletions}</span>
+                    </span>
+                  )}
+                  {git && (
+                    <span className="@max-[14rem]/sb:hidden">
+                      <SidebarGitGlyph git={git} />
                     </span>
                   )}
                   {/*
@@ -2130,7 +2131,7 @@ const TaskRow = memo(function TaskRow({
               </SidebarMenuSubButton>
             </HoverCardTrigger>
             <HoverCardContent data-testid="task-hover-card" side="right" align="start">
-              <TaskHoverCardBody task={task} stat={stat} status={status} tier={tier} childCount={childCount} now={now} />
+              <TaskHoverCardBody task={task} git={git} status={status} tier={tier} childCount={childCount} now={now} />
             </HoverCardContent>
           </HoverCard>
           {active && (
