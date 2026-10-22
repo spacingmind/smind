@@ -208,6 +208,35 @@ describe("App compact layout (Item 21)", () => {
     expect(screen.getAllByTestId("app-connection-status")).toHaveLength(1);
   });
 
+  it("below the breakpoint, picking a task (even the selected one) dismisses the sidebar sheet", async () => {
+    stubViewportWidth(375);
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    for (const round of [1, 2]) {
+      fireEvent.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
+      await flush();
+      expect(document.querySelector('[data-mobile="true"]'), `sheet open before pick #${round}`).not.toBeNull();
+
+      // Scoped to the sheet: once selected, the title is in the header too.
+      fireEvent.click(within(document.querySelector('[data-mobile="true"]') as HTMLElement).getByText(TASK.Title));
+      await flush();
+      if (round === 1) {
+        respondChatList(socket, TASK);
+        await flush();
+        respondAll(socket, "run.list", []);
+        await flush();
+      }
+      // The Sheet unmounts its content once closed (Radix presence, no timers under jsdom).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+      expect(document.querySelector('[data-mobile="true"]'), `sheet closed after pick #${round}`).toBeNull();
+    }
+  });
+
   it("at/above the breakpoint (regression), the sidebar keeps its resize handle", async () => {
     stubViewportWidth(1024);
     const socket = new FakeSocket();

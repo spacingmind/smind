@@ -394,6 +394,18 @@ function AppShell({
     // kicks that fetch off.
   }, []);
 
+  // Picking a task in the compact-layout sidebar sheet dismisses it (a no-op
+  // on the desktop sidebar): the sheet would otherwise sit over the task the
+  // user just opened, including when they re-pick the one already selected.
+  const closeMobileSidebarRef = useRef<(() => void) | null>(null);
+  const selectTaskFromSidebar = useCallback(
+    (task: Task) => {
+      selectTask(task);
+      closeMobileSidebarRef.current?.();
+    },
+    [selectTask],
+  );
+
   // The task header's lineage jump (PR-U2): fetch the target task fresh
   // (the sidebar's tree may not hold it) and reuse the normal selection
   // path so tabs/chat seeding behave exactly like a sidebar click.
@@ -968,7 +980,7 @@ function AppShell({
       windowToggle={windowToggle}
       client={client}
       selectedTaskId={selectedTask?.ID ?? null}
-      onSelectTask={selectTask}
+      onSelectTask={selectTaskFromSidebar}
       attention={attention}
       runStatus={runStatus}
       unread={unread}
@@ -1219,7 +1231,7 @@ function AppShell({
        * zero-render component is the cheapest way to be inside a provider
        * its own parent mounts.
        */}
-      <SidebarToggleAction settingsOpen={settingsOpen} />
+      <SidebarToggleAction settingsOpen={settingsOpen} closeMobileRef={closeMobileSidebarRef} />
       <CommandPalette />
       <ShellCommands
         client={client}
@@ -1578,9 +1590,22 @@ function useTaskChangedFiles(client: WsClient | null, task: Task | null): string
  * and a compact-layout sidebar sheet that was open when Settings opened is closed --
  * it portals out of the hidden shell and would otherwise float over Settings.
  */
-function SidebarToggleAction({ settingsOpen }: { settingsOpen: boolean }) {
+function SidebarToggleAction({
+  settingsOpen,
+  closeMobileRef,
+}: {
+  settingsOpen: boolean;
+  /** Filled with a closer for the compact-layout sheet, so a task pick (outside the provider) can dismiss it. */
+  closeMobileRef: { current: (() => void) | null };
+}) {
   const { toggleSidebar, setOpenMobile } = useSidebar();
   useActionHandler("sidebar.toggle", toggleSidebar);
+  useEffect(() => {
+    closeMobileRef.current = () => setOpenMobile(false);
+    return () => {
+      closeMobileRef.current = null;
+    };
+  }, [closeMobileRef, setOpenMobile]);
   useEffect(() => {
     if (settingsOpen) setOpenMobile(false);
   }, [settingsOpen, setOpenMobile]);
