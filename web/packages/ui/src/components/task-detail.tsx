@@ -3,6 +3,7 @@ import { Icons } from "@/lib/icons";
 import { providerLabel } from "@/lib/provider-catalog";
 
 import { TaskLineageChips } from "@/components/task-lineage";
+import { resendRequests } from "@/lib/attachments/reuse";
 import { AttachmentDropOverlay } from "@/components/composer/attachment-drop-overlay";
 import { Composer } from "@/components/composer/composer";
 import { useAttachmentDraft } from "@/components/composer/use-attachment-draft";
@@ -265,8 +266,19 @@ export function TaskDetailPane({
       composer && composer.provider === run.provider
         ? { permissionMode: composer.permissionMode, autoAccept: composer.autoAccept }
         : { permissionMode: run.permissionMode, autoAccept: run.autoAccept };
+    // ADR-0038: the earlier run's attachments ride along as `reuse`/ref requests (the daemon copies the stored files).
+    const reuse = resendRequests(run.id, run.attachments);
     submitPromptRef
-      .current(run.provider, prompt, permission, run.thinkingLevel, "queue", run.model || undefined)
+      .current(
+        run.provider,
+        prompt,
+        permission,
+        run.thinkingLevel,
+        "queue",
+        run.model || undefined,
+        reuse.length > 0 ? reuse : undefined,
+        reuse.length > 0 ? run.attachments : undefined,
+      )
       .then((result) => {
         // A queued prompt shows up in the composer's queue list straight away.
         if (result.kind === "queued") queueRefreshRef.current();
