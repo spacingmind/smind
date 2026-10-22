@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent, type Ref } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent, type Ref } from "react";
 
 import { Icons } from "@/lib/icons";
 import { AttachmentTray } from "@/components/composer/attachment-tray";
+import { FileMentionPopover } from "@/components/composer/file-mention-popover";
+import { useFileMention } from "@/components/composer/use-file-mention";
+import { mentionedPaths } from "@/lib/file-mention";
+import { supportsKind } from "@/lib/attachments/kinds";
 import { useAttachmentDraft } from "@/components/composer/use-attachment-draft";
 import { attachmentErrorMessage } from "@/lib/attachments/errors";
 import { encodeAttachment } from "@/lib/attachments/encode";
@@ -201,6 +205,9 @@ export function Composer({
   const [formError, setFormError] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
   const attach = useAttachmentDraft(taskId, chatId);
+  const [caret, setCaret] = useState(0);
+  // The caret to restore once the controlled value lands (after accepting a mention).
+  const pendingCaret = useRef<number | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const textareaNode = useRef<HTMLTextAreaElement | null>(null);
   const setTextareaNode = useCallback(
@@ -249,8 +256,17 @@ export function Composer({
       setFormError(null);
       try {
         // Bytes are encoded here, at submit, never when the file was added (ADR-0038 §6).
-        const attachments = attachItems.length > 0 ? await Promise.all(attachItems.map(encodeAttachment)) : undefined;
-        const previews = attachItems.length > 0 ? attachItems.map(draftPreview) : undefined;
+        // No await without items: a plain prompt must reach onSubmit in the same tick.
+        const encoded = attachItems.length > 0 ? await Promise.all(attachItems.map(encodeAttachment)) : [];
+        // Only mentions whose `@path` is still in the prompt are sent: the daemon dedupes against the text.
+        const refs = mentionedPaths(text, (attachKey && useComposerAttachmentsStore.getState().mentions[attachKey]) || []);
+        const attachments: AttachmentRequest[] | undefined =
+          encoded.length + refs.length > 0 ? [...encoded, ...refs.map((path): AttachmentRequest => ({ kind: "file_ref", path }))] : undefined;
+        const previews: AttachmentMeta[] | undefined =
+          attachments && [
+            ...attachItems.map(draftPreview),
+            ...refs.map((path, i): AttachmentMeta => ({ id: String(attachItems.length + i + 1), kind: "file_ref", path })),
+          ];
         const result = await onSubmit(
           provider,
           text,
@@ -263,6 +279,7 @@ export function Composer({
         );
         // The optimistic run entry now owns the thumbnails' object URLs, so the tray lets go without revoking.
         if (attachKey && attachItems.length > 0) useComposerAttachmentsStore.getState().release(attachKey, attachItems.map((i) => i.localId));
+        if (attachKey) useComposerAttachmentsStore.getState().clearMentions(attachKey);
         if (result.kind === "queued") onQueued?.();
         return true;
       } catch (err) {
@@ -313,6 +330,27 @@ export function Composer({
     }
   }
 
+  const inactive = !canSend || submitting;
+  const mentionState = useFileMention({
+    text: draft.value,
+    caret,
+    enabled: attachLimits !== null && supportsKind(attachLimits, "file_ref") && !inactive,
+    taskId,
+    onAccept: (path, next) => {
+      if (attachKey) useComposerAttachmentsStore.getState().addMention(attachKey, path);
+      pendingCaret.current = next.cursor;
+      draft.setValue(next.text);
+      setCaret(next.cursor);
+    },
+  });
+
+  // The controlled value has landed: put the caret after the inserted mention.
+  useLayoutEffect(() => {
+    if (pendingCaret.current === null) return;
+    textareaNode.current?.setSelectionRange(pendingCaret.current, pendingCaret.current);
+    pendingCaret.current = null;
+  }, [draft.value]);
+
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
       // isSubmitKey ignores modifier-held Enters, so this is the one
@@ -362,7 +400,6 @@ export function Composer({
     submit();
   }
 
-  const inactive = !canSend || submitting;
   const hasText = draft.value.trim() !== "";
   const noImageProvider = providers.find((p) => p.id === provider);
   const showImageHint = attachLimits !== null && noImageProvider?.images === "no" && attachItems.some((i) => i.kind === "image");
@@ -404,6 +441,15 @@ export function Composer({
           dropActive && "border-input-border-focused",
         )}
       >
+        {mentionState.open && (
+          <FileMentionPopover
+            rows={mentionState.rows}
+            activeIndex={mentionState.activeIndex}
+            loading={mentionState.loading}
+            onPick={mentionState.pick}
+            onHover={mentionState.setActive}
+          />
+        )}
         {attachLimits && <AttachmentTray items={attachItems} onRemove={attach.remove} />}
         {showImageHint && (
           <p data-testid="attachment-image-hint" className="px-4 pt-2 text-ui-xs text-foreground-muted">
@@ -418,6 +464,9 @@ export function Composer({
           onChange={draft.setValue}
           onSubmit={submit}
           onKeyDown={handleKeyDown}
+          interceptKey={mentionState.interceptKey}
+          onCaret={setCaret}
+          textareaProps={mentionState.textareaProps}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onPaste={handlePaste}
