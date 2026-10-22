@@ -863,7 +863,7 @@ func prepareStart(wm *workspace.Manager, runner *taskrunner.Runner, taskID, chat
 	// other's write silently no-ops and must still be rejected here rather
 	// than proceeding as if it had bound its own value.
 	if *chat.Provider != string(provider) {
-		return startParams{}, fmt.Errorf("runs: start: chat %d is bound to provider %q, got %q", chat.ID, *chat.Provider, provider)
+		return startParams{}, fmt.Errorf("runs: start: chat %d is bound to provider %q, got %q: start a new chat for this provider (CLI: smind task chat new %d, then --chat <id>)", chat.ID, *chat.Provider, provider, taskID)
 	}
 
 	catalog, ok := runner.ProviderCatalogFor(provider)
