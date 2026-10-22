@@ -77,7 +77,7 @@ Verification (real device; manual, recorded under Validation)
 
 Go (`internal/push`, `internal/wsapi`, `internal/relay/bridge`, `cmd/smind`)
 
-- `TestSealOpenVector` — AC1; `TestSealPadsToBucket` — padded length is a multiple of 256, ≤ 1 KiB; `TestOpenRejects{WrongDeviceID,FlippedCiphertext,FlippedNonce,BadVersion,Truncated}` — AC2; `TestSealRefusesPastMessageLimit`.
+- `TestSealOpenVector` — AC1; `TestSealPadsToBucket` — padded length is a multiple of 256, ≤ 1 KiB; `TestOpenRejects{WrongDeviceID,FlippedCiphertext,FlippedNonce,BadVersion,Truncated}` — AC2.
 - `TestRegistryPersistsAtomically0600`, `TestRegistryCorruptFileIsError`, `TestRegistryTokenTakeover`, `TestRegistryRemoveOnUnregister` — AC5, AC7.
 - `TestPushRegisterBindsToSessionDeviceID` (a params `deviceId` is ignored), `TestPushRegisterForbiddenOnLocalWS`, `TestPushRegisterValidation` (table: provider, token shape, key length, kinds), `TestPushRegisterDisabled` (no sender call), `TestPushStatusRedactsSecrets` — AC3–AC5.
 - `TestRevokeStopsPushes`, `TestRevokedByFileEditStopsPushes` (approved-at-send check), `TestHostRotateClearsRegistrations`, `TestPendingDeviceCannotRegister` — AC6.

@@ -55,8 +55,7 @@ a fixed generic notification ("smind needs your attention") and opens the app on
   **E2EE channel** together with its push token (§3). The relay never sees the token or the key.
 - **Seal:** ChaCha20-Poly1305 (IETF, 12-byte random nonce; the same primitive as the relay channel, so `golang.org/x/crypto`, `@noble/ciphers`
   and CryptoKit's `ChaChaPoly` all interoperate), AAD = `"smind-push-v1" ‖ device_id`. Binding the device id means a ciphertext cannot be
-  replayed to a different device's key; an explicit negative vector checks it. Random 96-bit nonces under a per-device key are safe at this volume (pushes are rare; the daemon
-  refuses to seal past 2^32 messages per key, and a phone that re-registers with a fresh key resets the count).
+  replayed to a different device's key; an explicit negative vector checks it. Random 96-bit nonces under a per-device key are safe at this volume (pushes are rare: even 100 a day is about 36,500 a year against a 2^32 comfort bound), so the daemon keeps no per-key counter; a phone that re-registers with a fresh key resets everything anyway.
 - **Plaintext** (JSON, then padded to a multiple of 256 bytes after a `u16BE` length so the provider cannot read title length):
   `{"id":"<event id>","kind":"permission|needs_continue|done|error|test","taskId":12,"runId":"…","chatId":3,"title":"≤80 chars","body":"≤160 chars","at":<unix>}`.
   `id` is the dedupe key (the notification identifier on the phone), `at` lets the phone drop a push older than 24 h. The padded plaintext is ≤ 1 KiB so the
