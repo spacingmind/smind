@@ -117,3 +117,36 @@ func TestDecodeStoredEvent_RoundTrip(t *testing.T) {
 		t.Fatal("DecodeStoredEvent(garbage) succeeded")
 	}
 }
+
+// TestEncodeDecodeEvent_PermissionResolution_RoundTrips: how a permission was
+// decided (a person, Auto-accept, a timeout) is part of the event. Before it
+// was persisted, a finished run replayed from run_events (run.logs, the
+// learning window) lost it: the timeline showed no badge and a human refusal
+// was indistinguishable from an auto-resolution.
+func TestEncodeDecodeEvent_PermissionResolution_RoundTrips(t *testing.T) {
+	t.Parallel()
+
+	for _, res := range []taskrunner.PermissionResolution{
+		taskrunner.PermissionResolvedByHuman,
+		taskrunner.PermissionResolvedByAutoAccept,
+		taskrunner.PermissionResolvedByTimeout,
+	} {
+		want := taskrunner.Event{
+			Type:                 taskrunner.EventTypePermissionResolved,
+			PermissionRequestID:  "req-1",
+			PermissionOptionID:   "deny",
+			PermissionResolution: res,
+		}
+		data, err := encodeEvent(want)
+		if err != nil {
+			t.Fatalf("encodeEvent(%s) error = %v", res, err)
+		}
+		got, err := decodeEvent(data)
+		if err != nil {
+			t.Fatalf("decodeEvent(%s) error = %v", res, err)
+		}
+		if got.PermissionResolution != res || got.PermissionOptionID != "deny" || got.PermissionRequestID != "req-1" {
+			t.Fatalf("round trip of %q = %+v, want resolution %q", res, got, res)
+		}
+	}
+}
