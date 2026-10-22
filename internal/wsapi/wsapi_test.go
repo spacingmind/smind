@@ -266,6 +266,38 @@ func readEnvelopeFor(t *testing.T, ws *websocket.Conn, id string, timeout time.D
 	}
 }
 
+// readEnvelopesFor reads until a message has arrived for each of ids and
+// returns them by id. Use it instead of consecutive readEnvelopeFor calls
+// when the responses can arrive in either order: readEnvelopeFor discards
+// every message not addressed to the id it waits for.
+func readEnvelopesFor(t *testing.T, ws *websocket.Conn, ids []string, timeout time.Duration) map[string]envelope {
+	t.Helper()
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	got := make(map[string]envelope, len(ids))
+	if err := ws.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		t.Fatalf("SetReadDeadline() error = %v", err)
+	}
+	for len(got) < len(want) {
+		_, data, err := ws.ReadMessage()
+		if err != nil {
+			t.Fatalf("ReadMessage() error = %v (waiting for ids %v, have %d)", err, ids, len(got))
+		}
+		var env envelope
+		if json.Unmarshal(data, &env) != nil {
+			continue // an ADR-0005 event notification, not an RPC message
+		}
+		if want[env.ID] {
+			if _, seen := got[env.ID]; !seen {
+				got[env.ID] = env
+			}
+		}
+	}
+	return got
+}
+
 // expectNoMoreMessages asserts that no message for id arrives on ws within
 // timeout, proving a request that already got its terminal response
 // doesn't also emit a later, duplicate one.
