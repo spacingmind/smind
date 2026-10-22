@@ -35,7 +35,8 @@ export function CreatePrDialog({
   return (
     <Dialog open={open} onOpenChange={(next) => (next || !pending.current) && onOpenChange(next)}>
       <DialogContent
-        className="gap-3 p-5 sm:max-w-xl"
+        className="top-[10vh] translate-y-0 gap-3 p-5 sm:max-w-xl"
+        // Top-anchored: the preview loads after open and a centred dialog would jump as its height settles.
         data-testid="create-pr-dialog"
         onCloseAutoFocus={(e) => {
           if (!focusCommitBox.current) return;
