@@ -29,6 +29,22 @@ const (
 	CodePRBusy             = "pr_busy"
 )
 
+// Codes of Push and Update from base (ADR-0039 sections 3-6).
+const (
+	CodeNonFastForward  = "non_fast_forward"
+	CodeConflict        = "conflict"
+	CodeMergeInProgress = "merge_in_progress"
+	CodeWorktreeDirty   = "worktree_dirty"
+	CodeNothingToPush   = "nothing_to_push"
+	CodeInvalidStrategy = "invalid_strategy"
+)
+
+// Operations a worktree can be in the middle of (Update from base).
+const (
+	OpMerge  = "merge"
+	OpRebase = "rebase"
+)
+
 // Codes of the archive branch cleanup and Restore (ADR-0039 section 9).
 const (
 	CodeBranchUnmerged   = "branch_unmerged"
@@ -123,6 +139,40 @@ func RestoreCheckedOut() *PRError {
 		"The branch is checked out in another worktree, so this task can't be restored until that worktree lets go of it.")
 }
 
+// ConflictError is the error for an Update from base that stopped on
+// conflicts. The worktree is left in the middle of the operation (nothing is
+// aborted); the sentence names the command that undoes it. files is sorted by
+// the caller; filesTruncated says the list was capped.
+func ConflictError(operation, base string, files []string, filesTruncated bool) *PRError {
+	var m string
+	if operation == OpRebase {
+		m = fmt.Sprintf("Rebasing onto `%s` hit conflicts, and the worktree is now in the middle of the rebase. Resolve the conflicts and continue, or ask the agent to; `git rebase --abort` in the worktree undoes it.", base)
+	} else {
+		operation = OpMerge
+		m = fmt.Sprintf("Merging `%s` into this branch hit conflicts, and the worktree is now in the middle of the merge. Resolve the conflicts and commit, or ask the agent to; `git merge --abort` in the worktree undoes it.", base)
+	}
+	if files == nil {
+		files = []string{}
+	}
+	return (&PRError{Code: CodeConflict, Message: m}).
+		With("files", files).With("operation", operation).With("base", base).With("filesTruncated", filesTruncated)
+}
+
+// MergeInProgress is the error for an Update from base on a worktree that is
+// already in the middle of a merge or rebase.
+func MergeInProgress(operation string) *PRError {
+	if operation != OpRebase {
+		operation = OpMerge
+	}
+	abort := "git merge --abort"
+	if operation == OpRebase {
+		abort = "git rebase --abort"
+	}
+	return (&PRError{Code: CodeMergeInProgress, Message: fmt.Sprintf(
+		"This worktree is already in the middle of a %s. Finish it (resolve the conflicts and commit or continue), or undo it with `%s`, then try again.", operation, abort)}).
+		With("operation", operation)
+}
+
 func (e *PRError) withMessage(m string) *PRError {
 	e.Message = m
 	return e
@@ -144,6 +194,13 @@ var prMessages = map[string]string{
 	CodeInvalidTitle:      "The pull request title must be 1 to 256 characters on a single line.",
 	CodeInvalidBody:       "The pull request description must be at most 64 KiB and can't contain NUL characters.",
 	CodeInvalidBranch:     "That branch name isn't valid. Pick an existing branch.",
+	CodeNonFastForward:    "Push was refused because origin has commits this branch doesn't. Bring those changes in first (pull in the worktree, or ask the agent), then push again.",
+	CodeConflict:          "Updating this branch from its base hit conflicts.",
+	CodeMergeInProgress:   "This worktree is already in the middle of a merge or rebase. Finish or undo it first.",
+	CodeWorktreeDirty:     "This worktree has uncommitted changes. Commit or stash them first, then update from the base branch.",
+	CodeNothingToPush:     "Nothing to push.",
+	CodeInvalidStrategy:   "The update strategy must be \"merge\" or \"rebase\".",
+	CodeUnauthenticated:   msgUnauthenticated,
 	CodePRBusy:            "Another pull request action is already running for this task. Wait for it to finish.",
 	CodeBranchUnmerged:    "The branch is not merged anywhere yet.",
 	CodeBranchDirty:       "The worktree has uncommitted changes; they are saved to the branch, so it is kept.",
