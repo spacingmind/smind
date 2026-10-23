@@ -47,7 +47,8 @@ import { attachMenuItems } from '../attachmentTray';
 import { createImageDeps, pickFiles, pickPhotos } from '../attachmentDeps';
 import { sendWithAttachments } from '../attachSend';
 import { lineAttachmentsFromRun } from '../lineAttachments';
-import { AttachmentsInfo, defaultChatId, fetchDaemonInfo, listProviders, listRunsForTask, ProviderInfo, RunSummary } from '../api';
+import { createThumbLoader } from '../thumbLoader';
+import { AttachmentsInfo, defaultChatId, fetchDaemonInfo, fetchRunAttachment, listProviders, listRunsForTask, ProviderInfo, RunSummary } from '../api';
 import { firstSendProvider } from '../firstSend';
 import { withRunPrompt } from '../promptLine';
 import { recallSelection } from '../newTaskPrefs';
@@ -109,6 +110,9 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   const [attachInfo, setAttachInfo] = useState<AttachmentsInfo | undefined>(undefined);
   const picking = useRef(false);
   const imageDims = useRef(new Map<string, { width: number; height: number }>()).current;
+  // One loader per connection: timeline thumbnails fetch one at a time and are cached for the screen's life.
+  const thumbLoader = useMemo(() => createThumbLoader((runId, id) => fetchRunAttachment(conn, runId, id)), [conn]);
+  const loadThumb = useCallback((runId: string, id: string) => thumbLoader.load(runId, id), [thumbLoader]);
   const imageDeps = useMemo(() => createImageDeps(imageDims), [imageDims]);
   // The provider catalog for a task with no run (its first prompt has no run to inherit a provider from); null = not loaded yet.
   const [providers, setProviders] = useState<ProviderInfo[] | null>(null);
@@ -592,7 +596,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
     ({ item }: ListRenderItemInfo<TranscriptItem>) => {
       switch (item.type) {
         case 'user':
-          return <UserBubble text={item.text} />;
+          return <UserBubble text={item.text} attachments={item.attachments} loadThumb={loadThumb} />;
         case 'assistant':
           return <AssistantMessage text={item.text} />;
         case 'thinking':
@@ -616,7 +620,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
           return <FooterBanner sentence={item.sentence} note={item.note} waiting={item.waiting} onContinue={handleContinue} />;
       }
     },
-    [expandedToolCalls, handleContinue, handlePermissionTap, toggleExpanded],
+    [expandedToolCalls, handleContinue, handlePermissionTap, loadThumb, toggleExpanded],
   );
 
   return (
