@@ -276,15 +276,16 @@ func TestTaskWait_PrintsPendingPermissionHint(t *testing.T) {
 
 // TestTaskWait_ErrorRun is the live-run half of the error exit: a run that
 // fails like GLM on a usage limit (an "[error] ..." chunk, then a generic
-// JSON-RPC error) makes `task wait` exit 1 and show the agent's own cause, and
-// `task runs` carries the same cause in its STATUS cell.
+// JSON-RPC error) makes `task wait` exit 6 (rate limited, ADR-0041) and show
+// the agent's own cause; `task runs` shows the rate-limit text in its STATUS
+// cell instead (the full cause stays in wait/logs).
 func TestTaskWait_ErrorRun(t *testing.T) {
 	_, taskID := waitEnv(t, "quota-error")
 	runID := detachedRun(t, taskID)
 
 	code, stdout, stderr := sendCaptured(t, []string{"task", "wait", runID})
-	if code != 1 {
-		t.Fatalf("exit = %d, want 1; stdout = %q, stderr = %q", code, stdout, stderr)
+	if code != 6 {
+		t.Fatalf("exit = %d, want 6; stdout = %q, stderr = %q", code, stdout, stderr)
 	}
 	for _, want := range []string{
 		"error after",
@@ -297,8 +298,49 @@ func TestTaskWait_ErrorRun(t *testing.T) {
 	}
 
 	code, out, stderr := sendCaptured(t, []string{"task", "runs", taskID})
-	if code != 0 || !strings.Contains(out, "error: 429 Usage limit reached") {
-		t.Fatalf("task runs: exit %d, out %q, stderr %q, want the cause in the STATUS cell", code, out, stderr)
+	if code != 0 || !strings.Contains(out, "error: rate limited (5h window)") {
+		t.Fatalf("task runs: exit %d, out %q, stderr %q, want the rate-limit text in the STATUS cell", code, out, stderr)
+	}
+}
+
+// TestTaskWait_ExitSixOnRateLimited: a run that hit a provider quota exits 6
+// and prints the rate-limit line right after the outcome line.
+func TestTaskWait_ExitSixOnRateLimited(t *testing.T) {
+	_, taskID := waitEnv(t, "quota-error")
+	runID := detachedRun(t, taskID)
+
+	code, stdout, stderr := sendCaptured(t, []string{"task", "wait", runID})
+	if code != 6 {
+		t.Fatalf("exit = %d, want 6; stdout = %q, stderr = %q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "rate limited (5h window)") {
+		t.Fatalf("stdout = %q, want the rate-limit line", stdout)
+	}
+	lines := strings.Split(stdout, "\n")
+	if len(lines) < 2 || !strings.HasPrefix(lines[1], "rate limited (5h window)") {
+		t.Fatalf("stdout = %q, want the rate-limit line second", stdout)
+	}
+}
+
+// TestTaskWait_OtherExitCodesUnchanged pins waitExitCode for every
+// non-rate-limited outcome.
+func TestTaskWait_OtherExitCodesUnchanged(t *testing.T) {
+	tests := []struct {
+		name string
+		row  runSummaryRow
+		want int
+	}{
+		{"done", runSummaryRow{Status: "done"}, 0},
+		{"done needs-continue", runSummaryRow{Status: "done", Disposition: "needs-continue"}, 4},
+		{"stopped", runSummaryRow{Status: "stopped"}, 3},
+		{"error", runSummaryRow{Status: "error"}, 1},
+		{"error other kind", runSummaryRow{Status: "error", FailureKind: "other"}, 1},
+		{"error rate limited", runSummaryRow{Status: "error", FailureKind: "rate_limited"}, 6},
+	}
+	for _, tt := range tests {
+		if got := waitExitCode(tt.row); got != tt.want {
+			t.Errorf("%s: waitExitCode = %d, want %d", tt.name, got, tt.want)
+		}
 	}
 }
 

@@ -148,6 +148,11 @@ type runLogsResult struct {
 	StopReason  string `json:"stopReason,omitempty"`
 	Disposition string `json:"disposition,omitempty"`
 	Err         string `json:"err,omitempty"`
+	// FailureKind/Window/ResetAt mirror an error run's typed failure
+	// (ADR-0041); absent when none. ResetAt is RFC 3339 UTC.
+	FailureKind string `json:"failureKind"`
+	Window      string `json:"window"`
+	ResetAt     string `json:"resetAt"`
 	// BaseSHA/HeadSHA/Dirty mirror the run's git provenance (O1), absent
 	// while unknown.
 	BaseSHA string        `json:"baseSha,omitempty"`
@@ -1580,6 +1585,11 @@ type runSummaryRow struct {
 	HeadSHA    *string
 	// Disposition is "needs-continue" for a run that ended done at a cap.
 	Disposition string
+	// FailureKind is "rate_limited" for a run that hit a provider quota;
+	// FailureWindow names the window, FailureResetAt is when it resets.
+	FailureKind    string
+	FailureWindow  string
+	FailureResetAt *time.Time
 }
 
 // runModelCell is a run's MODEL column: the requested model; when none was
@@ -1597,8 +1607,13 @@ func runModelCell(r runSummaryRow) string {
 
 // runStatusCell is a run's STATUS column: the status, and its disposition when
 // it has one (a run "done" at a turn cap reads "done (needs-continue)": not
-// finished). A failed run with an error text reads "error: <cause>".
-func runStatusCell(status, disposition, errText string) string {
+// finished). A failed run with an error text reads "error: <cause>"; a
+// rate-limited one reads "error: rate limited (5h window), resets ...".
+func runStatusCell(r runSummaryRow, now time.Time) string {
+	status, disposition, errText := r.Status, r.Disposition, r.Err
+	if status == "error" && r.FailureKind == "rate_limited" {
+		return status + ": " + rateLimitedText(r.FailureWindow, r.FailureResetAt, now)
+	}
 	if status == "error" && strings.TrimSpace(errText) != "" {
 		return status + ": " + runErrCause(errText)
 	}
@@ -1700,7 +1715,7 @@ func cmdTaskRuns(args []string) int {
 	for _, r := range rows {
 		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.ID, r.ChatID, r.Provider, runModelCell(r),
 			runStartedCell(r.StartedAt, now), runDurationCell(r, now), runUsageCell(r), runCommitsCell(r, worktree),
-			runStatusCell(r.Status, r.Disposition, r.Err))
+			runStatusCell(r, now))
 	}
 	tw.Flush()
 	return 0

@@ -19,7 +19,8 @@ const cmdTaskWaitUsage = "usage: smind task wait <runId|item:ID> [--timeout <dur
 
 // cmdTaskWait blocks until a run is terminal and reports the outcome in its
 // exit code: 0 done, 1 error, 3 stopped, 4 done at a cap (needs-continue),
-// 5 --timeout expired (run left running).
+// 5 --timeout expired (run left running), 6 error from a provider rate limit
+// (the output says when it resets).
 func cmdTaskWait(args []string) int {
 	var runID string
 	var timeout time.Duration
@@ -197,6 +198,11 @@ func waitExitCode(row runSummaryRow) int {
 		return 0
 	case "stopped":
 		return 3
+	case "error":
+		if row.FailureKind == "rate_limited" {
+			return 6
+		}
+		return 1
 	default:
 		return 1
 	}
@@ -289,6 +295,9 @@ func renderWaitSummary(row runSummaryRow, finalText string, now time.Time) strin
 		finalText = ""
 	}
 	out := fmt.Sprintf("run %s %s%s after %s; model %s; %s; %s.", row.ID, outcome, stop, dur, model, usage, git)
+	if row.Status == "error" && row.FailureKind == "rate_limited" {
+		out += "\n" + rateLimitedText(row.FailureWindow, row.FailureResetAt, now)
+	}
 	if text := trimFinalText(finalText); text != "" {
 		out += "\n\n" + text
 	}
