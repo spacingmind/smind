@@ -19,8 +19,8 @@ func WithRunContract(ctx context.Context, c RunContract) context.Context {
 	return context.WithValue(ctx, runContractKey{}, c)
 }
 
-// runContractFrom returns the contract attached to ctx (zero if none).
-func runContractFrom(ctx context.Context) RunContract {
+// RunContractFrom returns the contract attached to ctx (zero if none).
+func RunContractFrom(ctx context.Context) RunContract {
 	c, _ := ctx.Value(runContractKey{}).(RunContract)
 	return c
 }

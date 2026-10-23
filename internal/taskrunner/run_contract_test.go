@@ -29,10 +29,10 @@ func runContract(t *testing.T, r *Runner, taskID int64, p Provider, prompt, inst
 
 func TestRunContractFrom_RoundTrip(t *testing.T) {
 	t.Parallel()
-	if c := runContractFrom(context.Background()); c.Instructions != "" {
+	if c := RunContractFrom(context.Background()); c.Instructions != "" {
 		t.Fatalf("empty ctx has a contract: %+v", c)
 	}
-	if c := runContractFrom(WithRunContract(context.Background(), RunContract{Instructions: "x"})); c.Instructions != "x" {
+	if c := RunContractFrom(WithRunContract(context.Background(), RunContract{Instructions: "x"})); c.Instructions != "x" {
 		t.Fatalf("got %+v", c)
 	}
 }
