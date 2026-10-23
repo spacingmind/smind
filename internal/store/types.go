@@ -280,8 +280,19 @@ type AgentProfile struct {
 	// FallbackProfileID names the profile to continue on for "fallback"
 	// (a suggestion for "none"/"wait"); nil = none.
 	FallbackProfileID *int64
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	// The seat contract (ADR-0041 S1); every field optional, all unset =
+	// a legacy profile. OrchestrationTools nil = unmanaged, otherwise
+	// whether a run gets the built-in smind MCP server. Instructions is
+	// role text and Skills names bundled skills appended to it. ChildPolicy
+	// ("" | "none" | "leaf" | "profiles") and ChildProfileIDs say which
+	// profiles this seat may launch.
+	OrchestrationTools *bool
+	Instructions       string
+	Skills             []string
+	ChildPolicy        string
+	ChildProfileIDs    []int64
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 // McpServer is a named, daemon-global MCP server definition (docs/

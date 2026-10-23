@@ -363,6 +363,24 @@ var migrations = []migration{
 		},
 	},
 	{
+		// ADR-0041 S1: the seat contract on agent profiles.
+		name: "profile_contract",
+		apply: func(db *sql.DB) error {
+			for _, c := range []struct{ name, def string }{
+				{"orchestration_tools", "INTEGER"},
+				{"instructions", "TEXT NOT NULL DEFAULT ''"},
+				{"skills", "TEXT NOT NULL DEFAULT ''"},
+				{"child_policy", "TEXT NOT NULL DEFAULT ''"},
+				{"child_profile_ids", "TEXT NOT NULL DEFAULT ''"},
+			} {
+				if err := addColumnIfMissing(db, "agent_profiles", c.name, c.def); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
+	{
 		// ADR-0041 F2: the profile a run was launched with, and the run it
 		// continues after a rate limit.
 		name: "run_profile_failover",

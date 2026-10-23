@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/wsclient"
 )
 
@@ -20,7 +23,7 @@ func registerMCPDiscoveryTools(srv *mcp.Server, client *wsclient.Client) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_get", Description: "Get one task by id (id, title, status, branch, worktreePath, parentTaskId) -- the worktreePath is where to review a task's work with git."}, mcpTaskGet(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "run_list", Description: "List runs, newest first (at most 200), optionally filtered by taskId (across all of that task's chats), chatId, or status (e.g. \"running\"). Use this to recover a lost run id after task_send. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately."}, mcpRunList(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "provider_list", Description: "List the daemon's supported providers, each with its permission modes (id, autoApproves) and defaultMode. An orchestrator may not pick an auto-approving mode or autoAccept itself -- pass profileId (a human-authored profile) instead. A provider with cooldownUntil (RFC 3339 UTC) is rate limited until then: sends to it by an agent fail fast, so choose another provider."}, mcpProviderList(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "profile_list", Description: "List the human-authored agent profiles (id, name, provider, permissionMode, autoAccept, thinkingLevel, notes, and when set onRateLimit / fallbackProfileId). Pass a profile's id as task_send's profileId to run with its settings."}, mcpProfileList(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "profile_list", Description: "List the human-authored agent profiles (id, name, provider, permissionMode, autoAccept, thinkingLevel, notes, and when set onRateLimit / fallbackProfileId; plus the seat contract: role, orchestrationTools, childPolicy, childProfileIds, skills, hasInstructions -- never the instruction text). Pass a profile's id as task_send's profileId to run with its settings."}, mcpProfileList(client))
 }
 
 // workspaceListOutput is workspace_list's structured output: every
@@ -173,15 +176,24 @@ type profileListOutput struct {
 // read it.
 func mcpProfileList(client *wsclient.Client) mcp.ToolHandlerFor[struct{}, profileListOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, profileListOutput, error) {
-		var profiles []map[string]any
-		if err := callWS(ctx, client, "profile_list", "profile.list", nil, &profiles); err != nil {
+		var raw json.RawMessage
+		if err := callWS(ctx, client, "profile_list", "profile.list", nil, &raw); err != nil {
 			return nil, profileListOutput{}, err
+		}
+		var profiles []map[string]any
+		var typed []store.AgentProfile
+		if err := json.Unmarshal(raw, &profiles); err != nil {
+			return nil, profileListOutput{}, fmt.Errorf("profile_list: decode: %w", err)
+		}
+		if err := json.Unmarshal(raw, &typed); err != nil {
+			return nil, profileListOutput{}, fmt.Errorf("profile_list: decode: %w", err)
 		}
 		if profiles == nil {
 			profiles = []map[string]any{}
 		}
-		for _, p := range profiles {
+		for i, p := range profiles {
 			addProfileFailoverFields(p)
+			addProfileContractFields(p, typed[i])
 		}
 		return nil, profileListOutput{Profiles: profiles}, nil
 	}
@@ -204,6 +216,32 @@ func addFailureFields(row map[string]any) {
 		if ts, err := time.Parse(time.RFC3339Nano, s); err == nil {
 			row["resetAt"] = ts.UTC().Format(time.RFC3339)
 		}
+	}
+}
+
+// addProfileContractFields adds the camelCase ADR-0041 seat-contract keys
+// to one decoded profile: orchestrationTools (omitted when unmanaged), role,
+// childPolicy, childProfileIds and skills (omitted when empty). The
+// instructions text is never returned -- role text can be long and is for the
+// run, not for browsing -- so the Go-named Instructions key is removed and
+// hasInstructions reports whether there is any.
+func addProfileContractFields(p map[string]any, t store.AgentProfile) {
+	if t.OrchestrationTools != nil {
+		p["orchestrationTools"] = *t.OrchestrationTools
+	}
+	p["role"] = profileRole(t)
+	p["childPolicy"] = t.ChildPolicy
+	ids := t.ChildProfileIDs
+	if ids == nil {
+		ids = []int64{}
+	}
+	p["childProfileIds"] = ids
+	if len(t.Skills) > 0 {
+		p["skills"] = t.Skills
+	}
+	delete(p, "Instructions")
+	if t.Instructions != "" {
+		p["hasInstructions"] = true
 	}
 }
 

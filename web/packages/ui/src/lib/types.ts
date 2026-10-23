@@ -99,6 +99,12 @@ export interface AgentProfile {
   /** ADR-0025: a model id from the provider's catalog, or "" for the provider's default (absent on an older daemon). */
   Model?: string;
   Notes: string;
+  /** ADR-0041 seat contract; all optional, absent/unset = a legacy profile. null = unmanaged. */
+  OrchestrationTools?: boolean | null;
+  Instructions?: string;
+  Skills?: string[];
+  ChildPolicy?: string;
+  ChildProfileIDs?: number[];
   CreatedAt: string;
   UpdatedAt: string;
 }

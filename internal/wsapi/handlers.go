@@ -2266,6 +2266,11 @@ func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 			Notes                string          `json:"notes"`
 			OnRateLimit          string          `json:"onRateLimit"`
 			FallbackProfileID    *int64          `json:"fallbackProfileId"`
+			OrchestrationTools   *bool           `json:"orchestrationTools"`
+			Instructions         string          `json:"instructions"`
+			Skills               []string        `json:"skills"`
+			ChildPolicy          string          `json:"childPolicy"`
+			ChildProfileIDs      []int64         `json:"childProfileIds"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("profile.create: invalid params: %w", err)
@@ -2274,15 +2279,20 @@ func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 			return nil, fmt.Errorf("profile.create: %w", err)
 		}
 		return profReg.Create(store.AgentProfile{
-			Name:              p.Name,
-			Provider:          p.Provider,
-			PermissionMode:    p.PermissionMode,
-			AutoAccept:        p.AutoAccept,
-			ThinkingLevel:     p.ThinkingLevel,
-			Model:             p.Model,
-			Notes:             p.Notes,
-			OnRateLimit:       p.OnRateLimit,
-			FallbackProfileID: p.FallbackProfileID,
+			Name:               p.Name,
+			Provider:           p.Provider,
+			PermissionMode:     p.PermissionMode,
+			AutoAccept:         p.AutoAccept,
+			ThinkingLevel:      p.ThinkingLevel,
+			Model:              p.Model,
+			Notes:              p.Notes,
+			OnRateLimit:        p.OnRateLimit,
+			FallbackProfileID:  p.FallbackProfileID,
+			OrchestrationTools: p.OrchestrationTools,
+			Instructions:       p.Instructions,
+			Skills:             p.Skills,
+			ChildPolicy:        p.ChildPolicy,
+			ChildProfileIDs:    p.ChildProfileIDs,
 		})
 	}
 }
@@ -2324,6 +2334,11 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			Notes                string          `json:"notes"`
 			OnRateLimit          string          `json:"onRateLimit"`
 			FallbackProfileID    *int64          `json:"fallbackProfileId"`
+			OrchestrationTools   *bool           `json:"orchestrationTools"`
+			Instructions         string          `json:"instructions"`
+			Skills               []string        `json:"skills"`
+			ChildPolicy          string          `json:"childPolicy"`
+			ChildProfileIDs      []int64         `json:"childProfileIds"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("profile.update: invalid params: %w", err)
@@ -2332,16 +2347,21 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			return nil, fmt.Errorf("profile.update: %w", err)
 		}
 		return profReg.Update(store.AgentProfile{
-			ID:                p.ID,
-			Name:              p.Name,
-			Provider:          p.Provider,
-			PermissionMode:    p.PermissionMode,
-			AutoAccept:        p.AutoAccept,
-			ThinkingLevel:     p.ThinkingLevel,
-			Model:             p.Model,
-			Notes:             p.Notes,
-			OnRateLimit:       p.OnRateLimit,
-			FallbackProfileID: p.FallbackProfileID,
+			ID:                 p.ID,
+			Name:               p.Name,
+			Provider:           p.Provider,
+			PermissionMode:     p.PermissionMode,
+			AutoAccept:         p.AutoAccept,
+			ThinkingLevel:      p.ThinkingLevel,
+			Model:              p.Model,
+			Notes:              p.Notes,
+			OnRateLimit:        p.OnRateLimit,
+			FallbackProfileID:  p.FallbackProfileID,
+			OrchestrationTools: p.OrchestrationTools,
+			Instructions:       p.Instructions,
+			Skills:             p.Skills,
+			ChildPolicy:        p.ChildPolicy,
+			ChildProfileIDs:    p.ChildProfileIDs,
 		})
 	}
 }

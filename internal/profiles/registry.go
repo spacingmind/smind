@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/spacingmind/smind/internal/skills"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
@@ -153,7 +154,93 @@ func (r *Registry) validate(p *store.AgentProfile) error {
 	if err := taskrunner.ValidateModel(info, p.Model); err != nil {
 		return err
 	}
-	return r.validateFailover(p)
+	if err := r.validateFailover(p); err != nil {
+		return err
+	}
+	return r.validateContract(p)
+}
+
+// Seat-contract size caps (ADR-0041 S1), in bytes.
+const (
+	maxInstructionsBytes = 16 << 10
+	maxContractBytes     = 32 << 10
+)
+
+// validateContract checks the ADR-0041 seat contract and normalises
+// ChildPolicy: "" stays "" only for a pure legacy profile (no
+// orchestrationTools, instructions or skills); otherwise an unset policy
+// becomes "none". orchestrationTools=false forces "none".
+func (r *Registry) validateContract(p *store.AgentProfile) error {
+	if len(p.Instructions) > maxInstructionsBytes {
+		return fmt.Errorf("instructions are %d bytes, over the %d byte cap", len(p.Instructions), maxInstructionsBytes)
+	}
+	if len(p.Skills) > 0 {
+		bundle, err := skills.Bundle()
+		if err != nil {
+			return fmt.Errorf("load bundled skills: %w", err)
+		}
+		bodies := make(map[string]int, len(bundle))
+		for _, sk := range bundle {
+			bodies[sk.Name] = len(sk.Files["SKILL.md"])
+		}
+		total := len(p.Instructions)
+		seen := make(map[string]bool, len(p.Skills))
+		for _, name := range p.Skills {
+			size, ok := bodies[name]
+			if !ok {
+				return fmt.Errorf("unknown skill %q (not a bundled skill)", name)
+			}
+			if seen[name] {
+				return fmt.Errorf("duplicate skill %q", name)
+			}
+			seen[name] = true
+			total += size
+		}
+		if total > maxContractBytes {
+			return fmt.Errorf("instructions plus skills are %d bytes, over the %d byte cap", total, maxContractBytes)
+		}
+	}
+
+	switch p.ChildPolicy {
+	case "", "none", "leaf", "profiles":
+	default:
+		return fmt.Errorf("invalid childPolicy %q (want none, leaf or profiles)", p.ChildPolicy)
+	}
+	if p.OrchestrationTools != nil && !*p.OrchestrationTools && (p.ChildPolicy == "leaf" || p.ChildPolicy == "profiles") {
+		return fmt.Errorf("a profile without orchestration tools cannot launch children")
+	}
+	switch p.ChildPolicy {
+	case "profiles":
+		if len(p.ChildProfileIDs) == 0 {
+			return fmt.Errorf("childPolicy profiles requires childProfileIds")
+		}
+		seen := make(map[int64]bool, len(p.ChildProfileIDs))
+		for _, id := range p.ChildProfileIDs {
+			if p.ID != 0 && id == p.ID {
+				return fmt.Errorf("a profile cannot list itself as a child")
+			}
+			if seen[id] {
+				return fmt.Errorf("duplicate child profile %d", id)
+			}
+			seen[id] = true
+			if _, err := r.store.GetAgentProfile(id); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return fmt.Errorf("child profile %d not found", id)
+				}
+				return err
+			}
+		}
+	default:
+		if len(p.ChildProfileIDs) > 0 {
+			return fmt.Errorf("childProfileIds requires childPolicy profiles")
+		}
+	}
+
+	legacy := p.OrchestrationTools == nil && p.Instructions == "" && len(p.Skills) == 0
+	if p.ChildPolicy == "" && !legacy {
+		p.ChildPolicy = "none"
+	}
+	return nil
 }
 
 // validateFailover checks the ADR-0041 rate-limit policy fields and
