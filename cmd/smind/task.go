@@ -450,7 +450,7 @@ func renderTaskList(w io.Writer, tasks []store.Task) {
 }
 
 // cmdTaskSendUsage is printed on any argument error in cmdTaskSend.
-const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking off|standard|extended] [--detach] [--verbose]\n       smind task send <taskId> <prompt> --profile <profileId> [--chat <chatId>] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking off|standard|extended] [--detach] [--verbose]"
+const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking off|standard|extended] [--detach] [--verbose]\n       smind task send <taskId> <prompt> --profile <profileId> [--chat <chatId>] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking off|standard|extended] [--detach] [--verbose]\n       (omit --profile to continue the chat's last profile; --profile none keeps the first form and drops it)"
 
 // unpinnedModelNote is the stderr note printed when a claude-native run
 // starts without --model. With a configured default (config
@@ -605,7 +605,8 @@ func cmdTaskSend(args []string) int {
 	// owns provider, permission mode and auto-accept, so what the loop took
 	// for the provider is the first word of the prompt.
 	var profileID int64
-	if profileArg != "" {
+	noProfile := profileArg == "none"
+	if profileArg != "" && !noProfile {
 		if mode != "" || autoAccept {
 			fmt.Fprintln(os.Stderr, "task send: --mode and --auto-accept cannot be combined with --profile (the profile owns them)")
 			return 2
@@ -613,7 +614,7 @@ func cmdTaskSend(args []string) int {
 		var perr error
 		profileID, perr = parseInt64(profileArg)
 		if perr != nil || profileID <= 0 {
-			fmt.Fprintf(os.Stderr, "task send: invalid --profile value %q\n", profileArg)
+			fmt.Fprintf(os.Stderr, "task send: invalid --profile value %q (want a profile id or \"none\")\n", profileArg)
 			return 2
 		}
 		if provider != "" {
@@ -683,8 +684,12 @@ func cmdTaskSend(args []string) int {
 	params := map[string]any{
 		"taskId": taskID, "provider": provider, "prompt": prompt,
 	}
+	// No --profile: no profileId key, so the daemon inherits the chat's last
+	// profile (sticky seats). --profile none: an explicit 0 drops it.
 	if profileID != 0 {
 		params["profileId"] = profileID
+	} else if noProfile {
+		params["profileId"] = 0
 	}
 	if mode != "" {
 		params["permissionMode"] = mode

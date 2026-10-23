@@ -17,7 +17,16 @@ import (
 // reports the params of the run.start the call produced.
 func newTaskSendRecorder(t *testing.T) func(map[string]any) map[string]json.RawMessage {
 	t.Helper()
+	send, _ := newTaskSendRecorderMethods(t)
+	return send
+}
+
+// newTaskSendRecorderMethods is newTaskSendRecorder plus the list of every
+// daemon method the fake saw, in order.
+func newTaskSendRecorderMethods(t *testing.T) (func(map[string]any) map[string]json.RawMessage, func() []string) {
+	t.Helper()
 	var mu sync.Mutex
+	var methods []string
 	var starts []map[string]json.RawMessage
 	up := websocket.Upgrader{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -35,6 +44,9 @@ func newTaskSendRecorder(t *testing.T) func(map[string]any) map[string]json.RawM
 			if err := ws.ReadJSON(&env); err != nil {
 				return
 			}
+			mu.Lock()
+			methods = append(methods, env.Method)
+			mu.Unlock()
 			var result any = map[string]any{"ok": true}
 			switch env.Method {
 			case "provider.list":
@@ -82,7 +94,11 @@ func newTaskSendRecorder(t *testing.T) func(map[string]any) map[string]json.RawM
 		return starts[len(starts)-1]
 	}
 
-	return send
+	return send, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), methods...)
+	}
 }
 
 // TestMCPTaskSend_NotifyOnFinishForwarded pins ADR-0041 N1's MCP seam: an
@@ -128,5 +144,26 @@ func TestMCPTaskSend_ForwardsProfileID(t *testing.T) {
 	got = send(map[string]any{"taskId": 1, "provider": "glm", "prompt": "hi"})
 	if _, present := got["profileId"]; present {
 		t.Fatalf("run.start has profileId = %s when omitted, want the key absent", got["profileId"])
+	}
+}
+
+func TestMCPTaskSend_ProfileZeroForwardedWithoutProfileGet(t *testing.T) {
+	send, methods := newTaskSendRecorderMethods(t)
+	got := send(map[string]any{"taskId": 1, "provider": "glm", "prompt": "hi", "profileId": 0})
+	if string(got["profileId"]) != "0" {
+		t.Fatalf("run.start profileId = %q, want 0", got["profileId"])
+	}
+	for _, m := range methods() {
+		if m == "profile.get" {
+			t.Fatalf("profile.get was called for profileId 0: %v", methods())
+		}
+	}
+}
+
+func TestMCPTaskSend_OmittedProfileIdOmittedOnTheWire(t *testing.T) {
+	send := newTaskSendRecorder(t)
+	got := send(map[string]any{"taskId": 1, "provider": "glm", "prompt": "hi"})
+	if v, ok := got["profileId"]; ok {
+		t.Fatalf("run.start carries profileId = %s, want the key absent (inherit)", v)
 	}
 }

@@ -113,3 +113,75 @@ func TestTaskSend_WithoutProfileUnchanged(t *testing.T) {
 		t.Errorf("no prompt: code %d stderr %q", code, stderr)
 	}
 }
+
+// seatThenStop starts a seat run with the profile and waits until it is
+// stopped, so the chat is free for the follow-up under test.
+func seatThenStop(t *testing.T, client *wsclient.Client, id, profID string) int64 {
+	t.Helper()
+	code, stdout, stderr := sendCaptured(t, []string{"task", "send", id, "seat", "--profile", profID, "--detach"})
+	if code != 0 {
+		t.Fatalf("seat send exit = %d; stderr = %q", code, stderr)
+	}
+	runID := strings.TrimSpace(stdout)
+	waitForRunStatus(t, client, runID, "running")
+	stopRun(t, client, runID)
+	waitForRunStatus(t, client, runID, "stopped")
+	want, _ := strconv.ParseInt(profID, 10, 64)
+	return want
+}
+
+func TestTaskSend_ProfileNoneSendsZeroAndKeepsOldArity(t *testing.T) {
+	client, id := hangingTask(t)
+	profID := seedGLMProfile(t, client, map[string]any{})
+	seatThenStop(t, client, id, profID)
+
+	code, stdout, stderr := sendCaptured(t, []string{"task", "send", id, "glm", "plain", "again", "--profile", "none", "--mode", "plan", "--detach"})
+	if code != 0 {
+		t.Fatalf("exit = %d; stderr = %q", code, stderr)
+	}
+	runID := strings.TrimSpace(stdout)
+	defer stopRun(t, client, runID)
+	waitForRunStatus(t, client, runID, "running")
+	run, err := daemonStoreFor(t, client).GetRun(runID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if run.ProfileID != 0 || run.Provider != "glm" || run.PermissionMode != "plan" || run.Prompt != "plain again" {
+		t.Fatalf("run = profile %d provider %q mode %q prompt %q", run.ProfileID, run.Provider, run.PermissionMode, run.Prompt)
+	}
+}
+
+func TestTaskSend_NoProfileFlagOmitsTheKey(t *testing.T) {
+	client, id := hangingTask(t)
+	profID := seedGLMProfile(t, client, map[string]any{})
+	want := seatThenStop(t, client, id, profID)
+
+	// No profileId on the wire: the daemon inherits the seat's profile.
+	code, stdout, stderr := sendCaptured(t, []string{"task", "send", id, "glm", "follow", "up", "--detach"})
+	if code != 0 {
+		t.Fatalf("exit = %d; stderr = %q", code, stderr)
+	}
+	runID := strings.TrimSpace(stdout)
+	defer stopRun(t, client, runID)
+	waitForRunStatus(t, client, runID, "running")
+	run, err := daemonStoreFor(t, client).GetRun(runID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if run.ProfileID != want {
+		t.Fatalf("follow-up ProfileID = %d, want %d (inherited)", run.ProfileID, want)
+	}
+}
+
+func TestTaskSend_ProfileInvalidValueRejected(t *testing.T) {
+	client, id := hangingTask(t)
+	for _, v := range []string{"abc", "0", "-3"} {
+		code, _, stderr := sendCaptured(t, []string{"task", "send", id, "glm", "hi", "--profile", v, "--detach"})
+		if code != 2 || !strings.Contains(stderr, "invalid --profile value") || !strings.Contains(stderr, "none") {
+			t.Errorf("--profile %s: code %d stderr %q", v, code, stderr)
+		}
+	}
+	if rows := listRuns(t, client); len(rows) != 0 {
+		t.Errorf("runs started despite rejection: %+v", rows)
+	}
+}

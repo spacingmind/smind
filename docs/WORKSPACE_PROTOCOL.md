@@ -184,7 +184,9 @@ smind can host the three roles itself as seat profiles (ADR-0041). Seed the
 standard pack once with `smind profile seed roles`: `peer-sonnet`, `peer-glm`
 (falls back to `peer-sonnet` on a provider rate limit), `lead`, `reviewer` and
 `supervisor`. Seeding is idempotent by name; a profile you already have or
-edited is kept as is.
+edited is kept as is. A follow-up to a seat's chat that does not name a profile
+keeps the chat's last profile (a seat stays a seat); pass `--profile none` /
+`profileId: 0` to drop it, or start a new chat.
 
 - **Supervisor** is a root task the Human launches: `smind task new <ws>
   "<title>"`, then `smind task send <task> <prompt> --profile <supervisor id>`
