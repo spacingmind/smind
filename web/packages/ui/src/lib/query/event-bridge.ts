@@ -202,8 +202,11 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
     }
     case "forge.status": {
       const status = (payload as { status?: ForgeStatus } | null)?.status;
-      if (typeof status === "object" && status !== null && Array.isArray(status.hosts)) {
-        queryClient.setQueryData<ForgeStatus>(queryKeys.forgeStatus(), status);
+      const held = queryClient.getQueryData<ForgeStatus>(queryKeys.forgeStatus());
+      if (typeof status === "object" && status !== null && Array.isArray(status.hosts) && held) {
+        // The event is the same for every connection, so it cannot carry `canSetToken` (a property of THIS
+        // connection's channel): keep the value the RPC answered with, or the field would lock after any event.
+        queryClient.setQueryData<ForgeStatus>(queryKeys.forgeStatus(), { ...status, canSetToken: held.canSetToken });
       } else {
         void queryClient.invalidateQueries({ queryKey: queryKeys.forgeStatus() });
       }

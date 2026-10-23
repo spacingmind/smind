@@ -81,6 +81,17 @@ describe("Settings → GitHub", () => {
     expect(screen.queryByTestId("github-host-github.com")).not.toBeInTheDocument();
   });
 
+  it("keeps this connection's canSetToken when a forge.status event arrives (the event cannot carry it)", async () => {
+    const { client } = await mount(status({ canSetToken: true, hosts: [] }));
+    expect(screen.getByTestId("github-token-input")).toBeEnabled();
+    const { canSetToken: _omitted, ...eventStatus } = status();
+    void _omitted;
+    await act(async () => client.pushNotification("forge.status", { status: eventStatus }));
+    expect(screen.getByTestId("github-host-github.com")).toHaveTextContent("octo");
+    expect(screen.getByTestId("github-token-input")).toBeEnabled();
+    expect(screen.queryByTestId("github-insecure")).not.toBeInTheDocument();
+  });
+
   it("disables the field on an insecure channel", async () => {
     await mount(status({ canSetToken: false }));
     expect(screen.getByTestId("github-token-input")).toBeDisabled();
