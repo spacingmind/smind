@@ -28,7 +28,7 @@ import { AppHeader } from "@/components/app-header";
 import { UpdateBadge } from "@/components/update-badge";
 import { useAppUpdate } from "@/lib/app-update";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
-import { useAutoOpenPRTab } from "@/hooks/use-auto-open-pr-tab";
+import { PRTabAutoOpen } from "@/components/pr-panel/pr-tab-auto-open";
 import { useTaskGit } from "@/hooks/use-task-git";
 import { PRPanelPane } from "@/components/pr-panel/pr-panel-pane";
 import { TerminalPane } from "@/components/terminal-pane";
@@ -667,14 +667,6 @@ function AppShell({
   );
 
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
-  // G9: a task with a PR gets its PR tab once, in the background (never again after a close).
-  const selectedGit = useTaskGit(selectedTask?.ID ?? null);
-  useAutoOpenPRTab({
-    taskId: selectedTask?.ID ?? null,
-    prNumber: selectedGit?.pr?.number ?? null,
-    tabs: taskState ? collectAllTabs(taskState.root) : null,
-    openTab,
-  });
   const focusedPane = taskState ? findPaneById(taskState.root, taskState.focusedPaneId) : null;
   const paneCount = taskState ? collectAllPanes(taskState.root).length : 0;
   // Which of the selected task's chats already have a tab open, anywhere
@@ -1270,6 +1262,8 @@ function AppShell({
        */}
       <SidebarToggleAction settingsOpen={settingsOpen} closeMobileRef={closeMobileSidebarRef} />
       <CommandPalette />
+      {/* G9: a task with a PR gets its PR tab once, in the background (never again after a close). */}
+      <PRTabAutoOpen taskId={selectedTask?.ID ?? null} tabs={taskState ? collectAllTabs(taskState.root) : null} openTab={openTab} />
       <ShellCommands
         client={client}
         tasks={allTasks}
