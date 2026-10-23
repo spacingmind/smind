@@ -38,6 +38,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, ListRenderItemInfo, NativeScrollEvent, NativeSyntheticEvent, StyleSheet, View } from 'react-native';
 import { Button, useNativeState } from '@expo/ui';
+import { useRouter } from 'expo-router';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { UiHost } from '../ui/UiHost';
 import { useScreenInsets } from '../ui/useScreenInsets';
@@ -51,6 +52,7 @@ import { createThumbLoader } from '../thumbLoader';
 import { AttachmentsInfo, defaultChatId, fetchDaemonInfo, fetchRunAttachment, listProviders, listRunsForTask, ProviderInfo, RunSummary } from '../api';
 import { firstSendProvider } from '../firstSend';
 import { withRunPrompt } from '../promptLine';
+import { taskHref } from '../navigation/routes';
 import { recallSelection } from '../newTaskPrefs';
 import { continueRun, isEchoOfOptimisticLine, sendFollowUpPrompt, RunTail } from '../followUpPrompt';
 import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
@@ -76,6 +78,7 @@ import { LoadingState } from './task/LoadingState';
 import { MetaLine } from './task/MetaLine';
 import { PermissionCard } from './task/PermissionCard';
 import { RunStrip } from './task/RunStrip';
+import { TaskTreeSection } from './task/TaskTreeSection';
 import { ThinkingRow } from './task/ThinkingRow';
 import { ToolCallRow } from './task/ToolCallRow';
 import { UserBubble } from './task/UserBubble';
@@ -92,6 +95,8 @@ interface Props {
 
 export function TaskDetailScreen({ conn, taskId }: Props) {
   const theme = useAppTheme();
+  const router = useRouter();
+  const openTask = useCallback((id: number, title: string) => router.push(taskHref({ ID: id, Title: title })), [router]);
   const insets = useScreenInsets();
   const styles = useMemo(() => makeStyles(theme, insets.bottom), [theme, insets.bottom]);
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
@@ -631,6 +636,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
       {state.kind === 'ready' ? (
         <>
           {state.run !== null ? <RunStrip runId={state.run.ID} provider={state.run.Provider} status={state.run.Status} /> : null}
+          <TaskTreeSection conn={conn} taskId={taskId} pendingTaskIds={noPendingTasks} onOpenTask={openTask} />
           <View style={styles.listWrap}>
             <FlatList
               ref={listRef}
@@ -684,6 +690,8 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   );
 }
 
+// This screen has no unread-approval set of its own: the tree marks permissions from run state alone.
+const noPendingTasks: ReadonlySet<number> = new Set();
 const keyExtractor = (item: TranscriptItem) => item.key;
 const emptyTranscript = <EmptyState title="(empty transcript)" body="Nothing has been said in this run yet." />;
 /** A task with no run: either no providers to send with, or ready for its first prompt. */
