@@ -130,7 +130,11 @@ CREATE TABLE IF NOT EXISTS runs (
     -- ADR-0041 B1: typed terminal reason of an error run.
     failure_kind TEXT NOT NULL DEFAULT '', -- 'rate_limited' | ''
     failure_window TEXT NOT NULL DEFAULT '', -- e.g. '5h'; '' = unknown
-    failure_reset_at TIMESTAMP -- UTC reset instant; NULL = unknown
+    failure_reset_at TIMESTAMP, -- UTC reset instant; NULL = unknown
+    -- ADR-0041 B3: the parent chat to notify when this child run finishes,
+    -- and when that notification was claimed. NULL = none / not yet.
+    reply_chat_id INTEGER,
+    parent_notified_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS run_events (
@@ -253,6 +257,7 @@ CREATE TABLE IF NOT EXISTS chat_queue (
     cancel_reason TEXT NOT NULL DEFAULT '',
     cancel_kind TEXT NOT NULL DEFAULT '',  -- 'user' | 'auto' once cancelled
     attachments TEXT NOT NULL DEFAULT '',  -- attach.EncodeSet of the prompt's attachments (ADR-0038)
+    not_before TIMESTAMP,                  -- ADR-0041: held until then; NULL = deliverable now
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );

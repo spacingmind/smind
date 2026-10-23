@@ -44,6 +44,7 @@ type taskSendInput struct {
 	AutoAccept     bool   `json:"autoAccept,omitempty" jsonschema:"approve every permission prompt without asking a human (ACP providers only); may not be set by an orchestrating agent"`
 	Model          string `json:"model,omitempty" jsonschema:"optional model id for the run: any id from the chosen provider's catalog (see provider_list models; claude-native also takes any syntax-valid id such as sonnet or claude-opus-5-5). Omit for the provider default; overrides the profile's model"`
 	ProfileID      *int64 `json:"profileId,omitempty" jsonschema:"optional id of a human-authored agent profile supplying the provider and permission settings"`
+	NotifyOnFinish *bool  `json:"notifyOnFinish,omitempty" jsonschema:"set false for a fire-and-forget child: the daemon will not wake you when it finishes; default true"`
 	WhenBusy       string `json:"whenBusy,omitempty" jsonschema:"what to do when the chat already has a running run: reject (error), queue (append, delivered at the next turn boundary -- the default), or interrupt (stop the running run and deliver first)"`
 	FromTaskID     *int64 `json:"fromTaskId,omitempty" jsonschema:"optional: your own task id, for the [message from task #T, chat #C] provenance header on the delivered prompt"`
 	FromChatID     *int64 `json:"fromChatId,omitempty" jsonschema:"optional: your own chat id, paired with fromTaskId"`
@@ -173,10 +174,10 @@ func mcpTaskSend(client *wsclient.Client) mcp.ToolHandlerFor[taskSendInput, task
 		// Known limitation (ADR-0021 §4 vs ADR-0019 decision 6): a
 		// profileId send rides as source=human, so the server's
 		// non-human auto-approve guard accepts the profile's
-		// human-authored settings -- which also means agent provenance
-		// (the [message from task #T, chat #C] header) is dropped for
-		// profile sends. A profile-carrying agent that wants the header
-		// must forgo the profile or accept the loss.
+		// human-authored settings -- which also means the [message from
+		// task #T, chat #C] header is still not shown for profile sends.
+		// The sender ids do ride along (below) so the daemon can notify
+		// the parent chat when the child finishes (ADR-0041 B3).
 		if in.ProfileID != nil {
 			source = "human"
 		}
@@ -188,10 +189,13 @@ func mcpTaskSend(client *wsclient.Client) mcp.ToolHandlerFor[taskSendInput, task
 		if model != "" {
 			params["model"] = model
 		}
+		if in.NotifyOnFinish != nil {
+			params["notifyOnFinish"] = *in.NotifyOnFinish
+		}
 		if in.ChatID != nil {
 			params["chatId"] = *in.ChatID
 		}
-		if source == "agent" {
+		if source == "agent" || (in.FromTaskID != nil && in.FromChatID != nil) {
 			params["fromTaskId"] = *in.FromTaskID
 			params["fromChatId"] = *in.FromChatID
 		}

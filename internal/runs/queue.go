@@ -52,6 +52,9 @@ type chatQueueRunConfig struct {
 	AutoAccept     bool   `json:"autoAccept"`
 	ThinkingLevel  string `json:"thinkingLevel"`
 	Model          string `json:"model,omitempty"`
+	// ReplyChatID is the parent chat to tell when the delivered run
+	// finishes (ADR-0041 B3), computed at enqueue time; 0 = none.
+	ReplyChatID int64 `json:"replyChatId,omitempty"`
 }
 
 // SetStarter wires the dependencies delivery needs to start runs itself
@@ -126,6 +129,12 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		cooldownUntil, cooling = until, true
 	}
 
+	notify := true
+	if o := resolveStartOptions(opts); o.notifySet {
+		notify = o.notify
+	}
+	replyChatID := reg.replyChatFor(wm, taskID, source, fromTaskID, fromChatID, notify)
+
 	// An agent-sourced prompt carries its provenance header on an
 	// immediate start too (ADR-0021 §4) -- the queued path stamps it at
 	// delivery via deliverPrompt instead, so it is only prepended here
@@ -165,6 +174,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		model:              model,
 		purpose:            startPurpose(opts),
 		origin:             source,
+		replyChatID:        replyChatID,
 		interrupt:          resolveStartOptions(opts).interrupt,
 		attachments:        resolveStartOptions(opts).attachments,
 		attachStore:        resolveStartOptions(opts).attachStore,
@@ -274,7 +284,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	}
 
 	cfg, err := json.Marshal(chatQueueRunConfig{
-		Provider: string(provider), PermissionMode: perm.Mode, AutoAccept: perm.AutoAccept, ThinkingLevel: string(thinkingLevel), Model: model,
+		Provider: string(provider), PermissionMode: perm.Mode, AutoAccept: perm.AutoAccept, ThinkingLevel: string(thinkingLevel), Model: model, ReplyChatID: replyChatID,
 	})
 	if err != nil {
 		return StartOutcome{}, fmt.Errorf("runs: start: encode run config: %w", err)
@@ -303,6 +313,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	// finish hook ran over an empty queue): deliverOne re-reads setup status
 	// from the store. Pinned by TestSetup_QueuedPromptNotStranded...
 	reg.deliverOne(chatID)
+	reg.armQueueWake()
 
 	return StartOutcome{Queued: true, QueueItemID: item.ID}, nil
 }
@@ -316,12 +327,60 @@ func (reg *Registry) DeliverQueued() {
 	if reg.closing.Load() {
 		return
 	}
+	// Every pass re-arms the wake timer for the next held item, which also
+	// covers the startup call (ADR-0041 N1b).
+	defer reg.armQueueWake()
 	chats, err := reg.st.ChatsWithQueued()
 	if err != nil {
 		return
 	}
 	for _, chatID := range chats {
 		reg.deliverOne(chatID)
+	}
+}
+
+// queueWakeSlack is added to a held item's not_before so the timer fires just
+// after the hold has passed.
+const queueWakeSlack = 10 * time.Millisecond
+
+// armQueueWake (re)sets the registry's single wake timer to the earliest
+// future not_before among queued items, or stops it when none is held. When
+// it fires it delivers whatever became due and re-arms. A no-op once closing
+// is set; CloseAll stops the timer. Never call it holding reg.mu or deliverMu.
+func (reg *Registry) armQueueWake() {
+	if reg.closing.Load() {
+		return
+	}
+	at, ok, err := reg.st.EarliestHeldNotBefore(time.Now())
+
+	reg.wakeMu.Lock()
+	defer reg.wakeMu.Unlock()
+	if reg.closing.Load() { // CloseAll latched while we queried; it stops the timer under wakeMu.
+		return
+	}
+	if reg.wakeTimer != nil {
+		reg.wakeTimer.Stop()
+		reg.wakeTimer = nil
+	}
+	if err != nil || !ok {
+		return
+	}
+	d := time.Until(at) + queueWakeSlack
+	if d < 0 {
+		d = 0
+	}
+	reg.wakeTimer = time.AfterFunc(d, func() {
+		reg.DeliverQueued() // re-arms via its deferred armQueueWake
+	})
+}
+
+// stopQueueWake stops the wake timer (CloseAll).
+func (reg *Registry) stopQueueWake() {
+	reg.wakeMu.Lock()
+	defer reg.wakeMu.Unlock()
+	if reg.wakeTimer != nil {
+		reg.wakeTimer.Stop()
+		reg.wakeTimer = nil
 	}
 }
 
@@ -385,6 +444,9 @@ func (reg *Registry) deliverOne(chatID int64) {
 		startOpts := []StartOption{WithModel(cfg.Model), WithOrigin(item.Source)}
 		if item.Priority == 1 {
 			startOpts = append(startOpts, WithInterrupt())
+		}
+		if cfg.ReplyChatID != 0 {
+			startOpts = append(startOpts, WithReplyChat(cfg.ReplyChatID))
 		}
 		startOpts = append(startOpts, reg.attachmentStartOption(item.Attachments)...)
 		runID, err := reg.Start(context.Background(), wm, runner, chat.TaskID, chatID, taskrunner.Provider(cfg.Provider), deliverPrompt(item), taskrunner.PermissionSettings{Mode: cfg.PermissionMode, AutoAccept: cfg.AutoAccept}, taskrunner.ThinkingLevel(cfg.ThinkingLevel), startOpts...)
@@ -523,8 +585,12 @@ type startOptions struct {
 	purpose   string
 	origin    string
 	interrupt bool
-	isolation *taskrunner.IsolationOptions
-	probe     *taskrunner.ProbeOptions
+	// replyChatID/notify: see WithReplyChat / WithNotifyOnFinish.
+	replyChatID int64
+	notify      bool
+	notifySet   bool
+	isolation   *taskrunner.IsolationOptions
+	probe       *taskrunner.ProbeOptions
 
 	attachments attach.Set
 	attachStore *attach.Store
@@ -536,6 +602,39 @@ type startOptions struct {
 // immediate start, so callers only need this on a direct Start.
 func WithOrigin(source string) StartOption {
 	return func(o *startOptions) { o.origin = source }
+}
+
+// WithReplyChat records the parent chat to tell when the run finishes
+// (ADR-0041 B3). StartWhenBusy computes it itself from the sender; Start
+// callers (a queued delivery) pass the value stored at enqueue time.
+func WithReplyChat(chatID int64) StartOption {
+	return func(o *startOptions) { o.replyChatID = chatID }
+}
+
+// WithNotifyOnFinish opts a child run in (default) or out of the parent
+// notification: false means no reply chat is recorded (fire-and-forget).
+func WithNotifyOnFinish(notify bool) StartOption {
+	return func(o *startOptions) { o.notify, o.notifySet = notify, true }
+}
+
+// replyChatFor is ADR-0041 B3's "which chat" rule: the sender's chat when a
+// send naming its sender (an agent send, or a profile send that kept its ids
+// under source=human) comes from the run task's own parent task, the chat belongs to
+// that parent and is not archived, and the caller did not opt out; else 0.
+// Lookup errors silently yield 0.
+func (reg *Registry) replyChatFor(wm *workspace.Manager, taskID int64, source string, fromTaskID, fromChatID int64, notify bool) int64 {
+	if !notify || fromTaskID == 0 || fromChatID == 0 {
+		return 0
+	}
+	task, err := wm.GetTask(taskID)
+	if err != nil || task.ParentTaskID == nil || *task.ParentTaskID != fromTaskID {
+		return 0
+	}
+	chat, err := wm.GetChat(fromChatID)
+	if err != nil || chat.TaskID != fromTaskID || chat.ArchivedAt != nil {
+		return 0
+	}
+	return fromChatID
 }
 
 // WithInterrupt marks the run's prompt as a mid-run interrupt (a delivered

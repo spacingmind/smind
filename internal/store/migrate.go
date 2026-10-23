@@ -326,6 +326,25 @@ var migrations = []migration{
 		},
 	},
 	{
+		// ADR-0041: a queued item may be held until not_before. Existing
+		// rows stay NULL (deliverable now).
+		name: "chat_queue_not_before",
+		apply: func(db *sql.DB) error {
+			return addColumnIfMissing(db, "chat_queue", "not_before", "TIMESTAMP")
+		},
+	},
+	{
+		// ADR-0041 B3: parent chat to notify on finish + the idempotent
+		// notified marker. Pre-existing rows stay NULL (never notified).
+		name: "run_reply_chat",
+		apply: func(db *sql.DB) error {
+			if err := addColumnIfMissing(db, "runs", "reply_chat_id", "INTEGER"); err != nil {
+				return err
+			}
+			return addColumnIfMissing(db, "runs", "parent_notified_at", "TIMESTAMP")
+		},
+	},
+	{
 		// ADR-0026 section 6: learned_skill_offers / learned_skill_loads are
 		// new tables, so schema.sql's CREATE TABLE IF NOT EXISTS already
 		// creates them on every Open; this entry is the explicit marker and

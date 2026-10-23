@@ -151,6 +151,12 @@ type Registry struct {
 	// losing it for the restart's redelivery, ADR-0021 §5).
 	closing atomic.Bool
 
+	// wakeMu guards wakeTimer: the single timer that delivers a held queue
+	// item (chat_queue.not_before, ADR-0041) when its time arrives. Taken
+	// alone -- never while holding mu or deliverMu.
+	wakeMu    sync.Mutex
+	wakeTimer *time.Timer
+
 	// maxConcurrentRunsPerTree overrides defaultMaxConcurrentRunsPerTree
 	// when > 0 (see SetMaxConcurrentRunsPerTree). Guarded by mu.
 	maxConcurrentRunsPerTree int
@@ -337,6 +343,7 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 		model:              row.Model,
 		purpose:            rowPurpose(row.Purpose),
 		origin:             row.Origin,
+		replyChatID:        row.ReplyChatID,
 		interrupt:          row.Interrupt,
 		attachments:        decodeStoredAttachments(row.Attachments),
 		startedAt:          row.StartedAt,
@@ -407,6 +414,10 @@ type run struct {
 	// interrupt. Set at start, immutable, persisted on the row.
 	origin    string
 	interrupt bool
+
+	// replyChatID is the parent chat to notify when this run finishes
+	// (ADR-0041 B3); 0 = none. Set at start, immutable, persisted on the row.
+	replyChatID int64
 
 	// attachments is the accepted prompt attachment set (ADR-0038) and
 	// attachStore the store holding its files; set at start, immutable,
@@ -733,6 +744,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		purpose:            startPurpose(opts),
 		origin:             resolveStartOptions(opts).origin,
 		interrupt:          resolveStartOptions(opts).interrupt,
+		replyChatID:        resolveStartOptions(opts).replyChatID,
 		attachments:        resolveStartOptions(opts).attachments,
 		attachStore:        resolveStartOptions(opts).attachStore,
 		isolation:          resolveStartOptions(opts).isolation,
@@ -824,6 +836,7 @@ func (reg *Registry) registerAndDrive(r *run, runCtx context.Context, runner *ta
 		ID: r.id, TaskID: r.taskID, ChatID: r.chatID, Provider: string(r.provider), Prompt: r.prompt,
 		Status: string(StatusRunning), StartedAt: r.startedAt,
 		PermissionMode: r.perm.Mode, AutoAccept: r.perm.AutoAccept, Model: r.model, Purpose: r.purpose, Origin: r.origin, Interrupt: r.interrupt,
+		ReplyChatID: r.replyChatID,
 		Attachments: attach.EncodeSet(r.attachments),
 	}); err != nil {
 		reg.mu.Lock()
@@ -1606,6 +1619,7 @@ func (reg *Registry) Stop(runID string) error {
 // internal/terminal.Registry.CloseAll's exact same reasoning and shape).
 func (reg *Registry) CloseAll() {
 	reg.closing.Store(true)
+	reg.stopQueueWake()
 
 	// Loop until a pass finds nothing running: a finish that was already
 	// inside its queue hand-off when closing latched can still register a

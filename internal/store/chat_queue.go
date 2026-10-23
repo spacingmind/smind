@@ -17,6 +17,10 @@ const (
 	ChatQueueSourceHuman        = "human"
 	ChatQueueSourceOrchestrator = "orchestrator"
 	ChatQueueSourceAgent        = "agent"
+	// ChatQueueSourceChildEvent is a daemon-authored message about a child
+	// run finishing (ADR-0041 B3). Never accepted on the wire: only the
+	// daemon enqueues it.
+	ChatQueueSourceChildEvent = "child_event"
 
 	// ChatQueueCancelUser/ChatQueueCancelAuto are the cancel_kind values
 	// stamped when a queued item is cancelled: 'user' by the
@@ -57,8 +61,11 @@ type ChatQueueItem struct {
 	// Attachments is attach.EncodeSet of the prompt's accepted attachments
 	// (ADR-0038); "" = none.
 	Attachments string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// NotBefore holds the item until that instant (ADR-0041); nil =
+	// deliverable now.
+	NotBefore *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // EnqueueChatPrompt appends an item to chatID's queue in one statement
@@ -75,6 +82,13 @@ func (s *Store) EnqueueChatPrompt(chatID int64, prompt, runConfig, source string
 // EnqueueChatPromptAttach is EnqueueChatPrompt with the prompt's encoded
 // attachment set (attach.EncodeSet; "" = none) stored on the row.
 func (s *Store) EnqueueChatPromptAttach(chatID int64, prompt, runConfig, source string, priority int, fromTaskID, fromChatID int64, attachments string) (ChatQueueItem, error) {
+	return s.EnqueueChatPromptAt(chatID, prompt, runConfig, source, priority, fromTaskID, fromChatID, attachments, nil)
+}
+
+// EnqueueChatPromptAt is EnqueueChatPromptAttach with an optional hold: a
+// non-nil notBefore keeps the item undeliverable until that instant
+// (ADR-0041). It still counts toward the per-chat bound.
+func (s *Store) EnqueueChatPromptAt(chatID int64, prompt, runConfig, source string, priority int, fromTaskID, fromChatID int64, attachments string, notBefore *time.Time) (ChatQueueItem, error) {
 	var queued int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM chat_queue WHERE chat_id = ? AND status = 'queued'`, chatID).Scan(&queued); err != nil {
 		return ChatQueueItem{}, fmt.Errorf("count queued prompts for chat %d: %w", chatID, err)
@@ -85,9 +99,9 @@ func (s *Store) EnqueueChatPromptAttach(chatID int64, prompt, runConfig, source 
 
 	now := time.Now().UTC()
 	res, err := s.db.Exec(
-		`INSERT INTO chat_queue (chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, attachments, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', NULL, '', ?, ?, ?)`,
-		chatID, prompt, runConfig, source, nullID(fromTaskID), nullID(fromChatID), priority, attachments, now, now,
+		`INSERT INTO chat_queue (chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, attachments, not_before, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', NULL, '', ?, ?, ?, ?)`,
+		chatID, prompt, runConfig, source, nullID(fromTaskID), nullID(fromChatID), priority, attachments, timePtrToNull(utcPtr(notBefore)), now, now,
 	)
 	if err != nil {
 		return ChatQueueItem{}, fmt.Errorf("insert chat queue item for chat %d: %w", chatID, err)
@@ -109,7 +123,7 @@ func nullID(id int64) any {
 
 // GetChatQueueItem returns the queue item with the given id.
 func (s *Store) GetChatQueueItem(id int64) (ChatQueueItem, error) {
-	row := s.db.QueryRow(`SELECT id, chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, cancel_kind, attachments, created_at, updated_at FROM chat_queue WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT `+chatQueueColumns+` FROM chat_queue WHERE id = ?`, id)
 	item, err := scanChatQueueItem(row)
 	if err != nil {
 		return ChatQueueItem{}, fmt.Errorf("get chat queue item %d: %w", id, err)
@@ -117,14 +131,22 @@ func (s *Store) GetChatQueueItem(id int64) (ChatQueueItem, error) {
 	return item, nil
 }
 
-// NextQueued returns chatID's oldest deliverable queued item, ordered by
+// NextQueued returns chatID's oldest deliverable (not held) queued item, ordered by
 // priority DESC (interrupt items first), then id ASC (FIFO within a
 // priority). ok is false when the chat has nothing queued.
 func (s *Store) NextQueued(chatID int64) (ChatQueueItem, bool, error) {
+	return s.NextQueuedAt(chatID, time.Now())
+}
+
+// NextQueuedAt is NextQueued at an explicit instant: an item whose
+// not_before is after now is held and skipped (ADR-0041), so a later FIFO
+// item without a hold is still returned.
+func (s *Store) NextQueuedAt(chatID int64, now time.Time) (ChatQueueItem, bool, error) {
 	row := s.db.QueryRow(
-		`SELECT id, chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, cancel_kind, attachments, created_at, updated_at
+		`SELECT `+chatQueueColumns+`
 		 FROM chat_queue WHERE chat_id = ? AND status = 'queued'
-		 ORDER BY priority DESC, id LIMIT 1`, chatID,
+		   AND (not_before IS NULL OR not_before <= ?)
+		 ORDER BY priority DESC, id LIMIT 1`, chatID, now.UTC(),
 	)
 	item, err := scanChatQueueItem(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -134,6 +156,51 @@ func (s *Store) NextQueued(chatID int64) (ChatQueueItem, bool, error) {
 		return ChatQueueItem{}, false, fmt.Errorf("next queued for chat %d: %w", chatID, err)
 	}
 	return item, true, nil
+}
+
+// SetQueuedNotBefore sets (or, with nil, clears) a queued item's hold. Only a
+// status='queued' item can be changed; anything else is an error.
+func (s *Store) SetQueuedNotBefore(id int64, t *time.Time) error {
+	res, err := s.db.Exec(
+		`UPDATE chat_queue SET not_before = ?, updated_at = ? WHERE id = ? AND status = 'queued'`,
+		timePtrToNull(utcPtr(t)), time.Now().UTC(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("set chat queue item %d not_before: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("set chat queue item %d not_before: not queued", id)
+	}
+	return nil
+}
+
+// EarliestHeldNotBefore returns the smallest not_before strictly after now
+// among queued items; ok is false when no item is held into the future.
+func (s *Store) EarliestHeldNotBefore(now time.Time) (time.Time, bool, error) {
+	var raw sql.NullTime
+	err := s.db.QueryRow(
+		`SELECT not_before FROM chat_queue WHERE status = 'queued' AND not_before > ? ORDER BY not_before LIMIT 1`, now.UTC(),
+	).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("earliest held not_before: %w", err)
+	}
+	if !raw.Valid {
+		return time.Time{}, false, nil
+	}
+	return raw.Time, true, nil
+}
+
+// utcPtr returns t normalised to UTC (nil stays nil), so every stored
+// not_before compares consistently.
+func utcPtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }
 
 // MarkDelivered stamps item id as delivered, recording the run id its
@@ -174,7 +241,7 @@ func (s *Store) MarkCancelled(id int64, kind, reason string) error {
 // (newest last) first.
 func (s *Store) ListChatQueue(chatID int64) ([]ChatQueueItem, error) {
 	rows, err := s.db.Query(
-		`SELECT id, chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, cancel_kind, attachments, created_at, updated_at
+		`SELECT `+chatQueueColumns+`
 		 FROM chat_queue WHERE chat_id = ? ORDER BY id`, chatID,
 	)
 	if err != nil {
@@ -192,6 +259,10 @@ func (s *Store) ListChatQueue(chatID int64) ([]ChatQueueItem, error) {
 	}
 	return items, rows.Err()
 }
+
+// chatQueueColumns is the chat_queue SELECT column list; scanChatQueueItem's
+// Scan order must stay in lockstep with it.
+const chatQueueColumns = "id, chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, cancel_kind, attachments, not_before, created_at, updated_at"
 
 // ChatsWithQueued returns the distinct chat ids that still have at least
 // one queued item -- used after a daemon restart to resume delivery
@@ -218,10 +289,11 @@ func scanChatQueueItem(row rowScanner) (ChatQueueItem, error) {
 	var item ChatQueueItem
 	var fromTaskID, fromChatID sql.NullInt64
 	var runID sql.NullString
+	var notBefore sql.NullTime
 	if err := row.Scan(
 		&item.ID, &item.ChatID, &item.Prompt, &item.RunConfig, &item.Source,
 		&fromTaskID, &fromChatID, &item.Priority, &item.Status,
-		&runID, &item.CancelReason, &item.CancelKind, &item.Attachments, &item.CreatedAt, &item.UpdatedAt,
+		&runID, &item.CancelReason, &item.CancelKind, &item.Attachments, &notBefore, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
 		return ChatQueueItem{}, err
 	}
@@ -237,6 +309,7 @@ func scanChatQueueItem(row rowScanner) (ChatQueueItem, error) {
 		v := runID.String
 		item.RunID = &v
 	}
+	item.NotBefore = nullToTimePtr(notBefore)
 	return item, nil
 }
 
