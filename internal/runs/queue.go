@@ -114,6 +114,18 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	}
 	taskID, chatID, provider, prompt, perm, thinkingLevel = p.taskID, p.chatID, p.provider, p.prompt, p.perm, p.thinkingLevel
 
+	// ADR-0041 F1: a non-human send to a provider that an earlier run showed
+	// to be rate limited fails fast, before any run row or queue item exists.
+	// A human is never blocked; the immediate-start path notes it below.
+	var cooldownUntil time.Time
+	cooling := false
+	if until, ok := reg.activeProviderCooldown(string(provider)); ok {
+		if nonHumanSend(source, fromTaskID) {
+			return StartOutcome{}, &ProviderCooldownError{Provider: string(provider), Until: until}
+		}
+		cooldownUntil, cooling = until, true
+	}
+
 	// An agent-sourced prompt carries its provenance header on an
 	// immediate start too (ADR-0021 §4) -- the queued path stamps it at
 	// delivery via deliverPrompt instead, so it is only prepended here
@@ -247,6 +259,9 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		if err := reg.registerAndDrive(r, runCtx, runner); err != nil {
 			cancel()
 			return StartOutcome{}, err
+		}
+		if cooling {
+			reg.record(r, Event{Type: taskrunner.EventTypeSessionNote, Text: providerCooldownNote(string(provider), cooldownUntil)})
 		}
 		return StartOutcome{RunID: id}, nil
 	}

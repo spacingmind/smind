@@ -1374,6 +1374,13 @@ func (reg *Registry) finish(r *run, err error) {
 		if fail.Kind != "" {
 			_ = reg.st.UpdateRunFailure(r.id, fail.Kind, fail.Window, fail.ResetAt)
 		}
+		// ADR-0041 F1: a rate limit with a known, future reset puts the
+		// provider on cooldown. An unknown reset sets none (never guess a
+		// time); system runs (probe/reflect/curate) never do.
+		now := time.Now()
+		if fail.Kind == ratelimit.KindRateLimited && fail.ResetAt != nil && fail.ResetAt.After(now) && r.purpose == "" {
+			_ = reg.st.SetProviderCooldown(string(r.provider), *fail.ResetAt, r.id, now)
+		}
 	}
 
 	r.mu.Lock()
