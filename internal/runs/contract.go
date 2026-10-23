@@ -3,6 +3,7 @@ package runs
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -96,8 +97,34 @@ func (reg *Registry) withRunContract(ctx context.Context, r *run) context.Contex
 		slog.Warn("runs: run contract skipped", "run", r.id, "profile", r.profileID, "err", err)
 		return ctx
 	}
-	if text == "" {
+	if text == "" && p.OrchestrationTools == nil {
 		return ctx
 	}
-	return taskrunner.WithRunContract(ctx, taskrunner.RunContract{Instructions: text})
+	c := taskrunner.RunContract{Instructions: text}
+	if p.OrchestrationTools != nil {
+		c.Mcp = &taskrunner.McpPolicy{Orchestration: *p.OrchestrationTools}
+		if *p.OrchestrationTools {
+			c.Mcp.Env = map[string]string{
+				"SMIND_HOME":    reg.smindHomeDir(),
+				"SMIND_RUN_ID":  r.id,
+				"SMIND_TASK_ID": strconv.FormatInt(r.taskID, 10),
+				"SMIND_CHAT_ID": strconv.FormatInt(r.chatID, 10),
+			}
+		}
+	}
+	return taskrunner.WithRunContract(ctx, c)
+}
+
+// SetSmindHome records the daemon's home directory, handed to orchestration
+// seats' built-in MCP server as SMIND_HOME (ADR-0041 S2b).
+func (reg *Registry) SetSmindHome(dir string) {
+	reg.mu.Lock()
+	reg.smindHome = dir
+	reg.mu.Unlock()
+}
+
+func (reg *Registry) smindHomeDir() string {
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	return reg.smindHome
 }

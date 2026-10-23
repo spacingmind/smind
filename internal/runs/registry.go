@@ -171,6 +171,10 @@ type Registry struct {
 	// when > 0 (see SetMaxConcurrentRunsPerTree). Guarded by mu.
 	maxConcurrentRunsPerTree int
 
+	// smindHome is the daemon home passed to seats' built-in MCP server
+	// (SetSmindHome). Guarded by mu.
+	smindHome string
+
 	// archiving holds the task ids currently mid-archive (TryBeginArchive
 	// adds, its release func removes). While a task id is in it, every
 	// run-start path (Start, StartWhenBusy, queue delivery) refuses with

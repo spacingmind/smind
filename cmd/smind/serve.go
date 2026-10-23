@@ -149,6 +149,7 @@ func cmdServe(args []string) int {
 	}
 	srv.API().AttachUsage(poller, registry, passive)
 	srv.API().Runs.SetMaxConcurrentRunsPerTree(cfg.Orchestration.MaxConcurrentRunsPerTree)
+	srv.API().Runs.SetSmindHome(config.Dir())
 	srv.API().Runs.SetNotifyParent(cfg.Orchestration.NotifyParent)
 	srv.API().Runs.SetNotifyDebounce(time.Duration(cfg.Orchestration.NotifyDebounceSeconds) * time.Second)
 	wireAttachments(srv.API(), wm, db)
