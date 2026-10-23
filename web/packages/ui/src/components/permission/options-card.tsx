@@ -23,7 +23,9 @@ export function OptionsCard({
 }) {
   const [respondingTo, setRespondingTo] = useState<string | null>(null);
   const [respondError, setRespondError] = useState<string | null>(null);
-  const recommended = recommendedOptionId(pending.options);
+  // A git rule is per-call: never offer a sticky "always" choice for it.
+  const options = pending.detail?.gitRule ? pending.options.filter((o) => !o.kind.endsWith("_always")) : pending.options;
+  const recommended = recommendedOptionId(options);
 
   async function handleClick(optionId: string) {
     setRespondingTo(optionId);
@@ -53,7 +55,7 @@ export function OptionsCard({
         ) : undefined
       }
     >
-      {pending.options.map((option, index) => (
+      {options.map((option, index) => (
         <PermissionOptionButton
           key={option.id}
           option={option}
