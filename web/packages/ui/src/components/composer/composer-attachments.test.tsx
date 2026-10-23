@@ -255,6 +255,15 @@ describe("attachment drop zone", () => {
     expect(screen.getByTestId("count")).toHaveTextContent("2");
   });
 
+  it("the drop cue tints the pane and outlines it with a dashed border instead of washing it out", async () => {
+    await renderPane();
+    const overlay = screen.getByTestId("attachment-drop-overlay");
+    expect(overlay.className).toContain("bg-primary/[0.04]");
+    expect(overlay.className).not.toContain("bg-background");
+    expect(overlay.className).toContain("pointer-events-none");
+    expect(screen.getByTestId("attachment-drop-outline").className).toContain("border-dashed");
+  });
+
   it("ignores drags that carry no files", async () => {
     await renderPane();
     fireEvent.dragEnter(screen.getByTestId("pane"), { dataTransfer: { types: ["text/plain"], files: [] } });
