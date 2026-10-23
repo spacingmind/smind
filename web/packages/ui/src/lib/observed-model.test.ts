@@ -29,7 +29,7 @@ describe("selectObservedModel", () => {
     const runs = [
       run({ ChatID: 2, model: "older", StartedAt: "2026-10-23T09:00:00Z" }),
       run({ ChatID: 3, model: "newer", StartedAt: "2026-10-23T11:00:00Z" }),
-      run({ ChatID: 4, Provider: "codex", model: "other-provider", StartedAt: "2026-10-23T12:00:00Z" }),
+      run({ ChatID: 4, Provider: "glm", model: "other-provider", StartedAt: "2026-10-23T12:00:00Z" }),
     ];
     expect(selectObservedModel(runs, { chatId: 1, provider: "claude" })).toBe("newer");
     expect(selectObservedModel(runs, { chatId: null, provider: "claude" })).toBe("newer");
@@ -39,7 +39,7 @@ describe("selectObservedModel", () => {
     const runs = [
       run({ ChatID: 1, StartedAt: "2026-10-23T12:00:00Z" }),
       run({ ChatID: 1, model: "", StartedAt: "2026-10-23T12:00:00Z" }),
-      run({ ChatID: 9, Provider: "codex", model: "codex-model" }),
+      run({ ChatID: 9, Provider: "glm", model: "codex-model" }),
     ];
     expect(selectObservedModel(runs, { chatId: 1, provider: "claude" })).toBeUndefined();
     expect(selectObservedModel(undefined, { chatId: 1, provider: "claude" })).toBeUndefined();
