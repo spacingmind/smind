@@ -31,6 +31,20 @@ func TestWaitExitCode(t *testing.T) {
 	}
 }
 
+func TestRenderWaitSummary_NamesTask(t *testing.T) {
+	got := renderWaitSummary(runSummaryRow{ID: "abc", TaskID: 12, Status: "done"}, "", time.Now())
+	if !strings.HasPrefix(got, "run abc (task #12) done after") {
+		t.Errorf("summary %q does not name the task", got)
+	}
+}
+
+func TestRenderWaitSummary_UnknownTaskKeepsOldText(t *testing.T) {
+	got := renderWaitSummary(runSummaryRow{ID: "abc", Status: "done"}, "", time.Now())
+	if !strings.HasPrefix(got, "run abc done after") || strings.Contains(got, "task #") {
+		t.Errorf("summary %q should keep the old text without a task", got)
+	}
+}
+
 func TestRenderWaitSummary(t *testing.T) {
 	start := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	fin := start.Add(192 * time.Second)

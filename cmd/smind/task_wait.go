@@ -319,7 +319,11 @@ func renderWaitSummary(row runSummaryRow, finalText string, now time.Time) strin
 	if row.Status == "error" && strings.HasPrefix(strings.TrimSpace(finalText), "[error]") {
 		finalText = ""
 	}
-	out := fmt.Sprintf("run %s %s%s after %s; model %s; %s; %s.", row.ID, outcome, stop, dur, model, usage, git)
+	who := row.ID
+	if row.TaskID > 0 {
+		who = fmt.Sprintf("%s (task #%d)", row.ID, row.TaskID)
+	}
+	out := fmt.Sprintf("run %s %s%s after %s; model %s; %s; %s.", who, outcome, stop, dur, model, usage, git)
 	if row.Status == "error" && row.FailureKind == "rate_limited" {
 		out += "\n" + rateLimitedText(row.FailureWindow, row.FailureResetAt, now)
 	}

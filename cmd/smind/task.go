@@ -423,17 +423,30 @@ func cmdTaskList(args []string) int {
 		return 1
 	}
 
-	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tTITLE\tSTATUS\tBRANCH")
+	renderTaskList(os.Stdout, tasks)
+	return 0
+}
+
+// renderTaskList prints the task table; BRANCH is last because it is long.
+func renderTaskList(w io.Writer, tasks []store.Task) {
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tTITLE\tSTATUS\tPARENT\tSETUP\tBRANCH")
 	for _, t := range tasks {
 		branch := ""
 		if t.Branch != nil {
 			branch = *t.Branch
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\n", t.ID, t.Title, t.Status, branch)
+		parent := "-"
+		if t.ParentTaskID != nil {
+			parent = strconv.FormatInt(*t.ParentTaskID, 10)
+		}
+		setup := t.SetupStatus
+		if setup == "" {
+			setup = "-"
+		}
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", t.ID, t.Title, t.Status, parent, setup, branch)
 	}
 	tw.Flush()
-	return 0
 }
 
 // cmdTaskSendUsage is printed on any argument error in cmdTaskSend.
