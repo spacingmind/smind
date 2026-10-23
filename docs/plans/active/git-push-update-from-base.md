@@ -123,12 +123,16 @@ merge order daemon first); both branch from `origin/develop`, no stacking.
 
 ## Progress
 
-- [ ] spec committed
-- [ ] Peer 1 daemon
-- [ ] Peer 2 web
-- [ ] review / ACCEPT / REJECT
-- [ ] PR 1, PR 2, live smoke, screenshots
+- [x] spec committed
+- [x] Peer 1 daemon (task 62): ACCEPT 4cbc25bc (+ Lead fix: merge message uses the short ref). Reviewed: no force flag or `+` refspec, refuseRunScoped on both, no MCP tool, conflict never aborts, RPC re-checks on `svc.Fresh`.
+- [x] Peer 2 web (task 63): ACCEPT e706ddc9. Reviewed code and every screenshot frame (light/dark, 1280/390, transitions).
+- [x] PR 1 (daemon), PR 2 (web, depends on PR 1; merge daemon first)
+- [ ] Not verified: a real https push through the `gh` credential helper (no network used); live UI against the real daemon RPCs (web screenshots use mocked RPCs).
 
 ## Validation
 
-(filled at the end)
+- `go test ./...`, `go test -race ./internal/gitstate ./internal/workspace ./internal/wsapi ./internal/forge`, `task lint`: pass.
+- Live smoke on an isolated daemon (own SMIND_HOME, port 4947) against a throwaway repo with a local bare remote: publish, push, nothing-to-push,
+  non_fast_forward, merge, up_to_date, conflict (MERGE_HEAD left, files listed), merge_in_progress, invalid_strategy, rebase all behaved as specified.
+- Web: `bunx tsc -b packages/ui` clean, vitest 3479 passed; screenshots in /tmp/g7-shots (104 frames).
+- Known limit: `task.git` served from cache can lag a commit made outside smind; the RPCs recompute, so a stale payload never blocks or runs an action.
