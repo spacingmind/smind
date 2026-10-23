@@ -65,8 +65,7 @@ const windowRunScope = `FROM runs r JOIN tasks t ON t.id = r.task_id
 // only those events. System-task runs and other chats never appear.
 func (s *Store) ListChatRunsWithEventsAfter(chatID, afterEventID int64) ([]ChatWindowRun, error) {
 	rows, err := s.db.Query(
-		`SELECT r.id, r.task_id, r.chat_id, r.provider, r.prompt, r.status, r.started_at, r.finished_at, r.stop_reason,
-			r.err_msg, r.permission_mode, r.auto_accept, r.model, r.base_sha, r.head_sha, r.dirty, r.purpose, r.origin, r.interrupt, r.attachments,
+		`SELECT `+runColumnsAs("r")+`,
 			NOT EXISTS (SELECT 1 FROM run_events b WHERE b.run_id = r.id AND b.id <= ?)
 		`+windowRunScope+`
 			AND EXISTS (SELECT 1 FROM run_events e WHERE e.run_id = r.id AND e.id > ?)

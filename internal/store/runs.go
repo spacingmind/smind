@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -161,7 +162,7 @@ func (s *Store) MarkRunningRunsInterrupted(interruptedStatus string, stopReason 
 // GetRun returns the run with the given id.
 func (s *Store) GetRun(id string) (Run, error) {
 	row := s.db.QueryRow(
-		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose, origin, interrupt, attachments
+		`SELECT `+runColumns+`
 		 FROM runs WHERE id = ?`, id,
 	)
 	r, err := scanRun(row)
@@ -187,7 +188,7 @@ func (s *Store) ListRunsByPurpose(purpose string, limit int) ([]Run, error) {
 
 func (s *Store) listRuns(where string, limit int, args ...any) ([]Run, error) {
 	rows, err := s.db.Query(
-		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose, origin, interrupt, attachments
+		`SELECT `+runColumns+`
 		 FROM runs `+where+` ORDER BY started_at DESC LIMIT ?`, append(args, limit)...,
 	)
 	if err != nil {
@@ -245,6 +246,20 @@ func (s *Store) ListRunEvents(runID string) ([]RunEvent, error) {
 	return events, rows.Err()
 }
 
+// runColumns is the run SELECT column list; scanRun's Scan argument order
+// must stay in lockstep with it.
+const runColumns = "id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose, origin, interrupt, attachments"
+
+// runColumnsAs is runColumns with every column qualified by alias.
+func runColumnsAs(alias string) string {
+	parts := strings.Split(runColumns, ", ")
+	for i, c := range parts {
+		parts[i] = alias + "." + c
+	}
+	return strings.Join(parts, ", ")
+}
+
+// scanRun scans one row selected with runColumns (same order).
 func scanRun(row rowScanner) (Run, error) {
 	var r Run
 	var chatID sql.NullInt64
