@@ -22,19 +22,23 @@ function hasNoContent(d: PRDetails): boolean {
 }
 
 /**
- * One refetch at `refreshAvailableAt` when the daemon could not fetch (budget / backoff) and there is nothing to show yet;
- * cleared on blur, unmount or a newer answer.
+ * While the daemon cannot fetch (budget / backoff) and there is nothing to show yet, refetch once `refreshAvailableAt` has
+ * passed, and again after every refetch that still ends waiting: the daemon rounds that time down to the second and
+ * answers with the same value while it is still inside its floor, so the time alone never changes. The timer is armed 1 s
+ * after the later of that time and now (never early, never faster than once a second); cleared on blur or unmount.
  */
-function useRefetchWhenAvailable(details: PRDetails | undefined, focused: boolean, refetch: () => unknown) {
+const REARM_MS = 1000;
+function useRefetchWhenAvailable(details: PRDetails | undefined, focused: boolean, refetch: () => unknown, updatedAt: number) {
   const refetchRef = useRef(refetch);
   refetchRef.current = refetch;
   const waiting = details !== undefined && (details.stale === "budget" || details.stale === "backoff") && hasNoContent(details);
   const at = waiting ? Date.parse(details.refreshAvailableAt) : NaN;
   useEffect(() => {
     if (!focused || Number.isNaN(at)) return;
-    const timer = setTimeout(() => void refetchRef.current(), Math.max(0, at - Date.now()));
+    // `updatedAt` is a dependency on purpose: each completed refetch re-arms this, even with an identical answer.
+    const timer = setTimeout(() => void refetchRef.current(), Math.max(0, at - Date.now()) + REARM_MS);
     return () => clearTimeout(timer);
-  }, [focused, at]);
+  }, [focused, at, updatedAt]);
 }
 
 function PanelSkeleton({ waitingUntil }: { waitingUntil?: string }) {
@@ -63,7 +67,7 @@ export function PRPanelPane({ taskId, focused }: { taskId: number; focused: bool
   const send = useSendPRToChat(taskId);
   const [pendingCheckId, setPendingCheckId] = useState<string | null>(null);
   const details = query.data;
-  useRefetchWhenAvailable(details, focused, query.refetch);
+  useRefetchWhenAvailable(details, focused, query.refetch, query.dataUpdatedAt);
 
   const sendCheck = (check: CheckItem) => {
     if (!details) return;

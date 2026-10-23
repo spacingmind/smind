@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PRPanelPane } from "@/components/pr-panel/pr-panel-pane";
 import { clearToasts } from "@/components/ui/toast";
@@ -59,6 +59,7 @@ beforeEach(() => {
   useFocusedChatStore.setState({ byTask: { 1: 10 }, revealRequest: null });
 });
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   clearToasts();
 });
@@ -224,11 +225,76 @@ describe("PRPanelPane", () => {
     expect(screen.queryByText(/last data/)).toBeNull();
     expect(screen.queryByText(/Updated/)).toBeNull();
     const reads = () => client.calls.filter((c) => c.method === "task.prDetails");
-    await waitFor(() => expect(reads()).toHaveLength(2));
+    await waitFor(() => expect(reads()).toHaveLength(2), { timeout: 3000 });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 150));
     });
     expect(reads()).toHaveLength(2);
+  });
+
+  describe("waiting for the daemon's floor", () => {
+    const reads = (c: FakeWsClient) => c.calls.filter((x) => x.method === "task.prDetails");
+    const waitingAt = (at: number) =>
+      prDetails({
+        title: "",
+        fetchedAt: "0001-01-01T00:00:00Z",
+        stale: "backoff",
+        refreshAvailableAt: new Date(at).toISOString(),
+        checks: checksOf([]),
+        threads: { items: [], truncated: false },
+      });
+
+    /** Opens the panel, then switches to fake timers just before the first (waiting) answer, so the timer it arms is fake. */
+    async function openWaiting(focused = true) {
+      const client = new FakeWsClient();
+      const view = renderWithClientProp(<Harness client={client} focused={focused} />);
+      await load(client, null);
+      await waitFor(() => client.nth("task.prDetailsFocus", 0));
+      await act(async () => client.nth("task.prDetailsFocus", 0).resolve({}));
+      await waitFor(() => client.nth("task.prDetails", 0));
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      // The daemon's value is truncated to the second, so it can be up to 1 s before the real floor end.
+      const at = Math.floor((Date.now() + 5000) / 1000) * 1000;
+      await act(async () => client.nth("task.prDetails", 0).resolve(waitingAt(at)));
+      return { client, view, at };
+    }
+    const advance = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
+
+    it("waiting state re-arms after a refetch that returns the same refreshAvailableAt", async () => {
+      const { client, at } = await openWaiting();
+      expect(screen.getByTestId("pr-waiting")).toBeTruthy();
+      await advance(at - Date.now() + 1000);
+      expect(reads(client)).toHaveLength(2);
+      // Still inside the floor: the identical answer.
+      await act(async () => reads(client)[1]!.resolve(waitingAt(at)));
+      expect(screen.getByTestId("pr-waiting")).toBeTruthy();
+      await advance(999);
+      expect(reads(client)).toHaveLength(2);
+      await advance(1);
+      expect(reads(client)).toHaveLength(3);
+      await act(async () => reads(client)[2]!.resolve(prDetails()));
+      expect(screen.getByTestId("pr-header")).toBeTruthy();
+      expect(screen.queryByTestId("pr-waiting")).toBeNull();
+      await advance(5000);
+      expect(reads(client)).toHaveLength(3);
+    });
+
+    it("timer never fires before refreshAvailableAt", async () => {
+      const { client, at } = await openWaiting();
+      await advance(at - Date.now() - 1);
+      expect(reads(client)).toHaveLength(1);
+      await advance(1000);
+      expect(reads(client)).toHaveLength(1);
+      await advance(1);
+      expect(reads(client)).toHaveLength(2);
+    });
+
+    it("timer is cleared on blur", async () => {
+      const { client, view, at } = await openWaiting();
+      view.rerender(<Harness client={client} focused={false} />);
+      await advance(at - Date.now() + 10_000);
+      expect(reads(client)).toHaveLength(1);
+    });
   });
 
   it("zero fetchedAt shows no updated label", async () => {
