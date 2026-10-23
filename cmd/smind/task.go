@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strconv"
@@ -1558,13 +1559,16 @@ const cmdTaskRunsUsage = "usage: smind task runs <taskId> [--chat <chatId>]"
 // of runs.RunSummary's wire shape (bare Go field names, same convention
 // as chatRow; see internal/wsapi/chat_test.go's runStatusForTest).
 type runSummaryRow struct {
-	ID         string
-	TaskID     int64
-	ChatID     int64
-	Provider   string
-	Prompt     string
-	Status     string
-	StartedAt  time.Time
+	ID        string
+	TaskID    int64
+	ChatID    int64
+	Provider  string
+	Prompt    string
+	Status    string
+	StartedAt time.Time
+	// Origin is who authored the run's prompt ("human", "orchestrator",
+	// "agent", "child_event"; "" when unknown).
+	Origin     string
 	StopReason string
 	// ThinkingLevel is the run's thinking level ("" when unspecified).
 	ThinkingLevel string
@@ -1710,15 +1714,28 @@ func cmdTaskRuns(args []string) int {
 	}
 	now := time.Now()
 
-	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tCHAT\tPROVIDER\tMODEL\tSTARTED\tDURATION\tUSAGE\tCOMMITS\tSTATUS")
+	writeRunsTable(os.Stdout, rows, worktree, now)
+	return 0
+}
+
+// writeRunsTable prints the `task runs` table.
+func writeRunsTable(w io.Writer, rows []runSummaryRow, worktree string, now time.Time) {
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tCHAT\tPROVIDER\tORIGIN\tMODEL\tSTARTED\tDURATION\tUSAGE\tCOMMITS\tSTATUS")
 	for _, r := range rows {
-		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.ID, r.ChatID, r.Provider, runModelCell(r),
+		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.ID, r.ChatID, r.Provider, runOriginCell(r), runModelCell(r),
 			runStartedCell(r.StartedAt, now), runDurationCell(r, now), runUsageCell(r), runCommitsCell(r, worktree),
 			runStatusCell(r, now))
 	}
 	tw.Flush()
-	return 0
+}
+
+// runOriginCell is the ORIGIN column: who authored the run's prompt, "-" when unknown.
+func runOriginCell(r runSummaryRow) string {
+	if r.Origin == "" {
+		return "-"
+	}
+	return r.Origin
 }
 
 // cmdTaskQueueUsage is printed on any argument error in the queue group.

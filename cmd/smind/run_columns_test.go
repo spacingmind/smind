@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"os/exec"
 	"strings"
 	"testing"
@@ -157,7 +159,7 @@ func TestTaskRunsColumns(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("output = %q, want header + 1 row", out)
 	}
-	want := []string{"ID", "CHAT", "PROVIDER", "MODEL", "STARTED", "DURATION", "USAGE", "COMMITS", "STATUS"}
+	want := []string{"ID", "CHAT", "PROVIDER", "ORIGIN", "MODEL", "STARTED", "DURATION", "USAGE", "COMMITS", "STATUS"}
 	if got := strings.Fields(lines[0]); strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("header = %v, want %v", got, want)
 	}
@@ -169,5 +171,28 @@ func TestTaskRunsColumns(t *testing.T) {
 	end := strings.Index(lines[0], "USAGE")
 	if cell := strings.TrimSpace(lines[1][start:end]); cell == "-" || cell == "" {
 		t.Fatalf("duration cell = %q, want a value for a running run", cell)
+	}
+}
+
+func TestTaskRuns_ShowsOrigin(t *testing.T) {
+	var rows []runSummaryRow
+	// run.list's origin key is lowercase (json tag); decoding must pick it up.
+	if err := json.Unmarshal([]byte(`[{"ID":"r-1","ChatID":1,"Provider":"glm","Status":"done","origin":"child_event"},{"ID":"r-2","ChatID":1,"Provider":"glm","Status":"done"},{"ID":"r-3","ChatID":1,"Provider":"glm","Status":"done","origin":"human"}]`), &rows); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	writeRunsTable(&buf, rows, "", time.Now())
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("output = %q", buf.String())
+	}
+	col := strings.Index(lines[0], "ORIGIN")
+	if col < 0 || col < strings.Index(lines[0], "PROVIDER") || col > strings.Index(lines[0], "MODEL") {
+		t.Fatalf("ORIGIN not between PROVIDER and MODEL: %q", lines[0])
+	}
+	for i, want := range []string{"child_event", "-", "human"} {
+		if got := strings.Fields(lines[i+1])[3]; got != want {
+			t.Errorf("row %d origin = %q, want %q", i, got, want)
+		}
 	}
 }
