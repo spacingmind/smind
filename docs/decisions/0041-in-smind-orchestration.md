@@ -175,7 +175,7 @@ minutes) is not designed here; the dogfood did not show a stall, only quota stop
   zone), and the text can be clipped later (`clipErrMsg`); freezing the interpretation at finish time, with the daemon's `now`, keeps `run.list` stable across restarts and parser changes.
 - **Classification** happens in `Registry.finish`, from, in this order: (1) a structured signal when the backend has one — claude-native's `rate_limit_event` with `status = rejected`
   (`resetsAt` epoch, `rateLimitType` `five_hour|seven_day|…`), which smind must start recording; Codex's `UsageLimitExceeded` error info; (2) a per-provider text matcher on the agent's cause
-  text and error chain — GLM's `429 … Usage limit reached for 5 hour … reset at HH:MM:SS` (reset parsed in the daemon's local zone, rolled to tomorrow when already past; a failed parse leaves
+  text and error chain — GLM's `429 … Usage limit reached for 5 hour … reset at HH:MM:SS` (the reset is **Asia/Shanghai (UTC+8) wall time**, not the daemon's zone — see the 2026-10-23 correction below; an undated time is rolled to tomorrow when already past; a failed parse leaves
   `resetAt` NULL, never a guess); (3) otherwise not rate-limited. Unknown never classifies as rate-limited. The matchers are pure functions with the real strings from the dogfood log as fixtures.
 - **Window:** `failure_window` ("5h", "weekly", "") alongside, for the message; informational.
 - **Exposed** additively (old clients ignore it): `run.list`, `run.status`, `run.logs`, `task.tree` nodes (latest-run detail), MCP `task_status`, `task_wait`, `run_list`, `task_tree`
@@ -272,6 +272,8 @@ runs through the proxy so 429s fail over transparently — ADR-0020 decision 1 r
 as separate small PRs, B1 first.
 
 ---
+
+**Correction (2026-10-23): the GLM reset text is UTC+8.** The first draft said "parsed in the daemon's local zone". The real 429 text carries a full date and no zone (`… reset at 2026-10-22 17:35:18`, Z.ai error 1308, docs.z.ai/api-reference/api-code, which gives no zone either). Z.ai's backend runs on UTC+8, as ExaDev/agent-shim#448 infers from matching error timestamps; our own data agrees (a run at 16:33:26 +07 was refused with that text: 2 minutes before 17:35:18 UTC+8, but 1 hour before it in the daemon's +07). The classifier therefore reads GLM's reset as a fixed UTC+8 whatever the daemon's zone (`ratelimit.glmZone`, pinned by `TestClassify_GLMResetIsShanghaiTime`). The reading is an inference from third-party reports and one local data point, not a vendor statement; Claude's new text form ("resets 3pm") stays in the daemon's local zone, and Claude's structured `resetsAt` and the old `…|epoch` form are absolute. The window label and the reset are informational and never block a human send.
 
 ## Alternatives considered
 

@@ -59,7 +59,7 @@ before it opens (memory: two PRs extending one struct merge cleanly and break th
 
 Rate limit, typed reason (R1–R3)
 
-1. A run whose agent ends with GLM's `429 Usage limit reached for 5 hour. Your limit will reset at 17:35:18` ends `error` with `failureKind = rate_limited`, `window = 5h`, and `resetAt` = the next 17:35:18 in the daemon's local zone (today when still ahead, otherwise tomorrow), as an RFC 3339 UTC instant. The five run statuses are unchanged and `disposition` stays empty.
+1. A run whose agent ends with GLM's `429 Usage limit reached for 5 hour. Your limit will reset at 17:35:18` ends `error` with `failureKind = rate_limited`, `window = 5h`, and `resetAt` = 17:35:18 read as Asia/Shanghai (UTC+8) wall time (the dated form is absolute; an undated time is today when still ahead, otherwise tomorrow), as an RFC 3339 UTC instant. The five run statuses are unchanged and `disposition` stays empty.
 2. A claude-native run that received a `rate_limit_event` with `status = rejected` (`resetsAt` epoch seconds, `rateLimitType` `five_hour|seven_day|seven_day_opus|seven_day_sonnet|overage`) and then ended in error carries that epoch exactly as `resetAt` and that type as `window`; `allowed_warning` alone never classifies a run; a run that sees `rejected` for the *overage* type only, and finishes `done`, is not an error and is not classified.
 3. A Codex turn error whose info is `UsageLimitExceeded` classifies as `rate_limited`; `resetAt` is NULL unless the protocol supplies it.
 4. **Unknown never classifies:** an error with no recognised pattern, a failed parse of the reset time (`resetAt` NULL, kind still set when the pattern matched), and `429` appearing only in the agent's assistant text (not in the `[error]` cause or the error chain) all leave `failureKind` empty or `resetAt` NULL; nothing is guessed.
@@ -104,7 +104,7 @@ Later (T1, M1, M2)
 
 Go: classifier and store (R1)
 
-- `TestClassify_GLM429FiveHourFixture` (the exact string from the 2026-10-22 log; reset in local zone, rolled to tomorrow when past; zone-parametrised with a fixed clock) — AC1; `TestClassify_GLMDataDetailsFallback` (cause only in `error.data.details`); `TestClassify_UnparseableResetKeepsKindNilReset` — AC4.
+- `TestClassify_GLM429FiveHourFixture` (the exact string from the 2026-10-22 log; the reset is Asia/Shanghai (UTC+8) wall time, rolled to tomorrow when past; zone-parametrised with a fixed clock; `TestClassify_GLMResetIsShanghaiTime` pins the zone against the daemon's own) — AC1; `TestClassify_GLMDataDetailsFallback` (cause only in `error.data.details`); `TestClassify_UnparseableResetKeepsKindNilReset` — AC4.
 - `TestClassify_ClaudeRateLimitEventRejected` (exact epoch and type), `TestClassify_ClaudeWarningOnlyNeverClassifies`, `TestClassify_ClaudeOverageRejectedButDoneIsNotAnError` — AC2; `TestClassify_CodexUsageLimitExceeded` — AC3.
 - `TestClassify_429InAssistantTextOnlyIsNotClassified`, `TestClassify_UnknownErrorIsNotClassified` — AC4.
 - `TestFinish_StoresFailureColumnsAndStatusStaysError`, `TestStatusEnumUnchanged_AndDispositionEmptyForRateLimited` — AC1; `TestRunList_FailureFieldsSurviveRestartAndRehydrate`, `TestRunWire_FailureFieldsOmittedWhenEmpty` — AC5.
