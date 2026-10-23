@@ -6,10 +6,15 @@ import (
 	"log"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spacingmind/smind/internal/runs/ratelimit"
 	"github.com/spacingmind/smind/internal/store"
 )
+
+// fallbackTailMax bounds the previous attempt's output quoted into a
+// fallback successor's prompt.
+const fallbackTailMax = 4096
 
 // defaultRetryGrace is added to a rate limit's reset instant before the
 // "wait" retry becomes deliverable, so the retry does not race the provider's
@@ -50,8 +55,7 @@ func (reg *Registry) applyRateLimitPolicy(r *run, fail ratelimit.Result) {
 	case "wait":
 		reg.enqueueRateLimitRetry(r, fail)
 	case "fallback":
-		// TODO(ADR-0041 F3): start the work on prof.FallbackProfileID's
-		// provider in a new chat. F2b only surfaces the suggestion.
+		reg.startFallbackSuccessor(r, prof)
 	}
 }
 
@@ -98,4 +102,78 @@ func stripProvenanceHeader(prompt string) string {
 		}
 	}
 	return prompt
+}
+
+// failoverPreface leads a fallback successor's prompt.
+func failoverPreface(oldProvider string) string {
+	return "(The previous attempt on " + oldProvider + " stopped at a rate limit. The task's worktree holds its changes: inspect `git status` and `git log`, then continue the work below. Your earlier conversation is not available to you.)\n\n"
+}
+
+// tailBytes returns the last max bytes of s, cut on a rune boundary.
+func tailBytes(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	start := len(s) - max
+	for start < len(s) && !utf8.RuneStart(s[start]) {
+		start++
+	}
+	return s[start:]
+}
+
+// startFallbackSuccessor is ADR-0041 F3: continue the failed run's work on
+// the profile's fallback profile, in a NEW chat of the same task (a chat is
+// bound to its provider, ADR-0016). It gives up with one log line on any
+// problem. The fallback profile is human-authored, so its auto-approving
+// mode is allowed: the item goes straight to the store, deliberately
+// bypassing the non-human enqueue check, and only here. Holds no lock.
+func (reg *Registry) startFallbackSuccessor(r *run, prof store.AgentProfile) {
+	if prof.FallbackProfileID == nil || *prof.FallbackProfileID == 0 {
+		return
+	}
+	fb, err := reg.st.GetAgentProfile(*prof.FallbackProfileID)
+	if err != nil {
+		log.Printf("runs: fallback for run %s: load profile %d: %v; giving up", r.id, *prof.FallbackProfileID, err)
+		return
+	}
+	if fb.Provider == string(r.provider) {
+		log.Printf("runs: fallback for run %s: profile %d uses the same provider %s; giving up", r.id, fb.ID, fb.Provider)
+		return
+	}
+	if until, cooling := reg.activeProviderCooldown(fb.Provider); cooling {
+		log.Printf("runs: fallback for run %s: provider %s is rate-limited until %s; giving up", r.id, fb.Provider, until.Format(time.RFC3339))
+		return
+	}
+	wm, _, ok := reg.starterDeps()
+	if !ok {
+		log.Printf("runs: fallback for run %s: no starter wired; giving up", r.id)
+		return
+	}
+	chat, err := wm.CreateChat(r.taskID, "Continued on "+fb.Name)
+	if err != nil {
+		log.Printf("runs: fallback for run %s: create chat: %v; giving up", r.id, err)
+		return
+	}
+
+	r.mu.Lock()
+	tail := trailingAgentText(r.history)
+	r.mu.Unlock()
+	prompt := failoverPreface(string(r.provider)) + stripProvenanceHeader(r.prompt)
+	if tail != "" {
+		prompt += "\n\n--- tail of the previous attempt's output (read-only context, may be incomplete) ---\n" + tailBytes(tail, fallbackTailMax)
+	}
+	cfg, err := json.Marshal(chatQueueRunConfig{
+		Provider: fb.Provider, PermissionMode: fb.PermissionMode, AutoAccept: fb.AutoAccept,
+		ThinkingLevel: fb.ThinkingLevel, Model: fb.Model, ReplyChatID: r.replyChatID,
+		ProfileID: fb.ID, FailoverOf: r.id,
+	})
+	if err != nil {
+		return
+	}
+	if _, err := reg.st.EnqueueChatPromptAt(chat.ID, prompt, string(cfg), store.ChatQueueSourceOrchestrator, 0, 0, 0, "", nil); err != nil {
+		log.Printf("runs: fallback for run %s: enqueue on chat %d: %v; giving up", r.id, chat.ID, err)
+		return
+	}
+	reg.notifyQueueUpdated(chat.ID)
+	reg.deliverOne(chat.ID)
 }
