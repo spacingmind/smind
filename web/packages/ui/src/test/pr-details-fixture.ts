@@ -41,3 +41,19 @@ export const prDetails = (over: Partial<PRDetails> = {}): PRDetails => ({
   refreshAvailableAt: "",
   ...over,
 });
+
+export const checksOf = (items: CheckItem[], over: Partial<PRDetails["checks"]> = {}): PRDetails["checks"] => {
+  const count = (state: CheckItem["state"]) => items.filter((c) => c.state === state).length;
+  const failed = count("failure");
+  const pending = count("pending");
+  return {
+    state: failed > 0 ? "failure" : pending > 0 ? "pending" : items.length > 0 ? "success" : "none",
+    passed: count("success"),
+    failed,
+    pending,
+    total: items.length,
+    items,
+    truncated: false,
+    ...over,
+  };
+};
