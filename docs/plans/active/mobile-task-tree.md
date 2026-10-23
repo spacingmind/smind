@@ -76,8 +76,13 @@ relay/E2EE, theme tokens, `src/ui/*`, the daemon.
 
 ## Progress
 
-- 2026-10-23: plan written; Peer 1 (pure module + api), Peer 2 (UI + harness seed + smoke) pending.
+- 2026-10-23: plan written. Peer A (pure module + api, accepted), Peer B (devharness `seed-tree`, accepted; adds a test-only fakeagent scenario `rate-limited <min>` and a `peer-rpc` harness command), Peer C (Subtasks UI, accepted). Lead changes after review: distinct seed root titles, root row shows its tier, `n/a` instead of `n/a (subtree n/a)`, section body max height 360, smoke stage `70-task-tree.mjs`.
+- Deviation from the plan: a rate-limited node is counted in the header's "failed" rollup (state is `error`); the row itself reads "Rate limited".
 
 ## Validation
 
-(filled when each AC is confirmed)
+- AC1 `fetchTaskTree` + test in `api.test.ts` (Peer A). AC2-AC10 by `taskTree.test.ts` (14 named scenarios) and the smoke stage; AC9 tap-to-open by the `tree-opened-lead` frames (lead-1 opens with its own 2-child subtree); AC10 by reading the section: no control besides the expand/collapse header and row navigation.
+- AC11 frames (light + dark, 390 px, reviewed by eye): `tree-nested`, `tree-nested-collapsed`, `tree-collapse-t{0,90,220}`, `tree-expand-t{0,90,220}` (single-frame swap, no half-animated frames), `tree-opened-lead`, `tree-permission`, `tree-ratelimited` ("Rate limited · resets in 47m"), `tree-failed`, `tree-big` ("31 more"), `tree-leaf` (no section); cost shown (`$0.42`, `n/a (subtree $0.42)`) and `n/a` both appear in `tree-nested`.
+- AC12 `cd mobile && npx tsc --noEmit && npm test` (684 tests), `task lint`, `task test` green.
+- Mutations: `MAX_RENDERED_NODES` 100 -> 1000 and ignoring the daemon `truncated` flag each fail a `taskTree` test; `formatCost(null)` returning `$0.00` fails the n/a tests.
+- Not verified: a real device / native iOS or Android rendering (web smoke only), the 1 MiB frame against a real 500-node tree (a 130-node tree passes the relay; 500 nodes is about 200 KiB by estimate), the live 30 s refresh and countdown tick.

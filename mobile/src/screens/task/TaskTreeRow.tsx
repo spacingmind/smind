@@ -56,7 +56,7 @@ export const TaskTreeRow = memo(function TaskTreeRow({
   const toneColor = stateTone === 'danger' ? theme.status.danger : stateTone === 'warning' ? theme.status.warning : theme.foregroundSubtle;
   const running = state === 'Running';
   const permLabel = `${permissions} ${permissions === 1 ? 'permission' : 'permissions'}`;
-  const detail = [state, stateNote, countdown ? `· ${countdown}` : null].filter(Boolean).join(' ');
+  const detail = [isRoot ? 'This task ·' : null, state, stateNote, countdown ? `· ${countdown}` : null].filter(Boolean).join(' ');
   const shownTitle = title || `Task ${id}`;
   const body = (
     <>
@@ -66,7 +66,7 @@ export const TaskTreeRow = memo(function TaskTreeRow({
           <Text style={styles.title} numberOfLines={1}>
             {shownTitle}
           </Text>
-          {isRoot ? <Text style={styles.meta}>This task</Text> : tierLabel ? <Badge>{tierLabel}</Badge> : null}
+          {tierLabel ? <Badge>{tierLabel}</Badge> : null}
         </View>
         <Text style={[styles.meta, { color: toneColor }]} numberOfLines={1}>
           {detail}

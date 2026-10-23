@@ -15,7 +15,7 @@ import { AppIcon } from '../../ui/AppIcon';
 import { TaskTreeRow } from './TaskTreeRow';
 
 const REFRESH_MS = 30_000;
-const MAX_BODY_HEIGHT = 280;
+const MAX_BODY_HEIGHT = 360;
 
 interface Props {
   conn: RelayConnection;

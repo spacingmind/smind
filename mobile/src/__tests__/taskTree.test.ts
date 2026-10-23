@@ -63,6 +63,7 @@ describe('taskTree', () => {
   });
 
   it('buildTreeRows caps at MAX_RENDERED_NODES and reports hiddenCount', () => {
+    expect(MAX_RENDERED_NODES).toBe(100); // the plan's bound (decision 3); a change must be deliberate
     const out = buildTreeRows({ nodes: nodes(MAX_RENDERED_NODES + 12), truncated: false }, NOW, none);
     expect(out.hiddenCount).toBe(12);
     expect(out.rows).toHaveLength(MAX_RENDERED_NODES + 1);
@@ -146,7 +147,7 @@ describe('taskTree', () => {
     const parent = node(1, { childCount: 2, usage: { own: usage(0.42), subtree: usage(1.37), archivedDescendants: 0 } });
     expect(costLabel(parent)).toBe('$0.42 (subtree $1.37)');
     expect(costLabel(node(2, { usage: { own: usage(0.42), subtree: usage(0.42), archivedDescendants: 0 } }))).toBe('$0.42');
-    expect(costLabel(node(3, { childCount: 1, usage: { own: usage(null), subtree: usage(null), archivedDescendants: 0 } }))).toBe('n/a (subtree n/a)');
+    expect(costLabel(node(3, { childCount: 1, usage: { own: usage(null), subtree: usage(null), archivedDescendants: 0 } }))).toBe('n/a');
     expect(costLabel(node(4, { usage: { own: usage(null), subtree: usage(null), archivedDescendants: 0 } }))).toBe('n/a');
   });
 

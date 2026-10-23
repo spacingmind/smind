@@ -130,7 +130,9 @@ export function formatCost(costUsd: number | null | undefined): string {
 export function costLabel(node: Pick<TaskTreeNode, 'childCount' | 'usage'>): string {
   const own = formatCost(node.usage?.own?.costUsd);
   if (!(node.childCount > 0)) return own;
-  return `${own} (subtree ${formatCost(node.usage?.subtree?.costUsd)})`;
+  const subtree = formatCost(node.usage?.subtree?.costUsd);
+  if (own === 'n/a' && subtree === 'n/a') return 'n/a';
+  return `${own} (subtree ${subtree})`;
 }
 
 /** Waiting-for-permission and failed counts over the given nodes' own run state. */
