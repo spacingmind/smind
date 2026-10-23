@@ -146,3 +146,53 @@ func TestDrive_SystemRunNoContract(t *testing.T) {
 		}
 	}
 }
+
+// policyFor builds the contract the way drive does for a run of profile p.
+func policyFor(t *testing.T, p store.AgentProfile) (taskrunner.RunContract, string) {
+	t.Helper()
+	_, st := newTestWorkspaceManager(t)
+	reg := newTestRegistry(t, st)
+	reg.SetSmindHome("/daemon/home")
+	p.Name, p.Provider = "seat-"+t.Name(), "glm"
+	p, err := st.CreateAgentProfile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &run{id: "run-42", taskID: 7, chatID: 9, profileID: p.ID}
+	return taskrunner.RunContractFrom(reg.withRunContract(context.Background(), r)), r.id
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+func TestDrive_OrchestrationProfileBuildsMcpPolicyWithRunIdentity(t *testing.T) {
+	t.Parallel()
+	c, runID := policyFor(t, store.AgentProfile{OrchestrationTools: boolPtr(true)})
+	if c.Mcp == nil || !c.Mcp.Orchestration {
+		t.Fatalf("Mcp = %+v, want orchestration policy", c.Mcp)
+	}
+	want := map[string]string{"SMIND_HOME": "/daemon/home", "SMIND_RUN_ID": runID, "SMIND_TASK_ID": "7", "SMIND_CHAT_ID": "9"}
+	if len(c.Mcp.Env) != len(want) {
+		t.Fatalf("env keys = %d, want %d", len(c.Mcp.Env), len(want))
+	}
+	for k, v := range want {
+		if c.Mcp.Env[k] != v {
+			t.Fatalf("env[%s] = %q, want %q", k, c.Mcp.Env[k], v)
+		}
+	}
+}
+
+func TestDrive_PeerProfileHasPolicyWithoutOrchestration(t *testing.T) {
+	t.Parallel()
+	c, _ := policyFor(t, store.AgentProfile{OrchestrationTools: boolPtr(false)})
+	if c.Mcp == nil || c.Mcp.Orchestration || c.Mcp.Env != nil {
+		t.Fatalf("Mcp = %+v, want a policy with no orchestration and nil env", c.Mcp)
+	}
+}
+
+func TestDrive_UnmanagedProfileHasNoMcpPolicy(t *testing.T) {
+	t.Parallel()
+	c, _ := policyFor(t, store.AgentProfile{Instructions: "ROLE"})
+	if c.Mcp != nil || c.Instructions != "ROLE" {
+		t.Fatalf("contract = %+v, want instructions only", c)
+	}
+}

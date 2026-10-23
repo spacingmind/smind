@@ -233,7 +233,10 @@ type Runner struct {
 	// means the feature is fully off. lookPath resolves a stdio server's
 	// bare command (defaults to exec.LookPath; injectable for tests).
 	mcpServers McpServerSource
-	lookPath   func(string) (string, error)
+	// smindBinary is the built-in orchestration entry's executable
+	// (WithSmindBinary); "" resolves os.Executable lazily.
+	smindBinary string
+	lookPath    func(string) (string, error)
 
 	// sessionStore holds the resumable SessionHandle each provider's
 	// RunPrompt call reads before a turn and writes after one, keyed by
@@ -424,7 +427,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 		return fmt.Errorf("taskrunner: initialize %s agent: %w", provider, err)
 	}
 
-	rows, err := r.mcpServersForWorkspace(workspaceID)
+	rows, err := r.mcpRowsFor(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)
 	}
@@ -786,9 +789,16 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 		env = append(env, launchEnv...)
 	}
 
-	rows, err := r.mcpServersForWorkspace(workspaceID)
+	rows, err := r.mcpRowsFor(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("taskrunner: claude mcp servers: %w", err)
+	}
+	if contract := RunContractFrom(ctx); contract.Mcp != nil {
+		// A managed run sees only the daemon's registered servers (+ smind
+		// for orchestration seats): strict mode hides user-level servers
+		// (e.g. a personal `smind` in ~/.claude.json), so a Peer cannot
+		// inherit orchestration tools. Applies even with no rows.
+		opts = append(opts, claudecode.WithStrictMCPConfig())
 	}
 	if len(rows) > 0 {
 		select {
@@ -1124,7 +1134,10 @@ func (r *Runner) runCodexNative(ctx context.Context, chatID, workspaceID int64, 
 	if err := client.Initialize(ctx); err != nil {
 		return fmt.Errorf("taskrunner: initialize codex agent: %w", err)
 	}
-	if rows, err := r.mcpServersForWorkspace(workspaceID); err != nil {
+	if RunContractFrom(ctx).Mcp != nil {
+		r.sendSessionNote(ctx, events, "orchestration tools cannot be added or removed for codex-native runs (process-wide MCP config): the seat's tool policy is not enforced")
+	}
+	if rows, err := r.mcpRowsFor(ctx, workspaceID); err != nil {
 		return fmt.Errorf("taskrunner: codex mcp servers: %w", err)
 	} else if len(rows) > 0 {
 		names := make([]string, len(rows))

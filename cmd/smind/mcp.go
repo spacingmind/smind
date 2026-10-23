@@ -68,6 +68,19 @@ func cmdMcpServe(args []string) int {
 	}
 	defer client.Close()
 
+	// ADR-0041 S2b: a seat run's built-in smind entry carries the run's id.
+	// Identify as that run so the daemon applies its run-scoped rules (own
+	// task/chat ids, no administrative methods). This is a drift guard, not
+	// a sandbox (an agent with a shell can read the daemon token). Fail
+	// closed: the agent sees this MCP server fail to start instead of
+	// running with hidden full powers.
+	if runID := os.Getenv("SMIND_RUN_ID"); runID != "" {
+		if err := client.Call(context.Background(), "session.identify", map[string]any{"runId": runID}, nil); err != nil {
+			fmt.Fprintf(os.Stderr, "mcp serve: identify as run %s: %v\n", runID, err)
+			return 1
+		}
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

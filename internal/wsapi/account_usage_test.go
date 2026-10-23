@@ -462,7 +462,8 @@ func TestUsage_RefreshFromRunScopedCallerIsTouch(t *testing.T) {
 
 func TestUsage_ConnRunScopedPlumbedToRequestContext(t *testing.T) {
 	var got atomic.Bool
-	hs := map[string]handlerFunc{"probe": func(_ context.Context, rc *requestContext, _ json.RawMessage) (any, error) {
+	// An allowlisted method name: a run-scoped conn refuses any other.
+	hs := map[string]handlerFunc{"run.list": func(_ context.Context, rc *requestContext, _ json.RawMessage) (any, error) {
 		got.Store(rc.runScoped)
 		return "ok", nil
 	}}
@@ -472,7 +473,7 @@ func TestUsage_ConnRunScopedPlumbedToRequestContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go c.serve(ctx)
-	data, _ := json.Marshal(envelope{ID: "1", Method: "probe"})
+	data, _ := json.Marshal(envelope{ID: "1", Method: "run.list"})
 	if err := client.Send(data); err != nil {
 		t.Fatal(err)
 	}
