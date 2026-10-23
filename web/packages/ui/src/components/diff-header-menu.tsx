@@ -11,8 +11,8 @@ import { Icons } from "@/lib/icons";
 import type { DiffPrefs } from "@/lib/diff-prefs";
 
 /**
- * The Diff header's actions below `md`: the two view toggles, Refresh and
- * Create PR collapsed into one "⋯" menu, so they stop overflowing a phone-
+ * The Diff header's actions below `md`: the two view toggles, and Refresh
+ * collapsed into one "⋯" menu, so they stop overflowing a phone-
  * width pane (git-github-ux G6). Each choice is a menu item with a check on
  * the active one; the inline header (SegmentedToggle + buttons) is what
  * wider panes keep.
@@ -21,18 +21,12 @@ export function DiffHeaderMenu({
   prefs,
   onChangePrefs,
   onRefresh,
-  onCreatePr,
   refreshDisabled,
-  createPrDisabled,
-  creatingPr,
 }: {
   prefs: DiffPrefs;
   onChangePrefs: (patch: Partial<DiffPrefs>) => void;
   onRefresh: () => void;
-  onCreatePr: () => void;
   refreshDisabled: boolean;
-  createPrDisabled: boolean;
-  creatingPr: boolean;
 }) {
   return (
     <DropdownMenu>
@@ -68,9 +62,6 @@ export function DiffHeaderMenu({
         <DropdownMenuSeparator />
         <DropdownMenuItem disabled={refreshDisabled} onSelect={onRefresh} data-testid="diff-menu-refresh">
           <Icons.refresh aria-hidden /> Refresh
-        </DropdownMenuItem>
-        <DropdownMenuItem disabled={createPrDisabled} onSelect={onCreatePr} data-testid="diff-menu-create-pr">
-          {creatingPr ? "Creating PR…" : "Create PR"}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

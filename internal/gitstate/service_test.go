@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -68,6 +69,7 @@ type countRunner struct {
 	mu     sync.Mutex
 	counts map[string]int
 	hook   func(ctx context.Context, args []string) // may block
+	origin string                                   // answer to `git config --get remote.origin.url`
 }
 
 func (r *countRunner) run(ctx context.Context, _ string, args ...string) (string, error) {
@@ -80,6 +82,9 @@ func (r *countRunner) run(ctx context.Context, _ string, args ...string) (string
 	r.mu.Unlock()
 	if h != nil {
 		h(ctx, args)
+	}
+	if args[0] == "config" && r.origin != "" {
+		return r.origin + "\n", nil
 	}
 	return "", errors.New("fake")
 }
@@ -192,6 +197,8 @@ func (f *fakeTimers) pending() int {
 func newSvc(t *testing.T, src Source, r *countRunner, in Interest, clk *fakeClock, mod func(*Options)) *Service {
 	t.Helper()
 	o := Options{Source: src, Runner: r.run, Now: clk.Now, Interest: in, FetchEvery: time.Minute, FetchFloor: time.Minute}
+	// Never a real timer: a trailing publish fires only when a test says so.
+	o.After = new(fakeTimers).after
 	if mod != nil {
 		mod(&o)
 	}
@@ -413,5 +420,41 @@ func TestTaskGit_UntrustedFlag(t *testing.T) {
 	list, err := s.List(1)
 	if err != nil || len(list) != 2 || !list[0].Untrusted || list[1].Untrusted {
 		t.Fatalf("List untrusted flags = %+v (err %v), want [true false]", list, err)
+	}
+}
+
+func TestService_RunActiveFeedsCreatePrAndFreshSeesIt(t *testing.T) {
+	src := newFakeSource(task(1, "a"))
+	r := &countRunner{origin: "https://github.com/o/r.git"}
+	var active atomic.Bool
+	s := newSvc(t, src, r, &fakeInterest{}, newClock(), func(o *Options) {
+		o.RunActive = func(id int64) bool { return id == 1 && active.Load() }
+	})
+	g, err := s.Get(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Git answers nothing in this fake, so only the task-derived blockers are
+	// in play: the branchless task reports no worktree first.
+	if g.Actions["createPr"].Code != "task_no_worktree" {
+		t.Fatalf("createPr = %+v", g.Actions["createPr"])
+	}
+	wt, br := "/wt", "smind/task-1"
+	tk := task(1, "a")
+	tk.WorktreePath, tk.Branch = &wt, &br
+	src.set(tk)
+	if g, err = s.Fresh(1); err != nil || g.Actions["createPr"].Code == "run_active" {
+		t.Fatalf("idle: createPr = %+v err %v", g.Actions["createPr"], err)
+	}
+	active.Store(true)
+	// The cached snapshot is stale by design; Fresh is the precondition read.
+	if g, _ = s.Get(1); g.Actions["createPr"].Code == "run_active" {
+		t.Fatal("Get recomputed")
+	}
+	if g, err = s.Fresh(1); err != nil || g.Actions["createPr"].Code != "run_active" {
+		t.Fatalf("active: createPr = %+v err %v, want run_active", g.Actions["createPr"], err)
+	}
+	if _, err := s.Fresh(99); !errors.Is(err, ErrNotTracked) {
+		t.Fatalf("Fresh(missing) = %v, want ErrNotTracked", err)
 	}
 }

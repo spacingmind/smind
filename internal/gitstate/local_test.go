@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -150,5 +151,78 @@ func TestCompute_DiffStatPassedThrough(t *testing.T) {
 	g := Compute(context.Background(), DefaultRunner, in)
 	if g.Diff == nil || *g.Diff != (Diff{3, 22, 2}) {
 		t.Fatalf("diff = %+v", g.Diff)
+	}
+}
+
+func TestForgeRemoteURL(t *testing.T) {
+	for url, want := range map[string]bool{
+		"https://github.com/o/r.git":    true,
+		"https://ghe.example.com/o/r":   true,
+		"ssh://git@github.com/o/r.git":  true,
+		"git@github.com:o/r.git":        true,
+		"github.com:o/r":                true,
+		"":                              false,
+		"/srv/git/r.git":                false,
+		"../r.git":                      false,
+		"file:///srv/git/r.git":         false,
+		"git://github.com/o/r.git":      false,
+		"http://github.com/o/r.git":     false,
+		"C:\\repos\\r":                  false,
+		"C:/repos/r":                    false,
+		"-oProxyCommand=x:y":            false,
+		"https://":                      false,
+		"ssh:///o/r":                    false,
+		"host:":                         false,
+		"relative/path:with-colon":      false,
+		"ext::sh -c 'touch /tmp/pwned'": false,
+	} {
+		if got := forgeRemoteURL(url); got != want {
+			t.Errorf("forgeRemoteURL(%q) = %v, want %v", url, got, want)
+		}
+	}
+}
+
+// TestActions_NoOrigin_DisabledForgeNoRemote is U7 end to end on real git: a
+// workspace without an `origin` (or with a local-path one) cannot open a pull
+// request, and the reason says how to fix it.
+func TestActions_NoOrigin_DisabledForgeNoRemote(t *testing.T) {
+	f := newFixture(t)
+	commit(t, f.worktree, "a.txt", "a\n", "work")
+	in := f.input()
+
+	// The fixture's origin is a local bare path: not a forge remote.
+	g := Compute(context.Background(), DefaultRunner, in)
+	if a := g.Actions["createPr"]; a.Enabled || a.Code != "forge_no_remote" || !strings.Contains(a.Reason, "isn't a GitHub repository URL") {
+		t.Fatalf("local-path origin: createPr = %+v, want forge_no_remote saying origin isn't a GitHub URL", a)
+	}
+
+	// A forge URL is accepted (the transport still goes to the bare repo
+	// through insteadOf, which the check must not follow).
+	git(t, f.repo, "config", "remote.origin.url", "https://github.com/acme/repo.git")
+	git(t, f.repo, "config", "url."+f.bare+".insteadOf", "https://github.com/acme/repo.git")
+	g = Compute(context.Background(), DefaultRunner, in)
+	if a := g.Actions["createPr"]; !a.Enabled {
+		t.Fatalf("https origin: createPr = %+v, want enabled", a)
+	}
+
+	// No origin at all.
+	git(t, f.repo, "remote", "remove", "origin")
+	g = Compute(context.Background(), DefaultRunner, in)
+	if a := g.Actions["createPr"]; a.Enabled || a.Code != "forge_no_remote" || !strings.Contains(a.Reason, "no `origin` remote") {
+		t.Fatalf("no origin: createPr = %+v, want forge_no_remote saying there is no origin", a)
+	}
+}
+
+func TestCompute_ForgeCodePassedToActions(t *testing.T) {
+	f := newFixture(t)
+	git(t, f.repo, "config", "remote.origin.url", "https://github.com/acme/repo.git")
+	git(t, f.repo, "config", "url."+f.bare+".insteadOf", "https://github.com/acme/repo.git")
+	commit(t, f.worktree, "a.txt", "a\n", "work")
+	in := f.input()
+	in.ForgeCode = "forge_unauthenticated"
+	g := Compute(context.Background(), DefaultRunner, in)
+	a := g.Actions["createPr"]
+	if a.Enabled || a.Code != "forge_unauthenticated" || a.Reason != "Create PR isn't available because GitHub isn't signed in on the daemon host. Run `gh auth login` there." {
+		t.Fatalf("createPr = %+v", a)
 	}
 }

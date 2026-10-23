@@ -158,6 +158,7 @@ func TestGhctx_ImplementsForgeProvider(t *testing.T) {
 	_ = p.Repo
 	_ = p.OpenPRs
 	_ = p.PR
+	_ = p.CreatePR
 	if p.Name() != "github" {
 		t.Fatalf("Name() = %q", p.Name())
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/gitstate"
+	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/workspace"
 )
@@ -99,7 +100,7 @@ type gitOptions struct {
 // newGitService wires the git state service and its forge poller. The forge
 // provider is the same gh client forge.search uses, looked up on every call
 // because SetGithubClient can swap it.
-func newGitService(wm *workspace.Manager, db *store.Store, bus *eventBus, focus *focusRegistry, gh *githubHolder, o gitOptions) *gitstate.Service {
+func newGitService(wm *workspace.Manager, db *store.Store, bus *eventBus, focus *focusRegistry, gh *githubHolder, reg *runs.Registry, o gitOptions) *gitstate.Service {
 	return gitstate.New(gitstate.Options{
 		Source: gitSource{wm}, Runner: o.Runner, Now: o.Now, After: o.After, Tick: o.Tick,
 		Interest: gitInterest{bus: bus, focus: focus},
@@ -113,6 +114,12 @@ func newGitService(wm *workspace.Manager, db *store.Store, bus *eventBus, focus 
 			return gh.c
 		},
 		Ledger: db, PollTick: o.PollTick, Jitter: o.Jitter,
+		// A run (or queued prompt) in the task blocks Create PR. An unreadable
+		// store fails closed: better a disabled button than a PR under a run.
+		RunActive: func(taskID int64) bool {
+			_, _, active, err := reg.ActiveRunForTask(taskID)
+			return err != nil || active
+		},
 		// Adoption changed the task row: tell the clients (ADR-0039 §4).
 		OnAdopt: func(taskID int64) {
 			if t, err := db.GetTask(taskID); err == nil && t.Kind != store.TaskKindSystem {

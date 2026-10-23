@@ -4,8 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -246,7 +244,6 @@ func TestTaskDiff_BaseUnknown_TypedError(t *testing.T) {
 		"Diff":         func() error { _, err := m.Diff(task.ID); return err },
 		"TaskFiles":    func() error { _, err := m.TaskFiles(task.ID); return err },
 		"TaskFileDiff": func() error { _, err := m.TaskFileDiff(task.ID, "x"); return err },
-		"CreatePR":     func() error { _, err := m.CreatePR(task.ID, ""); return err },
 	}
 	for name, f := range checks {
 		err := f()
@@ -531,151 +528,4 @@ func TestMigrate_UnrecoverableBase_LeavesEmpty(t *testing.T) {
 	if got.BaseSha != "" || got.BaseRef != "" || got.BranchOwned {
 		t.Fatalf("unrecoverable task was touched: %+v", got)
 	}
-}
-
-// --- CreatePR ---
-
-func TestCreatePR_UsesTaskBase_NoDevelopConstant(t *testing.T) {
-	repo := newDetectRepo(t, "main", true)
-	m := newTestManager(t)
-	w, err := m.CreateWorkspace(repo, "W", "hard", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	task, err := m.CreateTask(w.ID, nil, "On main only")
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeAndCommit(t, *task.WorktreePath, "f.txt", "f\n", "f")
-	calls := stubGH(t, func(string, ...string) (string, error) { return "https://github.com/o/r/pull/1\n", nil })
-
-	if _, err := m.CreatePR(task.ID, ""); err != nil {
-		t.Fatalf("CreatePR() error = %v", err)
-	}
-	if !containsFlagValue((*calls)[0].args, "--base", "main") {
-		t.Fatalf("gh args = %v, want --base main", (*calls)[0].args)
-	}
-
-	// An explicit baseBranch still wins over the task's.
-	runGitT(t, repo, "branch", "other")
-	runGitT(t, repo, "push", "origin", "other")
-	if _, err := m.CreatePR(task.ID, "other"); err != nil {
-		t.Fatalf("CreatePR(other) error = %v", err)
-	}
-	if !containsFlagValue((*calls)[1].args, "--base", "other") {
-		t.Fatalf("gh args = %v, want --base other", (*calls)[1].args)
-	}
-}
-
-// divergedPRTask builds the cherry-pick scenario: an unpushed commit on the
-// checkout, a task forked from it (its base pinned to that fork point), and
-// one task commit.
-func divergedPRTask(t *testing.T) (m *Manager, task store.Task, repo, bare string) {
-	t.Helper()
-	repo, bare = newRepoWithOrigin(t)
-	writeAndCommit(t, repo, "unrelated.txt", "unpushed\n", "unrelated")
-	m = newTestManager(t)
-	w, err := m.CreateWorkspace(repo, "W", "hard", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	task, err = m.CreateTask(w.ID, nil, "Diverged")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := m.store.SetTaskBase(task.ID, "develop", worktreeHead(t, *task.WorktreePath)); err != nil {
-		t.Fatal(err)
-	}
-	return m, task, repo, bare
-}
-
-func TestCreatePR_CherryPickBranchName_NoClash(t *testing.T) {
-	m, task, repo, _ := divergedPRTask(t)
-	// A branch under the old throwaway name (smind/pr-<id>) must not clash.
-	oldName := "smind/pr-" + strconv.FormatInt(task.ID, 10)
-	runGitT(t, repo, "branch", oldName)
-	writeAndCommit(t, *task.WorktreePath, "tw.txt", "t\n", "tw")
-	calls := stubGH(t, func(string, ...string) (string, error) { return "https://github.com/o/r/pull/2\n", nil })
-
-	if _, err := m.CreatePR(task.ID, ""); err != nil {
-		t.Fatalf("CreatePR() error = %v", err)
-	}
-	want := "smind/pr-task-" + strconv.FormatInt(task.ID, 10)
-	if !containsFlagValue((*calls)[0].args, "--head", want) {
-		t.Fatalf("gh args = %v, want --head %s", (*calls)[0].args, want)
-	}
-	if out := runGitOutputT(t, repo, "branch", "--list", oldName); strings.TrimSpace(out) == "" {
-		t.Fatalf("the user's %s branch was deleted", oldName)
-	}
-}
-
-func TestCreatePR_CherryPickFailureDeletesBranch(t *testing.T) {
-	branchExists := func(t *testing.T, repo, name string) bool {
-		return strings.TrimSpace(runGitOutputT(t, repo, "branch", "--list", name)) != ""
-	}
-
-	t.Run("cherry-pick conflict", func(t *testing.T) {
-		m, task, repo, bare := divergedPRTask(t)
-		// origin/develop moves with a conflicting README, from another clone.
-		other := filepath.Join(t.TempDir(), "other")
-		runGitT(t, t.TempDir(), "clone", "-b", "develop", bare, other)
-		runGitT(t, other, "config", "user.email", "o@example.com")
-		runGitT(t, other, "config", "user.name", "O")
-		writeAndCommit(t, other, "README.md", "origin change\n", "origin readme")
-		runGitT(t, other, "push", "origin", "develop")
-		writeAndCommit(t, *task.WorktreePath, "README.md", "task change\n", "task readme")
-		stubGH(t, func(string, ...string) (string, error) { return "https://github.com/o/r/pull/3\n", nil })
-
-		name := "smind/pr-task-" + strconv.FormatInt(task.ID, 10)
-		for i := 0; i < 2; i++ { // the retry must fail the same way, not on "branch exists"
-			_, err := m.CreatePR(task.ID, "")
-			if err == nil {
-				t.Fatal("CreatePR() error = nil, want the cherry-pick conflict")
-			}
-			if strings.Contains(err.Error(), "already exists") {
-				t.Fatalf("attempt %d hit a stale branch: %v", i, err)
-			}
-			if branchExists(t, repo, name) {
-				t.Fatalf("attempt %d left %s behind", i, name)
-			}
-		}
-	})
-
-	t.Run("push rejected", func(t *testing.T) {
-		if runtime.GOOS == "windows" {
-			t.Skip("pre-receive hook needs a POSIX shell")
-		}
-		m, task, repo, bare := divergedPRTask(t)
-		writeAndCommit(t, *task.WorktreePath, "tw.txt", "t\n", "tw")
-		hook := filepath.Join(bare, "hooks", "pre-receive")
-		if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		stubGH(t, func(string, ...string) (string, error) { return "https://github.com/o/r/pull/4\n", nil })
-
-		name := "smind/pr-task-" + strconv.FormatInt(task.ID, 10)
-		if _, err := m.CreatePR(task.ID, ""); err == nil {
-			t.Fatal("CreatePR() error = nil, want the push failure")
-		}
-		if branchExists(t, repo, name) {
-			t.Fatalf("a failed push left %s behind", name)
-		}
-	})
-
-	t.Run("pre-existing branch is never deleted", func(t *testing.T) {
-		m, task, repo, _ := divergedPRTask(t)
-		writeAndCommit(t, *task.WorktreePath, "tw.txt", "t\n", "tw")
-		name := "smind/pr-task-" + strconv.FormatInt(task.ID, 10)
-		runGitT(t, repo, "branch", name)
-		stubGH(t, func(string, ...string) (string, error) { return "https://github.com/o/r/pull/5\n", nil })
-		if _, err := m.CreatePR(task.ID, ""); err == nil {
-			t.Fatal("CreatePR() error = nil, want 'branch already exists'")
-		}
-		if !branchExists(t, repo, name) {
-			t.Fatalf("CreatePR deleted %s, which it did not create", name)
-		}
-	})
 }

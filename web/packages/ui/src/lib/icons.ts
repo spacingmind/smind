@@ -16,6 +16,7 @@
 import {
   ArrowDown,
   ArrowLeft,
+  ArrowRight,
   ArrowUp,
   Archive,
   AtSign,
@@ -155,6 +156,7 @@ export const Icons = {
 
   // --- navigation / direction
   back: ArrowLeft,
+  arrowRight: ArrowRight,
   up: ArrowUp,
   down: ArrowDown,
   chevronRight: ChevronRight,

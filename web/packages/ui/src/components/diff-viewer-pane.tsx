@@ -5,15 +5,14 @@ import { Icons } from "@/lib/icons";
 
 import { DiffHeaderMenu } from "@/components/diff-header-menu";
 import { DiffRender, type DiffAnnotation, type DiffOutputFormat } from "@/components/diff-render";
-import { ErrorWithDetails } from "@/components/error-with-details";
 import { FileStatusMarker } from "@/components/file-status-marker";
+import { PrAction } from "@/components/git/pr-action";
 import { CommentComposer, ReviewAnnotationFrame, ReviewComments, ReviewDraftCard, type PendingComment } from "@/components/review-comments";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
-import { externalLinkProps } from "@/lib/external-link";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTaskDiff } from "@/hooks/use-task-diff";
@@ -44,7 +43,6 @@ import type {
   RunStatusEventPayload,
   Task,
   TaskCommitResult,
-  TaskCreatePrResult,
   TaskFile,
   TaskFileDiffResult,
   TaskFilesResult,
@@ -103,9 +101,6 @@ export function DiffViewerPane({
   const [commitError, setCommitError] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [lastCommit, setLastCommit] = useState<TaskCommitResult | null>(null);
-  const [creatingPR, setCreatingPR] = useState(false);
-  const [prError, setPrError] = useState<string | null>(null);
-  const [prUrl, setPrUrl] = useState<string | null>(null);
   // The path a pending "Reveal in diff" wants scrolled to, cleared as soon
   // as the scroll lands (it's a one-shot action, not a selection).
   const [revealPath, setRevealPath] = useState<string | null>(null);
@@ -158,8 +153,6 @@ export function DiffViewerPane({
     setCollapsed({});
     setError(null);
     setLastCommit(null);
-    setPrError(null);
-    setPrUrl(null);
     fetchFiles();
   }, [fetchFiles]);
 
@@ -346,23 +339,6 @@ export function DiffViewerPane({
     }
   };
 
-  const createPR = () => {
-    if (!client) return;
-    setCreatingPR(true);
-    setPrError(null);
-    client
-      .call<TaskCreatePrResult>("task.createPr", { taskId: task.ID })
-      .then((result) => {
-        setPrUrl(result.url);
-      })
-      .catch((err: unknown) => {
-        setPrError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
-        setCreatingPR(false);
-      });
-  };
-
   const refreshAll = () => {
     fetchFiles();
     wholeDiff.refresh();
@@ -397,15 +373,15 @@ export function DiffViewerPane({
         }
         actions={
           isMobile ? (
-            <DiffHeaderMenu
-              prefs={prefs}
-              onChangePrefs={updatePrefs}
-              onRefresh={refreshAll}
-              onCreatePr={createPR}
-              refreshDisabled={!client || loading}
-              createPrDisabled={!client || creatingPR}
-              creatingPr={creatingPR}
-            />
+            <>
+              <PrAction taskId={task.ID} workspaceId={task.WorkspaceID} />
+              <DiffHeaderMenu
+                prefs={prefs}
+                onChangePrefs={updatePrefs}
+                onRefresh={refreshAll}
+                refreshDisabled={!client || loading}
+              />
+            </>
           ) : (
             <>
               <SegmentedToggle
@@ -431,34 +407,11 @@ export function DiffViewerPane({
               <Button type="button" variant="outline" size="sm" disabled={!client || loading} onClick={refreshAll}>
                 Refresh
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!client || creatingPR}
-                onClick={createPR}
-                data-testid="create-pr-button"
-              >
-                {creatingPR ? "Creating PR…" : "Create PR"}
-              </Button>
+              <PrAction taskId={task.ID} workspaceId={task.WorkspaceID} />
             </>
           )
         }
       />
-
-      {(prUrl || prError) && (
-        <div className="border-b px-4 py-2">
-          {prUrl && (
-            <p className="text-ui-base" data-testid="pr-url">
-              PR opened:{" "}
-              <a {...externalLinkProps(prUrl)} className="underline" data-testid="pr-url-link">
-                {prUrl}
-              </a>
-            </p>
-          )}
-          {prError && <ErrorWithDetails message={prError} prefix="Couldn't create the PR" testId="pr-error" />}
-        </div>
-      )}
 
       <div ref={listRef} className="flex-1 overflow-auto p-4" data-testid="diff-file-list">
         {error && (

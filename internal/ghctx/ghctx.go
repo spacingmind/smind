@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -24,6 +25,11 @@ import (
 // stderr captured and clipped inside the returned error.
 type Runner func(ctx context.Context, dir string, args ...string) (stdout string, err error)
 
+// StdinRunner is Runner with a string fed to gh's stdin. Create PR passes the
+// pull request body this way (`--body-file -`) so user text never reaches
+// argv, the process list or a shell.
+type StdinRunner func(ctx context.Context, dir, stdin string, args ...string) (stdout string, err error)
+
 // stderrClip bounds how much of gh's stderr is carried inside an error
 // string: enough to map error kinds and show a human, not enough to dump
 // gh's whole diagnostic output into a run log.
@@ -34,8 +40,18 @@ const stderrClip = 500
 // bounded by ctx via CommandContext so a hung gh cannot outlive its
 // caller's deadline.
 func defaultRunner(ctx context.Context, dir string, args ...string) (string, error) {
+	return runGH(ctx, dir, nil, args...)
+}
+
+// defaultStdinRunner is defaultRunner with stdin.
+func defaultStdinRunner(ctx context.Context, dir, stdin string, args ...string) (string, error) {
+	return runGH(ctx, dir, strings.NewReader(stdin), args...)
+}
+
+func runGH(ctx context.Context, dir string, stdin io.Reader, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Dir = dir
+	cmd.Stdin = stdin
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -62,6 +78,9 @@ type Option func(*Client)
 // WithRunner replaces the gh runner (tests inject a stub here).
 func WithRunner(r Runner) Option { return func(c *Client) { c.run = r } }
 
+// WithStdinRunner replaces the gh runner that takes stdin (tests inject a stub).
+func WithStdinRunner(r StdinRunner) Option { return func(c *Client) { c.runIn = r } }
+
 // WithTTL overrides the result cache TTL (default 10s).
 func WithTTL(d time.Duration) Option { return func(c *Client) { c.ttl = d } }
 
@@ -71,6 +90,7 @@ func WithNow(now func() time.Time) Option { return func(c *Client) { c.now = now
 // Client is a gh CLI client with a small result cache and single-flight.
 type Client struct {
 	run     Runner
+	runIn   StdinRunner
 	ttl     time.Duration
 	now     func() time.Time
 	repos   *ttlCache
@@ -82,9 +102,10 @@ type Client struct {
 // New returns a Client with the default runner and a 10s TTL.
 func New(opts ...Option) *Client {
 	c := &Client{
-		run: defaultRunner,
-		ttl: 10 * time.Second,
-		now: time.Now,
+		run:   defaultRunner,
+		runIn: defaultStdinRunner,
+		ttl:   10 * time.Second,
+		now:   time.Now,
 	}
 	for _, o := range opts {
 		o(c)
