@@ -5,7 +5,6 @@ import { act } from "react";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import type { Connection, DesktopOS, EditorInfo } from "@/lib/platform";
@@ -110,6 +109,8 @@ async function mountHeader(props: HeaderProps = {}) {
   const { SidebarProvider } = await import("@/components/ui/sidebar");
   const { AppHeader } = await import("@/components/app-header");
   const { KeyboardProvider, useActionHandler } = await import("@/keyboard/keyboard-provider");
+  // Imported after `vi.resetModules()` with the components, so both share one daemon-connection context.
+  const { renderWithClientProp: render } = await import("@/test/render-with-daemon");
   function Claims() {
     useActionHandler("shortcuts.help", () => props.onHelp?.());
     return null;
@@ -191,7 +192,8 @@ describe("AppHeader task identity", () => {
 
     fireEvent.click(screen.getByTestId("dialog-archive-task-confirm"));
     await flush();
-    expect(client.nth("task.archive").params).toEqual({ id: 42 });
+    // react-query starts the mutation a tick after the click.
+    expect((await waitFor(() => client.nth("task.archive"))).params).toEqual({ id: 42, taskId: 42 });
   });
 
   it("AH-AC4 reveal only for local desktop", async () => {
