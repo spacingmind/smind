@@ -1,6 +1,9 @@
 package taskrunner
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // EventType discriminates which fields of an Event are populated.
 //
@@ -112,7 +115,23 @@ const (
 	// least one server applies -- a run with no servers behaves exactly
 	// as before.
 	EventTypeMcpServers
+
+	// EventTypeRateLimit is bookkeeping about the backend's own rate-limit
+	// state (a claude-native rate_limit_event with status rejected); like
+	// EventTypePermissionModeChanged it is for internal/runs to apply to
+	// the run and is never recorded into the transcript.
+	EventTypeRateLimit
 )
+
+// RateLimitSignal is the payload of EventTypeRateLimit.
+type RateLimitSignal struct {
+	// Status is the backend's reported status ("rejected").
+	Status string
+	// ResetsAt is when the limit resets; zero means unknown.
+	ResetsAt time.Time
+	// Type is the backend's limit kind (e.g. "five_hour").
+	Type string
+}
 
 // McpServerState status values for Event.McpServers (ADR-0018): a server
 // the agent was handed, one that was dropped before the wire, or one the
@@ -290,6 +309,9 @@ type Event struct {
 	// server that applied to this run's workspace, in row order, with its
 	// status (and reason, when not active). See McpServerState.
 	McpServers []McpServerState
+
+	// RateLimit is set for EventTypeRateLimit only; ResetsAt zero = unknown.
+	RateLimit *RateLimitSignal
 }
 
 // PermissionResolution categorizes how an EventTypePermissionResolved
