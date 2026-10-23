@@ -3,6 +3,8 @@ package gitstate
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -49,11 +51,12 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 	}
 	g = TaskGit{TaskID: in.TaskID, Forge: in.Forge, Untrusted: in.Untrusted, PR: in.PR}
 	noOrigin, notForge := false, false
+	midOp := ""
 	defer func() {
 		g.ComputedAt = now().UTC()
 		g.Actions = Actions(g, ActionCtx{
 			RunActive: in.RunActive, NoOrigin: noOrigin, OriginNotForge: notForge,
-			ForgeCode: in.ForgeCode, ForgeReason: in.ForgeReason,
+			ForgeCode: in.ForgeCode, ForgeReason: in.ForgeReason, MidOperation: midOp,
 		})
 	}()
 
@@ -75,6 +78,7 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 	}
 
 	g.Worktree = worktreeStatus(ctx, run, in.WorktreePath)
+	midOp = midOperation(ctx, run, in.WorktreePath)
 
 	cmp := compareRef(ctx, run, repo, in.BaseRef)
 	if cmp != "" {
@@ -264,4 +268,32 @@ func worktreeStatus(ctx context.Context, run Runner, dir string) *Worktree {
 	}
 	w.Dirty = w.Staged+w.Unstaged+w.Untracked > 0
 	return w
+}
+
+// midOperation reports "merge" or "rebase" when the worktree is in the middle
+// of one: MERGE_HEAD, rebase-merge or rebase-apply exists in its git dir. ""
+// when none does or git cannot say.
+func midOperation(ctx context.Context, run Runner, dir string) string {
+	out, err := run(ctx, dir, "rev-parse", "--git-path", "MERGE_HEAD", "--git-path", "rebase-merge", "--git-path", "rebase-apply")
+	if err != nil {
+		return ""
+	}
+	paths := strings.Split(strings.TrimSpace(out), "\n")
+	if len(paths) != 3 {
+		return ""
+	}
+	exists := func(p string) bool {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(dir, p)
+		}
+		_, err := os.Stat(p)
+		return err == nil
+	}
+	switch {
+	case exists(paths[1]), exists(paths[2]):
+		return "rebase"
+	case exists(paths[0]):
+		return "merge"
+	}
+	return ""
 }

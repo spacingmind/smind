@@ -46,3 +46,34 @@ func TestPRError_DetailScrubbedClippedAndDataCarried(t *testing.T) {
 		t.Fatal("not an error value")
 	}
 }
+
+func TestSyncErrors_FixedSentencesNoArgv(t *testing.T) {
+	for _, code := range []string{CodeNonFastForward, CodeWorktreeDirty, CodeNothingToPush, CodeInvalidStrategy, CodeUnauthenticated, CodeConflict, CodeMergeInProgress} {
+		e := NewPRError(code, "")
+		if e.Message == "" || e.Message == "The pull request action failed." || e.RPCCode() != code {
+			t.Fatalf("%s: %q", code, e.Message)
+		}
+		if strings.Contains(e.Message, "git push") || strings.Contains(e.Message, "--force") {
+			t.Fatalf("%s leaks a command: %q", code, e.Message)
+		}
+	}
+	c := ConflictError("merge", "origin/develop", []string{"a.go", "b/c.txt"}, false)
+	if c.Code != CodeConflict || !strings.Contains(c.Message, "`origin/develop`") || !strings.Contains(c.Message, "`git merge --abort`") {
+		t.Fatalf("merge conflict: %q", c.Message)
+	}
+	d, _ := c.RPCData().(map[string]any)
+	if d["operation"] != "merge" || d["base"] != "origin/develop" || d["filesTruncated"] != false || len(d["files"].([]string)) != 2 {
+		t.Fatalf("data = %v", d)
+	}
+	r := ConflictError("rebase", "origin/develop", nil, true)
+	if !strings.Contains(r.Message, "`git rebase --abort`") || r.Data["filesTruncated"] != true || len(r.Data["files"].([]string)) != 0 {
+		t.Fatalf("rebase conflict: %q %v", r.Message, r.Data)
+	}
+	if m := MergeInProgress("rebase"); m.Data["operation"] != "rebase" || !strings.Contains(m.Message, "git rebase --abort") {
+		t.Fatalf("merge_in_progress: %q", m.Message)
+	}
+	e := NewPRError(CodeNonFastForward, "! [rejected] x (fetch first) https://u:ghp_abcdefghijklmnopqrstuvwxyz0123456789@github.com "+strings.Repeat("y", 500))
+	if d, _ := e.Data["detail"].(string); strings.Contains(d, "ghp_") || len(d) > detailClip+len("…") {
+		t.Fatalf("detail not scrubbed/clipped: %q", d)
+	}
+}

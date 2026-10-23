@@ -58,6 +58,9 @@ func prHandlers(wm *workspace.Manager, svc *gitstate.Service, gh *githubHolder) 
 		"task.prPreview": h.preview,
 		"task.createPr":  h.create,
 		"task.updatePr":  h.update,
+		// Push and Update from base (sync_handlers.go) share the busy guard.
+		"task.push":           h.push,
+		"task.updateFromBase": h.updateFromBase,
 	}
 }
 
