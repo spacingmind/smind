@@ -199,3 +199,20 @@ func TestProviderCooldownErrorText(t *testing.T) {
 		t.Fatalf("minutes form: %q", got)
 	}
 }
+
+func TestCooldown_ModelScopedWindowSetsNone(t *testing.T) {
+	t.Parallel()
+	x := time.Unix(time.Now().Add(time.Hour).Unix(), 0)
+	for _, tc := range []struct {
+		typ  string
+		want bool
+	}{{"seven_day_opus", false}, {"seven_day_sonnet", false}, {"five_hour", true}, {"seven_day", true}} {
+		_, st, status := finishDirect(t, "cd-win-"+tc.typ, &taskrunner.RateLimitSignal{Status: "rejected", ResetsAt: x, Type: tc.typ}, errors.New("claude code prompt: exit status 1"))
+		if status.FailureKind != "rate_limited" || status.FailureResetAt == nil {
+			t.Fatalf("%s: status = %+v, want a classified rate limit with a reset", tc.typ, status)
+		}
+		if _, ok, _ := st.GetProviderCooldown("glm", time.Now()); ok != tc.want {
+			t.Fatalf("%s: cooldown set = %v, want %v", tc.typ, ok, tc.want)
+		}
+	}
+}

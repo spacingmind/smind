@@ -2,6 +2,7 @@ package runs
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spacingmind/smind/internal/store"
@@ -69,4 +70,12 @@ func (reg *Registry) ProviderCooldowns() map[string]time.Time {
 // carries from ids even when its source is human).
 func nonHumanSend(source string, fromTaskID int64) bool {
 	return source != store.ChatQueueSourceHuman || fromTaskID != 0
+}
+
+// windowBlocksProvider reports whether a rate limit of this window restricts
+// the whole provider. A model-scoped window ("weekly-opus", "weekly-sonnet",
+// any "weekly-<model>") only restricts that model, so another model's send
+// to the same provider must not be blocked by it.
+func windowBlocksProvider(window string) bool {
+	return !strings.HasPrefix(window, "weekly-")
 }
