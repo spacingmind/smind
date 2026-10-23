@@ -16,14 +16,18 @@ const cmdProfileSeedUsage = "usage: smind profile seed roles"
 
 const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept] [--thinking-level=<level>] [--model=<model>] [--on-rate-limit=<none|wait|fallback>] [--fallback-profile=<id>] [--notes=<text>] [--orchestration-tools=true|false] [--instructions=<text>] [--instructions-file=<path>] [--skills=a,b] [--child-policy=none|leaf|profiles] [--child-profiles=1,2]"
 
+const cmdProfileEditUsage = "usage: smind profile edit <id> [--name=..] [--provider=..] [every `profile add` flag]"
+
 func cmdProfile(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind profile <add|ls|rm|seed> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind profile <add|edit|ls|rm|seed> ...")
 		return 2
 	}
 	switch args[0] {
 	case "add":
 		return cmdProfileAdd(args[1:])
+	case "edit":
+		return cmdProfileEdit(args[1:])
 	case "ls":
 		return cmdProfileList(args[1:])
 	case "rm":
@@ -245,6 +249,137 @@ func cmdProfileAdd(args []string) int {
 	err = client.Call(context.Background(), "profile.create", params, &p)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "profile add: %v\n", err)
+		return 1
+	}
+	fmt.Printf("%d\t%s\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, profileModeColumn(p), p.ThinkingLevel, p.Model)
+	return 0
+}
+
+// cmdProfileEdit parses `smind profile edit <id> [flags]`. profile.update
+// on the wire is a full-record replace (handleProfileUpdate), so edit
+// reads the stored profile, overlays only the flags actually given (an
+// empty value like `--model=` means clear), and sends the merged record;
+// the daemon's registry validation rejects combinations run start would.
+func cmdProfileEdit(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, cmdProfileEditUsage)
+		return 2
+	}
+	id, err := parseInt64(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "profile edit: invalid id %q: %v\n", args[0], err)
+		return 2
+	}
+	flags, code := parseProfileFlags("profile edit", args[1:], true)
+	if code != 0 {
+		return code
+	}
+	if len(flags.set) == 0 {
+		fmt.Fprintln(os.Stderr, cmdProfileEditUsage)
+		return 2
+	}
+	childIDs, code := parseProfileChildIDs("profile edit", flags.childProfiles)
+	if code != 0 {
+		return code
+	}
+
+	client, err := dialDaemon(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer client.Close()
+
+	var list []store.AgentProfile
+	if err := client.Call(context.Background(), "profile.list", nil, &list); err != nil {
+		fmt.Fprintf(os.Stderr, "profile edit: %v\n", err)
+		return 1
+	}
+	var current *store.AgentProfile
+	for i := range list {
+		if list[i].ID == id {
+			current = &list[i]
+			break
+		}
+	}
+	if current == nil {
+		fmt.Fprintf(os.Stderr, "profile edit: profile %d not found\n", id)
+		return 1
+	}
+
+	skills := current.Skills
+	if skills == nil {
+		skills = []string{}
+	}
+	currentChildIDs := current.ChildProfileIDs
+	if currentChildIDs == nil {
+		currentChildIDs = []int64{}
+	}
+	params := map[string]any{
+		"id":   id,
+		"name": current.Name, "provider": current.Provider, "permissionMode": current.PermissionMode,
+		"autoAccept": current.AutoAccept, "thinkingLevel": current.ThinkingLevel, "model": current.Model,
+		"notes": current.Notes, "onRateLimit": current.OnRateLimit,
+		"orchestrationTools": current.OrchestrationTools, "instructions": current.Instructions,
+		"skills": skills, "childPolicy": current.ChildPolicy, "childProfileIds": currentChildIDs,
+	}
+	if current.FallbackProfileID != nil {
+		params["fallbackProfileId"] = *current.FallbackProfileID
+	}
+	if flags.set["--name"] {
+		params["name"] = flags.name
+	}
+	if flags.set["--provider"] {
+		params["provider"] = flags.provider
+	}
+	if flags.set["--mode"] {
+		params["permissionMode"] = flags.mode
+	}
+	if flags.set["--auto-accept"] {
+		params["autoAccept"] = flags.autoAccept
+	}
+	if flags.set["--thinking-level"] {
+		params["thinkingLevel"] = flags.thinkingLevel
+	}
+	if flags.set["--model"] {
+		params["model"] = flags.model
+	}
+	if flags.set["--notes"] {
+		params["notes"] = flags.notes
+	}
+	if flags.set["--on-rate-limit"] {
+		params["onRateLimit"] = flags.onRateLimit
+	}
+	if flags.fallbackSet {
+		if flags.fallbackRaw == 0 {
+			delete(params, "fallbackProfileId")
+		} else {
+			params["fallbackProfileId"] = flags.fallbackRaw
+		}
+	}
+	if flags.set["--orchestration-tools"] {
+		if flags.orchToolsUnmanaged {
+			params["orchestrationTools"] = nil
+		} else {
+			params["orchestrationTools"] = *flags.orchTools
+		}
+	}
+	if flags.set["--instructions"] || flags.set["--instructions-file"] {
+		params["instructions"] = flags.instructions
+	}
+	if flags.set["--skills"] {
+		params["skills"] = splitCSV(flags.skills)
+	}
+	if flags.set["--child-policy"] {
+		params["childPolicy"] = flags.childPolicy
+	}
+	if flags.set["--child-profiles"] {
+		params["childProfileIds"] = childIDs
+	}
+
+	var p store.AgentProfile
+	if err := client.Call(context.Background(), "profile.update", params, &p); err != nil {
+		fmt.Fprintf(os.Stderr, "profile edit: %v\n", err)
 		return 1
 	}
 	fmt.Printf("%d\t%s\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, profileModeColumn(p), p.ThinkingLevel, p.Model)
