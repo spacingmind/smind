@@ -333,6 +333,8 @@ export interface ChatQueueItem {
   CancelKind: "" | "user" | "auto";
   CreatedAt: string;
   UpdatedAt: string;
+  /** ADR-0041: RFC 3339 instant the item is held until (a child-update debounce); null/absent = deliverable now. */
+  NotBefore?: string | null;
   /** ADR-0038: the queued prompt's attachments (metadata only). */
   attachments?: AttachmentMeta[];
 }
