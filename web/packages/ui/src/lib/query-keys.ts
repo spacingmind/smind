@@ -42,6 +42,11 @@ export const queryKeys = {
   /** `task.prPreview` for one task and base branch ("" = the task's base_ref); the Create PR dialog's prefill. */
   prPreview: (taskId: number, base: string) => ["task.prPreview", { taskId, base }] as const,
   prPreviewAll: () => ["task.prPreview"] as const,
+  /** `task.archivePreview` for one task: the archive dialog's risk rows; refetched on every open. */
+  archivePreview: (taskId: number) => ["task.archivePreview", { taskId }] as const,
+  /** A workspace's archived tasks (`task.list` with `archived: true`): the sidebar's Archived view. */
+  archivedTasks: (workspaceId: number) => ["task.list", { workspaceId, archived: true }] as const,
+  archivedTasksAll: () => ["task.list", { archived: true }] as const,
   /** `workspace.branches` (base picker options; the RPC may not exist on an older daemon). */
   providerList: () => ["provider.list"] as const,
   profileList: () => ["profile.list"] as const,

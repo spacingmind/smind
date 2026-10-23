@@ -1,6 +1,6 @@
 import type { PrExistsErrorData } from "@/lib/types";
 
-export type PrOperation = "preview" | "create" | "update" | "token" | "logout";
+export type PrOperation = "preview" | "create" | "update" | "token" | "logout" | "archive" | "restore";
 
 /** What the UI shows for a failed PR call: one sentence, an optional scrubbed detail, and `pr_exists`'s PR. */
 export interface PrErrorView {
@@ -37,6 +37,13 @@ const FALLBACK: Record<string, string> = {
   forge_rate_limited: "GitHub is rate limiting requests. Try again in a minute.",
   forge_timeout: "GitHub didn't answer in time. Try again.",
   forge_error: "GitHub reported an error. Try again.",
+  // Archive and Restore (ADR-0039 §9).
+  branch_unmerged: "The branch isn't merged anywhere yet, so smind won't delete it.",
+  branch_dirty: "The worktree has uncommitted changes, so smind won't delete the branch.",
+  branch_not_owned: "smind didn't create this branch, so it never deletes it.",
+  branch_checked_out: "The branch is checked out in another worktree, so it can't be deleted.",
+  branch_gone: "The branch no longer exists, so there is nothing to restore. It was deleted after it was merged.",
+  not_archived: "This task isn't archived.",
 };
 
 const GENERIC: Record<PrOperation, string> = {
@@ -45,6 +52,8 @@ const GENERIC: Record<PrOperation, string> = {
   update: "Couldn't update the pull request.",
   token: "Couldn't sign in to GitHub.",
   logout: "Couldn't log out of GitHub.",
+  archive: "Couldn't archive the task.",
+  restore: "Couldn't restore the task.",
 };
 
 const MAX_MESSAGE = 300;
@@ -86,4 +95,15 @@ export function describePrError(err: unknown, op: PrOperation): PrErrorView {
     if (typeof url === "string" && typeof number === "number") view.existing = { url, number };
   }
   return view;
+}
+
+/**
+ * Archive and Restore: typed errors map as `describePrError` does. An untyped refusal (a task with a running run,
+ * the daemon's own sentence since before the typed codes) stays readable when it carries no argv or stack.
+ */
+export function describeArchiveError(err: unknown, op: "archive" | "restore"): PrErrorView {
+  const e = record(err);
+  const message = typeof e?.message === "string" ? e.message.trim() : "";
+  if (typeof e?.code !== "string" && isSafeSentence(message)) return { message };
+  return describePrError(err, op);
 }
