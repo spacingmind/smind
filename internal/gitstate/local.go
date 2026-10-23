@@ -27,9 +27,16 @@ type Input struct {
 	BaseSha      string // fork commit; "" = unknown
 	BranchOwned  bool
 	Untrusted    bool
-	Forge        string
-	PR           *PRInfo // always nil in the local pass
-	RunActive    bool
+	// ForkPR: the task was started from a pull request on a fork (stored PR
+	// identity on an untrusted task); push is read-only.
+	ForkPR bool
+	// RebasedOrigin is the sha origin/<branch> had when smind rebased the
+	// published branch ("" = no such rebase is remembered); the push action
+	// reports the rebase only while origin/<branch> still points at it.
+	RebasedOrigin string
+	Forge         string
+	PR            *PRInfo // always nil in the local pass
+	RunActive     bool
 	// ForgeCode/ForgeReason are the poller's host state (forge CLI missing or
 	// not signed in), passed through to the createPr/updatePr actions.
 	ForgeCode   string
@@ -52,11 +59,13 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 	g = TaskGit{TaskID: in.TaskID, Forge: in.Forge, Untrusted: in.Untrusted, PR: in.PR}
 	noOrigin, notForge := false, false
 	midOp := ""
+	rebased := false
 	defer func() {
 		g.ComputedAt = now().UTC()
 		g.Actions = Actions(g, ActionCtx{
 			RunActive: in.RunActive, NoOrigin: noOrigin, OriginNotForge: notForge,
 			ForgeCode: in.ForgeCode, ForgeReason: in.ForgeReason, MidOperation: midOp,
+			RebasedDiverged: rebased, ForkPR: in.ForkPR,
 		})
 	}()
 
@@ -107,6 +116,9 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 	}
 
 	g.Origin = originStatus(ctx, run, repo, in.Branch, branchRef)
+	if in.RebasedOrigin != "" && g.Origin != nil && g.Origin.Published && g.Origin.Behind != nil && *g.Origin.Behind > 0 {
+		rebased = revParse(ctx, run, repo, "refs/remotes/"+originRemote+"/"+in.Branch) == in.RebasedOrigin
+	}
 
 	if in.DiffStat != nil {
 		if f, i, d, err := in.DiffStat(); err == nil {

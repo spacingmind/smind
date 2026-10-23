@@ -539,3 +539,88 @@ func TestSyncNoForceInSource(t *testing.T) {
 		}
 	}
 }
+
+// publishAndRebase publishes one commit, moves the base on origin and rebases
+// the (now published) branch onto it.
+func (e *prEnv) publishAndRebase() {
+	e.t.Helper()
+	e.commit("a.txt", "a\n", "mine")
+	if _, err := e.push(); err != nil {
+		e.t.Fatal(err)
+	}
+	e.advanceBase("base.txt", "base\n")
+	if res, err := e.update(map[string]any{"strategy": "rebase"}); err != nil || res.Result != "rebased" {
+		e.t.Fatalf("updateFromBase = %+v, %v", res, err)
+	}
+}
+
+func TestPushAfterRebaseReason(t *testing.T) {
+	t.Parallel()
+	e := newPREnv(t)
+	e.publishAndRebase()
+	published := e.remoteSha(e.branch)
+
+	g, err := e.api.git.Fresh(e.task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := g.Actions["push"]
+	if a.Enabled || a.Code != forge.CodeNonFastForward || a.Reason != forge.MsgRebasedDiverged {
+		t.Fatalf("push action = %+v", a)
+	}
+	_, err = e.push()
+	r := wantErrCode(t, err, forge.CodeNonFastForward)
+	if r.Message != forge.MsgRebasedDiverged {
+		t.Fatalf("message = %q", r.Message)
+	}
+	if e.remoteSha(e.branch) != published {
+		t.Fatal("a refused push moved origin")
+	}
+}
+
+func TestPushOriginMovedKeepsOldSentence(t *testing.T) {
+	t.Parallel()
+	e := newPREnv(t)
+	e.commit("a.txt", "a\n", "one")
+	if _, err := e.push(); err != nil {
+		t.Fatal(err)
+	}
+	e.commit("b.txt", "b\n", "two")
+	e.moveOrigin("theirs.txt")
+	runGitT(t, e.wt, "fetch", "-q", "origin")
+	g, _ := e.api.git.Fresh(e.task.ID)
+	if a := g.Actions["push"]; a.Code != forge.CodeNonFastForward || !strings.Contains(a.Reason, "origin has newer changes") {
+		t.Fatalf("push action = %+v", a)
+	}
+	_, err := e.push()
+	if r := wantErrCode(t, err, forge.CodeNonFastForward); !strings.Contains(r.Message, "Bring those changes in first") {
+		t.Fatalf("message = %q", r.Message)
+	}
+
+	// After a rebase the marker only holds while origin still has the tip it
+	// had then: once someone else moves it, the plain sentence is back.
+	e2 := newPREnv(t)
+	e2.publishAndRebase()
+	e2.moveOrigin("theirs.txt")
+	runGitT(t, e2.wt, "fetch", "-q", "origin")
+	g, _ = e2.api.git.Fresh(e2.task.ID)
+	if a := g.Actions["push"]; a.Code != forge.CodeNonFastForward || a.Reason == forge.MsgRebasedDiverged {
+		t.Fatalf("push action after origin moved = %+v", a)
+	}
+}
+
+// moveOrigin has someone else add a commit to origin's copy of the task branch.
+func (e *prEnv) moveOrigin(path string) {
+	e.t.Helper()
+	other := filepath.Join(e.t.TempDir(), "other")
+	runGitT(e.t, filepath.Dir(other), "clone", "-q", e.bare, other)
+	runGitT(e.t, other, "config", "user.email", "o@example.com")
+	runGitT(e.t, other, "config", "user.name", "O")
+	runGitT(e.t, other, "checkout", "-q", e.branch)
+	if err := os.WriteFile(filepath.Join(other, path), []byte("t\n"), 0o644); err != nil {
+		e.t.Fatal(err)
+	}
+	runGitT(e.t, other, "add", path)
+	runGitT(e.t, other, "commit", "-m", "theirs")
+	runGitT(e.t, other, "push", "-q", "origin", e.branch)
+}

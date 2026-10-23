@@ -158,6 +158,28 @@ func ConflictError(operation, base string, files []string, filesTruncated bool) 
 		With("files", files).With("operation", operation).With("base", base).With("filesTruncated", filesTruncated)
 }
 
+// Sentences of a push smind will not attempt (shared by the gitstate policy
+// and the typed errors, so the card and the RPC never disagree).
+const (
+	// MsgRebasedDiverged: smind rebased a published branch, so a plain push
+	// is refused by origin and smind never forces.
+	MsgRebasedDiverged = "This branch was rebased and has diverged from origin; smind can't force-push. Push it manually (`git push --force-with-lease`) or reset to origin."
+	// MsgForkPushReadonly: the task came from a pull request on a fork.
+	MsgForkPushReadonly = "This task was started from a pull request on a fork, so smind can't push to it. Push it yourself or open a new pull request from your own branch."
+)
+
+// RebasedDiverged is the non_fast_forward error for a branch smind rebased
+// after it was published.
+func RebasedDiverged() *PRError {
+	return NewPRError(CodeNonFastForward, "").withMessage(MsgRebasedDiverged)
+}
+
+// ForkPushReadonly is the fork_pr_readonly error for a push from a task that
+// was started from a pull request on a fork.
+func ForkPushReadonly() *PRError {
+	return NewPRError(CodeForkPRReadonly, "").withMessage(MsgForkPushReadonly)
+}
+
 // MergeInProgress is the error for an Update from base on a worktree that is
 // already in the middle of a merge or rebase.
 func MergeInProgress(operation string) *PRError {

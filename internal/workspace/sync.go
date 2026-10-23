@@ -100,8 +100,9 @@ func (m *Manager) Push(ctx context.Context, id int64) (PushResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, prPushTimeout)
 	defer cancel()
 	if _, stderr, err := execGit(ctx, dir, nil, netGitArgs(ctx, dir, originRemote, args...)...); err != nil {
-		return PushResult{}, pushError(ctx, err, stderr, remoteURL)
+		return PushResult{}, m.pushError(ctx, id, err, stderr, remoteURL)
 	}
+	m.setRebasedOrigin(id, "")
 	return res, nil
 }
 
@@ -134,6 +135,41 @@ func pushError(ctx context.Context, err error, stderr, remoteURL string) *forge.
 	case forge.CodePushAuth:
 		if strings.HasPrefix(strings.ToLower(remoteURL), "https://") {
 			return forge.NewPRError(forge.CodeUnauthenticated, stderr)
+		}
+	}
+	return pe
+}
+
+// RebasedOrigin is the sha origin/<branch> pointed at when smind last rebased
+// the task's published branch, "" when it has not (or since a push or merge).
+func (m *Manager) RebasedOrigin(id int64) string {
+	m.rebasedMu.Lock()
+	defer m.rebasedMu.Unlock()
+	return m.rebased[id]
+}
+
+func (m *Manager) setRebasedOrigin(id int64, sha string) {
+	m.rebasedMu.Lock()
+	defer m.rebasedMu.Unlock()
+	if sha == "" {
+		delete(m.rebased, id)
+		return
+	}
+	if m.rebased == nil {
+		m.rebased = map[int64]string{}
+	}
+	m.rebased[id] = sha
+}
+
+// pushError is the package pushError, except that a refusal for a branch smind
+// rebased gets the rebase sentence (the marker is checked against the
+// remote-tracking ref, which git has just left alone).
+func (m *Manager) pushError(ctx context.Context, id int64, err error, stderr, remoteURL string) *forge.PRError {
+	pe := pushError(ctx, err, stderr, remoteURL)
+	if pe.Code == forge.CodeNonFastForward && m.RebasedOrigin(id) != "" {
+		if t, gerr := m.store.GetTask(id); gerr == nil && t.WorktreePath != nil && t.Branch != nil &&
+			prRevParse(ctx, *t.WorktreePath, "refs/remotes/"+originRemote+"/"+*t.Branch) == m.RebasedOrigin(id) {
+			return forge.RebasedDiverged().WithDetail(stderr)
 		}
 	}
 	return pe
@@ -187,6 +223,10 @@ func (m *Manager) UpdateFromBase(ctx context.Context, id int64, strategy string)
 		return UpdateResult{Result: SyncUpToDate}, nil
 	}
 
+	// Where origin's copy of this branch stands before a rebase rewrites ours
+	// ("" when the branch was never published).
+	publishedTip := prRevParse(ctx, tg.worktree, "refs/remotes/"+originRemote+"/"+tg.branch)
+
 	lctx, cancel := context.WithTimeout(ctx, syncLocalTimeout)
 	defer cancel()
 	env := append(os.Environ(), "GIT_EDITOR=true", "GIT_MERGE_AUTOEDIT=no")
@@ -207,6 +247,11 @@ func (m *Manager) UpdateFromBase(ctx context.Context, id int64, strategy string)
 			}
 		}
 		return UpdateResult{}, prGitError(lctx, err, stderr)
+	}
+	if result == SyncRebased {
+		m.setRebasedOrigin(id, publishedTip)
+	} else {
+		m.setRebasedOrigin(id, "")
 	}
 	return UpdateResult{Result: result, Commits: n}, nil
 }

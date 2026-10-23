@@ -309,7 +309,8 @@ func (m *Manager) freshGit(t store.Task, ws store.Workspace) (gitstate.TaskGit, 
 	in := gitstate.Input{
 		TaskID: t.ID, RepoDir: ws.Path, WorktreePath: *t.WorktreePath, Branch: *t.Branch,
 		BaseRef: t.BaseRef, BaseSha: t.BaseSha, BranchOwned: t.BranchOwned,
-		Untrusted: t.UntrustedSource, Conflicts: gitstate.NewConflictCache(),
+		Untrusted: t.UntrustedSource, ForkPR: t.UntrustedSource && t.PRNumber > 0,
+		RebasedOrigin: m.RebasedOrigin(t.ID), Conflicts: gitstate.NewConflictCache(),
 	}
 	if in.BaseRef == "" {
 		in.BaseRef = workspaceDefaultBase(ws)

@@ -79,6 +79,9 @@ type Options struct {
 	// (the run registry); it feeds the createPr run_active blocker. Nil means
 	// never.
 	RunActive func(taskID int64) bool
+	// RebasedOrigin returns the origin/<branch> sha recorded when smind
+	// rebased the task's published branch, "" when none (Input.RebasedOrigin).
+	RebasedOrigin func(taskID int64) string
 	// NetworkGit, when non-nil, returns extra per-invocation git options
 	// (`-c credential.helper=...`) for a network call to remote in dir; it is
 	// consulted before the background fetch only, and nil or an empty result
@@ -484,7 +487,7 @@ func (s *Service) compute(taskID int64) (g TaskGit, ws int64, base string, err e
 	}
 	in := Input{
 		TaskID: t.ID, RepoDir: w.Path, BaseRef: t.BaseRef, BaseSha: t.BaseSha,
-		BranchOwned: t.BranchOwned, Untrusted: t.UntrustedSource, Conflicts: s.conflicts, Now: s.now,
+		BranchOwned: t.BranchOwned, Untrusted: t.UntrustedSource, ForkPR: t.UntrustedSource && t.PRNumber > 0, Conflicts: s.conflicts, Now: s.now,
 		DiffStat: func() (int, int, int, error) { return src.TaskDiffStat(taskID) },
 	}
 	if in.BaseRef == "" {
@@ -502,6 +505,9 @@ func (s *Service) compute(taskID int64) (g TaskGit, ws int64, base string, err e
 	}
 	if s.opts.RunActive != nil {
 		in.RunActive = s.opts.RunActive(t.ID)
+	}
+	if s.opts.RebasedOrigin != nil {
+		in.RebasedOrigin = s.opts.RebasedOrigin(t.ID)
 	}
 	in.ForgeCode = s.poller.ForgeBlock(t)
 	return Compute(s.ctx, s.run, in), t.WorkspaceID, in.BaseRef, nil

@@ -71,6 +71,11 @@ type Manager struct {
 	worktreeAddFn func(repoPath, worktreePath, branch string, trackOrigin bool) error
 	restoring     map[int64]bool
 
+	// rebased remembers, per task, the sha origin/<branch> had when smind
+	// rebased the published branch (in memory only: lost on restart).
+	rebasedMu sync.Mutex
+	rebased   map[int64]string
+
 	setupMu       sync.Mutex
 	setupRuns     map[int64]*setupRun
 	setupFinished func(taskID int64)
