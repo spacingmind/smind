@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 	"github.com/spacingmind/smind/internal/acp"
@@ -983,6 +984,8 @@ func claudeEvents(msg claudecode.Message) []Event {
 		blocks, assistant = m.Content, true
 	case claudecode.UserMessage:
 		blocks = m.Content
+	case claudecode.RateLimitEvent:
+		return claudeRateLimitEvents(m, msg)
 	default:
 		return nil
 	}
@@ -1029,6 +1032,20 @@ func claudeEvents(msg claudecode.Message) []Event {
 		}
 	}
 	return out
+}
+
+// claudeRateLimitEvents turns a rate_limit_event into one EventTypeRateLimit
+// only when the CLI reports the limit as rejected; any other status is a
+// warning, not an event.
+func claudeRateLimitEvents(m claudecode.RateLimitEvent, raw claudecode.Message) []Event {
+	if m.RateLimitInfo.Status != "rejected" {
+		return nil
+	}
+	sig := &RateLimitSignal{Status: "rejected", Type: m.RateLimitInfo.RateLimitType}
+	if m.RateLimitInfo.ResetsAt > 0 {
+		sig.ResetsAt = time.Unix(m.RateLimitInfo.ResetsAt, 0).UTC()
+	}
+	return []Event{{Type: EventTypeRateLimit, RateLimit: sig, Raw: raw}}
 }
 
 // claudeToolUseEvent builds the "call started" event shared by

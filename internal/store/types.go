@@ -191,6 +191,14 @@ type Run struct {
 	// Attachments is attach.EncodeSet of the prompt's accepted attachments
 	// (ADR-0038); "" = none.
 	Attachments string
+	// FailureKind is the typed terminal reason of an error run
+	// ("rate_limited"); "" = none (ADR-0041).
+	FailureKind string
+	// FailureWindow names the exhausted quota window (e.g. "5h"); "" =
+	// unknown or not applicable.
+	FailureWindow string
+	// FailureResetAt is the instant (UTC) the quota resets; nil = unknown.
+	FailureResetAt *time.Time
 }
 
 // RunEvent is one persisted internal/runs.Event, in the order it was

@@ -76,6 +76,14 @@ type RunStatus struct {
 	// empty otherwise. It is not a status and is never stored.
 	Disposition string
 
+	// FailureKind is the typed terminal reason of an error run (ADR-0041 B1):
+	// rate_limited or empty; reset instant UTC, nil = unknown.
+	FailureKind string
+	// FailureWindow is the exhausted quota window ("5h", "weekly", ...) or "".
+	FailureWindow string
+	// FailureResetAt is when the quota resets (UTC); nil = unknown.
+	FailureResetAt *time.Time
+
 	// Err is populated once Status is StatusError, carrying the error
 	// RunPrompt returned.
 	Err string
@@ -172,3 +180,11 @@ type RunSummary = RunStatus
 // finished long enough ago to have been evicted (see Registry's doc
 // comment on retention).
 var ErrNotFound = errors.New("runs: run not found")
+
+// FailureResetRFC3339 formats rs.FailureResetAt as RFC 3339 UTC, "" when unknown.
+func FailureResetRFC3339(rs RunStatus) string {
+	if rs.FailureResetAt == nil {
+		return ""
+	}
+	return rs.FailureResetAt.UTC().Format(time.RFC3339)
+}

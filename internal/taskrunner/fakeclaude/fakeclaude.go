@@ -117,6 +117,21 @@ func Run() {
 			"result":      "done",
 		})
 
+	case "rate-limit-rejected":
+		// A rejected rate_limit_event, then a normal result.
+		stdin.Scan() // consume the prompt line
+		writeLine(map[string]any{
+			"type": "rate_limit_event",
+			"rate_limit_info": map[string]any{
+				"status": "rejected", "resetsAt": 1790000000, "rateLimitType": "five_hour",
+			},
+			"uuid": "rl-1", "session_id": "sess-1",
+		})
+		writeLine(map[string]any{
+			"type": "result", "is_error": false, "num_turns": 1,
+			"session_id": "sess-1", "stop_reason": "end_turn", "result": "done",
+		})
+
 	case "stale-notification":
 		// Resuming a session whose previous run left a background shell
 		// command behind: before it handles the prompt the CLI reports the

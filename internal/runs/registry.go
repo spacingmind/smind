@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/spacingmind/smind/internal/attach"
+	"github.com/spacingmind/smind/internal/runs/ratelimit"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -346,6 +347,9 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 		finishedAt:         row.FinishedAt,
 		stopReason:         row.StopReason,
 		errMsg:             row.ErrMsg,
+		failureKind:        row.FailureKind,
+		failureWindow:      row.FailureWindow,
+		failureResetAt:     cloneTimePtr(row.FailureResetAt),
 		history:            history,
 		nextEventSeq:       nextSeq,
 		baseSHA:            row.BaseSHA,
@@ -414,6 +418,15 @@ type run struct {
 	// set once in drive before the turn starts, read by finish. Guarded
 	// by mu.
 	offered OfferedInfo
+
+	// rateSignal is the latest rejected rate-limit signal the backend
+	// reported during the run (nil = none); failureKind/Window/ResetAt are
+	// the classified terminal reason of an error run (ADR-0041 B1). Guarded
+	// by mu.
+	rateSignal     *ratelimit.Signal
+	failureKind    string
+	failureWindow  string
+	failureResetAt *time.Time
 
 	// isolation, when set, drives the turn through RunPromptIsolated
 	// (system runs only; see WithIsolation). Not persisted: nothing
@@ -545,7 +558,11 @@ func (r *run) statusLocked() RunStatus {
 		Purpose:        r.purpose,
 		Origin:         r.origin,
 		Attachments:    publicItems(r.attachments),
+
+		FailureKind:   r.failureKind,
+		FailureWindow: r.failureWindow,
 	}
+	rs.FailureResetAt = cloneTimePtr(r.failureResetAt)
 	rs.BaseSHA = cloneStrPtr(r.baseSHA)
 	rs.HeadSHA = cloneStrPtr(r.headSHA)
 	rs.Dirty = cloneBoolPtr(r.dirty)
@@ -953,6 +970,10 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 				reg.applyReportedMode(r, e.Text, e.Initial)
 				continue
 			}
+			if e.Type == taskrunner.EventTypeRateLimit {
+				reg.applyRateLimit(r, e.RateLimit)
+				continue
+			}
 			reg.record(r, e)
 		}
 	}()
@@ -1270,6 +1291,25 @@ func (reg *Registry) record(r *run, e Event) {
 	}
 }
 
+// applyRateLimit keeps the latest rejected rate-limit signal on the run for
+// finish to classify with. Nil-safe; non-rejected signals are ignored.
+func (reg *Registry) applyRateLimit(r *run, sig *taskrunner.RateLimitSignal) {
+	if sig == nil || sig.Status != "rejected" {
+		return
+	}
+	r.mu.Lock()
+	r.rateSignal = &ratelimit.Signal{Status: sig.Status, ResetsAt: sig.ResetsAt, Type: sig.Type}
+	r.mu.Unlock()
+}
+
+func cloneTimePtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	v := *t
+	return &v
+}
+
 func (reg *Registry) finish(r *run, err error) {
 	now := time.Now()
 
@@ -1280,6 +1320,7 @@ func (reg *Registry) finish(r *run, err error) {
 	toolCalls := len(r.toolCallIDs)
 	offered := r.offered
 	cause := agentErrorCause(r.history)
+	rateSignal := r.rateSignal
 	r.mu.Unlock()
 
 	// Idempotent re-upsert so the row reflects the final value. A run that
@@ -1325,7 +1366,18 @@ func (reg *Registry) finish(r *run, err error) {
 	// succeeds.
 	_, _ = reg.st.UpdateRunStatus(r.id, string(status), &now, stopReason, errMsg)
 
+	// ADR-0041 B1: classify only error runs, stored with the same ordering
+	// rule. Never alters status, stop reason, error text or disposition.
+	var fail ratelimit.Result
+	if status == StatusError {
+		fail = ratelimit.Classify(ratelimit.Input{Provider: string(r.provider), Err: errMsg, Signal: rateSignal}, time.Now())
+		if fail.Kind != "" {
+			_ = reg.st.UpdateRunFailure(r.id, fail.Kind, fail.Window, fail.ResetAt)
+		}
+	}
+
 	r.mu.Lock()
+	r.failureKind, r.failureWindow, r.failureResetAt = fail.Kind, fail.Window, cloneTimePtr(fail.ResetAt)
 	r.finishedAt = &now
 	r.status = status
 	r.errMsg = errMsg
