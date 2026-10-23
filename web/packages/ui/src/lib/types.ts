@@ -105,6 +105,8 @@ export interface AgentProfile {
   Skills?: string[];
   ChildPolicy?: string;
   ChildProfileIDs?: number[];
+  OnRateLimit?: string;
+  FallbackProfileID?: number | null;
   CreatedAt: string;
   UpdatedAt: string;
 }

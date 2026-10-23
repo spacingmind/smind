@@ -58,6 +58,15 @@ interface ProfileParams {
   thinkingLevel: string;
   model: string;
   notes: string;
+  /** ADR-0041 seat contract and failover. profile.update is a FULL REPLACE: omitting these clears them, so the editor always sends all of them. */
+  onRateLimit?: string;
+  fallbackProfileId?: number | null;
+  /** null = unmanaged. */
+  orchestrationTools?: boolean | null;
+  instructions?: string;
+  skills?: string[];
+  childPolicy?: string;
+  childProfileIds?: number[];
 }
 
 /** `profile.create` {name, provider, ...} -> the saved profile, upserted into the cache. */

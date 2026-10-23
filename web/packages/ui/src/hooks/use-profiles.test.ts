@@ -106,6 +106,34 @@ describe("useProfiles", () => {
     expect(daemon.countCalls("profile.list")).toBe(1);
   });
 
+  it("update passes the seat-contract and failover params through to profile.update", async () => {
+    const daemon = new FakeUsageDaemon([]);
+    daemon.profiles = [profile(1, "One")];
+    const { result } = renderHookWithDaemon(() => useUpdateProfile(), daemon, { initialProps: undefined });
+    await flush();
+    const params = {
+      id: 1,
+      name: "One",
+      provider: "claude-native",
+      permissionMode: "",
+      autoAccept: false,
+      thinkingLevel: "",
+      model: "",
+      notes: "",
+      onRateLimit: "fallback",
+      fallbackProfileId: 2,
+      orchestrationTools: true,
+      instructions: "be brief",
+      skills: ["smind-peer"],
+      childPolicy: "profiles",
+      childProfileIds: [2, 3],
+    };
+    await act(async () => {
+      await result.current.mutateAsync(params);
+    });
+    expect(daemon.calls.find((c) => c.method === "profile.update")?.params).toEqual(params);
+  });
+
   it("profile events from another tab reach the cache", async () => {
     const daemon = new FakeUsageDaemon([]);
     daemon.profiles = [profile(1, "One")];
