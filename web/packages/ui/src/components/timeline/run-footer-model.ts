@@ -48,6 +48,8 @@ export interface RunFooterRun {
   failureWindow?: string;
   /** When the limit lifts (RFC 3339 UTC). */
   failureResetAt?: string;
+  /** ADR-0041 F2: a rate-limited run whose profile names a fallback (run.logs). */
+  fallbackProfileId?: number;
   err?: string;
   model?: string;
   usage?: RunUsage;

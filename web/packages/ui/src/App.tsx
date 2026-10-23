@@ -493,7 +493,15 @@ function AppShell({
   /** Looks chatId up in the selected task's already-fetched chats and opens it -- what the "+" menu's per-chat items and the "Also running" chip (which only knows a chatId, from run.status) actually call. */
   function openChatById(chatId: number, placement?: TabPlacement) {
     const chat = chats?.find((c) => c.ID === chatId);
-    if (chat) openChatTab(chat, placement);
+    if (chat) {
+      openChatTab(chat, placement);
+      return;
+    }
+    // A chat just created elsewhere (a failover retry) can beat its chat.created event into `chats`.
+    client
+      ?.call<Chat>("chat.get", { id: chatId })
+      .then((fetched) => openChatTab(fetched, placement))
+      .catch((err: unknown) => console.error("chat.get failed", err));
   }
 
   /** "+" -> "New chat": creates a chat via chat.create and opens its tab immediately (chat.created's own event, subscribed by useTaskChats, updates the `chats` list independently -- no need to wait for it here). */

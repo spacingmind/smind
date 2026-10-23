@@ -4,6 +4,7 @@ import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { supportsThinking } from "@/lib/thinking-levels";
 import type { WsClientLike } from "@/lib/ws-client";
 import { resendRequests } from "@/lib/attachments/reuse";
+import { runStartParams } from "@/lib/run-start";
 import type {
   AttachmentMeta,
   AttachmentRequest,
@@ -409,6 +410,8 @@ interface TimelineState {
     previews?: AttachmentMeta[],
     /** ADR-0041 S2w: the agent profile this run is launched as; sent as run.start's `profileId` only when defined. */
     profileId?: number,
+    /** RFC 3339: hold the prompt in the chat's queue until then (the result is then always queued). */
+    notBefore?: string,
   ) => Promise<SubmitResult>;
   /**
    * Actually stops runId server-side (run.stop) -- unlike task switch/
@@ -828,25 +831,17 @@ export function useRunTimeline(
       attachments?: AttachmentRequest[],
       previews?: AttachmentMeta[],
       profileId?: number,
+      notBefore?: string,
     ) => {
       const session = sessionRef.current;
       if (!client || taskId === null || chatId === null || !session) {
         throw new Error("no chat selected");
       }
 
-      const result = await client.call<RunStartResult>("run.start", {
-        taskId,
-        chatId,
-        provider,
-        prompt,
-        whenBusy,
-        ...(permission?.permissionMode ? { permissionMode: permission.permissionMode } : {}),
-        ...(permission?.autoAccept ? { autoAccept: true } : {}),
-        ...(thinkingLevel ? { thinkingLevel } : {}),
-        ...(model ? { model } : {}),
-        ...(profileId !== undefined ? { profileId } : {}),
-        ...(attachments && attachments.length > 0 ? { attachments } : {}),
-      });
+      const result = await client.call<RunStartResult>(
+        "run.start",
+        runStartParams({ taskId, chatId, provider, prompt, whenBusy, permission, thinkingLevel, model, profileId, attachments, notBefore }),
+      );
       // ADR-0021 §2: a queued result has no run yet -- no entry is
       // appended; the server delivers it later and run.status adopts it.
       if (!("runId" in result)) return { kind: "queued" as const, queueItemId: result.queueItemId };

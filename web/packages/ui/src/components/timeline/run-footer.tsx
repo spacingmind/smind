@@ -11,6 +11,7 @@ import {
   type RunModelLabels,
   type RunFooterRun,
 } from "@/components/timeline/run-footer-model";
+import { RunFailoverButtons, type RunFailover } from "@/components/timeline/run-failover-actions";
 import { hasFutureReset, isRateLimitedRun } from "@/lib/rate-limit";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +33,7 @@ export function RunFooter<T extends RunFooterRun>({
   disconnected = false,
   onContinue,
   onRerun,
+  failover,
   children,
 }: {
   run: T;
@@ -49,6 +51,8 @@ export function RunFooter<T extends RunFooterRun>({
   onContinue?: (run: T) => void;
   /** Retry: the existing Re-run path, offered on a failed latest run. */
   onRerun?: (run: T) => void;
+  /** ADR-0041 F2: the rate-limited footer's Retry-on-fallback / Wait actions and the continued-on links; omitted hides them all. */
+  failover?: RunFailover<T>;
   /** The hover action bar (copy / re-run) -- rendered as-is at the end of the line. */
   children?: ReactNode;
 }) {
@@ -132,6 +136,7 @@ export function RunFooter<T extends RunFooterRun>({
                   Retry
                 </Button>
               )}
+              {view.action === "retry" && isLatest && failover && <RunFailoverButtons run={run} failover={failover} now={now} />}
             </span>
           )
         )}

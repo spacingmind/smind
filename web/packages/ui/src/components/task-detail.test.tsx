@@ -1335,6 +1335,80 @@ describe("TaskDetailPane message hover actions", () => {
     expect(client.calls.some((c) => c.method === "task.prompt")).toBe(false);
   });
 
+  it("Retry on fallback creates a new chat and sends profileId", async () => {
+    const client = new FakeWsClient();
+    const jumps: number[] = [];
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat onJumpToChat={(id) => jumps.push(id)} />);
+    client.nth("profile.list", 0).resolve([
+      {
+        ID: 9,
+        Name: "Backup GLM",
+        Provider: "glm",
+        PermissionMode: "accept_edits",
+        AutoAccept: true,
+        ThinkingLevel: "extended",
+        Model: "glm-5.3",
+        Notes: "",
+        CreatedAt: "2024-01-01T00:00:00Z",
+        UpdatedAt: "2024-01-01T00:00:00Z",
+      } satisfies AgentProfile,
+    ]);
+    client.nth("run.list", 0).resolve([
+      doneRun({ Status: "error", Err: "limit", StopReason: "", FailureKind: "rate_limited", FailureWindow: "5h", FailureResetAt: "2999-01-01T00:00:00Z", ProfileID: 7 }),
+    ]);
+    await flush();
+    client.nth("run.logs", 0).resolve({ runId: "run-1", status: "error", failureKind: "rate_limited", window: "5h", resetAt: "2999-01-01T00:00:00Z", profileId: 7, fallbackProfileId: 9, events: [] } satisfies RunLogsResult);
+    await flush();
+
+    fireEvent.click(await screen.findByTestId("run-retry-fallback"));
+    await flush();
+    expect(client.nth("chat.create", 0).params).toEqual({ taskId: TASK_A.ID });
+    client.nth("chat.create", 0).resolve({ ...CHAT_A, ID: 11 });
+    await flush();
+    expect(client.nth("run.start", 0).params).toEqual({
+      taskId: TASK_A.ID,
+      chatId: 11,
+      provider: "glm",
+      prompt: "do the thing",
+      whenBusy: "queue",
+      permissionMode: "accept_edits",
+      autoAccept: true,
+      thinkingLevel: "extended",
+      model: "glm-5.3",
+      profileId: 9,
+    });
+    client.nth("run.start", 0).resolve({ runId: "run-2" });
+    await flush();
+    expect(jumps).toEqual([11]);
+  });
+
+  it("Wait until queues the same prompt on this chat with notBefore and the run's profileId", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+    client.nth("run.list", 0).resolve([
+      doneRun({ Status: "error", Err: "limit", StopReason: "", FailureKind: "rate_limited", FailureWindow: "5h", FailureResetAt: "2999-01-01T00:00:00Z", ProfileID: 7 }),
+    ]);
+    await flush();
+    client.nth("run.logs", 0).resolve({ runId: "run-1", status: "error", failureKind: "rate_limited", resetAt: "2999-01-01T00:00:00Z", events: [] } satisfies RunLogsResult);
+    await flush();
+
+    fireEvent.click(await screen.findByTestId("run-wait"));
+    await flush();
+    expect(client.nth("run.start", 0).params).toEqual({
+      taskId: TASK_A.ID,
+      chatId: CHAT_A.ID,
+      provider: "claude-native",
+      prompt: "do the thing",
+      whenBusy: "queue",
+      permissionMode: "acceptEdits",
+      profileId: 7,
+      notBefore: "2999-01-01T00:00:30.000Z",
+    });
+    client.nth("run.start", 0).resolve({ queued: true, queueItemId: 5 });
+    await flush();
+    expect(screen.getByTestId("run-wait-queued")).toBeInTheDocument();
+  });
+
   it("Re-run submits the same prompt, provider, model and permission with whenBusy queue", async () => {
     const client = await renderWithDoneRun({
       Provider: "glm",

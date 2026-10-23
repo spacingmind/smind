@@ -6,15 +6,15 @@ import type { WsClientLike } from "@/lib/ws-client";
 
 /**
  * The task's failover index (see lib/run-failover.ts), from one task-wide
- * run.list, refetched when a run of the task changes status (a successor
+ * run.list (only while `enabled`: the pane asks only for a chat that shows a rate-limited or failed-over run), refetched when a run of the task changes status (a successor
  * starting is a run.status in another chat) or events were dropped.
  */
-export function useRunFailoverIndex(client: WsClientLike | null, taskId: number | null, events: DaemonEvents | null = null): FailoverIndex {
+export function useRunFailoverIndex(client: WsClientLike | null, taskId: number | null, events: DaemonEvents | null = null, enabled = true): FailoverIndex {
   const [index, setIndex] = useState<FailoverIndex>(EMPTY_FAILOVER_INDEX);
 
   useEffect(() => {
     setIndex(EMPTY_FAILOVER_INDEX);
-    if (!client || taskId === null) return;
+    if (!client || taskId === null || !enabled) return;
     let cancelled = false;
     const load = () => {
       client
@@ -34,7 +34,7 @@ export function useRunFailoverIndex(client: WsClientLike | null, taskId: number 
       offStatus?.();
       offDropped?.();
     };
-  }, [client, taskId, events]);
+  }, [client, taskId, events, enabled]);
 
   return index;
 }

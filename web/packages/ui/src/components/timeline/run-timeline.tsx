@@ -18,6 +18,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tooltip, TooltipContent, TooltipTrigger, useMenuTooltip } from "@/components/ui/tooltip";
 import { ChildUpdateRow } from "@/components/timeline/child-update-row";
 import { RunFooter } from "@/components/timeline/run-footer";
+import type { RunFailover } from "@/components/timeline/run-failover-actions";
 import type { RunModelLabels } from "@/components/timeline/run-footer-model";
 import { canRetryWithHigherEffort, type RunEntry } from "@/hooks/use-run-timeline";
 
@@ -44,6 +45,7 @@ export const RunTimeline = memo(function RunTimeline({
   onRerun,
   onEditPrompt,
   onContinue,
+  failover,
   providerLabels,
   modelLabels,
   isLatest = false,
@@ -58,6 +60,8 @@ export const RunTimeline = memo(function RunTimeline({
   onEditPrompt?: (run: RunEntry) => void;
   /** Continue (max_tokens / turn-limit endings): submits "Continue" on the run's own config; omitted hides the button. */
   onContinue?: (run: RunEntry) => void;
+  /** ADR-0041 F2: rate-limit footer actions and failover links (see RunFailover); omitted hides them. */
+  failover?: RunFailover<RunEntry>;
   /** provider.list's id→label map ("label ?? id", run-config IA); omitted leaves raw ids. */
   providerLabels?: Record<string, string>;
   /** `${provider}/${modelId}` → human model label; `${provider}/` → the provider's default-model label (run footer). */
@@ -129,7 +133,7 @@ export const RunTimeline = memo(function RunTimeline({
           </div>
         )}
 
-        <RunFooter run={run} providerLabels={providerLabels} modelLabels={modelLabels} isLatest={isLatest} waiting={Boolean(run.pendingPermission)} disconnected={disconnected} onContinue={onContinue} onRerun={onRerun}>
+        <RunFooter run={run} providerLabels={providerLabels} modelLabels={modelLabels} isLatest={isLatest} waiting={Boolean(run.pendingPermission)} disconnected={disconnected} onContinue={onContinue} onRerun={onRerun} failover={failover}>
           <MessageActions group="run" className="ml-auto" data-testid="run-actions">
             <RunCopyMenu run={run} />
             {onRerun && run.status !== "running" && (
