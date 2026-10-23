@@ -248,6 +248,8 @@ func (r *Runner) ProviderCatalog() []ProviderInfo {
 // resolves to. Runs and ProviderInfo.DefaultModel both read it, so the UI shows
 // exactly what a run will use.
 func (r *Runner) DefaultModel(provider Provider) string {
+	r.defaultModelsMu.RLock()
+	defer r.defaultModelsMu.RUnlock()
 	return r.defaultModels[provider]
 }
 

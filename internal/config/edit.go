@@ -175,6 +175,28 @@ func Unset(path string) error {
 	})
 }
 
+// SetProviderDefaultModel sets (or, for a blank model, clears)
+// providers.<provider>.defaultModel through exactly the code path of
+// `smind config set/unset`: same validation, comment-preserving edit and
+// atomic write. provider must be one of DefaultModelProviders.
+func SetProviderDefaultModel(provider, model string) error {
+	known := false
+	for _, id := range DefaultModelProviders {
+		if id == provider {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return fmt.Errorf("unknown provider %q", provider)
+	}
+	key := "providers." + provider + ".defaultModel"
+	if strings.TrimSpace(model) == "" {
+		return Unset(key)
+	}
+	return Set(key, model)
+}
+
 // SetPasswordHash stores a bcrypt hash as server.passwordHash.
 func SetPasswordHash(hash string) error {
 	if !strings.HasPrefix(hash, "$2") {

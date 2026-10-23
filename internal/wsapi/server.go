@@ -244,6 +244,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		}
 		return res, err
 	}
+	hs["provider.setDefaultModel"] = handleProviderSetDefaultModel(runner, bus)
 	hs["daemon.info"] = handleDaemonInfo(info, reg)
 	hs["run.attachment"] = handleRunAttachment(reg)
 	hs["forge.search"] = handleForgeSearch(wm, gh)

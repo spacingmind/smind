@@ -59,7 +59,17 @@ const (
 	// and when a status read sees a change. The status has no canSetToken
 	// (that is per connection).
 	TopicForgeStatus = "forge.status"
+	// TopicProviderUpdated carries {id, defaultModel} after
+	// provider.setDefaultModel changed a provider's default model, so other
+	// clients refresh provider.list.
+	TopicProviderUpdated = "provider.updated"
 )
+
+// providerUpdatedPayload is the payload of TopicProviderUpdated.
+type providerUpdatedPayload struct {
+	ID           string `json:"id"`
+	DefaultModel string `json:"defaultModel"`
+}
 
 // The learning topics (TopicLearnedSkillProposed/Changed, TopicLearningJob)
 // live in learning.go next to their payloads.
@@ -95,6 +105,7 @@ var knownTopics = map[string]bool{
 	TopicMcpServerDeleted:     true,
 	TopicTaskGit:              true,
 	TopicForgeStatus:          true,
+	TopicProviderUpdated:      true,
 	TopicLearnedSkillProposed: true,
 	TopicLearnedSkillChanged:  true,
 	TopicLearningJob:          true,
