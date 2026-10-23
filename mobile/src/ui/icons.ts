@@ -18,6 +18,9 @@ export const ICONS = {
   stop: { ios: 'stop.fill', android: 'stop', glyph: '■' },
   send: { ios: 'arrow.up', android: 'arrow_upward', glyph: '↑' },
   link: { ios: 'link', android: 'link', glyph: '↗' },
+  attach: { ios: 'paperclip', android: 'attach_file', glyph: '+' },
+  file: { ios: 'doc', android: 'description', glyph: '▤' },
+  image: { ios: 'photo', android: 'image', glyph: '▣' },
   devices: { ios: 'laptopcomputer.and.iphone', android: 'devices', glyph: '▭' },
 } as const;
 
