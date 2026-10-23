@@ -411,8 +411,13 @@ func TestArchiveFinished_QueuedPromptMakesTaskNotFinished(t *testing.T) {
 	if err != nil || len(chats) == 0 {
 		t.Fatalf("ListChats() = %+v, %v", chats, err)
 	}
-	if _, err := f.db.EnqueueChatPrompt(chats[0].ID, "waiting", "{}", "human", 0, 0, 0); err != nil {
-		t.Fatalf("EnqueueChatPrompt() error = %v", err)
+	// Held for an hour: a finishing run's trailing DeliverQueued (which runs
+	// after the task already reads "done") must not deliver this item, whose
+	// empty run config could never start, and so cancel it out from under the
+	// test. A held item is still a queued prompt.
+	hold := time.Now().Add(time.Hour)
+	if _, err := f.db.EnqueueChatPromptAt(chats[0].ID, "waiting", "{}", "human", 0, 0, 0, "", &hold); err != nil {
+		t.Fatalf("EnqueueChatPromptAt() error = %v", err)
 	}
 
 	res := f.archiveFinished(root, false)
