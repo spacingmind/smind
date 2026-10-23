@@ -286,6 +286,20 @@ export function Composer({
     textareaNode.current?.focus();
   }, [attachKey, queuedInserts]);
 
+  // "Send to chat" from the PR panel: append each queued text after a blank line, like a prefill. Never sent here.
+  const queuedTexts = useComposerAttachmentsStore((s) => (attachKey ? s.pendingTexts[attachKey] : undefined));
+  useEffect(() => {
+    if (!attachKey || !queuedTexts?.length) return;
+    let text = draftRef.current.value;
+    for (const added of useComposerAttachmentsStore.getState().takeTexts(attachKey)) {
+      text = text.trim() === "" ? added : `${text}\n\n${added}`;
+    }
+    pendingCaret.current = text.length;
+    draftRef.current.setValue(text);
+    setCaret(text.length);
+    textareaNode.current?.focus();
+  }, [attachKey, queuedTexts]);
+
   const send = useCallback(
     async (text: string, whenBusy: "queue" | "interrupt") => {
       setSubmitting(true);
