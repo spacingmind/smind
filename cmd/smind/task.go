@@ -167,7 +167,7 @@ type runLogsResult struct {
 
 func cmdTask(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|wait|logs|stop|permissions|approve|deny|mode|options|set-option|chat|queue> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|wait|logs|stop|permissions|approve|deny|mode|options|set-option|chat|queue|tree> ...")
 		return 2
 	}
 	switch args[0] {
@@ -203,6 +203,8 @@ func cmdTask(args []string) int {
 		return cmdTaskChat(args[1:])
 	case "queue":
 		return cmdTaskQueue(args[1:])
+	case "tree":
+		return cmdTaskTree(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "smind task: unknown subcommand %q\n", args[0])
 		return 2
