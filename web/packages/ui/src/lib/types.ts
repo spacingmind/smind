@@ -295,6 +295,8 @@ export interface RunSummary {
   Dirty?: boolean | null;
   /** ADR-0038: the prompt's attachments as metadata (never bytes). Absent/empty when it had none. */
   attachments?: AttachmentMeta[];
+  /** Who authored the prompt: "human", "orchestrator", "agent" or "child_event" (ADR-0041). Lowercase json tag, omitted when unknown. */
+  origin?: string;
 }
 
 // internal/runs.WhenBusy's values (ADR-0021 §2), run.start's optional
@@ -333,6 +335,8 @@ export interface ChatQueueItem {
   CancelKind: "" | "user" | "auto";
   CreatedAt: string;
   UpdatedAt: string;
+  /** ADR-0041: RFC 3339 instant the item is held until (a child-update debounce); null/absent = deliverable now. */
+  NotBefore?: string | null;
   /** ADR-0038: the queued prompt's attachments (metadata only). */
   attachments?: AttachmentMeta[];
 }

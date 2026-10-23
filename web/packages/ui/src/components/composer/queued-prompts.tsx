@@ -2,7 +2,21 @@ import { Icons } from "@/lib/icons";
 
 import { AttachmentChip } from "@/components/timeline/attachment-chip";
 import { Button } from "@/components/ui/button";
+import { useNow } from "@/hooks/use-now";
+import { CHILD_EVENT_SOURCE, CHILD_UPDATES_LABEL, queueStartsLabel } from "@/lib/queue-hold";
 import type { ChatQueueItem } from "@/lib/types";
+
+/** "starts HH:MM" / "starts in 18s" for a held item; ticks each second only while mounted (held items only). */
+function StartsLabel({ notBefore }: { notBefore: string }) {
+  const now = useNow(1_000);
+  const label = queueStartsLabel(notBefore, now);
+  if (!label) return null;
+  return (
+    <span data-testid="queued-starts" className="shrink-0">
+      {label}
+    </span>
+  );
+}
 
 /**
  * The daemon's per-chat prompt queue as rendered above the composer card
@@ -43,9 +57,17 @@ export function QueuedPrompts({
             className="flex items-center gap-2 rounded-md bg-surface px-2 py-1 text-ui-sm text-foreground-muted"
           >
             <span className="shrink-0 uppercase">{item.Priority > 0 ? "Next" : "Queued"}</span>
-            <span className="min-w-0 flex-1 truncate" title={item.Prompt}>
-              {item.Prompt}
-            </span>
+            {item.Source === CHILD_EVENT_SOURCE ? (
+              <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                <span className="truncate">{CHILD_UPDATES_LABEL}</span>
+                {item.NotBefore && <StartsLabel notBefore={item.NotBefore} />}
+              </span>
+            ) : (
+              <span className="min-w-0 flex-1 truncate" title={item.Prompt}>
+                {item.Prompt}
+              </span>
+            )}
+            {item.Source !== CHILD_EVENT_SOURCE && item.NotBefore && <StartsLabel notBefore={item.NotBefore} />}
             {item.attachments && item.attachments.length > 0 && (
               <span data-testid="queued-attachments" className="flex shrink-0 items-center gap-1">
                 {item.attachments.map((a) => (
@@ -57,7 +79,7 @@ export function QueuedPrompts({
               type="button"
               variant="ghost"
               size="icon-xs"
-              aria-label={`Cancel queued prompt: ${item.Prompt.slice(0, 40)}`}
+              aria-label={`Cancel queued prompt: ${(item.Source === CHILD_EVENT_SOURCE ? CHILD_UPDATES_LABEL : item.Prompt).slice(0, 40)}`}
               onClick={() => onCancel(item.ID)}
             >
               <Icons.close aria-hidden className="size-3" />

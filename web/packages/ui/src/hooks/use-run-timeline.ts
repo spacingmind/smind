@@ -343,6 +343,8 @@ export interface RunEntry {
   usage?: RunUsage;
   /** ADR-0038: the prompt's attachments (metadata; an image may carry a local `previewUrl` from the optimistic echo). Undefined when it had none. */
   attachments?: AttachmentMeta[];
+  /** Who authored the prompt ("human", "orchestrator", "agent", "child_event"); undefined when unknown. Seeded from run.list. */
+  origin?: string;
   /** O1 provenance: worktree HEAD at the run's start (undefined when unknown). */
   baseSha?: string;
   /** O1 provenance: worktree HEAD at the terminal state (undefined while running/unknown). */
@@ -679,6 +681,7 @@ function toRunEntry(r: RunSummary): RunEntry {
     autoAccept: r.AutoAccept,
     thinkingLevel: r.ThinkingLevel,
     model: r.Model ?? "",
+    origin: r.origin || undefined,
     ...(r.attachments && r.attachments.length > 0 ? { attachments: r.attachments } : {}),
     ...(r.usage ? { usage: r.usage } : {}),
     ...(r.BaseSHA ? { baseSha: r.BaseSHA } : {}),

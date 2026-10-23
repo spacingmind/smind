@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger, useMenuTooltip } from "@/components/ui/tooltip";
+import { ChildUpdateRow } from "@/components/timeline/child-update-row";
 import { RunFooter } from "@/components/timeline/run-footer";
 import type { RunModelLabels } from "@/components/timeline/run-footer-model";
 import { canRetryWithHigherEffort, type RunEntry } from "@/hooks/use-run-timeline";
@@ -67,26 +68,30 @@ export const RunTimeline = memo(function RunTimeline({
 
   return (
     <li data-testid="run-entry" data-run-id={run.id} className="flex flex-col gap-2">
-      <div className="group/prompt flex flex-col items-end gap-0.5">
-        <p
-          className="max-w-[85%] rounded-2xl rounded-tr-sm bg-surface px-4 py-3 text-ui-base break-words whitespace-pre-wrap"
-          data-testid="run-prompt"
-        >
-          {run.prompt}
-        </p>
-        <RunAttachments runId={run.id} attachments={run.attachments} />
-        <MessageActions group="prompt" data-testid="run-prompt-actions">
-          <CopyAction getText={() => run.prompt} data-testid="run-prompt-copy" />
-          {onEditPrompt && (
-            <MessageAction
-              label="Edit & resend"
-              icon={<Icons.edit aria-hidden />}
-              data-testid="run-prompt-edit"
-              onClick={() => onEditPrompt(run)}
-            />
-          )}
-        </MessageActions>
-      </div>
+      {run.origin === "child_event" ? (
+        <ChildUpdateRow prompt={run.prompt} />
+      ) : (
+        <div className="group/prompt flex flex-col items-end gap-0.5">
+          <p
+            className="max-w-[85%] rounded-2xl rounded-tr-sm bg-surface px-4 py-3 text-ui-base break-words whitespace-pre-wrap"
+            data-testid="run-prompt"
+          >
+            {run.prompt}
+          </p>
+          <RunAttachments runId={run.id} attachments={run.attachments} />
+          <MessageActions group="prompt" data-testid="run-prompt-actions">
+            <CopyAction getText={() => run.prompt} data-testid="run-prompt-copy" />
+            {onEditPrompt && (
+              <MessageAction
+                label="Edit & resend"
+                icon={<Icons.edit aria-hidden />}
+                data-testid="run-prompt-edit"
+                onClick={() => onEditPrompt(run)}
+              />
+            )}
+          </MessageActions>
+        </div>
+      )}
 
       {/* The answer side (items, error, footer) is its own hover group, so hovering the prompt reveals only the prompt bar. */}
       <div className="group/answer flex flex-col gap-2">
