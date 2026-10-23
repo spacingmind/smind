@@ -30,6 +30,7 @@ mod notify;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod overlay_icon;
 mod probe;
+mod proxy_port;
 mod ssh_tunnel;
 mod state;
 mod tray;
@@ -178,8 +179,15 @@ pub fn run() {
             // later, the way ADR-0012's fallback page did) keeps this
             // simple and avoids ever showing a page with no `?k=` to
             // exchange.
-            let (port, server_fut) =
-                tauri::async_runtime::block_on(dclient::proxy::serve(proxy_state.clone()))?;
+            //
+            // The port is the previous launch's when it is still free: the
+            // webview keys localStorage by origin, so a port that changes on
+            // every launch would reset every UI preference on every launch.
+            let proxy_port_path = proxy_port::path_in(&app.path().app_data_dir()?);
+            let (port, server_fut) = tauri::async_runtime::block_on(
+                dclient::proxy::serve_preferring(proxy_state.clone(), proxy_port::load(&proxy_port_path)),
+            )?;
+            proxy_port::save(&proxy_port_path, port);
             tauri::async_runtime::spawn(server_fut);
 
             let proxy_url: Url = format!("http://127.0.0.1:{port}")
