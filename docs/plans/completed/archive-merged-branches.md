@@ -5,7 +5,7 @@ Size: **L (6)** — scope 2 (daemon + web), PRs 1 (two PRs: daemon, web; built i
 (UI screenshots; throwaway repos and a scripted `gh`, never a real forge). One Lead; every PR non-stacked off `develop`.
 
 Spec: [ADR-0039 §9](../../decisions/0039-git-pr-state.md) (policy and the data it needs, all in place since PRs 2–4: `branch_owned`, `base_ref`/`base_sha`,
-`TaskGit.merged`, `origin.ahead`, `commits.aheadOfBase`, `worktree.*`, the PR snapshot). Status: **plan written 2026-10-23; implementation not started.**
+`TaskGit.merged`, `origin.ahead`, `commits.aheadOfBase`, `worktree.*`, the PR snapshot). Status: **completed 2026-10-23** (daemon #544, web #545; every acceptance criterion is confirmed in Validation).
 
 ## Decisions (fixed)
 
@@ -134,13 +134,23 @@ Decided while implementing (2026-10-23):
 
 ## Progress
 
-- 2026-10-23: plan written (ADR-0039 §9, H3, Supervisor defaults a/b). Daemon and web halves implemented and verified live together; PRs opened.
+- 2026-10-23: plan written (ADR-0039 §9, H3, Supervisor defaults a/b). Daemon (#544) and web (#545) halves implemented, verified live together and merged; #545 was rebased once after the G12 web PR (#548) landed (`PrOperation` union and `PrAction` imports/reason logic merged; `tsc` found no duplicates).
 
 ## Validation
 
-How each AC was satisfied (daemon: this PR; web: the Archive dialog PR). The two branches were merged in a scratch worktree for the live run.
+How each AC was satisfied (daemon #544; web #545). The two branches were merged in a scratch worktree for the live run.
 
 - **AC1–AC9 (daemon):** every test name in the plan's `store / workspace` and `wsapi / agents` groups exists and passes (plus `TestRestore_FreshPathWhenOriginalIsTaken`, `TestRestore_ConcurrentCallsKeepTheWorktree`, `TestTaskArchive_DeletesAndForces`); `TestTaskArchiveFinished_NeverDeletesBranches` and `TestMcpTaskArchive_NeverDeletesBranches` first assert the branch *would* be deletable, so they prove something.
 - **Live (isolated daemon on port 4881, throwaway repo with a local bare origin, a scripted `gh` reporting a merged PR; nothing touched a real forge):** previews for a merged-clean task (`canDeleteBranch`, default on), an owned-unmerged one (off, "not merged anywhere"), a dirty-merged one (off, "saved to the branch, so it is kept"), a user-branch task ("smind never deletes it") and a squash-merged one (`merged via pr`, deletable). Archiving through the real UI: the merged-clean and squash-merged branches were deleted, the dirty one and the user's own branch were kept, the unmerged owned one was deleted only through "Delete the branch anyway" (`force`); `origin` still had only `develop`. The Archived view listed all five with "branch kept"/"branch deleted"; Restore of the kept dirty task re-created its worktree and put it back in the tree live (and out of the Archived list), Restore of deleted ones was disabled with the `branch_gone` sentence.
 - **Web ACs 10–14 and screenshots:** light and dark screenshots of the dialog (merged-clean, dirty, unmerged-owned, user branch, squash), the Archived view, the restore frames at 0/80/250/1500 ms, and the diff header's **Archive…** replacing Create/Update PR for a merged PR. Found and fixed in review: the Archived row's meta line was truncated to "branch del…" beside the Restore button (now its own line) and the `branch_gone` sentence claimed the branch had been merged.
 - **AC15:** `task test`, `task lint` and `cd web && bunx tsc -b packages/ui` are recorded in each PR body. ADR-0024's one-line amendment is below.
+
+### Acceptance-criteria coverage (2026-10-23 close-out)
+
+| ACs | Where | Evidence |
+|---|---|---|
+| AC1–AC9 (migration, preview, policy, order, squash, never in bulk/by agents, Restore, archived list, failure atomicity) | #544 | the named store/workspace/wsapi/MCP tests; the live run (merged-clean and squash-merged deleted, dirty and user branch kept, unmerged only via `force`, `origin` untouched, Restore of a kept branch) |
+| AC10–AC14 (risk dialog, typed errors, Archived view + Restore, Archive… on a merged PR, visuals) | #545 | `archive-dialog`, `archived-tasks`, `pr-action` tests; light/dark screenshots incl. restore frames |
+| AC15 (checks, no real forge, ADR-0024 amendment) | both | each PR body records `task test`/`task lint`/tsc; scripted `gh` only; ADR-0024 amended in #544 |
+
+Known residuals (not blockers): a real forge/PR merge was never exercised (scripted `gh`); `merged: unknown` is reported as "not merged anywhere yet" (fail-closed, imprecise); a delete-archive can hold the task's archive guard for up to the 20 s base fetch; the new tests carry `!windows` build tags. Out of scope and still open: "Merge locally into base" and auto-archive after a PR merge (Supervisor defaults a/b; the Human may revisit).
