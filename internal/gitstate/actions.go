@@ -19,15 +19,21 @@ type ActionCtx struct {
 	// sentence for the code, which names the action.
 	ForgeCode   string
 	ForgeReason string
+	// MidOperation is "merge" or "rebase" when the worktree is in the middle
+	// of one (MERGE_HEAD, rebase-merge or rebase-apply exists); "" otherwise.
+	// It feeds the policy only and is not part of the wire payload.
+	MidOperation string
 }
 
-// Actions is the createPr/updatePr policy, a pure function of the payload.
+// Actions is the createPr/updatePr/push/updateFromBase policy, a pure function of the payload.
 // Blockers are checked in order; the first wins. The RPCs re-check the same
 // preconditions, so a stale payload can never make an action run.
 func Actions(g TaskGit, c ActionCtx) map[string]Action {
 	return map[string]Action{
-		"createPr": createPrAction(g, c),
-		"updatePr": updatePrAction(g, c),
+		"createPr":       createPrAction(g, c),
+		"updatePr":       updatePrAction(g, c),
+		"push":           pushAction(g, c),
+		"updateFromBase": updateFromBaseAction(g, c),
 	}
 }
 
@@ -98,6 +104,51 @@ func updatePrAction(g TaskGit, c ActionCtx) Action {
 		return disabled("update_unsupported", fmt.Sprintf("This pull request was opened from a rebased copy (`%s`), so smind can't update it automatically.", g.PR.HeadRef))
 	case c.ForgeCode != "":
 		return disabled(c.ForgeCode, forgeReason("Update PR", c))
+	}
+	return Action{Enabled: true}
+}
+
+// CodeUpToDate is updateFromBase's advisory code: the branch already holds
+// everything its base has. The RPC does not refuse on it (it fetches first).
+const CodeUpToDate = "up_to_date"
+
+// CodeStatusUnknown means the facts the action needs have not been read yet.
+const CodeStatusUnknown = "status_unknown"
+
+func pushAction(g TaskGit, c ActionCtx) Action {
+	switch {
+	case g.Branch == nil:
+		return disabled(forge.CodeTaskNoWorktree, "Push isn't available because this task has no worktree. Start a new task from this branch to push changes.")
+	case c.NoOrigin:
+		return disabled(forge.CodeNoRemote, "Push isn't available because this workspace has no `origin` remote, so there's nowhere to push. Add one with `git remote add origin <url>`.")
+	case g.Origin == nil:
+		return disabled(CodeStatusUnknown, "Checking this branch's remote state…")
+	case g.Origin.Published && g.Origin.Behind != nil && *g.Origin.Behind > 0:
+		return disabled(forge.CodeNonFastForward, "Push isn't available because origin has newer changes on this branch. Bring those changes in first (pull in the worktree, or ask the agent).")
+	case g.Origin.Published && g.Origin.Ahead != nil && *g.Origin.Ahead == 0:
+		return disabled(forge.CodeNothingToPush, "Nothing to push.")
+	case !g.Origin.Published && g.Commits != nil && g.Commits.SinceFork != nil && *g.Commits.SinceFork == 0:
+		return disabled(forge.CodeNothingToPush, "Nothing to push. Commit your changes first.")
+	}
+	return Action{Enabled: true}
+}
+
+func updateFromBaseAction(g TaskGit, c ActionCtx) Action {
+	switch {
+	case g.Branch == nil:
+		return disabled(forge.CodeTaskNoWorktree, "Update from base isn't available because this task has no worktree. Start a new task from this branch to keep it current.")
+	case g.Base == nil || !g.Base.Known:
+		return disabled(forge.CodeBaseUnknown, "Update from base isn't available because this task's base commit is unknown. Set the base branch first.")
+	case g.Base.Tip == "":
+		return disabled(forge.CodeBaseNotFound, fmt.Sprintf("Update from base isn't available because %s wasn't found. Pick an existing base branch.", baseName(g)))
+	case c.RunActive:
+		return disabled(forge.CodeRunActive, "Update from base isn't available yet because an agent is still working in this task. Wait for the run to finish, or stop it.")
+	case c.MidOperation != "":
+		return disabled(forge.CodeMergeInProgress, fmt.Sprintf("Update from base isn't available because this worktree is in the middle of a %s. Finish it, or undo it with `git %s --abort` in the worktree.", c.MidOperation, c.MidOperation))
+	case g.Worktree != nil && g.Worktree.Dirty:
+		return disabled(forge.CodeWorktreeDirty, "Update from base isn't available because this worktree has uncommitted changes. Commit or stash them first.")
+	case g.Commits != nil && g.Commits.BehindBase != nil && *g.Commits.BehindBase == 0:
+		return disabled(CodeUpToDate, fmt.Sprintf("Already up to date with %s.", baseName(g)))
 	}
 	return Action{Enabled: true}
 }
