@@ -1145,7 +1145,7 @@ export interface TaskGit {
   diff?: { files: number; insertions: number; deletions: number };
   worktree?: { dirty: boolean; staged: number; unstaged: number; untracked: number };
   commits?: { aheadOfBase?: number; behindBase?: number; sinceFork?: number };
-  origin?: { upstream?: string; published: boolean; ahead?: number; behind?: number };
+  origin?: { upstream?: string; published: boolean; ahead?: number; behind?: number; pushTarget?: { remote: string; branch: string } };
   conflict?: { state: GitConflictState; files: string[]; against?: string; checkedAt: string; reason?: string };
   merged?: { state: GitMergedState; via: string };
   pr?: TaskGitPr;

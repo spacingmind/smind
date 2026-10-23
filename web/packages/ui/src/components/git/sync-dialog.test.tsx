@@ -45,6 +45,32 @@ describe("SyncDialog push", () => {
     expect(screen.getByTestId("sync-cancel")).toBeEnabled();
   });
 
+  it("shows the push target the daemon reports", async () => {
+    const withTarget = (pushTarget?: { remote: string; branch: string }) =>
+      published({ origin: { upstream: "origin/smind/task-x", published: true, ahead: 3, behind: 0, pushTarget } });
+    await mount("push", withTarget({ remote: "origin", branch: "smind/task-x" }));
+    expect(screen.getByTestId("sync-row-remote")).toHaveTextContent("origin/smind/task-x");
+    expect(screen.getByTestId("sync-row-next")).toHaveTextContent("Push 3 commits to origin/smind/task-x.");
+    expect(screen.queryByTestId("sync-remote-note")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [{ remote: "mirror", branch: "smind/task-x" }, "mirror/smind/task-x", "Pushes to the `mirror` remote."],
+    [{ remote: "origin", branch: "feat/x" }, "origin/feat/x", "Updates the pull request's branch."],
+  ])("push target %j", async (pushTarget, remote, note) => {
+    await mount("push", published({ origin: { upstream: "origin/smind/task-x", published: true, ahead: 3, behind: 0, pushTarget } }));
+    expect(screen.getByTestId("sync-row-remote")).toHaveTextContent(remote);
+    expect(screen.getByTestId("sync-row-next")).toHaveTextContent(`Push 3 commits to ${remote}.`);
+    expect(screen.getByTestId("sync-remote-note")).toHaveTextContent(note);
+  });
+
+  it("falls back to origin/<branch> without a push target", async () => {
+    await mount("push", published());
+    expect(screen.getByTestId("sync-row-remote")).toHaveTextContent("origin/smind/task-x");
+    expect(screen.getByTestId("sync-row-next")).toHaveTextContent("Push 3 commits to origin/smind/task-x.");
+    expect(screen.queryByTestId("sync-remote-note")).not.toBeInTheDocument();
+  });
+
   it("publish label without upstream", async () => {
     await mount("push", gitState({ origin: { published: false }, commits: { sinceFork: 2 }, actions: { push: { enabled: true } } }));
     expect(screen.getByRole("heading", { name: "Publish branch" })).toBeInTheDocument();
