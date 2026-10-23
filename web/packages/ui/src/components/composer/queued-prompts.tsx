@@ -13,7 +13,7 @@ function StartsLabel({ notBefore }: { notBefore: string }) {
   if (!label) return null;
   return (
     <span data-testid="queued-starts" className="shrink-0">
-      · {label}
+      {label}
     </span>
   );
 }
@@ -58,13 +58,16 @@ export function QueuedPrompts({
           >
             <span className="shrink-0 uppercase">{item.Priority > 0 ? "Next" : "Queued"}</span>
             {item.Source === CHILD_EVENT_SOURCE ? (
-              <span className="min-w-0 flex-1 truncate">{CHILD_UPDATES_LABEL}</span>
+              <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                <span className="truncate">{CHILD_UPDATES_LABEL}</span>
+                {item.NotBefore && <StartsLabel notBefore={item.NotBefore} />}
+              </span>
             ) : (
               <span className="min-w-0 flex-1 truncate" title={item.Prompt}>
                 {item.Prompt}
               </span>
             )}
-            {item.NotBefore && <StartsLabel notBefore={item.NotBefore} />}
+            {item.Source !== CHILD_EVENT_SOURCE && item.NotBefore && <StartsLabel notBefore={item.NotBefore} />}
             {item.attachments && item.attachments.length > 0 && (
               <span data-testid="queued-attachments" className="flex shrink-0 items-center gap-1">
                 {item.attachments.map((a) => (

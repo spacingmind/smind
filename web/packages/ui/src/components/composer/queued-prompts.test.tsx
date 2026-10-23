@@ -39,7 +39,7 @@ describe("QueuedPrompts child updates (ADR-0041)", () => {
     const row = screen.getByTestId("composer-queued-item");
     expect(row).toHaveTextContent("Child updates");
     expect(row).not.toHaveTextContent("task #12");
-    expect(screen.getByTestId("queued-starts").textContent).toMatch(/^· starts \d{2}:\d{2}$/);
+    expect(screen.getByTestId("queued-starts").textContent).toMatch(/^starts \d{2}:\d{2}$/);
   });
 
   it("counts down seconds and drops the label when the hold passes", () => {
