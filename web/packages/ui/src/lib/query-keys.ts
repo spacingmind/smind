@@ -4,6 +4,9 @@
  * (`lib/query/event-bridge.ts`) and every consumer address the same entry.
  * `query-keys.test.ts` fails when a key array is written inline elsewhere.
  */
+/** What a `forge.search` runs against: exactly one of these goes on the wire. */
+export type ForgeScope = { taskId: number } | { workspaceId: number };
+
 export const queryKeys = {
   accountList: () => ["account.list"] as const,
   /**
@@ -21,8 +24,12 @@ export const queryKeys = {
   runAttachment: (runId: string, id: string) => ["run.attachment", { runId, id }] as const,
   /** The task worktree's path index (`task.searchIndex`) the composer's `@` mention ranks; refreshed when a run ends. */
   taskSearchIndex: (taskId: number) => ["task.searchIndex", { taskId }] as const,
-  /** One `forge.search` answer (the PR/issue picker). */
-  forgeSearch: (taskId: number, kind: "pr" | "issue", query: string) => ["forge.search", { taskId, kind, query }] as const,
+  /** One `forge.search` answer (the PR/issue picker), scoped to a task (the composer) or a workspace (the New Task dialog). */
+  forgeSearch: (scope: ForgeScope, kind: "pr" | "issue", query: string) =>
+    ["forge.search", { ...scope, kind, query }] as const,
+  /** One `workspace.branches` page (the New Task "Start from → Branch…" combobox). */
+  workspaceBranches: (workspaceId: number, query: string, limit: number) =>
+    ["workspace.branches", { workspaceId, query, limit }] as const,
   /** One task's git/PR state (`task.git`); live via the `task.git` event. */
   taskGit: (taskId: number) => ["task.git", { taskId }] as const,
   /** Every task's git/PR state in one workspace (`task.gitList`); the sidebar/header chips read it. */

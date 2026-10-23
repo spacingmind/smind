@@ -89,6 +89,8 @@ import {
   Search,
   Server,
   Settings,
+  Lock,
+  Play,
   ShieldAlert,
   ShieldCheck,
   Sigma,
@@ -122,6 +124,10 @@ export const Icons = {
   pin: Pin,
   unpin: PinOff,
   search: Search,
+  /** Setup blocked until the user runs it (a fork PR, ADR-0039 §7). */
+  lock: Lock,
+  /** Run a script the user chose to run (Run setup). */
+  play: Play,
   /** Re-fetch data (usage, lists). */
   refresh: RefreshCw,
   /** Run / step again after a failure or on request. */

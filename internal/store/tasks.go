@@ -54,12 +54,14 @@ const RunPurposeProbe = "probe"
 
 func insertTask(db execer, t Task) (Task, error) {
 	res, err := db.Exec(
-		`INSERT INTO tasks (workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, kind, base_ref, base_sha, branch_owned)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO tasks (workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, kind, base_ref, base_sha, branch_owned, pr_forge, pr_repo, pr_number, pr_url, pr_head_ref, untrusted_source)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.WorkspaceID, int64PtrToNull(t.SpaceID), int64PtrToNull(t.ParentTaskID), t.Title, t.Status,
 		stringPtrToNull(t.WorktreePath), stringPtrToNull(t.Branch),
 		t.CreatedAt, t.UpdatedAt, timePtrToNull(t.ArchivedAt), t.Kind,
 		nullString(t.BaseRef), nullString(t.BaseSha), t.BranchOwned,
+		nullString(t.PRForge), nullString(t.PRRepo), nullInt(t.PRNumber), nullString(t.PRURL), nullString(t.PRHeadRef),
+		t.UntrustedSource,
 	)
 	if err != nil {
 		return Task{}, fmt.Errorf("insert task: %w", err)
@@ -365,7 +367,7 @@ func (s *Store) DeleteTask(id int64) error {
 }
 
 // taskCols is the column list scanTask reads.
-const taskCols = "id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, setup_status, setup_error, setup_log, port, kind, base_ref, base_sha, branch_owned, pr_forge, pr_repo, pr_number, pr_url, pr_head_ref"
+const taskCols = "id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, setup_status, setup_error, setup_log, port, kind, base_ref, base_sha, branch_owned, pr_forge, pr_repo, pr_number, pr_url, pr_head_ref, untrusted_source"
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -384,7 +386,7 @@ func scanTask(row rowScanner) (Task, error) {
 		&worktreePath, &branch, &t.CreatedAt, &t.UpdatedAt, &archivedAt,
 		&setupStatus, &setupError, &setupLog, &port, &t.Kind,
 		&baseRef, &baseSha, &t.BranchOwned,
-		&prForge, &prRepo, &prNumber, &prURL, &prHeadRef); err != nil {
+		&prForge, &prRepo, &prNumber, &prURL, &prHeadRef, &t.UntrustedSource); err != nil {
 		return Task{}, err
 	}
 
@@ -448,6 +450,11 @@ func nullToTimePtr(n sql.NullTime) *time.Time {
 	return &v
 }
 
+// nullInt maps 0 to SQL NULL (pr_number: 0 means none).
+func nullInt(v int64) sql.NullInt64 {
+	return sql.NullInt64{Int64: v, Valid: v != 0}
+}
+
 // nullString maps "" to SQL NULL, for optional TEXT columns where empty
 // means "unset" (runs.model, agent_profiles.model).
 func nullString(v string) sql.NullString {
@@ -499,6 +506,18 @@ func (s *Store) ClearTaskPR(id int64) error {
 		return fmt.Errorf("clear task %d pr: %w", id, sql.ErrNoRows)
 	}
 	return nil
+}
+
+// ClearTaskUntrusted clears task id's untrusted_source flag. Only the user's
+// explicit "run setup" does this (ADR-0039 section 7); it reports whether the
+// flag was set.
+func (s *Store) ClearTaskUntrusted(id int64) (bool, error) {
+	res, err := s.db.Exec(`UPDATE tasks SET untrusted_source = 0, updated_at = ? WHERE id = ? AND untrusted_source = 1`, time.Now().UTC(), id)
+	if err != nil {
+		return false, fmt.Errorf("clear task %d untrusted: %w", id, err)
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
 }
 
 // SetTaskBranchOwned records whether smind created task id's branch

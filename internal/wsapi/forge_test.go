@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -111,5 +113,105 @@ func TestForgeSearch_ErrorCarriesCodeAndDetail(t *testing.T) {
 	}
 	if strings.Contains(resp.Error.Message, "404") {
 		t.Fatalf("message must be the fixed sentence, got %q", resp.Error.Message)
+	}
+}
+
+// forgeWorkspaceServer is forgeTestServer plus the workspace id and path the
+// test task lives in, and the dir each gh call ran in.
+func forgeWorkspaceServer(t *testing.T) (srv *httptest.Server, taskID, workspaceID int64, wsPath string, dirs *[]string) {
+	t.Helper()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	w, err := wm.GetWorkspace(task.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, err := New(wm, newTestAccountsRegistry(t), newTestRunner(wm), db, "tok")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	t.Cleanup(api.Close)
+	var mu sync.Mutex
+	dirs = &[]string{}
+	api.SetGithubClient(ghctx.New(ghctx.WithRunner(func(_ context.Context, dir string, args ...string) (string, error) {
+		mu.Lock()
+		*dirs = append(*dirs, dir)
+		mu.Unlock()
+		if args[0] == "repo" {
+			return `{"nameWithOwner":"o/r"}`, nil
+		}
+		return `[{"number":9,"title":"From fork","state":"OPEN","author":{"login":"zed"},"url":"https://github.com/o/r/pull/9","updatedAt":"2026-10-22T00:00:00Z","headRefName":"fork-branch","isCrossRepository":true}]`, nil
+	})))
+	srv = httptest.NewServer(api.Handler)
+	t.Cleanup(srv.Close)
+	return srv, task.ID, w.ID, w.Path, dirs
+}
+
+func TestForgeSearch_ByWorkspaceID(t *testing.T) {
+	t.Parallel()
+	srv, _, wsID, wsPath, dirs := forgeWorkspaceServer(t)
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "forge.search", map[string]any{"workspaceId": wsID, "kind": "pr"})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("forge.search error = %v", resp.Error.Message)
+	}
+	var got forgeSearchResult
+	if err := json.Unmarshal(resp.Result, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Forge != "github" || got.Repo != "o/r" || len(got.Items) != 1 || got.Items[0].Number != 9 || !got.Items[0].FromFork {
+		t.Fatalf("result = %+v", got)
+	}
+	if len(*dirs) == 0 {
+		t.Fatal("gh never ran")
+	}
+	for _, d := range *dirs {
+		if d != wsPath {
+			t.Fatalf("gh ran in %q, want the workspace path %q", d, wsPath)
+		}
+	}
+}
+
+func TestForgeSearch_RequiresExactlyOneScope(t *testing.T) {
+	t.Parallel()
+	srv, taskID, wsID, _, dirs := forgeWorkspaceServer(t)
+	ws := dialWS(t, srv, "tok")
+
+	for i, params := range []map[string]any{
+		{"kind": "pr"},
+		{"kind": "pr", "taskId": taskID, "workspaceId": wsID},
+	} {
+		id := strconv.Itoa(i)
+		sendRequest(t, ws, id, "forge.search", params)
+		resp := readEnvelopeFor(t, ws, id, 5*time.Second)
+		if resp.Error == nil || !strings.Contains(resp.Error.Message, "invalid params: pass exactly one of taskId or workspaceId") {
+			t.Fatalf("case %d error = %+v, want the exactly-one sentence", i, resp.Error)
+		}
+	}
+	if len(*dirs) != 0 {
+		t.Fatalf("gh ran %d times for a rejected request", len(*dirs))
+	}
+
+	// taskId alone still works, in the task's worktree.
+	sendRequest(t, ws, "ok", "forge.search", map[string]any{"kind": "pr", "taskId": taskID})
+	if resp := readEnvelopeFor(t, ws, "ok", 5*time.Second); resp.Error != nil {
+		t.Fatalf("taskId-only error = %v", resp.Error.Message)
+	}
+}
+
+func TestForgeSearch_WorkspaceIDUnknown(t *testing.T) {
+	t.Parallel()
+	srv, _, _, _, dirs := forgeWorkspaceServer(t)
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "forge.search", map[string]any{"workspaceId": 999999, "kind": "pr"})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error == nil || !strings.HasPrefix(resp.Error.Message, "forge.search: ") {
+		t.Fatalf("error = %+v, want a forge.search-prefixed not-found error", resp.Error)
+	}
+	if len(*dirs) != 0 {
+		t.Fatal("gh ran for an unknown workspace")
 	}
 }

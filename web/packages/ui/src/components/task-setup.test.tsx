@@ -80,6 +80,16 @@ describe("task setup status", () => {
     expect(screen.getByTestId("task-setup-log")).toHaveTextContent("npm ERR! boom");
   });
 
+  it("a blocked setup says it has not run and offers no second Retry (the banner owns Run setup)", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={{ ...TASK, SetupStatus: "blocked", UntrustedSource: true }} chat={CHAT} isDefaultChat />);
+    await flush();
+
+    expect(screen.getByTestId("task-setup-details")).toHaveTextContent("Setup has not run");
+    expect(screen.getByTestId("task-setup-details")).not.toHaveTextContent("Setup finished");
+    expect(screen.queryByTestId("task-setup-retry")).toBeNull();
+  });
+
   it("retry setup button calls task.retrySetup", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={{ ...TASK, SetupStatus: "failed", SetupError: "exit status 1" }} chat={CHAT} isDefaultChat />);

@@ -61,6 +61,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.commit":              handleTaskCommit(wm),
 		"task.createPr":            handleTaskCreatePR(wm),
 		"task.setBase":             handleTaskSetBase(wm),
+		"workspace.branches":       handleWorkspaceBranches(wm),
 		"workspace.defaultBase":    handleWorkspaceDefaultBase(wm),
 		"workspace.setDefaultBase": handleWorkspaceSetDefaultBase(wm),
 		"chat.create":              handleChatCreate(wm),
@@ -704,8 +705,16 @@ func handleTaskArchive(wm *workspace.Manager, reg *runs.Registry) handlerFunc {
 
 // handleTaskRetrySetup re-runs the workspace's setup script on a
 // non-running task (ADR-0024 §3).
+//
+// Starting the script also clears the task's untrusted_source flag
+// (ADR-0039 section 7), so only the user may call it: a run-scoped (agent)
+// caller is refused, otherwise a fork's prompt-injected agent could un-gate
+// its own setup.
 func handleTaskRetrySetup(wm *workspace.Manager) handlerFunc {
-	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+	return func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+		if rc != nil && rc.runScoped {
+			return nil, &rpcCodeError{code: codeForbidden, msg: "task.retrySetup is not available to agents"}
+		}
 		var p struct {
 			ID int64 `json:"id"`
 		}

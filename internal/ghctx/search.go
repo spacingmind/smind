@@ -28,6 +28,8 @@ type ghItemJSON struct {
 	URL         string `json:"url"`
 	UpdatedAt   string `json:"updatedAt"`
 	HeadRefName string `json:"headRefName"`
+	// IsCrossRepository is only requested for pr lists.
+	IsCrossRepository bool `json:"isCrossRepository"`
 }
 
 // ghURLRe matches a github.com PR/issue URL with a strict owner/repo and
@@ -60,7 +62,7 @@ func (c *Client) search(ctx context.Context, dir, kind, query string, limit int)
 	if err != nil {
 		return forge.SearchResult{}, err
 	}
-	fields := "number,title,state,author,url,updatedAt,headRefName"
+	fields := "number,title,state,author,url,updatedAt,headRefName,isCrossRepository"
 	if kind == "issue" {
 		fields = "number,title,state,author,url,updatedAt"
 	}
@@ -86,6 +88,7 @@ func (c *Client) search(ctx context.Context, dir, kind, query string, limit int)
 			URL:       r.URL,
 			UpdatedAt: r.UpdatedAt,
 			HeadRef:   r.HeadRefName,
+			FromFork:  r.IsCrossRepository,
 		}
 	}
 	return forge.SearchResult{Repo: repo, Items: items}, nil

@@ -280,6 +280,15 @@ var migrations = []migration{
 		},
 	},
 	{
+		// ADR-0039 section 7: a task started from a fork PR (or from a PR
+		// the forge could not describe) is untrusted until the user runs its
+		// setup. Existing tasks are trusted (0).
+		name: "task_untrusted_source",
+		apply: func(db *sql.DB) error {
+			return addColumnIfMissing(db, "tasks", "untrusted_source", "INTEGER NOT NULL DEFAULT 0")
+		},
+	},
+	{
 		// ADR-0026: who authored a run's prompt (human|orchestrator|agent)
 		// and whether it was a mid-run interrupt, for the window builder.
 		// Pre-existing runs keep '' (unknown) / 0.

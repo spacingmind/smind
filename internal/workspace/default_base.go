@@ -225,10 +225,12 @@ func computeTaskBase(ws store.Workspace, p createTaskParams, worktreePath string
 		// merge base with the default base; unrelated histories leave it empty.
 		ref = workspaceDefaultBase(ws)
 	case p.prSupplied:
-		// TODO(ADR-0039 section 2): use the PR's baseRefName from the forge
-		// PR once the forge provider exists; until then the workspace
-		// default base stands in.
-		ref = workspaceDefaultBase(ws)
+		// The PR's target branch, as the forge reported it (validated by
+		// CreateTask); the workspace default base when the forge could not.
+		ref = p.prBaseRef
+		if ref == "" {
+			ref = workspaceDefaultBase(ws)
+		}
 	default:
 		return workspaceDefaultBase(ws), gitHeadSha(worktreePath, "HEAD")
 	}

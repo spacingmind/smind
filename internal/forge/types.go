@@ -11,6 +11,10 @@ type Item struct {
 	URL       string `json:"url"`
 	UpdatedAt string `json:"updatedAt"`
 	HeadRef   string `json:"headRef,omitempty"`
+	// FromFork is true for a PR whose head lives in another repository
+	// (isCrossRepository); only PR list rows carry it, so the picker can
+	// badge a fork PR before a task is created from it (ADR-0039 section 7).
+	FromFork bool `json:"fromFork,omitempty"`
 }
 
 // SearchResult is Search's answer: the repo the results belong to (the

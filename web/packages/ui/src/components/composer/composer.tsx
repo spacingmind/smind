@@ -630,7 +630,7 @@ export function Composer({
                     {forgePicker && taskId !== null && (
                       <ForgePicker
                         kind={forgePicker}
-                        taskId={taskId}
+                        scope={{ taskId }}
                         limits={attachLimits}
                         onPick={(item, repo) => {
                           attach.addForgeRef({ kind: forgePicker, forge: "github", number: item.number, repo, title: item.title, url: item.url });

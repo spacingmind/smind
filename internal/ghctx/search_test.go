@@ -17,7 +17,7 @@ func TestGithubSearch_ArgvAndJSONFields(t *testing.T) {
 		if call.args[0] == "repo" {
 			return `{"nameWithOwner":"o/r"}`, nil
 		}
-		return `[{"number":5,"title":"T","state":"OPEN","author":{"login":"alice"},"url":"u5","updatedAt":"2026-01-02T03:04:05Z","headRefName":"fix"},{"number":4,"title":"U","state":"open","author":{"login":"bob"},"url":"u4","updatedAt":"2026-01-03T03:04:05Z"}]`, nil
+		return `[{"number":5,"title":"T","state":"OPEN","author":{"login":"alice"},"url":"u5","updatedAt":"2026-01-02T03:04:05Z","headRefName":"fix","isCrossRepository":true},{"number":4,"title":"U","state":"open","author":{"login":"bob"},"url":"u4","updatedAt":"2026-01-03T03:04:05Z"}]`, nil
 	}}
 	c := New(WithRunner(s.run))
 	res, err := c.Search(context.Background(), "/w", "pr", "", 0)
@@ -30,6 +30,9 @@ func TestGithubSearch_ArgvAndJSONFields(t *testing.T) {
 	if res.Items[0].Number != 5 || res.Items[0].Author != "alice" || res.Items[0].State != "open" || res.Items[0].HeadRef != "fix" || res.Items[0].UpdatedAt != "2026-01-02T03:04:05Z" {
 		t.Fatalf("items[0] = %+v", res.Items[0])
 	}
+	if !res.Items[0].FromFork || res.Items[1].FromFork {
+		t.Fatalf("FromFork = %v, %v, want true, false (isCrossRepository)", res.Items[0].FromFork, res.Items[1].FromFork)
+	}
 	if res.Items[1].HeadRef != "" {
 		t.Fatalf("items[1].HeadRef = %q, want empty (no headRefName in gh JSON)", res.Items[1].HeadRef)
 	}
@@ -37,7 +40,7 @@ func TestGithubSearch_ArgvAndJSONFields(t *testing.T) {
 	if len(list) != 1 {
 		t.Fatalf("pr list calls = %d, want 1", len(list))
 	}
-	if want := "pr list --state open --limit 30 --json number,title,state,author,url,updatedAt,headRefName"; strings.Join(list[0].args, " ") != want {
+	if want := "pr list --state open --limit 30 --json number,title,state,author,url,updatedAt,headRefName,isCrossRepository"; strings.Join(list[0].args, " ") != want {
 		t.Fatalf("argv = %v, want %q", list[0].args, want)
 	}
 

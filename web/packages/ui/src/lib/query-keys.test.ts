@@ -27,7 +27,9 @@ describe("query keys", () => {
   it("is the RPC name plus its params", () => {
     expect(queryKeys.accountList()).toEqual(["account.list"]);
     expect(queryKeys.taskSearchIndex(7)).toEqual(["task.searchIndex", { taskId: 7 }]);
-    expect(queryKeys.forgeSearch(7, "pr", "fix")).toEqual(["forge.search", { taskId: 7, kind: "pr", query: "fix" }]);
+    expect(queryKeys.forgeSearch({ taskId: 7 }, "pr", "fix")).toEqual(["forge.search", { taskId: 7, kind: "pr", query: "fix" }]);
+    expect(queryKeys.forgeSearch({ workspaceId: 3 }, "issue", "")).toEqual(["forge.search", { workspaceId: 3, kind: "issue", query: "" }]);
+    expect(queryKeys.workspaceBranches(3, "fe", 30)).toEqual(["workspace.branches", { workspaceId: 3, query: "fe", limit: 30 }]);
     expect(queryKeys.accountUsage()).toEqual(["account.usage", { cached: true }]);
     expect(queryKeys.providerTest("anthropic")).toEqual(["provider.test", "anthropic"]);
   });

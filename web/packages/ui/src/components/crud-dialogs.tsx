@@ -1,5 +1,15 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useReducer, useState, type Dispatch, type ReactNode } from "react";
 
+import { draftStorageKey } from "@/components/composer/use-composer-draft";
+import { StartFrom } from "@/components/new-task/start-from";
+import {
+  INITIAL_START_FROM,
+  startFromMissing,
+  startFromParams,
+  startFromReducer,
+  type PickedForgeItem,
+  type StartFromAction,
+} from "@/components/new-task/start-from-state";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -62,6 +72,7 @@ function CrudForm({
   children,
   submitTestId,
   cancelTestId,
+  contentClassName,
 }: {
   title: string;
   description?: string;
@@ -71,11 +82,13 @@ function CrudForm({
   children: ReactNode;
   submitTestId?: string;
   cancelTestId?: string;
+  /** Extra classes for the dialog surface (e.g. anchoring it to the top so a growing body does not re-centre it). */
+  contentClassName?: string;
 }) {
   const [pending, setPending] = useState(false);
 
   return (
-    <DialogContent>
+    <DialogContent className={contentClassName}>
       <DialogHeader>
         <DialogTitle>{title}</DialogTitle>
         {description && <DialogDescription>{description}</DialogDescription>}
@@ -266,6 +279,15 @@ export function CreateSpaceDialog({
   );
 }
 
+/** Pre-fills the new task's composer with the issue it resolves (`Resolve #n: title` and its URL). */
+function seedIssueDraft(taskId: number, { item }: PickedForgeItem) {
+  try {
+    window.localStorage.setItem(draftStorageKey(taskId), `Resolve #${item.number}: ${item.title}\n${item.url}`);
+  } catch {
+    // Storage can be unavailable; the task is created either way.
+  }
+}
+
 export function CreateTaskDialog({
   client,
   workspace,
@@ -288,12 +310,21 @@ export function CreateTaskDialog({
   const [title, setTitle] = useState("");
   const [spaceId, setSpaceId] = useState<string>(fixedSpaceId !== null ? String(fixedSpaceId) : "none");
   const [error, setError] = useState<string | null>(null);
+  const [startFrom, dispatchStartFrom] = useReducer(startFromReducer, INITIAL_START_FROM);
+
+  // Picking an issue titles the task after it; the title stays editable afterwards.
+  const dispatchPick: Dispatch<StartFromAction> = (action) => {
+    if (action.type === "issue" && action.issue) setTitle(action.issue.item.title);
+    dispatchStartFrom(action);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {open && (
         <CrudForm
           title="New task"
+          // Anchored to the top: the Start-from step changes the body's height, and a centred dialog would jump with it.
+          contentClassName="top-[12vh] translate-y-0"
           description={`A task worktree in ${workspace.Title || workspace.Path}.`}
           submitLabel="Create task"
           onOpenChange={onOpenChange}
@@ -304,12 +335,20 @@ export function CreateTaskDialog({
               setError("Title is required.");
               return false;
             }
+            const missing = startFromMissing(startFrom);
+            if (missing) {
+              setError(missing);
+              return false;
+            }
             try {
               const task = await client!.call<Task>("task.create", {
                 workspaceId: workspace.ID,
                 ...(spaceId !== "none" ? { spaceId: Number(spaceId) } : {}),
                 title: title.trim(),
+                ...startFromParams(startFrom),
               });
+              // The issue rides into the new task's first prompt as composer draft text: the attachment drafts are keyed by chat id, which does not exist yet.
+              if (startFrom.mode === "issue" && startFrom.issue) seedIssueDraft(task.ID, startFrom.issue);
               onCreated(task);
               setTitle("");
               return true;
@@ -331,6 +370,7 @@ export function CreateTaskDialog({
               autoFocus
             />
           </div>
+          <StartFrom workspaceId={workspace.ID} state={startFrom} dispatch={dispatchPick} />
           {fixedSpaceId === null && (
             <div className="grid gap-2">
               <label htmlFor="task-space" className="text-ui-base font-medium">
