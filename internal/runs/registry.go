@@ -1037,6 +1037,7 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 		err = runner.RunPromptIsolated(ctx, r.taskID, r.chatID, r.provider, r.prompt, r.model, *r.isolation, events)
 	} else {
 		ctx = reg.withDelivery(ctx, r)
+		ctx = reg.withRunContract(ctx, r)
 		if pa, ok := r.promptAttachments(); ok {
 			ctx = taskrunner.WithPromptAttachments(ctx, pa)
 		}

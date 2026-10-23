@@ -37,6 +37,8 @@ type threadStartParams struct {
 	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
 	Sandbox        string `json:"sandbox,omitempty"`
 	Model          string `json:"model,omitempty"`
+
+	DeveloperInstructions string `json:"developerInstructions,omitempty"`
 }
 
 type thread struct {
@@ -77,6 +79,8 @@ type threadResumeParams struct {
 	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
 	Sandbox        string `json:"sandbox,omitempty"`
 	Model          string `json:"model,omitempty"`
+
+	DeveloperInstructions string `json:"developerInstructions,omitempty"`
 }
 
 type threadUnarchiveParams struct {
@@ -164,6 +168,9 @@ type Client struct {
 	// model is sent as `model` on every thread/start and thread/resume
 	// (see WithModel); empty omits the field, leaving Codex's default.
 	model string
+	// developerInstructions is sent as `developerInstructions` on every
+	// thread/start and thread/resume (see WithDeveloperInstructions).
+	developerInstructions string
 
 	// mu guards updateSubs/turnWaiters, both keyed by threadID -- not
 	// turnID, deliberately: a turn's own id is only known once turn/start's
@@ -220,6 +227,12 @@ func WithPermissionPolicy(p PermissionPolicy) Option {
 // may be empty to leave Codex's configured default in place.
 func WithThreadPolicy(approvalPolicy, sandbox string) Option {
 	return func(c *Client) { c.approvalPolicy, c.sandbox = approvalPolicy, sandbox }
+}
+
+// WithDeveloperInstructions sets the `developerInstructions` sent on every
+// thread/start and thread/resume. Empty omits the field.
+func WithDeveloperInstructions(text string) Option {
+	return func(c *Client) { c.developerInstructions = text }
 }
 
 // WithModel sets the `model` sent on every thread/start and thread/resume.
@@ -339,7 +352,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 // NewSession starts a new codex thread rooted at cwd (the task's worktree
 // path), returning its thread id.
 func (c *Client) NewSession(ctx context.Context, cwd string) (string, error) {
-	raw, err := c.conn.call(ctx, "thread/start", threadStartParams{Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox, Model: c.model})
+	raw, err := c.conn.call(ctx, "thread/start", threadStartParams{Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox, Model: c.model, DeveloperInstructions: c.developerInstructions})
 	if err != nil {
 		return "", fmt.Errorf("codex: thread/start: %w", err)
 	}
@@ -403,7 +416,7 @@ func (c *Client) threadLoaded(ctx context.Context, threadID string) (bool, error
 }
 
 func (c *Client) resumeThread(ctx context.Context, threadID, cwd string) error {
-	if _, err := c.conn.call(ctx, "thread/resume", threadResumeParams{ThreadID: threadID, Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox, Model: c.model}); err != nil {
+	if _, err := c.conn.call(ctx, "thread/resume", threadResumeParams{ThreadID: threadID, Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox, Model: c.model, DeveloperInstructions: c.developerInstructions}); err != nil {
 		return fmt.Errorf("codex: thread/resume: %w", err)
 	}
 	return nil
