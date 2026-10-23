@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -284,6 +285,70 @@ func TestProviderList_ImagesField(t *testing.T) {
 	for _, p := range raw.Providers {
 		if p.Images != want[p.ID] {
 			t.Errorf("%s images = %q, want %q", p.ID, p.Images, want[p.ID])
+		}
+	}
+}
+
+// TestProviderList_CooldownUntil: provider.list reports cooldownUntil
+// (RFC 3339 UTC) only for a provider on cooldown and leaves every other
+// field unchanged (ADR-0041 F1).
+func TestProviderList_CooldownUntil(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	list := func(id string) (providerListResult, map[string]json.RawMessage) {
+		sendRequest(t, ws, id, "provider.list", nil)
+		resp := readEnvelopeFor(t, ws, id, 5*time.Second)
+		if resp.Error != nil {
+			t.Fatalf("provider.list error = %v", resp.Error.Message)
+		}
+		var typed providerListResult
+		if err := json.Unmarshal(resp.Result, &typed); err != nil {
+			t.Fatal(err)
+		}
+		var raw struct {
+			Providers []map[string]json.RawMessage `json:"providers"`
+		}
+		if err := json.Unmarshal(resp.Result, &raw); err != nil {
+			t.Fatal(err)
+		}
+		byID := map[string]json.RawMessage{}
+		for _, p := range raw.Providers {
+			var id string
+			_ = json.Unmarshal(p["id"], &id)
+			if c, ok := p["cooldownUntil"]; ok {
+				byID[id] = c
+			}
+		}
+		return typed, byID
+	}
+
+	before, cooling := list("1")
+	if len(cooling) != 0 {
+		t.Fatalf("cooldownUntil present with no cooldown: %v", cooling)
+	}
+
+	until := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	if err := db.SetProviderCooldown("glm", until, "r", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	after, cooling := list("2")
+	if len(cooling) != 1 {
+		t.Fatalf("cooldownUntil on %v, want only glm", cooling)
+	}
+	var got string
+	_ = json.Unmarshal(cooling["glm"], &got)
+	if got != until.Format(time.RFC3339) || !strings.HasSuffix(got, "Z") {
+		t.Fatalf("glm cooldownUntil = %q, want %q (UTC)", got, until.Format(time.RFC3339))
+	}
+	for i := range after.Providers {
+		a, b := after.Providers[i], before.Providers[i]
+		a.CooldownUntil = ""
+		if !reflect.DeepEqual(a, b) {
+			t.Fatalf("provider %s changed besides cooldownUntil:\n%+v\n%+v", a.ID, a, b)
 		}
 	}
 }

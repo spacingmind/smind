@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/spacingmind/smind/internal/store"
 )
 
 // The PR-A discovery tools, each driven through the full MCP round trip
@@ -412,5 +414,51 @@ func TestCapRuns(t *testing.T) {
 	small := []map[string]any{{"ID": 1}, {"ID": 2}}
 	if got := capRuns(small); len(got) != 2 || got[0]["ID"] != 1 {
 		t.Fatalf("capRuns under cap = %+v, want unchanged", got)
+	}
+}
+
+// testDaemonStores maps a test daemon's URL to its store, so a test can seed
+// state the wire cannot (set by newConfigOptionTestEnvCap).
+var testDaemonStores sync.Map
+
+// TestMCPProviderList_CooldownUntil: provider_list passes the daemon's
+// cooldownUntil through for a cooling provider and omits it for the rest
+// (ADR-0041 F1).
+func TestMCPProviderList_CooldownUntil(t *testing.T) {
+	env := newMCPSession(t)
+	st, ok := testDaemonStores.Load(env.srvURL)
+	if !ok {
+		t.Fatal("no store registered for the test daemon")
+	}
+	until := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	if err := st.(*store.Store).SetProviderCooldown("glm", until, "r", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	var out struct {
+		Providers []struct {
+			ID            string `json:"id"`
+			CooldownUntil string `json:"cooldownUntil"`
+		} `json:"providers"`
+	}
+	if isErr := callMCPTool(t, env.cs, "provider_list", map[string]any{}, &out); isErr {
+		t.Fatal("provider_list returned an error result")
+	}
+	seen := false
+	for _, p := range out.Providers {
+		switch p.ID {
+		case "glm":
+			seen = true
+			if p.CooldownUntil != until.Format(time.RFC3339) {
+				t.Fatalf("glm cooldownUntil = %q, want %q", p.CooldownUntil, until.Format(time.RFC3339))
+			}
+		default:
+			if p.CooldownUntil != "" {
+				t.Fatalf("%s cooldownUntil = %q, want none", p.ID, p.CooldownUntil)
+			}
+		}
+	}
+	if !seen {
+		t.Fatalf("no glm entry in %+v", out.Providers)
 	}
 }

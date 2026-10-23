@@ -78,6 +78,9 @@ provider_list yourself (GLM accept_edits covers file writes but not
 commands). Auto-approving modes (autoApproves) and autoAccept may not be
 picked by you: they require a human-authored profile -- see profile_list.
 
+A provider shown with cooldownUntil in provider_list is rate limited until
+that time: task_send to it fails fast, so start the work on another provider.
+
 If you lose a run id (e.g. after a crash), run_list {taskId} (or
 {status: "running"}) recovers it, newest first.
 `

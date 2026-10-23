@@ -353,6 +353,19 @@ var migrations = []migration{
 		},
 	},
 	{
+		// ADR-0041 F1: provider_cooldowns is a new table (also in
+		// schema.sql); this entry re-creates it should a database lack it.
+		name: "provider_cooldowns",
+		apply: func(db *sql.DB) error {
+			_, err := db.Exec(`CREATE TABLE IF NOT EXISTS provider_cooldowns (
+				provider TEXT PRIMARY KEY,
+				reset_at TIMESTAMP NOT NULL,
+				run_id TEXT NOT NULL DEFAULT '',
+				created_at TIMESTAMP NOT NULL)`)
+			return err
+		},
+	},
+	{
 		// ADR-0026 section 6: learning_snapshots is a new table (also in
 		// schema.sql); this entry re-creates it should a database lack it.
 		name: "learning_snapshots",
