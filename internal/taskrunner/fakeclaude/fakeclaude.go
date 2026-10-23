@@ -132,6 +132,25 @@ func Run() {
 			"session_id": "sess-1", "stop_reason": "end_turn", "result": "done",
 		})
 
+	case "session-limit":
+		// Claude Code's refusal for an exhausted account: one short assistant
+		// text, then an empty "successful" result (no tokens, no tools).
+		stdin.Scan() // consume the prompt line
+		writeLine(map[string]any{
+			"type":       "assistant",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"model": "claude-fake",
+				"content": []any{
+					map[string]any{"type": "text", "text": "You've hit your session limit · resets 1pm (Asia/Saigon)"},
+				},
+			},
+		})
+		writeLine(map[string]any{
+			"type": "result", "is_error": false, "num_turns": 0,
+			"session_id": "sess-1", "stop_reason": "stop_sequence", "result": "",
+		})
+
 	case "stale-notification":
 		// Resuming a session whose previous run left a background shell
 		// command behind: before it handles the prompt the CLI reports the

@@ -1398,6 +1398,15 @@ func (reg *Registry) finish(r *run, err error) {
 		}
 	default:
 		status = StatusDone
+		// Claude Code answers an exhausted account with a normal, EMPTY result
+		// whose only text is its refusal ("You've hit your session limit ·
+		// resets 1pm"): the run "succeeds" with zero work and the tree stalls
+		// silently (the second in-smind dogfood tree lost two hours to it).
+		// Such a run is a rate-limited error, so the typed reason, the cooldown,
+		// the failover policies and the parent notification all apply.
+		if text := reg.limitRefusal(r, usage, toolCalls); text != "" {
+			status, errMsg = StatusError, text
+		}
 	}
 
 	// O1: capture the terminal-state provenance BEFORE the terminal status
@@ -1922,4 +1931,26 @@ func clipErrMsg(s string) string {
 		n--
 	}
 	return s[:n]
+}
+
+// limitRefusal returns the refusal text when a run that ended "done" did no
+// work and its whole answer is Claude Code's usage-limit refusal: claude-native
+// only, no tool calls, no tokens reported, a short trailing text that
+// ratelimit.IsLimitRefusal accepts. Otherwise "".
+func (reg *Registry) limitRefusal(r *run, usage *taskrunner.Usage, toolCalls int) string {
+	if r.provider != taskrunner.ProviderClaudeNative || toolCalls > 0 {
+		return ""
+	}
+	if usage != nil {
+		if (usage.Input != nil && *usage.Input > 0) || (usage.Output != nil && *usage.Output > 0) {
+			return ""
+		}
+	}
+	r.mu.Lock()
+	text := strings.TrimSpace(trailingAgentText(r.history))
+	r.mu.Unlock()
+	if !ratelimit.IsLimitRefusal(text) {
+		return ""
+	}
+	return text
 }

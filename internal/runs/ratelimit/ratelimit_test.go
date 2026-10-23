@@ -194,3 +194,69 @@ func TestClassify_GLMResetIsShanghaiTime(t *testing.T) {
 		t.Fatalf("undated: got %+v, want reset %v", r, want)
 	}
 }
+
+func TestClassify_ClaudeSessionLimitText(t *testing.T) {
+	const e = "You've hit your session limit · resets 1pm (Asia/Saigon)"
+	// 12:39 +07: the reset is 13:00 the same day, whatever zone the daemon runs in.
+	want := time.Date(2026, 10, 23, 13, 0, 0, 0, time.FixedZone("ICT", 7*3600))
+	for name, loc := range map[string]*time.Location{
+		"daemon at +07": time.FixedZone("ICT", 7*3600),
+		"daemon at UTC": time.UTC,
+		"daemon at -05": time.FixedZone("EST", -5*3600),
+	} {
+		t.Run(name, func(t *testing.T) {
+			now := time.Date(2026, 10, 23, 12, 39, 0, 0, time.FixedZone("ICT", 7*3600)).In(loc)
+			r := Classify(Input{Provider: "claude-native", Err: e}, now)
+			if r.Kind != KindRateLimited || r.Window != "5h" {
+				t.Fatalf("got %+v", r)
+			}
+			wantReset(t, r.ResetAt, want)
+		})
+	}
+	// After the reset time has passed the next occurrence is tomorrow.
+	late := time.Date(2026, 10, 23, 14, 46, 0, 0, time.FixedZone("ICT", 7*3600))
+	r := Classify(Input{Provider: "claude-native", Err: e}, late)
+	wantReset(t, r.ResetAt, want.AddDate(0, 0, 1))
+}
+
+func TestClassify_ClaudeLimitTextVariants(t *testing.T) {
+	now := time.Date(2026, 10, 23, 10, 0, 0, 0, time.UTC)
+	cases := []struct {
+		in, window string
+		reset      bool
+	}{
+		{"You've hit your weekly limit · resets 9am (UTC)", "weekly", true},
+		{"You've hit your Opus limit", "weekly-opus", false},
+		{"You've hit your limit · resets 3pm", "", true},
+		{"You've hit your session limit · resets 1pm (Not/AZone)", "5h", true}, // unknown zone falls back to now's
+	}
+	for _, c := range cases {
+		r := Classify(Input{Provider: "claude-native", Err: c.in}, now)
+		if r.Kind != KindRateLimited || r.Window != c.window || (r.ResetAt != nil) != c.reset {
+			t.Errorf("%q -> %+v, want window %q reset %v", c.in, r, c.window, c.reset)
+		}
+	}
+}
+
+func TestIsLimitRefusal(t *testing.T) {
+	yes := []string{"You've hit your session limit · resets 1pm (Asia/Saigon)", "  you've hit your weekly limit  "}
+	no := []string{"", "All done. I fixed it.", "I told the user: You've hit your session limit, then wrote a long essay " + string(make([]byte, 0)) + stringsRepeat("x", 400)}
+	for _, s := range yes {
+		if !IsLimitRefusal(s) {
+			t.Errorf("IsLimitRefusal(%q) = false, want true", s)
+		}
+	}
+	for _, s := range no {
+		if IsLimitRefusal(s) {
+			t.Errorf("IsLimitRefusal(%.40q) = true, want false", s)
+		}
+	}
+}
+
+func stringsRepeat(s string, n int) string {
+	out := ""
+	for i := 0; i < n; i++ {
+		out += s
+	}
+	return out
+}
