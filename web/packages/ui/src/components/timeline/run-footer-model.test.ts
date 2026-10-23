@@ -209,6 +209,72 @@ describe("describeRunFooter: an errored run offers retry", () => {
   });
 });
 
+// ADR-0041 R3: a provider quota reads as a warning with Retry, not a code failure.
+// Local-time fixtures (the sentence is local HH:MM): 2026-10-13 is a Tuesday.
+describe("describeRunFooter: a rate-limited run", () => {
+  const LOCAL_NOW = new Date(2026, 9, 13, 10, 0, 0);
+  const limited = (overrides: Partial<RunFooterRun> = {}): RunFooterRun =>
+    run({
+      status: "error",
+      err: "429 Usage limit reached",
+      failureKind: "rate_limited",
+      failureWindow: "5h",
+      startedAt: new Date(LOCAL_NOW.getTime() - 9_000).toISOString(),
+      finishedAt: LOCAL_NOW.toISOString(),
+      ...overrides,
+    });
+  const view = (r: RunFooterRun) => describeRunFooter(r, { now: LOCAL_NOW, modelLabel: "GLM 5.3" });
+
+  it("rate limited with a future reset", () => {
+    const v = view(limited({ failureResetAt: new Date(2026, 9, 13, 17, 35).toISOString() }));
+    expect(v.kind).toBe("abnormal");
+    expect(v.sentence).toBe("Rate limited (5h window) · resets 17:35");
+    expect(v.tone).toBe("warning");
+    expect(v.action).toBe("retry");
+  });
+
+  it("rate limited reset today vs another day", () => {
+    expect(view(limited({ failureResetAt: new Date(2026, 9, 13, 23, 59).toISOString() })).sentence).toBe(
+      "Rate limited (5h window) · resets 23:59",
+    );
+    expect(view(limited({ failureResetAt: new Date(2026, 9, 15, 9, 5).toISOString() })).sentence).toBe(
+      "Rate limited (5h window) · resets Thu 09:05",
+    );
+    // The window part is omitted when unknown.
+    expect(view(limited({ failureWindow: undefined, failureResetAt: new Date(2026, 9, 13, 17, 35).toISOString() })).sentence).toBe(
+      "Rate limited · resets 17:35",
+    );
+  });
+
+  it("rate limited with unknown reset", () => {
+    expect(view(limited()).sentence).toBe("Rate limited (5h window) · reset time unknown");
+    expect(view(limited({ failureResetAt: "not a date" })).sentence).toBe("Rate limited (5h window) · reset time unknown");
+  });
+
+  it("rate limited after the reset passed", () => {
+    const v = view(limited({ failureResetAt: new Date(2026, 9, 13, 9, 0).toISOString() }));
+    expect(v.sentence).toBe("Rate limited (5h window) · limit has reset");
+    expect(v.tone).toBe("warning");
+    expect(v.action).toBe("retry");
+  });
+
+  it("plain error footer unchanged", () => {
+    const plain = describeRunFooter(freshRun({ status: "error", err: "boom" }), { now: NOW, modelLabel: "Sonnet 5.5" });
+    expect(plain.sentence).toBe("Failed after 9s");
+    expect(plain.tone).toBe("danger");
+    expect(plain.duration).toBeNull();
+    // A failure kind this client does not know, or a rate_limited kind on a non-error run, changes nothing either.
+    expect(describeRunFooter(freshRun({ status: "error", failureKind: "other" }), { now: NOW, modelLabel: "Sonnet 5.5" })).toEqual(plain);
+    expect(describeRunFooter(freshRun({ failureKind: "rate_limited" }), { now: NOW, modelLabel: "" }).kind).toBe("done");
+  });
+
+  it("aria label carries the rate limit wording", () => {
+    const v = view(limited({ failureResetAt: new Date(2026, 9, 13, 17, 35).toISOString() }));
+    expect(v.ariaLabel).toContain("Rate limited (5h window) · resets 17:35");
+    expect(v.ariaLabel).toContain("with GLM 5.3");
+  });
+});
+
 describe('describeRunFooter: an unknown stop reason is shown verbatim as "Ended: <reason>"', () => {
   it("words an unknown reason", () => {
     const view = describeRunFooter(freshRun({ stopReason: "whatever" }), { now: NOW, modelLabel: "" });
