@@ -11,6 +11,8 @@ export interface SyncCard {
   /** Commits the branch has that the remote (push) or base (update) lacks; undefined while unknown. */
   ahead?: number;
   behind?: number;
+  /** Push: the remote and branch the daemon will really push to; absent from older daemons (origin/<branch> assumed). */
+  pushTo?: { remote: string; branch: string };
   /** Update: the base's name as the task knows it ("develop"). */
   base: string;
 }
@@ -27,6 +29,7 @@ export function syncCard(mode: SyncMode, git: TaskGit | undefined): SyncCard {
     return {
       branch,
       remote: "origin",
+      pushTo: git?.origin?.pushTarget,
       published,
       ahead: published ? git?.origin?.ahead : git?.commits?.sinceFork,
       behind: published ? git?.origin?.behind : undefined,
@@ -46,13 +49,23 @@ export function syncCard(mode: SyncMode, git: TaskGit | undefined): SyncCard {
 /** The "Next step" row: what the primary button will do, in one sentence. */
 export function nextStep(mode: SyncMode, card: SyncCard, rebase: boolean): string {
   if (mode === "push") {
-    if (!card.published) return `Publish ${card.branch} to origin and track it.`;
+    const to = card.pushTo;
+    if (!card.published) return to ? `Publish ${card.branch} to ${to.remote}/${to.branch} and track it.` : `Publish ${card.branch} to origin and track it.`;
+    if (to) return card.ahead ? `Push ${plural(card.ahead, "commit")} to ${to.remote}/${to.branch}.` : `Push ${card.branch} to ${to.remote}/${to.branch}.`;
     return card.ahead ? `Push ${plural(card.ahead, "commit")} to origin/${card.branch}.` : `Push ${card.branch} to origin.`;
   }
   const target = card.remote || "the base";
   if (card.behind === 0) return `Already up to date with ${card.base || "the base"}.`;
   const count = card.behind ? ` (${plural(card.behind, "new commit")})` : "";
   return rebase ? `Rebase this branch onto ${target}${count}.` : `Merge ${card.behind ? `${plural(card.behind, "commit")} from ` : ""}${target} into this branch.`;
+}
+
+/** A quiet line under the Remote row when the push does not go to origin/<task branch>; null otherwise. */
+export function pushTargetNote(card: SyncCard): string | null {
+  const to = card.pushTo;
+  if (!to) return null;
+  if (to.remote !== "origin") return `Pushes to the \`${to.remote}\` remote.`;
+  return to.branch !== card.branch ? "Updates the pull request's branch." : null;
 }
 
 export function pushSuccessLine(result: TaskPushResult): string {

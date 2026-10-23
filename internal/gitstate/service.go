@@ -84,6 +84,9 @@ type Options struct {
 	// consulted before the background fetch only, and nil or an empty result
 	// adds nothing (ADR-0039 section 8: https origin and a signed-in forge).
 	NetworkGit func(ctx context.Context, dir, remote string) []string
+	// PushTarget resolves where Push would send the task's branch (the same
+	// rule Push runs); nil result or a nil hook omits origin.pushTarget.
+	PushTarget func(ctx context.Context, t store.Task, w store.Workspace) *PushTarget
 }
 
 type entry struct {
@@ -504,6 +507,9 @@ func (s *Service) compute(taskID int64) (g TaskGit, ws int64, base string, err e
 		in.RunActive = s.opts.RunActive(t.ID)
 	}
 	in.ForgeCode = s.poller.ForgeBlock(t)
+	if s.opts.PushTarget != nil {
+		in.PushTarget = s.opts.PushTarget(s.ctx, t, w)
+	}
 	return Compute(s.ctx, s.run, in), t.WorkspaceID, in.BaseRef, nil
 }
 

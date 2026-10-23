@@ -34,10 +34,14 @@ type Input struct {
 	Untrusted    bool
 	// ForkPR: the task was started from a pull request on a fork (stored PR
 	// identity on an untrusted task); push is read-only.
-	ForkPR    bool
-	Forge     string
-	PR        *PRInfo // always nil in the local pass
-	RunActive bool
+	ForkPR bool
+	// PushTarget is what Push would use, resolved by the caller (the
+	// workspace layer owns the rule); nil when push cannot run. Copied onto
+	// Origin.
+	PushTarget *PushTarget
+	Forge      string
+	PR         *PRInfo // always nil in the local pass
+	RunActive  bool
 	// ForgeCode/ForgeReason are the poller's host state (forge CLI missing or
 	// not signed in), passed through to the createPr/updatePr actions.
 	ForgeCode   string
@@ -121,6 +125,10 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 	}
 
 	g.Origin = originStatus(ctx, run, repo, in.Branch, branchRef)
+	if g.Origin != nil && in.PushTarget != nil && !forkPR {
+		pt := *in.PushTarget
+		g.Origin.PushTarget = &pt
+	}
 	rebased = rebasedDiverged(ctx, run, repo, in.Branch, g.Origin)
 
 	if in.DiffStat != nil {

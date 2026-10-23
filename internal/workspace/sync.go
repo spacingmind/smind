@@ -12,6 +12,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/gitstate"
+	"github.com/spacingmind/smind/internal/store"
 )
 
 // Push and Update from base (ADR-0039 sections 3-6): the git half of
@@ -72,20 +73,9 @@ func (m *Manager) Push(ctx context.Context, id int64) (PushResult, error) {
 		return PushResult{}, fmt.Errorf("push: %w", err)
 	}
 	dir, branch := *t.WorktreePath, *t.Branch
-	if (t.UntrustedSource && t.PRNumber > 0) || forkPRRecorded(ctx, dir, branch) {
-		return PushResult{}, forge.ForkPushReadonly()
-	}
-	if err := validateRefName(ws.Path, branch, true); err != nil {
-		return PushResult{}, forge.NewPRError(forge.CodeInvalidBranch, "")
-	}
-	remote, err := pushRemote(ctx, dir, branch)
+	remote, dest, remoteURL, err := resolvePushTarget(ctx, t, ws)
 	if err != nil {
 		return PushResult{}, err
-	}
-	dest := pushDest(ws.Path, branch, t.PRHeadRef, t.BaseRef, workspaceDefaultBase(ws))
-	remoteURL := remoteURLOf(ctx, dir, remote)
-	if remoteURL == "" {
-		return PushResult{}, forge.NewPRError(forge.CodeNoRemote, "")
 	}
 
 	remoteRef := "refs/remotes/" + remote + "/" + dest
@@ -123,6 +113,44 @@ func (m *Manager) Push(ctx context.Context, id int64) (PushResult, error) {
 		return PushResult{}, pe
 	}
 	return res, nil
+}
+
+// resolvePushTarget is the one place the push target is decided: the remote
+// (branch.<b>.pushRemote, remote.pushDefault, else origin) and the branch on it
+// (the PR head for a same-repo PR task, else the task branch). The task must
+// have a worktree and branch. Errors are the typed ones Push returns.
+func resolvePushTarget(ctx context.Context, t store.Task, ws store.Workspace) (remote, dest, remoteURL string, err error) {
+	dir, branch := *t.WorktreePath, *t.Branch
+	if (t.UntrustedSource && t.PRNumber > 0) || forkPRRecorded(ctx, dir, branch) {
+		return "", "", "", forge.ForkPushReadonly()
+	}
+	if err := validateRefName(ws.Path, branch, true); err != nil {
+		return "", "", "", forge.NewPRError(forge.CodeInvalidBranch, "")
+	}
+	remote, err = pushRemote(ctx, dir, branch)
+	if err != nil {
+		return "", "", "", err
+	}
+	dest = pushDest(ws.Path, branch, t.PRHeadRef, t.BaseRef, workspaceDefaultBase(ws))
+	remoteURL = remoteURLOf(ctx, dir, remote)
+	if remoteURL == "" {
+		return "", "", "", forge.NewPRError(forge.CodeNoRemote, "")
+	}
+	return remote, dest, remoteURL, nil
+}
+
+// PushTarget is the remote and branch Push would update for t; nil when Push
+// could not run (no worktree or branch, fork PR, no usable remote). Local git
+// config only, no network.
+func (m *Manager) PushTarget(ctx context.Context, t store.Task, ws store.Workspace) *gitstate.PushTarget {
+	if t.WorktreePath == nil || t.Branch == nil {
+		return nil
+	}
+	remote, dest, _, err := resolvePushTarget(ctx, t, ws)
+	if err != nil {
+		return nil
+	}
+	return &gitstate.PushTarget{Remote: remote, Branch: dest}
 }
 
 // forkPRRecorded reports the git-config fact that the task's branch came from

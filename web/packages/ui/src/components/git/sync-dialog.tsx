@@ -5,6 +5,7 @@ import { PrErrorLine } from "@/components/git/pr-error-line";
 import {
   conflictData,
   nextStep,
+  pushTargetNote,
   plural,
   pushSuccessLine,
   resolveConflictPrompt,
@@ -168,7 +169,22 @@ function SyncForm({ taskId, mode, onClose, onPending }: { taskId: number; mode: 
           <Breakable text={card.branch || "—"} />
         </Row>
         <Row label={mode === "push" ? "Remote" : "Base"} testId="sync-row-remote" mono>
-          {mode === "push" ? card.published ? <Breakable text={`origin/${card.branch}`} /> : "origin (new upstream)" : card.remote || "—"}
+          {mode === "push" ? (
+            card.pushTo ? (
+              <Breakable text={`${card.pushTo.remote}/${card.pushTo.branch}`} />
+            ) : card.published ? (
+              <Breakable text={`origin/${card.branch}`} />
+            ) : (
+              "origin (new upstream)"
+            )
+          ) : (
+            card.remote || "—"
+          )}
+          {mode === "push" && pushTargetNote(card) && (
+            <p className="font-sans text-ui-sm text-foreground-muted" data-testid="sync-remote-note">
+              {pushTargetNote(card)}
+            </p>
+          )}
         </Row>
         <Row label="Ahead" testId="sync-row-ahead">
           {card.ahead === undefined ? "—" : plural(card.ahead, "commit")}
