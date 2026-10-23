@@ -46,6 +46,33 @@ describe("PrAction", () => {
     expect(screen.queryByText(/PR opened/)).not.toBeInTheDocument();
   });
 
+  it("offers Archive when the PR is merged", async () => {
+    const client = await mount(
+      gitState({
+        pr: openPr({ state: "merged" }),
+        merged: { state: "merged", via: "pr" },
+        actions: { createPr: { enabled: false, code: "pr_exists", reason: "x" }, updatePr: { enabled: false, code: "pr_not_open", reason: "y" } },
+      }),
+    );
+    expect(screen.queryByTestId("create-pr-button")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("update-pr-button")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pr-action-reason")).not.toBeInTheDocument();
+    const archive = screen.getByTestId("archive-task-button");
+    expect(archive).toHaveTextContent("Archive…");
+    expect(archive).toBeEnabled();
+    fireEvent.click(archive);
+    await flush();
+    expect(client.nth("task.archivePreview", 0).params).toEqual({ taskId: 1 });
+    expect(screen.getByTestId("dialog-archive-task")).toBeInTheDocument();
+  });
+
+  it("offers Archive for a branch merged without a PR", async () => {
+    await mount(gitState({ merged: { state: "merged", via: "ancestor" } }));
+    expect(screen.getByTestId("archive-task-button")).toBeInTheDocument();
+    expect(screen.queryByTestId("create-pr-button")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("view-pr-button")).not.toBeInTheDocument();
+  });
+
   it("only opens https PR urls", async () => {
     await mount(gitState({ pr: openPr({ url: "javascript:alert(1)" }), actions: { updatePr: { enabled: true } } }));
     expect(screen.getByTestId("view-pr-button")).toBeDisabled();

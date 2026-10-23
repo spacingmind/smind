@@ -567,7 +567,7 @@ export function ArchiveTaskDialog({
   onArchived,
 }: {
   client: WsClient | null;
-  task: Task | null;
+  task: Pick<Task, "ID" | "WorkspaceID" | "Title"> | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onArchived: () => void;
