@@ -122,12 +122,25 @@ mobile.
 
 ## Implementation notes
 
-(none yet)
+Decided while implementing (2026-10-23):
+
+- The eligibility decision and the mechanics both live in `workspace.Manager` (preview, the bounded base fetch, `ArchiveTaskWith`, `RestoreTask`), fed by `gitstate.Service.Fresh` through `SetGitFacts`, so the policy has one home and the workspace tests exercise it for real; `workspace` imports `gitstate` (no cycle).
+- `task.archive` and `task.restore` accept `{id}` or `{taskId}` (the CLI, MCP and older callers send `id`; the web sends both).
+- `branch_checked_out` is also a Restore error (the branch is checked out in another worktree). Restore publishes **`task.updated`**, not `task.created` (a restored task is not new; the web tree upserts on both and a test asserts no `task.created` fires); the status becomes `created` because the prior status is not stored.
+- `risks.commitsAheadOfOrigin` means commits no `origin/*` ref contains (what deleting the branch would lose), not the ahead count of `origin/<branch>`.
+- `force` without `deleteBranch` is ignored. Even with `force` a dirty worktree is checkpointed before `git branch -D`, and without `force` the branch tip is re-checked after the checkpoint (moved ⇒ keep and log). Concurrent Restore calls are serialised per task.
+- The `branch_gone` sentence says only that the branch no longer exists (a forced delete is unmerged, so "deleted after it was merged" would be false).
+
 
 ## Progress
 
-- 2026-10-23: plan written (ADR-0039 §9, H3, Supervisor defaults a/b). Nothing implemented.
+- 2026-10-23: plan written (ADR-0039 §9, H3, Supervisor defaults a/b). Daemon and web halves implemented and verified live together; PRs opened.
 
 ## Validation
 
-How each AC gets satisfied is recorded here per PR as it lands.
+How each AC was satisfied (daemon: this PR; web: the Archive dialog PR). The two branches were merged in a scratch worktree for the live run.
+
+- **AC1–AC9 (daemon):** every test name in the plan's `store / workspace` and `wsapi / agents` groups exists and passes (plus `TestRestore_FreshPathWhenOriginalIsTaken`, `TestRestore_ConcurrentCallsKeepTheWorktree`, `TestTaskArchive_DeletesAndForces`); `TestTaskArchiveFinished_NeverDeletesBranches` and `TestMcpTaskArchive_NeverDeletesBranches` first assert the branch *would* be deletable, so they prove something.
+- **Live (isolated daemon on port 4881, throwaway repo with a local bare origin, a scripted `gh` reporting a merged PR; nothing touched a real forge):** previews for a merged-clean task (`canDeleteBranch`, default on), an owned-unmerged one (off, "not merged anywhere"), a dirty-merged one (off, "saved to the branch, so it is kept"), a user-branch task ("smind never deletes it") and a squash-merged one (`merged via pr`, deletable). Archiving through the real UI: the merged-clean and squash-merged branches were deleted, the dirty one and the user's own branch were kept, the unmerged owned one was deleted only through "Delete the branch anyway" (`force`); `origin` still had only `develop`. The Archived view listed all five with "branch kept"/"branch deleted"; Restore of the kept dirty task re-created its worktree and put it back in the tree live (and out of the Archived list), Restore of deleted ones was disabled with the `branch_gone` sentence.
+- **Web ACs 10–14 and screenshots:** light and dark screenshots of the dialog (merged-clean, dirty, unmerged-owned, user branch, squash), the Archived view, the restore frames at 0/80/250/1500 ms, and the diff header's **Archive…** replacing Create/Update PR for a merged PR. Found and fixed in review: the Archived row's meta line was truncated to "branch del…" beside the Restore button (now its own line) and the `branch_gone` sentence claimed the branch had been merged.
+- **AC15:** `task test`, `task lint` and `cd web && bunx tsc -b packages/ui` are recorded in each PR body. ADR-0024's one-line amendment is below.

@@ -154,3 +154,48 @@ func repoHasRef(t *testing.T, dir, ref string) bool {
 	t.Helper()
 	return mcpGit(t, dir, "rev-parse", "--verify", "--quiet", ref) != ""
 }
+
+// TestMcpTaskArchive_NeverDeletesBranches proves task_archive, which agents
+// call, never deletes a branch even when the policy would allow the single-task
+// dialog to (owned, merged, clean): ADR-0039 section 9 reserves deletion for the
+// user's explicit choice.
+func TestMcpTaskArchive_NeverDeletesBranches(t *testing.T) {
+	env := newMCPSession(t)
+	_, wtPath, branch := createTaskViaMCP(t, env, "Merged work")
+	taskID := taskIDOf(t, env, branch)
+	repo := workspaceRepoForBranch(t, env, branch)
+
+	if err := os.WriteFile(filepath.Join(wtPath, "done.txt"), []byte("done\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	mcpGit(t, wtPath, "add", "done.txt")
+	mcpGit(t, wtPath, "commit", "-m", "the work")
+	mcpGit(t, repo, "merge", "--no-ff", "-m", "merge", branch)
+
+	// The branch is one the dialog would offer to delete.
+	client := dialTestClient(t, env.srvURL)
+	var preview struct {
+		CanDeleteBranch     bool   `json:"canDeleteBranch"`
+		DeleteBlockedReason string `json:"deleteBlockedReason"`
+	}
+	if err := client.Call(context.Background(), "task.archivePreview", map[string]any{"taskId": taskID}, &preview); err != nil {
+		t.Fatalf("task.archivePreview: %v", err)
+	}
+	if !preview.CanDeleteBranch {
+		t.Fatalf("setup: branch not deletable (%q); the test would prove nothing", preview.DeleteBlockedReason)
+	}
+
+	if callMCPTool(t, env.cs, "task_archive", map[string]any{"taskId": taskID}, nil) {
+		t.Fatal("task_archive IsError")
+	}
+	if got := mcpGit(t, repo, "rev-parse", "--verify", "refs/heads/"+branch); got == "" {
+		t.Fatalf("branch %s was deleted by task_archive", branch)
+	}
+	var task map[string]any
+	if err := client.Call(context.Background(), "task.get", map[string]any{"id": taskID}, &task); err != nil {
+		t.Fatalf("task.get: %v", err)
+	}
+	if task["BranchDeletedAt"] != nil || task["ArchivedAt"] == nil {
+		t.Fatalf("task = %v, want archived with BranchDeletedAt unset", task)
+	}
+}

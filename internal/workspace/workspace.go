@@ -13,6 +13,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/forge"
+	"github.com/spacingmind/smind/internal/gitstate"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -60,6 +61,15 @@ type Manager struct {
 	// gate, ADR-0039 section 7); nil or a nil result means unavailable.
 	forgeMu sync.Mutex
 	forgeFn func() forge.Provider
+
+	// Archive branch cleanup and Restore (archive_branch.go): the source of a
+	// task's fresh git state and the test seams for the base fetch and the
+	// worktree add.
+	archiveMu     sync.Mutex
+	gitFacts      func(taskID int64) (gitstate.TaskGit, error)
+	fetchBaseFn   func(dir, base string)
+	worktreeAddFn func(repoPath, worktreePath, branch string, trackOrigin bool) error
+	restoring     map[int64]bool
 
 	setupMu       sync.Mutex
 	setupRuns     map[int64]*setupRun

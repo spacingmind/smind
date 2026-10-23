@@ -289,6 +289,14 @@ var migrations = []migration{
 		},
 	},
 	{
+		// ADR-0039 section 9: set when archiving deleted the task's local
+		// branch (the Restore button reads it). Existing rows keep NULL.
+		name: "task_branch_deleted_at",
+		apply: func(db *sql.DB) error {
+			return addColumnIfMissing(db, "tasks", "branch_deleted_at", "TIMESTAMP")
+		},
+	},
+	{
 		// ADR-0026: who authored a run's prompt (human|orchestrator|agent)
 		// and whether it was a mid-run interrupt, for the window builder.
 		// Pre-existing runs keep '' (unknown) / 0.
