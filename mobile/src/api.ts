@@ -313,3 +313,48 @@ export function startFirstRun(
 ): Promise<RunStartResult> {
   return startRunWhenBusy(conn, { ...p, whenBusy: 'queue' });
 }
+
+/** One usage rollup of a task.tree node; null means unknown, never 0 (ADR-0020). */
+export interface TaskTreeUsage {
+  runs: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+  reasoningTokens: number | null;
+  costUsd: number | null;
+}
+
+/** One entry of the task.tree flat pre-order list (internal/tasktree Node). */
+export interface TaskTreeNode {
+  id: number;
+  parentId: number | null;
+  workspaceId: number;
+  title: string;
+  depth: number;
+  taskStatus: string;
+  tier: 'supervisor' | 'leader' | 'coder' | null;
+  childCount: number;
+  run: {
+    state: string;
+    runningRunIds: string[];
+    pendingPermissions: number;
+    disposition?: string;
+    failureKind?: string;
+    window?: string;
+    resetAt?: string;
+  };
+  counts: { running: number; waitingPermission: number; failed: number; done: number; idle: number };
+  usage: { own: TaskTreeUsage; subtree: TaskTreeUsage; archivedDescendants: number };
+}
+
+export interface TaskTreeResult {
+  nodes: TaskTreeNode[];
+  truncated: boolean;
+}
+
+/** task.tree for a task: it and its live descendants, depth-first pre-order. */
+export async function fetchTaskTree(conn: RelayConnection, taskId: number): Promise<TaskTreeResult> {
+  const result = (await conn.call('task.tree', { taskId })) as Partial<TaskTreeResult> | null;
+  return { nodes: result?.nodes ?? [], truncated: result?.truncated === true };
+}
