@@ -14,7 +14,10 @@
 // seed-run <stopReason|end_turn> [title] | seed-live <scenario> [title] |
 // set-scenario <taskId> <text...> | set-task-status <taskId> <status> | stop-run <runId> |
 // queue-prompt <taskId> <queue|interrupt> <prompt...> |
-// queue-list <chatId> | run-status <runId>. Diagnostics go to stderr, prefixed "devharness: ".
+// queue-list <chatId> | run-status <runId> |
+// seed-tree <nested|permission|ratelimited|failed|big> (TEST ONLY: a fresh task tree
+// under the seeded workspace; replies {rootId, nodes:{<name>:<taskId>}, ...}) |
+// peer-rpc <label> <method> [json params] (raw result of one daemon RPC). Diagnostics go to stderr, prefixed "devharness: ".
 package main
 
 import (
@@ -511,6 +514,10 @@ func (h *harness) dispatch(cmd string, args []string) (map[string]any, error) {
 		return h.seedRun(args)
 	case "seed-live":
 		return h.seedLive(args)
+	case "seed-tree":
+		return h.seedTree(args)
+	case "peer-rpc":
+		return h.peerRPC(args)
 	case "set-scenario":
 		return h.setScenario(args)
 	case "set-task-status":
@@ -720,7 +727,7 @@ func (p *peer) request(method string, params any, timeout time.Duration) (rpcRes
 // newSeedTask creates (once) the shared seeded workspace and a task in it;
 // scenario, when non-empty, selects the fake agent's behaviour via a
 // "scenario" file in the task worktree.
-func (h *harness) newSeedTask(title, scenario string) (store.Workspace, store.Task, error) {
+func (h *harness) newSeedTask(title, scenario string, opts ...workspace.CreateTaskOption) (store.Workspace, store.Task, error) {
 	// One seeded workspace for every seed-run (the app lists the first workspace's tasks): created on first use.
 	if h.seedWS == nil {
 		repo, err := os.MkdirTemp(h.workDir, "seed-repo-")
@@ -761,7 +768,7 @@ func (h *harness) newSeedTask(title, scenario string) (store.Workspace, store.Ta
 		h.seedWS = &created
 	}
 	ws := *h.seedWS
-	task, err := h.wm.CreateTask(ws.ID, nil, title)
+	task, err := h.wm.CreateTask(ws.ID, nil, title, opts...)
 	if err != nil {
 		return store.Workspace{}, store.Task{}, err
 	}
@@ -895,10 +902,15 @@ func (h *harness) setScenario(args []string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(*task.WorktreePath, "scenario"), []byte(strings.Join(args[1:], " ")), 0o644); err != nil {
+	if err := h.writeScenario(task, strings.Join(args[1:], " ")); err != nil {
 		return nil, err
 	}
 	return map[string]any{}, nil
+}
+
+// writeScenario overwrites the fake agent's scenario file in a task worktree.
+func (h *harness) writeScenario(task store.Task, scenario string) error {
+	return os.WriteFile(filepath.Join(*task.WorktreePath, "scenario"), []byte(scenario), 0o644)
 }
 
 // setTaskStatus force-writes a task's status column (created|running|done|

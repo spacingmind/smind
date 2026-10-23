@@ -419,3 +419,115 @@ func queueIDByPrompt(t *testing.T, p *proc, chatID int64, prompt string) int64 {
 	t.Fatalf("queue item %q not found", prompt)
 	return 0
 }
+
+type treeNode struct {
+	ID         int64    `json:"id"`
+	ParentID   *int64   `json:"parentId"`
+	Title      string   `json:"title"`
+	Depth      int      `json:"depth"`
+	Tier       *string  `json:"tier"`
+	ChildCount int      `json:"childCount"`
+	Run        treeRun  `json:"run"`
+	Usage      treeUsed `json:"usage"`
+}
+
+type treeRun struct {
+	State              string `json:"state"`
+	PendingPermissions int    `json:"pendingPermissions"`
+	FailureKind        string `json:"failureKind"`
+	ResetAt            string `json:"resetAt"`
+}
+
+type treeUsed struct {
+	Own struct {
+		CostUSD *float64 `json:"costUsd"`
+	} `json:"own"`
+}
+
+// seedTree runs seed-tree <shape> and reads the tree back through the real
+// task.tree handler over a paired device peer; byTitle indexes the nodes.
+func seedTree(t *testing.T, shape string) (reply map[string]any, nodes []treeNode, byTitle map[string]treeNode) {
+	t.Helper()
+	p := startFake(t)
+	p.mustOK("window 1")
+	if m := p.mustOK("peer-add a"); m["state"] != "approved" {
+		t.Fatalf("peer-add: %v", m)
+	}
+	reply = p.mustOK("seed-tree " + shape)
+	root := int64(reply["rootId"].(float64))
+	res := p.mustOK("peer-rpc a task.tree {\"taskId\":" + fmtInt(root) + "}")["result"].(map[string]any)
+	raw, _ := json.Marshal(res["nodes"])
+	if err := json.Unmarshal(raw, &nodes); err != nil {
+		t.Fatal(err)
+	}
+	byTitle = map[string]treeNode{}
+	for _, n := range nodes {
+		byTitle[n.Title] = n
+	}
+	p.mustOK("quit")
+	return reply, nodes, byTitle
+}
+
+func tierOf(n treeNode) string {
+	if n.Tier == nil {
+		return "<nil>"
+	}
+	return *n.Tier
+}
+
+func TestSeedTree_Nested(t *testing.T) {
+	reply, nodes, by := seedTree(t, "nested")
+	if len(nodes) != 7 {
+		t.Fatalf("nodes = %d, want 7: %+v", len(nodes), nodes)
+	}
+	ids := reply["nodes"].(map[string]any)
+	for title, n := range by {
+		if float64(n.ID) != ids[title] {
+			t.Fatalf("%s id %d not in reply %v", title, n.ID, ids)
+		}
+	}
+	sup := by["supervisor"]
+	if tierOf(sup) != "supervisor" || sup.ParentID != nil || sup.Depth != 0 || sup.ChildCount != 2 {
+		t.Fatalf("supervisor: %+v", sup)
+	}
+	for _, lead := range []string{"lead-1", "lead-2"} {
+		n := by[lead]
+		if tierOf(n) != "leader" || n.ParentID == nil || *n.ParentID != sup.ID || n.Depth != 1 || n.ChildCount != 2 {
+			t.Fatalf("%s: %+v", lead, n)
+		}
+	}
+	for peer, lead := range map[string]string{"peer-1a": "lead-1", "peer-1b": "lead-1", "peer-2a": "lead-2", "peer-2b": "lead-2"} {
+		n := by[peer]
+		if tierOf(n) != "coder" || n.ParentID == nil || *n.ParentID != by[lead].ID || n.Depth != 2 {
+			t.Fatalf("%s: %+v", peer, n)
+		}
+	}
+	for title, state := range map[string]string{"lead-1": "done", "peer-1a": "done", "peer-1b": "running", "peer-2a": "done", "peer-2b": "idle", "lead-2": "idle"} {
+		if got := by[title].Run.State; got != state {
+			t.Fatalf("%s run.state = %q, want %q", title, got, state)
+		}
+	}
+	if c := by["peer-1a"].Usage.Own.CostUSD; c == nil || *c != 0.42 {
+		t.Fatalf("peer-1a cost = %v, want 0.42", c)
+	}
+	if c := by["lead-1"].Usage.Own.CostUSD; c != nil {
+		t.Fatalf("lead-1 cost = %v, want null (n/a)", *c)
+	}
+}
+
+func TestSeedTree_Permission(t *testing.T) {
+	_, nodes, by := seedTree(t, "permission")
+	if len(nodes) != 2 {
+		t.Fatalf("nodes = %d, want 2", len(nodes))
+	}
+	c := by["coder-waiting"]
+	if tierOf(c) != "coder" || c.ParentID == nil || *c.ParentID != by["supervisor"].ID {
+		t.Fatalf("child: %+v", c)
+	}
+	if c.Run.State != "waiting_permission" || c.Run.PendingPermissions != 1 {
+		t.Fatalf("child run = %+v, want waiting_permission with 1 pending", c.Run)
+	}
+	if tierOf(by["supervisor"]) != "supervisor" {
+		t.Fatalf("supervisor tier = %s", tierOf(by["supervisor"]))
+	}
+}
