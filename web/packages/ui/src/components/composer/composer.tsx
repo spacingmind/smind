@@ -10,6 +10,7 @@ import { FileMentionPopover } from "@/components/composer/file-mention-popover";
 import { useFileMention } from "@/components/composer/use-file-mention";
 import { formatMentionToken, mentionedRefs } from "@/lib/file-mention";
 import { supportsKind } from "@/lib/attachments/kinds";
+import { profileIdFor } from "@/lib/run-profile";
 import { useAttachmentDraft } from "@/components/composer/use-attachment-draft";
 import { attachmentErrorMessage } from "@/lib/attachments/errors";
 import { encodeAttachment } from "@/lib/attachments/encode";
@@ -155,6 +156,8 @@ export function Composer({
     model?: string,
     attachments?: AttachmentRequest[],
     previews?: AttachmentMeta[],
+    /** ADR-0041 S2w: the applied agent profile's id, present only while the run config still equals that profile (see lib/run-profile.ts). */
+    profileId?: number,
   ) => Promise<SubmitResult>;
   onStop: (runId: string) => Promise<void>;
   /** Exposes the prompt textarea's DOM node -- what lets a plan review's "Chat about it" (Item 11) move focus into the composer without resolving the pending request. */
@@ -207,6 +210,7 @@ export function Composer({
     thinkingLevel: "" as ThinkingLevel,
     model: "",
   };
+  const profileId = runConfig ? profileIdFor(runConfig.state, runConfig.meta.profiles) : undefined;
   const [submitting, setSubmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -308,6 +312,7 @@ export function Composer({
           model || undefined,
           attachments,
           previews,
+          profileId,
         );
         // The optimistic run entry now owns the thumbnails' object URLs, so the tray lets go without revoking.
         if (attachKey && attachItems.length > 0) useComposerAttachmentsStore.getState().release(attachKey, attachItems.map((i) => i.localId));
@@ -321,7 +326,7 @@ export function Composer({
         setSubmitting(false);
       }
     },
-    [onSubmit, provider, permissionMode, autoAccept, thinkingLevel, model, onQueued, attachItems, attachKey, attachLimits],
+    [onSubmit, provider, permissionMode, autoAccept, thinkingLevel, model, profileId, onQueued, attachItems, attachKey, attachLimits],
   );
 
   // A plain submit always hands the prompt to the daemon's queue whenBusy

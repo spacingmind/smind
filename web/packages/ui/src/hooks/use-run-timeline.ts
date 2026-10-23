@@ -401,6 +401,8 @@ interface TimelineState {
     /** ADR-0038: base64 attachments sent inline; `previews` is their metadata for the optimistic echo (thumbnails the client already holds). */
     attachments?: AttachmentRequest[],
     previews?: AttachmentMeta[],
+    /** ADR-0041 S2w: the agent profile this run is launched as; sent as run.start's `profileId` only when defined. */
+    profileId?: number,
   ) => Promise<SubmitResult>;
   /**
    * Actually stops runId server-side (run.stop) -- unlike task switch/
@@ -806,6 +808,7 @@ export function useRunTimeline(
       model?: string,
       attachments?: AttachmentRequest[],
       previews?: AttachmentMeta[],
+      profileId?: number,
     ) => {
       const session = sessionRef.current;
       if (!client || taskId === null || chatId === null || !session) {
@@ -822,6 +825,7 @@ export function useRunTimeline(
         ...(permission?.autoAccept ? { autoAccept: true } : {}),
         ...(thinkingLevel ? { thinkingLevel } : {}),
         ...(model ? { model } : {}),
+        ...(profileId !== undefined ? { profileId } : {}),
         ...(attachments && attachments.length > 0 ? { attachments } : {}),
       });
       // ADR-0021 §2: a queued result has no run yet -- no entry is
