@@ -14,6 +14,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/gitstate"
+	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
@@ -42,18 +43,29 @@ type prHost struct {
 	wm       *workspace.Manager
 	svc      *gitstate.Service
 	provider func() forge.Provider
+	// reg is the run registry whose sync latch the git-changing handlers hold
+	// across their precondition check and git operation; nil means no latch.
+	reg *runs.Registry
+	// afterCheck, when non-nil, runs between a handler's precondition check
+	// and its git operation: the seam a test uses to start a run in the
+	// window the latch must close. Nil in production.
+	afterCheck func()
 
 	mu   sync.Mutex
 	busy map[int64]bool
 }
 
-func prHandlers(wm *workspace.Manager, svc *gitstate.Service, gh *githubHolder) map[string]handlerFunc {
-	h := &prHost{wm: wm, svc: svc, busy: map[int64]bool{}, provider: func() forge.Provider {
+func newPRHost(wm *workspace.Manager, svc *gitstate.Service, gh *githubHolder, reg *runs.Registry) *prHost {
+	return &prHost{wm: wm, svc: svc, reg: reg, busy: map[int64]bool{}, provider: func() forge.Provider {
 		if gh == nil || gh.c == nil {
 			return nil
 		}
 		return gh.c
 	}}
+}
+
+func prHandlers(wm *workspace.Manager, svc *gitstate.Service, gh *githubHolder, reg *runs.Registry) map[string]handlerFunc {
+	h := newPRHost(wm, svc, gh, reg)
 	return map[string]handlerFunc{
 		"task.prPreview": h.preview,
 		"task.createPr":  h.create,
@@ -78,6 +90,35 @@ func (h *prHost) begin(taskID int64) (end func(), ok bool) {
 		delete(h.busy, taskID)
 		h.mu.Unlock()
 	}, true
+}
+
+// latch holds the task's git sync latch (see runs.Registry.TryBeginSync) and
+// returns its release. needIdle also refuses over an active run or queued
+// prompt with the typed run_active error. Without a registry it is a no-op.
+func (h *prHost) latch(taskID int64, needIdle bool) (func(), error) {
+	if h.reg == nil {
+		return func() {}, nil
+	}
+	try := h.reg.TryBeginSyncAllowRun
+	if needIdle {
+		try = h.reg.TryBeginSync
+	}
+	release, err := try(taskID)
+	switch {
+	case err == nil:
+		return release, nil
+	case errors.Is(err, runs.ErrSyncRunActive):
+		return nil, forge.NewPRError(forge.CodeRunActive, "")
+	case errors.Is(err, runs.ErrTaskSyncing):
+		return nil, forge.NewPRError(forge.CodePRBusy, "")
+	}
+	return nil, fmt.Errorf("task %d: %w", taskID, err)
+}
+
+func (h *prHost) checked() {
+	if h.afterCheck != nil {
+		h.afterCheck()
+	}
 }
 
 func refuseRunScoped(method string, rc *requestContext) error {
@@ -399,6 +440,11 @@ func (h *prHost) update(ctx context.Context, rc *requestContext, raw json.RawMes
 		return nil, forge.NewPRError(forge.CodePRBusy, "")
 	}
 	defer end()
+	release, err := h.latch(p.TaskID, false)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), prActionTimeout)
 	defer cancel()
 
@@ -427,6 +473,7 @@ func (h *prHost) update(ctx context.Context, rc *requestContext, raw json.RawMes
 	if strings.HasPrefix(head, forge.CherryPickBranchPrefix) {
 		return nil, forge.UpdateUnsupported(head)
 	}
+	h.checked()
 	if err := h.wm.PushUpdate(ctx, p.TaskID, head); err != nil {
 		return nil, err
 	}

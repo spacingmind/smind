@@ -143,6 +143,8 @@ type Registry struct {
 	// exact window the latch must close. Nil in production. Guarded by mu
 	// for writes; read on the TryBeginArchive path only.
 	testHookAfterLatch func()
+	// testHookAfterSyncLatch is testHookAfterLatch for TryBeginSync.
+	testHookAfterSyncLatch func()
 
 	// closing latches once CloseAll begins: queue delivery must not start
 	// a chat's next prompt while the daemon is shutting down (a run
@@ -182,6 +184,12 @@ type Registry struct {
 	// sees no active run but a run starts between the check and the
 	// worktree removal. Guarded by mu.
 	archiving map[int64]bool
+
+	// syncing holds the task ids mid git sync (TryBeginSync): push, update
+	// from base or update PR. Like archiving it refuses every run-start path
+	// (ErrTaskSyncing) so a run cannot start between the handler's
+	// precondition check and its git operation. Guarded by mu.
+	syncing map[int64]bool
 }
 
 // SetPermissionTimeout overrides how long a pending permission request
@@ -277,7 +285,7 @@ func (reg *Registry) notifyRunStatus(r *run) {
 //     a rehydrated run immediately delivers its backfilled history then
 //     closes, same as attaching to any other already-finished run.
 func New(st *store.Store) (*Registry, error) {
-	reg := &Registry{runs: make(map[string]*run), st: st, deliveryAttempts: make(map[int64]int), archiving: make(map[int64]bool), notifyParent: true, notifyDebounce: defaultNotifyDebounce, notifyMaxHold: defaultNotifyMaxHold, retryGrace: defaultRetryGrace}
+	reg := &Registry{runs: make(map[string]*run), st: st, deliveryAttempts: make(map[int64]int), archiving: make(map[int64]bool), syncing: make(map[int64]bool), notifyParent: true, notifyDebounce: defaultNotifyDebounce, notifyMaxHold: defaultNotifyMaxHold, retryGrace: defaultRetryGrace}
 
 	if _, err := st.MarkRunningRunsInterrupted(string(StatusInterrupted), func(chatID int64) string { return restartStopReason(st, chatID) }); err != nil {
 		return nil, fmt.Errorf("runs: reconcile interrupted runs: %w", err)
@@ -802,13 +810,17 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	// concurrency count and the registration share the same section, so
 	// concurrent Starts in one tree can't both slip past the limit.
 	var busyRunID string
-	var archiving bool
+	var archiving, syncingTask bool
 	var treeFull *TreeBusyError
 	func() {
 		reg.mu.Lock()
 		defer reg.mu.Unlock()
 		if reg.taskArchivingLocked(taskID) {
 			archiving = true
+			return
+		}
+		if reg.syncing[taskID] {
+			syncingTask = true
 			return
 		}
 		for _, existing := range reg.runs {
@@ -832,6 +844,10 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	if archiving {
 		cancel()
 		return "", fmt.Errorf("runs: start: %w", ErrTaskArchiving)
+	}
+	if syncingTask {
+		cancel()
+		return "", fmt.Errorf("runs: start: %w", ErrTaskSyncing)
 	}
 	if busyRunID != "" {
 		cancel()
@@ -1783,6 +1799,10 @@ func (reg *Registry) TryBeginArchive(taskID int64) (func(), error) {
 		reg.mu.Unlock()
 		return nil, fmt.Errorf("task %d is already being archived", taskID)
 	}
+	if reg.syncing[taskID] {
+		reg.mu.Unlock()
+		return nil, fmt.Errorf("a git sync (push or update) is in progress; try again in a moment")
+	}
 	reg.archiving[taskID] = true
 	hook := reg.testHookAfterLatch
 	reg.mu.Unlock()
@@ -1813,6 +1833,75 @@ func (reg *Registry) TryBeginArchive(taskID int64) (func(), error) {
 	return func() {
 		once.Do(unlatch)
 	}, nil
+}
+
+// ErrTaskSyncing is the run-start refusal while a git sync (push, update from
+// base or update PR) holds the task: a run starting mid-sync would work in a
+// worktree the sync is about to rewrite.
+var ErrTaskSyncing = errors.New("A git sync (push or update) is in progress in this task; try again in a moment.")
+
+// ErrSyncRunActive is TryBeginSync's refusal when an agent run is running, or
+// a prompt is queued, in the task.
+var ErrSyncRunActive = errors.New("an agent is still working in this task")
+
+// TryBeginSync is the git sync handlers' half of closing the TOCTOU window
+// between their precondition check and the git operation, mirroring
+// TryBeginArchive: under reg.mu it refuses a task that is archiving or already
+// syncing, latches the task, and then (latch first, so no run can slip in
+// unseen) refuses with ErrSyncRunActive when a run is active or a prompt is
+// queued. From then until release runs, every run-start path refuses with
+// ErrTaskSyncing; queued prompts stay queued and are redelivered by release.
+// The caller must call release exactly once, typically via defer.
+func (reg *Registry) TryBeginSync(taskID int64) (release func(), err error) {
+	return reg.beginSync(taskID, true)
+}
+
+// TryBeginSyncAllowRun is TryBeginSync for a sync that only publishes commits
+// (push, update PR) and so does not need the task idle: it takes the same
+// latch but does not refuse over an active run.
+func (reg *Registry) TryBeginSyncAllowRun(taskID int64) (release func(), err error) {
+	return reg.beginSync(taskID, false)
+}
+
+func (reg *Registry) beginSync(taskID int64, needIdle bool) (func(), error) {
+	reg.mu.Lock()
+	if reg.archiving[taskID] {
+		reg.mu.Unlock()
+		return nil, fmt.Errorf("task %d: %w", taskID, ErrTaskArchiving)
+	}
+	if reg.syncing[taskID] {
+		reg.mu.Unlock()
+		return nil, ErrTaskSyncing
+	}
+	reg.syncing[taskID] = true
+	hook := reg.testHookAfterSyncLatch
+	reg.mu.Unlock()
+
+	if hook != nil {
+		hook()
+	}
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			reg.mu.Lock()
+			delete(reg.syncing, taskID)
+			reg.mu.Unlock()
+			// Anything a start refused meanwhile is still queued.
+			reg.DeliverQueued()
+		})
+	}
+	if needIdle {
+		_, _, active, err := reg.ActiveRunForTask(taskID)
+		if err != nil {
+			release()
+			return nil, err
+		}
+		if active {
+			release()
+			return nil, ErrSyncRunActive
+		}
+	}
+	return release, nil
 }
 
 // taskArchivingLocked reports whether taskID is mid-archive; callers must

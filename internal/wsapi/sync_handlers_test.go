@@ -1,7 +1,9 @@
 package wsapi
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"os"
@@ -10,9 +12,12 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/gitstate"
+	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
 // Throwaway repos with a local bare remote (prEnv serves its https `origin`
@@ -623,4 +628,97 @@ func (e *prEnv) moveOrigin(path string) {
 	runGitT(e.t, other, "add", path)
 	runGitT(e.t, other, "commit", "-m", "theirs")
 	runGitT(e.t, other, "push", "-q", "origin", e.branch)
+}
+
+// The sync latch refuses run.start on the wire while held and lets it through
+// once released.
+func TestSyncLatchRefusesRunStart(t *testing.T) {
+	t.Parallel()
+	e := newPREnv(t)
+	srv := newSyncServer(e)
+	ws := dialWS(t, srv, "tok")
+
+	release, err := e.api.Runs.TryBeginSync(e.task.ID)
+	if err != nil {
+		t.Fatalf("TryBeginSync() error = %v", err)
+	}
+	sendRequest(t, ws, "1", "run.start", map[string]any{"taskId": e.task.ID, "provider": "glm", "prompt": "hi"})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "A git sync (push or update) is in progress in this task; try again in a moment.") {
+		t.Fatalf("run.start while syncing = %+v, want the sync refusal", resp.Error)
+	}
+	// A sync RPC meanwhile reports the task busy, not a second latch.
+	_, err = e.push()
+	wantErrCode(t, err, forge.CodePRBusy)
+
+	release()
+	sendRequest(t, ws, "2", "run.start", map[string]any{"taskId": e.task.ID, "provider": "glm", "prompt": "hi"})
+	resp = readEnvelopeFor(t, ws, "2", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("run.start after release error = %v", resp.Error.Message)
+	}
+	var started runStartResult
+	if err := json.Unmarshal(resp.Result, &started); err != nil {
+		t.Fatal(err)
+	}
+	sendRequest(t, ws, "3", "run.stop", map[string]any{"runId": started.RunID})
+	readEnvelopeFor(t, ws, "3", 5*time.Second)
+}
+
+// A run starting after the handler's check and before its git call is refused
+// (the sync wins); a run that is already active makes the sync refuse and
+// leaves the branch alone (the run wins). Never both.
+func TestSyncLatchRacingStart(t *testing.T) {
+	t.Parallel()
+	t.Run("sync wins", func(t *testing.T) {
+		t.Parallel()
+		e := newPREnv(t)
+		e.commit("a.txt", "a\n", "mine")
+		e.advanceBase("base.txt", "base\n")
+		runner := newTestRunner(e.wm)
+		h := newPRHost(e.wm, e.api.git, nil, e.api.Runs)
+		var startErr error
+		h.afterCheck = func() {
+			_, startErr = e.api.Runs.Start(context.Background(), e.wm, runner, e.task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+		}
+		raw, _ := json.Marshal(map[string]any{"taskId": e.task.ID})
+		v, err := h.updateFromBase(context.Background(), &requestContext{}, raw)
+		if err != nil || v.(taskUpdateFromBaseResult).Result != "merged" {
+			t.Fatalf("updateFromBase = %#v, %v", v, err)
+		}
+		if !errors.Is(startErr, runs.ErrTaskSyncing) {
+			t.Fatalf("run start inside the window: err = %v, want ErrTaskSyncing", startErr)
+		}
+		if _, _, active, _ := e.api.Runs.ActiveRunForTask(e.task.ID); active {
+			t.Fatal("a run slipped in during the sync")
+		}
+	})
+	t.Run("run wins", func(t *testing.T) {
+		t.Parallel()
+		e := newPREnv(t)
+		e.commit("a.txt", "a\n", "mine")
+		e.advanceBase("base.txt", "base\n")
+		head := e.head()
+		if err := os.WriteFile(filepath.Join(e.wt, "scenario"), []byte("hang"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runner := newTestRunner(e.wm)
+		runID, err := e.api.Runs.Start(context.Background(), e.wm, runner, e.task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = e.api.Runs.Stop(runID) })
+		h := newPRHost(e.wm, e.api.git, nil, e.api.Runs)
+		h.afterCheck = func() { t.Error("the git call was reached with a run active") }
+		raw, _ := json.Marshal(map[string]any{"taskId": e.task.ID})
+		_, err = h.updateFromBase(context.Background(), &requestContext{}, raw)
+		wantErrCode(t, err, forge.CodeRunActive)
+		if e.head() != head {
+			t.Fatal("a refused update moved the branch")
+		}
+		// Push only publishes commits: a running agent does not block it.
+		if _, err := e.push(); err != nil {
+			t.Fatalf("task.push with a run active: %v", err)
+		}
+	})
 }

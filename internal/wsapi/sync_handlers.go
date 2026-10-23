@@ -46,6 +46,13 @@ func (h *prHost) push(ctx context.Context, rc *requestContext, raw json.RawMessa
 		return nil, forge.NewPRError(forge.CodePRBusy, "")
 	}
 	defer end()
+	// A push only publishes commits, so a running agent does not block it; the
+	// latch still keeps a run from starting mid-push.
+	release, err := h.latch(p.TaskID, false)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	// A push cut off half way by the client going away would leave the
 	// branch state unknown; run it to its own deadline.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), prActionTimeout)
@@ -58,6 +65,7 @@ func (h *prHost) push(ctx context.Context, rc *requestContext, raw json.RawMessa
 	if a := g.Actions["push"]; !a.Enabled {
 		return nil, blocked(a, g)
 	}
+	h.checked()
 	res, err := h.wm.Push(ctx, p.TaskID)
 	if err != nil {
 		return nil, err
@@ -86,6 +94,13 @@ func (h *prHost) updateFromBase(ctx context.Context, rc *requestContext, raw jso
 		return nil, forge.NewPRError(forge.CodePRBusy, "")
 	}
 	defer end()
+	// Update from base rewrites the worktree: no run may be active, or start,
+	// until it is done.
+	release, err := h.latch(p.TaskID, true)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), prActionTimeout)
 	defer cancel()
 
@@ -102,6 +117,7 @@ func (h *prHost) updateFromBase(ctx context.Context, rc *requestContext, raw jso
 	// The worktree changes whatever the outcome (a conflict leaves it
 	// mid-merge), so task.git is recomputed on every exit past this point.
 	defer h.publishGit(p.TaskID)
+	h.checked()
 	res, err := h.wm.UpdateFromBase(ctx, p.TaskID, strategy)
 	if err != nil {
 		return nil, err
