@@ -11,7 +11,7 @@ describe("describePrError", () => {
 
   it("keeps the daemon's push and update sentences and puts the stderr in Details", () => {
     const sentence =
-      "Merging `origin/develop` into this branch hit conflicts, and the worktree is now in the middle of the merge. Resolve the conflicts and commit, or ask the agent to; `git merge --abort` in the worktree undoes it.";
+      "Merging `origin/develop` into this branch hit conflicts, and the worktree is now in the middle of the merge. Resolve the conflicts and commit, or ask the agent to resolve them; `git merge --abort` in the worktree undoes it.";
     const conflict = describePrError(new RpcError(sentence, "conflict", { files: ["a.go"], detail: "CONFLICT (content): a.go" }), "sync");
     expect(conflict).toEqual({ message: sentence, detail: "CONFLICT (content): a.go", code: "conflict" });
     for (const code of ["non_fast_forward", "merge_in_progress", "worktree_dirty", "nothing_to_push", "invalid_strategy", "forge_unauthenticated"]) {

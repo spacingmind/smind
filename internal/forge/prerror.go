@@ -146,10 +146,10 @@ func RestoreCheckedOut() *PRError {
 func ConflictError(operation, base string, files []string, filesTruncated bool) *PRError {
 	var m string
 	if operation == OpRebase {
-		m = fmt.Sprintf("Rebasing onto `%s` hit conflicts, and the worktree is now in the middle of the rebase. Resolve the conflicts and continue, or ask the agent to; `git rebase --abort` in the worktree undoes it.", base)
+		m = fmt.Sprintf("Rebasing onto `%s` hit conflicts, and the worktree is now in the middle of the rebase. Resolve the conflicts and continue, or ask the agent to resolve them; `git rebase --abort` in the worktree undoes it.", base)
 	} else {
 		operation = OpMerge
-		m = fmt.Sprintf("Merging `%s` into this branch hit conflicts, and the worktree is now in the middle of the merge. Resolve the conflicts and commit, or ask the agent to; `git merge --abort` in the worktree undoes it.", base)
+		m = fmt.Sprintf("Merging `%s` into this branch hit conflicts, and the worktree is now in the middle of the merge. Resolve the conflicts and commit, or ask the agent to resolve them; `git merge --abort` in the worktree undoes it.", base)
 	}
 	if files == nil {
 		files = []string{}
