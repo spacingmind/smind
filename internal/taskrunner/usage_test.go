@@ -492,3 +492,103 @@ func TestUsageEvent_NoPromptOrSecret(t *testing.T) {
 	run("codex", ProviderCodexNative, "token-usage", codexRunner)
 	run("acp", ProviderGLM, "usage in=1 out=2 used=3 size=4 cost=0.5", glmRunner)
 }
+
+func claudeResult(cost float64, models map[string]claudecode.ModelUsage) claudecode.ResultMessage {
+	return claudecode.ResultMessage{SessionID: "sess-1", StopReason: "end_turn", NumTurns: 1, TotalCostUSD: cost, ModelUsage: models}
+}
+
+func haiku(in, out, cacheRead int, cost float64) map[string]claudecode.ModelUsage {
+	return map[string]claudecode.ModelUsage{"claude-haiku-5-5": {InputTokens: in, OutputTokens: out, CacheReadInputTokens: cacheRead, CostUSD: cost}}
+}
+
+// The CLI restores a resumed session's running totals, so each result is
+// cumulative; a turn's usage is the difference from the previous turn's.
+func TestClaudeTurnUsage_IsTheDifferenceFromThePreviousTurnsTotals(t *testing.T) {
+	t.Parallel()
+	turn1 := claudeResult(0.010, haiku(1000, 400, 5000, 0.010))
+	turn2 := claudeResult(0.025, haiku(1010, 2600, 9000, 0.025))
+
+	first := claudeTurnUsage(turn1, nil)
+	if first.Output == nil || *first.Output != 400 || first.CostUSD == nil || *first.CostUSD != 0.010 {
+		t.Fatalf("first turn (no baseline) = output %s cost %v, want the result as is: 400 / 0.010", fmtI(first.Output), first.CostUSD)
+	}
+
+	second := claudeTurnUsage(turn2, claudeTotalsOf(turn1))
+	if second.Input == nil || *second.Input != 10 || second.Output == nil || *second.Output != 2200 || second.CachedInput == nil || *second.CachedInput != 4000 {
+		t.Fatalf("second turn = input %s output %s cached %s, want 10 / 2200 / 4000", fmtI(second.Input), fmtI(second.Output), fmtI(second.CachedInput))
+	}
+	if second.CostUSD == nil || *second.CostUSD < 0.0149 || *second.CostUSD > 0.0151 {
+		t.Fatalf("second turn cost = %v, want 0.015 (0.025 - 0.010)", second.CostUSD)
+	}
+}
+
+// A counter that goes backwards means a fresh session (a failed resume), not
+// an extension: the result is that turn's own usage.
+func TestClaudeTurnUsage_AResetIsTakenAsIs(t *testing.T) {
+	t.Parallel()
+	before := claudeResult(0.50, haiku(1000, 9000, 50000, 0.50))
+	fresh := claudeResult(0.004, haiku(900, 300, 0, 0.004))
+	u := claudeTurnUsage(fresh, claudeTotalsOf(before))
+	if u.Output == nil || *u.Output != 300 || u.CostUSD == nil || *u.CostUSD != 0.004 {
+		t.Fatalf("reset turn = output %s cost %v, want the result as is: 300 / 0.004", fmtI(u.Output), u.CostUSD)
+	}
+}
+
+// A model the baseline never saw (the user switched model) counts in full.
+func TestClaudeTurnUsage_ANewModelCountsInFull(t *testing.T) {
+	t.Parallel()
+	turn1 := claudeResult(0.010, haiku(1000, 400, 0, 0.010))
+	both := haiku(1000, 400, 0, 0.010)
+	both["claude-sonnet-5-5"] = claudecode.ModelUsage{InputTokens: 50, OutputTokens: 700, CostUSD: 0.020}
+	turn2 := claudeResult(0.030, both)
+	u := claudeTurnUsage(turn2, claudeTotalsOf(turn1))
+	if u.Output == nil || *u.Output != 700 || u.Model == nil || *u.Model != "claude-sonnet-5-5" {
+		t.Fatalf("turn after a model switch = output %s model %v, want 700 on sonnet", fmtI(u.Output), u.Model)
+	}
+}
+
+// End to end through RunPrompt: successive turns of one chat whose results are
+// cumulative each report their own usage.
+func TestRunner_RunPrompt_ClaudeNative_UsagePerTurnNotCumulative(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "")
+	r := New(wm)
+	results := []claudecode.ResultMessage{
+		claudeResult(0.010, haiku(1000, 400, 0, 0.010)),
+		claudeResult(0.025, haiku(1010, 2600, 0, 0.025)),
+		claudeResult(0.026, haiku(1012, 2700, 0, 0.026)),
+	}
+	turn := 0
+	r.newClaudeClient = func(string, ...claudecode.Option) (claudeBackend, error) {
+		res := results[turn]
+		turn++
+		return stubClaudeResult{result: res}, nil
+	}
+	var outputs []int64
+	for range results {
+		u := runForUsage(t, r, task.ID, ProviderClaudeNative, "hi")
+		if u.Output == nil {
+			t.Fatalf("turn %d reported no output tokens", turn)
+		}
+		outputs = append(outputs, *u.Output)
+	}
+	if outputs[0] != 400 || outputs[1] != 2200 || outputs[2] != 100 {
+		t.Fatalf("per-turn output tokens = %v, want [400 2200 100]", outputs)
+	}
+}
+
+type stubClaudeResult struct{ result claudecode.ResultMessage }
+
+func (s stubClaudeResult) Prompt(_ context.Context, _ string, updates chan<- claudecode.Message) (claudecode.ResultMessage, error) {
+	close(updates)
+	return s.result, nil
+}
+
+func (s stubClaudeResult) PromptBlocks(_ context.Context, _ []claudecode.PromptBlock, updates chan<- claudecode.Message) (claudecode.ResultMessage, error) {
+	close(updates)
+	return s.result, nil
+}
+
+func (stubClaudeResult) SetPermissionMode(context.Context, string) error { return nil }
+func (stubClaudeResult) SetModel(context.Context, *string) error         { return nil }
+func (stubClaudeResult) Close() error                                    { return nil }

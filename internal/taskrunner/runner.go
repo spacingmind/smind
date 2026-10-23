@@ -863,7 +863,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 		opts = append(opts, claudecode.WithEnv(env...))
 	}
 
-	client, err := r.newClaudeClientWithResume(ctx, chatID, worktreePath, opts, events)
+	client, resumed, err := r.newClaudeClientWithResume(ctx, chatID, worktreePath, opts, events)
 	if err != nil {
 		return fmt.Errorf("taskrunner: spawn claude code agent: %w", err)
 	}
@@ -871,6 +871,12 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 	r.trackClaudeClient(chatID, client)
 	r.setClaudeModel(chatID, model)
 	defer r.untrackClaudeClient(chatID)
+
+	// The cumulative usage the session had before this turn (see claudeTurnUsage).
+	var baseline *ClaudeUsageTotals
+	if h, ok := r.sessionStore.Get(chatID); ok && resumed && h.Provider == ProviderClaudeNative {
+		baseline = h.UsageTotals
+	}
 
 	updates := make(chan claudecode.Message)
 	forwardDone := make(chan struct{})
@@ -887,7 +893,11 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 					SessionID string `json:"session_id"`
 				}
 				if json.Unmarshal(sys.Raw, &w) == nil && w.SessionID != "" {
-					r.sessionStore.Set(chatID, SessionHandle{Provider: ProviderClaudeNative, SessionID: w.SessionID})
+					// Keep the usage baseline the handle already carries: replacing it here would make
+					// a cancelled turn forget the totals the next turn subtracts.
+					handle, _ := r.sessionStore.Get(chatID)
+					handle.Provider, handle.SessionID = ProviderClaudeNative, w.SessionID
+					r.sessionStore.Set(chatID, handle)
 				}
 				// The CLI tolerates a failing MCP server and runs on
 				// without it; surface that, naming servers only.
@@ -913,8 +923,8 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 	if err != nil {
 		return fmt.Errorf("taskrunner: claude code prompt: %w", err)
 	}
-	r.sessionStore.Set(chatID, SessionHandle{Provider: ProviderClaudeNative, SessionID: result.SessionID})
-	r.sendUsage(ctx, events, claudeUsage(result))
+	r.sessionStore.Set(chatID, SessionHandle{Provider: ProviderClaudeNative, SessionID: result.SessionID, UsageTotals: claudeTotalsOf(result)})
+	r.sendUsage(ctx, events, claudeTurnUsage(result, baseline))
 
 	select {
 	case events <- Event{Type: EventTypeDone, StopReason: result.StopReason, Raw: result}:
@@ -933,21 +943,23 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 // instead of failing the turn, surfacing an EventTypeSessionNote first.
 // See ADR-0016 section 2 / docs/plans/completed/multi-chat-per-task.md's
 // P2.2/P2.5.
-func (r *Runner) newClaudeClientWithResume(ctx context.Context, chatID int64, worktreePath string, opts []claudecode.Option, events chan<- Event) (claudeBackend, error) {
+func (r *Runner) newClaudeClientWithResume(ctx context.Context, chatID int64, worktreePath string, opts []claudecode.Option, events chan<- Event) (client claudeBackend, resumed bool, err error) {
 	handle, ok := r.sessionStore.Get(chatID)
 	if !ok || handle.Provider != ProviderClaudeNative || handle.SessionID == "" {
-		return r.newClaudeClient(worktreePath, opts...)
+		client, err = r.newClaudeClient(worktreePath, opts...)
+		return client, false, err
 	}
 
 	resumeOpts := append(append([]claudecode.Option{}, opts...), claudecode.WithResume(handle.SessionID))
-	client, err := r.newClaudeClient(worktreePath, resumeOpts...)
+	client, err = r.newClaudeClient(worktreePath, resumeOpts...)
 	if err == nil {
-		return client, nil
+		return client, true, nil
 	}
 
 	r.sendSessionNote(ctx, events, fmt.Sprintf(
 		"could not resume claude-native session %s (%v); starting a new session instead", handle.SessionID, err))
-	return r.newClaudeClient(worktreePath, opts...)
+	client, err = r.newClaudeClient(worktreePath, opts...)
+	return client, false, err
 }
 
 // claudeEvents translates one claudecode.Message into zero or more
