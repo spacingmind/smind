@@ -23,6 +23,14 @@ describe("ProviderNav", () => {
     expect(screen.getByText("2")).toBeInTheDocument();
   });
 
+  it("an unconnected proxy-consumer provider says No proxy account, not Not connected", () => {
+    const proxy: ProviderNavItem = { id: "claude-native", label: "Claude Code", kind: "oauth", accountProvider: "anthropic", accountIds: [], tone: "neutral", connected: false };
+    const kimi: ProviderNavItem = { id: "kimi", label: "Kimi", kind: "api-key", accountProvider: "kimi", accountIds: [], tone: "neutral", connected: false };
+    render(<ProviderNav items={[proxy, kimi]} selectedId={null} onSelect={() => {}} mode="full" />);
+    expect(screen.getByRole("button", { name: "Claude Code, No proxy account" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Kimi, Not connected" })).toBeInTheDocument();
+  });
+
   it("nav marks the selected provider", () => {
     render(<ProviderNav items={items} selectedId="anthropic" onSelect={() => {}} mode="full" />);
     expect(screen.getByTestId("provider-nav-item-anthropic")).toHaveAttribute("aria-current", "true");

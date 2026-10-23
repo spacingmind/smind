@@ -1,4 +1,4 @@
-import { Fragment, useMemo, type JSX } from "react";
+import { Fragment, useEffect, useMemo, type JSX } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import type { ProviderNavItem } from "@/lib/providers-view";
@@ -15,6 +15,7 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { useRunProviderTest } from "@/hooks/use-accounts";
 import { useAccountRows } from "@/hooks/use-account-rows";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
+import { useProviderHealth } from "@/hooks/use-provider-health";
 import { useProvidersViewStore } from "@/stores/providers-view-store";
 import { queryKeys } from "@/lib/query-keys";
 import type { WsClient } from "@/lib/ws-client";
@@ -25,6 +26,33 @@ const KIND_LABEL: Record<ProviderNavItem["kind"], string> = {
   cli: "Managed by its own CLI",
   other: "Other accounts",
 };
+
+function ReadinessLine({
+  id,
+  result,
+  failed,
+  usesCliLogin,
+}: {
+  id: string;
+  result: { ok: boolean; detail: string } | undefined;
+  failed: boolean;
+  usesCliLogin: boolean;
+}): JSX.Element {
+  let status: "success" | "danger" | "neutral" = "neutral";
+  let text = "Checking…";
+  if (failed) {
+    text = "Couldn't check";
+  } else if (result) {
+    status = result.ok ? "success" : "danger";
+    text = result.ok ? (usesCliLogin ? "Ready (CLI login)" : "Ready") : `Not ready — ${result.detail}`;
+  }
+  return (
+    <p className="flex items-center gap-1.5 text-ui-sm text-muted-foreground" data-testid={`provider-readiness-${id}`}>
+      <StatusDot status={status} className="size-2" />
+      {text}
+    </p>
+  );
+}
 
 export function ProviderDetail({
   item,
@@ -37,6 +65,11 @@ export function ProviderDetail({
   const { rows } = useAccountRows();
   const { runTest, isTesting } = useRunProviderTest();
   const queryClient = useQueryClient();
+  const { health, ensure, rpcFailed } = useProviderHealth();
+  // Run readiness is provider-id based; ensure() is single-flight and cached, so asking on mount is safe.
+  useEffect(() => {
+    if (client) ensure();
+  }, [client, ensure, providers]);
   const connectProviderId = useProvidersViewStore((s) => s.connectProviderId);
   const reloginAccountId = useProvidersViewStore((s) => s.reloginAccountId);
   const clearConnect = useProvidersViewStore((s) => s.clearConnect);
@@ -73,6 +106,9 @@ export function ProviderDetail({
   const canConnect = item.kind !== "other" && item.kind !== "cli" && item.accountProvider !== undefined;
   const connectOpen = canConnect && connectProviderId === item.id;
   const reloginAccount = canConnect ? itemRows.find((r) => r.account.id === reloginAccountId)?.account ?? null : null;
+  const proxyConsumer = item.accountProvider !== undefined && providerConsumer(item.accountProvider) === "proxy";
+  // Runs on these providers use the CLI's own login, not an smind account.
+  const usesCliLogin = info !== null && (info.kind === "cli" || proxyConsumer);
   const onConnected = () => void queryClient.invalidateQueries({ queryKey: queryKeys.accountList() });
 
   return (
@@ -102,6 +138,14 @@ export function ProviderDetail({
           <p className="text-ui-xs text-muted-foreground" data-testid={`provider-group-note-${item.id}`}>
             Accounts here route sMind's /v1 proxy; agent runs use the CLI's own login.
           </p>
+        ) : null}
+        {info ? (
+          <ReadinessLine
+            id={item.id}
+            result={health[item.id]}
+            failed={rpcFailed.has(item.id)}
+            usesCliLogin={usesCliLogin}
+          />
         ) : null}
       </div>
 
@@ -152,7 +196,7 @@ export function ProviderDetail({
         >
           <span className="flex items-center gap-1.5 text-ui-base text-muted-foreground">
             <StatusDot status="neutral" className="size-2" />
-            Not connected
+            {proxyConsumer ? "No proxy account" : "Not connected"}
           </span>
           <Button
             variant="default"

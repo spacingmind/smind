@@ -51,8 +51,10 @@ describe("providers cache integration", () => {
     renderProviders(d);
     await flush();
 
-    // No provider.test ran: the danger state comes from the shared usage cache.
-    expect(d.countCalls("provider.test")).toBe(0);
+    // The danger state comes from the shared usage cache, not from a provider.test of the account.
+    // The detail's run-readiness line asks provider.test (local, network-free) once per key on mount; the account row's
+    // own test is never run by a mount.
+    expect(d.calls.filter((c) => c.method === "provider.test" && (c.params as { provider: string }).provider === "anthropic")).toHaveLength(1);
     const dot = screen.getByTestId("provider-row-dot-1");
     expect(dot).toHaveAttribute("data-status", "failed");
     expect(dot).toHaveAttribute("title", "Needs re-login");
@@ -72,11 +74,11 @@ describe("providers cache integration", () => {
     expect(d.count("touch")).toBe(0);
     expect(d.count("refresh")).toBe(0);
     expect(d.count("cached")).toBeLessThanOrEqual(1);
-    expect(d.countCalls("provider.test")).toBe(0);
+    const testsOnMount = d.countCalls("provider.test");
 
     fireEvent.click(screen.getByTestId("provider-test-anthropic"));
     await flush();
-    expect(d.countCalls("provider.test")).toBe(1);
+    expect(d.countCalls("provider.test")).toBe(testsOnMount + 1);
     expect(d.count("touch")).toBe(0);
     expect(d.count("refresh")).toBe(0);
   });

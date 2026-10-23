@@ -79,8 +79,48 @@ describe("ProviderDetail", () => {
     renderWithDaemon(<ProviderDetail item={item({ accountIds: [], tone: "neutral", connected: false })} client={d.client} />, d);
     await flush();
     const block = screen.getByTestId("provider-not-connected-claude-native");
-    expect(block).toHaveTextContent("Not connected");
+    expect(block).toHaveTextContent("No proxy account");
+    expect(block).not.toHaveTextContent("Not connected");
     expect(within(block).getByTestId("provider-connect-claude-native")).toHaveTextContent("Connect Claude Code");
+  });
+
+  it("a claude-native provider with no accounts is Ready (CLI login) with No proxy account; kimi stays Not connected", async () => {
+    const d = daemon([]);
+    const view = renderWithDaemon(<ProviderDetail item={item({ accountIds: [], tone: "neutral", connected: false })} client={d.client} />, d);
+    await flush();
+    await waitFor(() => expect(screen.getByTestId("provider-readiness-claude-native")).toHaveTextContent("Ready (CLI login)"));
+    expect(screen.getByTestId("provider-not-connected-claude-native")).toHaveTextContent("No proxy account");
+    view.rerenderWith(
+      d,
+      <ProviderDetail item={item({ id: "kimi", label: "Kimi", kind: "api-key", accountProvider: "kimi", accountIds: [], tone: "neutral", connected: false })} client={d.client} />,
+    );
+    await flush();
+    await waitFor(() => expect(screen.getByTestId("provider-readiness-kimi")).toHaveTextContent(/^Ready$/));
+    expect(screen.getByTestId("provider-not-connected-kimi")).toHaveTextContent("Not connected");
+  });
+
+  it("readiness line: not ok shows the detail, unanswered shows Checking…, a failed RPC shows Couldn't check", async () => {
+    const d = daemon([], { "claude-native": { ok: false, detail: "claude not on PATH" } as PT });
+    d.testRpcErrors = { codex: new Error("boom"), "codex-native": new Error("boom") };
+    const view = renderWithDaemon(<ProviderDetail item={item()} client={d.client} />, d);
+    // Before any answer lands the line is neutral and says Checking…
+    expect(screen.getByTestId("provider-readiness-claude-native")).toHaveTextContent("Checking…");
+    await flush();
+    await waitFor(() => expect(screen.getByTestId("provider-readiness-claude-native")).toHaveTextContent("Not ready — claude not on PATH"));
+    expect(screen.getByTestId("provider-readiness-claude-native").querySelector("[data-slot=status-dot]")).toHaveAttribute("data-status", "danger");
+    view.rerenderWith(
+      d,
+      <ProviderDetail item={item({ id: "codex-native", label: "Codex", accountProvider: "openai" })} client={d.client} />,
+    );
+    await flush();
+    await waitFor(() => expect(screen.getByTestId("provider-readiness-codex-native")).toHaveTextContent("Couldn't check"));
+  });
+
+  it("readiness line is not shown for the other bucket", async () => {
+    const d = daemon([account(3, "xai")]);
+    renderWithDaemon(<ProviderDetail item={item({ id: "other", label: "Other accounts", kind: "other", accountProvider: undefined, accountIds: [3], connected: true })} client={d.client} />, d);
+    await flush();
+    expect(screen.queryByTestId("provider-readiness-other")).toBeNull();
   });
 
   it("detail connect button requests a connect for that provider", async () => {

@@ -1,5 +1,6 @@
 import type { JSX } from "react";
 
+import { providerConsumer } from "@/lib/providers-groups";
 import { Icons } from "@/lib/icons";
 import type { ProviderNavItem, NavTone } from "@/lib/providers-view";
 import { ProviderIcon } from "@/components/provider-icon";
@@ -21,7 +22,8 @@ function toneLabel(item: ProviderNavItem): string {
     case "danger":
       return "Problem";
     default:
-      return item.connected ? "Not tested yet" : "Not connected";
+      if (item.connected) return "Not tested yet";
+      return item.accountProvider && providerConsumer(item.accountProvider) === "proxy" ? "No proxy account" : "Not connected";
   }
 }
 

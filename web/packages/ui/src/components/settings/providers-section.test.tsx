@@ -165,7 +165,7 @@ describe("providers-section", () => {
 
     fireEvent.click(screen.getByTestId("provider-test-anthropic"));
     await flush();
-    expect(client.calls.find((c) => c.method === "provider.test")?.params).toEqual({ provider: "anthropic" });
+    expect(client.calls.filter((c) => c.method === "provider.test").map((c) => c.params).find((p) => (p as { provider: string }).provider === "anthropic")).toEqual({ provider: "anthropic" });
 
     expect(screen.getByTestId("provider-row-test-result-1")).toHaveTextContent("ok");
     expect(screen.getByTestId("provider-row-dot-1")).toHaveAttribute("data-status", "ok");
