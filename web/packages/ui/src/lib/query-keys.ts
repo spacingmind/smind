@@ -32,7 +32,7 @@ export const queryKeys = {
   workspaceTaskGitAll: () => ["task.gitList"] as const,
   providerList: () => ["provider.list"] as const,
   profileList: () => ["profile.list"] as const,
-  /** One `provider.test` answer per account-vocabulary provider key (`accountHealthTestKey`). */
+  /** One `provider.test` answer per key: a provider's own id for run readiness (use-provider-health), an account id for an account's credential (accounts). */
   /** Every cached `provider.test` answer (a prefix, for removal after a reconnect or an account change). */
   providerTestAll: () => ["provider.test"] as const,
   providerTest: (providerKey: string) => ["provider.test", providerKey] as const,

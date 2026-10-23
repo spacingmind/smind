@@ -450,9 +450,9 @@ describe("profiles-section ★ default agent (run-config IA)", () => {
 
 describe("profiles-section inline edit's provider health dot (run-config IA)", () => {
   it("renders the profile's provider health from the shared provider.test cache", async () => {
-    // claude-native is credential-backed -- the cached test's key uses the
-    // accounts-vocabulary id (accountProvider), not the raw taskrunner
-    // provider id, per ProviderInfo.accountProvider's own doc comment.
+    // The dot answers "can a run on this provider start?", so the cached
+    // test's key is the provider's own id (claude-native runs on the CLI's
+    // login), not its accounts-vocabulary id.
     const { daemon, view } = await renderWithProfiles(
       [PROFILE],
       { providers: [{ id: "claude-native", label: "Claude Code", credentialKind: "oauth", accountProvider: "anthropic" }] },
@@ -460,11 +460,12 @@ describe("profiles-section inline edit's provider health dot (run-config IA)", (
 
     // Opening the editor makes sure its provider has a health answer: one local check, run once however
     // often the form re-renders, written to the shared cache.
-    daemon.testResults = { anthropic: { ok: false, detail: "no credential" } };
+    daemon.testResults = { "claude-native": { ok: false, detail: "claude not found on PATH" } };
     fireEvent.pointerDown(screen.getByTestId("profile-menu-1"), { button: 0 });
     fireEvent.click(await screen.findByTestId("profile-edit-1"));
     await flush();
-    expect(daemon.countCalls("provider.test")).toBe(1);
+    // The provider's own id (run readiness) and its account id (the Providers rows' credential check).
+    expect(daemon.countCalls("provider.test")).toBe(2);
     expect(screen.getByTestId("profile-edit-form-1-provider-health")).toHaveAttribute("data-status", "failed");
 
     // A result landing in the shared cache by another path (a Test button, the sidebar's count, the
@@ -473,13 +474,13 @@ describe("profiles-section inline edit's provider health dot (run-config IA)", (
       initialProps: undefined,
       queryClient: view.queryClient(),
     }).result.current;
-    daemon.testResults = { anthropic: { ok: true, detail: "using saved credential" } };
+    daemon.testResults = { "claude-native": { ok: true, detail: "found /usr/local/bin/claude" } };
     await act(async () => {
-      runTest("anthropic");
+      runTest("claude-native");
     });
     await flush();
     // One more call: the Test button's own. The dot re-read the shared cache; it did not fetch again.
-    expect(daemon.countCalls("provider.test")).toBe(2);
+    expect(daemon.countCalls("provider.test")).toBe(3);
     expect(screen.getByTestId("profile-edit-form-1-provider-health")).toHaveAttribute("data-status", "ok");
   });
 });
