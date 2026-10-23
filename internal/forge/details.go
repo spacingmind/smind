@@ -1,6 +1,10 @@
 package forge
 
-import "time"
+import (
+	"regexp"
+	"strconv"
+	"time"
+)
 
 // Bounds of PRDetails (docs/plans/active/pr-panel.md, decision 8): third-party
 // text is cut to these sizes and the matching Truncated flag is set.
@@ -136,4 +140,29 @@ type CheckLogTail struct {
 	Lines     int       `json:"lines"`
 	Truncated bool      `json:"truncated"`
 	FetchedAt time.Time `json:"fetchedAt"`
+}
+
+// CodeCheckUnknown is the error for a check id the daemon did not issue in
+// the task's cached details.
+const CodeCheckUnknown = "check_unknown"
+
+// CheckUnknown is the typed error for an unknown check id.
+func CheckUnknown() *PRError {
+	return NewPRError(CodeCheckUnknown, "").withMessage("That check isn't in this pull request's current details. Refresh and try again.")
+}
+
+var checkIDRe = regexp.MustCompile(`^run:([0-9]{1,18})(?::job:([0-9]{1,18}))?$`)
+
+// ParseCheckID splits a daemon-issued check id ("run:<runId>[:job:<jobId>]").
+// jobID is 0 when the id names a whole run.
+func ParseCheckID(id string) (runID, jobID int64, ok bool) {
+	m := checkIDRe.FindStringSubmatch(id)
+	if m == nil {
+		return 0, 0, false
+	}
+	runID, _ = strconv.ParseInt(m[1], 10, 64)
+	if m[2] != "" {
+		jobID, _ = strconv.ParseInt(m[2], 10, 64)
+	}
+	return runID, jobID, runID > 0
 }

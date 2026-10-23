@@ -91,23 +91,8 @@ type ghThreadsJSON struct {
 
 var (
 	runPathRe  = regexp.MustCompile(`/actions/runs/([0-9]{1,18})(?:/job/([0-9]{1,18}))?/?$`)
-	checkIDRe  = regexp.MustCompile(`^run:([0-9]{1,18})(?::job:([0-9]{1,18}))?$`)
 	ownerRepoR = regexp.MustCompile(`^([A-Za-z0-9_.-]{1,100})/([A-Za-z0-9_.-]{1,100})$`)
 )
-
-// ParseCheckID splits a daemon-issued check id ("run:<runId>[:job:<jobId>]").
-// jobID is 0 when the id names a whole run.
-func ParseCheckID(id string) (runID, jobID int64, ok bool) {
-	m := checkIDRe.FindStringSubmatch(id)
-	if m == nil {
-		return 0, 0, false
-	}
-	runID, _ = strconv.ParseInt(m[1], 10, 64)
-	if m[2] != "" {
-		jobID, _ = strconv.ParseInt(m[2], 10, 64)
-	}
-	return runID, jobID, runID > 0
-}
 
 // PRDetails fetches the PR panel's payload: `gh pr view --json ...` and one
 // `gh api graphql` for threads and the required-approval count. Each call has

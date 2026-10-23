@@ -284,12 +284,3 @@ func TestCheckLog_TailBounded(t *testing.T) {
 		t.Fatal("run id 0 accepted")
 	}
 }
-
-func TestParseCheckID(t *testing.T) {
-	for id, want := range map[string][3]int64{"run:1": {1, 0, 1}, "run:12:job:34": {12, 34, 1}, "run:": {}, "run:1;x": {}, "x": {}, "run:1:job:": {}} {
-		r, j, ok := ParseCheckID(id)
-		if (want[2] == 1) != ok || r != want[0] || j != want[1] {
-			t.Fatalf("ParseCheckID(%q) = %d %d %v", id, r, j, ok)
-		}
-	}
-}

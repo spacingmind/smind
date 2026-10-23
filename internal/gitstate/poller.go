@@ -158,6 +158,7 @@ type Poller struct {
 	ws      map[int64]*wsMem
 	hosts   map[string]*hostMem
 	flights map[int64]*wsFlight
+	det     map[int64]*detailsMem // PR panel state (details.go)
 }
 
 // NewPoller builds a Poller; drive it with Tick.

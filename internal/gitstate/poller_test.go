@@ -26,6 +26,16 @@ type fakeForge struct {
 	views   map[int]forge.PR
 	entered chan struct{} // signalled on every OpenPRs entry when non-nil
 	gate    chan struct{} // OpenPRs blocks until it is closed when non-nil
+
+	// PR panel (details_test.go): every PRDetails call stands for one `gh pr
+	// view` plus one graphql call.
+	detail     forge.PRDetails
+	detailErr  error
+	detEntered chan struct{}
+	detGate    chan struct{}
+	logOut     string
+	logErr     error
+	logArgs    [][2]int64
 }
 
 func newFakeForge() *fakeForge {
@@ -101,12 +111,27 @@ func (f *fakeForge) PR(_ context.Context, _ string, number int) (forge.PR, error
 	return pr, nil
 }
 
-func (f *fakeForge) PRDetails(context.Context, string, int) (forge.PRDetails, error) {
-	return forge.PRDetails{}, errors.New("not used")
+func (f *fakeForge) PRDetails(_ context.Context, _ string, number int) (forge.PRDetails, error) {
+	f.mu.Lock()
+	f.calls["PRDetails"]++
+	d, err, entered, gate := f.detail, f.detailErr, f.detEntered, f.detGate
+	f.mu.Unlock()
+	if entered != nil {
+		entered <- struct{}{}
+	}
+	if gate != nil {
+		<-gate
+	}
+	d.Number = number
+	return d, err
 }
 
-func (f *fakeForge) CheckLog(context.Context, string, int64, int64) (string, error) {
-	return "", errors.New("not used")
+func (f *fakeForge) CheckLog(_ context.Context, _ string, runID, jobID int64) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls["CheckLog"]++
+	f.logArgs = append(f.logArgs, [2]int64{runID, jobID})
+	return f.logOut, f.logErr
 }
 
 func (f *fakeForge) CreatePR(context.Context, string, forge.CreatePRInput) (forge.PR, error) {
