@@ -1459,6 +1459,10 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			// Absent/null = inherit the chat's last run's profile (sticky
 			// seats); 0 = explicit no profile.
 			ProfileID *int64 `json:"profileId"`
+			// NotBefore is human-only: an RFC 3339 instant that makes the
+			// prompt always queue, held until then (the web "Wait until"
+			// action on a rate-limited run).
+			NotBefore *string `json:"notBefore"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.start: invalid params: %w", err)
@@ -1468,6 +1472,24 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 		}
 		if !p.ThinkingLevel.IsValid() {
 			return nil, fmt.Errorf("run.start: invalid thinkingLevel %q", p.ThinkingLevel)
+		}
+		var notBefore *time.Time
+		if p.NotBefore != nil {
+			if rc != nil && rc.runScoped {
+				return nil, fmt.Errorf("run.start: notBefore is not available to agent callers")
+			}
+			t, err := time.Parse(time.RFC3339, *p.NotBefore)
+			if err != nil {
+				return nil, fmt.Errorf("run.start: invalid notBefore")
+			}
+			now := time.Now()
+			if !t.After(now) {
+				return nil, fmt.Errorf("run.start: notBefore must be in the future")
+			}
+			if t.After(now.Add(7 * 24 * time.Hour)) {
+				return nil, fmt.Errorf("run.start: notBefore is more than 7 days ahead")
+			}
+			notBefore = &t
 		}
 		if rc != nil && rc.runScoped {
 			// ADR-0041 S2b: an identified caller IS an agent; the sender ids
@@ -1514,6 +1536,9 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 		startOpts := runStartOptions(p.Model, set, reg, p.NotifyOnFinish)
 		if p.ProfileID != nil {
 			startOpts = append(startOpts, runs.WithProfile(*p.ProfileID))
+		}
+		if notBefore != nil {
+			startOpts = append(startOpts, runs.WithNotBefore(*notBefore))
 		}
 		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, p.Source, p.FromTaskID, p.FromChatID, startOpts...)
 		if err != nil {
