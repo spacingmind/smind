@@ -60,6 +60,18 @@ describe("useSendPRToChat", () => {
     expect(useFocusedChatStore.getState().revealRequest).toMatchObject({ taskId: 1, chatId: 10 });
   });
 
+  it("unsafe path gets no file_ref and is only inside the quote", async () => {
+    const { api } = await setup();
+    act(() => api().sendThread(prDetails(), thread({ path: "src/<b>x</b>.ts" })));
+    expect(store().pendingInserts[KEY]).toBeUndefined();
+    const text = store().pendingTexts[KEY]![0]!;
+    expect(text.slice(0, text.indexOf("\n```"))).not.toContain("<b>");
+    expect(text).toContain("path: src/<b>x</b>.ts");
+    // A safe path alongside it still produces its token.
+    act(() => api().sendThread(prDetails(), thread({ path: "src/ok.ts", line: 2 })));
+    expect(store().pendingInserts[KEY]).toEqual([{ path: "src/ok.ts", line: 2 }]);
+  });
+
   it("skips the chip and file_ref the daemon does not accept, keeps the text", async () => {
     const { api } = await setup({ ...LIMITS, kinds: ["image", "file"] });
     act(() => api().sendThread(prDetails(), thread()));
