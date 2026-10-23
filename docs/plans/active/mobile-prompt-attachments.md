@@ -62,4 +62,10 @@ sent prompt's pills in the timeline; before/after adding and removing a pill.
 
 ## Validation
 
-(filled in when every AC is confirmed)
+Peer 2 (task 60, peer-sonnet) candidate bb010acc: ACCEPT (diff reviewed; checks re-run by the Lead on the merged branch).
+
+- `cd mobile && npx tsc --noEmit` clean; `npm test` 653 passed (69 files); `task lint` and `task test` exit 0; `go test ./internal/relay/bridge/devharness` ok.
+- Web smoke `node scripts/smoke-web.mjs --full --stage attachments` passed (light + dark, 390 px); frames in /tmp/smind-dogfood/frames/mobile-attachments/ were each viewed by the Lead.
+- AC1-AC8: web smoke (real relay + devharness daemon with an attachment store) and unit tests. AC9: app.json plugins + mobile/DEV_CLIENT.md. AC10: new-task untouched.
+- NOT verified: a real iOS/Android device or simulator (native pickers, HEIC re-encode, expo-image-manipulator on device, expo-file-system read); the web smoke uses the browser file chooser and canvas manipulator. Not moved to completed/ for that reason.
+- Item 5 choice: pills always; image thumbnails fetched lazily via run.attachment only when the estimated reply fits one E2EE frame; a failed fetch stays a pill.
