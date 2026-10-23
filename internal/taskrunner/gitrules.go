@@ -2,6 +2,7 @@ package taskrunner
 
 import (
 	"errors"
+	"path"
 	"regexp"
 	"strings"
 )
@@ -386,15 +387,193 @@ func classifySimple(words []shWord, depth int) ([]*GitRule, error) {
 	if len(words) == 0 || words[0].dynamic {
 		return nil, nil
 	}
-	if words[0].text == "git" && len(words) > 1 && words[1].text == "push" {
-		args := wordTexts(words)
-		return []*GitRule{{
-			ID:      "git-push",
-			Class:   GitClassAlwaysAsk,
-			Label:   "git push always needs your approval",
-			Argv:    args,
-			Command: strings.Join(args, " "),
-		}}, nil
+	switch path.Base(words[0].text) {
+	case "git":
+		return classifyGit(words), nil
+	case "gh":
+		return classifyGh(words), nil
 	}
 	return nil, nil
+}
+
+func newGitRule(id string, class GitRuleClass, label string, words []shWord) *GitRule {
+	argv := wordTexts(words)
+	return &GitRule{ID: id, Class: class, Label: label, Argv: argv, Command: strings.Join(argv, " ")}
+}
+
+func askRule(id, what string, words []shWord) []*GitRule {
+	return []*GitRule{newGitRule(id, GitClassAlwaysAsk, what+" always needs your approval", words)}
+}
+
+// gitGlobalFlags are git options that may precede the subcommand and take no
+// separate value; gitGlobalValueFlags consume the next word.
+var (
+	gitGlobalFlags = map[string]bool{
+		"--no-pager": true, "-P": true, "-p": true, "--paginate": true,
+		"--no-optional-locks": true, "--exec-path": true, "--bare": true,
+		"--no-replace-objects": true, "--literal-pathspecs": true,
+		"--glob-pathspecs": true, "--noglob-pathspecs": true,
+		"--icase-pathspecs": true, "--no-advice": true,
+	}
+	gitGlobalValueFlags = map[string]bool{
+		"-C": true, "-c": true, "--git-dir": true, "--work-tree": true,
+		"--namespace": true, "--super-prefix": true, "--config-env": true,
+	}
+)
+
+// splitGitGlobals returns the index of the subcommand word in words (words[0]
+// is git), skipping global options.
+func splitGitGlobals(words []shWord) int {
+	i := 1
+	for i < len(words) {
+		t := words[i].text
+		switch {
+		case gitGlobalValueFlags[t]:
+			i += 2
+		case gitGlobalFlags[t]:
+			i++
+		case strings.HasPrefix(t, "-"):
+			i++ // --opt=value, --version, ... : never the subcommand
+		default:
+			return i
+		}
+	}
+	return len(words)
+}
+
+func classifyGit(words []shWord) []*GitRule {
+	si := splitGitGlobals(words)
+	if si >= len(words) {
+		return nil
+	}
+	sub := words[si].text
+	args := wordTexts(words[si+1:])
+	switch sub {
+	case "status", "diff", "log", "show", "fetch", "rev-parse", "ls-files":
+		return []*GitRule{newGitRule("git-"+sub, GitClassReadOnly, "git "+sub, words)}
+	case "push":
+		r := newGitRule("git-push", GitClassAlwaysAsk, "git push always needs your approval", words)
+		pos := gitPositionals(args, "-o", "--push-option", "--repo", "--receive-pack", "--exec")
+		if len(pos) > 0 {
+			r.Remote = pos[0]
+		}
+		if len(pos) > 1 {
+			r.Branch = strings.TrimPrefix(pos[1], "+")
+		}
+		return []*GitRule{r}
+	case "commit":
+		if hasArg(args, "--amend") {
+			return askRule("git-commit-amend", "git commit --amend", words)
+		}
+		return []*GitRule{newGitRule("git-commit", GitClassCommit, "git commit", words)}
+	case "reset":
+		if hasArg(args, "--hard") {
+			return askRule("git-reset-hard", "git reset --hard", words)
+		}
+	case "branch":
+		return classifyGitBranch(words, args)
+	case "clean":
+		if hasArg(args, "--force") || hasShortFlag(args, 'f') {
+			return askRule("git-clean", "git clean -f", words)
+		}
+	case "checkout":
+		if hasArg(args, "--") {
+			return askRule("git-checkout-discard", "git checkout --", words)
+		}
+	case "restore":
+		pos := gitPositionals(args, "-s", "--source")
+		if i := indexArg(args, "--"); i >= 0 {
+			pos = append(pos, args[i+1:]...)
+		}
+		if len(pos) == 0 || hasArg(pos, ".") || hasArg(pos, ":/") {
+			return askRule("git-restore", "git restore", words)
+		}
+	case "stash":
+		pos := gitPositionals(args)
+		if len(pos) > 0 && (pos[0] == "drop" || pos[0] == "clear") {
+			return askRule("git-stash-"+pos[0], "git stash "+pos[0], words)
+		}
+	case "remote":
+		for _, a := range args {
+			if a != "-v" && a != "--verbose" {
+				return nil
+			}
+		}
+		return []*GitRule{newGitRule("git-remote", GitClassReadOnly, "git remote", words)}
+	}
+	return nil
+}
+
+func classifyGitBranch(words []shWord, args []string) []*GitRule {
+	del := hasArg(args, "--delete") || hasShortFlag(args, 'd') || hasShortFlag(args, 'D')
+	force := hasArg(args, "--force") || hasShortFlag(args, 'f') || hasShortFlag(args, 'D')
+	if del && force {
+		return askRule("git-branch-delete", "git branch -D", words)
+	}
+	if len(args) == 0 || hasArg(args, "--list") || hasShortFlag(args, 'l') {
+		return []*GitRule{newGitRule("git-branch", GitClassReadOnly, "git branch", words)}
+	}
+	return nil
+}
+
+func classifyGh(words []shWord) []*GitRule {
+	var pos []string
+	for i := 1; i < len(words) && len(pos) < 2; i++ {
+		t := words[i].text
+		switch {
+		case t == "-R" || t == "--repo":
+			i++
+		case strings.HasPrefix(t, "-"):
+		default:
+			pos = append(pos, t)
+		}
+	}
+	if len(pos) == 2 && pos[0] == "pr" && (pos[1] == "create" || pos[1] == "merge") {
+		return askRule("gh-pr-"+pos[1], "gh pr "+pos[1], words)
+	}
+	return nil
+}
+
+// gitPositionals returns the non-option arguments before any "--", skipping
+// the values of the given value-taking options.
+func gitPositionals(args []string, valueFlags ...string) []string {
+	var pos []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--":
+			return pos
+		case hasArg(valueFlags, a):
+			i++
+		case strings.HasPrefix(a, "-") && a != "-":
+		default:
+			pos = append(pos, a)
+		}
+	}
+	return pos
+}
+
+func hasArg(args []string, want string) bool { return indexArg(args, want) >= 0 }
+
+func indexArg(args []string, want string) int {
+	for i, a := range args {
+		if a == want {
+			return i
+		}
+	}
+	return -1
+}
+
+// hasShortFlag reports whether a single-dash flag bundle (-f, -fd, -fdx)
+// before any "--" contains the letter.
+func hasShortFlag(args []string, letter byte) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if len(a) > 1 && a[0] == '-' && a[1] != '-' && strings.IndexByte(a, letter) > 0 {
+			return true
+		}
+	}
+	return false
 }
