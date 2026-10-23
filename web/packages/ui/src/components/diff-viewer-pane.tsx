@@ -17,7 +17,8 @@ import { externalLinkProps } from "@/lib/external-link";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTaskDiff } from "@/hooks/use-task-diff";
-import { useFocusedChatId } from "@/stores/focused-chat-store";
+import { toast } from "@/components/ui/toast";
+import { useFocusedChatId, useFocusedChatStore } from "@/stores/focused-chat-store";
 import { AddToChatButton } from "@/components/add-to-chat-button";
 import { useAddToChat } from "@/hooks/use-add-to-chat";
 import type { MentionRef } from "@/lib/file-mention";
@@ -317,7 +318,7 @@ export function DiffViewerPane({
           // own default is the same fallback the composer uses.
         }
       }
-      await client.call<RunStartResult>("run.start", {
+      const started = await client.call<RunStartResult>("run.start", {
         taskId: task.ID,
         chatId: recipient.chatId,
         provider,
@@ -325,8 +326,19 @@ export function DiffViewerPane({
         whenBusy: "queue",
         ...recipientRunParams(recipient),
       });
+      const count = drafts.length;
+      const chatName = recipient.title || "the chat";
       clearReviewDrafts(task.ID);
       setPending(null);
+      // The drafts vanish from this tab and the run starts in another one: say so, and take the reviewer to the chat
+      // that received it (a no-op when that chat is already in front).
+      toast({
+        variant: "success",
+        title: "queued" in started ? `Review queued in ${chatName}` : `Review sent to ${chatName}`,
+        description:
+          `${count} comment${count === 1 ? "" : "s"}` + ("queued" in started ? " · it sends when the current run finishes" : ""),
+      });
+      useFocusedChatStore.getState().requestRevealChat(task.ID, recipient.chatId);
     } catch (err: unknown) {
       setReviewError(err instanceof Error ? err.message : String(err));
     } finally {
