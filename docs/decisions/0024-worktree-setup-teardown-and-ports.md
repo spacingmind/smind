@@ -149,3 +149,7 @@ prompts. Daemon-side scripts keep that line while giving every task a
 working checkout. Treating setup as "busy" reuses the ADR-0021 queue so an
 orchestrator's `task_new` then `task_send` flow works unchanged, and keeping
 failed setups non-blocking avoids turning a flaky `npm ci` into a dead task.
+
+## Amendment (2026-10-23, ADR-0039 §9)
+
+Archiving one task from its dialog may now also delete the task's branch, but only a branch smind created, only when it is merged (an ancestor of `origin/<base>`, or its pull request is merged at the same head), the worktree is clean and the branch is not checked out elsewhere; an owned unmerged branch needs an explicit `force`, a user's own branch and any remote branch are never deleted, and bulk archive, the CLI and MCP never delete branches. **Restore** re-creates the worktree from the kept branch (or `origin/<branch>`), claims a port and re-runs setup (an untrusted fork task stays blocked); a deleted branch is `branch_gone`. Plan: `docs/plans/active/archive-merged-branches.md`.
