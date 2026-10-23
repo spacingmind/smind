@@ -1175,6 +1175,66 @@ describe("Composer diff-stat pill (Item 5)", () => {
       expect(sent).toEqual([{ provider: "glm", model: "glm-5.3" }]);
     });
 
+    describe("profileId on run.start (ADR-0041 S2w)", () => {
+      const seat = {
+        ID: 3,
+        Name: "Supervisor",
+        Provider: "claude-native",
+        PermissionMode: "",
+        AutoAccept: false,
+        ThinkingLevel: "",
+        Model: "",
+        Notes: "",
+        CreatedAt: "2026-09-25T00:00:00Z",
+        UpdatedAt: "2026-09-25T00:00:00Z",
+      };
+
+      async function setup(): Promise<{ sent: (number | undefined)[]; whenBusy: (string | undefined)[] }> {
+        const client = new FakeWsClient();
+        const sent: (number | undefined)[] = [];
+        const whenBusy: (string | undefined)[] = [];
+        renderComposer({
+          client,
+          onSubmit: async (_p, _t, _perm, _th, w, _m, _a, _pv, profileId) => {
+            sent.push(profileId);
+            whenBusy.push(w);
+            return { kind: "started", runId: "run-test" };
+          },
+        });
+        client.nth("profile.list", 0).resolve([seat]);
+        await flush();
+        return { sent, whenBusy };
+      }
+
+      it("a send with an applied profile includes profileId in the run.start params", async () => {
+        const { sent } = await setup();
+        await applyProfileRow(3);
+        fireEvent.change(textarea(), { target: { value: "go" } });
+        fireEvent.click(screen.getByRole("button", { name: "Send" }));
+        await flush();
+        expect(sent).toEqual([3]);
+      });
+
+      it("a send without one has no profileId key", async () => {
+        const { sent } = await setup();
+        fireEvent.change(textarea(), { target: { value: "go" } });
+        fireEvent.click(screen.getByRole("button", { name: "Send" }));
+        await flush();
+        expect(sent).toEqual([undefined]);
+      });
+
+      it("a queued send includes it", async () => {
+        const { sent, whenBusy } = await setup();
+        await applyProfileRow(3);
+        fireEvent.change(textarea(), { target: { value: "later" } });
+        fireEvent.click(screen.getByRole("button", { name: "Send" }));
+        await flush();
+        // The plain submit hands whenBusy "queue" to the same onSubmit call that carries profileId.
+        expect(whenBusy).toEqual(["queue"]);
+        expect(sent).toEqual([3]);
+      });
+    });
+
     it("hand-editing a field after applying a profile marks the profile row custom, and ↺ restores the agent's values", async () => {
       const client = new FakeWsClient();
       const { submissions } = renderComposer({ client });

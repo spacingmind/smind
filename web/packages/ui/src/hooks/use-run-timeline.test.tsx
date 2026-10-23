@@ -435,6 +435,21 @@ describe("useRunTimeline attachments (ADR-0038)", () => {
     expect(client.nth("run.start", 1).params).not.toHaveProperty("attachments");
   });
 
+  it("sends profileId only when defined (ADR-0041 S2w)", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+    client.nth("run.list", 0).resolve([]);
+    await flush();
+    await act(async () => {
+      void result.current.submitPrompt("claude-native", "as profile", undefined, undefined, "queue", undefined, undefined, undefined, 7);
+    });
+    expect(client.nth("run.start", 0).params).toMatchObject({ profileId: 7 });
+    await act(async () => {
+      void result.current.submitPrompt("claude-native", "plain");
+    });
+    expect(client.nth("run.start", 1).params).not.toHaveProperty("profileId");
+  });
+
   it("mergeAttachments keeps the local thumbnail when the daemon's metadata arrives", () => {
     expect(mergeAttachments([preview], [stored])).toEqual([{ ...stored, previewUrl: "blob:local" }]);
     expect(mergeAttachments([preview], undefined)).toEqual([preview]);
