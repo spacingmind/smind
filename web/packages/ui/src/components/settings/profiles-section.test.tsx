@@ -1,6 +1,6 @@
 import { act } from "react";
 import { fireEvent, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import "@/components/settings/profiles-section";
@@ -513,5 +513,127 @@ describe("profile form uses the shared run-config pickers (ADR-0032 S4)", () => 
     fireEvent.click(await screen.findByRole("option", { name: "Bypass" }));
     await flush();
     expect(screen.getByTestId("profile-form-permission-mode")).toHaveAttribute("data-danger", "true");
+  });
+
+  describe("ADR-0041 seat contract and failover", () => {
+    const SEAT = {
+      ...PROFILE,
+      OrchestrationTools: true,
+      Instructions: "Stay in scope.",
+      Skills: ["smind-peer"],
+      ChildPolicy: "leaf",
+      OnRateLimit: "wait",
+    };
+    const OTHER = { ...PROFILE, ID: 2, Name: "Codex fast", Provider: "codex" };
+    const THIRD = { ...PROFILE, ID: 3, Name: "GLM", Provider: "glm" };
+
+    async function openEditViaIntent(profiles: unknown[], id = 1) {
+      setSettingsIntent({ kind: "editProfile", id });
+      return renderWithProfiles(profiles);
+    }
+
+    function updateParams(daemon: FakeUsageDaemon) {
+      return daemon.calls.filter((c) => c.method === "profile.update").at(-1)?.params;
+    }
+
+    it("keeps failover and contract fields when saving an unrelated edit", async () => {
+      const { daemon } = await openEditViaIntent([SEAT, OTHER]);
+      fireEvent.change(screen.getByTestId("profile-edit-form-1-notes"), { target: { value: "new notes" } });
+      fireEvent.click(screen.getByTestId("profile-edit-form-1-submit"));
+      await flush();
+
+      expect(updateParams(daemon)).toMatchObject({
+        notes: "new notes",
+        onRateLimit: "wait",
+        fallbackProfileId: null,
+        orchestrationTools: true,
+        instructions: "Stay in scope.",
+        skills: ["smind-peer"],
+        childPolicy: "leaf",
+        childProfileIds: [],
+      });
+    });
+
+    it("keeps a legacy profile legacy (childPolicy empty, orchestrationTools null)", async () => {
+      const { daemon } = await openEditViaIntent([PROFILE]);
+      fireEvent.click(screen.getByTestId("profile-edit-form-1-submit"));
+      await flush();
+      expect(updateParams(daemon)).toMatchObject({ orchestrationTools: null, instructions: "", skills: [], childPolicy: "", onRateLimit: "none" });
+    });
+
+    it.each([
+      ["unmanaged", null],
+      ["on", true],
+      ["off", false],
+    ] as const)("sends orchestrationTools null/true/false per the select (%s)", async (value, want) => {
+      // Start from the opposite so the change is a real one.
+      const start = want === true ? { ...PROFILE, OrchestrationTools: false } : { ...PROFILE, OrchestrationTools: true };
+      const { daemon } = await openEditViaIntent([start]);
+      fireEvent.change(screen.getByTestId("profile-edit-form-1-orchestration-tools"), { target: { value } });
+      fireEvent.click(screen.getByTestId("profile-edit-form-1-submit"));
+      await flush();
+      expect(updateParams(daemon)).toMatchObject({ orchestrationTools: want });
+    });
+
+    it("shows child profiles only for childPolicy profiles, excluding the profile itself", async () => {
+      const { daemon } = await openEditViaIntent([PROFILE, OTHER, THIRD]);
+      expect(screen.queryByTestId("profile-edit-form-1-child-profiles")).not.toBeInTheDocument();
+
+      fireEvent.change(screen.getByTestId("profile-edit-form-1-child-policy"), { target: { value: "profiles" } });
+      const list = screen.getByTestId("profile-edit-form-1-child-profiles");
+      expect(within(list).getAllByRole("checkbox")).toHaveLength(2);
+      expect(screen.queryByTestId("profile-edit-form-1-child-profile-1")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("profile-edit-form-1-child-profile-3"));
+      fireEvent.click(screen.getByTestId("profile-edit-form-1-submit"));
+      await flush();
+      expect(updateParams(daemon)).toMatchObject({ childPolicy: "profiles", childProfileIds: [3] });
+    });
+
+    it("shows the fallback profile select only for onRateLimit fallback", async () => {
+      const { daemon } = await openEditViaIntent([PROFILE, OTHER]);
+      expect(screen.queryByTestId("profile-edit-form-1-fallback-profile")).not.toBeInTheDocument();
+
+      fireEvent.change(screen.getByTestId("profile-edit-form-1-on-rate-limit"), { target: { value: "fallback" } });
+      const fallback = screen.getByTestId("profile-edit-form-1-fallback-profile");
+      expect(within(fallback).getByRole("option", { name: "Codex fast (codex)" })).toBeInTheDocument();
+
+      fireEvent.change(fallback, { target: { value: "2" } });
+      fireEvent.click(screen.getByTestId("profile-edit-form-1-submit"));
+      await flush();
+      expect(updateParams(daemon)).toMatchObject({ onRateLimit: "fallback", fallbackProfileId: 2 });
+    });
+
+    it("renders a daemon validation error inline and keeps the form open with the edits", async () => {
+      const { daemon } = await openEditViaIntent([PROFILE, { ...OTHER, Provider: "claude-native" }]);
+      const call = daemon.client.call.bind(daemon.client);
+      vi.spyOn(daemon.client, "call").mockImplementation(async (method: string, params?: unknown) => {
+        if (method === "profile.update") throw new Error("fallback profile must be on a different provider");
+        return call(method, params as never);
+      });
+
+      fireEvent.change(screen.getByTestId("profile-edit-form-1-on-rate-limit"), { target: { value: "fallback" } });
+      fireEvent.change(screen.getByTestId("profile-edit-form-1-fallback-profile"), { target: { value: "2" } });
+      fireEvent.click(screen.getByTestId("profile-edit-form-1-submit"));
+      await flush();
+
+      expect(screen.getByTestId("profile-edit-form-1-error")).toHaveTextContent("fallback profile must be on a different provider");
+      expect(screen.getByTestId("profile-edit-form-1-on-rate-limit")).toHaveValue("fallback");
+      expect(screen.getByTestId("profile-edit-form-1-fallback-profile")).toHaveValue("2");
+    });
+
+    it("instructions over 16 KiB blocks save with a message", async () => {
+      const { daemon } = await openEditViaIntent([PROFILE]);
+      // 5462 three-byte characters = 16386 bytes, though only 5462 UTF-16 units.
+      fireEvent.change(screen.getByTestId("profile-edit-form-1-instructions"), { target: { value: "€".repeat(5462) } });
+
+      expect(screen.getByTestId("profile-edit-form-1-instructions-count")).toHaveTextContent("16386 / 16384 bytes");
+      expect(screen.getByTestId("profile-edit-form-1-instructions-count")).toHaveTextContent(/too long/);
+      expect(screen.getByTestId("profile-edit-form-1-submit")).toBeDisabled();
+
+      fireEvent.change(screen.getByTestId("profile-edit-form-1-instructions"), { target: { value: "ok" } });
+      expect(screen.getByTestId("profile-edit-form-1-submit")).not.toBeDisabled();
+      expect(daemon.calls.some((c) => c.method === "profile.update")).toBe(false);
+    });
   });
 });
