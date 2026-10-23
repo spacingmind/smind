@@ -159,6 +159,21 @@ func (s *Store) MarkRunningRunsInterrupted(interruptedStatus string, stopReason 
 	return n, nil
 }
 
+// UpdateRunFailure records (or, with kind "" and nil resetAt, clears) the
+// typed terminal failure of a run (ADR-0041). resetAt is stored as UTC.
+func (s *Store) UpdateRunFailure(id, kind, window string, resetAt *time.Time) error {
+	if resetAt != nil {
+		u := resetAt.UTC()
+		resetAt = &u
+	}
+	if _, err := s.db.Exec(
+		`UPDATE runs SET failure_kind = ?, failure_window = ?, failure_reset_at = ? WHERE id = ?`,
+		kind, window, timePtrToNull(resetAt), id); err != nil {
+		return fmt.Errorf("update run %q failure: %w", id, err)
+	}
+	return nil
+}
+
 // GetRun returns the run with the given id.
 func (s *Store) GetRun(id string) (Run, error) {
 	row := s.db.QueryRow(
@@ -248,7 +263,7 @@ func (s *Store) ListRunEvents(runID string) ([]RunEvent, error) {
 
 // runColumns is the run SELECT column list; scanRun's Scan argument order
 // must stay in lockstep with it.
-const runColumns = "id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose, origin, interrupt, attachments"
+const runColumns = "id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose, origin, interrupt, attachments, failure_kind, failure_window, failure_reset_at"
 
 // runColumnsAs is runColumns with every column qualified by alias.
 func runColumnsAs(alias string) string {
@@ -267,9 +282,11 @@ func scanRun(row rowScanner) (Run, error) {
 	var model sql.NullString
 	var baseSHA, headSHA sql.NullString
 	var dirty sql.NullBool
+	var failureResetAt sql.NullTime
 	if err := row.Scan(&r.ID, &r.TaskID, &chatID, &r.Provider, &r.Prompt, &r.Status,
 		&r.StartedAt, &finishedAt, &r.StopReason, &r.ErrMsg, &r.PermissionMode, &r.AutoAccept, &model,
-		&baseSHA, &headSHA, &dirty, &r.Purpose, &r.Origin, &r.Interrupt, &r.Attachments); err != nil {
+		&baseSHA, &headSHA, &dirty, &r.Purpose, &r.Origin, &r.Interrupt, &r.Attachments,
+		&r.FailureKind, &r.FailureWindow, &failureResetAt); err != nil {
 		return Run{}, err
 	}
 	// NULL decodes as ChatID 0 ("unknown"/pre-chats) -- see CreateRun's
@@ -283,6 +300,7 @@ func scanRun(row rowScanner) (Run, error) {
 	r.BaseSHA = nullToStringPtr(baseSHA)
 	r.HeadSHA = nullToStringPtr(headSHA)
 	r.Dirty = nullBoolPtr(dirty)
+	r.FailureResetAt = nullToTimePtr(failureResetAt)
 	return r, nil
 }
 

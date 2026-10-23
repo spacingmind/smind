@@ -125,7 +125,11 @@ CREATE TABLE IF NOT EXISTS runs (
     purpose TEXT NOT NULL DEFAULT 'user', -- 'user' | 'reflect' | 'curate' | 'probe' (ADR-0026, ADR-0037)
     origin TEXT NOT NULL DEFAULT '', -- who authored the prompt: human|orchestrator|agent; '' = unknown
     interrupt INTEGER NOT NULL DEFAULT 0, -- 1 = delivered as a mid-run interrupt
-    attachments TEXT NOT NULL DEFAULT '' -- attach.EncodeSet of the prompt's attachments (ADR-0038); '' = none
+    attachments TEXT NOT NULL DEFAULT '', -- attach.EncodeSet of the prompt's attachments (ADR-0038); '' = none
+    -- ADR-0041 B1: typed terminal reason of an error run.
+    failure_kind TEXT NOT NULL DEFAULT '', -- 'rate_limited' | ''
+    failure_window TEXT NOT NULL DEFAULT '', -- e.g. '5h'; '' = unknown
+    failure_reset_at TIMESTAMP -- UTC reset instant; NULL = unknown
 );
 
 CREATE TABLE IF NOT EXISTS run_events (

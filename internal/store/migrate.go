@@ -303,6 +303,20 @@ var migrations = []migration{
 		},
 	},
 	{
+		// ADR-0041 B1: typed terminal reason of an error run. Pre-existing
+		// rows keep '' / '' / NULL (no typed failure, reset unknown).
+		name: "run_failure",
+		apply: func(db *sql.DB) error {
+			if err := addColumnIfMissing(db, "runs", "failure_kind", "TEXT NOT NULL DEFAULT ''"); err != nil {
+				return err
+			}
+			if err := addColumnIfMissing(db, "runs", "failure_window", "TEXT NOT NULL DEFAULT ''"); err != nil {
+				return err
+			}
+			return addColumnIfMissing(db, "runs", "failure_reset_at", "TIMESTAMP")
+		},
+	},
+	{
 		// ADR-0026 section 6: learned_skill_offers / learned_skill_loads are
 		// new tables, so schema.sql's CREATE TABLE IF NOT EXISTS already
 		// creates them on every Open; this entry is the explicit marker and
