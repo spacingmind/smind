@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describePrError } from "@/components/git/pr-error";
+import { describeArchiveError, describePrError } from "@/components/git/pr-error";
 import { RpcError } from "@/lib/ws-client";
 
 describe("describePrError", () => {
@@ -28,5 +28,20 @@ describe("describePrError", () => {
 
   it("falls back to a generic sentence for an unknown code with no message", () => {
     expect(describePrError(new RpcError("", "weird"), "create").message).toBe("Couldn't create the pull request.");
+  });
+});
+
+describe("describeArchiveError", () => {
+  it("maps each typed archive code to one sentence, never the daemon's raw text", () => {
+    for (const code of ["branch_unmerged", "branch_dirty", "branch_not_owned", "branch_checked_out", "branch_gone", "not_archived"]) {
+      const view = describeArchiveError(new RpcError("git [branch -D x]: exit status 1", code), code === "branch_gone" || code === "not_archived" ? "restore" : "archive");
+      expect(view.code).toBe(code);
+      expect(view.message).not.toMatch(/exit status|branch -D/);
+    }
+  });
+
+  it("keeps a readable untyped refusal and scrubs an unsafe one", () => {
+    expect(describeArchiveError(new Error("task.archive: task 7: a run is still running"), "archive").message).toBe("task.archive: task 7: a run is still running");
+    expect(describeArchiveError(new Error("git [worktree remove x]: exit status 1"), "archive").message).toBe("Couldn't archive the task.");
   });
 });
