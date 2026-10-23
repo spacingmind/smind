@@ -150,6 +150,9 @@ func cmdServe(args []string) int {
 	srv.API().AttachUsage(poller, registry, passive)
 	srv.API().Runs.SetMaxConcurrentRunsPerTree(cfg.Orchestration.MaxConcurrentRunsPerTree)
 	wireAttachments(srv.API(), wm, db)
+	// Push and fetch to an https origin use the forge login (ADR-0039 O9),
+	// per invocation and only while it is signed in.
+	workspace.SetNetworkGitConfig(srv.API().NetworkGitConfig())
 	// The relay device admin methods must be registered before the first
 	// connection is served (SetRelayDevices is not safe against concurrent
 	// requests).

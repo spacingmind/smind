@@ -76,7 +76,7 @@ func TestDaemonInfoReturnsVersionCommitAndPlatform(t *testing.T) {
 	client, server := newPipeTransportPair()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go api.serveLocal(ctx, server)
+	go api.serveLocal(ctx, server, ChannelLoopback)
 	defer client.Close()
 
 	got := daemonInfoOver(t, client)
@@ -115,7 +115,7 @@ func TestDaemonInfoOmitsManagedByAndCommitWhenUnset(t *testing.T) {
 	client, server := newPipeTransportPair()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go api.serveLocal(ctx, server)
+	go api.serveLocal(ctx, server, ChannelLoopback)
 	defer client.Close()
 
 	got := daemonInfoOver(t, client)
