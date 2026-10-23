@@ -215,7 +215,8 @@ func cmdServe(args []string) int {
 	case <-srv.ShutdownSignal():
 	}
 
-	stopLearning() // before the run registry closes: in-flight jobs end failed, watermarks untouched
+	srv.API().CloseConnections() // clients see the stop immediately instead of after run teardown
+	stopLearning()               // before the run registry closes: in-flight jobs end failed, watermarks untouched
 	stopGitState()
 	pushRT.Close() // no push goroutine may outlive the daemon
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
