@@ -2,6 +2,7 @@ package runs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -572,5 +573,29 @@ func TestParentNotify_ConcurrentFinishesAdmitExactlyOnePerRun(t *testing.T) {
 		if !e.notified(t, id) {
 			t.Fatalf("run %s not claimed", id)
 		}
+	}
+}
+
+// TestParentNotify_WokenRunKeepsTheParentsProfile: the daemon-authored item
+// copies the parent chat's last run settings including its profile, so the
+// woken Lead run still gets its seat's instructions and orchestration MCP
+// entry (the first in-smind dogfood run lost both on the wake-up).
+func TestParentNotify_WokenRunKeepsTheParentsProfile(t *testing.T) {
+	t.Parallel()
+	e := newNotifyEnv(t)
+	if _, err := e.st.CreateRun(store.Run{
+		ID: "parent-seat-run", TaskID: e.task.ID, ChatID: e.parentChat.ID, Provider: "glm", Prompt: "lead", Status: "done",
+		StartedAt: time.Now().Add(time.Hour), ProfileID: 42,
+	}); err != nil {
+		t.Fatalf("CreateRun() error = %v", err)
+	}
+	e.childRun(t, e.child.ID, StatusDone)
+	waitUntil(t, "item", func() bool { return len(e.events(t, e.parentChat.ID)) == 1 })
+	var cfg chatQueueRunConfig
+	if err := json.Unmarshal([]byte(e.events(t, e.parentChat.ID)[0].RunConfig), &cfg); err != nil {
+		t.Fatalf("decode run config: %v", err)
+	}
+	if cfg.ProfileID != 42 {
+		t.Fatalf("run config profile = %d, want 42 (the parent's seat)", cfg.ProfileID)
 	}
 }
