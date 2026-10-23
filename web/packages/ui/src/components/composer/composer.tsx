@@ -269,36 +269,29 @@ export function Composer({
 
   const { limits: attachLimits, key: attachKey, items: attachItems, hasError: attachHasError } = attach;
 
-  // "Add to chat" from the Diff and Files panes: append each queued token after a space and remember the ref, so the
-  // next send carries it as a `file_ref`. The caret ends after the trailing space, so the `@` popover stays shut.
+  // "Add to chat" from the Diff, Files and PR panes: append each queued token after a space and remember the ref, so the
+  // next send carries it as a `file_ref`; then each queued text (the PR panel's quoted thread/check) after a blank line,
+  // like a prefill. Both are applied to one local string and set once: two effects each reading the draft before the other's
+  // setValue re-rendered would overwrite each other. The caret ends after the last addition, so the `@` popover stays shut.
+  // Never sent here.
   const queuedInserts = useComposerAttachmentsStore((s) => (attachKey ? s.pendingInserts[attachKey] : undefined));
+  const queuedTexts = useComposerAttachmentsStore((s) => (attachKey ? s.pendingTexts[attachKey] : undefined));
   useEffect(() => {
-    if (!attachKey || !queuedInserts?.length) return;
+    if (!attachKey || (!queuedInserts?.length && !queuedTexts?.length)) return;
     const store = useComposerAttachmentsStore.getState();
     let text = draftRef.current.value;
     for (const ref of store.takeInserts(attachKey)) {
       store.rememberMention(attachKey, ref);
       text += `${text === "" || /\s$/.test(text) ? "" : " "}${formatMentionToken(ref)} `;
     }
-    pendingCaret.current = text.length;
-    draftRef.current.setValue(text);
-    setCaret(text.length);
-    textareaNode.current?.focus();
-  }, [attachKey, queuedInserts]);
-
-  // "Send to chat" from the PR panel: append each queued text after a blank line, like a prefill. Never sent here.
-  const queuedTexts = useComposerAttachmentsStore((s) => (attachKey ? s.pendingTexts[attachKey] : undefined));
-  useEffect(() => {
-    if (!attachKey || !queuedTexts?.length) return;
-    let text = draftRef.current.value;
-    for (const added of useComposerAttachmentsStore.getState().takeTexts(attachKey)) {
-      text = text.trim() === "" ? added : `${text}\n\n${added}`;
+    for (const added of store.takeTexts(attachKey)) {
+      text = text.trim() === "" ? added : `${text.trimEnd()}\n\n${added}`;
     }
     pendingCaret.current = text.length;
     draftRef.current.setValue(text);
     setCaret(text.length);
     textareaNode.current?.focus();
-  }, [attachKey, queuedTexts]);
+  }, [attachKey, queuedInserts, queuedTexts]);
 
   const send = useCallback(
     async (text: string, whenBusy: "queue" | "interrupt") => {

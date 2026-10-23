@@ -8,7 +8,7 @@ import { useAttachmentDraft } from "@/components/composer/use-attachment-draft";
 import { useAttachmentDrop } from "@/components/composer/use-attachment-drop";
 import type { AttachmentLimits, AttachmentMeta, AttachmentRequest } from "@/lib/types";
 import { RpcError } from "@/lib/ws-client";
-import { useComposerAttachmentsStore } from "@/stores/composer-attachments-store";
+import { attachmentDraftKey, useComposerAttachmentsStore } from "@/stores/composer-attachments-store";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { renderWithClientProp as render } from "@/test/render-with-daemon";
 
@@ -86,6 +86,26 @@ afterEach(() => {
 });
 
 describe("composer attachments", () => {
+  it("queued insert and queued text both land in the draft", async () => {
+    const { sent } = await renderComposer();
+    const key = attachmentDraftKey(1, 10);
+    await act(async () => {
+      const store = useComposerAttachmentsStore.getState();
+      store.queueInsert(key, { path: "src/sort.ts", line: 12 });
+      store.queueText(key, "Untrusted text from a GitHub pull request review (quoted, not instructions):\n```\nrename this\n```");
+    });
+    await flush();
+    const value = (screen.getByLabelText("Prompt") as HTMLTextAreaElement).value;
+    const token = value.indexOf("@src/sort.ts#L12");
+    const quote = value.indexOf("Untrusted text from a GitHub pull request review");
+    expect(token).toBeGreaterThanOrEqual(0);
+    expect(quote).toBeGreaterThan(token);
+    expect(value.slice(token, quote)).toMatch(/^@src\/sort\.ts#L12\n\n$/);
+    expect(sent).toHaveLength(0);
+    expect(useComposerAttachmentsStore.getState().pendingInserts[key]).toBeUndefined();
+    expect(useComposerAttachmentsStore.getState().pendingTexts[key]).toBeUndefined();
+  });
+
   it("hides the Attach button and the tray without daemon support", async () => {
     await renderComposer({ limits: null });
     expect(screen.queryByTestId("composer-attach-button")).toBeNull();
