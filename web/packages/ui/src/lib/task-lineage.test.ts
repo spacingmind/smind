@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { childrenOf, pillStatusWithSubtree, statusSummary, usageChipText, type TaskTreeNode, type TaskTreeCounts, type TreeUsageTotals } from "@/lib/task-lineage";
+import { childrenOf, pillStatusWithSubtree, rateLimitHint, statusSummary, usageChipText, type TaskTreeNode, type TaskTreeCounts, type TreeUsageTotals } from "@/lib/task-lineage";
 
 function counts(partial: Partial<TaskTreeCounts> = {}): TaskTreeCounts {
   return { running: 0, waitingPermission: 0, failed: 0, done: 0, idle: 0, ...partial };
@@ -68,6 +68,25 @@ describe("childrenOf", () => {
 });
 
 describe("pillStatusWithSubtree", () => {
+  it("rate limited node pill is warning not danger", () => {
+    const limited = node({ id: 3, run: { state: "error", runningRunIds: [], pendingPermissions: 0, failureKind: "rate_limited", window: "5h", resetAt: "2030-01-01T17:35:00Z" } });
+    expect(pillStatusWithSubtree(limited)).toBe("warning");
+    // A plain error, or a failure kind this client does not know, stays danger.
+    expect(pillStatusWithSubtree(node({ id: 4, run: { state: "error", runningRunIds: [], pendingPermissions: 0 } }))).toBe("danger");
+    expect(pillStatusWithSubtree(node({ id: 5, run: { state: "error", runningRunIds: [], pendingPermissions: 0, failureKind: "other" } }))).toBe("danger");
+    // A descendant's failure still outranks it.
+    expect(pillStatusWithSubtree({ ...limited, counts: counts({ failed: 1 }) })).toBe("danger");
+  });
+
+  it("rateLimitHint words the reset in local time and is null for any other node", () => {
+    const now = new Date(2026, 9, 13, 10, 0, 0);
+    const run = { state: "error" as const, runningRunIds: [], pendingPermissions: 0, failureKind: "rate_limited" };
+    expect(rateLimitHint(node({ id: 3, run: { ...run, resetAt: new Date(2026, 9, 13, 17, 35).toISOString() } }), now)).toBe("Rate limited · resets 17:35");
+    expect(rateLimitHint(node({ id: 3, run }), now)).toBe("Rate limited · reset time unknown");
+    expect(rateLimitHint(node({ id: 3, run: { ...run, resetAt: new Date(2026, 9, 13, 9, 0).toISOString() } }), now)).toBe("Rate limited · limit has reset");
+    expect(rateLimitHint(node({ id: 4, run: { state: "error", runningRunIds: [], pendingPermissions: 0 } }), now)).toBeNull();
+  });
+
   it("pill shows warning when a descendant needs permission", () => {
     expect(pillStatusWithSubtree(node({ id: 3, counts: counts({ waitingPermission: 1 }) }))).toBe("warning");
   });

@@ -1,4 +1,5 @@
 import type { StatusDotStatus } from "@/components/ui/status-dot";
+import { describeRateLimitReset, isRateLimitedRun } from "@/lib/rate-limit";
 import { formatCost, formatTokens } from "@/lib/usage-format";
 
 // Wire shapes of the task.tree wsapi call (docs/plans/active/
@@ -105,6 +106,17 @@ export function pillStatus(state: TaskTreeRunState): StatusDotStatus {
   }
 }
 
+/** True when the node's latest run failed on a provider quota (state "error" + failureKind "rate_limited"). */
+export function isRateLimitedNode(node: Pick<TaskTreeNode, "run">): boolean {
+  return isRateLimitedRun({ status: node.run.state, failureKind: node.run.failureKind });
+}
+
+/** "Rate limited · resets 17:35" for a rate-limited node, null otherwise. The window stays out of the hint (it is a one-liner on a pill). */
+export function rateLimitHint(node: Pick<TaskTreeNode, "run">, now: Date): string | null {
+  if (!isRateLimitedNode(node)) return null;
+  return `Rate limited · ${describeRateLimitReset(node.run.resetAt, now)}`;
+}
+
 /**
  * The pill dot a child pill should actually show: a child with its own
  * children must surface the most urgent state of itself plus its subtree
@@ -115,6 +127,8 @@ export function pillStatus(state: TaskTreeRunState): StatusDotStatus {
  */
 export function pillStatusWithSubtree(node: TaskTreeNode): StatusDotStatus {
   if (node.counts.failed > 0) return "danger";
+  // A provider quota (ADR-0041) is not a code failure: the pill is warning, not danger.
+  if (isRateLimitedNode(node)) return "warning";
   if (node.counts.waitingPermission > 0 || node.run.state === "waiting_permission") return "warning";
   if (node.counts.running > 0 || node.run.state === "running") return "running";
   // "done" at a cap is not finished: a calm green dot would hide it.

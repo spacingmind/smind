@@ -7,12 +7,11 @@ import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
   describeRunFooter,
-  hasFutureReset,
-  isRateLimitedRun,
   resolveRunModelLabel,
   type RunModelLabels,
   type RunFooterRun,
 } from "@/components/timeline/run-footer-model";
+import { hasFutureReset, isRateLimitedRun } from "@/lib/rate-limit";
 import { cn } from "@/lib/utils";
 
 /**

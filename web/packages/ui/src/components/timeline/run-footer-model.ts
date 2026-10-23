@@ -1,5 +1,6 @@
 import { formatCost } from "@/lib/usage-format";
 import { formatRelativeTime } from "@/lib/relative-time";
+import { describeRateLimit, isRateLimitedRun } from "@/lib/rate-limit";
 import type { RunStatusValue, RunUsage } from "@/lib/types";
 
 /**
@@ -70,50 +71,7 @@ const CAP_SENTENCES: Record<string, string> = {
   daemon_restart: "Interrupted when the daemon restarted",
 };
 
-/** runs.FailureKindRateLimited (ADR-0041). */
-export const RATE_LIMITED = "rate_limited";
-
 const MINUTE_MS = 60_000;
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-/** True for an errored run the daemon classified as a provider rate limit. */
-export function isRateLimitedRun(run: Pick<RunFooterRun, "status" | "failureKind">): boolean {
-  return run.status === "error" && run.failureKind === RATE_LIMITED;
-}
-
-/** A valid reset instant, or null when absent/unparseable. */
-export function parseResetAt(resetAt: string | undefined | null): Date | null {
-  if (!resetAt) return null;
-  const d = new Date(resetAt);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-/** True while a reset instant is still ahead of `now` (what the footer's minute ticker keys on). */
-export function hasFutureReset(resetAt: string | undefined | null, now: Date): boolean {
-  const d = parseResetAt(resetAt);
-  return d !== null && d.getTime() > now.getTime();
-}
-
-/** Local `17:35`, prefixed with the weekday (`Mon 17:35`) when it is not the same local day as `now`. */
-export function formatResetClock(reset: Date, now: Date): string {
-  const hhmm = `${String(reset.getHours()).padStart(2, "0")}:${String(reset.getMinutes()).padStart(2, "0")}`;
-  const sameDay = reset.getFullYear() === now.getFullYear() && reset.getMonth() === now.getMonth() && reset.getDate() === now.getDate();
-  return sameDay ? hhmm : `${WEEKDAYS[reset.getDay()]} ${hhmm}`;
-}
-
-/** The tail of a rate-limit line: "resets 17:35", "limit has reset" or "reset time unknown". */
-export function describeRateLimitReset(resetAt: string | undefined | null, now: Date): string {
-  const reset = parseResetAt(resetAt);
-  if (reset === null) return "reset time unknown";
-  if (reset.getTime() <= now.getTime()) return "limit has reset";
-  return `resets ${formatResetClock(reset, now)}`;
-}
-
-/** "Rate limited (5h window) · resets 17:35" -- the window part is omitted when unknown. */
-export function describeRateLimit(opts: { window?: string; resetAt?: string | null }, now: Date): string {
-  const window = opts.window ? ` (${opts.window} window)` : "";
-  return `Rate limited${window} · ${describeRateLimitReset(opts.resetAt, now)}`;
-}
 
 /**
  * A duration as Paseo words it (`9s`, `1m 42s`, `1h 5m`); under a second
