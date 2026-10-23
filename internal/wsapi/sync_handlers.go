@@ -94,8 +94,9 @@ func (h *prHost) updateFromBase(ctx context.Context, rc *requestContext, raw jso
 		return nil, fmt.Errorf("task.updateFromBase: task %d not found or archived", p.TaskID)
 	}
 	// up_to_date is advisory: the local base ref may be stale, so the RPC
-	// fetches and answers instead of refusing.
-	if a := g.Actions["updateFromBase"]; !a.Enabled && a.Code != gitstate.CodeUpToDate {
+	// fetches and answers instead of refusing. merge_in_progress is left to
+	// the Manager, whose error also names the operation.
+	if a := g.Actions["updateFromBase"]; !a.Enabled && a.Code != gitstate.CodeUpToDate && a.Code != forge.CodeMergeInProgress {
 		return nil, blocked(a, g)
 	}
 	// The worktree changes whatever the outcome (a conflict leaves it
