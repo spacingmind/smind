@@ -123,6 +123,16 @@ func recordThreadModel(cwd, model string) {
 	_ = os.WriteFile(filepath.Join(cwd, "thread-model"), []byte(model), 0o644)
 }
 
+// recordThreadInstructions writes the `developerInstructions` a thread/start
+// or thread/resume carried to a "thread-instructions" file in cwd ("" when
+// absent).
+func recordThreadInstructions(cwd, text string) {
+	if cwd == "" {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(cwd, "thread-instructions"), []byte(text), 0o644)
+}
+
 func main() {
 	for _, a := range os.Args[1:] {
 		if a == "nomodellist" {
@@ -158,6 +168,8 @@ func handle(msg message, threadCwd *string) {
 			ApprovalPolicy string `json:"approvalPolicy"`
 			Sandbox        string `json:"sandbox"`
 			Model          string `json:"model"`
+
+			DeveloperInstructions string `json:"developerInstructions"`
 		}
 		_ = json.Unmarshal(msg.Params, &params)
 		*threadCwd = params.Cwd
@@ -167,6 +179,7 @@ func handle(msg message, threadCwd *string) {
 		recordThreadInitMethod(params.Cwd, "thread/start")
 		recordThreadPolicy(params.Cwd, params.ApprovalPolicy, params.Sandbox)
 		recordThreadModel(params.Cwd, params.Model)
+		recordThreadInstructions(params.Cwd, params.DeveloperInstructions)
 		respond(msg.ID, map[string]any{"thread": map[string]any{"id": threadID}})
 	case msg.Method == "thread/loaded/list":
 		threadStateMu.Lock()
@@ -209,10 +222,13 @@ func handle(msg message, threadCwd *string) {
 			ApprovalPolicy string `json:"approvalPolicy"`
 			Sandbox        string `json:"sandbox"`
 			Model          string `json:"model"`
+
+			DeveloperInstructions string `json:"developerInstructions"`
 		}
 		_ = json.Unmarshal(msg.Params, &params)
 		recordThreadPolicy(params.Cwd, params.ApprovalPolicy, params.Sandbox)
 		recordThreadModel(params.Cwd, params.Model)
+		recordThreadInstructions(params.Cwd, params.DeveloperInstructions)
 		threadStateMu.Lock()
 		isArchived := archivedThreads[params.ThreadID]
 		isKnown := params.ThreadID == threadID

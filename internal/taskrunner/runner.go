@@ -520,6 +520,13 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 		}
 		promptOpts = append(promptOpts, acp.WithPromptImages(blocks))
 	}
+	if c := runContractFrom(ctx); c.Instructions != "" && !resumed {
+		// ADR-0041: role text rides on the first prompt of a NEW session
+		// only; a resumed session's earlier turn already carried it, so a
+		// changed profile reaches new sessions only. Added here, after the
+		// run's prompt was recorded: runs.prompt and events stay user text.
+		prompt = roleInstructionsPreface(c.Instructions) + prompt
+	}
 	stopReason, err := client.Prompt(ctx, sessionID, prompt, updates, promptOpts...)
 	<-forwardDone
 	if err != nil {
@@ -814,6 +821,10 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 	// Deltas of the assistant's text and thinking, so the answer streams live
 	// instead of appearing whole at the end of the message (claude_stream.go).
 	opts = append(opts, claudecode.WithIncludePartialMessages())
+	if c := runContractFrom(ctx); c.Instructions != "" {
+		// ADR-0041: the seat's role text, on every spawn (resumed too).
+		opts = append(opts, claudecode.WithAppendSystemPrompt(c.Instructions))
+	}
 	d, _ := DeliveryFrom(ctx)
 	if dirs := append(append([]string(nil), d.AddDirs...), attachmentAddDirs(ctx, prompt)...); len(dirs) > 0 {
 		// ADR-0026 section 5: the read-only learned-skill projection, plus
@@ -1084,6 +1095,9 @@ func (r *Runner) runCodexNative(ctx context.Context, chatID, workspaceID int64, 
 	opts := []codex.Option{codex.WithThreadPolicy(preset.approvalPolicy, preset.sandbox)}
 	if model != "" {
 		opts = append(opts, codex.WithModel(model))
+	}
+	if c := runContractFrom(ctx); c.Instructions != "" {
+		opts = append(opts, codex.WithDeveloperInstructions(c.Instructions))
 	}
 	switch {
 	case decider != nil:
