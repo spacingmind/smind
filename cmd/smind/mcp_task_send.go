@@ -44,6 +44,7 @@ type taskSendInput struct {
 	AutoAccept     bool   `json:"autoAccept,omitempty" jsonschema:"approve every permission prompt without asking a human (ACP providers only); may not be set by an orchestrating agent"`
 	Model          string `json:"model,omitempty" jsonschema:"optional model id for the run: any id from the chosen provider's catalog (see provider_list models; claude-native also takes any syntax-valid id such as sonnet or claude-opus-5-5). Omit for the provider default; overrides the profile's model"`
 	ProfileID      *int64 `json:"profileId,omitempty" jsonschema:"optional id of a human-authored agent profile supplying the provider and permission settings"`
+	NotifyOnFinish *bool  `json:"notifyOnFinish,omitempty" jsonschema:"set false for a fire-and-forget child: the daemon will not wake you when it finishes; default true"`
 	WhenBusy       string `json:"whenBusy,omitempty" jsonschema:"what to do when the chat already has a running run: reject (error), queue (append, delivered at the next turn boundary -- the default), or interrupt (stop the running run and deliver first)"`
 	FromTaskID     *int64 `json:"fromTaskId,omitempty" jsonschema:"optional: your own task id, for the [message from task #T, chat #C] provenance header on the delivered prompt"`
 	FromChatID     *int64 `json:"fromChatId,omitempty" jsonschema:"optional: your own chat id, paired with fromTaskId"`
@@ -187,6 +188,9 @@ func mcpTaskSend(client *wsclient.Client) mcp.ToolHandlerFor[taskSendInput, task
 		}
 		if model != "" {
 			params["model"] = model
+		}
+		if in.NotifyOnFinish != nil {
+			params["notifyOnFinish"] = *in.NotifyOnFinish
 		}
 		if in.ChatID != nil {
 			params["chatId"] = *in.ChatID

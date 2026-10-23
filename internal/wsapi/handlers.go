@@ -1342,6 +1342,9 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			FromChatID int64  `json:"fromChatId"`
 			// Attachments (ADR-0038): see task.prompt.
 			Attachments []attach.Request `json:"attachments"`
+			// NotifyOnFinish (ADR-0041 B3): false opts a child run out of the
+			// parent-chat notification; omitted = true.
+			NotifyOnFinish *bool `json:"notifyOnFinish"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.start: invalid params: %w", err)
@@ -1368,7 +1371,7 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 		if err != nil {
 			return nil, fmt.Errorf("run.start: %w", err)
 		}
-		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, p.Source, p.FromTaskID, p.FromChatID, startOptions(p.Model, set, reg)...)
+		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, p.Source, p.FromTaskID, p.FromChatID, runStartOptions(p.Model, set, reg, p.NotifyOnFinish)...)
 		if err != nil {
 			reg.DiscardAttachments(set)
 			return nil, fmt.Errorf("run.start: %w", err)
@@ -2240,4 +2243,13 @@ func publicAttachments(raw string) []attach.Item {
 		return nil
 	}
 	return set.Public()
+}
+
+// runStartOptions is startOptions plus run.start's optional notifyOnFinish.
+func runStartOptions(model string, set attach.Set, reg *runs.Registry, notify *bool) []runs.StartOption {
+	opts := startOptions(model, set, reg)
+	if notify != nil {
+		opts = append(opts, runs.WithNotifyOnFinish(*notify))
+	}
+	return opts
 }
