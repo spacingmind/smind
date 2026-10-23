@@ -165,6 +165,10 @@ One status payload per task, one read, one event. **Reads are cache-first and ne
   It is the interest signal for the poller ([§4](#4-the-poller-the-call-budget-and-github-rate-limits)).
 - `task.gitRefresh {taskId}` → `TaskGit`: an explicit refresh; the only read that may spend a forge call, under the explicit-refresh floor
   and budget. Refuses run-scoped (agent) callers.
+- `task.prDetailsFocus {taskId|null}` → `{}`, `task.prDetails {taskId, refresh?}` → `PRDetails`, `task.prCheckLog {taskId, checkId}` →
+  `{checkId, text, lines, truncated, fetchedAt}`: the PR panel (G9; `docs/plans/active/pr-panel.md`). A detail read fetches only for a
+  connection that focused the PR tab, two `gh` calls booked together, under the same floors, budget and suspension as the poller; all
+  three refuse run-scoped callers.
 - `workspace.defaultBase {workspaceId}` / `workspace.setDefaultBase {workspaceId, branch}`; `task.setBase {taskId, baseRef}`.
 
 **`TaskGit`** (JSON, camelCase; every nested object optional; an absent object means "not known")

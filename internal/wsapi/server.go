@@ -74,12 +74,13 @@ type API struct {
 	Runs      *runs.Registry
 	Terminals *terminal.Registry
 
-	hs    map[string]handlerFunc
-	admit *seatAdmission
-	bus   *eventBus
-	git   *gitstate.Service
-	focus *focusRegistry
-	info  *DaemonInfo
+	hs      map[string]handlerFunc
+	admit   *seatAdmission
+	bus     *eventBus
+	git     *gitstate.Service
+	focus   *focusRegistry
+	prFocus *focusRegistry
+	info    *DaemonInfo
 	// pushRegistered reports whether a device has a push registration; set by SetPush when enabled.
 	pushRegistered func(string) bool
 
@@ -165,6 +166,7 @@ func (a *API) serve(ctx context.Context, tr Transport, local bool, maxMessage in
 	c.eventsSub = newSubscriber()
 	c.eventsBus = a.bus
 	c.focus = a.focus
+	c.prFocus = a.prFocus
 	c.serve(ctx)
 }
 
@@ -192,6 +194,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	mcpReg := mcpservers.New(db)
 	bus := newEventBus()
 	focus := newFocusRegistry()
+	prFocus := newFocusRegistry()
 	gh := &githubHolder{c: ghctx.New()}
 	fauth := newForgeAuth(gh, bus)
 	gitSvc := newGitService(wm, db, bus, focus, gh, reg, fauth.networkGit, gopts)
@@ -229,7 +232,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
 	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, mcpReg, coord, db, gh)
 	info := newDaemonInfo(time.Now())
-	for method, h := range gitHandlers(gitSvc, focus) {
+	for method, h := range gitHandlers(gitSvc, focus, prFocus) {
 		hs[method] = h
 	}
 	for method, h := range prHandlers(wm, gitSvc, gh, reg) {
@@ -268,7 +271,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		hs[method] = h
 	}
 	hs["workspace.delete"] = learning.beforeWorkspaceDelete(hs["workspace.delete"])
-	api := &API{Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, conns: map[*websocket.Conn]struct{}{}}
+	api := &API{Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}

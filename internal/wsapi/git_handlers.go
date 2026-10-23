@@ -61,6 +61,14 @@ func (f *focusRegistry) drop(c *conn) {
 	f.mu.Unlock()
 }
 
+// has reports whether c's focused task is taskID.
+func (f *focusRegistry) has(c *conn, taskID int64) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id, ok := f.by[c]
+	return ok && id == taskID
+}
+
 // ids returns the distinct focused task ids, sorted.
 func (f *focusRegistry) ids() []int64 {
 	f.mu.Lock()
@@ -131,7 +139,7 @@ func newGitService(wm *workspace.Manager, db *store.Store, bus *eventBus, focus 
 
 // gitHandlers returns the task.git* RPCs. Reads only ever run local git;
 // task.gitRefresh is the one that may spend a forge call.
-func gitHandlers(svc *gitstate.Service, focus *focusRegistry) map[string]handlerFunc {
+func gitHandlers(svc *gitstate.Service, focus, prFocus *focusRegistry) map[string]handlerFunc {
 	return map[string]handlerFunc{
 		"task.git": func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 			var p struct {
@@ -194,7 +202,72 @@ func gitHandlers(svc *gitstate.Service, focus *focusRegistry) map[string]handler
 			}
 			return struct{}{}, nil
 		},
+		"task.prDetailsFocus": func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+			if rc != nil && rc.runScoped {
+				return nil, &rpcCodeError{code: codeForbidden, msg: "task.prDetailsFocus is not available to agents"}
+			}
+			var p struct {
+				TaskID *int64 `json:"taskId"`
+			}
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return nil, fmt.Errorf("task.prDetailsFocus: invalid params: %w", err)
+			}
+			if p.TaskID == nil {
+				prFocus.drop(rc.conn)
+			} else {
+				prFocus.set(rc.conn, *p.TaskID)
+				svc.NoteDetailsFocus(*p.TaskID)
+			}
+			return struct{}{}, nil
+		},
+		"task.prDetails": func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+			if rc != nil && rc.runScoped {
+				return nil, &rpcCodeError{code: codeForbidden, msg: "task.prDetails is not available to agents"}
+			}
+			var p struct {
+				TaskID  int64 `json:"taskId"`
+				Refresh bool  `json:"refresh"`
+			}
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return nil, fmt.Errorf("task.prDetails: invalid params: %w", err)
+			}
+			focused := rc != nil && rc.conn != nil && prFocus.has(rc.conn, p.TaskID)
+			d, err := svc.PRDetails(p.TaskID, focused, p.Refresh)
+			if err != nil {
+				return nil, prDetailsError("task.prDetails", err)
+			}
+			return d, nil
+		},
+		"task.prCheckLog": func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+			if rc != nil && rc.runScoped {
+				return nil, &rpcCodeError{code: codeForbidden, msg: "task.prCheckLog is not available to agents"}
+			}
+			var p struct {
+				TaskID  int64  `json:"taskId"`
+				CheckID string `json:"checkId"`
+			}
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return nil, fmt.Errorf("task.prCheckLog: invalid params: %w", err)
+			}
+			l, err := svc.PRCheckLog(p.TaskID, p.CheckID)
+			if err != nil {
+				return nil, prDetailsError("task.prCheckLog", err)
+			}
+			return l, nil
+		},
 	}
+}
+
+// prDetailsError lets the typed errors of the PR panel (forge_*, no_pr,
+// check_unknown, refresh_limited) reach the wire as they are.
+func prDetailsError(method string, err error) error {
+	var lim *gitstate.RefreshLimitedError
+	var fe *forge.Error
+	var pe *forge.PRError
+	if errors.As(err, &lim) || errors.As(err, &fe) || errors.As(err, &pe) {
+		return err
+	}
+	return fmt.Errorf("%s: %w", method, err)
 }
 
 // invalidateAfter wraps a mutating task RPC (params carry taskId) so a
