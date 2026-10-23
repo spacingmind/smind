@@ -1166,6 +1166,104 @@ export interface TaskGitEventPayload {
   git: TaskGit;
 }
 
+// ---- PR panel (G9): `task.prDetails`, `task.prCheckLog` --------------------------------------------------------------
+// Everything in a `PRDetails` that came from GitHub (titles, check names, review text, logs) is third-party text:
+// render it as plain text and quote it with lib/untrusted-quote.ts before it reaches a prompt.
+
+export type CheckItemState = "success" | "failure" | "pending" | "skipped";
+export type ReviewItemState = "approved" | "changes_requested" | "commented" | "dismissed";
+/** Why a `PRDetails` is not fresh ("" = fresh); `not_focused` means the PR tab has not told the daemon it is open. */
+export type PRDetailsStale = PrStale | "not_focused";
+
+export interface CheckItem {
+  /** Opaque id the daemon issued; the only thing `task.prCheckLog` accepts. */
+  id: string;
+  name: string;
+  state: CheckItemState;
+  status: string;
+  conclusion: string;
+  /** RFC 3339. */
+  startedAt?: string;
+  completedAt?: string;
+  durationMs?: number;
+  /** A validated http(s) URL on the forge host. */
+  url?: string;
+}
+
+export interface ReviewItem {
+  author: string;
+  state: ReviewItemState;
+  /** RFC 3339. */
+  submittedAt: string;
+  body: string;
+  bodyTruncated: boolean;
+}
+
+export interface ThreadComment {
+  author: string;
+  /** RFC 3339. */
+  createdAt: string;
+  body: string;
+  bodyTruncated: boolean;
+}
+
+export interface ReviewThread {
+  id: string;
+  isResolved: boolean;
+  isOutdated: boolean;
+  path: string;
+  line: number | null;
+  comments: ThreadComment[];
+  commentsTruncated: boolean;
+}
+
+export interface PRDetails {
+  taskId: number;
+  number: number;
+  repo: string;
+  url: string;
+  title: string;
+  state: PrState;
+  draft: boolean;
+  mergeable: PrMergeable;
+  reviewDecision: PrReviewDecision;
+  body: string;
+  bodyTruncated: boolean;
+  checks: {
+    state: PrChecksState;
+    passed: number;
+    failed: number;
+    pending: number;
+    total: number;
+    items: CheckItem[];
+    truncated: boolean;
+  };
+  reviews: {
+    approvals: number;
+    /** null when the token cannot read the branch protection rule: show "1 approval". */
+    required: number | null;
+    items: ReviewItem[];
+    awaiting: string[];
+    truncated: boolean;
+  };
+  threads: { items: ReviewThread[]; truncated: boolean };
+  /** RFC 3339. */
+  fetchedAt: string;
+  stale: PRDetailsStale;
+  /** RFC 3339 or "" (when an explicit refresh is possible again). */
+  refreshAvailableAt: string;
+}
+
+/** `task.prCheckLog` result: the tail of a failing check's log. */
+export interface CheckLogTail {
+  checkId: string;
+  text: string;
+  lines: number;
+  truncated: boolean;
+  /** RFC 3339. */
+  fetchedAt: string;
+}
+
 // ---- Archive risk dialog and Restore (ADR-0039 §9) ----------------------------------------------------------------
 /** `task.archivePreview`: what archiving the task would do and lose, from local git and cache only (no fetch). */
 export interface ArchivePreview {
