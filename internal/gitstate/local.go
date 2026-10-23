@@ -14,6 +14,11 @@ import (
 
 const originRemote = "origin"
 
+// ForkPRConfigKey is the git config key recording that a task's branch was
+// started from a pull request on a fork ("true"). It lives in git, not the
+// store, and outlives the task's untrusted flag (which "Run setup" clears).
+func ForkPRConfigKey(branch string) string { return "branch." + branch + ".smindForkPr" }
+
 var shaRE = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // Input is what Compute needs about one task. The caller (wsapi/service) fills
@@ -56,12 +61,13 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 	noOrigin, notForge := false, false
 	midOp := ""
 	rebased := false
+	forkPR := in.ForkPR
 	defer func() {
 		g.ComputedAt = now().UTC()
 		g.Actions = Actions(g, ActionCtx{
 			RunActive: in.RunActive, NoOrigin: noOrigin, OriginNotForge: notForge,
 			ForgeCode: in.ForgeCode, ForgeReason: in.ForgeReason, MidOperation: midOp,
-			RebasedDiverged: rebased, ForkPR: in.ForkPR,
+			RebasedDiverged: rebased, ForkPR: forkPR,
 		})
 	}()
 
@@ -75,6 +81,9 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 		repo = in.WorktreePath
 	}
 	branchRef := "refs/heads/" + in.Branch
+	if out, err := run(ctx, repo, "config", "--get", ForkPRConfigKey(in.Branch)); err == nil && strings.TrimSpace(out) == "true" {
+		forkPR = true
+	}
 	switch originKind(ctx, run, repo) {
 	case originNone:
 		noOrigin = true

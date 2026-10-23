@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/forge"
+	"github.com/spacingmind/smind/internal/gitstate"
 )
 
 // Push and Update from base (ADR-0039 sections 3-6): the git half of
@@ -66,14 +67,14 @@ func (m *Manager) Push(ctx context.Context, id int64) (PushResult, error) {
 	if t.WorktreePath == nil || t.Branch == nil {
 		return PushResult{}, forge.NewPRError(forge.CodeTaskNoWorktree, "")
 	}
-	if t.UntrustedSource && t.PRNumber > 0 {
-		return PushResult{}, forge.ForkPushReadonly()
-	}
 	ws, err := m.store.GetWorkspace(t.WorkspaceID)
 	if err != nil {
 		return PushResult{}, fmt.Errorf("push: %w", err)
 	}
 	dir, branch := *t.WorktreePath, *t.Branch
+	if (t.UntrustedSource && t.PRNumber > 0) || forkPRRecorded(ctx, dir, branch) {
+		return PushResult{}, forge.ForkPushReadonly()
+	}
 	if err := validateRefName(ws.Path, branch, true); err != nil {
 		return PushResult{}, forge.NewPRError(forge.CodeInvalidBranch, "")
 	}
@@ -81,7 +82,7 @@ func (m *Manager) Push(ctx context.Context, id int64) (PushResult, error) {
 	if err != nil {
 		return PushResult{}, err
 	}
-	dest := pushDest(ws.Path, branch, t.PRHeadRef)
+	dest := pushDest(ws.Path, branch, t.PRHeadRef, t.BaseRef, workspaceDefaultBase(ws))
 	remoteURL := remoteURLOf(ctx, dir, remote)
 	if remoteURL == "" {
 		return PushResult{}, forge.NewPRError(forge.CodeNoRemote, "")
@@ -124,6 +125,13 @@ func (m *Manager) Push(ctx context.Context, id int64) (PushResult, error) {
 	return res, nil
 }
 
+// forkPRRecorded reports the git-config fact that the task's branch came from
+// a pull request on a fork (see gitstate.ForkPRConfigKey).
+func forkPRRecorded(ctx context.Context, dir, branch string) bool {
+	out, _, err := execGit(ctx, dir, nil, "config", "--get", gitstate.ForkPRConfigKey(branch))
+	return err == nil && strings.TrimSpace(out) == "true"
+}
+
 // pushRefspec is the one refspec Push sends: a plain ref to ref, never forced
 // (no leading '+').
 func pushRefspec(branch, dest string) string {
@@ -133,8 +141,13 @@ func pushRefspec(branch, dest string) string {
 // pushDest is the branch Push updates on the remote: the task's pull request
 // head when that is a branch smind may push to (not its throwaway rebased
 // copy, and a valid name), else the task's own branch.
-func pushDest(repoDir, branch, prHeadRef string) string {
+func pushDest(repoDir, branch, prHeadRef, baseRef, defaultBase string) string {
 	if prHeadRef == "" || strings.HasPrefix(prHeadRef, forge.CherryPickBranchPrefix) || validateRefName(repoDir, prHeadRef, true) != nil {
+		return branch
+	}
+	// Defence in depth: never move the base branch (a fork's `develop` or
+	// `main` head) whatever the stored head says.
+	if prHeadRef == baseRef || prHeadRef == defaultBase {
 		return branch
 	}
 	return prHeadRef

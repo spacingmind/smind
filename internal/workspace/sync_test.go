@@ -67,12 +67,15 @@ func TestPushDest(t *testing.T) {
 	}
 	for _, tc := range []struct{ head, want string }{
 		{"", "own"},
+		{"develop", "own"}, // the task's base
+		{"main", "own"},    // the workspace default base
+		{"release/1", "release/1"},
 		{"feat/x", "feat/x"},
 		{forge.CherryPickBranchPrefix + "4", "own"},
 		{"-bad", "own"},
 		{"has space", "own"},
 	} {
-		if got := pushDest(repo, "own", tc.head); got != tc.want {
+		if got := pushDest(repo, "own", tc.head, "develop", "main"); got != tc.want {
 			t.Errorf("pushDest(head %q) = %q, want %q", tc.head, got, tc.want)
 		}
 	}

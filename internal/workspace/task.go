@@ -13,6 +13,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/forge"
+	"github.com/spacingmind/smind/internal/gitstate"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -174,6 +175,13 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 		wtErr = createTaskFromPR(ws.Path, worktreePath, branch, p.prNumber)
 	default:
 		wtErr = gitWorktreeAdd(ws.Path, worktreePath, branch)
+	}
+	if wtErr == nil && pr != nil && pr.FromFork {
+		// Record the fork in git itself: the untrusted flag is cleared by
+		// "Run setup", and a fork task must stay unpushable. Fail closed.
+		if err := runGit(ws.Path, "config", gitstate.ForkPRConfigKey(branch), "true"); err != nil {
+			wtErr = fmt.Errorf("record fork pull request: %w", err)
+		}
 	}
 	if wtErr != nil {
 		// A half-created worktree directory must not outlive the failure:
