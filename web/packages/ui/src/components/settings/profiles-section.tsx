@@ -29,6 +29,7 @@ import { supportsThinking, THINKING_LEVELS } from "@/lib/thinking-levels";
 import { describeProfile } from "@/lib/describe-profile";
 import type { AgentProfile, ModeInfo, ProviderInfo } from "@/lib/types";
 import { Icons } from "@/lib/icons";
+import { contractFromProfile, contractParams, EMPTY_CONTRACT, instructionsBytes, INSTRUCTIONS_MAX_BYTES, type ProfileContractState } from "@/components/settings/profile-contract";
 
 // "Provider default" (the empty id -- the provider's own default mode) is
 // this form's own entry; the rest are the selected provider's own
@@ -39,7 +40,7 @@ const PROVIDER_DEFAULT_MODE = { id: "", label: "Provider default" };
 const FORM_THINKING_LEVELS = [{ id: "", label: "Composer default", help: "Use whatever the composer is set to for this agent's runs." }, ...THINKING_LEVELS];
 
 /** The add/edit form's field state -- one instance shared by whichever card is open (the "new agent" card or a row's own inline edit), since only one is ever open at a time. */
-interface ProfileFormState {
+interface ProfileFormState extends ProfileContractState {
   name: string;
   provider: string;
   permissionMode: string;
@@ -50,7 +51,7 @@ interface ProfileFormState {
   notes: string;
 }
 
-const EMPTY_FORM: ProfileFormState = { name: "", provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "", model: "", notes: "" };
+const EMPTY_FORM: ProfileFormState = { name: "", provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "", model: "", notes: "", ...EMPTY_CONTRACT };
 
 function formFromProfile(p: AgentProfile): ProfileFormState {
   return {
@@ -61,6 +62,7 @@ function formFromProfile(p: AgentProfile): ProfileFormState {
     thinkingLevel: p.ThinkingLevel,
     model: p.Model ?? "",
     notes: p.Notes,
+    ...contractFromProfile(p),
   };
 }
 
@@ -159,7 +161,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (openCard === null || !form.name.trim()) return;
+    if (openCard === null || !form.name.trim() || instructionsBytes(form.instructions) > INSTRUCTIONS_MAX_BYTES) return;
     setPending(true);
     setError(null);
     const params = {
@@ -170,6 +172,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
       thinkingLevel: form.thinkingLevel,
       model: form.model,
       notes: form.notes,
+      ...contractParams(form),
     };
     // The mutation upserts the RPC's own returned profile into the shared
     // cache, so every surface (composer picker, palette, task header) sees
