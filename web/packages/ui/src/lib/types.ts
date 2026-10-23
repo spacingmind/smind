@@ -779,6 +779,43 @@ export interface PrExistsErrorData {
   detail?: string;
 }
 
+// ---- Push and Update from base (ADR-0039 §3-§6; docs/plans/active/git-push-update-from-base.md "Wire contract") ----
+
+/** Result of `task.push`. */
+export interface TaskPushResult {
+  branch: string;
+  remote: string;
+  /** True when this push set the upstream ("Publish branch"). */
+  upstreamCreated: boolean;
+  /** Commits the push sent. */
+  pushed: number;
+}
+
+export type UpdateFromBaseStrategy = "merge" | "rebase";
+
+/** Params of `task.updateFromBase`; an omitted `strategy` means merge. */
+export interface TaskUpdateFromBaseParams {
+  taskId: number;
+  strategy?: UpdateFromBaseStrategy;
+}
+
+/** Result of `task.updateFromBase`. */
+export interface TaskUpdateFromBaseResult {
+  result: "up_to_date" | "merged" | "rebased";
+  /** Base commits brought in. */
+  commits: number;
+}
+
+/** `data` of a typed `conflict` error (worktree left mid-merge/rebase) and, with only `operation`, of `merge_in_progress`. */
+export interface UpdateConflictErrorData {
+  files: string[];
+  operation: "merge" | "rebase";
+  /** The ref that was merged or rebased onto, e.g. "origin/develop". */
+  base: string;
+  filesTruncated: boolean;
+  detail?: string;
+}
+
 /** `workspace.branches` (ADR-0039 §4, PR 7); the Create PR dialog tolerates its absence. */
 // Payloads of ADR 0005 notifications (internal/wsapi/events.go) -- see
 // docs/decisions/0005-wsapi-event-subscription.md. Carried in the
@@ -1077,6 +1114,17 @@ export interface TaskGitAction {
   reason?: string;
 }
 
+/** The `actions` map of a `TaskGit`: known entries named, unknown ones tolerated (a newer daemon). */
+export interface TaskGitActions {
+  createPr?: TaskGitAction;
+  updatePr?: TaskGitAction;
+  /** G7: push the branch to `origin`; "Publish branch" while it has no upstream. */
+  push?: TaskGitAction;
+  /** G7: merge (or rebase onto) the base's latest into the branch. */
+  updateFromBase?: TaskGitAction;
+  [action: string]: TaskGitAction | undefined;
+}
+
 export interface TaskGit {
   taskId: number;
   forge?: string;
@@ -1089,7 +1137,7 @@ export interface TaskGit {
   conflict?: { state: GitConflictState; files: string[]; against?: string; checkedAt: string; reason?: string };
   merged?: { state: GitMergedState; via: string };
   pr?: TaskGitPr;
-  actions?: Record<string, TaskGitAction>;
+  actions?: TaskGitActions;
   untrusted: boolean;
   /** RFC 3339. */
   computedAt: string;

@@ -60,6 +60,7 @@ import {
   GitFork,
   GitCommitHorizontal,
   GitCompare,
+  GitMerge,
   GitPullRequest,
   Globe,
   Link2,
@@ -104,6 +105,7 @@ import {
   Trash2,
   TriangleAlert,
   Undo2,
+  Upload,
   Wrench,
   X,
   Zap,
@@ -187,6 +189,10 @@ export const Icons = {
   attach: Paperclip,
   mention: AtSign,
   pullRequest: GitPullRequest,
+  /** G7: push / publish the task branch to origin. */
+  push: Upload,
+  /** G7: update the task branch from its base. */
+  merge: GitMerge,
   issue: CircleDot,
   folder: Folder,
   folderOpen: FolderOpen,

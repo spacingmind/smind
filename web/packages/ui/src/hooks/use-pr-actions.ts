@@ -6,6 +6,9 @@ import type {
   PrPreview,
   TaskCreatePrParams,
   TaskCreatePrResult,
+  TaskPushResult,
+  TaskUpdateFromBaseParams,
+  TaskUpdateFromBaseResult,
   TaskUpdatePrResult,
 } from "@/lib/types";
 
@@ -57,5 +60,30 @@ export function useUpdatePr() {
     },
     // Not awaited: the mutation settles (and the dialog closes) without waiting for the stale preview to refetch.
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.prPreviewAll() }),
+  });
+}
+
+/**
+ * `task.push` (G7): publishes the branch or pushes its new commits to `origin`. Nothing is written to the cache by
+ * hand: the daemon's `task.git` event carries the new ahead/behind counts and actions.
+ */
+export function usePushTask() {
+  const { client } = useDaemonConnection();
+  return useMutation<TaskPushResult, Error, { taskId: number }>({
+    mutationFn: async (params) => {
+      if (!client) throw new Error("no daemon connection");
+      return client.call<TaskPushResult>("task.push", params);
+    },
+  });
+}
+
+/** `task.updateFromBase` (G7): merges (default) or rebases onto the base's latest; a conflict arrives as a typed error. */
+export function useUpdateFromBase() {
+  const { client } = useDaemonConnection();
+  return useMutation<TaskUpdateFromBaseResult, Error, TaskUpdateFromBaseParams>({
+    mutationFn: async (params) => {
+      if (!client) throw new Error("no daemon connection");
+      return client.call<TaskUpdateFromBaseResult>("task.updateFromBase", params);
+    },
   });
 }

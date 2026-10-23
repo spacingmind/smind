@@ -9,6 +9,18 @@ describe("describePrError", () => {
     expect(view).toEqual({ message: "Git couldn't sign in to push.", detail: "fatal: bad", code: "push_auth" });
   });
 
+  it("keeps the daemon's push and update sentences and puts the stderr in Details", () => {
+    const sentence =
+      "Merging `origin/develop` into this branch hit conflicts, and the worktree is now in the middle of the merge. Resolve the conflicts and commit, or ask the agent to; `git merge --abort` in the worktree undoes it.";
+    const conflict = describePrError(new RpcError(sentence, "conflict", { files: ["a.go"], detail: "CONFLICT (content): a.go" }), "sync");
+    expect(conflict).toEqual({ message: sentence, detail: "CONFLICT (content): a.go", code: "conflict" });
+    for (const code of ["non_fast_forward", "merge_in_progress", "worktree_dirty", "nothing_to_push", "invalid_strategy", "forge_unauthenticated"]) {
+      expect(describePrError(new Error("git [push origin x]: exit status 1"), "push").message).toBe("Couldn't push the branch.");
+      expect(describePrError(new RpcError("git [push --force]", code), "push").message).not.toMatch(/git \[/);
+    }
+    expect(describePrError(undefined, "sync").message).toBe("Couldn't update the branch from its base.");
+  });
+
   it("extracts pr_exists's PR", () => {
     const view = describePrError(new RpcError("Already open.", "pr_exists", { url: "https://x/pull/1", number: 1 }), "create");
     expect(view.existing).toEqual({ url: "https://x/pull/1", number: 1 });
