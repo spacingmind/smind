@@ -189,6 +189,9 @@ func mcpTaskSend(client *wsclient.Client) mcp.ToolHandlerFor[taskSendInput, task
 		if model != "" {
 			params["model"] = model
 		}
+		if in.ProfileID != nil {
+			params["profileId"] = *in.ProfileID
+		}
 		if in.NotifyOnFinish != nil {
 			params["notifyOnFinish"] = *in.NotifyOnFinish
 		}
