@@ -53,6 +53,8 @@ export interface ProviderModelPickerProps {
   selectedModel: string;
   /** Chat bound => only that provider is offered (ADR-0016 P3). */
   boundProvider: string | null;
+  /** The line shown while bound (default: "Bound to <provider> — start a new chat to switch providers"); `null` hides it, for an owner that is not a chat (Settings -> Providers). */
+  boundNotice?: string | null;
   disabled: boolean;
   /**
    * "pill" is the composer toolbar's compact trigger; "field" is a full-width form control (Settings -> Agents'
@@ -142,6 +144,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
     selectedProvider,
     selectedModel,
     boundProvider,
+    boundNotice,
     disabled,
     variant = "pill",
     testId = "composer-model-picker",
@@ -478,10 +481,10 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
         }
         inSheet={isMobile}
       />
-      {boundLabel && (
+      {boundLabel && boundNotice !== null && (
         // ADR-0016 P3: a bound chat cannot switch providers, so say why the list is short.
         <p className="px-3 pb-2 text-ui-sm text-foreground-muted">
-          Bound to {boundLabel} — start a new chat to switch providers
+          {boundNotice ?? `Bound to ${boundLabel} — start a new chat to switch providers`}
         </p>
       )}
       {viewProvider?.unavailableReason && <UnavailableNotice reason={viewProvider.unavailableReason} />}

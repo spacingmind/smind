@@ -251,4 +251,81 @@ describe("ProviderDetail", () => {
     await flush();
     expect(screen.getByTestId("models-search")).toHaveValue("");
   });
+
+  describe("default model (U15)", () => {
+    function setCalls(d: FakeUsageDaemon) {
+      return d.calls.filter((c) => c.method === "provider.setDefaultModel").map((c) => c.params);
+    }
+    async function openPicker(): Promise<void> {
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("provider-default-model-picker-claude-native"));
+      });
+    }
+
+    it("picking a model sends provider.setDefaultModel and the line re-renders from provider.list", async () => {
+      const d = daemon([]);
+      renderWithDaemon(<ProviderDetail item={item()} client={d.client} />, d);
+      await flush();
+      expect(screen.getByTestId("provider-default-resolves")).toHaveTextContent("Runs use the CLI's own default");
+      expect(screen.getByTestId("provider-default-model-picker-claude-native")).toHaveTextContent("CLI default");
+      await openPicker();
+      // Only this provider's models are offered, and the synthetic row reads "CLI default" with no "Currently ..." hint.
+      expect(screen.getByTestId("model-row-claude-native:")).toHaveTextContent("CLI default");
+      expect(screen.queryByTestId("model-row-codex-native:")).toBeNull();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("model-row-claude-native:sonnet"));
+      });
+      await flush();
+      expect(setCalls(d)).toEqual([{ provider: "claude-native", model: "sonnet" }]);
+      await waitFor(() => expect(screen.getByTestId("provider-default-resolves")).toHaveTextContent("Runs use Sonnet"));
+      expect(screen.getByTestId("provider-default-model-picker-claude-native")).toHaveTextContent("Sonnet");
+    });
+
+    it("an id the catalog does not list shows the id; picking CLI default sends model \"\"", async () => {
+      const d = daemon([]);
+      d.providers = { providers: PROVIDERS.map((p) => (p.id === "claude-native" ? { ...p, defaultModel: "mystery-1" } : p)) } as unknown as ProviderListResult;
+      renderWithDaemon(<ProviderDetail item={item()} client={d.client} />, d);
+      await flush();
+      await waitFor(() => expect(screen.getByTestId("provider-default-resolves")).toHaveTextContent("Runs use mystery-1"));
+      await openPicker();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("model-row-claude-native:"));
+      });
+      await flush();
+      expect(setCalls(d)).toEqual([{ provider: "claude-native", model: "" }]);
+      await waitFor(() => expect(screen.getByTestId("provider-default-resolves")).toHaveTextContent("Runs use the CLI's own default"));
+    });
+
+    it("a failing RPC shows the error and leaves the line unchanged", async () => {
+      const d = daemon([]);
+      d.setDefaultModelError = new Error("model not in catalog");
+      renderWithDaemon(<ProviderDetail item={item()} client={d.client} />, d);
+      await flush();
+      await openPicker();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("model-row-claude-native:opus"));
+      });
+      await flush();
+      expect(await screen.findByRole("alert")).toHaveTextContent("model not in catalog");
+      expect(screen.getByTestId("provider-default-resolves")).toHaveTextContent("Runs use the CLI's own default");
+    });
+
+    it("a provider.updated event refreshes the line", async () => {
+      const d = daemon([]);
+      renderWithDaemon(<ProviderDetail item={item()} client={d.client} />, d);
+      await flush();
+      expect(screen.getByTestId("provider-default-resolves")).toHaveTextContent("CLI's own default");
+      d.providers = { providers: PROVIDERS.map((p) => (p.id === "claude-native" ? { ...p, defaultModel: "opus" } : p)) } as unknown as ProviderListResult;
+      await act(async () => d.emit("provider.updated", { id: "claude-native", defaultModel: "opus" }));
+      await flush();
+      await waitFor(() => expect(screen.getByTestId("provider-default-resolves")).toHaveTextContent("Runs use Opus"));
+    });
+
+    it("is not offered for the other bucket", async () => {
+      const d = daemon([account(3, "xai")]);
+      renderWithDaemon(<ProviderDetail item={item({ id: "other", label: "Other accounts", kind: "other", accountProvider: undefined, accountIds: [3], connected: true })} client={d.client} />, d);
+      await flush();
+      expect(screen.queryByTestId("provider-default-resolves")).toBeNull();
+    });
+  });
 });

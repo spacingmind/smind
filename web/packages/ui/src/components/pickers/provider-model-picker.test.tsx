@@ -191,6 +191,13 @@ describe("model picker", () => {
     expect(screen.getByTestId("model-row-glm:glm-4.6")).toBeInTheDocument();
   });
 
+  it("boundNotice replaces or hides the bound line (Settings is not a chat)", () => {
+    renderPicker({ boundProvider: "glm", selectedProvider: "glm", selectedModel: "", boundNotice: null });
+    open();
+    expect(screen.queryByText(/Bound to GLM/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("model-row-glm:glm-4.6")).toBeInTheDocument();
+  });
+
   it("Arrow keys and Enter select, Left goes back, Escape closes", () => {
     const { onSelect } = renderPicker();
     open();

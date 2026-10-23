@@ -48,6 +48,9 @@ const LEARNING_TOPICS = [
 /** ADR-0039's task git state: the daemon's recomputed `{taskId, git}` snapshot (the bridge patches the caches). */
 const GIT_TOPICS = ["task.git", "forge.status"];
 
+/** `provider.updated` {id, defaultModel}: a provider's configured default model changed (U15); the bridge re-reads provider.list. */
+const PROVIDER_TOPICS = ["provider.updated"];
+
 const TOPICS = [
   "task.status",
   "run.status",
@@ -59,6 +62,7 @@ const TOPICS = [
   ...ACCOUNT_TOPICS,
   ...LEARNING_TOPICS,
   ...GIT_TOPICS,
+  ...PROVIDER_TOPICS,
 ];
 
 /** Registration surface returned by useDaemonEvents -- topic-filtered, with per-listener try/catch isolation. */

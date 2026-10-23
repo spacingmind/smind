@@ -118,6 +118,13 @@ describe("applyDaemonEvent", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.profileList() });
   });
 
+  it("provider.updated invalidates the provider list", () => {
+    const qc = createQueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    applyDaemonEvent(qc, "provider.updated", { id: "claude-native", defaultModel: "opus" });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.providerList() });
+  });
+
   it("does not create cache entries nobody asked for", () => {
     const qc = createQueryClient();
     applyDaemonEvent(qc, "account.usage", { usage: usage(2, "Fresh") });
