@@ -130,6 +130,9 @@ type Task struct {
 	// not run and its teardown is skipped until the user clears the flag
 	// with task.retrySetup (ADR-0039 section 7).
 	UntrustedSource bool
+	// BranchDeletedAt is set when archiving deleted the task's local branch
+	// after it was merged (ADR-0039 section 9); nil otherwise.
+	BranchDeletedAt *time.Time
 }
 
 // Run is a persisted record of one internal/runs.Registry Run: a

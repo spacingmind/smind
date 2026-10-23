@@ -29,6 +29,16 @@ const (
 	CodePRBusy             = "pr_busy"
 )
 
+// Codes of the archive branch cleanup and Restore (ADR-0039 section 9).
+const (
+	CodeBranchUnmerged   = "branch_unmerged"
+	CodeBranchDirty      = "branch_dirty"
+	CodeBranchNotOwned   = "branch_not_owned"
+	CodeBranchCheckedOut = "branch_checked_out"
+	CodeBranchGone       = "branch_gone"
+	CodeNotArchived      = "not_archived"
+)
+
 // PRError is a typed failure of task.createPr / task.updatePr: a wire code, a
 // fixed sentence naming the next step, and optional data (the scrubbed git
 // stderr tail as "detail", or {url, number} for pr_exists). It never carries
@@ -99,6 +109,20 @@ func UpdateUnsupported(head string) *PRError {
 		fmt.Sprintf("This pull request was opened from a rebased copy (`%s`), so smind can't update it automatically.", head))
 }
 
+// BranchGone is the error for a Restore whose branch no longer exists
+// locally or on origin.
+func BranchGone(branch string) *PRError {
+	return NewPRError(CodeBranchGone, "").withMessage(
+		fmt.Sprintf("The branch `%s` no longer exists, so there is nothing to restore. It was deleted after it was merged.", branch))
+}
+
+// RestoreCheckedOut is the error for a Restore whose branch is checked out in
+// another worktree.
+func RestoreCheckedOut() *PRError {
+	return NewPRError(CodeBranchCheckedOut, "").withMessage(
+		"The branch is checked out in another worktree, so this task can't be restored until that worktree lets go of it.")
+}
+
 func (e *PRError) withMessage(m string) *PRError {
 	e.Message = m
 	return e
@@ -121,6 +145,11 @@ var prMessages = map[string]string{
 	CodeInvalidBody:       "The pull request description must be at most 64 KiB and can't contain NUL characters.",
 	CodeInvalidBranch:     "That branch name isn't valid. Pick an existing branch.",
 	CodePRBusy:            "Another pull request action is already running for this task. Wait for it to finish.",
+	CodeBranchUnmerged:    "The branch is not merged anywhere yet.",
+	CodeBranchDirty:       "The worktree has uncommitted changes; they are saved to the branch, so it is kept.",
+	CodeBranchNotOwned:    "This is your own branch; smind never deletes it.",
+	CodeBranchCheckedOut:  "The branch is checked out in another worktree, so it is kept.",
+	CodeNotArchived:       "This task isn't archived, so there is nothing to restore.",
 	CodeTimeout:           "git didn't finish in time. Check the network and try again.",
 	CodeError:             "git couldn't complete the request. See Details.",
 	CodeNoRemote:          msgNoRemote,

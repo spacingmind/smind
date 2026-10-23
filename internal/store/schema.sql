@@ -87,7 +87,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     pr_number INTEGER,
     pr_url TEXT,
     pr_head_ref TEXT,
-    untrusted_source INTEGER NOT NULL DEFAULT 0 -- ADR-0039 section 7: 1 = fork PR / unknown forge; setup blocked until the user runs it
+    untrusted_source INTEGER NOT NULL DEFAULT 0, -- ADR-0039 section 7: 1 = fork PR / unknown forge; setup blocked until the user runs it
+    branch_deleted_at TIMESTAMP -- ADR-0039 section 9: set when archive deleted the task's local branch
 );
 
 CREATE TABLE IF NOT EXISTS chats (

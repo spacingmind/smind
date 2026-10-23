@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -321,6 +322,74 @@ func (s *Store) ArchiveTask(id int64) (Task, error) {
 	return s.GetTask(id)
 }
 
+// SetTaskBranchDeleted stamps branch_deleted_at on task id (archive deleted its
+// local branch) and returns the updated task.
+func (s *Store) SetTaskBranchDeleted(id int64) (Task, error) {
+	res, err := s.db.Exec(`UPDATE tasks SET branch_deleted_at = ? WHERE id = ?`, time.Now().UTC(), id)
+	if err != nil {
+		return Task{}, fmt.Errorf("set task %d branch deleted: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return Task{}, fmt.Errorf("set task %d branch deleted: %w", id, sql.ErrNoRows)
+	}
+	return s.GetTask(id)
+}
+
+// ListArchivedTasks returns workspaceID's archived non-system tasks, newest
+// archive first (ADR-0039 section 9's Archived view).
+func (s *Store) ListArchivedTasks(workspaceID int64) ([]Task, error) {
+	rows, err := s.db.Query(
+		`SELECT `+taskCols+`
+		 FROM tasks WHERE workspace_id = ? AND kind != 'system' AND archived_at IS NOT NULL
+		 ORDER BY archived_at DESC, id DESC`,
+		workspaceID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list archived tasks for workspace %d: %w", workspaceID, err)
+	}
+	defer rows.Close()
+
+	tasks := make([]Task, 0)
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan task: %w", err)
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
+// ClearTaskPort drops task id's stored port (Restore claims a fresh one).
+func (s *Store) ClearTaskPort(id int64) error {
+	if _, err := s.db.Exec(`UPDATE tasks SET port = NULL WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("clear task %d port: %w", id, err)
+	}
+	return nil
+}
+
+// RestoreTask undoes ArchiveTask: it clears archived_at, sets the status back
+// to "created" and records worktreePath (the worktree Restore recreated, which
+// may differ from the original). A live task already holding the task's port
+// yields ErrPortTaken. It is a no-op error for a task that is not archived.
+func (s *Store) RestoreTask(id int64, worktreePath string) (Task, error) {
+	res, err := s.db.Exec(
+		`UPDATE tasks SET status = 'created', archived_at = NULL, worktree_path = ?, updated_at = ?
+		 WHERE id = ? AND archived_at IS NOT NULL`,
+		worktreePath, time.Now().UTC(), id,
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			return Task{}, fmt.Errorf("restore task %d: %w", id, ErrPortTaken)
+		}
+		return Task{}, fmt.Errorf("restore task %d: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return Task{}, fmt.Errorf("restore task %d: %w", id, sql.ErrNoRows)
+	}
+	return s.GetTask(id)
+}
+
 // DeleteTask permanently removes task id and everything scoped to it from
 // smind's own tracking: run_events (via each of its runs), runs, chats,
 // terminal_sessions, and finally the tasks row itself, in that FK-safe
@@ -367,7 +436,7 @@ func (s *Store) DeleteTask(id int64) error {
 }
 
 // taskCols is the column list scanTask reads.
-const taskCols = "id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, setup_status, setup_error, setup_log, port, kind, base_ref, base_sha, branch_owned, pr_forge, pr_repo, pr_number, pr_url, pr_head_ref, untrusted_source"
+const taskCols = "id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, setup_status, setup_error, setup_log, port, kind, base_ref, base_sha, branch_owned, pr_forge, pr_repo, pr_number, pr_url, pr_head_ref, untrusted_source, branch_deleted_at"
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -379,14 +448,14 @@ func scanTask(row rowScanner) (Task, error) {
 	var worktreePath, branch, setupStatus, setupError, setupLog, baseRef, baseSha sql.NullString
 	var prForge, prRepo, prURL, prHeadRef sql.NullString
 	var prNumber sql.NullInt64
-	var archivedAt sql.NullTime
+	var archivedAt, branchDeletedAt sql.NullTime
 	var port sql.NullInt64
 
 	if err := row.Scan(&t.ID, &t.WorkspaceID, &spaceID, &parentTaskID, &t.Title, &t.Status,
 		&worktreePath, &branch, &t.CreatedAt, &t.UpdatedAt, &archivedAt,
 		&setupStatus, &setupError, &setupLog, &port, &t.Kind,
 		&baseRef, &baseSha, &t.BranchOwned,
-		&prForge, &prRepo, &prNumber, &prURL, &prHeadRef, &t.UntrustedSource); err != nil {
+		&prForge, &prRepo, &prNumber, &prURL, &prHeadRef, &t.UntrustedSource, &branchDeletedAt); err != nil {
 		return Task{}, err
 	}
 
@@ -395,6 +464,7 @@ func scanTask(row rowScanner) (Task, error) {
 	t.WorktreePath = nullToStringPtr(worktreePath)
 	t.Branch = nullToStringPtr(branch)
 	t.ArchivedAt = nullToTimePtr(archivedAt)
+	t.BranchDeletedAt = nullToTimePtr(branchDeletedAt)
 	t.SetupStatus = setupStatus.String
 	t.SetupError = setupError.String
 	t.SetupLog = setupLog.String
