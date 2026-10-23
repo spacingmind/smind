@@ -85,6 +85,33 @@ func TestReplyChat_SetOnlyForAgentSendFromParent(t *testing.T) {
 	if got := e.send(t, e.child.ID, agent, e.sibling.ID, e.siblingCh.ID); got != 0 {
 		t.Fatalf("agent send from sibling: ReplyChatID = %d, want 0", got)
 	}
+	// Human WITH the parent's ids (a profile send) does get the chat.
+	if got := e.send(t, e.child.ID, human, e.task.ID, e.parentChat.ID); got != e.parentChat.ID {
+		t.Fatalf("human send with parent ids: ReplyChatID = %d, want %d", got, e.parentChat.ID)
+	}
+}
+
+// TestReplyChat_ProfileSendFromParentHasReplyChat: a profile send rides as
+// source=human but keeps the sender ids; it gets a reply chat, and the stored
+// prompt stays verbatim (no provenance header).
+func TestReplyChat_ProfileSendFromParentHasReplyChat(t *testing.T) {
+	t.Parallel()
+	e := newReplyEnv(t, "")
+	out, err := e.reg.StartWhenBusy(context.Background(), e.wm, e.runner, e.child.ID, 0, taskrunner.ProviderGLM, "work", taskrunner.PermissionSettings{}, "", WhenBusyReject, store.ChatQueueSourceHuman, e.task.ID, e.parentChat.ID)
+	if err != nil {
+		t.Fatalf("StartWhenBusy() error = %v", err)
+	}
+	waitForStatus(t, e.reg, out.RunID, StatusDone, 5*time.Second)
+	row, err := e.st.GetRun(out.RunID)
+	if err != nil {
+		t.Fatalf("GetRun() error = %v", err)
+	}
+	if row.ReplyChatID != e.parentChat.ID {
+		t.Fatalf("ReplyChatID = %d, want %d", row.ReplyChatID, e.parentChat.ID)
+	}
+	if row.Prompt != "work" {
+		t.Fatalf("stored prompt = %q, want it verbatim (no provenance header)", row.Prompt)
+	}
 }
 
 func TestReplyChat_MustBelongToParent(t *testing.T) {

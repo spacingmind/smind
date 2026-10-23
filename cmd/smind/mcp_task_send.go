@@ -174,10 +174,10 @@ func mcpTaskSend(client *wsclient.Client) mcp.ToolHandlerFor[taskSendInput, task
 		// Known limitation (ADR-0021 §4 vs ADR-0019 decision 6): a
 		// profileId send rides as source=human, so the server's
 		// non-human auto-approve guard accepts the profile's
-		// human-authored settings -- which also means agent provenance
-		// (the [message from task #T, chat #C] header) is dropped for
-		// profile sends. A profile-carrying agent that wants the header
-		// must forgo the profile or accept the loss.
+		// human-authored settings -- which also means the [message from
+		// task #T, chat #C] header is still not shown for profile sends.
+		// The sender ids do ride along (below) so the daemon can notify
+		// the parent chat when the child finishes (ADR-0041 B3).
 		if in.ProfileID != nil {
 			source = "human"
 		}
@@ -195,7 +195,7 @@ func mcpTaskSend(client *wsclient.Client) mcp.ToolHandlerFor[taskSendInput, task
 		if in.ChatID != nil {
 			params["chatId"] = *in.ChatID
 		}
-		if source == "agent" {
+		if source == "agent" || (in.FromTaskID != nil && in.FromChatID != nil) {
 			params["fromTaskId"] = *in.FromTaskID
 			params["fromChatId"] = *in.FromChatID
 		}

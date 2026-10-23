@@ -1363,6 +1363,9 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 		default:
 			return nil, fmt.Errorf("run.start: invalid source %q", p.Source)
 		}
+		if p.FromTaskID < 0 || p.FromChatID < 0 {
+			return nil, fmt.Errorf("run.start: fromTaskId and fromChatId must not be negative")
+		}
 		if p.Source == store.ChatQueueSourceAgent && (p.FromTaskID == 0 || p.FromChatID == 0) {
 			return nil, fmt.Errorf("run.start: source %q requires fromTaskId and fromChatId", p.Source)
 		}

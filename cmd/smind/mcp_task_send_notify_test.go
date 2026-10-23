@@ -13,10 +13,10 @@ import (
 	"github.com/spacingmind/smind/internal/wsclient"
 )
 
-// TestMCPTaskSend_NotifyOnFinishForwarded pins ADR-0041 N1's MCP seam: an
-// explicit notifyOnFinish=false reaches run.start's params, and an omitted
-// value leaves the key absent (the daemon defaults to true).
-func TestMCPTaskSend_NotifyOnFinishForwarded(t *testing.T) {
+// newTaskSendRecorder returns a task_send caller backed by a fake daemon; it
+// reports the params of the run.start the call produced.
+func newTaskSendRecorder(t *testing.T) func(map[string]any) map[string]json.RawMessage {
+	t.Helper()
 	var mu sync.Mutex
 	var starts []map[string]json.RawMessage
 	up := websocket.Upgrader{}
@@ -39,6 +39,8 @@ func TestMCPTaskSend_NotifyOnFinishForwarded(t *testing.T) {
 			switch env.Method {
 			case "provider.list":
 				result = map[string]any{"providers": []map[string]any{{"id": "glm"}}}
+			case "profile.get":
+				result = map[string]any{"Provider": "glm"}
 			case "run.start":
 				var p map[string]json.RawMessage
 				_ = json.Unmarshal(env.Params, &p)
@@ -80,6 +82,14 @@ func TestMCPTaskSend_NotifyOnFinishForwarded(t *testing.T) {
 		return starts[len(starts)-1]
 	}
 
+	return send
+}
+
+// TestMCPTaskSend_NotifyOnFinishForwarded pins ADR-0041 N1's MCP seam: an
+// explicit notifyOnFinish=false reaches run.start's params, and an omitted
+// value leaves the key absent (the daemon defaults to true).
+func TestMCPTaskSend_NotifyOnFinishForwarded(t *testing.T) {
+	send := newTaskSendRecorder(t)
 	got := send(map[string]any{"taskId": 1, "provider": "glm", "prompt": "hi", "notifyOnFinish": false})
 	if string(got["notifyOnFinish"]) != "false" {
 		t.Fatalf("run.start notifyOnFinish = %q, want false", got["notifyOnFinish"])
@@ -91,5 +101,18 @@ func TestMCPTaskSend_NotifyOnFinishForwarded(t *testing.T) {
 	got = send(map[string]any{"taskId": 1, "provider": "glm", "prompt": "hi"})
 	if _, present := got["notifyOnFinish"]; present {
 		t.Fatalf("run.start has notifyOnFinish = %q when omitted, want the key absent", got["notifyOnFinish"])
+	}
+}
+
+// TestMCPTaskSend_ProfileSendForwardsFromIds: a profileId send stays
+// source=human but still carries the sender ids (ADR-0041 N1c).
+func TestMCPTaskSend_ProfileSendForwardsFromIds(t *testing.T) {
+	send := newTaskSendRecorder(t)
+	got := send(map[string]any{"taskId": 1, "prompt": "hi", "profileId": 5, "fromTaskId": 7, "fromChatId": 9})
+	if string(got["source"]) != `"human"` {
+		t.Fatalf("source = %s, want \"human\"", got["source"])
+	}
+	if string(got["fromTaskId"]) != "7" || string(got["fromChatId"]) != "9" {
+		t.Fatalf("fromTaskId/fromChatId = %s/%s, want 7/9", got["fromTaskId"], got["fromChatId"])
 	}
 }

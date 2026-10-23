@@ -568,12 +568,13 @@ func WithNotifyOnFinish(notify bool) StartOption {
 	return func(o *startOptions) { o.notify, o.notifySet = notify, true }
 }
 
-// replyChatFor is ADR-0041 B3's "which chat" rule: the sender's chat when an
-// agent send comes from the run task's own parent task, the chat belongs to
+// replyChatFor is ADR-0041 B3's "which chat" rule: the sender's chat when a
+// send naming its sender (an agent send, or a profile send that kept its ids
+// under source=human) comes from the run task's own parent task, the chat belongs to
 // that parent and is not archived, and the caller did not opt out; else 0.
 // Lookup errors silently yield 0.
 func (reg *Registry) replyChatFor(wm *workspace.Manager, taskID int64, source string, fromTaskID, fromChatID int64, notify bool) int64 {
-	if !notify || source != store.ChatQueueSourceAgent || fromTaskID == 0 || fromChatID == 0 {
+	if !notify || fromTaskID == 0 || fromChatID == 0 {
 		return 0
 	}
 	task, err := wm.GetTask(taskID)
