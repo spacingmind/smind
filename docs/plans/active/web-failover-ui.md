@@ -41,8 +41,22 @@ Mobile: `runFooter.test.ts` (`wait state`, `continued on`).
 
 ## Progress
 
-- [ ] PR 1 daemon  - [ ] PR 2 web  - [ ] PR 2 mobile
+- [x] PR 1 daemon: #573 (peer-sonnet task 50). ACCEPTED: diff read, mutation check (dropping `WithNotBefore` fails `TestRunStart_NotBefore_QueuesOnIdleChat`), runs/wsapi/store tests pass.
+- [x] PR 2 web (peer-sonnet task 51). ACCEPTED at 4e946b87 (rebased: d178e013 here) after one rework round: the failover actions got their own footer row (a wrapped footer line began with a stray dot) and the badge shots were re-taken.
+- [x] PR 2 mobile (peer-sonnet task 57). ACCEPTED at 97220b95: pure `describeRunFooter` ctx + `failoverContext.ts`, FooterBanner note, Continue hidden while a retry is held.
+- Cap note: two Peer launches were refused while the shared task tree sat at 4/4 runs; waited instead of stopping other Leads' runs.
 
 ## Validation
 
-(filled in as candidates are accepted)
+Combined branch (cherry-picked Peer commits on origin/develop), run by the Lead: `cd web && bunx tsc -b packages/ui` clean; `cd mobile && npx tsc --noEmit` clean, `npm test` 624 passed; `task lint` ok; `task test` exit 0 (web 3481 passed).
+
+| AC | Evidence |
+|---|---|
+| AC-D1..D3 | #573 tests (daemon PR) |
+| AC-W1, W3 | `run-footer-rate-limit.test.tsx`, `task-detail.test.tsx` (Retry on fallback creates a new chat and sends profileId; hidden without fallback/reset) |
+| AC-W2 | tests for the `notBefore` payload; screenshots wait pending -> queued, queued survives a reload (queue row) |
+| AC-W4 | `run-footer-rate-limit.test.tsx` badge + hint, `use-run-failover-index.test.tsx` |
+| AC-W5 | /tmp/failover-shots-v2 (light + dark, 1280 and 390 px; frames 01 buttons, 02 pending, 03 queued, 04 after reload, 05-07 fallback pending/opening/new chat, 08 badge, 09 hint) |
+| AC-M1 | `runFooter.test.ts`, `failoverContext.test.ts` (unit only; no device) |
+
+Not verified: a real rate-limited provider run end to end (screenshots use a seeded database and no model run; the "new chat" frames show the fallback run failing on a missing `npx` in the sandbox, which is expected); the mobile screen on a device or simulator; the held retry actually starting after its time (covered by the daemon queue tests, not by the UI run).
