@@ -427,7 +427,7 @@ export function Composer({
       else submit();
       return;
     }
-    if (e.key === "Escape" && running) {
+    if (e.key === "Escape" && running && connected) {
       e.preventDefault();
       void handleStop();
       return;
@@ -480,7 +480,7 @@ export function Composer({
       {/* Paseo's chip row above the card: the live-run chip and the diff
           stat -- real data only, nothing when neither applies. */}
       <ComposerStatusChips
-        running={running}
+        running={running && connected}
         waiting={waitingOnUser}
         git={git}
         onOpenDiff={onOpenDiff}
@@ -674,7 +674,7 @@ export function Composer({
                   type="button"
                   variant="execute"
                   className={ICON_ACTION_BUTTON_CLASS}
-                  disabled={stopping}
+                  disabled={stopping || !connected}
                   aria-label={stopping ? "Stopping…" : "Stop"}
                   title="Stop the running turn (Esc)"
                   data-testid="chat-stop-button"

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -95,6 +96,12 @@ type API struct {
 	// legacy rule (the daemon token in the "token" query parameter);
 	// SetAuthorizer replaces it. Set before the first request is served.
 	authorize func(*http.Request) bool
+
+	// connsMu guards conns and closing: the live /ws connections, and whether
+	// CloseConnections has run (later upgrades are closed immediately).
+	connsMu sync.Mutex
+	conns   map[*websocket.Conn]struct{}
+	closing bool
 }
 
 // StartGitState runs the git state service's loop (ADR-0039 §4) until ctx is
@@ -255,7 +262,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		hs[method] = h
 	}
 	hs["workspace.delete"] = learning.beforeWorkspaceDelete(hs["workspace.delete"])
-	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus}
+	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, conns: map[*websocket.Conn]struct{}{}}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}
@@ -270,12 +277,50 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 			return
 		}
 		defer ws.Close()
+		api.connsMu.Lock()
+		if api.closing {
+			api.connsMu.Unlock()
+			sendGoingAway(ws)
+			return
+		}
+		api.conns[ws] = struct{}{}
+		api.connsMu.Unlock()
+		defer func() {
+			api.connsMu.Lock()
+			delete(api.conns, ws)
+			api.connsMu.Unlock()
+		}()
 		// Gorilla answers an oversized message with close code 1009.
 		ws.SetReadLimit(DirectMaxMessage)
 
 		api.serveLocal(r.Context(), wsTransport{ws}, ChannelOf(r))
 	})
 	return api, nil
+}
+
+// sendGoingAway writes a 1001 close frame; errors are ignored (peer may be gone).
+func sendGoingAway(ws *websocket.Conn) {
+	_ = ws.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseGoingAway, "daemon shutting down"),
+		time.Now().Add(time.Second))
+}
+
+// CloseConnections closes every live /ws connection with a 1001 (going away)
+// close frame and makes later upgrades close immediately the same way. The
+// daemon calls it first on shutdown so clients see the stop at once instead of
+// after run teardown. Safe to call more than once.
+func (a *API) CloseConnections() {
+	a.connsMu.Lock()
+	a.closing = true
+	snapshot := make([]*websocket.Conn, 0, len(a.conns))
+	for ws := range a.conns {
+		snapshot = append(snapshot, ws)
+	}
+	a.connsMu.Unlock()
+	for _, ws := range snapshot {
+		sendGoingAway(ws)
+		_ = ws.Close()
+	}
 }
 
 // busWorkspaceNotifier adapts the shared event bus to workspace.Notifier,

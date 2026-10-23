@@ -47,6 +47,7 @@ export const RunTimeline = memo(function RunTimeline({
   providerLabels,
   modelLabels,
   isLatest = false,
+  disconnected = false,
 }: {
   run: RunEntry;
   detailLevel?: DetailLevel;
@@ -63,6 +64,8 @@ export const RunTimeline = memo(function RunTimeline({
   modelLabels?: RunModelLabels;
   /** Continue/Retry are offered on the chat's latest run only. */
   isLatest?: boolean;
+  /** The daemon connection is down: the run footer freezes its live state. */
+  disconnected?: boolean;
 } & TimelineRowContext) {
   const groups = groupTimeline(run.items, detailLevel);
 
@@ -126,7 +129,7 @@ export const RunTimeline = memo(function RunTimeline({
           </div>
         )}
 
-        <RunFooter run={run} providerLabels={providerLabels} modelLabels={modelLabels} isLatest={isLatest} waiting={Boolean(run.pendingPermission)} onContinue={onContinue} onRerun={onRerun}>
+        <RunFooter run={run} providerLabels={providerLabels} modelLabels={modelLabels} isLatest={isLatest} waiting={Boolean(run.pendingPermission)} disconnected={disconnected} onContinue={onContinue} onRerun={onRerun}>
           <MessageActions group="run" className="ml-auto" data-testid="run-actions">
             <RunCopyMenu run={run} />
             {onRerun && run.status !== "running" && (

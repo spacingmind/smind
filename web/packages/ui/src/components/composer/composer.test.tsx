@@ -357,6 +357,20 @@ describe("Composer", () => {
     expect(stops).toEqual(["run-7", "run-7"]);
   });
 
+  it("freezes Stop and hides the Working chip while disconnected, and restores them on reconnect (U14)", () => {
+    const { rerender } = renderComposer({ runningRunId: "run-7", connected: true });
+    expect(screen.getByTestId("chat-stop-button")).toBeEnabled();
+    expect(screen.getByTestId("composer-working-chip")).toBeTruthy();
+
+    rerender({ runningRunId: "run-7", connected: false });
+    expect(screen.getByTestId("chat-stop-button")).toBeDisabled();
+    expect(screen.queryByTestId("composer-working-chip")).toBeNull();
+
+    rerender({ runningRunId: "run-7", connected: true });
+    expect(screen.getByTestId("chat-stop-button")).toBeEnabled();
+    expect(screen.getByTestId("composer-working-chip")).toBeTruthy();
+  });
+
   it("does not lose the text when the submit fails", async () => {
     const onSubmit = vi.fn().mockRejectedValue(new Error("daemon said no"));
     renderComposer({ onSubmit });
