@@ -72,10 +72,29 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 	// detail is the structured counterpart of the summary's write
 	// description (path, sizes, overwrite flags, capped diff/preview).
 	detail := BuildPermissionDetail(a.cwd, req.ToolCall)
+	if detail != nil && detail.GitRule != nil {
+		// A git rule is per call: never offer a standing allow/reject.
+		opts = stripStandingOptions(opts)
+	}
 	if dd, ok := a.decider.(DetailedPermissionDecider); ok {
 		return dd.DecideDetailed(ctx, summary, detail, opts)
 	}
 	return a.decider.Decide(ctx, summary, opts)
+}
+
+// stripStandingOptions drops allow_always/reject_always options, keeping
+// order. If that would leave nothing it returns opts unchanged.
+func stripStandingOptions(opts []PermissionOption) []PermissionOption {
+	kept := make([]PermissionOption, 0, len(opts))
+	for _, o := range opts {
+		if o.Kind != "allow_always" && o.Kind != "reject_always" {
+			kept = append(kept, o)
+		}
+	}
+	if len(kept) == 0 {
+		return opts
+	}
+	return kept
 }
 
 // DetailedPermissionDecider is an optional extension of PermissionDecider: a
@@ -181,7 +200,7 @@ func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseT
 
 	var optionID string
 	var err error
-	if detail := claudeBashDetail(req); detail != nil {
+	if detail := claudeBashDetail(a.cwd, req); detail != nil {
 		// The command is what a human approving a Bash call must see; the
 		// summary alone says only "run Bash".
 		if dd, ok := a.decider.(DetailedPermissionDecider); ok {
@@ -205,13 +224,14 @@ func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseT
 // the same execute shape ACP execute tool calls produce (command, capped), so
 // the CLI, MCP and web render it the way they do for GLM. nil for any other
 // tool or a request without a command string.
-func claudeBashDetail(req claudecode.CanUseToolRequest) *PermissionDetail {
+func claudeBashDetail(cwd string, req claudecode.CanUseToolRequest) *PermissionDetail {
 	cmd, ok := req.Input["command"].(string)
 	if !ok || req.ToolName != "Bash" {
 		return nil
 	}
 	d := &PermissionDetail{Kind: "execute"}
 	d.Command, d.Truncated = capBytes(cmd, detailCommandMaxBytes)
+	d.GitRule = gitRuleInfo(cwd, cmd)
 	return d
 }
 
@@ -233,7 +253,12 @@ type codexDeciderAdapter struct {
 }
 
 func (a codexDeciderAdapter) DecideCommandExecution(ctx context.Context, req codex.CommandExecutionApprovalRequest) (bool, error) {
-	return a.decide(ctx, fmt.Sprintf("run %s", req.Command))
+	summary := fmt.Sprintf("run %s", req.Command)
+	// Text only: codex's own sandbox policy decides what it escalates.
+	if r := ClassifyGitCommand(req.Command); r != nil && (r.Class == GitClassAlwaysAsk || r.Class == GitClassUnparsedGit) {
+		summary += " [" + r.Label + "]"
+	}
+	return a.decide(ctx, summary)
 }
 
 func (a codexDeciderAdapter) DecideFileChange(ctx context.Context, req codex.FileChangeApprovalRequest) (bool, error) {
