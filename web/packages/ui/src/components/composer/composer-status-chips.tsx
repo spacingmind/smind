@@ -82,12 +82,15 @@ function ConcurrencyChip({ chat, onJump }: { chat: { id: number; title: string }
  */
 export function ComposerStatusChips({
   running,
+  waiting = false,
   git,
   onOpenDiff,
   otherRunningChat,
   onJumpToChat,
 }: {
   running: boolean;
+  /** The live run is blocked on the user (an unanswered permission): the chip says so, like the timeline footer. */
+  waiting?: boolean;
   /** Another chat of this task with a live run (shared worktree) -- renders the concurrency chip. */
   otherRunningChat?: { id: number; title: string } | null;
   /** Jumps to otherRunningChat's tab. */
@@ -110,9 +113,10 @@ export function ComposerStatusChips({
   return (
     <div data-testid="composer-status-chips" className="flex flex-wrap items-center gap-2">
       {running && (
-        <span role="status" data-testid="composer-working-chip" className={CHIP_CLASS}>
-          <span aria-hidden className="size-2 animate-pulse rounded-full bg-primary" />
-          Working
+        <span role="status" data-testid="composer-working-chip" data-waiting={waiting || undefined} className={`${CHIP_CLASS}${waiting ? " text-warning" : ""}`}>
+          {/* Static while waiting: nothing is progressing, so nothing pulses. */}
+          <span aria-hidden className={`size-2 rounded-full ${waiting ? "bg-warning" : "animate-pulse bg-primary"}`} />
+          {waiting ? "Waiting for you" : "Working"}
         </span>
       )}
       {showOther && <ConcurrencyChip chat={otherRunningChat} onJump={() => onJumpToChat?.(otherRunningChat.id)} />}

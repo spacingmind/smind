@@ -36,6 +36,20 @@ function Wired({ onOpenDiff }: { client: FakeWsClient; onOpenDiff: () => void })
 }
 
 describe("ComposerStatusChips", () => {
+  it("says it is waiting for the user, with a static dot, while a permission is unanswered (U26)", () => {
+    const { rerender } = render(<ComposerStatusChips running />);
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working");
+    expect(screen.getByTestId("composer-working-chip").querySelector("span")).toHaveClass("animate-pulse");
+    rerender(<ComposerStatusChips running waiting />);
+    const chip = screen.getByTestId("composer-working-chip");
+    expect(chip).toHaveTextContent("Waiting for you");
+    expect(chip).not.toHaveTextContent("Working");
+    expect(chip.querySelector("span")).not.toHaveClass("animate-pulse");
+    // waiting without a live run shows nothing
+    rerender(<ComposerStatusChips running={false} waiting />);
+    expect(screen.queryByTestId("composer-working-chip")).not.toBeInTheDocument();
+  });
+
   it("renders the concurrency chip beside Working and calls onJumpToChat", () => {
     const onJumpToChat = vi.fn();
     render(<ComposerStatusChips running otherRunningChat={{ id: 7, title: "Fix login" }} onJumpToChat={onJumpToChat} />);

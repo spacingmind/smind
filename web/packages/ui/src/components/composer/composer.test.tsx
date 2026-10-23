@@ -1461,6 +1461,9 @@ describe("Composer redesign (composer-redesign plan)", () => {
 
     rerender({ runningRunId: "run-1" });
     expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working");
+
+    rerender({ runningRunId: "run-1", waitingOnUser: true });
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Waiting for you");
   });
 
   it("diff-stat chip compact-formats thousands and opens the diff", () => {

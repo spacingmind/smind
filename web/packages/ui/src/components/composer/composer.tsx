@@ -104,6 +104,7 @@ export function Composer({
   boundProvider,
   connected,
   runningRunId,
+  waitingOnUser = false,
   git,
   onOpenDiff,
   queuedItems,
@@ -133,6 +134,8 @@ export function Composer({
   connected: boolean;
   /** The task's currently-running run, or null. Drives Stop, "Send now", and the queue placeholder. */
   runningRunId: string | null;
+  /** The live run holds an unanswered permission request: the status chip reads "Waiting for you". */
+  waitingOnUser?: boolean;
   /** The task's git/PR state (useTaskGit) for the chips above the card -- each chip omitted when it does not apply. */
   git?: TaskGit;
   /** Brings the task's Diff tab forward when the pill is clicked; without it (no tab strip above) the pill is omitted entirely. */
@@ -478,6 +481,7 @@ export function Composer({
           stat -- real data only, nothing when neither applies. */}
       <ComposerStatusChips
         running={running}
+        waiting={waitingOnUser}
         git={git}
         onOpenDiff={onOpenDiff}
         otherRunningChat={otherRunningChat}
