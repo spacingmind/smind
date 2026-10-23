@@ -59,7 +59,7 @@ export const MessageAttachments = memo(function MessageAttachments({
 
 function makeStyles(theme: AppTheme) {
   return StyleSheet.create({
-    row: { alignSelf: 'flex-end', maxWidth: '85%', flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: theme.spacing[2], marginTop: theme.spacing[1] },
+    row: { alignSelf: 'flex-end', maxWidth: '85%', flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'flex-start', gap: theme.spacing[2], marginTop: theme.spacing[1] },
     thumb: { width: THUMB_MAX, height: THUMB_MAX, borderRadius: theme.radius.lg, borderCurve: 'continuous', backgroundColor: theme.secondary },
     caption: { ...theme.type.small, color: theme.foregroundSubtle, maxWidth: THUMB_MAX },
   });
