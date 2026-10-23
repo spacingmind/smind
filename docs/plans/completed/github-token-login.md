@@ -4,7 +4,7 @@ Size: **M (5)** — scope 2 (daemon + web + a Docker line), PRs 1 (two PRs: daem
 a subprocess), decisions 0 (H4 and ADR §8 settle it; one verification choice is listed below), verification 1 (UI screenshots; a real `gh` against a throwaway config dir).
 One Lead; every PR non-stacked off `develop`.
 
-Spec: [ADR-0039 §8 and §11](../../decisions/0039-git-pr-state.md) (the contract, accepted 2026-10-22 with H4). Status: **plan written 2026-10-23; implementation not started.**
+Spec: [ADR-0039 §8 and §11](../../decisions/0039-git-pr-state.md) (the contract, accepted 2026-10-22 with H4). Status: **completed 2026-10-23** (daemon #547, web #548; every acceptance criterion is confirmed in Validation, with the success path against real GitHub unverified by decision).
 
 ## Decisions (fixed)
 
@@ -87,7 +87,7 @@ validation call to GitHub); `forge.status` before/after; `plain` refusal over a 
 | A | **Daemon**: channel tag, `forge.status` + topic, `forge.setToken`/`forge.logout`, per-invocation credential helper for https, host-suspension lift, Dockerfile `gh`, the sentinel test | peer-sonnet |
 | B | **Web**: Settings → GitHub section, token field, status live, insecure-channel state, error links; screenshots | peer-sonnet (GLM when its quota allows, step-by-step briefs) |
 
-## Human decision needed (only this one; everything else is §8 as accepted)
+## Human decision needed (only this one; everything else is §8 as accepted) — resolved 2026-10-23: option (3)
 
 - **Success-path verification with a real token.** A bogus token proves the rejection path against real GitHub, but accepting a *valid* token can only be checked with a real one. Options:
   (1) the Lead uses `gh auth token` from the user's own login, **only inside a throwaway `GH_CONFIG_DIR`**, for one validation call, then deletes the directory; (2) the user supplies a
@@ -111,15 +111,25 @@ Decided while implementing (2026-10-23):
 
 ## Progress
 
-- 2026-10-23: daemon and web halves implemented and verified live together (bogus token against real `gh` in a throwaway config dir); PRs opened. Plan written from ADR-0039 §8/§11 and H4; `gh auth status --json hosts` confirmed available in gh 2.101 (fields: host, active, login, scopes, state, tokenSource, gitProtocol).
-  Nothing implemented.
+- 2026-10-23: daemon (#547) and web (#548) halves implemented, verified live together (bogus token against real `gh` in a throwaway config dir) and merged. Plan written from ADR-0039 §8/§11 and H4; `gh auth status --json hosts` confirmed available in gh 2.101 (fields: host, active, login, scopes, state, tokenSource, gitProtocol).
+
 
 ## Validation
 
-How each AC was satisfied (daemon: this PR; web: the Settings → GitHub PR). The two branches were merged in a scratch worktree for the live run.
+How each AC was satisfied (daemon #547; web #548). The two branches were merged in a scratch worktree for the live run.
 
 - **Daemon ACs 1–8:** every name in the plan's daemon group exists and passes. `TestForgeToken_NeverLogged` runs the real `ghctx` subprocess against a fake `gh` that echoes the token to stderr on failure and scans log output, stdout/stderr, the event bus, every SQLite table (`request_log` and `run_events` stay at 0 rows), every RPC result and `detail`, and the subprocess argv and env: the token appears only on gh's stdin. The Peer proved the test by mutation (dropped redaction, an added `slog.Info` of the token, a skipped poller lift each failed the matching test). The Dockerfile change was built for real: `gh --version` in the image printed 2.101.0.
 - **Live, real `gh` 2.101, throwaway `GH_CONFIG_DIR` (never `~/.config/gh`), nothing written to GitHub:** `forge.status` on an empty config → no hosts; pasting a **bogus** token through the real Settings → GitHub card made real `gh` validate it against GitHub once → `HTTP 401: Bad credentials` → `token_invalid` shown as "GitHub rejected that token. Check that it is correct, current and for the right host."; the field was empty afterwards; the sentinel string was in none of: the page DOM, localStorage/sessionStorage, the daemon log, `smind.db` and its WAL, the gh config dir.
 - **Live with a scripted `gh` (signed-in and logout states) and with `gh` missing from PATH:** the card showed "Signed in to github.com as octocat" with scopes, protocol and token source, the Log out confirm, and the signed-out card after logout; with `gh` missing it showed the warning and the disabled field. Light and dark screenshots of each state.
 - **Unverified (by decision, recommendation (3) of this plan):** accepting a *valid* token against GitHub (stubs and the fake `gh` only), and a real non-loopback plain connection (`plain` is covered by httptest remote-address tests, not reproduced live because direct non-loopback sessions need the password flow). Neither was exercised with the Human's own credentials.
 - **ACs 9–13 (web):** named web tests, the source-scan test that no token reaches storage/zustand/`console`/mutation variables, and the screenshots above. **AC14:** `task test`, `task lint` and tsc are recorded in each PR body.
+
+### Acceptance-criteria coverage (2026-10-23 close-out)
+
+| ACs | Where | Evidence |
+|---|---|---|
+| AC1–AC8 (channel tag, `forge.status`, stdin-only `setToken`, secure-channel and agent refusals, never logged, https credential helper, host-suspension lift, Docker `gh`) | #547 | the named daemon tests incl. `TestForgeToken_NeverLogged` (proved by mutation); live: real `gh` 2.101 in a throwaway `GH_CONFIG_DIR`, a bogus token → `token_invalid`, the sentinel in no DOM, storage, log, database or gh config; the image built with `gh --version` 2.101.0 |
+| AC9–AC13 (Settings → GitHub card, token field handling, insecure state, error links, visuals) | #548 | `github-section`, `forge-error-link` and source-scan tests; light/dark screenshots of each state; a review fix so a `forge.status` event keeps the connection's `canSetToken` |
+| AC14 | both | each PR body records `task test`/`task lint`/tsc; nothing written to GitHub |
+
+**Decision resolved:** the success path was verified with stubs and a scripted `gh` only (option 3); using the Human's own token, even in a throwaway config dir, needs their explicit OK, so accepting a valid token against real GitHub stays **unverified** until they choose option (1) or (2). Other residuals: no run-scoped identity exists yet, so the agent refusal is enforced at handler level only; a real non-loopback `plain` connection was covered by tests, not reproduced live.

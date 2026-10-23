@@ -10,8 +10,8 @@ that P1 items G8 (archive) and G12 (GitHub login) need. Research behind it is a 
 not committed).
 
 **Implemented 2026-10-23** (G1 #469, forge interface #471, local status #482, PR poller #503, web chips #497, Start-from #537, Create/Update PR
-#538); evidence in `docs/plans/completed/git-pr-state.md`. The archive/branch-cleanup policy (§9) is implemented by
-`docs/plans/active/archive-merged-branches.md` and the GitHub token login (§8) by `docs/plans/active/github-token-login.md`.
+#538, archive cleanup #544/#545, GitHub token login #547/#548); evidence in `docs/plans/completed/git-pr-state.md`. The archive/branch-cleanup policy (§9) is implemented by
+`docs/plans/completed/archive-merged-branches.md` and the GitHub token login (§8) by `docs/plans/completed/github-token-login.md`.
 
 Coordination decided with the Supervisor: PR #459 (`internal/ghctx`) lands as is; **this work owns the follow-up** that moves `ghctx` onto
 `internal/forge` and the `forge.Error`/`forge_*` codes, in the first forge PR after #459 is on `develop`.
