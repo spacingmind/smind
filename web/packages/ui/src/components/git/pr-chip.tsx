@@ -1,3 +1,4 @@
+import { ForgeSettingsLink } from "@/components/git/forge-settings-link";
 import { prChipModel } from "@/components/git/pr-chip-model";
 import { Icons } from "@/lib/icons";
 import type { TaskGitPr } from "@/lib/types";
@@ -10,7 +11,7 @@ export function PrChip({ pr, nowMs }: { pr: TaskGitPr; nowMs?: number }) {
   const { label, tone, detail } = prChipModel(pr, nowMs ?? Date.now());
   const url = typeof pr.url === "string" ? pr.url : "";
   const openable = url.startsWith("https://");
-  return (
+  const chip = (
     <button
       type="button"
       data-testid="pr-chip"
@@ -25,5 +26,13 @@ export function PrChip({ pr, nowMs }: { pr: TaskGitPr; nowMs?: number }) {
       <Icons.pullRequest aria-hidden className="size-3" />
       <span>{label}</span>
     </button>
+  );
+  // A tooltip can't hold a link: a snapshot stale because GitHub isn't signed in gets a quiet link beside the chip.
+  if (pr.stale !== "unauthenticated") return chip;
+  return (
+    <span className="flex shrink-0 items-center gap-2">
+      {chip}
+      <ForgeSettingsLink label="Sign in" testId="pr-chip-settings-link" />
+    </span>
   );
 }

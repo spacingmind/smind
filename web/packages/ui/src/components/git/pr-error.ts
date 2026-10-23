@@ -1,6 +1,6 @@
 import type { PrExistsErrorData } from "@/lib/types";
 
-export type PrOperation = "preview" | "create" | "update";
+export type PrOperation = "preview" | "create" | "update" | "token" | "logout";
 
 /** What the UI shows for a failed PR call: one sentence, an optional scrubbed detail, and `pr_exists`'s PR. */
 export interface PrErrorView {
@@ -29,7 +29,10 @@ const FALLBACK: Record<string, string> = {
   invalid_branch: "That base branch isn't valid.",
   pr_busy: "Another pull request action is already running for this task.",
   forge_no_remote: "This workspace has no `origin` remote, so there's nowhere to open a pull request.",
-  forge_unauthenticated: "GitHub isn't signed in on the daemon host. Run `gh auth login` there.",
+  forge_unauthenticated: "GitHub isn't signed in on the daemon host. Sign in under Settings → GitHub, or run `gh auth login` there.",
+  insecure_channel: "This connection isn't encrypted, so smind won't send a token over it. Use the relay, an ssh tunnel or TLS.",
+  token_invalid: "GitHub rejected that token. Check that it is correct, current and for the right host.",
+  token_scopes: "That token is missing permissions. A classic token needs the `repo` and `read:org` scopes.",
   forge_cli_missing: "The GitHub CLI (`gh`) isn't installed on the daemon host.",
   forge_rate_limited: "GitHub is rate limiting requests. Try again in a minute.",
   forge_timeout: "GitHub didn't answer in time. Try again.",
@@ -40,6 +43,8 @@ const GENERIC: Record<PrOperation, string> = {
   preview: "Couldn't load the pull request preview.",
   create: "Couldn't create the pull request.",
   update: "Couldn't update the pull request.",
+  token: "Couldn't sign in to GitHub.",
+  logout: "Couldn't log out of GitHub.",
 };
 
 const MAX_MESSAGE = 300;

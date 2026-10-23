@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 
+import { ForgeSettingsLink, isForgeSetupCode } from "@/components/git/forge-settings-link";
 import { CreatePrDialog } from "@/components/git/create-pr-dialog";
 import { describePrError } from "@/components/git/pr-error";
 import { PrErrorLine } from "@/components/git/pr-error-line";
@@ -25,6 +26,7 @@ export function PrAction({ taskId, workspaceId = null }: { taskId: number; works
   // No git state yet (still loading): disabled, with nothing to explain.
   const disabled = !action?.enabled || update.isPending;
   const reason = action && !action.enabled ? action.reason : undefined;
+  const reasonNeedsSetup = reason !== undefined && isForgeSetupCode(action?.code);
   const url = pr?.url ?? "";
   const viewable = url.startsWith("https://");
   const error = update.error ? describePrError(update.error, "update") : null;
@@ -76,6 +78,7 @@ export function PrAction({ taskId, workspaceId = null }: { taskId: number; works
           {reason}
         </p>
       )}
+      {reasonNeedsSetup && <ForgeSettingsLink testId="pr-action-settings-link" />}
       {error && (
         // A card anchored under the buttons, out of flow: an inline error would grow the header and shove the diff down.
         <div

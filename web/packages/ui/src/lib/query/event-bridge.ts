@@ -12,7 +12,7 @@ import type {
 import type { LearnedSkillProbePayload } from "@/lib/probe-types";
 import { queryKeys } from "@/lib/query-keys";
 import { applyLifecycleEvent, LIFECYCLE_TOPICS, type WorkspaceWithTree } from "@/lib/workspace-tree";
-import type { Account, AgentProfile, RunStatusEventPayload, TaskGit, TaskGitEventPayload, TaskGitListResult } from "@/lib/types";
+import type { Account, AgentProfile, ForgeStatus, RunStatusEventPayload, TaskGit, TaskGitEventPayload, TaskGitListResult } from "@/lib/types";
 import { toast } from "@/components/ui/toast";
 
 /**
@@ -198,6 +198,15 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       const p = payload as Partial<TaskGitEventPayload> | null;
       if (typeof p?.taskId !== "number" || typeof p.git !== "object" || p.git === null) return;
       patchTaskGit(queryClient, p.taskId, p.git);
+      return;
+    }
+    case "forge.status": {
+      const status = (payload as { status?: ForgeStatus } | null)?.status;
+      if (typeof status === "object" && status !== null && Array.isArray(status.hosts)) {
+        queryClient.setQueryData<ForgeStatus>(queryKeys.forgeStatus(), status);
+      } else {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.forgeStatus() });
+      }
       return;
     }
     case "event.dropped":
