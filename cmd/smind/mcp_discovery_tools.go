@@ -19,7 +19,7 @@ func registerMCPDiscoveryTools(srv *mcp.Server, client *wsclient.Client) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "workspace_list", Description: "List every workspace (id, title, path) registered with the daemon -- the first call of the orchestration loop, since task_new needs a workspaceId."}, mcpWorkspaceList(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_get", Description: "Get one task by id (id, title, status, branch, worktreePath, parentTaskId) -- the worktreePath is where to review a task's work with git."}, mcpTaskGet(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "run_list", Description: "List runs, newest first (at most 200), optionally filtered by taskId (across all of that task's chats), chatId, or status (e.g. \"running\"). Use this to recover a lost run id after task_send. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately."}, mcpRunList(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "provider_list", Description: "List the daemon's supported providers, each with its permission modes (id, autoApproves) and defaultMode. An orchestrator may not pick an auto-approving mode or autoAccept itself -- pass profileId (a human-authored profile) instead."}, mcpProviderList(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "provider_list", Description: "List the daemon's supported providers, each with its permission modes (id, autoApproves) and defaultMode. An orchestrator may not pick an auto-approving mode or autoAccept itself -- pass profileId (a human-authored profile) instead. A provider with cooldownUntil (RFC 3339 UTC) is rate limited until then: sends to it by an agent fail fast, so choose another provider."}, mcpProviderList(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "profile_list", Description: "List the human-authored agent profiles (id, name, provider, permissionMode, autoAccept, thinkingLevel, notes). Pass a profile's id as task_send's profileId to run with its settings."}, mcpProfileList(client))
 }
 
@@ -134,6 +134,9 @@ func mcpRunList(client *wsclient.Client) mcp.ToolHandlerFor[runListInput, runLis
 // providerListOutput is provider_list's structured output: the
 // providers under "providers", each carrying its own modes (with
 // autoApproves per mode) and defaultMode -- the providerInfo wire shape.
+// Entries are passed through as-is, so a provider.list entry's
+// cooldownUntil (ADR-0041 F1: RFC 3339 UTC, present only while the provider
+// is rate limited) reaches the agent unchanged.
 type providerListOutput struct {
 	Providers []map[string]any `json:"providers"`
 }

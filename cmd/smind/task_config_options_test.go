@@ -143,6 +143,7 @@ func newConfigOptionTestEnvCap(t *testing.T, home string, maxRunsPerTree int, ag
 	}
 	srv := httptest.NewServer(api.Handler)
 	t.Cleanup(srv.Close)
+	testDaemonStores.Store(srv.URL, s)
 
 	return srv.URL
 }

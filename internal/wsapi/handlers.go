@@ -28,7 +28,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"account.add":              handleAccountAdd(acctReg),
 		"account.oauthStart":       handleAccountOAuthStart(coord),
 		"account.oauthComplete":    handleAccountOAuthComplete(coord),
-		"provider.list":            handleProviderList(runner),
+		"provider.list":            handleProviderList(runner, reg),
 		"provider.test":            handleProviderTest(acctReg),
 		"account.list":             handleAccountList(acctReg),
 		"account.rename":           handleAccountRename(acctReg),
@@ -1950,15 +1950,36 @@ func handleRunSetConfigOption(reg *runs.Registry) handlerFunc {
 // daemon supports, sourced from taskrunner.SupportedProviders (the single
 // source of truth RunPrompt's dispatch stays in sync with).
 type providerListResult struct {
-	Providers []taskrunner.ProviderInfo `json:"providers"`
+	Providers []providerListEntry `json:"providers"`
+}
+
+// providerListEntry is one provider.list entry: the catalog info (flat, via
+// embedding) plus CooldownUntil (RFC 3339 UTC), set while an earlier run
+// showed the provider rate limited until then (ADR-0041 F1).
+type providerListEntry struct {
+	taskrunner.ProviderInfo
+	CooldownUntil string `json:"cooldownUntil,omitempty"`
 }
 
 // handleProviderList returns the daemon's supported providers, each with
 // its permission mode catalog (Runner.ProviderCatalog -- never blocks on
 // ACP mode discovery). No params.
-func handleProviderList(runner *taskrunner.Runner) handlerFunc {
+func handleProviderList(runner *taskrunner.Runner, reg *runs.Registry) handlerFunc {
 	return func(_ context.Context, _ *requestContext, _ json.RawMessage) (any, error) {
-		return providerListResult{Providers: runner.ProviderCatalog()}, nil
+		var cooling map[string]time.Time
+		if reg != nil {
+			cooling = reg.ProviderCooldowns()
+		}
+		catalog := runner.ProviderCatalog()
+		entries := make([]providerListEntry, 0, len(catalog))
+		for _, info := range catalog {
+			e := providerListEntry{ProviderInfo: info}
+			if until, ok := cooling[string(info.ID)]; ok {
+				e.CooldownUntil = until.UTC().Format(time.RFC3339)
+			}
+			entries = append(entries, e)
+		}
+		return providerListResult{Providers: entries}, nil
 	}
 }
 
