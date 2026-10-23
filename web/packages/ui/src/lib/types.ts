@@ -61,6 +61,8 @@ export interface Task {
   PRRepo?: string;
   PRHeadRef?: string;
   BaseRef?: string;
+  /** ADR-0039 §9: set when archiving deleted the task's branch, so Restore has nothing to rebuild the worktree from. */
+  BranchDeletedAt?: string | null;
 }
 
 // Mirrors internal/store.Space field-for-field -- same no-json-tags,
@@ -1090,6 +1092,36 @@ export interface TaskGitListResult {
 export interface TaskGitEventPayload {
   taskId: number;
   git: TaskGit;
+}
+
+// ---- Archive risk dialog and Restore (ADR-0039 §9) ----------------------------------------------------------------
+/** `task.archivePreview`: what archiving the task would do and lose, from local git and cache only (no fetch). */
+export interface ArchivePreview {
+  branch: { name: string; owned: boolean };
+  merged: { state: GitMergedState; via: string };
+  base: { ref: string };
+  risks: {
+    uncommitted: { files: number; added: number; deleted: number };
+    commitsAheadOfOrigin: number;
+    commitsAheadOfBase: number;
+    published: boolean;
+  };
+  ignoredFilesLost: boolean;
+  hasTeardown: boolean;
+  /** Whether the non-forced policy would delete the branch now; also the checkbox default. */
+  canDeleteBranch: boolean;
+  deleteBranchDefault: boolean;
+  /** The daemon's sentence for why `canDeleteBranch` is false. */
+  deleteBlockedReason?: string;
+}
+
+/** `task.archive` params. `id` is what daemons before ADR-0039 §9 read; `taskId` is the frozen wire name. */
+export interface TaskArchiveParams {
+  id: number;
+  taskId: number;
+  deleteBranch?: boolean;
+  /** Delete an owned branch although it is unmerged or dirty (the dialog's explicit "anyway"). */
+  force?: boolean;
 }
 
 // ---- New Task "Start from" (ADR-0039 G4) --------------------------------------------------------------------------

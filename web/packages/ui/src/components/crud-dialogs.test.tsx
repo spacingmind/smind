@@ -1,8 +1,9 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ArchiveTaskDialog, CreateWorkspaceDialog } from "@/components/crud-dialogs";
 import { FakeWsClient } from "@/test/fake-ws-client";
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import type { Task } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
@@ -131,7 +132,7 @@ describe("ArchiveTaskDialog children (PR-U2)", () => {
     // Exactly one task.archive, and only for the parent id -- archiving
     // is never a cascade.
     expect(client.calls.filter((c) => c.method === "task.archive")).toHaveLength(1);
-    expect(client.nth("task.archive").params).toEqual({ id: 7 });
+    expect(client.nth("task.archive").params).toEqual({ id: 7, taskId: 7 });
   });
 
   it("archive dialog child-list failure still allows archive with a warning", async () => {

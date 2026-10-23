@@ -43,6 +43,8 @@ import { sidebarTreeActions, type TreeActionAvailability } from "@/lib/task-tree
 import { ArchiveFinishedDialog, StopTreeDialog } from "@/components/tree-action-dialogs";
 import { formatRelativeTime, formatRelativeTimeShort } from "@/lib/relative-time";
 import { useWorkspaceTaskGit } from "@/hooks/use-task-git";
+import { useArchivedTasks } from "@/hooks/use-archive";
+import { ArchivedTaskList } from "@/components/archived-tasks";
 import { GitBranchLine } from "@/components/git/git-branch-line";
 import { GitTokens } from "@/components/git/git-tokens";
 import { SidebarGitGlyph } from "@/components/git/sidebar-git-glyph";
@@ -1250,7 +1252,7 @@ function ContainerContent({ kind, children }: { kind: string; children: ReactNod
   // title, so nearly every real title was cut. Tasks stay flush under the space
   // header and rely on its icon/weight to read as nested (their status dots
   // line up under the header's icon).
-  const isSpaceLike = kind === "space" || kind === "ungrouped";
+  const isSpaceLike = kind === "space" || kind === "ungrouped" || kind === "archived";
   return (
     <SidebarMenuSub
       data-testid="sidebar-container-content"
@@ -1569,9 +1571,44 @@ function WorkspaceItem({
               )}
             </>
           )}
+          <ArchivedItem workspaceId={workspace.ID} />
         </ContainerContent>
       )}
     </SidebarMenuItem>
+  );
+}
+
+/**
+ * A workspace's archived tasks (ADR-0039 §9): a collapsible "Archived (n)" row below its tasks, closed by default,
+ * with Restore per task. Absent while there is nothing archived, so a workspace with no history shows nothing extra.
+ */
+function ArchivedItem({ workspaceId }: { workspaceId: number }) {
+  const tasks = useArchivedTasks(workspaceId, true);
+  const [open, setOpen] = useState(false);
+  const { active, rowProps } = useRowActive();
+  if (!tasks || tasks.length === 0) return null;
+  return (
+    <SidebarMenuSubItem data-testid="sidebar-archived" data-workspace-id={workspaceId}>
+      <div {...rowProps}>
+        <SidebarMenuSubButton asChild className="h-8 w-full translate-x-0 gap-2 rounded-lg">
+          <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} data-testid="sidebar-archived-header">
+            <Icons.archive className={cn("size-3.5", active ? "text-foreground" : "text-foreground-subtle")} />
+            <FadeText
+              data-testid="container-title"
+              className={cn("flex-initial text-ui-sm", active ? "text-foreground" : "text-foreground-subtle")}
+            >
+              Archived ({tasks.length})
+            </FadeText>
+            <RowChevron open={open} />
+          </button>
+        </SidebarMenuSubButton>
+      </div>
+      {open && (
+        <ContainerContent kind="archived">
+          <ArchivedTaskList tasks={tasks} />
+        </ContainerContent>
+      )}
+    </SidebarMenuSubItem>
   );
 }
 

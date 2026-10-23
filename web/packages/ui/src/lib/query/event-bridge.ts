@@ -224,6 +224,9 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
         queryClient.setQueryData<WorkspaceWithTree[]>(queryKeys.workspaceTree(), (held) =>
           held ? applyLifecycleEvent(held, topic, payload) : held,
         );
+        // The Archived view lists what the tree does not: an archive adds a row there, a restore (published as
+        // the task coming back) or a delete removes one. Inactive entries re-read on their next mount.
+        if (topic.startsWith("task.")) void queryClient.invalidateQueries({ queryKey: queryKeys.archivedTasksAll() });
       }
       return;
   }

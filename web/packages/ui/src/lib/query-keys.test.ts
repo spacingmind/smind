@@ -35,6 +35,17 @@ describe("query keys", () => {
     expect(queryKeys.providerTest("anthropic")).toEqual(["provider.test", "anthropic"]);
   });
 
+  it("archive keys are the RPC name plus its params, and the partial key prefixes the full one", () => {
+    expect(queryKeys.archivePreview(7)).toEqual(["task.archivePreview", { taskId: 7 }]);
+    expect(queryKeys.archivedTasks(3)).toEqual(["task.list", { workspaceId: 3, archived: true }]);
+    const qc = new QueryClient();
+    qc.setQueryData(queryKeys.archivedTasks(3), []);
+    qc.setQueryData(queryKeys.archivedTasks(4), []);
+    void qc.invalidateQueries({ queryKey: queryKeys.archivedTasksAll() });
+    expect(qc.getQueryState(queryKeys.archivedTasks(3))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(queryKeys.archivedTasks(4))?.isInvalidated).toBe(true);
+  });
+
   it("attachment keys are the RPC name plus its params", () => {
     expect(queryKeys.daemonInfo()).toEqual(["daemon.info"]);
     expect(queryKeys.runAttachment("run_1", "2")).toEqual(["run.attachment", { runId: "run_1", id: "2" }]);

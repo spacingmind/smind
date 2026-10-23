@@ -374,7 +374,7 @@ export function DiffViewerPane({
         actions={
           isMobile ? (
             <>
-              <PrAction taskId={task.ID} workspaceId={task.WorkspaceID} />
+              <PrAction taskId={task.ID} workspaceId={task.WorkspaceID} title={task.Title} />
               <DiffHeaderMenu
                 prefs={prefs}
                 onChangePrefs={updatePrefs}
@@ -407,7 +407,7 @@ export function DiffViewerPane({
               <Button type="button" variant="outline" size="sm" disabled={!client || loading} onClick={refreshAll}>
                 Refresh
               </Button>
-              <PrAction taskId={task.ID} workspaceId={task.WorkspaceID} />
+              <PrAction taskId={task.ID} workspaceId={task.WorkspaceID} title={task.Title} />
             </>
           )
         }

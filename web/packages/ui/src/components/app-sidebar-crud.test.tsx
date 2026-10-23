@@ -73,7 +73,9 @@ async function resolveRefresh(client: FakeWsClient, workspace: Workspace, spaces
   await flush();
   await flush();
   client.nth("space.list", 1).resolve(spaces);
-  client.nth("task.list", 1).resolve(tasks);
+  // The tree's re-read: the first active-task list after the initial one (not the Archived view's `archived: true` read).
+  const treeLists = client.calls.filter((c) => c.method === "task.list" && !(c.params as { archived?: boolean }).archived);
+  treeLists[1].resolve(tasks);
   await flush();
 }
 
@@ -398,7 +400,7 @@ describe("AppSidebar CRUD", () => {
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
 
     const archive = await waitFor(() => client.nth("task.archive"));
-    expect(archive.params).toEqual({ id: 42 });
+    expect(archive.params).toEqual({ id: 42, taskId: 42 });
 
     await act(async () => {
       archive.resolve(TASK);

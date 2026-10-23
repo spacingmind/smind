@@ -22,7 +22,10 @@ import {
 import { FolderPickerDialog } from "@/components/folder-picker-dialog";
 import { FormError } from "@/components/ui/form-error";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { ArchiveRisks, DeleteBranchOption } from "@/components/archive-preview";
+import { describeArchiveError } from "@/components/git/pr-error";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
+import { useArchivePreview, useArchiveTask } from "@/hooks/use-archive";
 import { useLastDefined } from "@/hooks/use-last-defined";
 import { Input } from "@/components/ui/input";
 import {
@@ -564,12 +567,24 @@ export function ArchiveTaskDialog({
   onArchived,
 }: {
   client: WsClient | null;
-  task: Task | null;
+  task: Pick<Task, "ID" | "WorkspaceID" | "Title"> | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onArchived: () => void;
 }) {
-  const action = useConfirmAction(open);
+  const archive = useArchiveTask();
+  const preview = useArchivePreview(task?.ID ?? null, open).data;
+  // The user's choice; `null` = untouched, so the daemon's `deleteBranchDefault` applies once the preview lands.
+  const [deleteChoice, setDeleteChoice] = useState<boolean | null>(null);
+  const deleteBranch = deleteChoice ?? preview?.deleteBranchDefault ?? false;
+  const error = archive.error ? describeArchiveError(archive.error, "archive").message : null;
+  const { reset: resetArchive } = archive;
+  useEffect(() => {
+    if (!open) {
+      setDeleteChoice(null);
+      resetArchive();
+    }
+  }, [open, resetArchive]);
   // The target is cleared on close; keep its name on screen while the dialog animates out.
   const shown = useLastDefined(task);
   // null = fetch pending/never ran, [] = no children (today's dialog).
@@ -616,31 +631,45 @@ export function ArchiveTaskDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="Archive task?"
+      className="top-[10vh] translate-y-0"
       description={
         <>
           <span className="font-medium text-foreground">{shown?.Title}</span>
-          <p className="mt-2">
-            Uncommitted work is checkpointed to the task branch before the
-            worktree is removed.
-          </p>
+          <p className="mt-2">Uncommitted work is checkpointed to the task branch before the worktree is removed.</p>
+          {preview && (
+            <div className="mt-3">
+              <ArchiveRisks preview={preview} />
+            </div>
+          )}
           {hasChildren && <ArchiveChildren>{childTasks}</ArchiveChildren>}
           {childError && <p className="mt-2 font-normal text-foreground-muted">Could not check for child tasks.</p>}
         </>
       }
       confirmLabel={hasChildren ? "Archive parent only" : "Archive"}
       pendingLabel="Archiving…"
-      pending={action.pending}
-      error={action.error}
+      pending={archive.isPending}
+      error={error}
       testId="dialog-archive-task"
       confirmTestId="dialog-archive-task-confirm"
-      onConfirm={async () => {
+      onConfirm={() => {
         if (!task) return;
-        if (await action.run(() => client!.call("task.archive", { id: task.ID }))) {
-          onArchived();
-          onOpenChange(false);
-        }
+        // A branch is only ever deleted on a choice the user saw in the preview; forced only from the "anyway" option.
+        const force = deleteBranch && preview !== undefined && !preview.canDeleteBranch;
+        archive.mutate(
+          { id: task.ID, taskId: task.ID, ...(deleteBranch ? { deleteBranch: true } : {}), ...(force ? { force: true } : {}) },
+          {
+            onSuccess: () => {
+              onArchived();
+              onOpenChange(false);
+            },
+          },
+        );
       }}
-    />
+    >
+      {preview && (
+        <DeleteBranchOption preview={preview} checked={deleteBranch} disabled={archive.isPending} onChange={setDeleteChoice} />
+      )}
+    </ConfirmDialog>
   );
 }
 

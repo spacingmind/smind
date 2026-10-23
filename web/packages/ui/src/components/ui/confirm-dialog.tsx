@@ -31,6 +31,8 @@ export function ConfirmDialog({
   confirmTestId,
   cancelTestId,
   errorTestId,
+  className,
+  children,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -48,6 +50,10 @@ export function ConfirmDialog({
   confirmTestId?: string;
   cancelTestId?: string;
   errorTestId?: string;
+  /** For the dialog box itself, e.g. top-anchoring one whose body loads after it opens. */
+  className?: string;
+  /** Controls between the description and the error (a checkbox the confirm depends on). */
+  children?: ReactNode;
 }) {
   const [typed, setTyped] = useState("");
   const blocked = requireText !== undefined && typed !== requireText;
@@ -65,7 +71,7 @@ export function ConfirmDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent data-testid={testId}>
+      <DialogContent data-testid={testId} className={className}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription asChild>
@@ -83,6 +89,7 @@ export function ConfirmDialog({
             />
           </label>
         )}
+        {children}
         <FormError message={error} testId={errorTestId ?? `${testId}-error`} />
         <DialogFooter>
           <Button
