@@ -233,7 +233,7 @@ describe('timeline', () => {
     expect(canThumbnail(img(500_000))).toBe(true);
     expect(canThumbnail(img(undefined))).toBe(false);
     const est = (n: number) => (((n + 2) / 3) | 0) * 4 + (5 + 9) * 6 + 256;
-    let edge = 800_000;
+    let edge = 700_000;
     while (est(edge + 1) <= RELAY_MAX_REQUEST_BYTES) edge++;
     expect(est(edge)).toBeLessThanOrEqual(RELAY_MAX_REQUEST_BYTES);
     expect(canThumbnail(img(edge))).toBe(true);
