@@ -2400,7 +2400,7 @@ function TabContent({
     ),
     file: <FileEditorPane client={client} task={task} path={filePathFromTabKey(entry.key)} events={events} />,
     diff: <DiffViewerPane client={client} task={task} events={events} chats={chats} />,
-    pr: <PRPanelPane task={task} active={active} />,
+    pr: <PRPanelPane taskId={task.ID} focused={active} />,
     terminal: (
       <TerminalPane
         client={client}
