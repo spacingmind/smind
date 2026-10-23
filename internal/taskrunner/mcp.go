@@ -1,6 +1,7 @@
 package taskrunner
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -240,6 +241,63 @@ func (r *Runner) mcpServersForWorkspace(workspaceID int64) ([]store.McpServer, e
 		return nil, err
 	}
 	return rows, nil
+}
+
+// smindMcpName is the reserved name of the built-in orchestration server.
+const smindMcpName = "smind"
+
+// WithSmindBinary sets the executable the built-in orchestration MCP entry
+// runs (`<path> mcp serve`). Default: the daemon's own binary
+// (os.Executable, resolved lazily), falling back to "smind".
+func WithSmindBinary(path string) Option {
+	return func(r *Runner) { r.smindBinary = path }
+}
+
+func (r *Runner) smindBinaryPath() string {
+	if r.smindBinary != "" {
+		return r.smindBinary
+	}
+	if exe, err := os.Executable(); err == nil && exe != "" {
+		return exe
+	}
+	return smindMcpName
+}
+
+// mcpRowsFor is mcpServersForWorkspace under the run's seat contract. With
+// no contract (or no Mcp policy) the rows are exactly the workspace's. With
+// one, every row named "smind" is removed (reserved name) and, for an
+// orchestration seat, the built-in stdio entry is appended.
+func (r *Runner) mcpRowsFor(ctx context.Context, workspaceID int64) ([]store.McpServer, error) {
+	rows, err := r.mcpServersForWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	policy := RunContractFrom(ctx).Mcp
+	if policy == nil {
+		return rows, nil
+	}
+	out := make([]store.McpServer, 0, len(rows)+1)
+	for _, row := range rows {
+		if row.Name != smindMcpName {
+			out = append(out, row)
+		}
+	}
+	if policy.Orchestration {
+		args, _ := json.Marshal([]string{"mcp", "serve"})
+		env := policy.Env
+		if env == nil {
+			env = map[string]string{}
+		}
+		envJSON, err := json.Marshal(env)
+		if err != nil {
+			return nil, fmt.Errorf("smind mcp env: %w", err)
+		}
+		out = append(out, store.McpServer{
+			Name: smindMcpName, Transport: "stdio", Command: r.smindBinaryPath(),
+			Args: string(args), Env: string(envJSON), Enabled: true,
+		})
+	}
+	return out, nil
 }
 
 // redactedPlaceholder replaces a known MCP secret inside scrubbed text.
