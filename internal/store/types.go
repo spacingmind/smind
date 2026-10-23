@@ -199,6 +199,12 @@ type Run struct {
 	FailureWindow string
 	// FailureResetAt is the instant (UTC) the quota resets; nil = unknown.
 	FailureResetAt *time.Time
+	// ReplyChatID is the parent task's chat to tell when this run finishes
+	// (ADR-0041 B3); 0 = none, stored as NULL.
+	ReplyChatID int64
+	// ParentNotifiedAt is when the parent notification was claimed; nil = not
+	// yet notified.
+	ParentNotifiedAt *time.Time
 }
 
 // RunEvent is one persisted internal/runs.Event, in the order it was

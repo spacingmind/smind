@@ -24,15 +24,60 @@ func (s *Store) CreateRun(r Run) (Run, error) {
 		chatID = sql.NullInt64{Int64: r.ChatID, Valid: true}
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO runs (id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, approval_policy, model, purpose, origin, interrupt, attachments)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?)`,
+		`INSERT INTO runs (id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, approval_policy, model, purpose, origin, interrupt, attachments, reply_chat_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.TaskID, chatID, r.Provider, r.Prompt, r.Status, r.StartedAt,
-		timePtrToNull(r.FinishedAt), r.StopReason, r.ErrMsg, r.PermissionMode, r.AutoAccept, nullString(r.Model), r.Purpose, r.Origin, r.Interrupt, r.Attachments,
+		timePtrToNull(r.FinishedAt), r.StopReason, r.ErrMsg, r.PermissionMode, r.AutoAccept, nullString(r.Model), r.Purpose, r.Origin, r.Interrupt, r.Attachments, nullID(r.ReplyChatID),
 	)
 	if err != nil {
 		return Run{}, fmt.Errorf("insert run: %w", err)
 	}
 	return r, nil
+}
+
+// ClaimRunParentNotified atomically marks a run's parent notification as
+// claimed at the given time. It reports true only for the call that set the
+// marker; later calls (and runs already claimed) report false. This is the
+// idempotency gate of ADR-0041 B3.
+func (s *Store) ClaimRunParentNotified(id string, at time.Time) (bool, error) {
+	res, err := s.db.Exec(
+		`UPDATE runs SET parent_notified_at = ? WHERE id = ? AND parent_notified_at IS NULL`,
+		at, id,
+	)
+	if err != nil {
+		return false, fmt.Errorf("claim run %q parent notified: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("claim run %q parent notified: %w", id, err)
+	}
+	return n == 1, nil
+}
+
+// ListUnnotifiedChildRuns returns finished (non-running) runs that carry a
+// reply chat, have not yet been claimed as notified, and finished (or, when
+// unfinished, started) after since, oldest first.
+func (s *Store) ListUnnotifiedChildRuns(since time.Time) ([]Run, error) {
+	rows, err := s.db.Query(
+		`SELECT `+runColumns+`
+		 FROM runs
+		 WHERE reply_chat_id IS NOT NULL AND parent_notified_at IS NULL
+		   AND status != 'running' AND COALESCE(finished_at, started_at) > ?
+		 ORDER BY started_at, id`, since,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list unnotified child runs: %w", err)
+	}
+	defer rows.Close()
+	var out []Run
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan run: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // UpdateRunStatus sets a run's terminal (or reconciled) status and returns
@@ -263,7 +308,7 @@ func (s *Store) ListRunEvents(runID string) ([]RunEvent, error) {
 
 // runColumns is the run SELECT column list; scanRun's Scan argument order
 // must stay in lockstep with it.
-const runColumns = "id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose, origin, interrupt, attachments, failure_kind, failure_window, failure_reset_at"
+const runColumns = "id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose, origin, interrupt, attachments, failure_kind, failure_window, failure_reset_at, reply_chat_id, parent_notified_at"
 
 // runColumnsAs is runColumns with every column qualified by alias.
 func runColumnsAs(alias string) string {
@@ -283,10 +328,12 @@ func scanRun(row rowScanner) (Run, error) {
 	var baseSHA, headSHA sql.NullString
 	var dirty sql.NullBool
 	var failureResetAt sql.NullTime
+	var replyChatID sql.NullInt64
+	var parentNotifiedAt sql.NullTime
 	if err := row.Scan(&r.ID, &r.TaskID, &chatID, &r.Provider, &r.Prompt, &r.Status,
 		&r.StartedAt, &finishedAt, &r.StopReason, &r.ErrMsg, &r.PermissionMode, &r.AutoAccept, &model,
 		&baseSHA, &headSHA, &dirty, &r.Purpose, &r.Origin, &r.Interrupt, &r.Attachments,
-		&r.FailureKind, &r.FailureWindow, &failureResetAt); err != nil {
+		&r.FailureKind, &r.FailureWindow, &failureResetAt, &replyChatID, &parentNotifiedAt); err != nil {
 		return Run{}, err
 	}
 	// NULL decodes as ChatID 0 ("unknown"/pre-chats) -- see CreateRun's
@@ -301,6 +348,8 @@ func scanRun(row rowScanner) (Run, error) {
 	r.HeadSHA = nullToStringPtr(headSHA)
 	r.Dirty = nullBoolPtr(dirty)
 	r.FailureResetAt = nullToTimePtr(failureResetAt)
+	r.ReplyChatID = replyChatID.Int64
+	r.ParentNotifiedAt = nullToTimePtr(parentNotifiedAt)
 	return r, nil
 }
 
