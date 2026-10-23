@@ -55,7 +55,12 @@ Web (`profiles-section.test.tsx`, `use-profiles.test.ts`):
 - Edit semantics: get → modify → full update (no new RPC; no daemon change).
 
 ## Progress
-(Lead fills in)
+- CLI (task 48, peer-glm): 3 commits, ACCEPTED (PR-CLI).
+- Web (task 49, peer-sonnet): see PR-WEB.
 
-## Validation
-(Lead fills in: ACCEPT/REJECT per candidate, commands, results, screenshots)
+## Validation — CLI
+- AC-C1..C6 confirmed. `go test ./cmd/smind -run Profile -count=1` ok; mutation (drop the `--fallback-profile=0` clear) fails TestProfileEditClearsModelAndFallback.
+- Real run against an isolated daemon (throwaway SMIND_HOME, port 47391): notes cleared, fallback set → `fallback→2`; `--child-policy=profiles` on a no-tools profile → daemon text `a profile without orchestration tools cannot launch children`, exit 1, profile unchanged; clear model/fallback/skills + `--orchestration-tools=unmanaged` → ROLE `-`; unknown id exit 1; no flags exit 2.
+
+## Validation — Web
+(filled in by PR-WEB)
