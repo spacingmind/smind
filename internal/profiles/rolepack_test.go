@@ -159,3 +159,39 @@ func TestSeedRoles_PartialFailureCompletesOnRerun(t *testing.T) {
 		}
 	}
 }
+
+// TestSeedRoles_ClaudeSeatsWaitOnRateLimit: the claude-native seats re-enqueue
+// the cut-off prompt at the reset (the F2 "wait" policy), so a tree heals by
+// itself after an account usage limit (the second in-smind dogfood tree
+// stalled for two hours without it). peer-glm keeps its fallback to peer-sonnet.
+func TestSeedRoles_ClaudeSeatsWaitOnRateLimit(t *testing.T) {
+	t.Parallel()
+	r := newTestRegistry(t)
+	seed(t, r)
+	for _, n := range []string{"peer-sonnet", "lead", "reviewer", "supervisor"} {
+		if got := byName(t, r, n).OnRateLimit; got != "wait" {
+			t.Errorf("%s OnRateLimit = %q, want wait", n, got)
+		}
+	}
+	if got := byName(t, r, "peer-glm").OnRateLimit; got != "fallback" {
+		t.Errorf("peer-glm OnRateLimit = %q, want fallback", got)
+	}
+}
+
+// TestSeedRoles_LeadInstructionsDefaultToSonnetPeers: the dogfood measured
+// 28 min / 3.0M input tokens for a GLM step Sonnet does in ~1.5 min, so the
+// Lead is told to default to peer-sonnet and treat peer-glm as opt-in.
+func TestSeedRoles_LeadInstructionsDefaultToSonnetPeers(t *testing.T) {
+	t.Parallel()
+	r := newTestRegistry(t)
+	seed(t, r)
+	lead := byName(t, r, "lead").Instructions
+	for _, want := range []string{"DEFAULT TO peer-sonnet", "peer-glm only when the Human's brief asks for it"} {
+		if !strings.Contains(lead, want) {
+			t.Errorf("lead instructions lack %q", want)
+		}
+	}
+	if !strings.Contains(byName(t, r, "peer-glm").Notes, "Opt-in coder") {
+		t.Errorf("peer-glm notes = %q, want the opt-in wording", byName(t, r, "peer-glm").Notes)
+	}
+}
