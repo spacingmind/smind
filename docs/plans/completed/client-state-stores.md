@@ -282,3 +282,22 @@ Named test scenarios from the spec: all eleven exist under their names (`query c
 `provider.list fetched once with composer, sidebar, task header and settings mounted`, `profile created in settings appears in composer picker and palette`,
 `sidebar health count matches providers dots`, `profile form uses the shared provider/model, mode and thinking pickers`,
 `describeProfile is identical in picker pill and settings row`, `providerLabel maps both id vocabularies`).
+
+## Amendment 2026-10-23 (#536, UI dogfood U9): AC12 split into run readiness and account credentials
+AC12 said the sidebar footer count and the Providers dots "come from the same health cache and agree", which held because both asked `provider.test` by
+**account id** (`accountHealthTestKey`: claude-native → `anthropic`). For a CLI-login provider that answered the wrong question: claude-native runs on the
+`claude` CLI's own login, so a daemon with no accounts showed `no account configured for "anthropic"` in the composer picker and counted Claude Code as
+unhealthy.
+
+Decision (Supervisor, 2026-10-23; no API shape change): there are now two answers in the one cache, under two keys.
+- **Run readiness** (key = the provider's own id): the composer picker, the sidebar "N healthy" count and the agent profile dots. "Can a run start?" The
+  daemon already answers a taskrunner id with a PATH check of the agent CLI for claude-native, codex-native and glm, and with a credential check for kimi
+  (whose id is its account id).
+- **Account credential** (key = the account id): the Providers page's account rows and the Accounts dialog. Pressing Test on an account row updates only that
+  row. `useProviderHealth().ensure()` still asks the account id (a local check) so the rows have a dot, and `accountChecksPending` makes the footer re-run it
+  after `account.updated` drops the answer.
+
+The footer and the account rows therefore no longer have to agree: a provider can be ready to run with no account (Claude Code on the CLI login), or have a
+failing account that is irrelevant to a CLI run. The named scenario `sidebar health count matches providers dots` is now
+`the footer counts run readiness by provider id while an account row's dot tests its credential`, and `account.updated drops that provider's health answer…`
+covers kimi (id = account id) and the Anthropic account separately.
