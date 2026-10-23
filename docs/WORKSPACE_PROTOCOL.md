@@ -178,6 +178,28 @@ read-only review of an exact commit.
     `relaytest.Relay.DaemonSideAttached` to be false before re-attaching the
     same route; the hub's own session map goes first and is not enough.
 
+## Running the roles inside smind
+
+smind can host the three roles itself as seat profiles (ADR-0041). Seed the
+standard pack once with `smind profile seed roles`: `peer-sonnet`, `peer-glm`
+(falls back to `peer-sonnet` on a provider rate limit), `lead`, `reviewer` and
+`supervisor`. Seeding is idempotent by name; a profile you already have or
+edited is kept as is.
+
+- **Supervisor** is a root task the Human launches: `smind task new <ws>
+  "<title>"`, then `smind task send <task> <prompt> --profile <supervisor id>`
+  (or the web composer's profile picker). It has no model set; choose it.
+- **Lead** and **Peers** are child tasks launched through MCP (`task_new`,
+  then `task_send` with `profileId`). A seat sees only the profiles in its own
+  child list, so the Supervisor launches Leads and a Lead launches Peers.
+- **Peers have no orchestration tools**; they cannot start or message agents.
+- **No polling.** A parent ends its turn after dispatching; the daemon wakes it
+  with a `[child event]` message when the child's work is done or has failed.
+- The daemon, not the agent, enforces who may launch whom. That is a drift
+  guard, not a sandbox: the provider's permission modes are the real boundary.
+- After accepting a Peer's candidate (its commits are on the branch the Lead
+  will push), the Lead archives the Peer's task.
+
 ## Process safety
 
 - Run sandbox daemons with an isolated `SMIND_HOME` and port. Never touch
