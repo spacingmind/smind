@@ -313,6 +313,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	// finish hook ran over an empty queue): deliverOne re-reads setup status
 	// from the store. Pinned by TestSetup_QueuedPromptNotStranded...
 	reg.deliverOne(chatID)
+	reg.armQueueWake()
 
 	return StartOutcome{Queued: true, QueueItemID: item.ID}, nil
 }
@@ -326,12 +327,60 @@ func (reg *Registry) DeliverQueued() {
 	if reg.closing.Load() {
 		return
 	}
+	// Every pass re-arms the wake timer for the next held item, which also
+	// covers the startup call (ADR-0041 N1b).
+	defer reg.armQueueWake()
 	chats, err := reg.st.ChatsWithQueued()
 	if err != nil {
 		return
 	}
 	for _, chatID := range chats {
 		reg.deliverOne(chatID)
+	}
+}
+
+// queueWakeSlack is added to a held item's not_before so the timer fires just
+// after the hold has passed.
+const queueWakeSlack = 10 * time.Millisecond
+
+// armQueueWake (re)sets the registry's single wake timer to the earliest
+// future not_before among queued items, or stops it when none is held. When
+// it fires it delivers whatever became due and re-arms. A no-op once closing
+// is set; CloseAll stops the timer. Never call it holding reg.mu or deliverMu.
+func (reg *Registry) armQueueWake() {
+	if reg.closing.Load() {
+		return
+	}
+	at, ok, err := reg.st.EarliestHeldNotBefore(time.Now())
+
+	reg.wakeMu.Lock()
+	defer reg.wakeMu.Unlock()
+	if reg.closing.Load() { // CloseAll latched while we queried; it stops the timer under wakeMu.
+		return
+	}
+	if reg.wakeTimer != nil {
+		reg.wakeTimer.Stop()
+		reg.wakeTimer = nil
+	}
+	if err != nil || !ok {
+		return
+	}
+	d := time.Until(at) + queueWakeSlack
+	if d < 0 {
+		d = 0
+	}
+	reg.wakeTimer = time.AfterFunc(d, func() {
+		reg.DeliverQueued() // re-arms via its deferred armQueueWake
+	})
+}
+
+// stopQueueWake stops the wake timer (CloseAll).
+func (reg *Registry) stopQueueWake() {
+	reg.wakeMu.Lock()
+	defer reg.wakeMu.Unlock()
+	if reg.wakeTimer != nil {
+		reg.wakeTimer.Stop()
+		reg.wakeTimer = nil
 	}
 }
 

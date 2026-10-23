@@ -151,6 +151,12 @@ type Registry struct {
 	// losing it for the restart's redelivery, ADR-0021 §5).
 	closing atomic.Bool
 
+	// wakeMu guards wakeTimer: the single timer that delivers a held queue
+	// item (chat_queue.not_before, ADR-0041) when its time arrives. Taken
+	// alone -- never while holding mu or deliverMu.
+	wakeMu    sync.Mutex
+	wakeTimer *time.Timer
+
 	// maxConcurrentRunsPerTree overrides defaultMaxConcurrentRunsPerTree
 	// when > 0 (see SetMaxConcurrentRunsPerTree). Guarded by mu.
 	maxConcurrentRunsPerTree int
@@ -1613,6 +1619,7 @@ func (reg *Registry) Stop(runID string) error {
 // internal/terminal.Registry.CloseAll's exact same reasoning and shape).
 func (reg *Registry) CloseAll() {
 	reg.closing.Store(true)
+	reg.stopQueueWake()
 
 	// Loop until a pass finds nothing running: a finish that was already
 	// inside its queue hand-off when closing latched can still register a
