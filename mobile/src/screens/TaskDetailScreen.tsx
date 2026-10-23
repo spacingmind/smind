@@ -52,7 +52,8 @@ import { RelayConnection } from '../relay/RelayConnection';
 import { useConnectionState } from '../relay/useConnectionState';
 import { RunFollower, RunStatusEvent } from '../runFollower';
 import { hapticFor } from '../haptics';
-import { describeRunFooter } from '../runFooter';
+import { findHeldUntil, findSuccessor } from '../failoverContext';
+import { describeContinues, describeRunFooter } from '../runFooter';
 import { lineFromAttachEvent, TimelineLine, timelineFromLogs } from '../runTimeline';
 import { requestStop, stopControlView } from '../stopControl';
 import { AppTheme } from '../theme';
@@ -116,6 +117,8 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   const refreshSeq = useRef(0);
   const sending = useRef(false);
   const queue = useChatQueue(conn, chatId);
+  // ADR-0041: the failover successor of a rate-limited latest run, found with one run.list (no polling); null = none/unknown.
+  const [successor, setSuccessor] = useState<{ provider: string; chatId: number } | null>(null);
   const queueRef = useRef(queue); // the adoption callback lives in the load effect: it reads the current queue through this
   queueRef.current = queue;
 
@@ -454,10 +457,32 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   const stopView = stopControlView(liveRunId, stopping);
 
   // The not-finished footer: same visibility rule as before, now the last transcript item.
+  const failedRun = state.kind === 'ready' && state.run?.FailureKind === 'rate_limited' ? state.run : null;
+  const failedRunId = failedRun?.ID ?? null;
+  useEffect(() => {
+    setSuccessor(null);
+    if (failedRunId === null) return;
+    let cancelled = false;
+    listRunsForTask(conn, taskId)
+      .then((runs) => {
+        if (!cancelled) setSuccessor(findSuccessor(runs, failedRunId));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [conn, taskId, failedRunId, epoch]);
+  const heldUntil = failedRun ? findHeldUntil(queue.items, failedRun.Prompt) : null;
+  const heldUntilMs = heldUntil?.getTime() ?? null;
   const footer = useMemo(() => {
     if (state.kind !== 'ready' || state.run === null || continued || liveRunId !== null) return null;
-    return describeRunFooter(state.run);
-  }, [continued, liveRunId, state]);
+    const view = describeRunFooter(state.run, new Date(), {
+      heldUntil: heldUntilMs === null ? null : new Date(heldUntilMs),
+      continuedOn: successor,
+    });
+    const continues = describeContinues(state.run);
+    return view && continues && !view.note ? { ...view, note: continues } : view;
+  }, [continued, heldUntilMs, liveRunId, state, successor]);
   const items = useMemo(() => buildTranscript(lines, permissions, footer), [lines, permissions, footer]);
 
   // Stick-to-bottom (vercel-react-native-skills: never track scroll position in useState per frame): `following` is a
@@ -512,7 +537,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
         case 'permission':
           return <PermissionCard request={item.request} onRespond={handlePermissionTap} />;
         case 'footer':
-          return <FooterBanner sentence={item.sentence} onContinue={handleContinue} />;
+          return <FooterBanner sentence={item.sentence} note={item.note} waiting={item.waiting} onContinue={handleContinue} />;
       }
     },
     [expandedToolCalls, handleContinue, handlePermissionTap, toggleExpanded],

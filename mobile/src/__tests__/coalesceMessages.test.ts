@@ -72,3 +72,16 @@ describe('buildTranscript', () => {
     expect(input).toEqual(copy);
   });
 });
+
+describe('buildTranscript footer note', () => {
+  it('carries the note and waiting flag, and omits them when absent', () => {
+    expect(buildTranscript([], [], { sentence: 'S', note: 'Queued · starts after 17:35', waiting: true })[0]).toEqual({
+      type: 'footer',
+      key: 'footer',
+      sentence: 'S',
+      note: 'Queued · starts after 17:35',
+      waiting: true,
+    });
+    expect(buildTranscript([], [], { sentence: 'S' })[0]).toEqual({ type: 'footer', key: 'footer', sentence: 'S' });
+  });
+});

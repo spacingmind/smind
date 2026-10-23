@@ -11,7 +11,7 @@ import { Card } from '../../ui/Card';
 import { StatusDot } from '../../ui/StatusDot';
 import { UiHost } from '../../ui/UiHost';
 
-export const FooterBanner = memo(function FooterBanner({ sentence, onContinue }: { sentence: string; onContinue: () => void }) {
+export const FooterBanner = memo(function FooterBanner({ sentence, note, waiting, onContinue }: { sentence: string; note?: string; waiting?: boolean; onContinue: () => void }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   return (
@@ -22,9 +22,16 @@ export const FooterBanner = memo(function FooterBanner({ sentence, onContinue }:
           {sentence}
         </Text>
       </View>
-      <UiHost style={styles.host}>
-        <Button label="Continue" variant="filled" onPress={onContinue} style={styles.button} />
-      </UiHost>
+      {note ? (
+        <Text style={styles.note} selectable>
+          {note}
+        </Text>
+      ) : null}
+      {waiting ? null : ( // a held retry is already queued: Continue would send a second one
+        <UiHost style={styles.host}>
+          <Button label="Continue" variant="filled" onPress={onContinue} style={styles.button} />
+        </UiHost>
+      )}
     </Card>
   );
 });
@@ -34,6 +41,7 @@ function makeStyles(theme: AppTheme) {
     card: { gap: theme.spacing[3] },
     sentenceRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2] },
     sentence: { ...theme.type.body, color: theme.foreground, flex: 1 },
+    note: { ...theme.type.small, color: theme.foregroundSubtle },
     host: { alignSelf: 'flex-start' },
     button: { height: 44 },
   });
