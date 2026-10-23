@@ -437,7 +437,7 @@ func cmdTaskList(args []string) int {
 }
 
 // cmdTaskSendUsage is printed on any argument error in cmdTaskSend.
-const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking off|standard|extended] [--detach] [--verbose]"
+const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking off|standard|extended] [--detach] [--verbose]\n       smind task send <taskId> <prompt> --profile <profileId> [--chat <chatId>] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking off|standard|extended] [--detach] [--verbose]"
 
 // unpinnedModelNote is the stderr note printed when a claude-native run
 // starts without --model. With a configured default (config
@@ -506,7 +506,7 @@ func cmdTaskSend(args []string) int {
 	// Parsed by hand for the same reason as cmdTaskLogs: the prompt is
 	// free-form positional text, so stdlib flag parsing can't reliably
 	// separate it from flags.
-	var taskIDArg, provider, mode, chatArg, whenBusy, model string
+	var taskIDArg, provider, mode, chatArg, whenBusy, model, profileArg string
 	var autoAccept, detach, verbose bool
 	var thinking string
 	var promptParts []string
@@ -562,6 +562,15 @@ func cmdTaskSend(args []string) int {
 			model = args[i]
 		case strings.HasPrefix(a, "--model="):
 			model = strings.TrimPrefix(a, "--model=")
+		case a == "--profile":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
+				return 2
+			}
+			i++
+			profileArg = args[i]
+		case strings.HasPrefix(a, "--profile="):
+			profileArg = strings.TrimPrefix(a, "--profile=")
 		case a == "--auto-accept":
 			autoAccept = true
 		case a == "--approval-policy" || strings.HasPrefix(a, "--approval-policy="):
@@ -579,7 +588,30 @@ func cmdTaskSend(args []string) int {
 			promptParts = append(promptParts, a)
 		}
 	}
-	if taskIDArg == "" || provider == "" || len(promptParts) == 0 {
+	// --profile (ADR-0041 S4a) drops the provider positional: the profile
+	// owns provider, permission mode and auto-accept, so what the loop took
+	// for the provider is the first word of the prompt.
+	var profileID int64
+	if profileArg != "" {
+		if mode != "" || autoAccept {
+			fmt.Fprintln(os.Stderr, "task send: --mode and --auto-accept cannot be combined with --profile (the profile owns them)")
+			return 2
+		}
+		var perr error
+		profileID, perr = parseInt64(profileArg)
+		if perr != nil || profileID <= 0 {
+			fmt.Fprintf(os.Stderr, "task send: invalid --profile value %q\n", profileArg)
+			return 2
+		}
+		if provider != "" {
+			promptParts = append([]string{provider}, promptParts...)
+			provider = ""
+		}
+		if taskIDArg == "" || len(promptParts) == 0 {
+			fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
+			return 2
+		}
+	} else if taskIDArg == "" || provider == "" || len(promptParts) == 0 {
 		fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
 		return 2
 	}
@@ -621,8 +653,25 @@ func cmdTaskSend(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if profileID != 0 {
+		var prof store.AgentProfile
+		if err := client.Call(ctx, "profile.get", map[string]any{"id": profileID}, &prof); err != nil {
+			fmt.Fprintf(os.Stderr, "task send: profile %d: %v\n", profileID, err)
+			return 1
+		}
+		provider, mode, autoAccept = prof.Provider, prof.PermissionMode, prof.AutoAccept
+		if model == "" {
+			model = prof.Model
+		}
+		if thinking == "" {
+			thinking = prof.ThinkingLevel
+		}
+	}
 	params := map[string]any{
 		"taskId": taskID, "provider": provider, "prompt": prompt,
+	}
+	if profileID != 0 {
+		params["profileId"] = profileID
 	}
 	if mode != "" {
 		params["permissionMode"] = mode
