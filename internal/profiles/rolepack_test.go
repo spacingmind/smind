@@ -177,3 +177,21 @@ func TestSeedRoles_ClaudeSeatsWaitOnRateLimit(t *testing.T) {
 		t.Errorf("peer-glm OnRateLimit = %q, want fallback", got)
 	}
 }
+
+// TestSeedRoles_LeadInstructionsDefaultToSonnetPeers: the dogfood measured
+// 28 min / 3.0M input tokens for a GLM step Sonnet does in ~1.5 min, so the
+// Lead is told to default to peer-sonnet and treat peer-glm as opt-in.
+func TestSeedRoles_LeadInstructionsDefaultToSonnetPeers(t *testing.T) {
+	t.Parallel()
+	r := newTestRegistry(t)
+	seed(t, r)
+	lead := byName(t, r, "lead").Instructions
+	for _, want := range []string{"DEFAULT TO peer-sonnet", "peer-glm only when the Human's brief asks for it"} {
+		if !strings.Contains(lead, want) {
+			t.Errorf("lead instructions lack %q", want)
+		}
+	}
+	if !strings.Contains(byName(t, r, "peer-glm").Notes, "Opt-in coder") {
+		t.Errorf("peer-glm notes = %q, want the opt-in wording", byName(t, r, "peer-glm").Notes)
+	}
+}
