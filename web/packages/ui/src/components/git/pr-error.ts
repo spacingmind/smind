@@ -1,12 +1,14 @@
 import type { PrExistsErrorData } from "@/lib/types";
 
-export type PrOperation = "preview" | "create" | "update" | "push" | "sync" | "token" | "logout" | "archive" | "restore";
+export type PrOperation = "details" | "checklog" | "preview" | "create" | "update" | "push" | "sync" | "token" | "logout" | "archive" | "restore";
 
 /** What the UI shows for a failed PR call: one sentence, an optional scrubbed detail, and `pr_exists`'s PR. */
 export interface PrErrorView {
   message: string;
   detail?: string;
   code?: string;
+  /** RFC 3339: when a rate-limited call may be repeated (`refresh_limited`, `forge_rate_limited`). */
+  retryAt?: string;
   existing?: { url: string; number: number };
 }
 
@@ -19,6 +21,8 @@ const FALLBACK: Record<string, string> = {
   pr_exists: "This branch already has an open pull request.",
   pr_not_open: "The pull request is no longer open, so it can't be updated.",
   no_pr: "This task has no pull request yet.",
+  check_unknown: "That check is no longer on the pull request. Refresh and try again.",
+  refresh_limited: "Refreshed a moment ago. Try again in a few seconds.",
   fork_pr_readonly: "This pull request comes from a fork, so smind can't push to it.",
   update_unsupported: "This pull request was opened from a rebased copy, so smind can't update it automatically.",
   push_rejected: "GitHub rejected the push because the branch there has changes this branch doesn't. Update this branch first.",
@@ -56,6 +60,8 @@ const FALLBACK: Record<string, string> = {
 };
 
 const GENERIC: Record<PrOperation, string> = {
+  details: "Couldn't load the pull request.",
+  checklog: "Couldn't load the check log.",
   preview: "Couldn't load the pull request preview.",
   create: "Couldn't create the pull request.",
   update: "Couldn't update the pull request.",
@@ -101,6 +107,7 @@ export function describePrError(err: unknown, op: PrOperation): PrErrorView {
     const detail = data?.detail;
     if (typeof detail === "string" && detail.trim() !== "") view.detail = detail.slice(0, MAX_DETAIL);
   }
+  if (typeof data?.retryAt === "string" && data.retryAt !== "") view.retryAt = data.retryAt;
   if (code === "pr_exists") {
     const { url, number } = (data ?? {}) as Partial<PrExistsErrorData>;
     if (typeof url === "string" && typeof number === "number") view.existing = { url, number };
@@ -117,4 +124,24 @@ export function describeArchiveError(err: unknown, op: "archive" | "restore"): P
   const message = typeof e?.message === "string" ? e.message.trim() : "";
   if (typeof e?.code !== "string" && isSafeSentence(message)) return { message };
   return describePrError(err, op);
+}
+
+/** The one line shown under the PR panel's header when `PRDetails.stale` says the numbers are not fresh; "" when fresh. */
+export function describePrStale(stale: string): string {
+  switch (stale) {
+    case "budget":
+      return "Showing the last known state. smind is saving its GitHub request budget.";
+    case "backoff":
+      return "Showing the last known state. GitHub didn't answer, so smind is waiting before it asks again.";
+    case "rate_limited":
+      return "Showing the last known state. GitHub is rate limiting requests.";
+    case "unauthenticated":
+      return FALLBACK.forge_unauthenticated!;
+    case "unavailable":
+      return "Showing the last known state. GitHub is unavailable right now.";
+    case "not_focused":
+      return "Showing the last known state. Open this tab to refresh it.";
+    default:
+      return "";
+  }
 }

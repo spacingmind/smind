@@ -269,22 +269,36 @@ export function Composer({
 
   const { limits: attachLimits, key: attachKey, items: attachItems, hasError: attachHasError } = attach;
 
-  // "Add to chat" from the Diff and Files panes: append each queued token after a space and remember the ref, so the
-  // next send carries it as a `file_ref`. The caret ends after the trailing space, so the `@` popover stays shut.
+  // "Add to chat" from the Diff, Files and PR panes: append each queued token after a space and remember the ref, so the
+  // next send carries it as a `file_ref`; then each queued text (the PR panel's quoted thread/check) after a blank line,
+  // like a prefill. Both are applied to one local string and set once: two effects each reading the draft before the other's
+  // setValue re-rendered would overwrite each other. The caret ends after the last addition, so the `@` popover stays shut.
+  // Never sent here.
   const queuedInserts = useComposerAttachmentsStore((s) => (attachKey ? s.pendingInserts[attachKey] : undefined));
+  const queuedTexts = useComposerAttachmentsStore((s) => (attachKey ? s.pendingTexts[attachKey] : undefined));
   useEffect(() => {
-    if (!attachKey || !queuedInserts?.length) return;
+    if (!attachKey || (!queuedInserts?.length && !queuedTexts?.length)) return;
     const store = useComposerAttachmentsStore.getState();
     let text = draftRef.current.value;
-    for (const ref of store.takeInserts(attachKey)) {
+    const refs = store.takeInserts(attachKey);
+    const added = store.takeTexts(attachKey);
+    // Anything added after a quoted block (the draft ends on a closing fence) or alongside quoted text starts on a fresh
+    // paragraph, so a token can never land on a fence line and leave the earlier quote unclosed.
+    if (refs.length > 0 && text.trim() !== "" && (added.length > 0 || /(^|\n)`{3,}[ \t]*$/.test(text.trimEnd()))) {
+      text = text.endsWith("\n\n") ? text : text.endsWith("\n") ? `${text}\n` : `${text}\n\n`;
+    }
+    for (const ref of refs) {
       store.rememberMention(attachKey, ref);
       text += `${text === "" || /\s$/.test(text) ? "" : " "}${formatMentionToken(ref)} `;
+    }
+    for (const block of added) {
+      text = text.trim() === "" ? block : `${text.trimEnd()}\n\n${block}`;
     }
     pendingCaret.current = text.length;
     draftRef.current.setValue(text);
     setCaret(text.length);
     textareaNode.current?.focus();
-  }, [attachKey, queuedInserts]);
+  }, [attachKey, queuedInserts, queuedTexts]);
 
   const send = useCallback(
     async (text: string, whenBusy: "queue" | "interrupt") => {

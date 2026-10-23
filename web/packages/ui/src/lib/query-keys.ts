@@ -39,6 +39,8 @@ export const queryKeys = {
   /** Partial keys: every cached `task.git` / `task.gitList` entry (the event bridge and a reconnect address them). */
   taskGitAll: () => ["task.git"] as const,
   workspaceTaskGitAll: () => ["task.gitList"] as const,
+  /** `task.prDetails` for one task (the PR panel); read only while the PR tab is focused. */
+  taskPRDetails: (taskId: number) => ["task.prDetails", { taskId }] as const,
   /** `task.prPreview` for one task and base branch ("" = the task's base_ref); the Create PR dialog's prefill. */
   prPreview: (taskId: number, base: string) => ["task.prPreview", { taskId, base }] as const,
   prPreviewAll: () => ["task.prPreview"] as const,

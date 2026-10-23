@@ -55,12 +55,28 @@ async function renderComposer() {
 }
 
 beforeEach(() => {
-  useComposerAttachmentsStore.setState({ byKey: {}, mentions: {}, pendingInserts: {} });
+  useComposerAttachmentsStore.setState({ byKey: {}, mentions: {}, pendingInserts: {}, pendingTexts: {} });
   localStorage.clear();
 });
 afterEach(() => {
   cleanup();
   clearToasts();
+});
+
+describe("composer consumes queued texts", () => {
+  it("appends queued text after a blank line, focuses with the caret at the end, and sends nothing", async () => {
+    const { sent } = await renderComposer();
+    act(() => useComposerAttachmentsStore.getState().queueText(KEY, "first"));
+    await flush();
+    expect(area()).toHaveValue("first");
+    act(() => useComposerAttachmentsStore.getState().queueText(KEY, "second"));
+    await flush();
+    expect(area()).toHaveValue("first\n\nsecond");
+    expect(document.activeElement).toBe(area());
+    expect(area().selectionStart).toBe("first\n\nsecond".length);
+    expect(sent).toHaveLength(0);
+    expect(useComposerAttachmentsStore.getState().pendingTexts[KEY]).toBeUndefined();
+  });
 });
 
 describe("composer consumes queued inserts", () => {

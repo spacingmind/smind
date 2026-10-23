@@ -50,6 +50,7 @@ export function attachmentDraftKey(taskId: number, chatId: number): string {
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 const NONE: DraftAttachment[] = [];
 const NO_MENTIONS: MentionRef[] = [];
+const NO_TEXTS: string[] = [];
 
 let nextId = 0;
 let pastedImages = 0;
@@ -93,6 +94,8 @@ interface ComposerAttachmentsState {
   mentions: Record<string, MentionRef[]>;
   /** Refs waiting for the composer of that key to put their token into the draft. */
   pendingInserts: Record<string, MentionRef[]>;
+  /** Prompt text waiting for the composer of that key to append it to its draft (never sent by itself). */
+  pendingTexts: Record<string, string[]>;
   add: (key: string, files: File[], limits: AttachmentLimits) => void;
   /** Adds a picked PR/issue (a duplicate of one already in the tray is ignored). */
   addForgeRef: (key: string, ref: Omit<DraftForgeRef, "localId" | "error">, limits: AttachmentLimits) => void;
@@ -103,6 +106,10 @@ interface ComposerAttachmentsState {
   queueInsert: (key: string, ref: MentionRef) => void;
   /** Returns and clears the queued inserts of `key`. */
   takeInserts: (key: string) => MentionRef[];
+  /** Asks the composer of `key` to append `text` to its draft after a blank line. */
+  queueText: (key: string, text: string) => void;
+  /** Returns and clears the queued texts of `key`. */
+  takeTexts: (key: string) => string[];
   clearMentions: (key: string) => void;
   remove: (key: string, localId: string, limits?: AttachmentLimits | null) => void;
   /** Drops the tray and revokes its object URLs (on unmount). */
@@ -119,6 +126,7 @@ export const useComposerAttachmentsStore = create<ComposerAttachmentsState>()((s
   byKey: {},
   mentions: {},
   pendingInserts: {},
+  pendingTexts: {},
   add: (key, files, limits) => {
     if (files.length === 0) return;
     const added: DraftAttachment[] = files.map((file) => {
@@ -157,6 +165,14 @@ export const useComposerAttachmentsStore = create<ComposerAttachmentsState>()((s
     if (!held) return NO_MENTIONS;
     const { [key]: _gone, ...rest } = get().pendingInserts;
     set({ pendingInserts: rest });
+    return held;
+  },
+  queueText: (key, text) => set({ pendingTexts: { ...get().pendingTexts, [key]: [...(get().pendingTexts[key] ?? NO_TEXTS), text] } }),
+  takeTexts: (key) => {
+    const held = get().pendingTexts[key];
+    if (!held) return NO_TEXTS;
+    const { [key]: _gone, ...rest } = get().pendingTexts;
+    set({ pendingTexts: rest });
     return held;
   },
   clearMentions: (key) => {

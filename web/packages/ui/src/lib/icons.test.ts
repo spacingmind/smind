@@ -94,6 +94,7 @@ describe("icon registry", () => {
         "splitColumns": "Columns2",
         "splitRows": "Rows2",
         "statusIdle": "Circle",
+        "statusSkipped": "CircleMinus",
         "stop": "Square",
         "success": "CircleCheck",
         "terminal": "Terminal",
