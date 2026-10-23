@@ -34,10 +34,14 @@ None needed; no ADR.
 
 ## Progress
 
-- [ ] spec committed
-- [ ] steps 1–3 by Peer
-- [ ] review, checks, screenshots, PR
+- [x] spec committed
+- [x] steps 1–3 by Peer (task 54, candidate ACCEPTED: diff reviewed, checks re-run by Lead, screenshots viewed)
+- [x] review, checks, screenshots, PR
 
 ## Validation
 
-(filled in at the end)
+ACs 1–6 by the named vitest tests (lib/model-browser, lib/observed-model, provider-model-picker, run-config-toolbar). From `web/packages/ui`:
+`NODE_OPTIONS=--no-experimental-webstorage bunx vitest run` -> 310 files, 3473 tests pass; `cd web && bunx tsc -b packages/ui` clean; `task lint` and `task test` pass.
+AC7: screenshots under `/tmp/c2-shots/png/` (light + dark, 1280 + 390: observed chip, picker open/closed frames, chip after picking a model, same-provider fallback, nothing known).
+Lead viewed them: chip "Sonnet 5.5" with provider icon, icon-only at 390, no wrap. Not verified: a live run completing and refreshing the chip (invalidation covered by a unit test only).
+Note: `event-bridge` now invalidates `run.list` when a run ends.
