@@ -24,6 +24,9 @@ The loop:
      A stopNote on any other done run says it may be incomplete too.
    - timed_out: still running -- a timeout is not a failure; re-issue
      task_wait. task_status is the non-blocking check.
+   A failed run with failureKind rate_limited hit a provider quota: resetAt
+   says when it resets; retry on another provider or after resetAt, do not
+   retry immediately.
 5. Review: task_logs for the transcript, or read the git state in the
    task's worktree path. task_list/task_get/chat_list/chat_new manage and
    inspect tasks and their conversation threads.

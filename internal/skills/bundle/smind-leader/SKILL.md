@@ -60,4 +60,4 @@ Final message: the plan path, what shipped (PR links), what each verified, what 
 
 - Record the process ids of anything you start (a sandbox daemon, a dev server) and kill only those. Never kill by name pattern.
 - Use an isolated `SMIND_HOME` and port for any sandbox daemon.
-- If a worker hits a rate limit, relaunch it with another provider from `provider_list` rather than waiting.
+- When `task_wait`/`task_status` shows `failureKind` `rate_limited`, read `resetAt`. If it is soon, wait. Otherwise start a NEW chat (`chat_new`) on another provider or profile with a self-contained brief: a chat is bound to its provider, so the old chat's context does not carry over, but the task's worktree and commits do.

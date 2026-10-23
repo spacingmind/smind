@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -387,5 +388,42 @@ func TestTreeSummaryAndChildStatesShowNeedsContinue(t *testing.T) {
 	run := nested.Roots[1]["run"].(taskTreeNodeRun)
 	if run.Disposition != "needs-continue" {
 		t.Fatalf("task_tree node run = %+v, want the disposition to ride through", run)
+	}
+}
+
+// TestMCPTaskTree_FailureFieldOnNode (ADR-0041 R2): a child whose latest run
+// hit a provider quota carries failureKind/window/resetAt on its node's run.
+func TestMCPTaskTree_FailureFieldOnNode(t *testing.T) {
+	env := newMCPSession(t)
+	wsID := createTreeWorkspace(t, env)
+	sup := createTreeTask(t, env, wsID, 0, "", "")
+	runID := createTreeTaskWithRun(t, env, wsID, sup, "quota-error")
+	var wait taskWaitOutput
+	callMCPTool(t, env.cs, "task_wait", map[string]any{"runId": runID, "timeoutSeconds": 30}, &wait)
+	if wait.State != "error" {
+		t.Fatalf("task_wait state = %q, want error", wait.State)
+	}
+
+	var out taskTreeOutput
+	if isErr := callMCPTool(t, env.cs, "task_tree", map[string]any{"taskId": sup}, &out); isErr {
+		t.Fatal("task_tree returned an error result")
+	}
+	kids := out.Roots[0]["children"].([]any)
+	if len(kids) != 1 {
+		t.Fatalf("children = %d, want 1", len(kids))
+	}
+	raw, err := json.Marshal(kids[0].(map[string]any)["run"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var run taskTreeNodeRun
+	if err := json.Unmarshal(raw, &run); err != nil {
+		t.Fatal(err)
+	}
+	if run.State != "error" || run.FailureKind != "rate_limited" || run.Window != "5h" || run.ResetAt == "" {
+		t.Fatalf("node run = %s, want error / rate_limited / 5h / resetAt", raw)
+	}
+	if _, err := time.Parse(time.RFC3339, run.ResetAt); err != nil || !strings.HasSuffix(run.ResetAt, "Z") {
+		t.Fatalf("resetAt = %q, want RFC 3339 UTC", run.ResetAt)
 	}
 }

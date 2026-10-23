@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spacingmind/smind/internal/wsclient"
@@ -17,7 +18,7 @@ import (
 func registerMCPDiscoveryTools(srv *mcp.Server, client *wsclient.Client) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "workspace_list", Description: "List every workspace (id, title, path) registered with the daemon -- the first call of the orchestration loop, since task_new needs a workspaceId."}, mcpWorkspaceList(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_get", Description: "Get one task by id (id, title, status, branch, worktreePath, parentTaskId) -- the worktreePath is where to review a task's work with git."}, mcpTaskGet(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "run_list", Description: "List runs, newest first (at most 200), optionally filtered by taskId (across all of that task's chats), chatId, or status (e.g. \"running\"). Use this to recover a lost run id after task_send."}, mcpRunList(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "run_list", Description: "List runs, newest first (at most 200), optionally filtered by taskId (across all of that task's chats), chatId, or status (e.g. \"running\"). Use this to recover a lost run id after task_send. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately."}, mcpRunList(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "provider_list", Description: "List the daemon's supported providers, each with its permission modes (id, autoApproves) and defaultMode. An orchestrator may not pick an auto-approving mode or autoAccept itself -- pass profileId (a human-authored profile) instead."}, mcpProviderList(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "profile_list", Description: "List the human-authored agent profiles (id, name, provider, permissionMode, autoAccept, thinkingLevel, notes). Pass a profile's id as task_send's profileId to run with its settings."}, mcpProfileList(client))
 }
@@ -87,6 +88,9 @@ func capRuns(runs []map[string]any) []map[string]any {
 	}
 	if len(runs) > mcpRunListCap {
 		runs = runs[:mcpRunListCap]
+	}
+	for _, row := range runs {
+		addFailureFields(row)
 	}
 	return runs
 }
@@ -174,5 +178,25 @@ func mcpProfileList(client *wsclient.Client) mcp.ToolHandlerFor[struct{}, profil
 			profiles = []map[string]any{}
 		}
 		return nil, profileListOutput{Profiles: profiles}, nil
+	}
+}
+
+// addFailureFields adds the camelCase failureKind, window and resetAt keys
+// (ADR-0041) to a run.list row that carries a typed failure; resetAt is
+// RFC 3339 UTC and absent when the reset time is unknown. Rows without a
+// failure are left untouched.
+func addFailureFields(row map[string]any) {
+	kind, _ := row["FailureKind"].(string)
+	if kind == "" {
+		return
+	}
+	row["failureKind"] = kind
+	if w, _ := row["FailureWindow"].(string); w != "" {
+		row["window"] = w
+	}
+	if s, _ := row["FailureResetAt"].(string); s != "" {
+		if ts, err := time.Parse(time.RFC3339Nano, s); err == nil {
+			row["resetAt"] = ts.UTC().Format(time.RFC3339)
+		}
 	}
 }

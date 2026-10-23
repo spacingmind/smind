@@ -16,7 +16,7 @@ import (
 // task-hierarchy plan (§4.2/§4.3): task_tree (one call for every task
 // with status/usage/permissions, nested) and task_wait's childrenOf mode.
 func registerMCPTreeTools(srv *mcp.Server, client *wsclient.Client) {
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_tree", Description: "See a workspace's whole task hierarchy in one call: every task (or one task and its descendants) as nested nodes -- each carrying id, parentId, title, depth, tier (supervisor/leader/coder), run state, pending permission count, per-descendant status counts, usage rollups (tokens/cost summed over the subtree; null means nothing reported, never 0), and its children. Pass exactly one of workspaceId or taskId."}, mcpTaskTree(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_tree", Description: "See a workspace's whole task hierarchy in one call: every task (or one task and its descendants) as nested nodes -- each carrying id, parentId, title, depth, tier (supervisor/leader/coder), run state, pending permission count, per-descendant status counts, usage rollups (tokens/cost summed over the subtree; null means nothing reported, never 0), and its children. Pass exactly one of workspaceId or taskId. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately."}, mcpTaskTree(client))
 }
 
 // taskTreeInput is task_tree's argument shape: exactly one of
@@ -54,6 +54,11 @@ type taskTreeNodeRun struct {
 	PendingPermissions int      `json:"pendingPermissions"`
 	// Disposition is "needs-continue" for a done run that hit a cap.
 	Disposition string `json:"disposition,omitempty"`
+	// FailureKind is "rate_limited" when the latest run hit a provider quota;
+	// Window and ResetAt (RFC 3339 UTC) say which window and when it resets.
+	FailureKind string `json:"failureKind,omitempty"`
+	Window      string `json:"window,omitempty"`
+	ResetAt     string `json:"resetAt,omitempty"`
 }
 
 type taskTreeCounts struct {

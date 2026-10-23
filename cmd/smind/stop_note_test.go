@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStopNote_MaxTurnRequests(t *testing.T) {
@@ -55,10 +56,10 @@ func TestRenderDone_TurnCapHint(t *testing.T) {
 }
 
 func TestRunStatusCellShowsTheDisposition(t *testing.T) {
-	if got := runStatusCell("done", "needs-continue", ""); got != "done (needs-continue)" {
+	if got := runStatusCell(runSummaryRow{Status: "done", Disposition: "needs-continue", Err: ""}, time.Now()); got != "done (needs-continue)" {
 		t.Fatalf("runStatusCell = %q", got)
 	}
-	if got := runStatusCell("done", "", ""); got != "done" {
+	if got := runStatusCell(runSummaryRow{Status: "done", Disposition: "", Err: ""}, time.Now()); got != "done" {
 		t.Fatalf("runStatusCell without a disposition = %q, want the plain status", got)
 	}
 }

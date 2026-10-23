@@ -80,19 +80,19 @@ func TestRunUsageCell(t *testing.T) {
 }
 
 func TestRunStatusCell(t *testing.T) {
-	if got := runStatusCell("done", "", ""); got != "done" {
+	if got := runStatusCell(runSummaryRow{Status: "done", Disposition: "", Err: ""}, time.Now()); got != "done" {
 		t.Errorf("done = %q", got)
 	}
-	if got := runStatusCell("done", "needs-continue", ""); got != "done (needs-continue)" {
+	if got := runStatusCell(runSummaryRow{Status: "done", Disposition: "needs-continue", Err: ""}, time.Now()); got != "done (needs-continue)" {
 		t.Errorf("needs-continue = %q", got)
 	}
 	long := "boom   " + strings.Repeat("é", 100) + "\nsecond line"
-	got := runStatusCell("error", "", long)
+	got := runStatusCell(runSummaryRow{Status: "error", Disposition: "", Err: long}, time.Now())
 	want := "error: boom " + strings.Repeat("é", 80-5) + "…"
 	if got != want {
 		t.Errorf("long = %q, want %q", got, want)
 	}
-	if got := runStatusCell("error", "", ""); got != "error" {
+	if got := runStatusCell(runSummaryRow{Status: "error", Disposition: "", Err: ""}, time.Now()); got != "error" {
 		t.Errorf("empty err = %q", got)
 	}
 }

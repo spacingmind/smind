@@ -2,6 +2,7 @@ package runs
 
 import (
 	"sort"
+	"time"
 
 	"github.com/spacingmind/smind/internal/tasktree"
 )
@@ -17,6 +18,11 @@ type TaskRunFact struct {
 	// Disposition is the latest finished run's DispositionFor, when the task
 	// has no run going: "needs-continue" for a run that ended done at a cap.
 	Disposition string
+	// FailureKind/FailureWindow/FailureResetAt are the latest finished run's
+	// typed failure (ADR-0041 B1), set only when the task has no run going.
+	FailureKind    string
+	FailureWindow  string
+	FailureResetAt *time.Time
 }
 
 // taskRunFactSnapshot is one run's contribution to TaskRunFacts, read
@@ -28,6 +34,10 @@ type taskRunFactSnapshot struct {
 	status     Status
 	stopReason string
 	pending    int
+
+	failureKind    string
+	failureWindow  string
+	failureResetAt *time.Time
 }
 
 // TaskRunFacts summarizes the registry's in-memory runs per task id in
@@ -50,6 +60,10 @@ func (reg *Registry) TaskRunFacts() map[int64]TaskRunFact {
 			status:     r.status,
 			stopReason: r.stopReason,
 			pending:    len(r.pendingPermissions),
+
+			failureKind:    r.failureKind,
+			failureWindow:  r.failureWindow,
+			failureResetAt: cloneTimePtr(r.failureResetAt),
 		})
 		r.mu.Unlock()
 	}
@@ -100,6 +114,9 @@ func (reg *Registry) TaskRunFacts() map[int64]TaskRunFact {
 		} else if a.hasLatest {
 			f.State = mapStatusToState(a.latest.status)
 			f.Disposition = DispositionFor(a.latest.status, a.latest.stopReason)
+			f.FailureKind = a.latest.failureKind
+			f.FailureWindow = a.latest.failureWindow
+			f.FailureResetAt = a.latest.failureResetAt
 		} else {
 			f.State = tasktree.StateIdle
 		}

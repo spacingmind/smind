@@ -39,6 +39,12 @@ type RunFact struct {
 	// Disposition is "needs-continue" when the latest finished run ended done
 	// at a turn/token/budget cap (runs.DispositionFor); empty otherwise.
 	Disposition string
+	// FailureKind/Window/ResetAt are the latest finished run's typed failure
+	// (ADR-0041 B1): "rate_limited", the window name, and the reset time as
+	// RFC 3339 UTC; empty when none.
+	FailureKind string
+	Window      string
+	ResetAt     string
 }
 
 // Run state constants for RunFact.State / Node.Run.State.
@@ -91,6 +97,11 @@ type NodeRun struct {
 	// Disposition is "needs-continue" for a node whose latest run is "done"
 	// but was cut off at a cap (additive, omitted otherwise).
 	Disposition string `json:"disposition,omitempty"`
+	// FailureKind/Window/ResetAt carry the latest run's typed failure
+	// (ADR-0041 B1); omitted when empty. ResetAt is RFC 3339 UTC.
+	FailureKind string `json:"failureKind,omitempty"`
+	Window      string `json:"window,omitempty"`
+	ResetAt     string `json:"resetAt,omitempty"`
 }
 
 // NodeUsage bundles a node's own usage, its subtree rollup (every
@@ -239,6 +250,7 @@ func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, r
 			Run: NodeRun{
 				State: factState(facts, t.ID), RunningRunIDs: runIDs,
 				PendingPermissions: f.PendingPermissions, Disposition: f.Disposition,
+				FailureKind: f.FailureKind, Window: f.Window, ResetAt: f.ResetAt,
 			},
 			Counts: rec.counts,
 			Usage:  NodeUsage{Own: usage[t.ID], Subtree: rec.usage, ArchivedDescendants: rec.archived},

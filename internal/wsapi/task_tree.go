@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
@@ -98,9 +99,14 @@ func toTreeTasks(tasks []store.Task) []tasktree.Task {
 func toTreeFacts(facts map[int64]runs.TaskRunFact) map[int64]tasktree.RunFact {
 	out := make(map[int64]tasktree.RunFact, len(facts))
 	for id, f := range facts {
-		out[id] = tasktree.RunFact{
+		rf := tasktree.RunFact{
 			State: f.State, RunningRunIDs: f.RunningRunIDs, PendingPermissions: f.PendingPermissions, Disposition: f.Disposition,
+			FailureKind: f.FailureKind, Window: f.FailureWindow,
 		}
+		if f.FailureResetAt != nil {
+			rf.ResetAt = f.FailureResetAt.UTC().Format(time.RFC3339)
+		}
+		out[id] = rf
 	}
 	return out
 }
