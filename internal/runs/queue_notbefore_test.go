@@ -1,10 +1,12 @@
 package runs
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
 const heldRunConfig = `{"provider":"glm"}`
@@ -132,4 +134,50 @@ func TestQueue_CloseAllStopsWakeTimer(t *testing.T) {
 	if n := len(e.reg.List(chatID)); n != 0 {
 		t.Fatalf("runs after CloseAll = %d, want 0", n)
 	}
+}
+
+// startHeld sends a human prompt through StartWhenBusy held until notBefore.
+func (e *queuedTestEnv) startHeld(t *testing.T, prompt string, notBefore time.Time) StartOutcome {
+	t.Helper()
+	out, err := e.reg.StartWhenBusy(context.Background(), e.wm, e.runner, e.task.ID, 0, taskrunner.ProviderGLM, prompt, taskrunner.PermissionSettings{}, "", "", store.ChatQueueSourceHuman, 0, 0, WithNotBefore(notBefore))
+	if err != nil {
+		t.Fatalf("StartWhenBusy(%q, notBefore) error = %v", prompt, err)
+	}
+	return out
+}
+
+func TestStartWhenBusy_NotBefore_QueuesOnIdleChat(t *testing.T) {
+	t.Parallel()
+	e := newQueuedTestEnv(t, "")
+	hold := time.Now().Add(time.Hour)
+	out := e.startHeld(t, "later", hold)
+	if !out.Queued || out.QueueItemID == 0 || out.RunID != "" {
+		t.Fatalf("outcome = %+v, want queued item and no run", out)
+	}
+	chat, err := e.wm.DefaultChat(e.task.ID)
+	if err != nil {
+		t.Fatalf("DefaultChat() error = %v", err)
+	}
+	if n := len(e.reg.List(chat.ID)); n != 0 {
+		t.Fatalf("runs = %d, want 0", n)
+	}
+	item, err := e.st.GetChatQueueItem(out.QueueItemID)
+	if err != nil {
+		t.Fatalf("GetChatQueueItem() error = %v", err)
+	}
+	if item.Status != store.ChatQueueStatusQueued || item.Prompt != "later" || item.NotBefore == nil || !item.NotBefore.Equal(hold) {
+		t.Fatalf("item = %+v, want queued %q held until %v", item, "later", hold)
+	}
+}
+
+func TestStartWhenBusy_NotBefore_DeliversWhenTimePasses(t *testing.T) {
+	t.Parallel()
+	e := newQueuedTestEnv(t, "")
+	out := e.startHeld(t, "soon", time.Now().Add(300*time.Millisecond))
+	if got, _ := e.st.GetChatQueueItem(out.QueueItemID); got.Status != store.ChatQueueStatusQueued {
+		t.Fatalf("item status = %q right after enqueue, want queued", got.Status)
+	}
+	// Only the wake timer StartWhenBusy armed can deliver it.
+	got := pollItem(t, e.st, out.QueueItemID, store.ChatQueueStatusDelivered, 10*time.Second)
+	waitForStatus(t, e.reg, *got.RunID, StatusDone, 5*time.Second)
 }

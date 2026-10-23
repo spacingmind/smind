@@ -145,6 +145,24 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		profileID = reg.inheritedProfile(chatID)
 	}
 
+	// A held prompt (WithNotBefore) is always queued: never started now and
+	// never rejected for a busy chat. Delivery starts it once the time passes.
+	if nb := resolveStartOptions(opts).notBefore; nb != nil {
+		cfg, err := json.Marshal(chatQueueRunConfig{
+			Provider: string(provider), PermissionMode: perm.Mode, AutoAccept: perm.AutoAccept, ThinkingLevel: string(thinkingLevel), Model: model, ReplyChatID: replyChatID, ProfileID: profileID,
+		})
+		if err != nil {
+			return StartOutcome{}, fmt.Errorf("runs: start: encode run config: %w", err)
+		}
+		item, err := reg.st.EnqueueChatPromptAt(chatID, prompt, string(cfg), source, 0, fromTaskID, fromChatID, attach.EncodeSet(resolveStartOptions(opts).attachments), nb)
+		if err != nil {
+			return StartOutcome{}, fmt.Errorf("runs: start: %w", err)
+		}
+		reg.notifyQueueUpdated(chatID)
+		reg.armQueueWake()
+		return StartOutcome{Queued: true, QueueItemID: item.ID}, nil
+	}
+
 	// An agent-sourced prompt carries its provenance header on an
 	// immediate start too (ADR-0021 §4) -- the queued path stamps it at
 	// delivery via deliverPrompt instead, so it is only prepended here
@@ -621,10 +639,12 @@ type startOptions struct {
 	// explicit "no profile") wins over the chat's inherited profile.
 	profileSet bool
 	failoverOf string
-	notify     bool
-	notifySet  bool
-	isolation  *taskrunner.IsolationOptions
-	probe      *taskrunner.ProbeOptions
+	// notBefore: see WithNotBefore.
+	notBefore *time.Time
+	notify    bool
+	notifySet bool
+	isolation *taskrunner.IsolationOptions
+	probe     *taskrunner.ProbeOptions
 
 	attachments attach.Set
 	attachStore *attach.Store
@@ -674,6 +694,13 @@ func (reg *Registry) inheritedProfile(chatID int64) int64 {
 // (ADR-0041 F2b).
 func WithFailoverOf(runID string) StartOption {
 	return func(o *startOptions) { o.failoverOf = runID }
+}
+
+// WithNotBefore makes StartWhenBusy enqueue the prompt held until t, even on
+// an idle chat, instead of starting it or rejecting it for a busy chat. The
+// queue delivers it once t has passed. StartWhenBusy only; Start ignores it.
+func WithNotBefore(t time.Time) StartOption {
+	return func(o *startOptions) { o.notBefore = &t }
 }
 
 // WithNotifyOnFinish opts a child run in (default) or out of the parent
