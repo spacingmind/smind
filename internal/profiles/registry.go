@@ -11,6 +11,8 @@
 package profiles
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -71,7 +73,7 @@ func (r *Registry) getNotifier() Notifier {
 // Create validates p and inserts it, firing NotifyProfileCreated on
 // success.
 func (r *Registry) Create(p store.AgentProfile) (store.AgentProfile, error) {
-	if err := validate(p); err != nil {
+	if err := r.validate(&p); err != nil {
 		return store.AgentProfile{}, err
 	}
 	created, err := r.store.CreateAgentProfile(p)
@@ -98,7 +100,7 @@ func (r *Registry) List() ([]store.AgentProfile, error) {
 // full-record replace -- see store.UpdateAgentProfile), firing
 // NotifyProfileUpdated on success.
 func (r *Registry) Update(p store.AgentProfile) (store.AgentProfile, error) {
-	if err := validate(p); err != nil {
+	if err := r.validate(&p); err != nil {
 		return store.AgentProfile{}, err
 	}
 	updated, err := r.store.UpdateAgentProfile(p)
@@ -130,7 +132,7 @@ func (r *Registry) Delete(id int64) error {
 // thinkingLevel or model string that internal/taskrunner itself would reject from
 // task.prompt -- so a stored profile can never carry a combination the wire
 // would reject if applied directly.
-func validate(p store.AgentProfile) error {
+func (r *Registry) validate(p *store.AgentProfile) error {
 	if strings.TrimSpace(p.Name) == "" {
 		return fmt.Errorf("name is required")
 	}
@@ -150,6 +152,41 @@ func validate(p store.AgentProfile) error {
 	// start, which validates it against the live catalog.
 	if err := taskrunner.ValidateModel(info, p.Model); err != nil {
 		return err
+	}
+	return r.validateFailover(p)
+}
+
+// validateFailover checks the ADR-0041 rate-limit policy fields and
+// normalises an empty OnRateLimit to "none". The fallback is looked up
+// through the store so it must exist, must not be the profile itself and
+// must use a different provider.
+func (r *Registry) validateFailover(p *store.AgentProfile) error {
+	switch p.OnRateLimit {
+	case "":
+		p.OnRateLimit = "none"
+	case "none", "wait", "fallback":
+	default:
+		return fmt.Errorf("invalid onRateLimit %q (want none, wait or fallback)", p.OnRateLimit)
+	}
+	if p.FallbackProfileID == nil {
+		if p.OnRateLimit == "fallback" {
+			return fmt.Errorf("onRateLimit fallback requires fallbackProfileId")
+		}
+		return nil
+	}
+	id := *p.FallbackProfileID
+	if p.ID != 0 && id == p.ID {
+		return fmt.Errorf("fallback profile must not be the profile itself")
+	}
+	fb, err := r.store.GetAgentProfile(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("fallback profile %d not found", id)
+		}
+		return err
+	}
+	if fb.Provider == p.Provider {
+		return fmt.Errorf("fallback profile must use a different provider than the profile it backs up")
 	}
 	return nil
 }

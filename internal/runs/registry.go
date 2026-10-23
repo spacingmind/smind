@@ -157,6 +157,9 @@ type Registry struct {
 	notifyParent   bool
 	notifyDebounce time.Duration
 	notifyMaxHold  time.Duration
+	// retryGrace is added to a rate limit's reset instant for a "wait"
+	// retry (ADR-0041 F2b); tests lower it.
+	retryGrace time.Duration
 
 	// wakeMu guards wakeTimer: the single timer that delivers a held queue
 	// item (chat_queue.not_before, ADR-0041) when its time arrives. Taken
@@ -266,7 +269,7 @@ func (reg *Registry) notifyRunStatus(r *run) {
 //     a rehydrated run immediately delivers its backfilled history then
 //     closes, same as attaching to any other already-finished run.
 func New(st *store.Store) (*Registry, error) {
-	reg := &Registry{runs: make(map[string]*run), st: st, deliveryAttempts: make(map[int64]int), archiving: make(map[int64]bool), notifyParent: true, notifyDebounce: defaultNotifyDebounce, notifyMaxHold: defaultNotifyMaxHold}
+	reg := &Registry{runs: make(map[string]*run), st: st, deliveryAttempts: make(map[int64]int), archiving: make(map[int64]bool), notifyParent: true, notifyDebounce: defaultNotifyDebounce, notifyMaxHold: defaultNotifyMaxHold, retryGrace: defaultRetryGrace}
 
 	if _, err := st.MarkRunningRunsInterrupted(string(StatusInterrupted), func(chatID int64) string { return restartStopReason(st, chatID) }); err != nil {
 		return nil, fmt.Errorf("runs: reconcile interrupted runs: %w", err)
@@ -351,6 +354,8 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 		purpose:            rowPurpose(row.Purpose),
 		origin:             row.Origin,
 		replyChatID:        row.ReplyChatID,
+		profileID:          row.ProfileID,
+		failoverOf:         row.FailoverOf,
 		interrupt:          row.Interrupt,
 		attachments:        decodeStoredAttachments(row.Attachments),
 		startedAt:          row.StartedAt,
@@ -425,6 +430,14 @@ type run struct {
 	// replyChatID is the parent chat to notify when this run finishes
 	// (ADR-0041 B3); 0 = none. Set at start, immutable, persisted on the row.
 	replyChatID int64
+
+	// profileID is the agent profile the run was launched with (ADR-0041
+	// F2); 0 = none. Set at start, immutable, persisted on the row.
+	profileID int64
+
+	// failoverOf is the id of the run this one continues after a rate limit
+	// (ADR-0041 F2b); "" = none. Set at start, immutable, persisted.
+	failoverOf string
 
 	// attachments is the accepted prompt attachment set (ADR-0038) and
 	// attachStore the store holding its files; set at start, immutable,
@@ -576,6 +589,8 @@ func (r *run) statusLocked() RunStatus {
 		Purpose:        r.purpose,
 		Origin:         r.origin,
 		Attachments:    publicItems(r.attachments),
+		ProfileID:      r.profileID,
+		FailoverOf:     r.failoverOf,
 
 		FailureKind:   r.failureKind,
 		FailureWindow: r.failureWindow,
@@ -752,6 +767,8 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		origin:             resolveStartOptions(opts).origin,
 		interrupt:          resolveStartOptions(opts).interrupt,
 		replyChatID:        resolveStartOptions(opts).replyChatID,
+		profileID:          resolveStartOptions(opts).profileID,
+		failoverOf:         resolveStartOptions(opts).failoverOf,
 		attachments:        resolveStartOptions(opts).attachments,
 		attachStore:        resolveStartOptions(opts).attachStore,
 		isolation:          resolveStartOptions(opts).isolation,
@@ -843,7 +860,7 @@ func (reg *Registry) registerAndDrive(r *run, runCtx context.Context, runner *ta
 		ID: r.id, TaskID: r.taskID, ChatID: r.chatID, Provider: string(r.provider), Prompt: r.prompt,
 		Status: string(StatusRunning), StartedAt: r.startedAt,
 		PermissionMode: r.perm.Mode, AutoAccept: r.perm.AutoAccept, Model: r.model, Purpose: r.purpose, Origin: r.origin, Interrupt: r.interrupt,
-		ReplyChatID: r.replyChatID,
+		ReplyChatID: r.replyChatID, ProfileID: r.profileID, FailoverOf: r.failoverOf,
 		Attachments: attach.EncodeSet(r.attachments),
 	}); err != nil {
 		reg.mu.Lock()
@@ -1433,6 +1450,10 @@ func (reg *Registry) finish(r *run, err error) {
 	}
 
 	reg.retain(r.id)
+
+	// ADR-0041 F2b: the profile's rate-limit policy. Before the parent
+	// notification: a queued retry keeps the subtree busy.
+	reg.applyRateLimitPolicy(r, fail)
 
 	// ADR-0041 B3: tell the parent when this run settles its subtree. Before
 	// deliverOne, so a child with its own queued follow-up is not yet quiet.

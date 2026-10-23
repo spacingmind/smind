@@ -454,6 +454,7 @@ func (b busRunNotifier) NotifyRunStatus(s runs.RunStatus) {
 		StopReason: s.StopReason, Disposition: s.Disposition, Err: s.Err,
 		FailureKind: s.FailureKind, Window: s.FailureWindow, ResetAt: runs.FailureResetRFC3339(s),
 		BaseSHA: derefStr(s.BaseSHA), HeadSHA: derefStr(s.HeadSHA), Dirty: s.Dirty,
+		ProfileID: s.ProfileID, FailoverOf: s.FailoverOf,
 	}})
 }
 

@@ -6,11 +6,19 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/store"
 )
 
 // failureWire runs one prompt on the fake GLM agent's scenario and returns
 // the raw run.logs result and the terminal run.status payload (as JSON).
 func failureWire(t *testing.T, scenario string) (logs map[string]any, event map[string]any) {
+	t.Helper()
+	return failureWireProfile(t, scenario, nil)
+}
+
+// failureWireProfile is failureWire with a run launched under the profile
+// that mkProfile creates in the store (nil = no profile).
+func failureWireProfile(t *testing.T, scenario string, mkProfile func(db *store.Store) int64) (logs map[string]any, event map[string]any) {
 	t.Helper()
 	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, scenario)
@@ -18,7 +26,11 @@ func failureWire(t *testing.T, scenario string) (logs map[string]any, event map[
 	ec := newEventConn(t, dialWS(t, srv, "tok"))
 	ec.subscribe("sub", TopicRunStatus)
 
-	sendRequest(t, ec.ws, "start", "run.start", map[string]any{"taskId": task.ID, "provider": "glm", "prompt": "hi"})
+	params := map[string]any{"taskId": task.ID, "provider": "glm", "prompt": "hi"}
+	if mkProfile != nil {
+		params["profileId"] = mkProfile(db)
+	}
+	sendRequest(t, ec.ws, "start", "run.start", params)
 	resp := ec.nextResponse("start", 15*time.Second)
 	if resp.Error != nil {
 		t.Fatalf("run.start: %v", resp.Error.Message)
@@ -93,5 +105,53 @@ func TestRunStatusEvent_CarriesFailureFields(t *testing.T) {
 	_, event := failureWire(t, "quota-error")
 	if event["status"] != "error" || event["failureKind"] != "rate_limited" || event["window"] != "5h" {
 		t.Fatalf("run.status = %v", event)
+	}
+}
+
+// profileWithFallback creates a glm profile whose author named a codex
+// fallback and returns its id.
+func profileWithFallback(db *store.Store) int64 {
+	fb, err := db.CreateAgentProfile(store.AgentProfile{Name: "fb", Provider: "codex-native"})
+	if err != nil {
+		panic(err)
+	}
+	p, err := db.CreateAgentProfile(store.AgentProfile{Name: "main", Provider: "glm", OnRateLimit: "none", FallbackProfileID: &fb.ID})
+	if err != nil {
+		panic(err)
+	}
+	return p.ID
+}
+
+func TestRunLogs_FallbackProfileIdForRateLimitedRun(t *testing.T) {
+	t.Parallel()
+	logs, event := failureWireProfile(t, "quota-error", profileWithFallback)
+	if logs["failureKind"] != "rate_limited" {
+		t.Fatalf("run.logs = %v", logs)
+	}
+	fb, ok := logs["fallbackProfileId"].(float64)
+	if !ok || fb == 0 {
+		t.Fatalf("run.logs fallbackProfileId = %v, want the fallback profile id", logs["fallbackProfileId"])
+	}
+	if logs["profileId"] == nil || event["profileId"] != logs["profileId"] {
+		t.Fatalf("profileId logs = %v, event = %v", logs["profileId"], event["profileId"])
+	}
+	if _, ok := event["fallbackProfileId"]; ok {
+		t.Errorf("run.status event must not carry fallbackProfileId: %v", event)
+	}
+}
+
+func TestRunLogs_NoFallbackWhenNotRateLimited(t *testing.T) {
+	t.Parallel()
+	logs, _ := failureWireProfile(t, "stop end_turn", profileWithFallback)
+	if _, ok := logs["fallbackProfileId"]; ok {
+		t.Fatalf("done run carries fallbackProfileId: %v", logs)
+	}
+	if logs["profileId"] == nil {
+		t.Fatalf("done run lost profileId: %v", logs)
+	}
+	// And a rate-limited run without a profile has no suggestion either.
+	logs, _ = failureWire(t, "quota-error")
+	if _, ok := logs["fallbackProfileId"]; ok {
+		t.Fatalf("profile-less run carries fallbackProfileId: %v", logs)
 	}
 }

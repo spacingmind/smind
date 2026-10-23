@@ -170,8 +170,33 @@ func cmdTaskWait(args []string) int {
 		fmt.Fprintf(os.Stderr, "run %s not found\n", runID)
 		return 1
 	}
-	fmt.Println(renderWaitSummary(row, finalText.String(), time.Now()))
+	fallbackID := int64(0)
+	if row.Status == "error" {
+		fallbackID = fetchFallbackProfileID(ctx2, client, runID)
+	}
+	fmt.Println(renderWaitReport(row, finalText.String(), time.Now(), fallbackID))
 	return waitExitCode(row)
+}
+
+// fetchFallbackProfileID reads run.logs' fallbackProfileId (ADR-0041 F2: set
+// only for a rate_limited run whose profile names a fallback); 0 on any
+// failure or when absent.
+func fetchFallbackProfileID(ctx context.Context, client *wsclient.Client, runID string) int64 {
+	var result runLogsResult
+	if err := client.Call(ctx, "run.logs", map[string]any{"runId": runID, "tail": 1}, &result); err != nil {
+		return 0
+	}
+	return result.FallbackProfileID
+}
+
+// renderWaitReport is renderWaitSummary plus, for a rate-limited run whose
+// profile names a fallback, a hint line on how to start the work there.
+func renderWaitReport(row runSummaryRow, finalText string, now time.Time, fallbackProfileID int64) string {
+	out := renderWaitSummary(row, finalText, now)
+	if fallbackProfileID != 0 {
+		out += fmt.Sprintf("\nfallback: profile %d (use: smind task chat new <task>, then task send --chat ...)", fallbackProfileID)
+	}
+	return out
 }
 
 // fetchRunRowWith reads the run's row from run.list.

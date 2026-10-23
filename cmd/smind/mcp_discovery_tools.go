@@ -20,7 +20,7 @@ func registerMCPDiscoveryTools(srv *mcp.Server, client *wsclient.Client) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_get", Description: "Get one task by id (id, title, status, branch, worktreePath, parentTaskId) -- the worktreePath is where to review a task's work with git."}, mcpTaskGet(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "run_list", Description: "List runs, newest first (at most 200), optionally filtered by taskId (across all of that task's chats), chatId, or status (e.g. \"running\"). Use this to recover a lost run id after task_send. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately."}, mcpRunList(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "provider_list", Description: "List the daemon's supported providers, each with its permission modes (id, autoApproves) and defaultMode. An orchestrator may not pick an auto-approving mode or autoAccept itself -- pass profileId (a human-authored profile) instead. A provider with cooldownUntil (RFC 3339 UTC) is rate limited until then: sends to it by an agent fail fast, so choose another provider."}, mcpProviderList(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "profile_list", Description: "List the human-authored agent profiles (id, name, provider, permissionMode, autoAccept, thinkingLevel, notes). Pass a profile's id as task_send's profileId to run with its settings."}, mcpProfileList(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "profile_list", Description: "List the human-authored agent profiles (id, name, provider, permissionMode, autoAccept, thinkingLevel, notes, and when set onRateLimit / fallbackProfileId). Pass a profile's id as task_send's profileId to run with its settings."}, mcpProfileList(client))
 }
 
 // workspaceListOutput is workspace_list's structured output: every
@@ -180,6 +180,9 @@ func mcpProfileList(client *wsclient.Client) mcp.ToolHandlerFor[struct{}, profil
 		if profiles == nil {
 			profiles = []map[string]any{}
 		}
+		for _, p := range profiles {
+			addProfileFailoverFields(p)
+		}
 		return nil, profileListOutput{Profiles: profiles}, nil
 	}
 }
@@ -201,5 +204,18 @@ func addFailureFields(row map[string]any) {
 		if ts, err := time.Parse(time.RFC3339Nano, s); err == nil {
 			row["resetAt"] = ts.UTC().Format(time.RFC3339)
 		}
+	}
+}
+
+// addProfileFailoverFields adds the camelCase onRateLimit /
+// fallbackProfileId keys (ADR-0041 F2) to one decoded profile, omitting
+// them when the policy is "none" / there is no fallback. The profile's
+// Go-named keys (OnRateLimit, FallbackProfileID) are left as they are.
+func addProfileFailoverFields(p map[string]any) {
+	if v, ok := p["OnRateLimit"].(string); ok && v != "" && v != "none" {
+		p["onRateLimit"] = v
+	}
+	if v, ok := p["FallbackProfileID"]; ok && v != nil {
+		p["fallbackProfileId"] = v
 	}
 }

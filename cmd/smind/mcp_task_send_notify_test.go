@@ -116,3 +116,17 @@ func TestMCPTaskSend_ProfileSendForwardsFromIds(t *testing.T) {
 		t.Fatalf("fromTaskId/fromChatId = %s/%s, want 7/9", got["fromTaskId"], got["fromChatId"])
 	}
 }
+
+// TestMCPTaskSend_ForwardsProfileID: profileId reaches run.start's params
+// so the daemon can record it on the run (ADR-0041 F2); omitted stays absent.
+func TestMCPTaskSend_ForwardsProfileID(t *testing.T) {
+	send := newTaskSendRecorder(t)
+	got := send(map[string]any{"taskId": 1, "prompt": "hi", "profileId": 5})
+	if string(got["profileId"]) != "5" {
+		t.Fatalf("run.start profileId = %s, want 5", got["profileId"])
+	}
+	got = send(map[string]any{"taskId": 1, "provider": "glm", "prompt": "hi"})
+	if _, present := got["profileId"]; present {
+		t.Fatalf("run.start has profileId = %s when omitted, want the key absent", got["profileId"])
+	}
+}

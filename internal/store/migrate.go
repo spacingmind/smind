@@ -353,6 +353,27 @@ var migrations = []migration{
 		},
 	},
 	{
+		// ADR-0041 F2: rate-limit failover policy on agent profiles.
+		name: "profile_failover",
+		apply: func(db *sql.DB) error {
+			if err := addColumnIfMissing(db, "agent_profiles", "on_rate_limit", "TEXT NOT NULL DEFAULT 'none'"); err != nil {
+				return err
+			}
+			return addColumnIfMissing(db, "agent_profiles", "fallback_profile_id", "INTEGER")
+		},
+	},
+	{
+		// ADR-0041 F2: the profile a run was launched with, and the run it
+		// continues after a rate limit.
+		name: "run_profile_failover",
+		apply: func(db *sql.DB) error {
+			if err := addColumnIfMissing(db, "runs", "profile_id", "INTEGER"); err != nil {
+				return err
+			}
+			return addColumnIfMissing(db, "runs", "failover_of", "TEXT NOT NULL DEFAULT ''")
+		},
+	},
+	{
 		// ADR-0026 section 6: learned_skill_offers / learned_skill_loads are
 		// new tables, so schema.sql's CREATE TABLE IF NOT EXISTS already
 		// creates them on every Open; this entry is the explicit marker and

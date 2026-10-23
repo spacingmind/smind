@@ -76,7 +76,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"chat.queueCancel":         handleChatQueueCancel(reg),
 		"chat.queueGet":            handleChatQueueGet(reg),
 		"task.prompt":              handleTaskPrompt(wm, runner, reg, gh),
-		"run.start":                handleRunStart(wm, runner, reg, gh),
+		"run.start":                handleRunStart(wm, runner, reg, profReg, gh),
 		"run.list":                 handleRunList(reg),
 		"run.attach":               handleRunAttach(reg),
 		"run.logs":                 handleRunLogs(reg),
@@ -1400,7 +1400,7 @@ type runStartResult struct {
 // matters (Ctrl+C during a foreground `task send` must detach the watch,
 // not stop the run, which task.prompt's own request-scoped stop-on-detach
 // behavior cannot support).
-func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry, gh *githubHolder) handlerFunc {
+func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry, profReg *profiles.Registry, gh *githubHolder) handlerFunc {
 	return func(ctx context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			TaskID int64 `json:"taskId"`
@@ -1443,6 +1443,9 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			// NotifyOnFinish (ADR-0041 B3): false opts a child run out of the
 			// parent-chat notification; omitted = true.
 			NotifyOnFinish *bool `json:"notifyOnFinish"`
+			// ProfileID (ADR-0041 F2) is the profile the client resolved its
+			// settings from; recorded on the run, nothing else changes.
+			ProfileID int64 `json:"profileId"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.start: invalid params: %w", err)
@@ -1468,11 +1471,24 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			return nil, fmt.Errorf("run.start: source %q requires fromTaskId and fromChatId", p.Source)
 		}
 
+		if p.ProfileID < 0 {
+			return nil, fmt.Errorf("run.start: profile %d not found", p.ProfileID)
+		}
+		if p.ProfileID != 0 {
+			if _, err := profReg.Get(p.ProfileID); err != nil {
+				return nil, fmt.Errorf("run.start: profile %d not found", p.ProfileID)
+			}
+		}
+
 		set, err := acceptAttachments(ctx, wm, reg, gh, p.TaskID, p.Attachments)
 		if err != nil {
 			return nil, fmt.Errorf("run.start: %w", err)
 		}
-		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, p.Source, p.FromTaskID, p.FromChatID, runStartOptions(p.Model, set, reg, p.NotifyOnFinish)...)
+		startOpts := runStartOptions(p.Model, set, reg, p.NotifyOnFinish)
+		if p.ProfileID != 0 {
+			startOpts = append(startOpts, runs.WithProfile(p.ProfileID))
+		}
+		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, p.Source, p.FromTaskID, p.FromChatID, startOpts...)
 		if err != nil {
 			reg.DiscardAttachments(set)
 			return nil, fmt.Errorf("run.start: %w", err)
@@ -1745,7 +1761,14 @@ type runLogsResult struct {
 	// Attachments is the public metadata of the prompt's attachments
 	// (ADR-0038); never bytes.
 	Attachments []attach.Item `json:"attachments,omitempty"`
-	Events      []runLogEvent `json:"events"`
+	// ProfileID/FailoverOf: ADR-0041 F2 provenance, omitted when none.
+	ProfileID  int64  `json:"profileId,omitempty"`
+	FailoverOf string `json:"failoverOf,omitempty"`
+	// FallbackProfileID is set only for a rate_limited run whose profile
+	// names a fallback: the suggestion to start the work again on it, in a
+	// new chat.
+	FallbackProfileID int64         `json:"fallbackProfileId,omitempty"`
+	Events            []runLogEvent `json:"events"`
 }
 
 // handleRunLogs returns runID's full (or, with Tail set, last Tail)
@@ -1774,20 +1797,27 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 		for i, e := range history {
 			events[i] = toRunLogEvent(e)
 		}
+		var fallbackID int64
+		if status.FailureKind == "rate_limited" {
+			fallbackID = reg.FallbackProfileFor(status.ProfileID)
+		}
 		return runLogsResult{
-			RunID:       status.ID,
-			Status:      string(status.Status),
-			StopReason:  status.StopReason,
-			Disposition: status.Disposition,
-			Err:         status.Err,
-			FailureKind: status.FailureKind,
-			Window:      status.FailureWindow,
-			ResetAt:     runs.FailureResetRFC3339(status),
-			BaseSHA:     derefStr(status.BaseSHA),
-			HeadSHA:     derefStr(status.HeadSHA),
-			Dirty:       status.Dirty,
-			Attachments: status.Attachments,
-			Events:      events,
+			ProfileID:         status.ProfileID,
+			FailoverOf:        status.FailoverOf,
+			FallbackProfileID: fallbackID,
+			RunID:             status.ID,
+			Status:            string(status.Status),
+			StopReason:        status.StopReason,
+			Disposition:       status.Disposition,
+			Err:               status.Err,
+			FailureKind:       status.FailureKind,
+			Window:            status.FailureWindow,
+			ResetAt:           runs.FailureResetRFC3339(status),
+			BaseSHA:           derefStr(status.BaseSHA),
+			HeadSHA:           derefStr(status.HeadSHA),
+			Dirty:             status.Dirty,
+			Attachments:       status.Attachments,
+			Events:            events,
 		}, nil
 	}
 }
@@ -2233,6 +2263,8 @@ func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 			ThinkingLevel        string          `json:"thinkingLevel"`
 			Model                string          `json:"model"`
 			Notes                string          `json:"notes"`
+			OnRateLimit          string          `json:"onRateLimit"`
+			FallbackProfileID    *int64          `json:"fallbackProfileId"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("profile.create: invalid params: %w", err)
@@ -2241,13 +2273,15 @@ func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 			return nil, fmt.Errorf("profile.create: %w", err)
 		}
 		return profReg.Create(store.AgentProfile{
-			Name:           p.Name,
-			Provider:       p.Provider,
-			PermissionMode: p.PermissionMode,
-			AutoAccept:     p.AutoAccept,
-			ThinkingLevel:  p.ThinkingLevel,
-			Model:          p.Model,
-			Notes:          p.Notes,
+			Name:              p.Name,
+			Provider:          p.Provider,
+			PermissionMode:    p.PermissionMode,
+			AutoAccept:        p.AutoAccept,
+			ThinkingLevel:     p.ThinkingLevel,
+			Model:             p.Model,
+			Notes:             p.Notes,
+			OnRateLimit:       p.OnRateLimit,
+			FallbackProfileID: p.FallbackProfileID,
 		})
 	}
 }
@@ -2287,6 +2321,8 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			ThinkingLevel        string          `json:"thinkingLevel"`
 			Model                string          `json:"model"`
 			Notes                string          `json:"notes"`
+			OnRateLimit          string          `json:"onRateLimit"`
+			FallbackProfileID    *int64          `json:"fallbackProfileId"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("profile.update: invalid params: %w", err)
@@ -2295,14 +2331,16 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			return nil, fmt.Errorf("profile.update: %w", err)
 		}
 		return profReg.Update(store.AgentProfile{
-			ID:             p.ID,
-			Name:           p.Name,
-			Provider:       p.Provider,
-			PermissionMode: p.PermissionMode,
-			AutoAccept:     p.AutoAccept,
-			ThinkingLevel:  p.ThinkingLevel,
-			Model:          p.Model,
-			Notes:          p.Notes,
+			ID:                p.ID,
+			Name:              p.Name,
+			Provider:          p.Provider,
+			PermissionMode:    p.PermissionMode,
+			AutoAccept:        p.AutoAccept,
+			ThinkingLevel:     p.ThinkingLevel,
+			Model:             p.Model,
+			Notes:             p.Notes,
+			OnRateLimit:       p.OnRateLimit,
+			FallbackProfileID: p.FallbackProfileID,
 		})
 	}
 }

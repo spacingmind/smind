@@ -55,6 +55,12 @@ type chatQueueRunConfig struct {
 	// ReplyChatID is the parent chat to tell when the delivered run
 	// finishes (ADR-0041 B3), computed at enqueue time; 0 = none.
 	ReplyChatID int64 `json:"replyChatId,omitempty"`
+	// ProfileID is the agent profile the delivered run was launched with
+	// (ADR-0041 F2), recorded only; 0 = none.
+	ProfileID int64 `json:"profileId,omitempty"`
+	// FailoverOf is the failed run an automatic rate-limit retry continues
+	// (ADR-0041 F2b); "" = none.
+	FailoverOf string `json:"failoverOf,omitempty"`
 }
 
 // SetStarter wires the dependencies delivery needs to start runs itself
@@ -134,6 +140,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		notify = o.notify
 	}
 	replyChatID := reg.replyChatFor(wm, taskID, source, fromTaskID, fromChatID, notify)
+	profileID := resolveStartOptions(opts).profileID
 
 	// An agent-sourced prompt carries its provenance header on an
 	// immediate start too (ADR-0021 §4) -- the queued path stamps it at
@@ -175,6 +182,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		purpose:            startPurpose(opts),
 		origin:             source,
 		replyChatID:        replyChatID,
+		profileID:          profileID,
 		interrupt:          resolveStartOptions(opts).interrupt,
 		attachments:        resolveStartOptions(opts).attachments,
 		attachStore:        resolveStartOptions(opts).attachStore,
@@ -284,7 +292,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	}
 
 	cfg, err := json.Marshal(chatQueueRunConfig{
-		Provider: string(provider), PermissionMode: perm.Mode, AutoAccept: perm.AutoAccept, ThinkingLevel: string(thinkingLevel), Model: model, ReplyChatID: replyChatID,
+		Provider: string(provider), PermissionMode: perm.Mode, AutoAccept: perm.AutoAccept, ThinkingLevel: string(thinkingLevel), Model: model, ReplyChatID: replyChatID, ProfileID: profileID,
 	})
 	if err != nil {
 		return StartOutcome{}, fmt.Errorf("runs: start: encode run config: %w", err)
@@ -448,6 +456,12 @@ func (reg *Registry) deliverOne(chatID int64) {
 		if cfg.ReplyChatID != 0 {
 			startOpts = append(startOpts, WithReplyChat(cfg.ReplyChatID))
 		}
+		if cfg.ProfileID != 0 {
+			startOpts = append(startOpts, WithProfile(cfg.ProfileID))
+		}
+		if cfg.FailoverOf != "" {
+			startOpts = append(startOpts, WithFailoverOf(cfg.FailoverOf))
+		}
 		startOpts = append(startOpts, reg.attachmentStartOption(item.Attachments)...)
 		runID, err := reg.Start(context.Background(), wm, runner, chat.TaskID, chatID, taskrunner.Provider(cfg.Provider), deliverPrompt(item), taskrunner.PermissionSettings{Mode: cfg.PermissionMode, AutoAccept: cfg.AutoAccept}, taskrunner.ThinkingLevel(cfg.ThinkingLevel), startOpts...)
 		if err != nil {
@@ -599,6 +613,8 @@ type startOptions struct {
 	interrupt bool
 	// replyChatID/notify: see WithReplyChat / WithNotifyOnFinish.
 	replyChatID int64
+	profileID   int64
+	failoverOf  string
 	notify      bool
 	notifySet   bool
 	isolation   *taskrunner.IsolationOptions
@@ -621,6 +637,19 @@ func WithOrigin(source string) StartOption {
 // callers (a queued delivery) pass the value stored at enqueue time.
 func WithReplyChat(chatID int64) StartOption {
 	return func(o *startOptions) { o.replyChatID = chatID }
+}
+
+// WithProfile records the agent profile the run was launched with
+// (ADR-0041 F2) on the run, and nothing else: the profile's mode/model are
+// not applied here (the client already resolved them). 0 = none.
+func WithProfile(id int64) StartOption {
+	return func(o *startOptions) { o.profileID = id }
+}
+
+// WithFailoverOf records the run this one continues after a rate limit
+// (ADR-0041 F2b).
+func WithFailoverOf(runID string) StartOption {
+	return func(o *startOptions) { o.failoverOf = runID }
 }
 
 // WithNotifyOnFinish opts a child run in (default) or out of the parent

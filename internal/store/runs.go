@@ -24,10 +24,10 @@ func (s *Store) CreateRun(r Run) (Run, error) {
 		chatID = sql.NullInt64{Int64: r.ChatID, Valid: true}
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO runs (id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, approval_policy, model, purpose, origin, interrupt, attachments, reply_chat_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO runs (id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, approval_policy, model, purpose, origin, interrupt, attachments, reply_chat_id, profile_id, failover_of)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.TaskID, chatID, r.Provider, r.Prompt, r.Status, r.StartedAt,
-		timePtrToNull(r.FinishedAt), r.StopReason, r.ErrMsg, r.PermissionMode, r.AutoAccept, nullString(r.Model), r.Purpose, r.Origin, r.Interrupt, r.Attachments, nullID(r.ReplyChatID),
+		timePtrToNull(r.FinishedAt), r.StopReason, r.ErrMsg, r.PermissionMode, r.AutoAccept, nullString(r.Model), r.Purpose, r.Origin, r.Interrupt, r.Attachments, nullID(r.ReplyChatID), nullID(r.ProfileID), r.FailoverOf,
 	)
 	if err != nil {
 		return Run{}, fmt.Errorf("insert run: %w", err)
@@ -308,7 +308,7 @@ func (s *Store) ListRunEvents(runID string) ([]RunEvent, error) {
 
 // runColumns is the run SELECT column list; scanRun's Scan argument order
 // must stay in lockstep with it.
-const runColumns = "id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose, origin, interrupt, attachments, failure_kind, failure_window, failure_reset_at, reply_chat_id, parent_notified_at"
+const runColumns = "id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose, origin, interrupt, attachments, failure_kind, failure_window, failure_reset_at, reply_chat_id, parent_notified_at, profile_id, failover_of"
 
 // runColumnsAs is runColumns with every column qualified by alias.
 func runColumnsAs(alias string) string {
@@ -330,10 +330,11 @@ func scanRun(row rowScanner) (Run, error) {
 	var failureResetAt sql.NullTime
 	var replyChatID sql.NullInt64
 	var parentNotifiedAt sql.NullTime
+	var profileID sql.NullInt64
 	if err := row.Scan(&r.ID, &r.TaskID, &chatID, &r.Provider, &r.Prompt, &r.Status,
 		&r.StartedAt, &finishedAt, &r.StopReason, &r.ErrMsg, &r.PermissionMode, &r.AutoAccept, &model,
 		&baseSHA, &headSHA, &dirty, &r.Purpose, &r.Origin, &r.Interrupt, &r.Attachments,
-		&r.FailureKind, &r.FailureWindow, &failureResetAt, &replyChatID, &parentNotifiedAt); err != nil {
+		&r.FailureKind, &r.FailureWindow, &failureResetAt, &replyChatID, &parentNotifiedAt, &profileID, &r.FailoverOf); err != nil {
 		return Run{}, err
 	}
 	// NULL decodes as ChatID 0 ("unknown"/pre-chats) -- see CreateRun's
@@ -350,6 +351,7 @@ func scanRun(row rowScanner) (Run, error) {
 	r.FailureResetAt = nullToTimePtr(failureResetAt)
 	r.ReplyChatID = replyChatID.Int64
 	r.ParentNotifiedAt = nullToTimePtr(parentNotifiedAt)
+	r.ProfileID = profileID.Int64
 	return r, nil
 }
 
