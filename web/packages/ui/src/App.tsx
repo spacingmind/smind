@@ -272,7 +272,7 @@ function AppShell({
   } = useTaskTabs();
   const queryClient = useDaemonQueryClient();
   const events = useDaemonEvents(client, queryClient);
-  const { attention, runStatus, runningChatsByTask, loaded: runsLoaded } = useTaskAttention(client, selectedTask?.ID ?? null, events);
+  const { attention, runStatus, rateLimit, runningChatsByTask, loaded: runsLoaded } = useTaskAttention(client, selectedTask?.ID ?? null, events);
   // ADR-0016 P3: the selected task's own chats, live -- the "+" menu's
   // reopen section, the seed-or-migrate step below, and every chat tab's
   // authoritative title/provider all read from this one fetch.
@@ -997,6 +997,7 @@ function AppShell({
       onSelectTask={selectTaskFromSidebar}
       attention={attention}
       runStatus={runStatus}
+      rateLimit={rateLimit}
       unread={unread}
       onMarkUnread={markUnread}
       events={events}

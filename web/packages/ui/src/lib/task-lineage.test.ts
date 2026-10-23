@@ -78,6 +78,24 @@ describe("pillStatusWithSubtree", () => {
     expect(pillStatusWithSubtree({ ...limited, counts: counts({ failed: 1 }) })).toBe("danger");
   });
 
+  it("a parent whose only failed descendant is rate limited is warning, not danger", () => {
+    const limitedRun = { state: "error" as const, runningRunIds: [], pendingPermissions: 0, failureKind: "rate_limited" };
+    const plainRun = { state: "error" as const, runningRunIds: [], pendingPermissions: 0 };
+    const parent = node({ id: 1, counts: counts({ failed: 1 }) });
+    const limitedKid = node({ id: 2, parentId: 1, run: limitedRun });
+    const plainKid = node({ id: 3, parentId: 1, run: plainRun });
+    expect(pillStatusWithSubtree(parent, [parent, limitedKid])).toBe("warning");
+    // A plain failure beside it, or no node list to tell them apart, stays danger.
+    expect(pillStatusWithSubtree({ ...parent, counts: counts({ failed: 2 }) }, [parent, limitedKid, plainKid])).toBe("danger");
+    expect(pillStatusWithSubtree(parent)).toBe("danger");
+    // The parent's own plain failure outranks a rate-limited child.
+    expect(pillStatusWithSubtree({ ...parent, run: plainRun }, [parent, limitedKid])).toBe("danger");
+    // A grandchild counts too.
+    const mid = node({ id: 4, parentId: 1 });
+    const grandKid = node({ id: 5, parentId: 4, run: limitedRun });
+    expect(pillStatusWithSubtree(parent, [parent, mid, grandKid])).toBe("warning");
+  });
+
   it("rateLimitHint words the reset in local time and is null for any other node", () => {
     const now = new Date(2026, 9, 13, 10, 0, 0);
     const run = { state: "error" as const, runningRunIds: [], pendingPermissions: 0, failureKind: "rate_limited" };

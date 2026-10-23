@@ -35,7 +35,8 @@ import {
   type TaskSearchResult,
   type WorkspaceWithTree,
 } from "@/lib/workspace-tree";
-import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
+import type { AttentionReason, TaskAttention, TaskRateLimit, TaskRunStatus } from "@/hooks/use-task-attention";
+import { describeRateLimitReset } from "@/lib/rate-limit";
 import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, taskSlotSignal, workspaceMonogram, workspaceTasks } from "@/lib/sidebar-signal";
 import { attentionRollup, nestTasks, type TaskNode } from "@/lib/task-tree";
 import { sidebarTreeActions, type TreeActionAvailability } from "@/lib/task-tree-actions";
@@ -196,6 +197,8 @@ interface RowSignal {
   statusOverrides: Map<number, string>;
   /** Latest run status per task (see useTaskAttention). */
   runStatus: TaskRunStatus;
+  /** Tasks whose latest run is rate limited (ADR-0041): their dot is warning, not danger, and the row says so. */
+  rateLimit: TaskRateLimit;
   /** Per-task git state (see useWorkspaceTaskGit). */
   gitByTask: ReadonlyMap<number, TaskGit>;
   /** Task ids the user hasn't opened since their last attention-worthy event, or a manual "Mark unread" (AC2). */
@@ -213,6 +216,7 @@ interface RowSignal {
 const EMPTY_SIGNAL: RowSignal = {
   statusOverrides: new Map(),
   runStatus: new Map(),
+  rateLimit: new Map(),
   gitByTask: new Map(),
   unread: new Set(),
   onMarkUnread: () => {},
@@ -315,6 +319,7 @@ export function AppSidebar({
   onSelectTask,
   attention,
   runStatus,
+  rateLimit,
   unread,
   onMarkUnread,
   events,
@@ -339,6 +344,8 @@ export function AppSidebar({
   attention?: TaskAttention;
   /** Per-task latest-run status (App.tsx's useTaskAttention, same hook) -- renders the row's leading run dot and feeds the container rows' aggregate. */
   runStatus?: TaskRunStatus;
+  /** Per-task rate-limit detail for a latest run that hit a provider quota (same hook); absent = none. */
+  rateLimit?: TaskRateLimit;
   /** Task ids the user hasn't opened since their last attention-worthy event (App.tsx's useUnreadTasks) -- bolds the row's title (AC2). */
   unread?: ReadonlySet<number>;
   /** Manual "Mark unread" override from the task's context menu (App.tsx's useUnreadTasks). */
@@ -451,13 +458,14 @@ export function AppSidebar({
       attention,
       statusOverrides,
       runStatus: runStatus ?? EMPTY_RUN_STATUS,
+      rateLimit: rateLimit ?? EMPTY_SIGNAL.rateLimit,
       gitByTask,
       unread: unread ?? EMPTY_UNREAD,
       onMarkUnread: onMarkUnread ?? EMPTY_SIGNAL.onMarkUnread,
       pinned,
       onTogglePin: togglePin,
     }),
-    [now, attention, statusOverrides, runStatus, gitByTask, unread, onMarkUnread, pinned, togglePin],
+    [now, attention, statusOverrides, runStatus, rateLimit, gitByTask, unread, onMarkUnread, pinned, togglePin],
   );
 
   const pinnedTasks = useMemo(() => allTasks.filter((t) => pinned.has(t.ID)), [allTasks, pinned]);
@@ -1770,6 +1778,7 @@ function TaskHoverCardBody({
   tier,
   childCount,
   now,
+  limitHint,
 }: {
   task: Task;
   git?: TaskGit;
@@ -1777,6 +1786,8 @@ function TaskHoverCardBody({
   tier: string | null;
   childCount: number;
   now: number;
+  /** "Rate limited · resets 17:35" when the task's latest run hit a provider quota; null otherwise. */
+  limitHint?: string | null;
 }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -1801,6 +1812,11 @@ function TaskHoverCardBody({
       <p data-testid="sidebar-task-status" className="text-ui-sm uppercase text-muted-foreground">
         {status}
       </p>
+      {limitHint && (
+        <p data-testid="sidebar-task-rate-limit" className="text-ui-sm text-warning">
+          {limitHint}
+        </p>
+      )}
     </div>
   );
 }
@@ -1896,11 +1912,14 @@ const TaskRow = memo(function TaskRow({
   spaces?: SpaceWithTasks[];
   onMoveTask?: (task: Task, spaceId: number | null) => void;
 }) {
-  const { attention, statusOverrides, runStatus, gitByTask, unread, onMarkUnread, pinned, onTogglePin, now } = useRowSignal();
+  const { attention, statusOverrides, runStatus, rateLimit, gitByTask, unread, onMarkUnread, pinned, onTogglePin, now } = useRowSignal();
   const hasChildren = childCount > 0;
   const reason = primaryAttentionReason(attention?.get(task.ID));
   const runState = runStatus.get(task.ID);
-  const runDot = runDotStatus(runState);
+  // ADR-0041: a latest run that hit a provider quota is still "error" for every rollup, but its dot is warning and the row says why.
+  const limited = runState === "error" ? rateLimit.get(task.ID) : undefined;
+  const limitHint = limited ? `Rate limited · ${describeRateLimitReset(limited.resetAt, new Date(now))}` : null;
+  const runDot = limited ? "warning" : runDotStatus(runState);
   const git = gitByTask.get(task.ID);
   const isUnread = unread.has(task.ID);
   const slotSignal = taskSlotSignal(reason, runState, isUnread);
@@ -1962,6 +1981,7 @@ const TaskRow = memo(function TaskRow({
     slotSignal.kind === "attention" && `needs attention: ${ATTENTION_LABEL[slotSignal.reason]}`,
     slotSignal.kind === "run" && `latest run ${slotSignal.status}`,
     slotSignal.kind === "unread" && "unread",
+    limitHint,
   ]
     .filter(Boolean)
     .join(", ");
@@ -2036,10 +2056,10 @@ const TaskRow = memo(function TaskRow({
                   >
                     {slotSignal.kind === "attention" && (
                       <StatusDot
-                        status={attentionDotStatus(slotSignal.reason)}
+                        status={limited && slotSignal.reason === "error" ? "warning" : attentionDotStatus(slotSignal.reason)}
                         data-testid="task-attention"
                         data-attention-reason={slotSignal.reason}
-                        aria-label={`task needs attention: ${ATTENTION_LABEL[slotSignal.reason]}`}
+                        aria-label={`task needs attention: ${ATTENTION_LABEL[slotSignal.reason]}${limited && slotSignal.reason === "error" ? `, ${limitHint}` : ""}`}
                       />
                     )}
                     {slotSignal.kind === "run" && runDot && (
@@ -2047,7 +2067,7 @@ const TaskRow = memo(function TaskRow({
                         status={runDot}
                         data-testid="task-run-status"
                         data-run-status={runState}
-                        aria-label={`latest run ${runState}`}
+                        aria-label={limitHint ? `latest run ${runState}, ${limitHint}` : `latest run ${runState}`}
                       />
                     )}
                     {slotSignal.kind === "unread" && (
@@ -2132,7 +2152,7 @@ const TaskRow = memo(function TaskRow({
               </SidebarMenuSubButton>
             </HoverCardTrigger>
             <HoverCardContent data-testid="task-hover-card" side="right" align="start">
-              <TaskHoverCardBody task={task} git={git} status={status} tier={tier} childCount={childCount} now={now} />
+              <TaskHoverCardBody task={task} git={git} status={status} tier={tier} childCount={childCount} now={now} limitHint={limitHint} />
             </HoverCardContent>
           </HoverCard>
           {active && (

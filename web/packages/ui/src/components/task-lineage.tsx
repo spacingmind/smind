@@ -18,7 +18,7 @@ export function TaskLineageChips({
   lineage: TaskLineage;
   onJumpToTask?: (taskId: number) => void;
 }) {
-  const { parent, node, children } = lineage;
+  const { parent, node, children, nodes } = lineage;
   const summary = node ? statusSummary(node.counts) : "";
   const usage = node ? usageChipText(node.usage.subtree) : null;
   // ADR-0041: this task's own latest run hit a provider quota.
@@ -75,13 +75,13 @@ export function TaskLineageChips({
               data-testid="task-child-pill"
               data-child-id={child.id}
               data-child-state={child.run.state}
-              data-child-urgency={pillStatusWithSubtree(child)}
+              data-child-urgency={pillStatusWithSubtree(child, nodes)}
               data-child-rate-limited={childHint ? "true" : undefined}
               title={childHint ?? undefined}
               onClick={() => onJumpToTask?.(child.id)}
               className="flex max-w-[12rem] items-center gap-1.5 truncate rounded-full border px-2 py-0.5 transition-colors hover:bg-hover hover:text-foreground"
             >
-              <StatusDot status={pillStatusWithSubtree(child)} />
+              <StatusDot status={pillStatusWithSubtree(child, nodes)} />
               <span className="truncate">{child.title}</span>
               {child.tier && <span className="shrink-0">{child.tier}</span>}
             </button>

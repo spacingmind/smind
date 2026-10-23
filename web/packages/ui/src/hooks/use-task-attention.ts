@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
+import { RATE_LIMITED } from "@/lib/rate-limit";
 import type { RunLogEvent, RunLogsResult, RunStatusValue, RunSummary } from "@/lib/types";
 
 /** Why a task currently has the sidebar's attention marker. */
@@ -19,7 +20,7 @@ export const FINISHED_ATTENTION_WINDOW_MS = 24 * 60 * 60 * 1000;
 export type TaskAttention = Map<number, Set<AttentionReason>>;
 
 /** Stable "nothing known yet" value, so a client-less mount doesn't hand consumers a fresh object every render. */
-const EMPTY_SIGNAL: TaskSignal = { loaded: false, attention: new Map(), runStatus: new Map(), runningChatsByTask: new Map() };
+const EMPTY_SIGNAL: TaskSignal = { loaded: false, attention: new Map(), runStatus: new Map(), rateLimit: new Map(), runningChatsByTask: new Map() };
 
 /**
  * The status of each task's latest run -- "running" if any of the task's
@@ -29,6 +30,15 @@ const EMPTY_SIGNAL: TaskSignal = { loaded: false, attention: new Map(), runStatu
  * row draws no dot for it.
  */
 export type TaskRunStatus = ReadonlyMap<number, RunStatusValue>;
+
+/**
+ * Tasks whose latest run failed on a provider quota (ADR-0041), with what the
+ * daemon said about it. Separate from runStatus on purpose: such a task's
+ * status stays "error", so every consumer that keys on "error" (sorting,
+ * attention rollups, status groups) is unchanged; only the row's tone and
+ * wording read this.
+ */
+export type TaskRateLimit = ReadonlyMap<number, { window?: string; resetAt?: string }>;
 
 /** Both per-task signals this hook derives from the one run bookkeeping it keeps, plus ADR-0016 P3's per-task running-chats set (the concurrency banner's data source). */
 export interface TaskSignal {
@@ -40,6 +50,8 @@ export interface TaskSignal {
   loaded: boolean;
   attention: TaskAttention;
   runStatus: TaskRunStatus;
+  /** Tasks whose latest run is rate limited (ADR-0041); the task's runStatus is still "error". */
+  rateLimit: TaskRateLimit;
   /** Which of each task's chats currently have a running run -- ADR-0016 P3's concurrency banner ("Another chat is running in this worktree") is "this chat's own id is in the set but the set has more than one member". Absent taskId means "no chat of it is running". */
   runningChatsByTask: ReadonlyMap<number, ReadonlySet<number>>;
 }
@@ -57,6 +69,13 @@ interface RunLike extends Pick<RunSummary, "ID" | "TaskID" | "ChatID" | "Status"
   order: number;
   /** Epoch-ms finish time; null when unknown, which a terminal run treats as recent (conservative). */
   finishedAtMs: number | null;
+  /** ADR-0041: the rate-limit failure of an errored run, when the daemon classified one. */
+  rateLimit?: { window?: string; resetAt?: string };
+}
+
+/** The window/reset of a rate-limit failure, with empty values dropped. */
+function failureDetail(window: string | undefined, resetAt: string | null | undefined): { window?: string; resetAt?: string } {
+  return { ...(window ? { window } : {}), ...(resetAt ? { resetAt } : {}) };
 }
 
 /**
@@ -151,6 +170,7 @@ export function useTaskAttention(
       loaded: loadedRef.current,
       attention,
       runStatus: new Map([...latest].map(([taskId, run]) => [taskId, run.Status])),
+      rateLimit: new Map([...latest].filter(([, run]) => run.Status === "error" && run.rateLimit).map(([taskId, run]) => [taskId, run.rateLimit!])),
       runningChatsByTask,
     });
   }, []);
@@ -183,6 +203,7 @@ export function useTaskAttention(
               Status: r.Status,
               order: -index,
               finishedAtMs: Number.isNaN(parsed) ? null : parsed,
+              ...(r.FailureKind === RATE_LIMITED ? { rateLimit: failureDetail(r.FailureWindow, r.FailureResetAt) } : {}),
             };
           });
           runsRef.current = runs;
@@ -258,7 +279,7 @@ export function useTaskAttention(
 
     const offRunStatus = events.subscribe("run.status", (payload) => {
       if (typeof payload !== "object" || payload === null) return;
-      const p = payload as { runId?: unknown; taskId?: unknown; chatId?: unknown; status?: unknown };
+      const p = payload as { runId?: unknown; taskId?: unknown; chatId?: unknown; status?: unknown; failureKind?: unknown; window?: unknown; resetAt?: unknown };
       if (typeof p.runId !== "string" || typeof p.taskId !== "number" || typeof p.status !== "string") return;
       // chatId is ADR-0016 P1.4 -- absent only for a payload from a daemon
       // that predates it, which the concurrency banner then just can't
@@ -271,8 +292,17 @@ export function useTaskAttention(
       // run.status payloads carry no timestamp; a live terminal event is
       // "just now" by construction, which keeps it inside the window.
       const finishedAtMs = p.status === "running" ? null : Date.now();
-      if (idx >= 0) runs[idx] = { ...runs[idx], TaskID: p.taskId, ChatID: chatId, Status: p.status as RunLike["Status"], order, finishedAtMs };
-      else runs.push({ ID: p.runId, TaskID: p.taskId, ChatID: chatId, Status: p.status as RunLike["Status"], order, finishedAtMs });
+      // A run.status carries the failure fields (ADR-0041) on its terminal event; any later status for the run replaces them.
+      const rateLimit =
+        p.failureKind === RATE_LIMITED
+          ? failureDetail(typeof p.window === "string" ? p.window : undefined, typeof p.resetAt === "string" ? p.resetAt : undefined)
+          : undefined;
+      if (idx >= 0) {
+        const next: RunLike = { ...runs[idx], TaskID: p.taskId, ChatID: chatId, Status: p.status as RunLike["Status"], order, finishedAtMs };
+        if (rateLimit) next.rateLimit = rateLimit;
+        else delete next.rateLimit;
+        runs[idx] = next;
+      } else runs.push({ ID: p.runId, TaskID: p.taskId, ChatID: chatId, Status: p.status as RunLike["Status"], order, finishedAtMs, ...(rateLimit ? { rateLimit } : {}) });
 
       if (p.status === "running") {
         // A (re)started run un-terminalizes: clear its seen marker and

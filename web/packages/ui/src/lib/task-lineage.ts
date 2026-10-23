@@ -111,6 +111,19 @@ export function isRateLimitedNode(node: Pick<TaskTreeNode, "run">): boolean {
   return isRateLimitedRun({ status: node.run.state, failureKind: node.run.failureKind });
 }
 
+/** How many live descendants of `node` in `all` have a rate-limited latest run. */
+function rateLimitedDescendants(node: TaskTreeNode, all: ReadonlyArray<TaskTreeNode>): number {
+  const inSubtree = new Set<number>([node.id]);
+  let count = 0;
+  // task.tree is depth-first pre-order, so a parent always precedes its children.
+  for (const n of all) {
+    if (n.parentId === null || !inSubtree.has(n.parentId)) continue;
+    inSubtree.add(n.id);
+    if (isRateLimitedNode(n)) count++;
+  }
+  return count;
+}
+
 /** "Rate limited · resets 17:35" for a rate-limited node, null otherwise. The window stays out of the hint (it is a one-liner on a pill). */
 export function rateLimitHint(node: Pick<TaskTreeNode, "run">, now: Date): string | null {
   if (!isRateLimitedNode(node)) return null;
@@ -125,8 +138,13 @@ export function rateLimitHint(node: Pick<TaskTreeNode, "run">, now: Date): strin
  * failed > waiting_permission > running > anything else, so a red dot is
  * never masked by a calmer one beneath it.
  */
-export function pillStatusWithSubtree(node: TaskTreeNode): StatusDotStatus {
-  if (node.counts.failed > 0) return "danger";
+export function pillStatusWithSubtree(node: TaskTreeNode, all?: ReadonlyArray<TaskTreeNode>): StatusDotStatus {
+  if (node.counts.failed > 0) {
+    // Danger unless every failed descendant is known (from `all`) to be a provider quota (ADR-0041).
+    if (!all || rateLimitedDescendants(node, all) < node.counts.failed) return "danger";
+    // The node's own plain failure is not counted in `counts`; it still reads danger.
+    return node.run.state === "error" && !isRateLimitedNode(node) ? "danger" : "warning";
+  }
   // A provider quota (ADR-0041) is not a code failure: the pill is warning, not danger.
   if (isRateLimitedNode(node)) return "warning";
   if (node.counts.waitingPermission > 0 || node.run.state === "waiting_permission") return "warning";
