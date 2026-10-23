@@ -145,4 +145,25 @@ describe("RunFooter failover actions (ADR-0041 F2)", () => {
     expect(screen.queryByTestId("run-wait")).toBeNull();
     expect(screen.getByTestId("run-retry")).toBeTruthy();
   });
+
+  it("continued-on badge links to the successor chat", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const failover = failoverStub({ successor: () => ({ runId: "run-2", chatId: 11, provider: "glm" }) });
+    render(<RunFooter run={limited(future)} isLatest providerLabels={{ glm: "GLM" }} failover={failover} />);
+    const badge = screen.getByTestId("run-continued-on");
+    expect(badge.textContent).toBe("continued on GLM in chat #11");
+    fireEvent.click(badge);
+    expect(failover.openChat).toHaveBeenCalledWith(11);
+    expect(screen.queryByTestId("run-continues")).toBeNull();
+  });
+
+  it("successor shows continues hint", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const failover = failoverStub({ continues: (id) => (id === "run-2" ? "abcdef0123456789" : undefined) });
+    render(<RunFooter run={{ ...limited(), id: "run-2", status: "done", failureKind: undefined }} isLatest failover={failover} />);
+    expect(screen.getByTestId("run-continues").textContent).toBe("continues run abcdef01");
+    expect(screen.queryByTestId("run-continued-on")).toBeNull();
+  });
 });

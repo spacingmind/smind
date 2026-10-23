@@ -11,7 +11,7 @@ import {
   type RunModelLabels,
   type RunFooterRun,
 } from "@/components/timeline/run-footer-model";
-import { RunFailoverButtons, type RunFailover } from "@/components/timeline/run-failover-actions";
+import { RunFailoverButtons, RunFailoverNotes, type RunFailover } from "@/components/timeline/run-failover-actions";
 import { hasFutureReset, isRateLimitedRun } from "@/lib/rate-limit";
 import { cn } from "@/lib/utils";
 
@@ -140,6 +140,7 @@ export function RunFooter<T extends RunFooterRun>({
             </span>
           )
         )}
+        {!running && failover && <RunFailoverNotes run={run} failover={failover} segmentClass={SEGMENT} providerLabels={providerLabels} />}
         {!running && view.model && (
           <span data-testid="run-model" title={modelTitle(run)} className={cn(SEGMENT, "min-w-0")}>
             <span className="truncate">{view.model}</span>
