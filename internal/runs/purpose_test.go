@@ -265,7 +265,8 @@ type permissionCounter struct {
 	pending, resolved int
 }
 
-func (n *permissionCounter) NotifyRunStatus(RunStatus) {}
+func (n *permissionCounter) NotifyRunFailover(string, string, int64, int64) {}
+func (n *permissionCounter) NotifyRunStatus(RunStatus)                      {}
 func (n *permissionCounter) NotifyPermissionPending(string, int64, int64, string, string, []taskrunner.PermissionOption) {
 	n.mu.Lock()
 	n.pending++

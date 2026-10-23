@@ -216,6 +216,10 @@ type Notifier interface {
 	// when no option was chosen. Never called for AutoAccept (never pending).
 	NotifyPermissionResolved(runID string, taskID, chatID int64, requestID, optionID, reason string)
 	NotifyChatQueueUpdated(chatID int64, items []store.ChatQueueItem)
+	// NotifyRunFailover fires when a run that continues a rate-limited one
+	// (a "wait" retry or a "fallback" successor, ADR-0041) has been
+	// registered; toChatID is the chat the new run is on.
+	NotifyRunFailover(fromRunID, toRunID string, taskID, toChatID int64)
 }
 
 // SetNotifier registers n; nil-safe (notifications with no notifier are
@@ -870,6 +874,11 @@ func (reg *Registry) registerAndDrive(r *run, runCtx context.Context, runner *ta
 	}
 
 	reg.notifyRunStatus(r)
+	if r.failoverOf != "" {
+		if n := reg.getNotifier(); n != nil {
+			n.NotifyRunFailover(r.failoverOf, r.id, r.taskID, r.chatID)
+		}
+	}
 
 	go reg.drive(runCtx, r, runner)
 	return nil
