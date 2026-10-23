@@ -102,6 +102,12 @@ type Provider interface {
 	OpenPRs(ctx context.Context, dir string) ([]PR, error)
 	// PR fetches one PR of dir's repo by number.
 	PR(ctx context.Context, dir string, number int) (PR, error)
+	// PRDetails fetches the PR panel's payload for one PR: two gh calls
+	// (the view and the GraphQL threads). Text is bounded and sanitised.
+	PRDetails(ctx context.Context, dir string, number int) (PRDetails, error)
+	// CheckLog returns the sanitised tail (<= 200 lines / 16 KiB) of a failed
+	// check's log: one call. runID and jobID come from a daemon-issued check id.
+	CheckLog(ctx context.Context, dir string, runID, jobID int64) (string, error)
 	// CreatePR opens a pull request and returns its full state.
 	CreatePR(ctx context.Context, dir string, in CreatePRInput) (PR, error)
 	// Status reads the CLI's sign-in state for every host it knows. A missing

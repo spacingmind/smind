@@ -134,6 +134,10 @@ type conn struct {
 	// connection's entry is dropped when serve returns.
 	focus *focusRegistry
 
+	// prFocus is the task.prDetailsFocus registry (the PR tab is open and
+	// focused); dropped on disconnect like focus.
+	prFocus *focusRegistry
+
 	// maxMessage is the largest message this connection's transport carries
 	// (DirectMaxMessage on /ws, RelayMaxMessage over a relay); 0 = relay's.
 	maxMessage int
@@ -157,6 +161,9 @@ func (c *conn) serve(ctx context.Context) {
 	defer cancel()
 	if c.focus != nil {
 		defer c.focus.drop(c)
+	}
+	if c.prFocus != nil {
+		defer c.prFocus.drop(c)
 	}
 
 	if c.eventsSub != nil {
