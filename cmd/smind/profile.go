@@ -36,28 +36,40 @@ func cmdProfile(args []string) int {
 	}
 }
 
-// cmdProfileAdd parses `smind profile add <name> <provider> [flags]`.
+// profileFlags holds one parsed `profile add`/`profile edit` flag set.
 // Value-taking flags accept both `--flag value` (matching `task new`'s
-// `--space <id>` convention) and `--flag=value`; the boolean
-// --auto-accept accepts `--auto-accept`, `--auto-accept=true`, and
-// `--auto-accept=false`. --model (ADR-0025) names the profile's model; the
-// daemon validates it.
-func cmdProfileAdd(args []string) int {
-	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, cmdProfileAddUsage)
-		return 2
-	}
-	name, provider := args[0], args[1]
+// `--space <id>` convention) and `--flag=value`; the boolean --auto-accept
+// accepts `--auto-accept`, `--auto-accept=true`, and `--auto-accept=false`.
+type profileFlags struct {
+	mode, thinkingLevel, model, notes, onRateLimit string
+	instructions, instructionsFile, skills         string
+	childPolicy, childProfiles, name, provider     string
+	fallbackProfile                                *int64
+	fallbackRaw                                    int64
+	fallbackSet                                    bool
+	orchTools                                      *bool
+	orchToolsUnmanaged                             bool
+	autoAccept                                     bool
 
-	var mode, thinkingLevel, model, notes, onRateLimit string
-	var fallbackProfile *int64
-	var orchTools *bool
-	var instructions, instructionsFile, skillsList, childPolicy, childProfiles string
-	var instructionsSet, instructionsFileSet bool
-	var autoAccept bool
-	rest := args[2:]
-	for i := 0; i < len(rest); i++ {
-		flag := rest[i]
+	// set records every flag that appeared (flag name -> was given), so
+	// edit can tell `--model=` (clear the model) from an untouched field.
+	set map[string]bool
+}
+
+// parseProfileFlags parses args as the `profile add`/`profile edit` flag
+// loop; cmd ("profile add"/"profile edit") prefixes every error message.
+// The returned code is the exit code to return (0 = ok) once the message
+// has already been printed. allowRename marks the edit form: it
+// additionally accepts --name and --provider (add takes them as
+// positionals) and lets --orchestration-tools=unmanaged mean "no opinion"
+// where add demands a boolean. --fallback-profile stores the raw id in
+// fallbackRaw/fallbackSet even for id 0 (which add's fallbackProfile
+// pointer drops, but edit treats as "clear").
+func parseProfileFlags(cmd string, args []string, allowRename bool) (profileFlags, int) {
+	var f profileFlags
+	f.set = make(map[string]bool)
+	for i := 0; i < len(args); i++ {
+		flag := args[i]
 		value := ""
 		hasValue := false
 		if n, v, ok := strings.Cut(flag, "="); ok && strings.HasPrefix(n, "--") {
@@ -65,91 +77,136 @@ func cmdProfileAdd(args []string) int {
 		}
 		switch flag {
 		case "--auto-accept":
-			autoAccept = true
+			f.autoAccept = true
 			if hasValue {
 				b, err := strconv.ParseBool(value)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "profile add: --auto-accept: %q is not a boolean\n", value)
-					return 2
+					fmt.Fprintf(os.Stderr, "%s: --auto-accept: %q is not a boolean\n", cmd, value)
+					return f, 2
 				}
-				autoAccept = b
+				f.autoAccept = b
 			}
+			f.set[flag] = true
 			continue
 		case "--approval-policy":
-			fmt.Fprintf(os.Stderr, "profile add: %s\n", approvalPolicyRemovedMsg)
-			return 2
+			fmt.Fprintf(os.Stderr, "%s: %s\n", cmd, approvalPolicyRemovedMsg)
+			return f, 2
 		}
 		if !hasValue {
-			if i+1 >= len(rest) {
-				fmt.Fprintf(os.Stderr, "profile add: flag %q needs a value\n", flag)
-				return 2
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "%s: flag %q needs a value\n", cmd, flag)
+				return f, 2
 			}
 			i++
-			value = rest[i]
+			value = args[i]
 		}
 		switch flag {
 		case "--mode":
-			mode = value
+			f.mode = value
 		case "--thinking-level":
-			thinkingLevel = value
+			f.thinkingLevel = value
 		case "--model":
-			model = value
+			f.model = value
 		case "--on-rate-limit":
-			onRateLimit = value
+			f.onRateLimit = value
 		case "--fallback-profile":
 			id, err := parseInt64(value)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "profile add: --fallback-profile: invalid id %q: %v\n", value, err)
-				return 2
+				fmt.Fprintf(os.Stderr, "%s: --fallback-profile: invalid id %q: %v\n", cmd, value, err)
+				return f, 2
 			}
+			f.fallbackRaw, f.fallbackSet = id, true
 			if id != 0 {
-				fallbackProfile = &id
+				f.fallbackProfile = &id
 			}
 		case "--notes":
-			notes = value
+			f.notes = value
 		case "--orchestration-tools":
-			b, err := strconv.ParseBool(value)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "profile add: --orchestration-tools: %q is not a boolean\n", value)
-				return 2
+			if allowRename && value == "unmanaged" {
+				f.orchToolsUnmanaged = true
+			} else {
+				b, err := strconv.ParseBool(value)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "%s: --orchestration-tools: %q is not a boolean\n", cmd, value)
+					return f, 2
+				}
+				f.orchTools = &b
 			}
-			orchTools = &b
 		case "--instructions":
-			instructions, instructionsSet = value, true
+			f.instructions = value
 		case "--instructions-file":
-			instructionsFile, instructionsFileSet = value, true
+			f.instructionsFile = value
 		case "--skills":
-			skillsList = value
+			f.skills = value
 		case "--child-policy":
-			childPolicy = value
+			f.childPolicy = value
 		case "--child-profiles":
-			childProfiles = value
+			f.childProfiles = value
+		case "--name":
+			if !allowRename {
+				fmt.Fprintf(os.Stderr, "%s: unknown flag %q\n", cmd, flag)
+				return f, 2
+			}
+			f.name = value
+		case "--provider":
+			if !allowRename {
+				fmt.Fprintf(os.Stderr, "%s: unknown flag %q\n", cmd, flag)
+				return f, 2
+			}
+			f.provider = value
 		default:
-			fmt.Fprintf(os.Stderr, "profile add: unknown flag %q\n", flag)
-			return 2
+			fmt.Fprintf(os.Stderr, "%s: unknown flag %q\n", cmd, flag)
+			return f, 2
 		}
+		f.set[flag] = true
 	}
 
-	if instructionsSet && instructionsFileSet {
-		fmt.Fprintln(os.Stderr, "profile add: --instructions and --instructions-file are mutually exclusive")
-		return 2
+	if f.set["--instructions"] && f.set["--instructions-file"] {
+		fmt.Fprintf(os.Stderr, "%s: --instructions and --instructions-file are mutually exclusive\n", cmd)
+		return f, 2
 	}
-	if instructionsFileSet {
-		b, err := os.ReadFile(instructionsFile)
+	if f.set["--instructions-file"] {
+		b, err := os.ReadFile(f.instructionsFile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "profile add: --instructions-file: %v\n", err)
-			return 1
+			fmt.Fprintf(os.Stderr, "%s: --instructions-file: %v\n", cmd, err)
+			return f, 1
 		}
-		instructions = string(b)
+		f.instructions = string(b)
 	}
-	var childIDs []int64
-	for _, part := range splitCSV(childProfiles) {
+	return f, 0
+}
+
+// parseProfileChildIDs parses the --child-profiles flag value into profile
+// ids, exiting 2 (via the returned code) on any malformed id.
+func parseProfileChildIDs(cmd, value string) ([]int64, int) {
+	var ids []int64
+	for _, part := range splitCSV(value) {
 		id, err := parseInt64(part)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "profile add: --child-profiles: invalid id %q: %v\n", part, err)
-			return 2
+			fmt.Fprintf(os.Stderr, "%s: --child-profiles: invalid id %q: %v\n", cmd, part, err)
+			return nil, 2
 		}
-		childIDs = append(childIDs, id)
+		ids = append(ids, id)
+	}
+	return ids, 0
+}
+
+// cmdProfileAdd parses `smind profile add <name> <provider> [flags]`.
+// --model (ADR-0025) names the profile's model; the daemon validates it.
+func cmdProfileAdd(args []string) int {
+	if len(args) < 2 {
+		fmt.Fprintln(os.Stderr, cmdProfileAddUsage)
+		return 2
+	}
+	name, provider := args[0], args[1]
+
+	flags, code := parseProfileFlags("profile add", args[2:], false)
+	if code != 0 {
+		return code
+	}
+	childIDs, code := parseProfileChildIDs("profile add", flags.childProfiles)
+	if code != 0 {
+		return code
 	}
 
 	client, err := dialDaemon(context.Background())
@@ -161,25 +218,25 @@ func cmdProfileAdd(args []string) int {
 
 	params := map[string]any{
 		"name": name, "provider": provider,
-		"permissionMode": mode, "autoAccept": autoAccept, "thinkingLevel": thinkingLevel, "model": model, "notes": notes,
+		"permissionMode": flags.mode, "autoAccept": flags.autoAccept, "thinkingLevel": flags.thinkingLevel, "model": flags.model, "notes": flags.notes,
 	}
-	if onRateLimit != "" {
-		params["onRateLimit"] = onRateLimit
+	if flags.onRateLimit != "" {
+		params["onRateLimit"] = flags.onRateLimit
 	}
-	if fallbackProfile != nil {
-		params["fallbackProfileId"] = *fallbackProfile
+	if flags.fallbackProfile != nil {
+		params["fallbackProfileId"] = *flags.fallbackProfile
 	}
-	if orchTools != nil {
-		params["orchestrationTools"] = *orchTools
+	if flags.orchTools != nil {
+		params["orchestrationTools"] = *flags.orchTools
 	}
-	if instructions != "" {
-		params["instructions"] = instructions
+	if flags.instructions != "" {
+		params["instructions"] = flags.instructions
 	}
-	if skills := splitCSV(skillsList); len(skills) > 0 {
+	if skills := splitCSV(flags.skills); len(skills) > 0 {
 		params["skills"] = skills
 	}
-	if childPolicy != "" {
-		params["childPolicy"] = childPolicy
+	if flags.childPolicy != "" {
+		params["childPolicy"] = flags.childPolicy
 	}
 	if len(childIDs) > 0 {
 		params["childProfileIds"] = childIDs
