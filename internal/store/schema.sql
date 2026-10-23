@@ -257,6 +257,7 @@ CREATE TABLE IF NOT EXISTS chat_queue (
     cancel_reason TEXT NOT NULL DEFAULT '',
     cancel_kind TEXT NOT NULL DEFAULT '',  -- 'user' | 'auto' once cancelled
     attachments TEXT NOT NULL DEFAULT '',  -- attach.EncodeSet of the prompt's attachments (ADR-0038)
+    not_before TIMESTAMP,                  -- ADR-0041: held until then; NULL = deliverable now
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );

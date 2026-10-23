@@ -326,6 +326,14 @@ var migrations = []migration{
 		},
 	},
 	{
+		// ADR-0041: a queued item may be held until not_before. Existing
+		// rows stay NULL (deliverable now).
+		name: "chat_queue_not_before",
+		apply: func(db *sql.DB) error {
+			return addColumnIfMissing(db, "chat_queue", "not_before", "TIMESTAMP")
+		},
+	},
+	{
 		// ADR-0041 B3: parent chat to notify on finish + the idempotent
 		// notified marker. Pre-existing rows stay NULL (never notified).
 		name: "run_reply_chat",
