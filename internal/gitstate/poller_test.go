@@ -101,6 +101,14 @@ func (f *fakeForge) PR(_ context.Context, _ string, number int) (forge.PR, error
 	return pr, nil
 }
 
+func (f *fakeForge) PRDetails(context.Context, string, int) (forge.PRDetails, error) {
+	return forge.PRDetails{}, errors.New("not used")
+}
+
+func (f *fakeForge) CheckLog(context.Context, string, int64, int64) (string, error) {
+	return "", errors.New("not used")
+}
+
 func (f *fakeForge) CreatePR(context.Context, string, forge.CreatePRInput) (forge.PR, error) {
 	return forge.PR{}, errors.New("not used")
 }
