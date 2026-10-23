@@ -147,9 +147,20 @@ Web (PR 2):
 
 ## Progress
 
-- [ ] PR 1: forge interface + ghctx + gitstate details + wsapi
-- [ ] PR 2: web tab, query, send-to-chat, screenshots
+- [x] PR 1 (#588): forge interface + ghctx + gitstate details + wsapi (+ two follow-ups found in the real app: `refreshAvailableAt` rounds up; log tail starts on a line boundary)
+- [x] PR 2 (web): tab, query, send-to-chat, panel, screenshots (depends on #588)
 
 ## Validation
 
-(Filled in as each criterion is confirmed: exact commands, results, mutation checks, what was not verified.)
+Daemon (A1-A6): every named `TestPRDetails_*`, `TestPRCheckLog_*` scenario passes and counts `gh` calls; mutations (focus guard, `calls+n`
+budget check, pending age gate, `refreshAvailableAt` round-up, log-tail line boundary) each fail the matching test. `go test ./...`,
+`-race` on forge/ghctx/gitstate/wsapi, `task lint`, `task test` pass.
+
+Web (B1-B5): vitest names in the web PR; real-app evidence on an isolated daemon (own SMIND_HOME and port, scripted `gh`, nothing written to
+GitHub): light+dark at 1280 and 390 px for passing, failing, pending, review required/approved, threads (resolved/outdated/unresolved,
+expanded/collapsed), empty state, unauthenticated error, rate-limit stale line, send-to-chat results (chip + quoted text + file ref) and the
+hostile-comment case, plus transition frames (tab opening, thread expand/collapse, refresh in flight, send-to-chat). Real-app runs found and
+fixed: the file_ref token lost to a composer effect race, a quote's closing fence broken by appended text, an attacker-chosen path outside the
+quote, a first-load stall (second-truncated `refreshAvailableAt` and a client timer that fired early), a log tail starting mid-line.
+
+Not verified: real `gh`/GitHub (fixtures only), `stale: "budget"` in the real UI (covered by unit tests only), desktop app and mobile.
