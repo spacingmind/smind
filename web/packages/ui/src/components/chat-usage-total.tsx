@@ -37,9 +37,12 @@ export function ChatUsageTotal({
   }
 
   const parts: string[] = [];
-  if (totals.inputTokens !== null) parts.push(`${formatTokens(totals.inputTokens, "compact")} in`);
-  if (totals.outputTokens !== null) parts.push(`${formatTokens(totals.outputTokens, "compact")} out`);
-  if (totals.costUsd !== null) parts.push(formatCost(totals.costUsd));
+  const tokenParts: string[] = [];
+  if (totals.inputTokens !== null) tokenParts.push(`${formatTokens(totals.inputTokens, "compact")} in`);
+  if (totals.outputTokens !== null) tokenParts.push(`${formatTokens(totals.outputTokens, "compact")} out`);
+  parts.push(...tokenParts);
+  const cost = totals.costUsd !== null ? formatCost(totals.costUsd) : null;
+  if (cost !== null) parts.push(cost);
 
   const rows: Array<[string, string]> = [
     ["Input", formatTokens(totals.inputTokens)],
@@ -60,7 +63,17 @@ export function ChatUsageTotal({
       pill={
         <>
           <Icons.usageTotal className="size-3" />
-          <span className="truncate">{parts.join(" · ")}</span>
+          {/* Below `sm` only the cost shows (when there is one) so this chip and the task chip share one row; the tokens stay in the popover. */}
+          <span className="min-w-0 truncate">
+            {cost !== null && tokenParts.length > 0 ? (
+              <span data-testid="chat-usage-tokens" className="max-sm:hidden">
+                {tokenParts.join(" · ")} ·{" "}
+              </span>
+            ) : (
+              tokenParts.join(" · ")
+            )}
+            {cost}
+          </span>
         </>
       }
     >

@@ -143,6 +143,43 @@ describe("TaskLineageHeader (unit)", () => {
     expect(chip.getAttribute("title")).toContain(`own: ${usageChipText(own)}`);
     expect(chip.getAttribute("title")).toContain(`tree: ${usageChipText(subtree)}`);
   });
+
+  it("the usage chip keeps its full text, with the tokens in a max-sm:hidden span (cost-only on narrow screens)", () => {
+    const own = { ...usage(1), inputTokens: 1000, outputTokens: 500, costUsd: 0.3 };
+    const subtree = { ...usage(3), inputTokens: 5000, outputTokens: 2500, costUsd: 1.5 };
+    const lineage: TaskLineage = {
+      parent: null,
+      node: node({
+        id: 2,
+        counts: { running: 1, waitingPermission: 0, failed: 0, done: 0, idle: 0 },
+        usage: { own, subtree, archivedDescendants: 0 },
+      }),
+      children: [],
+    };
+    render(<TaskLineageHeader lineage={lineage} />);
+    const chip = screen.getByTestId("task-tree-usage");
+    expect(chip.textContent).toBe(`Task ${usageChipText(subtree)}`);
+    const tokens = screen.getByTestId("task-tree-usage-tokens");
+    expect(tokens.className).toContain("max-sm:hidden");
+    expect(tokens.textContent).toContain("7.5k tok");
+    expect(tokens.textContent).not.toContain("$");
+  });
+
+  it("with no cost the usage chip keeps its tokens visible on narrow screens", () => {
+    const own = { ...usage(1), inputTokens: 1000, outputTokens: 500, costUsd: null };
+    const lineage: TaskLineage = {
+      parent: null,
+      node: node({
+        id: 2,
+        counts: { running: 1, waitingPermission: 0, failed: 0, done: 0, idle: 0 },
+        usage: { own, subtree: own, archivedDescendants: 0 },
+      }),
+      children: [],
+    };
+    render(<TaskLineageHeader lineage={lineage} />);
+    expect(screen.queryByTestId("task-tree-usage-tokens")).toBeNull();
+    expect(screen.getByTestId("task-tree-usage").textContent).toContain("1.5k tok");
+  });
 });
 
 describe("task lineage header (in the pane)", () => {
