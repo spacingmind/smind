@@ -99,6 +99,49 @@ func TestClassifyGitCommand(t *testing.T) {
 		{"git stash drop", GitClassAlwaysAsk},
 		{"git stash clear", GitClassAlwaysAsk},
 		{"git commit --amend", GitClassAlwaysAsk},
+		// wrappers, aliases, nesting
+		{"sh -c 'git push'", GitClassAlwaysAsk},
+		{`bash -lc "cd a; git push"`, GitClassAlwaysAsk},
+		{"zsh -c 'git status'", GitClassReadOnly},
+		{"FOO=1 git push", GitClassAlwaysAsk},
+		{"env GIT_X=1 git push", GitClassAlwaysAsk},
+		{"env -u FOO git push", GitClassAlwaysAsk},
+		{"sudo -u root git push", GitClassAlwaysAsk},
+		{"command git push", GitClassAlwaysAsk},
+		{"time git push", GitClassAlwaysAsk},
+		{"nohup git push", GitClassAlwaysAsk},
+		{"exec git push", GitClassAlwaysAsk},
+		{"nice -n 5 git push", GitClassAlwaysAsk},
+		{"/usr/bin/git push", GitClassAlwaysAsk},
+		{"git -c alias.p=push p", GitClassAlwaysAsk},
+		{"git -c alias.ci='commit -m' ci x", GitClassCommit},
+		{"git -c 'alias.x=!git push' x", GitClassAlwaysAsk},
+		{"git -c alias.push=push push", GitClassAlwaysAsk},
+		{"if true; then git push; fi", GitClassAlwaysAsk},
+		{"{ git push; }", GitClassAlwaysAsk},
+		{"echo $(git status)", GitClassReadOnly},
+		{"command -v git", ""},
+		{"git push # comment", GitClassAlwaysAsk},
+		// fail closed
+		{"$GIT push", GitClassUnparsedGit},
+		{"${GIT} push", GitClassUnparsedGit},
+		{`eval "git push"`, GitClassUnparsedGit},
+		{"xargs git push", GitClassUnparsedGit},
+		{"find . -exec git push ;", GitClassUnparsedGit},
+		{"git $SUB", GitClassUnparsedGit},
+		{"git 'push", GitClassUnparsedGit},
+		{"git push && echo 'x", GitClassUnparsedGit},
+		{"(git push", GitClassUnparsedGit},
+		{"echo $(git push", GitClassUnparsedGit},
+		{"sh -c 'git push", GitClassUnparsedGit},
+		{"$(which git) push", GitClassUnparsedGit},
+		{"$EDITOR file", ""},
+		{"echo 'unbalanced", ""},
+		{"xargs rm", ""},
+		{"find . -name x", ""},
+		{"eval 'ls'", ""},
+		{"sh -c 'ls'", ""},
+		{"sh script.sh", ""},
 		// no rule
 		{"git pushd", ""},
 		{`grep -r "git push" .`, ""},
@@ -169,5 +212,17 @@ func TestClassifyGitCommandSeverity(t *testing.T) {
 		if r := ClassifyGitCommand(cmd); r == nil || r.Class != want {
 			t.Errorf("%q: got %+v, want %s", cmd, r, want)
 		}
+	}
+}
+
+func TestClassifyGitCommandNoPanic(t *testing.T) {
+	for _, in := range []string{
+		"", "'", `"`, "$(", "$", "${", "`", "(", ")", "\\", "git", "git -c", "git -C", "git -c alias.x",
+		"git push '", "gh", "gh -R", "env", "sudo -u", "sh -c", "bash -", "command", "xargs",
+		"git -c alias.a=a a", "git -c alias.a=b -c alias.b=a a", "git -c 'alias.a=' a", "git -c alias.a=!", "git -c alias.a=; a",
+		"$(((", "echo $(echo $(echo $(echo $(echo $(echo $(echo $(echo $(echo $(git push)))))))))",
+		"; ; &&", "\n\n", "git\x00push",
+	} {
+		_ = ClassifyGitCommand(in)
 	}
 }

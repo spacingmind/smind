@@ -383,17 +383,140 @@ func classifyShell(cmd string, depth int) ([]*GitRule, error) {
 	return rules, nil
 }
 
+var (
+	assignRe  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+	varHintRe = regexp.MustCompile(`(?i)\$\{?(\w*git\w*|(\w*_)?gh(_\w*)?)\b`)
+)
+
+var shellKeywords = map[string]bool{
+	"!": true, "{": true, "}": true, "then": true, "do": true, "else": true,
+	"elif": true, "if": true, "while": true, "until": true, "fi": true,
+	"done": true, "esac": true,
+}
+
+// wrapperArgFlags lists, per wrapper command, the options that consume the
+// next word. Other leading options are skipped as plain flags.
+var wrapperArgFlags = map[string]map[string]bool{
+	"env":   {"-u": true, "-C": true, "-S": true},
+	"sudo":  {"-u": true, "-g": true, "-h": true, "-p": true, "-C": true, "-r": true, "-t": true, "-U": true, "-D": true, "-R": true, "-T": true},
+	"time":  {"-f": true, "-o": true},
+	"nohup": {},
+	"exec":  {"-a": true},
+	"nice":  {"-n": true},
+}
+
 func classifySimple(words []shWord, depth int) ([]*GitRule, error) {
-	if len(words) == 0 || words[0].dynamic {
-		return nil, nil
+	for range maxGitParseDepth * 2 {
+		for len(words) > 0 && !words[0].dynamic && assignRe.MatchString(words[0].text) {
+			words = words[1:]
+		}
+		if len(words) == 0 {
+			return nil, nil
+		}
+		w0 := words[0]
+		if w0.dynamic {
+			if gitWordRe.MatchString(w0.text) || varHintRe.MatchString(w0.text) || mentionsGit(words[1:]) {
+				return []*GitRule{unparsedGitRule(strings.Join(wordTexts(words), " "))}, nil
+			}
+			return nil, nil
+		}
+		if shellKeywords[w0.text] {
+			words = words[1:]
+			continue
+		}
+		base := path.Base(w0.text)
+		switch base {
+		case "git":
+			return classifyGit(words, depth)
+		case "gh":
+			return classifyGh(words), nil
+		case "sh", "bash", "zsh", "dash", "ksh":
+			script, ok := shellDashC(words[1:])
+			if !ok {
+				return nil, nil
+			}
+			return classifyShell(script, depth+1)
+		case "env", "sudo", "time", "nohup", "exec", "nice":
+			words = skipWrapperOptions(words[1:], wrapperArgFlags[base])
+		case "command":
+			rest := skipWrapperOptions(words[1:], nil)
+			if hasArg(wordTexts(words[1:len(words)-len(rest)]), "-v") || hasArg(wordTexts(words[1:len(words)-len(rest)]), "-V") {
+				return nil, nil
+			}
+			words = rest
+		case "eval", "xargs":
+			if mentionsGit(words[1:]) {
+				return []*GitRule{unparsedGitRule(strings.Join(wordTexts(words), " "))}, nil
+			}
+			return nil, nil
+		case "find":
+			if mentionsGit(words[1:]) && hasExecPrimary(words[1:]) {
+				return []*GitRule{unparsedGitRule(strings.Join(wordTexts(words), " "))}, nil
+			}
+			return nil, nil
+		default:
+			return nil, nil
+		}
 	}
-	switch path.Base(words[0].text) {
-	case "git":
-		return classifyGit(words), nil
-	case "gh":
-		return classifyGh(words), nil
+	return nil, errGitParse
+}
+
+func mentionsGit(words []shWord) bool {
+	for _, w := range words {
+		if gitWordRe.MatchString(w.text) {
+			return true
+		}
 	}
-	return nil, nil
+	return false
+}
+
+func hasExecPrimary(words []shWord) bool {
+	for _, w := range words {
+		switch w.text {
+		case "-exec", "-execdir", "-ok", "-okdir":
+			return true
+		}
+	}
+	return false
+}
+
+// skipWrapperOptions drops a wrapper's leading options and VAR=val words.
+func skipWrapperOptions(words []shWord, argFlags map[string]bool) []shWord {
+	i := 0
+	for i < len(words) {
+		t := words[i].text
+		switch {
+		case t == "--":
+			return words[i+1:]
+		case argFlags[t]:
+			i += 2
+		case len(t) > 1 && t[0] == '-':
+			i++
+		case !words[i].dynamic && assignRe.MatchString(t):
+			i++
+		default:
+			return words[min(i, len(words)):]
+		}
+	}
+	return nil
+}
+
+// shellDashC returns the script of `sh -c <script>` style arguments,
+// including combined flags such as -lc.
+func shellDashC(args []shWord) (string, bool) {
+	for i, a := range args {
+		t := a.text
+		if len(t) < 2 || t[0] != '-' || t == "--" {
+			return "", false
+		}
+		if t[1] != '-' && strings.IndexByte(t, 'c') > 0 {
+			if i+1 < len(args) {
+				return args[i+1].text, true
+			}
+			return "", false
+		}
+	}
+	return "", false
 }
 
 func newGitRule(id string, class GitRuleClass, label string, words []shWord) *GitRule {
@@ -422,12 +545,21 @@ var (
 )
 
 // splitGitGlobals returns the index of the subcommand word in words (words[0]
-// is git), skipping global options.
-func splitGitGlobals(words []shWord) int {
+// is git), skipping global options, plus the inline aliases set via -c.
+func splitGitGlobals(words []shWord) (int, map[string]string) {
+	var aliases map[string]string
 	i := 1
 	for i < len(words) {
 		t := words[i].text
 		switch {
+		case t == "-c" && i+1 < len(words):
+			if k, v, ok := strings.Cut(words[i+1].text, "="); ok && strings.HasPrefix(strings.ToLower(k), "alias.") {
+				if aliases == nil {
+					aliases = map[string]string{}
+				}
+				aliases[k[len("alias."):]] = v
+			}
+			i += 2
 		case gitGlobalValueFlags[t]:
 			i += 2
 		case gitGlobalFlags[t]:
@@ -435,19 +567,56 @@ func splitGitGlobals(words []shWord) int {
 		case strings.HasPrefix(t, "-"):
 			i++ // --opt=value, --version, ... : never the subcommand
 		default:
-			return i
+			return i, aliases
 		}
 	}
-	return len(words)
+	return len(words), aliases
 }
 
-func classifyGit(words []shWord) []*GitRule {
-	si := splitGitGlobals(words)
+func classifyGit(words []shWord, depth int) ([]*GitRule, error) {
+	si, aliases := splitGitGlobals(words)
 	if si >= len(words) {
-		return nil
+		return nil, nil
+	}
+	if words[si].dynamic {
+		return []*GitRule{unparsedGitRule(strings.Join(wordTexts(words), " "))}, nil
 	}
 	sub := words[si].text
-	args := wordTexts(words[si+1:])
+	if target, ok := aliases[sub]; ok {
+		if depth > maxGitParseDepth {
+			return nil, errGitParse
+		}
+		var rules []*GitRule
+		var err error
+		if script, shell := strings.CutPrefix(target, "!"); shell {
+			rules, err = classifyShell(script, depth+1)
+		} else {
+			cmds, _, serr := scanShell(target)
+			err = serr
+			switch {
+			case err != nil || len(cmds) == 0:
+			case cmds[0][0].text == sub:
+				rules = classifyGitSub(words, sub, wordTexts(words[si+1:]))
+			default:
+				expanded := append([]shWord{}, words[:si]...)
+				expanded = append(expanded, cmds[0]...)
+				expanded = append(expanded, words[si+1:]...)
+				rules, err = classifyGit(expanded, depth+1)
+			}
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rules {
+			r.Argv = wordTexts(words)
+			r.Command = strings.Join(r.Argv, " ")
+		}
+		return rules, nil
+	}
+	return classifyGitSub(words, sub, wordTexts(words[si+1:])), nil
+}
+
+func classifyGitSub(words []shWord, sub string, args []string) []*GitRule {
 	switch sub {
 	case "status", "diff", "log", "show", "fetch", "rev-parse", "ls-files":
 		return []*GitRule{newGitRule("git-"+sub, GitClassReadOnly, "git "+sub, words)}
