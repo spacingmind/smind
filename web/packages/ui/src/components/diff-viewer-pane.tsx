@@ -4,10 +4,10 @@ import { providerListQueryOptions } from "@/hooks/use-provider-catalog";
 import { Icons } from "@/lib/icons";
 
 import { DiffHeaderMenu } from "@/components/diff-header-menu";
-import { DiffRender, type DiffOutputFormat } from "@/components/diff-render";
+import { DiffRender, type DiffAnnotation, type DiffOutputFormat } from "@/components/diff-render";
 import { ErrorWithDetails } from "@/components/error-with-details";
 import { FileStatusMarker } from "@/components/file-status-marker";
-import { ReviewComments, type PendingComment } from "@/components/review-comments";
+import { CommentComposer, ReviewAnnotationFrame, ReviewComments, ReviewDraftCard, type PendingComment } from "@/components/review-comments";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -473,6 +473,14 @@ export function DiffViewerPane({
                 diff={wholeDiff.diff}
                 outputFormat={prefs.format}
                 testId="whole-diff-container"
+                annotations={reviewAnnotations({
+                  taskId: task.ID,
+                  drafts,
+                  pending,
+                  withPath: true,
+                  onCancelPending: () => setPending(null),
+                  onAddDraft: addDraftFromPending,
+                })}
                 onSelectLine={(ref, element) => {
                   const path = filePathForElement(element);
                   if (path) selectLine(path, ref);
@@ -484,13 +492,16 @@ export function DiffViewerPane({
                 {wholeDiff.error}
               </p>
             )}
-            <ReviewComments
-              taskId={task.ID}
-              drafts={drafts}
-              pending={pending}
-              onCancelPending={() => setPending(null)}
-              onAddDraft={addDraftFromPending}
-            />
+            {/* Until the diff is on screen the comments have no line to sit under: list them (DiffRender does the same for one it cannot place). */}
+            {wholeDiff.diff === null && (
+              <ReviewComments
+                taskId={task.ID}
+                drafts={drafts}
+                pending={pending}
+                onCancelPending={() => setPending(null)}
+                onAddDraft={addDraftFromPending}
+              />
+            )}
           </div>
         )}
 
@@ -699,6 +710,7 @@ function FileRow({
               diff={diff}
               outputFormat={outputFormat}
               onSelectLine={onSelectLine}
+              annotations={reviewAnnotations({ taskId, drafts, pending, withPath: false, onCancelPending, onAddDraft })}
               renderHunkAction={
                 onAddToChat && file.status !== "deleted"
                   ? (hunk) => (
@@ -717,15 +729,66 @@ function FileRow({
           )}
         </div>
       )}
-      <ReviewComments
-        taskId={taskId}
-        drafts={drafts}
-        pending={pending}
-        onCancelPending={onCancelPending}
-        onAddDraft={onAddDraft}
-      />
+      {/* The diff shows the comments under their lines; with no diff on screen (collapsed, loading) they are listed here so a draft never looks lost. */}
+      {(collapsed || !diff) && (
+        <ReviewComments
+          taskId={taskId}
+          drafts={drafts}
+          pending={pending}
+          onCancelPending={onCancelPending}
+          onAddDraft={onAddDraft}
+        />
+      )}
     </div>
   );
+}
+
+/**
+ * The review drafts and the open composer as inline annotations for DiffRender: each sits right under the line it is
+ * about. `withPath` is for the whole-diff render, which holds many files and finds the right one by name.
+ */
+function reviewAnnotations({
+  taskId,
+  drafts,
+  pending,
+  withPath,
+  onCancelPending,
+  onAddDraft,
+}: {
+  taskId: number;
+  drafts: ReviewDraft[];
+  pending: PendingComment | null;
+  withPath: boolean;
+  onCancelPending: () => void;
+  onAddDraft: (body: string) => void;
+}): DiffAnnotation[] {
+  const out: DiffAnnotation[] = drafts.map((draft) => ({
+    id: draft.id,
+    path: withPath ? draft.path : undefined,
+    side: draft.side,
+    line: draft.line,
+    text: draft.snippet,
+    node: (
+      <ReviewAnnotationFrame>
+        <ReviewDraftCard taskId={taskId} draft={draft} />
+      </ReviewAnnotationFrame>
+    ),
+  }));
+  if (pending) {
+    out.push({
+      id: "pending-comment",
+      path: withPath ? pending.path : undefined,
+      side: pending.side,
+      line: pending.line,
+      text: pending.snippet,
+      node: (
+        <ReviewAnnotationFrame>
+          <CommentComposer pending={pending} onCancel={onCancelPending} onAdd={onAddDraft} />
+        </ReviewAnnotationFrame>
+      ),
+    });
+  }
+  return out;
 }
 
 /**
