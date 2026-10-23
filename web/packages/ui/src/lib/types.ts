@@ -305,6 +305,10 @@ export interface RunSummary {
   attachments?: AttachmentMeta[];
   /** Who authored the prompt: "human", "orchestrator", "agent" or "child_event" (ADR-0041). Lowercase json tag, omitted when unknown. */
   origin?: string;
+  /** ADR-0041 F2: the agent profile the run was launched with (0/absent = none). */
+  ProfileID?: number;
+  /** ADR-0041 F2: the failed run this one continues after a rate limit ("" / absent = none). */
+  FailoverOf?: string;
 }
 
 // internal/runs.WhenBusy's values (ADR-0021 §2), run.start's optional
@@ -606,6 +610,11 @@ export interface RunLogsResult {
   dirty?: boolean;
   /** ADR-0038: the run's attachments (metadata only). */
   attachments?: AttachmentMeta[];
+  /** ADR-0041 F2 provenance: the profile the run launched with and the run it continues; omitted when none. */
+  profileId?: number;
+  failoverOf?: string;
+  /** A rate_limited run whose profile names a fallback: the profile to start the work again on (in a new chat). */
+  fallbackProfileId?: number;
   events: RunLogEvent[];
 }
 
@@ -812,6 +821,9 @@ export interface RunStatusEventPayload {
   baseSha?: string;
   headSha?: string;
   dirty?: boolean;
+  /** ADR-0041 F2: omitted when none. */
+  profileId?: number;
+  failoverOf?: string;
 }
 
 // Payload of permission.pending: {runId, taskId, chatId, requestId,

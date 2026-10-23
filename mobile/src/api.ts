@@ -56,6 +56,10 @@ export interface RunSummary {
   FailureWindow?: string;
   /** When the limit lifts (RFC 3339 UTC); null/absent when unknown. */
   FailureResetAt?: string | null;
+  /** ADR-0041: the id of the run this run continues (a failover successor); absent/empty otherwise. */
+  FailoverOf?: string;
+  /** The profile the run used; absent on older daemons. */
+  ProfileID?: number;
 }
 
 /** workspace.list: every workspace this daemon tracks. */
@@ -121,6 +125,8 @@ export interface ChatQueueItem {
   RunID: string | null;
   CancelReason: string;
   CancelKind: string;
+  /** A human-only hold (ADR-0041): the daemon delivers the item no earlier than this (RFC 3339); null/absent when not held. */
+  NotBefore?: string | null;
   CreatedAt: string;
   UpdatedAt: string;
 }

@@ -20,7 +20,7 @@ export type TranscriptItem =
   | { type: 'tool'; key: string; toolName: string; title: string; status: string }
   | { type: 'meta'; key: string; text: string }
   | { type: 'permission'; key: string; request: PermissionRequestState }
-  | { type: 'footer'; key: string; sentence: string };
+  | { type: 'footer'; key: string; sentence: string; note?: string; waiting?: boolean };
 
 export type TranscriptItemType = TranscriptItem['type'];
 
@@ -29,7 +29,7 @@ const THINKING_ROLE = 'assistant (thinking)';
 export function buildTranscript(
   lines: readonly TimelineLine[],
   permissions: readonly PermissionRequestState[] = [],
-  footer: { sentence: string } | null = null,
+  footer: { sentence: string; note?: string; waiting?: boolean } | null = null,
 ): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   for (const line of lines) {
@@ -49,6 +49,6 @@ export function buildTranscript(
     }
   }
   for (const request of permissions) items.push({ type: 'permission', key: `perm-${request.requestId}`, request });
-  if (footer) items.push({ type: 'footer', key: 'footer', sentence: footer.sentence });
+  if (footer) items.push({ type: 'footer', key: 'footer', sentence: footer.sentence, ...(footer.note ? { note: footer.note } : {}), ...(footer.waiting ? { waiting: true } : {}) });
   return items;
 }

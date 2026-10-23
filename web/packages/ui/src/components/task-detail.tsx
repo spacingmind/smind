@@ -33,11 +33,15 @@ import { useTaskLineage } from "@/hooks/use-task-lineage";
 import { useChatQueue } from "@/hooks/use-chat-queue";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
+import { useRunFailoverIndex } from "@/hooks/use-run-failover-index";
+import { isRateLimitedRun } from "@/lib/rate-limit";
+import { runStartParams } from "@/lib/run-start";
+import type { RunFailover } from "@/components/timeline/run-failover-actions";
 import { useTaskGit } from "@/hooks/use-task-git";
 import { useTaskGitFocus } from "@/lib/task-git-focus";
 import { effectiveMode, providerModes, supportsAutoAccept, supportsLiveModeSwitch } from "@/lib/permission-modes";
 import type { ConnectionStatus } from "@/lib/reconnect";
-import type { AgentProfile, Chat, Provider, Task } from "@/lib/types";
+import type { AgentProfile, Chat, Provider, Task, ThinkingLevel } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
 /**
@@ -293,6 +297,68 @@ export function TaskDetailPane({
     setPrefill((prev) => ({ text: run.prompt, nonce: (prev?.nonce ?? 0) + 1 }));
   }, []);
 
+  // ADR-0041 F2: the rate-limited footer's way out and the failed-run <-> successor links.
+  const failoverIndex = useRunFailoverIndex(
+    client,
+    task.ID,
+    events ?? null,
+    runs?.some((r) => isRateLimitedRun(r) || r.failoverOf !== undefined) ?? false,
+  );
+  const taskId = task.ID;
+  const onJumpToChatRef = useRef(onJumpToChat);
+  onJumpToChatRef.current = onJumpToChat;
+  const queueItems = queue.items;
+  const failover = useMemo<RunFailover<RunEntry>>(
+    () => ({
+      fallbackName: (profileId) => profiles.find((p) => p.ID === profileId)?.Name,
+      // A NEW chat of this task, started the way the composer sends an applied profile (provider/mode/model/thinking/profileId).
+      retryOnFallback: async (run) => {
+        const p = profiles.find((x) => x.ID === run.fallbackProfileId);
+        if (!client || !p) throw new Error("fallback profile not available");
+        const chat = await client.call<Chat>("chat.create", { taskId });
+        const reuse = resendRequests(run.id, run.attachments);
+        await client.call(
+          "run.start",
+          runStartParams({
+            taskId,
+            chatId: chat.ID,
+            provider: p.Provider as Provider,
+            prompt: run.prompt,
+            whenBusy: "queue",
+            permission: { permissionMode: p.PermissionMode, autoAccept: p.AutoAccept },
+            thinkingLevel: p.ThinkingLevel as ThinkingLevel,
+            model: p.Model || undefined,
+            profileId: p.ID,
+            attachments: reuse.length > 0 ? reuse : undefined,
+          }),
+        );
+        onJumpToChatRef.current?.(chat.ID);
+      },
+      // The same chat, the run's own config, held until the limit lifts.
+      waitUntil: async (run, notBefore) => {
+        const reuse = resendRequests(run.id, run.attachments);
+        await submitPromptRef.current(
+          run.provider,
+          run.prompt,
+          { permissionMode: run.permissionMode, autoAccept: run.autoAccept },
+          run.thinkingLevel,
+          "queue",
+          run.model || undefined,
+          reuse.length > 0 ? reuse : undefined,
+          reuse.length > 0 ? run.attachments : undefined,
+          run.profileId,
+          notBefore,
+        );
+        queueRefreshRef.current();
+      },
+      isHeld: (run) => queueItems.some((i) => i.Status === "queued" && i.NotBefore && i.Prompt === run.prompt),
+      successor: (runId) => failoverIndex.successors.get(runId),
+      continues: (runId) => failoverIndex.continues.get(runId),
+      openChat: (chatId) => onJumpToChatRef.current?.(chatId),
+    }),
+    [client, taskId, profiles, queueItems, failoverIndex],
+  );
+
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const focusComposer = useCallback(() => composerTextareaRef.current?.focus(), []);
 
@@ -402,6 +468,7 @@ export function TaskDetailPane({
                     onRerun={rerun}
                     onEditPrompt={editPrompt}
                     onContinue={continueRun}
+                    failover={failover}
                     providerLabels={providerLabels}
                     modelLabels={modelLabels}
                     isLatest={run.id === runs[runs.length - 1]?.id}

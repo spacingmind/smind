@@ -47,3 +47,19 @@ export function describeRateLimit(opts: { window?: string; resetAt?: string | nu
   const window = opts.window ? ` (${opts.window} window)` : "";
   return `Rate limited${window} · ${describeRateLimitReset(opts.resetAt, now)}`;
 }
+
+/** Slack after the reset before a held retry fires, so the provider's window has certainly rolled over. */
+export const RETRY_NOT_BEFORE_SLACK_MS = 30_000;
+
+/** "Wait until 17:35" (weekday prefix on another day); null when the reset is absent or already past. */
+export function waitUntilLabel(resetAt: string | undefined | null, now: Date): string | null {
+  const reset = parseResetAt(resetAt);
+  if (reset === null || reset.getTime() <= now.getTime()) return null;
+  return `Wait until ${formatResetClock(reset, now)}`;
+}
+
+/** The `run.start` notBefore for a held retry: the reset instant + 30 s as RFC 3339 UTC; null when unparseable. */
+export function retryNotBefore(resetAt: string | undefined | null): string | null {
+  const reset = parseResetAt(resetAt);
+  return reset === null ? null : new Date(reset.getTime() + RETRY_NOT_BEFORE_SLACK_MS).toISOString();
+}

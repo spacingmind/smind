@@ -14,6 +14,19 @@ export interface RunFooterView {
   sentence: string;
   tone: 'warning';
   action: 'continue';
+  /** A second muted line: "Queued · starts after 17:35" while a held retry exists, "continued on GLM in chat #3" once a failover successor exists. */
+  note?: string;
+  /** True while a held retry is queued: the UI labels or hides Continue (the daemon already has the retry). */
+  waiting?: boolean;
+}
+
+/** What the screen knows beyond the run itself (ADR-0041 failover); every part optional. */
+export interface RunFooterContext {
+  /** When the held retry for this run starts (its queue item's NotBefore). */
+  heldUntil?: Date | null;
+  /** The failover successor's provider and chat. */
+  continuedOn?: { provider: string; chatId: number } | null;
+  continuesRunId?: string | null;
 }
 
 /** runs.DispositionNeedsContinue. */
@@ -37,15 +50,23 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
  * time unknown" with no usable reset, "· limit has reset" once it passed. The
  * window part is omitted when unknown.
  */
+function clock(at: Date, now: Date): string {
+  const hhmm = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+  const sameDay = at.getFullYear() === now.getFullYear() && at.getMonth() === now.getMonth() && at.getDate() === now.getDate();
+  return sameDay ? hhmm : `${WEEKDAYS[at.getDay()]} ${hhmm}`;
+}
+
+/** "continues run <first 8 chars>" for a failover successor, or null when the run continues nothing. */
+export function describeContinues(run: Pick<RunSummary, 'FailoverOf'>): string | null {
+  return run.FailoverOf ? `continues run ${run.FailoverOf.slice(0, 8)}` : null;
+}
+
 function rateLimitSentence(window: string | undefined, resetAt: string | null | undefined, now: Date): string {
   const head = `Rate limited${window ? ` (${window} window)` : ''}`;
   const reset = resetAt ? new Date(resetAt) : null;
   if (reset === null || Number.isNaN(reset.getTime())) return `${head} · reset time unknown`;
   if (reset.getTime() <= now.getTime()) return `${head} · limit has reset`;
-  const hhmm = `${String(reset.getHours()).padStart(2, '0')}:${String(reset.getMinutes()).padStart(2, '0')}`;
-  const sameDay =
-    reset.getFullYear() === now.getFullYear() && reset.getMonth() === now.getMonth() && reset.getDate() === now.getDate();
-  return `${head} · resets ${sameDay ? hhmm : `${WEEKDAYS[reset.getDay()]} ${hhmm}`}`;
+  return `${head} · resets ${clock(reset, now)}`;
 }
 
 /**
@@ -60,10 +81,23 @@ function rateLimitSentence(window: string | undefined, resetAt: string | null | 
 export function describeRunFooter(
   run: Pick<RunSummary, 'Status' | 'StopReason' | 'Disposition' | 'FailureKind' | 'FailureWindow' | 'FailureResetAt'>,
   now: Date = new Date(),
+  ctx?: RunFooterContext,
 ): RunFooterView | null {
   if (run.Status === 'error' && run.FailureKind === RATE_LIMITED) {
     // The Continue button re-submits on the run's own provider (TaskDetailScreen's handleContinue), which is the recovery path once the limit lifts.
-    return { sentence: rateLimitSentence(run.FailureWindow || undefined, run.FailureResetAt, now), tone: 'warning', action: 'continue' };
+    const view: RunFooterView = {
+      sentence: rateLimitSentence(run.FailureWindow || undefined, run.FailureResetAt, now),
+      tone: 'warning',
+      action: 'continue',
+    };
+    const held = ctx?.heldUntil;
+    if (held && !Number.isNaN(held.getTime())) {
+      view.note = `Queued · starts after ${clock(held, now)}`;
+      view.waiting = true;
+    } else if (ctx?.continuedOn) {
+      view.note = `continued on ${ctx.continuedOn.provider} in chat #${ctx.continuedOn.chatId}`;
+    }
+    return view;
   }
   if (run.Status !== 'done') return null;
   if (run.Disposition === NEEDS_CONTINUE) {

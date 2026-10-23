@@ -4,7 +4,7 @@
 // no-footer cases.
 
 import { describe, expect, it } from 'vitest';
-import { describeRunFooter } from '../runFooter';
+import { describeContinues, describeRunFooter } from '../runFooter';
 
 describe('describeRunFooter', () => {
   it('needs-continue on a done run reads "Hit the tool-turn limit · not finished" with a Continue action', () => {
@@ -109,5 +109,42 @@ describe('describeRunFooter', () => {
       expect(describeRunFooter({ Status: 'error', FailureKind: 'other' }, now)).toBeNull();
       expect(describeRunFooter({ Status: 'done', FailureKind: 'rate_limited' }, now)).toBeNull();
     });
+  });
+});
+
+describe('failover context (ADR-0041)', () => {
+  const limited = { Status: 'error', FailureKind: 'rate_limited', FailureWindow: '5h', FailureResetAt: null } as const;
+  const now = new Date(2026, 9, 23, 10, 0);
+
+  it('wait state shows queued note', () => {
+    const v = describeRunFooter(limited, now, { heldUntil: new Date(2026, 9, 23, 17, 35) });
+    expect(v?.note).toBe('Queued · starts after 17:35');
+    expect(v?.waiting).toBe(true);
+    expect(v?.action).toBe('continue');
+    expect(describeRunFooter(limited, now, { heldUntil: new Date(2026, 9, 24, 9, 5) })?.note).toMatch(/^Queued · starts after \w{3} 09:05$/);
+  });
+
+  it('no note without held retry', () => {
+    const v = describeRunFooter(limited, now, { heldUntil: null });
+    expect(v?.note).toBeUndefined();
+    expect(v?.waiting).toBeUndefined();
+  });
+
+  it('continued on text', () => {
+    expect(describeRunFooter(limited, now, { continuedOn: { provider: 'GLM', chatId: 3 } })?.note).toBe('continued on GLM in chat #3');
+  });
+
+  it('continues hint', () => {
+    expect(describeContinues({ FailoverOf: '0123456789abcdef' })).toBe('continues run 01234567');
+    expect(describeContinues({})).toBeNull();
+  });
+
+  it('existing cases unchanged', () => {
+    expect(describeRunFooter(limited, now)).toEqual({
+      sentence: 'Rate limited (5h window) · reset time unknown',
+      tone: 'warning',
+      action: 'continue',
+    });
+    expect(describeRunFooter({ Status: 'done' }, now, { heldUntil: new Date(2026, 9, 23, 17, 35) })).toBeNull();
   });
 });

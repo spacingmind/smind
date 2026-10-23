@@ -241,6 +241,34 @@ describe("useRunTimeline rate-limit failure (ADR-0041)", () => {
   });
 });
 
+describe("useRunTimeline failover lineage (ADR-0041 F2)", () => {
+  it("maps profileId/failoverOf from run.list and run.logs, and fallbackProfileId from run.logs", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+    client.nth("run.list", 0).resolve([
+      summary({ ID: "run-1", Status: "error", FailureKind: "rate_limited", ProfileID: 7 }),
+      summary({ ID: "run-2", ProfileID: 8, FailoverOf: "run-1" }),
+      summary({ ID: "run-3" }),
+    ]);
+    await flush();
+    expect(result.current.runs?.[0]).toMatchObject({ profileId: 7 });
+    expect(result.current.runs?.[0]?.failoverOf).toBeUndefined();
+    expect(result.current.runs?.[1]).toMatchObject({ profileId: 8, failoverOf: "run-1" });
+    expect(result.current.runs?.[2]?.profileId).toBeUndefined();
+
+    await act(async () => {
+      client.nth("run.logs", 0).resolve({ runId: "run-1", status: "error", failureKind: "rate_limited", profileId: 7, fallbackProfileId: 9, events: [] } satisfies RunLogsResult);
+      client.nth("run.logs", 1).resolve({ runId: "run-2", status: "done", events: [] } satisfies RunLogsResult);
+      client.nth("run.logs", 2).resolve({ runId: "run-3", status: "done", events: [] } satisfies RunLogsResult);
+    });
+    await waitFor(() => expect(result.current.runs?.[0]?.fallbackProfileId).toBe(9));
+    expect(result.current.runs?.[0]).toMatchObject({ profileId: 7 });
+    // A log without lineage keys never clears the list-seeded value.
+    expect(result.current.runs?.[1]).toMatchObject({ profileId: 8, failoverOf: "run-1" });
+    expect(result.current.runs?.[1]?.fallbackProfileId).toBeUndefined();
+  });
+});
+
 function fakeEvents() {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const events: DaemonEvents = {

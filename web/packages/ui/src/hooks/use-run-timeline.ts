@@ -4,6 +4,7 @@ import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { supportsThinking } from "@/lib/thinking-levels";
 import type { WsClientLike } from "@/lib/ws-client";
 import { resendRequests } from "@/lib/attachments/reuse";
+import { runStartParams } from "@/lib/run-start";
 import type {
   AttachmentMeta,
   AttachmentRequest,
@@ -301,6 +302,12 @@ export interface RunEntry {
   failureWindow?: string;
   /** When the limit lifts (RFC 3339 UTC). */
   failureResetAt?: string;
+  /** ADR-0041 F2: the agent profile the run launched with. */
+  profileId?: number;
+  /** ADR-0041 F2: the failed run this one continues after a rate limit. */
+  failoverOf?: string;
+  /** A rate-limited run whose profile names a fallback (run.logs): where "Retry on <profile>" would go. */
+  fallbackProfileId?: number;
   err?: string;
   /**
    * The run's provider-native permission mode (ADR-0019) -- "" until the
@@ -403,6 +410,8 @@ interface TimelineState {
     previews?: AttachmentMeta[],
     /** ADR-0041 S2w: the agent profile this run is launched as; sent as run.start's `profileId` only when defined. */
     profileId?: number,
+    /** RFC 3339: hold the prompt in the chat's queue until then (the result is then always queued). */
+    notBefore?: string,
   ) => Promise<SubmitResult>;
   /**
    * Actually stops runId server-side (run.stop) -- unlike task switch/
@@ -627,6 +636,7 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
             stopReason: logs.stopReason,
             disposition: logs.disposition,
             ...failureOf(logs),
+            ...lineageOf(logs),
             err: logs.err,
             ...provenanceOf(logs),
             ...attachmentsOf(logs),
@@ -647,6 +657,15 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
  */
 function failureOf(src: { failureKind?: string; window?: string; resetAt?: string }): Pick<RunEntry, "failureKind" | "failureWindow" | "failureResetAt"> {
   return { failureKind: src.failureKind || undefined, failureWindow: src.window || undefined, failureResetAt: src.resetAt || undefined };
+}
+
+/** The profile/failover keys a run.logs result carries -- only those, so a missing one never overwrites a list-seeded value. */
+function lineageOf(logs: RunLogsResult): Pick<RunEntry, "profileId" | "failoverOf" | "fallbackProfileId"> {
+  return {
+    ...(logs.profileId ? { profileId: logs.profileId } : {}),
+    ...(logs.failoverOf ? { failoverOf: logs.failoverOf } : {}),
+    ...(logs.fallbackProfileId ? { fallbackProfileId: logs.fallbackProfileId } : {}),
+  };
 }
 
 /** The provenance keys a run.logs result actually carries -- only those, so a missing one never overwrites a list-seeded value with undefined. */
@@ -678,6 +697,8 @@ function toRunEntry(r: RunSummary): RunEntry {
     failureKind: r.FailureKind || undefined,
     failureWindow: r.FailureWindow || undefined,
     failureResetAt: r.FailureResetAt || undefined,
+    ...(r.ProfileID ? { profileId: r.ProfileID } : {}),
+    ...(r.FailoverOf ? { failoverOf: r.FailoverOf } : {}),
     err: r.Err || undefined,
     permissionMode: r.PermissionMode,
     autoAccept: r.AutoAccept,
@@ -778,6 +799,7 @@ export function useRunTimeline(
                   stopReason: logs.stopReason,
                   disposition: logs.disposition,
                   ...failureOf(logs),
+                  ...lineageOf(logs),
                   err: logs.err,
                 });
               })
@@ -809,25 +831,17 @@ export function useRunTimeline(
       attachments?: AttachmentRequest[],
       previews?: AttachmentMeta[],
       profileId?: number,
+      notBefore?: string,
     ) => {
       const session = sessionRef.current;
       if (!client || taskId === null || chatId === null || !session) {
         throw new Error("no chat selected");
       }
 
-      const result = await client.call<RunStartResult>("run.start", {
-        taskId,
-        chatId,
-        provider,
-        prompt,
-        whenBusy,
-        ...(permission?.permissionMode ? { permissionMode: permission.permissionMode } : {}),
-        ...(permission?.autoAccept ? { autoAccept: true } : {}),
-        ...(thinkingLevel ? { thinkingLevel } : {}),
-        ...(model ? { model } : {}),
-        ...(profileId !== undefined ? { profileId } : {}),
-        ...(attachments && attachments.length > 0 ? { attachments } : {}),
-      });
+      const result = await client.call<RunStartResult>(
+        "run.start",
+        runStartParams({ taskId, chatId, provider, prompt, whenBusy, permission, thinkingLevel, model, profileId, attachments, notBefore }),
+      );
       // ADR-0021 §2: a queued result has no run yet -- no entry is
       // appended; the server delivers it later and run.status adopts it.
       if (!("runId" in result)) return { kind: "queued" as const, queueItemId: result.queueItemId };
@@ -921,9 +935,11 @@ export function useRunTimeline(
                   patch(setRuns, r.ID, {
                     items: buildTimeline(logs.events),
                     ...attachmentsOf(logs),
+                    ...lineageOf(logs),
                     status: logs.status,
                     stopReason: logs.stopReason,
                     disposition: logs.disposition,
+                    ...failureOf(logs),
                     err: logs.err,
                   });
                 })
