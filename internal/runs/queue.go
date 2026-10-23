@@ -58,6 +58,9 @@ type chatQueueRunConfig struct {
 	// ProfileID is the agent profile the delivered run was launched with
 	// (ADR-0041 F2), recorded only; 0 = none.
 	ProfileID int64 `json:"profileId,omitempty"`
+	// FailoverOf is the failed run an automatic rate-limit retry continues
+	// (ADR-0041 F2b); "" = none.
+	FailoverOf string `json:"failoverOf,omitempty"`
 }
 
 // SetStarter wires the dependencies delivery needs to start runs itself
@@ -456,6 +459,9 @@ func (reg *Registry) deliverOne(chatID int64) {
 		if cfg.ProfileID != 0 {
 			startOpts = append(startOpts, WithProfile(cfg.ProfileID))
 		}
+		if cfg.FailoverOf != "" {
+			startOpts = append(startOpts, WithFailoverOf(cfg.FailoverOf))
+		}
 		startOpts = append(startOpts, reg.attachmentStartOption(item.Attachments)...)
 		runID, err := reg.Start(context.Background(), wm, runner, chat.TaskID, chatID, taskrunner.Provider(cfg.Provider), deliverPrompt(item), taskrunner.PermissionSettings{Mode: cfg.PermissionMode, AutoAccept: cfg.AutoAccept}, taskrunner.ThinkingLevel(cfg.ThinkingLevel), startOpts...)
 		if err != nil {
@@ -608,6 +614,7 @@ type startOptions struct {
 	// replyChatID/notify: see WithReplyChat / WithNotifyOnFinish.
 	replyChatID int64
 	profileID   int64
+	failoverOf  string
 	notify      bool
 	notifySet   bool
 	isolation   *taskrunner.IsolationOptions
@@ -637,6 +644,12 @@ func WithReplyChat(chatID int64) StartOption {
 // not applied here (the client already resolved them). 0 = none.
 func WithProfile(id int64) StartOption {
 	return func(o *startOptions) { o.profileID = id }
+}
+
+// WithFailoverOf records the run this one continues after a rate limit
+// (ADR-0041 F2b).
+func WithFailoverOf(runID string) StartOption {
+	return func(o *startOptions) { o.failoverOf = runID }
 }
 
 // WithNotifyOnFinish opts a child run in (default) or out of the parent
