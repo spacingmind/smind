@@ -159,7 +159,7 @@ func (a *API) serve(ctx context.Context, tr Transport, local bool, maxMessage in
 	c.deviceID = deviceID
 	c.channel = ch
 	c.maxMessage = maxMessage
-	c.runScoped = false // no run-scoped identity exists yet (ADR-0027)
+	c.runs = a.Runs // run-scoped identity is set later by session.identify
 	c.eventsSub = newSubscriber()
 	c.eventsBus = a.bus
 	c.focus = a.focus
@@ -252,6 +252,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		return res, err
 	}
 	hs["provider.setDefaultModel"] = handleProviderSetDefaultModel(runner, bus)
+	hs["session.identify"] = handleSessionIdentify(reg)
 	hs["daemon.info"] = handleDaemonInfo(info, reg)
 	hs["run.attachment"] = handleRunAttachment(reg)
 	hs["forge.search"] = handleForgeSearch(wm, gh)

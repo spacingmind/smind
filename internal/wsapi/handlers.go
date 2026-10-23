@@ -579,7 +579,7 @@ func handleSpaceDelete(wm *workspace.Manager) handlerFunc {
 }
 
 func handleTaskCreate(wm *workspace.Manager) handlerFunc {
-	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+	return func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			WorkspaceID  int64  `json:"workspaceId"`
 			SpaceID      *int64 `json:"spaceId"`
@@ -594,6 +594,16 @@ func handleTaskCreate(wm *workspace.Manager) handlerFunc {
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.create: invalid params: %w", err)
+		}
+		if rc != nil && rc.runScoped {
+			// ADR-0041 S2b: an identified agent creates children of its own
+			// task only (S3 adds the policy checks on top).
+			if p.ParentTaskID == nil {
+				own := rc.ident.taskID
+				p.ParentTaskID = &own
+			} else if *p.ParentTaskID != rc.ident.taskID {
+				return nil, fmt.Errorf("task.create: parentTaskId must be your own task #%d", rc.ident.taskID)
+			}
 		}
 		refModes := 0
 		if p.BaseRef != "" {
@@ -1402,7 +1412,7 @@ type runStartResult struct {
 // not stop the run, which task.prompt's own request-scoped stop-on-detach
 // behavior cannot support).
 func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry, profReg *profiles.Registry, gh *githubHolder) handlerFunc {
-	return func(ctx context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+	return func(ctx context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			TaskID int64 `json:"taskId"`
 			// ChatID is optional (ADR-0016 P1.3): omitted or 0 resolves to
@@ -1456,6 +1466,18 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 		}
 		if !p.ThinkingLevel.IsValid() {
 			return nil, fmt.Errorf("run.start: invalid thinkingLevel %q", p.ThinkingLevel)
+		}
+		if rc != nil && rc.runScoped {
+			// ADR-0041 S2b: an identified caller IS an agent; the sender ids
+			// are its own (daemon-known), never whatever the params claim.
+			id := rc.ident
+			if (p.FromTaskID != 0 && p.FromTaskID != id.taskID) || (p.FromChatID != 0 && p.FromChatID != id.chatID) {
+				return nil, fmt.Errorf("run.start: fromTaskId/fromChatId must be your own (task #%d, chat #%d)", id.taskID, id.chatID)
+			}
+			p.FromTaskID, p.FromChatID = id.taskID, id.chatID
+			if p.Source == store.ChatQueueSourceOrchestrator {
+				p.Source = store.ChatQueueSourceAgent
+			}
 		}
 		if p.Source == "" {
 			p.Source = store.ChatQueueSourceHuman

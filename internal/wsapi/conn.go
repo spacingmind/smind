@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+
+	"github.com/spacingmind/smind/internal/runs"
 )
 
 // Transport is the minimal duplex byte-message stream a conn serves RPC
@@ -37,6 +39,8 @@ type requestContext struct {
 	// runScoped is true when the caller is an agent run rather than a
 	// user surface; see conn.runScoped.
 	runScoped bool
+	// ident is the run identity of a run-scoped caller (zero otherwise).
+	ident runIdentity
 	// local is true when the caller holds the daemon token on /ws, false for
 	// a relay-served (paired-device) session; see conn.local.
 	local bool
@@ -96,12 +100,18 @@ type conn struct {
 	eventsSub *subscriber
 	eventsBus *eventBus
 
-	// runScoped marks a connection authenticated as an agent run (ADR-0027
-	// run tokens), whose forced usage refreshes are downgraded to touches.
-	// No run-scoped identity exists yet, so nothing sets it: every
-	// connection today holds the daemon token and ServeTransport leaves it
-	// false.
+	// runScoped marks a connection that identified itself as an agent run
+	// through session.identify (ADR-0041 S2b; see runIdentity): its forced
+	// usage refreshes are downgraded to touches, only RunScopedMethods are
+	// served, and it dies with its run. ident holds the run's ids. Both are
+	// guarded by identMu (set by a request goroutine, read by all).
 	runScoped bool
+	ident     runIdentity
+	identMu   sync.Mutex
+
+	// runs answers the per-request "is my run still running" check for a
+	// run-scoped connection; nil disables it.
+	runs *runs.Registry
 
 	// local marks the token-authenticated /ws connection. A relay-served
 	// session (ServeTransport) is not local, so handlers that administer the
@@ -198,6 +208,12 @@ func (c *conn) handleCancel(params json.RawMessage) {
 }
 
 func (c *conn) dispatch(connCtx context.Context, env envelope) {
+	// Before the handler lookup: a run-scoped connection fails closed, so
+	// even an unregistered method name gets "not available to agents".
+	if err := c.gate(env.Method); err != nil {
+		c.writeEnvelope(envelope{ID: env.ID, Error: codedError(err)})
+		return
+	}
 	h, ok := c.handlers[env.Method]
 	if !ok {
 		// Answered directly, not through sendError: that only writes for a
@@ -217,7 +233,8 @@ func (c *conn) dispatch(connCtx context.Context, env envelope) {
 	c.inflight[env.ID] = &inflightRequest{cancel: cancel}
 	c.mu.Unlock()
 
-	rc := &requestContext{conn: c, id: env.ID, runScoped: c.runScoped, local: c.local, deviceID: c.deviceID, channel: c.channel}
+	ident, scoped := c.identity()
+	rc := &requestContext{conn: c, id: env.ID, runScoped: scoped, ident: ident, local: c.local, deviceID: c.deviceID, channel: c.channel}
 	result, err := h(reqCtx, rc, env.Params)
 	if err != nil {
 		c.sendError(env.ID, err)
