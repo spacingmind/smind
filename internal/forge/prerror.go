@@ -113,7 +113,7 @@ func UpdateUnsupported(head string) *PRError {
 // locally or on origin.
 func BranchGone(branch string) *PRError {
 	return NewPRError(CodeBranchGone, "").withMessage(
-		fmt.Sprintf("The branch `%s` no longer exists, so there is nothing to restore. It was deleted after it was merged.", branch))
+		fmt.Sprintf("The branch `%s` no longer exists, so there is nothing to restore.", branch))
 }
 
 // RestoreCheckedOut is the error for a Restore whose branch is checked out in

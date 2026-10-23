@@ -525,7 +525,7 @@ func TestRestore_BranchGone(t *testing.T) {
 
 	_, err := e.m.RestoreTask(task.ID)
 	pe := wantPRCode(t, err, forge.CodeBranchGone)
-	want := "The branch `" + *task.Branch + "` no longer exists, so there is nothing to restore. It was deleted after it was merged."
+	want := "The branch `" + *task.Branch + "` no longer exists, so there is nothing to restore."
 	if pe.Message != want {
 		t.Fatalf("message = %q, want %q", pe.Message, want)
 	}
