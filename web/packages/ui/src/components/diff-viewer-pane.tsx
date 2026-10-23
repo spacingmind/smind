@@ -5,7 +5,6 @@ import { Icons } from "@/lib/icons";
 
 import { DiffHeaderMenu } from "@/components/diff-header-menu";
 import { DiffRender, type DiffAnnotation, type DiffOutputFormat } from "@/components/diff-render";
-import { ErrorWithDetails } from "@/components/error-with-details";
 import { FileStatusMarker } from "@/components/file-status-marker";
 import { PrAction } from "@/components/git/pr-action";
 import { CommentComposer, ReviewAnnotationFrame, ReviewComments, ReviewDraftCard, type PendingComment } from "@/components/review-comments";

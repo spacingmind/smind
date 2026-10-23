@@ -41,7 +41,6 @@ export const queryKeys = {
   prPreview: (taskId: number, base: string) => ["task.prPreview", { taskId, base }] as const,
   prPreviewAll: () => ["task.prPreview"] as const,
   /** `workspace.branches` (base picker options; the RPC may not exist on an older daemon). */
-  workspaceBranches: (workspaceId: number) => ["workspace.branches", { workspaceId }] as const,
   providerList: () => ["provider.list"] as const,
   profileList: () => ["profile.list"] as const,
   /** One `provider.test` answer per key: a provider's own id for run readiness (use-provider-health), an account id for an account's credential (accounts). */

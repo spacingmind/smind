@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { Input } from "@/components/ui/input";
-import { useCreatePr, usePrPreview, useWorkspaceBranches } from "@/hooks/use-pr-actions";
+import { useCreatePr, usePrPreview } from "@/hooks/use-pr-actions";
+import { useWorkspaceBranches } from "@/hooks/use-workspace-branches";
 import { useTaskGit } from "@/hooks/use-task-git";
 import { loadDraftPr, saveDraftPr } from "@/lib/git-prefs";
 import { Icons } from "@/lib/icons";
@@ -80,7 +81,7 @@ function CreatePrForm({
   const [committedBase, setCommittedBase] = useState(taskBase);
   const baseOverride = committedBase === taskBase ? "" : committedBase;
   const preview = usePrPreview(taskId, baseOverride, true);
-  const branches = useWorkspaceBranches(workspaceId, true);
+  const branches = useWorkspaceBranches({ workspaceId: workspaceId ?? -1, limit: 50, enabled: workspaceId !== null });
   const create = useCreatePr();
 
   // `null` = the person hasn't typed: the field shows the preview's default (so a new base's defaults flow in).

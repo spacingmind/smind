@@ -754,12 +754,6 @@ export interface PrExistsErrorData {
 }
 
 /** `workspace.branches` (ADR-0039 §4, PR 7); the Create PR dialog tolerates its absence. */
-export interface WorkspaceBranchesResult {
-  defaultBase: string;
-  current: string;
-  branches: { name: string; remote: "local" | "origin"; ahead: number; behind: number }[];
-}
-
 // Payloads of ADR 0005 notifications (internal/wsapi/events.go) -- see
 // docs/decisions/0005-wsapi-event-subscription.md. Carried in the
 // notification envelope's payload field (lowercase json tags, unlike the

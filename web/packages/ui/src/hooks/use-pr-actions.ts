@@ -7,12 +7,10 @@ import type {
   TaskCreatePrParams,
   TaskCreatePrResult,
   TaskUpdatePrResult,
-  WorkspaceBranchesResult,
 } from "@/lib/types";
 
 /** How long a preview is trusted; the dialog refetches on every open regardless. */
 const PREVIEW_STALE_MS = 5_000;
-const BRANCHES_STALE_MS = 30_000;
 
 /** `task.prPreview` for the Create PR dialog: local git and cache only, so refetching on open is cheap. */
 export function usePrPreview(taskId: number, baseBranch: string, enabled: boolean) {
@@ -27,21 +25,6 @@ export function usePrPreview(taskId: number, baseBranch: string, enabled: boolea
     queryFn: async (): Promise<PrPreview> => {
       if (!client) throw new Error("no daemon connection");
       return client.call<PrPreview>("task.prPreview", baseBranch ? { taskId, baseBranch } : { taskId });
-    },
-  });
-}
-
-/** `workspace.branches` for the base picker. The RPC arrives with PR 7: an older daemon's error just leaves `data` empty. */
-export function useWorkspaceBranches(workspaceId: number | null, enabled: boolean) {
-  const { client } = useDaemonConnection();
-  return useQuery({
-    queryKey: queryKeys.workspaceBranches(workspaceId ?? -1),
-    enabled: enabled && client !== null && workspaceId !== null,
-    staleTime: BRANCHES_STALE_MS,
-    retry: false,
-    queryFn: async (): Promise<WorkspaceBranchesResult> => {
-      if (!client) throw new Error("no daemon connection");
-      return client.call<WorkspaceBranchesResult>("workspace.branches", { workspaceId, limit: 50 });
     },
   });
 }
