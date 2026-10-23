@@ -112,14 +112,42 @@ transition frame.
 
 ## Progress
 
-- [ ] plan committed
-- [ ] matcher + tests
-- [ ] decider wiring + detail field + tests
-- [ ] MCP no-PR test
-- [ ] web/mobile card line + tests + screenshots
-- [ ] PR(s)
+- [x] plan committed
+- [x] matcher + tests (Peer A, ACCEPTED: 50-form probe by the Lead matched expectations)
+- [x] decider wiring + `gitRule` detail field + tests (Peer B, ACCEPTED; Lead added `core.fsmonitor=false` to the staged-file listing)
+- [x] MCP no-PR test
+- [x] web card line + option filter + tests (Peer C, ACCEPTED)
+- [x] screenshots (Peer D capture, Lead reviewed)
+- [x] PR (daemon + web in one PR)
+- [ ] mobile card line: NOT done. Mobile renders only the summary and option
+  buttons (`mobile/src/permissionRequests.ts`, `transcript/permissionButtons.ts`)
+  and has no permission-detail surface; adding one is a mobile request-type
+  change owned by the mobile item. Follow-up.
+- [ ] D1 (commit allowed in acceptEdits/auto): not implemented, needs the Human.
 
 ## Validation
 
-(to be filled: real-claude compound-command and `permissions.ask` check,
-test/lint/tsc results, mutation checks, screenshot review.)
+- Real claude CLI (haiku, `-p`, throwaway repo, ~USD 0.015): with
+  `--permission-mode acceptEdits --allowedTools "Bash(git push:*)"`,
+  `cd . && git push` and `echo hi && git push` were NOT denied (the CLI splits
+  compound commands and matches each part), `sh -c 'git push'` WAS denied (no
+  unwrapping), and `Bash(git commit:*)` did not cover `git push`. So a
+  provider-native commit allow-rule would be safe for compounds but smind's own
+  matcher is stricter on wrappers. Not verified: whether `permissions.ask`
+  settings force a prompt under `auto`/`acceptEdits`; not relied on.
+- `go test` of taskrunner, runs, acp with `-race`: pass. `task test`: pass.
+  `task lint`: pass. web `bunx tsc -b packages/ui` clean, full vitest 3596 pass.
+- Mutation checks: dropping the `allow_always` stripping fails
+  `TestACPGitRuleStripsAlwaysOptions` (Lead); Peer A: splitter ignoring `&&` and
+  `-C` skipping fail `TestClassifyGitCommand`; Peer B: claudeBashDetail skipping
+  the rule, and a fake `pr_create` MCP tool, fail their tests.
+- Screenshots (light/dark x 1280/390; push, commit with 4 staged files, force
+  push, `sh -c 'cd sub && git push origin HEAD'`; fakeclaude on an isolated
+  daemon): 15 of the 16 card crops and the distinct open/close transition
+  frames viewed by the Lead, all clean (card appears and disappears in one frame,
+  no partial states). Light-1280 pipeline crop was checked only by the Peer.
+- Known gaps (documented): codex sandbox policy and agent-side allow-lists never
+  reach smind; ACP `autoAccept` and claude `bypassPermissions`/`auto` are not
+  forced to ask; user-level git aliases and scripts that run `git push` are not
+  matched. `cmd/smind` full `-race` has a pre-existing data race in
+  `TestTaskWait_QueueItemCancelled` (fails on the base commit too).
