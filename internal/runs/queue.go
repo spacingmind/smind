@@ -250,7 +250,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	}
 
 	var busyRunID string
-	var archiving bool
+	var archiving, syncingTask bool
 	var treeFull *TreeBusyError
 	func() {
 		if setupBusy {
@@ -260,6 +260,10 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		defer reg.mu.Unlock()
 		if reg.taskArchivingLocked(taskID) {
 			archiving = true
+			return
+		}
+		if reg.syncing[taskID] {
+			syncingTask = true
 			return
 		}
 		for _, existing := range reg.runs {
@@ -287,6 +291,10 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	if archiving {
 		cancel()
 		return StartOutcome{}, fmt.Errorf("runs: start: %w", ErrTaskArchiving)
+	}
+	if syncingTask {
+		cancel()
+		return StartOutcome{}, fmt.Errorf("runs: start: %w", ErrTaskSyncing)
 	}
 	if treeFull != nil {
 		cancel()
@@ -502,6 +510,11 @@ func (reg *Registry) deliverOne(chatID int64) {
 				// The task tree is at its concurrency limit; the slot frees
 				// when ANY run in the tree ends, which finish covers via
 				// its DeliverQueued retry. Leave it queued.
+				return
+			}
+			if errors.Is(err, ErrTaskSyncing) {
+				// A git sync holds the task for a moment; leave the item
+				// queued -- the sync's release redelivers it.
 				return
 			}
 			if errors.Is(err, ErrTaskArchiving) {

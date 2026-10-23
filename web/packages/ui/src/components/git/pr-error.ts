@@ -40,7 +40,7 @@ const FALLBACK: Record<string, string> = {
   // Push and Update from base (G7).
   non_fast_forward: "Origin has newer changes on this branch. Bring those changes in first (pull in the worktree, or ask the agent), then push again.",
   nothing_to_push: "Nothing to push.",
-  conflict: "Updating hit conflicts, and the worktree is now in the middle of the merge. Resolve the conflicts and commit, or ask the agent to.",
+  conflict: "Updating hit conflicts, and the worktree is now in the middle of the merge. Resolve the conflicts and commit, or ask the agent to resolve them.",
   merge_in_progress: "The worktree is in the middle of a merge or rebase. Finish or abort it first.",
   worktree_dirty: "The worktree has uncommitted changes. Commit or stash them, then try again.",
   invalid_strategy: "That update strategy isn't supported.",

@@ -23,6 +23,12 @@ type ActionCtx struct {
 	// of one (MERGE_HEAD, rebase-merge or rebase-apply exists); "" otherwise.
 	// It feeds the policy only and is not part of the wire payload.
 	MidOperation string
+	// RebasedDiverged: smind rebased this published branch, so origin's copy
+	// is no ancestor of it and a plain push cannot succeed.
+	RebasedDiverged bool
+	// ForkPR: the task was started from a pull request on a fork (read-only
+	// for push).
+	ForkPR bool
 }
 
 // Actions is the createPr/updatePr/push/updateFromBase policy, a pure function of the payload.
@@ -119,10 +125,14 @@ func pushAction(g TaskGit, c ActionCtx) Action {
 	switch {
 	case g.Branch == nil:
 		return disabled(forge.CodeTaskNoWorktree, "Push isn't available because this task has no worktree. Start a new task from this branch to push changes.")
+	case c.ForkPR:
+		return disabled(forge.CodeForkPRReadonly, forge.MsgForkPushReadonly)
 	case c.NoOrigin:
 		return disabled(forge.CodeNoRemote, "Push isn't available because this workspace has no `origin` remote, so there's nowhere to push. Add one with `git remote add origin <url>`.")
 	case g.Origin == nil:
 		return disabled(CodeStatusUnknown, "Checking this branch's remote state…")
+	case c.RebasedDiverged && g.Origin.Published && g.Origin.Behind != nil && *g.Origin.Behind > 0:
+		return disabled(forge.CodeNonFastForward, forge.MsgRebasedDiverged)
 	case g.Origin.Published && g.Origin.Behind != nil && *g.Origin.Behind > 0:
 		return disabled(forge.CodeNonFastForward, "Push isn't available because origin has newer changes on this branch. Bring those changes in first (pull in the worktree, or ask the agent).")
 	case g.Origin.Published && g.Origin.Ahead != nil && *g.Origin.Ahead == 0:

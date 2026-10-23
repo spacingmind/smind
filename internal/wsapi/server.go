@@ -232,7 +232,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	for method, h := range gitHandlers(gitSvc, focus) {
 		hs[method] = h
 	}
-	for method, h := range prHandlers(wm, gitSvc, gh) {
+	for method, h := range prHandlers(wm, gitSvc, gh, reg) {
 		hs[method] = h
 	}
 	for _, method := range []string{"task.commit", "task.stage", "task.setBase"} {

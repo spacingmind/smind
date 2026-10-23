@@ -484,7 +484,7 @@ func (s *Service) compute(taskID int64) (g TaskGit, ws int64, base string, err e
 	}
 	in := Input{
 		TaskID: t.ID, RepoDir: w.Path, BaseRef: t.BaseRef, BaseSha: t.BaseSha,
-		BranchOwned: t.BranchOwned, Untrusted: t.UntrustedSource, Conflicts: s.conflicts, Now: s.now,
+		BranchOwned: t.BranchOwned, Untrusted: t.UntrustedSource, ForkPR: t.UntrustedSource && t.PRNumber > 0, Conflicts: s.conflicts, Now: s.now,
 		DiffStat: func() (int, int, int, error) { return src.TaskDiffStat(taskID) },
 	}
 	if in.BaseRef == "" {

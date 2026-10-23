@@ -14,6 +14,11 @@ import (
 
 const originRemote = "origin"
 
+// ForkPRConfigKey is the git config key recording that a task's branch was
+// started from a pull request on a fork ("true"). It lives in git, not the
+// store, and outlives the task's untrusted flag (which "Run setup" clears).
+func ForkPRConfigKey(branch string) string { return "branch." + branch + ".smindForkPr" }
+
 var shaRE = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // Input is what Compute needs about one task. The caller (wsapi/service) fills
@@ -27,9 +32,12 @@ type Input struct {
 	BaseSha      string // fork commit; "" = unknown
 	BranchOwned  bool
 	Untrusted    bool
-	Forge        string
-	PR           *PRInfo // always nil in the local pass
-	RunActive    bool
+	// ForkPR: the task was started from a pull request on a fork (stored PR
+	// identity on an untrusted task); push is read-only.
+	ForkPR    bool
+	Forge     string
+	PR        *PRInfo // always nil in the local pass
+	RunActive bool
 	// ForgeCode/ForgeReason are the poller's host state (forge CLI missing or
 	// not signed in), passed through to the createPr/updatePr actions.
 	ForgeCode   string
@@ -52,11 +60,14 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 	g = TaskGit{TaskID: in.TaskID, Forge: in.Forge, Untrusted: in.Untrusted, PR: in.PR}
 	noOrigin, notForge := false, false
 	midOp := ""
+	rebased := false
+	forkPR := in.ForkPR
 	defer func() {
 		g.ComputedAt = now().UTC()
 		g.Actions = Actions(g, ActionCtx{
 			RunActive: in.RunActive, NoOrigin: noOrigin, OriginNotForge: notForge,
 			ForgeCode: in.ForgeCode, ForgeReason: in.ForgeReason, MidOperation: midOp,
+			RebasedDiverged: rebased, ForkPR: forkPR,
 		})
 	}()
 
@@ -70,6 +81,9 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 		repo = in.WorktreePath
 	}
 	branchRef := "refs/heads/" + in.Branch
+	if out, err := run(ctx, repo, "config", "--get", ForkPRConfigKey(in.Branch)); err == nil && strings.TrimSpace(out) == "true" {
+		forkPR = true
+	}
 	switch originKind(ctx, run, repo) {
 	case originNone:
 		noOrigin = true
@@ -107,6 +121,7 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 	}
 
 	g.Origin = originStatus(ctx, run, repo, in.Branch, branchRef)
+	rebased = rebasedDiverged(ctx, run, repo, in.Branch, g.Origin)
 
 	if in.DiffStat != nil {
 		if f, i, d, err := in.DiffStat(); err == nil {
@@ -296,4 +311,29 @@ func midOperation(ctx context.Context, run Runner, dir string) string {
 		return "merge"
 	}
 	return ""
+}
+
+// rebasedDiverged reports a published branch that has diverged from origin
+// because it was rebased: ahead and behind both > 0 and the branch's newest
+// reflog entry is a rebase finish (a later commit or merge puts another
+// subject first). It reads one bounded `git reflog`; any failure, an empty or
+// expired reflog or an unknown branch is "unknown" (false) and never fails the
+// status.
+func rebasedDiverged(ctx context.Context, run Runner, dir, branch string, o *Origin) bool {
+	if o == nil || !o.Published || o.Ahead == nil || o.Behind == nil || *o.Ahead == 0 || *o.Behind == 0 {
+		return false
+	}
+	out, err := run(ctx, dir, "--no-optional-locks", "reflog", "-n", "20", "--format=%gs", "refs/heads/"+branch, "--")
+	if err != nil {
+		return false
+	}
+	first, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
+	return isRebaseFinish(first)
+}
+
+// isRebaseFinish matches the reflog subject git writes to the rebased branch
+// when a rebase completes ("rebase (finish): refs/heads/x onto <sha>"; the
+// interactive form is "rebase -i (finish)" on older git).
+func isRebaseFinish(subject string) bool {
+	return strings.HasPrefix(subject, "rebase (finish)") || strings.HasPrefix(subject, "rebase -i (finish)")
 }

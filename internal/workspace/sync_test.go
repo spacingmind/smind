@@ -44,3 +44,50 @@ func TestSync_NoForceFlagAnywhere(t *testing.T) {
 		}
 	}
 }
+
+// The push refspec is always plain ref:ref, whatever the names: a leading '+'
+// would force the push.
+func TestPushRefspecNeverForced(t *testing.T) {
+	for _, tc := range []struct{ branch, dest, want string }{
+		{"smind/task-a", "smind/task-a", "refs/heads/smind/task-a:refs/heads/smind/task-a"},
+		{"smind/pr-7-x", "feat/x", "refs/heads/smind/pr-7-x:refs/heads/feat/x"},
+		{"+odd", "+odd", "refs/heads/+odd:refs/heads/+odd"},
+	} {
+		got := pushRefspec(tc.branch, tc.dest)
+		if got != tc.want || strings.HasPrefix(got, "+") || strings.Contains(got, ":+") {
+			t.Fatalf("pushRefspec(%q, %q) = %q, want %q", tc.branch, tc.dest, got, tc.want)
+		}
+	}
+}
+
+func TestPushDest(t *testing.T) {
+	repo := t.TempDir()
+	if err := runGit(repo, "init", "-q"); err != nil {
+		t.Skipf("git init: %v", err)
+	}
+	for _, tc := range []struct{ head, want string }{
+		{"", "own"},
+		{"develop", "own"}, // the task's base
+		{"main", "own"},    // the workspace default base
+		{"release/1", "release/1"},
+		{"feat/x", "feat/x"},
+		{forge.CherryPickBranchPrefix + "4", "own"},
+		{"-bad", "own"},
+		{"has space", "own"},
+	} {
+		if got := pushDest(repo, "own", tc.head, "develop", "main"); got != tc.want {
+			t.Errorf("pushDest(head %q) = %q, want %q", tc.head, got, tc.want)
+		}
+	}
+}
+
+func TestValidRemoteName(t *testing.T) {
+	for name, want := range map[string]bool{
+		"fork": true, "my-fork_2": true, "team/fork": true,
+		"": false, "-x": false, "--upload-pack=x": false, "a b": false, "a..b": false, "a;b": false, "$(x)": false,
+	} {
+		if got := validRemoteName(name); got != want {
+			t.Errorf("validRemoteName(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/forge"
+	"github.com/spacingmind/smind/internal/gitstate"
 )
 
 // Push and Update from base (ADR-0039 sections 3-6): the git half of
@@ -52,9 +53,12 @@ type UpdateResult struct {
 	Commits int    // base commits brought in
 }
 
-// Push publishes the task's branch to origin with a plain, never forced
-// `git push [-u] origin refs/heads/<b>:refs/heads/<b>`; -u only when the branch
-// has no upstream yet.
+// Push publishes the task's branch with a plain, never forced
+// `git push [-u] <remote> refs/heads/<b>:refs/heads/<dest>`; -u only when the
+// branch has no upstream yet. The remote is the branch's pushRemote, else
+// remote.pushDefault, else origin. dest is the task's pull request head when it
+// has one smind may push to (a same-repo PR-start task), else its own branch.
+// A task started from a pull request on a fork is read-only.
 func (m *Manager) Push(ctx context.Context, id int64) (PushResult, error) {
 	t, err := m.store.GetTask(id)
 	if err != nil {
@@ -68,15 +72,23 @@ func (m *Manager) Push(ctx context.Context, id int64) (PushResult, error) {
 		return PushResult{}, fmt.Errorf("push: %w", err)
 	}
 	dir, branch := *t.WorktreePath, *t.Branch
+	if (t.UntrustedSource && t.PRNumber > 0) || forkPRRecorded(ctx, dir, branch) {
+		return PushResult{}, forge.ForkPushReadonly()
+	}
 	if err := validateRefName(ws.Path, branch, true); err != nil {
 		return PushResult{}, forge.NewPRError(forge.CodeInvalidBranch, "")
 	}
-	remoteURL := originURL(ctx, dir)
+	remote, err := pushRemote(ctx, dir, branch)
+	if err != nil {
+		return PushResult{}, err
+	}
+	dest := pushDest(ws.Path, branch, t.PRHeadRef, t.BaseRef, workspaceDefaultBase(ws))
+	remoteURL := remoteURLOf(ctx, dir, remote)
 	if remoteURL == "" {
 		return PushResult{}, forge.NewPRError(forge.CodeNoRemote, "")
 	}
 
-	remoteRef := "refs/remotes/" + originRemote + "/" + branch
+	remoteRef := "refs/remotes/" + remote + "/" + dest
 	branchRef := "refs/heads/" + branch
 	var pushed int
 	if prRevParse(ctx, dir, remoteRef) != "" {
@@ -88,21 +100,106 @@ func (m *Manager) Push(ctx context.Context, id int64) (PushResult, error) {
 		}
 		pushed = syncCount(ctx, dir, syncBaseRange(ctx, dir, base, t.BaseSha)+".."+branchRef)
 	}
-	res := PushResult{Branch: branch, Remote: originRemote, Pushed: pushed}
+	res := PushResult{Branch: dest, Remote: remote, Pushed: pushed}
 
 	args := []string{"push"}
 	if _, _, err := execGit(ctx, dir, nil, "config", "--get", "branch."+branch+".merge"); err != nil {
 		args = append(args, "-u")
 		res.UpstreamCreated = true
 	}
-	args = append(args, originRemote, branchRef+":"+branchRef)
+	args = append(args, remote, pushRefspec(branch, dest))
 
 	ctx, cancel := context.WithTimeout(ctx, prPushTimeout)
 	defer cancel()
-	if _, stderr, err := execGit(ctx, dir, nil, netGitArgs(ctx, dir, originRemote, args...)...); err != nil {
-		return PushResult{}, pushError(ctx, err, stderr, remoteURL)
+	if _, stderr, err := execGit(ctx, dir, nil, netGitArgs(ctx, dir, remote, args...)...); err != nil {
+		pe := pushError(ctx, err, stderr, remoteURL)
+		if pe.Code == forge.CodeNonFastForward && remote == originRemote && dest == branch {
+			// git itself refused: if the branch was rebased after it was
+			// published, say so (same sentence as the action).
+			if g, gerr := m.freshGit(t, ws); gerr == nil && g.Actions["push"].Reason == forge.MsgRebasedDiverged {
+				return PushResult{}, forge.RebasedDiverged().WithDetail(stderr)
+			}
+		}
+		return PushResult{}, pe
 	}
 	return res, nil
+}
+
+// forkPRRecorded reports the git-config fact that the task's branch came from
+// a pull request on a fork (see gitstate.ForkPRConfigKey).
+func forkPRRecorded(ctx context.Context, dir, branch string) bool {
+	out, _, err := execGit(ctx, dir, nil, "config", "--get", gitstate.ForkPRConfigKey(branch))
+	return err == nil && strings.TrimSpace(out) == "true"
+}
+
+// pushRefspec is the one refspec Push sends: a plain ref to ref, never forced
+// (no leading '+').
+func pushRefspec(branch, dest string) string {
+	return "refs/heads/" + branch + ":refs/heads/" + dest
+}
+
+// pushDest is the branch Push updates on the remote: the task's pull request
+// head when that is a branch smind may push to (not its throwaway rebased
+// copy, and a valid name), else the task's own branch.
+func pushDest(repoDir, branch, prHeadRef, baseRef, defaultBase string) string {
+	if prHeadRef == "" || strings.HasPrefix(prHeadRef, forge.CherryPickBranchPrefix) || validateRefName(repoDir, prHeadRef, true) != nil {
+		return branch
+	}
+	// Defence in depth: never move the base branch (a fork's `develop` or
+	// `main` head) whatever the stored head says.
+	if prHeadRef == baseRef || prHeadRef == defaultBase {
+		return branch
+	}
+	return prHeadRef
+}
+
+// pushRemote is the remote a push of branch goes to, as `git push` would pick
+// it: branch.<b>.pushRemote, else remote.pushDefault, else origin. The name
+// must be a plain configured remote (no leading '-', no whitespace), never a
+// URL.
+func pushRemote(ctx context.Context, dir, branch string) (string, error) {
+	remote := originRemote
+	for _, key := range []string{"branch." + branch + ".pushRemote", "remote.pushDefault"} {
+		if out, _, err := execGit(ctx, dir, nil, "config", "--get", key); err == nil {
+			if v := strings.TrimSpace(out); v != "" {
+				remote = v
+				break
+			}
+		}
+	}
+	if remote == originRemote {
+		return remote, nil
+	}
+	if !validRemoteName(remote) {
+		return "", forge.NewPRError(forge.CodeNoRemote, "the configured push remote has an invalid name")
+	}
+	out, _, err := execGit(ctx, dir, nil, "remote")
+	if err != nil {
+		return "", forge.NewPRError(forge.CodeNoRemote, "")
+	}
+	for _, name := range strings.Fields(out) {
+		if name == remote {
+			return remote, nil
+		}
+	}
+	return "", forge.NewPRError(forge.CodeNoRemote, "the configured push remote isn't a remote of this repository")
+}
+
+// validRemoteName accepts what git allows in a remote name that is safe to
+// hand to `git push` as a positional: nothing that starts with '-', and no
+// whitespace, control or glob characters.
+func validRemoteName(name string) bool {
+	if name == "" || strings.HasPrefix(name, "-") || strings.Contains(name, "..") {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-', r == '/':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // syncBaseRange is the revision "everything the base already has" that an
@@ -264,8 +361,11 @@ func worktreeOperation(ctx context.Context, dir string) string {
 }
 
 // originURL is the configured url of `origin`, "" when there is none.
-func originURL(ctx context.Context, dir string) string {
-	out, _, err := execGit(ctx, dir, nil, "config", "--get", "remote."+originRemote+".url")
+func originURL(ctx context.Context, dir string) string { return remoteURLOf(ctx, dir, originRemote) }
+
+// remoteURLOf is the configured url of remote, "" when there is none.
+func remoteURLOf(ctx context.Context, dir, remote string) string {
+	out, _, err := execGit(ctx, dir, nil, "config", "--get", "remote."+remote+".url")
 	if err != nil {
 		return ""
 	}
