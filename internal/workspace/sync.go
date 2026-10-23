@@ -112,12 +112,15 @@ func (m *Manager) Push(ctx context.Context, id int64) (PushResult, error) {
 	defer cancel()
 	if _, stderr, err := execGit(ctx, dir, nil, netGitArgs(ctx, dir, remote, args...)...); err != nil {
 		pe := pushError(ctx, err, stderr, remoteURL)
-		if remote == originRemote && dest == branch {
-			pe = m.rebasedPushError(ctx, id, pe, stderr)
+		if pe.Code == forge.CodeNonFastForward && remote == originRemote && dest == branch {
+			// git itself refused: if the branch was rebased after it was
+			// published, say so (same sentence as the action).
+			if g, gerr := m.freshGit(t, ws); gerr == nil && g.Actions["push"].Reason == forge.MsgRebasedDiverged {
+				return PushResult{}, forge.RebasedDiverged().WithDetail(stderr)
+			}
 		}
 		return PushResult{}, pe
 	}
-	m.setRebasedOrigin(id, "")
 	return res, nil
 }
 
@@ -220,45 +223,6 @@ func pushError(ctx context.Context, err error, stderr, remoteURL string) *forge.
 	return pe
 }
 
-// RebasedOrigin is the sha origin/<branch> pointed at when smind last rebased
-// the task's published branch, "" when it has not (or since a push or merge).
-func (m *Manager) RebasedOrigin(id int64) string {
-	m.rebasedMu.Lock()
-	defer m.rebasedMu.Unlock()
-	return m.rebased[id]
-}
-
-func (m *Manager) setRebasedOrigin(id int64, sha string) {
-	m.rebasedMu.Lock()
-	defer m.rebasedMu.Unlock()
-	if sha == "" {
-		delete(m.rebased, id)
-		return
-	}
-	if m.rebased == nil {
-		m.rebased = map[int64]string{}
-	}
-	m.rebased[id] = sha
-}
-
-// rebasedPushError swaps a non_fast_forward refusal for the rebase sentence
-// when smind rebased this published branch and origin still has the tip it had
-// then (the remote-tracking ref git has just left alone).
-func (m *Manager) rebasedPushError(ctx context.Context, id int64, pe *forge.PRError, stderr string) *forge.PRError {
-	marker := m.RebasedOrigin(id)
-	if pe.Code != forge.CodeNonFastForward || marker == "" {
-		return pe
-	}
-	t, err := m.store.GetTask(id)
-	if err != nil || t.WorktreePath == nil || t.Branch == nil {
-		return pe
-	}
-	if prRevParse(ctx, *t.WorktreePath, "refs/remotes/"+originRemote+"/"+*t.Branch) != marker {
-		return pe
-	}
-	return forge.RebasedDiverged().WithDetail(stderr)
-}
-
 // UpdateFromBase brings the task's base branch into its branch: a merge (the
 // default) or a rebase. It fetches origin/<base> when origin exists, targets
 // that (else the local base branch), and does nothing when the branch already
@@ -307,10 +271,6 @@ func (m *Manager) UpdateFromBase(ctx context.Context, id int64, strategy string)
 		return UpdateResult{Result: SyncUpToDate}, nil
 	}
 
-	// Where origin's copy of this branch stands before a rebase rewrites ours
-	// ("" when the branch was never published).
-	publishedTip := prRevParse(ctx, tg.worktree, "refs/remotes/"+originRemote+"/"+tg.branch)
-
 	lctx, cancel := context.WithTimeout(ctx, syncLocalTimeout)
 	defer cancel()
 	env := append(os.Environ(), "GIT_EDITOR=true", "GIT_MERGE_AUTOEDIT=no")
@@ -331,11 +291,6 @@ func (m *Manager) UpdateFromBase(ctx context.Context, id int64, strategy string)
 			}
 		}
 		return UpdateResult{}, prGitError(lctx, err, stderr)
-	}
-	if result == SyncRebased {
-		m.setRebasedOrigin(id, publishedTip)
-	} else {
-		m.setRebasedOrigin(id, "")
 	}
 	return UpdateResult{Result: result, Commits: n}, nil
 }

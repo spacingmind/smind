@@ -29,14 +29,10 @@ type Input struct {
 	Untrusted    bool
 	// ForkPR: the task was started from a pull request on a fork (stored PR
 	// identity on an untrusted task); push is read-only.
-	ForkPR bool
-	// RebasedOrigin is the sha origin/<branch> had when smind rebased the
-	// published branch ("" = no such rebase is remembered); the push action
-	// reports the rebase only while origin/<branch> still points at it.
-	RebasedOrigin string
-	Forge         string
-	PR            *PRInfo // always nil in the local pass
-	RunActive     bool
+	ForkPR    bool
+	Forge     string
+	PR        *PRInfo // always nil in the local pass
+	RunActive bool
 	// ForgeCode/ForgeReason are the poller's host state (forge CLI missing or
 	// not signed in), passed through to the createPr/updatePr actions.
 	ForgeCode   string
@@ -116,9 +112,7 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 	}
 
 	g.Origin = originStatus(ctx, run, repo, in.Branch, branchRef)
-	if in.RebasedOrigin != "" && g.Origin != nil && g.Origin.Published && g.Origin.Behind != nil && *g.Origin.Behind > 0 {
-		rebased = revParse(ctx, run, repo, "refs/remotes/"+originRemote+"/"+in.Branch) == in.RebasedOrigin
-	}
+	rebased = rebasedDiverged(ctx, run, repo, in.Branch, g.Origin)
 
 	if in.DiffStat != nil {
 		if f, i, d, err := in.DiffStat(); err == nil {
@@ -308,4 +302,29 @@ func midOperation(ctx context.Context, run Runner, dir string) string {
 		return "merge"
 	}
 	return ""
+}
+
+// rebasedDiverged reports a published branch that has diverged from origin
+// because it was rebased: ahead and behind both > 0 and the branch's newest
+// reflog entry is a rebase finish (a later commit or merge puts another
+// subject first). It reads one bounded `git reflog`; any failure, an empty or
+// expired reflog or an unknown branch is "unknown" (false) and never fails the
+// status.
+func rebasedDiverged(ctx context.Context, run Runner, dir, branch string, o *Origin) bool {
+	if o == nil || !o.Published || o.Ahead == nil || o.Behind == nil || *o.Ahead == 0 || *o.Behind == 0 {
+		return false
+	}
+	out, err := run(ctx, dir, "--no-optional-locks", "reflog", "-n", "20", "--format=%gs", "refs/heads/"+branch, "--")
+	if err != nil {
+		return false
+	}
+	first, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
+	return isRebaseFinish(first)
+}
+
+// isRebaseFinish matches the reflog subject git writes to the rebased branch
+// when a rebase completes ("rebase (finish): refs/heads/x onto <sha>"; the
+// interactive form is "rebase -i (finish)" on older git).
+func isRebaseFinish(subject string) bool {
+	return strings.HasPrefix(subject, "rebase (finish)") || strings.HasPrefix(subject, "rebase -i (finish)")
 }

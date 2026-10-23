@@ -113,8 +113,7 @@ func newGitService(wm *workspace.Manager, db *store.Store, bus *eventBus, focus 
 			}
 			return gh.c
 		},
-		RebasedOrigin: wm.RebasedOrigin,
-		Ledger:        db, PollTick: o.PollTick, Jitter: o.Jitter, NetworkGit: net,
+		Ledger: db, PollTick: o.PollTick, Jitter: o.Jitter, NetworkGit: net,
 		// A run (or queued prompt) in the task blocks Create PR. An unreadable
 		// store fails closed: better a disabled button than a PR under a run.
 		RunActive: func(taskID int64) bool {

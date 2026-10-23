@@ -601,16 +601,22 @@ func TestPushOriginMovedKeepsOldSentence(t *testing.T) {
 	if r := wantErrCode(t, err, forge.CodeNonFastForward); !strings.Contains(r.Message, "Bring those changes in first") {
 		t.Fatalf("message = %q", r.Message)
 	}
+}
 
-	// After a rebase the marker only holds while origin still has the tip it
-	// had then: once someone else moves it, the plain sentence is back.
-	e2 := newPREnv(t)
-	e2.publishAndRebase()
-	e2.moveOrigin("theirs.txt")
-	runGitT(t, e2.wt, "fetch", "-q", "origin")
-	g, _ = e2.api.git.Fresh(e2.task.ID)
+// A commit after the rebase puts another reflog entry first: the generic
+// sentence is back, for the action and the RPC.
+func TestPushRebaseThenCommitIsGeneric(t *testing.T) {
+	t.Parallel()
+	e := newPREnv(t)
+	e.publishAndRebase()
+	e.commit("later.txt", "l\n", "after the rebase")
+	g, _ := e.api.git.Fresh(e.task.ID)
 	if a := g.Actions["push"]; a.Code != forge.CodeNonFastForward || a.Reason == forge.MsgRebasedDiverged {
-		t.Fatalf("push action after origin moved = %+v", a)
+		t.Fatalf("push action = %+v", a)
+	}
+	_, err := e.push()
+	if r := wantErrCode(t, err, forge.CodeNonFastForward); r.Message == forge.MsgRebasedDiverged {
+		t.Fatalf("message = %q", r.Message)
 	}
 }
 
