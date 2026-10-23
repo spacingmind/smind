@@ -168,7 +168,7 @@ function GithubSection() {
                 onChange={(e) => setTokenText(e.target.value)}
               />
               <p id={noteId} className="text-ui-sm text-muted-foreground">
-                smind sends it once over this encrypted connection to <code className="font-mono">gh auth login</code>; it isn&apos;t stored by the app.
+                smind sends it once, only on a secure connection, to <code className="font-mono">gh auth login</code>; it isn&apos;t stored by the app.
                 A classic token needs the <code className="font-mono">repo</code> and <code className="font-mono">read:org</code> scopes.
               </p>
             </div>
