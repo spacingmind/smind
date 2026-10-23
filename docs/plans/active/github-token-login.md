@@ -108,12 +108,13 @@ Decided while implementing (2026-10-23):
 - The Docker image pins the `gh` release binary with a sha256 check (the distro's `gh` is too old for `auth status --json`).
 - No run-scoped identity exists yet, so the agent refusal is enforced and tested at handler level only; an agent holding the daemon token could call `forge.setToken` over a raw `/ws` connection like any RPC (there is no MCP tool, and an agent on the host can run `gh auth login` itself). `GH_TOKEN`/`GITHUB_TOKEN` in the daemon's own environment makes `gh auth login` refuse (`forge_error`). Go strings cannot be zeroed, so the token lives in daemon memory until collected.
 
-## Validation (AC1–AC14)
 
 ## Progress
 
 - 2026-10-23: daemon and web halves implemented and verified live together (bogus token against real `gh` in a throwaway config dir); PRs opened. Plan written from ADR-0039 §8/§11 and H4; `gh auth status --json hosts` confirmed available in gh 2.101 (fields: host, active, login, scopes, state, tokenSource, gitProtocol).
   Nothing implemented.
+
+## Validation
 
 How each AC was satisfied (daemon: this PR; web: the Settings → GitHub PR). The two branches were merged in a scratch worktree for the live run.
 
