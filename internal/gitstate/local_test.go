@@ -2,6 +2,7 @@ package gitstate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -224,5 +225,35 @@ func TestCompute_ForgeCodePassedToActions(t *testing.T) {
 	a := g.Actions["createPr"]
 	if a.Enabled || a.Code != "forge_unauthenticated" || a.Reason != "Create PR isn't available because GitHub isn't signed in on the daemon host. Run `gh auth login` there." {
 		t.Fatalf("createPr = %+v", a)
+	}
+}
+
+func TestGitStatus_PushTargetOnOrigin(t *testing.T) {
+	f := newFixture(t)
+	in := f.input()
+	in.PushTarget = &PushTarget{Remote: "mirror", Branch: "feat/x"}
+	g := Compute(context.Background(), DefaultRunner, in)
+	b, err := json.Marshal(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		Origin struct {
+			PushTarget *PushTarget `json:"pushTarget"`
+		} `json:"origin"`
+	}
+	if err := json.Unmarshal(b, &wire); err != nil || wire.Origin.PushTarget == nil || *wire.Origin.PushTarget != *in.PushTarget {
+		t.Fatalf("origin.pushTarget = %+v (%v) in %s", wire.Origin.PushTarget, err, b)
+	}
+
+	g = Compute(context.Background(), DefaultRunner, f.input())
+	if b, _ := json.Marshal(g); strings.Contains(string(b), "pushTarget") {
+		t.Fatalf("nil PushTarget serialised: %s", b)
+	}
+
+	in.ForkPR = true
+	g = Compute(context.Background(), DefaultRunner, in)
+	if g.Origin != nil && g.Origin.PushTarget != nil {
+		t.Fatalf("fork PR kept pushTarget %+v", g.Origin.PushTarget)
 	}
 }
