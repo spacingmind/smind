@@ -82,6 +82,9 @@ export interface AttachmentMeta {
   width?: number;
   height?: number;
   path?: string;
+  /** pr/issue kinds: the forge number and title. */
+  number?: number;
+  title?: string;
 }
 
 /** daemon.info's attachment limits and accepted kinds (absent on an older daemon). */
