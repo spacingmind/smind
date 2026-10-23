@@ -1117,20 +1117,21 @@ func handleChatQueueList(reg *runs.Registry) handlerFunc {
 // itself uses over this API), with RunConfig and the nullable columns
 // explicit so a client can splice the snapshot straight into a list.
 type chatQueueItemParams struct {
-	ID           int64     `json:"ID"`
-	ChatID       int64     `json:"ChatID"`
-	Prompt       string    `json:"Prompt"`
-	RunConfig    string    `json:"RunConfig"`
-	Source       string    `json:"Source"`
-	FromTaskID   *int64    `json:"FromTaskID"`
-	FromChatID   *int64    `json:"FromChatID"`
-	Priority     int       `json:"Priority"`
-	Status       string    `json:"Status"`
-	RunID        *string   `json:"RunID"`
-	CancelReason string    `json:"CancelReason"`
-	CancelKind   string    `json:"CancelKind"`
-	CreatedAt    time.Time `json:"CreatedAt"`
-	UpdatedAt    time.Time `json:"UpdatedAt"`
+	ID           int64      `json:"ID"`
+	ChatID       int64      `json:"ChatID"`
+	Prompt       string     `json:"Prompt"`
+	RunConfig    string     `json:"RunConfig"`
+	Source       string     `json:"Source"`
+	FromTaskID   *int64     `json:"FromTaskID"`
+	FromChatID   *int64     `json:"FromChatID"`
+	Priority     int        `json:"Priority"`
+	Status       string     `json:"Status"`
+	RunID        *string    `json:"RunID"`
+	CancelReason string     `json:"CancelReason"`
+	CancelKind   string     `json:"CancelKind"`
+	CreatedAt    time.Time  `json:"CreatedAt"`
+	UpdatedAt    time.Time  `json:"UpdatedAt"`
+	NotBefore    *time.Time `json:"NotBefore"`
 	// Attachments is the public metadata of the prompt's attachments
 	// (ADR-0038); never bytes. Lowercase key, absent when none.
 	Attachments []attach.Item `json:"attachments,omitempty"`
@@ -1144,7 +1145,7 @@ func toChatQueueItemParams(items []store.ChatQueueItem) []chatQueueItemParams {
 			Source: item.Source, FromTaskID: item.FromTaskID, FromChatID: item.FromChatID,
 			Priority: item.Priority, Status: item.Status, RunID: item.RunID,
 			CancelReason: item.CancelReason, CancelKind: item.CancelKind,
-			CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+			CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, NotBefore: item.NotBefore,
 			Attachments: publicAttachments(item.Attachments),
 		}
 	}
