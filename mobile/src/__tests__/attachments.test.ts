@@ -22,6 +22,7 @@ import {
   requestBytes,
   runStartParams,
   timelineAttachmentView,
+  wireBytes,
 } from '../attachments';
 
 const base = { taskId: 7, provider: 'glm', prompt: 'hello', whenBusy: 'queue' };
@@ -126,7 +127,7 @@ describe('prepareFile', () => {
   it('oversized file is refused with message', async () => {
     // 3.2M base64 chars = 2.4 MB decoded.
     const r = await prepareFile({ uri: 'file:///r.pdf', name: 'report.pdf', mimeType: 'application/pdf', kind: 'file' }, { readBase64: async () => b64(3_200_000) }, ctx);
-    expect(r).toEqual({ ok: false, message: 'report.pdf is 2.4 MB; over the relay a prompt can carry about 780 KB' });
+    expect(r).toEqual({ ok: false, message: 'report.pdf is 2.4\u00a0MB; over the relay a prompt can carry about 780\u00a0KB' });
   });
 
   it('a small file is sent as is', async () => {
@@ -162,7 +163,7 @@ describe('send budget', () => {
     expect(checkSend(base, att)).toBeNull();
     const grown = { ...base, prompt: 'x'.repeat(60_000) };
     expect(checkSend(grown, att)).toBe(
-      'This prompt is too large to send: a.pdf (750 KB) is the largest attachment; over the relay a prompt can carry about 780 KB. Remove an attachment or shorten the prompt.',
+      'This prompt is too large to send: a.pdf (750\u00a0KB) is the largest attachment; over the relay a prompt can carry about 780\u00a0KB. Remove an attachment or shorten the prompt.',
     );
   });
 
@@ -172,12 +173,45 @@ describe('send budget', () => {
     expect(requestBytes(params)).toBeGreaterThan(JSON.stringify(params).length);
     // The request fits at exactly the limit and not one byte over.
     const att = pending('a.bin', 1_000_000);
-    const overhead = requestBytes(runStartParams({ ...base, prompt: '' }, [att]));
+    const overhead = wireBytes(runStartParams({ ...base, prompt: '' }, [att]));
     const room = RELAY_MAX_REQUEST_BYTES - overhead;
     expect(fits({ ...base, prompt: 'x'.repeat(room) }, [att])).toBe(true);
     expect(fits({ ...base, prompt: 'x'.repeat(room + 1) }, [att])).toBe(false);
     // Multi-byte characters count their bytes: 'é' is 2 bytes.
     expect(fits({ ...base, prompt: 'é'.repeat(Math.floor(room / 2) + 1) }, [att])).toBe(false);
+  });
+
+  it('envelope counts: params at the limit but envelope over is refused', async () => {
+    const att = pending('a.bin', 1_000_000);
+    const paramsOverhead = requestBytes(runStartParams({ ...base, prompt: '' }, [att]));
+    const atLimit = { ...base, prompt: 'x'.repeat(RELAY_MAX_REQUEST_BYTES - paramsOverhead) };
+    expect(requestBytes(runStartParams(atLimit, [att]))).toBe(RELAY_MAX_REQUEST_BYTES);
+    expect(fits(atLimit, [att])).toBe(false);
+    expect(checkSend(atLimit, [att])).not.toBeNull();
+    // One byte under with the envelope is accepted; one over is not.
+    const envelope = wireBytes({}) - requestBytes({});
+    const room = RELAY_MAX_REQUEST_BYTES - envelope - paramsOverhead;
+    expect(fits({ ...base, prompt: 'x'.repeat(room) }, [att])).toBe(true);
+    expect(checkSend({ ...base, prompt: 'x'.repeat(room - 1) }, [att])).toBeNull();
+    expect(fits({ ...base, prompt: 'x'.repeat(room + 1) }, [att])).toBe(false);
+  });
+
+  it('prepareImage steps down when only the envelope pushes it over', async () => {
+    const paramsOverhead = requestBytes(runStartParams(base, [pending('p.jpg', 0, 'image')]));
+    // Quality 0.8 yields params within 3 bytes of the limit (envelope over); 0.7 fits.
+    const len = Math.floor((RELAY_MAX_REQUEST_BYTES - paramsOverhead) / 4) * 4;
+    const slack = RELAY_MAX_REQUEST_BYTES - paramsOverhead - len;
+    expect(slack).toBeLessThan(4);
+    const m = {
+      calls: [] as number[],
+      manipulate: async (uri: string, o: { maxLongEdge: number; quality: number }) => {
+        m.calls.push(o.quality);
+        return { uri, width: 1568, height: 1000, base64: b64(o.quality === 0.8 ? len : 1000) };
+      },
+    };
+    const r = await prepareImage(png({ name: 'p.png', width: 9000, height: 9000 }), { manipulate: m.manipulate, readBase64: async () => '' }, ctx);
+    expect(r.ok).toBe(true);
+    expect(m.calls).toEqual([0.8, 0.7]);
   });
 
   it('runStartParams matches the api wire', () => {
@@ -189,10 +223,10 @@ describe('send budget', () => {
   });
 
   it('humanSize uses decimal units', () => {
-    expect(humanSize(512)).toBe('512 B');
-    expect(humanSize(780_000)).toBe('780 KB');
-    expect(humanSize(2_400_000)).toBe('2.4 MB');
-    expect(humanSize(999_999)).toBe('1.0 MB');
+    expect(humanSize(512)).toBe('512\u00a0B');
+    expect(humanSize(780_000)).toBe('780\u00a0KB');
+    expect(humanSize(2_400_000)).toBe('2.4\u00a0MB');
+    expect(humanSize(999_999)).toBe('1.0\u00a0MB');
   });
 });
 
@@ -249,8 +283,8 @@ describe('timeline', () => {
       { id: '4', kind: 'pr', number: 42, title: 'Fix' },
     ];
     expect(timelineAttachmentView(meta)).toEqual([
-      { id: '1', label: 'shot.jpg', sizeLabel: '2.4 MB', kind: 'image', thumbnail: false },
-      { id: '2', label: 'n.txt', sizeLabel: '512 B', kind: 'file', thumbnail: false },
+      { id: '1', label: 'shot.jpg', sizeLabel: '2.4\u00a0MB', kind: 'image', thumbnail: false },
+      { id: '2', label: 'n.txt', sizeLabel: '512\u00a0B', kind: 'file', thumbnail: false },
       { id: '3', label: 'src/a.go', sizeLabel: '', kind: 'file_ref', thumbnail: false },
       { id: '4', label: '#42', sizeLabel: '', kind: 'pr', thumbnail: false },
     ]);

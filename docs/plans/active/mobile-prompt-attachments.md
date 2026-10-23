@@ -18,7 +18,7 @@ If a daemon change turns out to be needed, stop and tell the Supervisor.
   image is re-encoded to JPEG through the same path. An image already <= 1568 px that fits and is png/jpeg/gif/webp is sent as is.
 - AC4. A non-image file is sent as is; if the request would not fit, it is refused inline naming file and limit
   ("report.pdf is 2.4 MB; over the relay a prompt can carry about 780 KB"). Nothing is silently dropped or truncated.
-- AC5. The size is checked BEFORE sending, on the exact JSON request (prompt + existing attachments + the new one), both when picking and again at Send.
+- AC5. The size is checked BEFORE sending, on the exact wire message, `{id, method, params}` as RelayConnection.request sends it (prompt + existing attachments + the new one), both when picking and again at Send.
 - AC6. At most 10 attachments; the 11th is refused with a message.
 - AC7. Daemon errors `{code,message,index}` (attachment_too_large, too_many_attachments, unsupported_image_type, mime_mismatch,
   invalid_base64, plus anything else) show as inline text under the composer; a failed send keeps the draft and the tray.
@@ -39,7 +39,7 @@ If a daemon change turns out to be needed, stop and tell the Supervisor.
 7. `size is rechecked at send` — an attachment that fit alone no longer fits after the draft text grows -> `checkSend` refuses.
 8. `daemon error code maps to inline text` — each typed code, with index -> attachment name.
 9. `older daemon without kinds hides affordance or limits it` — absent `kinds` = image+file; `kinds` without image/file = hidden.
-10. `request size is exact` — `requestBytes` equals the UTF-8 byte length of the JSON, including multi-byte prompt text.
+10. `request size is exact` — `requestBytes` equals the UTF-8 byte length of the JSON, including multi-byte prompt text; `fits` measures the whole `{id, method, params}` envelope (`wireBytes`), so params exactly at the limit are refused and the image ladder steps down.
 11. api: `startRunWhenBusy` and `startRun` send `attachments` only when non-empty (omitted otherwise); `fetchDaemonInfo` reads `attachments`; `fetchRunAttachment` wrapper.
 12. UI-free view helpers: timeline attachment view (name + human size; thumbnail decision `canThumbnail(size)`).
 
@@ -54,7 +54,7 @@ sent prompt's pills in the timeline; before/after adding and removing a pill.
 ## Decisions
 
 - Item 5: pills always; thumbnails when `run.attachment` fits (decided in the PR once built).
-- Relay budget uses the exact `JSON.stringify` UTF-8 length, not an estimate.
+- Relay budget uses the exact `JSON.stringify` UTF-8 length of the whole request envelope (worst-case 10-digit id), not an estimate and not just the params.
 
 ## Progress
 

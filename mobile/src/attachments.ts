@@ -1,6 +1,6 @@
 // attachments.ts is the UI-free half of ADR-0038's mobile prompt
-// attachments: the relay request budget (the exact JSON byte length, not an
-// estimate), the image downscale ladder, picker-result validation, daemon
+// attachments: the relay request budget (the exact byte length of the whole
+// {id, method, params} message RelayConnection.request sends, not an estimate), the image downscale ladder, picker-result validation, daemon
 // error wording and the timeline view helpers. Nothing here imports
 // react-native or expo: the image manipulator and the file reader are
 // injected, so the whole pipeline runs under vitest.
@@ -10,7 +10,8 @@ import type { AttachmentMeta, AttachmentPayload, AttachmentsInfo } from './api';
 /** One E2EE relay frame minus its envelope: the largest run.start request the connection carries (internal/wsapi/attachments.go). */
 export const RELAY_MAX_REQUEST_BYTES = 1048551;
 /** What that leaves for attachment bytes once base64 (4/3) and the JSON around it are paid for; used in user-facing sentences. */
-export const RELAY_PAYLOAD_HINT = '780 KB';
+/** Non-breaking spaces keep the number and its unit on one line in a wrapped sentence. */
+export const RELAY_PAYLOAD_HINT = '780\u00a0KB';
 export const MAX_LONG_EDGE = 1568;
 export const QUALITY_START = 0.8;
 export const QUALITY_STEP = 0.1;
@@ -99,8 +100,17 @@ export function runStartParams(base: RunStartBase, attachments: PendingAttachmen
   return params;
 }
 
+/**
+ * The bytes channel.send sees: RelayConnection.request wraps the params as
+ * JSON.stringify({id, method: 'run.start', params}). The id is a counter, so a
+ * 10-digit one is the worst case the envelope can add.
+ */
+export function wireBytes(params: object): number {
+  return requestBytes({ id: '9'.repeat(10), method: 'run.start', params });
+}
+
 export function fits(base: RunStartBase, attachments: PendingAttachment[]): boolean {
-  return requestBytes(runStartParams(base, attachments)) <= RELAY_MAX_REQUEST_BYTES;
+  return wireBytes(runStartParams(base, attachments)) <= RELAY_MAX_REQUEST_BYTES;
 }
 
 /** Re-check at Send: null when the request fits, else the sentence to show. */
@@ -121,12 +131,12 @@ export function capabilities(info?: AttachmentsInfo): { image: boolean; file: bo
   };
 }
 
-/** Decimal units: "512 B", "780 KB", "2.4 MB". */
+/** Decimal units: "512 B", "780 KB", "2.4 MB" (non-breaking space before the unit). */
 export function humanSize(bytes: number): string {
-  if (bytes < 1000) return `${bytes} B`;
+  if (bytes < 1000) return `${bytes}\u00a0B`;
   const kb = Math.round(bytes / 1000);
-  if (kb < 1000) return `${kb} KB`;
-  return `${(bytes / 1_000_000).toFixed(1)} MB`;
+  if (kb < 1000) return `${kb}\u00a0KB`;
+  return `${(bytes / 1_000_000).toFixed(1)}\u00a0MB`;
 }
 
 /** Decoded byte length of a base64 string. */

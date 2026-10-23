@@ -111,7 +111,7 @@ async function attachmentsFlow(page, harness) {
   const notice = page.getByText(/report\.bin/);
   if (await expectVisible(page, notice, 'no inline refusal for the over-limit file')) {
     const text = (await notice.first().innerText()).trim();
-    if (!text.includes('report.bin') || !text.includes('780 KB')) lib.fail(`the refusal must name the file and 780 KB, got: ${JSON.stringify(text)}`);
+    if (!text.includes('report.bin') || !text.includes('780\u00a0KB')) lib.fail(`the refusal must name the file and 780 KB (nbsp), got: ${JSON.stringify(text)}`);
   }
   if (await removeButton(page, 'report.bin').isVisible().catch(() => false)) lib.fail('the over-limit file was added to the tray');
   await lib.shootBothSchemes(page, 'attach-refusal-over-limit');

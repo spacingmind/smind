@@ -8,8 +8,8 @@ describe('attachmentTray', () => {
   it('tray pills show name and size', () => {
     const pills = trayPills([base, { ...base, id: 'b', kind: 'image', name: 'p.jpg', size: 512, uri: 'blob:x' }]);
     expect(pills).toEqual([
-      { id: 'a', label: 'notes.txt', sizeLabel: '2 KB', kind: 'file' },
-      { id: 'b', label: 'p.jpg', sizeLabel: '512 B', kind: 'image', thumbUri: 'blob:x' },
+      { id: 'a', label: 'notes.txt', sizeLabel: '2\u00a0KB', kind: 'file' },
+      { id: 'b', label: 'p.jpg', sizeLabel: '512\u00a0B', kind: 'image', thumbUri: 'blob:x' },
     ]);
   });
 
