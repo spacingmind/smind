@@ -7,7 +7,7 @@ import { formatRelativeTime } from "@/lib/relative-time";
 import type { Task } from "@/lib/types";
 
 /** The sentence a Restore that can't succeed shows; the daemon's `branch_gone` text is the same one. */
-export const BRANCH_GONE_SENTENCE = "The branch no longer exists, so there is nothing to restore. It was deleted after it was merged.";
+export const BRANCH_GONE_SENTENCE = "The branch no longer exists, so there is nothing to restore.";
 
 /** One archived task: title, when and whether the branch survived, and Restore (disabled, with the reason, when the branch is gone). */
 function ArchivedTaskRow({ task }: { task: Task }) {
@@ -21,10 +21,6 @@ function ArchivedTaskRow({ task }: { task: Task }) {
         <div className="min-w-0 flex-1">
           <p className="truncate text-ui-sm text-foreground" data-testid="archived-task-title">
             {task.Title}
-          </p>
-          <p className="truncate text-ui-caption text-foreground-subtle" data-testid="archived-task-meta">
-            {task.ArchivedAt ? `${formatRelativeTime(task.ArchivedAt)} · ` : ""}
-            {gone ? "branch deleted" : "branch kept"}
           </p>
         </div>
         <Button
@@ -40,6 +36,11 @@ function ArchivedTaskRow({ task }: { task: Task }) {
           {restore.isPending ? "Restoring…" : "Restore"}
         </Button>
       </div>
+      {/* Its own full-width line: beside the Restore button it was truncated to "branch del…" in the narrow sidebar. */}
+      <p className="truncate text-ui-caption text-foreground-subtle" data-testid="archived-task-meta">
+        {task.ArchivedAt ? `${formatRelativeTime(task.ArchivedAt)} · ` : ""}
+        {gone ? "branch deleted" : "branch kept"}
+      </p>
       {gone && (
         <p id={reasonId} className="sr-only" data-testid="archived-task-reason">
           {BRANCH_GONE_SENTENCE}

@@ -42,7 +42,7 @@ const FALLBACK: Record<string, string> = {
   branch_dirty: "The worktree has uncommitted changes, so smind won't delete the branch.",
   branch_not_owned: "smind didn't create this branch, so it never deletes it.",
   branch_checked_out: "The branch is checked out in another worktree, so it can't be deleted.",
-  branch_gone: "The branch no longer exists, so there is nothing to restore. It was deleted after it was merged.",
+  branch_gone: "The branch no longer exists, so there is nothing to restore.",
   not_archived: "This task isn't archived.",
 };
 
