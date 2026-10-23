@@ -11,7 +11,7 @@ import (
 	"github.com/spacingmind/smind/internal/store"
 )
 
-const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept] [--thinking-level=<level>] [--model=<model>] [--on-rate-limit=<none|wait|fallback>] [--fallback-profile=<id>] [--notes=<text>]"
+const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept] [--thinking-level=<level>] [--model=<model>] [--on-rate-limit=<none|wait|fallback>] [--fallback-profile=<id>] [--notes=<text>] [--orchestration-tools=true|false] [--instructions=<text>] [--instructions-file=<path>] [--skills=a,b] [--child-policy=none|leaf|profiles] [--child-profiles=1,2]"
 
 func cmdProfile(args []string) int {
 	if len(args) == 0 {
@@ -46,6 +46,9 @@ func cmdProfileAdd(args []string) int {
 
 	var mode, thinkingLevel, model, notes, onRateLimit string
 	var fallbackProfile *int64
+	var orchTools *bool
+	var instructions, instructionsFile, skillsList, childPolicy, childProfiles string
+	var instructionsSet, instructionsFileSet bool
 	var autoAccept bool
 	rest := args[2:]
 	for i := 0; i < len(rest); i++ {
@@ -99,10 +102,49 @@ func cmdProfileAdd(args []string) int {
 			}
 		case "--notes":
 			notes = value
+		case "--orchestration-tools":
+			b, err := strconv.ParseBool(value)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "profile add: --orchestration-tools: %q is not a boolean\n", value)
+				return 2
+			}
+			orchTools = &b
+		case "--instructions":
+			instructions, instructionsSet = value, true
+		case "--instructions-file":
+			instructionsFile, instructionsFileSet = value, true
+		case "--skills":
+			skillsList = value
+		case "--child-policy":
+			childPolicy = value
+		case "--child-profiles":
+			childProfiles = value
 		default:
 			fmt.Fprintf(os.Stderr, "profile add: unknown flag %q\n", flag)
 			return 2
 		}
+	}
+
+	if instructionsSet && instructionsFileSet {
+		fmt.Fprintln(os.Stderr, "profile add: --instructions and --instructions-file are mutually exclusive")
+		return 2
+	}
+	if instructionsFileSet {
+		b, err := os.ReadFile(instructionsFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "profile add: --instructions-file: %v\n", err)
+			return 1
+		}
+		instructions = string(b)
+	}
+	var childIDs []int64
+	for _, part := range splitCSV(childProfiles) {
+		id, err := parseInt64(part)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "profile add: --child-profiles: invalid id %q: %v\n", part, err)
+			return 2
+		}
+		childIDs = append(childIDs, id)
 	}
 
 	client, err := dialDaemon(context.Background())
@@ -121,6 +163,21 @@ func cmdProfileAdd(args []string) int {
 	}
 	if fallbackProfile != nil {
 		params["fallbackProfileId"] = *fallbackProfile
+	}
+	if orchTools != nil {
+		params["orchestrationTools"] = *orchTools
+	}
+	if instructions != "" {
+		params["instructions"] = instructions
+	}
+	if skills := splitCSV(skillsList); len(skills) > 0 {
+		params["skills"] = skills
+	}
+	if childPolicy != "" {
+		params["childPolicy"] = childPolicy
+	}
+	if len(childIDs) > 0 {
+		params["childProfileIds"] = childIDs
 	}
 	var p store.AgentProfile
 	err = client.Call(context.Background(), "profile.create", params, &p)
@@ -152,9 +209,9 @@ func cmdProfileList(args []string) int {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tPROVIDER\tMODE\tTHINKING\tMODEL\tON-RATE-LIMIT")
+	fmt.Fprintln(tw, "ID\tNAME\tPROVIDER\tMODE\tTHINKING\tMODEL\tON-RATE-LIMIT\tROLE")
 	for _, p := range profiles {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, profileModeColumn(p), p.ThinkingLevel, p.Model, profileRateLimitColumn(p))
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, profileModeColumn(p), p.ThinkingLevel, p.Model, profileRateLimitColumn(p), profileRole(p))
 	}
 	tw.Flush()
 	return 0
@@ -185,6 +242,36 @@ func profileRateLimitColumn(p store.AgentProfile) string {
 		}
 	}
 	return p.OnRateLimit
+}
+
+// profileRole derives the display label for a profile's seat (ADR-0041): a
+// label only, never stored. "-" is an unmanaged (legacy) profile.
+func profileRole(p store.AgentProfile) string {
+	if p.OrchestrationTools == nil {
+		return "-"
+	}
+	if !*p.OrchestrationTools {
+		return "peer"
+	}
+	switch p.ChildPolicy {
+	case "leaf":
+		return "lead"
+	case "profiles":
+		return "supervisor"
+	default:
+		return "orchestrator"
+	}
+}
+
+// splitCSV splits a comma-separated flag value, trimming blanks.
+func splitCSV(v string) []string {
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func cmdProfileRemove(args []string) int {
