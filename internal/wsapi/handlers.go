@@ -3,6 +3,7 @@ package wsapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"github.com/spacingmind/smind/internal/acp"
 	"github.com/spacingmind/smind/internal/attach"
 	"github.com/spacingmind/smind/internal/codex"
+	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
@@ -48,6 +50,8 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.list":                handleTaskList(wm),
 		"task.get":                 handleTaskGet(wm),
 		"task.archive":             handleTaskArchive(wm, reg),
+		"task.archivePreview":      handleTaskArchivePreview(wm),
+		"task.restore":             handleTaskRestore(wm),
 		"task.tree":                handleTaskTree(db, reg),
 		"task.archiveFinished":     handleTaskArchiveFinished(wm, db, reg),
 		"task.stopTree":            handleTaskStopTree(db, reg),
@@ -629,9 +633,28 @@ func handleTaskList(wm *workspace.Manager) handlerFunc {
 		var p struct {
 			WorkspaceID  int64  `json:"workspaceId"`
 			ParentTaskID *int64 `json:"parentTaskId"`
+			Archived     bool   `json:"archived"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.list: invalid params: %w", err)
+		}
+		if p.Archived {
+			// The Archived view (ADR-0039 section 9): archived tasks only,
+			// newest archive first, narrowed to one parent's children on request.
+			tasks, err := wm.ListArchivedTasks(p.WorkspaceID)
+			if err != nil {
+				return nil, fmt.Errorf("task.list: %w", err)
+			}
+			if p.ParentTaskID != nil {
+				kept := tasks[:0]
+				for _, t := range tasks {
+					if t.ParentTaskID != nil && *t.ParentTaskID == *p.ParentTaskID {
+						kept = append(kept, t)
+					}
+				}
+				tasks = kept
+			}
+			return tasks, nil
 		}
 		var opts []workspace.ListTasksOption
 		if p.ParentTaskID != nil {
@@ -678,13 +701,31 @@ func handleTaskMove(wm *workspace.Manager) handlerFunc {
 // daemon layer that holds both the workspace manager and the runs
 // registry, so the web UI gets it too. Past the guard, ArchiveTask's
 // checkpoint-first ordering is unchanged.
+//
+// The task is {id} (the original shape, still what task_archive sends) or
+// {taskId}. {deleteBranch, force} is the single-task dialog's explicit
+// choice (ADR-0039 section 9): the daemon decides eligibility itself and a
+// refusal is a typed error with nothing archived. It is refused to
+// run-scoped (agent) callers, so agents and bulk actions never delete a
+// branch; without deleteBranch this is the plain archive.
 func handleTaskArchive(wm *workspace.Manager, reg *runs.Registry) handlerFunc {
-	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+	return func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
-			ID int64 `json:"id"`
+			ID           int64 `json:"id"`
+			TaskID       int64 `json:"taskId"`
+			DeleteBranch bool  `json:"deleteBranch"`
+			Force        bool  `json:"force"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.archive: invalid params: %w", err)
+		}
+		if p.ID == 0 {
+			p.ID = p.TaskID
+		}
+		if p.DeleteBranch {
+			if err := refuseRunScoped("task.archive with deleteBranch", rc); err != nil {
+				return nil, err
+			}
 		}
 		release, err := reg.TryBeginArchive(p.ID)
 		if err != nil {
@@ -694,9 +735,66 @@ func handleTaskArchive(wm *workspace.Manager, reg *runs.Registry) handlerFunc {
 			return nil, fmt.Errorf("task.archive: task %d: %w", p.ID, err)
 		}
 		defer release()
-		t, err := wm.ArchiveTask(p.ID)
+		t, err := wm.ArchiveTaskWith(p.ID, workspace.ArchiveOptions{DeleteBranch: p.DeleteBranch, Force: p.Force})
 		if err != nil {
+			var pe *forge.PRError
+			if errors.As(err, &pe) {
+				return nil, pe // the typed refusal's own sentence, not a prefixed one
+			}
 			return nil, fmt.Errorf("task.archive: %w", err)
+		}
+		return t, nil
+	}
+}
+
+// handleTaskArchivePreview is task.archivePreview: what archiving the task
+// puts at risk and whether its branch could be deleted. Local git and cached
+// state only; it fetches nothing and calls no forge.
+func handleTaskArchivePreview(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ID     int64 `json:"id"`
+			TaskID int64 `json:"taskId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.archivePreview: invalid params: %w", err)
+		}
+		if p.ID == 0 {
+			p.ID = p.TaskID
+		}
+		res, err := wm.ArchivePreview(p.ID)
+		if err != nil {
+			return nil, fmt.Errorf("task.archivePreview: %w", err)
+		}
+		return res, nil
+	}
+}
+
+// handleTaskRestore is task.restore: bring an archived task back from its kept
+// branch (ADR-0039 section 9). It re-runs the workspace setup script, so like
+// task.retrySetup it is the user's call, not an agent's.
+func handleTaskRestore(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+		if err := refuseRunScoped("task.restore", rc); err != nil {
+			return nil, err
+		}
+		var p struct {
+			ID     int64 `json:"id"`
+			TaskID int64 `json:"taskId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.restore: invalid params: %w", err)
+		}
+		if p.ID == 0 {
+			p.ID = p.TaskID
+		}
+		t, err := wm.RestoreTask(p.ID)
+		if err != nil {
+			var pe *forge.PRError
+			if errors.As(err, &pe) {
+				return nil, pe
+			}
+			return nil, fmt.Errorf("task.restore: %w", err)
 		}
 		return t, nil
 	}

@@ -634,3 +634,31 @@ func TestRestore_WorktreeAddFailureLeavesNoDirectory(t *testing.T) {
 		t.Fatalf("task = %+v, want still archived", after)
 	}
 }
+
+func TestRestore_ConcurrentCallsKeepTheWorktree(t *testing.T) {
+	t.Parallel()
+	e := newArchiveEnv(t)
+	task := e.task(t, "restore race")
+	if _, err := e.m.ArchiveTask(task.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	const n = 4
+	errs := make(chan error, n)
+	for range n {
+		go func() { _, err := e.m.RestoreTask(task.ID); errs <- err }()
+	}
+	won := 0
+	for range n {
+		if err := <-errs; err == nil {
+			won++
+		}
+	}
+	if won != 1 {
+		t.Fatalf("%d concurrent Restores succeeded, want exactly 1", won)
+	}
+	after := getTask(t, e.m, task.ID)
+	if after.ArchivedAt != nil || !dirExists(*after.WorktreePath) {
+		t.Fatalf("task = %+v, want active with its worktree on disk", after)
+	}
+}

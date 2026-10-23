@@ -69,6 +69,7 @@ type Manager struct {
 	gitFacts      func(taskID int64) (gitstate.TaskGit, error)
 	fetchBaseFn   func(dir, base string)
 	worktreeAddFn func(repoPath, worktreePath, branch string, trackOrigin bool) error
+	restoring     map[int64]bool
 
 	setupMu       sync.Mutex
 	setupRuns     map[int64]*setupRun

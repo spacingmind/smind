@@ -440,6 +440,30 @@ func (m *Manager) RestoreTask(id int64) (store.Task, error) {
 	if t.Branch == nil || *t.Branch == "" {
 		return store.Task{}, fmt.Errorf("restore task %d: task has no branch", id)
 	}
+	// One Restore per task at a time: a loser's cleanup must never remove the
+	// worktree the winner just created at the same path.
+	m.archiveMu.Lock()
+	if m.restoring[id] {
+		m.archiveMu.Unlock()
+		return store.Task{}, fmt.Errorf("restore task %d: it is already being restored", id)
+	}
+	if m.restoring == nil {
+		m.restoring = map[int64]bool{}
+	}
+	m.restoring[id] = true
+	m.archiveMu.Unlock()
+	defer func() {
+		m.archiveMu.Lock()
+		delete(m.restoring, id)
+		m.archiveMu.Unlock()
+	}()
+	// Re-read under the guard: a Restore that just finished already cleared it.
+	if t, err = m.store.GetTask(id); err != nil {
+		return store.Task{}, fmt.Errorf("restore task: %w", err)
+	}
+	if t.ArchivedAt == nil {
+		return store.Task{}, forge.NewPRError(forge.CodeNotArchived, "")
+	}
 	branch := *t.Branch
 	ws, err := m.store.GetWorkspace(t.WorkspaceID)
 	if err != nil {
