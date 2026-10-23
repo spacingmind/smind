@@ -36,7 +36,7 @@ func TestRunProfile_RecordedOnImmediateStart(t *testing.T) {
 		t.Fatalf("run.ProfileID = %d, want %d", row.ProfileID, pid)
 	}
 
-	plain, err := e.reg.StartWhenBusy(context.Background(), e.wm, e.runner, e.task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "", WhenBusyReject, store.ChatQueueSourceHuman, 0, 0)
+	plain, err := e.reg.StartWhenBusy(context.Background(), e.wm, e.runner, e.task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "", WhenBusyReject, store.ChatQueueSourceHuman, 0, 0, WithProfile(0)) // explicit none: an omitted profile would inherit (sticky seats)
 	if err != nil {
 		t.Fatalf("StartWhenBusy(plain) error = %v", err)
 	}

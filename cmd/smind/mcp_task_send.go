@@ -43,7 +43,7 @@ type taskSendInput struct {
 	PermissionMode string `json:"permissionMode,omitempty" jsonschema:"one of the provider's own permission mode ids (see provider.list); may not name an auto-approving mode"`
 	AutoAccept     bool   `json:"autoAccept,omitempty" jsonschema:"approve every permission prompt without asking a human (ACP providers only); may not be set by an orchestrating agent"`
 	Model          string `json:"model,omitempty" jsonschema:"optional model id for the run: any id from the chosen provider's catalog (see provider_list models; claude-native also takes any syntax-valid id such as sonnet or claude-opus-5-5). Omit for the provider default; overrides the profile's model"`
-	ProfileID      *int64 `json:"profileId,omitempty" jsonschema:"optional id of a human-authored agent profile supplying the provider and permission settings"`
+	ProfileID      *int64 `json:"profileId,omitempty" jsonschema:"optional id of a human-authored agent profile supplying the provider and permission settings; omit to continue the chat's last profile (a seat stays a seat); 0 = no profile"`
 	NotifyOnFinish *bool  `json:"notifyOnFinish,omitempty" jsonschema:"set false for a fire-and-forget child: the daemon will not wake you when it finishes; default true"`
 	WhenBusy       string `json:"whenBusy,omitempty" jsonschema:"what to do when the chat already has a running run: reject (error), queue (append, delivered at the next turn boundary -- the default), or interrupt (stop the running run and deliver first)"`
 	FromTaskID     *int64 `json:"fromTaskId,omitempty" jsonschema:"optional: your own task id, for the [message from task #T, chat #C] provenance header on the delivered prompt"`
@@ -102,7 +102,8 @@ func mcpTaskSend(client *wsclient.Client) mcp.ToolHandlerFor[taskSendInput, task
 		// its provider/mode/autoAccept were chosen by a human. Explicit
 		// caller values alongside it are never trusted -- reject rather
 		// than merge.
-		if in.ProfileID != nil {
+		namedProfile := in.ProfileID != nil && *in.ProfileID != 0
+		if namedProfile {
 			if explicitMode || explicitAutoAccept {
 				return nil, taskSendOutput{}, fmt.Errorf("task_send: permissionMode/autoAccept cannot be combined with profileId -- explicit caller values are never trusted (ADR-0019)")
 			}
@@ -142,7 +143,7 @@ func mcpTaskSend(client *wsclient.Client) mcp.ToolHandlerFor[taskSendInput, task
 
 		// The guard itself, only over caller-supplied settings -- a
 		// profile's auto-approving configuration was human-approved.
-		if in.ProfileID == nil {
+		if !namedProfile {
 			catalog, err := providerCatalogFor(ctx, client, provider)
 			if err != nil {
 				return nil, taskSendOutput{}, err
@@ -178,7 +179,7 @@ func mcpTaskSend(client *wsclient.Client) mcp.ToolHandlerFor[taskSendInput, task
 		// task #T, chat #C] header is still not shown for profile sends.
 		// The sender ids do ride along (below) so the daemon can notify
 		// the parent chat when the child finishes (ADR-0041 B3).
-		if in.ProfileID != nil {
+		if namedProfile {
 			source = "human"
 		}
 		params := map[string]any{
