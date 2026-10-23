@@ -14,7 +14,7 @@ var (
 	mcpForbiddenDescription = regexp.MustCompile(`(?i)\b(creates?|opens?|merges?|merging|pushe?s?|pushing)\b[^.]{0,40}\b(pull[ -]?requests?|prs?)\b|\bmerges?\b|\bmerging\b|\bpush(es|ing)?\b|\bgit push\b`)
 )
 
-// TestMCPHasNoPRTools pins ADR-0039 D5: no MCP tool can create or merge a
+// TestMCPHasNoPRTools pins plan decision D5 (orchestration D9): no MCP tool can create or merge a
 // pull request or push; those stay human-approved agent operations.
 func TestMCPHasNoPRTools(t *testing.T) {
 	env := newMCPSession(t)
