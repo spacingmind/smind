@@ -111,6 +111,12 @@ var RoleSeats = []RoleSeat{
 // A failure partway returns the results so far together with the error; what
 // was created stays, and re-running completes the pack.
 func SeedRoles(reg *Registry, existing []store.AgentProfile) ([]SeedResult, error) {
+	return SeedRolesWith(reg.Create, existing)
+}
+
+// SeedRolesWith is SeedRoles over any create function, so the CLI can seed
+// through the profile.create RPC (which runs the same Registry.Create).
+func SeedRolesWith(create func(store.AgentProfile) (store.AgentProfile, error), existing []store.AgentProfile) ([]SeedResult, error) {
 	ids := make(map[string]int64, len(RoleSeats))
 	byName := make(map[string]int64, len(existing))
 	for _, p := range existing {
@@ -125,7 +131,7 @@ func SeedRoles(reg *Registry, existing []store.AgentProfile) ([]SeedResult, erro
 			out = append(out, SeedResult{Name: seat.Name, ID: id, Action: SeedKept})
 			continue
 		}
-		created, err := reg.Create(seat.Build(ids))
+		created, err := create(seat.Build(ids))
 		if err != nil {
 			return out, fmt.Errorf("create %s: %w", seat.Name, err)
 		}
