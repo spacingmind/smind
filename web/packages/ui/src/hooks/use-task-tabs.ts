@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 
 import { chatTab, chatTabKey, isLegacyTaskTab, type TabEntry, type TabKind } from "@/components/tab-registry";
+import { prTabTaskId, writePRTabState } from "@/lib/pr-tab-state";
 import { readStored, STORAGE_KEYS, writeStored } from "@/lib/storage";
 import type { Chat } from "@/lib/types";
 import {
@@ -47,6 +48,14 @@ const MOVABLE_KINDS: readonly TabKind[] = ["file", "diff", "terminal"];
 
 export function isMovableKind(kind: TabKind): boolean {
   return (MOVABLE_KINDS as readonly string[]).includes(kind);
+}
+
+/** Closing a task's PR tab opts the task out of auto-opening it again (G9). Idempotent, so safe inside a state updater. */
+function recordClosedTabs(keys: readonly string[]): void {
+  for (const key of keys) {
+    const taskId = prTabTaskId(key);
+    if (taskId !== null) writePRTabState(taskId, "opted-out");
+  }
 }
 
 /** Maps smind's own up/down `SplitDirection` naming to the tree's top/bottom vocabulary (`splitPaneInLayout`'s `position`). */
@@ -266,10 +275,12 @@ export function useTaskTabs() {
    * lands in the default pane; `"side"`/`"prefer"` land in an existing
    * non-default pane if one exists, else `"prefer"` falls back to the
    * default pane (never creates a split implicitly) while `"side"`
-   * explicitly creates one.
+   * explicitly creates one. `background` adds the tab without activating it
+   * or moving the focused pane (the PR tab's auto-open must not take focus
+   * from the chat the user is in).
    */
   const openTab = useCallback(
-    (taskId: number, entry: TabEntry, placement: TabPlacement = "primary"): void => {
+    (taskId: number, entry: TabEntry, placement: TabPlacement = "primary", options?: { background?: boolean }): void => {
       setTabsByTask((prev) => {
         // The empty-layout fallback only applies when the task has *no*
         // entry at all (never selected, or selected before its chats
@@ -314,10 +325,14 @@ export function useTaskTabs() {
 
         const nextRoot = updatePaneInTree(targetLayout.root, {
           paneId: targetPaneId,
-          updater: (pane) => ({ ...pane, tabs: [...pane.tabs, entry], activeKey: entry.key }),
+          updater: (pane) => ({
+            ...pane,
+            tabs: [...pane.tabs, entry],
+            activeKey: options?.background && pane.activeKey !== null ? pane.activeKey : entry.key,
+          }),
         });
         const next = new Map(prev);
-        next.set(taskId, { root: nextRoot, focusedPaneId: targetPaneId });
+        next.set(taskId, { root: nextRoot, focusedPaneId: options?.background ? targetLayout.focusedPaneId : targetPaneId });
         return next;
       });
     },
@@ -336,6 +351,7 @@ export function useTaskTabs() {
         if (!layout) return prev;
         const pane = findPaneContainingTab(layout.root, key);
         if (!pane) return prev;
+        recordClosedTabs([key]);
         const isSolePane = collectAllPanes(layout.root).length === 1;
         const { root } = detachTabFromTree(layout.root, {
           tabKey: key,
@@ -354,6 +370,7 @@ export function useTaskTabs() {
 
   /** Closes every one of `keys` in turn, recomputing the sole-pane/preserve-empty guard fresh before each -- the same rule `closeTab` applies to a single key. */
   function closeManyFromLayout(layout: TaskLayout, keys: readonly string[]): TaskLayout {
+    recordClosedTabs(keys);
     let root = layout.root;
     for (const key of keys) {
       const pane = findPaneContainingTab(root, key);
@@ -544,6 +561,7 @@ export function useTaskTabs() {
         if (!layout || !canDismissPaneInLayout(layout, paneId)) return prev;
         const closed = closePaneInLayout({ layout, paneId });
         if (!closed) return prev;
+        recordClosedTabs((findPaneById(layout.root, paneId)?.tabs ?? []).map((t) => t.key));
         const next = new Map(prev);
         next.set(taskId, closed);
         return next;

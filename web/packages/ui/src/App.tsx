@@ -28,6 +28,9 @@ import { AppHeader } from "@/components/app-header";
 import { UpdateBadge } from "@/components/update-badge";
 import { useAppUpdate } from "@/lib/app-update";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
+import { useAutoOpenPRTab } from "@/hooks/use-auto-open-pr-tab";
+import { useTaskGit } from "@/hooks/use-task-git";
+import { PRPanelPane } from "@/components/pr-panel/pr-panel-pane";
 import { TerminalPane } from "@/components/terminal-pane";
 import { QuickOpen } from "@/components/quick-open";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -47,6 +50,7 @@ import {
   chatTab,
   chatTabKey,
   defaultTabsForTask,
+  prTab,
   fileTab,
   filePathFromTabKey,
   NewTabButton,
@@ -663,6 +667,14 @@ function AppShell({
   );
 
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
+  // G9: a task with a PR gets its PR tab once, in the background (never again after a close).
+  const selectedGit = useTaskGit(selectedTask?.ID ?? null);
+  useAutoOpenPRTab({
+    taskId: selectedTask?.ID ?? null,
+    prNumber: selectedGit?.pr?.number ?? null,
+    tabs: taskState ? collectAllTabs(taskState.root) : null,
+    openTab,
+  });
   const focusedPane = taskState ? findPaneById(taskState.root, taskState.focusedPaneId) : null;
   const paneCount = taskState ? collectAllPanes(taskState.root).length : 0;
   // Which of the selected task's chats already have a tab open, anywhere
@@ -748,6 +760,8 @@ function AppShell({
         const wantedChatId = pendingRoute.tab.chatId;
         const targetChat = chats.find((c) => c.ID === wantedChatId);
         if (targetChat) openTab(match.ID, chatTab(match.ID, targetChat));
+      } else if (pendingRoute.tab.kind === "pr") {
+        openTab(match.ID, prTab(match.ID));
       } else {
         // Not just activate(): a deep link to e.g. .../diff must be able
         // to open that tab, not just activate an entry that may not exist
@@ -1438,6 +1452,7 @@ function ShellCommands({
   onOpenChat: (chatId: number) => void;
 }) {
   const { preference, setPreference } = useTheme();
+  const pr = useTaskGit(selectedTask?.ID ?? null)?.pr;
 
   const taskCommands = useMemo<Command[]>(
     () =>
@@ -1482,6 +1497,8 @@ function ShellCommands({
     // Terminal" should work after the tab was closed, which is the case a
     // list built from `tabs` alone would miss.
     const base = defaultTabsForTask(selectedTask.ID);
+    // The PR tab only exists for a task that has a PR.
+    if (pr) base.push(prTab(selectedTask.ID, pr.number));
     const open = new Map((tabs ?? []).map((t) => [t.key, t]));
     return base.map((entry) => ({
       id: `tab-${entry.kind}`,
@@ -1494,7 +1511,7 @@ function ShellCommands({
         else onOpenTab(selectedTask.ID, entry, "prefer");
       },
     }));
-  }, [selectedTask, tabs, onOpenTab, onActivateTab]);
+  }, [selectedTask, tabs, pr, onOpenTab, onActivateTab]);
   useCommands("shell:tabs", 2, tabCommands);
 
   const chatCommands = useMemo<Command[]>(() => {
@@ -2389,6 +2406,7 @@ function TabContent({
     ),
     file: <FileEditorPane client={client} task={task} path={filePathFromTabKey(entry.key)} events={events} />,
     diff: <DiffViewerPane client={client} task={task} events={events} chats={chats} />,
+    pr: <PRPanelPane task={task} active={active} />,
     terminal: (
       <TerminalPane
         client={client}

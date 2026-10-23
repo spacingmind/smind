@@ -23,7 +23,7 @@ import type { Chat } from "@/lib/types";
  *
  * Keys are globally unique *and* task-scoped (docs/decisions/0004-per-task-editor-tabs.md):
  * `${taskId}:chat:${chatId}`, `${taskId}:files`, `${taskId}:diff`,
- * `${taskId}:terminal`, `${taskId}:file:${path}` -- so the same file path
+ * `${taskId}:terminal`, `${taskId}:pr`, `${taskId}:file:${path}` -- so the same file path
  * open in two tasks' tabs never collides, and per-task tab sets fall out
  * of the key structure naturally.
  *
@@ -32,10 +32,10 @@ import type { Chat } from "@/lib/types";
  * number of these open at once, unlike files/diff/terminal has-at-most-one
  * bare `BASE_TAB_KINDS` entry.
  */
-export type TabKind = "chat" | "files" | "file" | "diff" | "terminal";
+export type TabKind = "chat" | "files" | "file" | "diff" | "terminal" | "pr";
 
 /** The non-file, non-chat kinds: the ones a task's strip is seeded with (Files/Diff/Terminal) and the empty state / "+" menu's base section can (re)open on demand. Chat tabs are opened via `chatTab`/the "+" menu's own chat section instead -- there can be any number of them, so they don't fit a single fixed-kind slot. */
-export type BaseTabKind = Exclude<TabKind, "file" | "chat">;
+export type BaseTabKind = Exclude<TabKind, "file" | "chat" | "pr">;
 
 export const BASE_TAB_KINDS: readonly BaseTabKind[] = ["files", "diff", "terminal"];
 
@@ -74,12 +74,23 @@ export const TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
   diff: { closable: true, defaultTitle: "Diff", icon: Icons.diff },
   terminal: { closable: true, defaultTitle: "Terminal", icon: Icons.terminal },
   file: { closable: true, defaultTitle: "File", icon: Icons.file },
+  pr: { closable: true, defaultTitle: "Pull request", icon: Icons.pullRequest },
 };
 
 /** The tab entry for one base kind -- the one constructor behind both the seed set and every "reopen Files/Diff/Terminal" affordance. */
 export function baseTabForKind(taskId: number, kind: BaseTabKind): TabEntry {
   const descriptor = TAB_KINDS[kind];
   return { kind, key: `${taskId}:${kind}`, taskId, title: descriptor.defaultTitle, closable: descriptor.closable };
+}
+
+/** The tab key of a task's pull request tab (G9): at most one per task, opened by auto-open or by the "+" menu only when the task has a PR. */
+export function prTabKey(taskId: number): string {
+  return `${taskId}:pr`;
+}
+
+/** The task's PR tab; `number` (when known) titles it "PR #7", else "Pull request". */
+export function prTab(taskId: number, number?: number): TabEntry {
+  return { kind: "pr", key: prTabKey(taskId), taskId, title: number ? `PR #${number}` : TAB_KINDS.pr.defaultTitle, closable: TAB_KINDS.pr.closable };
 }
 
 /** The base tabs a task's strip can reopen on demand (ADR 0004's per-task tab set minus Chat, which ADR-0016 replaced with per-chat tabs -- see `chatTab`), in strip order. */

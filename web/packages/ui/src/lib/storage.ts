@@ -25,6 +25,8 @@ export const STORAGE_KEYS = {
   theme: "smind:theme",
   shortcutOverrides: "smind:shortcut-overrides",
   taskTabs: "smind:task-tabs",
+  /** Per task, whether its PR tab was auto-opened or closed by the user (G9); see lib/pr-tab-state.ts. */
+  prTabState: "smind:pr-tab-state",
   sidePaneWidth: "smind:side-pane-width",
   pinnedTasks: "smind:pinned-tasks",
   unreadTasks: "smind:unread-tasks",

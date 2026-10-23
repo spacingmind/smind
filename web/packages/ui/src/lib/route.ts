@@ -21,7 +21,7 @@ export interface Route {
   tab: { kind: Exclude<TabKind, "file" | "chat"> } | { kind: "file"; path: string } | { kind: "chat"; chatId: number };
 }
 
-const BASE_KINDS: readonly Exclude<TabKind, "file" | "chat">[] = ["files", "diff", "terminal"];
+const BASE_KINDS: readonly Exclude<TabKind, "file" | "chat">[] = ["files", "diff", "terminal", "pr"];
 
 function isBaseKind(value: string): value is Exclude<TabKind, "file" | "chat"> {
   return (BASE_KINDS as readonly string[]).includes(value);
