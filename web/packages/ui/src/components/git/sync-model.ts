@@ -50,9 +50,9 @@ export function nextStep(mode: SyncMode, card: SyncCard, rebase: boolean): strin
     return card.ahead ? `Push ${plural(card.ahead, "commit")} to origin/${card.branch}.` : `Push ${card.branch} to origin.`;
   }
   const target = card.remote || "the base";
-  const verb = rebase ? "Rebase this branch onto" : "Merge";
   if (card.behind === 0) return `Already up to date with ${card.base || "the base"}.`;
-  return card.behind ? `${verb} ${plural(card.behind, "commit")} from ${target}${rebase ? "" : " into this branch"}.` : `${verb} ${target}${rebase ? "" : " into this branch"}.`;
+  const count = card.behind ? ` (${plural(card.behind, "new commit")})` : "";
+  return rebase ? `Rebase this branch onto ${target}${count}.` : `Merge ${card.behind ? `${plural(card.behind, "commit")} from ` : ""}${target} into this branch.`;
 }
 
 export function pushSuccessLine(result: TaskPushResult): string {

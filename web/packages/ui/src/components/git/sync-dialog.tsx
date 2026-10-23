@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 
 import { describePrError } from "@/components/git/pr-error";
 import { PrErrorLine } from "@/components/git/pr-error-line";
@@ -49,7 +49,15 @@ export function SyncDialog({
   const pending = useRef(false);
   return (
     <Dialog open={open} onOpenChange={(next) => (next || !pending.current) && onOpenChange(next)}>
-      <DialogContent className="top-[10vh] translate-y-0 gap-3 p-5 sm:max-w-md" data-testid="sync-dialog">
+      <DialogContent
+        className="top-[10vh] max-h-[calc(90dvh-1rem)] translate-y-0 gap-3 overflow-y-auto p-5 sm:max-w-md"
+        data-testid="sync-dialog"
+        // The primary action takes focus, so Enter confirms and the first Tab doesn't start on Cancel.
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          (e.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>('[data-testid="sync-submit"]')?.focus();
+        }}
+      >
         <SyncForm taskId={taskId} mode={mode} onClose={() => onOpenChange(false)} onPending={(p) => (pending.current = p)} />
       </DialogContent>
     </Dialog>
@@ -84,6 +92,13 @@ function SyncForm({ taskId, mode, onClose, onPending }: { taskId: number; mode: 
   const blocked = !!action && !action.enabled && action.code !== "up_to_date";
   const done = successLine !== null;
   const showRebaseWarning = mode === "update" && rebase && card.published;
+
+  // A disabled button gives up focus; hand it back to the primary once the call settles into a result or a conflict.
+  const primaryRef = useRef<HTMLButtonElement>(null);
+  const settled = done || conflict !== null;
+  useEffect(() => {
+    if (settled) primaryRef.current?.focus();
+  }, [settled]);
 
   const run = () => {
     if (inFlight || done || blocked) return;
@@ -147,13 +162,13 @@ function SyncForm({ taskId, mode, onClose, onPending }: { taskId: number; mode: 
         </DialogDescription>
       </DialogHeader>
 
-      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-lg border border-input-border bg-surface px-3 py-2.5 text-ui-base" data-testid="sync-card">
+      <dl className="grid grid-cols-[4.5rem_1fr] gap-x-4 gap-y-1.5 rounded-lg border border-input-border bg-surface px-3 py-2.5 text-ui-base" data-testid="sync-card">
         <Row label="Branch" testId="sync-row-branch" mono>
           <Icons.branch aria-hidden className="mr-1.5 inline size-3.5 text-foreground-muted" />
-          {card.branch || "—"}
+          <Breakable text={card.branch || "—"} />
         </Row>
         <Row label={mode === "push" ? "Remote" : "Base"} testId="sync-row-remote" mono>
-          {mode === "push" ? (card.published ? `origin/${card.branch}` : "origin (new upstream)") : card.remote || "—"}
+          {mode === "push" ? card.published ? <Breakable text={`origin/${card.branch}`} /> : "origin (new upstream)" : card.remote || "—"}
         </Row>
         <Row label="Ahead" testId="sync-row-ahead">
           {card.ahead === undefined ? "—" : plural(card.ahead, "commit")}
@@ -161,9 +176,11 @@ function SyncForm({ taskId, mode, onClose, onPending }: { taskId: number; mode: 
         <Row label="Behind" testId="sync-row-behind">
           {card.behind === undefined ? "—" : plural(card.behind, "commit")}
         </Row>
-        <Row label="Next step" testId="sync-row-next">
-          {nextStep(mode, card, rebase)}
-        </Row>
+        {!done && !conflict && (
+          <Row label="Next step" testId="sync-row-next">
+            <Breakable text={nextStep(mode, card, rebase)} />
+          </Row>
+        )}
       </dl>
 
       {mode === "update" && !done && !conflict && (
@@ -182,9 +199,9 @@ function SyncForm({ taskId, mode, onClose, onPending }: { taskId: number; mode: 
         </div>
       )}
 
+      {/* The button carries the visible "Pushing…"; this is the same state for assistive tech. */}
       {inFlight && !conflict && (
-        <p className="flex items-center gap-1.5 text-ui-base text-foreground-muted" role="status" data-testid="sync-progress">
-          <Icons.spinner aria-hidden className="size-3.5 animate-spin" />
+        <p className="sr-only" role="status" data-testid="sync-progress">
           {asking ? "Sending…" : mode === "push" ? "Pushing…" : "Updating…"}
         </p>
       )}
@@ -206,46 +223,46 @@ function SyncForm({ taskId, mode, onClose, onPending }: { taskId: number; mode: 
         </div>
       )}
 
+      {/* One primary button for every state, so the focused element survives the swap (a remounted one drops focus to the dialog). */}
       <DialogFooter className="gap-2">
-        {conflict ? (
-          <>
-            <Button type="button" variant="ghost" onClick={onClose} disabled={asking} data-testid="sync-close">
-              Close
-            </Button>
-            <Button type="button" onClick={() => void askAgent()} disabled={asking} data-testid="sync-ask-agent">
-              {asking ? (
-                <>
-                  <Icons.spinner aria-hidden className="size-3.5 animate-spin" /> Sending…
-                </>
-              ) : (
-                "Ask the agent to resolve"
-              )}
-            </Button>
-          </>
-        ) : done ? (
-          <Button type="button" onClick={onClose} data-testid="sync-close">
-            Close
+        {!done && (
+          <Button type="button" variant="ghost" onClick={onClose} disabled={asking || (inFlight && !conflict)} data-testid={conflict ? "sync-close" : "sync-cancel"}>
+            {conflict ? "Close" : "Cancel"}
           </Button>
-        ) : (
-          <>
-            <Button type="button" variant="ghost" onClick={onClose} disabled={inFlight} data-testid="sync-cancel">
-              Cancel
-            </Button>
-            <Button type="submit" disabled={inFlight || blocked} data-testid="sync-submit">
-              {inFlight ? (
-                <>
-                  <Icons.spinner aria-hidden className="size-3.5 animate-spin" /> {mode === "push" ? "Pushing…" : "Updating…"}
-                </>
-              ) : mode === "push" ? (
-                card.published ? "Push" : "Publish branch"
-              ) : rebase ? (
-                "Rebase branch"
-              ) : (
-                "Update branch"
-              )}
-            </Button>
-          </>
         )}
+        <Button
+          ref={primaryRef}
+          type={conflict || done ? "button" : "submit"}
+          disabled={conflict ? asking : done ? false : inFlight || blocked}
+          onClick={conflict ? () => void askAgent() : done ? onClose : undefined}
+          data-testid={conflict ? "sync-ask-agent" : done ? "sync-close" : "sync-submit"}
+        >
+          {conflict ? (
+            asking ? (
+              <>
+                <Icons.spinner aria-hidden className="size-3.5 animate-spin" /> Sending…
+              </>
+            ) : (
+              "Ask the agent to resolve"
+            )
+          ) : done ? (
+            "Close"
+          ) : inFlight ? (
+            <>
+              <Icons.spinner aria-hidden className="size-3.5 animate-spin" /> {mode === "push" ? "Pushing…" : "Updating…"}
+            </>
+          ) : mode === "push" ? (
+            card.published ? (
+              "Push"
+            ) : (
+              "Publish branch"
+            )
+          ) : rebase ? (
+            "Rebase branch"
+          ) : (
+            "Update branch"
+          )}
+        </Button>
       </DialogFooter>
     </form>
   );
@@ -255,8 +272,23 @@ function Row({ label, testId, mono, children }: { label: string; testId: string;
   return (
     <div className="contents" data-testid={testId}>
       <dt className="text-ui-sm leading-5 text-foreground-muted">{label}</dt>
-      <dd className={mono ? "min-w-0 break-all font-mono text-ui-sm leading-5" : "min-w-0 leading-5"}>{children}</dd>
+      <dd className={mono ? "min-w-0 font-mono text-ui-sm leading-5 [overflow-wrap:anywhere]" : "min-w-0 leading-5 [overflow-wrap:anywhere]"}>{children}</dd>
     </div>
+  );
+}
+
+/** Text that may wrap after `/` and `-` (a branch name) without a zero-width character landing in a copy. */
+function Breakable({ text }: { text: string }) {
+  const parts = text.split(/(?<=[/-])/);
+  return (
+    <>
+      {parts.map((part, i) => (
+        <Fragment key={i}>
+          {i > 0 && <wbr />}
+          {part}
+        </Fragment>
+      ))}
+    </>
   );
 }
 
@@ -264,17 +296,20 @@ function ConflictFiles({ conflict }: { conflict: UpdateConflictErrorData }) {
   const visible = conflict.files.slice(0, MAX_VISIBLE_FILES);
   const hidden = conflict.files.length - visible.length;
   return (
-    <ul className="grid gap-0.5 rounded-lg border border-input-border bg-surface px-3 py-2 font-mono text-ui-sm" data-testid="sync-conflict-files">
-      {visible.map((file) => (
-        <li key={file} className="break-all">
-          {file}
-        </li>
-      ))}
-      {(hidden > 0 || conflict.filesTruncated) && (
-        <li className="font-sans text-foreground-muted" data-testid="sync-conflict-more">
-          {hidden > 0 ? `and ${hidden} more` : "and more"}
-        </li>
-      )}
-    </ul>
+    <div className="grid gap-1">
+      <p className="text-ui-sm text-foreground-muted">Conflicting files</p>
+      <ul className="grid max-h-48 gap-0.5 overflow-y-auto rounded-lg border border-input-border bg-surface px-3 py-2 font-mono text-ui-sm" data-testid="sync-conflict-files">
+        {visible.map((file) => (
+          <li key={file} className="[overflow-wrap:anywhere]">
+            {file}
+          </li>
+        ))}
+        {(hidden > 0 || conflict.filesTruncated) && (
+          <li className="font-sans text-foreground-muted" data-testid="sync-conflict-more">
+            {hidden > 0 ? `and ${hidden} more` : "and more"}
+          </li>
+        )}
+      </ul>
+    </div>
   );
 }
