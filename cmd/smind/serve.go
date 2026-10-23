@@ -149,6 +149,8 @@ func cmdServe(args []string) int {
 	}
 	srv.API().AttachUsage(poller, registry, passive)
 	srv.API().Runs.SetMaxConcurrentRunsPerTree(cfg.Orchestration.MaxConcurrentRunsPerTree)
+	srv.API().Runs.SetNotifyParent(cfg.Orchestration.NotifyParent)
+	srv.API().Runs.SetNotifyDebounce(time.Duration(cfg.Orchestration.NotifyDebounceSeconds) * time.Second)
 	wireAttachments(srv.API(), wm, db)
 	// Push and fetch to an https origin use the forge login (ADR-0039 O9),
 	// per invocation and only while it is signed in.

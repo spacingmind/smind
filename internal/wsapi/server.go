@@ -209,6 +209,9 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	// survived a daemon restart keep delivering (decision 5, as amended).
 	reg.SetStarter(wm, runner)
 	reg.DeliverQueued()
+	// ADR-0041 B3: tell parents about child runs that finished (or were
+	// interrupted by the restart) without having been announced.
+	reg.NotifyPendingChildren()
 	// ADR-0024 §2: a prompt queued while a task's setup script ran is
 	// delivered when setup finishes (ok or failed).
 	wm.SetSetupFinishedHook(func(int64) { reg.DeliverQueued() })

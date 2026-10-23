@@ -229,3 +229,33 @@ func TestDirFor_IsDotSmind(t *testing.T) {
 		t.Errorf("DirFor = %s", got)
 	}
 }
+
+func TestConfig_OrchestrationNotifyDefaults(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	load := func(yaml string) (Config, error) {
+		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(yaml), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		return Load()
+	}
+
+	if d := Default().Orchestration; !d.NotifyParent || d.NotifyDebounceSeconds != 20 {
+		t.Fatalf("Default() = %+v, want notifyParent true, debounce 20", d)
+	}
+	cfg, err := load("orchestration:\n  maxDepth: 2\n")
+	if err != nil || !cfg.Orchestration.NotifyParent || cfg.Orchestration.NotifyDebounceSeconds != 20 {
+		t.Fatalf("absent keys: %+v, %v, want true/20", cfg.Orchestration, err)
+	}
+	cfg, err = load("orchestration:\n  notifyParent: false\n  notifyDebounceSeconds: 0\n")
+	if err != nil || cfg.Orchestration.NotifyParent || cfg.Orchestration.NotifyDebounceSeconds != 0 {
+		t.Fatalf("explicit false/0: %+v, %v", cfg.Orchestration, err)
+	}
+	cfg, err = load("orchestration:\n  notifyParent: true\n  notifyDebounceSeconds: 45\n")
+	if err != nil || !cfg.Orchestration.NotifyParent || cfg.Orchestration.NotifyDebounceSeconds != 45 {
+		t.Fatalf("explicit true/45: %+v, %v", cfg.Orchestration, err)
+	}
+	if _, err := load("orchestration:\n  notifyDebounceSeconds: -1\n"); err == nil {
+		t.Fatal("Load() accepted a negative notifyDebounceSeconds")
+	}
+}

@@ -151,6 +151,13 @@ type Registry struct {
 	// losing it for the restart's redelivery, ADR-0021 §5).
 	closing atomic.Bool
 
+	// notifyMu serialises parent-notification evaluation (ADR-0041 B3) and
+	// guards the notify* settings below. Never held with mu or deliverMu.
+	notifyMu       sync.Mutex
+	notifyParent   bool
+	notifyDebounce time.Duration
+	notifyMaxHold  time.Duration
+
 	// wakeMu guards wakeTimer: the single timer that delivers a held queue
 	// item (chat_queue.not_before, ADR-0041) when its time arrives. Taken
 	// alone -- never while holding mu or deliverMu.
@@ -259,7 +266,7 @@ func (reg *Registry) notifyRunStatus(r *run) {
 //     a rehydrated run immediately delivers its backfilled history then
 //     closes, same as attaching to any other already-finished run.
 func New(st *store.Store) (*Registry, error) {
-	reg := &Registry{runs: make(map[string]*run), st: st, deliveryAttempts: make(map[int64]int), archiving: make(map[int64]bool)}
+	reg := &Registry{runs: make(map[string]*run), st: st, deliveryAttempts: make(map[int64]int), archiving: make(map[int64]bool), notifyParent: true, notifyDebounce: defaultNotifyDebounce, notifyMaxHold: defaultNotifyMaxHold}
 
 	if _, err := st.MarkRunningRunsInterrupted(string(StatusInterrupted), func(chatID int64) string { return restartStopReason(st, chatID) }); err != nil {
 		return nil, fmt.Errorf("runs: reconcile interrupted runs: %w", err)
@@ -1426,6 +1433,10 @@ func (reg *Registry) finish(r *run, err error) {
 	}
 
 	reg.retain(r.id)
+
+	// ADR-0041 B3: tell the parent when this run settles its subtree. Before
+	// deliverOne, so a child with its own queued follow-up is not yet quiet.
+	reg.evaluateChildNotifications(r.taskID)
 
 	// Queue delivery (ADR-0021 §3): the finished run is recorded and every
 	// lock (reg.mu, r.mu) has been released by this point, so starting the

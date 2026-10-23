@@ -436,13 +436,21 @@ type OrchestrationConfig struct {
 	// once across one task tree (a root task and all its descendants).
 	// Default 4; Load rejects values < 1.
 	MaxConcurrentRunsPerTree int `yaml:"maxConcurrentRunsPerTree"`
+	// NotifyParent turns the parent notifier (ADR-0041 B3) on or off: when a
+	// child task's subtree goes quiet the daemon queues one message on the
+	// parent chat. Default true.
+	NotifyParent bool `yaml:"notifyParent"`
+	// NotifyDebounceSeconds is how long a parent notification is held so
+	// several children finishing together coalesce into one. Default 20; 0
+	// delivers at once; Load rejects negatives.
+	NotifyDebounceSeconds int `yaml:"notifyDebounceSeconds"`
 }
 
 // Default returns the built-in defaults.
 func Default() Config {
 	return Config{
 		Server:        ServerConfig{Port: 4648},
-		Orchestration: OrchestrationConfig{MaxDepth: 2, MaxConcurrentRunsPerTree: 4},
+		Orchestration: OrchestrationConfig{MaxDepth: 2, MaxConcurrentRunsPerTree: 4, NotifyParent: true, NotifyDebounceSeconds: 20},
 		Worktrees: WorktreesConfig{
 			SetupTimeoutSeconds:    600,
 			TeardownTimeoutSeconds: 120,
@@ -504,6 +512,9 @@ func LoadFile(path string) (Config, error) {
 	}
 	if n := cfg.Orchestration.MaxConcurrentRunsPerTree; n < 1 {
 		return cfg, fmt.Errorf("config %s: orchestration.maxConcurrentRunsPerTree must be >= 1, got %d", path, n)
+	}
+	if n := cfg.Orchestration.NotifyDebounceSeconds; n < 0 {
+		return cfg, fmt.Errorf("config %s: orchestration.notifyDebounceSeconds must be >= 0, got %d", path, n)
 	}
 	if ttl := cfg.AccountUsage.TTLSeconds; ttl < MinAccountUsageTTLSeconds {
 		return cfg, fmt.Errorf("config %s: accountUsage.ttlSeconds must be >= %d, got %d", path, MinAccountUsageTTLSeconds, ttl)
