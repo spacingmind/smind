@@ -198,7 +198,7 @@ func (m *Manager) UpdateFromBase(ctx context.Context, id int64, strategy string)
 	if strategy == SyncStrategyRebase {
 		args, op, result = []string{"rebase", "--end-of-options", target}, forge.OpRebase, SyncRebased
 	} else {
-		args = []string{"merge", "--no-edit", "--end-of-options", target}
+		args = []string{"merge", "-m", "Merge " + shortRemoteRef(target) + " into " + tg.branch, "--end-of-options", target}
 	}
 	if _, stderr, err := execGit(lctx, tg.worktree, env, args...); err != nil {
 		if lctx.Err() == nil {
