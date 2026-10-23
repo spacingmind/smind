@@ -34,15 +34,20 @@ type Result struct {
 }
 
 var (
-	reGLM        = regexp.MustCompile(`(?i)429[^\n]{0,40}usage limit reached for (\d+) hour`)
-	reGLMReset   = regexp.MustCompile(`(?i)reset at (?:(\d{4}-\d{2}-\d{2})[ T])?(\d{1,2}:\d{2}(?::\d{2})?)`)
-	reClaudeOld  = regexp.MustCompile(`(?i)usage limit reached\|(\d{9,11})`)
-	reClaudeNew  = regexp.MustCompile(`(?i)(\d+)-hour limit reached`)
-	reClaudeRst  = regexp.MustCompile(`(?i)resets (\d{1,2})(?::(\d{2}))?\s*(am|pm)`)
-	reCodex      = regexp.MustCompile(`(?i)you'?ve hit your usage limit`)
-	reGenericUL  = regexp.MustCompile(`(?i)usage limit reached`)
-	reGenericRLE = regexp.MustCompile(`(?i)rate_limit_error`)
-	reRateWords  = regexp.MustCompile(`(?i)rate limit|rate-limit|ratelimit|too many requests`)
+	reGLM       = regexp.MustCompile(`(?i)429[^\n]{0,40}usage limit reached for (\d+) hour`)
+	reGLMReset  = regexp.MustCompile(`(?i)reset at (?:(\d{4}-\d{2}-\d{2})[ T])?(\d{1,2}:\d{2}(?::\d{2})?)`)
+	reClaudeOld = regexp.MustCompile(`(?i)usage limit reached\|(\d{9,11})`)
+	reClaudeNew = regexp.MustCompile(`(?i)(\d+)-hour limit reached`)
+	reClaudeRst = regexp.MustCompile(`(?i)resets (\d{1,2})(?::(\d{2}))?\s*(am|pm)`)
+	reCodex     = regexp.MustCompile(`(?i)you'?ve hit your usage limit`)
+	// Claude Code's newer refusal text: "You've hit your session limit · resets
+	// 1pm (Asia/Saigon)" (also "weekly", "Opus", "Sonnet"); the zone, when
+	// printed, is an IANA name.
+	reClaudeHit     = regexp.MustCompile(`(?i)you'?ve hit your (session |weekly |usage |opus |sonnet )?limit`)
+	reClaudeResetTZ = regexp.MustCompile(`(?i)resets (\d{1,2})(?::(\d{2}))?\s*(am|pm)(?:\s*\(([A-Za-z_]+/[A-Za-z_+\-0-9]+)\))?`)
+	reGenericUL     = regexp.MustCompile(`(?i)usage limit reached`)
+	reGenericRLE    = regexp.MustCompile(`(?i)rate_limit_error`)
+	reRateWords     = regexp.MustCompile(`(?i)rate limit|rate-limit|ratelimit|too many requests`)
 )
 
 // Classify reports whether a failed run was rate limited. Unknown never
@@ -117,6 +122,13 @@ func classifyText(s string, now time.Time) Result {
 		r := Result{Kind: KindRateLimited, Window: m[1] + "h"}
 		if rm := reClaudeRst.FindStringSubmatch(s); rm != nil {
 			r.ResetAt = nextAmPm(rm[1], rm[2], rm[3], now)
+		}
+		return r
+	}
+	if m := reClaudeHit.FindStringSubmatch(s); m != nil {
+		r := Result{Kind: KindRateLimited, Window: claudeHitWindow(m[1])}
+		if rm := reClaudeResetTZ.FindStringSubmatch(s); rm != nil {
+			r.ResetAt = nextAmPmIn(rm[1], rm[2], rm[3], rm[4], now)
 		}
 		return r
 	}
@@ -196,4 +208,42 @@ func nextOccurrence(h, m, s int, now time.Time) *time.Time {
 	}
 	u := t.UTC()
 	return &u
+}
+
+// claudeHitWindow maps the word in "You've hit your <word> limit" to a window:
+// the session limit is Claude's 5-hour window.
+func claudeHitWindow(word string) string {
+	switch strings.ToLower(strings.TrimSpace(word)) {
+	case "session":
+		return "5h"
+	case "weekly":
+		return "weekly"
+	case "opus":
+		return "weekly-opus"
+	case "sonnet":
+		return "weekly-sonnet"
+	}
+	return ""
+}
+
+// nextAmPmIn is nextAmPm in the named IANA zone ("" or unknown = now's own).
+func nextAmPmIn(h, m, ap, zone string, now time.Time) *time.Time {
+	if zone != "" {
+		if loc, err := time.LoadLocation(zone); err == nil {
+			now = now.In(loc)
+		}
+	}
+	return nextAmPm(h, m, ap, now)
+}
+
+// maxRefusalText bounds a "limit refusal" message: the CLI's whole answer is
+// one short line, so a long text that merely mentions a limit is not one.
+const maxRefusalText = 300
+
+// IsLimitRefusal reports whether text is Claude Code's own "you've hit your
+// limit" refusal (the whole assistant answer of a run that never reached the
+// model). Callers must also require that the run did no work.
+func IsLimitRefusal(text string) bool {
+	text = strings.TrimSpace(text)
+	return text != "" && len(text) <= maxRefusalText && reClaudeHit.MatchString(text)
 }
