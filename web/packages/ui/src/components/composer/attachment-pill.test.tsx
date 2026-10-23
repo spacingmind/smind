@@ -85,6 +85,27 @@ describe("AttachmentTray", () => {
     expect(screen.queryByTestId("attachment-lightbox")).toBeNull();
   });
 
+  it("the lightbox close button is a contrasting chip outside the image, and the image is not framed", () => {
+    render(<AttachmentTray items={[image]} onRemove={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Preview shot.png" }));
+    const box = screen.getByTestId("attachment-lightbox");
+    const close = screen.getByTestId("attachment-lightbox-close");
+    // Not on the picture, and a dark chip with a light ring so it shows on a white image. It lives inside the dialog
+    // content: Radix switches off pointer events outside it, so a chip beside the content could not be clicked.
+    expect(box.contains(close)).toBe(true);
+    expect(close.closest("img")).toBeNull();
+    expect(box.querySelector("img")!.contains(close)).toBe(false);
+    expect(close.className).toContain("bg-black/70");
+    expect(close.className).toContain("text-white");
+    expect(box.className).not.toContain("bg-background");
+    expect(box.className).not.toContain("border");
+    // A click on the empty area closes it like the overlay would; a click on the picture does not.
+    fireEvent.click(box.querySelector("img")!);
+    expect(screen.getByTestId("attachment-lightbox")).toBeInTheDocument();
+    fireEvent.click(close);
+    expect(screen.queryByTestId("attachment-lightbox")).toBeNull();
+  });
+
   it("renders a PR/issue pill with #number title, kind and repo, opens its url and removes", () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     const onRemove = vi.fn();
