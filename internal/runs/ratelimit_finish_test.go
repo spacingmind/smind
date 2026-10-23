@@ -147,3 +147,35 @@ func TestStatusEnumUnchanged(t *testing.T) {
 		t.Errorf("DispositionFor(error, max_turn_requests) = %q, want empty", d)
 	}
 }
+
+// TestDrive_RateLimitEventIsAppliedNotRecorded runs a claude-native turn on
+// the fake CLI's "rate-limit-rejected" scenario: drive's forwarder must apply
+// the rejected signal to the run and keep the event out of history.
+func TestDrive_RateLimitEventIsAppliedNotRecorded(t *testing.T) {
+	t.Parallel()
+	e := newIsolatedEnv(t, "rate-limit-rejected")
+	id, err := e.start()
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForStatus(t, e.reg, id, StatusDone, 15*time.Second)
+	hist, _, err := e.reg.History(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range hist {
+		if ev.Type == taskrunner.EventTypeRateLimit {
+			t.Fatalf("rate-limit event recorded into history: %+v", ev)
+		}
+	}
+	r, err := e.reg.get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	sig := r.rateSignal
+	r.mu.Unlock()
+	if sig == nil || sig.Status != "rejected" {
+		t.Fatalf("applied signal = %+v, want a rejected signal", sig)
+	}
+}
