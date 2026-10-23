@@ -1,3 +1,5 @@
+import { SyncMenuItems } from "@/components/git/sync-actions";
+import type { SyncMode } from "@/components/git/sync-model";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -22,11 +24,16 @@ export function DiffHeaderMenu({
   onChangePrefs,
   onRefresh,
   refreshDisabled,
+  taskId,
+  onSync,
 }: {
   prefs: DiffPrefs;
   onChangePrefs: (patch: Partial<DiffPrefs>) => void;
   onRefresh: () => void;
   refreshDisabled: boolean;
+  /** With `onSync`: the task's Push / Update items join the menu (the Diff header has no room for their buttons here). */
+  taskId?: number;
+  onSync?: (mode: SyncMode) => void;
 }) {
   return (
     <DropdownMenu>
@@ -36,6 +43,12 @@ export function DiffHeaderMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" data-testid="diff-actions-menu-content">
+        {taskId !== undefined && onSync && (
+          <>
+            <SyncMenuItems taskId={taskId} onOpen={onSync} />
+            <DropdownMenuSeparator />
+          </>
+        )}
         <DropdownMenuLabel>View</DropdownMenuLabel>
         <ChoiceItem testId="diff-menu-by-file" checked={prefs.view === "by-file"} onSelect={() => onChangePrefs({ view: "by-file" })}>
           By file

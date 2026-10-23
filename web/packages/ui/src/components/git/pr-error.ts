@@ -1,6 +1,6 @@
 import type { PrExistsErrorData } from "@/lib/types";
 
-export type PrOperation = "preview" | "create" | "update" | "token" | "logout" | "archive" | "restore";
+export type PrOperation = "preview" | "create" | "update" | "push" | "sync" | "token" | "logout" | "archive" | "restore";
 
 /** What the UI shows for a failed PR call: one sentence, an optional scrubbed detail, and `pr_exists`'s PR. */
 export interface PrErrorView {
@@ -37,6 +37,15 @@ const FALLBACK: Record<string, string> = {
   forge_rate_limited: "GitHub is rate limiting requests. Try again in a minute.",
   forge_timeout: "GitHub didn't answer in time. Try again.",
   forge_error: "GitHub reported an error. Try again.",
+  // Push and Update from base (G7).
+  non_fast_forward: "Origin has newer changes on this branch. Bring those changes in first (pull in the worktree, or ask the agent), then push again.",
+  nothing_to_push: "Nothing to push.",
+  conflict: "Updating hit conflicts, and the worktree is now in the middle of the merge. Resolve the conflicts and commit, or ask the agent to.",
+  merge_in_progress: "The worktree is in the middle of a merge or rebase. Finish or abort it first.",
+  worktree_dirty: "The worktree has uncommitted changes. Commit or stash them, then try again.",
+  invalid_strategy: "That update strategy isn't supported.",
+  base_not_found: "smind couldn't find the base branch. Check the task's base branch and try again.",
+  git_error: "Git reported an error. See the details.",
   // Archive and Restore (ADR-0039 §9).
   branch_unmerged: "The branch isn't merged anywhere yet, so smind won't delete it.",
   branch_dirty: "The worktree has uncommitted changes, so smind won't delete the branch.",
@@ -50,6 +59,8 @@ const GENERIC: Record<PrOperation, string> = {
   preview: "Couldn't load the pull request preview.",
   create: "Couldn't create the pull request.",
   update: "Couldn't update the pull request.",
+  push: "Couldn't push the branch.",
+  sync: "Couldn't update the branch from its base.",
   token: "Couldn't sign in to GitHub.",
   logout: "Couldn't log out of GitHub.",
   archive: "Couldn't archive the task.",

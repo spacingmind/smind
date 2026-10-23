@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 import { ForgeSettingsLink, isForgeSetupCode } from "@/components/git/forge-settings-link";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,7 @@ export function PrErrorLine({
   const setup = isForgeSetupCode(error.code);
   return (
     <div className={cn("text-ui-base text-destructive", className)} role="alert" data-testid={testId}>
-      <p>{message}</p>
+      <p>{inlineCode(message)}</p>
       {(detail || children || setup) && (
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
           {children}
@@ -56,5 +56,18 @@ export function PrErrorLine({
         </div>
       )}
     </div>
+  );
+}
+
+/** The daemon's sentences mark commands and refs with backticks: show them as code, never as markup. */
+function inlineCode(text: string): ReactNode {
+  return text.split(/`([^`]+)`/).map((part, i) =>
+    i % 2 === 1 ? (
+      <code key={i} className="rounded bg-surface px-1 font-mono text-ui-sm">
+        {part}
+      </code>
+    ) : (
+      <Fragment key={i}>{part}</Fragment>
+    ),
   );
 }
