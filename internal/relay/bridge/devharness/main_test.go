@@ -462,6 +462,9 @@ func seedTree(t *testing.T, shape string) (reply map[string]any, nodes []treeNod
 	}
 	byTitle = map[string]treeNode{}
 	for _, n := range nodes {
+		if strings.HasPrefix(n.Title, "Tree ") { // seedTree titles the root "Tree <shape>"
+			n.Title = "supervisor"
+		}
 		byTitle[n.Title] = n
 	}
 	p.mustOK("quit")

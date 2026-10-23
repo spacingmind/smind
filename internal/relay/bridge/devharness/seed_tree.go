@@ -94,7 +94,11 @@ func (h *harness) seedTree(args []string) (map[string]any, error) {
 	shape := args[0]
 	nodes := map[string]int64{}
 	add := func(name, scenario string, parent string) (store.Task, error) {
-		t, err := h.seedNode(name, scenario, nodes[parent])
+		title := name
+		if name == "supervisor" {
+			title = "Tree " + shape // distinct root titles so several shapes can share one task list
+		}
+		t, err := h.seedNode(title, scenario, nodes[parent])
 		if err == nil {
 			nodes[name] = t.ID
 		}
