@@ -76,6 +76,14 @@ type RunStatus struct {
 	// empty otherwise. It is not a status and is never stored.
 	Disposition string
 
+	// FailureKind is the typed terminal reason of an error run (ADR-0041 B1):
+	// rate_limited or empty; reset instant UTC, nil = unknown.
+	FailureKind string
+	// FailureWindow is the exhausted quota window ("5h", "weekly", ...) or "".
+	FailureWindow string
+	// FailureResetAt is when the quota resets (UTC); nil = unknown.
+	FailureResetAt *time.Time
+
 	// Err is populated once Status is StatusError, carrying the error
 	// RunPrompt returned.
 	Err string
