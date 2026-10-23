@@ -450,3 +450,22 @@ func TestPRDetails_NoPRAndNoWorktree(t *testing.T) {
 	}
 	wantCalls(t, f, "PRDetails", 0)
 }
+
+// refreshAvailableAt has second resolution; a client that waits until it must
+// never be early (it would be answered with the same value and stall).
+func TestPRDetails_RefreshAvailableAtRoundsUp(t *testing.T) {
+	f := newDetailsFix(t, forge.ChecksSuccess)
+	f.p.mu.Lock()
+	f.p.wsLocked(f.tk.WorkspaceID).lastPoll = f.clk.Now().Add(-4300 * time.Millisecond)
+	f.p.mu.Unlock()
+	floorEnd := f.clk.Now().Add(-4300 * time.Millisecond).Add(repoFloor)
+	d, err := f.focusRead()
+	if err != nil || d.Stale != forge.StaleBackoff {
+		t.Fatalf("read = %+v, %v", d, err)
+	}
+	at, perr := time.Parse(time.RFC3339, d.RefreshAvailableAt)
+	if perr != nil || at.Before(floorEnd) {
+		t.Fatalf("refreshAvailableAt %q (%v) is before the floor end %v", d.RefreshAvailableAt, perr, floorEnd)
+	}
+	wantCalls(t, f.pollerFix, "PRDetails", 0)
+}

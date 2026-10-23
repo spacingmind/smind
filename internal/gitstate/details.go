@@ -205,7 +205,13 @@ func detailsView(m *detailsMem, t store.Task, stale string, until time.Time) for
 	d.TaskID = t.ID
 	d.Stale, d.RefreshAvailableAt = stale, ""
 	if stale != "" && !until.IsZero() {
-		d.RefreshAvailableAt = until.UTC().Format(time.RFC3339)
+		// RFC3339 has second resolution: round UP, so a client that waits
+		// until this time is never early and re-answered with the same value.
+		u := until.UTC()
+		if u.Nanosecond() > 0 {
+			u = u.Truncate(time.Second).Add(time.Second)
+		}
+		d.RefreshAvailableAt = u.Format(time.RFC3339)
 	}
 	return d
 }
