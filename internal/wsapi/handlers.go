@@ -1456,7 +1456,9 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			NotifyOnFinish *bool `json:"notifyOnFinish"`
 			// ProfileID (ADR-0041 F2) is the profile the client resolved its
 			// settings from; recorded on the run, nothing else changes.
-			ProfileID int64 `json:"profileId"`
+			// Absent/null = inherit the chat's last run's profile (sticky
+			// seats); 0 = explicit no profile.
+			ProfileID *int64 `json:"profileId"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.start: invalid params: %w", err)
@@ -1494,12 +1496,14 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			return nil, fmt.Errorf("run.start: source %q requires fromTaskId and fromChatId", p.Source)
 		}
 
-		if p.ProfileID < 0 {
-			return nil, fmt.Errorf("run.start: profile %d not found", p.ProfileID)
-		}
-		if p.ProfileID != 0 {
-			if _, err := profReg.Get(p.ProfileID); err != nil {
-				return nil, fmt.Errorf("run.start: profile %d not found", p.ProfileID)
+		if p.ProfileID != nil {
+			if *p.ProfileID < 0 {
+				return nil, fmt.Errorf("run.start: profile %d not found", *p.ProfileID)
+			}
+			if *p.ProfileID != 0 {
+				if _, err := profReg.Get(*p.ProfileID); err != nil {
+					return nil, fmt.Errorf("run.start: profile %d not found", *p.ProfileID)
+				}
 			}
 		}
 
@@ -1508,8 +1512,8 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			return nil, fmt.Errorf("run.start: %w", err)
 		}
 		startOpts := runStartOptions(p.Model, set, reg, p.NotifyOnFinish)
-		if p.ProfileID != 0 {
-			startOpts = append(startOpts, runs.WithProfile(p.ProfileID))
+		if p.ProfileID != nil {
+			startOpts = append(startOpts, runs.WithProfile(*p.ProfileID))
 		}
 		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, p.Source, p.FromTaskID, p.FromChatID, startOpts...)
 		if err != nil {

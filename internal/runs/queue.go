@@ -141,6 +141,9 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	}
 	replyChatID := reg.replyChatFor(wm, taskID, source, fromTaskID, fromChatID, notify)
 	profileID := resolveStartOptions(opts).profileID
+	if o := resolveStartOptions(opts); !o.profileSet && startPurpose(opts) == "" {
+		profileID = reg.inheritedProfile(chatID)
+	}
 
 	// An agent-sourced prompt carries its provenance header on an
 	// immediate start too (ADR-0021 §4) -- the queued path stamps it at
@@ -614,11 +617,14 @@ type startOptions struct {
 	// replyChatID/notify: see WithReplyChat / WithNotifyOnFinish.
 	replyChatID int64
 	profileID   int64
-	failoverOf  string
-	notify      bool
-	notifySet   bool
-	isolation   *taskrunner.IsolationOptions
-	probe       *taskrunner.ProbeOptions
+	// profileSet: WithProfile was called, so profileID (possibly 0 = an
+	// explicit "no profile") wins over the chat's inherited profile.
+	profileSet bool
+	failoverOf string
+	notify     bool
+	notifySet  bool
+	isolation  *taskrunner.IsolationOptions
+	probe      *taskrunner.ProbeOptions
 
 	attachments attach.Set
 	attachStore *attach.Store
@@ -641,9 +647,27 @@ func WithReplyChat(chatID int64) StartOption {
 
 // WithProfile records the agent profile the run was launched with
 // (ADR-0041 F2) on the run, and nothing else: the profile's mode/model are
-// not applied here (the client already resolved them). 0 = none.
+// not applied here (the client already resolved them). 0 = an explicit
+// "no profile", which StartWhenBusy honours instead of inheriting.
 func WithProfile(id int64) StartOption {
-	return func(o *startOptions) { o.profileID = id }
+	return func(o *startOptions) { o.profileID, o.profileSet = id, true }
+}
+
+// inheritedProfile is the profile a follow-up send that names no profile
+// runs with (ADR-0041 sticky seats): the profile of the chat's most recent
+// run, so a seat stays a seat. 0 when the chat has no run yet, or when the
+// lookup fails (a send never fails because of it). An explicit
+// WithProfile(0) run records 0, so the next omitted send inherits "none".
+func (reg *Registry) inheritedProfile(chatID int64) int64 {
+	last, ok, err := reg.st.LatestRunForChat(chatID)
+	if err != nil {
+		log.Printf("runs: sticky profile lookup for chat %d failed: %v", chatID, err)
+		return 0
+	}
+	if !ok {
+		return 0
+	}
+	return last.ProfileID
 }
 
 // WithFailoverOf records the run this one continues after a rate limit
