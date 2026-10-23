@@ -80,4 +80,48 @@ describe("PermissionDetailView in OptionsCard", () => {
     expect(screen.getByTestId("permission-detail-redacted").textContent).toBe("Existing contents hidden (restricted path)");
     expect(screen.getByTestId("permission-detail-truncated").textContent).toBe("Truncated");
   });
+
+  it("shows the git rule line and no always-allow for a git rule", () => {
+    renderCard({
+      kind: "execute",
+      command: "git commit -m x",
+      gitRule: {
+        id: "git-commit",
+        class: "commit",
+        label: "git commit",
+        command: "git commit -m x",
+        remote: "origin",
+        branch: "smind/task-x",
+        perCall: true,
+        stagedFiles: ["a.go", "b.go"],
+      },
+    });
+    expect(screen.getByTestId("permission-git-rule-label").textContent).toContain("git commit");
+    expect(screen.getByTestId("permission-git-rule-label").textContent).toContain("asks before committing");
+    expect(screen.getByTestId("permission-git-rule-command").textContent).toBe("git commit -m x");
+    expect(screen.getByTestId("permission-git-rule-target").textContent).toBe("Remote origin · Branch smind/task-x");
+    expect(screen.getByTestId("permission-git-rule-staged").textContent).toContain("a.go");
+    expect(screen.getByTestId("permission-git-rule-staged").textContent).toContain("b.go");
+  });
+
+  it("hides always-allow options when a git rule is present", () => {
+    const pending: PendingPermission = {
+      requestId: "req-2",
+      summary: "git push",
+      options: [
+        { id: "a1", label: "Allow once", kind: "allow_once" },
+        { id: "a2", label: "Always allow", kind: "allow_always" },
+        { id: "r1", label: "Reject", kind: "reject_once" },
+        { id: "r2", label: "Always reject", kind: "reject_always" },
+      ],
+      detail: {
+        kind: "execute",
+        gitRule: { id: "git-push", class: "always-ask", label: "git push always needs your approval", command: "git push", perCall: true },
+      },
+    };
+    render(<OptionsCard runId="run-1" pending={pending} onRespond={vi.fn()} />);
+    expect(screen.getByText("Allow once")).toBeTruthy();
+    expect(screen.queryByText("Always allow")).toBeNull();
+    expect(screen.queryByText("Always reject")).toBeNull();
+  });
 });
