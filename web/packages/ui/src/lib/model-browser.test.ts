@@ -458,3 +458,39 @@ describe("defaultRowLabel", () => {
     expect(resolveTriggerLabel({ providers: plain, selectedProvider: "claude", selectedModel: "" })).toBe("Sonnet");
   });
 });
+
+describe("observed model", () => {
+  const bare = (defaultModel?: string, models = [model("claude-sonnet-5-5", "Sonnet 5.5"), model("opus", "Opus")]) =>
+    buildBrowserProviders([{ ...info("claude", "Claude Code", models), defaultModel }], {});
+  const args = (providers: BrowserProvider[], selectedModel = "", observedModel?: string) => ({
+    providers,
+    selectedProvider: "claude",
+    selectedModel,
+    observedModel,
+  });
+
+  it("resolveTriggerLabel observed model fills an unresolved default", () => {
+    expect(resolveTriggerLabel(args(bare(), "", "claude-sonnet-5-5"))).toBe("Sonnet 5.5");
+    // An id missing from the catalog is shown the way an explicit unlisted model is: the raw id.
+    expect(resolveTriggerLabel(args(bare(), "", "claude-haiku-5-5"))).toBe("claude-haiku-5-5");
+  });
+
+  it("resolveTriggerLabel observed model never overrides an explicit, configured or catalog default", () => {
+    expect(resolveTriggerLabel(args(bare(), "opus", "claude-sonnet-5-5"))).toBe("Opus");
+    expect(resolveTriggerLabel(args(bare("opus"), "", "claude-sonnet-5-5"))).toBe("Opus");
+    const catalogDefault = bare(undefined, [model("opus", "Opus", { default: true })]);
+    expect(resolveTriggerLabel(args(catalogDefault, "", "claude-sonnet-5-5"))).toBe("Opus");
+  });
+
+  it("resolveTriggerLabel falls back to the provider name without an observed model", () => {
+    expect(resolveTriggerLabel(args(bare()))).toBe("Claude Code");
+    expect(resolveTriggerLabel(args(bare(), "", ""))).toBe("Claude Code");
+  });
+
+  it("resolveTriggerTitle marks an observed model (default)", () => {
+    expect(resolveTriggerTitle(args(bare(), "", "claude-sonnet-5-5"))).toBe("Claude Code · Sonnet 5.5 (default)");
+    expect(resolveTriggerTitle(args(bare()))).toBe("Claude Code");
+    expect(resolveTriggerTitle(args(bare(), "opus", "claude-sonnet-5-5"))).toBe("Claude Code · Opus");
+    expect(resolveTriggerTitle(args(bare("opus"), "", "claude-sonnet-5-5"))).toBe("Claude Code · Opus");
+  });
+});

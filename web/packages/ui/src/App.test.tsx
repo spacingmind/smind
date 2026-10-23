@@ -1375,8 +1375,8 @@ describe("App splits (Item 6)", () => {
       ThinkingLevel: "",
     };
     // run.list #0 is useTaskAttention's (on connect); #1 is the first,
-    // abandoned "Chat" mount; #2 is this remount's.
-    respond(socket, "run.list", [doneRun], 2);
+    // abandoned "Chat" mount; the composer chip's shared run-list read is one more, so answer them all.
+    respondAll(socket, "run.list", [doneRun]);
     await flush();
 
     const logs: RunLogsResult = {

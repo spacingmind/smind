@@ -273,63 +273,69 @@ export function groupProfilesByProviderModel<T extends ModelProfileRef>(
   return lookup;
 }
 
-/**
- * Trigger label is the model label only (Paseo buildSelectedTriggerLabel + G11)
- * — the UI shows a provider glyph beside it.
- */
-export function resolveTriggerLabel({
-  providers,
-  selectedProvider,
-  selectedModel,
-}: {
+interface TriggerArgs {
   providers: BrowserProvider[];
   selectedProvider: string;
   selectedModel: string;
-}): string {
+  /** The model the chat's (or provider's) latest run reported; fills an otherwise unresolved "Default". */
+  observedModel?: string;
+}
+
+function resolveTrigger({
+  providers,
+  selectedProvider,
+  selectedModel,
+  observedModel,
+}: TriggerArgs): { label: string; observed: boolean } {
   const provider = providers.find((entry) => entry.id === selectedProvider);
   if (!provider) {
-    return "Select model";
+    return { label: "Select model", observed: false };
   }
   if (provider.modelSelection.kind === "loading") {
-    return "Loading…";
+    return { label: "Loading…", observed: false };
   }
   if (provider.modelSelection.kind === "error") {
-    return "Error";
+    return { label: "Error", observed: false };
   }
   const rows = getProviderModelRows(provider);
   if (!selectedModel) {
     // An owner that named the "no model" row shows that name (a catalog model flagged default is not what is selected).
     const named = rows.find((row) => row.modelId === "" && row.customLabel);
-    if (named) return named.modelLabel;
+    if (named) return { label: named.modelLabel, observed: false };
     const defaultRow = rows.find((row) => row.isDefault && row.modelId !== "");
-    if (defaultRow) return defaultRow.modelLabel;
+    if (defaultRow) return { label: defaultRow.modelLabel, observed: false };
     // The synthetic default row: when a default is configured, show what a run resolves to.
-    return rows.find((row) => row.modelId === "")?.resolvedDefaultLabel ?? provider.label;
+    const resolved = rows.find((row) => row.modelId === "")?.resolvedDefaultLabel;
+    if (resolved) return { label: resolved, observed: false };
+    if (observedModel) {
+      return { label: rows.find((entry) => entry.modelId === observedModel)?.modelLabel ?? observedModel, observed: true };
+    }
+    return { label: provider.label, observed: false };
   }
   const row = rows.find((entry) => entry.modelId === selectedModel);
-  return row?.modelLabel ?? selectedModel;
+  return { label: row?.modelLabel ?? selectedModel, observed: false };
+}
+
+/**
+ * Trigger label is the model label only (Paseo buildSelectedTriggerLabel + G11)
+ * — the UI shows a provider glyph beside it.
+ */
+export function resolveTriggerLabel(args: TriggerArgs): string {
+  return resolveTrigger(args).label;
 }
 
 /** Trigger tooltip/aria text: provider and model, de-duplicated when they coincide. */
-export function resolveTriggerTitle({
-  providers,
-  selectedProvider,
-  selectedModel,
-}: {
-  providers: BrowserProvider[];
-  selectedProvider: string;
-  selectedModel: string;
-}): string {
-  const label = resolveTriggerLabel({ providers, selectedProvider, selectedModel });
+export function resolveTriggerTitle(args: TriggerArgs): string {
+  const { label, observed } = resolveTrigger(args);
   if (label === "Select model" || label === "Loading…" || label === "Error") {
     return label;
   }
-  const provider = providers.find((entry) => entry.id === selectedProvider);
+  const provider = args.providers.find((entry) => entry.id === args.selectedProvider);
   if (!provider) {
     return label;
   }
   if (label === provider.label) {
     return provider.label;
   }
-  return `${provider.label} · ${label}`;
+  return observed ? `${provider.label} · ${label} (default)` : `${provider.label} · ${label}`;
 }

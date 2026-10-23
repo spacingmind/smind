@@ -33,6 +33,9 @@ export class FakeWsClient implements WsClientLike {
     onEvent?: EventFunc,
     options?: CallOptions,
   ): Promise<TResult> {
+    // The shared run-list query (runListQueryOptions, read by the composer chip) is the only param-less run.list
+    // that carries a query signal; answer it empty and unrecorded so nth("run.list", n) keeps meaning the timeline's.
+    if (method === "run.list" && params === undefined && options?.signal) return Promise.resolve([] as TResult);
     return new Promise<TResult>((resolve, reject) => {
       this.calls.push({
         method,

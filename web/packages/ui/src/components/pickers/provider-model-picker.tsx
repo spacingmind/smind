@@ -51,6 +51,8 @@ export interface ProviderModelPickerProps {
   providers: BrowserProvider[];
   selectedProvider: string;
   selectedModel: string;
+  /** The model the latest run reported: names the chip when selectedModel is "" and no default is configured or catalogued. */
+  observedModel?: string;
   /** Chat bound => only that provider is offered (ADR-0016 P3). */
   boundProvider: string | null;
   /** The line shown while bound (default: "Bound to <provider> — start a new chat to switch providers"); `null` hides it, for an owner that is not a chat (Settings -> Providers). */
@@ -143,6 +145,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
     providers,
     selectedProvider,
     selectedModel,
+    observedModel,
     boundProvider,
     boundNotice,
     disabled,
@@ -174,7 +177,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
     () => (boundProvider ? providers.filter((p) => p.id === boundProvider) : providers),
     [providers, boundProvider],
   );
-  const triggerArgs = { providers, selectedProvider, selectedModel };
+  const triggerArgs = { providers, selectedProvider, selectedModel, observedModel };
   const label = resolveTriggerLabel(triggerArgs);
   const title = resolveTriggerTitle(triggerArgs);
   const canGoBack = view.kind === "provider" && visibleProviders.length > 1;

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import { Icons } from "@/lib/icons";
 
+import { useObservedModel } from "@/hooks/use-observed-model";
 import { ProviderModelPicker, type PickerProfileRow } from "@/components/pickers/provider-model-picker";
 import { readRunConfigPreference, writeRunConfigPreference } from "@/components/composer/run-config-preference";
 import { setSettingsIntent } from "@/lib/settings-intent";
@@ -81,6 +82,8 @@ export interface RunConfigContextValue {
     disabled: boolean;
     /** ADR-0016 P3: the chat's own bound provider (chats.Provider, set on its first run and immutable after) -- non-null makes the combined picker offer only that provider, since a stored agent session is provider-native. */
     boundProvider: Provider | null;
+    /** The chat this config belongs to (null before one exists): where the chip looks for the model a default resolved to. */
+    chatId: number | null;
     /** Set while a live-switch-capable run is active: the Mode/Auto-accept pills drive it instead of the next run's config. */
     liveRun: LiveRunControls | null;
   };
@@ -324,10 +327,11 @@ export function RunConfigToolbar({
         supportsAutoAccept: supportsAutoAccept(providers, state.provider),
         disabled,
         boundProvider,
+        chatId,
         liveRun,
       },
     };
-  }, [state, setProviderModel, setPermissionMode, setAutoAccept, setThinkingLevel, applyProfile, clearAgent, resetToAgent, profiles, providers, providersLoading, disabled, boundProvider, providerHealth, onPickerOpen, liveRun]);
+  }, [chatId, state, setProviderModel, setPermissionMode, setAutoAccept, setThinkingLevel, applyProfile, clearAgent, resetToAgent, profiles, providers, providersLoading, disabled, boundProvider, providerHealth, onPickerOpen, liveRun]);
 
   useEffect(() => {
     onChange?.(value);
@@ -367,6 +371,7 @@ function RunConfigToolbarModelPicker() {
       })),
     [meta.profiles, meta.providers],
   );
+  const observedModel = useObservedModel(meta.chatId, state.provider, state.model === "");
   const baseAgent = state.baseAgentId ? meta.profiles.find((p) => String(p.ID) === state.baseAgentId) : undefined;
   const openSettings = (sectionId: string) => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId } }));
 
@@ -376,6 +381,7 @@ function RunConfigToolbarModelPicker() {
         providers={browserProviders}
         selectedProvider={state.provider}
         selectedModel={state.model}
+        observedModel={observedModel}
         boundProvider={meta.boundProvider}
         disabled={meta.disabled}
         profileRows={profileRows}
