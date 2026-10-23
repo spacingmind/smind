@@ -149,6 +149,8 @@ func cmdServe(args []string) int {
 	}
 	srv.API().AttachUsage(poller, registry, passive)
 	srv.API().Runs.SetMaxConcurrentRunsPerTree(cfg.Orchestration.MaxConcurrentRunsPerTree)
+	srv.API().Runs.SetNotifyParent(cfg.Orchestration.NotifyParent)
+	srv.API().Runs.SetNotifyDebounce(time.Duration(cfg.Orchestration.NotifyDebounceSeconds) * time.Second)
 	wireAttachments(srv.API(), wm, db)
 	// The relay device admin methods must be registered before the first
 	// connection is served (SetRelayDevices is not safe against concurrent

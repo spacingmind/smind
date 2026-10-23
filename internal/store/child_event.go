@@ -193,3 +193,33 @@ func (s *Store) EnqueueChildEvent(in ChildEventInput) (item ChatQueueItem, appen
 	item, err = s.GetChatQueueItem(id)
 	return item, appended, err
 }
+
+// LatestFinishedRun returns taskID's most recently started non-running run.
+// ok is false when the task has none.
+func (s *Store) LatestFinishedRun(taskID int64) (Run, bool, error) {
+	r, err := scanRun(s.db.QueryRow(
+		`SELECT `+runColumns+` FROM runs WHERE task_id = ? AND status != 'running'
+		 ORDER BY started_at DESC, id DESC LIMIT 1`, taskID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Run{}, false, nil
+	}
+	if err != nil {
+		return Run{}, false, fmt.Errorf("latest finished run for task %d: %w", taskID, err)
+	}
+	return r, true, nil
+}
+
+// LatestRunForChat returns chatID's most recently started run (any status).
+// ok is false when the chat has none.
+func (s *Store) LatestRunForChat(chatID int64) (Run, bool, error) {
+	r, err := scanRun(s.db.QueryRow(
+		`SELECT `+runColumns+` FROM runs WHERE chat_id = ?
+		 ORDER BY started_at DESC, id DESC LIMIT 1`, chatID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Run{}, false, nil
+	}
+	if err != nil {
+		return Run{}, false, fmt.Errorf("latest run for chat %d: %w", chatID, err)
+	}
+	return r, true, nil
+}
