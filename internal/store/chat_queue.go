@@ -17,6 +17,10 @@ const (
 	ChatQueueSourceHuman        = "human"
 	ChatQueueSourceOrchestrator = "orchestrator"
 	ChatQueueSourceAgent        = "agent"
+	// ChatQueueSourceChildEvent is a daemon-authored message about a child
+	// run finishing (ADR-0041 B3). Never accepted on the wire: only the
+	// daemon enqueues it.
+	ChatQueueSourceChildEvent = "child_event"
 
 	// ChatQueueCancelUser/ChatQueueCancelAuto are the cancel_kind values
 	// stamped when a queued item is cancelled: 'user' by the
