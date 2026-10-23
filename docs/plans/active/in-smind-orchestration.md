@@ -164,11 +164,28 @@ Manual (recorded under Validation)
 
 - 2026-10-23: dogfood logs (2026-10-22/23), ADR-0016/0017/0018/0019/0020/0021/0027/0028/0040, the orchestration code (`internal/runs`, `cmd/smind/mcp_*`, bundled skills) and Paseo's notification and tool-policy code read; ADR-0041 and this plan written, docs PR opened. **Stopped for the Human's review.** No code, no live calls.
 - 2026-10-23: ADR-0041 **accepted by the Human** (all 12 as recommended); status updated in #530. Implementation starts with R1.
+- 2026-10-23: **Item R built through smind** (dogfood daemon, claude-native Sonnet 5.5 `--mode auto`, one Lead, about 45 Peer sends, roughly USD 35 in total) and merged as non-stacked PRs, in this order: R1 #541 (classifier, store columns, `rate_limit_event`, wire), R2 #546 (task wait exit 6, MCP, task.tree, skills), F1 #549 (provider cooldown), N1 #551 (reply chat, notifyOnFinish, held queue items), R3 #550 (web and mobile footer, sidebar dot, lineage), N2 #552 (parent notifier), F2 #555 (failover data and `wait`), zone fix #553. Also merged: F3 #557 (fallback), N3 #558 (child-update surfaces), and the flake fix #556.
+- Deviations from the plan as written: (1) a **profile send keeps `source=human`** (ADR-0019 auth) but now forwards `fromTaskId/fromChatId`, otherwise a Lead using seat profiles would never be notified (N1); (2) **GLM's reset text is UTC+8**, not the daemon's zone (#553, ADR correction); (3) a **model-scoped** Claude limit (`weekly-opus`, `weekly-sonnet`) does not cool the provider (F1); (4) there is **no `smind profile edit`** command (only add/ls/rm), so `onRateLimit` is set by `profile.update` or `profile add`; (5) the provider cooldown, `wait` and `fallback` all treat a **missing reset time** as "do nothing automatic" (never guessed); (6) `NotBefore` had to be added to the chat queue wire for the strip (N3).
+- **Still open in Item R:** web "Retry on <fallback>" / "Wait until HH:MM" buttons and the failed run's "continued on <provider> in chat #N" footer badge (AC17 and AC20's UI half; the daemon, CLI and MCP halves are done), mobile "Wait" label, and the first live measurement of a Lead wake (N3's cost note: `smind task runs` now shows ORIGIN so notification-started runs can be priced).
 
 ## Validation
 
-Docs only. Checked before opening the PR: ADR numbering (0040 is the latest; 0041 is next); every cited ADR, plan and PR exists (#373, #502, #505, #507, #528, #529); cited code facts were read on `develop` @ `235d22e9`
-(`Registry.finish` and `notifyObservers`, `MarkRunningRunsInterrupted` sets no `finished_at`, `chat_queue` columns and `StartWhenBusy`, `mcp_task_send.go` provenance fields, `orchestration.maxDepth`/per-tree guard, `task_wait` exit codes in
-`cmd/smind/task_wait.go`, `claude-agent-sdk-go` v0.4.0's `RateLimitEvent` unused by smind, the push notifier's root-only rule); Paseo citations at `refs/paseo` `8d9e7d3a`.
+**Item R (daemon, CLI, MCP, web, mobile), evidence by AC** (all PRs: `task lint` 0, `task test` 0 on the branch, web `tsc` 0 where web was touched; `task test` needed a rerun on some PRs because of two load flakes, `src/lib/attachments/attachments-encode.test.ts` and `TestArchiveFinished_QueuedPromptMakesTaskNotFinished`, the second root-caused and fixed in #556):
 
-**Not verified (and where the first PR must verify it):** the exact `rate_limit_event` shape the installed Claude CLI emits on a hard rejection (R1 captures a real one or a CLI-produced fixture, no live quota burn); whether Claude Code passes an MCP entry's `env` through to the stdio server on the CLI version in use (S2b; fallback: argv); whether Codex's turn-error info carries a reset time (R1); GLM's reset text is local time without a zone (assumed from the single logged string); the cost of a Lead wake (N3 measures it).
+| AC | Evidence |
+|---|---|
+| 1–5 | `TestClassify_*` (ratelimit), `TestFinish_*`, `TestStatusEnumUnchanged`, `TestMigrate_RunFailureColumns`, `TestRunLogs_*` (#541); GLM zone `TestClassify_GLMResetIsShanghaiTime` (#553) |
+| 6 | `TestTaskWait_ExitSixOnRateLimited`, `TestTaskRuns_StatusTextForRateLimited`, `TestMCPTaskStatus_FailureFields`, `TestMCPTaskWait_RateLimitedResult`, `TestMCPRunList_FailureFields`, `TestMCPTaskTree_FailureFieldOnNode`, `TestTaskTree_NodeCarriesLatestRunFailure` (#546) |
+| 7 | run-footer, use-run-timeline, task-lineage, use-task-attention, app-sidebar and mobile `runFooter` tests; light and dark screenshots at 1280 and 390 px, reviewed by the Lead and spot-checked by the Supervisor (#550) |
+| 8–15 | `TestReplyChat_*`, `TestMCPTaskSend_NotifyOnFinishForwarded`, `TestMCPTaskSend_ProfileSendForwardsFromIds` (#551); `TestParentNotify_*` (19 scenarios incl. quiescence, coalescing, restart scan, no loop, queue full, 32-goroutine `-race`), `TestBuildChildEventBlock_*`, `TestSubtreeBusy`, `TestEnqueueChildEvent_*` (#552); the timeline row and `parseChildEventPrompt` tests (#558) |
+| 16 | `TestCooldown_*`, `TestProviderList_CooldownUntil`, `TestMCPProviderList_CooldownUntil` (#549) |
+| 17 | daemon, CLI and MCP halves: `fallbackProfileId` on `run.logs`, `task_status`, `task_wait`, `task wait` hint (#555). **Web buttons not built** |
+| 18 | `TestPolicy_Wait*`, `TestPolicy_UserCancelWins`, `TestPolicy_SurvivesRestart`, `TestPolicy_ParentHearsRetryNotTheFailure` (#555) |
+| 19 | `TestOnRateLimitFallback_*`, `TestRunFailoverEventShape`, `TestRunFailoverEventOnBus` (#557) |
+| 20 | `TestFailover_ParentHearsSuccessorOnce`, `TestFailover_CopiesReplyChatAndCountsInTreeGuard` (#557). **Web "continued on" badge not built** |
+
+**Not verified:** a real Claude `rate_limit_event` (none seen naturally, no quota burned; covered by the SDK decoder and a fake-CLI scenario); a live end-to-end Lead wake through a real model (daemon side is covered by the notifier tests with fake agents); whether GLM's reset is UTC+8 is an inference from third-party reports plus one consistent run, not a vendor statement; Codex's turn error carries no structured reset (text matcher only).
+
+**Item S and ACs 21–28:** not started.
+
+**Docs-only record for the ADR PR (#530):** ADR numbering, cited ADR/plan/PR existence and the code facts cited there were read on `develop` @ `235d22e9` (see the PR); Paseo citations at `refs/paseo` `8d9e7d3a`.
