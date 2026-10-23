@@ -280,12 +280,19 @@ export function Composer({
     if (!attachKey || (!queuedInserts?.length && !queuedTexts?.length)) return;
     const store = useComposerAttachmentsStore.getState();
     let text = draftRef.current.value;
-    for (const ref of store.takeInserts(attachKey)) {
+    const refs = store.takeInserts(attachKey);
+    const added = store.takeTexts(attachKey);
+    // Anything added after a quoted block (the draft ends on a closing fence) or alongside quoted text starts on a fresh
+    // paragraph, so a token can never land on a fence line and leave the earlier quote unclosed.
+    if (refs.length > 0 && text.trim() !== "" && (added.length > 0 || /(^|\n)`{3,}[ \t]*$/.test(text.trimEnd()))) {
+      text = text.endsWith("\n\n") ? text : text.endsWith("\n") ? `${text}\n` : `${text}\n\n`;
+    }
+    for (const ref of refs) {
       store.rememberMention(attachKey, ref);
       text += `${text === "" || /\s$/.test(text) ? "" : " "}${formatMentionToken(ref)} `;
     }
-    for (const added of store.takeTexts(attachKey)) {
-      text = text.trim() === "" ? added : `${text.trimEnd()}\n\n${added}`;
+    for (const block of added) {
+      text = text.trim() === "" ? block : `${text.trimEnd()}\n\n${block}`;
     }
     pendingCaret.current = text.length;
     draftRef.current.setValue(text);

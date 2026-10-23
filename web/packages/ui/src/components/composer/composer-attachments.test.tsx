@@ -86,6 +86,25 @@ afterEach(() => {
 });
 
 describe("composer attachments", () => {
+  it("appending to an existing quoted draft keeps its closing fence on its own line", async () => {
+    await renderComposer();
+    const key = attachmentDraftKey(1, 10);
+    const existing = "see this\nUntrusted text (quoted):\n```\nold\n```";
+    type(existing);
+    await act(async () => {
+      const store = useComposerAttachmentsStore.getState();
+      store.queueInsert(key, { path: "src/sort.ts", line: 1 });
+      store.queueText(key, "NEW QUOTE\n```\nnew\n```");
+      store.queueText(key, "SECOND QUOTE");
+    });
+    await flush();
+    const value = (screen.getByLabelText("Prompt") as HTMLTextAreaElement).value;
+    expect(value.startsWith(`${existing}\n\n@src/sort.ts#L1`)).toBe(true);
+    expect(value).toContain("\n```\n\n@src/sort.ts#L1");
+    expect(value).toContain("@src/sort.ts#L1\n\nNEW QUOTE\n```\nnew\n```\n\nSECOND QUOTE");
+    expect(value.split("\n").filter((l) => l.startsWith("```") && l !== "```")).toEqual([]);
+  });
+
   it("queued insert and queued text both land in the draft", async () => {
     const { sent } = await renderComposer();
     const key = attachmentDraftKey(1, 10);
