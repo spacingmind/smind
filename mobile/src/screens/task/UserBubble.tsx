@@ -4,18 +4,32 @@
 
 import { memo, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { LineAttachment } from '../../runTimeline';
 import { AppTheme } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
+import { MessageAttachments } from './MessageAttachments';
 
-export const UserBubble = memo(function UserBubble({ text }: { text: string }) {
+export const UserBubble = memo(function UserBubble({
+  text,
+  attachments,
+  loadThumb,
+}: {
+  text: string;
+  /** The prompt's attachments, read-only under the bubble; the array is stable per line. */
+  attachments?: LineAttachment[];
+  loadThumb?: (runId: string, id: string) => Promise<string | undefined>;
+}) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   return (
-    <View style={styles.bubble}>
-      <Text style={styles.text} selectable>
-        {text}
-      </Text>
-    </View>
+    <>
+      <View style={styles.bubble}>
+        <Text style={styles.text} selectable>
+          {text}
+        </Text>
+      </View>
+      {attachments !== undefined && loadThumb !== undefined && <MessageAttachments attachments={attachments} loadThumb={loadThumb} />}
+    </>
   );
 });
 

@@ -27,6 +27,9 @@ const NATIVE: Record<IconName, ReturnType<typeof Icon.select>> = {
   stop: Icon.select({ ios: 'stop.fill', android: import('@expo/material-symbols/stop.xml') }),
   send: Icon.select({ ios: 'arrow.up', android: import('@expo/material-symbols/arrow_upward.xml') }),
   link: Icon.select({ ios: 'link', android: import('@expo/material-symbols/link.xml') }),
+  attach: Icon.select({ ios: 'paperclip', android: import('@expo/material-symbols/attach_file.xml') }),
+  file: Icon.select({ ios: 'doc', android: import('@expo/material-symbols/description.xml') }),
+  image: Icon.select({ ios: 'photo', android: import('@expo/material-symbols/image.xml') }),
   devices: Icon.select({ ios: 'laptopcomputer.and.iphone', android: import('@expo/material-symbols/devices.xml') }),
 };
 

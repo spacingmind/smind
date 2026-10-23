@@ -11,10 +11,10 @@
 // appended after the lines, in that order.
 
 import type { PermissionRequestState } from '../permissionRequests';
-import type { TimelineLine } from '../runTimeline';
+import type { LineAttachment, TimelineLine } from '../runTimeline';
 
 export type TranscriptItem =
-  | { type: 'user'; key: string; text: string }
+  | { type: 'user'; key: string; text: string; attachments?: LineAttachment[] }
   | { type: 'assistant'; key: string; text: string }
   | { type: 'thinking'; key: string; text: string }
   | { type: 'tool'; key: string; toolName: string; title: string; status: string }
@@ -43,7 +43,7 @@ export function buildTranscript(
       if (last && last.type === type) last.text += line.text;
       else items.push({ type, key: line.key, text: line.text });
     } else if (line.role === 'user') {
-      items.push({ type: 'user', key: line.key, text: line.text });
+      items.push(line.attachments?.length ? { type: 'user', key: line.key, text: line.text, attachments: line.attachments } : { type: 'user', key: line.key, text: line.text });
     } else {
       items.push({ type: 'meta', key: line.key, text: line.text });
     }

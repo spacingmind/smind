@@ -60,6 +60,56 @@ export interface RunSummary {
   FailoverOf?: string;
   /** The profile the run used; absent on older daemons. */
   ProfileID?: number;
+  /** ADR-0038: metadata of the prompt's attachments (never the bytes); lowercase wire name. */
+  attachments?: AttachmentMeta[];
+}
+
+/** One attachment of a run.start request, as the daemon takes it (data is base64). */
+export interface AttachmentPayload {
+  kind: 'image' | 'file';
+  name: string;
+  mimeType: string;
+  data: string;
+}
+
+/** Metadata run.list carries for a sent prompt's attachments. */
+export interface AttachmentMeta {
+  id: string;
+  kind: 'image' | 'file' | 'file_ref' | 'pr' | 'issue';
+  name?: string;
+  mimeType?: string;
+  size?: number;
+  width?: number;
+  height?: number;
+  path?: string;
+  /** pr/issue kinds: the forge number and title. */
+  number?: number;
+  title?: string;
+}
+
+/** daemon.info's attachment limits and accepted kinds (absent on an older daemon). */
+export interface AttachmentsInfo {
+  maxCount: number;
+  maxImageBytes: number;
+  maxFileBytes: number;
+  maxTotalBytes: number;
+  maxMessageBytes: number;
+  images: string[];
+  kinds?: string[];
+}
+
+/** daemon.info: only the attachment limits are read here. */
+export async function fetchDaemonInfo(conn: RelayConnection): Promise<{ attachments?: AttachmentsInfo }> {
+  return (await conn.call('daemon.info')) as { attachments?: AttachmentsInfo };
+}
+
+/** run.attachment: one attachment's bytes (base64), fetched lazily for a timeline thumbnail. */
+export async function fetchRunAttachment(
+  conn: RelayConnection,
+  runId: string,
+  id: string,
+): Promise<{ name: string; mimeType: string; size: number; data: string }> {
+  return (await conn.call('run.attachment', { runId, id })) as { name: string; mimeType: string; size: number; data: string };
 }
 
 /** workspace.list: every workspace this daemon tracks. */
@@ -92,8 +142,16 @@ export async function listRunsForTask(conn: RelayConnection, taskId: number, cha
  * would stop the run. Caller follows up with its own run.attach, the
  * same detach-not-stop path the screen already uses for viewing a run.
  */
-export async function startRun(conn: RelayConnection, taskId: number, provider: string, prompt: string): Promise<string> {
-  const result = (await conn.call('run.start', { taskId, provider, prompt })) as { runId: string };
+export async function startRun(
+  conn: RelayConnection,
+  taskId: number,
+  provider: string,
+  prompt: string,
+  attachments?: AttachmentPayload[],
+): Promise<string> {
+  const params: Record<string, unknown> = { taskId, provider, prompt };
+  if (attachments && attachments.length > 0) params.attachments = attachments;
+  const result = (await conn.call('run.start', params)) as { runId: string };
   return result.runId;
 }
 
@@ -140,12 +198,13 @@ export type RunStartResult = { kind: 'started'; runId: string } | { kind: 'queue
 /** run.start with whenBusy: {queued, queueItemId} becomes the queued variant, {runId} the started one. */
 export async function startRunWhenBusy(
   conn: RelayConnection,
-  p: { taskId: number; chatId?: number; provider: string; prompt: string; whenBusy: WhenBusy; model?: string; permissionMode?: string },
+  p: { taskId: number; chatId?: number; provider: string; prompt: string; whenBusy: WhenBusy; model?: string; permissionMode?: string; attachments?: AttachmentPayload[] },
 ): Promise<RunStartResult> {
   const params: Record<string, unknown> = { taskId: p.taskId, provider: p.provider, prompt: p.prompt, whenBusy: p.whenBusy };
   if (p.chatId !== undefined) params.chatId = p.chatId;
   if (p.model) params.model = p.model;
   if (p.permissionMode) params.permissionMode = p.permissionMode;
+  if (p.attachments && p.attachments.length > 0) params.attachments = p.attachments;
   const result = (await conn.call('run.start', params)) as { runId?: string; queued?: boolean; queueItemId?: number };
   if (result.queued) return { kind: 'queued', queueItemId: result.queueItemId! };
   return { kind: 'started', runId: result.runId! };

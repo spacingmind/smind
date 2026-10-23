@@ -38,7 +38,15 @@
             "web": false
           }
         }
-      ]
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "smind attaches photos you choose to your prompts.",
+          "cameraPermission": false
+        }
+      ],
+      "expo-document-picker"
     ],
     "extra": {
       "eas": {

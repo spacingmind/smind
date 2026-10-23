@@ -12,6 +12,9 @@
 // (the queue UI shows the prompt) and nothing attaches.
 
 import { RunSummary, RunStartResult, startRun, startRunWhenBusy, WhenBusy } from './api';
+import { attachmentPayloads } from './attachSend';
+import { PendingAttachment } from './attachments';
+import { lineAttachmentsFromPending } from './lineAttachments';
 import { CONTINUE_PROMPT } from './runFooter';
 import { RelayConnection } from './relay/RelayConnection';
 import { lineFromAttachEvent, TimelineLine } from './runTimeline';
@@ -38,6 +41,8 @@ export interface SendFollowUpDeps {
 export interface SendFollowUpOpts {
   whenBusy?: WhenBusy;
   chatId?: number;
+  /** ADR-0038: the composer's pending attachments; the optimistic user line shows them and run.start carries their payloads. */
+  attachments?: PendingAttachment[];
 }
 
 /**
@@ -59,12 +64,16 @@ export async function sendFollowUpPrompt(
   opts?: SendFollowUpOpts,
 ): Promise<RunStartResult> {
   const userLine = { key: `f${nextSeq()}`, role: 'user', text: prompt } as TimelineLine;
+  const pending = opts?.attachments ?? [];
+  const lineAttachments = lineAttachmentsFromPending(pending);
+  if (lineAttachments) userLine.attachments = lineAttachments;
+  const payloads = attachmentPayloads(pending);
   deps.appendLines([userLine]);
   let result: RunStartResult;
   try {
     result = opts?.whenBusy
-      ? await startRunWhenBusy(conn, { taskId, chatId: opts.chatId, provider, prompt, whenBusy: opts.whenBusy })
-      : { kind: 'started', runId: await startRun(conn, taskId, provider, prompt) };
+      ? await startRunWhenBusy(conn, { taskId, chatId: opts.chatId, provider, prompt, whenBusy: opts.whenBusy, attachments: payloads })
+      : { kind: 'started', runId: await startRun(conn, taskId, provider, prompt, payloads) };
   } catch (err) {
     deps.removeLines([userLine]);
     throw err;

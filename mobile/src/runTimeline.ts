@@ -5,6 +5,20 @@
 // explicitly not required). Wire shapes are ADR 0008's, as implemented by
 // internal/wsapi/handlers.go's runLogEvent/attachAndStream.
 
+/** A sent prompt's attachment as the timeline shows it: metadata only, plus a local uri on an optimistic line and the run id a lazy thumbnail fetch needs. */
+export interface LineAttachment {
+  id: string;
+  label: string;
+  sizeLabel: string;
+  kind: string;
+  /** run.attachment would fit the frame (attachments.canThumbnail). */
+  thumbnail: boolean;
+  /** Local image uri: set on the optimistic line, so no fetch is needed. */
+  uri?: string;
+  /** The run whose run.attachment serves this item. */
+  runId?: string;
+}
+
 /** One rendered timeline line. */
 export interface TimelineLine {
   key: string;
@@ -19,6 +33,8 @@ export interface TimelineLine {
    * `text`. Item 3 (mobile-ui-polish plan)'s reason for this field.
    */
   toolCall?: { toolName: string; title: string; status: string };
+  /** User lines only: the prompt's attachments (ADR-0038), shown read-only under the message. */
+  attachments?: LineAttachment[];
 }
 
 interface RunLogEvent {
