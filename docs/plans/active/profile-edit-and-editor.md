@@ -56,11 +56,13 @@ Web (`profiles-section.test.tsx`, `use-profiles.test.ts`):
 
 ## Progress
 - CLI (task 48, peer-glm): 3 commits, ACCEPTED (PR-CLI).
-- Web (task 49, peer-sonnet): see PR-WEB.
+- Web (task 49, peer-sonnet): 4 commits, ACCEPTED (PR #576).
 
 ## Validation — CLI
 - AC-C1..C6 confirmed. `go test ./cmd/smind -run Profile -count=1` ok; mutation (drop the `--fallback-profile=0` clear) fails TestProfileEditClearsModelAndFallback.
 - Real run against an isolated daemon (throwaway SMIND_HOME, port 47391): notes cleared, fallback set → `fallback→2`; `--child-policy=profiles` on a no-tools profile → daemon text `a profile without orchestration tools cannot launch children`, exit 1, profile unchanged; clear model/fallback/skills + `--orchestration-tools=unmanaged` → ROLE `-`; unknown id exit 1; no flags exit 2.
 
 ## Validation — Web
-(filled in by PR-WEB)
+- AC-W1..W5 confirmed in PR #576: tsc clean, vitest 38 passed (profiles-section + use-profiles), `task test` ui 3461 passed. Mutation (drop contract params from submit) fails 7 tests.
+- Screenshots light + dark and transition frames (editor opening, child list appearing, inline daemon errors, over-limit) reviewed by the Lead: /tmp/r4/shots/. Not verified: native selects vs custom pickers look; skills validity is daemon-side only.
+- Plan stays in active/ until #574 and #576 are merged.
