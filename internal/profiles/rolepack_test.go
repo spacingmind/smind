@@ -195,3 +195,22 @@ func TestSeedRoles_LeadInstructionsDefaultToSonnetPeers(t *testing.T) {
 		t.Errorf("peer-glm notes = %q, want the opt-in wording", byName(t, r, "peer-glm").Notes)
 	}
 }
+
+// A seat's own background task finishing does not start a run, so a Lead or
+// Supervisor that ends its turn "waiting" on one stalls the tree (dogfood log
+// entry 76): both seats carry the rule, a Peer (which works to completion) is
+// not burdened with it.
+func TestSeedRoles_LeadAndSupervisorNeverWaitOnBackgroundWork(t *testing.T) {
+	t.Parallel()
+	r := newTestRegistry(t)
+	seed(t, r)
+	const rule = "Never end a turn waiting on a background command or monitor you started"
+	for _, name := range []string{"lead", "supervisor"} {
+		if got := byName(t, r, name).Instructions; !strings.Contains(got, rule) || !strings.Contains(got, "hand it to a child task") {
+			t.Errorf("%s instructions lack the background-wait rule: %q", name, got)
+		}
+	}
+	if got := byName(t, r, "peer-sonnet").Instructions; strings.Contains(got, rule) {
+		t.Errorf("peer-sonnet instructions carry the Lead/Supervisor rule: %q", got)
+	}
+}
