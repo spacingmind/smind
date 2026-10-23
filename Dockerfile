@@ -27,6 +27,15 @@ ARG NODE_VERSION=22.23.3
 # from the same host as the tarball. Bump all three together.
 ARG NODE_SHA256_AMD64=df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de
 ARG NODE_SHA256_ARM64=a44aeb94849a299b22df10b9e622ec2f605c2183501bc40590705131de7c740f
+# The GitHub CLI (ADR-0039 section 8): the daemon opens and reads pull requests
+# through `gh`, and the user signs in to it from Settings -> GitHub. Debian
+# bookworm's own package is too old (no `gh auth status --json`), so the
+# release binary is installed the same way as Node: SHA-256 pinned here (from
+# https://github.com/cli/cli/releases/download/v2.101.0/gh_2.101.0_checksums.txt).
+# Bump all three together.
+ARG GH_VERSION=2.101.0
+ARG GH_SHA256_AMD64=9bca2d1c16825f109907a23307628a2f0698fbf99662b73a5cf0b020293072b8
+ARG GH_SHA256_ARM64=b57e8063f18862647c9d22727c32e9da1b963f8bf9db648fe123a6975695640f
 
 LABEL org.opencontainers.image.title="smind" \
       org.opencontainers.image.description="The smind daemon: agent orchestration with a web UI" \
@@ -34,15 +43,15 @@ LABEL org.opencontainers.image.title="smind" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}"
 
-# git + openssh-client: worktrees and remotes; curl: the healthcheck; gosu + tini:
+# git + openssh-client: worktrees and remotes; gh (below): GitHub pull requests; curl: the healthcheck; gosu + tini:
 # privilege drop and PID 1; procps: pgrep for diagnostics and the smoke tests.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         ca-certificates curl git gosu openssh-client procps tini xz-utils; \
     case "${TARGETARCH}" in \
-        amd64) node_arch=x64; node_sha="${NODE_SHA256_AMD64}" ;; \
-        arm64) node_arch=arm64; node_sha="${NODE_SHA256_ARM64}" ;; \
+        amd64) node_arch=x64; node_sha="${NODE_SHA256_AMD64}"; gh_sha="${GH_SHA256_AMD64}" ;; \
+        arm64) node_arch=arm64; node_sha="${NODE_SHA256_ARM64}"; gh_sha="${GH_SHA256_ARM64}" ;; \
         *) echo "unsupported TARGETARCH '${TARGETARCH}'" >&2; exit 1 ;; \
     esac; \
     node_tar="node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
@@ -52,6 +61,13 @@ RUN set -eux; \
     tar -xJf "${node_tar}" -C /usr/local --strip-components=1 --no-same-owner; \
     rm -f "${node_tar}"; \
     node --version; npm --version; \
+    gh_dir="gh_${GH_VERSION}_linux_${TARGETARCH}"; \
+    gh_tar="${gh_dir}.tar.gz"; \
+    curl --proto '=https' --tlsv1.2 -fsSLO "https://github.com/cli/cli/releases/download/v${GH_VERSION}/${gh_tar}"; \
+    echo "${gh_sha}  ${gh_tar}" | sha256sum -c -; \
+    tar -xzf "${gh_tar}" -C /usr/local/bin --strip-components=2 --no-same-owner "${gh_dir}/bin/gh"; \
+    rm -f "${gh_tar}"; \
+    gh --version; \
     apt-get purge -y --auto-remove xz-utils; \
     rm -rf /var/lib/apt/lists/*; \
     groupadd --gid 1000 smind; \
