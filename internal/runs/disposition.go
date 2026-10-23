@@ -27,12 +27,27 @@ var needsContinueStopReasons = map[string]bool{
 	"budget_exceeded":   true,
 }
 
+// StopReasonDaemonRestart is the stop reason of a run the daemon ended by going
+// down (a graceful shutdown stops it; after a crash the startup reconciliation
+// marks it interrupted), recorded only when its chat has a stored agent session
+// to resume. Such a run is not finished and "continue" picks it back up.
+const StopReasonDaemonRestart = "daemon_restart"
+
+// StopReasonDaemonRestartFresh is the same interruption for a chat with no
+// stored session (the run died before the agent reported one): it says why the
+// run ended, but there is nothing to continue from.
+const StopReasonDaemonRestartFresh = "daemon_restart_fresh"
+
 // DispositionFor derives a run's disposition. It is empty for a run that is
-// still going, failed, was stopped, or finished normally: only a run that ended
-// "done" at a cap needs a continue (an error or a stop already says it did not
-// finish, and a cancel is the human's own choice).
+// still going, failed, was stopped, or finished normally: a run that ended
+// "done" at a cap needs a continue, and so does one the daemon's restart cut off
+// (an error or a stop by the user already says it did not finish, and a cancel
+// is the human's own choice).
 func DispositionFor(status Status, stopReason string) string {
-	if status == StatusDone && needsContinueStopReasons[stopReason] {
+	switch {
+	case status == StatusDone && needsContinueStopReasons[stopReason]:
+		return DispositionNeedsContinue
+	case (status == StatusStopped || status == StatusInterrupted) && stopReason == StopReasonDaemonRestart:
 		return DispositionNeedsContinue
 	}
 	return ""

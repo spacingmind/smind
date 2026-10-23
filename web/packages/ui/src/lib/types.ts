@@ -225,7 +225,8 @@ export interface ProviderTestResult {
 // internal/runs.Status's four values (internal/runs/runs.go) -- carried
 // over the wire as their underlying string, same as any other Go string
 // enum with no json tag remapping.
-export type RunStatusValue = "running" | "done" | "error" | "stopped";
+/** "interrupted" is a run whose daemon crashed under it (the startup reconciliation); a graceful restart reads "stopped" with stop reason daemon_restart. */
+export type RunStatusValue = "running" | "done" | "error" | "stopped" | "interrupted";
 
 // Mirrors internal/runs.RunUsage (ADR-0020): a run's reported usage from
 // its own agent events. Every field but `source` is optional/null and

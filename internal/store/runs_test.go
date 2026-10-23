@@ -178,7 +178,7 @@ func TestStore_MarkRunningRunsInterrupted(t *testing.T) {
 		t.Fatalf("CreateRun(done-1) error = %v", err)
 	}
 
-	n, err := s.MarkRunningRunsInterrupted("interrupted")
+	n, err := s.MarkRunningRunsInterrupted("interrupted", nil)
 	if err != nil {
 		t.Fatalf("MarkRunningRunsInterrupted() error = %v", err)
 	}
@@ -204,7 +204,7 @@ func TestStore_MarkRunningRunsInterrupted(t *testing.T) {
 	}
 
 	// Idempotent: nothing left "running" to mark a second time.
-	n2, err := s.MarkRunningRunsInterrupted("interrupted")
+	n2, err := s.MarkRunningRunsInterrupted("interrupted", nil)
 	if err != nil {
 		t.Fatalf("MarkRunningRunsInterrupted() second call error = %v", err)
 	}
@@ -391,5 +391,47 @@ func TestUpdateRunProvenance_WritesOnlyNonNil(t *testing.T) {
 
 	if err := s.UpdateRunProvenance("no-such-run", RunProvenance{BaseSHA: strPtr("x")}); err == nil {
 		t.Fatal("UpdateRunProvenance() on missing run error = nil, want error")
+	}
+}
+
+func TestStore_MarkRunningRunsInterrupted_RecordsAStopReasonPerChat(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	task := newTestTaskForRuns(t, s)
+	now := time.Now().UTC()
+	chatA, err := s.CreateChat(task.ID, "A")
+	if err != nil {
+		t.Fatalf("CreateChat(A) error = %v", err)
+	}
+	chatB, err := s.CreateChat(task.ID, "B")
+	if err != nil {
+		t.Fatalf("CreateChat(B) error = %v", err)
+	}
+	for _, r := range []Run{
+		{ID: "chat-a", TaskID: task.ID, ChatID: chatA.ID, Provider: "claude-native", Prompt: "hi", Status: "running", StartedAt: now},
+		{ID: "chat-b", TaskID: task.ID, ChatID: chatB.ID, Provider: "claude-native", Prompt: "hi", Status: "running", StartedAt: now},
+	} {
+		if _, err := s.CreateRun(r); err != nil {
+			t.Fatalf("CreateRun(%s) error = %v", r.ID, err)
+		}
+	}
+
+	if _, err := s.MarkRunningRunsInterrupted("interrupted", func(chatID int64) string {
+		if chatID == chatA.ID {
+			return "resumable"
+		}
+		return "fresh"
+	}); err != nil {
+		t.Fatalf("MarkRunningRunsInterrupted() error = %v", err)
+	}
+	for id, want := range map[string]string{"chat-a": "resumable", "chat-b": "fresh"} {
+		r, err := s.GetRun(id)
+		if err != nil {
+			t.Fatalf("GetRun(%q) error = %v", id, err)
+		}
+		if r.StopReason != want {
+			t.Fatalf("GetRun(%q).StopReason = %q, want %q", id, r.StopReason, want)
+		}
 	}
 }

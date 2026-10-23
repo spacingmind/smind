@@ -60,6 +60,8 @@ const CAP_SENTENCES: Record<string, string> = {
   max_tokens: "Stopped at the output limit",
   max_turn_requests: "Hit the tool-turn limit",
   budget_exceeded: "Stopped at the budget limit",
+  // The daemon went down under the run (a restart): not a cap, but also not finished.
+  daemon_restart: "Interrupted when the daemon restarted",
 };
 
 const MINUTE_MS = 60_000;
@@ -217,7 +219,7 @@ export function describeRunFooter(
   // reasons here, decides, so a cap this client has never heard of (a budget
   // stop) still reads as needing a continue; an older daemon sends none and
   // the stop-reason cases below cover the two caps it can report.
-  if (run.status === "done" && run.disposition === NEEDS_CONTINUE) {
+  if (run.disposition === NEEDS_CONTINUE) {
     return detail({
       kind: "abnormal",
       sentence: `${CAP_SENTENCES[run.stopReason ?? ""] ?? "Stopped at a limit"} · not finished`,
@@ -284,6 +286,18 @@ export function describeRunFooter(
         sentence: "Hit the tool-turn limit",
         tone: "warning",
         action: "continue",
+        duration,
+        durationTitle: proseDuration(ms),
+        model: opts.modelLabel,
+        age,
+      });
+    case "daemon_restart_fresh":
+      // Cut off by a restart before the agent had a session: there is nothing to continue from.
+      return detail({
+        kind: "abnormal",
+        sentence: "Interrupted when the daemon restarted",
+        tone: "warning",
+        action: null,
         duration,
         durationTitle: proseDuration(ms),
         model: opts.modelLabel,

@@ -102,6 +102,8 @@ export function availabilityFromTaskTree(nodes: ReadonlyArray<TaskTreeNode>): Tr
 function sidebarRunState(status: RunStatusValue | undefined): TreeRunState {
   // The sidebar's runStatus map has no waiting_permission state (only the
   // task.tree build does); absent means "no run known" = idle.
+  // A run whose daemon crashed under it ("interrupted") has an unknown fate; task.tree reports it as an error.
+  if (status === "interrupted") return "error";
   return status ?? "idle";
 }
 
