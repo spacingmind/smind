@@ -29,6 +29,7 @@ import { supportsThinking, THINKING_LEVELS } from "@/lib/thinking-levels";
 import { describeProfile } from "@/lib/describe-profile";
 import type { AgentProfile, ModeInfo, ProviderInfo } from "@/lib/types";
 import { Icons } from "@/lib/icons";
+import { ProfileContractFields } from "@/components/settings/profile-contract-fields";
 import { contractFromProfile, contractParams, EMPTY_CONTRACT, instructionsBytes, INSTRUCTIONS_MAX_BYTES, type ProfileContractState } from "@/components/settings/profile-contract";
 
 // "Provider default" (the empty id -- the provider's own default mode) is
@@ -241,6 +242,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
                       error={error}
                       submitLabel={pending ? "Saving…" : "Add agent"}
                       providersLoading={!providersSettled}
+                      otherProfiles={profiles}
                     />
                   </li>
                 )}
@@ -313,6 +315,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
                           error={error}
                           submitLabel={pending ? "Saving…" : "Save"}
                           providersLoading={!providersSettled}
+                          otherProfiles={profiles.filter((o) => o.ID !== p.ID)}
                         />
                       )}
                     </li>
@@ -375,6 +378,7 @@ function ProfileForm({
   error,
   submitLabel,
   providersLoading,
+  otherProfiles,
 }: {
   idPrefix: string;
   form: ProfileFormState;
@@ -387,6 +391,8 @@ function ProfileForm({
   submitLabel: string;
   /** provider.list has not settled: the picker says "Loading…" like the composer's, instead of fallback ids. */
   providersLoading: boolean;
+  /** The saved profiles a fallback or child may point at (never the one being edited). */
+  otherProfiles: AgentProfile[];
 }) {
   const browserProviders = useMemo(() => buildBrowserProviders(providers, {}, { loading: providersLoading }), [providers, providersLoading]);
   return (
@@ -456,6 +462,7 @@ function ProfileForm({
         value={form.notes}
         onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
       />
+      <ProfileContractFields idPrefix={idPrefix} form={form} setForm={setForm} otherProfiles={otherProfiles} />
       {error && (
         <FormError message={error} testId={`${idPrefix}-error`} />
       )}
@@ -463,7 +470,7 @@ function ProfileForm({
         <Button type="button" variant="ghost" size="sm" data-testid={`${idPrefix}-cancel`} onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" size="sm" disabled={pending || !form.name.trim()} data-testid={`${idPrefix}-submit`}>
+        <Button type="submit" size="sm" disabled={pending || !form.name.trim() || instructionsBytes(form.instructions) > INSTRUCTIONS_MAX_BYTES} data-testid={`${idPrefix}-submit`}>
           {submitLabel}
         </Button>
       </div>
