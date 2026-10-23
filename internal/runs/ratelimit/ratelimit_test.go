@@ -32,8 +32,10 @@ func TestClassify_GLM429FiveHourFixture(t *testing.T) {
 		now  time.Time
 		want time.Time
 	}{
-		{"same day", at(2026, 10, 22, 15, 10, 0), at(2026, 10, 22, 17, 35, 18)},
-		{"next day", at(2026, 10, 22, 18, 0, 0), at(2026, 10, 23, 17, 35, 18)},
+		// The text is Asia/Shanghai (UTC+8) wall time: 17:35:18 CST is
+		// 16:35:18 in the ICT (+7) zone these tests use.
+		{"same day", at(2026, 10, 22, 15, 10, 0), at(2026, 10, 22, 16, 35, 18)},
+		{"next day", at(2026, 10, 22, 18, 0, 0), at(2026, 10, 23, 16, 35, 18)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -52,7 +54,7 @@ func TestClassify_GLMWrappedErrorStillMatches(t *testing.T) {
 	if r.Kind != KindRateLimited || r.Window != "5h" {
 		t.Fatalf("got %+v", r)
 	}
-	wantReset(t, r.ResetAt, at(2026, 10, 22, 17, 35, 18))
+	wantReset(t, r.ResetAt, at(2026, 10, 22, 16, 35, 18))
 }
 
 func TestClassify_UnparseableResetKeepsKindNilReset(t *testing.T) {
@@ -157,6 +159,38 @@ func TestClassify_GLMResetWithDate(t *testing.T) {
 		if r.Kind != KindRateLimited || r.Window != "5h" {
 			t.Fatalf("got %+v", r)
 		}
-		wantReset(t, r.ResetAt, at(2026, 10, 22, 17, 35, 18))
+		wantReset(t, r.ResetAt, at(2026, 10, 22, 16, 35, 18))
+	}
+}
+
+// TestClassify_GLMResetIsShanghaiTime pins the zone: Z.ai's reset text is
+// UTC+8 wall time whatever zone the daemon runs in. Real data: a run at
+// 16:33:26 +07 on 2026-10-22 got "reset at 2026-10-22 17:35:18"; read in the
+// daemon's own zone that is 1h 1m ahead, read as UTC+8 it is 1m 52s ahead.
+func TestClassify_GLMResetIsShanghaiTime(t *testing.T) {
+	const e = "429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18"
+	want := time.Date(2026, 10, 22, 9, 35, 18, 0, time.UTC)
+	for name, loc := range map[string]*time.Location{
+		"daemon at +07": time.FixedZone("ICT", 7*3600),
+		"daemon at UTC": time.UTC,
+		"daemon at -05": time.FixedZone("EST", -5*3600),
+		"daemon at +08": time.FixedZone("CST", 8*3600),
+	} {
+		t.Run(name, func(t *testing.T) {
+			now := time.Date(2026, 10, 22, 9, 33, 26, 0, time.UTC).In(loc)
+			r := Classify(Input{Provider: "glm", Err: e}, now)
+			if r.Kind != KindRateLimited || r.ResetAt == nil || !r.ResetAt.Equal(want) {
+				t.Fatalf("got %+v, want reset %v", r, want)
+			}
+			if d := r.ResetAt.Sub(now); d != 1*time.Minute+52*time.Second {
+				t.Fatalf("reset is %v ahead of the run, want 1m52s", d)
+			}
+		})
+	}
+	// An undated time is the next occurrence on the Shanghai clock, whatever the daemon zone.
+	now := time.Date(2026, 10, 22, 9, 33, 26, 0, time.UTC).In(time.FixedZone("EST", -5*3600))
+	r := Classify(Input{Provider: "glm", Err: "429 Usage limit reached for 5 hour. Your limit will reset at 17:35:18"}, now)
+	if r.ResetAt == nil || !r.ResetAt.Equal(want) {
+		t.Fatalf("undated: got %+v, want reset %v", r, want)
 	}
 }

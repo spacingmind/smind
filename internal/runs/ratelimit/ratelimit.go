@@ -96,7 +96,12 @@ func classifyText(s string, now time.Time) Result {
 	if m := reGLM.FindStringSubmatch(s); m != nil {
 		r := Result{Kind: KindRateLimited, Window: m[1] + "h"}
 		if rm := reGLMReset.FindStringSubmatch(s); rm != nil {
-			r.ResetAt = glmReset(rm[1], rm[2], now)
+			// Z.ai prints its reset as wall-clock time with no zone, and its
+			// backend runs on UTC+8 (Asia/Shanghai): the dogfood 429 of
+			// 2026-10-22 16:33 +07 said "reset at 2026-10-22 17:35:18", and
+			// third-party reports of the same message read it as UTC+8
+			// (ExaDev/agent-shim#448). Never the daemon's own zone.
+			r.ResetAt = glmReset(rm[1], rm[2], now.In(glmZone))
 		}
 		return r
 	}
@@ -124,6 +129,10 @@ func classifyText(s string, now time.Time) Result {
 	}
 	return Result{}
 }
+
+// glmZone is the zone of Z.ai's "Your limit will reset at ..." text: a fixed
+// UTC+8 (China has no daylight saving), without needing tzdata.
+var glmZone = time.FixedZone("CST", 8*3600)
 
 // glmReset resolves a GLM reset time: with a date it is that absolute
 // instant in now's location (never rolled); without, the next occurrence.
