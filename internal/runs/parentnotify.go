@@ -131,6 +131,11 @@ func (reg *Registry) notifyTaskIfQuiet(taskID int64) (chatID int64, queued bool)
 	}
 	cfgJSON, err := json.Marshal(chatQueueRunConfig{
 		Provider: prev.Provider, PermissionMode: prev.PermissionMode, AutoAccept: prev.AutoAccept, Model: prev.Model,
+		// The woken run keeps the seat: without the profile it would lose the
+		// role instructions and the orchestration MCP entry (found by the first
+		// in-smind dogfood run: a Lead woken by a child event could no longer call
+		// task_archive).
+		ProfileID: prev.ProfileID,
 	})
 	if err != nil {
 		return 0, false
