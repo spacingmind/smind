@@ -8,14 +8,17 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/store"
 )
+
+const cmdProfileSeedUsage = "usage: smind profile seed roles"
 
 const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept] [--thinking-level=<level>] [--model=<model>] [--on-rate-limit=<none|wait|fallback>] [--fallback-profile=<id>] [--notes=<text>] [--orchestration-tools=true|false] [--instructions=<text>] [--instructions-file=<path>] [--skills=a,b] [--child-policy=none|leaf|profiles] [--child-profiles=1,2]"
 
 func cmdProfile(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind profile <add|ls|rm> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind profile <add|ls|rm|seed> ...")
 		return 2
 	}
 	switch args[0] {
@@ -25,6 +28,8 @@ func cmdProfile(args []string) int {
 		return cmdProfileList(args[1:])
 	case "rm":
 		return cmdProfileRemove(args[1:])
+	case "seed":
+		return cmdProfileSeed(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "smind profile: unknown subcommand %q\n", args[0])
 		return 2
@@ -294,6 +299,57 @@ func cmdProfileRemove(args []string) int {
 
 	if err := client.Call(context.Background(), "profile.delete", map[string]any{"id": id}, nil); err != nil {
 		fmt.Fprintf(os.Stderr, "profile rm: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// cmdProfileSeed parses `smind profile seed roles`: it creates the standard
+// seat pack (ADR-0041 S4a) over the profile.list and profile.create RPCs,
+// leaving every existing profile of the same name untouched. It is a human
+// command: inside an agent run (SMIND_RUN_ID set) it refuses.
+func cmdProfileSeed(args []string) int {
+	if len(args) != 1 || args[0] != "roles" {
+		fmt.Fprintln(os.Stderr, cmdProfileSeedUsage)
+		return 2
+	}
+	if os.Getenv("SMIND_RUN_ID") != "" {
+		fmt.Fprintln(os.Stderr, "profile seed is for humans, not agents")
+		return 1
+	}
+
+	client, err := dialDaemon(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer client.Close()
+
+	var existing []store.AgentProfile
+	if err := client.Call(context.Background(), "profile.list", nil, &existing); err != nil {
+		fmt.Fprintf(os.Stderr, "profile seed: %v\n", err)
+		return 1
+	}
+	create := func(p store.AgentProfile) (store.AgentProfile, error) {
+		params := map[string]any{
+			"name": p.Name, "provider": p.Provider, "permissionMode": p.PermissionMode, "autoAccept": p.AutoAccept,
+			"thinkingLevel": p.ThinkingLevel, "model": p.Model, "notes": p.Notes, "onRateLimit": p.OnRateLimit,
+			"orchestrationTools": p.OrchestrationTools, "instructions": p.Instructions, "skills": p.Skills,
+			"childPolicy": p.ChildPolicy, "childProfileIds": p.ChildProfileIDs,
+		}
+		if p.FallbackProfileID != nil {
+			params["fallbackProfileId"] = *p.FallbackProfileID
+		}
+		var created store.AgentProfile
+		err := client.Call(context.Background(), "profile.create", params, &created)
+		return created, err
+	}
+	results, err := profiles.SeedRolesWith(create, existing)
+	for _, r := range results {
+		fmt.Printf("%s %s (id %d)\n", r.Action, r.Name, r.ID)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "profile seed: %v\n", err)
 		return 1
 	}
 	return 0

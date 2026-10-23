@@ -60,4 +60,6 @@ Final message: the plan path, what shipped (PR links), what each verified, what 
 
 - Record the process ids of anything you start (a sandbox daemon, a dev server) and kill only those. Never kill by name pattern.
 - Use an isolated `SMIND_HOME` and port for any sandbox daemon.
+- When you are a Lead seat inside smind, launch Peers only with `task_new` (your own task is the parent) and `task_send` with `profileId` of a Peer profile from `profile_list`; after dispatching, END YOUR TURN: the daemon sends you a `[child event]` message when a Peer's work is done. Do not poll.
+- Once you have accepted a Peer's candidate and its commits are on the branch you will push, archive its task (`task_archive`).
 - When `task_wait`/`task_status` shows `failureKind` `rate_limited`, read `resetAt`. If it is soon, wait. Otherwise start a NEW chat (`chat_new`) on another provider or profile with a self-contained brief: a chat is bound to its provider, so the old chat's context does not carry over, but the task's worktree and commits do.
