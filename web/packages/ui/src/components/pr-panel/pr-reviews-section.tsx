@@ -29,7 +29,7 @@ export function PRReviewsSection({ details }: { details: PRDetails }) {
   const { reviews, reviewDecision } = details;
   const decision = DECISION[reviewDecision];
   return (
-    <PRSection id="reviews" title="Reviews" summary={approvalsText(reviews)}>
+    <PRSection id="reviews" title="Reviews">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-ui-base">
         {decision && (
           <StatusBadge status={decision.status} data-testid="pr-review-decision">

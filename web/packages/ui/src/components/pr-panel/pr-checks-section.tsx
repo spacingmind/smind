@@ -35,7 +35,7 @@ function StateIcon({ state }: { state: CheckItemState }) {
       {state === "success" && <Icons.success className={cn(cls, "text-success")} />}
       {state === "failure" && <Icons.error className={cn(cls, "text-destructive")} />}
       {state === "pending" && <Icons.spinner className={cn(cls, "animate-spin text-warning motion-reduce:animate-none")} />}
-      {state === "skipped" && <Icons.statusIdle className={cn(cls, "text-foreground-subtle")} />}
+      {state === "skipped" && <Icons.statusSkipped className={cn(cls, "text-foreground-subtle")} />}
     </span>
   );
 }
@@ -69,7 +69,7 @@ export function PRChecksSection({
             <li key={check.id} data-testid="pr-check-row" data-state={check.state} className="flex min-w-0 items-center gap-2 py-1">
               <StateIcon state={check.state} />
               <UntrustedText className="flex-1 text-ui-base">{check.name}</UntrustedText>
-              {check.durationMs !== undefined && (
+              {check.durationMs !== undefined && check.durationMs > 0 && (
                 <span className="shrink-0 font-mono text-ui-xs tabular-nums text-foreground-muted">{formatDurationMs(check.durationMs)}</span>
               )}
               <ExternalLink href={check.url} label="Open check on GitHub" testId="pr-check-link" />

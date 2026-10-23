@@ -34,6 +34,7 @@ import {
   CircleAlert,
   CircleCheck,
   CircleDot,
+  CircleMinus,
   CircleQuestionMark,
   ClipboardPaste,
   Clock,
@@ -250,6 +251,8 @@ export const Icons = {
   spinner: LoaderCircle,
   /** A neutral / unfilled status marker. */
   statusIdle: Circle,
+  /** A skipped / neutral / cancelled check: nothing ran, nothing failed. */
+  statusSkipped: CircleMinus,
 } as const satisfies Record<string, IconComponent>;
 
 export type IconName = keyof typeof Icons;

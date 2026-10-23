@@ -77,6 +77,14 @@ describe("PRPanelPane", () => {
     expect(screen.getByText("1m 20s")).toBeTruthy();
     cleanup();
 
+    const skipped = check({ id: "run:4", name: "optional", state: "skipped", conclusion: "skipped", durationMs: 0 });
+    await show(prDetails({ checks: checksOf([skipped, { ...run, id: "run:5", durationMs: undefined }]) }));
+    const [skippedRow, runningRow] = checkRows();
+    expect(within(skippedRow!).getByRole("img", { name: "Skipped" })).toBeTruthy();
+    expect(skippedRow!.textContent).not.toContain("0s");
+    expect(runningRow!.textContent).not.toMatch(/\ds\b/);
+    cleanup();
+
     await show(prDetails({ checks: checksOf([bad, { ...bad, id: "run:9", name: "vet" }, run, ok]) }));
     expect(screen.getByTestId("pr-checks-headline").textContent).toBe("Some checks were not successful");
     expect(screen.getByText("2 failing · 1 running · 1 passed")).toBeTruthy();
@@ -101,6 +109,7 @@ describe("PRPanelPane", () => {
     );
     expect(screen.getByTestId("pr-review-decision").textContent).toBe("Approved");
     expect(screen.getByTestId("pr-approvals").textContent).toBe("1 of 2 approvals");
+    expect(screen.getAllByText("1 of 2 approvals")).toHaveLength(1);
     expect(within(screen.getByTestId("pr-review-row")).getByText("bob")).toBeTruthy();
     expect(screen.getByTestId("pr-awaiting").textContent).toBe("Awaiting: carol, dave");
     cleanup();
