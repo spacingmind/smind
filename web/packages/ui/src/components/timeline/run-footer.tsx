@@ -29,6 +29,7 @@ export function RunFooter<T extends RunFooterRun>({
   modelLabels,
   isLatest = false,
   waiting = false,
+  disconnected = false,
   onContinue,
   onRerun,
   children,
@@ -42,6 +43,8 @@ export function RunFooter<T extends RunFooterRun>({
   isLatest?: boolean;
   /** The live run is blocked on the user (an unanswered permission): the label says so instead of "Working…". */
   waiting?: boolean;
+  /** The daemon connection is down, so a running run's state is unknown. */
+  disconnected?: boolean;
   /** Continue: re-submits with the prompt "Continue" on the run's own config (task-detail wires it). */
   onContinue?: (run: T) => void;
   /** Retry: the existing Re-run path, offered on a failed latest run. */
@@ -50,13 +53,14 @@ export function RunFooter<T extends RunFooterRun>({
   children?: ReactNode;
 }) {
   const running = run.status === "running";
-  const waitingOnUser = running && waiting;
+  const reconnecting = running && disconnected;
+  const waitingOnUser = running && waiting && !reconnecting;
   // The tickers only force a re-render; `now` is read fresh each render so an
   // unrelated re-render never works from a stale tick. A running label ticks
   // every second; an age label needs 30 s only in its first hour, then 5 min,
   // and stops for good once it has become a plain date.
   const ageMs = run.finishedAt ? Date.now() - Date.parse(run.finishedAt) : NaN;
-  useTicker(running ? 1000 : null);
+  useTicker(running && !disconnected ? 1000 : null);
   useTicker(!running && ageMs >= 0 && ageMs < AGE_TICK_STOPS_MS ? (ageMs < HOUR_MS ? 30_000 : 300_000) : null);
   // A rate-limited footer with a reset still ahead re-evaluates once a minute (the sentence flips to "limit has reset"); no other footer owns this timer.
   useTicker(isRateLimitedRun(run) && hasFutureReset(run.failureResetAt, new Date()) ? MINUTE_TICK_MS : null);
@@ -69,7 +73,7 @@ export function RunFooter<T extends RunFooterRun>({
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-ui-sm text-foreground-muted" data-testid="run-footer">
       <div
         role="group"
-        aria-label={waitingOnUser ? "Waiting for your response" : view.ariaLabel}
+        aria-label={reconnecting ? "Reconnecting" : waitingOnUser ? "Waiting for your response" : view.ariaLabel}
         className={cn(
           "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 sm:gap-x-2 transition-opacity",
           view.kind === "done" &&
@@ -81,15 +85,15 @@ export function RunFooter<T extends RunFooterRun>({
         data-failure-kind={run.failureKind}
       >
         {running ? (
-          <span className={cn(SEGMENT, "gap-1.5", waitingOnUser && "text-warning")}>
-            {waitingOnUser ? (
+          <span className={cn(SEGMENT, "gap-1.5", (waitingOnUser || reconnecting) && "text-warning")}>
+            {waitingOnUser || reconnecting ? (
               <StatusDot status="warning" />
             ) : (
               <Icons.spinner aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
             )}
             {/* The static word is the polite live region; the ticking number is a timer (implicitly aria-live=off) so a screen reader is not read a new value every second. */}
-            <span role="status">{waitingOnUser ? "Waiting for you…" : "Working…"}</span>
-            {view.duration && (
+            <span role="status">{reconnecting ? "Reconnecting…" : waitingOnUser ? "Waiting for you…" : "Working…"}</span>
+            {view.duration && !reconnecting && (
               <span role="timer" data-testid="run-working-elapsed">
                 {view.duration}
               </span>

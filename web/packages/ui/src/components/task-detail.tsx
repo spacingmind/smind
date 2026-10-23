@@ -405,6 +405,7 @@ export function TaskDetailPane({
                     providerLabels={providerLabels}
                     modelLabels={modelLabels}
                     isLatest={run.id === runs[runs.length - 1]?.id}
+                    disconnected={connectionStatus !== "connected"}
                   />
                 ))}
               </ul>
