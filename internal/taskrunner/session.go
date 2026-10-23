@@ -31,6 +31,14 @@ type SessionHandle struct {
 	// handle. Unused by any of the three runners today; reserved the same
 	// way NativeHandle is.
 	Metadata json.RawMessage
+
+	// UsageTotals is the cumulative usage the claude-native CLI reported at
+	// the end of this session's last turn (nil for other providers, for a
+	// session that has not finished a turn, and for sessions stored before
+	// it existed). A resumed claude session carries its running totals into
+	// the next result, so a turn's own usage is that result minus these
+	// (claudeTurnUsage).
+	UsageTotals *ClaudeUsageTotals `json:"usageTotals,omitempty"`
 }
 
 // SessionStore persists one SessionHandle per key across runs, so a runner
