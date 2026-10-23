@@ -484,6 +484,7 @@ export function TaskDetailPane({
         boundProvider={chat.Provider as Provider | null}
         connected={client !== null && connectionStatus === "connected"}
         runningRunId={runningRunId}
+        waitingOnUser={!!runningRun?.pendingPermission}
         git={git}
         onOpenDiff={onOpenDiffTab}
         queuedItems={queue.items}
