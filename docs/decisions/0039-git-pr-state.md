@@ -5,9 +5,13 @@
 **Accepted — 2026-10-22, by the Human.** H1–H4 were decided before the ADR was written (recorded under
 [Decisions made by the Human](#decisions-made-by-the-human)); the open questions O1–O10 were accepted as recommended. G12 placement is
 accepted: the contract is [§8](#8-github-auth-surface-h4) and the implementation is a separate PR after G3/G4. Plan:
-[`docs/plans/active/git-pr-state.md`](../plans/active/git-pr-state.md). Scope: research items G1–G5 (P0), plus the policy and data
+[`docs/plans/completed/git-pr-state.md`](../plans/completed/git-pr-state.md). Scope: research items G1–G5 (P0), plus the policy and data
 that P1 items G8 (archive) and G12 (GitHub login) need. Research behind it is a local-only study (`docs/research/local/git-github-ux*.md`,
 not committed).
+
+**Implemented 2026-10-23** (G1 #469, forge interface #471, local status #482, PR poller #503, web chips #497, Start-from #537, Create/Update PR
+#538); evidence in `docs/plans/completed/git-pr-state.md`. The archive/branch-cleanup policy (§9) is implemented by
+`docs/plans/active/archive-merged-branches.md` and the GitHub token login (§8) by `docs/plans/active/github-token-login.md`.
 
 Coordination decided with the Supervisor: PR #459 (`internal/ghctx`) lands as is; **this work owns the follow-up** that moves `ghctx` onto
 `internal/forge` and the `forge.Error`/`forge_*` codes, in the first forge PR after #459 is on `develop`.

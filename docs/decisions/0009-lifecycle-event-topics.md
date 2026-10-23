@@ -190,7 +190,12 @@ emit across the four handlers that already share one Manager method.
   sidebar signal these would feed — changed-file count, PR state (Item 12)
   — is derived git state and needs its own topic with its own payload,
   not a lifecycle event. Out of scope here; noted for the plan item that
-  adds it.
+  adds it. **Update (2026-10-23, ADR-0039):** that topic now exists:
+  `task.git` carries `{taskId, git}` (dirty, ahead/behind, conflicts, the
+  task's PR) and is published whenever a commit, a stage, a run end, a
+  `task.setBase`, a poll result or a Create/Update PR changes it, so
+  "`task.commit` and `task.createPr` publish nothing" no longer holds for
+  git state; the task row itself still publishes only the lifecycle topics.
 - Archiving emits `task.archived` and not `task.deleted`, even though
   `ListTasks` filters archived tasks out and the UI treats archive as
   removal from the tree. The row still exists and `task.get` still
