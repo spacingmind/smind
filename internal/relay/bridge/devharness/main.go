@@ -41,6 +41,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/attach"
 	"github.com/spacingmind/smind/internal/relay/bridge"
 	"github.com/spacingmind/smind/internal/relay/client"
 	"github.com/spacingmind/smind/internal/relay/devices"
@@ -231,6 +232,7 @@ func run(windowMax int, outdated bool, password, fakeAgent string) error {
 	if err != nil {
 		return err
 	}
+	h.api.SetAttachmentStore(attach.NewStore(filepath.Join(workDir, "attachments"))) // prompt attachments on, as cmd/smind wires it
 	if h.daemonKP, err = e2ee.GenerateKeyPair(); err != nil {
 		return err
 	}
