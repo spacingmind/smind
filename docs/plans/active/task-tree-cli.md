@@ -43,4 +43,7 @@ serves `task.tree` (internal/wsapi/task_tree.go; MCP `task_tree`). This adds
 
 ## Progress / Validation
 
-(filled in during review)
+- Peer `peer-sonnet` (task 56) — candidate ACCEPTED: diff read in full; format matches ACs 1-7; mutation check (breaking the `cost n/a` text) fails 13 test lines; commits cherry-picked onto this branch rebased on origin/develop.
+- Checks: `go test ./cmd/smind -run TaskTree -count=1` ok; `task lint` ok; `go test ./...` all ok. `task test` failed only in the web suite (1 of 3451 UI tests, code untouched by this PR; not rerun in isolation).
+- Real run against a throwaway daemon (SMIND_HOME scratch, port 48731): `task tree 1`, `task tree --task 2`, `task tree 1 --json` and the both-args error (exit 2) behave as specified; output is in the PR.
+- Not verified: a live failed/rate-limited/permission node against a real provider (covered by the render table test only).
