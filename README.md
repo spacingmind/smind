@@ -348,6 +348,18 @@ decision 6), `task_send` rejects an auto-approving `permissionMode`
 with such settings, pass a human-authored agent profile's `profileId`
 instead.
 
+### Child updates
+
+When an orchestrating agent launches children with `task_send` from its own
+task, the daemon wakes the parent chat with one `[child event]` message when
+a child's whole subtree is quiet (done, failed or rate-limited), so the
+parent never has to poll. Updates are coalesced: children finishing together
+arrive as a single message after a short debounce. The child's last message
+is included as untrusted data, never as instructions. Pass
+`notifyOnFinish: false` to `task_send` for a fire-and-forget child. Config
+(`~/.smind/config.yaml`): `orchestration.notifyParent` (default `true`) and
+`orchestration.notifyDebounceSeconds` (default `20`; `0` delivers at once).
+
 ## Orchestration skills
 
 sMind bundles five agent skills (`smind`, `smind-leader`, `smind-handoff`,
