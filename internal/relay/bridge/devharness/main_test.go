@@ -531,3 +531,38 @@ func TestSeedTree_Permission(t *testing.T) {
 		t.Fatalf("supervisor tier = %s", tierOf(by["supervisor"]))
 	}
 }
+
+func TestSeedTree_RateLimited(t *testing.T) {
+	_, nodes, by := seedTree(t, "ratelimited")
+	if len(nodes) != 2 {
+		t.Fatalf("nodes = %d, want 2", len(nodes))
+	}
+	c := by["coder-limited"]
+	if tierOf(c) != "coder" || c.ParentID == nil || *c.ParentID != by["supervisor"].ID {
+		t.Fatalf("child: %+v", c)
+	}
+	if c.Run.State != "error" || c.Run.FailureKind != "rate_limited" {
+		t.Fatalf("child run = %+v, want error / rate_limited", c.Run)
+	}
+	reset, err := time.Parse(time.RFC3339, c.Run.ResetAt)
+	if err != nil {
+		t.Fatalf("resetAt %q: %v", c.Run.ResetAt, err)
+	}
+	if d := time.Until(reset); d < 45*time.Minute || d > 48*time.Minute {
+		t.Fatalf("resetAt in %v, want about 47m", d)
+	}
+}
+
+func TestSeedTree_Failed(t *testing.T) {
+	_, nodes, by := seedTree(t, "failed")
+	if len(nodes) != 2 {
+		t.Fatalf("nodes = %d, want 2", len(nodes))
+	}
+	c := by["coder-failed"]
+	if tierOf(c) != "coder" || c.ParentID == nil || *c.ParentID != by["supervisor"].ID {
+		t.Fatalf("child: %+v", c)
+	}
+	if c.Run.State != "error" || c.Run.FailureKind != "" || c.Run.ResetAt != "" {
+		t.Fatalf("child run = %+v, want a plain error (no failureKind, no resetAt)", c.Run)
+	}
+}
