@@ -953,3 +953,15 @@ describe("expansion persistence (S8)", () => {
     expect(window.localStorage.getItem(KEY)).toBeNull();
   });
 });
+
+describe("task hover card status label (U28)", () => {
+  it("derives the status from the latest run, falling back to the lifecycle value with no run", async () => {
+    const runStatus: TaskRunStatus = new Map([[1, "done" as never]]);
+    await mountSidebar([makeTask(1, "Ran", { Status: "created" }), makeTask(2, "Fresh", { Status: "created" })], { runStatus });
+
+    expect(within(await openHoverCard(1)).getByTestId("sidebar-task-status")).toHaveTextContent("Done");
+    cleanup();
+    await mountSidebar([makeTask(1, "Ran", { Status: "created" }), makeTask(2, "Fresh", { Status: "created" })], { runStatus });
+    expect(within(await openHoverCard(2)).getByTestId("sidebar-task-status")).toHaveTextContent(/^created$/i);
+  });
+});
