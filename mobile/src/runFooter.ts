@@ -26,16 +26,45 @@ const CAP: Record<string, string> = {
   budget_exceeded: 'Stopped at the budget limit',
 };
 
+/** runs.FailureKindRateLimited (ADR-0041). */
+const RATE_LIMITED = 'rate_limited';
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/**
+ * The rate-limit sentence, worded like the web run footer: "Rate limited (5h
+ * window) · resets 17:35" (local time, "Mon 17:35" on another day), "· reset
+ * time unknown" with no usable reset, "· limit has reset" once it passed. The
+ * window part is omitted when unknown.
+ */
+function rateLimitSentence(window: string | undefined, resetAt: string | null | undefined, now: Date): string {
+  const head = `Rate limited${window ? ` (${window} window)` : ''}`;
+  const reset = resetAt ? new Date(resetAt) : null;
+  if (reset === null || Number.isNaN(reset.getTime())) return `${head} · reset time unknown`;
+  if (reset.getTime() <= now.getTime()) return `${head} · limit has reset`;
+  const hhmm = `${String(reset.getHours()).padStart(2, '0')}:${String(reset.getMinutes()).padStart(2, '0')}`;
+  const sameDay =
+    reset.getFullYear() === now.getFullYear() && reset.getMonth() === now.getMonth() && reset.getDate() === now.getDate();
+  return `${head} · resets ${sameDay ? hhmm : `${WEEKDAYS[reset.getDay()]} ${hhmm}`}`;
+}
+
 /**
  * The footer for one run, or null when it needs none (not finished-yet,
- * failed, stopped, or a normal done). The disposition, not a list of stop
+ * stopped, a plain failure, or a normal done). A run that failed on a
+ * provider quota (ADR-0041) gets the warning sentence; `now` is injectable
+ * for tests. The disposition, not a list of stop
  * reasons, decides, so a cap this client has never heard of still reads
  * as needing a continue; an older daemon sends no disposition and the
  * stop-reason cases cover the two caps it can report.
  */
 export function describeRunFooter(
-  run: Pick<RunSummary, 'Status' | 'StopReason' | 'Disposition'>,
+  run: Pick<RunSummary, 'Status' | 'StopReason' | 'Disposition' | 'FailureKind' | 'FailureWindow' | 'FailureResetAt'>,
+  now: Date = new Date(),
 ): RunFooterView | null {
+  if (run.Status === 'error' && run.FailureKind === RATE_LIMITED) {
+    // The Continue button re-submits on the run's own provider (TaskDetailScreen's handleContinue), which is the recovery path once the limit lifts.
+    return { sentence: rateLimitSentence(run.FailureWindow || undefined, run.FailureResetAt, now), tone: 'warning', action: 'continue' };
+  }
   if (run.Status !== 'done') return null;
   if (run.Disposition === NEEDS_CONTINUE) {
     return {

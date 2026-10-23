@@ -66,4 +66,48 @@ describe('describeRunFooter', () => {
     expect(describeRunFooter({ Status: 'done', StopReason: 'end_turn' })).toBeNull();
     expect(describeRunFooter({ Status: 'done' })).toBeNull();
   });
+
+  describe('rate limited (ADR-0041)', () => {
+    // Local-time fixtures: the sentence is local HH:MM. 2026-10-13 is a Tuesday.
+    const now = new Date(2026, 9, 13, 10, 0, 0);
+    const limited = { Status: 'error' as const, FailureKind: 'rate_limited', FailureWindow: '5h' };
+
+    it('rate limited with a future reset', () => {
+      expect(describeRunFooter({ ...limited, FailureResetAt: new Date(2026, 9, 13, 17, 35).toISOString() }, now)).toEqual({
+        sentence: 'Rate limited (5h window) · resets 17:35',
+        tone: 'warning',
+        action: 'continue',
+      });
+    });
+
+    it('rate limited reset today vs another day', () => {
+      expect(describeRunFooter({ ...limited, FailureResetAt: new Date(2026, 9, 13, 23, 59).toISOString() }, now)?.sentence).toBe(
+        'Rate limited (5h window) · resets 23:59',
+      );
+      expect(describeRunFooter({ ...limited, FailureResetAt: new Date(2026, 9, 15, 9, 5).toISOString() }, now)?.sentence).toBe(
+        'Rate limited (5h window) · resets Thu 09:05',
+      );
+      expect(
+        describeRunFooter({ ...limited, FailureWindow: undefined, FailureResetAt: new Date(2026, 9, 13, 17, 35).toISOString() }, now)?.sentence,
+      ).toBe('Rate limited · resets 17:35');
+    });
+
+    it('rate limited with unknown reset', () => {
+      expect(describeRunFooter({ ...limited, FailureResetAt: null }, now)?.sentence).toBe('Rate limited (5h window) · reset time unknown');
+      expect(describeRunFooter(limited, now)?.sentence).toBe('Rate limited (5h window) · reset time unknown');
+      expect(describeRunFooter({ ...limited, FailureResetAt: 'nope' }, now)?.sentence).toBe('Rate limited (5h window) · reset time unknown');
+    });
+
+    it('rate limited after the reset passed', () => {
+      expect(describeRunFooter({ ...limited, FailureResetAt: new Date(2026, 9, 13, 9, 0).toISOString() }, now)?.sentence).toBe(
+        'Rate limited (5h window) · limit has reset',
+      );
+    });
+
+    it('plain error footer unchanged: still none', () => {
+      expect(describeRunFooter({ Status: 'error' }, now)).toBeNull();
+      expect(describeRunFooter({ Status: 'error', FailureKind: 'other' }, now)).toBeNull();
+      expect(describeRunFooter({ Status: 'done', FailureKind: 'rate_limited' }, now)).toBeNull();
+    });
+  });
 });
