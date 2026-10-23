@@ -11,6 +11,7 @@ import {
   type RunModelLabels,
   type RunFooterRun,
 } from "@/components/timeline/run-footer-model";
+import { hasFutureReset, isRateLimitedRun } from "@/lib/rate-limit";
 import { cn } from "@/lib/utils";
 
 /**
@@ -57,6 +58,8 @@ export function RunFooter<T extends RunFooterRun>({
   const ageMs = run.finishedAt ? Date.now() - Date.parse(run.finishedAt) : NaN;
   useTicker(running ? 1000 : null);
   useTicker(!running && ageMs >= 0 && ageMs < AGE_TICK_STOPS_MS ? (ageMs < HOUR_MS ? 30_000 : 300_000) : null);
+  // A rate-limited footer with a reset still ahead re-evaluates once a minute (the sentence flips to "limit has reset"); no other footer owns this timer.
+  useTicker(isRateLimitedRun(run) && hasFutureReset(run.failureResetAt, new Date()) ? MINUTE_TICK_MS : null);
   const now = new Date();
 
   const modelLabel = running ? "" : resolveRunModelLabel(run, modelLabels, providerLabels?.[run.provider]);
@@ -75,6 +78,7 @@ export function RunFooter<T extends RunFooterRun>({
         data-testid="run-meta"
         data-status={run.status}
         data-disposition={run.disposition}
+        data-failure-kind={run.failureKind}
       >
         {running ? (
           <span className={cn(SEGMENT, "gap-1.5", waitingOnUser && "text-warning")}>
@@ -162,6 +166,7 @@ export function RunFooter<T extends RunFooterRun>({
 
 /** One footer segment: from `sm` up a middle dot before every segment but the first (a pseudo-element, so assistive tech skips it); below `sm` a wrapped line would start with a stray dot, so plain gaps do the separating. */
 const HOUR_MS = 3_600_000;
+const MINUTE_TICK_MS = 60_000;
 const AGE_TICK_STOPS_MS = 7 * 24 * HOUR_MS;
 
 /** ADR-0025: the exact model id stays one hover away, now that the footer shows the catalog label. */

@@ -1,5 +1,6 @@
 import { formatCost } from "@/lib/usage-format";
 import { formatRelativeTime } from "@/lib/relative-time";
+import { describeRateLimit, isRateLimitedRun } from "@/lib/rate-limit";
 import type { RunStatusValue, RunUsage } from "@/lib/types";
 
 /**
@@ -41,6 +42,12 @@ export interface RunFooterRun {
   stopReason?: string;
   /** The daemon's derived disposition (ADR-0027 D13): "needs-continue" when the run ended done at a turn/token/budget cap. */
   disposition?: string;
+  /** ADR-0041: "rate_limited" when an errored run failed on a provider quota. */
+  failureKind?: string;
+  /** The quota window that was hit ("5h", "weekly", ...). */
+  failureWindow?: string;
+  /** When the limit lifts (RFC 3339 UTC). */
+  failureResetAt?: string;
   err?: string;
   model?: string;
   usage?: RunUsage;
@@ -200,6 +207,20 @@ export function describeRunFooter(
     ...view,
     ariaLabel: ariaLabel(run, view, ms, age),
   });
+
+  // A provider quota (ADR-0041) is not a code failure: warning tone, same Retry action.
+  if (isRateLimitedRun(run)) {
+    return detail({
+      kind: "abnormal",
+      sentence: describeRateLimit({ window: run.failureWindow, resetAt: run.failureResetAt }, now),
+      tone: "warning",
+      action: "retry",
+      duration,
+      durationTitle: proseDuration(ms),
+      model: opts.modelLabel,
+      age,
+    });
+  }
 
   if (run.status === "error") {
     return detail({

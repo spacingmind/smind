@@ -249,3 +249,56 @@ describe("useTaskAttention finished recency window", () => {
     expect(result.current.runStatus.get(7)).toBe("done");
   });
 });
+
+describe("useTaskAttention rateLimit (ADR-0041 R3)", () => {
+  const limited = (id: string, taskId: number, startedAt: string): RunSummary => ({
+    ...run(id, taskId, "error", startedAt),
+    FailureKind: "rate_limited",
+    FailureWindow: "5h",
+    FailureResetAt: "2030-01-01T17:35:00Z",
+  });
+
+  it("latest run rate limited exposes rateLimit and keeps status error", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useTaskAttention(client, null, null));
+    client.nth("run.list").resolve([limited("new", 1, "2024-01-01T00:05:00Z"), run("old", 1, "done", "2024-01-01T00:00:00Z")]);
+    await flush();
+
+    expect(result.current.runStatus.get(1)).toBe("error");
+    expect(result.current.rateLimit.get(1)).toEqual({ window: "5h", resetAt: "2030-01-01T17:35:00Z" });
+    // The attention rollup still sees an error.
+    expect(result.current.attention.get(1)?.has("error")).toBe(true);
+  });
+
+  it("a later successful run clears it", async () => {
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+    const { result } = renderHook(() => useTaskAttention(client, null, stub.events));
+    client.nth("run.list").resolve([limited("a", 1, "2024-01-01T00:00:00Z")]);
+    await flush();
+    expect(result.current.rateLimit.has(1)).toBe(true);
+
+    // run.list rows: a newer done run wins.
+    stub.fire("run.status", { runId: "b", taskId: 1, chatId: 1, status: "done" });
+    expect(result.current.runStatus.get(1)).toBe("done");
+    expect(result.current.rateLimit.has(1)).toBe(false);
+
+    // And a live terminal event carrying the failure sets it again, replacing a prior value.
+    stub.fire("run.status", { runId: "c", taskId: 1, chatId: 1, status: "error", failureKind: "rate_limited", window: "weekly", resetAt: "2030-02-01T00:00:00Z" });
+    expect(result.current.rateLimit.get(1)).toEqual({ window: "weekly", resetAt: "2030-02-01T00:00:00Z" });
+    stub.fire("run.status", { runId: "c", taskId: 1, chatId: 1, status: "running" });
+    expect(result.current.rateLimit.has(1)).toBe(false);
+  });
+
+  it("plain error exposes none", async () => {
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+    const { result } = renderHook(() => useTaskAttention(client, null, stub.events));
+    client.nth("run.list").resolve([run("e", 1, "error", "2024-01-01T00:00:00Z"), { ...run("x", 2, "error", "2024-01-01T00:00:00Z"), FailureKind: "" }]);
+    await flush();
+    expect(result.current.runStatus.get(1)).toBe("error");
+    expect(result.current.rateLimit.size).toBe(0);
+    stub.fire("run.status", { runId: "y", taskId: 3, chatId: 3, status: "error", failureKind: "other" });
+    expect(result.current.rateLimit.size).toBe(0);
+  });
+});

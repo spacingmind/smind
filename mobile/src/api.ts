@@ -50,6 +50,12 @@ export interface RunSummary {
   StopReason?: string;
   /** The daemon's derived disposition (ADR-0027 D13): "needs-continue" when the run ended done at a turn/token/budget cap. */
   Disposition?: string;
+  /** ADR-0041: "rate_limited" when the run failed on a provider quota (Status stays "error"); absent/empty otherwise. */
+  FailureKind?: string;
+  /** The quota window that was hit ("5h", "weekly", ...); absent/empty when unknown. */
+  FailureWindow?: string;
+  /** When the limit lifts (RFC 3339 UTC); null/absent when unknown. */
+  FailureResetAt?: string | null;
 }
 
 /** workspace.list: every workspace this daemon tracks. */

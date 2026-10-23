@@ -15,6 +15,8 @@ export interface TaskLineage {
   node: TaskTreeNode | null;
   /** The task's live direct children, in the tree's sibling order. */
   children: TaskTreeNode[];
+  /** Every node task.tree returned (the task and its whole subtree), so a pill can tell a rate-limited descendant from a failed one (ADR-0041); absent in hand-built lineages. */
+  nodes?: TaskTreeNode[];
 }
 
 /**
@@ -107,5 +109,5 @@ export function useTaskLineage(
   }, [client, events, task.ID, parentId, fetchAll]);
 
   const node = tree?.nodes[0] ?? null;
-  return { parent, node, children: tree ? childrenOf(tree.nodes, task.ID) : [] };
+  return { parent, node, children: tree ? childrenOf(tree.nodes, task.ID) : [], ...(tree ? { nodes: tree.nodes } : {}) };
 }

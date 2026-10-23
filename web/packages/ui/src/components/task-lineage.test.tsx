@@ -342,3 +342,33 @@ describe("task lineage header (in the pane)", () => {
 function withinPill(pill: HTMLElement): HTMLElement {
   return pill;
 }
+
+describe("TaskLineageHeader rate limit (ADR-0041 R3)", () => {
+  const limitedRun = { state: "error" as const, runningRunIds: [], pendingPermissions: 0, failureKind: "rate_limited", window: "5h" };
+
+  it("shows a warning hint for a rate-limited task and a warning pill with a title for a rate-limited child", () => {
+    const reset = new Date(Date.now() + 2 * 3_600_000).toISOString();
+    const lineage: TaskLineage = {
+      parent: null,
+      node: node({ id: 2, run: { ...limitedRun, resetAt: reset } }),
+      children: [
+        node({ id: 3, parentId: 2, title: "Limited", run: { ...limitedRun, resetAt: reset } }),
+        node({ id: 4, parentId: 2, title: "Broken", run: { state: "error", runningRunIds: [], pendingPermissions: 0 } }),
+      ],
+    };
+    render(<TaskLineageHeader lineage={lineage} />);
+    const hint = screen.getByTestId("task-rate-limit");
+    expect(hint.textContent).toMatch(/^Rate limited · resets (\w{3} )?\d\d:\d\d$/);
+    expect(hint.className).toContain("text-warning");
+    const [limited, broken] = screen.getAllByTestId("task-child-pill");
+    expect(limited.dataset.childUrgency).toBe("warning");
+    expect(limited.title).toMatch(/^Rate limited · resets /);
+    expect(broken.dataset.childUrgency).toBe("danger");
+    expect(broken.title).toBe("");
+  });
+
+  it("a plain node renders no hint", () => {
+    render(<TaskLineageHeader lineage={{ parent: null, node: node({ id: 2, usage: { ...node({ id: 2 }).usage, subtree: usage(1, { costUsd: 0.1 }) } }), children: [] }} />);
+    expect(screen.queryByTestId("task-rate-limit")).toBeNull();
+  });
+});

@@ -295,6 +295,12 @@ export interface RunEntry {
   stopReason?: string;
   /** Derived by the daemon: "needs-continue" when the run ended done at a turn/token/budget cap (ADR-0027 D13). */
   disposition?: string;
+  /** ADR-0041: "rate_limited" when the run failed on a provider quota (status stays "error"). */
+  failureKind?: string;
+  /** The quota window that was hit ("5h", "weekly", ...). */
+  failureWindow?: string;
+  /** When the limit lifts (RFC 3339 UTC). */
+  failureResetAt?: string;
   err?: string;
   /**
    * The run's provider-native permission mode (ADR-0019) -- "" until the
@@ -616,6 +622,7 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
             status: logs.status,
             stopReason: logs.stopReason,
             disposition: logs.disposition,
+            ...failureOf(logs),
             err: logs.err,
             ...provenanceOf(logs),
             ...attachmentsOf(logs),
@@ -627,6 +634,15 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
           // everything streamed before the run ended.
         });
     });
+}
+
+/**
+ * The rate-limit failure fields of a run.logs result or run.status payload
+ * (ADR-0041): always all three keys, with an empty value as undefined, so a
+ * terminal answer replaces whatever a list-seeded entry carried.
+ */
+function failureOf(src: { failureKind?: string; window?: string; resetAt?: string }): Pick<RunEntry, "failureKind" | "failureWindow" | "failureResetAt"> {
+  return { failureKind: src.failureKind || undefined, failureWindow: src.window || undefined, failureResetAt: src.resetAt || undefined };
 }
 
 /** The provenance keys a run.logs result actually carries -- only those, so a missing one never overwrites a list-seeded value with undefined. */
@@ -655,6 +671,9 @@ function toRunEntry(r: RunSummary): RunEntry {
     items: [],
     stopReason: r.StopReason || undefined,
     disposition: r.Disposition || undefined,
+    failureKind: r.FailureKind || undefined,
+    failureWindow: r.FailureWindow || undefined,
+    failureResetAt: r.FailureResetAt || undefined,
     err: r.Err || undefined,
     permissionMode: r.PermissionMode,
     autoAccept: r.AutoAccept,
@@ -753,6 +772,7 @@ export function useRunTimeline(
                   status: logs.status,
                   stopReason: logs.stopReason,
                   disposition: logs.disposition,
+                  ...failureOf(logs),
                   err: logs.err,
                 });
               })
@@ -865,6 +885,8 @@ export function useRunTimeline(
         if (p.headSha !== undefined) { provenance.headSha = p.headSha; has = true; }
         if (p.dirty !== undefined) { provenance.dirty = p.dirty; has = true; }
         if (has) patch(setRuns, runId, provenance);
+        // A terminal run.status for a known run carries the rate-limit failure (ADR-0041); only a kind-bearing payload patches it.
+        if (p.failureKind) patch(setRuns, runId, failureOf(p));
         return;
       }
       const session = sessionRef.current;

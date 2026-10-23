@@ -268,6 +268,12 @@ export interface RunSummary {
   StopReason: string;
   /** Derived by the daemon (ADR-0027 D13): "needs-continue" when the run ended done at a turn/token/budget cap; absent/empty otherwise. Not a status. */
   Disposition?: string;
+  /** ADR-0041: "rate_limited" when the run failed on a provider quota (status stays "error"); absent/empty otherwise. */
+  FailureKind?: string;
+  /** The quota window that was hit ("5h", "weekly", ...); absent/empty when unknown. */
+  FailureWindow?: string;
+  /** When the limit lifts (RFC 3339 UTC); null/absent when unknown. */
+  FailureResetAt?: string | null;
   Err: string;
   /** The run's current provider-native permission mode -- live for a running run (see run.setPermissionMode), whatever it last was for a finished one. */
   PermissionMode: string;
@@ -573,6 +579,12 @@ export interface RunLogsResult {
   stopReason?: string;
   /** "needs-continue" when the run ended done at a cap (ADR-0027 D13). */
   disposition?: string;
+  /** ADR-0041: "rate_limited" when the run failed on a provider quota; omitted otherwise. */
+  failureKind?: string;
+  /** The quota window that was hit ("5h", "weekly", ...); omitted when unknown. */
+  window?: string;
+  /** When the limit lifts (RFC 3339 UTC); omitted when unknown. */
+  resetAt?: string;
   err?: string;
   /** O1 provenance -- omitted by the daemon when unknown (or by an older daemon). */
   baseSha?: string;
@@ -775,6 +787,12 @@ export interface RunStatusEventPayload {
   stopReason?: string;
   /** "needs-continue" when the run ended done at a cap (ADR-0027 D13). */
   disposition?: string;
+  /** ADR-0041: "rate_limited" when the run failed on a provider quota; omitted otherwise. */
+  failureKind?: string;
+  /** The quota window that was hit ("5h", "weekly", ...); omitted when unknown. */
+  window?: string;
+  /** When the limit lifts (RFC 3339 UTC); omitted when unknown. */
+  resetAt?: string;
   err?: string;
   /** O1 provenance -- omitted when unknown. */
   baseSha?: string;

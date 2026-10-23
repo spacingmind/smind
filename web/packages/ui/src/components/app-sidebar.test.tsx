@@ -810,6 +810,44 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     expect(await screen.findByTestId("task-run-status")).toHaveAttribute("data-run-status", "running");
   });
 
+  it("rate limited task shows the warning dot and hint", async () => {
+    const reset = new Date(2030, 0, 1, 17, 35).toISOString();
+    const client = renderSidebar({
+      runStatus: new Map([[TASK.ID, "error"]]),
+      rateLimit: new Map([[TASK.ID, { window: "5h", resetAt: reset }]]),
+    });
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    const dot = await screen.findByTestId("task-run-status");
+    expect(dot).toHaveAttribute("data-status", "warning");
+    expect(dot).toHaveAttribute("data-run-status", "error");
+    expect(dot.getAttribute("aria-label")).toMatch(/^latest run error, Rate limited · limit has reset$|^latest run error, Rate limited · resets /);
+    expect(screen.getByTestId("sidebar-task-row").getAttribute("aria-label")).toContain("Rate limited · ");
+  });
+
+  it("rate limited task with an unseen failure shows a warning attention dot", async () => {
+    const client = renderSidebar({
+      runStatus: new Map([[TASK.ID, "error"]]),
+      rateLimit: new Map([[TASK.ID, {}]]),
+      attention: new Map([[TASK.ID, new Set<AttentionReason>(["error"])]]),
+    });
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    const dot = await screen.findByTestId("task-attention");
+    expect(dot).toHaveAttribute("data-status", "warning");
+    expect(dot.getAttribute("aria-label")).toContain("Rate limited · reset time unknown");
+  });
+
+  it("plain error task still shows the error dot", async () => {
+    const client = renderSidebar({ runStatus: new Map([[TASK.ID, "error"]]) });
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    const dot = await screen.findByTestId("task-run-status");
+    expect(dot).toHaveAttribute("data-status", "danger");
+    expect(dot).toHaveAttribute("aria-label", "latest run error");
+    expect(screen.getByTestId("sidebar-task-row").getAttribute("aria-label")).not.toContain("Rate limited");
+  });
+
   it("a task that has never run shows no run dot, rather than an idle one", async () => {
     const client = renderSidebar({ runStatus: new Map() });
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
