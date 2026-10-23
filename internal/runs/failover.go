@@ -20,6 +20,19 @@ const defaultRetryGrace = 30 * time.Second
 // attempt may already have changed the worktree.
 const retryPreface = "(Retrying after a provider rate limit. Your earlier attempt may have made partial progress: check git status and git log, then continue.)\n\n"
 
+// FallbackProfileFor returns the fallback profile id the given profile's
+// author named (ADR-0041 F2), or 0 when the profile is unknown or has none.
+func (reg *Registry) FallbackProfileFor(profileID int64) int64 {
+	if profileID == 0 {
+		return 0
+	}
+	p, err := reg.st.GetAgentProfile(profileID)
+	if err != nil || p.FallbackProfileID == nil {
+		return 0
+	}
+	return *p.FallbackProfileID
+}
+
 // applyRateLimitPolicy is ADR-0041 F2b: when a run launched with a profile
 // fails on a provider rate limit, do what the profile's onRateLimit says.
 // It acts at most once per chain (a retry is itself a run with failoverOf

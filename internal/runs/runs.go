@@ -84,6 +84,12 @@ type RunStatus struct {
 	// FailureResetAt is when the quota resets (UTC); nil = unknown.
 	FailureResetAt *time.Time
 
+	// ProfileID is the agent profile the run was launched with (0 = none)
+	// and FailoverOf the run it continues after a rate limit ("" = none);
+	// ADR-0041 F2.
+	ProfileID  int64
+	FailoverOf string
+
 	// Err is populated once Status is StatusError, carrying the error
 	// RunPrompt returned.
 	Err string

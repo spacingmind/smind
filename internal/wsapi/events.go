@@ -134,6 +134,9 @@ type runStatusPayload struct {
 	BaseSHA string `json:"baseSha,omitempty"`
 	HeadSHA string `json:"headSha,omitempty"`
 	Dirty   *bool  `json:"dirty,omitempty"`
+	// ProfileID/FailoverOf: ADR-0041 F2, omitted when none.
+	ProfileID  int64  `json:"profileId,omitempty"`
+	FailoverOf string `json:"failoverOf,omitempty"`
 }
 
 // permissionPendingPayload is the payload of permission.pending events:

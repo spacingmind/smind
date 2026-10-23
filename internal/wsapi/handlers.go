@@ -1761,7 +1761,14 @@ type runLogsResult struct {
 	// Attachments is the public metadata of the prompt's attachments
 	// (ADR-0038); never bytes.
 	Attachments []attach.Item `json:"attachments,omitempty"`
-	Events      []runLogEvent `json:"events"`
+	// ProfileID/FailoverOf: ADR-0041 F2 provenance, omitted when none.
+	ProfileID  int64  `json:"profileId,omitempty"`
+	FailoverOf string `json:"failoverOf,omitempty"`
+	// FallbackProfileID is set only for a rate_limited run whose profile
+	// names a fallback: the suggestion to start the work again on it, in a
+	// new chat.
+	FallbackProfileID int64         `json:"fallbackProfileId,omitempty"`
+	Events            []runLogEvent `json:"events"`
 }
 
 // handleRunLogs returns runID's full (or, with Tail set, last Tail)
@@ -1790,20 +1797,27 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 		for i, e := range history {
 			events[i] = toRunLogEvent(e)
 		}
+		var fallbackID int64
+		if status.FailureKind == "rate_limited" {
+			fallbackID = reg.FallbackProfileFor(status.ProfileID)
+		}
 		return runLogsResult{
-			RunID:       status.ID,
-			Status:      string(status.Status),
-			StopReason:  status.StopReason,
-			Disposition: status.Disposition,
-			Err:         status.Err,
-			FailureKind: status.FailureKind,
-			Window:      status.FailureWindow,
-			ResetAt:     runs.FailureResetRFC3339(status),
-			BaseSHA:     derefStr(status.BaseSHA),
-			HeadSHA:     derefStr(status.HeadSHA),
-			Dirty:       status.Dirty,
-			Attachments: status.Attachments,
-			Events:      events,
+			ProfileID:         status.ProfileID,
+			FailoverOf:        status.FailoverOf,
+			FallbackProfileID: fallbackID,
+			RunID:             status.ID,
+			Status:            string(status.Status),
+			StopReason:        status.StopReason,
+			Disposition:       status.Disposition,
+			Err:               status.Err,
+			FailureKind:       status.FailureKind,
+			Window:            status.FailureWindow,
+			ResetAt:           runs.FailureResetRFC3339(status),
+			BaseSHA:           derefStr(status.BaseSHA),
+			HeadSHA:           derefStr(status.HeadSHA),
+			Dirty:             status.Dirty,
+			Attachments:       status.Attachments,
+			Events:            events,
 		}, nil
 	}
 }

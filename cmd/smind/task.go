@@ -155,10 +155,13 @@ type runLogsResult struct {
 	ResetAt     string `json:"resetAt"`
 	// BaseSHA/HeadSHA/Dirty mirror the run's git provenance (O1), absent
 	// while unknown.
-	BaseSHA string        `json:"baseSha,omitempty"`
-	HeadSHA string        `json:"headSha,omitempty"`
-	Dirty   *bool         `json:"dirty,omitempty"`
-	Events  []runLogEvent `json:"events"`
+	BaseSHA string `json:"baseSha,omitempty"`
+	HeadSHA string `json:"headSha,omitempty"`
+	Dirty   *bool  `json:"dirty,omitempty"`
+	// FallbackProfileID (ADR-0041 F2): for a rate_limited run, the profile its
+	// author named as the fallback; 0 = none.
+	FallbackProfileID int64         `json:"fallbackProfileId,omitempty"`
+	Events            []runLogEvent `json:"events"`
 }
 
 func cmdTask(args []string) int {

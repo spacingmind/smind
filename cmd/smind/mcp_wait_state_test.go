@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTaskWait_PendingPermissionReportsWaitingPermission(t *testing.T) {
@@ -165,5 +167,49 @@ func TestTaskWait_IgnoredPermissionDoesNotReportWaiting(t *testing.T) {
 	fresh := buildTaskWaitOutput(result, map[string]bool{"other": true}, false)
 	if fresh.State != "waiting_permission" || len(fresh.PendingPermissions) != 1 {
 		t.Fatalf("fresh request: %+v, want waiting_permission", fresh)
+	}
+}
+
+// runLogsWithFallback is a run.logs payload for a rate-limited run whose
+// profile names profile 7 as the fallback.
+const runLogsWithFallback = `{"runId":"r1","status":"error","err":"429 usage limit","fallbackProfileId":7,"events":[]}`
+
+func TestMCPTaskStatus_FallbackProfileID(t *testing.T) {
+	var result runLogsResult
+	if err := json.Unmarshal([]byte(runLogsWithFallback), &result); err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(buildTaskStatusOutput(result))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	if m["fallbackProfileId"] != float64(7) {
+		t.Fatalf("task_status = %s, want fallbackProfileId 7", b)
+	}
+	wait := buildTaskWaitOutput(result, nil, false)
+	if wait.FallbackProfileID != 7 || wait.State != "error" {
+		t.Fatalf("task_wait = %+v", wait)
+	}
+	// Absent when the run has no suggestion.
+	result.FallbackProfileID = 0
+	b, _ = json.Marshal(buildTaskStatusOutput(result))
+	if strings.Contains(string(b), "fallbackProfileId") {
+		t.Fatalf("task_status = %s, want no fallbackProfileId", b)
+	}
+}
+
+func TestTaskWait_PrintsFallbackHint(t *testing.T) {
+	row := runSummaryRow{ID: "r1", Status: "error", StartedAt: time.Now().Add(-time.Minute), Err: "429"}
+	got := renderWaitReport(row, "", time.Now(), 7)
+	if !strings.Contains(got, "fallback: profile 7 (use: smind task chat new <task>, then task send --chat ...)") {
+		t.Fatalf("report = %q, want the fallback hint", got)
+	}
+	if strings.Contains(renderWaitReport(row, "", time.Now(), 0), "fallback:") {
+		t.Fatalf("hint printed without a fallback profile")
+	}
+	if waitExitCode(row) != 1 {
+		t.Fatalf("waitExitCode changed")
 	}
 }

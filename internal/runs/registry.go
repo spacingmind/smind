@@ -589,6 +589,8 @@ func (r *run) statusLocked() RunStatus {
 		Purpose:        r.purpose,
 		Origin:         r.origin,
 		Attachments:    publicItems(r.attachments),
+		ProfileID:      r.profileID,
+		FailoverOf:     r.failoverOf,
 
 		FailureKind:   r.failureKind,
 		FailureWindow: r.failureWindow,

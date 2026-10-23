@@ -111,6 +111,7 @@ type taskStatusOutput struct {
 	BaseSHA           string                `json:"baseSha,omitempty" jsonschema:"full commit SHA of the run's worktree when it started; omitted when unknown"`
 	HeadSHA           string                `json:"headSha,omitempty" jsonschema:"full commit SHA of the run's worktree at its latest capture; omitted when unknown"`
 	Dirty             *bool                 `json:"dirty,omitempty" jsonschema:"whether the run's worktree had uncommitted changes at its latest capture; omitted when unknown"`
+	FallbackProfileID int64                 `json:"fallbackProfileId,omitempty" jsonschema:"for a rate_limited run: the profile its author named as the fallback; start the work again with task_send profileId set to it on a NEW chat (chat_new), because a chat is bound to its provider"`
 	Events            []mcpRunEvent         `json:"events"`
 	PendingPermission *pendingPermissionOut `json:"pendingPermission,omitempty"`
 }
@@ -146,6 +147,8 @@ func buildTaskStatusOutput(result runLogsResult) taskStatusOutput {
 		BaseSHA:     result.BaseSHA,
 		HeadSHA:     result.HeadSHA,
 		Dirty:       result.Dirty,
+
+		FallbackProfileID: result.FallbackProfileID,
 	}
 	events := result.Events
 	if len(events) > mcpStatusTail {
@@ -338,6 +341,7 @@ type taskWaitOutput struct {
 	// just the first.
 	PendingPermissions []pendingPermissionOut `json:"pendingPermissions,omitempty"`
 	Message            string                 `json:"message,omitempty"`
+	FallbackProfileID  int64                  `json:"fallbackProfileId,omitempty" jsonschema:"for a rate_limited run: the profile its author named as the fallback; start the work again with task_send profileId set to it on a NEW chat (chat_new), because a chat is bound to its provider"`
 }
 
 // buildTaskWaitOutput derives task_wait's output from one run.logs snapshot.
@@ -345,7 +349,7 @@ type taskWaitOutput struct {
 // waiting); timedOut marks the deadline having passed with the run going.
 func buildTaskWaitOutput(result runLogsResult, ignore map[string]bool, timedOut bool) taskWaitOutput {
 	out := taskWaitOutput{RunID: result.RunID, Status: result.Status, StopReason: result.StopReason, StopNote: stopNote(result.StopReason), Disposition: result.Disposition, Err: result.Err,
-		FailureKind: result.FailureKind, Window: result.Window, ResetAt: result.ResetAt}
+		FailureKind: result.FailureKind, Window: result.Window, ResetAt: result.ResetAt, FallbackProfileID: result.FallbackProfileID}
 	var fresh []pendingPermissionOut
 	for _, p := range pendingPermissionsFrom(result) {
 		if !ignore[p.RequestID] {
