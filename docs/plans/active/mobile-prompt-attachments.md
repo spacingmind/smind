@@ -58,7 +58,7 @@ sent prompt's pills in the timeline; before/after adding and removing a pill.
 
 ## Progress
 
-(updated as work proceeds)
+- Peer 1 (task 59, peer-sonnet) candidate baafa983: ACCEPT. Reviewed attachments.ts/api.ts; tsc clean, 637 mobile tests pass. Error index is parsed from the message ("attachment N:"), no daemon change needed. One commit (8b21f26d) had a failing test fixed in the next; history kept.
 
 ## Validation
 
