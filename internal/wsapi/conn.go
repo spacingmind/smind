@@ -113,6 +113,10 @@ type conn struct {
 	// run-scoped connection; nil disables it.
 	runs *runs.Registry
 
+	// admit applies the ADR-0041 S3 seat policy to a run-scoped
+	// connection's requests; nil disables it.
+	admit *seatAdmission
+
 	// local marks the token-authenticated /ws connection. A relay-served
 	// session (ServeTransport) is not local, so handlers that administer the
 	// daemon itself (relay.device.*) refuse it.
@@ -235,6 +239,12 @@ func (c *conn) dispatch(connCtx context.Context, env envelope) {
 
 	ident, scoped := c.identity()
 	rc := &requestContext{conn: c, id: env.ID, runScoped: scoped, ident: ident, local: c.local, deviceID: c.deviceID, channel: c.channel}
+	if scoped {
+		if err := c.admit.admit(rc, env.Method, env.Params); err != nil {
+			c.sendError(env.ID, err)
+			return
+		}
+	}
 	result, err := h(reqCtx, rc, env.Params)
 	if err != nil {
 		c.sendError(env.ID, err)

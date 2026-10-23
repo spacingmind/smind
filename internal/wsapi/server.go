@@ -75,6 +75,7 @@ type API struct {
 	Terminals *terminal.Registry
 
 	hs    map[string]handlerFunc
+	admit *seatAdmission
 	bus   *eventBus
 	git   *gitstate.Service
 	focus *focusRegistry
@@ -159,6 +160,7 @@ func (a *API) serve(ctx context.Context, tr Transport, local bool, maxMessage in
 	c.deviceID = deviceID
 	c.channel = ch
 	c.maxMessage = maxMessage
+	c.admit = a.admit
 	c.runs = a.Runs // run-scoped identity is set later by session.identify
 	c.eventsSub = newSubscriber()
 	c.eventsBus = a.bus
@@ -253,6 +255,8 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	}
 	hs["provider.setDefaultModel"] = handleProviderSetDefaultModel(runner, bus)
 	hs["session.identify"] = handleSessionIdentify(reg)
+	admit := newSeatAdmission(reg, profReg, db)
+	hs["profile.list"] = admit.wrapProfileList(hs["profile.list"])
 	hs["daemon.info"] = handleDaemonInfo(info, reg)
 	hs["run.attachment"] = handleRunAttachment(reg)
 	hs["forge.search"] = handleForgeSearch(wm, gh)
@@ -264,7 +268,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		hs[method] = h
 	}
 	hs["workspace.delete"] = learning.beforeWorkspaceDelete(hs["workspace.delete"])
-	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, conns: map[*websocket.Conn]struct{}{}}
+	api := &API{Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, conns: map[*websocket.Conn]struct{}{}}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}
