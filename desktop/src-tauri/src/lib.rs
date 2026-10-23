@@ -50,6 +50,30 @@ const MAIN_WINDOW: &str = "main";
 const TOGGLE_SHORTCUT: &str = "CommandOrControl+Shift+S";
 const CONNECTIONS_FILE: &str = "connections.json";
 
+/// Verbosity of the app log (stdout and `<log dir>/sMind.log`). The plugin's
+/// default is TRACE, which in a release build wrote every WebSocket frame --
+/// and the daemon token in the `/ws?token=` request line -- to a file that
+/// rotates within minutes, burying the lines Help > Open Log Folder is for.
+/// Debug builds keep DEBUG for our own crates only.
+fn app_log_level(debug_build: bool) -> log::LevelFilter {
+    if debug_build {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    }
+}
+
+/// Dependencies that log request lines and frames below WARN even at DEBUG.
+const QUIET_TARGETS: [&str; 5] = ["tungstenite", "tokio_tungstenite", "hyper_util", "reqwest", "tao"];
+
+fn log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    let mut builder = tauri_plugin_log::Builder::new().level(app_log_level(cfg!(debug_assertions)));
+    for target in QUIET_TARGETS {
+        builder = builder.level_for(target, log::LevelFilter::Warn);
+    }
+    builder.build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -99,7 +123,7 @@ pub fn run() {
         )
         // quick-wins AC2 Help > Open Log Folder: writes to the platform
         // log dir (app.path().app_log_dir()) in addition to stdout.
-        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(log_plugin())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         // quick-wins AC6: smind://... deep links. A link that arrives
@@ -406,5 +430,25 @@ mod file_drop_tests {
             chain.contains(".disable_drag_drop_handler()"),
             "the main window builder must call disable_drag_drop_handler()"
         );
+    }
+}
+
+#[cfg(test)]
+mod log_level_tests {
+    use super::{app_log_level, QUIET_TARGETS};
+
+    /// A release build must never log at DEBUG or below: TRACE put the
+    /// daemon token (`GET /ws?token=...`) and every WebSocket frame in the log file.
+    #[test]
+    fn release_builds_log_at_info() {
+        assert_eq!(app_log_level(false), log::LevelFilter::Info);
+        assert_eq!(app_log_level(true), log::LevelFilter::Debug);
+    }
+
+    #[test]
+    fn the_request_line_loggers_are_silenced() {
+        for target in ["tungstenite", "hyper_util", "reqwest"] {
+            assert!(QUIET_TARGETS.contains(&target), "{target} must be capped at WARN");
+        }
     }
 }
