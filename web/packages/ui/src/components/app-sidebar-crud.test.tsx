@@ -398,7 +398,7 @@ describe("AppSidebar CRUD", () => {
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
 
     const archive = await waitFor(() => client.nth("task.archive"));
-    expect(archive.params).toEqual({ id: 42 });
+    expect(archive.params).toEqual({ id: 42, taskId: 42 });
 
     await act(async () => {
       archive.resolve(TASK);
