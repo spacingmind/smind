@@ -306,6 +306,10 @@ pub fn run() {
                     }
                 });
 
+                // macOS registers `smind://` through the bundle's Info.plist
+                // (tauri.conf.json `deep-link`); the runtime call is only for
+                // Windows/Linux and always answers "unsupported platform" here.
+                #[cfg(not(target_os = "macos"))]
                 if let Err(e) = app.deep_link().register_all() {
                     eprintln!("smind desktop: deep link registration failed: {e}");
                 }
@@ -340,8 +344,15 @@ pub fn run() {
                 _ => {}
             });
 
-            // AC5: register the toggle shortcut.
-            app.global_shortcut().register(TOGGLE_SHORTCUT)?;
+            // AC5: register the toggle shortcut. Another app (or another
+            // sMind) may already own it -- Windows and Linux refuse the second
+            // registration -- and that must not stop the app from starting:
+            // the tray and the window still work without it.
+            note_unavailable(
+                "global shortcut",
+                TOGGLE_SHORTCUT,
+                app.global_shortcut().register(TOGGLE_SHORTCUT),
+            );
 
             // AC7: start the daemon-client watcher (tray pending count,
             // OS notifications) -- and, for a relay-kind connection, the
@@ -421,6 +432,29 @@ fn show_main(app: &tauri::AppHandle) {
 fn show_main_window(win: &tauri::WebviewWindow) {
     let _ = win.show();
     let _ = win.set_focus();
+}
+
+/// note_unavailable logs an optional integration that could not be set up and
+/// says whether it is now active. Startup never fails because of one.
+fn note_unavailable<E: std::fmt::Display>(what: &str, name: &str, result: Result<(), E>) -> bool {
+    match result {
+        Ok(()) => true,
+        Err(e) => {
+            log::warn!("smind desktop: {what} {name} is unavailable: {e}");
+            false
+        }
+    }
+}
+
+#[cfg(test)]
+mod optional_integration_tests {
+    use super::note_unavailable;
+
+    #[test]
+    fn a_failed_shortcut_registration_is_reported_not_propagated() {
+        assert!(note_unavailable("global shortcut", "Ctrl+Shift+S", Ok::<(), String>(())));
+        assert!(!note_unavailable("global shortcut", "Ctrl+Shift+S", Err("already registered")));
+    }
 }
 
 #[cfg(test)]
