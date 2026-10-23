@@ -810,6 +810,9 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 	if model != "" && model != ClaudeModelDefault {
 		opts = append(opts, claudecode.WithModel(model))
 	}
+	// Deltas of the assistant's text and thinking, so the answer streams live
+	// instead of appearing whole at the end of the message (claude_stream.go).
+	opts = append(opts, claudecode.WithIncludePartialMessages())
 	d, _ := DeliveryFrom(ctx)
 	if dirs := append(append([]string(nil), d.AddDirs...), attachmentAddDirs(ctx, prompt)...); len(dirs) > 0 {
 		// ADR-0026 section 5: the read-only learned-skill projection, plus
@@ -873,7 +876,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 	forwardDone := make(chan struct{})
 	go func() {
 		defer close(forwardDone)
-		for msg := range updates {
+		forwardClaudeMessages(ctx, updates, events, func(msg claudecode.Message) {
 			// The CLI reports its session id on an "init" system message
 			// -- the earliest point a handle exists at all on this
 			// backend. Storing it here (never overwriting with an empty
@@ -902,13 +905,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 					}
 				}
 			}
-			for _, e := range claudeEvents(msg) {
-				select {
-				case events <- e:
-				case <-ctx.Done():
-				}
-			}
-		}
+		})
 	}()
 
 	result, err := r.claudePrompt(ctx, client, prompt, updates, events)
