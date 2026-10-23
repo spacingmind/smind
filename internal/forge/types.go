@@ -1,6 +1,9 @@
 package forge
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // Item is one PR/issue row in a Search result.
 type Item struct {
@@ -38,15 +41,40 @@ type Snapshot struct {
 	Body    string
 }
 
-// AuthStatus describes how a forge CLI is authenticated on the daemon host.
-// Nothing fills it yet; it is the shape later PRs of ADR-0039 return.
+// AuthHost is one forge host's sign-in state on the daemon host. Source is
+// where gh keeps the credential ("keyring", "file", "env" or "none"); it is
+// never a path, and no field ever carries a token.
+type AuthHost struct {
+	Host          string   `json:"host"`
+	Authenticated bool     `json:"authenticated"`
+	Login         string   `json:"login"`
+	Scopes        []string `json:"scopes"`
+	Protocol      string   `json:"protocol"`
+	Source        string   `json:"source"`
+}
+
+// CLIInfo says whether the forge CLI is on the daemon host's PATH.
+type CLIInfo struct {
+	Installed bool   `json:"installed"`
+	Version   string `json:"version"`
+}
+
+// AuthStatus is how a forge CLI is authenticated on the daemon host: the CLI
+// and every host it knows (empty when the CLI is missing or signed out
+// everywhere).
 type AuthStatus struct {
-	CLIInstalled  bool
-	Host, Login   string
-	Authenticated bool
-	Scopes        []string
-	Protocol      string
-	Source        string
+	CLI   CLIInfo    `json:"cli"`
+	Hosts []AuthHost `json:"hosts"`
+}
+
+// Authenticated reports whether host is signed in.
+func (s AuthStatus) Authenticated(host string) bool {
+	for _, h := range s.Hosts {
+		if strings.EqualFold(h.Host, host) && h.Authenticated {
+			return true
+		}
+	}
+	return false
 }
 
 // CreatePRInput is what Provider.CreatePR opens a pull request from. Head is
@@ -62,7 +90,8 @@ type CreatePRInput struct {
 
 // Provider is a forge client (GitHub today). Repo, OpenPRs and PR serve the
 // PR poller (ADR-0039 section 4); CreatePR serves task.createPr (section 5);
-// Status arrives with its caller in a later PR. Failures are *Error.
+// Status, Login and Logout serve forge.status, forge.setToken and
+// forge.logout (section 8). Failures are *Error.
 type Provider interface {
 	Name() string
 	Search(ctx context.Context, dir, kind, query string, limit int) (SearchResult, error)
@@ -75,4 +104,12 @@ type Provider interface {
 	PR(ctx context.Context, dir string, number int) (PR, error)
 	// CreatePR opens a pull request and returns its full state.
 	CreatePR(ctx context.Context, dir string, in CreatePRInput) (PR, error)
+	// Status reads the CLI's sign-in state for every host it knows. A missing
+	// CLI is a status (CLI.Installed false), not an error.
+	Status(ctx context.Context) (AuthStatus, error)
+	// Login signs the CLI in to host with token. The token travels on the
+	// CLI's stdin only: never argv, env, a log line or an error.
+	Login(ctx context.Context, host, token string) error
+	// Logout signs the CLI out of host.
+	Logout(ctx context.Context, host string) error
 }
