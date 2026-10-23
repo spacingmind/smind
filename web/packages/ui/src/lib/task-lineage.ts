@@ -44,6 +44,12 @@ export interface TaskTreeNode {
     pendingPermissions: number;
     /** "needs-continue" when the latest run is "done" but was cut off at a turn/token/budget cap (ADR-0027 D13). */
     disposition?: string;
+    /** ADR-0041: "rate_limited" when the latest run failed on a provider quota (state stays "error"). */
+    failureKind?: string;
+    /** The quota window that was hit ("5h", "weekly", ...). */
+    window?: string;
+    /** When the limit lifts (RFC 3339 UTC). */
+    resetAt?: string;
   };
   counts: TaskTreeCounts;
   usage: {

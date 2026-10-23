@@ -205,6 +205,42 @@ describe("useRunTimeline provenance", () => {
   });
 });
 
+describe("useRunTimeline rate-limit failure (ADR-0041)", () => {
+  const limited = { FailureKind: "rate_limited", FailureWindow: "5h", FailureResetAt: "2030-01-01T17:35:18Z" };
+
+  it("maps failure fields from run.list, run.logs and run.status and drops empty kinds", async () => {
+    const client = new FakeWsClient();
+    const ev = fakeEvents();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10, ev.events));
+
+    // run.list: Go-named fields; an empty kind / window and a null reset become undefined.
+    client.nth("run.list", 0).resolve([
+      summary({ ID: "run-1", Status: "error", ...limited }),
+      summary({ ID: "run-2", Status: "error", FailureKind: "", FailureWindow: "", FailureResetAt: null }),
+    ]);
+    await flush();
+    expect(result.current.runs?.[0]).toMatchObject({ failureKind: "rate_limited", failureWindow: "5h", failureResetAt: "2030-01-01T17:35:18Z" });
+    expect(result.current.runs?.[1]?.failureKind).toBeUndefined();
+    expect(result.current.runs?.[1]?.failureWindow).toBeUndefined();
+    expect(result.current.runs?.[1]?.failureResetAt).toBeUndefined();
+
+    // run.logs backfill (lowercase fields): run-1 (limited) and run-2 (empty kind).
+    await act(async () => {
+      client.nth("run.logs", 0).resolve({ runId: "run-1", status: "error", failureKind: "rate_limited", window: "weekly", resetAt: "2030-01-02T00:00:00Z", events: [] } satisfies RunLogsResult);
+      client.nth("run.logs", 1).resolve({ runId: "run-2", status: "error", failureKind: "", events: [] } satisfies RunLogsResult);
+    });
+    await waitFor(() => expect(result.current.runs?.[0]?.failureWindow).toBe("weekly"));
+    expect(result.current.runs?.[0]).toMatchObject({ failureKind: "rate_limited", failureResetAt: "2030-01-02T00:00:00Z" });
+    expect(result.current.runs?.[1]?.failureKind).toBeUndefined();
+
+    // run.status for a known run: the event carries the failure; an empty kind patches nothing.
+    await ev.fire("run.status", { runId: "run-2", taskId: 1, chatId: 10, status: "error", failureKind: "rate_limited", window: "5h", resetAt: "2030-01-03T00:00:00Z" });
+    expect(result.current.runs?.[1]).toMatchObject({ failureKind: "rate_limited", failureWindow: "5h", failureResetAt: "2030-01-03T00:00:00Z" });
+    await ev.fire("run.status", { runId: "run-1", taskId: 1, chatId: 10, status: "error", failureKind: "" });
+    expect(result.current.runs?.[0]?.failureKind).toBe("rate_limited");
+  });
+});
+
 function fakeEvents() {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const events: DaemonEvents = {
