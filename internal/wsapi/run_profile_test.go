@@ -16,20 +16,7 @@ func TestRunStart_ProfileIDRecordedAndValidated(t *testing.T) {
 	e.mustCall(t, "profile.create", map[string]any{"name": "p", "provider": "glm"}, &prof)
 
 	runID := e.startOK(t, map[string]any{"profileId": prof.ID})
-	waitRunDone := func(id string) {
-		t.Helper()
-		deadline := time.Now().Add(10 * time.Second)
-		for {
-			if row, err := e.db.GetRun(id); err == nil && row.Status != "running" {
-				return
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("run %s did not finish", id)
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-	waitRunDone(runID)
+	e.waitRunDone(t, runID)
 	if row, err := e.db.GetRun(runID); err != nil || row.ProfileID != prof.ID {
 		t.Fatalf("run ProfileID = %d, %v, want %d", row.ProfileID, err, prof.ID)
 	}
@@ -62,12 +49,23 @@ func stickyEnv(t *testing.T) (*attachEnv, int64) {
 	return e, prof.ID
 }
 
+// waitRunDone waits until the REGISTRY reports the run finished (run.list),
+// not just the persisted row: finish persists the terminal status a moment
+// before the in-memory transition, and a follow-up sent in between is refused
+// with "chat already has a running run" (seen once in a full-suite run).
 func (e *attachEnv) waitRunDone(t *testing.T, id string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if row, err := e.db.GetRun(id); err == nil && row.Status != "running" {
-			return
+		var rows []struct {
+			ID     string `json:"ID"`
+			Status string `json:"Status"`
+		}
+		e.mustCall(t, "run.list", map[string]any{}, &rows)
+		for _, r := range rows {
+			if r.ID == id && r.Status != "running" {
+				return
+			}
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("run %s did not finish", id)
