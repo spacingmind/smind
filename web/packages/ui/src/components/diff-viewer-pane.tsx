@@ -550,6 +550,11 @@ export function DiffViewerPane({
         </div>
       )}
 
+      {/*
+        Staging is per file (the checkboxes live on the By-file rows), so the commit bar belongs to that view: in the
+        whole-diff view it had no checkboxes next to it to explain "Commit (0 staged)".
+      */}
+      {prefs.view === "by-file" && (
       <div className="relative z-10 border-t bg-background px-4 py-3" data-testid="commit-bar">
         {lastCommit && (
           <p className="mb-2 text-ui-base text-foreground-subtle" data-testid="commit-success">
@@ -587,6 +592,7 @@ export function DiffViewerPane({
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -705,6 +711,7 @@ function FileRow({
                     )
                   : undefined
               }
+              hideFileHeader
               testId={`diff-container-${file.path}`}
             />
           )}
