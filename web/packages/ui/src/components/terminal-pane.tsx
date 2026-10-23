@@ -181,10 +181,17 @@ function base64ToBytes(b64: string): Uint8Array {
  * decisions for why that is the right reading of the detach-not-close
  * contract.
  */
+/** `${taskId}:terminal` -> "Terminal"; `${taskId}:terminal:N` -> "Terminal N" (mirrors tab-registry's terminalTab titles). */
+export function terminalTitleFromKey(key: string): string {
+  const m = /:terminal:(\d+)$/.exec(key);
+  return m ? `Terminal ${m[1]}` : "Terminal";
+}
+
 export function TerminalPane({
   client,
   task,
   tabKey,
+  title,
   active = true,
   connectionStatus = "connected",
   onNewTerminal,
@@ -194,6 +201,8 @@ export function TerminalPane({
   task: Task;
   /** This pane's tab key -- what its session binding and activity flag are recorded against. Defaults to the base terminal tab's key, so an existing single-terminal caller behaves exactly as before. */
   tabKey?: string;
+  /** The tab's current (possibly user-renamed) title, shown in the header. Absent: derived from `tabKey` ("Terminal" / "Terminal N"). */
+  title?: string;
   /** Whether this pane's tab is the one in front. Output arriving while false marks the tab; flipping to true clears the mark. Defaults true for a caller that has no tab strip. */
   active?: boolean;
   /** Real-time connection status from App.tsx -- see TaskDetailPane's identical prop for why. Defaults to "connected" so every existing caller/test keeps behaving exactly as before. */
@@ -204,6 +213,7 @@ export function TerminalPane({
   createTerminal?: (options: { scrollback: number }) => TerminalHandle;
 }) {
   const key = tabKey ?? `${task.ID}:terminal`;
+  const headerTitle = title || terminalTitleFromKey(key);
   const { resolved } = useTheme();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<TerminalHandle | null>(null);
@@ -610,8 +620,12 @@ export function TerminalPane({
     <div className="flex h-full flex-col" onFocus={onFindFocus} onBlur={onFindBlur}>
       <PaneHeader
         title={
-          <span data-testid="terminal-status" className="font-normal text-foreground-muted">
-            {endedStatus ? `session ${endedStatus}` : terminalId ? `terminal ${terminalId}` : "starting terminal…"}
+          <span
+            data-testid="terminal-status"
+            className="font-normal text-foreground-muted"
+            title={terminalId ?? undefined}
+          >
+            {endedStatus ? `session ${endedStatus}` : terminalId ? headerTitle : "starting terminal…"}
           </span>
         }
         actions={

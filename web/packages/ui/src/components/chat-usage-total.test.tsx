@@ -31,6 +31,23 @@ describe("ChatUsageTotal", () => {
     expect(popover).toHaveTextContent("3,200");
   });
 
+  it("renders tokens in full, in a max-sm:hidden span so narrow screens show only the cost", () => {
+    render(<ChatUsageTotal runs={[{ usage: usage({ inputTokens: 13500, outputTokens: 11400, costUsd: 0.17 }) }]} />);
+    const pill = screen.getByTestId("chat-usage-total");
+    expect(pill).toHaveTextContent("13.5k in · 11.4k out · $0.17");
+    const tokens = screen.getByTestId("chat-usage-tokens");
+    expect(tokens.className).toContain("max-sm:hidden");
+    expect(tokens).toHaveTextContent("13.5k in · 11.4k out");
+    expect(tokens).not.toHaveTextContent("$");
+    expect(pill).toHaveAttribute("aria-label", expect.stringContaining("Usage total: 13.5k in, 11.4k out, $0.17"));
+  });
+
+  it("without a cost the tokens are not hidden", () => {
+    render(<ChatUsageTotal runs={[{ usage: usage({ inputTokens: 100, outputTokens: 20 }) }]} />);
+    expect(screen.queryByTestId("chat-usage-tokens")).toBeNull();
+    expect(screen.getByTestId("chat-usage-total")).toHaveTextContent("100 in · 20 out");
+  });
+
   it("a run with null cost does not count as 0 in the total", async () => {
     const first = render(
       <ChatUsageTotal

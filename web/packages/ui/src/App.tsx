@@ -2386,6 +2386,7 @@ function TabContent({
         client={client}
         task={task}
         tabKey={entry.key}
+        title={entry.title}
         active={active}
         connectionStatus={connectionStatus}
         onNewTerminal={onNewTerminal}

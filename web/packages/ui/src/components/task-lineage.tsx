@@ -1,5 +1,5 @@
 import { StatusDot } from "@/components/ui/status-dot";
-import { pillStatusWithSubtree, rateLimitHint, statusSummary, usageChipText } from "@/lib/task-lineage";
+import { pillStatusWithSubtree, rateLimitHint, statusSummary, usageChipParts, usageChipText } from "@/lib/task-lineage";
 import type { TaskLineage } from "@/hooks/use-task-lineage";
 
 /**
@@ -21,6 +21,7 @@ export function TaskLineageChips({
   const { parent, node, children, nodes } = lineage;
   const summary = node ? statusSummary(node.counts) : "";
   const usage = node ? usageChipText(node.usage.subtree) : null;
+  const usageParts = node ? usageChipParts(node.usage.subtree) : null;
   // ADR-0041: this task's own latest run hit a provider quota.
   const limitHint = node ? rateLimitHint(node, new Date()) : null;
   if (!parent && children.length === 0 && !summary && !usage && !limitHint) return null;
@@ -31,9 +32,20 @@ export function TaskLineageChips({
         <span
           data-testid="task-tree-usage"
           title={`Task total (this task and its subtree) -- own: ${usageChipText(node.usage.own) ?? "—"} · tree: ${usageChipText(node.usage.subtree) ?? "—"}`}
-          className="truncate rounded-full border px-2 py-0.5"
+          className="min-w-0 truncate rounded-full border px-2 py-0.5"
         >
-          Task {usage}
+          Task{" "}
+          {usageParts?.cost ? (
+            <>
+              <span>{usageParts.cost}</span>
+              <span data-testid="task-tree-usage-tokens" className="max-sm:hidden">
+                {" "}
+                · {usageParts.tokens}
+              </span>
+            </>
+          ) : (
+            usage
+          )}
         </span>
       )}
       {parent && !parent.archived && (

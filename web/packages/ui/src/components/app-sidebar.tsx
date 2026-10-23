@@ -57,6 +57,7 @@ import { useCollapsedTasks } from "@/hooks/use-collapsed-tasks";
 import { useCollapsedNodes, type CollapsedNodes } from "@/hooks/use-collapsed-nodes";
 import { useRowActive } from "@/hooks/use-row-active";
 import { useSidebarGroupMode } from "@/hooks/use-sidebar-group-mode";
+import { describeTaskStatus } from "@/lib/task-status-label";
 import { groupTasksByStatus, type StatusGroup } from "@/lib/sidebar-status-groups";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import { UsageSidebarItem } from "@/components/account-usage/usage-sidebar-item";
@@ -1962,7 +1963,12 @@ const TaskRow = memo(function TaskRow({
   const slotSignal = taskSlotSignal(reason, runState, isUnread);
   const isTaskPinned = pinned.has(task.ID);
   const isSelected = task.ID === selectedTaskId;
-  const status = statusOverrides.get(task.ID) ?? task.Status;
+  const status = describeTaskStatus({
+    runState,
+    limited: Boolean(limited),
+    git,
+    lifecycle: statusOverrides.get(task.ID) ?? task.Status,
+  });
   const branch = git?.branch?.name ?? task.Branch;
   // Hover/focus/menu-open state lives on a wrapper around THIS row only. The
   // caller's li also contains this task's nested children list, so a CSS

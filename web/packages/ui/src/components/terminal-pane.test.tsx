@@ -180,7 +180,22 @@ describe("TerminalPane", () => {
 
     const attachCall = client.nth("terminal.attach", 0);
     expect(attachCall.params).toEqual({ terminalId: "term-1" });
-    expect(screen.getByTestId("terminal-status")).toHaveTextContent("term-1");
+    expect(screen.getByTestId("terminal-status")).toHaveTextContent("Terminal");
+    expect(screen.getByTestId("terminal-status")).not.toHaveTextContent("term-1");
+    expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-1");
+  });
+
+  it("shows the tab title prop (a renamed tab) in the header", async () => {
+    const client = new FakeWsClient();
+    const fake = new FakeTerminalHandle();
+    render(<TerminalPane client={client} task={TASK_A} title="Build logs" createTerminal={() => fake} />);
+    await flush();
+    client.nth("terminal.list", 0).resolve([]);
+    await flush();
+    client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+    await flush();
+    expect(screen.getByTestId("terminal-status")).toHaveTextContent("Build logs");
+    expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-1");
   });
 
   it("focuses the terminal when its tab is in front, and again when it is re-activated; not while behind", async () => {
@@ -466,7 +481,7 @@ describe("TerminalPane", () => {
       expect(client2.calls.some((c) => c.method === "terminal.create")).toBe(false);
       const reattach = client2.nth("terminal.attach", 0);
       expect(reattach.params).toEqual({ terminalId: "term-1" });
-      expect(screen.getByTestId("terminal-status")).toHaveTextContent("term-1");
+      expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-1");
     });
 
     it("given a session that comes back status: interrupted post-reconnect, renders the distinct 'session ended: daemon restarted' state, not a generic error", async () => {
@@ -544,7 +559,7 @@ describe("TerminalPane", () => {
       expect(client2.calls.some((c) => c.method === "terminal.create")).toBe(false);
       const reattach = client2.nth("terminal.attach", 0);
       expect(reattach.params).toEqual({ terminalId: "term-1" });
-      expect(screen.getByTestId("terminal-status")).toHaveTextContent("term-1");
+      expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-1");
     });
 
     it("explicitly closing the terminal, then a later reconnect, creates a fresh terminal instead of getting stuck showing 'session closed'", async () => {
@@ -557,7 +572,7 @@ describe("TerminalPane", () => {
       await flush();
       client1.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
       await flush();
-      expect(screen.getByTestId("terminal-status")).toHaveTextContent("term-1");
+      expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-1");
 
       fireEvent.click(screen.getByRole("button", { name: "Close terminal" }));
       await flush();
@@ -590,7 +605,7 @@ describe("TerminalPane", () => {
       createCall.resolve({ terminalId: "term-2" });
       await flush();
       expect(client2.nth("terminal.attach", 0).params).toEqual({ terminalId: "term-2" });
-      expect(screen.getByTestId("terminal-status")).toHaveTextContent("term-2");
+      expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-2");
     });
   });
 });
@@ -762,8 +777,8 @@ describe("TerminalPane multiple terminals per task (Item 20)", () => {
     await flush();
 
     expect(screen.getAllByTestId("terminal-status").map((el) => el.textContent)).toEqual([
-      "terminal term-1",
-      "terminal term-2",
+      "Terminal",
+      "Terminal 2",
     ]);
   });
 

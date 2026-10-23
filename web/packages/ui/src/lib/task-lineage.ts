@@ -166,3 +166,10 @@ export function usageChipText(usage: TreeUsageTotals): string | null {
   const tokens = usage.inputTokens === null && usage.outputTokens === null ? null : (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
   return `${formatCost(usage.costUsd)} · ${formatTokens(tokens, "compact")} tok`;
 }
+
+/** `usageChipText` split into its cost and token segments (`null` cost when none was reported), for a chip that drops the tokens on narrow screens. */
+export function usageChipParts(usage: TreeUsageTotals): { cost: string | null; tokens: string } | null {
+  if (usageChipText(usage) === null) return null;
+  const tokens = usage.inputTokens === null && usage.outputTokens === null ? null : (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+  return { cost: usage.costUsd === null ? null : formatCost(usage.costUsd), tokens: `${formatTokens(tokens, "compact")} tok` };
+}
