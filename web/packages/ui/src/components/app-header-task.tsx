@@ -6,6 +6,9 @@ import { ArchiveFinishedDialog, StopTreeDialog } from "@/components/tree-action-
 import { GitBranchLine } from "@/components/git/git-branch-line";
 import { GitTokens } from "@/components/git/git-tokens";
 import { PrChip } from "@/components/git/pr-chip";
+import { SyncMenuItems } from "@/components/git/sync-actions";
+import { SyncDialog } from "@/components/git/sync-dialog";
+import type { SyncMode } from "@/components/git/sync-model";
 import { PortChip, SetupBadge } from "@/components/task-setup";
 import { Button } from "@/components/ui/button";
 import {
@@ -103,6 +106,8 @@ export function HeaderTaskMenu({
   localPathActions: LocalPathActions | null;
 }) {
   const [archiving, setArchiving] = useState(false);
+  const [syncMode, setSyncMode] = useState<SyncMode | null>(null);
+  const [lastSyncMode, setLastSyncMode] = useState<SyncMode>("push");
   const [archiveFinished, setArchiveFinished] = useState(false);
   const [stoppingTree, setStoppingTree] = useState(false);
   const [treeActions, setTreeActions] = useState<TreeActionAvailability | null>(null);
@@ -189,6 +194,14 @@ export function HeaderTaskMenu({
             </DropdownMenuItem>
           )}
           {(task.Branch || worktree) && <DropdownMenuSeparator />}
+          <SyncMenuItems
+            taskId={task.ID}
+            onOpen={(mode) => {
+              setInstantClose(true);
+              setLastSyncMode(mode);
+              setSyncMode(mode);
+            }}
+          />
           {treeActions && (
             <>
               <DropdownMenuItem
@@ -243,6 +256,7 @@ export function HeaderTaskMenu({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <SyncDialog taskId={task.ID} mode={lastSyncMode} open={syncMode !== null} onOpenChange={(open) => !open && setSyncMode(null)} />
       {archiveFinished && (
         <ArchiveFinishedDialog
           client={client}

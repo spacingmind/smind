@@ -7,6 +7,9 @@ import { DiffHeaderMenu } from "@/components/diff-header-menu";
 import { DiffRender, type DiffAnnotation, type DiffOutputFormat } from "@/components/diff-render";
 import { FileStatusMarker } from "@/components/file-status-marker";
 import { PrAction } from "@/components/git/pr-action";
+import { SyncButtons } from "@/components/git/sync-actions";
+import { SyncDialog } from "@/components/git/sync-dialog";
+import type { SyncMode } from "@/components/git/sync-model";
 import { CommentComposer, ReviewAnnotationFrame, ReviewComments, ReviewDraftCard, type PendingComment } from "@/components/review-comments";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -87,6 +90,9 @@ export function DiffViewerPane({
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
   const focusedChatId = useFocusedChatId(task.ID);
+  // Narrow header: the Push / Update items live in the "…" menu, so this pane hosts their dialog.
+  const [syncMode, setSyncMode] = useState<SyncMode | null>(null);
+  const [lastSyncMode, setLastSyncMode] = useState<SyncMode>("push");
   const addToChat = useAddToChat(task.ID);
   const [files, setFiles] = useState<TaskFile[] | null>(null);
   const [fileStates, setFileStates] = useState<Record<string, FileState>>({});
@@ -380,7 +386,13 @@ export function DiffViewerPane({
                 onChangePrefs={updatePrefs}
                 onRefresh={refreshAll}
                 refreshDisabled={!client || loading}
+                taskId={task.ID}
+                onSync={(mode) => {
+                  setLastSyncMode(mode);
+                  setSyncMode(mode);
+                }}
               />
+              <SyncDialog taskId={task.ID} mode={lastSyncMode} open={syncMode !== null} onOpenChange={(open) => !open && setSyncMode(null)} />
             </>
           ) : (
             <>
@@ -407,6 +419,7 @@ export function DiffViewerPane({
               <Button type="button" variant="outline" size="sm" disabled={!client || loading} onClick={refreshAll}>
                 Refresh
               </Button>
+              <SyncButtons taskId={task.ID} />
               <PrAction taskId={task.ID} workspaceId={task.WorkspaceID} title={task.Title} />
             </>
           )
