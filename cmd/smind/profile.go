@@ -11,7 +11,7 @@ import (
 	"github.com/spacingmind/smind/internal/store"
 )
 
-const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept] [--thinking-level=<level>] [--model=<model>] [--notes=<text>]"
+const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept] [--thinking-level=<level>] [--model=<model>] [--on-rate-limit=<none|wait|fallback>] [--fallback-profile=<id>] [--notes=<text>]"
 
 func cmdProfile(args []string) int {
 	if len(args) == 0 {
@@ -44,7 +44,8 @@ func cmdProfileAdd(args []string) int {
 	}
 	name, provider := args[0], args[1]
 
-	var mode, thinkingLevel, model, notes string
+	var mode, thinkingLevel, model, notes, onRateLimit string
+	var fallbackProfile *int64
 	var autoAccept bool
 	rest := args[2:]
 	for i := 0; i < len(rest); i++ {
@@ -85,6 +86,17 @@ func cmdProfileAdd(args []string) int {
 			thinkingLevel = value
 		case "--model":
 			model = value
+		case "--on-rate-limit":
+			onRateLimit = value
+		case "--fallback-profile":
+			id, err := parseInt64(value)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "profile add: --fallback-profile: invalid id %q: %v\n", value, err)
+				return 2
+			}
+			if id != 0 {
+				fallbackProfile = &id
+			}
 		case "--notes":
 			notes = value
 		default:
@@ -100,11 +112,18 @@ func cmdProfileAdd(args []string) int {
 	}
 	defer client.Close()
 
-	var p store.AgentProfile
-	err = client.Call(context.Background(), "profile.create", map[string]any{
+	params := map[string]any{
 		"name": name, "provider": provider,
 		"permissionMode": mode, "autoAccept": autoAccept, "thinkingLevel": thinkingLevel, "model": model, "notes": notes,
-	}, &p)
+	}
+	if onRateLimit != "" {
+		params["onRateLimit"] = onRateLimit
+	}
+	if fallbackProfile != nil {
+		params["fallbackProfileId"] = *fallbackProfile
+	}
+	var p store.AgentProfile
+	err = client.Call(context.Background(), "profile.create", params, &p)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "profile add: %v\n", err)
 		return 1
@@ -133,9 +152,9 @@ func cmdProfileList(args []string) int {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tPROVIDER\tMODE\tTHINKING\tMODEL")
+	fmt.Fprintln(tw, "ID\tNAME\tPROVIDER\tMODE\tTHINKING\tMODEL\tON-RATE-LIMIT")
 	for _, p := range profiles {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, profileModeColumn(p), p.ThinkingLevel, p.Model)
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, profileModeColumn(p), p.ThinkingLevel, p.Model, profileRateLimitColumn(p))
 	}
 	tw.Flush()
 	return 0
@@ -152,6 +171,20 @@ func profileModeColumn(p store.AgentProfile) string {
 		mode += "+auto-accept"
 	}
 	return mode
+}
+
+// profileRateLimitColumn renders a profile's failover policy for the
+// ON-RATE-LIMIT column: "none", "wait" or "fallback→<id>".
+func profileRateLimitColumn(p store.AgentProfile) string {
+	switch p.OnRateLimit {
+	case "", "none":
+		return "none"
+	case "fallback":
+		if p.FallbackProfileID != nil {
+			return fmt.Sprintf("fallback→%d", *p.FallbackProfileID)
+		}
+	}
+	return p.OnRateLimit
 }
 
 func cmdProfileRemove(args []string) int {

@@ -2233,6 +2233,8 @@ func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 			ThinkingLevel        string          `json:"thinkingLevel"`
 			Model                string          `json:"model"`
 			Notes                string          `json:"notes"`
+			OnRateLimit          string          `json:"onRateLimit"`
+			FallbackProfileID    *int64          `json:"fallbackProfileId"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("profile.create: invalid params: %w", err)
@@ -2241,13 +2243,15 @@ func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 			return nil, fmt.Errorf("profile.create: %w", err)
 		}
 		return profReg.Create(store.AgentProfile{
-			Name:           p.Name,
-			Provider:       p.Provider,
-			PermissionMode: p.PermissionMode,
-			AutoAccept:     p.AutoAccept,
-			ThinkingLevel:  p.ThinkingLevel,
-			Model:          p.Model,
-			Notes:          p.Notes,
+			Name:              p.Name,
+			Provider:          p.Provider,
+			PermissionMode:    p.PermissionMode,
+			AutoAccept:        p.AutoAccept,
+			ThinkingLevel:     p.ThinkingLevel,
+			Model:             p.Model,
+			Notes:             p.Notes,
+			OnRateLimit:       p.OnRateLimit,
+			FallbackProfileID: p.FallbackProfileID,
 		})
 	}
 }
@@ -2287,6 +2291,8 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			ThinkingLevel        string          `json:"thinkingLevel"`
 			Model                string          `json:"model"`
 			Notes                string          `json:"notes"`
+			OnRateLimit          string          `json:"onRateLimit"`
+			FallbackProfileID    *int64          `json:"fallbackProfileId"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("profile.update: invalid params: %w", err)
@@ -2295,14 +2301,16 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			return nil, fmt.Errorf("profile.update: %w", err)
 		}
 		return profReg.Update(store.AgentProfile{
-			ID:             p.ID,
-			Name:           p.Name,
-			Provider:       p.Provider,
-			PermissionMode: p.PermissionMode,
-			AutoAccept:     p.AutoAccept,
-			ThinkingLevel:  p.ThinkingLevel,
-			Model:          p.Model,
-			Notes:          p.Notes,
+			ID:                p.ID,
+			Name:              p.Name,
+			Provider:          p.Provider,
+			PermissionMode:    p.PermissionMode,
+			AutoAccept:        p.AutoAccept,
+			ThinkingLevel:     p.ThinkingLevel,
+			Model:             p.Model,
+			Notes:             p.Notes,
+			OnRateLimit:       p.OnRateLimit,
+			FallbackProfileID: p.FallbackProfileID,
 		})
 	}
 }
