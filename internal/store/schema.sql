@@ -507,3 +507,12 @@ CREATE TABLE IF NOT EXISTS forge_budget (
     window_start TIMESTAMP NOT NULL,
     calls INTEGER NOT NULL
 );
+
+-- provider_cooldowns: "provider is rate limited until reset_at" after a run
+-- was classified rate_limited with a known reset (ADR-0041 F1). Additive.
+CREATE TABLE IF NOT EXISTS provider_cooldowns (
+    provider TEXT PRIMARY KEY,
+    reset_at TIMESTAMP NOT NULL,
+    run_id TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL
+);
