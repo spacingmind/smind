@@ -7,7 +7,7 @@ off `develop`** (a PR that needs an earlier PR's code waits for it to merge). Th
 `reviewer` pass on the exact commit before the Human is asked to merge.
 
 Spec for [ADR-0039](../../decisions/0039-git-pr-state.md) (read it first: schema, wire, budget, errors, security). Human decisions H1–H4, forge
-neutrality and read-only-mobile-later are fixed. Status: **ADR accepted 2026-10-22 (O1–O10 as recommended); implementation starting with PR 2.**
+neutrality and read-only-mobile-later are fixed. Status: **completed 2026-10-23.** ADR accepted 2026-10-22 (O1–O10 as recommended); PRs 2–7 merged (#469, #471, #482, #503, #497, #537, #538); every acceptance criterion is confirmed in Validation. G8 (archive/branch cleanup) and G12 (GitHub token login) have their own plans.
 
 ## Goal
 
@@ -296,3 +296,18 @@ How each AC gets satisfied is recorded here per PR as it lands (command output, 
 - Gitstate flake follow-up: the Service tests always install a fake `After`, and the one `time.Sleep` in `TestPoller_SingleFlightConcurrentRefresh` waits on the flight's joiner count instead.
 
 **PR 6 (G3), AC34–AC40:** by the named `TestPrPreview_*`, `TestCreatePr_*`, `TestUpdatePr_*`, `TestActions_*` tests and the web `create-pr-dialog`, `pr-action`, `pr-error` and `diff-viewer-pane` tests. Live (isolated daemon on port 4861, throwaway repo whose `origin` is an `https://github.com/o/r.git` URL rewritten by `url.insteadOf` to a local bare repo, a scripted fake `gh` that logs its argv and stdin and keeps PR state in a file; nothing touched GitHub): a task with no commits and a workspace with **no `origin`** (U7) had Create PR disabled with its sentence (also as the visible muted line at 520 px); the dialog showed the two commit subjects, the deterministic body, Draft on, "2 commits · 1 file uncommitted (not included)"; Create ran `gh pr create --base develop --head smind/task-… --title … --draft --body-file -` with the body **on stdin only** and pushed the branch to origin; the header then showed the `#11 · Draft` chip with **Update PR** and **View PR**; a new commit + Update PR fast-forwarded origin (`6801f35` → `65ec9fa`); after someone else pushed to the branch, Update PR showed "GitHub rejected the push because the branch there has changes this branch doesn't. Update this branch first." in the card with the scrubbed `Details`, header height unchanged (28 px); with `gh` signed out, Create PR showed "GitHub isn't signed in on the daemon host. Run `gh auth login` on that host." in one line with Details. Screenshots light and dark for each state and the dialog open frames. Review fixes found there: a local-path origin was reported as "no `origin` remote" (now says it isn't a GitHub URL), the dialog's `+3 −0` counted an uncommitted file, the update error grew the header, and the dialog jumped when the preview loaded.
+
+## Acceptance-criteria coverage (2026-10-23 close-out)
+
+| ACs | Where it landed | Evidence |
+|---|---|---|
+| AC1–AC2 (docs) | PR 1 (#464) | ADR-0039 accepted, this plan |
+| AC3–AC9 (G1 base, default base, `CreatePR` base, settings field) | PR 2 (#469) | named `store / migration` tests; isolated-daemon check on a `main`-only repo; settings-dialog screenshots |
+| AC10–AC16 (local status, conflicts, merged, hardening, event, interest/budget, disabled reasons) | PR 3 (#482); `task.stats` removal moved to PR 5 (#497) | named `TestGitStatus_*`, `TestGitRunner_*`, `TestFetch_*`, `TestTaskGitEvent_*`, `TestActions_*`; zero-`fetch`-without-subscriber live count |
+| AC17–AC27 (forge interface, identity, one call per repo, cadence, budget, backoff, restart-safe, cache-first, adoption, mapping, agents refused) | forge interface #471, poller PR 4 (#503) | the 20 named `TestPoller_*`/`TestRefresh_*` tests (15× under `-race`); live read-only against `spacingmind/smind`: 1 `pr list` per tick, adoption of an open PR, bogus-token suspension after one call |
+| AC28–AC33 (web data layer, PR chip, tokens, glyph, composer chip, visuals) | PR 5 (#497) | named web tests; light/dark screenshots incl. every PR state; the PR half re-checked live after #503 |
+| AC34–AC40 (preview, create, update, errors, dialog, `<PrAction>`, visuals; U7) | PR 6 (#538) | named `TestPrPreview_*`/`TestCreatePr_*`/`TestUpdatePr_*`/`TestActions_*` and web tests; scripted-`gh` live run: draft, body on stdin, fast-forward update, push rejected, signed-out `gh`, no-origin blocker |
+| AC41–AC44 (branches RPC, Start from, fork gate, visuals) | PR 7 (#537) | named tests; live fork-PR gate (blocked setup, Run setup clears it); dialog screenshots |
+| AC45–AC47 (local checks per PR, no real-forge writes, mobile untouched) | every PR | each PR body records `task test`/`task lint`/tsc; no PR, issue or comment was ever created on a real repo; `mobile/` has no diff; `TaskGit`'s field list is pinned by `TestTaskGit_FieldListPinned` |
+
+Known residuals carried to follow-ups (not blockers for this plan): a real `gh pr create` against GitHub and a real fork PR were never exercised (by rule; stubs only); `statusCheckRollup` cost on a repo with many open PRs (O10 fallback documented); Update PR on a cherry-pick-created PR is `update_unsupported` (O5); G7 (general push / update from base), G9 (PR panel), G13 (agent git approvals), G14 (GitLab) and the mobile read-only surfaces remain open as separate work.

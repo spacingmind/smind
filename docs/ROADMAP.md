@@ -37,7 +37,7 @@ checklist line disagree, this table is newer.
 | **5 Automation (demand-driven)** | Heartbeats (task self-evaluates and continues) | missing | Nothing in the tree |
 | | Schedules (cron creates tasks) | missing | Nothing in the tree |
 | | Cross-provider subagents | partial | MCP primitives, parent/child, depth and tree guards, queue (ADR-0017/0018/0019/0021, #246, #289, #291); dogfood Step 3 open |
-| | GitHub integration (PR status, checkout PR as task) | partial | PR creation from the UI (#96); `gh` client and `forge.search` (#459); ADR-0039 git/PR state in progress (`active/git-pr-state.md`, #469, #471) |
+| | GitHub integration (PR status, checkout PR as task) | mostly done | ADR-0039 (`completed/git-pr-state.md`): stored task base and default base (#469), forge interface and typed errors (#471), local git status and the `task.git` topic (#482), PR poller and identity (#503), PR/conflict chips (#497), Start from branch/PR/issue with the fork gate (#537), previewed Create PR / Update PR (#538); `gh` client and `forge.search` (#459). Left: merged-branch cleanup and Restore on archive (`active/archive-merged-branches.md`), GitHub token login on a remote daemon (`active/github-token-login.md`) |
 | | Per-workspace audit log | missing | Nothing in the tree |
 | | Quota prediction | partial | ADR-0028: usage windows fetched, routing around exhausted accounts, UI (#298-#317). Pace prediction (`runsOutAt`) is explicitly out of scope; live-account check unverified |
 | *Not on the original roadmap* | Self-learning skills + probe-before-approve (ADR-0026/0037), homelab distribution (ADR-0031: install scripts, `smind service`, Docker, `smind update`), prompt attachments (ADR-0038, in progress), task hierarchy tiers | mostly done | `completed/self-learning-skills.md`, `active/learning-probe.md`, `active/homelab-cli.md`, `active/prompt-attachments.md`, `active/task-hierarchy-tiers.md` |
@@ -218,7 +218,9 @@ Status as of v0.10.0 (2026-10-11):
 
   The remaining piece is dogfooding: Step 3 of
   `orchestration-and-metering`.
-- [ ] GitHub integration: PR status / checkout PR as a task
+- [~] GitHub integration: PR status / checkout PR as a task. Both exist
+      (ADR-0039, `completed/git-pr-state.md`); archive branch cleanup,
+      Restore and the remote-daemon GitHub login are the open pieces.
 - [ ] Per-workspace audit log
 - [~] Quota prediction. Per-run and proxy usage are recorded, and the
       quota fetchers, poller and routing-around-exhaustion exist
