@@ -142,6 +142,14 @@ Origin allowlist, no new endpoints — and the desktop app ships a
 
 - **Proxy port: random port + per-launch secret**, exchanged for an
   `HttpOnly; SameSite=Strict` cookie as described in Security notes.
+  *Amendment (2026-10-23):* the port is random only the first time. The app
+  remembers the port it bound (`proxy-port` in the app data dir) and tries it
+  again on the next launch, falling back to a fresh random port if something
+  else holds it. The webview keys `localStorage` by origin, so a port that
+  changed on every launch reset every UI preference (theme, pinned tasks, tabs,
+  drafts, shortcut overrides, dismissed notices) on every launch. The secret,
+  not the port, is what gates the proxy, so a sticky port weakens nothing the
+  security notes rely on.
 
 ## Consequences
 

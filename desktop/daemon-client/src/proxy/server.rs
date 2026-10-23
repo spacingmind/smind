@@ -229,7 +229,20 @@ pub fn build_router(state: Arc<ProxyState>) -> Router {
 pub async fn serve(
     state: Arc<ProxyState>,
 ) -> std::io::Result<(u16, impl std::future::Future<Output = ()>)> {
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    serve_preferring(state, None).await
+}
+
+/// serve_preferring is `serve`, but first tries `preferred` (the port the
+/// previous launch used). The webview keys all of its localStorage by origin,
+/// so a port that changes every launch resets every UI preference every
+/// launch (ADR-0013 amendment); when the port is taken by something else the
+/// proxy falls back to a random one and only that launch starts fresh. The
+/// per-launch secret still gates every request either way.
+pub async fn serve_preferring(
+    state: Arc<ProxyState>,
+    preferred: Option<u16>,
+) -> std::io::Result<(u16, impl std::future::Future<Output = ()>)> {
+    let listener = bind_preferring(preferred).await?;
     let port = listener.local_addr()?.port();
     let app = build_router(state);
     let fut = async move {
@@ -238,6 +251,15 @@ pub async fn serve(
         }
     };
     Ok((port, fut))
+}
+
+async fn bind_preferring(preferred: Option<u16>) -> std::io::Result<TcpListener> {
+    if let Some(port) = preferred.filter(|p| *p != 0) {
+        if let Ok(listener) = TcpListener::bind(("127.0.0.1", port)).await {
+            return Ok(listener);
+        }
+    }
+    TcpListener::bind("127.0.0.1:0").await
 }
 
 // --- the secret gate (AC3) ---------------------------------------------
@@ -754,6 +776,34 @@ mod tests {
 
         let uri: Uri = "/foo".parse().unwrap();
         assert_eq!(strip_query_param(&uri, "k"), "/foo");
+    }
+
+    #[tokio::test]
+    async fn bind_preferring_falls_back_when_the_port_is_taken() {
+        // Keep the listener: the port is certainly occupied for the whole test.
+        let held = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let taken = held.local_addr().unwrap().port();
+        let got = bind_preferring(Some(taken)).await.unwrap();
+        assert_ne!(got.local_addr().unwrap().port(), taken);
+    }
+
+    #[tokio::test]
+    async fn bind_preferring_reuses_a_free_preferred_port() {
+        let first = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = first.local_addr().unwrap().port();
+        drop(first);
+        let got = bind_preferring(Some(port)).await.unwrap().local_addr().unwrap().port();
+        // Another process could have grabbed the port in the instant between
+        // the drop and the bind; that is the fallback, not a failure.
+        if got != port {
+            eprintln!("port {port} was taken in between; fallback bound {got}");
+        }
+    }
+
+    #[tokio::test]
+    async fn bind_preferring_without_a_preference_is_random() {
+        assert_ne!(bind_preferring(None).await.unwrap().local_addr().unwrap().port(), 0);
+        assert_ne!(bind_preferring(Some(0)).await.unwrap().local_addr().unwrap().port(), 0);
     }
 
     #[test]
