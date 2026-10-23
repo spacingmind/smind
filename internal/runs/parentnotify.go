@@ -192,8 +192,14 @@ func (reg *Registry) childEventFacts(task store.Task, run store.Run) ChildEventF
 }
 
 // trailingAgentText is the last contiguous assistant text of a run: the
-// text chunks after the final non-text event.
+// text chunks after the final content event, ignoring the turn's trailing
+// bookkeeping events (done, usage, notes, rate-limit and mcp snapshots).
 func trailingAgentText(history []Event) string {
+	end := len(history)
+	for end > 0 && isBookkeepingEvent(history[end-1].Type) {
+		end--
+	}
+	history = history[:end]
 	i := len(history)
 	for i > 0 && history[i-1].Type == taskrunner.EventTypeText {
 		i--
@@ -219,4 +225,13 @@ func (reg *Registry) NotifyPendingChildren() {
 	for _, id := range ids {
 		reg.evaluateChildNotifications(id)
 	}
+}
+
+func isBookkeepingEvent(t taskrunner.EventType) bool {
+	switch t {
+	case taskrunner.EventTypeDone, taskrunner.EventTypeUsage, taskrunner.EventTypeSessionNote,
+		taskrunner.EventTypePermissionModeChanged, taskrunner.EventTypeMcpServers, taskrunner.EventTypeRateLimit:
+		return true
+	}
+	return false
 }
