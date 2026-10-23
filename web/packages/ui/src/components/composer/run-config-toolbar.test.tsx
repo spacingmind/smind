@@ -1,9 +1,12 @@
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RunConfigToolbar, type LiveRunControls } from "@/components/composer/run-config-toolbar";
-import type { AgentProfile, ProviderInfo } from "@/lib/types";
+import { DaemonQueryProvider } from "@/lib/query/daemon-query-provider";
+import { createQueryClient } from "@/lib/query/query-client";
+import { queryKeys } from "@/lib/query-keys";
+import type { AgentProfile, ProviderInfo, RunSummary } from "@/lib/types";
 import { useProvidersViewStore } from "@/stores/providers-view-store";
 
 /** The same served catalog shape composer.test.tsx stubs provider.list with: Claude's mode list is static, GLM's ACP auto-accept is on. */
@@ -64,9 +67,15 @@ function Parts() {
   );
 }
 
-function renderToolbar(over: Partial<React.ComponentProps<typeof RunConfigToolbar>> = {}) {
+function renderToolbar(over: Partial<React.ComponentProps<typeof RunConfigToolbar>> = {}, queryClient = createQueryClient()) {
   const props = toolbarProps(over);
-  return { props, rerender: render(<RunConfigToolbar {...props}><Parts /></RunConfigToolbar>).rerender };
+  // No daemon client: the shared run-list query stays disabled unless a test seeds it into queryClient.
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <DaemonQueryProvider queryClient={queryClient} client={null} events={null}>
+      {children}
+    </DaemonQueryProvider>
+  );
+  return { props, rerender: render(<RunConfigToolbar {...props}><Parts /></RunConfigToolbar>, { wrapper }).rerender };
 }
 
 async function flush(): Promise<void> {
@@ -241,5 +250,28 @@ describe("RunConfigToolbar live run (D1)", () => {
     expect(useProvidersViewStore.getState().selectedProviderId).toBe("claude-native");
     expect(events.at(-1)!.detail).toEqual({ sectionId: "providers" });
     window.removeEventListener("smind:open-settings", listener);
+  });
+});
+
+describe("RunConfigToolbar observed model", () => {
+  function run(over: Partial<RunSummary>): RunSummary {
+    return { ID: "r", TaskID: 1, ChatID: 10, Provider: "claude-native", StartedAt: "2026-10-23T10:00:00Z", usage: { source: "acp", model: "claude-opus-5-5" }, ...over } as RunSummary;
+  }
+
+  it("RunConfigToolbar chip uses the chat's last run model", () => {
+    const queryClient = createQueryClient();
+    queryClient.setQueryData(queryKeys.runList(), [
+      run({ ID: "other-chat", ChatID: 99, usage: { source: "acp", model: "glm-5.3" }, StartedAt: "2026-10-23T12:00:00Z" }),
+      run({ ID: "this-chat" }),
+    ]);
+    renderToolbar({}, queryClient);
+    const chip = screen.getByTestId("composer-model-picker");
+    expect(chip).toHaveAttribute("aria-label", expect.stringContaining("Opus 5.5"));
+    expect(chip).toHaveAttribute("title", "Claude Code · Opus 5.5 (default)");
+  });
+
+  it("the chip keeps the provider name when no run is known", () => {
+    renderToolbar();
+    expect(screen.getByTestId("composer-model-picker")).toHaveAttribute("title", "Claude Code");
   });
 });

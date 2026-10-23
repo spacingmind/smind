@@ -678,3 +678,27 @@ describe("model picker", () => {
     });
   });
 });
+
+describe("ProviderModelPicker observed model", () => {
+  it("ProviderModelPicker trigger shows the observed model", () => {
+    renderPicker({ selectedModel: "", observedModel: "sonnet-5-5" });
+    const trigger = screen.getByTestId("composer-model-picker");
+    expect(within(trigger).getByText("Sonnet 5.5")).toBeInTheDocument();
+    expect(trigger).toHaveAttribute("title", "Claude Code · Sonnet 5.5 (default)");
+    expect(trigger.querySelector("svg")).not.toBeNull();
+    expect(within(trigger).queryByText(/default/i)).toBeNull();
+  });
+
+  it("falls back to the provider name without an observed model, and never overrides an explicit pick", () => {
+    renderPicker({ selectedModel: "" });
+    const trigger = screen.getByTestId("composer-model-picker");
+    expect(within(trigger).getByText("Claude Code")).toBeInTheDocument();
+    expect(trigger).toHaveAttribute("title", "Claude Code");
+  });
+
+  it("an explicit model ignores the observed one and its title has no (default)", () => {
+    renderPicker({ selectedModel: "opus-5-5", observedModel: "sonnet-5-5" });
+    const trigger = screen.getByTestId("composer-model-picker");
+    expect(trigger).toHaveAttribute("title", "Claude Code · Opus 5.5");
+  });
+});

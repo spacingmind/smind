@@ -19,6 +19,7 @@ import type {
 import type { ProbeEstimate, ProbeView } from "@/lib/probe-types";
 import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
 import { queryKeys } from "@/lib/query-keys";
+import { runListQueryOptions } from "@/hooks/use-observed-model";
 import type { RunSummary } from "@/lib/types";
 import { RpcError, type WsClient } from "@/lib/ws-client";
 
@@ -400,14 +401,6 @@ export function useCurate() {
  * refreshed at most every 30 s.
  */
 export function useRunLookup(enabled = true): (runId: string) => RunSummary | undefined {
-  const client = useClient();
-  const runs = useQuery({
-    queryKey: queryKeys.runList(),
-    enabled: client !== null && enabled,
-    staleTime: 30_000,
-    refetchOnMount: true,
-    retry: false,
-    queryFn: async (): Promise<RunSummary[]> => (await requireClient(client).call<RunSummary[] | null>("run.list")) ?? [],
-  }).data;
+  const runs = useQuery(runListQueryOptions(useClient(), enabled)).data;
   return (runId) => runs?.find((r) => String(r.ID) === runId);
 }
