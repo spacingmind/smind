@@ -180,3 +180,11 @@ type RunSummary = RunStatus
 // finished long enough ago to have been evicted (see Registry's doc
 // comment on retention).
 var ErrNotFound = errors.New("runs: run not found")
+
+// FailureResetRFC3339 formats rs.FailureResetAt as RFC 3339 UTC, "" when unknown.
+func FailureResetRFC3339(rs RunStatus) string {
+	if rs.FailureResetAt == nil {
+		return ""
+	}
+	return rs.FailureResetAt.UTC().Format(time.RFC3339)
+}

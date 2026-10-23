@@ -1651,6 +1651,11 @@ type runLogsResult struct {
 	// Disposition is runs.RunStatus.Disposition ("needs-continue" or absent).
 	Disposition string `json:"disposition,omitempty"`
 	Err         string `json:"err,omitempty"`
+	// FailureKind/Window/ResetAt are the typed terminal reason of an error
+	// run (ADR-0041 B1), omitted when empty; ResetAt is RFC 3339 UTC.
+	FailureKind string `json:"failureKind,omitempty"`
+	Window      string `json:"window,omitempty"`
+	ResetAt     string `json:"resetAt,omitempty"`
 	// BaseSHA/HeadSHA/Dirty are the run's git provenance (O1), omitted
 	// while unknown.
 	BaseSHA string `json:"baseSha,omitempty"`
@@ -1694,6 +1699,9 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 			StopReason:  status.StopReason,
 			Disposition: status.Disposition,
 			Err:         status.Err,
+			FailureKind: status.FailureKind,
+			Window:      status.FailureWindow,
+			ResetAt:     runs.FailureResetRFC3339(status),
 			BaseSHA:     derefStr(status.BaseSHA),
 			HeadSHA:     derefStr(status.HeadSHA),
 			Dirty:       status.Dirty,

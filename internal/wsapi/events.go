@@ -118,6 +118,11 @@ type runStatusPayload struct {
 	StopReason  string `json:"stopReason,omitempty"`
 	Disposition string `json:"disposition,omitempty"`
 	Err         string `json:"err,omitempty"`
+	// FailureKind/Window/ResetAt: typed terminal reason (ADR-0041 B1),
+	// omitted when empty; ResetAt is RFC 3339 UTC.
+	FailureKind string `json:"failureKind,omitempty"`
+	Window      string `json:"window,omitempty"`
+	ResetAt     string `json:"resetAt,omitempty"`
 	// BaseSHA/HeadSHA/Dirty are the run's git provenance (O1), omitted
 	// while unknown.
 	BaseSHA string `json:"baseSha,omitempty"`
