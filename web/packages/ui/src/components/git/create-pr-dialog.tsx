@@ -1,6 +1,7 @@
 import { useId, useRef, useState } from "react";
 import { Switch } from "radix-ui";
 
+import { ForgeSettingsLink, isForgeSetupCode } from "@/components/git/forge-settings-link";
 import { describePrError } from "@/components/git/pr-error";
 import { PrErrorLine } from "@/components/git/pr-error-line";
 import { Alert } from "@/components/ui/alert";
@@ -175,7 +176,9 @@ function CreatePrForm({
       </div>
 
       {blocker && (
-        <Alert variant="warning" description={blocker.reason} testId="create-pr-blocker" />
+        <Alert variant="warning" description={blocker.reason} testId="create-pr-blocker">
+          {isForgeSetupCode(blocker.code) && <ForgeSettingsLink onNavigate={onClose} testId="create-pr-blocker-settings-link" />}
+        </Alert>
       )}
 
       <div className="grid gap-1">
@@ -254,9 +257,9 @@ function CreatePrForm({
         </p>
       )}
 
-      {preview.isError && !data && <PrErrorLine error={describePrError(preview.error, "preview")} testId="create-pr-preview-error" />}
+      {preview.isError && !data && <PrErrorLine error={describePrError(preview.error, "preview")} testId="create-pr-preview-error" onNavigate={onClose} />}
       {error && (
-        <PrErrorLine error={error} testId="create-pr-error">
+        <PrErrorLine error={error} testId="create-pr-error" onNavigate={onClose}>
           {error.existing && /^https:\/\//.test(error.existing.url) && (
             <a
               href={error.existing.url}

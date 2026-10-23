@@ -57,6 +57,7 @@ import {
   FolderTree,
   Gauge,
   GitBranch,
+  GitFork,
   GitCommitHorizontal,
   GitCompare,
   GitPullRequest,
@@ -196,6 +197,8 @@ export const Icons = {
   toolGroup: Boxes,
   tool: Wrench,
   branch: GitBranch,
+  /** ADR-0039 §8: Settings -> GitHub (lucide ships no brand glyphs). */
+  forge: GitFork,
   /** O1 provenance: a run's worktree commit. */
   commit: GitCommitHorizontal,
   groupByStatus: ListChecks,

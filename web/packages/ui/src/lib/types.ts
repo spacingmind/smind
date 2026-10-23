@@ -985,6 +985,35 @@ export interface DaemonForge {
   cli: boolean;
 }
 
+/** `forge.status` (ADR-0039 §8): the daemon host's `gh` and its signed-in hosts. Never carries a token or a path. */
+export interface ForgeHostStatus {
+  host: string;
+  authenticated: boolean;
+  login: string;
+  scopes: string[];
+  protocol: string;
+  source: "keyring" | "file" | "env" | "none";
+}
+
+export interface ForgeStatus {
+  provider: "github";
+  /** Whether THIS connection's channel is secure (loopback, TLS or E2EE): the token field is disabled when false. */
+  canSetToken: boolean;
+  cli: { installed: boolean; version: string };
+  hosts: ForgeHostStatus[];
+}
+
+/** `forge.setToken`: the token is on the wire only here and never stored on the client. */
+export interface ForgeSetTokenParams {
+  host?: string;
+  token: string;
+}
+
+/** `forge.setToken` / `forge.logout` result, and the `forge.status` event payload. */
+export interface ForgeStatusResult {
+  status: ForgeStatus;
+}
+
 /** `run.attachment` result. */
 export interface RunAttachmentResult {
   name: string;

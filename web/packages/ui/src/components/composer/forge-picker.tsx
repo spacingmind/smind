@@ -1,6 +1,7 @@
 import { useEffect, useId, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { ForgeKind } from "@/components/composer/attach-menu";
+import { ForgeSettingsLink, isForgeSetupCode } from "@/components/git/forge-settings-link";
 import { Input } from "@/components/ui/input";
 import { useForgeSearch, type ForgeSearchItem } from "@/hooks/use-forge-search";
 import { attachmentErrorMessage } from "@/lib/attachments/errors";
@@ -82,10 +83,13 @@ export function ForgePicker({
       </div>
       <div id={listId} role="listbox" aria-label={kind === "pr" ? "Pull requests" : "Issues"} className="max-h-72 overflow-auto p-1">
         {search.isError ? (
-          <p role="alert" className="flex items-start gap-2 px-2 py-1.5 text-ui-sm text-destructive">
+          <div role="alert" className="flex items-start gap-2 px-2 py-1.5 text-ui-sm text-destructive">
             <Icons.warning aria-hidden className="mt-0.5 size-4 shrink-0" />
-            {attachmentErrorMessage(search.error, limits)}
-          </p>
+            <div className="flex min-w-0 flex-col items-start gap-1">
+              <p>{attachmentErrorMessage(search.error, limits)}</p>
+              {isForgeSetupCode((search.error as { code?: string }).code) && <ForgeSettingsLink testId="forge-picker-settings-link" />}
+            </div>
+          </div>
         ) : search.isPending ? (
           <p role="status" className="flex items-center gap-2 px-2 py-1.5 text-ui-sm text-foreground-muted">
             <Icons.spinner aria-hidden className="size-4 animate-spin" />

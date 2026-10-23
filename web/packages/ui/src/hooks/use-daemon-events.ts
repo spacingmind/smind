@@ -46,7 +46,7 @@ const LEARNING_TOPICS = [
 ];
 
 /** ADR-0039's task git state: the daemon's recomputed `{taskId, git}` snapshot (the bridge patches the caches). */
-const GIT_TOPICS = ["task.git"];
+const GIT_TOPICS = ["task.git", "forge.status"];
 
 const TOPICS = [
   "task.status",

@@ -27,6 +27,8 @@ export const queryKeys = {
   /** One `forge.search` answer (the PR/issue picker), scoped to a task (the composer) or a workspace (the New Task dialog). */
   forgeSearch: (scope: ForgeScope, kind: "pr" | "issue", query: string) =>
     ["forge.search", { ...scope, kind, query }] as const,
+  /** `forge.status` (ADR-0039 §8): fresh forever, replaced by the `forge.status` event. */
+  forgeStatus: () => ["forge.status"] as const,
   /** One `workspace.branches` page (the New Task "Start from → Branch…" combobox). */
   workspaceBranches: (workspaceId: number, query: string, limit: number) =>
     ["workspace.branches", { workspaceId, query, limit }] as const,
