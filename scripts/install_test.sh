@@ -56,12 +56,18 @@ case "$url" in
 esac
 EOF
 
-# --desktop collaborators: sMind "running" is FAKE_SMIND_RUNNING=1; xattr and the
-# kill commands only record their arguments (a kill is a test failure).
+# --desktop collaborators: sMind "running" is FAKE_SMIND_RUNNING=1 (anywhere), or
+# FAKE_SMIND_RUNNING_AT=<dir> (an app at <dir>/Contents/MacOS/smind-desktop; the
+# pattern is applied as pgrep -f would, an anchored extended regex over the command
+# line); xattr and the kill commands only record their arguments (a kill is a test
+# failure).
 cat >"$stubs/pgrep" <<'EOF'
 #!/bin/sh
 echo "$@" >>"${FAKE_PGREP_LOG:-/dev/null}"
-[ "${FAKE_SMIND_RUNNING:-0}" = 1 ]
+[ "${FAKE_SMIND_RUNNING:-0}" = 1 ] && exit 0
+[ -n "${FAKE_SMIND_RUNNING_AT:-}" ] || exit 1
+for pattern in "$@"; do :; done
+printf '%s\n' "$FAKE_SMIND_RUNNING_AT/Contents/MacOS/smind-desktop" | grep -Eq -- "$pattern"
 EOF
 cat >"$stubs/xattr" <<'EOF'
 #!/bin/sh
@@ -440,6 +446,28 @@ test_desktop_refuses_while_running_and_never_kills() {
   [ "$rc" -ne 0 ] && has "$work/err" "sMind is running" && has "$work/pgrep.log" "sMind" &&
     [ ! -s "$work/kill.log" ] && [ ! -s "$work/curl.log" ] &&
     [ "$(cat "$work/apps/sMind.app/Contents/Resources-marker")" = previous ]
+}
+
+test_desktop_refuses_when_the_app_at_the_target_is_running() {
+  reset_desktop
+  seed_old_app
+  run_desktop env FAKE_SMIND_RUNNING_AT="$work/apps/sMind.app" sh "$script" --desktop --version 1.2.3
+  [ "$rc" -ne 0 ] && has "$work/err" "sMind is running" && [ ! -s "$work/curl.log" ] &&
+    [ "$(cat "$work/apps/sMind.app/Contents/Resources-marker")" = previous ]
+}
+
+test_desktop_installs_while_an_app_elsewhere_is_running() {
+  reset_desktop
+  run_desktop env FAKE_SMIND_RUNNING_AT=/Applications/sMind.app sh "$script" --desktop --version 1.2.3
+  [ "$rc" -eq 0 ] && [ -d "$work/apps/sMind.app/Contents/MacOS" ]
+}
+
+test_desktop_target_path_with_regex_characters_is_matched_literally() {
+  reset_desktop
+  # An app at a *similar* path ("a.b" vs "aXb") must not match the dot.
+  mkdir -p "$work/aXb"
+  run_desktop env FAKE_SMIND_RUNNING_AT="$work/aXb/sMind.app" SMIND_APP_DIR="$work/a.b" sh "$script" --desktop --version 1.2.3
+  [ "$rc" -eq 0 ] && [ -d "$work/a.b/sMind.app/Contents/MacOS" ]
 }
 
 test_desktop_clears_quarantine_on_the_installed_app_only() {

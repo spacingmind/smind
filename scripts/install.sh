@@ -60,7 +60,8 @@ Options:
   --desktop       macOS only: install the sMind desktop app (sMind.app) instead
                   of the CLI. The app is not notarized; downloading it with
                   this script avoids the Gatekeeper quarantine prompt. Refuses
-                  while sMind is running. Not combinable with --service.
+                  while the sMind being replaced is running. Not combinable
+                  with --service.
   -h, --help      print this help
 
 Environment:
@@ -225,11 +226,17 @@ download_verified() {
 }
 
 # sMind refuses to be replaced while it runs (a running app would keep its old
-# code, and the new bundle would be swapped under it). Never kills it.
+# code, and the new bundle would be swapped under it). Never kills it. Only the
+# app at $dest counts: an sMind running from /Applications does not block an
+# install into another SMIND_APP_DIR, and a process that merely mentions the
+# path (an editor, a `tail`) is not the app because the match is anchored at the
+# start of the command line.
 refuse_if_running() {
   need pgrep
-  if pgrep -f 'sMind\.app/Contents/MacOS/' >/dev/null 2>&1; then
-    err "sMind is running; quit it (Cmd+Q) and run this again -- this script never closes it for you"
+  # pgrep -f takes an extended regex: escape the path's metacharacters.
+  dest_re="$(printf '%s' "$1" | sed 's/[][\\.*^$+?(){}|]/\\&/g')"
+  if pgrep -f "^${dest_re}/Contents/MacOS/" >/dev/null 2>&1; then
+    err "sMind is running from $1; quit it (Cmd+Q) and run this again -- this script never closes it for you"
   fi
 }
 
@@ -252,7 +259,7 @@ install_desktop() {
   [ -w "$appdir" ] || err "$appdir is not writable; set SMIND_APP_DIR"
   dest="$appdir/sMind.app"
 
-  refuse_if_running
+  refuse_if_running "$dest"
 
   say "Downloading sMind v${version} (macos/${app_arch})..."
   download_verified "$app_asset"
@@ -271,7 +278,7 @@ install_desktop() {
   [ -d "$new_app/Contents/MacOS" ] || err "$app_asset is not a macOS app bundle"
 
   # Re-check right before the swap: the download took a while.
-  refuse_if_running
+  refuse_if_running "$dest"
 
   # The previous app stays in place until the new one is: move it aside (a
   # rename), move the new one in, and only then delete the old. If the second
