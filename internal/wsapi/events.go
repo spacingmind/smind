@@ -18,8 +18,11 @@ import (
 // without a manual reload -- see internal/workspace.Manager's Notifier for
 // the publish sites.
 const (
-	TopicTaskStatus        = "task.status"
-	TopicRunStatus         = "run.status"
+	TopicTaskStatus = "task.status"
+	TopicRunStatus  = "run.status"
+	// TopicRunFailover is published when a run continuing a rate-limited one
+	// starts (ADR-0041 F3); payload runFailoverPayload.
+	TopicRunFailover       = "run.failover"
 	TopicPermissionPending = "permission.pending"
 	// TopicPermissionResolved is published when a pending permission
 	// request leaves the pending state (see permissionResolvedPayload).
@@ -66,6 +69,7 @@ const (
 var knownTopics = map[string]bool{
 	TopicTaskStatus:           true,
 	TopicRunStatus:            true,
+	TopicRunFailover:          true,
 	TopicPermissionPending:    true,
 	TopicPermissionResolved:   true,
 	TopicWorkspaceCreated:     true,
@@ -110,6 +114,15 @@ const subscriberQueueCap = 256
 type taskStatusPayload struct {
 	TaskID int64  `json:"taskId"`
 	Status string `json:"status"`
+}
+
+// runFailoverPayload is the payload of run.failover events:
+// {fromRunId, toRunId, taskId, toChatId}.
+type runFailoverPayload struct {
+	FromRunID string `json:"fromRunId"`
+	ToRunID   string `json:"toRunId"`
+	TaskID    int64  `json:"taskId"`
+	ToChatID  int64  `json:"toChatId"`
 }
 
 // runStatusPayload is the payload of run.status events:

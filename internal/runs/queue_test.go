@@ -518,7 +518,8 @@ type countingNotifier struct {
 	snapshot map[int64][]store.ChatQueueItem
 }
 
-func (c *countingNotifier) NotifyRunStatus(s RunStatus) {}
+func (c *countingNotifier) NotifyRunFailover(string, string, int64, int64) {}
+func (c *countingNotifier) NotifyRunStatus(s RunStatus)                    {}
 func (c *countingNotifier) NotifyPermissionPending(string, int64, int64, string, string, []taskrunner.PermissionOption) {
 }
 func (c *countingNotifier) NotifyPermissionResolved(string, int64, int64, string, string, string) {}

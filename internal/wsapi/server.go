@@ -458,6 +458,15 @@ func (b busRunNotifier) NotifyRunStatus(s runs.RunStatus) {
 	}})
 }
 
+func (b busRunNotifier) NotifyRunFailover(fromRunID, toRunID string, taskID, toChatID int64) {
+	if isSystemTask(b.db, taskID) {
+		return
+	}
+	b.bus.Publish(Event{Topic: TopicRunFailover, Payload: runFailoverPayload{
+		FromRunID: fromRunID, ToRunID: toRunID, TaskID: taskID, ToChatID: toChatID,
+	}})
+}
+
 func (b busRunNotifier) NotifyPermissionPending(runID string, taskID, chatID int64, requestID, summary string, options []taskrunner.PermissionOption) {
 	if isSystemTask(b.db, taskID) {
 		return

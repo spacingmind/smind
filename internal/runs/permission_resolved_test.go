@@ -28,7 +28,8 @@ func newResolvedRecorder() *resolvedRecorder {
 	return &resolvedRecorder{wake: make(chan struct{}, 16)}
 }
 
-func (n *resolvedRecorder) NotifyRunStatus(RunStatus) {}
+func (n *resolvedRecorder) NotifyRunFailover(string, string, int64, int64) {}
+func (n *resolvedRecorder) NotifyRunStatus(RunStatus)                      {}
 func (n *resolvedRecorder) NotifyPermissionPending(string, int64, int64, string, string, []taskrunner.PermissionOption) {
 }
 func (n *resolvedRecorder) NotifyChatQueueUpdated(int64, []store.ChatQueueItem) {}
