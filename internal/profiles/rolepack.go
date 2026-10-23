@@ -57,7 +57,7 @@ var RoleSeats = []RoleSeat{
 		return store.AgentProfile{
 			Name: seatPeerSonnet, Provider: "claude-native", Model: sonnetModel, PermissionMode: "auto",
 			OrchestrationTools: boolRef(false), ChildPolicy: "none", Skills: []string{"smind-peer"},
-			OnRateLimit: "none",
+			OnRateLimit: "wait", // an account limit holds the work until it resets
 			Notes:       "Hard outcomes and the GLM fallback. Sonnet 5.5, auto mode. No orchestration tools.",
 		}
 	}},
@@ -74,7 +74,7 @@ var RoleSeats = []RoleSeat{
 		return store.AgentProfile{
 			Name: seatLead, Provider: "claude-native", Model: sonnetModel, PermissionMode: "auto",
 			OrchestrationTools: boolRef(true), ChildPolicy: "leaf", Skills: []string{"smind-leader"},
-			OnRateLimit:  "none",
+			OnRateLimit:  "wait", // a woken Lead hit by an account limit is re-woken at the reset
 			Instructions: leadInstructions,
 			Notes:        "Owns one work item end to end; launches Peers only. Sonnet 5.5, auto mode.",
 		}
@@ -82,7 +82,7 @@ var RoleSeats = []RoleSeat{
 	{Name: seatReviewer, Build: func(map[string]int64) store.AgentProfile {
 		return store.AgentProfile{
 			Name: seatReviewer, Provider: "claude-native", Model: sonnetModel, PermissionMode: "plan",
-			OrchestrationTools: boolRef(false), ChildPolicy: "none",
+			OrchestrationTools: boolRef(false), ChildPolicy: "none", OnRateLimit: "wait",
 			Instructions: "You are a read-only reviewer. Review the exact commit or diff you are given adversarially (security, secrets in logs/argv/events, races, data loss, platform gating, tests that do not test the behaviour). Do not edit files. Report findings with file:line and a severity.",
 			Notes:        "Read-only review (plan mode).",
 		}
@@ -92,7 +92,7 @@ var RoleSeats = []RoleSeat{
 			Name: seatSupervisor, Provider: "claude-native", // no model: the Human chooses
 			OrchestrationTools: boolRef(true), ChildPolicy: "profiles", ChildProfileIDs: []int64{ids[seatLead]},
 			Skills:       []string{"smind-supervisor"},
-			OnRateLimit:  "none",
+			OnRateLimit:  "wait", // the same: a limit swallowing a wake-up must not stall the tree
 			Instructions: "You are the Supervisor. Read docs/WORKSPACE_PROTOCOL.md in the repository first. You launch Leads only, then wait for their [child event] messages.",
 			Notes:        "Launched by the Human only (it is in no seat's child list). Set its model yourself.",
 		}

@@ -186,7 +186,11 @@ standard pack once with `smind profile seed roles`: `peer-sonnet`, `peer-glm`
 `supervisor`. Seeding is idempotent by name; a profile you already have or
 edited is kept as is. A follow-up to a seat's chat that does not name a profile
 keeps the chat's last profile (a seat stays a seat); pass `--profile none` /
-`profileId: 0` to drop it, or start a new chat.
+`profileId: 0` to drop it, or start a new chat. The claude-native seats are
+seeded with `onRateLimit=wait`: when the account's usage limit cuts a run off
+("You've hit your session limit · resets 1pm"), the same prompt (a Lead's
+`[child event]` wake-up included) is re-queued on the same chat for the reset
+time + 30 s, so a tree heals itself instead of stalling.
 
 - **Supervisor** is a root task the Human launches: `smind task new <ws>
   "<title>"`, then `smind task send <task> <prompt> --profile <supervisor id>`
