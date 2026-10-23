@@ -293,6 +293,8 @@ export interface RunSummary {
   Dirty?: boolean | null;
   /** ADR-0038: the prompt's attachments as metadata (never bytes). Absent/empty when it had none. */
   attachments?: AttachmentMeta[];
+  /** Who authored the prompt: "human", "orchestrator", "agent" or "child_event" (ADR-0041). Lowercase json tag, omitted when unknown. */
+  origin?: string;
 }
 
 // internal/runs.WhenBusy's values (ADR-0021 §2), run.start's optional

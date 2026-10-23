@@ -789,6 +789,14 @@ describe("useRunTimeline mcpServers", () => {
     };
   }
 
+  it("RunEntry.origin is carried from run.list's lowercase origin key", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+    client.nth("run.list", 0).resolve([summary({ origin: "child_event" }), summary({ ID: "run-2" })]);
+    await act(async () => {});
+    expect(result.current.runs?.map((r) => r.origin)).toEqual(["child_event", undefined]);
+  });
+
   it("RunEntry.mcpServers folded from run.logs backfill", async () => {
     const client = new FakeWsClient();
     const { result } = renderHook(() => useRunTimeline(client, 1, 10));
