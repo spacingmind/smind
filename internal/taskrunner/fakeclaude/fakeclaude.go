@@ -503,7 +503,7 @@ func Run() {
 			"request": map[string]any{
 				"subtype":     "can_use_tool",
 				"tool_name":   "Bash",
-				"input":       map[string]any{"command": "echo hi"},
+				"input":       map[string]any{"command": permissionCommand()},
 				"tool_use_id": "tool-1",
 			},
 		})
@@ -714,4 +714,13 @@ func Run() {
 	for stdin.Scan() {
 	}
 	os.Exit(0)
+}
+
+// permissionCommand is the Bash command the "permission" scenario asks about:
+// FAKECLAUDE_PERMISSION_COMMAND when set (screenshot seeding), else "echo hi".
+func permissionCommand() string {
+	if c := os.Getenv("FAKECLAUDE_PERMISSION_COMMAND"); c != "" {
+		return c
+	}
+	return "echo hi"
 }
