@@ -67,6 +67,10 @@ func TailLog(s string) (string, bool) {
 		}
 		s = s[start:]
 		cut = true
+		// Begin on a line boundary: a first line cut in the middle is noise.
+		if nl := strings.IndexByte(s, '\n'); nl >= 0 && nl < len(s)-1 {
+			s = s[nl+1:]
+		}
 	}
 	return s, cut
 }

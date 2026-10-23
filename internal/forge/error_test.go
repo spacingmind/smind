@@ -68,3 +68,17 @@ func TestClipDetail_ScrubsThenClips(t *testing.T) {
 		t.Fatalf("short = %q", short)
 	}
 }
+
+func TestTailLog_ByteCutStartsOnALineBoundary(t *testing.T) {
+	line := strings.Repeat("x", 99) + "\n"
+	log := strings.Repeat(line, 400) // 40000 bytes, 400 lines: line cut first, then byte cut
+	out, cut := TailLog(log)
+	if !cut || len(out) > CheckLogMaxBytes {
+		t.Fatalf("cut=%v len=%d", cut, len(out))
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if len(l) != 99 {
+			t.Fatalf("partial line %q (%d bytes) in the kept tail", l, len(l))
+		}
+	}
+}
