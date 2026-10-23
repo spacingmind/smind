@@ -18,6 +18,8 @@ export interface ModelRow {
   isDefault?: boolean;
   /** Synthetic default row only: the label of the configured default model (config providers.<id>.defaultModel) a run resolves to. */
   resolvedDefaultLabel?: string;
+  /** Synthetic default row only: set when the owner named the row itself (`defaultRowLabel`), so the trigger shows that label. */
+  customLabel?: boolean;
 }
 
 export type ProviderModelSelection =
@@ -58,15 +60,16 @@ function buildModelRowKey(provider: string, modelId: string): string {
   return `${provider}:${modelId}`;
 }
 
-function buildSyntheticDefaultRow(provider: string, providerLabel: string, resolved?: string): ModelRow {
+function buildSyntheticDefaultRow(provider: string, providerLabel: string, resolved?: string, label?: string): ModelRow {
   const row: ModelRow = {
     key: buildModelRowKey(provider, ""),
     provider,
     providerLabel,
     modelId: "",
-    modelLabel: DEFAULT_MODEL_LABEL,
+    modelLabel: label ?? DEFAULT_MODEL_LABEL,
     isDefault: true,
   };
+  if (label !== undefined) row.customLabel = true;
   if (resolved) {
     row.resolvedDefaultLabel = resolved;
     row.description = `Currently ${resolved}`;
@@ -83,7 +86,11 @@ function resolveConfiguredDefault(info: ProviderInfo): string | undefined {
 export function buildBrowserProviders(
   providers: ProviderInfo[],
   health: Record<string, ProviderHealth | undefined>,
-  options?: { loading?: boolean },
+  options?: {
+    loading?: boolean;
+    /** What the synthetic "no model" row is called (default DEFAULT_MODEL_LABEL); Settings -> Providers names it "CLI default". */
+    defaultRowLabel?: string;
+  },
 ): BrowserProvider[] {
   return providers.map((info) => {
     const label = providerLabel(info.id, [info]);
@@ -93,7 +100,7 @@ export function buildBrowserProviders(
         ? { id: info.id, label, modelSelection: { kind: "loading" as const }, unavailableReason: h.detail || "Unavailable" }
         : { id: info.id, label, modelSelection: { kind: "loading" as const } };
     }
-    const rows: ModelRow[] = [buildSyntheticDefaultRow(info.id, label, resolveConfiguredDefault(info))];
+    const rows: ModelRow[] = [buildSyntheticDefaultRow(info.id, label, resolveConfiguredDefault(info), options?.defaultRowLabel)];
     for (const model of info.models ?? []) {
       rows.push({
         key: buildModelRowKey(info.id, model.id),
@@ -291,6 +298,9 @@ export function resolveTriggerLabel({
   }
   const rows = getProviderModelRows(provider);
   if (!selectedModel) {
+    // An owner that named the "no model" row shows that name (a catalog model flagged default is not what is selected).
+    const named = rows.find((row) => row.modelId === "" && row.customLabel);
+    if (named) return named.modelLabel;
     const defaultRow = rows.find((row) => row.isDefault && row.modelId !== "");
     if (defaultRow) return defaultRow.modelLabel;
     // The synthetic default row: when a default is configured, show what a run resolves to.

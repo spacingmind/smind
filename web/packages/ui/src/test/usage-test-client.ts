@@ -43,6 +43,8 @@ export class FakeUsageDaemon {
   testResults: Record<string, ProviderTestResult> = {};
   /** `provider.test` keys whose RPC rejects (the check itself errored, as opposed to answering `{ ok: false }`). */
   testRpcErrors: Record<string, Error> = {};
+  /** When set, `provider.setDefaultModel` rejects with it. */
+  setDefaultModelError: Error | null = null;
   /** When set, every `account.list` / `provider.list` / `provider.test` / account-mutation request rejects with it. */
   failNonUsageWith: Error | null = null;
   /** Every non-`account.usage` request, as `{ method, params }`, in order. */
@@ -83,6 +85,18 @@ export class FakeUsageDaemon {
             return this.accounts;
           case "provider.list":
             return this.providers;
+          case "provider.setDefaultModel": {
+            // The daemon's own behaviour: persist into the list (model "" clears), answer {id, defaultModel}.
+            const p = params as { provider: string; model: string };
+            if (this.setDefaultModelError) throw this.setDefaultModelError;
+            this.providers = {
+              ...this.providers,
+              providers: this.providers.providers.map((info) =>
+                info.id === p.provider ? { ...info, defaultModel: p.model || undefined } : info,
+              ),
+            };
+            return { id: p.provider, defaultModel: p.model };
+          }
           case "provider.test": {
             const failure = this.testRpcErrors[(params as { provider?: string } | undefined)?.provider ?? ""];
             if (failure) throw failure;

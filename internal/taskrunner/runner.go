@@ -125,13 +125,20 @@ func WithClaudeCLIPath(path string, env ...string) Option {
 // (config providers.<id>.defaultModel). Empty or unset keeps the provider's
 // own default. See Runner.DefaultModel.
 func WithDefaultModel(provider Provider, model string) Option {
-	return func(r *Runner) {
-		if model == "" {
-			delete(r.defaultModels, provider)
-			return
-		}
-		r.defaultModels[provider] = model
+	return func(r *Runner) { r.SetDefaultModel(provider, model) }
+}
+
+// SetDefaultModel changes the default model of provider on a live Runner
+// (the provider.setDefaultModel RPC). Empty clears it, as WithDefaultModel
+// does. Safe for concurrent use with DefaultModel.
+func (r *Runner) SetDefaultModel(provider Provider, model string) {
+	r.defaultModelsMu.Lock()
+	defer r.defaultModelsMu.Unlock()
+	if model == "" {
+		delete(r.defaultModels, provider)
+		return
 	}
+	r.defaultModels[provider] = model
 }
 
 // WithCodexCommand overrides the command spawned for ProviderCodexNative
@@ -185,6 +192,8 @@ type Runner struct {
 	// defaultModels maps a provider to the configured default model
 	// (WithDefaultModel); a provider with no entry runs its own default.
 	defaultModels map[Provider]string
+	// defaultModelsMu guards defaultModels (SetDefaultModel runs live).
+	defaultModelsMu sync.RWMutex
 
 	// codexCommand is the command spawned for ProviderCodexNative turns.
 	// Defaults to codex.DefaultCommand(); overridable via WithCodexCommand.

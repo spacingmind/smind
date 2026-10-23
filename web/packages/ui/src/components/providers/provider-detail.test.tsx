@@ -79,8 +79,48 @@ describe("ProviderDetail", () => {
     renderWithDaemon(<ProviderDetail item={item({ accountIds: [], tone: "neutral", connected: false })} client={d.client} />, d);
     await flush();
     const block = screen.getByTestId("provider-not-connected-claude-native");
-    expect(block).toHaveTextContent("Not connected");
+    expect(block).toHaveTextContent("No proxy account");
+    expect(block).not.toHaveTextContent("Not connected");
     expect(within(block).getByTestId("provider-connect-claude-native")).toHaveTextContent("Connect Claude Code");
+  });
+
+  it("a claude-native provider with no accounts is Ready (CLI login) with No proxy account; kimi stays Not connected", async () => {
+    const d = daemon([]);
+    const view = renderWithDaemon(<ProviderDetail item={item({ accountIds: [], tone: "neutral", connected: false })} client={d.client} />, d);
+    await flush();
+    await waitFor(() => expect(screen.getByTestId("provider-readiness-claude-native")).toHaveTextContent("Ready (CLI login)"));
+    expect(screen.getByTestId("provider-not-connected-claude-native")).toHaveTextContent("No proxy account");
+    view.rerenderWith(
+      d,
+      <ProviderDetail item={item({ id: "kimi", label: "Kimi", kind: "api-key", accountProvider: "kimi", accountIds: [], tone: "neutral", connected: false })} client={d.client} />,
+    );
+    await flush();
+    await waitFor(() => expect(screen.getByTestId("provider-readiness-kimi")).toHaveTextContent(/^Ready$/));
+    expect(screen.getByTestId("provider-not-connected-kimi")).toHaveTextContent("Not connected");
+  });
+
+  it("readiness line: not ok shows the detail, unanswered shows Checking…, a failed RPC shows Couldn't check", async () => {
+    const d = daemon([], { "claude-native": { ok: false, detail: "claude not on PATH" } as PT });
+    d.testRpcErrors = { codex: new Error("boom"), "codex-native": new Error("boom") };
+    const view = renderWithDaemon(<ProviderDetail item={item()} client={d.client} />, d);
+    // Before any answer lands the line is neutral and says Checking…
+    expect(screen.getByTestId("provider-readiness-claude-native")).toHaveTextContent("Checking…");
+    await flush();
+    await waitFor(() => expect(screen.getByTestId("provider-readiness-claude-native")).toHaveTextContent("Not ready — claude not on PATH"));
+    expect(screen.getByTestId("provider-readiness-claude-native").querySelector("[data-slot=status-dot]")).toHaveAttribute("data-status", "danger");
+    view.rerenderWith(
+      d,
+      <ProviderDetail item={item({ id: "codex-native", label: "Codex", accountProvider: "openai" })} client={d.client} />,
+    );
+    await flush();
+    await waitFor(() => expect(screen.getByTestId("provider-readiness-codex-native")).toHaveTextContent("Couldn't check"));
+  });
+
+  it("readiness line is not shown for the other bucket", async () => {
+    const d = daemon([account(3, "xai")]);
+    renderWithDaemon(<ProviderDetail item={item({ id: "other", label: "Other accounts", kind: "other", accountProvider: undefined, accountIds: [3], connected: true })} client={d.client} />, d);
+    await flush();
+    expect(screen.queryByTestId("provider-readiness-other")).toBeNull();
   });
 
   it("detail connect button requests a connect for that provider", async () => {
@@ -210,5 +250,82 @@ describe("ProviderDetail", () => {
     );
     await flush();
     expect(screen.getByTestId("models-search")).toHaveValue("");
+  });
+
+  describe("default model (U15)", () => {
+    function setCalls(d: FakeUsageDaemon) {
+      return d.calls.filter((c) => c.method === "provider.setDefaultModel").map((c) => c.params);
+    }
+    async function openPicker(): Promise<void> {
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("provider-default-model-picker-claude-native"));
+      });
+    }
+
+    it("picking a model sends provider.setDefaultModel and the line re-renders from provider.list", async () => {
+      const d = daemon([]);
+      renderWithDaemon(<ProviderDetail item={item()} client={d.client} />, d);
+      await flush();
+      expect(screen.getByTestId("provider-default-resolves")).toHaveTextContent("Runs use the CLI's own default");
+      expect(screen.getByTestId("provider-default-model-picker-claude-native")).toHaveTextContent("CLI default");
+      await openPicker();
+      // Only this provider's models are offered, and the synthetic row reads "CLI default" with no "Currently ..." hint.
+      expect(screen.getByTestId("model-row-claude-native:")).toHaveTextContent("CLI default");
+      expect(screen.queryByTestId("model-row-codex-native:")).toBeNull();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("model-row-claude-native:sonnet"));
+      });
+      await flush();
+      expect(setCalls(d)).toEqual([{ provider: "claude-native", model: "sonnet" }]);
+      await waitFor(() => expect(screen.getByTestId("provider-default-resolves")).toHaveTextContent("Runs use Sonnet"));
+      expect(screen.getByTestId("provider-default-model-picker-claude-native")).toHaveTextContent("Sonnet");
+    });
+
+    it("an id the catalog does not list shows the id; picking CLI default sends model \"\"", async () => {
+      const d = daemon([]);
+      d.providers = { providers: PROVIDERS.map((p) => (p.id === "claude-native" ? { ...p, defaultModel: "mystery-1" } : p)) } as unknown as ProviderListResult;
+      renderWithDaemon(<ProviderDetail item={item()} client={d.client} />, d);
+      await flush();
+      await waitFor(() => expect(screen.getByTestId("provider-default-resolves")).toHaveTextContent("Runs use mystery-1"));
+      await openPicker();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("model-row-claude-native:"));
+      });
+      await flush();
+      expect(setCalls(d)).toEqual([{ provider: "claude-native", model: "" }]);
+      await waitFor(() => expect(screen.getByTestId("provider-default-resolves")).toHaveTextContent("Runs use the CLI's own default"));
+    });
+
+    it("a failing RPC shows the error and leaves the line unchanged", async () => {
+      const d = daemon([]);
+      d.setDefaultModelError = new Error("model not in catalog");
+      renderWithDaemon(<ProviderDetail item={item()} client={d.client} />, d);
+      await flush();
+      await openPicker();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("model-row-claude-native:opus"));
+      });
+      await flush();
+      expect(await screen.findByRole("alert")).toHaveTextContent("model not in catalog");
+      expect(screen.getByTestId("provider-default-resolves")).toHaveTextContent("Runs use the CLI's own default");
+    });
+
+    it("a provider.updated event refreshes the line", async () => {
+      const d = daemon([]);
+      renderWithDaemon(<ProviderDetail item={item()} client={d.client} />, d);
+      await flush();
+      expect(screen.getByTestId("provider-default-resolves")).toHaveTextContent("CLI's own default");
+      d.providers = { providers: PROVIDERS.map((p) => (p.id === "claude-native" ? { ...p, defaultModel: "opus" } : p)) } as unknown as ProviderListResult;
+      await act(async () => d.emit("provider.updated", { id: "claude-native", defaultModel: "opus" }));
+      await flush();
+      await waitFor(() => expect(screen.getByTestId("provider-default-resolves")).toHaveTextContent("Runs use Opus"));
+    });
+
+    it("is not offered for the other bucket", async () => {
+      const d = daemon([account(3, "xai")]);
+      renderWithDaemon(<ProviderDetail item={item({ id: "other", label: "Other accounts", kind: "other", accountProvider: undefined, accountIds: [3], connected: true })} client={d.client} />, d);
+      await flush();
+      expect(screen.queryByTestId("provider-default-resolves")).toBeNull();
+    });
   });
 });

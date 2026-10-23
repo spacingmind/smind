@@ -70,6 +70,7 @@ describe("useDaemonEvents", () => {
         "learnedSkill.probe.failed",
         "task.git",
         "forge.status",
+        "provider.updated",
       ],
     });
 

@@ -89,6 +89,11 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       );
       return;
     }
+    case "provider.updated": {
+      // {id, defaultModel}: the list rows carry defaultModel, so one re-read settles every consumer.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.providerList() });
+      return;
+    }
     case "profile.created":
     case "profile.updated": {
       const profile = (payload as { profile?: AgentProfile } | null)?.profile;

@@ -441,3 +441,20 @@ describe("trigger label", () => {
     expect(resolveTriggerTitle({ providers: glm, selectedProvider: "glm", selectedModel: "glm-5.3" })).toBe("GLM · GLM 5.3");
   });
 });
+
+describe("defaultRowLabel", () => {
+  const providers = (opts?: { defaultRowLabel?: string }) =>
+    buildBrowserProviders([info("claude", "Claude Code", [model("sonnet", "Sonnet", { default: true })])], {}, opts);
+
+  it("renames the synthetic row and the trigger, even when a catalog model is flagged default", () => {
+    const named = providers({ defaultRowLabel: "CLI default" });
+    expect(getProviderModelRows(named[0]!)[0]).toMatchObject({ modelId: "", modelLabel: "CLI default" });
+    expect(resolveTriggerLabel({ providers: named, selectedProvider: "claude", selectedModel: "" })).toBe("CLI default");
+  });
+
+  it("without it the composer's label and trigger are unchanged", () => {
+    const plain = providers();
+    expect(getProviderModelRows(plain[0]!)[0]?.modelLabel).toBe("Default model");
+    expect(resolveTriggerLabel({ providers: plain, selectedProvider: "claude", selectedModel: "" })).toBe("Sonnet");
+  });
+});
