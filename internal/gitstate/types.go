@@ -69,6 +69,15 @@ type Origin struct {
 	Published bool   `json:"published"`
 	Ahead     *int   `json:"ahead,omitempty"`
 	Behind    *int   `json:"behind,omitempty"`
+	// PushTarget is where Push would send the branch (remote and branch on
+	// it); absent when Push could not run (no remote, fork PR).
+	PushTarget *PushTarget `json:"pushTarget,omitempty"`
+}
+
+// PushTarget names the remote and branch a push updates.
+type PushTarget struct {
+	Remote string `json:"remote"`
+	Branch string `json:"branch"`
 }
 
 const (

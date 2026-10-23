@@ -315,6 +315,7 @@ func (m *Manager) freshGit(t store.Task, ws store.Workspace) (gitstate.TaskGit, 
 	if in.BaseRef == "" {
 		in.BaseRef = workspaceDefaultBase(ws)
 	}
+	in.PushTarget = m.PushTarget(context.Background(), t, ws)
 	return gitstate.Compute(context.Background(), gitstate.DefaultRunner, in), nil
 }
 
