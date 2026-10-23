@@ -159,6 +159,7 @@ Usage:
   smind task attach <runId>                                stream a run (Ctrl+C to detach)
   smind task logs <runId> [-f|--follow] [--tail N]        show (or follow) a run's history
   smind task stop <runId>                                  stop a running run
+  smind task archive <taskId> [--delete-branch] [--force]  archive a task (shows what it puts at risk first)
 
   smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept]
       [--thinking-level=<level>] [--model=<model>]
