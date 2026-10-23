@@ -11,7 +11,7 @@ import {
   type RunModelLabels,
   type RunFooterRun,
 } from "@/components/timeline/run-footer-model";
-import { RunFailoverButtons, RunFailoverNotes, type RunFailover } from "@/components/timeline/run-failover-actions";
+import { RunFailoverButtons, RunFailoverNotes, hasFailoverActions, type RunFailover } from "@/components/timeline/run-failover-actions";
 import { hasFutureReset, isRateLimitedRun } from "@/lib/rate-limit";
 import { cn } from "@/lib/utils";
 
@@ -72,6 +72,8 @@ export function RunFooter<T extends RunFooterRun>({
 
   const modelLabel = running ? "" : resolveRunModelLabel(run, modelLabels, providerLabels?.[run.provider]);
   const view = describeRunFooter(run, { now, modelLabel });
+  // With failover actions the buttons get their own row under the sentence (see below), so a wrapped line never starts with a segment dot.
+  const failoverRow = !running && view.action === "retry" && isLatest && failover !== undefined && hasFailoverActions(run, failover, now);
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-ui-sm text-foreground-muted" data-testid="run-footer">
@@ -124,7 +126,7 @@ export function RunFooter<T extends RunFooterRun>({
                   Continue
                 </Button>
               )}
-              {view.action === "retry" && isLatest && onRerun && (
+              {view.action === "retry" && isLatest && onRerun && !failoverRow && (
                 <Button
                   type="button"
                   variant="outline"
@@ -136,7 +138,6 @@ export function RunFooter<T extends RunFooterRun>({
                   Retry
                 </Button>
               )}
-              {view.action === "retry" && isLatest && failover && <RunFailoverButtons run={run} failover={failover} now={now} />}
             </span>
           )
         )}
@@ -169,6 +170,17 @@ export function RunFooter<T extends RunFooterRun>({
           </time>
         )}
       </div>
+      {failoverRow && failover && (
+        // order-last + basis-full: a full-width row under the meta line; the hover actions (children) stay beside it.
+        <div className="order-last flex basis-full flex-wrap items-center gap-1" data-testid="run-failover-actions">
+          {onRerun && (
+            <Button type="button" variant="outline" size="xs" data-testid="run-retry" onClick={() => onRerun(run)}>
+              Retry
+            </Button>
+          )}
+          <RunFailoverButtons run={run} failover={failover} now={now} />
+        </div>
+      )}
       {children}
     </div>
   );

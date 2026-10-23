@@ -30,6 +30,13 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** Whether RunFailoverButtons would render anything: the footer then gives the actions their own row. */
+export function hasFailoverActions<T extends RunFooterRun>(run: T, failover: RunFailover<T>, now: Date): boolean {
+  if (!isRateLimitedRun(run) || failover.successor(run.id)) return false;
+  const fallback = run.fallbackProfileId ? failover.fallbackName(run.fallbackProfileId) !== undefined : false;
+  return fallback || waitUntilLabel(run.failureResetAt, now) !== null || failover.isHeld(run);
+}
+
 /** "Retry on <profile>" and "Wait until HH:MM" -- shown beside Retry on the latest rate-limited run. */
 export function RunFailoverButtons<T extends RunFooterRun>({ run, failover, now }: { run: T; failover: RunFailover<T>; now: Date }) {
   const [fallbackBusy, setFallbackBusy] = useState(false);
@@ -83,7 +90,6 @@ export function RunFailoverButtons<T extends RunFooterRun>({ run, failover, now 
           variant="outline"
           size="xs"
           data-testid="run-retry-fallback"
-          className="ml-1"
           disabled={fallbackBusy}
           onClick={onFallback}
         >
@@ -92,7 +98,7 @@ export function RunFailoverButtons<T extends RunFooterRun>({ run, failover, now 
       )}
       {queued ? (
         reset !== null && (
-          <span data-testid="run-wait-queued" role="status" className="ml-1 text-foreground-muted">
+          <span data-testid="run-wait-queued" role="status" className="text-foreground-muted">
             Queued · starts after {formatResetClock(reset, now)}
           </span>
         )
@@ -104,7 +110,6 @@ export function RunFailoverButtons<T extends RunFooterRun>({ run, failover, now 
             variant="outline"
             size="xs"
             data-testid="run-wait"
-            className="ml-1"
             disabled={wait === "pending"}
             aria-busy={wait === "pending"}
             onClick={onWait}
