@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -167,5 +168,101 @@ func TestRenderTaskTree(t *testing.T) {
 				t.Fatalf("renderTaskTree() =\n%s\nwant\n%s", got, want)
 			}
 		})
+	}
+}
+
+func TestTaskTreeArgs(t *testing.T) {
+	// SMIND_HOME points at an empty dir: an arg that wrongly passes
+	// validation would fail dialing (exit 1), not return the usage code 2.
+	t.Setenv("SMIND_HOME", t.TempDir())
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"none", nil},
+		{"json only", []string{"--json"}},
+		{"both", []string{"1", "--task", "2"}},
+		{"both eq form", []string{"1", "--task=2"}},
+		{"non-numeric workspace", []string{"abc"}},
+		{"non-numeric task", []string{"--task", "abc"}},
+		{"zero", []string{"0"}},
+		{"negative task", []string{"--task=-3"}},
+		{"unknown flag", []string{"1", "--bogus"}},
+		{"extra positional", []string{"1", "2"}},
+		{"task missing value", []string{"--task"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var code int
+			errOut := captureStderr(t, func() { code = cmdTaskTree(tt.args) })
+			if code != 2 {
+				t.Fatalf("cmdTaskTree(%v) = %d, want 2 (stderr %q)", tt.args, code, errOut)
+			}
+			if !strings.Contains(errOut, "usage: smind task tree") {
+				t.Fatalf("stderr = %q, want usage", errOut)
+			}
+		})
+	}
+}
+
+func TestTaskTreeCLI_EndToEnd(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	srvURL := newConfigOptionTestEnv(t, home)
+	writeTestConfig(t, home, srvURL)
+	wsID := createCLIHierarchyWorkspace(t, srvURL)
+	ws := strconv.FormatInt(wsID, 10)
+
+	var code int
+	rootOut := captureStdout(t, func() { code = run([]string{"task", "new", ws, "root"}) })
+	if code != 0 {
+		t.Fatalf("task new root = %d, out %q", code, rootOut)
+	}
+	rootID := firstFieldOfOutputLine(t, rootOut)
+	childOut := captureStdout(t, func() { code = run([]string{"task", "new", ws, "child", "--parent", rootID}) })
+	if code != 0 {
+		t.Fatalf("task new child = %d, out %q", code, childOut)
+	}
+	childID := firstFieldOfOutputLine(t, childOut)
+
+	tree := func(args ...string) string {
+		t.Helper()
+		out := captureStdout(t, func() { code = run(append([]string{"task", "tree"}, args...)) })
+		if code != 0 {
+			t.Fatalf("task tree %v = %d, out %q", args, code, out)
+		}
+		return out
+	}
+
+	lines := strings.Split(strings.TrimRight(tree(ws), "\n"), "\n")
+	if len(lines) != 3 || !strings.HasPrefix(lines[0], "2 tasks:") {
+		t.Fatalf("workspace tree = %q, want a 2-task header and 2 lines", lines)
+	}
+	if !strings.HasPrefix(lines[1], "#"+rootID+" root") || !strings.Contains(lines[1], "cost n/a") {
+		t.Fatalf("root line = %q", lines[1])
+	}
+	if !strings.HasPrefix(lines[2], "  #"+childID+" child") || !strings.Contains(lines[2], "cost n/a") {
+		t.Fatalf("child line = %q, want indent of two spaces", lines[2])
+	}
+
+	lines = strings.Split(strings.TrimRight(tree("--task", rootID), "\n"), "\n")
+	if len(lines) != 3 || !strings.HasPrefix(lines[0], "2 tasks:") || !strings.HasPrefix(lines[1], "#"+rootID+" ") || !strings.HasPrefix(lines[2], "  #"+childID+" ") {
+		t.Fatalf("--task root tree = %q", lines)
+	}
+
+	lines = strings.Split(strings.TrimRight(tree("--task="+childID), "\n"), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "1 task:") || !strings.HasPrefix(lines[1], "#"+childID+" child") {
+		t.Fatalf("--task child tree = %q, want child at indent 0", lines)
+	}
+
+	var parsed struct {
+		Nodes     []json.RawMessage `json:"nodes"`
+		Truncated bool              `json:"truncated"`
+	}
+	if err := json.Unmarshal([]byte(tree(ws, "--json")), &parsed); err != nil {
+		t.Fatalf("--json output is not valid JSON: %v", err)
+	}
+	if len(parsed.Nodes) != 2 {
+		t.Fatalf("--json nodes = %d, want 2", len(parsed.Nodes))
 	}
 }

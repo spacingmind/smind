@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 )
@@ -113,4 +116,83 @@ func treeCost(n taskTreeNode) string {
 		return "cost n/a"
 	}
 	return fmt.Sprintf("$%.2f", *u.Subtree.CostUSD)
+}
+
+// cmdTaskTreeUsage is printed on any argument error in cmdTaskTree.
+const cmdTaskTreeUsage = "usage: smind task tree <workspaceId> [--json]\n       smind task tree --task <taskId> [--json]"
+
+// cmdTaskTree prints a workspace's whole task hierarchy, or one task's
+// subtree via --task -- the CLI mirror of the task.tree wsapi method.
+func cmdTaskTree(args []string) int {
+	var idArg, taskArg string
+	var asJSON bool
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--json":
+			asJSON = true
+		case a == "--task":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, cmdTaskTreeUsage)
+				return 2
+			}
+			i++
+			taskArg = args[i]
+		case strings.HasPrefix(a, "--task="):
+			taskArg = strings.TrimPrefix(a, "--task=")
+		case strings.HasPrefix(a, "-"):
+			fmt.Fprintf(os.Stderr, "task tree: unknown flag %q\n", a)
+			fmt.Fprintln(os.Stderr, cmdTaskTreeUsage)
+			return 2
+		case idArg == "":
+			idArg = a
+		default:
+			fmt.Fprintln(os.Stderr, cmdTaskTreeUsage)
+			return 2
+		}
+	}
+	if (idArg == "") == (taskArg == "") {
+		fmt.Fprintln(os.Stderr, cmdTaskTreeUsage)
+		return 2
+	}
+	key, raw := "workspaceId", idArg
+	if taskArg != "" {
+		key, raw = "taskId", taskArg
+	}
+	id, err := parseInt64(raw)
+	if err != nil || id <= 0 {
+		fmt.Fprintf(os.Stderr, "task tree: invalid %s %q\n", key, raw)
+		fmt.Fprintln(os.Stderr, cmdTaskTreeUsage)
+		return 2
+	}
+
+	client, err := dialDaemon(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer client.Close()
+
+	params := map[string]any{key: id}
+	if asJSON {
+		var raw json.RawMessage
+		if err := client.Call(context.Background(), "task.tree", params, &raw); err != nil {
+			fmt.Fprintf(os.Stderr, "task tree: %v\n", err)
+			return 1
+		}
+		var buf bytes.Buffer
+		if err := json.Indent(&buf, raw, "", "  "); err != nil {
+			fmt.Fprintf(os.Stderr, "task tree: %v\n", err)
+			return 1
+		}
+		fmt.Println(buf.String())
+		return 0
+	}
+	var flat taskTreeFlat
+	if err := client.Call(context.Background(), "task.tree", params, &flat); err != nil {
+		fmt.Fprintf(os.Stderr, "task tree: %v\n", err)
+		return 1
+	}
+	renderTaskTree(os.Stdout, flat, time.Now())
+	return 0
 }
