@@ -301,6 +301,12 @@ export interface RunEntry {
   failureWindow?: string;
   /** When the limit lifts (RFC 3339 UTC). */
   failureResetAt?: string;
+  /** ADR-0041 F2: the agent profile the run launched with. */
+  profileId?: number;
+  /** ADR-0041 F2: the failed run this one continues after a rate limit. */
+  failoverOf?: string;
+  /** A rate-limited run whose profile names a fallback (run.logs): where "Retry on <profile>" would go. */
+  fallbackProfileId?: number;
   err?: string;
   /**
    * The run's provider-native permission mode (ADR-0019) -- "" until the
@@ -627,6 +633,7 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
             stopReason: logs.stopReason,
             disposition: logs.disposition,
             ...failureOf(logs),
+            ...lineageOf(logs),
             err: logs.err,
             ...provenanceOf(logs),
             ...attachmentsOf(logs),
@@ -647,6 +654,15 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
  */
 function failureOf(src: { failureKind?: string; window?: string; resetAt?: string }): Pick<RunEntry, "failureKind" | "failureWindow" | "failureResetAt"> {
   return { failureKind: src.failureKind || undefined, failureWindow: src.window || undefined, failureResetAt: src.resetAt || undefined };
+}
+
+/** The profile/failover keys a run.logs result carries -- only those, so a missing one never overwrites a list-seeded value. */
+function lineageOf(logs: RunLogsResult): Pick<RunEntry, "profileId" | "failoverOf" | "fallbackProfileId"> {
+  return {
+    ...(logs.profileId ? { profileId: logs.profileId } : {}),
+    ...(logs.failoverOf ? { failoverOf: logs.failoverOf } : {}),
+    ...(logs.fallbackProfileId ? { fallbackProfileId: logs.fallbackProfileId } : {}),
+  };
 }
 
 /** The provenance keys a run.logs result actually carries -- only those, so a missing one never overwrites a list-seeded value with undefined. */
@@ -678,6 +694,8 @@ function toRunEntry(r: RunSummary): RunEntry {
     failureKind: r.FailureKind || undefined,
     failureWindow: r.FailureWindow || undefined,
     failureResetAt: r.FailureResetAt || undefined,
+    ...(r.ProfileID ? { profileId: r.ProfileID } : {}),
+    ...(r.FailoverOf ? { failoverOf: r.FailoverOf } : {}),
     err: r.Err || undefined,
     permissionMode: r.PermissionMode,
     autoAccept: r.AutoAccept,
@@ -778,6 +796,7 @@ export function useRunTimeline(
                   stopReason: logs.stopReason,
                   disposition: logs.disposition,
                   ...failureOf(logs),
+                  ...lineageOf(logs),
                   err: logs.err,
                 });
               })
@@ -921,9 +940,11 @@ export function useRunTimeline(
                   patch(setRuns, r.ID, {
                     items: buildTimeline(logs.events),
                     ...attachmentsOf(logs),
+                    ...lineageOf(logs),
                     status: logs.status,
                     stopReason: logs.stopReason,
                     disposition: logs.disposition,
+                    ...failureOf(logs),
                     err: logs.err,
                   });
                 })
