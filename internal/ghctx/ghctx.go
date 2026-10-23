@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -52,6 +53,7 @@ func runGH(ctx context.Context, dir string, stdin io.Reader, args ...string) (st
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Dir = dir
 	cmd.Stdin = stdin
+	cmd.Env = ghEnv()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -61,6 +63,14 @@ func runGH(ctx context.Context, dir string, stdin io.Reader, args ...string) (st
 		return "", fmt.Errorf("gh: %w: %s", err, clip(forge.Scrub(stderr.String())))
 	}
 	return stdout.String(), nil
+}
+
+// ghEnv is the child environment: the daemon's own, plus GH_PROMPT_DISABLED
+// so gh never waits on a terminal that is not there. Nothing else is added or
+// removed; in particular no token is ever placed in it (a pasted token goes
+// on stdin).
+func ghEnv() []string {
+	return append(os.Environ(), "GH_PROMPT_DISABLED=1")
 }
 
 // clip trims s to at most stderrClip bytes.

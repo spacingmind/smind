@@ -19,6 +19,12 @@ const (
 	CodeRateLimited     = "forge_rate_limited"
 	CodeTimeout         = "forge_timeout"
 	CodeError           = "forge_error"
+
+	// The token-login codes (ADR-0039 section 8). CodeInsecureChannel is not
+	// a forge failure but is raised through the same typed error.
+	CodeInsecureChannel = "insecure_channel"
+	CodeTokenInvalid    = "token_invalid"
+	CodeTokenScopes     = "token_scopes"
 )
 
 // Fixed, user-presentable messages per code. Each names the next step and
@@ -31,6 +37,9 @@ const (
 	msgRateLimited     = "GitHub is rate-limiting requests. Try again later."
 	msgTimeout         = "GitHub didn't answer in time."
 	msgError           = "GitHub returned an error."
+	msgInsecureChannel = "This connection isn't encrypted, so smind won't send a token over it. Use the relay, an ssh tunnel or TLS."
+	msgTokenInvalid    = "GitHub rejected that token."
+	msgTokenScopes     = "That token is missing a required scope. A classic token needs `repo` and `read:org`."
 )
 
 // Error is the typed forge error: a machine-readable Code, a fixed Message
@@ -81,6 +90,12 @@ func NewError(code, detail string) *Error {
 		e.Message = msgRateLimited
 	case CodeTimeout:
 		e.Message = msgTimeout
+	case CodeInsecureChannel:
+		e.Message = msgInsecureChannel
+	case CodeTokenInvalid:
+		e.Message = msgTokenInvalid
+	case CodeTokenScopes:
+		e.Message = msgTokenScopes
 	default:
 		e.Code = CodeError
 		e.Message = msgError

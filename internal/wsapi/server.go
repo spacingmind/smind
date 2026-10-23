@@ -84,6 +84,10 @@ type API struct {
 	// github backs forge.search (SetGithubClient).
 	github *githubHolder
 
+	// forgeAuth backs forge.status/setToken/logout and the https credential
+	// helper for the daemon's own git network calls.
+	forgeAuth *forgeAuth
+
 	// learning backs the human-only learning.* RPCs (SetLearning).
 	learning *learningHost
 
@@ -118,7 +122,8 @@ func (a *API) Close() {
 // safe to call while requests are being served.
 func (a *API) SetAuthorizer(fn func(*http.Request) bool) { a.authorize = fn }
 
-// ServeTransport serves one RPC connection to completion over tr -- same
+// ServeTransport serves one RPC connection to completion over tr (channel
+// "e2ee": a relay-bridged session) -- same
 // handler dispatch table and event subscription as a WebSocket /ws
 // connection, just over a different Transport. It blocks until tr's
 // connection ends (a read error) or ctx is cancelled, exactly like a
@@ -127,24 +132,25 @@ func (a *API) SetAuthorizer(fn func(*http.Request) bool) { a.authorize = fn }
 // *client.DataConn, so a mobile-originated request gets the same answer a
 // browser tab's would.
 func (a *API) ServeTransport(ctx context.Context, tr Transport) {
-	a.serve(ctx, tr, false, RelayMaxMessage, "")
+	a.serve(ctx, tr, false, RelayMaxMessage, "", ChannelE2EE)
 }
 
 // ServeDevice is ServeTransport for a relay session whose device proved its identity (device_hello): handlers see its device id in requestContext.deviceID.
 func (a *API) ServeDevice(ctx context.Context, tr Transport, deviceID string) {
-	a.serve(ctx, tr, false, RelayMaxMessage, deviceID)
+	a.serve(ctx, tr, false, RelayMaxMessage, deviceID, ChannelE2EE)
 }
 
 // serveLocal is ServeTransport for the token-authenticated /ws connection:
 // the one surface allowed to administer the daemon itself (relay.device.*).
-func (a *API) serveLocal(ctx context.Context, tr Transport) {
-	a.serve(ctx, tr, true, DirectMaxMessage, "")
+func (a *API) serveLocal(ctx context.Context, tr Transport, ch Channel) {
+	a.serve(ctx, tr, true, DirectMaxMessage, "", ch)
 }
 
-func (a *API) serve(ctx context.Context, tr Transport, local bool, maxMessage int, deviceID string) {
+func (a *API) serve(ctx context.Context, tr Transport, local bool, maxMessage int, deviceID string, ch Channel) {
 	c := newConn(tr, a.hs)
 	c.local = local
 	c.deviceID = deviceID
+	c.channel = ch
 	c.maxMessage = maxMessage
 	c.runScoped = false // no run-scoped identity exists yet (ADR-0027)
 	c.eventsSub = newSubscriber()
@@ -178,7 +184,9 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	bus := newEventBus()
 	focus := newFocusRegistry()
 	gh := &githubHolder{c: ghctx.New()}
-	gitSvc := newGitService(wm, db, bus, focus, gh, reg, gopts)
+	fauth := newForgeAuth(gh, bus)
+	gitSvc := newGitService(wm, db, bus, focus, gh, reg, fauth.networkGit, gopts)
+	fauth.git = gitSvc
 	// task.create with a prNumber asks the same provider, looked up per
 	// call, whether the PR comes from a fork (ADR-0039 section 7).
 	wm.SetForge(func() forge.Provider {
@@ -233,12 +241,15 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	hs["daemon.info"] = handleDaemonInfo(info, reg)
 	hs["run.attachment"] = handleRunAttachment(reg)
 	hs["forge.search"] = handleForgeSearch(wm, gh)
+	hs["forge.status"] = handleForgeStatus(fauth)
+	hs["forge.setToken"] = handleForgeSetToken(fauth)
+	hs["forge.logout"] = handleForgeLogout(fauth)
 	learning := newLearningHost(db, bus)
 	for method, h := range learningHandlers(learning) {
 		hs[method] = h
 	}
 	hs["workspace.delete"] = learning.beforeWorkspaceDelete(hs["workspace.delete"])
-	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus, info: info, learning: learning, github: gh, git: gitSvc, focus: focus}
+	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}
@@ -256,7 +267,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		// Gorilla answers an oversized message with close code 1009.
 		ws.SetReadLimit(DirectMaxMessage)
 
-		api.serveLocal(r.Context(), wsTransport{ws})
+		api.serveLocal(r.Context(), wsTransport{ws}, ChannelOf(r))
 	})
 	return api, nil
 }

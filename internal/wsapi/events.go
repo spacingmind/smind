@@ -51,6 +51,11 @@ const (
 	// (ADR-0039 §3). Subscribing is also the interest signal that turns on the
 	// daemon's periodic git work.
 	TopicTaskGit = "task.git"
+	// TopicForgeStatus carries {status} when the daemon host's forge sign-in
+	// state changed (ADR-0039 section 8): after forge.setToken/forge.logout
+	// and when a status read sees a change. The status has no canSetToken
+	// (that is per connection).
+	TopicForgeStatus = "forge.status"
 )
 
 // The learning topics (TopicLearnedSkillProposed/Changed, TopicLearningJob)
@@ -85,6 +90,7 @@ var knownTopics = map[string]bool{
 	TopicMcpServerUpdated:     true,
 	TopicMcpServerDeleted:     true,
 	TopicTaskGit:              true,
+	TopicForgeStatus:          true,
 	TopicLearnedSkillProposed: true,
 	TopicLearnedSkillChanged:  true,
 	TopicLearningJob:          true,

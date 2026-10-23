@@ -195,7 +195,7 @@ func (m *Manager) PushForPR(ctx context.Context, id int64, baseBranch string) (P
 		return PRPush{}, err
 	}
 	refspec := fmt.Sprintf("+refs/heads/%s:refs/remotes/%s/%s", tg.base, originRemote, tg.base)
-	if err := prGit(ctx, prFetchTimeout, tg.worktree, "fetch", "--no-tags", originRemote, refspec); err != nil {
+	if err := prGit(ctx, prFetchTimeout, tg.worktree, netGitArgs(ctx, tg.worktree, originRemote, "fetch", "--no-tags", originRemote, refspec)...); err != nil {
 		var pe *forge.PRError
 		if errors.As(err, &pe) && pe.Code == forge.CodeError && prCouldntFindRef(pe) {
 			return PRPush{}, forge.NewPRError(forge.CodeBaseNotFound, prDetail(pe))
@@ -252,7 +252,7 @@ func (m *Manager) PushUpdate(ctx context.Context, id int64, remoteBranch string)
 // refs/heads/<local>:refs/heads/<remote>`. No force flag, no `+` in the
 // refspec, so a remote that moved on is rejected rather than overwritten.
 func prPush(ctx context.Context, dir, local, remote string) error {
-	return prGit(ctx, prPushTimeout, dir, "push", originRemote, "refs/heads/"+local+":refs/heads/"+remote)
+	return prGit(ctx, prPushTimeout, dir, netGitArgs(ctx, dir, originRemote, "push", originRemote, "refs/heads/"+local+":refs/heads/"+remote)...)
 }
 
 // pushCleanBranch materializes a throwaway worktree checked out on a fresh

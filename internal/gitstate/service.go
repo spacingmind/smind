@@ -79,6 +79,11 @@ type Options struct {
 	// (the run registry); it feeds the createPr run_active blocker. Nil means
 	// never.
 	RunActive func(taskID int64) bool
+	// NetworkGit, when non-nil, returns extra per-invocation git options
+	// (`-c credential.helper=...`) for a network call to remote in dir; it is
+	// consulted before the background fetch only, and nil or an empty result
+	// adds nothing (ADR-0039 section 8: https origin and a signed-in forge).
+	NetworkGit func(ctx context.Context, dir, remote string) []string
 }
 
 type entry struct {
@@ -356,6 +361,20 @@ func (s *Service) Invalidate(taskID int64) {
 		defer s.wg.Done()
 		s.InvalidateSync(taskID)
 	}()
+}
+
+// ForgeAuthChanged is called after the daemon host's forge login changed
+// (forge.setToken, forge.logout): the poller drops the host suspension and
+// backoff a missing login caused, and every cached task is recomputed so a
+// forge_unauthenticated blocker on its actions clears (or appears) at once.
+func (s *Service) ForgeAuthChanged(host string) {
+	if s == nil {
+		return
+	}
+	s.poller.ForgeAuthChanged(host)
+	for _, id := range s.cachedIDs() {
+		s.Invalidate(id)
+	}
 }
 
 // InvalidateSync is Invalidate run in the caller's goroutine (single-flight
@@ -647,7 +666,11 @@ func (s *Service) fetch(ws int64, bases []string) {
 	}
 	for _, b := range bases {
 		ctx, cancel := context.WithTimeout(s.ctx, s.opts.FetchTimeout)
-		_, _ = s.run(ctx, w.Path, "fetch", "--no-tags", originRemote, "+refs/heads/"+b+":refs/remotes/origin/"+b)
+		args := []string{"fetch", "--no-tags", originRemote, "+refs/heads/" + b + ":refs/remotes/origin/" + b}
+		if s.opts.NetworkGit != nil {
+			args = append(s.opts.NetworkGit(ctx, w.Path, originRemote), args...)
+		}
+		_, _ = s.run(ctx, w.Path, args...)
 		cancel()
 	}
 	if s.ctx.Err() != nil {

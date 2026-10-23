@@ -43,6 +43,8 @@ type requestContext struct {
 	// deviceID is the verified relay device id of this session, "" for the
 	// local /ws connection and for legacy relay clients; see conn.deviceID.
 	deviceID string
+	// channel is how the connection reached the daemon; see conn.channel.
+	channel Channel
 }
 
 // Emit sends a server -> client event carrying params, correlated to this
@@ -109,6 +111,10 @@ type conn struct {
 	// deviceID is the verified relay device id of this session, "" for the
 	// local /ws connection and for legacy relay clients.
 	deviceID string
+
+	// channel is the connection's transport class (loopback, tls, e2ee,
+	// plain); the zero value is treated as plain.
+	channel Channel
 
 	// focus, when non-nil, is the daemon-wide task.gitFocus registry; this
 	// connection's entry is dropped when serve returns.
@@ -211,7 +217,7 @@ func (c *conn) dispatch(connCtx context.Context, env envelope) {
 	c.inflight[env.ID] = &inflightRequest{cancel: cancel}
 	c.mu.Unlock()
 
-	rc := &requestContext{conn: c, id: env.ID, runScoped: c.runScoped, local: c.local, deviceID: c.deviceID}
+	rc := &requestContext{conn: c, id: env.ID, runScoped: c.runScoped, local: c.local, deviceID: c.deviceID, channel: c.channel}
 	result, err := h(reqCtx, rc, env.Params)
 	if err != nil {
 		c.sendError(env.ID, err)

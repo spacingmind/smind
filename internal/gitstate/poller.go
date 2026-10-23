@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -305,6 +306,33 @@ func (p *Poller) ForgeBlock(t store.Task) string {
 		}
 	}
 	return ""
+}
+
+// ForgeAuthChanged lifts what a missing or stale login put on host: the host
+// suspension a forge_unauthenticated failure set (a rate-limit suspension
+// stays), and the per-task backoff of every task whose last failure was
+// forge_unauthenticated or forge_cli_missing, so the next poll tries again at
+// once. An empty host means every host. It calls no forge.
+func (p *Poller) ForgeAuthChanged(host string) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for name, h := range p.hosts {
+		if (host == "" || strings.EqualFold(name, host)) && h.suspendStale == staleFor(forge.CodeUnauthenticated) {
+			h.suspendedUntil, h.suspendStale = time.Time{}, ""
+		}
+	}
+	for _, m := range p.mem {
+		switch m.st.LastErrorCode {
+		case forge.CodeUnauthenticated, forge.CodeCLIMissing:
+			m.st.ConsecutiveFailures = 0
+			m.st.LastErrorCode = ""
+			m.st.NextAllowedAt = time.Time{}
+			p.saveLocked(m)
+		}
+	}
 }
 
 // RepoOf returns the forge repo the poller resolved for a workspace, from its

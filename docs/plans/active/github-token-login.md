@@ -99,13 +99,27 @@ Device flow / a smind OAuth app; storing the token in smind; GitHub Enterprise b
 
 ## Implementation notes
 
-(none yet)
+Decided while implementing (2026-10-23):
+
+- `forge.setToken` without `host` defaults to `github.com` (the wire has no workspace parameter, so no origin to read). `forge.setToken`/`forge.logout` return `{status:{provider, canSetToken, cli, hosts}}`; the `forge.status` **topic** payload is `{status:{provider, cli, hosts}}` without `canSetToken`, which is a property of one connection's channel: the web keeps the value the RPC answered with when an event arrives (a locked field after any event was found in review and fixed).
+- A `forge.status {refresh}` over the 5 s floor or the 12/hour cap returns the cached status without an error. A malformed token (empty, space, over 255 bytes, non-ASCII) is `token_invalid` and never reaches `gh`; malformed params or a bad `host` are `invalid_params` with a fixed sentence that never quotes the input.
+- A loopback peer sending `X-Forwarded-Proto: http` is tagged `plain` (stricter than the plan: a same-host proxy in front of a plain listener must not count as secure).
+- The network-git hook is `NetworkGitConfig func(ctx, dir, remote) []string`, installed through `workspace.SetNetworkGitConfig` and gitstate's `Options.NetworkGit`; it reads the remote with `git remote get-url`, so `url.insteadOf` applies, and a global https→ssh rewrite correctly yields no helper. `Provider.Status(ctx)` returns all hosts; `forge.AuthStatus` is `{CLI, Hosts}`.
+- The Docker image pins the `gh` release binary with a sha256 check (the distro's `gh` is too old for `auth status --json`).
+- No run-scoped identity exists yet, so the agent refusal is enforced and tested at handler level only; an agent holding the daemon token could call `forge.setToken` over a raw `/ws` connection like any RPC (there is no MCP tool, and an agent on the host can run `gh auth login` itself). `GH_TOKEN`/`GITHUB_TOKEN` in the daemon's own environment makes `gh auth login` refuse (`forge_error`). Go strings cannot be zeroed, so the token lives in daemon memory until collected.
+
 
 ## Progress
 
-- 2026-10-23: plan written from ADR-0039 §8/§11 and H4; `gh auth status --json hosts` confirmed available in gh 2.101 (fields: host, active, login, scopes, state, tokenSource, gitProtocol).
+- 2026-10-23: daemon and web halves implemented and verified live together (bogus token against real `gh` in a throwaway config dir); PRs opened. Plan written from ADR-0039 §8/§11 and H4; `gh auth status --json hosts` confirmed available in gh 2.101 (fields: host, active, login, scopes, state, tokenSource, gitProtocol).
   Nothing implemented.
 
 ## Validation
 
-How each AC gets satisfied is recorded here per PR as it lands.
+How each AC was satisfied (daemon: this PR; web: the Settings → GitHub PR). The two branches were merged in a scratch worktree for the live run.
+
+- **Daemon ACs 1–8:** every name in the plan's daemon group exists and passes. `TestForgeToken_NeverLogged` runs the real `ghctx` subprocess against a fake `gh` that echoes the token to stderr on failure and scans log output, stdout/stderr, the event bus, every SQLite table (`request_log` and `run_events` stay at 0 rows), every RPC result and `detail`, and the subprocess argv and env: the token appears only on gh's stdin. The Peer proved the test by mutation (dropped redaction, an added `slog.Info` of the token, a skipped poller lift each failed the matching test). The Dockerfile change was built for real: `gh --version` in the image printed 2.101.0.
+- **Live, real `gh` 2.101, throwaway `GH_CONFIG_DIR` (never `~/.config/gh`), nothing written to GitHub:** `forge.status` on an empty config → no hosts; pasting a **bogus** token through the real Settings → GitHub card made real `gh` validate it against GitHub once → `HTTP 401: Bad credentials` → `token_invalid` shown as "GitHub rejected that token. Check that it is correct, current and for the right host."; the field was empty afterwards; the sentinel string was in none of: the page DOM, localStorage/sessionStorage, the daemon log, `smind.db` and its WAL, the gh config dir.
+- **Live with a scripted `gh` (signed-in and logout states) and with `gh` missing from PATH:** the card showed "Signed in to github.com as octocat" with scopes, protocol and token source, the Log out confirm, and the signed-out card after logout; with `gh` missing it showed the warning and the disabled field. Light and dark screenshots of each state.
+- **Unverified (by decision, recommendation (3) of this plan):** accepting a *valid* token against GitHub (stubs and the fake `gh` only), and a real non-loopback plain connection (`plain` is covered by httptest remote-address tests, not reproduced live because direct non-loopback sessions need the password flow). Neither was exercised with the Human's own credentials.
+- **ACs 9–13 (web):** named web tests, the source-scan test that no token reaches storage/zustand/`console`/mutation variables, and the screenshots above. **AC14:** `task test`, `task lint` and tsc are recorded in each PR body.

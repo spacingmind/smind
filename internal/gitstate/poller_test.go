@@ -105,6 +105,14 @@ func (f *fakeForge) CreatePR(context.Context, string, forge.CreatePRInput) (forg
 	return forge.PR{}, errors.New("not used")
 }
 
+func (f *fakeForge) Status(context.Context) (forge.AuthStatus, error) {
+	return forge.AuthStatus{}, errors.New("not used")
+}
+
+func (f *fakeForge) Login(context.Context, string, string) error { return errors.New("not used") }
+
+func (f *fakeForge) Logout(context.Context, string) error { return errors.New("not used") }
+
 func (f *fakeForge) setOpen(dir string, prs ...forge.PR) {
 	f.mu.Lock()
 	f.open[dir] = prs

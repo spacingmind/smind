@@ -126,7 +126,7 @@ func fetchRemoteBranchBestEffort(dir, remote, branch string) {
 	ctx, cancel := context.WithTimeout(context.Background(), remoteFetchTimeout)
 	defer cancel()
 	refspec := fmt.Sprintf("+refs/heads/%s:refs/remotes/%s/%s", branch, remote, branch)
-	cmd := exec.CommandContext(ctx, "git", "fetch", remote, refspec)
+	cmd := exec.CommandContext(ctx, "git", netGitArgs(ctx, dir, remote, "fetch", remote, refspec)...)
 	cmd.Dir = dir
 	_ = cmd.Run()
 }
@@ -135,7 +135,7 @@ func fetchRemoteBranchBestEffort(dir, remote, branch string) {
 // package-level var (like runGH) so tests can substitute a local fetch
 // without a real GitHub round trip.
 var fetchPRHead = func(dir, remote string, n int) error {
-	return runGit(dir, "fetch", remote, fmt.Sprintf("refs/pull/%d/head", n))
+	return runGit(dir, netGitArgs(context.Background(), dir, remote, "fetch", remote, fmt.Sprintf("refs/pull/%d/head", n))...)
 }
 
 // createTaskFromBaseRef validates baseRef, best-effort refreshes it when
