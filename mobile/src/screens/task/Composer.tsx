@@ -4,17 +4,21 @@
 // Buttons in their own UiHost, tinted by the Host's seedColor (expo-ui: no
 // custom Pressable wrappers). Which actions show comes from composerActions.
 
-import { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
+import { useMemo, useState } from 'react';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { BottomSheet, Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
 import { ChatQueueItem } from '../../api';
+import { AttachMenuItem } from '../../attachmentTray';
+import { PendingAttachment } from '../../attachments';
 import { composerActions } from '../../composerActions';
 import { StopControlView } from '../../stopControl';
 import { AppTheme } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
+import { AppIcon } from '../../ui/AppIcon';
 import { TextButton } from '../../ui/TextButton';
 import { UiHost } from '../../ui/UiHost';
 import { QueuedPrompts } from '../QueuedPrompts';
+import { AttachmentTray } from './AttachmentTray';
 
 export function Composer({
   draftState,
@@ -29,6 +33,11 @@ export function Composer({
   onSend,
   onSendNow,
   placeholder,
+  attachments = [],
+  onRemoveAttachment,
+  attachMenu = [],
+  onAttach,
+  attachNotice = null,
 }: {
   draftState: ReturnType<typeof useNativeState<string>>;
   onChangeDraft: (text: string) => void;
@@ -43,7 +52,16 @@ export function Composer({
   onSendNow: () => void;
   /** Field placeholder; defaults to the follow-up wording. */
   placeholder?: string;
+  /** Pending attachments shown as a tray above the field (ADR-0038). */
+  attachments?: PendingAttachment[];
+  onRemoveAttachment?: (id: string) => void;
+  /** Attach menu entries from the daemon's kinds; empty hides the Attach button. */
+  attachMenu?: AttachMenuItem[];
+  onAttach?: (key: AttachMenuItem['key']) => void;
+  /** Inline attach refusal, shown beside sendError. */
+  attachNotice?: string | null;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const actions = composerActions({ liveRunId, canSend, stopping: stopView.disabled });
@@ -55,7 +73,13 @@ export function Composer({
           Couldn't send: {sendError}
         </Text>
       )}
+      {attachNotice !== null && (
+        <Text style={styles.sendError} selectable accessibilityRole="alert">
+          {attachNotice}
+        </Text>
+      )}
       <View style={styles.shell}>
+        <AttachmentTray attachments={attachments} onRemove={(id) => onRemoveAttachment?.(id)} />
         <UiHost style={styles.fieldHost}>
           <ExpoTextInput
             style={styles.field}
@@ -71,6 +95,12 @@ export function Composer({
           />
         </UiHost>
         <View style={styles.toolbar}>
+          {attachMenu.length > 0 && (
+            <Pressable accessibilityRole="button" accessibilityLabel="Attach" onPress={() => setMenuOpen(true)} style={styles.attach}>
+              <AppIcon name="attach" size={20} color={theme.foregroundSubtle} />
+            </Pressable>
+          )}
+          <View style={styles.spacer} />
           {actions.sendNow.visible && <TextButton label="Send now" onPress={onSendNow} />}
           {actions.stop.visible && (
             <UiHost>
@@ -82,6 +112,27 @@ export function Composer({
           </UiHost>
         </View>
       </View>
+      {attachMenu.length > 0 && (
+        <UiHost>
+          <BottomSheet isPresented={menuOpen} onDismiss={() => setMenuOpen(false)} containerColor={theme.overlay}>
+            <View style={styles.menu}>
+              {attachMenu.map((item) => (
+                <TextButton
+                  key={item.key}
+                  label={item.label}
+                  style={styles.menuItem}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    // iOS cannot present a picker while the sheet is still dismissing.
+                    if (Platform.OS === 'ios') setTimeout(() => onAttach?.(item.key), 400);
+                    else onAttach?.(item.key);
+                  }}
+                />
+              ))}
+            </View>
+          </BottomSheet>
+        </UiHost>
+      )}
     </>
   );
 }
@@ -113,11 +164,14 @@ function makeStyles(theme: AppTheme) {
     },
     toolbar: {
       flexDirection: 'row',
-      justifyContent: 'flex-end',
       alignItems: 'center',
       gap: theme.spacing[2],
       marginTop: theme.spacing[2],
     },
     action: { height: 44 },
+    spacer: { flex: 1 },
+    attach: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+    menu: { paddingBottom: theme.spacing[4] },
+    menuItem: { alignSelf: 'flex-start' },
   });
 }
