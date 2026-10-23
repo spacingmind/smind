@@ -203,10 +203,10 @@ func TestTaskRunsShowsModel(t *testing.T) {
 	if len(lines) != 2 || !strings.Contains(lines[0], "MODEL") || !strings.HasPrefix(lines[1], runID) {
 		t.Fatalf("task runs output = %q, want a MODEL header and the run row", out)
 	}
-	if f := strings.Fields(lines[0]); f[3] != "MODEL" {
-		t.Fatalf("header fields = %v, want MODEL fourth", f)
+	if f := strings.Fields(lines[0]); f[4] != "MODEL" {
+		t.Fatalf("header fields = %v, want MODEL fifth", f)
 	}
-	if f := strings.Fields(lines[1]); f[3] != "-" {
+	if f := strings.Fields(lines[1]); f[4] != "-" {
 		t.Fatalf("row fields = %v, want model cell %q for an unpinned run", f, "-")
 	}
 }
