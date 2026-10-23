@@ -297,6 +297,63 @@ describe("PRPanelPane", () => {
     });
   });
 
+  describe("refresh error", () => {
+    const reads = (c: FakeWsClient) => c.calls.filter((x) => x.method === "task.prDetails");
+    const limited = (retryAt?: string) => Object.assign(new Error(""), { code: "refresh_limited", data: retryAt ? { retryAt } : undefined });
+    const advance = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
+
+    async function failRefresh(details: PRDetails, retryAfterMs?: number) {
+      const client = new FakeWsClient();
+      const view = renderWithClientProp(<Harness client={client} />);
+      await load(client, details);
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+      fireEvent.click(screen.getByTestId("pr-refresh"));
+      await act(async () => {
+        for (let i = 0; i < 4; i++) await Promise.resolve();
+      });
+      expect(reads(client)).toHaveLength(2);
+      const retryAt = retryAfterMs === undefined ? undefined : new Date(Date.now() + retryAfterMs).toISOString();
+      await act(async () => reads(client)[1]!.reject(limited(retryAt)));
+      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
+      return { client, view };
+    }
+
+    it("refresh_limited error clears at retryAt", async () => {
+      await failRefresh(prDetails(), 3000);
+      await advance(2999);
+      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
+      await advance(1);
+      expect(screen.queryByTestId("pr-refresh-error")).toBeNull();
+    });
+
+    it("refresh_limited error without retryAt clears after 8 s", async () => {
+      await failRefresh(prDetails());
+      await advance(7999);
+      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
+      await advance(1);
+      expect(screen.queryByTestId("pr-refresh-error")).toBeNull();
+    });
+
+    it("error clears when new data arrives", async () => {
+      const { client } = await failRefresh(prDetails(), 60_000);
+      // The header snapshot moved (a push): the panel reads again.
+      await act(async () => client.pushNotification("task.git", { taskId: 1, git: gitWith({ ...gitPr(), headSha: "bbb" }) }));
+      await advance(0);
+      expect(reads(client)).toHaveLength(3);
+      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
+      await act(async () => reads(client)[2]!.resolve(prDetails({ title: "Newer" })));
+      expect(screen.queryByTestId("pr-refresh-error")).toBeNull();
+      expect(screen.getByText("Newer")).toBeTruthy();
+    });
+
+    it("error timer is cleared on blur", async () => {
+      const { client, view } = await failRefresh(prDetails(), 3000);
+      view.rerender(<Harness client={client} focused={false} />);
+      await advance(60_000);
+      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
+    });
+  });
+
   it("zero fetchedAt shows no updated label", async () => {
     await show(prDetails({ fetchedAt: "0001-01-01T00:00:00Z" }));
     expect(screen.queryByTestId("pr-fetched")).toBeNull();

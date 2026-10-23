@@ -7,6 +7,8 @@ export interface PrErrorView {
   message: string;
   detail?: string;
   code?: string;
+  /** RFC 3339: when a rate-limited call may be repeated (`refresh_limited`, `forge_rate_limited`). */
+  retryAt?: string;
   existing?: { url: string; number: number };
 }
 
@@ -105,6 +107,7 @@ export function describePrError(err: unknown, op: PrOperation): PrErrorView {
     const detail = data?.detail;
     if (typeof detail === "string" && detail.trim() !== "") view.detail = detail.slice(0, MAX_DETAIL);
   }
+  if (typeof data?.retryAt === "string" && data.retryAt !== "") view.retryAt = data.retryAt;
   if (code === "pr_exists") {
     const { url, number } = (data ?? {}) as Partial<PrExistsErrorData>;
     if (typeof url === "string" && typeof number === "number") view.existing = { url, number };

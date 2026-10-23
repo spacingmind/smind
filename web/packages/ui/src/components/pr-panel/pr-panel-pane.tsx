@@ -41,6 +41,26 @@ function useRefetchWhenAvailable(details: PRDetails | undefined, focused: boolea
   }, [focused, at, updatedAt]);
 }
 
+const ERROR_DISMISS_MS = 8000;
+
+/**
+ * Clears the Refresh error by itself: when its `retryAt` passes, else after 8 s. (A new answer or the next refresh clears it
+ * too; see the pane.) The timer is cleared on blur and unmount.
+ */
+function useDismissRefreshError(error: { retryAt?: string } | null, focused: boolean, dismiss: () => void) {
+  const dismissRef = useRef(dismiss);
+  dismissRef.current = dismiss;
+  const hasError = error !== null;
+  const retryAt = error?.retryAt;
+  useEffect(() => {
+    if (!hasError || !focused) return;
+    const at = retryAt ? Date.parse(retryAt) : NaN;
+    const delay = Number.isNaN(at) ? ERROR_DISMISS_MS : Math.max(0, at - Date.now());
+    const timer = setTimeout(() => dismissRef.current(), delay);
+    return () => clearTimeout(timer);
+  }, [hasError, retryAt, focused]);
+}
+
 function PanelSkeleton({ waitingUntil }: { waitingUntil?: string }) {
   const at = waitingUntil === undefined ? NaN : Date.parse(waitingUntil);
   return (
@@ -68,6 +88,10 @@ export function PRPanelPane({ taskId, focused }: { taskId: number; focused: bool
   const [pendingCheckId, setPendingCheckId] = useState<string | null>(null);
   const details = query.data;
   useRefetchWhenAvailable(details, focused, query.refetch, query.dataUpdatedAt);
+  useDismissRefreshError(refresh.error, focused, refresh.reset);
+  // A newer answer supersedes the refresh error.
+  const resetRefresh = refresh.reset;
+  useEffect(() => resetRefresh(), [query.dataUpdatedAt, resetRefresh]);
 
   const sendCheck = (check: CheckItem) => {
     if (!details) return;
