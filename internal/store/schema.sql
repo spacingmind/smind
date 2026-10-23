@@ -135,7 +135,12 @@ CREATE TABLE IF NOT EXISTS runs (
     -- ADR-0041 B3: the parent chat to notify when this child run finishes,
     -- and when that notification was claimed. NULL = none / not yet.
     reply_chat_id INTEGER,
-    parent_notified_at TIMESTAMP
+    parent_notified_at TIMESTAMP,
+    -- ADR-0041 F2: the agent profile the run was launched with (NULL = none;
+    -- history, never cleared on profile delete) and the run this one continues
+    -- after a rate limit ('' = none).
+    profile_id INTEGER,
+    failover_of TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS run_events (
@@ -168,6 +173,10 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
     thinking_level TEXT NOT NULL DEFAULT '',
     model TEXT, -- requested model (ADR-0025); NULL = provider default
     notes TEXT NOT NULL DEFAULT '',
+    -- ADR-0041 F2: what to do when a run launched with this profile hits a
+    -- provider rate limit: 'none' | 'wait' | 'fallback'.
+    on_rate_limit TEXT NOT NULL DEFAULT 'none',
+    fallback_profile_id INTEGER, -- NULL = none
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );

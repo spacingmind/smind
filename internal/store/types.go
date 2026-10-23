@@ -208,6 +208,13 @@ type Run struct {
 	// ParentNotifiedAt is when the parent notification was claimed; nil = not
 	// yet notified.
 	ParentNotifiedAt *time.Time
+	// ProfileID is the agent profile the run was launched with (ADR-0041
+	// F2); 0 = none, stored as NULL. Kept as history when the profile is
+	// deleted.
+	ProfileID int64
+	// FailoverOf is the id of the run this one continues after a rate limit;
+	// "" = none.
+	FailoverOf string
 }
 
 // RunEvent is one persisted internal/runs.Event, in the order it was
@@ -264,10 +271,17 @@ type AgentProfile struct {
 	ThinkingLevel  string
 	// Model is the profile's requested model (ADR-0025); "" (NULL) is the
 	// provider's default.
-	Model     string
-	Notes     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Model string
+	Notes string
+	// OnRateLimit is what should happen when a run launched with this
+	// profile hits a provider rate limit (ADR-0041 F2): "none" (default),
+	// "wait" or "fallback".
+	OnRateLimit string
+	// FallbackProfileID names the profile to continue on for "fallback"
+	// (a suggestion for "none"/"wait"); nil = none.
+	FallbackProfileID *int64
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // McpServer is a named, daemon-global MCP server definition (docs/
