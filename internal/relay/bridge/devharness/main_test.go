@@ -566,3 +566,22 @@ func TestSeedTree_Failed(t *testing.T) {
 		t.Fatalf("child run = %+v, want a plain error (no failureKind, no resetAt)", c.Run)
 	}
 }
+
+func TestSeedTree_Big(t *testing.T) {
+	reply, nodes, by := seedTree(t, "big")
+	if len(nodes) != 131 {
+		t.Fatalf("nodes = %d, want 131 (root + 130 children)", len(nodes))
+	}
+	sup := by["supervisor"]
+	if tierOf(sup) != "supervisor" || sup.ChildCount != 130 {
+		t.Fatalf("supervisor: %+v", sup)
+	}
+	first, last := by["child-001"], by["child-130"]
+	if tierOf(first) != "coder" || first.ParentID == nil || *first.ParentID != sup.ID || first.Run.State != "idle" || first.Depth != 1 {
+		t.Fatalf("first child: %+v", first)
+	}
+	ids := reply["nodes"].(map[string]any)
+	if float64(first.ID) != ids["firstChild"] || float64(last.ID) != ids["lastChild"] {
+		t.Fatalf("reply ids %v do not match first %d / last %d", ids, first.ID, last.ID)
+	}
+}
