@@ -42,7 +42,12 @@ import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { UiHost } from '../ui/UiHost';
 import { useScreenInsets } from '../ui/useScreenInsets';
 import { adoptedPromptText } from '../adoptedPrompt';
-import { defaultChatId, listProviders, listRunsForTask, ProviderInfo, RunSummary } from '../api';
+import { addPick, capabilities, PendingAttachment, Pick } from '../attachments';
+import { attachMenuItems } from '../attachmentTray';
+import { createImageDeps, pickFiles, pickPhotos } from '../attachmentDeps';
+import { sendWithAttachments } from '../attachSend';
+import { lineAttachmentsFromRun } from '../lineAttachments';
+import { AttachmentsInfo, defaultChatId, fetchDaemonInfo, listProviders, listRunsForTask, ProviderInfo, RunSummary } from '../api';
 import { firstSendProvider } from '../firstSend';
 import { withRunPrompt } from '../promptLine';
 import { recallSelection } from '../newTaskPrefs';
@@ -96,6 +101,15 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   // restore-on-failed-send path.
   const draftState = useNativeState('');
   const [sendError, setSendError] = useState<string | null>(null);
+  // ADR-0038 prompt attachments: the tray, the inline refusal text, and the daemon's accepted kinds (undefined until loaded / older daemon).
+  const [pending, setPending] = useState<PendingAttachment[]>([]);
+  const pendingRef = useRef<PendingAttachment[]>([]);
+  pendingRef.current = pending;
+  const [attachNotice, setAttachNotice] = useState<string | null>(null);
+  const [attachInfo, setAttachInfo] = useState<AttachmentsInfo | undefined>(undefined);
+  const picking = useRef(false);
+  const imageDims = useRef(new Map<string, { width: number; height: number }>()).current;
+  const imageDeps = useMemo(() => createImageDeps(imageDims), [imageDims]);
   // The provider catalog for a task with no run (its first prompt has no run to inherit a provider from); null = not loaded yet.
   const [providers, setProviders] = useState<ProviderInfo[] | null>(null);
   const [continued, setContinued] = useState(false);
@@ -119,6 +133,16 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   const queue = useChatQueue(conn, chatId);
   // ADR-0041: the failover successor of a rate-limited latest run, found with one run.list (no polling); null = none/unknown.
   const [successor, setSuccessor] = useState<{ provider: string; chatId: number } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetchDaemonInfo(conn)
+      .then((info) => alive && setAttachInfo(info.attachments))
+      .catch(() => alive && setAttachInfo(undefined)); // unknown: the menu falls back to image + file, the send re-check guards the rest
+    return () => {
+      alive = false;
+    };
+  }, [conn]);
   const queueRef = useRef(queue); // the adoption callback lives in the load effect: it reads the current queue through this
   queueRef.current = queue;
 
@@ -135,7 +159,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
    * history has no user message, and the attach sites (the load, a run.status adoption, a refresh that finds a run already
    * live) race each other, so the prompt cannot depend on which one wins.
    */
-  const attachRun = (runId: string, isCancelled: () => boolean) => {
+  const attachRun = (runId: string, isCancelled: () => boolean, attachments?: TimelineLine['attachments']) => {
     const prelude = () =>
       adoptedPromptText({ promptForRun: (id) => queueRef.current.promptForRun(id) }, () => listRunsForTask(conn, taskId, chatIdRef.current ?? undefined), runId);
     if (attachedRuns.current.has(runId)) return;
@@ -169,6 +193,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
         if (text && !isCancelled() && !promptShown.current.has(runId)) {
           promptShown.current.add(runId);
           const line = { key: `p${runId}`, role: 'user', text } as TimelineLine;
+          if (attachments) line.attachments = attachments;
           setLines((prev) => (prev.some((l) => l.role === 'user' && l.key.startsWith('f') && l.text === text) ? prev : [...prev, line]));
         }
       })
@@ -196,7 +221,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
       // "live" stale, nor a live run unattached.
       if (next) {
         followerRef.current?.markKnown(next.ID, next.Status);
-        if (next.Status === 'running') attachRun(next.ID, () => !mounted.current);
+        if (next.Status === 'running') attachRun(next.ID, () => !mounted.current, lineAttachmentsFromRun(next));
       }
     } catch {
       // the screen keeps what it has
@@ -296,7 +321,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
           // Registry.Subscribe), so a separate run.logs fetch here would
           // double-render every historical line -- the web UI's
           // streamRun makes the same choice.
-          attachRun(latest.ID, () => cancelled);
+          attachRun(latest.ID, () => cancelled, lineAttachmentsFromRun(latest));
         } else {
           // A finished run: one run.logs fetch, the full transcript.
           const logs = (await conn.call('run.logs', { runId: latest.ID })) as { events?: unknown[] };
@@ -309,7 +334,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
           setLines((prev) => {
             // The optimistic line of this very prompt may already have rendered while the logs loaded.
             if (prev.some((l) => l.role === 'user' && l.text === latest.Prompt)) return [...logLines, ...prev];
-            return [...withRunPrompt(logLines, latest.Prompt), ...prev];
+            return [...withRunPrompt(logLines, latest.Prompt, lineAttachmentsFromRun(latest)), ...prev];
           });
         }
       } catch (e) {
@@ -359,8 +384,10 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
       setDraft('');
       draftState.value = '';
       setSendError(null);
-      try {
-        const result = await sendFollowUpPrompt(
+      setAttachNotice(null);
+      const tray = pendingRef.current;
+      const outcome = await sendWithAttachments({ taskId, provider: sendProvider, prompt: text, chatId: chatId ?? undefined, whenBusy }, tray, () =>
+        sendFollowUpPrompt(
           conn,
           {
             appendLines,
@@ -377,21 +404,70 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
           sendProvider,
           text,
           nextSeq,
-          { whenBusy, chatId: chatId ?? undefined },
-        );
-        if (result.kind === 'queued') queue.refresh(); // covers a missed snapshot
-        else if (state.run === null) void refreshLatest(); // a first send's run must adopt (RunStrip/footer) like a task that had one
-      } catch (e) {
-        hapticFor('error');
-        setDraft(text); // the typed text is never silently lost
-        draftState.value = text;
-        setSendError(e instanceof Error ? e.message : String(e));
+          { whenBusy, chatId: chatId ?? undefined, attachments: tray },
+        ),
+      );
+      try {
+        if (outcome.kind === 'sent') {
+          setPending([]); // the tray goes only once the daemon accepted the prompt
+          if (outcome.result.kind === 'queued') queue.refresh(); // covers a missed snapshot
+          else if (state.run === null) void refreshLatest(); // a first send's run must adopt (RunStrip/footer) like a task that had one
+        } else {
+          hapticFor('error');
+          setDraft(text); // the typed text and the tray are never silently lost
+          draftState.value = text;
+          if (outcome.kind === 'refused') setAttachNotice(outcome.notice);
+          else if (outcome.attachment) setAttachNotice(outcome.message);
+          else setSendError(outcome.message);
+        }
       } finally {
         sending.current = false;
       }
     },
     [appendLines, board, chatId, conn, draft, nextSeq, queue, refreshLatest, removeLines, sendProvider, taskId, trackTail],
   );
+
+  const caps = useMemo(() => capabilities(attachInfo), [attachInfo]);
+  const attachMenu = useMemo(() => attachMenuItems(attachInfo), [attachInfo]);
+
+  const handleAttach = useCallback(
+    async (key: 'photo' | 'file') => {
+      if (picking.current || sendProvider === null) return;
+      picking.current = true;
+      setAttachNotice(null);
+      try {
+        const remaining = caps.maxCount - pendingRef.current.length;
+        const picks: Pick[] = key === 'photo' ? await pickPhotos(remaining) : await pickFiles();
+        for (const p of picks) if (p.width !== undefined && p.height !== undefined) imageDims.set(p.uri, { width: p.width, height: p.height });
+        const base = { taskId, provider: sendProvider, prompt: draft.trim(), chatId: chatId ?? undefined, whenBusy: 'queue' };
+        let existing = pendingRef.current;
+        const refusals: string[] = [];
+        const added: PendingAttachment[] = [];
+        for (const p of picks) {
+          try {
+            const res = await addPick(p, imageDeps, { base, existing, max: caps.maxCount });
+            if (res.ok) {
+              added.push(res.attachment);
+              existing = [...existing, res.attachment];
+            } else refusals.push(res.message);
+          } catch (e) {
+            refusals.push(`${p.name} could not be read: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+        if (added.length > 0) setPending((prev) => [...prev, ...added]);
+        if (refusals.length > 0) setAttachNotice(refusals.join('\n'));
+      } catch (e) {
+        setAttachNotice(`Could not open the picker: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        picking.current = false;
+      }
+    },
+    [caps.maxCount, chatId, draft, imageDeps, imageDims, sendProvider, taskId],
+  );
+  const handleRemoveAttachment = useCallback((id: string) => {
+    setPending((prev) => prev.filter((a) => a.id !== id));
+    setAttachNotice(null);
+  }, []);
 
   const handleSend = useCallback(() => send('queue'), [send]);
   const handleSendNow = useCallback(() => send('interrupt'), [send]);
@@ -590,6 +666,11 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
                 onSend={handleSend}
                 onSendNow={handleSendNow}
                 placeholder={state.run === null ? 'Send the first prompt…' : undefined}
+                attachments={pending}
+                onRemoveAttachment={handleRemoveAttachment}
+                attachMenu={attachMenu}
+                onAttach={handleAttach}
+                attachNotice={attachNotice}
               />
             </View>
           </KeyboardAvoidingView>

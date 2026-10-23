@@ -3,7 +3,7 @@
 // the run row's Prompt when the logs have none. Pure, per providerCatalog's
 // discipline.
 
-import { TimelineLine } from './runTimeline';
+import { LineAttachment, TimelineLine } from './runTimeline';
 
 /**
  * Lines with the run's own prompt prepended as a user line, when the logs
@@ -12,7 +12,9 @@ import { TimelineLine } from './runTimeline';
  * isEchoOfOptimisticLine still dedupes an echo against it. Returns the
  * input array (same reference) when nothing is prepended; never mutates.
  */
-export function withRunPrompt(lines: readonly TimelineLine[], prompt: string): TimelineLine[] {
+export function withRunPrompt(lines: readonly TimelineLine[], prompt: string, attachments?: LineAttachment[]): TimelineLine[] {
   if (prompt === '' || lines.some((l) => l.role === 'user')) return lines as TimelineLine[];
-  return [{ key: `p${prompt}`, role: 'user', text: prompt } as TimelineLine, ...lines];
+  const line = { key: `p${prompt}`, role: 'user', text: prompt } as TimelineLine;
+  if (attachments?.length) line.attachments = attachments;
+  return [line, ...lines];
 }
