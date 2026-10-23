@@ -5,8 +5,8 @@ Size: **XL (10)** by the protocol table — scope 2 (daemon, wsapi, MCP, CLI, we
 Supervisor → Lead → Peer item). Per `docs/WORKSPACE_PROTOCOL.md` an XL is split into L items with one Lead each and disjoint write scopes: **Item R (resilience: R1–R3, N1–N3, F1–F3)** first,
 **Item S (seats: S1–S4, T1, M1–M2)** second. Every PR is **non-stacked off `develop`**; a PR that needs an earlier PR's code waits for its merge.
 
-Spec for [ADR-0041](../../decisions/0041-in-smind-orchestration.md) (**Proposed**; read it first). Amends [ADR-0027](../../decisions/0027-profile-as-role-contract.md) and leaves
-[`orchestration-roles.md`](orchestration-roles.md) parked for its R5/R6/R8 parts. **Status: docs only. Nothing here is built, and implementation waits for the Human's answers to the ADR's open questions.**
+Spec for [ADR-0041](../../decisions/0041-in-smind-orchestration.md) (**Accepted 2026-10-23**, all twelve questions as recommended; read it first). Amends [ADR-0027](../../decisions/0027-profile-as-role-contract.md) and leaves
+[`orchestration-roles.md`](orchestration-roles.md) parked for its R5/R6/R8 parts. **Status: ADR accepted; implementation starts with Item R (R1).**
 
 ## Goal
 
@@ -155,7 +155,7 @@ Manual (recorded under Validation)
 
 ## Decisions
 
-- ADR-0041 is **Proposed**; this plan's PR table is the recommended route, **not authorised**. The Human's answers to the twelve open questions decide what is built. Item R does not depend on Q2–Q4, Q9–Q10; it depends on Q5–Q8 and Q12.
+- ADR-0041 is **Accepted** (Human, 2026-10-23, Q1–Q12 as recommended); the PR table is the route. Order: Item R first, then Item S.
 - ADR-0027 is amended (status note in the same docs PR); `orchestration-roles.md` stays parked with a progress line, and its R5/R6/R8 keep their trigger.
 - Coordination (do not edit their files): ADR-0038 attachments Lead (3a1a5b38), ADR-0039 git/PR Lead (88de2c0a), UI-dogfood Lead (2bc38705). Open PRs that touch the same code: **#529** (`fix/run-restart-interrupted`, `Registry.CloseAll`, `MarkRunningRunsInterrupted`, `DispositionFor`) must merge before R1 and N2; **#528** (claude-native streaming, `internal/taskrunner`) is adjacent to R1's `rate_limit_event` recording (rebase, no overlap in intent).
 - Executors: before S2b exists, Peers run as smind tasks the way the dogfood did (`claude-native --model claude-sonnet-5-5 --mode auto --detach`, `task wait`; GLM with step-by-step briefs); never Opus for a Peer; a Peer commits before long test runs and the Lead checks `git status -s` after every send (dogfood entries 32–33).
@@ -163,6 +163,7 @@ Manual (recorded under Validation)
 ## Progress
 
 - 2026-10-23: dogfood logs (2026-10-22/23), ADR-0016/0017/0018/0019/0020/0021/0027/0028/0040, the orchestration code (`internal/runs`, `cmd/smind/mcp_*`, bundled skills) and Paseo's notification and tool-policy code read; ADR-0041 and this plan written, docs PR opened. **Stopped for the Human's review.** No code, no live calls.
+- 2026-10-23: ADR-0041 **accepted by the Human** (all 12 as recommended); status updated in #530. Implementation starts with R1.
 
 ## Validation
 

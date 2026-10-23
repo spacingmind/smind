@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** (2026-10-23, docs-only). Nothing here is built. Spec and PR split:
+**Accepted — 2026-10-23, by the Human** (via the Supervisor): all twelve open questions as recommended (see [Open questions](#open-questions-for-the-human), which record the accepted answers). Nothing here is built yet. Spec and PR split:
 [`docs/plans/active/in-smind-orchestration.md`](../plans/active/in-smind-orchestration.md).
 Closes the first "biggest gap" in `docs/ROADMAP.md` (Phase 2's original DoD: smind orchestrates its own work instead of Paseo).
 
@@ -296,7 +296,7 @@ as separate small PRs, B1 first.
 
 ## Open questions for the Human
 
-Each has a recommendation; none is decided until you answer.
+**All twelve accepted as recommended (2026-10-23).** Each entry's recommendation is the decision.
 
 1. **ADR-0027: amend, supersede or fold?** Recommend **amend** (this ADR), as above. `orchestration-roles.md` stays parked; R6 and R8 keep their trigger.
 2. **Seat model: profile contract (three new columns + daemon-built MCP entry) vs Paseo-style provider variants vs notes only?** Recommend the profile contract. It is the smallest change that gives

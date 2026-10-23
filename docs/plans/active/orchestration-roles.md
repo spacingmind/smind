@@ -209,7 +209,7 @@ the trigger in section 2.
 
 ## Progress
 
-- 2026-10-23: **ADR-0041 (Proposed) amends ADR-0027** and pulls R2–R4 forward in reduced form (profile contract, daemon-side profile, built-in `smind` MCP entry with run identity, admission) as Item S of [`in-smind-orchestration.md`](in-smind-orchestration.md); R5, R6 and R8 stay parked behind the section 2 trigger. This plan remains parked until the Human answers ADR-0041's open questions.
+- 2026-10-23: **ADR-0041 (Accepted) amends ADR-0027** and pulls R2–R4 forward in reduced form (profile contract, daemon-side profile, built-in `smind` MCP entry with run identity, admission) as Item S of [`in-smind-orchestration.md`](in-smind-orchestration.md); R5, R6 and R8 stay parked behind the section 2 trigger. This plan remains parked until the Human answers ADR-0041's open questions.
 
 - 2026-10-22 (plans hygiene) — **STALE BY DESIGN, flagged for the Human.** Nothing here is built and ADR-0027 is still Proposed; the plan is deliberately parked until the trigger in section 2 fires. No occurrence of that trigger is recorded below. Since 2026-10-11 the neighbouring pieces landed: D12 (a human-only live mode switch) as #369 `smind task mode`; D13 stayed a derived `disposition` (#373); the tree guard and `task.tree` (see `task-hierarchy-tiers.md`). The Supervisor/Lead/Peer workflow still runs on Paseo plus `docs/WORKSPACE_PROTOCOL.md`. **Decision for the Human:** keep this parked, or move it to `completed/` with "not built, trigger never fired" so `active/` only holds live work. Not deleted.
 
