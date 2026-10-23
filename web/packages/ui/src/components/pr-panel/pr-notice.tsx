@@ -15,6 +15,8 @@ export function PRNotice({ details }: { details: Pick<PRDetails, "stale" | "refr
       break;
     }
     case "backoff":
+      text = "Couldn't refresh from GitHub just now; showing the last data.";
+      break;
     case "rate_limited":
       text = "GitHub is rate limiting smind; showing the last data.";
       break;

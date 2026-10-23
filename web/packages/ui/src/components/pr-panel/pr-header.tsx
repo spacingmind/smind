@@ -12,6 +12,12 @@ function stateBadge(d: Pick<PRDetails, "state" | "draft">): { label: string; sta
   return d.draft ? { label: "Draft", status: "neutral" } : { label: "Open", status: "success" };
 }
 
+/** The zero time (`0001-01-01…`, what an empty cache carries) and a missing value are "never fetched", not a very old fetch. */
+function hasFetchTime(fetchedAt: string | undefined): fetchedAt is string {
+  const at = fetchedAt ? Date.parse(fetchedAt) : NaN;
+  return !Number.isNaN(at) && new Date(at).getUTCFullYear() > 1970;
+}
+
 /** Title, state, `#N`, "Open on GitHub", Refresh, and how old the data is. */
 export function PRHeader({
   details,
@@ -53,7 +59,7 @@ export function PRHeader({
           <span>Open on GitHub</span>
           <Icons.externalLink aria-hidden className="size-3" />
         </ExternalLink>
-        {details.fetchedAt && (
+        {hasFetchTime(details.fetchedAt) && (
           <span className="ml-auto text-foreground-subtle" data-testid="pr-fetched">
             Updated {formatRelativeTime(details.fetchedAt, now)}
           </span>

@@ -199,22 +199,52 @@ describe("PRPanelPane", () => {
     expect(screen.queryByTestId("pr-notice")).toBeNull();
   });
 
-  it("refetches once at refreshAvailableAt when budget-limited with nothing to show", async () => {
+  it("empty cache while waiting shows skeleton and schedules one refetch", async () => {
     const at = new Date(Date.now() + 60).toISOString();
     const empty = prDetails({
       title: "",
-      stale: "budget",
+      fetchedAt: "0001-01-01T00:00:00Z",
+      stale: "backoff",
       refreshAvailableAt: at,
       checks: checksOf([]),
       threads: { items: [], truncated: false },
     });
-    const client = await show(empty);
-    expect(screen.getByText("Nothing to show yet.")).toBeTruthy();
-    await waitFor(() => expect(client.calls.filter((c) => c.method === "task.prDetails")).toHaveLength(2));
+    const client = new FakeWsClient();
+    renderWithClientProp(<Harness client={client} />);
+    await load(client, null);
+    await waitFor(() => client.nth("task.prDetailsFocus", 0));
+    await act(async () => client.nth("task.prDetailsFocus", 0).resolve({}));
+    await waitFor(() => client.nth("task.prDetails", 0));
+    await act(async () => client.nth("task.prDetails", 0).resolve(empty));
+    expect(await screen.findByTestId("pr-waiting")).toBeTruthy();
+    expect(screen.getByTestId("pr-waiting").textContent).toMatch(/^Waiting for GitHub… loading again at \d{1,2}:\d{2}:\d{2}/);
+    expect(screen.getByTestId("pr-skeleton")).toBeTruthy();
+    expect(screen.queryByTestId("pr-header")).toBeNull();
+    expect(screen.queryByTestId("pr-notice")).toBeNull();
+    expect(screen.queryByText(/last data/)).toBeNull();
+    expect(screen.queryByText(/Updated/)).toBeNull();
+    const reads = () => client.calls.filter((c) => c.method === "task.prDetails");
+    await waitFor(() => expect(reads()).toHaveLength(2));
     await act(async () => {
       await new Promise((r) => setTimeout(r, 150));
     });
-    expect(client.calls.filter((c) => c.method === "task.prDetails")).toHaveLength(2);
+    expect(reads()).toHaveLength(2);
+  });
+
+  it("zero fetchedAt shows no updated label", async () => {
+    await show(prDetails({ fetchedAt: "0001-01-01T00:00:00Z" }));
+    expect(screen.queryByTestId("pr-fetched")).toBeNull();
+    cleanup();
+    await show(prDetails({ fetchedAt: "" }));
+    expect(screen.queryByTestId("pr-fetched")).toBeNull();
+    cleanup();
+    await show(prDetails());
+    expect(screen.getByTestId("pr-fetched").textContent).toMatch(/^Updated /);
+  });
+
+  it("backoff with content uses the refresh-failed sentence", async () => {
+    await show(prDetails({ stale: "backoff", refreshAvailableAt: "2026-10-23T10:30:00Z" }));
+    expect(screen.getByTestId("pr-notice").textContent).toBe("Couldn't refresh from GitHub just now; showing the last data.");
   });
 
   it("refresh button", async () => {

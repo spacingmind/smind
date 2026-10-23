@@ -37,10 +37,16 @@ function useRefetchWhenAvailable(details: PRDetails | undefined, focused: boolea
   }, [focused, at]);
 }
 
-function PanelSkeleton() {
+function PanelSkeleton({ waitingUntil }: { waitingUntil?: string }) {
+  const at = waitingUntil === undefined ? NaN : Date.parse(waitingUntil);
   return (
     <div role="status" data-testid="pr-skeleton" className="flex flex-col gap-3 p-4">
       <span className="sr-only">Loading pull request…</span>
+      {waitingUntil !== undefined && (
+        <p className="text-ui-sm text-foreground-muted" data-testid="pr-waiting">
+          {Number.isNaN(at) ? "Waiting for GitHub…" : `Waiting for GitHub… loading again at ${new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}`}
+        </p>
+      )}
       <Skeleton aria-hidden className="h-5 w-3/4" />
       <Skeleton aria-hidden className="h-4 w-1/3" />
       <Skeleton aria-hidden className="h-24 w-full" />
@@ -87,6 +93,9 @@ export function PRPanelPane({ taskId, focused }: { taskId: number; focused: bool
     );
   } else if (!details) {
     body = <PanelSkeleton />;
+  } else if ((details.stale === "budget" || details.stale === "backoff") && hasNoContent(details)) {
+    // The daemon is waiting out a floor with nothing cached yet: there is no "last data" to show, and one refetch is scheduled.
+    body = <PanelSkeleton waitingUntil={details.refreshAvailableAt} />;
   } else {
     body = (
       <>
