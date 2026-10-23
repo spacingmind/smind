@@ -2,8 +2,8 @@
 
 ## Status
 
-**Accepted — 2026-10-23, by the Human** (via the Supervisor): all twelve open questions as recommended (see [Open questions](#open-questions-for-the-human), which record the accepted answers). Nothing here is built yet. Spec and PR split:
-[`docs/plans/active/in-smind-orchestration.md`](../plans/active/in-smind-orchestration.md).
+**Accepted — 2026-10-23, by the Human** (via the Supervisor): all twelve open questions as recommended (see [Open questions](#open-questions-for-the-human), which record the accepted answers). **Implemented 2026-10-23** (plan closed in `docs/plans/completed/`): Item R (typed `rate_limited` reason, parent notification, failover `wait`/`fallback`, provider cooldown) and Item S (seat contract, role instructions, daemon-built MCP entry with run identity, admission, role pack, sticky seats) are built and merged; the first real item ran Supervisor → Lead → 2 Peers entirely inside smind for $0.99. **Not built, by decision:** the web failover buttons and badge, the tree budget (A5), the mobile read-only tree and push for a stuck tree (A7), write-scope warnings and sizing (A4); see the plan's "Remaining (parked)". Two corrections since acceptance: the GLM reset is UTC+8 (B1), and a follow-up that omits the profile inherits the chat's last profile ("sticky seats"; an explicit id or `0` overrides). Spec and PR split:
+[`docs/plans/completed/in-smind-orchestration.md`](../plans/completed/in-smind-orchestration.md).
 Closes the first "biggest gap" in `docs/ROADMAP.md` (Phase 2's original DoD: smind orchestrates its own work instead of Paseo).
 
 **Relationship to ADR-0027 (Profile as role contract): this ADR amends it.** ADR-0027 stays Proposed. This ADR takes a thin, enforceable slice of it
