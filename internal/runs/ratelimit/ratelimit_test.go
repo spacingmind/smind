@@ -149,3 +149,14 @@ func TestClassify_GenericRateLimitError(t *testing.T) {
 		t.Fatalf("got %+v", r)
 	}
 }
+
+func TestClassify_GLMResetWithDate(t *testing.T) {
+	const e = "429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18"
+	for _, now := range []time.Time{at(2026, 10, 22, 15, 10, 0), at(2026, 10, 25, 9, 0, 0)} {
+		r := Classify(Input{Provider: "glm", Err: e}, now)
+		if r.Kind != KindRateLimited || r.Window != "5h" {
+			t.Fatalf("got %+v", r)
+		}
+		wantReset(t, r.ResetAt, at(2026, 10, 22, 17, 35, 18))
+	}
+}

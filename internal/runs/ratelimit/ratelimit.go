@@ -35,7 +35,7 @@ type Result struct {
 
 var (
 	reGLM        = regexp.MustCompile(`(?i)429[^\n]{0,40}usage limit reached for (\d+) hour`)
-	reGLMReset   = regexp.MustCompile(`(?i)reset at (\d{1,2}:\d{2}(?::\d{2})?)`)
+	reGLMReset   = regexp.MustCompile(`(?i)reset at (?:(\d{4}-\d{2}-\d{2})[ T])?(\d{1,2}:\d{2}(?::\d{2})?)`)
 	reClaudeOld  = regexp.MustCompile(`(?i)usage limit reached\|(\d{9,11})`)
 	reClaudeNew  = regexp.MustCompile(`(?i)(\d+)-hour limit reached`)
 	reClaudeRst  = regexp.MustCompile(`(?i)resets (\d{1,2})(?::(\d{2}))?\s*(am|pm)`)
@@ -96,7 +96,7 @@ func classifyText(s string, now time.Time) Result {
 	if m := reGLM.FindStringSubmatch(s); m != nil {
 		r := Result{Kind: KindRateLimited, Window: m[1] + "h"}
 		if rm := reGLMReset.FindStringSubmatch(s); rm != nil {
-			r.ResetAt = nextClock(rm[1], now)
+			r.ResetAt = glmReset(rm[1], rm[2], now)
 		}
 		return r
 	}
@@ -123,6 +123,24 @@ func classifyText(s string, now time.Time) Result {
 		return Result{Kind: KindRateLimited}
 	}
 	return Result{}
+}
+
+// glmReset resolves a GLM reset time: with a date it is that absolute
+// instant in now's location (never rolled); without, the next occurrence.
+func glmReset(date, hms string, now time.Time) *time.Time {
+	if date == "" {
+		return nextClock(hms, now)
+	}
+	layout := "2006-01-02 15:04:05"
+	if strings.Count(hms, ":") == 1 {
+		layout = "2006-01-02 15:04"
+	}
+	t, err := time.ParseInLocation(layout, date+" "+hms, now.Location())
+	if err != nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }
 
 // nextClock parses "H:MM[:SS]" as wall-clock time in now's location.

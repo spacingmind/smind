@@ -46,6 +46,9 @@ func TestFinish_GLM429ClassifiedAsRateLimited(t *testing.T) {
 	if got.FailureKind != "rate_limited" || got.FailureWindow != "5h" {
 		t.Fatalf("failure = %q/%q, want rate_limited/5h", got.FailureKind, got.FailureWindow)
 	}
+	if want := time.Date(2026, 10, 22, 17, 35, 18, 0, time.Local); got.FailureResetAt == nil || !got.FailureResetAt.Equal(want) {
+		t.Fatalf("FailureResetAt = %v, want %v", got.FailureResetAt, want)
+	}
 	// The wall-clock case (reset at HH:MM:SS) fills the reset instant.
 	_, _, st := finishDirect(t, "glm-clock", nil, errors.New(glmClockText))
 	if st.Status != StatusError || st.FailureKind != "rate_limited" || st.FailureWindow != "5h" || st.FailureResetAt == nil {
