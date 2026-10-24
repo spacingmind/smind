@@ -746,3 +746,67 @@ func hasShortFlag(args []string, letter byte) bool {
 	}
 	return false
 }
+
+// claudeAskRule says how the Claude CLI's own permission rules reach one
+// always-ask rule ID. Words is the command prefix ("git push"); Contains are
+// extra substrings that must follow it in any order (a flag such as --hard).
+// A rule with a "git" first word is also written with a wildcard in the
+// middle so global options (-C dir, -c k=v, --no-pager) between git and the
+// subcommand still match, and with a leading wildcard so the command inside
+// `sh -c '...'`/`bash -lc "..."` matches: the CLI splits compounds and
+// strips env/VAR= prefixes itself but does not unwrap shells, and
+// `Bash(git push:*)` alone is not enough for `git -C . push`
+// (docs/plans/active/agent-git-approvals.md D3, verified on claude 2.1.303).
+type claudeAskRule struct {
+	ID       string
+	Words    string
+	Contains []string
+}
+
+// claudeAskRules is keyed by the always-ask GitRule IDs classifyGitSub and
+// classifyGh emit; TestClaudeAskRulesCoverEveryAlwaysAskClass keeps the two
+// in step. Force variants (--force, -f, --force-with-lease, +refspec) are all
+// `git push`, so the git-push entry covers them.
+var claudeAskRules = []claudeAskRule{
+	{ID: "git-push", Words: "git push"},
+	{ID: "gh-pr-create", Words: "gh pr create"},
+	{ID: "gh-pr-merge", Words: "gh pr merge"},
+	{ID: "git-reset-hard", Words: "git reset", Contains: []string{"--hard"}},
+	{ID: "git-branch-delete", Words: "git branch", Contains: []string{"-D"}},
+	{ID: "git-clean", Words: "git clean"},
+	{ID: "git-checkout-discard", Words: "git checkout", Contains: []string{" -- "}},
+	{ID: "git-restore", Words: "git restore"},
+	{ID: "git-stash-drop", Words: "git stash drop"},
+	{ID: "git-stash-clear", Words: "git stash clear"},
+	{ID: "git-commit-amend", Words: "git commit", Contains: []string{"--amend"}},
+}
+
+// ClaudeAlwaysAskRules returns the Claude CLI `permissions.ask` patterns for
+// every always-ask git/gh operation, in table order.
+func ClaudeAlwaysAskRules() []string {
+	var out []string
+	add := func(p string) { out = append(out, "Bash("+p+")") }
+	for _, r := range claudeAskRules {
+		tail := strings.Join(r.Contains, "*")
+		if len(r.Contains) == 0 {
+			add(r.Words + ":*")
+		}
+		cmd, sub, _ := strings.Cut(r.Words, " ")
+		wild := func(prefix string) string {
+			p := prefix + r.Words
+			if tail != "" {
+				p += "*" + tail
+			}
+			return p + "*"
+		}
+		add(wild("*"))
+		// A wildcard after the binary name lets global options sit between
+		// the binary and its subcommand (git -C d push, gh -R o/r pr create).
+		p := "*" + cmd + " * " + sub
+		if tail != "" {
+			p += "*" + tail
+		}
+		add(p + "*")
+	}
+	return out
+}

@@ -864,6 +864,11 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 		claudecode.WithPermissionMode(mode),
 		claudecode.WithExtraArgs(map[string]*string{claudeAllowBypassFlag: nil}),
 	)
+	if settings := claudeGitAskSettings(mode); settings != "" {
+		// G13: the CLI asks before git push / gh pr create / ... even in
+		// auto, where it would otherwise run them without a prompt.
+		opts = append(opts, claudecode.WithSettings(settings))
+	}
 	switch {
 	case decider != nil:
 		// Installed for every mode, bypassPermissions included: in bypass
