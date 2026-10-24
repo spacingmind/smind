@@ -23,8 +23,8 @@ that provider, editable live from Settings → Providers. Additive and reversibl
   (claude-native: `claudecode.WithEnv`, which the SDK appends to `os.Environ()`; codex: new `codex.WithEnv` -> `cmd.Env = append(os.Environ(), env...)`).
   Read per launch, so the next launch sees a change; a RUNNING run keeps the env it started with.
 - Launch sites: `runClaudeNative`, `RunPromptIsolated` (isolated.go), the codex-native run and the codex model probe. **The learning probe/sandbox is
-  NOT changed**: `sandbox.AllowlistEnv` already passes the daemon-process `CLAUDE_CONFIG_DIR` through to its launcher (the CLI needs the login to authenticate; measured in
-  ADR-0037) and builds its own HOME; the setting is deliberately not injected into the launcher file, so a sandboxed probe never silently takes the
+  NOT changed**: its launcher runs the CLI under `env -i` with only `sandbox.AllowlistEnv` (which passes the daemon-process `CLAUDE_CONFIG_DIR` through; the CLI needs the login to
+  authenticate, measured in ADR-0037), so the Runner-level env never reaches it and the setting is deliberately not added to the launcher file: a sandboxed probe never silently takes the
   smind setting. Limitation: a probe for a user whose login is only in the setting (daemon env unset) will not authenticate; revisit if probing is productised.
 - RPC: `provider.setEnv {provider, key, value|null}` (human only: run-scoped callers get `codeForbidden`, no MCP tool). Writes config, updates the Runner,
   publishes `provider.updated` with the new payload. Serialised by the same mutex as setDefaultModel.
@@ -62,10 +62,15 @@ that provider, editable live from Settings → Providers. Additive and reversibl
 ## Progress
 
 - [x] spec committed
-- [ ] backend
-- [ ] web
-- [ ] review, checks, evidence, PR
+- [x] backend (Lead)
+- [x] web (Peer task 93, peer-sonnet; candidate aead335e..4ac014ab ACCEPTED: diff read against the contract, tests/tsc re-run by the Lead, screenshots viewed)
+- [x] review, checks, evidence, PR
 
 ## Validation
 
-(filled in at the end)
+Go: `go test ./...` all packages ok; `go test -race` on config, codex, wsapi, taskrunner ok; `go vet ./...` and gofmt clean. Web: vitest 324 files / 3636 tests pass;
+`bunx tsc -b packages/ui` clean. ACs 1-6 by the named Go tests (internal/config/provider_env_test.go, internal/taskrunner/provider_env_test.go, internal/wsapi/provider_env_test.go);
+AC7 by web/packages/ui/src/components/providers/provider-env.test.tsx. AC8 mutations (all went red, then reverted): dropping the append in `runClaudeNative` -> `TestClaudeLaunchEnvFromProviderEnv`,
+`...SettingBeatsProcessEnv`, `TestProviderEnvAppliesToNextLaunch`; `checkProviderEnvKey` always nil -> `TestProviderEnvRejects`, `TestSetProviderEnv`, `TestProviderSetEnvValidatesKey`;
+`AllowlistEnv` swapping in another CLAUDE_CONFIG_DIR -> `TestProbeLaunchIgnoresProviderEnvSetting`. AC9: /tmp/provider-env-evidence/{before,after,run}.txt and /tmp/provider-env-shots/ (light+dark, 1280+390).
+Not verified: a real authenticated Claude/Codex login through a changed dir (no throwaway login exists; the Human's was not touched), the desktop app started from Finder, Windows paths in the daemon.
