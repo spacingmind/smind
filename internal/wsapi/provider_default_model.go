@@ -42,9 +42,9 @@ func handleProviderSetDefaultModel(runner *taskrunner.Runner, bus *eventBus) han
 			return nil, fmt.Errorf("provider.setDefaultModel: %w", err)
 		}
 		runner.SetDefaultModel(taskrunner.Provider(p.Provider), model)
-		res := providerSetDefaultModelResult{ID: p.Provider, DefaultModel: model}
+		res := newProviderUpdatedPayload(runner, p.Provider)
 		if bus != nil {
-			bus.Publish(Event{Topic: TopicProviderUpdated, Payload: providerUpdatedPayload(res)})
+			bus.Publish(Event{Topic: TopicProviderUpdated, Payload: res})
 		}
 		return res, nil
 	}

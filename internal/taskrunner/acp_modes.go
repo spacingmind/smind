@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/spacingmind/smind/internal/codex"
 	"log"
 	"os"
 	"time"
@@ -227,7 +228,11 @@ func (r *Runner) recordSessionModes(provider Provider, client acpBackend, sessio
 // the provider keeps reporting no models and accepts any syntax-valid
 // string (ADR-0025).
 func (r *Runner) probeCodexModels(ctx context.Context, provider Provider) error {
-	client, err := r.newCodexClient(r.codexCommand)
+	var copts []codex.Option
+	if env := r.providerEnvEntries(ProviderCodexNative); len(env) > 0 {
+		copts = append(copts, codex.WithEnv(env...))
+	}
+	client, err := r.newCodexClient(r.codexCommand, copts...)
 	if err != nil {
 		return fmt.Errorf("spawn: %w", err)
 	}
