@@ -48,6 +48,7 @@ export interface RunFooterRun {
   failureWindow?: string;
   /** When the limit lifts (RFC 3339 UTC). */
   failureResetAt?: string;
+  failureResetInferred?: boolean;
   /** ADR-0041 F2: a rate-limited run whose profile names a fallback (run.logs). */
   fallbackProfileId?: number;
   err?: string;
@@ -214,7 +215,7 @@ export function describeRunFooter(
   if (isRateLimitedRun(run)) {
     return detail({
       kind: "abnormal",
-      sentence: describeRateLimit({ window: run.failureWindow, resetAt: run.failureResetAt }, now),
+      sentence: describeRateLimit({ window: run.failureWindow, resetAt: run.failureResetAt, inferred: run.failureResetInferred }, now),
       tone: "warning",
       action: "retry",
       duration,

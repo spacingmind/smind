@@ -202,6 +202,9 @@ type Run struct {
 	FailureWindow string
 	// FailureResetAt is the instant (UTC) the quota resets; nil = unknown.
 	FailureResetAt *time.Time
+	// FailureResetInferred is true when FailureResetAt was read in an assumed
+	// zone, so a client shows it as approximate.
+	FailureResetInferred bool
 	// ReplyChatID is the parent task's chat to tell when this run finishes
 	// (ADR-0041 B3); 0 = none, stored as NULL.
 	ReplyChatID int64

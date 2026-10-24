@@ -116,7 +116,7 @@ export function rateLimitCountdown(run: RunLike, now: Date): string | null {
   if (!Number.isFinite(at)) return null;
   const ms = at - now.getTime();
   if (ms <= 0) return null;
-  return `resets in ${formatCountdown(ms)}`;
+  return `resets in ${run.resetInferred ? '≈' : ''}${formatCountdown(ms)}`;
 }
 
 /** Cost text: unknown is 'n/a' and never '$0.00'. */

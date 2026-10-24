@@ -98,7 +98,7 @@ func treeStateText(run taskTreeNodeRun, now time.Time) string {
 		if t, err := time.Parse(time.RFC3339, run.ResetAt); err == nil {
 			resetAt = &t
 		}
-		return "error: " + rateLimitedText(run.Window, resetAt, now)
+		return "error: " + rateLimitedText(run.Window, resetAt, run.ResetInferred, now)
 	case run.State == "error" && run.FailureKind != "":
 		return "error: " + run.FailureKind
 	case run.State == "done" && run.Disposition == "needs-continue":

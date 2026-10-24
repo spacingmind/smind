@@ -360,38 +360,39 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 	cancel() // rehydrated runs are always already-terminal; ctx is inert.
 
 	return &run{
-		id:                 row.ID,
-		taskID:             row.TaskID,
-		chatID:             row.ChatID,
-		provider:           taskrunner.Provider(row.Provider),
-		prompt:             row.Prompt,
-		perm:               taskrunner.PermissionSettings{Mode: row.PermissionMode, AutoAccept: row.AutoAccept},
-		model:              row.Model,
-		purpose:            rowPurpose(row.Purpose),
-		origin:             row.Origin,
-		replyChatID:        row.ReplyChatID,
-		profileID:          row.ProfileID,
-		failoverOf:         row.FailoverOf,
-		interrupt:          row.Interrupt,
-		attachments:        decodeStoredAttachments(row.Attachments),
-		startedAt:          row.StartedAt,
-		ctx:                ctx,
-		cancel:             cancel,
-		closedCh:           closedChan(),
-		status:             Status(row.Status),
-		finishedAt:         row.FinishedAt,
-		stopReason:         row.StopReason,
-		errMsg:             row.ErrMsg,
-		failureKind:        row.FailureKind,
-		failureWindow:      row.FailureWindow,
-		failureResetAt:     cloneTimePtr(row.FailureResetAt),
-		history:            history,
-		nextEventSeq:       nextSeq,
-		baseSHA:            row.BaseSHA,
-		headSHA:            row.HeadSHA,
-		dirty:              row.Dirty,
-		subscribers:        make(map[int]*subQueue),
-		pendingPermissions: make(map[string]chan string),
+		id:                   row.ID,
+		taskID:               row.TaskID,
+		chatID:               row.ChatID,
+		provider:             taskrunner.Provider(row.Provider),
+		prompt:               row.Prompt,
+		perm:                 taskrunner.PermissionSettings{Mode: row.PermissionMode, AutoAccept: row.AutoAccept},
+		model:                row.Model,
+		purpose:              rowPurpose(row.Purpose),
+		origin:               row.Origin,
+		replyChatID:          row.ReplyChatID,
+		profileID:            row.ProfileID,
+		failoverOf:           row.FailoverOf,
+		interrupt:            row.Interrupt,
+		attachments:          decodeStoredAttachments(row.Attachments),
+		startedAt:            row.StartedAt,
+		ctx:                  ctx,
+		cancel:               cancel,
+		closedCh:             closedChan(),
+		status:               Status(row.Status),
+		finishedAt:           row.FinishedAt,
+		stopReason:           row.StopReason,
+		errMsg:               row.ErrMsg,
+		failureKind:          row.FailureKind,
+		failureWindow:        row.FailureWindow,
+		failureResetAt:       cloneTimePtr(row.FailureResetAt),
+		failureResetInferred: row.FailureResetInferred,
+		history:              history,
+		nextEventSeq:         nextSeq,
+		baseSHA:              row.BaseSHA,
+		headSHA:              row.HeadSHA,
+		dirty:                row.Dirty,
+		subscribers:          make(map[int]*subQueue),
+		pendingPermissions:   make(map[string]chan string),
 	}, nil
 }
 
@@ -474,6 +475,8 @@ type run struct {
 	failureKind    string
 	failureWindow  string
 	failureResetAt *time.Time
+	// failureResetInferred: failureResetAt was read in an assumed zone.
+	failureResetInferred bool
 
 	// isolation, when set, drives the turn through RunPromptIsolated
 	// (system runs only; see WithIsolation). Not persisted: nothing
@@ -612,6 +615,7 @@ func (r *run) statusLocked() RunStatus {
 		FailureWindow: r.failureWindow,
 	}
 	rs.FailureResetAt = cloneTimePtr(r.failureResetAt)
+	rs.FailureResetInferred = r.failureResetInferred
 	rs.BaseSHA = cloneStrPtr(r.baseSHA)
 	rs.HeadSHA = cloneStrPtr(r.headSHA)
 	rs.Dirty = cloneBoolPtr(r.dirty)
@@ -1448,7 +1452,7 @@ func (reg *Registry) finish(r *run, err error) {
 	if status == StatusError {
 		fail = ratelimit.Classify(ratelimit.Input{Provider: string(r.provider), Err: errMsg, Signal: rateSignal}, time.Now())
 		if fail.Kind != "" {
-			_ = reg.st.UpdateRunFailure(r.id, fail.Kind, fail.Window, fail.ResetAt)
+			_ = reg.st.UpdateRunFailure(r.id, fail.Kind, fail.Window, fail.ResetAt, fail.ResetInferred)
 		}
 		// ADR-0041 F1: a rate limit with a known, future reset puts the
 		// provider on cooldown. An unknown reset sets none (never guess a
@@ -1462,6 +1466,7 @@ func (reg *Registry) finish(r *run, err error) {
 
 	r.mu.Lock()
 	r.failureKind, r.failureWindow, r.failureResetAt = fail.Kind, fail.Window, cloneTimePtr(fail.ResetAt)
+	r.failureResetInferred = fail.ResetInferred
 	r.finishedAt = &now
 	r.status = status
 	r.errMsg = errMsg

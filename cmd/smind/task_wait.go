@@ -325,7 +325,7 @@ func renderWaitSummary(row runSummaryRow, finalText string, now time.Time) strin
 	}
 	out := fmt.Sprintf("run %s %s%s after %s; model %s; %s; %s.", who, outcome, stop, dur, model, usage, git)
 	if row.Status == "error" && row.FailureKind == "rate_limited" {
-		out += "\n" + rateLimitedText(row.FailureWindow, row.FailureResetAt, now)
+		out += "\n" + rateLimitedText(row.FailureWindow, row.FailureResetAt, row.FailureResetInferred, now)
 	}
 	if text := trimFinalText(finalText); text != "" {
 		out += "\n\n" + text

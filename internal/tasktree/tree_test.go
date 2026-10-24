@@ -400,12 +400,12 @@ func TestBuild_NodeRunCarriesTheDisposition(t *testing.T) {
 func TestTaskTree_NodeCarriesLatestRunFailure(t *testing.T) {
 	tasks := []Task{task(1, nil, false), task(2, pid(1), false), task(3, pid(1), false)}
 	facts := map[int64]RunFact{
-		2: {State: StateError, FailureKind: "rate_limited", Window: "5h", ResetAt: "2026-10-22T10:35:18Z"},
+		2: {State: StateError, FailureKind: "rate_limited", Window: "5h", ResetAt: "2026-10-22T10:35:18Z", ResetInferred: true},
 		3: {State: StateRunning},
 	}
 	nodes, _ := Build(tasks, facts, nil, Root{WorkspaceID: 1})
 	got := find(t, nodes, 2).Run
-	if got.FailureKind != "rate_limited" || got.Window != "5h" || got.ResetAt != "2026-10-22T10:35:18Z" {
+	if got.FailureKind != "rate_limited" || got.Window != "5h" || got.ResetAt != "2026-10-22T10:35:18Z" || !got.ResetInferred {
 		t.Fatalf("failed node run = %+v", got)
 	}
 	run := find(t, nodes, 3).Run
@@ -416,11 +416,11 @@ func TestTaskTree_NodeCarriesLatestRunFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(b), "failureKind") || strings.Contains(string(b), "resetAt") {
+	if strings.Contains(string(b), "failureKind") || strings.Contains(string(b), "resetAt") || strings.Contains(string(b), "resetInferred") {
 		t.Fatalf("running node must omit failure keys: %s", b)
 	}
 	b, _ = json.Marshal(got)
-	if !strings.Contains(string(b), `"failureKind":"rate_limited"`) || !strings.Contains(string(b), `"resetAt":"2026-10-22T10:35:18Z"`) {
+	if !strings.Contains(string(b), `"failureKind":"rate_limited"`) || !strings.Contains(string(b), `"resetAt":"2026-10-22T10:35:18Z"`) || !strings.Contains(string(b), `"resetInferred":true`) {
 		t.Fatalf("failed node json = %s", b)
 	}
 }

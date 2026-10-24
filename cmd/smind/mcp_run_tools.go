@@ -108,6 +108,7 @@ type taskStatusOutput struct {
 	FailureKind       string                `json:"failureKind,omitempty" jsonschema:"typed terminal reason of an error run: rate_limited means the run hit a provider quota (retry on another provider or after resetAt, not immediately); absent otherwise"`
 	Window            string                `json:"window,omitempty" jsonschema:"for rate_limited: the quota window that was hit, e.g. 5h or weekly; absent when unknown"`
 	ResetAt           string                `json:"resetAt,omitempty" jsonschema:"for rate_limited: when the quota resets, RFC 3339 UTC; absent when unknown"`
+	ResetInferred     bool                  `json:"resetInferred,omitempty" jsonschema:"true when resetAt was read in an assumed zone (approximate; show with ≈); absent for a stated reset"`
 	BaseSHA           string                `json:"baseSha,omitempty" jsonschema:"full commit SHA of the run's worktree when it started; omitted when unknown"`
 	HeadSHA           string                `json:"headSha,omitempty" jsonschema:"full commit SHA of the run's worktree at its latest capture; omitted when unknown"`
 	Dirty             *bool                 `json:"dirty,omitempty" jsonschema:"whether the run's worktree had uncommitted changes at its latest capture; omitted when unknown"`
@@ -135,18 +136,19 @@ func mcpTaskStatus(client *wsclient.Client) mcp.ToolHandlerFor[runIDInput, taskS
 // still-pending permission.
 func buildTaskStatusOutput(result runLogsResult) taskStatusOutput {
 	out := taskStatusOutput{
-		RunID:       result.RunID,
-		Status:      result.Status,
-		StopReason:  result.StopReason,
-		StopNote:    stopNote(result.StopReason),
-		Disposition: result.Disposition,
-		Err:         result.Err,
-		FailureKind: result.FailureKind,
-		Window:      result.Window,
-		ResetAt:     result.ResetAt,
-		BaseSHA:     result.BaseSHA,
-		HeadSHA:     result.HeadSHA,
-		Dirty:       result.Dirty,
+		RunID:         result.RunID,
+		Status:        result.Status,
+		StopReason:    result.StopReason,
+		StopNote:      stopNote(result.StopReason),
+		Disposition:   result.Disposition,
+		Err:           result.Err,
+		FailureKind:   result.FailureKind,
+		Window:        result.Window,
+		ResetAt:       result.ResetAt,
+		ResetInferred: result.ResetInferred,
+		BaseSHA:       result.BaseSHA,
+		HeadSHA:       result.HeadSHA,
+		Dirty:         result.Dirty,
 
 		FallbackProfileID: result.FallbackProfileID,
 	}
@@ -176,12 +178,13 @@ type taskLogsOutput struct {
 	StopReason string `json:"stopReason,omitempty"`
 	StopNote   string `json:"stopNote,omitempty"`
 	// Disposition is "needs-continue" for a run cut off at a cap; see taskStatusOutput.
-	Disposition string        `json:"disposition,omitempty"`
-	Err         string        `json:"err,omitempty"`
-	FailureKind string        `json:"failureKind,omitempty" jsonschema:"typed terminal reason of an error run: rate_limited means the run hit a provider quota (retry on another provider or after resetAt, not immediately); absent otherwise"`
-	Window      string        `json:"window,omitempty" jsonschema:"for rate_limited: the quota window that was hit, e.g. 5h or weekly; absent when unknown"`
-	ResetAt     string        `json:"resetAt,omitempty" jsonschema:"for rate_limited: when the quota resets, RFC 3339 UTC; absent when unknown"`
-	Events      []mcpRunEvent `json:"events"`
+	Disposition   string        `json:"disposition,omitempty"`
+	Err           string        `json:"err,omitempty"`
+	FailureKind   string        `json:"failureKind,omitempty" jsonschema:"typed terminal reason of an error run: rate_limited means the run hit a provider quota (retry on another provider or after resetAt, not immediately); absent otherwise"`
+	Window        string        `json:"window,omitempty" jsonschema:"for rate_limited: the quota window that was hit, e.g. 5h or weekly; absent when unknown"`
+	ResetAt       string        `json:"resetAt,omitempty" jsonschema:"for rate_limited: when the quota resets, RFC 3339 UTC; absent when unknown"`
+	ResetInferred bool          `json:"resetInferred,omitempty" jsonschema:"true when resetAt was read in an assumed zone (approximate; show with ≈); absent for a stated reset"`
+	Events        []mcpRunEvent `json:"events"`
 }
 
 // mcpTaskLogs wraps run.logs: full or tailed transcript plus the run's
@@ -199,7 +202,7 @@ func mcpTaskLogs(client *wsclient.Client) mcp.ToolHandlerFor[taskLogsInput, task
 		return nil, taskLogsOutput{
 			RunID: result.RunID, Status: result.Status,
 			StopReason: result.StopReason, StopNote: stopNote(result.StopReason), Disposition: result.Disposition, Err: result.Err,
-			FailureKind: result.FailureKind, Window: result.Window, ResetAt: result.ResetAt, Events: toMCPRunEvents(result.Events),
+			FailureKind: result.FailureKind, Window: result.Window, ResetAt: result.ResetAt, ResetInferred: result.ResetInferred, Events: toMCPRunEvents(result.Events),
 		}, nil
 	}
 }
@@ -325,6 +328,7 @@ type taskWaitOutput struct {
 	FailureKind       string                `json:"failureKind,omitempty" jsonschema:"typed terminal reason of an error run: rate_limited means the run hit a provider quota (retry on another provider or after resetAt, not immediately); absent otherwise"`
 	Window            string                `json:"window,omitempty" jsonschema:"for rate_limited: the quota window that was hit, e.g. 5h or weekly; absent when unknown"`
 	ResetAt           string                `json:"resetAt,omitempty" jsonschema:"for rate_limited: when the quota resets, RFC 3339 UTC; absent when unknown"`
+	ResetInferred     bool                  `json:"resetInferred,omitempty" jsonschema:"true when resetAt was read in an assumed zone (approximate; show with ≈); absent for a stated reset"`
 	PendingPermission *pendingPermissionOut `json:"pendingPermission,omitempty"`
 	TimedOut          bool                  `json:"timedOut"`
 	StopNote          string                `json:"stopNote,omitempty"`
@@ -349,7 +353,7 @@ type taskWaitOutput struct {
 // waiting); timedOut marks the deadline having passed with the run going.
 func buildTaskWaitOutput(result runLogsResult, ignore map[string]bool, timedOut bool) taskWaitOutput {
 	out := taskWaitOutput{RunID: result.RunID, Status: result.Status, StopReason: result.StopReason, StopNote: stopNote(result.StopReason), Disposition: result.Disposition, Err: result.Err,
-		FailureKind: result.FailureKind, Window: result.Window, ResetAt: result.ResetAt, FallbackProfileID: result.FallbackProfileID}
+		FailureKind: result.FailureKind, Window: result.Window, ResetAt: result.ResetAt, ResetInferred: result.ResetInferred, FallbackProfileID: result.FallbackProfileID}
 	var fresh []pendingPermissionOut
 	for _, p := range pendingPermissionsFrom(result) {
 		if !ignore[p.RequestID] {

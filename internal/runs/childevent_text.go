@@ -20,6 +20,7 @@ type ChildEventFacts struct {
 	Title, RunID, Status, StopReason, Disposition string
 	FailureKind, FailureWindow                    string
 	FailureResetAt                                *time.Time
+	FailureResetInferred                          bool
 	CostUSD                                       *float64
 	BaseSHA, HeadSHA                              string
 	LastText                                      string
@@ -43,7 +44,11 @@ func BuildChildEventBlock(f ChildEventFacts) string {
 			fail += " (" + f.FailureWindow + " window)"
 		}
 		if f.FailureResetAt != nil {
-			fail += ", resets " + f.FailureResetAt.Format(time.RFC3339)
+			approx := ""
+			if f.FailureResetInferred {
+				approx = "≈"
+			}
+			fail += ", resets " + approx + f.FailureResetAt.Format(time.RFC3339)
 		} else {
 			fail += ", reset time unknown"
 		}

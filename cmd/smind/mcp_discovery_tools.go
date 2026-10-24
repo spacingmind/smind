@@ -217,6 +217,9 @@ func addFailureFields(row map[string]any) {
 			row["resetAt"] = ts.UTC().Format(time.RFC3339)
 		}
 	}
+	if inferred, _ := row["FailureResetInferred"].(bool); inferred {
+		row["resetInferred"] = true
+	}
 }
 
 // addProfileContractFields adds the camelCase ADR-0041 seat-contract keys

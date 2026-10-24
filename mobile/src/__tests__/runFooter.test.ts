@@ -72,6 +72,20 @@ describe('describeRunFooter', () => {
     const now = new Date(2026, 9, 13, 10, 0, 0);
     const limited = { Status: 'error' as const, FailureKind: 'rate_limited', FailureWindow: '5h' };
 
+    it('footer has ≈ for inferred reset', () => {
+      const at = new Date(2026, 9, 13, 17, 35).toISOString();
+      expect(describeRunFooter({ ...limited, FailureResetAt: at, FailureResetInferred: true }, now)?.sentence).toBe('Rate limited (5h window) · resets ≈17:35');
+      expect(describeRunFooter({ ...limited, FailureResetAt: new Date(2026, 9, 15, 9, 5).toISOString(), FailureResetInferred: true }, now)?.sentence).toBe(
+        'Rate limited (5h window) · resets Thu ≈09:05',
+      );
+    });
+
+    it('stated reset unchanged', () => {
+      const at = new Date(2026, 9, 13, 17, 35).toISOString();
+      expect(describeRunFooter({ ...limited, FailureResetAt: at, FailureResetInferred: false }, now)?.sentence).toBe('Rate limited (5h window) · resets 17:35');
+      expect(describeRunFooter({ ...limited, FailureResetAt: at }, now)?.sentence).toBe('Rate limited (5h window) · resets 17:35');
+    });
+
     it('rate limited with a future reset', () => {
       expect(describeRunFooter({ ...limited, FailureResetAt: new Date(2026, 9, 13, 17, 35).toISOString() }, now)).toEqual({
         sentence: 'Rate limited (5h window) · resets 17:35',
@@ -115,6 +129,11 @@ describe('describeRunFooter', () => {
 describe('failover context (ADR-0041)', () => {
   const limited = { Status: 'error', FailureKind: 'rate_limited', FailureWindow: '5h', FailureResetAt: null } as const;
   const now = new Date(2026, 9, 23, 10, 0);
+
+  it('queued note has ≈ when the reset was inferred', () => {
+    const v = describeRunFooter({ ...limited, FailureResetInferred: true }, now, { heldUntil: new Date(2026, 9, 23, 17, 35) });
+    expect(v?.note).toBe('Queued · starts after ≈17:35');
+  });
 
   it('wait state shows queued note', () => {
     const v = describeRunFooter(limited, now, { heldUntil: new Date(2026, 9, 23, 17, 35) });

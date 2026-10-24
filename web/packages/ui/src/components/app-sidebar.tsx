@@ -2080,7 +2080,7 @@ const TaskRow = memo(function TaskRow({
   const runState = runStatus.get(task.ID);
   // ADR-0041: a latest run that hit a provider quota is still "error" for every rollup, but its dot is warning and the row says why.
   const limited = runState === "error" ? rateLimit.get(task.ID) : undefined;
-  const limitHint = limited ? `Rate limited · ${describeRateLimitReset(limited.resetAt, new Date(now))}` : null;
+  const limitHint = limited ? `Rate limited · ${describeRateLimitReset(limited.resetAt, new Date(now), limited.resetInferred)}` : null;
   const runDot = limited ? "warning" : runDotStatus(runState);
   const git = gitByTask.get(task.ID);
   const isUnread = unread.has(task.ID);

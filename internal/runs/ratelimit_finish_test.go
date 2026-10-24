@@ -54,6 +54,12 @@ func TestFinish_GLM429ClassifiedAsRateLimited(t *testing.T) {
 	if st.Status != StatusError || st.FailureKind != "rate_limited" || st.FailureWindow != "5h" || st.FailureResetAt == nil {
 		t.Fatalf("clock case = %+v", st)
 	}
+	if !st.FailureResetInferred {
+		t.Fatalf("GLM clock reset not marked inferred: %+v", st)
+	}
+	if !got.FailureResetInferred {
+		t.Fatalf("GLM quota-error reset not marked inferred: %+v", got)
+	}
 	if st.Err != glmClockText {
 		t.Fatalf("Err changed: %q", st.Err)
 	}

@@ -1809,6 +1809,8 @@ type runLogsResult struct {
 	FailureKind string `json:"failureKind,omitempty"`
 	Window      string `json:"window,omitempty"`
 	ResetAt     string `json:"resetAt,omitempty"`
+	// ResetInferred: ResetAt was read in an assumed zone (clients show "≈").
+	ResetInferred bool `json:"resetInferred,omitempty"`
 	// BaseSHA/HeadSHA/Dirty are the run's git provenance (O1), omitted
 	// while unknown.
 	BaseSHA string `json:"baseSha,omitempty"`
@@ -1869,6 +1871,7 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 			FailureKind:       status.FailureKind,
 			Window:            status.FailureWindow,
 			ResetAt:           runs.FailureResetRFC3339(status),
+			ResetInferred:     status.FailureResetInferred,
 			BaseSHA:           derefStr(status.BaseSHA),
 			HeadSHA:           derefStr(status.HeadSHA),
 			Dirty:             status.Dirty,

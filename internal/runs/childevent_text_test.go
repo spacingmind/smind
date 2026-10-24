@@ -44,6 +44,14 @@ func TestBuildChildEventBlock_RateLimitedWithAndWithoutReset(t *testing.T) {
 	if got != want {
 		t.Fatalf("with reset = %q, want %q", got, want)
 	}
+	got = BuildChildEventBlock(ChildEventFacts{
+		TaskID: 12, Title: "Seal and vector", RunID: "r-4f2", Status: "error",
+		FailureKind: "rate_limited", FailureWindow: "5h", FailureResetAt: &reset, FailureResetInferred: true, HeadSHA: "a1b2c3d",
+	})
+	want = `- task #12 "Seal and vector" run r-4f2: error · rate_limited (5h window), resets ≈2026-10-22T17:35:18+07:00 · cost not reported · head a1b2c3d`
+	if got != want {
+		t.Fatalf("inferred reset = %q, want %q", got, want)
+	}
 	got = BuildChildEventBlock(ChildEventFacts{TaskID: 1, Title: "t", RunID: "r", Status: "error", FailureKind: "rate_limited"})
 	want = `- task #1 "t" run r: error · rate_limited, reset time unknown · cost not reported`
 	if got != want {

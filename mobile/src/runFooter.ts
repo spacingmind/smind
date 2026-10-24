@@ -50,8 +50,8 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
  * time unknown" with no usable reset, "· limit has reset" once it passed. The
  * window part is omitted when unknown.
  */
-function clock(at: Date, now: Date): string {
-  const hhmm = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+function clock(at: Date, now: Date, inferred = false): string {
+  const hhmm = `${inferred ? '≈' : ''}${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
   const sameDay = at.getFullYear() === now.getFullYear() && at.getMonth() === now.getMonth() && at.getDate() === now.getDate();
   return sameDay ? hhmm : `${WEEKDAYS[at.getDay()]} ${hhmm}`;
 }
@@ -61,12 +61,12 @@ export function describeContinues(run: Pick<RunSummary, 'FailoverOf'>): string |
   return run.FailoverOf ? `continues run ${run.FailoverOf.slice(0, 8)}` : null;
 }
 
-function rateLimitSentence(window: string | undefined, resetAt: string | null | undefined, now: Date): string {
+function rateLimitSentence(window: string | undefined, resetAt: string | null | undefined, now: Date, inferred = false): string {
   const head = `Rate limited${window ? ` (${window} window)` : ''}`;
   const reset = resetAt ? new Date(resetAt) : null;
   if (reset === null || Number.isNaN(reset.getTime())) return `${head} · reset time unknown`;
   if (reset.getTime() <= now.getTime()) return `${head} · limit has reset`;
-  return `${head} · resets ${clock(reset, now)}`;
+  return `${head} · resets ${clock(reset, now, inferred)}`;
 }
 
 /**
@@ -79,20 +79,20 @@ function rateLimitSentence(window: string | undefined, resetAt: string | null | 
  * stop-reason cases cover the two caps it can report.
  */
 export function describeRunFooter(
-  run: Pick<RunSummary, 'Status' | 'StopReason' | 'Disposition' | 'FailureKind' | 'FailureWindow' | 'FailureResetAt'>,
+  run: Pick<RunSummary, 'Status' | 'StopReason' | 'Disposition' | 'FailureKind' | 'FailureWindow' | 'FailureResetAt' | 'FailureResetInferred'>,
   now: Date = new Date(),
   ctx?: RunFooterContext,
 ): RunFooterView | null {
   if (run.Status === 'error' && run.FailureKind === RATE_LIMITED) {
     // The Continue button re-submits on the run's own provider (TaskDetailScreen's handleContinue), which is the recovery path once the limit lifts.
     const view: RunFooterView = {
-      sentence: rateLimitSentence(run.FailureWindow || undefined, run.FailureResetAt, now),
+      sentence: rateLimitSentence(run.FailureWindow || undefined, run.FailureResetAt, now, run.FailureResetInferred),
       tone: 'warning',
       action: 'continue',
     };
     const held = ctx?.heldUntil;
     if (held && !Number.isNaN(held.getTime())) {
-      view.note = `Queued · starts after ${clock(held, now)}`;
+      view.note = `Queued · starts after ${clock(held, now, run.FailureResetInferred)}`;
       view.waiting = true;
     } else if (ctx?.continuedOn) {
       view.note = `continued on ${ctx.continuedOn.provider} in chat #${ctx.continuedOn.chatId}`;

@@ -9,6 +9,7 @@ import {
   costLabel,
   formatCost,
   formatCountdown,
+  rateLimitCountdown,
   runStateLabel,
   tierLabel,
 } from '../taskTree';
@@ -109,6 +110,12 @@ describe('taskTree', () => {
     expect(rows[1]).toMatchObject({ state: 'Rate limited', stateTone: 'warning', rateLimited: true, countdown: 'resets in 12m' });
     const plain = buildTreeRows({ nodes: [node(1), node(3, { run: run({ state: 'error', failureKind: 'crash' }) })], truncated: false }, NOW, none);
     expect(plain.rows[1]).toMatchObject({ state: 'Error', stateTone: 'danger', rateLimited: false, countdown: null });
+  });
+
+  it('countdown has ≈ when inferred', () => {
+    const mk = (resetInferred?: boolean) => node(2, { run: run({ state: 'error', failureKind: 'rate_limited', resetAt: '2026-10-23T12:12:30Z', resetInferred }) });
+    expect(rateLimitCountdown(mk(true).run, NOW)).toBe('resets in ≈12m');
+    expect(rateLimitCountdown(mk(false).run, NOW)).toBe('resets in 12m');
   });
 
   it('rate limit without resetAt or with a past resetAt shows no countdown', () => {
