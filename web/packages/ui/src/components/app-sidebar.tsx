@@ -484,7 +484,14 @@ export function AppSidebar({
       }),
     [allTasks, attention, runStatus, gitByTask],
   );
-  const workspaceNames = useMemo(() => new Map((workspaces ?? []).map((ws) => [ws.ID, ws.Title || ws.Path])), [workspaces]);
+  // The name only says something when the view mixes workspaces.
+  const workspaceNames = useMemo(
+    () =>
+      new Set(allTasks.map((t) => t.WorkspaceID)).size > 1
+        ? new Map((workspaces ?? []).map((ws) => [ws.ID, ws.Title || ws.Path]))
+        : new Map<number, string>(),
+    [workspaces, allTasks],
+  );
   const statusGroups = useMemo(
     () => groupTasksByStatus(allTasks, attention ?? EMPTY_ATTENTION, runStatus ?? EMPTY_RUN_STATUS),
     [allTasks, attention, runStatus],
@@ -2152,8 +2159,9 @@ const TaskRow = memo(function TaskRow({
           data-testid="sidebar-task-item"
           data-task-id={task.ID}
           className={cn(
-            "relative flex h-8 min-w-0 items-center gap-1 rounded-lg pr-1 ring-sidebar-ring has-focus-visible:ring-2 has-focus-visible:ring-inset",
+            "relative flex min-w-0 items-center gap-1 rounded-lg pr-1 ring-sidebar-ring has-focus-visible:ring-2 has-focus-visible:ring-inset",
             isSelected ? "bg-selected" : active && "bg-hover",
+            workspaceName ? "h-10" : "h-8",
           )}
           style={{ paddingLeft: padLeft }}
           {...rowProps}
@@ -2183,7 +2191,7 @@ const TaskRow = memo(function TaskRow({
                 asChild
                 // The highlight lives on the wrapper (so the chevron sits inside
                 // it too), not on the select button.
-                className="h-8 min-w-0 flex-1 translate-x-0 gap-1.5 rounded-lg px-1 text-left focus-visible:ring-0 hover:bg-transparent active:bg-transparent data-active:bg-transparent"
+                className={cn(workspaceName ? "h-10" : "h-8", "min-w-0 flex-1 translate-x-0 gap-1.5 rounded-lg px-1 text-left focus-visible:ring-0 hover:bg-transparent active:bg-transparent data-active:bg-transparent")}
                 isActive={isSelected}
               >
                 <button
@@ -2239,26 +2247,28 @@ const TaskRow = memo(function TaskRow({
                     )}
                   </span>
                   {/* min-w-0 flex-1: the title is the only thing on the line that may shrink. */}
-                  <FadeText
-                    data-testid="task-title"
-                    fade={active}
-                    className={cn(
-                      "text-ui-base opacity-[.76] transition-opacity",
-                      (active || isSelected) && "opacity-100",
-                      active && "@max-[14rem]/sb:pr-6",
-                    )}
-                  >
-                    {task.Title}
-                  </FadeText>
-                  {workspaceName && (
-                    <span
-                      data-testid="task-workspace-name"
-                      title={workspaceName}
-                      className="min-w-0 max-w-[40%] shrink-[3] truncate text-ui-xs text-foreground-subtlest @max-[14rem]/sb:hidden"
+                  <span className={cn("flex min-w-0 flex-1 flex-col", workspaceName && "gap-px leading-tight")}>
+                    <FadeText
+                      data-testid="task-title"
+                      fade={active}
+                      className={cn(
+                        "text-ui-base opacity-[.76] transition-opacity",
+                        (active || isSelected) && "opacity-100",
+                        active && "@max-[14rem]/sb:pr-6",
+                      )}
                     >
-                      {workspaceName}
-                    </span>
-                  )}
+                      {task.Title}
+                    </FadeText>
+                    {workspaceName && (
+                      <span
+                        data-testid="task-workspace-name"
+                        title={workspaceName}
+                        className="truncate text-ui-xs text-foreground-subtlest"
+                      >
+                        {workspaceName}
+                      </span>
+                    )}
+                  </span>
                   {hasChildren && (
                     <span
                       data-testid="task-child-count"

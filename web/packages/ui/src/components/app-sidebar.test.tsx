@@ -1857,6 +1857,11 @@ describe("AppSidebar stage view", () => {
     expect(within(taskItem(1)).getByTestId("task-workspace-name")).toHaveTextContent("My Workspace");
   });
 
+  it("shows no workspace name when only one workspace is represented", async () => {
+    await mountStage([READY_TASK, NEWER_READY], [gitItem(1, "a", 1, 1, 1, AHEAD), gitItem(2, "b", 1, 1, 1, AHEAD)]);
+    expect(screen.queryByTestId("task-workspace-name")).toBeNull();
+  });
+
   it("a task moves Ready -> Working on a running run, and Ready -> Done on a merged PR", async () => {
     const { client, rerender } = await mountStage([READY_TASK], [gitItem(1, "a", 1, 1, 1, AHEAD)]);
     expect(within(group("ready")!).getByText("Ready task")).toBeInTheDocument();
