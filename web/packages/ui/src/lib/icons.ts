@@ -68,6 +68,7 @@ import {
   Image,
   Info,
   KeyRound,
+  Kanban,
   Keyboard,
   Layers,
   ListChecks,
@@ -210,6 +211,7 @@ export const Icons = {
   commit: GitCommitHorizontal,
   groupByStatus: ListChecks,
   groupByWorkspace: FolderGit2,
+  groupByStage: Kanban,
   web: Globe,
   link: Link2,
 

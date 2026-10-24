@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ToggleGroup } from "radix-ui";
 
 import { cn } from "@/lib/utils";
@@ -15,14 +16,17 @@ export function SegmentedControl<T extends string>({
   label,
   className,
   disabled,
+  testId,
 }: {
-  options: { value: T; label: string }[];
+  /** `icon` makes the segment icon-only: `label` becomes its aria-label (and tooltip). */
+  options: { value: T; label: string; icon?: ReactNode; testId?: string }[];
   value: T;
   onChange: (value: T) => void;
   /** Accessible name of the whole group. */
   label: string;
   className?: string;
   disabled?: boolean;
+  testId?: string;
 }) {
   return (
     <ToggleGroup.Root
@@ -30,6 +34,7 @@ export function SegmentedControl<T extends string>({
       value={value}
       aria-label={label}
       disabled={disabled}
+      data-testid={testId}
       onValueChange={(next) => {
         // Radix reports "" when the pressed segment is clicked again; a
         // segmented control always has a selection.
@@ -41,13 +46,17 @@ export function SegmentedControl<T extends string>({
         <ToggleGroup.Item
           key={opt.value}
           value={opt.value}
+          aria-label={opt.icon ? opt.label : undefined}
+          title={opt.icon ? opt.label : undefined}
+          data-testid={opt.testId}
           className={cn(
             "h-7 rounded-md px-3 text-ui-sm text-muted-foreground outline-none transition-colors",
             "hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
             "data-[state=on]:bg-selected data-[state=on]:text-foreground",
+            opt.icon && "inline-flex items-center justify-center px-1.5",
           )}
         >
-          {opt.label}
+          {opt.icon ?? opt.label}
         </ToggleGroup.Item>
       ))}
     </ToggleGroup.Root>

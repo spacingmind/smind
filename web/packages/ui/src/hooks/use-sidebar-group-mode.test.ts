@@ -24,6 +24,13 @@ describe("useSidebarGroupMode", () => {
     expect(readSidebarGroupMode()).toBe("status");
   });
 
+  it("stage mode round-trips through the hook and storage", () => {
+    const { result } = renderHook(() => useSidebarGroupMode());
+    act(() => result.current.setGroupMode("stage"));
+    expect(result.current.groupMode).toBe("stage");
+    expect(readSidebarGroupMode()).toBe("stage");
+  });
+
   it("persists across a remount", () => {
     const { result, unmount } = renderHook(() => useSidebarGroupMode());
     act(() => result.current.setGroupMode("status"));
