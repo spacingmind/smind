@@ -56,6 +56,8 @@ export interface RunSummary {
   FailureWindow?: string;
   /** When the limit lifts (RFC 3339 UTC); null/absent when unknown. */
   FailureResetAt?: string | null;
+  /** True when the daemon assumed the reset's time zone, so the clock is approximate (shown as ≈); absent/false = stated. */
+  FailureResetInferred?: boolean;
   /** ADR-0041: the id of the run this run continues (a failover successor); absent/empty otherwise. */
   FailoverOf?: string;
   /** The profile the run used; absent on older daemons. */
@@ -343,6 +345,7 @@ export interface TaskTreeNode {
     failureKind?: string;
     window?: string;
     resetAt?: string;
+    resetInferred?: boolean;
   };
   counts: { running: number; waitingPermission: number; failed: number; done: number; idle: number };
   usage: { own: TaskTreeUsage; subtree: TaskTreeUsage; archivedDescendants: number };
