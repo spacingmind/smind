@@ -46,7 +46,7 @@ function isStringArray(value: unknown): value is string[] {
 
 /**
  * The ids of the sidebar containers the user has collapsed: `ws:<id>`,
- * `space:<id>`, `ungrouped:<workspaceId>`, `pinned`, `status:<group key>`.
+ * `space:<id>`, `ungrouped:<workspaceId>`, `pinned`, `status:<group key>`, `stage:<group key>`.
  * Collapsed (not expanded) is what is stored, so a container that did not
  * exist yet -- a new workspace, a new space -- is expanded by default without
  * anything having to be written for it. Unset/corrupt reads as "nothing
@@ -61,11 +61,11 @@ export function writeCollapsedNodes(collapsed: ReadonlySet<string>): void {
   writeStored(STORAGE_KEYS.collapsedSidebarNodes, collapsed.size === 0 ? undefined : [...collapsed]);
 }
 
-/** The sidebar's two task-list views: the default grouped workspace/space tree, or a flat group-by-status view (AC6). */
-export type SidebarGroupMode = "tree" | "status";
+/** The sidebar's task-list views: the default grouped workspace/space tree, a flat group-by-status view (AC6), or a flat group-by-stage view (working / ready to review / done). */
+export type SidebarGroupMode = "tree" | "status" | "stage";
 
 function isSidebarGroupMode(value: unknown): value is SidebarGroupMode {
-  return value === "tree" || value === "status";
+  return value === "tree" || value === "status" || value === "stage";
 }
 
 export function readSidebarGroupMode(): SidebarGroupMode {

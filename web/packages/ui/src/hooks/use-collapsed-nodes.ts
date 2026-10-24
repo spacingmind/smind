@@ -5,14 +5,18 @@ import { useCollapsedNodesStore } from "@/stores/collapsed-nodes-store";
 export interface CollapsedNodes {
   /** The collapsed container ids (see readCollapsedNodes for the id scheme). */
   collapsed: ReadonlySet<string>;
-  isOpen: (id: string) => boolean;
-  toggle: (id: string) => void;
+  /** `defaultOpen: false` is for containers that start collapsed; an explicit expand is stored as `expanded:<id>`. */
+  isOpen: (id: string, defaultOpen?: boolean) => boolean;
+  toggle: (id: string, defaultOpen?: boolean) => void;
   /** Force a container open, e.g. a just-created workspace whose id may still be persisted as collapsed from a deleted one. */
   open: (id: string) => void;
 }
 
 /** Ids that name a row of the fetched tree and so can go stale; `pinned` and `status:*` are fixed and never pruned. */
 const PRUNABLE = /^(ws|space|ungrouped):/;
+
+/** Marker for a default-collapsed container the user expanded; the set stores collapses, so this is the one stored expand. */
+const EXPANDED_PREFIX = "expanded:";
 
 /**
  * The sidebar's persisted expand/collapse state for workspaces, spaces, the
@@ -40,12 +44,16 @@ export function useCollapsedNodes(liveNodeIds: ReadonlySet<string> | null): Coll
     if (changed) set(next);
   }, [liveNodeIds]);
 
-  const isOpen = useCallback((id: string) => !collapsed.has(id), [collapsed]);
+  const isOpen = useCallback(
+    (id: string, defaultOpen = true) => (defaultOpen ? !collapsed.has(id) : collapsed.has(EXPANDED_PREFIX + id)),
+    [collapsed],
+  );
 
-  const toggle = useCallback((id: string) => {
+  const toggle = useCallback((id: string, defaultOpen = true) => {
     const { value: prev, set } = useCollapsedNodesStore.getState();
     const next = new Set(prev);
-    if (!next.delete(id)) next.add(id);
+    const key = defaultOpen ? id : EXPANDED_PREFIX + id;
+    if (!next.delete(key)) next.add(key);
     set(next);
   }, []);
 

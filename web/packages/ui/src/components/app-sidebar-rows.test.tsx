@@ -564,7 +564,7 @@ describe("container rows (S5)", () => {
     expect(chevronClass(screen.getByTestId("sidebar-space-row"))).toBe(workspace);
     expect(chevronClass(screen.getByTestId("sidebar-pinned-section-header"))).toBe(workspace);
 
-    fireEvent.click(screen.getByTestId("sidebar-group-mode-toggle"));
+    fireEvent.click(screen.getByTestId("sidebar-group-mode-status"));
     const groupHeader = (await screen.findAllByTestId("sidebar-status-group-header"))[0]!;
     expect(chevronClass(groupHeader)).toBe(workspace);
     // Muted, small, token-only.
@@ -575,7 +575,7 @@ describe("container rows (S5)", () => {
   it("a status group's count is a pill", async () => {
     await mountSidebar([makeTask(5, "A"), makeTask(6, "B")]);
 
-    fireEvent.click(screen.getByTestId("sidebar-group-mode-toggle"));
+    fireEvent.click(screen.getByTestId("sidebar-group-mode-status"));
 
     const pill = (await screen.findAllByTestId("status-group-count"))[0]!;
     expect(pill.className).toContain("rounded-full");
@@ -866,7 +866,7 @@ describe("expansion persistence (S8)", () => {
 
   it("a collapsed status group persists across a remount", async () => {
     const first = await mountSidebar([UNGROUPED]);
-    fireEvent.click(screen.getByTestId("sidebar-group-mode-toggle"));
+    fireEvent.click(screen.getByTestId("sidebar-group-mode-status"));
     const header = (await screen.findAllByTestId("sidebar-status-group-header"))[0]!;
     const key = header.closest<HTMLElement>('[data-testid="sidebar-status-group"]')!.dataset.statusGroup;
     fireEvent.click(header);
