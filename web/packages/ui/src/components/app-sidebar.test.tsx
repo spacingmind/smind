@@ -554,7 +554,7 @@ describe("AppSidebar", () => {
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
       await screen.findByTestId("sidebar-workspace-row");
 
-      fireEvent.click(screen.getByTestId("sidebar-group-mode-toggle"));
+      fireEvent.click(screen.getByTestId("sidebar-group-mode-status"));
 
       expect(screen.queryByTestId("sidebar-workspace-row")).not.toBeInTheDocument();
       const groups = screen.getAllByTestId("sidebar-status-group");
@@ -572,7 +572,7 @@ describe("AppSidebar", () => {
       );
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
       await screen.findByTestId("sidebar-workspace-row");
-      fireEvent.click(screen.getByTestId("sidebar-group-mode-toggle"));
+      fireEvent.click(screen.getByTestId("sidebar-group-mode-status"));
 
       const group = await screen.findByTestId("sidebar-status-group");
       expect(within(group).getByText("Fix the bug")).toBeInTheDocument();
@@ -590,7 +590,7 @@ describe("AppSidebar", () => {
       );
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
       await screen.findByTestId("sidebar-workspace-row");
-      fireEvent.click(screen.getByTestId("sidebar-group-mode-toggle"));
+      fireEvent.click(screen.getByTestId("sidebar-group-mode-status"));
       await screen.findByTestId("sidebar-status-group");
       unmount();
 

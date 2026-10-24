@@ -62,6 +62,7 @@ import { groupTasksByStatus, type StatusGroup } from "@/lib/sidebar-status-group
 import type { ConnectionStatus } from "@/lib/reconnect";
 import { UsageSidebarItem } from "@/components/account-usage/usage-sidebar-item";
 import { SidebarFooterActions } from "@/components/sidebar-footer";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import {
   ArchiveTaskDialog,
@@ -787,16 +788,18 @@ export function AppSidebar({
                 <span>Workspaces</span>
                 <span className="flex items-center">
                   {!empty && (
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={groupMode === "tree" ? "Group by status" : "Group by workspace"}
-                      aria-pressed={groupMode === "status"}
-                      data-testid="sidebar-group-mode-toggle"
-                      onClick={() => setGroupMode(groupMode === "tree" ? "status" : "tree")}
-                    >
-                      {groupMode === "tree" ? <Icons.groupByWorkspace /> : <Icons.groupByStatus />}
-                    </Button>
+                    <SegmentedControl
+                      label="Group tasks"
+                      testId="sidebar-group-mode-control"
+                      className="mr-1 p-px"
+                      value={groupMode}
+                      onChange={setGroupMode}
+                      options={[
+                        { value: "tree", label: "Group by workspace", icon: <Icons.groupByWorkspace className="size-3.5" />, testId: "sidebar-group-mode-tree" },
+                        { value: "status", label: "Group by status", icon: <Icons.groupByStatus className="size-3.5" />, testId: "sidebar-group-mode-status" },
+                        { value: "stage", label: "Group by stage", icon: <Icons.groupByStage className="size-3.5" />, testId: "sidebar-group-mode-stage" },
+                      ]}
+                    />
                   )}
                   <Button
                     variant="ghost"
