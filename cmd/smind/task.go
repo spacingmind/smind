@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/signal"
 	"strconv"
@@ -169,7 +170,7 @@ type runLogsResult struct {
 
 func cmdTask(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|wait|logs|stop|permissions|approve|deny|mode|options|set-option|chat|queue|tree|archive> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|wait|logs|stop|permissions|approve|deny|mode|options|set-option|chat|queue|tree|archive|budget> ...")
 		return 2
 	}
 	switch args[0] {
@@ -209,6 +210,8 @@ func cmdTask(args []string) int {
 		return cmdTaskTree(args[1:])
 	case "archive":
 		return cmdTaskArchive(args[1:])
+	case "budget":
+		return cmdTaskBudget(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "smind task: unknown subcommand %q\n", args[0])
 		return 2
@@ -216,7 +219,7 @@ func cmdTask(args []string) int {
 }
 
 // cmdTaskNewUsage is printed on any argument error in cmdTaskNew.
-const cmdTaskNewUsage = "usage: smind task new <workspaceId> <title> [--space <spaceId>] [--parent <parentTaskId>] [--base <ref> | --branch <existingBranch> | --pr <number>]"
+const cmdTaskNewUsage = "usage: smind task new <workspaceId> <title> [--space <spaceId>] [--parent <parentTaskId>] [--base <ref> | --branch <existingBranch> | --pr <number>] [--budget <usd>]"
 
 // cmdTaskNew accepts optional trailing flag pairs after the title:
 // "--space <spaceId>", "--parent <parentTaskId>", and the start-point
@@ -249,6 +252,7 @@ func cmdTaskNew(args []string) int {
 		flagValueID = iota
 		flagValueRef
 		flagValuePR
+		flagValueUSD
 	)
 	flagKinds := map[string]int{
 		"--space":  flagValueID,
@@ -256,10 +260,12 @@ func cmdTaskNew(args []string) int {
 		"--base":   flagValueRef,
 		"--branch": flagValueRef,
 		"--pr":     flagValuePR,
+		"--budget": flagValueUSD,
 	}
 	rest := args[1:]
 	var spaceID, parentID, prNum *int64
 	var baseRef, branch string
+	var budget *float64
 	for len(rest) >= 2 {
 		flag, value := rest[len(rest)-2], rest[len(rest)-1]
 		kind, ok := flagKinds[flag]
@@ -295,6 +301,13 @@ func cmdTaskNew(args []string) int {
 				return 2
 			}
 			prNum = &n
+		case flagValueUSD:
+			usd, err := strconv.ParseFloat(value, 64)
+			if err != nil || math.IsNaN(usd) || math.IsInf(usd, 0) || usd <= 0 {
+				fmt.Fprintf(os.Stderr, "task new: invalid --budget value %q: must be a positive number of USD\n", value)
+				return 2
+			}
+			budget = &usd
 		}
 		rest = rest[:len(rest)-2]
 	}
@@ -341,6 +354,9 @@ func cmdTaskNew(args []string) int {
 	}
 	if prNum != nil {
 		params["prNumber"] = *prNum
+	}
+	if budget != nil {
+		params["budgetUsd"] = *budget
 	}
 
 	var task store.Task

@@ -342,7 +342,7 @@ func TestTaskList_Archived(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := res.([]store.Task)
+	got := res.([]taskView)
 	if len(got) != 1 || got[0].ID != e.task.ID || got[0].ArchivedAt == nil {
 		t.Fatalf("archived list = %+v, want only task %d", got, e.task.ID)
 	}
@@ -350,12 +350,12 @@ func TestTaskList_Archived(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	live := res.([]store.Task)
+	live := res.([]taskView)
 	if len(live) != 1 || live[0].ID != other.ID {
 		t.Fatalf("live list = %+v, want only task %d", live, other.ID)
 	}
 	res, err = e.call("task.list", map[string]any{"workspaceId": e.task.WorkspaceID + 99, "archived": true})
-	if err != nil || len(res.([]store.Task)) != 0 {
+	if err != nil || len(res.([]taskView)) != 0 {
 		t.Fatalf("another workspace's archived list = %v, %v, want empty", res, err)
 	}
 }

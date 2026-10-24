@@ -133,6 +133,10 @@ type Task struct {
 	// BranchDeletedAt is set when archiving deleted the task's local branch
 	// after it was merged (ADR-0039 section 9); nil otherwise.
 	BranchDeletedAt *time.Time
+	// BudgetUSD is the opt-in tree budget (ADR-0041 A5): a USD cap on the
+	// reported cost of this task's tree, meaningful on a root task only.
+	// nil = no budget.
+	BudgetUSD *float64 `json:"budgetUsd,omitempty"`
 }
 
 // Run is a persisted record of one internal/runs.Registry Run: a

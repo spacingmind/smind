@@ -46,9 +46,10 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"space.list":               handleSpaceList(wm),
 		"space.get":                handleSpaceGet(wm),
 		"space.delete":             handleSpaceDelete(wm),
-		"task.create":              handleTaskCreate(wm),
-		"task.list":                handleTaskList(wm),
-		"task.get":                 handleTaskGet(wm),
+		"task.create":              handleTaskCreate(wm, db, reg),
+		"task.list":                handleTaskList(wm, db),
+		"task.get":                 handleTaskGet(wm, db),
+		"task.setBudget":           handleTaskSetBudget(db, reg),
 		"task.archive":             handleTaskArchive(wm, reg),
 		"task.archivePreview":      handleTaskArchivePreview(wm),
 		"task.restore":             handleTaskRestore(wm),
@@ -578,7 +579,7 @@ func handleSpaceDelete(wm *workspace.Manager) handlerFunc {
 	}
 }
 
-func handleTaskCreate(wm *workspace.Manager) handlerFunc {
+func handleTaskCreate(wm *workspace.Manager, db *store.Store, reg *runs.Registry) handlerFunc {
 	return func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			WorkspaceID  int64  `json:"workspaceId"`
@@ -591,9 +592,25 @@ func handleTaskCreate(wm *workspace.Manager) handlerFunc {
 			BaseRef string `json:"baseRef"`
 			Branch  string `json:"branch"`
 			PRNum   *int64 `json:"prNumber"`
+			// BudgetUSD is the opt-in tree budget (ADR-0041 A5): human only,
+			// root tasks only.
+			BudgetUSD json.RawMessage `json:"budgetUsd"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.create: invalid params: %w", err)
+		}
+		var budget *float64
+		if len(p.BudgetUSD) > 0 && string(p.BudgetUSD) != "null" {
+			if err := refuseRunScoped("task.create budgetUsd", rc); err != nil {
+				return nil, err
+			}
+			if p.ParentTaskID != nil {
+				return nil, budgetInvalid("task.create", errors.New("budgetUsd can only be set on a root task (no parentTaskId)"))
+			}
+			var err error
+			if budget, err = parseBudget(p.BudgetUSD); err != nil {
+				return nil, budgetInvalid("task.create", err)
+			}
 		}
 		if rc != nil && rc.runScoped {
 			// ADR-0041 S2b: an identified agent creates children of its own
@@ -603,6 +620,11 @@ func handleTaskCreate(wm *workspace.Manager) handlerFunc {
 				p.ParentTaskID = &own
 			} else if *p.ParentTaskID != rc.ident.taskID {
 				return nil, fmt.Errorf("task.create: parentTaskId must be your own task #%d", rc.ident.taskID)
+			}
+			// A seat creating a task is an agent launch: refused once its
+			// tree reached the budget (ADR-0041 A5).
+			if err := reg.CheckTreeBudget(*p.ParentTaskID, store.ChatQueueSourceAgent); err != nil {
+				return nil, err
 			}
 		}
 		refModes := 0
@@ -634,11 +656,19 @@ func handleTaskCreate(wm *workspace.Manager) handlerFunc {
 		if p.PRNum != nil {
 			opts = append(opts, workspace.WithPullRequest(int(*p.PRNum)))
 		}
-		return wm.CreateTask(p.WorkspaceID, p.SpaceID, p.Title, opts...)
+		task, err := wm.CreateTask(p.WorkspaceID, p.SpaceID, p.Title, opts...)
+		if err != nil || budget == nil {
+			return task, err
+		}
+		if err := db.SetTaskBudget(task.ID, budget); err != nil {
+			return nil, fmt.Errorf("task.create: task %d created but its budget was not saved: %w", task.ID, err)
+		}
+		task.BudgetUSD = budget
+		return viewTask(db, task)
 	}
 }
 
-func handleTaskList(wm *workspace.Manager) handlerFunc {
+func handleTaskList(wm *workspace.Manager, db *store.Store) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			WorkspaceID  int64  `json:"workspaceId"`
@@ -664,17 +694,21 @@ func handleTaskList(wm *workspace.Manager) handlerFunc {
 				}
 				tasks = kept
 			}
-			return tasks, nil
+			return viewTasks(db, tasks)
 		}
 		var opts []workspace.ListTasksOption
 		if p.ParentTaskID != nil {
 			opts = append(opts, workspace.WithParentFilter(*p.ParentTaskID))
 		}
-		return wm.ListTasks(p.WorkspaceID, opts...)
+		tasks, err := wm.ListTasks(p.WorkspaceID, opts...)
+		if err != nil {
+			return nil, err
+		}
+		return viewTasks(db, tasks)
 	}
 }
 
-func handleTaskGet(wm *workspace.Manager) handlerFunc {
+func handleTaskGet(wm *workspace.Manager, db *store.Store) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			ID int64 `json:"id"`
@@ -682,7 +716,11 @@ func handleTaskGet(wm *workspace.Manager) handlerFunc {
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.get: invalid params: %w", err)
 		}
-		return wm.GetTask(p.ID)
+		t, err := wm.GetTask(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		return viewTask(db, t)
 	}
 }
 

@@ -102,6 +102,11 @@ type Registry struct {
 	// store under reg.mu"; nil in production.
 	treeRootStoreRead func()
 
+	// budgetCostRead, when non-nil, is called before each TreeKnownCost query
+	// checkBudget makes. A test seam (budget_test.go) that pins the admission
+	// query count; nil in production.
+	budgetCostRead func()
+
 	// notifier, if set via SetNotifier, receives run.status lifecycle
 	// notifications (Start, finish) and permission.pending notifications
 	// (runPermissionDecider), so the wsapi server can push them as
@@ -159,6 +164,15 @@ type Registry struct {
 	notifyParent   bool
 	notifyDebounce time.Duration
 	notifyMaxHold  time.Duration
+	// budgetMu guards budgetNotified: the roots whose tree budget crossing was
+	// already announced to their chat (ADR-0041 A5). In memory on purpose: a
+	// restart may announce a still-over-budget tree once more. Never held
+	// with another lock.
+	budgetMu       sync.Mutex
+	budgetNotified map[int64]bool
+	// budgetNow is the clock of the budget notification; nil = time.Now.
+	// A test seam.
+	budgetNow func() time.Time
 	// retryGrace is added to a rate limit's reset instant for a "wait"
 	// retry (ADR-0041 F2b); tests lower it.
 	retryGrace time.Duration
@@ -755,8 +769,13 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	// parent links are immutable while a run exists, and the store call
 	// must not run under the registry lock (it would serialize every
 	// start behind one store round trip).
-	treeRoot, err := reg.treeRootOf(taskID)
+	treeRoot, rootTask, err := reg.treeRootTask(taskID)
 	if err != nil {
+		return "", err
+	}
+	// ADR-0041 A5: the tree budget, also before reg.mu. A queued agent
+	// item reaches here again at delivery, so it is re-checked then.
+	if err := reg.checkBudget(resolveStartOptions(opts).origin, rootTask); err != nil {
 		return "", err
 	}
 

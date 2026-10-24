@@ -122,7 +122,7 @@ type ChildEventInput struct {
 	Debounce, MaxHold time.Duration
 }
 
-// EnqueueChildEvent atomically claims every run in in.RunIDs and either
+// EnqueueChildEvent atomically claims every run in in.RunIDs (none is fine) and either
 // appends in.Block to the chat's queued child_event item (pushing its
 // not_before, capped at created_at+MaxHold) or inserts a new one. A crash
 // or error never leaves a run claimed without its message. It returns
@@ -136,12 +136,17 @@ func (s *Store) EnqueueChildEvent(in ChildEventInput) (item ChatQueueItem, appen
 	defer tx.Rollback() //nolint:errcheck
 
 	now := in.Now.UTC()
-	claimed, err := claimRunsTx(tx, in.RunIDs, now)
-	if err != nil {
-		return ChatQueueItem{}, false, err
-	}
-	if claimed == 0 {
-		return ChatQueueItem{}, false, ErrChildEventAlreadyNotified
+	// A message with no RunIDs (the tree budget notice) reports no run, so
+	// there is nothing to claim and the claim gate does not apply; its caller
+	// owns the once-per-crossing idempotency.
+	if len(in.RunIDs) > 0 {
+		claimed, err := claimRunsTx(tx, in.RunIDs, now)
+		if err != nil {
+			return ChatQueueItem{}, false, err
+		}
+		if claimed == 0 {
+			return ChatQueueItem{}, false, ErrChildEventAlreadyNotified
+		}
 	}
 
 	existing, err := scanChatQueueItem(tx.QueryRow(

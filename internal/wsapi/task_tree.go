@@ -64,6 +64,9 @@ func handleTaskTree(db *store.Store, reg *runs.Registry) handlerFunc {
 		if err != nil {
 			return nil, fmt.Errorf("task.tree: %w", err)
 		}
+		if err := annotateTreeBudgets(db, nodes); err != nil {
+			return nil, fmt.Errorf("task.tree: %w", err)
+		}
 		return taskTreeResult{Nodes: nodes, Truncated: truncated}, nil
 	}
 }
@@ -90,7 +93,7 @@ func toTreeTasks(tasks []store.Task) []tasktree.Task {
 	for i, t := range tasks {
 		out[i] = tasktree.Task{
 			ID: t.ID, ParentID: t.ParentTaskID, WorkspaceID: t.WorkspaceID,
-			Title: t.Title, TaskStatus: t.Status, Archived: t.ArchivedAt != nil,
+			Title: t.Title, TaskStatus: t.Status, Archived: t.ArchivedAt != nil, BudgetUSD: t.BudgetUSD,
 		}
 	}
 	return out

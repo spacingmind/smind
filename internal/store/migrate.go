@@ -361,6 +361,14 @@ var migrations = []migration{
 		},
 	},
 	{
+		// ADR-0041 A5: opt-in tree budget on the root task. Nullable with no
+		// default; existing rows stay NULL (no budget).
+		name: "task_budget_usd",
+		apply: func(db *sql.DB) error {
+			return addColumnIfMissing(db, "tasks", "budget_usd", "REAL")
+		},
+	},
+	{
 		// ADR-0041 F2: rate-limit failover policy on agent profiles.
 		name: "profile_failover",
 		apply: func(db *sql.DB) error {
