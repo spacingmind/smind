@@ -84,7 +84,7 @@ func TestRenderTaskTree(t *testing.T) {
 			}},
 			lines: []string{
 				"4 tasks: 0 running, 0 waiting, 3 failed, 1 done",
-				"#1 Limited  coder  error: " + rateLimitedText("5h", &resetAt, now) + "  cost n/a",
+				"#1 Limited  coder  error: " + rateLimitedText("5h", &resetAt, false, now) + "  cost n/a",
 				"#2 Crashed  coder  error: crash  cost n/a",
 				"#3 Plain  coder  error  cost n/a",
 				"#4 Cut  coder  done (needs-continue)  cost n/a",

@@ -7,8 +7,9 @@ import (
 
 // rateLimitedText renders a rate_limited run's failure for humans, e.g.
 // "rate limited (5h window), resets 17:35 (in 2h 3m)". The window part is
-// omitted when unknown; the reset time is local.
-func rateLimitedText(window string, resetAt *time.Time, now time.Time) string {
+// omitted when unknown; the reset time is local. An inferred reset (zone
+// assumed) reads "resets ≈17:35 (in ≈2h 3m)".
+func rateLimitedText(window string, resetAt *time.Time, inferred bool, now time.Time) string {
 	head := "rate limited"
 	if window != "" {
 		head += " (" + window + " window)"
@@ -29,6 +30,10 @@ func rateLimitedText(window string, resetAt *time.Time, now time.Time) string {
 		at = local.Format("Mon 15:04")
 	default:
 		at = local.Format("2006-01-02 15:04")
+	}
+	if inferred {
+		at = "≈" + at
+		return fmt.Sprintf("%s, resets %s (in ≈%s)", head, at, rateLimitIn(d))
 	}
 	return fmt.Sprintf("%s, resets %s (in %s)", head, at, rateLimitIn(d))
 }

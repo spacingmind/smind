@@ -260,3 +260,42 @@ func stringsRepeat(s string, n int) string {
 	}
 	return out
 }
+
+// TestClassify_ResetInferred pins which resets are marked: only those read in
+// an assumed zone. The GLM text is the real Z.ai 429 of the 2026-10-22 dogfood
+// run; Claude's stated zone, an epoch and a backend signal are never marked.
+func TestClassify_ResetInferred(t *testing.T) {
+	now := at(2026, 10, 22, 12, 39, 0)
+	cases := []struct {
+		name string
+		in   Input
+		want bool
+	}{
+		{"glm dated", Input{Provider: "glm", Err: "429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18"}, true},
+		{"glm clock only", Input{Provider: "glm", Err: glmText}, true},
+		{"glm unparseable reset", Input{Provider: "glm", Err: "429 Usage limit reached for 5 hour. Your limit will reset at soon"}, false},
+		{"claude stated zone", Input{Provider: "claude-native", Err: "You've hit your session limit · resets 1pm (Asia/Saigon)"}, false},
+		{"claude zone-less", Input{Provider: "claude-native", Err: "You've hit your session limit · resets 1pm"}, true},
+		{"claude unknown zone", Input{Provider: "claude-native", Err: "You've hit your session limit · resets 1pm (Mars/Olympus)"}, true},
+		{"claude 5-hour zone-less", Input{Provider: "claude-native", Err: "5-hour limit reached - resets 3pm"}, true},
+		{"claude epoch", Input{Provider: "claude-native", Err: "Claude AI usage limit reached|1790000000"}, false},
+		{"claude signal", Input{Provider: "claude-native", Err: "exit status 1", Signal: &Signal{Status: "rejected", ResetsAt: time.Unix(1790000000, 0), Type: "five_hour"}}, false},
+		{"signal without time falls back to inferred text", Input{Provider: "claude-native", Err: "5-hour limit reached - resets 3pm", Signal: &Signal{Status: "rejected", Type: "five_hour"}}, true},
+		{"signal time wins over zone-less text", Input{Provider: "claude-native", Err: "5-hour limit reached - resets 3pm", Signal: &Signal{Status: "rejected", ResetsAt: time.Unix(1790000000, 0), Type: "five_hour"}}, false},
+		{"no reset at all", Input{Provider: "codex-native", Err: "You've hit your usage limit"}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := Classify(c.in, now)
+			if r.Kind != KindRateLimited {
+				t.Fatalf("got %+v, want rate limited", r)
+			}
+			if r.ResetInferred != c.want {
+				t.Fatalf("ResetInferred = %v, want %v (%+v)", r.ResetInferred, c.want, r)
+			}
+			if r.ResetInferred && r.ResetAt == nil {
+				t.Fatalf("inferred without a reset: %+v", r)
+			}
+		})
+	}
+}

@@ -83,6 +83,9 @@ type RunStatus struct {
 	FailureWindow string
 	// FailureResetAt is when the quota resets (UTC); nil = unknown.
 	FailureResetAt *time.Time
+	// FailureResetInferred: FailureResetAt was read in an assumed zone (shown
+	// as approximate, "≈").
+	FailureResetInferred bool
 
 	// ProfileID is the agent profile the run was launched with (0 = none)
 	// and FailoverOf the run it continues after a rate limit ("" = none);

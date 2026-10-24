@@ -154,6 +154,8 @@ type runLogsResult struct {
 	FailureKind string `json:"failureKind"`
 	Window      string `json:"window"`
 	ResetAt     string `json:"resetAt"`
+	// ResetInferred: ResetAt was read in an assumed zone (shown as "≈").
+	ResetInferred bool `json:"resetInferred,omitempty"`
 	// BaseSHA/HeadSHA/Dirty mirror the run's git provenance (O1), absent
 	// while unknown.
 	BaseSHA string `json:"baseSha,omitempty"`
@@ -1668,6 +1670,8 @@ type runSummaryRow struct {
 	FailureKind    string
 	FailureWindow  string
 	FailureResetAt *time.Time
+	// FailureResetInferred: FailureResetAt was read in an assumed zone.
+	FailureResetInferred bool
 }
 
 // runModelCell is a run's MODEL column: the requested model; when none was
@@ -1690,7 +1694,7 @@ func runModelCell(r runSummaryRow) string {
 func runStatusCell(r runSummaryRow, now time.Time) string {
 	status, disposition, errText := r.Status, r.Disposition, r.Err
 	if status == "error" && r.FailureKind == "rate_limited" {
-		return status + ": " + rateLimitedText(r.FailureWindow, r.FailureResetAt, now)
+		return status + ": " + rateLimitedText(r.FailureWindow, r.FailureResetAt, r.FailureResetInferred, now)
 	}
 	if status == "error" && strings.TrimSpace(errText) != "" {
 		return status + ": " + runErrCause(errText)

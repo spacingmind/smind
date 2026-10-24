@@ -67,6 +67,10 @@ func TestRunLogs_CarriesFailureFields(t *testing.T) {
 	if logs["status"] != "error" || logs["failureKind"] != "rate_limited" || logs["window"] != "5h" {
 		t.Fatalf("run.logs = %v", logs)
 	}
+	// The fake's text is Z.ai's zone-less wall clock: the reset is inferred.
+	if logs["resetInferred"] != true {
+		t.Fatalf("run.logs resetInferred = %v, want true", logs["resetInferred"])
+	}
 	// resetAt is RFC 3339 UTC when known (the fake's text carries a full date,
 	// which the classifier deliberately does not guess a time from).
 	if s, ok := logs["resetAt"].(string); ok {
@@ -92,7 +96,7 @@ func TestRunLogs_FailureFieldsOmittedWhenEmpty(t *testing.T) {
 	t.Parallel()
 	logs, event := failureWire(t, "stop end_turn")
 	for _, m := range []map[string]any{logs, event} {
-		for _, k := range []string{"failureKind", "window", "resetAt"} {
+		for _, k := range []string{"failureKind", "window", "resetAt", "resetInferred"} {
 			if _, ok := m[k]; ok {
 				t.Errorf("key %q present in %v", k, m)
 			}
@@ -105,6 +109,26 @@ func TestRunStatusEvent_CarriesFailureFields(t *testing.T) {
 	_, event := failureWire(t, "quota-error")
 	if event["status"] != "error" || event["failureKind"] != "rate_limited" || event["window"] != "5h" {
 		t.Fatalf("run.status = %v", event)
+	}
+	if event["resetInferred"] != true {
+		t.Fatalf("run.status resetInferred = %v, want true", event["resetInferred"])
+	}
+}
+
+// TestToTreeFacts_CarriesResetInferred: the task.tree run info carries the
+// marker only when the registry fact does.
+func TestToTreeFacts_CarriesResetInferred(t *testing.T) {
+	t.Parallel()
+	reset := time.Date(2026, 10, 22, 9, 35, 18, 0, time.UTC)
+	got := toTreeFacts(map[int64]runs.TaskRunFact{
+		1: {FailureKind: "rate_limited", FailureResetAt: &reset, FailureResetInferred: true},
+		2: {FailureKind: "rate_limited", FailureResetAt: &reset},
+	})
+	if !got[1].ResetInferred || got[1].ResetAt == "" {
+		t.Fatalf("inferred fact = %+v", got[1])
+	}
+	if got[2].ResetInferred {
+		t.Fatalf("stated fact marked inferred: %+v", got[2])
 	}
 }
 

@@ -23,6 +23,8 @@ type TaskRunFact struct {
 	FailureKind    string
 	FailureWindow  string
 	FailureResetAt *time.Time
+	// FailureResetInferred: FailureResetAt was read in an assumed zone.
+	FailureResetInferred bool
 }
 
 // taskRunFactSnapshot is one run's contribution to TaskRunFacts, read
@@ -35,9 +37,10 @@ type taskRunFactSnapshot struct {
 	stopReason string
 	pending    int
 
-	failureKind    string
-	failureWindow  string
-	failureResetAt *time.Time
+	failureKind          string
+	failureWindow        string
+	failureResetAt       *time.Time
+	failureResetInferred bool
 }
 
 // TaskRunFacts summarizes the registry's in-memory runs per task id in
@@ -61,9 +64,10 @@ func (reg *Registry) TaskRunFacts() map[int64]TaskRunFact {
 			stopReason: r.stopReason,
 			pending:    len(r.pendingPermissions),
 
-			failureKind:    r.failureKind,
-			failureWindow:  r.failureWindow,
-			failureResetAt: cloneTimePtr(r.failureResetAt),
+			failureKind:          r.failureKind,
+			failureWindow:        r.failureWindow,
+			failureResetAt:       cloneTimePtr(r.failureResetAt),
+			failureResetInferred: r.failureResetInferred,
 		})
 		r.mu.Unlock()
 	}
@@ -117,6 +121,7 @@ func (reg *Registry) TaskRunFacts() map[int64]TaskRunFact {
 			f.FailureKind = a.latest.failureKind
 			f.FailureWindow = a.latest.failureWindow
 			f.FailureResetAt = a.latest.failureResetAt
+			f.FailureResetInferred = a.latest.failureResetInferred
 		} else {
 			f.State = tasktree.StateIdle
 		}

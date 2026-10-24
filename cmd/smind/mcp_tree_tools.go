@@ -59,6 +59,8 @@ type taskTreeNodeRun struct {
 	FailureKind string `json:"failureKind,omitempty"`
 	Window      string `json:"window,omitempty"`
 	ResetAt     string `json:"resetAt,omitempty"`
+	// ResetInferred: ResetAt was read in an assumed zone (show with ≈).
+	ResetInferred bool `json:"resetInferred,omitempty"`
 }
 
 type taskTreeCounts struct {

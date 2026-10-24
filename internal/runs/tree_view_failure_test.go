@@ -29,4 +29,7 @@ func TestTaskRunFacts_FailureFromLatestFinishedRun(t *testing.T) {
 	if f.State != tasktree.StateError || f.FailureKind != "rate_limited" || f.FailureWindow != "5h" || f.FailureResetAt == nil {
 		t.Fatalf("limited fact = %+v, want error / rate_limited / 5h / reset set", f)
 	}
+	if !f.FailureResetInferred {
+		t.Fatalf("limited fact = %+v, want the GLM reset marked inferred", f)
+	}
 }

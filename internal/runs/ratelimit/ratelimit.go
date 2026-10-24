@@ -31,6 +31,10 @@ type Result struct {
 	Kind    string
 	Window  string     // "<N>h", "weekly", "weekly-opus", "weekly-sonnet", or ""
 	ResetAt *time.Time // UTC; nil = unknown
+	// ResetInferred is true when ResetAt was read in an assumed zone (Z.ai's
+	// zone-less wall clock as UTC+8, a Claude "resets 3pm" in the daemon's
+	// own zone). A stated zone, an epoch or a backend signal is never inferred.
+	ResetInferred bool
 }
 
 var (
@@ -62,6 +66,7 @@ func Classify(in Input, now time.Time) Result {
 		if !s.ResetsAt.IsZero() {
 			t := s.ResetsAt.UTC()
 			res.ResetAt = &t
+			res.ResetInferred = false
 		}
 	}
 	txt := classifyText(in.Err, now)
@@ -75,7 +80,7 @@ func Classify(in Input, now time.Time) Result {
 		res.Window = txt.Window
 	}
 	if res.ResetAt == nil {
-		res.ResetAt = txt.ResetAt
+		res.ResetAt, res.ResetInferred = txt.ResetAt, txt.ResetInferred
 	}
 	return res
 }
@@ -107,6 +112,7 @@ func classifyText(s string, now time.Time) Result {
 			// third-party reports of the same message read it as UTC+8
 			// (ExaDev/agent-shim#448). Never the daemon's own zone.
 			r.ResetAt = glmReset(rm[1], rm[2], now.In(glmZone))
+			r.ResetInferred = r.ResetAt != nil
 		}
 		return r
 	}
@@ -122,6 +128,7 @@ func classifyText(s string, now time.Time) Result {
 		r := Result{Kind: KindRateLimited, Window: m[1] + "h"}
 		if rm := reClaudeRst.FindStringSubmatch(s); rm != nil {
 			r.ResetAt = nextAmPm(rm[1], rm[2], rm[3], now)
+			r.ResetInferred = r.ResetAt != nil
 		}
 		return r
 	}
@@ -129,6 +136,7 @@ func classifyText(s string, now time.Time) Result {
 		r := Result{Kind: KindRateLimited, Window: claudeHitWindow(m[1])}
 		if rm := reClaudeResetTZ.FindStringSubmatch(s); rm != nil {
 			r.ResetAt = nextAmPmIn(rm[1], rm[2], rm[3], rm[4], now)
+			r.ResetInferred = r.ResetAt != nil && !knownZone(rm[4])
 		}
 		return r
 	}
@@ -224,6 +232,16 @@ func claudeHitWindow(word string) string {
 		return "weekly-sonnet"
 	}
 	return ""
+}
+
+// knownZone reports whether zone names an IANA zone this daemon can load; a
+// missing or unknown one leaves the time in the daemon's own zone (inferred).
+func knownZone(zone string) bool {
+	if zone == "" {
+		return false
+	}
+	_, err := time.LoadLocation(zone)
+	return err == nil
 }
 
 // nextAmPmIn is nextAmPm in the named IANA zone ("" or unknown = now's own).

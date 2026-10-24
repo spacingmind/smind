@@ -179,7 +179,7 @@ func (reg *Registry) childEventFacts(task store.Task, run store.Run) ChildEventF
 	f := ChildEventFacts{
 		TaskID: task.ID, Title: task.Title, RunID: run.ID, Status: run.Status, StopReason: run.StopReason,
 		Disposition: DispositionFor(Status(run.Status), run.StopReason),
-		FailureKind: run.FailureKind, FailureWindow: run.FailureWindow, FailureResetAt: run.FailureResetAt,
+		FailureKind: run.FailureKind, FailureWindow: run.FailureWindow, FailureResetAt: run.FailureResetAt, FailureResetInferred: run.FailureResetInferred,
 	}
 	if run.BaseSHA != nil {
 		f.BaseSHA = *run.BaseSHA
