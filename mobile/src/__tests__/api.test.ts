@@ -6,7 +6,7 @@
 // the fake records every method that goes out).
 
 import { describe, expect, it } from 'vitest';
-import { defaultChatId, fetchOverview, listWorkspaces, startRunWhenBusy, stopRun } from '../api';
+import { defaultChatId, fetchOverview, fetchTaskTree, listWorkspaces, startRunWhenBusy, stopRun } from '../api';
 import { CloseableStream, RelayConnection } from '../relay/RelayConnection';
 import { PairingOffer } from '../relay/pairing';
 
@@ -184,5 +184,21 @@ describe('stopRun (run.stop wrapper)', () => {
       throw new Error('run not found');
     });
     await expect(stopRun(conn, 'run-x')).rejects.toThrow('run not found');
+  });
+});
+
+describe('api: fetchTaskTree', () => {
+  it('api: fetchTaskTree sends task.tree {taskId} and returns the typed result', async () => {
+    const node = { id: 5, parentId: null, workspaceId: 1, title: 'root', depth: 0, taskStatus: 'running', tier: 'supervisor', childCount: 0 };
+    const { conn, calls } = fakeConnection(() => ({ nodes: [node], truncated: true }));
+    const result = await fetchTaskTree(conn, 5);
+    expect(calls).toEqual([['task.tree', { taskId: 5 }]]);
+    expect(result.truncated).toBe(true);
+    expect(result.nodes.map((n) => n.id)).toEqual([5]);
+  });
+
+  it('tolerates a missing nodes array', async () => {
+    const { conn } = fakeConnection(() => ({}));
+    expect(await fetchTaskTree(conn, 1)).toEqual({ nodes: [], truncated: false });
   });
 });

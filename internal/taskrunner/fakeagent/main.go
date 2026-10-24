@@ -494,6 +494,21 @@ func runPromptScript(promptMsg message, cwd string) {
 		return
 	}
 
+	// "rate-limited <minutes>": the GLM quota failure of "quota-error", but
+	// with a reset that many minutes from now (Z.ai prints UTC+8 wall-clock
+	// time), so a run can fail rate_limited with a known, future resetAt.
+	if mins, ok := strings.CutPrefix(scenario, "rate-limited "); ok {
+		n, err := strconv.Atoi(strings.TrimSpace(mins))
+		if err != nil {
+			n = 47
+		}
+		reset := time.Now().In(time.FixedZone("CST", 8*3600)).Add(time.Duration(n)*time.Minute + 30*time.Second)
+		msg := "429 Usage limit reached for 5 hour. Your limit will reset at " + reset.Format("2006-01-02 15:04:05")
+		sessionUpdate("[error] " + msg)
+		writeMessage(message{JSONRPC: "2.0", ID: promptMsg.ID, Error: &rpcError{Code: -32603, Message: "Internal error"}})
+		return
+	}
+
 	if scenario == "hang" {
 		sessionUpdate("before hang")
 		time.Sleep(time.Hour)
