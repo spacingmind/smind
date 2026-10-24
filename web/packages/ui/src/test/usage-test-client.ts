@@ -45,6 +45,8 @@ export class FakeUsageDaemon {
   testRpcErrors: Record<string, Error> = {};
   /** When set, `provider.setDefaultModel` rejects with it. */
   setDefaultModelError: Error | null = null;
+  /** When set, `provider.setEnv` rejects with it. */
+  setEnvError: Error | null = null;
   /** When set, every `account.list` / `provider.list` / `provider.test` / account-mutation request rejects with it. */
   failNonUsageWith: Error | null = null;
   /** Every non-`account.usage` request, as `{ method, params }`, in order. */
@@ -96,6 +98,37 @@ export class FakeUsageDaemon {
               ),
             };
             return { id: p.provider, defaultModel: p.model };
+          }
+          case "provider.setEnv": {
+            // The daemon's own behaviour: persist into the list (null / "" clears), answer the provider.updated payload.
+            const p = params as { provider: string; key: string; value: string | null };
+            if (this.setEnvError) throw this.setEnvError;
+            let updated: ProviderListResult["providers"][number] | undefined;
+            this.providers = {
+              ...this.providers,
+              providers: this.providers.providers.map((info) => {
+                if (info.id !== p.provider) return info;
+                const env = { ...info.env };
+                const envDirExists = { ...info.envDirExists };
+                const envEffective = { ...info.envEffective };
+                if (p.value) {
+                  env[p.key] = p.value;
+                  envDirExists[p.key] = true;
+                  envEffective[p.key] = { path: p.value, source: "settings", exists: true };
+                } else {
+                  delete env[p.key];
+                  delete envDirExists[p.key];
+                }
+                updated = {
+                  ...info,
+                  env: Object.keys(env).length ? env : undefined,
+                  envDirExists: Object.keys(envDirExists).length ? envDirExists : undefined,
+                  envEffective,
+                };
+                return updated;
+              }),
+            };
+            return updated ? { id: updated.id, defaultModel: updated.defaultModel, env: updated.env, envDirExists: updated.envDirExists, envEffective: updated.envEffective } : null;
           }
           case "provider.test": {
             const failure = this.testRpcErrors[(params as { provider?: string } | undefined)?.provider ?? ""];
