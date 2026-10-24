@@ -131,9 +131,10 @@ type hostMem struct {
 }
 
 type wsFlight struct {
-	done   chan struct{}
-	err    error
-	joined int // callers waiting on this flight instead of polling (tests wait on it)
+	done    chan struct{}
+	err     error
+	adopted bool // LookupByHead: the flight adopted a PR
+	joined  int  // callers waiting on this flight instead of polling (tests wait on it)
 }
 
 type tracked struct {
@@ -158,6 +159,7 @@ type Poller struct {
 	ws      map[int64]*wsMem
 	hosts   map[string]*hostMem
 	flights map[int64]*wsFlight
+	lookups map[int64]*wsFlight   // LookupByHead, per task
 	det     map[int64]*detailsMem // PR panel state (details.go)
 }
 
@@ -166,7 +168,7 @@ func NewPoller(o PollerOptions) *Poller {
 	p := &Poller{
 		o: o, now: o.Now,
 		mem: map[int64]*taskMem{}, ws: map[int64]*wsMem{},
-		hosts: map[string]*hostMem{}, flights: map[int64]*wsFlight{},
+		hosts: map[string]*hostMem{}, flights: map[int64]*wsFlight{}, lookups: map[int64]*wsFlight{},
 	}
 	if p.now == nil {
 		p.now = time.Now

@@ -745,7 +745,7 @@ func handleTaskArchive(wm *workspace.Manager, reg *runs.Registry) handlerFunc {
 			return nil, fmt.Errorf("task.archive: task %d: %w", p.ID, err)
 		}
 		defer release()
-		t, err := wm.ArchiveTaskWith(p.ID, workspace.ArchiveOptions{DeleteBranch: p.DeleteBranch, Force: p.Force})
+		t, err := wm.ArchiveTaskWith(p.ID, workspace.ArchiveOptions{DeleteBranch: p.DeleteBranch, Force: p.Force, LookupPR: true}) // deleteBranch is human-only (refused above)
 		if err != nil {
 			var pe *forge.PRError
 			if errors.As(err, &pe) {
@@ -759,9 +759,10 @@ func handleTaskArchive(wm *workspace.Manager, reg *runs.Registry) handlerFunc {
 
 // handleTaskArchivePreview is task.archivePreview: what archiving the task
 // puts at risk and whether its branch could be deleted. Local git and cached
-// state only; it fetches nothing and calls no forge.
+// state; the one forge call it may make is the bounded lookup of the PR of a
+// task with no stored PR, and only for a human caller (ADR-0039 O6).
 func handleTaskArchivePreview(wm *workspace.Manager) handlerFunc {
-	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+	return func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			ID     int64 `json:"id"`
 			TaskID int64 `json:"taskId"`
@@ -771,6 +772,9 @@ func handleTaskArchivePreview(wm *workspace.Manager) handlerFunc {
 		}
 		if p.ID == 0 {
 			p.ID = p.TaskID
+		}
+		if rc == nil || !rc.runScoped {
+			wm.LookupMergedPR(p.ID)
 		}
 		res, err := wm.ArchivePreview(p.ID)
 		if err != nil {

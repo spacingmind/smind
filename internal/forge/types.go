@@ -100,6 +100,10 @@ type Provider interface {
 	Repo(ctx context.Context, dir string) (Repo, error)
 	// OpenPRs lists the open PRs of dir's repo (one call, no cache).
 	OpenPRs(ctx context.Context, dir string) ([]PR, error)
+	// PRsByHead lists up to a handful of PRs of dir's repo, in any state,
+	// whose head branch is headRef: one call, for an explicit user action
+	// only (the archive preview's lookup for a task with no stored PR).
+	PRsByHead(ctx context.Context, dir, headRef string) ([]PR, error)
 	// PR fetches one PR of dir's repo by number.
 	PR(ctx context.Context, dir string, number int) (PR, error)
 	// PRDetails fetches the PR panel's payload for one PR: two gh calls

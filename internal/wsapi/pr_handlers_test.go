@@ -32,6 +32,8 @@ type ghStub struct {
 	repoErr   error         // returned by `repo view` when set
 	viewHead  string        // headRefOid `pr view` reports
 	viewState string        // state `pr view` reports (default OPEN)
+	listOut   string        // stdout of `pr list` (default no PRs)
+	listErr   error         // returned by `pr list` when set
 	gate      chan struct{} // `pr create` blocks until closed when non-nil
 	entered   chan struct{} // signalled when a `pr create` is entered
 }
@@ -58,6 +60,14 @@ func (g *ghStub) run(_ context.Context, _ string, args ...string) (string, error
 			return "", g.repoErr
 		}
 		return `{"nameWithOwner":"acme/repo","url":"https://github.com/acme/repo"}`, nil
+	case args[0] == "pr" && args[1] == "list":
+		if g.listErr != nil {
+			return "", g.listErr
+		}
+		if g.listOut == "" {
+			return "[]", nil
+		}
+		return g.listOut, nil
 	case args[0] == "pr" && args[1] == "view":
 		n, _ := strconv.Atoi(args[2])
 		return fmt.Sprintf(`{"number":%d,"url":"https://github.com/acme/repo/pull/%d","title":"t","state":%q,"isDraft":true,`+

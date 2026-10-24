@@ -110,6 +110,52 @@ func (c *Client) OpenPRs(ctx context.Context, dir string) ([]forge.PR, error) {
 	return clonePRs(v.([]forge.PR)), nil
 }
 
+// prByHeadFields is the lighter field list of PRsByHead: no check rollup, the
+// slowest field and one the archive lookup never reads.
+const prByHeadFields = "number,url,title,state,isDraft,headRefName,headRefOid,baseRefName,isCrossRepository,mergeable,reviewDecision"
+
+// prByHeadLimit caps PRsByHead: a branch name is rarely reused more than a
+// few times.
+const prByHeadLimit = 5
+
+// PRsByHead lists dir's PRs (any state) whose head branch is headRef with one
+// `gh pr list --head` call. Concurrent calls for the same dir and branch share
+// it; the result is never cached.
+func (c *Client) PRsByHead(ctx context.Context, dir, headRef string) ([]forge.PR, error) {
+	if headRef == "" || strings.HasPrefix(headRef, "-") || strings.ContainsAny(headRef, "\x00\n") {
+		return nil, fmt.Errorf("invalid arguments")
+	}
+	v, err := c.flights.do("h\x00"+dir+"\x00"+headRef, func() (any, error) {
+		ctx, cancel := context.WithTimeout(ctx, prTimeout)
+		defer cancel()
+		repo, err := c.knownRepo(ctx, dir)
+		if err != nil {
+			return nil, err
+		}
+		out, err := c.run(ctx, dir, "pr", "list", "--head", headRef, "--state", "all",
+			"--limit", fmt.Sprint(prByHeadLimit), "--json", prByHeadFields)
+		if err != nil {
+			return nil, c.mapRunError(ctx, err)
+		}
+		var rows []ghPRJSON
+		if err := json.Unmarshal([]byte(out), &rows); err != nil {
+			return nil, forge.NewError(forge.CodeError, "parse gh pr list output: "+err.Error())
+		}
+		now := c.ttlNow()
+		prs := make([]forge.PR, 0, len(rows))
+		for _, r := range rows {
+			if pr, ok := mapPR(r, repo, now); ok {
+				prs = append(prs, pr)
+			}
+		}
+		return prs, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return clonePRs(v.([]forge.PR)), nil
+}
+
 // PR fetches one PR of dir's repo with `gh pr view <number>`.
 func (c *Client) PR(ctx context.Context, dir string, number int) (forge.PR, error) {
 	if number <= 0 {
