@@ -51,6 +51,9 @@ type PermissionDetail struct {
 	Command     string `json:"command,omitempty"`
 	Truncated   bool   `json:"truncated,omitempty"`
 	Redacted    bool   `json:"redacted,omitempty"`
+	// GitRule is set when an execute command contains a non-read-only
+	// git/gh operation (see ClassifyGitCommand).
+	GitRule *GitRuleInfo `json:"gitRule,omitempty"`
 }
 
 // BuildPermissionDetail derives a PermissionDetail from an ACP permission
@@ -77,6 +80,7 @@ func BuildPermissionDetail(worktree string, toolCall json.RawMessage) *Permissio
 		d := &PermissionDetail{Kind: "execute"}
 		if cmd, ok := str("command"); ok {
 			d.Command, d.Truncated = capBytes(cmd, detailCommandMaxBytes)
+			d.GitRule = gitRuleInfo(worktree, cmd)
 		}
 		return d
 	case "edit":

@@ -2221,3 +2221,36 @@ func TestRegistry_InterruptedReconciliation_RecordsWhyTheRunEnded(t *testing.T) 
 		t.Fatalf("rehydrated run = status %q reason %q disposition %q, want interrupted %q needs-continue", status.Status, status.StopReason, status.Disposition, StopReasonDaemonRestart)
 	}
 }
+
+// TestACPGitRuleAutoAcceptExempt documents that AutoAccept is bypass-equivalent:
+// a git rule on the request (options already stripped of standing choices)
+// does not change the run decider -- it still auto-allows once.
+func TestACPGitRuleAutoAcceptExempt(t *testing.T) {
+	t.Parallel()
+	reg, r, _ := startedRun(t, taskrunner.PermissionSettings{AutoAccept: true})
+	decider := runPermissionDecider{reg: reg, r: r}
+	detail := &taskrunner.PermissionDetail{
+		Kind:    "execute",
+		Command: "git push origin x",
+		GitRule: &taskrunner.GitRuleInfo{ID: "git-push", Class: "always-ask", PerCall: true},
+	}
+	optionID, err := decider.DecideDetailed(context.Background(), "run git push", detail, allowDenyOptions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if optionID != "allow-1" {
+		t.Fatalf("DecideDetailed() = %q, want allow-1 (auto-allow once)", optionID)
+	}
+	r.mu.Lock()
+	pending := len(r.pendingPermissions)
+	var resolved []taskrunner.Event
+	for _, e := range r.history {
+		if e.Type == taskrunner.EventTypePermissionResolved {
+			resolved = append(resolved, e)
+		}
+	}
+	r.mu.Unlock()
+	if pending != 0 || len(resolved) != 1 || resolved[0].PermissionResolution != taskrunner.PermissionResolvedByAutoAccept {
+		t.Fatalf("pending=%d resolved=%+v, want 0 pending and one auto_accept resolution", pending, resolved)
+	}
+}

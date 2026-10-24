@@ -443,6 +443,21 @@ export interface PermissionQuestion {
   allowOther?: boolean;
 }
 
+/** The git approval rule that gated a command (G13); absent for non-git permissions. */
+export interface GitRule {
+  id: string;
+  class: "always-ask" | "commit" | "unparsed-git";
+  label: string;
+  command: string;
+  remote?: string;
+  branch?: string;
+  /** Approval covers this call only; there is no "always allow". */
+  perCall: boolean;
+  stagedFiles?: string[];
+  stagedTruncated?: boolean;
+  note?: string;
+}
+
 /**
  * Structured detail the daemon attaches to a permission_request (wire event
  * params and run.logs entries alike). Every field but `kind` is optional.
@@ -468,6 +483,7 @@ export interface PermissionDetail {
   truncated?: boolean;
   /** Existing contents deliberately not shown (sensitive/outside path). */
   redacted?: boolean;
+  gitRule?: GitRule;
 }
 
 export interface PermissionRequestEventParams {
