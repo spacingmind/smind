@@ -3,6 +3,7 @@ package runs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -263,5 +264,104 @@ func TestBudgetAdmission_QueryCount(t *testing.T) {
 	}
 	if w, c := walks.Load(), costs.Load(); w != 2 || c != 1 {
 		t.Fatalf("agent send in a budgeted tree: %d root reads, %d cost queries, want 2 (the same walk, no extra GetTask), 1", w, c)
+	}
+}
+
+// budgetNotifyEnv is a notifyEnv whose root (e.task) has a $5 budget already
+// reached, a frozen budget clock and a long debounce so the notification
+// item stays queued and countable.
+func newBudgetNotifyEnv(t *testing.T) (*notifyEnv, time.Time) {
+	t.Helper()
+	e := newNotifyEnv(t)
+	frozen := time.Now().UTC().Truncate(time.Second)
+	e.reg.budgetNow = func() time.Time { return frozen }
+	e.reg.SetNotifyDebounce(time.Hour)
+	if err := e.st.SetTaskBudget(e.task.ID, budgetPtr(5)); err != nil {
+		t.Fatal(err)
+	}
+	cost := 6.0
+	if err := e.st.UpsertRunUsage(store.RunUsage{RunID: e.latestRun(t), TaskID: e.task.ID, Provider: "glm", CostUSD: &cost, Source: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	return e, frozen
+}
+
+func (e *notifyEnv) latestRun(t *testing.T) string {
+	t.Helper()
+	r, ok, err := e.st.LatestRunForChat(e.parentChat.ID)
+	if err != nil || !ok {
+		t.Fatalf("LatestRunForChat() = %v, %v", ok, err)
+	}
+	return r.ID
+}
+
+func (e *notifyEnv) agentSend(t *testing.T) error {
+	t.Helper()
+	_, err := e.reg.StartWhenBusy(context.Background(), e.wm, e.runner, e.child.ID, 0, taskrunner.ProviderGLM, "work", taskrunner.PermissionSettings{}, "", WhenBusyReject, store.ChatQueueSourceAgent, e.task.ID, e.parentChat.ID)
+	return err
+}
+
+func TestBudgetNotify_OnePerCrossing_FakeClock(t *testing.T) {
+	t.Parallel()
+	e, frozen := newBudgetNotifyEnv(t)
+	for i := 0; i < 3; i++ {
+		if _, ok := asBudgetExceeded(e.agentSend(t)); !ok {
+			t.Fatalf("refusal %d: want *BudgetExceededError", i+1)
+		}
+	}
+	items := e.events(t, e.parentChat.ID)
+	if len(items) != 1 {
+		t.Fatalf("child event items after 3 refusals = %d, want 1: %+v", len(items), items)
+	}
+	if n := strings.Count(items[0].Prompt, "task tree #"); n != 1 {
+		t.Fatalf("notification count = %d, want 1 in %q", n, items[0].Prompt)
+	}
+	want := "task tree #" + fmt.Sprint(e.task.ID) + " reached its budget ($6.00 of $5.00 reported cost)"
+	if !strings.Contains(items[0].Prompt, want) {
+		t.Fatalf("prompt %q lacks %q", items[0].Prompt, want)
+	}
+	if items[0].NotBefore == nil || !items[0].NotBefore.Equal(frozen.Add(time.Hour)) {
+		t.Fatalf("not_before = %v, want the frozen clock + debounce %v", items[0].NotBefore, frozen.Add(time.Hour))
+	}
+}
+
+func TestBudgetNotify_RearmedAfterRaise(t *testing.T) {
+	t.Parallel()
+	e, _ := newBudgetNotifyEnv(t)
+	if err := e.agentSend(t); err == nil {
+		t.Fatal("want refusal")
+	}
+	// Raising the cap re-arms (what task.setBudget does); the next crossing
+	// notifies again, coalesced into the same still-queued item.
+	if err := e.st.SetTaskBudget(e.task.ID, budgetPtr(6.5)); err != nil {
+		t.Fatal(err)
+	}
+	e.reg.RearmBudgetNotify(e.task.ID)
+	cost := 7.0
+	if err := e.st.UpsertRunUsage(store.RunUsage{RunID: e.latestRun(t), TaskID: e.task.ID, Provider: "glm", CostUSD: &cost, Source: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.agentSend(t); err == nil {
+		t.Fatal("want refusal after recrossing")
+	}
+	items := e.events(t, e.parentChat.ID)
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1 coalesced item", len(items))
+	}
+	if n := strings.Count(items[0].Prompt, "reached its budget"); n != 2 {
+		t.Fatalf("notifications = %d, want 2 (one per crossing) in %q", n, items[0].Prompt)
+	}
+	// A later admission that finds the tree under the cap re-arms by itself.
+	if err := e.st.SetTaskBudget(e.task.ID, budgetPtr(100)); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.agentSend(t); err != nil {
+		t.Fatalf("agent send under the raised cap error = %v", err)
+	}
+	e.reg.budgetMu.Lock()
+	armed := e.reg.budgetNotified[e.task.ID]
+	e.reg.budgetMu.Unlock()
+	if armed {
+		t.Fatal("budgetNotified still set after an admission found the tree under the cap")
 	}
 }

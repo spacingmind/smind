@@ -1,7 +1,10 @@
 package runs
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
+	"time"
 
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -58,7 +61,89 @@ func (reg *Registry) checkBudget(origin string, root store.Task) error {
 		return fmt.Errorf("runs: start: %w", err)
 	}
 	if known >= *root.BudgetUSD {
-		return &BudgetExceededError{RootTaskID: root.ID, SpentUSD: known, BudgetUSD: *root.BudgetUSD, UnknownRuns: unknown}
+		be := &BudgetExceededError{RootTaskID: root.ID, SpentUSD: known, BudgetUSD: *root.BudgetUSD, UnknownRuns: unknown}
+		reg.notifyBudgetReached(be)
+		return be
 	}
+	reg.RearmBudgetNotify(root.ID)
 	return nil
+}
+
+// RearmBudgetNotify lets the root's next budget crossing notify its chat
+// again. task.setBudget calls it whenever the budget is raised or cleared;
+// checkBudget calls it when it finds the tree back under the cap.
+func (reg *Registry) RearmBudgetNotify(rootID int64) {
+	reg.budgetMu.Lock()
+	delete(reg.budgetNotified, rootID)
+	reg.budgetMu.Unlock()
+}
+
+// notifyBudgetReached tells the root task's chat, once per crossing, that
+// its tree reached its budget: one child_event style message through the
+// parent notifier's queue (same debounce, coalescing and delivery at a turn
+// boundary), so a Lead hears it without being interrupted. Further refusals
+// while the flag is set do nothing. The enqueue is synchronous; delivery
+// is started in the background because checkBudget can run inside deliverOne,
+// which holds deliverMu.
+func (reg *Registry) notifyBudgetReached(be *BudgetExceededError) {
+	reg.budgetMu.Lock()
+	if reg.budgetNotified[be.RootTaskID] {
+		reg.budgetMu.Unlock()
+		return
+	}
+	if reg.budgetNotified == nil {
+		reg.budgetNotified = make(map[int64]bool)
+	}
+	reg.budgetNotified[be.RootTaskID] = true
+	now := time.Now
+	if reg.budgetNow != nil {
+		now = reg.budgetNow
+	}
+	reg.budgetMu.Unlock()
+
+	reg.notifyMu.Lock()
+	notifyOn, debounce, maxHold := reg.notifyParent, reg.notifyDebounce, reg.notifyMaxHold
+	reg.notifyMu.Unlock()
+	if !notifyOn || reg.closing.Load() {
+		return
+	}
+	chats, err := reg.st.ListChatsByTask(be.RootTaskID, false)
+	if err != nil || len(chats) == 0 {
+		return
+	}
+	target := chats[0].ID
+	prev, ok, err := reg.st.LatestRunForChat(target)
+	if err != nil || !ok {
+		return // nothing to copy run settings from, as for a child event
+	}
+	cfg, err := json.Marshal(chatQueueRunConfig{
+		Provider: prev.Provider, PermissionMode: prev.PermissionMode, AutoAccept: prev.AutoAccept, Model: prev.Model,
+		ProfileID: prev.ProfileID,
+	})
+	if err != nil {
+		return
+	}
+	_, _, err = reg.st.EnqueueChildEvent(store.ChildEventInput{
+		ChatID: target, Block: budgetReachedText(be), RunConfig: string(cfg),
+		Now: now(), Debounce: debounce, MaxHold: maxHold,
+	})
+	if err != nil {
+		log.Printf("runs: budget notify task %d: %v", be.RootTaskID, err)
+		return
+	}
+	reg.notifyQueueUpdated(target)
+	reg.armQueueWake()
+	if debounce <= 0 {
+		go reg.deliverOne(target)
+	}
+}
+
+// budgetReachedText is the notification text: the facts, in the style of
+// the child event status line, with no untrusted content.
+func budgetReachedText(be *BudgetExceededError) string {
+	text := fmt.Sprintf("task tree #%d reached its budget ($%.2f of $%.2f reported cost)", be.RootTaskID, be.SpentUSD, be.BudgetUSD)
+	if be.UnknownRuns > 0 {
+		text += fmt.Sprintf("; %d %s reported no cost", be.UnknownRuns, pluralRuns(be.UnknownRuns))
+	}
+	return text
 }

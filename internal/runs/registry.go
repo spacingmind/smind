@@ -164,6 +164,15 @@ type Registry struct {
 	notifyParent   bool
 	notifyDebounce time.Duration
 	notifyMaxHold  time.Duration
+	// budgetMu guards budgetNotified: the roots whose tree budget crossing was
+	// already announced to their chat (ADR-0041 A5). In memory on purpose: a
+	// restart may announce a still-over-budget tree once more. Never held
+	// with another lock.
+	budgetMu       sync.Mutex
+	budgetNotified map[int64]bool
+	// budgetNow is the clock of the budget notification; nil = time.Now.
+	// A test seam.
+	budgetNow func() time.Time
 	// retryGrace is added to a rate limit's reset instant for a "wait"
 	// retry (ADR-0041 F2b); tests lower it.
 	retryGrace time.Duration
