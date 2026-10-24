@@ -27,35 +27,35 @@ export function hasFutureReset(resetAt: string | undefined | null, now: Date): b
   return d !== null && d.getTime() > now.getTime();
 }
 
-/** Local `17:35`, prefixed with the weekday (`Mon 17:35`) when it is not the same local day as `now`. */
-export function formatResetClock(reset: Date, now: Date): string {
-  const hhmm = `${String(reset.getHours()).padStart(2, "0")}:${String(reset.getMinutes()).padStart(2, "0")}`;
+/** Local `17:35` (`≈17:35` when the daemon inferred the reset zone), prefixed with the weekday (`Mon 17:35`) when it is not the same local day as `now`. */
+export function formatResetClock(reset: Date, now: Date, inferred = false): string {
+  const hhmm = `${inferred ? "≈" : ""}${String(reset.getHours()).padStart(2, "0")}:${String(reset.getMinutes()).padStart(2, "0")}`;
   const sameDay = reset.getFullYear() === now.getFullYear() && reset.getMonth() === now.getMonth() && reset.getDate() === now.getDate();
   return sameDay ? hhmm : `${WEEKDAYS[reset.getDay()]} ${hhmm}`;
 }
 
 /** The tail of a rate-limit line: "resets 17:35", "limit has reset" or "reset time unknown". */
-export function describeRateLimitReset(resetAt: string | undefined | null, now: Date): string {
+export function describeRateLimitReset(resetAt: string | undefined | null, now: Date, inferred = false): string {
   const reset = parseResetAt(resetAt);
   if (reset === null) return "reset time unknown";
   if (reset.getTime() <= now.getTime()) return "limit has reset";
-  return `resets ${formatResetClock(reset, now)}`;
+  return `resets ${formatResetClock(reset, now, inferred)}`;
 }
 
 /** "Rate limited (5h window) · resets 17:35" -- the window part is omitted when unknown. */
-export function describeRateLimit(opts: { window?: string; resetAt?: string | null }, now: Date): string {
+export function describeRateLimit(opts: { window?: string; resetAt?: string | null; inferred?: boolean }, now: Date): string {
   const window = opts.window ? ` (${opts.window} window)` : "";
-  return `Rate limited${window} · ${describeRateLimitReset(opts.resetAt, now)}`;
+  return `Rate limited${window} · ${describeRateLimitReset(opts.resetAt, now, opts.inferred)}`;
 }
 
 /** Slack after the reset before a held retry fires, so the provider's window has certainly rolled over. */
 export const RETRY_NOT_BEFORE_SLACK_MS = 30_000;
 
 /** "Wait until 17:35" (weekday prefix on another day); null when the reset is absent or already past. */
-export function waitUntilLabel(resetAt: string | undefined | null, now: Date): string | null {
+export function waitUntilLabel(resetAt: string | undefined | null, now: Date, inferred = false): string | null {
   const reset = parseResetAt(resetAt);
   if (reset === null || reset.getTime() <= now.getTime()) return null;
-  return `Wait until ${formatResetClock(reset, now)}`;
+  return `Wait until ${formatResetClock(reset, now, inferred)}`;
 }
 
 /** The `run.start` notBefore for a held retry: the reset instant + 30 s as RFC 3339 UTC; null when unparseable. */

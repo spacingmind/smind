@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { retryNotBefore, waitUntilLabel } from "@/lib/rate-limit";
+import { describeRateLimit, describeRateLimitReset, formatResetClock, retryNotBefore, waitUntilLabel } from "@/lib/rate-limit";
 
 describe("waitUntilLabel", () => {
   const now = new Date(2026, 9, 23, 12, 0, 0);
@@ -29,5 +29,31 @@ describe("retryNotBefore", () => {
   it("is null when the reset is absent or unparseable", () => {
     expect(retryNotBefore(undefined)).toBeNull();
     expect(retryNotBefore("nope")).toBeNull();
+  });
+});
+
+describe("inferred reset marker", () => {
+  const now = new Date(2026, 9, 23, 12, 0, 0);
+  const same = new Date(2026, 9, 23, 17, 35);
+  const next = new Date(2026, 9, 24, 9, 5);
+
+  it("inferred reset shows ≈ in clock, describe, describeRateLimit, waitUntilLabel", () => {
+    expect(formatResetClock(same, now, true)).toBe("≈17:35");
+    expect(describeRateLimitReset(same.toISOString(), now, true)).toBe("resets ≈17:35");
+    expect(describeRateLimit({ window: "5h", resetAt: same.toISOString(), inferred: true }, now)).toBe("Rate limited (5h window) · resets ≈17:35");
+    expect(waitUntilLabel(same.toISOString(), now, true)).toBe("Wait until ≈17:35");
+  });
+
+  it("stated reset unchanged", () => {
+    expect(formatResetClock(same, now)).toBe("17:35");
+    expect(formatResetClock(same, now, false)).toBe("17:35");
+    expect(describeRateLimitReset(same.toISOString(), now)).toBe("resets 17:35");
+    expect(describeRateLimit({ resetAt: same.toISOString(), inferred: false }, now)).toBe("Rate limited · resets 17:35");
+    expect(waitUntilLabel(same.toISOString(), now)).toBe("Wait until 17:35");
+  });
+
+  it("weekday prefix with ≈", () => {
+    expect(formatResetClock(next, now, true)).toBe("Sat ≈09:05");
+    expect(waitUntilLabel(next.toISOString(), now, true)).toBe("Wait until Sat ≈09:05");
   });
 });
