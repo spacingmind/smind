@@ -51,6 +51,7 @@ export interface TaskTreeNode {
     window?: string;
     /** When the limit lifts (RFC 3339 UTC). */
     resetAt?: string;
+    resetInferred?: boolean;
   };
   counts: TaskTreeCounts;
   usage: {
@@ -127,7 +128,7 @@ function rateLimitedDescendants(node: TaskTreeNode, all: ReadonlyArray<TaskTreeN
 /** "Rate limited · resets 17:35" for a rate-limited node, null otherwise. The window stays out of the hint (it is a one-liner on a pill). */
 export function rateLimitHint(node: Pick<TaskTreeNode, "run">, now: Date): string | null {
   if (!isRateLimitedNode(node)) return null;
-  return `Rate limited · ${describeRateLimitReset(node.run.resetAt, now)}`;
+  return `Rate limited · ${describeRateLimitReset(node.run.resetAt, now, node.run.resetInferred)}`;
 }
 
 /**

@@ -106,6 +106,18 @@ describe("RunFooter failover actions (ADR-0041 F2)", () => {
     expect(screen.getByTestId("run-wait-queued").textContent).toMatch(/^Queued · starts after (\w{3} )?\d\d:\d\d$/);
   });
 
+  it("Wait and Queued labels carry ≈ for an inferred reset", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    render(<RunFooter run={limited({ failureResetAt: "2026-10-13T12:00:18Z", failureResetInferred: true })} isLatest onRerun={() => {}} failover={failoverStub()} />);
+    const wait = screen.getByTestId("run-wait");
+    expect(wait.textContent).toMatch(/^Wait until (\w{3} )?≈\d\d:\d\d$/);
+    await act(async () => {
+      fireEvent.click(wait);
+    });
+    expect(screen.getByTestId("run-wait-queued").textContent).toMatch(/^Queued · starts after (\w{3} )?≈\d\d:\d\d$/);
+  });
+
   it("brings the Wait button back with a toast when queuing fails", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);

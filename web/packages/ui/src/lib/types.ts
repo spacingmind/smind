@@ -284,6 +284,7 @@ export interface RunSummary {
   FailureWindow?: string;
   /** When the limit lifts (RFC 3339 UTC); null/absent when unknown. */
   FailureResetAt?: string | null;
+  FailureResetInferred?: boolean;
   Err: string;
   /** The run's current provider-native permission mode -- live for a running run (see run.setPermissionMode), whatever it last was for a finished one. */
   PermissionMode: string;
@@ -619,6 +620,8 @@ export interface RunLogsResult {
   window?: string;
   /** When the limit lifts (RFC 3339 UTC); omitted when unknown. */
   resetAt?: string;
+  /** True when the daemon assumed the reset's time zone, so the clock is approximate. */
+  resetInferred?: boolean;
   err?: string;
   /** O1 provenance -- omitted by the daemon when unknown (or by an older daemon). */
   baseSha?: string;
@@ -869,6 +872,8 @@ export interface RunStatusEventPayload {
   window?: string;
   /** When the limit lifts (RFC 3339 UTC); omitted when unknown. */
   resetAt?: string;
+  /** True when the daemon assumed the reset's time zone, so the clock is approximate. */
+  resetInferred?: boolean;
   err?: string;
   /** O1 provenance -- omitted when unknown. */
   baseSha?: string;

@@ -38,7 +38,7 @@ export type TaskRunStatus = ReadonlyMap<number, RunStatusValue>;
  * attention rollups, status groups) is unchanged; only the row's tone and
  * wording read this.
  */
-export type TaskRateLimit = ReadonlyMap<number, { window?: string; resetAt?: string }>;
+export type TaskRateLimit = ReadonlyMap<number, { window?: string; resetAt?: string; resetInferred?: boolean }>;
 
 /** Both per-task signals this hook derives from the one run bookkeeping it keeps, plus ADR-0016 P3's per-task running-chats set (the concurrency banner's data source). */
 export interface TaskSignal {
@@ -70,12 +70,12 @@ interface RunLike extends Pick<RunSummary, "ID" | "TaskID" | "ChatID" | "Status"
   /** Epoch-ms finish time; null when unknown, which a terminal run treats as recent (conservative). */
   finishedAtMs: number | null;
   /** ADR-0041: the rate-limit failure of an errored run, when the daemon classified one. */
-  rateLimit?: { window?: string; resetAt?: string };
+  rateLimit?: { window?: string; resetAt?: string; resetInferred?: boolean };
 }
 
 /** The window/reset of a rate-limit failure, with empty values dropped. */
-function failureDetail(window: string | undefined, resetAt: string | null | undefined): { window?: string; resetAt?: string } {
-  return { ...(window ? { window } : {}), ...(resetAt ? { resetAt } : {}) };
+function failureDetail(window: string | undefined, resetAt: string | null | undefined, resetInferred?: boolean | null): { window?: string; resetAt?: string; resetInferred?: boolean } {
+  return { ...(window ? { window } : {}), ...(resetAt ? { resetAt } : {}), ...(resetAt && resetInferred ? { resetInferred: true } : {}) };
 }
 
 /**
@@ -203,7 +203,7 @@ export function useTaskAttention(
               Status: r.Status,
               order: -index,
               finishedAtMs: Number.isNaN(parsed) ? null : parsed,
-              ...(r.FailureKind === RATE_LIMITED ? { rateLimit: failureDetail(r.FailureWindow, r.FailureResetAt) } : {}),
+              ...(r.FailureKind === RATE_LIMITED ? { rateLimit: failureDetail(r.FailureWindow, r.FailureResetAt, r.FailureResetInferred) } : {}),
             };
           });
           runsRef.current = runs;
@@ -279,7 +279,7 @@ export function useTaskAttention(
 
     const offRunStatus = events.subscribe("run.status", (payload) => {
       if (typeof payload !== "object" || payload === null) return;
-      const p = payload as { runId?: unknown; taskId?: unknown; chatId?: unknown; status?: unknown; failureKind?: unknown; window?: unknown; resetAt?: unknown };
+      const p = payload as { runId?: unknown; taskId?: unknown; chatId?: unknown; status?: unknown; failureKind?: unknown; window?: unknown; resetAt?: unknown; resetInferred?: unknown };
       if (typeof p.runId !== "string" || typeof p.taskId !== "number" || typeof p.status !== "string") return;
       // chatId is ADR-0016 P1.4 -- absent only for a payload from a daemon
       // that predates it, which the concurrency banner then just can't
@@ -295,7 +295,7 @@ export function useTaskAttention(
       // A run.status carries the failure fields (ADR-0041) on its terminal event; any later status for the run replaces them.
       const rateLimit =
         p.failureKind === RATE_LIMITED
-          ? failureDetail(typeof p.window === "string" ? p.window : undefined, typeof p.resetAt === "string" ? p.resetAt : undefined)
+          ? failureDetail(typeof p.window === "string" ? p.window : undefined, typeof p.resetAt === "string" ? p.resetAt : undefined, p.resetInferred === true)
           : undefined;
       if (idx >= 0) {
         const next: RunLike = { ...runs[idx], TaskID: p.taskId, ChatID: chatId, Status: p.status as RunLike["Status"], order, finishedAtMs };

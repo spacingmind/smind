@@ -34,7 +34,7 @@ function message(err: unknown): string {
 export function hasFailoverActions<T extends RunFooterRun>(run: T, failover: RunFailover<T>, now: Date): boolean {
   if (!isRateLimitedRun(run) || failover.successor(run.id)) return false;
   const fallback = run.fallbackProfileId ? failover.fallbackName(run.fallbackProfileId) !== undefined : false;
-  return fallback || waitUntilLabel(run.failureResetAt, now) !== null || failover.isHeld(run);
+  return fallback || waitUntilLabel(run.failureResetAt, now, run.failureResetInferred) !== null || failover.isHeld(run);
 }
 
 /** "Retry on <profile>" and "Wait until HH:MM" -- shown beside Retry on the latest rate-limited run. */
@@ -48,7 +48,7 @@ export function RunFailoverButtons<T extends RunFooterRun>({ run, failover, now 
   if (!isRateLimitedRun(run) || failover.successor(run.id)) return null;
 
   const fallbackName = run.fallbackProfileId ? failover.fallbackName(run.fallbackProfileId) : undefined;
-  const label = waitUntilLabel(run.failureResetAt, now);
+  const label = waitUntilLabel(run.failureResetAt, now, run.failureResetInferred);
   const notBefore = retryNotBefore(run.failureResetAt);
   const queued = failover.isHeld(run) || wait === "queued";
 
@@ -99,7 +99,7 @@ export function RunFailoverButtons<T extends RunFooterRun>({ run, failover, now 
       {queued ? (
         reset !== null && (
           <span data-testid="run-wait-queued" role="status" className="text-foreground-muted">
-            Queued · starts after {formatResetClock(reset, now)}
+            Queued · starts after {formatResetClock(reset, now, run.failureResetInferred)}
           </span>
         )
       ) : (

@@ -96,6 +96,13 @@ describe("pillStatusWithSubtree", () => {
     expect(pillStatusWithSubtree(parent, [parent, mid, grandKid])).toBe("warning");
   });
 
+  it("rateLimitHint has ≈ for an inferred reset", () => {
+    const now = new Date(2026, 9, 13, 10, 0, 0);
+    const run = { state: "error" as const, runningRunIds: [], pendingPermissions: 0, failureKind: "rate_limited", resetAt: new Date(2026, 9, 13, 17, 35).toISOString() };
+    expect(rateLimitHint(node({ id: 3, run: { ...run, resetInferred: true } }), now)).toBe("Rate limited · resets ≈17:35");
+    expect(rateLimitHint(node({ id: 3, run }), now)).toBe("Rate limited · resets 17:35");
+  });
+
   it("rateLimitHint words the reset in local time and is null for any other node", () => {
     const now = new Date(2026, 9, 13, 10, 0, 0);
     const run = { state: "error" as const, runningRunIds: [], pendingPermissions: 0, failureKind: "rate_limited" };

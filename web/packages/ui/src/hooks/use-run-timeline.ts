@@ -302,6 +302,8 @@ export interface RunEntry {
   failureWindow?: string;
   /** When the limit lifts (RFC 3339 UTC). */
   failureResetAt?: string;
+  /** True when failureResetAt's zone was assumed (shown as ≈). */
+  failureResetInferred?: boolean;
   /** ADR-0041 F2: the agent profile the run launched with. */
   profileId?: number;
   /** ADR-0041 F2: the failed run this one continues after a rate limit. */
@@ -655,8 +657,8 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
  * (ADR-0041): always all three keys, with an empty value as undefined, so a
  * terminal answer replaces whatever a list-seeded entry carried.
  */
-function failureOf(src: { failureKind?: string; window?: string; resetAt?: string }): Pick<RunEntry, "failureKind" | "failureWindow" | "failureResetAt"> {
-  return { failureKind: src.failureKind || undefined, failureWindow: src.window || undefined, failureResetAt: src.resetAt || undefined };
+function failureOf(src: { failureKind?: string; window?: string; resetAt?: string; resetInferred?: boolean }): Pick<RunEntry, "failureKind" | "failureWindow" | "failureResetAt" | "failureResetInferred"> {
+  return { failureKind: src.failureKind || undefined, failureWindow: src.window || undefined, failureResetAt: src.resetAt || undefined, failureResetInferred: src.resetInferred || undefined };
 }
 
 /** The profile/failover keys a run.logs result carries -- only those, so a missing one never overwrites a list-seeded value. */
@@ -697,6 +699,7 @@ function toRunEntry(r: RunSummary): RunEntry {
     failureKind: r.FailureKind || undefined,
     failureWindow: r.FailureWindow || undefined,
     failureResetAt: r.FailureResetAt || undefined,
+    failureResetInferred: r.FailureResetInferred || undefined,
     ...(r.ProfileID ? { profileId: r.ProfileID } : {}),
     ...(r.FailoverOf ? { failoverOf: r.FailoverOf } : {}),
     err: r.Err || undefined,

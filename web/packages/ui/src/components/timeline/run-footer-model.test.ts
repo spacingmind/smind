@@ -225,6 +225,12 @@ describe("describeRunFooter: a rate-limited run", () => {
     });
   const view = (r: RunFooterRun) => describeRunFooter(r, { now: LOCAL_NOW, modelLabel: "GLM 5.3" });
 
+  it("footer sentence has ≈ for an inferred reset", () => {
+    const at = new Date(2026, 9, 13, 17, 35).toISOString();
+    expect(view(limited({ failureResetAt: at, failureResetInferred: true })).sentence).toBe("Rate limited (5h window) · resets ≈17:35");
+    expect(view(limited({ failureResetAt: at, failureResetInferred: false })).sentence).toBe("Rate limited (5h window) · resets 17:35");
+  });
+
   it("rate limited with a future reset", () => {
     const v = view(limited({ failureResetAt: new Date(2026, 9, 13, 17, 35).toISOString() }));
     expect(v.kind).toBe("abnormal");
