@@ -270,12 +270,34 @@ fn macos_layout(app: &AppHandle) -> Result<native::Layout, String> {
 /// `native::spawn_detached` may wait on the login-shell PATH resolution
 /// (bounded; normally already prewarmed at app start), so keep that off the
 /// async worker threads.
-async fn spawn_native_daemon(layout: &native::Layout) -> Result<std::process::Child, String> {
+///
+/// The daemon is detached into its own process group but is still this app's child, so a thread reaps it
+/// when it exits: dropping a `Child` never waits, and every stopped daemon would stay a zombie until the app
+/// quits. The new daemon is tracked by pid from here on.
+async fn spawn_native_daemon(layout: &native::Layout) -> Result<u32, String> {
     let layout = layout.clone();
-    tauri::async_runtime::spawn_blocking(move || native::spawn_detached(&layout))
+    let mut child = tauri::async_runtime::spawn_blocking(move || native::spawn_detached(&layout))
         .await
         .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    let pid = child.id();
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(pid)
+}
+
+/// How long a stopping daemon gets to exit on SIGTERM before SIGKILL: its own graceful shutdown is about 5 s
+/// of connection draining plus run teardown.
+const STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// stop_managed_daemon signals the daemon and waits until it has really gone (see `native::stop_process`),
+/// off the async worker threads.
+async fn stop_managed_daemon(pid: u32) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || native::stop_process(pid, STOP_GRACE, std::time::Duration::from_millis(100)))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("could not stop the old daemon (pid {pid}): {e}"))
 }
 
 /// Where install/update gets the daemon binary from. macOS takes it from
@@ -894,14 +916,16 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
                 // can actually replace it.
                 let exe_matches = macos_exe_matches(record.pid, Path::new(&record.exe_path));
                 if managed::safe_to_kill(record, port_owner_before, exe_matches) {
-                    let _ = native::kill_process(record.pid);
+                    // Wait for it to let go of the port before starting the replacement.
+                    if let Err(e) = stop_managed_daemon(record.pid).await {
+                        emit_progress(app, "starting", &e);
+                    }
                 } else if port_owner_before.is_some() {
                     emit_progress(app, "starting", "The previously-managed process could not be verified; starting alongside it instead of stopping it.");
                 }
             }
 
-            let child = spawn_native_daemon(&layout).await?;
-            drop(child); // detached (its own process group); tracked by pid below, not by this handle.
+            spawn_native_daemon(&layout).await?; // detached (its own process group); tracked by pid below
 
             // Don't trust "whoever now owns the port" on its own -- verify
             // it's really the binary just installed (and, since /healthz
@@ -1051,7 +1075,7 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
     emit_progress(app, "stopping", "Stopping the daemon…");
     match platform {
         Platform::Macos => {
-            native::kill_process(record.pid).map_err(|e| e.to_string())?;
+            stop_managed_daemon(record.pid).await?;
         }
         Platform::Windows => {
             #[cfg(target_os = "windows")]
@@ -1076,8 +1100,7 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
     match platform {
         Platform::Macos => {
             let layout = macos_layout(app)?;
-            let child = spawn_native_daemon(&layout).await?;
-            drop(child);
+            spawn_native_daemon(&layout).await?;
 
             let _ = wait_for_healthz(&base_url).await;
             let port_owner_after = native::find_port_owner(port).ok().flatten();

@@ -151,6 +151,57 @@ pub fn is_pid_alive(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
+/// is_pid_running is `is_pid_alive` for callers that must know the process has really exited. `kill -0`
+/// also succeeds on a zombie (an exited child its parent has not reaped yet), so this asks `ps` and treats
+/// a missing entry or a `Z` state as gone.
+pub fn is_pid_running(pid: u32) -> bool {
+    let mut cmd = Command::new("ps");
+    cmd.arg("-o").arg("stat=").arg("-p").arg(pid.to_string());
+    let Ok(out) = crate::windows_process::no_window(&mut cmd).output() else { return false };
+    if !out.status.success() {
+        return false;
+    }
+    let stat = String::from_utf8_lossy(&out.stdout);
+    let stat = stat.trim();
+    !stat.is_empty() && !stat.starts_with('Z')
+}
+
+fn wait_until_gone(pid: u32, within: std::time::Duration, poll: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + within;
+    loop {
+        if !is_pid_running(pid) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(poll);
+    }
+}
+
+/// stop_process asks `pid` to terminate (SIGTERM) and returns only once it has really gone, so the caller can
+/// start a replacement on the same port. The daemon shuts down gracefully (about 5 s of connection draining plus
+/// run teardown when a turn is running); starting the new one before the old has let go of the port makes the
+/// new one fail with "address already in use" while the old one's still-answering /healthz passes for it.
+/// After `grace` it escalates to SIGKILL and waits a few more seconds; an error means the pid never exited.
+pub fn stop_process(pid: u32, grace: std::time::Duration, poll: std::time::Duration) -> io::Result<()> {
+    if let Err(e) = kill_process(pid) {
+        // `kill` fails when the pid is already gone: that is the outcome we wanted.
+        return if is_pid_running(pid) { Err(e) } else { Ok(()) };
+    }
+    if wait_until_gone(pid, grace, poll) {
+        return Ok(());
+    }
+    let mut cmd = Command::new("kill");
+    cmd.arg("-9").arg(pid.to_string()).stdout(Stdio::null()).stderr(Stdio::null());
+    let _ = crate::windows_process::no_window(&mut cmd).status();
+    if wait_until_gone(pid, std::time::Duration::from_secs(3), poll) {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!("process {pid} did not exit after SIGTERM and SIGKILL")))
+    }
+}
+
 pub fn kill_process(pid: u32) -> io::Result<()> {
     let mut cmd = Command::new("kill");
     cmd.arg(pid.to_string()).stdout(Stdio::null()).stderr(Stdio::null());
@@ -492,5 +543,55 @@ mod tests {
         let client = reqwest::Client::new();
         let err = download_and_verify(&client, &urls).await.unwrap_err();
         assert!(matches!(err, ReleaseError::NoAsset { .. }));
+    }
+
+    #[cfg(unix)]
+    fn spawn_sh(script: &str) -> std::process::Child {
+        Command::new("sh").arg("-c").arg(script).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_process_waits_for_a_slow_graceful_exit() {
+        // Exits ~0.7 s after SIGTERM, like a daemon draining its connections.
+        let mut child = spawn_sh("trap 'sleep 0.7; exit 0' TERM; while true; do sleep 0.05; done");
+        std::thread::sleep(std::time::Duration::from_millis(300)); // let the trap install
+        let pid = child.id();
+        let started = std::time::Instant::now();
+        stop_process(pid, std::time::Duration::from_secs(10), std::time::Duration::from_millis(20)).unwrap();
+        assert!(started.elapsed() >= std::time::Duration::from_millis(600), "returned before the process exited: {:?}", started.elapsed());
+        assert!(!is_pid_running(pid));
+        let _ = child.wait();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_process_escalates_to_sigkill_when_sigterm_is_ignored() {
+        let mut child = spawn_sh("trap '' TERM; while true; do sleep 0.05; done");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let pid = child.id();
+        stop_process(pid, std::time::Duration::from_millis(300), std::time::Duration::from_millis(20)).unwrap();
+        assert!(!is_pid_running(pid));
+        let _ = child.wait();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_process_on_a_pid_that_is_already_gone_is_ok() {
+        let mut child = spawn_sh("exit 0");
+        let pid = child.id();
+        let _ = child.wait(); // reaped: no zombie, no process
+        stop_process(pid, std::time::Duration::from_millis(200), std::time::Duration::from_millis(20)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn is_pid_running_treats_an_unreaped_zombie_as_gone() {
+        let mut child = spawn_sh("exit 0");
+        let pid = child.id();
+        std::thread::sleep(std::time::Duration::from_millis(400)); // exited, not yet waited for: a zombie
+        assert!(is_pid_alive(pid), "kill -0 still sees the zombie");
+        assert!(!is_pid_running(pid), "but it has exited");
+        let _ = child.wait();
     }
 }
