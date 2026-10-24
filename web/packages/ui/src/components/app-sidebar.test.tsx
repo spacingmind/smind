@@ -7,10 +7,10 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { PaletteProvider, useRegisteredCommands } from "@/palette/palette-provider";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { FakeWsClient } from "@/test/fake-ws-client";
-import { gitItem, openHoverCard, revealWorkspaceActions, taskTrigger } from "@/test/sidebar-helpers";
+import { gitItem, openHoverCard, revealWorkspaceActions, taskItem, taskTrigger } from "@/test/sidebar-helpers";
 import type { AttentionReason, TaskAttention } from "@/hooks/use-task-attention";
 import type { LocalPathActions } from "@/hooks/use-local-path-actions";
-import type { AgentProfile, Space, Task, Workspace } from "@/lib/types";
+import type { AgentProfile, Space, Task, TaskGit, Workspace } from "@/lib/types";
 
 let mockLocalPathActions: LocalPathActions | null = null;
 vi.mock("@/hooks/use-local-path-actions", () => ({
@@ -1742,5 +1742,163 @@ describe("AppSidebar task tree (PR-U1)", () => {
     const child = await waitFor(() => rowOf(CHILD.ID));
     expect(rowOf(PARENT.ID).closest("li")!.contains(child)).toBe(true);
     expect(child.closest("li")!.contains(rowOf(GRANDCHILD.ID))).toBe(true);
+  });
+});
+
+describe("AppSidebar stage view", () => {
+  const OTHER_WS: Workspace = { ...WORKSPACE, ID: 2, Path: "/tmp/other", Title: "Other WS" };
+  const mk = (id: number, title: string, updatedAt: string): Task => ({ ...TASK, ID: id, Title: title, UpdatedAt: updatedAt });
+  const READY_TASK = mk(1, "Ready task", "2026-10-01T00:00:00Z");
+  const NEWER_READY = mk(2, "Newer ready", "2026-10-02T00:00:00Z");
+  const DONE_TASK = mk(3, "Done task", "2026-10-01T00:00:00Z");
+  const AHEAD = { commits: { aheadOfBase: 2 } } as Partial<TaskGit>;
+  const MERGED = { pr: { state: "merged" } } as unknown as Partial<TaskGit>;
+
+  function mount(client: FakeWsClient, props: Partial<Parameters<typeof AppSidebar>[0]> = {}) {
+    return render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} {...props} />
+      </SidebarProvider>,
+    );
+  }
+
+  async function mountStage(tasks: Task[], git: TaskGit[], props: Partial<Parameters<typeof AppSidebar>[0]> = {}) {
+    const client = new FakeWsClient();
+    const view = mount(client, props);
+    await resolveWorkspaceTree(client, WORKSPACE, [], tasks);
+    await screen.findByTestId("sidebar-group-mode-control");
+    client.nth("task.gitList", 0).resolve({ items: git });
+    await flush();
+    fireEvent.click(screen.getByTestId("sidebar-group-mode-stage"));
+    return { client, ...view };
+  }
+
+  const group = (key: string) => document.querySelector<HTMLElement>(`[data-testid="sidebar-stage-group"][data-stage-group="${key}"]`);
+  const titlesIn = (el: HTMLElement) => within(el).queryAllByTestId("task-title").map((t) => t.textContent);
+
+  it("defaults to the workspace tree", async () => {
+    const client = new FakeWsClient();
+    mount(client);
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    expect(await screen.findByTestId("sidebar-workspace-row")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-stage-group")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-group-mode-tree")).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("the Stage segment shows stage groups and the choice persists across a remount", async () => {
+    const { unmount } = await mountStage([READY_TASK], [gitItem(1, "b", 1, 1, 1, AHEAD)]);
+    expect(screen.queryByTestId("sidebar-workspace-row")).not.toBeInTheDocument();
+    expect(group("ready")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-group-mode-stage")).toHaveAttribute("aria-checked", "true");
+    unmount();
+
+    const client2 = new FakeWsClient();
+    mount(client2);
+    await resolveWorkspaceTree(client2, WORKSPACE, [], [READY_TASK]);
+    client2.nth("task.gitList", 0).resolve({ items: [gitItem(1, "b", 1, 1, 1, AHEAD)] });
+    await flush();
+    expect(await screen.findByTestId("sidebar-stage-group")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-workspace-row")).not.toBeInTheDocument();
+  });
+
+  it("Done is collapsed by default with its count, expands on click, and the choice persists", async () => {
+    const git = [gitItem(3, "d", 1, 1, 1, MERGED)];
+    const { unmount } = await mountStage([DONE_TASK], git);
+    const done = group("done")!;
+    expect(within(done).getByTestId("stage-group-count")).toHaveTextContent("1");
+    expect(within(done).getByTestId("sidebar-stage-group-header")).toHaveAttribute("aria-expanded", "false");
+    expect(within(done).queryByText("Done task")).not.toBeInTheDocument();
+
+    fireEvent.click(within(done).getByTestId("sidebar-stage-group-header"));
+    expect(within(group("done")!).getByText("Done task")).toBeInTheDocument();
+    unmount();
+
+    const client2 = new FakeWsClient();
+    mount(client2);
+    await resolveWorkspaceTree(client2, WORKSPACE, [], [DONE_TASK]);
+    client2.nth("task.gitList", 0).resolve({ items: git });
+    await flush();
+    expect(await screen.findByText("Done task")).toBeInTheDocument();
+    expect(within(group("done")!).getByTestId("sidebar-stage-group-header")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("other groups are expanded by default and collapse persists", async () => {
+    await mountStage([READY_TASK], [gitItem(1, "b", 1, 1, 1, AHEAD)]);
+    const header = within(group("ready")!).getByTestId("sidebar-stage-group-header");
+    expect(header).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(header);
+    expect(within(group("ready")!).queryByText("Ready task")).not.toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem("smind:sidebar-collapsed-nodes") ?? "[]")).toContain("stage:ready");
+  });
+
+  it("sorts a group by UpdatedAt descending", async () => {
+    await mountStage(
+      [READY_TASK, NEWER_READY],
+      [gitItem(1, "a", 1, 1, 1, AHEAD), gitItem(2, "b", 1, 1, 1, AHEAD)],
+    );
+    expect(titlesIn(group("ready")!)).toEqual(["Newer ready", "Ready task"]);
+  });
+
+  it("each row shows its workspace name", async () => {
+    const client = new FakeWsClient();
+    mount(client);
+    client.nth("workspace.list", 0).resolve([WORKSPACE, OTHER_WS]);
+    await flush();
+    client.nth("space.list", 0).resolve([]);
+    client.nth("space.list", 1).resolve([]);
+    client.nth("task.list", 0).resolve([READY_TASK]);
+    client.nth("task.list", 1).resolve([{ ...NEWER_READY, WorkspaceID: 2 }]);
+    await flush();
+    client.nth("task.gitList", 0).resolve({ items: [gitItem(1, "a", 1, 1, 1, AHEAD)] });
+    await flush();
+    fireEvent.click(screen.getByTestId("sidebar-group-mode-stage"));
+    const names = screen.getAllByTestId("task-workspace-name").map((n) => n.textContent);
+    expect(names.sort()).toEqual(["My Workspace", "Other WS"]);
+    expect(within(taskItem(1)).getByTestId("task-workspace-name")).toHaveTextContent("My Workspace");
+  });
+
+  it("a task moves Ready -> Working on a running run, and Ready -> Done on a merged PR", async () => {
+    const { client, rerender } = await mountStage([READY_TASK], [gitItem(1, "a", 1, 1, 1, AHEAD)]);
+    expect(within(group("ready")!).getByText("Ready task")).toBeInTheDocument();
+
+    rerender(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} runStatus={new Map([[1, "running" as const]])} />
+      </SidebarProvider>,
+    );
+    expect(group("ready")).toBeNull();
+    expect(within(group("working")!).getByText("Ready task")).toBeInTheDocument();
+
+    rerender(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} runStatus={new Map([[1, "done" as const]])} />
+      </SidebarProvider>,
+    );
+    expect(within(group("ready")!).getByText("Ready task")).toBeInTheDocument();
+
+    act(() => client.pushNotification("task.git", { taskId: 1, git: gitItem(1, "a", 1, 1, 1, MERGED) }));
+    await flush();
+    expect(group("ready")).toBeNull();
+    expect(within(group("done")!).getByTestId("stage-group-count")).toHaveTextContent("1");
+  });
+
+  it("mounting in stage mode issues the same daemon calls as tree mode", async () => {
+    const counts = async (mode: "tree" | "stage") => {
+      window.localStorage.clear();
+      if (mode === "stage") window.localStorage.setItem("smind:sidebar-group-mode", JSON.stringify("stage"));
+      const client = new FakeWsClient();
+      const view = mount(client);
+      await resolveWorkspaceTree(client, WORKSPACE, [], [READY_TASK]);
+      client.nth("task.gitList", 0).resolve({ items: [gitItem(1, "a", 1, 1, 1, AHEAD)] });
+      await flush();
+      await screen.findByText("Ready task");
+      const byMethod: Record<string, number> = {};
+      for (const c of client.calls) byMethod[c.method] = (byMethod[c.method] ?? 0) + 1;
+      view.unmount();
+      return byMethod;
+    };
+    const tree = await counts("tree");
+    const stage = await counts("stage");
+    expect(stage).toEqual(tree);
   });
 });
