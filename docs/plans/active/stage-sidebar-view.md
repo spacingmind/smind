@@ -85,12 +85,20 @@ Component (`app-sidebar.test.tsx`):
 
 ## Progress
 
-- [ ] spec committed
-- [ ] stage-groups lib + tests
-- [ ] mode type/storage + 3-way control
-- [ ] StageGroupedList UI
-- [ ] screenshots, PR
+- [x] spec committed
+- [x] stage-groups lib + tests
+- [x] mode type/storage + 3-way control
+- [x] StageGroupedList UI
+- [x] screenshots, PR
 
 ## Validation
 
-(filled in when done: tsc, ui vitest, task lint, task test, mutation checks, screenshots under /tmp/stage-view-shots/)
+- tsc -b packages/ui clean; ui vitest 323 files / 3626 tests pass; task lint and task test exit 0.
+- AC1-AC8: covered by lib/sidebar-stage-groups.test.ts and app-sidebar.test.tsx (default tree, persistence across remount,
+  Done collapsed with count and persisted expand, sort by UpdatedAt, workspace name on rows, Ready->Working and
+  Ready->Done on events, equal daemon call counts tree vs stage).
+- Mutation checks: dropping the aheadOfBase rule fails 4 stage tests; dropping merged.state fails 2; making Done open by
+  default fails 1 sidebar test.
+- Screenshots (light+dark, 1280+390, incl. transitions): /tmp/stage-view-shots/ (INDEX.md there).
+- Known: titles truncate harder than in the tree at 256px because of the workspace chip; the control's highlight lags the
+  list by about one frame on click.
