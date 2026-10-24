@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -141,6 +142,64 @@ func (r *Runner) SetDefaultModel(provider Provider, model string) {
 	r.defaultModels[provider] = model
 }
 
+// WithProviderEnv sets the launch env of provider (config providers.<id>.env,
+// already validated by config.ValidateProviderEnv): NAME -> value, applied to
+// every launch of that provider. See Runner.SetProviderEnv.
+func WithProviderEnv(provider Provider, env map[string]string) Option {
+	return func(r *Runner) {
+		for k, v := range env {
+			r.SetProviderEnv(provider, k, v)
+		}
+	}
+}
+
+// SetProviderEnv sets (or, for an empty value, clears) one launch-env entry of
+// provider on a live Runner (the provider.setEnv RPC). The next launch of the
+// provider reads it and it wins over the daemon's own environment; a run
+// already started keeps the environment it started with. Safe for concurrent
+// use with ProviderEnv. The caller validates key and value.
+func (r *Runner) SetProviderEnv(provider Provider, key, value string) {
+	r.providerEnvMu.Lock()
+	defer r.providerEnvMu.Unlock()
+	if value == "" {
+		delete(r.providerEnv[provider], key)
+		return
+	}
+	if r.providerEnv == nil {
+		r.providerEnv = make(map[Provider]map[string]string)
+	}
+	if r.providerEnv[provider] == nil {
+		r.providerEnv[provider] = make(map[string]string)
+	}
+	r.providerEnv[provider][key] = value
+}
+
+// ProviderEnv returns a copy of provider's configured launch env, nil when none.
+func (r *Runner) ProviderEnv(provider Provider) map[string]string {
+	r.providerEnvMu.RLock()
+	defer r.providerEnvMu.RUnlock()
+	if len(r.providerEnv[provider]) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(r.providerEnv[provider]))
+	for k, v := range r.providerEnv[provider] {
+		out[k] = v
+	}
+	return out
+}
+
+// providerEnvEntries is ProviderEnv as sorted NAME=VALUE entries, for
+// appending after the inherited environment (last entry wins).
+func (r *Runner) providerEnvEntries(provider Provider) []string {
+	env := r.ProviderEnv(provider)
+	entries := make([]string, 0, len(env))
+	for k, v := range env {
+		entries = append(entries, k+"="+v)
+	}
+	sort.Strings(entries)
+	return entries
+}
+
 // WithCodexCommand overrides the command spawned for ProviderCodexNative
 // turns, in place of the default codex.DefaultCommand(). Same reasoning and
 // use (pointing at a compiled fake-agent binary in tests) as
@@ -194,6 +253,11 @@ type Runner struct {
 	defaultModels map[Provider]string
 	// defaultModelsMu guards defaultModels (SetDefaultModel runs live).
 	defaultModelsMu sync.RWMutex
+
+	// providerEnv is the configured launch env per provider
+	// (WithProviderEnv); providerEnvMu guards it (SetProviderEnv runs live).
+	providerEnv   map[Provider]map[string]string
+	providerEnvMu sync.RWMutex
 
 	// codexCommand is the command spawned for ProviderCodexNative turns.
 	// Defaults to codex.DefaultCommand(); overridable via WithCodexCommand.
@@ -895,6 +959,9 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 			claudecode.WithPermissionPolicy(r.claudePermissionPolicy),
 			claudecode.WithPermissionPromptTool(claudePermissionPromptTool))
 	}
+	// The configured launch env goes last so it wins over the daemon's own
+	// environment and everything above.
+	env = append(env, r.providerEnvEntries(ProviderClaudeNative)...)
 	if len(env) > 0 {
 		opts = append(opts, claudecode.WithEnv(env...))
 	}
@@ -1128,6 +1195,10 @@ func (r *Runner) runCodexNative(ctx context.Context, chatID, workspaceID int64, 
 		opts = append(opts, codex.WithPermissionPolicy(codexDeciderAdapter{decider}))
 	case r.codexPermissionPolicy != nil:
 		opts = append(opts, codex.WithPermissionPolicy(r.codexPermissionPolicy))
+	}
+
+	if env := r.providerEnvEntries(ProviderCodexNative); len(env) > 0 {
+		opts = append(opts, codex.WithEnv(env...))
 	}
 
 	client, err := r.newCodexClient(r.codexCommand, opts...)

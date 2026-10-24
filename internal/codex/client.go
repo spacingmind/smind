@@ -158,6 +158,7 @@ type Client struct {
 	conn      *conn
 	policy    PermissionPolicy
 	logWriter io.Writer
+	env       []string // WithEnv: appended to the inherited environment
 
 	// approvalPolicy/sandbox are Codex's own AskForApproval and
 	// SandboxMode values sent on every thread/start and thread/resume (see
@@ -206,6 +207,12 @@ type updateSub struct {
 
 // Option configures a Client constructed via New.
 type Option func(*Client)
+
+// WithEnv adds NAME=VALUE entries to the app-server's environment, after the
+// inherited one (last entry wins), e.g. CODEX_HOME.
+func WithEnv(env ...string) Option {
+	return func(c *Client) { c.env = append(c.env, env...) }
+}
 
 // WithLogWriter captures the agent's stderr (agent-side logging, never
 // parsed as protocol) to w. Defaults to io.Discard.
@@ -318,7 +325,7 @@ func New(command []string, opts ...Option) (*Client, error) {
 		opt(c)
 	}
 
-	conn, err := newConn(command, c.logWriter)
+	conn, err := newConn(command, c.logWriter, c.env)
 	if err != nil {
 		return nil, err
 	}

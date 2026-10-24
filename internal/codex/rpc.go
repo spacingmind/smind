@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -101,7 +102,7 @@ type conn struct {
 
 // newConn spawns command[0] with command[1:] as arguments, wiring its
 // stdin/stdout as the transport and stderr to logWriter.
-func newConn(command []string, logWriter io.Writer) (*conn, error) {
+func newConn(command []string, logWriter io.Writer, env []string) (*conn, error) {
 	if len(command) == 0 {
 		return nil, fmt.Errorf("codex: empty command")
 	}
@@ -111,6 +112,9 @@ func newConn(command []string, logWriter io.Writer) (*conn, error) {
 
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Stderr = logWriter
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	setProcessGroup(cmd)
 
 	stdin, err := cmd.StdinPipe()

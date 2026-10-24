@@ -152,6 +152,11 @@ type ProviderConfig struct {
 	// model "default" on a run still means "the CLI's own default" and
 	// bypasses this.
 	DefaultModel string `yaml:"defaultModel"`
+	// Env is the launch env applied to every launch of this provider,
+	// limited to ProviderEnvKeys (config directories only: CLAUDE_CONFIG_DIR,
+	// CODEX_HOME). It wins over the daemon's own environment; unset changes
+	// nothing.
+	Env map[string]string `yaml:"env"`
 }
 
 // DefaultModelProviders are the provider ids that accept providers.<id>.
@@ -177,6 +182,13 @@ func validateProviders(path string, providers map[string]ProviderConfig) error {
 		}
 		if err := ValidateModelName(pc.DefaultModel); err != nil {
 			return fmt.Errorf("config %s: providers.%s.defaultModel: %w", path, id, err)
+		}
+		for key, value := range pc.Env {
+			clean, err := ValidateProviderEnv(id, key, value)
+			if err != nil {
+				return fmt.Errorf("config %s: providers.%s.env.%s: %w", path, id, key, err)
+			}
+			pc.Env[key] = clean // the expanded, cleaned path is what launches use
 		}
 	}
 	return nil

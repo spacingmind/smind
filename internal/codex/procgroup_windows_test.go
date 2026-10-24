@@ -44,7 +44,7 @@ func TestSpawnShim_UnsafeArgRejected_Windows(t *testing.T) {
 	t.Setenv("PATH", dir)
 
 	for _, arg := range []string{"a&b", "a|b", "a^b", "%PATH%"} {
-		if _, err := newConn([]string{"shim", arg}, nil); err == nil {
+		if _, err := newConn([]string{"shim", arg}, nil, nil); err == nil {
 			t.Fatalf("newConn(shim, %q) succeeded, want refusal", arg)
 		} else if !strings.Contains(err.Error(), strconv.Quote(arg)) {
 			t.Fatalf("newConn(shim, %q) error %q does not name the argument", arg, err)
@@ -61,7 +61,7 @@ func TestAgentStop_KillsDescendants_Windows(t *testing.T) {
 	pidsPath := filepath.Join(dir, "pids.json")
 	t.Setenv("SMIND_TREEAGENT_OUT", pidsPath)
 
-	c, err := newConn([]string{agent}, nil)
+	c, err := newConn([]string{agent}, nil, nil)
 	if err != nil {
 		t.Fatalf("newConn() error = %v", err)
 	}
@@ -129,7 +129,7 @@ func crashHelper(agentPath string) {
 	// learns where to report its pids.
 	os.Setenv("SMIND_TREEAGENT_OUT", pidsPath)
 
-	c, err := newConn([]string{agentPath}, nil)
+	c, err := newConn([]string{agentPath}, nil, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "crashHelper: newConn: %v\n", err)
 		os.Exit(1)

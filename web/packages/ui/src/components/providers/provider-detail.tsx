@@ -7,6 +7,7 @@ import { buildProviderDiagnostic } from "@/lib/provider-diagnostic";
 import { ProviderIcon } from "@/components/provider-icon";
 import { AccountsCard } from "@/components/providers/accounts-card";
 import { ProviderDefaultModel } from "@/components/providers/provider-default-model";
+import { ProviderEnvField } from "@/components/providers/provider-env";
 import { ProviderModels } from "@/components/providers/provider-models";
 import { ProviderDiagnostics } from "@/components/providers/provider-diagnostics";
 import { TestButton } from "@/components/providers/account-actions";
@@ -178,6 +179,8 @@ export function ProviderDetail({
       ) : null}
 
       {info ? <ProviderDefaultModel info={info} hasClient={client !== null} /> : null}
+
+      {info ? <ProviderEnvField info={info} hasClient={client !== null} /> : null}
 
       {item.kind === "cli" ? (
         <div

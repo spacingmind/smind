@@ -124,6 +124,9 @@ func cmdServe(args []string) int {
 		if m := cfg.DefaultModel(id); m != "" {
 			runnerOpts = append(runnerOpts, taskrunner.WithDefaultModel(taskrunner.Provider(id), m))
 		}
+		if env := cfg.ProviderEnv(id); len(env) > 0 {
+			runnerOpts = append(runnerOpts, taskrunner.WithProviderEnv(taskrunner.Provider(id), env))
+		}
 	}
 	if cmd := os.Getenv("SMIND_ACP_COMMAND"); cmd != "" {
 		// Testing-only hook: lets a manual/integration test point

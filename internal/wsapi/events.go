@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
 // Event topics (ADR 0005): domain.verb, dotted lowercase. The set is
@@ -59,9 +60,9 @@ const (
 	// and when a status read sees a change. The status has no canSetToken
 	// (that is per connection).
 	TopicForgeStatus = "forge.status"
-	// TopicProviderUpdated carries {id, defaultModel} after
-	// provider.setDefaultModel changed a provider's default model, so other
-	// clients refresh provider.list.
+	// TopicProviderUpdated carries {id, defaultModel, env, envDirExists,
+	// envEffective} after provider.setDefaultModel or provider.setEnv changed
+	// a provider's setting, so other clients refresh provider.list.
 	TopicProviderUpdated = "provider.updated"
 )
 
@@ -69,6 +70,18 @@ const (
 type providerUpdatedPayload struct {
 	ID           string `json:"id"`
 	DefaultModel string `json:"defaultModel"`
+	// providerEnvView adds env, envDirExists and envEffective (paths only).
+	providerEnvView
+}
+
+// newProviderUpdatedPayload is the payload for provider, read from the live
+// Runner: its default model and launch env.
+func newProviderUpdatedPayload(runner *taskrunner.Runner, provider string) providerUpdatedPayload {
+	return providerUpdatedPayload{
+		ID:              provider,
+		DefaultModel:    runner.DefaultModel(taskrunner.Provider(provider)),
+		providerEnvView: providerEnvViewFor(runner, provider),
+	}
 }
 
 // The learning topics (TopicLearnedSkillProposed/Changed, TopicLearningJob)

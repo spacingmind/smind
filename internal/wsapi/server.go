@@ -258,6 +258,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		return res, err
 	}
 	hs["provider.setDefaultModel"] = handleProviderSetDefaultModel(runner, bus)
+	hs["provider.setEnv"] = handleProviderSetEnv(runner, bus)
 	hs["session.identify"] = handleSessionIdentify(reg)
 	admit := newSeatAdmission(reg, profReg, db)
 	hs["profile.list"] = admit.wrapProfileList(hs["profile.list"])

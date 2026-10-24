@@ -252,6 +252,7 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 		opts = append(opts, claudecode.WithCLIPath(cliPath))
 		env = append(env, launchEnv...)
 	}
+	env = append(env, r.providerEnvEntries(ProviderClaudeNative)...)
 	opts = append(opts, claudecode.WithEnv(env...))
 	if model != "" && model != ClaudeModelDefault {
 		opts = append(opts, claudecode.WithModel(model))

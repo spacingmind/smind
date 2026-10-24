@@ -31,7 +31,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"account.oauthStart":       handleAccountOAuthStart(coord),
 		"account.oauthComplete":    handleAccountOAuthComplete(coord),
 		"provider.list":            handleProviderList(runner, reg),
-		"provider.test":            handleProviderTest(acctReg),
+		"provider.test":            handleProviderTest(acctReg, runner),
 		"account.list":             handleAccountList(acctReg),
 		"account.rename":           handleAccountRename(acctReg),
 		"account.updateCredential": handleAccountUpdateCredential(acctReg),
@@ -2189,6 +2189,7 @@ type providerListResult struct {
 // showed the provider rate limited until then (ADR-0041 F1).
 type providerListEntry struct {
 	taskrunner.ProviderInfo
+	providerEnvView
 	CooldownUntil string `json:"cooldownUntil,omitempty"`
 }
 
@@ -2204,7 +2205,7 @@ func handleProviderList(runner *taskrunner.Runner, reg *runs.Registry) handlerFu
 		catalog := runner.ProviderCatalog()
 		entries := make([]providerListEntry, 0, len(catalog))
 		for _, info := range catalog {
-			e := providerListEntry{ProviderInfo: info}
+			e := providerListEntry{ProviderInfo: info, providerEnvView: providerEnvViewFor(runner, string(info.ID))}
 			if until, ok := cooling[string(info.ID)]; ok {
 				e.CooldownUntil = until.UTC().Format(time.RFC3339)
 			}
@@ -2258,7 +2259,7 @@ type providerTestResult struct {
 // stored, unexpired credential exists for it. Never hits the network and
 // never refreshes a credential (accounts.Registry.EnsureFresh does that,
 // with real side effects); this only reports what's already there.
-func handleProviderTest(acctReg *accounts.Registry) handlerFunc {
+func handleProviderTest(acctReg *accounts.Registry, runner *taskrunner.Runner) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			Provider string `json:"provider"`
@@ -2270,7 +2271,13 @@ func handleProviderTest(acctReg *accounts.Registry) handlerFunc {
 			return nil, fmt.Errorf("provider.test: provider is required")
 		}
 		if cmd, ok := providerCLICommand[taskrunner.Provider(p.Provider)]; ok {
-			return testProviderCLI(cmd), nil
+			res := testProviderCLI(cmd)
+			if runner != nil {
+				if d := providerEnvDetail(runner, p.Provider); d != "" {
+					res.Detail += "; " + d
+				}
+			}
+			return res, nil
 		}
 		return testProviderCredential(acctReg, p.Provider), nil
 	}

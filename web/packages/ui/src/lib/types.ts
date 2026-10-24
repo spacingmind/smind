@@ -234,6 +234,19 @@ export interface ProviderInfo {
   modelsDiscovered?: boolean;
   /** Config `providers.<id>.defaultModel`: the model a run that names none resolves to. Absent = the provider's own default. */
   defaultModel?: string;
+  /** Per-provider launch env the user configured (key -> absolute path). */
+  env?: Record<string, string>;
+  /** Whether each configured env path exists as a directory. */
+  envDirExists?: Record<string, boolean>;
+  /** Per allowlisted key (claude-native CLAUDE_CONFIG_DIR, codex-native CODEX_HOME): the path a run would use and where it came from. */
+  envEffective?: Record<string, ProviderEnvEffective>;
+}
+
+/** One `envEffective` entry: the resolved path, its source, and whether that directory exists. */
+export interface ProviderEnvEffective {
+  path: string;
+  source: "settings" | "environment" | "default";
+  exists: boolean;
 }
 
 // Result of provider.list (internal/wsapi/handlers.go's providerListResult).
