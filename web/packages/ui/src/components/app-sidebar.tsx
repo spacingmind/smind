@@ -59,6 +59,7 @@ import { useRowActive } from "@/hooks/use-row-active";
 import { useSidebarGroupMode } from "@/hooks/use-sidebar-group-mode";
 import { describeTaskStatus } from "@/lib/task-status-label";
 import { groupTasksByStatus, type StatusGroup } from "@/lib/sidebar-status-groups";
+import { groupTasksByStage, type StageGroup } from "@/lib/sidebar-stage-groups";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import { UsageSidebarItem } from "@/components/account-usage/usage-sidebar-item";
 import { SidebarFooterActions } from "@/components/sidebar-footer";
@@ -240,9 +241,9 @@ const NODE_COLLAPSE_FALLBACK: CollapsedNodes = {
 };
 const CollapsedNodesContext = createContext<CollapsedNodes>(NODE_COLLAPSE_FALLBACK);
 
-function useNodeOpen(id: string): [boolean, () => void] {
+function useNodeOpen(id: string, defaultOpen = true): [boolean, () => void] {
   const { isOpen, toggle } = useContext(CollapsedNodesContext);
-  return [isOpen(id), useCallback(() => toggle(id), [toggle, id])];
+  return [isOpen(id, defaultOpen), useCallback(() => toggle(id, defaultOpen), [toggle, id, defaultOpen])];
 }
 
 function useRowSignal(): RowSignal {
@@ -474,6 +475,16 @@ export function AppSidebar({
 
   const pinnedTasks = useMemo(() => allTasks.filter((t) => pinned.has(t.ID)), [allTasks, pinned]);
   const { groupMode, setGroupMode } = useSidebarGroupMode();
+  const stageGroups = useMemo(
+    () =>
+      groupTasksByStage(allTasks, {
+        attention: attention ?? EMPTY_ATTENTION,
+        runStatus: runStatus ?? EMPTY_RUN_STATUS,
+        gitByTask,
+      }),
+    [allTasks, attention, runStatus, gitByTask],
+  );
+  const workspaceNames = useMemo(() => new Map((workspaces ?? []).map((ws) => [ws.ID, ws.Title || ws.Path])), [workspaces]);
   const statusGroups = useMemo(
     () => groupTasksByStatus(allTasks, attention ?? EMPTY_ATTENTION, runStatus ?? EMPTY_RUN_STATUS),
     [allTasks, attention, runStatus],
@@ -885,6 +896,15 @@ export function AppSidebar({
                       onArchiveTask={archiveTask}
                     />
                   )}
+                  {!searching && groupMode === "stage" && (
+                    <StageGroupedList
+                      groups={stageGroups}
+                      workspaceNames={workspaceNames}
+                      selectedTaskId={selectedTaskId}
+                      onSelectTask={onSelectTask}
+                      onArchiveTask={archiveTask}
+                    />
+                  )}
                   {!searching &&
                     groupMode === "tree" &&
                     workspaces?.map((ws) => (
@@ -1222,6 +1242,97 @@ function StatusGroupItem({
             onSelectTask={onSelectTask}
             emptyText="No tasks"
             onArchiveTask={onArchiveTask}
+          />
+        </ContainerContent>
+      )}
+    </SidebarMenuItem>
+  );
+}
+
+/**
+ * The group-by-stage view: Working / Ready to review / Done / Idle buckets
+ * (lib/sidebar-stage-groups.ts), modelled on StatusGroupedList. Done starts
+ * collapsed (its expand is persisted as `expanded:stage:done`); every row also
+ * names its workspace, since this view drops the workspace headers.
+ */
+function StageGroupedList({
+  groups,
+  workspaceNames,
+  selectedTaskId,
+  onSelectTask,
+  onArchiveTask,
+}: {
+  groups: StageGroup[];
+  workspaceNames: ReadonlyMap<number, string>;
+  selectedTaskId: number | null;
+  onSelectTask?: (task: Task) => void;
+  onArchiveTask: (task: Task) => void;
+}) {
+  return (
+    <>
+      {groups.map((group) => (
+        <StageGroupItem
+          key={group.key}
+          group={group}
+          workspaceNames={workspaceNames}
+          selectedTaskId={selectedTaskId}
+          onSelectTask={onSelectTask}
+          onArchiveTask={onArchiveTask}
+        />
+      ))}
+    </>
+  );
+}
+
+function StageGroupItem({
+  group,
+  workspaceNames,
+  selectedTaskId,
+  onSelectTask,
+  onArchiveTask,
+}: {
+  group: StageGroup;
+  workspaceNames: ReadonlyMap<number, string>;
+  selectedTaskId: number | null;
+  onSelectTask?: (task: Task) => void;
+  onArchiveTask: (task: Task) => void;
+}) {
+  const [open, toggleOpen] = useNodeOpen(`stage:${group.key}`, group.key !== "done");
+  const { active, rowProps } = useRowActive();
+
+  return (
+    <SidebarMenuItem data-testid="sidebar-stage-group" data-stage-group={group.key}>
+      <div {...rowProps}>
+        <SidebarMenuButton
+          onClick={toggleOpen}
+          aria-expanded={open}
+          data-testid="sidebar-stage-group-header"
+          className="rounded-lg"
+        >
+          <FadeText
+            data-testid="container-title"
+            className={cn("flex-initial text-ui-sm", active ? "text-foreground" : "text-foreground-subtle")}
+          >
+            {group.label}
+          </FadeText>
+          <RowChevron open={open} />
+          <span
+            data-testid="stage-group-count"
+            className="ml-auto inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-tag/50 px-1.5 py-0.5 text-ui-sm font-medium leading-none text-foreground-subtle"
+          >
+            {group.tasks.length}
+          </span>
+        </SidebarMenuButton>
+      </div>
+      {open && (
+        <ContainerContent kind="stage">
+          <TaskRows
+            tasks={group.tasks}
+            selectedTaskId={selectedTaskId}
+            onSelectTask={onSelectTask}
+            emptyText="No tasks"
+            onArchiveTask={onArchiveTask}
+            workspaceNames={workspaceNames}
           />
         </ContainerContent>
       )}
@@ -1935,6 +2046,7 @@ const TaskRow = memo(function TaskRow({
   onArchiveTask,
   spaces,
   onMoveTask,
+  workspaceName,
 }: {
   task: Task;
   /** "supervisor" | "leader" | "coder"; absent for an untiered root. Shown in the hover card and the row's aria-label, not on the row. */
@@ -1952,6 +2064,8 @@ const TaskRow = memo(function TaskRow({
   onArchiveTask: (task: Task) => void;
   spaces?: SpaceWithTasks[];
   onMoveTask?: (task: Task, spaceId: number | null) => void;
+  /** Quiet workspace name after the title (stage view only). */
+  workspaceName?: string;
 }) {
   const { attention, statusOverrides, runStatus, rateLimit, gitByTask, unread, onMarkUnread, pinned, onTogglePin, now } = useRowSignal();
   const hasChildren = childCount > 0;
@@ -2136,6 +2250,15 @@ const TaskRow = memo(function TaskRow({
                   >
                     {task.Title}
                   </FadeText>
+                  {workspaceName && (
+                    <span
+                      data-testid="task-workspace-name"
+                      title={workspaceName}
+                      className="min-w-0 max-w-[40%] shrink-[3] truncate text-ui-xs text-foreground-subtlest @max-[14rem]/sb:hidden"
+                    >
+                      {workspaceName}
+                    </span>
+                  )}
                   {hasChildren && (
                     <span
                       data-testid="task-child-count"
@@ -2254,6 +2377,7 @@ function TaskRows({
   onArchiveTask,
   spaces,
   onMoveTask,
+  workspaceNames,
 }: {
   tasks: Task[];
   /** Root TaskNodes for the tree view; absent for the flat lists (search/pinned/status). */
@@ -2274,6 +2398,8 @@ function TaskRows({
    */
   spaces?: SpaceWithTasks[];
   onMoveTask?: (task: Task, spaceId: number | null) => void;
+  /** The stage view's flat list: when given, each row shows its workspace's name. */
+  workspaceNames?: ReadonlyMap<number, string>;
 }) {
   const { attention, runStatus } = useRowSignal();
 
@@ -2303,6 +2429,7 @@ function TaskRows({
               onArchiveTask={onArchiveTask}
               spaces={spaces}
               onMoveTask={onMoveTask}
+              workspaceName={workspaceNames?.get(task.WorkspaceID)}
             />
           </SidebarMenuSubItem>
         ))}
