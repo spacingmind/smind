@@ -147,3 +147,21 @@ func budgetReachedText(be *BudgetExceededError) string {
 	}
 	return text
 }
+
+// CheckTreeBudget is checkBudget for a launch that is not a run: an agent
+// creating a task under parentTaskID (task.create from a seat). It resolves
+// the tree root and refuses with *BudgetExceededError exactly as run
+// admission does; a nil error means the tree has no budget or is under it.
+func (reg *Registry) CheckTreeBudget(parentTaskID int64, origin string) error {
+	if origin != store.ChatQueueSourceAgent {
+		return nil
+	}
+	_, root, err := reg.treeRootTask(parentTaskID)
+	if err != nil {
+		return err
+	}
+	return reg.checkBudget(origin, root)
+}
+
+// RPCCode is the wire code of a budget refusal (wsapi's rpcCoder).
+func (e *BudgetExceededError) RPCCode() string { return "budget_exceeded" }

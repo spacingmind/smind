@@ -136,7 +136,7 @@ type Task struct {
 	// BudgetUSD is the opt-in tree budget (ADR-0041 A5): a USD cap on the
 	// reported cost of this task's tree, meaningful on a root task only.
 	// nil = no budget.
-	BudgetUSD *float64
+	BudgetUSD *float64 `json:"budgetUsd,omitempty"`
 }
 
 // Run is a persisted record of one internal/runs.Registry Run: a

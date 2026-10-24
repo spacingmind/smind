@@ -23,6 +23,10 @@ type Task struct {
 	Title       string
 	TaskStatus  string
 	Archived    bool
+	// BudgetUSD is the opt-in tree budget (ADR-0041 A5); only a root's
+	// counts. Build copies it onto a root's node; the spend comes from the
+	// caller (it needs a cost query Build must not make).
+	BudgetUSD *float64
 }
 
 // State is the task.tree node run-state vocabulary (see RunFact.State).
@@ -132,6 +136,17 @@ type Node struct {
 	Run         NodeRun   `json:"run"`
 	Counts      Counts    `json:"counts"`
 	Usage       NodeUsage `json:"usage"`
+	// BudgetUSD is set on a ROOT node whose task has a tree budget
+	// (additive, omitted otherwise). The remaining budget* fields are
+	// filled by the wsapi layer from one cost query per budgeted root:
+	// BudgetSpentUSD is the reported cost, BudgetPartial/BudgetUnknownRuns
+	// say how many finished runs reported none (never counted, ADR-0020),
+	// OverBudget is spent >= budget.
+	BudgetUSD         *float64 `json:"budgetUsd,omitempty"`
+	BudgetSpentUSD    *float64 `json:"budgetSpentUsd,omitempty"`
+	BudgetPartial     bool     `json:"budgetPartial,omitempty"`
+	BudgetUnknownRuns int      `json:"budgetUnknownRuns,omitempty"`
+	OverBudget        bool     `json:"overBudget,omitempty"`
 }
 
 // TierOf derives a task's tier from its position (plan §3.1): no parent +
@@ -247,7 +262,7 @@ func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, r
 		if s := TierOf(hasParent, liveKids > 0); s != "" {
 			tier = &s
 		}
-		return Node{
+		n := Node{
 			ID: t.ID, ParentID: t.ParentID, WorkspaceID: t.WorkspaceID,
 			Title: t.Title, Depth: depth, TaskStatus: t.TaskStatus, Tier: tier,
 			ChildCount: liveKids,
@@ -259,6 +274,10 @@ func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, r
 			Counts: rec.counts,
 			Usage:  NodeUsage{Own: usage[t.ID], Subtree: rec.usage, ArchivedDescendants: rec.archived},
 		}
+		if t.ParentID == nil {
+			n.BudgetUSD = t.BudgetUSD
+		}
+		return n
 	}
 
 	nodes := make([]Node, 0)
