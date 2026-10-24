@@ -135,6 +135,27 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		cooldownUntil, cooling = until, true
 	}
 
+	// ADR-0041 A5: the tree budget refuses an agent launch before anything
+	// is created or queued (a held or busy-chat enqueue included). Only an
+	// agent source resolves the root here; every other source resolves it
+	// below, exactly as before, so a human send pays no extra query.
+	var (
+		treeRoot int64
+		rootTask store.Task
+		rootDone bool
+	)
+	if source == store.ChatQueueSourceAgent {
+		var err error
+		treeRoot, rootTask, err = reg.treeRootTask(taskID)
+		if err != nil {
+			return StartOutcome{}, err
+		}
+		rootDone = true
+		if err := reg.checkBudget(source, rootTask); err != nil {
+			return StartOutcome{}, err
+		}
+	}
+
 	notify := true
 	if o := resolveStartOptions(opts); o.notifySet {
 		notify = o.notify
@@ -177,9 +198,12 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	// Resolved before reg.mu is taken, same as Start (store reads never
 	// happen under the registry lock; parent links are immutable while a
 	// run exists).
-	treeRoot, err := reg.treeRootOf(taskID)
-	if err != nil {
-		return StartOutcome{}, err
+	if !rootDone {
+		var err error
+		treeRoot, err = reg.treeRootOf(taskID)
+		if err != nil {
+			return StartOutcome{}, err
+		}
 	}
 
 	// O1 provenance: same worktree resolution Start does, for the
@@ -497,6 +521,14 @@ func (reg *Registry) deliverOne(chatID int64) {
 			var busyErr *ChatBusyError
 			var setupErr *SetupBusyError
 			var treeErr *TreeBusyError
+			var budgetErr *BudgetExceededError
+			if errors.As(err, &budgetErr) {
+				// The tree reached its budget since this agent item was
+				// queued. Cancel it (a human can resend after raising the
+				// cap) rather than leave it at the head to wedge the queue.
+				reg.cancelQueuedItem(item.ID, store.ChatQueueCancelAuto, budgetErr.Error())
+				continue
+			}
 			if errors.As(err, &setupErr) {
 				// Setup was re-run since the check above; its finish delivers.
 				return

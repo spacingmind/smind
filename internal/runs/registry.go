@@ -102,6 +102,11 @@ type Registry struct {
 	// store under reg.mu"; nil in production.
 	treeRootStoreRead func()
 
+	// budgetCostRead, when non-nil, is called before each TreeKnownCost query
+	// checkBudget makes. A test seam (budget_test.go) that pins the admission
+	// query count; nil in production.
+	budgetCostRead func()
+
 	// notifier, if set via SetNotifier, receives run.status lifecycle
 	// notifications (Start, finish) and permission.pending notifications
 	// (runPermissionDecider), so the wsapi server can push them as
@@ -755,8 +760,13 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	// parent links are immutable while a run exists, and the store call
 	// must not run under the registry lock (it would serialize every
 	// start behind one store round trip).
-	treeRoot, err := reg.treeRootOf(taskID)
+	treeRoot, rootTask, err := reg.treeRootTask(taskID)
 	if err != nil {
+		return "", err
+	}
+	// ADR-0041 A5: the tree budget, also before reg.mu. A queued agent
+	// item reaches here again at delivery, so it is re-checked then.
+	if err := reg.checkBudget(resolveStartOptions(opts).origin, rootTask); err != nil {
 		return "", err
 	}
 

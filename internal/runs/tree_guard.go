@@ -1,6 +1,10 @@
 package runs
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/spacingmind/smind/internal/store"
+)
 
 // defaultMaxConcurrentRunsPerTree is the per-tree concurrency limit when
 // SetMaxConcurrentRunsPerTree has not been called (or was called with a
@@ -51,26 +55,43 @@ const treeRootWalkHopLimit = 32
 // lowest task id seen on it (or the task itself when it has no parent),
 // never loops.
 func (reg *Registry) treeRootOf(taskID int64) (int64, error) {
+	id, _, err := reg.treeRootTask(taskID)
+	return id, err
+}
+
+// treeRootTask is treeRootOf that also returns the root's Task row. The
+// final step of the walk has already loaded it, so the tree budget check
+// (checkBudget) costs no extra GetTask; only the corrupt-cycle and
+// hop-limit fallbacks, which resolve to a task the walk did not end on,
+// read it once more.
+func (reg *Registry) treeRootTask(taskID int64) (int64, store.Task, error) {
 	root := taskID
 	lowest := taskID
 	seen := map[int64]bool{taskID: true}
 	cur := taskID
+	fallback := func() (int64, store.Task, error) {
+		t, err := reg.st.GetTask(lowest)
+		if err != nil {
+			return 0, store.Task{}, fmt.Errorf("runs: start: resolve tree root of task %d: %w", taskID, err)
+		}
+		return lowest, t, nil
+	}
 	for i := 0; i < treeRootWalkHopLimit; i++ {
 		if reg.treeRootStoreRead != nil {
 			reg.treeRootStoreRead()
 		}
 		t, err := reg.st.GetTask(cur)
 		if err != nil {
-			return 0, fmt.Errorf("runs: start: resolve tree root of task %d: %w", taskID, err)
+			return 0, store.Task{}, fmt.Errorf("runs: start: resolve tree root of task %d: %w", taskID, err)
 		}
 		if t.ParentTaskID == nil || *t.ParentTaskID == 0 {
-			return root, nil
+			return root, t, nil
 		}
 		parent := *t.ParentTaskID
 		if seen[parent] {
 			// Corrupt cycle: resolve to the lowest id seen so the same
 			// cycle always maps to one deterministic root.
-			return lowest, nil
+			return fallback()
 		}
 		seen[parent] = true
 		if parent < lowest {
@@ -80,7 +101,7 @@ func (reg *Registry) treeRootOf(taskID int64) (int64, error) {
 		cur = parent
 	}
 	// Chain deeper than the hop limit: treat it like a cycle, deterministically.
-	return lowest, nil
+	return fallback()
 }
 
 // runningInTreeLocked counts StatusRunning runs whose treeRoot equals
