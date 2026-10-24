@@ -52,6 +52,8 @@ describe("sidebar group mode", () => {
   it("round-trips across a write", () => {
     writeSidebarGroupMode("status");
     expect(readSidebarGroupMode()).toBe("status");
+    writeSidebarGroupMode("stage");
+    expect(readSidebarGroupMode()).toBe("stage");
   });
 
   it("falls back to the tree view for an invalid stored value", () => {
