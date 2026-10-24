@@ -39,6 +39,12 @@ export interface TaskTreeNode {
   taskStatus: string;
   tier: "supervisor" | "leader" | "coder" | null;
   childCount: number;
+  /** ADR-0041 A5 tree budget: set on the ROOT node only (same fields as on Task). */
+  budgetUsd?: number | null;
+  budgetSpentUsd?: number | null;
+  budgetPartial?: boolean;
+  budgetUnknownRuns?: number;
+  overBudget?: boolean;
   run: {
     state: TaskTreeRunState;
     runningRunIds: string[];

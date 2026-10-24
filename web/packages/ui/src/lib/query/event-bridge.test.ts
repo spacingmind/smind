@@ -42,7 +42,7 @@ const usage = (accountId: number, displayName: string): AccountUsage => ({
 const usageData = (reports: AccountUsage[]): UsageQueryData => ({ supportsUsage: true, enabled: true, ttlSeconds: 300, reports });
 
 describe("applyDaemonEvent", () => {
-  it("a terminal run.status invalidates that task's path index and the shared run list only", () => {
+  it("a terminal run.status invalidates that task's path index, the shared run list and the tree budgets only", () => {
     const qc = createQueryClient();
     const invalidate = vi.spyOn(qc, "invalidateQueries");
     applyDaemonEvent(qc, "run.status", { runId: "r", taskId: 4, chatId: 1, status: "running" });
@@ -50,7 +50,9 @@ describe("applyDaemonEvent", () => {
     applyDaemonEvent(qc, "run.status", { runId: "r", taskId: 4, chatId: 1, status: "done" });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.taskSearchIndex(4) });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runList() });
-    expect(invalidate).toHaveBeenCalledTimes(2);
+    // Every tree budget's spend (ADR-0041 A5): the ended run may belong to any task in a budgeted tree.
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.taskBudgetAll() });
+    expect(invalidate).toHaveBeenCalledTimes(3);
   });
 
   it("account.updated upserts the account list and re-reads the cached usage list", () => {

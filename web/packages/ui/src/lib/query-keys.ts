@@ -32,6 +32,9 @@ export const queryKeys = {
   /** One `workspace.branches` page (the New Task "Start from → Branch…" combobox). */
   workspaceBranches: (workspaceId: number, query: string, limit: number) =>
     ["workspace.branches", { workspaceId, query, limit }] as const,
+  /** One root task's payload (`task.get`) carrying its tree-budget spend (ADR-0041 A5); refetched when a run ends and whenever the popover opens. */
+  taskBudget: (taskId: number) => ["task.budget", { taskId }] as const,
+  taskBudgetAll: () => ["task.budget"] as const,
   /** One task's git/PR state (`task.git`); live via the `task.git` event. */
   taskGit: (taskId: number) => ["task.git", { taskId }] as const,
   /** Every task's git/PR state in one workspace (`task.gitList`); the sidebar/header chips read it. */

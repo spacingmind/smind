@@ -197,8 +197,10 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       if (typeof p?.taskId === "number" && (p.status === "done" || p.status === "error" || p.status === "stopped")) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.taskSearchIndex(p.taskId) });
       }
-      // A run that ended reported its usage (and model): the shared run list is stale (the composer chip reads it).
+      // A run that ended reported its usage (and model): the shared run list is stale (the composer chip reads it),
+      // and so is every tree budget's spend (the run may belong to any task in a budgeted tree).
       if (p?.status === "done" || p?.status === "error" || p?.status === "stopped") {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.taskBudgetAll() });
         void queryClient.invalidateQueries({ queryKey: queryKeys.runList() });
       }
       return;

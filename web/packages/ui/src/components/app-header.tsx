@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { AppMenu } from "@/components/app-menu";
 import { HeaderTaskMenu, HeaderTaskTitle } from "@/components/app-header-task";
+import { TaskBudgetControl } from "@/components/task-budget-control";
 import { DesktopWindowControls } from "@/components/desktop-window-controls";
 import { OpenInEditorButton } from "@/components/open-in-editor-button";
 import { Button } from "@/components/ui/button";
@@ -74,6 +75,7 @@ function HeaderTask({
     <div data-testid="app-header-task" className="flex min-w-0 items-center gap-0.5">
       <HeaderTaskTitle task={live} />
       <HeaderTaskMenu task={live} client={client} localPathActions={localPathActions} />
+      <TaskBudgetControl task={live} client={client} />
     </div>
   );
 }

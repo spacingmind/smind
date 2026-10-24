@@ -63,6 +63,17 @@ export interface Task {
   BaseRef?: string;
   /** ADR-0039 §9: set when archiving deleted the task's branch, so Restore has nothing to rebuild the worktree from. */
   BranchDeletedAt?: string | null;
+  /**
+   * ADR-0041 A5 tree budget, on a ROOT task only (camelCase on the wire: the daemon's computed fields). `budgetUsd` is the
+   * opt-in cap (null/absent = none); the rest are omitted for an unbudgeted tree and for a non-root.
+   */
+  budgetUsd?: number | null;
+  /** Known (reported) cost of the whole tree so far. */
+  budgetSpentUsd?: number | null;
+  /** True when some finished run reported no cost, so the cap bounds reported cost only. */
+  budgetPartial?: boolean;
+  budgetUnknownRuns?: number;
+  overBudget?: boolean;
 }
 
 // Mirrors internal/store.Space field-for-field -- same no-json-tags,
