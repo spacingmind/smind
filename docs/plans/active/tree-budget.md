@@ -76,8 +76,12 @@ PR 1 daemon (column, store query, admission, RPC, CLI, MCP read-only fields, tas
 
 ## Progress
 
-(none yet)
+- PR 1 (daemon): store column + `TreeKnownCost`, admission in `Start`/`StartWhenBusy`/queue delivery, one notification per crossing, `task.setBudget`, `budget_exceeded`, CLI, MCP read-only. Built by a peer-sonnet Peer (task #91, candidate d8455b10), reviewed and ACCEPTED by the Lead.
+- PR 2 (web, mobile line): not started.
 
 ## Validation
 
-(filled as ACs are confirmed; screenshots in /tmp/tree-budget-shots/)
+PR 1, confirmed (AC1-AC11): named tests above pass (`go test` on runs, store, wsapi, tasktree, cmd/smind; `-race` on runs, store, wsapi). Mutations (reverted): `>=` to `>` fails `TestBudgetAdmission_ExactlyAtCapBoundary`; dropping the agent-origin condition fails `TestBudgetAdmission_HumanNeverRefused` and `..._QueuedAgentRefusedAtEnqueueAndDelivery`.
+AC13 (isolated daemon, own SMIND_HOME, port 48771, transcript `/tmp/tree-budget-shots/daemon-smoke.txt`): root budget $0.05 set by CLI; a seeded $0.06 run (cost seeded in sqlite, NO model run) plus a seeded run with no cost; an agent `task_send` over `smind mcp serve` with fromTaskId/fromChatId was refused twice with the typed sentence; exactly one `child_event` row was queued for the root chat; raise and clear via CLI work. Not verified: a real model run crossing the cap (no model call made).
+AC12 (web): pending PR 2.
+Known limits: the check runs before `reg.mu`, so launches racing the same instant can both pass (cost is only known when a run finishes, so v1 accepts this); `child_event` wake runs are never refused, so a woken Lead can still spend after the cap (the cap bounds NEW agent launches, per the ADR).
