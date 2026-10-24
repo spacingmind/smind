@@ -55,14 +55,14 @@ const RunPurposeProbe = "probe"
 
 func insertTask(db execer, t Task) (Task, error) {
 	res, err := db.Exec(
-		`INSERT INTO tasks (workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, kind, base_ref, base_sha, branch_owned, pr_forge, pr_repo, pr_number, pr_url, pr_head_ref, untrusted_source)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO tasks (workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, kind, base_ref, base_sha, branch_owned, pr_forge, pr_repo, pr_number, pr_url, pr_head_ref, untrusted_source, budget_usd)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.WorkspaceID, int64PtrToNull(t.SpaceID), int64PtrToNull(t.ParentTaskID), t.Title, t.Status,
 		stringPtrToNull(t.WorktreePath), stringPtrToNull(t.Branch),
 		t.CreatedAt, t.UpdatedAt, timePtrToNull(t.ArchivedAt), t.Kind,
 		nullString(t.BaseRef), nullString(t.BaseSha), t.BranchOwned,
 		nullString(t.PRForge), nullString(t.PRRepo), nullInt(t.PRNumber), nullString(t.PRURL), nullString(t.PRHeadRef),
-		t.UntrustedSource,
+		t.UntrustedSource, float64PtrToNull(t.BudgetUSD),
 	)
 	if err != nil {
 		return Task{}, fmt.Errorf("insert task: %w", err)
@@ -335,6 +335,19 @@ func (s *Store) SetTaskBranchDeleted(id int64) (Task, error) {
 	return s.GetTask(id)
 }
 
+// SetTaskBudget sets (v != nil) or clears (v == nil) tasks.budget_usd on task
+// id. Validation and the root-only rule live with the callers (task.setBudget).
+func (s *Store) SetTaskBudget(id int64, v *float64) error {
+	res, err := s.db.Exec(`UPDATE tasks SET budget_usd = ? WHERE id = ?`, float64PtrToNull(v), id)
+	if err != nil {
+		return fmt.Errorf("set task %d budget: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("set task %d budget: %w", id, sql.ErrNoRows)
+	}
+	return nil
+}
+
 // ListArchivedTasks returns workspaceID's archived non-system tasks, newest
 // archive first (ADR-0039 section 9's Archived view).
 func (s *Store) ListArchivedTasks(workspaceID int64) ([]Task, error) {
@@ -436,7 +449,7 @@ func (s *Store) DeleteTask(id int64) error {
 }
 
 // taskCols is the column list scanTask reads.
-const taskCols = "id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, setup_status, setup_error, setup_log, port, kind, base_ref, base_sha, branch_owned, pr_forge, pr_repo, pr_number, pr_url, pr_head_ref, untrusted_source, branch_deleted_at"
+const taskCols = "id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, setup_status, setup_error, setup_log, port, kind, base_ref, base_sha, branch_owned, pr_forge, pr_repo, pr_number, pr_url, pr_head_ref, untrusted_source, branch_deleted_at, budget_usd"
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -450,12 +463,13 @@ func scanTask(row rowScanner) (Task, error) {
 	var prNumber sql.NullInt64
 	var archivedAt, branchDeletedAt sql.NullTime
 	var port sql.NullInt64
+	var budgetUSD sql.NullFloat64
 
 	if err := row.Scan(&t.ID, &t.WorkspaceID, &spaceID, &parentTaskID, &t.Title, &t.Status,
 		&worktreePath, &branch, &t.CreatedAt, &t.UpdatedAt, &archivedAt,
 		&setupStatus, &setupError, &setupLog, &port, &t.Kind,
 		&baseRef, &baseSha, &t.BranchOwned,
-		&prForge, &prRepo, &prNumber, &prURL, &prHeadRef, &t.UntrustedSource, &branchDeletedAt); err != nil {
+		&prForge, &prRepo, &prNumber, &prURL, &prHeadRef, &t.UntrustedSource, &branchDeletedAt, &budgetUSD); err != nil {
 		return Task{}, err
 	}
 
@@ -465,6 +479,10 @@ func scanTask(row rowScanner) (Task, error) {
 	t.Branch = nullToStringPtr(branch)
 	t.ArchivedAt = nullToTimePtr(archivedAt)
 	t.BranchDeletedAt = nullToTimePtr(branchDeletedAt)
+	if budgetUSD.Valid {
+		v := budgetUSD.Float64
+		t.BudgetUSD = &v
+	}
 	t.SetupStatus = setupStatus.String
 	t.SetupError = setupError.String
 	t.SetupLog = setupLog.String
@@ -473,6 +491,13 @@ func scanTask(row rowScanner) (Task, error) {
 	t.PRForge, t.PRRepo, t.PRNumber = prForge.String, prRepo.String, prNumber.Int64
 	t.PRURL, t.PRHeadRef = prURL.String, prHeadRef.String
 	return t, nil
+}
+
+func float64PtrToNull(p *float64) sql.NullFloat64 {
+	if p == nil {
+		return sql.NullFloat64{}
+	}
+	return sql.NullFloat64{Float64: *p, Valid: true}
 }
 
 func int64PtrToNull(p *int64) sql.NullInt64 {
