@@ -53,10 +53,24 @@ to offer a standing "always allow" for the risky ones.
     agent's own bypass-style mode or an in-agent allow-list never reaches
     smind (gap, documented). `autoAccept` is bypass-equivalent and stays exempt
     (the Human's own per-run choice, ADR-0019).
-  - claude-native: `can_use_tool` for Bash → classified. Whether the CLI
-    escalates compound commands under acceptEdits/auto, and whether a
-    `--settings` `permissions.ask` rule `Bash(git push:*)` forces a prompt there,
-    is verified against the real CLI (Validation); until then not relied on.
+  - claude-native: `can_use_tool` for Bash → classified. In `auto` the CLI runs
+    `git push` with no prompt at all, so smind also passes the always-ask set as
+    `permissions.ask` rules on this run's command line (`--settings '<inline
+    json>'`, `claudeGitAskSettings`, generated from the `claudeAskRules` table in
+    `gitrules.go`; no settings file is written). Every mode except
+    `bypassPermissions` gets it. Patterns per class: the plain prefix
+    (`Bash(git push:*)`), `Bash(*git push*)` (reaches `sh -c '...'` and
+    `bash -lc "..."`, which the CLI does not unwrap) and `Bash(*git * push*)`
+    (reaches `-C dir`/`-c k=v`/`--no-pager` globals; `Bash(git * push:*)` is
+    rejected by the CLI as never matching, `:*` is only valid at the end). Force
+    variants are all `git push`. Limits: `--settings` is fixed at launch, and the
+    CLI applies ask rules in bypass too, so a live switch into bypass keeps
+    asking (safe) until the next turn respawns the CLI, and a live switch out of
+    bypass has no rules until then (the decider still annotates what the CLI
+    escalates). Not covered: git aliases from gitconfig or `-c alias.x=push`,
+    scripts/Makefile targets that run `git push`, a renamed binary. Over-asking:
+    the CLI patterns are broader than the matcher (`git restore --staged f`,
+    `git clean -n` ask too).
   - codex-native: smind has no policy hook beyond the `approvalPolicy`/sandbox
     presets; its own sandbox escalates `.git` writes and network. Classification
     is applied to the card text only. Gap documented.
@@ -123,6 +137,7 @@ transition frame.
   buttons (`mobile/src/permissionRequests.ts`, `transcript/permissionButtons.ts`)
   and has no permission-detail surface; adding one is a mobile request-type
   change owned by the mobile item. Follow-up.
+- [x] claude-native always-ask via `--settings` `permissions.ask` (Item M, ACCEPTED: Lead did it directly)
 - [ ] D1 (commit allowed in acceptEdits/auto): not implemented, needs the Human.
 
 ## Validation
@@ -147,7 +162,37 @@ transition frame.
   frames viewed by the Lead, all clean (card appears and disappears in one frame,
   no partial states). Light-1280 pipeline crop was checked only by the Peer.
 - Known gaps (documented): codex sandbox policy and agent-side allow-lists never
-  reach smind; ACP `autoAccept` and claude `bypassPermissions`/`auto` are not
+  reach smind; ACP `autoAccept` and claude `bypassPermissions` are not
   forced to ask; user-level git aliases and scripts that run `git push` are not
   matched. `cmd/smind` full `-race` has a pre-existing data race in
   `TestTaskWait_QueueItemCancelled` (fails on the base commit too).
+
+### Item M: `permissions.ask` on claude-native launch (real CLI 2.1.303, claude-haiku-5-5, `-p`)
+
+- `--permission-mode auto` with no rule pushed silently; with `permissions.ask`
+  `Bash(git push:*)` it was refused (asked). `bypassPermissions` + an ask rule
+  is also refused: ask rules beat bypass.
+- With only `Bash(git push:*)`: blocked `git push`, `cd . && git push`,
+  `FOO=1 git push`, `env X=1 git push`; NOT blocked `git -C . push`,
+  `git -c k=v push`, `sh -c 'git push'`, `bash -lc "git push"`.
+- `Bash(git * push *)` blocks `-C`, `-c`, `--no-pager` forms; `Bash(*git push*)`
+  blocks the `sh -c`/`bash -lc` forms; `Bash(*git * push*)` blocks
+  `sh -c 'git -C . push'` and `cd . && git -C . push`.
+- With the generated set: push (plain, `--force`, `-f +main`, `--force-with-lease`,
+  `-C`, `-c`, `FOO=1`, `env X=1`, `cd . &&`, `sh -c`, `bash -lc`), `gh pr create`
+  (also `-R o/r`), `gh pr merge`, `reset --hard` (also `-C`), `branch -D` (also in
+  `sh -c`), `clean -fd`, `checkout -- f`, `checkout HEAD -- f`, `restore .`,
+  `stash drop`, `stash clear`, `commit --amend` (also `commit -a -m x --amend`)
+  were all denied; `git status`, `git log`, `git commit --allow-empty` were not.
+  `p=push; git $p`, `x=git; $x push` and `eval '...'` were denied by the CLI too.
+  `git -c alias.zz=push zz` was NOT (residual gap).
+- Through smind's own launch path (isolated daemon, local bare remote, haiku):
+  auto + `git push origin HEAD:main` → permission request pending, remote
+  unchanged; after `smind task approve` the remote advanced. bypassPermissions
+  → pushed with no request. auto + `git status` → no request.
+  Transcripts: `/tmp/smind-dogfood/evidence/item-m/transcript-*.txt`.
+- Unit/fake tests: `TestClaudeGitAskSettingsPerMode`,
+  `TestClaudeAskRulesCoverEveryAlwaysAskClass`,
+  `TestRunClaude_GitAskSettingsReachTheCLI`. Mutations (settings dropped from
+  auto, bypass gets rules, an allow rule added, a table entry removed) each fail
+  a test.
