@@ -265,3 +265,35 @@ func TestPRMapping_FromForkAndMissingFields(t *testing.T) {
 		t.Fatalf("pr = %+v ok=%v", pr, ok)
 	}
 }
+
+func TestGhctx_PRsByHead_ArgvAndMapping(t *testing.T) {
+	list := `[{"number":9,"url":"https://github.com/spacingmind/smind/pull/9","state":"MERGED","headRefName":"smind/task-x",` +
+		`"headRefOid":"abc","isCrossRepository":true},{"number":4,"url":"https://evil.example/o/r/pull/4","state":"OPEN"}]`
+	s := prStub(t, list)
+	c := New(WithRunner(s.run))
+	prs, err := c.PRsByHead(context.Background(), "/w", "smind/task-x")
+	if err != nil {
+		t.Fatalf("PRsByHead: %v", err)
+	}
+	calls := s.callsWith("pr")
+	want := []string{"pr", "list", "--head", "smind/task-x", "--state", "all", "--limit", "5", "--json", prByHeadFields}
+	if len(calls) != 1 || strings.Join(calls[0].args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("pr calls = %+v, want one with argv %v", calls, want)
+	}
+	if len(prs) != 1 || prs[0].Number != 9 || prs[0].State != "merged" || prs[0].HeadSha != "abc" || !prs[0].FromFork || prs[0].HeadRef != "smind/task-x" {
+		t.Fatalf("prs = %+v, want PR 9 only (the off-host url is dropped)", prs)
+	}
+}
+
+func TestGhctx_PRsByHead_RejectsAnOptionLikeBranch(t *testing.T) {
+	s := prStub(t, "[]")
+	c := New(WithRunner(s.run))
+	for _, head := range []string{"", "--web", "-x", "a\nb"} {
+		if _, err := c.PRsByHead(context.Background(), "/w", head); err == nil {
+			t.Fatalf("PRsByHead(%q) = nil error, want invalid arguments", head)
+		}
+	}
+	if n := len(s.callsWith("pr")) + len(s.callsWith("repo")); n != 0 {
+		t.Fatalf("gh was called %d times for invalid heads", n)
+	}
+}

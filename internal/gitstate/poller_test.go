@@ -16,16 +16,20 @@ import (
 // fakeForge is a forge.Provider that counts every call per method and per
 // directory, so a test can assert how many calls a scenario cost.
 type fakeForge struct {
-	mu      sync.Mutex
-	calls   map[string]int
-	repo    forge.Repo
-	repoErr error
-	openErr error
-	viewErr error
-	open    map[string][]forge.PR // by dir
-	views   map[int]forge.PR
-	entered chan struct{} // signalled on every OpenPRs entry when non-nil
-	gate    chan struct{} // OpenPRs blocks until it is closed when non-nil
+	mu          sync.Mutex
+	calls       map[string]int
+	repo        forge.Repo
+	repoErr     error
+	openErr     error
+	viewErr     error
+	open        map[string][]forge.PR // by dir
+	views       map[int]forge.PR
+	byHead      map[string][]forge.PR // PRsByHead answers, by head ref
+	headErr     error
+	headEntered chan struct{} // signalled on every PRsByHead entry when non-nil
+	headGate    chan struct{} // PRsByHead blocks until it is closed when non-nil
+	entered     chan struct{} // signalled on every OpenPRs entry when non-nil
+	gate        chan struct{} // OpenPRs blocks until it is closed when non-nil
 
 	// PR panel (details_test.go): every PRDetails call stands for one `gh pr
 	// view` plus one graphql call.
@@ -66,7 +70,7 @@ func (f *fakeForge) total() int {
 	defer f.mu.Unlock()
 	n := 0
 	for k, c := range f.calls {
-		if k == "Repo" || k == "OpenPRs" || k == "PR" {
+		if k == "Repo" || k == "OpenPRs" || k == "PR" || k == "PRsByHead" {
 			n += c
 		}
 	}
@@ -95,6 +99,25 @@ func (f *fakeForge) OpenPRs(_ context.Context, dir string) ([]forge.PR, error) {
 		<-gate
 	}
 	return list, err
+}
+
+func (f *fakeForge) PRsByHead(_ context.Context, dir, headRef string) ([]forge.PR, error) {
+	f.mu.Lock()
+	f.calls["PRsByHead"]++
+	f.calls["PRsByHead:"+dir+":"+headRef]++
+	entered, gate, herr := f.headEntered, f.headGate, f.headErr
+	list := append([]forge.PR(nil), f.byHead[headRef]...)
+	f.mu.Unlock()
+	if entered != nil {
+		entered <- struct{}{}
+	}
+	if gate != nil {
+		<-gate
+	}
+	if herr != nil {
+		return nil, herr
+	}
+	return list, nil
 }
 
 func (f *fakeForge) PR(_ context.Context, _ string, number int) (forge.PR, error) {

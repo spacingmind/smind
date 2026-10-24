@@ -41,6 +41,47 @@ func (m *Manager) SetGitFacts(fn func(taskID int64) (gitstate.TaskGit, error)) {
 	m.archiveMu.Unlock()
 }
 
+// SetPRLookup registers the on-demand "find this task's pull request" lookup
+// that LookupMergedPR runs (the git state service's, with its floor, budget
+// and error handling). Nil leaves LookupMergedPR a no-op.
+func (m *Manager) SetPRLookup(fn func(taskID int64)) {
+	if m == nil {
+		return
+	}
+	m.archiveMu.Lock()
+	m.prLookup = fn
+	m.archiveMu.Unlock()
+}
+
+// LookupMergedPR is the one bounded forge lookup an explicit, human archive
+// action may make for a task with no stored PR, so a squash-merged branch is
+// seen as merged (ADR-0039 O6). Callers must not call it on behalf of an
+// agent. It never fails: the preview and the delete policy fall back to local
+// git when nothing is found.
+func (m *Manager) LookupMergedPR(id int64) {
+	if m == nil {
+		return
+	}
+	m.archiveMu.Lock()
+	fn := m.prLookup
+	m.archiveMu.Unlock()
+	if fn == nil {
+		return
+	}
+	t, err := m.store.GetTask(id)
+	if err != nil || t.ArchivedAt != nil {
+		return
+	}
+	ws, err := m.store.GetWorkspace(t.WorkspaceID)
+	if err != nil {
+		return
+	}
+	if g, gerr := m.freshGit(t, ws); gerr == nil && g.Merged != nil && g.Merged.State == gitstate.MergedMerged {
+		return // landed by ancestry: nothing to ask the forge
+	}
+	fn(id)
+}
+
 // ArchiveOptions selects what ArchiveTaskWith does beyond archiving.
 type ArchiveOptions struct {
 	// DeleteBranch deletes the task's local branch after the worktree is
@@ -49,10 +90,14 @@ type ArchiveOptions struct {
 	// smind owns.
 	DeleteBranch bool
 	Force        bool
+	// LookupPR lets the merged check make the one bounded forge lookup for a
+	// task with no stored PR (LookupMergedPR). Set it for a human caller only.
+	LookupPR bool
 }
 
 // ArchivePreview is the risk summary task.archivePreview returns: local git
-// and cached state only, no network.
+// and cached state only, no network (LookupMergedPR is the caller's one
+// explicit exception).
 type ArchivePreview struct {
 	Branch              PreviewBranch `json:"branch"`
 	Merged              PreviewMerged `json:"merged"`
@@ -199,7 +244,7 @@ func (m *Manager) ArchiveTaskWith(id int64, opt ArchiveOptions) (store.Task, err
 	if err != nil {
 		return store.Task{}, fmt.Errorf("archive task %d: %w", id, err)
 	}
-	tip, err := m.decideBranchDelete(t, ws, opt.Force)
+	tip, err := m.decideBranchDelete(t, ws, opt.Force, opt.LookupPR)
 	if err != nil {
 		return store.Task{}, err
 	}
@@ -227,8 +272,9 @@ func (m *Manager) ArchiveTaskWith(id int64, opt ArchiveOptions) (store.Task, err
 
 // decideBranchDelete applies the policy to t and returns the branch tip it was
 // decided on, or a typed refusal. Unless forced it first refreshes origin/<base>
-// (one bounded fetch, failure tolerated) so a branch merged upstream is seen.
-func (m *Manager) decideBranchDelete(t store.Task, ws store.Workspace, force bool) (tip string, err error) {
+// (one bounded fetch, failure tolerated) so a branch merged upstream is seen,
+// then, for a human caller, looks up the task's pull request if it has none.
+func (m *Manager) decideBranchDelete(t store.Task, ws store.Workspace, force, lookupPR bool) (tip string, err error) {
 	own := ""
 	if t.WorktreePath != nil {
 		own = *t.WorktreePath
@@ -242,6 +288,9 @@ func (m *Manager) decideBranchDelete(t store.Task, ws store.Workspace, force boo
 	var gerr error
 	if !force && t.BranchOwned && !elsewhere {
 		m.fetchBase(ws, t)
+		if lookupPR {
+			m.LookupMergedPR(t.ID)
+		}
 		g, gerr = m.freshGit(t, ws)
 	}
 	if block := branchDeleteBlock(t, g, gerr, elsewhere, force); block != nil {

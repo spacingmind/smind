@@ -537,6 +537,15 @@ func (s *Service) AdoptPR(taskID int64, pr forge.PR) error {
 	return nil
 }
 
+// LookupPR is the archive preview's on-demand PR lookup for a task with no
+// stored PR (Poller.LookupByHead); on adoption the task is recomputed so the
+// caller's next read carries the PR. Any failure leaves things as they were.
+func (s *Service) LookupPR(taskID int64) {
+	if s.poller != nil && s.poller.LookupByHead(taskID) {
+		s.InvalidateSync(taskID)
+	}
+}
+
 // RecordPR stores a freshly fetched snapshot of the task's existing pull
 // request (after Update PR pushed to it) and recomputes the task.
 func (s *Service) RecordPR(taskID int64, pr forge.PR) error {

@@ -210,6 +210,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	// Archive's branch cleanup decides on the service's fresh snapshot, which
 	// carries the poller's cached PR state (ADR-0039 section 9).
 	wm.SetGitFacts(gitSvc.Fresh)
+	wm.SetPRLookup(gitSvc.LookupPR)
 	wm.SetNotifier(busWorkspaceNotifier{bus: bus, db: db, git: gitSvc})
 	reg.SetNotifier(busRunNotifier{bus: bus, db: db, git: gitSvc})
 	profReg.SetNotifier(busProfileNotifier{bus: bus})

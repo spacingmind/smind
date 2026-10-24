@@ -67,6 +67,7 @@ type Manager struct {
 	// worktree add.
 	archiveMu     sync.Mutex
 	gitFacts      func(taskID int64) (gitstate.TaskGit, error)
+	prLookup      func(taskID int64)
 	fetchBaseFn   func(dir, base string)
 	worktreeAddFn func(repoPath, worktreePath, branch string, trackOrigin bool) error
 	restoring     map[int64]bool

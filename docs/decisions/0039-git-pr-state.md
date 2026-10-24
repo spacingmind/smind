@@ -535,6 +535,15 @@ makes this path rare.
 **Recommendation:** not in v1. Adoption covers open PRs for free; the closed/merged case needs a call per task (head-SHA match) and only
 matters for tasks that predate this work. A manual "Link PR…" (number or URL) is the fallback if it matters.
 
+**Update (2026-10-24, archive squash lookup).** Dogfood showed it matters: Lead and Peer tasks open their PR with `gh pr create` in the
+worktree, nobody watches them, and the archive preview then said "not merged anywhere" for a squash-merged branch. Narrow fix, still no
+background call: when `task.archivePreview` or `task.archive {deleteBranch}` (never `force`, never a run-scoped caller) evaluates a task
+with no stored PR and the branch is not already merged by ancestry, it makes **one** `Provider.PRsByHead` call
+(`gh pr list --head <branch> --state all --limit 5`) under the §4 rules for an explicit action (5 s floor and 12/hour per task, the host
+budget and suspension, the task's backoff, single-flight, the 20 s deadline; failures are booked and swallowed). It accepts only a
+same-repo PR whose head ref is the branch and that is open, or merged with `headRefOid` exactly equal to the branch's current tip, and
+adopts it (identity written, `task.updated` published) so later views and the sidebar need no call. Tasks with a stored PR cost no call.
+
 ### O7. PR body footer attribution
 The default body ends `Opened from smind task #N.` (today's text is `… via task.createPr.`). **Recommendation:** keep a short footer,
 editable in the dialog; a per-workspace setting to drop it can come with the settings card.
