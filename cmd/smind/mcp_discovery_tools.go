@@ -20,7 +20,7 @@ import (
 // list is empty, not null.
 func registerMCPDiscoveryTools(srv *mcp.Server, client *wsclient.Client) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "workspace_list", Description: "List every workspace (id, title, path) registered with the daemon -- the first call of the orchestration loop, since task_new needs a workspaceId."}, mcpWorkspaceList(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_get", Description: "Get one task by id (id, title, status, branch, worktreePath, parentTaskId) -- the worktreePath is where to review a task's work with git."}, mcpTaskGet(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_get", Description: "Get one task by id (id, title, status, branch, worktreePath, parentTaskId) -- the worktreePath is where to review a task's work with git. A root task with a human-set tree budget also carries budgetUsd, budgetSpentUsd, budgetPartial, budgetUnknownRuns, budgetRemainingUsd and overBudget (read-only; once over budget, agent launches in the tree are refused)."}, mcpTaskGet(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "run_list", Description: "List runs, newest first (at most 200), optionally filtered by taskId (across all of that task's chats), chatId, or status (e.g. \"running\"). Use this to recover a lost run id after task_send. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately."}, mcpRunList(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "provider_list", Description: "List the daemon's supported providers, each with its permission modes (id, autoApproves) and defaultMode. An orchestrator may not pick an auto-approving mode or autoAccept itself -- pass profileId (a human-authored profile) instead. A provider with cooldownUntil (RFC 3339 UTC) is rate limited until then: sends to it by an agent fail fast, so choose another provider."}, mcpProviderList(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "profile_list", Description: "List the human-authored agent profiles (id, name, provider, permissionMode, autoAccept, thinkingLevel, notes, and when set onRateLimit / fallbackProfileId; plus the seat contract: role, orchestrationTools, childPolicy, childProfileIds, skills, hasInstructions -- never the instruction text). Pass a profile's id as task_send's profileId to run with its settings."}, mcpProfileList(client))
@@ -67,6 +67,10 @@ func mcpTaskGet(client *wsclient.Client) mcp.ToolHandlerFor[taskGetInput, taskGe
 		var task map[string]any
 		if err := callWS(ctx, client, "task_get", "task.get", map[string]any{"id": in.ID}, &task); err != nil {
 			return nil, taskGetOutput{}, err
+		}
+		if budget, ok := task["budgetUsd"].(float64); ok {
+			spent, _ := task["budgetSpentUsd"].(float64)
+			task["budgetRemainingUsd"] = budgetRemaining(budget, spent)
 		}
 		return nil, taskGetOutput{Task: task}, nil
 	}

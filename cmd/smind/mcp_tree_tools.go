@@ -16,7 +16,7 @@ import (
 // task-hierarchy plan (§4.2/§4.3): task_tree (one call for every task
 // with status/usage/permissions, nested) and task_wait's childrenOf mode.
 func registerMCPTreeTools(srv *mcp.Server, client *wsclient.Client) {
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_tree", Description: "See a workspace's whole task hierarchy in one call: every task (or one task and its descendants) as nested nodes -- each carrying id, parentId, title, depth, tier (supervisor/leader/coder), run state, pending permission count, per-descendant status counts, usage rollups (tokens/cost summed over the subtree; null means nothing reported, never 0), and its children. Pass exactly one of workspaceId or taskId. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately."}, mcpTaskTree(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_tree", Description: "See a workspace's whole task hierarchy in one call: every task (or one task and its descendants) as nested nodes -- each carrying id, parentId, title, depth, tier (supervisor/leader/coder), run state, pending permission count, per-descendant status counts, usage rollups (tokens/cost summed over the subtree; null means nothing reported, never 0), and its children. Pass exactly one of workspaceId or taskId. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately. A root with a human-set budget also carries budgetUsd, budgetSpentUsd (reported cost only; runs that reported none are not counted: budgetPartial/budgetUnknownRuns), budgetRemainingUsd and overBudget: once overBudget, new agent-launched runs and tasks in that tree are refused (budget_exceeded) until a human raises the budget -- you cannot change it."}, mcpTaskTree(client))
 }
 
 // taskTreeInput is task_tree's argument shape: exactly one of
@@ -46,6 +46,13 @@ type taskTreeNode struct {
 	Run         taskTreeNodeRun `json:"run"`
 	Counts      taskTreeCounts  `json:"counts"`
 	Usage       json.RawMessage `json:"usage"`
+	// The tree budget (ADR-0041 A5), on a root with a budget only. Read-only
+	// here: no MCP tool can set or raise it.
+	BudgetUSD         *float64 `json:"budgetUsd"`
+	BudgetSpentUSD    *float64 `json:"budgetSpentUsd"`
+	BudgetPartial     bool     `json:"budgetPartial"`
+	BudgetUnknownRuns int      `json:"budgetUnknownRuns"`
+	OverBudget        bool     `json:"overBudget"`
 }
 
 type taskTreeNodeRun struct {
@@ -142,6 +149,18 @@ func decodeNodeMap(n taskTreeNode) map[string]any {
 		"depth": n.Depth, "taskStatus": n.TaskStatus, "childCount": n.ChildCount,
 		"run": n.Run, "counts": n.Counts, "usage": n.Usage,
 	}
+	if n.BudgetUSD != nil {
+		m["budgetUsd"] = *n.BudgetUSD
+		m["budgetPartial"] = n.BudgetPartial
+		m["budgetUnknownRuns"] = n.BudgetUnknownRuns
+		m["overBudget"] = n.OverBudget
+		spent := 0.0
+		if n.BudgetSpentUSD != nil {
+			spent = *n.BudgetSpentUSD
+		}
+		m["budgetSpentUsd"] = spent
+		m["budgetRemainingUsd"] = budgetRemaining(*n.BudgetUSD, spent)
+	}
 	if n.ParentID != nil {
 		m["parentId"] = *n.ParentID
 	} else {
@@ -153,6 +172,14 @@ func decodeNodeMap(n taskTreeNode) map[string]any {
 		m["tier"] = nil
 	}
 	return m
+}
+
+// budgetRemaining is what is left of a tree budget, never negative.
+func budgetRemaining(budget, spent float64) float64 {
+	if r := budget - spent; r > 0 {
+		return r
+	}
+	return 0
 }
 
 // treeSummary renders the one-line model-facing summary, e.g.
