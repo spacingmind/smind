@@ -77,7 +77,7 @@ type RunStatus struct {
 	Disposition string
 
 	// FailureKind is the typed terminal reason of an error run (ADR-0041 B1):
-	// rate_limited or empty; reset instant UTC, nil = unknown.
+	// rate_limited, cli_exited (the CLI died without a result) or empty.
 	FailureKind string
 	// FailureWindow is the exhausted quota window ("5h", "weekly", ...) or "".
 	FailureWindow string

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -965,6 +966,11 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 	if len(env) > 0 {
 		opts = append(opts, claudecode.WithEnv(env...))
 	}
+	// The CLI's stderr tail and streamed usage are what a CLI exit leaves
+	// behind (cli_exit.go); both are only read if the turn dies without a result.
+	stderrTail := &tailBuffer{}
+	opts = append(opts, claudecode.WithLogWriter(stderrTail))
+	probe := newClaudeStreamProbe()
 
 	client, resumed, err := r.newClaudeClientWithResume(ctx, chatID, worktreePath, opts, events)
 	if err != nil {
@@ -986,6 +992,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 	go func() {
 		defer close(forwardDone)
 		forwardClaudeMessages(ctx, updates, events, func(msg claudecode.Message) {
+			probe.observe(msg)
 			// The CLI reports its session id on an "init" system message
 			// -- the earliest point a handle exists at all on this
 			// backend. Storing it here (never overwriting with an empty
@@ -1024,6 +1031,9 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 	result, err := r.claudePrompt(ctx, client, prompt, updates, events)
 	<-forwardDone
 	if err != nil {
+		if ctx.Err() == nil && isCLIExit(err) {
+			return r.claudeCLIExited(ctx, client, err, probe, stderrTail, env, events)
+		}
 		return fmt.Errorf("taskrunner: claude code prompt: %w", err)
 	}
 	r.sessionStore.Set(chatID, SessionHandle{Provider: ProviderClaudeNative, SessionID: result.SessionID, UsageTotals: claudeTotalsOf(result)})
@@ -1034,6 +1044,33 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 	case <-ctx.Done():
 	}
 	return nil
+}
+
+// claudeCLIExited ends a turn whose CLI died without a result: it records the
+// usage the stream reported before the exit (partial_stream, no cost) and
+// returns the typed error carrying the exit code, redacted stderr tail and last
+// event. The SDK's own error says only that the stream ended.
+func (r *Runner) claudeCLIExited(ctx context.Context, client claudeBackend, cause error, probe *claudeStreamProbe, stderr *tailBuffer, env []string, events chan<- Event) error {
+	exitCode := -1
+	if c, ok := client.(interface{ Err() error }); ok {
+		var pe *claudecode.ProcessError
+		if errors.As(c.Err(), &pe) {
+			exitCode = pe.ExitCode
+		}
+	}
+	secrets := make([]string, 0, len(env))
+	for _, e := range env {
+		if _, v, ok := strings.Cut(e, "="); ok {
+			secrets = append(secrets, v)
+		}
+	}
+	if u := probe.partialUsage(); u != nil {
+		select {
+		case events <- Event{Type: EventTypeUsage, Usage: u}:
+		case <-ctx.Done():
+		}
+	}
+	return fmt.Errorf("taskrunner: claude code prompt: %w", probe.exitError(cause, exitCode, stderr.redacted(secrets)))
 }
 
 // newClaudeClientWithResume spawns chatID's claude-native turn, resuming

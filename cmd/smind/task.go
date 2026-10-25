@@ -1717,6 +1717,11 @@ func runStatusCell(r runSummaryRow, now time.Time) string {
 	if status == "error" && r.FailureKind == "rate_limited" {
 		return status + ": " + rateLimitedText(r.FailureWindow, r.FailureResetAt, r.FailureResetInferred, now)
 	}
+	if status == "error" && r.FailureKind == "cli_exited" {
+		// The first 80 runes of the text are the wrapper prefix; the exit
+		// details are in the full text (task logs / task status).
+		return status + ": CLI exited without a result (details in task logs)"
+	}
 	if status == "error" && strings.TrimSpace(errText) != "" {
 		return status + ": " + runErrCause(errText)
 	}

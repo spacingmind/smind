@@ -47,13 +47,14 @@ func BuildChildEventBlock(f ChildEventFacts) string {
 		if f.FailureWindow != "" {
 			fail += " (" + f.FailureWindow + " window)"
 		}
-		if f.FailureResetAt != nil {
+		switch {
+		case f.FailureResetAt != nil:
 			approx := ""
 			if f.FailureResetInferred {
 				approx = "≈"
 			}
 			fail += ", resets " + approx + f.FailureResetAt.Format(time.RFC3339)
-		} else {
+		case f.FailureKind == "rate_limited":
 			fail += ", reset time unknown"
 		}
 		parts = append(parts, fail)

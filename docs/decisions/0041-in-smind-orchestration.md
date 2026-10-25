@@ -177,6 +177,10 @@ minutes) is not designed here; the dogfood did not show a stall, only quota stop
   (`resetsAt` epoch, `rateLimitType` `five_hour|seven_day|…`), which smind must start recording; Codex's `UsageLimitExceeded` error info; (2) a per-provider text matcher on the agent's cause
   text and error chain — GLM's `429 … Usage limit reached for 5 hour … reset at HH:MM:SS` (the reset is **Asia/Shanghai (UTC+8) wall time**, not the daemon's zone — see the 2026-10-23 correction below; an undated time is rolled to tomorrow when already past; a failed parse leaves
   `resetAt` NULL, never a guess); (3) otherwise not rate-limited. Unknown never classifies as rate-limited. The matchers are pure functions with the real strings from the dogfood log as fixtures.
+- **Amendment 2026-10-25 (`cli_exited`):** a claude-native run whose CLI ends the stream without a result message (crash, external kill, out of memory) is typed `failureKind = cli_exited`
+  (status `error`, no window or reset). The error text carries the exit status (the SDK reads it racing the reaper, so it may read "unknown"), the last event and its age, the run's duration
+  and a redacted stderr tail (at most 2 KiB). Usage streamed before the exit is recorded with source `partial_stream` (summed from the API stream events; reported values only, no cost). There is
+  no automatic retry and no `needs-continue` disposition; the session is stored at init, so a follow-up prompt resumes it. A stderr that says "usage limit" still classifies `rate_limited`.
 - **Window:** `failure_window` ("5h", "weekly", "") alongside, for the message; informational.
 - **Exposed** additively (old clients ignore it): `run.list`, `run.status`, `run.logs`, `task.tree` nodes (latest-run detail), MCP `task_status`, `task_wait`, `run_list`, `task_tree`
   (`failureKind`, `resetAt`, `window`), the CLI (`task runs` STATUS shows `error: rate limited, resets 17:35 (in 2h 3m)`; `task wait` prints the same line and exits **6**, a new code next to

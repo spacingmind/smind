@@ -1470,6 +1470,13 @@ func (reg *Registry) finish(r *run, err error) {
 	var fail ratelimit.Result
 	if status == StatusError {
 		fail = ratelimit.Classify(ratelimit.Input{Provider: string(r.provider), Err: errMsg, Signal: rateSignal}, time.Now())
+		// A CLI that died without a result is its own typed failure; a stderr
+		// that says it hit a usage limit is still a rate limit, the more
+		// actionable of the two.
+		var cliExit *taskrunner.CLIExitError
+		if fail.Kind == "" && errors.As(err, &cliExit) {
+			fail.Kind = taskrunner.FailureKindCLIExited
+		}
 		if fail.Kind != "" {
 			_ = reg.st.UpdateRunFailure(r.id, fail.Kind, fail.Window, fail.ResetAt, fail.ResetInferred)
 		}
