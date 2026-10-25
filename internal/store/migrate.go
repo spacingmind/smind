@@ -252,7 +252,6 @@ var migrations = []migration{
 				{"tasks", "base_sha", "TEXT"},
 				{"tasks", "branch_owned", "INTEGER NOT NULL DEFAULT 0"},
 				{"workspaces", "default_base", "TEXT"},
-				{"workspaces", "commit_message_style", "TEXT"},
 			} {
 				if err := addColumnIfMissing(db, c.table, c.col, c.ddl); err != nil {
 					return err

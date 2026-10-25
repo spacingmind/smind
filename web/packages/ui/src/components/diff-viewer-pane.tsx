@@ -16,12 +16,11 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { describeDraftError, useCommitDraft } from "@/lib/use-commit-draft";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTaskDiff } from "@/hooks/use-task-diff";
 import { toast } from "@/components/ui/toast";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useFocusedChatId, useFocusedChatStore } from "@/stores/focused-chat-store";
 import { AddToChatButton } from "@/components/add-to-chat-button";
 import { useAddToChat } from "@/hooks/use-add-to-chat";
@@ -58,6 +57,10 @@ interface FileState {
   diff: string | null;
   viewed: boolean;
 }
+
+/** What "Draft with agent" sends to the task's chat (G17); exact text, the reply is read in the chat. */
+export const DRAFT_COMMIT_PROMPT =
+  "Draft a Conventional Commits message for the currently staged changes (`git diff --cached`). Reply with the message only in a fenced block; do not commit.";
 
 /**
  * A per-file review-and-commit surface for a task (ADR 0006): the task's
@@ -109,13 +112,6 @@ export function DiffViewerPane({
   const [commitError, setCommitError] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [lastCommit, setLastCommit] = useState<TaskCommitResult | null>(null);
-  // AI draft (ADR-0043): `pendingDraft` waits on Replace/Keep when the textarea already had text; `draftNote`
-  // is the quiet truncated/omitted line. Both are dropped as soon as the message, staging or commit changes.
-  const commitDraft = useCommitDraft(client, task.ID);
-  const [pendingDraft, setPendingDraft] = useState<string | null>(null);
-  const [draftNote, setDraftNote] = useState<string | null>(null);
-  const [draftAnnounce, setDraftAnnounce] = useState("");
-  const messageRef = useRef<HTMLTextAreaElement | null>(null);
   // The path a pending "Reveal in diff" wants scrolled to, cleared as soon
   // as the scroll lands (it's a one-shot action, not a selection).
   const [revealPath, setRevealPath] = useState<string | null>(null);
@@ -262,41 +258,8 @@ export function DiffViewerPane({
       });
   };
 
-  const clearDraftExtras = () => {
-    setPendingDraft(null);
-    setDraftNote(null);
-  };
-
-  const fillMessage = (text: string) => {
-    setMessage(text);
-    setPendingDraft(null);
-    // Focus after the value commits so the caret lands at the end of the new text.
-    requestAnimationFrame(() => {
-      const el = messageRef.current;
-      if (!el) return;
-      el.focus();
-      el.setSelectionRange(text.length, text.length);
-    });
-  };
-
-  const draftMessage = () => {
-    clearDraftExtras();
-    setDraftAnnounce("");
-    void commitDraft.draft().then((result) => {
-      if (!result) return;
-      setDraftAnnounce("Draft ready");
-      const notes: string[] = [];
-      if (result.truncated) notes.push("Draft sent only the first part of a large diff");
-      if (result.omitted.length > 0) notes.push(`Left out: ${result.omitted.join(", ")}`);
-      setDraftNote(notes.length > 0 ? notes.join(" · ") : null);
-      if (messageRef.current?.value.trim() ?? message.trim()) setPendingDraft(result.message);
-      else fillMessage(result.message);
-    });
-  };
-
   const commit = () => {
     if (!client) return;
-    clearDraftExtras();
     setCommitting(true);
     setCommitError(null);
     client
@@ -341,32 +304,41 @@ export function DiffViewerPane({
    * a chat that has never run and has no saved run config falls back to
    * the shared provider catalog's first entry, the composer's default.
    */
+  /**
+   * Sends `prompt` to the recipient chat as a normal run.start: queued when that chat is mid-run, under the chat's own
+   * provider/model/permission settings (nothing pinned). Shared by "Submit review" and "Draft with agent".
+   */
+  const sendToRecipient = async (prompt: string) => {
+    if (!client || !recipient) throw new Error("No agent chat to ask");
+    let provider: Provider | null = recipient.provider;
+    if (!provider) {
+      provider = "claude-native";
+      try {
+        // The shared catalog's cache entry: served from the cache while it is fresh, re-read only if
+        // it was never fetched or was invalidated -- never a second one-off fetch.
+        const result = await queryClient.fetchQuery(providerListQueryOptions(client));
+        if (result?.providers?.[0]) provider = result.providers[0].id;
+      } catch {
+        // provider.list failing shouldn't block the send -- the daemon's
+        // own default is the same fallback the composer uses.
+      }
+    }
+    return client.call<RunStartResult>("run.start", {
+      taskId: task.ID,
+      chatId: recipient.chatId,
+      provider,
+      prompt,
+      whenBusy: "queue",
+      ...recipientRunParams(recipient),
+    });
+  };
+
   const submitReview = async () => {
     if (!client || !recipient || drafts.length === 0) return;
     setSubmittingReview(true);
     setReviewError(null);
     try {
-      let provider: Provider | null = recipient.provider;
-      if (!provider) {
-        provider = "claude-native";
-        try {
-          // The shared catalog's cache entry: served from the cache while it is fresh, re-read only if
-          // it was never fetched or was invalidated -- never a second one-off fetch.
-          const result = await queryClient.fetchQuery(providerListQueryOptions(client));
-          if (result?.providers?.[0]) provider = result.providers[0].id;
-        } catch {
-          // provider.list failing shouldn't block the review -- the daemon's
-          // own default is the same fallback the composer uses.
-        }
-      }
-      const started = await client.call<RunStartResult>("run.start", {
-        taskId: task.ID,
-        chatId: recipient.chatId,
-        provider,
-        prompt: buildReviewPrompt(drafts),
-        whenBusy: "queue",
-        ...recipientRunParams(recipient),
-      });
+      const started = await sendToRecipient(buildReviewPrompt(drafts));
       const count = drafts.length;
       const chatName = recipient.title || "the chat";
       clearReviewDrafts(task.ID);
@@ -387,22 +359,35 @@ export function DiffViewerPane({
     }
   };
 
+  // "Draft with agent": a normal prompt to the task's own chat (G17). The reply is a chat turn; nothing fills the textarea.
+  const [askingAgent, setAskingAgent] = useState(false);
+  const draftWithAgent = async () => {
+    if (!recipient || askingAgent) return;
+    setAskingAgent(true);
+    try {
+      const started = await sendToRecipient(DRAFT_COMMIT_PROMPT);
+      const chatName = recipient.title || "the chat";
+      toast({
+        variant: "success",
+        title: "queued" in started ? `Draft request queued in ${chatName}` : `Draft request sent to ${chatName}`,
+        description: "queued" in started ? "It sends when the current run finishes" : "The agent's reply appears in the chat",
+      });
+      useFocusedChatStore.getState().requestRevealChat(task.ID, recipient.chatId);
+    } catch (err: unknown) {
+      toast({ variant: "error", title: "Could not ask the agent", description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setAskingAgent(false);
+    }
+  };
+
   const refreshAll = () => {
     fetchFiles();
     wholeDiff.refresh();
   };
 
   const stagedCount = files?.filter((f) => f.staged).length ?? 0;
-  // Staging changed: whatever was drafted described a different set of files.
-  useEffect(() => {
-    setPendingDraft(null);
-    setDraftNote(null);
-  }, [stagedCount]);
-  useEffect(() => {
-    if (commitDraft.status === "error" && commitDraft.error) setDraftAnnounce(`Draft failed: ${describeDraftError(commitDraft.error)}`);
-  }, [commitDraft.status, commitDraft.error]);
-  const drafting = commitDraft.status === "drafting";
-  const draftDisabled = stagedCount === 0 || committing || drafting;
+  // Why "Draft with agent" is unavailable (shown as its tooltip), or null when it can be used.
+  const draftDisabledReason = stagedCount === 0 ? "Nothing staged" : recipient === null ? "No agent chat to ask" : null;
   // Item 8: a suggested message derived from the staged set itself
   // (lib/commit-suggestion.ts). Offered as a one-click fill rather than
   // placeholder text -- a placeholder vanishes on focus and can't be
@@ -609,15 +594,11 @@ export function DiffViewerPane({
           </p>
         )}
         <textarea
-          ref={messageRef}
           className="mb-2 w-full rounded border p-2 text-ui-base"
           rows={2}
           placeholder="Commit message…"
           value={message}
-          onChange={(e) => {
-            setMessage(e.target.value);
-            clearDraftExtras();
-          }}
+          onChange={(e) => setMessage(e.target.value)}
           data-testid="commit-message"
         />
         <div className="flex items-center gap-2">
@@ -628,26 +609,21 @@ export function DiffViewerPane({
             <Tooltip>
               <TooltipTrigger asChild>
                 {/* A disabled button swallows pointer events: the span keeps the tooltip reachable. */}
-                <span className="inline-flex">
+                <span className="inline-flex" data-disabled-reason={draftDisabledReason ?? undefined}>
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="min-w-[7.5rem] justify-center"
-                    disabled={draftDisabled}
-                    onClick={draftMessage}
-                    data-testid="commit-draft"
+                    disabled={draftDisabledReason !== null || askingAgent}
+                    onClick={() => void draftWithAgent()}
+                    data-testid="commit-draft-agent"
                   >
-                    {drafting ? (
-                      <Icons.spinner className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                    ) : (
-                      <Icons.draft aria-hidden="true" />
-                    )}
-                    {drafting ? "Drafting…" : "Draft message"}
+                    <Icons.draft aria-hidden="true" />
+                    Draft with agent
                   </Button>
                 </span>
               </TooltipTrigger>
-              <TooltipContent>{stagedCount === 0 ? "Stage files to draft a message" : "Draft with AI"}</TooltipContent>
+              <TooltipContent>{draftDisabledReason ?? "Ask the agent to draft a message"}</TooltipContent>
             </Tooltip>
           </TooltipProvider>
           {suggestion && message.trim() === "" && (
@@ -661,37 +637,6 @@ export function DiffViewerPane({
               Use “{suggestion}”
             </Button>
           )}
-        </div>
-        {/* Draft status row (ADR-0043): always rendered at a fixed height BELOW the buttons, so an error, the
-            Replace / Keep prompt or the note appearing never moves the textarea or the button row. */}
-        <div
-          className="mt-2 flex h-7 items-center gap-2 overflow-hidden whitespace-nowrap text-ui-base"
-          data-testid="commit-draft-status-row"
-        >
-          {commitDraft.status === "error" && commitDraft.error && (
-            <p className="truncate text-destructive" data-testid="commit-draft-error">
-              {describeDraftError(commitDraft.error)}
-            </p>
-          )}
-          {pendingDraft !== null && (
-            <>
-              <span className="text-foreground-subtle">Replace the current message with the draft?</span>
-              <Button type="button" size="sm" onClick={() => fillMessage(pendingDraft)} data-testid="commit-draft-replace">
-                Replace
-              </Button>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setPendingDraft(null)} data-testid="commit-draft-keep">
-                Keep mine
-              </Button>
-            </>
-          )}
-          {draftNote && (
-            <p className="truncate text-ui-sm text-foreground-muted" data-testid="commit-draft-note">
-              {draftNote}
-            </p>
-          )}
-          <span className="sr-only" aria-live="polite" data-testid="commit-draft-status">
-            {draftAnnounce}
-          </span>
         </div>
       </div>
       )}

@@ -13,8 +13,6 @@ export interface Workspace {
   HasTeardownScript?: boolean;
   /** ADR-0039: the stored default-base override ("" = auto-detect); mirrors store.Workspace's field. */
   DefaultBase?: string;
-  /** G17: free-text guidance for AI-drafted commit messages ("" = none, max 1000 characters). */
-  commitMessageStyle?: string;
   CreatedAt: string;
   UpdatedAt: string;
 }
@@ -779,16 +777,6 @@ export interface TaskCommitResult {
   commit: string;
   subject: string;
   files: number;
-}
-
-/** task.draftCommitMessage result (ADR-0043): an AI draft of the staged diff's commit message. */
-export interface TaskDraftCommitMessageResult {
-  message: string;
-  model: string;
-  /** Only the first part of a large diff reached the model. */
-  truncated: boolean;
-  /** Files left out of the prompt. */
-  omitted: string[];
 }
 
 // ---- Create / Update PR (ADR-0039 §5; docs/research/local/git-pr-g5-briefs.md "PR 6 wire contract") -----------

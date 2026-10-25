@@ -29,15 +29,6 @@ export function setWorkspaceDefaultBase(
   return client.call<WorkspaceDefaultBase>("workspace.setDefaultBase", { workspaceId, branch });
 }
 
-/** Sets/clears the workspace's commit-message style guidance (G17); resolves with the updated workspace. */
-export function setWorkspaceCommitMessageStyle(
-  client: WsClientLike,
-  workspaceId: number,
-  style: string,
-): Promise<Workspace> {
-  return client.call<Workspace>("workspace.setCommitMessageStyle", { workspaceId, style });
-}
-
 /** Re-runs the workspace's setup script on a finished task; resolves with the task, already back in "running". */
 export function retryTaskSetup(client: WsClientLike, taskId: number): Promise<Task> {
   return client.call<Task>("task.retrySetup", { id: taskId });

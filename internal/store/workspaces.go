@@ -31,9 +31,9 @@ func (s *Store) CreateWorkspace(w Workspace) (Workspace, error) {
 func (s *Store) GetWorkspace(id int64) (Workspace, error) {
 	var w Workspace
 	err := s.db.QueryRow(
-		`SELECT id, path, title, routing_policy, created_at, updated_at, COALESCE(setup_script, ''), COALESCE(teardown_script, ''), learning_mode, COALESCE(default_base, ''), COALESCE(commit_message_style, '')
+		`SELECT id, path, title, routing_policy, created_at, updated_at, COALESCE(setup_script, ''), COALESCE(teardown_script, ''), learning_mode, COALESCE(default_base, '')
 		 FROM workspaces WHERE id = ?`, id,
-	).Scan(&w.ID, &w.Path, &w.Title, &w.RoutingPolicy, &w.CreatedAt, &w.UpdatedAt, &w.SetupScript, &w.TeardownScript, &w.LearningMode, &w.DefaultBase, &w.CommitMessageStyle)
+	).Scan(&w.ID, &w.Path, &w.Title, &w.RoutingPolicy, &w.CreatedAt, &w.UpdatedAt, &w.SetupScript, &w.TeardownScript, &w.LearningMode, &w.DefaultBase)
 	if err != nil {
 		return Workspace{}, fmt.Errorf("get workspace %d: %w", id, err)
 	}
@@ -44,7 +44,7 @@ func (s *Store) GetWorkspace(id int64) (Workspace, error) {
 // ListWorkspaces returns all workspaces, ordered by id.
 func (s *Store) ListWorkspaces() ([]Workspace, error) {
 	rows, err := s.db.Query(
-		`SELECT id, path, title, routing_policy, created_at, updated_at, COALESCE(setup_script, ''), COALESCE(teardown_script, ''), learning_mode, COALESCE(default_base, ''), COALESCE(commit_message_style, '')
+		`SELECT id, path, title, routing_policy, created_at, updated_at, COALESCE(setup_script, ''), COALESCE(teardown_script, ''), learning_mode, COALESCE(default_base, '')
 		 FROM workspaces ORDER BY id`,
 	)
 	if err != nil {
@@ -55,7 +55,7 @@ func (s *Store) ListWorkspaces() ([]Workspace, error) {
 	workspaces := make([]Workspace, 0)
 	for rows.Next() {
 		var w Workspace
-		if err := rows.Scan(&w.ID, &w.Path, &w.Title, &w.RoutingPolicy, &w.CreatedAt, &w.UpdatedAt, &w.SetupScript, &w.TeardownScript, &w.LearningMode, &w.DefaultBase, &w.CommitMessageStyle); err != nil {
+		if err := rows.Scan(&w.ID, &w.Path, &w.Title, &w.RoutingPolicy, &w.CreatedAt, &w.UpdatedAt, &w.SetupScript, &w.TeardownScript, &w.LearningMode, &w.DefaultBase); err != nil {
 			return nil, fmt.Errorf("scan workspace: %w", err)
 		}
 		w.HasSetupScript, w.HasTeardownScript = w.SetupScript != "", w.TeardownScript != ""
@@ -162,22 +162,6 @@ func (s *Store) SetWorkspaceDefaultBase(id int64, branch string) error {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("set workspace %d default base: %w", id, sql.ErrNoRows)
-	}
-	return nil
-}
-
-// SetWorkspaceCommitMessageStyle stores the commit-message style guidance for
-// workspace id (G17); "" clears it.
-func (s *Store) SetWorkspaceCommitMessageStyle(id int64, style string) error {
-	res, err := s.db.Exec(
-		`UPDATE workspaces SET commit_message_style = ?, updated_at = ? WHERE id = ?`,
-		nullString(style), time.Now().UTC(), id,
-	)
-	if err != nil {
-		return fmt.Errorf("set workspace %d commit message style: %w", id, err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("set workspace %d commit message style: %w", id, sql.ErrNoRows)
 	}
 	return nil
 }

@@ -87,23 +87,3 @@ func handleTaskSetBase(wm *workspace.Manager) handlerFunc {
 		return t, nil
 	}
 }
-
-// handleWorkspaceSetCommitMessageStyle stores (or, for empty text, clears)
-// the workspace's commit-message style guidance and returns the workspace.
-// The style text is never logged.
-func handleWorkspaceSetCommitMessageStyle(wm *workspace.Manager) handlerFunc {
-	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
-		var p struct {
-			WorkspaceID int64  `json:"workspaceId"`
-			Style       string `json:"style"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, fmt.Errorf("workspace.setCommitMessageStyle: invalid params: %w", err)
-		}
-		ws, err := wm.SetCommitMessageStyle(p.WorkspaceID, p.Style)
-		if err != nil {
-			return nil, fmt.Errorf("workspace.setCommitMessageStyle: %w", err)
-		}
-		return ws, nil
-	}
-}

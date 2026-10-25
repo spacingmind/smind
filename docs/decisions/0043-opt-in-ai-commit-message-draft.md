@@ -1,55 +1,32 @@
-# 0043: Opt-in AI-drafted commit message (narrow amendment of ADR-0006 decision 2)
+# 0043: Opt-in AI-drafted commit message (daemon-side) — Rejected
 
 ## Status
 
-Proposed (the Human must accept before release).
+Rejected (Human, 2026-10-25).
 
 ## Context
 
-ADR-0006 decision 2 says: "The daemon never generates commit messages via a
-model call." Users still want a draft to start from (G17 in the git/GitHub UX
-gap list), and the commit bar already has a non-LLM heuristic suggestion
-(`lib/commit-suggestion.ts`) that is too weak for real changes.
-
-Designs that avoid the exception exist: ask the task's *agent* to draft one in
-the task chat. That puts a run in the task's history, can use tools, bills the
-task, and is slow to fill a textarea. It is also not "one click in the commit
-bar". We recommend the exception below instead, because it is bounded and
-auditable; if the Human prefers no exception, the agent-in-chat route is the
-fallback and this ADR is rejected.
+G17 (git/GitHub UX gap list) wanted a one-click AI draft of the commit message.
+The proposal amended ADR-0006 decision 2 ("the daemon never generates commit
+messages via a model call") with a narrow exception: a human-triggered,
+isolated, no-tools Haiku run behind a new `task.draftCommitMessage` RPC that
+filled the commit textarea, with a per-task rate floor, an hourly workspace
+cap, single-flight, a per-workspace style setting and its own metered run
+purpose.
 
 ## Decision
 
-Amend **only** the sentence above. A daemon-side model call to draft a commit
-message is allowed when, and only when, all of these hold:
+Rejected. ADR-0006 decision 2 stays exactly as written: the daemon never makes
+a model call for commit messages. A daemon-side model call contradicts that
+decision, and the surface it needed (a new RPC, a system-run purpose on the
+shared learning executor, guards and caps, a settings column, a CLI command)
+was a lot of cost and risk for little value.
 
-1. **Opt-in per click.** Nothing drafts automatically (not on stage, not on
-   open). There is no setting that turns it on globally.
-2. **Human-triggered only.** The RPC `task.draftCommitMessage` is refused for
-   run-scoped (agent) callers; there is no MCP tool and no agent-facing path.
-3. **Isolated, no-tools run.** It uses `RunPromptIsolated` (no tools, no MCP,
-   no resume, empty cwd) as a hidden system run (purpose `commitmsg`), pinned
-   to the cheapest Claude model. It creates no chat, no queue item, no
-   notification and no entry in a task's run history.
-4. **Output only fills a textarea.** The reply is returned to the caller as
-   text. The daemon never stages, commits, edits the index or the worktree,
-   or caches the text on disk. Committing stays the explicit `task.commit`
-   action, with ADR-0006's own trailers.
-5. **Bounded input and cost.** The prompt carries the staged diff only (byte
-   budget, likely-secret files omitted), the stat summary and recent subjects.
-   Single-flight per task, a per-task rate floor, an hourly workspace cap and a
-   hard timeout. Usage is metered on the run (`run_usage`) like any other
-   system run.
+## What replaced it
 
-ADR-0006 decisions 1 and 3 and the "daemon does not commit on its own" rule are
-unchanged.
-
-## Consequences
-
-- `internal/wsapi` still depends on no model code: it holds an interface and
-  the daemon wiring supplies the drafter.
-- Cost is visible under the workspace's hidden system task, purpose
-  `commitmsg`, and does not count against the learning budget.
-- A workspace may set free-text style guidance; it is sent as untrusted
-  guidance, never as instructions that outrank the system prompt.
-- If the Human rejects this ADR the feature is removed (one RPC, one button).
+The commit bar has a **Draft with agent** button. It sends a normal prompt to
+the task's own chat through the existing web send path (the same one "Submit
+review" uses: the chat's current provider, model and mode, `whenBusy: queue`
+per ADR-0024, nothing pinned or hidden). The agent's reply is an ordinary chat
+turn; nothing fills the textarea. No daemon change, no new RPC, no new
+settings. ADR-0006 is unchanged.

@@ -212,8 +212,6 @@ func cmdTask(args []string) int {
 		return cmdTaskArchive(args[1:])
 	case "budget":
 		return cmdTaskBudget(args[1:])
-	case "commit-message":
-		return cmdTaskCommitMessage(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "smind task: unknown subcommand %q\n", args[0])
 		return 2

@@ -6,11 +6,10 @@ import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { requestDiffReveal, resetDiffReveal } from "@/lib/diff-reveal";
 import { DIFF_PREFS_STORAGE_KEY } from "@/lib/diff-prefs";
 import { addReviewDraft, getReviewDrafts, resetReviewDrafts } from "@/lib/review-drafts";
-import { DiffViewerPane } from "@/components/diff-viewer-pane";
+import { DiffViewerPane, DRAFT_COMMIT_PROMPT } from "@/components/diff-viewer-pane";
 import { clearToasts, Toaster } from "@/components/ui/toast";
 import { runConfigStorageKey } from "@/components/composer/run-config-preference";
 import { useFocusedChatStore } from "@/stores/focused-chat-store";
-import { RpcError } from "@/lib/ws-client";
 import type { Chat, Task, TaskFileDiffResult, TaskFilesResult, TaskGit } from "@/lib/types";
 
 const TASK: Task = {
@@ -935,147 +934,58 @@ describe("DiffViewerPane header below md", () => {
   });
 });
 
-describe("DiffViewerPane AI commit draft", () => {
-  const DRAFT = { message: "feat: add line2", model: "claude-haiku-5-5", truncated: false, omitted: [] as string[] };
+describe("DiffViewerPane Draft with agent", () => {
+  const PROMPT =
+    "Draft a Conventional Commits message for the currently staged changes (`git diff --cached`). Reply with the message only in a fenced block; do not commit.";
 
-  async function stagedPane() {
+  async function pane(opts: { staged: boolean; chats: Chat[] }) {
     const client = new FakeWsClient();
-    const view = render(<DiffViewerPane client={client} task={TASK} />);
-    await resolveFilesAndDiffs(client, { files: [{ path: "file.txt", status: "modified", staged: true }] });
-    return { client, ...view };
+    render(<DiffViewerPane client={client} task={TASK} chats={opts.chats} />);
+    await resolveFilesAndDiffs(client, { files: [{ path: "file.txt", status: "modified", staged: opts.staged }] });
+    return client;
   }
 
-  it("draft button disabled when nothing staged", async () => {
-    const client = new FakeWsClient();
-    render(<DiffViewerPane client={client} task={TASK} />);
-    await resolveFilesAndDiffs(client);
-
-    expect(screen.getByTestId("commit-draft")).toBeDisabled();
-    fireEvent.click(screen.getByTestId("stage-file.txt"));
-    client.nth("task.stage", 0).resolve({});
-    await flush();
-    expect(screen.getByTestId("commit-draft")).toBeEnabled();
+  it("draft with agent is disabled with the Nothing staged reason", async () => {
+    await pane({ staged: false, chats: [chat(10, { Provider: "claude-native" })] });
+    expect(screen.getByTestId("commit-draft-agent")).toBeDisabled();
+    expect(screen.getByTestId("commit-draft-agent").parentElement).toHaveAttribute("data-disabled-reason", "Nothing staged");
   });
 
-  it("draft fills an empty textarea", async () => {
-    const { client } = await stagedPane();
-    fireEvent.click(screen.getByTestId("commit-draft"));
-    expect(client.nth("task.draftCommitMessage", 0).params).toEqual({ taskId: TASK.ID });
-    client.nth("task.draftCommitMessage", 0).resolve({ ...DRAFT, truncated: true, omitted: ["a.bin", "b.bin"] });
-    await flush();
-
-    const box = screen.getByTestId("commit-message") as HTMLTextAreaElement;
-    expect(box.value).toBe("feat: add line2");
-    await waitFor(() => expect(box).toHaveFocus());
-    expect(box.selectionStart).toBe(box.value.length);
-    expect(screen.getByTestId("commit-draft-status")).toHaveTextContent("Draft ready");
-    expect(screen.getByTestId("commit-draft-note")).toHaveTextContent("Draft sent only the first part of a large diff");
-    expect(screen.getByTestId("commit-draft-note")).toHaveTextContent("Left out: a.bin, b.bin");
-    expect(screen.queryByTestId("commit-draft-replace")).not.toBeInTheDocument();
+  it("draft with agent is disabled with the No agent chat to ask reason", async () => {
+    await pane({ staged: true, chats: [] });
+    expect(screen.getByTestId("commit-draft-agent")).toBeDisabled();
+    expect(screen.getByTestId("commit-draft-agent").parentElement).toHaveAttribute("data-disabled-reason", "No agent chat to ask");
   });
 
-  it("draft does not overwrite existing text without Replace", async () => {
-    const { client } = await stagedPane();
+  it("draft with agent sends the exact prompt once through the chat's own send path and touches nothing else", async () => {
+    expect(DRAFT_COMMIT_PROMPT).toBe(PROMPT);
+    window.localStorage.setItem(
+      runConfigStorageKey(TASK.ID, 10),
+      JSON.stringify({ baseAgentId: "3", custom: false, provider: "claude-native", permissionMode: "plan", autoAccept: false, thinkingLevel: "", model: "claude-sonnet-5-5" }),
+    );
+    useFocusedChatStore.getState().setFocusedChat(TASK.ID, 10);
+    const client = await pane({ staged: true, chats: [chat(10, { Provider: "claude-native" })] });
     const box = screen.getByTestId("commit-message") as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "my own words" } });
+    const before = client.calls.length;
 
-    fireEvent.click(screen.getByTestId("commit-draft"));
-    expect(client.nth("task.draftCommitMessage", 0).params).toEqual({ taskId: TASK.ID });
-    client.nth("task.draftCommitMessage", 0).resolve(DRAFT);
+    expect(screen.getByTestId("commit-draft-agent")).toBeEnabled();
+    fireEvent.click(screen.getByTestId("commit-draft-agent"));
+    fireEvent.click(screen.getByTestId("commit-draft-agent"));
     await flush();
-    expect(box.value).toBe("my own words");
-    expect(screen.getByText("Replace the current message with the draft?")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId("commit-draft-keep"));
-    expect(box.value).toBe("my own words");
-    expect(screen.queryByTestId("commit-draft-replace")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("commit-draft"));
-    client.nth("task.draftCommitMessage", 1).resolve(DRAFT);
-    await flush();
-    fireEvent.click(screen.getByTestId("commit-draft-replace"));
-    expect(box.value).toBe("feat: add line2");
-    expect(screen.queryByTestId("commit-draft-replace")).not.toBeInTheDocument();
-  });
-
-  it("draft shows typed errors inline", async () => {
-    const { client } = await stagedPane();
-    fireEvent.click(screen.getByTestId("commit-draft"));
-    client.nth("task.draftCommitMessage", 0).reject(new RpcError("raw", "nothing_staged"));
-    await flush();
-    expect(screen.getByTestId("commit-draft-error")).toHaveTextContent("Nothing is staged.");
-    expect(screen.getByTestId("commit-draft-status")).toHaveTextContent("Draft failed: Nothing is staged.");
-
-    fireEvent.click(screen.getByTestId("commit-draft"));
-    client.nth("task.draftCommitMessage", 1).reject(new RpcError("raw", "rate_limited"));
-    await flush();
-    expect(screen.getByTestId("commit-draft-error")).toHaveTextContent("Drafting too often — try again in a moment.");
-
-    fireEvent.click(screen.getByTestId("commit-draft"));
-    client.nth("task.draftCommitMessage", 2).reject(new RpcError("model said no", "refused"));
-    await flush();
-    expect(screen.getByTestId("commit-draft-error")).toHaveTextContent("model said no");
-    expect((screen.getByTestId("commit-message") as HTMLTextAreaElement).value).toBe("");
-  });
-
-  it("draft shows spinner while pending", async () => {
-    const { client } = await stagedPane();
-    const button = screen.getByTestId("commit-draft");
-    fireEvent.click(button);
-    expect(button).toBeDisabled();
-    expect(button).toHaveTextContent("Drafting…");
-    fireEvent.click(button);
-    expect(client.calls.filter((c) => c.method === "task.draftCommitMessage")).toHaveLength(1);
-
-    client.nth("task.draftCommitMessage", 0).resolve(DRAFT);
-    await flush();
-    expect(button).toHaveTextContent("Draft message");
-    expect(button).toBeEnabled();
-  });
-
-  it("commit bar status row never shifts textarea", async () => {
-    // jsdom has no layout, so the proxy is structure: the textarea's preceding siblings, the element right after
-    // it (the button row) and the always-present fixed-height status row (after the buttons) must be identical in
-    // idle, drafting, error and Replace-prompt states -- nothing may appear above or between them.
-    const { client } = await stagedPane();
-    const bar = screen.getByTestId("commit-bar");
-    const box = screen.getByTestId("commit-message") as HTMLTextAreaElement;
-    const shape = () => ({
-      before: Array.from(bar.children).slice(0, Array.from(bar.children).indexOf(box)).map((e) => e.getAttribute("data-testid") ?? e.tagName),
-      next: box.nextElementSibling?.querySelector('[data-testid="commit-button"]') !== null,
-      statusRowIsLast: bar.lastElementChild === screen.getByTestId("commit-draft-status-row"),
-      statusRowClass: screen.getByTestId("commit-draft-status-row").className,
+    const sent = client.calls.slice(before);
+    expect(sent.map((c) => c.method)).toEqual(["run.start"]);
+    // The chat's own provider/model/mode, queued when busy; nothing pinned or hidden.
+    expect(sent[0]!.params).toEqual({
+      taskId: TASK.ID,
+      chatId: 10,
+      provider: "claude-native",
+      prompt: PROMPT,
+      whenBusy: "queue",
+      model: "claude-sonnet-5-5",
+      permissionMode: "plan",
     });
-    const idle = shape();
-    expect(idle.statusRowIsLast).toBe(true);
-    expect(idle.next).toBe(true);
-    expect(idle.statusRowClass).toContain("h-7");
-
-    fireEvent.click(screen.getByTestId("commit-draft"));
-    expect(shape()).toEqual(idle);
-    client.nth("task.draftCommitMessage", 0).reject(new RpcError("raw", "rate_limited"));
-    await flush();
-    expect(screen.getByTestId("commit-draft-status-row")).toContainElement(screen.getByTestId("commit-draft-error"));
-    expect(shape()).toEqual(idle);
-
-    fireEvent.change(box, { target: { value: "my own words" } });
-    fireEvent.click(screen.getByTestId("commit-draft"));
-    client.nth("task.draftCommitMessage", 1).resolve(DRAFT);
-    await flush();
-    expect(screen.getByTestId("commit-draft-status-row")).toContainElement(screen.getByTestId("commit-draft-replace"));
-    expect(shape()).toEqual(idle);
-  });
-
-  it("draft result is dropped after unmount", async () => {
-    const { client, unmount } = await stagedPane();
-    fireEvent.click(screen.getByTestId("commit-draft"));
-    expect(client.nth("task.draftCommitMessage", 0).params).toEqual({ taskId: TASK.ID });
-    unmount();
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    client.nth("task.draftCommitMessage", 0).resolve(DRAFT);
-    await flush();
-    expect(errors).not.toHaveBeenCalled();
-    errors.mockRestore();
-    expect(screen.queryByTestId("commit-message")).not.toBeInTheDocument();
+    expect(box.value).toBe("my own words");
   });
 });
