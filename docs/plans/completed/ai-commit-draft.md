@@ -58,12 +58,16 @@ Mutations (reported in the PR): (1) `git diff` instead of `--cached` fails AC1; 
 
 ## Progress
 
-- [ ] ADR-0043 + plan committed
-- [ ] Daemon: store column, `internal/commitdraft`, RPC, wiring, CLI
-- [ ] Web: button, types, icon
-- [ ] Style RPC + settings field
-- [ ] Review, mutations, frames, live call, PR
+- [x] ADR-0043 + plan committed
+- [x] Daemon: `internal/commitdraft`, RPC `task.draftCommitMessage`, wiring on the shared learning executor, CLI `smind task commit-message` (Peer candidate 13d480e9, ACCEPTED: diff reader read-only with GIT_OPTIONAL_LOCKS=0, per-task single-flight, nothing_staged before any rate budget, tests assert on the prompt sent)
+- [x] Web: button, hook, icon, tests (Peer candidate 6bfba534, ACCEPTED; Lead fix 18f4f244: reset draft status on task change)
+- [x] Style: store column, `workspace.setCommitMessageStyle`, settings field, drafter wiring (Peer candidate 9979490c, ACCEPTED)
+- [x] Review, mutations, frames, live call, PR
 
 ## Validation
 
-(empty until each AC is confirmed)
+- AC1-AC13: named tests in `internal/commitdraft`, `internal/wsapi`, `internal/workspace`, `cmd/smind` pass (see PR body for the exact commands).
+- AC14: six vitest cases in `diff-viewer-pane.test.tsx`; light + dark + transition frames in `/tmp/commit-draft-shots/` (idle, tooltip, drafting spinner, filled, replace prompt, rate-limited error, disabled, disabled tooltip), taken from the real app against an isolated daemon with a FAKE claude CLI.
+- AC15: one live Haiku call (`claude-haiku-5-5`) via the CLI on an isolated daemon: USD 0.00087, 1385 in / 262 out tokens, message "feat: add Greet function" + short body. Cost lands in `run_usage` of a hidden `commitmsg` run on the workspace's system task.
+- Mutations: (1) `git diff` instead of `--cached` fails `TestDraft_PromptHasStagedDiffAndStyle_ExcludesUnstagedAndUntracked` (and 9 more); (2) dropping the nothing-staged guard fails `TestDraft_NothingStaged_ZeroModelCalls`; (3) dropping `refuseRunScoped` fails `TestWSAPI_DraftCommitMessage_RunScopedRefused_ZeroModelCalls`.
+- Known unrelated: `TestTaskWait_QueueItemCancelled` races under `-race` on origin/develop too.
