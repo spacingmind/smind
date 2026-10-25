@@ -230,7 +230,7 @@ Found with `grep -rnE 'ProviderClaudeNative|ProviderCodexNative|ProviderGLM|Prov
 
 - 2026-10-24: Research done (local-only notes in `docs/research/local/plugins-research.md`); ADR-0042 and this plan written; docs PR opened for review. **No implementation
   has started; no Leads spawned.** Nothing below is checked until the ADR is accepted.
-- [x] P0.1 (K1, daemon + AC37 daemon side)  [ ] P0.2 (K2: web + mobile + Settings UI)
+- [x] P0.1 (K1, daemon + AC37 daemon side)  [x] P0.2 (K2: web + mobile + Settings UI)
 - [ ] PA.1  [ ] PA.2  [ ] PA.3  [ ] PA.4  [ ] PA.5
 - [ ] PB.1  [ ] PB.2  [ ] PB.3  [ ] PB.4
 - [ ] PC.1  [ ] PC.2  [ ] PC.3
@@ -252,3 +252,4 @@ Filled as items land; for each acceptance criterion, name the test or manual che
 - AC37 (P0 provider instances): the `TestProviderInstance_*` and `TestProviderDirSuggestions_NamesOnly` tests, plus a manual run of two claude-native instances side by side on an isolated daemon.
 - AC34–AC36: log/UI audit script that greps for unlabeled plugin output, the example CI job, and the release-notes diff.
 - Every PR runs `task test`, `task lint` and the `verify` skill; UI PRs add the light+dark screenshot pass; nothing here has been run yet.
+- 2026-10-25 K2 (P0.2 + AC37 UI): web/mobile provider ids are strings (closed `Provider` union removed; capability checks ask the catalog `runner`, built-in table only as offline answer); generic provider icon via `Icons.providerGeneric` (drift snapshot updated); instances wear their base's mark (zustand `provider-families-store` fed by the catalog hook); offline fallback = four built-ins, never merged with a loaded list; Settings -> Providers lists instances, `Add instance` area (dirSuggestions chips, manual form, inline errors), custom entries show config dir + Reload providers (no human remove RPC exists: edit config.yaml + reload). Mobile has no provider glyph surface, so only the catalog/fallback/labels changed (not verified on device). Public docs updated.
