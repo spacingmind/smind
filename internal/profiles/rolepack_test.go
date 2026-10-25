@@ -35,11 +35,11 @@ func byName(t *testing.T, r *Registry, name string) store.AgentProfile {
 	return store.AgentProfile{}
 }
 
-func TestSeedRoles_CreatesFiveSeatsInOrder(t *testing.T) {
+func TestSeedRoles_CreatesThreeSeatsInOrder(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
 	res := seed(t, r)
-	want := []string{"peer-sonnet", "peer-glm", "lead", "reviewer", "supervisor"}
+	want := []string{"peer-sonnet", "lead", "reviewer"}
 	if len(res) != len(want) {
 		t.Fatalf("results = %+v, want %d", res, len(want))
 	}
@@ -53,7 +53,7 @@ func TestSeedRoles_CreatesFiveSeatsInOrder(t *testing.T) {
 	}
 	lead := byName(t, r, "lead")
 	if lead.ChildPolicy != "leaf" || lead.OrchestrationTools == nil || !*lead.OrchestrationTools ||
-		!strings.Contains(lead.Instructions, "END YOUR TURN") || len(lead.Skills) != 1 || lead.Skills[0] != "smind-leader" {
+		!strings.Contains(lead.Instructions, "end your turn") || len(lead.Skills) != 1 || lead.Skills[0] != "smind-leader" {
 		t.Errorf("lead = %+v", lead)
 	}
 	if rv := byName(t, r, "reviewer"); rv.PermissionMode != "plan" {
@@ -75,8 +75,8 @@ func TestSeedRoles_IdempotentAndKeepsExisting(t *testing.T) {
 		}
 	}
 	all, _ := r.List()
-	if len(all) != 5 {
-		t.Errorf("profiles = %d, want 5", len(all))
+	if len(all) != 3 {
+		t.Errorf("profiles = %d, want 3", len(all))
 	}
 }
 
@@ -97,32 +97,6 @@ func TestSeedRoles_EditSurvivesRerun(t *testing.T) {
 	}
 }
 
-func TestSeedRoles_PeerGlmFallsBackToPeerSonnet(t *testing.T) {
-	t.Parallel()
-	r := newTestRegistry(t)
-	seed(t, r)
-	glm, sonnet := byName(t, r, "peer-glm"), byName(t, r, "peer-sonnet")
-	if glm.OnRateLimit != "fallback" || glm.FallbackProfileID == nil || *glm.FallbackProfileID != sonnet.ID {
-		t.Errorf("peer-glm = %+v, want fallback to %d", glm, sonnet.ID)
-	}
-	if !glm.AutoAccept || glm.Provider != "glm" {
-		t.Errorf("peer-glm = %+v", glm)
-	}
-}
-
-func TestSeedRoles_SupervisorChildListIsLead(t *testing.T) {
-	t.Parallel()
-	r := newTestRegistry(t)
-	seed(t, r)
-	sup, lead := byName(t, r, "supervisor"), byName(t, r, "lead")
-	if sup.ChildPolicy != "profiles" || len(sup.ChildProfileIDs) != 1 || sup.ChildProfileIDs[0] != lead.ID {
-		t.Errorf("supervisor = %+v, want children [%d]", sup, lead.ID)
-	}
-	if sup.Model != "" || sup.PermissionMode != "" {
-		t.Errorf("supervisor model %q mode %q, want provider defaults", sup.Model, sup.PermissionMode)
-	}
-}
-
 func TestSeedRoles_NoOpusModel(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
@@ -135,19 +109,15 @@ func TestSeedRoles_NoOpusModel(t *testing.T) {
 	}
 }
 
-func TestSeedRoles_PartialFailureCompletesOnRerun(t *testing.T) {
+func TestSeedRoles_ExistingSeatKeptUntouched(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
 	// A Human-made "lead" with a different provider (and no seat contract) is
-	// kept untouched, and the supervisor is wired to THAT lead.
+	// kept untouched.
 	pre := mustCreate(t, r, store.AgentProfile{Name: "lead", Provider: "glm", AutoAccept: true})
 	res := seed(t, r)
-	if res[2].Name != "lead" || res[2].Action != SeedKept || res[2].ID != pre.ID {
-		t.Fatalf("lead result = %+v, want kept %d", res[2], pre.ID)
-	}
-	sup := byName(t, r, "supervisor")
-	if len(sup.ChildProfileIDs) != 1 || sup.ChildProfileIDs[0] != pre.ID {
-		t.Errorf("supervisor children = %v, want [%d]", sup.ChildProfileIDs, pre.ID)
+	if res[1].Name != "lead" || res[1].Action != SeedKept || res[1].ID != pre.ID {
+		t.Fatalf("lead result = %+v, want kept %d", res[1], pre.ID)
 	}
 	if got := byName(t, r, "lead"); got.Provider != "glm" || got.Instructions != "" {
 		t.Errorf("pre-existing lead was modified: %+v", got)
@@ -160,57 +130,100 @@ func TestSeedRoles_PartialFailureCompletesOnRerun(t *testing.T) {
 	}
 }
 
-// TestSeedRoles_ClaudeSeatsWaitOnRateLimit: the claude-native seats re-enqueue
-// the cut-off prompt at the reset (the F2 "wait" policy), so a tree heals by
-// itself after an account usage limit (the second in-smind dogfood tree
-// stalled for two hours without it). peer-glm keeps its fallback to peer-sonnet.
+// TestSeedRoles_SeatsExactly: the single-agent-loop audit folded the
+// Supervisor seats and peer-glm out of the pack (ADR-0041 amendment
+// 2026-10-25): the Human or a Steward briefs a Lead directly.
+func TestSeedRoles_SeatsExactly(t *testing.T) {
+	t.Parallel()
+	r := newTestRegistry(t)
+	seed(t, r)
+	all, _ := r.List()
+	got := map[string]bool{}
+	for _, p := range all {
+		got[p.Name] = true
+		if strings.HasPrefix(p.Name, "supervisor") || p.Name == "peer-glm" || p.ChildPolicy == "profiles" || p.Provider == "glm" {
+			t.Errorf("pack seeds %q (provider %q, childPolicy %q)", p.Name, p.Provider, p.ChildPolicy)
+		}
+	}
+	for _, n := range []string{"lead", "peer-sonnet", "reviewer"} {
+		if !got[n] {
+			t.Errorf("pack lacks %s", n)
+		}
+	}
+	if len(all) != 3 {
+		t.Errorf("profiles = %d, want exactly lead, peer-sonnet, reviewer", len(all))
+	}
+}
+
+// TestSeedRoles_ClaudeSeatsWaitOnRateLimit: every seat re-enqueues the
+// cut-off prompt at the reset (the F2 "wait" policy), so a tree heals by
+// itself after an account usage limit.
 func TestSeedRoles_ClaudeSeatsWaitOnRateLimit(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
 	seed(t, r)
-	for _, n := range []string{"peer-sonnet", "lead", "reviewer", "supervisor"} {
+	for _, n := range []string{"peer-sonnet", "lead", "reviewer"} {
 		if got := byName(t, r, n).OnRateLimit; got != "wait" {
 			t.Errorf("%s OnRateLimit = %q, want wait", n, got)
 		}
 	}
-	if got := byName(t, r, "peer-glm").OnRateLimit; got != "fallback" {
-		t.Errorf("peer-glm OnRateLimit = %q, want fallback", got)
-	}
 }
 
-// TestSeedRoles_LeadInstructionsDefaultToSonnetPeers: the dogfood measured
-// 28 min / 3.0M input tokens for a GLM step Sonnet does in ~1.5 min, so the
-// Lead is told to default to peer-sonnet and treat peer-glm as opt-in.
-func TestSeedRoles_LeadInstructionsDefaultToSonnetPeers(t *testing.T) {
+// previousLeadInstructionsLen is the byte length of the Lead text before the
+// single-agent-loop fold (about 2,240 bytes); the audit counted prompt weight, so the
+// new text must stay shorter.
+const previousLeadInstructionsLen = 2237
+
+// TestSeedRoles_LeadIsTheSingleLoop: the Lead does S/M work itself, launches
+// only peer-sonnet and only for parallel parts or independent verification,
+// reads the Peer's json handoff first, and carries no Peer prices or timings.
+func TestSeedRoles_LeadIsTheSingleLoop(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
 	seed(t, r)
 	lead := byName(t, r, "lead").Instructions
-	for _, want := range []string{"DEFAULT TO peer-sonnet", "peer-glm only when the Human's brief asks for it"} {
+	for _, want := range []string{"peer-sonnet", "Do small and medium items yourself", "independent verifier", "json block", "missing or invalid block", "Never merge"} {
 		if !strings.Contains(lead, want) {
 			t.Errorf("lead instructions lack %q", want)
 		}
 	}
-	if !strings.Contains(byName(t, r, "peer-glm").Notes, "Opt-in coder") {
-		t.Errorf("peer-glm notes = %q, want the opt-in wording", byName(t, r, "peer-glm").Notes)
+	for _, bad := range []string{"peer-glm", "GLM", "DEFAULT TO", "$0.", "minutes", "Supervisor"} {
+		if strings.Contains(lead, bad) {
+			t.Errorf("lead instructions still carry %q", bad)
+		}
+	}
+	if len(lead) >= previousLeadInstructionsLen {
+		t.Errorf("lead instructions = %d bytes, want fewer than before (%d)", len(lead), previousLeadInstructionsLen)
 	}
 }
 
-// A seat's own background task finishing does not start a run, so a Lead or
-// Supervisor that ends its turn "waiting" on one stalls the tree (dogfood log
-// entry 76): both seats carry the rule, a Peer (which works to completion) is
-// not burdened with it.
-func TestSeedRoles_LeadAndSupervisorNeverWaitOnBackgroundWork(t *testing.T) {
+// TestSeedRoles_PeerEndsWithJSONHandoff: the Peer is a tool with a structured
+// result, put first so the parent notifier's cut keeps it.
+func TestSeedRoles_PeerEndsWithJSONHandoff(t *testing.T) {
+	t.Parallel()
+	r := newTestRegistry(t)
+	seed(t, r)
+	peer := byName(t, r, "peer-sonnet").Instructions
+	for _, want := range []string{"STARTS with exactly one fenced json block", `"status":"done|blocked|failed"`, `"branch"`, `"commits"`, `"tests_run"`, `"not_verified"`, `"notes"`} {
+		if !strings.Contains(peer, want) {
+			t.Errorf("peer-sonnet instructions lack %q", want)
+		}
+	}
+}
+
+// A seat's own background task finishing does not start a run, so a Lead that
+// ends its turn "waiting" on one stalls the tree (dogfood log entry 76): the
+// Lead carries the rule, a Peer (which works to completion) is not burdened
+// with it.
+func TestSeedRoles_LeadNeverWaitsOnBackgroundWork(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
 	seed(t, r)
 	const rule = "Never end a turn waiting on a background command or monitor you started"
-	for _, name := range []string{"lead", "supervisor"} {
-		if got := byName(t, r, name).Instructions; !strings.Contains(got, rule) || !strings.Contains(got, "hand it to a child task") {
-			t.Errorf("%s instructions lack the background-wait rule: %q", name, got)
-		}
+	if got := byName(t, r, "lead").Instructions; !strings.Contains(got, rule) || !strings.Contains(got, "hand it to a child task") {
+		t.Errorf("lead instructions lack the background-wait rule: %q", got)
 	}
 	if got := byName(t, r, "peer-sonnet").Instructions; strings.Contains(got, rule) {
-		t.Errorf("peer-sonnet instructions carry the Lead/Supervisor rule: %q", got)
+		t.Errorf("peer-sonnet instructions carry the Lead rule: %q", got)
 	}
 }

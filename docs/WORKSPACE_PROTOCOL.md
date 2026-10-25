@@ -1,42 +1,42 @@
-# Workspace protocol — Supervisor → Lead → Peer
+# Workspace protocol — Human/Steward → Lead → (optional Peers)
 
-This is the working contract for multi-agent work on this repo. It applies
-to agents launched through Paseo profiles (`supervisor`, `lead`, `peer-glm`,
-`peer-sonnet`, `reviewer`) and later to smind's own orchestration. `AGENTS.md`
-rules still apply on top of it. This document adds roles and handoffs; it
-does not relax any rule in `AGENTS.md`.
+This is the working contract for agent work on this repo, as smind hosts it
+itself (ADR-0041, amended 2026-10-25 after the single-agent-loop audit). One
+shape: the Human, or a Steward acting for them, briefs a **Lead** directly; the
+Lead does the item and launches **Peers** only where a Peer earns its own
+context. `AGENTS.md` rules still apply on top of it. This document adds roles
+and handoffs; it does not relax any rule in `AGENTS.md`.
+
+The Paseo-era text (Paseo profiles, the `glm-peer`/`claude-s-peer` providers, a
+Supervisor tier, `peer-glm` as default coder with a 20-turn limit) is gone: the
+Supervisor seats and `peer-glm` were folded out of the role pack, and `glm` is
+just a provider.
 
 ## Authority
 
 - **Human** owns product goals, priority, material cost, external effects
   (pushing tags, releases, secrets, repo settings), irreversible risk, and
   architecture choices not already settled in `docs/decisions/`
-  (AGENTS.md rule d).
-- **Supervisor** (human-launched only):
-  - routes Human intent and sizes incoming work;
-  - spawns Leads, assigning each a non-overlapping write scope;
-  - does S-sized work itself;
-  - runs the merge queue only when Human has authorized merging;
-  - reports to Human.
-
-  Supervisor is not a second Lead: it intervenes only on concrete drift,
-  overlap, or a missed checkpoint.
+  (AGENTS.md rule d). A **Steward** may brief Leads and read their PRs for the
+  Human; it is outside the seats and holds no more authority than the Human
+  gave it.
 - **Lead** owns one work item end to end:
   - the spec;
   - the technical route;
-  - delegation to Peers;
+  - the implementation and tests, for small and medium items, itself;
   - review;
   - an explicit accept or reject of each Peer candidate;
   - the PR.
 
-  A Lead never merges.
+  A Lead never merges. Pushing its own branch and opening the PR for its item
+  is authorised.
 - **Peer** owns one bounded outcome from a Lead brief. Peers have no
-  orchestration tools and do not coordinate other agents. The `glm-peer` and
-  `claude-s-peer` providers have Paseo tools disabled.
+  orchestration tools and do not coordinate other agents.
 
 ## Sizing (complexity points)
 
-Supervisor scores each item from 0 to 2 on each axis and adds the scores up.
+The Human or Steward scores an item from 0 to 2 on each axis and adds the
+scores up, to decide how to brief it.
 
 | Axis | 0 | 1 | 2 |
 |---|---|---|---|
@@ -46,27 +46,32 @@ Supervisor scores each item from 0 to 2 on each axis and adds the scores up.
 | Decisions | spec is clear | short spec needed | ADR or Human decision needed |
 | Verification | unit tests | UI screenshots | real platform (macOS app, Windows, live provider) |
 
-The total decides the route:
-
 | Total | Size | Route |
 |---|---|---|
-| 0–2 | S | Supervisor does it, or one Peer directly |
-| 3–5 | M | one Lead and one Peer |
-| 6–8 | L | one Lead and up to two Peers; spec or ADR first; split write scopes |
+| 0–5 | S, M | one Lead, alone; a Peer only as an independent verifier |
+| 6–8 | L | one Lead; up to two Peers for independent parts (screenshot or test loops, parallel worktrees); spec or ADR first |
 | 9–10 | XL | split into several L items first, one Lead each |
 
-Write the size in the Lead brief and at the top of the plan, for example
+Write the size in the brief and at the top of the plan, for example
 `Size: L (6) — scope 2, PRs 1, risk 1, decisions 1, verify 1`.
 
 ## Ownership
 
-- Every moving write scope has exactly one owner at a time. Before spawning
-  parallel Leads, Supervisor checks for overlap: shared files, the same plan
-  doc, the same tool catalog.
+- Every moving write scope has exactly one owner at a time. Before briefing
+  parallel Leads, check for overlap: shared files, the same plan doc, the same
+  tool catalog.
 - A Peer must tell its Lead before touching anything outside its scope or
   changing a shared contract.
 - PRs branch from `origin/develop`. **Do not stack PRs.** Squash merges make
   the PR on top conflict. Sequence the work instead.
+
+## When a Lead launches a Peer
+
+Only for an independent parallel part, or as an independent verifier (a fresh
+context reviewing an exact commit). At most two Peers at a time, one task per
+Peer, launched with `peer-sonnet` (the pack's only coder; `profile_list` Notes
+carry its cost and timing). A Peer is a tool: its result is the structured
+handoff below.
 
 ## Lead brief (to a Peer)
 
@@ -80,51 +85,36 @@ A brief states:
 7. when to reopen.
 
 The file lists in a brief are provisional. Give the Peer enough context to
-start without the earlier conversation.
-
-### Briefing `peer-glm` (default coder, low thinking)
-
-`peer-glm` runs with low thinking and a 20-turn limit, so the Lead does the
-thinking and the brief carries it. Use `peer-glm` for coding by default and
-make the brief detailed enough that it only has to type:
-- name the exact files, functions and types to add or change, with
-  signatures, and point at an existing function or test in the repo to copy
-  the pattern from (path:line);
-- give the algorithm or the code shape in a few lines (pseudocode or a
-  snippet), including error handling and the edge cases to cover;
-- list the exact test names and what each asserts, and the exact commands to
-  run (`go test ./pkg -run Name`, `bunx vitest run path`);
-- split the outcome into small numbered steps, one commit each, so a
-  20-turn cut leaves compiling, committed progress;
-- say what is out of scope and must not be touched.
-
-When a `peer-glm` candidate fails, first tighten the brief (what was
-ambiguous, the failing output, the exact fix shape) and retry once.
-Switch to `peer-sonnet` only after that, on a GLM 429, or for a genuinely
-hard outcome (crypto, concurrency, cross-language protocol), and say why in
-the Lead's report.
+start without the earlier conversation. Split the outcome into small numbered
+steps, one commit each, so a cut leaves compiling, committed progress; say what
+is out of scope.
 
 ## Peer handoff (to the Lead)
 
-A writable Peer returns:
-- the candidate commit SHA and its base;
-- the complete list of changed paths;
-- the verification environment, the commands it ran, and their actual
-  results;
-- residual risk;
-- whether it keeps or gives up write ownership.
+A Peer's final message **starts with exactly one fenced json block** (before
+any prose), adapted from the single-agent-loop kit's `subagent_response`
+schema:
 
-Keep verified, untested, failed, and unknown items separate. "Tests pass"
-or "done" is evidence, not acceptance.
+```json
+{"status":"done","branch":"smind/task-...","commits":["<sha> <subject>"],"tests_run":["<command>: <actual result>"],"not_verified":["..."],"notes":"..."}
+```
 
-If the Peer can't hand off a candidate, it returns one of these signals,
-each with evidence, the consequence, and the decision it needs:
-- `REOPEN_REQUEST`: a premise of the brief is wrong.
-- `DEPENDENCY_REQUEST`: it needs a prerequisite that no one owns.
-- `BLOCKED`: no safe in-scope progress remains.
+| Field | Meaning |
+|---|---|
+| `status` | `done`, `blocked` (no safe in-scope progress, a premise of the brief is wrong, or a prerequisite nobody owns is missing: say which in `notes`) or `failed` |
+| `branch` | the Peer's branch |
+| `commits` | candidate commits, base first |
+| `tests_run` | commands with their actual results |
+| `not_verified` | what it could not check; keep verified, untested, failed and unknown separate |
+| `notes` | residual risk; whether it keeps or gives up write ownership |
 
-A Peer that hit a turn limit or produced no edits must say so. It must not
-report "done".
+The Lead reads the block first; `status` drives the next step. A missing or
+invalid block is a failed report: the Lead reads the diff itself. The parent
+notifier cuts a child's text at 1 KiB but keeps a well-formed json block whole
+(hard cap 4 KiB), so the block must lead the message; prose before it counts
+against the 1 KiB. A Peer that hit a turn limit, was rate limited or produced
+no edits must say so and must not report `done`. "Tests pass" or "done" is a
+claim, not acceptance.
 
 ## Acceptance
 
@@ -140,8 +130,9 @@ adversarially:
 - platform gating;
 - tests that don't test the behaviour.
 
-For material uncertainty, the Lead may ask the `reviewer` profile for a
-read-only review of an exact commit.
+For material uncertainty, the Lead may launch the `reviewer` profile for a
+read-only review of an exact commit (the reviewer seat is unchanged; whether it
+stays is a Human decision, open).
 
 ## Verification checklist
 
@@ -180,29 +171,32 @@ read-only review of an exact commit.
 
 ## Running the roles inside smind
 
-smind can host the three roles itself as seat profiles (ADR-0041). Seed the
-standard pack once with `smind profile seed roles`: `peer-sonnet`, `peer-glm`
-(falls back to `peer-sonnet` on a provider rate limit), `lead`, `reviewer` and
-`supervisor`. Seeding is idempotent by name; a profile you already have or
-edited is kept as is. A follow-up to a seat's chat that does not name a profile
-keeps the chat's last profile (a seat stays a seat); pass `--profile none` /
-`profileId: 0` to drop it, or start a new chat. The claude-native seats are
-seeded with `onRateLimit=wait`: when the account's usage limit cuts a run off
-("You've hit your session limit · resets 1pm"), the same prompt (a Lead's
-`[child event]` wake-up included) is re-queued on the same chat for the reset
-time + 30 s, so a tree heals itself instead of stalling.
+smind hosts the roles itself as seat profiles (ADR-0041). Seed the standard
+pack once with `smind profile seed roles`: `lead`, `peer-sonnet` and
+`reviewer`. Seeding is idempotent by name; a profile you already have or edited
+is kept as is. A follow-up to a seat's chat that does not name a profile keeps
+the chat's last profile (a seat stays a seat); pass `--profile none` /
+`profileId: 0` to drop it, or start a new chat. The seats are seeded with
+`onRateLimit=wait`: when the account's usage limit cuts a run off ("You've hit
+your session limit · resets 1pm"), the same prompt (a Lead's `[child event]`
+wake-up included) is re-queued on the same chat for the reset time + 30 s, so a
+tree heals itself instead of stalling.
 
-- **Supervisor** is a root task the Human launches: `smind task new <ws>
-  "<title>"`, then `smind task send <task> <prompt> --profile <supervisor id>`
-  (or the web composer's profile picker). It has no model set; choose it.
-- **Lead** and **Peers** are child tasks launched through MCP (`task_new`,
-  then `task_send` with `profileId`). A seat sees only the profiles in its own
-  child list, so the Supervisor launches Leads and a Lead launches Peers.
+- **Lead** is a root task the Human or Steward launches: `smind task new <ws>
+  "<title>"`, then `smind task send <task> <prompt> --profile <lead id>` (or
+  the web composer's profile picker).
+- **Peers** are child tasks the Lead launches through MCP (`task_new`, then
+  `task_send` with `profileId`). A seat sees only the profiles in its own child
+  list; a Lead launches Peers.
 - **Peers have no orchestration tools**; they cannot start or message agents.
 - **No polling.** A parent ends its turn after dispatching; the daemon wakes it
   with a `[child event]` message when the child's work is done or has failed.
+  (A Human or Steward outside the seats may use `smind task wait`.)
 - The daemon, not the agent, enforces who may launch whom. That is a drift
   guard, not a sandbox: the provider's permission modes are the real boundary.
+  The daemon still supports `childPolicy: profiles`, `orchestration.maxDepth`,
+  sticky seats, the per-tree guard and the parent notifier; the pack just no
+  longer seeds a seat that uses the `profiles` policy.
 - After accepting a Peer's candidate (its commits are on the branch the Lead
   will push), the Lead archives the Peer's task.
 

@@ -335,3 +335,31 @@ as separate small PRs, B1 first.
   Peer's last message into a Lead (untrusted envelope; a Lead in `auto` mode still ends at the provider's own classifier, the real boundary); a failover that re-runs side effects (the preface tells the successor to inspect
   `git status`/`git log` first; one hop only).
 - Not decided here: heartbeats/schedules (Phase 5), a stall detector, account-level failover, `handoff_submit`/`handoff_review`, tier-scoped learned skills.
+
+## Amendment 2026-10-25: single-agent-loop audit, Human-approved; eval skipped by Human choice
+
+The audit in [`docs/plans/active/single-loop/PLAN.md`](../plans/active/single-loop/PLAN.md) (skill `single-agent-loop`) found that
+the Supervisor → Lead → Peer chain carried three routing hops where one loop does the work. The Human approved the verdicts as recommended on 2026-10-25 and
+skipped the paid eval (step 1) by choice; the changes were applied directly. Everything above stays as written; this section only adds.
+
+- **Folded: the Supervisor seats.** The role pack no longer seeds `supervisor` (or the hand-made `supervisor-sonnet`), and the `smind-supervisor` skill is deleted.
+  The Human, or a Steward acting for them, briefs a Lead directly. Evidence: 24 of the Supervisor's 43 runs were 16 s wake-ups relaying a Lead's report
+  (USD 2.29); a direct hop to a Lead (#611) took 17m19s and USD 2.01 against about USD 4 through the Supervisor.
+- **Folded: `peer-glm`.** Not seeded any more; the Lead names `peer-sonnet` only. One run in 191 (28m31s, 3.0M input tokens against about 1.5 min on Sonnet). The
+  `glm` provider stays a normal provider; the `onRateLimit: fallback` mechanism stays in the daemon (no seed uses it now).
+- **The Lead is the single loop.** It does S and M items itself and launches a Peer only for an independent parallel part or as an independent verifier. Its
+  instructions are shorter and carry no Peer prices or timings (`profile_list` Notes do).
+- **The Peer is a tool with a structured handoff.** `peer-sonnet` ends its final message with one fenced json block `{status: done|blocked|failed, branch,
+  commits[], tests_run[], not_verified[], notes}` (the kit's `subagent_response` schema, adapted). The parent notifier keeps a well-formed block whole (hard cap
+  4 KiB escaped) on top of the 1 KiB text cut; a block after a long preamble survives but the preamble is cut to the 1 KiB budget. A missing or invalid block
+  means "failed to report": the Lead reads the diff.
+- **The reviewer is unchanged**; the Human decides later whether it stays.
+- **The protocol and skills describe one shape**: Human/Steward → Lead → optional Peers. `docs/WORKSPACE_PROTOCOL.md` lost its Paseo-era scope text, the GLM
+  default-coder section and the Supervisor duties; `smind-leader` no longer tells a Lead to `task_wait`.
+- **The daemon keeps** every mechanism: `childPolicy` (`none`, `leaf`, `profiles`) and the `profiles` branch of admission, `orchestration.maxDepth` (default
+  still 2, pinned by a test; the extra level is now just headroom), the per-tree concurrency guard, sticky seats, the parent notifier and wake runs, rate-limit
+  `wait` and `fallback`, and the `supervisor` role label in `smind profile ls` / tree tiers. Only the seed, its docs and the skill changed.
+- **Break for existing seeded profiles** (no installed base, so no migration or shim): a daemon seeded before this change keeps its old `supervisor`,
+  `supervisor-sonnet` and `peer-glm` profiles and its old `lead` / `peer-sonnet` text, because seeding never rewrites an existing profile. Delete the first
+  three and delete or `profile edit` the other two, then re-run `smind profile seed roles`. A `smind-supervisor` entry in a profile's `skills` list no longer
+  resolves (the skill is gone), so edit it out before the profile can be saved again.
