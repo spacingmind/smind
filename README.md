@@ -168,6 +168,10 @@ built into the app — the corresponding private key is a repository secret
 - If the signing key is ever lost or rotated, installed apps can no longer
   verify new releases — one manual reinstall is needed, after which the new
   key's releases update normally again.
+- Developers: `daemon_survives_app_update` (`desktop/src-tauri/src/daemon_survival_test.rs`)
+  proves a managed daemon keeps its pid, port and in-flight terminal across an
+  app update; it runs against a real daemon with
+  `SMIND_REAL_DAEMON_BIN=<built smind> cargo test --lib daemon_survi`.
 - The Linux `deb` package has no updater: install new versions by hand.
 
 #### Updating the `smind` binary itself

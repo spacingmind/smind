@@ -289,7 +289,7 @@ workflow's `publish` job end to end.
 
 ## Progress
 
-**Re-checked 2026-10-25 (plans hygiene): still PARTIAL, no new evidence.** Open (all need a real app window or machine, i.e. the Human): U3 menu click, U4 real-window screenshots, U7 `daemon-survives-app-update`, the five `local-*` in-window scenarios, the Windows NSIS update path, and a first real published-release-to-release in-app update. The `requireSignedVersion` follow-up is also still open.
+**Status 2026-10-25 (scenario automation pass): still PARTIAL, narrower.** U7 `daemon-survives-app-update` is now automated (`daemon_survives_app_update`, below) and the logic behind four of the five `local-*` scenarios is covered by committed tests (mapping in Validation, "Scenario automation pass"). What is left needs a real native window, Windows hardware or a second published release, i.e. the Human: U3 menu click, U4 real-window screenshots, the in-window half of the five `local-*` scenarios (prompt visible on launch, Later/Esc in the real window, menu toast, `app.restart()` landing on the new version), the Windows NSIS update path, a first real published-release-to-release in-app update, and the `requireSignedVersion` follow-up. Exact steps for the Human are in Validation under "Manual steps for the Human". The plan stays in `active/`.
 
 **Status 2026-10-22 (plans hygiene): PARTIAL.** Shipped and in use; kept in `active/` because several acceptance criteria were only partly verified and nothing in the repo shows that a human closed them.
 
@@ -388,6 +388,72 @@ path unchanged (unsigned build); real release with an empty secret fails
 (`signing-mode-fails-when-required-and-absent`); `latest.json` uploaded in its
 own last step; `*.sig` added to checksums/artifact/release globs.
 `actionlint` clean. **Not run on GitHub** (no release/dry run was started).
+
+### Scenario automation pass (2026-10-25)
+
+**U7 / `daemon-survives-app-update`: automated.** `desktop/src-tauri/src/daemon_survival_test.rs`
+(opt-in, skips without `SMIND_REAL_DAEMON_BIN`, unix only). Command:
+
+```text
+T=$(mktemp -d); go build -o $T/smind ./cmd/smind
+cd desktop/src-tauri && SMIND_REAL_DAEMON_BIN=$T/smind cargo test --lib daemon_survi -- --nocapture
+```
+
+Result: `daemon_survival_stub_app ... ok`, `daemon_survives_app_update ... ok` (10 s).
+Sequence: a stub "app" (this test binary, own process group) starts a real
+`smind serve` through the production `native::spawn_detached` on a free
+loopback port with its own `SMIND_HOME` and records it as managed; the test
+creates a workspace + task + terminal and starts `echo before; sleep 8; echo
+after` in it; the "update" SIGKILLs the stub's whole process group and swaps
+the fake bundle's files (0.10.0 -> 0.10.1); a fresh stub relaunches and must
+classify the daemon as `Managed` on first sight (adopt, not reinstall) with the
+same pid, same port owner and a healthy `/healthz`; the terminal is still
+listed and the in-flight command finishes after the update. No model calls;
+only the stub and daemon pids it started are killed (`Rig::drop`); `/Applications`,
+`~/.smind`, :4648 and :4870 are never touched (the stub refuses to run without
+`SMIND_LISTEN`). **Mutation:** commenting out `cmd.process_group(0)` in
+`desktop/daemon-client/src/daemon_manager/native.rs` made it fail ("the daemon
+outlived the app group's SIGKILL"); restored. Not covered: the M5 older-daemon
+banner after the update (the real daemon built from source reports a dev version;
+`version::compare` has its own unit tests), and `app.restart()` itself.
+
+**`local-*` scenarios: automated vs Human.** `desktop/src-tauri/tests/updater_e2e.rs`
+(`cargo test --test updater_e2e`, 13 pass on this Mac) already runs the real
+updater plugin against a local signed feed:
+
+| scenario | automated by | needs the Human |
+| --- | --- | --- |
+| `local-update-end-to-end` | `check_reports_available_and_downloads_nothing`, `install_replaces_the_bundle_and_reports_progress` (download, signature check, install onto a fake bundle, access log) | prompt in the real window on launch, light/dark screenshots, `app.restart()` landing on 0.10.1 |
+| `local-bad-signature-rejected` | `tampered_artifact_is_refused`, `signature_from_another_key_is_refused`, `artifact_signed_for_another_version_is_refused`, `undecodable_signature_is_refused`, `refused_install_leaves_the_bundle_and_keeps_the_update_pending` | the error toast in the real window |
+| `local-later-dismiss` | vitest `update-later-dismisses` + `check_reports_available_and_downloads_nothing` (no download without Update) | Later/Esc in the real window |
+| `local-endpoint-down-launch-silent` | `dead_endpoint_is_an_error` + vitest `update-launch-check-error-is-silent` / `update-manual-check-error-toast` | nothing visible at launch in the real window |
+| `local-menu-check` | `update_menu_location` + `update-manual-check-up-to-date-toast` | the native menu click itself (not drivable without Accessibility/UI scripting on a logged-in session) |
+
+Windows (NSIS hand-off) and a real signed release (GitHub `releases/latest`
+redirect, first real in-app update) need Windows hardware / a second release.
+
+### Manual steps for the Human (what is still open)
+
+On a logged-in Mac session, isolated from the real install: set
+`HOME=$(mktemp -d)`, `SMIND_HOME=$HOME/.smind`, `server: {port: 4751}` in
+`$SMIND_HOME/config.yaml`, `SMIND_DAEMON_URL=http://127.0.0.1:4751`, and use
+the build recipe in "Not verified" below (an `.e2e` identifier, e.g.
+`dev.spacingmind.desktop.dogfood`, never `/Applications/sMind.app`, never :4648).
+1. **U4 / `local-update-end-to-end`**: launch the 0.10.0 build against the local
+   `latest.json` (0.10.1): the prompt shows within seconds (screenshot light and
+   dark), the server log shows only `GET /latest.json` until **Update** is
+   clicked, then download, install, restart: About shows 0.10.1.
+2. **U3 / `local-menu-check`**: app menu -> **Check for Updates…** with the
+   server serving the same version: an "up to date" toast.
+3. **`local-later-dismiss`**: **Later** and Esc each close the prompt; the log
+   shows no tarball request.
+4. **`local-bad-signature-rejected`**: serve the tampered tarball, then the
+   other-key signature: an error toast each time, still on 0.10.0 and running.
+5. **`local-endpoint-down-launch-silent`**: stop the server, launch: no dialog or
+   toast; menu check -> error toast.
+6. Windows: install the signed NSIS build, publish a newer one, accept the update.
+7. After two real releases with updater artifacts: update in place from the
+   older installed app (needs the repo signing secret).
 
 ### Not verified, needs a human or the next release
 

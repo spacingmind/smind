@@ -43,6 +43,8 @@ mod window_chrome;
 mod capability_tests;
 #[cfg(test)]
 mod real_daemon_test;
+#[cfg(all(test, unix))]
+mod daemon_survival_test;
 mod zoom_store;
 
 use state::DesktopState;
