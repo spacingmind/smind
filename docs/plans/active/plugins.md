@@ -192,6 +192,31 @@ Parallel after PA.2 is merged: PB.1 and PA.3/PA.4 (disjoint scopes: `internal/pl
 Reopen rules from the protocol apply: a PR that needs another item's file raises `DEPENDENCY_REQUEST`; a changed shared contract (capability table, view schema,
 manifest) raises `REOPEN_REQUEST` to the Lead that owns it.
 
+### P0.1 touch-point inventory (K1, 2026-10-25; ticked as each moves to the registry)
+
+Found with `grep -rnE 'ProviderClaudeNative|ProviderCodexNative|ProviderGLM|ProviderKimi|"claude-native"|...' internal cmd`; the plan said ten, there are more.
+`internal/providers` holds one `Spec` per provider; each hit below reads it instead.
+
+- [ ] `taskrunner/runner.go:453-461` RunPrompt dispatch switch -> `Spec.Runner`
+- [ ] `taskrunner/runner.go:343-344,263` default ACP commands / codexCommand -> `Spec.Command`
+- [ ] `taskrunner/runner.go:965,986,1009,1039,1088,1237,1273,1287,1301,1322`, `isolated.go:255`, `acp_modes.go:232`: launch env and session handle keyed by the base constant -> keyed by the provider (instance) id
+- [ ] `taskrunner/modes.go:125-127` staticModes -> `Spec.Modes`
+- [ ] `taskrunner/modes.go:211-245` ProviderCatalog (acpProvider / codex cases) -> `Spec.Runner`
+- [ ] `taskrunner/provider.go:136-148` SupportedProviders literal -> registry
+- [ ] `taskrunner/config_options.go:69-76,83,105,108` acpProvider and claude/codex checks -> `Spec.Runner`
+- [ ] `taskrunner/live_mode.go:45,56` -> `Spec.Runner`
+- [ ] `taskrunner/models.go:52` staticModels -> `Spec.Models`
+- [ ] `taskrunner/isolated.go:200`, `probe.go:72`, `attachments.go:92`, `model_switch.go:68` claude-only guards -> `Runner == claude`
+- [ ] `wsapi/handlers.go:2292-2296` providerCLICommand diag map -> `Spec.HealthCommand`
+- [ ] `wsapi/provider_env.go:70,91` env allowlist lookup by id -> by `Spec.Base()`
+- [ ] `learning/eligible.go:19-46` provider id list -> `Spec.ToolEvents/Reflect`
+- [ ] `learning/delivery/delivery.go:102,122,213`, `learning/probe/service/eligibility.go:147` -> `Spec.Delivery`
+- [ ] `runs/queue.go:802,829`, `runs/registry.go:2087` claude-only guards -> `Runner == claude`
+- [ ] `runs/permission_mode.go:71`, `profiles/registry.go:140` ProviderInfoFor -> registry
+- [ ] `config/config.go:165`, `config/edit.go:47,184`, `config/provider_env.go:29-30,96` id lists -> `providers.BuiltinIDs()`
+- [ ] `cmd/smind/serve.go:119-131` startup wiring of per-provider default model / env -> registry loop
+- [ ] `cmd/smind/task.go:602,861`, `cmd/smind/learning_wire.go:131`: client-side CLI notes keyed on the id (left as is: they name the base provider on purpose; recorded here)
+
 ## Decisions
 
 - ADR-0042 (Accepted 2026-10-25, all Q1–Q12 as recommended, plus provider instances in Wave 0 as AC37) holds the architecture: trusted local plugins, off by default, consent and mediated capabilities, data-first contributions, plugin process over
