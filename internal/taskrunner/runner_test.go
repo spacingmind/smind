@@ -148,13 +148,13 @@ func TestRunner_WithACPCommand_IsPerProviderIndependent(t *testing.T) {
 	custom := []string{"custom-glm-binary"}
 	r := New(nil, WithACPCommand(ProviderGLM, custom))
 
-	got := r.acpCommands[ProviderGLM]
+	got, _ := r.acpCommandFor(ProviderGLM)
 	if len(got) != 1 || got[0] != custom[0] {
 		t.Fatalf("acpCommands[ProviderGLM] = %v, want %v", got, custom)
 	}
 
 	wantKimi := acp.KimiCommand()
-	gotKimi := r.acpCommands[ProviderKimi]
+	gotKimi, _ := r.acpCommandFor(ProviderKimi)
 	if len(gotKimi) != len(wantKimi) {
 		t.Fatalf("acpCommands[ProviderKimi] = %v, want unchanged default %v", gotKimi, wantKimi)
 	}

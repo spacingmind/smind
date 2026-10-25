@@ -178,7 +178,10 @@ func notifyEligible(r store.Run) bool {
 func (reg *Registry) childEventFacts(task store.Task, run store.Run) ChildEventFacts {
 	f := ChildEventFacts{
 		TaskID: task.ID, Title: task.Title, RunID: run.ID, Status: run.Status, StopReason: run.StopReason,
-		Disposition: DispositionFor(Status(run.Status), run.StopReason),
+		Disposition: DispositionOf(DispositionFacts{
+			Status: Status(run.Status), StopReason: run.StopReason, FailureKind: run.FailureKind, FailureResetAt: run.FailureResetAt,
+			HasSession: run.Status == string(StatusError) && resumableKind(run.FailureKind) && chatHasSession(reg.st, run.ChatID), Now: time.Now(),
+		}),
 		FailureKind: run.FailureKind, FailureWindow: run.FailureWindow, FailureResetAt: run.FailureResetAt, FailureResetInferred: run.FailureResetInferred,
 	}
 	if run.BaseSHA != nil {

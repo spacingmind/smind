@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -55,6 +56,17 @@ func sendCaptured(t *testing.T, args []string) (int, string, string) {
 		stdout = captureStdout(t, func() { code = run(args) })
 	})
 	return code, stdout, stderr
+}
+
+// waitCaptured runs `task wait <args>` into private buffers instead of
+// swapping the os.Stdout/os.Stderr globals like sendCaptured. Use it for a wait
+// that runs in a goroutine while the test body runs other commands: two
+// concurrent global swaps race with each other and can leave os.Stdout pointing
+// at a closed pipe.
+func waitCaptured(args ...string) (int, string, string) {
+	var stdout, stderr bytes.Buffer
+	code := runTaskWait(args, &stdout, &stderr)
+	return code, stdout.String(), stderr.String()
 }
 
 func TestTaskSendDetachPrintsRunIDAndSkipsAttach(t *testing.T) {

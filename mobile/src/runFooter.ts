@@ -10,10 +10,27 @@ import { RunSummary } from './api';
 /** The prompt the Continue button sends on the run's own provider (web task-detail.tsx sends the same word). */
 export const CONTINUE_PROMPT = 'Continue';
 
+/**
+ * The prompt Continue sends for `run`: the plain word for a capped run, one
+ * line naming the failure for an errored one (J1; the same text as the web
+ * footer's continuePrompt in run-footer-model.ts).
+ */
+export function continuePrompt(run: Pick<RunSummary, 'Status' | 'FailureKind'>): string {
+  if (run.Status !== 'error') return CONTINUE_PROMPT;
+  const label = FAILURE_LABELS[run.FailureKind ?? ''] ?? 'an unexpected error';
+  return `Continue from where you left off (the previous run ended unexpectedly: ${label}).`;
+}
+
+const FAILURE_LABELS: Record<string, string> = {
+  cli_exited: 'the agent CLI exited without a result',
+  rate_limited: 'a provider rate limit, which has since reset',
+};
+
 export interface RunFooterView {
   sentence: string;
   tone: 'warning';
-  action: 'continue';
+  /** null: the footer explains the state but offers nothing (a rate limit that has not reset yet). */
+  action: 'continue' | null;
   /** A second muted line: "Queued · starts after 17:35" while a held retry exists, "continued on GLM in chat #3" once a failover successor exists. */
   note?: string;
   /** True while a held retry is queued: the UI labels or hides Continue (the daemon already has the retry). */
@@ -84,11 +101,12 @@ export function describeRunFooter(
   ctx?: RunFooterContext,
 ): RunFooterView | null {
   if (run.Status === 'error' && run.FailureKind === RATE_LIMITED) {
-    // The Continue button re-submits on the run's own provider (TaskDetailScreen's handleContinue), which is the recovery path once the limit lifts.
+    // Continue (TaskDetailScreen's handleContinue) resumes on the run's own provider. The daemon decides when that is offered
+    // (J1: its quota has reset and the chat has a stored session), so before the reset the banner only explains.
     const view: RunFooterView = {
       sentence: rateLimitSentence(run.FailureWindow || undefined, run.FailureResetAt, now, run.FailureResetInferred),
       tone: 'warning',
-      action: 'continue',
+      action: run.Disposition === NEEDS_CONTINUE ? 'continue' : null,
     };
     const held = ctx?.heldUntil;
     if (held && !Number.isNaN(held.getTime())) {
@@ -98,6 +116,10 @@ export function describeRunFooter(
       view.note = `continued on ${ctx.continuedOn.provider} in chat #${ctx.continuedOn.chatId}`;
     }
     return view;
+  }
+  // J1: a CLI that died without a result is resumable when the daemon says so (it has a stored session).
+  if (run.Status === 'error' && run.FailureKind === 'cli_exited' && run.Disposition === NEEDS_CONTINUE) {
+    return { sentence: 'Failed · the agent CLI exited without a result', tone: 'warning', action: 'continue' };
   }
   if (run.Status !== 'done') return null;
   if (run.Disposition === NEEDS_CONTINUE) {

@@ -338,3 +338,10 @@ ADR-0013 amendment / #603). Two instances of the same CLI then run side by side 
 which is how Paseo's `extends` + `env` providers work. Settings → Providers lists `~/.claude*` and `~/.codex*` directories found in the daemon user's home as
 one-click suggestions; discovery reads directory names only, never file contents or credentials.
 
+### Implementation note, 2026-10-25 (Wave 0, daemon side)
+
+`internal/providers` is the registry (one `Spec` per provider, a leaf package); `providers.custom` holds ACP entries and instances (`extends: claude-native|codex-native`
+with an allowlisted env), validated with the field named. An instance runs the extended provider's code with its own launch env, appears in `provider.list`
+(`runner`, `extends`, `custom` are additive wire fields; `kind` keeps meaning auth), the health check and the run-usage/cooldown grouping (all keyed by provider id),
+and is not a reflector source. Humans add one through `provider.dirSuggestions` (directory names under the daemon user's home only) and `provider.addInstance`;
+`provider.reload` re-applies config.yaml. Web, mobile and the Settings UI follow in P0.2.

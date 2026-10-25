@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -120,8 +121,14 @@ type conn struct {
 }
 
 // newConn spawns command[0] with command[1:] as arguments, wiring its
-// stdin/stdout as the JSON-RPC transport and stderr to logWriter.
+// stdin/stdout as the JSON-RPC transport and stderr to logWriter. env
+// (NAME=VALUE) is appended to the inherited environment.
 func newConn(command []string, logWriter io.Writer) (*conn, error) {
+	return newConnEnv(command, logWriter, nil)
+}
+
+// newConnEnv is newConn with extra environment entries.
+func newConnEnv(command []string, logWriter io.Writer, env []string) (*conn, error) {
 	if len(command) == 0 {
 		return nil, fmt.Errorf("acp: empty command")
 	}
@@ -131,6 +138,9 @@ func newConn(command []string, logWriter io.Writer) (*conn, error) {
 
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Stderr = logWriter
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...) // last entry wins
+	}
 	setProcessGroup(cmd)
 
 	stdin, err := cmd.StdinPipe()

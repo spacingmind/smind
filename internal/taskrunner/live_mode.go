@@ -42,7 +42,7 @@ func (r *Runner) untrackClaudeClient(chatID int64) {
 // session fails rather than silently no-opping.
 func (r *Runner) SetPermissionMode(ctx context.Context, chatID int64, provider Provider, mode string) error {
 	switch {
-	case provider == ProviderClaudeNative:
+	case r.isClaude(provider):
 		r.sessionMu.Lock()
 		client := r.claudeClients[chatID]
 		r.sessionMu.Unlock()
@@ -53,7 +53,7 @@ func (r *Runner) SetPermissionMode(ctx context.Context, chatID int64, provider P
 			return fmt.Errorf("taskrunner: set permission mode on chat %d: %w", chatID, err)
 		}
 		return nil
-	case acpProvider(provider):
+	case r.isACP(provider):
 		r.sessionMu.Lock()
 		s, ok := r.acpSessions[chatID]
 		var (

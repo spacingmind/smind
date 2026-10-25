@@ -9,20 +9,22 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/spacingmind/smind/internal/providers"
 )
 
 // Config is the root daemon configuration.
 type Config struct {
-	Server        ServerConfig              `yaml:"server"`
-	Orchestration OrchestrationConfig       `yaml:"orchestration"`
-	Worktrees     WorktreesConfig           `yaml:"worktrees"`
-	Agents        AgentsConfig              `yaml:"agents"`
-	Providers     map[string]ProviderConfig `yaml:"providers"`
-	AccountUsage  AccountUsageConfig        `yaml:"accountUsage"`
-	Relay         RelayConfig               `yaml:"relay"`
-	Push          PushConfig                `yaml:"push"`
-	Learning      LearningConfig            `yaml:"learning"`
-	Log           LogConfig                 `yaml:"log"`
+	Server        ServerConfig        `yaml:"server"`
+	Orchestration OrchestrationConfig `yaml:"orchestration"`
+	Worktrees     WorktreesConfig     `yaml:"worktrees"`
+	Agents        AgentsConfig        `yaml:"agents"`
+	Providers     ProvidersConfig     `yaml:"providers"`
+	AccountUsage  AccountUsageConfig  `yaml:"accountUsage"`
+	Relay         RelayConfig         `yaml:"relay"`
+	Push          PushConfig          `yaml:"push"`
+	Learning      LearningConfig      `yaml:"learning"`
+	Log           LogConfig           `yaml:"log"`
 }
 
 // LogConfig tunes the daemon's own rotating log file, $SMIND_HOME/daemon.log
@@ -159,20 +161,23 @@ type ProviderConfig struct {
 	Env map[string]string `yaml:"env"`
 }
 
-// DefaultModelProviders are the provider ids that accept providers.<id>.
-// defaultModel. Kept in step with taskrunner.SupportedProviders by a test in
-// cmd/smind (config cannot import taskrunner).
-var DefaultModelProviders = []string{"claude-native", "codex-native", "glm", "kimi"}
+// DefaultModelProviders are the built-in provider ids, the ones that accept
+// providers.<id>.defaultModel and providers.<id>.env (the provider registry's
+// built-in table; custom providers carry their own settings).
+var DefaultModelProviders = providers.BuiltinIDs()
 
 // DefaultModel returns providers.<id>.defaultModel, "" when unset.
 func (c Config) DefaultModel(provider string) string {
-	return c.Providers[provider].DefaultModel
+	return c.Providers.ByID[provider].DefaultModel
 }
 
 // validateProviders rejects unknown provider ids and malformed model strings,
 // so a typo is an error at load rather than a setting that never applies.
-func validateProviders(path string, providers map[string]ProviderConfig) error {
-	for id, pc := range providers {
+func validateProviders(path string, cfg ProvidersConfig) error {
+	if err := ValidateCustomProviders(cfg.Custom); err != nil {
+		return fmt.Errorf("config %s: %w", path, err)
+	}
+	for id, pc := range cfg.ByID {
 		known := false
 		for _, k := range DefaultModelProviders {
 			known = known || k == id

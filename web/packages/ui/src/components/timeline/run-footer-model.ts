@@ -40,7 +40,7 @@ export interface RunFooterRun {
   startedAt: string;
   finishedAt?: string;
   stopReason?: string;
-  /** The daemon's derived disposition (ADR-0027 D13): "needs-continue" when the run ended done at a turn/token/budget cap. */
+  /** The daemon's derived disposition (ADR-0027 D13): "needs-continue" when the run ended done at a turn/token/budget cap, or failed resumably (J1: cli_exited, or rate_limited past its reset) with a stored session. */
   disposition?: string;
   /** ADR-0041: "rate_limited" when an errored run failed on a provider quota. */
   failureKind?: string;
@@ -73,6 +73,26 @@ const CAP_SENTENCES: Record<string, string> = {
   // The daemon went down under the run (a restart): not a cap, but also not finished.
   daemon_restart: "Interrupted when the daemon restarted",
 };
+
+/** The prompt of a Continue on a run that ended done at a cap or was cut off by a restart. */
+export const CONTINUE_PROMPT = "Continue";
+
+/** How a resumable failure kind reads in the error run's Continue prompt. */
+const FAILURE_LABELS: Record<string, string> = {
+  cli_exited: "the agent CLI exited without a result",
+  rate_limited: "a provider rate limit, which has since reset",
+};
+
+/**
+ * The follow-up prompt the footer's Continue sends for `run`: the standard
+ * "Continue" for a capped or restart-interrupted run, one line naming the
+ * failure for an errored one (J1).
+ */
+export function continuePrompt(run: Pick<RunFooterRun, "status" | "failureKind">): string {
+  if (run.status !== "error") return CONTINUE_PROMPT;
+  const label = FAILURE_LABELS[run.failureKind ?? ""] ?? "an unexpected error";
+  return `Continue from where you left off (the previous run ended unexpectedly: ${label}).`;
+}
 
 const MINUTE_MS = 60_000;
 
@@ -211,13 +231,19 @@ export function describeRunFooter(
     ariaLabel: ariaLabel(run, view, ms, age),
   });
 
-  // A provider quota (ADR-0041) is not a code failure: warning tone, same Retry action.
+  // The daemon says an errored run is resumable (J1: its CLI died without a
+  // result, or its quota has reset, and its chat has a stored session): the
+  // disposition, never the failure kind alone, decides Continue, so a client
+  // that cannot see the session and a daemon that can never disagree.
+  const resumable = run.status === "error" && run.disposition === NEEDS_CONTINUE;
+
+  // A provider quota (ADR-0041) is not a code failure: warning tone; Retry, or Continue once the daemon says it is resumable.
   if (isRateLimitedRun(run)) {
     return detail({
       kind: "abnormal",
       sentence: describeRateLimit({ window: run.failureWindow, resetAt: run.failureResetAt, inferred: run.failureResetInferred }, now),
       tone: "warning",
-      action: "retry",
+      action: resumable ? "continue" : "retry",
       duration,
       durationTitle: proseDuration(ms),
       model: opts.modelLabel,
@@ -230,7 +256,7 @@ export function describeRunFooter(
       kind: "abnormal",
       sentence: duration === null ? "Failed" : `Failed after ${duration}`,
       tone: "danger",
-      action: "retry",
+      action: resumable ? "continue" : "retry",
       duration: null,
       durationTitle: null,
       model: opts.modelLabel,

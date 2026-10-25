@@ -89,7 +89,7 @@ func (r *Runner) attachmentsFor(ctx context.Context, provider Provider, prompt s
 	if len(blocks) == 0 && len(images) == 0 {
 		return prompt, nil
 	}
-	if provider == ProviderClaudeNative && strings.HasPrefix(prompt, "/") && len(images) == 0 {
+	if r.isClaude(provider) && strings.HasPrefix(prompt, "/") && len(images) == 0 {
 		r.sendSessionNote(ctx, events, attachmentSlashNote)
 		return prompt, nil
 	}

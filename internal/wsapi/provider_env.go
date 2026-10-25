@@ -63,11 +63,17 @@ func effectiveProviderEnv(runner *taskrunner.Runner, provider string, k config.P
 	return providerEnvEffective{Path: path, Source: source, Exists: dirExists(path)}
 }
 
+// envKeysOf is the allowlisted launch-env keys of provider: its own, or for an
+// instance those of the provider it extends (CLAUDE_CONFIG_DIR / CODEX_HOME).
+func envKeysOf(runner *taskrunner.Runner, provider string) []config.ProviderEnvKey {
+	return config.ProviderEnvKeys[runner.Providers().BaseOf(provider)]
+}
+
 // providerEnvViewFor builds the launch-env view of provider; the zero view
 // for a provider with no allowlisted keys.
 func providerEnvViewFor(runner *taskrunner.Runner, provider string) providerEnvView {
 	var v providerEnvView
-	for _, k := range config.ProviderEnvKeys[provider] {
+	for _, k := range envKeysOf(runner, provider) {
 		if v.EnvEffective == nil {
 			v.EnvEffective = make(map[string]providerEnvEffective)
 		}
@@ -88,7 +94,7 @@ func providerEnvViewFor(runner *taskrunner.Runner, provider string) providerEnvV
 // settings)". It names only the path and whether the directory exists.
 func providerEnvDetail(runner *taskrunner.Runner, provider string) string {
 	var parts []string
-	for _, k := range config.ProviderEnvKeys[provider] {
+	for _, k := range envKeysOf(runner, provider) {
 		eff := effectiveProviderEnv(runner, provider, k)
 		var src string
 		switch eff.Source {

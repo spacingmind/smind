@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"regexp"
@@ -22,6 +23,13 @@ const cmdTaskWaitUsage = "usage: smind task wait <runId|item:ID> [--timeout <dur
 // 5 --timeout expired (run left running), 6 error from a provider rate limit
 // (the output says when it resets).
 func cmdTaskWait(args []string) int {
+	return runTaskWait(args, os.Stdout, os.Stderr)
+}
+
+// runTaskWait is cmdTaskWait writing to out/errw instead of the process
+// streams, so a caller that waits concurrently with other commands (the CLI
+// tests) owns its output without swapping the os.Stdout/os.Stderr globals.
+func runTaskWait(args []string, out, errw io.Writer) int {
 	var runID string
 	var timeout time.Duration
 	for i := 0; i < len(args); i++ {
@@ -29,32 +37,32 @@ func cmdTaskWait(args []string) int {
 		switch {
 		case a == "--timeout":
 			if i+1 >= len(args) {
-				fmt.Fprintln(os.Stderr, cmdTaskWaitUsage)
+				fmt.Fprintln(errw, cmdTaskWaitUsage)
 				return 2
 			}
 			i++
 			d, err := time.ParseDuration(args[i])
 			if err != nil || d <= 0 {
-				fmt.Fprintln(os.Stderr, cmdTaskWaitUsage)
+				fmt.Fprintln(errw, cmdTaskWaitUsage)
 				return 2
 			}
 			timeout = d
 		case strings.HasPrefix(a, "--timeout="):
 			d, err := time.ParseDuration(strings.TrimPrefix(a, "--timeout="))
 			if err != nil || d <= 0 {
-				fmt.Fprintln(os.Stderr, cmdTaskWaitUsage)
+				fmt.Fprintln(errw, cmdTaskWaitUsage)
 				return 2
 			}
 			timeout = d
 		case strings.HasPrefix(a, "-"), runID != "":
-			fmt.Fprintln(os.Stderr, cmdTaskWaitUsage)
+			fmt.Fprintln(errw, cmdTaskWaitUsage)
 			return 2
 		default:
 			runID = a
 		}
 	}
 	if runID == "" {
-		fmt.Fprintln(os.Stderr, cmdTaskWaitUsage)
+		fmt.Fprintln(errw, cmdTaskWaitUsage)
 		return 2
 	}
 	// item:<id> is what `task send --detach` prints for a prompt that was
@@ -63,7 +71,7 @@ func cmdTaskWait(args []string) int {
 	if rest, ok := strings.CutPrefix(runID, "item:"); ok {
 		id, err := parseInt64(rest)
 		if err != nil || id <= 0 {
-			fmt.Fprintf(os.Stderr, "task wait: invalid queue item %q (want item:<number>)\n%s\n", runID, cmdTaskWaitUsage)
+			fmt.Fprintf(errw, "task wait: invalid queue item %q (want item:<number>)\n%s\n", runID, cmdTaskWaitUsage)
 			return 2
 		}
 		itemID, runID = id, ""
@@ -71,7 +79,7 @@ func cmdTaskWait(args []string) int {
 
 	client, err := dialDaemon(context.Background())
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(errw, err)
 		return 1
 	}
 	defer client.Close()
@@ -86,7 +94,7 @@ func cmdTaskWait(args []string) int {
 	}
 
 	if itemID != 0 {
-		rid, code := waitForQueueItem(ctx, sigCtx, client, itemID, timeout)
+		rid, code := waitForQueueItem(ctx, sigCtx, errw, client, itemID, timeout)
 		if rid == "" {
 			return code
 		}
@@ -109,7 +117,7 @@ func cmdTaskWait(args []string) int {
 					continue
 				}
 				announced[p.RequestID] = true
-				fmt.Fprintf(os.Stderr, "run %s is waiting for a permission: smind task approve %s %s  |  smind task deny %s %s\n",
+				fmt.Fprintf(errw, "run %s is waiting for a permission: smind task approve %s %s  |  smind task deny %s %s\n",
 					runID, runID, p.RequestID, runID, p.RequestID)
 			}
 		}
@@ -149,32 +157,32 @@ func cmdTaskWait(args []string) int {
 		// too, so only an error with no terminal run behind it is fatal
 		// (unknown run id, daemon failure).
 		if !found || (row.Status != "done" && row.Status != "error" && row.Status != "stopped") {
-			fmt.Fprintf(os.Stderr, "task wait: %v\n", streamErr)
+			fmt.Fprintf(errw, "task wait: %v\n", streamErr)
 			return 1
 		}
 	}
 
 	if cancelled {
 		if sigCtx.Err() != nil {
-			fmt.Fprintf(os.Stderr, "detached -- run %s is still running\n", runID)
+			fmt.Fprintf(errw, "detached -- run %s is still running\n", runID)
 			return 0
 		}
 		status := "running"
 		if found && row.Status != "" {
 			status = row.Status
 		}
-		fmt.Fprintf(os.Stderr, "timed out after %s; run %s is still %s\n", timeout, runID, status)
+		fmt.Fprintf(errw, "timed out after %s; run %s is still %s\n", timeout, runID, status)
 		return 5
 	}
 	if !found {
-		fmt.Fprintf(os.Stderr, "run %s not found\n", runID)
+		fmt.Fprintf(errw, "run %s not found\n", runID)
 		return 1
 	}
 	fallbackID := int64(0)
 	if row.Status == "error" {
 		fallbackID = fetchFallbackProfileID(ctx2, client, runID)
 	}
-	fmt.Println(renderWaitReport(row, finalText.String(), time.Now(), fallbackID))
+	fmt.Fprintln(out, renderWaitReport(row, finalText.String(), time.Now(), fallbackID))
 	return waitExitCode(row)
 }
 
