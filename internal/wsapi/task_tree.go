@@ -25,15 +25,17 @@ type taskTreeResult struct {
 // handleTaskTree is the task.tree read model (plan §4.1): exactly one of
 // {workspaceId} (every live root and orphan of the workspace, subtrees
 // included) or {taskId} (that task and its live descendants; the task
-// need not be be a root). One store pass (ListTasksByWorkspace, archived
+// need not be be a root). includeArchived (additive, read-only history)
+// also emits archived tasks, marked archivedAt; an archived taskId implies it. One store pass (ListTasksByWorkspace, archived
 // included -- orphans and usage rollups need the archived rows), one
 // usage query (SumRunUsageByTask), and one reg.TaskRunFacts() call, then
 // the pure tasktree.Build -- never a per-node query.
 func handleTaskTree(db *store.Store, reg *runs.Registry, stalled *stalledSource) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
-			WorkspaceID int64 `json:"workspaceId"`
-			TaskID      int64 `json:"taskId"`
+			WorkspaceID     int64 `json:"workspaceId"`
+			TaskID          int64 `json:"taskId"`
+			IncludeArchived bool  `json:"includeArchived"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.tree: invalid params: %w", err)
@@ -45,8 +47,9 @@ func handleTaskTree(db *store.Store, reg *runs.Registry, stalled *stalledSource)
 		root := tasktree.Root{WorkspaceID: p.WorkspaceID}
 		if p.TaskID != 0 {
 			// The workspace comes from the task itself, so a cross-workspace
-			// id is not an issue; an unknown or archived id is a clear error
-			// rather than an empty result.
+			// id is not an issue; an unknown id is a clear error rather than
+			// an empty result. An archived id is read-only history: it is
+			// shown with its archived descendants.
 			t, err := db.GetTask(p.TaskID)
 			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
@@ -55,12 +58,13 @@ func handleTaskTree(db *store.Store, reg *runs.Registry, stalled *stalledSource)
 				return nil, fmt.Errorf("task.tree: get task %d: %w", p.TaskID, err)
 			}
 			if t.ArchivedAt != nil {
-				return nil, fmt.Errorf("task.tree: task %d is archived", p.TaskID)
+				p.IncludeArchived = true
 			}
 			root = tasktree.Root{TaskID: p.TaskID}
 			p.WorkspaceID = t.WorkspaceID
 		}
 
+		root.IncludeArchived = p.IncludeArchived
 		nodes, truncated, err := buildTaskTree(db, reg, p.WorkspaceID, root)
 		if err != nil {
 			return nil, fmt.Errorf("task.tree: %w", err)
@@ -145,6 +149,9 @@ func toTreeTasks(tasks []store.Task) []tasktree.Task {
 		out[i] = tasktree.Task{
 			ID: t.ID, ParentID: t.ParentTaskID, WorkspaceID: t.WorkspaceID,
 			Title: t.Title, TaskStatus: t.Status, Archived: t.ArchivedAt != nil, BudgetUSD: t.BudgetUSD,
+		}
+		if t.ArchivedAt != nil {
+			out[i].ArchivedAt = t.ArchivedAt.UTC().Format(time.RFC3339)
 		}
 	}
 	return out

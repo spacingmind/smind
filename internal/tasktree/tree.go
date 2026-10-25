@@ -23,6 +23,9 @@ type Task struct {
 	Title       string
 	TaskStatus  string
 	Archived    bool
+	// ArchivedAt is the RFC 3339 UTC archive instant, "" when live; Build
+	// copies it onto an archived node (Root.IncludeArchived only).
+	ArchivedAt string
 	// BudgetUSD is the opt-in tree budget (ADR-0041 A5); only a root's
 	// counts. Build copies it onto a root's node; the spend comes from the
 	// caller (it needs a cost query Build must not make).
@@ -80,9 +83,15 @@ type UsageTotals struct {
 // every live root and orphan of that workspace with its subtree. The
 // wsapi layer enforces the exactly-one-param rule; Build just reads the
 // struct.
+//
+// IncludeArchived (read-only history) also emits archived tasks as nodes,
+// marked with ArchivedAt, and keeps them in the hierarchy: an archived
+// parent is a parent again, so nothing is orphaned. An archived Root.TaskID
+// is emitted only with it. The default (false) is unchanged.
 type Root struct {
-	TaskID      int64
-	WorkspaceID int64
+	TaskID          int64
+	WorkspaceID     int64
+	IncludeArchived bool
 }
 
 // Counts are a node's live-descendant (not self) status counts. "stopped"
@@ -153,6 +162,10 @@ type Node struct {
 	// last had activity. Both are omitted when not stalled.
 	Stalled      bool   `json:"stalled,omitempty"`
 	StalledSince string `json:"stalledSince,omitempty"`
+
+	// ArchivedAt marks an archived node (RFC 3339 UTC); only present when
+	// the tree was built with Root.IncludeArchived, omitted for live nodes.
+	ArchivedAt string `json:"archivedAt,omitempty"`
 }
 
 // TierOf derives a task's tier from its position (plan §3.1): no parent +
@@ -245,17 +258,21 @@ func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, r
 		visit(&tasks[i])
 	}
 
+	// visible: whether a task is emitted as a node (and so counts as a
+	// parent, child and root); archived ones only in history mode.
+	visible := func(t *Task) bool { return root.IncludeArchived || !t.Archived }
+
 	emit := func(t *Task, depth int) Node {
 		rec := memo[t.ID]
 		hasParent := false
 		if t.ParentID != nil {
-			if p, ok := byID[*t.ParentID]; ok && !p.Archived {
+			if p, ok := byID[*t.ParentID]; ok && visible(p) {
 				hasParent = true
 			}
 		}
 		liveKids := 0
 		for _, c := range children[t.ID] {
-			if !c.Archived {
+			if visible(c) {
 				liveKids++
 			}
 		}
@@ -283,6 +300,9 @@ func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, r
 		if t.ParentID == nil {
 			n.BudgetUSD = t.BudgetUSD
 		}
+		if t.Archived {
+			n.ArchivedAt = t.ArchivedAt
+		}
 		return n
 	}
 
@@ -301,14 +321,14 @@ func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, r
 		}
 		nodes = append(nodes, emit(t, depth))
 		for _, c := range children[t.ID] {
-			if !c.Archived {
+			if visible(c) {
 				walk(c, depth+1)
 			}
 		}
 	}
 
 	if root.TaskID != 0 {
-		if t, ok := byID[root.TaskID]; ok && !t.Archived {
+		if t, ok := byID[root.TaskID]; ok && visible(t) {
 			walk(t, 0)
 		}
 		return nodes, truncated
@@ -319,7 +339,7 @@ func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, r
 	roots := make([]*Task, 0, len(tasks))
 	for i := range tasks {
 		t := &tasks[i]
-		if t.Archived {
+		if !visible(t) {
 			continue
 		}
 		if t.ParentID == nil {
@@ -327,7 +347,7 @@ func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, r
 			continue
 		}
 		p, ok := byID[*t.ParentID]
-		if !ok || p.Archived {
+		if !ok || !visible(p) {
 			roots = append(roots, t)
 		}
 	}

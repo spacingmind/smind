@@ -363,3 +363,35 @@ func nullBoolPtr(n sql.NullBool) *bool {
 	v := n.Bool
 	return &v
 }
+
+// ListRunsByTask returns up to limit user runs of taskID across all its
+// chats, most recently started first -- the persisted history behind
+// run.list for a task whose runs the Registry no longer holds in memory.
+func (s *Store) ListRunsByTask(taskID int64, limit int) ([]Run, error) {
+	return s.listRuns(`WHERE purpose = 'user' AND task_id = ?`, limit, taskID)
+}
+
+// LatestRunProfileByTask maps each task of workspaceID that has a user run to
+// the profile_id of its most recently started run (0 = launched without a
+// profile), in one query. Tasks without runs are absent.
+func (s *Store) LatestRunProfileByTask(workspaceID int64) (map[int64]int64, error) {
+	rows, err := s.db.Query(`
+		SELECT r.task_id, r.profile_id
+		FROM runs r JOIN tasks t ON t.id = r.task_id
+		WHERE t.workspace_id = ? AND r.purpose = 'user'
+		ORDER BY r.started_at ASC, r.rowid ASC`, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("latest run profile by task: %w", err)
+	}
+	defer rows.Close()
+	out := map[int64]int64{}
+	for rows.Next() {
+		var taskID int64
+		var profileID sql.NullInt64
+		if err := rows.Scan(&taskID, &profileID); err != nil {
+			return nil, fmt.Errorf("scan latest run profile: %w", err)
+		}
+		out[taskID] = profileID.Int64 // later rows overwrite earlier: the latest wins
+	}
+	return out, rows.Err()
+}

@@ -78,7 +78,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"chat.queueGet":            handleChatQueueGet(reg),
 		"task.prompt":              handleTaskPrompt(wm, runner, reg, gh),
 		"run.start":                handleRunStart(wm, runner, reg, profReg, gh),
-		"run.list":                 handleRunList(reg),
+		"run.list":                 handleRunList(reg, db),
 		"run.attach":               handleRunAttach(reg),
 		"run.logs":                 handleRunLogs(reg),
 		"run.stop":                 handleRunStop(reg),
@@ -680,9 +680,18 @@ func handleTaskList(wm *workspace.Manager, db *store.Store) handlerFunc {
 			WorkspaceID  int64  `json:"workspaceId"`
 			ParentTaskID *int64 `json:"parentTaskId"`
 			Archived     bool   `json:"archived"`
+			// WithLatestRun (additive) fills latestRunProfileId/Name on every row.
+			WithLatestRun bool `json:"withLatestRun"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.list: invalid params: %w", err)
+		}
+		view := func(tasks []store.Task) ([]taskView, error) {
+			out, err := viewTasks(db, tasks)
+			if err != nil || !p.WithLatestRun || len(tasks) == 0 {
+				return out, err
+			}
+			return out, annotateLatestRun(db, p.WorkspaceID, out)
 		}
 		if p.Archived {
 			// The Archived view (ADR-0039 section 9): archived tasks only,
@@ -700,7 +709,7 @@ func handleTaskList(wm *workspace.Manager, db *store.Store) handlerFunc {
 				}
 				tasks = kept
 			}
-			return viewTasks(db, tasks)
+			return view(tasks)
 		}
 		var opts []workspace.ListTasksOption
 		if p.ParentTaskID != nil {
@@ -710,7 +719,7 @@ func handleTaskList(wm *workspace.Manager, db *store.Store) handlerFunc {
 		if err != nil {
 			return nil, err
 		}
-		return viewTasks(db, tasks)
+		return view(tasks)
 	}
 }
 
@@ -1600,14 +1609,57 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 	}
 }
 
+// runListRow is one run.list entry: the run summary plus, additively, the
+// name of the profile it ran with (null when it had none or the profile row
+// is gone; ProfileID tells those apart) and its task's parent task id.
+type runListRow struct {
+	runs.RunSummary
+	ProfileName  *string `json:"profileName"`
+	ParentTaskID *int64  `json:"parentTaskId"`
+}
+
+// withRunContext decorates summaries with profileName and parentTaskId, one
+// store lookup per distinct profile and task.
+func withRunContext(db *store.Store, rows []runs.RunSummary) []runListRow {
+	names := map[int64]*string{}
+	parents := map[int64]*int64{}
+	out := make([]runListRow, len(rows))
+	for i, r := range rows {
+		row := runListRow{RunSummary: r}
+		if r.ProfileID != 0 {
+			name, seen := names[r.ProfileID]
+			if !seen {
+				if p, err := db.GetAgentProfile(r.ProfileID); err == nil {
+					n := p.Name
+					name = &n
+				}
+				names[r.ProfileID] = name
+			}
+			row.ProfileName = name
+		}
+		parent, seen := parents[r.TaskID]
+		if !seen {
+			if t, err := db.GetTask(r.TaskID); err == nil && t.ParentTaskID != nil && *t.ParentTaskID != 0 {
+				parent = t.ParentTaskID
+			}
+			parents[r.TaskID] = parent
+		}
+		row.ParentTaskID = parent
+		out[i] = row
+	}
+	return out
+}
+
 // handleRunList returns every run the Registry knows about, or (with
 // chatId set) just that chat's runs -- ADR-0016 P1.4's additive filter;
 // an omitted/zero chatId preserves today's unfiltered behavior exactly.
-// taskId (nonzero) restricts to that task's runs across all of its chats,
-// and status (non-empty) to runs in exactly that status ("running",
-// "done", ...) -- both additive filters for the discovery path; a call
-// naming neither keeps the exact pre-filter reg.List behavior (no cap).
-func handleRunList(reg *runs.Registry) handlerFunc {
+// taskId (nonzero) restricts to that task's runs across all of its chats
+// (plus its persisted runs the Registry no longer holds, so an archived
+// task's history is complete), and status (non-empty) to runs in exactly
+// that status ("running", "done", ...) -- both additive filters for the
+// discovery path; a call naming neither keeps the exact pre-filter reg.List
+// behavior (no cap). Every row also carries profileName and parentTaskId.
+func handleRunList(reg *runs.Registry, db *store.Store) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			ChatID int64  `json:"chatId"`
@@ -1622,10 +1674,13 @@ func handleRunList(reg *runs.Registry) handlerFunc {
 		if p.Status != "" && !runs.ValidRunListStatus(runs.Status(p.Status)) {
 			return nil, fmt.Errorf("run.list: unknown status %q (valid: running, done, error, stopped, interrupted)", p.Status)
 		}
-		if p.TaskID == 0 && p.Status == "" {
-			return reg.List(p.ChatID), nil
+		switch {
+		case p.TaskID != 0 && p.Status == "" && p.ChatID == 0:
+			return withRunContext(db, reg.ListTaskHistory(p.TaskID)), nil
+		case p.TaskID == 0 && p.Status == "":
+			return withRunContext(db, reg.List(p.ChatID)), nil
 		}
-		return reg.ListFiltered(p.TaskID, p.ChatID, runs.Status(p.Status)), nil
+		return withRunContext(db, reg.ListFiltered(p.TaskID, p.ChatID, runs.Status(p.Status))), nil
 	}
 }
 

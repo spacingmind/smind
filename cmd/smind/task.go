@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -383,7 +384,7 @@ func cmdTaskNew(args []string) int {
 }
 
 // cmdTaskListUsage is printed on any argument error in cmdTaskList.
-const cmdTaskListUsage = "usage: smind task ls <workspaceId> [--parent <parentTaskId>]"
+const cmdTaskListUsage = "usage: smind task ls <workspaceId> [--parent <parentTaskId>] [--archived|--all] [--json]\n       (default: live tasks only; --archived: archived only; --all: live and archived)"
 
 // cmdTaskList lists a workspace's tasks, optionally narrowed to one
 // parent's direct children via --parent -- the CLI mirror of task.list's
@@ -391,9 +392,16 @@ const cmdTaskListUsage = "usage: smind task ls <workspaceId> [--parent <parentTa
 // listing).
 func cmdTaskList(args []string) int {
 	var workspaceIDArg, parentArg string
+	var onlyArchived, all, asJSON bool
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
+		case a == "--archived":
+			onlyArchived = true
+		case a == "--all":
+			all = true
+		case a == "--json":
+			asJSON = true
 		case a == "--parent":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, cmdTaskListUsage)
@@ -414,7 +422,7 @@ func cmdTaskList(args []string) int {
 			return 2
 		}
 	}
-	if workspaceIDArg == "" {
+	if workspaceIDArg == "" || (onlyArchived && all) {
 		fmt.Fprintln(os.Stderr, cmdTaskListUsage)
 		return 2
 	}
@@ -443,15 +451,119 @@ func cmdTaskList(args []string) int {
 	if parentArg != "" {
 		params["parentTaskId"] = parentID
 	}
-	var tasks []store.Task
-	err = client.Call(context.Background(), "task.list", params, &tasks)
+	if asJSON {
+		params["withLatestRun"] = true
+	}
+	var tasks []taskListRow
+	if !onlyArchived {
+		if err := client.Call(context.Background(), "task.list", params, &tasks); err != nil {
+			fmt.Fprintf(os.Stderr, "task ls: %v\n", err)
+			return 1
+		}
+	}
+	if onlyArchived || all {
+		archivedParams := map[string]any{"archived": true}
+		for k, v := range params {
+			archivedParams[k] = v
+		}
+		var archived []taskListRow
+		if err := client.Call(context.Background(), "task.list", archivedParams, &archived); err != nil {
+			fmt.Fprintf(os.Stderr, "task ls: %v\n", err)
+			return 1
+		}
+		tasks = mergeTaskRows(tasks, archived)
+	}
+
+	if asJSON {
+		return writeTaskListJSON(os.Stdout, tasks)
+	}
+	if onlyArchived || all {
+		renderTaskListWithArchived(os.Stdout, tasks)
+		return 0
+	}
+	renderTaskList(os.Stdout, rowsToTasks(tasks))
+	return 0
+}
+
+// taskListRow is one task.list entry: the task plus the profile of its
+// latest run (task.list withLatestRun).
+type taskListRow struct {
+	store.Task
+	LatestRunProfileID   *int64  `json:"latestRunProfileId"`
+	LatestRunProfileName *string `json:"latestRunProfileName"`
+}
+
+// mergeTaskRows is live followed by archived, id ascending.
+func mergeTaskRows(live, archived []taskListRow) []taskListRow {
+	all := append(append([]taskListRow(nil), live...), archived...)
+	sort.SliceStable(all, func(i, j int) bool { return all[i].ID < all[j].ID })
+	return all
+}
+
+func rowsToTasks(rows []taskListRow) []store.Task {
+	out := make([]store.Task, len(rows))
+	for i, r := range rows {
+		out[i] = r.Task
+	}
+	return out
+}
+
+// taskListJSON is one `task ls --json` entry; profileId/profileName are null
+// when the task has no run (profileName also when the profile is deleted).
+type taskListJSON struct {
+	ID           int64      `json:"id"`
+	Title        string     `json:"title"`
+	ParentTaskID *int64     `json:"parentTaskId"`
+	ArchivedAt   *time.Time `json:"archivedAt"`
+	Branch       *string    `json:"branch"`
+	Status       string     `json:"status"`
+	ProfileID    *int64     `json:"profileId"`
+	ProfileName  *string    `json:"profileName"`
+}
+
+func writeTaskListJSON(w io.Writer, rows []taskListRow) int {
+	out := make([]taskListJSON, len(rows))
+	for i, r := range rows {
+		out[i] = taskListJSON{
+			ID: r.ID, Title: r.Title, ParentTaskID: r.ParentTaskID, ArchivedAt: r.ArchivedAt,
+			Branch: r.Branch, Status: r.Status, ProfileID: r.LatestRunProfileID, ProfileName: r.LatestRunProfileName,
+		}
+	}
+	b, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "task ls: %v\n", err)
 		return 1
 	}
-
-	renderTaskList(os.Stdout, tasks)
+	fmt.Fprintln(w, string(b))
 	return 0
+}
+
+// renderTaskListWithArchived is renderTaskList with an ARCHIVED column (the
+// archive date, "-" for a live task) before BRANCH, for --archived and --all.
+func renderTaskListWithArchived(w io.Writer, rows []taskListRow) {
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tTITLE\tSTATUS\tPARENT\tSETUP\tARCHIVED\tBRANCH")
+	for _, r := range rows {
+		t := r.Task
+		branch := ""
+		if t.Branch != nil {
+			branch = *t.Branch
+		}
+		parent := "-"
+		if t.ParentTaskID != nil {
+			parent = strconv.FormatInt(*t.ParentTaskID, 10)
+		}
+		setup := t.SetupStatus
+		if setup == "" {
+			setup = "-"
+		}
+		archived := "-"
+		if t.ArchivedAt != nil {
+			archived = t.ArchivedAt.UTC().Format("2006-01-02")
+		}
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", t.ID, t.Title, t.Status, parent, setup, archived, branch)
+	}
+	tw.Flush()
 }
 
 // renderTaskList prints the task table; BRANCH is last because it is long.
@@ -1650,7 +1762,7 @@ func cmdTaskChatArchive(args []string) int {
 }
 
 // cmdTaskRunsUsage is printed on any argument error in cmdTaskRuns.
-const cmdTaskRunsUsage = "usage: smind task runs <taskId> [--chat <chatId>]"
+const cmdTaskRunsUsage = "usage: smind task runs <taskId> [--chat <chatId>] [--json]"
 
 // runSummaryRow is one entry of a run.list result -- the CLI-side mirror
 // of runs.RunSummary's wire shape (bare Go field names, same convention
@@ -1693,6 +1805,14 @@ type runSummaryRow struct {
 	FailureResetAt *time.Time
 	// FailureResetInferred: FailureResetAt was read in an assumed zone.
 	FailureResetInferred bool
+	// ProfileID is the agent profile the run was launched with (0 = none);
+	// ProfileName its name (null when none or the profile row is deleted);
+	// ParentTaskID the run's task's parent. The wire carries ProfileID bare
+	// (like the fields above) and the other two lowercase; --json writes all
+	// three lowercase.
+	ProfileID    int64   `json:"profileId"`
+	ProfileName  *string `json:"profileName"`
+	ParentTaskID *int64  `json:"parentTaskId"`
 }
 
 // runModelCell is a run's MODEL column: the requested model; when none was
@@ -1733,9 +1853,12 @@ func runStatusCell(r runSummaryRow, now time.Time) string {
 // chat already belongs to exactly one task, so the two filters agree.
 func cmdTaskRuns(args []string) int {
 	var taskIDArg, chatArg string
+	var asJSON bool
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
+		case a == "--json":
+			asJSON = true
 		case a == "--chat":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, cmdTaskRunsUsage)
@@ -1781,7 +1904,9 @@ func cmdTaskRuns(args []string) int {
 	}
 	defer client.Close()
 
-	params := map[string]any{}
+	// taskId makes the daemon include the task's persisted runs it no longer
+	// holds in memory, so an archived task's history is complete.
+	params := map[string]any{"taskId": taskID}
 	if chatID != 0 {
 		params["chatId"] = chatID
 	}
@@ -1813,18 +1938,51 @@ func cmdTaskRuns(args []string) int {
 	}
 	now := time.Now()
 
+	if asJSON {
+		if rows == nil {
+			rows = []runSummaryRow{}
+		}
+		b, err := json.MarshalIndent(rows, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "task runs: %v\n", err)
+			return 1
+		}
+		fmt.Println(string(b))
+		return 0
+	}
 	writeRunsTable(os.Stdout, rows, worktree, now)
 	return 0
 }
 
-// writeRunsTable prints the `task runs` table.
+// runProfileCell is the PROFILE column: the profile's name, "(deleted)" when
+// the run names a profile whose row is gone, "-" for a run without one.
+func runProfileCell(r runSummaryRow) string {
+	switch {
+	case r.ProfileName != nil && *r.ProfileName != "":
+		return *r.ProfileName
+	case r.ProfileID != 0:
+		return "(deleted)"
+	}
+	return "-"
+}
+
+// runParentCell is the PARENT column: the task's parent task id, "-" for a root.
+func runParentCell(r runSummaryRow) string {
+	if r.ParentTaskID == nil {
+		return "-"
+	}
+	return strconv.FormatInt(*r.ParentTaskID, 10)
+}
+
+// writeRunsTable prints the `task runs` table. PROFILE and PARENT are
+// appended after STATUS so existing column positions are unchanged.
 func writeRunsTable(w io.Writer, rows []runSummaryRow, worktree string, now time.Time) {
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tCHAT\tPROVIDER\tORIGIN\tMODEL\tSTARTED\tDURATION\tUSAGE\tCOMMITS\tSTATUS")
+	fmt.Fprintln(tw, "ID\tCHAT\tPROVIDER\tORIGIN\tMODEL\tSTARTED\tDURATION\tUSAGE\tCOMMITS\tSTATUS\tPROFILE\tPARENT")
 	for _, r := range rows {
-		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.ID, r.ChatID, r.Provider, runOriginCell(r), runModelCell(r),
+		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.ID, r.ChatID, r.Provider, runOriginCell(r), runModelCell(r),
 			runStartedCell(r.StartedAt, now), runDurationCell(r, now), runUsageCell(r), runCommitsCell(r, worktree),
-			runStatusCell(r, now))
+			runStatusCell(r, now), runProfileCell(r), runParentCell(r))
 	}
 	tw.Flush()
 }

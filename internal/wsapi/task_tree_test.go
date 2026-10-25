@@ -32,6 +32,7 @@ type treeNode struct {
 	Run         treeNodeRun    `json:"run"`
 	Counts      tasktreeCounts `json:"counts"`
 	Usage       treeNodeUsage  `json:"usage"`
+	ArchivedAt  string         `json:"archivedAt"`
 }
 
 type treeNodeRun struct {
@@ -292,20 +293,38 @@ func TestTaskTree_WideTree200ChildrenIsOneStorePass(t *testing.T) {
 	}
 }
 
-// TestTaskTree_ArchivedTaskIsError: {taskId} of an archived task is a
-// clear error, not an empty success.
-func TestTaskTree_ArchivedTaskIsError(t *testing.T) {
+// TestTaskTree_ArchivedTaskIsReadOnlyHistory: {taskId} of an archived task
+// returns it (marked archivedAt) with its archived descendants; the
+// workspace form hides archived tasks unless includeArchived is set.
+func TestTaskTree_ArchivedTaskIsReadOnlyHistory(t *testing.T) {
 	t.Parallel()
 	wm, db := newTestWorkspaceManager(t)
 	runner := newTestRunner(wm)
 	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 	task := newTestTask(t, wm, "")
-	if _, err := wm.ArchiveTask(task.ID); err != nil {
-		t.Fatalf("ArchiveTask() error = %v", err)
+	p := task.ID
+	child, err := db.CreateTask(store.Task{WorkspaceID: task.WorkspaceID, Title: "kid", Status: "created", ParentTaskID: &p})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, errObj := callTaskTree(t, ws, "arch", map[string]any{"taskId": task.ID}); errObj == nil {
-		t.Fatal("archived taskId: error = nil, want an error")
+	for _, id := range []int64{child.ID, task.ID} {
+		if _, err := wm.ArchiveTask(id); err != nil {
+			t.Fatalf("ArchiveTask(%d) error = %v", id, err)
+		}
+	}
+	res, errObj := callTaskTree(t, ws, "arch", map[string]any{"taskId": task.ID})
+	if errObj != nil {
+		t.Fatalf("archived taskId: %v", errObj.Message)
+	}
+	if len(res.Nodes) != 2 || res.Nodes[0].ID != task.ID || res.Nodes[1].ID != child.ID || res.Nodes[0].ArchivedAt == "" || res.Nodes[1].ArchivedAt == "" {
+		t.Fatalf("nodes = %+v, want the archived root and child, both with archivedAt", res.Nodes)
+	}
+	if res, _ := callTaskTree(t, ws, "live", map[string]any{"workspaceId": task.WorkspaceID}); len(res.Nodes) != 0 {
+		t.Fatalf("workspace tree = %+v, want archived tasks hidden by default", res.Nodes)
+	}
+	if res, _ := callTaskTree(t, ws, "incl", map[string]any{"workspaceId": task.WorkspaceID, "includeArchived": true}); len(res.Nodes) != 2 {
+		t.Fatalf("includeArchived tree = %+v, want 2 nodes", res.Nodes)
 	}
 }
 

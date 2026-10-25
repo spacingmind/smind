@@ -1646,6 +1646,9 @@ func (reg *Registry) Subscribe(runID string) (<-chan Event, func(), error) {
 // finished.
 func (reg *Registry) History(runID string) ([]Event, RunStatus, error) {
 	r, err := reg.get(runID)
+	if errors.Is(err, ErrNotFound) {
+		return reg.storedHistory(runID)
+	}
 	if err != nil {
 		return nil, RunStatus{}, err
 	}
@@ -1657,6 +1660,29 @@ func (reg *Registry) History(runID string) ([]Event, RunStatus, error) {
 		if u, err := reg.st.GetRunUsage(runID); err == nil {
 			status.Usage = runUsageFromStore(u)
 		}
+	}
+	return hist, status, nil
+}
+
+// storedHistory is History for a run the Registry no longer holds in memory
+// (evicted past finishedRetentionCap): rebuilt read-only from its persisted
+// row and events, without re-registering it. Unknown ids stay ErrNotFound.
+func (reg *Registry) storedHistory(runID string) ([]Event, RunStatus, error) {
+	row, err := reg.st.GetRun(runID)
+	if err != nil {
+		return nil, RunStatus{}, ErrNotFound
+	}
+	if row.Status == string(StatusRunning) || row.Purpose != "" && row.Purpose != "user" {
+		return nil, RunStatus{}, ErrNotFound
+	}
+	r, err := rehydrateRun(reg.st, row)
+	if err != nil {
+		return nil, RunStatus{}, fmt.Errorf("rehydrate run %s: %w", runID, err)
+	}
+	hist := append([]Event(nil), r.history...)
+	status := r.statusLocked()
+	if u, err := reg.st.GetRunUsage(runID); err == nil {
+		status.Usage = runUsageFromStore(u)
 	}
 	return hist, status, nil
 }
