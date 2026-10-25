@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { StepGroup } from "@/components/ui/step-group";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useWorkspaceTree } from "@/hooks/use-workspace-tree";
 import { EM_DASH, formatCost, formatTokens, usageSince } from "@/lib/usage-format";
 import type { UsageGroupBy, UsageRange, UsageScope, UsageSummaryRow } from "@/lib/types";
@@ -26,6 +28,8 @@ const GROUP_BY_OPTIONS: { value: UsageGroupBy; label: string }[] = [
   { value: "model", label: "Model" },
   { value: "workspace", label: "Workspace" },
 ];
+
+const SUBSCRIPTION_COST_HINT = "Estimated at API list prices; subscription plans are not billed per token";
 
 const RANGE_OPTIONS: { value: UsageRange; label: string }[] = [
   { value: "today", label: "Today" },
@@ -141,6 +145,12 @@ function UsageSection({ client }: SettingsSectionContext) {
   // workspace.list + one task.list per workspace of its own. A tree that has not loaded (or failed) just
   // leaves rows on their "Task #id" / "Workspace #id" fallbacks, as the old best-effort lookup did.
   const { workspaces } = useWorkspaceTree();
+  // Providers that use the CLI's own login are subscription plans: their cost is an API-price estimate.
+  const { providers: providerList } = useProviderCatalog();
+  const subscriptionProviders = useMemo(
+    () => new Set(providerList.filter((p) => p.kind === "cli").map((p) => p.id as string)),
+    [providerList],
+  );
   const names = useMemo(() => {
     const resolved: Record<string, string> = {};
     if (groupBy !== "task" && groupBy !== "workspace") return resolved;
@@ -180,9 +190,25 @@ function UsageSection({ client }: SettingsSectionContext) {
     return formatTokens(row[field], "full");
   }
 
-  function costCell(row: UsageSummaryRow): string {
+  function costCell(row: UsageSummaryRow): ReactNode {
     if (row.scope === "proxy") return EM_DASH;
-    return formatCost(row.costUsd);
+    const cost = formatCost(row.costUsd);
+    if (row.costUsd == null || !row.providers?.some((id) => subscriptionProviders.has(id))) return cost;
+    return (
+      <span className="whitespace-nowrap">
+        {cost}{" "}
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span tabIndex={0} data-testid="usage-cost-estimate" className="text-foreground-muted">
+                ≈ API price
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{SUBSCRIPTION_COST_HINT}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </span>
+    );
   }
 
   return (

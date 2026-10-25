@@ -1039,6 +1039,8 @@ export interface UsageSummaryRow {
   reasoningTokens: number;
   costUsd?: number | null;
   unreported?: Array<"inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens" | "reasoningTokens">;
+  /** Runs rows only: the distinct providers behind the group (absent when none). */
+  providers?: string[];
 }
 
 export type UsageScope = "runs" | "proxy" | "all";

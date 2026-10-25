@@ -219,4 +219,52 @@ describe("usage-section", () => {
     expect(screen.queryByTestId("usage-row-runs-11")).not.toBeInTheDocument();
     expect(screen.getByTestId("usage-cell-inputTokens")).toHaveTextContent("12,345");
   });
+  describe("subscription cost label", () => {
+    const HINT = "Estimated at API list prices; subscription plans are not billed per token";
+    const PROVIDERS = {
+      providers: [
+        { id: "claude-native", label: "Claude Code", kind: "cli" },
+        { id: "glm", label: "GLM" },
+      ],
+    };
+
+    async function renderWithRows(rows: UsageSummaryRow[]) {
+      const client = new FakeWsClient();
+      renderSection(client);
+      client.nth("usage.summary").resolve(rows);
+      client.nth("provider.list").resolve(PROVIDERS);
+      await flush();
+      return client;
+    }
+
+    it("subscription provider row shows ≈ API price with tooltip", async () => {
+      await renderWithRows([runRow({ providers: ["claude-native"] })]);
+      const cost = screen.getByTestId("usage-cell-costUsd");
+      expect(cost).toHaveTextContent("$0.042");
+      const label = within(cost).getByText("≈ API price");
+      expect(label).toHaveClass("text-foreground-muted");
+      expect(label).toHaveAttribute("tabindex", "0");
+      fireEvent.focus(label);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(HINT);
+    });
+
+    it("API-key provider row shows plain cost", async () => {
+      await renderWithRows([runRow({ providers: ["glm"] })]);
+      const cost = screen.getByTestId("usage-cell-costUsd");
+      expect(cost).toHaveTextContent("$0.042");
+      expect(cost).not.toHaveTextContent("API price");
+    });
+
+    it("mixed row shows the label", async () => {
+      await renderWithRows([runRow({ providers: ["glm", "claude-native"] })]);
+      expect(screen.getByTestId("usage-cell-costUsd")).toHaveTextContent("≈ API price");
+    });
+
+    it("row without cost shows no label", async () => {
+      await renderWithRows([runRow({ providers: ["claude-native"], costUsd: null })]);
+      const cost = screen.getByTestId("usage-cell-costUsd");
+      expect(cost).toHaveTextContent("—");
+      expect(cost).not.toHaveTextContent("API price");
+    });
+  });
 });
