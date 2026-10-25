@@ -779,6 +779,16 @@ export interface TaskCommitResult {
   files: number;
 }
 
+/** task.draftCommitMessage result (ADR-0043): an AI draft of the staged diff's commit message. */
+export interface TaskDraftCommitMessageResult {
+  message: string;
+  model: string;
+  /** Only the first part of a large diff reached the model. */
+  truncated: boolean;
+  /** Files left out of the prompt. */
+  omitted: string[];
+}
+
 // ---- Create / Update PR (ADR-0039 §5; docs/research/local/git-pr-g5-briefs.md "PR 6 wire contract") -----------
 
 /** One commit of a PR preview. */

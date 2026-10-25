@@ -39,6 +39,7 @@ describe("icon registry", () => {
         "diff": "GitCompare",
         "down": "ArrowDown",
         "download": "Download",
+        "draft": "Sparkles",
         "edit": "Pencil",
         "error": "CircleAlert",
         "externalLink": "ExternalLink",

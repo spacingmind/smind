@@ -101,6 +101,7 @@ import {
   ShieldCheck,
   Sigma,
   SlidersHorizontal,
+  Sparkles,
   Square,
   Star,
   Sun,
@@ -258,6 +259,8 @@ export const Icons = {
   statusSkipped: CircleMinus,
   /** A task tree that has sat idle past the stall alert threshold (no run, nothing queued). */
   stalled: Hourglass,
+  /** An AI-assisted action (drafting a commit message). */
+  draft: Sparkles,
 } as const satisfies Record<string, IconComponent>;
 
 export type IconName = keyof typeof Icons;
