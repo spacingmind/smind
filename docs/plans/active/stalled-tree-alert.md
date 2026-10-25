@@ -76,6 +76,8 @@ Detector (`internal/stall`, fake clock, injected tick, no sleeps):
 - `TestRestartDoesNotReAlertAlertedEpisode` (new detector over the same DB)
 - `TestDoneTreeNeverAlerts`, `TestArchivedSeatNeverAlerts`,
   `TestSystemTaskNeverAlerts`
+- `TestNestedSeatsAlertOnlyTopmost` (nested stalled seats: one alert for the
+  topmost; every stalled seat keeps the marker)
 - `TestBudgetExceededRefusalAloneIsNotBusy`
 - `TestTickIsOSeatsNoExternalCalls` (count-asserting fakes: store snapshot
   queries counted, GitHub/provider fakes called 0 times)
@@ -141,6 +143,8 @@ Lead decisions:
   Desktop: a new bus topic `task.stalled` (the existing run-status path is
   edge-triggered in the web client by attention reasons; the new topic feeds
   the same Notification code with reason `stalled`).
+- L5 Nested stalled seats (a Lead under a Supervisor, same silent subtree)
+  alert once, for the topmost; every stalled seat still shows the marker.
 - L3 Tick = one goroutine in the daemon (period 1 min, injectable), disabled
   when N = 0. The same pure core (`stall.Detect`) feeds `task.tree` so the
   marker and the alert cannot disagree.

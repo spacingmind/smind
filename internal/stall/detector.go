@@ -22,6 +22,9 @@ type Episode struct {
 	Since  time.Time
 	// AlreadyAlerted is true when the persisted marker equals Since.
 	AlreadyAlerted bool
+	// Covered is true when a live ancestor seat is stalled too: the whole tree
+	// is silent, so only the topmost seat alerts (the marker still shows).
+	Covered bool
 }
 
 type agg struct {
@@ -126,6 +129,24 @@ func Detect(rows []store.StallRow, now time.Time, n time.Duration) []Episode {
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].TaskID < out[j].TaskID })
+	stalled := make(map[int64]bool, len(out))
+	for _, ep := range out {
+		stalled[ep.TaskID] = true
+	}
+	for i := range out {
+		seen := map[int64]bool{out[i].TaskID: true}
+		for p := byID[out[i].TaskID].ParentID; p != nil; {
+			if _, live := byID[*p]; !live || seen[*p] {
+				break
+			}
+			if stalled[*p] {
+				out[i].Covered = true
+				break
+			}
+			seen[*p] = true
+			p = byID[*p].ParentID
+		}
+	}
 	return out
 }
 
@@ -179,7 +200,7 @@ func (dt *Detector) episodes() ([]Episode, int) {
 func (dt *Detector) Tick() {
 	eps, m := dt.episodes()
 	for _, ep := range eps {
-		if ep.AlreadyAlerted {
+		if ep.AlreadyAlerted || ep.Covered {
 			continue
 		}
 		if err := dt.d.Mark(ep.TaskID, ep.Since); err != nil {

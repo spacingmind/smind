@@ -330,3 +330,21 @@ func TestTickIsOSeatsNoExternalCalls(t *testing.T) {
 		t.Fatalf("second tick: snapshots=%d marks=%d alerts=%d", snapshots, marks, alerts)
 	}
 }
+
+func TestNestedSeatsAlertOnlyTopmost(t *testing.T) {
+	e := newEnv(t)
+	root := e.task("lead", nil)
+	mid := e.task("sub-lead", &root.ID)
+	e.task("worker", &mid.ID)
+	d := e.detector(testMinutes)
+	e.at(20 * time.Minute)
+	d.Tick()
+	e.wantAlerts(1)
+	if e.alerts[0].TaskID != root.ID {
+		t.Fatalf("alert for task %d, want the topmost seat %d", e.alerts[0].TaskID, root.ID)
+	}
+	// Both seats still carry the marker.
+	if got := len(d.Current()); got != 2 {
+		t.Fatalf("Current() has %d stalled seats, want 2", got)
+	}
+}
