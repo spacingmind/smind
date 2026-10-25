@@ -1,4 +1,4 @@
-import type { AttachmentRequest, PermissionSettings, Provider, ThinkingLevel, WhenBusy } from "@/lib/types";
+import type { AttachmentRequest, PermissionSettings, ThinkingLevel, WhenBusy } from "@/lib/types";
 
 /**
  * The run.start params, shared by the composer's send (useRunTimeline's
@@ -9,7 +9,7 @@ import type { AttachmentRequest, PermissionSettings, Provider, ThinkingLevel, Wh
 export function runStartParams(o: {
   taskId: number;
   chatId: number;
-  provider: Provider;
+  provider: string;
   prompt: string;
   whenBusy: WhenBusy;
   permission?: PermissionSettings;

@@ -20,7 +20,7 @@ import { ChildUpdateRow } from "@/components/timeline/child-update-row";
 import { RunFooter } from "@/components/timeline/run-footer";
 import type { RunFailover } from "@/components/timeline/run-failover-actions";
 import type { RunModelLabels } from "@/components/timeline/run-footer-model";
-import { canRetryWithHigherEffort, type RunEntry } from "@/hooks/use-run-timeline";
+import type { RunEntry } from "@/hooks/use-run-timeline";
 
 /**
  * One run rendered as a turn: the prompt that started it, the typed
@@ -119,7 +119,7 @@ export const RunTimeline = memo(function RunTimeline({
             <p className="text-ui-sm text-destructive" data-testid="run-error">
               {run.err}
             </p>
-            {onRetry && canRetryWithHigherEffort(run) && (
+            {onRetry && (
               <Button
                 type="button"
                 variant="outline"

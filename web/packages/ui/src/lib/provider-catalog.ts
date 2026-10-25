@@ -1,9 +1,34 @@
+import type { ProviderRunner } from "@/lib/types";
 
 /** The label lookup only needs the daemon's own row shape; ProviderInfo satisfies it. */
-interface ServedProvider {
+export interface ServedProvider {
   id: string;
   label?: string;
   accountProvider?: string;
+  runner?: ProviderRunner;
+  extends?: string;
+}
+
+/** The four built-ins' runners: the offline answer for `providerRunner` until/unless `provider.list` describes them. */
+const BUILTIN_RUNNERS: Readonly<Record<string, ProviderRunner>> = {
+  "claude-native": "claude-native",
+  "codex-native": "codex-native",
+  glm: "acp",
+  kimi: "acp",
+};
+
+/**
+ * How a provider id runs: the catalog's `runner` wins (an instance or a providers.custom entry is only known
+ * there), else the built-in table, else "acp" (any other id is a generic ACP agent). Never a switch on the id
+ * at the call site: every capability check (thinking, auto-accept, live mode switch) asks this.
+ */
+export function providerRunner(id: string, providers?: readonly ServedProvider[]): ProviderRunner {
+  return providers?.find((p) => p.id === id)?.runner ?? BUILTIN_RUNNERS[id] ?? "acp";
+}
+
+/** The provider an id is a flavour of: an instance's `extends`, else the id itself (the mark and the env field follow it). */
+export function providerFamilyId(id: string, providers?: readonly ServedProvider[]): string {
+  return providers?.find((p) => p.id === id)?.extends ?? id;
 }
 
 /**

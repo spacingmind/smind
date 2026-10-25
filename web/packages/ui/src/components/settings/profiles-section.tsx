@@ -414,7 +414,7 @@ function ProfileForm({
           dangerous={isDangerousMode(providers, form.provider, form.permissionMode, form.autoAccept)}
           onChange={(value) => setForm((f) => ({ ...f, permissionMode: value }))}
         />
-        {supportsThinking(form.provider) ? (
+        {supportsThinking(form.provider, providers) ? (
           <ThinkingSelect
             variant="field"
             testId={`${idPrefix}-thinking-level`}

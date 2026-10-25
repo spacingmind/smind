@@ -12,10 +12,10 @@ import { autoGrow, isSubmitKey, MAX_COMPOSER_HEIGHT } from "@/components/compose
 import { draftStorageKey } from "@/components/composer/use-composer-draft";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { KeyboardProvider } from "@/keyboard/keyboard-provider";
-import type { Provider, ThinkingLevel } from "@/lib/types";
+import type { ThinkingLevel } from "@/lib/types";
 
 interface Submission {
-  provider: Provider;
+  provider: string;
   prompt: string;
   permissionMode: string;
   autoAccept: boolean;

@@ -8,6 +8,6 @@ export function describeProfile(p: AgentProfile, providers: ProviderInfo[]): str
   const parts = [providerLabel(p.Provider, providers)];
   if (p.Model) parts.push(providers.find((candidate) => candidate.id === p.Provider)?.models?.find((m) => m.id === p.Model)?.label ?? p.Model);
   parts.push(describePermission(providers, p.Provider, p.PermissionMode, p.AutoAccept));
-  if (supportsThinking(p.Provider)) parts.push(thinkingLevelLabel(p.ThinkingLevel as ThinkingLevel));
+  if (supportsThinking(p.Provider, providers)) parts.push(thinkingLevelLabel(p.ThinkingLevel as ThinkingLevel));
   return parts.join(" · ");
 }

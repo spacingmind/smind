@@ -21,6 +21,7 @@ import {
   Archive,
   AtSign,
   Bell,
+  Blocks,
   BookOpen,
   Boxes,
   Bot,
@@ -217,6 +218,8 @@ export const Icons = {
 
   // --- agents / models
   agent: Bot,
+  /** A provider with no brand mark of its own (a providers.custom ACP agent, an id the catalog has not described). */
+  providerGeneric: Blocks,
   model: Cpu,
   thinking: Brain,
   /** The default-agent marker. */

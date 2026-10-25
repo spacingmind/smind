@@ -33,16 +33,7 @@ import { Button } from "@/components/ui/button";
 import { useActionHandler, useKeyboard } from "@/keyboard/keyboard-provider";
 import { formatCombo } from "@/keyboard/shortcut-string";
 import { supportsThinking } from "@/lib/thinking-levels";
-import type {
-  AttachmentMeta,
-  AttachmentRequest,
-  ChatQueueItem,
-  ConfigOptionParams,
-  PermissionSettings,
-  Provider,
-  TaskGit,
-  ThinkingLevel,
-} from "@/lib/types";
+import type { AttachmentMeta, AttachmentRequest, ChatQueueItem, ConfigOptionParams, PermissionSettings, TaskGit, ThinkingLevel } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
 /** Icon-only send cluster: 44px touch targets below md (Item 21), ZCode's 32px rounded squares from md up. */
@@ -132,7 +123,7 @@ export function Composer({
   /** Whether chatId is taskId's default (oldest) chat -- migrates the pre-ADR-0016 per-task-only run-config key onto it. */
   isDefaultChat: boolean;
   /** The chat's bound provider (chats.Provider), once set -- makes RunConfigToolbar's Provider select read-only. */
-  boundProvider: Provider | null;
+  boundProvider: string | null;
   connected: boolean;
   /** The task's currently-running run, or null. Drives Stop, "Send now", and the queue placeholder. */
   runningRunId: string | null;
@@ -149,7 +140,7 @@ export function Composer({
   /** Called after a prompt was queued, so the queue view refetches even if the live snapshot missed it. */
   onQueued?: () => void;
   onSubmit: (
-    provider: Provider,
+    provider: string,
     prompt: string,
     permission: PermissionSettings,
     thinkingLevel?: ThinkingLevel,
@@ -205,7 +196,7 @@ export function Composer({
   // Shift+Tab cycle read, updated by the toolbar's onChange.
   const [runConfig, setRunConfig] = useState<RunConfigContextValue | null>(null);
   const { provider, permissionMode, autoAccept, thinkingLevel, model } = runConfig?.state ?? {
-    provider: "claude-native" as Provider,
+    provider: "claude-native",
     permissionMode: "",
     autoAccept: false,
     thinkingLevel: "" as ThinkingLevel,
@@ -325,7 +316,7 @@ export function Composer({
           provider,
           text,
           { permissionMode, autoAccept },
-          supportsThinking(provider) && thinkingLevel ? thinkingLevel : undefined,
+          supportsThinking(provider, providers) && thinkingLevel ? thinkingLevel : undefined,
           whenBusy,
           model || undefined,
           attachments,

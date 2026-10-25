@@ -1,13 +1,14 @@
 import { readRunConfigPreference } from "@/components/composer/run-config-preference";
+import type { ServedProvider } from "@/lib/provider-catalog";
 import { supportsThinking } from "@/lib/thinking-levels";
-import type { Chat, Provider, ThinkingLevel } from "@/lib/types";
+import type { Chat, ThinkingLevel } from "@/lib/types";
 
 /** Where a submitted review goes: one chat, with the run config that chat is using. */
 export interface ReviewRecipient {
   chatId: number;
   title: string;
   /** null for a chat that has never run and has no saved run config -- the caller falls back to the catalog's first provider, as the composer's default does. */
-  provider: Provider | null;
+  provider: string | null;
   /** Empty = the provider's default (nothing is sent). */
   model: string;
   permissionMode: string;
@@ -44,11 +45,14 @@ export function resolveReviewRecipient({
   chats,
   focusedChatId,
   connected,
+  providers,
 }: {
   taskId: number;
   chats: readonly Chat[] | null | undefined;
   focusedChatId: number | null;
   connected: boolean;
+  /** The provider catalog, so an instance of claude-native keeps its thinking level; absent = the built-in table. */
+  providers?: readonly ServedProvider[];
 }): ReviewRecipientResult {
   const open = (chats ?? []).filter((c) => c.ArchivedAt === null);
   if (open.length === 0) return { kind: "unavailable", reason: "no-chats" };
@@ -57,7 +61,7 @@ export function resolveReviewRecipient({
   const chat = open.find((c) => c.ID === focusedChatId) ?? open[0]!;
   const isDefaultChat = chat.ID === open[0]!.ID;
   const config = readRunConfigPreference(taskId, chat.ID, isDefaultChat);
-  const bound = (chat.Provider as Provider | null) || null;
+  const bound = chat.Provider || null;
   const provider = bound ?? config?.provider ?? null;
   const own = config !== null && config.provider === provider ? config : null;
   return {
@@ -69,7 +73,7 @@ export function resolveReviewRecipient({
       model: own?.model ?? "",
       permissionMode: own?.permissionMode ?? "",
       autoAccept: own?.autoAccept ?? false,
-      thinkingLevel: provider !== null && supportsThinking(provider) ? (own?.thinkingLevel ?? "") : "",
+      thinkingLevel: provider !== null && supportsThinking(provider, providers) ? (own?.thinkingLevel ?? "") : "",
     },
   };
 }

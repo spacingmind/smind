@@ -1,9 +1,14 @@
 import type { ProviderInfo } from "@/lib/types";
 
 /**
- * The one built-in provider catalog (ADR-0032 AC13): used until
- * `provider.list` answers (and kept if it fails), so the composer and the
- * agent form are never unusable because one fetch was lost. Imported by
- * `useProviderCatalog` -- never duplicated in a component.
+ * The offline provider catalog (ADR-0032 AC13, ADR-0042 AC31): the four built-ins, used only while `provider.list`
+ * has not answered or failed, so the composer and the agent form are never unusable because one fetch was lost.
+ * Once the daemon answers, its list is the single source (instances and providers.custom entries included) and this
+ * one is never merged in. Imported by `useProviderCatalog` -- never duplicated in a component.
  */
-export const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm" }];
+export const FALLBACK_PROVIDERS: ProviderInfo[] = [
+  { id: "claude-native", runner: "claude-native" },
+  { id: "codex-native", runner: "codex-native" },
+  { id: "glm", runner: "acp" },
+  { id: "kimi", runner: "acp" },
+];

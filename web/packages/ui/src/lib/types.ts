@@ -137,12 +137,6 @@ export interface Chat {
   ArchivedAt: string | null;
 }
 
-// internal/taskrunner.Provider values, carried over the wire as their
-// underlying strings. The authoritative list is served dynamically by the
-// daemon's provider.list method (see ProviderListResult); this union just
-// covers the values that can appear, including the hardcoded fallback's two.
-export type Provider = "claude-native" | "glm" | "kimi" | "codex-native";
-
 // One of a provider's own permission modes (internal/taskrunner.ModeInfo,
 // ADR-0019): Claude Code's --permission-mode values, Codex's presets, or
 // an ACP agent's advertised session modes -- the provider's own
@@ -205,13 +199,23 @@ export type ProviderCredentialKind = "oauth" | "api-key";
 // accountProvider is the id accounts-dialog must actually send to
 // account.add/account.oauthStart -- it's internal/accounts' own provider
 // vocabulary (anthropic/openai/kimi/xai/antigravity), which predates and
-// differs from this Provider union (claude-native/glm/kimi/codex-native).
+// differs from the taskrunner provider ids (claude-native/glm/kimi/codex-native, plus providers.custom entries).
 // The two aren't fully unified: xai and antigravity are accounts-only
 // providers with no taskrunner counterpart, so provider.list can't (and
 // doesn't try to) describe them -- see accounts-dialog.tsx's doc comment and
 // docs/plans/active/task-permission-ux.md's Item 7d note for that gap.
+/** How a provider's runs execute (internal/providers Spec.Runner): the two native CLIs or a generic ACP agent. */
+export type ProviderRunner = "claude-native" | "codex-native" | "acp";
+
 export interface ProviderInfo {
-  id: Provider;
+  /** A string, not a closed union: the four built-ins plus every providers.custom entry (ADR-0042). */
+  id: string;
+  /** Which runner executes this provider's runs. Absent on a daemon older than the provider registry. */
+  runner?: ProviderRunner;
+  /** Instances only: the built-in (claude-native | codex-native) this one runs through, with its own config dir. */
+  extends?: string;
+  /** True for a providers.custom entry (an ACP provider or an instance), false/absent for a built-in. */
+  custom?: boolean;
   /** ADR-0038: whether the provider can view images natively ("no" = the file path is sent instead). Absent on a daemon without attachments. */
   images?: "yes" | "no" | "unknown";
   label?: string;
@@ -247,6 +251,29 @@ export interface ProviderEnvEffective {
   path: string;
   source: "settings" | "environment" | "default";
   exists: boolean;
+}
+
+/** One `provider.dirSuggestions` entry: a `~/.claude*` / `~/.codex*` directory found in the daemon user's home (name only, no file was read). */
+export interface ProviderDirSuggestion {
+  /** The directory's own name, e.g. ".claude-work". */
+  name: string;
+  /** Its absolute path. */
+  dir: string;
+  extends: string;
+  suggestedId: string;
+  suggestedLabel: string;
+}
+
+export interface ProviderDirSuggestionsResult {
+  suggestions: ProviderDirSuggestion[];
+}
+
+/** `provider.addInstance` params: one providers.custom entry that extends claude-native or codex-native. */
+export interface AddProviderInstanceParams {
+  extends: string;
+  id: string;
+  label: string;
+  dir: string;
 }
 
 // Result of provider.list (internal/wsapi/handlers.go's providerListResult).
@@ -294,7 +321,7 @@ export interface RunSummary {
   TaskID: number;
   /** ADR-0016 P1.4: which chat this run belongs to -- every run has exactly one, the task's default chat when its prompt/run.start omitted chatId. */
   ChatID: number;
-  Provider: Provider;
+  Provider: string;
   Prompt: string;
   Status: RunStatusValue;
   StartedAt: string;
