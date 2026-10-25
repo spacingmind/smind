@@ -162,10 +162,10 @@ func (p PortsConfig) PortRange() (lo, hi int, ok bool, err error) {
 type ProviderConfig struct {
 	// DefaultModel is the model a run of this provider uses when nothing
 	// else names one: not the run's own model, and not a profile's. Unset
-	// keeps each provider's own default (for claude-native, whatever the
-	// Claude CLI picks for the login). For claude-native, naming the
-	// model "default" on a run still means "the CLI's own default" and
-	// bypasses this.
+	// keeps each provider's own default, except for claude-native: a
+	// claude-native run that resolves no model is refused (ADR-0025,
+	// 2026-10-26), since the CLI's own default may be Opus. A human naming
+	// the model "default" on a run is the one way to keep the CLI's own.
 	DefaultModel string `yaml:"defaultModel"`
 	// Env is the launch env applied to every launch of this provider,
 	// limited to ProviderEnvKeys (config directories only: CLAUDE_CONFIG_DIR,

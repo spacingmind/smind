@@ -18,7 +18,7 @@ func runContract(t *testing.T, r *Runner, taskID int64, p Provider, prompt, inst
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(ctx, taskID, taskID, p, prompt, denyAllDecider{}, PermissionSettings{}, "", "", events)
+		errCh <- r.RunPrompt(ctx, taskID, taskID, p, prompt, denyAllDecider{}, PermissionSettings{}, "", testModelFor(p), events)
 	}()
 	got := drainEvents(events)
 	if err := <-errCh; err != nil {

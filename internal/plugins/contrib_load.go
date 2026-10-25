@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Caps on what a plugin's data contributions may weigh; they bound what a
@@ -19,6 +21,7 @@ const (
 	maxSkillFileBytes   = 128 << 10
 	maxSkillTotalBytes  = 256 << 10
 	maxSkillFiles       = 32
+	maxPromptFileBytes  = 16 << 10
 )
 
 var (
@@ -63,7 +66,7 @@ func (m *Manifest) loadContributions(root string) error {
 		return err
 	}
 	v := &manifestVal{}
-	m.skills, m.profiles = nil, nil
+	m.skills, m.profiles, m.prompts, m.themes = nil, nil, nil, nil
 
 	seenSkill := map[string]bool{}
 	for i, p := range m.Contributes.Skills {
@@ -119,6 +122,8 @@ func (m *Manifest) loadContributions(root string) error {
 			}
 		}
 	}
+	m.loadPrompts(realRoot, v)
+	m.loadThemes(realRoot, v)
 	if len(v.errs) > 0 {
 		return &ManifestError{Errs: v.errs}
 	}
@@ -281,5 +286,79 @@ func skillDescription(md string) string {
 			return ""
 		}
 		rest = after
+	}
+}
+
+// loadPrompts reads the prompt text of every prompt command. A prompt command
+// inserts text into the composer and nothing else: the file must be a regular,
+// non-empty UTF-8 text file with no NUL, under maxPromptFileBytes.
+func (m *Manifest) loadPrompts(realRoot string, v *manifestVal) {
+	seen := map[string]bool{}
+	for i, c := range m.Contributes.Commands {
+		f := fmt.Sprintf("contributes.commands[%d]", i)
+		if seen[c.Name] {
+			v.bad(f+".name", fmt.Sprintf("command %q is declared twice", c.Name), "keep one entry per command name")
+			continue
+		}
+		seen[c.Name] = true
+		if c.Prompt == "" {
+			continue
+		}
+		raw, err := readConfinedFile(realRoot, c.Prompt, maxPromptFileBytes)
+		if err != nil {
+			v.bad(f+".prompt", err.Error(), "point it at a regular text file inside the plugin")
+			continue
+		}
+		if !utf8.Valid(raw) || bytes.IndexByte(raw, 0) >= 0 {
+			v.bad(f+".prompt", c.Prompt+" is not UTF-8 text", "save the prompt as plain UTF-8 text")
+			continue
+		}
+		if len(bytes.TrimSpace(raw)) == 0 {
+			v.bad(f+".prompt", c.Prompt+" is empty", "write the text the command should insert")
+			continue
+		}
+		if m.prompts == nil {
+			m.prompts = map[string]string{}
+		}
+		m.prompts[c.Name] = string(raw)
+	}
+}
+
+// loadThemes reads and validates every theme file: complete token sets per
+// declared scheme, values in the safe grammar (see theme.go).
+func (m *Manifest) loadThemes(realRoot string, v *manifestVal) {
+	seen := map[string]bool{}
+	for i, t := range m.Contributes.Themes {
+		f := fmt.Sprintf("contributes.themes[%d]", i)
+		if seen[t.ID] {
+			v.bad(f+".id", fmt.Sprintf("theme %q is declared twice", t.ID), "keep one entry per theme id")
+			continue
+		}
+		seen[t.ID] = true
+		label := t.Label
+		if label == "" {
+			label = t.ID
+		}
+		if n := utf8.RuneCountInString(label); n > maxThemeLabelRunes {
+			v.bad(f+".label", fmt.Sprintf("is %d characters, over the %d limit", n, maxThemeLabelRunes), "shorten the label")
+			continue
+		}
+		if strings.IndexFunc(label, unicode.IsControl) >= 0 {
+			v.bad(f+".label", "has a control character", "use plain text")
+			continue
+		}
+		raw, err := readConfinedFile(realRoot, t.File, maxThemeFileBytes)
+		if err != nil {
+			v.bad(f+".file", err.Error(), "point it at a regular JSON file inside the plugin")
+			continue
+		}
+		schemes, probs := parseThemeFile(raw)
+		if len(probs) > 0 {
+			for _, p := range probs {
+				v.bad(f+".file", t.File+" "+p, "give every scheme the full token list (see the plugin docs)")
+			}
+			continue
+		}
+		m.themes = append(m.themes, ThemeSpec{ID: t.ID, Label: label, Schemes: schemes})
 	}
 }

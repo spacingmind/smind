@@ -51,7 +51,7 @@ func TestRunner_RunPrompt_ClaudeNative_ThroughTheWindowsLauncher(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, "", "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, "", testClaudeModel, events)
 	}()
 	got := withoutUsage(drainEvents(events))
 	if err := <-errCh; err != nil {

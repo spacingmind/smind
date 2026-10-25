@@ -763,26 +763,29 @@ func (reg *Registry) withStoredUsage(out []RunSummary) {
 // exactly.
 //
 // WithModel (ADR-0025) names the model the run is asked to use; omitted or
-// empty means the provider's default and the spawn is unchanged.
+// empty resolves through resolveModel (the profile's model, then the
+// provider's configured default; a claude-native run that resolves none is
+// refused with a *taskrunner.NoModelError, never launched unpinned).
 func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel, opts ...StartOption) (string, error) {
-	model := startModel(opts)
-	if model == "" {
-		// A run that names no model gets the provider's configured default
-		// (config providers.<id>.defaultModel), recorded as the requested
-		// model; "default" is the explicit way to keep the provider's own.
-		model = runner.DefaultModel(provider)
-	}
 	if err := validateIsolation(provider, opts); err != nil {
 		return "", err
 	}
 	if err := validateProbe(provider, opts); err != nil {
 		return "", err
 	}
-	p, err := prepareStart(wm, runner, taskID, chatID, provider, prompt, perm, thinkingLevel, model)
+	p, err := prepareStart(wm, runner, taskID, chatID, provider, prompt, perm, thinkingLevel, startModel(opts))
 	if err != nil {
 		return "", err
 	}
 	taskID, chatID, prompt, perm, thinkingLevel = p.taskID, p.chatID, p.prompt, p.perm, p.thinkingLevel
+	// Only after the request itself validated: the model the CLI launches with.
+	model, err := reg.resolveModel(runner, provider, startModel(opts), resolveStartOptions(opts).profileID)
+	if err != nil {
+		return "", err
+	}
+	if err := taskrunner.ValidateModel(p.catalog, model); err != nil {
+		return "", fmt.Errorf("runs: start: %w", err)
+	}
 
 	// ADR-0024 §2: never start a run in a worktree whose setup script is
 	// still running (StartWhenBusy and the queue check this too).
@@ -970,6 +973,20 @@ type startParams struct {
 	// orchestrator guard (ADR-0019 decision 6 at enqueue time,
 	// ADR-0021 §6) checks against.
 	catalog taskrunner.ProviderInfo
+}
+
+// resolveModel is the model a run launches with: requested, else the model of
+// the profile it runs under (when that profile is for provider), else the
+// provider's configured default. Every claude-native launch goes through it,
+// so a run can no longer reach the CLI without an explicit --model unless a
+// human asked for the literal "default" (see Runner.ResolveModel).
+func (reg *Registry) resolveModel(runner *taskrunner.Runner, provider taskrunner.Provider, requested string, profileID int64) (string, error) {
+	if requested == "" && profileID != 0 {
+		if p, err := reg.st.GetAgentProfile(profileID); err == nil && p.Provider == string(provider) {
+			requested = p.Model
+		}
+	}
+	return runner.ResolveModel(provider, requested)
 }
 
 // prepareStart is Start's validation half: unknown task, chat resolution

@@ -192,7 +192,6 @@ func TestRunClaudeNative_WithModelOption(t *testing.T) {
 		{"claude-opus-5-5", "claude-opus-5-5"},
 		{"sonnet", "sonnet"},
 		{ClaudeModelDefault, ""}, // the synthetic default means no flag
-		{"", ""},
 	} {
 		t.Run("model="+tc.model, func(t *testing.T) {
 			t.Parallel()
@@ -303,18 +302,20 @@ func TestRunCodex_ModelInThreadStart(t *testing.T) {
 	}
 }
 
-// An empty model changes nothing about any spawn: no --model flag, no
-// set_config_option for the model, no `model` in thread/start.
+// An empty model changes nothing about an ACP or Codex spawn: no
+// set_config_option for the model, no `model` in thread/start. A claude launch
+// with none is refused (TestUnpinnedClaude_*), never started unpinned.
 func TestRunStart_ModelEmptyIsDefault(t *testing.T) {
 	t.Parallel()
 	t.Run("claude", func(t *testing.T) {
 		t.Parallel()
 		wm, task := newTestTask(t, "echo-args")
-		if err := runModelPrompt(t, claudeNativeRunner(t, wm), task.ID, ProviderClaudeNative, ""); err != nil {
-			t.Fatalf("RunPrompt() error = %v", err)
+		var nm *NoModelError
+		if err := runModelPrompt(t, claudeNativeRunner(t, wm), task.ID, ProviderClaudeNative, ""); !errors.As(err, &nm) {
+			t.Fatalf("RunPrompt() error = %v, want *NoModelError", err)
 		}
-		if got := readArgsFile(t, *task.WorktreePath); strings.Contains(got, "--model") {
-			t.Fatalf("args contain --model: %q", got)
+		if _, err := os.Stat(filepath.Join(*task.WorktreePath, "args")); err == nil {
+			t.Fatal("the CLI was spawned for a refused run")
 		}
 	})
 	t.Run("acp", func(t *testing.T) {
@@ -408,14 +409,27 @@ func TestSetConfigOption_ClaudeModelCallsSetModel(t *testing.T) {
 		t.Fatalf("listed currentValue = %q, want sonnet", cur)
 	}
 
-	// The catalog default (and empty) reset with nil.
+	// The catalog default (and empty) select the configured default, never a
+	// reset to the CLI's own (SetModel(nil)); with none configured they are
+	// refused and the client is not called.
+	for _, v := range []string{ClaudeModelDefault, ""} {
+		fake.modelCalls = nil
+		var nm *NoModelError
+		if _, err := r.SetSessionConfigOption(context.Background(), 7, ProviderClaudeNative, "model", v); !errors.As(err, &nm) {
+			t.Fatalf("SetSessionConfigOption(model=%q) with no default error = %v, want *NoModelError", v, err)
+		}
+		if len(fake.modelCalls) != 0 {
+			t.Fatalf("SetModel called for an unresolvable default: %v", fake.modelCalls)
+		}
+	}
+	r.SetDefaultModel(ProviderClaudeNative, "claude-haiku-5-5")
 	for _, v := range []string{ClaudeModelDefault, ""} {
 		fake.modelCalls = nil
 		if _, err := r.SetSessionConfigOption(context.Background(), 7, ProviderClaudeNative, "model", v); err != nil {
 			t.Fatalf("SetSessionConfigOption(model=%q) error = %v", v, err)
 		}
-		if len(fake.modelCalls) != 1 || fake.modelCalls[0] != nil {
-			t.Fatalf("SetModel calls for %q = %v, want one nil call", v, fake.modelCalls)
+		if len(fake.modelCalls) != 1 || fake.modelCalls[0] == nil || *fake.modelCalls[0] != "claude-haiku-5-5" {
+			t.Fatalf("SetModel calls for %q = %v, want one call with the configured default", v, fake.modelCalls)
 		}
 	}
 

@@ -27,7 +27,7 @@ func runWithCtx(t *testing.T, ctx context.Context, r *Runner, task store.Task, p
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(ctx, task.ID, task.ID, p, prompt, denyAllDecider{}, PermissionSettings{}, "", "", events)
+		errCh <- r.RunPrompt(ctx, task.ID, task.ID, p, prompt, denyAllDecider{}, PermissionSettings{}, "", testModelFor(p), events)
 	}()
 	got := drainEvents(events)
 	if err := <-errCh; err != nil {

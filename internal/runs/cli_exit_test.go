@@ -87,7 +87,7 @@ func TestCLIExit_NotifiesParentLikeAnyFailedChild(t *testing.T) {
 	e.runner = taskrunner.New(e.wm,
 		taskrunner.WithSessionStore(taskrunner.NewChatSessionStore(e.st)),
 		taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath}),
-		taskrunner.WithClaudeCLIPath(self, "FAKE_CLAUDE_SCENARIO=cli-exit-nonzero"))
+		taskrunner.WithDefaultModel(taskrunner.ProviderClaudeNative, "claude-haiku-5-5"), taskrunner.WithDefaultModel(taskrunner.ProviderClaudeNative, "claude-haiku-5-5"), taskrunner.WithClaudeCLIPath(self, "FAKE_CLAUDE_SCENARIO=cli-exit-nonzero"))
 	e.reg.SetStarter(e.wm, e.runner)
 	out, err := e.reg.StartWhenBusy(context.Background(), e.wm, e.runner, e.child.ID, 0, taskrunner.ProviderClaudeNative, "work", taskrunner.PermissionSettings{}, "", WhenBusyReject, store.ChatQueueSourceAgent, e.task.ID, e.parentChat.ID)
 	if err != nil {

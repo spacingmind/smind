@@ -103,6 +103,9 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       void queryClient.invalidateQueries({ queryKey: queryKeys.pluginList() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.skillList() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.profileList() });
+      // {id, globalEnabled}: an install, enable, disable, remove, update, reload or a flip of plugins.enabled.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pluginCommands() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pluginThemes() });
       return;
     }
     case "profile.created":

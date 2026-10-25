@@ -114,7 +114,7 @@ func TestRunClaude_GitAskSettingsReachTheCLI(t *testing.T) {
 			events := make(chan Event)
 			errCh := make(chan error, 1)
 			go func() {
-				errCh <- r.RunPrompt(policyCtx(&McpPolicy{}), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{Mode: tc.mode}, "", "", events)
+				errCh <- r.RunPrompt(policyCtx(&McpPolicy{}), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{Mode: tc.mode}, "", testClaudeModel, events)
 			}()
 			drainEvents(events)
 			if err := <-errCh; err != nil {

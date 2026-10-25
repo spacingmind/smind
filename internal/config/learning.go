@@ -63,12 +63,12 @@ type LearningConfig struct {
 	// a live run of claude 2.1.293 answered `--model haiku` with Sonnet in
 	// 3 of 3 calls (about 30x the cost) while the full id was answered by
 	// Haiku. A cheap model is recommended, the reflector only distils a
-	// bounded window; set a newer id here when one ships. "" = the provider
-	// default.
+	// bounded window; set a newer id here when one ships. "" = providers.
+	// claude-native.defaultModel, and a refused run when that is unset too.
 	ReflectorModel string `yaml:"reflectorModel"`
 	// CuratorModel is the model the curator runs on. Default
-	// DefaultHaikuModel (same reasoning as ReflectorModel); "" = the
-	// provider default.
+	// DefaultHaikuModel (same reasoning as ReflectorModel); "" = providers.
+	// claude-native.defaultModel, and a refused run when that is unset too.
 	CuratorModel string `yaml:"curatorModel"`
 	// Probe holds the learning-probe knobs (ADR-0037).
 	Probe LearningProbe `yaml:"probe"`

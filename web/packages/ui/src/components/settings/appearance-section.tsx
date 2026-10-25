@@ -2,7 +2,9 @@
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { StepGroup } from "@/components/ui/step-group";
 import { useFontSizes } from "@/hooks/use-font-sizes";
+import { usePluginThemes } from "@/hooks/use-plugin-contributions";
 import { useTheme } from "@/hooks/use-theme";
+import { usePluginThemeStore } from "@/stores/plugin-theme-store";
 import type { FontSizes, FontSizeStep } from "@/lib/settings-preferences";
 import type { ThemePreference } from "@/lib/theme";
 import { Icons } from "@/lib/icons";
@@ -33,7 +35,16 @@ const FONT_SIZE_AXES: { axis: keyof FontSizes; label: string; description: strin
  * settings screen never references this file directly.
  */
 export function AppearanceSection() {
-  const { preference, setPreference } = useTheme();
+  const { preference, resolved, setPreference } = useTheme();
+  const pluginThemes = usePluginThemes();
+  const selectedTheme = usePluginThemeStore((state) => state.value);
+  const setSelectedTheme = usePluginThemeStore((state) => state.set);
+  const themeOptions = [
+    { value: "", label: "Default" },
+    ...pluginThemes.map((t) => ({ value: t.qualified, label: `${t.label} · ${t.plugin}` })),
+  ];
+  const chosen = pluginThemes.find((t) => t.qualified === selectedTheme?.id);
+  const lacksScheme = chosen !== undefined && chosen.schemes[resolved] === undefined;
   const { fontSizes, setFontSize } = useFontSizes();
 
   return (
@@ -42,6 +53,27 @@ export function AppearanceSection() {
         <h3 className="text-ui-base font-medium text-foreground">Theme</h3>
         <StepGroup groupLabel="theme" options={THEME_OPTIONS} value={preference} onChange={setPreference} />
       </section>
+
+      {pluginThemes.length > 0 && (
+        <section className="flex flex-col gap-2" data-testid="settings-plugin-themes">
+          <h3 className="text-ui-base font-medium text-foreground">Plugin theme</h3>
+          <StepGroup
+            wrap
+            groupLabel="plugin-theme"
+            options={themeOptions}
+            value={chosen?.qualified ?? ""}
+            onChange={(id) => {
+              const theme = pluginThemes.find((t) => t.qualified === id);
+              setSelectedTheme(theme ? { id: theme.qualified, theme } : null);
+            }}
+          />
+          {lacksScheme && (
+            <p className="text-ui-sm text-muted-foreground" data-testid="settings-plugin-theme-note">
+              {chosen.label} has no {resolved} variant, so the default {resolved} theme stays.
+            </p>
+          )}
+        </section>
+      )}
 
       <section className="flex flex-col gap-4">
         <h3 className="text-ui-base font-medium text-foreground">Font size</h3>

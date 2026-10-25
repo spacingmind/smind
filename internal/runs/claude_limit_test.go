@@ -21,7 +21,7 @@ func claudeScenarioEnv(t *testing.T, scenario string) *queuedTestEnv {
 	e.runner = taskrunner.New(e.wm,
 		taskrunner.WithSessionStore(taskrunner.NewChatSessionStore(e.st)),
 		taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath}),
-		taskrunner.WithClaudeCLIPath(self, "FAKE_CLAUDE_SCENARIO="+scenario))
+		taskrunner.WithDefaultModel(taskrunner.ProviderClaudeNative, "claude-haiku-5-5"), taskrunner.WithDefaultModel(taskrunner.ProviderClaudeNative, "claude-haiku-5-5"), taskrunner.WithClaudeCLIPath(self, "FAKE_CLAUDE_SCENARIO="+scenario))
 	e.reg.SetStarter(e.wm, e.runner)
 	return e
 }

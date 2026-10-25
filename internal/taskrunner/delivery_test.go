@@ -20,7 +20,7 @@ func runWith(t *testing.T, r *Runner, task store.Task, p Provider, prompt string
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(ctx, task.ID, task.ID, p, prompt, denyAllDecider{}, PermissionSettings{}, "", "", events)
+		errCh <- r.RunPrompt(ctx, task.ID, task.ID, p, prompt, denyAllDecider{}, PermissionSettings{}, "", testModelFor(p), events)
 	}()
 	got := drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -77,7 +77,7 @@ func TestReflector_IgnoresDelivery(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPromptIsolated(ctx, task.ID, task.ID, ProviderClaudeNative, "hi", "", IsolationOptions{SystemPrompt: "s"}, events)
+		errCh <- r.RunPromptIsolated(ctx, task.ID, task.ID, ProviderClaudeNative, "hi", testClaudeModel, IsolationOptions{SystemPrompt: "s"}, events)
 	}()
 	drainEvents(events)
 	if err := <-errCh; err != nil {

@@ -8,7 +8,7 @@ import { SettingsScreen } from "@/components/settings/settings-screen";
 import { readStoredThemePreference } from "@/lib/theme";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
-import { renderWithDaemon } from "@/test/render-with-daemon";
+import { renderWithClientProp, renderWithDaemon } from "@/test/render-with-daemon";
 
 async function flush(): Promise<void> {
   await act(async () => {
@@ -237,7 +237,7 @@ describe("SettingsScreen Appearance section", () => {
 
     // Persisted across a remount.
     const client2 = new FakeWsClient();
-    render(<SettingsScreen client={client2 as never} onNavigateBack={() => {}} initialSectionId="appearance" />);
+    renderWithClientProp(<SettingsScreen client={client2 as never} onNavigateBack={() => {}} initialSectionId="appearance" />);
     expect(screen.getAllByTestId("settings-font-size-interface-large")[1]).toHaveAttribute("aria-pressed", "true");
   });
 
@@ -392,7 +392,7 @@ describe("SettingsScreen narrow", () => {
   });
 
   async function renderNarrow(props: Partial<Parameters<typeof SettingsScreen>[0]> = {}) {
-    render(<SettingsScreen client={null} onNavigateBack={props.onNavigateBack ?? (() => {})} initialSectionId={props.initialSectionId} />);
+    renderWithClientProp(<SettingsScreen client={null} onNavigateBack={props.onNavigateBack ?? (() => {})} initialSectionId={props.initialSectionId} />);
     await flush();
   }
 

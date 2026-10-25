@@ -134,3 +134,47 @@ over cost and quality, and every backend already exposes it. Reusing the
 mode-catalog machinery and the config-option RPCs keeps the new surface to
 one optional field, one catalog field, and no new tools, while NULL = default
 keeps every existing client and stored row working unchanged.
+
+## Amendment 2026-10-26: a claude-native launch is never unpinned
+
+**Finding.** A live check on 2026-10-25 configured
+`providers.claude-native.defaultModel: claude-haiku-5-5`, sent with no
+`--model` (the CLI note said the configured default was used) and the run was
+metered on `claude-opus-5-5`. Root cause: `Registry.Start` applied the
+configured default but `Registry.StartWhenBusy`, the path every `run.start`
+and `task.prompt` (CLI, web, MCP `task_send`) takes for an idle chat, built
+its run from the raw request and never did, so the CLI was spawned with no
+`--model` and picked its own default. Queue delivery, wake runs and failover
+hops go through `Start` and were fine; the CLI's note read `provider.list`
+instead of what the daemon resolved. The unpinned launch was reproduced
+without a paid call by a fake `claude` that records its argv
+(`TestUnpinnedClaude_*`).
+
+**Decision.**
+- One resolution, in `taskrunner.Runner.ResolveModel` and used by both
+  `Start` and `StartWhenBusy`: the requested model, else the model of the
+  profile the run runs under (sticky seats included, when it is for the same
+  provider), else the provider's `defaultModel` (an instance falls back to its
+  base provider's), else nothing.
+- Nothing resolved for a claude-native run (instances included) is refused
+  with `*taskrunner.NoModelError`, message code `no_model`, before any run row
+  or queue item exists. The message names the three remedies. A queued item or
+  a wake that resolves nothing at delivery is cancelled with the same reason.
+- The launchers (`runClaudeNative`, `RunPromptIsolated`, `RunPromptProbe`)
+  refuse an empty model themselves, so no spawn path can omit `--model`.
+  Learning, reflector and probe runs pin their own model (default
+  `claude-haiku-5-5`); an empty `reflectorModel`/`curatorModel` now falls to
+  `providers.claude-native.defaultModel` and is refused when that is unset.
+- The literal `default` stays the one explicit way to keep the CLI's own
+  default and is for a human: `StartWhenBusy` refuses it from an agent or
+  orchestrator source. The live switch (`task_set_option model`) treats
+  `default` as the configured default and refuses it when none is set, rather
+  than `SetModel(nil)`.
+- `run.start` and `task.prompt` queue results echo the resolved `model`; the
+  CLI prints its "no --model given" note from that reply only.
+
+**Breaking, by design (no installed base).** A config or profile that relied
+on the Claude CLI's own default now gets the `no_model` refusal until
+`providers.claude-native.defaultModel` or the profile's model is set. Release
+note: "claude-native runs always launch with an explicit model; set
+`providers.claude-native.defaultModel` (or a profile model) or pass `--model`."

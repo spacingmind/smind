@@ -51,6 +51,9 @@ const GIT_TOPICS = ["task.git", "forge.status"];
 /** `provider.updated` {id, defaultModel}: a provider's configured default model changed (U15); the bridge re-reads provider.list. */
 const PROVIDER_TOPICS = ["provider.updated"];
 
+/** `plugin.updated` {id, globalEnabled}: a plugin was installed, enabled, disabled, removed, updated or reloaded, or `plugins.enabled` flipped; the bridge re-reads the plugin commands and themes. */
+const PLUGIN_TOPICS = ["plugin.updated"];
+
 /** The stalled-tree alert (`{taskId, title, minutes, since}`): the web notification fires on it and the task tree re-reads. */
 const STALL_TOPICS = ["task.stalled"];
 
@@ -66,6 +69,7 @@ const TOPICS = [
   ...LEARNING_TOPICS,
   ...GIT_TOPICS,
   ...PROVIDER_TOPICS,
+  ...PLUGIN_TOPICS,
   ...STALL_TOPICS,
 ];
 

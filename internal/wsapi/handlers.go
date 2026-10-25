@@ -1276,6 +1276,8 @@ func handleChatQueueCancel(reg *runs.Registry) handlerFunc {
 type runQueuedResult struct {
 	Queued      bool  `json:"queued"`
 	QueueItemID int64 `json:"queueItemId"`
+	// Model is the model the queued item will launch with, resolved.
+	Model string `json:"model,omitempty"`
 }
 
 // taskPromptResult is the terminal result of a successful task.prompt (or
@@ -1441,7 +1443,7 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 			return nil, fmt.Errorf("task.prompt: %w", err)
 		}
 		if out.Queued {
-			return runQueuedResult{Queued: true, QueueItemID: out.QueueItemID}, nil
+			return runQueuedResult{Queued: true, QueueItemID: out.QueueItemID, Model: out.Model}, nil
 		}
 
 		return attachAndStream(ctx, rc, reg, out.RunID, true)
@@ -1454,6 +1456,10 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 // for the run to progress or finish.
 type runStartResult struct {
 	RunID string `json:"runId"`
+	// Model is the model the run launches with, after the daemon resolved it
+	// (requested, profile, configured default); "" for a provider that keeps
+	// its own. The CLI prints it instead of guessing.
+	Model string `json:"model,omitempty"`
 }
 
 // handleRunStart is task.prompt's first half on its own: it starts a Run
@@ -1602,9 +1608,9 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			return nil, fmt.Errorf("run.start: %w", err)
 		}
 		if out.Queued {
-			return runQueuedResult{Queued: true, QueueItemID: out.QueueItemID}, nil
+			return runQueuedResult{Queued: true, QueueItemID: out.QueueItemID, Model: out.Model}, nil
 		}
-		return runStartResult{RunID: out.RunID}, nil
+		return runStartResult{RunID: out.RunID, Model: out.Model}, nil
 	}
 }
 

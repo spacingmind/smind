@@ -33,7 +33,7 @@ func runIsolated(t *testing.T, r *Runner, task store.Task, provider Provider, is
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPromptIsolated(context.Background(), task.ID, task.ID, provider, "hi", "", iso, events)
+		errCh <- r.RunPromptIsolated(context.Background(), task.ID, task.ID, provider, "hi", testModelFor(provider), iso, events)
 	}()
 	got := drainEvents(events)
 	return got, <-errCh
@@ -206,7 +206,7 @@ func TestRunPromptIsolated_ClosesClientBeforeDone(t *testing.T) {
 	events := make(chan Event) // never drained after the first read
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPromptIsolated(ctx, task.ID, task.ID, ProviderClaudeNative, "hi", "", IsolationOptions{SystemPrompt: "p"}, events)
+		errCh <- r.RunPromptIsolated(ctx, task.ID, task.ID, ProviderClaudeNative, "hi", testClaudeModel, IsolationOptions{SystemPrompt: "p"}, events)
 	}()
 	select {
 	case err := <-errCh:
@@ -237,7 +237,7 @@ func TestReflector_UnchangedRunPromptFlags(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, "", "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, "", testClaudeModel, events)
 	}()
 	drainEvents(events)
 	if err := <-errCh; err != nil {
