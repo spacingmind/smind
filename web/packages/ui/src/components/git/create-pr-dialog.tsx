@@ -140,7 +140,7 @@ function CreatePrForm({
 
       <div className="flex min-h-7 flex-wrap items-center gap-x-2 gap-y-1 text-ui-base" data-testid="create-pr-branches">
         <Icons.branch aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
-        <MiddleText text={headBranch} className="max-w-[11rem] font-mono text-ui-sm" />
+        <MiddleText text={headBranch} className="max-w-[8.5rem] font-mono text-ui-sm" />
         <Icons.arrowRight aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
         <label htmlFor={ids.base} className="sr-only">
           Base branch
@@ -159,7 +159,7 @@ function CreatePrForm({
           }}
           spellCheck={false}
           autoComplete="off"
-          className="h-7 w-64 min-w-0 flex-1 font-mono text-ui-sm"
+          className="h-7 w-64 min-w-0 flex-1 font-mono text-ui-xs"
           title={baseInput}
           data-testid="create-pr-base"
         />
