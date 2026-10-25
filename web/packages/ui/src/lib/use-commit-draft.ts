@@ -47,6 +47,9 @@ export function useCommitDraft(client: WsClientLike | null, taskId: number) {
   }, []);
 
   useEffect(() => {
+    // A new task starts clean: a draft still in flight for the previous one must not leave "drafting" behind.
+    setStatus("idle");
+    setError(null);
     return () => {
       generation.current += 1;
       inFlight.current = false;
