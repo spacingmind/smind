@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
+	"io"
 	"time"
 
 	"github.com/spacingmind/smind/internal/wsclient"
@@ -19,9 +19,11 @@ const queueItemPollInterval = 500 * time.Millisecond
 // was cancelled, 1 when the lookup failed (unknown item, daemon error), 5 on
 // --timeout, 0 on Ctrl+C.
 //
+// Notices go to errw.
+//
 // ctx carries the --timeout deadline; sigCtx only the signal, to tell the two
 // apart when ctx ends.
-func waitForQueueItem(ctx, sigCtx context.Context, client *wsclient.Client, itemID int64, timeout time.Duration) (runID string, exit int) {
+func waitForQueueItem(ctx, sigCtx context.Context, errw io.Writer, client *wsclient.Client, itemID int64, timeout time.Duration) (runID string, exit int) {
 	announced := false
 	ticker := time.NewTicker(queueItemPollInterval)
 	defer ticker.Stop()
@@ -34,20 +36,20 @@ func waitForQueueItem(ctx, sigCtx context.Context, client *wsclient.Client, item
 		case ctx.Err() != nil:
 			// fall through to the ctx handling below
 		case err != nil:
-			fmt.Fprintf(os.Stderr, "task wait: %v\n", err)
+			fmt.Fprintf(errw, "task wait: %v\n", err)
 			return "", 1
 		case res.Item.Status == "cancelled":
 			reason := res.Item.CancelReason
 			if reason == "" {
 				reason = "no reason given"
 			}
-			fmt.Fprintf(os.Stderr, "queue item %d was cancelled: %s\n", itemID, reason)
+			fmt.Fprintf(errw, "queue item %d was cancelled: %s\n", itemID, reason)
 			return "", 3
 		case res.Item.RunID != nil && *res.Item.RunID != "":
 			return *res.Item.RunID, 0
 		case !announced:
 			announced = true
-			fmt.Fprintf(os.Stderr, "queue item %d is %s; waiting for it to start (its chat is busy or the task's setup is running)\n", itemID, res.Item.Status)
+			fmt.Fprintf(errw, "queue item %d is %s; waiting for it to start (its chat is busy or the task's setup is running)\n", itemID, res.Item.Status)
 		}
 
 		if ctx.Err() == nil {
@@ -58,10 +60,10 @@ func waitForQueueItem(ctx, sigCtx context.Context, client *wsclient.Client, item
 			}
 		}
 		if sigCtx.Err() != nil {
-			fmt.Fprintf(os.Stderr, "detached -- queue item %d is still queued\n", itemID)
+			fmt.Fprintf(errw, "detached -- queue item %d is still queued\n", itemID)
 			return "", 0
 		}
-		fmt.Fprintf(os.Stderr, "timed out after %s; queue item %d is still queued\n", timeout, itemID)
+		fmt.Fprintf(errw, "timed out after %s; queue item %d is still queued\n", timeout, itemID)
 		return "", 5
 	}
 }
