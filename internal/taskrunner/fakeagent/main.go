@@ -420,6 +420,9 @@ func recordSessionInitMethod(cwd, method string) {
 		return
 	}
 	_ = os.WriteFile(filepath.Join(cwd, "session-init-method"), []byte(method), 0o644)
+	// The custom-provider env test reads this back: the launch env is not
+	// observable through the wire protocol.
+	_ = os.WriteFile(filepath.Join(cwd, "env-fake-custom"), []byte(os.Getenv("FAKE_CUSTOM_VAR")), 0o644)
 }
 
 // handleResumeSession answers session/load and session/resume: it

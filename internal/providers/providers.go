@@ -273,6 +273,7 @@ func resolve(s Spec, table []Spec) (Spec, error) {
 		// the base login) and the smind-held account row stay the base's.
 		inst := *base
 		inst.ID, inst.Label, inst.Extends, inst.Custom = s.ID, s.Label, base.ID, true
+		inst.Env = s.Env // the instance's own launch env (config providers.custom[].env)
 		inst.Reflect = false
 		inst.AccountProvider = ""
 		inst.CredentialKind = ""
