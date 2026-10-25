@@ -34,6 +34,14 @@ describe("ProbeCard running", () => {
     expect(screen.getByTestId("probe-running").textContent).toContain("2m 10s elapsed · $0.62 so far (estimate $1.44)");
   });
 
+  it("keeps each arm's label on its own line below sm so it is not squeezed to nothing (390 px)", async () => {
+    await renderProbeCard({ probe: runningProbe() });
+    for (const row of screen.getAllByTestId("probe-arm")) {
+      expect(row.className).toContain("max-sm:flex-wrap");
+      expect(row.firstElementChild?.nextElementSibling?.className).toContain("max-sm:basis-");
+    }
+  });
+
   it("keeps the elapsed time moving between polls (footer and the running arm, not the finished one)", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
     await renderProbeCard({ probe: runningProbe() });
