@@ -96,6 +96,10 @@ Numbered so a reviewer can grade each independently. Items name which ACs they o
   learning delivery's list, or the client unions; `provider.list` is the single source and web/mobile treat ids as strings with an offline fallback list.
 - AC32 [P0] `providers.custom` in `config.yaml` adds an ACP provider (command, args, env, models, modes); a bad entry is rejected at startup/reload with the field named;
   runs use `runACP`, record run events/usage, honor model selection and permission modes.
+- AC37 [P0] A `providers.custom` entry with `extends: claude-native|codex-native` adds a provider instance with its own id, label and allowlisted env
+  (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`); it runs through the extended provider's runner, side by side with the base provider, and appears in every picker, the
+  health check and usage grouping. Settings → Providers suggests `~/.claude*` / `~/.codex*` directories found in the daemon user's home (names only, no file reads)
+  and adds an instance in one click (human-only RPC).
 - AC33 [PD] A plugin's `providers` entries register as `<plugin>/<provider>`, vanish with the plugin, and cannot shadow a core or custom provider id; the command in the
   entry is on the consent screen.
 
@@ -153,6 +157,8 @@ frame reviewed).
 **Providers (P0, PD)**
 - `TestProviderRegistry_AddACPProvider_NoSwitchEdits` (a table test registering a fake provider and exercising run, modes, diag, delivery, catalog), `TestProviderList_SingleSource`
 - `TestCustomProvider_ConfigValidation_FieldNamed`, `TestCustomProvider_RunsViaACP_UsageAndEvents`, `TestCustomProvider_ModelSelectionAndModes`
+- `TestProviderInstance_ExtendsClaudeNative_OwnConfigDir`, `TestProviderInstance_EnvAllowlistOnly`, `TestProviderInstance_SideBySideWithBase`,
+  `TestProviderDirSuggestions_NamesOnly` (no file under a suggested dir is opened)
 - Web/mobile: catalog renders an unknown provider id with a generic icon; offline fallback list; `provider-catalog.test` updated.
 - `TestPluginProvider_NamespacedId_NoShadowing_VanishesWithPlugin`
 
@@ -188,12 +194,12 @@ manifest) raises `REOPEN_REQUEST` to the Lead that owns it.
 
 ## Decisions
 
-- ADR-0042 (Proposed) holds the architecture: trusted local plugins, off by default, consent and mediated capabilities, data-first contributions, plugin process over
+- ADR-0042 (Accepted 2026-10-25, all Q1–Q12 as recommended, plus provider instances in Wave 0 as AC37) holds the architecture: trusted local plugins, off by default, consent and mediated capabilities, data-first contributions, plugin process over
   stdio JSON-RPC, declarative view documents (no remote JS on clients), provider registry first, no registry/store, no OS sandbox in v1.
 - Plan-level choices made here and reversible without an ADR change: the PR order and item boundaries above; Wave 0 (P0) can start on acceptance because it needs no
   plugin decision; example plugins are first-party fixtures, not a catalog.
-- **Waiting on the Human:** ADR-0042 Q1–Q12. Answers that reshape the plan: Q1 (which items start), Q5 (a JS-panel answer adds a PC.4 and a sandbox ADR; "remote JS on mobile"
-  invalidates AC30), Q6 (adds an import-adapter PR after PA.3), Q7/Q8 (change PB.2–PB.3), Q12 (adds a sandbox item).
+- Human answers 2026-10-25: Q1–Q12 as recommended, so the plan stands; Wave 0 and Wave A start now, B–D wait for a Human decision after Wave A is on screen.
+  Added AC37 (provider instances: `extends` + allowlisted env, directory suggestions) to P0.
 
 ## Progress
 
@@ -215,5 +221,6 @@ Filled as items land; for each acceptance criterion, name the test or manual che
   tests (ADR-0029/0030).
 - AC24–AC30 (PC): shared fixture suite on Go/web/mobile, screenshots of panel open/refresh/disable transitions on web and mobile, and the relay E2EE smoke.
 - AC31–AC33 (P0, PD): the provider registry table test, a manual run of a custom ACP provider against a local ACP agent, and the generic-icon rendering check on web/mobile.
+- AC37 (P0 provider instances): the `TestProviderInstance_*` and `TestProviderDirSuggestions_NamesOnly` tests, plus a manual run of two claude-native instances side by side on an isolated daemon.
 - AC34–AC36: log/UI audit script that greps for unlabeled plugin output, the example CI job, and the release-notes diff.
 - Every PR runs `task test`, `task lint` and the `verify` skill; UI PRs add the light+dark screenshot pass; nothing here has been run yet.

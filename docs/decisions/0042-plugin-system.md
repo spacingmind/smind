@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed — 2026-10-24.** Awaiting the Human's answers to the [open questions](#open-questions-for-the-human); nothing here is built. Spec and PR split:
+**Accepted — 2026-10-25** (Human: all twelve open questions as recommended, plus provider instances in Wave 0; see [Human answers](#human-answers-2026-10-25)). Proposed 2026-10-24. Spec and PR split:
 [`docs/plans/active/plugins.md`](../plans/active/plugins.md).
 
 Closes the "Extend" gap in the Build → Review → Ship → **Extend** framing the Human took from Paseo (paseo.sh): smind covers Build, Review and Ship, and has no
@@ -323,3 +323,18 @@ Each has a recommendation; the plan assumes the recommendations. Answers change 
     (MIT) for examples and the plugin protocol docs; counsel if third-party distribution grows.
 12. **OS sandbox (§2).** Whether to invest in seatbelt/bwrap/job-object confinement of plugin processes. *Recommendation:* no in v1; revisit when a registry or
     non-local sources are on the table, because that is when the threat model changes.
+
+## Human answers (2026-10-25)
+
+All twelve open questions are answered **as recommended**: Wave 0 + Wave A start now and B–D are decided after A is on screen (Q1); the trust model (Q2);
+install sources without a marketplace index (Q3); local-only management, the phone views and acts but never installs (Q4); declarative view documents only,
+no remote JS on mobile, web/desktop JS panels deferred (Q5); Claude-Code-format import deferred past Wave A (Q6); one fail-open `run.beforeStart` hook and no
+permission answering (Q7); stdio JSON-RPC (Q8); ACP-only plugin providers with `providers.custom` first (Q9); two first-party examples, role-pack move later
+(Q10); MIT for examples and protocol docs (Q11); no OS sandbox in v1 (Q12).
+
+**Addition to Wave 0: provider instances.** A `providers.custom` entry may also *extend* a core provider (`claude-native`, `codex-native`) instead of naming an
+ACP command: it keeps that provider's runner and adds a label and environment from the existing config-directory allowlist (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+ADR-0013 amendment / #603). Two instances of the same CLI then run side by side (for example "Claude" on `~/.claude` and "Claude S" on `~/.claude-scopedocs`),
+which is how Paseo's `extends` + `env` providers work. Settings → Providers lists `~/.claude*` and `~/.codex*` directories found in the daemon user's home as
+one-click suggestions; discovery reads directory names only, never file contents or credentials.
+
