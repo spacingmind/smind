@@ -310,6 +310,8 @@ All numbers are defaults in `learning.probe.*` and are guesses until the first w
 
 ## Progress
 
+**Re-checked 2026-10-25 (plans hygiene): still PARTIAL, no probe work landed since (only #607, a test fix).** Open, exactly: AC33 `probeCheck` (blocked on a Human decision on how to run a command in the CLI sandbox without a model call; `TestProbeCheck_*` do not exist); AC42 light/dark + transition screenshots of the Probe card (no record); Validation entries for AC3-AC11 (2a/2b) and AC38-AC41 (4c UI) are missing although the tests exist; the Settings -> Usage row for the Probe bucket; the P0 PARTIAL items (keychain beyond macOS, `failIfUnavailable` isolation, Linux and Windows).
+
 **Status 2026-10-22 (plans hygiene): PARTIAL; the checkboxes below were stale and are corrected.** All six PRs merged: 2a #441, 2b #442, 3 #445, 4a #450, 4b #452 (its stacked branch was #451), 4c #448, plus follow-ups #447 and #456. Open items:
 
 - **AC33 `probeCheck` is not met** (deferred, needs a Human decision, see Decisions); `TestProbeCheck_*` do not exist.

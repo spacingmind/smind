@@ -90,8 +90,12 @@ Component (`app-sidebar.test.tsx`):
 - [x] mode type/storage + 3-way control
 - [x] StageGroupedList UI
 - [x] screenshots, PR
+- Merged in #597 (`feat(web): sidebar stage view (Working / Ready to review / Done)`). Plan closed in the 2026-10-25 plans hygiene pass.
 
 ## Validation
+
+AC to PR map: AC1-AC8 all shipped in #597; the `AppSidebar stage view` describe block in `components/app-sidebar.test.tsx` and
+`lib/sidebar-stage-groups.test.ts` exist on `origin/develop` (confirmed 2026-10-25).
 
 - tsc -b packages/ui clean; ui vitest 323 files / 3626 tests pass; task lint and task test exit 0.
 - AC1-AC8: covered by lib/sidebar-stage-groups.test.ts and app-sidebar.test.tsx (default tree, persistence across remount,

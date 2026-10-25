@@ -127,9 +127,20 @@ merge order daemon first); both branch from `origin/develop`, no stacking.
 - [x] Peer 1 daemon (task 62): ACCEPT 4cbc25bc (+ Lead fix: merge message uses the short ref). Reviewed: no force flag or `+` refspec, refuseRunScoped on both, no MCP tool, conflict never aborts, RPC re-checks on `svc.Fresh`.
 - [x] Peer 2 web (task 63): ACCEPT e706ddc9. Reviewed code and every screenshot frame (light/dark, 1280/390, transitions).
 - [x] PR 1 (daemon), PR 2 (web, depends on PR 1; merge daemon first)
-- [ ] Not verified: a real https push through the `gh` credential helper (no network used); live UI against the real daemon RPCs (web screenshots use mocked RPCs).
+- Merged: daemon in #582 (`task.push`, `task.updateFromBase`), web in #583, follow-ups in #585. Plan closed in the 2026-10-25 plans hygiene pass.
+- Not verified (not acceptance criteria; carried as known limits): a real https push through the `gh` credential helper (no network used); live UI against the real daemon RPCs (web screenshots use mocked RPCs).
 
 ## Validation
+
+AC to evidence map (tests confirmed present on `origin/develop` on 2026-10-25):
+
+- AC1-8, AC11, AC12: `internal/wsapi/sync_handlers_test.go` (`TestPushPublishesBranch`, `TestPushAhead`, `TestPushNonFastForward`,
+  `TestUpdateFromBaseDefaultsToMerge`, `TestUpdateFromBaseConflictLeavesMergeState`, `TestSyncPublishesTaskGit`, ...) and
+  `internal/gitstate/sync_actions_test.go` (`TestActionsPush`, `TestActionsUpdateFromBase` tables), shipped in #582; confirmed by the live smoke below.
+- AC9: `TestSyncRPCsRefuseRunScoped`, `TestNoMCPToolForPushOrUpdate` (`cmd/smind/mcp_sync_exposure_test.go`).
+- AC10: `TestSyncNoSecretsInArgvOrErrors`.
+- AC13: `web/packages/ui/src/components/git/sync-dialog.test.tsx` (`renders idle push card`, `rebase option not default`, ...) and the sync-menu test, shipped in #583.
+- AC14: screenshots /tmp/g7-shots (104 frames, light/dark, 1280/390, transitions), reviewed by the Lead; recorded below.
 
 - `go test ./...`, `go test -race ./internal/gitstate ./internal/workspace ./internal/wsapi ./internal/forge`, `task lint`: pass.
 - Live smoke on an isolated daemon (own SMIND_HOME, port 4947) against a throwaway repo with a local bare remote: publish, push, nothing-to-push,

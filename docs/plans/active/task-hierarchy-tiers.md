@@ -512,6 +512,8 @@ dialogs' counts equal the server selection and both actions work end to end.
 
 ## Progress
 
+**Re-checked 2026-10-25 (plans hygiene): still PARTIAL, effectively shipped; nothing new since 2026-10-22.** Open, exactly: U1-AC4 (light/dark screenshots of the nested sidebar tree) and U2-AC3 (screenshots of the task header lineage), both without recorded evidence; the explicit `role` column (decision 6.1) is not built and only waits on the Human if wanted. The Human can either accept the two screenshot gaps (the sidebar was later restyled, `completed/sidebar-polish.md`) and have the plan moved to `completed/`, or ask for one screenshot pass.
+
 **Status 2026-10-22 (plans hygiene): PARTIAL, effectively shipped.** Every PR below is merged (#289, #291, #293, #295, #376; also #373 `disposition`, #423 tree-guard flake fix). What is left is evidence, not code:
 
 - U1-AC4 (nested sidebar tree, light/dark screenshots): recorded as partially verified.

@@ -34,12 +34,15 @@ None needed; no ADR.
 
 ## Progress
 
+Done. Merged in #579 (`feat(web): composer chip resolves an unresolved Default model from the last run`). Plan closed in the 2026-10-25 plans hygiene pass.
+
 - [x] spec committed
 - [x] steps 1–3 by Peer (task 54, candidate ACCEPTED: diff reviewed, checks re-run by Lead, screenshots viewed)
 - [x] review, checks, screenshots, PR
 
 ## Validation
 
+AC to PR map: all ACs shipped in #579; test names confirmed present on `origin/develop` on 2026-10-25 (`lib/observed-model.test.ts`, `lib/model-browser.test.ts`).
 ACs 1–6 by the named vitest tests (lib/model-browser, lib/observed-model, provider-model-picker, run-config-toolbar). From `web/packages/ui`:
 `NODE_OPTIONS=--no-experimental-webstorage bunx vitest run` -> 310 files, 3473 tests pass; `cd web && bunx tsc -b packages/ui` clean; `task lint` and `task test` pass.
 AC7: screenshots under `/tmp/c2-shots/png/` (light + dark, 1280 + 390: observed chip, picker open/closed frames, chip after picking a model, same-provider fallback, nothing known).

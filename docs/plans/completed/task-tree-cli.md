@@ -43,6 +43,10 @@ serves `task.tree` (internal/wsapi/task_tree.go; MCP `task_tree`). This adds
 
 ## Progress / Validation
 
+Done. Merged in #578 (`feat(cli): smind task tree`). Plan closed in the 2026-10-25 plans hygiene pass.
+AC to evidence: AC1-AC5 and AC7 by `TestRenderTaskTree`, AC6 by `TestTaskTreeArgs` (both in `cmd/smind/task_tree_test.go`), end to end (incl. `--json`) by
+`TestTaskTreeCLI_EndToEnd`; all present on `origin/develop` (confirmed 2026-10-25).
+
 - Peer `peer-sonnet` (task 56) — candidate ACCEPTED: diff read in full; format matches ACs 1-7; mutation check (breaking the `cost n/a` text) fails 13 test lines; commits cherry-picked onto this branch rebased on origin/develop.
 - Checks: `go test ./cmd/smind -run TaskTree -count=1` ok; `task lint` ok; `go test ./...` all ok. `task test` failed only in the web suite (1 of 3451 UI tests, code untouched by this PR; not rerun in isolation).
 - Real run against a throwaway daemon (SMIND_HOME scratch, port 48731): `task tree 1`, `task tree --task 2`, `task tree 1 --json` and the both-args error (exit 2) behave as specified; output is in the PR.

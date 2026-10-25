@@ -1,5 +1,7 @@
 # Prompt attachments
 
+**Status 2026-10-25 (plans hygiene): PARTIAL.** Built and merged: docs #458/#461, daemon core #463 (+ #474), native images and SDK v0.4.0 #473, `forge.search` #459, accept-time PR/issue fetch #479, web composer + timeline #465, `@` popover + PR/issue picker + Attach menu #476, desktop drop fix #468, "Add to chat" #498 (G10); mobile is its own plan (`mobile-prompt-attachments.md`, #581). The Progress and Validation sections below were stale (written 2026-10-22) and are not an AC-by-AC record. Open: AC36 (light/dark screenshots and real-app transition frames; no record), AC37 (paste and drop confirmed in the macOS app; #468 landed the `dragDropEnabled` fix but no run in the real app is recorded), AC38 live checks on an isolated daemon (the `liveattach` gated suite named below, `TestLive_*`, was never written; ad hoc haiku checks exist only for claude-native PNG and the PR fetch; Codex `localImage`, the GLM fallback plus text file, and `@file` read were not run live), and a Validation section mapping AC1-AC35 to tests. Several Go tests were renamed when `github` became forge-neutral (for example `TestGithubAttach_*` became `TestForgeAttach_*`).
+
 Size: XL (10) split into L/M items — scope 2 (daemon + web + desktop + an SDK repo), PRs 2 (about eight, with ordering), risk 2
 (untrusted bytes, path containment, secrets, protocol), decisions 2 (ADR-0038 proposed, open questions O1–O7), verification 2 (live
 provider calls, macOS app drop/paste). One Lead sequences the items; each PR is non-stacked off `develop`. The security-sensitive

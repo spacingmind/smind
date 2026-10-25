@@ -831,7 +831,7 @@ export interface PrExistsErrorData {
   detail?: string;
 }
 
-// ---- Push and Update from base (ADR-0039 §3-§6; docs/plans/active/git-push-update-from-base.md "Wire contract") ----
+// ---- Push and Update from base (ADR-0039 §3-§6; docs/plans/completed/git-push-update-from-base.md "Wire contract") ----
 
 /** Result of `task.push`. */
 export interface TaskPushResult {

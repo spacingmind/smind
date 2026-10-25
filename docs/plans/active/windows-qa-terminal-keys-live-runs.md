@@ -1,5 +1,7 @@
 # Windows QA 2026-10-11: terminal keys, live runs, workspace context menu, CLI approve
 
+**Status 2026-10-25 (plans hygiene): PARTIAL.** All ACs (K, L, W, C) shipped in #284 and are confirmed by tests plus a spoofed-`Win32` Chrome run. Open: the Windows re-test by the Human on a real Windows webview (the keys were only checked with a spoofed user agent on macOS); no evidence it happened as of this date.
+
 Source: a Windows QA pass of smind desktop 0.10.0 (2026-10-11). Each item was
 re-checked against `origin/develop` (v0.10.0-21) before specifying; findings are
 in Decisions. Related: `desktop-native-feel.md` (D3 shortcuts),

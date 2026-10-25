@@ -289,6 +289,8 @@ workflow's `publish` job end to end.
 
 ## Progress
 
+**Re-checked 2026-10-25 (plans hygiene): still PARTIAL, no new evidence.** Open (all need a real app window or machine, i.e. the Human): U3 menu click, U4 real-window screenshots, U7 `daemon-survives-app-update`, the five `local-*` in-window scenarios, the Windows NSIS update path, and a first real published-release-to-release in-app update. The `requireSignedVersion` follow-up is also still open.
+
 **Status 2026-10-22 (plans hygiene): PARTIAL.** Shipped and in use; kept in `active/` because several acceptance criteria were only partly verified and nothing in the repo shows that a human closed them.
 
 - Merged: #274 (`feat(desktop): signed auto-update via the Tauri 2 updater`), #333 (release notes rendered as markdown), #377 (hermetic end-to-end updater test; see `completed/desktop-update-e2e.md`).

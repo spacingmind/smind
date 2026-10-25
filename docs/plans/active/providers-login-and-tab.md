@@ -141,6 +141,7 @@ B1→B2→B3 are sequential (same package); B4 starts after B2 (paste) and rebas
 ## Progress
 
 **Status 2026-10-22 (plans hygiene): PARTIAL (built and merged, verification gaps).**
+**Re-checked 2026-10-25 (plans hygiene): still PARTIAL, nothing new landed.** Open: real-account remote login on a homelab daemon and in the macOS app (needs the Human); AC-A11 screenshots of every state (no recorded evidence).
 
 - Merged: #384 (ADR-0033 + plan), #385 (B1 identity), #389 (B2 loginId/`oauthComplete`), #396 (B3 device code), #404 (org-uuid identity fix), #409 (B4 connect form), #416 (A1+A2 Providers tab, one PR), #457 (test fix).
 - **Remaining (unverified):**

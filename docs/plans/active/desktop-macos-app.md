@@ -368,6 +368,8 @@ Web (vitest, `desktop-daemon-banner.test.tsx` + `use-task-attention.test.ts`):
 
 ## Progress
 
+**Re-checked 2026-10-25 (plans hygiene): still PARTIAL, no new evidence.** Open (needs a Human on a Mac): M3 `close-keeps-dock-reopen`, `dock-badge-on-permission`, a light-theme screenshot, `downloaded-dmg-quarantine`, and the Settings -> Daemon banner Restart / take-over in the UI.
+
 **Status 2026-10-22 (plans hygiene): PARTIAL.** M1, M2, M4 and M5 are built and shipped; M3's manual interactions were never recorded as done.
 
 - Merged: #238 (macOS app build, bundled daemon, Dock lifecycle, CI) and #243 (`update the managed daemon only when no runs are in flight`, M5). First shipped in v0.10.0; v0.13.1 carries per-arch DMGs.

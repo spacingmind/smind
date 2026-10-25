@@ -1,5 +1,7 @@
 # Mobile prompt attachments
 
+**Status 2026-10-25 (plans hygiene): PARTIAL.** Merged in #581 (`feat(mobile): prompt attachments (ADR-0038 mobile half)`); AC1-AC10 are confirmed by unit tests and the web smoke. Open: a run on a real iOS or Android device or simulator (native image and document pickers, HEIC re-encode, `expo-image-manipulator` and `expo-file-system` on device, and the dev-client rebuild); only the web smoke with a browser file chooser and a canvas manipulator ran. Needs a Human with a device.
+
 Size: L (6) — scope 1, PRs 1, risk 1, decisions 0, verify 2 (web smoke; device/simulator not available to this Lead).
 
 Mobile half of [ADR-0038](../../decisions/0038-prompt-attachments.md) (web/desktop shipped; O1 = (b): the phone downscales to fit the
