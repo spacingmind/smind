@@ -53,6 +53,9 @@ const RunPurposeUser = "user"
 
 const RunPurposeProbe = "probe"
 
+// RunPurposeCommitMsg marks the hidden run that drafts a commit message (ADR-0043).
+const RunPurposeCommitMsg = "commitmsg"
+
 func insertTask(db execer, t Task) (Task, error) {
 	res, err := db.Exec(
 		`INSERT INTO tasks (workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, kind, base_ref, base_sha, branch_owned, pr_forge, pr_repo, pr_number, pr_url, pr_head_ref, untrusted_source, budget_usd)
