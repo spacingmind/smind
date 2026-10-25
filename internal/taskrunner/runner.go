@@ -350,8 +350,8 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 		sessionStore:  NewMemorySessionStore(),
 		defaultModels: map[Provider]string{},
 		acpCommands:   map[Provider][]string{},
-		lookPath:     exec.LookPath,
-		claudeLaunch: claudecli.LaunchSpec,
+		lookPath:      exec.LookPath,
+		claudeLaunch:  claudecli.LaunchSpec,
 		newACPClient: func(command []string, opts ...acp.Option) (acpBackend, error) {
 			return acp.New(command, opts...)
 		},

@@ -25,7 +25,9 @@ func (r *Runner) runnerOf(provider Provider) providers.Runner {
 	return r.providerRegistry().RunnerOf(string(provider))
 }
 
-func (r *Runner) isClaude(provider Provider) bool { return r.runnerOf(provider) == providers.RunnerClaude }
+func (r *Runner) isClaude(provider Provider) bool {
+	return r.runnerOf(provider) == providers.RunnerClaude
+}
 
 func (r *Runner) isACP(provider Provider) bool { return r.runnerOf(provider) == providers.RunnerACP }
 

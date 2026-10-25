@@ -20,6 +20,7 @@ import (
 	"github.com/spacingmind/smind/internal/learning/lifecycle"
 	"github.com/spacingmind/smind/internal/learning/loads"
 	"github.com/spacingmind/smind/internal/learning/projection"
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -99,7 +100,8 @@ func (s *Service) Prepare(_ context.Context, workspaceID int64, _ string, provid
 	if !cfg.Enabled || purpose != "" {
 		return taskrunner.Delivery{}, runs.OfferedInfo{}
 	}
-	if provider != taskrunner.ProviderClaudeNative && provider != taskrunner.ProviderGLM && provider != taskrunner.ProviderKimi {
+	delivery := providers.Delivery(string(provider))
+	if delivery == "" {
 		return taskrunner.Delivery{}, runs.OfferedInfo{} // codex and unknown providers: untouched
 	}
 	mode, err := s.d.Store.GetWorkspaceLearningMode(workspaceID)
@@ -119,7 +121,7 @@ func (s *Service) Prepare(_ context.Context, workspaceID int64, _ string, provid
 		ids[i] = k.ID
 	}
 
-	if provider == taskrunner.ProviderClaudeNative {
+	if delivery == providers.DeliveryProjection {
 		ps := make([]projection.Skill, len(skills))
 		for i, k := range skills {
 			ps[i] = projection.Skill{Name: k.Name, Category: k.Category, Description: k.Description, Body: k.Body}
@@ -135,7 +137,7 @@ func (s *Service) Prepare(_ context.Context, workspaceID int64, _ string, provid
 		return taskrunner.Delivery{AddDirs: []string{p.Dir}}, runs.OfferedInfo{SkillIDs: ids, Measured: true}
 	}
 
-	// GLM/Kimi: inline preface on the first prompt of a session. Their loads
+	// Preface providers (ACP agents): inline preface on the first prompt of a session. Their loads
 	// cannot be observed, so the offer is recorded unmeasured.
 	pf := make([]projection.PrefaceSkill, len(skills))
 	for i, k := range skills {
@@ -210,7 +212,7 @@ func (s *Service) process(f runs.RunFinished) error {
 	if err != nil {
 		return err
 	}
-	if f.OfferedMeasured && f.Provider == string(taskrunner.ProviderClaudeNative) {
+	if f.OfferedMeasured && providers.Delivery(f.Provider) == providers.DeliveryProjection {
 		if err := s.countLoads(f, task.WorkspaceID); err != nil {
 			return err
 		}

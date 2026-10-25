@@ -15,16 +15,16 @@ import (
 
 // Config is the root daemon configuration.
 type Config struct {
-	Server        ServerConfig              `yaml:"server"`
-	Orchestration OrchestrationConfig       `yaml:"orchestration"`
-	Worktrees     WorktreesConfig           `yaml:"worktrees"`
-	Agents        AgentsConfig              `yaml:"agents"`
-	Providers     ProvidersConfig           `yaml:"providers"`
-	AccountUsage  AccountUsageConfig        `yaml:"accountUsage"`
-	Relay         RelayConfig               `yaml:"relay"`
-	Push          PushConfig                `yaml:"push"`
-	Learning      LearningConfig            `yaml:"learning"`
-	Log           LogConfig                 `yaml:"log"`
+	Server        ServerConfig        `yaml:"server"`
+	Orchestration OrchestrationConfig `yaml:"orchestration"`
+	Worktrees     WorktreesConfig     `yaml:"worktrees"`
+	Agents        AgentsConfig        `yaml:"agents"`
+	Providers     ProvidersConfig     `yaml:"providers"`
+	AccountUsage  AccountUsageConfig  `yaml:"accountUsage"`
+	Relay         RelayConfig         `yaml:"relay"`
+	Push          PushConfig          `yaml:"push"`
+	Learning      LearningConfig      `yaml:"learning"`
+	Log           LogConfig           `yaml:"log"`
 }
 
 // LogConfig tunes the daemon's own rotating log file, $SMIND_HOME/daemon.log
