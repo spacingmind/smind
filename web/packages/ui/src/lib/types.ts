@@ -1188,7 +1188,18 @@ export interface TaskGit {
   taskId: number;
   forge?: string;
   branch?: { name: string; owned: boolean };
-  base?: { ref?: string; sha?: string; tip?: string; known: boolean };
+  base?: {
+    ref?: string;
+    sha?: string;
+    tip?: string;
+    known: boolean;
+    /** The base ref is the parent task's branch (a stacked task). */
+    parentBranch?: string;
+    /** The base is set but resolves nowhere. */
+    gone?: boolean;
+    /** The base Create PR should default to. */
+    prDefault?: string;
+  };
   diff?: { files: number; insertions: number; deletions: number };
   worktree?: { dirty: boolean; staged: number; unstaged: number; untracked: number };
   commits?: { aheadOfBase?: number; behindBase?: number; sinceFork?: number };
