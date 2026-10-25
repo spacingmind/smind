@@ -605,7 +605,7 @@ describe("task context menu (S6)", () => {
     const context = await menuLabels(await screen.findByTestId("sidebar-task-context-menu"));
 
     expect(context).toEqual(dropdown);
-    expect(context).toEqual(["Move to space", "Pin", "Mark unread", "Archive task"]);
+    expect(context).toEqual(["New sub-task…", "Move to space", "Pin", "Mark unread", "Archive task"]);
   });
 
   it("context menu Pin, Mark unread and Archive call the same handlers as the ⋯ menu", async () => {
