@@ -205,6 +205,12 @@
       "skillPath": "skills/golang-testing/SKILL.md",
       "computedHash": "fae31668e68e7171bf81c7c784bd61851b2f1abde0339bfeeef96f33f43022cc"
     },
+    "single-agent-loop": {
+      "source": "anthropics/single-agent-loop-kit",
+      "sourceType": "github",
+      "skillPath": "skill/SKILL.md",
+      "computedHash": "79cde6271b9490b8fc0c22762fdcd1dfccbdf1e488e89d50e23a16b4a526e36d"
+    },
     "sleek-design-mobile-apps": {
       "source": "sleekdotdesign/agent-skills",
       "sourceType": "github",
