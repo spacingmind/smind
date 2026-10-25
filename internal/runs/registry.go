@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/spacingmind/smind/internal/attach"
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/runs/ratelimit"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -2108,7 +2109,7 @@ func clipErrMsg(s string) string {
 // only, no tool calls, no tokens reported, a short trailing text that
 // ratelimit.IsLimitRefusal accepts. Otherwise "".
 func (reg *Registry) limitRefusal(r *run, usage *taskrunner.Usage, toolCalls int) string {
-	if r.provider != taskrunner.ProviderClaudeNative || toolCalls > 0 {
+	if !providers.IsClaude(string(r.provider)) || toolCalls > 0 {
 		return ""
 	}
 	if usage != nil {

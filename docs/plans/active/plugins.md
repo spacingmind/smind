@@ -192,6 +192,31 @@ Parallel after PA.2 is merged: PB.1 and PA.3/PA.4 (disjoint scopes: `internal/pl
 Reopen rules from the protocol apply: a PR that needs another item's file raises `DEPENDENCY_REQUEST`; a changed shared contract (capability table, view schema,
 manifest) raises `REOPEN_REQUEST` to the Lead that owns it.
 
+### P0.1 touch-point inventory (K1, 2026-10-25; ticked as each moves to the registry)
+
+Found with `grep -rnE 'ProviderClaudeNative|ProviderCodexNative|ProviderGLM|ProviderKimi|"claude-native"|...' internal cmd`; the plan said ten, there are more.
+`internal/providers` holds one `Spec` per provider; each hit below reads it instead.
+
+- [x] `taskrunner/runner.go:453-461` RunPrompt dispatch switch -> `Spec.Runner`
+- [x] `taskrunner/runner.go:343-344,263` default ACP commands / codexCommand -> `Spec.Command`
+- [x] `taskrunner/runner.go:965,986,1009,1039,1088,1237,1273,1287,1301,1322`, `isolated.go:255`, `acp_modes.go:232`: launch env and session handle keyed by the base constant -> keyed by the provider (instance) id
+- [x] `taskrunner/modes.go:125-127` staticModes -> `Spec.Modes`
+- [x] `taskrunner/modes.go:211-245` ProviderCatalog (acpProvider / codex cases) -> `Spec.Runner`
+- [x] `taskrunner/provider.go:136-148` SupportedProviders literal -> registry
+- [x] `taskrunner/config_options.go:69-76,83,105,108` acpProvider and claude/codex checks -> `Spec.Runner`
+- [x] `taskrunner/live_mode.go:45,56` -> `Spec.Runner`
+- [x] `taskrunner/models.go:52` staticModels -> `Spec.Models`
+- [x] `taskrunner/isolated.go:200`, `probe.go:72`, `attachments.go:92`, `model_switch.go:68` claude-only guards -> `Runner == claude`
+- [x] `wsapi/handlers.go:2292-2296` providerCLICommand diag map -> `Spec.HealthCommand`
+- [x] `wsapi/provider_env.go:70,91` env allowlist lookup by id -> by `Spec.Base()`
+- [x] `learning/eligible.go:19-46` provider id list -> `Spec.ToolEvents/Reflect`
+- [x] `learning/delivery/delivery.go:102,122,213`, `learning/probe/service/eligibility.go:147` -> `Spec.Delivery`
+- [x] `runs/queue.go:802,829`, `runs/registry.go:2087` claude-only guards -> `Runner == claude`
+- [x] `runs/permission_mode.go:71`, `profiles/registry.go:140` ProviderInfoFor -> registry
+- [x] `config/config.go:165`, `config/edit.go:47,184`, `config/provider_env.go:29-30,96` id lists -> `providers.BuiltinIDs()`
+- [x] `cmd/smind/serve.go:119-131` startup wiring of per-provider default model / env -> registry loop
+- [x] `cmd/smind/task.go:602,861` (CLI note about claude-native's unpinned model) and `cmd/smind/learning_wire.go:131`: left as is on purpose (client-side wording / a legacy accounts check); recorded here. Also left on purpose: `learning/probe/service/eligibility.go:147` and the reflector/probe `Start(..., ProviderClaudeNative, ...)` calls: they name the BASE claude login deliberately, so an instance's run is not probed or reflected on another login
+
 ## Decisions
 
 - ADR-0042 (Accepted 2026-10-25, all Q1–Q12 as recommended, plus provider instances in Wave 0 as AC37) holds the architecture: trusted local plugins, off by default, consent and mediated capabilities, data-first contributions, plugin process over
@@ -205,11 +230,13 @@ manifest) raises `REOPEN_REQUEST` to the Lead that owns it.
 
 - 2026-10-24: Research done (local-only notes in `docs/research/local/plugins-research.md`); ADR-0042 and this plan written; docs PR opened for review. **No implementation
   has started; no Leads spawned.** Nothing below is checked until the ADR is accepted.
-- [ ] P0.1  [ ] P0.2
+- [x] P0.1 (K1, daemon + AC37 daemon side)  [ ] P0.2 (K2: web + mobile + Settings UI)
 - [ ] PA.1  [ ] PA.2  [ ] PA.3  [ ] PA.4  [ ] PA.5
 - [ ] PB.1  [ ] PB.2  [ ] PB.3  [ ] PB.4
 - [ ] PC.1  [ ] PC.2  [ ] PC.3
 - [ ] PD.1  [ ] DOC.1
+
+- 2026-10-25 K1 (P0.1 + AC37 daemon): new leaf package `internal/providers` (one `Spec` per provider; `Default()` registry that config load writes and runner, learning, runs and profiles read). Runner dispatch, modes, models, env and session handles, the wsapi health check, learning delivery and the run-registry guards all read it. `providers.custom` (ACP entries and `extends` instances) in `internal/config/providers_custom.go`; validated at load and by `provider.reload`, field named. New human-only RPCs: `provider.reload`, `provider.addInstance`, `provider.dirSuggestions` (run-scoped callers get `codeForbidden`). `acp.WithEnv` added for a custom provider's command env. Decisions made on the way: `provider.list` keeps `kind` (auth classification, "cli") and adds `runner`, `extends`, `custom`; an instance clears `accountProvider`/`credentialKind` (it uses a CLI login in its own dir, not a smind account row) and is not a reflector source; run usage, cooldowns and `usage.summary` group by the provider id string so an instance is its own key with no code change; smind-held account plan windows (internal/accounts, quota) remain per account row, an instance has none; `provider.setEnv`/`setDefaultModel` stay for the four built-ins only (an instance's dir is edited in config.yaml and applied with `provider.reload`).
 
 ## Validation
 
@@ -221,6 +248,7 @@ Filled as items land; for each acceptance criterion, name the test or manual che
   tests (ADR-0029/0030).
 - AC24–AC30 (PC): shared fixture suite on Go/web/mobile, screenshots of panel open/refresh/disable transitions on web and mobile, and the relay E2EE smoke.
 - AC31–AC33 (P0, PD): the provider registry table test, a manual run of a custom ACP provider against a local ACP agent, and the generic-icon rendering check on web/mobile.
+- K1 results (2026-10-25): AC31 `TestProviderRegistry_AddACPProvider_NoSwitchEdits` + `TestProviderList_SingleSource` (wsapi); AC32 `TestCustomProvider_ConfigValidation_FieldNamed`, `TestCustomProvider_RunsViaACP_UsageAndEvents`, `TestCustomProvider_ModelSelectionAndModes`; AC37 daemon `TestProviderInstance_ExtendsClaudeNative_OwnConfigDir`, `_EnvAllowlistOnly`, `_SideBySideWithBase`, `TestProviderDirSuggestions_NamesOnly`, `TestProviderInstanceRPCs_RefuseAgentCallers`, `TestProviderReload_AddsAndRemovesInstanceLive`, `TestProviderAddInstance_...`. Mutations all caught (re-added switch, non-allowlisted env, file read under a suggested dir, dropped run-scoped refusal). Manual run on an isolated daemon with two claude-native instances plus the base through the fake CLI: see the PR body. Still open for K2: the generic-icon rendering check and the offline fallback (AC31 client half), P0.2.
 - AC37 (P0 provider instances): the `TestProviderInstance_*` and `TestProviderDirSuggestions_NamesOnly` tests, plus a manual run of two claude-native instances side by side on an isolated daemon.
 - AC34–AC36: log/UI audit script that greps for unlabeled plugin output, the example CI job, and the release-notes diff.
 - Every PR runs `task test`, `task lint` and the `verify` skill; UI PRs add the light+dark screenshot pass; nothing here has been run yet.
