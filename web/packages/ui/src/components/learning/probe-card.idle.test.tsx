@@ -44,6 +44,28 @@ describe("ProbeCard idle", () => {
     expect(v.calls.find((c) => c.method === "learning.probe.start")?.params).toEqual({ id: 9, quick: true });
   });
 
+  it("keeps the start block on screen while the estimate for the other size loads (no flash to Estimating)", async () => {
+    let release: (e: ReturnType<typeof estimate>) => void = () => {};
+    const d = learningDaemon((method, params) => {
+      if (method === "learning.probe.get") return null;
+      if (method === "learning.probe.estimate") {
+        return (params as { quick: boolean }).quick ? new Promise((resolve) => (release = resolve)) : estimate();
+      }
+      return null;
+    });
+    renderWithDaemon(<ProbeCard id={9} workspaceId={1} />, d);
+    await flush();
+    await act(async () => screen.getByTestId("probe-toggle").click());
+    await flush();
+    await act(async () => screen.getByRole("radio", { name: /Quick/ }).click());
+    await flush();
+    expect(screen.getByTestId("probe-start")).toBeTruthy();
+    expect(screen.queryByText("Estimating…")).toBeNull();
+    await act(async () => release(estimate({ quick: true })));
+    await flush();
+    expect(screen.getByTestId("probe-start")).toBeTruthy();
+  });
+
   it("a failed start shows the daemon's message and keeps the button", async () => {
     await renderProbeCard({ start: new Error("Another probe is running.") });
     await act(async () => screen.getByTestId("probe-run").click());

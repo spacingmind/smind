@@ -1,4 +1,4 @@
-import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import type {
   ApproveProposalParams,
@@ -143,6 +143,8 @@ export function useProbeEstimate(id: number | null, quick: boolean, enabled: boo
     enabled: client !== null && id !== null && enabled,
     retry: false,
     staleTime: 30_000,
+    // Toggling Full/Quick changes the key: keep the previous answer on screen while the next one loads, or the whole start block flashes to "Estimating…" for a frame.
+    placeholderData: keepPreviousData,
     queryFn: (): Promise<ProbeEstimate> => requireClient(client).call<ProbeEstimate>("learning.probe.estimate", { id, quick }),
   });
 }
