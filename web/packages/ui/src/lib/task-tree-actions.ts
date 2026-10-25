@@ -94,8 +94,10 @@ export function availabilityFromTaskTree(nodes: ReadonlyArray<TaskTreeNode>): Tr
   return treeActionAvailability(
     selfNode.run.state,
     // A "done" run cut off at a cap (disposition needs-continue, ADR-0027
-    // D13) is unfinished work: it counts as neither running nor finished.
-    rest.map((n) => (n.run.disposition === "needs-continue" ? "idle" : n.run.state)),
+    // D13) is unfinished work: it counts as neither running nor finished. An
+    // errored run with the disposition (J1: resumable) stays finished, as
+    // wsapi's isFinishedNode treats it.
+    rest.map((n) => (n.run.state === "done" && n.run.disposition === "needs-continue" ? "idle" : n.run.state)),
   );
 }
 

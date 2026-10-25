@@ -11,7 +11,7 @@ import { Card } from '../../ui/Card';
 import { StatusDot } from '../../ui/StatusDot';
 import { UiHost } from '../../ui/UiHost';
 
-export const FooterBanner = memo(function FooterBanner({ sentence, note, waiting, onContinue }: { sentence: string; note?: string; waiting?: boolean; onContinue: () => void }) {
+export const FooterBanner = memo(function FooterBanner({ sentence, note, waiting, canContinue, onContinue }: { sentence: string; note?: string; waiting?: boolean; canContinue?: boolean; onContinue: () => void }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   return (
@@ -27,7 +27,7 @@ export const FooterBanner = memo(function FooterBanner({ sentence, note, waiting
           {note}
         </Text>
       ) : null}
-      {waiting ? null : ( // a held retry is already queued: Continue would send a second one
+      {waiting || !canContinue ? null : ( // a held retry is already queued: Continue would send a second one
         <UiHost style={styles.host}>
           <Button label="Continue" variant="filled" onPress={onContinue} style={styles.button} />
         </UiHost>

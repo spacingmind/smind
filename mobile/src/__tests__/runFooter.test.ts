@@ -4,7 +4,7 @@
 // no-footer cases.
 
 import { describe, expect, it } from 'vitest';
-import { describeContinues, describeRunFooter } from '../runFooter';
+import { continuePrompt, describeContinues, describeRunFooter } from '../runFooter';
 
 describe('describeRunFooter', () => {
   it('needs-continue on a done run reads "Hit the tool-turn limit · not finished" with a Continue action', () => {
@@ -90,8 +90,18 @@ describe('describeRunFooter', () => {
       expect(describeRunFooter({ ...limited, FailureResetAt: new Date(2026, 9, 13, 17, 35).toISOString() }, now)).toEqual({
         sentence: 'Rate limited (5h window) · resets 17:35',
         tone: 'warning',
+        action: null,
+      });
+    });
+
+    it('rate limited after its reset offers Continue only with the daemon\'s disposition (J1)', () => {
+      const past = new Date(2026, 9, 13, 9, 0).toISOString();
+      expect(describeRunFooter({ ...limited, FailureResetAt: past, Disposition: 'needs-continue' }, now)).toEqual({
+        sentence: 'Rate limited (5h window) · limit has reset',
+        tone: 'warning',
         action: 'continue',
       });
+      expect(describeRunFooter({ ...limited, FailureResetAt: past }, now)?.action).toBeNull();
     });
 
     it('rate limited reset today vs another day', () => {
@@ -118,6 +128,26 @@ describe('describeRunFooter', () => {
       );
     });
 
+    it('cli_exited: Continue only with the disposition; every other failure has no footer (J1)', () => {
+      expect(describeRunFooter({ Status: 'error', FailureKind: 'cli_exited', Disposition: 'needs-continue' }, now)).toEqual({
+        sentence: 'Failed · the agent CLI exited without a result',
+        tone: 'warning',
+        action: 'continue',
+      });
+      expect(describeRunFooter({ Status: 'error', FailureKind: 'cli_exited' }, now)).toBeNull(); // no stored session
+      for (const kind of [undefined, 'auth', 'invalid_model', 'refused']) {
+        expect(describeRunFooter({ Status: 'error', FailureKind: kind }, now)).toBeNull();
+      }
+    });
+
+    it('continuePrompt: plain Continue for a cap, one line naming the failure for an error', () => {
+      expect(continuePrompt({ Status: 'done' })).toBe('Continue');
+      expect(continuePrompt({ Status: 'error', FailureKind: 'cli_exited' })).toBe(
+        'Continue from where you left off (the previous run ended unexpectedly: the agent CLI exited without a result).',
+      );
+      expect(continuePrompt({ Status: 'error', FailureKind: 'rate_limited' })).toContain('provider rate limit');
+    });
+
     it('plain error footer unchanged: still none', () => {
       expect(describeRunFooter({ Status: 'error' }, now)).toBeNull();
       expect(describeRunFooter({ Status: 'error', FailureKind: 'other' }, now)).toBeNull();
@@ -139,7 +169,7 @@ describe('failover context (ADR-0041)', () => {
     const v = describeRunFooter(limited, now, { heldUntil: new Date(2026, 9, 23, 17, 35) });
     expect(v?.note).toBe('Queued · starts after 17:35');
     expect(v?.waiting).toBe(true);
-    expect(v?.action).toBe('continue');
+    expect(v?.action).toBeNull();
     expect(describeRunFooter(limited, now, { heldUntil: new Date(2026, 9, 24, 9, 5) })?.note).toMatch(/^Queued · starts after \w{3} 09:05$/);
   });
 
@@ -158,11 +188,11 @@ describe('failover context (ADR-0041)', () => {
     expect(describeContinues({})).toBeNull();
   });
 
-  it('existing cases unchanged', () => {
+  it('existing cases unchanged, except an unknown reset offers no Continue (J1: the daemon withholds it)', () => {
     expect(describeRunFooter(limited, now)).toEqual({
       sentence: 'Rate limited (5h window) · reset time unknown',
       tone: 'warning',
-      action: 'continue',
+      action: null,
     });
     expect(describeRunFooter({ Status: 'done' }, now, { heldUntil: new Date(2026, 9, 23, 17, 35) })).toBeNull();
   });

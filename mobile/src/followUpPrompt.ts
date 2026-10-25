@@ -15,7 +15,7 @@ import { RunSummary, RunStartResult, startRun, startRunWhenBusy, WhenBusy } from
 import { attachmentPayloads } from './attachSend';
 import { PendingAttachment } from './attachments';
 import { lineAttachmentsFromPending } from './lineAttachments';
-import { CONTINUE_PROMPT } from './runFooter';
+import { continuePrompt } from './runFooter';
 import { RelayConnection } from './relay/RelayConnection';
 import { lineFromAttachEvent, TimelineLine } from './runTimeline';
 
@@ -148,9 +148,9 @@ export function continueRun(
   conn: RelayConnection,
   deps: SendFollowUpDeps,
   taskId: number,
-  run: Pick<RunSummary, 'Provider'>,
+  run: Pick<RunSummary, 'Provider' | 'Status' | 'FailureKind'>,
   nextSeq: () => number,
   chatId?: number,
 ): Promise<RunStartResult> {
-  return sendFollowUpPrompt(conn, deps, taskId, run.Provider, CONTINUE_PROMPT, nextSeq, { whenBusy: 'queue', chatId });
+  return sendFollowUpPrompt(conn, deps, taskId, run.Provider, continuePrompt(run), nextSeq, { whenBusy: 'queue', chatId });
 }

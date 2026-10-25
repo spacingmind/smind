@@ -326,11 +326,24 @@ func New(st *store.Store) (*Registry, error) {
 	return reg, nil
 }
 
+// chatHasSession reports whether chat has a stored agent session and provider:
+// what a "continue" resumes (restartStopReason, DispositionOf).
+func chatHasSession(st *store.Store, chatID int64) bool {
+	chat, err := st.GetChat(chatID)
+	return err == nil && chat.AgentSession != nil && chat.Provider != nil
+}
+
+// resumableKind is a failure kind DispositionOf may offer a continue for;
+// only those runs pay the chat lookup.
+func resumableKind(kind string) bool {
+	return kind == taskrunner.FailureKindCLIExited || kind == "rate_limited"
+}
+
 // restartStopReason is the stop reason for a run the daemon's going down cut
 // off: StopReasonDaemonRestart when its chat has a stored agent session (a
 // "continue" resumes it), StopReasonDaemonRestartFresh when it has not.
 func restartStopReason(st *store.Store, chatID int64) string {
-	if chat, err := st.GetChat(chatID); err == nil && chat.AgentSession != nil && chat.Provider != nil {
+	if chatHasSession(st, chatID) {
 		return StopReasonDaemonRestart
 	}
 	return StopReasonDaemonRestartFresh
@@ -374,6 +387,7 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 	cancel() // rehydrated runs are always already-terminal; ctx is inert.
 
 	return &run{
+		hasSession:           row.Status == string(StatusError) && resumableKind(row.FailureKind) && chatHasSession(st, row.ChatID),
 		id:                   row.ID,
 		taskID:               row.TaskID,
 		chatID:               row.ChatID,
@@ -491,6 +505,11 @@ type run struct {
 	failureResetAt *time.Time
 	// failureResetInferred: failureResetAt was read in an assumed zone.
 	failureResetInferred bool
+	// hasSession: at the terminal state of an error run with a resumable
+	// failure kind, its chat had a stored agent session (DispositionOf). A
+	// session is only ever replaced, never cleared, so it stays true. Guarded
+	// by mu.
+	hasSession bool
 
 	// isolation, when set, drives the turn through RunPromptIsolated
 	// (system runs only; see WithIsolation). Not persisted: nothing
@@ -603,16 +622,19 @@ func rowPurpose(p string) string {
 
 func (r *run) statusLocked() RunStatus {
 	rs := RunStatus{
-		ID:             r.id,
-		TaskID:         r.taskID,
-		ChatID:         r.chatID,
-		Provider:       r.provider,
-		Prompt:         r.prompt,
-		Status:         r.status,
-		StartedAt:      r.startedAt,
-		FinishedAt:     r.finishedAt,
-		StopReason:     r.stopReason,
-		Disposition:    DispositionFor(r.status, r.stopReason),
+		ID:         r.id,
+		TaskID:     r.taskID,
+		ChatID:     r.chatID,
+		Provider:   r.provider,
+		Prompt:     r.prompt,
+		Status:     r.status,
+		StartedAt:  r.startedAt,
+		FinishedAt: r.finishedAt,
+		StopReason: r.stopReason,
+		Disposition: DispositionOf(DispositionFacts{
+			Status: r.status, StopReason: r.stopReason, FailureKind: r.failureKind,
+			FailureResetAt: r.failureResetAt, HasSession: r.hasSession, Now: time.Now(),
+		}),
 		Err:            r.errMsg,
 		PermissionMode: r.perm.Mode,
 		AutoAccept:     r.perm.AutoAccept,
@@ -1490,7 +1512,9 @@ func (reg *Registry) finish(r *run, err error) {
 		}
 	}
 
+	hasSession := status == StatusError && resumableKind(fail.Kind) && chatHasSession(reg.st, r.chatID)
 	r.mu.Lock()
+	r.hasSession = hasSession
 	r.failureKind, r.failureWindow, r.failureResetAt = fail.Kind, fail.Window, cloneTimePtr(fail.ResetAt)
 	r.failureResetInferred = fail.ResetInferred
 	r.finishedAt = &now

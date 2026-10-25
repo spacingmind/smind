@@ -1275,6 +1275,69 @@ describe("TaskDetailPane message hover actions", () => {
     expect(client.calls.some((c) => c.method === "task.prompt")).toBe(false);
   });
 
+  describe("J1: Continue on an errored run", () => {
+    async function renderWithErrorRun(overrides: Partial<RunSummary>) {
+      const client = new FakeWsClient();
+      render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+      client.nth("run.list", 0).resolve([doneRun({ Status: "error", StopReason: "", Err: "claude CLI exited before sending a result message", ...overrides })]);
+      await flush();
+      client.nth("run.logs", 0).resolve({
+        runId: "run-1",
+        status: "error",
+        stopReason: "",
+        // run.logs carries the same derived fields as run.list: a terminal answer replaces what the list seeded.
+        disposition: overrides.Disposition || undefined,
+        failureKind: overrides.FailureKind || undefined,
+        window: overrides.FailureWindow || undefined,
+        resetAt: overrides.FailureResetAt || undefined,
+        events: [],
+      } satisfies RunLogsResult);
+      await flush();
+      return client;
+    }
+
+    it("cli_exited with a disposition: one click sends the error prompt once, on the run's own provider/model, through the queue", async () => {
+      const client = await renderWithErrorRun({ Provider: "glm", Model: "glm-5.3", FailureKind: "cli_exited", Disposition: "needs-continue" });
+      const button = await screen.findByTestId("run-continue");
+      fireEvent.click(button);
+      fireEvent.click(button);
+      await flush();
+      expect(client.calls.filter((c) => c.method === "run.start")).toHaveLength(1);
+      expect(client.nth("run.start", 0).params).toEqual({
+        taskId: TASK_A.ID,
+        chatId: CHAT_A.ID,
+        provider: "glm",
+        prompt: "Continue from where you left off (the previous run ended unexpectedly: the agent CLI exited without a result).",
+        whenBusy: "queue",
+        permissionMode: "acceptEdits",
+        model: "glm-5.3",
+      });
+      expect(screen.queryByTestId("run-retry")).toBeNull();
+    });
+
+    it("no model is pinned when the run had none", async () => {
+      const client = await renderWithErrorRun({ FailureKind: "cli_exited", Disposition: "needs-continue", Model: "" });
+      fireEvent.click(await screen.findByTestId("run-continue"));
+      await flush();
+      expect(client.nth("run.start", 0).params).not.toHaveProperty("model");
+    });
+
+    it.each([["permission/timeout", ""], ["auth", "auth"], ["rate_limited before reset", "rate_limited"], ["cli_exited without a session", "cli_exited"]])(
+      "%s has no disposition: Retry, no Continue",
+      async (_name, FailureKind) => {
+        await renderWithErrorRun({ FailureKind, FailureResetAt: FailureKind === "rate_limited" ? "2999-01-01T00:00:00Z" : undefined });
+        expect(screen.queryByTestId("run-continue")).toBeNull();
+        expect(await screen.findByTestId("run-retry")).toBeTruthy();
+      },
+    );
+
+    it("rate_limited after its reset (disposition) offers Continue", async () => {
+      await renderWithErrorRun({ FailureKind: "rate_limited", FailureWindow: "5h", FailureResetAt: "2020-01-01T00:00:00Z", Disposition: "needs-continue" });
+      expect(await screen.findByTestId("run-continue")).toBeTruthy();
+      expect(screen.getByTestId("run-stop-reason").textContent).toBe("Rate limited (5h window) · limit has reset");
+    });
+  });
+
   it("Retry on fallback creates a new chat and sends profileId", async () => {
     const client = new FakeWsClient();
     const jumps: number[] = [];

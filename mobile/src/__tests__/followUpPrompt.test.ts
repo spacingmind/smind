@@ -89,10 +89,24 @@ describe('sendFollowUpPrompt (fake connection)', () => {
     });
     const rec = recordingDeps();
 
-    await continueRun(conn, rec.deps, 7, { Provider: 'glm' }, seqFrom(0));
+    await continueRun(conn, rec.deps, 7, { Provider: 'glm', Status: 'done' }, seqFrom(0));
 
     expect(calls[0]).toEqual(['run.start', { taskId: 7, provider: 'glm', prompt: 'Continue', whenBusy: 'queue' }]);
     expect(rec.appended).toEqual([{ key: 'f1', role: 'user', text: 'Continue' }]);
+  });
+
+  it('continueRun on an errored run sends the one-line error prompt, queued, without a model', async () => {
+    const { conn, calls } = fakeConnection((method) => {
+      if (method === 'run.start') return { runId: 'r-new' };
+      if (method === 'run.attach') return {};
+      throw new Error(`unexpected method ${method}`);
+    });
+    const rec = recordingDeps();
+    const prompt = 'Continue from where you left off (the previous run ended unexpectedly: the agent CLI exited without a result).';
+
+    await continueRun(conn, rec.deps, 7, { Provider: 'claude-native', Status: 'error', FailureKind: 'cli_exited' }, seqFrom(0));
+
+    expect(calls[0]).toEqual(['run.start', { taskId: 7, provider: 'claude-native', prompt, whenBusy: 'queue' }]);
   });
 
   it('a run.start failure rolls the optimistic user line back and surfaces the error (draft preserved for retry)', async () => {
