@@ -347,6 +347,33 @@ func Run() {
 			"result":     "ok",
 		})
 
+	case "echo-prompt":
+		// Appends the raw stream-json prompt line (plus a newline) to the file
+		// named by FAKE_CLAUDE_PROMPT_FILE, so a test can assert what the
+		// prompt carried and how many model calls were made, then replies with
+		// a short commit-message-shaped text.
+		stdin.Scan() // consume the prompt line
+		if pf := os.Getenv("FAKE_CLAUDE_PROMPT_FILE"); pf != "" {
+			if f, err := os.OpenFile(pf, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+				_, _ = f.WriteString(stdin.Text() + "\n")
+				_ = f.Close()
+			}
+		}
+		writeLine(map[string]any{
+			"type":       "assistant",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"role":    "assistant",
+				"content": []map[string]any{{"type": "text", "text": "feat(core): add the thing"}},
+			},
+		})
+		writeLine(map[string]any{
+			"type":       "result",
+			"subtype":    "success",
+			"session_id": "sess-1",
+			"result":     "feat(core): add the thing",
+		})
+
 	case "mcp-init":
 		// Emits an init system message reporting MCP server statuses the
 		// way the real CLI does, so a test can assert failed servers are
