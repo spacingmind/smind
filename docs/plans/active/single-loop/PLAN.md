@@ -114,7 +114,7 @@ No variants were run (eval skipped), so there are no `compare.py` tables. Each c
 ### Item 1: fold `supervisor-sonnet` + `supervisor`, Lead as the single loop
 
 - Evidence relied on: natural experiment #611, a direct hop to a Lead: 17m19s, USD 2.01, against about USD 4 through seat 45; 24 of the Supervisor's 43 runs were 16 s relay wake-ups (USD 2.29), plus 4 zero-token wakes at the account limit; the Supervisor re-ran the same tests a third time (dogfood entry 62).
-- Edited: `internal/profiles/rolepack.go` (no `supervisor` seat or constant, `noBackgroundWait` is the Lead's only; Lead instructions rewritten: 2.2 KB down to about 2.0 KB, no persona, no Peer prices, S/M done by the Lead, Peer only for parallel parts or independent verification); `internal/skills/bundle/smind-supervisor/` deleted; `smind-leader` skill rewritten; README seat and skill lists.
+- Edited: `internal/profiles/rolepack.go` (no `supervisor` seat or constant, `noBackgroundWait` is the Lead's only; Lead instructions rewritten: about 2.2 KB down to about 1.9 KB, no persona, no Peer prices, S/M done by the Lead, Peer only for parallel parts or independent verification); `internal/skills/bundle/smind-supervisor/` deleted; `smind-leader` skill rewritten; README seat and skill lists.
 - Kept in the daemon: `childPolicy: profiles`, `mayLaunch`, `orchestration.maxDepth` (default 2; a test pins it, left alone), tree guard, sticky seats, notifier. The `supervisor` label in `smind profile ls` and tree tiers stays.
 - Checked with no model: `TestSeedRoles_SeatsExactly`, `TestSeedRoles_LeadIsTheSingleLoop`, `TestProfileSeedRoles_*`.
 - Not measured: cost and time per item after the fold (see After-check).
