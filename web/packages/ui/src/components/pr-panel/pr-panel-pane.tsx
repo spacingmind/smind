@@ -41,6 +41,27 @@ function useRefetchWhenAvailable(details: PRDetails | undefined, focused: boolea
   }, [focused, at, updatedAt]);
 }
 
+/** The forge says the pull request is gone (deleted, or not visible to this account), or the task no longer has one. */
+const VANISHED_CODES = new Set(["forge_not_found", "no_pr"]);
+const isVanished = (err: unknown) => VANISHED_CODES.has((err as { code?: string } | null | undefined)?.code ?? "");
+
+/** Neutral, not an error: nothing the user did failed. "Check again" asks the forge once more. */
+function VanishedState({ onCheck, checking }: { onCheck: () => void; checking: boolean }) {
+  return (
+    <EmptyState
+      testId="pr-vanished"
+      icon={<Icons.pullRequest aria-hidden className="size-5" />}
+      title="Pull request unavailable"
+      description="This pull request is no longer available (deleted or not accessible)."
+      action={
+        <Button type="button" variant="outline" size="sm" disabled={checking} onClick={onCheck} data-testid="pr-check-again">
+          Check again
+        </Button>
+      }
+    />
+  );
+}
+
 const ERROR_DISMISS_MS = 8000;
 
 /**
@@ -88,7 +109,8 @@ export function PRPanelPane({ taskId, focused }: { taskId: number; focused: bool
   const [pendingCheckId, setPendingCheckId] = useState<string | null>(null);
   const details = query.data;
   useRefetchWhenAvailable(details, focused, query.refetch, query.dataUpdatedAt);
-  useDismissRefreshError(refresh.limited ?? refresh.error, focused, refresh.reset);
+  // A vanished pull request is a state, not a message: it stays until a check finds it again.
+  useDismissRefreshError(refresh.limited ?? (isVanished(refresh.error) ? null : refresh.error), focused, refresh.reset);
   // A newer answer supersedes the refresh error.
   const resetRefresh = refresh.reset;
   useEffect(() => resetRefresh(), [query.dataUpdatedAt, resetRefresh]);
@@ -109,6 +131,9 @@ export function PRPanelPane({ taskId, focused }: { taskId: number; focused: bool
         description="Create a pull request for this task to see its details here."
       />
     );
+  } else if (isVanished(refresh.error ?? query.error) && (query.isError || refresh.error)) {
+    // Checking again re-reads (a refresh when the last read worked, a plain read when it was the read that failed).
+    body = <VanishedState checking={refresh.isPending || query.isFetching} onCheck={() => (refresh.error ? refresh.refresh() : void query.refetch())} />;
   } else if (!details && query.isError) {
     body = (
       <div className="p-4">

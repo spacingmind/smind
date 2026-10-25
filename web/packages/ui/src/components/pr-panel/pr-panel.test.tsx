@@ -369,6 +369,57 @@ describe("PRPanelPane", () => {
     });
   });
 
+  describe("vanished pull request", () => {
+    const gone = (code: string) => Object.assign(new Error("gone"), { code });
+    async function open(code: string) {
+      const client = new FakeWsClient();
+      renderWithClientProp(<Harness client={client} />);
+      await waitFor(() => client.nth("task.git", 0));
+      await act(async () => client.nth("task.git", 0).resolve(gitWith(gitPr())));
+      await waitFor(() => client.nth("task.prDetailsFocus", 0));
+      await act(async () => client.nth("task.prDetailsFocus", 0).resolve({}));
+      await waitFor(() => client.nth("task.prDetails", 0));
+      await act(async () => client.nth("task.prDetails", 0).reject(gone(code)));
+      return client;
+    }
+
+    it.each(["forge_not_found", "no_pr"])("%s is a neutral state with the reason and Check again, not a red error", async (code) => {
+      await open(code);
+      const state = await screen.findByTestId("pr-vanished");
+      expect(state.textContent).toContain("This pull request is no longer available (deleted or not accessible).");
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.queryByTestId("pr-query-error")).toBeNull();
+      expect(screen.queryByText("Try again")).toBeNull();
+      expect(state.querySelector(".text-destructive")).toBeNull();
+    });
+
+    it("Check again reads once more and shows the pull request if it is back", async () => {
+      const client = await open("forge_not_found");
+      fireEvent.click(await screen.findByTestId("pr-check-again"));
+      await waitFor(() => client.nth("task.prDetails", 1));
+      await act(async () => client.nth("task.prDetails", 1).resolve(prDetails({ title: "Back again" })));
+      expect(await screen.findByText("Back again")).toBeTruthy();
+      expect(screen.queryByTestId("pr-vanished")).toBeNull();
+    });
+
+    it("other errors keep the error line and Try again", async () => {
+      await open("forge_timeout");
+      expect(await screen.findByTestId("pr-query-error")).toBeTruthy();
+      expect(screen.queryByTestId("pr-vanished")).toBeNull();
+    });
+
+    it("a refresh that finds the pull request gone replaces the stale panel and does not auto-dismiss", async () => {
+      const client = await show(prDetails());
+      fireEvent.click(screen.getByTestId("pr-refresh"));
+      await waitFor(() => client.nth("task.prDetails", 1));
+      await act(async () => client.nth("task.prDetails", 1).reject(gone("forge_not_found")));
+      expect(await screen.findByTestId("pr-vanished")).toBeTruthy();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      await act(async () => void (await vi.advanceTimersByTimeAsync(60_000)));
+      expect(screen.getByTestId("pr-vanished")).toBeTruthy();
+    });
+  });
+
   it("zero fetchedAt shows no updated label", async () => {
     await show(prDetails({ fetchedAt: "0001-01-01T00:00:00Z" }));
     expect(screen.queryByTestId("pr-fetched")).toBeNull();
