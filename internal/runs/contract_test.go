@@ -196,3 +196,39 @@ func TestDrive_UnmanagedProfileHasNoMcpPolicy(t *testing.T) {
 		t.Fatalf("contract = %+v, want instructions only", c)
 	}
 }
+
+func TestBuildInstructions_PluginSkills_ActiveOnly(t *testing.T) {
+	active := map[string]string{"acme:review": "---\nname: x\n---\nReview carefully."}
+	plug := func(name string) (string, bool) { s, ok := active[name]; return s, ok }
+	p := store.AgentProfile{Instructions: "ROLE", Skills: []string{"acme:review"}}
+
+	got := buildInstructionsWith(p, nil, plug)
+	if !strings.Contains(got, "## Skill: acme:review") || !strings.Contains(got, "Review carefully.") || strings.Contains(got, "name: x") {
+		t.Fatalf("an active plugin skill is inlined under its qualified name:\n%s", got)
+	}
+	// The plugin goes away: the profile still loads, the skill is neither
+	// inlined nor an error.
+	delete(active, "acme:review")
+	if got := buildInstructionsWith(p, nil, plug); got != "ROLE" {
+		t.Fatalf("a skill of a disabled plugin must not be delivered, got %q", got)
+	}
+	// No source wired: same.
+	if got := buildInstructionsWith(p, nil, nil); got != "ROLE" {
+		t.Fatalf("no plugin source: got %q", got)
+	}
+}
+
+func TestMergeDelivery_AddsPluginSkillsToLearnedOnes(t *testing.T) {
+	a := taskrunner.Delivery{AddDirs: []string{"/learn"}, Preface: "L"}
+	b := taskrunner.Delivery{AddDirs: []string{"/plug"}, Preface: "P"}
+	got := mergeDelivery(a, b)
+	if len(got.AddDirs) != 2 || got.AddDirs[0] != "/learn" || got.AddDirs[1] != "/plug" || got.Preface != "L\nP" {
+		t.Fatalf("merged = %+v", got)
+	}
+	if len(a.AddDirs) != 1 {
+		t.Fatal("merge must not alias the learned delivery's slice")
+	}
+	if got := mergeDelivery(taskrunner.Delivery{}, b); len(got.AddDirs) != 1 || got.Preface != "P" {
+		t.Fatalf("plugin-only = %+v", got)
+	}
+}

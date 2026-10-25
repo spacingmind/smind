@@ -3,10 +3,12 @@ package wsapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/plugins"
+	"github.com/spacingmind/smind/internal/store"
 )
 
 // The plugin.* RPCs (ADR-0042). Reads (plugin.list, plugin.get) are open to
@@ -58,6 +60,32 @@ func pluginErr(method string, err error) error {
 	return fmt.Errorf("%s: %w", method, err)
 }
 
+// codeReadOnlyOwned is the typed error for a write to a row a plugin owns.
+const codeReadOnlyOwned = "read_only_owned"
+
+// ownedRPCErr maps a write to a plugin-owned row onto the typed
+// read_only_owned error naming the plugin (data: {plugin}); any other error
+// keeps the usual method-prefixed shape.
+func ownedRPCErr(method string, err error) error {
+	var oe *store.OwnedRowError
+	if errors.As(err, &oe) {
+		return &rpcCodeError{code: codeReadOnlyOwned, msg: method + ": " + oe.Error(), err: err, data: map[string]string{"plugin": oe.Plugin}}
+	}
+	return fmt.Errorf("%s: %w", method, err)
+}
+
+// pluginResultID is the plugin a mutation touched: the id in the params, or
+// for install and link the id of the plugin just recorded.
+func pluginResultID(res any, paramID string) string {
+	if paramID != "" {
+		return paramID
+	}
+	if in, ok := res.(plugins.Info); ok {
+		return in.ID
+	}
+	return ""
+}
+
 func pluginParams(method string, raw json.RawMessage, p any) error {
 	if len(raw) == 0 || string(raw) == "null" {
 		raw = []byte("{}")
@@ -68,7 +96,7 @@ func pluginParams(method string, raw json.RawMessage, p any) error {
 	return nil
 }
 
-func pluginHandlers(mgr *plugins.Manager) map[string]handlerFunc {
+func pluginHandlers(mgr *plugins.Manager, ev *pluginEvents) map[string]handlerFunc {
 	hs := map[string]handlerFunc{}
 	hs["plugin.list"] = func(context.Context, *requestContext, json.RawMessage) (any, error) {
 		l, err := mgr.List()
@@ -88,6 +116,13 @@ func pluginHandlers(mgr *plugins.Manager) map[string]handlerFunc {
 	guard := func(method string, h func(ctx context.Context, raw json.RawMessage) (any, error)) {
 		hs[method] = humanLocalOnly(method, func(ctx context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 			res, err := h(ctx, raw)
+			if err == nil && ev != nil {
+				var p struct {
+					ID string `json:"id"`
+				}
+				_ = json.Unmarshal(raw, &p)
+				ev.changed(pluginResultID(res, p.ID))
+			}
 			return res, pluginErr(method, err)
 		})
 	}

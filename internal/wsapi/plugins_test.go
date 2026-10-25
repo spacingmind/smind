@@ -33,7 +33,7 @@ func newPluginHarness(t *testing.T) *pluginHarness {
 		[]byte(`{"id":"demo","name":"Demo","version":"1.0.0","api":1,"engines":{"smind":">=0.1.0"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return &pluginHarness{home: home, hs: pluginHandlers(mgr), src: src, on: &on}
+	return &pluginHarness{home: home, hs: pluginHandlers(mgr, nil), src: src, on: &on}
 }
 
 func (h *pluginHarness) call(method string, rc *requestContext, params any) (any, error) {

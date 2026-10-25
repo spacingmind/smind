@@ -39,15 +39,31 @@ func buildInstructions(p store.AgentProfile) (string, error) {
 }
 
 func buildInstructionsFrom(p store.AgentProfile, bundle []skills.Skill) string {
+	return buildInstructionsWith(p, bundle, nil)
+}
+
+// buildInstructionsWith is buildInstructionsFrom plus plugin skills: a
+// "<plugin>:<skill>" name is resolved through plug against the plugins that
+// are active NOW, so a skill of a disabled, removed or switched-off plugin is
+// skipped (the profile still loads) and never reaches the agent.
+func buildInstructionsWith(p store.AgentProfile, bundle []skills.Skill, plug func(string) (string, bool)) string {
 	var b strings.Builder
 	b.WriteString(p.Instructions)
 	for _, name := range p.Skills {
 		var body []byte
 		found := false
-		for _, s := range bundle {
-			if s.Name == name {
-				body, found = s.Files["SKILL.md"]
-				break
+		if strings.Contains(name, ":") {
+			var text string
+			if plug != nil {
+				text, found = plug(name)
+			}
+			body = []byte(text)
+		} else {
+			for _, s := range bundle {
+				if s.Name == name {
+					body, found = s.Files["SKILL.md"], true
+					break
+				}
 			}
 		}
 		if !found {
@@ -92,11 +108,16 @@ func (reg *Registry) withRunContract(ctx context.Context, r *run) context.Contex
 		slog.Warn("runs: run contract skipped", "run", r.id, "profile", r.profileID, "err", err)
 		return ctx
 	}
-	text, err := buildInstructions(p)
+	bundle, err := cachedBundle()
 	if err != nil {
 		slog.Warn("runs: run contract skipped", "run", r.id, "profile", r.profileID, "err", err)
 		return ctx
 	}
+	var plug func(string) (string, bool)
+	if src := reg.pluginSkillSource(); src != nil {
+		plug = src.PluginSkillBody
+	}
+	text := buildInstructionsWith(p, bundle, plug)
 	if text == "" && p.OrchestrationTools == nil {
 		return ctx
 	}

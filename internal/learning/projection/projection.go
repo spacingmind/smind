@@ -387,3 +387,16 @@ func removeTree(path string) error {
 	})
 	return os.RemoveAll(path)
 }
+
+// ProjectFileSet materialises an arbitrary file set (relative path to
+// content) as the same read-only, content-addressed tree Project builds, under
+// root/<scope>/<hash>. It serves plugin skills (ADR-0042), which are
+// delivered through the projection and never written under a home or repo
+// skills directory. The caller validates names; paths are checked to stay
+// inside the tree.
+func ProjectFileSet(root string, scope int64, files map[string][]byte) (Projection, error) {
+	if len(files) == 0 {
+		return Projection{}, nil
+	}
+	return projectFiles(root, scope, files, hashFiles(files))
+}

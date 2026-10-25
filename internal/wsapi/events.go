@@ -125,6 +125,7 @@ var knownTopics = map[string]bool{
 	TopicTaskStalled:          true,
 	TopicForgeStatus:          true,
 	TopicProviderUpdated:      true,
+	TopicPluginUpdated:        true,
 	TopicLearnedSkillProposed: true,
 	TopicLearnedSkillChanged:  true,
 	TopicLearningJob:          true,

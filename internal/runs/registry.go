@@ -92,6 +92,8 @@ type Registry struct {
 	// deliveryProvider, set by SetDeliveryProvider, prepares each user
 	// run's learned-skill delivery in drive. Guarded by observersMu.
 	deliveryProvider DeliveryProvider
+	// pluginSkills delivers plugin skills (SetPluginSkills; ADR-0042).
+	pluginSkills PluginSkillSource
 
 	// st persists every Run's row and event history so both survive a
 	// daemon restart -- see New's doc comment for reconciliation/rehydration

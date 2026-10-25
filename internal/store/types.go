@@ -300,6 +300,12 @@ type AgentProfile struct {
 	ChildProfileIDs    []int64
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	// Owner is the id of the plugin that contributes this profile (ADR-0042),
+	// nil for a user row. Owned profiles are never stored: they come from the
+	// ProfileOverlay, carry an ID at or above OwnedIDBase and are
+	// read-only. ReadOnly is true exactly when Owner is set.
+	Owner    *string `json:"owner"`
+	ReadOnly bool    `json:"readOnly"`
 }
 
 // McpServer is a named, daemon-global MCP server definition (docs/
@@ -328,6 +334,10 @@ type McpServer struct {
 	Enabled   bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// OwnerPlugin is the plugin that contributes this row (ADR-0042), "" for a
+	// user row. It is never persisted: an owned row is derived from the
+	// plugin's manifest at read time.
+	OwnerPlugin string
 }
 
 // Chat is a conversation thread within a task (docs/decisions/

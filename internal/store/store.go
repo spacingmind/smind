@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -26,6 +27,10 @@ var schema string
 type Store struct {
 	db     *sql.DB
 	closed atomic.Bool
+
+	// overlay supplies plugin-owned rows (overlay.go).
+	overlayMu sync.RWMutex
+	overlay   Overlay
 }
 
 // DefaultPath returns the default smind.db location under the smind home dir.

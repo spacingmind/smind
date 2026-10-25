@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/spacingmind/smind/internal/gitstate"
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/plugins"
+	"github.com/spacingmind/smind/internal/plugins/skilldelivery"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
@@ -79,8 +81,10 @@ type API struct {
 
 	hs      map[string]handlerFunc
 	plugins *plugins.Manager
-	admit   *seatAdmission
-	bus     *eventBus
+	// pluginEvents publishes plugin.updated and the owned-row diffs.
+	pluginEvents *pluginEvents
+	admit        *seatAdmission
+	bus          *eventBus
 	// stalled feeds task.tree's stalled marker (SetStalledSource).
 	stalled *stalledSource
 	git     *gitstate.Service
@@ -270,10 +274,32 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	hs["provider.reload"] = handleProviderReload(runner, bus)
 	hs["provider.addInstance"] = handleProviderAddInstance(runner, bus)
 	hs["provider.dirSuggestions"] = handleProviderDirSuggestions(runner, osDirLister{})
-	pluginMgr := plugins.New(plugins.Options{Home: config.Dir(), Store: db, Version: version.Version, Enabled: configPluginsEnabled})
-	for method, h := range pluginHandlers(pluginMgr) {
+	pluginMgr := plugins.New(plugins.Options{
+		Home: config.Dir(), Store: db, Version: version.Version, Enabled: configPluginsEnabled,
+		ValidateProfile: profReg.ValidateOwned,
+		UserProfileNames: func() []string {
+			rows, err := db.ListAgentProfiles()
+			if err != nil {
+				return nil
+			}
+			names := make([]string, len(rows))
+			for i, p := range rows {
+				names[i] = p.Name
+			}
+			return names
+		},
+	})
+	// ADR-0042: the rows plugins contribute are derived from their manifests
+	// while enabled (never written to the user's tables), so the one overlay
+	// on the store reaches every registry over this db, the runner's included.
+	db.SetOverlay(pluginMgr)
+	profReg.SetSkillResolver(plugins.Resolver{M: pluginMgr})
+	reg.SetPluginSkills(skilldelivery.New(pluginMgr, filepath.Join(config.Dir(), "plugin-projection")))
+	pluginEv := newPluginEvents(bus, pluginMgr)
+	for method, h := range pluginHandlers(pluginMgr, pluginEv) {
 		hs[method] = h
 	}
+	hs["skill.list"] = handleSkillList(pluginMgr)
 	hs["session.identify"] = handleSessionIdentify(reg)
 	admit := newSeatAdmission(reg, profReg, db)
 	hs["profile.list"] = admit.wrapProfileList(hs["profile.list"])
@@ -288,7 +314,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		hs[method] = h
 	}
 	hs["workspace.delete"] = learning.beforeWorkspaceDelete(hs["workspace.delete"])
-	api := &API{plugins: pluginMgr, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
+	api := &API{plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}

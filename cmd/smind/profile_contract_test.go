@@ -113,8 +113,9 @@ func TestProfileLs_ShowsRole(t *testing.T) {
 			f := strings.Fields(line)
 			if len(f) > 1 && f[1] == name {
 				found = true
-				if f[len(f)-1] != role {
-					t.Errorf("%s role = %q, want %q (line %q)", name, f[len(f)-1], role, line)
+				// ROLE is the second-to-last column; OWNER is last ("-" for a user row).
+				if f[len(f)-2] != role || f[len(f)-1] != "-" {
+					t.Errorf("%s role/owner = %q/%q, want %q/- (line %q)", name, f[len(f)-2], f[len(f)-1], role, line)
 				}
 			}
 		}

@@ -110,6 +110,9 @@ func (s *Store) CreateAgentProfile(p AgentProfile) (AgentProfile, error) {
 
 // GetAgentProfile returns the agent profile with the given id.
 func (s *Store) GetAgentProfile(id int64) (AgentProfile, error) {
+	if IsOwnedID(id) {
+		return s.getOwnedProfile(id)
+	}
 	p, err := scanAgentProfile(s.db.QueryRow(
 		`SELECT `+agentProfileColumns+` FROM agent_profiles WHERE id = ?`, id,
 	))
