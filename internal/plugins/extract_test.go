@@ -249,7 +249,7 @@ func TestExtract_StreamCountedNotHeader(t *testing.T) {
 	lim := Limits{MaxEntries: 10, MaxTotalBytes: 1 << 20, MaxFileBytes: 64 << 10}
 	dest := t.TempDir()
 	w := newTreeWriter(dest, lim)
-	err := w.writeFile("big.bin", infiniteReader{}, false)
+	err := w.writeFile("big.bin", infiniteReader{}, false, 10) // the header claims 10 bytes
 	wantCode(t, err, CodeTooLarge)
 	if st, serr := os.Stat(filepath.Join(dest, "big.bin")); serr != nil || st.Size() > lim.MaxFileBytes+1 {
 		t.Fatalf("file not cut at the cap: %v %v", st, serr)
@@ -258,7 +258,16 @@ func TestExtract_StreamCountedNotHeader(t *testing.T) {
 	w2 := newTreeWriter(t.TempDir(), Limits{MaxEntries: 100, MaxTotalBytes: 100 << 10, MaxFileBytes: 64 << 10})
 	var last error
 	for i := 0; i < 5 && last == nil; i++ {
-		last = w2.writeFile("f"+string(rune('a'+i)), io.LimitReader(infiniteReader{}, 40<<10), false)
+		last = w2.writeFile("f"+string(rune('a'+i)), io.LimitReader(infiniteReader{}, 40<<10), false, 10)
 	}
 	wantCode(t, last, CodeTooLarge)
+}
+
+func TestExtract_DeclaredSizeOverCapFailsFast(t *testing.T) {
+	w := newTreeWriter(t.TempDir(), Limits{MaxEntries: 10, MaxTotalBytes: 45, MaxFileBytes: 50})
+	wantCode(t, w.writeFile("a", strings.NewReader("x"), false, 51), CodeTooLarge)
+	if err := w.writeFile("b", strings.NewReader("x"), false, 40); err != nil {
+		t.Fatal(err)
+	}
+	wantCode(t, w.writeFile("c", strings.NewReader("x"), false, 50), CodeTooLarge)
 }

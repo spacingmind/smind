@@ -152,8 +152,17 @@ func (w *treeWriter) mkdir(rel string) error {
 	return os.MkdirAll(full, 0o755)
 }
 
-// writeFile streams r into rel, counting the bytes it really produces.
-func (w *treeWriter) writeFile(rel string, r io.Reader, exec bool) error {
+// writeFile streams r into rel. declared is the size the archive header (or
+// stat) claims: it fails fast when that alone is over a cap, but is never
+// trusted: the bytes really read are counted and cut at the cap, because a
+// bomb's header lies.
+func (w *treeWriter) writeFile(rel string, r io.Reader, exec bool, declared int64) error {
+	if declared > w.lim.MaxFileBytes {
+		return newErr(CodeTooLarge, "entry %q declares %d bytes, over the %d byte per-file cap", rel, declared, w.lim.MaxFileBytes)
+	}
+	if declared > w.lim.MaxTotalBytes-w.total {
+		return newErr(CodeTooLarge, "archive declares more than the %d byte total cap", w.lim.MaxTotalBytes)
+	}
 	if err := w.claim(rel, false); err != nil {
 		return err
 	}
@@ -323,7 +332,7 @@ func extractTar(r io.Reader, w *treeWriter) error {
 			}
 			continue
 		}
-		if err := w.writeFile(rel, tr, h.FileInfo().Mode()&0o111 != 0); err != nil {
+		if err := w.writeFile(rel, tr, h.FileInfo().Mode()&0o111 != 0, h.Size); err != nil {
 			return err
 		}
 	}
@@ -359,7 +368,7 @@ func extractZip(ra io.ReaderAt, size int64, w *treeWriter) error {
 		if err != nil {
 			return &Error{Code: CodeBadArchive, Msg: fmt.Sprintf("cannot open entry %q", zf.Name), Err: err}
 		}
-		err = w.writeFile(rel, rc, mode&0o111 != 0)
+		err = w.writeFile(rel, rc, mode&0o111 != 0, int64(min(zf.UncompressedSize64, 1<<62)))
 		rc.Close()
 		if err != nil {
 			return err
@@ -432,7 +441,7 @@ func CopyDir(src, dest string, lim Limits) (string, error) {
 		if !lst.Mode().IsRegular() || !fst.Mode().IsRegular() || !os.SameFile(lst, fst) {
 			return newErr(CodeLinkRejected, "%q changed while being copied", rel)
 		}
-		return w.writeFile(rel, f, fst.Mode()&0o111 != 0)
+		return w.writeFile(rel, f, fst.Mode()&0o111 != 0, fst.Size())
 	})
 	if err != nil {
 		return "", err
