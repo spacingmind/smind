@@ -1,7 +1,6 @@
 package commitdraft
 
 import (
-	"errors"
 	"strings"
 	"unicode/utf8"
 )
@@ -10,9 +9,6 @@ const (
 	maxSubject = 72
 	maxWrap    = 72
 )
-
-// ErrEmptyDraft is returned when the model's reply has no usable text.
-var ErrEmptyDraft = errors.New("commitdraft: the model returned an empty message")
 
 // SystemPrompt is the fixed instruction of every draft run.
 const SystemPrompt = `You write git commit messages.

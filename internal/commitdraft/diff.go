@@ -6,7 +6,6 @@ package commitdraft
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os/exec"
 	"path"
@@ -15,9 +14,6 @@ import (
 
 // DefaultBudget is the byte budget of the diff text sent to the model.
 const DefaultBudget = 24 << 10
-
-// ErrNothingStaged is returned when the index holds no staged change.
-var ErrNothingStaged = errors.New("commitdraft: nothing staged")
 
 // Input is what the prompt is built from.
 type Input struct {

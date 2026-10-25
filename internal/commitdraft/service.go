@@ -3,7 +3,6 @@ package commitdraft
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -11,14 +10,6 @@ import (
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/learning/executor"
 	"github.com/spacingmind/smind/internal/store"
-)
-
-// Typed failures; the wsapi layer maps each to a wire code.
-var (
-	ErrRateLimited     = errors.New("commitdraft: too many drafts, try again shortly")
-	ErrBusy            = errors.New("commitdraft: the draft runner is busy")
-	ErrNoDraftProvider = errors.New("commitdraft: no usable claude-native provider")
-	ErrDraftFailed     = errors.New("commitdraft: drafting failed")
 )
 
 // Defaults of Deps.
@@ -108,7 +99,10 @@ func (s *Service) Draft(ctx context.Context, taskID int64) (Result, error) {
 	}
 	in, err := BuildInput(ctx, path, s.d.Budget)
 	if err != nil {
-		return Result{}, err
+		if errors.Is(err, ErrNothingStaged) || ctx.Err() != nil {
+			return Result{}, err
+		}
+		return Result{}, withCause(ErrDraftFailed, err)
 	}
 
 	s.mu.Lock()
@@ -199,9 +193,9 @@ func (s *Service) run(ctx context.Context, wsID int64, in Input) (Result, error)
 		case errors.Is(err, executor.ErrBusy):
 			return Result{}, ErrBusy
 		case noProvider(err):
-			return Result{}, fmt.Errorf("%w: %v", ErrNoDraftProvider, err)
+			return Result{}, withCause(ErrNoDraftProvider, err)
 		}
-		return Result{}, fmt.Errorf("%w: %w", ErrDraftFailed, err)
+		return Result{}, withCause(ErrDraftFailed, err)
 	}
 	msg, err := Normalize(res.FinalText)
 	if err != nil {
