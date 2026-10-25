@@ -115,6 +115,13 @@ describe("availabilityFromTaskTree", () => {
     expect(a?.archive.enabled).toBe(false);
   });
 
+  it("an errored run carrying needs-continue (J1) still counts as finished, as the daemon's isFinishedNode does", () => {
+    const resumable = treeNode(2, 1, "error");
+    resumable.run.disposition = "needs-continue";
+    const a = availabilityFromTaskTree([treeNode(1, null, "idle"), resumable]);
+    expect(a?.archive.enabled).toBe(true);
+  });
+
   it("returns null for an empty node list", () => {
     expect(availabilityFromTaskTree([])).toBeNull();
   });

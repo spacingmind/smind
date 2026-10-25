@@ -2,6 +2,7 @@ package runs
 
 import (
 	"sort"
+	"time"
 
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -99,7 +100,7 @@ func (reg *Registry) ListTaskHistory(taskID int64) []RunSummary {
 	var stored []RunSummary
 	for _, row := range rows {
 		if !known[row.ID] {
-			stored = append(stored, summaryFromRow(row))
+			stored = append(stored, reg.summaryFromRow(row))
 		}
 	}
 	if len(stored) == 0 {
@@ -117,12 +118,15 @@ func (reg *Registry) ListTaskHistory(taskID int64) []RunSummary {
 // summaryFromRow is the RunSummary of a persisted run row (a terminal run:
 // reconciliation ran at startup), without its event history. Usage is left
 // to withStoredUsage.
-func summaryFromRow(row store.Run) RunSummary {
+func (reg *Registry) summaryFromRow(row store.Run) RunSummary {
 	rs := RunSummary{
 		ID: row.ID, TaskID: row.TaskID, ChatID: row.ChatID,
 		Provider: taskrunner.Provider(row.Provider), Prompt: row.Prompt,
 		Status: Status(row.Status), StartedAt: row.StartedAt, FinishedAt: row.FinishedAt,
-		StopReason: row.StopReason, Disposition: DispositionFor(Status(row.Status), row.StopReason),
+		StopReason: row.StopReason, Disposition: DispositionOf(DispositionFacts{
+			Status: Status(row.Status), StopReason: row.StopReason, FailureKind: row.FailureKind, FailureResetAt: row.FailureResetAt,
+			HasSession: row.Status == string(StatusError) && resumableKind(row.FailureKind) && chatHasSession(reg.st, row.ChatID), Now: time.Now(),
+		}),
 		Err: row.ErrMsg, PermissionMode: row.PermissionMode, AutoAccept: row.AutoAccept,
 		Model: row.Model, Purpose: rowPurpose(row.Purpose), Origin: row.Origin,
 		Attachments:    publicItems(decodeStoredAttachments(row.Attachments)),
