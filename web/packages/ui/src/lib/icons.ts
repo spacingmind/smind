@@ -89,6 +89,7 @@ import {
   PinOff,
   Plug,
   Plus,
+  Puzzle,
   RefreshCw,
   RotateCcw,
   Rows2,
@@ -228,6 +229,8 @@ export const Icons = {
   permissionDanger: ShieldAlert,
   credentials: KeyRound,
   mcp: Plug,
+  /** A plugin (Settings -> Plugins) and the "from plugin" owner badge. */
+  plugin: Puzzle,
   /** Learned skills (Settings -> Skills (learned)). */
   skills: BookOpen,
 

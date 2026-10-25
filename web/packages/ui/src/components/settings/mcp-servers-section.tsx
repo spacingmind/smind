@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { McpServer } from "@/lib/types";
 import { Icons } from "@/lib/icons";
+import { OwnerBadge, ownedTooltip } from "@/components/plugins/owner-badge";
 
 /**
  * The add/edit form's field state -- one instance shared by whichever card
@@ -145,10 +146,14 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
       if (id === undefined) return;
       setServers((prev) => (prev ? prev.filter((s) => s.id !== id) : prev));
     });
+    // A plugin was enabled, disabled, reloaded or removed, or the global switch flipped: the rows it owns appear or
+    // vanish (the daemon also publishes mcpServer.created/deleted for each), and one re-read settles the rest.
+    const offPlugin = events.subscribe("plugin.updated", () => setLoadAttempt((n) => n + 1));
     return () => {
       offCreated();
       offUpdated();
       offDeleted();
+      offPlugin();
     };
   }, [events]);
 
@@ -274,6 +279,8 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
                 )}
                 {servers.map((m) => {
                   const editing = openCard === m.id;
+                  // A plugin-owned row is read-only for every caller (the daemon answers `read_only_owned`): manage it in Settings -> Plugins.
+                  const owned = m.readOnly === true || !!m.owner;
                   return (
                     <li
                       key={m.id}
@@ -290,55 +297,59 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
                             >
                               {m.transport}
                             </span>
+                            <OwnerBadge owner={m.owner} testId={`mcp-owner-${m.id}`} />
                           </span>
                           <span className="truncate text-ui-sm text-muted-foreground">{mcpSummaryLine(m)}</span>
                         </div>
                         <label
                           className="flex shrink-0 cursor-pointer items-center gap-1.5 text-ui-sm text-foreground-muted"
-                          title={m.enabled ? "Disable this server" : "Enable this server"}
+                          title={m.owner ? ownedTooltip(m.owner) : m.enabled ? "Disable this server" : "Enable this server"}
                         >
                           <input
                             type="checkbox"
                             data-testid={`mcp-enabled-${m.id}`}
                             checked={m.enabled}
+                            disabled={owned}
                             aria-label={`${m.name} enabled`}
                             onChange={(e) => void handleToggleEnabled(m, e.target.checked)}
                           />
                           {m.enabled ? "Enabled" : "Disabled"}
                         </label>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-xs"
-                              aria-label={`${m.name} actions`}
-                              data-testid={`mcp-menu-${m.id}`}
-                              className="shrink-0"
-                            >
-                              <Icons.more aria-hidden />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              data-testid={`mcp-edit-${m.id}`}
-                              onSelect={() => (editing ? closeCard() : startEdit(m))}
-                            >
-                              {editing ? "Close" : "Edit"}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              data-testid={`mcp-delete-${m.id}`}
-                              onSelect={() => {
-                                setDeleting(m.id);
-                                deleteAction.reset();
-                              }}
-                            >
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        {!owned && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                aria-label={`${m.name} actions`}
+                                data-testid={`mcp-menu-${m.id}`}
+                                className="shrink-0"
+                              >
+                                <Icons.more aria-hidden />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                data-testid={`mcp-edit-${m.id}`}
+                                onSelect={() => (editing ? closeCard() : startEdit(m))}
+                              >
+                                {editing ? "Close" : "Edit"}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                data-testid={`mcp-delete-${m.id}`}
+                                onSelect={() => {
+                                  setDeleting(m.id);
+                                  deleteAction.reset();
+                                }}
+                              >
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
                       </div>
-                      {editing && (
+                      {editing && !owned && (
                         <McpServerForm
                           idPrefix={`mcp-edit-form-${m.id}`}
                           form={form}

@@ -57,6 +57,10 @@ export const queryKeys = {
   /** `provider.dirSuggestions`: the directories Settings -> Providers offers as one-click instances. */
   providerDirSuggestions: () => ["provider.dirSuggestions"] as const,
   profileList: () => ["profile.list"] as const,
+  /** `plugin.list` (ADR-0042): the global switch and every plugin; live via the `plugin.updated` event. */
+  pluginList: () => ["plugin.list"] as const,
+  /** `skill.list`: bundled skills and the active plugins' `<plugin>:<skill>` entries. */
+  skillList: () => ["skill.list"] as const,
   /** One `provider.test` answer per key: a provider's own id for run readiness (use-provider-health), an account id for an account's credential (accounts). */
   /** Every cached `provider.test` answer (a prefix, for removal after a reconnect or an account change). */
   providerTestAll: () => ["provider.test"] as const,

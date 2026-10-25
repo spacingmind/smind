@@ -96,6 +96,15 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       void queryClient.invalidateQueries({ queryKey: queryKeys.providerDirSuggestions(), refetchType: "none" });
       return;
     }
+    case "plugin.updated": {
+      // {id, globalEnabled}: a plugin changed, or the global switch flipped (id ""). The plugin list is stale, and so
+      // is every list holding plugin-owned rows (an owned profile or skill appears or vanishes with the plugin; the
+      // MCP list refetches itself on this event).
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pluginList() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.skillList() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.profileList() });
+      return;
+    }
     case "profile.created":
     case "profile.updated": {
       const profile = (payload as { profile?: AgentProfile } | null)?.profile;

@@ -77,6 +77,7 @@ describe("icon registry", () => {
         "permissionDanger": "ShieldAlert",
         "pin": "Pin",
         "play": "Play",
+        "plugin": "Puzzle",
         "preview": "Eye",
         "providerGeneric": "Blocks",
         "pullRequest": "GitPullRequest",
