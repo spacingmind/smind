@@ -10,6 +10,7 @@ import { DiffViewerPane } from "@/components/diff-viewer-pane";
 import { clearToasts, Toaster } from "@/components/ui/toast";
 import { runConfigStorageKey } from "@/components/composer/run-config-preference";
 import { useFocusedChatStore } from "@/stores/focused-chat-store";
+import { RpcError } from "@/lib/ws-client";
 import type { Chat, Task, TaskFileDiffResult, TaskFilesResult, TaskGit } from "@/lib/types";
 
 const TASK: Task = {
@@ -931,5 +932,117 @@ describe("DiffViewerPane header below md", () => {
     fireEvent.pointerDown(screen.getByTestId("diff-actions-menu"), { button: 0, ctrlKey: false });
     await waitFor(() => expect(screen.getByTestId("diff-menu-refresh")).toBeInTheDocument());
     expect(screen.queryByTestId("diff-menu-create-pr")).not.toBeInTheDocument();
+  });
+});
+
+describe("DiffViewerPane AI commit draft", () => {
+  const DRAFT = { message: "feat: add line2", model: "claude-haiku-5-5", truncated: false, omitted: [] as string[] };
+
+  async function stagedPane() {
+    const client = new FakeWsClient();
+    const view = render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client, { files: [{ path: "file.txt", status: "modified", staged: true }] });
+    return { client, ...view };
+  }
+
+  it("draft button disabled when nothing staged", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+
+    expect(screen.getByTestId("commit-draft")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("stage-file.txt"));
+    client.nth("task.stage", 0).resolve({});
+    await flush();
+    expect(screen.getByTestId("commit-draft")).toBeEnabled();
+  });
+
+  it("draft fills an empty textarea", async () => {
+    const { client } = await stagedPane();
+    fireEvent.click(screen.getByTestId("commit-draft"));
+    expect(client.nth("task.draftCommitMessage", 0).params).toEqual({ taskId: TASK.ID });
+    client.nth("task.draftCommitMessage", 0).resolve({ ...DRAFT, truncated: true, omitted: ["a.bin", "b.bin"] });
+    await flush();
+
+    const box = screen.getByTestId("commit-message") as HTMLTextAreaElement;
+    expect(box.value).toBe("feat: add line2");
+    await waitFor(() => expect(box).toHaveFocus());
+    expect(box.selectionStart).toBe(box.value.length);
+    expect(screen.getByTestId("commit-draft-status")).toHaveTextContent("Draft ready");
+    expect(screen.getByTestId("commit-draft-note")).toHaveTextContent("Draft sent only the first part of a large diff");
+    expect(screen.getByTestId("commit-draft-note")).toHaveTextContent("Left out: a.bin, b.bin");
+    expect(screen.queryByTestId("commit-draft-replace")).not.toBeInTheDocument();
+  });
+
+  it("draft does not overwrite existing text without Replace", async () => {
+    const { client } = await stagedPane();
+    const box = screen.getByTestId("commit-message") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "my own words" } });
+
+    fireEvent.click(screen.getByTestId("commit-draft"));
+    expect(client.nth("task.draftCommitMessage", 0).params).toEqual({ taskId: TASK.ID });
+    client.nth("task.draftCommitMessage", 0).resolve(DRAFT);
+    await flush();
+    expect(box.value).toBe("my own words");
+    expect(screen.getByText("Replace the current message with the draft?")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("commit-draft-keep"));
+    expect(box.value).toBe("my own words");
+    expect(screen.queryByTestId("commit-draft-replace")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("commit-draft"));
+    client.nth("task.draftCommitMessage", 1).resolve(DRAFT);
+    await flush();
+    fireEvent.click(screen.getByTestId("commit-draft-replace"));
+    expect(box.value).toBe("feat: add line2");
+    expect(screen.queryByTestId("commit-draft-replace")).not.toBeInTheDocument();
+  });
+
+  it("draft shows typed errors inline", async () => {
+    const { client } = await stagedPane();
+    fireEvent.click(screen.getByTestId("commit-draft"));
+    client.nth("task.draftCommitMessage", 0).reject(new RpcError("raw", "nothing_staged"));
+    await flush();
+    expect(screen.getByTestId("commit-draft-error")).toHaveTextContent("Nothing is staged.");
+    expect(screen.getByTestId("commit-draft-status")).toHaveTextContent("Draft failed: Nothing is staged.");
+
+    fireEvent.click(screen.getByTestId("commit-draft"));
+    client.nth("task.draftCommitMessage", 1).reject(new RpcError("raw", "rate_limited"));
+    await flush();
+    expect(screen.getByTestId("commit-draft-error")).toHaveTextContent("Drafting too often — try again in a moment.");
+
+    fireEvent.click(screen.getByTestId("commit-draft"));
+    client.nth("task.draftCommitMessage", 2).reject(new RpcError("model said no", "refused"));
+    await flush();
+    expect(screen.getByTestId("commit-draft-error")).toHaveTextContent("model said no");
+    expect((screen.getByTestId("commit-message") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("draft shows spinner while pending", async () => {
+    const { client } = await stagedPane();
+    const button = screen.getByTestId("commit-draft");
+    fireEvent.click(button);
+    expect(button).toBeDisabled();
+    expect(button).toHaveTextContent("Drafting…");
+    fireEvent.click(button);
+    expect(client.calls.filter((c) => c.method === "task.draftCommitMessage")).toHaveLength(1);
+
+    client.nth("task.draftCommitMessage", 0).resolve(DRAFT);
+    await flush();
+    expect(button).toHaveTextContent("Draft message");
+    expect(button).toBeEnabled();
+  });
+
+  it("draft result is dropped after unmount", async () => {
+    const { client, unmount } = await stagedPane();
+    fireEvent.click(screen.getByTestId("commit-draft"));
+    expect(client.nth("task.draftCommitMessage", 0).params).toEqual({ taskId: TASK.ID });
+    unmount();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    client.nth("task.draftCommitMessage", 0).resolve(DRAFT);
+    await flush();
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
+    expect(screen.queryByTestId("commit-message")).not.toBeInTheDocument();
   });
 });
