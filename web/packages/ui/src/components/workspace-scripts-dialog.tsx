@@ -8,10 +8,13 @@ import type { Workspace } from "@/lib/types";
 import {
   getWorkspaceDefaultBase,
   getWorkspaceScripts,
+  setWorkspaceCommitMessageStyle,
   setWorkspaceDefaultBase,
   setWorkspaceScripts,
 } from "@/lib/worktree-setup";
 import type { WsClientLike } from "@/lib/ws-client";
+
+const MAX_COMMIT_STYLE_CHARS = 1000;
 
 const SCRIPT_TEXTAREA_CLASS =
   "h-32 w-full resize-y rounded-lg border border-input-border bg-input px-2.5 py-2 font-mono text-ui-base leading-relaxed transition-colors outline-none placeholder:text-foreground-subtlest hover:border-input-border-hover focus-visible:border-input-border-focused focus-visible:bg-input-focused disabled:cursor-not-allowed disabled:opacity-50";
@@ -41,6 +44,8 @@ export function WorkspaceScriptsDialog({
   const [setup, setSetup] = useState("");
   const [teardown, setTeardown] = useState("");
   const [defaultBase, setDefaultBase] = useState("");
+  const [commitStyle, setCommitStyle] = useState("");
+  const [savedCommitStyle, setSavedCommitStyle] = useState("");
   const [baseInfo, setBaseInfo] = useState<{ ref: string; detected: boolean; override: string } | null>(null);
   const [loading, setLoading] = useState(true);
   // A failed load leaves the textareas empty and saving then would clear
@@ -63,6 +68,8 @@ export function WorkspaceScriptsDialog({
         setTeardown(ws.TeardownScript ?? "");
         setBaseInfo(base);
         setDefaultBase(base.override);
+        setCommitStyle(ws.commitMessageStyle ?? "");
+        setSavedCommitStyle(ws.commitMessageStyle ?? "");
         setLoaded(true);
         setLoading(false);
       })
@@ -76,14 +83,20 @@ export function WorkspaceScriptsDialog({
     };
   }, [open, client, workspace.ID]);
 
+  const styleLength = [...commitStyle.trim()].length;
+  const styleTooLong = styleLength > MAX_COMMIT_STYLE_CHARS;
+
   const submit = async () => {
-    if (!client) return;
+    if (!client || styleTooLong) return;
     setPending(true);
     setError(null);
     try {
       const trimmed = defaultBase.trim();
       if (baseInfo && trimmed !== baseInfo.override) {
         await setWorkspaceDefaultBase(client, workspace.ID, trimmed);
+      }
+      if (commitStyle.trim() !== savedCommitStyle) {
+        await setWorkspaceCommitMessageStyle(client, workspace.ID, commitStyle.trim());
       }
       await setWorkspaceScripts(client, workspace.ID, { setupScript: setup, teardownScript: teardown });
       onSaved();
@@ -139,6 +152,38 @@ export function WorkspaceScriptsDialog({
                 )}
               </div>
               <div className="grid gap-1.5">
+                <label htmlFor={`${id}-commit-style`} className="text-ui-base font-medium">
+                  Commit message style
+                </label>
+                <textarea
+                  id={`${id}-commit-style`}
+                  data-testid="workspace-commit-style"
+                  className={`${SCRIPT_TEXTAREA_CLASS} h-20 font-sans`}
+                  spellCheck
+                  value={commitStyle}
+                  onChange={(e) => setCommitStyle(e.target.value)}
+                  disabled={pending}
+                  aria-invalid={styleTooLong}
+                  aria-describedby={`${id}-commit-style-help`}
+                />
+                <div className="flex items-start justify-between gap-2">
+                  <p id={`${id}-commit-style-help`} className="text-ui-sm text-muted-foreground">
+                    Optional guidance for AI-drafted commit messages (max 1000 characters).
+                  </p>
+                  <span
+                    data-testid="workspace-commit-style-count"
+                    className={`shrink-0 text-ui-sm tabular-nums ${styleTooLong ? "text-destructive" : "text-muted-foreground"}`}
+                  >
+                    {styleLength}/{MAX_COMMIT_STYLE_CHARS}
+                  </span>
+                </div>
+                {styleTooLong && (
+                  <p role="alert" data-testid="workspace-commit-style-error" className="text-ui-sm text-destructive">
+                    Commit message style is too long (max 1000 characters).
+                  </p>
+                )}
+              </div>
+              <div className="grid gap-1.5">
                 <label htmlFor={`${id}-setup`} className="text-ui-base font-medium">
                   Setup script
                 </label>
@@ -179,7 +224,7 @@ export function WorkspaceScriptsDialog({
             <Button type="button" variant="quiet" onClick={() => onOpenChange(false)} data-testid="workspace-scripts-cancel">
               Cancel
             </Button>
-            <Button type="submit" disabled={pending || !loaded} data-testid="workspace-scripts-save">
+            <Button type="submit" disabled={pending || !loaded || styleTooLong} data-testid="workspace-scripts-save">
               {pending ? "Saving…" : "Save"}
             </Button>
           </DialogFooter>

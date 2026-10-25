@@ -166,4 +166,29 @@ describe("workspace setup editor", () => {
     expect(client.calls.filter((c) => c.method === "workspace.setDefaultBase")).toHaveLength(0);
     expect(client.calls[2]).toMatchObject({ method: "workspace.setScripts" });
   });
+
+  it("commit message style field saves and shows inline error over 1000 chars", async () => {
+    const { client, onSaved } = await openDialog({ SetupScript: "", TeardownScript: "" });
+    const field = screen.getByTestId("workspace-commit-style");
+
+    fireEvent.change(field, { target: { value: "x".repeat(1001) } });
+    expect(screen.getByTestId("workspace-commit-style-error")).toHaveTextContent("max 1000 characters");
+    expect(screen.getByTestId("workspace-commit-style-count")).toHaveTextContent("1001/1000");
+    expect(screen.getByTestId("workspace-scripts-save")).toBeDisabled();
+
+    fireEvent.change(field, { target: { value: "  Conventional commits, imperative mood  " } });
+    expect(screen.queryByTestId("workspace-commit-style-error")).toBeNull();
+    fireEvent.click(screen.getByTestId("workspace-scripts-save"));
+
+    expect(client.calls[2]).toMatchObject({
+      method: "workspace.setCommitMessageStyle",
+      params: { workspaceId: 7, style: "Conventional commits, imperative mood" },
+    });
+    await act(async () => client.calls[2]!.resolve(WORKSPACE));
+    await flush();
+    expect(client.calls[3]).toMatchObject({ method: "workspace.setScripts" });
+    await act(async () => client.calls[3]!.resolve(WORKSPACE));
+    await flush();
+    expect(onSaved).toHaveBeenCalled();
+  });
 });

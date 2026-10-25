@@ -13,6 +13,8 @@ export interface Workspace {
   HasTeardownScript?: boolean;
   /** ADR-0039: the stored default-base override ("" = auto-detect); mirrors store.Workspace's field. */
   DefaultBase?: string;
+  /** G17: free-text guidance for AI-drafted commit messages ("" = none, max 1000 characters). */
+  commitMessageStyle?: string;
   CreatedAt: string;
   UpdatedAt: string;
 }
