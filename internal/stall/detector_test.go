@@ -289,21 +289,29 @@ func TestLatestRunErrorOrNeedsContinueStillAlerts(t *testing.T) {
 func TestArchivedRootNeverAlertsEvenWhenIdle(t *testing.T) {
 	e := newEnv(t)
 	root, child := e.pair()
-	grand := e.task("grand", &child.ID)
-	_ = grand
+	e.task("grand", &child.ID)
 	if _, err := e.s.ArchiveTask(root.ID); err != nil {
 		t.Fatalf("ArchiveTask() error = %v", err)
 	}
 	d := e.detector(testMinutes)
 	e.at(5 * time.Hour)
 	d.Tick()
-	// The archived root never alerts; its live descendants become their own
-	// roots, and their own seats may.
-	for _, a := range e.alerts {
-		if a.TaskID == root.ID {
-			t.Fatalf("archived root alerted: %+v", a)
-		}
+	// Neither the archived root nor its live descendants alert.
+	e.wantAlerts(0)
+}
+
+func TestLiveDescendantsOfArchivedRootNeverAlert(t *testing.T) {
+	e := newEnv(t)
+	root, child := e.pair()
+	grand := e.task("grand", &child.ID)
+	e.task("grandkid", &grand.ID) // makes grand a seat too
+	if _, err := e.s.ArchiveTask(root.ID); err != nil {
+		t.Fatalf("ArchiveTask() error = %v", err)
 	}
+	d := e.detector(testMinutes)
+	e.at(5 * time.Hour)
+	d.Tick()
+	e.wantAlerts(0)
 }
 
 func TestArchivedSeatNeverAlerts(t *testing.T) {

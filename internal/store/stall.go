@@ -36,6 +36,10 @@ type StallRow struct {
 	ProfileOnRateLimit   string
 	ProfileOrchestration bool
 
+	// AncestorArchived is true when any ancestor of the task is archived: a
+	// live seat under an archived root belongs to a closed tree and never alerts.
+	AncestorArchived bool
+
 	// StallAlertedSince is the stalledSince of the last alerted episode.
 	StallAlertedSince *time.Time
 }
@@ -82,6 +86,10 @@ func (s *Store) StallSnapshot() ([]StallRow, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("stall snapshot: tasks: %w", err)
+	}
+
+	if err := s.markArchivedAncestors(out); err != nil {
+		return nil, err
 	}
 
 	// Runs, oldest first so the last row seen per task is its latest run.
@@ -183,6 +191,56 @@ func (s *Store) MarkStallAlerted(taskID int64, since time.Time) error {
 	}
 	if n, err := res.RowsAffected(); err == nil && n == 0 {
 		return fmt.Errorf("mark stall alerted: task %d not found", taskID)
+	}
+	return nil
+}
+
+// markArchivedAncestors sets AncestorArchived on every row whose parent chain
+// reaches an archived task (one query over all kind='task' parents).
+func (s *Store) markArchivedAncestors(rows []StallRow) error {
+	type node struct {
+		parent   *int64
+		archived bool
+	}
+	nodes := make(map[int64]node)
+	q, err := s.db.Query(`SELECT id, parent_task_id, archived_at IS NOT NULL FROM tasks WHERE kind = 'task'`)
+	if err != nil {
+		return fmt.Errorf("stall snapshot: ancestors: %w", err)
+	}
+	defer q.Close()
+	for q.Next() {
+		var (
+			id       int64
+			parent   sql.NullInt64
+			archived bool
+		)
+		if err := q.Scan(&id, &parent, &archived); err != nil {
+			return fmt.Errorf("stall snapshot: scan ancestor: %w", err)
+		}
+		n := node{archived: archived}
+		if parent.Valid {
+			p := parent.Int64
+			n.parent = &p
+		}
+		nodes[id] = n
+	}
+	if err := q.Err(); err != nil {
+		return fmt.Errorf("stall snapshot: ancestors: %w", err)
+	}
+	for i := range rows {
+		seen := map[int64]bool{rows[i].TaskID: true}
+		for p := rows[i].ParentID; p != nil && !seen[*p]; {
+			seen[*p] = true
+			n, ok := nodes[*p]
+			if !ok {
+				break
+			}
+			if n.archived {
+				rows[i].AncestorArchived = true
+				break
+			}
+			p = n.parent
+		}
 	}
 	return nil
 }
