@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useAddProviderInstance, useProviderDirSuggestions } from "@/hooks/use-provider-instances";
 import { Icons } from "@/lib/icons";
+import { cn } from "@/lib/utils";
+import type { ProviderDirSuggestion } from "@/lib/types";
 
 type Base = "claude-native" | "codex-native";
 
@@ -26,6 +28,10 @@ const EMPTY_FORM = { base: "claude-native" as Base, id: "", label: "", dir: "" }
 export function AddProviderInstance({ hasClient }: { hasClient: boolean }): JSX.Element {
   const { suggestions } = useProviderDirSuggestions(true);
   const { add, pending, error, clearError } = useAddProviderInstance();
+  // A chip that was clicked stays put as "added" (instead of vanishing when the daemon stops suggesting it), so the
+  // chips below and the list under this area never move; the panel starts clean the next time it is opened.
+  const [added, setAdded] = useState<ProviderDirSuggestion[]>([]);
+  const shown = [...suggestions.filter((s) => !added.some((a) => a.dir === s.dir)), ...added].sort((a, b) => a.name.localeCompare(b.name));
   const [manual, setManual] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   // The error belongs to the control last used, so a chip's refusal is not repeated under the form (and vice versa).
@@ -47,28 +53,39 @@ export function AddProviderInstance({ hasClient }: { hasClient: boolean }): JSX.
       <div className="flex flex-col gap-1.5">
         <span className="text-ui-sm font-medium">Found in your home folder</span>
         <div className="flex min-h-7 flex-wrap items-center gap-1.5" data-testid="provider-add-suggestions">
-          {suggestions.length === 0 ? (
+          {shown.length === 0 ? (
             <span className="text-ui-sm text-muted-foreground">No other ~/.claude* or ~/.codex* directories found.</span>
           ) : (
-            suggestions.map((s) => (
-              <button
-                key={s.dir}
-                type="button"
-                disabled={!hasClient || pending}
-                data-testid={`provider-suggestion-${s.suggestedId}`}
-                title={s.dir}
-                onClick={() => {
-                  setErrorFrom("chip");
-                  add({ extends: s.extends, id: s.suggestedId, label: s.suggestedLabel, dir: s.dir });
-                }}
-                className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-input-border bg-input px-2 text-ui-sm outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
-              >
-                <ProviderIcon provider={s.extends} size={14} />
-                <span className="font-mono">~/{s.name}</span>
-                <Icons.arrowRight aria-hidden className="size-3 text-muted-foreground" />
-                <span>{s.suggestedLabel}</span>
-              </button>
-            ))
+            shown.map((s) => {
+              const done = added.some((a) => a.dir === s.dir);
+              return (
+                <button
+                  key={s.dir}
+                  type="button"
+                  disabled={!hasClient || pending || done}
+                  aria-label={done ? `${s.suggestedLabel} added` : undefined}
+                  data-testid={`provider-suggestion-${s.suggestedId}`}
+                  title={s.dir}
+                  onClick={() => {
+                    setErrorFrom("chip");
+                    add({ extends: s.extends, id: s.suggestedId, label: s.suggestedLabel, dir: s.dir }, () => setAdded((prev) => [...prev, s]));
+                  }}
+                  className={cn(
+                    "inline-flex h-7 items-center gap-1.5 rounded-lg border border-input-border bg-input px-2 text-ui-sm outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50",
+                    done && "disabled:opacity-100",
+                  )}
+                >
+                  <ProviderIcon provider={s.extends} size={14} />
+                  <span className="font-mono">~/{s.name}</span>
+                  {done ? (
+                    <Icons.check aria-hidden className="size-3 text-success" />
+                  ) : (
+                    <Icons.arrowRight aria-hidden className="size-3 text-muted-foreground" />
+                  )}
+                  <span>{s.suggestedLabel}</span>
+                </button>
+              );
+            })
           )}
         </div>
         {errorFrom === "chip" ? <FormError message={error} size="sm" testId="provider-add-error" /> : null}
@@ -93,13 +110,10 @@ export function AddProviderInstance({ hasClient }: { hasClient: boolean }): JSX.
               e.preventDefault();
               if (!hasClient || pending || !formReady) return;
               setErrorFrom("form");
-              add(
-                { extends: form.base, id: form.id.trim(), label: form.label.trim(), dir: form.dir.trim() },
-                () => setForm(EMPTY_FORM),
-              );
+              add({ extends: form.base, id: form.id.trim(), label: form.label.trim(), dir: form.dir.trim() }, () => setForm(EMPTY_FORM));
             }}
           >
-            <SegmentedControl label="Extends" value={form.base} options={BASE_OPTIONS} onChange={(base) => edit({ base })} disabled={pending} />
+            <SegmentedControl label="Extends" className="self-start" value={form.base} options={BASE_OPTIONS} onChange={(base) => edit({ base })} disabled={pending} />
             <div className="grid gap-2 @md/add:grid-cols-2">
               <label className="flex flex-col gap-1 text-ui-sm font-medium">
                 Id
@@ -116,7 +130,13 @@ export function AddProviderInstance({ hasClient }: { hasClient: boolean }): JSX.
               </label>
               <label className="flex flex-col gap-1 text-ui-sm font-medium">
                 Label
-                <Input value={form.label} placeholder="Claude work" data-testid="provider-add-label" disabled={pending} onChange={(e) => edit({ label: e.target.value })} />
+                <Input
+                  value={form.label}
+                  placeholder="Claude work"
+                  data-testid="provider-add-label"
+                  disabled={pending}
+                  onChange={(e) => edit({ label: e.target.value })}
+                />
               </label>
             </div>
             <label className="flex flex-col gap-1 text-ui-sm font-medium">

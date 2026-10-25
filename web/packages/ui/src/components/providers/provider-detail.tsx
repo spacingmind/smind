@@ -120,7 +120,7 @@ export function ProviderDetail({
   const reloginAccount = canConnect ? itemRows.find((r) => r.account.id === reloginAccountId)?.account ?? null : null;
   const proxyConsumer = item.accountProvider !== undefined && providerConsumer(item.accountProvider) === "proxy";
   // Runs on these providers use the CLI's own login, not an smind account.
-  const usesCliLogin = info !== null && (info.kind === "cli" || proxyConsumer);
+  const usesCliLogin = info !== null && (info.kind === "cli" || info.extends !== undefined || proxyConsumer);
   const onConnected = () => void queryClient.invalidateQueries({ queryKey: queryKeys.accountList() });
 
   return (
@@ -204,7 +204,9 @@ export function ProviderDetail({
             <span className="text-ui-xs text-muted-foreground">
               {info?.extends
                 ? "Uses the CLI login kept in its own config directory — accounts added here aren't read by it."
-                : "Authenticates itself via its own CLI login — accounts added here aren't read by it."}
+                : info?.custom
+                  ? "The agent handles its own sign-in — accounts added here aren't read by it."
+                  : "Authenticates itself via its own CLI login — accounts added here aren't read by it."}
             </span>
           </span>
           <TestButton providerId={item.id} testing={isTesting(item.id)} onTest={runTest} />

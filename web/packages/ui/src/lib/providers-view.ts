@@ -26,7 +26,8 @@ export function buildProviderNav(input: {
   toneOf: (accountId: number) => NavTone | undefined;
 }): ProviderNavItem[] {
   const items = input.providers.map((info): ProviderNavItem => {
-    const isCli = info.kind === "cli";
+    // A providers.custom entry (instance or ACP agent) has no smind account row: it uses its own CLI login / config.
+    const isCli = info.kind === "cli" || info.custom === true;
     const accountIds = isCli
       ? []
       : input.accounts.filter((account) => account.provider === info.accountProvider).map((a) => a.id);

@@ -45,7 +45,7 @@ export function ProviderModels(props: { provider: ProviderInfo }): JSX.Element {
         <h4 className="text-ui-base font-medium">Models</h4>
         <span className="text-ui-sm text-muted-foreground">{models.length}</span>
         <span className="text-ui-sm text-muted-foreground">
-          {provider.modelsDiscovered ? "Reported by the agent" : "Built-in catalog"}
+          {provider.modelsDiscovered ? "Reported by the agent" : provider.custom && !provider.extends ? "Listed in config.yaml" : "Built-in catalog"}
         </span>
       </div>
       {models.length >= SEARCH_THRESHOLD ? (

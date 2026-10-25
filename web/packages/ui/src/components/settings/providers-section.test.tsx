@@ -451,9 +451,10 @@ describe("provider instances", () => {
     const adds = daemon.calls.filter((c) => c.method === "provider.addInstance");
     expect(adds).toHaveLength(1);
     expect(adds[0].params).toEqual({ extends: "claude-native", id: "claude-spare", label: "Claude spare", dir: "/home/u/.claude-spare" });
-    // provider.updated re-read the catalog: the instance is a nav row, and its chip is gone.
+    // provider.updated re-read the catalog: the instance is a nav row; its chip stays in place as "added" (nothing moves).
     expect(screen.getAllByTestId("provider-nav-item-claude-spare")[0]).toHaveTextContent("Claude spare");
-    expect(screen.queryByTestId("provider-suggestion-claude-spare")).toBeNull();
+    expect(screen.getByTestId("provider-suggestion-claude-spare")).toBeDisabled();
+    expect(screen.getByTestId("provider-suggestion-claude-spare")).toHaveAccessibleName("Claude spare added");
     expect(screen.getByTestId("provider-suggestion-codex-alt")).toBeInTheDocument();
     expect(screen.queryByTestId("provider-add-error")).toBeNull();
   });
