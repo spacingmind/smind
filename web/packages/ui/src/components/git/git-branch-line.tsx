@@ -9,8 +9,13 @@ export function GitBranchLine({ branch, base, gone, stackedOn, testId }: { branc
       <Icons.branch className="size-3 shrink-0" />
       {/* The branch name truncates; the base stays visible: "→ main" is the part that matters. */}
       <span data-testid={testId} className="flex min-w-0 gap-1" title={title}>
-        <span className="min-w-0 truncate">{branch}</span>
-        {baseText && <span className="shrink-0">{` → ${baseText}`}</span>}
+        <span className="min-w-0 flex-1 truncate">{branch}</span>
+        {base && (
+          <span className="flex min-w-0 max-w-[60%] shrink-0 gap-1">
+            <span className="min-w-0 truncate">{` → ${base}`}</span>
+            {gone && <span className="shrink-0">{" (gone)"}</span>}
+          </span>
+        )}
       </span>
     </div>
   );
