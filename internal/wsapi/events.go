@@ -55,6 +55,11 @@ const (
 	// (ADR-0039 §3). Subscribing is also the interest signal that turns on the
 	// daemon's periodic git work.
 	TopicTaskGit = "task.git"
+
+	// TopicTaskStalled carries {taskId, title, minutes, since} once per stall
+	// episode of an orchestrating task's tree (internal/stall). since is the
+	// RFC 3339 UTC instant the subtree last had activity.
+	TopicTaskStalled = "task.stalled"
 	// TopicForgeStatus carries {status} when the daemon host's forge sign-in
 	// state changed (ADR-0039 section 8): after forge.setToken/forge.logout
 	// and when a status read sees a change. The status has no canSetToken
@@ -117,6 +122,7 @@ var knownTopics = map[string]bool{
 	TopicMcpServerUpdated:     true,
 	TopicMcpServerDeleted:     true,
 	TopicTaskGit:              true,
+	TopicTaskStalled:          true,
 	TopicForgeStatus:          true,
 	TopicProviderUpdated:      true,
 	TopicLearnedSkillProposed: true,
@@ -669,4 +675,12 @@ func (c *conn) writeEventNotification(n eventNotification) {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	_ = c.tr.Send(data)
+}
+
+// stalledPayload is the payload of task.stalled events.
+type stalledPayload struct {
+	TaskID  int64  `json:"taskId"`
+	Title   string `json:"title"`
+	Minutes int    `json:"minutes"`
+	Since   string `json:"since"`
 }

@@ -22,6 +22,7 @@ interface Props {
   stateTone: StateTone;
   stateNote?: string;
   countdown: string | null;
+  stalledNote: string | null;
   permissions: number;
   unread: boolean;
   cost: string;
@@ -45,6 +46,7 @@ export const TaskTreeRow = memo(function TaskTreeRow({
   stateTone,
   stateNote,
   countdown,
+  stalledNote,
   permissions,
   unread,
   cost,
@@ -53,10 +55,10 @@ export const TaskTreeRow = memo(function TaskTreeRow({
 }: Props) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme, depth, isRoot), [theme, depth, isRoot]);
-  const toneColor = stateTone === 'danger' ? theme.status.danger : stateTone === 'warning' ? theme.status.warning : theme.foregroundSubtle;
+  const toneColor = stateTone === 'danger' ? theme.status.danger : stateTone === 'warning' || stalledNote ? theme.status.warning : theme.foregroundSubtle;
   const running = state === 'Running';
   const permLabel = `${permissions} ${permissions === 1 ? 'permission' : 'permissions'}`;
-  const detail = [isRoot ? 'This task ·' : null, state, stateNote, countdown ? `· ${countdown}` : null].filter(Boolean).join(' ');
+  const detail = [isRoot ? 'This task ·' : null, state, stateNote, countdown ? `· ${countdown}` : null, stalledNote ? `· ${stalledNote}` : null].filter(Boolean).join(' ');
   const shownTitle = title || `Task ${id}`;
   const body = (
     <>

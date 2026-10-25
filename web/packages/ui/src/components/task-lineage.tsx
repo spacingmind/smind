@@ -1,5 +1,6 @@
 import { StatusDot } from "@/components/ui/status-dot";
-import { pillStatusWithSubtree, rateLimitHint, statusSummary, usageChipParts, usageChipText } from "@/lib/task-lineage";
+import { Icons, ICON_SIZE } from "@/lib/icons";
+import { pillStatusWithSubtree, rateLimitHint, stalledHint, statusSummary, usageChipParts, usageChipText } from "@/lib/task-lineage";
 import type { TaskLineage } from "@/hooks/use-task-lineage";
 
 /**
@@ -24,7 +25,8 @@ export function TaskLineageChips({
   const usageParts = node ? usageChipParts(node.usage.subtree) : null;
   // ADR-0041: this task's own latest run hit a provider quota.
   const limitHint = node ? rateLimitHint(node, new Date()) : null;
-  if (!parent && children.length === 0 && !summary && !usage && !limitHint) return null;
+  const stalled = node ? stalledHint(node, new Date()) : null;
+  if (!parent && children.length === 0 && !summary && !usage && !limitHint && !stalled) return null;
 
   return (
     <>
@@ -75,11 +77,18 @@ export function TaskLineageChips({
           {limitHint}
         </span>
       )}
+      {stalled && (
+        <span data-testid="task-stalled" title={stalled} className="flex shrink-0 items-center gap-1 text-warning">
+          <Icons.stalled className={ICON_SIZE.xs} aria-hidden />
+          stalled
+        </span>
+      )}
       {/* Below sm the children are one tap away in the sidebar tree; keeping their pills would turn the meta row into a column. */}
       {children.length > 0 && (
         <span className="flex min-w-0 flex-wrap items-center gap-1 max-sm:hidden">
           {children.map((child) => {
             const childHint = rateLimitHint(child, new Date());
+            const childStalled = stalledHint(child, new Date());
             return (
             <button
               key={child.id}
@@ -89,13 +98,15 @@ export function TaskLineageChips({
               data-child-state={child.run.state}
               data-child-urgency={pillStatusWithSubtree(child, nodes)}
               data-child-rate-limited={childHint ? "true" : undefined}
-              title={childHint ?? undefined}
+              data-child-stalled={childStalled ? "true" : undefined}
+              title={childHint ?? childStalled ?? undefined}
               onClick={() => onJumpToTask?.(child.id)}
               className="flex max-w-[12rem] items-center gap-1.5 truncate rounded-full border px-2 py-0.5 transition-colors hover:bg-hover hover:text-foreground"
             >
               <StatusDot status={pillStatusWithSubtree(child, nodes)} />
               <span className="truncate">{child.title}</span>
               {child.tier && <span className="shrink-0">{child.tier}</span>}
+              {childStalled && <Icons.stalled className={`${ICON_SIZE.xs} shrink-0 text-warning`} aria-label="stalled" />}
             </button>
             );
           })}

@@ -153,3 +153,44 @@ func TestSetPushDisabledInstallsNoTap(t *testing.T) {
 		t.Fatal("notifier was started")
 	}
 }
+
+func TestPushInputStalled(t *testing.T) {
+	t.Parallel()
+	ev := Event{Topic: TopicTaskStalled, Payload: stalledPayload{TaskID: 4, Title: "lead", Minutes: 15, Since: "2026-10-25T01:00:00Z"}}
+	got, ok := pushInput(ev)
+	want := push.Input{Kind: push.KindStalled, Key: "stall:4:1792890000", TaskID: 4, Minutes: 15}
+	if !ok || got != want {
+		t.Fatalf("pushInput = (%+v, %v), want (%+v, true)", got, ok, want)
+	}
+	for name, bad := range map[string]Event{
+		"bad since":     {Topic: TopicTaskStalled, Payload: stalledPayload{TaskID: 4, Since: "nope"}},
+		"wrong payload": {Topic: TopicTaskStalled, Payload: "nope"},
+	} {
+		if _, ok := pushInput(bad); ok {
+			t.Errorf("%s: pushInput ok = true, want false", name)
+		}
+	}
+}
+
+func TestStalledBusEventEmitted(t *testing.T) {
+	t.Parallel()
+	if !knownTopics[TopicTaskStalled] || TopicTaskStalled != "task.stalled" {
+		t.Fatal("task.stalled is not a known topic")
+	}
+	wm, db := newTestWorkspaceManager(t)
+	api, srv := newGitTestAPI(t, wm, db, nil)
+	ec := newEventConn(t, dialWS(t, srv, "tok"))
+	ec.subscribe("sub", TopicTaskStalled)
+
+	since := time.Date(2026, 10, 25, 1, 0, 0, 0, time.UTC)
+	api.PublishTaskStalled(9, "lead", 15, since)
+	n := ec.nextEvent(5 * time.Second)
+	if n.Topic != TopicTaskStalled {
+		t.Fatalf("topic = %q, want task.stalled", n.Topic)
+	}
+	var raw map[string]any
+	decodePayload(t, n, &raw)
+	if raw["taskId"] != 9.0 || raw["title"] != "lead" || raw["minutes"] != 15.0 || raw["since"] != "2026-10-25T01:00:00Z" || len(raw) != 4 {
+		t.Fatalf("payload = %v", raw)
+	}
+}

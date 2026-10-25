@@ -104,6 +104,7 @@ export function TaskTreeSection({ conn, taskId, pendingTaskIds, onOpenTask }: Pr
                   stateTone={row.stateTone}
                   stateNote={row.stateNote}
                   countdown={row.countdown}
+                  stalledNote={row.stalledNote}
                   permissions={row.permissions}
                   unread={row.unread}
                   cost={row.cost}

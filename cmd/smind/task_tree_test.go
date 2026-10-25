@@ -266,3 +266,22 @@ func TestTaskTreeCLI_EndToEnd(t *testing.T) {
 		t.Fatalf("--json nodes = %d, want 2", len(parsed.Nodes))
 	}
 }
+
+func TestTaskTreeLinePrintsStalled(t *testing.T) {
+	now := time.Date(2026, 10, 25, 10, 0, 0, 0, time.UTC)
+	n := treeTestNode(4, 0, "Lead", nil, "idle")
+	if got, want := treeLine(n, now), "#4 Lead  -  idle  cost n/a"; got != want {
+		t.Fatalf("not stalled: %q, want %q", got, want)
+	}
+	n.Stalled, n.StalledSince = true, "2026-10-25T09:30:00Z"
+	if got, want := treeLine(n, now), "#4 Lead  -  idle  stalled  cost n/a"; got != want {
+		t.Fatalf("stalled: %q, want %q", got, want)
+	}
+	m := decodeNodeMap(n)
+	if m["stalled"] != true || m["stalledSince"] != "2026-10-25T09:30:00Z" {
+		t.Fatalf("MCP node map = %v, want stalled + stalledSince", m)
+	}
+	if _, ok := decodeNodeMap(treeTestNode(5, 0, "x", nil, "idle"))["stalled"]; ok {
+		t.Fatal("MCP node map carries stalled for a node that is not stalled")
+	}
+}

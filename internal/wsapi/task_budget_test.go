@@ -255,3 +255,64 @@ func TestTaskCreate_BudgetHumanRootOnly(t *testing.T) {
 		t.Fatalf("run-scoped task.create with a budget error = %v, want forbidden", err)
 	}
 }
+
+func stalledTreeNodes(t *testing.T, api *API, workspaceID int64) map[int64]map[string]any {
+	t.Helper()
+	out, err := budgetCall(t, api, &requestContext{}, "task.tree", map[string]any{"workspaceId": workspaceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tree struct {
+		Nodes []map[string]any `json:"nodes"`
+	}
+	if err := json.Unmarshal(out, &tree); err != nil {
+		t.Fatal(err)
+	}
+	byID := map[int64]map[string]any{}
+	for _, n := range tree.Nodes {
+		byID[int64(n["id"].(float64))] = n
+	}
+	return byID
+}
+
+func TestTaskTreeCarriesStalledAndSince(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	root := newTestTask(t, wm, "")
+	child, err := wm.CreateTask(root.WorkspaceID, nil, "child", workspace.WithParentTask(root.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, _ := newGitTestAPI(t, wm, db, nil)
+	since := time.Date(2026, 10, 25, 9, 30, 0, 0, time.FixedZone("x", 3600)) // not UTC on purpose
+	api.SetStalledSource(func() map[int64]time.Time { return map[int64]time.Time{root.ID: since} })
+
+	nodes := stalledTreeNodes(t, api, root.WorkspaceID)
+	if r := nodes[root.ID]; r["stalled"] != true || r["stalledSince"] != "2026-10-25T08:30:00Z" {
+		t.Fatalf("root node = %v, want stalled true and stalledSince in UTC", r)
+	}
+	for _, k := range []string{"stalled", "stalledSince"} {
+		if _, ok := nodes[child.ID][k]; ok {
+			t.Errorf("child carries %s, want it omitted", k)
+		}
+	}
+}
+
+func TestTaskTreeOmitsStalledWhenNot(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	root := newTestTask(t, wm, "")
+	api, _ := newGitTestAPI(t, wm, db, nil)
+	for name, fn := range map[string]func() map[int64]time.Time{
+		"no source":    nil,
+		"empty result": func() map[int64]time.Time { return nil },
+	} {
+		api.SetStalledSource(fn)
+		n := stalledTreeNodes(t, api, root.WorkspaceID)[root.ID]
+		for _, k := range []string{"stalled", "stalledSince"} {
+			if _, ok := n[k]; ok {
+				t.Errorf("%s: node carries %s, want it omitted", name, k)
+			}
+		}
+	}
+}

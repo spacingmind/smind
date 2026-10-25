@@ -456,13 +456,18 @@ type OrchestrationConfig struct {
 	// several children finishing together coalesce into one. Default 20; 0
 	// delivers at once; Load rejects negatives.
 	NotifyDebounceSeconds int `yaml:"notifyDebounceSeconds"`
+	// StallAlertMinutes is how long an orchestrating task's tree may sit with
+	// unfinished work and no run or queued prompt before the daemon raises a
+	// "tree stalled" notification (once per episode). Default 15; 0 turns the
+	// detector off; Load rejects negatives.
+	StallAlertMinutes int `yaml:"stallAlertMinutes"`
 }
 
 // Default returns the built-in defaults.
 func Default() Config {
 	return Config{
 		Server:        ServerConfig{Port: 4648},
-		Orchestration: OrchestrationConfig{MaxDepth: 2, MaxConcurrentRunsPerTree: 4, NotifyParent: true, NotifyDebounceSeconds: 20},
+		Orchestration: OrchestrationConfig{MaxDepth: 2, MaxConcurrentRunsPerTree: 4, NotifyParent: true, NotifyDebounceSeconds: 20, StallAlertMinutes: 15},
 		Worktrees: WorktreesConfig{
 			SetupTimeoutSeconds:    600,
 			TeardownTimeoutSeconds: 120,
@@ -527,6 +532,9 @@ func LoadFile(path string) (Config, error) {
 	}
 	if n := cfg.Orchestration.NotifyDebounceSeconds; n < 0 {
 		return cfg, fmt.Errorf("config %s: orchestration.notifyDebounceSeconds must be >= 0, got %d", path, n)
+	}
+	if n := cfg.Orchestration.StallAlertMinutes; n < 0 {
+		return cfg, fmt.Errorf("config %s: orchestration.stallAlertMinutes must be >= 0, got %d", path, n)
 	}
 	if ttl := cfg.AccountUsage.TTLSeconds; ttl < MinAccountUsageTTLSeconds {
 		return cfg, fmt.Errorf("config %s: accountUsage.ttlSeconds must be >= %d, got %d", path, MinAccountUsageTTLSeconds, ttl)

@@ -1,7 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { useAttentionNotifications, type NotifiableTask } from "@/hooks/use-attention-notifications";
+import { useAttentionNotifications, useStalledNotifications, type NotifiableTask } from "@/hooks/use-attention-notifications";
+import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { TaskAttention } from "@/hooks/use-task-attention";
 import * as notificationSound from "@/lib/notification-sound";
 
@@ -230,5 +231,62 @@ describe("useAttentionNotifications", () => {
 
     expect(playSpy).not.toHaveBeenCalled();
     playSpy.mockRestore();
+  });
+});
+
+describe("useStalledNotifications", () => {
+  function fakeEvents() {
+    const listeners = new Set<(payload: unknown) => void>();
+    const events: DaemonEvents = {
+      subscribe(topic, listener) {
+        if (topic !== "task.stalled") return () => {};
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    return { events, emit: (payload: unknown) => listeners.forEach((l) => l(payload)) };
+  }
+  const STALLED = { taskId: 1, title: "Ship it", minutes: 15, since: "2026-10-25T10:00:00Z" };
+
+  it("fires a notification on task.stalled", () => {
+    const calls = installFakeNotification();
+    setDocumentHidden(true);
+    const onOpenTask = vi.fn();
+    const focusSpy = vi.spyOn(window, "focus").mockImplementation(() => {});
+    const { events, emit } = fakeEvents();
+    renderHook(() => useStalledNotifications(events, "granted", onOpenTask));
+
+    act(() => emit(STALLED));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.title).toBe("Tree stalled: Ship it has been idle for 15 min");
+    calls[0]!.instance.onclick?.();
+    expect(onOpenTask).toHaveBeenCalledWith(1);
+    focusSpy.mockRestore();
+  });
+
+  it("does not notify twice for the same episode", () => {
+    const calls = installFakeNotification();
+    setDocumentHidden(true);
+    const { events, emit } = fakeEvents();
+    renderHook(() => useStalledNotifications(events, "granted", NOOP_OPEN));
+
+    act(() => {
+      emit(STALLED);
+      emit(STALLED);
+    });
+    expect(calls).toHaveLength(1);
+
+    act(() => emit({ ...STALLED, minutes: 40, since: "2026-10-25T11:00:00Z" }));
+    expect(calls).toHaveLength(2);
+  });
+
+  it("stays quiet without permission or while the tab is visible", () => {
+    const calls = installFakeNotification();
+    const { events, emit } = fakeEvents();
+    renderHook(() => useStalledNotifications(events, "denied", NOOP_OPEN));
+    setDocumentHidden(true);
+    act(() => emit(STALLED));
+    expect(calls).toHaveLength(0);
   });
 });

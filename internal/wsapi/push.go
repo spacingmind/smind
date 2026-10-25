@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -273,6 +274,16 @@ func pushInput(e Event) (push.Input, bool) {
 			return push.Input{}, false
 		}
 		return push.Input{Kind: push.KindPermission, Key: p.RequestID, TaskID: p.TaskID, ChatID: p.ChatID, RunID: p.RunID, Summary: p.Summary}, true
+	case TopicTaskStalled:
+		p, ok := e.Payload.(stalledPayload)
+		if !ok {
+			return push.Input{}, false
+		}
+		since, err := time.Parse(time.RFC3339, p.Since)
+		if err != nil {
+			return push.Input{}, false
+		}
+		return push.Input{Kind: push.KindStalled, Key: "stall:" + strconv.FormatInt(p.TaskID, 10) + ":" + strconv.FormatInt(since.Unix(), 10), TaskID: p.TaskID, Minutes: p.Minutes}, true
 	case TopicRunStatus:
 		p, ok := e.Payload.(runStatusPayload)
 		if !ok {

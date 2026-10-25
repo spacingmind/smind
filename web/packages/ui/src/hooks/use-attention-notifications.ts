@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 
+import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { AttentionReason, TaskAttention } from "@/hooks/use-task-attention";
 import type { NotificationPermissionState } from "@/hooks/use-notification-permission";
 import { playNotificationSound } from "@/lib/notification-sound";
@@ -93,8 +94,13 @@ function notifyIfEligible(
   if (typeof window === "undefined" || !("Notification" in window)) return;
 
   const title = tasks.find((t) => t.ID === taskId)?.Title ?? `Task ${taskId}`;
+  show(title, REASON_BODY[reason], taskId, onOpenTask, playSound);
+}
+
+/** The one place a Notification is constructed: click focuses the window and opens the task; never throws. */
+function show(title: string, body: string | undefined, taskId: number, onOpenTask: (taskId: number) => void, playSound: boolean): void {
   try {
-    const notification = new Notification(title, { body: REASON_BODY[reason] });
+    const notification = new Notification(title, body ? { body } : undefined);
     notification.onclick = () => {
       window.focus();
       onOpenTask(taskId);
@@ -104,4 +110,44 @@ function notifyIfEligible(
     // Degrade silently -- a best-effort notification is never worth
     // throwing into the render/effect over.
   }
+}
+
+/**
+ * The stalled-tree alert's desktop half: the daemon publishes `task.stalled`
+ * {taskId, title, minutes, since} once per episode, and this turns it into the
+ * same Notification as the attention reasons, with the same gating (permission
+ * "granted", tab hidden), sound preference and click-to-open-task.
+ *
+ * Edge-triggered per (taskId, since): the daemon dedupes too, but a replay
+ * after a reconnect must not notify twice for one episode.
+ */
+export function useStalledNotifications(
+  events: DaemonEvents | null | undefined,
+  permission: NotificationPermissionState,
+  onOpenTask: (taskId: number) => void,
+  playSound = false,
+): void {
+  const seenRef = useRef<Set<string>>(new Set());
+  const permissionRef = useRef(permission);
+  permissionRef.current = permission;
+  const onOpenTaskRef = useRef(onOpenTask);
+  onOpenTaskRef.current = onOpenTask;
+  const playSoundRef = useRef(playSound);
+  playSoundRef.current = playSound;
+
+  useEffect(() => {
+    if (!events) return;
+    return events.subscribe("task.stalled", (payload) => {
+      const p = payload as { taskId?: unknown; title?: unknown; minutes?: unknown; since?: unknown } | null;
+      if (typeof p?.taskId !== "number" || typeof p.minutes !== "number") return;
+      const key = `${p.taskId}:${typeof p.since === "string" ? p.since : ""}`;
+      if (seenRef.current.has(key)) return;
+      seenRef.current.add(key);
+      if (permissionRef.current !== "granted") return;
+      if (typeof document === "undefined" || !document.hidden) return;
+      if (typeof window === "undefined" || !("Notification" in window)) return;
+      const title = typeof p.title === "string" && p.title ? p.title : `Task ${p.taskId}`;
+      show(`Tree stalled: ${title} has been idle for ${p.minutes} min`, undefined, p.taskId, onOpenTaskRef.current, playSoundRef.current);
+    });
+  }, [events]);
 }

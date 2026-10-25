@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/spacingmind/smind/internal/runs"
@@ -28,7 +29,7 @@ type taskTreeResult struct {
 // included -- orphans and usage rollups need the archived rows), one
 // usage query (SumRunUsageByTask), and one reg.TaskRunFacts() call, then
 // the pure tasktree.Build -- never a per-node query.
-func handleTaskTree(db *store.Store, reg *runs.Registry) handlerFunc {
+func handleTaskTree(db *store.Store, reg *runs.Registry, stalled *stalledSource) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			WorkspaceID int64 `json:"workspaceId"`
@@ -67,8 +68,58 @@ func handleTaskTree(db *store.Store, reg *runs.Registry) handlerFunc {
 		if err := annotateTreeBudgets(db, nodes); err != nil {
 			return nil, fmt.Errorf("task.tree: %w", err)
 		}
+		annotateStalled(nodes, stalled.current())
 		return taskTreeResult{Nodes: nodes, Truncated: truncated}, nil
 	}
+}
+
+// stalledSource lets the daemon hand task.tree the currently stalled seats
+// (internal/stall) after the API is built. A nil source or unset func means
+// no seat is ever marked.
+type stalledSource struct {
+	fn atomic.Pointer[func() map[int64]time.Time]
+}
+
+func (s *stalledSource) current() map[int64]time.Time {
+	if s == nil {
+		return nil
+	}
+	if f := s.fn.Load(); f != nil {
+		return (*f)()
+	}
+	return nil
+}
+
+// SetStalledSource wires the stalled-tree detector's Current into task.tree:
+// each returned task id (stalledSince as the value) gets stalled=true and
+// stalledSince. nil clears it. It is not applied in buildTaskTree, which
+// archiveFinished and stopTree share.
+func (a *API) SetStalledSource(fn func() map[int64]time.Time) {
+	if fn == nil {
+		a.stalled.fn.Store(nil)
+		return
+	}
+	a.stalled.fn.Store(&fn)
+}
+
+func annotateStalled(nodes []tasktree.Node, since map[int64]time.Time) {
+	if len(since) == 0 {
+		return
+	}
+	for i := range nodes {
+		if t, ok := since[nodes[i].ID]; ok {
+			nodes[i].Stalled = true
+			nodes[i].StalledSince = t.UTC().Format(time.RFC3339)
+		}
+	}
+}
+
+// PublishTaskStalled emits the task.stalled bus event (the stall detector's
+// alert); the push tap and connected clients both consume it.
+func (a *API) PublishTaskStalled(taskID int64, title string, minutes int, since time.Time) {
+	a.bus.Publish(Event{Topic: TopicTaskStalled, Payload: stalledPayload{
+		TaskID: taskID, Title: title, Minutes: minutes, Since: since.UTC().Format(time.RFC3339),
+	}})
 }
 
 // buildTaskTree is task.tree's read pass (one store pass, one usage

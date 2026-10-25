@@ -337,6 +337,9 @@ export interface TaskTreeNode {
   taskStatus: string;
   tier: 'supervisor' | 'leader' | 'coder' | null;
   childCount: number;
+  /** Stalled-tree alert: both present only while this seat's tree is idle past the threshold (RFC 3339 UTC). */
+  stalled?: boolean;
+  stalledSince?: string;
   run: {
     state: string;
     runningRunIds: string[];

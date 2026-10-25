@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { childrenOf, pillStatusWithSubtree, rateLimitHint, statusSummary, usageChipText, type TaskTreeNode, type TaskTreeCounts, type TreeUsageTotals } from "@/lib/task-lineage";
+import { childrenOf, pillStatusWithSubtree, rateLimitHint, stalledHint, statusSummary, usageChipText, type TaskTreeNode, type TaskTreeCounts, type TreeUsageTotals } from "@/lib/task-lineage";
 
 function counts(partial: Partial<TaskTreeCounts> = {}): TaskTreeCounts {
   return { running: 0, waitingPermission: 0, failed: 0, done: 0, idle: 0, ...partial };
@@ -142,5 +142,16 @@ describe("pillStatusWithSubtree", () => {
     expect(pillStatusWithSubtree(node({ id: 5, counts: counts({ running: 1 }) }))).toBe("running");
     // An own running run also promotes an otherwise-idle pill.
     expect(pillStatusWithSubtree(node({ id: 6, run: { state: "running", runningRunIds: ["r1"], pendingPermissions: 0 } }))).toBe("running");
+  });
+});
+
+describe("stalledHint", () => {
+  const now = new Date("2026-10-25T12:00:00Z");
+  it("counts whole minutes since stalledSince", () => {
+    expect(stalledHint({ stalled: true, stalledSince: "2026-10-25T11:39:30Z" }, now)).toBe("No run for 20 min");
+  });
+  it("is null when not stalled or the time is unparseable", () => {
+    expect(stalledHint({}, now)).toBeNull();
+    expect(stalledHint({ stalled: true, stalledSince: "nope" }, now)).toBeNull();
   });
 });

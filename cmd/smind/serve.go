@@ -194,6 +194,8 @@ func cmdServe(args []string) int {
 	// ADR-0039 §4: the git state loop idles until a client subscribes to task.git.
 	stopGitState := srv.API().StartGitState(ctx)
 
+	stopStall := wireStallAlert(ctx, db, srv.API(), cfg.Orchestration.StallAlertMinutes)
+
 	stopLearning := wireLearning(ctx, learningWiring{
 		Cfg: cfg, DB: db, API: srv.API(), WM: wm, Runner: runner, Reg: srv.API().Runs,
 		Home: config.Dir(), Secrets: []string{token},
@@ -222,6 +224,7 @@ func cmdServe(args []string) int {
 	srv.API().CloseConnections() // clients see the stop immediately instead of after run teardown
 	stopLearning()               // before the run registry closes: in-flight jobs end failed, watermarks untouched
 	stopGitState()
+	stopStall()    // no tick may publish after the push runtime closes
 	pushRT.Close() // no push goroutine may outlive the daemon
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

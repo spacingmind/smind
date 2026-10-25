@@ -360,6 +360,12 @@ is included as untrusted data, never as instructions. Pass
 (`~/.smind/config.yaml`): `orchestration.notifyParent` (default `true`) and
 `orchestration.notifyDebounceSeconds` (default `20`; `0` delivers at once).
 
+A tree that goes silent with unfinished work is reported once: when an
+orchestrating task's whole subtree has had no run or queued prompt for
+`orchestration.stallAlertMinutes` (default `15`; `0` turns it off), the daemon
+sends a "Tree stalled" notification (sealed push and desktop/browser) and marks
+the task `stalled` in `smind task tree`. It never wakes or archives anything.
+
 ## Orchestrating with seats
 
 Agent profiles can carry a seat contract (ADR-0041): role instructions, bundled

@@ -19,11 +19,12 @@ const (
 	KindNeedsContinue = "needs_continue"
 	KindDone          = "done"
 	KindError         = "error"
+	KindStalled       = "stalled"
 	KindTest          = "test"
 )
 
 // AllKinds is every kind a device can subscribe to, in canonical order.
-var AllKinds = []string{KindPermission, KindNeedsContinue, KindDone, KindError}
+var AllKinds = []string{KindPermission, KindNeedsContinue, KindDone, KindError, KindStalled}
 
 const (
 	// QueueSize bounds the async queue Enqueue feeds.
@@ -37,13 +38,14 @@ const (
 
 // Input is one daemon event the notifier may turn into pushes.
 type Input struct {
-	Kind    string // permission | needs_continue | done | error
-	Key     string // dedupe key: permission = the requestId; run events = runId + ":" + kind
+	Kind    string // permission | needs_continue | done | error | stalled
+	Key     string // dedupe key: permission = the requestId; run events = runId + ":" + kind; stalled = "stall:<taskId>:<since unix>"
 	TaskID  int64
 	ChatID  int64
 	RunID   string
 	Summary string // permission summary
 	Err     string // run error text (kind error)
+	Minutes int    // idle minutes (kind stalled)
 }
 
 // TaskInfo is what the notifier needs to know about a task.
@@ -342,6 +344,8 @@ func (n *Notifier) event(in Input, info TaskInfo, now time.Time) Event {
 		if in.Err != "" {
 			body += ": " + in.Err
 		}
+	case KindStalled:
+		body = "Tree stalled: " + title + " has been idle for " + strconv.Itoa(in.Minutes) + " min"
 	}
 	return Event{
 		ID:     n.d.NewID(),

@@ -147,6 +147,12 @@ type Node struct {
 	BudgetPartial     bool     `json:"budgetPartial,omitempty"`
 	BudgetUnknownRuns int      `json:"budgetUnknownRuns,omitempty"`
 	OverBudget        bool     `json:"overBudget,omitempty"`
+
+	// Stalled marks a seat whose tree has sat idle past the stall threshold
+	// (internal/stall); StalledSince is the RFC 3339 UTC instant its subtree
+	// last had activity. Both are omitted when not stalled.
+	Stalled      bool   `json:"stalled,omitempty"`
+	StalledSince string `json:"stalledSince,omitempty"`
 }
 
 // TierOf derives a task's tier from its position (plan §3.1): no parent +
