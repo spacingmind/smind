@@ -310,7 +310,7 @@ All numbers are defaults in `learning.probe.*` and are guesses until the first w
 
 ## Progress
 
-**Evidence pass 2026-10-25: AC42 is confirmed on the real web app (isolated daemon, rows seeded, no probe or model call; see Validation "AC42 evidence pass").** Still open: AC33 `probeCheck`, the Validation entries for AC3-AC11 and AC38-AC41, the Settings -> Usage row, the P0 PARTIAL items; the idle -> running transition was not captured (it needs a real Start), see below.
+**Evidence pass 2026-10-25: AC42 is PARTIALLY confirmed on the real web app (isolated daemon, rows seeded, no probe or model call; see Validation "AC42 evidence pass"): every static state, light + dark, 1280 + 390, and the toggle, running -> verdict and collapse/expand transitions. NOT confirmed: the idle -> running and running -> cancelled transition frames (they need a real Start/Cancel, i.e. a live probe: Human go-ahead), so AC42 stays open.** Still open: AC33 `probeCheck`, the Validation entries for AC3-AC11 and AC38-AC41, the Settings -> Usage row, the P0 PARTIAL items; the idle -> running transition was not captured (it needs a real Start), see below.
 
 **Re-checked 2026-10-25 (plans hygiene): still PARTIAL, no probe work landed since (only #607, a test fix).** Open, exactly: AC33 `probeCheck` (blocked on a Human decision on how to run a command in the CLI sandbox without a model call; `TestProbeCheck_*` do not exist); AC42 light/dark + transition screenshots of the Probe card (no record); Validation entries for AC3-AC11 (2a/2b) and AC38-AC41 (4c UI) are missing although the tests exist; the Settings -> Usage row for the Probe bucket; the P0 PARTIAL items (keychain beyond macOS, `failIfUnavailable` isolation, Linux and Windows).
 
