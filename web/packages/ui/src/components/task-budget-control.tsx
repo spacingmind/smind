@@ -54,6 +54,9 @@ export function TaskBudgetControl({ task, client }: { task: Task; client: WsClie
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [serverError, setServerError] = useState<string | null>(null);
+  // The popover body as it was when a save/clear was submitted: the saved figures land before the popover finishes
+  // closing, and re-rendering them mid fade-out makes its content jump.
+  const [frozen, setFrozen] = useState<{ current: Task; state: ReturnType<typeof budgetState> } | null>(null);
   const setBudget = useSetTaskBudget();
   const inputId = useId();
 
@@ -67,6 +70,7 @@ export function TaskBudgetControl({ task, client }: { task: Task; client: WsClie
     if (!open) return;
     setText(current.budgetUsd != null ? current.budgetUsd.toFixed(2) : "");
     setServerError(null);
+    setFrozen(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- seed once per open, not on every spend refresh
   }, [open]);
 
@@ -74,16 +78,22 @@ export function TaskBudgetControl({ task, client }: { task: Task; client: WsClie
 
   const submit = (budgetUsd: number | null) => {
     setServerError(null);
+    setFrozen({ current, state });
     setBudget.mutate(
       { taskId: task.ID, budgetUsd },
       {
         onSuccess: () => setOpen(false),
-        onError: (err) => setServerError(err.message || "Couldn't update the budget"),
+        onError: (err) => {
+          setFrozen(null);
+          setServerError(err.message || "Couldn't update the budget");
+        },
       },
     );
   };
 
   const hasCap = state.kind !== "none";
+  const shown = frozen ?? { current, state };
+  const shownHasCap = shown.state.kind !== "none";
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -109,18 +119,18 @@ export function TaskBudgetControl({ task, client }: { task: Task; client: WsClie
       </PopoverTrigger>
       <PopoverContent data-testid="task-budget-popover" align="start" className="flex w-72 max-w-[calc(100vw-2rem)] flex-col gap-2.5 p-3">
         <p className="text-ui-sm font-medium text-foreground">Tree budget</p>
-        {hasCap ? (
+        {shownHasCap ? (
           <div className="flex flex-col gap-1.5">
             <p data-testid="task-budget-summary" className="text-ui-base text-foreground">
-              {formatUsd(current.budgetSpentUsd ?? 0)}
-              {state.partialLabel ? "+" : ""} <span className="text-foreground-muted">of {formatUsd(current.budgetUsd!)}</span>
-              {state.kind === "over" && <span className="ml-2 text-ui-sm text-warning">Over budget</span>}
+              {formatUsd(shown.current.budgetSpentUsd ?? 0)}
+              {shown.state.partialLabel ? "+" : ""} <span className="text-foreground-muted">of {formatUsd(shown.current.budgetUsd!)}</span>
+              {shown.state.kind === "over" && <span className="ml-2 text-ui-sm text-warning">Over budget</span>}
             </p>
-            <BudgetMeter kind={state.kind} ratio={state.ratio} />
-            {state.partialLabel && (
+            <BudgetMeter kind={shown.state.kind} ratio={shown.state.ratio} />
+            {shown.state.partialLabel && (
               <p data-testid="task-budget-partial" className="flex items-start gap-1.5 text-ui-sm text-foreground-muted">
                 <span className="mt-px shrink-0 rounded border px-1 text-ui-xs">partial</span>
-                <span>{state.partialLabel}</span>
+                <span>{shown.state.partialLabel}</span>
               </p>
             )}
           </div>
@@ -160,7 +170,7 @@ export function TaskBudgetControl({ task, client }: { task: Task; client: WsClie
           />
           <FormError message={serverError} testId="task-budget-server-error" size="sm" />
           <div className="flex items-center justify-end gap-2 pt-0.5">
-            {hasCap && (
+            {shownHasCap && (
               <Button type="button" variant="ghost" size="sm" data-testid="task-budget-clear" disabled={setBudget.isPending} onClick={() => submit(null)}>
                 Clear
               </Button>

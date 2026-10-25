@@ -1,6 +1,6 @@
 // ADR-0041 A5 / AC12: the root task header's budget chip + popover.
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TaskBudgetControl } from "@/components/task-budget-control";
 import { FakeWsClient } from "@/test/fake-ws-client";
@@ -120,5 +120,64 @@ describe("TaskBudgetControl", () => {
     client.nth("task.setBudget").reject(new Error("task 7 is not a root task"));
     expect(await screen.findByTestId("task-budget-server-error")).toHaveTextContent("not a root task");
     expect(screen.getByTestId("task-budget-popover")).toBeInTheDocument();
+  });
+
+  describe("while the popover fades out after a save or clear", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    // Radix keeps a closing popover mounted while its exit animation runs; jsdom has none, so fake one.
+    function holdClosingPopover() {
+      const real = window.getComputedStyle.bind(window);
+      const fake = (el: Element, pseudo?: string | null) =>
+        el instanceof HTMLElement && el.dataset.testid === "task-budget-popover"
+          ? ({
+              get animationName() {
+                return el.dataset.state === "open" ? "fade-in" : "fade-out";
+              },
+              display: "block",
+            } as CSSStyleDeclaration)
+          : real(el, pseudo);
+      vi.spyOn(window, "getComputedStyle").mockImplementation(fake);
+      vi.spyOn(globalThis, "getComputedStyle").mockImplementation(fake);
+    }
+
+    it("Save keeps the figures it was opened with instead of jumping to the new ones", async () => {
+      holdClosingPopover();
+      const client = setup(ROOT);
+      open();
+      fireEvent.change(screen.getByTestId("task-budget-input"), { target: { value: "12.5" } });
+      fireEvent.click(screen.getByTestId("task-budget-save"));
+      await waitFor(() => client.nth("task.setBudget"));
+      client.nth("task.setBudget").resolve({ ...ROOT, budgetUsd: 12.5 });
+      await waitFor(() => expect(chip()).toHaveTextContent("$0.00 / $12.50"));
+      expect(screen.getByTestId("task-budget-popover")).toHaveTextContent("No cap on this task");
+      expect(screen.queryByTestId("task-budget-summary")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("task-budget-clear")).not.toBeInTheDocument();
+    });
+
+    it("Clear keeps the capped figures and the Clear button while closing", async () => {
+      holdClosingPopover();
+      const client = setup({ ...ROOT, budgetUsd: 10, budgetSpentUsd: 1 });
+      open();
+      fireEvent.click(screen.getByTestId("task-budget-clear"));
+      await waitFor(() => client.nth("task.setBudget"));
+      client.nth("task.setBudget").resolve({ ...ROOT });
+      await waitFor(() => expect(chip()).toHaveTextContent("Set budget"));
+      expect(screen.getByTestId("task-budget-summary")).toHaveTextContent("$1.00 of $10.00");
+      expect(screen.getByTestId("task-budget-clear")).toBeInTheDocument();
+    });
+
+    it("reopening shows the stored figures again", async () => {
+      holdClosingPopover();
+      const client = setup(ROOT);
+      open();
+      fireEvent.change(screen.getByTestId("task-budget-input"), { target: { value: "12.5" } });
+      fireEvent.click(screen.getByTestId("task-budget-save"));
+      await waitFor(() => client.nth("task.setBudget"));
+      client.nth("task.setBudget").resolve({ ...ROOT, budgetUsd: 12.5 });
+      await waitFor(() => expect(chip()).toHaveTextContent("$0.00 / $12.50"));
+      open();
+      expect(screen.getByTestId("task-budget-summary")).toHaveTextContent("$0.00 of $12.50");
+    });
   });
 });
