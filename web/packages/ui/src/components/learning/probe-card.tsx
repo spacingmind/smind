@@ -11,6 +11,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useCancelProbe, useProbe, useProbeEstimate, useStartProbe } from "@/hooks/use-learning";
 import { useNow } from "@/hooks/use-now";
 import { Icons } from "@/lib/icons";
+import { cn } from "@/lib/utils";
 import { ARM_LABELS, elapsedSince, formatDurationMs, formatMoney, formatSpendLine, isProbeActive, OVER_ESTIMATE_HINT } from "@/lib/probe-format";
 import type { ProbeEstimate, ProbeView } from "@/lib/probe-types";
 
@@ -39,6 +40,8 @@ function ProbeStart({ id, workspaceId, again, quick, onQuick }: { id: number; wo
   const estimate = useProbeEstimate(id, quick, true);
   const start = useStartProbe();
   const e = estimate.data;
+  // After a Full/Quick toggle the hook keeps the other size's answer on screen while the new one loads; that answer must not be started from.
+  const stale = estimate.isPlaceholderData;
   if (estimate.isPending) return <InlineSpinner label="Estimating…" />;
   if (!e) return <Quiet testId="probe-estimate-error">{estimate.error?.message ?? "The estimate is not available."}</Quiet>;
   if (isUnsupported(e)) {
@@ -48,28 +51,34 @@ function ProbeStart({ id, workspaceId, again, quick, onQuick }: { id: number; wo
   return (
     <div className="flex flex-col gap-2" data-testid="probe-start">
       <SegmentedControl className="self-start" label="Probe size" options={MODE_OPTIONS} value={quick ? "quick" : "full"} onChange={(v) => onQuick(v === "quick")} />
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={!e.eligible || start.isPending}
-          data-testid="probe-run"
-          onClick={() => start.mutate({ id, workspaceId, quick })}
-        >
-          {start.isPending && <Icons.spinner className="animate-spin" aria-hidden />}
-          {e.eligible ? `${label} (about ${formatMoney(e.estUSD)}, about ${e.expectedMinutes} min)` : label}
-        </Button>
+      <div className={cn("flex flex-col gap-2", stale && "opacity-60")} data-stale={stale} data-testid="probe-estimate">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={!e.eligible || start.isPending || stale}
+            data-testid="probe-run"
+            onClick={() => start.mutate({ id, workspaceId, quick })}
+          >
+            {start.isPending && <Icons.spinner className="animate-spin" aria-hidden />}
+            {e.eligible ? `${label} (about ${formatMoney(e.estUSD)}, about ${e.expectedMinutes} min)` : label}
+          </Button>
+        </div>
+        {/* Always laid out (hidden, not removed) so the block never changes size when the estimate refreshes. */}
+        <span role="status" data-testid="probe-estimate-updating" className={cn("text-ui-sm text-foreground-muted", !stale && "invisible")}>
+          updating…
+        </span>
+        {e.reasons.length > 0 && (
+          <ul className="flex flex-col gap-0.5" data-testid="probe-reasons">
+            {e.reasons.map((r) => (
+              <li key={r.code} data-reason={r.code} className="text-ui-sm text-muted-foreground">
+                {r.message}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
-      {e.reasons.length > 0 && (
-        <ul className="flex flex-col gap-0.5" data-testid="probe-reasons">
-          {e.reasons.map((r) => (
-            <li key={r.code} data-reason={r.code} className="text-ui-sm text-muted-foreground">
-              {r.message}
-            </li>
-          ))}
-        </ul>
-      )}
       {start.error && <Quiet testId="probe-start-error" role="alert">{start.error.message}</Quiet>}
     </div>
   );

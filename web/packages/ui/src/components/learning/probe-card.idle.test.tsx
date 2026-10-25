@@ -66,6 +66,45 @@ describe("ProbeCard idle", () => {
     expect(screen.getByTestId("probe-start")).toBeTruthy();
   });
 
+  it("marks the previous size's estimate stale and cannot start from it until the new estimate arrives", async () => {
+    let release: (e: ReturnType<typeof estimate>) => void = () => {};
+    const d = learningDaemon((method, params) => {
+      if (method === "learning.probe.get") return null;
+      if (method === "learning.probe.estimate") {
+        return (params as { quick: boolean }).quick ? new Promise((resolve) => (release = resolve)) : estimate();
+      }
+      return null;
+    });
+    renderWithDaemon(<ProbeCard id={9} workspaceId={1} />, d);
+    await flush();
+    await act(async () => screen.getByTestId("probe-toggle").click());
+    await flush();
+    const run = () => screen.getByTestId("probe-run") as HTMLButtonElement;
+    expect(run().disabled).toBe(false);
+    expect(screen.getByTestId("probe-estimate").getAttribute("data-stale")).toBe("false");
+    expect(screen.getByTestId("probe-estimate-updating").className).toContain("invisible");
+
+    await act(async () => screen.getByRole("radio", { name: /Quick/ }).click());
+    await flush();
+    // The Full estimate is still shown (no flash), but dimmed, labelled and not startable.
+    expect(run().textContent).toBe("Run probe (about $1.44, about 8 min)");
+    expect(screen.getByTestId("probe-estimate").getAttribute("data-stale")).toBe("true");
+    expect(screen.getByTestId("probe-estimate-updating").className).not.toContain("invisible");
+    expect(run().disabled).toBe(true);
+    await act(async () => run().click());
+    expect(d.calls.some((c) => c.method === "learning.probe.start")).toBe(false);
+
+    await act(async () => release(estimate({ quick: true, arms: 2, estUSD: 0.96, expectedMinutes: 5 })));
+    await flush();
+    expect(run().textContent).toBe("Run probe (about $0.96, about 5 min)");
+    expect(screen.getByTestId("probe-estimate").getAttribute("data-stale")).toBe("false");
+    expect(screen.getByTestId("probe-estimate-updating").className).toContain("invisible");
+    expect(run().disabled).toBe(false);
+    await act(async () => run().click());
+    await flush();
+    expect(d.calls.find((c) => c.method === "learning.probe.start")?.params).toEqual({ id: 9, quick: true });
+  });
+
   it("a failed start shows the daemon's message and keeps the button", async () => {
     await renderProbeCard({ start: new Error("Another probe is running.") });
     await act(async () => screen.getByTestId("probe-run").click());

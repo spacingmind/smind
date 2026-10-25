@@ -64,6 +64,7 @@ function Refresh({ taskId }: { client: FakeWsClient; taskId: number }) {
       <span data-testid="stored">{stored?.title ?? "none"}</span>
       <button onClick={() => r.refresh()}>refresh</button>
       <span data-testid="err">{r.error?.message ?? ""}</span>
+      <span data-testid="limited">{r.limited?.message ?? ""}</span>
     </>
   );
 }
@@ -161,7 +162,7 @@ describe("usePRDetails", () => {
 });
 
 describe("useRefreshPRDetails", () => {
-  it("refresh stores the result and surfaces refresh_limited", async () => {
+  it("refresh stores the result and reports refresh_limited as limited, not error", async () => {
     const client = new FakeWsClient();
     renderWithClientProp(<Refresh client={client} taskId={4} />);
     act(() => screen.getByText("refresh").click());
@@ -172,6 +173,7 @@ describe("useRefreshPRDetails", () => {
     act(() => screen.getByText("refresh").click());
     await waitFor(() => client.nth("task.prDetails", 1));
     await act(async () => client.nth("task.prDetails", 1).reject(Object.assign(new Error("slow down"), { code: "refresh_limited" })));
-    await waitFor(() => expect(screen.getByTestId("err").textContent).toBe("slow down"));
+    await waitFor(() => expect(screen.getByTestId("limited").textContent).toBe("slow down"));
+    expect(screen.getByTestId("err").textContent).toBe("");
   });
 });

@@ -101,15 +101,19 @@ export function TaskBudgetControl({ task, client }: { task: Task; client: WsClie
         data-testid="task-budget-chip"
         data-state-kind={state.kind}
         aria-label={hasCap ? `Budget: ${state.label}` : "Set budget"}
+        title={hasCap ? `Budget: ${state.label}` : "Set budget"}
         className={cn(
-          "flex min-w-0 shrink items-center gap-1.5 rounded-full border px-2 py-0.5 text-ui-sm transition-colors hover:bg-hover hover:text-foreground",
+          "flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-ui-sm transition-colors hover:bg-hover hover:text-foreground",
           state.kind === "none" ? "border-dashed text-foreground-subtle" : "text-foreground-muted",
           state.kind === "near" && "text-foreground",
           state.kind === "over" && "border-warning/50 text-warning",
         )}
       >
         <Icons.usage aria-hidden className="size-3 shrink-0" />
-        <span className="truncate">{state.label}</span>
+        {/* Narrow top bar: the icon alone (aria-label and `title` carry the label); the title needs the room. */}
+        <span data-testid="task-budget-chip-label" className="hidden truncate @min-[34rem]/app-header:inline">
+          {state.label}
+        </span>
         {hasCap && state.kind !== "over" && <BudgetMeter kind={state.kind} ratio={state.ratio} className="hidden w-8 shrink-0 sm:block" />}
         {state.partialLabel && (
           <span data-testid="task-budget-chip-partial" className="hidden shrink-0 rounded border px-1 text-ui-xs sm:inline">

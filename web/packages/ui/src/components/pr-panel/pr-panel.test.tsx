@@ -297,10 +297,11 @@ describe("PRPanelPane", () => {
     });
   });
 
-  describe("refresh error", () => {
+  describe("refresh inside the floor", () => {
     const reads = (c: FakeWsClient) => c.calls.filter((x) => x.method === "task.prDetails");
     const limited = (retryAt?: string) => Object.assign(new Error(""), { code: "refresh_limited", data: retryAt ? { retryAt } : undefined });
     const advance = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
+    const refreshButton = () => screen.getByTestId("pr-refresh") as HTMLButtonElement;
 
     async function failRefresh(details: PRDetails, retryAfterMs?: number) {
       const client = new FakeWsClient();
@@ -314,43 +315,108 @@ describe("PRPanelPane", () => {
       expect(reads(client)).toHaveLength(2);
       const retryAt = retryAfterMs === undefined ? undefined : new Date(Date.now() + retryAfterMs).toISOString();
       await act(async () => reads(client)[1]!.reject(limited(retryAt)));
-      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
       return { client, view };
     }
 
-    it("refresh_limited error clears at retryAt", async () => {
+    it("is a quiet settled state, not an error line", async () => {
+      await failRefresh(prDetails({ fetchedAt: "2020-01-01T00:00:00Z" }), 3000);
+      expect(screen.queryByTestId("pr-refresh-error")).toBeNull();
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(refreshButton().disabled).toBe(true);
+      expect(screen.queryByTestId("pr-refresh-spinner")).toBeNull();
+      expect(screen.getByTestId("pr-fetched").textContent).toBe("Updated just now");
+    });
+
+    it("settles until retryAt, then Refresh works again", async () => {
       await failRefresh(prDetails(), 3000);
       await advance(2999);
-      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
+      expect(refreshButton().disabled).toBe(true);
       await advance(1);
-      expect(screen.queryByTestId("pr-refresh-error")).toBeNull();
+      expect(refreshButton().disabled).toBe(false);
+      expect(screen.getByTestId("pr-fetched").textContent).not.toBe("Updated just now");
     });
 
-    it("refresh_limited error without retryAt clears after 8 s", async () => {
+    it("settles for 8 s when the daemon sent no retryAt", async () => {
       await failRefresh(prDetails());
       await advance(7999);
-      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
+      expect(refreshButton().disabled).toBe(true);
       await advance(1);
-      expect(screen.queryByTestId("pr-refresh-error")).toBeNull();
+      expect(refreshButton().disabled).toBe(false);
     });
 
-    it("error clears when new data arrives", async () => {
+    it("the hourly cap (retryAt far away) stays a visible error", async () => {
+      await failRefresh(prDetails(), 30 * 60_000);
+      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
+      expect(refreshButton().disabled).toBe(false);
+    });
+
+    it("settled state clears when new data arrives", async () => {
       const { client } = await failRefresh(prDetails(), 60_000);
       // The header snapshot moved (a push): the panel reads again.
       await act(async () => client.pushNotification("task.git", { taskId: 1, git: gitWith({ ...gitPr(), headSha: "bbb" }) }));
       await advance(0);
       expect(reads(client)).toHaveLength(3);
-      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
       await act(async () => reads(client)[2]!.resolve(prDetails({ title: "Newer" })));
-      expect(screen.queryByTestId("pr-refresh-error")).toBeNull();
+      expect(refreshButton().disabled).toBe(false);
       expect(screen.getByText("Newer")).toBeTruthy();
     });
 
-    it("error timer is cleared on blur", async () => {
+    it("settled timer is cleared on blur", async () => {
       const { client, view } = await failRefresh(prDetails(), 3000);
       view.rerender(<Harness client={client} focused={false} />);
       await advance(60_000);
-      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
+      expect(refreshButton().disabled).toBe(true);
+    });
+  });
+
+  describe("vanished pull request", () => {
+    const gone = (code: string) => Object.assign(new Error("gone"), { code });
+    async function open(code: string) {
+      const client = new FakeWsClient();
+      renderWithClientProp(<Harness client={client} />);
+      await waitFor(() => client.nth("task.git", 0));
+      await act(async () => client.nth("task.git", 0).resolve(gitWith(gitPr())));
+      await waitFor(() => client.nth("task.prDetailsFocus", 0));
+      await act(async () => client.nth("task.prDetailsFocus", 0).resolve({}));
+      await waitFor(() => client.nth("task.prDetails", 0));
+      await act(async () => client.nth("task.prDetails", 0).reject(gone(code)));
+      return client;
+    }
+
+    it.each(["forge_not_found", "no_pr"])("%s is a neutral state with the reason and Check again, not a red error", async (code) => {
+      await open(code);
+      const state = await screen.findByTestId("pr-vanished");
+      expect(state.textContent).toContain("This pull request is no longer available (deleted or not accessible).");
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.queryByTestId("pr-query-error")).toBeNull();
+      expect(screen.queryByText("Try again")).toBeNull();
+      expect(state.querySelector(".text-destructive")).toBeNull();
+    });
+
+    it("Check again reads once more and shows the pull request if it is back", async () => {
+      const client = await open("forge_not_found");
+      fireEvent.click(await screen.findByTestId("pr-check-again"));
+      await waitFor(() => client.nth("task.prDetails", 1));
+      await act(async () => client.nth("task.prDetails", 1).resolve(prDetails({ title: "Back again" })));
+      expect(await screen.findByText("Back again")).toBeTruthy();
+      expect(screen.queryByTestId("pr-vanished")).toBeNull();
+    });
+
+    it("other errors keep the error line and Try again", async () => {
+      await open("forge_timeout");
+      expect(await screen.findByTestId("pr-query-error")).toBeTruthy();
+      expect(screen.queryByTestId("pr-vanished")).toBeNull();
+    });
+
+    it("a refresh that finds the pull request gone replaces the stale panel and does not auto-dismiss", async () => {
+      const client = await show(prDetails());
+      fireEvent.click(screen.getByTestId("pr-refresh"));
+      await waitFor(() => client.nth("task.prDetails", 1));
+      await act(async () => client.nth("task.prDetails", 1).reject(gone("forge_not_found")));
+      expect(await screen.findByTestId("pr-vanished")).toBeTruthy();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      await act(async () => void (await vi.advanceTimersByTimeAsync(60_000)));
+      expect(screen.getByTestId("pr-vanished")).toBeTruthy();
     });
   });
 

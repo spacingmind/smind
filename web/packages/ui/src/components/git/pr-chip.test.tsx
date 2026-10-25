@@ -30,6 +30,16 @@ function pr(overrides: Partial<TaskGitPr> = {}): TaskGitPr {
 afterEach(() => vi.restoreAllMocks());
 
 describe("PrChip", () => {
+  it("collapseInHeader renders a short #number for a narrow top bar and the full label otherwise", () => {
+    const { rerender } = render(<PrChip pr={pr({ draft: true })} nowMs={NOW} collapseInHeader />);
+    expect(screen.getByTestId("pr-chip-short")).toHaveTextContent("#42");
+    expect(screen.getByTestId("pr-chip-label")).toHaveTextContent("#42 · Draft");
+    expect(screen.getByTestId("pr-chip-label")).toHaveClass("hidden");
+    rerender(<PrChip pr={pr({ draft: true })} nowMs={NOW} />);
+    expect(screen.queryByTestId("pr-chip-short")).not.toBeInTheDocument();
+    expect(screen.getByTestId("pr-chip")).toHaveTextContent("#42 · Draft");
+  });
+
   it("renders each state with text", () => {
     const cases: [Partial<TaskGitPr>, string][] = [
       [{}, "#42 · Open"],

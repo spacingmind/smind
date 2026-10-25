@@ -235,7 +235,7 @@ children's states. More than 16 running runs → the 16 oldest-started, with a
   (`lib/task-tree.test.ts`): `nests children under parent in id order`,
   `orphan whose parent is missing is a root`, `child in another space
   nests under its parent`, `cycle does not loop`, `depth is derived from
-  the chain`, `rollup counts permission before error before finished`,
+  the chain`, `rollup uses the same precedence as a row dot` (error > permission > finished),
   `rollup counts every descendant once`, `rollup ignores a seen finished
   child`, `tierOf table`.
 - **U1-AC3** (tier-on-row part superseded 2026-10-12 by [sidebar-polish.md](../completed/sidebar-polish.md) S4: the tier is now in the hover card and aria-label, not on the row; depth indent is per-row padding) the sidebar tree view renders nested rows: depth indent with a

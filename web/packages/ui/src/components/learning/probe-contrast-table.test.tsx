@@ -57,3 +57,36 @@ describe("ProbeContrastTable narrow layout", () => {
     for (const c of cells) expect(c.className).toContain("whitespace-nowrap");
   });
 });
+
+describe("ProbeContrastTable stacked layout (below sm)", () => {
+  const worse = metric({ key: "failedToolCalls", worse: true, deltaAB: 4, a: 1, a2: null, b: 5, noise: null });
+
+  it("renders one block per metric, each with every column as a label/value pair, so nothing scrolls off screen", () => {
+    render(<ProbeContrastTable noiseFloor metrics={[metric(), worse]} />);
+    const blocks = screen.getAllByTestId("probe-metric-stacked");
+    expect(blocks).toHaveLength(2);
+    const labels = [...blocks[0]!.querySelectorAll("dt")].map((d) => d.textContent);
+    expect(labels).toEqual(["Control", "Replicate", "With this skill", "Δ", "Noise"]);
+    const values = [...blocks[0]!.querySelectorAll("dd")].map((d) => d.textContent);
+    expect(values).toEqual(["20", "21", "14", "−6", "±1"]);
+    expect(screen.getByTestId("probe-contrast-stacked").className).toContain("sm:hidden");
+    expect(screen.getByTestId("probe-contrast").parentElement?.className).toContain("hidden");
+  });
+
+  it("drops Replicate and Noise for a quick probe and keeps the dash for a missing replicate", () => {
+    render(<ProbeContrastTable noiseFloor={false} metrics={[metric({ a2: null, noise: null })]} />);
+    const block = screen.getByTestId("probe-metric-stacked");
+    expect([...block.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["Control", "With this skill", "Δ"]);
+    render(<ProbeContrastTable noiseFloor metrics={[worse]} />);
+    expect(screen.getAllByTestId("probe-metric-stacked")[1]?.textContent).toContain("–");
+  });
+
+  it("marks a worse metric with the word and the data attribute", () => {
+    render(<ProbeContrastTable noiseFloor metrics={[metric(), worse]} />);
+    const [ok, bad] = screen.getAllByTestId("probe-metric-stacked");
+    expect(ok?.getAttribute("data-worse")).toBe("false");
+    expect(ok?.textContent).not.toContain("worse");
+    expect(bad?.getAttribute("data-worse")).toBe("true");
+    expect(bad?.textContent).toContain("worse");
+  });
+});

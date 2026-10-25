@@ -23,10 +23,13 @@ export function PRHeader({
   details,
   onRefresh,
   refreshing,
+  settled = false,
 }: {
   details: PRDetails;
   onRefresh: () => void;
   refreshing: boolean;
+  /** Refreshed inside the daemon's floor: Refresh rests (disabled) and the age reads "just now"; nothing else changes. */
+  settled?: boolean;
 }) {
   const now = useNow();
   const badge = stateBadge(details);
@@ -41,8 +44,8 @@ export function PRHeader({
           variant="ghost"
           size="icon-sm"
           aria-label="Refresh"
-          title="Refresh"
-          disabled={refreshing}
+          title={settled ? "Refreshed just now" : "Refresh"}
+          disabled={refreshing || settled}
           aria-busy={refreshing || undefined}
           onClick={onRefresh}
           data-testid="pr-refresh"
@@ -59,9 +62,9 @@ export function PRHeader({
           <span>Open on GitHub</span>
           <Icons.externalLink aria-hidden className="size-3" />
         </ExternalLink>
-        {hasFetchTime(details.fetchedAt) && (
+        {(settled || hasFetchTime(details.fetchedAt)) && (
           <span className="ml-auto text-foreground-subtle" data-testid="pr-fetched">
-            Updated {formatRelativeTime(details.fetchedAt, now)}
+            Updated {settled ? "just now" : formatRelativeTime(details.fetchedAt, now)}
           </span>
         )}
       </div>

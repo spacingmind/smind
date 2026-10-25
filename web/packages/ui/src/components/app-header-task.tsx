@@ -45,7 +45,7 @@ export function HeaderTaskTitle({ task }: { task: Task }) {
           <button
             type="button"
             data-testid="app-header-title"
-            className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-ui-base font-medium text-foreground outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex min-w-20 items-center gap-1.5 rounded-md px-1.5 py-1 text-ui-base font-medium text-foreground outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Icons.folder aria-hidden className="size-4 shrink-0 text-foreground-muted" />
             <span className="min-w-0 truncate">{task.Title}</span>
@@ -80,7 +80,7 @@ export function HeaderTaskTitle({ task }: { task: Task }) {
           </div>
         </HoverCardContent>
       </HoverCard>
-      {git?.pr && <PrChip pr={git.pr} />}
+      {git?.pr && <PrChip pr={git.pr} collapseInHeader />}
     </>
   );
 }

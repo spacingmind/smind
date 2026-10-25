@@ -32,6 +32,11 @@ describe("ConfirmDialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  it("keeps title and description left-aligned on narrow screens (the shared header centres below sm)", () => {
+    renderDialog();
+    expect(screen.getByText("Delete thing?").closest('[data-slot="dialog-header"]')).toHaveClass("text-left");
+  });
+
   it("derives its test ids from testId, and lets a surface keep its own", () => {
     renderDialog({ testId: "x", confirmTestId: "keep-confirm", errorTestId: "keep-error", error: "nope" });
     expect(screen.getByTestId("x")).toBeInTheDocument();
