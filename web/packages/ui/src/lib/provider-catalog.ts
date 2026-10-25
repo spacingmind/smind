@@ -44,13 +44,15 @@ export interface ProviderIdentity {
   accountProvider?: string;
   label: string;
   shortName: string;
+  /** Which mark the family wears: its own brand SVG, or the registry's agent glyph (what GLM and Kimi always wore). */
+  mark: "claude" | "codex" | "agent";
 }
 
 const IDENTITIES: readonly ProviderIdentity[] = [
-  { key: "claude", runtimeId: "claude-native", accountProvider: "anthropic", label: "Claude Code", shortName: "Claude" },
-  { key: "codex", runtimeId: "codex-native", accountProvider: "openai", label: "Codex", shortName: "Codex" },
-  { key: "glm", runtimeId: "glm", label: "GLM", shortName: "GLM" },
-  { key: "kimi", runtimeId: "kimi", accountProvider: "kimi", label: "Kimi", shortName: "Kimi" },
+  { key: "claude", runtimeId: "claude-native", accountProvider: "anthropic", label: "Claude Code", shortName: "Claude", mark: "claude" },
+  { key: "codex", runtimeId: "codex-native", accountProvider: "openai", label: "Codex", shortName: "Codex", mark: "codex" },
+  { key: "glm", runtimeId: "glm", label: "GLM", shortName: "GLM", mark: "agent" },
+  { key: "kimi", runtimeId: "kimi", accountProvider: "kimi", label: "Kimi", shortName: "Kimi", mark: "agent" },
 ];
 
 /** The identity for either id vocabulary (runtime, account, or bare family word), case-insensitive. */
