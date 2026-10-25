@@ -514,6 +514,8 @@ dialogs' counts equal the server selection and both actions work end to end.
 
 **Re-checked 2026-10-25 (plans hygiene): still PARTIAL, effectively shipped; nothing new since 2026-10-22.** Open, exactly: U1-AC4 (light/dark screenshots of the nested sidebar tree) and U2-AC3 (screenshots of the task header lineage), both without recorded evidence; the explicit `role` column (decision 6.1) is not built and only waits on the Human if wanted. The Human can either accept the two screenshot gaps (the sidebar was later restyled, `completed/sidebar-polish.md`) and have the plan moved to `completed/`, or ask for one screenshot pass.
 
+**Evidence pass 2026-10-25: U1-AC4 and U2-AC3 are now confirmed (screenshots, see Validation "Evidence pass"). Status: still active only because the explicit `role` column (decision 6.1) is Human-gated; no AC other than that is open.**
+
 **Status 2026-10-22 (plans hygiene): PARTIAL, effectively shipped.** Every PR below is merged (#289, #291, #293, #295, #376; also #373 `disposition`, #423 tree-guard flake fix). What is left is evidence, not code:
 
 - U1-AC4 (nested sidebar tree, light/dark screenshots): recorded as partially verified.
@@ -610,3 +612,22 @@ H11 (2026-10-18):
   worktree-removal failure (read-only dir) produced the partial-failure state
   ("Archived 2 of 3"), sidebar updated live; Stop all: 2 running runs (the root
   included) stopped, entries then disabled with "No running tasks in this tree".
+
+### Evidence pass (screenshots), 2026-10-25
+
+Isolated daemon (own `SMIND_HOME`, port 4957): 15 tasks created through `task.create` (a supervisor with two leaders and a direct coder, a second supervisor, a plain task, an orphan whose parent was archived); `done`/`failed` runs seeded in the db, "running" and "needs you" runs driven by the repo's fake ACP agent (no model, no live provider). Light and dark, 1280 and 390. Files in `/tmp/evidence-pass/task-hierarchy-tiers/` (local only): `<scheme>-<width>-<name>.png`, transitions `-trans-expand|collapse-f0..f7.png`, `-sheet.png`, `-bboxes.json`, `tiers-log.json` (sampler summary).
+
+| AC | Files (suffix) | What was seen |
+|---|---|---|
+| U1-AC4 expanded 3-tier tree | `tree-expanded` | supervisor, two leaders and their coders nested with depth indent and guide line, child-count chips (3, 3, 2), status dots on coders (running, failed, done, needs-you orange), orphan and plain task as roots; titles ellipsised at the default sidebar width |
+| U1-AC4 collapsed with rollup | `tree-collapsed-rollup` | "Ship checkout" collapsed shows red dot + 5 (error outranks permission in the rollup code, aria-label "5 descendants need attention: a run failed"); "Refactor auth" shows orange dot + 1 ("a permission is waiting"); expanded parents show no rollup |
+| U1-AC4 orphan | `tree-expanded`, `orphan-header` | "Orphaned coder" is a root row; its header shows "Old parent (to archive) (archived)" as plain text (inert) |
+| tier chip | `tree-hovercard-leader` | hover card reads "leader · 3 sub-tasks" |
+| U2-AC3 header, strip, summary | `leader-header`, `leader-ui-header`, `supervisor-header` | "Task $0.160 · 65k tok" usage chip, "Spawned by Ship checkout redesign" breadcrumb, "1 running · 1 failed · 1 done" summary, one status pill per child with tier; supervisor adds "Set budget". At 390 the pills are hidden by design (comment in `task-lineage.tsx`), the chips wrap |
+| U2-AC3 archive dialog | `archive-parent-dialog` | "These tasks stay and become top-level:" lists the three children with their states, button "Archive parent only" (also `archive-dialog` = the separate "Archive finished sub-tasks" dialog) |
+
+Transition frames (8 per transition, frame 0 before the click, plus a per-animation-frame sampler): expand and collapse of a supervisor row, all four configurations. The collapse itself is not animated: the whole change lands in one frame; only the chevron rotates (seen mid-rotation in frames f3 or f4). Row, time slot and header rectangles never changed. The child-count chip moves 22 px left in the same frame the rollup appears (the title is the only element allowed to shrink; the time slot stays put), which matches the code comment but is looser than "reserved slots do not shift" read literally.
+
+Viewed with the image reader: expanded, collapsed, hover card (dark 1280); expanded and collapsed (390); headers (light and dark 1280, light 390); orphan header; coder header with a live permission request; archive dialog (light 1280, dark 390); transition sheets light-1280 collapse, dark-1280 expand, dark-390 collapse. The other transition sheets were analysed numerically only.
+
+Observations, not changed: the 390 archive dialog centres its list and warning lines (the shared dialog header is `text-center` below `sm`), bullets sit at the left edge; the 390 header truncates the "Set budget" chip to "Set bud...". Doc nit: the U1-AC2 test name says "permission before error" while the code and its comment rank error first.

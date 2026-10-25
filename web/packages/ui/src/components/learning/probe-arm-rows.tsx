@@ -17,9 +17,9 @@ export function ProbeArmRows({ arms, workspaceId }: { arms: ProbeArmView[]; work
         // An arm stopped before it ever ran (restart recovery, an earlier arm failing) has no start, no time and no cost.
         const started = arm.status !== "pending" && !(arm.startedAt === undefined && arm.elapsedMs === 0 && arm.costUSD === 0);
         return (
-          <li key={arm.role} data-testid="probe-arm" data-role={arm.role} data-status={arm.status} className="flex items-center gap-3 px-3 py-2">
+          <li key={arm.role} data-testid="probe-arm" data-role={arm.role} data-status={arm.status} className="flex items-center gap-3 px-3 py-2 max-sm:flex-wrap max-sm:gap-y-1">
             <StatusDot status={dotFor(arm.status)} aria-hidden />
-            <span className="min-w-0 flex-1 truncate text-ui-sm text-foreground">{ARM_LABELS[arm.role]}</span>
+            <span className="min-w-0 flex-1 truncate text-ui-sm text-foreground max-sm:basis-[calc(100%-1.25rem)]">{ARM_LABELS[arm.role]}</span>
             <span data-testid="probe-arm-status" className="text-ui-sm text-foreground-muted">
               {armStatusLabel(arm.status)}
             </span>

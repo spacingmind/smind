@@ -59,3 +59,17 @@ describe("QueuedPrompts child updates (ADR-0041)", () => {
     expect(screen.queryByTestId("queued-starts")).toBeNull();
   });
 });
+
+describe("QueuedPrompts narrow layout", () => {
+  it("lets the row wrap and puts the attachment chips on their own line so the prompt and cancel stay reachable", () => {
+    const attachments = [
+      { id: "1", kind: "image", name: "checkout-mock.png" },
+      { id: "2", kind: "file", name: "notes.md" },
+    ] as ChatQueueItem["attachments"];
+    render(<QueuedPrompts items={[item({ attachments })]} onCancel={() => {}} />);
+    expect(screen.getByTestId("composer-queued-item").className).toContain("flex-wrap");
+    const chips = screen.getByTestId("queued-attachments");
+    expect(chips.className).toContain("max-sm:order-last");
+    expect(chips.className).toContain("max-sm:w-full");
+  });
+});

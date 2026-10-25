@@ -8,8 +8,8 @@ import { cn } from "@/lib/utils";
  * than the noise) is marked with a word, not just a tint.
  */
 export function ProbeContrastTable({ metrics, noiseFloor }: { metrics: ProbeMetricRow[]; noiseFloor: boolean }) {
-  const head = "px-2 py-1.5 text-right text-ui-sm font-normal text-foreground-subtle";
-  const cell = "px-2 py-1.5 text-right text-ui-sm tabular-nums text-foreground-muted";
+  const head = "whitespace-nowrap px-2 py-1.5 text-right text-ui-sm font-normal text-foreground-subtle";
+  const cell = "whitespace-nowrap px-2 py-1.5 text-right text-ui-sm tabular-nums text-foreground-muted";
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table data-testid="probe-contrast" className="w-full border-collapse">
