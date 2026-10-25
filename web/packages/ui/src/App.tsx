@@ -63,6 +63,8 @@ import {
   type TabKind,
 } from "@/components/tab-registry";
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
+import { PluginThemeApplier } from "@/components/plugin-theme-applier";
+import { useSlashPaletteCommands } from "@/hooks/use-slash-palette-commands";
 import { DaemonQueryProvider, useDaemonQueryClient } from "@/lib/query/daemon-query-provider";
 import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useInitialValue } from "@/hooks/use-initial-value";
@@ -1382,6 +1384,7 @@ function AppShell({
   return (
     <DaemonQueryProvider queryClient={queryClient} client={client} events={events}>
       <div className="relative h-svh w-full">
+        <PluginThemeApplier />
         <UsageModalRoot />
         <div
           data-testid="app-shell"
@@ -1546,6 +1549,7 @@ function ShellCommands({
     }));
   }, [files, selectedTask, onOpenTab]);
   useCommands("shell:files", 3, fileCommands);
+  useSlashPaletteCommands();
 
   const actionCommands = useMemo<Command[]>(
     () => [

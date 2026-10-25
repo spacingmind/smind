@@ -12,15 +12,18 @@ export function StepGroup<T extends string>({
   onChange,
   groupLabel,
   isDisabled,
+  wrap,
 }: {
   options: { value: T; label: string }[];
   value: T;
   onChange: (value: T) => void;
   groupLabel: string;
   isDisabled?: (value: T) => boolean;
+  /** Let the buttons wrap onto more lines (a list whose length is not known, like plugin themes). */
+  wrap?: boolean;
 }) {
   return (
-    <div role="group" aria-label={groupLabel} className="inline-flex rounded-lg border border-input-border p-0.5">
+    <div role="group" aria-label={groupLabel} className={cn("inline-flex rounded-lg border border-input-border p-0.5", wrap && "flex-wrap")}>
       {options.map((opt) => (
         <Button
           key={opt.value}

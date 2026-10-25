@@ -1,15 +1,15 @@
 ---
 title: Plugins
-description: Add MCP servers, skills and agent profiles from a plugin directory, and see what a plugin does before you turn it on.
+description: Add MCP servers, skills, agent profiles, prompt commands and themes from a plugin directory, and see what a plugin does before you turn it on.
 order: 12
 ---
 
 # Plugins
 
 Plugins are a preview. A plugin is a directory with a `smind-plugin.json`
-file. Today a plugin can add three things: MCP servers, skills and agent
-profiles. Nothing else a manifest declares (commands, themes, hooks,
-providers, panels) has an effect yet.
+file. Today a plugin can add five things: MCP servers, skills, agent profiles,
+prompt commands and themes. Nothing else a manifest declares (hooks, providers,
+panels, commands that call a plugin process) has an effect yet.
 
 A plugin is trusted code you chose to run. An MCP server it adds starts as
 you, with your files and credentials, exactly like an MCP server you add by
@@ -81,7 +81,11 @@ profiles away at once.
       { "name": "notes", "transport": "stdio", "command": ["npx", "-y", "notes-mcp"], "env": { "MODE": "readonly" } }
     ],
     "skills": ["skills/review"],
-    "profiles": ["profiles/reviewer.json"]
+    "profiles": ["profiles/reviewer.json"],
+    "commands": [
+      { "name": "review", "description": "Review the staged diff", "prompt": "commands/review.md" }
+    ],
+    "themes": [{ "id": "dusk", "label": "Dusk", "file": "themes/dusk.json" }]
   }
 }
 ```
@@ -103,6 +107,11 @@ profiles away at once.
 ```json
 { "name": "reviewer", "provider": "glm", "instructions": "You review changes.", "skills": ["acme:review"] }
 ```
+
+- `commands`: each entry has a `name`, an optional `description` and a `prompt`,
+  the path of a UTF-8 text file (up to 16 KiB). See [Prompt commands](#prompt-commands).
+- `themes`: each entry has an `id`, an optional `label` (up to 48 characters)
+  and a `file`, a JSON color set. See [Themes](#themes).
 
 smind rejects a manifest at install time and names the field that is wrong.
 
@@ -128,6 +137,73 @@ the global setting off changes what the next run gets.
 
 If you already have a profile with the name a plugin would use, yours wins and
 `smind plugin show <id> --json` lists the plugin's profile under `conflicts`.
+
+### Prompt commands
+
+A prompt command puts text in the message box. Type `/` as the first character
+of the box and the list shows the commands of every enabled plugin, each with a
+quiet "from acme". The arrow keys move, Enter or Tab picks, Esc closes. Picking
+a command replaces the `/word` you typed with the command's file, exactly as it
+is written, and puts the caret after it. It never sends anything: you read the
+text, edit it and press send yourself. The command palette lists the
+same commands as "Insert command: /review", which insert into the message box
+you last used.
+
+```json
+{
+  "id": "acme-demo",
+  "name": "Acme demo",
+  "version": "1.0.0",
+  "api": 1,
+  "engines": { "smind": ">=0.1.0" },
+  "contributes": {
+    "commands": [
+      { "name": "review", "description": "Review the staged diff", "prompt": "commands/review.md" },
+      { "name": "plan", "description": "Plan before coding", "prompt": "commands/plan.md" }
+    ]
+  }
+}
+```
+
+with `commands/review.md` holding `Review the staged diff. List bugs first, then
+risks, then style nits.` Every command can be typed as `/acme-demo:review`. The
+short form `/review` goes to a built-in command with that name if there is one,
+otherwise to the first plugin, by id, that has a command called `review`; the
+others keep only the long form, and `smind plugin show <id> --json` lists the
+short name under `conflicts`. With no plugin commands the message box behaves
+as it always did. A command file is only text: it starts nothing and gets no
+access to anything. Commands that call a plugin process are not available yet.
+
+### Themes
+
+A theme file is JSON with a `light` and/or a `dark` object. Each object must
+set **every** color token of the web UI, 115 in all, and nothing else:
+
+```json
+{
+  "dark": {
+    "--background": "rgb(26 22 37)",
+    "--foreground": "rgb(217 212 232)",
+    "--card": "rgb(39 32 54)"
+  }
+}
+```
+
+(That is the shape, not a working theme: all the tokens are required.) You do
+not need the list up front. Install a plugin whose scheme is `{}`, such as
+`{ "dark": {} }`, and `smind plugin install` rejects it and lists every token
+that scheme is missing; install and update reject any incomplete scheme the same
+way, so a plugin never leaves part of the interface unstyled. A value is a hex
+color (`#` and 3, 4, 6 or 8 digits), `rgb()`, `rgba()`, `hsl()`, `hsla()` or `oklch()` with plain numbers, a
+plain length such as `12px`, or `transparent`. Anything else (`url()`,
+`var()`, `calc()`, names, quotes, semicolons, braces) rejects the plugin.
+
+An enabled plugin's themes appear in Settings, Appearance, under "Plugin
+theme", next to the plugin's name, on the web interface. A theme applies in the
+schemes it declares and leaves the other alone: pick a dark-only theme and the
+light theme stays the stock one. Choosing "Default" goes back, and so does
+disabling or removing the plugin or turning the global setting off: the choice
+is dropped and the stock theme returns.
 
 ### Settings and secrets
 

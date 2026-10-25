@@ -96,6 +96,12 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       void queryClient.invalidateQueries({ queryKey: queryKeys.providerDirSuggestions(), refetchType: "none" });
       return;
     }
+    case "plugin.updated": {
+      // {id, globalEnabled}: an install, enable, disable, remove, update, reload or a flip of plugins.enabled.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pluginCommands() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pluginThemes() });
+      return;
+    }
     case "profile.created":
     case "profile.updated": {
       const profile = (payload as { profile?: AgentProfile } | null)?.profile;

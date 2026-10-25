@@ -25,7 +25,7 @@ type SettingsProvider interface {
 // owns the name, a setting that is not set, a profile that failed validation.
 type Conflict struct {
 	Plugin string `json:"plugin"`
-	Kind   string `json:"kind"` // mcpServer | skill | profile
+	Kind   string `json:"kind"` // mcpServer | skill | profile | command
 	Name   string `json:"name"`
 	Reason string `json:"reason"`
 }
@@ -47,7 +47,33 @@ type contribution struct {
 	mcpRun    []store.McpServer // run form (secrets substituted)
 	skills    []Skill
 	profiles  []store.AgentProfile
+	commands  []Command
+	themes    []Theme
 	conflicts []Conflict
+}
+
+// Command is one prompt slash command of an active plugin. It carries text
+// only: selecting it inserts Prompt into the composer and never sends it.
+type Command struct {
+	Plugin      string `json:"plugin"`
+	Name        string `json:"name"`
+	Qualified   string `json:"qualified"` // "<plugin>:<name>", always unique
+	Description string `json:"description,omitempty"`
+	Prompt      string `json:"prompt"`
+	// Alias is the bare name this command may also be typed as ("/name"),
+	// set only for the first plugin by id that declares that name. Clients
+	// drop it when a built-in command has the same name (built-ins win).
+	Alias string `json:"alias,omitempty"`
+}
+
+// Theme is one theme of an active plugin: a complete token set per declared
+// scheme.
+type Theme struct {
+	Plugin    string                       `json:"plugin"`
+	ID        string                       `json:"id"`
+	Qualified string                       `json:"qualified"` // "<plugin>:<id>"
+	Label     string                       `json:"label"`
+	Schemes   map[string]map[string]string `json:"schemes"`
 }
 
 type cachedPlugin struct {
@@ -178,6 +204,7 @@ func (m *Manager) derive() contribution {
 		}
 	}
 	takenMcp, takenProf := map[int64]bool{}, map[int64]bool{}
+	bareOwner := map[string]string{}
 	for _, in := range infos {
 		man := m.loadedManifest(in)
 		if man == nil {
@@ -224,6 +251,24 @@ func (m *Manager) derive() contribution {
 			}
 			seenDir[dir] = true
 			c.skills = append(c.skills, Skill{Plugin: owner, Name: sk.Name, Qualified: owner + ":" + sk.Name, Description: sk.Description, Dir: dir, Files: sk.Files})
+		}
+
+		for _, cc := range man.Contributes.Commands {
+			text, ok := man.prompts[cc.Name]
+			if !ok {
+				continue // an rpc command (PB.4): not a prompt, not listed here
+			}
+			cmd := Command{Plugin: owner, Name: cc.Name, Qualified: owner + ":" + cc.Name, Description: cc.Description, Prompt: text}
+			if first, taken := bareOwner[cc.Name]; taken {
+				c.conflicts = append(c.conflicts, Conflict{Plugin: owner, Kind: "command", Name: cc.Name, Reason: fmt.Sprintf("/%s belongs to plugin %q (first by id); use /%s", cc.Name, first, cmd.Qualified)})
+			} else {
+				bareOwner[cc.Name] = owner
+				cmd.Alias = cc.Name
+			}
+			c.commands = append(c.commands, cmd)
+		}
+		for _, ts := range man.themes {
+			c.themes = append(c.themes, Theme{Plugin: owner, ID: ts.ID, Qualified: owner + ":" + ts.ID, Label: ts.Label, Schemes: ts.Schemes})
 		}
 
 		ids := map[string]int64{}
@@ -322,6 +367,14 @@ func (m *Manager) PluginSkill(qualified string) (Skill, bool) {
 	}
 	return Skill{}, false
 }
+
+// Commands lists the prompt slash commands of every active plugin, by plugin
+// id then declaration order. Empty when the global switch is off.
+func (m *Manager) Commands() []Command { return m.derive().commands }
+
+// Themes lists the themes of every active plugin, by plugin id then
+// declaration order. Empty when the global switch is off.
+func (m *Manager) Themes() []Theme { return m.derive().themes }
 
 // Conflicts lists what active plugins contributed but the host did not apply.
 func (m *Manager) Conflicts() []Conflict { return m.derive().conflicts }

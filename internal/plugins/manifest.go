@@ -72,6 +72,8 @@ type Manifest struct {
 	// Loaded by loadContributions once the plugin's files are at hand.
 	skills   []SkillSpec
 	profiles []ProfileSpec
+	prompts  map[string]string // command name -> prompt text
+	themes   []ThemeSpec
 }
 
 // Engines holds the version gates besides api.

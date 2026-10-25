@@ -290,3 +290,72 @@ func TestPluginRPC_Loopback_AllowedWhenOff(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPluginCommands_RPC_OnlyEnabled_SwitchOff_Empty(t *testing.T) {
+	h := newPluginHarness(t)
+	loc := &requestContext{local: true, channel: ChannelLoopback}
+	relay := &requestContext{local: false, deviceID: "dev-1", channel: ChannelE2EE}
+
+	src := t.TempDir()
+	tokens := map[string]string{}
+	for _, tok := range plugins.ThemeTokens() {
+		tokens[tok] = "#102030"
+	}
+	theme, _ := json.Marshal(map[string]any{"dark": tokens})
+	for name, body := range map[string]string{
+		plugins.ManifestFile: `{"id":"demo","name":"Demo","version":"1.0.0","api":1,"engines":{"smind":">=0.1.0"},"contributes":{` +
+			`"commands":[{"name":"review","description":"Review","prompt":"c.md"}],"themes":[{"id":"dusk","label":"Dusk","file":"t.json"}]}}`,
+		"c.md":   "Review the diff.",
+		"t.json": string(theme),
+	} {
+		if err := os.WriteFile(filepath.Join(src, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := h.call("plugin.install", loc, map[string]any{"source": src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp := res.(plugins.Info).Consent.Fingerprint
+
+	list := func(rc *requestContext) (cmds []plugins.Command, themes []plugins.Theme) {
+		t.Helper()
+		c, err := h.call("plugin.commands", rc, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		th, err := h.call("plugin.themes", rc, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.([]plugins.Command), th.([]plugins.Theme)
+	}
+	if c, th := list(relay); len(c) != 0 || len(th) != 0 {
+		t.Fatal("an installed, disabled plugin contributes nothing")
+	}
+	if _, err := h.call("plugin.enable", loc, map[string]any{"id": "demo", "confirm": fp}); err != nil {
+		t.Fatal(err)
+	}
+	// Readable over the relay, with the exact wire shape.
+	c, th := list(relay)
+	if len(c) != 1 || len(th) != 1 {
+		t.Fatalf("%+v %+v", c, th)
+	}
+	raw, _ := json.Marshal(c[0])
+	if want := `{"plugin":"demo","name":"review","qualified":"demo:review","description":"Review","prompt":"Review the diff.","alias":"review"}`; string(raw) != want {
+		t.Fatalf("commands wire:\n got %s\nwant %s", raw, want)
+	}
+	if th[0].Plugin != "demo" || th[0].ID != "dusk" || th[0].Qualified != "demo:dusk" || th[0].Label != "Dusk" ||
+		len(th[0].Schemes) != 1 || len(th[0].Schemes["dark"]) != len(tokens) {
+		t.Fatalf("themes wire: %+v", th[0])
+	}
+	*h.on = false
+	c, th = list(relay)
+	if len(c) != 0 || len(th) != 0 {
+		t.Fatal("the switch off must empty both lists")
+	}
+	// Empty is [], never null, on the wire.
+	if raw, _ := json.Marshal(c); string(raw) != "[]" {
+		t.Fatalf("empty commands marshal as %s", raw)
+	}
+}

@@ -8,7 +8,10 @@ import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { useDaemonForge } from "@/hooks/use-attachment-limits";
 import { useLastDefined } from "@/hooks/use-last-defined";
 import { FileMentionPopover } from "@/components/composer/file-mention-popover";
+import { SlashCommandPopover } from "@/components/composer/slash-command-popover";
 import { useFileMention } from "@/components/composer/use-file-mention";
+import { useSlashCommand } from "@/components/composer/use-slash-command";
+import { useComposerInsertStore } from "@/stores/composer-insert-store";
 import { formatMentionToken, mentionedRefs } from "@/lib/file-mention";
 import { supportsKind } from "@/lib/attachments/kinds";
 import { profileIdFor } from "@/lib/run-profile";
@@ -397,6 +400,38 @@ export function Composer({
   });
   dismissMentionRef.current = mentionState.dismissForText;
 
+  // `/` at the start of the text lists the commands (plugins'; built-ins first). Picking one only puts its text in the
+  // draft, caret after it: nothing here sends. The `@` list and this one cannot both be open (a `/token` has no
+  // whitespace before the caret, an `@token` is preceded by it or starts the text).
+  const slashState = useSlashCommand({
+    text: draft.value,
+    caret,
+    enabled: !inactive,
+    onAccept: (_command, next) => {
+      pendingCaret.current = next.cursor;
+      draft.setValue(next.text);
+      setCaret(next.cursor);
+    },
+  });
+  const interceptKey = (e: KeyboardEvent<HTMLTextAreaElement>) => slashState.interceptKey(e) || mentionState.interceptKey(e);
+
+  // The palette's "Insert command" entries: this composer takes the text when it is the one that last had focus.
+  const insertKey = `${taskId ?? "none"}:${chatId ?? "none"}`;
+  useEffect(() => useComposerInsertStore.getState().register(insertKey), [insertKey]);
+  const insertRequest = useComposerInsertStore((state) => state.request);
+  const appliedInsert = useRef(insertRequest?.nonce);
+  useEffect(() => {
+    if (!insertRequest || insertRequest.nonce === appliedInsert.current) return;
+    appliedInsert.current = insertRequest.nonce;
+    if (insertRequest.key !== insertKey || inactive) return;
+    const current = draftRef.current.value;
+    const next = current.trim() === "" ? insertRequest.text : `${current}\n\n${insertRequest.text}`;
+    pendingCaret.current = next.length;
+    draftRef.current.setValue(next);
+    setCaret(next.length);
+    textareaNode.current?.focus();
+  }, [insertRequest, insertKey, inactive]);
+
   // The controlled value has landed: put the caret after the inserted mention.
   useLayoutEffect(() => {
     if (pendingCaret.current === null) return;
@@ -532,6 +567,7 @@ export function Composer({
             onHover={mentionState.setActive}
           />
         )}
+        {slashState.open && <SlashCommandPopover rows={slashState.rows} activeIndex={slashState.activeIndex} onPick={slashState.pick} onHover={slashState.setActive} />}
         {attachLimits && <AttachmentTray items={attachItems} onRemove={attach.remove} />}
         {showImageHint && (
           <p data-testid="attachment-image-hint" className="px-4 pt-2 text-ui-xs text-foreground-muted">
@@ -546,10 +582,13 @@ export function Composer({
           onChange={draft.setValue}
           onSubmit={submit}
           onKeyDown={handleKeyDown}
-          interceptKey={mentionState.interceptKey}
+          interceptKey={interceptKey}
           onCaret={setCaret}
-          textareaProps={mentionState.textareaProps}
-          onFocus={() => setFocused(true)}
+          textareaProps={slashState.open ? slashState.textareaProps : mentionState.textareaProps}
+          onFocus={() => {
+            setFocused(true);
+            useComposerInsertStore.getState().setTarget(insertKey);
+          }}
           onBlur={() => setFocused(false)}
           onPaste={handlePaste}
           placeholder={composerPlaceholder({ connected, hasTask: taskId !== null, running })}

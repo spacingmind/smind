@@ -122,6 +122,15 @@ func pluginHandlers(mgr *plugins.Manager, ev *pluginEvents) map[string]handlerFu
 		return in, pluginErr("plugin.get", err)
 	}
 
+	// Prompt commands and themes of the ACTIVE plugins (empty with the switch
+	// off): data only, readable by every caller the other reads allow.
+	hs["plugin.commands"] = func(context.Context, *requestContext, json.RawMessage) (any, error) {
+		return orEmpty(mgr.Commands()), nil
+	}
+	hs["plugin.themes"] = func(context.Context, *requestContext, json.RawMessage) (any, error) {
+		return orEmpty(mgr.Themes()), nil
+	}
+
 	guard := func(method string, h func(ctx context.Context, raw json.RawMessage) (any, error)) {
 		hs[method] = humanLocalOnly(method, func(ctx context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 			res, err := h(ctx, raw)
@@ -220,4 +229,12 @@ func (a *API) StartPlugins() {
 	if a.plugins != nil {
 		a.plugins.Start()
 	}
+}
+
+// orEmpty makes an empty list marshal as [] rather than null.
+func orEmpty[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
 }

@@ -1,7 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AppearanceSection } from "@/components/settings/appearance-section";
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 
 /** Extracts the one `text-ui-*` font-size utility present in a className string, if any. */
 function textUiSize(className: string): string | undefined {
