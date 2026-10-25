@@ -330,7 +330,6 @@ func newCommitDrafter(wm *workspace.Manager, exec commitdraft.Executor) wsapi.Co
 			}
 			return *t.WorktreePath, t.WorkspaceID, nil
 		},
-		// The style setting arrives in a later commit.
-		Style: func(int64) string { return "" },
+		Style: wm.CommitMessageStyle,
 	})}
 }
