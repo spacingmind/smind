@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTaskDiff } from "@/hooks/use-task-diff";
 import { toast } from "@/components/ui/toast";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useFocusedChatId, useFocusedChatStore } from "@/stores/focused-chat-store";
 import { AddToChatButton } from "@/components/add-to-chat-button";
 import { useAddToChat } from "@/hooks/use-add-to-chat";
@@ -56,6 +57,10 @@ interface FileState {
   diff: string | null;
   viewed: boolean;
 }
+
+/** What "Draft with agent" sends to the task's chat (G17); exact text, the reply is read in the chat. */
+export const DRAFT_COMMIT_PROMPT =
+  "Draft a Conventional Commits message for the currently staged changes (`git diff --cached`). Reply with the message only in a fenced block; do not commit.";
 
 /**
  * A per-file review-and-commit surface for a task (ADR 0006): the task's
@@ -299,32 +304,41 @@ export function DiffViewerPane({
    * a chat that has never run and has no saved run config falls back to
    * the shared provider catalog's first entry, the composer's default.
    */
+  /**
+   * Sends `prompt` to the recipient chat as a normal run.start: queued when that chat is mid-run, under the chat's own
+   * provider/model/permission settings (nothing pinned). Shared by "Submit review" and "Draft with agent".
+   */
+  const sendToRecipient = async (prompt: string) => {
+    if (!client || !recipient) throw new Error("No agent chat to ask");
+    let provider: Provider | null = recipient.provider;
+    if (!provider) {
+      provider = "claude-native";
+      try {
+        // The shared catalog's cache entry: served from the cache while it is fresh, re-read only if
+        // it was never fetched or was invalidated -- never a second one-off fetch.
+        const result = await queryClient.fetchQuery(providerListQueryOptions(client));
+        if (result?.providers?.[0]) provider = result.providers[0].id;
+      } catch {
+        // provider.list failing shouldn't block the send -- the daemon's
+        // own default is the same fallback the composer uses.
+      }
+    }
+    return client.call<RunStartResult>("run.start", {
+      taskId: task.ID,
+      chatId: recipient.chatId,
+      provider,
+      prompt,
+      whenBusy: "queue",
+      ...recipientRunParams(recipient),
+    });
+  };
+
   const submitReview = async () => {
     if (!client || !recipient || drafts.length === 0) return;
     setSubmittingReview(true);
     setReviewError(null);
     try {
-      let provider: Provider | null = recipient.provider;
-      if (!provider) {
-        provider = "claude-native";
-        try {
-          // The shared catalog's cache entry: served from the cache while it is fresh, re-read only if
-          // it was never fetched or was invalidated -- never a second one-off fetch.
-          const result = await queryClient.fetchQuery(providerListQueryOptions(client));
-          if (result?.providers?.[0]) provider = result.providers[0].id;
-        } catch {
-          // provider.list failing shouldn't block the review -- the daemon's
-          // own default is the same fallback the composer uses.
-        }
-      }
-      const started = await client.call<RunStartResult>("run.start", {
-        taskId: task.ID,
-        chatId: recipient.chatId,
-        provider,
-        prompt: buildReviewPrompt(drafts),
-        whenBusy: "queue",
-        ...recipientRunParams(recipient),
-      });
+      const started = await sendToRecipient(buildReviewPrompt(drafts));
       const count = drafts.length;
       const chatName = recipient.title || "the chat";
       clearReviewDrafts(task.ID);
@@ -345,12 +359,35 @@ export function DiffViewerPane({
     }
   };
 
+  // "Draft with agent": a normal prompt to the task's own chat (G17). The reply is a chat turn; nothing fills the textarea.
+  const [askingAgent, setAskingAgent] = useState(false);
+  const draftWithAgent = async () => {
+    if (!recipient || askingAgent) return;
+    setAskingAgent(true);
+    try {
+      const started = await sendToRecipient(DRAFT_COMMIT_PROMPT);
+      const chatName = recipient.title || "the chat";
+      toast({
+        variant: "success",
+        title: "queued" in started ? `Draft request queued in ${chatName}` : `Draft request sent to ${chatName}`,
+        description: "queued" in started ? "It sends when the current run finishes" : "The agent's reply appears in the chat",
+      });
+      useFocusedChatStore.getState().requestRevealChat(task.ID, recipient.chatId);
+    } catch (err: unknown) {
+      toast({ variant: "error", title: "Could not ask the agent", description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setAskingAgent(false);
+    }
+  };
+
   const refreshAll = () => {
     fetchFiles();
     wholeDiff.refresh();
   };
 
   const stagedCount = files?.filter((f) => f.staged).length ?? 0;
+  // Why "Draft with agent" is unavailable (shown as its tooltip), or null when it can be used.
+  const draftDisabledReason = stagedCount === 0 ? "Nothing staged" : recipient === null ? "No agent chat to ask" : null;
   // Item 8: a suggested message derived from the staged set itself
   // (lib/commit-suggestion.ts). Offered as a one-click fill rather than
   // placeholder text -- a placeholder vanishes on focus and can't be
@@ -568,6 +605,27 @@ export function DiffViewerPane({
           <Button type="button" size="sm" disabled={!canCommit} onClick={commit} data-testid="commit-button">
             {committing ? "Committing…" : `Commit (${stagedCount} staged)`}
           </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* A disabled button swallows pointer events: the span keeps the tooltip reachable. */}
+                <span className="inline-flex" data-disabled-reason={draftDisabledReason ?? undefined}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={draftDisabledReason !== null || askingAgent}
+                    onClick={() => void draftWithAgent()}
+                    data-testid="commit-draft-agent"
+                  >
+                    <Icons.draft aria-hidden="true" />
+                    Draft with agent
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{draftDisabledReason ?? "Ask the agent to draft a message"}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           {suggestion && message.trim() === "" && (
             <Button
               type="button"

@@ -102,6 +102,7 @@ import {
   Sigma,
   SlidersHorizontal,
   Square,
+  Sparkles,
   Star,
   Sun,
   Terminal,
@@ -252,6 +253,8 @@ export const Icons = {
   error: CircleAlert,
   /** Add `animate-spin` (and `motion-reduce:animate-none`). */
   spinner: LoaderCircle,
+  /** An AI-assisted action (asking the agent to draft a commit message). */
+  draft: Sparkles,
   /** A neutral / unfilled status marker. */
   statusIdle: Circle,
   /** A skipped / neutral / cancelled check: nothing ran, nothing failed. */

@@ -6,7 +6,7 @@ import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { requestDiffReveal, resetDiffReveal } from "@/lib/diff-reveal";
 import { DIFF_PREFS_STORAGE_KEY } from "@/lib/diff-prefs";
 import { addReviewDraft, getReviewDrafts, resetReviewDrafts } from "@/lib/review-drafts";
-import { DiffViewerPane } from "@/components/diff-viewer-pane";
+import { DiffViewerPane, DRAFT_COMMIT_PROMPT } from "@/components/diff-viewer-pane";
 import { clearToasts, Toaster } from "@/components/ui/toast";
 import { runConfigStorageKey } from "@/components/composer/run-config-preference";
 import { useFocusedChatStore } from "@/stores/focused-chat-store";
@@ -931,5 +931,61 @@ describe("DiffViewerPane header below md", () => {
     fireEvent.pointerDown(screen.getByTestId("diff-actions-menu"), { button: 0, ctrlKey: false });
     await waitFor(() => expect(screen.getByTestId("diff-menu-refresh")).toBeInTheDocument());
     expect(screen.queryByTestId("diff-menu-create-pr")).not.toBeInTheDocument();
+  });
+});
+
+describe("DiffViewerPane Draft with agent", () => {
+  const PROMPT =
+    "Draft a Conventional Commits message for the currently staged changes (`git diff --cached`). Reply with the message only in a fenced block; do not commit.";
+
+  async function pane(opts: { staged: boolean; chats: Chat[] }) {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} chats={opts.chats} />);
+    await resolveFilesAndDiffs(client, { files: [{ path: "file.txt", status: "modified", staged: opts.staged }] });
+    return client;
+  }
+
+  it("draft with agent is disabled with the Nothing staged reason", async () => {
+    await pane({ staged: false, chats: [chat(10, { Provider: "claude-native" })] });
+    expect(screen.getByTestId("commit-draft-agent")).toBeDisabled();
+    expect(screen.getByTestId("commit-draft-agent").parentElement).toHaveAttribute("data-disabled-reason", "Nothing staged");
+  });
+
+  it("draft with agent is disabled with the No agent chat to ask reason", async () => {
+    await pane({ staged: true, chats: [] });
+    expect(screen.getByTestId("commit-draft-agent")).toBeDisabled();
+    expect(screen.getByTestId("commit-draft-agent").parentElement).toHaveAttribute("data-disabled-reason", "No agent chat to ask");
+  });
+
+  it("draft with agent sends the exact prompt once through the chat's own send path and touches nothing else", async () => {
+    expect(DRAFT_COMMIT_PROMPT).toBe(PROMPT);
+    window.localStorage.setItem(
+      runConfigStorageKey(TASK.ID, 10),
+      JSON.stringify({ baseAgentId: "3", custom: false, provider: "claude-native", permissionMode: "plan", autoAccept: false, thinkingLevel: "", model: "claude-sonnet-5-5" }),
+    );
+    useFocusedChatStore.getState().setFocusedChat(TASK.ID, 10);
+    const client = await pane({ staged: true, chats: [chat(10, { Provider: "claude-native" })] });
+    const box = screen.getByTestId("commit-message") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "my own words" } });
+    const before = client.calls.length;
+
+    expect(screen.getByTestId("commit-draft-agent")).toBeEnabled();
+    fireEvent.click(screen.getByTestId("commit-draft-agent"));
+    fireEvent.click(screen.getByTestId("commit-draft-agent"));
+    await flush();
+
+    const sent = client.calls.slice(before);
+    expect(sent.map((c) => c.method)).toEqual(["run.start"]);
+    // The chat's own provider/model/mode, queued when busy; nothing pinned or hidden.
+    expect(sent[0]!.params).toEqual({
+      taskId: TASK.ID,
+      chatId: 10,
+      provider: "claude-native",
+      prompt: PROMPT,
+      whenBusy: "queue",
+      model: "claude-sonnet-5-5",
+      permissionMode: "plan",
+    });
+    expect(box.value).toBe("my own words");
   });
 });
