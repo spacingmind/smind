@@ -44,6 +44,11 @@ describe("TaskBudgetControl", () => {
     expect(screen.getByTestId("task-budget-meter")).toHaveAttribute("aria-valuenow", "42");
   });
 
+  it("task-detail tree budget chip still renders when a budget is set", () => {
+    setup({ ...ROOT, budgetUsd: 10, budgetSpentUsd: 4.2 });
+    expect(chip()).toHaveTextContent("$4.20 / $10.00");
+  });
+
   it("near: 80% and up", () => {
     setup({ ...ROOT, budgetUsd: 10, budgetSpentUsd: 8 });
     expect(chip()).toHaveAttribute("data-state-kind", "near");

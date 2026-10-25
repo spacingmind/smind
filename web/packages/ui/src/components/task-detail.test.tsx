@@ -1200,81 +1200,21 @@ describe("MCP servers pill", () => {
 });
 
 describe("chat usage total", () => {
-  it("task-detail: the header total updates live from a usage event", async () => {
+  it("task-detail renders no chat usage total", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
-    client.nth("run.list", 0).resolve([runningRun()]);
+    client.nth("run.list", 0).resolve([
+      doneRun({ usage: { inputTokens: 10000, outputTokens: 1000, costUsd: 0.31, source: "claude_result" } }),
+    ]);
     await flush();
     expect(screen.queryByTestId("chat-usage-total")).not.toBeInTheDocument();
 
+    // A live usage event doesn't bring it back either.
     client.emit("run.attach", 0, "usage", {
       usage: { inputTokens: 12345, outputTokens: 1234, costUsd: 0.31, source: "claude_result" },
     });
     await flush();
-
-    expect(screen.getByTestId("chat-usage-total")).toHaveTextContent("12.3k in · 1.2k out · $0.31");
-  });
-
-  it("task-detail: no double counting when a usage event follows the run.list usage", async () => {
-    const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
-
-    client.nth("run.list", 0).resolve([
-      runningRun({ usage: { inputTokens: 10000, outputTokens: 1000, source: "claude_result" } }),
-    ]);
-    await flush();
-    expect(screen.getByTestId("chat-usage-total")).toHaveTextContent("10k in · 1k out");
-
-    // The live event REPLACES the seeded value, never adds to it.
-    client.emit("run.attach", 0, "usage", {
-      usage: { inputTokens: 12345, outputTokens: 1234, source: "claude_result" },
-    });
-    await flush();
-
-    expect(screen.getByTestId("chat-usage-total")).toHaveTextContent("12.3k in · 1.2k out");
-  });
-
-  it("task-detail: switching chats drops the previous chat's total", async () => {
-    const client = new FakeWsClient();
-    const { rerender } = render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
-
-    client.nth("run.list", 0).resolve([
-      runningRun({ usage: { inputTokens: 10000, outputTokens: 1000, source: "claude_result" } }),
-    ]);
-    await flush();
-    expect(screen.getByTestId("chat-usage-total")).toHaveTextContent("10k in");
-
-    rerender(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_B} isDefaultChat={false} />);
-    await flush();
-
-    // Gone immediately -- no stale total while chat B's list is in flight.
-    expect(screen.queryByTestId("chat-usage-total")).not.toBeInTheDocument();
-
-    client.nth("run.list", 1).resolve([]);
-    await flush();
-    expect(screen.queryByTestId("chat-usage-total")).not.toBeInTheDocument();
-  });
-
-  it("task-detail: a late usage event from the previous chat's stream is ignored", async () => {
-    const client = new FakeWsClient();
-    const { rerender } = render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
-
-    client.nth("run.list", 0).resolve([runningRun()]);
-    await flush();
-
-    rerender(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_B} isDefaultChat={false} />);
-    client.nth("run.list", 1).resolve([]);
-    await flush();
-    expect(screen.queryByTestId("chat-usage-total")).not.toBeInTheDocument();
-
-    // The old chat's still-open run.attach delivers a usage event after the
-    // switch -- the cancelled session must drop it.
-    client.emit("run.attach", 0, "usage", {
-      usage: { inputTokens: 99999, outputTokens: 99999, source: "claude_result" },
-    });
-    await flush();
-
     expect(screen.queryByTestId("chat-usage-total")).not.toBeInTheDocument();
   });
 });

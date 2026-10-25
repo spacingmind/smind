@@ -10,7 +10,6 @@ import { useAttachmentDraft } from "@/components/composer/use-attachment-draft";
 import { useAttachmentDrop } from "@/components/composer/use-attachment-drop";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
-import { ChatUsageTotal } from "@/components/chat-usage-total";
 import { McpServersIndicator } from "@/components/mcp-servers-indicator";
 import { PortChip, SetupBadge, SetupDetails, UntrustedBanner } from "@/components/task-setup";
 import { PermissionCard } from "@/components/permission/permission-card";
@@ -400,7 +399,6 @@ export function TaskDetailPane({
               </button>
             )}
             <McpServersIndicator servers={latestRun?.mcpServers} />
-            <ChatUsageTotal runs={runs} provider={chat.Provider ?? latestRun?.provider} />
             <TaskLineageChips lineage={lineage} onJumpToTask={onJumpToTask} />
           </>
         }
