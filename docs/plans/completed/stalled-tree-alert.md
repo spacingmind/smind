@@ -24,10 +24,11 @@ Definitions (the detector's contract):
 - **Busy**: any run in the subtree with `status='running'` (this includes a run
   waiting on a permission). A tree `budget_exceeded` refusal creates no run,
   so it is not busy and does not move `A`.
-- **Done tree**: every live node of the seat's root tree is finished under the
-  existing `isFinishedNode` rule (latest run terminal, not `needs-continue`)
-  and has no queued prompt. A done tree never stalls.
-- **Stalled** = seat, tree not done, not busy, `now - A(seat) >= N`, where
+- **No done-tree exemption** (Supervisor default 2026-10-25, supersedes the
+  first draft): an idle finished tree still stalls; it is ended by ARCHIVING it
+  (archived seats and roots never alert). The latest run's terminal state
+  (done, error, stopped, interrupted, needs-continue) does not exempt a seat.
+- **Stalled** = live seat under a live root, not busy, `now - A(seat) >= N`, where
   `N = orchestration.stallAlertMinutes`. `stalledSince = A(seat)`.
 - **Episode** = `(seat task id, stalledSince)`. Any run/queue activity in the
   subtree moves `A`, which ends the episode; a later stall has a new
@@ -39,8 +40,8 @@ Criteria:
 2. AC2 — a daemon restart does not re-alert an already alerted episode (the
    episode marker is persisted).
 3. AC3 — busy subtrees, queued items younger than N, rate-limited `wait`
-   seats with a future reset, done trees, archived seats and system tasks
-   never alert; `stallAlertMinutes: 0` turns the detector off.
+   seats with a future reset, archived seats/roots and system tasks never
+   alert; a finished-but-idle tree DOES alert; `stallAlertMinutes: 0` turns the detector off.
 4. AC4 — config key `orchestration.stallAlertMinutes` (default 15, 0 = off,
    negative rejected with a clear error), documented beside the other
    `orchestration.*` keys.
@@ -74,7 +75,10 @@ Detector (`internal/stall`, fake clock, injected tick, no sleeps):
 - `TestRateLimitedWaitSeatAlertsNMinutesAfterReset`
 - `TestStallAlertMinutesZeroNeverAlerts`
 - `TestRestartDoesNotReAlertAlertedEpisode` (new detector over the same DB)
-- `TestDoneTreeNeverAlerts`, `TestArchivedSeatNeverAlerts`,
+- `TestFinishedChildrenIdleSeatAlerts` (seat run done + child done, nothing
+  queued, N+ min later => one alert, marker in Current(), no re-alert),
+  `TestLatestRunErrorOrNeedsContinueStillAlerts`,
+  `TestArchivedSeatNeverAlerts`, `TestArchivedRootNeverAlertsEvenWhenIdle`,
   `TestSystemTaskNeverAlerts`
 - `TestNestedSeatsAlertOnlyTopmost` (nested stalled seats: one alert for the
   topmost; every stalled seat keeps the marker)
@@ -121,19 +125,14 @@ Supervisor defaults (2026-10-25; the Human may veto):
   step is needed.
 - D5 A `wait` seat with a known future reset is "rate limited", not stalled;
   after the reset, N minutes count from the reset (it is part of `A`).
-- D6 A done tree never stalls; archived seats never stall.
+- D6 Archived seats and archived roots never stall. There is NO finished-tree
+  exemption (see L1).
 
 Lead decisions:
 
-- L1 Done tree reuses `isFinishedNode` + "no queued prompt" over every live
-  node, seat included. Consequence: a Lead that ended its last turn with every
-  child finished is "done", not stalled (finished trees awaiting archive are
-  routine; alerting on them would be noise). A node that is `idle` (never
-  ran or its run state is unknown) or `needs-continue`, or has a queued prompt,
-  keeps the tree not done; an errored or stopped node counts as finished (the
-  existing rule). **Human may veto**: the
-  alternative is alerting whenever the root seat's own latest run ended and
-  nothing else is going on.
+- L1 (revised by the Steward after review of #605) No done-tree rule: a Lead
+  that ends a turn with every child finished is exactly the silent case this
+  feature exists for, so it alerts after N minutes. Archiving ends it.
 - L2 Reuse: `push.Notifier.Notify` (dedupe by device+key, sealing, registry,
   Approved, queue) with a new `KindStalled` added to `AllKinds`; the key is
   `"stall:<taskId>:<stalledSince unix>"`. Stalled is not a run kind, so the
@@ -184,7 +183,7 @@ mobile `npx tsc --noEmit && npm test` (71 files, 689 tests).
 |---|---|
 | AC1 | `TestIdleSeatPastThresholdAlertsOnce`, `TestSecondTickSameEpisodeDoesNotReAlert`, `TestRunStartingInSubtreeClearsEpisodeAndLaterStallAlertsAgain`, `TestNestedSeatsAlertOnlyTopmost`; live: one `task.stalled` event per seat |
 | AC2 | `TestRestartDoesNotReAlertAlertedEpisode`; live: daemon restarted over the same DB, no second event, marker still shown |
-| AC3 | `TestRunningChildRunSuppresses`, `TestQueuedItemSuppresses`, `TestRateLimitedWait*`, `TestDoneTreeNeverAlerts`, `TestArchivedSeatNeverAlerts`, `TestSystemTaskNeverAlerts`, `TestBudgetExceededRefusalAloneIsNotBusy`, `TestStallAlertMinutesZeroNeverAlerts` |
+| AC3 | `TestRunningChildRunSuppresses`, `TestQueuedItemSuppresses`, `TestRateLimitedWait*`, `TestFinishedChildrenIdleSeatAlerts`, `TestLatestRunErrorOrNeedsContinueStillAlerts`, `TestArchivedSeatNeverAlerts`, `TestArchivedRootNeverAlertsEvenWhenIdle`, `TestSystemTaskNeverAlerts`, `TestBudgetExceededRefusalAloneIsNotBusy`, `TestStallAlertMinutesZeroNeverAlerts` |
 | AC4 | `TestStallAlertMinutesDefaultAndZero`, `TestStallAlertMinutesNegativeRejected`; documented in README next to the other `orchestration.*` keys and in the `OrchestrationConfig` doc comment |
 | AC5 | `TestNotifyStalledSealedNoPlaintext`, `TestStalledDedupeByEpisodeKey`, `TestPushInputStalled`, `TestStalledBusEventEmitted`; web `fires a notification on task.stalled`; live: bus event captured (/tmp/stalled-tree-shots/live/). Live push send NOT exercised (push disabled in the sandbox) |
 | AC6 | `TestTaskTreeCarriesStalledAndSince`, `TestTaskTreeOmitsStalledWhenNot`, `TestTaskTreeLinePrintsStalled`; live `smind task tree` printed `stalled`. MCP `task_tree` passes the node JSON through (cmd/smind/mcp_tree_tools.go) |
@@ -197,7 +196,13 @@ Mutations (each reverted afterwards): (1) drop the already-alerted check =>
 `TestTickIsOSeatsNoExternalCalls` fail; (2) ignore the rate-limit reset =>
 `TestRateLimitedWaitSeatFutureResetDoesNotAlert`,
 `TestRateLimitedWaitSeatAlertsNMinutesAfterReset` fail; (3) ignore running
-children => `TestRunningChildRunSuppresses` fails.
+children => `TestRunningChildRunSuppresses` fails; (4) re-add a finished-seat
+exemption => `TestFinishedChildrenIdleSeatAlerts` and the needs-continue case
+of `TestLatestRunErrorOrNeedsContinueStillAlerts` fail.
+
+Push kinds: `push.register` with an empty kinds list already stores ALL kinds
+(`normalizePushKinds`), so new registrations include `stalled`; stored lists
+are explicit, so pre-existing devices must re-register. Left as is.
 
 Not verified: a real push send to a device; the marker in the real daemon-served
 web bundle (frames use the real app against an intercepted task.tree response);

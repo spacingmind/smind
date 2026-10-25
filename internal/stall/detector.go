@@ -1,8 +1,9 @@
 // Package stall detects a task tree that has gone silent: a seat (a Lead or a
 // task with live children) whose subtree has not run or queued anything for
-// the configured number of minutes while the tree still has unfinished work.
+// the configured number of minutes. A finished tree is not exempt: an idle tree
+// is ended by archiving it.
 // It only reports; it never wakes, archives or recovers anything. The rules
-// are in docs/plans/active/stalled-tree-alert.md.
+// are in docs/plans/completed/stalled-tree-alert.md.
 package stall
 
 import (
@@ -10,7 +11,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -32,7 +32,6 @@ type agg struct {
 	// activity is the subtree activity time A (without the seat's own
 	// rate-limit reset, which is added per seat).
 	activity time.Time
-	done     bool // every live node in the subtree is finished
 }
 
 // Detect returns the stalled seats among rows (live, kind='task' tasks), in
@@ -63,18 +62,17 @@ func Detect(rows []store.StallRow, now time.Time, n time.Duration) []Episode {
 			return a
 		}
 		if visiting[id] { // parent cycle: do not recurse into it again
-			return agg{done: true}
+			return agg{}
 		}
 		visiting[id] = true
 		r := byID[id]
-		a := agg{running: r.Running, activity: r.LastActivity, done: finished(r)}
+		a := agg{running: r.Running, activity: r.LastActivity}
 		if r.QueuedHold != nil && r.QueuedHold.After(a.activity) {
 			a.activity = *r.QueuedHold
 		}
 		for _, c := range children[id] {
 			ca := walk(c)
 			a.running = a.running || ca.running
-			a.done = a.done && ca.done
 			if ca.activity.After(a.activity) {
 				a.activity = ca.activity
 			}
@@ -87,29 +85,13 @@ func Detect(rows []store.StallRow, now time.Time, n time.Duration) []Episode {
 		walk(rows[i].TaskID)
 	}
 
-	rootOf := func(id int64) int64 {
-		seen := map[int64]bool{id: true}
-		for {
-			p := byID[id].ParentID
-			if p == nil {
-				return id
-			}
-			next, live := byID[*p]
-			if !live || seen[next.TaskID] {
-				return id
-			}
-			seen[next.TaskID] = true
-			id = next.TaskID
-		}
-	}
-
 	var out []Episode
 	for i := range rows {
 		r := &rows[i]
 		if len(children[r.TaskID]) == 0 && !r.ProfileOrchestration {
 			continue // not a seat
 		}
-		if memo[rootOf(r.TaskID)].done || memo[r.TaskID].running {
+		if memo[r.TaskID].running {
 			continue
 		}
 		a := memo[r.TaskID].activity
@@ -148,22 +130,6 @@ func Detect(rows []store.StallRow, now time.Time, n time.Duration) []Episode {
 		}
 	}
 	return out
-}
-
-// finished mirrors wsapi.isFinishedNode from the node's own DB facts: the
-// latest run reached a terminal state without a needs-continue disposition,
-// and no prompt is queued.
-func finished(r *store.StallRow) bool {
-	if !r.HasRun || r.HasQueued {
-		return false
-	}
-	switch runs.Status(r.LatestStatus) {
-	case runs.StatusDone:
-		return runs.DispositionFor(runs.StatusDone, r.LatestStopReason) != runs.DispositionNeedsContinue
-	case runs.StatusError, runs.StatusStopped, runs.StatusInterrupted:
-		return true
-	}
-	return false
 }
 
 // Deps are the detector's collaborators; every one is required.

@@ -242,7 +242,7 @@ func TestRestartDoesNotReAlertAlertedEpisode(t *testing.T) {
 	e.wantAlerts(1)
 }
 
-func TestDoneTreeNeverAlerts(t *testing.T) {
+func TestFinishedChildrenIdleSeatAlerts(t *testing.T) {
 	e := newEnv(t)
 	root, child := e.pair()
 	e.run("r", root.ID, "done", 0, 0)
@@ -250,9 +250,59 @@ func TestDoneTreeNeverAlerts(t *testing.T) {
 	d := e.detector(testMinutes)
 	e.at(5 * time.Hour)
 	d.Tick()
-	e.wantAlerts(0)
-	if got := d.Current(); len(got) != 0 {
-		t.Fatalf("Current() = %v for a done tree", got)
+	e.wantAlerts(1)
+	if e.alerts[0].TaskID != root.ID {
+		t.Fatalf("alert for task %d, want the seat %d", e.alerts[0].TaskID, root.ID)
+	}
+	if _, ok := d.Current()[root.ID]; !ok {
+		t.Fatalf("Current() = %v, want the seat marked", d.Current())
+	}
+	d.Tick()
+	e.wantAlerts(1)
+}
+
+func TestLatestRunErrorOrNeedsContinueStillAlerts(t *testing.T) {
+	for _, tc := range []struct{ name, status, stop string }{
+		{"error", "error", ""},
+		{"stopped", "stopped", ""},
+		{"needs-continue", "done", "max_turns"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			root, child := e.pair()
+			e.run("c", child.ID, "done", 0, 0)
+			e.run("r", root.ID, tc.status, 0, 0)
+			if tc.stop != "" {
+				fin := e.base.Add(time.Second)
+				if _, err := e.s.UpdateRunStatus("r", tc.status, &fin, tc.stop, ""); err != nil {
+					t.Fatalf("UpdateRunStatus() error = %v", err)
+				}
+			}
+			d := e.detector(testMinutes)
+			e.at(time.Hour)
+			d.Tick()
+			e.wantAlerts(1)
+		})
+	}
+}
+
+func TestArchivedRootNeverAlertsEvenWhenIdle(t *testing.T) {
+	e := newEnv(t)
+	root, child := e.pair()
+	grand := e.task("grand", &child.ID)
+	_ = grand
+	if _, err := e.s.ArchiveTask(root.ID); err != nil {
+		t.Fatalf("ArchiveTask() error = %v", err)
+	}
+	d := e.detector(testMinutes)
+	e.at(5 * time.Hour)
+	d.Tick()
+	// The archived root never alerts; its live descendants become their own
+	// roots, and their own seats may.
+	for _, a := range e.alerts {
+		if a.TaskID == root.ID {
+			t.Fatalf("archived root alerted: %+v", a)
+		}
 	}
 }
 
