@@ -271,37 +271,15 @@ function ProfilesSection(_props: SettingsSectionContext) {
                           <span className="truncate text-ui-sm text-muted-foreground">{describeProfile(p, providers)}</span>
                           {p.Notes && <span className="truncate text-ui-sm text-foreground-subtlest">{p.Notes}</span>}
                         </div>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-xs"
-                              aria-label={`${p.Name} actions`}
-                              data-testid={`profile-menu-${p.ID}`}
-                              className="shrink-0"
-                            >
-                              <Icons.more aria-hidden />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              data-testid={`profile-edit-${p.ID}`}
-                              onSelect={() => (editing ? closeCard() : startEdit(p))}
-                            >
-                              {editing ? "Close" : "Edit"}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              data-testid={`profile-delete-${p.ID}`}
-                              onSelect={() => {
-                                setDeletingProfile(p);
-                                deleteAction.reset();
-                              }}
-                            >
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        <ProfileActionsMenu
+                          profile={p}
+                          editing={editing}
+                          onToggleEdit={() => (editing ? closeCard() : startEdit(p))}
+                          onDelete={() => {
+                            setDeletingProfile(p);
+                            deleteAction.reset();
+                          }}
+                        />
                       </div>
                       {editing && (
                         <ProfileForm
@@ -511,6 +489,48 @@ function ProviderHealthDot({ provider, testId }: { provider: string; testId: str
       data-testid={testId}
       data-status={state}
     />
+  );
+}
+
+/**
+ * The row's "..." menu. Its first item reads "Edit" or "Close" as the row was when the menu opened: choosing it flips
+ * `editing` while the menu is still fading out, and the label must not change under the pointer mid-animation.
+ */
+function ProfileActionsMenu({
+  profile,
+  editing,
+  onToggleEdit,
+  onDelete,
+}: {
+  profile: AgentProfile;
+  editing: boolean;
+  onToggleEdit: () => void;
+  onDelete: () => void;
+}) {
+  const [editingWhenOpened, setEditingWhenOpened] = useState(editing);
+  return (
+    <DropdownMenu onOpenChange={(open) => open && setEditingWhenOpened(editing)}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          aria-label={`${profile.Name} actions`}
+          data-testid={`profile-menu-${profile.ID}`}
+          className="shrink-0"
+        >
+          <Icons.more aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem data-testid={`profile-edit-${profile.ID}`} onSelect={onToggleEdit}>
+          {editingWhenOpened ? "Close" : "Edit"}
+        </DropdownMenuItem>
+        <DropdownMenuItem data-testid={`profile-delete-${profile.ID}`} onSelect={onDelete}>
+          Delete
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

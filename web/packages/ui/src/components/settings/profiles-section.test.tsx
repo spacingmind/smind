@@ -636,4 +636,43 @@ describe("profile form uses the shared run-config pickers (ADR-0032 S4)", () => 
       expect(daemon.calls.some((c) => c.method === "profile.update")).toBe(false);
     });
   });
+
+  describe("actions menu while it fades out", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    // Radix keeps a closing menu mounted while its exit animation runs; jsdom has none, so fake one.
+    function holdClosingMenu() {
+      const real = window.getComputedStyle.bind(window);
+      const fake = (el: Element, pseudo?: string | null) =>
+        el instanceof HTMLElement && el.getAttribute("role") === "menu"
+          ? ({
+              get animationName() {
+                return el.dataset.state === "open" ? "fade-in" : "fade-out";
+              },
+              display: "block",
+            } as CSSStyleDeclaration)
+          : real(el, pseudo);
+      vi.spyOn(window, "getComputedStyle").mockImplementation(fake);
+      vi.spyOn(globalThis, "getComputedStyle").mockImplementation(fake);
+    }
+
+    it("Edit does not turn into Close under the pointer once the editor opens", async () => {
+      holdClosingMenu();
+      await renderWithProfiles([PROFILE]);
+      fireEvent.pointerDown(screen.getByTestId("profile-menu-1"), { button: 0 });
+      fireEvent.click(await screen.findByTestId("profile-edit-1"));
+      await flush();
+      expect(screen.getByTestId("profile-edit-form-1-name")).toBeInTheDocument();
+      expect(screen.getByTestId("profile-edit-1")).toHaveTextContent("Edit");
+    });
+
+    it("reopening the menu on an open editor offers Close", async () => {
+      await renderWithProfiles([PROFILE]);
+      fireEvent.pointerDown(screen.getByTestId("profile-menu-1"), { button: 0 });
+      fireEvent.click(await screen.findByTestId("profile-edit-1"));
+      await flush();
+      fireEvent.pointerDown(screen.getByTestId("profile-menu-1"), { button: 0 });
+      expect(await screen.findByTestId("profile-edit-1")).toHaveTextContent("Close");
+    });
+  });
 });
