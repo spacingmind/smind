@@ -78,6 +78,9 @@ func treeLine(n taskTreeNode, now time.Time) string {
 	case p > 1:
 		segs = append(segs, fmt.Sprintf("%d permissions", p))
 	}
+	if n.Stalled {
+		segs = append(segs, "stalled")
+	}
 	return strings.Join(append(segs, treeCost(n)), "  ")
 }
 

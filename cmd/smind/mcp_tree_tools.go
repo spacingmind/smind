@@ -16,7 +16,7 @@ import (
 // task-hierarchy plan (§4.2/§4.3): task_tree (one call for every task
 // with status/usage/permissions, nested) and task_wait's childrenOf mode.
 func registerMCPTreeTools(srv *mcp.Server, client *wsclient.Client) {
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_tree", Description: "See a workspace's whole task hierarchy in one call: every task (or one task and its descendants) as nested nodes -- each carrying id, parentId, title, depth, tier (supervisor/leader/coder), run state, pending permission count, per-descendant status counts, usage rollups (tokens/cost summed over the subtree; null means nothing reported, never 0), and its children. Pass exactly one of workspaceId or taskId. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately. A root with a human-set budget also carries budgetUsd, budgetSpentUsd (reported cost only; runs that reported none are not counted: budgetPartial/budgetUnknownRuns), budgetRemainingUsd and overBudget: once overBudget, new agent-launched runs and tasks in that tree are refused (budget_exceeded) until a human raises the budget -- you cannot change it."}, mcpTaskTree(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_tree", Description: "See a workspace's whole task hierarchy in one call: every task (or one task and its descendants) as nested nodes -- each carrying id, parentId, title, depth, tier (supervisor/leader/coder), run state, pending permission count, per-descendant status counts, usage rollups (tokens/cost summed over the subtree; null means nothing reported, never 0), and its children. A node with stalled: true (and stalledSince) is a seat whose tree has had no run or queued prompt for the configured idle time while work is unfinished: look at it, do not wait on it. Pass exactly one of workspaceId or taskId. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately. A root with a human-set budget also carries budgetUsd, budgetSpentUsd (reported cost only; runs that reported none are not counted: budgetPartial/budgetUnknownRuns), budgetRemainingUsd and overBudget: once overBudget, new agent-launched runs and tasks in that tree are refused (budget_exceeded) until a human raises the budget -- you cannot change it."}, mcpTaskTree(client))
 }
 
 // taskTreeInput is task_tree's argument shape: exactly one of
@@ -53,6 +53,10 @@ type taskTreeNode struct {
 	BudgetPartial     bool     `json:"budgetPartial"`
 	BudgetUnknownRuns int      `json:"budgetUnknownRuns"`
 	OverBudget        bool     `json:"overBudget"`
+	// Stalled marks a seat whose tree sat idle past orchestration.stallAlertMinutes;
+	// StalledSince is the RFC 3339 UTC instant of its last subtree activity.
+	Stalled      bool   `json:"stalled"`
+	StalledSince string `json:"stalledSince"`
 }
 
 type taskTreeNodeRun struct {
@@ -160,6 +164,10 @@ func decodeNodeMap(n taskTreeNode) map[string]any {
 		}
 		m["budgetSpentUsd"] = spent
 		m["budgetRemainingUsd"] = budgetRemaining(*n.BudgetUSD, spent)
+	}
+	if n.Stalled {
+		m["stalled"] = true
+		m["stalledSince"] = n.StalledSince
 	}
 	if n.ParentID != nil {
 		m["parentId"] = *n.ParentID
