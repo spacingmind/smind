@@ -35,7 +35,7 @@ const (
 	relayEndMark   = "<!-- END GENERATED: smind relay --help -->"
 	// readmeForbidden turns the forbidden-string rule on for README.md too.
 	// The README move (last docs PR) flips it.
-	readmeForbidden = false
+	readmeForbidden = true
 )
 
 func repoRoot(t *testing.T) string {
@@ -94,6 +94,7 @@ var (
 	smindCmdRe  = regexp.MustCompile(`(?:^|[\s$("'])smind((?:\s+[^\s"'` + "`" + `)|;&<>]+){0,3})`)
 	bareWordRe  = regexp.MustCompile(`^[a-z][a-z-]*$`)
 	helpLineRe  = regexp.MustCompile(`(?m)^\s+smind((?: [a-z][a-z-]*){1,3})`)
+	dockerRe    = regexp.MustCompile(`\bdocker\b`)
 	commentTail = regexp.MustCompile(`\s#\s.*$`)
 )
 
@@ -341,6 +342,10 @@ func codeLines(md string) []string {
 func commandMentions(md string) [][]string {
 	var found [][]string
 	for _, l := range codeLines(md) {
+		// "smind" in a docker command is an image or container name.
+		if dockerRe.MatchString(l) {
+			continue
+		}
 		for _, m := range smindCmdRe.FindAllStringSubmatch(l, -1) {
 			found = append(found, strings.Fields(m[1]))
 		}
