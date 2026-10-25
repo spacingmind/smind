@@ -48,3 +48,12 @@ describe("ProbeContrastTable", () => {
     expect(duration?.textContent).toContain("−8s");
   });
 });
+
+describe("ProbeContrastTable narrow layout", () => {
+  it("never wraps a value inside a cell, so a narrow screen scrolls the table instead of breaking numbers", () => {
+    render(<ProbeContrastTable noiseFloor metrics={[{ key: "costUSD", a: 0.09, a2: 0.08, b: 0.05, deltaAB: -0.04, noise: 0.01, worse: false }]} />);
+    const cells = screen.getByTestId("probe-contrast").querySelectorAll("th, td");
+    expect(cells.length).toBeGreaterThan(0);
+    for (const c of cells) expect(c.className).toContain("whitespace-nowrap");
+  });
+});

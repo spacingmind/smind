@@ -91,6 +91,13 @@ describe("GitHub picker", () => {
     expect(screen.getByRole("menuitem", { name: /GitHub issue/ })).toHaveAttribute("aria-disabled", "true");
   });
 
+  it("keeps the search placeholder short enough to show whole at 390 px (it was clipped mid-word)", async () => {
+    const { client } = await renderComposer();
+    await openPicker(client);
+    const placeholder = screen.getByRole("combobox", { name: "Search pull requests" }).getAttribute("placeholder") ?? "";
+    expect(placeholder.length).toBeLessThanOrEqual(40);
+  });
+
   it("searches on open and once per settled query with the right params", async () => {
     const { client } = await renderComposer();
     await openPicker(client);

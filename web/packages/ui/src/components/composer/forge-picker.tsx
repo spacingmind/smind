@@ -72,7 +72,7 @@ export function ForgePicker({
           aria-expanded
           aria-controls={listId}
           aria-activedescendant={items.length > 0 ? `${listId}-${activeIndex}` : undefined}
-          placeholder={kind === "pr" ? "Search pull requests, or paste a number or URL" : "Search issues, or paste a number or URL"}
+          placeholder={kind === "pr" ? "Search PRs, or paste a number or URL" : "Search issues, or paste a number or URL"}
           value={text}
           onChange={(e) => {
             setText(e.target.value);

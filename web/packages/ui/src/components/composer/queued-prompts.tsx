@@ -54,7 +54,7 @@ export function QueuedPrompts({
           <li
             key={item.ID}
             data-testid="composer-queued-item"
-            className="flex items-center gap-2 rounded-md bg-surface px-2 py-1 text-ui-sm text-foreground-muted"
+            className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md bg-surface px-2 py-1 text-ui-sm text-foreground-muted sm:flex-nowrap"
           >
             <span className="shrink-0 uppercase">{item.Priority > 0 ? "Next" : "Queued"}</span>
             {item.Source === CHILD_EVENT_SOURCE ? (
@@ -69,7 +69,7 @@ export function QueuedPrompts({
             )}
             {item.Source !== CHILD_EVENT_SOURCE && item.NotBefore && <StartsLabel notBefore={item.NotBefore} />}
             {item.attachments && item.attachments.length > 0 && (
-              <span data-testid="queued-attachments" className="flex shrink-0 items-center gap-1">
+              <span data-testid="queued-attachments" className="flex shrink-0 items-center gap-1 max-sm:order-last max-sm:w-full max-sm:flex-wrap">
                 {item.attachments.map((a) => (
                   <AttachmentChip key={a.id} attachment={a} compact />
                 ))}
