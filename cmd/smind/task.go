@@ -591,42 +591,17 @@ func renderTaskList(w io.Writer, tasks []store.Task) {
 // cmdTaskSendUsage is printed on any argument error in cmdTaskSend.
 const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking off|standard|extended] [--detach] [--verbose]\n       smind task send <taskId> <prompt> --profile <profileId> [--chat <chatId>] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking off|standard|extended] [--detach] [--verbose]\n       (omit --profile to continue the chat's last profile; --profile none keeps the first form and drops it)"
 
-// unpinnedModelNote is the stderr note printed when a claude-native run
-// starts without --model. With a configured default (config
-// providers.claude-native.defaultModel, reported by provider.list) it says
-// which model the run will use; without one the Claude CLI runs its own
-// default for the login, which may be a costly one, so the note says how to
-// pin. "" for every other case, including the explicit --model default (a
-// deliberate choice of the provider default).
-func unpinnedModelNote(provider, model, configuredDefault string) string {
-	if provider != string(taskrunner.ProviderClaudeNative) || model != "" {
+// unpinnedModelNote is the stderr note printed when a claude-native send names
+// no --model. resolved is the model the daemon's run.start reply says the run
+// launches with (requested, then the profile's, then providers.<id>.
+// defaultModel), never a guess from provider.list: the note must be what
+// actually runs. "" when the send named a model (the explicit --model default
+// included) or the provider keeps its own.
+func unpinnedModelNote(provider, requested, resolved string) string {
+	if provider != string(taskrunner.ProviderClaudeNative) || requested != "" || resolved == "" {
 		return ""
 	}
-	if configuredDefault != "" {
-		return fmt.Sprintf("note: no --model given; using the configured default model %s (providers.%s.defaultModel). Override with --model.\n", configuredDefault, provider)
-	}
-	return "note: no --model given; claude-native uses the Claude CLI's own default model for this login (it may be Opus). Pin one with --model sonnet|haiku|opus or a full id.\n"
-}
-
-// providerDefaultModel is provider's configured default model as provider.list
-// reports it, "" when none is set or the lookup fails (the note then falls
-// back to the unconfigured wording).
-func providerDefaultModel(ctx context.Context, client *wsclient.Client, provider string) string {
-	var res struct {
-		Providers []struct {
-			ID           string `json:"id"`
-			DefaultModel string `json:"defaultModel"`
-		} `json:"providers"`
-	}
-	if err := client.Call(ctx, "provider.list", nil, &res); err != nil {
-		return ""
-	}
-	for _, p := range res.Providers {
-		if p.ID == provider {
-			return p.DefaultModel
-		}
-	}
-	return ""
+	return fmt.Sprintf("note: no --model given; the run uses %s (the profile's model or providers.%s.defaultModel). Override with --model.\n", resolved, provider)
 }
 
 // approvalPolicyRemovedMsg is printed for the removed --approval-policy
@@ -858,9 +833,6 @@ func cmdTaskSend(args []string) int {
 			return 2
 		}
 	}
-	if provider == string(taskrunner.ProviderClaudeNative) && model == "" {
-		fmt.Fprint(os.Stderr, unpinnedModelNote(provider, model, providerDefaultModel(ctx, client, provider)))
-	}
 	// Right after `task new` the workspace setup script may still be
 	// running, which rejects a plain run.start. With no explicit
 	// --when-busy, ask for queue ourselves (ADR-0024 §2); a task.get
@@ -876,12 +848,14 @@ func cmdTaskSend(args []string) int {
 		RunID       string `json:"runId"`
 		Queued      bool   `json:"queued"`
 		QueueItemID int64  `json:"queueItemId"`
+		Model       string `json:"model"`
 	}
 	err = client.Call(ctx, "run.start", params, &start)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "task send: %v\n", err)
 		return 1
 	}
+	fmt.Fprint(os.Stderr, unpinnedModelNote(provider, model, start.Model))
 	if start.Queued {
 		fmt.Fprintf(os.Stderr, "queued as item %d -- it runs when the chat's current run finishes (smind task queue ls to watch, task queue cancel %d to undo)\n", start.QueueItemID, start.QueueItemID)
 		if detach {

@@ -24,7 +24,7 @@ func withClaude(t *testing.T, e *queuedTestEnv) *queuedTestEnv {
 	e.runner = taskrunner.New(e.wm,
 		taskrunner.WithSessionStore(taskrunner.NewChatSessionStore(e.st)),
 		taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath}),
-		taskrunner.WithClaudeCLIPath(self, "FAKE_CLAUDE_SCENARIO=reply"))
+		taskrunner.WithDefaultModel(taskrunner.ProviderClaudeNative, "claude-haiku-5-5"), taskrunner.WithDefaultModel(taskrunner.ProviderClaudeNative, "claude-haiku-5-5"), taskrunner.WithClaudeCLIPath(self, "FAKE_CLAUDE_SCENARIO=reply"))
 	e.reg.SetStarter(e.wm, e.runner)
 	return e
 }
@@ -323,7 +323,7 @@ func TestFailover_CopiesReplyChatAndCountsInTreeGuard(t *testing.T) {
 	e.runner = taskrunner.New(e.wm,
 		taskrunner.WithSessionStore(taskrunner.NewChatSessionStore(e.st)),
 		taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath}),
-		taskrunner.WithClaudeCLIPath(self, "FAKE_CLAUDE_SCENARIO=hang"))
+		taskrunner.WithDefaultModel(taskrunner.ProviderClaudeNative, "claude-haiku-5-5"), taskrunner.WithDefaultModel(taskrunner.ProviderClaudeNative, "claude-haiku-5-5"), taskrunner.WithClaudeCLIPath(self, "FAKE_CLAUDE_SCENARIO=hang"))
 	e.reg.SetStarter(e.wm, e.runner)
 
 	r := e.failedRun(t, "failed-1", failedOpts{profileID: pid, replyChatID: 77})

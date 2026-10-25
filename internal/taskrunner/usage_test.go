@@ -31,7 +31,7 @@ func runForUsage(t *testing.T, r *Runner, task int64, provider Provider, prompt 
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task, task, provider, prompt, nil, PermissionSettings{}, "", "", events)
+		errCh <- r.RunPrompt(context.Background(), task, task, provider, prompt, nil, PermissionSettings{}, "", testModelFor(provider), events)
 	}()
 	got := drainEvents(events)
 	if err := <-errCh; err != nil {

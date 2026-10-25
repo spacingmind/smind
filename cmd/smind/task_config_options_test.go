@@ -297,7 +297,11 @@ func startTestRun(t *testing.T, srvURL, provider string, scenarios ...string) st
 	var start struct {
 		RunID string `json:"runId"`
 	}
-	if err := client.Call(context.Background(), "run.start", map[string]any{"taskId": task.ID, "provider": provider, "prompt": "hi"}, &start); err != nil {
+	params := map[string]any{"taskId": task.ID, "provider": provider, "prompt": "hi"}
+	if provider == "claude-native" {
+		params["model"] = "claude-haiku-5-5" // an unpinned claude launch is refused
+	}
+	if err := client.Call(context.Background(), "run.start", params, &start); err != nil {
 		t.Fatalf("run.start: %v", err)
 	}
 	if start.RunID == "" {

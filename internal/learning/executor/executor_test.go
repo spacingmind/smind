@@ -63,7 +63,7 @@ func newEnv(t *testing.T, scenario string) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := taskrunner.New(wm, taskrunner.WithClaudeCLIPath(self, fakeclaude.ScenarioEnv+"="+scenario))
+	runner := taskrunner.New(wm, taskrunner.WithDefaultModel(taskrunner.ProviderClaudeNative, "claude-haiku-5-5"), taskrunner.WithClaudeCLIPath(self, fakeclaude.ScenarioEnv+"="+scenario))
 	ws, err := st.CreateWorkspace(store.Workspace{Path: t.TempDir(), Title: "w", RoutingPolicy: "hard"})
 	if err != nil {
 		t.Fatal(err)

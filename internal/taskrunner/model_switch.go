@@ -60,9 +60,9 @@ func (r *Runner) claudeConfigOptions(chatID int64) []acp.ConfigOption {
 }
 
 // setClaudeConfigOption routes the synthetic "model" option to
-// Client.SetModel: the catalog's default (or an empty value) resets with
-// nil; anything else must pass ValidateModelSyntax (the catalog is not an
-// allowlist). Takes effect for the session's next turn.
+// Client.SetModel: the catalog's default (or an empty value) selects the
+// configured default model; anything else must pass ValidateModelSyntax (the
+// catalog is not an allowlist). Takes effect for the session's next turn.
 func (r *Runner) setClaudeConfigOption(ctx context.Context, chatID int64, configID, value string) ([]acp.ConfigOption, error) {
 	if configID != claudeModelConfigID {
 		return nil, fmt.Errorf("taskrunner: set config option: %s: no such config option %q: %w", ProviderClaudeNative, configID, ErrConfigOptionsNotSupported)
@@ -76,21 +76,24 @@ func (r *Runner) setClaudeConfigOption(ctx context.Context, chatID int64, config
 	if client == nil {
 		return nil, fmt.Errorf("taskrunner: set config option: no live claude-native session for chat %d", chatID)
 	}
-	var model *string
-	if value != "" && value != ClaudeModelDefault {
-		model = &value
+	// "default" (or empty) is the configured default, never SetModel(nil): a
+	// reset would hand the session to the CLI's own default, possibly Opus.
+	// With none configured there is nothing to reset to, so it is refused.
+	if value == "" || value == ClaudeModelDefault {
+		def, err := r.ResolveModel(ProviderClaudeNative, "")
+		if err != nil {
+			return nil, fmt.Errorf("taskrunner: set config option: %w", err)
+		}
+		value = def
 	}
+	model := &value
 	if err := client.SetModel(ctx, model); err != nil {
 		return nil, fmt.Errorf("taskrunner: set model on chat %d: %w", chatID, err)
 	}
-	current := ""
-	if model != nil {
-		current = *model
-	}
 	r.sessionMu.Lock()
 	if r.claudeClients[chatID] != nil {
-		r.claudeModels[chatID] = current
+		r.claudeModels[chatID] = value
 	}
 	r.sessionMu.Unlock()
-	return []acp.ConfigOption{claudeModelOption(current)}, nil
+	return []acp.ConfigOption{claudeModelOption(value)}, nil
 }

@@ -110,7 +110,7 @@ func runClaudeCtx(t *testing.T, r *Runner, task store.Task, ctx context.Context)
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(ctx, task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", "", events)
+		errCh <- r.RunPrompt(ctx, task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", testClaudeModel, events)
 	}()
 	drainEvents(events)
 	if err := <-errCh; err != nil {

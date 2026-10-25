@@ -15,7 +15,7 @@ func runClaudeScenario(t *testing.T, scenario string) []Event {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "ping", denyAllDecider{}, PermissionSettings{}, "", "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "ping", denyAllDecider{}, PermissionSettings{}, "", testClaudeModel, events)
 	}()
 	got := drainEvents(events)
 	if err := <-errCh; err != nil {

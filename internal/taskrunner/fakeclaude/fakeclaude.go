@@ -23,6 +23,15 @@ import (
 // the working directory -- for callers whose cwd is cleaned between runs.
 const ScenarioEnv = "FAKE_CLAUDE_SCENARIO"
 
+// ArgvLogEnv, when set, names a file every spawn appends its argv to (one
+// line, arguments joined by ArgvSep), whatever the scenario: for tests that
+// assert the flags of several launches (a "args" file in the working
+// directory holds only the last one and only for the echo-args scenario).
+const ArgvLogEnv = "FAKE_CLAUDE_ARGV_LOG"
+
+// ArgvSep separates the arguments on an ArgvLogEnv line.
+const ArgvSep = "\x1f"
+
 // Run is a minimal NDJSON scripted stand-in for the `claude`
 // CLI's headless stream-json protocol. Like fakeagent, its scenario comes
 // from a "scenario" file in its working directory (claudecode.Client sets
@@ -31,6 +40,12 @@ func Run() {
 	wd, err := os.Getwd()
 	if err != nil {
 		os.Exit(1)
+	}
+	if path := os.Getenv(ArgvLogEnv); path != "" {
+		if f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+			fmt.Fprintln(f, strings.Join(os.Args[1:], ArgvSep))
+			f.Close()
+		}
 	}
 	scenario := "reply"
 	if v := os.Getenv(ScenarioEnv); v != "" {

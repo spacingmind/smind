@@ -847,6 +847,11 @@ const claudePermissionPromptTool = "stdio"
 const claudeDialogTimeoutMS = "3600000"
 
 func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID, workspaceID int64, worktreePath string, taskEnv []string, prompt string, decider PermissionDecider, perm PermissionSettings, thinkingLevel ThinkingLevel, model string, events chan<- Event) error {
+	if model == "" {
+		// Runs resolve the model before launching (ResolveModel); an empty one
+		// here would let the CLI pick its own default.
+		return r.noModel(provider)
+	}
 	var opts []claudecode.Option
 	// Everything that must reach the CLI's environment is collected here and
 	// handed over in ONE claudecode.WithEnv at the end: the SDK's WithEnv

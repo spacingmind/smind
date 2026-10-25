@@ -135,40 +135,23 @@ func TestTaskSendThinkingFlag(t *testing.T) {
 	}
 }
 
-func TestUnpinnedModelNote(t *testing.T) {
-	tests := []struct {
-		provider, model string
-		wantNote        bool
-	}{
-		{"claude-native", "", true},
-		{"claude-native", "sonnet", false},
-		{"claude-native", "default", false},
-		{"glm", "", false},
-		{"codex-native", "", false},
+// TestCLINote_MatchesResolvedModel: the note names the model the daemon says
+// the run launches with, and only for an unpinned claude-native send.
+func TestCLINote_MatchesResolvedModel(t *testing.T) {
+	got := unpinnedModelNote("claude-native", "", "claude-haiku-5-5")
+	if !strings.Contains(got, "the run uses claude-haiku-5-5") || strings.Contains(got, "Opus") || !strings.HasSuffix(got, "\n") {
+		t.Fatalf("note = %q, want the resolved model named", got)
 	}
-	for _, tt := range tests {
-		got := unpinnedModelNote(tt.provider, tt.model, "")
-		if (got != "") != tt.wantNote {
-			t.Errorf("unpinnedModelNote(%q, %q) = %q, want note=%v", tt.provider, tt.model, got, tt.wantNote)
+	for _, tt := range []struct{ provider, requested, resolved string }{
+		{"claude-native", "sonnet", "sonnet"},   // pinned
+		{"claude-native", "default", "default"}, // the human's explicit choice
+		{"claude-native", "", ""},               // nothing resolved: nothing to claim
+		{"glm", "", "x"},                        // another provider
+		{"codex-native", "", ""},
+	} {
+		if got := unpinnedModelNote(tt.provider, tt.requested, tt.resolved); got != "" {
+			t.Errorf("unpinnedModelNote(%q, %q, %q) = %q, want none", tt.provider, tt.requested, tt.resolved, got)
 		}
-		if got != "" && (!strings.Contains(got, "Claude CLI's own default") || !strings.HasSuffix(got, "\n")) {
-			t.Errorf("unpinnedModelNote note = %q, want the default-model wording and a trailing newline", got)
-		}
-	}
-}
-
-// TestUnpinnedModelNote_ConfiguredDefault: with a configured default the note
-// names the model instead of warning about the CLI's own default.
-func TestUnpinnedModelNote_ConfiguredDefault(t *testing.T) {
-	got := unpinnedModelNote("claude-native", "", "sonnet")
-	if !strings.Contains(got, "configured default model sonnet") || strings.Contains(got, "may be Opus") {
-		t.Fatalf("note = %q, want the configured model named and no Opus warning", got)
-	}
-	if got := unpinnedModelNote("claude-native", "haiku", "sonnet"); got != "" {
-		t.Fatalf("pinned run note = %q, want none", got)
-	}
-	if got := unpinnedModelNote("glm", "", "x"); got != "" {
-		t.Fatalf("glm note = %q, want none", got)
 	}
 }
 
