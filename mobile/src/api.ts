@@ -337,6 +337,12 @@ export interface TaskTreeNode {
   taskStatus: string;
   tier: 'supervisor' | 'leader' | 'coder' | null;
   childCount: number;
+  /** ADR-0041 A5 tree budget, on a ROOT node only; omitted for an unbudgeted tree. */
+  budgetUsd?: number | null;
+  budgetSpentUsd?: number | null;
+  budgetPartial?: boolean;
+  budgetUnknownRuns?: number;
+  overBudget?: boolean;
   /** Stalled-tree alert: both present only while this seat's tree is idle past the threshold (RFC 3339 UTC). */
   stalled?: boolean;
   stalledSince?: string;

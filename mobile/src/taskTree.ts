@@ -145,6 +145,25 @@ export function costLabel(node: Pick<TaskTreeNode, 'childCount' | 'usage'>): str
   return `${own} (subtree ${subtree})`;
 }
 
+export type BudgetLine = { text: string; tone: StateTone };
+
+/**
+ * The tree's opt-in budget line under the Subtasks header (web wording from
+ * lib/task-budget.ts): 'Budget $4.20 / $5.00', '$4.20+ / $5.00 · partial' when
+ * some runs reported no cost, 'Over budget' (danger) once spent reaches the cap.
+ * Null when the root has no cap.
+ */
+export function budgetLine(root: Pick<TaskTreeNode, 'budgetUsd' | 'budgetSpentUsd' | 'budgetPartial' | 'budgetUnknownRuns' | 'overBudget'> | undefined): BudgetLine | null {
+  const cap = root?.budgetUsd;
+  if (cap == null || !Number.isFinite(cap) || !(cap > 0)) return null;
+  const spent = root?.budgetSpentUsd ?? 0;
+  const partial = (root?.budgetUnknownRuns ?? 0) > 0 || root?.budgetPartial === true;
+  const over = Math.round(spent * 100) >= Math.round(cap * 100) || root?.overBudget === true;
+  const amounts = `$${spent.toFixed(2)}${partial ? '+' : ''} / $${cap.toFixed(2)}`;
+  if (over) return { text: `Over budget · ${amounts}${partial ? ' · partial' : ''}`, tone: 'danger' };
+  return { text: partial ? `${amounts} · partial` : `Budget ${amounts}`, tone: 'default' };
+}
+
 /** Waiting-for-permission, failed and rate-limited counts over the given nodes' own run state; a rate-limited run is not a failure. */
 export function attentionRollup(nodes: readonly TaskTreeNode[]): { waiting: number; failed: number; rateLimited: number } {
   let waiting = 0;
@@ -176,9 +195,9 @@ export function buildTreeRows(
   result: TaskTreeResult,
   now: Date,
   pendingTaskIds: ReadonlySet<number>,
-): { rows: TreeRow[]; hiddenCount: number; attention: { waiting: number; failed: number; rateLimited: number } } {
+): { rows: TreeRow[]; hiddenCount: number; attention: { waiting: number; failed: number; rateLimited: number }; budget: BudgetLine | null } {
   const nodes = Array.isArray(result?.nodes) ? result.nodes : [];
-  if (nodes.length <= 1) return { rows: [], hiddenCount: 0, attention: { waiting: 0, failed: 0, rateLimited: 0 } };
+  if (nodes.length <= 1) return { rows: [], hiddenCount: 0, attention: { waiting: 0, failed: 0, rateLimited: 0 }, budget: null };
   const shown = nodes.slice(0, MAX_RENDERED_NODES);
   const hiddenCount = nodes.length - shown.length;
   const truncated = result.truncated === true;
@@ -208,5 +227,5 @@ export function buildTreeRows(
   if (hiddenCount > 0 || truncated) {
     rows.push({ kind: 'more', hiddenCount, truncated, label: moreLabel(hiddenCount, truncated) });
   }
-  return { rows, hiddenCount, attention: attentionRollup(shown) };
+  return { rows, hiddenCount, attention: attentionRollup(shown), budget: budgetLine(nodes[0]) };
 }

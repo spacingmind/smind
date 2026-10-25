@@ -57,7 +57,7 @@ export function TaskTreeSection({ conn, taskId, pendingTaskIds, onOpenTask }: Pr
   const toggle = useCallback(() => setExpanded((e) => !e), []);
 
   if (!built || built.rows.length === 0) return null;
-  const { rows, attention } = built;
+  const { rows, attention, budget } = built;
   const count = (result?.nodes.length ?? 1) - 1;
   const summary = `Subtasks · ${count}`;
   const attentionLabel = [attention.waiting > 0 ? `${attention.waiting} waiting` : null, attention.rateLimited > 0 ? `${attention.rateLimited} rate limited` : null, attention.failed > 0 ? `${attention.failed} failed` : null]
@@ -87,6 +87,11 @@ export function TaskTreeSection({ conn, taskId, pendingTaskIds, onOpenTask }: Pr
           <AppIcon name="chevronRight" size={14} color={theme.foregroundSubtle} />
         </View>
       </Pressable>
+      {budget ? (
+        <Text style={[styles.budget, budget.tone === 'danger' && { color: theme.status.danger }]} accessibilityLabel={budget.text}>
+          {budget.text}
+        </Text>
+      ) : null}
       {expanded ? (
         <View style={styles.card}>
           <ScrollView style={styles.scroll} nestedScrollEnabled>
@@ -130,6 +135,7 @@ function makeStyles(theme: AppTheme) {
     headerTitle: { ...theme.type.label, color: theme.foreground },
     attention: { flex: 1, flexDirection: 'row', gap: theme.spacing[1] },
     attentionText: { ...theme.type.small, color: theme.foregroundSubtle },
+    budget: { ...theme.type.small, color: theme.foregroundSubtle },
     chevronOpen: { transform: [{ rotate: '90deg' }] },
     card: {
       borderWidth: 1,
