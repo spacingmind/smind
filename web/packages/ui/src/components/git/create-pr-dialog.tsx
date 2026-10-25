@@ -140,29 +140,32 @@ function CreatePrForm({
 
       <div className="flex min-h-7 flex-wrap items-center gap-x-2 gap-y-1 text-ui-base" data-testid="create-pr-branches">
         <Icons.branch aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
-        <MiddleText text={headBranch} className="max-w-[8.5rem] font-mono text-ui-sm" />
-        <Icons.arrowRight aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
-        <label htmlFor={ids.base} className="sr-only">
-          Base branch
-        </label>
-        <Input
-          id={ids.base}
-          list={branches.data ? ids.branches : undefined}
-          value={baseInput}
-          onChange={(e) => setBaseInput(e.target.value)}
-          onBlur={commitBase}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              commitBase();
-            }
-          }}
-          spellCheck={false}
-          autoComplete="off"
-          className="h-7 w-64 min-w-0 flex-1 font-mono text-ui-xs"
-          title={baseInput}
-          data-testid="create-pr-base"
-        />
+        <MiddleText text={headBranch} className="max-w-[11rem] font-mono text-ui-sm" />
+        {/* The arrow stays with the field; a long base wraps the pair to its own line instead of cutting the name. */}
+        <span className="flex min-w-[19rem] flex-1 items-center gap-2">
+          <Icons.arrowRight aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
+          <label htmlFor={ids.base} className="sr-only">
+            Base branch
+          </label>
+          <Input
+            id={ids.base}
+            list={branches.data ? ids.branches : undefined}
+            value={baseInput}
+            onChange={(e) => setBaseInput(e.target.value)}
+            onBlur={commitBase}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitBase();
+              }
+            }}
+            spellCheck={false}
+            autoComplete="off"
+            className="h-7 min-w-0 flex-1 font-mono text-ui-xs"
+            title={baseInput}
+            data-testid="create-pr-base"
+          />
+        </span>
         {branches.data && (
           <datalist id={ids.branches}>
             {branches.data.branches.map((b) => (
