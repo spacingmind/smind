@@ -28,9 +28,17 @@ plugins:
 The setting is read on every request, so a change applies without a restart.
 With it off, no plugin adds anything, even one that is enabled.
 
-Installing, enabling, disabling, removing and updating a plugin are human
-actions on the machine that runs the daemon. Agents and paired phones cannot
-do them. A phone can still see the lists.
+Installing, enabling, disabling, removing, updating and reloading a plugin are
+human actions. They need a loopback connection to the daemon, which includes a
+reverse proxy on the same machine. To manage plugins over a network login, set
+`plugins.allowRemoteManage: true`; it is off by default. Agents and paired
+phones cannot do any of this whatever the setting. A phone can still see the
+lists.
+
+smind does not stop an agent that runs as your user from reading the daemon's
+token or `config.yaml`. What an agent may read is decided by the agent's own
+sandbox and permission settings, so keep those strict if you run agents you
+do not trust.
 
 ## Install and enable
 

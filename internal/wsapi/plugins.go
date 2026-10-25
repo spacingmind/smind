@@ -35,13 +35,22 @@ func configPluginsEnabled() bool {
 	return err == nil && cfg.Plugins.Enabled
 }
 
+// configPluginsAllowRemote reads plugins.allowRemoteManage on every call, like
+// the switch; an unreadable file is false. Tests replace it.
+var configPluginsAllowRemote = func() bool {
+	cfg, err := config.Load()
+	return err == nil && cfg.Plugins.AllowRemoteManage
+}
+
 func humanLocalOnly(method string, h handlerFunc) handlerFunc {
 	return func(ctx context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 		switch {
 		case rc == nil || rc.runScoped:
 			return nil, forbidden(method + " is not available to agents")
 		case !rc.local:
-			return nil, forbidden(method + " is only available on the local connection, not over the relay")
+			return nil, forbidden(method + " is only available on a direct connection, not over the relay")
+		case rc.channel != ChannelLoopback && !configPluginsAllowRemote():
+			return nil, forbidden(method + " needs a local connection: set plugins.allowRemoteManage: true in config.yaml to manage plugins from a remote connection")
 		}
 		return h(ctx, rc, raw)
 	}

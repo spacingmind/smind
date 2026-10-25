@@ -97,7 +97,7 @@ func newContribEnv(t *testing.T) *contribEnv {
 	return e
 }
 
-func localRC() *requestContext { return &requestContext{local: true} }
+func localRC() *requestContext { return &requestContext{local: true, channel: ChannelLoopback} }
 func agentRC() *requestContext { return &requestContext{local: true, runScoped: true} }
 func relayRC() *requestContext {
 	return &requestContext{local: false, deviceID: "dev-1", channel: ChannelE2EE}
