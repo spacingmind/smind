@@ -369,6 +369,14 @@ var migrations = []migration{
 		},
 	},
 	{
+		// Stalled-tree alert: the stalledSince of the last alerted episode.
+		// Nullable with no default; existing rows stay NULL (never alerted).
+		name: "stall_alert",
+		apply: func(db *sql.DB) error {
+			return addColumnIfMissing(db, "tasks", "stall_alerted_since", "TIMESTAMP")
+		},
+	},
+	{
 		// ADR-0041 F2: rate-limit failover policy on agent profiles.
 		name: "profile_failover",
 		apply: func(db *sql.DB) error {
