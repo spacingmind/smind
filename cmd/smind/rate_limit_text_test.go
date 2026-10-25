@@ -51,6 +51,9 @@ func TestTaskRuns_StatusTextForRateLimited(t *testing.T) {
 	if got, want := runStatusCell(inferredRow, now), "error: rate limited (5h window), resets ≈17:35 (in ≈2h 3m)"; got != want {
 		t.Errorf("inferred rate limited cell = %q, want %q", got, want)
 	}
+	if got, want := runStatusCell(runSummaryRow{Status: "error", Err: "taskrunner: claude code prompt: claude CLI exited ...", FailureKind: "cli_exited"}, now), "error: CLI exited without a result (details in task logs)"; got != want {
+		t.Errorf("cli_exited cell = %q, want %q", got, want)
+	}
 	if got := runStatusCell(runSummaryRow{Status: "error", Err: "boom", FailureKind: "other"}, now); got != "error: boom" {
 		t.Errorf("other failure cell = %q, want the plain cause", got)
 	}

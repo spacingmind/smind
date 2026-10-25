@@ -117,6 +117,37 @@ func Run() {
 			"result":      "done",
 		})
 
+	case "cli-exit-nonzero", "cli-exit-signal", "cli-exit-zero":
+		// The CLI streams one API message's usage (two messages: the first
+		// complete, the second cut off before its message_delta) and some
+		// stderr, then dies before any result: exit 3, a SIGKILL, or a clean
+		// exit 0 (the SDK's "cli exited before sending a result message").
+		stdin.Scan() // consume the prompt line
+		streamEvent := func(ev map[string]any) {
+			writeLine(map[string]any{"type": "stream_event", "session_id": "sess-1", "uuid": "u", "event": ev})
+		}
+		streamEvent(map[string]any{"type": "message_start", "message": map[string]any{
+			"model": "claude-fake",
+			"usage": map[string]any{"input_tokens": 100, "cache_read_input_tokens": 40, "cache_creation_input_tokens": 10, "output_tokens": 1},
+		}})
+		streamEvent(map[string]any{"type": "message_delta", "usage": map[string]any{"output_tokens": 25}})
+		streamEvent(map[string]any{"type": "message_start", "message": map[string]any{
+			"model": "claude-fake",
+			"usage": map[string]any{"input_tokens": 200, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0, "output_tokens": 2},
+		}})
+		fmt.Fprintln(os.Stderr, "fatal: heap out of memory")
+		fmt.Fprintln(os.Stderr, "ANTHROPIC_API_KEY=sk-ant-api03-FAKEFAKEFAKEFAKEFAKEFAKE0123456789")
+		switch scenario {
+		case "cli-exit-signal":
+			if p, err := os.FindProcess(os.Getpid()); err == nil {
+				_ = p.Kill()
+			}
+			select {} // the kill is asynchronous on some platforms
+		case "cli-exit-zero":
+			os.Exit(0)
+		}
+		os.Exit(3)
+
 	case "rate-limit-rejected":
 		// A rejected rate_limit_event, then a normal result.
 		stdin.Scan() // consume the prompt line
