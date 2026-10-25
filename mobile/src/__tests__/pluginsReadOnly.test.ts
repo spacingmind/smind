@@ -4,7 +4,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { fetchPlugin, fetchPluginCommands, fetchPluginList, fetchPluginThemes, PLUGIN_READ_METHODS } from '../plugins/api';
+import { fetchPlugin, fetchPluginCommands, fetchPluginDetail, fetchPluginList, fetchPluginThemes, PLUGIN_READ_METHODS } from '../plugins/api';
 import { watchPluginUpdates } from '../plugins/subscription';
 import { makeRelayHarness } from '../relayHarness';
 import { cmd, fakeConnection, listing, plugin } from './pluginFixtures';
@@ -43,7 +43,8 @@ describe('plugin client is read-only', () => {
     await fetchPlugin(conn, 'acme');
     await fetchPluginCommands(conn);
     await fetchPluginThemes(conn);
-    expect(calls.map(([m]) => m)).toEqual(['plugin.list', 'plugin.get', 'plugin.commands', 'plugin.themes']);
+    await fetchPluginDetail(conn, 'acme');
+    expect(calls.map(([m]) => m)).toEqual(['plugin.list', 'plugin.get', 'plugin.commands', 'plugin.themes', 'plugin.get', 'plugin.commands']);
     expect(calls.every(([m]) => (PLUGIN_READ_METHODS as readonly string[]).includes(m))).toBe(true);
     expect(calls[1][1]).toEqual({ id: 'acme' });
   });

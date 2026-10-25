@@ -5,10 +5,9 @@
 
 import { useCallback, useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { fetchPlugin, fetchPluginCommands } from '../plugins/api';
+import { fetchPluginDetail } from '../plugins/api';
 import { pluginDetailView, PluginDetailView } from '../plugins/listView';
 import { usePluginResource } from '../plugins/usePluginResource';
-import { PluginCommand, PluginInfo } from '../plugins/types';
 import { RelayConnection } from '../relay/RelayConnection';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
@@ -20,13 +19,7 @@ import { SectionHeader } from './tasks/SectionHeader';
 export function PluginDetailScreen({ conn, id }: { conn: RelayConnection; id: string }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const load = useCallback(
-    async (c: RelayConnection): Promise<{ info: PluginInfo; commands: PluginCommand[] }> => {
-      const [info, commands] = await Promise.all([fetchPlugin(c, id), fetchPluginCommands(c)]);
-      return { info, commands };
-    },
-    [id],
-  );
+  const load = useCallback((c: RelayConnection) => fetchPluginDetail(c, id), [id]);
   const { state } = usePluginResource(conn, load);
 
   if (state.kind === 'loading') {
@@ -50,6 +43,7 @@ export function PluginDetailScreen({ conn, id }: { conn: RelayConnection; id: st
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content}>
       <Header v={v} styles={styles} />
       {link && <Text style={styles.warning}>{LINK_WARNING_TEXT}</Text>}
+      {v.pendingNotice !== null && <Text style={styles.warning}>{v.pendingNotice}</Text>}
       {v.header.lastError !== null && <Text style={styles.error}>{v.header.lastError}</Text>}
       <Text style={styles.line}>{v.dataOnly ? 'Data only: nothing it declares runs code.' : 'Runs code: it declares a process or hooks.'}</Text>
       {v.process.length > 0 && <Text style={styles.mono}>{v.process.join(' ')}</Text>}

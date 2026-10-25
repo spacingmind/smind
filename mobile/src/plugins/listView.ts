@@ -81,6 +81,8 @@ export interface PluginDetailView {
   commands: { label: string; owner: string }[];
   conflicts: { kind: string; name: string; reason: string }[];
   pending: boolean;
+  /** Set when an update waits: the summary below is the pending version's, not the running one's. */
+  pendingNotice: string | null;
   /** The only mutation hint: where to do it. The screen offers no control. */
   manageHint: string;
 }
@@ -111,6 +113,7 @@ export function pluginDetailView(p: PluginInfo, commands: readonly PluginCommand
     commands: commands.filter((cmd) => cmd.plugin === p.id).map((cmd) => ({ label: `/${cmd.qualified}`, owner })),
     conflicts: conflicts.map((x) => ({ kind: x.kind, name: x.name, reason: x.reason })),
     pending: p.pending !== undefined,
+    pendingNotice: p.pending ? `Pending update ${p.pending.consent.version}: this is what it would declare. It is not applied yet.` : null,
     manageHint: MANAGE_ON_COMPUTER_TEXT,
   };
 }

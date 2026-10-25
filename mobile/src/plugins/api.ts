@@ -26,3 +26,9 @@ export async function fetchPluginThemes(conn: RelayConnection): Promise<PluginTh
   const res = await conn.call('plugin.themes');
   return Array.isArray(res) ? (res as PluginTheme[]) : [];
 }
+
+/** What the detail screen loads: the plugin and the prompt commands (to list the plugin's own). Reads only. */
+export async function fetchPluginDetail(conn: RelayConnection, id: string): Promise<{ info: PluginInfo; commands: PluginCommand[] }> {
+  const [info, commands] = await Promise.all([fetchPlugin(conn, id), fetchPluginCommands(conn)]);
+  return { info, commands };
+}

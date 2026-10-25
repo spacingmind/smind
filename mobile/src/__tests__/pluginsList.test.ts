@@ -92,6 +92,7 @@ describe('pluginDetailView (read-only)', () => {
   it('a pending update shows the pending consent', () => {
     const v = pluginDetailView(plugin({ pending: { consent: consent({ capabilities: ['hooks'] }) } }), []);
     expect(v.pending).toBe(true);
+    expect(v.pendingNotice).toBe('Pending update 1.2.0: this is what it would declare. It is not applied yet.');
     expect(v.capabilities).toEqual(['hooks']);
   });
 });
