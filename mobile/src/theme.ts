@@ -161,12 +161,17 @@ export function resolveAppTheme(scheme: ColorSchemeName | null | undefined): App
   return scheme === 'dark' ? darkTheme : lightTheme;
 }
 
-/** Accepts `#rgb` or `#rrggbb` (lowercase or uppercase); returns `rgba(r, g, b, alpha)` with alpha as given. Throws on anything else. */
+/**
+ * Accepts `#rgb`, `#rrggbb` or `rgb()`/`rgba()` as plugin themes produce (lowercase or uppercase hex); returns
+ * `rgba(r, g, b, alpha)` with alpha as given (an input alpha is replaced, not multiplied). Throws on anything else.
+ */
 export function withAlpha(color: string, alpha: number): string {
+  const fn = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*[0-9.]+\s*)?\)$/.exec(color);
+  if (fn) return `rgba(${fn[1]}, ${fn[2]}, ${fn[3]}, ${alpha})`;
   const hex = color.startsWith('#') ? color.slice(1) : null;
   const expanded = hex === null ? null : hex.length === 3 ? hex.split('').map((c) => c + c).join('') : hex.length === 6 ? hex : null;
   if (expanded === null || !/^[0-9a-fA-F]{6}$/.test(expanded)) {
-    throw new Error(`withAlpha: expected #rgb or #rrggbb, got: ${color}`);
+    throw new Error(`withAlpha: expected #rgb, #rrggbb or rgb()/rgba(), got: ${color}`);
   }
   const r = parseInt(expanded.slice(0, 2), 16);
   const g = parseInt(expanded.slice(2, 4), 16);

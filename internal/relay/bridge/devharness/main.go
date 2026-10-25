@@ -17,6 +17,8 @@
 // queue-list <chatId> | run-status <runId> |
 // seed-tree <nested|permission|ratelimited|failed|big> (TEST ONLY: a fresh task tree
 // under the seeded workspace; replies {rootId, nodes:{<name>:<taskId>}, ...}) |
+// plugin-install <dir> | plugin-link <dir> | plugin-enable <id> | plugin-disable <id> | plugin-reload <id> | plugin-update <id> <dir>
+// (TEST ONLY: plugin_cmds.go; needs SMIND_HOME with plugins.enabled: true) |
 // peer-rpc <label> <method> [json params] (raw result of one daemon RPC). Diagnostics go to stderr, prefixed "devharness: ".
 package main
 
@@ -45,6 +47,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/attach"
+	"github.com/spacingmind/smind/internal/plugins"
 	"github.com/spacingmind/smind/internal/relay/bridge"
 	"github.com/spacingmind/smind/internal/relay/client"
 	"github.com/spacingmind/smind/internal/relay/devices"
@@ -162,6 +165,7 @@ type harness struct {
 	store     *store.Store
 	fakeAgent string
 	workDir   string
+	plugins   *plugins.Manager // see plugin_cmds.go
 	seedWS    *store.Workspace // the workspace seed-run puts its tasks in
 
 	hub       *bridge.Hub
@@ -235,6 +239,9 @@ func run(windowMax int, outdated bool, password, fakeAgent string) error {
 	if err != nil {
 		return err
 	}
+	// plugin.updated on a flip of plugins.enabled in $SMIND_HOME/config.yaml (the daemon does the same).
+	stopWatch := h.api.WatchPlugins(context.Background())
+	defer stopWatch()
 	h.api.SetAttachmentStore(attach.NewStore(filepath.Join(workDir, "attachments"))) // prompt attachments on, as cmd/smind wires it
 	if h.daemonKP, err = e2ee.GenerateKeyPair(); err != nil {
 		return err
@@ -530,6 +537,8 @@ func (h *harness) dispatch(cmd string, args []string) (map[string]any, error) {
 		return h.queueList(args)
 	case "run-status":
 		return h.runStatus(args)
+	case "plugin-install", "plugin-link", "plugin-enable", "plugin-disable", "plugin-reload", "plugin-update":
+		return h.pluginCmd(cmd, args)
 	case "daemon-restart":
 		// A new Hub loses every E2EE counter; waiting clients must re-handshake
 		// on a fresh session id. Registry and daemon key are kept.

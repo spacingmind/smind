@@ -10,7 +10,7 @@
 // Pressable, which put a keyboard-focus ring on a row that does nothing.
 
 import { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { BottomSheet } from '@expo/ui';
 import { ConnectionState } from '../../relay/RelayConnection';
 import { describeState } from '../../relay/connectionStatus';
@@ -25,6 +25,8 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onDisconnect: () => void;
+  /** Opens the read-only Plugins list (ADR-0042 PA.5). */
+  onOpenPlugins: () => void;
   state: ConnectionState;
 }
 
@@ -36,7 +38,7 @@ function statusText(state: ConnectionState): string {
   return 'Reconnecting…';
 }
 
-export function ConnectionSheet({ open, onClose, onDisconnect, state }: Props) {
+export function ConnectionSheet({ open, onClose, onDisconnect, onOpenPlugins, state }: Props) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   // defaultDeviceLabel is sync today but may go async (it reads the
@@ -70,6 +72,18 @@ export function ConnectionSheet({ open, onClose, onDisconnect, state }: Props) {
               </Text>
             </View>
             <NotificationsRow />
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>Plugins</Text>
+              <TextButton
+                label="Open"
+                onPress={() => {
+                  onClose();
+                  // iOS cannot push a screen while the sheet is still dismissing.
+                  if (Platform.OS === 'ios') setTimeout(onOpenPlugins, 400);
+                  else onOpenPlugins();
+                }}
+              />
+            </View>
           </View>
           <TextButton label="Disconnect" tone="danger" onPress={() => { onClose(); onDisconnect(); }} style={styles.disconnect} />
         </View>

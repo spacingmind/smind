@@ -72,6 +72,7 @@ import { buildTranscript, TranscriptItem } from '../transcript/coalesceMessages'
 import { nextFollowState } from '../transcript/stickToBottom';
 import { EmptyState } from '../ui/EmptyState';
 import { AssistantMessage } from './task/AssistantMessage';
+import { usePluginCommands } from '../plugins/usePluginCommands';
 import { Composer } from './task/Composer';
 import { FooterBanner } from './task/FooterBanner';
 import { LoadingState } from './task/LoadingState';
@@ -106,6 +107,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   // React state remains the source of truth for canSend and the
   // restore-on-failed-send path.
   const draftState = useNativeState('');
+  const slashCommands = usePluginCommands(conn);
   const [sendError, setSendError] = useState<string | null>(null);
   // ADR-0038 prompt attachments: the tray, the inline refusal text, and the daemon's accepted kinds (undefined until loaded / older daemon).
   const [pending, setPending] = useState<PendingAttachment[]>([]);
@@ -681,6 +683,8 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
                 attachMenu={attachMenu}
                 onAttach={handleAttach}
                 attachNotice={attachNotice}
+                draft={draft}
+                slashCommands={slashCommands}
               />
             </View>
           </KeyboardAvoidingView>

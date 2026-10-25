@@ -7,6 +7,7 @@ import { StatusBar } from 'expo-status-bar';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { ConnectionProvider, useConnection } from '../src/connection/ConnectionProvider';
 import { routeGate } from '../src/navigation/gate';
+import { PluginThemeController } from '../src/plugins/PluginThemeController';
 import { PushController } from '../src/push/native/PushController';
 import { taskHeaderTitle } from '../src/navigation/routes';
 import { AppThemeProvider, useAppTheme } from '../src/theme/ThemeProvider';
@@ -38,6 +39,8 @@ function RootStack() {
         <Stack.Protected guard={gate === 'app'}>
           <Stack.Screen name="index" options={{ title: 'Tasks' }} />
           <Stack.Screen name="new-task" options={{ title: 'New task', presentation: 'modal' }} />
+          <Stack.Screen name="plugins" options={{ title: 'Plugins' }} />
+          <Stack.Screen name="plugin/[id]" options={{ title: 'Plugin' }} />
           <Stack.Screen name="task/[id]" options={({ route }) => ({ title: taskHeaderTitle(route.params as { id?: string; title?: string } | undefined) })} />
         </Stack.Protected>
       </Stack>
@@ -52,6 +55,7 @@ export default function RootLayout() {
         <ConnectionProvider>
           <RootStack />
           <PushController />
+          <PluginThemeController />
         </ConnectionProvider>
       </AppThemeProvider>
     </KeyboardProvider>

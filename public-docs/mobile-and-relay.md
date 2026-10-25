@@ -206,6 +206,35 @@ budget line (`Budget $1.20 / $5.00`, or `Over budget`) appears when the root
 task has a tree budget. Tapping a row opens that task. The tree is read-only:
 you cannot approve, stop or change anything from it.
 
+## Plugins on the phone
+
+The phone lists plugins but never changes them. In the app open **Connection**,
+then **Plugins**, then **Open**. The screen shows each plugin's name and
+version, a source chip (**Folder**, **Link**, **Git** or **Archive**) and a
+status chip: **Enabled**, **Disabled**, **Pending update** or **Error**. An
+error shows its last message, and a linked plugin shows **Live directory:
+changes after consent are not re-reviewed**. When plugins are off for the
+daemon, the screen says **Plugins are off on this daemon. Turn them on in
+config.yaml on the computer.** Tap a plugin for what it declares: its
+capabilities, MCP servers, skills, profiles (a profile with elevated rights is
+flagged **Needs your attention**), prompt commands and conflicts, each marked
+`from <plugin>`. Install, enable, disable, update and remove are only on the
+computer: **Manage plugins on the computer: Settings -> Plugins**. The list
+refreshes when a plugin changes.
+
+In a task's composer, type `/` at the start of the text to see the prompt
+commands plugins provide, each with `from <plugin>`. Tapping one puts its text
+in the field; it is never sent until you press Send. A command that shares a
+name with another is listed as `/<plugin>:<name>`; the plugin whose id sorts
+first keeps the bare name.
+
+If a plugin provides themes, the **Themes** section of the Plugins screen lists
+them next to **Default**. A theme can be light, dark or both, and it applies
+when the phone is in that mode. Choosing one only changes colours on this
+phone. It goes back to the default when the plugin is disabled, removed or
+plugins are switched off. A theme the app cannot use says **Not supported on
+mobile**. Plugin text is shown as plain text, and the phone runs no plugin code.
+
 ## Further reading
 
 - [ADR-0040: push notifications](../docs/decisions/0040-mobile-push-notifications.md)

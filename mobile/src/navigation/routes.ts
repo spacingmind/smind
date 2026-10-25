@@ -34,3 +34,16 @@ export function taskHeaderTitle(params: { id?: Param; title?: Param } | undefine
 
 // The create-a-task form's route (a const, no logic).
 export const NEW_TASK_HREF = '/new-task' as const;
+
+// The read-only plugin screens (ADR-0042 PA.5): the list, and one plugin's detail by id.
+export const PLUGINS_HREF = '/plugins' as const;
+
+export function pluginHref(id: string): { pathname: '/plugin/[id]'; params: { id: string } } {
+  return { pathname: '/plugin/[id]', params: { id } };
+}
+
+/** The plugin id from route params; an id is a route string only, so anything empty is refused. */
+export function parsePluginParams(params: { id?: Param }): { ok: true; id: string } | { ok: false } {
+  const id = first(params.id);
+  return id !== undefined && id.trim() !== '' && id.length <= 128 ? { ok: true, id } : { ok: false };
+}
