@@ -349,13 +349,13 @@ describe("shared catalog / profile / health cache", () => {
     };
     walk(root);
     expect(declarations).toEqual(["lib/provider-catalog-fallback.ts"]);
-    // And no inline copy of the two-provider list under another name.
+    // And no inline copy of the built-in provider list under another name.
     const inline: string[] = [];
     const walkInline = (dir: string) => {
       for (const name of readdirSync(dir)) {
         const path = join(dir, name);
         if (statSync(path).isDirectory()) walkInline(path);
-        else if (/\.tsx?$/.test(name) && !/\.test\./.test(name) && /\[\s*\{\s*id:\s*"claude-native"\s*\}\s*,\s*\{\s*id:\s*"glm"\s*\}\s*\]/.test(readFileSync(path, "utf8"))) {
+        else if (/\.tsx?$/.test(name) && !/\.test\./.test(name) && /\{\s*id:\s*"claude-native"[^}]*\}\s*,\s*\{\s*id:\s*"codex-native"/.test(readFileSync(path, "utf8"))) {
           inline.push(path.slice(root.length + 1));
         }
       }

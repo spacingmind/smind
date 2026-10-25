@@ -3,10 +3,13 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import type { ProviderNavItem } from "@/lib/providers-view";
 import { providerConsumer } from "@/lib/providers-groups";
+import { providerLabel } from "@/lib/provider-catalog";
+import type { ProviderInfo } from "@/lib/types";
 import { buildProviderDiagnostic } from "@/lib/provider-diagnostic";
 import { ProviderIcon } from "@/components/provider-icon";
 import { AccountsCard } from "@/components/providers/accounts-card";
 import { ProviderDefaultModel } from "@/components/providers/provider-default-model";
+import { ProviderCustomInfo } from "@/components/providers/provider-custom-info";
 import { ProviderEnvField } from "@/components/providers/provider-env";
 import { ProviderModels } from "@/components/providers/provider-models";
 import { ProviderDiagnostics } from "@/components/providers/provider-diagnostics";
@@ -28,6 +31,13 @@ const KIND_LABEL: Record<ProviderNavItem["kind"], string> = {
   cli: "Managed by its own CLI",
   other: "Other accounts",
 };
+
+/** The detail's subtitle: how the provider authenticates, or what a providers.custom entry is. */
+function kindLine(item: ProviderNavItem, info: ProviderInfo | null, providers: readonly ProviderInfo[]): string {
+  if (info?.extends) return `Instance of ${providerLabel(info.extends, providers)} · its own config directory`;
+  if (info?.custom) return "Custom ACP provider";
+  return KIND_LABEL[item.kind];
+}
 
 function ReadinessLine({
   id,
@@ -110,7 +120,7 @@ export function ProviderDetail({
   const reloginAccount = canConnect ? itemRows.find((r) => r.account.id === reloginAccountId)?.account ?? null : null;
   const proxyConsumer = item.accountProvider !== undefined && providerConsumer(item.accountProvider) === "proxy";
   // Runs on these providers use the CLI's own login, not an smind account.
-  const usesCliLogin = info !== null && (info.kind === "cli" || proxyConsumer);
+  const usesCliLogin = info !== null && (info.kind === "cli" || info.extends !== undefined || proxyConsumer);
   const onConnected = () => void queryClient.invalidateQueries({ queryKey: queryKeys.accountList() });
 
   return (
@@ -121,7 +131,7 @@ export function ProviderDetail({
           <h3 className="text-ui-lg font-medium">{item.label}</h3>
         </div>
         <p className="text-ui-sm text-muted-foreground">
-          {KIND_LABEL[item.kind]}
+          {kindLine(item, info, providers)}
           {itemRows.length > 0 ? (
             <span data-testid="provider-detail-summary">
               {` · ${itemRows.length} account${itemRows.length === 1 ? "" : "s"}`}
@@ -178,9 +188,11 @@ export function ProviderDetail({
         />
       ) : null}
 
-      {info ? <ProviderDefaultModel info={info} hasClient={client !== null} /> : null}
+      {info && !info.custom ? <ProviderDefaultModel info={info} hasClient={client !== null} /> : null}
 
-      {info ? <ProviderEnvField info={info} hasClient={client !== null} /> : null}
+      {info && !info.custom ? <ProviderEnvField info={info} hasClient={client !== null} /> : null}
+
+      {info?.custom ? <ProviderCustomInfo info={info} hasClient={client !== null} /> : null}
 
       {item.kind === "cli" ? (
         <div
@@ -190,7 +202,11 @@ export function ProviderDetail({
           <span className="flex flex-col gap-0.5">
             <span className="text-ui-base text-muted-foreground">Managed externally via CLI</span>
             <span className="text-ui-xs text-muted-foreground">
-              Authenticates itself via its own CLI login — accounts added here aren't read by it.
+              {info?.extends
+                ? "Uses the CLI login kept in its own config directory — accounts added here aren't read by it."
+                : info?.custom
+                  ? "The agent handles its own sign-in — accounts added here aren't read by it."
+                  : "Authenticates itself via its own CLI login — accounts added here aren't read by it."}
             </span>
           </span>
           <TestButton providerId={item.id} testing={isTesting(item.id)} onTest={runTest} />

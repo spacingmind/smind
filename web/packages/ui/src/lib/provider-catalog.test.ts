@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { ProviderInfo } from "@/lib/types";
 
-import { accountProviderLabel, providerIdentity, providerLabel, providerShortName } from "@/lib/provider-catalog";
+import { accountProviderLabel, providerFamilyId, providerIdentity, providerLabel, providerRunner, providerShortName } from "@/lib/provider-catalog";
+import { FALLBACK_PROVIDERS } from "@/lib/provider-catalog-fallback";
 
 const SERVED: ProviderInfo[] = [
   { id: "claude-native", label: "Claude (daemon)", accountProvider: "anthropic" },
@@ -75,5 +76,44 @@ describe("providerShortName", () => {
     expect(providerShortName("openai")).toBe("Codex");
     expect(providerShortName("glm")).toBe("GLM");
     expect(providerShortName("xai")).toBe("xai");
+  });
+});
+
+// ADR-0042 AC31: provider ids are strings; anything the catalog describes (an instance, a providers.custom ACP agent) works without a table row.
+const CUSTOM: ProviderInfo[] = [
+  { id: "claude-native", label: "Claude Code", runner: "claude-native" },
+  { id: "claude-work", label: "Claude work", runner: "claude-native", extends: "claude-native", custom: true },
+  { id: "my-acp", label: "My ACP agent", runner: "acp", custom: true },
+];
+
+describe("unknown provider ids (providers.custom)", () => {
+  it("takes the label from the catalog, not from a table", () => {
+    expect(providerLabel("my-acp", CUSTOM)).toBe("My ACP agent");
+    expect(providerLabel("claude-work", CUSTOM)).toBe("Claude work");
+    expect(providerLabel("my-acp")).toBe("my-acp");
+  });
+
+  it("asks the catalog how a provider runs, then the built-in table, then treats the id as ACP", () => {
+    expect(providerRunner("claude-work", CUSTOM)).toBe("claude-native");
+    expect(providerRunner("my-acp", CUSTOM)).toBe("acp");
+    expect(providerRunner("codex-native")).toBe("codex-native");
+    expect(providerRunner("glm")).toBe("acp");
+    expect(providerRunner("never-heard-of-it")).toBe("acp");
+  });
+
+  it("names the built-in an instance extends", () => {
+    expect(providerFamilyId("claude-work", CUSTOM)).toBe("claude-native");
+    expect(providerFamilyId("my-acp", CUSTOM)).toBe("my-acp");
+  });
+});
+
+describe("offline fallback catalog", () => {
+  it("is exactly the four built-ins with their runners", () => {
+    expect(FALLBACK_PROVIDERS.map((p) => [p.id, p.runner])).toEqual([
+      ["claude-native", "claude-native"],
+      ["codex-native", "codex-native"],
+      ["glm", "acp"],
+      ["kimi", "acp"],
+    ]);
   });
 });

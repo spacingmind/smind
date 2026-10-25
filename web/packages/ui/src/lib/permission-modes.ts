@@ -1,4 +1,5 @@
-import type { ModeInfo, Provider, ProviderInfo } from "@/lib/types";
+import { providerRunner } from "@/lib/provider-catalog";
+import type { ModeInfo, ProviderInfo, ProviderRunner } from "@/lib/types";
 
 /**
  * Provider-native permission modes (ADR-0019): every surface -- composer,
@@ -10,7 +11,7 @@ import type { ModeInfo, Provider, ProviderInfo } from "@/lib/types";
  * it fails), mirroring internal/taskrunner's static catalogs so the
  * composer is never unusable; the daemon's answer always wins.
  */
-const STATIC_MODES: Record<Provider, { modes: ModeInfo[]; defaultMode: string }> = {
+const STATIC_MODES: Record<ProviderRunner, { modes: ModeInfo[]; defaultMode: string }> = {
   "claude-native": {
     defaultMode: "acceptEdits",
     modes: [
@@ -27,11 +28,8 @@ const STATIC_MODES: Record<Provider, { modes: ModeInfo[]; defaultMode: string }>
       { id: "full-access", label: "Full Access", description: "Edit files, run commands, and access the network without additional prompts.", autoApproves: true },
     ],
   },
-  glm: { defaultMode: "default", modes: [{ id: "default", label: "Default", description: "The agent's own starting mode" }] },
-  kimi: { defaultMode: "default", modes: [{ id: "default", label: "Default", description: "The agent's own starting mode" }] },
+  acp: { defaultMode: "default", modes: [{ id: "default", label: "Default", description: "The agent's own starting mode" }] },
 };
-
-const ACP_PROVIDERS: ReadonlySet<string> = new Set(["glm", "kimi"]);
 
 function infoFor(providers: ProviderInfo[], provider: string): ProviderInfo | undefined {
   return providers.find((p) => p.id === provider);
@@ -41,14 +39,14 @@ function infoFor(providers: ProviderInfo[], provider: string): ProviderInfo | un
 export function providerModes(providers: ProviderInfo[], provider: string): ModeInfo[] {
   const served = infoFor(providers, provider)?.modes;
   if (served && served.length > 0) return served;
-  return STATIC_MODES[provider as Provider]?.modes ?? [];
+  return STATIC_MODES[providerRunner(provider, providers)].modes;
 }
 
 /** The mode a run of provider gets when it names none. */
 export function defaultModeFor(providers: ProviderInfo[], provider: string): string {
   const info = infoFor(providers, provider);
   if (info?.defaultMode) return info.defaultMode;
-  return STATIC_MODES[provider as Provider]?.defaultMode ?? providerModes(providers, provider)[0]?.id ?? "";
+  return STATIC_MODES[providerRunner(provider, providers)].defaultMode;
 }
 
 /** The mode a stored/draft value actually means: "" resolves to the provider default. */
@@ -64,12 +62,12 @@ export function permissionModeLabel(providers: ProviderInfo[], provider: string,
 
 /** Whether provider takes autoAccept (ACP: approve every permission prompt). */
 export function supportsAutoAccept(providers: ProviderInfo[], provider: string): boolean {
-  return infoFor(providers, provider)?.supportsAutoAccept ?? ACP_PROVIDERS.has(provider);
+  return infoFor(providers, provider)?.supportsAutoAccept ?? providerRunner(provider, providers) === "acp";
 }
 
 /** Whether a running run of provider can switch mode mid-run (Codex can't). */
 export function supportsLiveModeSwitch(providers: ProviderInfo[], provider: string): boolean {
-  return infoFor(providers, provider)?.liveModeSwitch ?? provider !== "codex-native";
+  return infoFor(providers, provider)?.liveModeSwitch ?? providerRunner(provider, providers) !== "codex-native";
 }
 
 export const AUTO_ACCEPT_LABEL = "Auto-accept";

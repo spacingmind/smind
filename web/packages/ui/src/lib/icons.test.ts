@@ -78,6 +78,7 @@ describe("icon registry", () => {
         "pin": "Pin",
         "play": "Play",
         "preview": "Eye",
+        "providerGeneric": "Blocks",
         "pullRequest": "GitPullRequest",
         "push": "Upload",
         "question": "CircleQuestionMark",

@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Icons } from "@/lib/icons";
-import { providerLabel } from "@/lib/provider-catalog";
+import { providerLabel, providerRunner } from "@/lib/provider-catalog";
 
 import { TaskLineageChips } from "@/components/task-lineage";
 import { resendRequests } from "@/lib/attachments/reuse";
@@ -32,7 +32,7 @@ import { useLiveTask } from "@/hooks/use-live-task";
 import { useTaskLineage } from "@/hooks/use-task-lineage";
 import { useChatQueue } from "@/hooks/use-chat-queue";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
-import { useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
+import { canRetryWithHigherEffort, useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import { useRunFailoverIndex } from "@/hooks/use-run-failover-index";
 import { isRateLimitedRun } from "@/lib/rate-limit";
 import { runStartParams } from "@/lib/run-start";
@@ -41,7 +41,7 @@ import { useTaskGit } from "@/hooks/use-task-git";
 import { useTaskGitFocus } from "@/lib/task-git-focus";
 import { effectiveMode, providerModes, supportsAutoAccept, supportsLiveModeSwitch } from "@/lib/permission-modes";
 import type { ConnectionStatus } from "@/lib/reconnect";
-import type { AgentProfile, Chat, Provider, Task, ThinkingLevel } from "@/lib/types";
+import type { AgentProfile, Chat, Task, ThinkingLevel } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
 /**
@@ -176,7 +176,7 @@ export function TaskDetailPane({
   // running run's own item count so a fresh option list is fetched as the
   // session progresses (see the hook's own doc comment for why there's no
   // dedicated push notification for this instead).
-  const configOptionsRunId = runningRun && (runningRun.provider === "glm" || runningRun.provider === "kimi" || runningRun.provider === "claude-native") ? runningRun.id : null;
+  const configOptionsRunId = runningRun && providerRunner(runningRun.provider, providers) !== "codex-native" ? runningRun.id : null;
   // D1: while a live-switch-capable run is active the composer's Mode/Auto-accept pills drive it.
   const liveRunId = runningRun?.id;
   const liveProvider = runningRun?.provider;
@@ -322,7 +322,7 @@ export function TaskDetailPane({
           runStartParams({
             taskId,
             chatId: chat.ID,
-            provider: p.Provider as Provider,
+            provider: p.Provider,
             prompt: run.prompt,
             whenBusy: "queue",
             permission: { permissionMode: p.PermissionMode, autoAccept: p.AutoAccept },
@@ -463,7 +463,7 @@ export function TaskDetailPane({
                     detailLevel={detailLevel}
                     worktreePath={task.WorktreePath ?? undefined}
                     onOpenFile={openFile}
-                    onRetry={retryWithHigherEffort}
+                    onRetry={canRetryWithHigherEffort(run, providers) ? retryWithHigherEffort : undefined}
                     onRerun={rerun}
                     onEditPrompt={editPrompt}
                     onContinue={continueRun}
@@ -549,7 +549,7 @@ export function TaskDetailPane({
         taskId={task.ID}
         chatId={chat.ID}
         isDefaultChat={isDefaultChat}
-        boundProvider={chat.Provider as Provider | null}
+        boundProvider={chat.Provider}
         connected={client !== null && connectionStatus === "connected"}
         runningRunId={runningRunId}
         waitingOnUser={!!runningRun?.pendingPermission}

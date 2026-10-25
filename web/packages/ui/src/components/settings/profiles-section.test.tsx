@@ -676,3 +676,37 @@ describe("profile form uses the shared run-config pickers (ADR-0032 S4)", () => 
     });
   });
 });
+
+describe("profile editor with a provider instance", () => {
+  it("offers the instance in the provider picker and saves it as the profile's provider", async () => {
+    const providers = {
+      providers: [
+        { id: "claude-native", label: "Claude Code", runner: "claude-native", defaultMode: "acceptEdits", modes: [{ id: "acceptEdits", label: "Accept File Edits" }], models: [] },
+        {
+          id: "claude-work",
+          label: "Claude work",
+          runner: "claude-native",
+          extends: "claude-native",
+          custom: true,
+          defaultMode: "acceptEdits",
+          modes: [{ id: "acceptEdits", label: "Accept File Edits" }],
+          models: [],
+        },
+      ],
+    };
+    const { daemon } = await renderWithProfiles([PROFILE], providers);
+    fireEvent.click(screen.getByTestId("profile-new-button"));
+    await flush();
+    fireEvent.change(screen.getByTestId("profile-form-name"), { target: { value: "Work login" } });
+    fireEvent.click(screen.getByTestId("profile-form-provider"));
+    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    fireEvent.click(screen.getByTestId("model-provider-claude-work"));
+    fireEvent.click(screen.getByTestId("model-row-claude-work:"));
+    await flush();
+    // Thinking is offered: the instance runs through claude-native.
+    expect(screen.getByTestId("profile-form-thinking-level")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("profile-form-submit"));
+    await flush();
+    expect(daemon.calls.find((c) => c.method === "profile.create")?.params).toMatchObject({ name: "Work login", provider: "claude-work" });
+  });
+});

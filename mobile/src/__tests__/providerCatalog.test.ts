@@ -6,6 +6,8 @@
 import { describe, expect, it } from 'vitest';
 import { ProviderInfo } from '../api';
 import {
+  FALLBACK_PROVIDERS,
+  catalogOrFallback,
   defaultSelection,
   modeOptions,
   modelOptions,
@@ -110,5 +112,32 @@ describe('wireModelMode', () => {
 
   it('with no provider entry, any non-empty selection still goes out', () => {
     expect(wireModelMode(undefined, { provider: 'x', model: 'm', mode: 'acceptEdits' })).toEqual({ model: 'm', permissionMode: 'acceptEdits' });
+  });
+});
+
+// ADR-0042 AC31: ids are strings, the daemon's list is the single source, the four built-ins are only the offline fallback.
+describe('custom providers and the offline fallback', () => {
+  const instance: ProviderInfo = { id: 'claude-work', label: 'Claude work', runner: 'claude-native', extends: 'claude-native', custom: true, defaultMode: 'default' };
+  const acp: ProviderInfo = { id: 'my-acp', runner: 'acp', custom: true };
+
+  it('takes an unknown id through selection and labels without any table: the label is the catalog label, else the raw id', () => {
+    const catalog = [claude, instance, acp];
+    expect(selectProvider(catalog, 'claude-work').provider).toBe('claude-work');
+    expect(providerLabel(instance)).toBe('Claude work');
+    expect(providerLabel(acp)).toBe('my-acp');
+    expect(defaultSelection(catalog, { provider: 'my-acp' })?.provider).toBe('my-acp');
+  });
+
+  it('serves the daemon list as is when it answered: no built-in is back-filled', () => {
+    const served = [instance, acp];
+    expect(catalogOrFallback(served)).toBe(served);
+    expect(catalogOrFallback(served).map((p) => p.id)).toEqual(['claude-work', 'my-acp']);
+  });
+
+  it('falls back to the four built-ins only when the fetch failed or listed nothing', () => {
+    const ids = ['claude-native', 'codex-native', 'glm', 'kimi'];
+    expect(catalogOrFallback(null).map((p) => p.id)).toEqual(ids);
+    expect(catalogOrFallback([]).map((p) => p.id)).toEqual(ids);
+    expect(FALLBACK_PROVIDERS.map((p) => providerLabel(p))).toEqual(['Claude Code', 'Codex', 'GLM', 'Kimi']);
   });
 });

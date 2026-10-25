@@ -125,8 +125,8 @@ describe("useProviderHealth", () => {
     release();
     await flush();
     act(() => result.current.ensure());
-    // The list failed, so the picker's fallback catalog (claude-native + glm) is what gets tested.
-    expect(daemon.countCalls("provider.test")).toBe(2);
+    // The list failed, so the picker's fallback catalog (the four built-ins) is what gets tested.
+    expect(daemon.countCalls("provider.test")).toBe(4);
   });
 
   it("tests only the newly listed providers on a later open", async () => {

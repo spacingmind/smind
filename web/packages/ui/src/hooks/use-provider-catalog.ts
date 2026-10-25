@@ -6,6 +6,7 @@ import { FALLBACK_PROVIDERS } from "@/lib/provider-catalog-fallback";
 import { queryKeys } from "@/lib/query-keys";
 import type { ProviderInfo, ProviderListResult } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
+import { useProviderFamilies } from "@/stores/provider-families-store";
 
 /** The one `provider.list` query definition: the hook and one-off readers (`ensureQueryData`) share it, so the key has a single fetcher. */
 export function providerListQueryOptions(client: WsClientLike | null) {
@@ -58,6 +59,10 @@ export function useProviderCatalog(): {
   const { client } = useDaemonConnection();
   const query = useQuery(providerListQueryOptions(client));
   const providers = query.data?.providers ?? NO_PROVIDERS;
+  const setFamilies = useProviderFamilies((s) => s.setFromCatalog);
+  useEffect(() => {
+    if (query.data) setFamilies(providers);
+  }, [query.data, providers, setFamilies]);
   // A daemon that never answers must not leave a picker on "Loading…" forever: the fallback catalog takes over.
   // Per connection: a new client waits (shows "Loading…") again before falling back.
   const [timedOutFor, setTimedOutFor] = useState<WsClientLike | null>(null);

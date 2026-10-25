@@ -1,34 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
+import type { ServedProvider } from "@/lib/provider-catalog";
 import { supportsThinking } from "@/lib/thinking-levels";
 import type { WsClientLike } from "@/lib/ws-client";
 import { resendRequests } from "@/lib/attachments/reuse";
 import { runStartParams } from "@/lib/run-start";
-import type {
-  AttachmentMeta,
-  AttachmentRequest,
-  PermissionSettings,
-  PermissionQuestion,
-  PermissionDetail,
-  PermissionRequestEventParams,
-  PermissionResolutionReason,
-  PermissionResolvedEventParams,
-  McpServerState,
-  Provider,
-  RunUsage,
-  RunAttachResult,
-  RunLogEvent,
-  RunLogsResult,
-  RunSetPermissionModeResult,
-  RunStartResult,
-  RunStatusEventPayload,
-  RunStatusValue,
-  RunSummary,
-  ThinkingLevel,
-  ToolCallStatus,
-  WhenBusy,
-} from "@/lib/types";
+import type { AttachmentMeta, AttachmentRequest, PermissionSettings, PermissionQuestion, PermissionDetail, PermissionRequestEventParams, PermissionResolutionReason, PermissionResolvedEventParams, McpServerState, RunUsage, RunAttachResult, RunLogEvent, RunLogsResult, RunSetPermissionModeResult, RunStartResult, RunStatusEventPayload, RunStatusValue, RunSummary, ThinkingLevel, ToolCallStatus, WhenBusy } from "@/lib/types";
 
 /** A still-unanswered permission request on a run, as shown by the detail pane. */
 export interface PendingPermission {
@@ -285,7 +263,7 @@ class PermissionRequestKinds {
 /** One run in a task's timeline, as rendered by the detail pane. */
 export interface RunEntry {
   id: string;
-  provider: Provider;
+  provider: string;
   prompt: string;
   status: RunStatusValue;
   startedAt: string;
@@ -401,7 +379,7 @@ interface TimelineState {
    * selector is touched).
    */
   submitPrompt: (
-    provider: Provider,
+    provider: string,
     prompt: string,
     permission?: PermissionSettings,
     thinkingLevel?: ThinkingLevel,
@@ -472,8 +450,8 @@ export function nextThinkingTier(level: ThinkingLevel): ThinkingLevel | null {
  * tier left to try. A successful run, a non-Claude provider, or a run
  * already at "extended" never qualifies.
  */
-export function canRetryWithHigherEffort(run: RunEntry): boolean {
-  return run.status === "error" && supportsThinking(run.provider) && nextThinkingTier(run.thinkingLevel) !== null;
+export function canRetryWithHigherEffort(run: RunEntry, providers?: readonly ServedProvider[]): boolean {
+  return run.status === "error" && supportsThinking(run.provider, providers) && nextThinkingTier(run.thinkingLevel) !== null;
 }
 
 /** Tracks one task-selection's lifetime: guards async continuations from a superseded selection, and lets an active run.attach be aborted (detached, not stopped) on task switch or unmount. */
@@ -825,7 +803,7 @@ export function useRunTimeline(
 
   const submitPrompt = useCallback(
     async (
-      provider: Provider,
+      provider: string,
       prompt: string,
       permission?: PermissionSettings,
       thinkingLevel?: ThinkingLevel,

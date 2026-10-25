@@ -1,5 +1,5 @@
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
-import type { Provider, ThinkingLevel } from "@/lib/types";
+import type { ThinkingLevel } from "@/lib/types";
 
 /** localStorage key for one chat's run-config toolbar state (ADR-0016 P3: `smind:run-config:${taskId}:${chatId}`, replacing the old per-task-only key) -- same per-key shape as use-composer-draft.ts's draftStorageKey (docs/design.md §9). */
 export function runConfigStorageKey(taskId: number, chatId: number): string {
@@ -11,7 +11,6 @@ function legacyRunConfigStorageKey(taskId: number): string {
   return `smind:run-config:${taskId}`;
 }
 
-const PROVIDERS: readonly Provider[] = ["claude-native", "glm", "kimi", "codex-native"];
 const THINKING_LEVEL_VALUES: readonly ThinkingLevel[] = ["", "off", "standard", "extended"];
 
 /**
@@ -29,14 +28,15 @@ function toRunConfigState(value: unknown): RunConfigState | null {
   const valid =
     (v.baseAgentId === null || typeof v.baseAgentId === "string") &&
     typeof v.custom === "boolean" &&
-    PROVIDERS.includes(v.provider as Provider) &&
+    typeof v.provider === "string" &&
+    v.provider !== "" &&
     THINKING_LEVEL_VALUES.includes(v.thinkingLevel as ThinkingLevel) &&
     (legacy || (typeof v.permissionMode === "string" && typeof v.autoAccept === "boolean"));
   if (!valid) return null;
   return {
     baseAgentId: v.baseAgentId as string | null,
     custom: v.custom as boolean,
-    provider: v.provider as Provider,
+    provider: v.provider as string,
     permissionMode: legacy ? "" : (v.permissionMode as string),
     autoAccept: legacy ? false : (v.autoAccept as boolean),
     thinkingLevel: v.thinkingLevel as ThinkingLevel,

@@ -4,7 +4,8 @@ import { providerListQueryOptions } from "@/hooks/use-provider-catalog";
 import { toast } from "@/components/ui/toast";
 import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
 import { recipientRunParams, resolveReviewRecipient } from "@/lib/review-recipient";
-import type { Chat, Provider, RunStartResult } from "@/lib/types";
+import { queryKeys } from "@/lib/query-keys";
+import type { Chat, ProviderListResult, RunStartResult } from "@/lib/types";
 import { useFocusedChatStore } from "@/stores/focused-chat-store";
 
 /**
@@ -20,10 +21,10 @@ export function useSendToFocusedChat(taskId: number) {
     if (!client) throw new Error("smind isn't connected to the daemon.");
     const chats = (await client.call<Chat[]>("chat.list", { taskId })) ?? [];
     const focusedChatId = useFocusedChatStore.getState().byTask[taskId] ?? null;
-    const resolved = resolveReviewRecipient({ taskId, chats, focusedChatId, connected: true });
+    const resolved = resolveReviewRecipient({ taskId, chats, focusedChatId, connected: true, providers: queryClient.getQueryData<ProviderListResult>(queryKeys.providerList())?.providers });
     if (resolved.kind !== "ready") throw new Error("This task has no open chat to send the request to. Open a chat first.");
     const { recipient } = resolved;
-    let provider: Provider | null = recipient.provider;
+    let provider: string | null = recipient.provider;
     if (!provider) {
       provider = "claude-native";
       try {

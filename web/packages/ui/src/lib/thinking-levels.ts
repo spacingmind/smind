@@ -1,3 +1,4 @@
+import { providerRunner, type ServedProvider } from "@/lib/provider-catalog";
 import type { ThinkingLevel } from "@/lib/types";
 
 /**
@@ -32,10 +33,10 @@ export function thinkingLevelLabel(level: ThinkingLevel): string {
 }
 
 /**
- * Whether provider has a thinking level at all: a Claude-only, pre-run
+ * Whether provider has a thinking level at all: a claude-native-runner-only (the base and its instances), pre-run
  * control (internal/taskrunner/thinking.go) -- every other provider takes
  * no thinking option, so the control is omitted rather than disabled.
  */
-export function supportsThinking(provider: string): boolean {
-  return provider === "claude-native";
+export function supportsThinking(provider: string, providers?: readonly ServedProvider[]): boolean {
+  return providerRunner(provider, providers) === "claude-native";
 }

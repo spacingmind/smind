@@ -20,7 +20,7 @@ import { ThinkingSelect } from "@/components/pickers/thinking-select";
 import { AutoAcceptToggle } from "@/components/pickers/auto-accept-toggle";
 import { describeProfile } from "@/lib/describe-profile";
 import { Button } from "@/components/ui/button";
-import type { AgentProfile, ModeInfo, Provider, ProviderInfo, ThinkingLevel } from "@/lib/types";
+import type { AgentProfile, ModeInfo, ProviderInfo, ThinkingLevel } from "@/lib/types";
 
 /**
  * The per-run configuration the composer submits with (run-config IA
@@ -39,7 +39,7 @@ export interface RunConfigState {
   baseAgentId: string | null;
   /** True once any field has been hand-edited since baseAgentId was applied. */
   custom: boolean;
-  provider: Provider;
+  provider: string;
   /** One of the provider's own permission mode ids (ADR-0019); "" means the provider's default. */
   permissionMode: string;
   /** ACP providers only: approve every permission prompt. */
@@ -53,7 +53,7 @@ export interface RunConfigContextValue {
   state: RunConfigState;
   actions: {
     /** The combined picker's one action: picking a model under another provider switches provider and model together (mode/autoAccept reset to the new provider's defaults, ADR-0019); under the current provider only the model changes. "" = the provider's default model (ADR-0025). */
-    setProviderModel: (provider: Provider, model: string) => void;
+    setProviderModel: (provider: string, model: string) => void;
     setPermissionMode: (mode: string) => void;
     setAutoAccept: (autoAccept: boolean) => void;
     setThinkingLevel: (level: ThinkingLevel) => void;
@@ -81,7 +81,7 @@ export interface RunConfigContextValue {
     supportsAutoAccept: boolean;
     disabled: boolean;
     /** ADR-0016 P3: the chat's own bound provider (chats.Provider, set on its first run and immutable after) -- non-null makes the combined picker offer only that provider, since a stored agent session is provider-native. */
-    boundProvider: Provider | null;
+    boundProvider: string | null;
     /** The chat this config belongs to (null before one exists): where the chip looks for the model a default resolved to. */
     chatId: number | null;
     /** Set while a live-switch-capable run is active: the Mode/Auto-accept pills drive it instead of the next run's config. */
@@ -96,7 +96,7 @@ export interface RunConfigContextValue {
  */
 export interface LiveRunControls {
   /** The running run's provider and id (a live change only syncs the next-run config for the same provider). */
-  provider: Provider;
+  provider: string;
   runId: string;
   modes: ModeInfo[];
   /** The running run's effective mode id. */
@@ -125,7 +125,7 @@ function applyProfileFields(prev: RunConfigState, p: AgentProfile): RunConfigSta
   return {
     baseAgentId: String(p.ID),
     custom: false,
-    provider: p.Provider as Provider,
+    provider: p.Provider,
     permissionMode: p.PermissionMode,
     autoAccept: p.AutoAccept,
     thinkingLevel: (p.ThinkingLevel || prev.thinkingLevel) as ThinkingLevel,
@@ -179,7 +179,7 @@ export function RunConfigToolbar({
   /** Whether chatId is taskId's default (oldest) chat -- the only one that migrates the pre-ADR-0016 per-task-only persisted key (see readRunConfigPreference). */
   isDefaultChat?: boolean;
   /** The chat's own bound provider (chats.Provider), once its first run has set one -- forces state.provider to match and makes the Provider select read-only (ADR-0016 P3). null (not yet bound) leaves the provider freely selectable, as today. */
-  boundProvider?: Provider | null;
+  boundProvider?: string | null;
   profiles: AgentProfile[];
   providers: ProviderInfo[];
   /** provider.list has not settled yet (see meta.providersLoading). */
@@ -283,7 +283,7 @@ export function RunConfigToolbar({
   // resets to the new provider's own default mode and turns autoAccept off,
   // and the model is the one picked alongside it, so a model id never leaks
   // into a provider that lacks it. Same-provider picks keep the mode.
-  const setProviderModel = useCallback((provider: Provider, model: string) => {
+  const setProviderModel = useCallback((provider: string, model: string) => {
     setState((prev) => {
       const patch =
         provider === prev.provider ? { model } : { provider, permissionMode: "", autoAccept: false, model };
@@ -387,10 +387,10 @@ function RunConfigToolbarModelPicker() {
         profileRows={profileRows}
         baseAgentId={state.baseAgentId}
         custom={state.custom}
-        onSelect={(provider, model) => actions.setProviderModel(provider as Provider, model)}
+        onSelect={(provider, model) => actions.setProviderModel(provider, model)}
         onApplyProfile={actions.applyProfile}
         onClearAgent={actions.clearAgent}
-        currentConfig={{ permissionMode: state.permissionMode, autoAccept: state.autoAccept, thinkingLevel: supportsThinking(state.provider) ? state.thinkingLevel : "" }}
+        currentConfig={{ permissionMode: state.permissionMode, autoAccept: state.autoAccept, thinkingLevel: supportsThinking(state.provider, meta.providers) ? state.thinkingLevel : "" }}
         onManageAgents={() => openSettings("agents")}
         onCreateProfile={(seed) => {
           setSettingsIntent({ kind: "newProfile", seed });
@@ -501,7 +501,7 @@ function RunConfigToolbarThinking() {
   // instead, once a live session exists (see run-config-options in
   // task-detail), since that option list is only ever known after ACP's
   // NewSession responds.
-  if (!supportsThinking(state.provider)) return null;
+  if (!supportsThinking(state.provider, meta.providers)) return null;
   return (
     <ThinkingSelect
       value={state.thinkingLevel || "standard"}

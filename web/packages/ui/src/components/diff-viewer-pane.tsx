@@ -40,17 +40,8 @@ import { loadDiffPrefs, saveDiffPrefs } from "@/lib/diff-prefs";
 import { recipientRunParams, resolveReviewRecipient } from "@/lib/review-recipient";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
-import type {
-  Chat,
-  Provider,
-  RunStartResult,
-  RunStatusEventPayload,
-  Task,
-  TaskCommitResult,
-  TaskFile,
-  TaskFileDiffResult,
-  TaskFilesResult,
-} from "@/lib/types";
+import { queryKeys } from "@/lib/query-keys";
+import type { Chat, ProviderListResult, RunStartResult, RunStatusEventPayload, Task, TaskCommitResult, TaskFile, TaskFileDiffResult, TaskFilesResult } from "@/lib/types";
 
 /** One file row's view state: fetched diff text, viewed flag (local only this pass), open/collapsed. */
 interface FileState {
@@ -289,7 +280,7 @@ export function DiffViewerPane({
   }
 
   // Who the review goes to: the focused chat, with that chat's own run config (lib/review-recipient.ts).
-  const recipientResult = resolveReviewRecipient({ taskId: task.ID, chats, focusedChatId, connected: client !== null });
+  const recipientResult = resolveReviewRecipient({ taskId: task.ID, chats, focusedChatId, connected: client !== null, providers: queryClient.getQueryData<ProviderListResult>(queryKeys.providerList())?.providers });
   const recipient = recipientResult.kind === "ready" ? recipientResult.recipient : null;
 
   /**
@@ -310,7 +301,7 @@ export function DiffViewerPane({
    */
   const sendToRecipient = async (prompt: string) => {
     if (!client || !recipient) throw new Error("No agent chat to ask");
-    let provider: Provider | null = recipient.provider;
+    let provider: string | null = recipient.provider;
     if (!provider) {
       provider = "claude-native";
       try {

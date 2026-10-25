@@ -15,6 +15,7 @@ import { useWorkspaceTree } from "@/hooks/use-workspace-tree";
 import { EM_DASH, formatCost, formatTokens, usageSince } from "@/lib/usage-format";
 import type { UsageGroupBy, UsageRange, UsageScope, UsageSummaryRow } from "@/lib/types";
 import { Icons } from "@/lib/icons";
+import { providerLabel } from "@/lib/provider-catalog";
 
 const SCOPE_OPTIONS: { value: UsageScope; label: string }[] = [
   { value: "runs", label: "Runs" },
@@ -199,7 +200,7 @@ function UsageSection({ client }: SettingsSectionContext) {
   // Providers with a browser OAuth login (claude-native, codex-native) are subscription plans: their cost is an API-price estimate. API-key and external-CLI providers (GLM, Kimi) are metered.
   const { providers: providerList } = useProviderCatalog();
   const subscriptionProviders = useMemo(
-    () => new Set(providerList.filter((p) => p.credentialKind === "oauth").map((p) => p.id as string)),
+    () => new Set(providerList.filter((p) => p.credentialKind === "oauth" || p.extends !== undefined).map((p) => p.id as string)),
     [providerList],
   );
   const names = useMemo(() => {
@@ -252,7 +253,7 @@ function UsageSection({ client }: SettingsSectionContext) {
   }
 
   function labelFor(row: UsageSummaryRow): string {
-    if (groupBy === "provider") return row.key;
+    if (groupBy === "provider") return providerLabel(row.key, providerList);
     if (groupBy === "model") return row.key === "" ? "Unknown model" : row.key;
     if (groupBy === "space") return row.key === NO_SPACE_KEY ? "No space" : (spaces.titles.get(row.key) ?? row.key);
     const resolved = names[`${groupBy}:${row.key}`];

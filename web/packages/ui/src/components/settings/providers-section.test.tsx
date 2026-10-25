@@ -382,3 +382,121 @@ describe("Connect account header button", () => {
     expect(useProvidersViewStore.getState().connectProviderId).toBeNull();
   });
 });
+
+// ADR-0042 AC37: provider instances (providers.custom `extends`) and the one-click Add instance area.
+describe("provider instances", () => {
+  const INSTANCE: ProviderInfo = {
+    id: "claude-work",
+    label: "Claude work",
+    kind: "cli",
+    runner: "claude-native",
+    extends: "claude-native",
+    custom: true,
+    env: { CLAUDE_CONFIG_DIR: "/home/u/.claude-work" },
+    envDirExists: { CLAUDE_CONFIG_DIR: true },
+    envEffective: { CLAUDE_CONFIG_DIR: { path: "/home/u/.claude-work", source: "settings", exists: true } },
+  };
+  const SUGGESTIONS = [
+    { name: ".claude-spare", dir: "/home/u/.claude-spare", extends: "claude-native", suggestedId: "claude-spare", suggestedLabel: "Claude spare" },
+    { name: ".codex-alt", dir: "/home/u/.codex-alt", extends: "codex-native", suggestedId: "codex-alt", suggestedLabel: "Codex alt" },
+  ];
+
+  async function renderWithInstances() {
+    const daemon = await renderLoaded([], [...PROVIDERS, INSTANCE]);
+    daemon.dirSuggestions = SUGGESTIONS.map((s) => ({ ...s }));
+    return daemon;
+  }
+
+  async function openAddArea() {
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("providers-add-instance-toggle"));
+    });
+    await flush();
+  }
+
+  it("lists an instance next to the built-ins with its extends, config dir, source line and a Test button", async () => {
+    await renderWithInstances();
+    expect(screen.getAllByTestId("provider-nav-item-claude-work")[0]).toHaveTextContent("Claude work");
+    await selectProvider("claude-work");
+    const detail = screen.getByTestId("provider-detail");
+    expect(detail).toHaveTextContent("Instance of Claude Code");
+    const dir = screen.getByTestId("provider-custom-dir-claude-work");
+    expect(dir).toHaveTextContent("/home/u/.claude-work");
+    expect(dir).toHaveTextContent("set in smind");
+    expect(screen.getByTestId("provider-test-claude-work")).toBeInTheDocument();
+    // An instance's dir is edited in config.yaml, so no editable env field / default-model picker is offered.
+    expect(screen.queryByTestId("provider-env-claude-work")).toBeNull();
+    expect(screen.queryByTestId("provider-default-model-claude-work")).toBeNull();
+    expect(screen.getByTestId("provider-reload-claude-work")).toBeInTheDocument();
+  });
+
+  it("renders the suggestions as one-click chips with the directory and the label they would get", async () => {
+    await renderWithInstances();
+    expect(screen.queryByTestId("provider-add-instance")).toBeNull();
+    await openAddArea();
+    const chip = screen.getByTestId("provider-suggestion-claude-spare");
+    expect(chip).toHaveTextContent("~/.claude-spare");
+    expect(chip).toHaveTextContent("Claude spare");
+    expect(screen.getByTestId("provider-suggestion-codex-alt")).toHaveTextContent("Codex alt");
+  });
+
+  it("one click calls provider.addInstance once with the suggested params and the instance appears live", async () => {
+    const daemon = await renderWithInstances();
+    await openAddArea();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("provider-suggestion-claude-spare"));
+    });
+    await flush();
+    await flush();
+    const adds = daemon.calls.filter((c) => c.method === "provider.addInstance");
+    expect(adds).toHaveLength(1);
+    expect(adds[0].params).toEqual({ extends: "claude-native", id: "claude-spare", label: "Claude spare", dir: "/home/u/.claude-spare" });
+    // provider.updated re-read the catalog: the instance is a nav row; its chip stays in place as "added" (nothing moves).
+    expect(screen.getAllByTestId("provider-nav-item-claude-spare")[0]).toHaveTextContent("Claude spare");
+    expect(screen.getByTestId("provider-suggestion-claude-spare")).toBeDisabled();
+    expect(screen.getByTestId("provider-suggestion-claude-spare")).toHaveAccessibleName("Claude spare added");
+    expect(screen.getByTestId("provider-suggestion-codex-alt")).toBeInTheDocument();
+    expect(screen.queryByTestId("provider-add-error")).toBeNull();
+  });
+
+  it("shows the daemon's refusal inline under the chips, keeps the chip, and adds nothing", async () => {
+    const daemon = await renderWithInstances();
+    daemon.addInstanceError = new Error("providers.custom[0].id: already in use");
+    await openAddArea();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("provider-suggestion-claude-spare"));
+    });
+    await flush();
+    expect(screen.getByTestId("provider-add-error")).toHaveTextContent("providers.custom[0].id: already in use");
+    expect(screen.getByTestId("provider-suggestion-claude-spare")).toBeEnabled();
+    expect(screen.queryByTestId("provider-nav-item-claude-spare")).toBeNull();
+  });
+
+  it("the manual form sends the typed extends/id/label/dir for a directory that is not suggested", async () => {
+    const daemon = await renderWithInstances();
+    await openAddArea();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("provider-add-manual-toggle"));
+    });
+    expect(screen.getByTestId("provider-add-submit")).toBeDisabled();
+    fireEvent.click(screen.getByRole("radio", { name: "Codex" }));
+    fireEvent.change(screen.getByTestId("provider-add-id"), { target: { value: "codex-lab" } });
+    fireEvent.change(screen.getByTestId("provider-add-label"), { target: { value: "Codex lab" } });
+    fireEvent.change(screen.getByTestId("provider-add-dir"), { target: { value: "~/labs/codex" } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("provider-add-submit"));
+    });
+    await flush();
+    await flush();
+    const adds = daemon.calls.filter((c) => c.method === "provider.addInstance");
+    expect(adds.map((c) => c.params)).toEqual([{ extends: "codex-native", id: "codex-lab", label: "Codex lab", dir: "~/labs/codex" }]);
+    expect(screen.getAllByTestId("provider-nav-item-codex-lab")[0]).toBeInTheDocument();
+  });
+
+  it("does not ask the daemon for suggestions until the Add instance area is opened", async () => {
+    const daemon = await renderWithInstances();
+    expect(daemon.countCalls("provider.dirSuggestions")).toBe(0);
+    await openAddArea();
+    expect(daemon.countCalls("provider.dirSuggestions")).toBe(1);
+  });
+});

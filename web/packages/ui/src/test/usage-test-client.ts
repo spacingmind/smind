@@ -3,7 +3,7 @@ import type { AccountUsage, AccountUsageParams } from "@/lib/account-usage/types
 import { RpcError, type WsClient } from "@/lib/ws-client";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { usageResult } from "@/test/account-usage-fixtures";
-import type { Account, AgentProfile, ProviderListResult, ProviderTestResult, RunSummary } from "@/lib/types";
+import type { Account, AgentProfile, ProviderDirSuggestion, ProviderListResult, ProviderTestResult, RunSummary } from "@/lib/types";
 
 /**
  * A scripted daemon for the plan-usage tests: answers `account.usage` from a
@@ -45,6 +45,10 @@ export class FakeUsageDaemon {
   testRpcErrors: Record<string, Error> = {};
   /** When set, `provider.setDefaultModel` rejects with it. */
   setDefaultModelError: Error | null = null;
+  /** Answers `provider.dirSuggestions`; `provider.addInstance` removes the matching entry and adds the instance to `providers`. */
+  dirSuggestions: ProviderDirSuggestion[] = [];
+  /** When set, `provider.addInstance` rejects with it. */
+  addInstanceError: Error | null = null;
   /** When set, `provider.setEnv` rejects with it. */
   setEnvError: Error | null = null;
   /** When set, every `account.list` / `provider.list` / `provider.test` / account-mutation request rejects with it. */
@@ -99,6 +103,37 @@ export class FakeUsageDaemon {
             };
             return { id: p.provider, defaultModel: p.model };
           }
+          case "provider.dirSuggestions":
+            return { suggestions: this.dirSuggestions };
+          case "provider.addInstance": {
+            // The daemon's behaviour: write the instance, publish provider.updated (the cache bridge re-reads provider.list).
+            const p = params as { extends: string; id: string; label: string; dir: string };
+            if (this.addInstanceError) throw this.addInstanceError;
+            const envKey = p.extends === "codex-native" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR";
+            this.providers = {
+              ...this.providers,
+              providers: [
+                ...this.providers.providers,
+                {
+                  id: p.id,
+                  label: p.label,
+                  kind: "cli",
+                  runner: p.extends as "claude-native" | "codex-native",
+                  extends: p.extends,
+                  custom: true,
+                  env: { [envKey]: p.dir },
+                  envDirExists: { [envKey]: true },
+                  envEffective: { [envKey]: { path: p.dir, source: "settings", exists: true } },
+                },
+              ],
+            };
+            this.dirSuggestions = this.dirSuggestions.filter((s) => s.dir !== p.dir);
+            queueMicrotask(() => this.emit("provider.updated", { id: p.id }));
+            return { id: p.id };
+          }
+          case "provider.reload":
+            queueMicrotask(() => this.emit("provider.updated", { id: "" }));
+            return this.providers;
           case "provider.setEnv": {
             // The daemon's own behaviour: persist into the list (null / "" clears), answer the provider.updated payload.
             const p = params as { provider: string; key: string; value: string | null };

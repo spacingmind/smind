@@ -92,6 +92,8 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
     case "provider.updated": {
       // {id, defaultModel}: the list rows carry defaultModel, so one re-read settles every consumer.
       void queryClient.invalidateQueries({ queryKey: queryKeys.providerList() });
+      // An added instance (or a reload, id "") changes which directories are still worth suggesting.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.providerDirSuggestions(), refetchType: "none" });
       return;
     }
     case "profile.created":
