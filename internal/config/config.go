@@ -24,7 +24,15 @@ type Config struct {
 	Relay         RelayConfig         `yaml:"relay"`
 	Push          PushConfig          `yaml:"push"`
 	Learning      LearningConfig      `yaml:"learning"`
+	Plugins       PluginsConfig       `yaml:"plugins"`
 	Log           LogConfig           `yaml:"log"`
+}
+
+// PluginsConfig is the global plugin switch (ADR-0042). It is off by default
+// and only a human edit of config.yaml turns it on: no RPC, agent or relay
+// session can set it.
+type PluginsConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // LogConfig tunes the daemon's own rotating log file, $SMIND_HOME/daemon.log
