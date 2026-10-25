@@ -201,6 +201,9 @@ func cmdServe(args []string) int {
 	// ADR-0039 §4: the git state loop idles until a client subscribes to task.git.
 	stopGitState := srv.API().StartGitState(ctx)
 
+	// ADR-0042: tidy install leftovers and re-validate enabled plugins.
+	srv.API().StartPlugins()
+
 	stopStall := wireStallAlert(ctx, db, srv.API(), cfg.Orchestration.StallAlertMinutes)
 
 	stopLearning := wireLearning(ctx, learningWiring{

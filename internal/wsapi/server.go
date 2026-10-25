@@ -11,15 +11,18 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/ghctx"
 	"github.com/spacingmind/smind/internal/gitstate"
 	"github.com/spacingmind/smind/internal/mcpservers"
+	"github.com/spacingmind/smind/internal/plugins"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/terminal"
+	"github.com/spacingmind/smind/internal/version"
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
@@ -74,9 +77,10 @@ type API struct {
 	Runs      *runs.Registry
 	Terminals *terminal.Registry
 
-	hs    map[string]handlerFunc
-	admit *seatAdmission
-	bus   *eventBus
+	hs      map[string]handlerFunc
+	plugins *plugins.Manager
+	admit   *seatAdmission
+	bus     *eventBus
 	// stalled feeds task.tree's stalled marker (SetStalledSource).
 	stalled *stalledSource
 	git     *gitstate.Service
@@ -266,6 +270,10 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	hs["provider.reload"] = handleProviderReload(runner, bus)
 	hs["provider.addInstance"] = handleProviderAddInstance(runner, bus)
 	hs["provider.dirSuggestions"] = handleProviderDirSuggestions(runner, osDirLister{})
+	pluginMgr := plugins.New(plugins.Options{Home: config.Dir(), Store: db, Version: version.Version, Enabled: configPluginsEnabled})
+	for method, h := range pluginHandlers(pluginMgr) {
+		hs[method] = h
+	}
 	hs["session.identify"] = handleSessionIdentify(reg)
 	admit := newSeatAdmission(reg, profReg, db)
 	hs["profile.list"] = admit.wrapProfileList(hs["profile.list"])
@@ -280,7 +288,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		hs[method] = h
 	}
 	hs["workspace.delete"] = learning.beforeWorkspaceDelete(hs["workspace.delete"])
-	api := &API{Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
+	api := &API{plugins: pluginMgr, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}

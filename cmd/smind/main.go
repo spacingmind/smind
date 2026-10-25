@@ -80,6 +80,8 @@ func run(args []string) int {
 		return cmdUsage(args[1:])
 	case "mcp":
 		return cmdMcp(args[1:])
+	case "plugin":
+		return cmdPlugin(args[1:])
 	case "skill":
 		return cmdSkill(args[1:])
 	case "learn":
@@ -171,6 +173,12 @@ Usage:
 
   smind usage [--since <RFC3339>] [--until <RFC3339>]     token usage per account, model, or day
       [--by account|model|day]
+
+  smind plugin install <source>                           install a plugin DISABLED and show what it would run
+                                                           (a directory, git+<url>@<40-hex sha>, or <archive>#sha256=<hash>)
+  smind plugin link <dir>                                 use a directory in place (development; never copied or deleted)
+  smind plugin list|show|enable|disable|remove|update|reload
+                                                           manage plugins (humans only, local only; run "smind plugin" for flags)
 
   smind skill ls [--target claude|agents|codex|all]       bundled orchestration skills x targets (installed/modified/missing)
   smind skill install [--target ...] [--force] [name...]  install the bundled skills (explicit; no daemon needed)
