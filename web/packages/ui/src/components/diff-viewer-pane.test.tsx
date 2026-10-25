@@ -1033,6 +1033,39 @@ describe("DiffViewerPane AI commit draft", () => {
     expect(button).toBeEnabled();
   });
 
+  it("commit bar status row never shifts textarea", async () => {
+    // jsdom has no layout, so the proxy is structure: the textarea's preceding siblings, the element right after
+    // it (the button row) and the always-present fixed-height status row (after the buttons) must be identical in
+    // idle, drafting, error and Replace-prompt states -- nothing may appear above or between them.
+    const { client } = await stagedPane();
+    const bar = screen.getByTestId("commit-bar");
+    const box = screen.getByTestId("commit-message") as HTMLTextAreaElement;
+    const shape = () => ({
+      before: Array.from(bar.children).slice(0, Array.from(bar.children).indexOf(box)).map((e) => e.getAttribute("data-testid") ?? e.tagName),
+      next: box.nextElementSibling?.querySelector('[data-testid="commit-button"]') !== null,
+      statusRowIsLast: bar.lastElementChild === screen.getByTestId("commit-draft-status-row"),
+      statusRowClass: screen.getByTestId("commit-draft-status-row").className,
+    });
+    const idle = shape();
+    expect(idle.statusRowIsLast).toBe(true);
+    expect(idle.next).toBe(true);
+    expect(idle.statusRowClass).toContain("h-7");
+
+    fireEvent.click(screen.getByTestId("commit-draft"));
+    expect(shape()).toEqual(idle);
+    client.nth("task.draftCommitMessage", 0).reject(new RpcError("raw", "rate_limited"));
+    await flush();
+    expect(screen.getByTestId("commit-draft-status-row")).toContainElement(screen.getByTestId("commit-draft-error"));
+    expect(shape()).toEqual(idle);
+
+    fireEvent.change(box, { target: { value: "my own words" } });
+    fireEvent.click(screen.getByTestId("commit-draft"));
+    client.nth("task.draftCommitMessage", 1).resolve(DRAFT);
+    await flush();
+    expect(screen.getByTestId("commit-draft-status-row")).toContainElement(screen.getByTestId("commit-draft-replace"));
+    expect(shape()).toEqual(idle);
+  });
+
   it("draft result is dropped after unmount", async () => {
     const { client, unmount } = await stagedPane();
     fireEvent.click(screen.getByTestId("commit-draft"));

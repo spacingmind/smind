@@ -608,11 +608,6 @@ export function DiffViewerPane({
             {commitError}
           </p>
         )}
-        {commitDraft.status === "error" && commitDraft.error && (
-          <p className="mb-2 text-ui-base text-destructive" data-testid="commit-draft-error">
-            {describeDraftError(commitDraft.error)}
-          </p>
-        )}
         <textarea
           ref={messageRef}
           className="mb-2 w-full rounded border p-2 text-ui-base"
@@ -625,25 +620,6 @@ export function DiffViewerPane({
           }}
           data-testid="commit-message"
         />
-        {pendingDraft !== null && (
-          <div className="mb-2 flex flex-wrap items-center gap-2 text-ui-base text-foreground-subtle">
-            <span>Replace the current message with the draft?</span>
-            <Button type="button" size="sm" onClick={() => fillMessage(pendingDraft)} data-testid="commit-draft-replace">
-              Replace
-            </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setPendingDraft(null)} data-testid="commit-draft-keep">
-              Keep mine
-            </Button>
-          </div>
-        )}
-        {draftNote && (
-          <p className="mb-2 text-ui-sm text-foreground-muted" data-testid="commit-draft-note">
-            {draftNote}
-          </p>
-        )}
-        <span className="sr-only" aria-live="polite" data-testid="commit-draft-status">
-          {draftAnnounce}
-        </span>
         <div className="flex items-center gap-2">
           <Button type="button" size="sm" disabled={!canCommit} onClick={commit} data-testid="commit-button">
             {committing ? "Committing…" : `Commit (${stagedCount} staged)`}
@@ -657,6 +633,7 @@ export function DiffViewerPane({
                     type="button"
                     variant="ghost"
                     size="sm"
+                    className="min-w-[7.5rem] justify-center"
                     disabled={draftDisabled}
                     onClick={draftMessage}
                     data-testid="commit-draft"
@@ -684,6 +661,37 @@ export function DiffViewerPane({
               Use “{suggestion}”
             </Button>
           )}
+        </div>
+        {/* Draft status row (ADR-0043): always rendered at a fixed height BELOW the buttons, so an error, the
+            Replace / Keep prompt or the note appearing never moves the textarea or the button row. */}
+        <div
+          className="mt-2 flex h-7 items-center gap-2 overflow-hidden whitespace-nowrap text-ui-base"
+          data-testid="commit-draft-status-row"
+        >
+          {commitDraft.status === "error" && commitDraft.error && (
+            <p className="truncate text-destructive" data-testid="commit-draft-error">
+              {describeDraftError(commitDraft.error)}
+            </p>
+          )}
+          {pendingDraft !== null && (
+            <>
+              <span className="text-foreground-subtle">Replace the current message with the draft?</span>
+              <Button type="button" size="sm" onClick={() => fillMessage(pendingDraft)} data-testid="commit-draft-replace">
+                Replace
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setPendingDraft(null)} data-testid="commit-draft-keep">
+                Keep mine
+              </Button>
+            </>
+          )}
+          {draftNote && (
+            <p className="truncate text-ui-sm text-foreground-muted" data-testid="commit-draft-note">
+              {draftNote}
+            </p>
+          )}
+          <span className="sr-only" aria-live="polite" data-testid="commit-draft-status">
+            {draftAnnounce}
+          </span>
         </div>
       </div>
       )}
