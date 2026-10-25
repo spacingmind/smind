@@ -540,3 +540,21 @@ CREATE TABLE IF NOT EXISTS provider_cooldowns (
     run_id TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMP NOT NULL
 );
+
+-- plugins: installed plugins (ADR-0042). State lives here, never in the plugin
+-- directory, so a plugin cannot enable itself. Additive.
+CREATE TABLE IF NOT EXISTS plugins (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    source_kind TEXT NOT NULL,          -- 'dir' | 'link' | 'git' | 'archive'
+    source TEXT NOT NULL,               -- as given (pinned), or the linked path
+    hash TEXT NOT NULL,                 -- content hash of the installed files
+    enabled INTEGER NOT NULL DEFAULT 0, -- disabled until the Human confirms
+    capabilities TEXT NOT NULL DEFAULT '{}', -- JSON consent summary of the installed version
+    consent_hash TEXT NOT NULL DEFAULT '',   -- fingerprint the Human confirmed ('' = never)
+    pending TEXT NOT NULL DEFAULT '',   -- JSON of an update waiting for re-consent
+    last_error TEXT NOT NULL DEFAULT '',
+    installed_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
