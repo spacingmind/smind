@@ -72,7 +72,7 @@ export function ConfirmDialog({
       }}
     >
       <DialogContent data-testid={testId} className={className}>
-        <DialogHeader>
+        <DialogHeader className="text-left">
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription asChild>
             <div>{description}</div>

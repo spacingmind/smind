@@ -44,6 +44,13 @@ describe("TaskBudgetControl", () => {
     expect(screen.getByTestId("task-budget-meter")).toHaveAttribute("aria-valuenow", "42");
   });
 
+  it("the chip label hides in a narrow top bar while the icon chip keeps its full name", () => {
+    setup(ROOT);
+    expect(screen.getByTestId("task-budget-chip-label")).toHaveClass("hidden");
+    expect(chip()).toHaveAttribute("title", "Set budget");
+    expect(chip()).toHaveClass("shrink-0");
+  });
+
   it("task-detail tree budget chip still renders when a budget is set", () => {
     setup({ ...ROOT, budgetUsd: 10, budgetSpentUsd: 4.2 });
     expect(chip()).toHaveTextContent("$4.20 / $10.00");
