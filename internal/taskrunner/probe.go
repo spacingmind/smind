@@ -72,6 +72,9 @@ func (r *Runner) RunPromptProbe(ctx context.Context, taskID, chatID int64, provi
 	if !r.isClaude(provider) {
 		return fail(fmt.Errorf("%w (got %q)", ErrIsolationUnsupported, provider))
 	}
+	if model == "" {
+		return fail(r.noModel(provider))
+	}
 	switch {
 	case po.Launch == nil:
 		return fail(errors.New("taskrunner: probe run requires a sandbox launch"))

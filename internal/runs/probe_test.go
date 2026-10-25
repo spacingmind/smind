@@ -26,7 +26,7 @@ type probeEnv struct {
 func newProbeEnv(t *testing.T, scenario string) *probeEnv {
 	t.Helper()
 	e := &probeEnv{isolatedEnv: newIsolatedEnv(t, "")}
-	e.runner = taskrunner.New(e.wm) // the launcher is the CLI path: no WithClaudeCLIPath
+	e.runner = taskrunner.New(e.wm, taskrunner.WithDefaultModel(taskrunner.ProviderClaudeNative, "claude-haiku-5-5")) // the launcher is the CLI path: no WithClaudeCLIPath
 	if !sandbox.Supported() {
 		t.Skip("a prepared launch needs macOS")
 	}

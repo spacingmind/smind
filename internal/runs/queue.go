@@ -43,6 +43,9 @@ type StartOutcome struct {
 	RunID       string
 	Queued      bool
 	QueueItemID int64
+	// Model is the model the run launches with (or the queued item will
+	// launch with), after resolution: what a client may tell the user.
+	Model string
 }
 
 // chatQueueRunConfig is the JSON stored in chat_queue.run_config: the
@@ -166,6 +169,18 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	if o := resolveStartOptions(opts); !o.profileSet && startPurpose(opts) == "" {
 		profileID = reg.inheritedProfile(chatID)
 	}
+	// The model the run launches with, resolved here so the queue stores (and
+	// the run records) what will actually be passed to the CLI.
+	model, err = reg.resolveModel(runner, provider, model, profileID)
+	if err != nil {
+		return StartOutcome{}, err
+	}
+	if model == taskrunner.ClaudeModelDefault && runner.IsClaude(provider) && nonHumanSend(source, fromTaskID) {
+		return StartOutcome{}, fmt.Errorf("runs: start: model %q (the Claude CLI's own default, possibly Opus) is for a human to ask for: name a model", model)
+	}
+	if err := taskrunner.ValidateModel(p.catalog, model); err != nil {
+		return StartOutcome{}, fmt.Errorf("runs: start: %w", err)
+	}
 
 	// A held prompt (WithNotBefore) is always queued: never started now and
 	// never rejected for a busy chat. Delivery starts it once the time passes.
@@ -182,7 +197,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		}
 		reg.notifyQueueUpdated(chatID)
 		reg.armQueueWake()
-		return StartOutcome{Queued: true, QueueItemID: item.ID}, nil
+		return StartOutcome{Queued: true, QueueItemID: item.ID, Model: model}, nil
 	}
 
 	// An agent-sourced prompt carries its provenance header on an
@@ -335,7 +350,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		if cooling {
 			reg.record(r, Event{Type: taskrunner.EventTypeSessionNote, Text: providerCooldownNote(string(provider), cooldownUntil)})
 		}
-		return StartOutcome{RunID: id}, nil
+		return StartOutcome{RunID: id, Model: model}, nil
 	}
 
 	// Busy.
@@ -377,7 +392,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	reg.deliverOne(chatID)
 	reg.armQueueWake()
 
-	return StartOutcome{Queued: true, QueueItemID: item.ID}, nil
+	return StartOutcome{Queued: true, QueueItemID: item.ID, Model: model}, nil
 }
 
 // DeliverQueued delivers the next queued item of every chat that has one,

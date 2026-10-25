@@ -76,7 +76,7 @@ func (f *probeFixture) run(ctx context.Context) ([]Event, error) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- f.r.RunPromptProbe(ctx, 0, 0, ProviderClaudeNative, "hi", "", f.po, events)
+		errCh <- f.r.RunPromptProbe(ctx, 0, 0, ProviderClaudeNative, "hi", testClaudeModel, f.po, events)
 	}()
 	got := drainEvents(events)
 	return got, <-errCh
@@ -113,7 +113,7 @@ func TestRunPromptProbe_RequiresLaunchAndCaps(t *testing.T) {
 		events := make(chan Event)
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- r.RunPromptProbe(context.Background(), 0, 0, ProviderClaudeNative, "p", "", po, events)
+			errCh <- r.RunPromptProbe(context.Background(), 0, 0, ProviderClaudeNative, "p", testClaudeModel, po, events)
 		}()
 		drainEvents(events)
 		if err := <-errCh; err == nil {
@@ -154,12 +154,12 @@ func TestRunPromptProbe_AppliesLaunchOptionsOnly(t *testing.T) {
 		}
 		return false
 	}
-	for _, want := range []string{"--tools", "--permission-mode", "--settings", "--strict-mcp-config", "--setting-sources", "--max-turns", "--max-budget-usd", "--disallowedTools"} {
+	for _, want := range []string{"--tools", "--permission-mode", "--settings", "--strict-mcp-config", "--setting-sources", "--max-turns", "--max-budget-usd", "--disallowedTools", "--model"} {
 		if !has(want) {
 			t.Errorf("argv lacks %s: %q", want, argv)
 		}
 	}
-	for _, bad := range []string{"--mcp-config", "--resume", "--continue", "--add-dir", "--disable-slash-commands", "--permission-prompt-tool", "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--session-id", "--model"} {
+	for _, bad := range []string{"--mcp-config", "--resume", "--continue", "--add-dir", "--disable-slash-commands", "--permission-prompt-tool", "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--session-id"} {
 		if has(bad) {
 			t.Errorf("argv must not contain %s: %q", bad, argv)
 		}

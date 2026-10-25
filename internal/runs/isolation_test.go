@@ -39,7 +39,7 @@ func newIsolatedEnv(t *testing.T, scenario string) *isolatedEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := taskrunner.New(wm, taskrunner.WithClaudeCLIPath(self))
+	runner := taskrunner.New(wm, taskrunner.WithDefaultModel(taskrunner.ProviderClaudeNative, "claude-haiku-5-5"), taskrunner.WithDefaultModel(taskrunner.ProviderClaudeNative, "claude-haiku-5-5"), taskrunner.WithClaudeCLIPath(self))
 	return &isolatedEnv{wm: wm, st: st, task: task, runner: runner, reg: newTestRegistry(t, st)}
 }
 

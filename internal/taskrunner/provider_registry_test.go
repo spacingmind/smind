@@ -25,6 +25,9 @@ func customRunner(t *testing.T, wm *workspace.Manager, specs ...providers.Spec) 
 
 func runPlain(t *testing.T, r *Runner, task store.Task, provider Provider, perm PermissionSettings, model string) []Event {
 	t.Helper()
+	if model == "" && r.isClaude(provider) {
+		model = testClaudeModel // a claude launch with no model is refused
+	}
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {

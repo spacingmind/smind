@@ -203,6 +203,9 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 	if iso.SystemPrompt == "" {
 		return errors.New("taskrunner: isolated run requires a system prompt")
 	}
+	if model == "" {
+		return r.noModel(provider)
+	}
 	task, err := r.wm.GetTask(taskID)
 	if err != nil {
 		return fmt.Errorf("taskrunner: get task %d: %w", taskID, err)

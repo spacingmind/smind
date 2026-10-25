@@ -25,6 +25,9 @@ func (r *Runner) runnerOf(provider Provider) providers.Runner {
 	return r.providerRegistry().RunnerOf(string(provider))
 }
 
+// IsClaude reports whether provider runs the Claude CLI (claude-native and its instances).
+func (r *Runner) IsClaude(provider Provider) bool { return r.isClaude(provider) }
+
 func (r *Runner) isClaude(provider Provider) bool {
 	return r.runnerOf(provider) == providers.RunnerClaude
 }
