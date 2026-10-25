@@ -51,6 +51,9 @@ const GIT_TOPICS = ["task.git", "forge.status"];
 /** `provider.updated` {id, defaultModel}: a provider's configured default model changed (U15); the bridge re-reads provider.list. */
 const PROVIDER_TOPICS = ["provider.updated"];
 
+/** The stalled-tree alert (`{taskId, title, minutes, since}`): the web notification fires on it and the task tree re-reads. */
+const STALL_TOPICS = ["task.stalled"];
+
 const TOPICS = [
   "task.status",
   "run.status",
@@ -63,6 +66,7 @@ const TOPICS = [
   ...LEARNING_TOPICS,
   ...GIT_TOPICS,
   ...PROVIDER_TOPICS,
+  ...STALL_TOPICS,
 ];
 
 /** Registration surface returned by useDaemonEvents -- topic-filtered, with per-listener try/catch isolation. */

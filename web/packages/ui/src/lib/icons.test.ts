@@ -94,6 +94,7 @@ describe("icon registry", () => {
         "spinner": "LoaderCircle",
         "splitColumns": "Columns2",
         "splitRows": "Rows2",
+        "stalled": "Hourglass",
         "statusIdle": "Circle",
         "statusSkipped": "CircleMinus",
         "stop": "Square",
