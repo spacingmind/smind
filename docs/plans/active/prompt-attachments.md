@@ -1,6 +1,6 @@
 # Prompt attachments
 
-**Status 2026-10-25 (plans hygiene): PARTIAL.** Built and merged: docs #458/#461, daemon core #463 (+ #474), native images and SDK v0.4.0 #473, `forge.search` #459, accept-time PR/issue fetch #479, web composer + timeline #465, `@` popover + PR/issue picker + Attach menu #476, desktop drop fix #468, "Add to chat" #498 (G10); mobile is its own plan (`mobile-prompt-attachments.md`, #581). The Progress and Validation sections below were stale (written 2026-10-22) and are not an AC-by-AC record. Open: AC36 (light/dark screenshots and real-app transition frames; no record), AC37 (paste and drop confirmed in the macOS app; #468 landed the `dragDropEnabled` fix but no run in the real app is recorded), AC38 live checks on an isolated daemon (the `liveattach` gated suite named below, `TestLive_*`, was never written; ad hoc haiku checks exist only for claude-native PNG and the PR fetch; Codex `localImage`, the GLM fallback plus text file, and `@file` read were not run live), and a Validation section mapping AC1-AC35 to tests. Several Go tests were renamed when `github` became forge-neutral (for example `TestGithubAttach_*` became `TestForgeAttach_*`).
+**Status 2026-10-25 (evidence pass B): PARTIAL; AC36 is confirmed for the web UI (see Validation, "AC36 evidence pass"); the mobile parts of AC36, AC37 and AC38 stay open.** Earlier note (plans hygiene): PARTIAL. Built and merged: docs #458/#461, daemon core #463 (+ #474), native images and SDK v0.4.0 #473, `forge.search` #459, accept-time PR/issue fetch #479, web composer + timeline #465, `@` popover + PR/issue picker + Attach menu #476, desktop drop fix #468, "Add to chat" #498 (G10); mobile is its own plan (`mobile-prompt-attachments.md`, #581). The Progress and Validation sections below were stale (written 2026-10-22) and are not an AC-by-AC record. Open: AC36 (light/dark screenshots and real-app transition frames; no record), AC37 (paste and drop confirmed in the macOS app; #468 landed the `dragDropEnabled` fix but no run in the real app is recorded), AC38 live checks on an isolated daemon (the `liveattach` gated suite named below, `TestLive_*`, was never written; ad hoc haiku checks exist only for claude-native PNG and the PR fetch; Codex `localImage`, the GLM fallback plus text file, and `@file` read were not run live), and a Validation section mapping AC1-AC35 to tests. Several Go tests were renamed when `github` became forge-neutral (for example `TestGithubAttach_*` became `TestForgeAttach_*`).
 
 Size: XL (10) split into L/M items — scope 2 (daemon + web + desktop + an SDK repo), PRs 2 (about eight, with ordering), risk 2
 (untrusted bytes, path containment, secrets, protocol), decisions 2 (ADR-0038 proposed, open questions O1–O7), verification 2 (live
@@ -230,3 +230,30 @@ Taken from ADR-0038 (Accepted 2026-10-22).
 ## Validation
 
 How each AC gets satisfied is recorded here per PR as it lands (command output, screenshots, live-call counts). Empty until implementation.
+
+### AC36 evidence pass (web only), 2026-10-25
+
+Isolated daemon (own `SMIND_HOME`, port 4957, fake ACP agent for `glm`, fake `gh` on PATH, no model call, no Send of a live run). Real flows were used: composer drafts via the real file input, `forge.search` through the daemon over the fake `gh`, queued row through the real `run.start whenBusy:queue` accept path, a seeded run row with a stored attachment set for the timeline. Light and dark, 1280 and 390. Evidence (PNGs, rAF/bounding-box JSON, scripts) lives in `/tmp/evidence-pass/prompt-attachments/` (local only, not committed); file names are `<scheme>-<width>-<state>.png`, transitions `<scheme>-<width>-trans-<name>-f0..f7.png` plus `-sheet.png` and `-bboxes.json`.
+
+| State named by AC36 | File (suffix) | What was seen |
+|---|---|---|
+| composer with tray: image + file + PR | `tray-image-file-pr` | two image thumbnails, `notes.md` (MD, 34 B) and `#42 Fix webhook retry backoff` (PR, acme/shop) pills, readable in both themes; at 390 the pills wrap onto three rows with their close buttons |
+| error state | `tray-error-pill` | oversize file shows a red pill "Larger than 10 MiB" |
+| drop-over | `drop-over` | dashed outline inset 8 px and a "Drop to attach" chip, pane tinted but readable |
+| `@` popover | `at-popover`, `at-popover-filtered` | README.md and main.go (src) rows above the composer |
+| attach menu | `attach-menu` | Image or file, Mention a file, GitHub pull request, GitHub issue |
+| GitHub picker | `github-picker-list`, `-loading`, `-empty`, `-error`, `-error-auth` | list of 3 PRs; "No matching pull requests"; "GitHub returned an error."; "GitHub is unavailable: gh is not logged in on the daemon host." with the "Open GitHub settings" link. The `-loading` file shows the previous rows (the hook keeps them while the next query loads, by design); the first-open "Searching…" row is only seen for the `@` popover |
+| timeline with thumbnails | `timeline-attachments` | 2 thumbnails (160 px, 112 px at 390), chips for file, `src/main.go`, PR and issue |
+| queued row with chips | `queued-row-chips` | QUEUED row with 4 chips and the cancel button (after fix, see bugs) |
+| lightbox | `lightbox` | image centred over a dimmed page, close button top right |
+| provider hint (AC35) | `image-hint-glm` | "GLM can't view images; the file path is sent instead" under the thumbnail |
+
+Transition frames (8 per transition, frame 0 before the action, spacing about 30 to 100 ms; plus a per-animation-frame sampler of key element rectangles): tray add, tray remove, `@` popover open and close, attach menu open and close, picker open, drop overlay on and off, lightbox open and close, in all four configurations (`trans-log-*.json`).
+- Composer textarea, toolbar, Attach button and Send button never changed x, y or size in any configuration or transition (`moves-composer-fixed-elements.txt`: none). The tray appears in one frame and the card grows upward by the tray height (60 px at 1280), never half-animated, as the tray's own comment promises.
+- Drop overlay and menu fade through opacity only (overlay rectangle fixed); lightbox zooms from 95 % to 100 %. No overflow or clipping seen in the viewed frames.
+- Observations, not changed: the `@` popover opens as one "Searching…" row (32 px) and grows to 62 px about 100 ms later when the index answers; the picker was sampled for one animation frame at a position 105 px lower than its final one right after the menu closed (not visible in any screenshot).
+- Viewed by the author with the image reader: every static state in light-1280 and dark-390 plus samples of the other two, and the transition sheets tray-add, popover-open, picker-open, drop-on, lightbox-open (light-1280) and tray-add, picker-open (dark-390). The remaining transition sheets were analysed numerically only (rectangles and opacity), not looked at.
+
+Bugs found and fixed (commit `1b820a69`, tests prove the fix: reverting the three source files makes the three new tests fail): at 390 px the queued row with chips pushed the prompt and its cancel button off screen; the PR picker placeholder was clipped mid-word ("...or paste a number or U"); the probe contrast table wrapped numbers inside cells.
+
+Not covered: mobile app screenshots (AC36 is web-only here), `gh` missing state of the attach menu (the fake `gh` is always present), a real-app run in the macOS shell (AC37), live calls (AC38).
