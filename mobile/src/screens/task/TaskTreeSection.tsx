@@ -1,5 +1,5 @@
 // TaskTreeSection is the read-only "Subtasks" section under the run strip
-// (ADR-0041 M1, docs/plans/active/mobile-task-tree.md). It fetches task.tree,
+// (ADR-0041 M1, docs/plans/completed/mobile-task-tree.md). It fetches task.tree,
 // refreshes on a 30 s timer that also drives the countdown re-render, and
 // renders nothing for a leaf task or on any error -- it never blocks the
 // transcript. Expand/collapse swaps content in one frame (no animation).

@@ -1,6 +1,6 @@
 // taskTree.ts turns a task.tree result into the rows the Subtasks section
 // renders -- pure (no React) so every label, countdown and bound is
-// unit-tested. Decisions 3-6 of docs/plans/active/mobile-task-tree.md.
+// unit-tested. Decisions 3-6 of docs/plans/completed/mobile-task-tree.md.
 
 import type { TaskTreeNode, TaskTreeResult } from './api';
 
