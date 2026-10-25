@@ -39,7 +39,6 @@ import {
   ClipboardPaste,
   Clock,
   Code,
-  Coins,
   Columns2,
   Copy,
   Cpu,
@@ -99,7 +98,6 @@ import {
   Play,
   ShieldAlert,
   ShieldCheck,
-  Sigma,
   SlidersHorizontal,
   Square,
   Star,
@@ -232,8 +230,6 @@ export const Icons = {
   // --- usage
   /** Account / plan usage windows. */
   usage: Gauge,
-  usageTotal: Sigma,
-  tokens: Coins,
   time: Clock,
 
   // --- settings sections / hosts

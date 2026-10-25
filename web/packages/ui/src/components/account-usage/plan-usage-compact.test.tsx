@@ -1,14 +1,11 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PlanUsageCompact } from "@/components/account-usage/plan-usage-compact";
-import { ChatUsageTotal } from "@/components/chat-usage-total";
 import { closeUsageModal } from "@/hooks/use-usage-modal";
 import { STORAGE_KEYS } from "@/lib/storage";
 import type { UsageCooldown, UsageWindow } from "@/lib/account-usage/types";
 import { claudeAccount, FIXTURE_NOW } from "@/test/account-usage-fixtures";
-import { renderWithDaemon } from "@/test/render-with-daemon";
-import { FakeUsageDaemon } from "@/test/usage-test-client";
 
 const MIN = 60_000;
 
@@ -133,29 +130,6 @@ describe("plan usage compact: passive cooldown and observed windows", () => {
     expect(within(warning).getByTestId("plan-usage-window-status")).toHaveTextContent("Near limit");
     expect(within(warning).getByTestId("plan-usage-window-status")).toHaveAttribute("data-tone", "warning");
     expect(screen.queryByTestId("plan-usage-window-weekly_opus")).not.toBeInTheDocument();
-  });
-
-  it("compact_card_never_triggers_fetch_for_cooldown", async () => {
-    vi.useRealTimers();
-    const daemon = new FakeUsageDaemon([
-      claudeAccount({ cooldown: cooldown({ until: new Date(Date.now() + 10 * MIN).toISOString() }) }),
-    ]);
-    renderWithDaemon(
-      <ChatUsageTotal runs={[{ usage: { inputTokens: 1, outputTokens: 1, source: "claude_result" } }]} provider="claude-native" />,
-      daemon,
-    );
-    await act(async () => {
-      for (let i = 0; i < 4; i++) await Promise.resolve();
-    });
-    await act(async () => {
-      fireEvent.focus(screen.getByTestId("chat-usage-total"));
-    });
-    const card = await screen.findByTestId("chat-usage-total-popover", {}, { timeout: 3000 });
-    expect(within(card).getByTestId("plan-usage-cooldown")).toHaveTextContent("Rate limited until");
-    expect(daemon.requests.length).toBeGreaterThan(0);
-    expect(daemon.modes().every((mode) => mode === "cached")).toBe(true);
-    expect(daemon.count("touch")).toBe(0);
-    expect(daemon.count("refresh")).toBe(0);
   });
 
   it("compact_card_long_model_name_truncates", () => {

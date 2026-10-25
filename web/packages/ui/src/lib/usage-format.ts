@@ -1,4 +1,4 @@
-import type { RunUsage, UsageRange } from "@/lib/types";
+import type { UsageRange } from "@/lib/types";
 
 export const EM_DASH = "—";
 
@@ -46,59 +46,6 @@ const SOURCE_LABELS: Record<string, string> = {
 /** Human label for a RunUsage source (ADR-0020); unknown values fall back to the raw string. */
 export function usageSourceLabel(source: string): string {
   return SOURCE_LABELS[source] ?? source;
-}
-
-/** Per-field sums over the runs that reported each field. A field no run reported stays null; a reported 0 counts as 0. */
-export interface UsageTotals {
-  inputTokens: number | null;
-  cachedInputTokens: number | null;
-  cacheWriteTokens: number | null;
-  outputTokens: number | null;
-  reasoningTokens: number | null;
-  costUsd: number | null;
-  reportedRuns: number;
-  totalRuns: number;
-}
-
-function sumField(usages: ReadonlyArray<RunUsage | null | undefined>, pick: (u: RunUsage) => number | null | undefined): number | null {
-  let sum: number | null = null;
-  for (const u of usages) {
-    if (!u) continue;
-    const v = pick(u);
-    if (v !== null && v !== undefined) sum = (sum ?? 0) + v;
-  }
-  return sum;
-}
-
-/** Sums usage per field over the runs that reported it (ADR-0020: null never means 0, and tokens are never summed across fields). */
-export function sumUsage(usages: ReadonlyArray<RunUsage | null | undefined>): UsageTotals {
-  const NUMERIC_FIELDS: Array<(u: RunUsage) => number | null | undefined> = [
-    (u) => u.inputTokens,
-    (u) => u.cachedInputTokens,
-    (u) => u.cacheWriteTokens,
-    (u) => u.outputTokens,
-    (u) => u.reasoningTokens,
-    (u) => u.costUsd,
-  ];
-
-  let reportedRuns = 0;
-  for (const u of usages) {
-    if (u && NUMERIC_FIELDS.some((pick) => {
-      const v = pick(u);
-      return v !== null && v !== undefined;
-    })) reportedRuns += 1;
-  }
-
-  return {
-    inputTokens: sumField(usages, (u) => u.inputTokens),
-    cachedInputTokens: sumField(usages, (u) => u.cachedInputTokens),
-    cacheWriteTokens: sumField(usages, (u) => u.cacheWriteTokens),
-    outputTokens: sumField(usages, (u) => u.outputTokens),
-    reasoningTokens: sumField(usages, (u) => u.reasoningTokens),
-    costUsd: sumField(usages, (u) => u.costUsd),
-    reportedRuns,
-    totalRuns: usages.length,
-  };
 }
 
 /** The RFC3339 `since` for a usage range: "today" is local midnight, "7d"/"30d" are now minus N*24h. */

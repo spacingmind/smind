@@ -4,17 +4,17 @@ import { describe, expect, it } from "vitest";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import "@/components/settings/providers-section";
-import { ChatPlanUsage } from "@/components/account-usage/chat-plan-usage";
 import { UsageList } from "@/components/account-usage/usage-list";
 import { claudeAccount } from "@/test/account-usage-fixtures";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 import { renderWithDaemon } from "@/test/render-with-daemon";
-import { useChatPlanUsage } from "@/hooks/use-chat-plan-usage";
+import { useUsagePreferences } from "@/hooks/use-usage-preferences";
+import { useUsageReports } from "@/hooks/use-usage-reports";
 import type { Account } from "@/lib/types";
 
 /**
  * ADR-0032 AC9: one `account.updated` event renames the account on every
- * surface at once (Providers, a usage card, the chat pill) — the shared
+ * surface at once (Providers, a usage card) — the shared
  * cache plus the event bridge, with no remount and no refetch.
  */
 
@@ -42,16 +42,10 @@ async function flush(): Promise<void> {
   });
 }
 
-/** The chat pill: ChatPlanUsage over useChatPlanUsage, as the usage hover card mounts it. */
-function ChatPill({ chatProvider }: { chatProvider: string }) {
-  return <ChatPlanUsage plan={useChatPlanUsage(chatProvider)} />;
-}
-
 /** A UsageList-shaped consumer: the usage card list as the modal/Settings render it. */
 function UsageListView() {
-  // Reading via the chat pill hook keeps one connection to the shared cache;
-  // the list itself maps reports onto cards.
-  const { snapshot, displayAs } = useChatPlanUsage("claude-native");
+  const { snapshot } = useUsageReports({ enabled: true });
+  const { displayAs } = useUsagePreferences();
   return (
     <UsageList
       reports={[...snapshot.reports]}
@@ -65,20 +59,19 @@ function UsageListView() {
 }
 
 describe("account.updated across surfaces", () => {
-  it("account.updated renames the account in providers, usage card and chat pill", async () => {
+  it("account.updated renames the account in providers and usage card", async () => {
     const d = daemon([account(1, "anthropic", "work")]);
     const section = listSettingsSections().find((s) => s.id === "providers")!;
     renderWithDaemon(
       <>
         {section.render({ client: d.client, events: d.events })}
         <UsageListView />
-        <ChatPill chatProvider="claude-native" />
       </>,
       d,
     );
     await flush();
 
-    // All three surfaces show the pre-rename name.
+    // Both surfaces show the pre-rename name.
     expect(screen.getAllByText("Claude").length).toBeGreaterThan(0);
     expect(screen.queryByText("Renamed")).not.toBeInTheDocument();
 
@@ -92,11 +85,9 @@ describe("account.updated across surfaces", () => {
     });
     await flush();
 
-    // Providers' row shows the new displayName (AC58), so does the usage card and the pill.
+    // Providers' row shows the new displayName (AC58), so does the usage card.
     expect(screen.getByTestId("provider-row-1")).toHaveTextContent("Renamed");
     expect(screen.getByTestId("usage-report-1")).toHaveTextContent("Renamed");
-    // The chat pill's compact card carries the new name too.
-    expect(screen.getByTestId("plan-usage-1")).toHaveTextContent("Renamed");
     expect(screen.queryByText("Claude")).not.toBeInTheDocument();
   });
 
