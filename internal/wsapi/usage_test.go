@@ -415,3 +415,40 @@ func TestUsage_SummaryRowsNameUnreportedFields(t *testing.T) {
 		t.Error("no runs row carried unreported; taskA's ra2 row reports only input+cost")
 	}
 }
+
+func TestUsage_SummaryExposesProvidersOnRunsRows(t *testing.T) {
+	t.Parallel()
+	srv, registry, db := newUsageTestServer(t)
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	seedRunUsage(t, db, base)
+	acct, err := registry.AddAPIKey("anthropic", "a1", "sk-test")
+	if err != nil {
+		t.Fatalf("AddAPIKey() error = %v", err)
+	}
+	mustCreateRequestLog(t, db, store.RequestLog{
+		StartedAt: base, Provider: "anthropic", AccountID: &acct.ID, SessionKey: "s1", Model: ptr("m1"),
+		Status: 200, Outcome: store.RequestLogOutcomeOK, DurationMs: 5, InputTokens: ptr(int64(1)),
+	})
+
+	rows, errEnv := callUsageSummary(t, srv, map[string]any{"scope": "all", "groupBy": "model"})
+	if errEnv != nil {
+		t.Fatalf("usage.summary error = %v", errEnv.Error.Message)
+	}
+	sawRuns := false
+	for _, r := range rows {
+		switch r.Scope {
+		case "runs":
+			sawRuns = true
+			if !reflect.DeepEqual(r.Providers, []string{"glm"}) {
+				t.Errorf("runs row %q providers = %v, want [glm]", r.Key, r.Providers)
+			}
+		case "proxy":
+			if r.Providers != nil {
+				t.Errorf("proxy row %q providers = %v, want none", r.Key, r.Providers)
+			}
+		}
+	}
+	if !sawRuns {
+		t.Fatalf("no runs rows in %+v", rows)
+	}
+}

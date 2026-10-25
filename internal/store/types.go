@@ -468,6 +468,8 @@ type RunUsageSummary struct {
 	// non-NULL value (nil when every token field had at least one reported
 	// value). A reported 0 is not unreported.
 	Unreported []string
+	// Providers lists the distinct run_usage.provider ids in the group, sorted.
+	Providers []string
 }
 
 // Learned skill statuses (learned_skills.status). ADR-0026: proposals

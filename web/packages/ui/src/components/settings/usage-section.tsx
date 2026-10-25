@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { StepGroup } from "@/components/ui/step-group";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useWorkspaceTree } from "@/hooks/use-workspace-tree";
 import { EM_DASH, formatCost, formatTokens, usageSince } from "@/lib/usage-format";
 import type { UsageGroupBy, UsageRange, UsageScope, UsageSummaryRow } from "@/lib/types";
@@ -20,12 +22,21 @@ const SCOPE_OPTIONS: { value: UsageScope; label: string }[] = [
   { value: "all", label: "All" },
 ];
 
-const GROUP_BY_OPTIONS: { value: UsageGroupBy; label: string }[] = [
+/**
+ * The table's group-by choices: the wire's, plus "space", which usage.summary cannot group by. Space is
+ * rolled up client-side from task rows (see rollUpBySpace), so it is never sent.
+ */
+type UiGroupBy = UsageGroupBy | "space";
+
+const GROUP_BY_OPTIONS: { value: UiGroupBy; label: string }[] = [
   { value: "task", label: "Task" },
   { value: "provider", label: "Provider" },
   { value: "model", label: "Model" },
   { value: "workspace", label: "Workspace" },
+  { value: "space", label: "Space" },
 ];
+
+const SUBSCRIPTION_COST_HINT = "Estimated at API list prices; subscription plans are not billed per token";
 
 const RANGE_OPTIONS: { value: UsageRange; label: string }[] = [
   { value: "today", label: "Today" },
@@ -33,12 +44,54 @@ const RANGE_OPTIONS: { value: UsageRange; label: string }[] = [
   { value: "30d", label: "30 days" },
 ];
 
-const GROUP_LABELS: Record<UsageGroupBy, string> = {
+const GROUP_LABELS: Record<UiGroupBy, string> = {
   task: "Task",
   provider: "Provider",
   model: "Model",
   workspace: "Workspace",
+  space: "Space",
 };
+
+const NO_SPACE_KEY = "space:none";
+const TOKEN_FIELDS: NonNullable<UsageSummaryRow["unreported"]> = [
+  "inputTokens",
+  "outputTokens",
+  "cacheReadTokens",
+  "cacheWriteTokens",
+  "reasoningTokens",
+];
+
+/**
+ * Sums task rows into one row per space. `spaceOf` maps a task key to its space key (tasks it does not know
+ * land in "space:none"). Cost is the sum of the reported costs (null when no row reported one), a token
+ * field is unreported only when every rolled row lists it, and providers are the union.
+ */
+function rollUpBySpace(rows: UsageSummaryRow[], spaceOf: (taskKey: string) => string, labelOf: (spaceKey: string) => string): UsageSummaryRow[] {
+  const groups = new Map<string, UsageSummaryRow[]>();
+  for (const row of rows) {
+    const key = spaceOf(row.key);
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  const rolled = [...groups].map(([key, members]): UsageSummaryRow => {
+    const costs = members.flatMap((r) => (r.costUsd == null ? [] : [r.costUsd]));
+    const providers = [...new Set(members.flatMap((r) => r.providers ?? []))].sort();
+    const unreported = TOKEN_FIELDS.filter((f) => members.every((r) => r.unreported?.includes(f)));
+    return {
+      scope: "runs",
+      key,
+      count: members.reduce((n, r) => n + r.count, 0),
+      inputTokens: members.reduce((n, r) => n + r.inputTokens, 0),
+      outputTokens: members.reduce((n, r) => n + r.outputTokens, 0),
+      cacheReadTokens: members.reduce((n, r) => n + r.cacheReadTokens, 0),
+      cacheWriteTokens: members.reduce((n, r) => n + r.cacheWriteTokens, 0),
+      reasoningTokens: members.reduce((n, r) => n + r.reasoningTokens, 0),
+      costUsd: costs.length === 0 ? null : costs.reduce((n, c) => n + c, 0),
+      ...(unreported.length > 0 && { unreported }),
+      ...(providers.length > 0 && { providers }),
+    };
+  });
+  return rolled.sort((a, b) => (b.costUsd ?? -1) - (a.costUsd ?? -1) || labelOf(a.key).localeCompare(labelOf(b.key)));
+}
 
 type TokenField = "inputTokens" | "cacheReadTokens" | "outputTokens" | "reasoningTokens";
 
@@ -110,9 +163,11 @@ function PlanUsageBlock() {
  */
 function UsageSection({ client }: SettingsSectionContext) {
   const [scope, setScope] = useState<UsageScope>("runs");
-  const [groupBy, setGroupBy] = useState<UsageGroupBy>("task");
+  const [groupBy, setGroupBy] = useState<UiGroupBy>("task");
   const [range, setRange] = useState<UsageRange>("7d");
-  const [rows, setRows] = useState<UsageSummaryRow[] | null>(null);
+  // The wire's groupBy: Space reuses the task rows and is rolled up below, so Task <-> Space never refetches.
+  const apiGroupBy: UsageGroupBy = groupBy === "space" ? "task" : groupBy;
+  const [fetched, setFetched] = useState<{ groupBy: UsageGroupBy; rows: UsageSummaryRow[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -124,10 +179,10 @@ function UsageSection({ client }: SettingsSectionContext) {
     setLoading(true);
     setError(null);
     client
-      .call<UsageSummaryRow[]>("usage.summary", { scope, groupBy, since: usageSince(range) })
+      .call<UsageSummaryRow[]>("usage.summary", { scope, groupBy: apiGroupBy, since: usageSince(range) })
       .then((list) => {
         if (seq !== summarySeq.current) return;
-        setRows(list ?? []);
+        setFetched({ groupBy: apiGroupBy, rows: list ?? [] });
         setLoading(false);
       })
       .catch((err) => {
@@ -135,12 +190,18 @@ function UsageSection({ client }: SettingsSectionContext) {
         setError(err instanceof Error ? err.message : String(err));
         setLoading(false);
       });
-  }, [client, scope, groupBy, range, refreshTick]);
+  }, [client, scope, apiGroupBy, range, refreshTick]);
 
   // Row names come from the shared workspace tree (the sidebar's own query, live via lifecycle events): no
   // workspace.list + one task.list per workspace of its own. A tree that has not loaded (or failed) just
   // leaves rows on their "Task #id" / "Workspace #id" fallbacks, as the old best-effort lookup did.
   const { workspaces } = useWorkspaceTree();
+  // Providers with a browser OAuth login (claude-native, codex-native) are subscription plans: their cost is an API-price estimate. API-key and external-CLI providers (GLM, Kimi) are metered.
+  const { providers: providerList } = useProviderCatalog();
+  const subscriptionProviders = useMemo(
+    () => new Set(providerList.filter((p) => p.credentialKind === "oauth").map((p) => p.id as string)),
+    [providerList],
+  );
   const names = useMemo(() => {
     const resolved: Record<string, string> = {};
     if (groupBy !== "task" && groupBy !== "workspace") return resolved;
@@ -153,6 +214,31 @@ function UsageSection({ client }: SettingsSectionContext) {
     }
     return resolved;
   }, [workspaces, groupBy]);
+
+  // Task id -> its space, and each space's display title (the workspace's in parentheses when two share one).
+  const spaces = useMemo(() => {
+    const spaceOfTask = new Map<string, string>();
+    const titles = new Map<string, string>();
+    const all = (workspaces ?? []).flatMap((w) => w.spaces.map((sp) => ({ w, sp })));
+    for (const { w, sp } of all) {
+      const key = `space:${sp.ID}`;
+      const shared = all.filter((o) => o.sp.Title === sp.Title).length > 1;
+      titles.set(key, shared ? `${sp.Title} (${w.Title})` : sp.Title);
+      for (const t of sp.tasks) spaceOfTask.set(String(t.ID), key);
+    }
+    return { spaceOfTask, titles };
+  }, [workspaces]);
+
+  const rows = useMemo(() => {
+    if (!fetched || groupBy !== "space") return fetched?.rows ?? null;
+    // Rows of another groupBy (the last fetch, until the task rows arrive) are not task rows to roll up.
+    if (fetched.groupBy !== "task") return null;
+    return rollUpBySpace(
+      fetched.rows,
+      (taskKey) => spaces.spaceOfTask.get(taskKey) ?? NO_SPACE_KEY,
+      (key) => (key === NO_SPACE_KEY ? "No space" : (spaces.titles.get(key) ?? key)),
+    );
+  }, [fetched, groupBy, spaces]);
 
   function changeScope(next: UsageScope) {
     // The proxy scope only accepts groupBy "model"; switching in one state
@@ -168,6 +254,7 @@ function UsageSection({ client }: SettingsSectionContext) {
   function labelFor(row: UsageSummaryRow): string {
     if (groupBy === "provider") return row.key;
     if (groupBy === "model") return row.key === "" ? "Unknown model" : row.key;
+    if (groupBy === "space") return row.key === NO_SPACE_KEY ? "No space" : (spaces.titles.get(row.key) ?? row.key);
     const resolved = names[`${groupBy}:${row.key}`];
     if (resolved) return resolved;
     return groupBy === "task" ? `Task #${row.key}` : `Workspace #${row.key}`;
@@ -180,9 +267,25 @@ function UsageSection({ client }: SettingsSectionContext) {
     return formatTokens(row[field], "full");
   }
 
-  function costCell(row: UsageSummaryRow): string {
+  function costCell(row: UsageSummaryRow): ReactNode {
     if (row.scope === "proxy") return EM_DASH;
-    return formatCost(row.costUsd);
+    const cost = formatCost(row.costUsd);
+    if (row.costUsd == null || !row.providers?.some((id) => subscriptionProviders.has(id))) return cost;
+    return (
+      <span className="whitespace-nowrap">
+        {cost}{" "}
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span tabIndex={0} data-testid="usage-cost-estimate" className="text-foreground-muted">
+                ≈ API price
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{SUBSCRIPTION_COST_HINT}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </span>
+    );
   }
 
   return (

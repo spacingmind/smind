@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Icons } from "@/lib/icons";
 
-import { RunUsagePill } from "@/components/run-usage-pill";
 import { RunProvenance, provenanceSha } from "@/components/timeline/run-provenance";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -156,12 +155,6 @@ export function RunFooter<T extends RunFooterRun>({
         {provenanceSha(run.status, run.baseSha, run.headSha) !== undefined && (
           <span className={SEGMENT}>
             <RunProvenance baseSha={run.baseSha} headSha={run.headSha} dirty={run.dirty} status={run.status} />
-          </span>
-        )}
-        {run.usage !== undefined && (
-          // The pill carries its own px-2 (a hover target): trade the dot's margin and the trailing gap for it so the dots stay evenly spaced.
-          <span className={cn(SEGMENT, "sm:-mr-2 sm:before:mr-0")}>
-            <RunUsagePill usage={run.usage} provider={run.provider} />
           </span>
         )}
         {view.age && (
