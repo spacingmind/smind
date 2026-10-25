@@ -701,4 +701,23 @@ describe("ProviderModelPicker observed model", () => {
     const trigger = screen.getByTestId("composer-model-picker");
     expect(trigger).toHaveAttribute("title", "Claude Code · Opus 5.5");
   });
+
+  it("a plugin-owned agent shows a from-plugin badge; a model row with only an owned agent lists instead of editing", () => {
+    const profiles: PickerProfileRow[] = [
+      { id: "1", name: "Mine", summary: "", provider: "claude-native", model: "sonnet-5-5" },
+      { id: "2", name: "Acme reviewer", summary: "", provider: "claude-native", model: "opus-5-5", owner: "acme" },
+    ];
+    const { onEditProfile, onManageAgents } = renderPicker({ profileRows: profiles });
+    open();
+    fireEvent.click(screen.getByTestId("model-picker-back"));
+    expect(within(screen.getByTestId("model-profile-row-2")).getByText("from acme")).toBeInTheDocument();
+    expect(screen.getByTestId("model-profile-owner-2")).toHaveAttribute("title", expect.stringContaining("Owned by plugin acme"));
+    expect(within(screen.getByTestId("model-profile-row-1")).queryByText(/^from /)).toBeNull();
+    fireEvent.click(screen.getByTestId("model-provider-claude-native"));
+    // The owned agent cannot be edited: its model row offers the list (Settings -> Agents), never the editor.
+    expect(screen.queryByTestId("model-edit-profile-claude-native-opus-5-5")).toBeNull();
+    fireEvent.click(screen.getByTestId("model-edit-profiles-claude-native-opus-5-5"));
+    expect(onManageAgents).toHaveBeenCalledOnce();
+    expect(onEditProfile).not.toHaveBeenCalled();
+  });
 });

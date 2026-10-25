@@ -175,7 +175,8 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
   }
 
   async function handleToggleEnabled(m: McpServer, enabled: boolean) {
-    if (!client) return;
+    // A plugin-owned row is read-only: the daemon would answer read_only_owned, so don't send it.
+    if (!client || m.readOnly || m.owner) return;
     // Optimistic flip, reconciled by the mcpServer.updated event / result.
     setServers((prev) => (prev ? prev.map((s) => (s.id === m.id ? { ...s, enabled } : s)) : prev));
     try {

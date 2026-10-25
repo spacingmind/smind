@@ -20,20 +20,30 @@ function byKey<T>(items: T[] | undefined, key: (t: T) => string): Map<string, T>
   return new Map((items ?? []).map((t) => [key(t), t]));
 }
 
-function diffKeyed<T>(what: string, from: T[] | undefined, to: T[] | undefined, key: (t: T) => string, show: (t: T) => string, runs: boolean): PluginChange[] {
+/** Added/removed lines show the whole entry; a changed one shows `key: before → after` using `detail`. */
+function diffKeyed<T>(
+  what: string,
+  from: T[] | undefined,
+  to: T[] | undefined,
+  key: (t: T) => string,
+  show: (t: T) => string,
+  runs: boolean,
+  detail: (t: T) => string = show,
+): PluginChange[] {
   const a = byKey(from, key);
   const b = byKey(to, key);
   const out: PluginChange[] = [];
   for (const [k, v] of b) {
     const before = a.get(k);
     if (!before) out.push({ kind: "added", what, text: show(v), runs });
-    else if (show(before) !== show(v)) out.push({ kind: "changed", what, text: `${show(before)} → ${show(v)}`, runs });
+    else if (show(before) !== show(v)) out.push({ kind: "changed", what, text: `${k}: ${detail(before)} → ${detail(v)}`, runs });
   }
   for (const [k, v] of a) if (!b.has(k)) out.push({ kind: "removed", what, text: show(v), runs: false });
   return out;
 }
 
 const acp = (e: PluginAcpEntry) => `${e.id}: ${e.command.join(" ")}`;
+const acpCommand = (e: PluginAcpEntry) => e.command.join(" ");
 
 /** What `next` declares that `current` does not (and the reverse): the diff an Apply asks the Human to accept. */
 export function diffConsent(current: PluginConsent, next: PluginConsent): PluginChange[] {
@@ -44,12 +54,12 @@ export function diffConsent(current: PluginConsent, next: PluginConsent): Plugin
     out.push({ kind: proc(current) === "" ? "added" : proc(next) === "" ? "removed" : "changed", what: "Process", text: proc(current) && proc(next) ? `${proc(current)} → ${proc(next)}` : proc(next) || proc(current), runs: proc(next) !== "" });
   }
   out.push(...diffKeyed("Capability", current.capabilities, next.capabilities, (c) => c, (c) => c, true));
-  out.push(...diffKeyed("MCP server", current.mcpServers, next.mcpServers, (s) => s.name, (s) => `${s.name}: ${describeMcp(s)}`, true));
-  out.push(...diffKeyed("ACP provider", current.acpProviders, next.acpProviders, (e) => e.id, acp, true));
-  out.push(...diffKeyed("Hook", current.hookEvents, next.hookEvents, (h) => h.event, (h) => `${h.event} (on error: ${h.onError ?? "open"})`, true));
+  out.push(...diffKeyed("MCP server", current.mcpServers, next.mcpServers, (s) => s.name, (s) => `${s.name}: ${describeMcp(s)}`, true, describeMcp));
+  out.push(...diffKeyed("ACP provider", current.acpProviders, next.acpProviders, (e) => e.id, acp, true, acpCommand));
+  out.push(...diffKeyed("Hook", current.hookEvents, next.hookEvents, (h) => h.event, (h) => `${h.event} (on error: ${h.onError ?? "open"})`, true, (h) => `on error: ${h.onError ?? "open"}`));
   // Only profiles that need attention are part of the fingerprint; the calm ones are informational.
   const flagged = (c: PluginConsent) => (c.profiles ?? []).filter((p) => (p.escalations ?? []).length > 0);
-  out.push(...diffKeyed("Escalating agent", flagged(current), flagged(next), (p) => p.name, (p) => `${p.name}: ${(p.escalations ?? []).join("; ")}`, true));
+  out.push(...diffKeyed("Escalating agent", flagged(current), flagged(next), (p) => p.name, (p) => `${p.name}: ${(p.escalations ?? []).join("; ")}`, true, (p) => (p.escalations ?? []).join("; ")));
   const calm = (c: PluginConsent) => (c.profiles ?? []).filter((p) => (p.escalations ?? []).length === 0);
   out.push(...diffKeyed("Agent", calm(current), calm(next), (p) => p.name, (p) => p.name, false));
   out.push(...diffKeyed("Skill", current.skills?.map((name) => ({ name })), next.skills?.map((name) => ({ name })), (s) => s.name, (s) => s.name, false));
