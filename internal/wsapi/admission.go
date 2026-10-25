@@ -164,12 +164,95 @@ func (a *seatAdmission) requireChildTask(rc *requestContext, task int64) error {
 	return nil
 }
 
+func archivedOutOfScope() error {
+	return forbidden("archived history outside your own task subtree is not readable by agents")
+}
+
+// inOwnScope reports whether task is the caller's own task or in its subtree.
+func (a *seatAdmission) inOwnScope(rc *requestContext, task int64) bool {
+	return task == rc.ident.taskID || a.isInSubtree(rc.ident.taskID, task)
+}
+
+// archivedTask reports whether task exists and is archived; a store error
+// counts as archived (fail closed).
+func (a *seatAdmission) archivedTask(task int64) bool {
+	t, err := a.st.GetTask(task)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false
+	}
+	return err != nil || t.ArchivedAt != nil
+}
+
+// admitArchivedRead keeps the read-only archived-task history (task.list
+// archived, task.tree includeArchived or an archived taskId, run.list and
+// run.logs of an archived task's runs, and the persisted history behind
+// them) inside the caller's own task subtree, for every run-scoped caller.
+// Live reads are untouched. A request that does not decode is left to its
+// handler.
+func (a *seatAdmission) admitArchivedRead(rc *requestContext, method string, raw json.RawMessage) error {
+	switch method {
+	case "task.list":
+		var p struct {
+			ParentTaskID *int64 `json:"parentTaskId"`
+			Archived     bool   `json:"archived"`
+		}
+		if json.Unmarshal(raw, &p) != nil || !p.Archived {
+			return nil
+		}
+		if p.ParentTaskID == nil || !a.inOwnScope(rc, *p.ParentTaskID) {
+			return archivedOutOfScope()
+		}
+	case "task.tree":
+		var p struct {
+			TaskID          int64 `json:"taskId"`
+			IncludeArchived bool  `json:"includeArchived"`
+		}
+		if json.Unmarshal(raw, &p) != nil {
+			return nil
+		}
+		if p.IncludeArchived && (p.TaskID == 0 || !a.inOwnScope(rc, p.TaskID)) {
+			return archivedOutOfScope()
+		}
+		if p.TaskID != 0 && !a.inOwnScope(rc, p.TaskID) && a.archivedTask(p.TaskID) {
+			return archivedOutOfScope()
+		}
+	case "run.list":
+		var p struct {
+			TaskID int64 `json:"taskId"`
+		}
+		if json.Unmarshal(raw, &p) != nil || p.TaskID == 0 {
+			return nil
+		}
+		if !a.inOwnScope(rc, p.TaskID) && a.archivedTask(p.TaskID) {
+			return archivedOutOfScope()
+		}
+	case "run.logs":
+		var p struct {
+			RunID string `json:"runId"`
+		}
+		if json.Unmarshal(raw, &p) != nil || p.RunID == "" {
+			return nil
+		}
+		row, err := a.st.GetRun(p.RunID)
+		if err != nil {
+			return nil // unknown run: the handler reports it
+		}
+		if !a.inOwnScope(rc, row.TaskID) && a.archivedTask(row.TaskID) {
+			return archivedOutOfScope()
+		}
+	}
+	return nil
+}
+
 // admit applies the admission rules to one request of an identified
 // connection. It returns nil for anything it has no rule for (the S2b
 // allowlist already ran) and for a caller without a managed profile.
 func (a *seatAdmission) admit(rc *requestContext, method string, raw json.RawMessage) error {
 	if a == nil || rc == nil || !rc.runScoped {
 		return nil
+	}
+	if err := a.admitArchivedRead(rc, method, raw); err != nil {
+		return err
 	}
 	switch method {
 	case "task.create", "chat.create", "run.start", "run.stop", "run.setConfigOption",

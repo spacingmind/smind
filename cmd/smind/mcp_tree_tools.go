@@ -57,6 +57,8 @@ type taskTreeNode struct {
 	// StalledSince is the RFC 3339 UTC instant of its last subtree activity.
 	Stalled      bool   `json:"stalled"`
 	StalledSince string `json:"stalledSince"`
+	// ArchivedAt is set on an archived node (task.tree includeArchived, read-only history).
+	ArchivedAt string `json:"archivedAt,omitempty"`
 }
 
 type taskTreeNodeRun struct {

@@ -2,6 +2,9 @@ package runs
 
 import (
 	"sort"
+
+	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
 // runListCap bounds how many runs ListFiltered returns: newest first, so
@@ -77,4 +80,58 @@ func ValidRunListStatus(s Status) bool {
 		return true
 	}
 	return false
+}
+
+// ListTaskHistory is ListFiltered(taskID, 0, "") plus the task's persisted
+// runs the Registry no longer holds (evicted past finishedRetentionCap, or
+// never rehydrated): read-only history, e.g. of an archived task. A run in
+// both is reported once, from memory. Newest first, capped at runListCap.
+func (reg *Registry) ListTaskHistory(taskID int64) []RunSummary {
+	out := reg.ListFiltered(taskID, 0, "")
+	rows, err := reg.st.ListRunsByTask(taskID, runListCap)
+	if err != nil {
+		return out
+	}
+	known := make(map[string]bool, len(out))
+	for _, s := range out {
+		known[s.ID] = true
+	}
+	var stored []RunSummary
+	for _, row := range rows {
+		if !known[row.ID] {
+			stored = append(stored, summaryFromRow(row))
+		}
+	}
+	if len(stored) == 0 {
+		return out
+	}
+	reg.withStoredUsage(stored)
+	out = append(out, stored...)
+	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt.After(out[j].StartedAt) })
+	if len(out) > runListCap {
+		out = out[:runListCap]
+	}
+	return out
+}
+
+// summaryFromRow is the RunSummary of a persisted run row (a terminal run:
+// reconciliation ran at startup), without its event history. Usage is left
+// to withStoredUsage.
+func summaryFromRow(row store.Run) RunSummary {
+	rs := RunSummary{
+		ID: row.ID, TaskID: row.TaskID, ChatID: row.ChatID,
+		Provider: taskrunner.Provider(row.Provider), Prompt: row.Prompt,
+		Status: Status(row.Status), StartedAt: row.StartedAt, FinishedAt: row.FinishedAt,
+		StopReason: row.StopReason, Disposition: DispositionFor(Status(row.Status), row.StopReason),
+		Err: row.ErrMsg, PermissionMode: row.PermissionMode, AutoAccept: row.AutoAccept,
+		Model: row.Model, Purpose: rowPurpose(row.Purpose), Origin: row.Origin,
+		Attachments:    publicItems(decodeStoredAttachments(row.Attachments)),
+		ProfileID:      row.ProfileID,
+		FailoverOf:     row.FailoverOf,
+		FailureKind:    row.FailureKind,
+		FailureWindow:  row.FailureWindow,
+		FailureResetAt: cloneTimePtr(row.FailureResetAt), FailureResetInferred: row.FailureResetInferred,
+		BaseSHA: cloneStrPtr(row.BaseSHA), HeadSHA: cloneStrPtr(row.HeadSHA), Dirty: cloneBoolPtr(row.Dirty),
+	}
+	return rs
 }

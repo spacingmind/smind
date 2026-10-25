@@ -21,6 +21,38 @@ type taskView struct {
 	BudgetPartial     bool     `json:"budgetPartial,omitempty"`
 	BudgetUnknownRuns int      `json:"budgetUnknownRuns,omitempty"`
 	OverBudget        bool     `json:"overBudget,omitempty"`
+
+	// LatestRunProfileID/Name: the profile of the task's most recent run,
+	// only on task.list withLatestRun; omitted when it has none (Name also
+	// when the profile row is gone).
+	LatestRunProfileID   *int64  `json:"latestRunProfileId,omitempty"`
+	LatestRunProfileName *string `json:"latestRunProfileName,omitempty"`
+}
+
+// annotateLatestRun fills LatestRunProfile* on views from two queries.
+func annotateLatestRun(db *store.Store, workspaceID int64, views []taskView) error {
+	byTask, err := db.LatestRunProfileByTask(workspaceID)
+	if err != nil {
+		return err
+	}
+	names := map[int64]*string{}
+	for i := range views {
+		id := byTask[views[i].ID]
+		if id == 0 {
+			continue
+		}
+		views[i].LatestRunProfileID = &id
+		name, seen := names[id]
+		if !seen {
+			if p, err := db.GetAgentProfile(id); err == nil {
+				n := p.Name
+				name = &n
+			}
+			names[id] = name
+		}
+		views[i].LatestRunProfileName = name
+	}
+	return nil
 }
 
 // budgetSpend is one budgeted root's reported spend.

@@ -159,13 +159,13 @@ func TestTaskRunsColumns(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("output = %q, want header + 1 row", out)
 	}
-	want := []string{"ID", "CHAT", "PROVIDER", "ORIGIN", "MODEL", "STARTED", "DURATION", "USAGE", "COMMITS", "STATUS"}
+	want := []string{"ID", "CHAT", "PROVIDER", "ORIGIN", "MODEL", "STARTED", "DURATION", "USAGE", "COMMITS", "STATUS", "PROFILE", "PARENT"}
 	if got := strings.Fields(lines[0]); strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("header = %v, want %v", got, want)
 	}
 	f := strings.Fields(lines[1])
-	if f[0] != runID || f[len(f)-1] != "running" {
-		t.Fatalf("row = %v, want run id first and running last", f)
+	if f[0] != runID || f[9] != "running" || f[10] != "-" || f[11] != "-" {
+		t.Fatalf("row = %v, want run id first, running STATUS, then PROFILE and PARENT \"-\"", f)
 	}
 	start := strings.Index(lines[0], "DURATION")
 	end := strings.Index(lines[0], "USAGE")

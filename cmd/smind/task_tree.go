@@ -81,6 +81,9 @@ func treeLine(n taskTreeNode, now time.Time) string {
 	if n.Stalled {
 		segs = append(segs, "stalled")
 	}
+	if n.ArchivedAt != "" {
+		segs = append(segs, "archived")
+	}
 	return strings.Join(append(segs, treeCost(n)), "  ")
 }
 
@@ -122,18 +125,20 @@ func treeCost(n taskTreeNode) string {
 }
 
 // cmdTaskTreeUsage is printed on any argument error in cmdTaskTree.
-const cmdTaskTreeUsage = "usage: smind task tree <workspaceId> [--json]\n       smind task tree --task <taskId> [--json]"
+const cmdTaskTreeUsage = "usage: smind task tree <workspaceId> [--archived] [--json]\n       smind task tree --task <taskId> [--archived] [--json]\n       (--archived also shows archived tasks, marked; an archived --task is shown with its archived descendants)"
 
 // cmdTaskTree prints a workspace's whole task hierarchy, or one task's
 // subtree via --task -- the CLI mirror of the task.tree wsapi method.
 func cmdTaskTree(args []string) int {
 	var idArg, taskArg string
-	var asJSON bool
+	var asJSON, includeArchived bool
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
 		case a == "--json":
 			asJSON = true
+		case a == "--archived":
+			includeArchived = true
 		case a == "--task":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, cmdTaskTreeUsage)
@@ -177,6 +182,9 @@ func cmdTaskTree(args []string) int {
 	defer client.Close()
 
 	params := map[string]any{key: id}
+	if includeArchived {
+		params["includeArchived"] = true
+	}
 	if asJSON {
 		var raw json.RawMessage
 		if err := client.Call(context.Background(), "task.tree", params, &raw); err != nil {
