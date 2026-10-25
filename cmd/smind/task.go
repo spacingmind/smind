@@ -365,6 +365,11 @@ func cmdTaskNew(args []string) int {
 		fmt.Fprintf(os.Stderr, "task new: %v\n", err)
 		return 1
 	}
+	if parentID != nil {
+		// The daemon stacks a sub-task on its parent's branch by default;
+		// say which base it actually got.
+		fmt.Fprintf(os.Stderr, "task new: base %s\n", task.BaseRef)
+	}
 	// First line stays "id<TAB>title<TAB>status" for existing parsers; the
 	// branch and worktree path follow on their own labelled lines.
 	fmt.Printf("%d\t%s\t%s\n", task.ID, task.Title, task.Status)

@@ -649,6 +649,12 @@ func handleTaskCreate(wm *workspace.Manager, db *store.Store, reg *runs.Registry
 		}
 		if p.BaseRef != "" {
 			opts = append(opts, workspace.WithBaseRef(p.BaseRef))
+		} else if refModes == 0 && p.ParentTaskID != nil && (rc == nil || !rc.runScoped) {
+			// A human-created sub-task stacks on its parent's branch (G18);
+			// agents keep the workspace default base.
+			if b, ok := wm.ParentStackBase(*p.ParentTaskID); ok {
+				opts = append(opts, workspace.WithBaseRef(b))
+			}
 		}
 		if p.Branch != "" {
 			opts = append(opts, workspace.WithExistingBranch(p.Branch))

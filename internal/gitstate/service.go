@@ -87,6 +87,9 @@ type Options struct {
 	// PushTarget resolves where Push would send the task's branch (the same
 	// rule Push runs); nil result or a nil hook omits origin.pushTarget.
 	PushTarget func(ctx context.Context, t store.Task, w store.Workspace) *PushTarget
+	// DefaultBase is the workspace's default base branch (stored override,
+	// else detected); nil falls back to the stored override only.
+	DefaultBase func(w store.Workspace) string
 }
 
 type entry struct {
@@ -498,6 +501,15 @@ func (s *Service) compute(taskID int64) (g TaskGit, ws int64, base string, err e
 	}
 	if t.Branch != nil {
 		in.Branch = *t.Branch
+	}
+	in.DefaultBase = w.DefaultBase
+	if s.opts.DefaultBase != nil {
+		in.DefaultBase = s.opts.DefaultBase(w)
+	}
+	if t.ParentTaskID != nil {
+		if parent, err := src.GetTask(*t.ParentTaskID); err == nil && parent.Branch != nil {
+			in.ParentBranch = *parent.Branch
+		}
 	}
 	if t.PRNumber > 0 {
 		in.Forge = t.PRForge

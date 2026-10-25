@@ -194,6 +194,10 @@ func (m *Manager) SetTaskBase(taskID int64, baseRef string) (store.Task, error) 
 
 // workspaceDefaultBase is ws's default base: the stored override, else the
 // detected one.
+// WorkspaceDefaultBase is ws's default base: the stored override, else the
+// detected one.
+func (m *Manager) WorkspaceDefaultBase(ws store.Workspace) string { return workspaceDefaultBase(ws) }
+
 func workspaceDefaultBase(ws store.Workspace) string {
 	if ws.DefaultBase != "" {
 		return ws.DefaultBase

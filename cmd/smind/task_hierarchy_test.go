@@ -193,3 +193,64 @@ func TestTaskNew_PrintsIDBranchPath(t *testing.T) {
 		t.Fatalf("worktree path %q: %v", path, err)
 	}
 }
+
+// TestTaskNew_ParentDefaultPrintsBase proves --parent alone stacks the child
+// on the parent's branch and `task new` reports that base on stderr.
+func TestTaskNew_ParentDefaultPrintsBase(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	srvURL := newConfigOptionTestEnv(t, home)
+	writeTestConfig(t, home, srvURL)
+	wsID, _ := createStartOptionWorkspace(t, srvURL)
+	ws := strconv.FormatInt(wsID, 10)
+
+	code, out := runCaptured(t, []string{"task", "new", ws, "parent"})
+	if code != 0 {
+		t.Fatalf("task new parent = %d, out %q", code, out)
+	}
+	parentID := strings.Fields(strings.Split(strings.TrimSpace(out), "\n")[0])[0]
+	parentBranch := taskNewLabeledLine(t, out, "branch")
+
+	code, stderr := runCapturedStderr(t, []string{"task", "new", ws, "child", "--parent", parentID})
+	if code != 0 {
+		t.Fatalf("task new --parent = %d, stderr %q", code, stderr)
+	}
+	if want := "task new: base " + parentBranch; !strings.Contains(stderr, want) {
+		t.Fatalf("stderr %q, want line %q", stderr, want)
+	}
+}
+
+// TestTaskNew_BaseOverridesParentDefault proves an explicit --base reaches
+// the daemon and is what the base line reports.
+func TestTaskNew_BaseOverridesParentDefault(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	srvURL := newConfigOptionTestEnv(t, home)
+	writeTestConfig(t, home, srvURL)
+	wsID, repoDir := createStartOptionWorkspace(t, srvURL)
+	addFeatureXBranch(t, repoDir)
+	ws := strconv.FormatInt(wsID, 10)
+
+	code, out := runCaptured(t, []string{"task", "new", ws, "parent"})
+	if code != 0 {
+		t.Fatalf("task new parent = %d, out %q", code, out)
+	}
+	parentID := strings.Fields(strings.Split(strings.TrimSpace(out), "\n")[0])[0]
+
+	code, stderr := runCapturedStderr(t, []string{"task", "new", ws, "child", "--parent", parentID, "--base", "feature-x"})
+	if code != 0 {
+		t.Fatalf("task new --parent --base = %d, stderr %q", code, stderr)
+	}
+	if !strings.Contains(stderr, "task new: base feature-x") {
+		t.Fatalf("stderr %q, want base feature-x", stderr)
+	}
+}
+
+// runCapturedStderr runs the CLI and returns its exit code and stderr.
+func runCapturedStderr(t *testing.T, args []string) (int, string) {
+	t.Helper()
+	code := -1
+	var stderr string
+	captureStdout(t, func() { stderr = captureStderr(t, func() { code = run(args) }) })
+	return code, stderr
+}

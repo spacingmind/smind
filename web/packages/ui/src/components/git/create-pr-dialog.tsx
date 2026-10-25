@@ -77,10 +77,12 @@ function CreatePrForm({
   onPending: (pending: boolean) => void;
 }) {
   const git = useTaskGit(taskId);
-  const taskBase = git?.base?.ref ?? "";
+  // The base the daemon would use for a PR with no override (`base_ref`), and the one the field starts at (`prDefault`).
+  const storedBase = git?.base?.ref ?? "";
+  const taskBase = git?.base?.prDefault ?? storedBase;
   const [baseInput, setBaseInput] = useState(taskBase);
   const [committedBase, setCommittedBase] = useState(taskBase);
-  const baseOverride = committedBase === taskBase ? "" : committedBase;
+  const baseOverride = committedBase === storedBase ? "" : committedBase;
   const preview = usePrPreview(taskId, baseOverride, true);
   const branches = useWorkspaceBranches({ workspaceId: workspaceId ?? -1, limit: 50, enabled: workspaceId !== null });
   const create = useCreatePr();
@@ -174,6 +176,12 @@ function CreatePrForm({
           </span>
         )}
       </div>
+
+      {git?.base?.parentBranch && committedBase === git.base.parentBranch && (
+        <p data-testid="create-pr-stacked-hint" className="text-ui-sm text-foreground-muted">
+          Stacked on <span className="font-mono text-foreground">{git.base.parentBranch}</span>
+        </p>
+      )}
 
       {blocker && (
         <Alert variant="warning" description={blocker.reason} testId="create-pr-blocker">

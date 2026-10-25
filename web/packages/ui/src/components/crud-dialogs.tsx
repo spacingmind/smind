@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useState, type Dispatch, type ReactNode } from "react";
 
 import { draftStorageKey } from "@/components/composer/use-composer-draft";
+import { StackBaseControl, parentBranchOf, useStackDefaultBase, type StackBase } from "@/components/new-task/stack-base";
 import { StartFrom } from "@/components/new-task/start-from";
 import {
   INITIAL_START_FROM,
@@ -296,6 +297,7 @@ export function CreateTaskDialog({
   workspace,
   spaces,
   fixedSpaceId = null,
+  parent,
   open,
   onOpenChange,
   onCreated,
@@ -305,6 +307,8 @@ export function CreateTaskDialog({
   spaces: Space[];
   /** When started from a space row, the space is fixed and the select is hidden. */
   fixedSpaceId?: number | null;
+  /** New sub-task: the task being stacked under; swaps Start from for the Base control. */
+  parent?: Task;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Called with the created task so App can select it (chat tab ready). */
@@ -314,6 +318,15 @@ export function CreateTaskDialog({
   const [spaceId, setSpaceId] = useState<string>(fixedSpaceId !== null ? String(fixedSpaceId) : "none");
   const [error, setError] = useState<string | null>(null);
   const [startFrom, dispatchStartFrom] = useReducer(startFromReducer, INITIAL_START_FROM);
+  const [stackBase, setStackBase] = useState<StackBase>("parent");
+  const { defaultBase } = useStackDefaultBase(workspace.ID);
+
+  // Both options send `baseRef` explicitly; a parent without a branch sends only `parentTaskId`.
+  const subTaskParams = (p: Task) => {
+    const parentBranch = parentBranchOf(p);
+    const ref = parentBranch && stackBase === "parent" ? parentBranch : defaultBase.ref;
+    return { parentTaskId: p.ID, ...(parentBranch && ref ? { baseRef: ref } : {}) };
+  };
 
   // Picking an issue titles the task after it; the title stays editable afterwards.
   const dispatchPick: Dispatch<StartFromAction> = (action) => {
@@ -325,10 +338,10 @@ export function CreateTaskDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       {open && (
         <CrudForm
-          title="New task"
+          title={parent ? "New sub-task" : "New task"}
           // Anchored to the top: the Start-from step changes the body's height, and a centred dialog would jump with it.
           contentClassName="top-[12vh] translate-y-0"
-          description={`A task worktree in ${workspace.Title || workspace.Path}.`}
+          description={parent ? `A sub-task of ${parent.Title}, in ${workspace.Title || workspace.Path}.` : `A task worktree in ${workspace.Title || workspace.Path}.`}
           submitLabel="Create task"
           onOpenChange={onOpenChange}
           submitTestId="dialog-new-task-submit"
@@ -338,7 +351,7 @@ export function CreateTaskDialog({
               setError("Title is required.");
               return false;
             }
-            const missing = startFromMissing(startFrom);
+            const missing = parent ? null : startFromMissing(startFrom);
             if (missing) {
               setError(missing);
               return false;
@@ -348,10 +361,10 @@ export function CreateTaskDialog({
                 workspaceId: workspace.ID,
                 ...(spaceId !== "none" ? { spaceId: Number(spaceId) } : {}),
                 title: title.trim(),
-                ...startFromParams(startFrom),
+                ...(parent ? subTaskParams(parent) : startFromParams(startFrom)),
               });
               // The issue rides into the new task's first prompt as composer draft text: the attachment drafts are keyed by chat id, which does not exist yet.
-              if (startFrom.mode === "issue" && startFrom.issue) seedIssueDraft(task.ID, startFrom.issue);
+              if (!parent && startFrom.mode === "issue" && startFrom.issue) seedIssueDraft(task.ID, startFrom.issue);
               onCreated(task);
               setTitle("");
               return true;
@@ -373,7 +386,11 @@ export function CreateTaskDialog({
               autoFocus
             />
           </div>
-          <StartFrom workspaceId={workspace.ID} state={startFrom} dispatch={dispatchPick} />
+          {parent ? (
+            <StackBaseControl workspaceId={workspace.ID} parent={parent} value={stackBase} onChange={setStackBase} />
+          ) : (
+            <StartFrom workspaceId={workspace.ID} state={startFrom} dispatch={dispatchPick} />
+          )}
           {fixedSpaceId === null && (
             <div className="grid gap-2">
               <label htmlFor="task-space" className="text-ui-base font-medium">

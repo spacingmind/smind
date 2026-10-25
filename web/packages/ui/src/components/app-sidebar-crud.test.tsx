@@ -603,3 +603,17 @@ describe("AppSidebar CRUD", () => {
     expect(client.calls.filter((c) => c.method === "space.delete")).toHaveLength(0);
   });
 });
+
+describe("AppSidebar New sub-task", () => {
+  it("sidebar task menu offers New sub-task and opens the dialog with the parent", async () => {
+    const client = new FakeWsClient();
+    mount(client);
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    await openTaskMenu("Fix the bug");
+    fireEvent.click(screen.getByTestId("sidebar-task-new-subtask-action"));
+    await flush();
+    expect(await screen.findByText("New sub-task")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Parent branch (fix-bug)" })).toHaveAttribute("aria-checked", "true");
+  });
+});

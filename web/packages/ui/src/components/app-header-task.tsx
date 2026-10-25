@@ -56,7 +56,9 @@ export function HeaderTaskTitle({ task }: { task: Task }) {
           {(git?.branch?.name ?? task.Branch) && (
             <GitBranchLine
               branch={(git?.branch?.name ?? task.Branch)!}
-              base={git?.base?.known ? git.base.ref : undefined}
+              base={git?.base?.known || git?.base?.gone ? git.base.ref : undefined}
+          gone={git?.base?.gone}
+          stackedOn={git?.base?.parentBranch}
               testId="app-header-task-branch"
             />
           )}

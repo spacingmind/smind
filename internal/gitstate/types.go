@@ -41,6 +41,22 @@ type Base struct {
 	Sha   string `json:"sha,omitempty"`
 	Tip   string `json:"tip,omitempty"`
 	Known bool   `json:"known"`
+	// ParentBranch is set when the task is stacked: its parent's branch is
+	// the base. Gone: the base ref resolves nowhere (origin nor local).
+	// PRDefault is the base Create PR should default to (PRDefaultBase).
+	ParentBranch string `json:"parentBranch,omitempty"`
+	Gone         bool   `json:"gone,omitempty"`
+	PRDefault    string `json:"prDefault,omitempty"`
+}
+
+// PRDefaultBase is the one rule for a task's default PR target. A stacked task
+// (baseRef is its parent's branch) targets the parent only while that branch
+// is pushed; otherwise the workspace default base. Anything else keeps baseRef.
+func PRDefaultBase(baseRef, parentBranch, defaultBase string, parentPushed bool) string {
+	if parentBranch == "" || parentBranch != baseRef || parentPushed || defaultBase == "" {
+		return baseRef
+	}
+	return defaultBase
 }
 
 type Diff struct {

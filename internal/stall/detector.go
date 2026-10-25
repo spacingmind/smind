@@ -88,6 +88,9 @@ func Detect(rows []store.StallRow, now time.Time, n time.Duration) []Episode {
 	var out []Episode
 	for i := range rows {
 		r := &rows[i]
+		if r.AncestorArchived {
+			continue // a closed tree: its root was archived
+		}
 		if len(children[r.TaskID]) == 0 && !r.ProfileOrchestration {
 			continue // not a seat
 		}

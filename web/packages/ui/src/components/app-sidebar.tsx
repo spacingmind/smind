@@ -304,6 +304,8 @@ const TreeActionsContext = createContext<{
   availability: ReadonlyMap<number, TreeActionAvailability>;
   onArchiveFinished: (task: Task) => void;
   onStopTree: (task: Task) => void;
+  /** Opens the New sub-task dialog under `task` (offered on every row, not only parents). */
+  onNewSubTask: (task: Task) => void;
 } | null>(null);
 
 /** Which create/archive dialog a sidebar row has opened, if any. */
@@ -312,6 +314,7 @@ type CrudTarget =
   | { kind: "space"; workspace: WorkspaceWithTree }
   | { kind: "task"; workspace: WorkspaceWithTree; spaceId: number | null }
   | { kind: "archive"; task: Task }
+  | { kind: "subTask"; task: Task }
   | { kind: "archiveFinished"; task: Task }
   | { kind: "stopTree"; task: Task }
   | { kind: "scripts"; workspace: WorkspaceWithTree }
@@ -530,12 +533,10 @@ export function AppSidebar({
   // app-sidebar-memo.test.tsx).
   const openArchiveFinished = useCallback((task: Task) => setCrud({ kind: "archiveFinished", task }), []);
   const openStopTree = useCallback((task: Task) => setCrud({ kind: "stopTree", task }), []);
+  const openNewSubTask = useCallback((task: Task) => setCrud({ kind: "subTask", task }), []);
   const treeActions = useMemo(
-    () =>
-      treeActionAvailability.size > 0
-        ? { availability: treeActionAvailability, onArchiveFinished: openArchiveFinished, onStopTree: openStopTree }
-        : null,
-    [treeActionAvailability, openArchiveFinished, openStopTree],
+    () => ({ availability: treeActionAvailability, onArchiveFinished: openArchiveFinished, onStopTree: openStopTree, onNewSubTask: openNewSubTask }),
+    [treeActionAvailability, openArchiveFinished, openStopTree, openNewSubTask],
   );
   // One stable callback for every task row: an inline arrow here is a new
   // prop on each AppSidebar render, which defeats TaskRow's memo (opening a
@@ -999,6 +1000,25 @@ export function AppSidebar({
               }}
             />
           )}
+          {crud?.kind === "subTask" && (() => {
+            const parent = crud.task;
+            const workspace = workspaces?.find((w) => w.ID === parent.WorkspaceID);
+            return workspace ? (
+              <CreateTaskDialog
+                client={client}
+                workspace={workspace}
+                spaces={workspace.spaces}
+                fixedSpaceId={parent.SpaceID}
+                parent={parent}
+                open
+                onOpenChange={(o) => !o && setCrud(null)}
+                onCreated={(task) => {
+                  onSelectTask?.(task);
+                  refresh();
+                }}
+              />
+            ) : null;
+          })()}
           {crud?.kind === "archive" && (
             <ArchiveTaskDialog
               client={client}
@@ -1961,7 +1981,9 @@ function TaskHoverCardBody({
       {(git?.branch?.name ?? task.Branch) && (
         <GitBranchLine
           branch={(git?.branch?.name ?? task.Branch)!}
-          base={git?.base?.known ? git.base.ref : undefined}
+          base={git?.base?.known || git?.base?.gone ? git.base.ref : undefined}
+          gone={git?.base?.gone}
+          stackedOn={git?.base?.parentBranch}
           testId="sidebar-task-branch"
         />
       )}
@@ -2126,6 +2148,7 @@ const TaskRow = memo(function TaskRow({
     onTogglePin,
     onMarkUnread,
     onArchiveTask,
+    onNewSubTask: treeActions ? () => treeActions.onNewSubTask(task) : undefined,
     tree: treeActions && treeAvailability
       ? {
           availability: treeAvailability,
@@ -2527,11 +2550,23 @@ function taskMenuEntries(
     onTogglePin: (taskId: number) => void;
     onMarkUnread: (taskId: number) => void;
     onArchiveTask: (task: Task) => void;
+    /** Opens the New sub-task dialog; absent outside the tree provider (search results). */
+    onNewSubTask?: () => void;
     /** PR-H11 tree actions; present only on rows in the tree view whose task has live descendants. */
     tree?: { availability: TreeActionAvailability; onArchiveFinished: () => void; onStopTree: () => void };
   },
 ): TaskMenuEntry[] {
   const entries: TaskMenuEntry[] = [];
+  if (o.onNewSubTask && !task.ArchivedAt) {
+    entries.push({
+      kind: "item",
+      testId: "sidebar-task-new-subtask-action",
+      label: "New sub-task…",
+      icon: <Icons.add />,
+      onSelect: o.onNewSubTask,
+      opensDialog: true,
+    });
+  }
   if (o.tree) {
     const { availability, onArchiveFinished, onStopTree } = o.tree;
     entries.push(

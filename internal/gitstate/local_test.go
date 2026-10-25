@@ -257,3 +257,36 @@ func TestGitStatus_PushTargetOnOrigin(t *testing.T) {
 		t.Fatalf("fork PR kept pushTarget %+v", g.Origin.PushTarget)
 	}
 }
+
+func TestTaskGit_StackedBaseGoneAndParentBranch(t *testing.T) {
+	f := newFixture(t)
+	git(t, f.repo, "branch", "smind/task-parent", "develop")
+	in := f.input()
+	in.BaseRef, in.ParentBranch, in.DefaultBase = "smind/task-parent", "smind/task-parent", "develop"
+
+	g := Compute(context.Background(), DefaultRunner, in)
+	if g.Base.ParentBranch != "smind/task-parent" || g.Base.Gone {
+		t.Fatalf("base = %+v, want parentBranch set and not gone", g.Base)
+	}
+	if g.Base.PRDefault != "develop" {
+		t.Fatalf("prDefault = %q, want develop while the parent is not pushed", g.Base.PRDefault)
+	}
+
+	git(t, f.repo, "push", "origin", "smind/task-parent")
+	if g = Compute(context.Background(), DefaultRunner, in); g.Base.PRDefault != "smind/task-parent" {
+		t.Fatalf("prDefault = %q, want the pushed parent branch", g.Base.PRDefault)
+	}
+
+	git(t, f.repo, "push", "origin", "--delete", "smind/task-parent")
+	git(t, f.repo, "fetch", "--prune", "origin")
+	git(t, f.repo, "branch", "-D", "smind/task-parent")
+	g = Compute(context.Background(), DefaultRunner, in)
+	if !g.Base.Gone || g.Base.ParentBranch != "smind/task-parent" || g.Base.PRDefault != "develop" {
+		t.Fatalf("base = %+v, want gone, parentBranch kept, prDefault develop", g.Base)
+	}
+
+	plain := Compute(context.Background(), DefaultRunner, f.input())
+	if plain.Base.Gone || plain.Base.ParentBranch != "" || plain.Base.PRDefault != "develop" {
+		t.Fatalf("unstacked base = %+v, want not gone, no parentBranch, prDefault develop", plain.Base)
+	}
+}
