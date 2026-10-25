@@ -32,6 +32,15 @@ type Options struct {
 	Enabled func() bool
 	// Limits overrides DefaultLimits (tests).
 	Limits Limits
+	// Settings supplies plugin setting values for ${setting.KEY} in MCP
+	// env and headers (nil: none are set).
+	Settings SettingsProvider
+	// ValidateProfile checks a contributed profile against the provider
+	// vocabulary (nil: structural checks only).
+	ValidateProfile func(store.AgentProfile) error
+	// UserProfileNames lists the user's profile names, so a contributed
+	// profile never shadows one (the user's wins and a conflict is noted).
+	UserProfileNames func() []string
 }
 
 // Manager installs and tracks plugins. All mutators serialize on one lock; a
@@ -42,6 +51,11 @@ type Manager struct {
 	version string
 	enabled func() bool
 	lim     Limits
+
+	settings         SettingsProvider
+	validateProfile  func(store.AgentProfile) error
+	userProfileNames func() []string
+	cache            contribCache
 
 	mu sync.Mutex
 	// failAt, when set (tests only), is called at named points of an install
@@ -55,7 +69,8 @@ func New(o Options) *Manager {
 	if lim == (Limits{}) {
 		lim = DefaultLimits
 	}
-	return &Manager{home: o.Home, st: o.Store, version: o.Version, enabled: o.Enabled, lim: lim}
+	return &Manager{home: o.Home, st: o.Store, version: o.Version, enabled: o.Enabled, lim: lim,
+		settings: o.Settings, validateProfile: o.ValidateProfile, userProfileNames: o.UserProfileNames}
 }
 
 // GlobalEnabled reports the plugins.enabled switch.
@@ -92,13 +107,16 @@ type Info struct {
 	Enabled    bool   `json:"enabled"`
 	// Active is true only when the plugin is enabled AND the global switch is
 	// on: the only state in which a contribution may be loaded or called.
-	Active      bool      `json:"active"`
-	Consent     Consent   `json:"consent"`
-	Consented   bool      `json:"consented"`
-	Pending     *Pending  `json:"pending,omitempty"`
-	LastError   string    `json:"lastError,omitempty"`
-	InstalledAt time.Time `json:"installedAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	Active    bool     `json:"active"`
+	Consent   Consent  `json:"consent"`
+	Consented bool     `json:"consented"`
+	Pending   *Pending `json:"pending,omitempty"`
+	LastError string   `json:"lastError,omitempty"`
+	// Conflicts lists what this plugin contributed that the host did not
+	// apply (a user row with the same name, a setting with no value).
+	Conflicts   []Conflict `json:"conflicts,omitempty"`
+	InstalledAt time.Time  `json:"installedAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
 }
 
 // Pending is an update waiting for the Human's re-consent.
@@ -112,12 +130,15 @@ type Listing struct {
 	Plugins       []Info `json:"plugins"`
 }
 
-func (m *Manager) info(p store.Plugin) Info {
+func (m *Manager) info(p store.Plugin) Info { return m.infoG(p, m.GlobalEnabled()) }
+
+// infoG is info with the global switch already read (it is a file read).
+func (m *Manager) infoG(p store.Plugin, global bool) Info {
 	var c Consent
 	_ = json.Unmarshal([]byte(p.Capabilities), &c)
 	in := Info{
 		ID: p.ID, Name: p.Name, Version: p.Version, Source: p.Source, SourceKind: p.SourceKind, Hash: p.Hash,
-		Enabled: p.Enabled, Active: p.Enabled && m.GlobalEnabled(), Consent: c,
+		Enabled: p.Enabled, Active: p.Enabled && global, Consent: c,
 		Consented: p.ConsentHash != "" && p.ConsentHash == c.Fingerprint, LastError: p.LastError,
 		InstalledAt: p.InstalledAt, UpdatedAt: p.UpdatedAt,
 	}
@@ -133,13 +154,32 @@ func (m *Manager) info(p store.Plugin) Info {
 // List returns every plugin and the global switch. With the switch off no
 // plugin reports Active.
 func (m *Manager) List() (Listing, error) {
+	l, err := m.list()
+	if err != nil {
+		return l, err
+	}
+	if confl := m.derive().conflicts; len(confl) > 0 {
+		for i := range l.Plugins {
+			for _, c := range confl {
+				if c.Plugin == l.Plugins[i].ID {
+					l.Plugins[i].Conflicts = append(l.Plugins[i].Conflicts, c)
+				}
+			}
+		}
+	}
+	return l, nil
+}
+
+// list is List without the contribution conflicts (derive builds on it).
+func (m *Manager) list() (Listing, error) {
 	rows, err := m.st.ListPlugins()
 	if err != nil {
 		return Listing{}, err
 	}
-	out := Listing{GlobalEnabled: m.GlobalEnabled(), Plugins: make([]Info, 0, len(rows))}
+	global := m.GlobalEnabled()
+	out := Listing{GlobalEnabled: global, Plugins: make([]Info, 0, len(rows))}
 	for _, r := range rows {
-		out.Plugins = append(out.Plugins, m.info(r))
+		out.Plugins = append(out.Plugins, m.infoG(r, global))
 	}
 	return out, nil
 }
@@ -150,7 +190,7 @@ func (m *Manager) Active() []Info {
 	if !m.GlobalEnabled() {
 		return nil
 	}
-	l, err := m.List()
+	l, err := m.list()
 	if err != nil {
 		return nil
 	}
@@ -177,7 +217,13 @@ func (m *Manager) Get(id string) (Info, error) {
 	if err != nil {
 		return Info{}, err
 	}
-	return m.info(p), nil
+	in := m.info(p)
+	for _, c := range m.derive().conflicts {
+		if c.Plugin == id {
+			in.Conflicts = append(in.Conflicts, c)
+		}
+	}
+	return in, nil
 }
 
 // staged is a validated candidate: its files are in work, not yet in place.
@@ -261,6 +307,9 @@ func (m *Manager) stage(ctx context.Context, src Source) (*staged, error) {
 		return fail(err)
 	}
 	if err := checkDeclared(tree, st.man, src.Kind != SourceLink); err != nil {
+		return fail(err)
+	}
+	if err := st.man.loadContributions(tree); err != nil {
 		return fail(err)
 	}
 	st.cons = BuildConsent(st.man, src, st.hash)
@@ -469,6 +518,9 @@ func (m *Manager) loadInstalled(p store.Plugin) (*Manifest, string, error) {
 		return nil, "", newErr(CodeBadManifest, "the installed files changed since install (hash mismatch): reinstall or update the plugin")
 	}
 	if err := checkDeclaredInstalled(root, man, link); err != nil {
+		return nil, "", err
+	}
+	if err := man.loadContributions(root); err != nil {
 		return nil, "", err
 	}
 	return man, hash, nil

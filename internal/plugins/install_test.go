@@ -59,7 +59,7 @@ func TestPluginInstall_RecordsDisabled_ConsentSummary(t *testing.T) {
 	if _, err := e.m.Install(bg, src); CodeOf(err) != CodeInstalled {
 		t.Fatalf("second install: %v", err)
 	}
-	data := writePluginDir(t, manifestWith("pure", "1.0.0", `"contributes":{"skills":["s"]}`), map[string]string{"s": "x"})
+	data := writePluginDir(t, manifestWith("pure", "1.0.0", `"contributes":{"skills":["s"]}`), map[string]string{"s/SKILL.md": "x"})
 	if d := mustInstall(t, e, data); !d.Consent.DataOnly {
 		t.Fatalf("a data-only plugin must say so: %+v", d.Consent)
 	}

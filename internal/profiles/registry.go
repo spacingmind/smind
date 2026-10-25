@@ -32,6 +32,9 @@ type Registry struct {
 	// internal/workspace.Manager's Notifier/SetNotifier pattern.
 	notifierMu sync.Mutex
 	notifier   Notifier
+
+	skillMu sync.Mutex
+	skills  SkillResolver
 }
 
 // Notifier receives agent-profile lifecycle notifications. Every method is
@@ -74,6 +77,10 @@ func (r *Registry) getNotifier() Notifier {
 // Create validates p and inserts it, firing NotifyProfileCreated on
 // success.
 func (r *Registry) Create(p store.AgentProfile) (store.AgentProfile, error) {
+	if err := r.refuseOwnedName(strings.TrimSpace(p.Name)); err != nil {
+		return store.AgentProfile{}, err
+	}
+	p.Owner, p.ReadOnly = nil, false
 	if err := r.validate(&p); err != nil {
 		return store.AgentProfile{}, err
 	}
@@ -87,20 +94,103 @@ func (r *Registry) Create(p store.AgentProfile) (store.AgentProfile, error) {
 	return created, nil
 }
 
+// SkillResolver resolves "<plugin>:<skill>" references against the plugins
+// that are active now (ADR-0042). It is set at wiring time.
+type SkillResolver interface {
+	PluginSkill(qualified string) (plugin string, ok bool)
+	// PluginActive reports whether the named plugin is installed and active.
+	PluginActive(plugin string) bool
+}
+
+// SetSkillResolver installs the plugin skill resolver (nil: plugin skill
+// names are rejected).
+func (r *Registry) SetSkillResolver(s SkillResolver) {
+	r.skillMu.Lock()
+	r.skills = s
+	r.skillMu.Unlock()
+}
+
+func (r *Registry) skillResolver() SkillResolver {
+	r.skillMu.Lock()
+	defer r.skillMu.Unlock()
+	return r.skills
+}
+
 // Get returns the profile with the given id.
 func (r *Registry) Get(id int64) (store.AgentProfile, error) {
 	return r.store.GetAgentProfile(id)
 }
 
-// List returns every profile, ordered by id.
+// List returns every user profile ordered by id, then the profiles enabled
+// plugins contribute (owned, read-only, "<plugin>:<name>").
 func (r *Registry) List() ([]store.AgentProfile, error) {
-	return r.store.ListAgentProfiles()
+	rows, err := r.store.ListAgentProfiles()
+	if err != nil {
+		return nil, err
+	}
+	if o := r.store.Overlay(); o != nil {
+		rows = append(rows, o.OwnedProfiles()...)
+	}
+	return rows, nil
+}
+
+// ownedProfile returns the owned profile with the given id, if its plugin is
+// active.
+func (r *Registry) ownedProfile(id int64) (store.AgentProfile, bool) {
+	if !store.IsOwnedID(id) {
+		return store.AgentProfile{}, false
+	}
+	if o := r.store.Overlay(); o != nil {
+		return o.OwnedProfile(id)
+	}
+	return store.AgentProfile{}, false
+}
+
+// refuseOwned is the guard of every write by id: a profile a plugin owns is
+// read-only for every caller, human or agent.
+func (r *Registry) refuseOwned(id int64) error {
+	if p, ok := r.ownedProfile(id); ok {
+		return &store.OwnedRowError{Plugin: *p.Owner, Kind: "profile", Name: p.Name}
+	}
+	return nil
+}
+
+// refuseOwnedName rejects a user profile named like a profile an active
+// plugin contributes, so a user row can never shadow (or be shadowed by) an
+// owned one.
+func (r *Registry) refuseOwnedName(name string) error {
+	if !strings.Contains(name, ":") {
+		return nil
+	}
+	if o := r.store.Overlay(); o != nil {
+		for _, p := range o.OwnedProfiles() {
+			if p.Name == name {
+				return fmt.Errorf("name %q is taken by a profile plugin %q contributes; pick another name", name, *p.Owner)
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateOwned checks the provider-level fields of a profile a plugin
+// contributes (provider, permission mode, thinking level, model, sizes). It
+// does not check skills or child references: those may name plugins that are
+// not active.
+func (r *Registry) ValidateOwned(p store.AgentProfile) error {
+	return r.validateFields(&p)
 }
 
 // Update validates p and replaces the stored profile with id p.ID (a
 // full-record replace -- see store.UpdateAgentProfile), firing
 // NotifyProfileUpdated on success.
 func (r *Registry) Update(p store.AgentProfile) (store.AgentProfile, error) {
+	if err := r.refuseOwned(p.ID); err != nil {
+		return store.AgentProfile{}, err
+	}
+	if err := r.refuseOwnedName(strings.TrimSpace(p.Name)); err != nil {
+		return store.AgentProfile{}, err
+	}
+	p.Owner, p.ReadOnly = nil, false
 	if err := r.validate(&p); err != nil {
 		return store.AgentProfile{}, err
 	}
@@ -117,6 +207,9 @@ func (r *Registry) Update(p store.AgentProfile) (store.AgentProfile, error) {
 // Delete removes the profile with the given id, firing NotifyProfileDeleted
 // on success.
 func (r *Registry) Delete(id int64) error {
+	if err := r.refuseOwned(id); err != nil {
+		return err
+	}
 	if err := r.store.DeleteAgentProfile(id); err != nil {
 		return err
 	}
@@ -134,6 +227,17 @@ func (r *Registry) Delete(id int64) error {
 // task.prompt -- so a stored profile can never carry a combination the wire
 // would reject if applied directly.
 func (r *Registry) validate(p *store.AgentProfile) error {
+	if err := r.validateFields(p); err != nil {
+		return err
+	}
+	if err := r.validateFailover(p); err != nil {
+		return err
+	}
+	return r.validateContract(p)
+}
+
+// validateFields is the provider-level part of validate.
+func (r *Registry) validateFields(p *store.AgentProfile) error {
 	if strings.TrimSpace(p.Name) == "" {
 		return fmt.Errorf("name is required")
 	}
@@ -154,10 +258,10 @@ func (r *Registry) validate(p *store.AgentProfile) error {
 	if err := taskrunner.ValidateModel(info, p.Model); err != nil {
 		return err
 	}
-	if err := r.validateFailover(p); err != nil {
-		return err
+	if len(p.Instructions) > maxInstructionsBytes {
+		return fmt.Errorf("instructions are %d bytes, over the %d byte cap", len(p.Instructions), maxInstructionsBytes)
 	}
-	return r.validateContract(p)
+	return nil
 }
 
 // Seat-contract size caps (ADR-0041 S1), in bytes.
@@ -187,6 +291,19 @@ func (r *Registry) validateContract(p *store.AgentProfile) error {
 		seen := make(map[string]bool, len(p.Skills))
 		for _, name := range p.Skills {
 			size, ok := bodies[name]
+			if strings.Contains(name, ":") {
+				plugin, _, _ := strings.Cut(name, ":")
+				res := r.skillResolver()
+				switch {
+				case res == nil || !res.PluginActive(plugin):
+					return fmt.Errorf("unknown skill %q: plugin %q is not installed and enabled", name, plugin)
+				default:
+					if _, found := res.PluginSkill(name); !found {
+						return fmt.Errorf("unknown skill %q: plugin %q has no skill by that name", name, plugin)
+					}
+				}
+				size, ok = 0, true // inlined at run time; the cap below counts bundled bodies only
+			}
 			if !ok {
 				return fmt.Errorf("unknown skill %q (not a bundled skill)", name)
 			}
@@ -223,6 +340,9 @@ func (r *Registry) validateContract(p *store.AgentProfile) error {
 				return fmt.Errorf("duplicate child profile %d", id)
 			}
 			seen[id] = true
+			if store.IsOwnedID(id) {
+				return fmt.Errorf("child profile %d belongs to a plugin and cannot be referenced by a stored profile", id)
+			}
 			if _, err := r.store.GetAgentProfile(id); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return fmt.Errorf("child profile %d not found", id)
@@ -262,6 +382,9 @@ func (r *Registry) validateFailover(p *store.AgentProfile) error {
 		return nil
 	}
 	id := *p.FallbackProfileID
+	if store.IsOwnedID(id) {
+		return fmt.Errorf("fallback profile %d belongs to a plugin and cannot be referenced by a stored profile", id)
+	}
 	if p.ID != 0 && id == p.ID {
 		return fmt.Errorf("fallback profile must not be the profile itself")
 	}

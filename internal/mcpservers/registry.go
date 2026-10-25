@@ -7,6 +7,7 @@
 package mcpservers
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -81,26 +82,87 @@ func (r *Registry) Create(m store.McpServer) (store.McpServer, error) {
 	return created, nil
 }
 
+// ownedMcp returns the owned MCP server with the given id, if its plugin is
+// active.
+func (r *Registry) ownedMcp(id int64) (store.McpServer, bool) {
+	if !store.IsOwnedID(id) {
+		return store.McpServer{}, false
+	}
+	if o := r.store.Overlay(); o != nil {
+		for _, m := range o.OwnedMcp() {
+			if m.ID == id {
+				return m, true
+			}
+		}
+	}
+	return store.McpServer{}, false
+}
+
+// refuseOwned is the guard of every write by id: a server a plugin owns is
+// read-only for every caller, whether it is a person or an agent.
+func (r *Registry) refuseOwned(id int64) error {
+	if m, ok := r.ownedMcp(id); ok {
+		return &store.OwnedRowError{Plugin: m.OwnerPlugin, Kind: "mcp server", Name: m.Name}
+	}
+	return nil
+}
+
 // Get returns the MCP server with the given id.
 func (r *Registry) Get(id int64) (store.McpServer, error) {
+	if store.IsOwnedID(id) {
+		if m, ok := r.ownedMcp(id); ok {
+			return m, nil
+		}
+		return store.McpServer{}, fmt.Errorf("get mcp server %d: %w", id, sql.ErrNoRows)
+	}
 	return r.store.GetMcpServer(id)
 }
 
-// List returns every MCP server, enabled and disabled alike, ordered by id.
+// List returns every MCP server, enabled and disabled alike, ordered by id,
+// then the servers enabled plugins contribute (owned, read-only; their env and
+// headers still hold ${setting.KEY} placeholders, never a secret).
 func (r *Registry) List() ([]store.McpServer, error) {
-	return r.store.ListMcpServers()
+	rows, err := r.store.ListMcpServers()
+	if err != nil {
+		return nil, err
+	}
+	if o := r.store.Overlay(); o != nil {
+		rows = append(rows, o.OwnedMcp()...)
+	}
+	return rows, nil
 }
 
 // ListForWorkspace returns the enabled MCP servers applicable to the given
-// workspace (see store.ListMcpServersForWorkspace).
+// workspace (see store.ListMcpServersForWorkspace), followed by the servers of
+// enabled plugins: exactly what a new run is injected with. An owned server
+// whose run name equals a user server's is left out (the user's wins). A run
+// keeps what it was started with; the next run sees the current plugin state.
 func (r *Registry) ListForWorkspace(workspaceID int64) ([]store.McpServer, error) {
-	return r.store.ListMcpServersForWorkspace(workspaceID)
+	rows, err := r.store.ListMcpServersForWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if o := r.store.Overlay(); o != nil {
+		taken := map[string]bool{}
+		for _, m := range rows {
+			taken[m.Name] = true
+		}
+		for _, m := range o.OwnedMcpForRun() {
+			if !taken[m.Name] {
+				rows = append(rows, m)
+			}
+		}
+	}
+	return rows, nil
 }
 
 // SetEnabled toggles the enabled flag of the MCP server with the given id,
 // firing NotifyMcpServerUpdated on success. A dedicated toggle rather than
 // a generic update field, matching ADR-0018's wsapi surface.
 func (r *Registry) SetEnabled(id int64, enabled bool) (store.McpServer, error) {
+	if err := r.refuseOwned(id); err != nil {
+		return store.McpServer{}, err
+	}
 	updated, err := r.store.SetMcpServerEnabled(id, enabled)
 	if err != nil {
 		return store.McpServer{}, err
@@ -115,6 +177,9 @@ func (r *Registry) SetEnabled(id int64, enabled bool) (store.McpServer, error) {
 // full-record replace -- see store.UpdateMcpServer), firing
 // NotifyMcpServerUpdated on success.
 func (r *Registry) Update(m store.McpServer) (store.McpServer, error) {
+	if err := r.refuseOwned(m.ID); err != nil {
+		return store.McpServer{}, err
+	}
 	if err := normalizeValidate(&m); err != nil {
 		return store.McpServer{}, err
 	}
@@ -131,6 +196,9 @@ func (r *Registry) Update(m store.McpServer) (store.McpServer, error) {
 // Delete removes the MCP server with the given id, firing
 // NotifyMcpServerDeleted on success.
 func (r *Registry) Delete(id int64) error {
+	if err := r.refuseOwned(id); err != nil {
+		return err
+	}
 	if err := r.store.DeleteMcpServer(id); err != nil {
 		return err
 	}
@@ -172,6 +240,9 @@ func normalizeValidate(m *store.McpServer) error {
 	m.Name = strings.TrimSpace(m.Name)
 	if m.Name == "" {
 		return fmt.Errorf("name is required")
+	}
+	if strings.Contains(m.Name, ":") {
+		return fmt.Errorf("name %q: names with ':' are reserved for servers contributed by plugins (<plugin>:<name>)", m.Name)
 	}
 	if strings.Trim(m.Name, validMcpServerName) != "" {
 		return fmt.Errorf("name %q may only contain letters, digits, '_' and '-'", m.Name)

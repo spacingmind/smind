@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spacingmind/smind/internal/plugins"
@@ -33,7 +34,7 @@ func newPluginHarness(t *testing.T) *pluginHarness {
 		[]byte(`{"id":"demo","name":"Demo","version":"1.0.0","api":1,"engines":{"smind":">=0.1.0"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return &pluginHarness{home: home, hs: pluginHandlers(mgr), src: src, on: &on}
+	return &pluginHarness{home: home, hs: pluginHandlers(mgr, nil), src: src, on: &on}
 }
 
 func (h *pluginHarness) call(method string, rc *requestContext, params any) (any, error) {
@@ -70,7 +71,7 @@ func wantPluginForbidden(t *testing.T, method string, err error) {
 
 func TestPluginRPC_RunScopedCallersForbidden(t *testing.T) {
 	h := newPluginHarness(t)
-	agent := &requestContext{runScoped: true, local: true}
+	agent := &requestContext{runScoped: true, local: true, channel: ChannelLoopback}
 	for _, m := range pluginMutating {
 		_, err := h.call(m, agent, h.pluginParamsFor(m))
 		wantPluginForbidden(t, m, err)
@@ -89,7 +90,7 @@ func TestPluginRPC_RunScopedCallersForbidden(t *testing.T) {
 		}
 	}
 	// The same human request with a local, non-agent context succeeds.
-	if _, err := h.call("plugin.install", &requestContext{local: true}, h.pluginParamsFor("plugin.install")); err != nil {
+	if _, err := h.call("plugin.install", &requestContext{local: true, channel: ChannelLoopback}, h.pluginParamsFor("plugin.install")); err != nil {
 		t.Fatalf("local human install: %v", err)
 	}
 }
@@ -97,7 +98,7 @@ func TestPluginRPC_RunScopedCallersForbidden(t *testing.T) {
 func TestPluginRPC_RelaySessionsForbidden_ListGetAllowed(t *testing.T) {
 	h := newPluginHarness(t)
 	// Install as the local human so list/get have something to return.
-	if _, err := h.call("plugin.install", &requestContext{local: true}, h.pluginParamsFor("plugin.install")); err != nil {
+	if _, err := h.call("plugin.install", &requestContext{local: true, channel: ChannelLoopback}, h.pluginParamsFor("plugin.install")); err != nil {
 		t.Fatal(err)
 	}
 	relay := &requestContext{local: false, deviceID: "dev-1", channel: ChannelE2EE}
@@ -135,7 +136,7 @@ func TestPluginRPC_RelaySessionsForbidden_ListGetAllowed(t *testing.T) {
 
 func TestPluginRPC_LocalFlow_TypedErrorsAndSwitch(t *testing.T) {
 	h := newPluginHarness(t)
-	local := &requestContext{local: true}
+	local := &requestContext{local: true, channel: ChannelLoopback}
 	res, err := h.call("plugin.install", local, h.pluginParamsFor("plugin.install"))
 	if err != nil {
 		t.Fatal(err)
@@ -209,5 +210,83 @@ func TestPluginRPC_OverWS_AgentRefused_SwitchDefaultOff(t *testing.T) {
 	resp = callWS(t, e.admin, "plugin.install", map[string]any{"source": t.TempDir()})
 	if resp.Error == nil || resp.Error.Code != plugins.CodeSwitchOff {
 		t.Fatalf("install with the switch off: %+v", resp.Error)
+	}
+}
+
+func setAllowRemote(t *testing.T, v bool) {
+	t.Helper()
+	prev := configPluginsAllowRemote
+	configPluginsAllowRemote = func() bool { return v }
+	t.Cleanup(func() { configPluginsAllowRemote = prev })
+}
+
+func TestPluginRPC_RemoteManage_DefaultOff_NonLoopbackForbidden_ReasonNamesSetting(t *testing.T) {
+	setAllowRemote(t, false)
+	h := newPluginHarness(t)
+	for _, ch := range []Channel{ChannelPlain, ChannelTLS, ""} {
+		rc := &requestContext{local: true, channel: ch}
+		for _, m := range pluginMutating {
+			_, err := h.call(m, rc, h.pluginParamsFor(m))
+			wantPluginForbidden(t, m, err)
+			if !strings.Contains(err.Error(), "plugins.allowRemoteManage") {
+				t.Errorf("%s over %q: reason must name the setting: %v", m, ch, err)
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(h.home, "plugins")); err == nil {
+		t.Fatal("a refused call touched the plugins dir")
+	}
+	// Reads are unaffected.
+	if _, err := h.call("plugin.list", &requestContext{local: true, channel: ChannelPlain}, nil); err != nil {
+		t.Fatalf("plugin.list: %v", err)
+	}
+}
+
+func TestPluginRPC_RemoteManage_On_NonLoopbackAllowed(t *testing.T) {
+	setAllowRemote(t, true)
+	h := newPluginHarness(t)
+	for _, ch := range []Channel{ChannelPlain, ChannelTLS} {
+		rc := &requestContext{local: true, channel: ch}
+		if _, err := h.call("plugin.install", rc, h.pluginParamsFor("plugin.install")); err != nil {
+			t.Fatalf("install over %s with the setting on: %v", ch, err)
+		}
+		if _, err := h.call("plugin.remove", rc, map[string]any{"id": "demo"}); err != nil {
+			t.Fatalf("remove over %s: %v", ch, err)
+		}
+	}
+}
+
+func TestPluginRPC_Relay_And_Agent_RefusedRegardlessOfSetting(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		setAllowRemote(t, on)
+		h := newPluginHarness(t)
+		for name, rc := range map[string]*requestContext{
+			"agent":        {runScoped: true, local: true, channel: ChannelLoopback},
+			"relay":        {local: false, deviceID: "d", channel: ChannelE2EE},
+			"legacy relay": {local: false, channel: ChannelLoopback},
+			"nil":          nil,
+		} {
+			for _, m := range pluginMutating {
+				_, err := h.call(m, rc, h.pluginParamsFor(m))
+				wantPluginForbidden(t, name+" "+m, err)
+			}
+		}
+	}
+}
+
+func TestPluginRPC_Loopback_AllowedWhenOff(t *testing.T) {
+	setAllowRemote(t, false)
+	h := newPluginHarness(t)
+	rc := &requestContext{local: true, channel: ChannelLoopback}
+	res, err := h.call("plugin.install", rc, h.pluginParamsFor("plugin.install"))
+	if err != nil {
+		t.Fatalf("loopback install: %v", err)
+	}
+	in := res.(plugins.Info)
+	if _, err := h.call("plugin.enable", rc, map[string]any{"id": "demo", "confirm": in.Consent.Fingerprint}); err != nil {
+		t.Fatalf("loopback enable: %v", err)
+	}
+	if _, err := h.call("plugin.disable", rc, map[string]any{"id": "demo"}); err != nil {
+		t.Fatal(err)
 	}
 }

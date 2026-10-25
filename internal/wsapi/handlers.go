@@ -2501,7 +2501,7 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 		if err := rejectLegacyApprovalPolicy(p.LegacyApprovalPolicy); err != nil {
 			return nil, fmt.Errorf("profile.update: %w", err)
 		}
-		return profReg.Update(store.AgentProfile{
+		updated, err := profReg.Update(store.AgentProfile{
 			ID:                 p.ID,
 			Name:               p.Name,
 			Provider:           p.Provider,
@@ -2518,6 +2518,10 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			ChildPolicy:        p.ChildPolicy,
 			ChildProfileIDs:    p.ChildProfileIDs,
 		})
+		if err != nil {
+			return nil, ownedRPCErr("profile.update", err)
+		}
+		return updated, nil
 	}
 }
 
@@ -2534,7 +2538,7 @@ func handleProfileDelete(profReg *profiles.Registry) handlerFunc {
 			return nil, fmt.Errorf("profile.delete: invalid params: %w", err)
 		}
 		if err := profReg.Delete(p.ID); err != nil {
-			return nil, fmt.Errorf("profile.delete: %w", err)
+			return nil, ownedRPCErr("profile.delete", err)
 		}
 		return struct{}{}, nil
 	}

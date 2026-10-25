@@ -142,6 +142,18 @@ An unknown provider id under `providers.<id>` is an error. See
 | `log.maxSizeMB` | `10` | Size at which `daemon.log` rotates. Must be 1 or more. |
 | `log.maxFiles` | `5` | Log files kept, including the active one. Must be 1 or more. |
 
+### plugins
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `plugins.enabled` | `false` | Turns plugins on. With it off, no plugin adds anything. Read on every request, no restart needed. |
+| `plugins.allowRemoteManage` | `false` | Lets a direct connection that is not a loopback connection install, enable, disable, remove, update or reload plugins. Read on every request. |
+
+With `plugins.allowRemoteManage` off, those actions need a loopback connection.
+A same-host reverse proxy that terminates TLS counts as loopback. Paired
+phones (the relay) and agents cannot manage plugins whatever this is set to.
+See [Plugins](plugins.md).
+
 ### learning
 
 Learning is on by default. Set `learning.enabled: false` to stop collection and

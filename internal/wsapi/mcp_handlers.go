@@ -34,15 +34,25 @@ type mcpServerResult struct {
 	URL       string          `json:"url"`
 	Headers   json.RawMessage `json:"headers"`
 	Enabled   bool            `json:"enabled"`
-	CreatedAt string          `json:"createdAt"`
-	UpdatedAt string          `json:"updatedAt"`
+	// Owner is the id of the plugin that contributes this server, null for
+	// a user row; ReadOnly is true exactly for an owned row (ADR-0042).
+	Owner     *string `json:"owner"`
+	ReadOnly  bool    `json:"readOnly"`
+	CreatedAt string  `json:"createdAt"`
+	UpdatedAt string  `json:"updatedAt"`
 }
 
 // mcpServerResultFrom redacts m's env/headers before it ever reaches the
 // wire -- the one conversion every mcp.* handler and the mcpServer.*
 // notifier below must route through.
 func mcpServerResultFrom(m store.McpServer) mcpServerResult {
+	var owner *string
+	if m.OwnerPlugin != "" {
+		o := m.OwnerPlugin
+		owner = &o
+	}
 	return mcpServerResult{
+		Owner: owner, ReadOnly: owner != nil,
 		ID: m.ID, Name: m.Name, Transport: m.Transport, Command: m.Command,
 		Args: rawJSONOrEmptyArray(m.Args), Env: redactMcpSecretValues(m.Env),
 		URL: m.URL, Headers: redactMcpSecretValues(m.Headers),
@@ -223,6 +233,9 @@ func handleMcpUpdate(mcpReg *mcpservers.Registry) handlerFunc {
 		if err != nil {
 			return nil, fmt.Errorf("mcp.update: %w", err)
 		}
+		if existing.OwnerPlugin != "" {
+			return nil, ownedRPCErr("mcp.update", &store.OwnedRowError{Plugin: existing.OwnerPlugin, Kind: "mcp server", Name: existing.Name})
+		}
 		m := p.toStoreMcpServer()
 		if m.Env, err = mergePlaceholderSecrets("env", m.Env, existing.Env); err != nil {
 			return nil, err
@@ -233,7 +246,7 @@ func handleMcpUpdate(mcpReg *mcpservers.Registry) handlerFunc {
 		m.ID = p.ID
 		updated, err := mcpReg.Update(m)
 		if err != nil {
-			return nil, fmt.Errorf("mcp.update: %w", err)
+			return nil, ownedRPCErr("mcp.update", err)
 		}
 		return mcpServerResultFrom(updated), nil
 	}
@@ -252,7 +265,7 @@ func handleMcpDelete(mcpReg *mcpservers.Registry) handlerFunc {
 			return nil, fmt.Errorf("mcp.delete: invalid params: %w", err)
 		}
 		if err := mcpReg.Delete(p.ID); err != nil {
-			return nil, fmt.Errorf("mcp.delete: %w", err)
+			return nil, ownedRPCErr("mcp.delete", err)
 		}
 		return struct{}{}, nil
 	}
@@ -273,7 +286,7 @@ func handleMcpSetEnabled(mcpReg *mcpservers.Registry) handlerFunc {
 		}
 		updated, err := mcpReg.SetEnabled(p.ID, p.Enabled)
 		if err != nil {
-			return nil, fmt.Errorf("mcp.setEnabled: %w", err)
+			return nil, ownedRPCErr("mcp.setEnabled", err)
 		}
 		return mcpServerResultFrom(updated), nil
 	}

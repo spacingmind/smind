@@ -229,6 +229,9 @@ func pluginShow(args []string, env pluginIO) int {
 	if in.LastError != "" {
 		fmt.Fprintf(env.out, "Last error: %s\n", in.LastError)
 	}
+	for _, c := range in.Conflicts {
+		fmt.Fprintf(env.out, "Not applied: %s %s: %s\n", c.Kind, c.Name, c.Reason)
+	}
 	fmt.Fprintln(env.out)
 	printConsent(env.out, in.Consent)
 	if in.Pending != nil {
@@ -261,6 +264,15 @@ func printConsent(w io.Writer, c plugins.Consent) {
 			fmt.Fprintf(w, "  MCP server:   %s: %s %s\n", s.Name, s.Transport, s.URL)
 		}
 	}
+	for _, s := range c.Skills {
+		fmt.Fprintf(w, "  Skill:        %s:%s (text the agent reads; delivered read-only)\n", c.ID, s)
+	}
+	for _, p := range c.Profiles {
+		fmt.Fprintf(w, "  Profile:      %s:%s on %s\n", c.ID, p.Name, p.Provider)
+		for _, e := range p.Escalations {
+			fmt.Fprintf(w, "    ATTENTION:  %s\n", e)
+		}
+	}
 	for _, p := range c.AcpProviders {
 		fmt.Fprintf(w, "  ACP provider: %s: %s\n", p.ID, strings.Join(p.Command, " "))
 	}
@@ -271,6 +283,9 @@ func printConsent(w io.Writer, c plugins.Consent) {
 		fmt.Fprintf(w, "  May call:     %s\n", strings.Join(c.Capabilities, ", "))
 	} else {
 		fmt.Fprintln(w, "  May call:     nothing")
+	}
+	if c.LinkWarning != "" {
+		fmt.Fprintf(w, "  WARNING:      %s\n", c.LinkWarning)
 	}
 }
 
@@ -313,6 +328,9 @@ func pluginEnable(args []string, env pluginIO) int {
 		return env.fail("enable", err)
 	}
 	fmt.Fprintf(env.out, "Enabled %s %s.\n", out.ID, out.Version)
+	if out.Consent.LinkWarning != "" {
+		fmt.Fprintf(env.out, "WARNING: %s\n", out.Consent.LinkWarning)
+	}
 	return 0
 }
 

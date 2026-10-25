@@ -203,6 +203,7 @@ func cmdServe(args []string) int {
 
 	// ADR-0042: tidy install leftovers and re-validate enabled plugins.
 	srv.API().StartPlugins()
+	stopPluginWatch := srv.API().WatchPlugins(ctx)
 
 	stopStall := wireStallAlert(ctx, db, srv.API(), cfg.Orchestration.StallAlertMinutes)
 
@@ -234,6 +235,7 @@ func cmdServe(args []string) int {
 	srv.API().CloseConnections() // clients see the stop immediately instead of after run teardown
 	stopLearning()               // before the run registry closes: in-flight jobs end failed, watermarks untouched
 	stopGitState()
+	stopPluginWatch()
 	stopStall()    // no tick may publish after the push runtime closes
 	pushRT.Close() // no push goroutine may outlive the daemon
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

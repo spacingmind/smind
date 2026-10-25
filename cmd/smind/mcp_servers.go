@@ -26,6 +26,7 @@ type mcpServerCLI struct {
 	Env       json.RawMessage `json:"env"`
 	Headers   json.RawMessage `json:"headers"`
 	Enabled   bool            `json:"enabled"`
+	Owner     *string         `json:"owner"`
 }
 
 // cmdMcpAdd parses `smind mcp add <name> <transport> [flags]`. Flags are
@@ -136,10 +137,10 @@ func cmdMcpList(args []string) int {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tTRANSPORT\tCOMMAND\tARGS\tURL\tENV\tHEADERS\tENABLED")
+	fmt.Fprintln(tw, "ID\tNAME\tTRANSPORT\tCOMMAND\tARGS\tURL\tENV\tHEADERS\tENABLED\tOWNER")
 	for _, m := range servers {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%t\n",
-			m.ID, m.Name, m.Transport, m.Command, formatArgs(m.Args), m.URL, formatKV(m.Env), formatKV(m.Headers), m.Enabled)
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%t\t%s\n",
+			m.ID, m.Name, m.Transport, m.Command, formatArgs(m.Args), m.URL, formatKV(m.Env), formatKV(m.Headers), m.Enabled, ownerColumn(m.Owner))
 	}
 	tw.Flush()
 	return 0
@@ -243,4 +244,13 @@ func cmdMcpSetEnabled(args []string, enabled bool) int {
 	}
 	fmt.Printf("%d\t%s\t%t\n", m.ID, m.Name, m.Enabled)
 	return 0
+}
+
+// ownerColumn renders a row's owner for ls: the plugin id for a row a plugin
+// contributes (read-only), "-" for the user's own.
+func ownerColumn(owner *string) string {
+	if owner == nil {
+		return "-"
+	}
+	return "plugin:" + *owner
 }

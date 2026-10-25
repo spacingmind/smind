@@ -68,6 +68,10 @@ type Manifest struct {
 	Settings     []Setting   `json:"settings,omitempty"`
 	Contributes  Contributes `json:"contributes"`
 	raw          []byte      // the bytes parsed, for hashing a linked source
+
+	// Loaded by loadContributions once the plugin's files are at hand.
+	skills   []SkillSpec
+	profiles []ProfileSpec
 }
 
 // Engines holds the version gates besides api.
@@ -108,6 +112,11 @@ type McpContribution struct {
 	Transport string   `json:"transport"`
 	Command   []string `json:"command,omitempty"`
 	URL       string   `json:"url,omitempty"`
+	// Env (stdio) and Headers (http, sse) values may hold ${setting.KEY}
+	// placeholders, substituted from the plugin's settings when a run starts.
+	// Placeholders are accepted nowhere else.
+	Env     map[string]string `json:"env,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // CommandContribution is a slash command: a prompt file or an RPC.
@@ -298,6 +307,7 @@ func validateContributes(v *manifestVal, m *Manifest) {
 		default:
 			v.bad(f+".transport", fmt.Sprintf("unknown transport %q", s.Transport), "use stdio, http or sse")
 		}
+		validateMcpSettings(v, f, s, m.Settings)
 	}
 	for i, p := range c.Skills {
 		checkPath(v, fmt.Sprintf("contributes.skills[%d]", i), p)
@@ -340,6 +350,65 @@ func validateContributes(v *manifestVal, m *Manifest) {
 		checkName(v, f+".id", p.ID)
 		validateCommand(v, f+".acp.command", p.ACP.Command)
 	}
+}
+
+// settingRefRe matches a ${setting.KEY} placeholder.
+var settingRefRe = regexp.MustCompile(`\$\{setting\.([A-Za-z][A-Za-z0-9_]{0,63})\}`)
+
+// settingRefs returns the setting keys referenced by s.
+func settingRefs(s string) []string {
+	var out []string
+	for _, m := range settingRefRe.FindAllStringSubmatch(s, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
+// validateMcpSettings checks an MCP contribution's env and headers: they fit
+// the transport, placeholders name declared settings, and no placeholder sits
+// anywhere else (a secret in a command line or URL would leak through argv,
+// process listings and logs).
+func validateMcpSettings(v *manifestVal, f string, s McpContribution, settings []Setting) {
+	declared := map[string]bool{}
+	for _, st := range settings {
+		declared[st.Key] = true
+	}
+	for i, a := range s.Command {
+		if strings.Contains(a, "${setting.") {
+			v.bad(fmt.Sprintf("%s.command[%d]", f, i), "a setting placeholder is only allowed in env and headers", "move the value into env (stdio) or headers (http, sse)")
+		}
+	}
+	if strings.Contains(s.URL, "${setting.") {
+		v.bad(f+".url", "a setting placeholder is only allowed in env and headers", "move the value into headers")
+	}
+	check := func(field string, m map[string]string) {
+		for k, val := range m {
+			if k == "" || len(k) > 128 || strings.ContainsAny(k, "\x00=") || len(val) > 4096 || strings.ContainsRune(val, 0) {
+				v.bad(field, fmt.Sprintf("entry %q is not a valid name and value", k), "use a non-empty name without = and a value under 4096 characters")
+				continue
+			}
+			for _, ref := range settingRefs(val) {
+				if !declared[ref] {
+					v.bad(field+"."+k, fmt.Sprintf("refers to setting %q, which is not declared", ref), "declare it in settings or remove the placeholder")
+				}
+			}
+			if strings.Contains(settingRefRe.ReplaceAllString(val, ""), "${setting.") {
+				v.bad(field+"."+k, "has a malformed ${setting.KEY} placeholder", "use ${setting.NAME} with a declared setting key")
+			}
+		}
+	}
+	switch s.Transport {
+	case "stdio":
+		if len(s.Headers) > 0 {
+			v.bad(f+".headers", "a stdio server has no headers", "use env, or switch to http or sse")
+		}
+	case "http", "sse":
+		if len(s.Env) > 0 {
+			v.bad(f+".env", "an http or sse server has no env", "use headers, or switch to stdio")
+		}
+	}
+	check(f+".env", s.Env)
+	check(f+".headers", s.Headers)
 }
 
 func validateCommand(v *manifestVal, field string, cmd []string) {

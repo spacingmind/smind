@@ -33,6 +33,11 @@ type Config struct {
 // session can set it.
 type PluginsConfig struct {
 	Enabled bool `yaml:"enabled"`
+	// AllowRemoteManage lets a direct non-loopback connection (a password
+	// login over the network, plain or TLS) install, enable, change or remove
+	// plugins. Default false: management then needs a loopback connection.
+	// Relay sessions and agent callers are refused either way.
+	AllowRemoteManage bool `yaml:"allowRemoteManage"`
 }
 
 // LogConfig tunes the daemon's own rotating log file, $SMIND_HOME/daemon.log
