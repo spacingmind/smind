@@ -85,7 +85,7 @@ export function useTaskLineage(
     // One debounced refetch for every event kind that can move the strip:
     // task lifecycle (created/updated/archived/deleted in the subtree),
     // run.status (a child's pill state), permission.pending (waiting on
-    // you), and event.dropped (anything missed while disconnected).
+    // you), task.stalled (the marker), and event.dropped (anything missed while disconnected).
     const schedule = () => {
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => {
@@ -100,6 +100,7 @@ export function useTaskLineage(
       "task.deleted",
       "run.status",
       "permission.pending",
+      "task.stalled",
       "event.dropped",
     ].map((topic) => events.subscribe(topic, schedule));
     return () => {

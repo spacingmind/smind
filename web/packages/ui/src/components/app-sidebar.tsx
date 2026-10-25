@@ -48,7 +48,7 @@ import { ArchivedTaskList } from "@/components/archived-tasks";
 import { GitBranchLine } from "@/components/git/git-branch-line";
 import { GitTokens } from "@/components/git/git-tokens";
 import { SidebarGitGlyph } from "@/components/git/sidebar-git-glyph";
-import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
+import { useAttentionNotifications, useStalledNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission } from "@/hooks/use-notification-permission";
 import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-preference";
 import { usePinnedTasks } from "@/hooks/use-pinned-tasks";
@@ -512,6 +512,7 @@ export function AppSidebar({
     openNotifiedTask,
     notificationSoundEnabled,
   );
+  useStalledNotifications(events, notificationPermission, openNotifiedTask, notificationSoundEnabled);
 
   useEffect(() => {
     onTasksChange?.(allTasks);
