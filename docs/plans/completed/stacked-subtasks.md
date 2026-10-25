@@ -92,12 +92,35 @@ plus transition frames for the base option switch (no layout shift).
 
 ## Progress
 
-- [ ] spec committed
-- [ ] daemon: default + PR default + gitstate fields (Peer A)
-- [ ] web: New sub-task entry + dialog + hover + PR dialog (Peer B)
-- [ ] stall follow-up
-- [ ] frames, mutations, checks, PR
+- [x] spec committed (89e8a892)
+- [x] daemon: default + PR default + gitstate fields (Peer 106, ACCEPTED: diff read in full, tests + mutations re-run by the Lead)
+- [x] web: New sub-task entry + dialog + hover + PR dialog (Peer 107, ACCEPTED, plus a Lead fix: a long parent branch pushed the task's own branch out of the hover line)
+- [x] stall follow-up (`AncestorArchived`)
+- [x] frames, mutations, checks, PR
 
 ## Validation
 
-(filled in as each acceptance criterion is confirmed)
+Real end to end (isolated daemon, throwaway repo with a bare origin): `smind task new 1 "Add refunds" --parent 1` printed
+`task new: base smind/task-payments-rework-...` and `git merge-base <child> <parent>` equalled the parent tip (AC1, AC5).
+
+| AC | Evidence |
+|---|---|
+| AC1 | `TestCreateTask_HumanSubtaskDefaultsToParentBranch`; CLI `TestTaskNew_ParentDefaultPrintsBase`; web `defaults to the parent branch and sends it as baseRef`; real daemon run above |
+| AC2 | `TestCreateTask_ExplicitBaseBeatsParentDefault`; `TestTaskNew_BaseOverridesParentDefault`; web `switching to the default base sends the default base` |
+| AC3 | `TestCreateTask_ParentWithoutBranchFallsBack`, `TestCreateTask_ParentBranchGoneFallsBack`; web `parent without a branch shows the fallback helper...` |
+| AC4 | `TestCreateTask_AgentChildKeepsDefaultBase` (mutation 2 fails it) |
+| AC5 | merge-base assertion in the AC1 test + real run |
+| AC6 | `TestCreateTask_GrandchildStacksOnChild` |
+| AC7 | `TestTaskGit_StackedBaseGoneAndParentBranch`, `TestPRBase_ParentBranchDeletedFallsBack`, `shows (gone)...`; frame `07-hover-parent-gone` |
+| AC8 | `TestPRBase_StackedParentPushedUsesParent`, `..NotPushedFallsBack`, `..NotStackedUnchanged`; frames `08` (pushed) and `09` (not pushed, base develop, no hint) |
+| AC9 | `hover card shows the parent branch for a stacked task`; frame `06-hover-stacked-task` |
+| AC10 | `TestLiveDescendantsOfArchivedRootNeverAlert` (mutation 4 fails it) |
+
+Mutations (each applied by the Lead, test failed, then reverted): (1) default ignores parent -> `TestCreateTask_HumanSubtaskDefaultsToParentBranch`
+and `TestCreateTask_GrandchildStacksOnChild` fail; (2) agent path defaults too -> `TestCreateTask_AgentChildKeepsDefaultBase` fails; (3) PR base
+always the parent -> `TestPRBase_StackedParentNotPushedFallsBack`, `TestPRBase_ParentBranchDeletedFallsBack`, `TestTaskGit_StackedBaseGoneAndParentBranch` fail;
+(4) stall descendant skip removed -> `TestLiveDescendantsOfArchivedRootNeverAlert` and `TestArchivedRootNeverAlertsEvenWhenIdle` fail.
+
+Not verified: mobile (untouched); a live forge PR (fake `gh`, local bare origin, no network); the web "gone parent branch" case in the
+New sub-task dialog (the dialog offers the parent branch from the task's `Branch` field; if that branch was deleted the daemon rejects the
+explicit baseRef with a clear error rather than falling back).
