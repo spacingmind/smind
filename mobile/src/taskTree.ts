@@ -26,6 +26,8 @@ export type TreeRow =
       unread: boolean;
       rateLimited: boolean;
       countdown: string | null;
+      /** 'Stalled · no run for 23 min' while the node's tree is stalled, else null. */
+      stalledNote: string | null;
       cost: string;
       isRoot: boolean;
     }
@@ -119,6 +121,14 @@ export function rateLimitCountdown(run: RunLike, now: Date): string | null {
   return `resets in ${run.resetInferred ? '≈' : ''}${formatCountdown(ms)}`;
 }
 
+/** 'Stalled · no run for 23 min' (whole minutes since stalledSince), null when the node is not stalled. */
+export function stalledNote(node: Pick<TaskTreeNode, 'stalled' | 'stalledSince'>, now: Date): string | null {
+  if (!node.stalled || !node.stalledSince) return null;
+  const since = Date.parse(node.stalledSince);
+  if (!Number.isFinite(since)) return null;
+  return `Stalled · no run for ${Math.max(0, Math.floor((now.getTime() - since) / 60000))} min`;
+}
+
 /** Cost text: unknown is 'n/a' and never '$0.00'. */
 export function formatCost(costUsd: number | null | undefined): string {
   if (costUsd === null || costUsd === undefined || !Number.isFinite(costUsd)) return 'n/a';
@@ -185,6 +195,7 @@ export function buildTreeRows(
       unread: pendingTaskIds.has(n.id) || permissions > 0,
       rateLimited: isRateLimited(n.run),
       countdown: rateLimitCountdown(n.run, now),
+      stalledNote: stalledNote(n, now),
       cost: costLabel(n),
       isRoot: i === 0,
     };

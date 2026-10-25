@@ -11,6 +11,7 @@ import {
   formatCountdown,
   rateLimitCountdown,
   runStateLabel,
+  stalledNote,
   tierLabel,
 } from '../taskTree';
 
@@ -184,5 +185,15 @@ describe('taskTree', () => {
     expect(tierLabel('coder')).toBe('Coder');
     expect(tierLabel(null)).toBeNull();
     expect(tierLabel('other')).toBeNull();
+  });
+});
+
+describe('stalledNote', () => {
+  it('shows whole minutes since stalledSince on the row and nothing when not stalled', () => {
+    const since = '2026-10-23T11:36:30Z';
+    const { rows } = buildTreeRows({ nodes: [node(1), node(2, { stalled: true, stalledSince: since })], truncated: false }, NOW, none);
+    expect(rows[1]).toMatchObject({ stalledNote: 'Stalled · no run for 23 min' });
+    expect(rows[0]).toMatchObject({ stalledNote: null });
+    expect(stalledNote({ stalled: true, stalledSince: 'nope' }, NOW)).toBeNull();
   });
 });
