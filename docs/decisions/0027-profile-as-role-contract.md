@@ -163,6 +163,17 @@ The protocol's Peer handoff and `REOPEN_REQUEST` / `DEPENDENCY_REQUEST` /
   acceptance, checks, reopen-when), rendered into the prompt in a fixed
   template; overlapping live write scopes in one subtree produce a warning.
 
+**Note, 2026-10-25 (J1): resumable error runs.** The derived disposition
+(`runs.DispositionOf`) now also returns `needs-continue` for a run with
+status `error` and a stored agent session on its chat when the typed failure
+is `cli_exited`, or `rate_limited` with a known reset time that has passed
+(derived at read time against the clock, never stored). Every other error
+(permission denial/timeout, auth/config/provider errors, an unclassified
+error, a rate limit before or without a reset time, no stored session) keeps
+no disposition. The wire is unchanged (the same additive `disposition` field);
+the status stays `error`. Web, mobile and CLI read the field and never derive
+resumability themselves. See `docs/plans/active/continue-on-resumable-failed.md`.
+
 ### 5. Sizing
 
 `tasks.size` (nullable points, the protocol's five axes) is an optional

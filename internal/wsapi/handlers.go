@@ -12,7 +12,6 @@ import (
 	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/acp"
 	"github.com/spacingmind/smind/internal/attach"
-	"github.com/spacingmind/smind/internal/codex"
 	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/profiles"
@@ -2239,8 +2238,9 @@ func handleRunSetConfigOption(reg *runs.Registry) handlerFunc {
 }
 
 // providerListResult is the result of provider.list: every provider the
-// daemon supports, sourced from taskrunner.SupportedProviders (the single
-// source of truth RunPrompt's dispatch stays in sync with).
+// daemon supports, sourced from the provider registry (internal/providers,
+// the single source RunPrompt's dispatch, modes, health check and learning
+// delivery all read).
 type providerListResult struct {
 	Providers []providerListEntry `json:"providers"`
 }
@@ -2259,39 +2259,26 @@ type providerListEntry struct {
 // ACP mode discovery). No params.
 func handleProviderList(runner *taskrunner.Runner, reg *runs.Registry) handlerFunc {
 	return func(_ context.Context, _ *requestContext, _ json.RawMessage) (any, error) {
-		var cooling map[string]time.Time
-		if reg != nil {
-			cooling = reg.ProviderCooldowns()
-		}
-		catalog := runner.ProviderCatalog()
-		entries := make([]providerListEntry, 0, len(catalog))
-		for _, info := range catalog {
-			e := providerListEntry{ProviderInfo: info, providerEnvView: providerEnvViewFor(runner, string(info.ID))}
-			if until, ok := cooling[string(info.ID)]; ok {
-				e.CooldownUntil = until.UTC().Format(time.RFC3339)
-			}
-			entries = append(entries, e)
-		}
-		return providerListResult{Providers: entries}, nil
+		return providerListResultFor(runner, reg), nil
 	}
 }
 
-// providerCLICommand maps a taskrunner.Provider to the command whose first
-// argument (the executable name) internal/taskrunner.Runner actually spawns
-// for it, for provider.test's cli-kind diagnostic path below -- mirroring
-// acp.GLMCommand/codex.DefaultCommand and, for ProviderClaudeNative,
-// github.com/spacingmind/claude-agent-sdk-go's own hardcoded "claude"
-// binary (that package exposes no command override, unlike the ACP/Codex
-// backends, so there's nothing to import here). Only the three providers
-// this diagnostic is scoped to are listed; ProviderKimi's CLI needs an
-// out-of-band `kimi -> /login` first (see acp.KimiCommand's doc comment) so
-// "is kimi on PATH" wouldn't actually signal readiness the way it does for
-// the other three -- it's left to fall through to the credential-based
-// check below, same as the account-management "kimi" provider id.
-var providerCLICommand = map[taskrunner.Provider][]string{
-	taskrunner.ProviderGLM:          acp.GLMCommand(),
-	taskrunner.ProviderCodexNative:  codex.DefaultCommand(),
-	taskrunner.ProviderClaudeNative: {"claude"},
+// providerListResultFor builds the provider.list result from the live registry.
+func providerListResultFor(runner *taskrunner.Runner, reg *runs.Registry) providerListResult {
+	var cooling map[string]time.Time
+	if reg != nil {
+		cooling = reg.ProviderCooldowns()
+	}
+	catalog := runner.ProviderCatalog()
+	entries := make([]providerListEntry, 0, len(catalog))
+	for _, info := range catalog {
+		e := providerListEntry{ProviderInfo: info, providerEnvView: providerEnvViewFor(runner, string(info.ID))}
+		if until, ok := cooling[string(info.ID)]; ok {
+			e.CooldownUntil = until.UTC().Format(time.RFC3339)
+		}
+		entries = append(entries, e)
+	}
+	return providerListResult{Providers: entries}
 }
 
 // providerTestTimeout bounds how long provider.test's PATH lookup is
@@ -2331,14 +2318,18 @@ func handleProviderTest(acctReg *accounts.Registry, runner *taskrunner.Runner) h
 		if p.Provider == "" {
 			return nil, fmt.Errorf("provider.test: provider is required")
 		}
-		if cmd, ok := providerCLICommand[taskrunner.Provider(p.Provider)]; ok {
-			res := testProviderCLI(cmd)
-			if runner != nil {
+		// A registered provider with a health command is checked by looking that
+		// executable up on PATH (an instance additionally reports its own
+		// config directory); otherwise p.Provider names an internal/accounts
+		// provider and the credential check applies.
+		if runner != nil {
+			if spec, ok := runner.Providers().Get(p.Provider); ok && len(spec.HealthCommand) > 0 {
+				res := testProviderCLI(spec.HealthCommand)
 				if d := providerEnvDetail(runner, p.Provider); d != "" {
 					res.Detail += "; " + d
 				}
+				return res, nil
 			}
-			return res, nil
 		}
 		return testProviderCredential(acctReg, p.Provider), nil
 	}

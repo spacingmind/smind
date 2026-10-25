@@ -36,6 +36,7 @@ type taskRunFactSnapshot struct {
 	status     Status
 	stopReason string
 	pending    int
+	hasSession bool
 
 	failureKind          string
 	failureWindow        string
@@ -63,6 +64,7 @@ func (reg *Registry) TaskRunFacts() map[int64]TaskRunFact {
 			status:     r.status,
 			stopReason: r.stopReason,
 			pending:    len(r.pendingPermissions),
+			hasSession: r.hasSession,
 
 			failureKind:          r.failureKind,
 			failureWindow:        r.failureWindow,
@@ -117,7 +119,10 @@ func (reg *Registry) TaskRunFacts() map[int64]TaskRunFact {
 			f.RunningRunIDs = ids
 		} else if a.hasLatest {
 			f.State = mapStatusToState(a.latest.status)
-			f.Disposition = DispositionFor(a.latest.status, a.latest.stopReason)
+			f.Disposition = DispositionOf(DispositionFacts{
+				Status: a.latest.status, StopReason: a.latest.stopReason, FailureKind: a.latest.failureKind,
+				FailureResetAt: a.latest.failureResetAt, HasSession: a.latest.hasSession, Now: time.Now(),
+			})
 			f.FailureKind = a.latest.failureKind
 			f.FailureWindow = a.latest.failureWindow
 			f.FailureResetAt = a.latest.failureResetAt

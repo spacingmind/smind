@@ -622,7 +622,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
         case 'permission':
           return <PermissionCard request={item.request} onRespond={handlePermissionTap} />;
         case 'footer':
-          return <FooterBanner sentence={item.sentence} note={item.note} waiting={item.waiting} onContinue={handleContinue} />;
+          return <FooterBanner sentence={item.sentence} note={item.note} waiting={item.waiting} canContinue={item.canContinue} onContinue={handleContinue} />;
       }
     },
     [expandedToolCalls, handleContinue, handlePermissionTap, loadThumb, toggleExpanded],

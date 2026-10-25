@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  continuePrompt,
   describeRunFooter,
   formatAbsoluteTime,
   formatDuration,
@@ -149,7 +150,7 @@ describe("describeRunFooter: the daemon's needs-continue disposition (ADR-0027 D
     expect(other.action).toBe("continue");
   });
   it("is ignored unless the run is done, and an older daemon (no disposition) is unchanged", () => {
-    const failed = describeRunFooter(freshRun({ status: "error", stopReason: "max_turn_requests", disposition: "needs-continue" }), { now: NOW, modelLabel: "" });
+    const failed = describeRunFooter(freshRun({ status: "error", stopReason: "max_turn_requests" }), { now: NOW, modelLabel: "" });
     expect(failed.sentence).toMatch(/^Failed/);
     expect(failed.action).toBe("retry");
     const old = describeRunFooter(freshRun({ stopReason: "max_turn_requests" }), { now: NOW, modelLabel: "" });
@@ -322,5 +323,58 @@ describe("describeRunFooter: running", () => {
     expect(view.kind).toBe("running");
     expect(view.duration).toBe("9s");
     expect(view.age).toBeNull();
+  });
+});
+
+// J1: the daemon derives needs-continue for a resumable error run (cli_exited,
+// or rate_limited past its reset, with a stored session); the footer only obeys it.
+describe("describeRunFooter: Continue on an errored run follows the daemon's disposition (J1)", () => {
+  const view = (overrides: Partial<RunFooterRun>) => describeRunFooter(freshRun({ status: "error", ...overrides }), { now: NOW, modelLabel: "" });
+
+  it("cli_exited with the disposition offers Continue, keeping the danger sentence", () => {
+    const v = view({ failureKind: "cli_exited", disposition: "needs-continue" });
+    expect(v.action).toBe("continue");
+    expect(v.tone).toBe("danger");
+    expect(v.sentence).toBe("Failed after 9s");
+  });
+  it("cli_exited without the disposition (no stored session) offers Retry only", () => {
+    expect(view({ failureKind: "cli_exited" }).action).toBe("retry");
+  });
+  it.each([
+    ["permission denied / timeout (no kind)", undefined],
+    ["auth", "auth"],
+    ["invalid model", "invalid_model"],
+    ["refused", "refused"],
+  ])("a %s failure has no disposition and so no Continue", (_name, failureKind) => {
+    expect(view({ failureKind }).action).toBe("retry");
+  });
+  it("rate_limited before its reset shows the reset text and Retry, no Continue", () => {
+    const v = view({ failureKind: "rate_limited", failureWindow: "5h", failureResetAt: "2026-10-13T14:00:00Z" });
+    expect(v.action).toBe("retry");
+    expect(v.sentence).toMatch(/^Rate limited \(5h window\) · resets /);
+  });
+  it("rate_limited after its reset with the disposition offers Continue", () => {
+    const v = view({ failureKind: "rate_limited", failureWindow: "5h", failureResetAt: "2026-10-13T11:00:00Z", disposition: "needs-continue" });
+    expect(v.action).toBe("continue");
+    expect(v.sentence).toBe("Rate limited (5h window) · limit has reset");
+    expect(v.tone).toBe("warning");
+  });
+  it("a stopped-by-you run never offers Continue", () => {
+    const v = describeRunFooter(freshRun({ status: "stopped", stopReason: "cancelled" }), { now: NOW, modelLabel: "" });
+    expect(v.action).toBeNull();
+  });
+});
+
+describe("continuePrompt", () => {
+  it("is the plain Continue for a capped or restart-interrupted run", () => {
+    expect(continuePrompt({ status: "done" })).toBe("Continue");
+    expect(continuePrompt({ status: "stopped" })).toBe("Continue");
+  });
+  it("is one line naming the failure for an errored run", () => {
+    const p = continuePrompt({ status: "error", failureKind: "cli_exited" });
+    expect(p).toBe("Continue from where you left off (the previous run ended unexpectedly: the agent CLI exited without a result).");
+    expect(p).not.toContain("\n");
+    expect(continuePrompt({ status: "error", failureKind: "rate_limited" })).toContain("provider rate limit");
+    expect(continuePrompt({ status: "error" })).toContain("an unexpected error");
   });
 });
