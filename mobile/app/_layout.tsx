@@ -7,6 +7,7 @@ import { StatusBar } from 'expo-status-bar';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { ConnectionProvider, useConnection } from '../src/connection/ConnectionProvider';
 import { routeGate } from '../src/navigation/gate';
+import { PluginThemeController } from '../src/plugins/PluginThemeController';
 import { PushController } from '../src/push/native/PushController';
 import { taskHeaderTitle } from '../src/navigation/routes';
 import { AppThemeProvider, useAppTheme } from '../src/theme/ThemeProvider';
@@ -52,6 +53,7 @@ export default function RootLayout() {
         <ConnectionProvider>
           <RootStack />
           <PushController />
+          <PluginThemeController />
         </ConnectionProvider>
       </AppThemeProvider>
     </KeyboardProvider>
