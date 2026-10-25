@@ -146,6 +146,9 @@ func (s *Store) ListAgentProfiles() ([]AgentProfile, error) {
 // section), preserving its original created_at. Updating a nonexistent id
 // is a clear not-found error, never a silent no-op.
 func (s *Store) UpdateAgentProfile(p AgentProfile) (AgentProfile, error) {
+	if IsOwnedID(p.ID) {
+		return AgentProfile{}, fmt.Errorf("update agent profile %d: %w", p.ID, errOwnedProfile)
+	}
 	existing, err := s.GetAgentProfile(p.ID)
 	if err != nil {
 		return AgentProfile{}, fmt.Errorf("update agent profile %d: %w", p.ID, err)
@@ -184,6 +187,9 @@ func (s *Store) UpdateAgentProfile(p AgentProfile) (AgentProfile, error) {
 // and a 'fallback' policy is downgraded to 'none'; runs.profile_id is left
 // untouched (history).
 func (s *Store) DeleteAgentProfile(id int64) error {
+	if IsOwnedID(id) {
+		return fmt.Errorf("delete agent profile %d: %w", id, errOwnedProfile)
+	}
 	if _, err := s.GetAgentProfile(id); err != nil {
 		return fmt.Errorf("delete agent profile %d: %w", id, err)
 	}

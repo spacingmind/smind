@@ -2,8 +2,14 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 )
+
+// errOwnedProfile is what the stored-row writers return for an id in the
+// owned range: those profiles are not rows, so there is nothing to write
+// (defence in depth; the registries refuse first, with the plugin named).
+var errOwnedProfile = errors.New("a plugin-owned profile is read-only and not stored")
 
 // OwnedIDBase is the first id of the plugin-owned range (ADR-0042). Rows a
 // plugin contributes (profiles, MCP servers) are not stored: they are derived
