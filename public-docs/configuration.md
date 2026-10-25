@@ -100,9 +100,10 @@ providers:
 | `providers.<id>.defaultModel` | empty | Model a run uses when nothing else names one. Empty keeps the provider's own default. Up to 100 characters from letters, digits and `. _ : / @ [ ] -`; it may not start with `-`. |
 | `providers.<id>.env.CLAUDE_CONFIG_DIR` | empty | `claude-native` only. An absolute path, or one starting with `~/`. |
 | `providers.<id>.env.CODEX_HOME` | empty | `codex-native` only. Same rules. |
+| `providers.custom` | empty | A list of extra providers: instances of Claude Code or Codex with their own config directory (`extends`), and custom ACP agents (`command`). See [Provider instances](providers.md#provider-instances). |
 
-An unknown provider id is an error. See [Providers](providers.md) for the
-launch environment.
+An unknown provider id under `providers.<id>` is an error. See
+[Providers](providers.md) for the launch environment.
 
 ### agents
 
