@@ -16,7 +16,9 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { describeDraftError, useCommitDraft } from "@/lib/use-commit-draft";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTaskDiff } from "@/hooks/use-task-diff";
 import { toast } from "@/components/ui/toast";
@@ -107,6 +109,13 @@ export function DiffViewerPane({
   const [commitError, setCommitError] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [lastCommit, setLastCommit] = useState<TaskCommitResult | null>(null);
+  // AI draft (ADR-0043): `pendingDraft` waits on Replace/Keep when the textarea already had text; `draftNote`
+  // is the quiet truncated/omitted line. Both are dropped as soon as the message, staging or commit changes.
+  const commitDraft = useCommitDraft(client, task.ID);
+  const [pendingDraft, setPendingDraft] = useState<string | null>(null);
+  const [draftNote, setDraftNote] = useState<string | null>(null);
+  const [draftAnnounce, setDraftAnnounce] = useState("");
+  const messageRef = useRef<HTMLTextAreaElement | null>(null);
   // The path a pending "Reveal in diff" wants scrolled to, cleared as soon
   // as the scroll lands (it's a one-shot action, not a selection).
   const [revealPath, setRevealPath] = useState<string | null>(null);
@@ -253,8 +262,41 @@ export function DiffViewerPane({
       });
   };
 
+  const clearDraftExtras = () => {
+    setPendingDraft(null);
+    setDraftNote(null);
+  };
+
+  const fillMessage = (text: string) => {
+    setMessage(text);
+    setPendingDraft(null);
+    // Focus after the value commits so the caret lands at the end of the new text.
+    requestAnimationFrame(() => {
+      const el = messageRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(text.length, text.length);
+    });
+  };
+
+  const draftMessage = () => {
+    clearDraftExtras();
+    setDraftAnnounce("");
+    void commitDraft.draft().then((result) => {
+      if (!result) return;
+      setDraftAnnounce("Draft ready");
+      const notes: string[] = [];
+      if (result.truncated) notes.push("Draft sent only the first part of a large diff");
+      if (result.omitted.length > 0) notes.push(`Left out: ${result.omitted.join(", ")}`);
+      setDraftNote(notes.length > 0 ? notes.join(" · ") : null);
+      if (messageRef.current?.value.trim() ?? message.trim()) setPendingDraft(result.message);
+      else fillMessage(result.message);
+    });
+  };
+
   const commit = () => {
     if (!client) return;
+    clearDraftExtras();
     setCommitting(true);
     setCommitError(null);
     client
@@ -351,6 +393,16 @@ export function DiffViewerPane({
   };
 
   const stagedCount = files?.filter((f) => f.staged).length ?? 0;
+  // Staging changed: whatever was drafted described a different set of files.
+  useEffect(() => {
+    setPendingDraft(null);
+    setDraftNote(null);
+  }, [stagedCount]);
+  useEffect(() => {
+    if (commitDraft.status === "error" && commitDraft.error) setDraftAnnounce(`Draft failed: ${describeDraftError(commitDraft.error)}`);
+  }, [commitDraft.status, commitDraft.error]);
+  const drafting = commitDraft.status === "drafting";
+  const draftDisabled = stagedCount === 0 || committing || drafting;
   // Item 8: a suggested message derived from the staged set itself
   // (lib/commit-suggestion.ts). Offered as a one-click fill rather than
   // placeholder text -- a placeholder vanishes on focus and can't be
@@ -556,18 +608,71 @@ export function DiffViewerPane({
             {commitError}
           </p>
         )}
+        {commitDraft.status === "error" && commitDraft.error && (
+          <p className="mb-2 text-ui-base text-destructive" data-testid="commit-draft-error">
+            {describeDraftError(commitDraft.error)}
+          </p>
+        )}
         <textarea
+          ref={messageRef}
           className="mb-2 w-full rounded border p-2 text-ui-base"
           rows={2}
           placeholder="Commit message…"
           value={message}
-          onChange={(e) => setMessage(e.target.value)}
+          onChange={(e) => {
+            setMessage(e.target.value);
+            clearDraftExtras();
+          }}
           data-testid="commit-message"
         />
+        {pendingDraft !== null && (
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-ui-base text-foreground-subtle">
+            <span>Replace the current message with the draft?</span>
+            <Button type="button" size="sm" onClick={() => fillMessage(pendingDraft)} data-testid="commit-draft-replace">
+              Replace
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setPendingDraft(null)} data-testid="commit-draft-keep">
+              Keep mine
+            </Button>
+          </div>
+        )}
+        {draftNote && (
+          <p className="mb-2 text-ui-sm text-foreground-muted" data-testid="commit-draft-note">
+            {draftNote}
+          </p>
+        )}
+        <span className="sr-only" aria-live="polite" data-testid="commit-draft-status">
+          {draftAnnounce}
+        </span>
         <div className="flex items-center gap-2">
           <Button type="button" size="sm" disabled={!canCommit} onClick={commit} data-testid="commit-button">
             {committing ? "Committing…" : `Commit (${stagedCount} staged)`}
           </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* A disabled button swallows pointer events: the span keeps the tooltip reachable. */}
+                <span className="inline-flex">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={draftDisabled}
+                    onClick={draftMessage}
+                    data-testid="commit-draft"
+                  >
+                    {drafting ? (
+                      <Icons.spinner className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                    ) : (
+                      <Icons.draft aria-hidden="true" />
+                    )}
+                    {drafting ? "Drafting…" : "Draft message"}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{stagedCount === 0 ? "Stage files to draft a message" : "Draft with AI"}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           {suggestion && message.trim() === "" && (
             <Button
               type="button"
