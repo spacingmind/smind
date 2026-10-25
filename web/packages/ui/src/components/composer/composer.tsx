@@ -6,6 +6,7 @@ import { AttachMenu, type ForgeKind } from "@/components/composer/attach-menu";
 import { ForgePicker } from "@/components/composer/forge-picker";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { useDaemonForge } from "@/hooks/use-attachment-limits";
+import { useLastDefined } from "@/hooks/use-last-defined";
 import { FileMentionPopover } from "@/components/composer/file-mention-popover";
 import { useFileMention } from "@/components/composer/use-file-mention";
 import { formatMentionToken, mentionedRefs } from "@/lib/file-mention";
@@ -226,6 +227,9 @@ export function Composer({
   // Set once the mention state exists (it is built below the submit callbacks that need it).
   const dismissMentionRef = useRef<(restored: string) => void>(() => {});
   const [forgePicker, setForgePicker] = useState<ForgeKind | null>(null);
+  // Closing clears `forgePicker` while the popover is still fading out: keep rendering the picker it was showing, or the
+  // card collapses to an empty 2 px strip that slides down mid-fade.
+  const pickerKind = useLastDefined(forgePicker);
   const daemonForge = useDaemonForge();
   const fileInput = useRef<HTMLInputElement | null>(null);
   const textareaNode = useRef<HTMLTextAreaElement | null>(null);
@@ -645,14 +649,19 @@ export function Composer({
                       />
                     </span>
                   </PopoverAnchor>
-                  <PopoverContent side="top" align="start" className="w-96 max-w-[calc(100vw-2rem)] rounded-lg bg-menu p-0 data-[state=open]:animate-none!">
-                    {forgePicker && taskId !== null && (
+                  {/* `absolute bottom-0 left-0`: the popper wrapper measures a zero-height box sitting on the anchor, and this card
+                      grows upward out of it. The card's height changes after it opens (Searching… → rows, every new query), and
+                      the popper repositions one frame after a resize, so a measured card sat ~105 px low for that frame. The
+                      same bottom-anchoring paseo's Combobox uses for `top-start` (refs/paseo components/ui/combobox.tsx). `origin-bottom-left`:
+                      Radix's origin variable is measured from the zero-height wrapper, which would scale the exit about the top edge. */}
+                  <PopoverContent side="top" align="start" className="absolute bottom-0 left-0 origin-bottom-left w-96 max-w-[calc(100vw-2rem)] rounded-lg bg-menu p-0 data-[state=open]:animate-none!">
+                    {pickerKind && taskId !== null && (
                       <ForgePicker
-                        kind={forgePicker}
+                        kind={pickerKind}
                         scope={{ taskId }}
                         limits={attachLimits}
                         onPick={(item, repo) => {
-                          attach.addForgeRef({ kind: forgePicker, forge: "github", number: item.number, repo, title: item.title, url: item.url });
+                          attach.addForgeRef({ kind: pickerKind, forge: "github", number: item.number, repo, title: item.title, url: item.url });
                           setForgePicker(null);
                           textareaNode.current?.focus();
                         }}

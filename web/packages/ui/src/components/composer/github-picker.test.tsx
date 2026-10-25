@@ -147,6 +147,47 @@ describe("GitHub picker", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(text);
   });
 
+  it("opens upward from a bottom-anchored card, so a resize never leaves it off the anchor for a frame", async () => {
+    const { client } = await renderComposer().then((r) => ({ client: r.client }));
+    await openPicker(client);
+    const card = screen.getByTestId("forge-picker").closest('[data-slot="popover-content"]')!;
+    // The card is absolutely bottom-anchored inside the zero-height popper wrapper: its height changes (Searching… -> rows,
+    // every new query) never move its anchoring edge. Exit zooms about that same edge.
+    expect(card.classList.contains("absolute")).toBe(true);
+    expect(card.classList.contains("bottom-0")).toBe(true);
+    expect(card.classList.contains("origin-bottom-left")).toBe(true);
+  });
+
+  it("keeps the picker's content while the popover fades out (it used to collapse to an empty strip)", async () => {
+    const client = await renderComposer().then((r) => r.client);
+    const realStyle = window.getComputedStyle.bind(window);
+    vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element, pseudo?: string | null) => {
+      const style = realStyle(el, pseudo);
+      if (!(el instanceof HTMLElement) || el.dataset.slot !== "popover-content") return style;
+      // jsdom has no animations: report an exit animation once closed, as the browser does, so Radix keeps the content
+      // mounted until it ends. (Radix reads the style object it got at mount, so the state is checked on every read.)
+      return new Proxy(style, {
+        get: (t, k) => {
+          if (k === "animationName" && el.dataset.state === "closed") return "fade-out";
+          const v = t[k as keyof CSSStyleDeclaration];
+          return typeof v === "function" ? (v as () => unknown).bind(t) : v;
+        },
+      });
+    });
+    await openPicker(client);
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Search pull requests" }), { key: "Escape" });
+    await flush();
+    const card = document.querySelector('[data-slot="popover-content"][data-state="closed"]')!;
+    expect(card).toBeTruthy();
+    expect(card.querySelector('[data-testid="forge-picker"]')).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Search pull requests" })).toBeTruthy();
+    // jsdom has no AnimationEvent: a plain event carrying the name Radix compares against.
+    const end = Object.assign(new Event("animationend", { bubbles: true }), { animationName: "fade-out" });
+    act(() => void card.dispatchEvent(end));
+    await flush();
+    expect(screen.queryByTestId("forge-picker")).toBeNull();
+  });
+
   it("selecting adds a pill, closes the picker, and submit sends {kind:'pr', forge, number, repo}", async () => {
     const { client, sent } = await renderComposer();
     await openPicker(client);
