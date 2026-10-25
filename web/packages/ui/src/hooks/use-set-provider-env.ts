@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
+import { runProviderTest } from "@/hooks/use-provider-health";
 import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
 import { queryKeys } from "@/lib/query-keys";
 import type { ProviderInfo } from "@/lib/types";
@@ -24,8 +25,13 @@ export function useSetProviderEnv(): {
       if (!client) throw new Error("no daemon connection");
       return client.call<SetEnvResult>("provider.setEnv", vars);
     },
-    onSuccess: () => {
+    onSuccess: (_result, vars) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.providerList() });
+      // The readiness line ("Ready (CLI login)") is the provider's cached `provider.test`, whose detail names the
+      // config dir just saved: mark it stale and re-run it through the shared single-flight path.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.providerTest(vars.provider), refetchType: "none" });
+      if (client) runProviderTest(queryClient, client, vars.provider);
+      
     },
   });
   const { mutate } = mutation;

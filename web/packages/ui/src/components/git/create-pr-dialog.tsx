@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { Input } from "@/components/ui/input";
+import { MiddleText } from "@/components/ui/middle-text";
 import { useCreatePr, usePrPreview } from "@/hooks/use-pr-actions";
 import { useWorkspaceBranches } from "@/hooks/use-workspace-branches";
 import { useTaskGit } from "@/hooks/use-task-git";
@@ -139,9 +140,7 @@ function CreatePrForm({
 
       <div className="flex min-h-7 flex-wrap items-center gap-x-2 gap-y-1 text-ui-base" data-testid="create-pr-branches">
         <Icons.branch aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
-        <span className="max-w-[16rem] truncate font-mono text-ui-sm" title={headBranch}>
-          {headBranch}
-        </span>
+        <MiddleText text={headBranch} className="max-w-[11rem] font-mono text-ui-sm" />
         <Icons.arrowRight aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
         <label htmlFor={ids.base} className="sr-only">
           Base branch
@@ -160,7 +159,8 @@ function CreatePrForm({
           }}
           spellCheck={false}
           autoComplete="off"
-          className="h-7 w-44 font-mono text-ui-sm"
+          className="h-7 w-64 min-w-0 flex-1 font-mono text-ui-sm"
+          title={baseInput}
           data-testid="create-pr-base"
         />
         {branches.data && (
@@ -177,9 +177,16 @@ function CreatePrForm({
         )}
       </div>
 
-      {git?.base?.parentBranch && committedBase === git.base.parentBranch && (
-        <p data-testid="create-pr-stacked-hint" className="text-ui-sm text-foreground-muted">
-          Stacked on <span className="font-mono text-foreground">{git.base.parentBranch}</span>
+      {git?.base?.parentBranch && (
+        // One line reserved for a stacked task, so switching the base never moves the fields below.
+        <p className="min-h-5 text-ui-sm text-foreground-muted">
+          {committedBase === git.base.parentBranch ? (
+            <span data-testid="create-pr-stacked-hint">
+              Stacked on <span className="font-mono text-foreground">{git.base.parentBranch}</span>
+            </span>
+          ) : git.base.prDefault && git.base.prDefault !== git.base.parentBranch && committedBase === git.base.prDefault ? (
+            <span data-testid="create-pr-fallback-hint">Parent branch not pushed yet; PR targets {git.base.prDefault}</span>
+          ) : null}
         </p>
       )}
 

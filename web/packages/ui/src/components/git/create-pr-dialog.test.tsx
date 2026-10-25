@@ -37,13 +37,25 @@ describe("CreatePrDialog", () => {
     const client = await openDialog(preview(), new FakeWsClient(), gitState({ base: { ref: "smind/parent", known: true, parentBranch: "smind/parent", prDefault: "smind/parent" } }));
     expect(screen.getByTestId("create-pr-base")).toHaveValue("smind/parent");
     expect(screen.getByTestId("create-pr-stacked-hint")).toHaveTextContent("Stacked on smind/parent");
+    expect(screen.queryByTestId("create-pr-fallback-hint")).toBeNull();
     expect(client.nth("task.prPreview", 0).params).toEqual({ taskId: 1 });
+  });
+
+  it("shows neither stacked hint once the base is changed to something else", async () => {
+    await openDialog(preview(), new FakeWsClient(), gitState({ base: { ref: "smind/parent", known: true, parentBranch: "smind/parent", prDefault: "smind/parent" } }));
+    const base = screen.getByTestId("create-pr-base");
+    fireEvent.change(base, { target: { value: "release" } });
+    fireEvent.blur(base);
+    await flush();
+    expect(screen.queryByTestId("create-pr-stacked-hint")).toBeNull();
+    expect(screen.queryByTestId("create-pr-fallback-hint")).toBeNull();
   });
 
   it("falls back to the default base when the parent is not pushed", async () => {
     const client = await openDialog(preview(), new FakeWsClient(), gitState({ base: { ref: "smind/parent", known: true, parentBranch: "smind/parent", prDefault: "develop" } }));
     expect(screen.getByTestId("create-pr-base")).toHaveValue("develop");
     expect(screen.queryByTestId("create-pr-stacked-hint")).toBeNull();
+    expect(screen.getByTestId("create-pr-fallback-hint")).toHaveTextContent("Parent branch not pushed yet; PR targets develop");
     // prDefault differs from the stored base, so it is sent explicitly.
     expect(client.nth("task.prPreview", 0).params).toEqual({ taskId: 1, baseBranch: "develop" });
   });

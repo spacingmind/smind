@@ -962,7 +962,7 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     await flush();
 
     const card = await openHoverCard(TASK.ID);
-    expect(within(card).getByTestId("sidebar-task-branch")).toHaveTextContent("feat/fix-bug → develop");
+    expect(within(card).getByTestId("sidebar-task-branch")).toHaveTextContent("feat/fix-bug→ Base: develop");
     expect(within(card).getByTestId("git-tokens")).toHaveTextContent("+12");
   });
 

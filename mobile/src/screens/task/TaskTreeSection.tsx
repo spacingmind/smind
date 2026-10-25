@@ -60,7 +60,7 @@ export function TaskTreeSection({ conn, taskId, pendingTaskIds, onOpenTask }: Pr
   const { rows, attention } = built;
   const count = (result?.nodes.length ?? 1) - 1;
   const summary = `Subtasks · ${count}`;
-  const attentionLabel = [attention.waiting > 0 ? `${attention.waiting} waiting` : null, attention.failed > 0 ? `${attention.failed} failed` : null]
+  const attentionLabel = [attention.waiting > 0 ? `${attention.waiting} waiting` : null, attention.rateLimited > 0 ? `${attention.rateLimited} rate limited` : null, attention.failed > 0 ? `${attention.failed} failed` : null]
     .filter(Boolean)
     .join(' · ');
 
@@ -77,7 +77,9 @@ export function TaskTreeSection({ conn, taskId, pendingTaskIds, onOpenTask }: Pr
         <Text style={styles.headerTitle}>{summary}</Text>
         <View style={styles.attention}>
           {attention.waiting > 0 ? <Text style={[styles.attentionText, { color: theme.status.warning }]}>{`${attention.waiting} waiting`}</Text> : null}
-          {attention.waiting > 0 && attention.failed > 0 ? <Text style={styles.attentionText}>·</Text> : null}
+          {attention.waiting > 0 && attention.rateLimited > 0 ? <Text style={styles.attentionText}>·</Text> : null}
+          {attention.rateLimited > 0 ? <Text style={[styles.attentionText, { color: theme.status.warning }]}>{`${attention.rateLimited} rate limited`}</Text> : null}
+          {(attention.waiting > 0 || attention.rateLimited > 0) && attention.failed > 0 ? <Text style={styles.attentionText}>·</Text> : null}
           {attention.failed > 0 ? <Text style={[styles.attentionText, { color: theme.status.danger }]}>{`${attention.failed} failed`}</Text> : null}
         </View>
         {/* The registry has one chevron: rotated (not animated) to show the state. */}
