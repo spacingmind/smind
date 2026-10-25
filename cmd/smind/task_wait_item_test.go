@@ -67,7 +67,7 @@ func TestTaskWait_QueueItem(t *testing.T) {
 	}
 	ch := make(chan res, 1)
 	go func() {
-		c, o, e := sendCaptured(t, []string{"task", "wait", ref, "--timeout", "30s"})
+		c, o, e := waitCaptured(ref, "--timeout", "30s")
 		ch <- res{c, o, e}
 	}()
 	time.Sleep(700 * time.Millisecond) // wait is polling a still-queued item
@@ -95,7 +95,7 @@ func TestTaskWait_QueueItemCancelled(t *testing.T) {
 	}
 	ch := make(chan res, 1)
 	go func() {
-		c, o, e := sendCaptured(t, []string{"task", "wait", ref, "--timeout", "30s"})
+		c, o, e := waitCaptured(ref, "--timeout", "30s")
 		ch <- res{c, o, e}
 	}()
 	time.Sleep(700 * time.Millisecond)
