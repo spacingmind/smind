@@ -1,7 +1,7 @@
 # PA.5 — Mobile: read-only plugins, prompt commands, themes
 
 Parent: [plugins.md](plugins.md) (AC15 mobile part, AC30 lint note), [ADR-0042](../../decisions/0042-plugin-system.md).
-Size: M (5) — scope 1 (mobile only, one dev-tooling hook), PRs 1, risk 1 (relay-readable data rendered on a phone), decisions 1, verification 1 (390 px web export, no device).
+Size: M (5) — scope 1 (mobile, plus one dev-tooling hook), PRs 1, risk 1 (relay-readable data rendered on a phone), decisions 1, verification 1 (390 px web export, no device).
 
 ## Acceptance criteria
 
@@ -33,8 +33,8 @@ Size: M (5) — scope 1 (mobile only, one dev-tooling hook), PRs 1, risk 1 (rela
 
 ## Progress
 
-- [ ] spec  [ ] data layer  [ ] slash  [ ] screens  [ ] themes  [ ] safety  [ ] harness + frames  [ ] docs
+- [x] spec  [x] data layer  [x] slash  [x] screens  [x] themes  [x] safety  [x] harness + frames  [x] docs
 
 ## Validation
 
-(filled at the end)
+AM1-AM5: tests named above, all in `mobile/src/__tests__`; full `cd mobile && npx tsc --noEmit && npm test` green. Mutations 1-4 each failed the test they target (`/tmp/smind-pa5-evidence/mutations.txt`). Frames: `/tmp/smind-pa5-evidence/frames` (stage `75-plugins`, Expo web export at 390x844@2 against the devharness daemon API, light and dark), contact sheets in `/tmp/smind-pa5-evidence/sheets`; the PR body has the frame table. AM6: public-docs paragraph (`## Plugins on the phone`), ADR note, plugins.md Progress/Validation. Not verified: a native iOS/Android device (web export has no native stack animation, no secure store, no @expo/ui native controls).

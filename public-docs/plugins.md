@@ -33,7 +33,8 @@ human actions. They need a loopback connection to the daemon, which includes a
 reverse proxy on the same machine. To manage plugins over a network login, set
 `plugins.allowRemoteManage: true`; it is off by default. Agents and paired
 phones cannot do any of this whatever the setting. A phone can still see the
-lists.
+lists, offer plugin prompt commands and apply plugin themes; see
+[Plugins on the phone](mobile-and-relay.md#plugins-on-the-phone).
 
 smind does not stop an agent that runs as your user from reading the daemon's
 token or `config.yaml`. What an agent may read is decided by the agent's own
