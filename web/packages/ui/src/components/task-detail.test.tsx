@@ -1205,7 +1205,7 @@ describe("chat usage total", () => {
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([
-      doneRun({ usage: { inputTokens: 10000, outputTokens: 1000, costUsd: 0.31, source: "claude_result" } }),
+      runningRun({ usage: { inputTokens: 10000, outputTokens: 1000, costUsd: 0.31, source: "claude_result" } }),
     ]);
     await flush();
     expect(screen.queryByTestId("chat-usage-total")).not.toBeInTheDocument();
