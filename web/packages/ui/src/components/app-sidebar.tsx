@@ -1981,7 +1981,9 @@ function TaskHoverCardBody({
       {(git?.branch?.name ?? task.Branch) && (
         <GitBranchLine
           branch={(git?.branch?.name ?? task.Branch)!}
-          base={git?.base?.known ? git.base.ref : undefined}
+          base={git?.base?.known || git?.base?.gone ? git.base.ref : undefined}
+          gone={git?.base?.gone}
+          stackedOn={git?.base?.parentBranch}
           testId="sidebar-task-branch"
         />
       )}

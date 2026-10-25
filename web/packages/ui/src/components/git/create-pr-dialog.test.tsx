@@ -10,9 +10,9 @@ import { renderWithClientProp as render } from "@/test/render-with-daemon";
 
 beforeEach(() => window.localStorage.removeItem(GIT_PREFS_STORAGE_KEY));
 
-async function openDialog(pv: PrPreview = preview(), client = new FakeWsClient()) {
+async function openDialog(pv: PrPreview = preview(), client = new FakeWsClient(), git = gitState()) {
   render(<Harness client={client} />);
-  client.nth("task.git", 0).resolve(gitState());
+  client.nth("task.git", 0).resolve(git);
   await flush();
   fireEvent.click(screen.getByTestId("create-pr-button"));
   await flush();
@@ -31,6 +31,21 @@ describe("CreatePrDialog", () => {
     expect(screen.getByTestId("create-pr-diffstat")).toHaveTextContent("+12 −4");
     expect(screen.getByTestId("create-pr-summary")).toHaveTextContent("2 commits");
     expect(screen.getByTestId("create-pr-title")).toHaveFocus();
+  });
+
+  it("defaults to prDefault and shows the stacked hint", async () => {
+    const client = await openDialog(preview(), new FakeWsClient(), gitState({ base: { ref: "smind/parent", known: true, parentBranch: "smind/parent", prDefault: "smind/parent" } }));
+    expect(screen.getByTestId("create-pr-base")).toHaveValue("smind/parent");
+    expect(screen.getByTestId("create-pr-stacked-hint")).toHaveTextContent("Stacked on smind/parent");
+    expect(client.nth("task.prPreview", 0).params).toEqual({ taskId: 1 });
+  });
+
+  it("falls back to the default base when the parent is not pushed", async () => {
+    const client = await openDialog(preview(), new FakeWsClient(), gitState({ base: { ref: "smind/parent", known: true, parentBranch: "smind/parent", prDefault: "develop" } }));
+    expect(screen.getByTestId("create-pr-base")).toHaveValue("develop");
+    expect(screen.queryByTestId("create-pr-stacked-hint")).toBeNull();
+    // prDefault differs from the stored base, so it is sent explicitly.
+    expect(client.nth("task.prPreview", 0).params).toEqual({ taskId: 1, baseBranch: "develop" });
   });
 
   it("creates with the edited text, draft and base, then closes", async () => {

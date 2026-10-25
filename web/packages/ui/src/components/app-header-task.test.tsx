@@ -111,6 +111,27 @@ describe("HeaderTaskTitle git state (ADR-0039)", () => {
   });
 });
 
+describe("HeaderTaskTitle hover card, stacked", () => {
+  it("hover card shows the parent branch for a stacked task", async () => {
+    const client = new FakeWsClient();
+    render(
+      <WithClient client={client}>
+        <HeaderTaskTitle task={TASK} />
+      </WithClient>,
+    );
+    await act(async () =>
+      client.nth("task.git", 0).resolve(taskGit({ branch: { name: "fix-bug", owned: true }, base: { ref: "smind/parent", known: true, parentBranch: "smind/parent" } })),
+    );
+    await act(async () => {
+      screen.getByTestId("app-header-title").focus();
+    });
+    await screen.findByTestId("app-header-task-card");
+    expect(screen.getByTestId("app-header-task-branch")).toHaveTextContent("fix-bug → smind/parent");
+    expect(screen.getByTestId("app-header-task-branch")).toHaveAttribute("title", expect.stringContaining("stacked on smind/parent"));
+    fireEvent.blur(screen.getByTestId("app-header-title"));
+  });
+});
+
 function wsFake(): FakeWsClient {
   return new FakeWsClient();
 }
