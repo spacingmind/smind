@@ -70,6 +70,9 @@ type Workspace struct {
 	// DefaultBase is the user's default-base-branch override (ADR-0039);
 	// "" = auto-detect.
 	DefaultBase string
+	// CommitMessageStyle is free-text guidance for AI-drafted commit messages
+	// (G17); "" = none.
+	CommitMessageStyle string `json:"commitMessageStyle"`
 }
 
 // Space is an optional grouping layer within a workspace, carrying its own
