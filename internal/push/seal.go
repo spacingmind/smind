@@ -37,7 +37,7 @@ var (
 // Event is the plaintext of one notification.
 type Event struct {
 	ID     string `json:"id"`
-	Kind   string `json:"kind"` // permission | needs_continue | done | error | test
+	Kind   string `json:"kind"` // permission | needs_continue | done | error | stalled | test
 	TaskID int64  `json:"taskId"`
 	RunID  string `json:"runId,omitempty"`
 	ChatID int64  `json:"chatId,omitempty"`

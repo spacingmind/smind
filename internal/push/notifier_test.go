@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -431,5 +432,54 @@ func TestNotifyConcurrent(t *testing.T) {
 	wg.Wait()
 	if got, want := len(h.sender.messages()), workers*per*2; got != want {
 		t.Fatalf("messages = %d, want %d", got, want)
+	}
+}
+
+func TestNotifyStalledSealedNoPlaintext(t *testing.T) {
+	t.Parallel()
+	h := newNHarness(t)
+	r := h.add("dev-a", 1, nil)
+	// A stalled seat is not a run kind: a child task is notified too.
+	if got := h.n.Notify(context.Background(), Input{Kind: KindStalled, Key: "stall:2:100", TaskID: 2, Minutes: 15}); got != 1 {
+		t.Fatalf("Notify = %d, want 1", got)
+	}
+	msgs := h.sender.messages()
+	if len(msgs) != 1 {
+		t.Fatalf("sent %d messages, want 1", len(msgs))
+	}
+	raw, err := json.Marshal(msgs[0].Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plain := range []string{"Child task", "Tree stalled", "idle for"} {
+		if strings.Contains(string(raw), plain) {
+			t.Fatalf("sealed data leaks %q: %s", plain, raw)
+		}
+	}
+	ev := h.open(r, msgs[0])
+	if ev.Kind != KindStalled || ev.TaskID != 2 || ev.Title != "Child task" || ev.Body != "Tree stalled: Child task has been idle for 15 min" {
+		t.Fatalf("opened event = %+v", ev)
+	}
+}
+
+func TestStalledDedupeByEpisodeKey(t *testing.T) {
+	t.Parallel()
+	h := newNHarness(t)
+	h.add("dev-a", 1, nil)
+	ctx := context.Background()
+	in := Input{Kind: KindStalled, Key: "stall:1:100", TaskID: 1, Minutes: 15}
+	if h.n.Notify(ctx, in) != 1 || h.n.Notify(ctx, in) != 0 {
+		t.Fatal("same episode key must deliver once")
+	}
+	in.Key = "stall:1:200"
+	if h.n.Notify(ctx, in) != 1 {
+		t.Fatal("a new episode (new since) must deliver again")
+	}
+	// Stalled alerts are not subject to the done/error rate limit.
+	for i := 0; i < 10; i++ {
+		in.Key = fmt.Sprintf("stall:1:%d", 1000+i)
+		if h.n.Notify(ctx, in) != 1 {
+			t.Fatalf("stalled alert %d was rate limited", i)
+		}
 	}
 }

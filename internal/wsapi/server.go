@@ -74,9 +74,11 @@ type API struct {
 	Runs      *runs.Registry
 	Terminals *terminal.Registry
 
-	hs      map[string]handlerFunc
-	admit   *seatAdmission
-	bus     *eventBus
+	hs    map[string]handlerFunc
+	admit *seatAdmission
+	bus   *eventBus
+	// stalled feeds task.tree's stalled marker (SetStalledSource).
+	stalled *stalledSource
 	git     *gitstate.Service
 	focus   *focusRegistry
 	prFocus *focusRegistry
@@ -257,6 +259,8 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		}
 		return res, err
 	}
+	stalled := &stalledSource{}
+	hs["task.tree"] = handleTaskTree(db, reg, stalled)
 	hs["provider.setDefaultModel"] = handleProviderSetDefaultModel(runner, bus)
 	hs["provider.setEnv"] = handleProviderSetEnv(runner, bus)
 	hs["session.identify"] = handleSessionIdentify(reg)
@@ -273,7 +277,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		hs[method] = h
 	}
 	hs["workspace.delete"] = learning.beforeWorkspaceDelete(hs["workspace.delete"])
-	api := &API{Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
+	api := &API{Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}
