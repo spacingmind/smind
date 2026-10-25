@@ -223,8 +223,8 @@ describe("usage-section", () => {
     const HINT = "Estimated at API list prices; subscription plans are not billed per token";
     const PROVIDERS = {
       providers: [
-        { id: "claude-native", label: "Claude Code", kind: "cli" },
-        { id: "glm", label: "GLM" },
+        { id: "claude-native", label: "Claude Code", credentialKind: "oauth" },
+        { id: "glm", label: "GLM", kind: "cli" },
       ],
     };
 

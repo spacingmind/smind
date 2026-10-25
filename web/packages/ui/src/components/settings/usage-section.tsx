@@ -196,10 +196,10 @@ function UsageSection({ client }: SettingsSectionContext) {
   // workspace.list + one task.list per workspace of its own. A tree that has not loaded (or failed) just
   // leaves rows on their "Task #id" / "Workspace #id" fallbacks, as the old best-effort lookup did.
   const { workspaces } = useWorkspaceTree();
-  // Providers that use the CLI's own login are subscription plans: their cost is an API-price estimate.
+  // Providers with a browser OAuth login (claude-native, codex-native) are subscription plans: their cost is an API-price estimate. API-key and external-CLI providers (GLM, Kimi) are metered.
   const { providers: providerList } = useProviderCatalog();
   const subscriptionProviders = useMemo(
-    () => new Set(providerList.filter((p) => p.kind === "cli").map((p) => p.id as string)),
+    () => new Set(providerList.filter((p) => p.credentialKind === "oauth").map((p) => p.id as string)),
     [providerList],
   );
   const names = useMemo(() => {

@@ -10,7 +10,7 @@ Human request 2026-10-25: "Cost is not shown per chat" (see memory: cost = API-p
 - `components/account-usage/*` shows plan windows only, no cost → kept. `ChatPlanUsage` + `useChatPlanUsage` + `UsagePillCard` become dead once the pills go; deleted if grep shows no other importer.
 - Mobile: `mobile/src/taskTree.ts` `costLabel` / `TaskTreeRow` show a cost per row of the read-only tree (#594). That is the tree view, not a chat/run surface → kept (decision for the Human). No other cost/usage UI in task screen, chat header, run footer or task list.
 - Spaces: a space belongs to a workspace (`spaces.workspace_id`), tasks carry `space_id`. `usage.summary` cannot group by space (`runUsageGroupColumns`), but the shared workspace tree (`useWorkspaceTree`) maps task → space, so Space is a client-side roll-up of the `task`-grouped rows. No daemon change for it.
-- Account kind: `usage.summary` rows carry no provider/account. Only a Provider group-by key identifies the provider. So the label needs one additive field: runs-scope rows get `providers: string[]` (distinct `run_usage.provider`), no change to accounting. The client maps provider → subscription via the shared provider list (`kind === "cli"`: claude-native, codex-native use the CLI's own login; GLM and other API-key providers are metered).
+- Account kind: `usage.summary` rows carry no provider/account. Only a Provider group-by key identifies the provider. So the label needs one additive field: runs-scope rows get `providers: string[]` (distinct `run_usage.provider`), no change to accounting. The client maps provider → subscription via the shared provider catalog (`useProviderCatalog`): `credentialKind === "oauth"` (claude-native, codex-native: the CLI's own plan login). GLM (`kind: "cli"`, key-based) and Kimi (`api-key`) are metered. (A first Peer pass used `kind === "cli"`, which is GLM: caught in the real-app frames and fixed.)
   Mapping rule: a row is subscription if ANY provider in `row.providers` is `kind: "cli"`. Proxy rows have no cost, so no label.
 
 ## Acceptance criteria
@@ -44,10 +44,11 @@ Human request 2026-10-25: "Cost is not shown per chat" (see memory: cost = API-p
 
 ## Progress
 
-- [ ] A: web deletion (Peer 1)
-- [ ] B: providers field + Usage label + Space group-by (Peer 2)
-- [ ] Frames, PR
+- [x] A: web deletion (Peer 1, accepted)
+- [x] B: providers field + Usage label + Space group-by (Peer 2, accepted; label rule corrected by Lead)
+- [x] Frames, PR
 
 ## Validation
 
-(to fill)
+AC1-4: run-footer/task-detail absence tests and budget-chip test pass; grep shows no remaining reference to RunUsagePill/ChatUsageTotal/UsagePillCard. AC5-6: usage-section tests (Space roll-up, em-dash cost, proxy-disabled, subscription/API-key/mixed/no-cost labels) pass; real-app frames in /tmp/cost-display-shots/{before,after}. AC7: mobile has only the read-only tree row/header cost (kept). AC8: go test ./..., GOOS=windows build+vet, task lint, web tsc, full web vitest (323 files / 3644 tests) green.
+Mutations (all fail the named tests): pill re-rendered in footer; every provider treated as API key (and wrong credentialKind); Space roll-up grouped by task key.
