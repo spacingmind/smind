@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -31,6 +32,11 @@ const (
 	cliStderrKeep = 8 << 10
 	// cliStderrShown is the redacted stderr tail put in the error text.
 	cliStderrShown = 2 << 10
+	// cliStderrDrainWait bounds how long a CLI exit waits for the stderr pipe
+	// to reach EOF (a grandchild holding it open would otherwise never end it).
+	cliStderrDrainWait = 2 * time.Second
+	// cliStderrIncomplete is appended to the stderr text when the drain timed out.
+	cliStderrIncomplete = " (stderr incomplete)"
 )
 
 // CLIExitError is a claude-native CLI that ended its stream without a result.
@@ -41,6 +47,9 @@ type CLIExitError struct {
 	ExitCode int
 	// Stderr is the redacted tail of the CLI's stderr ("" = it wrote none).
 	Stderr string
+	// StderrIncomplete: the stderr pipe was still open when the drain bound
+	// ran out, so Stderr may miss the CLI's last output.
+	StderrIncomplete bool
 	// LastEvent is the type of the last message the CLI streamed ("" = none)
 	// and Since how long before the exit it arrived.
 	LastEvent string
@@ -69,6 +78,9 @@ func (e *CLIExitError) Error() string {
 	} else {
 		b.WriteString("; stderr: empty")
 	}
+	if e.StderrIncomplete {
+		b.WriteString(cliStderrIncomplete)
+	}
 	b.WriteString(". Send a follow-up prompt to resume the session")
 	return b.String()
 }
@@ -90,6 +102,67 @@ func (t *tailBuffer) Write(p []byte) (int, error) {
 		t.buf = append(t.buf[:0], t.buf[len(t.buf)-cliStderrKeep:]...)
 	}
 	return len(p), nil
+}
+
+// stderrCapture is the CLI's stderr as the SDK's log writer. The SDK hands a
+// non-*os.File writer to exec, which copies the child's stderr pipe into it
+// with io.Copy; that calls ReadFrom, which returns exactly when the pipe
+// reaches EOF (the CLI and anything it spawned closed stderr). That is the
+// signal the SDK does not expose: the message stream ends at stdout EOF, which
+// can precede the last stderr bytes. A pipe *os.File would give the same signal
+// but leaves exec no copy goroutine to hold cmd.Wait back, so Wait closes the
+// stdout pipe at process exit and drops stdout the SDK has not yet read.
+type stderrCapture struct {
+	tail tailBuffer
+
+	mu      sync.Mutex
+	started int           // ReadFrom calls begun (one per spawned CLI)
+	active  int           // ReadFrom calls not yet at EOF
+	changed chan struct{} // closed and replaced whenever started/active change
+}
+
+func newStderrCapture() *stderrCapture { return &stderrCapture{changed: make(chan struct{})} }
+
+func (c *stderrCapture) Write(p []byte) (int, error) { return c.tail.Write(p) }
+
+// ReadFrom copies r (the CLI's stderr pipe) into the tail until EOF.
+func (c *stderrCapture) ReadFrom(r io.Reader) (int64, error) {
+	c.bump(1, 1)
+	defer c.bump(0, -1)
+	return io.Copy(writerOnly{&c.tail}, r)
+}
+
+// writerOnly hides tailBuffer's other methods so io.Copy does not loop back here.
+type writerOnly struct{ io.Writer }
+
+func (c *stderrCapture) bump(started, active int) {
+	c.mu.Lock()
+	c.started += started
+	c.active += active
+	close(c.changed)
+	c.changed = make(chan struct{})
+	c.mu.Unlock()
+}
+
+// drain waits until every spawned CLI's stderr reached EOF, at most max; false
+// means it timed out (a grandchild may hold the pipe open, or the copy had not
+// begun) and the tail may be incomplete.
+func (c *stderrCapture) drain(max time.Duration) bool {
+	t := time.NewTimer(max)
+	defer t.Stop()
+	for {
+		c.mu.Lock()
+		done, ch := c.started > 0 && c.active == 0, c.changed
+		c.mu.Unlock()
+		if done {
+			return true
+		}
+		select {
+		case <-ch:
+		case <-t.C:
+			return false
+		}
+	}
 }
 
 // redacted is the stderr tail with secrets removed (exactSecrets by value,

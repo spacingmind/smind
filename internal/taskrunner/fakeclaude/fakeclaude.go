@@ -163,6 +163,33 @@ func Run() {
 		}
 		os.Exit(3)
 
+	case "cli-exit-chunks", "cli-exit-held", "cli-exit-nostderr":
+		// Dies without a result like cli-exit-nonzero, but with a scripted
+		// stderr: three chunks with pauses between them (chunks), a
+		// grandchild that keeps the stderr pipe open for 6s after the exit
+		// (held), or none at all (nostderr).
+		stdin.Scan() // consume the prompt line
+		writeLine(map[string]any{"type": "stream_event", "session_id": "sess-1", "uuid": "u", "event": map[string]any{"type": "message_start", "message": map[string]any{
+			"model": "claude-fake", "usage": map[string]any{"input_tokens": 1, "output_tokens": 1},
+		}}})
+		switch scenario {
+		case "cli-exit-chunks":
+			fmt.Fprintln(os.Stderr, "chunk-one")
+			// The stream ends at stdout EOF: the later chunks arrive after
+			// the SDK has already seen the stream close.
+			_ = os.Stdout.Close()
+			for _, c := range []string{"chunk-two", "chunk-three"} {
+				time.Sleep(80 * time.Millisecond)
+				fmt.Fprintln(os.Stderr, c)
+			}
+		case "cli-exit-held":
+			fmt.Fprintln(os.Stderr, "held-line")
+			holder := exec.Command("sleep", "6")
+			holder.Stderr = os.Stderr
+			_ = holder.Start()
+		}
+		os.Exit(3)
+
 	case "rate-limit-rejected":
 		// A rejected rate_limit_event, then a normal result.
 		stdin.Scan() // consume the prompt line

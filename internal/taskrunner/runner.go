@@ -985,7 +985,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 	}
 	// The CLI's stderr tail and streamed usage are what a CLI exit leaves
 	// behind (cli_exit.go); both are only read if the turn dies without a result.
-	stderrTail := &tailBuffer{}
+	stderrTail := newStderrCapture()
 	opts = append(opts, claudecode.WithLogWriter(stderrTail))
 	probe := newClaudeStreamProbe()
 
@@ -993,7 +993,16 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 	if err != nil {
 		return fmt.Errorf("taskrunner: spawn claude code agent: %w", err)
 	}
-	defer client.Close()
+	// After a CLI exit the process is gone, but Close (cmd.Wait) can still block
+	// on a grandchild holding stderr open: do not hold the run's end for it.
+	cliExited := false
+	defer func() {
+		if cliExited {
+			go client.Close()
+			return
+		}
+		client.Close()
+	}()
 	r.trackClaudeClient(chatID, client)
 	r.setClaudeModel(chatID, model)
 	defer r.untrackClaudeClient(chatID)
@@ -1049,6 +1058,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 	<-forwardDone
 	if err != nil {
 		if ctx.Err() == nil && isCLIExit(err) {
+			cliExited = true
 			return r.claudeCLIExited(ctx, client, err, probe, stderrTail, env, events)
 		}
 		return fmt.Errorf("taskrunner: claude code prompt: %w", err)
@@ -1067,7 +1077,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 // usage the stream reported before the exit (partial_stream, no cost) and
 // returns the typed error carrying the exit code, redacted stderr tail and last
 // event. The SDK's own error says only that the stream ended.
-func (r *Runner) claudeCLIExited(ctx context.Context, client claudeBackend, cause error, probe *claudeStreamProbe, stderr *tailBuffer, env []string, events chan<- Event) error {
+func (r *Runner) claudeCLIExited(ctx context.Context, client claudeBackend, cause error, probe *claudeStreamProbe, stderr *stderrCapture, env []string, events chan<- Event) error {
 	exitCode := -1
 	if c, ok := client.(interface{ Err() error }); ok {
 		var pe *claudecode.ProcessError
@@ -1087,7 +1097,11 @@ func (r *Runner) claudeCLIExited(ctx context.Context, client claudeBackend, caus
 		case <-ctx.Done():
 		}
 	}
-	return fmt.Errorf("taskrunner: claude code prompt: %w", probe.exitError(cause, exitCode, stderr.redacted(secrets)))
+	// The stream ended at stdout EOF, which can precede the last stderr bytes.
+	complete := stderr.drain(cliStderrDrainWait)
+	exitErr := probe.exitError(cause, exitCode, stderr.tail.redacted(secrets))
+	exitErr.StderrIncomplete = !complete
+	return fmt.Errorf("taskrunner: claude code prompt: %w", exitErr)
 }
 
 // newClaudeClientWithResume spawns chatID's claude-native turn, resuming
