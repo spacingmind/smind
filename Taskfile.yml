@@ -101,6 +101,11 @@ tasks:
       - sh scripts/install_test.sh
       - sh scripts/task_setup_test.sh
 
+  docs:cli:
+    desc: Regenerate the CLI summary blocks of public-docs/cli-reference.md from smind --help
+    cmds:
+      - SMIND_UPDATE_DOCS=1 go test ./cmd/smind -run '^TestCLIReferenceMatchesHelp$' -count=1
+
   test:install:ps:
     desc: Run the install.ps1 tests (needs PowerShell 7, `pwsh`)
     cmds:
