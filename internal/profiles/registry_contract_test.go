@@ -75,7 +75,7 @@ func TestProfile_UnknownSkillRejected(t *testing.T) {
 func TestProfile_SkillsPlusInstructionsOverCapRejected(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
-	all := []string{"smind", "smind-advisor", "smind-committee", "smind-handoff", "smind-leader", "smind-peer", "smind-supervisor"}
+	all := []string{"smind", "smind-advisor", "smind-committee", "smind-handoff", "smind-leader", "smind-peer"}
 	// Instructions alone are under the cap, the bodies tip the total over.
 	_, err := r.Create(store.AgentProfile{Name: "p", Provider: "claude-native", Instructions: strings.Repeat("x", 16<<10), Skills: all})
 	wantErr(t, err, "instructions plus skills")

@@ -13,8 +13,10 @@ Step 0 changed no code, profile or prompt, and ran no model.
 
 ## Status
 
-- [ ] Verdicts agreed with the person (end of step 0)
-- [ ] Main eval agreed and baseline measured (end of step 1)
+- [x] Verdicts agreed with the person (end of step 0): Human approved all verdicts as recommended, 2026-10-25
+- [x] Main eval agreed and baseline measured (end of step 1): **Step 1 (eval) skipped by Human decision 2026-10-25**; changes applied directly, checked by the lightweight After-check below instead
+- [x] Changes 1-5 applied (PR: see "Changes")
+- [ ] After-check table filled from the next ~5 items briefed directly (keeps this plan in `active/`)
 
 A new session picks up at the first unticked box here, then at the first unticked item in
 the worklist.
@@ -100,28 +102,48 @@ out of order, say so here.
 
 No merges (see above).
 
-- [ ] 1. fold `supervisor-sonnet` + `supervisor`: the Human/Steward sends the brief straight to a Lead; sizing and write-scope checks move to the brief template; the first fold also makes `lead` the entry (its instructions get the conflicts above fixed, no other edit) · variant: · compared with: baseline · result:
-- [ ] 2. fold `peer-glm`: take it out of the seed pack and out of the protocol's "default coder" text; keep it only as an optional profile · variant: · compared with: last kept · result:
-- [ ] 3. as-tool `peer-sonnet`: a structured handoff result (candidate SHA and base, changed paths, commands with results, residual risk, keep/give up ownership) instead of free text cut to 1 KiB · variant: · compared with: last kept · result:
-- [ ] 4. as-tool or delete `reviewer`: owner decision first (no traffic, so nothing to measure) · variant: · compared with: · result:
+- [x] 1. fold `supervisor-sonnet` + `supervisor`: the Human/Steward sends the brief straight to a Lead; sizing and write-scope checks move to the brief template; the first fold also makes `lead` the entry (its instructions get the conflicts above fixed, no other edit) · variant: · compared with: baseline · result: applied, no eval (Human decision 2026-10-25)
+- [x] 2. fold `peer-glm`: take it out of the seed pack and out of the protocol's "default coder" text; keep it only as an optional profile · variant: · compared with: last kept · result:
+- [x] 3. as-tool `peer-sonnet`: a structured handoff result (candidate SHA and base, changed paths, commands with results, residual risk, keep/give up ownership) instead of free text cut to 1 KiB · variant: · compared with: last kept · result:
+- [ ] 4. as-tool or delete `reviewer`: owner decision first (no traffic, so nothing to measure) · variant: · compared with: · result: **unchanged, Human decides later**
 
 ## Changes
 
-One section per change, filled in as it is made. Copy this block.
+No variants were run (eval skipped), so there are no `compare.py` tables. Each change records what was edited and the evidence it relied on. Branch `smind/task-lead-apply-single-agent-loop-verdicts-*`, one PR against `develop`.
 
-### Item <n>: `<change>` (variant `<vN>`, branch or commit)
+### Item 1: fold `supervisor-sonnet` + `supervisor`, Lead as the single loop
 
-Comparison with `<last kept variant>`: the table from `compare.py`, and tokens used next
-to the estimate.
+- Evidence relied on: natural experiment #611, a direct hop to a Lead: 17m19s, USD 2.01, against about USD 4 through seat 45; 24 of the Supervisor's 43 runs were 16 s relay wake-ups (USD 2.29), plus 4 zero-token wakes at the account limit; the Supervisor re-ran the same tests a third time (dogfood entry 62).
+- Edited: `internal/profiles/rolepack.go` (no `supervisor` seat or constant, `noBackgroundWait` is the Lead's only; Lead instructions rewritten: 2.2 KB down to about 2.0 KB, no persona, no Peer prices, S/M done by the Lead, Peer only for parallel parts or independent verification); `internal/skills/bundle/smind-supervisor/` deleted; `smind-leader` skill rewritten; README seat and skill lists.
+- Kept in the daemon: `childPolicy: profiles`, `mayLaunch`, `orchestration.maxDepth` (default 2; a test pins it, left alone), tree guard, sticky seats, notifier. The `supervisor` label in `smind profile ls` and tree tiers stays.
+- Checked with no model: `TestSeedRoles_SeatsExactly`, `TestSeedRoles_LeadIsTheSingleLoop`, `TestProfileSeedRoles_*`.
+- Not measured: cost and time per item after the fold (see After-check).
+- Decision: Human, 2026-10-25, keep.
 
-- Tasks that changed score, each with its cause from the trace:
-- Tasks that changed route but not score, and what the new route costs:
-- What was edited in the main agent's prompt and tool list:
-- Checked with no model (unit tests, direct tool calls):
-- Reruns, if any: variant names, the commit each side ran on, and each task over all reps:
-- Skipped or not measured:
-- Decision (who, when): keep / fix / revert
-- Left open after the decision:
+### Item 2: fold `peer-glm`
+
+- Evidence relied on: 1 run in 191 (task 48, 28m31s, 3.0M input tokens against about 1.5 min on Sonnet; entry 64); a model is a profile setting.
+- Edited: `rolepack.go` (no `peer-glm` seat; `peer-sonnet` Notes carry the cost and timing facts and no longer mention a GLM fallback); `docs/WORKSPACE_PROTOCOL.md` (GLM default-coder section removed). The `glm` provider and its tests are untouched.
+- Checked with no model: `TestSeedRoles_SeatsExactly` (no `peer-glm`, no `glm` provider in the pack).
+- Decision: Human, 2026-10-25, keep.
+
+### Item 3: `peer-sonnet` as a tool with a structured handoff
+
+- Evidence relied on: the free-text return is cut to 1 KiB and re-checked by hand (`childevent_text.go`); Peers are 55 runs and 52% of cost.
+- Edited: `peer-sonnet` seed `Instructions` (final message STARTS with one fenced json block `{status, branch, commits[], tests_run[], not_verified[], notes}`); `smind-peer` skill; `internal/runs/childevent_text.go` (a well-formed fenced json block is kept whole, hard cap 4 KiB escaped, on top of the 1 KiB cut); the shape is documented in `docs/WORKSPACE_PROTOCOL.md` and the skill, no separate schema file. `status` replaces the `REOPEN_REQUEST`/`DEPENDENCY_REQUEST`/`BLOCKED` signals (`blocked` plus notes).
+- Checked with no model: `TestBuildChildEventBlock_KeepsHandoffJSONBlock` (block first; block after 3 KiB of prose; over-cap and invalid blocks cut like prose), `TestSeedRoles_PeerEndsWithJSONHandoff`.
+- Not verified: that a live Sonnet Peer actually emits the block first (no model call was made).
+- Decision: Human, 2026-10-25, keep.
+
+### Item 4: `reviewer`
+
+Unchanged. Human decides later (no traffic found, nothing to measure).
+
+### The three contradictions
+
+- (a) Protocol default coder: the Peer section was rewritten to `peer-sonnet` only; GLM is not default.
+- (b) Who does S work: the protocol's Supervisor role is gone; S and M items go to a Lead directly. The Paseo-era scope text (`:3-7,33-35`) was dropped, with one sentence saying so.
+- (c) `smind-leader` `task_wait` versus "never wait": the skill is now the single-loop Lead's and never tells it to wait or poll; the protocol says an outside Human or Steward may use `smind task wait`.
 
 ## Open questions for owners
 
@@ -133,6 +155,21 @@ to the estimate.
 6. **Cost is a lower bound.** Runs that end in an error report no usage (tasks 109 and 110: 11m28s and 28m06s, 'cli exited before sending a result'), GLM reports no cost, and the CLI's input column looks like uncached input only (4-30 tokens per run against ~2M cache-read per run in the rollup). Should step 1 record the provider-side totals too? (Human)
 7. **Two tree-1 style facts to confirm:** that tasks 108 and 113 were roots started by the Human/Steward directly (inferred: tree 45's rollup excludes them), and that profile 5 `supervisor` was never run. (Steward)
 8. **Stale protocol text** (the three conflicts under Prompt notes) is a bug fix independent of this plan: fix it now, or only as part of item 1? (Human)
+
+## After-check
+
+A lightweight comparison instead of the paid eval: for the next ~5 items briefed directly to a Lead, read `smind task tree --task <lead> --json` (cost, runs, wall clock, peers launched) and `smind task runs <lead>`, and fill this table. The audit's 25-item numbers are the reference (Supervisor tree 45: 174 runs, USD 90.15, about 3.6 per item; #611 direct: 17m19s, USD 2.01). Compare medians, not single items; items differ in size.
+
+| Item (Lead task, PR) | Size | Lead runs | Peers launched | Cost USD | Wall clock | Json handoff present? | Rework rounds |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| audit, 25 items (median) | mixed | | | about 3.6 | | n/a | 5 on the worst |
+| | | | | | | | |
+| | | | | | | | |
+| | | | | | | | |
+| | | | | | | | |
+| | | | | | | | |
+
+Decide after five rows: keep, or reopen the seat that was folded.
 
 ## Left as it is, and why
 

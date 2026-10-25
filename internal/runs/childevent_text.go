@@ -1,6 +1,7 @@
 package runs
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -8,8 +9,11 @@ import (
 )
 
 const (
-	childEventTitleMax    = 80
-	childEventTextMax     = 1024
+	childEventTitleMax = 80
+	childEventTextMax  = 1024
+	// childEventJSONMax bounds a kept fenced json block (a Peer's structured
+	// handoff), measured on its escaped bytes.
+	childEventJSONMax     = 4096
 	childEventTruncMarker = "…[truncated; use task_logs {runId} for the rest]"
 )
 
@@ -28,7 +32,7 @@ type ChildEventFacts struct {
 
 // BuildChildEventBlock renders the status line plus the untrusted
 // <child-response> element for one child run. The result has no trailing
-// newline and stays under 2 KiB.
+// newline; without a handoff block it stays under 2 KiB, with one under 6 KiB.
 func BuildChildEventBlock(f ChildEventFacts) string {
 	state := f.Status
 	if f.Disposition != "" {
@@ -102,28 +106,78 @@ func childEventTitle(title string) string {
 	return b.String()
 }
 
-// escapeChildText XML-escapes s rune by rune and stops before the escaped
-// output would exceed childEventTextMax bytes (never mid-entity or
-// mid-rune), appending the truncation marker after a cut.
+// escapeChildText renders a child's final text. Ordinary text is XML-escaped
+// and cut at childEventTextMax bytes (never mid-entity or mid-rune) with the
+// truncation marker. The first well-formed fenced json block (a Peer's
+// handoff) is kept whole up to childEventJSONMax escaped bytes, on top of that
+// budget: prose before it is cut to the budget, prose after it gets what the
+// budget has left, so a block after a long preamble survives but the preamble
+// does not. A block over the cap is cut like prose.
 func escapeChildText(s string) string {
+	pre, block, post, ok := splitJSONBlock(s)
+	if !ok {
+		out, _ := escapeCut(s, childEventTextMax)
+		return out
+	}
+	esc := escapeXML(block)
+	if len(esc) > childEventJSONMax {
+		out, _ := escapeCut(s, childEventTextMax)
+		return out
+	}
+	head, _ := escapeCut(pre, childEventTextMax)
+	budget := childEventTextMax - len(escapeXML(pre))
+	if budget < 0 {
+		budget = 0
+	}
+	tail, _ := escapeCut(post, budget)
+	return head + esc + tail
+}
+
+// splitJSONBlock finds the first fenced ```json block whose body is valid
+// JSON and returns the text before it, the whole fence, and the text after.
+func splitJSONBlock(s string) (pre, block, post string, ok bool) {
+	const open, closeFence = "```json", "```"
+	from := 0
+	for {
+		i := strings.Index(s[from:], open)
+		if i < 0 {
+			return "", "", "", false
+		}
+		i += from
+		bodyStart := i + len(open)
+		nl := strings.IndexByte(s[bodyStart:], '\n')
+		if nl < 0 || strings.TrimSpace(s[bodyStart:bodyStart+nl]) != "" {
+			from = bodyStart
+			continue
+		}
+		bodyStart += nl + 1
+		j := strings.Index(s[bodyStart:], closeFence)
+		if j < 0 {
+			return "", "", "", false
+		}
+		end := bodyStart + j
+		if json.Valid([]byte(s[bodyStart:end])) {
+			return s[:i], s[i : end+len(closeFence)], s[end+len(closeFence):], true
+		}
+		from = end + len(closeFence)
+	}
+}
+
+func escapeXML(s string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
+}
+
+// escapeCut XML-escapes s rune by rune and stops before the escaped output
+// would exceed max bytes, appending the truncation marker after a cut.
+func escapeCut(s string, max int) (string, bool) {
 	var b strings.Builder
 	for _, r := range s {
-		var piece string
-		switch r {
-		case '&':
-			piece = "&amp;"
-		case '<':
-			piece = "&lt;"
-		case '>':
-			piece = "&gt;"
-		default:
-			piece = string(r)
-		}
-		if b.Len()+len(piece) > childEventTextMax {
+		piece := escapeXML(string(r))
+		if b.Len()+len(piece) > max {
 			b.WriteString(childEventTruncMarker)
-			return b.String()
+			return b.String(), true
 		}
 		b.WriteString(piece)
 	}
-	return b.String()
+	return b.String(), false
 }

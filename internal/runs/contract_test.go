@@ -33,7 +33,7 @@ func TestBuildInstructions_RealBundle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(got, "ROLE\n\n## Skill: smind-leader\n\n# Leader / coder pattern") || strings.Contains(got, "user-invocable") {
+	if !strings.HasPrefix(got, "ROLE\n\n## Skill: smind-leader\n\n# Lead (the single loop)") || strings.Contains(got, "user-invocable") {
 		t.Fatalf("unexpected text start: %.120q", got)
 	}
 }

@@ -149,3 +149,52 @@ func TestDeliverPrompt_ChildEventHeader(t *testing.T) {
 		t.Fatalf("deliverPrompt = %q, want %q", got, want)
 	}
 }
+
+const handoffJSON = `{"status":"done","branch":"smind/task-x","commits":["abc1234 feat: x"],"tests_run":["go test ./...: ok"],"not_verified":[],"notes":"a < b & c"}`
+
+func childBody(t *testing.T, text string) string {
+	t.Helper()
+	got := BuildChildEventBlock(ChildEventFacts{TaskID: 1, Title: "t", RunID: "r", Status: "done", LastText: text})
+	start := strings.Index(got, "\n") + len(`<child-response task="1" untrusted="true">`) + 1
+	return strings.TrimSuffix(got[start:], "</child-response>")
+}
+
+// TestBuildChildEventBlock_KeepsHandoffJSONBlock: a Peer's fenced json handoff
+// survives the 1 KiB cut whole when it leads a long reply, and still survives
+// (the preamble is what gets cut) when it follows 3 KiB of prose.
+func TestBuildChildEventBlock_KeepsHandoffJSONBlock(t *testing.T) {
+	t.Parallel()
+	block := "```json\n" + handoffJSON + "\n```"
+	wantBlock := escapeXML(block)
+	prose := strings.Repeat("some long prose. ", 400) // ~6.8 KiB
+
+	lead := childBody(t, block+"\n\n"+prose)
+	if !strings.Contains(lead, wantBlock) || !strings.HasPrefix(lead, wantBlock) {
+		t.Fatalf("leading block not kept whole at the start: %.200q", lead)
+	}
+	if !strings.HasSuffix(lead, childEventTruncMarker) || len(lead) > childEventJSONMax+childEventTextMax+len(childEventTruncMarker) {
+		t.Fatalf("trailing prose not cut or body too long (%d bytes)", len(lead))
+	}
+
+	late := childBody(t, strings.Repeat("p", 3072)+"\n"+block+"\n"+prose)
+	if !strings.Contains(late, wantBlock) {
+		t.Fatalf("block after 3 KiB of prose was lost")
+	}
+	if !strings.Contains(late, childEventTruncMarker+wantBlock) {
+		t.Fatalf("documented behaviour: the preamble is cut to the budget, then the whole block follows")
+	}
+	if strings.Contains(late, "some long prose") {
+		t.Fatalf("prose after the block must get no budget when the preamble used it all")
+	}
+
+	// An over-cap block, or one that is not valid JSON, is plain text again.
+	for _, bad := range []string{
+		"```json\n{\"notes\":\"" + strings.Repeat("x", childEventJSONMax) + "\"}\n```",
+		"```json\n{not json}\n```" + prose,
+	} {
+		body := childBody(t, bad)
+		if !strings.HasSuffix(body, childEventTruncMarker) || len(body) > childEventTextMax+len(childEventTruncMarker) {
+			t.Fatalf("bad block not cut like prose (%d bytes)", len(body))
+		}
+	}
+}

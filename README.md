@@ -374,17 +374,17 @@ the task `stalled` in `smind task tree`. It never wakes or archives anything.
 
 Agent profiles can carry a seat contract (ADR-0041): role instructions, bundled
 skills, whether the run gets the orchestration MCP tools, and which profiles it
-may launch. `smind profile seed roles` creates the standard pack (`peer-sonnet`,
-`peer-glm`, `lead`, `reviewer`, `supervisor`) and is safe to re-run; it never
-changes a profile that already exists. Start the Supervisor yourself with
-`smind task send <task> <prompt> --profile <id>`; it launches Leads, Leads
-launch Peers, and parents are woken by `[child event]` messages instead of
-polling. See [Running the roles inside smind](docs/WORKSPACE_PROTOCOL.md#running-the-roles-inside-smind).
+may launch. `smind profile seed roles` creates the standard pack (`lead`,
+`peer-sonnet`, `reviewer`) and is safe to re-run; it never changes a profile
+that already exists. Brief a Lead yourself with
+`smind task send <task> <prompt> --profile <id>`; the Lead does the item itself
+and launches Peers only for parallel parts or independent verification, and
+parents are woken by `[child event]` messages instead of polling. See [Running the roles inside smind](docs/WORKSPACE_PROTOCOL.md#running-the-roles-inside-smind).
 
 ## Orchestration skills
 
-sMind bundles seven agent skills (`smind`, `smind-leader`, `smind-handoff`,
-`smind-advisor`, `smind-committee`, `smind-supervisor`, `smind-peer`) that teach an orchestrating agent the
+sMind bundles six agent skills (`smind`, `smind-leader`, `smind-handoff`,
+`smind-advisor`, `smind-committee`, `smind-peer`) that teach an orchestrating agent the
 MCP tool loop and the leader/coder pattern. They are plain `SKILL.md` files
 embedded in the binary and installed only when you ask:
 
