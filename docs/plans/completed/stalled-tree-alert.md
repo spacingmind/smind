@@ -153,11 +153,11 @@ Lead decisions:
 ## Progress
 
 - [x] Plan written (this file), reuse inventory done.
-- [ ] Peer 1: backend (store column + snapshot query, `internal/stall`,
+- [x] Peer 1: backend (store column + snapshot query, `internal/stall`,
       config, notifier kind, bus topic + tap, `task.tree` fields, CLI word,
       MCP passthrough).
-- [ ] Peer 2: web marker + `task.stalled` notification (+ mobile if small).
-- [ ] Review, mutations, live check, frames, PR.
+- [x] Peer 2: web marker + `task.stalled` notification (+ mobile if small).
+- [x] Review, mutations, live check, frames, PR.
 
 ### Reuse inventory
 
@@ -175,6 +175,31 @@ Lead decisions:
 
 ## Validation
 
-(filled in at PR time: each AC mapped to the test or manual check that
-confirmed it, mutation results, live check, frame paths, what was not
-verified.)
+Commands (all green): `go test ./...`; `go test -race ./internal/stall
+./internal/push ./internal/wsapi ./internal/store`; `task lint`; `task test`;
+`cd web && bunx tsc -b packages/ui`; web `vitest run` (326 files, 3683 tests);
+mobile `npx tsc --noEmit && npm test` (71 files, 689 tests).
+
+| AC | Confirmed by |
+|---|---|
+| AC1 | `TestIdleSeatPastThresholdAlertsOnce`, `TestSecondTickSameEpisodeDoesNotReAlert`, `TestRunStartingInSubtreeClearsEpisodeAndLaterStallAlertsAgain`, `TestNestedSeatsAlertOnlyTopmost`; live: one `task.stalled` event per seat |
+| AC2 | `TestRestartDoesNotReAlertAlertedEpisode`; live: daemon restarted over the same DB, no second event, marker still shown |
+| AC3 | `TestRunningChildRunSuppresses`, `TestQueuedItemSuppresses`, `TestRateLimitedWait*`, `TestDoneTreeNeverAlerts`, `TestArchivedSeatNeverAlerts`, `TestSystemTaskNeverAlerts`, `TestBudgetExceededRefusalAloneIsNotBusy`, `TestStallAlertMinutesZeroNeverAlerts` |
+| AC4 | `TestStallAlertMinutesDefaultAndZero`, `TestStallAlertMinutesNegativeRejected`; documented in README next to the other `orchestration.*` keys and in the `OrchestrationConfig` doc comment |
+| AC5 | `TestNotifyStalledSealedNoPlaintext`, `TestStalledDedupeByEpisodeKey`, `TestPushInputStalled`, `TestStalledBusEventEmitted`; web `fires a notification on task.stalled`; live: bus event captured (/tmp/stalled-tree-shots/live/). Live push send NOT exercised (push disabled in the sandbox) |
+| AC6 | `TestTaskTreeCarriesStalledAndSince`, `TestTaskTreeOmitsStalledWhenNot`, `TestTaskTreeLinePrintsStalled`; live `smind task tree` printed `stalled`. MCP `task_tree` passes the node JSON through (cmd/smind/mcp_tree_tools.go) |
+| AC7 | web vitest `renders the stalled marker with tooltip`, `omits the marker when not stalled`; frames in /tmp/stalled-tree-shots/web/ |
+| AC8 | `TestTickIsOSeatsNoExternalCalls` |
+| AC9 | shipped (small): mobile read-only tree row shows "Stalled · no run for N min"; test in `mobile/src/__tests__/taskTree.test.ts` |
+
+Mutations (each reverted afterwards): (1) drop the already-alerted check =>
+`TestSecondTickSameEpisodeDoesNotReAlert`, `TestRestartDoesNotReAlertAlertedEpisode`,
+`TestTickIsOSeatsNoExternalCalls` fail; (2) ignore the rate-limit reset =>
+`TestRateLimitedWaitSeatFutureResetDoesNotAlert`,
+`TestRateLimitedWaitSeatAlertsNMinutesAfterReset` fail; (3) ignore running
+children => `TestRunningChildRunSuppresses` fails.
+
+Not verified: a real push send to a device; the marker in the real daemon-served
+web bundle (frames use the real app against an intercepted task.tree response);
+the marker on the real mobile screen; the "run starts and clears the episode"
+path on a live daemon (needs a model run; covered by the unit test only).
