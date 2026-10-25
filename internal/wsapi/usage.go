@@ -109,6 +109,8 @@ type usageSummaryEntry struct {
 	ReasoningTokens  int64    `json:"reasoningTokens"`
 	CostUSD          *float64 `json:"costUsd,omitempty"`
 	Unreported       []string `json:"unreported,omitempty"`
+	// Providers is only carried by runs rows: the distinct providers behind the group.
+	Providers []string `json:"providers,omitempty"`
 }
 
 func usageSummaryEntryFrom(u store.UsageSummary) usageSummaryEntry {
@@ -125,7 +127,7 @@ func runUsageSummaryEntryFrom(u store.RunUsageSummary) usageSummaryEntry {
 		Scope: usageScopeRuns,
 		Key:   u.Key, Count: u.Count, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
 		CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens,
-		ReasoningTokens: u.ReasoningTokens, CostUSD: u.CostUSD, Unreported: u.Unreported,
+		ReasoningTokens: u.ReasoningTokens, CostUSD: u.CostUSD, Unreported: u.Unreported, Providers: u.Providers,
 	}
 }
 

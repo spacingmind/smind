@@ -156,3 +156,38 @@ func TestSummarizeRunUsage_UnreportedFields(t *testing.T) {
 		}
 	}
 }
+
+func TestSummarizeRunUsage_ReturnsDistinctProvidersPerGroup(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	task := newTestTaskForRuns(t, s)
+	other := newTestTaskForRuns(t, s)
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	for i, c := range []struct {
+		id       string
+		task     int64
+		provider string
+	}{
+		{"p1", task.ID, "glm"}, {"p2", task.ID, "claude-native"}, {"p3", task.ID, "glm"}, {"p4", other.ID, "codex-native"},
+	} {
+		newTestRunFor(t, s, c.task, c.id, base.Add(time.Duration(i)*time.Minute))
+		if err := s.UpsertRunUsage(RunUsage{RunID: c.id, TaskID: c.task, Provider: c.provider, Source: "t", InputTokens: ptr(int64(1))}); err != nil {
+			t.Fatalf("UpsertRunUsage() error = %v", err)
+		}
+	}
+	sums, err := s.SummarizeRunUsage(nil, nil, "task")
+	if err != nil || len(sums) != 2 {
+		t.Fatalf("SummarizeRunUsage() = %+v, %v; want 2 groups", sums, err)
+	}
+	byKey := map[string][]string{}
+	for _, u := range sums {
+		byKey[u.Key] = u.Providers
+	}
+	if got := byKey[fmt.Sprint(task.ID)]; len(got) != 2 || got[0] != "claude-native" || got[1] != "glm" {
+		t.Errorf("task providers = %v, want [claude-native glm]", got)
+	}
+	if got := byKey[fmt.Sprint(other.ID)]; len(got) != 1 || got[0] != "codex-native" {
+		t.Errorf("other providers = %v, want [codex-native]", got)
+	}
+}
