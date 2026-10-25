@@ -88,7 +88,7 @@ export function PRPanelPane({ taskId, focused }: { taskId: number; focused: bool
   const [pendingCheckId, setPendingCheckId] = useState<string | null>(null);
   const details = query.data;
   useRefetchWhenAvailable(details, focused, query.refetch, query.dataUpdatedAt);
-  useDismissRefreshError(refresh.error, focused, refresh.reset);
+  useDismissRefreshError(refresh.limited ?? refresh.error, focused, refresh.reset);
   // A newer answer supersedes the refresh error.
   const resetRefresh = refresh.reset;
   useEffect(() => resetRefresh(), [query.dataUpdatedAt, resetRefresh]);
@@ -127,7 +127,7 @@ export function PRPanelPane({ taskId, focused }: { taskId: number; focused: bool
   } else {
     body = (
       <>
-        <PRHeader details={details} onRefresh={() => refresh.refresh()} refreshing={refresh.isPending} />
+        <PRHeader details={details} onRefresh={() => refresh.refresh()} refreshing={refresh.isPending} settled={refresh.limited !== null} />
         <PRNotice details={details} />
         {(refresh.error || (query.isError && query.error)) && (
           <div className="border-b px-4 py-2">

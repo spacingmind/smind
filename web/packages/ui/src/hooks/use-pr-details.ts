@@ -84,6 +84,12 @@ export function usePRDetails(taskId: number | null, { focused }: { focused: bool
   return query;
 }
 
+/**
+ * A `refresh_limited` whose `retryAt` is this close (or missing) is the per-task floor of a few seconds, not the hourly
+ * cap: the panel treats it as "just refreshed" (a quiet, settled Refresh), not as a failure.
+ */
+const REFRESH_FLOOR_MAX_MS = 10_000;
+
 /** The panel's Refresh: an explicit `refresh: true` read whose result replaces the cache. */
 export function useRefreshPRDetails(taskId: number) {
   const { client } = useDaemonConnection();
@@ -96,7 +102,16 @@ export function useRefreshPRDetails(taskId: number) {
     onSuccess: (details) => queryClient.setQueryData(queryKeys.taskPRDetails(taskId), details),
   });
   const error: PrErrorView | null = mutation.error ? describePrError(mutation.error, "details") : null;
-  return { refresh: mutation.mutate, isPending: mutation.isPending, error, reset: mutation.reset };
+  const retryAt = error?.retryAt ? Date.parse(error.retryAt) : NaN;
+  const insideFloor = error?.code === "refresh_limited" && (Number.isNaN(retryAt) || retryAt - Date.now() <= REFRESH_FLOOR_MAX_MS);
+  // `limited` is the floor (quiet); `error` is everything else, the hourly cap included.
+  return {
+    refresh: mutation.mutate,
+    isPending: mutation.isPending,
+    limited: insideFloor ? error : null,
+    error: insideFloor ? null : error,
+    reset: mutation.reset,
+  };
 }
 
 /** A failing check's log tail, read only when its "Send to chat" is clicked. */

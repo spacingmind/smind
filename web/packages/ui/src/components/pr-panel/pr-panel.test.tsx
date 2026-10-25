@@ -297,10 +297,11 @@ describe("PRPanelPane", () => {
     });
   });
 
-  describe("refresh error", () => {
+  describe("refresh inside the floor", () => {
     const reads = (c: FakeWsClient) => c.calls.filter((x) => x.method === "task.prDetails");
     const limited = (retryAt?: string) => Object.assign(new Error(""), { code: "refresh_limited", data: retryAt ? { retryAt } : undefined });
     const advance = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
+    const refreshButton = () => screen.getByTestId("pr-refresh") as HTMLButtonElement;
 
     async function failRefresh(details: PRDetails, retryAfterMs?: number) {
       const client = new FakeWsClient();
@@ -314,43 +315,57 @@ describe("PRPanelPane", () => {
       expect(reads(client)).toHaveLength(2);
       const retryAt = retryAfterMs === undefined ? undefined : new Date(Date.now() + retryAfterMs).toISOString();
       await act(async () => reads(client)[1]!.reject(limited(retryAt)));
-      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
       return { client, view };
     }
 
-    it("refresh_limited error clears at retryAt", async () => {
+    it("is a quiet settled state, not an error line", async () => {
+      await failRefresh(prDetails({ fetchedAt: "2020-01-01T00:00:00Z" }), 3000);
+      expect(screen.queryByTestId("pr-refresh-error")).toBeNull();
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(refreshButton().disabled).toBe(true);
+      expect(screen.queryByTestId("pr-refresh-spinner")).toBeNull();
+      expect(screen.getByTestId("pr-fetched").textContent).toBe("Updated just now");
+    });
+
+    it("settles until retryAt, then Refresh works again", async () => {
       await failRefresh(prDetails(), 3000);
       await advance(2999);
-      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
+      expect(refreshButton().disabled).toBe(true);
       await advance(1);
-      expect(screen.queryByTestId("pr-refresh-error")).toBeNull();
+      expect(refreshButton().disabled).toBe(false);
+      expect(screen.getByTestId("pr-fetched").textContent).not.toBe("Updated just now");
     });
 
-    it("refresh_limited error without retryAt clears after 8 s", async () => {
+    it("settles for 8 s when the daemon sent no retryAt", async () => {
       await failRefresh(prDetails());
       await advance(7999);
-      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
+      expect(refreshButton().disabled).toBe(true);
       await advance(1);
-      expect(screen.queryByTestId("pr-refresh-error")).toBeNull();
+      expect(refreshButton().disabled).toBe(false);
     });
 
-    it("error clears when new data arrives", async () => {
+    it("the hourly cap (retryAt far away) stays a visible error", async () => {
+      await failRefresh(prDetails(), 30 * 60_000);
+      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
+      expect(refreshButton().disabled).toBe(false);
+    });
+
+    it("settled state clears when new data arrives", async () => {
       const { client } = await failRefresh(prDetails(), 60_000);
       // The header snapshot moved (a push): the panel reads again.
       await act(async () => client.pushNotification("task.git", { taskId: 1, git: gitWith({ ...gitPr(), headSha: "bbb" }) }));
       await advance(0);
       expect(reads(client)).toHaveLength(3);
-      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
       await act(async () => reads(client)[2]!.resolve(prDetails({ title: "Newer" })));
-      expect(screen.queryByTestId("pr-refresh-error")).toBeNull();
+      expect(refreshButton().disabled).toBe(false);
       expect(screen.getByText("Newer")).toBeTruthy();
     });
 
-    it("error timer is cleared on blur", async () => {
+    it("settled timer is cleared on blur", async () => {
       const { client, view } = await failRefresh(prDetails(), 3000);
       view.rerender(<Harness client={client} focused={false} />);
       await advance(60_000);
-      expect(screen.getByTestId("pr-refresh-error")).toBeTruthy();
+      expect(refreshButton().disabled).toBe(true);
     });
   });
 
