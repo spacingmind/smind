@@ -133,6 +133,9 @@ func wrapListLine(l string) []string {
 		indent = l[:len(l)-len(strings.TrimLeft(l, " \t"))]
 	}
 	lines := wrapWordsIndent(strings.TrimSpace(l), indent)
+	if indent != "  " || (!strings.HasPrefix(l, "- ") && !strings.HasPrefix(l, "* ")) {
+		lines[0] = indent + lines[0]
+	}
 	return lines
 }
 
