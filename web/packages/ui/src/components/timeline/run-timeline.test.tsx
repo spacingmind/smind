@@ -88,7 +88,7 @@ describe("RunTimeline", () => {
     expect(screen.getByTestId("timeline-unknown")).toHaveTextContent("todo_list");
   });
 
-  it("a finished run shows model, duration and cost and no \"done\"", () => {
+  it("a finished run shows model and duration and no \"done\"", () => {
     const { rerender } = render(
       <ul>
         <RunTimeline
@@ -103,7 +103,6 @@ describe("RunTimeline", () => {
     const footer = screen.getByTestId("run-footer");
     expect(within(footer).getByTestId("run-model")).toHaveTextContent("Sonnet 4.5");
     expect(within(footer).getByTestId("run-elapsed")).toHaveTextContent("2s");
-    expect(within(footer).getByTestId("run-usage-pill")).toHaveTextContent("$0.03");
     expect(footer.textContent).not.toContain("done");
     expect(footer.textContent).not.toContain("claude-native");
     // No stop-reason segment on a normal finish.
@@ -529,15 +528,13 @@ describe("RunTimeline", () => {
 describe("RunTimeline borderless chrome", () => {
   /**
    * Allow-list: semantic borders that legitimately stay inside a message --
-   * markdown tables/blockquotes (rendered under `.markdown`, timeline-markdown.tsx)
-   * the usage Popover's content (a floating surface, not a message row), and
+   * markdown tables/blockquotes (rendered under `.markdown`, timeline-markdown.tsx) and
    * the shared Button primitive (`border-transparent` is invisible; the retry
    * button's outline variant is an actionable control, not message chrome).
    */
   function borderOffenders(root: HTMLElement): string[] {
     const offenders: string[] = [];
     for (const el of root.querySelectorAll("*")) {
-      if (el.closest("[data-testid='run-usage-popover']")) continue;
       // Radix `asChild` triggers overwrite data-slot, so the action-bar buttons (the same Button primitive) read as these.
       if (el.closest("[data-slot='button'], [data-slot='tooltip-trigger'], [data-slot='dropdown-menu-trigger']")) continue;
       if (el.closest(".markdown, [data-testid='timeline-assistant']")) continue;
@@ -578,7 +575,6 @@ describe("RunTimeline borderless chrome", () => {
       for (const btn of [...screen.queryAllByTestId("tool-group-toggle")]) fireEvent.click(btn);
       for (const btn of [...screen.queryAllByTestId("tool-call-toggle")]) fireEvent.click(btn);
       for (const d of document.querySelectorAll("details")) d.setAttribute("open", "");
-      fireEvent.click(screen.getByTestId("run-usage-pill"));
 
       expect(borderOffenders(screen.getByTestId("run-entry"))).toEqual([]);
     });

@@ -47,3 +47,13 @@ describe("RunFooter provenance segment", () => {
     expect(screen.queryByTestId("run-provenance")).toBeNull();
   });
 });
+
+describe("RunFooter usage", () => {
+  it("run footer renders no usage pill or cost text for a run with usage", () => {
+    render(<RunFooter run={run({ usage: { inputTokens: 12345, outputTokens: 1234, costUsd: 0.03, source: "claude_result" } })} />);
+    expect(screen.queryByTestId("run-usage-pill")).toBeNull();
+    const text = screen.getByTestId("run-footer").textContent ?? "";
+    expect(text).not.toContain("$");
+    expect(text).not.toContain("tokens");
+  });
+});
