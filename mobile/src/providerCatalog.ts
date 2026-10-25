@@ -56,6 +56,23 @@ export function selectProvider(providers: ProviderInfo[], providerId: string, re
   return { provider: p.id, model: resolveModel(p, remembered), mode: resolveMode(p, remembered) };
 }
 
+/**
+ * The offline catalog (ADR-0042 AC31): the four built-ins, used only while provider.list has not answered or failed,
+ * so the new-task form is never empty because one fetch was lost. The daemon's own list is the single source once it
+ * answers (instances and providers.custom entries included) and is never merged with this one.
+ */
+export const FALLBACK_PROVIDERS: ProviderInfo[] = [
+  { id: 'claude-native', label: 'Claude Code', runner: 'claude-native' },
+  { id: 'codex-native', label: 'Codex', runner: 'codex-native' },
+  { id: 'glm', label: 'GLM', runner: 'acp' },
+  { id: 'kimi', label: 'Kimi', runner: 'acp' },
+];
+
+/** The daemon's catalog when it gave one (null = the fetch failed, [] = it listed nothing), else the offline fallback. */
+export function catalogOrFallback(served: ProviderInfo[] | null): ProviderInfo[] {
+  return served !== null && served.length > 0 ? served : FALLBACK_PROVIDERS;
+}
+
 /** label ?? id. */
 export function providerLabel(p: ProviderInfo): string {
   return p.label ?? p.id;

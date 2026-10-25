@@ -258,8 +258,15 @@ export interface ModelInfo {
 }
 
 export interface ProviderInfo {
+  /** A string, not a closed set: the four built-ins plus every providers.custom entry (ADR-0042). */
   id: string;
   label?: string;
+  /** Which runner executes it; an instance (`extends`) runs through its base's. */
+  runner?: 'claude-native' | 'codex-native' | 'acp';
+  /** Instances only: the built-in this one is a second login of. */
+  extends?: string;
+  /** True for a providers.custom entry (an instance or an ACP provider). */
+  custom?: boolean;
   modes?: ModeInfo[];
   defaultMode?: string;
   models?: ModelInfo[];

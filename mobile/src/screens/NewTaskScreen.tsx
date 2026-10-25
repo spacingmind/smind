@@ -24,7 +24,7 @@ import {
   singleFlight,
   submitNewTask,
 } from '../newTask';
-import { NewTaskSelection, defaultSelection, modeOptions, modelOptions, providerLabel, selectProvider } from '../providerCatalog';
+import { NewTaskSelection, catalogOrFallback, defaultSelection, modeOptions, modelOptions, providerLabel, selectProvider } from '../providerCatalog';
 import { recallSelection, rememberSelection } from '../newTaskPrefs';
 import { issueMessage, spacesFor } from '../newTaskForm';
 import { taskHref } from '../navigation/routes';
@@ -66,7 +66,9 @@ export function NewTaskScreen({ conn }: { conn: RelayConnection }) {
     setLoad({ kind: 'loading' });
     (async () => {
       try {
-        const [workspaces, providers] = await Promise.all([listWorkspaces(conn), listProviders(conn)]);
+        // A lost provider.list must not strand the form: the offline built-ins take over (workspaces still must load).
+        const [workspaces, served] = await Promise.all([listWorkspaces(conn), listProviders(conn).catch(() => null)]);
+        const providers = catalogOrFallback(served);
         const first = workspaces[0];
         const spaces = first ? await conn.call('space.list', { workspaceId: first.ID }) : [];
         if (!alive) return;
