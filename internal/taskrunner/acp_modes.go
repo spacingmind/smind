@@ -187,7 +187,7 @@ func (r *Runner) maybeProbe(provider Provider, probe func(context.Context, Provi
 // listModes probe pattern. Every permission request is denied: a probe
 // never prompts, so none should arrive.
 func (r *Runner) probeACPModes(ctx context.Context, provider Provider) error {
-	command, ok := r.acpCommands[provider]
+	command, ok := r.acpCommandFor(provider)
 	if !ok {
 		return fmt.Errorf("no ACP command configured for provider %q", provider)
 	}
@@ -197,7 +197,11 @@ func (r *Runner) probeACPModes(ctx context.Context, provider Provider) error {
 	}
 	defer os.RemoveAll(dir)
 
-	client, err := r.newACPClient(command, acp.WithPermissionPolicy(acp.AutoDenyPolicy{}))
+	popts := []acp.Option{acp.WithPermissionPolicy(acp.AutoDenyPolicy{})}
+	if env := r.acpEnvEntries(provider); len(env) > 0 {
+		popts = append(popts, acp.WithEnv(env...))
+	}
+	client, err := r.newACPClient(command, popts...)
 	if err != nil {
 		return fmt.Errorf("spawn: %w", err)
 	}
@@ -229,10 +233,10 @@ func (r *Runner) recordSessionModes(provider Provider, client acpBackend, sessio
 // string (ADR-0025).
 func (r *Runner) probeCodexModels(ctx context.Context, provider Provider) error {
 	var copts []codex.Option
-	if env := r.providerEnvEntries(ProviderCodexNative); len(env) > 0 {
+	if env := r.providerEnvEntries(provider); len(env) > 0 {
 		copts = append(copts, codex.WithEnv(env...))
 	}
-	client, err := r.newCodexClient(r.codexCommand, copts...)
+	client, err := r.newCodexClient(r.codexCommandFor(provider), copts...)
 	if err != nil {
 		return fmt.Errorf("spawn: %w", err)
 	}

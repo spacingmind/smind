@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/providers"
 )
 
 // ModelInfo is one model a provider offers (ADR-0025): ID is the string the
@@ -46,13 +47,18 @@ func claudeModels() []ModelInfo {
 	}
 }
 
-// staticModels is provider's built-in model catalog: Claude's static list;
-// ACP and Codex are discovered at runtime (see Runner.ProviderCatalog).
-func staticModels(provider Provider) []ModelInfo {
-	if provider == ProviderClaudeNative {
+// staticModels is s's built-in model catalog: Claude's static list, or a
+// custom ACP provider's configured one; ACP and Codex are otherwise
+// discovered at runtime (see Runner.ProviderCatalog).
+func staticModels(s providers.Spec) []ModelInfo {
+	if s.Runner == providers.RunnerClaude {
 		return claudeModels()
 	}
-	return nil
+	var out []ModelInfo
+	for _, m := range s.Models {
+		out = append(out, ModelInfo{ID: m.ID, Label: m.Label, Description: m.Description, Default: m.Default})
+	}
+	return out
 }
 
 // ValidateModelSyntax checks a model string's shape: empty (the provider

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/providers"
 )
 
 // ErrConfigOptionsNotSupported is returned (wrapped) by
@@ -63,27 +64,15 @@ func (r *Runner) endACPTurn(chatID int64) {
 	}
 }
 
-// acpProvider reports whether provider's turns are driven over ACP -- the
-// same distinction RunPrompt's dispatch switch makes, factored out here so
-// the config-option methods below share one source of truth for it.
-func acpProvider(provider Provider) bool {
-	switch provider {
-	case ProviderGLM, ProviderKimi:
-		return true
-	default:
-		return false
-	}
-}
-
 // ConfigOptions returns the config options the agent advertised for
 // chatID's ACP session, discovered once at session creation. A provider
 // that doesn't speak ACP (claude-native, codex-native), or a chat whose
 // ACP session hasn't been created yet, reports an empty list.
 func (r *Runner) ConfigOptions(chatID int64, provider Provider) []acp.ConfigOption {
-	if provider == ProviderClaudeNative {
+	if r.isClaude(provider) {
 		return r.claudeConfigOptions(chatID)
 	}
-	if !acpProvider(provider) {
+	if !r.isACP(provider) {
 		return nil
 	}
 	r.sessionMu.Lock()
@@ -102,13 +91,13 @@ func (r *Runner) ConfigOptions(chatID int64, provider Provider) []acp.ConfigOpti
 // whose session isn't currently live (turn not running, or finished), it
 // fails rather than silently no-opping.
 func (r *Runner) SetSessionConfigOption(ctx context.Context, chatID int64, provider Provider, configID, value string) ([]acp.ConfigOption, error) {
-	if provider == ProviderClaudeNative {
+	if r.isClaude(provider) {
 		return r.setClaudeConfigOption(ctx, chatID, configID, value)
 	}
-	if provider == ProviderCodexNative && configID == acpModelConfigCategory {
+	if r.runnerOf(provider) == providers.RunnerCodex && configID == acpModelConfigCategory {
 		return nil, ErrCodexModelNextRun
 	}
-	if !acpProvider(provider) {
+	if !r.isACP(provider) {
 		return nil, fmt.Errorf("taskrunner: set config option: %s: %w", provider, ErrConfigOptionsNotSupported)
 	}
 

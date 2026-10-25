@@ -172,7 +172,7 @@ func TestTaskWait_ExitCodes(t *testing.T) {
 		}
 		ch := make(chan res, 1)
 		go func() {
-			c, o, e := sendCaptured(t, []string{"task", "wait", runID})
+			c, o, e := waitCaptured(runID)
 			ch <- res{c, o, e}
 		}()
 		time.Sleep(200 * time.Millisecond)
@@ -246,9 +246,8 @@ func TestTaskWait_PrintsPendingPermissionHint(t *testing.T) {
 	ch := make(chan res, 1)
 	go func() {
 		code := -1
-		e := captureStderr(t, func() {
-			captureStdout(t, func() { code = run([]string{"task", "wait", runID}) })
-		})
+		var e string
+		code, _, e = waitCaptured(runID)
 		mu.Lock()
 		stderrBuf = e
 		mu.Unlock()

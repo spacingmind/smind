@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/attach"
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -799,7 +800,7 @@ func validateIsolation(provider taskrunner.Provider, opts []StartOption) error {
 	if startPurpose(opts) == "" {
 		return errors.New("runs: start: WithIsolation requires a system purpose (WithPurpose)")
 	}
-	if provider != taskrunner.ProviderClaudeNative {
+	if !providers.IsClaude(string(provider)) {
 		return fmt.Errorf("runs: start: %w (got %q)", taskrunner.ErrIsolationUnsupported, provider)
 	}
 	return nil
@@ -826,7 +827,7 @@ func validateProbe(provider taskrunner.Provider, opts []StartOption) error {
 	if o.isolation != nil {
 		return errors.New("runs: start: WithProbe and WithIsolation are mutually exclusive")
 	}
-	if provider != taskrunner.ProviderClaudeNative {
+	if !providers.IsClaude(string(provider)) {
 		return fmt.Errorf("runs: start: %w (got %q)", taskrunner.ErrIsolationUnsupported, provider)
 	}
 	if !o.probe.Launch.Prepared() {

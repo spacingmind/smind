@@ -197,7 +197,7 @@ func (denyAllClaudePolicy) Decide(_ context.Context, _ claudecode.CanUseToolRequ
 func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, provider Provider, prompt string, model string, iso IsolationOptions, events chan<- Event) error {
 	defer close(events)
 
-	if provider != ProviderClaudeNative {
+	if !r.isClaude(provider) {
 		return fmt.Errorf("%w (got %q)", ErrIsolationUnsupported, provider)
 	}
 	if iso.SystemPrompt == "" {
@@ -252,7 +252,7 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 		opts = append(opts, claudecode.WithCLIPath(cliPath))
 		env = append(env, launchEnv...)
 	}
-	env = append(env, r.providerEnvEntries(ProviderClaudeNative)...)
+	env = append(env, r.providerEnvEntries(provider)...)
 	opts = append(opts, claudecode.WithEnv(env...))
 	if model != "" && model != ClaudeModelDefault {
 		opts = append(opts, claudecode.WithModel(model))
