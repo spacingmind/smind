@@ -30,6 +30,10 @@ type Input struct {
 	Branch       string // "" = task has no branch
 	BaseRef      string // branch name, e.g. "develop"
 	BaseSha      string // fork commit; "" = unknown
+	// ParentBranch is the parent task's branch ("" = no parent or none);
+	// DefaultBase the workspace default base. Both feed Base.PRDefault.
+	ParentBranch string
+	DefaultBase  string
 	BranchOwned  bool
 	Untrusted    bool
 	// ForkPR: the task was started from a pull request on a fork (stored PR
@@ -76,6 +80,10 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 	}()
 
 	g.Base = &Base{Ref: in.BaseRef, Sha: in.BaseSha, Known: in.BaseSha != ""}
+	if in.ParentBranch != "" && in.ParentBranch == in.BaseRef {
+		g.Base.ParentBranch = in.ParentBranch
+	}
+	g.Base.PRDefault = in.BaseRef
 	if in.WorktreePath == "" || in.Branch == "" {
 		return g // no worktree: nothing local to ask git
 	}
@@ -101,6 +109,11 @@ func Compute(ctx context.Context, run Runner, in Input) (g TaskGit) {
 	cmp := compareRef(ctx, run, repo, in.BaseRef)
 	if cmp != "" {
 		g.Base.Tip = revParse(ctx, run, repo, cmp)
+	}
+	g.Base.Gone = in.BaseRef != "" && g.Base.Tip == ""
+	if g.Base.ParentBranch != "" {
+		pushed := revParse(ctx, run, repo, "refs/remotes/"+originRemote+"/"+g.Base.ParentBranch) != ""
+		g.Base.PRDefault = PRDefaultBase(in.BaseRef, g.Base.ParentBranch, in.DefaultBase, pushed)
 	}
 
 	var ahead, behind *int

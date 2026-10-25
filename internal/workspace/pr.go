@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/forge"
+	"github.com/spacingmind/smind/internal/gitstate"
 )
 
 // The git steps behind task.prPreview, task.createPr and task.updatePr
@@ -104,6 +105,13 @@ func (m *Manager) prTarget(id int64, baseBranch string) (prTarget, error) {
 	base := strings.TrimSpace(baseBranch)
 	if base == "" {
 		base = t.BaseRef
+		if t.ParentTaskID != nil && base != "" {
+			// A stacked task targets its parent's branch only while pushed.
+			if parent, err := m.store.GetTask(*t.ParentTaskID); err == nil && parent.Branch != nil {
+				pushed := gitRefCommitExists(ws.Path, "refs/remotes/"+originRemote+"/"+*parent.Branch)
+				base = gitstate.PRDefaultBase(base, *parent.Branch, workspaceDefaultBase(ws), pushed)
+			}
+		}
 	}
 	if base == "" {
 		base = workspaceDefaultBase(ws)
