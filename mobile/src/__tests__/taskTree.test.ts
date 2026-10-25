@@ -5,6 +5,7 @@ import type { TaskTreeNode, TaskTreeUsage } from '../api';
 import {
   MAX_RENDERED_NODES,
   attentionRollup,
+  budgetLine,
   buildTreeRows,
   costLabel,
   formatCost,
@@ -206,5 +207,35 @@ describe('stalledNote', () => {
     expect(rows[1]).toMatchObject({ stalledNote: 'Stalled · no run for 23 min' });
     expect(rows[0]).toMatchObject({ stalledNote: null });
     expect(stalledNote({ stalled: true, stalledSince: 'nope' }, NOW)).toBeNull();
+  });
+});
+
+describe('tree budget line', () => {
+  const tree = (root: Partial<TaskTreeNode>) => ({ nodes: [node(1, { childCount: 1, ...root }), node(2)], truncated: false });
+
+  it('shows nothing without a budget', () => {
+    expect(budgetLine(node(1))).toBeNull();
+    expect(budgetLine(node(1, { budgetUsd: null }))).toBeNull();
+    expect(buildTreeRows(tree({}), NOW, none).budget).toBeNull();
+  });
+
+  it('shows spent / cap under the cap', () => {
+    expect(budgetLine(node(1, { budgetUsd: 5, budgetSpentUsd: 4.2 }))).toEqual({ text: 'Budget $4.20 / $5.00', tone: 'default' });
+    expect(buildTreeRows(tree({ budgetUsd: 5, budgetSpentUsd: 4.2 }), NOW, none).budget?.text).toBe('Budget $4.20 / $5.00');
+  });
+
+  it('treats a missing spent as $0.00', () => {
+    expect(budgetLine(node(1, { budgetUsd: 5 }))?.text).toBe('Budget $0.00 / $5.00');
+  });
+
+  it('marks a partial total with + and "partial"', () => {
+    expect(budgetLine(node(1, { budgetUsd: 5, budgetSpentUsd: 4.2, budgetPartial: true }))).toEqual({ text: '$4.20+ / $5.00 · partial', tone: 'default' });
+    expect(budgetLine(node(1, { budgetUsd: 5, budgetSpentUsd: 1, budgetUnknownRuns: 2 }))?.text).toBe('$1.00+ / $5.00 · partial');
+  });
+
+  it('reads as over budget in the danger tone', () => {
+    expect(budgetLine(node(1, { budgetUsd: 5, budgetSpentUsd: 5.5, overBudget: true }))).toEqual({ text: 'Over budget · $5.50 / $5.00', tone: 'danger' });
+    expect(budgetLine(node(1, { budgetUsd: 5, budgetSpentUsd: 5 }))?.tone).toBe('danger');
+    expect(budgetLine(node(1, { budgetUsd: 5, budgetSpentUsd: 6, overBudget: true, budgetPartial: true }))?.text).toBe('Over budget · $6.00+ / $5.00 · partial');
   });
 });
