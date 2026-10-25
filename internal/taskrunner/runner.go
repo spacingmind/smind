@@ -18,6 +18,7 @@ import (
 	"github.com/spacingmind/smind/internal/acp"
 	"github.com/spacingmind/smind/internal/claudecli"
 	"github.com/spacingmind/smind/internal/codex"
+	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/workspace"
 )
@@ -939,9 +940,10 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 		claudecode.WithPermissionMode(mode),
 		claudecode.WithExtraArgs(map[string]*string{claudeAllowBypassFlag: nil}),
 	)
-	if settings := claudeGitAskSettings(mode); settings != "" {
+	if settings := claudeSettings(mode, config.Dir()); settings != "" {
 		// G13: the CLI asks before git push / gh pr create / ... even in
-		// auto, where it would otherwise run them without a prompt.
+		// auto, where it would otherwise run them without a prompt; deny
+		// rules keep the built-in tools off smind's own secrets.
 		opts = append(opts, claudecode.WithSettings(settings))
 	}
 	switch {

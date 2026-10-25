@@ -172,6 +172,35 @@ launches Peers in `auto` mode, a push or a pull request from any of them still
 stops and waits for you. For Codex runs the daemon adds the matching label to the
 permission request text; Codex's own sandbox decides what it escalates.
 
+## What an agent can read
+
+An agent runs as your operating-system user, so it can read smind's own files
+(the auth token, `config.yaml`, `smind.db`, the relay key pair) unless the
+agent provider's sandbox or permissions stop it. smind is not a security
+boundary against its own agents. What it adds is cheap and provider-side:
+
+- **Claude native:** every run's `--settings` carries `permissions.deny` rules
+  for the files of the current `SMIND_HOME`: `Read`, `Edit` and `Write` of the
+  token, `config.yaml`, `relay-keypair.json`, `smind.db` (and its `-wal` and
+  `-shm`) and each plugin's `data/` directory, plus `Bash` rules for the common
+  readers of those exact files (`cat`, `less`, `more`, `head`, `tail`, `grep`,
+  `sed`, `awk`, `cp`, `base64`, `xxd`, `strings`, `sqlite3`). The task
+  worktrees under `$SMIND_HOME/worktrees` are not covered. The rules apply in
+  every permission mode, bypass included. A program the rules do not name
+  (a Python or Node script, for example) can still read the files.
+- **Codex native:** smind sends Codex's own `approvalPolicy` and `sandbox` on
+  `thread/start`: `on-request` with `workspace-write` in `auto`, and `never`
+  with `danger-full-access` in `full-access`. Codex documents `workspace-write`
+  as limiting writes to the workspace; it does not restrict reads, and Codex
+  has no per-path read-deny setting that smind could pass, so smind adds no
+  rules there. Treat a Codex run as able to read these files.
+- **Stronger isolation:** run the daemon, or the agents, inside an OS-level
+  sandbox or a container. The learning probe already does this for its own
+  runs.
+
+Further reading: the [plugin system decision record](../docs/decisions/0042-plugin-system.md)
+states the same same-user limit for plugin processes.
+
 ## One tree at a time
 
 Two guards limit how much one tree can do at once. Both are in `config.yaml`:
