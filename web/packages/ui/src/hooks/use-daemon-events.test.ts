@@ -71,6 +71,7 @@ describe("useDaemonEvents", () => {
         "task.git",
         "forge.status",
         "provider.updated",
+        "task.stalled",
       ],
     });
 
