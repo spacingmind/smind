@@ -217,7 +217,7 @@ function PluginsSection(_props: SettingsSectionContext) {
             title="No plugins installed"
             description={
               <>
-                Install one from a directory with <code className="font-mono text-ui-sm">smind plugin install &lt;path&gt;</code>
+                Install one from a directory with <code className="font-mono text-ui-sm whitespace-nowrap">smind plugin install &lt;path&gt;</code>
               </>
             }
           />
@@ -544,14 +544,14 @@ function PluginRow({
           </span>
           <span className="truncate text-ui-sm text-muted-foreground">{p.id}</span>
           {p.lastError && (
-            <span className="truncate text-ui-sm text-destructive" title={p.lastError} data-testid={`plugin-error-${p.id}`}>
+            <span className="line-clamp-2 break-words text-ui-sm text-destructive" title={p.lastError} data-testid={`plugin-error-${p.id}`}>
               {p.lastError}
             </span>
           )}
           {linkWarning && (
-            <span className="flex items-center gap-1 text-ui-sm text-warning" data-testid={`plugin-link-warning-${p.id}`}>
-              <Icons.warning aria-hidden className="size-3.5 shrink-0" />
-              <span className="truncate">{linkWarning}</span>
+            <span className="flex items-start gap-1 text-ui-sm text-warning" data-testid={`plugin-link-warning-${p.id}`}>
+              <Icons.warning aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+              <span>{linkWarning}</span>
             </span>
           )}
           {error && <FormError message={error} size="sm" testId={`plugin-row-error-${p.id}`} />}
@@ -641,7 +641,7 @@ function PluginDetail({ plugin: p, locked, onReviewUpdate }: { plugin: PluginInf
             {mcp.map((s) => (
               <li key={`mcp-${s.name}`} className="flex items-center gap-2 text-ui-sm">
                 <span className="w-16 shrink-0 text-foreground-muted">MCP server</span>
-                <span className="min-w-0 truncate">{s.name}</span>
+                <span className="min-w-0 truncate">{`${p.id}:${s.name}`}</span>
                 <OwnerBadge owner={p.active ? p.id : null} link={false} />
               </li>
             ))}
@@ -655,7 +655,7 @@ function PluginDetail({ plugin: p, locked, onReviewUpdate }: { plugin: PluginInf
             {profiles.map((a) => (
               <li key={`profile-${a.name}`} className="flex items-center gap-2 text-ui-sm">
                 <span className="w-16 shrink-0 text-foreground-muted">Agent</span>
-                <span className="min-w-0 truncate">{a.name}</span>
+                <span className="min-w-0 truncate">{`${p.id}:${a.name}`}</span>
                 <OwnerBadge owner={p.active ? p.id : null} link={false} />
               </li>
             ))}
