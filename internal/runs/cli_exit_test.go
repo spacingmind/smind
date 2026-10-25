@@ -108,3 +108,56 @@ func containsAny(s string, subs []string) bool {
 	}
 	return false
 }
+
+// exitErrFor runs scenario to its cli_exited failure and returns the run error text.
+func exitErrFor(t *testing.T, scenario string) (string, time.Duration) {
+	t.Helper()
+	e := claudeScenarioEnv(t, scenario)
+	start := time.Now()
+	id := startClaude(t, e)
+	st := waitForStatus(t, e.reg, id, StatusError, 15*time.Second)
+	if st.FailureKind != "cli_exited" {
+		t.Fatalf("FailureKind = %q, want cli_exited (err %q)", st.FailureKind, st.Err)
+	}
+	return st.Err, time.Since(start)
+}
+
+// TestCLIExit_StderrDrainedBeforeError: the CLI writes three stderr chunks
+// with pauses and exits non-zero; the stream ends at stdout EOF, but the error
+// must still carry every chunk.
+func TestCLIExit_StderrDrainedBeforeError(t *testing.T) {
+	t.Parallel()
+	got, _ := exitErrFor(t, "cli-exit-chunks")
+	for _, want := range []string{"chunk-one", "chunk-two", "chunk-three"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Err missing %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "stderr incomplete") {
+		t.Errorf("Err marks complete stderr as incomplete: %s", got)
+	}
+}
+
+// TestCLIExit_StderrDrain_BoundedWhenPipeHeldOpen: a grandchild keeps stderr
+// open for 6s after the CLI exits; the error is built within the drain bound
+// (2s, not 6s) and says stderr may be incomplete.
+func TestCLIExit_StderrDrain_BoundedWhenPipeHeldOpen(t *testing.T) {
+	t.Parallel()
+	got, took := exitErrFor(t, "cli-exit-held")
+	if !strings.Contains(got, "(stderr incomplete)") {
+		t.Errorf("Err does not mark stderr incomplete: %s", got)
+	}
+	if took > 4500*time.Millisecond {
+		t.Errorf("error took %s, want within the drain bound", took)
+	}
+}
+
+// TestCLIExit_NoStderr_StillTyped: a CLI that writes nothing to stderr still
+// ends as a typed cli_exited error, stderr "empty", with no incomplete mark.
+func TestCLIExit_NoStderr_StillTyped(t *testing.T) {
+	t.Parallel()
+	got, _ := exitErrFor(t, "cli-exit-nostderr")
+	if !strings.Contains(got, "stderr: empty") || strings.Contains(got, "stderr incomplete") {
+		t.Errorf("Err = %s, want stderr: empty and no incomplete mark", got)
+	}
+}
