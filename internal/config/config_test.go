@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -257,5 +258,40 @@ func TestConfig_OrchestrationNotifyDefaults(t *testing.T) {
 	}
 	if _, err := load("orchestration:\n  notifyDebounceSeconds: -1\n"); err == nil {
 		t.Fatal("Load() accepted a negative notifyDebounceSeconds")
+	}
+}
+
+func loadOrchestrationYAML(t *testing.T, yaml string) (Config, error) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return Load()
+}
+
+func TestStallAlertMinutesDefaultAndZero(t *testing.T) {
+	if got := Default().Orchestration.StallAlertMinutes; got != 15 {
+		t.Fatalf("Default() stallAlertMinutes = %d, want 15", got)
+	}
+	cfg, err := loadOrchestrationYAML(t, "orchestration:\n  maxDepth: 2\n")
+	if err != nil || cfg.Orchestration.StallAlertMinutes != 15 {
+		t.Fatalf("absent key: %d, %v, want 15", cfg.Orchestration.StallAlertMinutes, err)
+	}
+	cfg, err = loadOrchestrationYAML(t, "orchestration:\n  stallAlertMinutes: 0\n")
+	if err != nil || cfg.Orchestration.StallAlertMinutes != 0 {
+		t.Fatalf("explicit 0: %d, %v, want 0 (off)", cfg.Orchestration.StallAlertMinutes, err)
+	}
+	cfg, err = loadOrchestrationYAML(t, "orchestration:\n  stallAlertMinutes: 1\n")
+	if err != nil || cfg.Orchestration.StallAlertMinutes != 1 {
+		t.Fatalf("explicit 1: %d, %v", cfg.Orchestration.StallAlertMinutes, err)
+	}
+}
+
+func TestStallAlertMinutesNegativeRejected(t *testing.T) {
+	_, err := loadOrchestrationYAML(t, "orchestration:\n  stallAlertMinutes: -1\n")
+	if err == nil || !strings.Contains(err.Error(), "orchestration.stallAlertMinutes must be >= 0, got -1") {
+		t.Fatalf("Load() error = %v, want the stallAlertMinutes error", err)
 	}
 }
