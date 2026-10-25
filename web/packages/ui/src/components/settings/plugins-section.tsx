@@ -641,21 +641,21 @@ function PluginDetail({ plugin: p, locked, onReviewUpdate }: { plugin: PluginInf
             {mcp.map((s) => (
               <li key={`mcp-${s.name}`} className="flex items-center gap-2 text-ui-sm">
                 <span className="w-16 shrink-0 text-foreground-muted">MCP server</span>
-                <span className="min-w-0 truncate">{`${p.id}:${s.name}`}</span>
+                <span className="min-w-0 break-all">{`${p.id}:${s.name}`}</span>
                 <OwnerBadge owner={p.active ? p.id : null} link={false} />
               </li>
             ))}
             {skills.map((s) => (
               <li key={`skill-${s}`} className="flex items-center gap-2 text-ui-sm">
                 <span className="w-16 shrink-0 text-foreground-muted">Skill</span>
-                <span className="min-w-0 truncate">{`${p.id}:${s}`}</span>
+                <span className="min-w-0 break-all">{`${p.id}:${s}`}</span>
                 <OwnerBadge owner={p.active ? p.id : null} link={false} />
               </li>
             ))}
             {profiles.map((a) => (
               <li key={`profile-${a.name}`} className="flex items-center gap-2 text-ui-sm">
                 <span className="w-16 shrink-0 text-foreground-muted">Agent</span>
-                <span className="min-w-0 truncate">{`${p.id}:${a.name}`}</span>
+                <span className="min-w-0 break-all">{`${p.id}:${a.name}`}</span>
                 <OwnerBadge owner={p.active ? p.id : null} link={false} />
               </li>
             ))}
