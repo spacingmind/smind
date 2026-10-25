@@ -69,7 +69,7 @@ func (r *Runner) RunPromptProbe(ctx context.Context, taskID, chatID int64, provi
 	}()
 	fail := func(e error) error { rep.End = arm.EndError; return e }
 
-	if provider != ProviderClaudeNative {
+	if !r.isClaude(provider) {
 		return fail(fmt.Errorf("%w (got %q)", ErrIsolationUnsupported, provider))
 	}
 	switch {

@@ -5,6 +5,8 @@
 // regardless of which backend a given task's agent actually speaks.
 package taskrunner
 
+import "github.com/spacingmind/smind/internal/providers"
+
 // Provider identifies which backend agent protocol drives a task's turn.
 type Provider string
 
@@ -120,40 +122,58 @@ type ProviderInfo struct {
 	// (run.setPermissionMode) -- false for Codex, whose mode only applies
 	// at thread start.
 	LiveModeSwitch bool `json:"liveModeSwitch,omitempty"`
+
+	// Runner is how the provider's turns run: "claude-native",
+	// "codex-native" or "acp" (an instance reports its base's). Kind above is
+	// the separate auth classification. Extends names the built-in provider
+	// an instance extends (empty otherwise); Custom marks a providers.custom
+	// entry (an ACP provider or an instance). All three are additive wire
+	// fields (ADR-0042, AC31/AC37).
+	Runner  string `json:"runner,omitempty"`
+	Extends string `json:"extends,omitempty"`
+	Custom  bool   `json:"custom,omitempty"`
 }
 
-// SupportedProviders is the single source of truth for which providers the
-// daemon supports -- every provider RunPrompt can dispatch to, in dropdown
-// display order, with their human labels. provider.list serves this; the
-// web UI renders both its run/task provider dropdown and (via
+// SupportedProviders lists the registered providers (internal/providers,
+// the single source of truth for which providers the daemon supports) in
+// dropdown display order. provider.list serves it through Runner.ProviderCatalog;
+// the web UI renders its run/task provider dropdown and (via
 // CredentialKind/AccountProvider) its accounts dialog from it. A provider
-// added here (and to RunPrompt's switch) shows up in the UI without client
-// changes.
+// registered there shows up everywhere without a code edit here.
 //
 // Each entry carries its static permission mode catalog (see
 // staticModes); Runner.ProviderCatalog layers ACP agents' discovered modes
 // on top.
-func SupportedProviders() []ProviderInfo {
-	providers := []ProviderInfo{
-		{ID: ProviderClaudeNative, Label: "Claude Code", CredentialKind: CredentialKindOAuth, AccountProvider: "anthropic", LiveModeSwitch: true, Images: "yes"},
-		{ID: ProviderGLM, Label: "GLM", Kind: ProviderKindCLI, SupportsAutoAccept: true, LiveModeSwitch: true, Images: "no"},
-		{ID: ProviderKimi, Label: "Kimi", CredentialKind: CredentialKindAPIKey, AccountProvider: "kimi", SupportsAutoAccept: true, LiveModeSwitch: true, Images: "unknown"},
-		{ID: ProviderCodexNative, Label: "Codex", CredentialKind: CredentialKindOAuth, AccountProvider: "openai", Images: "yes"},
+func SupportedProviders() []ProviderInfo { return providerInfos(providers.Default()) }
+
+func providerInfos(reg *providers.Registry) []ProviderInfo {
+	specs := reg.List()
+	out := make([]ProviderInfo, len(specs))
+	for i, s := range specs {
+		out[i] = infoFromSpec(s)
 	}
-	for i := range providers {
-		providers[i].Modes, providers[i].DefaultMode = staticModes(providers[i].ID)
-		providers[i].Models = staticModels(providers[i].ID)
-	}
-	return providers
+	return out
 }
 
-// ProviderInfoFor returns SupportedProviders' entry for provider, and
-// false for an unknown one.
-func ProviderInfoFor(provider Provider) (ProviderInfo, bool) {
-	for _, p := range SupportedProviders() {
-		if p.ID == provider {
-			return p, true
-		}
+// infoFromSpec is a provider's static catalog entry.
+func infoFromSpec(s providers.Spec) ProviderInfo {
+	info := ProviderInfo{
+		ID: Provider(s.ID), Label: s.Label, Kind: ProviderKind(s.Kind),
+		CredentialKind: ProviderCredentialKind(s.CredentialKind), AccountProvider: s.AccountProvider,
+		Images: s.Images, SupportsAutoAccept: s.SupportsAutoAccept, LiveModeSwitch: s.LiveModeSwitch,
+		Runner: string(s.Runner), Extends: s.Extends, Custom: s.Custom,
 	}
-	return ProviderInfo{}, false
+	info.Modes, info.DefaultMode = staticModes(s)
+	info.Models = staticModels(s)
+	return info
+}
+
+// ProviderInfoFor returns the registered entry for provider, and false for
+// an unknown one.
+func ProviderInfoFor(provider Provider) (ProviderInfo, bool) {
+	s, ok := providers.Default().Get(string(provider))
+	if !ok {
+		return ProviderInfo{}, false
+	}
+	return infoFromSpec(s), true
 }

@@ -15,6 +15,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/codex"
 )
 
 // Runner is how a provider's turns are driven.
@@ -74,9 +77,10 @@ type Spec struct {
 	// not the built-in table.
 	Custom bool
 
-	// Command and Env launch an ACP provider (Command is argv; Env is the
-	// free-form environment of that command). Instances use the registry's
-	// per-provider launch env (config providers.custom[].env), not Env.
+	// Command is the argv a turn spawns (ACP agent, or `codex app-server`;
+	// unused for claude-native, which the SDK launches). Env is a custom ACP
+	// provider's free-form command environment; an instance's allowlisted
+	// launch env is not here but in the runner's per-provider env.
 	Command []string
 	Env     map[string]string
 
@@ -123,11 +127,11 @@ func builtins() []Spec {
 			LiveModeSwitch: true, Images: "yes", HealthCommand: []string{"claude"},
 			ToolEvents: true, Reflect: true, Delivery: DeliveryProjection},
 		{ID: IDGLM, Label: "GLM", Runner: RunnerACP, Kind: "cli", SupportsAutoAccept: true, LiveModeSwitch: true, Images: "no",
-			HealthCommand: []string{"npx", "-y", "glm-acp-agent"}, ToolEvents: true, Delivery: DeliveryPreface},
+			Command: acp.GLMCommand(), HealthCommand: acp.GLMCommand(), ToolEvents: true, Delivery: DeliveryPreface},
 		{ID: IDKimi, Label: "Kimi", Runner: RunnerACP, CredentialKind: "api-key", AccountProvider: "kimi", SupportsAutoAccept: true,
-			LiveModeSwitch: true, Images: "unknown", ToolEvents: true, Delivery: DeliveryPreface},
+			LiveModeSwitch: true, Images: "unknown", Command: acp.KimiCommand(), ToolEvents: true, Delivery: DeliveryPreface},
 		{ID: IDCodexNative, Label: "Codex", Runner: RunnerCodex, CredentialKind: "oauth", AccountProvider: "openai", Images: "yes",
-			HealthCommand: []string{"codex"}},
+			Command: codex.DefaultCommand(), HealthCommand: []string{"codex"}},
 	}
 }
 
