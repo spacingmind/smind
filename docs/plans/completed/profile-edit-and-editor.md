@@ -1,6 +1,6 @@
 # `smind profile edit` + web profile editor contract/failover fields (ADR-0041 S1w)
 
-**Status 2026-10-25 (plans hygiene): PARTIAL.** PR-CLI #574 (AC-C1..C6 confirmed with a real isolated-daemon run) and PR-WEB #576 (AC-W1..W3, W5 confirmed by tests) are merged. Open: AC-W4, the light/dark screenshot and transition-frame pass of the editor, which has no recorded evidence.
+**Status 2026-10-25: DONE.** PR-CLI #574 (AC-C1..C6 confirmed with a real isolated-daemon run) and PR-WEB #576 (AC-W1..W3, W5 confirmed by tests) are merged. AC-W4 CONFIRMED 2026-10-25 by a light/dark screenshot and transition-frame pass (Validation — Web, below; one visual bug found and fixed). Every AC is now confirmed: moved to completed.
 
 Size: L (6) — scope 2, PRs 2, risk 1, decisions 0, verify 1
 
@@ -68,4 +68,10 @@ Web (`profiles-section.test.tsx`, `use-profiles.test.ts`):
 Never filled in by PR-WEB. Hygiene pass 2026-10-25: PR-WEB merged as #576 (PR-CLI as #574). AC-W1, AC-W2, AC-W3 and AC-W5 are covered by tests present on `origin/develop` in
 `web/packages/ui/src/components/settings/profiles-section.test.tsx` (`keeps failover and contract fields when saving an unrelated edit`, `sends orchestrationTools null/true/false per the select`,
 `shows child profiles only for childPolicy profiles`, `shows the fallback profile select only for onRateLimit fallback`, `renders a daemon validation error inline and keeps the form open`,
-`instructions over 16 KiB blocks save with a message`). AC-W4 (light and dark screenshots with transition frames) has no recorded evidence: open.
+`instructions over 16 KiB blocks save with a message`). AC-W4 (light and dark screenshots with transition frames), confirmed 2026-10-25 on an isolated daemon (port 49871, own SMIND_HOME, no model call); evidence kept in `/tmp/evidence-pass/profile-edit-and-editor/`, every image looked at, light + dark, 1280 + 390 px:
+- Editor opening on a seat profile (name, provider/mode/thinking row, notes, Seat contract: orchestration tools On, skills, child policy Profiles with a child-profile checklist, instructions with `23 / 16384 bytes`, rate-limit row), compact and aligned in both themes; at 390 px the fields stack in one column with no horizontal overflow.
+- Fallback field appearing: None -> Fallback adds "Fallback agent" next to "On rate limit" at 1280 (nothing else moves, bbox delta 0.0 on name, notes, instructions, child policy) and below it at 390 (only Save moves down 62 px, as intended).
+- Child profiles appearing: None -> Profiles inserts the checklist; only elements below it move (102 px); name/notes/policy delta 0.0.
+- Inline error: a same-provider fallback gives the daemon text `fallback profile must use a different provider than the profile it backs up` in red above Save, form stays open with edits kept, Save moves down by the error height only (29 px at 1280, 50 px at 390 where the text wraps).
+- Instructions over 16 KiB: red border, red counter text "17000 / 16384 bytes — too long to save, shorten the instructions", Save disabled.
+- Bug found and fixed (commit `fix(web): profile actions menu keeps its Edit label while it fades out`): choosing "Edit" in the row's "..." menu opened the editor before the menu finished fading, and its first item flipped to "Close" (and showed over the new name field) for ~4 frames. The label is now fixed to the row state at menu open; 2 new tests in `profiles-section.test.tsx`; mutation check: reading the live `editing` flag again makes `Edit does not turn into Close under the pointer once the editor opens` fail (1 red, 35 green with the fix). Re-captured frames show "Edit" fading out.
