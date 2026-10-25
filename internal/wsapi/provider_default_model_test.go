@@ -10,11 +10,13 @@ import (
 
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/taskrunner"
+	"github.com/spacingmind/smind/internal/workspace"
 )
 
 type pdmHarness struct {
 	api    *API
 	runner *taskrunner.Runner
+	wm     *workspace.Manager
 	path   string
 }
 
@@ -29,7 +31,7 @@ func newPDMHarness(t *testing.T) *pdmHarness {
 		t.Fatal(err)
 	}
 	t.Cleanup(api.Close)
-	return &pdmHarness{api: api, runner: runner, path: filepath.Join(home, "config.yaml")}
+	return &pdmHarness{api: api, runner: runner, wm: wm, path: filepath.Join(home, "config.yaml")}
 }
 
 func (h *pdmHarness) set(rc *requestContext, provider, model string) (any, error) {

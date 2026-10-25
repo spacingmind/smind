@@ -17,6 +17,7 @@ import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useProfileList } from "@/hooks/use-profiles";
 import { useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
+import { continuePrompt } from "@/components/timeline/run-footer-model";
 import { ChatOutlineRail } from "@/components/timeline/chat-outline-rail";
 import { useAutoFollow } from "@/components/timeline/use-auto-follow";
 import { useChatOutline } from "@/components/timeline/use-chat-outline";
@@ -290,7 +291,7 @@ export function TaskDetailPane({
       .finally(() => rerunsInFlight.current.delete(run.id));
   }, []);
   const rerun = useCallback((run: RunEntry) => resubmit(run, run.prompt), [resubmit]);
-  const continueRun = useCallback((run: RunEntry) => resubmit(run, "Continue"), [resubmit]);
+  const continueRun = useCallback((run: RunEntry) => resubmit(run, continuePrompt(run)), [resubmit]);
   const editPrompt = useCallback((run: RunEntry) => {
     setActionError(null);
     setPrefill((prev) => ({ text: run.prompt, nonce: (prev?.nonce ?? 0) + 1 }));

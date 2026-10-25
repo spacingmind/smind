@@ -334,7 +334,9 @@ type taskWaitOutput struct {
 	StopNote          string                `json:"stopNote,omitempty"`
 	// Disposition is "needs-continue" when the run ended done at a turn,
 	// token or budget cap: state is still "done" (no new status), but the
-	// work is not finished. Absent otherwise.
+	// work is not finished. It is also set on an error run that is resumable
+	// (cli_exited, or rate_limited past its reset, with a stored session).
+	// Absent otherwise.
 	Disposition string `json:"disposition,omitempty"`
 	// State is the unambiguous summary of why task_wait returned:
 	// waiting_permission | running | done | error | stopped | timed_out.
@@ -373,7 +375,9 @@ func buildTaskWaitOutput(result runLogsResult, ignore map[string]bool, timedOut 
 		if out.State != "done" && out.State != "stopped" {
 			out.State = "error"
 		}
-		if result.Disposition == "needs-continue" {
+		if result.Disposition == "needs-continue" && result.Status == "error" {
+			out.Message = "Run " + result.RunID + " failed in a resumable way (" + result.FailureKind + "): the agent's session is stored. Send a follow-up prompt such as \"Continue from where you left off\" with task_send on the same task (and the run's chatId from run_list if it is not the default chat) to resume it."
+		} else if result.Disposition == "needs-continue" {
 			out.Message = "Run " + result.RunID + " ended at a cap (" + result.StopReason + "): its status is done but the work is NOT finished. Send a follow-up prompt such as \"continue\" with task_send on the same task (and the run's chatId from run_list if it is not the default chat) to resume it; do not treat this as complete."
 		}
 	case timedOut:

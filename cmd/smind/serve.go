@@ -21,6 +21,7 @@ import (
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/logging"
 	"github.com/spacingmind/smind/internal/mcpservers"
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/quota"
 	"github.com/spacingmind/smind/internal/relay/bridge"
 	"github.com/spacingmind/smind/internal/relay/devices"
@@ -114,6 +115,12 @@ func cmdServe(args []string) int {
 		wtSettings.HasPorts, wtSettings.PortLo, wtSettings.PortHi = true, lo, hi
 	}
 	wm.SetWorktreesConfig(wtSettings)
+
+	// providers.custom (ACP entries and instances) joins the built-in providers
+	// before anything dispatches; config load already validated it.
+	if err := providers.Default().SetCustom(config.ProviderSpecs(cfg.Providers.Custom)); err != nil {
+		log.Fatalf("config: providers.custom%v", err)
+	}
 
 	// A second Registry over the same db is fine: it only reads.
 	runnerOpts := []taskrunner.Option{taskrunner.WithSessionStore(taskrunner.NewChatSessionStore(db)), taskrunner.WithACPModeProbe(), taskrunner.WithMcpServers(mcpservers.New(db))}

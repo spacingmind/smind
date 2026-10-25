@@ -40,8 +40,10 @@ func TestFinish_GLM429ClassifiedAsRateLimited(t *testing.T) {
 	t.Parallel()
 	// Real end to end run: the fake GLM agent's quota-error scenario.
 	got := runToErrorStatus(t, "quota-error")
-	if got.Status != StatusError || got.Disposition != "" {
-		t.Fatalf("status = %q disposition = %q, want error and none", got.Status, got.Disposition)
+	// The scenario's reset (2026-10-22) is in the past and the fake agent stored a
+	// session, so the run is resumable (J1: rate_limited after its reset).
+	if got.Status != StatusError || got.Disposition != DispositionNeedsContinue {
+		t.Fatalf("status = %q disposition = %q, want error and needs-continue", got.Status, got.Disposition)
 	}
 	if got.FailureKind != "rate_limited" || got.FailureWindow != "5h" {
 		t.Fatalf("failure = %q/%q, want rate_limited/5h", got.FailureKind, got.FailureWindow)

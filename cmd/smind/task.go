@@ -1833,6 +1833,16 @@ func runModelCell(r runSummaryRow) string {
 // finished). A failed run with an error text reads "error: <cause>"; a
 // rate-limited one reads "error: rate limited (5h window), resets ...".
 func runStatusCell(r runSummaryRow, now time.Time) string {
+	text := runStatusText(r, now)
+	if r.Status == "error" && r.Disposition != "" {
+		// A resumable failure (J1: cli_exited, or rate_limited past its reset) is
+		// not finished work either: a follow-up prompt resumes the session.
+		text += " (" + r.Disposition + ")"
+	}
+	return text
+}
+
+func runStatusText(r runSummaryRow, now time.Time) string {
 	status, disposition, errText := r.Status, r.Disposition, r.Err
 	if status == "error" && r.FailureKind == "rate_limited" {
 		return status + ": " + rateLimitedText(r.FailureWindow, r.FailureResetAt, r.FailureResetInferred, now)

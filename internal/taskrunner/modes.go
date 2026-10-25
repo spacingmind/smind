@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/spacingmind/smind/internal/providers"
 )
 
 // ModeInfo is one of a provider's own permission modes (ADR-0019): the id
@@ -117,18 +119,24 @@ func acpBypassLike(id string) bool {
 	return false
 }
 
-// staticModes returns provider's built-in mode catalog and default mode id
-// -- the discovered-at-runtime ACP catalog aside (see
-// Runner.ProviderCatalog), this is the full answer.
-func staticModes(provider Provider) (modes []ModeInfo, defaultMode string) {
-	switch provider {
-	case ProviderClaudeNative:
+// staticModes returns s's built-in mode catalog and default mode id -- the
+// discovered-at-runtime ACP catalog aside (see Runner.ProviderCatalog), this
+// is the full answer. A custom ACP provider's own modes (providers.custom
+// `modes`) win over the single-entry fallback.
+func staticModes(s providers.Spec) (modes []ModeInfo, defaultMode string) {
+	switch s.Runner {
+	case providers.RunnerClaude:
 		return claudeModes(), ClaudeModeAcceptEdits
-	case ProviderCodexNative:
+	case providers.RunnerCodex:
 		return codexModes(), CodexModeAuto
-	default:
-		return acpFallbackModes(), ACPModeDefault
 	}
+	if len(s.Modes) > 0 {
+		for _, m := range s.Modes {
+			modes = append(modes, ModeInfo{ID: m.ID, Label: m.Label, Description: m.Description, AutoApproves: m.AutoApproves})
+		}
+		return modes, s.DefaultMode
+	}
+	return acpFallbackModes(), ACPModeDefault
 }
 
 // PermissionSettings is a run's provider-native permission configuration
@@ -172,7 +180,7 @@ func ValidatePermissionSettings(catalog ProviderInfo, s PermissionSettings) erro
 	if s.Mode == "" {
 		return nil
 	}
-	if acpProvider(catalog.ID) && !catalog.ModesDiscovered {
+	if catalog.Runner == string(providers.RunnerACP) && !catalog.ModesDiscovered {
 		return nil
 	}
 	ids := make([]string, len(catalog.Modes))
@@ -201,7 +209,7 @@ func ModeAutoApproves(catalog ProviderInfo, s PermissionSettings) bool {
 			return m.AutoApproves
 		}
 	}
-	return acpProvider(catalog.ID) && acpBypassLike(mode)
+	return catalog.Runner == string(providers.RunnerACP) && acpBypassLike(mode)
 }
 
 // ProviderCatalog returns SupportedProviders with every ACP provider's
@@ -209,38 +217,38 @@ func ModeAutoApproves(catalog ProviderInfo, s PermissionSettings) bool {
 // provider.list and for run-start validation. It never blocks on
 // discovery.
 func (r *Runner) ProviderCatalog() []ProviderInfo {
-	providers := SupportedProviders()
-	for i := range providers {
-		providers[i].DefaultModel = r.DefaultModel(providers[i].ID)
+	infos := providerInfos(r.providerRegistry())
+	for i := range infos {
+		infos[i].DefaultModel = r.DefaultModel(infos[i].ID)
 	}
-	for i, p := range providers {
-		switch {
-		case acpProvider(p.ID):
+	for i, p := range infos {
+		switch providers.Runner(p.Runner) {
+		case providers.RunnerACP:
 			c, ok := r.acpCatalog(p.ID)
 			m, mok := r.acpModelCatalog(p.ID)
 			if !ok && !mok {
 				r.maybeProbeACPModes(p.ID)
 			}
 			if ok {
-				providers[i].Modes = append([]ModeInfo(nil), c.modes...)
-				providers[i].DefaultMode = c.defaultMode
-				providers[i].ModesDiscovered = true
+				infos[i].Modes = append([]ModeInfo(nil), c.modes...)
+				infos[i].DefaultMode = c.defaultMode
+				infos[i].ModesDiscovered = true
 			}
 			if mok {
-				providers[i].Models = append([]ModelInfo(nil), m.models...)
-				providers[i].ModelsDiscovered = true
+				infos[i].Models = append([]ModelInfo(nil), m.models...)
+				infos[i].ModelsDiscovered = true
 			}
-		case p.ID == ProviderCodexNative:
+		case providers.RunnerCodex:
 			m, ok := r.acpModelCatalog(p.ID)
 			if !ok {
 				r.maybeProbe(p.ID, r.probeCodexModels)
 				continue
 			}
-			providers[i].Models = append([]ModelInfo(nil), m.models...)
-			providers[i].ModelsDiscovered = true
+			infos[i].Models = append([]ModelInfo(nil), m.models...)
+			infos[i].ModelsDiscovered = true
 		}
 	}
-	return providers
+	return infos
 }
 
 // DefaultModel is the configured default model for provider

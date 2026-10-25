@@ -399,6 +399,7 @@ type Client struct {
 	conn      *conn
 	policy    PermissionPolicy
 	logWriter io.Writer
+	env       []string
 
 	mu           sync.Mutex
 	sessionCwd   map[string]string
@@ -420,6 +421,12 @@ type Option func(*Client)
 // parsed as protocol) to w. Defaults to io.Discard.
 func WithLogWriter(w io.Writer) Option {
 	return func(c *Client) { c.logWriter = w }
+}
+
+// WithEnv adds NAME=VALUE entries to the agent's environment, after the
+// inherited one (last entry wins).
+func WithEnv(env ...string) Option {
+	return func(c *Client) { c.env = append(c.env, env...) }
 }
 
 // WithPermissionPolicy overrides the default PermissionPolicy. See
@@ -446,7 +453,7 @@ func New(command []string, opts ...Option) (*Client, error) {
 		opt(c)
 	}
 
-	conn, err := newConn(command, c.logWriter)
+	conn, err := newConnEnv(command, c.logWriter, c.env)
 	if err != nil {
 		return nil, err
 	}
