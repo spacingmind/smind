@@ -1,6 +1,7 @@
 import type { MouseEvent, ReactNode } from "react";
 
 import { Icons } from "@/lib/icons";
+import { OwnerBadge } from "@/components/plugins/owner-badge";
 
 import { ProfileIcon, ProviderIcon } from "@/components/provider-icon";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,8 @@ export interface PickerProfileRow {
   /** "" = the provider's default model. */
   model: string;
   notes?: string;
+  /** The plugin id that contributed this agent (ADR-0042); shown as a "from <plugin>" badge. */
+  owner?: string | null;
 }
 
 export interface RowShellProps {
@@ -133,6 +136,7 @@ export function ProfileRow({
     <RowShell {...shell} testId={`model-profile-row-${profile.id}`} selected={checked}>
       <ProfileIcon className="shrink-0 text-foreground-muted" />
       <span className="max-w-[50%] shrink-0 truncate text-ui-base text-foreground">{profile.name}</span>
+      <OwnerBadge owner={profile.owner} link={false} testId={`model-profile-owner-${profile.id}`} />
       {checked && custom && (
         <span className="shrink-0 rounded bg-muted px-1 text-ui-xs text-foreground-muted">custom</span>
       )}

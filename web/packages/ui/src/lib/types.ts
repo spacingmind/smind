@@ -118,6 +118,10 @@ export interface AgentProfile {
   ChildProfileIDs?: number[];
   OnRateLimit?: string;
   FallbackProfileID?: number | null;
+  /** The plugin id that contributed this profile (ADR-0042; the only lowercase keys on the profile wire); null/absent for the user's own. */
+  owner?: string | null;
+  /** True for a plugin-owned profile: read-only for every caller. */
+  readOnly?: boolean;
   CreatedAt: string;
   UpdatedAt: string;
 }
@@ -1042,6 +1046,10 @@ export interface McpServer {
   /** http/sse only; values always "[redacted]" on read. */
   headers: Record<string, string>;
   enabled: boolean;
+  /** The plugin id that contributed this row (ADR-0042); null/absent for a row the user made. */
+  owner?: string | null;
+  /** True for a plugin-owned row: every write to it fails with `read_only_owned`. */
+  readOnly?: boolean;
   createdAt: string;
   updatedAt: string;
 }

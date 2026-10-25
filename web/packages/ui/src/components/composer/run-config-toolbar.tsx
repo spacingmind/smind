@@ -368,6 +368,7 @@ function RunConfigToolbarModelPicker() {
         provider: p.Provider,
         model: p.Model ?? "",
         notes: p.Notes || undefined,
+        owner: p.owner ?? undefined,
       })),
     [meta.profiles, meta.providers],
   );

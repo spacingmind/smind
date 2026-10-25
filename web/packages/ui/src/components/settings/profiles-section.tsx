@@ -29,6 +29,7 @@ import { supportsThinking, THINKING_LEVELS } from "@/lib/thinking-levels";
 import { describeProfile } from "@/lib/describe-profile";
 import type { AgentProfile, ModeInfo, ProviderInfo } from "@/lib/types";
 import { Icons } from "@/lib/icons";
+import { OwnerBadge } from "@/components/plugins/owner-badge";
 import { ProfileContractFields } from "@/components/settings/profile-contract-fields";
 import { contractFromProfile, contractParams, EMPTY_CONTRACT, instructionsBytes, INSTRUCTIONS_MAX_BYTES, type ProfileContractState } from "@/components/settings/profile-contract";
 
@@ -249,6 +250,8 @@ function ProfilesSection(_props: SettingsSectionContext) {
                 {profiles.map((p) => {
                   const isDefault = defaultAgentId === String(p.ID);
                   const editing = openCard === p.ID;
+                  // A plugin-owned agent is read-only for every caller: manage it in Settings -> Plugins.
+                  const owned = p.readOnly === true || !!p.owner;
                   return (
                     <li key={p.ID} data-testid={`profile-row-${p.ID}`} className="flex flex-col gap-2 rounded-lg px-2 py-1.5 hover:bg-hover">
                       <div className="flex items-center justify-between gap-2">
@@ -267,21 +270,26 @@ function ProfilesSection(_props: SettingsSectionContext) {
                           <Icons.defaultAgent aria-hidden fill={isDefault ? "currentColor" : "none"} />
                         </Button>
                         <div className="flex min-w-0 flex-1 flex-col">
-                          <span className="truncate text-ui-base font-medium text-foreground">{p.Name}</span>
+                          <span className="flex items-center gap-2">
+                            <span className="truncate text-ui-base font-medium text-foreground">{p.Name}</span>
+                            <OwnerBadge owner={p.owner} testId={`profile-owner-${p.ID}`} />
+                          </span>
                           <span className="truncate text-ui-sm text-muted-foreground">{describeProfile(p, providers)}</span>
                           {p.Notes && <span className="truncate text-ui-sm text-foreground-subtlest">{p.Notes}</span>}
                         </div>
-                        <ProfileActionsMenu
-                          profile={p}
-                          editing={editing}
-                          onToggleEdit={() => (editing ? closeCard() : startEdit(p))}
-                          onDelete={() => {
-                            setDeletingProfile(p);
-                            deleteAction.reset();
-                          }}
-                        />
+                        {!owned && (
+                          <ProfileActionsMenu
+                            profile={p}
+                            editing={editing}
+                            onToggleEdit={() => (editing ? closeCard() : startEdit(p))}
+                            onDelete={() => {
+                              setDeletingProfile(p);
+                              deleteAction.reset();
+                            }}
+                          />
+                        )}
                       </div>
-                      {editing && (
+                      {editing && !owned && (
                         <ProfileForm
                           idPrefix={`profile-edit-form-${p.ID}`}
                           form={form}

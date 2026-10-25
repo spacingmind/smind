@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 
 import { instructionsBytes, INSTRUCTIONS_MAX_BYTES, type ChildPolicyChoice, type OnRateLimitChoice, type OrchestrationToolsChoice, type ProfileContractState } from "@/components/settings/profile-contract";
+import { OwnerBadge } from "@/components/plugins/owner-badge";
 import { Input } from "@/components/ui/input";
+import { useSkillList } from "@/hooks/use-plugins";
 import type { AgentProfile } from "@/lib/types";
 
 const SELECT_CLASS =
@@ -44,6 +46,8 @@ export function ProfileContractFields<S extends ProfileContractState>({
   const bytes = instructionsBytes(form.instructions);
   const over = bytes > INSTRUCTIONS_MAX_BYTES;
   const toolsOff = form.orchestrationTools === "off";
+  const available = useSkillList().data ?? [];
+  const named = new Set(form.skills.split(/[\s,]+/).filter(Boolean));
 
   return (
     <>
@@ -73,6 +77,25 @@ export function ProfileContractFields<S extends ProfileContractState>({
             value={form.skills}
             onChange={(e) => setForm((f) => ({ ...f, skills: e.target.value }))}
           />
+          {available.length > 0 && (
+            <div className="flex flex-wrap gap-1" data-testid={id("skills-available")}>
+              {available.map((skill) => (
+                <span key={skill.name} className="inline-flex items-center gap-1">
+                  <button
+                    type="button"
+                    data-testid={id(`skill-${skill.name}`)}
+                    disabled={named.has(skill.name)}
+                    title={skill.description || undefined}
+                    className="rounded-full border border-border px-1.5 text-ui-sm text-foreground-muted hover:bg-hover disabled:opacity-50"
+                    onClick={() => setForm((f) => ({ ...f, skills: f.skills.trim() ? `${f.skills.trim().replace(/,$/, "")}, ${skill.name}` : skill.name }))}
+                  >
+                    {skill.name}
+                  </button>
+                  <OwnerBadge owner={skill.owner} testId={id(`skill-owner-${skill.name}`)} />
+                </span>
+              ))}
+            </div>
+          )}
         </Field>
         <Field label="Child policy" htmlFor={id("child-policy")}>
           <select

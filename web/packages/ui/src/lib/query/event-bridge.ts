@@ -97,6 +97,12 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       return;
     }
     case "plugin.updated": {
+      // {id, globalEnabled}: a plugin changed, or the global switch flipped (id ""). The plugin list is stale, and so
+      // is every list holding plugin-owned rows (an owned profile or skill appears or vanishes with the plugin; the
+      // MCP list refetches itself on this event).
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pluginList() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.skillList() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.profileList() });
       // {id, globalEnabled}: an install, enable, disable, remove, update, reload or a flip of plugins.enabled.
       void queryClient.invalidateQueries({ queryKey: queryKeys.pluginCommands() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.pluginThemes() });

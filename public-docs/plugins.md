@@ -66,6 +66,49 @@ warning "live directory: changes after consent are not re-reviewed", and
 their names say. Disabling or removing a plugin takes its servers, skills and
 profiles away at once.
 
+## The Plugins page
+
+Settings → Plugins shows what is installed and lets you manage it in the web
+app and the desktop app. The page cannot turn plugins on: with `plugins.enabled`
+off it shows **Plugins are off**, how to set it in `config.yaml`, and every
+action stays disabled until you edit the file.
+
+Each plugin is a row with its name, version, where it came from (`dir`, `link`,
+`git` or `archive`) and its status: **Enabled** or **Disabled**, plus **Pending
+update** and **Error** when they apply. An error row shows the last error the
+daemon recorded. A linked plugin carries the line "Live directory: changes after
+consent are not re-reviewed". With no plugins the page says **No plugins
+installed** and shows `smind plugin install <path>`.
+
+- **Details** (the arrow on the row) show the same summary `smind plugin enable`
+  prints: whether anything runs, the capabilities, each command, the hook
+  events, the skills and the agents, with an agent that raises the permission
+  mode, skips prompts, gets orchestration tools or may launch children marked
+  **Escalates**. They also list what the plugin contributes, anything that was
+  not applied, the last error, and when it was installed and updated.
+- **Enable** opens that summary in a confirmation (with the live-directory
+  warning for a linked plugin). Nothing is enabled until you confirm.
+  **Disable** needs no confirmation.
+- The row's menu has **Reload**, **Check for update** (or **Review update** when
+  one is pending) and **Remove**. Remove asks first and has a **Keep plugin data**
+  box, off by default; a linked directory is never deleted.
+- An update that changes what a plugin runs shows **Update available** with each
+  change; **Review and apply** asks you to confirm the new summary.
+- **Install plugin** takes a plugin directory, a Git URL pinned to a full commit
+  or an archive pinned with `#sha256=`. The plugin is installed disabled, and
+  its details open so you can review it before enabling.
+
+These actions are refused on a relay connection, and on a remote login unless
+`plugins.allowRemoteManage` is set. The page shows the daemon's message and
+becomes read-only. The page has no process logs yet: it says "Process logs
+arrive with plugin processes."
+
+Anything a plugin added is labelled "from acme" (its id) in Settings → MCP
+servers and Settings → Agents, in the agent picker of the composer, and next to
+the plugin's skills when you choose skills for an agent. These rows cannot be
+edited, disabled or deleted there; the badge opens the plugin in Settings →
+Plugins.
+
 ## The manifest
 
 ```json

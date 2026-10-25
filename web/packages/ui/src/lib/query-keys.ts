@@ -57,6 +57,10 @@ export const queryKeys = {
   /** `provider.dirSuggestions`: the directories Settings -> Providers offers as one-click instances. */
   providerDirSuggestions: () => ["provider.dirSuggestions"] as const,
   profileList: () => ["profile.list"] as const,
+  /** `plugin.list` (ADR-0042): the global switch and every plugin; live via the `plugin.updated` event. */
+  pluginList: () => ["plugin.list"] as const,
+  /** `skill.list`: bundled skills and the active plugins' `<plugin>:<skill>` entries. */
+  skillList: () => ["skill.list"] as const,
   /** `plugin.commands`: the prompt slash commands of the active plugins; refetched on `plugin.updated`. */
   pluginCommands: () => ["plugin.commands"] as const,
   /** `plugin.themes`: the themes of the active plugins; refetched on `plugin.updated`. */

@@ -376,7 +376,8 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
         },
       };
     }
-    if (existing.length === 1 && onEditProfile) {
+    // A plugin-owned agent cannot be edited: its row offers the list (Settings -> Agents, where it is labelled) instead.
+    if (existing.length === 1 && onEditProfile && !existing[0]!.owner) {
       const only = existing[0]!;
       return {
         action: { kind: "edit", profile: only },
