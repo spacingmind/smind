@@ -95,3 +95,16 @@ describe('pluginDetailView (read-only)', () => {
     expect(v.capabilities).toEqual(['hooks']);
   });
 });
+
+import { parsePluginParams, pluginHref } from '../navigation/routes';
+
+describe('plugin routes', () => {
+  it('the id is a non-empty route string; arrays take the first; anything else is refused', () => {
+    expect(pluginHref('acme')).toEqual({ pathname: '/plugin/[id]', params: { id: 'acme' } });
+    expect(parsePluginParams({ id: 'acme' })).toEqual({ ok: true, id: 'acme' });
+    expect(parsePluginParams({ id: ['a', 'b'] })).toEqual({ ok: true, id: 'a' });
+    expect(parsePluginParams({})).toEqual({ ok: false });
+    expect(parsePluginParams({ id: '  ' })).toEqual({ ok: false });
+    expect(parsePluginParams({ id: 'x'.repeat(200) })).toEqual({ ok: false });
+  });
+});
