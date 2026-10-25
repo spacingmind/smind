@@ -176,15 +176,21 @@ func (r *Runner) SetProviderEnv(provider Provider, key, value string) {
 	r.providerEnv[provider][key] = value
 }
 
-// ProviderEnv returns a copy of provider's configured launch env, nil when none.
+// ProviderEnv returns a copy of provider's launch env, nil when none: the
+// configured providers.<id>.env of a built-in provider, or the allowlisted
+// env of a provider instance (its providers.custom entry; an entry set live
+// through SetProviderEnv wins).
 func (r *Runner) ProviderEnv(provider Provider) map[string]string {
+	var out map[string]string
+	if spec, ok := r.providerRegistry().Get(string(provider)); ok && spec.IsInstance() && len(spec.Env) > 0 {
+		out = spec.Env // Get returned a copy
+	}
 	r.providerEnvMu.RLock()
 	defer r.providerEnvMu.RUnlock()
-	if len(r.providerEnv[provider]) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(r.providerEnv[provider]))
 	for k, v := range r.providerEnv[provider] {
+		if out == nil {
+			out = make(map[string]string)
+		}
 		out[k] = v
 	}
 	return out
@@ -480,6 +486,10 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 		opts = append(opts, acp.WithPermissionPolicy(acp.AutoApprovePolicy{}))
 	case r.acpPermissionPolicy != nil:
 		opts = append(opts, acp.WithPermissionPolicy(r.acpPermissionPolicy))
+	}
+
+	if env := r.acpEnvEntries(provider); len(env) > 0 {
+		opts = append(opts, acp.WithEnv(env...))
 	}
 
 	client, err := r.newACPClient(command, opts...)

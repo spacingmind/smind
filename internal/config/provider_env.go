@@ -120,5 +120,5 @@ func SetProviderEnv(provider, key, value string) (string, error) {
 
 // ProviderEnv returns providers.<provider>.env, nil when unset.
 func (c Config) ProviderEnv(provider string) map[string]string {
-	return c.Providers[provider].Env
+	return c.Providers.ByID[provider].Env
 }

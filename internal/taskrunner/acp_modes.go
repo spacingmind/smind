@@ -197,7 +197,11 @@ func (r *Runner) probeACPModes(ctx context.Context, provider Provider) error {
 	}
 	defer os.RemoveAll(dir)
 
-	client, err := r.newACPClient(command, acp.WithPermissionPolicy(acp.AutoDenyPolicy{}))
+	popts := []acp.Option{acp.WithPermissionPolicy(acp.AutoDenyPolicy{})}
+	if env := r.acpEnvEntries(provider); len(env) > 0 {
+		popts = append(popts, acp.WithEnv(env...))
+	}
+	client, err := r.newACPClient(command, popts...)
 	if err != nil {
 		return fmt.Errorf("spawn: %w", err)
 	}

@@ -1,6 +1,10 @@
 package taskrunner
 
-import "github.com/spacingmind/smind/internal/providers"
+import (
+	"sort"
+
+	"github.com/spacingmind/smind/internal/providers"
+)
 
 // WithProviderRegistry makes the Runner read reg instead of providers.Default
 // (tests that register a fake provider without touching the process-wide table).
@@ -47,3 +51,22 @@ func (r *Runner) codexCommandFor(provider Provider) []string {
 	s, _ := r.providerRegistry().Get(string(provider))
 	return s.Command
 }
+
+// acpEnvEntries is a custom ACP provider's configured command environment
+// (providers.custom[].env) as sorted NAME=VALUE entries; nil for built-ins.
+func (r *Runner) acpEnvEntries(provider Provider) []string {
+	s, ok := r.providerRegistry().Get(string(provider))
+	if !ok || s.Runner != providers.RunnerACP {
+		return nil
+	}
+	entries := make([]string, 0, len(s.Env))
+	for k, v := range s.Env {
+		entries = append(entries, k+"="+v)
+	}
+	sort.Strings(entries)
+	return entries
+}
+
+// Providers is the registry this Runner dispatches from (the daemon's
+// providers.Default unless WithProviderRegistry replaced it).
+func (r *Runner) Providers() *providers.Registry { return r.providerRegistry() }
