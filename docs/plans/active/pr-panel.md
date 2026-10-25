@@ -1,6 +1,6 @@
 # PR panel (G9): checks, reviews and threads of a task's PR, and "Send to chat"
 
-**Status 2026-10-25 (plans hygiene): PARTIAL.** Both PRs shipped: daemon #588, web #593; every named Go and web test below exists on `origin/develop` and covers A1-A6, B1, B2, B4. Open: B3 and B5 (light/dark, 1280/390 screenshots and transition frames of the panel were never recorded in this plan; no evidence on `origin/develop`), and a real-GitHub check of `task.prDetails` (all tests use a scripted `gh`). Validation below is filled for what is confirmed.
+**Status 2026-10-25 (plans hygiene): PARTIAL.** Both PRs shipped: daemon #588, web #593; every named Go and web test below exists on `origin/develop` and covers A1-A6, B1, B2, B4. B3 and B5 CONFIRMED 2026-10-25 by a screenshot pass (below). Still open: a real-GitHub check of `task.prDetails` (all tests and the screenshot pass use a scripted `gh`). Validation below is filled for what is confirmed.
 
 Size: L (6) — scope 2, PRs 2, risk 1, decisions 0, verify 1.
 Status: active. Binding design: ADR-0039 (§3 reads, §4 poller and call budget, §6 error codes, §9) and ADR-0038 (`pr` and `file_ref`
@@ -151,7 +151,7 @@ Web (PR 2):
 
 - [x] PR 1: forge interface + ghctx + gitstate details + wsapi (#588)
 - [x] PR 2: web tab, query, send-to-chat (#593)
-- [ ] PR 2 screenshots (B3, B5): not recorded.
+- [x] PR 2 screenshots (B3, B5): recorded 2026-10-25, see Validation.
 
 ## Validation
 
@@ -164,4 +164,12 @@ Confirmed on `origin/develop` on 2026-10-25 by the presence of the named tests (
 - A4, A6: `TestTaskPRDetails_RunScopedRefused`, `_NoPR`, `TestTaskPRDetailsFocus_DroppedOnDisconnect`, `TestTaskPRDetails_TypedErrors` (`internal/wsapi/pr_details_test.go`); all fakes, no network.
 - B1: `components/pr-tab-open.test.tsx`. B2: `hooks/use-pr-details.test.tsx`. B4: `lib/untrusted-quote.test.ts`, `hooks/use-send-pr-to-chat.test.tsx`. B3 (render only): `components/pr-panel/pr-panel.test.tsx` (`hostile comment renders as text`, `resolved and outdated badges`).
 
-Not confirmed: B3 and B5 screenshots; behaviour against real GitHub.
+B3 + B5 (2026-10-25, isolated daemon on port 49871, own SMIND_HOME, scripted fake `gh`, no model call; evidence kept outside the repo in `/tmp/evidence-pass/pr-panel/`):
+every PNG/contact sheet was opened and looked at, light and dark, 1280 and 390 px.
+- Sections seen: header (title wraps to 2 lines at 390, state badge Draft/Open, "Open on GitHub", Refresh, "Updated just now"), Checks (headline "Some checks were not successful" / "Checks are running" / "All checks passed" / "No checks", counts, rows with status icon, duration, link; a long check name wraps at 390 and is one line at 1280), Reviews ("1 of 2 approvals", "1 approval", "2 approvals", "0 approvals"; decision badge; reviewers; "Awaiting: carol, core"), Threads (`file:line`, Resolved / Outdated badges, collapsed with latest comment, expand shows all comments), per-row and "Add all unresolved to chat" buttons, "Added to chat" toast (no run started).
+- Hostile comment (`<img onerror>`, `<script>`, `[x](javascript:)`, a 130-char unbroken line) renders as literal text in both themes and widths, the long line is ellipsised collapsed and wraps expanded; DOM check: 0 `img`, 0 `script`, 0 `javascript:` links in the panel.
+- Transitions (10 frames each, 2 before the action; the swaps are instant, no animation in code): opening the PR tab, expanding and collapsing a thread, Refresh. Per-frame `boundingBox` of header, tab strip, panel, checks, reviews, threads, thread row: delta 0.0 px in x/y/w/h in every frame except the intended ones (thread row 101 -> 172 px on expand; the checks section moves down by the inserted notice on a too-early Refresh). Header, tabs and refresh button never moved by 1 px.
+- Found, not fixed (judged design, not a glitch): a Refresh inside the 5 s floor shows the `refresh_limited` text in red (error colour) and pushes the sections below it down ~22-38 px; a task whose PR vanished with the PR tab open shows the red "This branch has no pull request. Create one first." + "Try again" (the "No pull request yet" empty state is only reachable when the query succeeds with no PR; covered by `pr-panel.test.tsx` `empty state`); at 390 px the app header (outside this panel) crowds the task title to "P..." and clips the budget chip to "Se...".
+- Bugs fixed: none.
+
+Not confirmed: behaviour against real GitHub (`task.prDetails` and `task.prCheckLog` were only run against a scripted `gh`).
