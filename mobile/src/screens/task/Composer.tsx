@@ -11,6 +11,7 @@ import { ChatQueueItem } from '../../api';
 import { AttachMenuItem } from '../../attachmentTray';
 import { PendingAttachment } from '../../attachments';
 import { composerActions } from '../../composerActions';
+import { pickSlashCommand, SlashCommand, slashSuggestions } from '../../plugins/slashCommands';
 import { StopControlView } from '../../stopControl';
 import { AppTheme } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
@@ -19,6 +20,7 @@ import { TextButton } from '../../ui/TextButton';
 import { UiHost } from '../../ui/UiHost';
 import { QueuedPrompts } from '../QueuedPrompts';
 import { AttachmentTray } from './AttachmentTray';
+import { SlashSuggestions } from './SlashSuggestions';
 
 export function Composer({
   draftState,
@@ -38,6 +40,8 @@ export function Composer({
   attachMenu = [],
   onAttach,
   attachNotice = null,
+  draft = '',
+  slashCommands = [],
 }: {
   draftState: ReturnType<typeof useNativeState<string>>;
   onChangeDraft: (text: string) => void;
@@ -60,11 +64,22 @@ export function Composer({
   onAttach?: (key: AttachMenuItem['key']) => void;
   /** Inline attach refusal, shown beside sendError. */
   attachNotice?: string | null;
+  /** The current draft text (the field itself holds it natively), for the `/` list. */
+  draft?: string;
+  /** Plugin prompt commands (ADR-0042); empty leaves the composer exactly as it was. */
+  slashCommands?: SlashCommand[];
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const actions = composerActions({ liveRunId, canSend, stopping: stopView.disabled });
+  const slashRows = useMemo(() => slashSuggestions(slashCommands, draft), [slashCommands, draft]);
+  // Picking only puts the prompt text in the field; the user still presses Send.
+  const pickSlash = (row: SlashCommand) => {
+    const next = pickSlashCommand(draft, row);
+    draftState.value = next;
+    onChangeDraft(next);
+  };
   return (
     <>
       <QueuedPrompts items={queueItems} onCancel={onCancelQueued} />
@@ -78,6 +93,7 @@ export function Composer({
           {attachNotice}
         </Text>
       )}
+      <SlashSuggestions rows={slashRows} onPick={pickSlash} />
       <View style={styles.shell}>
         <AttachmentTray attachments={attachments} onRemove={(id) => onRemoveAttachment?.(id)} />
         <UiHost style={styles.fieldHost}>
