@@ -21,7 +21,7 @@ and click **Create workspace**. Without a title, smind uses the folder name.
 From the command line:
 
 ```sh
-smind workspace create ~/code/my-app my-app default
+smind workspace create ~/code/my-app my-app hard
 smind workspace ls
 ```
 
