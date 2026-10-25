@@ -1,5 +1,7 @@
 # Tree budget: opt-in spend cap on a task tree (ADR-0041 A5 / T1, open question 9)
 
+**Status 2026-10-25 (plans hygiene): PARTIAL.** Daemon (#602) and web (#604) shipped; AC1-AC11 confirmed by tests. Open: AC12 screenshots (light + dark, 1280 and 390 px, not recorded); AC13 only run with seeded cost rows, never with a real Haiku run crossing a tiny budget (needs a live-model run, a Human go-ahead); the optional mobile read-only budget line is not built.
+
 Status: active (2026-10-24).
 
 Size: L (7) — scope 2 (daemon + web, mobile read-only if cheap), PRs 2, risk 1 (admission path, migration; no data loss), decisions 1 (setter reading, below), verification 1 (UI screenshots + one scripted live smoke).
@@ -77,11 +79,16 @@ PR 1 daemon (column, store query, admission, RPC, CLI, MCP read-only fields, tas
 ## Progress
 
 - PR 1 (daemon): store column + `TreeKnownCost`, admission in `Start`/`StartWhenBusy`/queue delivery, one notification per crossing, `task.setBudget`, `budget_exceeded`, CLI, MCP read-only. Built by a peer-sonnet Peer (task #91, candidate d8455b10), reviewed and ACCEPTED by the Lead.
-- PR 2 (web, mobile line): not started.
+- PR 1 merged as #602 (daemon half).
+- PR 2 (web) merged as #604 (`task-budget-control.tsx`, `lib/task-budget.ts`, `hooks/use-set-task-budget.ts`). The mobile read-only budget line ("if cheap") was not built.
 
 ## Validation
 
+Hygiene pass 2026-10-25: the named daemon tests (`internal/store/task_budget_test.go`, `internal/runs/budget_test.go`, `internal/wsapi/task_budget_test.go`,
+`cmd/smind/task_budget_test.go`) and the web `components/task-budget-control.test.tsx` exist on `origin/develop`. AC1-AC11 confirmed by those tests (#602); AC12 test
+coverage is in #604, but its screenshots were never recorded here.
+
 PR 1, confirmed (AC1-AC11): named tests above pass (`go test` on runs, store, wsapi, tasktree, cmd/smind; `-race` on runs, store, wsapi). Mutations (reverted): `>=` to `>` fails `TestBudgetAdmission_ExactlyAtCapBoundary`; dropping the agent-origin condition fails `TestBudgetAdmission_HumanNeverRefused` and `..._QueuedAgentRefusedAtEnqueueAndDelivery`.
 AC13 (isolated daemon, own SMIND_HOME, port 48771, transcript `/tmp/tree-budget-shots/daemon-smoke.txt`): root budget $0.05 set by CLI; a seeded $0.06 run (cost seeded in sqlite, NO model run) plus a seeded run with no cost; an agent `task_send` over `smind mcp serve` with fromTaskId/fromChatId was refused twice with the typed sentence; exactly one `child_event` row was queued for the root chat; raise and clear via CLI work. Not verified: a real model run crossing the cap (no model call made).
-AC12 (web): pending PR 2.
+AC12 (web): shipped in #604; unit tests present; light + dark screenshots at 1280 and 390 px not recorded (open).
 Known limits: the check runs before `reg.mu`, so launches racing the same instant can both pass (cost is only known when a run finishes, so v1 accepts this); `child_event` wake runs are never refused, so a woken Lead can still spend after the cap (the cap bounds NEW agent launches, per the ADR).

@@ -65,8 +65,13 @@ that provider, editable live from Settings → Providers. Additive and reversibl
 - [x] backend (Lead)
 - [x] web (Peer task 93, peer-sonnet; candidate aead335e..4ac014ab ACCEPTED: diff read against the contract, tests/tsc re-run by the Lead, screenshots viewed)
 - [x] review, checks, evidence, PR
+- Merged in #603 (`feat: per-provider launch env (CLAUDE_CONFIG_DIR / CODEX_HOME) in Settings -> Providers`). Plan closed in the 2026-10-25 plans hygiene pass.
 
 ## Validation
+
+AC to PR map: AC1-AC9 all shipped in #603. Test names that changed from the spec while building (confirmed on `origin/develop`, 2026-10-25): `TestProviderSetEnvNullClears` and
+`TestProviderSetEnvPublishesUpdated` became `TestProviderSetEnvSetAndNullClears` (which also asserts the `provider.updated` publish); `TestProviderSetEnvAppliesToNextLaunch` is
+`TestProviderEnvAppliesToNextLaunch` (taskrunner); `TestCodexEnvSettingBeatsProcessEnv` is folded into `TestCodexLaunchEnvFromProviderEnv` (it sets a conflicting `CODEX_HOME` in the daemon env and asserts the setting wins).
 
 Go: `go test ./...` all packages ok; `go test -race` on config, codex, wsapi, taskrunner ok; `go vet ./...` and gofmt clean. Web: vitest 324 files / 3636 tests pass;
 `bunx tsc -b packages/ui` clean. ACs 1-6 by the named Go tests (internal/config/provider_env_test.go, internal/taskrunner/provider_env_test.go, internal/wsapi/provider_env_test.go);

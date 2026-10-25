@@ -1,5 +1,7 @@
 # PR panel (G9): checks, reviews and threads of a task's PR, and "Send to chat"
 
+**Status 2026-10-25 (plans hygiene): PARTIAL.** Both PRs shipped: daemon #588, web #593; every named Go and web test below exists on `origin/develop` and covers A1-A6, B1, B2, B4. Open: B3 and B5 (light/dark, 1280/390 screenshots and transition frames of the panel were never recorded in this plan; no evidence on `origin/develop`), and a real-GitHub check of `task.prDetails` (all tests use a scripted `gh`). Validation below is filled for what is confirmed.
+
 Size: L (6) — scope 2, PRs 2, risk 1, decisions 0, verify 1.
 Status: active. Binding design: ADR-0039 (§3 reads, §4 poller and call budget, §6 error codes, §9) and ADR-0038 (`pr` and `file_ref`
 attachment kinds, §6). Product spec: the G9 section of the local-only git/GitHub UX study. Web only; mobile is out of scope.
@@ -147,9 +149,19 @@ Web (PR 2):
 
 ## Progress
 
-- [ ] PR 1: forge interface + ghctx + gitstate details + wsapi
-- [ ] PR 2: web tab, query, send-to-chat, screenshots
+- [x] PR 1: forge interface + ghctx + gitstate details + wsapi (#588)
+- [x] PR 2: web tab, query, send-to-chat (#593)
+- [ ] PR 2 screenshots (B3, B5): not recorded.
 
 ## Validation
 
-(Filled in as each criterion is confirmed: exact commands, results, mutation checks, what was not verified.)
+Confirmed on `origin/develop` on 2026-10-25 by the presence of the named tests (not re-run in this pass):
+
+- A1, A5: `TestPRDetails_BoundsAndSanitises`, `TestPRDetails_MapsGraphQLThreads`, `TestPRDetails_ArgvAndEnvHaveNoToken` (`internal/ghctx/details_test.go`), shipped in #588.
+- A2, A3: `TestPRDetails_NeverOpened_ZeroCalls`, `_OpenedFetchesOnce`, `_ConcurrentReadsSingleFlight`, `_SecondReadWithinFloorServedFromCache`,
+  `_PendingChecksOneCallPerTick`, `_SettledChecksNoRefetch`, `_BlurredOrClosedZeroFurtherCalls`, `_BudgetExhaustedServesCache`, `_UnauthenticatedSuspends`,
+  `_RateLimitedBackoff`, `TestPRCheckLog_OnlyOnClickAndBounded` (`internal/gitstate/details_test.go`).
+- A4, A6: `TestTaskPRDetails_RunScopedRefused`, `_NoPR`, `TestTaskPRDetailsFocus_DroppedOnDisconnect`, `TestTaskPRDetails_TypedErrors` (`internal/wsapi/pr_details_test.go`); all fakes, no network.
+- B1: `components/pr-tab-open.test.tsx`. B2: `hooks/use-pr-details.test.tsx`. B4: `lib/untrusted-quote.test.ts`, `hooks/use-send-pr-to-chat.test.tsx`. B3 (render only): `components/pr-panel/pr-panel.test.tsx` (`hostile comment renders as text`, `resolved and outdated badges`).
+
+Not confirmed: B3 and B5 screenshots; behaviour against real GitHub.

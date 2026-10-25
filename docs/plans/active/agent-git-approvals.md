@@ -1,5 +1,7 @@
 # Agent git-operation approval defaults (G13)
 
+**Status 2026-10-25 (plans hygiene): PARTIAL.** Shipped: daemon matcher, decider wiring, `gitRule` detail field, web card line and MCP no-PR test (#595), and claude-native `permissions.ask` (#596). Open: AC5 on mobile (the mobile permission card has no rule line, parsed command or staged-file list; needs a mobile permission-detail surface); D1 (commit allowed in acceptEdits/auto) is a Human decision and is deliberately not implemented. AC1-4, AC6 and AC7 are confirmed (the named tests exist on `origin/develop`).
+
 Size: M (5) — scope 2, PRs 1, risk 1, decisions 1, verify 1 (daemon policy + card line, screenshots)
 
 Owner: Lead G13. Inputs: ADR-0019 (provider-native permission modes), ADR-0017/0041

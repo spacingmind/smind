@@ -1,5 +1,7 @@
 # `smind profile edit` + web profile editor contract/failover fields (ADR-0041 S1w)
 
+**Status 2026-10-25 (plans hygiene): PARTIAL.** PR-CLI #574 (AC-C1..C6 confirmed with a real isolated-daemon run) and PR-WEB #576 (AC-W1..W3, W5 confirmed by tests) are merged. Open: AC-W4, the light/dark screenshot and transition-frame pass of the editor, which has no recorded evidence.
+
 Size: L (6) — scope 2, PRs 2, risk 1, decisions 0, verify 1
 
 Two PRs from `origin/develop`, not stacked: **PR-CLI** (`smind profile edit`), **PR-WEB** (profile editor fields).
@@ -63,4 +65,7 @@ Web (`profiles-section.test.tsx`, `use-profiles.test.ts`):
 - Real run against an isolated daemon (throwaway SMIND_HOME, port 47391): notes cleared, fallback set → `fallback→2`; `--child-policy=profiles` on a no-tools profile → daemon text `a profile without orchestration tools cannot launch children`, exit 1, profile unchanged; clear model/fallback/skills + `--orchestration-tools=unmanaged` → ROLE `-`; unknown id exit 1; no flags exit 2.
 
 ## Validation — Web
-(filled in by PR-WEB)
+Never filled in by PR-WEB. Hygiene pass 2026-10-25: PR-WEB merged as #576 (PR-CLI as #574). AC-W1, AC-W2, AC-W3 and AC-W5 are covered by tests present on `origin/develop` in
+`web/packages/ui/src/components/settings/profiles-section.test.tsx` (`keeps failover and contract fields when saving an unrelated edit`, `sends orchestrationTools null/true/false per the select`,
+`shows child profiles only for childPolicy profiles`, `shows the fallback profile select only for onRateLimit fallback`, `renders a daemon validation error inline and keeps the form open`,
+`instructions over 16 KiB blocks save with a message`). AC-W4 (light and dark screenshots with transition frames) has no recorded evidence: open.

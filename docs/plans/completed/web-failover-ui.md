@@ -2,7 +2,7 @@
 
 Size: L (6) — scope 2, PRs 2, risk 1, decisions 0, verify 1
 
-Follow-up to [`in-smind-orchestration.md`](../completed/in-smind-orchestration.md) "Remaining (parked)". The daemon already classifies a rate-limited run
+Follow-up to [`in-smind-orchestration.md`](in-smind-orchestration.md) "Remaining (parked)". The daemon already classifies a rate-limited run
 (`failureKind`, `failureWindow`, `failureResetAt`), can fail over (`profile.onRateLimit = fallback`, `run.failover` event, `runs.failover_of`) and can hold a
 retry (`onRateLimit = wait`, `chat_queue.not_before`); `run.logs` carries `fallbackProfileId`. The UI shows only "Rate limited (5h window) · resets 17:35" + Retry.
 
@@ -44,9 +44,13 @@ Mobile: `runFooter.test.ts` (`wait state`, `continued on`).
 - [x] PR 1 daemon: #573 (peer-sonnet task 50). ACCEPTED: diff read, mutation check (dropping `WithNotBefore` fails `TestRunStart_NotBefore_QueuesOnIdleChat`), runs/wsapi/store tests pass.
 - [x] PR 2 web (peer-sonnet task 51). ACCEPTED at 4e946b87 (rebased: d178e013 here) after one rework round: the failover actions got their own footer row (a wrapped footer line began with a stray dot) and the badge shots were re-taken.
 - [x] PR 2 mobile (peer-sonnet task 57). ACCEPTED at 97220b95: pure `describeRunFooter` ctx + `failoverContext.ts`, FooterBanner note, Continue hidden while a retry is held.
+- Merged: daemon half #573; web + mobile halves in #580 (`feat(web,mobile): Retry on fallback, Wait until, and continued-on badge ...`). Plan closed in the 2026-10-25 plans hygiene pass.
 - Cap note: two Peer launches were refused while the shared task tree sat at 4/4 runs; waited instead of stopping other Leads' runs.
 
 ## Validation
+
+Hygiene pass 2026-10-25: all test files named below exist on `origin/develop` (`components/timeline/run-footer-rate-limit.test.tsx`, `hooks/use-run-failover-index.test.tsx`,
+`internal/wsapi/run_notbefore_test.go`, `mobile/src/__tests__/{runFooter,failoverContext}.test.ts`); AC-D* shipped in #573, AC-W* and AC-M1 in #580.
 
 Combined branch (cherry-picked Peer commits on origin/develop), run by the Lead: `cd web && bunx tsc -b packages/ui` clean; `cd mobile && npx tsc --noEmit` clean, `npm test` 624 passed; `task lint` ok; `task test` exit 0 (web 3481 passed).
 

@@ -919,6 +919,8 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 
 ## Progress
 
+**Re-checked 2026-10-25 (plans hygiene): still PARTIAL.** Open, exactly: (1) Step 3 as specified (a lead plus at least two peers on a **non-smind** project, via smind only). Since 2026-10-22 smind did orchestrate its own work (a Supervisor, a Lead and two Peers built #570 `task ls` PARENT/SETUP entirely inside smind, and the ADR-0041 AC26 dogfood run is in `completed/in-smind-orchestration.md`), but both were on the smind repo; (2) the live-provider usage check (a real claude/codex/GLM turn producing a `usage` event verified against the vendor); (3) Step 4 stays demand-gated and not started.
+
 **Status 2026-10-22 (plans hygiene): PARTIAL.**
 
 - Landed: M1 request log (#226); ADR-0020 per-run usage from agent events (#254) and proxy base-URL/model routing (#253); web usage UI (#262); ADR-0021 per-chat prompt queue (#248), web composer on the server queue (#259), `cancel_kind` plus the Step 3 gap log (#265), mobile queue and Stop (#383, #387); O1 provenance; O2 parent params and depth guard, per-tree concurrency guard (#289), `task.tree` / `task_tree` (#291); MCP gap-log fixes (#271, #273, #284, #369).

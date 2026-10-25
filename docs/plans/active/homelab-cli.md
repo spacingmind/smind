@@ -928,6 +928,8 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
 
 ## Progress
 
+**Re-checked 2026-10-25 (plans hygiene): still PARTIAL, unchanged.** Open, exactly: P14 hosted-relay deploy and ops, P15 open enrolment and abuse limits, P16 `relay connect` with no address (all BLOCKED on ADR-0031 decision 12, plus 27-32 and 36; `deploy/` still does not exist); and the live checks listed under Unverified below (signed release + `smind update` on Linux and Windows 11, `smind service` across a reboot, mobile relay and password on a real device, Docker image on amd64 and arm64, real Tauri app against a real relay, macOS first-run and ssh host, a real proxy in front of the relay). No homelab PR merged since 2026-10-22 except the #592 install fix and #478 `install.sh --desktop`.
+
 **Status 2026-10-22 (plans hygiene): PARTIAL — 18 of 21 PRs merged; the other three are blocked on the Human.**
 
 | PR | Merged as |

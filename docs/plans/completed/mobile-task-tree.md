@@ -1,6 +1,6 @@
 # Mobile: read-only task tree (ADR-0041 M1 / AC28 first half)
 
-Status: active (2026-10-23).
+Status: done (2026-10-25, plans hygiene). Merged in #594 (`feat(mobile): read-only task tree on the task screen (ADR-0041 M1)`). The files named below and the `taskTree.test.ts`, `api.test.ts`, devharness `TestSeedTree` and smoke stage `70-task-tree.mjs` exist on `origin/develop`. Real-device rendering was never an AC (the plan scopes verification to the 390 px web smoke).
 
 Size: M (5) — scope 1 (mobile + a test-only harness seed), PRs 1, risk 1 (E2EE frame size, no write paths), decisions 1 (placement, below), verification 1 (390 px light+dark web smoke; no device).
 

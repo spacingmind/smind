@@ -2,7 +2,9 @@
 
 Size: L (8) — scope 2, PRs 2, risk 2 (user tokens, outbound calls, refresh races), decisions 0 (all answered), verify 2 (UI screenshots; manual live-provider check)
 
-Status: **spec, ADR accepted** (2026-10-11), docs-only so far. Design:
+**Status 2026-10-25 (plans hygiene): PARTIAL.** Built and merged (PR-A1 #298, A2 #302, B #304, C #305, D1 #307, E #309, D2 #315, F core #308, cooldown surfaces #317, shared query cache #386); the "spec, docs-only so far" line below is stale. Open, exactly: the manual live check against one real account per provider (the four endpoint unknowns listed under Validation: Anthropic `/api/oauth/usage` with a smind-login token, OpenAI `chatgpt_account_id` claim, OpenAI uTLS fingerprint on `/backend-api/wham/usage`, and what `extra_usage.is_enabled` means for serving past a full window, D9), which needs the Human's go-ahead because it calls real vendor endpoints with a real token. The AC43 close-out docs (ROADMAP stub text) are done; the two checkboxes "Human go-ahead" and "Manual live check" stay unchecked and "Close-out docs" is satisfied except for the move to `completed/`, which waits on the live check.
+
+Status (original, 2026-10-11): **spec, ADR accepted**, docs-only so far. Design:
 [ADR-0028](../../decisions/0028-account-usage-windows.md) (**Accepted**).
 D1–D4 and D6–D13 were accepted as the recommended defaults; **D5 changed**:
 the web UI ports Paseo's Usage UX (PR-D1/D2 below). PR-A may start, but its
