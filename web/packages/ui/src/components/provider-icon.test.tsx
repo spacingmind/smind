@@ -28,7 +28,7 @@ describe("provider-icon", () => {
   it("renders the agent fallback for unknown providers and the usage fallback on demand", () => {
     const sig = (p: string, fallback?: "agent" | "usage") =>
       render(<ProviderIcon provider={p} fallback={fallback} />).container.innerHTML;
-    expect(sig("kimi")).toBe(sig("something-unknown"));
+    expect(sig("kimi")).not.toBe(sig("something-unknown"));
     expect(sig("xai", "usage")).not.toBe(sig("xai"));
     expect(sig("anthropic", "usage")).toBe(sig("claude-native", "usage"));
   });
@@ -49,6 +49,27 @@ describe("provider-icon", () => {
     const generic = render(<Icons.providerGeneric aria-hidden size={16} />).container.innerHTML;
     const unknown = render(<ProviderIcon provider="acme-agent" size={16} />).container.innerHTML;
     expect(unknown.replace(/ data-testid="[^"]*"/, "")).toBe(generic);
+  });
+
+  it("built-ins keep distinct marks: claude, codex and the agent glyph, never the generic one for glm and kimi", () => {
+    const html = (p: string) => render(<ProviderIcon provider={p} size={16} />).container.innerHTML.replace(/ data-testid="[^"]*"/, "");
+    const generic = render(<Icons.providerGeneric aria-hidden size={16} />).container.innerHTML;
+    const agent = render(<Icons.agent aria-hidden size={16} />).container.innerHTML;
+    expect(new Set([html("claude-native"), html("codex-native"), html("glm")]).size).toBe(3);
+    expect(html("glm")).toBe(agent);
+    expect(html("kimi")).toBe(agent);
+    for (const id of ["claude-native", "codex-native", "glm", "kimi"]) expect(html(id)).not.toBe(generic);
+    for (const id of ["acme-agent", "my-custom-acp"]) expect(html(id)).toBe(generic);
+  });
+
+  it("an instance of glm wears the agent glyph, not the generic one", () => {
+    const html = (p: string) => render(<ProviderIcon provider={p} size={16} />).container.innerHTML;
+    useProviderFamilies.getState().setFromCatalog([{ id: "glm-work", extends: "glm", custom: true }]);
+    try {
+      expect(html("glm-work")).toBe(html("glm"));
+    } finally {
+      useProviderFamilies.getState().setFromCatalog([]);
+    }
   });
 
   it("an instance with an unrelated id wears the mark of the provider it extends", () => {
