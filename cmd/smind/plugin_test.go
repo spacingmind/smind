@@ -221,3 +221,38 @@ func TestPluginCLI_UsageAndErrors(t *testing.T) {
 		t.Fatalf("%d %s", code, e)
 	}
 }
+
+func TestPluginEnable_LinkedPrintsWarning_ProfilesFlagged(t *testing.T) {
+	in := sampleInfo()
+	in.SourceKind = "link"
+	in.Consent.SourceKind = "link"
+	in.Consent.LinkWarning = plugins.LinkWarningText
+	in.Consent.Skills = []string{"review"}
+	in.Consent.Profiles = []plugins.ProfileEntry{{Name: "boss", Provider: "claude-native", Escalations: []string{`permission mode "bypassPermissions" skips permission prompts`}}}
+	f := &fakePluginDaemon{handlers: map[string]func(map[string]any) (any, error){
+		"plugin.get":    func(map[string]any) (any, error) { return in, nil },
+		"plugin.enable": func(map[string]any) (any, error) { return in, nil },
+	}}
+	code, out, errOut := runPluginCLI(t, f, "", false, "enable", "acme", "--yes")
+	if code != 0 {
+		t.Fatalf("code %d, stderr %q", code, errOut)
+	}
+	// Shown before confirming and again once enabled.
+	if strings.Count(out, plugins.LinkWarningText) != 2 {
+		t.Fatalf("the link warning must be printed with the consent summary and after enabling:\n%s", out)
+	}
+	for _, want := range []string{"Skill:        acme:review", "Profile:      acme:boss on claude-native", "ATTENTION:  permission mode"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary lacks %q:\n%s", want, out)
+		}
+	}
+	// A copied plugin prints no warning.
+	plain := sampleInfo()
+	f2 := &fakePluginDaemon{handlers: map[string]func(map[string]any) (any, error){
+		"plugin.get":    func(map[string]any) (any, error) { return plain, nil },
+		"plugin.enable": func(map[string]any) (any, error) { return plain, nil },
+	}}
+	if _, out, _ := runPluginCLI(t, f2, "", false, "enable", "acme", "--yes"); strings.Contains(out, "live directory") {
+		t.Fatalf("no warning for a copied plugin:\n%s", out)
+	}
+}

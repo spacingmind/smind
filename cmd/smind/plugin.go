@@ -229,6 +229,9 @@ func pluginShow(args []string, env pluginIO) int {
 	if in.LastError != "" {
 		fmt.Fprintf(env.out, "Last error: %s\n", in.LastError)
 	}
+	for _, c := range in.Conflicts {
+		fmt.Fprintf(env.out, "Not applied: %s %s: %s\n", c.Kind, c.Name, c.Reason)
+	}
 	fmt.Fprintln(env.out)
 	printConsent(env.out, in.Consent)
 	if in.Pending != nil {
