@@ -344,3 +344,23 @@ describe("usage-section", () => {
     });
   });
 });
+
+describe("usage grouped by provider with an instance", () => {
+  it("labels an instance row from the catalog and treats it as a subscription plan (it extends a native CLI)", async () => {
+    const client = new FakeWsClient();
+    renderSection(client);
+    fireEvent.click(screen.getByTestId("settings-usage-group-by-provider"));
+    await flush();
+    client.nth("provider.list").resolve({
+      providers: [
+        { id: "claude-native", label: "Claude Code", credentialKind: "oauth" },
+        { id: "claude-work", label: "Claude work", kind: "cli", runner: "claude-native", extends: "claude-native", custom: true },
+      ],
+    });
+    client.nth("usage.summary", client.calls.filter((c) => c.method === "usage.summary").length - 1).resolve([runRow({ key: "claude-work", providers: ["claude-work"] })]);
+    await flush();
+    const row = screen.getByTestId("usage-row-runs-claude-work");
+    expect(row).toHaveTextContent("Claude work");
+    expect(within(screen.getByTestId("usage-cell-costUsd")).getByText("≈ API price")).toBeInTheDocument();
+  });
+});

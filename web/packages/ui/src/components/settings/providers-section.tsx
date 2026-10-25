@@ -1,3 +1,6 @@
+import { useState } from "react";
+
+import { AddProviderInstance } from "@/components/providers/add-provider-instance";
 import { ProvidersScreen } from "@/components/providers/providers-screen";
 import {
   registerSettingsSection,
@@ -22,6 +25,7 @@ function ProvidersSection({ client }: SettingsSectionContext) {
   const { providersOrFallback: providers } = useProviderCatalog();
   const selectedProviderId = useProvidersViewStore((s) => s.selectedProviderId);
   const requestConnect = useProvidersViewStore((s) => s.requestConnect);
+  const [addOpen, setAddOpen] = useState(false);
   // Connect the selected provider when it can connect; the other bucket, a
   // CLI provider or no selection fall back to the first credential provider.
   const credentials = credentialProviders(providers);
@@ -31,18 +35,31 @@ function ProvidersSection({ client }: SettingsSectionContext) {
       <SettingsSectionTitle
         title="Providers"
         actions={
-          <Button
-            variant="outline"
-            size="sm"
-            data-testid="providers-connect-toggle"
-            disabled={!target}
-            onClick={() => target && requestConnect(target.id)}
-          >
-            <Icons.add aria-hidden className="size-3.5" />
-            Connect account
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="providers-add-instance-toggle"
+              aria-expanded={addOpen}
+              onClick={() => setAddOpen((v) => !v)}
+            >
+              <Icons.providerGeneric aria-hidden className="size-3.5" />
+              Add instance
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="providers-connect-toggle"
+              disabled={!target}
+              onClick={() => target && requestConnect(target.id)}
+            >
+              <Icons.add aria-hidden className="size-3.5" />
+              Connect account
+            </Button>
+          </div>
         }
       />
+      {addOpen ? <AddProviderInstance hasClient={client !== null} /> : null}
       <ProvidersScreen client={client} />
     </div>
   );

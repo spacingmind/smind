@@ -2,6 +2,8 @@ import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { ProfileIcon, ProviderIcon } from "@/components/provider-icon";
+import { Icons } from "@/lib/icons";
+import { useProviderFamilies } from "@/stores/provider-families-store";
 
 describe("provider-icon", () => {
   it.each(["claude-native", "codex-native", "glm", "something-unknown"])("renders an aria-hidden svg for %s", (provider) => {
@@ -41,5 +43,22 @@ describe("provider-icon", () => {
     expect(mark("claude-code-acp")).toBe(mark("claude-native"));
     expect(mark("codex-acp")).toBe(mark("codex-native"));
     expect(mark("gemini-acp")).not.toBe(mark("claude-native"));
+  });
+
+  it("renders the generic provider icon from the registry for an id nothing describes", () => {
+    const generic = render(<Icons.providerGeneric aria-hidden size={16} />).container.innerHTML;
+    const unknown = render(<ProviderIcon provider="acme-agent" size={16} />).container.innerHTML;
+    expect(unknown.replace(/ data-testid="[^"]*"/, "")).toBe(generic);
+  });
+
+  it("an instance with an unrelated id wears the mark of the provider it extends", () => {
+    const mark = (provider: string) => render(<ProviderIcon provider={provider} />).container.querySelector("path")?.getAttribute("d");
+    expect(mark("work")).not.toBe(mark("claude-native"));
+    useProviderFamilies.getState().setFromCatalog([{ id: "work", extends: "claude-native", custom: true }]);
+    try {
+      expect(mark("work")).toBe(mark("claude-native"));
+    } finally {
+      useProviderFamilies.getState().setFromCatalog([]);
+    }
   });
 });

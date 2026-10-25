@@ -11,7 +11,7 @@ const ENV_FIELDS: Record<string, { key: string; label: string }> = {
   "codex-native": { key: "CODEX_HOME", label: "Codex home" },
 };
 
-const SOURCE_TEXT: Record<ProviderEnvEffective["source"], string> = {
+export const SOURCE_TEXT: Record<ProviderEnvEffective["source"], string> = {
   settings: "set in smind",
   environment: "from the daemon's environment",
   default: "CLI default",

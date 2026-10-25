@@ -54,6 +54,8 @@ export const queryKeys = {
   archivedTasksAll: () => ["task.list", { archived: true }] as const,
   /** `workspace.branches` (base picker options; the RPC may not exist on an older daemon). */
   providerList: () => ["provider.list"] as const,
+  /** `provider.dirSuggestions`: the directories Settings -> Providers offers as one-click instances. */
+  providerDirSuggestions: () => ["provider.dirSuggestions"] as const,
   profileList: () => ["profile.list"] as const,
   /** One `provider.test` answer per key: a provider's own id for run readiness (use-provider-health), an account id for an account's credential (accounts). */
   /** Every cached `provider.test` answer (a prefix, for removal after a reconnect or an account change). */

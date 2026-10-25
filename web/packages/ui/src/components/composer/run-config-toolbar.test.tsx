@@ -275,3 +275,47 @@ describe("RunConfigToolbar observed model", () => {
     expect(screen.getByTestId("composer-model-picker")).toHaveAttribute("title", "Claude Code");
   });
 });
+
+// ADR-0042 AC37: an instance appears wherever a provider does, and runs through its base provider's capabilities.
+describe("RunConfigToolbar with a provider instance", () => {
+  const WORK: ProviderInfo = {
+    id: "claude-work",
+    label: "Claude work",
+    runner: "claude-native",
+    extends: "claude-native",
+    custom: true,
+    defaultMode: "acceptEdits",
+    liveModeSwitch: true,
+    modes: [{ id: "acceptEdits", label: "Accept File Edits" }],
+    models: [{ id: "claude-opus-5-5", label: "Opus 5.5" }],
+  };
+  const CUSTOM_ACP: ProviderInfo = { id: "my-acp", label: "My ACP agent", runner: "acp", custom: true, defaultMode: "default", modes: [{ id: "default", label: "Default" }], models: [] };
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("lists the instance and a custom ACP provider in the composer picker next to the built-ins", async () => {
+    renderToolbar({ providers: [...SERVED_PROVIDERS, WORK, CUSTOM_ACP] });
+    fireEvent.click(screen.getByTestId("composer-model-picker"));
+    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    const rows = await screen.findAllByTestId(/^model-provider-/);
+    expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual(["model-provider-claude-native", "model-provider-glm", "model-provider-claude-work", "model-provider-my-acp"]);
+    expect(screen.getByTestId("model-provider-claude-work")).toHaveTextContent("Claude work");
+    // The unknown ACP provider wears the generic provider icon, never a throw or a blank.
+    expect(screen.getByTestId("model-provider-my-acp").querySelector("svg")).not.toBeNull();
+  });
+
+  it("picking the instance keeps the Thinking control (its runner is claude-native) and the base's modes", async () => {
+    renderToolbar({ providers: [...SERVED_PROVIDERS, WORK, CUSTOM_ACP] });
+    await pickModel("claude-work");
+    expect(screen.getByLabelText("Thinking level")).toBeTruthy();
+    expect(screen.getByTestId("composer-model-picker")).toHaveAttribute("aria-label", expect.stringContaining("Claude work"));
+  });
+
+  it("picking a custom ACP provider drops the Thinking control (not a claude-native runner)", async () => {
+    renderToolbar({ providers: [...SERVED_PROVIDERS, WORK, CUSTOM_ACP] });
+    await pickModel("my-acp");
+    expect(screen.queryByLabelText("Thinking level")).toBeNull();
+  });
+});
