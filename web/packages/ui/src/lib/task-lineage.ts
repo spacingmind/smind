@@ -45,6 +45,9 @@ export interface TaskTreeNode {
   budgetPartial?: boolean;
   budgetUnknownRuns?: number;
   overBudget?: boolean;
+  /** Stalled-tree alert: set (with `stalledSince`, RFC 3339 UTC) while this seat's tree is idle past the threshold; absent otherwise. */
+  stalled?: boolean;
+  stalledSince?: string;
   run: {
     state: TaskTreeRunState;
     runningRunIds: string[];
@@ -129,6 +132,14 @@ function rateLimitedDescendants(node: TaskTreeNode, all: ReadonlyArray<TaskTreeN
     if (isRateLimitedNode(n)) count++;
   }
   return count;
+}
+
+/** "No run for 20 min" for a stalled node (whole minutes since `stalledSince`), null when it is not stalled. */
+export function stalledHint(node: Pick<TaskTreeNode, "stalled" | "stalledSince">, now: Date): string | null {
+  if (!node.stalled || !node.stalledSince) return null;
+  const since = Date.parse(node.stalledSince);
+  if (Number.isNaN(since)) return null;
+  return `No run for ${Math.max(0, Math.floor((now.getTime() - since) / 60_000))} min`;
 }
 
 /** "Rate limited · resets 17:35" for a rate-limited node, null otherwise. The window stays out of the hint (it is a one-liner on a pill). */

@@ -409,3 +409,28 @@ describe("TaskLineageHeader rate limit (ADR-0041 R3)", () => {
     expect(screen.queryByTestId("task-rate-limit")).toBeNull();
   });
 });
+
+describe("TaskLineageHeader stalled marker (stalled-tree alert AC7)", () => {
+  it("renders the stalled marker with tooltip", () => {
+    const since = new Date(Date.now() - 20 * 60_000 - 5_000).toISOString();
+    const lineage: TaskLineage = {
+      parent: null,
+      node: node({ id: 2, stalled: true, stalledSince: since }),
+      children: [node({ id: 3, parentId: 2, title: "Kid", stalled: true, stalledSince: since })],
+    };
+    render(<TaskLineageHeader lineage={lineage} />);
+    const marker = screen.getByTestId("task-stalled");
+    expect(marker.textContent).toBe("stalled");
+    expect(marker.title).toBe("No run for 20 min");
+    expect(marker.className).toContain("text-warning");
+    const pill = screen.getByTestId("task-child-pill");
+    expect(pill.dataset.childStalled).toBe("true");
+    expect(pill.title).toBe("No run for 20 min");
+  });
+
+  it("omits the marker when not stalled", () => {
+    render(<TaskLineageHeader lineage={{ parent: null, node: node({ id: 2, usage: { ...node({ id: 2 }).usage, subtree: usage(1, { costUsd: 0.1 }) } }), children: [node({ id: 3, parentId: 2 })] }} />);
+    expect(screen.queryByTestId("task-stalled")).toBeNull();
+    expect(screen.getByTestId("task-child-pill").dataset.childStalled).toBeUndefined();
+  });
+});

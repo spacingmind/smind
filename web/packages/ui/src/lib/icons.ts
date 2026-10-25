@@ -64,6 +64,7 @@ import {
   GitMerge,
   GitPullRequest,
   Globe,
+  Hourglass,
   Link2,
   Image,
   Info,
@@ -255,6 +256,8 @@ export const Icons = {
   statusIdle: Circle,
   /** A skipped / neutral / cancelled check: nothing ran, nothing failed. */
   statusSkipped: CircleMinus,
+  /** A task tree that has sat idle past the stall alert threshold (no run, nothing queued). */
+  stalled: Hourglass,
 } as const satisfies Record<string, IconComponent>;
 
 export type IconName = keyof typeof Icons;
