@@ -138,11 +138,18 @@ function CreatePrForm({
         <DialogDescription className="sr-only">Review the title and description, then open the pull request on GitHub.</DialogDescription>
       </DialogHeader>
 
-      <div className="flex min-h-7 flex-wrap items-center gap-x-2 gap-y-1 text-ui-base" data-testid="create-pr-branches">
-        <Icons.branch aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
-        <MiddleText text={headBranch} className="max-w-[11rem] font-mono text-ui-sm" />
-        {/* The arrow stays with the field; a long base wraps the pair to its own line instead of cutting the name. */}
-        <span className="flex min-w-[19rem] flex-1 items-center gap-2">
+      <div className="grid gap-1.5 text-ui-base" data-testid="create-pr-branches">
+        <div className="flex min-h-7 items-center gap-2">
+          <Icons.branch aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
+          <MiddleText text={headBranch} className="flex-1 font-mono text-ui-sm" />
+          {diff && (
+            <span className="shrink-0 text-ui-sm" data-testid="create-pr-diffstat">
+              <span className="text-diff-added">+{diff.insertions}</span> <span className="text-diff-removed">−{diff.deletions}</span>
+            </span>
+          )}
+        </div>
+        {/* The base has its own full-width line, so a long (stacked) branch name is not cut. */}
+        <div className="flex min-h-7 items-center gap-2">
           <Icons.arrowRight aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
           <label htmlFor={ids.base} className="sr-only">
             Base branch
@@ -161,22 +168,17 @@ function CreatePrForm({
             }}
             spellCheck={false}
             autoComplete="off"
-            className="h-7 min-w-0 flex-1 font-mono text-ui-xs"
+            className="h-7 min-w-0 flex-1 font-mono text-ui-sm"
             title={baseInput}
             data-testid="create-pr-base"
           />
-        </span>
+        </div>
         {branches.data && (
           <datalist id={ids.branches}>
             {branches.data.branches.map((b) => (
               <option key={`${b.remote}/${b.name}`} value={b.name} />
             ))}
           </datalist>
-        )}
-        {diff && (
-          <span className="ml-auto text-ui-sm" data-testid="create-pr-diffstat">
-            <span className="text-diff-added">+{diff.insertions}</span> <span className="text-diff-removed">−{diff.deletions}</span>
-          </span>
         )}
       </div>
 
