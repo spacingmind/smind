@@ -148,6 +148,7 @@ Usage:
   smind task new <workspaceId> <title> [--space <id>]     create a task, optionally scoped to a space
       [--budget <usd>]                                     cap the reported cost of its task tree (root tasks only)
   smind task budget <taskId> [<usd> | --clear]            show, set or clear a root task's tree budget (humans only)
+  smind task commit-message <taskId>                      print an AI-drafted message for the task's staged diff (never commits)
   smind task ls <workspaceId>                              list a workspace's tasks
   smind task tree <workspaceId> | --task <taskId> [--json]  show the task hierarchy with run state, permissions and cost
   smind task send <taskId> <provider> <prompt>            start a run, stream it (Ctrl+C to detach)

@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
 
+	"github.com/spacingmind/smind/internal/commitdraft"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/learning/approval"
 	"github.com/spacingmind/smind/internal/learning/delivery"
@@ -239,6 +241,10 @@ func wireLearning(ctx context.Context, w learningWiring) (stop func()) {
 		},
 	})
 	deps.Probe = probeSvc
+	// The commit-message drafter shares the one executor (same slot and cwd as
+	// learning; ADR-0043). It is wired even with learning off: it is a
+	// human-clicked draft, not the learning loop.
+	w.API.SetCommitDrafter(newCommitDrafter(w.WM, realExec))
 	var deliv *delivery.Service
 	var coll *learningservice.Service
 	if lc.Enabled {
@@ -297,4 +303,34 @@ func wireLearning(ctx context.Context, w learningWiring) (stop func()) {
 		}
 		once.Do(func() { probeSvc.Close() })
 	}
+}
+
+// commitDrafterAdapter exposes a commitdraft.Service as the wsapi drafter.
+type commitDrafterAdapter struct{ svc *commitdraft.Service }
+
+func (a commitDrafterAdapter) DraftCommitMessage(ctx context.Context, taskID int64) (wsapi.CommitDraft, error) {
+	res, err := a.svc.Draft(ctx, taskID)
+	if err != nil {
+		return wsapi.CommitDraft{}, err
+	}
+	return wsapi.CommitDraft{Message: res.Message, Model: res.Model, Truncated: res.Truncated, Omitted: res.Omitted}, nil
+}
+
+// newCommitDrafter builds the daemon's commit-message drafter over exec.
+func newCommitDrafter(wm *workspace.Manager, exec commitdraft.Executor) wsapi.CommitDrafter {
+	return commitDrafterAdapter{svc: commitdraft.New(commitdraft.Deps{
+		Exec: exec,
+		Worktree: func(taskID int64) (string, int64, error) {
+			t, err := wm.GetTask(taskID)
+			if err != nil {
+				return "", 0, err
+			}
+			if t.WorktreePath == nil || *t.WorktreePath == "" {
+				return "", 0, fmt.Errorf("task %d has no worktree", taskID)
+			}
+			return *t.WorktreePath, t.WorkspaceID, nil
+		},
+		// The style setting arrives in a later commit.
+		Style: func(int64) string { return "" },
+	})}
 }

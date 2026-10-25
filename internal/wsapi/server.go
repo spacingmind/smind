@@ -95,6 +95,8 @@ type API struct {
 
 	// learning backs the human-only learning.* RPCs (SetLearning).
 	learning *learningHost
+	// commitDraft backs task.draftCommitMessage (SetCommitDrafter).
+	commitDraft *commitDraftHost
 
 	// authorize decides whether a /ws upgrade may proceed. New installs the
 	// legacy rule (the daemon token in the "token" query parameter);
@@ -272,12 +274,14 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	hs["forge.status"] = handleForgeStatus(fauth)
 	hs["forge.setToken"] = handleForgeSetToken(fauth)
 	hs["forge.logout"] = handleForgeLogout(fauth)
+	commitDraft := &commitDraftHost{}
+	hs["task.draftCommitMessage"] = handleTaskDraftCommitMessage(commitDraft)
 	learning := newLearningHost(db, bus)
 	for method, h := range learningHandlers(learning) {
 		hs[method] = h
 	}
 	hs["workspace.delete"] = learning.beforeWorkspaceDelete(hs["workspace.delete"])
-	api := &API{Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
+	api := &API{Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, commitDraft: commitDraft, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}
