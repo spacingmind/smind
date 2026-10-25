@@ -1,5 +1,11 @@
 # Homelab quickstart: reach a daemon from another device
 
+> **Operator notes.** This page is for people who run a smind deployment: service
+> units, the threat model of a remote daemon, hosting a relay, Docker details and
+> backups. The user-facing how-tos are in [public-docs/](../public-docs/index.md):
+> [Run the daemon](../public-docs/running-the-daemon.md) and
+> [Mobile and relay pairing](../public-docs/mobile-and-relay.md).
+
 The smind daemon (`smind serve`) listens on `127.0.0.1:4648` by default. To use it from a laptop, a phone or the desktop app
 on another machine, you connect to it one of two ways:
 

@@ -12,6 +12,32 @@ task test       # go test ./... (plus the web UI's test suite)
 task lint       # go vet + gofmt check
 ```
 
+While developing:
+
+```sh
+task dev        # daemon + web UI with hot reload (one Ctrl+C)
+task dev:go     # run the Go daemon with hot reload
+task dev:web    # run the Vite dev server, proxying /healthz to :4648
+task docs:cli   # regenerate the CLI summary in public-docs/cli-reference.md
+```
+
+Each task gets a fresh git worktree with no `node_modules`.
+[`scripts/task-setup.sh`](scripts/task-setup.sh) is a sample workspace setup
+script for this repo that installs `web/` and `mobile/`; register it with
+`smind workspace setup set <workspaceId> --setup-file scripts/task-setup.sh`.
+
+User documentation lives in `public-docs/`; `task test` checks its links,
+front matter, forbidden strings and `smind ...` commands (see
+`cmd/smind/docs_drift_test.go`). `docs/` is for contributors (decision
+records, plans).
+
+The desktop updater: `daemon_survives_app_update`
+(`desktop/src-tauri/src/daemon_survival_test.rs`) proves a managed daemon keeps
+its pid, port and in-flight terminal across an app update; run it against a
+real daemon with `SMIND_REAL_DAEMON_BIN=<built smind> cargo test --lib daemon_survi`.
+The updater's signing key is the repository secret `TAURI_SIGNING_PRIVATE_KEY`,
+used only by the release build.
+
 Run `task build && task test && task lint` — the same sequence CI runs —
 before opening a PR.
 

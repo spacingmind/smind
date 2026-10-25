@@ -22,10 +22,12 @@ Size: L (6) — scope 1 (docs plus one Go test), PRs 2 (several, in sequence), r
 | 10 | `troubleshooting.md` | daemon not running, port in use, login, reconnect / resync, logs, `smind doctor` only if it exists (it does not on 2026-10-25) |
 | 11 | `configuration.md` | user-facing `config.yaml` keys and defaults, checked in `internal/config` |
 | 12 | `plugins.md` | stub: plugins are planned; link to the decision record's "Further reading" |
+| 13 | `running-the-daemon.md` | added with the README move: service, direct and relay access overview, Docker, update, manual release install, backup |
+| 14 | `scripting-and-permissions.md` | added with the README move: scripting `task send`, start points, permission modes, MCP server, worktree setup script |
 
 ## Acceptance criteria
 
-AC1 `public-docs/` has the 12 pages above, each with front matter `title`, `description`, `order` (unique positive integer).
+AC1 `public-docs/` has the 14 pages above, each with front matter `title`, `description`, `order` (unique positive integer).
 AC2 Every command, flag, config key, setting name and UI label in a page was checked against the current binary, code or a real UI on an isolated daemon (own `SMIND_HOME` and port, no live model sends). A statement that could not be checked is left out, or marked `<!-- unverified -->` and listed in the PR body.
 AC3 No internal text in a page: no decision-record, PR or issue numbers, no plan names, no secrets, no personal paths, no internal hostnames. A "Further reading" section may link into `docs/decisions/`.
 AC4 `task test` fails when the docs drift (named scenarios below).
@@ -57,7 +59,7 @@ Limits, stated on purpose: flags and arguments are not checked (only command wor
 4. **Command extraction** reads the dispatch code with `go/parser` rather than running help: `smind <cmd> --help` is inconsistent across commands and some invocations would reach a live daemon.
 5. **```` ```text ```` fences are program output**, not commands; hand-written command lists use ```` ```sh ````.
 6. **README** joins the forbidden-string rule in the README PR (`readmeForbidden` in the test), because today's README still carries decision-record links.
-7. **homelab.md** (decide per section in the README/homelab PR): user how-tos (connect from another device, relay pairing, push, Docker run) move to `mobile-and-relay.md` / `getting-started.md`; the threat model and operator details stay. Decisions are recorded here when made.
+7. **README and homelab.md** (decided in the README PR). README sections: Features, Install, Quickstart, Docker, manual release install, Updating, scripting, starting point, permission modes, MCP, child updates, seats, skills: all moved to pages (13 and 14 added because no planned page fitted service/Docker/update and scripting/permissions; orchestration owns seats, child updates, skills); Dev quickstart, task-worktree dependencies and the desktop-updater developer notes moved to `CONTRIBUTING.md`. `docs/homelab.md` per section: service units, threat model ("What is protected"), relay hosting, Docker details, backups and WAL notes STAY (operator material; the new pages carry the short user how-to and link here); pairing and push user flows are summarised in `mobile-and-relay.md`. A note at the top of homelab.md says so.
 8. **No new CLI help text**: the summary page documents what `smind --help` prints today, even where it lags the dispatch table; gaps are listed on the CLI page and reported to the Human.
 
 ## PR sequence
@@ -66,8 +68,9 @@ PR1 plan, skeleton pages, drift check, CLI generator. PR2, PR3 page batches (at 
 
 ## Progress
 
-- 2026-10-25 PR1: plan, 12 pages (11 stubs with verified outlines, CLI reference complete), drift check with six mutations run, `task docs:cli`.
+- 2026-10-25 PR1 (#621): plan, 12 pages (11 stubs with verified outlines, CLI reference complete), drift check with six mutations run, `task docs:cli`.
 
 ## Validation
 
 PR1 mutation results: `/tmp/pd/mutations.log`.
+- 2026-10-25 PR2 (batch A: getting-started, providers, troubleshooting, configuration), PR3 (batch B: workspaces-and-tasks, git-and-prs, usage-and-limits), PR4 (mobile-and-relay, orchestration, index, pages 13 and 14, README and homelab move; `readmeForbidden` on).
