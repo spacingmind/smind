@@ -145,15 +145,17 @@ export function costLabel(node: Pick<TaskTreeNode, 'childCount' | 'usage'>): str
   return `${own} (subtree ${subtree})`;
 }
 
-/** Waiting-for-permission and failed counts over the given nodes' own run state. */
-export function attentionRollup(nodes: readonly TaskTreeNode[]): { waiting: number; failed: number } {
+/** Waiting-for-permission, failed and rate-limited counts over the given nodes' own run state; a rate-limited run is not a failure. */
+export function attentionRollup(nodes: readonly TaskTreeNode[]): { waiting: number; failed: number; rateLimited: number } {
   let waiting = 0;
   let failed = 0;
+  let rateLimited = 0;
   for (const n of nodes) {
     if (n.run?.state === 'waiting_permission') waiting++;
+    else if (isRateLimited(n.run)) rateLimited++;
     else if (n.run?.state === 'error') failed++;
   }
-  return { waiting, failed };
+  return { waiting, failed, rateLimited };
 }
 
 function clampDepth(depth: unknown): number {
@@ -174,9 +176,9 @@ export function buildTreeRows(
   result: TaskTreeResult,
   now: Date,
   pendingTaskIds: ReadonlySet<number>,
-): { rows: TreeRow[]; hiddenCount: number; attention: { waiting: number; failed: number } } {
+): { rows: TreeRow[]; hiddenCount: number; attention: { waiting: number; failed: number; rateLimited: number } } {
   const nodes = Array.isArray(result?.nodes) ? result.nodes : [];
-  if (nodes.length <= 1) return { rows: [], hiddenCount: 0, attention: { waiting: 0, failed: 0 } };
+  if (nodes.length <= 1) return { rows: [], hiddenCount: 0, attention: { waiting: 0, failed: 0, rateLimited: 0 } };
   const shown = nodes.slice(0, MAX_RENDERED_NODES);
   const hiddenCount = nodes.length - shown.length;
   const truncated = result.truncated === true;

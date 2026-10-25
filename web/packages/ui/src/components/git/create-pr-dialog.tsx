@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { Input } from "@/components/ui/input";
+import { MiddleText } from "@/components/ui/middle-text";
 import { useCreatePr, usePrPreview } from "@/hooks/use-pr-actions";
 import { useWorkspaceBranches } from "@/hooks/use-workspace-branches";
 import { useTaskGit } from "@/hooks/use-task-git";
@@ -137,32 +138,41 @@ function CreatePrForm({
         <DialogDescription className="sr-only">Review the title and description, then open the pull request on GitHub.</DialogDescription>
       </DialogHeader>
 
-      <div className="flex min-h-7 flex-wrap items-center gap-x-2 gap-y-1 text-ui-base" data-testid="create-pr-branches">
-        <Icons.branch aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
-        <span className="max-w-[16rem] truncate font-mono text-ui-sm" title={headBranch}>
-          {headBranch}
-        </span>
-        <Icons.arrowRight aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
-        <label htmlFor={ids.base} className="sr-only">
-          Base branch
-        </label>
-        <Input
-          id={ids.base}
-          list={branches.data ? ids.branches : undefined}
-          value={baseInput}
-          onChange={(e) => setBaseInput(e.target.value)}
-          onBlur={commitBase}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              commitBase();
-            }
-          }}
-          spellCheck={false}
-          autoComplete="off"
-          className="h-7 w-44 font-mono text-ui-sm"
-          data-testid="create-pr-base"
-        />
+      <div className="grid gap-1.5 text-ui-base" data-testid="create-pr-branches">
+        <div className="flex min-h-7 items-center gap-2">
+          <Icons.branch aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
+          <MiddleText text={headBranch} className="flex-1 font-mono text-ui-sm" />
+          {diff && (
+            <span className="shrink-0 text-ui-sm" data-testid="create-pr-diffstat">
+              <span className="text-diff-added">+{diff.insertions}</span> <span className="text-diff-removed">−{diff.deletions}</span>
+            </span>
+          )}
+        </div>
+        {/* The base has its own full-width line, so a long (stacked) branch name is not cut. */}
+        <div className="flex min-h-7 items-center gap-2">
+          <Icons.arrowRight aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
+          <label htmlFor={ids.base} className="sr-only">
+            Base branch
+          </label>
+          <Input
+            id={ids.base}
+            list={branches.data ? ids.branches : undefined}
+            value={baseInput}
+            onChange={(e) => setBaseInput(e.target.value)}
+            onBlur={commitBase}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitBase();
+              }
+            }}
+            spellCheck={false}
+            autoComplete="off"
+            className="h-7 min-w-0 flex-1 font-mono text-ui-sm"
+            title={baseInput}
+            data-testid="create-pr-base"
+          />
+        </div>
         {branches.data && (
           <datalist id={ids.branches}>
             {branches.data.branches.map((b) => (
@@ -170,16 +180,18 @@ function CreatePrForm({
             ))}
           </datalist>
         )}
-        {diff && (
-          <span className="ml-auto text-ui-sm" data-testid="create-pr-diffstat">
-            <span className="text-diff-added">+{diff.insertions}</span> <span className="text-diff-removed">−{diff.deletions}</span>
-          </span>
-        )}
       </div>
 
-      {git?.base?.parentBranch && committedBase === git.base.parentBranch && (
-        <p data-testid="create-pr-stacked-hint" className="text-ui-sm text-foreground-muted">
-          Stacked on <span className="font-mono text-foreground">{git.base.parentBranch}</span>
+      {git?.base?.parentBranch && (
+        // One line reserved for a stacked task, so switching the base never moves the fields below.
+        <p className="min-h-5 text-ui-sm text-foreground-muted">
+          {committedBase === git.base.parentBranch ? (
+            <span data-testid="create-pr-stacked-hint">
+              Stacked on <span className="font-mono text-foreground">{git.base.parentBranch}</span>
+            </span>
+          ) : git.base.prDefault && git.base.prDefault !== git.base.parentBranch && committedBase === git.base.prDefault ? (
+            <span data-testid="create-pr-fallback-hint">Parent branch not pushed yet; PR targets {git.base.prDefault}</span>
+          ) : null}
         </p>
       )}
 

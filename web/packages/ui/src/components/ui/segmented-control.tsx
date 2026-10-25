@@ -17,6 +17,7 @@ export function SegmentedControl<T extends string>({
   className,
   disabled,
   testId,
+  instant = false,
 }: {
   /** `icon` makes the segment icon-only: `label` becomes its aria-label (and tooltip). */
   options: { value: T; label: string; icon?: ReactNode; testId?: string }[];
@@ -27,6 +28,8 @@ export function SegmentedControl<T extends string>({
   className?: string;
   disabled?: boolean;
   testId?: string;
+  /** Selection changes without the colour fade, so text derived from the same value never leads the highlight. */
+  instant?: boolean;
 }) {
   return (
     <ToggleGroup.Root
@@ -50,7 +53,8 @@ export function SegmentedControl<T extends string>({
           title={opt.icon ? opt.label : undefined}
           data-testid={opt.testId}
           className={cn(
-            "h-7 rounded-md px-3 text-ui-sm text-muted-foreground outline-none transition-colors",
+            "h-7 rounded-md px-3 text-ui-sm text-muted-foreground outline-none",
+            !instant && "transition-colors",
             "hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
             "data-[state=on]:bg-selected data-[state=on]:text-foreground",
             opt.icon && "inline-flex items-center justify-center px-1.5",

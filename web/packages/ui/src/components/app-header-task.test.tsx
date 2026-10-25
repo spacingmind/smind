@@ -105,7 +105,7 @@ describe("HeaderTaskTitle git state (ADR-0039)", () => {
       screen.getByTestId("app-header-title").focus();
     });
     await screen.findByTestId("app-header-task-card");
-    expect(screen.getByTestId("app-header-task-branch")).toHaveTextContent("fix-bug → develop");
+    expect(screen.getByTestId("app-header-task-branch")).toHaveTextContent("fix-bug→ Base: develop");
     expect(screen.getByTestId("git-tokens")).toHaveTextContent("+4");
     fireEvent.blur(screen.getByTestId("app-header-title"));
   });
@@ -126,7 +126,7 @@ describe("HeaderTaskTitle hover card, stacked", () => {
       screen.getByTestId("app-header-title").focus();
     });
     await screen.findByTestId("app-header-task-card");
-    expect(screen.getByTestId("app-header-task-branch")).toHaveTextContent("fix-bug → smind/parent");
+    expect(screen.getByTestId("app-header-task-branch")).toHaveTextContent("fix-bug→ Base: smind/parent");
     expect(screen.getByTestId("app-header-task-branch")).toHaveAttribute("title", expect.stringContaining("stacked on smind/parent"));
     fireEvent.blur(screen.getByTestId("app-header-title"));
   });

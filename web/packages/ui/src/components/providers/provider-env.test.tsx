@@ -98,6 +98,24 @@ describe("ProviderEnvField", () => {
     expect(setEnvCalls(d)).toEqual([{ provider: "claude-native", key: "CLAUDE_CONFIG_DIR", value: "~/alt-claude" }]);
   });
 
+  it("Save and Clear re-run the provider's readiness check", async () => {
+    const d = setup(claude());
+    const tests = () => d.calls.filter((c) => c.method === "provider.test").map((c) => c.params);
+    type("~/alt-claude");
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("provider-env-save-claude-native"));
+    });
+    await flush();
+    expect(tests()).toEqual([{ provider: "claude-native" }]);
+    // The answer is cached and fresh now; a second save marks it stale and asks again, once.
+    type("~/other-claude");
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("provider-env-save-claude-native"));
+    });
+    await flush();
+    expect(tests()).toEqual([{ provider: "claude-native" }, { provider: "claude-native" }]);
+  });
+
   it("Clear sends provider.setEnv with null", async () => {
     const d = setup(claude({ env: { CLAUDE_CONFIG_DIR: "/work/claude" } }, { path: "/work/claude", source: "settings" }));
     await act(async () => {

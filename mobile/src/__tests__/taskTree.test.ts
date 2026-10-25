@@ -167,9 +167,20 @@ describe('taskTree', () => {
       node(4, { run: run({ state: 'error' }) }),
       node(5, { run: run({ state: 'done' }) }),
     ];
-    expect(attentionRollup(list)).toEqual({ waiting: 2, failed: 1 });
-    expect(attentionRollup([])).toEqual({ waiting: 0, failed: 0 });
-    expect(buildTreeRows({ nodes: list, truncated: false }, NOW, none).attention).toEqual({ waiting: 2, failed: 1 });
+    expect(attentionRollup(list)).toEqual({ waiting: 2, failed: 1, rateLimited: 0 });
+    expect(attentionRollup([])).toEqual({ waiting: 0, failed: 0, rateLimited: 0 });
+    expect(buildTreeRows({ nodes: list, truncated: false }, NOW, none).attention).toEqual({ waiting: 2, failed: 1, rateLimited: 0 });
+  });
+
+  it('attentionRollup counts a rate-limited run as rate limited, not failed', () => {
+    const list = [
+      node(1, { run: run({ state: 'running' }) }),
+      node(2, { run: run({ state: 'error', failureKind: 'rate_limited' }) }),
+      node(3, { run: run({ state: 'error' }) }),
+    ];
+    expect(attentionRollup(list)).toEqual({ waiting: 0, failed: 1, rateLimited: 1 });
+    const only = [node(1), node(2, { run: run({ state: 'error', failureKind: 'rate_limited' }) })];
+    expect(buildTreeRows({ nodes: only, truncated: false }, NOW, none).attention).toEqual({ waiting: 0, failed: 0, rateLimited: 1 });
   });
 
   it('unread comes from pendingTaskIds or pendingPermissions', () => {

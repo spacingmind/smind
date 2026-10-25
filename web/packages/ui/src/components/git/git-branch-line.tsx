@@ -1,22 +1,28 @@
+import { MiddleText } from "@/components/ui/middle-text";
 import { Icons } from "@/lib/icons";
 
-/** `<branch> → <base ref>` (just the branch while the base is unknown), for the sidebar and header hover cards. `gone` marks a base that resolves nowhere; `stackedOn` is the parent task's branch when the base is it. */
+/**
+ * `<branch> → Base: <base ref>` (just the branch while the base is unknown), for the sidebar and header hover cards. Both
+ * names truncate in the middle so the distinguishing tail stays visible; `gone` marks a base that resolves nowhere;
+ * `stackedOn` is the parent task's branch when the base is it.
+ */
 export function GitBranchLine({ branch, base, gone, stackedOn, testId }: { branch: string; base?: string; gone?: boolean; stackedOn?: string; testId?: string }) {
   const baseText = base && gone ? `${base} (gone)` : base;
   const title = [baseText ? `${branch} → ${baseText}` : branch, stackedOn && `stacked on ${stackedOn}`].filter(Boolean).join(" · ");
   return (
-    <div className="flex items-center gap-1.5 text-ui-sm text-muted-foreground">
-      <Icons.branch className="size-3 shrink-0" />
-      {/* The branch name truncates; the base stays visible: "→ main" is the part that matters. */}
-      <span data-testid={testId} className="flex min-w-0 gap-1" title={title}>
-        <span className="min-w-0 flex-1 truncate">{branch}</span>
-        {base && (
-          <span className="flex min-w-0 max-w-[60%] shrink-0 gap-1">
-            <span className="min-w-0 truncate">{` → ${base}`}</span>
-            {gone && <span className="shrink-0">{" (gone)"}</span>}
-          </span>
-        )}
-      </span>
+    <div className="flex flex-col gap-0.5 text-ui-sm text-muted-foreground" data-testid={testId} title={title}>
+      <div className="flex items-center gap-1.5">
+        <Icons.branch className="size-3 shrink-0" />
+        <MiddleText text={branch} className="flex-1" />
+      </div>
+      {base && (
+        // The base gets its own line: two long names never fit side by side in the card, and the label tells it from the task's own branch.
+        <div className="flex min-w-0 gap-1 pl-[1.125rem]">
+          <span className="shrink-0">{"→ Base: "}</span>
+          <MiddleText text={base} />
+          {gone && <span className="shrink-0">{" (gone)"}</span>}
+        </div>
+      )}
     </div>
   );
 }

@@ -63,3 +63,19 @@ describe("New sub-task dialog", () => {
     expect(client.nth("task.create", 0).params).toEqual({ workspaceId: 3, title: "child", parentTaskId: 5 });
   });
 });
+
+describe("base switch frame agreement", () => {
+  it("updates the selected pill and the helper text in the same flush, with no colour fade between them", async () => {
+    await setup(PARENT);
+    const parent = screen.getByRole("radio", { name: /Parent branch/ });
+    const def = screen.getByRole("radio", { name: /Default base/ });
+    expect(parent).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(def);
+    // One synchronous check straight after the click: pill, text and the absence of a fade agree.
+    expect(def).toHaveAttribute("aria-checked", "true");
+    expect(parent).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByTestId("stack-base-helper")).toHaveTextContent("Starts at develop, not stacked.");
+    expect(def).not.toHaveClass("transition-colors");
+    expect(parent).not.toHaveClass("transition-colors");
+  });
+});

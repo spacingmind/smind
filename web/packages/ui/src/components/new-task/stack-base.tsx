@@ -39,7 +39,7 @@ export function StackBaseControl({
   return (
     <div className="grid gap-2" data-testid="stack-base">
       <span className="text-ui-base font-medium">Base</span>
-      <SegmentedControl label="Base" options={options} value={selected} onChange={onChange} className="w-fit" />
+      <SegmentedControl label="Base" options={options} value={selected} onChange={onChange} className="w-fit" instant />
       {/* Fixed height: every state is one or two lines, so switching options does not move the dialog. */}
       <p data-testid="stack-base-helper" className="min-h-10 text-ui-sm text-foreground-muted">
         {helper}
