@@ -1045,9 +1045,15 @@ func (h *harness) runStatus(args []string) (map[string]any, error) {
 	if err := need(args, 1, "run-status <runId>"); err != nil {
 		return nil, err
 	}
-	_, st, err := h.api.Runs.History(args[0])
+	events, st, err := h.api.Runs.History(args[0])
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"status": st.Status, "stopReason": st.StopReason, "disposition": st.Disposition}, nil
+	texts := 0
+	for _, e := range events {
+		if e.Type == taskrunner.EventTypeText {
+			texts++
+		}
+	}
+	return map[string]any{"status": st.Status, "stopReason": st.StopReason, "disposition": st.Disposition, "textEvents": texts}, nil
 }
