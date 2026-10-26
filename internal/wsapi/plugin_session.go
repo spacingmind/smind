@@ -255,7 +255,10 @@ func (s *pluginSession) Close() {
 	s.mu.Unlock()
 	s.cancel()
 	if sub != nil {
-		s.reg.bus.unregister(sub)
+		s.reg.mu.RLock()
+		bus := s.reg.bus
+		s.reg.mu.RUnlock()
+		bus.unregister(sub)
 		sub.close()
 	}
 }
@@ -333,17 +336,20 @@ func (s *pluginSession) subscription(method string, params json.RawMessage) (any
 			return nil, rpcErr(host.ErrCodeInvalidParams, method+": topic "+clipMethod(t)+" is not observable by plugins (allowed: "+strings.Join(PluginEventTopics, ", ")+")", nil)
 		}
 	}
+	s.reg.mu.RLock()
+	bus := s.reg.bus
+	s.reg.mu.RUnlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
-		return nil, rpcErr(host.ErrCodeInternal, "the session has ended", nil)
+	if s.closed || bus == nil {
+		return nil, rpcErr(host.ErrCodeInternal, "the session is not available", nil)
 	}
 	if s.sub == nil {
 		if method == pluginRPCUnsub {
 			return map[string]any{"topics": []string{}}, nil
 		}
 		s.sub = newSubscriber()
-		s.reg.bus.register(s.sub)
+		bus.register(s.sub)
 		go s.pump(s.sub)
 	}
 	if method == pluginRPCSubscibe {
