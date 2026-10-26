@@ -304,6 +304,7 @@ func TestNotifyBodyContent(t *testing.T) {
 		{Input{Kind: KindDone, Key: "4", TaskID: 1}, "Root task", "Run finished."},
 		{Input{Kind: KindError, Key: "5", TaskID: 1, Err: "boom"}, "Root task", "Run failed: boom"},
 		{Input{Kind: KindError, Key: "6", TaskID: 1}, "Root task", "Run failed"},
+		{Input{Kind: KindError, Key: "autopause:1:1", TaskID: 1, Summary: "Automation paused: 3 failed runs"}, "Root task", "Automation paused: 3 failed runs"},
 		{Input{Kind: KindPermission, Key: "7", TaskID: 7}, "Task 7", "A run needs your approval"},
 	}
 	for i, tc := range cases {
