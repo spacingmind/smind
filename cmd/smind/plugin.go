@@ -8,12 +8,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/mattn/go-isatty"
 
 	"github.com/spacingmind/smind/internal/plugins"
+	"github.com/spacingmind/smind/internal/plugins/host"
 )
 
 const cmdPluginUsage = `usage: smind plugin <command>
@@ -30,6 +32,9 @@ const cmdPluginUsage = `usage: smind plugin <command>
   smind plugin update <id> [<source>] [--yes]
                                          stage a new version; one that changes what runs waits for --yes
   smind plugin reload <id>               re-read and re-validate an installed plugin
+  smind plugin logs <id> [--lines=N] [--json]
+                                         what the plugin's process printed on stderr, and the host's own
+                                         messages about it (start, crash, restart); secrets are redacted
 
 Plugins run trusted code as you. They are off until plugins.enabled is true in config.yaml
 (a human edit; no command or agent can set it). Management is local only.`
@@ -72,6 +77,8 @@ func runPlugin(args []string, env pluginIO) int {
 		return pluginRemove(rest, env)
 	case "update":
 		return pluginUpdate(rest, env)
+	case "logs":
+		return pluginLogs(rest, env)
 	case "-h", "--help", "help":
 		fmt.Fprintln(env.out, cmdPluginUsage)
 		return 0
@@ -197,6 +204,9 @@ func pluginState(p plugins.Info, global bool) string {
 	case p.Enabled && !global:
 		s = "enabled (switch off)"
 	}
+	if p.Process != nil {
+		s += ", process " + string(p.Process.State)
+	}
 	if p.Pending != nil {
 		s += ", update " + p.Pending.Consent.Version + " pending"
 	}
@@ -226,6 +236,9 @@ func pluginShow(args []string, env pluginIO) int {
 		state = "enabled"
 	}
 	fmt.Fprintf(env.out, "State: %s (confirmed: %t)\n", state, in.Consented)
+	if in.Process != nil {
+		fmt.Fprintf(env.out, "Process: %s\n", processLine(*in.Process))
+	}
 	if in.LastError != "" {
 		fmt.Fprintf(env.out, "Last error: %s\n", in.LastError)
 	}
@@ -237,6 +250,56 @@ func pluginShow(args []string, env pluginIO) int {
 	if in.Pending != nil {
 		fmt.Fprintf(env.out, "\nPENDING UPDATE to %s (changes what the plugin runs or may call; apply with: smind plugin update %s --yes):\n\n", in.Pending.Consent.Version, in.ID)
 		printConsent(env.out, in.Pending.Consent)
+	}
+	return 0
+}
+
+// processLine is one line about a plugin process: state, pid, restarts.
+func processLine(p host.Status) string {
+	out := string(p.State)
+	if p.PID != 0 {
+		out += fmt.Sprintf(" (pid %d)", p.PID)
+	}
+	if p.Restarts > 0 {
+		out += fmt.Sprintf(", %d restart(s)", p.Restarts)
+	}
+	if p.State == host.StateRestarting && !p.RetryAt.IsZero() {
+		out += ", next try " + p.RetryAt.Local().Format("15:04:05")
+	}
+	return out
+}
+
+func pluginLogs(args []string, env pluginIO) int {
+	lines := 0
+	var rest []string
+	for _, a := range args {
+		if v, ok := strings.CutPrefix(a, "--lines="); ok {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 {
+				fmt.Fprintln(env.errOut, "usage: smind plugin logs <id> [--lines=N] [--json] (N is a positive number)")
+				return 2
+			}
+			lines = n
+			continue
+		}
+		rest = append(rest, a)
+	}
+	pos, flags, bad := splitFlags(rest, "--json")
+	if bad != "" || len(pos) != 1 {
+		fmt.Fprintln(env.errOut, "usage: smind plugin logs <id> [--lines=N] [--json]")
+		return 2
+	}
+	var res plugins.LogsResult
+	if err := env.call("logs", "plugin.logs", map[string]any{"id": pos[0], "limit": lines}, &res); err != nil {
+		return env.fail("logs", err)
+	}
+	if flags["--json"] {
+		b, _ := json.MarshalIndent(res, "", "  ")
+		fmt.Fprintln(env.out, string(b))
+		return 0
+	}
+	for _, l := range res.Lines {
+		fmt.Fprintf(env.out, "%s %s\n", l.Time.Local().Format("15:04:05.000"), l.Text)
 	}
 	return 0
 }

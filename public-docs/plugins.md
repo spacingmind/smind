@@ -8,8 +8,10 @@ order: 12
 
 Plugins are a preview. A plugin is a directory with a `smind-plugin.json`
 file. Today a plugin can add five things: MCP servers, skills, agent profiles,
-prompt commands and themes. Nothing else a manifest declares (hooks, providers,
-panels, commands that call a plugin process) has an effect yet.
+prompt commands and themes, and it can declare a long-lived process that smind
+starts (see [Plugin processes](#plugin-processes)). Nothing else a manifest
+declares (hooks, providers, panels, commands that call a plugin process) has an
+effect yet.
 
 A plugin is trusted code you chose to run. An MCP server it adds starts as
 you, with your files and credentials, exactly like an MCP server you add by
@@ -101,8 +103,8 @@ installed** and shows `smind plugin install <path>`.
 
 These actions are refused on a relay connection, and on a remote login unless
 `plugins.allowRemoteManage` is set. The page shows the daemon's message and
-becomes read-only. The page has no process logs yet: it says "Process logs
-arrive with plugin processes."
+becomes read-only. The page does not show process logs yet (it says "Process
+logs arrive with plugin processes."); use `smind plugin logs <id>`.
 
 Anything a plugin added is labelled "from acme" (its id) in Settings → MCP
 servers and Settings → Agents, in the agent picker of the composer, and next to
@@ -255,6 +257,49 @@ A manifest may declare `settings` and use `${setting.NAME}` in an MCP server's
 `env` or `headers`, and nowhere else. Storing setting values is not available
 yet, so a server that uses a placeholder is listed but is not given to runs;
 `smind plugin show <id> --json` says which setting has no value.
+
+## Plugin processes
+
+A manifest may declare `"process": { "command": ["node", "server.js"] }`. While
+the plugin is enabled and `plugins.enabled` is on, smind starts that command as
+you, in the plugin's own directory, and keeps it running. It is a program you
+chose to run: the process can read your files and open network connections, and
+smind shows its command before you enable the plugin.
+
+- **No shell.** The command is an argument list. A first entry with a slash
+  (`./bin/server`) is a program inside the plugin; a bare name (`node`) is looked
+  up on a fixed system `PATH` (`/usr/local/bin`, `/opt/homebrew/bin`,
+  `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin` on macOS and Linux), not on yours.
+- **A clean environment.** The process does not inherit smind's environment: no
+  `SMIND_*` value, no provider key, nothing from your shell. It gets that `PATH`,
+  `HOME` set to the plugin's `data/` directory (and the temp directory inside
+  it), and your locale (`LANG`, `LC_*`) and `TZ`. This hides smind's secrets from
+  the environment only: a same-user process can still read files such as
+  `~/.smind/token`.
+- **Handshake.** smind sends `plugin.initialize` with `api`, `smindVersion`,
+  `dataDir` and `settings` (an empty object for now) on the process's stdin, in
+  `Content-Length`-framed JSON-RPC 2.0 (the framing language servers use), and
+  the plugin has 10 seconds to answer it. Calls the plugin makes back into smind
+  are all refused with `method not found` for now; hooks and the host API are
+  not available yet.
+- **Limits.** A frame body is at most 1 MiB and a header line 1 KiB. A malformed
+  or oversize frame closes the connection and kills the process; it counts as a
+  crash.
+- **Crashes.** A process that exits is restarted after 1 s, 2 s, 4 s, ... up to
+  30 s. Five crashes within ten minutes mark the plugin **failed**: it stays
+  enabled but is not restarted, `smind plugin show` and the Plugins page show
+  why, and `smind plugin reload <id>` (or disable and enable) tries again.
+- **Stopping.** Disable, remove, reload, an applied update, switching
+  `plugins.enabled` off and stopping the daemon send `plugin.shutdown`, then
+  SIGTERM to the process's whole group, wait 5 seconds, then kill the group
+  (a job object on Windows), so nothing the plugin started is left behind. If
+  the daemon itself is killed (SIGKILL, power loss) a Unix plugin process is not
+  stopped by smind; on Windows the job object ends it.
+- **Logs.** `smind plugin logs <id>` prints what the process wrote to stderr
+  plus smind's own `[smind]` lines (started, ready, crashed, restarting). The log
+  is kept in memory, at most 1000 lines or 256 KiB, each line cut at 2 KiB;
+  control characters are removed and secrets are redacted before a line is
+  stored. It is gone when the daemon restarts or the plugin is removed.
 
 ## Further reading
 
