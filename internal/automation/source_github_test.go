@@ -282,3 +282,26 @@ func TestGHSource_CursorSurvivesRestart(t *testing.T) {
 		t.Fatalf("cursor = %q", cur.PollCursor)
 	}
 }
+
+// A crash between the audit write and the cursor write must re-deliver the
+// signal (deduped by its fingerprint), never lose it: the cursor still holds
+// its old value while the task is being started.
+func TestGHSource_CursorAdvancesOnlyAfterAuditAndLaunch(t *testing.T) {
+	g := newGHEnv(t)
+	g.ff.runs = []forge.WorkflowRun{run(10, "completed", "success", "a")}
+	a := g.create(g.def(KindWorkflowRun), true)
+	g.tick()
+	var atLaunch string
+	g.fs.onStart = func() {
+		cur, _ := g.st.GetAutomation(a.ID)
+		atLaunch = cur.PollCursor
+	}
+	g.ff.runs = append([]forge.WorkflowRun{run(11, "completed", "failure", "bad1111")}, g.ff.runs...)
+	g.poll(6 * time.Minute)
+	if atLaunch != "10" {
+		t.Fatalf("cursor was %q while the task started, want the old 10", atLaunch)
+	}
+	if rows := g.audit(a.ID); len(rows) != 1 || rows[0].Decision != "fire" {
+		t.Fatalf("rows = %v", decisions(rows))
+	}
+}
