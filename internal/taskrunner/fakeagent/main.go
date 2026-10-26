@@ -176,6 +176,12 @@ func main() {
 		mcpCaps = strings.Split(v, ",")
 	}
 	mcpDumpPath = os.Getenv("FAKEAGENT_MCP_DUMP")
+	// FAKEAGENT_ENV_DUMP, when set, makes the agent write its own environment
+	// (one KEY=value per line) to that file at start: what the daemon's launch
+	// gave it.
+	if p := os.Getenv("FAKEAGENT_ENV_DUMP"); p != "" {
+		_ = os.WriteFile(p, []byte(strings.Join(os.Environ(), "\n")), 0o644)
+	}
 
 	for _, a := range os.Args[1:] {
 		if strings.HasPrefix(a, "modes:") {

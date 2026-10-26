@@ -361,6 +361,12 @@ func Run() {
 			fmt.Fprintf(os.Stderr, "fake claude cli: write env: %v\n", err)
 			os.Exit(1)
 		}
+		// The whole environment, one KEY=value per line, for tests that assert
+		// what the launch added (plugin hook env) or refused to override.
+		if err := os.WriteFile(filepath.Join(wd, "env-all"), []byte(strings.Join(os.Environ(), "\n")), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude cli: write env-all: %v\n", err)
+			os.Exit(1)
+		}
 		// And the CLAUDE_CONFIG_DIR the CLI would read its login from (a path,
 		// not a secret), for the provider launch-env tests.
 		if err := os.WriteFile(filepath.Join(wd, "env-config-dir"), []byte(os.Getenv("CLAUDE_CONFIG_DIR")), 0o644); err != nil {

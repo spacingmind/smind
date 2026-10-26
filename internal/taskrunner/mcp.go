@@ -272,6 +272,7 @@ func (r *Runner) mcpRowsFor(ctx context.Context, workspaceID int64) ([]store.Mcp
 	if err != nil {
 		return nil, err
 	}
+	rows = withHookMcp(ctx, rows)
 	policy := RunContractFrom(ctx).Mcp
 	if policy == nil {
 		return rows, nil
