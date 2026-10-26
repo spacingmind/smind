@@ -59,6 +59,10 @@ func (reg *Registry) treeRootOf(taskID int64) (int64, error) {
 	return id, err
 }
 
+// TreeRoot returns the id of the root of taskID's tree (taskID itself for a
+// task with no parent).
+func (reg *Registry) TreeRoot(taskID int64) (int64, error) { return reg.treeRootOf(taskID) }
+
 // treeRootTask is treeRootOf that also returns the root's Task row. The
 // final step of the walk has already loaded it, so the tree budget check
 // (checkBudget) costs no extra GetTask; only the corrupt-cycle and

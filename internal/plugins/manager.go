@@ -63,6 +63,7 @@ type Manager struct {
 	userProfileNames func() []string
 	cache            contribCache
 	proc             *hostState
+	hooks            hookState
 
 	mu sync.Mutex
 	// failAt, when set (tests only), is called at named points of an install
@@ -162,6 +163,9 @@ func (m *Manager) infoG(p store.Plugin, global bool) Info {
 		if st.State == host.StateFailed && in.LastError == "" {
 			in.LastError = "process failed: " + st.LastError
 		}
+	}
+	if in.LastError == "" && p.Enabled && global {
+		in.LastError = m.problemText(p.ID)
 	}
 	if p.Pending != "" {
 		var pc Consent

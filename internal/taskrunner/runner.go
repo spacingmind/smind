@@ -489,7 +489,14 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 		opts = append(opts, acp.WithPermissionPolicy(r.acpPermissionPolicy))
 	}
 
-	if env := r.acpEnvEntries(provider); len(env) > 0 {
+	env := r.acpEnvEntries(provider)
+	if add, note := hookEnvEntries(ctx, env); len(add) > 0 || note != "" {
+		env = append(env, add...)
+		if note != "" {
+			r.sendSessionNote(ctx, events, note)
+		}
+	}
+	if len(env) > 0 {
 		opts = append(opts, acp.WithEnv(env...))
 	}
 
@@ -979,7 +986,14 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 	}
 	// The configured launch env goes last so it wins over the daemon's own
 	// environment and everything above.
-	env = append(env, r.providerEnvEntries(provider)...)
+	providerEnv := r.providerEnvEntries(provider)
+	if add, note := hookEnvEntries(ctx, append(append([]string(nil), env...), providerEnv...)); len(add) > 0 || note != "" {
+		env = append(env, add...)
+		if note != "" {
+			r.sendSessionNote(ctx, events, note)
+		}
+	}
+	env = append(env, providerEnv...)
 	if len(env) > 0 {
 		opts = append(opts, claudecode.WithEnv(env...))
 	}
@@ -1293,6 +1307,9 @@ func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, 
 
 	if err := client.Initialize(ctx); err != nil {
 		return fmt.Errorf("taskrunner: initialize codex agent: %w", err)
+	}
+	if len(LaunchEditsFrom(ctx).Env) > 0 {
+		r.sendSessionNote(ctx, events, "plugin env not applied: codex-native runs take no per-run environment")
 	}
 	if RunContractFrom(ctx).Mcp != nil {
 		r.sendSessionNote(ctx, events, "orchestration tools cannot be added or removed for codex-native runs (process-wide MCP config): the seat's tool policy is not enforced")
