@@ -34,6 +34,7 @@ agent is doing and what it costs.
 - [Troubleshooting](troubleshooting.md): fix a daemon that will not start, login problems and reconnects.
 - [Configuration reference](configuration.md): the keys in `config.yaml` and their defaults.
 - [Plugins](plugins.md): what is planned.
+- [Automations](automations.md): start a task on a schedule or when a workflow fails.
 
 ## How the docs are organised
 
