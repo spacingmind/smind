@@ -232,7 +232,7 @@ Found with `grep -rnE 'ProviderClaudeNative|ProviderCodexNative|ProviderGLM|Prov
   has started; no Leads spawned.** Nothing below is checked until the ADR is accepted.
 - [x] P0.1 (K1, daemon + AC37 daemon side)  [x] P0.2 (K2: web + mobile + Settings UI)
 - [x] PA.1 (merged #630)  [x] PA.2 (merged #631)  [x] PA.3 (merged #634)  [x] PA.4 (#635)  [x] PA.5 (mobile, PR in review)
-- [x] PB.1 (merged #643)  [x] PB.2 (PR in review)  [ ] PB.3  [ ] PB.4
+- [x] PB.1 (merged #643)  [x] PB.2 (merged #654)  [x] PB.3 (PR in review)  [ ] PB.4
 - [ ] PC.1  [ ] PC.2  [ ] PC.3
 - [ ] PD.1  [ ] DOC.1
 
@@ -285,3 +285,6 @@ Named tests: `TestHook_RunFinished_ObserveOnly_Redacted`, `TestHook_BeforeStart_
 `TestHook_Ordering_ByPluginIdThenRegistration_NoDeepMerge`, `TestHook_FailedOrDisabledPluginSkipped`, `TestHook_NoPermissionDecisionAnywhere`,
 `TestTaskSend_FromPlugin_SourceHeaderAndQueue`, `TestTaskSend_RateLimit_PerPluginAndPerTree`, `TestTaskSend_LoopStopped_VisibleReason`,
 `TestTaskSend_DepthAndTreeGuardRespected`, `TestTaskSend_CapabilityNotDeclared_Forbidden`, `TestBeforeStartEditsReachTheLaunch` (fake CLI harness).
+
+- 2026-10-27 PB.3 (hooks and `task.send`; Lead, solo): `run.beforeStart` (host-validated edits, labeled, capped, never override), `run.finished` (observe, bounded per-plugin queue), `tasks.write`/`task.send` (source `plugin:<id>`, header, limiter and chain guard). Decisions in ADR-0042's PB.3 note.
+- PB.3 validation: AC20 `TestHook_BeforeStart_AppendsInstructions_LabeledByPlugin`, `_AddsEnv_RefusesReservedAndOverrides`, `_AddsOwnMcp_RefusesOthers`, `_ChangeProviderCwdModelProfileModeAutoAccept_TypedError`, `_Timeout10s_OnErrorOpenAndClosed`, `TestHook_Ordering_ByPluginIdThenRegistration_NoDeepMerge`, `TestHook_FailedOrDisabledPluginSkipped`, `TestBeforeStartEditsReachTheLaunch` (fake ACP agent: prompt, env, MCP dump) and `TestBeforeStartEditsReachTheLaunch_ClaudeNative` (fake CLI), `TestHookEnvEntries_SkipsExistingAndDaemonKeys`; AC21 `TestTaskSend_FromPlugin_SourceHeaderAndQueue`, `_RateLimit_PerPluginAndPerTree`, `TestSendLimiter_Windows_PerPluginPerHourAndPerTree`, `TestTaskSend_LoopStopped_VisibleReason` (a real child plugin answering every `run.finished` with a send), `_DepthAndTreeGuardRespected`, `_CapabilityNotDeclared_Forbidden`, `TestDeliverPrompt_PluginSourceHeader`, `TestBudgetedOrigin_AgentAndPlugin`; AC22 `TestHook_NoPermissionDecisionAnywhere`; AC19 `TestHook_RunFinished_ObserveOnly_Redacted`; AC34 hook results logged with the plugin id, sizes only. Mutations (all caught by assertion): host trusts `permissionMode`; env allowlist off; another plugin's MCP name accepted; closed treated as open; timeout not enforced; rate limit off; loop limiter off; `tasks.write` without the capability; label dropped. Live: isolated daemon, a Python process plugin, the fake ACP agent as a custom provider; transcript in the PR.
