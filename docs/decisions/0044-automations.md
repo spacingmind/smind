@@ -2,9 +2,7 @@
 
 ## Status
 
-**Proposed — 2026-10-27.** Waiting for the Human to answer the [numbered questions](#questions-for-the-human); each carries a recommendation. The
-Human pre-approved "as recommended" for a 12-hour window, so once the PR is merged with Status `Accepted` the recommendations bind. No
-implementation starts before that. Spec and PR split (written after acceptance): `docs/plans/active/automations.md`.
+**Accepted — 2026-10-27** (Human pre-approved the recommendations for a 12-hour window on 2026-10-27 01:10; Supervisor applied them, see [Human answers](#human-answers-2026-10-27)). Proposed the same day. Spec and PR split (written after acceptance): `docs/plans/active/automations.md`.
 
 Closes the Phase 5 rows "Schedules: cron creates new tasks" and the audit-log row in `docs/ROADMAP.md`. Heartbeats ("a task self-evaluates and
 continues") are **not** part of this ADR: see [what we are NOT doing](#what-we-are-not-doing).
@@ -459,3 +457,16 @@ Each is one real decision; the **Recommendation** is what binds if you accept "a
     - (b) Default true.
     - (c) A UI toggle.
     *Recommendation:* **(a).** Same shape as `plugins.enabled`: no RPC can arm unattended agents.
+
+## Human answers (2026-10-27)
+
+All twelve questions are answered **as recommended** (Human pre-approval, applied by the Supervisor):
+1 (a) `cron` (UTC) + `github.workflow_run`, extension interface for the rest; 2 (a) poll through `forge.Provider`, 5-minute default, inside a
+60-of-240 hourly call ceiling; 3 (a) dedupe 24 h for CI sources, per-instant for cron; 4 (a) auto-pause after 3 consecutive failed runs;
+5 (a) 2 runs per hour, ceiling 12; 6 (a) `$SMIND_HOME/automations/<id>/MEMORY.md`, read-only projection, daemon-written from a fenced block,
+16 KiB cap, off by default; 7 (a) push only on `automation.paused` (plus existing permission/stall pushes); 8 (a) local direct humans manage,
+a relay session may list, read audit and disable/pause only, agents nothing; 9 (a) 90 days and never fewer than the last 100 firings;
+10 (a) $3 tree budget per run, 45 min wall clock, ceiling `automations.maxBudgetUsd` $10; 11 (a) unattended modes refused unless
+`automations.allowUnattendedModes: true` in `config.yaml`; 12 (a) `automations.enabled` default false (file only) plus `automations.paused`.
+Enabling automations on the Human's own daemon remains the Human's step (the switch is file-only and off by default).
+
