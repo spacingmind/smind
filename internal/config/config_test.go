@@ -295,3 +295,12 @@ func TestStallAlertMinutesNegativeRejected(t *testing.T) {
 		t.Fatalf("Load() error = %v, want the stallAlertMinutes error", err)
 	}
 }
+
+// TestConfig_AutomationsDefaults pins ADR-0044's global switch: off by
+// default, a $10 per-run ceiling, no opt-ins.
+func TestConfig_AutomationsDefaults(t *testing.T) {
+	a := Default().Automations
+	if a.Enabled || a.Paused || a.AllowRemoteManage || a.AllowUnattendedModes || a.MaxBudgetUSD != 10 {
+		t.Fatalf("Default().Automations = %+v", a)
+	}
+}
