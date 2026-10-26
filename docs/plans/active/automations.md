@@ -78,7 +78,7 @@ Disjointness: the **V lane** (validator/inbox: reviewer seat, verdicts, console 
 
 ## Progress
 
-- 2026-10-27 PR 1 (daemon core: engine, cron, rails, memory, prompt envelope, store, config keys, `automation.*` RPCs with the human-only guards, events, CLI, public docs) implemented on this branch; PR 2-4 not started.
+- 2026-10-27 PR 1 (daemon core: engine, cron, rails, memory, prompt envelope, store, config keys, `automation.*` RPCs with the human-only guards, events, CLI, public docs) implemented on this branch; PR 1 merged (#653). PR 2 (GitHub source) implemented, see below; PR 3 (UI) and PR 4 (pilot) in review prep.
 
 ## Validation
 
@@ -106,3 +106,5 @@ PR 1 (evidence is the named tests; `go test -race` on `internal/automation`, `in
 | AC23 | `TestAutomationCLI_*`, `TestAutomationEvents_Topics`, `public-docs/automations.md`, `TestCLIReferenceMatchesHelp` |
 
 Mutations run (one each, test had to fail, restored with `git checkout`; log `/tmp/automation-mutations.log`): runs/hour `>=`->`>`; dedupe check disabled; failure counter not reset on success; kill switch not consulted in `Tick`; single-flight check dropped; agent guard skipped in `automationHumanLocal`; relay `!rc.local` guard removed (this one first survived because the channel check also refused, so the test now adds a relay session claiming a loopback channel); payload JSON not HTML-escaped; workflow placeholder unvalidated; memory directory symlink followed (`os.Stat` for `os.Lstat`); memory size cap dropped. Not run in PR 1: cursor-before-audit order (PR 2), live daemon (PR 4).
+
+PR 2 (GitHub `workflow_run` source, AC18/AC19): evidence `TestGHSource_*`, `TestManualFire_LatestRunOneCall`, `TestWorkflowRuns_*` (ghctx). The source polls `gh run list --workflow=<w> --branch=<b>` through `forge.WorkflowRunLister` (implemented by `ghctx.Client`; a separate interface so `forge.Provider` and its fakes keep their shape), books each call on the real host's ledger and on an `automations:<host>` ledger row (ceiling 60 of 240 an hour), keeps the 15 s per-repo floor, caches the repo for an hour (one forge call per poll), primes the cursor on the first poll, and never lets the cursor pass a run still in progress. Mutations (each failed its test, restored): cursor passes an unfinished run; priming does not skip history; budget ceiling off by one; real host ledger not booked; fingerprint by run id; repo floor dropped; cursor advanced before the audit row/launch.

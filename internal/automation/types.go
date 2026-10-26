@@ -162,7 +162,7 @@ func (d Def) Validate(lim Limits) error {
 			return err
 		}
 	case KindWorkflowRun:
-		if strings.TrimSpace(d.Signal.Workflow) == "" || len(d.Signal.Workflow) > 128 || hasControl(d.Signal.Workflow) {
+		if strings.TrimSpace(d.Signal.Workflow) == "" || len(d.Signal.Workflow) > 128 || hasControl(d.Signal.Workflow) || strings.HasPrefix(d.Signal.Workflow, "-") {
 			return fmt.Errorf("signal.workflow is required (the workflow's name or file, 128 chars max)")
 		}
 		if !validBranch(d.Signal.Branch) {

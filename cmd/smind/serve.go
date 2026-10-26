@@ -18,6 +18,7 @@ import (
 	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/acp"
 	"github.com/spacingmind/smind/internal/auth"
+	"github.com/spacingmind/smind/internal/automation"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/logging"
 	"github.com/spacingmind/smind/internal/mcpservers"
@@ -207,7 +208,7 @@ func cmdServe(args []string) int {
 
 	// ADR-0044: the automation engine ticks only while automations.enabled is
 	// true in config.yaml (read on every tick); it is off by default.
-	stopAutomations := wireAutomations(ctx, db, srv.API(), wm, runner)
+	stopAutomations := wireAutomations(ctx, db, srv.API(), wm, runner, automation.NewGitHubSource(db, srv.API().ForgeProvider))
 
 	stopStall := wireStallAlert(ctx, db, srv.API(), cfg.Orchestration.StallAlertMinutes)
 
