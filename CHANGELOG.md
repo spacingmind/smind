@@ -2,6 +2,13 @@
 
 ## [0.15.0](https://github.com/spacingmind/smind/compare/v0.14.0...v0.15.0) (2026-10-25)
 
+### ⚠ BREAKING CHANGES
+
+* **runs:** a claude-native run always passes an explicit `--model`; with no requested, profile or `providers.claude-native.defaultModel` model the run is refused with `no_model` instead of silently using the CLI's own default. Set `providers.claude-native.defaultModel` before upgrading if any client sends without a model ([#633](https://github.com/spacingmind/smind/issues/633)).
+* **orchestration:** the seeded role pack is now `lead`, `peer-sonnet` and `reviewer`; the `supervisor`, `supervisor-sonnet` and `peer-glm` seats are no longer seeded, and the `lead`/`peer-sonnet` instructions changed. Seeding never touches profiles that already exist: delete the old seats or update them with `smind profile edit` to adopt the new role pack ([#617](https://github.com/spacingmind/smind/issues/617)).
+* **providers:** provider ids are plain strings in the wire catalogs (`provider.list` is the source); custom ACP providers and provider instances come from `providers.custom` ([#627](https://github.com/spacingmind/smind/issues/627), [#628](https://github.com/spacingmind/smind/issues/628)).
+* **web:** per-run and per-chat cost chips are gone; costs live in Settings → Usage, labelled "≈ API price" for subscription logins ([#608](https://github.com/spacingmind/smind/issues/608)).
+
 
 ### Features
 
