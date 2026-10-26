@@ -22,18 +22,20 @@ export function InboxRow({ row, onOpen, onMore }: { row: InboxRowView; onOpen: (
         onPress={() => onOpen(row)}
         style={styles.main}
       >
-        <AppIcon name={row.icon} size={18} color={high ? theme.waiting.foreground : theme.foregroundSubtle} />
+        <View style={styles.icon}>
+          <AppIcon name={row.icon} size={18} color={high ? theme.waiting.foreground : theme.foregroundSubtle} />
+        </View>
         <View style={styles.body}>
           <View style={styles.top}>
-            <Text style={styles.title} numberOfLines={1}>
+            <Text style={styles.title} numberOfLines={2}>
               {row.title}
             </Text>
-            {row.unseen && <Badge tone="waiting">New</Badge>}
+            {row.unseen && <Badge tone="success">New</Badge>}
           </View>
           <Text style={styles.summary} numberOfLines={2}>
             {row.summary}
           </Text>
-          <Text style={styles.time}>{row.time}</Text>
+          <Text style={styles.time}>{`${row.label} · ${row.time}`}</Text>
         </View>
       </Pressable>
       <Pressable accessibilityRole="button" accessibilityLabel={`Actions for ${row.title}`} onPress={() => onMore(row)} style={styles.more} hitSlop={4}>
@@ -58,10 +60,11 @@ function makeStyles(theme: AppTheme) {
     high: { backgroundColor: theme.waiting.surface },
     main: { flex: 1, flexDirection: 'row', gap: theme.spacing[3], minHeight: 44, padding: theme.spacing[3] },
     body: { flex: 1, gap: theme.spacing[1] },
-    top: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2] },
+    icon: { width: 24, alignItems: 'center' },
+    top: { flexDirection: 'row', alignItems: 'flex-start', gap: theme.spacing[2] },
     title: { ...theme.type.label, color: theme.foreground, flexShrink: 1 },
     summary: { ...theme.type.small, color: theme.foregroundSubtle },
-    time: { ...theme.type.small, color: theme.foregroundSubtlest },
+    time: { ...theme.type.small, color: theme.foregroundSubtle },
     more: { width: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   });
 }

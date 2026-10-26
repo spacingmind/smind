@@ -6,7 +6,7 @@ import { IconName } from '../ui/icons';
 import { InboxItem, InboxKind } from './types';
 
 export const INBOX_EMPTY_TITLE = 'Nothing needs you';
-export const INBOX_EMPTY_TEXT = 'Permission requests, verdicts ready for a decision and stalled tasks show up here.';
+export const INBOX_EMPTY_TEXT = 'Permission requests, validator verdicts and stalled tasks show up here.';
 
 export type InboxTone = 'waiting' | 'neutral';
 export type InboxAction = 'seen' | 'snooze' | 'resolve' | 'open';

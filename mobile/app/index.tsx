@@ -29,7 +29,9 @@ export default function TasksRoute() {
           headerRight: () => (
             <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch' }}>
               <InboxEntry conn={conn} onPress={() => router.push(INBOX_HREF)} />
-              <TextButton label="New task" onPress={() => router.push(NEW_TASK_HREF)} />
+              <View style={{ justifyContent: 'center', alignSelf: 'stretch' }}>
+                <TextButton label="New task" onPress={() => router.push(NEW_TASK_HREF)} />
+              </View>
             </View>
           ),
         }}
