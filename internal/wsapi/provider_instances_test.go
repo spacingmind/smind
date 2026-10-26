@@ -294,7 +294,10 @@ func TestProviderReload_AddsAndRemovesInstanceLive(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("providers:\n  custom:\n    - id: claude-a\n      label: Claude A\n      extends: claude-native\n      env: {CLAUDE_CONFIG_DIR: /d/a}\n    - id: my-agent\n      command: " + fakeACPAgentPath + "\n")
+	// Absolute on every OS (a bare "/d/a" is not on Windows) and single-quoted
+	// so a Windows path's backslashes are literal in the YAML.
+	dirA := filepath.Join(t.TempDir(), "a")
+	write("providers:\n  custom:\n    - id: claude-a\n      label: Claude A\n      extends: claude-native\n      env: {CLAUDE_CONFIG_DIR: '" + dirA + "'}\n    - id: my-agent\n      command: " + fakeACPAgentPath + "\n")
 	if _, err := h.call(t, "provider.reload", &requestContext{}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +305,7 @@ func TestProviderReload_AddsAndRemovesInstanceLive(t *testing.T) {
 		t.Fatalf("after reload: %s", got)
 	}
 	e := h.listedEntry(t, "claude-a")
-	if e.Extends != "claude-native" || e.Label != "Claude A" || e.EnvEffective["CLAUDE_CONFIG_DIR"].Path != "/d/a" || e.EnvEffective["CLAUDE_CONFIG_DIR"].Source != envSourceSettings {
+	if e.Extends != "claude-native" || e.Label != "Claude A" || e.EnvEffective["CLAUDE_CONFIG_DIR"].Path != dirA || e.EnvEffective["CLAUDE_CONFIG_DIR"].Source != envSourceSettings {
 		t.Fatalf("instance entry = %+v", e)
 	}
 	if len(queued(sub)) == 0 {
