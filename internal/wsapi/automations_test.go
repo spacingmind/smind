@@ -122,7 +122,9 @@ func TestAutomationRPC_RelayMutationsRefused_DisableAndReadsAllowed(t *testing.T
 	if _, err := h.call("automation.enable", local(), map[string]any{"id": id}); err != nil {
 		t.Fatal(err)
 	}
-	for _, relay := range []*requestContext{{local: false, deviceID: "d1", channel: ChannelE2EE}, {local: false}} {
+	// The third context is a relay session whose channel claims loopback: the
+	// local flag alone must refuse it.
+	for _, relay := range []*requestContext{{local: false, deviceID: "d1", channel: ChannelE2EE}, {local: false}, {local: false, channel: ChannelLoopback}} {
 		for _, m := range automationMutating {
 			_, err := h.call(m, relay, h.paramsFor(m, id))
 			wantAutoForbidden(t, m, err)
