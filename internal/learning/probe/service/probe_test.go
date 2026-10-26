@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -106,7 +107,8 @@ func (fa *fakeArms) run(ctx context.Context, job armJob) (armOutcome, error) {
 	if _, err := os.Stat(filepath.Join(job.ArmDir, "README.md")); err != nil {
 		fa.t.Errorf("arm dir not materialised: %v", err)
 	}
-	if fi, err := os.Stat(job.PrivateDir); err != nil || fi.Mode().Perm() != 0o700 {
+	// Windows has no Unix mode bits (Stat reports 0777 for a dir).
+	if fi, err := os.Stat(job.PrivateDir); err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o700) {
 		fa.t.Errorf("launch dir: %v %v", fi, err)
 	}
 	b := fa.behave(job, n)
