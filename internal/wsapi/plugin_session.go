@@ -426,6 +426,10 @@ func scrub(red *redact.Redactor, v any, drop map[string]bool) any {
 				out[k] = redactedValue
 				continue
 			}
+			if str, ok := t[k].(string); ok && isHexID(str) {
+				out[k] = str // a commit or content hash is an id, not a secret (the redactor would blank it)
+				continue
+			}
 			out[k] = scrub(red, t[k], drop)
 		}
 		return out
@@ -449,4 +453,18 @@ func secretKey(k string) bool {
 		}
 	}
 	return false
+}
+
+// isHexID reports a whole string that is a 40 (SHA-1) or 64 (SHA-256) digit
+// lowercase hex id.
+func isHexID(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }

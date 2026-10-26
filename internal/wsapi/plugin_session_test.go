@@ -456,7 +456,8 @@ func TestEventsObserve_RedactedCopies(t *testing.T) {
 
 	perm := permissionPendingPayload{RunID: "r1", TaskID: 4, ChatID: 5, RequestID: "q9", Summary: "run: " + body + " " + ghToken,
 		Options: []permissionOptionParams{{ID: "allow", Label: "Allow", Kind: "allow_once"}}}
-	task := store.Task{ID: 4, Title: "fix " + ghToken, SetupLog: "setup said " + body, SetupError: body}
+	const sha = "9fceb02d0ae598e95dc970b74767f19372d61af8" // high entropy: the redactor alone would blank it
+	task := store.Task{ID: 4, BaseSha: sha, Title: "fix " + ghToken, SetupLog: "setup said " + body, SetupError: body}
 	if home != "" {
 		task.Title += " in " + filepath.Join(home, "proj")
 	}
@@ -475,6 +476,9 @@ func TestEventsObserve_RedactedCopies(t *testing.T) {
 	}
 	if home != "" && strings.Contains(all, home) {
 		t.Fatalf("home dir not rewritten: %s", all)
+	}
+	if !strings.Contains(all, sha) {
+		t.Fatalf("a commit id must survive redaction: %s", all)
 	}
 	var first eventNotification
 	_ = json.Unmarshal(got[0].Params, &first)
@@ -594,8 +598,10 @@ func TestEventsObserve_StalledPluginDoesNotDelayOthers(t *testing.T) {
 	}()
 	time.Sleep(100 * time.Millisecond)
 
-	big := strings.Repeat("x", 6000)
-	const n = 400 // ~2.4 MB: far more than a pipe buffer
+	// 600 KB in all: far more than a pipe buffer (64 KiB), while a drain of the
+	// 256 queued events stays well under the 1 MiB frame cap.
+	big := strings.Repeat("x", 1500)
+	const n = 400
 	start := time.Now()
 	for i := 0; i < n; i++ {
 		e.api.bus.Publish(Event{Topic: TopicTaskCreated, Payload: taskCreatedPayload{Task: store.Task{ID: int64(i), Title: big}}})
