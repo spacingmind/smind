@@ -87,7 +87,7 @@ type Status struct {
 	Since     time.Time `json:"since"`
 	Restarts  int       `json:"restarts"`
 	LastError string    `json:"lastError,omitempty"`
-	RetryAt   time.Time `json:"retryAt,omitempty"`
+	RetryAt   time.Time `json:"retryAt,omitzero"`
 }
 
 // Clock lets tests drive backoff without sleeping.

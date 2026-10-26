@@ -3,6 +3,8 @@ package host
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -290,5 +292,40 @@ func TestChangeNotifier_FiresOnTransitions(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("no change notification")
+	}
+}
+
+func TestResolve_BareNameUsesPluginPathNotDaemonPath(t *testing.T) {
+	dir := t.TempDir()
+	tool := filepath.Join(dir, "mytool")
+	if err := os.WriteFile(tool, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sp := spec(t, "demo", "sleep")
+	sp.Command = []string{"mytool"}
+	// A program the Human has on their own PATH is not found: the plugin's
+	// PATH is the fixed system list.
+	if _, _, err := resolve(sp, []string{"PATH=" + dir}); err == nil {
+		t.Fatal("a bare command was resolved on the daemon's PATH")
+	}
+	// A program inside the plugin directory is addressed by a relative path.
+	if err := os.WriteFile(filepath.Join(sp.Dir, "tool.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sp.Command = []string{"./tool.sh", "--flag"}
+	p, args, err := resolve(sp, nil)
+	if err != nil || p != filepath.Join(sp.Dir, "tool.sh") || len(args) != 1 || args[0] != "--flag" {
+		t.Fatalf("%q %v %v", p, args, err)
+	}
+}
+
+func TestStatus_JSON_OmitsZeroRetryAt(t *testing.T) {
+	b, _ := json.Marshal(Status{State: StateRunning, PID: 4})
+	if strings.Contains(string(b), "retryAt") {
+		t.Fatalf("a running plugin has no retryAt: %s", b)
+	}
+	b, _ = json.Marshal(Status{State: StateRestarting, RetryAt: time.Unix(1, 0).UTC()})
+	if !strings.Contains(string(b), "retryAt") {
+		t.Fatalf("%s", b)
 	}
 }
