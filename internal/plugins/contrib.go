@@ -52,14 +52,17 @@ type contribution struct {
 	conflicts []Conflict
 }
 
-// Command is one prompt slash command of an active plugin. It carries text
-// only: selecting it inserts Prompt into the composer and never sends it.
+// Command is one slash command of an active plugin. A prompt command carries
+// its text (Prompt); an rpc command carries the declared RPC name (RPC) and
+// no text: the client calls plugin.call and inserts the returned prompt. A
+// command inserts text into the composer and never sends it.
 type Command struct {
 	Plugin      string `json:"plugin"`
 	Name        string `json:"name"`
 	Qualified   string `json:"qualified"` // "<plugin>:<name>", always unique
 	Description string `json:"description,omitempty"`
-	Prompt      string `json:"prompt"`
+	Prompt      string `json:"prompt,omitempty"`
+	RPC         string `json:"rpc,omitempty"`
 	// Alias is the bare name this command may also be typed as ("/name"),
 	// set only for the first plugin by id that declares that name. Clients
 	// drop it when a built-in command has the same name (built-ins win).
@@ -264,10 +267,13 @@ func (m *Manager) derive() contribution {
 
 		for _, cc := range man.Contributes.Commands {
 			text, ok := man.prompts[cc.Name]
-			if !ok {
-				continue // an rpc command (PB.4): not a prompt, not listed here
+			if !ok && cc.RPC == "" {
+				continue
 			}
 			cmd := Command{Plugin: owner, Name: cc.Name, Qualified: owner + ":" + cc.Name, Description: cc.Description, Prompt: text}
+			if cc.RPC != "" && !ok {
+				cmd.RPC = cc.RPC
+			}
 			if first, taken := bareOwner[cc.Name]; taken {
 				c.conflicts = append(c.conflicts, Conflict{Plugin: owner, Kind: "command", Name: cc.Name, Reason: fmt.Sprintf("/%s belongs to plugin %q (first by id); use /%s", cc.Name, first, cmd.Qualified)})
 			} else {

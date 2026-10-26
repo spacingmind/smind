@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // ManifestFile is the manifest's name at the plugin root.
@@ -120,6 +121,7 @@ type Contributes struct {
 	Commands   []CommandContribution  `json:"commands,omitempty"`
 	Themes     []ThemeContribution    `json:"themes,omitempty"`
 	Hooks      []HookContribution     `json:"hooks,omitempty"`
+	RPC        []RPCContribution      `json:"rpc,omitempty"`
 	Providers  []ProviderContribution `json:"providers,omitempty"`
 	Panels     []json.RawMessage      `json:"panels,omitempty"`
 	Sidebar    []json.RawMessage      `json:"sidebar,omitempty"`
@@ -144,6 +146,16 @@ type CommandContribution struct {
 	Description string `json:"description,omitempty"`
 	Prompt      string `json:"prompt,omitempty"`
 	RPC         string `json:"rpc,omitempty"`
+}
+
+// RPCContribution declares a method the plugin process answers as
+// `rpc.<name>` for plugin.call (ADR-0042 section 4). Only declared names are
+// ever forwarded to the process.
+type RPCContribution struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// TimeoutMs lowers the per-call timeout (default and hard max: MaxCallTimeout).
+	TimeoutMs int `json:"timeoutMs,omitempty"`
 }
 
 // ThemeContribution is a theme token file.
@@ -348,6 +360,24 @@ func validateContributes(v *manifestVal, m *Manifest) {
 		if cmd.RPC != "" && m.Process == nil {
 			v.bad(f+".rpc", "an rpc command needs a plugin process", "declare process or use a prompt command")
 		}
+		if cmd.RPC != "" && m.Process != nil && !declaresRPC(c.RPC, cmd.RPC) {
+			v.bad(f+".rpc", fmt.Sprintf("%q is not declared in contributes.rpc", cmd.RPC), "add {\"name\": \""+cmd.RPC+"\"} to contributes.rpc")
+		}
+	}
+	seenRPC := map[string]bool{}
+	for i, r := range c.RPC {
+		f := fmt.Sprintf("contributes.rpc[%d]", i)
+		checkName(v, f+".name", r.Name)
+		if seenRPC[r.Name] {
+			v.bad(f+".name", fmt.Sprintf("duplicate rpc %q", r.Name), "declare each rpc once")
+		}
+		seenRPC[r.Name] = true
+		if r.TimeoutMs < 0 || r.TimeoutMs > int(MaxCallTimeout/time.Millisecond) {
+			v.bad(f+".timeoutMs", fmt.Sprintf("%d is out of range", r.TimeoutMs), fmt.Sprintf("use 1 to %d milliseconds, or omit it for the default", MaxCallTimeout/time.Millisecond))
+		}
+		if m.Process == nil {
+			v.bad(f, "an rpc needs a plugin process", "declare process or remove the rpc")
+		}
 	}
 	for i, t := range c.Themes {
 		f := fmt.Sprintf("contributes.themes[%d]", i)
@@ -442,6 +472,15 @@ func validateCommand(v *manifestVal, field string, cmd []string) {
 			v.bad(fmt.Sprintf("%s[%d]", field, i), "is empty, too long or contains a NUL", "give each argument as a plain string")
 		}
 	}
+}
+
+func declaresRPC(rs []RPCContribution, name string) bool {
+	for _, r := range rs {
+		if r.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func checkName(v *manifestVal, field, name string) {
