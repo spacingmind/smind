@@ -159,20 +159,29 @@ func jsonMap(v map[string]string) string {
 }
 
 // substitute replaces ${setting.KEY} in every value of vals from the plugin's
-// settings. It returns the keys with no value; the result must reach only a
-// run's env and headers, never a read path.
-func (m *Manager) substitute(plugin string, vals map[string]string) (map[string]string, []string) {
+// settings: an injected provider (tests) wins, else the stored values and
+// defaults of man's declarations. It returns the keys with no value; the
+// result must reach only a run's env and headers, never a read path.
+func (m *Manager) substitute(plugin string, man *Manifest, vals map[string]string) (map[string]string, []string) {
 	if len(vals) == 0 {
 		return vals, nil
 	}
 	out := make(map[string]string, len(vals))
 	var missing []string
+	var stored map[string]any // read at most once per call
 	for k, v := range vals {
 		out[k] = settingRefRe.ReplaceAllStringFunc(v, func(ref string) string {
 			key := settingRefRe.FindStringSubmatch(ref)[1]
 			if sp := m.settingsProvider(); sp != nil {
 				if val, ok := sp.Setting(plugin, key); ok {
 					return val
+				}
+			} else {
+				if stored == nil {
+					stored = m.resolved(plugin, man)
+				}
+				if val, ok := stored[key]; ok {
+					return settingText(val)
 				}
 			}
 			missing = append(missing, key)
@@ -229,8 +238,8 @@ func (m *Manager) derive() contribution {
 
 			run := row
 			run.Name = wireName(owner, s.Name)
-			env, miss1 := m.substitute(owner, s.Env)
-			hdr, miss2 := m.substitute(owner, s.Headers)
+			env, miss1 := m.substitute(owner, man, s.Env)
+			hdr, miss2 := m.substitute(owner, man, s.Headers)
 			if miss := append(miss1, miss2...); len(miss) > 0 {
 				c.conflicts = append(c.conflicts, Conflict{Plugin: owner, Kind: "mcpServer", Name: s.Name, Reason: "not injected: setting " + strings.Join(miss, ", ") + " has no value"})
 				continue

@@ -1,9 +1,13 @@
 package plugins
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 
 	"github.com/spacingmind/smind/internal/learning/redact"
@@ -23,6 +27,13 @@ import (
 type hostState struct {
 	h        *host.Host
 	onChange atomic.Pointer[func(string)]
+
+	// red scrubs log lines: token shapes, home paths and every plugin's
+	// current secret setting values.
+	red     atomic.Pointer[redact.Redactor]
+	homes   []string
+	mu      sync.Mutex
+	secrets map[string][]string
 }
 
 // newHost builds the host from o, forcing the global switch as its gate and
@@ -37,13 +48,42 @@ func (m *Manager) newHost(o host.Options) {
 	}
 	if o.Redact == nil {
 		home, _ := os.UserHomeDir()
-		var homes []string
 		if home != "" {
-			homes = append(homes, home)
+			m.proc.homes = append(m.proc.homes, home)
 		}
-		o.Redact = redact.New(nil, homes).String
+		m.proc.red.Store(redact.New(nil, m.proc.homes))
+		o.Redact = func(s string) string { return m.proc.red.Load().String(s) }
 	}
 	m.proc.h = host.New(o)
+}
+
+// noteSecrets remembers a plugin's current secret values so every log line is
+// scrubbed of them (a plugin that prints its own token to stderr, or a host
+// message that quotes one, never stores it). Called whenever a spec is built.
+func (m *Manager) noteSecrets(id string, man *Manifest, settings map[string]any) {
+	if m.proc == nil || man == nil {
+		return
+	}
+	var vals []string
+	for _, s := range man.Settings {
+		if s.Type != "secret" {
+			continue
+		}
+		if v, ok := settings[s.Key].(string); ok && v != "" {
+			vals = append(vals, v)
+		}
+	}
+	m.proc.mu.Lock()
+	defer m.proc.mu.Unlock()
+	if m.proc.secrets == nil {
+		m.proc.secrets = map[string][]string{}
+	}
+	m.proc.secrets[id] = vals
+	var all []string
+	for _, v := range m.proc.secrets {
+		all = append(all, v...)
+	}
+	m.proc.red.Store(redact.New(all, m.proc.homes))
 }
 
 // SetOnChange registers the function told (asynchronously) that a plugin's
@@ -64,10 +104,13 @@ func (m *Manager) hostSpec(p store.Plugin, man *Manifest) (host.Spec, bool) {
 	if p.SourceKind == string(SourceLink) {
 		dir = p.Source
 	}
+	settings := m.resolved(p.ID, man)
+	m.noteSecrets(p.ID, man, settings)
 	return host.Spec{
 		ID: p.ID, Version: man.Version, Dir: dir, DataDir: filepath.Join(m.dir(p.ID), "data"),
 		Command: append([]string(nil), man.Process.Command...), DaemonVersion: m.version,
-		Settings: map[string]any{}, // plugin settings arrive with PB.2
+		Capabilities: append([]string(nil), man.Capabilities...),
+		Settings:     settings, // decrypted: this goes to the plugin's initialize and nowhere else
 	}, true
 }
 
@@ -181,4 +224,14 @@ func (m *Manager) ProcessStatus(id string) (host.Status, bool) {
 		return host.Status{}, false
 	}
 	return m.proc.h.Status(id)
+}
+
+// CallProcess sends a host-to-plugin request to a plugin's running process and
+// returns its raw answer. It is the Go entry point plugin.call (PB.4) will use
+// and what tests drive a helper plugin with; no RPC exposes it yet.
+func (m *Manager) CallProcess(ctx context.Context, id, method string, params any) (json.RawMessage, error) {
+	if m.proc == nil {
+		return nil, errors.New("process hosting is off")
+	}
+	return m.proc.h.Call(ctx, id, method, params)
 }

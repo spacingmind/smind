@@ -27,6 +27,7 @@ const (
 	CodePending         = "update_pending"   // an update waits for re-consent
 	CodeNoPending       = "no_pending_update"
 	CodeBadManifest     = "bad_manifest"
+	CodeBadSetting      = "bad_setting" // a settings patch that does not fit the declaration
 	CodeBusy            = "busy"
 )
 
