@@ -82,4 +82,10 @@ describe('time and accessibility text', () => {
     expect(inboxAnnouncement(0, 2)).toBe('2 new inbox items');
     expect(inboxAnnouncement(2, 0)).toBe('Inbox is clear');
   });
+
+  it('a verdict that needs a decision does not use the pass check icon', () => {
+    const v = inboxView([inboxItem({ key: 'verdict:1', kind: 'verdict', attention: 'high' }), inboxItem({ key: 'verdict:2', kind: 'verdict', attention: 'normal' })], NOW);
+    const rows = v.kind === 'list' ? v.sections[0].rows : [];
+    expect(rows.map((r) => r.icon)).toEqual(['warning', 'check']);
+  });
 });
