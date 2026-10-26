@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import { useLastDefined } from "@/hooks/use-last-defined";
+
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -175,14 +177,16 @@ export function AutomationHistoryDialog({
   onForbidden: (err: unknown) => void;
   closeSettings?: () => void;
 }) {
+  // Cleared on close while the exit animation plays: keep showing the last automation so the dialog fades out whole.
+  const shown = useLastDefined(automation);
   return (
     <Dialog open={automation !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent data-testid="automation-history-dialog" className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader className="text-left">
-          <DialogTitle>{automation ? `History: ${automation.name}` : "History"}</DialogTitle>
+          <DialogTitle>{shown ? `History: ${shown.name}` : "History"}</DialogTitle>
           <DialogDescription>Every signal this automation decided on, newest first.</DialogDescription>
         </DialogHeader>
-        {automation && <HistoryBody key={automation.id} automation={automation} canManage={canManage} onForbidden={onForbidden} closeSettings={closeSettings} />}
+        {shown && <HistoryBody key={shown.id} automation={shown} canManage={canManage} onForbidden={onForbidden} closeSettings={closeSettings} />}
       </DialogContent>
     </Dialog>
   );
@@ -213,7 +217,7 @@ function HistoryBody({ automation, canManage, onForbidden, closeSettings }: { au
         audit.isError ? (
           <Alert variant="error" testId="automation-audit-error" description={audit.error instanceof Error ? audit.error.message : String(audit.error)} />
         ) : (
-          <LoadingRows />
+          <LoadingRows rows={7} />
         )
       ) : rows.length === 0 ? (
         <EmptyState

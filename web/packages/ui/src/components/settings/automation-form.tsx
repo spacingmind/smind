@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -176,16 +176,21 @@ export function AutomationFormDialog({
   onSaved: (message: string) => void;
   onForbidden: (err: unknown) => void;
 }) {
+  // The target is cleared on close while Radix still plays the exit animation: the title and the form read the last
+  // open value, so the dialog fades out whole instead of collapsing to its header (and flipping "Edit x" to "New").
+  const last = useRef<{ editing: AutomationView | null }>({ editing });
+  if (open) last.current = { editing };
+  const shown = last.current.editing;
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent data-testid="automation-form-dialog" className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader className="text-left">
-          <DialogTitle>{editing ? `Edit ${editing.name}` : "New automation"}</DialogTitle>
+          <DialogTitle>{shown ? `Edit ${shown.name}` : "New automation"}</DialogTitle>
           <DialogDescription>
-            {editing ? "Changes apply to the next signal." : "Created disabled. Enable it when you are ready."}
+            {shown ? "Changes apply to the next signal." : "Created disabled. Enable it when you are ready."}
           </DialogDescription>
         </DialogHeader>
-        {open && <AutomationForm key={editing?.id ?? "new"} editing={editing} onClose={onClose} onSaved={onSaved} onForbidden={onForbidden} />}
+        <AutomationForm key={shown?.id ?? "new"} editing={shown} onClose={onClose} onSaved={onSaved} onForbidden={onForbidden} />
       </DialogContent>
     </Dialog>
   );

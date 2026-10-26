@@ -251,7 +251,8 @@ function StateBadge({ automation: a }: { automation: AutomationView }) {
 }
 
 /** A compact on/off switch (role=switch), as the notifications section draws it. */
-function Switch({ checked, label, disabled, title, testId, onClick }: { checked: boolean; label: string; disabled: boolean; title?: string; testId: string; onClick: () => void }) {
+/** `busy`: a request is in flight: not clickable, but not dimmed (a dim-then-undim flash on every flip). */
+function Switch({ checked, label, disabled, busy, title, testId, onClick }: { checked: boolean; label: string; disabled: boolean; busy?: boolean; title?: string; testId: string; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -263,7 +264,8 @@ function Switch({ checked, label, disabled, title, testId, onClick }: { checked:
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "relative h-5 w-9 shrink-0 rounded-full border border-input-border transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+        "relative h-5 w-9 shrink-0 rounded-full border border-input-border transition-colors disabled:cursor-not-allowed",
+        busy ? "disabled:opacity-100" : "disabled:opacity-50",
         checked ? "bg-primary" : "bg-transparent",
       )}
     >
@@ -334,6 +336,7 @@ function AutomationRow({
           checked={a.enabled}
           label={`${a.enabled ? "Disable" : "Enable"} ${a.name}`}
           disabled={switchDisabled}
+          busy={busy}
           title={a.enabled ? undefined : (lockedReason ?? undefined)}
           testId={`automation-switch-${a.id}`}
           onClick={onToggle}
