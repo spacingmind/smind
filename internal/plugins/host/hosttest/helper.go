@@ -97,6 +97,12 @@ func run(mode string, args []string) {
 		os.Exit(3)
 	case "sleep":
 		time.Sleep(time.Hour)
+	case "sleep-immune":
+		// A grandchild that survives the group's SIGTERM: only a group kill
+		// (or a job object) can remove it.
+		signal.Ignore(syscall.SIGTERM)
+		fmt.Println("ready") // tells the parent the signal is ignored from now on
+		time.Sleep(time.Hour)
 	case "garbage":
 		raw, _ := hex.DecodeString(args[0])
 		out.Write(raw)
@@ -112,10 +118,7 @@ func run(mode string, args []string) {
 		}
 	case "orphan-maker":
 		// Leaves a grandchild behind and exits promptly when asked to stop.
-		gc := exec.Command(os.Args[0], Flag, "sleep")
-		if err := gc.Start(); err != nil {
-			os.Exit(4)
-		}
+		gc := immuneGrandchild()
 		for {
 			m, ok := read()
 			if !ok {
@@ -131,10 +134,7 @@ func run(mode string, args []string) {
 		}
 	case "ignore-term":
 		signal.Ignore(syscall.SIGTERM)
-		gc := exec.Command(os.Args[0], Flag, "sleep")
-		if err := gc.Start(); err != nil {
-			os.Exit(4)
-		}
+		gc := immuneGrandchild()
 		for {
 			m, ok := read()
 			if !ok {
@@ -214,4 +214,18 @@ func stderrStorm(args []string) {
 		}
 	}
 	fmt.Fprintln(e)
+}
+
+// immuneGrandchild starts a grandchild that ignores SIGTERM and returns once
+// it says so, so a test never races the signal against its start-up.
+func immuneGrandchild() *exec.Cmd {
+	gc := exec.Command(os.Args[0], Flag, "sleep-immune")
+	r, err := gc.StdoutPipe()
+	if err != nil || gc.Start() != nil {
+		os.Exit(4)
+	}
+	if _, err := bufio.NewReader(r).ReadString('\n'); err != nil {
+		os.Exit(5)
+	}
+	return gc
 }
