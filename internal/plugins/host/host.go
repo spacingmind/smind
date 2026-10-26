@@ -372,6 +372,8 @@ type notifier struct {
 	wake    chan struct{}
 	stop    chan struct{}
 	done    chan struct{}
+
+	closeOnce sync.Once
 }
 
 func newNotifier(fn func(string)) *notifier {
@@ -409,6 +411,6 @@ func (n *notifier) loop() {
 }
 
 func (n *notifier) close() {
-	close(n.stop)
+	n.closeOnce.Do(func() { close(n.stop) })
 	<-n.done
 }
