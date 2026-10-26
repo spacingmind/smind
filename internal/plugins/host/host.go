@@ -207,6 +207,25 @@ func (h *Host) Call(ctx context.Context, id, method string, params any) (json.Ra
 	return p.Call(ctx, method, params)
 }
 
+// Logf adds a `[smind]` line to a plugin's log (redacted like every line), for
+// what the host did on the plugin's behalf: a hook result, a refused send.
+func (h *Host) Logf(id, format string, a ...any) { h.logFor(id).Hostf(format, a...) }
+
+// Notify sends a host-to-plugin notification to a running plugin.
+func (h *Host) Notify(id, method string, params any) error {
+	h.mu.Lock()
+	s := h.sups[id]
+	h.mu.Unlock()
+	if s == nil {
+		return ErrNotRunning
+	}
+	p := s.current()
+	if p == nil {
+		return ErrNotRunning
+	}
+	return p.Notify(method, params)
+}
+
 type supervisor struct {
 	h    *Host
 	spec Spec

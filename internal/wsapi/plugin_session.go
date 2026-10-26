@@ -54,9 +54,9 @@ type PluginMethod struct {
 }
 
 // PluginCapabilityTable is THE documented plugin API: capability group ->
-// methods. Groups the manifest knows but that are not here (tasks.write,
-// files.read, ui.notify, hooks.beforeRun) grant nothing yet; they arrive with
-// their own PRs and their own test updates. Deliberately left out of
+// methods. Groups the manifest knows but that are not here (files.read,
+// ui.notify) grant nothing yet; hooks.beforeRun grants no call, it lets the
+// run.beforeStart hook run (hooks.go in internal/plugins). Deliberately left out of
 // tasks.read: run.logs and task.diff (transcripts and file contents),
 // workspace.get (returns the setup/teardown scripts), chat.get/queue reads
 // (prompt text).
@@ -68,6 +68,9 @@ var PluginCapabilityTable = map[string][]PluginMethod{
 	},
 	CapMcpRead:      {{Name: "mcp.list"}, {Name: "mcp.get"}},
 	CapProfilesRead: {{Name: "profile.list"}, {Name: "profile.get"}},
+	CapTasksWrite: {
+		{Name: pluginRPCTaskSend, Native: true, Why: "queues one prompt on a chat the plugin could read (needs tasks.read too), source plugin:<id> with a [message from plugin <id>] header; never creates a task and cannot set provider, mode, profile or answer a permission; rate limited per plugin and per task tree, with a loop stop"},
+	},
 	CapEventsObserve: {
 		{Name: pluginRPCSubscibe, Native: true, Why: "changes only this plugin's own subscription to allowlisted, redacted topics"},
 		{Name: pluginRPCUnsub, Native: true, Why: "changes only this plugin's own subscription"},
@@ -177,6 +180,15 @@ type pluginRegistry struct {
 	bus  *eventBus
 	red  *redact.Redactor
 	conn *conn
+	// sender answers task.send (nil until bindSender).
+	sender *pluginSender
+}
+
+// bindSender installs what task.send needs.
+func (r *pluginRegistry) bindSender(s *pluginSender) {
+	r.mu.Lock()
+	r.sender = s
+	r.mu.Unlock()
 }
 
 func newPluginRegistry() *pluginRegistry { return &pluginRegistry{} }
@@ -282,6 +294,17 @@ func (s *pluginSession) Request(ctx context.Context, method string, params json.
 	switch method {
 	case pluginRPCSubscibe, pluginRPCUnsub:
 		return s.subscription(method, params)
+	case pluginRPCTaskSend:
+		s.reg.mu.RLock()
+		snd := s.reg.sender
+		s.reg.mu.RUnlock()
+		if snd == nil {
+			return nil, rpcErr(host.ErrCodeMethodNotFound, "method task.send is not available", nil)
+		}
+		if len(params) == 0 {
+			params = json.RawMessage("{}")
+		}
+		return snd.send(s.id, s.caps, params)
 	}
 	s.reg.mu.RLock()
 	h, red, c := s.reg.hs[method], s.reg.red, s.reg.conn
