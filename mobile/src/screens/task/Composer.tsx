@@ -4,7 +4,7 @@
 // Buttons in their own UiHost, tinted by the Host's seedColor (expo-ui: no
 // custom Pressable wrappers). Which actions show comes from composerActions.
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { BottomSheet, Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
 import { ChatQueueItem } from '../../api';
@@ -12,6 +12,7 @@ import { AttachMenuItem } from '../../attachmentTray';
 import { PendingAttachment } from '../../attachments';
 import { composerActions } from '../../composerActions';
 import { pickSlashCommand, SlashCommand, slashSuggestions } from '../../plugins/slashCommands';
+import { applySlashRpcPrompt, SlashRpcOutcome, SlashRpcStatus } from '../../plugins/slashRpc';
 import { StopControlView } from '../../stopControl';
 import { AppTheme } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
@@ -42,6 +43,7 @@ export function Composer({
   attachNotice = null,
   draft = '',
   slashCommands = [],
+  runSlashRpc,
 }: {
   draftState: ReturnType<typeof useNativeState<string>>;
   onChangeDraft: (text: string) => void;
@@ -68,6 +70,8 @@ export function Composer({
   draft?: string;
   /** Plugin prompt commands (ADR-0042); empty leaves the composer exactly as it was. */
   slashCommands?: SlashCommand[];
+  /** Asks a plugin for an RPC-backed command's prompt (plugin.call on the daemon); the phone runs nothing itself. */
+  runSlashRpc?: (row: SlashCommand) => Promise<SlashRpcOutcome>;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const theme = useAppTheme();
@@ -75,11 +79,37 @@ export function Composer({
   const actions = composerActions({ liveRunId, canSend, stopping: stopView.disabled });
   const slashRows = useMemo(() => slashSuggestions(slashCommands, draft), [slashCommands, draft]);
   // Picking only puts the prompt text in the field; the user still presses Send.
+  const [slashStatus, setSlashStatus] = useState<SlashRpcStatus | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const slashStatusRef = useRef<SlashRpcStatus | null>(null);
+  slashStatusRef.current = slashStatus;
   const pickSlash = (row: SlashCommand) => {
-    const next = pickSlashCommand(draft, row);
-    draftState.value = next;
-    onChangeDraft(next);
+    if (!row.rpc) {
+      const next = pickSlashCommand(draft, row);
+      draftState.value = next;
+      onChangeDraft(next);
+      return;
+    }
+    // An RPC-backed command: ask the plugin, then put its text in place of the /token. A late answer for a draft
+    // that moved on is dropped; the draft is only ever text, and sending stays the Send button's job.
+    if (!runSlashRpc || slashStatusRef.current?.state === 'running') return;
+    const token = draft;
+    setSlashStatus({ key: row.key, state: 'running' });
+    void runSlashRpc(row).then((out) => {
+      if (!out.ok) {
+        setSlashStatus({ key: row.key, state: 'error', message: out.message, code: out.code });
+        return;
+      }
+      setSlashStatus(null);
+      const next = applySlashRpcPrompt(draftRef.current, token, out.prompt);
+      if (next !== null) {
+        draftState.value = next;
+        onChangeDraft(next);
+      }
+    });
   };
+
   return (
     <>
       <QueuedPrompts items={queueItems} onCancel={onCancelQueued} />
@@ -93,7 +123,7 @@ export function Composer({
           {attachNotice}
         </Text>
       )}
-      <SlashSuggestions rows={slashRows} onPick={pickSlash} />
+      <SlashSuggestions rows={slashRows} onPick={pickSlash} status={slashStatus} />
       <View style={styles.shell}>
         <AttachmentTray attachments={attachments} onRemove={(id) => onRemoveAttachment?.(id)} />
         <UiHost style={styles.fieldHost}>
@@ -104,6 +134,8 @@ export function Composer({
             onChangeText={(text) => {
               draftState.value = text;
               onChangeDraft(text);
+              // An error is about the token it was raised for: any edit of the draft clears it.
+              setSlashStatus((s) => (s?.state === 'error' ? null : s));
             }}
             placeholder={placeholder ?? (liveRunId !== null ? 'Queue a follow-up — it sends when this run finishes' : 'Send a follow-up prompt…')}
             placeholderTextColor={theme.foregroundSubtlest}

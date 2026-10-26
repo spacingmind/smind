@@ -1,3 +1,4 @@
+import type { SlashRpcStatus } from "@/components/composer/use-slash-command";
 import type { SlashCommand } from "@/lib/slash-commands";
 import { cn } from "@/lib/utils";
 
@@ -14,11 +15,14 @@ export function SlashCommandPopover({
   activeIndex,
   onPick,
   onHover,
+  status = null,
 }: {
   rows: SlashCommand[];
   activeIndex: number;
   onPick: (command: SlashCommand) => void;
   onHover: (index: number) => void;
+  /** The last RPC-backed command: a "Running…" mark on its row, or its typed failure under the list. */
+  status?: SlashRpcStatus | null;
 }) {
   return (
     <div
@@ -42,9 +46,20 @@ export function SlashCommandPopover({
         >
           <span className="shrink-0 font-medium text-foreground">/{row.label}</span>
           {row.description && <span className="min-w-0 truncate text-foreground-muted">{row.description}</span>}
-          {!row.builtin && <span className="ml-auto shrink-0 pl-2 text-ui-xs text-foreground-subtle">from {row.source}</span>}
+          {status?.state === "running" && status.key === row.key ? (
+            <span className="ml-auto shrink-0 pl-2 text-ui-xs text-foreground-subtle" role="status">
+              Running…
+            </span>
+          ) : (
+            !row.builtin && <span className="ml-auto shrink-0 pl-2 text-ui-xs text-foreground-subtle">from {row.source}</span>
+          )}
         </div>
       ))}
+      {status?.state === "error" && (
+        <div role="alert" data-testid="slash-command-error" data-code={status.code} className="border-t border-border px-3 py-1.5 text-ui-xs text-destructive">
+          {status.message}
+        </div>
+      )}
     </div>
   );
 }

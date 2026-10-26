@@ -24,8 +24,10 @@ export interface SlashCommand {
   /** "built-in", or the id of the plugin the command is from (shown as a quiet "from <plugin>"). */
   source: string;
   builtin: boolean;
-  /** The text selecting the row inserts into the composer. */
+  /** The text selecting the row inserts into the composer (empty for an rpc command: its text comes from the plugin). */
   text: string;
+  /** Set for an RPC-backed plugin command: selecting it calls `plugin.call` and inserts the result's prompt. */
+  rpc?: { plugin: string; rpc: string; command: string };
   /** Names a query may match, lowercase. */
   names: string[];
 }
@@ -59,7 +61,8 @@ export function buildSlashCommands(builtins: readonly BuiltinSlashCommand[], plu
       description: c.description ?? "",
       source: c.plugin,
       builtin: false,
-      text: c.prompt,
+      text: c.prompt ?? "",
+      ...(c.rpc ? { rpc: { plugin: c.plugin, rpc: c.rpc, command: c.qualified } } : {}),
       names: ownsBare ? [bare, qualified] : [qualified],
     });
   }
@@ -104,4 +107,19 @@ export function applySlashReplacement({ text, slash, command }: { text: string; 
   const before = text.slice(0, slash.start);
   const after = text.slice(slash.end);
   return { text: `${before}${command.text}${after}`, cursor: before.length + command.text.length };
+}
+
+/** Most text an RPC-backed command may insert; the plugin's answer is untrusted, so anything larger is refused, not cut. */
+export const MAX_SLASH_RPC_PROMPT_CHARS = 16 * 1024;
+
+/**
+ * What an RPC-backed command's `plugin.call` result must be: `{prompt: string}`, non-empty, bounded, without NUL.
+ * Anything else is a failure the composer shows inline; the string is inserted as plain text and never interpreted
+ * (the textarea shows characters, so markup in it stays markup).
+ */
+export function slashRpcPrompt(result: unknown): string | null {
+  if (typeof result !== "object" || result === null) return null;
+  const prompt = (result as { prompt?: unknown }).prompt;
+  if (typeof prompt !== "string" || prompt.trim() === "" || prompt.length > MAX_SLASH_RPC_PROMPT_CHARS || prompt.includes("\u0000")) return null;
+  return prompt;
 }
