@@ -18,6 +18,7 @@ import (
 	"github.com/spacingmind/smind/internal/gitstate"
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/plugins"
+	"github.com/spacingmind/smind/internal/plugins/host"
 	"github.com/spacingmind/smind/internal/plugins/skilldelivery"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
@@ -130,6 +131,7 @@ func (a *API) StartGitState(ctx context.Context) (stop func()) {
 // accepting connections and before the store closes, so no background
 // writer is left touching the database or a worktree directory.
 func (a *API) Close() {
+	a.StopPlugins()
 	a.git.Stop()
 	a.Runs.CloseAll()
 	a.Terminals.CloseAll()
@@ -276,6 +278,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	hs["provider.dirSuggestions"] = handleProviderDirSuggestions(runner, osDirLister{})
 	pluginMgr := plugins.New(plugins.Options{
 		Home: config.Dir(), Store: db, Version: version.Version, Enabled: configPluginsEnabled,
+		Host:            &host.Options{}, // ADR-0042 Wave B: enabled process plugins run, DenyAll answers their calls until PB.2
 		ValidateProfile: profReg.ValidateOwned,
 		UserProfileNames: func() []string {
 			rows, err := db.ListAgentProfiles()
@@ -296,6 +299,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	profReg.SetSkillResolver(plugins.Resolver{M: pluginMgr})
 	reg.SetPluginSkills(skilldelivery.New(pluginMgr, filepath.Join(config.Dir(), "plugin-projection")))
 	pluginEv := newPluginEvents(bus, pluginMgr)
+	pluginMgr.SetOnChange(pluginEv.changed) // a crash, restart or failed breaker reaches clients as plugin.updated
 	for method, h := range pluginHandlers(pluginMgr, pluginEv) {
 		hs[method] = h
 	}

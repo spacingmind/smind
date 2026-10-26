@@ -359,3 +359,51 @@ func TestPluginCommands_RPC_OnlyEnabled_SwitchOff_Empty(t *testing.T) {
 		t.Fatalf("empty commands marshal as %s", raw)
 	}
 }
+
+// plugin.logs is a read: relay sessions may call it (like plugin.get), an
+// identified agent connection never reaches it (it is not on RunScopedMethods),
+// and an empty log is [] on the wire.
+func TestPluginRPC_Logs_Guards(t *testing.T) {
+	h := newPluginHarness(t)
+	local := &requestContext{local: true, channel: ChannelLoopback}
+	if _, err := h.call("plugin.install", local, h.pluginParamsFor("plugin.install")); err != nil {
+		t.Fatal(err)
+	}
+	if runScopedSet["plugin.logs"] {
+		t.Fatal("plugin.logs is on RunScopedMethods: an agent could read plugin output")
+	}
+	for name, rc := range map[string]*requestContext{
+		"local": local, "relay": {local: false, deviceID: "dev-1", channel: ChannelE2EE}, "legacy relay": {local: false},
+	} {
+		res, err := h.call("plugin.logs", rc, map[string]any{"id": "demo", "limit": 5})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if b, _ := json.Marshal(res); string(b) != `{"lines":[]}` {
+			t.Fatalf("%s: an empty log must be [] on the wire, got %s", name, b)
+		}
+		if _, err := h.call("plugin.logs", rc, map[string]any{"id": "ghost"}); err == nil {
+			t.Fatalf("%s: unknown plugin", name)
+		} else if ce, ok := err.(*rpcCodeError); !ok || ce.RPCCode() != plugins.CodeNotFound {
+			t.Fatalf("%s: not_found code lost: %v", name, err)
+		}
+	}
+	if _, err := h.call("plugin.logs", local, map[string]any{"id": 5}); err == nil {
+		t.Fatal("bad params accepted")
+	}
+}
+
+func TestPluginRPC_Logs_OverWS_AgentRefused_RelayAllowed(t *testing.T) {
+	t.Setenv("SMIND_HOME", t.TempDir())
+	e := newIdentEnv(t, "hang")
+	agent := e.identified(t)
+	wantForbidden(t, callWS(t, agent, "plugin.logs", map[string]any{"id": "demo"}), "not available to agents")
+	for _, dev := range []string{"dev-1", ""} {
+		env := callDevice(t, e.api, dev, "plugin.logs", mustJSON(t, map[string]any{"id": "demo"}))
+		wantCode(t, env, plugins.CodeNotFound) // reaches the handler; nothing installed
+	}
+	resp := callWS(t, e.admin, "plugin.logs", map[string]any{"id": "demo"})
+	if resp.Error == nil || resp.Error.Code != plugins.CodeNotFound {
+		t.Fatalf("%+v", resp.Error)
+	}
+}

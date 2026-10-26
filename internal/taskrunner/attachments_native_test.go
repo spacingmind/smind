@@ -119,7 +119,9 @@ func TestClaudeNative_UnreadableImageFallsBackToPath(t *testing.T) {
 	missing := PromptImage{Name: "gone.png", MimeType: "image/png", Path: filepath.Join(t.TempDir(), "gone.png"), Size: 9}
 	events := runWithCtx(t, withImage(missing), claudeNativeRunner(t, wm), task, ProviderClaudeNative, "look")
 	line := readFile(t, filepath.Join(*task.WorktreePath, "prompt-line"))
-	if !strings.Contains(line, `"content":"look`) || !strings.Contains(line, missing.Path) {
+	// The line is JSON: a Windows path's backslashes appear doubled in it.
+	wantPath, _ := json.Marshal(missing.Path)
+	if !strings.Contains(line, `"content":"look`) || !strings.Contains(line, strings.Trim(string(wantPath), `"`)) {
 		t.Fatalf("no path fallback in %s", line)
 	}
 	noted := false

@@ -122,6 +122,22 @@ func pluginHandlers(mgr *plugins.Manager, ev *pluginEvents) map[string]handlerFu
 		return in, pluginErr("plugin.get", err)
 	}
 
+	// plugin.logs: what a plugin process printed and the host's own messages
+	// about it (start, ready, crash, restart), already redacted. Read-only and
+	// guarded exactly like plugin.get: relay sessions may read it, and it is
+	// not on RunScopedMethods, so an agent connection never reaches it.
+	hs["plugin.logs"] = func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ID    string `json:"id"`
+			Limit int    `json:"limit"`
+		}
+		if err := pluginParams("plugin.logs", raw, &p); err != nil {
+			return nil, err
+		}
+		res, err := mgr.Logs(p.ID, p.Limit)
+		return res, pluginErr("plugin.logs", err)
+	}
+
 	// Prompt commands and themes of the ACTIVE plugins (empty with the switch
 	// off): data only, readable by every caller the other reads allow.
 	hs["plugin.commands"] = func(context.Context, *requestContext, json.RawMessage) (any, error) {
@@ -228,6 +244,14 @@ func pluginHandlers(mgr *plugins.Manager, ev *pluginEvents) map[string]handlerFu
 func (a *API) StartPlugins() {
 	if a.plugins != nil {
 		a.plugins.Start()
+	}
+}
+
+// StopPlugins stops every plugin process and waits until none is left. The
+// daemon calls it on its way down; it is safe to call more than once.
+func (a *API) StopPlugins() {
+	if a.plugins != nil {
+		a.plugins.Shutdown()
 	}
 }
 
