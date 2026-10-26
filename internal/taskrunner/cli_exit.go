@@ -104,7 +104,10 @@ func (t *tailBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// stderrCapture is the CLI's stderr as the SDK's log writer. The SDK hands a
+// stderrCapture is the CLI's stderr as the SDK's log writer. Since SDK v0.4.2
+// the SDK wraps it in an io.MultiWriter and reports the reaped exit status,
+// which claudeCLIExited prefers; ReadFrom and drain remain the fallback for a
+// backend without ExitStatus. Before v0.4.2 the SDK handed a
 // non-*os.File writer to exec, which copies the child's stderr pipe into it
 // with io.Copy; that calls ReadFrom, which returns exactly when the pipe
 // reaches EOF (the CLI and anything it spawned closed stderr). That is the

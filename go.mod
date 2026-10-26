@@ -8,7 +8,7 @@ require (
 	github.com/mattn/go-isatty v0.0.24
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/refraction-networking/utls v1.8.2
-	github.com/spacingmind/claude-agent-sdk-go v0.4.1
+	github.com/spacingmind/claude-agent-sdk-go v0.4.2
 	github.com/traefik/grpc-web v0.16.0
 	golang.org/x/crypto v0.55.0
 	golang.org/x/oauth2 v0.36.0

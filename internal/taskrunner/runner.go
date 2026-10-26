@@ -1098,7 +1098,23 @@ func (r *Runner) claudeCLIExited(ctx context.Context, client claudeBackend, caus
 		}
 	}
 	// The stream ended at stdout EOF, which can precede the last stderr bytes.
-	complete := stderr.drain(cliStderrDrainWait)
+	// Since SDK v0.4.2 a reaped exit status means the SDK's stderr copy has
+	// joined (cmd.Wait waits for it), so our tail is complete; otherwise fall
+	// back to waiting for the copy to reach EOF ourselves.
+	complete := false
+	if c, ok := client.(interface {
+		ExitStatus() (claudecode.ExitStatus, bool)
+	}); ok {
+		if st, reaped := c.ExitStatus(); reaped {
+			complete = true
+			if exitCode < 0 {
+				exitCode = st.Code
+			}
+		}
+	}
+	if !complete {
+		complete = stderr.drain(cliStderrDrainWait)
+	}
 	exitErr := probe.exitError(cause, exitCode, stderr.tail.redacted(secrets))
 	exitErr.StderrIncomplete = !complete
 	return fmt.Errorf("taskrunner: claude code prompt: %w", exitErr)
