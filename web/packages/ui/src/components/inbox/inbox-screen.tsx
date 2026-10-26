@@ -30,7 +30,7 @@ function tone(item: InboxItem): StatusBadgeStatus {
 function kindLabel(item: InboxItem): string {
   if (item.kind === "permission") return "Permission";
   if (item.kind === "stall") return "Stalled";
-  return item.attention === "high" ? "Needs a decision" : "Ready to merge";
+  return item.attention === "high" ? "Needs a decision" : "Passed";
 }
 
 function KindIcon({ item }: { item: InboxItem }) {
@@ -280,11 +280,18 @@ function InboxRow({
             </Button>
           )
         )}
-        {item.state === "new" && (
-          <Button type="button" variant="ghost" size="sm" className={btn} data-testid={`inbox-seen-${item.key}`} onClick={onSeen}>
-            Mark seen
-          </Button>
-        )}
+        {/* Always rendered (disabled once seen) so the buttons beside it do not jump when the row is marked. */}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className={btn}
+          disabled={item.state !== "new"}
+          data-testid={`inbox-seen-${item.key}`}
+          onClick={onSeen}
+        >
+          {item.state === "new" ? "Mark seen" : "Seen"}
+        </Button>
         {canSnoozeOrResolve(item) && (
           <>
             <DropdownMenu>

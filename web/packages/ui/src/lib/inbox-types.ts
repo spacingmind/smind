@@ -25,7 +25,7 @@ export interface InboxCounts {
 /** The three groups of the page, in display order. */
 export const INBOX_GROUPS: { kind: InboxKind; label: string }[] = [
   { kind: "permission", label: "Needs you now" },
-  { kind: "verdict", label: "Ready for a decision" },
+  { kind: "verdict", label: "Validator verdicts" },
   { kind: "stall", label: "Stalled" },
 ];
 

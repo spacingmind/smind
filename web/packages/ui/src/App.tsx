@@ -258,7 +258,16 @@ function AppShell({
   }, []);
   const closeSettings = useCallback(() => setActiveView("workspace"), []);
   // The Human inbox (ADR-0045): a full-screen view like Settings, reached from the sidebar footer.
-  const openInbox = useCallback(() => setActiveView("inbox"), []);
+  // In the compact layout the sidebar is a sheet: let it finish closing before the inbox covers the screen, so
+  // its exit animation never ghosts over the page.
+  const openInbox = useCallback(() => {
+    if (isMobile) {
+      closeMobileSidebarRef.current?.();
+      window.setTimeout(() => setActiveView("inbox"), 220);
+    } else {
+      setActiveView("inbox");
+    }
+  }, [isMobile]);
 
   const {
     tabsByTask,

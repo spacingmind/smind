@@ -71,8 +71,12 @@ export const queryKeys = {
   inboxAll: () => ["inbox"] as const,
   inboxList: () => ["inbox", "list"] as const,
   inboxCount: () => ["inbox", "count"] as const,
-  /** The permission request an inbox row expands to (from `run.logs`). */
-  inboxRequest: (runId: string, requestId: string) => ["inbox", "request", runId, requestId] as const,
+  /**
+   * The permission request an inbox row expands to (from `run.logs`). Deliberately NOT under the "inbox" prefix: a
+   * pending request's options never change, and refetching it when `inbox.changed` fires (right after it is answered)
+   * would flash "already answered" over the card before its row leaves the list.
+   */
+  inboxRequest: (runId: string, requestId: string) => ["inbox.request", runId, requestId] as const,
   /** `skill.list`: bundled skills and the active plugins' `<plugin>:<skill>` entries. */
   skillList: () => ["skill.list"] as const,
   /** `plugin.commands`: the prompt slash commands of the active plugins; refetched on `plugin.updated`. */

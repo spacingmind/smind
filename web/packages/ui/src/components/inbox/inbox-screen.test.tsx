@@ -37,13 +37,13 @@ function daemonWith(...items: ReturnType<typeof permissionItem>[]): InboxDaemon 
 }
 
 describe("InboxScreen", () => {
-  it("InboxPage_GroupsInOrder: needs you now, ready for a decision, stalled", async () => {
+  it("InboxPage_GroupsInOrder: needs you now, validator verdicts, stalled", async () => {
     await renderInbox(daemonWith(stallItem(), verdictItem(), permissionItem()));
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(headings).toEqual(["Needs you now", "Ready for a decision", "Stalled"]);
+    expect(headings).toEqual(["Needs you now", "Validator verdicts", "Stalled"]);
     expect(screen.getByTestId("inbox-row-perm:q1")).toHaveAttribute("data-kind", "permission");
     expect(screen.getByTestId("inbox-summary-verdict:7")).toHaveTextContent("ready for your merge decision");
-    expect(screen.getByTestId("inbox-kind-verdict:7")).toHaveTextContent("Ready to merge");
+    expect(screen.getByTestId("inbox-kind-verdict:7")).toHaveTextContent("Passed");
   });
 
   it("InboxPage_EmptyState", async () => {
