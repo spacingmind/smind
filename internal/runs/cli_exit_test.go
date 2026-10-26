@@ -140,12 +140,17 @@ func TestCLIExit_StderrDrainedBeforeError(t *testing.T) {
 
 // TestCLIExit_StderrDrain_BoundedWhenPipeHeldOpen: a grandchild keeps stderr
 // open for 6s after the CLI exits; the error is built within the drain bound
-// (2s, not 6s) and says stderr may be incomplete.
+// TestCLIExit_StderrDrain_BoundedWhenPipeHeldOpen: a grandchild holding the
+// CLI's stderr open cannot hold the error back. Since SDK v0.4.2 the SDK cuts
+// its stderr copy at its own WaitDelay and still reports the reaped exit
+// status, so the error arrives within the bound with the stderr written
+// before the exit; the "(stderr incomplete)" mark is only set on the fallback
+// path, because the SDK does not say whether its copy was cut.
 func TestCLIExit_StderrDrain_BoundedWhenPipeHeldOpen(t *testing.T) {
 	t.Parallel()
 	got, took := exitErrFor(t, "cli-exit-held")
-	if !strings.Contains(got, "(stderr incomplete)") {
-		t.Errorf("Err does not mark stderr incomplete: %s", got)
+	if !strings.Contains(got, "held-line") {
+		t.Errorf("Err lost the stderr written before the exit: %s", got)
 	}
 	if took > 4500*time.Millisecond {
 		t.Errorf("error took %s, want within the drain bound", took)
