@@ -47,7 +47,17 @@ type GitHubSource struct {
 
 	mu    sync.Mutex
 	floor map[string]time.Time // repo -> last call
+	repos map[int64]cachedRepo // workspace -> its repo, for repoCacheTTL
 }
+
+type cachedRepo struct {
+	repo forge.Repo
+	at   time.Time
+}
+
+// repoCacheTTL keeps a workspace's repo identity for an hour, so a poll costs
+// one forge call (the run list), not two.
+const repoCacheTTL = time.Hour
 
 // NewGitHubSource builds the source over st (the ledger and the workspace
 // lookup) and a provider accessor.
@@ -130,7 +140,7 @@ func (g *GitHubSource) list(ctx context.Context, a store.Automation, d Def, now 
 	if err != nil {
 		return nil, forge.Repo{}, fmt.Errorf("workspace %d: %w", a.WorkspaceID, err)
 	}
-	repo, err := prov.Repo(ctx, dir)
+	repo, err := g.repoOf(ctx, prov, a.WorkspaceID, dir, now)
 	if err != nil {
 		return nil, forge.Repo{}, g.mapErr(err, now)
 	}
@@ -142,6 +152,26 @@ func (g *GitHubSource) list(ctx context.Context, a store.Automation, d Def, now 
 		return nil, repo, g.mapErr(err, now)
 	}
 	return runs, repo, nil
+}
+
+func (g *GitHubSource) repoOf(ctx context.Context, prov forge.Provider, ws int64, dir string, now time.Time) (forge.Repo, error) {
+	g.mu.Lock()
+	if c, ok := g.repos[ws]; ok && now.Sub(c.at) < repoCacheTTL {
+		g.mu.Unlock()
+		return c.repo, nil
+	}
+	g.mu.Unlock()
+	repo, err := prov.Repo(ctx, dir)
+	if err != nil {
+		return forge.Repo{}, err
+	}
+	g.mu.Lock()
+	if g.repos == nil {
+		g.repos = map[int64]cachedRepo{}
+	}
+	g.repos[ws] = cachedRepo{repo: repo, at: now}
+	g.mu.Unlock()
+	return repo, nil
 }
 
 // mapErr turns a rate limit into a deferral (no failure counted); everything

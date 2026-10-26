@@ -150,6 +150,9 @@ func TestGHSource_CallCounts_UnderBudget_AndOneListPerPoll(t *testing.T) {
 	for i := 0; i < 24; i++ { // two hours of ticks at the 5-minute interval
 		g.poll(5*time.Minute + time.Second)
 	}
+	if g.ff.repoCalls < 1 || g.ff.repoCalls > 3 {
+		t.Fatalf("repo lookups over two hours = %d, want about 2 (cached for an hour)", g.ff.repoCalls)
+	}
 	if g.ff.listCalls < 20 || g.ff.listCalls > 25 {
 		t.Fatalf("list calls over two hours = %d, want about 24", g.ff.listCalls)
 	}
