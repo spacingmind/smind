@@ -304,7 +304,10 @@ func (r *Router) latestDecision(sessionKey string) (store.RoutingDecision, bool,
 		if d.SessionKey != sessionKey {
 			continue
 		}
-		if !found || d.DecidedAt.After(latest.DecidedAt) {
+		// Not After: the list is ordered by id, so on equal timestamps (two
+		// decisions inside one clock tick, ~0.5-15 ms on Windows) the later one
+		// must win or the session goes back to the account it just left.
+		if !found || !d.DecidedAt.Before(latest.DecidedAt) {
 			latest = d
 			found = true
 		}

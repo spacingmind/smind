@@ -86,13 +86,30 @@ type Process struct {
 	Command []string `json:"command"`
 }
 
-// Setting is one declared plugin setting.
+// Setting is one declared plugin setting (ADR-0042 PB.2). Type is string,
+// secret, boolean, number or enum. A secret is write-only over every RPC, never
+// has a default (a manifest is not a place for one) and reaches only the
+// plugin's own initialize and ${setting.KEY} in MCP env and headers.
 type Setting struct {
-	Key      string `json:"key"`
-	Type     string `json:"type"`
-	Label    string `json:"label"`
-	Required bool   `json:"required,omitempty"`
+	Key         string          `json:"key"`
+	Type        string          `json:"type"`
+	Label       string          `json:"label"`
+	Description string          `json:"description,omitempty"`
+	Required    bool            `json:"required,omitempty"`
+	Default     json.RawMessage `json:"default,omitempty"`
+	// Options are the allowed values of an enum.
+	Options []string `json:"options,omitempty"`
+	// MaxLength caps a string or secret in bytes (default MaxSettingString,
+	// at most MaxSettingStringCap).
+	MaxLength int `json:"maxLength,omitempty"`
 }
+
+// Setting value limits.
+const (
+	MaxSettingString    = 1024
+	MaxSettingStringCap = 8192
+	MaxSettingOptions   = 64
+)
 
 // Contributes lists what a plugin adds. Wave A consumes the data kinds; the
 // manifest accepts the later waves' keys so a plugin is written once.
@@ -279,9 +296,11 @@ func ParseManifest(data []byte, daemonVersion string) (*Manifest, error) {
 				v.bad(f+".key", fmt.Sprintf("%q is not a unique setting key", s.Key), "use letters, digits and _ starting with a letter, once per plugin")
 			}
 			seen[s.Key] = true
-			if !contains([]string{"string", "secret", "boolean", "number"}, s.Type) {
-				v.bad(f+".type", fmt.Sprintf("unknown setting type %q", s.Type), "use string, secret, boolean or number")
+			if !contains([]string{"string", "secret", "boolean", "number", "enum"}, s.Type) {
+				v.bad(f+".type", fmt.Sprintf("unknown setting type %q", s.Type), "use string, secret, boolean, number or enum")
+				continue
 			}
+			validateSettingDecl(v, f, s)
 		}
 	}
 	if get("contributes", &m.Contributes, false, "make contributes an object of contribution lists") {
@@ -506,4 +525,40 @@ func (m *Manifest) DeclaredPaths() []string {
 		out = append(out, t.File)
 	}
 	return out
+}
+
+// validateSettingDecl checks the type-specific parts of a setting declaration:
+// enum options, the size cap, and that a default fits its type. A secret may
+// not carry a default.
+func validateSettingDecl(v *manifestVal, f string, s Setting) {
+	if s.Type == "enum" {
+		switch {
+		case len(s.Options) == 0 || len(s.Options) > MaxSettingOptions:
+			v.bad(f+".options", "an enum needs 1 to 64 options", "list the allowed values")
+		default:
+			seen := map[string]bool{}
+			for _, o := range s.Options {
+				if o == "" || len(o) > 128 || seen[o] {
+					v.bad(f+".options", fmt.Sprintf("option %q is empty, over 128 bytes or repeated", o), "use distinct, short options")
+					break
+				}
+				seen[o] = true
+			}
+		}
+	} else if len(s.Options) > 0 {
+		v.bad(f+".options", "options belong to an enum", "remove options or make the type enum")
+	}
+	if s.MaxLength != 0 && (s.Type != "string" && s.Type != "secret" || s.MaxLength < 1 || s.MaxLength > MaxSettingStringCap) {
+		v.bad(f+".maxLength", "maxLength applies to string and secret, from 1 to 8192", "remove it or use a size in range")
+	}
+	if len(s.Default) == 0 {
+		return
+	}
+	if s.Type == "secret" {
+		v.bad(f+".default", "a secret cannot have a default", "remove it: the Human sets a secret, the manifest never carries one")
+		return
+	}
+	if _, err := ValidateSettingValue(s, s.Default); err != nil {
+		v.bad(f+".default", err.Error(), "use a value that fits the declared type")
+	}
 }

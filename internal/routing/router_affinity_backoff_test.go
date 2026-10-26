@@ -203,3 +203,21 @@ func TestRoute_affinity_transient_backoff_single_account_pool_keeps_pinned_accou
 		t.Fatalf("after back-off Route() = %d, %v; want %d", got.ID, err, a)
 	}
 }
+
+// Two decisions with the same DecidedAt (a coarse clock: Windows ticks at
+// ~0.5-15 ms) must resolve to the later one, not the first.
+func TestLatestDecision_EqualTimestampsPickTheLaterRow(t *testing.T) {
+	t.Parallel()
+	r, s, reg, _, _ := newFakeRouter(t)
+	a := newAccount(t, reg, "a")
+	b := newAccount(t, reg, "b")
+	at := testNow.UTC()
+	for _, id := range []int64{a, b} {
+		if _, err := s.CreateRoutingDecision(store.RoutingDecision{SessionKey: "tie", AccountID: id, Policy: PolicyPool, DecidedAt: at, ExpiresAt: at.Add(time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, _, _ := r.latestDecision("tie"); got.AccountID != b {
+		t.Fatalf("latest decision account = %d, want %d (the later row)", got.AccountID, b)
+	}
+}

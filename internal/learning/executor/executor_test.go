@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -123,7 +124,7 @@ func TestExecutor_RunsHiddenIsolatedSystemRun(t *testing.T) {
 		t.Fatalf(`argv lacks --tools "": %q`, args)
 	}
 	fi, err := os.Stat(*sys.WorktreePath)
-	if err != nil || fi.Mode().Perm() != 0o700 {
+	if err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o700) { // no Unix mode bits on Windows
 		t.Fatalf("cwd mode = %v, %v; want 0700", fi, err)
 	}
 }
@@ -392,7 +393,7 @@ func TestExecutor_SystemTaskCreatesAndReusesWithoutRunning(t *testing.T) {
 	if filepath.Clean(*t1.WorktreePath) != want {
 		t.Fatalf("cwd = %s, want %s", *t1.WorktreePath, want)
 	}
-	if fi, err := os.Stat(want); err != nil || fi.Mode().Perm() != 0o700 {
+	if fi, err := os.Stat(want); err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o700) {
 		t.Fatalf("cwd = %v, %v; want 0700 dir", fi, err)
 	}
 	t2, err := e.ex.SystemTask(e.ws.ID)

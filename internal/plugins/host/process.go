@@ -109,6 +109,10 @@ func startProcess(spec Spec, environ []string, pol Policy, reg Registry, log *Lo
 	}
 	p.cmd, p.pg = cmd, pg
 	p.conn = newConn(spec.ID, outR, inW, pol.Limits, reg, log, pol.WriteTimeout, func(error) { p.pg.kill() })
+	if so, ok := reg.(SessionOpener); ok {
+		sess := so.Open(Plugin{ID: spec.ID, Capabilities: append([]string(nil), spec.Capabilities...)}, p.conn.notifyPeer)
+		p.conn.reg, p.conn.onClose = sessionRegistry{sess}, sess.Close
+	}
 	go p.conn.readLoop()
 	go func() {
 		err := cmd.Wait()

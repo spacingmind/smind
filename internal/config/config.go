@@ -25,6 +25,7 @@ type Config struct {
 	Push          PushConfig          `yaml:"push"`
 	Learning      LearningConfig      `yaml:"learning"`
 	Plugins       PluginsConfig       `yaml:"plugins"`
+	Automations   AutomationsConfig   `yaml:"automations"`
 	Log           LogConfig           `yaml:"log"`
 }
 
@@ -39,6 +40,28 @@ type PluginsConfig struct {
 	// Relay sessions and agent callers are refused either way.
 	AllowRemoteManage bool `yaml:"allowRemoteManage"`
 }
+
+// AutomationsConfig is the global automation switch set (ADR-0044). Everything
+// here is a human edit of config.yaml: no RPC, agent or relay session can
+// change it. Automations are off by default.
+type AutomationsConfig struct {
+	// Enabled turns the engine on: with false nothing polls and nothing fires.
+	Enabled bool `yaml:"enabled"`
+	// Paused is the soft switch: the engine keeps its state but records every
+	// signal as paused and never fires.
+	Paused bool `yaml:"paused"`
+	// AllowRemoteManage lets a direct non-loopback connection create, edit,
+	// enable, resume or fire automations. Relay sessions and agents are
+	// refused either way (a relay session may only disable).
+	AllowRemoteManage bool `yaml:"allowRemoteManage"`
+	// AllowUnattendedModes lets a template use autoAccept / full-access.
+	AllowUnattendedModes bool `yaml:"allowUnattendedModes"`
+	// MaxBudgetUSD is the ceiling for a template's per-run budget.
+	MaxBudgetUSD float64 `yaml:"maxBudgetUsd"`
+}
+
+// DefaultMaxAutomationBudgetUSD is AutomationsConfig.MaxBudgetUSD's default.
+const DefaultMaxAutomationBudgetUSD = 10.0
 
 // LogConfig tunes the daemon's own rotating log file, $SMIND_HOME/daemon.log
 // (ADR-0031 decision 7). The daemon also keeps logging to stderr.
@@ -497,10 +520,11 @@ func Default() Config {
 			ExhaustThresholdPct: 100,
 			Passive:             true,
 		},
-		Relay:    RelayConfig{LegacyDevices: false, MaxDevices: DefaultRelayMaxDevices},
-		Push:     PushConfig{Enabled: true},
-		Learning: DefaultLearning(),
-		Log:      LogConfig{MaxSizeMB: DefaultLogMaxSizeMB, MaxFiles: DefaultLogMaxFiles},
+		Relay:       RelayConfig{LegacyDevices: false, MaxDevices: DefaultRelayMaxDevices},
+		Push:        PushConfig{Enabled: true},
+		Learning:    DefaultLearning(),
+		Automations: AutomationsConfig{MaxBudgetUSD: DefaultMaxAutomationBudgetUSD},
+		Log:         LogConfig{MaxSizeMB: DefaultLogMaxSizeMB, MaxFiles: DefaultLogMaxFiles},
 	}
 }
 
@@ -562,6 +586,9 @@ func LoadFile(path string) (Config, error) {
 	}
 	if n := cfg.Relay.MaxDevices; n < 1 {
 		return cfg, fmt.Errorf("config %s: relay.maxDevices must be >= 1, got %d", path, n)
+	}
+	if v := cfg.Automations.MaxBudgetUSD; v <= 0 {
+		return cfg, fmt.Errorf("config %s: automations.maxBudgetUsd must be > 0, got %g", path, v)
 	}
 	if n := cfg.Log.MaxSizeMB; n < 1 {
 		return cfg, fmt.Errorf("config %s: log.maxSizeMB must be >= 1, got %d", path, n)

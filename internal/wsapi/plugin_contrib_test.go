@@ -40,7 +40,11 @@ type contribEnv struct {
 	home string
 }
 
-func newContribEnv(t *testing.T) *contribEnv {
+func newContribEnv(t *testing.T) *contribEnv { return newContribEnvOpt(t, true) }
+
+// newContribEnvOpt: injectSettings false leaves the daemon's own settings
+// store in charge (PB.2), true replaces it with the fixed sentinel provider.
+func newContribEnvOpt(t *testing.T, injectSettings bool) *contribEnv {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("SMIND_HOME", home)
@@ -62,7 +66,9 @@ func newContribEnv(t *testing.T) *contribEnv {
 		t.Fatal(err)
 	}
 	t.Cleanup(api.Close)
-	api.plugins.SetSettings(wsSettings{"acme/token": wsSecret})
+	if injectSettings {
+		api.plugins.SetSettings(wsSettings{"acme/token": wsSecret})
+	}
 	srv := httptest.NewServer(api.Handler)
 	t.Cleanup(srv.Close)
 

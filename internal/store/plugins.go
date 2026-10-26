@@ -99,3 +99,60 @@ func (s *Store) DeletePlugin(id string) error {
 	}
 	return nil
 }
+
+// PluginSetting is one stored plugin setting value: JSON text (a string, a
+// number or a boolean). Secrets are stored like provider credentials: a plain
+// column of this database.
+type PluginSetting struct {
+	Key   string
+	Value string
+}
+
+// ListPluginSettings returns a plugin's stored setting values ordered by key.
+func (s *Store) ListPluginSettings(pluginID string) ([]PluginSetting, error) {
+	rows, err := s.db.Query(`SELECT key, value FROM plugin_settings WHERE plugin_id = ? ORDER BY key`, pluginID)
+	if err != nil {
+		return nil, fmt.Errorf("list plugin settings %q: %w", pluginID, err)
+	}
+	defer rows.Close()
+	var out []PluginSetting
+	for rows.Next() {
+		var ps PluginSetting
+		if err := rows.Scan(&ps.Key, &ps.Value); err != nil {
+			return nil, fmt.Errorf("scan plugin setting: %w", err)
+		}
+		out = append(out, ps)
+	}
+	return out, rows.Err()
+}
+
+// ApplyPluginSettings writes set (key -> JSON value) and deletes the keys in
+// clear in one transaction, so a failed write changes nothing.
+func (s *Store) ApplyPluginSettings(pluginID string, set map[string]string, clear []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("apply plugin settings %q: %w", pluginID, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC()
+	for k, v := range set {
+		if _, err := tx.Exec(`INSERT INTO plugin_settings (plugin_id, key, value, updated_at) VALUES (?, ?, ?, ?)
+			ON CONFLICT(plugin_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, pluginID, k, v, now); err != nil {
+			return fmt.Errorf("apply plugin settings %q: %w", pluginID, err)
+		}
+	}
+	for _, k := range clear {
+		if _, err := tx.Exec(`DELETE FROM plugin_settings WHERE plugin_id = ? AND key = ?`, pluginID, k); err != nil {
+			return fmt.Errorf("apply plugin settings %q: %w", pluginID, err)
+		}
+	}
+	return tx.Commit()
+}
+
+// DeletePluginSettings removes every stored value of a plugin.
+func (s *Store) DeletePluginSettings(pluginID string) error {
+	if _, err := s.db.Exec(`DELETE FROM plugin_settings WHERE plugin_id = ?`, pluginID); err != nil {
+		return fmt.Errorf("delete plugin settings %q: %w", pluginID, err)
+	}
+	return nil
+}

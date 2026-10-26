@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -100,7 +101,8 @@ func TestMaterialise_ExportsBaseSHA(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "later.txt")); err == nil {
 		t.Error("file from a commit after the base sha was exported")
 	}
-	if fi, err := os.Stat(filepath.Join(dir, "cmd", "run.sh")); err != nil || fi.Mode()&0o100 == 0 {
+	// Windows has no execute bit to lose.
+	if fi, err := os.Stat(filepath.Join(dir, "cmd", "run.sh")); err != nil || (runtime.GOOS != "windows" && fi.Mode()&0o100 == 0) {
 		t.Errorf("executable bit lost: %v %v", fi, err)
 	}
 	if res.Files != 3 || res.SkippedLinks != 1 {
