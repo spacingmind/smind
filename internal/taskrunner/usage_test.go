@@ -553,6 +553,7 @@ func TestRunner_RunPrompt_ClaudeNative_UsagePerTurnNotCumulative(t *testing.T) {
 	t.Parallel()
 	wm, task := newTestTask(t, "")
 	r := New(wm)
+	r.claudeLaunch = nil // newClaudeClient is stubbed: on Windows the default would resolve a real claude.exe first
 	results := []claudecode.ResultMessage{
 		claudeResult(0.010, haiku(1000, 400, 0, 0.010)),
 		claudeResult(0.025, haiku(1010, 2600, 0, 0.025)),
