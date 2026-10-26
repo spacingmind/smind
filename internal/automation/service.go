@@ -76,8 +76,16 @@ func checkProfile(st *store.Store, def Def, lim Limits) error {
 	if mode == "" {
 		mode = p.PermissionMode
 	}
-	if (p.AutoAccept || unattendedModes[mode]) && !lim.AllowUnattendedModes {
-		return fmt.Errorf("profile %q runs unattended (autoAccept or mode %q): set automations.allowUnattendedModes: true in config.yaml to allow it", p.Name, mode)
+	return RefuseUnattended(p.Name, p.AutoAccept, mode, lim)
+}
+
+// RefuseUnattended is the one rule for "this would run unattended": a profile
+// with autoAccept or an unattended permission mode needs
+// automations.allowUnattendedModes. The daemon adapter repeats it at launch, so
+// a row edited behind the RPCs' back still cannot start such a task.
+func RefuseUnattended(profileName string, autoAccept bool, mode string, lim Limits) error {
+	if (autoAccept || unattendedModes[mode]) && !lim.AllowUnattendedModes {
+		return fmt.Errorf("profile %q runs unattended (autoAccept or mode %q): set automations.allowUnattendedModes: true in config.yaml to allow it", profileName, mode)
 	}
 	return nil
 }

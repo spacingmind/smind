@@ -28,12 +28,24 @@ type automationStarter struct {
 	reg    *runs.Registry
 	runner *taskrunner.Runner
 	db     *store.Store
+	limits func() automation.Limits
 }
 
 func (s automationStarter) Start(ctx context.Context, req automation.StartRequest) (automation.StartResult, error) {
 	prof, err := s.db.GetAgentProfile(req.Def.Template.ProfileID)
 	if err != nil {
 		return automation.StartResult{}, fmt.Errorf("profile %d: %w", req.Def.Template.ProfileID, err)
+	}
+	mode := req.Def.Template.Mode
+	if mode == "" {
+		mode = prof.PermissionMode
+	}
+	lim := automation.Limits{}
+	if s.limits != nil {
+		lim = s.limits()
+	}
+	if err := automation.RefuseUnattended(prof.Name, prof.AutoAccept || req.Def.Template.AutoAccept, mode, lim); err != nil {
+		return automation.StartResult{}, err
 	}
 	opts := []workspace.CreateTaskOption{}
 	if req.Def.Template.BaseRef != "" {
@@ -50,10 +62,6 @@ func (s automationStarter) Start(ctx context.Context, req automation.StartReques
 	chat, err := s.wm.DefaultChat(task.ID)
 	if err != nil {
 		return automation.StartResult{}, err
-	}
-	mode := req.Def.Template.Mode
-	if mode == "" {
-		mode = prof.PermissionMode
 	}
 	runID, err := s.reg.Start(ctx, s.wm, s.runner, task.ID, chat.ID, taskrunner.Provider(prof.Provider), req.Prompt,
 		taskrunner.PermissionSettings{Mode: mode, AutoAccept: false}, taskrunner.ThinkingLevel(prof.ThinkingLevel),
@@ -127,7 +135,7 @@ func automationConfig() automation.Config {
 func wireAutomations(ctx context.Context, db *store.Store, api *wsapi.API, wm *workspace.Manager, runner *taskrunner.Runner, sources ...automation.Source) (stop func()) {
 	eng := automation.New(automation.Deps{
 		Store:   db,
-		Starter: automationStarter{wm: wm, reg: api.Runs, runner: runner, db: db},
+		Starter: automationStarter{wm: wm, reg: api.Runs, runner: runner, db: db, limits: func() automation.Limits { return automationConfig().Limits }},
 		Memory:  automation.Memory{Home: config.Dir()},
 		Sources: sources,
 		Config:  automationConfig,
