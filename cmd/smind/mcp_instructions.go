@@ -46,6 +46,10 @@ The loop:
    task_wait also takes runIds to wait for the first of several runs, and
    ignorePermissionIds (request ids you already surfaced) to keep waiting
    past a pending permission until a NEW one, a terminal status, or timeout.
+8. validation_contract_submit / validation_request / validation_get: for a
+   milestone, store a validation contract BEFORE coding, then ask a fresh-context
+   validator to judge your branch head against it and read its verdict. You
+   cannot write, edit or waive a verdict; mergeReady is a label for the human.
    task_diff reads a task's worktree diff (capped at 256 KiB); queue_list
    and queue_cancel inspect and cancel your own queued prompts;
    usage_summary reports token/cost usage; account_usage reports each

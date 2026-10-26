@@ -26,7 +26,7 @@ import (
 func registerMCPValidationTools(srv *mcp.Server, client *wsclient.Client) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "validation_contract_submit", Description: "Store the validation contract for your task BEFORE implementing (ADR-0045): a file whose front matter lists the ACs, named tests, mutation checks, frames and commands a fresh-context validator will check. Pass path (relative to your worktree) or body. Returns {id, version, sha256}, or a field-path error to fix. A new submit is a new version; the validator judges the newest."}, mcpValidationContractSubmit(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "validation_request", Description: "Ask a fresh-context validator to judge your task's branch head (or a commitSha on it) against its newest contract. It runs in its own scratch worktree and never sees your reasoning; the daemon wakes you with a [child event] when it ends. Do not touch your worktree meanwhile. One at a time. Returns {validationId, ...}; read the result with validation_get. You cannot write, edit or waive a verdict."}, mcpValidationRequest(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "validation_get", Description: "Read a validation (validationId) or your task's validations, newest first: status pass|fail|blocked|running, the verdict with per-item evidence, and mergeReady (a label for the human: true only for a pass at the current branch head and newest contract; smind never merges)."}, mcpValidationGet(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "validation_get", Description: "Read a validation (validationId) or your task's validations, newest first: status pass|fail|blocked|running, the verdict with per-item evidence, and mergeReady (a label for the human to read: true only for a pass at the current branch head and newest contract; nothing acts on it)."}, mcpValidationGet(client))
 }
 
 type validationContractSubmitInput struct {
@@ -76,18 +76,18 @@ type validationGetInput struct {
 
 func mcpValidationGet(client *wsclient.Client) mcp.ToolHandlerFor[validationGetInput, map[string]any] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in validationGetInput) (*mcp.CallToolResult, map[string]any, error) {
-		method, params := "validation.list", map[string]any{}
 		if in.ValidationID > 0 {
-			method, params = "validation.get", map[string]any{"id": in.ValidationID}
+			var out map[string]any
+			if err := callWS(ctx, client, "validation_get", "validation.get", map[string]any{"id": in.ValidationID}, &out); err != nil {
+				return nil, nil, err
+			}
+			return nil, out, nil
 		}
-		var out any
-		if err := callWS(ctx, client, "validation_get", method, params, &out); err != nil {
+		var list []any
+		if err := callWS(ctx, client, "validation_get", "validation.list", map[string]any{}, &list); err != nil {
 			return nil, nil, err
 		}
-		if m, ok := out.(map[string]any); ok {
-			return nil, m, nil
-		}
-		return nil, map[string]any{"validations": out}, nil
+		return nil, map[string]any{"validations": list}, nil
 	}
 }
 
