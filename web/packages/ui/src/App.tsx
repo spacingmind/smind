@@ -20,6 +20,7 @@ import { CommandPalette } from "@/components/command-palette";
 import { DesktopDaemonBanner } from "@/components/desktop-daemon-banner";
 import { DesktopUpdateDialogView } from "@/components/desktop-update-dialog";
 import { DesktopUnreachable } from "@/components/desktop-unreachable";
+import { InboxScreen } from "@/components/inbox/inbox-screen";
 import { SettingsScreen } from "@/components/settings/settings-screen";
 import { TaskDetailPane } from "@/components/task-detail";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
@@ -244,18 +245,20 @@ function AppShell({
   // the plan's "no router library introduction" decision; settings is not
   // deep-linkable and does not disturb the hash the task routing below
   // owns.
-  const [activeView, setActiveView] = useState<"workspace" | "settings">("workspace");
+  const [activeView, setActiveView] = useState<"workspace" | "settings" | "inbox">("workspace");
   // Bumped on every request to open Settings, and used as the screen's key:
   // asking for a section while Settings is already open (shortcuts.help,
   // a deep link) remounts it onto that section instead of being ignored.
   const [settingsOpenNonce, setSettingsOpenNonce] = useState(0);
-  useActionRestriction(activeView === "settings" ? SETTINGS_SAFE_ACTIONS : null);
+  useActionRestriction(activeView !== "workspace" ? SETTINGS_SAFE_ACTIONS : null);
   const openSettings = useCallback((sectionId?: string) => {
     setSettingsInitialSectionId(sectionId ?? null);
     setSettingsOpenNonce((n) => n + 1);
     setActiveView("settings");
   }, []);
   const closeSettings = useCallback(() => setActiveView("workspace"), []);
+  // The Human inbox (ADR-0045): a full-screen view like Settings, reached from the sidebar footer.
+  const openInbox = useCallback(() => setActiveView("inbox"), []);
 
   const {
     tabsByTask,
@@ -1023,6 +1026,7 @@ function AppShell({
         setTreeLoaded(true);
       }}
       onOpenSettings={openSettings}
+      onOpenInbox={openInbox}
       connectionStatus={connectionStatus}
       connectionStatusText={connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
       headerActions={
@@ -1225,6 +1229,8 @@ function AppShell({
   );
 
   const settingsOpen = activeView === "settings";
+  // Settings and the inbox both cover the shell: it is hidden and inert behind either.
+  const shellCovered = activeView !== "workspace";
   // Stable identities: ShellCommands memoizes its palette entries on them.
   const selectTaskFromPalette = useCallback(
     (task: Task) => {
@@ -1262,7 +1268,7 @@ function AppShell({
        * zero-render component is the cheapest way to be inside a provider
        * its own parent mounts.
        */}
-      <SidebarToggleAction settingsOpen={settingsOpen} closeMobileRef={closeMobileSidebarRef} />
+      <SidebarToggleAction settingsOpen={shellCovered} closeMobileRef={closeMobileSidebarRef} />
       <CommandPalette />
       {/* G9: a task with a PR gets its PR tab once, in the background (never again after a close). */}
       <PRTabAutoOpen taskId={selectedTask?.ID ?? null} tabs={taskState ? collectAllTabs(taskState.root) : null} openTab={openTab} />
@@ -1388,12 +1394,23 @@ function AppShell({
         <UsageModalRoot />
         <div
           data-testid="app-shell"
-          className={cn("h-full w-full", settingsOpen && "invisible")}
-          inert={settingsOpen}
-          aria-hidden={settingsOpen || undefined}
+          className={cn("h-full w-full", shellCovered && "invisible")}
+          inert={shellCovered}
+          aria-hidden={shellCovered || undefined}
         >
           {shellElement}
         </div>
+        {activeView === "inbox" && (
+          <div className="absolute inset-0 z-40">
+            <InboxScreen
+              onNavigateBack={closeSettings}
+              onOpenTask={(taskId) => {
+                closeSettings();
+                void jumpToTask(taskId);
+              }}
+            />
+          </div>
+        )}
         {settingsOpen && (
           // No background here: on macOS the settings sidebar is a vibrancy
           // surface and the screen paints its own opaque panes.
