@@ -18,6 +18,10 @@ type githubHolder struct{ c *ghctx.Client }
 // must be called before the API serves any connection.
 func (a *API) SetGithubClient(c *ghctx.Client) { a.github.c = c }
 
+// ForgeProvider returns the forge client (nil when there is none): the one
+// client the PR poller and the automation GitHub source share.
+func (a *API) ForgeProvider() forge.Provider { return a.forgeAuth.provider() }
+
 // forgeSearchResult is forge.search's result: ghctx's search result tagged
 // with the forge that answered.
 type forgeSearchResult struct {
