@@ -933,3 +933,41 @@ func TestForgeNoWsMethodForAgentsOnlyTable(t *testing.T) {
 		t.Fatal("forge.status is not a known topic")
 	}
 }
+
+// A status read that observes a change must not return before the forge.status
+// event for it is queued: forge.setToken replies with that read's result, and a
+// reply that outruns the publish is the flake in TestForgeSetToken_StdinOnly.
+// Deterministic: the test holds the bus lock, so the publish cannot complete
+// until the test lets it. An implementation that releases the caller first
+// returns here while the lock is still held.
+func TestForgeStatus_ChangeIsPublishedBeforeTheReadReturns(t *testing.T) {
+	t.Parallel()
+	g := &ghFake{}
+	api, clk := newClockedAuth(t, g)
+	sub := subscribeTopics(api, TopicForgeStatus)
+	f := api.forgeAuth
+	if _, err := f.status(context.Background(), false); err != nil { // baseline: unauthenticated
+		t.Fatal(err)
+	}
+	g.mu.Lock()
+	g.authed = true
+	g.mu.Unlock()
+	clk.advance(2 * time.Minute)
+
+	api.bus.mu.Lock() // Publish blocks here until released
+	done := make(chan error, 1)
+	go func() { _, err := f.status(context.Background(), false); done <- err }()
+	select {
+	case err := <-done:
+		api.bus.mu.Unlock()
+		t.Fatalf("status returned (err %v) before the change was published", err)
+	case <-time.After(300 * time.Millisecond): // the read is parked in Publish, as it should be
+	}
+	api.bus.mu.Unlock()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := queued(sub); len(got) != 1 {
+		t.Fatalf("forge.status events = %d, want 1 queued by the time status returned", len(got))
+	}
+}
