@@ -72,6 +72,8 @@ type fakeSink struct {
 	mu     sync.Mutex
 	fired  int
 	paused []string
+	// pausedTasks is the failed task of each pause (0 = none).
+	pausedTasks []int64
 }
 
 func (s *fakeSink) Fired(store.Automation, store.AutomationAudit) {
@@ -79,7 +81,8 @@ func (s *fakeSink) Fired(store.Automation, store.AutomationAudit) {
 	s.fired++
 	s.mu.Unlock()
 }
-func (s *fakeSink) Paused(_ store.Automation, r string) {
+func (s *fakeSink) Paused(_ store.Automation, r string, taskID int64) {
+	s.pausedTasks = append(s.pausedTasks, taskID)
 	s.mu.Lock()
 	s.paused = append(s.paused, r)
 	s.mu.Unlock()
@@ -410,6 +413,9 @@ func TestAutoPause_TripsAtN_SuccessResets_ResumeClears(t *testing.T) {
 	}
 	if len(e.sink.paused) != 1 {
 		t.Fatalf("paused events = %d", len(e.sink.paused))
+	}
+	if len(e.sink.pausedTasks) != 1 || e.sink.pausedTasks[0] == 0 {
+		t.Fatalf("the pause event does not carry the failed task: %v", e.sink.pausedTasks)
 	}
 	n := e.fs.count()
 	e.pollSignal(ciSignal(shas[6], 6))
