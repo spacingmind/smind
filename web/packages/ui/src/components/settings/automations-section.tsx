@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { AutomationFormDialog } from "@/components/settings/automation-form";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -52,7 +53,6 @@ function AutomationsSection({ closeSettings }: SettingsSectionContext) {
   /** Edit/create and history targets (the dialogs arrive with the form and the history view). */
   const [editing, setEditing] = useState<number | "new" | null>(null);
   const [historyId, setHistoryId] = useState<number | null>(null);
-  void editing;
   void historyId;
   void closeSettings;
   const canManage = daemonOn && readOnlyReason === null;
@@ -183,6 +183,17 @@ function AutomationsSection({ closeSettings }: SettingsSectionContext) {
           </ul>
         )}
       </section>
+
+      <AutomationFormDialog
+        open={editing !== null}
+        editing={typeof editing === "number" ? (automations?.find((a) => a.id === editing) ?? null) : null}
+        onClose={() => setEditing(null)}
+        onSaved={(message) => {
+          setEditing(null);
+          setNotice(message);
+        }}
+        onForbidden={fail}
+      />
 
       <ConfirmDialog
         open={deleteId !== null}
