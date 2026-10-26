@@ -3,6 +3,7 @@ package contrast
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spacingmind/smind/internal/learning/gate"
@@ -11,8 +12,12 @@ import (
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
+// js escapes a path for embedding in a JSON string literal: a Windows path's
+// backslashes would otherwise be invalid JSON escapes.
+func js(p string) string { return strings.ReplaceAll(p, `\`, `\\`) }
+
 func TestContrast_LoadedUsesLoadsMatch(t *testing.T) {
-	proj := filepath.Join(string(filepath.Separator), "data", "proj", "1", "abc")
+	proj := filepath.Join(t.TempDir(), "data", "proj", "1", "abc")
 	skillMD := filepath.Join(proj, ".claude", "skills", "learned-x", "SKILL.md")
 	cases := []struct {
 		name   string
@@ -33,7 +38,7 @@ func TestContrast_LoadedUsesLoadsMatch(t *testing.T) {
 			[]window.Event{ev(1, taskrunner.Event{
 				Type:      taskrunner.EventTypeToolCall,
 				ToolName:  "Read",
-				ToolInput: json.RawMessage(`{"file_path":"` + skillMD + `"}`),
+				ToolInput: json.RawMessage(`{"file_path":"` + js(skillMD) + `"}`),
 			})},
 			true,
 		},
@@ -42,7 +47,7 @@ func TestContrast_LoadedUsesLoadsMatch(t *testing.T) {
 			[]window.Event{ev(1, taskrunner.Event{
 				Type:      taskrunner.EventTypeToolCall,
 				ToolName:  "Read",
-				ToolInput: json.RawMessage(`{"file_path":"` + filepath.Join(string(filepath.Separator), "elsewhere", ".claude", "skills", "learned-x", "SKILL.md") + `"}`),
+				ToolInput: json.RawMessage(`{"file_path":"` + js(filepath.Join(t.TempDir(), "elsewhere", ".claude", "skills", "learned-x", "SKILL.md")) + `"}`),
 			})},
 			false,
 		},
@@ -60,7 +65,7 @@ func TestContrast_LoadedUsesLoadsMatch(t *testing.T) {
 			[]window.Event{ev(1, taskrunner.Event{
 				Type:      taskrunner.EventTypeToolCall,
 				ToolName:  "Read",
-				ToolInput: json.RawMessage(`{"file_path":"` + proj + `/.claude/skills/learned-x/../../learned-x/SKILL.md"}`),
+				ToolInput: json.RawMessage(`{"file_path":"` + js(proj) + `/.claude/skills/learned-x/../../learned-x/SKILL.md"}`),
 			})},
 			false,
 		},

@@ -275,7 +275,7 @@ func TestLearnCLI_Export(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home) // the daemon's default export home; never the real one
+	setHome(t, home) // the daemon's default export home; never the real one
 	f := newLearnCLIFx(t)
 	repo, _ := filepath.EvalSymlinks(t.TempDir())
 	ws, err := f.s.CreateWorkspace(store.Workspace{Path: repo, Title: "real", RoutingPolicy: "hard"})
