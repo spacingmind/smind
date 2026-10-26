@@ -38,6 +38,7 @@ var RunScopedMethods = []string{
 	"session.identify",
 	"task.archive", "task.create", "task.diff", "task.get", "task.list", "task.tree",
 	"usage.summary",
+	"validation.contract.get", "validation.contract.submit", "validation.get", "validation.list", "validation.verdict.submit",
 	"workspace.list",
 }
 

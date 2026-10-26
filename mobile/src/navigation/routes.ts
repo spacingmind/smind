@@ -47,3 +47,17 @@ export function parsePluginParams(params: { id?: Param }): { ok: true; id: strin
   const id = first(params.id);
   return id !== undefined && id.trim() !== '' && id.length <= 128 ? { ok: true, id } : { ok: false };
 }
+
+// The read-only automation screens (ADR-0044 section 10): the list, and one automation's run history by numeric id.
+export const AUTOMATIONS_HREF = '/automations' as const;
+
+export function automationHref(id: number): { pathname: '/automation/[id]'; params: { id: string } } {
+  return { pathname: '/automation/[id]', params: { id: String(id) } };
+}
+
+export function parseAutomationParams(params: { id?: Param }): { ok: true; id: number } | { ok: false } {
+  const raw = first(params.id);
+  if (raw === undefined || !/^\d+$/.test(raw)) return { ok: false };
+  const id = Number(raw);
+  return Number.isSafeInteger(id) && id > 0 ? { ok: true, id } : { ok: false };
+}

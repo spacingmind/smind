@@ -21,6 +21,7 @@ describe("icon registry", () => {
         "archive": "Archive",
         "arrowRight": "ArrowRight",
         "attach": "Paperclip",
+        "automation": "CalendarClock",
         "back": "ArrowLeft",
         "branch": "GitBranch",
         "chat": "MessageSquare",

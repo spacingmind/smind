@@ -54,6 +54,9 @@ const PROVIDER_TOPICS = ["provider.updated"];
 /** `plugin.updated` {id, globalEnabled}: a plugin was installed, enabled, disabled, removed, updated or reloaded, or `plugins.enabled` flipped; the bridge re-reads the plugin commands and themes. */
 const PLUGIN_TOPICS = ["plugin.updated"];
 
+/** `automation.fired` {automationId, auditId, taskId?, decision}, `automation.paused` {automationId, reason}, `automation.updated` {automationId} (ADR-0044): the bridge re-reads the list and the audit pages. */
+const AUTOMATION_TOPICS = ["automation.fired", "automation.paused", "automation.updated"];
+
 /** The stalled-tree alert (`{taskId, title, minutes, since}`): the web notification fires on it and the task tree re-reads. */
 const STALL_TOPICS = ["task.stalled"];
 
@@ -70,6 +73,7 @@ const TOPICS = [
   ...GIT_TOPICS,
   ...PROVIDER_TOPICS,
   ...PLUGIN_TOPICS,
+  ...AUTOMATION_TOPICS,
   ...STALL_TOPICS,
 ];
 
