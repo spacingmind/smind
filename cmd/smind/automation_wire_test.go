@@ -186,3 +186,20 @@ func TestAutomationStarter_RefusesUnattendedWithoutOptIn_NoTaskCreated(t *testin
 		t.Fatalf("a refused launch left %d tasks behind", len(tasks))
 	}
 }
+
+// Fire now reaches the adapter on an RPC context that is cancelled as soon as
+// the handler returns; the run it started must not die with it (found by the
+// live pilot run: fire-now tasks ended "initialize: context canceled").
+func TestAutomationStarter_RunOutlivesTheCallersContext(t *testing.T) {
+	e := newStarterEnv(t)
+	prof := e.profile(t, store.AgentProfile{PermissionMode: "default"})
+	ctx, cancel := context.WithCancel(context.Background())
+	res, err := e.starter.Start(ctx, e.req(prof, automation.Template{Mode: "default", Model: "fake-model-a", BudgetUSD: 1}))
+	cancel() // the RPC handler returned
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.summary(t, res.TaskID); got.Status != runs.StatusDone {
+		t.Fatalf("run status = %q (%s), want done: the caller's context cancelled the agent", got.Status, got.Err)
+	}
+}

@@ -63,7 +63,11 @@ func (s automationStarter) Start(ctx context.Context, req automation.StartReques
 	if err != nil {
 		return automation.StartResult{}, err
 	}
-	runID, err := s.reg.Start(ctx, s.wm, s.runner, task.ID, chat.ID, taskrunner.Provider(prof.Provider), req.Prompt,
+	// The run outlives this call: fire now arrives on an RPC whose context ends
+	// when the handler returns, and that must not cancel the agent it started
+	// (the run.start handler starts runs on a background context for the same
+	// reason).
+	runID, err := s.reg.Start(context.WithoutCancel(ctx), s.wm, s.runner, task.ID, chat.ID, taskrunner.Provider(prof.Provider), req.Prompt,
 		taskrunner.PermissionSettings{Mode: mode, AutoAccept: false}, taskrunner.ThinkingLevel(prof.ThinkingLevel),
 		runs.WithModel(req.Def.Template.Model), runs.WithOrigin(automation.OriginAutomation), runs.WithProfile(prof.ID))
 	if err != nil {

@@ -151,7 +151,15 @@ func (g *GitHubSource) list(ctx context.Context, a store.Automation, d Def, now 
 	if err != nil {
 		return nil, repo, g.mapErr(err, now)
 	}
-	return runs, repo, nil
+	// Defence in depth: the query names the branch, but a run on any other
+	// branch is never a signal, whatever the client returned.
+	kept := runs[:0:0]
+	for _, r := range runs {
+		if r.Branch == d.Signal.Branch {
+			kept = append(kept, r)
+		}
+	}
+	return kept, repo, nil
 }
 
 func (g *GitHubSource) repoOf(ctx context.Context, prov forge.Provider, ws int64, dir string, now time.Time) (forge.Repo, error) {
