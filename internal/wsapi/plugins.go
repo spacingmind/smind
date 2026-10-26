@@ -25,7 +25,7 @@ import (
 // pluginMutating lists the methods the local-only guard wraps; a test walks it.
 var pluginMutating = []string{
 	"plugin.install", "plugin.link", "plugin.enable", "plugin.disable",
-	"plugin.remove", "plugin.update", "plugin.reload",
+	"plugin.remove", "plugin.update", "plugin.reload", "plugin.settings.set",
 }
 
 // configPluginsEnabled reads the switch from config.yaml on every call, so a
@@ -138,6 +138,23 @@ func pluginHandlers(mgr *plugins.Manager, ev *pluginEvents) map[string]handlerFu
 		return res, pluginErr("plugin.logs", err)
 	}
 
+	// plugin.settings.get: the plugin's declared settings and which are set.
+	// Readable like plugin.get (relay sessions too), never by an agent, and a
+	// secret's value is NEVER in it, on any channel: only `set: true`.
+	hs["plugin.settings.get"] = func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+		if rc == nil || rc.runScoped {
+			return nil, forbidden("plugin.settings.get is not available to agents")
+		}
+		var p struct {
+			ID string `json:"id"`
+		}
+		if err := pluginParams("plugin.settings.get", raw, &p); err != nil {
+			return nil, err
+		}
+		res, err := mgr.Settings(p.ID)
+		return res, pluginErr("plugin.settings.get", err)
+	}
+
 	// Prompt commands and themes of the ACTIVE plugins (empty with the switch
 	// off): data only, readable by every caller the other reads allow.
 	hs["plugin.commands"] = func(context.Context, *requestContext, json.RawMessage) (any, error) {
@@ -220,6 +237,24 @@ func pluginHandlers(mgr *plugins.Manager, ev *pluginEvents) map[string]handlerFu
 			return nil, err
 		}
 		return mgr.Update(ctx, p.ID, p.Source, p.Apply)
+	})
+	// plugin.settings.set {id, values: {key: value | null}}: human + local
+	// only, exactly like plugin.enable (so also plugins.allowRemoteManage). A
+	// null clears a key. All or nothing; a running process is restarted so it
+	// initializes with the new values. The reply is the same redacted view as
+	// plugin.settings.get.
+	guard("plugin.settings.set", func(_ context.Context, raw json.RawMessage) (any, error) {
+		var p struct {
+			ID     string                     `json:"id"`
+			Values map[string]json.RawMessage `json:"values"`
+		}
+		if err := pluginParams("plugin.settings.set", raw, &p); err != nil {
+			return nil, err
+		}
+		if len(p.Values) == 0 {
+			return nil, &rpcCodeError{code: codeInvalid, msg: "plugin.settings.set: values must name at least one setting"}
+		}
+		return mgr.PutSettings(p.ID, p.Values)
 	})
 	guard("plugin.reload", func(_ context.Context, raw json.RawMessage) (any, error) {
 		var p struct {

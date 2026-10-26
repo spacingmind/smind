@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/spacingmind/smind/internal/plugins/host/hosttest"
 	"net"
 	"net/http/httptest"
 	"os"
@@ -31,6 +32,9 @@ var fakeACPAgentPath string
 var fakeCodexAgentPath string
 
 func TestMain(m *testing.M) {
+	if hosttest.Main() { // re-executed as a plugin process by the plugin tests
+		return
+	}
 	dir, err := os.MkdirTemp("", "smind-wsapi-test-")
 	if err != nil {
 		panic(err)

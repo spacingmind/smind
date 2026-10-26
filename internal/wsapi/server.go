@@ -277,9 +277,10 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	hs["provider.reload"] = handleProviderReload(runner, bus)
 	hs["provider.addInstance"] = handleProviderAddInstance(runner, bus)
 	hs["provider.dirSuggestions"] = handleProviderDirSuggestions(runner, osDirLister{})
+	pluginReg := newPluginRegistry() // bound to the handler map and bus below
 	pluginMgr := plugins.New(plugins.Options{
 		Home: config.Dir(), Store: db, Version: version.Version, Enabled: configPluginsEnabled,
-		Host:            &host.Options{}, // ADR-0042 Wave B: enabled process plugins run, DenyAll answers their calls until PB.2
+		Host:            &host.Options{Registry: pluginReg}, // ADR-0042 Wave B: enabled process plugins run; their calls go through the plugin-scoped session (plugin_session.go)
 		ValidateProfile: profReg.ValidateOwned,
 		UserProfileNames: func() []string {
 			rows, err := db.ListAgentProfiles()
@@ -311,6 +312,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	hs["skill.list"] = handleSkillList(pluginMgr)
 	hs["session.identify"] = handleSessionIdentify(reg)
 	admit := newSeatAdmission(reg, profReg, db)
+	profileListRaw := hs["profile.list"] // the plugin session must not get the seat-filtered form
 	hs["profile.list"] = admit.wrapProfileList(hs["profile.list"])
 	hs["daemon.info"] = handleDaemonInfo(info, reg)
 	hs["run.attachment"] = handleRunAttachment(reg)
@@ -323,6 +325,12 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		hs[method] = h
 	}
 	hs["workspace.delete"] = learning.beforeWorkspaceDelete(hs["workspace.delete"])
+	pluginHS := make(map[string]handlerFunc, len(hs))
+	for k, v := range hs {
+		pluginHS[k] = v
+	}
+	pluginHS["profile.list"] = profileListRaw
+	pluginReg.bind(pluginHS, bus)
 	api := &API{automations: automations, plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1

@@ -559,6 +559,18 @@ CREATE TABLE IF NOT EXISTS plugins (
     updated_at TIMESTAMP NOT NULL
 );
 
+-- plugin_settings: the values of a plugin's declared settings (ADR-0042, PB.2).
+-- Secrets are stored the way provider credentials (accounts.credential_data)
+-- and MCP env/headers are: a plain column of this database, never returned by
+-- any read RPC. value is JSON (string, number or boolean).
+CREATE TABLE IF NOT EXISTS plugin_settings (
+    plugin_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (plugin_id, key)
+);
+
 -- automations: signal -> task rules (ADR-0044). Human-authored only; the engine
 -- in internal/automation owns their meaning, the store holds the columns.
 -- signal/filter/template/rails are JSON. Additive.

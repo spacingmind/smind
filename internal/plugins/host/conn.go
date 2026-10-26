@@ -50,6 +50,41 @@ type Registry interface {
 	Notify(plugin, method string, params json.RawMessage)
 }
 
+// Plugin identifies the plugin a session belongs to: its id and the capability
+// groups its manifest declared (and the Human consented to).
+type Plugin struct {
+	ID           string
+	Capabilities []string
+}
+
+// PushFunc sends a notification to the plugin. It blocks while the plugin is
+// not reading (bounded by the write timeout, after which the connection ends).
+type PushFunc func(method string, params any) error
+
+// Session is one plugin process's view of the host: it answers what that
+// process sends and is closed when its connection ends. One Session per
+// process run, so state such as an event subscription cannot outlive it.
+type Session interface {
+	Request(ctx context.Context, method string, params json.RawMessage) (any, *RPCError)
+	Notify(method string, params json.RawMessage)
+	Close()
+}
+
+// SessionOpener is implemented by a Registry that wants a per-process
+// Session carrying the plugin's capabilities and a way to push to it (PB.2).
+// A Registry that does not implement it is used directly.
+type SessionOpener interface {
+	Open(p Plugin, push PushFunc) Session
+}
+
+// sessionRegistry adapts a Session to the Registry the connection calls.
+type sessionRegistry struct{ s Session }
+
+func (r sessionRegistry) Request(ctx context.Context, _, method string, params json.RawMessage) (any, *RPCError) {
+	return r.s.Request(ctx, method, params)
+}
+func (r sessionRegistry) Notify(_, method string, params json.RawMessage) { r.s.Notify(method, params) }
+
 // DenyAll refuses every plugin-to-host request with method_not_found and
 // drops notifications.
 var DenyAll Registry = denyAll{}
@@ -90,6 +125,7 @@ type conn struct {
 
 	writeTimeout time.Duration
 	onFail       func(error) // called once, with the typed reason
+	onClose      func()      // called once when the connection ends, whatever the reason
 
 	wmu sync.Mutex
 
@@ -135,6 +171,9 @@ func (c *conn) end(cause error) {
 		c.mu.Unlock()
 		c.cancel()
 		close(c.done)
+		if c.onClose != nil {
+			c.onClose()
+		}
 		if cause != nil {
 			c.log.Hostf("%v", cause)
 			if c.onFail != nil {

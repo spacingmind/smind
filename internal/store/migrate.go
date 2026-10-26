@@ -478,6 +478,20 @@ var migrations = []migration{
 		},
 	},
 	{
+		// ADR-0042 PB.2: plugin_settings is a new table (also in schema.sql);
+		// this entry re-creates it should a database lack it.
+		name: "plugin_settings",
+		apply: func(db *sql.DB) error {
+			_, err := db.Exec(`CREATE TABLE IF NOT EXISTS plugin_settings (
+				plugin_id TEXT NOT NULL,
+				key TEXT NOT NULL,
+				value TEXT NOT NULL,
+				updated_at TIMESTAMP NOT NULL,
+				PRIMARY KEY (plugin_id, key))`)
+			return err
+		},
+	},
+	{
 		// ADR-0026 section 6: learning_snapshots is a new table (also in
 		// schema.sql); this entry re-creates it should a database lack it.
 		name: "learning_snapshots",

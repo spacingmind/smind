@@ -22,8 +22,12 @@ type Spec struct {
 	Command []string
 	// DaemonVersion is reported to the plugin in plugin.initialize.
 	DaemonVersion string
-	// Settings is the plugin's settings object for plugin.initialize. Setting
-	// storage is PB.2: until then it is empty, but the field is always sent.
+	// Capabilities are the host-API groups the manifest declares; a Registry
+	// that opens sessions enforces them on every plugin-to-host call.
+	Capabilities []string
+	// Settings is the plugin's DECRYPTED settings object for
+	// plugin.initialize (secrets included: it goes to the plugin and nowhere
+	// else). Always sent, `{}` when nothing is set.
 	Settings map[string]any
 }
 
