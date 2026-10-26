@@ -26,6 +26,7 @@ type Config struct {
 	Learning      LearningConfig      `yaml:"learning"`
 	Plugins       PluginsConfig       `yaml:"plugins"`
 	Automations   AutomationsConfig   `yaml:"automations"`
+	Validation    ValidationConfig    `yaml:"validation"`
 	Log           LogConfig           `yaml:"log"`
 }
 
@@ -62,6 +63,27 @@ type AutomationsConfig struct {
 
 // DefaultMaxAutomationBudgetUSD is AutomationsConfig.MaxBudgetUSD's default.
 const DefaultMaxAutomationBudgetUSD = 10.0
+
+// ValidationConfig bounds the validator seat's spend (ADR-0045 Q12).
+type ValidationConfig struct {
+	// MaxBudgetUsd is the ceiling for a contract's limits.budgetUsd.
+	// Default 5.
+	MaxBudgetUsd float64 `yaml:"maxBudgetUsd"`
+	// DefaultBudgetUsd applies when a contract leaves limits.budgetUsd
+	// unset. Default 1.5; must not exceed MaxBudgetUsd.
+	DefaultBudgetUsd float64 `yaml:"defaultBudgetUsd"`
+}
+
+// Validate rejects a non-positive or inconsistent budget.
+func (v ValidationConfig) Validate() error {
+	if v.MaxBudgetUsd <= 0 {
+		return fmt.Errorf("validation.maxBudgetUsd must be > 0, got %v", v.MaxBudgetUsd)
+	}
+	if v.DefaultBudgetUsd <= 0 || v.DefaultBudgetUsd > v.MaxBudgetUsd {
+		return fmt.Errorf("validation.defaultBudgetUsd must be > 0 and <= maxBudgetUsd (%v), got %v", v.MaxBudgetUsd, v.DefaultBudgetUsd)
+	}
+	return nil
+}
 
 // LogConfig tunes the daemon's own rotating log file, $SMIND_HOME/daemon.log
 // (ADR-0031 decision 7). The daemon also keeps logging to stderr.
@@ -524,6 +546,7 @@ func Default() Config {
 		Push:        PushConfig{Enabled: true},
 		Learning:    DefaultLearning(),
 		Automations: AutomationsConfig{MaxBudgetUSD: DefaultMaxAutomationBudgetUSD},
+		Validation:  ValidationConfig{MaxBudgetUsd: 5, DefaultBudgetUsd: 1.5},
 		Log:         LogConfig{MaxSizeMB: DefaultLogMaxSizeMB, MaxFiles: DefaultLogMaxFiles},
 	}
 }
@@ -603,6 +626,9 @@ func LoadFile(path string) (Config, error) {
 		return cfg, err
 	}
 	if err := cfg.Learning.Validate(); err != nil {
+		return cfg, fmt.Errorf("config %s: %w", path, err)
+	}
+	if err := cfg.Validation.Validate(); err != nil {
 		return cfg, fmt.Errorf("config %s: %w", path, err)
 	}
 	return cfg, nil
