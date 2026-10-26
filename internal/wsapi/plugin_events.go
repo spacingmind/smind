@@ -103,6 +103,7 @@ func (e *pluginEvents) watch(ctx context.Context, every time.Duration) {
 			flipped := e.mgr.GlobalEnabled() != e.global
 			e.mu.Unlock()
 			if flipped {
+				e.mgr.SyncHost() // processes stop when the switch goes off and start when it goes on
 				e.changed("")
 			}
 		}

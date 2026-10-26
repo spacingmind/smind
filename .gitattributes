@@ -1,3 +1,10 @@
+# Every text file is LF in the working tree on every OS. Tests read repo files
+# (Dockerfile, docs/CLI reference, embedded prompts, JSON vectors) and compare or
+# regex them with "\n"; a Windows checkout with core.autocrlf=true turned them
+# into CRLF and failed those tests on the Windows full suite. Binaries are
+# auto-detected and left alone; the per-path entries below stay as documentation.
+* text=auto eol=lf
+
 # Shell scripts must stay LF even on Windows checkouts (core.autocrlf=true):
 # Git Bash on windows-latest CI and Windows dev machines run them directly.
 *.sh text eol=lf

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spacingmind/smind/internal/plugins/host"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -41,6 +42,10 @@ type Options struct {
 	// UserProfileNames lists the user's profile names, so a contributed
 	// profile never shadows one (the user's wins and a conflict is noted).
 	UserProfileNames func() []string
+	// Host, when set, turns on process hosting: enabled plugins that declare
+	// `process` are run (ADR-0042 Wave B). nil keeps every plugin inert. Gate
+	// and OnChange are set by the Manager.
+	Host *host.Options
 }
 
 // Manager installs and tracks plugins. All mutators serialize on one lock; a
@@ -56,6 +61,7 @@ type Manager struct {
 	validateProfile  func(store.AgentProfile) error
 	userProfileNames func() []string
 	cache            contribCache
+	proc             *hostState
 
 	mu sync.Mutex
 	// failAt, when set (tests only), is called at named points of an install
@@ -69,8 +75,12 @@ func New(o Options) *Manager {
 	if lim == (Limits{}) {
 		lim = DefaultLimits
 	}
-	return &Manager{home: o.Home, st: o.Store, version: o.Version, enabled: o.Enabled, lim: lim,
+	m := &Manager{home: o.Home, st: o.Store, version: o.Version, enabled: o.Enabled, lim: lim,
 		settings: o.Settings, validateProfile: o.ValidateProfile, userProfileNames: o.UserProfileNames}
+	if o.Host != nil {
+		m.newHost(*o.Host)
+	}
+	return m
 }
 
 // GlobalEnabled reports the plugins.enabled switch.
@@ -114,9 +124,13 @@ type Info struct {
 	LastError string   `json:"lastError,omitempty"`
 	// Conflicts lists what this plugin contributed that the host did not
 	// apply (a user row with the same name, a setting with no value).
-	Conflicts   []Conflict `json:"conflicts,omitempty"`
-	InstalledAt time.Time  `json:"installedAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
+	Conflicts []Conflict `json:"conflicts,omitempty"`
+	// Process is the plugin process's status while one is supervised
+	// (starting, running, restarting, failed); absent for a data-only plugin,
+	// a disabled one and while the global switch is off.
+	Process     *host.Status `json:"process,omitempty"`
+	InstalledAt time.Time    `json:"installedAt"`
+	UpdatedAt   time.Time    `json:"updatedAt"`
 }
 
 // Pending is an update waiting for the Human's re-consent.
@@ -141,6 +155,12 @@ func (m *Manager) infoG(p store.Plugin, global bool) Info {
 		Enabled: p.Enabled, Active: p.Enabled && global, Consent: c,
 		Consented: p.ConsentHash != "" && p.ConsentHash == c.Fingerprint, LastError: p.LastError,
 		InstalledAt: p.InstalledAt, UpdatedAt: p.UpdatedAt,
+	}
+	if st, ok := m.ProcessStatus(p.ID); ok && p.Enabled && global {
+		in.Process = &st
+		if st.State == host.StateFailed && in.LastError == "" {
+			in.LastError = "process failed: " + st.LastError
+		}
 	}
 	if p.Pending != "" {
 		var pc Consent
@@ -567,7 +587,8 @@ func (m *Manager) Enable(id, confirm string) (Info, error) {
 	if confirm == "" || confirm != c.Fingerprint {
 		return Info{}, newErr(CodeConsent, "enabling %q needs confirmation of what it will do: review `smind plugin show %s` and confirm (--yes)", id, id)
 	}
-	if _, _, err := m.loadInstalled(p); err != nil {
+	man, _, err := m.loadInstalled(p)
+	if err != nil {
 		m.setError(p, err)
 		return Info{}, err
 	}
@@ -575,6 +596,7 @@ func (m *Manager) Enable(id, confirm string) (Info, error) {
 	if err := m.st.UpdatePlugin(p); err != nil {
 		return Info{}, err
 	}
+	m.syncOne(p, man, true)
 	return m.info(p), nil
 }
 
@@ -591,6 +613,9 @@ func (m *Manager) Disable(id string) (Info, error) {
 	if err := m.st.UpdatePlugin(p); err != nil {
 		return Info{}, err
 	}
+	if m.proc != nil {
+		m.proc.h.Stop(id) // returns once the process tree is gone
+	}
 	return m.info(p), nil
 }
 
@@ -603,6 +628,10 @@ func (m *Manager) Remove(id string, keepData bool) error {
 	p, err := m.row(id)
 	if err != nil {
 		return err
+	}
+	if m.proc != nil {
+		m.proc.h.Stop(id) // before the files go: nothing may run from a deleted directory
+		m.proc.h.Forget(id)
 	}
 	if err := m.st.DeletePlugin(id); err != nil {
 		return err
@@ -706,7 +735,7 @@ func (m *Manager) Update(ctx context.Context, id, arg string, apply bool) (Updat
 		}
 		return UpdateResult{Pending: true, Info: m.info(p)}, nil
 	}
-	return m.swapIn(p, st.tree, st.cons, src)
+	return m.swapInRestart(p, st.tree, st.cons, src)
 }
 
 func (m *Manager) applyPending(p store.Plugin) (UpdateResult, error) {
@@ -726,7 +755,20 @@ func (m *Manager) applyPending(p store.Plugin) (UpdateResult, error) {
 		return UpdateResult{}, newErr(CodeHashMismatch, "the staged update changed on disk: run update again")
 	}
 	src := Source{Kind: SourceKind(pc.SourceKind), Spec: pc.Source}
-	return m.swapIn(p, tree, pc, src)
+	return m.swapInRestart(p, tree, pc, src)
+}
+
+// swapInRestart is swapIn followed by a restart of the plugin's process on the
+// new files.
+func (m *Manager) swapInRestart(p store.Plugin, tree string, c Consent, src Source) (UpdateResult, error) {
+	res, err := m.swapIn(p, tree, c, src)
+	if err == nil && res.Applied {
+		m.restartAfterSwap(p.ID)
+		if np, gerr := m.st.GetPlugin(p.ID); gerr == nil {
+			res.Info = m.info(np)
+		}
+	}
+	return res, err
 }
 
 // swapIn replaces the live files with tree and the row with the new version.
@@ -836,6 +878,7 @@ func (m *Manager) Reload(id string) (Info, error) {
 	if err := m.st.UpdatePlugin(p); err != nil {
 		return Info{}, err
 	}
+	m.syncOne(p, man, true) // a failed reload returned above: the last good process keeps running
 	return m.info(p), nil
 }
 
@@ -868,13 +911,15 @@ func (m *Manager) Start() {
 		}
 		var c Consent
 		_ = json.Unmarshal([]byte(p.Capabilities), &c)
-		_, _, err := m.loadInstalled(p)
+		man, _, err := m.loadInstalled(p)
 		if err == nil && p.ConsentHash != c.Fingerprint {
 			err = newErr(CodeConsent, "no valid consent is recorded for the installed capabilities")
 		}
 		if err != nil {
 			p.Enabled, p.LastError = false, err.Error()
 			_ = m.st.UpdatePlugin(p)
+			continue
 		}
+		m.syncOne(p, man, false)
 	}
 }

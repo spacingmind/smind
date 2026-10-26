@@ -141,10 +141,13 @@ func TestProviderListEnvEffectiveSources(t *testing.T) {
 	if e := eff(); e.Source != envSourceEnvironment || e.Path != "/from/daemon/environment" {
 		t.Fatalf("environment = %+v", e)
 	}
-	if _, err := h.setEnv(&requestContext{}, "claude-native", "CLAUDE_CONFIG_DIR", str("/from/settings")); err != nil {
+	// A filepath.Join under a temp dir, not "/from/settings": the setEnv
+	// validator wants an absolute path, and a bare "/x" is not one on Windows.
+	fromSettings := filepath.Join(t.TempDir(), "from-settings")
+	if _, err := h.setEnv(&requestContext{}, "claude-native", "CLAUDE_CONFIG_DIR", str(fromSettings)); err != nil {
 		t.Fatal(err)
 	}
-	if e := eff(); e.Source != envSourceSettings || e.Path != "/from/settings" {
+	if e := eff(); e.Source != envSourceSettings || e.Path != fromSettings {
 		t.Fatalf("settings = %+v", e)
 	}
 	if e := h.listedEntry(t, "glm"); e.EnvEffective != nil || e.Env != nil {
