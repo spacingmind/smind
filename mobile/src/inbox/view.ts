@@ -45,7 +45,7 @@ export type InboxView = { kind: 'empty'; title: string; text: string } | { kind:
 
 const KIND_META: Record<InboxKind, { icon: IconName; label: string; section: string }> = {
   permission: { icon: 'lock', label: 'Permission', section: 'Needs you now' },
-  verdict: { icon: 'check', label: 'Verdict', section: 'Ready for a decision' },
+  verdict: { icon: 'check', label: 'Verdict', section: 'Validator verdicts' },
   stall: { icon: 'warning', label: 'Stalled', section: 'Stalled' },
 };
 const KIND_ORDER: InboxKind[] = ['permission', 'verdict', 'stall'];
@@ -77,7 +77,7 @@ export function inboxRow(item: InboxItem, now: number): InboxRowView {
     kind: item.kind,
     taskId: item.taskId ?? item.links?.taskId ?? null,
     icon: meta.icon,
-    label: meta.label,
+    label: item.kind === 'verdict' ? (item.attention === 'high' ? 'Needs a decision' : 'Passed') : meta.label,
     title: item.title,
     summary: item.summary,
     time: relativeTime(item.createdAt, now),

@@ -15,9 +15,11 @@ describe('inbox grouping', () => {
     const v = inboxView([stall, verdict, perm], NOW);
     expect(v.kind).toBe('list');
     if (v.kind !== 'list') return;
-    expect(v.sections.map((s) => s.title)).toEqual(['Needs you now', 'Ready for a decision', 'Stalled']);
+    expect(v.sections.map((s) => s.title)).toEqual(['Needs you now', 'Validator verdicts', 'Stalled']);
     expect(v.sections[0].rows[0]).toMatchObject({ key: 'perm:r1:q1', tone: 'waiting', unseen: true, taskId: 7 });
     expect(v.sections[1].rows[0].time).toBe('30m ago');
+    expect(v.sections[1].rows[0].label).toBe('Passed');
+    expect(inboxView([inboxItem({ attention: 'high' })], NOW)).toMatchObject({ sections: [{ rows: [{ label: 'Needs a decision' }] }] });
   });
 
   it('omits empty groups and shows the empty state for no items', () => {
