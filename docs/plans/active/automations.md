@@ -73,12 +73,36 @@ Disjointness: the **V lane** (validator/inbox: reviewer seat, verdicts, console 
 
 - Origin `automation` is a new `ChatQueueSource*`-style string on the run (the run origin is opaque to the tree budget, which only refuses `agent`); the human-only guard keys on run identity origin, not on "is a seat".
 - The starter is an injected interface in `internal/automation`; the daemon adapter (`cmd/smind`) creates the task through `workspace.Manager.CreateTask` + `runs.Registry.Start` with `WithOrigin("automation")` and `WithProfile`, the same path as the RPCs.
+- **PR 1 deviations from the ADR text (recorded, no change of meaning):** (a) the task-to-automation link is `automation_audit.task_id` (`Store.AutomationAuditForTask`) instead of two new `tasks` columns, which keeps `store.Task` and `scanTask` untouched; (b) the memory is inlined into the prompt as quoted data for every provider (a 16 KiB cap makes the claude `AddDirs` projection unnecessary), so there is no new add-dir path; (c) the wall-clock stop and the budget block are applied on the engine's tick (30 s), not by a per-run timer; (d) the budget/wall-clock/failure accounting follows the *root* run of the automation's task, Peers the Lead launched are bounded by the tree budget and the tree guard, not tracked separately.
 - `maxConcurrent` is fixed at 1; per-automation poll interval is a rail field, clamped to the 2-minute floor.
 
 ## Progress
 
-(filled as PRs land)
+- 2026-10-27 PR 1 (daemon core: engine, cron, rails, memory, prompt envelope, store, config keys, `automation.*` RPCs with the human-only guards, events, CLI, public docs) implemented on this branch; PR 2-4 not started.
 
 ## Validation
 
-(filled per AC with evidence; mutations listed per PR)
+PR 1 (evidence is the named tests; `go test -race` on `internal/automation`, `internal/store`, `internal/config`, `internal/wsapi`, `cmd/smind` green; full `go test ./...` green except one unrelated timing flake in `internal/accounts` (`TestOpenAIDeviceLogin_Vendor`, passes on rerun)):
+
+| AC | Evidence |
+|---|---|
+| AC1 | `TestKillSwitch_GlobalOffNoTickNoPoll`, `TestPausedGlobal_RecordsPaused`, `TestPoll_ZeroEnabledZeroCalls`, `TestConfig_AutomationsDefaults` |
+| AC2 | `TestCron_Grammar`, `TestCron_RejectsUnderFiveMinutes`, `TestCron_NextFire_MonthEndLeapDomDow` |
+| AC3 | `TestCron_CatchupOnce_BacklogCollapses_DoubleTickOneFire`, `TestCron_FiresOnTime_NeverFiresThePastOnEnable` |
+| AC4 | fingerprints asserted in `TestCron_FiresOnTime_...` and `ciSignal` tests (CI fingerprint built by the PR 2 source) |
+| AC5 | `TestFire_ThenDedupe_SameShaDifferentRun`, `TestDedupe_DedupedRowDoesNotExtendWindow`, `TestDedupe_NewShaIsNewSignal`, `TestDedupe_SurvivesRestart`, `TestAutomationAudit_Queries` |
+| AC6 | `TestCap_RunsPerHour_BurstOf50`, `TestFireNow_CountsTowardRunsPerHour`, `TestValidate_Template` (ceiling) |
+| AC7 | `TestSingleFlight_RunningAndWaitingPermission` |
+| AC8 | `TestAutoPause_TripsAtN_SuccessResets_ResumeClears`, `TestAutoPause_FireRowWithoutTaskCounts`, `TestStartFailed_CountsAsFailure` |
+| AC9 | `TestWallClock_StopsRun` |
+| AC10 | `TestBudget_NextFireCappedAfterOverspend`; the budget is set on the root by `automationStarter.Start` (live check in PR 4) |
+| AC11 | `TestAudit_FireRowLinkedToTask_AndOutcomeBackfilled`, `TestAudit_PayloadCappedAt4KiB`, `TestAudit_RetentionKeepsLast100`, `TestAutomationAudit_Queries` |
+| AC12 | `TestAutomationRPC_RefusedForRunScoped_NilAndAutomationOriginTask`, `TestAutomationRPC_NotInRunScopedMethods`, `TestAutomationRPC_RelayMutationsRefused_DisableAndReadsAllowed`, `TestAutomationRPC_NonLoopbackNeedsAllowRemote`, `TestMCPTools_NoAutomationTool` |
+| AC13 | `TestMigrate_AutomationTables`, `TestCreate_StartsDisabled_RefusesUnattendedProfile`, `TestValidate_Template`, `TestValidate_RefusesUnattendedModes`, `TestAutomationRPC_CreateStartsDisabled_AndRoundTrip` |
+| AC14 | `TestStarter_ReceivesTemplateModeAndOrigin` (engine side); the daemon adapter passes `AutoAccept:false` and `runs.WithOrigin("automation")` (live check in PR 4) |
+| AC15 | `TestPrompt_SignalIsQuotedData`, `TestPrompt_InjectionStringCannotCloseEnvelope`, `TestPrompt_PlaceholderRejectsFreeText_AndValidatesScalars`, `TestPrompt_ControlCharsStrippedAndCapped`, `TestPrompt_MemoryIsQuotedData` |
+| AC16 | `TestMemory_*` (`WriteFromFencedBlockOnly`, `RoundTrip_AtomicReplace_PerAutomationIsolation`, `Rejections`, `PathEscapeRejected`, `SymlinkRefused`), `TestMemory_StoredFromBlock_AndOversizeKeepsOld` |
+| AC17 | `TestFireNow_BypassesDedupeOnly`, `TestFireNow_CountsTowardRunsPerHour`, `TestEvaluate_KindSwitchRowForManualFireWhenDisabled` |
+| AC23 | `TestAutomationCLI_*`, `TestAutomationEvents_Topics`, `public-docs/automations.md`, `TestCLIReferenceMatchesHelp` |
+
+Mutations run (one each, test had to fail, restored with `git checkout`; log `/tmp/automation-mutations.log`): runs/hour `>=`->`>`; dedupe check disabled; failure counter not reset on success; kill switch not consulted in `Tick`; single-flight check dropped; agent guard skipped in `automationHumanLocal`; relay `!rc.local` guard removed (this one first survived because the channel check also refused, so the test now adds a relay session claiming a loopback channel); payload JSON not HTML-escaped; workflow placeholder unvalidated; memory directory symlink followed (`os.Stat` for `os.Lstat`); memory size cap dropped. Not run in PR 1: cursor-before-audit order (PR 2), live daemon (PR 4).
