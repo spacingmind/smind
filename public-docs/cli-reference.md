@@ -90,6 +90,8 @@ Usage:
 
   smind automation list|show|create|enable|disable|resume|fire|audit|memory|delete
                                                            signal -> task rules (humans only, local only; run "smind automation" for flags)
+  smind validation contract submit|show, list|show        write a validation contract before code; read validator verdicts
+                                                           (run "smind validation" for flags; smind never merges)
 
   smind skill ls [--target claude|agents|codex|all]       bundled orchestration skills x targets (installed/modified/missing)
   smind skill install [--target ...] [--force] [name...]  install the bundled skills (explicit; no daemon needed)

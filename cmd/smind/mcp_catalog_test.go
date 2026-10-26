@@ -201,3 +201,15 @@ func TestMCPServer_InstructionsExplainWaitLoopAndModes(t *testing.T) {
 		}
 	}
 }
+
+// TestValidationRPCs_MCPCatalogueHasNoVerdictToolForLead pins ADR-0045: the
+// catalogue a Lead sees has no tool that writes, edits or waives a verdict
+// or merges. (The validator's own entry, added with the seat, is separate.)
+func TestValidationRPCs_MCPCatalogueHasNoVerdictToolForLead(t *testing.T) {
+	env := newMCPSession(t)
+	for _, name := range mcpToolNames(t, env.cs) {
+		if strings.Contains(name, "verdict") || strings.Contains(name, "waive") || strings.Contains(name, "merge") {
+			t.Fatalf("tools/list contains %q", name)
+		}
+	}
+}
