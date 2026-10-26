@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spacingmind/smind/internal/plugins"
+	"github.com/spacingmind/smind/internal/plugins/host"
 )
 
 type pluginCall struct {
@@ -254,5 +256,46 @@ func TestPluginEnable_LinkedPrintsWarning_ProfilesFlagged(t *testing.T) {
 	}}
 	if _, out, _ := runPluginCLI(t, f2, "", false, "enable", "acme", "--yes"); strings.Contains(out, "live directory") {
 		t.Fatalf("no warning for a copied plugin:\n%s", out)
+	}
+}
+
+func TestPluginLogs_PrintsLinesAndPassesLimit(t *testing.T) {
+	f := &fakePluginDaemon{handlers: map[string]func(map[string]any) (any, error){
+		"plugin.logs": func(map[string]any) (any, error) {
+			return plugins.LogsResult{Lines: []host.LogEntry{
+				{Time: time.Date(2026, 10, 27, 12, 0, 1, 0, time.UTC), Stream: "host", Text: "[smind] started node (pid 4242)"},
+				{Time: time.Date(2026, 10, 27, 12, 0, 2, 0, time.UTC), Stream: "stderr", Text: "boom"},
+			}}, nil
+		},
+	}}
+	code, out, errOut := runPluginCLI(t, f, "", false, "logs", "acme", "--lines=7")
+	if code != 0 || !strings.Contains(out, "[smind] started node (pid 4242)") || !strings.Contains(out, "boom") {
+		t.Fatalf("%d %q %q", code, out, errOut)
+	}
+	if got := f.calls[0].params; got["id"] != "acme" || got["limit"] != float64(7) {
+		t.Fatalf("params %v", got)
+	}
+	code, out, _ = runPluginCLI(t, f, "", false, "logs", "acme", "--json")
+	var res plugins.LogsResult
+	if code != 0 || json.Unmarshal([]byte(out), &res) != nil || len(res.Lines) != 2 {
+		t.Fatalf("%d %q", code, out)
+	}
+	for _, bad := range [][]string{{"logs"}, {"logs", "a", "b"}, {"logs", "a", "--lines=0"}, {"logs", "a", "--lines=x"}, {"logs", "a", "--follow"}} {
+		if code, _, _ := runPluginCLI(t, f, "", false, bad...); code != 2 {
+			t.Errorf("%v: exit %d, want a usage error", bad, code)
+		}
+	}
+}
+
+func TestPluginShow_PrintsProcessStatus(t *testing.T) {
+	in := sampleInfo()
+	in.Process = &host.Status{State: host.StateFailed, Restarts: 5, LastError: "crashed 5 times within 10m0s; last: exited: exit status 3"}
+	in.LastError = "process failed: " + in.Process.LastError
+	f := &fakePluginDaemon{handlers: map[string]func(map[string]any) (any, error){
+		"plugin.get": func(map[string]any) (any, error) { return in, nil },
+	}}
+	code, out, _ := runPluginCLI(t, f, "", false, "show", "acme")
+	if code != 0 || !strings.Contains(out, "Process: failed, 5 restart(s)") || !strings.Contains(out, "Last error: process failed: crashed 5 times") {
+		t.Fatalf("%d\n%s", code, out)
 	}
 }

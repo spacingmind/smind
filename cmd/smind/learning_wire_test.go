@@ -32,7 +32,7 @@ func TestHumanSkillDirs(t *testing.T) {
 // .claude/skills counts as a human skill, so a proposal reusing its name is
 // refused at landing.
 func TestLearningDeps_HumanSkillsReachTheGate(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	db, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
 	if err != nil {
 		t.Fatal(err)

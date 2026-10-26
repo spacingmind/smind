@@ -80,7 +80,7 @@ type wiringFx struct {
 // temp homes.
 func newWiringFx(t *testing.T, enabled bool) *wiringFx {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	db, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
 	if err != nil {
 		t.Fatal(err)

@@ -34,7 +34,7 @@ func TestLearningGateConfigAndHumanSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	got := loadHumanSkills(db, ws.ID)
 	if len(got) != 1 || got[0].Name != "deploy" || !got[0].Human || got[0].Body != "" || got[0].Description != "Use when deploying." {
 		t.Fatalf("human skills = %+v", got)
