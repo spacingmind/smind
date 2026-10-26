@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -46,6 +47,8 @@ func TestCustomProvider_ErrorsNeverEchoEnvValues(t *testing.T) {
 }
 
 func TestCustomProvider_LoadsACPAndInstance(t *testing.T) {
+	// An absolute temp dir (a bare "/Users/x" is not absolute on Windows), single-quoted in the YAML.
+	claudeS := filepath.Join(t.TempDir(), ".claude-s")
 	useHome(t, `providers:
   claude-native:
     defaultModel: sonnet
@@ -60,7 +63,7 @@ func TestCustomProvider_LoadsACPAndInstance(t *testing.T) {
     - id: claude-s
       label: Claude S
       extends: claude-native
-      env: {CLAUDE_CONFIG_DIR: /Users/x/.claude-s}
+      env: {CLAUDE_CONFIG_DIR: '`+claudeS+`'}
 `)
 	cfg, err := Load()
 	if err != nil {
@@ -73,7 +76,7 @@ func TestCustomProvider_LoadsACPAndInstance(t *testing.T) {
 	if got := strings.Join(specs[0].Command, " "); got != "my-agent --acp" || specs[0].Models[0].ID != "m1" || !specs[0].Modes[1].AutoApproves {
 		t.Fatalf("acp spec = %+v", specs[0])
 	}
-	if specs[1].Extends != "claude-native" || specs[1].Env["CLAUDE_CONFIG_DIR"] != "/Users/x/.claude-s" || len(specs[1].Command) != 0 {
+	if specs[1].Extends != "claude-native" || specs[1].Env["CLAUDE_CONFIG_DIR"] != claudeS || len(specs[1].Command) != 0 {
 		t.Fatalf("instance spec = %+v", specs[1])
 	}
 }
@@ -94,8 +97,9 @@ func TestProviderInstance_EnvAllowlistOnly(t *testing.T) {
 		{"claude-native", "PATH", false},
 		{"codex-native", "OPENAI_API_KEY", false},
 	}
+	dir := filepath.Join(t.TempDir(), "dir") // absolute on every OS
 	for _, c := range cases {
-		list := []CustomProvider{{ID: "inst", Extends: c.extends, Env: map[string]string{c.key: "/abs/dir"}}}
+		list := []CustomProvider{{ID: "inst", Extends: c.extends, Env: map[string]string{c.key: dir}}}
 		err := ValidateCustomProviders(list)
 		if c.ok && err != nil {
 			t.Errorf("%s %s: %v", c.extends, c.key, err)
@@ -109,11 +113,11 @@ func TestProviderInstance_EnvAllowlistOnly(t *testing.T) {
 func TestAddProviderInstance_WritesPreservingCommentsAndValidates(t *testing.T) {
 	useHome(t, "# my settings\nserver:\n  port: 4650 # keep\n")
 	home := t.TempDir()
-	entry, err := AddProviderInstance("claude-native", "claude-work", "Claude Work", home+"/.claude-work")
+	entry, err := AddProviderInstance("claude-native", "claude-work", "Claude Work", filepath.Join(home, ".claude-work"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entry.Env["CLAUDE_CONFIG_DIR"] != home+"/.claude-work" {
+	if entry.Env["CLAUDE_CONFIG_DIR"] != filepath.Join(home, ".claude-work") {
 		t.Fatalf("entry = %+v", entry)
 	}
 	body, _ := os.ReadFile(Path())
