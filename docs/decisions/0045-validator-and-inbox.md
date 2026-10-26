@@ -2,8 +2,7 @@
 
 ## Status
 
-**Proposed — 2026-10-27.** Spec and PR split (written after acceptance): `docs/plans/active/validator-inbox.md`. The Human pre-approved "as recommended" for a
-12-hour window on 2026-10-27; every question below carries a `Recommendation:` that binds if the Steward reports "V accepted".
+**Accepted — 2026-10-27** (Human pre-approved the recommendations for a 12-hour window on 2026-10-27 01:10; Supervisor applied them, see [Human answers](#human-answers-2026-10-27)). Proposed the same day. Spec and PR split (written after acceptance): `docs/plans/active/validator-inbox.md`.
 
 Inputs: ADR-0041 (seats, role pack, tree guard, tree budget A5, the single-loop amendment: the `reviewer` seat "unchanged, Human decides later"), ADR-0019
 (provider-native permission modes, no smind allowlist, human-authored configuration), ADR-0017 (a seat can never answer a permission), ADR-0040 (push kinds),
@@ -419,3 +418,17 @@ Each is one real decision; the **Recommendation** is what binds if you accept "a
     - (a) Daemon config (`validation.maxBudgetUsd`, default ceiling $5, per-contract default $1.5), like `automations.maxBudgetUsd`.
     - (b) Hard-coded.
     *Recommendation:* **(a).**
+
+## Human answers (2026-10-27)
+
+All twelve questions are answered **as recommended** (option (a); Human pre-approval, applied by the Supervisor):
+1 YAML front matter (strict subset) + markdown body not shown to the validator, JSON-Schema validated; 2 contract required by protocol for
+L-size items and for changes in `internal/wsapi`, store migrations, permissions, relay/E2EE or UI, optional for S/M docs/test changes (not
+daemon-enforced in v1); 3 authored as a file, stored as an immutable DB row per version; 4 the role pack's `reviewer` seat is replaced by
+`validator` (single-loop item 4 closed); 5 validator runs in `auto` in a detached scratch worktree at the exact sha, with the always-ask git
+rules and a daemon post-check of the Lead's worktree (`scope_violation`); 6 validator model = the Lead's (`claude-sonnet-5-5`) in v1, never
+Opus; 7 no new push kind in v1 (inbox badge + existing stall notification); 8 no waiver of a `fail` in v1; 9 inbox = a web page with a sidebar
+entry and badge, plus a mobile Inbox entry; 10 `seen`/`snooze`/`resolve` allowed over the relay (display state only), refused for run-scoped
+agents; 11 the QA frame harness becomes the validator's bundled skill as its own later item, v1 reports `blocked: no_browser` for frame items;
+12 `validation.maxBudgetUsd` in daemon config, ceiling $5, per-contract default $1.5.
+
