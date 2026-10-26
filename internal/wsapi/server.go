@@ -310,6 +310,9 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		hs[method] = h
 	}
 	hs["skill.list"] = handleSkillList(pluginMgr)
+	for method, h := range validationHandlers(newValidationService(db, bus)) {
+		hs[method] = h
+	}
 	hs["session.identify"] = handleSessionIdentify(reg)
 	admit := newSeatAdmission(reg, profReg, db)
 	profileListRaw := hs["profile.list"] // the plugin session must not get the seat-filtered form

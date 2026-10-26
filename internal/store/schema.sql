@@ -619,3 +619,37 @@ CREATE TABLE IF NOT EXISTS automation_audit (
 );
 CREATE INDEX IF NOT EXISTS automation_audit_by_time ON automation_audit(automation_id, created_at);
 CREATE INDEX IF NOT EXISTS automation_audit_by_fp ON automation_audit(automation_id, fingerprint, created_at);
+-- validation_contracts: the per-milestone validation contract a Lead submits
+-- before implementation (ADR-0045 §1). One immutable row per version; a
+-- task's current contract is its highest version. Additive.
+CREATE TABLE IF NOT EXISTS validation_contracts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL REFERENCES tasks(id),
+    version INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    body_json TEXT NOT NULL,            -- the validated front matter, canonical JSON
+    body_md TEXT NOT NULL DEFAULT '',   -- the human-only markdown body (never given to a validator)
+    created_at TIMESTAMP NOT NULL,
+    UNIQUE (task_id, version)
+);
+
+-- validations: one validator run against {contract, commit} and its verdict
+-- (ADR-0045 §3). A validator task is identified by a row here, not by a
+-- column on tasks. verdict_json stays '' until the one verdict is written;
+-- token_hash is the sha256 of the one-time verdict token. Additive.
+CREATE TABLE IF NOT EXISTS validations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL REFERENCES tasks(id),
+    contract_id INTEGER NOT NULL REFERENCES validation_contracts(id),
+    commit_sha TEXT NOT NULL,
+    run_id TEXT NOT NULL DEFAULT '',
+    validator_task_id INTEGER,
+    scratch_dir TEXT NOT NULL DEFAULT '',
+    token_hash TEXT NOT NULL,
+    verdict_json TEXT NOT NULL DEFAULT '',
+    verdict_status TEXT NOT NULL DEFAULT '',  -- '' | pass | fail | blocked
+    scope_violation INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL,
+    finished_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_validations_task ON validations(task_id, id);
