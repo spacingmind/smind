@@ -1,7 +1,7 @@
 // inboxView.test.ts: grouping, actions per kind, the snooze cap, relative time, the empty state and the a11y strings.
 
 import { describe, expect, it } from 'vitest';
-import { icons } from './inboxIcons';
+import { ICONS as icons } from '../ui/icons';
 import { inboxActions, inboxAnnouncement, inboxBadgeLabel, inboxView, relativeTime, SNOOZE_CAP_MS, snoozeOptions } from '../inbox/view';
 import { inboxItem } from './inboxFixtures';
 
