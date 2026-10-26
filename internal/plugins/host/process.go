@@ -194,6 +194,12 @@ func (p *Process) Call(ctx context.Context, method string, params any) (json.Raw
 	return p.conn.call(ctx, method, params, p.pol.RequestTimeout)
 }
 
+// Notify sends a host-to-plugin notification (best effort: no answer, and a
+// plugin that stopped reading is ended by the write timeout).
+func (p *Process) Notify(method string, params any) error {
+	return p.conn.notifyPeer(method, params)
+}
+
 // Stop ends the process and everything it spawned: a plugin.shutdown
 // notification, SIGTERM to the process group, StopGrace, then SIGKILL to the
 // group. The group is killed even when the leader exited by itself, so a

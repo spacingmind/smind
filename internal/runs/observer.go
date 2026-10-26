@@ -22,6 +22,11 @@ type RunFinished struct {
 	Purpose    string
 	Status     string
 	StopReason string
+	// Model, Origin and FailureKind describe the run for observers that
+	// only report (plugin run.finished hooks): never prompt or output.
+	Model       string
+	Origin      string
+	FailureKind string
 	// ToolCalls is the number of distinct non-empty ToolCallIDs the run
 	// emitted, including runs that finished with error or cancel.
 	ToolCalls int

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -22,6 +23,10 @@ const (
 	// daemon enqueues it.
 	ChatQueueSourceChildEvent = "child_event"
 
+	// ChatQueueSourcePluginPrefix starts the source of a message a plugin
+	// queued with task.send (ADR-0042 PB.3): "plugin:<id>".
+	ChatQueueSourcePluginPrefix = "plugin:"
+
 	// ChatQueueCancelUser/ChatQueueCancelAuto are the cancel_kind values
 	// stamped when a queued item is cancelled: 'user' by the
 	// chat.queueCancel RPC, 'auto' by a failed delivery. '' means not
@@ -29,6 +34,15 @@ const (
 	ChatQueueCancelUser = "user"
 	ChatQueueCancelAuto = "auto"
 )
+
+// PluginSource is the queue source of a message plugin id sent.
+func PluginSource(id string) string { return ChatQueueSourcePluginPrefix + id }
+
+// PluginSourceID reports whether source is a plugin's and which plugin.
+func PluginSourceID(source string) (string, bool) {
+	id, ok := strings.CutPrefix(source, ChatQueueSourcePluginPrefix)
+	return id, ok && id != ""
+}
 
 // chatQueueBound is the per-chat bound on queued items (ADR-0021 §7):
 // at most this many status='queued' rows per chat; the next EnqueueChatPrompt
