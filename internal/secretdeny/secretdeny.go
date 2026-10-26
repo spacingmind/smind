@@ -40,6 +40,10 @@ func Paths(home string) (files, dirs []string) {
 // grammar), and Bash rules for the common readers of the exact files plus
 // `sqlite3 <db>`. A home reached through a symlink (macOS /tmp) also gets its
 // resolved spelling.
+//
+// On Windows the CLI normalises a path to POSIX form before matching
+// (C:\Users\a becomes /c/Users/a), so every path in a rule is written that
+// way; a native "\h\smind\token" would never match and the deny would be dead.
 func Rules(home string) []string {
 	homes := []string{filepath.Clean(home)}
 	if real, err := filepath.EvalSymlinks(home); err == nil && real != homes[0] {
@@ -50,12 +54,12 @@ func Rules(home string) []string {
 		files, dirs := Paths(h)
 		for _, f := range files {
 			for _, tool := range []string{"Read", "Edit", "Write"} {
-				out = append(out, tool+"(/"+f+")")
+				out = append(out, tool+"(/"+cliPath(f)+")")
 			}
 		}
 		for _, d := range dirs {
 			for _, tool := range []string{"Read", "Edit", "Write"} {
-				out = append(out, tool+"(/"+d+"/**)")
+				out = append(out, tool+"(/"+cliPath(d)+"/**)")
 			}
 		}
 		if strings.ContainsAny(h, "*?[]()") {
@@ -63,11 +67,22 @@ func Rules(home string) []string {
 		}
 		for _, f := range files {
 			for _, cmd := range readers {
-				out = append(out, "Bash("+cmd+" "+f+"*)")
+				out = append(out, "Bash("+cmd+" "+cliPath(f)+"*)")
 			}
 		}
 		db := filepath.Join(h, "smind.db")
-		out = append(out, "Bash(sqlite3 "+db+"*)")
+		out = append(out, "Bash(sqlite3 "+cliPath(db)+"*)")
 	}
 	return out
+}
+
+// cliPath spells an absolute path the way the CLI's rule matcher sees it:
+// forward slashes, and a Windows drive letter as a leading lower-case
+// directory ("C:\\Users" -> "/c/Users"). A POSIX path is returned unchanged.
+func cliPath(p string) string {
+	p = filepath.ToSlash(p)
+	if len(p) >= 2 && p[1] == ':' && (p[0]|0x20) >= 'a' && (p[0]|0x20) <= 'z' {
+		return "/" + strings.ToLower(p[:1]) + p[2:]
+	}
+	return p
 }

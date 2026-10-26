@@ -179,7 +179,7 @@ Usage:
   smind plugin install <source>                           install a plugin DISABLED and show what it would run
                                                            (a directory, git+<url>@<40-hex sha>, or <archive>#sha256=<hash>)
   smind plugin link <dir>                                 use a directory in place (development; never copied or deleted)
-  smind plugin list|show|enable|disable|remove|update|reload
+  smind plugin list|show|enable|disable|remove|update|reload|logs
                                                            manage plugins (humans only, local only; run "smind plugin" for flags)
 
   smind automation list|show|create|enable|disable|resume|fire|audit|memory|delete

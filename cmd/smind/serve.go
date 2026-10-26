@@ -241,6 +241,8 @@ func cmdServe(args []string) int {
 	stopGitState()
 	stopPluginWatch()
 	stopAutomations()
+	// SIGTERM, grace, then kill the process group of every plugin: none may outlive the daemon.
+	srv.API().StopPlugins()
 	stopStall()    // no tick may publish after the push runtime closes
 	pushRT.Close() // no push goroutine may outlive the daemon
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

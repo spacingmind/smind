@@ -43,6 +43,7 @@ func state(t *testing.T, root string, skip ...string) map[string]string {
 		}
 		rel, _ := filepath.Rel(root, p)
 		for _, s := range skip {
+			s = filepath.FromSlash(s) // callers spell skips with "/"; rel uses the OS separator
 			if rel == s || strings.HasPrefix(rel, s+string(filepath.Separator)) {
 				return nil
 			}
