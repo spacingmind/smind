@@ -41,6 +41,8 @@ function RootStack() {
           <Stack.Screen name="new-task" options={{ title: 'New task', presentation: 'modal' }} />
           <Stack.Screen name="plugins" options={{ title: 'Plugins' }} />
           <Stack.Screen name="plugin/[id]" options={{ title: 'Plugin' }} />
+          <Stack.Screen name="automations" options={{ title: 'Automations' }} />
+          <Stack.Screen name="automation/[id]" options={{ title: 'Automation' }} />
           <Stack.Screen name="task/[id]" options={({ route }) => ({ title: taskHeaderTitle(route.params as { id?: string; title?: string } | undefined) })} />
         </Stack.Protected>
       </Stack>

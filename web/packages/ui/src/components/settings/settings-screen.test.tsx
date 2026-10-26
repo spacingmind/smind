@@ -84,6 +84,7 @@ describe("SettingsScreen shell", () => {
       "settings-nav-mcp-servers",
       "settings-nav-learned-skills",
       "settings-nav-plugins",
+      "settings-nav-automations",
       "settings-nav-providers",
       "settings-nav-usage",
     ]);
