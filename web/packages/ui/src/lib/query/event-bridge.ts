@@ -108,6 +108,15 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       void queryClient.invalidateQueries({ queryKey: queryKeys.pluginThemes() });
       return;
     }
+    case "automation.fired":
+    case "automation.paused":
+    case "automation.updated": {
+      // ids and short reasons only: the list (status, last fired, pause) and every audit page / memory read is stale.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.automationList() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.automationAuditAll() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.automationMemoryAll() });
+      return;
+    }
     case "profile.created":
     case "profile.updated": {
       const profile = (payload as { profile?: AgentProfile } | null)?.profile;

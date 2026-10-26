@@ -59,6 +59,14 @@ export const queryKeys = {
   profileList: () => ["profile.list"] as const,
   /** `plugin.list` (ADR-0042): the global switch and every plugin; live via the `plugin.updated` event. */
   pluginList: () => ["plugin.list"] as const,
+  /** `automation.list` (ADR-0044): the daemon switches and every automation; live via `automation.fired/paused/updated`. */
+  automationList: () => ["automation.list"] as const,
+  /** Every cached audit page / memory read of every automation (a prefix, for the event bridge). */
+  automationAuditAll: () => ["automation.audit"] as const,
+  /** `automation.audit` pages of one automation (infinite query, newest first). */
+  automationAudit: (id: number) => ["automation.audit", id] as const,
+  automationMemoryAll: () => ["automation.memory"] as const,
+  automationMemory: (id: number) => ["automation.memory", id] as const,
   /** `skill.list`: bundled skills and the active plugins' `<plugin>:<skill>` entries. */
   skillList: () => ["skill.list"] as const,
   /** `plugin.commands`: the prompt slash commands of the active plugins; refetched on `plugin.updated`. */
