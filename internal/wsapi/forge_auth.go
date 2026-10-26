@@ -170,10 +170,15 @@ func (f *forgeAuth) read(fl *statusFlight) {
 	f.flight = nil
 	f.mu.Unlock()
 	fl.st, fl.err = st, err
-	close(fl.done)
+	// Publish before releasing the callers: a caller that sees the changed
+	// status (forge.setToken's reply, a status read) can rely on its
+	// forge.status event already being queued. Closing first let the reply race
+	// the publish, and a client or test that looked right after the reply found
+	// no event.
 	if publish != nil && f.bus != nil {
 		f.bus.Publish(Event{Topic: TopicForgeStatus, Payload: forgeStatusEvent{Status: bodyOf(*publish, nil)}})
 	}
+	close(fl.done)
 }
 
 func (f *forgeAuth) refreshAllowedLocked(now time.Time) bool {
