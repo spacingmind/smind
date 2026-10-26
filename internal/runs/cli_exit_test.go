@@ -3,6 +3,7 @@ package runs
 import (
 	"context"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,9 @@ func TestCLIExit_TypedFailureWithPartialUsage(t *testing.T) {
 	} {
 		t.Run(tc.scenario, func(t *testing.T) {
 			t.Parallel()
+			if tc.scenario == "cli-exit-signal" && runtime.GOOS == "windows" {
+				t.Skip("Windows has no signals: a killed process just exits 1, so there is no \"killed by a signal\" to report")
+			}
 			e := claudeScenarioEnv(t, tc.scenario)
 			id := startClaude(t, e)
 			st := waitForStatus(t, e.reg, id, StatusError, 10*time.Second)
