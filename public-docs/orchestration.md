@@ -11,7 +11,7 @@ other agents (**Peers**) as child tasks. You brief the Lead; it does the work,
 launches Peers only where that helps, and reports back. The result is a **task
 tree**: the Lead's task is the root and each Peer is a child task.
 
-## Seats: Lead, Peer and reviewer
+## Seats: Lead, Peer and validator
 
 A seat is an agent profile with a role. Create the standard set in one command
 (the daemon must be running):
@@ -27,7 +27,7 @@ edits survive a re-run:
 |---|---|
 | `lead` | Owns one work item end to end: spec, implementation, tests, review, pull request. Can launch Peers. |
 | `peer-sonnet` | Does one bounded step from a Lead's brief. Cannot launch anyone. Ends with a short JSON handoff. |
-| `reviewer` | Read-only. Reviews a commit or diff and reports findings. Runs in plan mode and edits nothing. |
+| `validator` | Judges one commit against the contract a Lead wrote before coding, in a fresh context and its own scratch worktree, and reports a pass, fail or blocked verdict with evidence. A Lead starts it with `validation_request`; the verdict is for one commit and goes stale after a push. It never merges, and neither does smind. |
 
 All three use the `claude-native` provider with a Sonnet model. List them and
 their ids with `smind profile ls`. Edit one with `smind profile edit <id>`.

@@ -90,8 +90,17 @@ func cmdMcpServe(args []string) int {
 	// lets the MCP host notice and respawn us against the new daemon
 	// (ADR-0017 resolved decision 5's "daemon must already be running"
 	// read the same way at runtime, not just at startup).
+	srv := newMCPServer(client)
+	if venv, isValidator, err := validatorEnvFromOS(); isValidator {
+		// ADR-0045: a validator run serves its two tools and nothing else.
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mcp serve: %v\n", err)
+			return 1
+		}
+		srv = newValidatorMCPServer(client, venv)
+	}
 	srvDone := make(chan error, 1)
-	go func() { srvDone <- newMCPServer(client).Run(ctx, &mcp.StdioTransport{}) }()
+	go func() { srvDone <- srv.Run(ctx, &mcp.StdioTransport{}) }()
 
 	select {
 	case err := <-srvDone:
