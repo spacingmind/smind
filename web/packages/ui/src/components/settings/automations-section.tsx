@@ -269,7 +269,7 @@ function Switch({ checked, label, disabled, title, testId, onClick }: { checked:
     >
       <span
         aria-hidden
-        className={cn("absolute top-0.5 left-0.5 size-3.5 rounded-full bg-foreground transition-transform", checked ? "translate-x-4" : "translate-x-0")}
+        className={cn("absolute top-0.5 left-0.5 size-3.5 rounded-full transition-transform", checked ? "translate-x-4 bg-primary-foreground" : "translate-x-0 bg-foreground")}
       />
     </button>
   );
@@ -341,7 +341,7 @@ function AutomationRow({
       </div>
 
       {state === "paused" && (
-        <Alert variant="warning" testId={`automation-paused-${a.id}`} title="Paused" description={a.pausedReason || "Paused."}>
+        <Alert variant="warning" testId={`automation-paused-${a.id}`} title="Paused until you resume it" description={a.pausedReason || "Paused."}>
           <Button
             type="button"
             variant="outline"
