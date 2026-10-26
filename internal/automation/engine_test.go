@@ -20,6 +20,7 @@ type fakeStarter struct {
 	status   map[int64]RunStatus
 	stopped  map[int64]string
 	startErr error
+	onStart  func()
 }
 
 func newFakeStarter() *fakeStarter {
@@ -29,6 +30,9 @@ func newFakeStarter() *fakeStarter {
 func (f *fakeStarter) Start(_ context.Context, req StartRequest) (StartResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.onStart != nil {
+		f.onStart()
+	}
 	if f.startErr != nil {
 		return StartResult{}, f.startErr
 	}
