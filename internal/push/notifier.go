@@ -46,6 +46,11 @@ type Input struct {
 	Summary string // permission summary; for kind error, a body that replaces "Run failed"
 	Err     string // run error text (kind error)
 	Minutes int    // idle minutes (kind stalled)
+	// AutomationID/Title carry an automation auto-pause (kind error): with a
+	// task, TaskID is the failed run's task; without one (TaskID 0) the alert
+	// is about the automation itself and Title is its title.
+	AutomationID int64
+	Title        string
 }
 
 // TaskInfo is what the notifier needs to know about a task.
@@ -215,12 +220,27 @@ func (n *Notifier) Notify(ctx context.Context, in Input) int {
 	if !slices.Contains(AllKinds, in.Kind) {
 		return 0
 	}
-	info, ok := n.d.Task(in.TaskID)
-	if !ok || info.System {
-		return 0
+	var info TaskInfo
+	if in.TaskID == 0 && in.AutomationID > 0 && in.Kind == KindError {
+		// A pause with no task to open (the template went invalid, a firing
+		// never started): nothing to look up, and a person still has to act.
+		info = TaskInfo{Title: in.Title, Root: true}
+	} else {
+		var ok bool
+		info, ok = n.d.Task(in.TaskID)
+		if !ok || info.System {
+			return 0
+		}
 	}
 	if isRunKind(in.Kind) && !info.Root {
 		return 0
+	}
+
+	// A done/error run alert shares the per-device rate window; an automation
+	// pause is a person's cue to act and is never dropped by it.
+	limitKind := in.Kind
+	if in.AutomationID > 0 {
+		limitKind = ""
 	}
 
 	var msgs []Message
@@ -234,13 +254,13 @@ func (n *Notifier) Notify(ctx context.Context, in Input) int {
 		}
 		dkey := reg.DeviceID + "\x00" + in.Key
 		now := n.d.Now()
-		if !n.admit(reg.DeviceID, dkey, in.Kind, now) {
+		if !n.admit(reg.DeviceID, dkey, limitKind, now) {
 			continue
 		}
 		blob, err := Seal(reg.Key, reg.DeviceID, n.event(in, info, now))
 		if err != nil {
 			n.d.Logf("push: seal failed for device %s", idPrefix(reg.DeviceID))
-			n.release(reg.DeviceID, dkey, in.Kind)
+			n.release(reg.DeviceID, dkey, limitKind)
 			continue
 		}
 		msgs = append(msgs, Message{Token: reg.Token, Platform: reg.Platform, Data: blob})
@@ -324,6 +344,9 @@ func (n *Notifier) release(deviceID, dkey, kind string) {
 
 func (n *Notifier) event(in Input, info TaskInfo, now time.Time) Event {
 	title := info.Title
+	if title == "" && in.TaskID == 0 && in.AutomationID > 0 {
+		title = "Automation " + strconv.FormatInt(in.AutomationID, 10)
+	}
 	if title == "" {
 		title = "Task " + strconv.FormatInt(in.TaskID, 10)
 	}
@@ -351,14 +374,15 @@ func (n *Notifier) event(in Input, info TaskInfo, now time.Time) Event {
 		body = "Tree stalled: " + title + " has been idle for " + strconv.Itoa(in.Minutes) + " min"
 	}
 	return Event{
-		ID:     n.d.NewID(),
-		Kind:   in.Kind,
-		TaskID: in.TaskID,
-		RunID:  in.RunID,
-		ChatID: in.ChatID,
-		Title:  title,
-		Body:   body,
-		At:     now.Unix(),
+		ID:           n.d.NewID(),
+		Kind:         in.Kind,
+		TaskID:       in.TaskID,
+		RunID:        in.RunID,
+		ChatID:       in.ChatID,
+		AutomationID: in.AutomationID,
+		Title:        title,
+		Body:         body,
+		At:           now.Unix(),
 	}
 }
 

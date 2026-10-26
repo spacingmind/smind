@@ -114,3 +114,23 @@ describe('notificationFor', () => {
     expect(failed).toEqual({ title: GENERIC_NOTIFICATION.title, body: GENERIC_NOTIFICATION.body, data: null });
   });
 });
+
+describe('automation pause alerts (no task to open)', () => {
+  const pause = { id: 'ev-pause-1', kind: 'error', taskId: 0, automationId: 3, title: 'Automation paused: nightly', body: 'Automation paused: the template is no longer valid', at: 1_000_000 };
+  const seal = (event: object) => sealRaw(framed(new TextEncoder().encode(JSON.stringify(event))));
+
+  it('opens with taskId 0 and carries the automation id into the notification data', () => {
+    const n = notificationFor(openWithAnyKey([{ deviceId, key }], seal(pause)), 1_000_100);
+    expect(n).toEqual({
+      title: 'Automation paused: nightly',
+      body: 'Automation paused: the template is no longer valid',
+      data: { eventId: 'ev-pause-1', taskId: 0, automationId: 3 },
+    });
+  });
+
+  it('rejects a negative or non-integer automation id', () => {
+    for (const bad of [-1, 1.5, '3']) {
+      expect(openBlob(key, deviceId, seal({ ...pause, automationId: bad })), String(bad)).toEqual({ ok: false, error: 'malformed' });
+    }
+  });
+});

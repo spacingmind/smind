@@ -14,7 +14,7 @@ import { pushAvailability } from '../availability';
 import { foregroundBehavior } from '../foregroundBehavior';
 import { openTaskIdFromPath } from '../path';
 import { reregisterToken } from '../register';
-import { PendingTarget, releaseTarget, resolveNotificationTarget, targetHref } from '../target';
+import { PendingTarget, releaseTarget, resolveNotificationTarget, targetHref, targetTaskId } from '../target';
 import { onPushTokenChange, platformPushEnv } from './adapters';
 import { buildRegisterDeps } from './registerDeps';
 
@@ -52,7 +52,7 @@ export function PushController() {
       handleNotification: async (n) =>
         foregroundBehavior({
           ...live.current,
-          eventTaskId: resolveNotificationTarget(n.request.content.data)?.taskId ?? null,
+          eventTaskId: targetTaskId(resolveNotificationTarget(n.request.content.data)),
         }),
     });
     return () => Notifications.setNotificationHandler(null);
