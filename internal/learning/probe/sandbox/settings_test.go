@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -24,6 +25,9 @@ func fsOf(m map[string]any) map[string]any {
 }
 
 func TestSandboxSettings_Table(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the probe sandbox is POSIX-only (there is no measured sandbox on Windows, see launcher_windows.go); its settings take /-rooted paths")
+	}
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -153,6 +157,9 @@ func TestSandboxSettings_SystemPathsIncludeClaudeTmp(t *testing.T) {
 }
 
 func TestSandboxSettings_HomebrewIsNarrowed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the probe sandbox is POSIX-only (there is no measured sandbox on Windows, see launcher_windows.go); its settings take /-rooted paths")
+	}
 	paths := SystemReadPaths()
 	have := map[string]bool{}
 	for _, p := range paths {

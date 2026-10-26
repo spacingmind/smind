@@ -570,3 +570,52 @@ CREATE TABLE IF NOT EXISTS plugin_settings (
     updated_at TIMESTAMP NOT NULL,
     PRIMARY KEY (plugin_id, key)
 );
+
+-- automations: signal -> task rules (ADR-0044). Human-authored only; the engine
+-- in internal/automation owns their meaning, the store holds the columns.
+-- signal/filter/template/rails are JSON. Additive.
+CREATE TABLE IF NOT EXISTS automations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    signal_kind TEXT NOT NULL,
+    signal TEXT NOT NULL DEFAULT '{}',
+    filter TEXT NOT NULL DEFAULT '{}',
+    template TEXT NOT NULL DEFAULT '{}',
+    rails TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'active', -- 'active' | 'paused' (the engine's brake)
+    paused_reason TEXT NOT NULL DEFAULT '',
+    paused_at TIMESTAMP,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    budget_blocked INTEGER NOT NULL DEFAULT 0, -- last run's reported cost reached the budget; a human resume/update clears it
+    last_fired_at TIMESTAMP,
+    next_run_at TIMESTAMP, -- cron sources: the next scheduled instant (UTC)
+    poll_cursor TEXT NOT NULL DEFAULT '', -- polled sources: newest signal id already seen
+    poll_next_allowed_at TIMESTAMP,
+    poll_failures INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+-- automation_audit: one row per signal evaluation (ADR-0044 section 6.7).
+-- Append-only except the backfill of task_id/run_id/outcome/finished_at.
+CREATE TABLE IF NOT EXISTS automation_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    automation_id INTEGER NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+    signal_kind TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    manual INTEGER NOT NULL DEFAULT 0,
+    catchup INTEGER NOT NULL DEFAULT 0,
+    payload TEXT NOT NULL DEFAULT '', -- redacted signal payload JSON, capped 4 KiB
+    task_id INTEGER,
+    run_id TEXT NOT NULL DEFAULT '',
+    outcome TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    finished_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS automation_audit_by_time ON automation_audit(automation_id, created_at);
+CREATE INDEX IF NOT EXISTS automation_audit_by_fp ON automation_audit(automation_id, fingerprint, created_at);

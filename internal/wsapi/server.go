@@ -80,8 +80,9 @@ type API struct {
 	Runs      *runs.Registry
 	Terminals *terminal.Registry
 
-	hs      map[string]handlerFunc
-	plugins *plugins.Manager
+	automations *automationHost
+	hs          map[string]handlerFunc
+	plugins     *plugins.Manager
 	// pluginEvents publishes plugin.updated and the owned-row diffs.
 	pluginEvents *pluginEvents
 	admit        *seatAdmission
@@ -304,6 +305,10 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	for method, h := range pluginHandlers(pluginMgr, pluginEv) {
 		hs[method] = h
 	}
+	automations := newAutomationHost(db, bus, config.Dir())
+	for method, h := range automationHandlers(automations) {
+		hs[method] = h
+	}
 	hs["skill.list"] = handleSkillList(pluginMgr)
 	hs["session.identify"] = handleSessionIdentify(reg)
 	admit := newSeatAdmission(reg, profReg, db)
@@ -326,7 +331,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	}
 	pluginHS["profile.list"] = profileListRaw
 	pluginReg.bind(pluginHS, bus)
-	api := &API{plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
+	api := &API{automations: automations, plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}

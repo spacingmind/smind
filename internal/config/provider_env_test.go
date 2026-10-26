@@ -8,15 +8,18 @@ import (
 )
 
 func TestProviderEnvLoadAccepts(t *testing.T) {
-	useHome(t, "providers:\n  claude-native:\n    env:\n      CLAUDE_CONFIG_DIR: /Users/x/.claude-scopedocs\n  codex-native:\n    env:\n      CODEX_HOME: /srv/codex\n")
+	// Temp dirs, single-quoted in the YAML: a bare "/Users/x" is not absolute on
+	// Windows, and its paths hold backslashes.
+	claudeDir, codexDir := filepath.Join(t.TempDir(), ".claude-scopedocs"), filepath.Join(t.TempDir(), "codex")
+	useHome(t, "providers:\n  claude-native:\n    env:\n      CLAUDE_CONFIG_DIR: '"+claudeDir+"'\n  codex-native:\n    env:\n      CODEX_HOME: '"+codexDir+"'\n")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if got := cfg.ProviderEnv("claude-native")["CLAUDE_CONFIG_DIR"]; got != "/Users/x/.claude-scopedocs" {
+	if got := cfg.ProviderEnv("claude-native")["CLAUDE_CONFIG_DIR"]; got != claudeDir {
 		t.Fatalf("CLAUDE_CONFIG_DIR = %q", got)
 	}
-	if got := cfg.ProviderEnv("codex-native")["CODEX_HOME"]; got != "/srv/codex" {
+	if got := cfg.ProviderEnv("codex-native")["CODEX_HOME"]; got != codexDir {
 		t.Fatalf("CODEX_HOME = %q", got)
 	}
 	if got := cfg.ProviderEnv("glm"); got != nil {

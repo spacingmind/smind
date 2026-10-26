@@ -276,17 +276,20 @@ func TestUnpinnedClaude_AlwaysGetsExplicitModel_Failover(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitForStatus(t, e.reg, failed, StatusError, 10*time.Second)
-	var succ store.Run
+	// The registry lists the successor before its row is guaranteed to be in
+	// the store (a slow disk: Windows CI), so take the id from the registry
+	// rather than reading the row back and ignoring the error.
+	var succID string
 	waitUntil(t, "successor", func() bool {
 		for _, s := range e.reg.List(0) {
 			if s.FailoverOf == failed {
-				succ, _ = e.st.GetRun(s.ID)
+				succID = s.ID
 				return true
 			}
 		}
 		return false
 	})
-	waitForStatus(t, e.reg, succ.ID, StatusDone, 10*time.Second)
+	waitForStatus(t, e.reg, succID, StatusDone, 10*time.Second)
 	e.wantLaunches(t, unpinnedDefault)
 }
 

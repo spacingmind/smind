@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -116,6 +117,9 @@ func TestTripwire_HumanSkillDirHashChangedMarksUnsafe(t *testing.T) {
 		"chmod":               func(f *tripFixture) { _ = os.Chmod(filepath.Join(f.skills1, "SKILL.md"), 0o600) },
 		"missing dir created": func(f *tripFixture) { _ = os.Mkdir(f.skills2, 0o755) },
 		"dir removed":         func(f *tripFixture) { _ = os.RemoveAll(f.skills1) },
+	}
+	if runtime.GOOS == "windows" {
+		delete(cases, "chmod") // Windows has no Unix mode bits to change
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

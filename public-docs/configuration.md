@@ -142,6 +142,16 @@ An unknown provider id under `providers.<id>` is an error. See
 | `log.maxSizeMB` | `10` | Size at which `daemon.log` rotates. Must be 1 or more. |
 | `log.maxFiles` | `5` | Log files kept, including the active one. Must be 1 or more. |
 
+### automations
+
+| Key | Default | Meaning |
+|---|---|---|
+| `automations.enabled` | `false` | Runs the automation engine. With it off nothing polls and nothing fires. Read on every tick. |
+| `automations.paused` | `false` | Records every signal as paused and fires nothing, keeping all state. |
+| `automations.maxBudgetUsd` | `10` | The most a single automation run's budget may be. |
+| `automations.allowRemoteManage` | `false` | Lets a direct non-loopback connection create, enable, resume or fire automations. Relay sessions and agents are refused either way. |
+| `automations.allowUnattendedModes` | `false` | Lets an automation use `autoAccept` or a full-access permission mode. |
+
 ### plugins
 
 | Key | Default | Notes |

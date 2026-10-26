@@ -59,8 +59,11 @@ func Diff(ctx context.Context, baseDir, armDir string, maxBytes int) (diff strin
 
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
+	// Slash paths: git prints native Windows paths quoted and backslash-escaped
+	// ("a/D:\\tmp\\base/x"), which rewritePrefixes would never strip, leaving
+	// daemon temp paths in the stored diff. With slashes it prints a/D:/tmp/base/x.
 	cmd := exec.CommandContext(ctx, "git", "-c", "core.fsmonitor=false", "-c", "core.pager=cat",
-		"diff", "--no-index", "--no-textconv", "--no-ext-diff", "--no-color", "--", baseDir, copyDir)
+		"diff", "--no-index", "--no-textconv", "--no-ext-diff", "--no-color", "--", filepath.ToSlash(baseDir), filepath.ToSlash(copyDir))
 	cmd.Dir = cwd
 	cmd.Env = append(gitEnv(), "GIT_ATTR_NOSYSTEM=1")
 	var out, errb bytes.Buffer
