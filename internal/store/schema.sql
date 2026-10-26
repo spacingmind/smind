@@ -653,3 +653,14 @@ CREATE TABLE IF NOT EXISTS validations (
     finished_at TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_validations_task ON validations(task_id, id);
+
+-- inbox_state: what the Human did to a derived inbox item (ADR-0045 §5): seen,
+-- snoozed until a time, or resolved. Items themselves are never stored; a row
+-- is garbage-collected once its key no longer derives. Additive.
+CREATE TABLE IF NOT EXISTS inbox_state (
+    key TEXT PRIMARY KEY,
+    state TEXT NOT NULL,                -- 'seen' | 'snoozed' | 'resolved'
+    snoozed_until TIMESTAMP,
+    actor TEXT NOT NULL DEFAULT '',     -- 'local' | 'device:<id>'
+    updated_at TIMESTAMP NOT NULL
+);
