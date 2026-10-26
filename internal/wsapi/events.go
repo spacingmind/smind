@@ -123,6 +123,7 @@ var knownTopics = map[string]bool{
 	TopicMcpServerDeleted:     true,
 	TopicTaskGit:              true,
 	TopicTaskStalled:          true,
+	TopicValidationUpdated:    true,
 	TopicForgeStatus:          true,
 	TopicProviderUpdated:      true,
 	TopicPluginUpdated:        true,
