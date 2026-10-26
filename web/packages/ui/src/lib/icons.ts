@@ -113,6 +113,7 @@ import {
   Wrench,
   X,
   Zap,
+  CalendarClock,
   type LucideIcon,
 } from "lucide-react";
 
@@ -231,6 +232,8 @@ export const Icons = {
   mcp: Plug,
   /** A plugin (Settings -> Plugins) and the "from plugin" owner badge. */
   plugin: Puzzle,
+  /** Automations (Settings -> Automations): rules that start a task from a signal. */
+  automation: CalendarClock,
   /** Learned skills (Settings -> Skills (learned)). */
   skills: BookOpen,
 
