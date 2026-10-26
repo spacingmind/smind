@@ -157,14 +157,18 @@ func serve(mode string, args []string) {
 		if !ok {
 			return
 		}
+		keep(m)
 		switch m.Method {
 		case "plugin.initialize":
+			initParams = m.Params
 			switch mode {
 			case "report":
 				cwd, _ := os.Getwd()
 				notify("test.report", map[string]any{"env": os.Environ(), "args": args, "cwd": cwd, "init": m.Params})
 			case "stderr":
 				stderrStorm(args)
+			case "stderr-init":
+				fmt.Fprintln(os.Stderr, "init params:", string(m.Params)) // a plugin that logs its own settings
 			}
 			reply(m.ID, map[string]any{})
 			if mode == "crash-after-ready" {
@@ -176,12 +180,18 @@ func serve(mode string, args []string) {
 		case "echo":
 			reply(m.ID, m.Params)
 		case "callhost":
-			// Ask the host something and hand back its answer.
+			// Ask the host something and hand back its answer. Notifications
+			// that arrive meanwhile are kept for "drain".
 			var p struct {
-				Method string `json:"method"`
+				Method string          `json:"method"`
+				Params json.RawMessage `json:"params"`
 			}
 			_ = json.Unmarshal(m.Params, &p)
-			send(map[string]any{"jsonrpc": "2.0", "id": 9001, "method": p.Method, "params": map[string]any{}})
+			var params any = map[string]any{}
+			if len(p.Params) > 0 {
+				params = p.Params
+			}
+			send(map[string]any{"jsonrpc": "2.0", "id": 9001, "method": p.Method, "params": params})
 			for {
 				r, ok := read()
 				if !ok {
@@ -191,12 +201,44 @@ func serve(mode string, args []string) {
 					reply(m.ID, map[string]any{"result": r.Result, "error": r.Error})
 					break
 				}
+				keep(r)
 			}
+		case "drain":
+			// The notifications received since the last drain, oldest first.
+			reply(m.ID, received)
+			received = nil
+		case "getinit":
+			reply(m.ID, initParams)
+		case "stall":
+			// Stop reading stdin for a while: the host's writes to this
+			// plugin back up (a plugin that stopped reading).
+			var p struct {
+				Ms int `json:"ms"`
+			}
+			_ = json.Unmarshal(m.Params, &p)
+			reply(m.ID, map[string]any{})
+			time.Sleep(time.Duration(p.Ms) * time.Millisecond)
 		case "notifyhost":
 			notify("test.unknown", map[string]any{})
 			reply(m.ID, map[string]any{})
 		}
 	}
+}
+
+// received holds the notifications the host pushed (events and the like).
+var (
+	received   []map[string]json.RawMessage
+	initParams json.RawMessage
+)
+
+// keep records a notification (no id, has a method) other than the lifecycle
+// ones.
+func keep(m msg) {
+	if len(m.ID) != 0 || m.Method == "" || strings.HasPrefix(m.Method, "plugin.") {
+		return
+	}
+	method, _ := json.Marshal(m.Method)
+	received = append(received, map[string]json.RawMessage{"method": method, "params": m.Params})
 }
 
 func stderrStorm(args []string) {

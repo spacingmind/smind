@@ -205,6 +205,10 @@ func cmdServe(args []string) int {
 	srv.API().StartPlugins()
 	stopPluginWatch := srv.API().WatchPlugins(ctx)
 
+	// ADR-0044: the automation engine ticks only while automations.enabled is
+	// true in config.yaml (read on every tick); it is off by default.
+	stopAutomations := wireAutomations(ctx, db, srv.API(), wm, runner)
+
 	stopStall := wireStallAlert(ctx, db, srv.API(), cfg.Orchestration.StallAlertMinutes)
 
 	stopLearning := wireLearning(ctx, learningWiring{
@@ -236,6 +240,7 @@ func cmdServe(args []string) int {
 	stopLearning()               // before the run registry closes: in-flight jobs end failed, watermarks untouched
 	stopGitState()
 	stopPluginWatch()
+	stopAutomations()
 	// SIGTERM, grace, then kill the process group of every plugin: none may outlive the daemon.
 	srv.API().StopPlugins()
 	stopStall()    // no tick may publish after the push runtime closes

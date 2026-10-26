@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -635,6 +636,11 @@ func (m *Manager) Remove(id string, keepData bool) error {
 	}
 	if err := m.st.DeletePlugin(id); err != nil {
 		return err
+	}
+	// Settings can hold secrets: they go with the plugin even with keepData
+	// (that flag keeps the data/ directory only).
+	if err := m.st.DeletePluginSettings(id); err != nil {
+		slog.Warn("plugins: deleting settings", "plugin", id, "err", err)
 	}
 	_ = os.RemoveAll(filepath.Join(m.pendingDir(), id))
 	_ = os.Remove(m.pendingDir())

@@ -253,10 +253,43 @@ is dropped and the stock theme returns.
 
 ### Settings and secrets
 
-A manifest may declare `settings` and use `${setting.NAME}` in an MCP server's
-`env` or `headers`, and nowhere else. Storing setting values is not available
-yet, so a server that uses a placeholder is listed but is not given to runs;
-`smind plugin show <id> --json` says which setting has no value.
+A manifest may declare typed `settings`:
+
+```json
+"settings": [
+  { "key": "token", "type": "secret", "label": "API token", "required": true },
+  { "key": "region", "type": "enum", "label": "Region", "options": ["eu", "us"], "default": "eu" },
+  { "key": "retries", "type": "number", "label": "Retries", "default": 3 }
+]
+```
+
+The types are `string`, `secret`, `boolean`, `number` and `enum` (with
+`options`). `string` and `secret` are at most 1024 bytes unless `maxLength` says
+up to 8192. A `secret` cannot have a default: a manifest is not a place for one.
+
+You set values with the `plugin.settings.set` request (`{"id": "acme", "values":
+{"token": "..."}}`; a `null` clears a key back to its default); `plugin.settings.get`
+lists the settings and which are set. There is no settings command or page yet.
+Setting values is a human action with the same limits as `enable`: loopback only,
+or a network login with `plugins.allowRemoteManage`; never an agent or a phone.
+A phone may read: it sees each secret as `set: true` and nothing else, and so does
+every other reader, you included. A value is validated against its declared type;
+an error names the setting, never the value, and a patch with one bad key changes
+nothing.
+
+Values are stored in smind's database the way provider credentials and MCP
+environment values are, not encrypted separately. A value goes to exactly two
+places: the plugin's own `plugin.initialize` (see below) and `${setting.NAME}`
+in the plugin's MCP server `env` or `headers`, and nowhere else. It never
+appears in `plugin list`, `plugin show`, events, errors or logs; a plugin's
+stderr is scrubbed of the secret values of the plugins you have set (values
+shorter than 8 characters cannot be scrubbed by match, so use long tokens).
+Removing a plugin deletes its values, even with `--keep-data`.
+
+Changing a setting restarts the plugin's process, so it starts with the new
+values. A server that uses a placeholder whose setting has no value is listed
+but not given to runs; `smind plugin show <id> --json` says which setting is
+missing.
 
 ## Plugin processes
 
@@ -277,11 +310,10 @@ smind shows its command before you enable the plugin.
   the environment only: a same-user process can still read files such as
   `~/.smind/token`.
 - **Handshake.** smind sends `plugin.initialize` with `api`, `smindVersion`,
-  `dataDir` and `settings` (an empty object for now) on the process's stdin, in
-  `Content-Length`-framed JSON-RPC 2.0 (the framing language servers use), and
-  the plugin has 10 seconds to answer it. Calls the plugin makes back into smind
-  are all refused with `method not found` for now; hooks and the host API are
-  not available yet.
+  `dataDir` and `settings` (your values with secrets in the clear, the defaults for
+  what is unset) on the process's stdin, in `Content-Length`-framed JSON-RPC 2.0
+  (the framing language servers use), and the plugin has 10 seconds to answer
+  it. Hooks are not available yet; see [What a plugin may call](#what-a-plugin-may-call).
 - **Limits.** A frame body is at most 1 MiB and a header line 1 KiB. A malformed
   or oversize frame closes the connection and kills the process; it counts as a
   crash.
@@ -300,6 +332,45 @@ smind shows its command before you enable the plugin.
   is kept in memory, at most 1000 lines or 256 KiB, each line cut at 2 KiB;
   control characters are removed and secrets are redacted before a line is
   stored. It is gone when the daemon restarts or the plugin is removed.
+
+### What a plugin may call
+
+A plugin process can send requests back to smind. There is one table of what it
+may call, grouped by the `capabilities` its manifest declares and you confirmed:
+
+| Capability | Methods |
+|---|---|
+| `tasks.read` | `task.list`, `task.get`, `task.tree`, `run.list`, `chat.list`, `workspace.list`, `space.list`, `space.get` |
+| `mcp.read` | `mcp.list`, `mcp.get` |
+| `profiles.read` | `profile.list`, `profile.get` |
+| `events.observe` | `events.subscribe`, `events.unsubscribe` |
+
+Everything else is refused. A method in the table whose capability the plugin did
+not declare fails with `forbidden` (code -32001) naming the capability; any other
+method, including one smind adds later, fails with `method not found`. Whatever
+the plugin declares, it can never call the plugin, provider, account, relay,
+automation or settings methods, anything that writes your tasks, runs, MCP
+servers or profiles, or anything that answers or changes a permission request.
+Results are redacted copies: token shapes and home paths are removed and a task's
+setup output is left out. `tasks.write`, `files.read`, `ui.notify` and
+`hooks.beforeRun` can be declared but grant nothing yet.
+
+This is mediation, not isolation: a process running as you can still read your
+files, including smind's token.
+
+**Events.** After `events.subscribe {"topics": [...]}` a plugin with
+`events.observe` receives `event` notifications `{topic, seq, payload}`. Only
+these topics are allowed: `task.status`, `task.created`, `task.updated`,
+`task.archived`, `task.deleted`, `task.stalled`, `run.status`, `run.failover`,
+`permission.pending`, `permission.resolved`, `workspace.created`,
+`workspace.deleted`, `space.created`, `space.deleted`, `chat.created`,
+`chat.updated`, `chat.archived` and `plugin.updated`. Delivery is live and best
+effort: nothing is replayed, at most 256 events wait per plugin, and a plugin
+that falls behind gets `event.dropped {count}`; one that stops reading never
+slows smind or other subscribers (after 10 seconds without reading, the
+connection is closed and the process counts as crashed). A plugin may observe
+that a permission request is pending, with its ids and option names, but not its
+`summary`, and it has no way to answer it.
 
 ## Further reading
 
