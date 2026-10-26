@@ -53,8 +53,10 @@ func TestMatch_SkillToolCall(t *testing.T) {
 }
 
 func TestMatch_ReadUnderProjectionDir(t *testing.T) {
-	d1 := filepath.Join(string(filepath.Separator), "data", "proj", "1", "abc")
-	d2 := filepath.Join(string(filepath.Separator), "data", "proj", "1", "def")
+	// A temp dir, not "/data/...": a rooted path with no drive letter is not
+	// absolute on Windows, and Match only looks at absolute paths.
+	d1 := filepath.Join(t.TempDir(), "data", "proj", "1", "abc")
+	d2 := filepath.Join(t.TempDir(), "data", "proj", "1", "def")
 	skillMD := filepath.Join(d2, ".claude", "skills", "learned-y", "SKILL.md")
 	cases := []struct {
 		tool, input string
@@ -75,8 +77,8 @@ func TestMatch_ReadUnderProjectionDir(t *testing.T) {
 }
 
 func TestMatch_IgnoresOtherToolsAndHumanSkills(t *testing.T) {
-	d := filepath.Join(string(filepath.Separator), "data", "proj", "1", "abc")
-	other := filepath.Join(string(filepath.Separator), "data", "proj", "2", "abc")
+	d := filepath.Join(t.TempDir(), "data", "proj", "1", "abc")
+	other := filepath.Join(t.TempDir(), "data", "proj", "2", "abc")
 	cases := []taskrunner.Event{
 		call("Skill", `{"skill":"human-skill"}`),
 		call("Read", `{"file_path":"`+js(filepath.Join(d, ".claude/skills/human/SKILL.md"))+`"}`),
@@ -116,7 +118,7 @@ func TestMatch_IgnoresNonToolEvents(t *testing.T) {
 }
 
 func TestMatch_PathTraversalDoesNotMatch(t *testing.T) {
-	d := filepath.Join(string(filepath.Separator), "data", "proj", "1", "abc")
+	d := filepath.Join(t.TempDir(), "data", "proj", "1", "abc")
 	for _, p := range []string{
 		d + "/.claude/skills/learned-x/../../../../../etc/passwd",
 		d + "/.claude/skills/../skills/learned-x/SKILL.md",

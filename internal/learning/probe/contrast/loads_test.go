@@ -17,7 +17,7 @@ import (
 func js(p string) string { return strings.ReplaceAll(p, `\`, `\\`) }
 
 func TestContrast_LoadedUsesLoadsMatch(t *testing.T) {
-	proj := filepath.Join(string(filepath.Separator), "data", "proj", "1", "abc")
+	proj := filepath.Join(t.TempDir(), "data", "proj", "1", "abc")
 	skillMD := filepath.Join(proj, ".claude", "skills", "learned-x", "SKILL.md")
 	cases := []struct {
 		name   string
@@ -47,7 +47,7 @@ func TestContrast_LoadedUsesLoadsMatch(t *testing.T) {
 			[]window.Event{ev(1, taskrunner.Event{
 				Type:      taskrunner.EventTypeToolCall,
 				ToolName:  "Read",
-				ToolInput: json.RawMessage(`{"file_path":"` + js(filepath.Join(string(filepath.Separator), "elsewhere", ".claude", "skills", "learned-x", "SKILL.md")) + `"}`),
+				ToolInput: json.RawMessage(`{"file_path":"` + js(filepath.Join(t.TempDir(), "elsewhere", ".claude", "skills", "learned-x", "SKILL.md")) + `"}`),
 			})},
 			false,
 		},
