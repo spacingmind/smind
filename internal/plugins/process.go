@@ -122,6 +122,7 @@ func (m *Manager) syncOne(p store.Plugin, man *Manifest, restart bool) {
 	if m.proc == nil {
 		return
 	}
+	m.clearProblems(p.ID)
 	spec, ok := m.hostSpec(p, man)
 	if !ok || !p.Enabled || !m.GlobalEnabled() {
 		m.proc.h.Stop(p.ID)
@@ -179,6 +180,7 @@ func (m *Manager) restartAfterSwap(id string) {
 // Shutdown stops every plugin process and waits until each process group is
 // gone. The daemon calls it once on its way down; it is safe to call twice.
 func (m *Manager) Shutdown() {
+	m.closeHooks()
 	if m.proc != nil {
 		m.proc.h.Close()
 	}

@@ -111,3 +111,39 @@ of each automation are always kept.
   disable one, but not create, enable, resume or fire.
 - `automations.allowRemoteManage: true` lets a direct network connection manage
   them too.
+
+## Example: a failed nightly CI run starts a Lead
+
+This is the example smind ships and tests. It is never created or enabled for
+you: you copy it, point it at your workspace and profile, and turn it on.
+
+When the workflow named `Windows full suite` fails on `develop`, an automation
+starts one Lead task. The task fetches the failed log itself, finds the failing
+tests, and either proposes a fix pull request or opens an issue. It runs in the
+`default` permission mode, so every command it wants to run waits for you; it is
+limited to $3 and 45 minutes, and two runs an hour.
+
+```sh
+cp docs/examples/automation-windows-full-suite-failed.json my-automation.json
+# edit workspaceId and template.profileId (smind workspace ls, smind profile ls)
+smind automation create --file my-automation.json
+smind automation enable <id>
+smind automation fire <id>      # rehearse it on the latest failed run
+```
+
+The prompt the task receives holds the run id, commit, branch and run URL as a
+quoted JSON data block, plus the instruction to fetch the log with
+`gh run view <run id> --log-failed`. The log text is never put in the prompt, so a
+failing test whose name says "ignore previous instructions" is only ever read as
+tool output. Anything the task writes to its memory is handed back to the next
+run as quoted data too.
+
+What you will see in `smind automation audit <id>`:
+
+| Decision | When |
+|---|---|
+| `fire` | A new failed run; a task was started. |
+| `deduped` | The same commit failed again (for example a re-run). |
+| `capped` | A task from this automation is still running, or the hourly cap was reached. |
+| `paused` | The automation paused itself after three failed runs in a row; `smind automation resume` clears it. |
+

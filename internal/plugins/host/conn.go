@@ -22,6 +22,9 @@ const (
 	ErrCodeInternal       = -32603
 	ErrCodeForbidden      = -32001
 	ErrCodeBusy           = -32002
+	// ErrCodeRateLimited answers a plugin call the daemon's limiter refused;
+	// the message says which limit and when it frees up.
+	ErrCodeRateLimited = -32003
 )
 
 // RPCError is a JSON-RPC error object.

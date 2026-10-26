@@ -203,6 +203,27 @@ func serve(mode string, args []string) {
 				}
 				keep(r)
 			}
+		case "hook.run.beforeStart":
+			// mode "hook": answer with args[0] verbatim; "hook-error": a JSON-RPC
+			// error; "hook-sleep": never answer (the host's timeout ends it).
+			switch {
+			case mode == "hook-sleep":
+				time.Sleep(time.Hour)
+			case mode == "hook-error":
+				send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32000, "message": "boom sk-abcdefghijklmnopqrstuvwxyz0123456789"}})
+			case len(args) > 0:
+				send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": json.RawMessage(args[0])})
+			default:
+				reply(m.ID, map[string]any{})
+			}
+		case "hook.run.finished":
+			if strings.HasPrefix(mode, "loop-send") && len(args) > 0 {
+				// A plugin that answers every finished run with a task.send.
+				sendSeq++
+				send(map[string]any{"jsonrpc": "2.0", "id": 9100 + sendSeq, "method": "task.send", "params": json.RawMessage(args[0])})
+			}
+		case "sendresults":
+			reply(m.ID, sendResults)
 		case "drain":
 			// The notifications received since the last drain, oldest first.
 			reply(m.ID, received)
@@ -225,6 +246,13 @@ func serve(mode string, args []string) {
 	}
 }
 
+// sendSeq numbers the task.send requests of the loop-send mode; sendResults
+// holds the host's answers (result or error), oldest first.
+var (
+	sendSeq     int
+	sendResults []map[string]json.RawMessage
+)
+
 // received holds the notifications the host pushed (events and the like).
 var (
 	received   []map[string]json.RawMessage
@@ -234,6 +262,10 @@ var (
 // keep records a notification (no id, has a method) other than the lifecycle
 // ones.
 func keep(m msg) {
+	if n, err := strconv.Atoi(string(m.ID)); err == nil && n > 9100 && m.Method == "" {
+		sendResults = append(sendResults, map[string]json.RawMessage{"result": m.Result, "error": m.Error})
+		return
+	}
 	if len(m.ID) != 0 || m.Method == "" || strings.HasPrefix(m.Method, "plugin.") {
 		return
 	}
