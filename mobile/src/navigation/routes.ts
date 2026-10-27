@@ -61,3 +61,6 @@ export function parseAutomationParams(params: { id?: Param }): { ok: true; id: n
   const id = Number(raw);
   return Number.isSafeInteger(id) && id > 0 ? { ok: true, id } : { ok: false };
 }
+
+// The Human inbox (ADR-0045 section 5).
+export const INBOX_HREF = '/inbox' as const;
