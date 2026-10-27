@@ -3,6 +3,8 @@ package validation
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -34,10 +36,10 @@ type Watch struct {
 	Probe func(validatorTaskID int64) ProbeState
 	// Stop stops the validator's running runs.
 	Stop func()
-	// LeadDigest returns the lead worktree's current Digest; Before is the
-	// value recorded before the validator started ("" skips the post-check).
-	LeadDigest func() (string, error)
-	Before     string
+	// LeadSnapshot reads the lead worktree now; Before is the Snapshot taken
+	// before the validator started (the zero value skips the post-check).
+	LeadSnapshot func() (Snapshot, error)
+	Before       Snapshot
 
 	elapsed time.Duration
 	sawRun  bool
@@ -85,8 +87,8 @@ func (w *Watch) Tick(dt time.Duration) bool {
 	}
 	// A changed lead worktree outranks the other reasons: the verdict must
 	// never read as merely "crashed" when the validator touched it.
-	if w.leadChanged() {
-		reason, summary = ReasonScopeViolation, "the lead's worktree changed while the validator ran"
+	if changed := w.leadChanged(); len(changed) > 0 {
+		reason, summary = ReasonScopeViolation, scopeSummary(changed)
 	}
 	if err := w.Svc.WriteBlocked(w.ValidationID, reason, summary); err != nil && !errors.Is(err, ErrVerdictExists) {
 		return false
@@ -100,22 +102,37 @@ func (w *Watch) stop() {
 	}
 }
 
-// leadChanged compares the lead worktree's digest with the one recorded
-// before the run; "" or an unreadable digest skips the check.
-func (w *Watch) leadChanged() bool {
-	if w.Before == "" || w.LeadDigest == nil {
-		return false
+// leadChanged compares the lead worktree with the Snapshot taken before the
+// run and returns the changed paths (nil: unchanged, skipped or unreadable).
+func (w *Watch) leadChanged() []string {
+	if w.Before.IsZero() || w.LeadSnapshot == nil {
+		return nil
 	}
-	after, err := w.LeadDigest()
-	return err == nil && after != w.Before
+	after, err := w.LeadSnapshot()
+	if err != nil {
+		return nil
+	}
+	return w.Before.Changed(after)
 }
 
 // postCheck flags a validation whose verdict is already in when the lead
 // worktree changed.
 func (w *Watch) postCheck(bool) {
-	if w.leadChanged() {
+	if changed := w.leadChanged(); len(changed) > 0 {
 		_ = w.Svc.FlagScopeViolation(w.ValidationID)
 	}
+}
+
+// scopeSummary names what changed (at most five paths), so a person can tell a
+// validator that edited a file from a build artifact the lead's own tools wrote.
+func scopeSummary(changed []string) string {
+	shown := changed
+	more := ""
+	if len(shown) > 5 {
+		more = fmt.Sprintf(" and %d more", len(shown)-5)
+		shown = shown[:5]
+	}
+	return "the lead's worktree changed while the validator ran: " + strings.Join(shown, ", ") + more
 }
 
 // Run ticks every period until the watch is done or ctx is cancelled.
