@@ -337,7 +337,7 @@ var humanOnly = []string{
 	"settings.set", "auth.setPassword", "daemon.setPassword", "set-password", "session.identify",
 	"run.respondPermission", "run.setPermissionMode", "run.start", "run.stop", "run.setConfigOption",
 	"task.create", "task.archive", "task.prompt", "task.setBudget", "task.stopTree", "task.commit", "task.push", "task.createPr",
-	"workspace.create", "workspace.delete", "workspace.setScripts", "workspace.get",
+	"workspace.create", "workspace.delete", "workspace.setScripts", "workspace.get", "workspace.readiness",
 	"terminal.create", "terminal.write", "file.write", "file.read", "fs.listDir", "learning.setMode", "learning.curate",
 	"run.logs", "task.diff", "usage.summary", "daemon.info",
 }

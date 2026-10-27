@@ -137,6 +137,7 @@ Usage:
   smind workspace create <repoPath> <name> <policy>       register a workspace
   smind workspace ls                                      list workspaces
   smind workspace setup show|set|clear <workspaceId>      worktree setup/teardown scripts
+  smind workspace readiness [workspaceId] [--json]        check whether a repo is ready for agents
                                                            [--setup-file F|-] [--teardown-file F|-]
 
   smind account add [--base-url <url>] <provider> <label> < credential

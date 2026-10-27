@@ -1,4 +1,4 @@
-import type { Task, Workspace, WorkspaceDefaultBase, WorkspaceWithScripts } from "@/lib/types";
+import type { Task, Workspace, WorkspaceDefaultBase, WorkspaceReadiness, WorkspaceWithScripts } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
 /** Loads a workspace including its setup/teardown script text (workspace.get is the only method that returns it, ADR-0024). */
@@ -32,4 +32,9 @@ export function setWorkspaceDefaultBase(
 /** Re-runs the workspace's setup script on a finished task; resolves with the task, already back in "running". */
 export function retryTaskSetup(client: WsClientLike, taskId: number): Promise<Task> {
   return client.call<Task>("task.retrySetup", { id: taskId });
+}
+
+/** Runs the static agent-readiness check of the workspace's repo (workspace.readiness; read-only, recomputed each call). */
+export function getWorkspaceReadiness(client: WsClientLike, workspaceId: number): Promise<WorkspaceReadiness> {
+  return client.call<WorkspaceReadiness>("workspace.readiness", { workspaceId });
 }

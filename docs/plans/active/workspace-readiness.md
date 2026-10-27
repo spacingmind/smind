@@ -52,12 +52,19 @@ Web: `readiness-panel.test.tsx` (loading, findings, error, Re-check re-calls the
 
 ## Progress
 
-- [ ] plan PR
-- [ ] readiness package + tests
-- [ ] RPC + CLI
-- [ ] web panel + screenshots
-- [ ] docs
+- [x] plan PR (#675)
+- [x] readiness package + tests
+- [x] RPC + CLI
+- [x] web panel + screenshots
+- [x] docs
 
 ## Validation
 
-(filled in when done)
+- AC1-AC4: `internal/readiness` tests (all named scenarios pass, `-race`). Mutations, each run once and each failed its test: exec a Taskfile command -> `TestReadiness_NeverExecutesRepoCode`; `os.Stat` for `os.Lstat` -> `TestReadiness_SymlinkOutOfRepoNotFollowed`; read cap removed -> `TestReadiness_BoundedReads`; warn reported as pass -> `TestReadiness_EmptyRepo_AllWarnWithFix` (+3 more).
+- AC5: `TestWorkspaceReadiness_RPC_Guards` (local, relay, run-scoped refused, unknown id, cap). Mutation: `workspace.readiness` added to `RunScopedMethods` -> that test fails. `workspace.readiness` is in the plugin never list (`TestPluginSession_CannotReachHumanOnlyMethods`). The `.env` listing is `workspace.TrackedEnvFiles` (`TestTrackedEnvFiles`).
+- AC6: `TestWorkspaceReadiness_CLI_Table_And_JSON`; live against an isolated daemon (own `SMIND_HOME`, port 4931): table, `--json`, unknown id exits 1.
+- AC7: `readiness-panel.test.tsx` (loading, findings, error, Re-check). Screenshots light+dark at 1280 and 390 plus 12-frame open and Re-check transition sheets, reviewed (`/tmp/b6/frames`). The review found the dialog had no max height, so a tall dialog was clipped at top and bottom; fixed with `max-h-[calc(100dvh-2rem)] overflow-y-auto` on the dialog. No new icon (reuses success/warning/info/refresh), so the icon drift snapshot is unchanged.
+- AC8: public-docs paragraph; `task docs:cli` regenerated; docs drift tests pass.
+- `task lint`, `tsc -b`, `go test -race` on readiness, wsapi, workspace, cmd/smind pass. Full vitest: 3898 pass; `open-in-editor.test.tsx` failed 3 tests once under load and passes alone (8/8).
+
+Not done: mobile; any web mutation run; no live LLM calls were made.

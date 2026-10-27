@@ -32,6 +32,13 @@ A workspace can also run setup and teardown scripts in each task worktree. See
 `smind workspace setup show|set|clear` in the [CLI reference](cli-reference.md),
 or **Worktree settings** in the workspace's row menu in the sidebar.
 
+To see whether a repository is set up for agents, run `smind workspace readiness [workspaceId]`
+(or open **Worktree settings** and read **Agent readiness**). It reads the repo's files
+only, and never runs any of its scripts or touches the network. It lists what is
+there (agent instructions, a test and a lint command, a setup script, a
+`.gitignore`, CI, docs, lockfiles) and what is missing, with a one-line hint for each
+gap. Warnings are advice; they never block a task.
+
 To remove a workspace, use **Delete workspace** in the same menu. This only
 removes it from smind. Files on disk stay, and uncommitted work in task
 worktrees is saved to each task's branch first.

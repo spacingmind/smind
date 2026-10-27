@@ -40,6 +40,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"workspace.list":           handleWorkspaceList(wm),
 		"workspace.get":            handleWorkspaceGet(wm),
 		"workspace.setScripts":     handleWorkspaceSetScripts(wm),
+		"workspace.readiness":      handleWorkspaceReadiness(wm),
 		"workspace.delete":         handleWorkspaceDelete(wm),
 		"space.create":             handleSpaceCreate(wm),
 		"space.list":               handleSpaceList(wm),

@@ -455,3 +455,21 @@ func taskDiffStat(worktreePath, base string) (files, insertions, deletions int, 
 	deletions, _ = strconv.Atoi(m[3])
 	return files, insertions, deletions, nil
 }
+
+// TrackedEnvFiles lists the git-tracked paths under dir that are named .env
+// or .env.*, through the hardened runner. The pathspecs keep the output small
+// on a large repo; the readiness check filters template names itself.
+func TrackedEnvFiles(ctx context.Context, dir string) ([]string, error) {
+	out, err := runGitOutputEnvCtx(ctx, dir, nil, "ls-files", "-z", "--",
+		".env", ".env.*", ":(glob)**/.env", ":(glob)**/.env.*")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, p := range strings.Split(out, "\x00") {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
