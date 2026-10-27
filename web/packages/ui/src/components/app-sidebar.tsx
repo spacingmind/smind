@@ -334,6 +334,7 @@ export function AppSidebar({
   onTasksChange,
   onWorkspacesChange,
   onOpenSettings,
+  onOpenInbox,
   connectionStatus = "connected",
   connectionStatusText,
   headerActions,
@@ -380,6 +381,8 @@ export function AppSidebar({
    * "providers".
    */
   onOpenSettings?: (sectionId?: string) => void;
+  /** Opens the Human inbox (ADR-0045); the footer shows its unseen count. */
+  onOpenInbox?: () => void;
   /** The daemon connection state and its human text (App.tsx's STATUS_LABEL / connect error) -- the footer's Host popover shows it. */
   connectionStatus?: ConnectionStatus;
   connectionStatusText?: string;
@@ -960,6 +963,7 @@ export function AppSidebar({
           agentCount={profiles.length}
           onAddWorkspace={() => setCrud({ kind: "workspace" })}
           onOpenSettings={onOpenSettings}
+          onOpenInbox={onOpenInbox}
         />
       </SidebarFooter>
 
