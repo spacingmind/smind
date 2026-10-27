@@ -122,6 +122,21 @@ func (reg *Registry) withRunContract(ctx context.Context, r *run) context.Contex
 		return ctx
 	}
 	c := taskrunner.RunContract{Instructions: text}
+	if extra, ok := reg.runEnv(r.taskID); ok {
+		// ADR-0045: a validator run gets the built-in smind entry whatever
+		// its profile says; the entry's env switches `smind mcp serve` to
+		// the validator-only catalogue and carries the one-time token.
+		c.Mcp = &taskrunner.McpPolicy{Orchestration: true, Env: map[string]string{
+			"SMIND_HOME":    reg.smindHomeDir(),
+			"SMIND_RUN_ID":  r.id,
+			"SMIND_TASK_ID": strconv.FormatInt(r.taskID, 10),
+			"SMIND_CHAT_ID": strconv.FormatInt(r.chatID, 10),
+		}}
+		for k, v := range extra {
+			c.Mcp.Env[k] = v
+		}
+		return taskrunner.WithRunContract(ctx, c)
+	}
 	if p.OrchestrationTools != nil {
 		c.Mcp = &taskrunner.McpPolicy{Orchestration: *p.OrchestrationTools}
 		if *p.OrchestrationTools {
@@ -134,6 +149,25 @@ func (reg *Registry) withRunContract(ctx context.Context, r *run) context.Contex
 		}
 	}
 	return taskrunner.WithRunContract(ctx, c)
+}
+
+// SetRunEnvSource installs the hook that supplies extra MCP environment for a
+// task's runs (the validator seat, ADR-0045). The returned map is policy, never
+// logged.
+func (reg *Registry) SetRunEnvSource(fn func(taskID int64) (map[string]string, bool)) {
+	reg.mu.Lock()
+	reg.runEnvSource = fn
+	reg.mu.Unlock()
+}
+
+func (reg *Registry) runEnv(taskID int64) (map[string]string, bool) {
+	reg.mu.Lock()
+	fn := reg.runEnvSource
+	reg.mu.Unlock()
+	if fn == nil {
+		return nil, false
+	}
+	return fn(taskID)
 }
 
 // SetSmindHome records the daemon's home directory, handed to orchestration

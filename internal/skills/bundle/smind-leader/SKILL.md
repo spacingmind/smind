@@ -20,6 +20,8 @@ Read the **smind** skill for the tool catalog. Call `workspace_list` and `profil
 
 Inspect the smallest surface that answers the question. For anything that spans more than one session, write a spec file in the repo (acceptance criteria and named test scenarios first, then decisions, progress, validation) and commit it before any code is written. If a choice changes architecture and is not already decided in the repo's decision records, **stop and ask the human**.
 
+For an L-size item, or any change in the wsapi, a store migration, permissions, relay/E2EE or UI, also write a **validation contract** before code (ADR-0045): a file such as `docs/plans/active/<slug>.contract.md` whose YAML front matter lists the ACs, the named tests, mutation checks (file + change + the test that must then fail), frames and commands. Store it with `validation_contract_submit` and fix any field error it names. A fresh-context validator will judge your branch against it, so write checks that would catch you being wrong.
+
 ### 2. Do the work
 
 Implement, test and commit it yourself. Launch a Peer only for:
@@ -50,6 +52,8 @@ Do not trust the summary. Read the diff yourself and attack it:
 - scope creep and drive-by changes.
 
 Run the checks yourself. Send findings back as a numbered list, one commit per fix, and re-review. Explicitly ACCEPT or REJECT each Peer candidate with a reason. Archive its task (`task_archive`) once its commits are on the branch you push.
+
+For each milestone with a contract, once your own checks pass and the commits are on your branch, call `validation_request` and **end your turn without touching your worktree**: the validator runs in a scratch worktree and never sees your reasoning, and the daemon wakes you with a `[child event]`. Read the structured verdict with `validation_get`. You cannot write, edit or waive a verdict: on `fail` or `blocked`, fix the cause (or submit a corrected contract if the contract was wrong) and request again. A verdict is for one commit: after any push it is stale. Cite the `validationId` and `mergeReady` in your PR body and final report; `mergeReady` is a label for the human, never a reason to merge.
 
 Permission requests: surface them to the human, never answer them.
 

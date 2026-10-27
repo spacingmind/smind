@@ -221,7 +221,7 @@ func (s *Service) SubmitVerdict(id int64, token, runID string, raw []byte) (View
 	if subtle.ConstantTimeCompare([]byte(hashToken(token)), []byte(val.TokenHash)) != 1 || token == "" {
 		return View{}, ErrBadToken
 	}
-	if val.RunID == "" || runID != val.RunID {
+	if !s.isValidatorRun(val, runID) {
 		return View{}, ErrWrongRun
 	}
 	if val.VerdictJSON != "" {
@@ -256,6 +256,23 @@ func (s *Service) SubmitVerdict(id int64, token, runID string, raw []byte) (View
 	}
 	s.publish(val.TaskID, id, v.Status)
 	return s.View(id)
+}
+
+// isValidatorRun reports whether runID is the validator's: the bound run, or
+// any run of the validator's own task (a rate-limit wait re-queues the prompt
+// as a new run of the same chat).
+func (s *Service) isValidatorRun(val store.Validation, runID string) bool {
+	if runID == "" {
+		return false
+	}
+	if val.RunID != "" && runID == val.RunID {
+		return true
+	}
+	if val.ValidatorTaskID == nil {
+		return false
+	}
+	r, err := s.DB.GetRun(runID)
+	return err == nil && r.TaskID == *val.ValidatorTaskID
 }
 
 // WriteBlocked is the daemon's own verdict: blocked with one of the

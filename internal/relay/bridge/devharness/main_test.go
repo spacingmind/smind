@@ -312,6 +312,25 @@ func TestQueueDeliversWhenTheLiveRunIsStopped(t *testing.T) {
 	p.mustOK("quit")
 }
 
+// TestSeedLiveReturnsOnlyOnceTheAgentIsInItsScenario: a run is "running" from
+// the moment it is registered, before the agent has read its scenario file, so
+// a test that rewrites the scenario or stops the run right after seed-live
+// raced the agent's start (the CI flake "timed out waiting for live run
+// stopped"). seed-live must not return before the hang scenario's first chunk.
+func TestSeedLiveReturnsOnlyOnceTheAgentIsInItsScenario(t *testing.T) {
+	p := startFake(t)
+	m := p.mustOK("seed-live hang Live")
+	st := p.mustOK("run-status " + m2s(m["runId"]))
+	if st["status"] != "running" || st["textEvents"].(float64) < 1 {
+		t.Fatalf("seed-live returned before the agent was inside the scenario: %v", st)
+	}
+	// So rewriting the scenario now cannot change this run: it still hangs.
+	p.mustOK("set-scenario " + fmtInt(int64(m["taskId"].(float64))) + " default")
+	p.mustOK("stop-run " + m2s(m["runId"]))
+	eventually(t, "live run stopped", func() bool { return p.mustOK("run-status " + m2s(m["runId"]))["status"] == "stopped" })
+	p.mustOK("quit")
+}
+
 // TestQueueInterruptStopsTheLiveRunAndGoesFirst (ADR-0021): an interrupt
 // prompt stops the live run and is delivered before earlier queued prompts.
 func TestQueueInterruptStopsTheLiveRunAndGoesFirst(t *testing.T) {

@@ -313,7 +313,7 @@ smind shows its command before you enable the plugin.
   `dataDir` and `settings` (your values with secrets in the clear, the defaults for
   what is unset) on the process's stdin, in `Content-Length`-framed JSON-RPC 2.0
   (the framing language servers use), and the plugin has 10 seconds to answer
-  it. Hooks are not available yet; see [What a plugin may call](#what-a-plugin-may-call).
+  it. Hooks are described under [Hooks](#hooks).
 - **Limits.** A frame body is at most 1 MiB and a header line 1 KiB. A malformed
   or oversize frame closes the connection and kills the process; it counts as a
   crash.
@@ -344,6 +344,7 @@ may call, grouped by the `capabilities` its manifest declares and you confirmed:
 | `mcp.read` | `mcp.list`, `mcp.get` |
 | `profiles.read` | `profile.list`, `profile.get` |
 | `events.observe` | `events.subscribe`, `events.unsubscribe` |
+| `tasks.write` | `task.send` (also needs `tasks.read`) |
 
 Everything else is refused. A method in the table whose capability the plugin did
 not declare fails with `forbidden` (code -32001) naming the capability; any other
@@ -352,8 +353,9 @@ the plugin declares, it can never call the plugin, provider, account, relay,
 automation or settings methods, anything that writes your tasks, runs, MCP
 servers or profiles, or anything that answers or changes a permission request.
 Results are redacted copies: token shapes and home paths are removed and a task's
-setup output is left out. `tasks.write`, `files.read`, `ui.notify` and
-`hooks.beforeRun` can be declared but grant nothing yet.
+setup output is left out. `files.read` and `ui.notify` can be declared but grant
+nothing yet; `hooks.beforeRun` grants no call, it lets the `run.beforeStart` hook
+run (see [Hooks](#hooks)).
 
 This is mediation, not isolation: a process running as you can still read your
 files, including smind's token.
@@ -371,6 +373,67 @@ slows smind or other subscribers (after 10 seconds without reading, the
 connection is closed and the process counts as crashed). A plugin may observe
 that a permission request is pending, with its ids and option names, but not its
 `summary`, and it has no way to answer it.
+
+**`task.send`.** With `tasks.write` (and `tasks.read`: a plugin may only message a
+task it could read) a plugin can queue one prompt: `task.send {taskId, chatId?,
+prompt, whenBusy?, model?}`. `whenBusy` is `queue` (the default) or `reject`; the
+chat must already have a provider. The message is stored with source
+`plugin:<id>` and delivered to the agent with a `[message from plugin <id>]`
+header, so the agent and you can tell it from your own text. The send cannot set
+the provider, the permission mode, auto-accept or a profile (those params are
+ignored), cannot create a task (so `orchestration.maxDepth` cannot be exceeded),
+and the run it starts is under the per-tree concurrency guard and the tree budget.
+It is limited to 6 sends a minute and 60 an hour per plugin and 20 an hour per
+task tree, and a plugin whose own messages started the last 3 runs of a chat may
+not send into it again until something else has run there: that is what stops a
+`run.finished` hook that answers every run with a send. A refusal is an error to
+the plugin (code -32003, saying which limit and when it frees up) and shows as the
+plugin's error in `smind plugin show` and the Plugins page.
+
+### Hooks
+
+A plugin with a process can subscribe to two events in `contributes.hooks`; smind
+tells it with a request or notification on the same stdio connection, and no hook
+can approve, deny or answer a permission request (smind has no auto-approval), or
+rewrite a tool call.
+
+- **`run.finished`** (observe only). `hook.run.finished` is a notification with
+  `{runId, taskId, chatId, provider, model, origin, status, stopReason?,
+  failureKind?, toolCalls}`: ids and states, never the prompt or the output, with
+  secret shapes redacted. Delivery is best effort from a per-plugin queue (64
+  events, the newest is dropped when it is full), so a slow plugin never delays
+  smind. System runs (learning, probes) are not reported.
+- **`run.beforeStart`** (needs the `hooks.beforeRun` capability). Just before an
+  agent starts, smind sends `hook.run.beforeStart {runId, taskId, chatId,
+  workspaceId, provider, model, permissionMode, origin}` and waits at most 10
+  seconds. The answer may hold exactly three fields and smind checks every one:
+  - `additionalContext` (string, at most 8 KiB): appended to the prompt the agent
+    gets, in a block labeled `[plugin <id>]` ... `[end plugin <id>]`. The run's
+    stored prompt stays the sender's text, and the run's timeline says how many
+    bytes were added, never the text.
+  - `env` (object of strings, at most 16 entries, values at most 4 KiB): added to
+    the agent's environment. Names are upper case letters, digits and `_`; names
+    smind, a provider or the loader use are refused (`SMIND_*`, `ANTHROPIC_*`,
+    `CLAUDE*`, `OPENAI_*`, `GIT_*`, `LD_*`, `DYLD_*`, `PATH`, `HOME`, proxies and
+    anything ending `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD`), and a key that is
+    already set is never overridden. Codex runs take no per-run environment.
+  - `mcpServers` (list of names): servers this same plugin contributes, by manifest
+    name or `<id>__<name>`. Any other name, another plugin's included, is refused.
+  Any other field (`provider`, `cwd`, `model`, `profile`, `permissionMode`,
+  `autoAccept`, a permission decision, a rewritten input, anything unknown) fails
+  the hook with a typed error naming the field; nothing from a failed answer is
+  applied. With several plugins, hooks run in plugin id order and then in the order
+  of the manifest; instructions are appended in that order, the first plugin to set
+  an env key keeps it, and nothing is merged deeper than that.
+
+Each hook has `onError`: `open` (the default) runs the task anyway and shows the
+failure on the plugin (`lastError`, the log and a note on the run), `closed` fails
+the start naming the plugin and the reason. A plugin that is not running (crashed,
+restarting, failed) or lacks the capability is skipped and the skip is shown; smind
+never waits for it. A hook that answers with a JSON-RPC error is a failure, which is
+how a `closed` hook stops a start. Names follow Claude Code's hook vocabulary where
+they mean the same (`additionalContext`; `run.finished` is its `Stop`); there are no
+exit codes, since a plugin answers over JSON-RPC.
 
 ## Further reading
 

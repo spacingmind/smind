@@ -43,7 +43,7 @@ type Input struct {
 	TaskID  int64
 	ChatID  int64
 	RunID   string
-	Summary string // permission summary
+	Summary string // permission summary; for kind error, a body that replaces "Run failed"
 	Err     string // run error text (kind error)
 	Minutes int    // idle minutes (kind stalled)
 }
@@ -343,6 +343,9 @@ func (n *Notifier) event(in Input, info TaskInfo, now time.Time) Event {
 		body = "Run failed"
 		if in.Err != "" {
 			body += ": " + in.Err
+		}
+		if in.Summary != "" { // a daemon-authored alert on the failed task (an automation auto-pause)
+			body = in.Summary
 		}
 	case KindStalled:
 		body = "Tree stalled: " + title + " has been idle for " + strconv.Itoa(in.Minutes) + " min"

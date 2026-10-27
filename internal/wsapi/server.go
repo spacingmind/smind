@@ -312,9 +312,11 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		hs[method] = h
 	}
 	hs["skill.list"] = handleSkillList(pluginMgr)
-	for method, h := range validationHandlers(newValidationService(db, bus)) {
+	valSvc := newValidationService(db, bus)
+	for method, h := range validationHandlers(valSvc) {
 		hs[method] = h
 	}
+	hs["validation.request"] = newValidationSeat(valSvc, wm, db, reg, runner, profReg).request
 	hs["session.identify"] = handleSessionIdentify(reg)
 	inboxH := newInboxHost(db, bus, reg, newValidationService(db, bus), stalled)
 	for method, h := range inboxHandlers(inboxH) {
@@ -340,6 +342,9 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	}
 	pluginHS["profile.list"] = profileListRaw
 	pluginReg.bind(pluginHS, bus)
+	pluginReg.bindSender(&pluginSender{wm: wm, runner: runner, reg: reg, db: db, mgr: pluginMgr, lim: newSendLimiter()})
+	reg.SetLaunchHooks(pluginHooks{pluginMgr})
+	reg.AddObserver(pluginHooks{pluginMgr})
 	api := &API{inbox: inboxH, automations: automations, plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1

@@ -44,13 +44,23 @@ func isAre(n int) string {
 	return "are"
 }
 
+// budgetedOrigin reports an origin the tree budget applies to: an agent, and
+// a plugin's task.send (ADR-0042 PB.3), which spends the tree's money like one.
+func budgetedOrigin(origin string) bool {
+	if origin == store.ChatQueueSourceAgent {
+		return true
+	}
+	_, plugin := store.PluginSourceID(origin)
+	return plugin
+}
+
 // checkBudget is the tree budget's admission check. It must be called BEFORE
 // reg.mu is taken (it reads the store). Only an agent-sourced launch into a
 // tree whose root has a budget is checked, with one TreeKnownCost query;
 // every other origin (human, orchestrator, child_event, unknown) and every
 // unbudgeted tree costs no query. A budget is reached when known >= budget.
 func (reg *Registry) checkBudget(origin string, root store.Task) error {
-	if origin != store.ChatQueueSourceAgent || root.BudgetUSD == nil {
+	if !budgetedOrigin(origin) || root.BudgetUSD == nil {
 		return nil
 	}
 	if reg.budgetCostRead != nil {
@@ -153,7 +163,7 @@ func budgetReachedText(be *BudgetExceededError) string {
 // the tree root and refuses with *BudgetExceededError exactly as run
 // admission does; a nil error means the tree has no budget or is under it.
 func (reg *Registry) CheckTreeBudget(parentTaskID int64, origin string) error {
-	if origin != store.ChatQueueSourceAgent {
+	if !budgetedOrigin(origin) {
 		return nil
 	}
 	_, root, err := reg.treeRootTask(parentTaskID)

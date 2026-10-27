@@ -18,6 +18,7 @@ import (
 	"github.com/spacingmind/smind/internal/plugins/host/hosttest"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
+	"github.com/spacingmind/smind/internal/workspace"
 )
 
 const allCaps = `["events.observe","tasks.read","mcp.read","profiles.read"]`
@@ -25,17 +26,31 @@ const allCaps = `["events.observe","tasks.read","mcp.read","profiles.read"]`
 // procEnv is a real API with plugins on and process plugins (the test binary
 // re-executed by hosttest) installed and running.
 type procEnv struct {
-	api  *API
-	db   *store.Store
-	task store.Task
-	home string
+	api    *API
+	db     *store.Store
+	task   store.Task
+	home   string
+	wm     *workspace.Manager
+	runner *taskrunner.Runner
 }
 
 type procPlugin struct {
 	id, caps, mode, settings string
+	// args are extra arguments of the helper mode; contributes is the
+	// manifest's `contributes` object (JSON); noWait skips waiting for the
+	// process to run (a plugin that crashes at once).
+	args        []string
+	contributes string
+	noWait      bool
 }
 
 func newProcEnv(t *testing.T, ps ...procPlugin) *procEnv {
+	t.Helper()
+	return newProcEnvOpts(t, nil, ps...)
+}
+
+// newProcEnvOpts is newProcEnv with extra runner options (a fake agent).
+func newProcEnvOpts(t *testing.T, ropts []taskrunner.Option, ps ...procPlugin) *procEnv {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("SMIND_HOME", home)
@@ -44,13 +59,13 @@ func newProcEnv(t *testing.T, ps ...procPlugin) *procEnv {
 	}
 	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
-	runner := taskrunner.New(wm, taskrunner.WithMcpServers(mcpservers.New(db)))
+	runner := taskrunner.New(wm, append([]taskrunner.Option{taskrunner.WithMcpServers(mcpservers.New(db))}, ropts...)...)
 	api, err := New(wm, newTestAccountsRegistry(t), runner, db, "tok")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(api.Close)
-	e := &procEnv{api: api, db: db, task: task, home: home}
+	e := &procEnv{api: api, db: db, task: task, home: home, wm: wm, runner: runner}
 	for _, p := range ps {
 		e.install(t, p)
 	}
@@ -59,10 +74,13 @@ func newProcEnv(t *testing.T, ps ...procPlugin) *procEnv {
 
 func (e *procEnv) install(t *testing.T, p procPlugin) {
 	t.Helper()
-	cmd, _ := json.Marshal(hosttest.Command(p.mode))
+	cmd, _ := json.Marshal(hosttest.Command(p.mode, p.args...))
 	extra := ""
 	if p.settings != "" {
 		extra = `,"settings":` + p.settings
+	}
+	if p.contributes != "" {
+		extra += `,"contributes":` + p.contributes
 	}
 	man := `{"id":"` + p.id + `","name":"P","version":"1.0.0","api":1,"engines":{"smind":">=0.1.0"},"process":{"command":` + string(cmd) + `},"capabilities":` + p.caps + extra + `}`
 	dir := t.TempDir()
@@ -76,7 +94,9 @@ func (e *procEnv) install(t *testing.T, p procPlugin) {
 	if _, err := e.call("plugin.enable", localRC(), map[string]any{"id": p.id, "confirm": res.(plugins.Info).Consent.Fingerprint}); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
-	e.waitRunning(t, p.id)
+	if !p.noWait {
+		e.waitRunning(t, p.id)
+	}
 }
 
 func (e *procEnv) waitRunning(t *testing.T, id string) {

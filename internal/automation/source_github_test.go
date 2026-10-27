@@ -308,3 +308,18 @@ func TestGHSource_CursorAdvancesOnlyAfterAuditAndLaunch(t *testing.T) {
 		t.Fatalf("rows = %v", decisions(rows))
 	}
 }
+
+// A run on another branch is never a signal even if the client returns it.
+func TestGHSource_RunOnOtherBranchIsNotASignal(t *testing.T) {
+	g := newGHEnv(t)
+	g.ff.runs = []forge.WorkflowRun{run(10, "completed", "success", "a")}
+	a := g.create(g.def(KindWorkflowRun), true)
+	g.tick()
+	other := run(11, "completed", "failure", "bad1111")
+	other.Branch = "feature/x"
+	g.ff.runs = append([]forge.WorkflowRun{other}, g.ff.runs...)
+	g.poll(6 * time.Minute)
+	if g.fs.count() != 0 || len(g.audit(a.ID)) != 0 {
+		t.Fatalf("a run on feature/x fired (%d starts)", g.fs.count())
+	}
+}

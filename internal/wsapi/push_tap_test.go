@@ -10,6 +10,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/push"
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/store"
 )
 
 // pushKinds is the default kind list the push RPC tests compare against.
@@ -192,5 +193,46 @@ func TestStalledBusEventEmitted(t *testing.T) {
 	decodePayload(t, n, &raw)
 	if raw["taskId"] != 9.0 || raw["title"] != "lead" || raw["minutes"] != 15.0 || raw["since"] != "2026-10-25T01:00:00Z" || len(raw) != 4 {
 		t.Fatalf("payload = %v", raw)
+	}
+}
+
+// ADR-0044 question 7: an auto-pause notifies, as an "error" push on the failed
+// task (the kind devices already subscribe to and the phone already renders).
+func TestPushInputAutomationPaused(t *testing.T) {
+	t.Parallel()
+	ev := Event{Topic: TopicAutomationPaused, Payload: automationPausedPayload{AutomationID: 3, TaskID: 12, Reason: "paused after 3 consecutive failed runs; last: task #12 ended `error`"}}
+	got, ok := pushInput(ev)
+	want := push.Input{Kind: push.KindError, Key: "autopause:3:12", TaskID: 12, Summary: "Automation paused: paused after 3 consecutive failed runs; last: task #12 ended `error`"}
+	if !ok || got != want {
+		t.Fatalf("pushInput = (%+v, %v), want (%+v, true)", got, ok, want)
+	}
+	for name, bad := range map[string]Event{
+		"no task to open": {Topic: TopicAutomationPaused, Payload: automationPausedPayload{AutomationID: 3, Reason: "x"}},
+		"wrong payload":   {Topic: TopicAutomationPaused, Payload: "nope"},
+	} {
+		if _, ok := pushInput(bad); ok {
+			t.Errorf("%s: pushInput ok = true, want false", name)
+		}
+	}
+	// fired and updated never notify.
+	for _, topic := range []string{TopicAutomationFired, TopicAutomationUpdated} {
+		if _, ok := pushInput(Event{Topic: topic, Payload: automationUpdatedPayload{AutomationID: 3}}); ok {
+			t.Errorf("%s notified", topic)
+		}
+	}
+}
+
+// The sink the engine uses carries the failed task id into the bus event.
+func TestAutomationSink_PausedCarriesTaskID(t *testing.T) {
+	h := newAutoHarness(t)
+	var got []Event
+	h.bus.setTap(func(e Event) { got = append(got, e) })
+	automationSink{h: newAutomationHost(h.db, h.bus, t.TempDir())}.Paused(store.Automation{ID: 3}, "why", 12)
+	if len(got) != 1 {
+		t.Fatalf("events = %d", len(got))
+	}
+	p, ok := got[0].Payload.(automationPausedPayload)
+	if !ok || p.TaskID != 12 || p.AutomationID != 3 || p.Reason != "why" {
+		t.Fatalf("payload = %+v", got[0].Payload)
 	}
 }

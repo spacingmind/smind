@@ -867,15 +867,21 @@ func (h *harness) seedLive(args []string) (map[string]any, error) {
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		_, st, err := h.api.Runs.History(runID)
+		hist, st, err := h.api.Runs.History(runID)
 		if err != nil {
 			return nil, err
 		}
-		if st.Status == runs.StatusRunning {
-			break
-		}
 		if st.Status == runs.StatusError {
 			return nil, fmt.Errorf("live run failed: %s", st.Err)
+		}
+		// "running" holds from the moment the run is registered, before the
+		// agent process has read its scenario file. A caller that then
+		// rewrites the scenario (set-scenario) or stops the run races the
+		// agent's start, so for the scenarios that stream a first chunk
+		// wait until that chunk is in the history: the agent is then inside
+		// the scenario and a later set-scenario cannot change this run.
+		if st.Status == runs.StatusRunning && (!streamsFirst(args[0]) || hasTextEvent(hist)) {
+			break
 		}
 		if time.Now().After(deadline) {
 			return nil, errors.New("timed out waiting for the live run to start")
@@ -893,6 +899,25 @@ func (h *harness) seedLive(args []string) (map[string]any, error) {
 		"runId":       runID,
 		"status":      "running",
 	}, nil
+}
+
+// streamsFirst reports whether the fake agent's scenario sends a text chunk
+// before it blocks (hang, hold and slow do; permission scenarios ask first).
+func streamsFirst(scenario string) bool {
+	switch scenario {
+	case "hang", "hold", "slow":
+		return true
+	}
+	return false
+}
+
+func hasTextEvent(events []runs.Event) bool {
+	for _, e := range events {
+		if e.Type == taskrunner.EventTypeText {
+			return true
+		}
+	}
+	return false
 }
 
 // setScenario overwrites the fake agent's scenario file in a task worktree.
@@ -1020,9 +1045,15 @@ func (h *harness) runStatus(args []string) (map[string]any, error) {
 	if err := need(args, 1, "run-status <runId>"); err != nil {
 		return nil, err
 	}
-	_, st, err := h.api.Runs.History(args[0])
+	events, st, err := h.api.Runs.History(args[0])
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"status": st.Status, "stopReason": st.StopReason, "disposition": st.Disposition}, nil
+	texts := 0
+	for _, e := range events {
+		if e.Type == taskrunner.EventTypeText {
+			texts++
+		}
+	}
+	return map[string]any{"status": st.Status, "stopReason": st.StopReason, "disposition": st.Disposition, "textEvents": texts}, nil
 }

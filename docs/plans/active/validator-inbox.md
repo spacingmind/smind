@@ -79,9 +79,21 @@ Non-stacked: each PR branches from `origin/develop`; a PR that needs an earlier 
 
 ## Progress
 
-- P0 plan: this PR.
-- P1–P5: not started.
+- P0 plan: merged (#656).
+- P1 contract + verdict + RPC/CLI: merged (#659). AC1-AC8.
+- P2 seat: this PR. AC9-AC14 (`validation.request`, scratch worktree at the exact sha on a new task branch rather than a detached HEAD, daemon-built prompt, validator-only MCP entry with an env token, post-check, timeout/budget/crash verdicts, `validator` seed replacing `reviewer`, skill and protocol text, fake-LLM test). Deviation: the ADR check that a mutation `file` exists at `base` is not built (needs git at an arbitrary base ref); P1's schema checks the path shape only.
+- P3-P5 inbox: not started.
 
 ## Validation
 
 Filled per PR: each AC → the test that confirms it, the mutation run and its failing test, commands (`task test`, `task lint`, `go test -race` on touched packages, `cd web && bunx tsc -b packages/ui`), screenshots for UI.
+
+### P2 (seat)
+
+- AC9 `TestRequest_OnlyOwnTaskOrHuman`, `TestRequest_SingleFlightPerTask`, `TestRequest_RefusesNonAncestorSha`, `TestRequest_OverBudgetRefusedForAgentNotHuman`, `TestValidatorSeat_E2E_FakeLLM` (worktree at the exact sha, parent = the Lead).
+- AC10 `TestValidatorPrompt_NeverContainsBodyOrLeadNotes`, `TestValidatorPrompt_E2E_HasNoLeadReasoning`, `TestValidatorMCPEntry_OnlyTwoTools`, `TestValidatorMCPEntry_TokenAndIdsComeFromEnvNotArguments`, `TestMCPServe_ValidatorEnvServesOnlyValidatorTools` (real stdio process), `TestValidatorEnv_OnlyForTheValidatorTask`.
+- AC11 `TestPostCheck_LeadWorktreeChangedIsScopeViolation`, `TestPostCheck_ValidatorWritingLeadWorktreeIsScopeViolation`. A Lead that edits its own worktree while a validation runs also trips this: the Lead must wait.
+- AC12 `TestTimeout_WritesBlockedTimeout`, `TestBudget_WritesBlockedBudget`, `TestCrash_RunEndedWithoutVerdictIsBlockedCrashed`, `TestRunEndWithoutVerdictIsBlockedCrashed_E2E`, `TestRateLimitWaitDoesNotConsumeWallClock`.
+- AC13 not built in the daemon: the flaky retry rule (re-run a failing test once, record `attempts`/`flaky`) is delivered as validator instructions and prompt text; the completeness check already accepts `attempts: 2`. A mechanical flaky check needs the validator's own tool output, which the daemon does not see.
+- AC14 `TestSeedRoles_CreatesThreeSeatsInOrder`, `TestSeedRoles_ExistingReviewerKept`, `TestSeedRoles_ValidatorNeverOverwritten`; skill and `docs/WORKSPACE_PROTOCOL.md` text.
+

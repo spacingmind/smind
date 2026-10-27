@@ -86,8 +86,9 @@ type Registry struct {
 
 	// observers receive RunFinished from finish (AddObserver). Guarded by
 	// observersMu, not mu: finish snapshots it without holding any lock.
-	observersMu sync.Mutex
-	observers   []Observer
+	observersMu     sync.Mutex
+	launchHooksSlot launchHooksSlot
+	observers       []Observer
 
 	// deliveryProvider, set by SetDeliveryProvider, prepares each user
 	// run's learned-skill delivery in drive. Guarded by observersMu.
@@ -193,6 +194,9 @@ type Registry struct {
 	// smindHome is the daemon home passed to seats' built-in MCP server
 	// (SetSmindHome). Guarded by mu.
 	smindHome string
+	// runEnvSource supplies a run's extra MCP environment by task (ADR-0045:
+	// the validator seat's verdict entry). Nil = none.
+	runEnvSource func(taskID int64) (map[string]string, bool)
 
 	// archiving holds the task ids currently mid-archive (TryBeginArchive
 	// adds, its release func removes). While a task id is in it, every
@@ -1121,12 +1125,22 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 	} else if r.isolation != nil {
 		err = runner.RunPromptIsolated(ctx, r.taskID, r.chatID, r.provider, r.prompt, r.model, *r.isolation, events)
 	} else {
-		ctx = reg.withDelivery(ctx, r)
-		ctx = reg.withRunContract(ctx, r)
-		if pa, ok := r.promptAttachments(); ok {
-			ctx = taskrunner.WithPromptAttachments(ctx, pa)
+		prompt := r.prompt
+		var hookErr error
+		ctx, prompt, hookErr = reg.applyLaunchHooks(ctx, r, prompt)
+		if hookErr != nil {
+			// A closed plugin hook failed: nothing is spawned. RunPrompt owns
+			// closing events, so do it here.
+			close(events)
+			err = hookErr
+		} else {
+			ctx = reg.withDelivery(ctx, r)
+			ctx = reg.withRunContract(ctx, r)
+			if pa, ok := r.promptAttachments(); ok {
+				ctx = taskrunner.WithPromptAttachments(ctx, pa)
+			}
+			err = runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, prompt, decider, r.getPerm(), r.thinkingLevel, r.model, events)
 		}
-		err = runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, r.prompt, decider, r.getPerm(), r.thinkingLevel, r.model, events)
 	}
 	<-forwardDone
 	reg.finish(r, err)
@@ -1551,7 +1565,7 @@ func (reg *Registry) finish(r *run, err error) {
 
 	reg.notifyObservers(RunFinished{
 		RunID: r.id, TaskID: r.taskID, ChatID: r.chatID, Provider: string(r.provider),
-		Purpose: observerPurpose(r.purpose), Status: string(status), StopReason: stopReason, ToolCalls: toolCalls,
+		Purpose: observerPurpose(r.purpose), Status: string(status), StopReason: stopReason, Model: r.model, Origin: r.origin, FailureKind: fail.Kind, ToolCalls: toolCalls,
 		OfferedSkillIDs: offered.SkillIDs, OfferedMeasured: offered.Measured,
 	})
 

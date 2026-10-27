@@ -27,6 +27,8 @@ interface Props {
   onDisconnect: () => void;
   /** Opens the read-only Plugins list (ADR-0042 PA.5). */
   onOpenPlugins: () => void;
+  /** Opens the read-only Automations list (ADR-0044 section 10). */
+  onOpenAutomations: () => void;
   state: ConnectionState;
 }
 
@@ -38,7 +40,7 @@ function statusText(state: ConnectionState): string {
   return 'Reconnecting…';
 }
 
-export function ConnectionSheet({ open, onClose, onDisconnect, onOpenPlugins, state }: Props) {
+export function ConnectionSheet({ open, onClose, onDisconnect, onOpenPlugins, onOpenAutomations, state }: Props) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   // defaultDeviceLabel is sync today but may go async (it reads the
@@ -72,7 +74,7 @@ export function ConnectionSheet({ open, onClose, onDisconnect, onOpenPlugins, st
               </Text>
             </View>
             <NotificationsRow />
-            <View style={styles.row}>
+            <View style={[styles.row, styles.rowDivider]}>
               <Text style={styles.rowLabel}>Plugins</Text>
               <TextButton
                 label="Open"
@@ -81,6 +83,18 @@ export function ConnectionSheet({ open, onClose, onDisconnect, onOpenPlugins, st
                   // iOS cannot push a screen while the sheet is still dismissing.
                   if (Platform.OS === 'ios') setTimeout(onOpenPlugins, 400);
                   else onOpenPlugins();
+                }}
+              />
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>Automations</Text>
+              <TextButton
+                label="Open"
+                onPress={() => {
+                  onClose();
+                  // iOS cannot push a screen while the sheet is still dismissing.
+                  if (Platform.OS === 'ios') setTimeout(onOpenAutomations, 400);
+                  else onOpenAutomations();
                 }}
               />
             </View>
