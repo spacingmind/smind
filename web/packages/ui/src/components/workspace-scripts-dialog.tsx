@@ -1,7 +1,15 @@
 import { useEffect, useId, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ReadinessPanel } from "@/components/readiness-panel";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { Input } from "@/components/ui/input";
 import type { Workspace } from "@/lib/types";
@@ -41,7 +49,11 @@ export function WorkspaceScriptsDialog({
   const [setup, setSetup] = useState("");
   const [teardown, setTeardown] = useState("");
   const [defaultBase, setDefaultBase] = useState("");
-  const [baseInfo, setBaseInfo] = useState<{ ref: string; detected: boolean; override: string } | null>(null);
+  const [baseInfo, setBaseInfo] = useState<{
+    ref: string;
+    detected: boolean;
+    override: string;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   // A failed load leaves the textareas empty and saving then would clear
   // both scripts, so Save stays disabled until a load succeeded.
@@ -56,7 +68,10 @@ export function WorkspaceScriptsDialog({
     setLoading(true);
     setLoaded(false);
     setError(null);
-    Promise.all([getWorkspaceScripts(client, workspace.ID), getWorkspaceDefaultBase(client, workspace.ID)])
+    Promise.all([
+      getWorkspaceScripts(client, workspace.ID),
+      getWorkspaceDefaultBase(client, workspace.ID),
+    ])
       .then(([ws, base]) => {
         if (cancelled) return;
         setSetup(ws.SetupScript ?? "");
@@ -85,7 +100,10 @@ export function WorkspaceScriptsDialog({
       if (baseInfo && trimmed !== baseInfo.override) {
         await setWorkspaceDefaultBase(client, workspace.ID, trimmed);
       }
-      await setWorkspaceScripts(client, workspace.ID, { setupScript: setup, teardownScript: teardown });
+      await setWorkspaceScripts(client, workspace.ID, {
+        setupScript: setup,
+        teardownScript: teardown,
+      });
       onSaved();
       onOpenChange(false);
     } catch (err) {
@@ -101,9 +119,11 @@ export function WorkspaceScriptsDialog({
         <DialogHeader>
           <DialogTitle>Worktree settings</DialogTitle>
           <DialogDescription>
-            {workspace.Title || workspace.Path} — the branch new tasks are measured against and open pull requests into, and
-            the scripts that run in each new task&apos;s worktree with SMIND_WORKTREE_PATH, SMIND_SOURCE_CHECKOUT_PATH,
-            SMIND_BRANCH, SMIND_PORT. Scripts are authored by you only — agents and repositories cannot change them.
+            {workspace.Title || workspace.Path} — the branch new tasks are
+            measured against and open pull requests into, and the scripts that
+            run in each new task&apos;s worktree with SMIND_WORKTREE_PATH,
+            SMIND_SOURCE_CHECKOUT_PATH, SMIND_BRANCH, SMIND_PORT. Scripts are
+            authored by you only — agents and repositories cannot change them.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -118,7 +138,10 @@ export function WorkspaceScriptsDialog({
           ) : (
             <>
               <div className="grid gap-1.5">
-                <label htmlFor={`${id}-default-base`} className="text-ui-base font-medium">
+                <label
+                  htmlFor={`${id}-default-base`}
+                  className="text-ui-base font-medium"
+                >
                   Default base branch
                 </label>
                 <Input
@@ -139,7 +162,10 @@ export function WorkspaceScriptsDialog({
                 )}
               </div>
               <div className="grid gap-1.5">
-                <label htmlFor={`${id}-setup`} className="text-ui-base font-medium">
+                <label
+                  htmlFor={`${id}-setup`}
+                  className="text-ui-base font-medium"
+                >
                   Setup script
                 </label>
                 <textarea
@@ -154,7 +180,10 @@ export function WorkspaceScriptsDialog({
                 />
               </div>
               <div className="grid gap-1.5">
-                <label htmlFor={`${id}-teardown`} className="text-ui-base font-medium">
+                <label
+                  htmlFor={`${id}-teardown`}
+                  className="text-ui-base font-medium"
+                >
                   Teardown script
                 </label>
                 <textarea
@@ -170,16 +199,30 @@ export function WorkspaceScriptsDialog({
               </div>
             </>
           )}
+          <ReadinessPanel client={client} workspaceId={workspace.ID} />
           {error && (
-            <p role="alert" data-testid="workspace-scripts-error" className="text-ui-base text-destructive">
+            <p
+              role="alert"
+              data-testid="workspace-scripts-error"
+              className="text-ui-base text-destructive"
+            >
               {error}
             </p>
           )}
           <DialogFooter>
-            <Button type="button" variant="quiet" onClick={() => onOpenChange(false)} data-testid="workspace-scripts-cancel">
+            <Button
+              type="button"
+              variant="quiet"
+              onClick={() => onOpenChange(false)}
+              data-testid="workspace-scripts-cancel"
+            >
               Cancel
             </Button>
-            <Button type="submit" disabled={pending || !loaded} data-testid="workspace-scripts-save">
+            <Button
+              type="submit"
+              disabled={pending || !loaded}
+              data-testid="workspace-scripts-save"
+            >
               {pending ? "Saving…" : "Save"}
             </Button>
           </DialogFooter>

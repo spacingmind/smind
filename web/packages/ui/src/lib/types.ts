@@ -24,6 +24,21 @@ export interface WorkspaceDefaultBase {
   override: string;
 }
 
+/** One workspace.readiness finding: a static check of the repo for agent use (never a command to run in fix). */
+export interface ReadinessFinding {
+  id: string;
+  status: "pass" | "warn" | "info";
+  title: string;
+  evidence: string;
+  fix: string;
+}
+
+export interface WorkspaceReadiness {
+  workspaceId: number;
+  findings: ReadinessFinding[];
+  checkedAt: string;
+}
+
 /** workspace.get's result: the workspace plus its setup/teardown script text ("" = none) -- the only wire method that returns it (ADR-0024). */
 export interface WorkspaceWithScripts extends Workspace {
   SetupScript: string;
@@ -298,7 +313,8 @@ export interface ProviderTestResult {
 // over the wire as their underlying string, same as any other Go string
 // enum with no json tag remapping.
 /** "interrupted" is a run whose daemon crashed under it (the startup reconciliation); a graceful restart reads "stopped" with stop reason daemon_restart. */
-export type RunStatusValue = "running" | "done" | "error" | "stopped" | "interrupted";
+export type RunStatusValue =
+  "running" | "done" | "error" | "stopped" | "interrupted";
 
 // Mirrors internal/runs.RunUsage (ADR-0020): a run's reported usage from
 // its own agent events. Every field but `source` is optional/null and
@@ -378,7 +394,8 @@ export type WhenBusy = "reject" | "queue" | "interrupt";
 // when the chat was busy and whenBusy was queue/interrupt, its
 // runQueuedResult -- ADR-0021 §2). Only reachable by explicitly passing
 // whenBusy, so a call without it stays the runId variant.
-export type RunStartResult = { runId: string } | { queued: true; queueItemId: number };
+export type RunStartResult =
+  { runId: string } | { queued: true; queueItemId: number };
 
 // One entry in a chat.queueList result or chat.queueUpdated snapshot
 // (internal/wsapi/handlers.go's chatQueueItemParams, ADR-0021 §8) --
@@ -560,7 +577,8 @@ export interface PermissionRequestEventParams {
 // tolerance RunEventType documents below.
 // "auto_safe" is legacy (ADR-0019 removed smind's auto-safe allowlist) --
 // kept so an older daemon's payload still renders.
-export type PermissionResolutionReason = "human" | "auto_accept" | "auto_safe" | "timeout" | (string & {});
+export type PermissionResolutionReason =
+  "human" | "auto_accept" | "auto_safe" | "timeout" | (string & {});
 
 // Params of a "permission_resolved" event task.prompt/run.attach emit
 // (internal/wsapi/handlers.go's permissionResolvedParams). `reason` is
@@ -609,7 +627,11 @@ export interface McpServerState {
   name: string;
   transport: "stdio" | "http" | "sse";
   status: "active" | "dropped" | "failed";
-  reason?: "transport_unsupported" | "command_not_found" | "provider_unsupported" | "failed_to_start";
+  reason?:
+    | "transport_unsupported"
+    | "command_not_found"
+    | "provider_unsupported"
+    | "failed_to_start";
 }
 
 // Every event name run.attach/run.logs can carry today
@@ -1005,7 +1027,14 @@ export interface OAuthStartResult extends Account {
 // must copy the redirect address back) or a device-code pair to show.
 export type LoginEvent =
   | { kind: "authorizeUrl"; loginId: string; url: string; pasteOnly: boolean }
-  | { kind: "deviceCode"; loginId: string; verificationUrl: string; userCode: string; expiresAt: string; intervalSeconds: number };
+  | {
+      kind: "deviceCode";
+      loginId: string;
+      verificationUrl: string;
+      userCode: string;
+      expiresAt: string;
+      intervalSeconds: number;
+    };
 
 // One entry in an fs.listDir response (internal/wsapi/hostfs.go's
 // fsListDirEntry, mirroring internal/hostfs.Entry): a subdirectory of the
@@ -1073,7 +1102,13 @@ export interface UsageSummaryRow {
   cacheWriteTokens: number;
   reasoningTokens: number;
   costUsd?: number | null;
-  unreported?: Array<"inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens" | "reasoningTokens">;
+  unreported?: Array<
+    | "inputTokens"
+    | "outputTokens"
+    | "cacheReadTokens"
+    | "cacheWriteTokens"
+    | "reasoningTokens"
+  >;
   /** Runs rows only: the distinct providers behind the group (absent when none). */
   providers?: string[];
 }
@@ -1174,10 +1209,17 @@ export type GitConflictState = "none" | "conflicts" | "unknown";
 export type GitMergedState = "merged" | "unmerged" | "unknown";
 export type PrState = "open" | "closed" | "merged";
 export type PrMergeable = "mergeable" | "conflicting" | "unknown";
-export type PrReviewDecision = "approved" | "changes_requested" | "review_required" | "none";
+export type PrReviewDecision =
+  "approved" | "changes_requested" | "review_required" | "none";
 export type PrChecksState = "success" | "failure" | "pending" | "none";
 /** Why a PR snapshot is not fresh: "" = fresh. */
-export type PrStale = "" | "budget" | "backoff" | "rate_limited" | "unauthenticated" | "unavailable";
+export type PrStale =
+  | ""
+  | "budget"
+  | "backoff"
+  | "rate_limited"
+  | "unauthenticated"
+  | "unavailable";
 
 export interface TaskGitPr {
   number: number;
@@ -1192,7 +1234,13 @@ export interface TaskGitPr {
   fromFork: boolean;
   mergeable: PrMergeable;
   reviewDecision: PrReviewDecision;
-  checks?: { state: PrChecksState; passed: number; failed: number; pending: number; total: number };
+  checks?: {
+    state: PrChecksState;
+    passed: number;
+    failed: number;
+    pending: number;
+    total: number;
+  };
   /** RFC 3339. */
   fetchedAt: string;
   stale: PrStale;
@@ -1236,10 +1284,27 @@ export interface TaskGit {
     prDefault?: string;
   };
   diff?: { files: number; insertions: number; deletions: number };
-  worktree?: { dirty: boolean; staged: number; unstaged: number; untracked: number };
+  worktree?: {
+    dirty: boolean;
+    staged: number;
+    unstaged: number;
+    untracked: number;
+  };
   commits?: { aheadOfBase?: number; behindBase?: number; sinceFork?: number };
-  origin?: { upstream?: string; published: boolean; ahead?: number; behind?: number; pushTarget?: { remote: string; branch: string } };
-  conflict?: { state: GitConflictState; files: string[]; against?: string; checkedAt: string; reason?: string };
+  origin?: {
+    upstream?: string;
+    published: boolean;
+    ahead?: number;
+    behind?: number;
+    pushTarget?: { remote: string; branch: string };
+  };
+  conflict?: {
+    state: GitConflictState;
+    files: string[];
+    against?: string;
+    checkedAt: string;
+    reason?: string;
+  };
   merged?: { state: GitMergedState; via: string };
   pr?: TaskGitPr;
   actions?: TaskGitActions;
@@ -1264,7 +1329,8 @@ export interface TaskGitEventPayload {
 // render it as plain text and quote it with lib/untrusted-quote.ts before it reaches a prompt.
 
 export type CheckItemState = "success" | "failure" | "pending" | "skipped";
-export type ReviewItemState = "approved" | "changes_requested" | "commented" | "dismissed";
+export type ReviewItemState =
+  "approved" | "changes_requested" | "commented" | "dismissed";
 /** Why a `PRDetails` is not fresh ("" = fresh); `not_focused` means the PR tab has not told the daemon it is open. */
 export type PRDetailsStale = PrStale | "not_focused";
 
