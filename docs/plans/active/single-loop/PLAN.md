@@ -163,13 +163,16 @@ A lightweight comparison instead of the paid eval: for the next ~5 items briefed
 | Item (Lead task, PR) | Size | Lead runs | Peers launched | Cost USD | Wall clock | Json handoff present? | Rework rounds |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | audit, 25 items (median) | mixed | | | about 3.6 | | n/a | 5 on the worst |
-| | | | | | | | |
-| | | | | | | | |
-| | | | | | | | |
-| | | | | | | | |
-| | | | | | | | |
+| R roadmap refresh (#638) | S | 1 | 0 | 0.67 | 13m | n/a (no Peer) | 0 |
+| PB.1 plugin process host (#643) | L, security | 1 | 0 | 4.61 | 44m | n/a (no Peer) | 0 |
+| PB.2 plugin session and settings (#654) | L, security | 1 | 0 | 4.47 | about 35m | n/a (no Peer) | 0 |
+| PB.3 hooks and task.send (#661) | L, security | 1 | 0 | 4.82 | about 50m | n/a (no Peer) | 0 |
+| PB.4 plugin.call + DOC.1 (#667, #672) | L + M | 3 | 0 | 6.73 | about 1h30 | n/a (no Peer) | 0 |
+| W Windows nightly, 10 PRs (#641, #644-#651, #655) | M x 10 | 4 | 0 | about 4.1 | about 2h30 | n/a (no Peer) | 0 (one review nudge: Human wants the nightly green, not only wsapi) |
+| A automations, 9 PRs incl. 2 flake fixes (#653, #657, #658, #660, #663, #664, #666, #668, #669) | XL | 14 | 2 (web UI 2.97, mobile 1.34) | 22.47 + 4.31 | about 9h wall, mostly waiting on the merge queue | yes (both Peers) | 2 (adapter test missing on #653; transition frames on #658) |
+| V validator and inbox, 5 PRs + ADR and plan (#652, #656, #659, #662, #665, #670, #671) | XL | 11 | 1 (mobile inbox, 0.95) | 17.48 + 0.95 | about 9h wall, mostly waiting on the merge queue | yes (the Peer) | 1 (stale mobile frames on #671) |
 
-Decide after five rows: keep, or reopen the seat that was folded.
+Reading (2026-10-27, Steward): eight direct items, no Supervisor seat. Single-Lead items cost USD 0.67 to 6.73, median about 4.5, against about 3.6 per item through the Supervisor tree, but these items are larger (every PB item is a security-relevant L with named adversarial tests, a live isolated-daemon run and mutations; the audit's median item was smaller). Rework was zero or one round per item against five on the audit's worst; every rework round was caught by Steward review (a surviving mutation, missing transition frames, stale screenshots), not by the Lead. Two Peers were used where the work was independent (UI on two surfaces) and both returned a json handoff. What did NOT hold: Leads still need a Steward in the loop to approve pushes and read PRs; the parallel lanes produced merge-queue and shared-file conflicts (serve.go, server.go, schema.sql) that the Human/Supervisor resolved by hand. Decision: keep the fold; do not reopen the supervisor seat. Open: cost columns count only Lead and Peer runs of the item, not the Steward's own review time.
 
 ## Left as it is, and why
 
