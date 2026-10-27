@@ -2,6 +2,13 @@
 
 ## [0.16.0](https://github.com/spacingmind/smind/compare/v0.15.0...v0.16.0) (2026-10-27)
 
+### Upgrade notes
+
+* **automations** (ADR-0044) and **plugins** (ADR-0042 Wave A+B) ship switched off: `automations.enabled` and `plugins.enabled` are `false` and can only be turned on in `config.yaml`; plugin management needs a loopback connection unless `plugins.allowRemoteManage` is set.
+* **orchestration:** the seeded role pack now has a `validator` seat instead of `reviewer` (ADR-0045). Seeding never touches existing profiles: add the seat with `smind profile seed roles` and delete an old `reviewer` yourself if you want.
+* **mobile push:** stall alerts arrive only after the phone re-registers for push (open the app's notification settings once).
+* **claude-native on Windows:** the deny rules for smind's own secrets are written in the CLI's POSIX path form (`/c/...`); not yet verified against a real Windows `claude`.
+
 
 ### Features
 
