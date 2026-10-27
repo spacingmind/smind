@@ -15,7 +15,7 @@ import { PortChip, SetupBadge, SetupDetails, UntrustedBanner } from "@/component
 import { PermissionCard } from "@/components/permission/permission-card";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useProfileList } from "@/hooks/use-profiles";
-import { useDetailLevel } from "@/components/timeline/detail-level";
+import { detailLevelChangesView, useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
 import { continuePrompt } from "@/components/timeline/run-footer-model";
 import { ChatOutlineRail } from "@/components/timeline/chat-outline-rail";
@@ -235,6 +235,8 @@ export function TaskDetailPane({
   const chatFind = useChatFind(follow.ref, `${itemCount}:${textLength}`);
 
   const [detailLevel, setDetailLevel] = useDetailLevel();
+  // The control only shows when it has something to reveal (or to undo): on an error-only run it was an unexplained button.
+  const showDetailToggle = useMemo(() => detailLevel === "overview" || detailLevelChangesView(runs ?? []), [detailLevel, runs]);
 
   // App.tsx re-creates its openFileTab closure on every render, which
   // would defeat TimelineRow's memo if passed straight through. Pinning
@@ -404,16 +406,19 @@ export function TaskDetailPane({
           </>
         }
         actions={
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            data-testid="detail-level-toggle"
-            aria-pressed={detailLevel === "overview"}
-            onClick={() => setDetailLevel(detailLevel === "overview" ? "detailed" : "overview")}
-          >
-            {detailLevel === "overview" ? "Overview" : "Detailed"}
-          </Button>
+          showDetailToggle ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              title={detailLevel === "overview" ? "Show every tool call" : "Collapse runs of tool calls"}
+              data-testid="detail-level-toggle"
+              aria-pressed={detailLevel === "overview"}
+              onClick={() => setDetailLevel(detailLevel === "overview" ? "detailed" : "overview")}
+            >
+              {detailLevel === "overview" ? "Overview" : "Detailed"}
+            </Button>
+          ) : undefined
         }
       />
 

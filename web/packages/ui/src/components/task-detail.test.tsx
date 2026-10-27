@@ -1073,8 +1073,8 @@ describe("run-config pill (run-config IA)", () => {
     fireEvent.click(await screen.findByTestId("model-row-glm:"));
     await flush();
     expect(screen.queryByTestId("task-run-config-pill")).not.toBeInTheDocument();
-    // The meta row itself stays (Detailed toggle).
-    expect(screen.getByTestId("detail-level-toggle")).toBeInTheDocument();
+    // The meta row itself stays; the Detailed toggle has nothing to reveal with no runs.
+    expect(screen.getByTestId("task-chat-meta")).toBeInTheDocument();
   });
 
   it("shows the agent's name once one is picked from the toolbar", async () => {
@@ -1220,7 +1220,7 @@ describe("chat usage total", () => {
 });
 
 describe("chat meta row (app-header-and-tabs)", () => {
-  it("AH-AC12 no title heading; Detailed toggle remains (the run-config pill only names an agent)", async () => {
+  it("AH-AC12 no title heading (the run-config pill only names an agent); the Detailed toggle hides when a run has nothing to collapse", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
     client.nth("run.list", 0).resolve([]);
@@ -1230,6 +1230,34 @@ describe("chat meta row (app-header-and-tabs)", () => {
     expect(screen.queryByRole("heading", { level: 2 })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: new RegExp(TASK_A.Title) })).not.toBeInTheDocument();
     expect(screen.queryByText(/·\s*Chat/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("detail-level-toggle")).not.toBeInTheDocument();
+  });
+
+  it("hides the Detailed toggle on an error-only run", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+    client.nth("run.list", 0).resolve([doneRun({ Status: "error", Err: "boom" })]);
+    await flush();
+    client.nth("run.logs", 0).resolve({ runId: "run-1", status: "error", err: "boom", events: [] });
+    await flush();
+    expect(screen.getByTestId("run-error-box")).toBeInTheDocument();
+    expect(screen.queryByTestId("detail-level-toggle")).not.toBeInTheDocument();
+  });
+
+  it("keeps the Detailed toggle on a run with two or more tool calls", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+    client.nth("run.list", 0).resolve([doneRun()]);
+    await flush();
+    client.nth("run.logs", 0).resolve({
+      runId: "run-1",
+      status: "done",
+      events: [
+        { type: "tool_call", toolCallId: "t1", toolName: "Bash", title: "ls", status: "success" },
+        { type: "tool_call", toolCallId: "t2", toolName: "Read", title: "a.go", status: "success" },
+      ],
+    } as RunLogsResult);
+    await flush();
     expect(screen.getByTestId("detail-level-toggle")).toBeInTheDocument();
   });
 });

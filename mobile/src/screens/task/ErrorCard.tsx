@@ -1,6 +1,6 @@
 // ErrorCard: a failed run's error -- the plain sentence, and the stored raw
-// text (transport chain, the provider's own wording and its zone-less reset
-// time) behind a "Details" toggle. See runError.ts.
+// text (transport chain, the provider's own wording and its reset time in its
+// own zone) behind a "Details" toggle. See runError.ts.
 
 import { memo, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -9,7 +9,7 @@ import { useAppTheme } from '../../theme/ThemeProvider';
 import { Card } from '../../ui/Card';
 import { StatusDot } from '../../ui/StatusDot';
 
-export const ErrorCard = memo(function ErrorCard({ message, raw }: { message: string; raw?: string }) {
+export const ErrorCard = memo(function ErrorCard({ message, raw, zoneNote }: { message: string; raw?: string; zoneNote?: string }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const [open, setOpen] = useState(false);
@@ -31,7 +31,7 @@ export const ErrorCard = memo(function ErrorCard({ message, raw }: { message: st
               <Text style={styles.rawText} selectable>
                 {raw}
               </Text>
-              <Text style={styles.note}>As reported by the provider. A time in this text is in the provider's zone, not yours.</Text>
+              {zoneNote ? <Text style={styles.note}>{zoneNote}</Text> : null}
             </View>
           ) : null}
         </>

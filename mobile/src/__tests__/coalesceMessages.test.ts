@@ -97,6 +97,12 @@ describe('buildTranscript error card', () => {
     expect(items[1]).toEqual({ type: 'error', key: 'error', message: 'Usage limit reached for the 5-hour window.', raw: err });
   });
 
+  it('carries the zone note to the error card, and omits it when null', () => {
+    const withNote = buildTranscript([], [], null, { ...error, zoneNote: 'ZONE' });
+    expect(withNote[0]).toMatchObject({ type: 'error', zoneNote: 'ZONE' });
+    expect(buildTranscript([], [], null, { ...error, zoneNote: null })[0]).not.toHaveProperty('zoneNote');
+  });
+
   it('keeps the agent text that came before the [error] line', () => {
     const items = buildTranscript([line('b', 'assistant', `Working.\n[error] ${quota}`)], [], null, error);
     expect(items[0]).toEqual({ type: 'assistant', key: 'b', text: 'Working.' });

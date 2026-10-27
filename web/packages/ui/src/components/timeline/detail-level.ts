@@ -86,3 +86,13 @@ export function groupTimeline(items: TimelineItem[], level: DetailLevel): Timeli
   flush();
   return groups;
 }
+
+/**
+ * Whether Overview would render anything differently from Detailed for these
+ * runs (a run of two or more tool calls to collapse, or an unclassified event
+ * to hide). When it would not -- an error-only run, a plain chat -- the
+ * Detailed/Overview control has nothing to reveal and the header hides it.
+ */
+export function detailLevelChangesView(runs: ReadonlyArray<{ items: TimelineItem[] }>): boolean {
+  return runs.some((run) => groupTimeline(run.items, "overview").length !== run.items.length);
+}
