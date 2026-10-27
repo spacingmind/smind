@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http/httptest"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -109,11 +111,7 @@ func newConfigOptionTestEnvCap(t *testing.T, home string, maxRunsPerTree int, ag
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
 
-	fakeAgent := filepath.Join(dir, exeName("fakeagent"))
-	buildOut, err := buildFakeAgent(t, fakeAgent)
-	if err != nil {
-		t.Fatalf("build fakeagent: %v: %s", err, buildOut)
-	}
+	fakeAgent := buildFakeAgent(t)
 
 	// Token created before the server (and under this test's SMIND_HOME)
 	// so both sides see the same one -- the CLI's dialDaemon reads it from
@@ -148,13 +146,36 @@ func newConfigOptionTestEnvCap(t *testing.T, home string, maxRunsPerTree int, ag
 	return srv.URL
 }
 
-// buildFakeAgent compiles internal/taskrunner/fakeagent to path, returning
-// combined output on failure.
-func buildFakeAgent(t *testing.T, path string) ([]byte, error) {
+var (
+	fakeAgentOnce sync.Once
+	fakeAgentPath string
+	fakeAgentErr  error
+)
+
+// buildFakeAgent returns internal/taskrunner/fakeagent compiled once per test
+// binary (a Windows link costs seconds, and every daemon test used to pay it).
+// The binary is read-only for tests; TestMain removes its directory.
+func buildFakeAgent(t *testing.T) string {
 	t.Helper()
-	cmd := exec.Command("go", "build", "-o", path, "../../internal/taskrunner/fakeagent")
-	return cmd.CombinedOutput()
+	fakeAgentOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "smind-test-fakeagent-")
+		if err != nil {
+			fakeAgentErr = err
+			return
+		}
+		fakeAgentDir = dir
+		fakeAgentPath = filepath.Join(dir, exeName("fakeagent"))
+		if out, err := exec.Command("go", "build", "-o", fakeAgentPath, "../../internal/taskrunner/fakeagent").CombinedOutput(); err != nil {
+			fakeAgentErr = fmt.Errorf("build fakeagent: %v: %s", err, out)
+		}
+	})
+	if fakeAgentErr != nil {
+		t.Fatal(fakeAgentErr)
+	}
+	return fakeAgentPath
 }
+
+var fakeAgentDir string
 
 // TestTaskOptions_PrintsNotSupportedNoteForNonACPProvider proves
 // `smind task options <runId>` on a non-ACP provider (claude-native) prints

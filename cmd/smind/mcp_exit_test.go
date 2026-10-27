@@ -48,11 +48,7 @@ func TestMCPServe_ExitsWhenDaemonConnectionDies(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	bin := filepath.Join(t.TempDir(), exeName("smind-test"))
-	build := exec.Command("go", "build", "-o", bin, ".")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build smind: %v: %s", err, out)
-	}
+	bin := buildSmind(t)
 
 	// Never written: keeps the subprocess's stdin (and so its stdio
 	// transport) up until the lost-connection path exits it. The write end

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -30,11 +29,7 @@ func TestMCPServe_StdioRoundTrip(t *testing.T) {
 	client := dialTestClient(t, srvURL)
 	wsID := createTestWorkspace(t, client)
 
-	bin := filepath.Join(t.TempDir(), exeName("smind-test"))
-	build := exec.Command("go", "build", "-o", bin, ".")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build smind: %v: %s", err, out)
-	}
+	bin := buildSmind(t)
 
 	// cmd.Env is left nil, so the subprocess inherits this process's
 	// environment -- including the SMIND_HOME t.Setenv set above -- the
@@ -86,10 +81,7 @@ func TestMCPServe_ValidatorEnvServesOnlyValidatorTools(t *testing.T) {
 	srvURL := newConfigOptionTestEnv(t, home)
 	writeTestConfig(t, home, srvURL)
 
-	bin := filepath.Join(t.TempDir(), exeName("smind-test"))
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build smind: %v: %s", err, out)
-	}
+	bin := buildSmind(t)
 
 	cmd := exec.Command(bin, "mcp", "serve")
 	cmd.Env = append(os.Environ(), "SMIND_VALIDATION_ID=7", "SMIND_CONTRACT_ID=3", "SMIND_VERDICT_TOKEN=tok")

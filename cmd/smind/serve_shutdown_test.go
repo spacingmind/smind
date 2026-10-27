@@ -80,6 +80,9 @@ func TestMain(m *testing.M) {
 	if smindBinDir != "" {
 		_ = os.RemoveAll(smindBinDir)
 	}
+	if fakeAgentDir != "" {
+		_ = os.RemoveAll(fakeAgentDir)
+	}
 	os.Exit(code)
 }
 

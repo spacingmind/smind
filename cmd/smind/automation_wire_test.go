@@ -30,11 +30,7 @@ type starterEnv struct {
 // the other cmd/smind tests use.
 func newStarterEnv(t *testing.T) *starterEnv {
 	t.Helper()
-	dir := t.TempDir()
-	fakeAgent := filepath.Join(dir, exeName("fakeagent"))
-	if out, err := buildFakeAgent(t, fakeAgent); err != nil {
-		t.Fatalf("build fakeagent: %v: %s", err, out)
-	}
+	fakeAgent := buildFakeAgent(t)
 	st, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
 	if err != nil {
 		t.Fatal(err)

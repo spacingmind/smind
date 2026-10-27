@@ -15,14 +15,7 @@ import (
 	"github.com/spacingmind/smind/internal/wsapi"
 )
 
-func buildSmindForTest(t *testing.T) string {
-	t.Helper()
-	bin := filepath.Join(t.TempDir(), exeName("smind-test"))
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build smind: %v: %s", err, out)
-	}
-	return bin
-}
+func buildSmindForTest(t *testing.T) string { return buildSmind(t) }
 
 // identifyEnv starts a daemon with one running "hang" run and returns its
 // URL, the run's id and its task id.
