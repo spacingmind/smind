@@ -45,9 +45,21 @@ Mutations (each must fail its test): real home used; send allowed with non-haiku
 
 ## Progress
 
-- [ ] PR0 plan
-- [ ] PR1 implementation
+- [x] PR0 plan (#676)
+- [x] PR1 implementation (#677)
 
 ## Validation
 
-(filled in with PR1)
+Evidence is in #677 (tests, mutations, real-browser run, contact sheets looked at).
+
+- AC1 TestFramesPlan_DiffToScreens_MappedAndUnmapped; mutation: unmapped file dropped -> fails.
+- AC2 TestFramesRun_NoBrowser_TypedBlocked (node, playwright, chrome each missing); report written, nothing started.
+- AC3 TestFramesRun_IsolatedHome_NeverTouchesDefaultHomeOrPorts; mutation: daemon env inherits HOME/SMIND_HOME -> fails.
+- AC4 TestFramesRun_SelfCleaning_NoOrphans (cancel and real SIGTERM, grandchild helper); mutation: kill pid not group -> fails. Real CLI SIGTERM mid-run left no daemon, browser or temp dir.
+- AC5 TestFramesRun_ScriptedSend_RefusesNonHaiku_OffByDefault; mutations: any model allowed, on by default -> both fail.
+- AC6 TestFramesSheet_AtMost12PerSheet_Timestamped; mutation: cap 40 -> fails.
+- AC7 TestFramesReport_MapsEveryContractFrame.
+- AC8 TestSkillDelivery_ValidatorOnly (mutation: lead gets the skill -> fails); TestValidator_FramesItemBlockedNoBrowserUnchanged.
+- AC9 TestFramesRun_E2E_RealBrowser passed with a real Chromium on an isolated daemon (4 variants).
+
+Not done: Windows run; existing seeded validator profiles are not rewritten; plugin skills point not used.
