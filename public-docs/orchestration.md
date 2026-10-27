@@ -36,6 +36,18 @@ A **Lead** does small and medium items itself. It launches a Peer only for an
 independent parallel part, or to verify a commit in a fresh context. It runs at
 most two Peers at a time and never merges a pull request.
 
+A contract with `frames` items is for screens the validator must look at. The
+validator carries a bundled skill, `smind-validator-frames`, that runs a frame
+harness: it starts its own isolated daemon (a temporary home and a free port,
+never your daemon), drives a real browser through each frame in light and dark
+at 1280 and 390 pixels, captures transition frames, and writes contact sheets
+(at most 12 images each) and a report into the validator's evidence folder.
+It needs Node, a Playwright module and a Chromium or Chrome; when any is
+missing the frame items are reported `blocked` with the reason `no_browser`,
+as they were before. It never sends a prompt unless a step asks for it, and
+then only with an explicit flag and the `claude-haiku-5-5` model. It cleans up
+every process it started. It is Unix-first and untested on Windows.
+
 A **Peer** works in its own worktree and commits after each step. Its final
 message starts with one JSON block:
 
