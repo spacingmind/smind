@@ -56,6 +56,11 @@ func newSeatEnv(t *testing.T) *seatEnv {
 	t.Helper()
 	e := &seatEnv{identEnv: newIdentEnv(t, "hang")}
 	wt := *e.seatTask.WorktreePath
+	// The Lead's own (fake) agent writes session-init-method into its worktree when its session starts, on its own
+	// goroutine. The scope check compares the Lead worktree before and after a validation, so the baseline must be
+	// taken after the Lead has settled: wait for the file instead of racing it (it was an intermittent false
+	// scope_violation under load).
+	waitForFile(t, filepath.Join(wt, "session-init-method"))
 	gitIn(t, wt, "add", "-f", "scenario")
 	gitIn(t, wt, "commit", "-qm", "scenario")
 	e.head = gitIn(t, wt, "rev-parse", "HEAD")
@@ -342,4 +347,17 @@ func (e *seatEnv) call(t *testing.T, rc *requestContext, method string, params a
 	var out map[string]any
 	_ = json.Unmarshal(raw, &out)
 	return out
+}
+
+// waitForFile polls until path exists (bounded, no fixed sleep).
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("%s never appeared", path)
 }
