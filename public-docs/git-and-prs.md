@@ -1,6 +1,7 @@
 ---
 title: Git and pull requests
 description: Branches, publishing, the Create PR dialog, the PR panel and stacked sub-tasks.
+summary: "This page describes how sMind by Spacing Mind handles git for each task: branches, publishing, the Create PR dialog, the PR panel and stacked sub-tasks. It is for developers reviewing and shipping agent work."
 order: 5
 ---
 

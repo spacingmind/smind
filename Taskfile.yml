@@ -98,6 +98,7 @@ tasks:
     cmds:
       - go test ./...
       - node --test 'desktop/scripts/*.test.mjs'
+      - node --test 'docs-site/scripts/*.test.mjs'
       - sh scripts/install_test.sh
       - sh scripts/task_setup_test.sh
 
@@ -105,6 +106,14 @@ tasks:
     desc: Regenerate the CLI summary blocks of public-docs/cli-reference.md from smind --help
     cmds:
       - SMIND_UPDATE_DOCS=1 go test ./cmd/smind -run '^TestCLIReferenceMatchesHelp$' -count=1
+
+  docs:site:
+    desc: Build the docs site (docs-site/, from public-docs/) into docs-site/.vitepress/dist
+    dir: docs-site
+    cmds:
+      - npm ci
+      - npm run build
+      - node scripts/check-dist.mjs
 
   test:install:ps:
     desc: Run the install.ps1 tests (needs PowerShell 7, `pwsh`)

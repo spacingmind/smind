@@ -1,6 +1,7 @@
 ---
 title: Automations
 description: Start a task by itself on a schedule, or when a GitHub workflow fails, with caps, de-duplication, auto-pause and a record of every decision.
+summary: "This page explains automations in sMind by Spacing Mind: tasks that start by themselves on a schedule or when a GitHub workflow fails, with caps, de-duplication, auto-pause and a decision record. It is for people who want unattended agent runs under strict limits."
 order: 15
 ---
 

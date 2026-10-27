@@ -1,6 +1,7 @@
 ---
 title: Mobile and relay pairing
 description: Pair a phone through the relay, what end-to-end encryption protects, push notifications and the task tree.
+summary: "This page explains how to pair the sMind by Spacing Mind mobile app with your daemon through the relay, what end-to-end encryption protects, and how push notifications and the task tree work. It is for people who want to follow agents from a phone."
 order: 6
 ---
 

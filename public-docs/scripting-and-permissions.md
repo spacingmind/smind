@@ -1,6 +1,7 @@
 ---
 title: Scripting and permissions
 description: Drive agents from the command line, choose permission modes, and connect other tools over MCP.
+summary: "This page explains how to script sMind by Spacing Mind from the command line, choose permission modes for agents, and use the built-in MCP server. It is for developers automating agent work."
 order: 14
 ---
 

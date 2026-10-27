@@ -29,7 +29,10 @@ script for this repo that installs `web/` and `mobile/`; register it with
 User documentation lives in `public-docs/`; `task test` checks its links,
 front matter, forbidden strings and `smind ...` commands (see
 `cmd/smind/docs_drift_test.go`). `docs/` is for contributors (decision
-records, plans).
+records, plans). The same pages are published as a static site (VitePress,
+config in `docs-site/`, `task docs:site` builds it locally): every page needs
+`title`, `description`, `summary` and `order` front matter, and `task test`
+checks that each one is in the generated `llms.txt`.
 
 The desktop updater: `daemon_survives_app_update`
 (`desktop/src-tauri/src/daemon_survival_test.rs`) proves a managed daemon keeps

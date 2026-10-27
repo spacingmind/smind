@@ -1,6 +1,7 @@
 ---
 title: Configuration reference
 description: The user-facing keys of config.yaml and their defaults.
+summary: "This page documents the user-facing keys of config.yaml for sMind by Spacing Mind, where the file lives and the default of each key. It is for people who tune or operate the daemon."
 order: 11
 ---
 

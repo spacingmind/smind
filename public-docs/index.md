@@ -1,6 +1,7 @@
 ---
-title: smind documentation
+title: sMind by Spacing Mind documentation
 description: What smind is and where to read next.
+summary: "sMind by Spacing Mind is a self-hosted platform for running coding agents, delivered as one Go binary with a web app, desktop app, command line and mobile access. This page is for developers who run coding agents every day and want them on their own machine under their own accounts."
 order: 1
 ---
 
