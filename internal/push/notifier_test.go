@@ -484,3 +484,34 @@ func TestStalledDedupeByEpisodeKey(t *testing.T) {
 		}
 	}
 }
+
+// An automation auto-pause with no task to open is still pushed (a pause needs
+// a person): it is addressed to the automation, carries its id and title, and
+// is not dropped by the done/error rate window.
+func TestNotifyAutomationPauseWithoutTask(t *testing.T) {
+	t.Parallel()
+	h := newNHarness(t)
+	reg := h.add("dev-a", 1, nil)
+	ctx := context.Background()
+	for i := 0; i < 6; i++ { // fill the done/error window
+		if h.n.Notify(ctx, Input{Kind: KindDone, Key: fmt.Sprintf("run%d:done", i), TaskID: 1}) != 1 {
+			t.Fatalf("done %d dropped", i)
+		}
+	}
+	in := Input{Kind: KindError, Key: "autopause:3:0:1000", AutomationID: 3, Title: "Automation paused: nightly", Summary: "Automation paused: the template is no longer valid"}
+	if h.n.Notify(ctx, in) != 1 {
+		t.Fatal("the pause was not delivered (task-less, or dropped by the rate window)")
+	}
+	msgs := h.sender.messages()
+	ev := h.open(reg, msgs[len(msgs)-1])
+	if ev.TaskID != 0 || ev.AutomationID != 3 || ev.Title != "Automation paused: nightly" || ev.Body != "Automation paused: the template is no longer valid" || ev.Kind != KindError {
+		t.Fatalf("event = %+v", ev)
+	}
+	if h.n.Notify(ctx, in) != 0 {
+		t.Fatal("the same pause was delivered twice")
+	}
+	// Only an error-kind alert may skip the task lookup: an unknown task still delivers nothing.
+	if h.n.Notify(ctx, Input{Kind: KindDone, Key: "x", TaskID: 0, AutomationID: 3}) != 0 {
+		t.Fatal("a done alert for task 0 was delivered")
+	}
+}

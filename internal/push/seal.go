@@ -41,9 +41,12 @@ type Event struct {
 	TaskID int64  `json:"taskId"`
 	RunID  string `json:"runId,omitempty"`
 	ChatID int64  `json:"chatId,omitempty"`
-	Title  string `json:"title"`
-	Body   string `json:"body"`
-	At     int64  `json:"at"` // unix seconds
+	// AutomationID names the automation an auto-pause alert is about; a
+	// task-less alert (TaskID 0) opens that automation's screen instead.
+	AutomationID int64  `json:"automationId,omitempty"`
+	Title        string `json:"title"`
+	Body         string `json:"body"`
+	At           int64  `json:"at"` // unix seconds
 }
 
 // Blob is the only thing sent as the push "data". N and C are base64url WITHOUT padding.

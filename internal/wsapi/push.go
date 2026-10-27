@@ -275,15 +275,21 @@ func pushInput(e Event) (push.Input, bool) {
 		}
 		return push.Input{Kind: push.KindPermission, Key: p.RequestID, TaskID: p.TaskID, ChatID: p.ChatID, RunID: p.RunID, Summary: p.Summary}, true
 	case TopicAutomationPaused:
-		// ADR-0044 question 7: an auto-pause always notifies. It rides the
-		// existing "error" kind (devices already subscribe to it, mobile
-		// already renders it) and opens the failed task; a pause with no task
-		// has nothing to open and is not pushed.
+		// ADR-0044 question 7: an auto-pause always notifies, because it needs
+		// a person. It rides the existing "error" kind. With a failed task it
+		// opens that task; without one (the template went invalid, a firing
+		// never started a task) it opens the automation's own screen.
 		p, ok := e.Payload.(automationPausedPayload)
-		if !ok || p.TaskID <= 0 {
+		if !ok || p.AutomationID <= 0 {
 			return push.Input{}, false
 		}
-		return push.Input{Kind: push.KindError, Key: "autopause:" + strconv.FormatInt(p.AutomationID, 10) + ":" + strconv.FormatInt(p.TaskID, 10), TaskID: p.TaskID, Summary: "Automation paused: " + p.Reason}, true
+		key := "autopause:" + strconv.FormatInt(p.AutomationID, 10) + ":" + strconv.FormatInt(p.TaskID, 10) + ":" + strconv.FormatInt(p.At, 10)
+		in := push.Input{Kind: push.KindError, Key: key, TaskID: p.TaskID, AutomationID: p.AutomationID, Summary: "Automation paused: " + p.Reason}
+		if p.TaskID <= 0 {
+			in.TaskID = 0
+			in.Title = "Automation paused: " + p.Name
+		}
+		return in, true
 	case TopicTaskStalled:
 		p, ok := e.Payload.(stalledPayload)
 		if !ok {
