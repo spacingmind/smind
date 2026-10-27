@@ -8,7 +8,8 @@ import { InboxItem, InboxKind } from './types';
 export const INBOX_EMPTY_TITLE = 'Nothing needs you';
 export const INBOX_EMPTY_TEXT = 'Permission requests, validator verdicts and stalled tasks show up here.';
 
-export type InboxTone = 'waiting' | 'neutral';
+/** waiting: a permission asks for you; warning: a verdict that needs a decision (never a success tint); neutral: the rest. */
+export type InboxTone = 'waiting' | 'warning' | 'neutral';
 export type InboxAction = 'seen' | 'snooze' | 'resolve' | 'open';
 
 export const SNOOZE_CAP_MS = 24 * 60 * 60 * 1000;
@@ -82,7 +83,7 @@ export function inboxRow(item: InboxItem, now: number): InboxRowView {
     title: item.title,
     summary: item.summary,
     time: relativeTime(item.createdAt, now),
-    tone: item.attention === 'high' ? 'waiting' : 'neutral',
+    tone: item.kind === 'permission' ? 'waiting' : item.attention === 'high' ? 'warning' : 'neutral',
     unseen: item.state === 'new',
     actions: inboxActions({ ...item, links: item.links ?? {} }),
   };

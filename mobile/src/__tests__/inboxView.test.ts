@@ -88,4 +88,18 @@ describe('time and accessibility text', () => {
     const rows = v.kind === 'list' ? v.sections[0].rows : [];
     expect(rows.map((r) => r.icon)).toEqual(['warning', 'check']);
   });
+
+  it('tones: a permission is waiting, a verdict that needs a decision is warning (never a success tint), the rest neutral', () => {
+    const v = inboxView(
+      [
+        inboxItem({ key: 'perm:1', kind: 'permission', attention: 'high' }),
+        inboxItem({ key: 'verdict:1', kind: 'verdict', attention: 'high' }),
+        inboxItem({ key: 'verdict:2', kind: 'verdict', attention: 'normal' }),
+        inboxItem({ key: 'stall:1:1', kind: 'stall', attention: 'normal' }),
+      ],
+      NOW,
+    );
+    const tones = v.kind === 'list' ? v.sections.flatMap((s) => s.rows.map((r) => r.tone)) : [];
+    expect(tones).toEqual(['waiting', 'warning', 'neutral', 'neutral']);
+  });
 });

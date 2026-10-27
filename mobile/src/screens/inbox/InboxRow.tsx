@@ -5,7 +5,7 @@
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { InboxRowView } from '../../inbox/view';
-import { AppTheme } from '../../theme';
+import { AppTheme, withAlpha } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { AppIcon } from '../../ui/AppIcon';
 import { Badge } from '../../ui/Badge';
@@ -13,9 +13,10 @@ import { Badge } from '../../ui/Badge';
 export function InboxRow({ row, onOpen, onMore }: { row: InboxRowView; onOpen: (row: InboxRowView) => void; onMore: (row: InboxRowView) => void }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const high = row.tone === 'waiting';
+  const waiting = row.tone === 'waiting';
+  const warning = row.tone === 'warning';
   return (
-    <View style={[styles.card, high && styles.high]}>
+    <View style={[styles.card, waiting && styles.waiting, warning && styles.warning]}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${row.label}${row.unseen ? ', new' : ''}: ${row.title}. ${row.summary}. ${row.time}`}
@@ -23,14 +24,14 @@ export function InboxRow({ row, onOpen, onMore }: { row: InboxRowView; onOpen: (
         style={styles.main}
       >
         <View style={styles.icon}>
-          <AppIcon name={row.icon} size={18} color={high ? theme.waiting.foreground : theme.foregroundSubtle} />
+          <AppIcon name={row.icon} size={18} color={waiting ? theme.waiting.foreground : warning ? theme.status.warning : theme.foregroundSubtle} />
         </View>
         <View style={styles.body}>
           <View style={styles.top}>
             <Text style={styles.title} numberOfLines={2}>
               {row.title}
             </Text>
-            {row.unseen && <Badge tone="success">New</Badge>}
+            {row.unseen && <Badge tone={waiting ? 'waiting' : warning ? 'warning' : 'neutral'}>New</Badge>}
           </View>
           <Text style={styles.summary} numberOfLines={2}>
             {row.summary}
@@ -57,7 +58,8 @@ function makeStyles(theme: AppTheme) {
       borderRadius: theme.radius.xl,
       borderCurve: 'continuous',
     },
-    high: { backgroundColor: theme.waiting.surface },
+    waiting: { backgroundColor: theme.waiting.surface },
+    warning: { backgroundColor: withAlpha(theme.statusDot.warning, 0.1), borderColor: withAlpha(theme.statusDot.warning, 0.35) },
     main: { flex: 1, flexDirection: 'row', gap: theme.spacing[3], minHeight: 44, padding: theme.spacing[3] },
     body: { flex: 1, gap: theme.spacing[1] },
     icon: { width: 24, alignItems: 'center' },
