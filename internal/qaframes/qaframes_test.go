@@ -132,6 +132,7 @@ func browserEnv(root string, missing ...string) Env {
 		},
 		Glob: func(string) ([]string, error) { return nil, nil },
 		Stat: func(p string) (os.FileInfo, error) {
+			p = filepath.ToSlash(p) // detect.go joins with the host separator
 			switch {
 			case strings.HasSuffix(p, "playwright-core/package.json") && !gone["playwright"]:
 				return fakeFileInfo{}, nil
