@@ -196,19 +196,29 @@ func TestStalledBusEventEmitted(t *testing.T) {
 	}
 }
 
-// ADR-0044 question 7: an auto-pause notifies, as an "error" push on the failed
-// task (the kind devices already subscribe to and the phone already renders).
+// ADR-0044 question 7: an auto-pause notifies, as an "error" push (the kind
+// devices already subscribe to and the phone already renders): on the failed
+// task when there is one, otherwise on the automation itself.
 func TestPushInputAutomationPaused(t *testing.T) {
 	t.Parallel()
-	ev := Event{Topic: TopicAutomationPaused, Payload: automationPausedPayload{AutomationID: 3, TaskID: 12, Reason: "paused after 3 consecutive failed runs; last: task #12 ended `error`"}}
-	got, ok := pushInput(ev)
-	want := push.Input{Kind: push.KindError, Key: "autopause:3:12", TaskID: 12, Summary: "Automation paused: paused after 3 consecutive failed runs; last: task #12 ended `error`"}
+	withTask := Event{Topic: TopicAutomationPaused, Payload: automationPausedPayload{AutomationID: 3, Name: "nightly", At: 1000, TaskID: 12, Reason: "paused after 3 consecutive failed runs; last: task #12 ended `error`"}}
+	got, ok := pushInput(withTask)
+	want := push.Input{Kind: push.KindError, Key: "autopause:3:12:1000", TaskID: 12, AutomationID: 3, Summary: "Automation paused: paused after 3 consecutive failed runs; last: task #12 ended `error`"}
 	if !ok || got != want {
-		t.Fatalf("pushInput = (%+v, %v), want (%+v, true)", got, ok, want)
+		t.Fatalf("with task: pushInput = (%+v, %v), want (%+v, true)", got, ok, want)
+	}
+	noTask := Event{Topic: TopicAutomationPaused, Payload: automationPausedPayload{AutomationID: 3, Name: "nightly", At: 2000, Reason: "paused after 1 consecutive failed runs; last: the template is no longer valid"}}
+	got, ok = pushInput(noTask)
+	want = push.Input{Kind: push.KindError, Key: "autopause:3:0:2000", AutomationID: 3, Title: "Automation paused: nightly", Summary: "Automation paused: paused after 1 consecutive failed runs; last: the template is no longer valid"}
+	if !ok || got != want {
+		t.Fatalf("no task: pushInput = (%+v, %v), want (%+v, true)", got, ok, want)
+	}
+	if got.Key == "autopause:3:0:1000" {
+		t.Fatal("two pauses of one automation share a dedupe key")
 	}
 	for name, bad := range map[string]Event{
-		"no task to open": {Topic: TopicAutomationPaused, Payload: automationPausedPayload{AutomationID: 3, Reason: "x"}},
-		"wrong payload":   {Topic: TopicAutomationPaused, Payload: "nope"},
+		"no automation": {Topic: TopicAutomationPaused, Payload: automationPausedPayload{Reason: "x"}},
+		"wrong payload": {Topic: TopicAutomationPaused, Payload: "nope"},
 	} {
 		if _, ok := pushInput(bad); ok {
 			t.Errorf("%s: pushInput ok = true, want false", name)
@@ -227,12 +237,12 @@ func TestAutomationSink_PausedCarriesTaskID(t *testing.T) {
 	h := newAutoHarness(t)
 	var got []Event
 	h.bus.setTap(func(e Event) { got = append(got, e) })
-	automationSink{h: newAutomationHost(h.db, h.bus, t.TempDir())}.Paused(store.Automation{ID: 3}, "why", 12)
+	automationSink{h: newAutomationHost(h.db, h.bus, t.TempDir())}.Paused(store.Automation{ID: 3, Name: "nightly"}, "why", 12)
 	if len(got) != 1 {
 		t.Fatalf("events = %d", len(got))
 	}
 	p, ok := got[0].Payload.(automationPausedPayload)
-	if !ok || p.TaskID != 12 || p.AutomationID != 3 || p.Reason != "why" {
+	if !ok || p.TaskID != 12 || p.AutomationID != 3 || p.Reason != "why" || p.Name != "nightly" || p.At == 0 {
 		t.Fatalf("payload = %+v", got[0].Payload)
 	}
 }

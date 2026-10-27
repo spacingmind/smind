@@ -114,6 +114,8 @@ import {
   X,
   Zap,
   CalendarClock,
+  ClipboardCheck,
+  Inbox,
   type LucideIcon,
 } from "lucide-react";
 
@@ -234,6 +236,9 @@ export const Icons = {
   plugin: Puzzle,
   /** Automations (Settings -> Automations): rules that start a task from a signal. */
   automation: CalendarClock,
+  /** The Human inbox (ADR-0045): what needs a person, and its three kinds of row. */
+  inbox: Inbox,
+  verdict: ClipboardCheck,
   /** Learned skills (Settings -> Skills (learned)). */
   skills: BookOpen,
 

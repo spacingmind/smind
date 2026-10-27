@@ -114,3 +114,54 @@ describe('notificationFor', () => {
     expect(failed).toEqual({ title: GENERIC_NOTIFICATION.title, body: GENERIC_NOTIFICATION.body, data: null });
   });
 });
+
+describe('automation pause alerts (no task to open)', () => {
+  const pause = { id: 'ev-pause-1', kind: 'error', taskId: 0, automationId: 3, title: 'Automation paused: nightly', body: 'Automation paused: the template is no longer valid', at: 1_000_000 };
+  const seal = (event: object) => sealRaw(framed(new TextEncoder().encode(JSON.stringify(event))));
+
+  it('opens with taskId 0 and carries the automation id into the notification data', () => {
+    const n = notificationFor(openWithAnyKey([{ deviceId, key }], seal(pause)), 1_000_100);
+    expect(n).toEqual({
+      title: 'Automation paused: nightly',
+      body: 'Automation paused: the template is no longer valid',
+      data: { eventId: 'ev-pause-1', taskId: 0, automationId: 3 },
+    });
+  });
+
+  it('rejects a negative or non-integer automation id', () => {
+    for (const bad of [-1, 1.5, '3']) {
+      expect(openBlob(key, deviceId, seal({ ...pause, automationId: bad })), String(bad)).toEqual({ ok: false, error: 'malformed' });
+    }
+  });
+});
+
+describe('stalled pushes (daemon kind "stalled")', () => {
+  const stalled = {
+    id: 'ev-stall-1',
+    kind: 'stalled',
+    taskId: 4,
+    title: 'Lead task',
+    body: 'Tree stalled: Lead task has been idle for 15 min',
+    at: 1_000_000,
+  };
+  const seal = (event: object) => sealRaw(framed(new TextEncoder().encode(JSON.stringify(event))));
+
+  it('opens as itself, not as a malformed blob', () => {
+    const r = openBlob(key, deviceId, seal(stalled));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.event.kind).toBe('stalled');
+  });
+
+  it('shows the daemon-built title and body instead of the generic text', () => {
+    const n = notificationFor(openWithAnyKey([{ deviceId, key }], seal(stalled)), 1_000_100);
+    expect(n).toEqual({
+      title: 'Lead task',
+      body: 'Tree stalled: Lead task has been idle for 15 min',
+      data: { eventId: 'ev-stall-1', taskId: 4 },
+    });
+  });
+
+  it('still rejects an unknown kind', () => {
+    expect(openBlob(key, deviceId, seal({ ...stalled, kind: 'bogus' }))).toEqual({ ok: false, error: 'malformed' });
+  });
+});

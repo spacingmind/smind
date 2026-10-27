@@ -368,3 +368,22 @@ func TestSealOpenVector(t *testing.T) {
 		})
 	}
 }
+
+// A task-less automation alert carries its automation id through seal/open;
+// an ordinary event omits the field (the mobile vector stays unchanged).
+func TestSealCarriesAutomationID(t *testing.T) {
+	key := make([]byte, KeySize)
+	ev := Event{ID: "e1", Kind: KindError, TaskID: 0, AutomationID: 3, Title: "Automation paused: nightly", Body: "Automation paused: x", At: 1}
+	blob, err := Seal(key, "dev", ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Open(key, "dev", blob)
+	if err != nil || got.AutomationID != 3 || got.TaskID != 0 {
+		t.Fatalf("Open = %+v, %v", got, err)
+	}
+	plain, _ := json.Marshal(Event{ID: "e2", Kind: KindDone, TaskID: 1})
+	if strings.Contains(string(plain), "automationId") {
+		t.Fatalf("an ordinary event serialises automationId: %s", plain)
+	}
+}

@@ -6,10 +6,12 @@ import { base64UrlDecode } from '../relay/base64';
 
 export interface PushEvent {
   id: string;
-  kind: 'permission' | 'needs_continue' | 'done' | 'error' | 'test';
+  kind: 'permission' | 'needs_continue' | 'done' | 'error' | 'stalled' | 'test';
   taskId: number;
   runId?: string;
   chatId?: number;
+  /** An automation alert (an auto-pause) that has no task to open: the tap opens this automation. */
+  automationId?: number;
   title: string;
   body: string;
   at: number;
@@ -26,7 +28,7 @@ export const GENERIC_NOTIFICATION = { title: 'smind', body: 'Open smind to see w
 export const MAX_AGE_SECONDS = 86400;
 
 const AAD_PREFIX = 'smind-push-v1';
-const KINDS = ['permission', 'needs_continue', 'done', 'error', 'test'];
+const KINDS = ['permission', 'needs_continue', 'done', 'error', 'stalled', 'test'];
 
 function fail(error: OpenFailure): OpenResult {
   return { ok: false, error };
@@ -45,6 +47,7 @@ function toEvent(v: unknown): PushEvent | null {
   if (typeof o.at !== 'number' || !Number.isFinite(o.at)) return null;
   if (o.runId !== undefined && typeof o.runId !== 'string') return null;
   if (o.chatId !== undefined && !isSafeInt(o.chatId)) return null;
+  if (o.automationId !== undefined && (!isSafeInt(o.automationId) || o.automationId < 0)) return null;
   const event: PushEvent = {
     id: o.id,
     kind: o.kind as PushEvent['kind'],
@@ -55,6 +58,7 @@ function toEvent(v: unknown): PushEvent | null {
   };
   if (o.runId !== undefined) event.runId = o.runId;
   if (o.chatId !== undefined) event.chatId = o.chatId;
+  if (o.automationId !== undefined) event.automationId = o.automationId;
   return event;
 }
 
@@ -119,7 +123,7 @@ export function openWithAnyKey(
 export function notificationFor(
   result: ReturnType<typeof openWithAnyKey>,
   nowSeconds: number,
-): { title: string; body: string; data: { eventId: string; taskId: number; chatId?: number } | null } | null {
+): { title: string; body: string; data: { eventId: string; taskId: number; chatId?: number; automationId?: number } | null } | null {
   if (!result.ok) return { ...GENERIC_NOTIFICATION, data: null };
   const { event } = result;
   if (nowSeconds - event.at > MAX_AGE_SECONDS) return null;
@@ -130,6 +134,7 @@ export function notificationFor(
       eventId: event.id,
       taskId: event.taskId,
       ...(event.chatId !== undefined ? { chatId: event.chatId } : {}),
+      ...(event.automationId !== undefined && event.automationId > 0 ? { automationId: event.automationId } : {}),
     },
   };
 }
