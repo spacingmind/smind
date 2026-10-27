@@ -11,6 +11,7 @@
 // appended after the lines, in that order.
 
 import type { PermissionRequestState } from '../permissionRequests';
+import { stripErrorEcho, type RunErrorView } from '../runError';
 import type { LineAttachment, TimelineLine } from '../runTimeline';
 
 export type TranscriptItem =
@@ -20,6 +21,7 @@ export type TranscriptItem =
   | { type: 'tool'; key: string; toolName: string; title: string; status: string }
   | { type: 'meta'; key: string; text: string }
   | { type: 'permission'; key: string; request: PermissionRequestState }
+  | { type: 'error'; key: string; message: string; raw?: string }
   | { type: 'footer'; key: string; sentence: string; note?: string; waiting?: boolean; canContinue?: boolean };
 
 export type TranscriptItemType = TranscriptItem['type'];
@@ -30,6 +32,7 @@ export function buildTranscript(
   lines: readonly TimelineLine[],
   permissions: readonly PermissionRequestState[] = [],
   footer: { sentence: string; note?: string; waiting?: boolean; action?: 'continue' | null } | null = null,
+  error: (RunErrorView & { err: string }) | null = null,
 ): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   for (const line of lines) {
@@ -47,6 +50,16 @@ export function buildTranscript(
     } else {
       items.push({ type: 'meta', key: line.key, text: line.text });
     }
+  }
+  if (error) {
+    // The error card states the failure once: drop the agent's own "[error] <cause>" line from the last message.
+    const last = items[items.length - 1];
+    if (last && last.type === 'assistant') {
+      const text = stripErrorEcho(last.text, error.err);
+      if (text === '') items.pop();
+      else last.text = text;
+    }
+    items.push({ type: 'error', key: 'error', message: error.message, ...(error.raw ? { raw: error.raw } : {}) });
   }
   for (const request of permissions) items.push({ type: 'permission', key: `perm-${request.requestId}`, request });
   if (footer) items.push({ type: 'footer', key: 'footer', sentence: footer.sentence, ...(footer.note ? { note: footer.note } : {}), ...(footer.waiting ? { waiting: true } : {}), ...(footer.action === 'continue' ? { canContinue: true } : {}) });

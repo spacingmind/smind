@@ -85,3 +85,20 @@ describe('buildTranscript footer note', () => {
     expect(buildTranscript([], [], { sentence: 'S' })[0]).toEqual({ type: 'footer', key: 'footer', sentence: 'S' });
   });
 });
+
+describe('buildTranscript error card', () => {
+  const quota = '429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-27 22:44:59';
+  const err = `${quota} (taskrunner: glm prompt: acp: rpc error -32603: Internal error)`;
+  const error = { message: 'Usage limit reached for the 5-hour window.', raw: err, err };
+
+  it("replaces the agent's [error] line with one error card before the footer", () => {
+    const items = buildTranscript([line('a', 'user', 'go'), line('b', 'assistant', `[error] ${quota}`)], [], { sentence: 'Rate limited' }, error);
+    expect(items.map((i) => i.type)).toEqual(['user', 'error', 'footer']);
+    expect(items[1]).toEqual({ type: 'error', key: 'error', message: 'Usage limit reached for the 5-hour window.', raw: err });
+  });
+
+  it('keeps the agent text that came before the [error] line', () => {
+    const items = buildTranscript([line('b', 'assistant', `Working.\n[error] ${quota}`)], [], null, error);
+    expect(items[0]).toEqual({ type: 'assistant', key: 'b', text: 'Working.' });
+  });
+});
