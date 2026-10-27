@@ -117,6 +117,11 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       void queryClient.invalidateQueries({ queryKey: queryKeys.automationMemoryAll() });
       return;
     }
+    case "inbox.changed": {
+      // an empty payload: whatever an inbox client renders may have changed (a permission, a verdict, a stall, a state).
+      void queryClient.invalidateQueries({ queryKey: queryKeys.inboxAll() });
+      return;
+    }
     case "profile.created":
     case "profile.updated": {
       const profile = (payload as { profile?: AgentProfile } | null)?.profile;

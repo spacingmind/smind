@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PendingTarget, releaseTarget, resolveNotificationTarget, targetHref } from '../target';
+import { PendingTarget, releaseTarget, resolveNotificationTarget, targetHref, targetTaskId } from '../target';
 
 describe('notification target', () => {
   it('resolves a valid target', () => {
@@ -84,5 +84,28 @@ describe('releaseTarget', () => {
     expect(releaseTarget('app', p)).toBeNull();
     p.set({ taskId: 9, chatId: 1 });
     expect(releaseTarget('app', p)).toEqual({ taskId: 9, chatId: 1 });
+  });
+});
+
+describe('automation target (an auto-pause with no task to open)', () => {
+  it('resolves to the automation only when there is no task', () => {
+    expect(resolveNotificationTarget({ taskId: 0, automationId: 3 })).toEqual({ automationId: 3 });
+    expect(resolveNotificationTarget({ automationId: '3' })).toEqual({ automationId: 3 });
+    expect(resolveNotificationTarget({ taskId: 12, automationId: 3 })).toEqual({ taskId: 12 });
+  });
+
+  it('rejects an invalid automation id', () => {
+    for (const bad of [{ automationId: 0 }, { automationId: -1 }, { automationId: 'x' }, { automationId: 1.5 }, { taskId: 0, automationId: {} }]) {
+      expect(resolveNotificationTarget(bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  it('opens the automation screen, and has no task id for the foreground rule', () => {
+    const t = resolveNotificationTarget({ taskId: 0, automationId: 3 });
+    expect(t).not.toBeNull();
+    const h = targetHref(t!);
+    expect(h).toEqual({ pathname: '/automation/[id]', params: { id: '3' } });
+    expect(targetTaskId(t)).toBeNull();
+    expect(targetTaskId({ taskId: 9 })).toBe(9);
   });
 });

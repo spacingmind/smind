@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { useConnectionOrNull } from '../src/connection/ConnectionProvider';
-import { AUTOMATIONS_HREF, NEW_TASK_HREF, PLUGINS_HREF, taskHref } from '../src/navigation/routes';
+import { AUTOMATIONS_HREF, INBOX_HREF, NEW_TASK_HREF, PLUGINS_HREF, taskHref } from '../src/navigation/routes';
 import { TasksScreen } from '../src/screens/TasksScreen';
+import { InboxEntry } from '../src/screens/tasks/InboxEntry';
 import { ConnectionSheet } from '../src/screens/tasks/ConnectionSheet';
 import { TextButton } from '../src/ui/TextButton';
 
@@ -26,8 +27,11 @@ export default function TasksRoute() {
             </View>
           ),
           headerRight: () => (
-            <View style={{ justifyContent: 'center', alignSelf: 'stretch' }}>
-              <TextButton label="New task" onPress={() => router.push(NEW_TASK_HREF)} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch' }}>
+              <InboxEntry conn={conn} onPress={() => router.push(INBOX_HREF)} />
+              <View style={{ justifyContent: 'center', alignSelf: 'stretch' }}>
+                <TextButton label="New task" onPress={() => router.push(NEW_TASK_HREF)} />
+              </View>
             </View>
           ),
         }}

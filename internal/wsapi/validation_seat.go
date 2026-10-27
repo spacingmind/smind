@@ -169,7 +169,7 @@ func (s *validationSeat) request(ctx context.Context, rc *requestContext, raw js
 		return nil, fmt.Errorf("%s: %w", m, err)
 	}
 
-	before, _ := validation.Digest(ctx, *lead.WorktreePath)
+	before, _ := validation.Take(ctx, *lead.WorktreePath)
 
 	title := fmt.Sprintf("validate #%d: %s", val.ID, rec.Contract.Milestone)
 	if len(title) > 120 {
@@ -222,7 +222,7 @@ func (s *validationSeat) request(ctx context.Context, rc *requestContext, raw js
 		Svc: s.svc, ValidationID: val.ID, ValidatorTaskID: vtask.ID,
 		MaxMinutes: rec.Contract.Limits.MaxMinutes, BudgetUSD: rec.Contract.Limits.BudgetUSD,
 		Probe: s.probe, Stop: func() { s.stopTask(vtask.ID) },
-		Before: before, LeadDigest: func() (string, error) { return validation.Digest(context.Background(), *lead.WorktreePath) },
+		Before: before, LeadSnapshot: func() (validation.Snapshot, error) { return validation.Take(context.Background(), *lead.WorktreePath) },
 	}
 	go func() {
 		defer s.forget(vtask.ID)
