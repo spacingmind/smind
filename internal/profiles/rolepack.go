@@ -94,6 +94,7 @@ var RoleSeats = []RoleSeat{
 		return store.AgentProfile{
 			Name: seatValidator, Provider: "claude-native", Model: sonnetModel, PermissionMode: "auto",
 			OrchestrationTools: boolRef(false), ChildPolicy: "none", OnRateLimit: "wait",
+			Skills:       []string{"smind-validator-frames"}, // the frame harness, for this seat only (ADR-0045 §7)
 			Instructions: validatorInstructions,
 			Notes:        "ADR-0045: judges one commit against a stored contract in a fresh context and scratch worktree. Started by validation.request, which gives its run the two validator tools; not a general reviewer. Sonnet 5.5, auto mode.",
 		}

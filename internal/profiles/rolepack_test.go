@@ -275,3 +275,25 @@ func TestSeedRoles_ValidatorNeverOverwritten(t *testing.T) {
 		t.Fatalf("a human edit was overwritten")
 	}
 }
+
+// The frame harness skill is delivered to the validator seat and to no other.
+func TestSkillDelivery_ValidatorOnly(t *testing.T) {
+	r := newTestRegistry(t)
+	seed(t, r)
+	all, err := r.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range all {
+		has := false
+		for _, s := range p.Skills {
+			has = has || s == "smind-validator-frames"
+		}
+		if has != (p.Name == "validator") {
+			t.Errorf("seat %s: has smind-validator-frames = %v", p.Name, has)
+		}
+	}
+	if len(byName(t, r, "validator").Skills) != 1 {
+		t.Errorf("validator skills = %v", byName(t, r, "validator").Skills)
+	}
+}
