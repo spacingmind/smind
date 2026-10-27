@@ -39,7 +39,8 @@ export function describeRunError(err: string, opts: { rateLimited?: boolean; has
     message = plainRpcMessage(RPC_ERROR.exec(text)?.[1] ?? '');
   }
   if (opts.rateLimited) {
-    const bare = message.replace(/^429\s+/, '');
+    // Z.ai says "for 5 hour"; a reader wants "the 5-hour window".
+    const bare = message.replace(/^429\s+/, '').replace(/\bfor (\d+) hours?\b/i, 'for the $1-hour window');
     const stripped = opts.hasReset ? bare.replace(RESET_CLAUSE, '').trim() : bare;
     message = stripped === '' ? "The provider's usage limit was reached." : /[.!?]$/.test(stripped) ? stripped : `${stripped}.`;
   }
