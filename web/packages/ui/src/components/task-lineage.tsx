@@ -23,10 +23,9 @@ export function TaskLineageChips({
   const summary = node ? statusSummary(node.counts) : "";
   const usage = node ? usageChipText(node.usage.subtree) : null;
   const usageParts = node ? usageChipParts(node.usage.subtree) : null;
-  // ADR-0041: this task's own latest run hit a provider quota.
-  const limitHint = node ? rateLimitHint(node, new Date()) : null;
+  // This task's own rate limit is not repeated here: the run footer under the failed run states the reset once (with its actions); only a child's limit is hinted, on its pill.
   const stalled = node ? stalledHint(node, new Date()) : null;
-  if (!parent && children.length === 0 && !summary && !usage && !limitHint && !stalled) return null;
+  if (!parent && children.length === 0 && !summary && !usage && !stalled) return null;
 
   return (
     <>
@@ -70,11 +69,6 @@ export function TaskLineageChips({
       {summary && (
         <span data-testid="task-tree-summary" className="truncate">
           {summary}
-        </span>
-      )}
-      {limitHint && (
-        <span data-testid="task-rate-limit" className="truncate text-warning">
-          {limitHint}
         </span>
       )}
       {stalled && (

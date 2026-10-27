@@ -75,6 +75,18 @@ describe("RunFooter failover actions (ADR-0041 F2)", () => {
     expect(failover.retryOnFallback).toHaveBeenCalledTimes(1);
   });
 
+  it("puts the hover actions in the failover action row, not on a row of their own", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    render(
+      <RunFooter run={limited({ ...future, fallbackProfileId: 9 })} isLatest onRerun={() => {}} failover={failoverStub()}>
+        <span data-testid="run-actions" />
+      </RunFooter>,
+    );
+    expect(screen.getByTestId("run-failover-actions").contains(screen.getByTestId("run-actions"))).toBe(true);
+    expect(screen.getAllByTestId("run-actions")).toHaveLength(1);
+  });
+
   it("hides Retry on fallback without fallback", () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
