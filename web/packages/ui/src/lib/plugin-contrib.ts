@@ -10,8 +10,10 @@ export interface PluginCommand {
   /** `<plugin>:<name>`, always unique. */
   qualified: string;
   description?: string;
-  /** The text the command inserts into the composer. It is never sent by the command itself. */
-  prompt: string;
+  /** The text a prompt command inserts into the composer. It is never sent by the command itself. Absent on an rpc command. */
+  prompt?: string;
+  /** An rpc command: the name of the plugin's declared RPC. Selecting it calls `plugin.call` and inserts the returned prompt. */
+  rpc?: string;
   /** The bare name the daemon gave this command (first plugin by id); clients re-derive it. */
   alias?: string;
 }

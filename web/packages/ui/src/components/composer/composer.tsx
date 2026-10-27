@@ -567,7 +567,7 @@ export function Composer({
             onHover={mentionState.setActive}
           />
         )}
-        {slashState.open && <SlashCommandPopover rows={slashState.rows} activeIndex={slashState.activeIndex} onPick={slashState.pick} onHover={slashState.setActive} />}
+        {slashState.open && <SlashCommandPopover rows={slashState.rows} activeIndex={slashState.activeIndex} onPick={slashState.pick} onHover={slashState.setActive} status={slashState.rpcStatus} />}
         {attachLimits && <AttachmentTray items={attachItems} onRemove={attach.remove} />}
         {showImageHint && (
           <p data-testid="attachment-image-hint" className="px-4 pt-2 text-ui-xs text-foreground-muted">

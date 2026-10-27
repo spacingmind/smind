@@ -64,6 +64,7 @@ type Manager struct {
 	cache            contribCache
 	proc             *hostState
 	hooks            hookState
+	calls            callGate
 
 	mu sync.Mutex
 	// failAt, when set (tests only), is called at named points of an install
