@@ -197,3 +197,9 @@ describe('logging', () => {
     }
   });
 });
+
+describe('the kinds a phone subscribes to', () => {
+  it('include stalled, so the daemon sends it stall alerts (the daemon filters by registered kind)', () => {
+    expect(ALL_KINDS).toContain('stalled');
+  });
+});

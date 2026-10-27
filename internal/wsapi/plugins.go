@@ -160,6 +160,7 @@ func pluginHandlers(mgr *plugins.Manager, ev *pluginEvents) map[string]handlerFu
 	hs["plugin.commands"] = func(context.Context, *requestContext, json.RawMessage) (any, error) {
 		return orEmpty(mgr.Commands()), nil
 	}
+	hs["plugin.call"] = pluginCallHandler(mgr)
 	hs["plugin.themes"] = func(context.Context, *requestContext, json.RawMessage) (any, error) {
 		return orEmpty(mgr.Themes()), nil
 	}

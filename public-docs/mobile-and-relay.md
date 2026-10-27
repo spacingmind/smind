@@ -226,7 +226,9 @@ In a task's composer, type `/` at the start of the text to see the prompt
 commands plugins provide, each with `from <plugin>`. Tapping one puts its text
 in the field; it is never sent until you press Send. A command that shares a
 name with another is listed as `/<plugin>:<name>`; the plugin whose id sorts
-first keeps the bare name.
+first keeps the bare name. A command that asks its plugin for the text shows
+**Running…** while the computer's plugin answers, then puts the text in the
+field the same way; if the plugin fails, the reason shows under the list.
 
 If a plugin provides themes, the **Themes** section of the Plugins screen lists
 them next to **Default**. A theme can be light, dark or both, and it applies

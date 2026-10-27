@@ -16,7 +16,8 @@ export function useSlashPaletteCommands(): void {
   const hasComposer = useComposerInsertStore((state) => state.mounted.length > 0);
   const commands = useMemo<Command[]>(() => {
     if (!hasComposer) return [];
-    return buildSlashCommands(BUILTIN_SLASH_COMMANDS, pluginCommands).map((c) => ({
+    // An rpc command has no text of its own to insert (the plugin produces it on request): the composer's `/` list runs it.
+    return buildSlashCommands(BUILTIN_SLASH_COMMANDS, pluginCommands).filter((c) => !c.rpc).map((c) => ({
       id: `slash-${c.key}`,
       group: "Commands",
       title: `Insert command: /${c.label}`,

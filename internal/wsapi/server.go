@@ -81,6 +81,7 @@ type API struct {
 	Terminals *terminal.Registry
 
 	automations *automationHost
+	inbox       *inboxHost
 	hs          map[string]handlerFunc
 	plugins     *plugins.Manager
 	// pluginEvents publishes plugin.updated and the owned-row diffs.
@@ -132,6 +133,7 @@ func (a *API) StartGitState(ctx context.Context) (stop func()) {
 // accepting connections and before the store closes, so no background
 // writer is left touching the database or a worktree directory.
 func (a *API) Close() {
+	a.inbox.stop()
 	a.StopPlugins()
 	a.git.Stop()
 	a.Runs.CloseAll()
@@ -310,10 +312,16 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		hs[method] = h
 	}
 	hs["skill.list"] = handleSkillList(pluginMgr)
-	for method, h := range validationHandlers(newValidationService(db, bus)) {
+	valSvc := newValidationService(db, bus)
+	for method, h := range validationHandlers(valSvc) {
 		hs[method] = h
 	}
+	hs["validation.request"] = newValidationSeat(valSvc, wm, db, reg, runner, profReg).request
 	hs["session.identify"] = handleSessionIdentify(reg)
+	inboxH := newInboxHost(db, bus, reg, newValidationService(db, bus), stalled)
+	for method, h := range inboxHandlers(inboxH) {
+		hs[method] = h
+	}
 	admit := newSeatAdmission(reg, profReg, db)
 	profileListRaw := hs["profile.list"] // the plugin session must not get the seat-filtered form
 	hs["profile.list"] = admit.wrapProfileList(hs["profile.list"])
@@ -337,7 +345,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	pluginReg.bindSender(&pluginSender{wm: wm, runner: runner, reg: reg, db: db, mgr: pluginMgr, lim: newSendLimiter()})
 	reg.SetLaunchHooks(pluginHooks{pluginMgr})
 	reg.AddObserver(pluginHooks{pluginMgr})
-	api := &API{automations: automations, plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
+	api := &API{inbox: inboxH, automations: automations, plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}

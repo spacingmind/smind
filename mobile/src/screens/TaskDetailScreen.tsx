@@ -72,6 +72,7 @@ import { buildTranscript, TranscriptItem } from '../transcript/coalesceMessages'
 import { nextFollowState } from '../transcript/stickToBottom';
 import { EmptyState } from '../ui/EmptyState';
 import { AssistantMessage } from './task/AssistantMessage';
+import { runSlashRpc } from '../plugins/slashRpc';
 import { usePluginCommands } from '../plugins/usePluginCommands';
 import { Composer } from './task/Composer';
 import { FooterBanner } from './task/FooterBanner';
@@ -685,6 +686,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
                 attachNotice={attachNotice}
                 draft={draft}
                 slashCommands={slashCommands}
+                runSlashRpc={(row) => runSlashRpc(conn, row)}
               />
             </View>
           </KeyboardAvoidingView>
