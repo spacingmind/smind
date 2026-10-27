@@ -47,25 +47,18 @@ export function describeRunError(err: string, opts: { rateLimited?: boolean; has
   return { message, raw: message === text ? null : text };
 }
 
-/** The IANA zone Claude Code prints after a reset time: "resets 1pm (Asia/Saigon)" -- the daemon's reClaudeResetTZ. */
-const PRINTED_ZONE = /\bresets?\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*\(([A-Za-z_]+\/[A-Za-z_+\-0-9]+)\)/i;
-
 /**
  * The Details note naming the zone the daemon read the raw text's reset time
- * in; null says nothing (not a rate-limit error, no reset time parsed from
- * the text, or an absolute instant such as an epoch). Mirrors
- * internal/runs/ratelimit: GLM's zone-less wall clock is UTC+8, a Claude time
- * carries its own IANA zone, and the rest was read in the daemon's own zone,
- * which the run does not carry (so it cannot be named here). Kept identical
- * in web/packages/ui/src/lib/run-error.ts and mobile/src/runError.ts.
+ * in, from the run's `FailureResetZone` ("UTC+8", an IANA name, or
+ * "daemon-local:<zone>"); null (old rows, no reset parsed, an absolute
+ * instant) says nothing. The daemon decides the zone; this only words it.
  */
-export function resetZoneNote(raw: string, opts: { provider?: string; rateLimited?: boolean; hasReset: boolean; inferred?: boolean }): string | null {
-  if (!opts.rateLimited || !opts.hasReset) return null;
-  if (opts.provider === 'glm') return 'As reported by the provider. A time in this text is UTC+8, not your local time.';
-  const printed = PRINTED_ZONE.exec(raw)?.[1];
-  if (printed) return `As reported by the provider. A time in this text is in ${printed.replace(/_/g, ' ')}, not your local time.`;
-  if (opts.inferred) return "As reported by the provider. A time in this text has no zone; it was read in the daemon's time zone.";
-  return null;
+export function resetZoneNote(zone: string | null | undefined): string | null {
+  if (!zone) return null;
+  const lead = 'As reported by the provider. A time in this text';
+  if (zone.startsWith('daemon-local:')) return `${lead} has no zone; it was read in the daemon's time zone (${zone.slice('daemon-local:'.length)}).`;
+  if (zone.startsWith('UTC')) return `${lead} is ${zone}, not your local time.`;
+  return `${lead} is in ${zone.replace(/_/g, ' ')}, not your local time.`;
 }
 
 /** The agent's "[error] <cause>" text chunk that the run's error box repeats. */

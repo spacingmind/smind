@@ -421,6 +421,7 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 		failureWindow:        row.FailureWindow,
 		failureResetAt:       cloneTimePtr(row.FailureResetAt),
 		failureResetInferred: row.FailureResetInferred,
+		failureResetZone:     row.FailureResetZone,
 		history:              history,
 		nextEventSeq:         nextSeq,
 		baseSHA:              row.BaseSHA,
@@ -512,6 +513,7 @@ type run struct {
 	failureResetAt *time.Time
 	// failureResetInferred: failureResetAt was read in an assumed zone.
 	failureResetInferred bool
+	failureResetZone     string
 	// hasSession: at the terminal state of an error run with a resumable
 	// failure kind, its chat had a stored agent session (DispositionOf). A
 	// session is only ever replaced, never cleared, so it stays true. Guarded
@@ -659,6 +661,7 @@ func (r *run) statusLocked() RunStatus {
 	}
 	rs.FailureResetAt = cloneTimePtr(r.failureResetAt)
 	rs.FailureResetInferred = r.failureResetInferred
+	rs.FailureResetZone = r.failureResetZone
 	rs.BaseSHA = cloneStrPtr(r.baseSHA)
 	rs.HeadSHA = cloneStrPtr(r.headSHA)
 	rs.Dirty = cloneBoolPtr(r.dirty)
@@ -1534,7 +1537,7 @@ func (reg *Registry) finish(r *run, err error) {
 			fail.Kind = taskrunner.FailureKindCLIExited
 		}
 		if fail.Kind != "" {
-			_ = reg.st.UpdateRunFailure(r.id, fail.Kind, fail.Window, fail.ResetAt, fail.ResetInferred)
+			_ = reg.st.UpdateRunFailure(r.id, fail.Kind, fail.Window, fail.ResetAt, fail.ResetInferred, fail.ResetZone)
 		}
 		// ADR-0041 F1: a rate limit with a known, future reset puts the
 		// provider on cooldown. An unknown reset sets none (never guess a
@@ -1551,6 +1554,7 @@ func (reg *Registry) finish(r *run, err error) {
 	r.hasSession = hasSession
 	r.failureKind, r.failureWindow, r.failureResetAt = fail.Kind, fail.Window, cloneTimePtr(fail.ResetAt)
 	r.failureResetInferred = fail.ResetInferred
+	r.failureResetZone = fail.ResetZone
 	r.finishedAt = &now
 	r.status = status
 	r.errMsg = errMsg

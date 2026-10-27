@@ -55,6 +55,9 @@ func TestMigrate_RunFailureColumns(t *testing.T) {
 		if got.FailureResetInferred {
 			t.Fatalf("cleared failure still marked inferred")
 		}
+		if got.FailureResetZone != "" {
+			t.Fatalf("cleared FailureResetZone = %q, want empty", got.FailureResetZone)
+		}
 		if got.FailureKind != "" || got.FailureWindow != "" || got.FailureResetAt != nil {
 			t.Fatalf("Open() #%d failure = %q/%q/%v, want empty/empty/nil", i, got.FailureKind, got.FailureWindow, got.FailureResetAt)
 		}
@@ -80,7 +83,7 @@ func TestStore_UpdateRunFailureRoundTrip(t *testing.T) {
 	newFailureTestRun(t, s, "run-fail")
 
 	reset := time.Date(2026, 10, 23, 18, 30, 0, 0, time.FixedZone("UTC+7", 7*3600))
-	if err := s.UpdateRunFailure("run-fail", "rate_limited", "5h", &reset, true); err != nil {
+	if err := s.UpdateRunFailure("run-fail", "rate_limited", "5h", &reset, true, "UTC+8"); err != nil {
 		t.Fatalf("UpdateRunFailure() error = %v", err)
 	}
 	got, err := s.GetRun("run-fail")
@@ -97,8 +100,11 @@ func TestStore_UpdateRunFailureRoundTrip(t *testing.T) {
 	if !got.FailureResetInferred {
 		t.Fatalf("FailureResetInferred = false, want true")
 	}
+	if got.FailureResetZone != "UTC+8" {
+		t.Fatalf("FailureResetZone = %q, want UTC+8", got.FailureResetZone)
+	}
 
-	if err := s.UpdateRunFailure("run-fail", "", "", nil, false); err != nil {
+	if err := s.UpdateRunFailure("run-fail", "", "", nil, false, ""); err != nil {
 		t.Fatalf("UpdateRunFailure(clear) error = %v", err)
 	}
 	got, err = s.GetRun("run-fail")
@@ -116,7 +122,7 @@ func TestStore_ListRecentRunsCarriesFailure(t *testing.T) {
 	s := newTestStore(t)
 	newFailureTestRun(t, s, "run-list")
 	reset := time.Now().UTC().Add(time.Hour)
-	if err := s.UpdateRunFailure("run-list", "rate_limited", "weekly", &reset, true); err != nil {
+	if err := s.UpdateRunFailure("run-list", "rate_limited", "weekly", &reset, true, "UTC+8"); err != nil {
 		t.Fatalf("UpdateRunFailure() error = %v", err)
 	}
 	runs, err := s.ListRecentRuns(10)

@@ -578,7 +578,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
     const run = state.run;
     const rateLimited = run.FailureKind === 'rate_limited';
     const hasReset = Boolean(run.FailureResetAt);
-    const zoneNote = resetZoneNote(run.Err!, { provider: run.Provider, rateLimited, hasReset, inferred: run.FailureResetInferred });
+    const zoneNote = resetZoneNote(run.FailureResetZone);
     return { ...describeRunError(run.Err!, { rateLimited, hasReset }), zoneNote, err: run.Err! };
   }, [liveRunId, state]);
   const items = useMemo(() => buildTranscript(lines, permissions, footer, runError), [lines, permissions, footer, runError]);

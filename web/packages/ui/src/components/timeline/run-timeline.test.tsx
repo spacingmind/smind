@@ -923,18 +923,29 @@ describe("RunTimeline failed run", () => {
   };
 
   it("names UTC+8 in the Details note for a GLM reset time", () => {
-    openDetails({ ...failed(), provider: "glm", failureResetInferred: true });
+    openDetails({ ...failed(), provider: "glm", failureResetInferred: true, failureResetZone: "UTC+8" });
     expect(screen.getByTestId("run-error-zone-note").textContent).toContain("UTC+8");
   });
 
   it("names the zone Claude printed", () => {
     const text = "You've hit your session limit · resets 1pm (Asia/Saigon)";
-    openDetails({ ...failed(), provider: "claude-native", err: `${text} (taskrunner: x: rpc error -32603: Internal error)`, failureResetAt: "2099-01-01T06:00:00Z" });
+    openDetails({ ...failed(), provider: "claude-native", err: `${text} (taskrunner: x: rpc error -32603: Internal error)`, failureResetAt: "2099-01-01T06:00:00Z", failureResetZone: "Asia/Saigon" });
     expect(screen.getByTestId("run-error-zone-note").textContent).toContain("Asia/Saigon");
   });
 
+  it("an old row with a reset time but no stored zone renders no zone line", () => {
+    openDetails({ ...failed(), provider: "glm", failureResetAt: "2099-01-01T06:00:00Z", failureResetInferred: true });
+    expect(screen.getByTestId("run-error-raw")).toBeInTheDocument();
+    expect(screen.queryByTestId("run-error-zone-note")).toBeNull();
+  });
+
+  it("names the daemon's zone for an assumed one", () => {
+    openDetails({ ...failed(), provider: "claude-native", failureResetAt: "2099-01-01T06:00:00Z", failureResetInferred: true, failureResetZone: "daemon-local:Asia/Saigon" });
+    expect(screen.getByTestId("run-error-zone-note").textContent).toContain("daemon's time zone (Asia/Saigon)");
+  });
+
   it("no zone line at all when the daemon parsed no reset time", () => {
-    openDetails({ ...failed(), provider: "glm", failureResetAt: undefined });
+    openDetails({ ...failed(), provider: "glm", failureResetAt: undefined, failureResetZone: undefined });
     expect(screen.getByTestId("run-error-raw")).toBeInTheDocument();
     expect(screen.queryByTestId("run-error-zone-note")).toBeNull();
   });

@@ -213,7 +213,7 @@ func (e *env) waitSeat(resetIn time.Duration) (store.Task, store.AgentProfile) {
 	root, _ := e.pair()
 	e.run("r1", root.ID, "error", 0, prof.ID)
 	reset := e.base.Add(resetIn)
-	if err := e.s.UpdateRunFailure("r1", "rate_limited", "5h", &reset, false); err != nil {
+	if err := e.s.UpdateRunFailure("r1", "rate_limited", "5h", &reset, false, ""); err != nil {
 		e.t.Fatalf("UpdateRunFailure() error = %v", err)
 	}
 	return root, prof

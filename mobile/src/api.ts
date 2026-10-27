@@ -60,6 +60,8 @@ export interface RunSummary {
   FailureResetAt?: string | null;
   /** True when the daemon assumed the reset's time zone, so the clock is approximate (shown as ≈); absent/false = stated. */
   FailureResetInferred?: boolean;
+  /** The zone the reset's text was read in: "UTC+8", an IANA name or "daemon-local:<zone>"; absent = no note. */
+  FailureResetZone?: string;
   /** ADR-0041: the id of the run this run continues (a failover successor); absent/empty otherwise. */
   FailoverOf?: string;
   /** The profile the run used; absent on older daemons. */

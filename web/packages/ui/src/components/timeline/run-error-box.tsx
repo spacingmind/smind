@@ -14,12 +14,7 @@ export function RunErrorBox({ run, onRetry }: { run: RunEntry; onRetry?: (run: R
   const [open, setOpen] = useState(false);
   if (!run.err) return null;
   const view = describeRunError(run.err, { rateLimited: run.failureKind === "rate_limited", hasReset: Boolean(run.failureResetAt) });
-  const zoneNote = resetZoneNote(run.err, {
-    provider: run.provider,
-    rateLimited: run.failureKind === "rate_limited",
-    hasReset: Boolean(run.failureResetAt),
-    inferred: run.failureResetInferred,
-  });
+  const zoneNote = resetZoneNote(run.failureResetZone);
   return (
     <div className="flex flex-col gap-1 rounded-lg bg-destructive/10 px-3 py-2" data-testid="run-error-box">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
