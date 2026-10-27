@@ -561,3 +561,28 @@ func TestReadContractFile_InsideWorktreeOnly(t *testing.T) {
 		t.Fatalf("a path outside the worktree must be refused")
 	}
 }
+
+// The frame harness (smind-validator-frames) changes nothing daemon-side: a
+// frame the validator could not shoot is a blocked item, a pass still needs a
+// passing evidenced item per frame, and no_browser stays a valid reason.
+func TestValidator_FramesItemBlockedNoBrowserUnchanged(t *testing.T) {
+	c := parseGood(t).Contract
+	// blocked frame item inside a blocked/no_browser verdict: accepted
+	v := goodVerdict(c)
+	v.Status, v.BlockedReason, v.Summary = StatusBlocked, ReasonNoBrowser, "no browser on this machine"
+	v.Items[4] = Item{Kind: KindFrame, ID: "F1", Status: "blocked", Note: "no_browser: node has no playwright", Evidence: ex("qaframes: blocked (no_browser)")}
+	if err := CheckVerdict(c, v); err != nil {
+		t.Fatalf("blocked no_browser frame verdict: %v", err)
+	}
+	// the same blocked frame cannot ride in a pass
+	v.Status, v.BlockedReason = StatusPass, ""
+	if err := CheckVerdict(c, v); err == nil {
+		t.Fatalf("a pass with a blocked frame item must be rejected")
+	}
+	// a pass with the frame item dropped is still incomplete
+	p := goodVerdict(c)
+	p.Items = append(append([]Item{}, p.Items[:4]...), p.Items[5:]...)
+	if err := CheckVerdict(c, p); err == nil || !strings.Contains(err.Error(), `"F1"`) {
+		t.Fatalf("pass without the frame item must name F1, got %v", err)
+	}
+}
