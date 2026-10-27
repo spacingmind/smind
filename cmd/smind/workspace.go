@@ -14,7 +14,7 @@ import (
 
 func cmdWorkspace(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind workspace <create|ls|setup> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind workspace <create|ls|setup|readiness> ...")
 		return 2
 	}
 	switch args[0] {
@@ -24,6 +24,8 @@ func cmdWorkspace(args []string) int {
 		return cmdWorkspaceList(args[1:])
 	case "setup":
 		return cmdWorkspaceSetup(args[1:])
+	case "readiness":
+		return cmdWorkspaceReadiness(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "smind workspace: unknown subcommand %q\n", args[0])
 		return 2
