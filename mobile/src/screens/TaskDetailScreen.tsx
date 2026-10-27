@@ -72,6 +72,8 @@ import { buildTranscript, TranscriptItem } from '../transcript/coalesceMessages'
 import { nextFollowState } from '../transcript/stickToBottom';
 import { EmptyState } from '../ui/EmptyState';
 import { AssistantMessage } from './task/AssistantMessage';
+import { ErrorCard } from './task/ErrorCard';
+import { describeRunError } from '../runError';
 import { runSlashRpc } from '../plugins/slashRpc';
 import { usePluginCommands } from '../plugins/usePluginCommands';
 import { Composer } from './task/Composer';
@@ -571,7 +573,12 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
     const continues = describeContinues(state.run);
     return view && continues && !view.note ? { ...view, note: continues } : view;
   }, [continued, heldUntilMs, liveRunId, state, successor]);
-  const items = useMemo(() => buildTranscript(lines, permissions, footer), [lines, permissions, footer]);
+  const runError = useMemo(() => {
+    if (state.kind !== 'ready' || state.run === null || state.run.Status !== 'error' || !state.run.Err || liveRunId !== null) return null;
+    const run = state.run;
+    return { ...describeRunError(run.Err!, { rateLimited: run.FailureKind === 'rate_limited', hasReset: Boolean(run.FailureResetAt) }), err: run.Err! };
+  }, [liveRunId, state]);
+  const items = useMemo(() => buildTranscript(lines, permissions, footer, runError), [lines, permissions, footer, runError]);
 
   // Stick-to-bottom (vercel-react-native-skills: never track scroll position in useState per frame): `following` is a
   // ref written by onScroll; React state (`showJump`) changes only when the boolean flips.
@@ -624,6 +631,8 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
           return <MetaLine text={item.text} />;
         case 'permission':
           return <PermissionCard request={item.request} onRespond={handlePermissionTap} />;
+        case 'error':
+          return <ErrorCard message={item.message} raw={item.raw} />;
         case 'footer':
           return <FooterBanner sentence={item.sentence} note={item.note} waiting={item.waiting} canContinue={item.canContinue} onContinue={handleContinue} />;
       }
