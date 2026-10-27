@@ -60,6 +60,9 @@ const AUTOMATION_TOPICS = ["automation.fired", "automation.paused", "automation.
 /** The stalled-tree alert (`{taskId, title, minutes, since}`): the web notification fires on it and the task tree re-reads. */
 const STALL_TOPICS = ["task.stalled"];
 
+/** `inbox.changed` {} (ADR-0045): the inbox's visible set or state changed; the bridge re-reads the count and the list. */
+const INBOX_TOPICS = ["inbox.changed"];
+
 const TOPICS = [
   "task.status",
   "run.status",
@@ -75,6 +78,7 @@ const TOPICS = [
   ...PLUGIN_TOPICS,
   ...AUTOMATION_TOPICS,
   ...STALL_TOPICS,
+  ...INBOX_TOPICS,
 ];
 
 /** Registration surface returned by useDaemonEvents -- topic-filtered, with per-listener try/catch isolation. */

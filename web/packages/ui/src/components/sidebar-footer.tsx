@@ -18,6 +18,7 @@ import { openExternalUrl } from "@/lib/external-link";
 import { isDesktop } from "@/lib/platform";
 import { Icons, type IconComponent } from "@/lib/icons";
 import { PendingProposalBadge } from "@/components/learning/pending-badge";
+import { InboxBadge } from "@/components/inbox/inbox-badge";
 import { cn } from "@/lib/utils";
 
 const DOCS_URL = "https://github.com/spacingmind/smind#readme";
@@ -258,6 +259,7 @@ export function SidebarFooterActions({
   agentCount,
   onAddWorkspace,
   onOpenSettings,
+  onOpenInbox,
 }: {
   rows?: ReactNode;
   connectionStatus?: ConnectionStatus;
@@ -266,6 +268,7 @@ export function SidebarFooterActions({
   agentCount: number;
   onAddWorkspace: () => void;
   onOpenSettings?: (sectionId?: string) => void;
+  onOpenInbox?: () => void;
 }) {
   return (
     <TooltipProvider>
@@ -291,6 +294,15 @@ export function SidebarFooterActions({
             testId="sidebar-footer-usage"
             onClick={openUsageModal}
           />
+          {onOpenInbox && (
+            <FooterIconButton
+              label="Inbox"
+              icon={Icons.inbox}
+              testId="sidebar-footer-inbox"
+              onClick={onOpenInbox}
+              badge={<InboxBadge className="absolute -top-1 -right-1" />}
+            />
+          )}
           <HostButton
             connectionStatus={connectionStatus}
             connectionStatusText={connectionStatusText}
