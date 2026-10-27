@@ -9,7 +9,7 @@ describe("describeRunError", () => {
   it("drops the provider's zone-less reset time from a rate-limited message and keeps the raw text", () => {
     const err = `${QUOTA} (${CHAIN})`;
     const v = describeRunError(err, { rateLimited: true, hasReset: true });
-    expect(v.message).toBe("Usage limit reached for 5 hour.");
+    expect(v.message).toBe("Usage limit reached for the 5-hour window.");
     expect(v.message).not.toMatch(/22:44|2026/);
     expect(v.raw).toBe(err);
   });

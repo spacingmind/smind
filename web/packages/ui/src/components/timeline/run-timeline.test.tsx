@@ -906,7 +906,7 @@ describe("RunTimeline failed run", () => {
       </ul>,
     );
     expect(screen.queryByTestId("run-timeline")).toBeNull();
-    expect(screen.getByTestId("run-error").textContent).toBe("Usage limit reached for 5 hour.");
+    expect(screen.getByTestId("run-error").textContent).toBe("Usage limit reached for the 5-hour window.");
     expect(screen.queryByTestId("run-error-raw")).toBeNull();
     fireEvent.click(screen.getByTestId("run-error-details-toggle"));
     expect(screen.getByTestId("run-error-raw").textContent).toContain("rpc error -32603");
