@@ -30,7 +30,7 @@ type RoleSeat struct {
 const (
 	seatPeerSonnet = "peer-sonnet"
 	seatLead       = "lead"
-	seatReviewer   = "reviewer"
+	seatValidator  = "validator"
 
 	// sonnetModel is the pack's Claude model; the pack never uses Opus.
 	sonnetModel = "claude-sonnet-5-5"
@@ -65,6 +65,10 @@ Never merge. Pushing your branch and opening a PR for your item is authorised. W
 // a hard cap, but prose before the block counts against the usual limit).
 const peerInstructions = `You are a Peer: you own one bounded outcome from your Lead's brief. Your final message STARTS with exactly one fenced json block, before any prose: {"status":"done|blocked|failed","branch":"","commits":["<sha> <subject>"],"tests_run":["<command>: <result>"],"not_verified":[],"notes":""}. Use blocked when no safe in-scope progress remains and failed when you could not finish; never report done after a turn limit, a rate limit or with no edits. Keep notes short; prose after the block is optional.`
 
+// validatorInstructions: the validator judges, it does not build (ADR-0045).
+// The daemon's first prompt carries the contract; these are the standing rules.
+const validatorInstructions = `You are a validator: you judge one commit against one contract in a fresh context and report a structured verdict. You never saw the author's reasoning and must not ask for it. Work only in your own worktree (checked out at the exact commit); never touch the lead's worktree, push, open a PR or merge. Review the diff adversarially (security, secrets in logs/argv/events, races, data loss, platform gating, tests that do not test the behaviour). Run every named test; do each mutation as ONE change, see the named test fail, then restore the file; run each command; look at each frame if you can, and report it blocked with the reason when you cannot (no browser, no toolchain), never guess. Evidence is real tool output, not a summary. Submit your one verdict with validation_verdict_submit; the daemon rejects an incomplete pass and names the missing item. Your final message starts with one fenced json block {"status":"done","validationId":N,"verdict":"pass|fail|blocked"}. ` + noBackgroundWait
+
 // RoleSeats is the role pack, in creation order: the Human (or a Steward)
 // briefs a Lead directly, the Lead launches Peers.
 var RoleSeats = []RoleSeat{
@@ -86,12 +90,12 @@ var RoleSeats = []RoleSeat{
 			Notes:        "The single loop: owns one work item end to end, launches Peers only for parallel parts or independent verification. Sonnet 5.5, auto mode.",
 		}
 	}},
-	{Name: seatReviewer, Build: func(map[string]int64) store.AgentProfile {
+	{Name: seatValidator, Build: func(map[string]int64) store.AgentProfile {
 		return store.AgentProfile{
-			Name: seatReviewer, Provider: "claude-native", Model: sonnetModel, PermissionMode: "plan",
+			Name: seatValidator, Provider: "claude-native", Model: sonnetModel, PermissionMode: "auto",
 			OrchestrationTools: boolRef(false), ChildPolicy: "none", OnRateLimit: "wait",
-			Instructions: "You are a read-only reviewer. Review the exact commit or diff you are given adversarially (security, secrets in logs/argv/events, races, data loss, platform gating, tests that do not test the behaviour). Do not edit files. Report findings with file:line and a severity.",
-			Notes:        "Read-only review (plan mode).",
+			Instructions: validatorInstructions,
+			Notes:        "ADR-0045: judges one commit against a stored contract in a fresh context and scratch worktree. Started by validation.request, which gives its run the two validator tools; not a general reviewer. Sonnet 5.5, auto mode.",
 		}
 	}},
 }

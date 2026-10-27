@@ -58,4 +58,5 @@ Discovery: `workspace_list`, `provider_list`, `profile_list`, `task_list`, `task
 Lifecycle: `task_new`, `chat_new`, `task_send`, `task_wait`, `task_stop`, `task_archive`.
 Inspection: `task_status` and `task_wait` (also `failureKind`, `window`, `resetAt` for a rate-limited run; `run_list` and `task_tree` carry them too), `task_logs`, `task_permissions`, `task_diff`, `usage_summary` (tokens), `account_usage` (plan windows and any active rate-limit cooldown, read-only; CLI: `smind account usage`).
 Queue: `queue_list`, `queue_cancel`.
+Validation (a Lead, before coding and per milestone): `validation_contract_submit`, `validation_request`, `validation_get`. You cannot write or waive a verdict.
 Live settings: `task_set_mode`, `task_options`, `task_set_option`.

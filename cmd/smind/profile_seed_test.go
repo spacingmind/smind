@@ -24,7 +24,7 @@ func TestProfileSeedRoles_CreatesAndReports(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("output = %q, want 3 lines", out)
 	}
-	for i, name := range []string{"peer-sonnet", "lead", "reviewer"} {
+	for i, name := range []string{"peer-sonnet", "lead", "validator"} {
 		want := "created " + name + " (id "
 		if !strings.HasPrefix(lines[i], want) {
 			t.Errorf("line %d = %q, want prefix %q", i, lines[i], want)

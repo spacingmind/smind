@@ -274,6 +274,16 @@ func pushInput(e Event) (push.Input, bool) {
 			return push.Input{}, false
 		}
 		return push.Input{Kind: push.KindPermission, Key: p.RequestID, TaskID: p.TaskID, ChatID: p.ChatID, RunID: p.RunID, Summary: p.Summary}, true
+	case TopicAutomationPaused:
+		// ADR-0044 question 7: an auto-pause always notifies. It rides the
+		// existing "error" kind (devices already subscribe to it, mobile
+		// already renders it) and opens the failed task; a pause with no task
+		// has nothing to open and is not pushed.
+		p, ok := e.Payload.(automationPausedPayload)
+		if !ok || p.TaskID <= 0 {
+			return push.Input{}, false
+		}
+		return push.Input{Kind: push.KindError, Key: "autopause:" + strconv.FormatInt(p.AutomationID, 10) + ":" + strconv.FormatInt(p.TaskID, 10), TaskID: p.TaskID, Summary: "Automation paused: " + p.Reason}, true
 	case TopicTaskStalled:
 		p, ok := e.Payload.(stalledPayload)
 		if !ok {

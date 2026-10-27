@@ -128,6 +128,9 @@ type automationFiredPayload struct {
 type automationPausedPayload struct {
 	AutomationID int64  `json:"automationId"`
 	Reason       string `json:"reason"`
+	// TaskID is the failed run's task that tripped the pause (0 = none); the
+	// push uses it so the phone can open that task.
+	TaskID int64 `json:"taskId,omitempty"`
 }
 
 type automationUpdatedPayload struct {
@@ -139,8 +142,8 @@ func (s automationSink) Fired(a store.Automation, r store.AutomationAudit) {
 		AutomationID: a.ID, AuditID: r.ID, TaskID: r.TaskID, Decision: r.Decision, Fingerprint: r.Fingerprint}})
 }
 
-func (s automationSink) Paused(a store.Automation, reason string) {
-	s.h.bus.Publish(Event{Topic: TopicAutomationPaused, Payload: automationPausedPayload{AutomationID: a.ID, Reason: reason}})
+func (s automationSink) Paused(a store.Automation, reason string, taskID int64) {
+	s.h.bus.Publish(Event{Topic: TopicAutomationPaused, Payload: automationPausedPayload{AutomationID: a.ID, Reason: reason, TaskID: taskID}})
 }
 
 func (s automationSink) Updated(a store.Automation) {

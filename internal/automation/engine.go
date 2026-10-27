@@ -75,7 +75,9 @@ type Starter interface {
 // Sink receives the engine's events (ids only; no signal text).
 type Sink interface {
 	Fired(a store.Automation, row store.AutomationAudit)
-	Paused(a store.Automation, reason string)
+	// Paused is called when the engine pauses an automation; taskID is the
+	// task of the failed run that tripped it (0 when there was none).
+	Paused(a store.Automation, reason string, taskID int64)
 	Updated(a store.Automation)
 }
 
@@ -336,7 +338,7 @@ func (e *Engine) evaluate(ctx context.Context, cfg Config, a store.Automation, d
 	if err := d.WithDefaults().Validate(cfg.Limits); err != nil {
 		row.Decision, row.Reason = store.AuditFailed, "template no longer valid: "+err.Error()
 		out := e.audit(a, row, now)
-		e.recordFailure(a.ID, "the template is no longer valid: "+err.Error(), now)
+		e.recordFailure(a.ID, "the template is no longer valid: "+err.Error(), 0, now)
 		return out
 	}
 
@@ -359,7 +361,7 @@ func (e *Engine) evaluate(ctx context.Context, cfg Config, a store.Automation, d
 	if err != nil {
 		_ = e.d.Store.FinishAutomationAudit(row.ID, "start_failed", err.Error(), now)
 		row.Outcome, row.Note = "start_failed", err.Error()
-		e.recordFailure(a.ID, "could not start the task: "+err.Error(), now)
+		e.recordFailure(a.ID, "could not start the task: "+err.Error(), res.TaskID, now)
 		return row
 	}
 	_ = e.d.Store.SetAutomationAuditTask(row.ID, res.TaskID, res.RunID)
@@ -418,7 +420,7 @@ func (e *Engine) reconcile(a store.Automation, d Def, now time.Time) {
 		if row.TaskID == nil {
 			if now.Sub(row.CreatedAt) > orphanFireAfter {
 				_ = e.d.Store.FinishAutomationAudit(row.ID, "start_failed", "no task was started (daemon stopped between the audit write and the launch)", now)
-				e.recordFailure(a.ID, fmt.Sprintf("a firing never started a task (audit #%d)", row.ID), now)
+				e.recordFailure(a.ID, fmt.Sprintf("a firing never started a task (audit #%d)", row.ID), 0, now)
 			}
 			continue
 		}
@@ -433,7 +435,7 @@ func (e *Engine) reconcile(a store.Automation, d Def, now time.Time) {
 					continue
 				}
 				_ = e.d.Store.FinishAutomationAudit(row.ID, "timeout", fmt.Sprintf("stopped after %d minutes (maxRunMinutes)", d.Template.MaxRunMinutes), now)
-				e.recordFailure(a.ID, fmt.Sprintf("task #%d hit the %d-minute wall clock", *row.TaskID, d.Template.MaxRunMinutes), now)
+				e.recordFailure(a.ID, fmt.Sprintf("task #%d hit the %d-minute wall clock", *row.TaskID, d.Template.MaxRunMinutes), *row.TaskID, now)
 			}
 			continue
 		}
@@ -450,7 +452,7 @@ func (e *Engine) reconcile(a store.Automation, d Def, now time.Time) {
 		case "done":
 			_ = e.d.Store.SetAutomationFailures(a.ID, 0)
 		case "error", "interrupted":
-			e.recordFailure(a.ID, fmt.Sprintf("task #%d ended `%s`", *row.TaskID, st.State), now)
+			e.recordFailure(a.ID, fmt.Sprintf("task #%d ended `%s`", *row.TaskID, st.State), *row.TaskID, now)
 		}
 	}
 	if fresh, err := e.d.Store.GetAutomation(a.ID); err == nil && e.d.Sink != nil {
@@ -482,7 +484,7 @@ func (e *Engine) storeMemory(id int64, d Def, final string) string {
 
 // recordFailure bumps the consecutive-failure counter and pauses the
 // automation, with a visible reason, at pauseAfterFailures.
-func (e *Engine) recordFailure(id int64, detail string, now time.Time) {
+func (e *Engine) recordFailure(id int64, detail string, taskID int64, now time.Time) {
 	a, err := e.d.Store.GetAutomation(id)
 	if err != nil {
 		return
@@ -498,7 +500,7 @@ func (e *Engine) recordFailure(id int64, detail string, now time.Time) {
 		reason := fmt.Sprintf("paused after %d consecutive failed runs; last: %s", n, detail)
 		_ = e.d.Store.PauseAutomation(id, reason, now)
 		if e.d.Sink != nil {
-			e.d.Sink.Paused(a, reason)
+			e.d.Sink.Paused(a, reason, taskID)
 		}
 	}
 }

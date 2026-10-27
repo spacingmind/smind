@@ -34,7 +34,7 @@ type validationUpdatedPayload struct {
 // validationMethods lists every validation RPC; a test walks it.
 var validationMethods = []string{
 	"validation.contract.submit", "validation.contract.get",
-	"validation.verdict.submit", "validation.get", "validation.list",
+	"validation.request", "validation.verdict.submit", "validation.get", "validation.list",
 }
 
 // validationLimits reads validation.* from config.yaml on every call, so a
@@ -131,6 +131,9 @@ func validationHandlers(svc *validation.Service) map[string]handlerFunc {
 		if err := pluginParams(m, raw, &p); err != nil {
 			return nil, err
 		}
+		if p.TaskID == 0 && rc.runScoped {
+			p.TaskID = rc.ident.taskID
+		}
 		if p.TaskID <= 0 {
 			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": taskId is required"}
 		}
@@ -168,6 +171,9 @@ func validationHandlers(svc *validation.Service) map[string]handlerFunc {
 		}
 		var rec validation.ContractRecord
 		var err error
+		if p.ContractID == 0 && p.TaskID == 0 && rc != nil && rc.runScoped {
+			p.TaskID = rc.ident.taskID
+		}
 		switch {
 		case p.ContractID > 0:
 			rec, err = svc.GetContract(p.ContractID)
@@ -187,10 +193,15 @@ func validationHandlers(svc *validation.Service) map[string]handlerFunc {
 		if rc.ident.taskID == rec.TaskID {
 			return contractOf(rec, true), nil
 		}
-		if vs, err := svc.DB.ListValidationsByRun(rc.ident.runID); err == nil {
-			for _, v := range vs {
-				if v.ContractID == rec.ID {
-					return contractOf(rec, false), nil
+		for _, vs := range []func() ([]store.Validation, error){
+			func() ([]store.Validation, error) { return svc.DB.ListValidationsByRun(rc.ident.runID) },
+			func() ([]store.Validation, error) { return svc.DB.ListValidationsByValidatorTask(rc.ident.taskID) },
+		} {
+			if list, err := vs(); err == nil {
+				for _, v := range list {
+					if v.ContractID == rec.ID {
+						return contractOf(rec, false), nil
+					}
 				}
 			}
 		}
@@ -245,6 +256,9 @@ func validationHandlers(svc *validation.Service) map[string]handlerFunc {
 		}
 		if err := pluginParams(m, raw, &p); err != nil {
 			return nil, err
+		}
+		if p.TaskID == 0 && rc != nil && rc.runScoped {
+			p.TaskID = rc.ident.taskID
 		}
 		if p.TaskID <= 0 {
 			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": taskId is required"}
