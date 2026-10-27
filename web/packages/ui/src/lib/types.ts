@@ -24,6 +24,21 @@ export interface WorkspaceDefaultBase {
   override: string;
 }
 
+/** One workspace.readiness finding: a static check of the repo for agent use (never a command to run in fix). */
+export interface ReadinessFinding {
+  id: string;
+  status: "pass" | "warn" | "info";
+  title: string;
+  evidence: string;
+  fix: string;
+}
+
+export interface WorkspaceReadiness {
+  workspaceId: number;
+  findings: ReadinessFinding[];
+  checkedAt: string;
+}
+
 /** workspace.get's result: the workspace plus its setup/teardown script text ("" = none) -- the only wire method that returns it (ADR-0024). */
 export interface WorkspaceWithScripts extends Workspace {
   SetupScript: string;

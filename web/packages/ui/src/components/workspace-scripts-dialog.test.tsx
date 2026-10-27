@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { WorkspaceScriptsDialog } from "@/components/workspace-scripts-dialog";
 import type { Workspace, WorkspaceDefaultBase, WorkspaceWithScripts } from "@/lib/types";
-import type { WsClient } from "@/lib/ws-client";
+import type { CallOptions, EventFunc, WsClient } from "@/lib/ws-client";
 
 const WORKSPACE: Workspace = {
   ID: 7,
@@ -21,6 +21,14 @@ const WORKSPACE: Workspace = {
 const AUTO_BASE: WorkspaceDefaultBase = { ref: "develop", detected: true, override: "" };
 const OVERRIDE_BASE: WorkspaceDefaultBase = { ref: "develop", detected: false, override: "main" };
 
+/** workspace.readiness (the panel's own call) is answered at once and unrecorded, so call indexes below stay the editor's. */
+class ScriptsClient extends FakeWsClient {
+  override callStream<T = unknown>(method: string, params?: unknown, onEvent?: EventFunc, options?: CallOptions): Promise<T> {
+    if (method === "workspace.readiness") return Promise.resolve({ workspaceId: 7, findings: [], checkedAt: "" } as T);
+    return super.callStream<T>(method, params, onEvent, options);
+  }
+}
+
 async function flush(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
@@ -31,7 +39,7 @@ async function openDialog(
   scripts: { SetupScript: string; TeardownScript: string },
   base: WorkspaceDefaultBase = AUTO_BASE,
 ) {
-  const client = new FakeWsClient();
+  const client = new ScriptsClient();
   const onSaved = vi.fn();
   const onOpenChange = vi.fn();
   render(

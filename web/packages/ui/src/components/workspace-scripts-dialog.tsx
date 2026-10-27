@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ReadinessPanel } from "@/components/readiness-panel";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { Input } from "@/components/ui/input";
 import type { Workspace } from "@/lib/types";
@@ -97,7 +98,7 @@ export function WorkspaceScriptsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Worktree settings</DialogTitle>
           <DialogDescription>
@@ -170,6 +171,8 @@ export function WorkspaceScriptsDialog({
               </div>
             </>
           )}
+          {/* After the editor loads, so the panel does not appear above the fields and then jump below them. */}
+          {!loading && <ReadinessPanel client={client} workspaceId={workspace.ID} />}
           {error && (
             <p role="alert" data-testid="workspace-scripts-error" className="text-ui-base text-destructive">
               {error}
