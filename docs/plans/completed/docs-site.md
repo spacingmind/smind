@@ -1,6 +1,6 @@
 # Docs site: `public-docs/` on GitHub Pages at docs.spacingmind.com
 
-Status: active (2026-10-27). Human-approved scope: SEO + GEO (generative-engine optimisation).
+Status: completed (2026-10-27; #682 plan, #683 site, deployed and live). Human-approved scope: SEO + GEO (generative-engine optimisation).
 
 Size: M (4) — scope 1 (new `docs-site/` dir, one workflow, one node test), PRs 2, risk 1 (publishing; Pages and DNS stay a Human step), decisions 0, verification 2 (built site served locally, visual check, curl of generated files).
 
@@ -50,8 +50,19 @@ PR1 this plan only. PR2 site, generators, workflow, summaries, drift test.
 
 ## Progress
 
-- 2026-10-27 plan written.
+- 2026-10-27 plan written (#682).
+- 2026-10-27 site, generators, workflow, summaries and drift test merged (#683); a later commit fixed `<!-- -->` generator markers rendering as text (`check-dist.mjs` now fails on `&lt;!--`).
+- 2026-10-27 Pages enabled by the Human; docs.spacingmind.com live (deploy green; `/`, `llms.txt`, `robots.txt`, `sitemap.xml` return 200; HTTPS certificate pending at the time).
 
 ## Validation
 
-(filled in PR2)
+Evidence is in the #683 body and CI; every criterion was checked there.
+
+- AC1, AC2, AC5, AC6: clean `npm ci` + `vitepress build` reviewed by the Steward; per-page title, canonical, JSON-LD (TechArticle + BreadcrumbList), summary and version line present in the built HTML; `providers.html` inspected. FAQPage is covered by a fixture test.
+- AC3, AC4: `CNAME`, `llms.txt`, `llms-full.txt`, `robots.txt` (eight crawlers), `sitemap.xml` and a `.md` copy per page present in `dist`; same files return 200 on the live site.
+- AC7: link test in `docs-site/scripts/docs-site.test.mjs`.
+- AC8: workflow shape test plus the live deploy run.
+- AC9, AC10: `node --test` (10 pass), `check-dist.mjs`, `task lint`, `task test`, CI `ci` and `windows-terminal` green. Seven mutations each made the intended check fail (listed in #683).
+- Visual: home, providers and cli-reference in light and dark at true 1280x800 and 390x844 viewports; `scrollWidth` equals the viewport width on all 12.
+
+Follow-ups, not done: Lighthouse SEO score (needs a tool install), an `og:image` for the docs site.
