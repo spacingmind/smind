@@ -10,11 +10,7 @@ import type { WsClientLike } from "@/lib/ws-client";
 const STATUS_ICON = {
   pass: { Icon: Icons.success, className: "text-success", label: "Pass" },
   warn: { Icon: Icons.warning, className: "text-warning", label: "Warning" },
-  info: {
-    Icon: Icons.info,
-    className: "text-foreground-subtlest",
-    label: "Info",
-  },
+  info: { Icon: Icons.info, className: "text-foreground-subtlest", label: "Info" },
 } as const;
 
 /**
@@ -23,13 +19,7 @@ const STATUS_ICON = {
  * lockfiles). It runs when mounted and again on Re-check; it only reads, and
  * a warning is advice, never a block.
  */
-export function ReadinessPanel({
-  client,
-  workspaceId,
-}: {
-  client: WsClientLike | null;
-  workspaceId: number;
-}) {
+export function ReadinessPanel({ client, workspaceId }: { client: WsClientLike | null; workspaceId: number }) {
   const [findings, setFindings] = useState<ReadinessFinding[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -60,13 +50,9 @@ export function ReadinessPanel({
   const warns = findings?.filter((f) => f.status === "warn").length ?? 0;
 
   return (
-    <section
-      className="grid gap-2"
-      aria-label="Agent readiness"
-      data-testid="readiness-panel"
-    >
+    <section className="grid min-w-0 gap-2" aria-label="Agent readiness" data-testid="readiness-panel">
       <div className="flex items-center justify-between gap-2">
-        <div>
+        <div className="min-w-0">
           <h3 className="text-ui-base font-medium">Agent readiness</h3>
           <p className="text-ui-sm text-muted-foreground">
             {findings && !loading
@@ -80,37 +66,25 @@ export function ReadinessPanel({
           type="button"
           variant="quiet"
           size="sm"
+          className="shrink-0"
           onClick={recheck}
           disabled={loading}
           data-testid="readiness-recheck"
         >
-          <Icons.refresh
-            aria-hidden
-            className={loading ? "size-3.5 animate-spin" : "size-3.5"}
-            data-icon="inline-start"
-          />
+          <Icons.refresh aria-hidden className={loading ? "size-3.5 animate-spin" : "size-3.5"} data-icon="inline-start" />
           Re-check
         </Button>
       </div>
       {error && (
-        <p
-          role="alert"
-          data-testid="readiness-error"
-          className="text-ui-base text-destructive"
-        >
+        <p role="alert" data-testid="readiness-error" className="text-ui-base text-destructive">
           {error}
         </p>
       )}
       {loading && !findings && <InlineSpinner label="Checking…" />}
       {findings && (
-        <ul
-          className="grid gap-1.5"
-          data-testid="readiness-list"
-          aria-busy={loading}
-        >
+        <ul className="grid min-w-0 gap-1.5" data-testid="readiness-list" aria-busy={loading}>
           {findings.map((f) => {
-            const { Icon, className, label } =
-              STATUS_ICON[f.status] ?? STATUS_ICON.info;
+            const { Icon, className, label } = STATUS_ICON[f.status] ?? STATUS_ICON.info;
             return (
               <li
                 key={f.id}
@@ -118,26 +92,14 @@ export function ReadinessPanel({
                 data-testid={`readiness-${f.id}`}
                 data-status={f.status}
               >
-                <Icon
-                  aria-hidden
-                  className={`mt-0.5 size-3.5 shrink-0 ${className}`}
-                />
+                <Icon aria-hidden className={`mt-0.5 size-3.5 shrink-0 ${className}`} />
                 <div className="min-w-0">
                   <div>
                     <span className="sr-only">{label}: </span>
                     {f.title}
                   </div>
-                  <div
-                    className="truncate text-ui-sm text-muted-foreground"
-                    title={f.evidence}
-                  >
-                    {f.evidence}
-                  </div>
-                  {f.fix && (
-                    <div className="text-ui-sm text-foreground-muted">
-                      {f.fix}
-                    </div>
-                  )}
+                  <div className="text-ui-sm break-words text-muted-foreground">{f.evidence}</div>
+                  {f.fix && <div className="text-ui-sm text-foreground-muted">{f.fix}</div>}
                 </div>
               </li>
             );

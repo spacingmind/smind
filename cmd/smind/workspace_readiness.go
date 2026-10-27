@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"strconv"
-	"text/tabwriter"
 
 	"github.com/spacingmind/smind/internal/readiness"
 	"github.com/spacingmind/smind/internal/store"
@@ -107,14 +106,13 @@ func runWorkspaceReadiness(ctx context.Context, c rpcCaller, id int64, asJSON bo
 			fmt.Fprintln(out)
 		}
 		fmt.Fprintf(out, "workspace %d: %s\n", r.WorkspaceID, r.Title)
-		tw := tabwriter.NewWriter(out, 0, 2, 2, ' ', 0)
 		for _, f := range r.Findings {
-			fmt.Fprintf(tw, "  %s\t%s\t%s\n", f.Status, f.Title, f.Evidence)
+			fmt.Fprintf(out, "  %-4s  %s\n", f.Status, f.Title)
+			fmt.Fprintf(out, "        %s\n", f.Evidence)
 			if f.Fix != "" {
-				fmt.Fprintf(tw, "\t  fix:\t%s\n", f.Fix)
+				fmt.Fprintf(out, "        fix: %s\n", f.Fix)
 			}
 		}
-		tw.Flush()
 	}
 	return 0
 }
