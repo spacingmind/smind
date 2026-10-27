@@ -1,6 +1,7 @@
 ---
 title: Workspaces and tasks
 description: Create workspaces and tasks, chat with agents, attach files, queue prompts and tidy up.
+summary: "This page explains workspaces (registered git repositories) and tasks (one worktree and branch each) in sMind by Spacing Mind, plus chat, attachments, the prompt queue, spaces, pinning and archiving. It is for everyday users of the web app and CLI."
 order: 4
 ---
 

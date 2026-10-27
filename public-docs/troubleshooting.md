@@ -1,6 +1,7 @@
 ---
 title: Troubleshooting
 description: Fix a daemon that will not start, port clashes, login problems and lost connections.
+summary: "This page helps users of sMind by Spacing Mind diagnose a daemon that is not running, a port in use, provider login problems, reconnect and resync behaviour, and where to find logs."
 order: 10
 ---
 

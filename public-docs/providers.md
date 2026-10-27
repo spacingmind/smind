@@ -1,6 +1,7 @@
 ---
 title: Providers
 description: Log in to Claude Code, Codex, GLM and Kimi, and choose each provider's config directory.
+summary: "This page explains how to connect the four coding-agent providers sMind by Spacing Mind runs (Claude Code, Codex, GLM and Kimi), including login and each provider's config directory. It is for anyone setting up accounts."
 order: 3
 ---
 

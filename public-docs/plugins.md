@@ -1,6 +1,7 @@
 ---
 title: Plugins
 description: Add MCP servers, skills, agent profiles, prompt commands and themes from a plugin directory, and see what a plugin does before you turn it on.
+summary: "This page explains how to install and manage plugins in sMind by Spacing Mind (a preview feature): what a plugin can add, how to see what it does before enabling it, and how plugin processes run. It is for users and administrators."
 order: 12
 ---
 

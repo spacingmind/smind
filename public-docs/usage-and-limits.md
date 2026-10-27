@@ -1,6 +1,7 @@
 ---
 title: Usage and limits
 description: Token usage, plan windows and what happens at a rate limit.
+summary: "This page explains how sMind by Spacing Mind records token usage, shows plan usage windows per account, and keeps work moving when a provider reports a rate limit. It is for users watching cost and quota."
 order: 8
 ---
 

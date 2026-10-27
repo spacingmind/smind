@@ -1,6 +1,7 @@
 ---
 title: Orchestration
-description: Run a Lead that launches Peers: seats, briefs, budgets, alerts and permission rules.
+description: "Run a Lead that launches Peers: seats, briefs, budgets, alerts and permission rules."
+summary: "This page explains orchestration in sMind by Spacing Mind: a Lead agent owns a piece of work and launches Peer agents as child tasks, with seats, briefs, budgets, alerts and permission rules. It is for developers who delegate work across several agents."
 order: 7
 ---
 

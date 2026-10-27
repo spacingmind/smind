@@ -1,6 +1,7 @@
 ---
 title: CLI reference
 description: Every smind command, with the usage text the binary prints.
+summary: "This page lists every command of the smind binary, the daemon and command line of sMind by Spacing Mind, with the usage text the binary prints. It is for people who script or operate smind from a terminal."
 order: 9
 ---
 

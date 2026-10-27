@@ -1,6 +1,7 @@
 ---
 title: Getting started
 description: Install smind and run your first task.
+summary: "This page shows developers how to install sMind by Spacing Mind (the CLI, the desktop app or the mobile app), start the daemon, and run a first task in a new workspace."
 order: 2
 ---
 
