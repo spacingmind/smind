@@ -10,8 +10,7 @@ Plugins are a preview. A plugin is a directory with a `smind-plugin.json`
 file. Today a plugin can add five things: MCP servers, skills, agent profiles,
 prompt commands and themes, and it can declare a long-lived process that smind
 starts (see [Plugin processes](#plugin-processes)). Nothing else a manifest
-declares (hooks, providers, panels, commands that call a plugin process) has an
-effect yet.
+declares (providers, panels) has an effect yet.
 
 A plugin is trusted code you chose to run. An MCP server it adds starts as
 you, with your files and credentials, exactly like an MCP server you add by
@@ -218,7 +217,8 @@ otherwise to the first plugin, by id, that has a command called `review`; the
 others keep only the long form, and `smind plugin show <id> --json` lists the
 short name under `conflicts`. With no plugin commands the message box behaves
 as it always did. A command file is only text: it starts nothing and gets no
-access to anything. Commands that call a plugin process are not available yet.
+access to anything. A command that asks a plugin process for its text is
+described under [Plugin RPCs](#plugin-rpcs).
 
 ### Themes
 
@@ -434,6 +434,46 @@ never waits for it. A hook that answers with a JSON-RPC error is a failure, whic
 how a `closed` hook stops a start. Names follow Claude Code's hook vocabulary where
 they mean the same (`additionalContext`; `run.finished` is its `Stop`); there are no
 exit codes, since a plugin answers over JSON-RPC.
+
+## Plugin RPCs
+
+A plugin process may declare methods a client can ask it to run, in
+`contributes.rpc`:
+
+```json
+"contributes": {
+  "rpc": [{ "name": "echoPrompt", "description": "Build a prompt", "timeoutMs": 5000 }],
+  "commands": [{ "name": "hello", "description": "Insert a greeting", "rpc": "echoPrompt" }]
+}
+```
+
+The wsapi method `plugin.call {pluginId, rpc, params}` sends `rpc.<name>` to the
+process and returns its JSON result. Only names declared in `contributes.rpc`
+are ever sent; anything else fails `unknown_rpc` without reaching the process.
+
+- **Who can call.** You, in the web or desktop app or over a remote login, and a
+  paired phone. Agents cannot, and one plugin cannot call another (a plugin's own
+  calls to smind never include `plugin.*`). `plugins.allowRemoteManage` does not
+  apply: it governs installing and enabling, not asking an enabled plugin to do
+  what it declared.
+- **Limits.** Params at most 64 KiB, a result at most 256 KiB (a bigger result is
+  dropped and the call fails `call_too_large`), JSON only, 4 calls in flight per
+  plugin (the fifth fails `plugin_busy` at once), 30 s per call. A manifest may
+  lower the timeout with `timeoutMs` and can never raise it.
+- **Errors** are typed and name the plugin: `unknown_rpc`, `plugin_unavailable`
+  (off, disabled, not running, failed or gone during the call), `call_timeout`,
+  `call_too_large`, `plugin_busy`, `bad_call`, and `plugin_error` (the process
+  answered with an error; its text is cut to 300 characters and scrubbed of
+  secrets). Each call is logged in `smind plugin logs <id>` with a scrubbed preview.
+- **RPC-backed slash commands.** A command with `"rpc"` appears in the `/` list like
+  a prompt command (web and phone), "from <plugin>". Picking it calls the RPC with
+  `{"command": "<plugin>:<name>", "args": ""}`; the result must be
+  `{"prompt": "<text>"}` (at most 16 KiB). The text is put in the message box as
+  plain characters, in place of the `/word`, and is never sent; a failure shows
+  under the list and leaves the box alone. The same name and collision rules as
+  prompt commands apply. The command palette does not list RPC commands yet.
+
+A small working plugin is in `plugin-examples/hello-process/` in the repository.
 
 ## Further reading
 

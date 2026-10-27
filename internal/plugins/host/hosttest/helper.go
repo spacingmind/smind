@@ -224,6 +224,29 @@ func serve(mode string, args []string) {
 			}
 		case "sendresults":
 			reply(m.ID, sendResults)
+		case "rpc.echo":
+			reply(m.ID, m.Params)
+		case "rpc.slow":
+			var p struct {
+				Ms int `json:"ms"`
+			}
+			_ = json.Unmarshal(m.Params, &p)
+			time.Sleep(time.Duration(p.Ms) * time.Millisecond)
+			reply(m.ID, map[string]any{"slept": p.Ms})
+		case "rpc.huge":
+			var p struct {
+				Bytes int `json:"bytes"`
+			}
+			_ = json.Unmarshal(m.Params, &p)
+			reply(m.ID, strings.Repeat("x", p.Bytes))
+		case "rpc.fail":
+			var p struct {
+				Msg string `json:"msg"`
+			}
+			_ = json.Unmarshal(m.Params, &p)
+			send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32000, "message": p.Msg}})
+		case "rpc.die":
+			os.Exit(9)
 		case "drain":
 			// The notifications received since the last drain, oldest first.
 			reply(m.ID, received)

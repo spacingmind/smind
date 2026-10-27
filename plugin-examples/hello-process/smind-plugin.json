@@ -1,0 +1,22 @@
+{
+  "id": "hello-process",
+  "name": "Hello (process example)",
+  "version": "0.1.0",
+  "api": 1,
+  "engines": { "smind": ">=0.15.0" },
+  "description": "A tiny process plugin: one RPC, one RPC-backed slash command, a run.finished hook and a setting. Python 3, standard library only.",
+  "process": { "command": ["python3", "server.py"] },
+  "capabilities": [],
+  "settings": [
+    { "key": "greeting", "type": "string", "label": "Greeting", "description": "How the hello prompt starts.", "default": "Hello", "maxLength": 80 }
+  ],
+  "contributes": {
+    "rpc": [
+      { "name": "echoPrompt", "description": "Returns {prompt} built from the greeting setting and the command's text.", "timeoutMs": 5000 }
+    ],
+    "commands": [
+      { "name": "hello", "description": "Insert a greeting prompt (answered by the plugin process)", "rpc": "echoPrompt" }
+    ],
+    "hooks": [{ "event": "run.finished" }]
+  }
+}

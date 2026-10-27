@@ -50,9 +50,16 @@ describe('plugin client is read-only', () => {
   });
 
   it('no mobile source names a mutating plugin RPC', () => {
-    const mutating = /plugin\.(install|link|enable|disable|remove|update|reload|call)\b/;
+    const mutating = /plugin\.(install|link|enable|disable|remove|update|reload)\b/;
     const hits = [...sources(SRC), ...sources(join(ROOT, 'app'))].filter((f) => mutating.test(readFileSync(f, 'utf8').replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '')));
     expect(hits).toEqual([]);
+  });
+
+  it('plugin.call is named in exactly one place: plugins/api.ts, for RPC-backed slash commands', () => {
+    const named = /plugin\.call\b/;
+    const strip = (f: string) => readFileSync(f, 'utf8').replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
+    const hits = [...sources(SRC), ...sources(join(ROOT, 'app'))].filter((f) => named.test(strip(f)));
+    expect(hits.map((f) => f.slice(SRC.length + 1))).toEqual(['plugins/api.ts']);
   });
 
   it('a malformed answer degrades to empty rather than throwing', async () => {

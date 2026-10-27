@@ -22,8 +22,10 @@ export interface SlashCommand {
   /** "built-in", or the id of the plugin the command is from (drawn as a quiet "from <plugin>"). */
   source: string;
   builtin: boolean;
-  /** The text selecting the row inserts into the composer. */
+  /** The text selecting the row inserts into the composer (empty for an rpc command: its text comes from the plugin). */
   text: string;
+  /** Set for an RPC-backed plugin command: selecting it calls plugin.call and inserts the result's prompt. */
+  rpc?: { plugin: string; rpc: string; command: string };
   /** Names a query may match, lowercase. */
   names: string[];
 }
@@ -56,7 +58,8 @@ export function buildSlashCommands(builtins: readonly BuiltinSlashCommand[], plu
       description: c.description ?? '',
       source: c.plugin,
       builtin: false,
-      text: c.prompt,
+      text: c.prompt ?? '',
+      ...(c.rpc ? { rpc: { plugin: c.plugin, rpc: c.rpc, command: c.qualified } } : {}),
       names: ownsBare ? [bare, qualified] : [qualified],
     });
   }
@@ -113,6 +116,7 @@ export function slashSuggestions(commands: readonly SlashCommand[], draft: strin
 
 /** The draft after picking `command`: the prompt text in place of the `/token`. A pure function of the draft; sending is not its business. */
 export function pickSlashCommand(draft: string, command: SlashCommand): string {
+  if (command.rpc) return draft; // its text is asked of the plugin first (slashRpc.ts); picking alone changes nothing
   const slash = findActiveSlash({ text: draft, cursorIndex: draft.length });
   return slash ? applySlashReplacement({ text: draft, slash, command }).text : draft;
 }
