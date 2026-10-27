@@ -21,7 +21,7 @@ export type TranscriptItem =
   | { type: 'tool'; key: string; toolName: string; title: string; status: string }
   | { type: 'meta'; key: string; text: string }
   | { type: 'permission'; key: string; request: PermissionRequestState }
-  | { type: 'error'; key: string; message: string; raw?: string }
+  | { type: 'error'; key: string; message: string; raw?: string; zoneNote?: string }
   | { type: 'footer'; key: string; sentence: string; note?: string; waiting?: boolean; canContinue?: boolean };
 
 export type TranscriptItemType = TranscriptItem['type'];
@@ -32,7 +32,7 @@ export function buildTranscript(
   lines: readonly TimelineLine[],
   permissions: readonly PermissionRequestState[] = [],
   footer: { sentence: string; note?: string; waiting?: boolean; action?: 'continue' | null } | null = null,
-  error: (RunErrorView & { err: string }) | null = null,
+  error: (RunErrorView & { err: string; zoneNote?: string | null }) | null = null,
 ): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   for (const line of lines) {
@@ -59,7 +59,7 @@ export function buildTranscript(
       if (text === '') items.pop();
       else last.text = text;
     }
-    items.push({ type: 'error', key: 'error', message: error.message, ...(error.raw ? { raw: error.raw } : {}) });
+    items.push({ type: 'error', key: 'error', message: error.message, ...(error.raw ? { raw: error.raw } : {}), ...(error.zoneNote ? { zoneNote: error.zoneNote } : {}) });
   }
   for (const request of permissions) items.push({ type: 'permission', key: `perm-${request.requestId}`, request });
   if (footer) items.push({ type: 'footer', key: 'footer', sentence: footer.sentence, ...(footer.note ? { note: footer.note } : {}), ...(footer.waiting ? { waiting: true } : {}), ...(footer.action === 'continue' ? { canContinue: true } : {}) });

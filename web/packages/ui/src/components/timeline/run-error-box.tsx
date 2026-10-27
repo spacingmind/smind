@@ -2,18 +2,24 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Icons } from "@/lib/icons";
-import { describeRunError } from "@/lib/run-error";
+import { describeRunError, resetZoneNote } from "@/lib/run-error";
 import type { RunEntry } from "@/hooks/use-run-timeline";
 
 /**
  * A failed run's error: the plain sentence, a "Details" disclosure holding
  * the stored raw text (transport chain, the provider's own wording and its
- * zone-less reset time), and the optional "Retry with higher effort".
+ * reset time in its own zone), and the optional "Retry with higher effort".
  */
 export function RunErrorBox({ run, onRetry }: { run: RunEntry; onRetry?: (run: RunEntry) => void }) {
   const [open, setOpen] = useState(false);
   if (!run.err) return null;
   const view = describeRunError(run.err, { rateLimited: run.failureKind === "rate_limited", hasReset: Boolean(run.failureResetAt) });
+  const zoneNote = resetZoneNote(run.err, {
+    provider: run.provider,
+    rateLimited: run.failureKind === "rate_limited",
+    hasReset: Boolean(run.failureResetAt),
+    inferred: run.failureResetInferred,
+  });
   return (
     <div className="flex flex-col gap-1 rounded-lg bg-destructive/10 px-3 py-2" data-testid="run-error-box">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -41,7 +47,11 @@ export function RunErrorBox({ run, onRetry }: { run: RunEntry; onRetry?: (run: R
           {open && (
             <div className="flex flex-col gap-1" data-testid="run-error-raw">
               <pre className="font-mono text-ui-xs whitespace-pre-wrap break-words text-foreground-muted">{view.raw}</pre>
-              <p className="text-ui-xs text-foreground-subtle">As reported by the provider. A time in this text is in the provider&apos;s zone, not yours.</p>
+              {zoneNote && (
+                <p className="text-ui-xs text-foreground-subtle" data-testid="run-error-zone-note">
+                  {zoneNote}
+                </p>
+              )}
             </div>
           )}
         </>

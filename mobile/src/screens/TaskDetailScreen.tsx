@@ -73,7 +73,7 @@ import { nextFollowState } from '../transcript/stickToBottom';
 import { EmptyState } from '../ui/EmptyState';
 import { AssistantMessage } from './task/AssistantMessage';
 import { ErrorCard } from './task/ErrorCard';
-import { describeRunError } from '../runError';
+import { describeRunError, resetZoneNote } from '../runError';
 import { runSlashRpc } from '../plugins/slashRpc';
 import { usePluginCommands } from '../plugins/usePluginCommands';
 import { Composer } from './task/Composer';
@@ -576,7 +576,10 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   const runError = useMemo(() => {
     if (state.kind !== 'ready' || state.run === null || state.run.Status !== 'error' || !state.run.Err || liveRunId !== null) return null;
     const run = state.run;
-    return { ...describeRunError(run.Err!, { rateLimited: run.FailureKind === 'rate_limited', hasReset: Boolean(run.FailureResetAt) }), err: run.Err! };
+    const rateLimited = run.FailureKind === 'rate_limited';
+    const hasReset = Boolean(run.FailureResetAt);
+    const zoneNote = resetZoneNote(run.Err!, { provider: run.Provider, rateLimited, hasReset, inferred: run.FailureResetInferred });
+    return { ...describeRunError(run.Err!, { rateLimited, hasReset }), zoneNote, err: run.Err! };
   }, [liveRunId, state]);
   const items = useMemo(() => buildTranscript(lines, permissions, footer, runError), [lines, permissions, footer, runError]);
 
@@ -632,7 +635,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
         case 'permission':
           return <PermissionCard request={item.request} onRespond={handlePermissionTap} />;
         case 'error':
-          return <ErrorCard message={item.message} raw={item.raw} />;
+          return <ErrorCard message={item.message} raw={item.raw} zoneNote={item.zoneNote} />;
         case 'footer':
           return <FooterBanner sentence={item.sentence} note={item.note} waiting={item.waiting} canContinue={item.canContinue} onContinue={handleContinue} />;
       }

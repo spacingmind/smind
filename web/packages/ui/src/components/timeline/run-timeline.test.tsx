@@ -912,4 +912,30 @@ describe("RunTimeline failed run", () => {
     expect(screen.getByTestId("run-error-raw").textContent).toContain("rpc error -32603");
     expect(screen.getByTestId("run-error-raw").textContent).toContain("22:44:59");
   });
+
+  const openDetails = (r: RunEntry) => {
+    render(
+      <ul>
+        <RunTimeline run={r} />
+      </ul>,
+    );
+    fireEvent.click(screen.getByTestId("run-error-details-toggle"));
+  };
+
+  it("names UTC+8 in the Details note for a GLM reset time", () => {
+    openDetails({ ...failed(), provider: "glm", failureResetInferred: true });
+    expect(screen.getByTestId("run-error-zone-note").textContent).toContain("UTC+8");
+  });
+
+  it("names the zone Claude printed", () => {
+    const text = "You've hit your session limit · resets 1pm (Asia/Saigon)";
+    openDetails({ ...failed(), provider: "claude-native", err: `${text} (taskrunner: x: rpc error -32603: Internal error)`, failureResetAt: "2099-01-01T06:00:00Z" });
+    expect(screen.getByTestId("run-error-zone-note").textContent).toContain("Asia/Saigon");
+  });
+
+  it("no zone line at all when the daemon parsed no reset time", () => {
+    openDetails({ ...failed(), provider: "glm", failureResetAt: undefined });
+    expect(screen.getByTestId("run-error-raw")).toBeInTheDocument();
+    expect(screen.queryByTestId("run-error-zone-note")).toBeNull();
+  });
 });

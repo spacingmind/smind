@@ -334,7 +334,7 @@ describe("task lineage header (in the pane)", () => {
     expect(screen.getByTestId("task-tree-summary").textContent).toBe("2 running · 1 needs you · 3 done");
   });
 
-  it("one meta row: the task total, lineage chips and the Detailed toggle share the chat meta row, with no separate bordered strip", async () => {
+  it("one meta row: the task total and lineage chips share the chat meta row, with no separate bordered strip", async () => {
     const client = new FakeWsClient();
     await renderPane(client);
     act(() => {
@@ -356,7 +356,6 @@ describe("task lineage header (in the pane)", () => {
     expect(row).toContainElement(screen.getByTestId("task-tree-usage"));
     expect(row).toContainElement(screen.getByTestId("task-tree-summary"));
     expect(row).toContainElement(screen.getByTestId("task-child-pill"));
-    expect(row).toContainElement(screen.getByTestId("detail-level-toggle"));
     expect(screen.getByTestId("task-tree-usage").textContent).toMatch(/^Task \$1\.12 · /);
     expect(screen.queryByTestId("task-lineage-header")).toBeNull();
     expect(row.className).not.toMatch(/(^|\s)border(-b)?(\s|$)/);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeRunError, stripErrorEcho } from "@/lib/run-error";
+import { describeRunError, resetZoneNote, stripErrorEcho } from "@/lib/run-error";
 
 const QUOTA = "429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-27 22:44:59";
 const CHAIN = "taskrunner: glm prompt: acp: session/prompt: acp: rpc error -32603: Internal error";
@@ -53,5 +53,25 @@ describe("stripErrorEcho", () => {
   });
   it("does nothing without a run error", () => {
     expect(stripErrorEcho(`[error] ${QUOTA}`, undefined)).toBe(`[error] ${QUOTA}`);
+  });
+});
+
+describe("resetZoneNote", () => {
+  const CLAUDE = "You've hit your session limit · resets 1pm (Asia/Saigon)";
+
+  it("says nothing without a parsed reset time or outside a rate-limit error", () => {
+    expect(resetZoneNote(QUOTA, { provider: "glm", rateLimited: true, hasReset: false })).toBeNull();
+    expect(resetZoneNote(CLAUDE, { provider: "claude-native", rateLimited: true, hasReset: false, inferred: true })).toBeNull();
+    expect(resetZoneNote(QUOTA, { provider: "glm", rateLimited: false, hasReset: true, inferred: true })).toBeNull();
+  });
+
+  it("names UTC+8 for GLM and the printed IANA zone for Claude", () => {
+    expect(resetZoneNote(QUOTA, { provider: "glm", rateLimited: true, hasReset: true, inferred: true })).toContain("UTC+8");
+    expect(resetZoneNote(CLAUDE, { provider: "claude-native", rateLimited: true, hasReset: true })).toContain("Asia/Saigon");
+  });
+
+  it("an inferred zone-less time is the daemon's; an absolute instant gets no note", () => {
+    expect(resetZoneNote("resets 3pm", { provider: "claude-native", rateLimited: true, hasReset: true, inferred: true })).toContain("daemon's time zone");
+    expect(resetZoneNote("usage limit reached|1790000000", { provider: "claude-native", rateLimited: true, hasReset: true })).toBeNull();
   });
 });
