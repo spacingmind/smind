@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.16.0](https://github.com/spacingmind/smind/compare/v0.15.0...v0.16.0) (2026-10-27)
+
+### Upgrade notes
+
+* **automations** (ADR-0044) and **plugins** (ADR-0042 Wave A+B) ship switched off: `automations.enabled` and `plugins.enabled` are `false` and can only be turned on in `config.yaml`; plugin management needs a loopback connection unless `plugins.allowRemoteManage` is set.
+* **orchestration:** the seeded role pack now has a `validator` seat instead of `reviewer` (ADR-0045). Seeding never touches existing profiles: add the seat with `smind profile seed roles` and delete an old `reviewer` yourself if you want.
+* **mobile push:** stall alerts arrive only after the phone re-registers for push.
+* **claude-native on Windows:** the deny rules for smind's own secrets are written in the CLI's POSIX path form (`/c/...`); not yet verified against a real Windows `claude`.
+
+
+### Features
+
+* **automation:** GitHub workflow_run source by polling gh under the forge budget (ADR-0044 PR 2) ([#657](https://github.com/spacingmind/smind/issues/657)) ([03882a9](https://github.com/spacingmind/smind/commit/03882a903d774c7ac3588b87dcd14f5438d5165d))
+* **automation:** pilot example, live isolated-daemon proof and two fixes (ADR-0044 PR 4) ([#663](https://github.com/spacingmind/smind/issues/663)) ([3671710](https://github.com/spacingmind/smind/commit/3671710d5baacd5a6cbc5e6bd1a9d65722461b60))
+* **automation:** signal-to-task engine, rails, RPCs and CLI (ADR-0044 PR 1) ([#653](https://github.com/spacingmind/smind/issues/653)) ([5234c1d](https://github.com/spacingmind/smind/commit/5234c1d5d8d08e35e2c2dfe75b0c4a7ceca9ac7d))
+* **inbox:** derived Human inbox read model, RPCs and inbox.changed (ADR-0045 P3) ([#665](https://github.com/spacingmind/smind/issues/665)) ([cf29c05](https://github.com/spacingmind/smind/commit/cf29c05942b30d662f452696fbd1c46323c6ceea))
+* **mobile:** Human inbox screen, Tasks-header entry and live badge ([#671](https://github.com/spacingmind/smind/issues/671)) ([9244353](https://github.com/spacingmind/smind/commit/92443538e62f4f5ba81ab522fc7610631bf12f0c))
+* **mobile:** read-only automations list, history and Pause (ADR-0044 PR 3b) ([#660](https://github.com/spacingmind/smind/issues/660)) ([00c6124](https://github.com/spacingmind/smind/commit/00c61240a271fa39f4b2a5592eef228af0154932))
+* **plugins:** plugin-scoped session, events.observe and typed settings (ADR-0042 PB.2) ([#654](https://github.com/spacingmind/smind/issues/654)) ([6d37159](https://github.com/spacingmind/smind/commit/6d371592f2455ff25c265f080d6ca51f60006ea1))
+* **plugins:** plugin.call, RPC-backed slash commands and hello-process example (ADR-0042 PB.4) ([#667](https://github.com/spacingmind/smind/issues/667)) ([8a3c021](https://github.com/spacingmind/smind/commit/8a3c021d24ce524d085280d7f7508bc3ee4b24f9))
+* **plugins:** run plugin processes: scrubbed env, framed JSON-RPC, supervisor, logs (ADR-0042 PB.1) ([#643](https://github.com/spacingmind/smind/issues/643)) ([08f278b](https://github.com/spacingmind/smind/commit/08f278bc4c0a9b16ddaacfb28b09c503d725ac8a))
+* **plugins:** run.beforeStart/run.finished hooks and task.send (ADR-0042 PB.3) ([#661](https://github.com/spacingmind/smind/issues/661)) ([4dbfce3](https://github.com/spacingmind/smind/commit/4dbfce317db269d04a59e1a149e734dbc5cc1523))
+* **push:** an auto-pause with no task is pushed and opens the automation (ADR-0044 question 7) ([#669](https://github.com/spacingmind/smind/issues/669)) ([a197ee0](https://github.com/spacingmind/smind/commit/a197ee01d650b52df4eb2230338a92dfd459de7c))
+* **push:** notify when an automation auto-pauses (ADR-0044 question 7) ([#664](https://github.com/spacingmind/smind/issues/664)) ([6a073e4](https://github.com/spacingmind/smind/commit/6a073e47dc560b9d956749272d291954e606621b))
+* **validation:** contract, verdict and merge-ready model with RPCs and CLI (ADR-0045 P1) ([#659](https://github.com/spacingmind/smind/issues/659)) ([052fb22](https://github.com/spacingmind/smind/commit/052fb2239456d229eace950bdc865f44808401f8))
+* **validation:** QA frame harness as the validator's bundled skill (ADR-0045 Q11) ([#677](https://github.com/spacingmind/smind/issues/677)) ([d444e6d](https://github.com/spacingmind/smind/commit/d444e6def59723fbb0cb495cf757af52e14bca4a))
+* **validation:** validator seat, request flow and verdict wiring ([#662](https://github.com/spacingmind/smind/issues/662)) ([436a0f6](https://github.com/spacingmind/smind/commit/436a0f6136fbf3798fbcc8cb35118b4dec7a1681))
+* **web:** Human inbox page, sidebar badge and live updates ([#670](https://github.com/spacingmind/smind/issues/670)) ([bdb9e43](https://github.com/spacingmind/smind/commit/bdb9e435f50dc21f60316b4c0659eefff5145010))
+* **web:** Settings -&gt; Automations with run history (ADR-0044 PR 3a) ([#658](https://github.com/spacingmind/smind/issues/658)) ([fffef9b](https://github.com/spacingmind/smind/commit/fffef9b88c9bc625a898f43d57499e3e6ecfcb64))
+* **workspace:** agent-readiness check (RPC, CLI, web panel) ([#678](https://github.com/spacingmind/smind/issues/678)) ([b8bee67](https://github.com/spacingmind/smind/commit/b8bee6731f6501fbad4124b4610676d9584133e9))
+
+
+### Bug Fixes
+
+* **config:** use absolute temp dirs for provider env paths in tests on Windows ([#651](https://github.com/spacingmind/smind/issues/651)) ([a9e2b13](https://github.com/spacingmind/smind/commit/a9e2b13e7227955d5e34355d08b434aa0e05f444))
+* **devharness:** seed-live waits until the agent is in its scenario (flaky queue-interrupt test) ([#666](https://github.com/spacingmind/smind/issues/666)) ([4592e88](https://github.com/spacingmind/smind/commit/4592e88f16627bcf4a327df801658aa934da0f93))
+* **learning:** make probe/export/loads tests and the arm diff work on Windows ([#649](https://github.com/spacingmind/smind/issues/649)) ([913ed8a](https://github.com/spacingmind/smind/commit/913ed8ae7912da61cdaeb591716f1969acc88284))
+* **mobile:** accept and subscribe to stalled pushes ([#668](https://github.com/spacingmind/smind/issues/668)) ([d68fd0a](https://github.com/spacingmind/smind/commit/d68fd0a0f5e2b9218f22faafc28ddc8906a23575))
+* **plugins:** stop the plugin process before swapping its directory (Windows rename failure) ([#679](https://github.com/spacingmind/smind/issues/679)) ([2322ba9](https://github.com/spacingmind/smind/commit/2322ba9dfd57792d207564b21adfeef14121a810))
+* **qaframes:** portable test fixtures on Windows; supervisor kill test on all OSes ([#681](https://github.com/spacingmind/smind/issues/681)) ([95d20b3](https://github.com/spacingmind/smind/commit/95d20b3838023ea5d8e9576866dc7d69201eea31))
+* **repo:** check text files out with LF on Windows ([#644](https://github.com/spacingmind/smind/issues/644)) ([c5dba60](https://github.com/spacingmind/smind/commit/c5dba60bdd7bb52979ae15f08a8f0d22a7fef47e))
+* **routing:** on equal timestamps the later routing decision wins ([#648](https://github.com/spacingmind/smind/issues/648)) ([ef4a341](https://github.com/spacingmind/smind/commit/ef4a341f92423f47579d57bee0f29aba8846580a))
+* **runs:** bump claude-agent-sdk-go to v0.4.2 and use its exit status ([#640](https://github.com/spacingmind/smind/issues/640)) ([b7d5959](https://github.com/spacingmind/smind/commit/b7d5959e194f82611a02904dd974327d73431f68))
+* **runs:** make the unpinned-model and cli-exit tests Windows-safe ([#650](https://github.com/spacingmind/smind/issues/650)) ([49d7a95](https://github.com/spacingmind/smind/commit/49d7a95698eb55f4fcc37419768eb48ee30a5c95))
+* **secretdeny:** write deny-rule paths in the CLI's POSIX form on Windows ([#645](https://github.com/spacingmind/smind/issues/645)) ([e6510e9](https://github.com/spacingmind/smind/commit/e6510e9e6842e77a2936e538aee74f53f9ead1e6))
+* **smind:** isolate USERPROFILE as well as HOME in learning CLI tests ([#647](https://github.com/spacingmind/smind/issues/647)) ([382174f](https://github.com/spacingmind/smind/commit/382174f538c9634bb1547bb75a4a4ed3ed9c52d5))
+* **taskrunner:** make two claude-native tests Windows-safe ([#646](https://github.com/spacingmind/smind/issues/646)) ([5562c06](https://github.com/spacingmind/smind/commit/5562c06680228393f81af28766fa6f9d639833a1))
+* **validation:** scope check no longer rewrites the lead's index, names what changed; fix the seat test's baseline race ([#674](https://github.com/spacingmind/smind/issues/674)) ([d9d9bbc](https://github.com/spacingmind/smind/commit/d9d9bbcdbace1940e3ef7783eed2876ac09a4ca4))
+* **wsapi:** publish forge.status before releasing the status read ([#655](https://github.com/spacingmind/smind/issues/655)) ([7e32c58](https://github.com/spacingmind/smind/commit/7e32c5881c2854959f1435815d461fbc5ff70c7d))
+* **wsapi:** use absolute temp paths in provider env tests on Windows ([#641](https://github.com/spacingmind/smind/issues/641)) ([a3994aa](https://github.com/spacingmind/smind/commit/a3994aa41cc5450df62af30d247c1e94ec016d16))
+
 ## [0.15.0](https://github.com/spacingmind/smind/compare/v0.14.0...v0.15.0) (2026-10-25)
 
 ### ⚠ BREAKING CHANGES
