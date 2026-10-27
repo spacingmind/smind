@@ -128,6 +128,9 @@ func TestReadiness_SymlinkOutOfRepoNotFollowed(t *testing.T) {
 	outside := t.TempDir()
 	put(t, outside, "secret.md", "TOPSECRETMARKER "+strings.Repeat("x", 400))
 	put(t, outside, "wf/ci.yml", "on: push\n")
+	// Directories a symlink stands in for in the MIDDLE of a path (.github/workflows/ci.yml, .circleci/config.yml).
+	put(t, outside, "workflows/ci.yml", "on: push\n")
+	put(t, outside, "config.yml", "version: 2\n")
 	put(t, outside, "gitignore", ".env\nnode_modules\ndist\n")
 	dir := t.TempDir()
 	for name, target := range map[string]string{
@@ -136,6 +139,7 @@ func TestReadiness_SymlinkOutOfRepoNotFollowed(t *testing.T) {
 		"Taskfile.yml": filepath.Join(outside, "secret.md"),
 		".github":      outside,
 		"docs":         outside,
+		".circleci":    outside,
 		"README.md":    filepath.Join(outside, "secret.md"),
 	} {
 		if err := os.Symlink(target, filepath.Join(dir, name)); err != nil {
@@ -148,6 +152,10 @@ func TestReadiness_SymlinkOutOfRepoNotFollowed(t *testing.T) {
 		if m[id].Status != StatusWarn {
 			t.Errorf("%s = %q (%s), want warn (symlink not followed)", id, m[id].Status, m[id].Evidence)
 		}
+	}
+	r := &repo{root: dir}
+	if r.isDir(".github/workflows") || len(r.list(".github/workflows")) != 0 || r.isFile(".circleci/config.yml") {
+		t.Error("a path through a symlinked directory was followed")
 	}
 	for _, f := range fs {
 		if strings.Contains(f.Evidence+f.Title+f.Fix, "TOPSECRET") {
