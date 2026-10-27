@@ -473,8 +473,10 @@ are ever sent; anything else fails `unknown_rpc` without reaching the process.
   under the list and leaves the box alone. The same name and collision rules as
   prompt commands apply. The command palette does not list RPC commands yet.
 
-A small working plugin is in `plugin-examples/hello-process/` in the repository.
+A small working plugin is in `plugin-examples/hello-process/` in the repository;
+[Writing a plugin](plugins-authoring.md) walks through it.
 
 ## Further reading
 
+- [Writing a plugin](plugins-authoring.md): the manifest reference, hooks, RPCs and a worked example.
 - [Plugin system decision record](../docs/decisions/0042-plugin-system.md)
