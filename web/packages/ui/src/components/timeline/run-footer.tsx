@@ -164,7 +164,8 @@ export function RunFooter<T extends RunFooterRun>({
         )}
       </div>
       {failoverRow && failover && (
-        // order-last + basis-full: a full-width row under the meta line; the hover actions (children) stay beside it.
+        // order-last + basis-full: a full-width row under the meta line. The hover actions (children) live in this row, so the
+        // footer is the meta line plus one action row instead of the icons floating on a row of their own.
         <div className="order-last flex basis-full flex-wrap items-center gap-1" data-testid="run-failover-actions">
           {onRerun && (
             <Button type="button" variant="outline" size="xs" data-testid="run-retry" onClick={() => onRerun(run)}>
@@ -172,9 +173,10 @@ export function RunFooter<T extends RunFooterRun>({
             </Button>
           )}
           <RunFailoverButtons run={run} failover={failover} now={now} />
+          {children}
         </div>
       )}
-      {children}
+      {!(failoverRow && failover) && children}
     </div>
   );
 }

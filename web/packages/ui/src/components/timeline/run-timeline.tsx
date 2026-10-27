@@ -5,6 +5,7 @@ import { Icons } from "@/lib/icons";
 import { groupTimeline, type DetailLevel } from "@/components/timeline/detail-level";
 import { TimelineRow, type TimelineRowContext } from "@/components/timeline/timeline-row";
 import { ToolGroupRow } from "@/components/timeline/tool-group-row";
+import { stripErrorEcho } from "@/lib/run-error";
 import { assistantMarkdown, timelineToText } from "@/components/timeline/timeline-text";
 import {
   CopyAction,
@@ -17,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger, useMenuTooltip } from "@/components/ui/tooltip";
 import { ChildUpdateRow } from "@/components/timeline/child-update-row";
+import { RunErrorBox } from "@/components/timeline/run-error-box";
 import { RunFooter } from "@/components/timeline/run-footer";
 import type { RunFailover } from "@/components/timeline/run-failover-actions";
 import type { RunModelLabels } from "@/components/timeline/run-footer-model";
@@ -71,7 +73,8 @@ export const RunTimeline = memo(function RunTimeline({
   /** The daemon connection is down: the run footer freezes its live state. */
   disconnected?: boolean;
 } & TimelineRowContext) {
-  const groups = groupTimeline(run.items, detailLevel);
+  const items = run.status === "error" ? withoutErrorEcho(run.items, run.err) : run.items;
+  const groups = groupTimeline(items, detailLevel);
 
   return (
     <li data-testid="run-entry" data-run-id={run.id} className="flex flex-col gap-2">
@@ -102,7 +105,7 @@ export const RunTimeline = memo(function RunTimeline({
 
       {/* The answer side (items, error, footer) is its own hover group, so hovering the prompt reveals only the prompt bar. */}
       <div className="group/answer flex flex-col gap-2">
-        {run.items.length > 0 && (
+        {items.length > 0 && (
           <ol className="space-y-1.5" data-testid="run-timeline">
             {groups.map((group) =>
               group.kind === "tool-group" ? (
@@ -114,24 +117,7 @@ export const RunTimeline = memo(function RunTimeline({
           </ol>
         )}
 
-        {run.err && (
-          <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2">
-            <p className="text-ui-sm text-destructive" data-testid="run-error">
-              {run.err}
-            </p>
-            {onRetry && (
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                data-testid="run-retry-higher-effort"
-                onClick={() => onRetry(run)}
-              >
-                Retry with higher effort
-              </Button>
-            )}
-          </div>
-        )}
+        <RunErrorBox run={run} onRetry={onRetry} />
 
         <RunFooter run={run} providerLabels={providerLabels} modelLabels={modelLabels} isLatest={isLatest} waiting={Boolean(run.pendingPermission)} disconnected={disconnected} onContinue={onContinue} onRerun={onRerun} failover={failover}>
           <MessageActions group="run" className="ml-auto" data-testid="run-actions">
@@ -198,4 +184,13 @@ function RunCopyMenu({ run }: { run: RunEntry }) {
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+/** The transcript minus the agent's "[error] <cause>" line when the run's error box states the same cause. */
+function withoutErrorEcho(items: RunEntry["items"], err: string | undefined): RunEntry["items"] {
+  const last = items[items.length - 1];
+  if (!last || last.kind !== "assistant") return items;
+  const text = stripErrorEcho(last.text, err);
+  if (text === last.text) return items;
+  return text === "" ? items.slice(0, -1) : [...items.slice(0, -1), { ...last, text }];
 }

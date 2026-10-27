@@ -383,7 +383,7 @@ function withinPill(pill: HTMLElement): HTMLElement {
 describe("TaskLineageHeader rate limit (ADR-0041 R3)", () => {
   const limitedRun = { state: "error" as const, runningRunIds: [], pendingPermissions: 0, failureKind: "rate_limited", window: "5h" };
 
-  it("shows a warning hint for a rate-limited task and a warning pill with a title for a rate-limited child", () => {
+  it("hints a rate-limited child on its pill but does not repeat the task's own reset (its run footer owns it)", () => {
     const reset = new Date(Date.now() + 2 * 3_600_000).toISOString();
     const lineage: TaskLineage = {
       parent: null,
@@ -394,9 +394,7 @@ describe("TaskLineageHeader rate limit (ADR-0041 R3)", () => {
       ],
     };
     render(<TaskLineageHeader lineage={lineage} />);
-    const hint = screen.getByTestId("task-rate-limit");
-    expect(hint.textContent).toMatch(/^Rate limited · resets (\w{3} )?\d\d:\d\d$/);
-    expect(hint.className).toContain("text-warning");
+    expect(screen.queryByTestId("task-rate-limit")).toBeNull();
     const [limited, broken] = screen.getAllByTestId("task-child-pill");
     expect(limited.dataset.childUrgency).toBe("warning");
     expect(limited.title).toMatch(/^Rate limited · resets /);

@@ -886,3 +886,30 @@ describe("RunTimeline model segment title", () => {
     expect(model).toHaveAttribute("title", "Reported model: claude-sonnet-4-5-20250929");
   });
 });
+
+describe("RunTimeline failed run", () => {
+  const QUOTA = "429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-27 22:44:59";
+  const err = `${QUOTA} (taskrunner: glm prompt: acp: session/prompt: acp: rpc error -32603: Internal error)`;
+  const failed = () =>
+    run([{ type: "chunk", text: `[error] ${QUOTA}` }], {
+      status: "error",
+      err,
+      failureKind: "rate_limited",
+      failureWindow: "5h",
+      failureResetAt: "2099-01-01T00:00:00Z",
+    });
+
+  it("states the failure once: no [error] transcript line, a plain box, raw text behind Details", () => {
+    render(
+      <ul>
+        <RunTimeline run={failed()} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-timeline")).toBeNull();
+    expect(screen.getByTestId("run-error").textContent).toBe("Usage limit reached for the 5-hour window.");
+    expect(screen.queryByTestId("run-error-raw")).toBeNull();
+    fireEvent.click(screen.getByTestId("run-error-details-toggle"));
+    expect(screen.getByTestId("run-error-raw").textContent).toContain("rpc error -32603");
+    expect(screen.getByTestId("run-error-raw").textContent).toContain("22:44:59");
+  });
+});
