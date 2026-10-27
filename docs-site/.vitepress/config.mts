@@ -60,6 +60,10 @@ export default defineConfig({
       md.renderer.rules.code_inline = (tokens, idx, _o, _e, self) =>
         `<code v-pre${self.renderAttrs(tokens[idx])}>${md.utils.escapeHtml(tokens[idx].content)}</code>`
       md.renderer.rules.text = (tokens, idx) => esc(tokens[idx].content)
+      // html:false turns whole-line <!-- ... --> markers into visible text; drop them before parsing.
+      md.core.ruler.before('block', 'smind-drop-comments', (state) => {
+        state.src = state.src.replace(/^<!--.*-->[ \t]*\n?/gm, '')
+      })
       // Under the first H1: the page summary and the version line; links into docs/ go to GitHub.
       md.core.ruler.push('smind-summary', (state) => {
         const fm = (state.env as any)?.frontmatter ?? {}

@@ -21,6 +21,7 @@ for (const p of readPages()) {
   need(html.includes('"@type":"TechArticle"') && html.includes('"@type":"BreadcrumbList"'), `${w}: JSON-LD`)
   need(html.includes('"@context":"https://schema.org","@type":"SoftwareApplication"') === (w === 'index'), `${w}: SoftwareApplication only on home`)
   need(/<main[\s\S]*<p/.test(html) && html.length > 12000, `${w}: body missing (SSR error?)`)
+  need(!html.includes('&lt;!--'), `${w}: HTML comment shown as text`)
   need(fs.existsSync(path.join(dist, `${w}.md`)), `${w}: raw .md copy`)
 }
 for (const f of ['llms.txt', 'llms-full.txt', 'robots.txt', 'sitemap.xml', 'CNAME']) need(fs.existsSync(path.join(dist, f)), `missing ${f}`)
