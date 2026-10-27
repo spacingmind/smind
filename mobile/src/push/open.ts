@@ -6,7 +6,7 @@ import { base64UrlDecode } from '../relay/base64';
 
 export interface PushEvent {
   id: string;
-  kind: 'permission' | 'needs_continue' | 'done' | 'error' | 'test';
+  kind: 'permission' | 'needs_continue' | 'done' | 'error' | 'stalled' | 'test';
   taskId: number;
   runId?: string;
   chatId?: number;
@@ -26,7 +26,7 @@ export const GENERIC_NOTIFICATION = { title: 'smind', body: 'Open smind to see w
 export const MAX_AGE_SECONDS = 86400;
 
 const AAD_PREFIX = 'smind-push-v1';
-const KINDS = ['permission', 'needs_continue', 'done', 'error', 'test'];
+const KINDS = ['permission', 'needs_continue', 'done', 'error', 'stalled', 'test'];
 
 function fail(error: OpenFailure): OpenResult {
   return { ok: false, error };

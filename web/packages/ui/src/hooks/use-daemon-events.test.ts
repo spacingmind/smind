@@ -76,6 +76,7 @@ describe("useDaemonEvents", () => {
         "automation.paused",
         "automation.updated",
         "task.stalled",
+        "inbox.changed",
       ],
     });
 
