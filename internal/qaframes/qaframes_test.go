@@ -188,7 +188,21 @@ func TestFramesRun_NoBrowser_TypedBlocked(t *testing.T) {
 }
 
 func TestFramesRun_IsolatedHome_NeverTouchesDefaultHomeOrPorts(t *testing.T) {
-	o := baseOpts(t, nil, browserEnv(""))
+	// Hermetic: the "default home" this test compares against is a temp HOME,
+	// so no path of the Human's real home is ever resolved, even by a mutant.
+	fakeHome := t.TempDir()
+	smindHome := filepath.Join(t.TempDir(), "unused-smind-home")
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("USERPROFILE", fakeHome)
+	t.Setenv("SMIND_HOME", smindHome)
+	benv := browserEnv("")
+	benv.Getenv = func(k string) string {
+		if k == "SMIND_HOME" {
+			return smindHome
+		}
+		return ""
+	}
+	o := baseOpts(t, nil, benv)
 	var got struct {
 		home string
 		port int
@@ -204,11 +218,14 @@ func TestFramesRun_IsolatedHome_NeverTouchesDefaultHomeOrPorts(t *testing.T) {
 		t.Fatal(err)
 	}
 	got.home, got.port = l.home, l.port
-	real, _ := os.UserHomeDir()
+	real, _ := os.UserHomeDir() // == fakeHome
+	if real != fakeHome {
+		t.Fatalf("test is not hermetic: HOME resolves to %q", real)
+	}
 	if !existed || !strings.HasPrefix(got.home, o.TempRoot) {
 		t.Errorf("home %q must be a fresh dir under the temp root %q", got.home, o.TempRoot)
 	}
-	if got.home == filepath.Join(real, ".smind") || got.home == real || got.home == os.Getenv("SMIND_HOME") {
+	if got.home == filepath.Join(real, ".smind") || got.home == real || got.home == smindHome {
 		t.Errorf("the real home was used: %s", got.home)
 	}
 	for _, p := range ForbiddenPorts {
