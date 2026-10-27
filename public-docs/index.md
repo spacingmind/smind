@@ -33,7 +33,8 @@ agent is doing and what it costs.
 - [CLI reference](cli-reference.md): every `smind` command.
 - [Troubleshooting](troubleshooting.md): fix a daemon that will not start, login problems and reconnects.
 - [Configuration reference](configuration.md): the keys in `config.yaml` and their defaults.
-- [Plugins](plugins.md): what is planned.
+- [Plugins](plugins.md): install MCP servers, skills, profiles, commands, themes and plugin processes, and see what they do first.
+- [Writing a plugin](plugins-authoring.md): the manifest reference, capabilities, hooks, RPCs and a worked example.
 - [Automations](automations.md): start a task on a schedule or when a workflow fails.
 
 ## How the docs are organised
