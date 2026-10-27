@@ -342,6 +342,14 @@ var migrations = []migration{
 		},
 	},
 	{
+		// The zone a rate-limit reset's text was read in (the run's "Details"
+		// note). No installed base: old rows read '' (no note).
+		name: "run_failure_reset_zone",
+		apply: func(db *sql.DB) error {
+			return addColumnIfMissing(db, "runs", "failure_reset_zone", "TEXT NOT NULL DEFAULT ''")
+		},
+	},
+	{
 		// ADR-0041: a queued item may be held until not_before. Existing
 		// rows stay NULL (deliverable now).
 		name: "chat_queue_not_before",

@@ -355,6 +355,8 @@ export interface RunSummary {
   /** When the limit lifts (RFC 3339 UTC); null/absent when unknown. */
   FailureResetAt?: string | null;
   FailureResetInferred?: boolean;
+  /** The zone the reset's text was read in: "UTC+8", an IANA name or "daemon-local:<zone>"; absent = no note. */
+  FailureResetZone?: string;
   Err: string;
   /** The run's current provider-native permission mode -- live for a running run (see run.setPermissionMode), whatever it last was for a finished one. */
   PermissionMode: string;

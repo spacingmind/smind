@@ -134,7 +134,7 @@ func (reg *Registry) summaryFromRow(row store.Run) RunSummary {
 		FailoverOf:     row.FailoverOf,
 		FailureKind:    row.FailureKind,
 		FailureWindow:  row.FailureWindow,
-		FailureResetAt: cloneTimePtr(row.FailureResetAt), FailureResetInferred: row.FailureResetInferred,
+		FailureResetAt: cloneTimePtr(row.FailureResetAt), FailureResetInferred: row.FailureResetInferred, FailureResetZone: row.FailureResetZone,
 		BaseSHA: cloneStrPtr(row.BaseSHA), HeadSHA: cloneStrPtr(row.HeadSHA), Dirty: cloneBoolPtr(row.Dirty),
 	}
 	return rs

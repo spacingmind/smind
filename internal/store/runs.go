@@ -206,15 +206,16 @@ func (s *Store) MarkRunningRunsInterrupted(interruptedStatus string, stopReason 
 
 // UpdateRunFailure records (or, with kind "" and nil resetAt, clears) the
 // typed terminal failure of a run (ADR-0041). resetAt is stored as UTC.
-// inferred marks a reset read in an assumed zone.
-func (s *Store) UpdateRunFailure(id, kind, window string, resetAt *time.Time, inferred bool) error {
+// inferred marks a reset read in an assumed zone; zone names the zone it was
+// read in ("" = none).
+func (s *Store) UpdateRunFailure(id, kind, window string, resetAt *time.Time, inferred bool, zone string) error {
 	if resetAt != nil {
 		u := resetAt.UTC()
 		resetAt = &u
 	}
 	if _, err := s.db.Exec(
-		`UPDATE runs SET failure_kind = ?, failure_window = ?, failure_reset_at = ?, failure_reset_inferred = ? WHERE id = ?`,
-		kind, window, timePtrToNull(resetAt), inferred, id); err != nil {
+		`UPDATE runs SET failure_kind = ?, failure_window = ?, failure_reset_at = ?, failure_reset_inferred = ?, failure_reset_zone = ? WHERE id = ?`,
+		kind, window, timePtrToNull(resetAt), inferred, zone, id); err != nil {
 		return fmt.Errorf("update run %q failure: %w", id, err)
 	}
 	return nil
@@ -309,7 +310,7 @@ func (s *Store) ListRunEvents(runID string) ([]RunEvent, error) {
 
 // runColumns is the run SELECT column list; scanRun's Scan argument order
 // must stay in lockstep with it.
-const runColumns = "id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose, origin, interrupt, attachments, failure_kind, failure_window, failure_reset_at, failure_reset_inferred, reply_chat_id, parent_notified_at, profile_id, failover_of"
+const runColumns = "id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose, origin, interrupt, attachments, failure_kind, failure_window, failure_reset_at, failure_reset_inferred, failure_reset_zone, reply_chat_id, parent_notified_at, profile_id, failover_of"
 
 // runColumnsAs is runColumns with every column qualified by alias.
 func runColumnsAs(alias string) string {
@@ -335,7 +336,7 @@ func scanRun(row rowScanner) (Run, error) {
 	if err := row.Scan(&r.ID, &r.TaskID, &chatID, &r.Provider, &r.Prompt, &r.Status,
 		&r.StartedAt, &finishedAt, &r.StopReason, &r.ErrMsg, &r.PermissionMode, &r.AutoAccept, &model,
 		&baseSHA, &headSHA, &dirty, &r.Purpose, &r.Origin, &r.Interrupt, &r.Attachments,
-		&r.FailureKind, &r.FailureWindow, &failureResetAt, &r.FailureResetInferred, &replyChatID, &parentNotifiedAt, &profileID, &r.FailoverOf); err != nil {
+		&r.FailureKind, &r.FailureWindow, &failureResetAt, &r.FailureResetInferred, &r.FailureResetZone, &replyChatID, &parentNotifiedAt, &profileID, &r.FailoverOf); err != nil {
 		return Run{}, err
 	}
 	// NULL decodes as ChatID 0 ("unknown"/pre-chats) -- see CreateRun's

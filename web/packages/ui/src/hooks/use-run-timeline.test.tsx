@@ -215,11 +215,12 @@ describe("useRunTimeline rate-limit failure (ADR-0041)", () => {
 
     // run.list: Go-named fields; an empty kind / window and a null reset become undefined.
     client.nth("run.list", 0).resolve([
-      summary({ ID: "run-1", Status: "error", ...limited }),
+      summary({ ID: "run-1", Status: "error", ...limited, FailureResetZone: "UTC+8" }),
       summary({ ID: "run-2", Status: "error", FailureKind: "", FailureWindow: "", FailureResetAt: null }),
     ]);
     await flush();
-    expect(result.current.runs?.[0]).toMatchObject({ failureKind: "rate_limited", failureWindow: "5h", failureResetAt: "2030-01-01T17:35:18Z" });
+    expect(result.current.runs?.[0]).toMatchObject({ failureKind: "rate_limited", failureWindow: "5h", failureResetAt: "2030-01-01T17:35:18Z", failureResetZone: "UTC+8" });
+    expect(result.current.runs?.[1]?.failureResetZone).toBeUndefined();
     expect(result.current.runs?.[1]?.failureKind).toBeUndefined();
     expect(result.current.runs?.[1]?.failureWindow).toBeUndefined();
     expect(result.current.runs?.[1]?.failureResetAt).toBeUndefined();

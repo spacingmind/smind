@@ -209,6 +209,9 @@ type Run struct {
 	// FailureResetInferred is true when FailureResetAt was read in an assumed
 	// zone, so a client shows it as approximate.
 	FailureResetInferred bool
+	// FailureResetZone names the zone that reset's text was read in ("UTC+8",
+	// an IANA name, or "daemon-local:<zone>"); "" = none.
+	FailureResetZone string
 	// ReplyChatID is the parent task's chat to tell when this run finishes
 	// (ADR-0041 B3); 0 = none, stored as NULL.
 	ReplyChatID int64

@@ -57,21 +57,12 @@ describe('stripErrorEcho', () => {
 });
 
 describe('resetZoneNote', () => {
-  const CLAUDE = "You've hit your session limit · resets 1pm (Asia/Saigon)";
-
-  it('says nothing without a parsed reset time or outside a rate-limit error', () => {
-    expect(resetZoneNote(QUOTA, { provider: 'glm', rateLimited: true, hasReset: false })).toBeNull();
-    expect(resetZoneNote(CLAUDE, { provider: 'claude-native', rateLimited: true, hasReset: false, inferred: true })).toBeNull();
-    expect(resetZoneNote(QUOTA, { provider: 'glm', rateLimited: false, hasReset: true, inferred: true })).toBeNull();
-  });
-
-  it('names UTC+8 for GLM and the printed IANA zone for Claude', () => {
-    expect(resetZoneNote(QUOTA, { provider: 'glm', rateLimited: true, hasReset: true, inferred: true })).toContain('UTC+8');
-    expect(resetZoneNote(CLAUDE, { provider: 'claude-native', rateLimited: true, hasReset: true })).toContain('Asia/Saigon');
-  });
-
-  it("an inferred zone-less time is the daemon's; an absolute instant gets no note", () => {
-    expect(resetZoneNote('resets 3pm', { provider: 'claude-native', rateLimited: true, hasReset: true, inferred: true })).toContain("daemon's time zone");
-    expect(resetZoneNote('usage limit reached|1790000000', { provider: 'claude-native', rateLimited: true, hasReset: true })).toBeNull();
+  it('words the zone the daemon names and says nothing without one', () => {
+    expect(resetZoneNote('UTC+8')).toContain('is UTC+8, not your local time');
+    expect(resetZoneNote('Asia/Saigon')).toContain('in Asia/Saigon');
+    expect(resetZoneNote('America/Argentina/Buenos_Aires')).toContain('Buenos Aires');
+    expect(resetZoneNote('daemon-local:Asia/Saigon')).toContain("daemon's time zone (Asia/Saigon)");
+    expect(resetZoneNote(undefined)).toBeNull();
+    expect(resetZoneNote('')).toBeNull();
   });
 });

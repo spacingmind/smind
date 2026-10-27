@@ -282,6 +282,7 @@ export interface RunEntry {
   failureResetAt?: string;
   /** True when failureResetAt's zone was assumed (shown as ≈). */
   failureResetInferred?: boolean;
+  failureResetZone?: string;
   /** ADR-0041 F2: the agent profile the run launched with. */
   profileId?: number;
   /** ADR-0041 F2: the failed run this one continues after a rate limit. */
@@ -678,6 +679,7 @@ function toRunEntry(r: RunSummary): RunEntry {
     failureWindow: r.FailureWindow || undefined,
     failureResetAt: r.FailureResetAt || undefined,
     failureResetInferred: r.FailureResetInferred || undefined,
+    failureResetZone: r.FailureResetZone || undefined,
     ...(r.ProfileID ? { profileId: r.ProfileID } : {}),
     ...(r.FailoverOf ? { failoverOf: r.FailoverOf } : {}),
     err: r.Err || undefined,

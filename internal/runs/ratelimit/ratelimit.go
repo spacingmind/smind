@@ -35,7 +35,15 @@ type Result struct {
 	// zone-less wall clock as UTC+8, a Claude "resets 3pm" in the daemon's
 	// own zone). A stated zone, an epoch or a backend signal is never inferred.
 	ResetInferred bool
+	// ResetZone names the zone ResetAt's text was read in, for a client's
+	// "which zone?" note: "UTC+8" (GLM), the IANA zone Claude printed, or
+	// DaemonLocalPrefix + the daemon's zone when assumed. "" = none (no
+	// reset parsed, an epoch or a backend signal).
+	ResetZone string
 }
+
+// DaemonLocalPrefix starts a ResetZone read in the daemon's own zone.
+const DaemonLocalPrefix = "daemon-local:"
 
 var (
 	reGLM       = regexp.MustCompile(`(?i)429[^\n]{0,40}usage limit reached for (\d+) hour`)
@@ -80,7 +88,7 @@ func Classify(in Input, now time.Time) Result {
 		res.Window = txt.Window
 	}
 	if res.ResetAt == nil {
-		res.ResetAt, res.ResetInferred = txt.ResetAt, txt.ResetInferred
+		res.ResetAt, res.ResetInferred, res.ResetZone = txt.ResetAt, txt.ResetInferred, txt.ResetZone
 	}
 	return res
 }
@@ -113,6 +121,9 @@ func classifyText(s string, now time.Time) Result {
 			// (ExaDev/agent-shim#448). Never the daemon's own zone.
 			r.ResetAt = glmReset(rm[1], rm[2], now.In(glmZone))
 			r.ResetInferred = r.ResetAt != nil
+			if r.ResetAt != nil {
+				r.ResetZone = "UTC+8"
+			}
 		}
 		return r
 	}
@@ -129,6 +140,7 @@ func classifyText(s string, now time.Time) Result {
 		if rm := reClaudeRst.FindStringSubmatch(s); rm != nil {
 			r.ResetAt = nextAmPm(rm[1], rm[2], rm[3], now)
 			r.ResetInferred = r.ResetAt != nil
+			r.ResetZone = daemonZone(r.ResetAt, now)
 		}
 		return r
 	}
@@ -137,6 +149,13 @@ func classifyText(s string, now time.Time) Result {
 		if rm := reClaudeResetTZ.FindStringSubmatch(s); rm != nil {
 			r.ResetAt = nextAmPmIn(rm[1], rm[2], rm[3], rm[4], now)
 			r.ResetInferred = r.ResetAt != nil && !knownZone(rm[4])
+			switch {
+			case r.ResetAt == nil:
+			case r.ResetInferred:
+				r.ResetZone = daemonZone(r.ResetAt, now)
+			default:
+				r.ResetZone = rm[4]
+			}
 		}
 		return r
 	}
@@ -232,6 +251,19 @@ func claudeHitWindow(word string) string {
 		return "weekly-sonnet"
 	}
 	return ""
+}
+
+// daemonZone is the ResetZone of a time read in the daemon's own zone ("" when
+// no time was parsed): its IANA name, or a UTC offset when it runs on "Local".
+func daemonZone(at *time.Time, now time.Time) string {
+	if at == nil {
+		return ""
+	}
+	name := now.Location().String()
+	if name == "" || name == "Local" {
+		name = "UTC" + now.Format("-07:00")
+	}
+	return DaemonLocalPrefix + name
 }
 
 // knownZone reports whether zone names an IANA zone this daemon can load; a

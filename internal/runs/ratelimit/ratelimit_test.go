@@ -299,3 +299,39 @@ func TestClassify_ResetInferred(t *testing.T) {
 		})
 	}
 }
+
+// TestClassify_ResetZone pins the zone the daemon reports for the client's
+// "Details" note, per provider case.
+func TestClassify_ResetZone(t *testing.T) {
+	now := at(2026, 10, 22, 12, 39, 0)
+	cases := []struct {
+		name string
+		in   Input
+		want string
+	}{
+		{"glm is UTC+8", Input{Provider: "glm", Err: glmText}, "UTC+8"},
+		{"glm dated is UTC+8", Input{Provider: "glm", Err: "429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18"}, "UTC+8"},
+		{"claude printed IANA zone", Input{Provider: "claude-native", Err: "You've hit your session limit · resets 1pm (Asia/Saigon)"}, "Asia/Saigon"},
+		{"claude zone-less is daemon-local", Input{Provider: "claude-native", Err: "5-hour limit reached - resets 3pm"}, "daemon-local:ICT"},
+		{"claude unknown zone is daemon-local", Input{Provider: "claude-native", Err: "You've hit your session limit · resets 1pm (Mars/Olympus)"}, "daemon-local:ICT"},
+		{"no reset parsed", Input{Provider: "codex-native", Err: "You've hit your usage limit"}, ""},
+		{"glm unparseable reset", Input{Provider: "glm", Err: "429 Usage limit reached for 5 hour. Your limit will reset at soon"}, ""},
+		{"absolute epoch", Input{Provider: "claude-native", Err: "Claude AI usage limit reached|1790000000"}, ""},
+		{"backend signal", Input{Provider: "claude-native", Err: "exit status 1", Signal: &Signal{Status: "rejected", ResetsAt: time.Unix(1790000000, 0), Type: "five_hour"}}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := Classify(c.in, now).ResetZone; got != c.want {
+				t.Fatalf("ResetZone = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestClassify_ResetZoneLocalOffsetName(t *testing.T) {
+	now := time.Date(2026, 10, 22, 12, 39, 0, 0, time.Local)
+	got := Classify(Input{Provider: "claude-native", Err: "5-hour limit reached - resets 3pm"}, now).ResetZone
+	if want := DaemonLocalPrefix + "UTC" + now.Format("-07:00"); got != want {
+		t.Fatalf("ResetZone = %q, want %q", got, want)
+	}
+}

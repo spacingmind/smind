@@ -52,7 +52,7 @@ func TestFinish_GLM429ClassifiedAsRateLimited(t *testing.T) {
 		t.Fatalf("FailureResetAt = %v, want %v", got.FailureResetAt, want)
 	}
 	// The wall-clock case (reset at HH:MM:SS) fills the reset instant.
-	_, _, st := finishDirect(t, "glm-clock", nil, errors.New(glmClockText))
+	reg, store2, st := finishDirect(t, "glm-clock", nil, errors.New(glmClockText))
 	if st.Status != StatusError || st.FailureKind != "rate_limited" || st.FailureWindow != "5h" || st.FailureResetAt == nil {
 		t.Fatalf("clock case = %+v", st)
 	}
@@ -61,6 +61,18 @@ func TestFinish_GLM429ClassifiedAsRateLimited(t *testing.T) {
 	}
 	if !got.FailureResetInferred {
 		t.Fatalf("GLM quota-error reset not marked inferred: %+v", got)
+	}
+	if st.FailureResetZone != "UTC+8" || got.FailureResetZone != "UTC+8" {
+		t.Fatalf("FailureResetZone = %q / %q, want UTC+8", st.FailureResetZone, got.FailureResetZone)
+	}
+	if row, err := store2.GetRun("glm-clock"); err != nil || row.FailureResetZone != "UTC+8" {
+		t.Fatalf("stored FailureResetZone = %q (err %v), want UTC+8", row.FailureResetZone, err)
+	}
+	{
+		row, _ := store2.GetRun("glm-clock")
+		if sum := reg.summaryFromRow(row); sum.FailureResetZone != "UTC+8" {
+			t.Fatalf("summaryFromRow FailureResetZone = %q, want UTC+8", sum.FailureResetZone)
+		}
 	}
 	if st.Err != glmClockText {
 		t.Fatalf("Err changed: %q", st.Err)

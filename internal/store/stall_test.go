@@ -54,7 +54,7 @@ func TestStallSnapshotOwnFacts(t *testing.T) {
 	if _, err := s.UpdateRunStatus("r2", "error", &fin2, "", "limit"); err != nil {
 		t.Fatalf("UpdateRunStatus(r2) error = %v", err)
 	}
-	if err := s.UpdateRunFailure("r2", "rate_limited", "5h", &reset, false); err != nil {
+	if err := s.UpdateRunFailure("r2", "rate_limited", "5h", &reset, false, ""); err != nil {
 		t.Fatalf("UpdateRunFailure() error = %v", err)
 	}
 	if _, err := s.CreateRun(Run{ID: "c1", TaskID: child.ID, Provider: "glm", Prompt: "p", Status: "running", StartedAt: later}); err != nil {
