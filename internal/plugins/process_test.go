@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -365,4 +366,60 @@ func waitUntil(t *testing.T, what string, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+// A running plugin has its directory as cwd: on Windows the rename of that
+// directory fails while it runs, so the apply must stop and reap the process
+// BEFORE the files move (Unix would let the rename through, so assert the order).
+func TestUpdate_Apply_StopsProcessBeforeSwappingDir(t *testing.T) {
+	e := newHostEnv(t, host.DenyAll)
+	src := writePluginDir(t, processManifest("demo", "1.0.0", "report"), nil)
+	installEnable(t, e, src, false)
+	before := waitProc(t, e.m, "demo", host.StateRunning)
+	writeFile(t, src+"/"+ManifestFile, []byte(processManifest("demo", "2.0.0", "report", "x")))
+	if res, err := e.m.Update(bg, "demo", "", false); err != nil || !res.Pending {
+		t.Fatalf("%+v %v", res, err)
+	}
+	var aliveAtSwap = true
+	e.m.failAt = func(p string) error {
+		if p == "dirs" {
+			aliveAtSwap = procAlive(before.PID)
+		}
+		return nil
+	}
+	if _, err := e.m.Update(bg, "demo", "", true); err != nil {
+		t.Fatal(err)
+	}
+	if aliveAtSwap {
+		t.Fatal("the plugin process was still running when its directory was swapped")
+	}
+}
+
+// If the swap fails the previous version must come back running.
+func TestUpdate_Apply_SwapFailure_RestartsLastGood(t *testing.T) {
+	e := newHostEnv(t, host.DenyAll)
+	src := writePluginDir(t, processManifest("demo", "1.0.0", "report"), nil)
+	installEnable(t, e, src, false)
+	before := waitProc(t, e.m, "demo", host.StateRunning)
+	writeFile(t, src+"/"+ManifestFile, []byte(processManifest("demo", "2.0.0", "report", "x")))
+	if res, err := e.m.Update(bg, "demo", "", false); err != nil || !res.Pending {
+		t.Fatalf("%+v %v", res, err)
+	}
+	e.m.failAt = func(p string) error {
+		if p == "dirs" {
+			return errors.New("injected swap failure")
+		}
+		return nil
+	}
+	if _, err := e.m.Update(bg, "demo", "", true); err == nil {
+		t.Fatal("want the injected failure")
+	}
+	waitDead(t, before.PID)
+	waitUntil(t, "last good restarted", func() bool {
+		s, ok := e.m.ProcessStatus("demo")
+		return ok && s.State == host.StateRunning && s.PID != before.PID
+	})
+	if got, _ := e.m.Get("demo"); got.Version != "1.0.0" {
+		t.Fatalf("row not rolled back: %+v", got)
+	}
 }

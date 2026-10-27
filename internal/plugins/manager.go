@@ -802,9 +802,20 @@ func (m *Manager) swapIn(p store.Plugin, tree string, c Consent, src Source) (Up
 	if err := m.st.UpdatePlugin(p); err != nil {
 		return UpdateResult{}, err
 	}
-	if err := m.swapDirs(p.ID, tree); err != nil {
+	// A running plugin has its directory as cwd and files open under it: on
+	// Windows that blocks the rename below, so the process tree is stopped (and
+	// reaped) first. Every exit from here on restarts on whatever the row says.
+	if m.proc != nil {
+		m.proc.h.Stop(p.ID)
+	}
+	err := m.point("dirs")
+	if err == nil {
+		err = m.swapDirs(p.ID, tree)
+	}
+	if err != nil {
 		_ = m.st.UpdatePlugin(prev)
 		m.setError(prev, err)
+		m.restartAfterSwap(p.ID) // the old files are back: the last good version runs again
 		return UpdateResult{}, err
 	}
 	_ = os.RemoveAll(filepath.Join(m.pendingDir(), p.ID))
