@@ -4,8 +4,8 @@
 import { base64Encode } from '../relay/base64';
 import type { PushKeyStore } from './keys';
 
-export type PushKind = 'permission' | 'needs_continue' | 'done' | 'error';
-export const ALL_KINDS: readonly PushKind[] = ['permission', 'needs_continue', 'done', 'error'];
+export type PushKind = 'permission' | 'needs_continue' | 'done' | 'error' | 'stalled';
+export const ALL_KINDS: readonly PushKind[] = ['permission', 'needs_continue', 'done', 'error', 'stalled'];
 
 export interface RegisterDeps {
   platform: 'android' | 'ios';
