@@ -131,13 +131,13 @@ func TestPostCheck_LeadWorktreeChangedIsScopeViolation(t *testing.T) {
 	}
 	gitRun(t, lead, "add", ".")
 	gitRun(t, lead, "commit", "-qm", "a")
-	before, err := Digest(context.Background(), lead)
+	before, err := Take(context.Background(), lead)
 	if err != nil {
 		t.Fatal(err)
 	}
 	w, fp, _, id := newWatch(t, f, 30, 0)
 	w.Before = before
-	w.LeadDigest = func() (string, error) { return Digest(context.Background(), lead) }
+	w.LeadSnapshot = func() (Snapshot, error) { return Take(context.Background(), lead) }
 	fp.st = ProbeState{Running: true}
 	w.Tick(time.Second)
 	// the "validator" edits a file in the LEAD's worktree
@@ -163,9 +163,9 @@ func TestPostCheck_UnchangedLeadWorktreeIsClean(t *testing.T) {
 	}
 	gitRun(t, lead, "add", ".")
 	gitRun(t, lead, "commit", "-qm", "a")
-	before, _ := Digest(context.Background(), lead)
+	before, _ := Take(context.Background(), lead)
 	w, fp, _, id := newWatch(t, f, 30, 0)
-	w.Before, w.LeadDigest = before, func() (string, error) { return Digest(context.Background(), lead) }
+	w.Before, w.LeadSnapshot = before, func() (Snapshot, error) { return Take(context.Background(), lead) }
 	fp.st = ProbeState{Running: true}
 	w.Tick(time.Second)
 	fp.st = ProbeState{}
@@ -199,4 +199,121 @@ func mustOut(t *testing.T, dir string, args ...string) string {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// ---- scope snapshot ----
+
+func newLeadRepo(t *testing.T) string {
+	t.Helper()
+	lead := t.TempDir()
+	gitRun(t, lead, "init", "-q")
+	if err := os.WriteFile(filepath.Join(lead, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, lead, "add", ".")
+	gitRun(t, lead, "commit", "-qm", "a")
+	return lead
+}
+
+func fileBytes(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// TestSnapshot_DoesNotRewriteTheIndex: a plain `git status` refreshes and rewrites .git/index (and takes index.lock),
+// so a "read-only" scope check would itself change the lead's worktree state and race the lead's own git commands.
+// Take must leave the index byte for byte as it found it.
+func TestSnapshot_DoesNotRewriteTheIndex(t *testing.T) {
+	lead := newLeadRepo(t)
+	index := filepath.Join(lead, ".git", "index")
+	stale := func() {
+		// A newer mtime than the index recorded: the stat cache is stale, the case a plain status refreshes.
+		later := time.Now().Add(2 * time.Second)
+		if err := os.Chtimes(filepath.Join(lead, "a.txt"), later, later); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stale()
+	before := fileBytes(t, index)
+	if _, err := Take(context.Background(), lead); err != nil {
+		t.Fatal(err)
+	}
+	if fileBytes(t, index) != before {
+		t.Fatalf("Take rewrote .git/index")
+	}
+	// The control: the same state under a plain git status DOES rewrite it, so the assertion above is meaningful.
+	gitRun(t, lead, "status", "--porcelain")
+	if fileBytes(t, index) == before {
+		t.Fatalf("control: a plain git status was expected to refresh the index")
+	}
+}
+
+func TestSnapshotChanged_NamesWhatChanged(t *testing.T) {
+	lead := newLeadRepo(t)
+	base, err := Take(context.Background(), lead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := base.Changed(base); len(got) != 0 {
+		t.Fatalf("identical snapshots differ: %v", got)
+	}
+	if err := os.WriteFile(filepath.Join(lead, "b.txt"), []byte("b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lead, "a.txt"), []byte("changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, lead, "commit", "-qam", "more")
+	after, _ := Take(context.Background(), lead)
+	got := strings.Join(base.Changed(after), ",")
+	if got != "HEAD,b.txt" {
+		t.Fatalf("Changed = %q, want HEAD,b.txt (a.txt was committed, b.txt is untracked)", got)
+	}
+}
+
+// TestPostCheck_LateWriteByAnotherWriterIsNamed documents the check's by-design limit: it sees that the lead's
+// worktree changed, not WHO changed it. Something the lead's own tools write after the baseline (here a file, like
+// the fake agent's session-init-method) is reported as a scope violation, and the verdict names the path so a person
+// can tell it from a validator edit.
+func TestPostCheck_LateWriteByAnotherWriterIsNamed(t *testing.T) {
+	f := newFixture(t)
+	lead := newLeadRepo(t)
+	before, _ := Take(context.Background(), lead)
+	w, fp, _, id := newWatch(t, f, 30, 0)
+	w.Before, w.LeadSnapshot = before, func() (Snapshot, error) { return Take(context.Background(), lead) }
+	fp.st = ProbeState{Running: true}
+	w.Tick(time.Second)
+	if err := os.WriteFile(filepath.Join(lead, "session-init-method"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fp.st = ProbeState{}
+	w.Tick(time.Second)
+	v, _ := f.svc.View(id)
+	if !v.ScopeViolation || v.Verdict.BlockedReason != ReasonScopeViolation || !strings.Contains(v.Verdict.Summary, "session-init-method") {
+		t.Fatalf("view = %+v", v)
+	}
+}
+
+// TestPostCheck_BaselineAfterSettleIsClean is the mechanism behind the old flake, made deterministic: the same late
+// writer is NOT a violation when it finished before the baseline was taken.
+func TestPostCheck_BaselineAfterSettleIsClean(t *testing.T) {
+	f := newFixture(t)
+	lead := newLeadRepo(t)
+	if err := os.WriteFile(filepath.Join(lead, "session-init-method"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := Take(context.Background(), lead) // taken after the writer settled
+	w, fp, _, id := newWatch(t, f, 30, 0)
+	w.Before, w.LeadSnapshot = before, func() (Snapshot, error) { return Take(context.Background(), lead) }
+	fp.st = ProbeState{Running: true}
+	w.Tick(time.Second)
+	fp.st = ProbeState{}
+	w.Tick(time.Second)
+	if v, _ := f.svc.View(id); v.ScopeViolation || v.Verdict.BlockedReason != ReasonCrashed {
+		t.Fatalf("view = %+v", v)
+	}
 }
