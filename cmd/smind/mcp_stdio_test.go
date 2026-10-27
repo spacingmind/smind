@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -69,5 +73,43 @@ func TestMCPServe_StdioRoundTrip(t *testing.T) {
 	}
 	if created.Task.ID == 0 || created.Task.Title != "Stdio" {
 		t.Fatalf("task_new over stdio = %+v, want a created task", created.Task)
+	}
+}
+
+// TestMCPServe_ValidatorEnvServesOnlyValidatorTools runs the compiled
+// `smind mcp serve` with a validator run's env (ADR-0045) over real stdio: the
+// catalogue is exactly the two validator tools. A half-set validator env fails
+// closed (exit 1) instead of serving the full catalogue.
+func TestMCPServe_ValidatorEnvServesOnlyValidatorTools(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	srvURL := newConfigOptionTestEnv(t, home)
+	writeTestConfig(t, home, srvURL)
+
+	bin := filepath.Join(t.TempDir(), exeName("smind-test"))
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build smind: %v: %s", err, out)
+	}
+
+	cmd := exec.Command(bin, "mcp", "serve")
+	cmd.Env = append(os.Environ(), "SMIND_VALIDATION_ID=7", "SMIND_CONTRACT_ID=3", "SMIND_VERDICT_TOKEN=tok")
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, nil).
+		Connect(context.Background(), &mcp.CommandTransport{Command: cmd}, nil)
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+	got := mcpToolNames(t, cs)
+	sort.Strings(got)
+	if strings.Join(got, ",") != "validation_contract_get,validation_verdict_submit" {
+		t.Fatalf("validator stdio catalogue = %v", got)
+	}
+
+	half := exec.Command(bin, "mcp", "serve")
+	half.Env = append(os.Environ(), "SMIND_VALIDATION_ID=7")
+	out, err := half.CombinedOutput()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != 1 || !strings.Contains(string(out), "SMIND_VERDICT_TOKEN") {
+		t.Fatalf("a half-set validator env must exit 1 naming the variables: err=%v out=%q", err, out)
 	}
 }

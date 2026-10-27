@@ -130,9 +130,15 @@ adversarially:
 - platform gating;
 - tests that don't test the behaviour.
 
-For material uncertainty, the Lead may launch the `reviewer` profile for a
-read-only review of an exact commit (the reviewer seat is unchanged; whether it
-stays is a Human decision, open).
+For material uncertainty a Peer may still be launched as an independent verifier
+of an exact commit. For L-size items and for changes in `internal/wsapi`, store
+migrations, permissions, relay/E2EE or UI, the Lead writes a **validation
+contract** before code and requests a **validator** per milestone (ADR-0045):
+the `validator` seat judges the exact commit against the stored contract in a
+fresh context and issues a structured pass/fail/blocked verdict bound to that
+commit. The Lead cannot write or waive a verdict, a verdict is stale after a
+push, and `mergeReady` is a label for the Human: smind never merges. The PR body
+cites the `validationId`, or says "no contract: <reason>".
 
 ## Verification checklist
 
@@ -173,7 +179,7 @@ stays is a Human decision, open).
 
 smind hosts the roles itself as seat profiles (ADR-0041). Seed the standard
 pack once with `smind profile seed roles`: `lead`, `peer-sonnet` and
-`reviewer`. Seeding is idempotent by name; a profile you already have or edited
+`validator`. Seeding is idempotent by name; a profile you already have or edited
 is kept as is. A follow-up to a seat's chat that does not name a profile keeps
 the chat's last profile (a seat stays a seat); pass `--profile none` /
 `profileId: 0` to drop it, or start a new chat. The seats are seeded with

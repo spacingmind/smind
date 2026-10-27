@@ -194,6 +194,9 @@ type Registry struct {
 	// smindHome is the daemon home passed to seats' built-in MCP server
 	// (SetSmindHome). Guarded by mu.
 	smindHome string
+	// runEnvSource supplies a run's extra MCP environment by task (ADR-0045:
+	// the validator seat's verdict entry). Nil = none.
+	runEnvSource func(taskID int64) (map[string]string, bool)
 
 	// archiving holds the task ids currently mid-archive (TryBeginArchive
 	// adds, its release func removes). While a task id is in it, every

@@ -32,6 +32,7 @@ func registerMCPTools(srv *mcp.Server, client *wsclient.Client) {
 	registerMCPLiveTools(srv, client)
 	registerMCPReviewTools(srv, client)
 	registerMCPAccountUsageTool(srv, client)
+	registerMCPValidationTools(srv, client)
 }
 
 // callWS is the one wsapi invocation every tool handler funnels through:

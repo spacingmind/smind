@@ -215,3 +215,36 @@ func (s *Store) ListValidationsByRun(runID string) ([]Validation, error) {
 	}
 	return out, rows.Err()
 }
+
+// ListValidationsByValidatorTask returns the validations judged by validator
+// task taskID.
+func (s *Store) ListValidationsByValidatorTask(taskID int64) ([]Validation, error) {
+	rows, err := s.db.Query(`SELECT `+validationCols+` FROM validations WHERE validator_task_id = ?`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list validations by validator task: %w", err)
+	}
+	defer rows.Close()
+	var out []Validation
+	for rows.Next() {
+		v, err := scanValidation(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list validations by validator task: %w", err)
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// SetValidationValidatorTask records the validator task and its scratch
+// worktree before the run starts, so the daemon can bind env and identity to
+// the task.
+func (s *Store) SetValidationValidatorTask(id, validatorTaskID int64, scratchDir string) error {
+	res, err := s.db.Exec(`UPDATE validations SET validator_task_id = ?, scratch_dir = ? WHERE id = ? AND verdict_json = ''`, validatorTaskID, scratchDir, id)
+	if err != nil {
+		return fmt.Errorf("set validator task: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrVerdictExists
+	}
+	return nil
+}

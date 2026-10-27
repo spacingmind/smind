@@ -39,7 +39,7 @@ func TestSeedRoles_CreatesThreeSeatsInOrder(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
 	res := seed(t, r)
-	want := []string{"peer-sonnet", "lead", "reviewer"}
+	want := []string{"peer-sonnet", "lead", "validator"}
 	if len(res) != len(want) {
 		t.Fatalf("results = %+v, want %d", res, len(want))
 	}
@@ -56,8 +56,16 @@ func TestSeedRoles_CreatesThreeSeatsInOrder(t *testing.T) {
 		!strings.Contains(lead.Instructions, "end your turn") || len(lead.Skills) != 1 || lead.Skills[0] != "smind-leader" {
 		t.Errorf("lead = %+v", lead)
 	}
-	if rv := byName(t, r, "reviewer"); rv.PermissionMode != "plan" {
-		t.Errorf("reviewer mode = %q", rv.PermissionMode)
+	v := byName(t, r, "validator")
+	if v.PermissionMode != "auto" || v.OrchestrationTools == nil || *v.OrchestrationTools || v.ChildPolicy != "none" || v.Model != "claude-sonnet-5-5" ||
+		!strings.Contains(v.Instructions, "validation_verdict_submit") {
+		t.Errorf("validator = %+v", v)
+	}
+	all, _ := r.List()
+	for _, p := range all {
+		if p.Name == "reviewer" {
+			t.Errorf("the pack must no longer seed a reviewer: %+v", p)
+		}
 	}
 }
 
@@ -145,13 +153,13 @@ func TestSeedRoles_SeatsExactly(t *testing.T) {
 			t.Errorf("pack seeds %q (provider %q, childPolicy %q)", p.Name, p.Provider, p.ChildPolicy)
 		}
 	}
-	for _, n := range []string{"lead", "peer-sonnet", "reviewer"} {
+	for _, n := range []string{"lead", "peer-sonnet", "validator"} {
 		if !got[n] {
 			t.Errorf("pack lacks %s", n)
 		}
 	}
 	if len(all) != 3 {
-		t.Errorf("profiles = %d, want exactly lead, peer-sonnet, reviewer", len(all))
+		t.Errorf("profiles = %d, want exactly lead, peer-sonnet, validator", len(all))
 	}
 }
 
@@ -162,7 +170,7 @@ func TestSeedRoles_ClaudeSeatsWaitOnRateLimit(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
 	seed(t, r)
-	for _, n := range []string{"peer-sonnet", "lead", "reviewer"} {
+	for _, n := range []string{"peer-sonnet", "lead", "validator"} {
 		if got := byName(t, r, n).OnRateLimit; got != "wait" {
 			t.Errorf("%s OnRateLimit = %q, want wait", n, got)
 		}
@@ -225,5 +233,45 @@ func TestSeedRoles_LeadNeverWaitsOnBackgroundWork(t *testing.T) {
 	}
 	if got := byName(t, r, "peer-sonnet").Instructions; strings.Contains(got, rule) {
 		t.Errorf("peer-sonnet instructions carry the Lead rule: %q", got)
+	}
+}
+
+// TestSeedRoles_ExistingReviewerKept: a Human's own `reviewer` profile (from the
+// old pack) is neither touched nor removed when the pack now seeds `validator`.
+func TestSeedRoles_ExistingReviewerKept(t *testing.T) {
+	t.Parallel()
+	r := newTestRegistry(t)
+	mine, err := r.Create(store.AgentProfile{Name: "reviewer", Provider: "claude-native", Model: "claude-sonnet-5-5", PermissionMode: "plan", Instructions: "my own text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed(t, r)
+	got := byName(t, r, "reviewer")
+	if got.ID != mine.ID || got.Instructions != "my own text" {
+		t.Fatalf("reviewer changed: %+v", got)
+	}
+	if byName(t, r, "validator").ID == 0 {
+		t.Fatalf("validator not seeded")
+	}
+}
+
+// TestSeedRoles_ValidatorNeverOverwritten: re-seeding keeps a Human-edited validator.
+func TestSeedRoles_ValidatorNeverOverwritten(t *testing.T) {
+	t.Parallel()
+	r := newTestRegistry(t)
+	seed(t, r)
+	v := byName(t, r, "validator")
+	v.Instructions = "edited by a human"
+	if _, err := r.Update(v); err != nil {
+		t.Fatal(err)
+	}
+	res := seed(t, r)
+	for _, x := range res {
+		if x.Name == "validator" && x.Action != SeedKept {
+			t.Fatalf("validator action = %v, want kept", x.Action)
+		}
+	}
+	if byName(t, r, "validator").Instructions != "edited by a human" {
+		t.Fatalf("a human edit was overwritten")
 	}
 }
