@@ -171,7 +171,8 @@ export function WorkspaceScriptsDialog({
               </div>
             </>
           )}
-          <ReadinessPanel client={client} workspaceId={workspace.ID} />
+          {/* After the editor loads, so the panel does not appear above the fields and then jump below them. */}
+          {!loading && <ReadinessPanel client={client} workspaceId={workspace.ID} />}
           {error && (
             <p role="alert" data-testid="workspace-scripts-error" className="text-ui-base text-destructive">
               {error}
