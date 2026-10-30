@@ -198,8 +198,13 @@ func (r *Runner) probeACPModes(ctx context.Context, provider Provider) error {
 	defer os.RemoveAll(dir)
 
 	popts := []acp.Option{acp.WithPermissionPolicy(acp.AutoDenyPolicy{})}
-	if env := r.acpEnvEntries(provider); len(env) > 0 {
-		popts = append(popts, acp.WithEnv(env...))
+	// NO_BROWSER comes first so the probe's default never launches a
+	// browser, while a provider-configured NO_BROWSER (a later entry, and
+	// later entries win) still overrides it. Real runs set no such default.
+	env := append([]string{"NO_BROWSER=true"}, r.acpEnvEntries(provider)...)
+	popts = append(popts, acp.WithEnv(env...))
+	if spec, ok := r.providerRegistry().Get(string(provider)); ok && spec.NoMCPServers {
+		popts = append(popts, acp.WithoutMcpServers())
 	}
 	client, err := r.newACPClient(command, popts...)
 	if err != nil {
