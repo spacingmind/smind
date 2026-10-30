@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ConnectMethodPanel, CONNECT_METHOD_LABELS, useConnectMethod, type ConnectMethodId } from "@/components/first-run/connect-methods";
 import { SetupSection } from "@/components/first-run/setup-section";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
+import { SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
 import { Button } from "@/components/ui/button";
 import { FormError } from "@/components/ui/form-error";
 
@@ -135,50 +136,54 @@ function ConnectionsSection() {
   return (
     <div className="flex flex-col gap-6" data-testid="settings-section-connections">
       <section className="flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-ui-base font-medium text-foreground">Daemon connections</h3>
-          <div className="relative">
-            <Button
-              variant="outline"
-              size="sm"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              data-testid="connection-add-menu"
-              onClick={() => setMenuOpen((o) => !o)}
-            >
-              <Icons.add aria-hidden className="size-3.5" />
-              Add connection
-            </Button>
-            {menuOpen && (
-              <div
-                role="menu"
-                aria-label="Add connection"
-                data-testid="connection-add-menu-items"
-                className="absolute right-0 top-full z-10 mt-1 flex min-w-64 flex-col rounded-xl border bg-popover p-1 text-popover-foreground shadow-md"
-              >
-                {ADD_METHODS.map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    role="menuitem"
-                    data-testid={`connection-add-menu-${m}`}
-                    className="rounded-lg px-2 py-1.5 text-left text-ui-base whitespace-nowrap outline-none hover:bg-hover focus-visible:bg-hover"
-                    onClick={() => openMethod(m)}
+        <SettingsGroup
+          title={
+            <span className="flex items-center justify-between gap-2">
+              Daemon connections
+              <div className="relative">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                  data-testid="connection-add-menu"
+                  onClick={() => setMenuOpen((o) => !o)}
+                >
+                  <Icons.add aria-hidden className="size-3.5" />
+                  Add connection
+                </Button>
+                {menuOpen && (
+                  <div
+                    role="menu"
+                    aria-label="Add connection"
+                    data-testid="connection-add-menu-items"
+                    className="absolute right-0 top-full z-10 mt-1 flex min-w-64 flex-col rounded-xl border bg-popover p-1 text-popover-foreground shadow-md"
                   >
-                    {CONNECT_METHOD_LABELS[m]}
-                  </button>
-                ))}
+                    {ADD_METHODS.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        role="menuitem"
+                        data-testid={`connection-add-menu-${m}`}
+                        className="rounded-lg px-2 py-1.5 text-left text-ui-base whitespace-nowrap outline-none hover:bg-hover focus-visible:bg-hover"
+                        onClick={() => openMethod(m)}
+                      >
+                        {CONNECT_METHOD_LABELS[m]}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </div>
-        <ul className="flex flex-col gap-1 rounded-xl border bg-card p-3">
-          {connections.map((c) => (
-            <li
-              key={c.id}
-              data-testid={`connection-row-${c.id}`}
-              className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-hover"
-            >
+            </span>
+          }
+        >
+          <ul className="divide-y divide-border">
+            {connections.map((c) => (
+              <li
+                key={c.id}
+                data-testid={`connection-row-${c.id}`}
+                className="flex items-center justify-between gap-2 px-3 py-2 hover:bg-hover"
+              >
               <div className="flex min-w-0 flex-col">
                 <span className="text-ui-base text-foreground">
                   {c.label}
@@ -218,8 +223,9 @@ function ConnectionsSection() {
                 )}
               </div>
             </li>
-          ))}
-        </ul>
+            ))}
+          </ul>
+        </SettingsGroup>
         {unsupported.length > 0 && (() => {
           const n = unsupported.length;
           const first = unsupported[0];
@@ -237,23 +243,28 @@ function ConnectionsSection() {
         )}
       </section>
       {method && (
-        <section className="flex flex-col gap-2 rounded-xl border bg-card p-3" data-testid="connection-add-panel">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-ui-base font-medium text-foreground">{CONNECT_METHOD_LABELS[method]}</h3>
-            <Button variant="ghost" size="sm" data-testid="connection-add-close" onClick={closePanel}>
-              Close
-            </Button>
+        <SettingsGroup
+          title={
+            <span className="flex items-center justify-between gap-2">
+              {CONNECT_METHOD_LABELS[method]}
+              <Button variant="ghost" size="sm" data-testid="connection-add-close" onClick={closePanel}>
+                Close
+              </Button>
+            </span>
+          }
+        >
+          <div data-testid="connection-add-panel" className="px-4 py-3">
+            <ConnectMethodPanel
+              method={method}
+              state={connect}
+              onConnected={(conn) => {
+                refresh();
+                // The relay flow resets itself and stays mounted so a "switching failed" note survives.
+                if (conn.kind !== "relay") closePanel();
+              }}
+            />
           </div>
-          <ConnectMethodPanel
-            method={method}
-            state={connect}
-            onConnected={(conn) => {
-              refresh();
-              // The relay flow resets itself and stays mounted so a "switching failed" note survives.
-              if (conn.kind !== "relay") closePanel();
-            }}
-          />
-        </section>
+        </SettingsGroup>
       )}
       <ManageLocalDaemon />
       <SetupSection />
@@ -318,31 +329,33 @@ function ManageLocalDaemon() {
 
   return (
     <section className="flex flex-col gap-2" data-testid="connection-manage-section">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex flex-col gap-0.5">
-          <h3 className="text-ui-base font-medium text-foreground">Manage this computer&apos;s daemon</h3>
-          <p className="max-w-sm text-ui-base text-muted-foreground">
-            {on
+      <SettingsGroup>
+        <SettingsRow
+          label="Manage this computer's daemon"
+          description={
+            on
               ? "The app installs, starts and updates the local daemon."
-              : "The app never installs, starts, updates or takes over a daemon here. Switching to This computer still works if one is running."}
-          </p>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={on}
-          aria-label="Manage this computer's daemon"
-          data-testid="connection-manage-toggle"
-          disabled={busy}
-          onClick={() => void toggle()}
-          className={cn(
-            "h-5 w-9 shrink-0 rounded-full border border-input-border transition-colors disabled:opacity-50",
-            on ? "bg-primary" : "bg-transparent",
-          )}
-        >
-          <span className={cn("block size-3.5 rounded-full bg-background shadow transition-transform", on ? "translate-x-4" : "translate-x-0.5")} />
-        </button>
-      </div>
+              : "The app never installs, starts, updates or takes over a daemon here. Switching to This computer still works if one is running."
+          }
+          control={
+            <button
+              type="button"
+              role="switch"
+              aria-checked={on}
+              aria-label="Manage this computer's daemon"
+              data-testid="connection-manage-toggle"
+              disabled={busy}
+              onClick={() => void toggle()}
+              className={cn(
+                "h-5 w-9 shrink-0 rounded-full border border-input-border transition-colors disabled:opacity-50",
+                on ? "bg-primary" : "bg-transparent",
+              )}
+            >
+              <span className={cn("block size-3.5 rounded-full bg-background shadow transition-transform", on ? "translate-x-4" : "translate-x-0.5")} />
+            </button>
+          }
+        />
+      </SettingsGroup>
       {confirming && (
         <div role="alertdialog" aria-label="Stop managing the daemon" data-testid="connection-manage-confirm" className="flex flex-col gap-2 rounded-xl border bg-card p-3">
           <p className="text-ui-base text-muted-foreground">
@@ -371,6 +384,7 @@ if (isDesktop) {
     id: "connections",
     label: "Daemon server",
     groupLabel: "Connection",
+    description: "Saved daemon connections and local daemon management.",
     order: 150,
     icon: <Icons.connections aria-hidden className="size-3.5" />,
     render: () => <ConnectionsSection />,
