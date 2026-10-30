@@ -165,6 +165,12 @@ A same-host reverse proxy that terminates TLS counts as loopback. Paired
 phones (the relay) and agents cannot manage plugins whatever this is set to.
 See [Plugins](plugins.md).
 
+### steward
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `steward.policy.enabled` | `false` | Turn on the standing permission policy in `~/.smind/steward/policy.yaml` (see [Scripting and permissions](scripting-and-permissions.md#a-standing-permission-policy-optional)). Read on every decision. |
+
 ### learning
 
 Learning is on by default. Set `learning.enabled: false` to stop collection and
