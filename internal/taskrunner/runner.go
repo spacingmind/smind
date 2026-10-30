@@ -1308,7 +1308,15 @@ func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, 
 		opts = append(opts, codex.WithPermissionPolicy(r.codexPermissionPolicy))
 	}
 
-	if env := r.providerEnvEntries(provider); len(env) > 0 {
+	epOpts, epEnv, err := r.codexEndpointLaunch(provider)
+	if err != nil {
+		return err
+	}
+	opts = append(opts, epOpts...)
+	// The private-home entries come first so the provider's own env wins
+	// (WithEnv appends after the inherited environment; last entry wins).
+	env := append(epEnv, r.providerEnvEntries(provider)...)
+	if len(env) > 0 {
 		opts = append(opts, codex.WithEnv(env...))
 	}
 

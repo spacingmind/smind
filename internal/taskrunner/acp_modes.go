@@ -232,6 +232,10 @@ func (r *Runner) recordSessionModes(provider Provider, client acpBackend, sessio
 // the provider keeps reporting no models and accepts any syntax-valid
 // string (ADR-0025).
 func (r *Runner) probeCodexModels(ctx context.Context, provider Provider) error {
+	// models of an endpoint instance are configured, never discovered.
+	if spec, ok := r.providerRegistry().Get(string(provider)); ok && spec.HasEndpoint() {
+		return nil
+	}
 	var copts []codex.Option
 	if env := r.providerEnvEntries(provider); len(env) > 0 {
 		copts = append(copts, codex.WithEnv(env...))
