@@ -196,7 +196,7 @@ Running total: **USD 0.00** of 2.00.
 
 - [x] Security spike (env scrub), recipe kept under `/tmp/steward4/spike-sec/` and described in the ADR
 - [x] PR0: ADR-0046 + this plan (docs only)
-- [ ] PR1 registry generalisation + Kimi fix
+- [x] PR1 registry generalisation + Kimi fix (code merged-ready; see Validation)
 - [ ] PR2 typed env + provider secrets
 - [ ] PR3 claude-code recipes + vendor rate-limit profiles
 - [ ] PR4 Codex endpoint instances
@@ -206,3 +206,26 @@ Running total: **USD 0.00** of 2.00.
 ## Validation
 
 PR0 (docs only): the spike results are in ADR-0046 section 7 (`claude` 2.1.310, macOS, fake Anthropic server, sentinel keys, no network but localhost, cost 0). Markdown sanity is checked in the PR body. Later PRs append their evidence here per AC.
+
+PR1 (registry generalisation + Kimi fix), 2026-10-30, branch `smind/task-lead-providers-epic-pr1-registry-dmi9f7tyb0uw`:
+
+| AC | Evidence |
+|---|---|
+| AC1.1 | `TestInstance_ModelsReplaceClaudeCatalog` (exact list, `source: config`, syntax-valid ids accepted, base untouched) |
+| AC1.2 | `TestClaudeLaunch_DisallowedToolsInArgv` (fakeclaude argv has `--disallowedTools WebSearch,Bash(rm:*)`; absent with none) |
+| AC1.3 | `TestInstance_AdditionalModelsMergeByID` (no models = the Claude catalog; additional = catalog + ids merged by id) |
+| AC1.4 | `TestCustomProvider_InstanceOverlayValidation_FieldNamed` (`providers.custom[1].disallowedTools[0]: required` and nine more), `TestCustomProvider_ACPInstanceCommandOverride`, `TestInstance_ACPCommandOverrideRuns` (the override command is what runs) |
+| AC1.5 | `TestProviderList_AdditiveFields` (kimi keeps its wire fields), full `task test` green |
+| AC1.6 | `TestInstance_DefaultModelNotInheritedWhenModelsSet`, `TestInstance_DefaultModelInheritedWhenNoModelsNoEndpoint` |
+| AC1.7 | `TestKimiCommand_KimiCode` (`kimi acp`; docs and `internal/acp/kimi.go` name `MoonshotAI/kimi-code`, vendor script verified from the vendor README) |
+| AC1.8 | `TestModelDisplay_UnknownIDShownRaw` (vitest) |
+
+Mutations (each made the named test FAIL, a test failure not a build failure; file restored with `git checkout -- <file>`): drop `WithDisallowedTools` (argv test);
+`staticModels` ignores the instance (replace + merge tests); `configuredDefaultModel` skips the instance models (default test); skip `validateToolName` (field-named test);
+ignore the instance `Command` in `resolve` (override tests).
+
+Decisions taken in PR1: `Runner` stays the internal type and `Harness` is its ADR name (`Runner.Harness()`, wire `harness` additive, wire `runner` values unchanged) instead of a
+rename across the codebase; `models` and `additionalModels` are mutually exclusive on one instance; `disallowedTools` is claude-native only; a claude-native or codex-native
+instance `command` is the executable only (no `args`); an instance of an ACP provider keeps free-form env until PR2; an instance may not extend an instance; with `models` replace
+mode the instance does not use ACP/Codex discovery (models > discovery). `ModelAliases` is on `Spec` and inert until PR2. Not done here: `docs/decisions/0042` pointer to ADR-0046 and
+`docs/homelab.md` rows (homelab has no `providers.custom` rows to extend).
