@@ -17,6 +17,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/acp"
 	"github.com/spacingmind/smind/internal/mcpservers"
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -677,6 +678,46 @@ func TestRunner_RunPrompt_ClaudeNativeWorkspaceRestriction(t *testing.T) {
 	args := runClaudeMcp(t, r, task)
 	if v, ok := flagValue(args, "--mcp-config"); ok {
 		t.Fatalf("--mcp-config = %q, want none for a server restricted to another workspace", v)
+	}
+}
+
+// TestACPProvider_NoMCPServersSpecHidesMcp proves a spec with
+// NoMCPServers (an agent that cannot take mcpServers at all) makes a run
+// send an empty mcpServers and report every configured row dropped,
+// however much the agent itself advertises.
+func TestACPProvider_NoMCPServersSpecHidesMcp(t *testing.T) {
+	t.Setenv("FAKEAGENT_MCP_CAPS", "stdio,http")
+	dump := filepath.Join(t.TempDir(), "mcp-dump.json")
+	t.Setenv("FAKEAGENT_MCP_DUMP", dump)
+
+	st, wm, _ := newTestStoreAndManager(t)
+	task := newTestTaskUnder(t, wm)
+	if _, err := mcpservers.New(st).Create(store.McpServer{Name: "pw", Transport: "stdio", Command: "go", Enabled: true}); err != nil {
+		t.Fatalf("Create(): %v", err)
+	}
+
+	r, _ := customRunner(t, wm, providers.Spec{
+		ID: "no-mcp-agent", Command: []string{fakeACPAgentPath}, NoMCPServers: true,
+	})
+	WithMcpServers(mcpservers.New(st))(r)
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, "no-mcp-agent", "hi", nil, PermissionSettings{}, "", "", events)
+	}()
+	got := drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+
+	if got := readMcpDump(t, dump); got != "[]" {
+		t.Fatalf("session/new mcpServers = %s, want []", got)
+	}
+	mcp := mcpServerEvents(got)
+	want := []McpServerState{{Name: "pw", Transport: "stdio", Status: McpStatusDropped, Reason: McpReasonTransportUnsupported}}
+	if len(mcp) != 1 || !reflect.DeepEqual(mcp[0].McpServers, want) {
+		t.Fatalf("mcp_servers events = %+v, want exactly one event with %+v", mcp, want)
 	}
 }
 

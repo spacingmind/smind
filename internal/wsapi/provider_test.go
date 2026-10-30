@@ -56,6 +56,11 @@ func TestServer_ProviderList_RoundTrip(t *testing.T) {
 		"glm":           {label: "GLM", kind: taskrunner.ProviderKindCLI},
 		"kimi":          {label: "Kimi", credentialKind: taskrunner.CredentialKindAPIKey, accountProvider: "kimi"},
 		"codex-native":  {label: "Codex", credentialKind: taskrunner.CredentialKindOAuth, accountProvider: "openai"},
+		"opencode":      {label: "OpenCode", kind: taskrunner.ProviderKindCLI},
+		"copilot":       {label: "GitHub Copilot", kind: taskrunner.ProviderKindCLI},
+		"cline":         {label: "Cline", kind: taskrunner.ProviderKindCLI},
+		"goose":         {label: "Goose", kind: taskrunner.ProviderKindCLI},
+		"cursor":        {label: "Cursor", kind: taskrunner.ProviderKindCLI},
 	}
 	if len(result.Providers) != len(want) {
 		t.Fatalf("provider.list returned %d providers, want %d: %+v", len(result.Providers), len(want), result.Providers)
@@ -278,7 +283,8 @@ func TestProviderList_ImagesField(t *testing.T) {
 	if err := json.Unmarshal(resp.Result, &raw); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"claude-native": "yes", "codex-native": "yes", "glm": "no", "kimi": "unknown"}
+	want := map[string]string{"claude-native": "yes", "codex-native": "yes", "glm": "no", "kimi": "unknown",
+		"opencode": "yes", "copilot": "unknown", "cline": "unknown", "goose": "unknown", "cursor": "unknown"}
 	if len(raw.Providers) != len(want) {
 		t.Fatalf("providers = %+v", raw.Providers)
 	}

@@ -1,13 +1,13 @@
 import { useState } from "react";
 
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { SettingsEmptyCard } from "@/components/settings/settings-layout";
 import { AutomationHistoryDialog } from "@/components/settings/automation-history";
 import { AutomationFormDialog } from "@/components/settings/automation-form";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { EmptyState } from "@/components/ui/empty-state";
 import { FormError } from "@/components/ui/form-error";
 import { LoadingRows } from "@/components/ui/loading-rows";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -144,7 +144,7 @@ function AutomationsSection({ closeSettings }: SettingsSectionContext) {
             <LoadingRows />
           )
         ) : automations.length === 0 ? (
-          <EmptyState
+          <SettingsEmptyCard
             testId="automations-empty-state"
             title="No automations"
             description="An automation starts a task when a schedule fires or a GitHub workflow fails. Create one, then enable it when you are ready."
@@ -389,6 +389,7 @@ registerSettingsSection({
   id: AUTOMATIONS_SECTION_ID,
   label: "Automations",
   groupLabel: "Agents & providers",
+  description: "Rules that start a task when a signal fires.",
   order: 179,
   icon: <Icons.automation aria-hidden className="size-3.5" />,
   render: (ctx) => <AutomationsSection {...ctx} />,

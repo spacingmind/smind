@@ -497,6 +497,9 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	case r.acpPermissionPolicy != nil:
 		opts = append(opts, acp.WithPermissionPolicy(r.acpPermissionPolicy))
 	}
+	if spec, ok := r.providerRegistry().Get(string(provider)); ok && spec.NoMCPServers {
+		opts = append(opts, acp.WithoutMcpServers())
+	}
 
 	env, err := r.launchEnvEntries(provider)
 	if err != nil {
@@ -1324,10 +1327,18 @@ func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, 
 		opts = append(opts, codex.WithPermissionPolicy(r.codexPermissionPolicy))
 	}
 
-	env, err := r.launchEnvEntries(provider)
+	epOpts, epEnv, err := r.codexEndpointLaunch(provider)
+	if err != nil {
+		return err
+	}
+	opts = append(opts, epOpts...)
+	launchEnv, err := r.launchEnvEntries(provider)
 	if err != nil {
 		return fmt.Errorf("taskrunner: %w", err)
 	}
+	// The private-home entries come first so the provider's own env wins
+	// (WithEnv appends after the inherited environment; last entry wins).
+	env := append(epEnv, launchEnv...)
 	if len(env) > 0 {
 		opts = append(opts, codex.WithEnv(env...))
 	}

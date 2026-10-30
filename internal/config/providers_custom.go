@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -40,7 +41,24 @@ type CustomProvider struct {
 	Models           []CustomModel       `yaml:"models"`
 	AdditionalModels []CustomModel       `yaml:"additionalModels"`
 	DisallowedTools  []string            `yaml:"disallowedTools"`
+	Endpoint         *CustomEndpoint     `yaml:"endpoint"`
 	Modes            []CustomMode        `yaml:"modes"`
+	ACP              *CustomACP          `yaml:"acp"`
+}
+
+// CustomACP carries an ACP-specific capability declaration for a custom
+// provider: the fields an agent's own capabilities can't express.
+type CustomACP struct {
+	// SupportsMcpServers nil = follow the agent's advertised capabilities;
+	// false = the agent cannot take mcpServers, so smind sends none.
+	SupportsMcpServers *bool `yaml:"supportsMcpServers"`
+}
+
+// CustomEndpoint is providers.custom[].endpoint: a Responses-compatible API a
+// codex-native instance talks to (ADR-0046 section 6).
+type CustomEndpoint struct {
+	Kind    string `yaml:"kind"`
+	BaseURL string `yaml:"baseUrl"`
 }
 
 // CustomModel is one entry of a custom ACP provider's model list.
@@ -119,6 +137,9 @@ func validateInstance(p *CustomProvider, bases map[string]providers.Runner, fiel
 	if len(p.Modes) > 0 {
 		return fmt.Errorf("%s: not allowed with extends", field("modes"))
 	}
+	if p.ACP != nil && runner != providers.RunnerACP {
+		return fmt.Errorf("%s: only applies to an ACP provider", field("acp"))
+	}
 	if err := validateInstanceCommand(p, runner, field); err != nil {
 		return err
 	}
@@ -139,12 +160,52 @@ func validateInstance(p *CustomProvider, bases map[string]providers.Runner, fiel
 			return fmt.Errorf("%s: %w", field(fmt.Sprintf("disallowedTools[%d]", j)), err)
 		}
 	}
+	if err := validateEndpoint(p, runner, field); err != nil {
+		return err
+	}
 	for key, value := range p.Env {
 		clean, err := ValidateInstanceEnv(runner, key, value)
 		if err != nil {
 			return fmt.Errorf("%s: %w", field("env."+key), err)
 		}
 		p.Env[key] = clean
+	}
+	return nil
+}
+
+// validateEndpoint checks providers.custom[].endpoint, an API a codex-native
+// instance talks to instead of its login's (ADR-0046 section 6). The base URL
+// is stored trimmed as given (never normalised) and never echoed in an error:
+// it may carry a token.
+func validateEndpoint(p *CustomProvider, runner providers.Runner, field func(string) string) error {
+	if p.Endpoint == nil {
+		return nil
+	}
+	if runner != providers.RunnerCodex {
+		return fmt.Errorf("%s: only applies to an instance of %s", field("endpoint"), providers.IDCodexNative)
+	}
+	switch p.Endpoint.Kind {
+	case "openai-responses":
+	case "openai-chat", "chat-completions", "openai-chat-completions":
+		return fmt.Errorf("%s: %q is unsupported by the Codex harness: Codex only speaks the OpenAI Responses API (wire_api %q). Use an Anthropic-compatible recipe with Claude Code, a Responses gateway such as LiteLLM, or OpenCode", field("endpoint.kind"), p.Endpoint.Kind, "responses")
+	case "":
+		return fmt.Errorf("%s: required", field("endpoint.kind"))
+	default:
+		return fmt.Errorf("%s: unknown kind %q (supported: openai-responses)", field("endpoint.kind"), p.Endpoint.Kind)
+	}
+	p.Endpoint.BaseURL = strings.TrimSpace(p.Endpoint.BaseURL)
+	if p.Endpoint.BaseURL == "" {
+		return fmt.Errorf("%s: required", field("endpoint.baseUrl"))
+	}
+	u, err := url.Parse(p.Endpoint.BaseURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Opaque != "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("%s: must be an http(s) URL with a host and no userinfo, query or fragment", field("endpoint.baseUrl"))
+	}
+	if len(p.AdditionalModels) > 0 {
+		return fmt.Errorf("%s: not allowed with endpoint (use models)", field("additionalModels"))
+	}
+	if len(p.Models) == 0 {
+		return fmt.Errorf("%s: required for a codex-native instance with an endpoint (models are not discovered for custom endpoints)", field("models"))
 	}
 	return nil
 }
@@ -277,6 +338,9 @@ func ProviderSpecs(list []CustomProvider) []providers.Spec {
 			}
 		}
 		sort.Strings(s.PassthroughEnv)
+		if p.ACP != nil && p.ACP.SupportsMcpServers != nil && !*p.ACP.SupportsMcpServers {
+			s.NoMCPServers = true
+		}
 		if p.Extends == "" {
 			s.Runner = providers.RunnerACP
 			s.Command = append([]string{p.Command}, p.Args...)
@@ -287,6 +351,9 @@ func ProviderSpecs(list []CustomProvider) []providers.Spec {
 		} else {
 			if p.Command != "" {
 				s.Command = append([]string{p.Command}, p.Args...)
+			}
+			if p.Endpoint != nil {
+				s.Endpoint = providers.Endpoint{Kind: providers.EndpointKind(p.Endpoint.Kind), BaseURL: p.Endpoint.BaseURL}
 			}
 			s.DisallowedTools = append([]string(nil), p.DisallowedTools...)
 			if len(p.Models) > 0 {
