@@ -4,6 +4,7 @@ import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { describe, expect, it } from "vitest";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
+import { sumColumn } from "@/components/settings/usage-section";
 import "@/components/settings/usage-section";
 import { useWorkspaceTree } from "@/hooks/use-workspace-tree";
 import { FakeWsClient } from "@/test/fake-ws-client";
@@ -139,6 +140,15 @@ describe("usage-section", () => {
 
     const reportedRow = screen.getByTestId("usage-row-runs-2");
     expect(within(reportedRow).getByTestId("usage-cell-reasoningTokens")).toHaveTextContent("0");
+  });
+
+  it("usage stat strip sums reported columns and shows a dash when any row is unreported", () => {
+    // All rows report the field: the plain sum.
+    expect(sumColumn([runRow({ inputTokens: 1 }), runRow({ inputTokens: 2 })], "inputTokens")).toBe(3);
+    expect(sumColumn([runRow({ reasoningTokens: 0 })], "reasoningTokens")).toBe(0);
+    // Any row leaving it unreported (named in `unreported`, or not a number) is null -- never 0.
+    expect(sumColumn([runRow({ inputTokens: 1 }), runRow({ inputTokens: 0, unreported: ["inputTokens"] })], "inputTokens")).toBeNull();
+    expect(sumColumn([runRow({ inputTokens: 1 }), runRow({ inputTokens: null as never })], "inputTokens")).toBeNull();
   });
 
   it("resolves task and workspace keys to titles with an id fallback", async () => {

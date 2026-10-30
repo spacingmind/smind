@@ -72,6 +72,7 @@ registerSettingsSection({
   id: "providers",
   label: "Providers",
   groupLabel: "Agents & providers",
+  description: "Connect provider accounts and add extra Claude Code or Codex logins.",
   order: 180,
   icon: <Icons.credentials aria-hidden className="size-3.5" />,
   render: (ctx) => <ProvidersSection {...ctx} />,

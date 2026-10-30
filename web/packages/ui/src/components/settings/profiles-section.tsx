@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
-import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingRows } from "@/components/ui/loading-rows";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
@@ -8,6 +7,7 @@ import { useLastDefined } from "@/hooks/use-last-defined";
 
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { SettingsEmptyCard } from "@/components/settings/settings-layout";
 import { Button } from "@/components/ui/button";
 import { FormError } from "@/components/ui/form-error";
 
@@ -222,14 +222,14 @@ function ProfilesSection(_props: SettingsSectionContext) {
         ) : (
           <>
             {profiles.length === 0 && openCard !== "new" && (
-              <EmptyState
+              <SettingsEmptyCard
                 testId="profiles-empty-state"
                 title="No agents yet"
                 description="Create one with New agent to reuse a provider/mode/thinking bundle from the composer's Agents picker"
               />
             )}
             {(profiles.length > 0 || openCard === "new") && (
-              <ul className="flex flex-col gap-1 rounded-xl border bg-card p-3">
+              <ul className="overflow-hidden rounded-xl border border-border bg-card [&>*+*]:border-t [&>*+*]:border-border">
                 {openCard === "new" && (
                   <li data-testid="profile-new-form" className="rounded-lg px-2 py-1.5">
                     <ProfileForm
@@ -546,6 +546,7 @@ registerSettingsSection({
   id: "agents",
   label: "Agents",
   groupLabel: "Agents & providers",
+  description: "Named bundles of provider, mode and thinking level for new tasks.",
   order: 175,
   icon: <Icons.agent aria-hidden className="size-3.5" />,
   render: (ctx) => <ProfilesSection {...ctx} />,
