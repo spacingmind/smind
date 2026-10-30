@@ -160,3 +160,83 @@ func TestManifest_Panels_FileInDeclaredPaths(t *testing.T) {
 		t.Fatal("an rpc panel must not add an empty path")
 	}
 }
+
+// installPanelsPlugin installs and enables a plugin whose contributes is
+// given verbatim; the two view files it may point at exist, as install
+// requires of every declared path.
+func installPanelsPlugin(t *testing.T, e *env, id, contributes string) {
+	t.Helper()
+	in := mustInstall(t, e, writePluginDir(t, manifestWith(id, "1.0.0", `"contributes":`+contributes), map[string]string{
+		"views/main.json":   "{}",
+		"views/second.json": "{}",
+	}))
+	if _, err := e.m.Enable(id, in.Consent.Fingerprint); err != nil {
+		t.Fatalf("enable %s: %v", id, err)
+	}
+}
+
+func TestPanels_OnlyActive_OrderedByPluginID_GatedByLevel(t *testing.T) {
+	e := newEnv(t)
+	// Installed out of id order on purpose: the listing is by plugin id.
+	installPanelsPlugin(t, e, "zeta", `{"panels":[{"id":"one","title":"One","where":"task","view":{"file":"views/main.json"}}],`+
+		`"sidebar":[{"id":"one-item","title":"One","opens":"one"}]}`)
+	installPanelsPlugin(t, e, "acme", `{"panels":[{"id":"alpha","title":"Alpha","icon":"ListChecks","where":"task","view":{"file":"views/main.json"}},`+
+		`{"id":"beta","title":"Beta","where":"sidebar","ui":1,"view":{"file":"views/second.json"}}],`+
+		`"sidebar":[{"id":"beta-item","title":"Beta","opens":"beta"}]}`)
+
+	for _, level := range []int{0, -1} {
+		if panels, sidebar := e.m.Panels(level); len(panels) != 0 || len(sidebar) != 0 {
+			t.Fatalf("level %d must list nothing: %+v %+v", level, panels, sidebar)
+		}
+	}
+	panels, sidebar := e.m.Panels(1)
+	wantP := []Panel{
+		{Plugin: "acme", ID: "alpha", Title: "Alpha", Icon: "ListChecks", Where: "task", UI: 1},
+		{Plugin: "acme", ID: "beta", Title: "Beta", Where: "sidebar", UI: 1},
+		{Plugin: "zeta", ID: "one", Title: "One", Where: "task", UI: 1},
+	}
+	if len(panels) != len(wantP) {
+		t.Fatalf("panels = %+v", panels)
+	}
+	for i, p := range panels {
+		if p != wantP[i] {
+			t.Fatalf("panels[%d] = %+v, want %+v", i, p, wantP[i])
+		}
+	}
+	wantS := []SidebarItem{
+		{Plugin: "acme", ID: "beta-item", Title: "Beta", Opens: "beta"},
+		{Plugin: "zeta", ID: "one-item", Title: "One", Opens: "one"},
+	}
+	if len(sidebar) != len(wantS) {
+		t.Fatalf("sidebar = %+v", sidebar)
+	}
+	for i, s := range sidebar {
+		if s != wantS[i] {
+			t.Fatalf("sidebar[%d] = %+v, want %+v", i, s, wantS[i])
+		}
+	}
+}
+
+func TestPanels_DisabledPluginVanishes(t *testing.T) {
+	e := newEnv(t)
+	installPanelsPlugin(t, e, "acme", `{"panels":[{"id":"alpha","title":"Alpha","where":"task","view":{"file":"views/main.json"}}],`+
+		`"sidebar":[{"id":"alpha-item","title":"Alpha","opens":"alpha"}]}`)
+	if panels, sidebar := e.m.Panels(1); len(panels) != 1 || len(sidebar) != 1 {
+		t.Fatalf("precondition: %+v %+v", panels, sidebar)
+	}
+	if _, err := e.m.Disable("acme"); err != nil {
+		t.Fatal(err)
+	}
+	if panels, sidebar := e.m.Panels(1); len(panels) != 0 || len(sidebar) != 0 {
+		t.Fatalf("a disabled plugin's panels must vanish: %+v %+v", panels, sidebar)
+	}
+}
+
+func TestPanels_SwitchOff_Empty(t *testing.T) {
+	e := newEnv(t)
+	installPanelsPlugin(t, e, "acme", `{"panels":[{"id":"alpha","title":"Alpha","where":"task","view":{"file":"views/main.json"}}]}`)
+	*e.on = false
+	if panels, sidebar := e.m.Panels(1); len(panels) != 0 || len(sidebar) != 0 {
+		t.Fatalf("the global switch off must empty the panel list: %+v %+v", panels, sidebar)
+	}
+}
