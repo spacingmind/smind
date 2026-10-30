@@ -139,13 +139,13 @@ function LearnedSkillsSection({ closeSettings }: SettingsSectionContext) {
       </div>
     );
   }
-    if (!workspace) {
-      return (
-        <div data-testid="settings-section-learned-skills">
-          <SettingsEmptyCard testId="learning-no-workspaces" title="No workspaces yet" description="Add a workspace to start learning from its runs." />
-        </div>
-      );
-    }
+  if (!workspace) {
+    return (
+      <div data-testid="settings-section-learned-skills">
+        <SettingsEmptyCard testId="learning-no-workspaces" title="No workspaces yet" description="Add a workspace to start learning from its runs." />
+      </div>
+    );
+  }
 
   if (openSkill !== null || openProposal !== null) {
     return (

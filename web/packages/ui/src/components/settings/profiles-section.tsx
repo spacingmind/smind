@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
-import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingRows } from "@/components/ui/loading-rows";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
@@ -8,6 +7,7 @@ import { useLastDefined } from "@/hooks/use-last-defined";
 
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { SettingsEmptyCard } from "@/components/settings/settings-layout";
 import { Button } from "@/components/ui/button";
 import { FormError } from "@/components/ui/form-error";
 
@@ -222,7 +222,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
         ) : (
           <>
             {profiles.length === 0 && openCard !== "new" && (
-              <EmptyState
+              <SettingsEmptyCard
                 testId="profiles-empty-state"
                 title="No agents yet"
                 description="Create one with New agent to reuse a provider/mode/thinking bundle from the composer's Agents picker"
