@@ -412,57 +412,6 @@
     --terminal-bright-cyan: #0aa7a7;
     --terminal-bright-white: #0d0d0d;
 
-    /*
-     * ZCode tokens added in the zcode-parity second pass (Stage 1) -- Zai Light
-     * values per refs/zcode/DESIGN.md / styles.css; the names<->ZCode map
-     * lives in lib/zcode-tokens.ts (drift-tested).
-     */
-    --elevation-shadow-composer: 0 1px 3px rgb(0 0 0 / 4%), 0 6px 18px rgb(0 0 0 / 4%);
-    --background-win-alt: #ececee;
-    --background-alt: color-mix(in oklab, var(--background) 70%, transparent);
-    --brand: #000000;
-    --trajectory-user: #2563eb;
-    --trajectory-assistant: #0f766e;
-    --trajectory-reasoning: #7c3aed;
-    --trajectory-tool-call: #d97706;
-    --trajectory-tool-result: #0284c7;
-    --user-message-bubble: rgba(13, 13, 13, 0.05);
-    --usage-chart-1: #0b7fff;
-    --usage-chart-2: #1e8a3e;
-    --usage-chart-3: #9e77ed;
-    --usage-chart-4: #e03131;
-    --usage-chart-5: #e07b00;
-    --usage-chart-6: #0aa7a7;
-    --context-breakdown-1: #0b7fff;
-    --context-breakdown-2: #338fff;
-    --context-breakdown-3: #5ca7ff;
-    --context-breakdown-4: #85bbff;
-    --context-breakdown-5: #acd0ff;
-    --context-breakdown-6: #c8ddff;
-    --context-breakdown-7: #e0ecff;
-    --usage-heatmap-0: color-mix(in oklab, #0b7fff 0%, var(--surface));
-    --usage-heatmap-1: color-mix(in oklab, #0b7fff 18%, var(--surface));
-    --usage-heatmap-2: color-mix(in oklab, #0b7fff 36%, var(--surface));
-    --usage-heatmap-3: color-mix(in oklab, #0b7fff 58%, var(--surface));
-    --usage-heatmap-4: color-mix(in oklab, #0066dd 82%, var(--surface));
-    --tab: #f0f0f0;
-    --tab-active: #ffffff;
-    --tab-border: var(--border);
-    --interaction-ask-surface: #ebf4ff;
-    --interaction-ask-foreground: #0066dd;
-    --interaction-ask-fill: rgba(70, 191, 114, 0.2);
-    --success-surface: #eaf7ee;
-    --success-surface-foreground: #166b32;
-    --progress-surface: var(--color-blue-50);
-    --progress-surface-foreground: var(--color-blue-700);
-    --lucide-subtlest-opacity: 0.4;
-    --idle-task: #9e77ed;
-    --idle-task-surface: #f5f3ff;
-    --warning-surface: color-mix(in srgb, var(--warning) 12%, transparent);
-    --warning-surface-foreground: #914e00;
-    --destructive-surface: color-mix(in srgb, var(--destructive) 10%, transparent);
-    --destructive-surface-foreground: #b42020;
-
     --foreground-muted: var(--muted-foreground);
 
     /*
@@ -643,11 +592,102 @@
     --terminal-bright-cyan: #8ee5e5;
     --terminal-bright-white: #f8f8f8;
 
-    /*
-     * ZCode tokens added in the zcode-parity second pass (Stage 1) -- Zai Dark
-     * values per refs/zcode/DESIGN.md / styles.css; the names<->ZCode map
-     * lives in lib/zcode-tokens.ts (drift-tested).
-     */
+    --foreground-muted: var(--muted-foreground);
+
+    /* Diff family (retired -- see :root's comment above). */
+    --diff-addition: var(--diff-added);
+    --diff-deletion: var(--diff-removed);
+
+    /* Diff syntax tokens: see :root's comment above (same AA rule, against the dark rows). */
+    --syntax-keyword: #eab1ff;
+    --syntax-string: #8fdc9a;
+    --syntax-comment: #c3c6cc;
+    --syntax-number: #ffb86b;
+    --syntax-function: #a3c8ff;
+    --syntax-type: #65d5e9;
+    --syntax-attr: #f0c674;
+    --syntax-meta: #d1baff;
+    --syntax-regexp: #ffb1b1;
+    --syntax-symbol: #ffb491;
+    --syntax-builtin: #6ee0c8;
+
+    /* `--content-size`/`--content-line-height`: see :root's comment above. */
+    --content-size: calc(15px * var(--font-scale-content, 1));
+    --content-line-height: 1.6;
+
+    /* Dark-band shadows: harder than light (alpha 0.20-0.40) -- paseo's asymmetry, round values in its bands. */
+    --elevation-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 24%);
+    --elevation-shadow-md: 0 4px 8px 0 rgb(0 0 0 / 32%);
+    --elevation-shadow-lg: 0 12px 24px 0 rgb(0 0 0 / 40%);
+
+    --duration-hover: 150ms;
+    --duration-menu: 200ms;
+    --duration-panel: 300ms;
+}
+
+/*
+ * ZCode Stage-1 tokens (zcode-parity plan), Zai Light. A second block on purpose:
+ * the plugin theme contract (internal/plugins/themetokens.json,
+ * PLUGIN_THEME_TOKENS) is read from the FIRST :root/.dark blocks, and these
+ * app-internal tokens are not plugin-themeable. Map + drift test:
+ * lib/zcode-tokens.ts, lib/zcode-tokens.test.ts.
+ */
+:root {
+    --elevation-shadow-composer: 0 1px 3px rgb(0 0 0 / 4%), 0 6px 18px rgb(0 0 0 / 4%);
+    --background-win-alt: #ececee;
+    --background-alt: color-mix(in oklab, var(--background) 70%, transparent);
+    --brand: #000000;
+    --trajectory-user: #2563eb;
+    --trajectory-assistant: #0f766e;
+    --trajectory-reasoning: #7c3aed;
+    --trajectory-tool-call: #d97706;
+    --trajectory-tool-result: #0284c7;
+    --user-message-bubble: rgba(13, 13, 13, 0.05);
+    --usage-chart-1: #0b7fff;
+    --usage-chart-2: #1e8a3e;
+    --usage-chart-3: #9e77ed;
+    --usage-chart-4: #e03131;
+    --usage-chart-5: #e07b00;
+    --usage-chart-6: #0aa7a7;
+    --context-breakdown-1: #0b7fff;
+    --context-breakdown-2: #338fff;
+    --context-breakdown-3: #5ca7ff;
+    --context-breakdown-4: #85bbff;
+    --context-breakdown-5: #acd0ff;
+    --context-breakdown-6: #c8ddff;
+    --context-breakdown-7: #e0ecff;
+    --usage-heatmap-0: color-mix(in oklab, #0b7fff 0%, var(--surface));
+    --usage-heatmap-1: color-mix(in oklab, #0b7fff 18%, var(--surface));
+    --usage-heatmap-2: color-mix(in oklab, #0b7fff 36%, var(--surface));
+    --usage-heatmap-3: color-mix(in oklab, #0b7fff 58%, var(--surface));
+    --usage-heatmap-4: color-mix(in oklab, #0066dd 82%, var(--surface));
+    --tab: #f0f0f0;
+    --tab-active: #ffffff;
+    --tab-border: var(--border);
+    --interaction-ask-surface: #ebf4ff;
+    --interaction-ask-foreground: #0066dd;
+    --interaction-ask-fill: rgba(70, 191, 114, 0.2);
+    --success-surface: #eaf7ee;
+    --success-surface-foreground: #166b32;
+    --progress-surface: var(--color-blue-50);
+    --progress-surface-foreground: var(--color-blue-700);
+    --lucide-subtlest-opacity: 0.4;
+    --idle-task: #9e77ed;
+    --idle-task-surface: #f5f3ff;
+    --warning-surface: color-mix(in srgb, var(--warning) 12%, transparent);
+    --warning-surface-foreground: #914e00;
+    --destructive-surface: color-mix(in srgb, var(--destructive) 10%, transparent);
+    --destructive-surface-foreground: #b42020;
+}
+
+/*
+ * ZCode Stage-1 tokens (zcode-parity plan), Zai Dark. A second block on purpose:
+ * the plugin theme contract (internal/plugins/themetokens.json,
+ * PLUGIN_THEME_TOKENS) is read from the FIRST :root/.dark blocks, and these
+ * app-internal tokens are not plugin-themeable. Map + drift test:
+ * lib/zcode-tokens.ts, lib/zcode-tokens.test.ts.
+ */
+.dark {
     --elevation-shadow-composer: 0 0 #0000;
     --background-win-alt: #2b2b2b;
     --background-alt: color-mix(in oklab, var(--background-win-alt) 60%, transparent);
@@ -693,38 +733,6 @@
     --warning-surface-foreground: #ffa159;
     --destructive-surface: color-mix(in srgb, var(--destructive) 16%, transparent);
     --destructive-surface-foreground: #ff8585;
-
-    --foreground-muted: var(--muted-foreground);
-
-    /* Diff family (retired -- see :root's comment above). */
-    --diff-addition: var(--diff-added);
-    --diff-deletion: var(--diff-removed);
-
-    /* Diff syntax tokens: see :root's comment above (same AA rule, against the dark rows). */
-    --syntax-keyword: #eab1ff;
-    --syntax-string: #8fdc9a;
-    --syntax-comment: #c3c6cc;
-    --syntax-number: #ffb86b;
-    --syntax-function: #a3c8ff;
-    --syntax-type: #65d5e9;
-    --syntax-attr: #f0c674;
-    --syntax-meta: #d1baff;
-    --syntax-regexp: #ffb1b1;
-    --syntax-symbol: #ffb491;
-    --syntax-builtin: #6ee0c8;
-
-    /* `--content-size`/`--content-line-height`: see :root's comment above. */
-    --content-size: calc(15px * var(--font-scale-content, 1));
-    --content-line-height: 1.6;
-
-    /* Dark-band shadows: harder than light (alpha 0.20-0.40) -- paseo's asymmetry, round values in its bands. */
-    --elevation-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 24%);
-    --elevation-shadow-md: 0 4px 8px 0 rgb(0 0 0 / 32%);
-    --elevation-shadow-lg: 0 12px 24px 0 rgb(0 0 0 / 40%);
-
-    --duration-hover: 150ms;
-    --duration-menu: 200ms;
-    --duration-panel: 300ms;
 }
 
 @layer base {
