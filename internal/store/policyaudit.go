@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // PolicyAuditRetention is how long permission decisions stay readable
@@ -61,10 +62,10 @@ func (s *Store) AppendPolicyAudit(r PolicyAuditRow) (int64, error) {
 		return 0, fmt.Errorf("append policy audit: unknown decision %q", r.Decision)
 	}
 	if len(r.Target) > policyAuditMaxTarget {
-		r.Target = r.Target[:policyAuditMaxTarget-len(policyAuditTrunc)] + policyAuditTrunc
+		r.Target = capUTF8(r.Target, policyAuditMaxTarget)
 	}
 	if len(r.Reasons) > policyAuditMaxReasons {
-		r.Reasons = r.Reasons[:policyAuditMaxReasons-len(policyAuditTrunc)] + policyAuditTrunc
+		r.Reasons = capUTF8(r.Reasons, policyAuditMaxReasons)
 	}
 	if len(r.Paths) > policyAuditMaxPaths {
 		r.Paths = r.Paths[:policyAuditMaxPaths]
@@ -93,6 +94,22 @@ func (s *Store) AppendPolicyAudit(r PolicyAuditRow) (int64, error) {
 		return 0, fmt.Errorf("append policy audit: %w", err)
 	}
 	return id, nil
+}
+
+// capUTF8 caps s at max bytes without cutting a rune in half: a byte-slice
+// cut can land mid-character in redacted audit text, leaving an invalid
+// UTF-8 string in the column. Over the cap it keeps the longest prefix that
+// is at most max-len("…") bytes and ends on a rune boundary, plus the
+// ellipsis marker.
+func capUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	s = s[:max-len(policyAuditTrunc)]
+	for !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s + policyAuditTrunc
 }
 
 // PolicyAuditFilter narrows a policy-audit listing; zero fields list every

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func openPolicyAuditStore(t *testing.T) *Store {
@@ -184,5 +185,29 @@ func TestAudit_RetentionSweep90Days(t *testing.T) {
 		if r.CreatedAt.Before(now.Add(-PolicyAuditRetention)) {
 			t.Fatalf("row %d created %v survived the sweep", r.ID, r.CreatedAt)
 		}
+	}
+}
+
+func TestAudit_CapKeepsValidUTF8(t *testing.T) {
+	s := openPolicyAuditStore(t)
+	if _, err := s.AppendPolicyAudit(PolicyAuditRow{
+		Decision: "ask",
+		Target:   strings.Repeat("京", 600),
+		Reasons:  strings.Repeat("説", 600),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.ListPolicyAudit(PolicyAuditFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if got := rows[0].Target; !utf8.ValidString(got) || len(got) > policyAuditMaxTarget {
+		t.Fatalf("Target capped to %d bytes of %t valid UTF-8", len(got), utf8.ValidString(got))
+	}
+	if got := rows[0].Reasons; !utf8.ValidString(got) || len(got) > policyAuditMaxReasons {
+		t.Fatalf("Reasons capped to %d bytes of %t valid UTF-8", len(got), utf8.ValidString(got))
 	}
 }
