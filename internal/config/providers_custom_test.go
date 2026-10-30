@@ -210,6 +210,50 @@ func TestCustomProvider_ACPInstanceCommandOverride(t *testing.T) {
 	}
 }
 
+// acp.supportsMcpServers: false marks an agent that cannot take mcpServers;
+// true (or leaving it out) keeps the agent's own capabilities in charge.
+// The flag reaches the registry spec, and an instance inherits it.
+func TestCustomProvider_ACPSupportsMcpServersFalse(t *testing.T) {
+	useHome(t, `providers:
+  custom:
+    - id: my-agent
+      command: my-agent
+      acp: {supportsMcpServers: false}
+    - id: my-agent-fast
+      extends: my-agent
+    - id: supports-them
+      command: other
+      acp: {supportsMcpServers: true}
+`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := providers.New()
+	if err := reg.SetCustom(ProviderSpecs(cfg.Providers.Custom)); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := reg.Get("my-agent"); !s.NoMCPServers {
+		t.Fatalf("my-agent spec = %+v, want NoMCPServers", s)
+	}
+	if s, _ := reg.Get("my-agent-fast"); !s.NoMCPServers {
+		t.Fatalf("my-agent-fast spec = %+v, want NoMCPServers inherited from the base", s)
+	}
+	if s, _ := reg.Get("supports-them"); s.NoMCPServers {
+		t.Fatalf("supports-them spec = %+v, want NoMCPServers false", s)
+	}
+}
+
+// The acp block applies only to an ACP provider, not to a claude-native
+// or codex-native instance.
+func TestCustomProvider_ACPFieldOnClaudeInstanceRejected(t *testing.T) {
+	useHome(t, "providers:\n  custom:\n    - {id: i, extends: claude-native, acp: {supportsMcpServers: false}}\n")
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "providers.custom[0].acp: only applies to an ACP provider") {
+		t.Fatalf("Load() error = %v, want providers.custom[0].acp: only applies to an ACP provider", err)
+	}
+}
+
 func TestAddProviderInstance_WritesPreservingCommentsAndValidates(t *testing.T) {
 	useHome(t, "# my settings\nserver:\n  port: 4650 # keep\n")
 	home := t.TempDir()

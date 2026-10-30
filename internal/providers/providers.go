@@ -386,6 +386,7 @@ func resolve(s Spec, table []Spec) (Spec, error) {
 			inst.Models = s.Models
 		}
 		inst.ModelAliases = s.ModelAliases
+		inst.NoMCPServers = base.NoMCPServers || s.NoMCPServers
 		inst.DisallowedTools = append(append([]string(nil), base.DisallowedTools...), s.DisallowedTools...)
 		inst.Reflect = false
 		inst.AccountProvider = ""

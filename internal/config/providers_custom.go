@@ -40,6 +40,15 @@ type CustomProvider struct {
 	AdditionalModels []CustomModel     `yaml:"additionalModels"`
 	DisallowedTools  []string          `yaml:"disallowedTools"`
 	Modes            []CustomMode      `yaml:"modes"`
+	ACP              *CustomACP        `yaml:"acp"`
+}
+
+// CustomACP carries an ACP-specific capability declaration for a custom
+// provider: the fields an agent's own capabilities can't express.
+type CustomACP struct {
+	// SupportsMcpServers nil = follow the agent's advertised capabilities;
+	// false = the agent cannot take mcpServers, so smind sends none.
+	SupportsMcpServers *bool `yaml:"supportsMcpServers"`
 }
 
 // CustomModel is one entry of a custom ACP provider's model list.
@@ -117,6 +126,9 @@ func validateInstance(p *CustomProvider, bases map[string]providers.Runner, fiel
 	}
 	if len(p.Modes) > 0 {
 		return fmt.Errorf("%s: not allowed with extends", field("modes"))
+	}
+	if p.ACP != nil && runner != providers.RunnerACP {
+		return fmt.Errorf("%s: only applies to an ACP provider", field("acp"))
 	}
 	if err := validateInstanceCommand(p, runner, field); err != nil {
 		return err
@@ -272,6 +284,9 @@ func ProviderSpecs(list []CustomProvider) []providers.Spec {
 	out := make([]providers.Spec, 0, len(list))
 	for _, p := range list {
 		s := providers.Spec{ID: p.ID, Label: strings.TrimSpace(p.Label), Extends: p.Extends, Env: copyEnv(p.Env)}
+		if p.ACP != nil && p.ACP.SupportsMcpServers != nil && !*p.ACP.SupportsMcpServers {
+			s.NoMCPServers = true
+		}
 		if p.Extends == "" {
 			s.Runner = providers.RunnerACP
 			s.Command = append([]string{p.Command}, p.Args...)

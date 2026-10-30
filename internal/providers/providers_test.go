@@ -159,6 +159,31 @@ func TestSetCustom_InstanceOverlays(t *testing.T) {
 	}
 }
 
+// TestSetCustom_InstanceInheritsNoMCPServers: NoMCPServers is sticky -- an
+// instance of a base that declares it cannot take mcpServers inherits the
+// flag (and cannot re-enable them), and an instance may declare it itself.
+func TestSetCustom_InstanceInheritsNoMCPServers(t *testing.T) {
+	t.Parallel()
+	r := New()
+	err := r.SetCustom([]Spec{
+		{ID: "base-acp", Command: []string{"base-acp"}, NoMCPServers: true},
+		{ID: "inst", Extends: "base-acp"},
+		{ID: "inst-no-mcp", Extends: IDKimi, NoMCPServers: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := r.Get("inst"); !s.NoMCPServers {
+		t.Fatalf("inst = %+v, want NoMCPServers inherited from the base", s)
+	}
+	if s, _ := r.Get("inst-no-mcp"); !s.NoMCPServers {
+		t.Fatalf("inst-no-mcp = %+v, want its own NoMCPServers", s)
+	}
+	if s, _ := r.Get(IDKimi); s.NoMCPServers {
+		t.Fatalf("kimi = %+v, want NoMCPServers false", s)
+	}
+}
+
 func TestACPProvider_AllFive_RowsRegister(t *testing.T) {
 	t.Parallel()
 	r := New()
