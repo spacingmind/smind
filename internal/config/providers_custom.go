@@ -22,19 +22,24 @@ type ProvidersConfig struct {
 // CustomProvider is one providers.custom entry.
 //
 // An ACP provider sets Command (+ Args, Env, Models, Modes). An instance sets
-// Extends (claude-native or codex-native) and, in Env, only that provider's
-// config-directory variable (CLAUDE_CONFIG_DIR / CODEX_HOME, the same
-// allowlist as providers.<id>.env); it runs the extended provider's code, side
-// by side with it.
+// Extends (any built-in provider, or an earlier ACP entry) and overlays it
+// (ADR-0046): Command (a different executable; Args only for an ACP base),
+// Models (replace the base's list) or AdditionalModels (merged into it),
+// DisallowedTools (Claude Code), and Env (for claude-native / codex-native
+// only that provider's config-directory variable, the same allowlist as
+// providers.<id>.env; free-form for an ACP base). It runs the extended
+// provider's code, side by side with it.
 type CustomProvider struct {
-	ID      string            `yaml:"id"`
-	Label   string            `yaml:"label"`
-	Extends string            `yaml:"extends"`
-	Command string            `yaml:"command"`
-	Args    []string          `yaml:"args"`
-	Env     map[string]string `yaml:"env"`
-	Models  []CustomModel     `yaml:"models"`
-	Modes   []CustomMode      `yaml:"modes"`
+	ID               string            `yaml:"id"`
+	Label            string            `yaml:"label"`
+	Extends          string            `yaml:"extends"`
+	Command          string            `yaml:"command"`
+	Args             []string          `yaml:"args"`
+	Env              map[string]string `yaml:"env"`
+	Models           []CustomModel     `yaml:"models"`
+	AdditionalModels []CustomModel     `yaml:"additionalModels"`
+	DisallowedTools  []string          `yaml:"disallowedTools"`
+	Modes            []CustomMode      `yaml:"modes"`
 }
 
 // CustomModel is one entry of a custom ACP provider's model list.
@@ -57,6 +62,8 @@ var (
 	customIDRe  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 	envNameRe   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	maxLabelLen = 80
+	// maxToolNameLen bounds one disallowedTools entry.
+	maxToolNameLen = 200
 )
 
 // ValidateCustomProviders checks every providers.custom entry and returns the
@@ -65,6 +72,12 @@ var (
 // like providers.<id>.env. Env values are never echoed in an error.
 func ValidateCustomProviders(list []CustomProvider) error {
 	seen := map[string]bool{}
+	// bases are the ids an instance may extend: every built-in, then each
+	// earlier non-instance entry (an ACP provider), mapped to its runner.
+	bases := map[string]providers.Runner{}
+	for _, id := range providers.BuiltinIDs() {
+		bases[id] = providers.BuiltinRunner(id)
+	}
 	for i := range list {
 		p := &list[i]
 		field := func(f string) string { return fmt.Sprintf("providers.custom[%d].%s", i, f) }
@@ -84,7 +97,7 @@ func ValidateCustomProviders(list []CustomProvider) error {
 			return fmt.Errorf("%s: longer than %d characters", field("label"), maxLabelLen)
 		}
 		if p.Extends != "" {
-			if err := validateInstance(p, field); err != nil {
+			if err := validateInstance(p, bases, field); err != nil {
 				return err
 			}
 			continue
@@ -92,30 +105,124 @@ func ValidateCustomProviders(list []CustomProvider) error {
 		if err := validateACPEntry(p, field); err != nil {
 			return err
 		}
+		bases[p.ID] = providers.RunnerACP
 	}
 	return nil
 }
 
-func validateInstance(p *CustomProvider, field func(string) string) error {
-	if p.Extends != providers.IDClaudeNative && p.Extends != providers.IDCodexNative {
-		return fmt.Errorf("%s: %q must be %s or %s", field("extends"), p.Extends, providers.IDClaudeNative, providers.IDCodexNative)
+func validateInstance(p *CustomProvider, bases map[string]providers.Runner, field func(string) string) error {
+	runner, ok := bases[p.Extends]
+	if !ok {
+		return fmt.Errorf("%s: %q must be a built-in provider or an earlier providers.custom ACP entry", field("extends"), p.Extends)
 	}
-	switch {
-	case p.Command != "":
-		return fmt.Errorf("%s: not allowed with extends (an instance runs %s's own command)", field("command"), p.Extends)
-	case len(p.Args) > 0:
-		return fmt.Errorf("%s: not allowed with extends", field("args"))
-	case len(p.Models) > 0:
-		return fmt.Errorf("%s: not allowed with extends", field("models"))
-	case len(p.Modes) > 0:
+	if len(p.Modes) > 0 {
 		return fmt.Errorf("%s: not allowed with extends", field("modes"))
 	}
+	if err := validateInstanceCommand(p, runner, field); err != nil {
+		return err
+	}
+	if len(p.Models) > 0 && len(p.AdditionalModels) > 0 {
+		return fmt.Errorf("%s: not allowed together with models (models replaces the list, additionalModels extends it)", field("additionalModels"))
+	}
+	if err := validateModelList(p.Models, field, "models"); err != nil {
+		return err
+	}
+	if err := validateModelList(p.AdditionalModels, field, "additionalModels"); err != nil {
+		return err
+	}
+	if len(p.DisallowedTools) > 0 && runner != providers.RunnerClaude {
+		return fmt.Errorf("%s: only applies to an instance of %s", field("disallowedTools"), providers.IDClaudeNative)
+	}
+	for j, tool := range p.DisallowedTools {
+		if err := validateToolName(tool); err != nil {
+			return fmt.Errorf("%s: %w", field(fmt.Sprintf("disallowedTools[%d]", j)), err)
+		}
+	}
 	for key, value := range p.Env {
+		if runner == providers.RunnerACP {
+			if err := validateFreeFormEnv(key, value); err != nil {
+				return fmt.Errorf("%s: %w", field("env."+key), err)
+			}
+			continue
+		}
 		clean, err := ValidateProviderEnv(p.Extends, key, value)
 		if err != nil {
 			return fmt.Errorf("%s: %w", field("env."+key), err)
 		}
 		p.Env[key] = clean
+	}
+	return nil
+}
+
+// validateInstanceCommand checks an instance's command override: an ACP base
+// takes a command plus args, claude-native and codex-native only the
+// executable (no args: their launch is not a free-form argv).
+func validateInstanceCommand(p *CustomProvider, runner providers.Runner, field func(string) string) error {
+	if p.Command == "" {
+		if len(p.Args) > 0 {
+			return fmt.Errorf("%s: needs command", field("args"))
+		}
+		return nil
+	}
+	if strings.ContainsAny(p.Command, "\x00\n\r") {
+		return fmt.Errorf("%s: must not contain NUL or newline characters", field("command"))
+	}
+	if runner != providers.RunnerACP && len(p.Args) > 0 {
+		return fmt.Errorf("%s: not allowed for an instance of %s (only command, the executable)", field("args"), p.Extends)
+	}
+	for j, a := range p.Args {
+		if strings.ContainsRune(a, 0) {
+			return fmt.Errorf("%s: must not contain NUL characters", field(fmt.Sprintf("args[%d]", j)))
+		}
+	}
+	return nil
+}
+
+// validateToolName checks one disallowedTools entry (a Claude Code tool name
+// or rule such as "WebSearch" or "Bash(rm:*)"): non-empty, bounded, printable.
+func validateToolName(tool string) error {
+	switch {
+	case strings.TrimSpace(tool) == "":
+		return fmt.Errorf("required")
+	case len(tool) > maxToolNameLen:
+		return fmt.Errorf("longer than %d characters", maxToolNameLen)
+	}
+	for _, c := range tool {
+		if c < 0x20 || c == 0x7f {
+			return fmt.Errorf("must not contain control characters")
+		}
+	}
+	return nil
+}
+
+// validateFreeFormEnv checks one ACP command env entry: no allowlist, but the
+// value is never put in an error (it may be a token).
+func validateFreeFormEnv(key, value string) error {
+	if !envNameRe.MatchString(key) {
+		return fmt.Errorf("the name is not a valid environment variable name")
+	}
+	if strings.ContainsRune(value, 0) {
+		return fmt.Errorf("the value must not contain NUL characters")
+	}
+	return nil
+}
+
+// validateModelList checks a models / additionalModels list: ids required,
+// syntax-valid and unique.
+func validateModelList(models []CustomModel, field func(string) string, name string) error {
+	ids := map[string]bool{}
+	for j, m := range models {
+		f := func(s string) string { return field(fmt.Sprintf("%s[%d].%s", name, j, s)) }
+		if m.ID == "" {
+			return fmt.Errorf("%s: required", f("id"))
+		}
+		if err := ValidateModelName(m.ID); err != nil {
+			return fmt.Errorf("%s: %w", f("id"), err)
+		}
+		if ids[m.ID] {
+			return fmt.Errorf("%s: duplicate model id %q", f("id"), m.ID)
+		}
+		ids[m.ID] = true
 	}
 	return nil
 }
@@ -133,30 +240,20 @@ func validateACPEntry(p *CustomProvider, field func(string) string) error {
 		}
 	}
 	for key, value := range p.Env {
-		// Free-form env of the agent command: no allowlist, but the value is
-		// never put in an error (it may be a token).
-		if !envNameRe.MatchString(key) {
-			return fmt.Errorf("%s: the name is not a valid environment variable name", field("env."+key))
+		if err := validateFreeFormEnv(key, value); err != nil {
+			return fmt.Errorf("%s: %w", field("env."+key), err)
 		}
-		if strings.ContainsRune(value, 0) {
-			return fmt.Errorf("%s: the value must not contain NUL characters", field("env."+key))
-		}
+	}
+	if len(p.AdditionalModels) > 0 {
+		return fmt.Errorf("%s: only applies to an instance (use models)", field("additionalModels"))
+	}
+	if len(p.DisallowedTools) > 0 {
+		return fmt.Errorf("%s: only applies to an instance of %s", field("disallowedTools"), providers.IDClaudeNative)
+	}
+	if err := validateModelList(p.Models, field, "models"); err != nil {
+		return err
 	}
 	ids := map[string]bool{}
-	for j, m := range p.Models {
-		f := func(s string) string { return field(fmt.Sprintf("models[%d].%s", j, s)) }
-		if m.ID == "" {
-			return fmt.Errorf("%s: required", f("id"))
-		}
-		if err := ValidateModelName(m.ID); err != nil {
-			return fmt.Errorf("%s: %w", f("id"), err)
-		}
-		if ids[m.ID] {
-			return fmt.Errorf("%s: duplicate model id %q", f("id"), m.ID)
-		}
-		ids[m.ID] = true
-	}
-	ids = map[string]bool{}
 	for j, m := range p.Modes {
 		f := func(s string) string { return field(fmt.Sprintf("modes[%d].%s", j, s)) }
 		if strings.TrimSpace(m.ID) == "" {
@@ -178,14 +275,30 @@ func ProviderSpecs(list []CustomProvider) []providers.Spec {
 		if p.Extends == "" {
 			s.Runner = providers.RunnerACP
 			s.Command = append([]string{p.Command}, p.Args...)
-			for _, m := range p.Models {
-				s.Models = append(s.Models, providers.Model{ID: m.ID, Label: orID(m.Label, m.ID), Description: m.Description, Default: m.Default})
-			}
+			s.Models = specModels(p.Models)
 			for _, m := range p.Modes {
 				s.Modes = append(s.Modes, providers.Mode{ID: m.ID, Label: orID(m.Label, m.ID), Description: m.Description, AutoApproves: m.AutoApproves})
 			}
+		} else {
+			if p.Command != "" {
+				s.Command = append([]string{p.Command}, p.Args...)
+			}
+			s.DisallowedTools = append([]string(nil), p.DisallowedTools...)
+			if len(p.Models) > 0 {
+				s.Models, s.ModelsMode = specModels(p.Models), providers.ModelsReplace
+			} else if len(p.AdditionalModels) > 0 {
+				s.Models, s.ModelsMode = specModels(p.AdditionalModels), providers.ModelsAdd
+			}
 		}
 		out = append(out, s)
+	}
+	return out
+}
+
+func specModels(list []CustomModel) []providers.Model {
+	var out []providers.Model
+	for _, m := range list {
+		out = append(out, providers.Model{ID: m.ID, Label: orID(m.Label, m.ID), Description: m.Description, Default: m.Default})
 	}
 	return out
 }

@@ -83,6 +83,16 @@ describe("resolveRunModelLabel humanises an uncatalogued claude id and leaves un
   });
 });
 
+describe("TestModelDisplay_UnknownIDShownRaw", () => {
+  it("shows an uncatalogued instance model id raw, suffix and all", () => {
+    expect(resolveRunModelLabel(run({ provider: "zai-glm", model: "glm-5.3[1m]" }), {})).toBe("glm-5.3[1m]");
+    expect(resolveRunModelLabel(run({ provider: "zai-glm", model: "glm-5.3[1m]" }), undefined)).toBe("glm-5.3[1m]");
+  });
+  it("does not pick up a sibling model's label for the same instance", () => {
+    expect(resolveRunModelLabel(run({ provider: "zai-glm", model: "deepseek-flash" }), { "zai-glm/other": "Other" })).toBe("deepseek-flash");
+  });
+});
+
 describe("describeRunFooter: a normal finish has no status word and no provider id", () => {
   it("words a done run as a plain finish", () => {
     const view = describeRunFooter(freshRun({ stopReason: "end_turn" }), { now: NOW, modelLabel: "Sonnet 5.5" });

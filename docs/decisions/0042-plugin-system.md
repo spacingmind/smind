@@ -338,6 +338,8 @@ ADR-0013 amendment / #603). Two instances of the same CLI then run side by side 
 which is how Paseo's `extends` + `env` providers work. Settings → Providers lists `~/.claude*` and `~/.codex*` directories found in the daemon user's home as
 one-click suggestions; discovery reads directory names only, never file contents or credentials.
 
+**Amended by ADR-0046 (2026-10-30).** The instance overlay is no longer limited to a label and the two config-directory variables: an instance may extend any built-in provider or an earlier ACP entry, and carry `command`, `models` / `additionalModels` and `disallowedTools` (registry generalisation, PR1 of the providers epic). Typed env, provider secrets and recipes follow in later PRs of that epic; see [ADR-0046](0046-provider-spec-harness-overlay.md).
+
 ### Implementation note, 2026-10-25 (Wave 0, daemon side)
 
 `internal/providers` is the registry (one `Spec` per provider, a leaf package); `providers.custom` holds ACP entries and instances (`extends: claude-native|codex-native`

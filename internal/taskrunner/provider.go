@@ -132,6 +132,9 @@ type ProviderInfo struct {
 	Runner  string `json:"runner,omitempty"`
 	Extends string `json:"extends,omitempty"`
 	Custom  bool   `json:"custom,omitempty"`
+	// Harness is the engine kind (ADR-0046): "claude-code",
+	// "codex-app-server" or "acp"; Runner's value under its ADR name (additive).
+	Harness string `json:"harness,omitempty"`
 }
 
 // SupportedProviders lists the registered providers (internal/providers,
@@ -161,7 +164,7 @@ func infoFromSpec(s providers.Spec) ProviderInfo {
 		ID: Provider(s.ID), Label: s.Label, Kind: ProviderKind(s.Kind),
 		CredentialKind: ProviderCredentialKind(s.CredentialKind), AccountProvider: s.AccountProvider,
 		Images: s.Images, SupportsAutoAccept: s.SupportsAutoAccept, LiveModeSwitch: s.LiveModeSwitch,
-		Runner: string(s.Runner), Extends: s.Extends, Custom: s.Custom,
+		Runner: string(s.Runner), Extends: s.Extends, Custom: s.Custom, Harness: string(s.Harness()),
 	}
 	info.Modes, info.DefaultMode = staticModes(s)
 	info.Models = staticModels(s)

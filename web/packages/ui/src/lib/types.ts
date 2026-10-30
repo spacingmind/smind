@@ -194,6 +194,8 @@ export interface ModelInfo {
   label: string;
   description?: string;
   default?: boolean;
+  /** Where the entry came from (ADR-0046): smind's static Claude list, the provider's configured models, or the agent's own discovered list. Absent on an older daemon. */
+  source?: "catalog" | "config" | "discovered";
 }
 
 // internal/taskrunner.ProviderInfo's Kind: "cli" marks a provider that's
@@ -231,8 +233,10 @@ export interface ProviderInfo {
   id: string;
   /** Which runner executes this provider's runs. Absent on a daemon older than the provider registry. */
   runner?: ProviderRunner;
-  /** Instances only: the built-in (claude-native | codex-native) this one runs through, with its own config dir. */
+  /** Instances only: the provider (a built-in, or an earlier ACP entry) this one runs through, with its own overlay. */
   extends?: string;
+  /** ADR-0046: the engine kind -- the runner's value under its harness name. Absent on an older daemon. */
+  harness?: "claude-code" | "codex-app-server" | "acp";
   /** True for a providers.custom entry (an ACP provider or an instance), false/absent for a built-in. */
   custom?: boolean;
   /** ADR-0038: whether the provider can view images natively ("no" = the file path is sent instead). Absent on a daemon without attachments. */

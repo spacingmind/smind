@@ -5,9 +5,9 @@
 //
 // It is a leaf package (it imports nothing from smind) so config, learning and
 // taskrunner can all depend on it. A built-in provider, a providers.custom ACP
-// entry and a provider instance (an entry that extends claude-native or
-// codex-native with its own launch env) are all the same type; adding an ACP
-// provider needs a Spec and no code edits elsewhere.
+// entry and a provider instance (an entry that extends another provider with
+// its own overlay) are all the same type; adding an ACP provider needs a Spec
+// and no code edits elsewhere.
 package providers
 
 import (
@@ -32,6 +32,30 @@ const (
 	RunnerACP Runner = "acp"
 )
 
+// Harness is the kind of engine that drives a provider's turns (ADR-0046
+// section 2). It is the Runner under its ADR name; the wire `runner` field
+// keeps the Runner values, `harness` is additive.
+type Harness string
+
+const (
+	HarnessClaudeCode     Harness = "claude-code"
+	HarnessCodexAppServer Harness = "codex-app-server"
+	HarnessACP            Harness = "acp"
+)
+
+// Harness is the harness kind of r ("" for an unknown runner).
+func (r Runner) Harness() Harness {
+	switch r {
+	case RunnerClaude:
+		return HarnessClaudeCode
+	case RunnerCodex:
+		return HarnessCodexAppServer
+	case RunnerACP:
+		return HarnessACP
+	}
+	return ""
+}
+
 // Built-in provider ids.
 const (
 	IDClaudeNative = "claude-native"
@@ -55,6 +79,18 @@ type Model struct {
 	ID, Label, Description string
 	Default                bool
 }
+
+// ModelsMode says how a Spec's Models combine with the model list the
+// provider would otherwise have (ADR-0046 section 1).
+type ModelsMode string
+
+const (
+	// ModelsReplace (the zero value): Models is the whole list.
+	ModelsReplace ModelsMode = "replace"
+	// ModelsAdd: Models are merged by id into the provider's own list
+	// (Claude's static catalog, an ACP agent's discovered models).
+	ModelsAdd ModelsMode = "add"
+)
 
 // Mode is one entry of a provider's static permission-mode catalog.
 type Mode struct {
@@ -85,10 +121,20 @@ type Spec struct {
 	Env     map[string]string
 
 	// Models and Modes are a custom ACP provider's static catalogs (ACP
-	// discovery layers the agent's own list on top, as for glm/kimi).
+	// discovery layers the agent's own list on top, as for glm/kimi). On an
+	// instance, Models + ModelsMode are its overlay: replace the base's
+	// list, or add to it (additionalModels).
 	Models      []Model
+	ModelsMode  ModelsMode
 	Modes       []Mode
 	DefaultMode string
+
+	// ModelAliases maps a model slot (opus, sonnet, haiku, subagent) to an
+	// endpoint model id; carried now, consumed by the typed env (PR2).
+	ModelAliases map[string]string
+	// DisallowedTools is passed to a Claude Code launch as --disallowedTools
+	// (an instance's list is appended to its base's).
+	DisallowedTools []string
 
 	// Catalog flags served by provider.list.
 	Kind               string // "cli": authentication is managed outside smind
@@ -108,6 +154,9 @@ type Spec struct {
 	Reflect    bool   // runs may feed the reflector
 	Delivery   string // DeliveryProjection | DeliveryPreface | ""
 }
+
+// Harness is the harness kind of s.
+func (s Spec) Harness() Harness { return s.Runner.Harness() }
 
 // Base is the id of the provider whose code runs this one: Extends for an
 // instance, else the id itself.
@@ -194,6 +243,14 @@ func cloneSpec(s Spec) Spec {
 	s.HealthCommand = append([]string(nil), s.HealthCommand...)
 	s.Models = append([]Model(nil), s.Models...)
 	s.Modes = append([]Mode(nil), s.Modes...)
+	s.DisallowedTools = append([]string(nil), s.DisallowedTools...)
+	if s.ModelAliases != nil {
+		al := make(map[string]string, len(s.ModelAliases))
+		for k, v := range s.ModelAliases {
+			al[k] = v
+		}
+		s.ModelAliases = al
+	}
 	if s.Env != nil {
 		env := make(map[string]string, len(s.Env))
 		for k, v := range s.Env {
@@ -261,19 +318,37 @@ func resolve(s Spec, table []Spec) (Spec, error) {
 	if s.Extends != "" {
 		var base *Spec
 		for i := range table {
-			if table[i].ID == s.Extends && !table[i].Custom {
+			// Any harness-bearing provider that is not itself an instance:
+			// a built-in, or an earlier custom ACP entry.
+			if table[i].ID == s.Extends && !table[i].IsInstance() {
 				base = &table[i]
 			}
 		}
-		if base == nil || (base.Runner != RunnerClaude && base.Runner != RunnerCodex) {
-			return s, fmt.Errorf("extends %q: must be %s or %s", s.Extends, IDClaudeNative, IDCodexNative)
+		if base == nil || base.Runner == "" {
+			return s, fmt.Errorf("extends %q: must name a built-in provider or an earlier providers.custom entry that is not itself an instance", s.Extends)
 		}
-		// An instance is its base's code with its own id, label and env:
-		// everything else is inherited, but the reflector (which runs on
-		// the base login) and the smind-held account row stay the base's.
+		// An instance is its base's code with its own id, label and
+		// overlay: everything else is inherited, but the reflector (which
+		// runs on the base login) and the smind-held account row stay the
+		// base's.
 		inst := *base
 		inst.ID, inst.Label, inst.Extends, inst.Custom = s.ID, s.Label, base.ID, true
 		inst.Env = s.Env // the instance's own launch env (config providers.custom[].env)
+		if len(s.Command) > 0 {
+			inst.Command = s.Command
+			inst.HealthCommand = []string{s.Command[0]}
+		}
+		inst.ModelsMode = s.ModelsMode
+		switch {
+		case len(s.Models) == 0:
+			// keep the base's list (Claude's catalog lives in taskrunner)
+		case s.ModelsMode == ModelsAdd:
+			inst.Models = MergeModels(base.Models, s.Models)
+		default:
+			inst.Models = s.Models
+		}
+		inst.ModelAliases = s.ModelAliases
+		inst.DisallowedTools = append(append([]string(nil), base.DisallowedTools...), s.DisallowedTools...)
 		inst.Reflect = false
 		inst.AccountProvider = ""
 		inst.CredentialKind = ""
@@ -381,3 +456,32 @@ func Delivery(provider string) string { s, _ := Default().Get(provider); return 
 // IsClaude reports whether provider runs on the Claude Code CLI (the base
 // claude-native provider or an instance of it).
 func IsClaude(provider string) bool { return Default().RunnerOf(provider) == RunnerClaude }
+
+// MergeModels returns base plus extra merged by id: an extra entry replaces a
+// base entry of the same id in place, new ids append in order.
+func MergeModels(base, extra []Model) []Model {
+	out := append([]Model(nil), base...)
+	for _, m := range extra {
+		replaced := false
+		for i := range out {
+			if out[i].ID == m.ID {
+				out[i], replaced = m, true
+				break
+			}
+		}
+		if !replaced {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// BuiltinRunner is the runner of a built-in provider id ("" if id is not one).
+func BuiltinRunner(id string) Runner {
+	for _, s := range builtins() {
+		if s.ID == id {
+			return s.Runner
+		}
+	}
+	return ""
+}
