@@ -514,12 +514,12 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 
 	client, err := r.newACPClient(command, opts...)
 	if err != nil {
-		return fmt.Errorf("taskrunner: spawn %s agent: %w", provider, err)
+		return fmt.Errorf("taskrunner: spawn %s agent: %w", provider, scrubError(err, r.providerSecretValues(provider)))
 	}
 	defer client.Close()
 
 	if err := client.Initialize(ctx); err != nil {
-		return fmt.Errorf("taskrunner: initialize %s agent: %w", provider, err)
+		return fmt.Errorf("taskrunner: initialize %s agent: %w", provider, scrubError(err, r.providerSecretValues(provider)))
 	}
 
 	rows, err := r.mcpRowsFor(ctx, workspaceID)
@@ -549,7 +549,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 			provider, strings.Join(inactive, ", ")))
 	}
 
-	secrets := mcpSecrets(rows)
+	secrets := append(mcpSecrets(rows), r.providerSecretValues(provider)...)
 	sessionID, configOptions, resumed, err := r.newOrResumeACPSession(ctx, chatID, provider, client, worktreePath, mcpWire, secrets, events)
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s new session: %w", provider, scrubError(err, secrets))
@@ -561,11 +561,11 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	r.recordSessionModes(provider, client, sessionID, configOptions)
 	updated, err := applyACPMode(ctx, client, sessionID, configOptions, perm.Mode)
 	if err != nil {
-		return fmt.Errorf("taskrunner: %s set permission mode %q: %w", provider, perm.Mode, err)
+		return fmt.Errorf("taskrunner: %s set permission mode %q: %w", provider, perm.Mode, scrubError(err, secrets))
 	}
 	updated, err = applyACPModel(ctx, client, sessionID, updated, model)
 	if err != nil {
-		return fmt.Errorf("taskrunner: %s set model %q: %w", provider, model, err)
+		return fmt.Errorf("taskrunner: %s set model %q: %w", provider, model, scrubError(err, secrets))
 	}
 	// Published only once the start mode is applied: until then a
 	// SetPermissionMode can't reach the session (it fails as "no live
@@ -1033,7 +1033,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 
 	client, resumed, err := r.newClaudeClientWithResume(ctx, provider, chatID, worktreePath, opts, events)
 	if err != nil {
-		return fmt.Errorf("taskrunner: spawn claude code agent: %w", err)
+		return fmt.Errorf("taskrunner: spawn claude code agent: %w", scrubError(err, r.providerSecretValues(provider)))
 	}
 	// After a CLI exit the process is gone, but Close (cmd.Wait) can still block
 	// on a grandchild holding stderr open: do not hold the run's end for it.
@@ -1103,7 +1103,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 			cliExited = true
 			return r.claudeCLIExited(ctx, client, err, probe, stderrTail, env, events)
 		}
-		return fmt.Errorf("taskrunner: claude code prompt: %w", err)
+		return fmt.Errorf("taskrunner: claude code prompt: %w", scrubError(err, r.providerSecretValues(provider)))
 	}
 	r.sessionStore.Set(chatID, SessionHandle{Provider: provider, SessionID: result.SessionID, UsageTotals: claudeTotalsOf(result)})
 	r.sendUsage(ctx, events, claudeTurnUsage(result, baseline))
@@ -1186,7 +1186,8 @@ func (r *Runner) newClaudeClientWithResume(ctx context.Context, provider Provide
 	}
 
 	r.sendSessionNote(ctx, events, fmt.Sprintf(
-		"could not resume claude-native session %s (%v); starting a new session instead", handle.SessionID, err))
+		"could not resume claude-native session %s (%v); starting a new session instead",
+		handle.SessionID, scrubError(err, r.providerSecretValues(provider))))
 	client, err = r.newClaudeClient(worktreePath, opts...)
 	return client, false, err
 }
@@ -1338,7 +1339,7 @@ func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, 
 	defer client.Close()
 
 	if err := client.Initialize(ctx); err != nil {
-		return fmt.Errorf("taskrunner: initialize codex agent: %w", err)
+		return fmt.Errorf("taskrunner: initialize codex agent: %w", scrubError(err, r.providerSecretValues(provider)))
 	}
 	if len(LaunchEditsFrom(ctx).Env) > 0 {
 		r.sendSessionNote(ctx, events, "plugin env not applied: codex-native runs take no per-run environment")
@@ -1360,9 +1361,9 @@ func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, 
 		case <-ctx.Done():
 		}
 	}
-	threadID, err := r.newOrResumeCodexThread(ctx, provider, chatID, client, worktreePath, events)
+	threadID, err := r.newOrResumeCodexThread(ctx, provider, chatID, client, worktreePath, r.providerSecretValues(provider), events)
 	if err != nil {
-		return fmt.Errorf("taskrunner: codex new thread: %w", err)
+		return fmt.Errorf("taskrunner: codex new thread: %w", scrubError(err, r.providerSecretValues(provider)))
 	}
 	// Stored as soon as the thread exists, not only after a successful
 	// prompt -- same stop-doesn't-lose-the-handle reasoning as runACP.
@@ -1392,7 +1393,7 @@ func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, 
 	stopReason, err := client.Prompt(ctx, threadID, prompt, updates, codexOpts...)
 	<-forwardDone
 	if err != nil {
-		return fmt.Errorf("taskrunner: codex prompt: %w", err)
+		return fmt.Errorf("taskrunner: codex prompt: %w", scrubError(err, r.providerSecretValues(provider)))
 	}
 	r.keepSessionHandle(chatID, provider, threadID)
 	r.sendUsage(ctx, events, r.codexTurnUsage(chatID, client, threadID))
@@ -1413,7 +1414,10 @@ func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, 
 // id), so that degrades gracefully rather than failing the prompt. See
 // ADR-0016 section 2 / docs/plans/completed/multi-chat-per-task.md's
 // P2.4/P2.5.
-func (r *Runner) newOrResumeCodexThread(ctx context.Context, provider Provider, chatID int64, client codexBackend, worktreePath string, events chan<- Event) (string, error) {
+//
+// secrets (see Runner.providerSecretValues) are scrubbed from the agent
+// error text placed in the resume-fallback session note.
+func (r *Runner) newOrResumeCodexThread(ctx context.Context, provider Provider, chatID int64, client codexBackend, worktreePath string, secrets []string, events chan<- Event) (string, error) {
 	handle, ok := r.sessionStore.Get(chatID)
 	if !ok || handle.Provider != provider || handle.SessionID == "" {
 		return client.NewSession(ctx, worktreePath)
@@ -1425,7 +1429,8 @@ func (r *Runner) newOrResumeCodexThread(ctx context.Context, provider Provider, 
 	}
 
 	r.sendSessionNote(ctx, events, fmt.Sprintf(
-		"could not resume codex thread %s (%v); starting a new thread instead", handle.SessionID, err))
+		"could not resume codex thread %s (%v); starting a new thread instead",
+		handle.SessionID, scrubError(err, secrets)))
 	return client.NewSession(ctx, worktreePath)
 }
 

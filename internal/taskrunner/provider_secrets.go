@@ -111,6 +111,44 @@ func (r *Runner) launchEnvEntries(provider Provider) ([]string, error) {
 	return entries, nil
 }
 
+// providerSecretValues resolves the VALUES a launch of provider puts in
+// its child environment for the spec's SecretEnv refs (via r.providerSecrets)
+// and its PassthroughEnv names present in the daemon's environment -- the
+// values agent-originated text (run errors, session notes, stderr tails)
+// is scrubbed of (ADR-0046 section 4). Empty values are skipped and
+// resolution errors ignored (whatever could be resolved is returned); a
+// missing source contributes only the passthrough values. The values are
+// used for scrubbing only, never logged.
+func (r *Runner) providerSecretValues(provider Provider) []string {
+	spec, _ := r.providerRegistry().Get(string(provider))
+	var out []string
+	add := func(v string) {
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	if len(spec.SecretEnv) > 0 && r.providerSecrets != nil {
+		names := make([]string, 0, len(spec.SecretEnv))
+		for name := range spec.SecretEnv {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, envName := range names {
+			if value, ok, err := r.providerSecrets.GetProviderSecret(string(provider), spec.SecretEnv[envName]); err == nil && ok {
+				add(value)
+			}
+		}
+	}
+	pass := append([]string(nil), spec.PassthroughEnv...)
+	sort.Strings(pass)
+	for _, name := range pass {
+		if value, ok := os.LookupEnv(name); ok {
+			add(value)
+		}
+	}
+	return out
+}
+
 // ProviderSecretInfo lists an instance's stored secrets by name, each with
 // only a fingerprint of its value. Nil when no source is configured or the
 // listing fails.
