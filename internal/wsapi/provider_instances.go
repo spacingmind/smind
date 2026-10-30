@@ -173,13 +173,20 @@ func handleProviderDirSuggestions(runner *taskrunner.Runner, lister dirLister) h
 
 // reloadProviders re-reads config.yaml and replaces the registry's custom
 // providers (ACP entries and instances) with providers.custom, atomically: an
-// invalid file changes nothing and the error names the field.
+// invalid file changes nothing and the error names the field. Secrets of
+// instances the new catalog dropped are pruned (their error carries no
+// value, and a prune that fails leaves only orphaned rows behind, not a bad
+// registry, so it is ignored).
 func reloadProviders(runner *taskrunner.Runner) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
-	return runner.Providers().SetCustom(config.ProviderSpecs(cfg.Providers.Custom))
+	if err := runner.Providers().SetCustom(config.ProviderSpecs(cfg.Providers.Custom)); err != nil {
+		return err
+	}
+	_, _ = runner.PruneProviderSecrets()
+	return nil
 }
 
 // publishProvidersChanged tells clients the provider catalog changed (id ""

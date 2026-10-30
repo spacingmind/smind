@@ -664,3 +664,15 @@ CREATE TABLE IF NOT EXISTS inbox_state (
     actor TEXT NOT NULL DEFAULT '',     -- 'local' | 'device:<id>'
     updated_at TIMESTAMP NOT NULL
 );
+
+-- provider_secrets: ADR-0046 section 4: provider secrets (vendor API keys),
+-- write-only through provider.setSecret; never returned, logged or put in
+-- config.yaml. Additive.
+CREATE TABLE IF NOT EXISTS provider_secrets (
+    instance_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    value TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (instance_id, name)
+);

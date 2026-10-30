@@ -120,6 +120,14 @@ type Spec struct {
 	Command []string
 	Env     map[string]string
 
+	// SecretEnv maps an env NAME to a stored secret name (ADR-0046 section
+	// 4): the value lives in smind.db, resolved into the child env at
+	// launch, never inline in config.yaml.
+	SecretEnv map[string]string
+	// PassthroughEnv lists env NAMES copied from the daemon's own
+	// environment at launch, sorted.
+	PassthroughEnv []string
+
 	// Models and Modes are a custom ACP provider's static catalogs (ACP
 	// discovery layers the agent's own list on top, as for glm/kimi). On an
 	// instance, Models + ModelsMode are its overlay: replace the base's
@@ -258,6 +266,14 @@ func cloneSpec(s Spec) Spec {
 		}
 		s.Env = env
 	}
+	if s.SecretEnv != nil {
+		secrets := make(map[string]string, len(s.SecretEnv))
+		for k, v := range s.SecretEnv {
+			secrets[k] = v
+		}
+		s.SecretEnv = secrets
+	}
+	s.PassthroughEnv = append([]string(nil), s.PassthroughEnv...)
 	return s
 }
 
@@ -334,6 +350,8 @@ func resolve(s Spec, table []Spec) (Spec, error) {
 		inst := *base
 		inst.ID, inst.Label, inst.Extends, inst.Custom = s.ID, s.Label, base.ID, true
 		inst.Env = s.Env // the instance's own launch env (config providers.custom[].env)
+		inst.SecretEnv = s.SecretEnv
+		inst.PassthroughEnv = s.PassthroughEnv
 		if len(s.Command) > 0 {
 			inst.Command = s.Command
 			inst.HealthCommand = []string{s.Command[0]}

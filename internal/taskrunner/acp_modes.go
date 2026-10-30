@@ -172,7 +172,7 @@ func (r *Runner) maybeProbe(provider Provider, probe func(context.Context, Provi
 		ctx, cancel := context.WithTimeout(context.Background(), acpModeProbeTimeout)
 		defer cancel()
 		if err := probe(ctx, provider); err != nil {
-			log.Printf("taskrunner: probe %s modes/models: %v", provider, err)
+			log.Printf("taskrunner: probe %s modes/models: %v", provider, scrubError(err, r.providerSecretValues(provider)))
 		}
 		r.modeMu.Lock()
 		e := r.acpModes[provider]
@@ -198,20 +198,25 @@ func (r *Runner) probeACPModes(ctx context.Context, provider Provider) error {
 	defer os.RemoveAll(dir)
 
 	popts := []acp.Option{acp.WithPermissionPolicy(acp.AutoDenyPolicy{})}
-	if env := r.acpEnvEntries(provider); len(env) > 0 {
-		popts = append(popts, acp.WithEnv(env...))
+	launchEnv, err := r.launchEnvEntries(provider)
+	if err != nil {
+		return fmt.Errorf("launch env: %w", err)
 	}
+	if len(launchEnv) > 0 {
+		popts = append(popts, acp.WithEnv(launchEnv...))
+	}
+	secrets := r.providerSecretValues(provider)
 	client, err := r.newACPClient(command, popts...)
 	if err != nil {
-		return fmt.Errorf("spawn: %w", err)
+		return fmt.Errorf("spawn: %w", scrubError(err, secrets))
 	}
 	defer client.Close()
 	if err := client.Initialize(ctx); err != nil {
-		return fmt.Errorf("initialize: %w", err)
+		return fmt.Errorf("initialize: %w", scrubError(err, secrets))
 	}
 	sessionID, options, err := client.NewSession(ctx, dir, nil) // probe: never spawn user MCP servers
 	if err != nil {
-		return fmt.Errorf("session/new: %w", err)
+		return fmt.Errorf("session/new: %w", scrubError(err, secrets))
 	}
 	r.recordSessionModes(provider, client, sessionID, options)
 	return nil

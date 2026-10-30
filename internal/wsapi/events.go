@@ -66,8 +66,9 @@ const (
 	// (that is per connection).
 	TopicForgeStatus = "forge.status"
 	// TopicProviderUpdated carries {id, defaultModel, env, envDirExists,
-	// envEffective} after provider.setDefaultModel or provider.setEnv changed
-	// a provider's setting, so other clients refresh provider.list.
+	// envEffective, secrets} after provider.setDefaultModel,
+	// provider.setEnv, provider.setSecret or provider.clearSecret changed a
+	// provider's setting, so other clients refresh provider.list.
 	TopicProviderUpdated = "provider.updated"
 )
 

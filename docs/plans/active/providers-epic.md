@@ -197,11 +197,12 @@ Running total: **USD 0.00** of 2.00.
 - [x] Security spike (env scrub), recipe kept under `/tmp/steward4/spike-sec/` and described in the ADR
 - [x] PR0: ADR-0046 + this plan (docs only)
 - [x] PR1 registry generalisation + Kimi fix (code merged-ready; see Validation)
-- [ ] PR2 typed env + provider secrets
+- [x] PR2 typed env + provider secrets (branch `smind/task-lead-providers-epic-pr2-secrets-typed-dmiaxo7isgtc`)
 - [ ] PR3 claude-code recipes + vendor rate-limit profiles
 - [ ] PR4 Codex endpoint instances
 - [ ] PR5 five ACP providers
 - [ ] PR6 web + mobile UX
+- 2026-10-30 (PR2 Lead): store provider_secrets + typed env config + secretdeny EnvRules + launch resolution landed in the PR2 branch; AC2.6 measured: scrub NOT enabled (permission-mode conflict), see ADR-0046 section 7.
 
 ## Validation
 
@@ -229,3 +230,20 @@ rename across the codebase; `models` and `additionalModels` are mutually exclusi
 instance `command` is the executable only (no `args`); an instance of an ACP provider keeps free-form env until PR2; an instance may not extend an instance; with `models` replace
 mode the instance does not use ACP/Codex discovery (models > discovery). `ModelAliases` is on `Spec` and inert until PR2. The `docs/decisions/0042` pointer to ADR-0046 is added; `docs/homelab.md` needs no rows (it has no
 `providers.custom` rows to extend).
+
+PR2 (typed env + provider secret store), 2026-10-30:
+
+| AC | Evidence |
+|---|---|
+| AC2.1 | `TestProviderSecret_NeverInConfigYaml` (config), `TestProviderEnv_NotInArgv` (argv incl. `--settings`), `TestProviderSecret_RedactedInEventsAndLogs_Claude` / `_ACP` (events, notes, error, stderr tail), `TestProviderSecret_NotInDaemonLog_Run` / `_ModeProbe` (stdlib log), `TestProviderSecret_ListShowsFingerprintOnly` |
+| AC2.2 | `TestProviderEnv_AllowlistPerHarness`, `TestProviderEnv_SecretKindRejectsLiteral`, `TestProviderEnv_URLKind` (no userinfo), `TestProviderEnv_IntKind`, `TestProviderEnv_PassthroughOnlyForSecretKinds` |
+| AC2.3 | `TestProviderSecret_RefusesAgentCaller` (run-scoped refused, not on `RunScopedMethods`), `plugin_session_test.go` humanOnly list (automation/plugin origin), `TestProviderSecret_RelayResponseCarriesNoValue` |
+| AC2.4 | `TestProviderEnv_SecretResolvedLastWins`, `TestProviderEnv_PassthroughCopiesDaemonEnv`, `TestProviderEnv_MissingSecretErrorNamesNotValue` |
+| AC2.5 | `TestSecretdeny_ProviderEnvNames`, `TestSecretdeny_EnvRulesAreDeny`, `TestClaudeSettings_DenyRulesForSecretEnvNames` (best effort, documented as such) |
+| AC2.6 | Measured, not in CI (`/tmp/steward4/pr2-spike`, copy of the scripts is in the scratchpad of the PR2 Lead): with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` a `bypassPermissions` run refuses a Bash command that uses a shell variable (it ran without the scrub), `acceptEdits` the same: **(a) conflicts**. smind's MCP stdio explicit env (`SMIND_RUN_ID`, `SMIND_VERDICT_TOKEN`) is delivered with and without the scrub: (b) does not conflict. The measured command contained `$?`, so (a) shows the forced `default` mode through the variable check; a variable-free command was not re-measured. Decision: scrub NOT enabled by default; `TestScrubEnv_SetOnlyWhenPolicySaysSo` pins the policy (default false) and the conditions under which the code would set it. Cost 0 (no real key, localhost only) |
+| AC2.7 | `TestProviderSecret_DeletedWithInstance` (reload prunes), `TestProviderSecretStore_DeleteAndPrune`, `TestRunner_PruneProviderSecretsKeepsCustomInstances`, `TestProviderSecret_ClearRemovesRow` |
+| Migration | `TestMigration_ProviderSecretsTable` |
+
+Mutations (each made the named test FAIL; file restored with `git checkout -- <file>`): drop the allowlist check (`TestProviderEnv_AllowlistPerHarness`); resolved value into argv via `WithExtraArgs` (`TestProviderEnv_NotInArgv`: "argv[15] carries the secret value"); run-scoped caller let through `provider.setSecret` (`TestProviderSecret_RefusesAgentCaller`); drop the provider values from the ACP redaction list and the scrub wrappers (`TestProviderSecret_RedactedInEventsAndLogs_ACP`); log the launch env map (`TestProviderSecret_NotInDaemonLog_Run`).
+
+Checks: `task lint`, `task test` green; `go test -race` on store, config, providers, secretdeny, wsapi, taskrunner, cmd/smind green. Not done in PR2: UI for setting a key (PR6), recipes (PR3), Codex endpoint config (PR4), web/mobile rendering of `secrets` in provider.list (types only).

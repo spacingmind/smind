@@ -23,8 +23,8 @@ import (
 // until the next turn respawns the CLI (the CLI applies ask rules in bypass
 // too), and a live switch out of bypass has no rules until the next turn; the
 // decider still annotates whatever the CLI does escalate.
-func claudeSettings(mode, home string) string {
-	perms := map[string]any{"deny": secretdeny.Rules(home)}
+func claudeSettings(mode, home string, secretEnvNames []string) string {
+	perms := map[string]any{"deny": append(secretdeny.Rules(home), secretdeny.EnvRules(home, secretEnvNames)...)}
 	if mode != ClaudeModeBypass {
 		perms["ask"] = ClaudeAlwaysAskRules()
 	}

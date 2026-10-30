@@ -267,6 +267,24 @@ export interface ProviderInfo {
   envDirExists?: Record<string, boolean>;
   /** Per allowlisted key (claude-native CLAUDE_CONFIG_DIR, codex-native CODEX_HOME): the path a run would use and where it came from. */
   envEffective?: Record<string, ProviderEnvEffective>;
+  /** ADR-0046 section 4: the instance's stored secrets ({secret: name} env refs), each with only a fingerprint of its value -- never the value. Absent when the instance has none. */
+  secrets?: ProviderSecretInfo[];
+}
+
+/** One `secrets` entry: the secret's stored name, the env name it feeds, whether a value is stored, and the last 4 hex of its SHA-256 when one is. */
+export interface ProviderSecretInfo {
+  name: string;
+  env: string;
+  set: boolean;
+  fingerprint?: string;
+}
+
+/** Result of provider.setSecret / provider.clearSecret (internal/wsapi/provider_secrets.go): names and a fingerprint only -- a secret value never crosses the wire. */
+export interface ProviderSecretResult {
+  instanceId: string;
+  name: string;
+  set: boolean;
+  fingerprint?: string;
 }
 
 /** One `envEffective` entry: the resolved path, its source, and whether that directory exists. */
