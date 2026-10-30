@@ -102,7 +102,7 @@ func TestProviderInstance_EnvAllowlistOnly(t *testing.T) {
 	}
 	dir := filepath.Join(t.TempDir(), "dir") // absolute on every OS
 	for _, c := range cases {
-		list := []CustomProvider{{ID: "inst", Extends: c.extends, Env: map[string]string{c.key: dir}}}
+		list := []CustomProvider{{ID: "inst", Extends: c.extends, Env: map[string]EnvValue{c.key: {Literal: dir}}}}
 		err := ValidateCustomProviders(list)
 		if c.ok && err != nil {
 			t.Errorf("%s %s: %v", c.extends, c.key, err)
@@ -217,7 +217,7 @@ func TestAddProviderInstance_WritesPreservingCommentsAndValidates(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entry.Env["CLAUDE_CONFIG_DIR"] != filepath.Join(home, ".claude-work") {
+	if entry.Env["CLAUDE_CONFIG_DIR"].Literal != filepath.Join(home, ".claude-work") {
 		t.Fatalf("entry = %+v", entry)
 	}
 	body, _ := os.ReadFile(Path())
