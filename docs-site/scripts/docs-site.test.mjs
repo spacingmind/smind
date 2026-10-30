@@ -113,6 +113,11 @@ test('code block language label is readable', () => {
   assert.match(css, /span\.lang\s*\{[^}]*--vp-c-text-2/)
 })
 
+test('syntax theme is high contrast', () => {
+  const config = fs.readFileSync(path.join(REPO_ROOT, 'docs-site', '.vitepress', 'config.mts'), 'utf8')
+  assert.ok(config.includes('github-light-high-contrast'), 'config: github-light-high-contrast')
+})
+
 test('version line from manifest', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, '.release-please-manifest.json'), 'utf8'))
   assert.equal(version(), manifest['.'])

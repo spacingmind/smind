@@ -56,6 +56,8 @@ export default defineConfig({
     footer: { message: `${SITE_NAME}, version ${v}`, copyright: 'Documentation for the smind daemon, CLI and apps.' },
   },
   markdown: {
+    // Lighthouse color-contrast: github-light's green tokens are 4.28:1 on the code block.
+    theme: { light: 'github-light-high-contrast', dark: 'github-dark' },
     // The docs write placeholders like <plugin> outside code: show them as text, not Vue tags.
     html: false,
     config(md) {
