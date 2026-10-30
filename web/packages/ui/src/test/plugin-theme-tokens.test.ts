@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { ZCODE_TOKENS } from "@/lib/zcode-tokens";
 import { isSafeThemeValue, PLUGIN_THEME_TOKENS, usableThemeTokens } from "@/lib/plugin-contrib";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -23,13 +24,15 @@ function block(marker: string): string {
 }
 
 const declared = (b: string) => new Set([...b.matchAll(/^\s+(--[a-z0-9-]+):/gm)].map((m) => m[1]!));
-const NON_COLOUR = /^--(ui-font-size|elevation-shadow-|content-|duration-)/;
+const NON_COLOUR = /^--(ui-font-size|elevation-shadow-|content-|duration-|lucide-)/;
+// Stage-1 ZCode tokens are app-internal until a later PR promotes them into the plugin contract (daemon list + PLUGIN_THEME_TOKENS).
+const ZCODE_INTERNAL = new Set(ZCODE_TOKENS.filter((t) => t.status === "added").map((t) => t.smind));
 
 describe("plugin theme token list", () => {
   it("TestTheme_TokenListDrift: the TS list, the daemon's list and index.css's themeable tokens are the same set", () => {
     const light = declared(block("\n:root {"));
     const dark = declared(block("\n.dark {"));
-    const css = [...light].filter((t) => dark.has(t) && !NON_COLOUR.test(t)).sort();
+    const css = [...light].filter((t) => dark.has(t) && !NON_COLOUR.test(t) && !ZCODE_INTERNAL.has(t)).sort();
     expect([...PLUGIN_THEME_TOKENS].sort(), "lib/plugin-contrib.ts PLUGIN_THEME_TOKENS vs index.css").toEqual(css);
     expect([...DAEMON_LIST].sort(), "internal/plugins/themetokens.json vs index.css").toEqual(css);
   });
