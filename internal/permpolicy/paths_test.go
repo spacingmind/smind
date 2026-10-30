@@ -88,6 +88,34 @@ func TestResolvePath_HomeExpansion(t *testing.T) {
 	}
 }
 
+// A dangling link must resolve to its target, not to the link's own path:
+// walking up from wt/link would place it inside wt while a write through it
+// lands in the target directory.
+func TestResolvePath_DanglingSymlinkFollowed(t *testing.T) {
+	wt, outside := t.TempDir(), t.TempDir()
+	kind := testutil.Link(t, filepath.Join(outside, "new.txt"), filepath.Join(wt, "link"))
+
+	got, err := ResolvePath(filepath.Join(wt, "link"), wt)
+	if err != nil {
+		t.Fatalf("ResolvePath through dangling %s: %v", kind, err)
+	}
+	if want := filepath.Join(canon(t, outside), "new.txt"); got != want {
+		t.Fatalf("ResolvePath through dangling %s = %q, want %q", kind, got, want)
+	}
+	if Within(got, []string{wt}) {
+		t.Fatalf("a %s pointing outside wt resolved within wt", kind)
+	}
+}
+
+func TestResolvePath_SymlinkLoopIsError(t *testing.T) {
+	dir := t.TempDir()
+	testutil.Link(t, "loop-b", filepath.Join(dir, "loop-a"))
+	testutil.Link(t, "loop-a", filepath.Join(dir, "loop-b"))
+	if _, err := ResolvePath(filepath.Join(dir, "loop-a"), dir); err == nil {
+		t.Fatal("ResolvePath of a link loop: want error")
+	}
+}
+
 func TestWithin_SiblingPrefixIsNotWithin(t *testing.T) {
 	dir := canon(t, t.TempDir())
 	root := filepath.Join(dir, "b")

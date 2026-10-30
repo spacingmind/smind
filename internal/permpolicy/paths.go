@@ -39,7 +39,18 @@ func ResolvePath(p, cwd string) (string, error) {
 	// a link whose target is gone; both walk up to the deepest ancestor that
 	// does resolve. Everything else (permissions, a loop, ...) is a real
 	// failure.
+	//
+	// A dangling link is walked up like any missing tail unless it is
+	// followed first: `wt/link -> /etc/newfile` with the target missing
+	// would otherwise be judged as wt/link, inside wt, although a write
+	// through it creates /etc/newfile. So an ErrNotExist on a path whose
+	// last component is itself a link restarts the loop from the link's
+	// target, with the pending tail re-joined. The hop cap bounds a link
+	// cycle the OS would refuse with ELOOP but a missing target keeps
+	// alive.
+	const maxLinkHops = 40
 	cur, tail := p, []string{}
+	hops := 0
 	for {
 		resolved, err := realpath.Resolve(cur)
 		if err == nil {
@@ -50,6 +61,22 @@ func ResolvePath(p, cwd string) (string, error) {
 		}
 		if !errors.Is(err, fs.ErrNotExist) {
 			return "", fmt.Errorf("resolve path %q: %w", p, err)
+		}
+		if info, lerr := os.Lstat(cur); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+			if hops >= maxLinkHops {
+				return "", fmt.Errorf("resolve path %q: more than %d link hops", p, maxLinkHops)
+			}
+			hops++
+			target, rerr := os.Readlink(cur)
+			if rerr != nil {
+				return "", fmt.Errorf("resolve path %q: read link %q: %w", p, cur, rerr)
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(cur), target)
+			}
+			cur = filepath.Join(append([]string{target}, tail...)...)
+			tail = nil
+			continue
 		}
 		parent := filepath.Dir(cur)
 		if parent == cur {
