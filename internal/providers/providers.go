@@ -204,7 +204,7 @@ func builtins() []Spec {
 		{ID: IDOpenCode, Label: "OpenCode", Runner: RunnerACP, Kind: "cli", SupportsAutoAccept: true, LiveModeSwitch: true, Images: "yes",
 			Command: []string{"opencode", "acp"}, HealthCommand: []string{"opencode"}, ToolEvents: true, Delivery: DeliveryPreface,
 			// OpenCode auto-allows tools by default; this makes it ask so smind's permission modes apply.
-			Env: map[string]string{"OPENCODE_DISABLE_AUTOUPDATE": "1", "OPENCODE_PERMISSION": `{"bash":"ask","edit":"ask"}`},
+			Env:    map[string]string{"OPENCODE_DISABLE_AUTOUPDATE": "1", "OPENCODE_PERMISSION": `{"bash":"ask","edit":"ask"}`},
 			Health: Health{Install: "npm i -g opencode-ai (or brew install sst/tap/opencode)", VersionArg: "--version"}},
 		{ID: IDCopilot, Label: "GitHub Copilot", Runner: RunnerACP, Kind: "cli", SupportsAutoAccept: true, LiveModeSwitch: true, Images: "unknown",
 			Command: []string{"copilot", "--acp"}, HealthCommand: []string{"copilot"}, ToolEvents: true, Delivery: DeliveryPreface,

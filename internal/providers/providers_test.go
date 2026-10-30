@@ -12,8 +12,12 @@ import (
 func TestBuiltinsAreRegistered(t *testing.T) {
 	t.Parallel()
 	got := strings.Join(New().IDs(), ",")
-	if got != "claude-native,codex-native,glm,kimi" {
+	if got != "claude-native,cline,codex-native,copilot,cursor,glm,goose,kimi,opencode" {
 		t.Fatalf("built-in ids = %s", got)
+	}
+	wantOrder := strings.Join([]string{IDClaudeNative, IDGLM, IDKimi, IDCodexNative, IDOpenCode, IDCopilot, IDCline, IDGoose, IDCursor}, ",")
+	if got := strings.Join(BuiltinIDs(), ","); got != wantOrder {
+		t.Fatalf("BuiltinIDs order = %s, want %s", got, wantOrder)
 	}
 	for _, id := range BuiltinIDs() {
 		if !IsBuiltin(id) || !ReservedID(id) {
@@ -72,7 +76,7 @@ func TestSetCustom_RejectsAndChangesNothing(t *testing.T) {
 		if err := r.SetCustom(tc.specs); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
 		}
-		if _, ok := r.Get("ok"); !ok || len(r.List()) != 5 {
+		if _, ok := r.Get("ok"); !ok || len(r.List()) != 10 {
 			t.Fatalf("%s: a rejected set changed the registry: %v", name, r.IDs())
 		}
 	}
@@ -152,5 +156,76 @@ func TestSetCustom_InstanceOverlays(t *testing.T) {
 	// An instance of an unknown or instance provider is refused, naming the field.
 	if err := r.SetCustom([]Spec{{ID: "x", Extends: "nope"}}); err == nil || !strings.Contains(err.Error(), "[0].extends") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestACPProvider_AllFive_RowsRegister(t *testing.T) {
+	t.Parallel()
+	r := New()
+	for _, id := range []string{IDOpenCode, IDCopilot, IDCline, IDGoose, IDCursor} {
+		s, ok := r.Get(id)
+		if !ok {
+			t.Fatalf("%s: not registered", id)
+		}
+		if s.Runner != RunnerACP || len(s.Command) < 1 || s.HealthCommand[0] != s.Command[0] {
+			t.Errorf("%s: acp spec = %+v", id, s)
+		}
+		if s.Kind != "cli" || s.Delivery != DeliveryPreface {
+			t.Errorf("%s: catalog = %+v", id, s)
+		}
+		if s.Health.Install == "" {
+			t.Errorf("%s: no Health.Install", id)
+		}
+		if !IsBuiltin(id) || !ReservedID(id) {
+			t.Errorf("%s: built-in but not reserved", id)
+		}
+	}
+	if s, _ := r.Get(IDCursor); s.Health.MinVersion == "" {
+		t.Error("cursor: no Health.MinVersion")
+	}
+	for _, id := range []string{IDCopilot, IDCline, IDGoose, IDCursor} {
+		if s, _ := r.Get(id); !s.Health.Unverified {
+			t.Errorf("%s: Health.Unverified must be true", id)
+		}
+	}
+	if s, _ := r.Get(IDOpenCode); s.Health.Unverified {
+		t.Error("opencode: Health.Unverified must be false")
+	}
+}
+
+func TestACPProvider_OpenCode_SpecRegistersWithoutSwitchEdits(t *testing.T) {
+	t.Parallel()
+	r := New()
+	if err := r.Register(Spec{ID: "opencode-lab", Runner: RunnerACP, Command: []string{"opencode", "acp"}}); err != nil {
+		t.Fatal(err)
+	}
+	lab, _ := r.Get("opencode-lab")
+	if lab.Runner != RunnerACP || !lab.ToolEvents || lab.Delivery != DeliveryPreface {
+		t.Fatalf("registered spec = %+v", lab)
+	}
+	b, _ := r.Get(IDOpenCode)
+	if len(b.Command) != 2 || b.Command[0] != "opencode" || b.Command[1] != "acp" {
+		t.Fatalf("builtin opencode command = %v", b.Command)
+	}
+	if err := r.Register(Spec{ID: "oc2", Extends: IDOpenCode, Env: map[string]string{"X": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	inst, _ := r.Get("oc2")
+	if inst.Runner != RunnerACP || strings.Join(inst.Command, " ") != "opencode acp" || inst.Health.Install != b.Health.Install {
+		t.Fatalf("opencode instance = %+v", inst)
+	}
+	if inst.Env["X"] != "1" {
+		t.Fatalf("instance env = %v", inst.Env)
+	}
+}
+
+func TestACPProvider_OpenCodePermissionEnvAsks(t *testing.T) {
+	t.Parallel()
+	s, _ := New().Get(IDOpenCode)
+	if got := s.Env["OPENCODE_PERMISSION"]; got != `{"bash":"ask","edit":"ask"}` {
+		t.Fatalf("OPENCODE_PERMISSION = %q", got)
+	}
+	if s.Env["OPENCODE_DISABLE_AUTOUPDATE"] != "1" {
+		t.Fatalf("OPENCODE_DISABLE_AUTOUPDATE = %q", s.Env["OPENCODE_DISABLE_AUTOUPDATE"])
 	}
 }
