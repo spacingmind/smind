@@ -1,5 +1,6 @@
 
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
 import { Icons } from "@/lib/icons";
 
 /**
@@ -19,21 +20,24 @@ import { Icons } from "@/lib/icons";
 export function GeneralSection(_ctx: SettingsSectionContext) {
   return (
     <div className="flex flex-col gap-6" data-testid="settings-section-general">
-      <section className="flex flex-col gap-2">
-        <h3 className="text-ui-base font-medium text-foreground">Defaults for new tasks</h3>
-        <p className="text-ui-base text-muted-foreground">
-          Set a ★ default agent in{" "}
-          <span className="font-medium text-foreground">Settings → Agents</span> — a new task's composer starts
-          from it.
-        </p>
-      </section>
-    </div>
+      <SettingsGroup title="Defaults for new tasks">
+        <SettingsRow
+          label="Default agent"
+          description={
+            <>
+              Set a ★ default agent in <span className="font-medium text-foreground">Settings → Agents</span> — a
+              new task's composer starts from it.
+            </>
+          }
+        />
+      </SettingsGroup>    </div>
   );
 }
 
 registerSettingsSection({
   id: "general",
   label: "General",
+  description: "Defaults and shortcuts into the rest of settings.",
   // First in the nav (run-config IA regroup: General · Appearance ·
   // Agents & providers · Connection · Notifications · Shortcuts).
   order: 50,
