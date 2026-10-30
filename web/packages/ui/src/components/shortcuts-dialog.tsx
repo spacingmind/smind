@@ -110,8 +110,8 @@ function ShortcutRow({
       className="border-t border-border max-sm:grid max-sm:grid-cols-[minmax(0,1fr)_auto] max-sm:gap-x-2"
     >
       <td className="max-sm:col-start-1 max-sm:row-start-1 max-sm:pb-0 px-3 py-1.5">
-        <div className="truncate text-ui-base">{row.label}</div>
-        {row.note && <div className="truncate text-ui-sm text-foreground-muted">{row.note}</div>}
+        <div className="max-sm:whitespace-normal sm:truncate text-ui-base">{row.label}</div>
+        {row.note && <div className="max-sm:whitespace-normal sm:truncate text-ui-sm text-foreground-muted">{row.note}</div>}
         {conflictLabel && (
           <div className="text-ui-sm text-warning" data-testid="shortcut-conflict">
             Also used by {conflictLabel}
@@ -232,7 +232,7 @@ export function ShortcutRows({ query = "" }: { query?: string } = {}) {
                     <th
                       colSpan={4}
                       scope="colgroup"
-                      className="bg-muted/40 px-4 py-1.5 text-ui-sm font-medium uppercase tracking-wide text-foreground-muted"
+                      className="max-sm:block bg-muted/40 px-4 py-1.5 text-ui-sm font-medium uppercase tracking-wide text-foreground-muted"
                     >
                       {section.title}
                     </th>
