@@ -5,12 +5,14 @@ import { cn } from "@/lib/utils";
 export function SettingsGroup({
   title,
   description,
+  actions,
   children,
   className,
   testId,
 }: {
   title?: ReactNode;
   description?: ReactNode;
+  actions?: ReactNode;
   children: ReactNode;
   className?: string;
   testId?: string;
@@ -21,10 +23,13 @@ export function SettingsGroup({
       data-slot="settings-group"
       className={cn("flex flex-col gap-2", className)}
     >
-      {(title || description) && (
-        <div className="flex flex-col gap-1">
-          {title && <h3 className="text-ui-base font-medium text-foreground">{title}</h3>}
-          {description && <p className="text-ui-sm text-foreground-muted">{description}</p>}
+      {(title || description || actions) && (
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-col gap-1">
+            {title && <h3 className="text-ui-base font-medium text-foreground">{title}</h3>}
+            {description && <p className="text-ui-sm text-foreground-muted">{description}</p>}
+          </div>
+          {actions && <div className="shrink-0">{actions}</div>}
         </div>
       )}
       <div className="overflow-hidden rounded-xl border border-border bg-card [&>*+*]:border-t [&>*+*]:border-border">
