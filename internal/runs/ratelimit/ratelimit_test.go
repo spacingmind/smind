@@ -39,7 +39,7 @@ func TestClassify_GLM429FiveHourFixture(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			r := Classify(Input{Provider: "glm", Err: glmText}, c.now)
+			r := Classify(Input{Provider: "glm", Vendor: "zai", Err: glmText}, c.now)
 			if r.Kind != KindRateLimited || r.Window != "5h" {
 				t.Fatalf("got %+v", r)
 			}
@@ -50,7 +50,7 @@ func TestClassify_GLM429FiveHourFixture(t *testing.T) {
 
 func TestClassify_GLMWrappedErrorStillMatches(t *testing.T) {
 	e := glmText + ` (taskrunner: glm prompt: acp: rpc error -32603: Internal error ({"details":"` + glmText + `"}))`
-	r := Classify(Input{Provider: "glm", Err: e}, at(2026, 10, 22, 15, 10, 0))
+	r := Classify(Input{Provider: "glm", Vendor: "zai", Err: e}, at(2026, 10, 22, 15, 10, 0))
 	if r.Kind != KindRateLimited || r.Window != "5h" {
 		t.Fatalf("got %+v", r)
 	}
@@ -58,7 +58,7 @@ func TestClassify_GLMWrappedErrorStillMatches(t *testing.T) {
 }
 
 func TestClassify_UnparseableResetKeepsKindNilReset(t *testing.T) {
-	r := Classify(Input{Err: "429 Usage limit reached for 5 hour. Your limit will reset at soon"}, at(2026, 10, 22, 15, 0, 0))
+	r := Classify(Input{Vendor: "zai", Err: "429 Usage limit reached for 5 hour. Your limit will reset at soon"}, at(2026, 10, 22, 15, 0, 0))
 	if r.Kind != KindRateLimited || r.ResetAt != nil {
 		t.Fatalf("got %+v", r)
 	}
@@ -94,7 +94,7 @@ func TestClassify_ClaudeSignalOverageRejectedIgnored(t *testing.T) {
 }
 
 func TestClassify_ClaudeOldTextEpoch(t *testing.T) {
-	r := Classify(Input{Err: "Claude AI usage limit reached|1790000000"}, at(2026, 10, 22, 10, 0, 0))
+	r := Classify(Input{Vendor: "anthropic", Err: "Claude AI usage limit reached|1790000000"}, at(2026, 10, 22, 10, 0, 0))
 	if r.Kind != KindRateLimited || r.Window != "" {
 		t.Fatalf("got %+v", r)
 	}
@@ -103,17 +103,17 @@ func TestClassify_ClaudeOldTextEpoch(t *testing.T) {
 
 func TestClassify_ClaudeNewTextHourLimit(t *testing.T) {
 	e := "5-hour limit reached ∙ resets 3pm"
-	r := Classify(Input{Err: e}, at(2026, 10, 22, 10, 0, 0))
+	r := Classify(Input{Vendor: "anthropic", Err: e}, at(2026, 10, 22, 10, 0, 0))
 	if r.Kind != KindRateLimited || r.Window != "5h" {
 		t.Fatalf("got %+v", r)
 	}
 	wantReset(t, r.ResetAt, at(2026, 10, 22, 15, 0, 0))
-	r = Classify(Input{Err: e}, at(2026, 10, 22, 16, 0, 0))
+	r = Classify(Input{Vendor: "anthropic", Err: e}, at(2026, 10, 22, 16, 0, 0))
 	wantReset(t, r.ResetAt, at(2026, 10, 23, 15, 0, 0))
 }
 
 func TestClassify_CodexUsageLimit(t *testing.T) {
-	r := Classify(Input{Provider: "codex-native", Err: "You've hit your usage limit. Upgrade to Pro"}, at(2026, 10, 22, 10, 0, 0))
+	r := Classify(Input{Provider: "codex-native", Vendor: "openai", Err: "You've hit your usage limit. Upgrade to Pro"}, at(2026, 10, 22, 10, 0, 0))
 	if r.Kind != KindRateLimited || r.ResetAt != nil {
 		t.Fatalf("got %+v", r)
 	}
@@ -137,6 +137,7 @@ func TestClassify_SignalResetWinsOverText(t *testing.T) {
 	x := at(2026, 10, 22, 12, 0, 0)
 	r := Classify(Input{
 		Err:    glmText,
+		Vendor: "zai",
 		Signal: &Signal{Status: "rejected", ResetsAt: x, Type: "seven_day"},
 	}, at(2026, 10, 22, 15, 10, 0))
 	if r.Kind != KindRateLimited || r.Window != "weekly" {
@@ -155,7 +156,7 @@ func TestClassify_GenericRateLimitError(t *testing.T) {
 func TestClassify_GLMResetWithDate(t *testing.T) {
 	const e = "429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18"
 	for _, now := range []time.Time{at(2026, 10, 22, 15, 10, 0), at(2026, 10, 25, 9, 0, 0)} {
-		r := Classify(Input{Provider: "glm", Err: e}, now)
+		r := Classify(Input{Provider: "glm", Vendor: "zai", Err: e}, now)
 		if r.Kind != KindRateLimited || r.Window != "5h" {
 			t.Fatalf("got %+v", r)
 		}
@@ -178,7 +179,7 @@ func TestClassify_GLMResetIsShanghaiTime(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			now := time.Date(2026, 10, 22, 9, 33, 26, 0, time.UTC).In(loc)
-			r := Classify(Input{Provider: "glm", Err: e}, now)
+			r := Classify(Input{Provider: "glm", Vendor: "zai", Err: e}, now)
 			if r.Kind != KindRateLimited || r.ResetAt == nil || !r.ResetAt.Equal(want) {
 				t.Fatalf("got %+v, want reset %v", r, want)
 			}
@@ -189,7 +190,7 @@ func TestClassify_GLMResetIsShanghaiTime(t *testing.T) {
 	}
 	// An undated time is the next occurrence on the Shanghai clock, whatever the daemon zone.
 	now := time.Date(2026, 10, 22, 9, 33, 26, 0, time.UTC).In(time.FixedZone("EST", -5*3600))
-	r := Classify(Input{Provider: "glm", Err: "429 Usage limit reached for 5 hour. Your limit will reset at 17:35:18"}, now)
+	r := Classify(Input{Provider: "glm", Vendor: "zai", Err: "429 Usage limit reached for 5 hour. Your limit will reset at 17:35:18"}, now)
 	if r.ResetAt == nil || !r.ResetAt.Equal(want) {
 		t.Fatalf("undated: got %+v, want reset %v", r, want)
 	}
@@ -206,7 +207,7 @@ func TestClassify_ClaudeSessionLimitText(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			now := time.Date(2026, 10, 23, 12, 39, 0, 0, time.FixedZone("ICT", 7*3600)).In(loc)
-			r := Classify(Input{Provider: "claude-native", Err: e}, now)
+			r := Classify(Input{Provider: "claude-native", Vendor: "anthropic", Err: e}, now)
 			if r.Kind != KindRateLimited || r.Window != "5h" {
 				t.Fatalf("got %+v", r)
 			}
@@ -215,7 +216,7 @@ func TestClassify_ClaudeSessionLimitText(t *testing.T) {
 	}
 	// After the reset time has passed the next occurrence is tomorrow.
 	late := time.Date(2026, 10, 23, 14, 46, 0, 0, time.FixedZone("ICT", 7*3600))
-	r := Classify(Input{Provider: "claude-native", Err: e}, late)
+	r := Classify(Input{Provider: "claude-native", Vendor: "anthropic", Err: e}, late)
 	wantReset(t, r.ResetAt, want.AddDate(0, 0, 1))
 }
 
@@ -231,7 +232,7 @@ func TestClassify_ClaudeLimitTextVariants(t *testing.T) {
 		{"You've hit your session limit · resets 1pm (Not/AZone)", "5h", true}, // unknown zone falls back to now's
 	}
 	for _, c := range cases {
-		r := Classify(Input{Provider: "claude-native", Err: c.in}, now)
+		r := Classify(Input{Provider: "claude-native", Vendor: "anthropic", Err: c.in}, now)
 		if r.Kind != KindRateLimited || r.Window != c.window || (r.ResetAt != nil) != c.reset {
 			t.Errorf("%q -> %+v, want window %q reset %v", c.in, r, c.window, c.reset)
 		}
@@ -271,18 +272,18 @@ func TestClassify_ResetInferred(t *testing.T) {
 		in   Input
 		want bool
 	}{
-		{"glm dated", Input{Provider: "glm", Err: "429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18"}, true},
-		{"glm clock only", Input{Provider: "glm", Err: glmText}, true},
-		{"glm unparseable reset", Input{Provider: "glm", Err: "429 Usage limit reached for 5 hour. Your limit will reset at soon"}, false},
-		{"claude stated zone", Input{Provider: "claude-native", Err: "You've hit your session limit · resets 1pm (Asia/Saigon)"}, false},
-		{"claude zone-less", Input{Provider: "claude-native", Err: "You've hit your session limit · resets 1pm"}, true},
-		{"claude unknown zone", Input{Provider: "claude-native", Err: "You've hit your session limit · resets 1pm (Mars/Olympus)"}, true},
-		{"claude 5-hour zone-less", Input{Provider: "claude-native", Err: "5-hour limit reached - resets 3pm"}, true},
-		{"claude epoch", Input{Provider: "claude-native", Err: "Claude AI usage limit reached|1790000000"}, false},
-		{"claude signal", Input{Provider: "claude-native", Err: "exit status 1", Signal: &Signal{Status: "rejected", ResetsAt: time.Unix(1790000000, 0), Type: "five_hour"}}, false},
-		{"signal without time falls back to inferred text", Input{Provider: "claude-native", Err: "5-hour limit reached - resets 3pm", Signal: &Signal{Status: "rejected", Type: "five_hour"}}, true},
-		{"signal time wins over zone-less text", Input{Provider: "claude-native", Err: "5-hour limit reached - resets 3pm", Signal: &Signal{Status: "rejected", ResetsAt: time.Unix(1790000000, 0), Type: "five_hour"}}, false},
-		{"no reset at all", Input{Provider: "codex-native", Err: "You've hit your usage limit"}, false},
+		{"glm dated", Input{Provider: "glm", Vendor: "zai", Err: "429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18"}, true},
+		{"glm clock only", Input{Provider: "glm", Vendor: "zai", Err: glmText}, true},
+		{"glm unparseable reset", Input{Provider: "glm", Vendor: "zai", Err: "429 Usage limit reached for 5 hour. Your limit will reset at soon"}, false},
+		{"claude stated zone", Input{Provider: "claude-native", Vendor: "anthropic", Err: "You've hit your session limit · resets 1pm (Asia/Saigon)"}, false},
+		{"claude zone-less", Input{Provider: "claude-native", Vendor: "anthropic", Err: "You've hit your session limit · resets 1pm"}, true},
+		{"claude unknown zone", Input{Provider: "claude-native", Vendor: "anthropic", Err: "You've hit your session limit · resets 1pm (Mars/Olympus)"}, true},
+		{"claude 5-hour zone-less", Input{Provider: "claude-native", Vendor: "anthropic", Err: "5-hour limit reached - resets 3pm"}, true},
+		{"claude epoch", Input{Provider: "claude-native", Vendor: "anthropic", Err: "Claude AI usage limit reached|1790000000"}, false},
+		{"claude signal", Input{Provider: "claude-native", Vendor: "anthropic", Err: "exit status 1", Signal: &Signal{Status: "rejected", ResetsAt: time.Unix(1790000000, 0), Type: "five_hour"}}, false},
+		{"signal without time falls back to inferred text", Input{Provider: "claude-native", Vendor: "anthropic", Err: "5-hour limit reached - resets 3pm", Signal: &Signal{Status: "rejected", Type: "five_hour"}}, true},
+		{"signal time wins over zone-less text", Input{Provider: "claude-native", Vendor: "anthropic", Err: "5-hour limit reached - resets 3pm", Signal: &Signal{Status: "rejected", ResetsAt: time.Unix(1790000000, 0), Type: "five_hour"}}, false},
+		{"no reset at all", Input{Provider: "codex-native", Vendor: "openai", Err: "You've hit your usage limit"}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -309,15 +310,15 @@ func TestClassify_ResetZone(t *testing.T) {
 		in   Input
 		want string
 	}{
-		{"glm is UTC+8", Input{Provider: "glm", Err: glmText}, "UTC+8"},
-		{"glm dated is UTC+8", Input{Provider: "glm", Err: "429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18"}, "UTC+8"},
-		{"claude printed IANA zone", Input{Provider: "claude-native", Err: "You've hit your session limit · resets 1pm (Asia/Saigon)"}, "Asia/Saigon"},
-		{"claude zone-less is daemon-local", Input{Provider: "claude-native", Err: "5-hour limit reached - resets 3pm"}, "daemon-local:ICT"},
-		{"claude unknown zone is daemon-local", Input{Provider: "claude-native", Err: "You've hit your session limit · resets 1pm (Mars/Olympus)"}, "daemon-local:ICT"},
-		{"no reset parsed", Input{Provider: "codex-native", Err: "You've hit your usage limit"}, ""},
-		{"glm unparseable reset", Input{Provider: "glm", Err: "429 Usage limit reached for 5 hour. Your limit will reset at soon"}, ""},
-		{"absolute epoch", Input{Provider: "claude-native", Err: "Claude AI usage limit reached|1790000000"}, ""},
-		{"backend signal", Input{Provider: "claude-native", Err: "exit status 1", Signal: &Signal{Status: "rejected", ResetsAt: time.Unix(1790000000, 0), Type: "five_hour"}}, ""},
+		{"glm is UTC+8", Input{Provider: "glm", Vendor: "zai", Err: glmText}, "UTC+8"},
+		{"glm dated is UTC+8", Input{Provider: "glm", Vendor: "zai", Err: "429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18"}, "UTC+8"},
+		{"claude printed IANA zone", Input{Provider: "claude-native", Vendor: "anthropic", Err: "You've hit your session limit · resets 1pm (Asia/Saigon)"}, "Asia/Saigon"},
+		{"claude zone-less is daemon-local", Input{Provider: "claude-native", Vendor: "anthropic", Err: "5-hour limit reached - resets 3pm"}, "daemon-local:ICT"},
+		{"claude unknown zone is daemon-local", Input{Provider: "claude-native", Vendor: "anthropic", Err: "You've hit your session limit · resets 1pm (Mars/Olympus)"}, "daemon-local:ICT"},
+		{"no reset parsed", Input{Provider: "codex-native", Vendor: "openai", Err: "You've hit your usage limit"}, ""},
+		{"glm unparseable reset", Input{Provider: "glm", Vendor: "zai", Err: "429 Usage limit reached for 5 hour. Your limit will reset at soon"}, ""},
+		{"absolute epoch", Input{Provider: "claude-native", Vendor: "anthropic", Err: "Claude AI usage limit reached|1790000000"}, ""},
+		{"backend signal", Input{Provider: "claude-native", Vendor: "anthropic", Err: "exit status 1", Signal: &Signal{Status: "rejected", ResetsAt: time.Unix(1790000000, 0), Type: "five_hour"}}, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -330,8 +331,56 @@ func TestClassify_ResetZone(t *testing.T) {
 
 func TestClassify_ResetZoneLocalOffsetName(t *testing.T) {
 	now := time.Date(2026, 10, 22, 12, 39, 0, 0, time.Local)
-	got := Classify(Input{Provider: "claude-native", Err: "5-hour limit reached - resets 3pm"}, now).ResetZone
+	got := Classify(Input{Provider: "claude-native", Vendor: "anthropic", Err: "5-hour limit reached - resets 3pm"}, now).ResetZone
 	if want := DaemonLocalPrefix + "UTC" + now.Format("-07:00"); got != want {
 		t.Fatalf("ResetZone = %q, want %q", got, want)
+	}
+}
+
+// TestRateLimit_VendorProfile_GLMOnInstance: a GLM-worded 429 resolves by
+// the vendor profile, not the provider id -- on the zai profile it carries
+// the 5h window and the UTC+8 reset; on anthropic only the generic pattern
+// fires, with no window or reset.
+func TestRateLimit_VendorProfile_GLMOnInstance(t *testing.T) {
+	r := Classify(Input{Vendor: "zai", Err: glmText}, at(2026, 10, 22, 15, 10, 0))
+	if r.Kind != KindRateLimited || r.Window != "5h" {
+		t.Fatalf("zai: got %+v", r)
+	}
+	if r.ResetZone != "UTC+8" {
+		t.Fatalf("zai: ResetZone = %q, want UTC+8", r.ResetZone)
+	}
+	if r.ResetAt == nil {
+		t.Fatal("zai: ResetAt = nil, want a reset")
+	}
+
+	r = Classify(Input{Vendor: "anthropic", Err: glmText}, at(2026, 10, 22, 15, 10, 0))
+	if r.Kind != KindRateLimited {
+		t.Fatalf("anthropic: got %+v, want the generic pattern to fire", r)
+	}
+	if r.Window != "" || r.ResetAt != nil {
+		t.Fatalf("anthropic: got %+v, want no window and no reset", r)
+	}
+}
+
+func TestRateLimit_GenericUnknownVendor(t *testing.T) {
+	if r := Classify(Input{Vendor: "generic", Err: `API Error: 429 {"error":{"type":"rate_limit_error","message":"slow down"}}`}, at(2026, 10, 22, 10, 0, 0)); r.Kind != KindRateLimited {
+		t.Fatalf("generic 429: got %+v", r)
+	}
+	const claudeSession = "You've hit your session limit · resets 1pm (Asia/Saigon)"
+	if r := Classify(Input{Vendor: "generic", Err: claudeSession}, at(2026, 10, 23, 12, 39, 0)); r.Kind != "" {
+		t.Fatalf("generic claude text: got %+v, want not classified", r)
+	}
+	if r := Classify(Input{Vendor: "", Err: claudeSession}, at(2026, 10, 23, 12, 39, 0)); r.Kind != "" {
+		t.Fatalf("empty vendor: got %+v, want not classified", r)
+	}
+}
+
+func TestRateLimit_ClaudeTextOnlyForAnthropic(t *testing.T) {
+	const e = "You've hit your session limit · resets 1pm (Asia/Saigon)"
+	if r := Classify(Input{Vendor: "anthropic", Err: e}, at(2026, 10, 23, 12, 39, 0)); r.Kind != KindRateLimited || r.Window != "5h" {
+		t.Fatalf("anthropic: got %+v, want rate_limited/5h", r)
+	}
+	if r := Classify(Input{Vendor: "zai", Err: e}, at(2026, 10, 23, 12, 39, 0)); r.Kind != "" {
+		t.Fatalf("zai: got %+v, want not classified", r)
 	}
 }

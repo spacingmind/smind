@@ -24,6 +24,9 @@ type Input struct {
 	Provider string  // smind provider id: "glm", "claude-native", "codex-native", "kimi"
 	Err      string  // the run's final error text, cause first
 	Signal   *Signal // the last signal seen during the run, or nil
+	// Vendor is the resolved vendor profile of the provider
+	// (zai|anthropic|openai|generic); "" = generic.
+	Vendor string
 }
 
 // Result is the classification. Kind == "" means not rate limited.
@@ -77,7 +80,7 @@ func Classify(in Input, now time.Time) Result {
 			res.ResetInferred = false
 		}
 	}
-	txt := classifyText(in.Err, now)
+	txt := classifyText(in.Err, now, in.Vendor)
 	if txt.Kind == "" {
 		return res
 	}
@@ -107,60 +110,82 @@ func signalWindow(t string) string {
 	return ""
 }
 
-func classifyText(s string, now time.Time) Result {
+// profile says which vendor-specific pattern groups classifyText tries for
+// vendor: GLM's, Claude's or Codex's; "generic"/"" tries none of them (the
+// generic patterns always run, for every vendor).
+func profile(vendor string) (glm, claude, codex bool) {
+	switch vendor {
+	case "zai":
+		return true, false, false
+	case "anthropic":
+		return false, true, false
+	case "openai":
+		return false, false, true
+	}
+	return false, false, false
+}
+
+func classifyText(s string, now time.Time, vendor string) Result {
 	if s == "" {
 		return Result{}
 	}
-	if m := reGLM.FindStringSubmatch(s); m != nil {
-		r := Result{Kind: KindRateLimited, Window: m[1] + "h"}
-		if rm := reGLMReset.FindStringSubmatch(s); rm != nil {
-			// Z.ai prints its reset as wall-clock time with no zone, and its
-			// backend runs on UTC+8 (Asia/Shanghai): the dogfood 429 of
-			// 2026-10-22 16:33 +07 said "reset at 2026-10-22 17:35:18", and
-			// third-party reports of the same message read it as UTC+8
-			// (ExaDev/agent-shim#448). Never the daemon's own zone.
-			r.ResetAt = glmReset(rm[1], rm[2], now.In(glmZone))
-			r.ResetInferred = r.ResetAt != nil
-			if r.ResetAt != nil {
-				r.ResetZone = "UTC+8"
+	tryGLM, tryClaude, tryCodex := profile(vendor)
+	if tryGLM {
+		if m := reGLM.FindStringSubmatch(s); m != nil {
+			r := Result{Kind: KindRateLimited, Window: m[1] + "h"}
+			if rm := reGLMReset.FindStringSubmatch(s); rm != nil {
+				// Z.ai prints its reset as wall-clock time with no zone, and its
+				// backend runs on UTC+8 (Asia/Shanghai): the dogfood 429 of
+				// 2026-10-22 16:33 +07 said "reset at 2026-10-22 17:35:18", and
+				// third-party reports of the same message read it as UTC+8
+				// (ExaDev/agent-shim#448). Never the daemon's own zone.
+				r.ResetAt = glmReset(rm[1], rm[2], now.In(glmZone))
+				r.ResetInferred = r.ResetAt != nil
+				if r.ResetAt != nil {
+					r.ResetZone = "UTC+8"
+				}
 			}
+			return r
 		}
-		return r
 	}
-	if m := reClaudeOld.FindStringSubmatch(s); m != nil {
-		r := Result{Kind: KindRateLimited}
-		if sec, err := strconv.ParseInt(m[1], 10, 64); err == nil {
-			t := time.Unix(sec, 0).UTC()
-			r.ResetAt = &t
+	if tryClaude {
+		if m := reClaudeOld.FindStringSubmatch(s); m != nil {
+			r := Result{Kind: KindRateLimited}
+			if sec, err := strconv.ParseInt(m[1], 10, 64); err == nil {
+				t := time.Unix(sec, 0).UTC()
+				r.ResetAt = &t
+			}
+			return r
 		}
-		return r
-	}
-	if m := reClaudeNew.FindStringSubmatch(s); m != nil {
-		r := Result{Kind: KindRateLimited, Window: m[1] + "h"}
-		if rm := reClaudeRst.FindStringSubmatch(s); rm != nil {
-			r.ResetAt = nextAmPm(rm[1], rm[2], rm[3], now)
-			r.ResetInferred = r.ResetAt != nil
-			r.ResetZone = daemonZone(r.ResetAt, now)
-		}
-		return r
-	}
-	if m := reClaudeHit.FindStringSubmatch(s); m != nil {
-		r := Result{Kind: KindRateLimited, Window: claudeHitWindow(m[1])}
-		if rm := reClaudeResetTZ.FindStringSubmatch(s); rm != nil {
-			r.ResetAt = nextAmPmIn(rm[1], rm[2], rm[3], rm[4], now)
-			r.ResetInferred = r.ResetAt != nil && !knownZone(rm[4])
-			switch {
-			case r.ResetAt == nil:
-			case r.ResetInferred:
+		if m := reClaudeNew.FindStringSubmatch(s); m != nil {
+			r := Result{Kind: KindRateLimited, Window: m[1] + "h"}
+			if rm := reClaudeRst.FindStringSubmatch(s); rm != nil {
+				r.ResetAt = nextAmPm(rm[1], rm[2], rm[3], now)
+				r.ResetInferred = r.ResetAt != nil
 				r.ResetZone = daemonZone(r.ResetAt, now)
-			default:
-				r.ResetZone = rm[4]
 			}
+			return r
 		}
-		return r
+		if m := reClaudeHit.FindStringSubmatch(s); m != nil {
+			r := Result{Kind: KindRateLimited, Window: claudeHitWindow(m[1])}
+			if rm := reClaudeResetTZ.FindStringSubmatch(s); rm != nil {
+				r.ResetAt = nextAmPmIn(rm[1], rm[2], rm[3], rm[4], now)
+				r.ResetInferred = r.ResetAt != nil && !knownZone(rm[4])
+				switch {
+				case r.ResetAt == nil:
+				case r.ResetInferred:
+					r.ResetZone = daemonZone(r.ResetAt, now)
+				default:
+					r.ResetZone = rm[4]
+				}
+			}
+			return r
+		}
 	}
-	if reCodex.MatchString(s) {
-		return Result{Kind: KindRateLimited}
+	if tryCodex {
+		if reCodex.MatchString(s) {
+			return Result{Kind: KindRateLimited}
+		}
 	}
 	if reGenericUL.MatchString(s) || reGenericRLE.MatchString(s) ||
 		(strings.Contains(s, "429") && reRateWords.MatchString(s)) {

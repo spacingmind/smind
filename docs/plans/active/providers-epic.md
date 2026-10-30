@@ -198,7 +198,7 @@ Running total: **USD 0.00** of 2.00.
 - [x] PR0: ADR-0046 + this plan (docs only)
 - [x] PR1 registry generalisation + Kimi fix (code merged-ready; see Validation)
 - [x] PR2 typed env + provider secrets (branch `smind/task-lead-providers-epic-pr2-secrets-typed-dmiaxo7isgtc`)
-- [ ] PR3 claude-code recipes + vendor rate-limit profiles
+- [x] PR3 claude-code recipes + vendor rate-limit profiles (code ready; see Validation)
 - [x] PR4 Codex endpoint instances (code ready; see Validation. Recipe row 11 and the LiteLLM/OpenRouter variants land with PR3's catalog; the key comes from the instance env until PR2's secret refs plug into `codexEndpointLaunch`)
 - [ ] PR5 five ACP providers
 
@@ -280,3 +280,22 @@ PR5 (five native ACP providers), 2026-10-31, branch `smind/task-lead-providers-e
 Mutations (a test failure each, file restored with `git checkout -- <file>`): drop `NO_BROWSER=true` from the probe env (ProbeUsesNoBrowser); disable the runner's `WithoutMcpServers` (NoMCPServersSpecHidesMcp); disable `noMCP` in `SupportsMcpHttp` (SupportsMcpServersOptOut); drop the install text (MissingBinaryNamed); disable the version gate (TooOldVersion); drop `OPENCODE_PERMISSION` from the row (OpenCodePermissionEnvAsks) and set it to `allow` (the real-opencode permission test: the decider is never called); cut the `acp` argument from the Cursor command (AllFive_RowsRegister, after a review found the first version of that test did not catch it); remove the `opencode` identity row in the web catalog (provider-icon and provider-catalog tests).
 
 Decisions in PR5: the five rows are built-in ids, so a `providers.custom` entry using `opencode|copilot|cline|goose|cursor` must be renamed (breaking, no installed base). A new `Spec.Health` carries install/login/unverified/min-version/version-arg data; a new `Spec.NoMCPServers` is the data form of the `supportsMcpServers: false` opt-out. Not done: clientCapabilities config, Gemini (not requested), recipe row 12 (`chat-completions-via-opencode`, PR3 owns the recipe file), real-login runs of the four paid/closed agents, the UI does not yet show the install/login hint text (it is in the `provider.test` detail).
+
+PR3 (claude-code recipes + vendor rate-limit profiles), 2026-10-31. Hermetic: fake Anthropic-compatible `httptest` server, sentinel key `sentinel-NOT-A-REAL-KEY-12345`, no network, no real key, cost 0.
+
+| AC | Evidence |
+|---|---|
+| AC3.1 | `TestRecipeEntry_ZAIOnlyNeedsKey`, `TestAddFromRecipe_WritesInstanceAndSecret` (only `secrets.api-key` supplied), `TestAddRecipeInstance_WritesConfigNoKey` |
+| AC3.2 | `TestRecipe_ZAI_RunAgainstFakeAnthropicServer` (path `/v1/messages`, `Authorization: Bearer <sentinel>`, `--disallowedTools WebSearch`, `--model glm-5.3`, sentinel not in argv, private `CLAUDE_CONFIG_DIR`, base URL env), `TestRecipe_PrivateConfigDirSet` |
+| AC3.3 | `TestRateLimit_VendorProfile_GLMOnInstance` (zai: 5h + UTC+8 reset), `TestRateLimit_InstanceCooldownLeavesBaseRunning` (cooldown on the instance id only), `TestVendor_CompatibleInstanceIsGenericUnlessSet` |
+| AC3.4 | `TestRateLimit_GenericUnknownVendor`, `TestRateLimit_ClaudeTextOnlyForAnthropic` |
+| AC3.5 | `TestRecipes_AllParseAndValidate`, `TestRecipe_InferredRowsFlagged`, `TestRecipesRPC_ListsCatalog` (`unverified` per row); the doc table repeats the flags |
+| AC3.6 | `TestRecipe_NoSecretLiteralsInCatalog`, `TestRecipe_ThinkingHiddenHidesOption` (argv of a hidden instance equals the unspecified-level argv), `TestProviderList_RecipeFields` (`thinking: hidden`) |
+| AC3.7 | `TestRecipe_InheritToggleUsesDefaultConfigDir`, `TestRecipe_PinnedConfigDirWins` |
+| addFromRecipe | `TestAddFromRecipe_RefusesAgentCaller`, `_SecretWriteOnly`, `_MissingKeyWritesNothing`, `_IDCollision`, `_Idempotent`, `_LocalPlaceholder`, `_UserBaseURL`; `provider.addFromRecipe` is in the plugin-session human-only list |
+
+Mutations (each made the named test FAIL; file restored with `git checkout -- <file>`): literal key in the zai row (`TestRecipe_NoSecretLiteralsInCatalog`, `TestRecipes_AllParseAndValidate`); GLM branch for every vendor (`TestRateLimit_VendorProfile_GLMOnInstance`, `TestRateLimit_GenericUnknownVendor`); no Vendor passed at the registry call (`TestRateLimit_InstanceCooldownLeavesBaseRunning`); drop the private dir (`TestRecipe_PrivateConfigDirSet`, `TestRecipe_ZAI_RunAgainstFakeAnthropicServer`); remove the agent refusal (`TestAddFromRecipe_RefusesAgentCaller`); key in the result (`TestAddFromRecipe_WritesInstanceAndSecret`); disable the hidden-thinking override (`TestRecipe_ThinkingHiddenHidesOption`).
+
+Decisions taken in PR3: a local keyless recipe (Ollama, LM Studio) stores its non-secret placeholder token through the secret store (kind `secretDefault`), so the typed-env rule "no literal on a secret-kind name" stays unrelaxed. The vendor profile is a Spec field (`zai|anthropic|openai|generic`) set by the recipe or by hand in `providers.custom[].vendor`; built-ins carry it from a table in `internal/providers/vendor.go`, an instance of a compatible endpoint is `generic` unless set. A private `CLAUDE_CONFIG_DIR` is applied to a claude-code instance that sets `ANTHROPIC_BASE_URL` and no `CLAUDE_CONFIG_DIR`, unless `inheritClaudeConfig`.
+
+Not done in PR3 (deliberate): making the built-in `glm` provider itself Claude Code + Z.AI and deleting `agents.glm.maxTurns` (it would change what every `peer-glm` run executes on the live daemon: needs the Human's go; today the default path for a new GLM login is the `zai-glm` recipe and `glm-acp-agent` stays); `addFromRecipe` for the OpenCode row 12 (acp harness; refused with a clear message); UI (PR6); no live probe, so every `verifiedAt` is empty; the web types for the two RPCs are additive only.
