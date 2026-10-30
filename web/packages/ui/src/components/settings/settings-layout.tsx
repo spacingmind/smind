@@ -110,14 +110,16 @@ export function SettingsStatStrip({
     <div
       data-testid={testId}
       data-slot="settings-stat-strip"
-      className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-[repeat(auto-fit,minmax(0,1fr))]"
+      className="overflow-hidden rounded-xl border border-border bg-card"
     >
-      {stats.map((stat) => (
-        <div key={stat.label} className="bg-card px-4 py-3">
-          <p className="text-ui-sm text-foreground-muted">{stat.label}</p>
-          <p className="text-ui-lg font-semibold tabular-nums text-foreground">{stat.value}</p>
-        </div>
-      ))}
+      <div className="-m-px grid grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(0,1fr))]">
+        {stats.map((stat) => (
+          <div key={stat.label} className="border-b border-r border-border px-4 py-3">
+            <p className="text-ui-sm text-foreground-muted">{stat.label}</p>
+            <p className="text-ui-lg font-semibold tabular-nums text-foreground">{stat.value}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
