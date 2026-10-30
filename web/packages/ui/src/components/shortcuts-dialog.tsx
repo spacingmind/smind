@@ -55,7 +55,6 @@ function KeyCaps({ keys }: { keys: string }) {
  */
 function ShortcutRow({
   row,
-  scope,
   capturing,
   onStartCapture,
   onStartChordCapture,
@@ -65,7 +64,6 @@ function ShortcutRow({
   conflictLabel,
 }: {
   row: ReturnType<typeof helpSections>[number]["rows"][number];
-  scope: string;
   capturing: false | "single" | "chord";
   onStartCapture: () => void;
   onStartChordCapture: () => void;
@@ -116,7 +114,7 @@ function ShortcutRow({
           </div>
         )}
       </td>
-      <td className="px-4 py-1.5">
+      <td className="whitespace-nowrap px-4 py-1.5">
         {capturing === "chord" ? (
           <span className="text-ui-sm text-foreground-muted" data-testid="shortcut-capturing">
             Recording a chord… (Enter to save, Esc to cancel)
@@ -133,12 +131,13 @@ function ShortcutRow({
           <KeyCaps keys={row.keys} />
         )}
       </td>
-      <td className="px-4 py-1.5 text-ui-sm text-foreground-muted">{scope}</td>
+      <td className="hidden whitespace-nowrap px-4 py-1.5 text-ui-sm text-foreground-muted sm:table-cell">Global</td>
       <td className="px-4 py-1.5">
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Button
             variant="ghost"
             size="xs"
+            className="whitespace-nowrap"
             onClick={capturing ? onCancelCapture : onStartCapture}
             aria-label={`${capturing ? "Cancel rebinding" : "Change shortcut for"} ${row.label}`}
           >
@@ -148,6 +147,7 @@ function ShortcutRow({
             <Button
               variant="ghost"
               size="xs"
+              className="whitespace-nowrap"
               onClick={onStartChordCapture}
               aria-label={`Record a chord for ${row.label}`}
             >
@@ -158,6 +158,7 @@ function ShortcutRow({
             <Button
               variant="ghost"
               size="xs"
+              className="whitespace-nowrap"
               onClick={onReset}
               aria-label={`Reset shortcut for ${row.label}`}
             >
@@ -200,58 +201,62 @@ export function ShortcutRows({ query = "" }: { query?: string } = {}) {
           className="overflow-hidden rounded-xl border border-border bg-card"
           data-testid="shortcut-sections"
         >
-          <table className="w-full border-collapse text-left text-ui-base">
-            <thead>
-              <tr className="border-b border-border">
-                <th scope="col" className="px-4 py-2 text-ui-sm font-medium text-foreground-muted">
-                  Command
-                </th>
-                <th scope="col" className="px-4 py-2 text-ui-sm font-medium text-foreground-muted">
-                  Keybinding
-                </th>
-                <th scope="col" className="px-4 py-2 text-ui-sm font-medium text-foreground-muted">
-                  Scope
-                </th>
-                <th scope="col" className="px-4 py-2 text-ui-sm font-medium text-foreground-muted">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            {sections.map((section) => (
-              <tbody key={section.id} data-testid={`shortcut-section-${section.id}`}>
-                <tr>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-left text-ui-base">
+              <thead>
+                <tr className="border-b border-border">
+                  <th scope="col" className="px-4 py-2 text-ui-sm font-medium text-foreground-muted">
+                    Command
+                  </th>
+                  <th scope="col" className="px-4 py-2 text-ui-sm font-medium text-foreground-muted">
+                    Keybinding
+                  </th>
                   <th
-                    colSpan={4}
-                    scope="colgroup"
-                    className="bg-muted/40 px-4 py-1.5 text-ui-sm font-medium uppercase tracking-wide text-foreground-muted"
+                    scope="col"
+                    className="hidden whitespace-nowrap px-4 py-2 text-ui-sm font-medium text-foreground-muted sm:table-cell"
                   >
-                    {section.title}
+                    Scope
+                  </th>
+                  <th scope="col" className="px-4 py-2 text-ui-sm font-medium text-foreground-muted">
+                    Actions
                   </th>
                 </tr>
-                {section.rows.map((row) => {
-                  const effective = bindings.find((b) => b.id === row.id)?.effectiveCombo;
-                  const conflicts =
-                    effective === undefined || effective === null
-                      ? []
-                      : conflictingBindings(bindings, effective, row.id, isMac);
-                  return (
-                    <ShortcutRow
-                      key={row.id}
-                      row={row}
-                      scope={section.title}
-                      capturing={capturing?.id === row.id ? capturing.mode : false}
-                      onStartCapture={() => setCapturing({ id: row.id, mode: "single" })}
-                      onStartChordCapture={() => setCapturing({ id: row.id, mode: "chord" })}
-                      onCancelCapture={() => setCapturing(null)}
-                      onRebind={(combo) => handleRebind(row.id, combo)}
-                      onReset={() => resetBinding(row.id)}
-                      conflictLabel={conflicts.length > 0 ? conflicts.map((c) => c.label).join(", ") : null}
-                    />
-                  );
-                })}
-              </tbody>
-            ))}
-          </table>
+              </thead>
+              {sections.map((section) => (
+                <tbody key={section.id} data-testid={`shortcut-section-${section.id}`}>
+                  <tr>
+                    <th
+                      colSpan={4}
+                      scope="colgroup"
+                      className="bg-muted/40 px-4 py-1.5 text-ui-sm font-medium uppercase tracking-wide text-foreground-muted"
+                    >
+                      {section.title}
+                    </th>
+                  </tr>
+                  {section.rows.map((row) => {
+                    const effective = bindings.find((b) => b.id === row.id)?.effectiveCombo;
+                    const conflicts =
+                      effective === undefined || effective === null
+                        ? []
+                        : conflictingBindings(bindings, effective, row.id, isMac);
+                    return (
+                      <ShortcutRow
+                        key={row.id}
+                        row={row}
+                        capturing={capturing?.id === row.id ? capturing.mode : false}
+                        onStartCapture={() => setCapturing({ id: row.id, mode: "single" })}
+                        onStartChordCapture={() => setCapturing({ id: row.id, mode: "chord" })}
+                        onCancelCapture={() => setCapturing(null)}
+                        onRebind={(combo) => handleRebind(row.id, combo)}
+                        onReset={() => resetBinding(row.id)}
+                        conflictLabel={conflicts.length > 0 ? conflicts.map((c) => c.label).join(", ") : null}
+                      />
+                    );
+                  })}
+                </tbody>
+              ))}
+            </table>
+          </div>
         </div>
       )}
       {Object.keys(overrides).length > 0 && (
