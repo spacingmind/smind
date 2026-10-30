@@ -520,6 +520,21 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		// ADR-0046 section 4: provider_secrets is a new table (also in
+		// schema.sql); this entry re-creates it should a database lack it.
+		name: "provider_secrets",
+		apply: func(db *sql.DB) error {
+			_, err := db.Exec(`CREATE TABLE IF NOT EXISTS provider_secrets (
+				instance_id TEXT NOT NULL,
+				name TEXT NOT NULL,
+				value TEXT NOT NULL,
+				created_at TIMESTAMP NOT NULL,
+				updated_at TIMESTAMP NOT NULL,
+				PRIMARY KEY (instance_id, name))`)
+			return err
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and
