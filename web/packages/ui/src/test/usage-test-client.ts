@@ -3,7 +3,16 @@ import type { AccountUsage, AccountUsageParams } from "@/lib/account-usage/types
 import { RpcError, type WsClient } from "@/lib/ws-client";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { usageResult } from "@/test/account-usage-fixtures";
-import type { Account, AgentProfile, ProviderDirSuggestion, ProviderListResult, ProviderTestResult, RunSummary } from "@/lib/types";
+import type {
+  Account,
+  AddFromRecipeParams,
+  AgentProfile,
+  ProviderDirSuggestion,
+  ProviderListResult,
+  ProviderRecipesResult,
+  ProviderTestResult,
+  RunSummary,
+} from "@/lib/types";
 
 /**
  * A scripted daemon for the plan-usage tests: answers `account.usage` from a
@@ -49,6 +58,14 @@ export class FakeUsageDaemon {
   dirSuggestions: ProviderDirSuggestion[] = [];
   /** When set, `provider.addInstance` rejects with it. */
   addInstanceError: Error | null = null;
+  /** Answers `provider.recipes`. */
+  recipes: ProviderRecipesResult = { recipes: [] };
+  /** When set, `provider.recipes` rejects with it. */
+  recipesError: Error | null = null;
+  /** When set, `provider.addFromRecipe` rejects with it. */
+  addFromRecipeError: Error | null = null;
+  /** When set, `provider.setSecret` / `provider.clearSecret` reject with it. */
+  secretError: Error | null = null;
   /** When set, `provider.setEnv` rejects with it. */
   setEnvError: Error | null = null;
   /** When set, every `account.list` / `provider.list` / `provider.test` / account-mutation request rejects with it. */
@@ -130,6 +147,75 @@ export class FakeUsageDaemon {
             this.dirSuggestions = this.dirSuggestions.filter((s) => s.dir !== p.dir);
             queueMicrotask(() => this.emit("provider.updated", { id: p.id }));
             return { id: p.id };
+          }
+          case "provider.recipes":
+            if (this.recipesError) throw this.recipesError;
+            return this.recipes;
+          case "provider.addFromRecipe": {
+            // The daemon's behaviour: write the instance, store the key (never echoed anywhere), publish provider.updated.
+            const p = params as AddFromRecipeParams;
+            if (this.addFromRecipeError) throw this.addFromRecipeError;
+            const id = p.id || p.recipe;
+            if (this.providers.providers.some((info) => info.id === id)) {
+              throw new Error(`provider.addFromRecipe: id "${id}" is already used`);
+            }
+            this.providers = {
+              ...this.providers,
+              providers: [
+                ...this.providers.providers,
+                {
+                  id,
+                  label: p.label || id,
+                  runner: "claude-native",
+                  extends: "claude-native",
+                  custom: true,
+                  recipe: p.recipe,
+                  secrets: [{ name: "api-key", env: "ANTHROPIC_AUTH_TOKEN", set: true, fingerprint: "0001" }],
+                },
+              ],
+            };
+            queueMicrotask(() => this.emit("provider.updated", { id }));
+            return { id, created: true, needsKey: false, secrets: [{ name: "api-key", set: true, fingerprint: "0001" }] };
+          }
+          case "provider.setSecret": {
+            // The daemon's behaviour: store the value (only a fingerprint comes back), publish provider.updated.
+            const p = params as { instanceId: string; name: string; value: string };
+            if (this.secretError) throw this.secretError;
+            this.providers = {
+              ...this.providers,
+              providers: this.providers.providers.map((info) => {
+                if (info.id !== p.instanceId) return info;
+                const secrets = [...(info.secrets ?? [])];
+                const index = secrets.findIndex((s) => s.name === p.name);
+                const stored = { name: p.name, env: index === -1 ? "" : secrets[index].env, set: true, fingerprint: "0002" };
+                if (index === -1) secrets.push(stored);
+                else secrets[index] = stored;
+                return { ...info, secrets };
+              }),
+            };
+            queueMicrotask(() => this.emit("provider.updated", { id: p.instanceId }));
+            return { instanceId: p.instanceId, name: p.name, set: true, fingerprint: "0002" };
+          }
+          case "provider.clearSecret": {
+            const p = params as { instanceId: string; name: string };
+            if (this.secretError) throw this.secretError;
+            this.providers = {
+              ...this.providers,
+              providers: this.providers.providers.map((info) => {
+                if (info.id !== p.instanceId) return info;
+                const secrets = [...(info.secrets ?? [])];
+                const index = secrets.findIndex((s) => s.name === p.name);
+                const stored =
+                  index === -1
+                    ? { name: p.name, env: "", set: false }
+                    : { name: secrets[index].name, env: secrets[index].env, set: false };
+                if (index === -1) secrets.push(stored);
+                else secrets[index] = stored;
+                return { ...info, secrets };
+              }),
+            };
+            queueMicrotask(() => this.emit("provider.updated", { id: p.instanceId }));
+            return { instanceId: p.instanceId, name: p.name, set: false };
           }
           case "provider.reload":
             queueMicrotask(() => this.emit("provider.updated", { id: "" }));
