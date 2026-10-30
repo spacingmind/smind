@@ -128,6 +128,23 @@ nothing, touch no file not named"). Suggested S1 steps, at most two Peers in par
 A Peer that fails twice on a review finding is fixed by the Lead. S2 splits the same way (digest, rails, seat/MCP entry, verdict+clamp, seed/CLI); S3 UI frame loops go to
 `peer-sonnet` only for screenshots.
 
+## S1 engine design (binding for the S1 implementation; Lead 2026-10-31)
+
+Package `internal/permpolicy`. Files and their exported surface (one owner per file):
+
+- `split.go`: `SplitCommand(cmd string) Parsed`. `Parsed{Segments []Segment; Normalized string; HeredocBytes int; Unparsed []string}`; `Segment{Argv []string; Env []string; Redirects []Redirect; Dynamic bool; Raw string}`; `Redirect{Op, Target string}`. Never panics, never returns an error: doubt goes in `Unparsed` (non-empty means the caller must ask). `$(…)`/backticks/subshells/`bash -c '<literal>'` contents are parsed recursively and **appended** as extra segments (so the floor sees them) and the outer segment is `Dynamic`; a word containing `$`, a backtick, `*`, `?` or `[` makes its segment `Dynamic`. `eval`, `bash|sh|zsh -c` with a non-literal, `<(`/`>(`, unbalanced quotes, an argv0 beginning with `$` → `Unparsed`. Heredoc bodies are not segments; `Normalized` replaces each body with `<<TAG [heredoc N bytes]`.
+- `request.go`: `Action` (`allow|deny|ask`), `Request`, `Decision`, `SegmentDecision` (types only).
+- `paths.go`: `ResolvePath(p, cwd string) (string, error)` (abs; `~`/`$HOME`/`${HOME}` expanded from `os.UserHomeDir`; `internal/realpath.Resolve` on the deepest existing parent, then the missing tail re-joined; error = unresolvable → ask) and `Within(resolved string, roots []string) bool` (roots resolved the same way; path-separator aware, never a bare string prefix); `SegmentPaths(seg Segment, cwd string) ([]string, error)` (every non-flag word after argv0, the value of `--flag=value`, redirect targets).
+- `floor.go`: `CheckFloor(req Request, p Parsed) (FloorHit, bool)`; `FloorHit{ID, Reason string}`; ids exactly the ADR §2.1 ids. Wrapper unwrapping (`env`, `command`, `nohup`, `time`, `exec`, `xargs`, `builtin`, `nice`) before matching; `sudo` is a floor hit. Also covers writes outside the worktree: an `Edit`/`Write` path, a redirect target or the target of `cp|mv|rm|tee|touch|mkdir|ln|chmod|chown|dd|install|truncate` that resolves outside the worktree **and** outside the OS temp dir → `no-destructive-outside`.
+- `load.go`: `Load(data []byte) (*Policy, error)`; `Policy{Version int; Rules []Rule; Sha string}`; `Rule{ID, Action, Why string; Match Match}`; strict YAML (anchors, aliases, tags, merge keys, duplicate keys, unknown fields = error with a field path), caps, `Policy.Sha` = hex sha256 of the raw bytes. Every Bash `allow` counts as mutating and needs `paths.within`. The floor check on an `allow` (a probe segment built from `argv0 subcommand allow_only…`) is added in the decide step.
+- `decide.go`: `Decide(req Request, pol *Policy) Decision`. `pol == nil` = floor + ask. Order: `Truncated` → ask; floor on the parsed segments (also when `Unparsed`, a floor hit wins) → deny; `Unparsed`/unresolvable path → ask; deny rules (any segment matches) → deny; ask rules → ask; allow only when **every** segment is covered by an allow rule, no segment is `Dynamic`, there is no redirect, every segment path and the cwd is `Within` the rule's `paths.within` (placeholders `{worktree}`, `{taskBranch}`), and `Worktree != ""`; otherwise ask. Command match: `argv0` exact, `subcommand` = the first N non-flag words (`"pr create"` is two), a flag **before** the subcommand means no match (ask), `args.allow_only` constrains every arg after the subcommand to exact literals (placeholders expanded), `args.deny_flags` exact flags that stop a match. Non-Bash tools match on `tool` + `paths`.
+- `engine.go`: `Engine` (policy file path, mtime+size reload cache, `Enabled func() bool`, `AuditSink`), `Evaluate(Request) (Decision, bool)` (false = engine off, nothing audited), `RecordOutcome(requestID, outcome)`, `Status()`, `Explain(Request)` (dry run, no audit), `Rules()`. Audit text goes through `internal/learning/redact` and is capped (target 512, 8 paths).
+- `template.go`: the commented template of `smind policy init` (zero active allow rules, loads valid).
+
+Other files: `internal/store/policyaudit.go` + `schema.sql` (`permission_policy_audit`, new table, no migrate entry; `AppendPolicyAudit`, `ListPolicyAudit`, `SweepPolicyAudit`); `internal/config/steward.go` (`Config.Steward.Policy.Enabled`, default false, read per decision like `plugins.enabled`); `internal/taskrunner` (`PermissionResolvedByPolicyAllow|PolicyDeny`, `PermissionDetail.Policy`, and an optional `DenyReasonDecider` so the claude adapter's deny message carries the floor id; ACP/codex have no message channel); `internal/runs/decider_policy.go` (the hook, called after the system-run and AutoAccept branches and before the pending channel); `internal/wsapi/policy.go`; `cmd/smind/policy*.go`.
+
+Stated limits: a provider adapter that sends no detail (Codex, an ACP non-execute/edit call, a Claude non-Bash tool) reaches the engine with an unknown tool and is `ask` unless a deny/ask rule names the tool; a command the provider truncated (`detail.Truncated`) is `ask`; OS-temp writes are not floor-denied.
+
 ## Decisions
 
 - ADR-0047 binds everything; D1–D18 are Supervisor defaults 2026-10-31, vetoable.
@@ -139,7 +156,8 @@ A Peer that fails twice on a review finding is fixed by the Lead. S2 splits the 
 ## Progress
 
 - S0 plan + ADR: this PR (docs only, Proposed).
-- S1–S4: not started.
+- S1: in progress (Lead 2026-10-31): contract `steward-seat-s1.contract.md`, engine design above, GLM briefs in steps.
+- S2–S4: not started.
 
 ## Validation
 
