@@ -85,7 +85,7 @@ test('jsonld', () => {
 })
 
 test('og card', () => {
-  const png = fs.readFileSync(path.join(REPO_ROOT, 'docs-site', '.vitepress', 'public', 'og-card.png'))
+  const png = fs.readFileSync(path.join(REPO_ROOT, 'docs-site', 'assets', 'og-card.png'))
   assert.ok(png.length < 200000, `og-card.png too large: ${png.length} bytes`)
   assert.ok(png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), 'og-card.png is not a PNG')
   assert.equal(png.readUInt32BE(16), OG_IMAGE_WIDTH, 'PNG IHDR width')
@@ -105,6 +105,12 @@ test('og card', () => {
   assert.ok(config.includes("'summary_large_image'"), 'config: summary_large_image')
   assert.ok(config.includes("'og:image'"), 'config: og:image')
   assert.ok(config.includes("'twitter:image'"), 'config: twitter:image')
+  assert.ok(config.includes('og-card.png'), 'config: og-card.png copy')
+})
+
+test('code block language label is readable', () => {
+  const css = fs.readFileSync(path.join(REPO_ROOT, 'docs-site', '.vitepress', 'theme', 'custom.css'), 'utf8')
+  assert.match(css, /span\.lang\s*\{[^}]*--vp-c-text-2/)
 })
 
 test('version line from manifest', () => {

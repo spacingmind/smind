@@ -135,6 +135,7 @@ export default defineConfig({
     fs.writeFileSync(path.join(out, 'CNAME'), 'docs.spacingmind.com\n')
     fs.writeFileSync(path.join(out, '.nojekyll'), '')
     fs.writeFileSync(path.join(out, 'robots.txt'), buildRobotsTxt())
+    fs.copyFileSync(path.join(__dirname, '../assets/og-card.png'), path.join(out, 'og-card.png'))
     fs.writeFileSync(path.join(out, 'llms.txt'), buildLlmsTxt(pages))
     fs.writeFileSync(path.join(out, 'llms-full.txt'), buildLlmsFullTxt(pages))
     for (const p of pages) fs.writeFileSync(path.join(out, `${p.slug}.md`), rawMarkdown(p, v))
