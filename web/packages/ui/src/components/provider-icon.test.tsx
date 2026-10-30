@@ -62,6 +62,15 @@ describe("provider-icon", () => {
     for (const id of ["acme-agent", "my-custom-acp"]) expect(html(id)).toBe(generic);
   });
 
+  // TestIcons_NewACPProvidersRegistered
+  it("new ACP providers wear the agent glyph, never the generic one", () => {
+    const html = (p: string) => render(<ProviderIcon provider={p} size={16} />).container.innerHTML.replace(/ data-testid="[^"]*"/, "");
+    for (const id of ["opencode", "copilot", "cline", "goose", "cursor"]) {
+      expect(html(id)).toBe(html("glm"));
+      expect(html(id)).not.toBe(html("zzz-unknown"));
+    }
+  });
+
   it("an instance of glm wears the agent glyph, not the generic one", () => {
     const html = (p: string) => render(<ProviderIcon provider={p} size={16} />).container.innerHTML;
     useProviderFamilies.getState().setFromCatalog([{ id: "glm-work", extends: "glm", custom: true }]);

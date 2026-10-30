@@ -497,6 +497,9 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	case r.acpPermissionPolicy != nil:
 		opts = append(opts, acp.WithPermissionPolicy(r.acpPermissionPolicy))
 	}
+	if spec, ok := r.providerRegistry().Get(string(provider)); ok && spec.NoMCPServers {
+		opts = append(opts, acp.WithoutMcpServers())
+	}
 
 	env, err := r.launchEnvEntries(provider)
 	if err != nil {

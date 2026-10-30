@@ -175,7 +175,7 @@ func TestProviderInstance_SideBySideWithBase(t *testing.T) {
 	for _, p := range r.ProviderCatalog() {
 		ids = append(ids, string(p.ID))
 	}
-	if got := strings.Join(ids, ","); got != "claude-native,glm,kimi,codex-native,claude-a,claude-b" {
+	if got := strings.Join(ids, ","); got != "claude-native,glm,kimi,codex-native,opencode,copilot,cline,goose,cursor,claude-a,claude-b" {
 		t.Fatalf("catalog ids = %s", got)
 	}
 }
