@@ -1368,13 +1368,17 @@ type permissionRequestParams struct {
 // permissionResolvedParams is the params payload of a "permission_resolved"
 // event task.prompt/run.attach emit for taskrunner.EventTypePermissionResolved.
 // Reason is the wire form of taskrunner.PermissionResolution ("human" |
-// "auto_safe" | "timeout") -- what lets a caller (the web UI, or a log
+// "auto_safe" | "auto_accept" | "timeout" | "provider_cancellation" |
+// "policy_allow" | "policy_deny") -- what lets a caller (the web UI, or a log
 // reader) distinguish a real person clicking a button from either kind of
-// auto-resolution, per task-permission-ux.md Item 2.
+// auto-resolution, per task-permission-ux.md Item 2, and a policy decision
+// (ADR-0047 §2) from both. RuleID is set for the policy reasons only: the
+// rule or floor id that decided.
 type permissionResolvedParams struct {
 	RequestID string `json:"requestId"`
 	OptionID  string `json:"optionId"`
 	Reason    string `json:"reason"`
+	RuleID    string `json:"ruleId,omitempty"`
 }
 
 // handleTaskPrompt starts a Run and then behaves like an implicit
@@ -1761,6 +1765,7 @@ func attachAndStream(ctx context.Context, rc *requestContext, reg *runs.Registry
 					RequestID: e.PermissionRequestID,
 					OptionID:  e.PermissionOptionID,
 					Reason:    string(e.PermissionResolution),
+					RuleID:    e.PermissionRuleID,
 				})
 			}
 		case <-cancelCh:
@@ -1827,6 +1832,10 @@ type runLogEvent struct {
 	// Reason is the wire form of taskrunner.PermissionResolution, populated
 	// for a "permission_resolved" entry -- see permissionResolvedParams.
 	Reason string `json:"reason,omitempty"`
+	// RuleID is the policy rule or floor id behind a policy_allow/
+	// policy_deny reason (ADR-0047 §2), populated for a
+	// "permission_resolved" entry -- see permissionResolvedParams.
+	RuleID string `json:"ruleId,omitempty"`
 	// ToolCallID, ToolName, Title, Status, Input, and Result are populated
 	// for a "tool_call" entry -- see runToolCallParams for the shared
 	// shape this mirrors.
@@ -1895,6 +1904,7 @@ func toRunLogEvent(e taskrunner.Event) runLogEvent {
 			RequestID: e.PermissionRequestID,
 			OptionID:  e.PermissionOptionID,
 			Reason:    string(e.PermissionResolution),
+			RuleID:    e.PermissionRuleID,
 		}
 	default:
 		return runLogEvent{Type: "chunk", Text: e.Text}

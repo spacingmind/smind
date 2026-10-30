@@ -249,6 +249,13 @@ type Event struct {
 	// docs/plans/active/task-permission-ux.md Item 2.
 	PermissionResolution PermissionResolution
 
+	// PermissionRuleID is the policy rule or floor id behind a
+	// policy_allow/policy_deny PermissionResolution (ADR-0047 §2),
+	// populated for EventTypePermissionResolved: the timeline renders the
+	// rule's why next to the badge, and the audit links back to it. Empty
+	// for every other resolution.
+	PermissionRuleID string
+
 	// ToolCallID identifies one tool call, populated for EventTypeToolCall.
 	// Correlates a "running" event with the later "success"/"failure"
 	// event for the same call -- see EventTypeToolCall's doc comment.
@@ -355,4 +362,17 @@ const (
 	// smind's own timeout. See
 	// docs/plans/active/claude-native-permission-cancellation.md.
 	PermissionResolvedByProviderCancellation PermissionResolution = "provider_cancellation"
+
+	// PermissionResolvedByPolicyAllow is the permission policy engine
+	// (ADR-0047 §2) allowing the request off a rule a human authored in
+	// $SMIND_HOME/steward/policy.yaml: no human was asked, because the
+	// human's standing decision already answered. PermissionRuleID carries
+	// which rule.
+	PermissionResolvedByPolicyAllow PermissionResolution = "policy_allow"
+
+	// PermissionResolvedByPolicyDeny is the engine (or its compiled-in
+	// floor) denying the request: no human was asked, because a rule or a
+	// floor id a human cannot override already answered. PermissionRuleID
+	// carries the rule or floor id.
+	PermissionResolvedByPolicyDeny PermissionResolution = "policy_deny"
 )
