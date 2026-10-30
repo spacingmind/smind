@@ -104,8 +104,12 @@ function ShortcutRow({
   }, [capturing, onCancelCapture, onRebind]);
 
   return (
-    <tr data-testid="shortcut-row" data-binding-id={row.id} className="border-t border-border">
-      <td className="px-3 py-1.5">
+    <tr
+      data-testid="shortcut-row"
+      data-binding-id={row.id}
+      className="border-t border-border max-sm:grid max-sm:grid-cols-[minmax(0,1fr)_auto] max-sm:gap-x-2"
+    >
+      <td className="max-sm:col-start-1 max-sm:row-start-1 max-sm:pb-0 px-3 py-1.5">
         <div className="truncate text-ui-base">{row.label}</div>
         {row.note && <div className="truncate text-ui-sm text-foreground-muted">{row.note}</div>}
         {conflictLabel && (
@@ -114,7 +118,7 @@ function ShortcutRow({
           </div>
         )}
       </td>
-      <td className="whitespace-nowrap px-3 py-1.5">
+      <td className="max-sm:col-start-1 max-sm:row-start-2 max-sm:pt-1 whitespace-nowrap px-3 py-1.5">
         {capturing === "chord" ? (
           <span className="text-ui-sm text-foreground-muted" data-testid="shortcut-capturing">
             Recording a chord… (Enter to save, Esc to cancel)
@@ -132,7 +136,7 @@ function ShortcutRow({
         )}
       </td>
       <td className="hidden whitespace-nowrap px-3 py-1.5 text-ui-sm text-foreground-muted sm:table-cell">Global</td>
-      <td className="px-3 py-1.5">
+      <td className="max-sm:col-start-2 max-sm:row-start-1 max-sm:row-span-2 max-sm:self-center px-3 py-1.5">
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button
             variant="ghost"
@@ -202,8 +206,8 @@ export function ShortcutRows({ query = "" }: { query?: string } = {}) {
           data-testid="shortcut-sections"
         >
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-ui-base">
-              <thead>
+            <table className="max-sm:block w-full border-collapse text-left text-ui-base">
+              <thead className="max-sm:sr-only">
                 <tr className="border-b border-border">
                   <th scope="col" className="px-3 py-2 text-ui-sm font-medium text-foreground-muted">
                     Command
@@ -223,8 +227,8 @@ export function ShortcutRows({ query = "" }: { query?: string } = {}) {
                 </tr>
               </thead>
               {sections.map((section) => (
-                <tbody key={section.id} data-testid={`shortcut-section-${section.id}`}>
-                  <tr>
+                <tbody key={section.id} data-testid={`shortcut-section-${section.id}`} className="max-sm:block">
+                  <tr className="max-sm:block">
                     <th
                       colSpan={4}
                       scope="colgroup"
