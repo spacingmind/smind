@@ -178,6 +178,56 @@
     --color-terminal-bright-white: var(--terminal-bright-white);
 
     /*
+     * ZCode tokens added in the zcode-parity second pass (Stage 1) -- exports
+     * values per refs/zcode/DESIGN.md / styles.css; the names<->ZCode map
+     * lives in lib/zcode-tokens.ts (drift-tested).
+     */
+    --shadow-composer-soft: var(--elevation-shadow-composer);
+    --color-background-win-alt: var(--background-win-alt);
+    --color-background-alt: var(--background-alt);
+    --color-brand: var(--brand);
+    --color-trajectory-user: var(--trajectory-user);
+    --color-trajectory-assistant: var(--trajectory-assistant);
+    --color-trajectory-reasoning: var(--trajectory-reasoning);
+    --color-trajectory-tool-call: var(--trajectory-tool-call);
+    --color-trajectory-tool-result: var(--trajectory-tool-result);
+    --color-user-message-bubble: var(--user-message-bubble);
+    --color-usage-chart-1: var(--usage-chart-1);
+    --color-usage-chart-2: var(--usage-chart-2);
+    --color-usage-chart-3: var(--usage-chart-3);
+    --color-usage-chart-4: var(--usage-chart-4);
+    --color-usage-chart-5: var(--usage-chart-5);
+    --color-usage-chart-6: var(--usage-chart-6);
+    --color-context-breakdown-1: var(--context-breakdown-1);
+    --color-context-breakdown-2: var(--context-breakdown-2);
+    --color-context-breakdown-3: var(--context-breakdown-3);
+    --color-context-breakdown-4: var(--context-breakdown-4);
+    --color-context-breakdown-5: var(--context-breakdown-5);
+    --color-context-breakdown-6: var(--context-breakdown-6);
+    --color-context-breakdown-7: var(--context-breakdown-7);
+    --color-usage-heatmap-0: var(--usage-heatmap-0);
+    --color-usage-heatmap-1: var(--usage-heatmap-1);
+    --color-usage-heatmap-2: var(--usage-heatmap-2);
+    --color-usage-heatmap-3: var(--usage-heatmap-3);
+    --color-usage-heatmap-4: var(--usage-heatmap-4);
+    --color-tab: var(--tab);
+    --color-tab-active: var(--tab-active);
+    --color-tab-border: var(--tab-border);
+    --color-interaction-ask-surface: var(--interaction-ask-surface);
+    --color-interaction-ask-foreground: var(--interaction-ask-foreground);
+    --color-interaction-ask-fill: var(--interaction-ask-fill);
+    --color-success-surface: var(--success-surface);
+    --color-success-surface-foreground: var(--success-surface-foreground);
+    --color-progress-surface: var(--progress-surface);
+    --color-progress-surface-foreground: var(--progress-surface-foreground);
+    --color-idle-task: var(--idle-task);
+    --color-idle-task-surface: var(--idle-task-surface);
+    --color-warning-surface: var(--warning-surface);
+    --color-warning-surface-foreground: var(--warning-surface-foreground);
+    --color-destructive-surface: var(--destructive-surface);
+    --color-destructive-surface-foreground: var(--destructive-surface-foreground);
+
+    /*
      * `--text-content` (visual-identity-console plan, Item 2) is the one
      * surviving member of that Item's type-role scale -- the rest
      * (workspace-title/section-title/panel-title/metadata-label/
@@ -210,6 +260,10 @@
     --text-ui-caption: calc(var(--ui-font-size) - 1px);
     --text-ui-sm: calc(var(--ui-font-size) - 2px);
     --text-ui-xs: calc(var(--ui-font-size) - 4px);
+    --text-ui-settings-title: calc(var(--ui-font-size) + 10px);
+    --text-ui-settings-title--line-height: calc(4 / 3);
+    --text-ui-settings-title-lg: calc(var(--ui-font-size) + 16px);
+    --text-ui-settings-title-lg--line-height: 1.2;
 
     /* Shadow tiers (Item 3) -- see :root below. */
     --shadow-sm: var(--elevation-shadow-sm);
@@ -357,6 +411,57 @@
     --terminal-bright-magenta: #9e77ed;
     --terminal-bright-cyan: #0aa7a7;
     --terminal-bright-white: #0d0d0d;
+
+    /*
+     * ZCode tokens added in the zcode-parity second pass (Stage 1) -- Zai Light
+     * values per refs/zcode/DESIGN.md / styles.css; the names<->ZCode map
+     * lives in lib/zcode-tokens.ts (drift-tested).
+     */
+    --elevation-shadow-composer: 0 1px 3px rgb(0 0 0 / 4%), 0 6px 18px rgb(0 0 0 / 4%);
+    --background-win-alt: #ececee;
+    --background-alt: color-mix(in oklab, var(--background) 70%, transparent);
+    --brand: #000000;
+    --trajectory-user: #2563eb;
+    --trajectory-assistant: #0f766e;
+    --trajectory-reasoning: #7c3aed;
+    --trajectory-tool-call: #d97706;
+    --trajectory-tool-result: #0284c7;
+    --user-message-bubble: rgba(13, 13, 13, 0.05);
+    --usage-chart-1: #0b7fff;
+    --usage-chart-2: #1e8a3e;
+    --usage-chart-3: #9e77ed;
+    --usage-chart-4: #e03131;
+    --usage-chart-5: #e07b00;
+    --usage-chart-6: #0aa7a7;
+    --context-breakdown-1: #0b7fff;
+    --context-breakdown-2: #338fff;
+    --context-breakdown-3: #5ca7ff;
+    --context-breakdown-4: #85bbff;
+    --context-breakdown-5: #acd0ff;
+    --context-breakdown-6: #c8ddff;
+    --context-breakdown-7: #e0ecff;
+    --usage-heatmap-0: color-mix(in oklab, #0b7fff 0%, var(--surface));
+    --usage-heatmap-1: color-mix(in oklab, #0b7fff 18%, var(--surface));
+    --usage-heatmap-2: color-mix(in oklab, #0b7fff 36%, var(--surface));
+    --usage-heatmap-3: color-mix(in oklab, #0b7fff 58%, var(--surface));
+    --usage-heatmap-4: color-mix(in oklab, #0066dd 82%, var(--surface));
+    --tab: #f0f0f0;
+    --tab-active: #ffffff;
+    --tab-border: var(--border);
+    --interaction-ask-surface: #ebf4ff;
+    --interaction-ask-foreground: #0066dd;
+    --interaction-ask-fill: rgba(70, 191, 114, 0.2);
+    --success-surface: #eaf7ee;
+    --success-surface-foreground: #166b32;
+    --progress-surface: var(--color-blue-50);
+    --progress-surface-foreground: var(--color-blue-700);
+    --lucide-subtlest-opacity: 0.4;
+    --idle-task: #9e77ed;
+    --idle-task-surface: #f5f3ff;
+    --warning-surface: color-mix(in srgb, var(--warning) 12%, transparent);
+    --warning-surface-foreground: #914e00;
+    --destructive-surface: color-mix(in srgb, var(--destructive) 10%, transparent);
+    --destructive-surface-foreground: #b42020;
 
     --foreground-muted: var(--muted-foreground);
 
@@ -537,6 +642,57 @@
     --terminal-bright-magenta: #a888f2;
     --terminal-bright-cyan: #8ee5e5;
     --terminal-bright-white: #f8f8f8;
+
+    /*
+     * ZCode tokens added in the zcode-parity second pass (Stage 1) -- Zai Dark
+     * values per refs/zcode/DESIGN.md / styles.css; the names<->ZCode map
+     * lives in lib/zcode-tokens.ts (drift-tested).
+     */
+    --elevation-shadow-composer: 0 0 #0000;
+    --background-win-alt: #2b2b2b;
+    --background-alt: color-mix(in oklab, var(--background-win-alt) 60%, transparent);
+    --brand: #ffffff;
+    --trajectory-user: #60a5fa;
+    --trajectory-assistant: #2dd4bf;
+    --trajectory-reasoning: #a78bfa;
+    --trajectory-tool-call: #f59e0b;
+    --trajectory-tool-result: #38bdf8;
+    --user-message-bubble: rgba(255, 255, 255, 0.08);
+    --usage-chart-1: #4099ff;
+    --usage-chart-2: #46bf72;
+    --usage-chart-3: #7b5ce5;
+    --usage-chart-4: #ff5c5c;
+    --usage-chart-5: #ff8a30;
+    --usage-chart-6: #42c8c8;
+    --context-breakdown-1: #4099ff;
+    --context-breakdown-2: #66adff;
+    --context-breakdown-3: #80beff;
+    --context-breakdown-4: #9dceff;
+    --context-breakdown-5: #b9ddff;
+    --context-breakdown-6: #d0e8ff;
+    --context-breakdown-7: #e4f1ff;
+    --usage-heatmap-0: color-mix(in oklab, #4099ff 0%, var(--surface));
+    --usage-heatmap-1: color-mix(in oklab, #4099ff 24%, var(--surface));
+    --usage-heatmap-2: color-mix(in oklab, #4099ff 42%, var(--surface));
+    --usage-heatmap-3: color-mix(in oklab, #4099ff 62%, var(--surface));
+    --usage-heatmap-4: color-mix(in oklab, #80beff 78%, var(--surface));
+    --tab: #202020;
+    --tab-active: #161616;
+    --tab-border: var(--border);
+    --interaction-ask-surface: #001d3d;
+    --interaction-ask-foreground: #80beff;
+    --interaction-ask-fill: rgba(70, 191, 114, 0.24);
+    --success-surface: rgba(70, 191, 114, 0.16);
+    --success-surface-foreground: #87d9a4;
+    --progress-surface: rgba(70, 130, 240, 0.16);
+    --progress-surface-foreground: var(--color-blue-300);
+    --lucide-subtlest-opacity: 0.3;
+    --idle-task: #7b5ce5;
+    --idle-task-surface: #160d38;
+    --warning-surface: color-mix(in srgb, var(--warning) 16%, transparent);
+    --warning-surface-foreground: #ffa159;
+    --destructive-surface: color-mix(in srgb, var(--destructive) 16%, transparent);
+    --destructive-surface-foreground: #ff8585;
 
     --foreground-muted: var(--muted-foreground);
 
