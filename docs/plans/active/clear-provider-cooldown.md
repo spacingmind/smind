@@ -39,11 +39,21 @@ reset+grace. When the human resets the quota by hand (real incident
 
 ## Progress
 
-- [ ] store + runs + wsapi (peer-glm A)
-- [ ] CLI (peer-glm B)
-- [ ] web (peer-glm C)
-- [ ] docs, frames, mutations, PR
+- [x] store + runs + wsapi (peer-glm A, task 79, 7m47s)
+- [x] CLI (peer-glm B, task 81, 3m33s)
+- [x] web (peer-glm C, task 80, 6m30s)
+- [x] web: re-read provider.list when a run turns rate limited (peer-glm D, task 97; found by the frames)
+- [x] docs (public-docs/usage-and-limits.md, cli-reference via `task docs:cli`), frames, mutations
+- [ ] mobile: follow-up (not done)
+- [ ] full `task test` green locally (blocked by disk full; CI is the check)
 
 ## Validation
 
-(filled in at the end)
+- AC1-3 wsapi: `TestProviderClearCooldown_RefusesAgentCaller`, `_ClearsBlock`, `_UnknownProvider`; `provider.clearCooldown` added to the plugin `humanOnly` list.
+- AC4 `TestClearProviderCooldown_WakesHeldRetriesOnce`, `_ClearsBlock`, `_OtherProviderUntouched` (runs).
+- AC5 `TestStore_ClearProviderCooldown`, `TestStore_ReleaseHeldRetries_OnlyMatchingProvider`.
+- AC6 `TestCooldown*` (cmd/smind); `TestCLIReferenceMatchesHelp` after `task docs:cli`.
+- AC7 vitest: run-footer-rate-limit (visible only while a cooldown exists, double click, failed clear, hidden when other actions render the row), use-clear-provider-cooldown, provider-detail cooldown line, task-detail-cooldown-refresh.
+- AC8 docs written; frames looked at: footer and Settings -> Providers, light+dark, 1280 and 390, no overflow; after the click the action is gone (frames not committed).
+- Mutations (each failed its test): drop the runScoped guard; skip the store clear; drop the provider filter in ReleaseHeldRetries; drop DeliverQueued; wrong RPC name in the CLI; footer action rendered without cooldown (needed an added test).
+- Ledger: GLM 4 runs (A, B, C, D), Sonnet 1 (frames, 2 runs; first blocked by ENOSPC). Review fix by the Lead: duplicate `Icons.clock` removed (reuse `Icons.time`).
