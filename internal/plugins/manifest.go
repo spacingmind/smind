@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // ManifestFile is the manifest's name at the plugin root.
@@ -43,7 +44,11 @@ var (
 	settingRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
 	nameRe    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 	driveRe   = regexp.MustCompile(`^[A-Za-z]:`)
+	iconRe    = regexp.MustCompile(`^[A-Z][A-Za-z0-9]{0,39}$`)
 )
+
+// panelWheres are the placements a panel may ask for.
+var panelWheres = []string{"task", "sidebar", "palette"}
 
 // windowsReserved are device names Windows refuses as file names; an id or an
 // entry named like one cannot be created there.
@@ -123,8 +128,8 @@ type Contributes struct {
 	Hooks      []HookContribution     `json:"hooks,omitempty"`
 	RPC        []RPCContribution      `json:"rpc,omitempty"`
 	Providers  []ProviderContribution `json:"providers,omitempty"`
-	Panels     []json.RawMessage      `json:"panels,omitempty"`
-	Sidebar    []json.RawMessage      `json:"sidebar,omitempty"`
+	Panels     []PanelContribution    `json:"panels,omitempty"`
+	Sidebar    []SidebarContribution  `json:"sidebar,omitempty"`
 }
 
 // McpContribution is an MCP server a plugin contributes.
@@ -179,6 +184,41 @@ type ProviderContribution struct {
 		Command []string `json:"command"`
 	} `json:"acp"`
 }
+
+// PanelContribution is a data-only panel (ADR-0042 section 5): a view
+// document the clients render natively, from a file or over an rpc. No code
+// ever reaches a client through it.
+type PanelContribution struct {
+	ID    string    `json:"id"`
+	Title string    `json:"title"`
+	Icon  string    `json:"icon,omitempty"` // Lucide name
+	Where string    `json:"where"`          // "task" | "sidebar" | "palette"
+	UI    int       `json:"ui,omitempty"`   // schema level needed, default 1
+	View  PanelView `json:"view"`
+}
+
+// PanelView is where a panel's view document comes from: a file inside the
+// plugin, or an rpc its process answers. Exactly one is set.
+type PanelView struct {
+	File string `json:"file,omitempty"`
+	RPC  string `json:"rpc,omitempty"`
+}
+
+// SidebarContribution is a sidebar item that opens a declared panel.
+type SidebarContribution struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Icon  string `json:"icon,omitempty"`
+	Opens string `json:"opens"`
+}
+
+// Panel contribution caps: the ui level this daemon's view schema reaches,
+// and how many panels and sidebar items one plugin may declare.
+const (
+	MaxPanelUILevel = 1
+	MaxPanels       = 16
+	MaxSidebarItems = 16
+)
 
 // FieldError is one manifest problem: the field, what is wrong and the fix.
 type FieldError struct {
@@ -401,6 +441,63 @@ func validateContributes(v *manifestVal, m *Manifest) {
 		checkName(v, f+".id", p.ID)
 		validateCommand(v, f+".acp.command", p.ACP.Command)
 	}
+	panelIDs := map[string]bool{}
+	for i, p := range c.Panels {
+		f := fmt.Sprintf("contributes.panels[%d]", i)
+		checkName(v, f+".id", p.ID)
+		if panelIDs[p.ID] {
+			v.bad(f+".id", fmt.Sprintf("duplicate panel %q", p.ID), "declare each panel once")
+		}
+		panelIDs[p.ID] = true
+		checkTitle(v, f+".title", p.Title)
+		if p.Icon != "" && !iconRe.MatchString(p.Icon) {
+			v.bad(f+".icon", fmt.Sprintf("%q is not a Lucide icon name", p.Icon), "use a PascalCase name from the client's Lucide registry, like \"ListChecks\"")
+		}
+		if !contains(panelWheres, p.Where) {
+			v.bad(f+".where", fmt.Sprintf("unknown placement %q", p.Where), "use one of: "+strings.Join(panelWheres, ", "))
+		}
+		if p.UI != 0 && (p.UI < 1 || p.UI > MaxPanelUILevel) {
+			v.bad(f+".ui", fmt.Sprintf("%d is not a ui level this smind understands", p.UI), fmt.Sprintf("this smind understands ui level %d", MaxPanelUILevel))
+		}
+		if (p.View.File == "") == (p.View.RPC == "") {
+			v.bad(f+".view", "must set exactly one of file and rpc", "give the panel a view file or an rpc name, not both")
+		}
+		if p.View.File != "" {
+			checkPath(v, f+".view.file", p.View.File)
+			if !strings.HasSuffix(p.View.File, ".json") {
+				v.bad(f+".view.file", fmt.Sprintf("%q is not a .json view document", p.View.File), "point view.file at the panel's JSON view file")
+			}
+		}
+		if p.View.RPC != "" {
+			if m.Process == nil {
+				v.bad(f+".view.rpc", "a panel with a view rpc needs a plugin process", "declare process or use a view file")
+			} else if !declaresRPC(c.RPC, p.View.RPC) {
+				v.bad(f+".view.rpc", fmt.Sprintf("%q is not declared in contributes.rpc", p.View.RPC), "add {\"name\": \""+p.View.RPC+"\"} to contributes.rpc")
+			}
+		}
+	}
+	if len(c.Panels) > MaxPanels {
+		v.bad("contributes.panels", fmt.Sprintf("lists %d panels, over the cap of %d", len(c.Panels), MaxPanels), fmt.Sprintf("declare at most %d panels", MaxPanels))
+	}
+	seenSide := map[string]bool{}
+	for i, s := range c.Sidebar {
+		f := fmt.Sprintf("contributes.sidebar[%d]", i)
+		checkName(v, f+".id", s.ID)
+		if seenSide[s.ID] {
+			v.bad(f+".id", fmt.Sprintf("duplicate sidebar item %q", s.ID), "declare each sidebar item once")
+		}
+		seenSide[s.ID] = true
+		checkTitle(v, f+".title", s.Title)
+		if s.Icon != "" && !iconRe.MatchString(s.Icon) {
+			v.bad(f+".icon", fmt.Sprintf("%q is not a Lucide icon name", s.Icon), "use a PascalCase name from the client's Lucide registry, like \"ListChecks\"")
+		}
+		if !panelIDs[s.Opens] {
+			v.bad(f+".opens", fmt.Sprintf("%q is not a declared panel", s.Opens), "set opens to the id of a panel in contributes.panels")
+		}
+	}
+	if len(c.Sidebar) > MaxSidebarItems {
+		v.bad("contributes.sidebar", fmt.Sprintf("lists %d items, over the cap of %d", len(c.Sidebar), MaxSidebarItems), fmt.Sprintf("declare at most %d sidebar items", MaxSidebarItems))
+	}
 }
 
 // settingRefRe matches a ${setting.KEY} placeholder.
@@ -489,6 +586,22 @@ func checkName(v *manifestVal, field, name string) {
 	}
 }
 
+// checkTitle validates a panel or sidebar title: short enough for a tab or a
+// menu, and no control characters (they render as boxes in clients).
+func checkTitle(v *manifestVal, field, title string) {
+	r := []rune(title)
+	if strings.TrimSpace(title) == "" || len(r) > 48 {
+		v.bad(field, "must be 1 to 48 characters", "set title to a short label")
+		return
+	}
+	for _, c := range r {
+		if unicode.IsControl(c) {
+			v.bad(field, "contains a control character", "use plain text")
+			return
+		}
+	}
+}
+
 func checkPath(v *manifestVal, field, p string) {
 	if err := ConfinedPath(p); err != nil {
 		v.bad(field, err.Error(), "use a relative, forward-slashed path inside the plugin, without \"..\"")
@@ -562,6 +675,11 @@ func (m *Manifest) DeclaredPaths() []string {
 	}
 	for _, t := range m.Contributes.Themes {
 		out = append(out, t.File)
+	}
+	for _, p := range m.Contributes.Panels {
+		if p.View.File != "" {
+			out = append(out, p.View.File)
+		}
 	}
 	return out
 }
