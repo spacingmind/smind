@@ -28,6 +28,7 @@ func Main() bool {
 	if len(os.Args) < 3 || os.Args[1] != Flag {
 		return false
 	}
+	startWatchdog()
 	run(os.Args[2], os.Args[3:])
 	os.Exit(0)
 	return true
@@ -45,6 +46,16 @@ type msg struct {
 	Result json.RawMessage `json:"result,omitempty"`
 	Error  json.RawMessage `json:"error,omitempty"`
 }
+
+// rootPIDEnv carries the pid of the test binary that started the helper tree
+// to every helper below it, so a helper that ignores SIGTERM (and its immune
+// grandchild) still ends when that test binary is gone, however it went:
+// panic, `go test -timeout`, a kill. Without it such a helper sleeps for an
+// hour and outlives the run.
+const rootPIDEnv = "SMIND_HOSTTEST_ROOT_PID"
+
+// rootPID is the test binary the watchdog follows (0 until it starts).
+var rootPID int
 
 var (
 	in  = bufio.NewReader(os.Stdin)
@@ -132,6 +143,8 @@ func run(mode string, args []string) {
 				os.Exit(0)
 			}
 		}
+	case "parent-of-ignore-term":
+		parentOfIgnoreTerm()
 	case "ignore-term":
 		signal.Ignore(syscall.SIGTERM)
 		gc := immuneGrandchild()
@@ -317,6 +330,7 @@ func stderrStorm(args []string) {
 // it says so, so a test never races the signal against its start-up.
 func immuneGrandchild() *exec.Cmd {
 	gc := exec.Command(os.Args[0], Flag, "sleep-immune")
+	gc.Env = childEnv()
 	r, err := gc.StdoutPipe()
 	if err != nil || gc.Start() != nil {
 		os.Exit(4)
@@ -325,4 +339,54 @@ func immuneGrandchild() *exec.Cmd {
 		os.Exit(5)
 	}
 	return gc
+}
+
+// parentOfIgnoreTerm is the harness of TestHelpers_DieWithTestBinary: it
+// starts an ignore-term helper (which starts its immune grandchild), prints
+// "pids <self> <helper> <grandchild>" and waits to be killed.
+func parentOfIgnoreTerm() {
+	h := exec.Command(os.Args[0], Flag, "ignore-term")
+	// This process plays the test binary: its descendants watch it, not the
+	// real test that started it.
+	h.Env = append(os.Environ(), rootPIDEnv+"="+strconv.Itoa(os.Getpid()))
+	stdin, err := h.StdinPipe()
+	if err != nil {
+		os.Exit(7)
+	}
+	stdout, err := h.StdoutPipe()
+	if err != nil || h.Start() != nil {
+		os.Exit(7)
+	}
+	body := `{"jsonrpc":"2.0","id":1,"method":"plugin.initialize","params":{}}`
+	fmt.Fprintf(stdin, "Content-Length: %d\r\n\r\n%s", len(body), body)
+	r := bufio.NewReader(stdout)
+	for {
+		n := -1
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				os.Exit(8)
+			}
+			line = strings.TrimRight(line, "\r\n")
+			if line == "" {
+				break
+			}
+			if k, v, ok := strings.Cut(line, ":"); ok && strings.EqualFold(k, "content-length") {
+				n, _ = strconv.Atoi(strings.TrimSpace(v))
+			}
+		}
+		b := make([]byte, n)
+		if _, err := io.ReadFull(r, b); err != nil {
+			os.Exit(8)
+		}
+		var m msg
+		_ = json.Unmarshal(b, &m)
+		if m.Method != "test.pids" {
+			continue
+		}
+		var p map[string]int
+		_ = json.Unmarshal(m.Params, &p)
+		fmt.Printf("pids %d %d %d\n", os.Getpid(), h.Process.Pid, p["grandchild"])
+		time.Sleep(time.Hour)
+	}
 }
