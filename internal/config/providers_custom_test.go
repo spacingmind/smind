@@ -60,7 +60,7 @@ func TestCustomProvider_LoadsACPAndInstance(t *testing.T) {
       label: My agent
       command: my-agent
       args: ["--acp"]
-      env: {MY_TOKEN: abc}
+      env: {MY_FLAG: abc}
       models: [{id: m1, label: Model 1, default: true}]
       modes: [{id: plan, label: Plan}, {id: yolo, autoApproves: true}]
     - id: claude-s
