@@ -50,7 +50,7 @@ mutations:
   - { id: M3, file: internal/scratch/scratch.go, change: "ignore the busy hook in Remove", expectFail: [TestRemove_BusyRefused] }
   - { id: M4, file: internal/scratch/scratch.go, change: "Sweep also removes non-numeric entries or live tasks", expectFail: [TestSweep_IgnoresNonNumeric, TestSweep_RemovesClosedKeepsLive] }
   - { id: M5, file: internal/wsapi/scratch.go, change: "drop the runScoped refusal in scratch.clean", expectFail: [TestScratchRPC_RefusedForRunScoped] }
-  - { id: M6, file: internal/taskrunner/scratch_env.go, change: "append the scratch TMPDIR after the provider env instead of before", expectFail: [TestLaunchEnv_PinnedTmpdirWins] }
+  - { id: M6, file: internal/taskrunner/runner.go, change: "append the scratch entries after providerEnv in runClaudeNative instead of first", expectFail: [TestLaunchEnv_PinnedTmpdirWins] }
 commands:
   - { id: C1, run: "task lint", timeoutSec: 900 }
   - { id: C2, run: "task test", timeoutSec: 1500 }
