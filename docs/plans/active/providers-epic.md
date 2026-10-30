@@ -200,7 +200,7 @@ Running total: **USD 0.00** of 2.00.
 - [ ] PR2 typed env + provider secrets
 - [ ] PR3 claude-code recipes + vendor rate-limit profiles
 - [ ] PR4 Codex endpoint instances
-- [ ] PR5 five ACP providers
+- [x] PR5 five ACP providers (one PR: rows, health, probe, MCP opt-out, real-OpenCode conformance, docs; see Validation)
 - [ ] PR6 web + mobile UX
 
 ## Validation
@@ -229,3 +229,20 @@ rename across the codebase; `models` and `additionalModels` are mutually exclusi
 instance `command` is the executable only (no `args`); an instance of an ACP provider keeps free-form env until PR2; an instance may not extend an instance; with `models` replace
 mode the instance does not use ACP/Codex discovery (models > discovery). `ModelAliases` is on `Spec` and inert until PR2. The `docs/decisions/0042` pointer to ADR-0046 is added; `docs/homelab.md` needs no rows (it has no
 `providers.custom` rows to extend).
+
+PR5 (five native ACP providers), 2026-10-31, branch `smind/task-lead-providers-epic-pr5-acp-providers-dmiaxo9jajs0`. Spike: `/tmp/steward4/spike-acp/FINDINGS.md` (local research note): OpenCode 1.18.33 hands-on PASS, the other four docs-only.
+
+| AC | Evidence |
+|---|---|
+| AC5.1 | `TestACPDiscovery_ConfigOptionsModelsAndModes` (each of the five ids, fake ACP agent advertising configOptions: discovered models + modes). Frames: Settings -> Providers and the model picker show OpenCode backed by a fake ACP agent (`/tmp/pr5-frames/`). |
+| AC5.2 | `TestACPProvider_AllFive_FakeConformance` (permission / resume / cancel per id, command overridden to the fake agent) and `TestACPProvider_OpenCode_SpecRegistersWithoutSwitchEdits` (a spec registered from data alone, and an instance of `opencode`). |
+| AC5.3 | `TestProviderHealth_MissingBinaryNamed` (binary + install text), `TestProviderHealth_LoginMessagePerProvider` (login text per provider, "paid" for Copilot and Cursor, no login/unverified note for OpenCode), `TestProviderHealth_TooOldVersion` (Cursor `2025.09.18` < `2026.01.01`), `TestProviderHealth_VersionCommandFailureStillOK`. The only process the check runs is `<binary> --version`. |
+| AC5.4 | Spike recorded: `opencode acp` exposes models and modes as `configOptions` (no top-level `models`/`modes`), streams `tool_call`/`tool_call_update`, asks permission only when configured (it auto-allows by default, so the row sets `OPENCODE_PERMISSION={"bash":"ask","edit":"ask"}`), cancels with `stopReason: cancelled`, `session/load` replays history. PASS: OpenCode ships as a full provider. Re-proved inside smind by `TestOpenCodeReal_ProbeDiscoversConfigOptions`, `_PermissionRequestedAndAllowed`, `_Cancel`, `_ResumeLoadsSession` (real `opencode`, fake OpenAI-compatible server on 127.0.0.1, isolated HOME/XDG, only the sentinel key; skipped when `opencode` is not on PATH). |
+| AC5.5 | `TestACPClient_SupportsMcpServersOptOut`, `TestACPProvider_NoMCPServersSpecHidesMcp`, config `providers.custom[].acp.supportsMcpServers: false` (`TestCustomProvider_ACPSupportsMcpServersFalse`, `TestCustomProvider_ACPFieldOnClaudeInstanceRejected`). |
+| AC5.6 | Copilot, Cline, Goose, Cursor: not verified against a real login; the health text, `Health.Unverified`, the public docs table and the PR body say so. No live model call was made (budget ledger unchanged, USD 0.00). |
+| drift | `TestIcons_NewACPProvidersRegistered` (vitest, `provider-icon.test.tsx`), `provider-catalog.test.ts`, mobile `providerCatalog.test.ts`. The five wear the registry's agent glyph (no vendor logos copied). |
+| probe | `TestACPProvider_ProbeUsesNoBrowser`, `TestACPProvider_RunDoesNotSetNoBrowser`. |
+
+Mutations (a test failure each, file restored with `git checkout -- <file>`): drop `NO_BROWSER=true` from the probe env (ProbeUsesNoBrowser); disable the runner's `WithoutMcpServers` (NoMCPServersSpecHidesMcp); disable `noMCP` in `SupportsMcpHttp` (SupportsMcpServersOptOut); drop the install text (MissingBinaryNamed); disable the version gate (TooOldVersion); drop `OPENCODE_PERMISSION` from the row (OpenCodePermissionEnvAsks) and set it to `allow` (the real-opencode permission test: the decider is never called); cut the `acp` argument from the Cursor command (AllFive_RowsRegister, after a review found the first version of that test did not catch it); remove the `opencode` identity row in the web catalog (provider-icon and provider-catalog tests).
+
+Decisions in PR5: the five rows are built-in ids, so a `providers.custom` entry using `opencode|copilot|cline|goose|cursor` must be renamed (breaking, no installed base). A new `Spec.Health` carries install/login/unverified/min-version/version-arg data; a new `Spec.NoMCPServers` is the data form of the `supportsMcpServers: false` opt-out. Not done: clientCapabilities config, Gemini (not requested), recipe row 12 (`chat-completions-via-opencode`, PR3 owns the recipe file), real-login runs of the four paid/closed agents, the UI does not yet show the install/login hint text (it is in the `provider.test` detail).
