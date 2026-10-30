@@ -332,6 +332,7 @@ function UsageSection({ client }: SettingsSectionContext) {
           <div className="flex flex-col gap-1">
             <span className="text-ui-sm text-muted-foreground">Group by</span>
             <StepGroup
+              wrap
               groupLabel="usage-group-by"
               options={GROUP_BY_OPTIONS}
               value={groupBy}

@@ -5,12 +5,14 @@ import { cn } from "@/lib/utils";
 export function SettingsGroup({
   title,
   description,
+  actions,
   children,
   className,
   testId,
 }: {
   title?: ReactNode;
   description?: ReactNode;
+  actions?: ReactNode;
   children: ReactNode;
   className?: string;
   testId?: string;
@@ -21,10 +23,13 @@ export function SettingsGroup({
       data-slot="settings-group"
       className={cn("flex flex-col gap-2", className)}
     >
-      {(title || description) && (
-        <div className="flex flex-col gap-1">
-          {title && <h3 className="text-ui-base font-medium text-foreground">{title}</h3>}
-          {description && <p className="text-ui-sm text-foreground-muted">{description}</p>}
+      {(title || description || actions) && (
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-col gap-1">
+            {title && <h3 className="text-ui-base font-medium text-foreground">{title}</h3>}
+            {description && <p className="text-ui-sm text-foreground-muted">{description}</p>}
+          </div>
+          {actions && <div className="shrink-0">{actions}</div>}
         </div>
       )}
       <div className="overflow-hidden rounded-xl border border-border bg-card [&>*+*]:border-t [&>*+*]:border-border">
@@ -105,14 +110,16 @@ export function SettingsStatStrip({
     <div
       data-testid={testId}
       data-slot="settings-stat-strip"
-      className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-[repeat(auto-fit,minmax(0,1fr))]"
+      className="overflow-hidden rounded-xl border border-border bg-card"
     >
-      {stats.map((stat) => (
-        <div key={stat.label} className="bg-card px-4 py-3">
-          <p className="text-ui-sm text-foreground-muted">{stat.label}</p>
-          <p className="text-ui-lg font-semibold tabular-nums text-foreground">{stat.value}</p>
-        </div>
-      ))}
+      <div className="-m-px grid grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(0,1fr))]">
+        {stats.map((stat) => (
+          <div key={stat.label} className="border-b border-r border-border px-4 py-3">
+            <p className="text-ui-sm text-foreground-muted">{stat.label}</p>
+            <p className="text-ui-lg font-semibold tabular-nums text-foreground">{stat.value}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

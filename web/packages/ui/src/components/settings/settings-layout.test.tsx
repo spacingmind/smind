@@ -29,6 +29,17 @@ describe("settings layout primitives", () => {
     expect(group.querySelector(".rounded-xl")).not.toBeNull();
   });
 
+  it("SettingsGroup renders an actions slot beside the title", () => {
+    render(
+      <SettingsGroup title="T" actions={<button>Go</button>}>
+        <SettingsRow label="R" />
+      </SettingsGroup>
+    );
+
+    expect(screen.getByText("T")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Go" })).toBeVisible();
+  });
+
   it("SettingsRow shows label, description and control", () => {
     render(
       <SettingsRow

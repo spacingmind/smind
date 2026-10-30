@@ -137,44 +137,42 @@ function ConnectionsSection() {
     <div className="flex flex-col gap-6" data-testid="settings-section-connections">
       <section className="flex flex-col gap-2">
         <SettingsGroup
-          title={
-            <span className="flex items-center justify-between gap-2">
-              Daemon connections
-              <div className="relative">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  aria-haspopup="menu"
-                  aria-expanded={menuOpen}
-                  data-testid="connection-add-menu"
-                  onClick={() => setMenuOpen((o) => !o)}
+          title="Daemon connections"
+          actions={
+            <div className="relative">
+              <Button
+                variant="outline"
+                size="sm"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                data-testid="connection-add-menu"
+                onClick={() => setMenuOpen((o) => !o)}
+              >
+                <Icons.add aria-hidden className="size-3.5" />
+                Add connection
+              </Button>
+              {menuOpen && (
+                <div
+                  role="menu"
+                  aria-label="Add connection"
+                  data-testid="connection-add-menu-items"
+                  className="absolute right-0 top-full z-10 mt-1 flex min-w-64 flex-col rounded-xl border bg-popover p-1 text-popover-foreground shadow-md"
                 >
-                  <Icons.add aria-hidden className="size-3.5" />
-                  Add connection
-                </Button>
-                {menuOpen && (
-                  <div
-                    role="menu"
-                    aria-label="Add connection"
-                    data-testid="connection-add-menu-items"
-                    className="absolute right-0 top-full z-10 mt-1 flex min-w-64 flex-col rounded-xl border bg-popover p-1 text-popover-foreground shadow-md"
-                  >
-                    {ADD_METHODS.map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        role="menuitem"
-                        data-testid={`connection-add-menu-${m}`}
-                        className="rounded-lg px-2 py-1.5 text-left text-ui-base whitespace-nowrap outline-none hover:bg-hover focus-visible:bg-hover"
-                        onClick={() => openMethod(m)}
-                      >
-                        {CONNECT_METHOD_LABELS[m]}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </span>
+                  {ADD_METHODS.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      role="menuitem"
+                      data-testid={`connection-add-menu-${m}`}
+                      className="rounded-lg px-2 py-1.5 text-left text-ui-base whitespace-nowrap outline-none hover:bg-hover focus-visible:bg-hover"
+                      onClick={() => openMethod(m)}
+                    >
+                      {CONNECT_METHOD_LABELS[m]}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           }
         >
           <ul className="divide-y divide-border">
@@ -244,13 +242,11 @@ function ConnectionsSection() {
       </section>
       {method && (
         <SettingsGroup
-          title={
-            <span className="flex items-center justify-between gap-2">
-              {CONNECT_METHOD_LABELS[method]}
-              <Button variant="ghost" size="sm" data-testid="connection-add-close" onClick={closePanel}>
-                Close
-              </Button>
-            </span>
+          title={CONNECT_METHOD_LABELS[method]}
+          actions={
+            <Button variant="ghost" size="sm" data-testid="connection-add-close" onClick={closePanel}>
+              Close
+            </Button>
           }
         >
           <div data-testid="connection-add-panel" className="px-4 py-3">
