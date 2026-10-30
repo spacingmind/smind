@@ -10,9 +10,9 @@ import { LearningOptIn } from "@/components/learning/learning-optin";
 import { PendingProposalBadge } from "@/components/learning/pending-badge";
 import { LearnedSkillRow, ProposalRow } from "@/components/learning/skill-row";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { SettingsEmptyCard } from "@/components/settings/settings-layout";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useForgetLearning, useLearnedSkills, useLearningStatus, useProposals } from "@/hooks/use-learning";
@@ -58,7 +58,7 @@ function ProposedTab({ workspace, onOpen, openId }: { workspace: LearningWorkspa
     <ListFrame>
       <LoadState loading={proposals.isPending} error={proposals.error} onRetry={() => void proposals.refetch()} />
       {proposals.data && list.length === 0 && (
-        <EmptyState
+        <SettingsEmptyCard
           testId="learning-empty-proposed"
           title="No proposals waiting"
           description="When a run shows a reusable pattern, the skill smind would learn from it appears here for you to approve."
@@ -92,7 +92,7 @@ function SkillsTab({
     <ListFrame>
       <LoadState loading={skills.isPending} error={skills.error} onRetry={() => void skills.refetch()} />
       {skills.data && list.length === 0 && (
-        <EmptyState
+        <SettingsEmptyCard
           testId={`learning-empty-${tab}`}
           title={tab === "active" ? "No learned skills yet" : "Nothing archived"}
           description={
@@ -142,7 +142,7 @@ function LearnedSkillsSection({ closeSettings }: SettingsSectionContext) {
   if (!workspace) {
     return (
       <div data-testid="settings-section-learned-skills">
-        <EmptyState testId="learning-no-workspaces" title="No workspaces yet" description="Add a workspace to start learning from its runs." />
+        <SettingsEmptyCard testId="learning-no-workspaces" title="No workspaces yet" description="Add a workspace to start learning from its runs." />
       </div>
     );
   }
@@ -247,6 +247,7 @@ registerSettingsSection({
   id: LEARNED_SKILLS_SECTION_ID,
   label: "Skills (learned)",
   groupLabel: "Agents & providers",
+  description: "Skills learned from each workspace's runs.",
   order: 178,
   icon: <Icons.skills aria-hidden className="size-3.5" />,
   badge: <PendingProposalBadge />,

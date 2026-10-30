@@ -1,5 +1,6 @@
 
 import { registerSettingsSection } from "@/components/settings/settings-registry";
+import { SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
 import { StepGroup } from "@/components/ui/step-group";
 import { useFontSizes } from "@/hooks/use-font-sizes";
 import { usePluginThemes } from "@/hooks/use-plugin-contributions";
@@ -49,49 +50,55 @@ export function AppearanceSection() {
 
   return (
     <div className="flex flex-col gap-6" data-testid="settings-section-appearance">
-      <section className="flex flex-col gap-2">
-        <h3 className="text-ui-base font-medium text-foreground">Theme</h3>
-        <StepGroup groupLabel="theme" options={THEME_OPTIONS} value={preference} onChange={setPreference} />
-      </section>
+      <SettingsGroup title="Interface">
+        <SettingsRow
+          label="App theme"
+          description="Choose light, dark, or follow the system theme."
+          control={<StepGroup groupLabel="theme" options={THEME_OPTIONS} value={preference} onChange={setPreference} />}
+        />
+      </SettingsGroup>
 
       {pluginThemes.length > 0 && (
-        <section className="flex flex-col gap-2" data-testid="settings-plugin-themes">
-          <h3 className="text-ui-base font-medium text-foreground">Plugin theme</h3>
-          <StepGroup
-            wrap
-            groupLabel="plugin-theme"
-            options={themeOptions}
-            value={chosen?.qualified ?? ""}
-            onChange={(id) => {
-              const theme = pluginThemes.find((t) => t.qualified === id);
-              setSelectedTheme(theme ? { id: theme.qualified, theme } : null);
-            }}
-          />
-          {lacksScheme && (
-            <p className="text-ui-sm text-muted-foreground" data-testid="settings-plugin-theme-note">
-              {chosen.label} has no {resolved} variant, so the default {resolved} theme stays.
-            </p>
-          )}
-        </section>
+        <SettingsGroup testId="settings-plugin-themes">
+          <SettingsRow label="Plugin theme">
+            <div className="flex flex-col gap-2">
+              <StepGroup
+                wrap
+                groupLabel="plugin-theme"
+                options={themeOptions}
+                value={chosen?.qualified ?? ""}
+                onChange={(id) => {
+                  const theme = pluginThemes.find((t) => t.qualified === id);
+                  setSelectedTheme(theme ? { id: theme.qualified, theme } : null);
+                }}
+              />
+              {lacksScheme && (
+                <p className="text-ui-sm text-muted-foreground" data-testid="settings-plugin-theme-note">
+                  {chosen.label} has no {resolved} variant, so the default {resolved} theme stays.
+                </p>
+              )}
+            </div>
+          </SettingsRow>
+        </SettingsGroup>
       )}
 
-      <section className="flex flex-col gap-4">
-        <h3 className="text-ui-base font-medium text-foreground">Font size</h3>
+      <SettingsGroup title="Font size">
         {FONT_SIZE_AXES.map(({ axis, label, description }) => (
-          <div key={axis} className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-ui-base text-foreground">{label}</p>
-              <p className="text-ui-sm text-muted-foreground">{description}</p>
-            </div>
-            <StepGroup
-              groupLabel={`font-size-${axis}`}
-              options={FONT_SIZE_OPTIONS}
-              value={fontSizes[axis]}
-              onChange={(step) => setFontSize(axis, step)}
-            />
-          </div>
+          <SettingsRow
+            key={axis}
+            label={label}
+            description={description}
+            control={
+              <StepGroup
+                groupLabel={`font-size-${axis}`}
+                options={FONT_SIZE_OPTIONS}
+                value={fontSizes[axis]}
+                onChange={(step) => setFontSize(axis, step)}
+              />
+            }
+          />
         ))}
-      </section>
+      </SettingsGroup>
     </div>
   );
 }
@@ -99,6 +106,7 @@ export function AppearanceSection() {
 registerSettingsSection({
   id: "appearance",
   label: "Appearance",
+  description: "Theme and font sizes.",
   order: 100,
   icon: <Icons.appearance aria-hidden className="size-3.5" />,
   render: () => <AppearanceSection />,

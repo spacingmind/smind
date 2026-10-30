@@ -1,0 +1,170 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "verdict": {
+      "additionalProperties": false,
+      "description": "the verdict object: {v:1, contractId, contractSha256, commitSha (40-hex), status pass|fail|blocked, blockedReason (blocked only), summary, items:[{kind,id,status,...,evidence:[...]}], findings:[...]}",
+      "properties": {
+        "blockedReason": {
+          "type": "string"
+        },
+        "commitSha": {
+          "type": "string"
+        },
+        "contractId": {
+          "type": "integer"
+        },
+        "contractSha256": {
+          "type": "string"
+        },
+        "findings": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "line": {
+                "type": "integer"
+              },
+              "severity": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "severity",
+              "text"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "items": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "attempts": {
+                "type": "integer"
+              },
+              "evidence": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "flaky": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              },
+              "restored": {
+                "type": [
+                  "null",
+                  "boolean"
+                ]
+              },
+              "status": {
+                "type": "string"
+              },
+              "via": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "status"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "usage": {
+          "additionalProperties": false,
+          "properties": {
+            "costUsd": {
+              "type": "number"
+            },
+            "minutes": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "costUsd",
+            "minutes"
+          ],
+          "type": [
+            "null",
+            "object"
+          ]
+        },
+        "v": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "v",
+        "contractId",
+        "contractSha256",
+        "commitSha",
+        "status",
+        "summary",
+        "items"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "verdict"
+  ],
+  "type": "object"
+}
