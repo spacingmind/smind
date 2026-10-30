@@ -30,7 +30,11 @@ describe("settings layout primitives", () => {
   });
 
   it("SettingsGroup renders an actions slot beside the title", () => {
-    render(<SettingsGroup title="T" actions={<button>Go</button>} />);
+    render(
+      <SettingsGroup title="T" actions={<button>Go</button>}>
+        <SettingsRow label="R" />
+      </SettingsGroup>
+    );
 
     expect(screen.getByText("T")).toBeVisible();
     expect(screen.getByRole("button", { name: "Go" })).toBeVisible();
