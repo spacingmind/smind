@@ -271,6 +271,10 @@ type Runner struct {
 	// providerSecrets is the store SecretEnv refs are resolved from at
 	// launch (WithProviderSecrets; nil: a spec with a secret fails it).
 	providerSecrets ProviderSecretSource
+	// scrubSubprocessEnv is whether launches set
+	// CLAUDE_CODE_SUBPROCESS_ENV_SCRUB for claude-code instances that hold
+	// a secret (off: scrubSubprocessEnvDefault, ADR-0046 section 7).
+	scrubSubprocessEnv bool
 
 	// registry is the provider table (nil: providers.Default).
 	registry *providers.Registry
@@ -347,16 +351,17 @@ type Runner struct {
 // New returns a Runner backed by wm.
 func New(wm *workspace.Manager, opts ...Option) *Runner {
 	r := &Runner{
-		wm:            wm,
-		acpSessions:   map[int64]*acpSessionState{},
-		acpModes:      map[Provider]acpModeCacheEntry{},
-		claudeClients: map[int64]claudeBackend{},
-		claudeModels:  map[int64]string{},
-		sessionStore:  NewMemorySessionStore(),
-		defaultModels: map[Provider]string{},
-		acpCommands:   map[Provider][]string{},
-		lookPath:      exec.LookPath,
-		claudeLaunch:  claudecli.LaunchSpec,
+		wm:                 wm,
+		acpSessions:        map[int64]*acpSessionState{},
+		acpModes:           map[Provider]acpModeCacheEntry{},
+		claudeClients:      map[int64]claudeBackend{},
+		claudeModels:       map[int64]string{},
+		sessionStore:       NewMemorySessionStore(),
+		defaultModels:      map[Provider]string{},
+		acpCommands:        map[Provider][]string{},
+		lookPath:           exec.LookPath,
+		claudeLaunch:       claudecli.LaunchSpec,
+		scrubSubprocessEnv: scrubSubprocessEnvDefault,
 		newACPClient: func(command []string, opts ...acp.Option) (acpBackend, error) {
 			return acp.New(command, opts...)
 		},
@@ -972,7 +977,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 		claudecode.WithPermissionMode(mode),
 		claudecode.WithExtraArgs(map[string]*string{claudeAllowBypassFlag: nil}),
 	)
-	if settings := claudeSettings(mode, config.Dir()); settings != "" {
+	if settings := claudeSettings(mode, config.Dir(), providerSecretEnvNames(spec)); settings != "" {
 		// G13: the CLI asks before git push / gh pr create / ... even in
 		// auto, where it would otherwise run them without a prompt; deny
 		// rules keep the built-in tools off smind's own secrets.

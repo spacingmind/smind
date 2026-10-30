@@ -25,6 +25,43 @@ func WithProviderSecrets(src ProviderSecretSource) Option {
 	return func(r *Runner) { r.providerSecrets = src }
 }
 
+// providerSecretEnvNames lists the env NAMES of a spec that hold a secret
+// ref or a passthrough (sorted) -- the names the launch env and the deny
+// rules share.
+func providerSecretEnvNames(spec providers.Spec) []string {
+	names := make([]string, 0, len(spec.SecretEnv)+len(spec.PassthroughEnv))
+	for name := range spec.SecretEnv {
+		names = append(names, name)
+	}
+	names = append(names, spec.PassthroughEnv...)
+	sort.Strings(names)
+	return names
+}
+
+// scrubSubprocessEnvDefault is whether smind sets
+// CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 on a claude-code launch that holds a
+// secret. ADR-0046 section 7, measured 2026-10-30 against claude 2.1.310
+// with a fake Anthropic server: CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 forces
+// the permission mode back to default (a bypassPermissions run's Bash
+// command is refused, 'A variable in this command can't be checked before
+// it runs'), which conflicts with smind's permission modes, so smind does
+// NOT set it. The MCP stdio entry env (SMIND_RUN_ID, SMIND_VERDICT_TOKEN)
+// was NOT affected. A user may still opt in per instance with env
+// CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'.
+const scrubSubprocessEnvDefault = false
+
+// scrubEnvEntries is the CLAUDE_CODE_SUBPROCESS_ENV_SCRUB entry a launch
+// env opens with (see scrubSubprocessEnvDefault): only when the policy is
+// on, the spec runs the claude-code harness, and the instance actually
+// holds a secret or a passthrough. Nil otherwise. It goes before the
+// literal group so an explicit user value still wins.
+func scrubEnvEntries(spec providers.Spec, policyOn bool) []string {
+	if !policyOn || spec.Harness() != providers.HarnessClaudeCode || len(spec.SecretEnv)+len(spec.PassthroughEnv) == 0 {
+		return nil
+	}
+	return []string{"CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1"}
+}
+
 // launchEnvEntries is everything a launch of provider appends after the
 // daemon's own environment, in last-wins order: the literal launch env
 // (an instance's spec.Env, providers.<id>.env), then one entry per
@@ -40,7 +77,8 @@ func (r *Runner) launchEnvEntries(provider Provider) ([]string, error) {
 	} else {
 		literals = r.providerEnvEntries(provider)
 	}
-	entries := make([]string, 0, len(literals)+len(spec.SecretEnv)+len(spec.PassthroughEnv))
+	entries := make([]string, 0, len(literals)+len(spec.SecretEnv)+len(spec.PassthroughEnv)+1)
+	entries = append(entries, scrubEnvEntries(spec, r.scrubSubprocessEnv)...)
 	entries = append(entries, literals...)
 
 	if len(spec.SecretEnv) > 0 && r.providerSecrets == nil {
