@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Icons } from "@/lib/icons";
 import { providerLabel, providerRunner } from "@/lib/provider-catalog";
 
@@ -36,6 +37,8 @@ import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { canRetryWithHigherEffort, useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import { useRunFailoverIndex } from "@/hooks/use-run-failover-index";
 import { isRateLimitedRun } from "@/lib/rate-limit";
+import { limitedProvidersKey } from "@/lib/rate-limit-providers";
+import { queryKeys } from "@/lib/query-keys";
 import { runStartParams } from "@/lib/run-start";
 import type { RunFailover } from "@/components/timeline/run-failover-actions";
 import { useTaskGit } from "@/hooks/use-task-git";
@@ -140,6 +143,16 @@ export function TaskDetailPane({
   // The header run-config pill's agent-name lookup (run-config IA), from
   // the same shared profile.list cache the composer picker reads.
   const profiles = useProfileList();
+  // A run that failed rate limited needs provider.list re-read: the footer's
+  // "I reset my quota, retry now" shows only once that cache (staleTime
+  // Infinity) carries the provider's cooldownUntil. The key changes exactly
+  // when a provider enters or leaves the limited set, so the refetch fires
+  // then -- not on every render.
+  const limitedKey = limitedProvidersKey(runs, new Date());
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (limitedKey) void queryClient.invalidateQueries({ queryKey: queryKeys.providerList() });
+  }, [limitedKey, queryClient]);
   // Mirrors RunConfigToolbar's own shared state (run-config IA): the
   // header pill is "display-only, derived from the same state the toolbar
   // reads" -- this is that read, not a second source of truth. Null until
