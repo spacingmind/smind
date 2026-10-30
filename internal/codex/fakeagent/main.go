@@ -123,6 +123,26 @@ func recordThreadModel(cwd, model string) {
 	_ = os.WriteFile(filepath.Join(cwd, "thread-model"), []byte(model), 0o644)
 }
 
+// recordThreadConfig writes the `modelProvider`/`config` a thread/start or
+// thread/resume carried to a "thread-config" file in cwd, plus a per-method
+// "thread-config.<method-with-dashes>" twin (e.g.
+// thread-config.thread-start) so tests can also tell start from resume.
+// An absent config records as JSON null.
+func recordThreadConfig(cwd, method, modelProvider string, config json.RawMessage) {
+	if cwd == "" {
+		return
+	}
+	data, err := json.Marshal(struct {
+		ModelProvider string          `json:"modelProvider"`
+		Config        json.RawMessage `json:"config"`
+	}{ModelProvider: modelProvider, Config: config})
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(cwd, "thread-config"), data, 0o644)
+	_ = os.WriteFile(filepath.Join(cwd, "thread-config."+strings.ReplaceAll(method, "/", "-")), data, 0o644)
+}
+
 // recordThreadInstructions writes the `developerInstructions` a thread/start
 // or thread/resume carried to a "thread-instructions" file in cwd ("" when
 // absent).
@@ -169,6 +189,9 @@ func handle(msg message, threadCwd *string) {
 			Sandbox        string `json:"sandbox"`
 			Model          string `json:"model"`
 
+			ModelProvider string          `json:"modelProvider"`
+			Config        json.RawMessage `json:"config"`
+
 			DeveloperInstructions string `json:"developerInstructions"`
 		}
 		_ = json.Unmarshal(msg.Params, &params)
@@ -179,6 +202,7 @@ func handle(msg message, threadCwd *string) {
 		recordThreadInitMethod(params.Cwd, "thread/start")
 		recordThreadPolicy(params.Cwd, params.ApprovalPolicy, params.Sandbox)
 		recordThreadModel(params.Cwd, params.Model)
+		recordThreadConfig(params.Cwd, "thread/start", params.ModelProvider, params.Config)
 		recordThreadInstructions(params.Cwd, params.DeveloperInstructions)
 		respond(msg.ID, map[string]any{"thread": map[string]any{"id": threadID}})
 	case msg.Method == "thread/loaded/list":
@@ -223,11 +247,15 @@ func handle(msg message, threadCwd *string) {
 			Sandbox        string `json:"sandbox"`
 			Model          string `json:"model"`
 
+			ModelProvider string          `json:"modelProvider"`
+			Config        json.RawMessage `json:"config"`
+
 			DeveloperInstructions string `json:"developerInstructions"`
 		}
 		_ = json.Unmarshal(msg.Params, &params)
 		recordThreadPolicy(params.Cwd, params.ApprovalPolicy, params.Sandbox)
 		recordThreadModel(params.Cwd, params.Model)
+		recordThreadConfig(params.Cwd, "thread/resume", params.ModelProvider, params.Config)
 		recordThreadInstructions(params.Cwd, params.DeveloperInstructions)
 		threadStateMu.Lock()
 		isArchived := archivedThreads[params.ThreadID]

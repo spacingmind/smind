@@ -268,3 +268,24 @@ func TestACPProvider_OpenCodePermissionEnvAsks(t *testing.T) {
 		t.Fatalf("OPENCODE_DISABLE_AUTOUPDATE = %q", s.Env["OPENCODE_DISABLE_AUTOUPDATE"])
 	}
 }
+
+func TestInstance_EndpointCarried(t *testing.T) {
+	t.Parallel()
+	r := New()
+	err := r.SetCustom([]Spec{
+		{ID: "codex-gw", Extends: IDCodexNative, Endpoint: Endpoint{Kind: EndpointOpenAIResponses, BaseURL: "https://gw.example"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, ok := r.Get("codex-gw")
+	if !ok {
+		t.Fatal("codex-gw: not in the registry")
+	}
+	if !inst.HasEndpoint() || inst.Endpoint.Kind != EndpointOpenAIResponses || inst.Endpoint.BaseURL != "https://gw.example" {
+		t.Fatalf("instance endpoint = %+v", inst.Endpoint)
+	}
+	if base, _ := r.Get(IDCodexNative); base.HasEndpoint() || base.Endpoint != (Endpoint{}) {
+		t.Fatalf("base spec endpoint = %+v", base.Endpoint)
+	}
+}

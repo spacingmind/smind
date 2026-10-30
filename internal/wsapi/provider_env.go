@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spacingmind/smind/internal/config"
@@ -28,6 +29,20 @@ type providerEnvEffective struct {
 	Exists bool   `json:"exists"`
 }
 
+// providerSecretView is one entry of providerEnvView.Secrets: a stored
+// secret of a custom instance (ADR-0046 section 4) by name only -- whether
+// a value is stored, and the fingerprint when one is. Never the value.
+type providerSecretView struct {
+	// Name is the stored secret name the instance's env references.
+	Name string `json:"name"`
+	// Env is the env NAME the secret resolves into at launch.
+	Env string `json:"env"`
+	// Set reports whether a value is stored.
+	Set bool `json:"set"`
+	// Fingerprint is the last 4 hex of the value's sha256, when Set.
+	Fingerprint string `json:"fingerprint,omitempty"`
+}
+
 // providerEnvView is the additive launch-env part of provider.list entries
 // and of the provider.updated payload. Paths only.
 type providerEnvView struct {
@@ -37,6 +52,10 @@ type providerEnvView struct {
 	EnvDirExists map[string]bool `json:"envDirExists,omitempty"`
 	// EnvEffective is, per allowlisted key, what a launch will use.
 	EnvEffective map[string]providerEnvEffective `json:"envEffective,omitempty"`
+	// Secrets is the instance's stored secrets ({secret: name} env refs),
+	// sorted by env name; passthrough names are not stored secrets and
+	// never appear.
+	Secrets []providerSecretView `json:"secrets,omitempty"`
 }
 
 func dirExists(path string) bool {
@@ -86,7 +105,34 @@ func providerEnvViewFor(runner *taskrunner.Runner, provider string) providerEnvV
 			v.EnvDirExists[k.Key] = dirExists(val)
 		}
 	}
+	v.Secrets = providerSecretViews(runner, provider)
 	return v
+}
+
+// providerSecretViews lists provider's stored secrets (its SecretEnv refs),
+// sorted by env name, with only a set flag and a fingerprint per name. Nil
+// when it has none.
+func providerSecretViews(runner *taskrunner.Runner, provider string) []providerSecretView {
+	spec, ok := runner.Providers().Get(provider)
+	if !ok || len(spec.SecretEnv) == 0 {
+		return nil
+	}
+	info := runner.ProviderSecretInfo(provider)
+	names := make([]string, 0, len(spec.SecretEnv))
+	for envName := range spec.SecretEnv {
+		names = append(names, envName)
+	}
+	sort.Strings(names)
+	out := make([]providerSecretView, 0, len(names))
+	for _, envName := range names {
+		secretName := spec.SecretEnv[envName]
+		e := providerSecretView{Name: secretName, Env: envName}
+		if i, ok := info[secretName]; ok {
+			e.Set, e.Fingerprint = true, i.Fingerprint
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // providerEnvDetail is the line provider.test appends for a provider with a

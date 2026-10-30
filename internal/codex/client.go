@@ -38,6 +38,9 @@ type threadStartParams struct {
 	Sandbox        string `json:"sandbox,omitempty"`
 	Model          string `json:"model,omitempty"`
 
+	ModelProvider string         `json:"modelProvider,omitempty"`
+	Config        map[string]any `json:"config,omitempty"`
+
 	DeveloperInstructions string `json:"developerInstructions,omitempty"`
 }
 
@@ -79,6 +82,9 @@ type threadResumeParams struct {
 	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
 	Sandbox        string `json:"sandbox,omitempty"`
 	Model          string `json:"model,omitempty"`
+
+	ModelProvider string         `json:"modelProvider,omitempty"`
+	Config        map[string]any `json:"config,omitempty"`
 
 	DeveloperInstructions string `json:"developerInstructions,omitempty"`
 }
@@ -173,6 +179,12 @@ type Client struct {
 	// thread/start and thread/resume (see WithDeveloperInstructions).
 	developerInstructions string
 
+	// modelProvider/threadConfig are sent as `modelProvider`/`config` on
+	// every thread/start and thread/resume (see WithModelProvider); an
+	// empty modelProvider omits both, leaving Codex's own provider.
+	modelProvider string
+	threadConfig  map[string]any
+
 	// mu guards updateSubs/turnWaiters, both keyed by threadID -- not
 	// turnID, deliberately: a turn's own id is only known once turn/start's
 	// response arrives, which would create a window (between issuing the
@@ -246,6 +258,13 @@ func WithDeveloperInstructions(text string) Option {
 // Empty (the default) omits the field entirely.
 func WithModel(model string) Option {
 	return func(c *Client) { c.model = model }
+}
+
+// WithModelProvider sets the `modelProvider` and `config` sent on every
+// thread/start and thread/resume. Empty modelProvider / nil config (the
+// default) omit both fields entirely.
+func WithModelProvider(modelProvider string, config map[string]any) Option {
+	return func(c *Client) { c.modelProvider, c.threadConfig = modelProvider, config }
 }
 
 // ModelInfo is one entry of the app-server's model/list.
@@ -359,7 +378,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 // NewSession starts a new codex thread rooted at cwd (the task's worktree
 // path), returning its thread id.
 func (c *Client) NewSession(ctx context.Context, cwd string) (string, error) {
-	raw, err := c.conn.call(ctx, "thread/start", threadStartParams{Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox, Model: c.model, DeveloperInstructions: c.developerInstructions})
+	raw, err := c.conn.call(ctx, "thread/start", threadStartParams{Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox, Model: c.model, ModelProvider: c.modelProvider, Config: c.threadConfig, DeveloperInstructions: c.developerInstructions})
 	if err != nil {
 		return "", fmt.Errorf("codex: thread/start: %w", err)
 	}
@@ -423,7 +442,7 @@ func (c *Client) threadLoaded(ctx context.Context, threadID string) (bool, error
 }
 
 func (c *Client) resumeThread(ctx context.Context, threadID, cwd string) error {
-	if _, err := c.conn.call(ctx, "thread/resume", threadResumeParams{ThreadID: threadID, Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox, Model: c.model, DeveloperInstructions: c.developerInstructions}); err != nil {
+	if _, err := c.conn.call(ctx, "thread/resume", threadResumeParams{ThreadID: threadID, Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox, Model: c.model, ModelProvider: c.modelProvider, Config: c.threadConfig, DeveloperInstructions: c.developerInstructions}); err != nil {
 		return fmt.Errorf("codex: thread/resume: %w", err)
 	}
 	return nil

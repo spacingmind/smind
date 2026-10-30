@@ -172,7 +172,7 @@ func (r *Runner) maybeProbe(provider Provider, probe func(context.Context, Provi
 		ctx, cancel := context.WithTimeout(context.Background(), acpModeProbeTimeout)
 		defer cancel()
 		if err := probe(ctx, provider); err != nil {
-			log.Printf("taskrunner: probe %s modes/models: %v", provider, err)
+			log.Printf("taskrunner: probe %s modes/models: %v", provider, scrubError(err, r.providerSecretValues(provider)))
 		}
 		r.modeMu.Lock()
 		e := r.acpModes[provider]
@@ -198,25 +198,32 @@ func (r *Runner) probeACPModes(ctx context.Context, provider Provider) error {
 	defer os.RemoveAll(dir)
 
 	popts := []acp.Option{acp.WithPermissionPolicy(acp.AutoDenyPolicy{})}
+	launchEnv, err := r.launchEnvEntries(provider)
+	if err != nil {
+		return fmt.Errorf("launch env: %w", err)
+	}
 	// NO_BROWSER comes first so the probe's default never launches a
 	// browser, while a provider-configured NO_BROWSER (a later entry, and
 	// later entries win) still overrides it. Real runs set no such default.
-	env := append([]string{"NO_BROWSER=true"}, r.acpEnvEntries(provider)...)
-	popts = append(popts, acp.WithEnv(env...))
+	launchEnv = append([]string{"NO_BROWSER=true"}, launchEnv...)
 	if spec, ok := r.providerRegistry().Get(string(provider)); ok && spec.NoMCPServers {
 		popts = append(popts, acp.WithoutMcpServers())
 	}
+	if len(launchEnv) > 0 {
+		popts = append(popts, acp.WithEnv(launchEnv...))
+	}
+	secrets := r.providerSecretValues(provider)
 	client, err := r.newACPClient(command, popts...)
 	if err != nil {
-		return fmt.Errorf("spawn: %w", err)
+		return fmt.Errorf("spawn: %w", scrubError(err, secrets))
 	}
 	defer client.Close()
 	if err := client.Initialize(ctx); err != nil {
-		return fmt.Errorf("initialize: %w", err)
+		return fmt.Errorf("initialize: %w", scrubError(err, secrets))
 	}
 	sessionID, options, err := client.NewSession(ctx, dir, nil) // probe: never spawn user MCP servers
 	if err != nil {
-		return fmt.Errorf("session/new: %w", err)
+		return fmt.Errorf("session/new: %w", scrubError(err, secrets))
 	}
 	r.recordSessionModes(provider, client, sessionID, options)
 	return nil
@@ -237,6 +244,10 @@ func (r *Runner) recordSessionModes(provider Provider, client acpBackend, sessio
 // the provider keeps reporting no models and accepts any syntax-valid
 // string (ADR-0025).
 func (r *Runner) probeCodexModels(ctx context.Context, provider Provider) error {
+	// models of an endpoint instance are configured, never discovered.
+	if spec, ok := r.providerRegistry().Get(string(provider)); ok && spec.HasEndpoint() {
+		return nil
+	}
 	var copts []codex.Option
 	if env := r.providerEnvEntries(provider); len(env) > 0 {
 		copts = append(copts, codex.WithEnv(env...))

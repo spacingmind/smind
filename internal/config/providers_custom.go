@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -25,22 +27,23 @@ type ProvidersConfig struct {
 // Extends (any built-in provider, or an earlier ACP entry) and overlays it
 // (ADR-0046): Command (a different executable; Args only for an ACP base),
 // Models (replace the base's list) or AdditionalModels (merged into it),
-// DisallowedTools (Claude Code), and Env (for claude-native / codex-native
-// only that provider's config-directory variable, the same allowlist as
-// providers.<id>.env; free-form for an ACP base). It runs the extended
-// provider's code, side by side with it.
+// DisallowedTools (Claude Code), and Env — typed values against the runner's
+// per-harness allowlist (ADR-0046 section 3): a literal, a `secret:` reference
+// or a passthrough; a key never sits inline in config.yaml. It runs the
+// extended provider's code, side by side with it.
 type CustomProvider struct {
-	ID               string            `yaml:"id"`
-	Label            string            `yaml:"label"`
-	Extends          string            `yaml:"extends"`
-	Command          string            `yaml:"command"`
-	Args             []string          `yaml:"args"`
-	Env              map[string]string `yaml:"env"`
-	Models           []CustomModel     `yaml:"models"`
-	AdditionalModels []CustomModel     `yaml:"additionalModels"`
-	DisallowedTools  []string          `yaml:"disallowedTools"`
-	Modes            []CustomMode      `yaml:"modes"`
-	ACP              *CustomACP        `yaml:"acp"`
+	ID               string              `yaml:"id"`
+	Label            string              `yaml:"label"`
+	Extends          string              `yaml:"extends"`
+	Command          string              `yaml:"command"`
+	Args             []string            `yaml:"args"`
+	Env              map[string]EnvValue `yaml:"env"`
+	Models           []CustomModel       `yaml:"models"`
+	AdditionalModels []CustomModel       `yaml:"additionalModels"`
+	DisallowedTools  []string            `yaml:"disallowedTools"`
+	Endpoint         *CustomEndpoint     `yaml:"endpoint"`
+	Modes            []CustomMode        `yaml:"modes"`
+	ACP              *CustomACP          `yaml:"acp"`
 }
 
 // CustomACP carries an ACP-specific capability declaration for a custom
@@ -49,6 +52,13 @@ type CustomACP struct {
 	// SupportsMcpServers nil = follow the agent's advertised capabilities;
 	// false = the agent cannot take mcpServers, so smind sends none.
 	SupportsMcpServers *bool `yaml:"supportsMcpServers"`
+}
+
+// CustomEndpoint is providers.custom[].endpoint: a Responses-compatible API a
+// codex-native instance talks to (ADR-0046 section 6).
+type CustomEndpoint struct {
+	Kind    string `yaml:"kind"`
+	BaseURL string `yaml:"baseUrl"`
 }
 
 // CustomModel is one entry of a custom ACP provider's model list.
@@ -150,18 +160,52 @@ func validateInstance(p *CustomProvider, bases map[string]providers.Runner, fiel
 			return fmt.Errorf("%s: %w", field(fmt.Sprintf("disallowedTools[%d]", j)), err)
 		}
 	}
+	if err := validateEndpoint(p, runner, field); err != nil {
+		return err
+	}
 	for key, value := range p.Env {
-		if runner == providers.RunnerACP {
-			if err := validateFreeFormEnv(key, value); err != nil {
-				return fmt.Errorf("%s: %w", field("env."+key), err)
-			}
-			continue
-		}
-		clean, err := ValidateProviderEnv(p.Extends, key, value)
+		clean, err := ValidateInstanceEnv(runner, key, value)
 		if err != nil {
 			return fmt.Errorf("%s: %w", field("env."+key), err)
 		}
 		p.Env[key] = clean
+	}
+	return nil
+}
+
+// validateEndpoint checks providers.custom[].endpoint, an API a codex-native
+// instance talks to instead of its login's (ADR-0046 section 6). The base URL
+// is stored trimmed as given (never normalised) and never echoed in an error:
+// it may carry a token.
+func validateEndpoint(p *CustomProvider, runner providers.Runner, field func(string) string) error {
+	if p.Endpoint == nil {
+		return nil
+	}
+	if runner != providers.RunnerCodex {
+		return fmt.Errorf("%s: only applies to an instance of %s", field("endpoint"), providers.IDCodexNative)
+	}
+	switch p.Endpoint.Kind {
+	case "openai-responses":
+	case "openai-chat", "chat-completions", "openai-chat-completions":
+		return fmt.Errorf("%s: %q is unsupported by the Codex harness: Codex only speaks the OpenAI Responses API (wire_api %q). Use an Anthropic-compatible recipe with Claude Code, a Responses gateway such as LiteLLM, or OpenCode", field("endpoint.kind"), p.Endpoint.Kind, "responses")
+	case "":
+		return fmt.Errorf("%s: required", field("endpoint.kind"))
+	default:
+		return fmt.Errorf("%s: unknown kind %q (supported: openai-responses)", field("endpoint.kind"), p.Endpoint.Kind)
+	}
+	p.Endpoint.BaseURL = strings.TrimSpace(p.Endpoint.BaseURL)
+	if p.Endpoint.BaseURL == "" {
+		return fmt.Errorf("%s: required", field("endpoint.baseUrl"))
+	}
+	u, err := url.Parse(p.Endpoint.BaseURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Opaque != "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("%s: must be an http(s) URL with a host and no userinfo, query or fragment", field("endpoint.baseUrl"))
+	}
+	if len(p.AdditionalModels) > 0 {
+		return fmt.Errorf("%s: not allowed with endpoint (use models)", field("additionalModels"))
+	}
+	if len(p.Models) == 0 {
+		return fmt.Errorf("%s: required for a codex-native instance with an endpoint (models are not discovered for custom endpoints)", field("models"))
 	}
 	return nil
 }
@@ -207,18 +251,6 @@ func validateToolName(tool string) error {
 	return nil
 }
 
-// validateFreeFormEnv checks one ACP command env entry: no allowlist, but the
-// value is never put in an error (it may be a token).
-func validateFreeFormEnv(key, value string) error {
-	if !envNameRe.MatchString(key) {
-		return fmt.Errorf("the name is not a valid environment variable name")
-	}
-	if strings.ContainsRune(value, 0) {
-		return fmt.Errorf("the value must not contain NUL characters")
-	}
-	return nil
-}
-
 // validateModelList checks a models / additionalModels list: ids required,
 // syntax-valid and unique.
 func validateModelList(models []CustomModel, field func(string) string, name string) error {
@@ -252,9 +284,11 @@ func validateACPEntry(p *CustomProvider, field func(string) string) error {
 		}
 	}
 	for key, value := range p.Env {
-		if err := validateFreeFormEnv(key, value); err != nil {
+		clean, err := ValidateInstanceEnv(providers.RunnerACP, key, value)
+		if err != nil {
 			return fmt.Errorf("%s: %w", field("env."+key), err)
 		}
+		p.Env[key] = clean
 	}
 	if len(p.AdditionalModels) > 0 {
 		return fmt.Errorf("%s: only applies to an instance (use models)", field("additionalModels"))
@@ -279,11 +313,31 @@ func validateACPEntry(p *CustomProvider, field func(string) string) error {
 	return nil
 }
 
-// ProviderSpecs converts validated entries to registry specs.
+// ProviderSpecs converts validated entries to registry specs. Literal env
+// values go to Spec.Env (empty literals kept: some vendors need NAME=""),
+// `secret:` references to Spec.SecretEnv (env NAME -> secret name) and
+// passthrough names to Spec.PassthroughEnv, sorted.
 func ProviderSpecs(list []CustomProvider) []providers.Spec {
 	out := make([]providers.Spec, 0, len(list))
 	for _, p := range list {
-		s := providers.Spec{ID: p.ID, Label: strings.TrimSpace(p.Label), Extends: p.Extends, Env: copyEnv(p.Env)}
+		s := providers.Spec{ID: p.ID, Label: strings.TrimSpace(p.Label), Extends: p.Extends}
+		for name, v := range p.Env {
+			switch {
+			case v.Secret != "":
+				if s.SecretEnv == nil {
+					s.SecretEnv = map[string]string{}
+				}
+				s.SecretEnv[name] = v.Secret
+			case v.Passthrough:
+				s.PassthroughEnv = append(s.PassthroughEnv, name)
+			default:
+				if s.Env == nil {
+					s.Env = map[string]string{}
+				}
+				s.Env[name] = v.Literal
+			}
+		}
+		sort.Strings(s.PassthroughEnv)
 		if p.ACP != nil && p.ACP.SupportsMcpServers != nil && !*p.ACP.SupportsMcpServers {
 			s.NoMCPServers = true
 		}
@@ -297,6 +351,9 @@ func ProviderSpecs(list []CustomProvider) []providers.Spec {
 		} else {
 			if p.Command != "" {
 				s.Command = append([]string{p.Command}, p.Args...)
+			}
+			if p.Endpoint != nil {
+				s.Endpoint = providers.Endpoint{Kind: providers.EndpointKind(p.Endpoint.Kind), BaseURL: p.Endpoint.BaseURL}
 			}
 			s.DisallowedTools = append([]string(nil), p.DisallowedTools...)
 			if len(p.Models) > 0 {
@@ -325,17 +382,6 @@ func orID(label, id string) string {
 	return id
 }
 
-func copyEnv(env map[string]string) map[string]string {
-	if len(env) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(env))
-	for k, v := range env {
-		out[k] = v
-	}
-	return out
-}
-
 // AddProviderInstance appends an instance entry (extends + its config
 // directory) to providers.custom in config.yaml through the atomic,
 // comment-preserving writer, after validating the resulting list with
@@ -353,7 +399,7 @@ func AddProviderInstance(extends, id, label, dir string) (CustomProvider, error)
 		if err != nil {
 			return CustomProvider{}, err
 		}
-		entry.Env = map[string]string{keys[0].Key: clean}
+		entry.Env = map[string]EnvValue{keys[0].Key: {Literal: clean}}
 	}
 	str := func(v string) *yaml.Node { return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v} }
 	node := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{str("id"), str(entry.ID)}}
@@ -362,7 +408,7 @@ func AddProviderInstance(extends, id, label, dir string) (CustomProvider, error)
 	}
 	node.Content = append(node.Content, str("extends"), str(extends))
 	if entry.Env != nil {
-		env := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{str(keys[0].Key), str(entry.Env[keys[0].Key])}}
+		env := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{str(keys[0].Key), str(entry.Env[keys[0].Key].Literal)}}
 		node.Content = append(node.Content, str("env"), env)
 	}
 	err := mutate(func(root *yaml.Node) error {
