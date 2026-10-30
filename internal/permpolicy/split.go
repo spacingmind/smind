@@ -4,7 +4,11 @@
 // escalate to a human instead of matching rules against a guess.
 package permpolicy
 
-import "strings"
+import (
+	"sort"
+	"strconv"
+	"strings"
+)
 
 // maxCommandBytes caps what the splitter will scan at all; a larger request
 // is reported unparseable rather than trusted after truncation.
@@ -45,7 +49,12 @@ func SplitCommand(cmd string) Parsed {
 	}
 	s := scanner{src: cmd, p: &p, segStart: -1}
 	s.run()
+	s.consumeHeredocBodies() // a heredoc on the last line owns the rest even without a newline
+	for i := range s.segs {
+		s.segs[i].Raw = s.elided(s.spans[i].start, s.spans[i].end)
+	}
 	p.Segments = s.segs
+	p.Normalized = s.normalized()
 	return p
 }
 
@@ -60,6 +69,21 @@ type word struct {
 	dynamic bool
 }
 
+// heredoc records one <<TAG operator and, once its body has been consumed,
+// the span that body occupied, so Raw and Normalized can replace it with a
+// size marker instead of the text (bodies are never matched as commands).
+type heredoc struct {
+	opStart, opEnd     int // the operator and tag as written
+	bodyStart, bodyEnd int
+	tag                string
+	stripTabs          bool // <<- strips leading tabs from body lines and the terminator
+	n                  int  // body length in bytes
+}
+
+func (h *heredoc) marker() string {
+	return "<<" + h.tag + " [heredoc " + strconv.Itoa(h.n) + " bytes]"
+}
+
 type scanner struct {
 	src      string
 	i        int
@@ -67,8 +91,16 @@ type scanner struct {
 	w        word
 	cur      *Segment
 	segs     []Segment
+	spans    []span // source range of each segment, for the final Raw pass
 	segStart int
+	pending  []*heredoc // heredoc operators on the line being scanned
+	heredocs []*heredoc // every heredoc, in operator order, once consumed
 }
+
+// span is the source range a segment was built from; Raw is re-rendered from
+// it after every heredoc body is known, because a segment can close (at a
+// pipe, a ';' or a newline) before its own heredoc body is consumed.
+type span struct{ start, end int }
 
 func (s *scanner) run() {
 	for s.i < len(s.src) {
@@ -80,6 +112,9 @@ func (s *scanner) run() {
 		case c == '\n' || c == ';':
 			s.closeSeg(false)
 			s.i++
+			if c == '\n' {
+				s.consumeHeredocBodies()
+			}
 		case c == '&':
 			switch {
 			case s.peek(1) == '&':
@@ -231,10 +266,9 @@ func (s *scanner) closeSeg(pipe bool) {
 		if pipe {
 			s.cur.PipeNext = true
 		}
-		if s.segStart >= 0 && s.segStart <= s.i {
-			s.cur.Raw = strings.TrimSpace(s.src[s.segStart:s.i])
-		}
 		if len(s.cur.Argv) > 0 || len(s.cur.Env) > 0 || len(s.cur.Redirects) > 0 {
+			s.cur.Raw = s.elided(s.segStart, s.i)
+			s.spans = append(s.spans, span{s.segStart, s.i})
 			s.segs = append(s.segs, *s.cur)
 		}
 		s.cur = nil
@@ -302,6 +336,10 @@ func (s *scanner) redirect() {
 			op += "<"
 			s.i++
 		}
+		if strings.HasSuffix(op, "<<") && s.peek(0) == '-' {
+			op += "-"
+			s.i++
+		}
 	case s.peek(0) == '>':
 		op += ">"
 		s.i++
@@ -318,14 +356,16 @@ func (s *scanner) redirect() {
 			s.i++
 		}
 	}
-	switch {
-	case strings.HasSuffix(op, "<") && s.peek(0) == '(',
-		strings.HasSuffix(op, ">") && s.peek(0) == '(':
+	if strings.HasSuffix(op, "<") && s.peek(0) == '(' || strings.HasSuffix(op, ">") && s.peek(0) == '(' {
 		s.unparsed("process substitution cannot be analysed")
-	case strings.Contains(op, "<<") && op != "<<<":
-		s.unparsed("heredoc not supported yet")
 	}
+	// A heredoc's body starts after the line ends; its target is the
+	// delimiter word (quotes stripped, never expanded by the shell).
+	isHere := strings.Contains(op, "<<") && op != "<<<"
 	tok := Redirect{Op: op}
+	if isHere {
+		tok.Op = "<<"
+	}
 	if !(strings.Contains(op, "&") && isDigit(op[len(op)-1])) {
 		for s.peek(0) == ' ' || s.peek(0) == '\t' || s.peek(0) == '\r' {
 			s.i++
@@ -335,8 +375,16 @@ func (s *scanner) redirect() {
 			s.unparsed("redirect " + op + " without a target")
 		} else {
 			tok.Target = string(s.w.val)
-			if s.w.dynamic {
+			if s.w.dynamic && !isHere {
 				s.seg().Dynamic = true
+			}
+			if isHere {
+				s.pending = append(s.pending, &heredoc{
+					opStart:   start,
+					opEnd:     s.i,
+					tag:       tok.Target,
+					stripTabs: strings.Contains(op, "<<-"),
+				})
 			}
 			s.w = word{}
 		}
@@ -357,6 +405,116 @@ func (s *scanner) scanWord() {
 		}
 		s.wordChar()
 	}
+}
+
+// consumeHeredocBodies swallows the bodies of every heredoc operator on the
+// line that just ended, so they are never scanned as commands, and records
+// their spans for the elided Raw and Normalized forms. Bash reads the bodies
+// in operator order, one after the other.
+func (s *scanner) consumeHeredocBodies() {
+	for _, h := range s.pending {
+		h.bodyStart = s.i
+		var ok bool
+		h.n, ok = s.heredocBody(h.tag, h.stripTabs)
+		h.bodyEnd = s.i
+		s.p.HeredocBytes += h.n
+		if !ok {
+			s.unparsed("heredoc terminator not found")
+		}
+		s.heredocs = append(s.heredocs, h)
+	}
+	s.pending = nil
+}
+
+// heredocBody advances s.i past the body of one heredoc, up to and including
+// the line equal to tag (tabs stripped for <<-), and returns the body length.
+// ok is false when the terminator never appears; the remainder is still
+// treated as body, exactly as bash would read it.
+func (s *scanner) heredocBody(tag string, stripTabs bool) (n int, ok bool) {
+	bodyStart := s.i
+	for {
+		lineStart := s.i
+		lineEnd := strings.IndexByte(s.src[s.i:], '\n')
+		var line string
+		var next int
+		if lineEnd < 0 {
+			line = s.src[s.i:]
+			next = len(s.src)
+		} else {
+			line = s.src[s.i : s.i+lineEnd]
+			next = s.i + lineEnd + 1
+		}
+		s.i = next
+		if stripTabs {
+			line = strings.TrimLeft(line, "\t")
+		}
+		if line == tag {
+			return lineStart - bodyStart, true
+		}
+		if next >= len(s.src) {
+			return len(s.src) - bodyStart, false
+		}
+	}
+}
+
+// elided renders src[base:end) with every heredoc operator replaced by its
+// size marker, so a segment's Raw never carries body text.
+func (s *scanner) elided(base, end int) string {
+	var b strings.Builder
+	pos := base
+	for _, h := range s.heredocs {
+		if h.opStart < pos || h.opStart >= end {
+			continue
+		}
+		b.WriteString(s.src[pos:h.opStart])
+		b.WriteString(h.marker())
+		pos = h.opEnd
+	}
+	b.WriteString(s.src[pos:end])
+	return strings.TrimSpace(b.String())
+}
+
+// normalized renders the whole command with every heredoc body (and its
+// terminator line) replaced by the size marker inline where the operator
+// was, so no body text survives into an audit row or a permission card.
+// The operator spans and body spans of several heredocs on one line
+// interleave, so the edits are spliced in start order.
+func (s *scanner) normalized() string {
+	if len(s.heredocs) == 0 {
+		return strings.TrimSpace(s.src)
+	}
+	type edit struct {
+		start, end int
+		text       string
+	}
+	var edits []edit
+	for _, h := range s.heredocs {
+		edits = append(edits, edit{h.opStart, h.opEnd, h.marker()})
+		if h.bodyStart > h.opEnd && h.bodyStart <= len(s.src) {
+			edits = append(edits, edit{h.bodyStart - 1, h.bodyEnd, ""}) // the newline that opened the body
+		}
+	}
+	sort.Slice(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
+	var b strings.Builder
+	pos := 0
+	for _, e := range edits {
+		if e.start < pos {
+			// Two bodies on one line make the deletions overlap; a deletion
+			// clamps into the union, an insertion never overlaps in practice.
+			if e.text != "" || e.end <= pos {
+				continue
+			}
+			e.start = pos
+		}
+		if e.end > len(s.src) {
+			continue
+		}
+		b.WriteString(s.src[pos:e.start])
+		b.WriteString(e.text)
+		pos = e.end
+	}
+	b.WriteString(s.src[pos:])
+	return strings.TrimSpace(b.String())
 }
 
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }
