@@ -45,6 +45,9 @@ const WIDE_SECTION_IDS = new Set([
   "shortcuts",
 ]);
 
+/** Sections whose tables need even more room than max-w-3xl gives at 1280 -- their page gets max-w-5xl. */
+const EXTRA_WIDE_SECTION_IDS = new Set(["shortcuts"]);
+
 /**
  * The scrolling grouped section nav, shared by both layouts: the desktop
  * sidebar (`variant="sidebar"`, compact h-8 rows with an active highlight)
@@ -345,7 +348,11 @@ export function SettingsScreen({
             <div
               className={cn(
                 "mx-auto w-full px-6 pb-12 pt-4",
-                active?.id && WIDE_SECTION_IDS.has(active.id) ? "max-w-3xl" : "max-w-[510px]",
+                active?.id && EXTRA_WIDE_SECTION_IDS.has(active.id)
+                  ? "max-w-5xl"
+                  : active?.id && WIDE_SECTION_IDS.has(active.id)
+                    ? "max-w-3xl"
+                    : "max-w-[510px]",
               )}
             >
               <h1

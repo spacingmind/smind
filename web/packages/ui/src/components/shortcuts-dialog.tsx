@@ -105,7 +105,7 @@ function ShortcutRow({
 
   return (
     <tr data-testid="shortcut-row" data-binding-id={row.id} className="border-t border-border">
-      <td className="px-4 py-1.5">
+      <td className="px-3 py-1.5">
         <div className="truncate text-ui-base">{row.label}</div>
         {row.note && <div className="truncate text-ui-sm text-foreground-muted">{row.note}</div>}
         {conflictLabel && (
@@ -114,7 +114,7 @@ function ShortcutRow({
           </div>
         )}
       </td>
-      <td className="whitespace-nowrap px-4 py-1.5">
+      <td className="whitespace-nowrap px-3 py-1.5">
         {capturing === "chord" ? (
           <span className="text-ui-sm text-foreground-muted" data-testid="shortcut-capturing">
             Recording a chord… (Enter to save, Esc to cancel)
@@ -131,8 +131,8 @@ function ShortcutRow({
           <KeyCaps keys={row.keys} />
         )}
       </td>
-      <td className="hidden whitespace-nowrap px-4 py-1.5 text-ui-sm text-foreground-muted sm:table-cell">Global</td>
-      <td className="px-4 py-1.5">
+      <td className="hidden whitespace-nowrap px-3 py-1.5 text-ui-sm text-foreground-muted sm:table-cell">Global</td>
+      <td className="px-3 py-1.5">
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button
             variant="ghost"
@@ -205,19 +205,19 @@ export function ShortcutRows({ query = "" }: { query?: string } = {}) {
             <table className="w-full border-collapse text-left text-ui-base">
               <thead>
                 <tr className="border-b border-border">
-                  <th scope="col" className="px-4 py-2 text-ui-sm font-medium text-foreground-muted">
+                  <th scope="col" className="px-3 py-2 text-ui-sm font-medium text-foreground-muted">
                     Command
                   </th>
-                  <th scope="col" className="px-4 py-2 text-ui-sm font-medium text-foreground-muted">
+                  <th scope="col" className="px-3 py-2 text-ui-sm font-medium text-foreground-muted">
                     Keybinding
                   </th>
                   <th
                     scope="col"
-                    className="hidden whitespace-nowrap px-4 py-2 text-ui-sm font-medium text-foreground-muted sm:table-cell"
+                    className="hidden whitespace-nowrap px-3 py-2 text-ui-sm font-medium text-foreground-muted sm:table-cell"
                   >
                     Scope
                   </th>
-                  <th scope="col" className="px-4 py-2 text-ui-sm font-medium text-foreground-muted">
+                  <th scope="col" className="px-3 py-2 text-ui-sm font-medium text-foreground-muted">
                     Actions
                   </th>
                 </tr>
