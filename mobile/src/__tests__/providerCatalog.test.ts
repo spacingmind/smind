@@ -150,4 +150,15 @@ describe('custom providers and the offline fallback', () => {
       'Cursor',
     ]);
   });
+
+  it('fallback catalog lists the five new ACP providers', () => {
+    const five = FALLBACK_PROVIDERS.filter((p) => ['opencode', 'copilot', 'cline', 'goose', 'cursor'].includes(p.id));
+    expect(five.map((p) => ({ id: p.id, label: p.label, runner: p.runner }))).toEqual([
+      { id: 'opencode', label: 'OpenCode', runner: 'acp' },
+      { id: 'copilot', label: 'GitHub Copilot', runner: 'acp' },
+      { id: 'cline', label: 'Cline', runner: 'acp' },
+      { id: 'goose', label: 'Goose', runner: 'acp' },
+      { id: 'cursor', label: 'Cursor', runner: 'acp' },
+    ]);
+  });
 });
