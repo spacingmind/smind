@@ -199,6 +199,60 @@ providers:
 
 GLM and Kimi have no launch environment field.
 
+## Recipes: compatible endpoints
+
+A recipe is a built-in template for one provider instance that points Claude
+Code (or Codex) at another vendor's API. smind ships the catalog inside the
+daemon: there is no remote catalog, and it changes only with a release.
+`provider.recipes` lists it (read-only). `provider.addFromRecipe {recipe, id?,
+label?, baseUrl?, models?, secrets}` creates the instance from one row. It is
+for Humans only: agents and plugins are refused. For Z.AI you only paste a key:
+`secrets: {"api-key": "<key>"}`. The key goes into the secret store and is never
+written to `config.yaml`, returned, logged or put on a command line. Adding the
+same recipe with the same id again changes nothing in the config; an id used by
+another entry is refused.
+
+Every Claude Code recipe disallows `WebSearch` (third-party endpoints have no
+hosted search tool) and runs with its own `CLAUDE_CONFIG_DIR` under
+`<SMIND_HOME>/providers/<id>/claude`, so its files never mix with `~/.claude`.
+Set `inheritClaudeConfig: true` on the entry to use `~/.claude` instead. A recipe
+whose endpoint cannot turn thinking off is marked `thinking: hidden`: the run
+ignores a requested thinking level and `provider.list` reports `thinking:
+hidden` so a client hides the control. A model id smind does not know is shown
+as the raw id.
+
+Rate limits follow the vendor: an instance has a vendor profile (`zai`,
+`anthropic`, `openai` or `generic`). A GLM-worded 429 on the Z.AI instance
+(`vendor: zai`) puts that instance on cooldown until its UTC+8 reset and leaves
+`claude-native` running. Any other vendor's 429 is classified by the generic
+patterns, without a reset time.
+
+| Recipe id | Harness | Needs | Source | Verified |
+| --- | --- | --- | --- | --- |
+| `zai-glm` | Claude Code | key | vendor docs | no |
+| `qwen-dashscope` | Claude Code | key | Paseo docs | no |
+| `deepseek` | Claude Code | key | vendor docs | no |
+| `kimi-moonshot` | Claude Code | key | **inferred** | **no: the Claude Code base URL is a guess** |
+| `minimax` | Claude Code | key | vendor docs | no |
+| `openrouter` | Claude Code | key | vendor docs | no |
+| `ollama` | Claude Code | a model id (local, no key) | vendor docs | no |
+| `lm-studio` | Claude Code | a model id (local, no key) | vendor docs | no |
+| `litellm` | Claude Code | URL, key, model ids | vendor docs | no |
+| `anthropic-compatible` | Claude Code | URL, key, model ids | Paseo docs | no |
+| `openai-responses-compatible` | Codex | URL, key, model ids | Paseo docs | no |
+| `chat-completions-via-opencode` | OpenCode | not addable yet | **inferred** | **no** |
+
+"Verified: no" means no row has been run against a live endpoint yet; the
+catalog records `source` and `verifiedAt` per row, and `provider.recipes` returns
+`unverified: true` for each. Treat the base URLs and model ids as the vendor's
+documentation said on 2026-10-30. The Kimi and OpenCode rows are inferred and
+should be tried with care. The `openai-responses-compatible` row speaks only the
+OpenAI Responses API (Codex has no chat-completions mode).
+
+For GLM, the default way to add a new login is now the `zai-glm` recipe (Claude
+Code against the Z.AI endpoint). The built-in `glm` provider (the
+`glm-acp-agent` wrapper) stays for one more release.
+
 ## Provider instances
 
 A provider instance is a second login of Claude Code or Codex that has its own

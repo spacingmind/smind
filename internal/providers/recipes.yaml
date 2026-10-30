@@ -356,10 +356,10 @@ recipes:
     thinking: supported
     disallowedTools: []
     notes:
-      - "Runs through OpenCode's own provider config (opencode.json); depends on the OpenCode provider landing."
+      - "Runs through OpenCode's own provider config (opencode.json); the OpenCode provider exists, but adding this recipe is not supported yet."
       - "Not usable with Codex."
     docs: "https://opencode.ai/docs/providers/"
     source: inferred
     verifiedAt: ""
     unverified:
-      - "whole recipe: the OpenCode provider is not merged and nothing was run"
+      - "whole recipe: nothing was run, and addFromRecipe cannot build an OpenCode instance yet"
