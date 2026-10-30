@@ -246,8 +246,6 @@ export const Icons = {
   /** Account / plan usage windows. */
   usage: Gauge,
   time: Clock,
-  /** A provider's rate-limit cooldown (ADR-0041 F1): the Settings -> Providers line. */
-  clock: Clock,
 
   // --- settings sections / hosts
   host: Server,

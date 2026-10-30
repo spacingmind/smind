@@ -167,7 +167,7 @@ export function ProviderDetail({
         ) : null}
         {cooldownUntil ? (
           <p data-testid={`provider-cooldown-${item.id}`} className="flex items-center gap-1.5 text-ui-sm text-muted-foreground">
-            <Icons.clock aria-hidden className="size-3.5 text-foreground-muted" />
+            <Icons.time aria-hidden className="size-3.5 text-foreground-muted" />
             {`Rate limited until ${cooldownUntil.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
             <Button
               type="button"
