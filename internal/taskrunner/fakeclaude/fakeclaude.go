@@ -152,6 +152,17 @@ func Run() {
 		}})
 		fmt.Fprintln(os.Stderr, "fatal: heap out of memory")
 		fmt.Fprintln(os.Stderr, "ANTHROPIC_API_KEY=sk-ant-api03-FAKEFAKEFAKEFAKEFAKEFAKE0123456789")
+		// Redaction tests: echo one launch-env VALUE bare on stderr (the
+		// env NAME comes from FAKE_CLAUDE_STDERR_ECHO_ENV) -- bare, so no
+		// generic key=value rule can catch it and only the exact-secret
+		// scrub does -- and record it in "stderr-echoed" so a test can
+		// prove the echo actually ran.
+		if name := os.Getenv("FAKE_CLAUDE_STDERR_ECHO_ENV"); name != "" {
+			if v, ok := os.LookupEnv(name); ok && v != "" {
+				fmt.Fprintln(os.Stderr, v)
+				_ = os.WriteFile(filepath.Join(wd, "stderr-echoed"), []byte(v), 0o644)
+			}
+		}
 		switch scenario {
 		case "cli-exit-signal":
 			if p, err := os.FindProcess(os.Getpid()); err == nil {
