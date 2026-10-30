@@ -30,14 +30,15 @@ export function GeneralSection(_ctx: SettingsSectionContext) {
             </>
           }
         />
-      </SettingsGroup>    </div>
+      </SettingsGroup>
+    </div>
   );
 }
 
 registerSettingsSection({
   id: "general",
   label: "General",
-  description: "Defaults and shortcuts into the rest of settings.",
+  description: "Defaults for new tasks.",
   // First in the nav (run-config IA regroup: General · Appearance ·
   // Agents & providers · Connection · Notifications · Shortcuts).
   order: 50,
