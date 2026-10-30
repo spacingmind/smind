@@ -15,6 +15,11 @@ const BUILTIN_RUNNERS: Readonly<Record<string, ProviderRunner>> = {
   "codex-native": "codex-native",
   glm: "acp",
   kimi: "acp",
+  opencode: "acp",
+  copilot: "acp",
+  cline: "acp",
+  goose: "acp",
+  cursor: "acp",
 };
 
 /**
@@ -39,7 +44,7 @@ export function providerFamilyId(id: string, providers?: readonly ServedProvider
  * the bare family word ("claude", "codex") is what the glyph code accepted.
  */
 export interface ProviderIdentity {
-  key: "claude" | "codex" | "glm" | "kimi";
+  key: "claude" | "codex" | "glm" | "kimi" | "opencode" | "copilot" | "cline" | "goose" | "cursor";
   runtimeId: string;
   accountProvider?: string;
   label: string;
@@ -53,6 +58,11 @@ const IDENTITIES: readonly ProviderIdentity[] = [
   { key: "codex", runtimeId: "codex-native", accountProvider: "openai", label: "Codex", shortName: "Codex", mark: "codex" },
   { key: "glm", runtimeId: "glm", label: "GLM", shortName: "GLM", mark: "agent" },
   { key: "kimi", runtimeId: "kimi", accountProvider: "kimi", label: "Kimi", shortName: "Kimi", mark: "agent" },
+  { key: "opencode", runtimeId: "opencode", label: "OpenCode", shortName: "OpenCode", mark: "agent" },
+  { key: "copilot", runtimeId: "copilot", label: "GitHub Copilot", shortName: "GitHub Copilot", mark: "agent" },
+  { key: "cline", runtimeId: "cline", label: "Cline", shortName: "Cline", mark: "agent" },
+  { key: "goose", runtimeId: "goose", label: "Goose", shortName: "Goose", mark: "agent" },
+  { key: "cursor", runtimeId: "cursor", label: "Cursor", shortName: "Cursor", mark: "agent" },
 ];
 
 /** The identity for either id vocabulary (runtime, account, or bare family word), case-insensitive. */
