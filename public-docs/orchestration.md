@@ -28,7 +28,7 @@ edits survive a re-run:
 |---|---|
 | `lead` | Owns one work item end to end: spec, implementation, tests, review, pull request. Can launch Peers. |
 | `peer-sonnet` | Does one bounded step from a Lead's brief. Cannot launch anyone. Ends with a short JSON handoff. |
-| `validator` | Judges one commit against the contract a Lead wrote before coding, in a fresh context and its own scratch worktree, and reports a pass, fail or blocked verdict with evidence. A Lead starts it with `validation_request`; the verdict is for one commit and goes stale after a push. It never merges, and neither does smind. |
+| `validator` | Judges one commit against the contract a Lead wrote before coding, in a fresh context and its own scratch worktree, and reports a pass, fail or blocked verdict with evidence. A Lead starts it with `validation_request`; the verdict is for one commit and goes stale after a push. It never merges, and neither does smind. A verdict that needs you shows in the [Inbox](inbox.md). |
 
 All three use the `claude-native` provider with a Sonnet model. List them and
 their ids with `smind profile ls`. Edit one with `smind profile edit <id>`.
