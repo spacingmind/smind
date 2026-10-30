@@ -116,6 +116,21 @@ func TestResolvePath_SymlinkLoopIsError(t *testing.T) {
 	}
 }
 
+// The pending tail is stacked deepest-first; a link with two or more missing
+// components after it is where a wrong rejoin order would show.
+func TestResolvePath_DanglingSymlinkWithDeepTail(t *testing.T) {
+	wt, other := t.TempDir(), t.TempDir()
+	kind := testutil.Link(t, filepath.Join(other, "missing"), filepath.Join(wt, "link"))
+
+	got, err := ResolvePath(filepath.Join(wt, "link", "a", "b.txt"), wt)
+	if err != nil {
+		t.Fatalf("ResolvePath through dangling %s: %v", kind, err)
+	}
+	if want := filepath.Join(canon(t, other), "missing", "a", "b.txt"); got != want {
+		t.Fatalf("ResolvePath through dangling %s = %q, want %q", kind, got, want)
+	}
+}
+
 func TestWithin_SiblingPrefixIsNotWithin(t *testing.T) {
 	dir := canon(t, t.TempDir())
 	root := filepath.Join(dir, "b")

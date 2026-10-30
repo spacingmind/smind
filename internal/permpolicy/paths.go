@@ -74,7 +74,12 @@ func ResolvePath(p, cwd string) (string, error) {
 			if !filepath.IsAbs(target) {
 				target = filepath.Join(filepath.Dir(cur), target)
 			}
-			cur = filepath.Join(append([]string{target}, tail...)...)
+			// tail is stacked deepest-first; re-join from the last entry
+			// down so the components keep their order under the target.
+			for i := len(tail) - 1; i >= 0; i-- {
+				target = filepath.Join(target, tail[i])
+			}
+			cur = filepath.Clean(target)
 			tail = nil
 			continue
 		}
