@@ -237,6 +237,18 @@ export interface ProviderInfo {
   extends?: string;
   /** ADR-0046: the engine kind -- the runner's value under its harness name. Absent on an older daemon. */
   harness?: "claude-code" | "codex-app-server" | "acp";
+  /** Instances only: id of the recipe the instance was made from (the fields below describe that recipe). */
+  recipe?: string;
+  /** The recipe's vendor (its rate-limit profile); "generic" = not one of the known three. */
+  vendor?: "zai" | "anthropic" | "openai" | "generic";
+  /** Whether the endpoint can turn thinking off: "hidden" means it cannot, so hide the thinking control. */
+  thinking?: "supported" | "hidden";
+  /** The wire protocol the endpoint speaks ("anthropic", "openai-responses", ...). */
+  endpointKind?: string;
+  /** The recipe's caveats, carried over for display. */
+  notes?: string[];
+  /** True when the recipe row was never verified against a live endpoint. */
+  unverified?: boolean;
   /** True for a providers.custom entry (an ACP provider or an instance), false/absent for a built-in. */
   custom?: boolean;
   /** ADR-0038: whether the provider can view images natively ("no" = the file path is sent instead). Absent on a daemon without attachments. */
@@ -317,6 +329,77 @@ export interface AddProviderInstanceParams {
   id: string;
   label: string;
   dir: string;
+}
+
+/** One `env` entry of a provider.recipes row: where the env var's value comes from. */
+export interface ProviderRecipeEnv {
+  name: string;
+  /** literal = a fixed value; secret = a key the user pastes; secretDefault = a stored placeholder, no prompt; userBaseURL = the URL the user supplies. */
+  kind: "literal" | "secret" | "secretDefault" | "userBaseURL";
+  /** The fixed value (literal) or URL placeholder; "" for secret/secretDefault -- a value never crosses the wire. */
+  value: string;
+}
+
+/** One `models` entry of a provider.recipes row. */
+export interface ProviderRecipeModel {
+  id: string;
+  label: string;
+  default: boolean;
+}
+
+/** One row of provider.recipes (internal/providers' catalog): a template the add-provider flow instantiates. */
+export interface ProviderRecipe {
+  id: string;
+  label: string;
+  description: string;
+  harness: "claude-code" | "codex-app-server" | "acp";
+  /** The wire protocol the endpoint speaks. */
+  endpointKind: string;
+  vendor: string;
+  env: ProviderRecipeEnv[];
+  models: ProviderRecipeModel[];
+  /** The user must supply model ids (generic URL recipes). */
+  modelsRequired: boolean;
+  disallowedTools: string[];
+  /** "hidden" = the endpoint cannot turn thinking off, hide the thinking control. */
+  thinking: "supported" | "hidden";
+  notes: string[];
+  /** https URL. */
+  docs: string;
+  source: "paseo-docs" | "vendor-docs" | "inferred";
+  /** YYYY-MM-DD, or "" when the row was never verified. */
+  verifiedAt: string;
+  unverified: boolean;
+  /** Inferred aspects shown as caveats. */
+  unverifiedAspects: string[];
+  /** The add form must ask for a base URL (a userBaseURL env, or the codex harness). */
+  needsBaseUrl: boolean;
+  /** The add form must ask for a key (a `secret` env). */
+  needsKey: boolean;
+}
+
+/** Result of provider.recipes (read-only, no params, any caller). */
+export interface ProviderRecipesResult {
+  recipes: ProviderRecipe[];
+}
+
+/** provider.addFromRecipe params: instantiate one catalog row as a providers.custom entry. Humans only; secrets["api-key"] is write-only. */
+export interface AddFromRecipeParams {
+  recipe: string;
+  id?: string;
+  label?: string;
+  baseUrl?: string;
+  models?: string[];
+  secrets?: Record<string, string>;
+}
+
+/** Result of provider.addFromRecipe: what got stored -- secret values never appear, only fingerprints. */
+export interface AddFromRecipeResult {
+  id: string;
+  created: boolean;
+  /** Whether the row has a `secret` env the user must paste a key into (recipeNeedsKey). */
+  needsKey: boolean;
+  secrets: { name: string; set: boolean; fingerprint: string }[];
 }
 
 // Result of provider.list (internal/wsapi/handlers.go's providerListResult).
