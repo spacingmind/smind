@@ -173,6 +173,7 @@ Scope: web Settings → Providers shows recipe cards, "Add from recipe" (pick, p
 - AC6.4 Shared stores and pickers are reused; no new ad-hoc fetch layer.
 - Tests: `providers-view.test.ts` extensions, `provider-recipes.test.ts`, `add-from-recipe.test.tsx` (key field is a password input, cleared after submit), icon drift test, mobile `providerCatalog` test, Playwright screenshot script pinned to a fake daemon (no live sends).
 - Mutations: render the secret value in the field (never-shown test fails); drop an icon id from the registry (drift test fails).
+- PR6 as built (2026-10-31 refinement): the daemon has **no RPC to edit an existing instance's `models`, `disallowedTools` or `inheritClaudeConfig`** and `provider.list` does not serve the last two, so the post-creation model/tool/inherit editors cannot ship in this PR. This PR ships: Add from recipe (picker, form with a prefilled models editor, write-only password key field), secret rows with set/not-set, fingerprint and replace/clear dialogs, recipe + unverified rows and nav badges, thinking hidden respected by `supportsThinking`, the `recipe` icon, and a read-only mobile note in the new-task provider picker. Follow-up (needs the Human/Steward's go as it is a new RPC): `provider.updateInstance {id, models?, additionalModels?, disallowedTools?, inheritClaudeConfig?}` + the detail editors.
 - Wire/schema changes: none (consumes PR3 RPCs).
 - Docs to update: `public-docs/providers.md` screenshots/steps, `docs-site` provider page if it mirrors it.
 
