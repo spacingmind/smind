@@ -27,7 +27,7 @@ func TestClaudeSettings_AskRulesUnchanged(t *testing.T) {
 	t.Parallel()
 	want := ClaudeAlwaysAskRules()
 	for _, mode := range []string{ClaudeModeAuto, ClaudeModeAcceptEdits, ClaudeModeDefault, ClaudeModePlan} {
-		s := decodeAskSettings(t, claudeSettings(mode, t.TempDir()))
+		s := decodeAskSettings(t, claudeSettings(mode, t.TempDir(), nil))
 		if len(s) != 1 {
 			t.Fatalf("%s: top-level keys = %v, want only permissions", mode, s)
 		}
@@ -43,7 +43,7 @@ func TestClaudeSettings_AskRulesUnchanged(t *testing.T) {
 			t.Fatalf("%s: ask = %v, want %v", mode, got, want)
 		}
 	}
-	bypass := decodeAskSettings(t, claudeSettings(ClaudeModeBypass, t.TempDir()))["permissions"].(map[string]any)
+	bypass := decodeAskSettings(t, claudeSettings(ClaudeModeBypass, t.TempDir(), nil))["permissions"].(map[string]any)
 	if bypass["ask"] != nil || bypass["deny"] == nil {
 		t.Fatalf("bypass permissions = %v, want deny only", bypass)
 	}
@@ -130,8 +130,8 @@ func TestRunClaude_GitAskSettingsReachTheCLI(t *testing.T) {
 				t.Fatalf("--settings present = %v, want %v (args %q)", ok, tc.want, args)
 			}
 			if ok {
-				if v != claudeSettings(tc.mode, config.Dir()) {
-					t.Fatalf("--settings = %q, want %q", v, claudeSettings(tc.mode, config.Dir()))
+				if v != claudeSettings(tc.mode, config.Dir(), nil) {
+					t.Fatalf("--settings = %q, want %q", v, claudeSettings(tc.mode, config.Dir(), nil))
 				}
 				if strings.Count(string(data), "--settings") != 1 {
 					t.Fatalf("--settings passed more than once: %q", args)
@@ -170,7 +170,7 @@ func TestClaudeSettings_DenyRulesForSmindSecrets(t *testing.T) {
 	t.Parallel()
 	home := "/srv/smind-home"
 	for _, mode := range []string{ClaudeModeAuto, ClaudeModeDefault, ClaudeModeBypass} {
-		rules := denyList(t, claudeSettings(mode, home))
+		rules := denyList(t, claudeSettings(mode, home, nil))
 		for _, f := range []string{"token", "config.yaml", "relay-keypair.json", "smind.db", "smind.db-wal", "smind.db-shm"} {
 			for _, tool := range []string{"Read", "Edit", "Write"} {
 				if want := tool + "(//srv/smind-home/" + f + ")"; !hasRule(rules, want) {
@@ -198,7 +198,7 @@ func TestClaudeSettings_DenyRules_DoNotCoverWorktrees(t *testing.T) {
 	t.Parallel()
 	home := "/srv/smind-home"
 	wt := "/srv/smind-home/worktrees/1/task/src/main.go"
-	for _, r := range denyList(t, claudeSettings(ClaudeModeAuto, home)) {
+	for _, r := range denyList(t, claudeSettings(ClaudeModeAuto, home, nil)) {
 		if _, arg, ok := strings.Cut(strings.TrimSuffix(r, ")"), "("); ok {
 			arg = strings.TrimPrefix(arg, "/") // Read(//abs) -> /abs
 			if i := strings.LastIndex(arg, " "); i >= 0 {
@@ -223,8 +223,8 @@ func TestClaudeSettings_DenyRules_DoNotCoverWorktrees(t *testing.T) {
 // TestClaudeSettings_DenyRules_FollowSmindHomeOverride: two homes, two
 // disjoint rule sets; and RunPrompt resolves SMIND_HOME at launch.
 func TestClaudeSettings_DenyRules_FollowSmindHomeOverride(t *testing.T) {
-	a := denyList(t, claudeSettings(ClaudeModeAuto, "/srv/home-a"))
-	b := denyList(t, claudeSettings(ClaudeModeAuto, "/srv/home-b"))
+	a := denyList(t, claudeSettings(ClaudeModeAuto, "/srv/home-a", nil))
+	b := denyList(t, claudeSettings(ClaudeModeAuto, "/srv/home-b", nil))
 	if !hasRule(a, "Read(//srv/home-a/token)") || hasRule(a, "Read(//srv/home-b/token)") {
 		t.Fatalf("home-a rules wrong: %v", a)
 	}
@@ -232,7 +232,7 @@ func TestClaudeSettings_DenyRules_FollowSmindHomeOverride(t *testing.T) {
 		t.Fatalf("home-b rules wrong: %v", b)
 	}
 	t.Setenv("SMIND_HOME", "/srv/home-c")
-	if !hasRule(denyList(t, claudeSettings(ClaudeModeAuto, config.Dir())), "Read(//srv/home-c/token)") {
+	if !hasRule(denyList(t, claudeSettings(ClaudeModeAuto, config.Dir(), nil)), "Read(//srv/home-c/token)") {
 		t.Fatal("config.Dir() override not reflected")
 	}
 }

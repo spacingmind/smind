@@ -255,8 +255,12 @@ func (c *Client) SupportsImagePrompt() bool {
 // must advertise mcp.stdio as an object; a v1 agent supports stdio
 // unconditionally -- ACP v1 makes stdio mandatory -- so it's true even
 // with no mcpCapabilities key at all. Malformed capabilities decode to
-// the v1 baseline.
+// the v1 baseline. WithoutMcpServers overrides all of that: no transport
+// is ever reported supported.
 func (c *Client) SupportsMcpStdio() bool {
+	if c.noMCP {
+		return false
+	}
 	f := c.capabilityFlags()
 	if len(f.Mcp) > 0 {
 		var mcp struct {
@@ -272,6 +276,9 @@ func (c *Client) SupportsMcpStdio() bool {
 // http-transport MCP servers: v2's mcp.http object, or v1's
 // mcpCapabilities.http boolean. Missing or malformed => false.
 func (c *Client) SupportsMcpHttp() bool {
+	if c.noMCP {
+		return false
+	}
 	f := c.capabilityFlags()
 	if len(f.Mcp) > 0 {
 		var mcp struct {
@@ -287,6 +294,9 @@ func (c *Client) SupportsMcpHttp() bool {
 // sse-transport MCP servers: v2's mcp.sse object, or v1's
 // mcpCapabilities.sse boolean. Missing or malformed => false.
 func (c *Client) SupportsMcpSSE() bool {
+	if c.noMCP {
+		return false
+	}
 	f := c.capabilityFlags()
 	if len(f.Mcp) > 0 {
 		var mcp struct {
@@ -410,6 +420,11 @@ type Client struct {
 	// instanceID identifies this agent process: unique per New.
 	instanceID string
 
+	// noMCP marks an agent that cannot take mcpServers at all: the
+	// SupportsMcp* methods then report no transport support so callers
+	// send none.
+	noMCP bool
+
 	ProtocolVersion   int
 	AgentCapabilities json.RawMessage
 }
@@ -433,6 +448,13 @@ func WithEnv(env ...string) Option {
 // AutoApprovePolicy for the default and why it was chosen.
 func WithPermissionPolicy(p PermissionPolicy) Option {
 	return func(c *Client) { c.policy = p }
+}
+
+// WithoutMcpServers declares that the agent cannot take mcpServers in its
+// session RPCs. The client then reports no MCP transport support (see
+// SupportsMcpStdio and friends), so callers send it none.
+func WithoutMcpServers() Option {
+	return func(c *Client) { c.noMCP = true }
 }
 
 // New spawns command[0] with command[1:] as arguments and wires up an ACP

@@ -26,6 +26,11 @@ func TestSupportedProviders_ModeCatalogs(t *testing.T) {
 		ProviderCodexNative:  {"auto,full-access", "auto", false, false},
 		ProviderGLM:          {"default", "default", true, true},
 		ProviderKimi:         {"default", "default", true, true},
+		"opencode":           {"default", "default", true, true},
+		"copilot":            {"default", "default", true, true},
+		"cline":              {"default", "default", true, true},
+		"goose":              {"default", "default", true, true},
+		"cursor":             {"default", "default", true, true},
 	}
 	for _, p := range SupportedProviders() {
 		w := want[p.ID]

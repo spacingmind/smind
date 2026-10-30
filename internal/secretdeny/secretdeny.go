@@ -8,6 +8,7 @@ package secretdeny
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/spacingmind/smind/internal/auth"
@@ -85,4 +86,65 @@ func cliPath(p string) string {
 		return "/" + strings.ToLower(p[:1]) + p[2:]
 	}
 	return p
+}
+
+// envNamePattern is the POSIX environment variable name grammar; anything
+// else (a value with a space, an empty string) cannot be a name a shell
+// would expand, so it gets no per-name rules.
+var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// EnvRules returns the `permissions.deny` entries that keep the obvious
+// shell and file readers away from a provider instance's secret environment
+// variables: the environment dumpers, the /proc/.../environ readers, the
+// per-name `echo` spellings and `printenv NAME`, and the providers dir under
+// home where instance secrets are written. Like Rules this is a best-effort
+// defence, not a boundary: it cannot cover every way a program can reach the
+// environment (`python -c 'import os'` and friends are out of scope), only
+// the commands an agent reaches for by habit.
+func EnvRules(home string, secretEnvNames []string) []string {
+	if len(secretEnvNames) == 0 {
+		return nil
+	}
+	out := []string{
+		"Bash(env)",
+		"Bash(printenv*)",
+		"Bash(set)",
+		"Bash(export -p*)",
+		"Bash(declare -x*)",
+		"Bash(declare -p*)",
+		"Bash(cat /proc/*/environ*)",
+		"Bash(cat /proc/self/environ*)",
+		"Bash(strings /proc/*/environ*)",
+		"Bash(tr * /proc/*/environ*)",
+		"Read(//proc/*/environ)",
+		"Read(//proc/self/environ)",
+	}
+	homes := []string{filepath.Clean(home)}
+	if real, err := filepath.EvalSymlinks(home); err == nil && real != homes[0] {
+		homes = append(homes, real)
+	}
+	for _, h := range homes {
+		out = append(out, "Read(/"+cliPath(filepath.Join(h, "providers"))+"/**)")
+	}
+	for _, name := range secretEnvNames {
+		if !envNamePattern.MatchString(name) {
+			continue
+		}
+		out = append(out,
+			"Bash(echo $"+name+"*)",
+			"Bash(echo ${"+name+"}*)",
+			"Bash(echo \"$"+name+"\"*)",
+			"Bash(echo \"${"+name+"}\"*)",
+			"Bash(printenv "+name+"*)",
+		)
+	}
+	seen := make(map[string]bool, len(out))
+	deduped := out[:0]
+	for _, r := range out {
+		if !seen[r] {
+			seen[r] = true
+			deduped = append(deduped, r)
+		}
+	}
+	return deduped
 }

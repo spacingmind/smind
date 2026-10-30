@@ -107,6 +107,22 @@ describe("unknown provider ids (providers.custom)", () => {
   });
 });
 
+describe("new ACP built-ins", () => {
+  it("providerRunner and providerLabel know the five new ids offline", () => {
+    const labels = {
+      opencode: "OpenCode",
+      copilot: "GitHub Copilot",
+      cline: "Cline",
+      goose: "Goose",
+      cursor: "Cursor",
+    } as const;
+    for (const [id, label] of Object.entries(labels)) {
+      expect(providerRunner(id)).toBe("acp");
+      expect(providerLabel(id)).toBe(label);
+    }
+  });
+});
+
 describe("offline fallback catalog", () => {
   it("is exactly the four built-ins with their runners", () => {
     expect(FALLBACK_PROVIDERS.map((p) => [p.id, p.runner])).toEqual([

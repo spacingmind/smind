@@ -1,10 +1,96 @@
 package taskrunner
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spacingmind/smind/internal/providers"
 )
+
+// readAgentEnvDump reads a FAKEAGENT_ENV_DUMP file (one KEY=value per
+// line, the spawned fake agent's own environment) into a map.
+func readAgentEnvDump(t *testing.T, path string) map[string]string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read env dump: %v", err)
+	}
+	env := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		if k, v, ok := strings.Cut(line, "="); ok {
+			env[k] = v
+		}
+	}
+	return env
+}
+
+// TestACPProvider_ProbeUsesNoBrowser proves the mode/model probe always
+// sets NO_BROWSER in the spawned agent's environment (a probe must never
+// open a browser), while a provider-configured NO_BROWSER still wins over
+// the probe's own default.
+func TestACPProvider_ProbeUsesNoBrowser(t *testing.T) {
+	if v := os.Getenv("NO_BROWSER"); v != "" {
+		t.Skipf("host environment already sets NO_BROWSER=%s", v)
+	}
+	dump := filepath.Join(t.TempDir(), "env-dump")
+	t.Setenv("FAKEAGENT_ENV_DUMP", dump)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	t.Run("probe default", func(t *testing.T) {
+		r := New(nil, WithACPCommand(ProviderGLM, []string{fakeACPAgentPath}))
+		if err := r.probeACPModes(ctx, ProviderGLM); err != nil {
+			t.Fatalf("probeACPModes() error = %v", err)
+		}
+		if got := readAgentEnvDump(t, dump)["NO_BROWSER"]; got != "true" {
+			t.Fatalf("probe agent NO_BROWSER = %q, want true", got)
+		}
+	})
+
+	t.Run("configured value wins", func(t *testing.T) {
+		r, _ := customRunner(t, nil, providers.Spec{
+			ID: "browserful-agent", Command: []string{fakeACPAgentPath},
+			Env: map[string]string{"NO_BROWSER": "0"},
+		})
+		if err := r.probeACPModes(ctx, "browserful-agent"); err != nil {
+			t.Fatalf("probeACPModes() error = %v", err)
+		}
+		if got := readAgentEnvDump(t, dump)["NO_BROWSER"]; got != "0" {
+			t.Fatalf("probe agent NO_BROWSER = %q, want the configured 0 to win over the probe default", got)
+		}
+	})
+}
+
+// TestACPProvider_RunDoesNotSetNoBrowser is the flip side of the probe:
+// a real run never injects NO_BROWSER, so a user's agent keeps whatever
+// browser behavior it has (unless the provider's own env configures it).
+func TestACPProvider_RunDoesNotSetNoBrowser(t *testing.T) {
+	if v := os.Getenv("NO_BROWSER"); v != "" {
+		t.Skipf("host environment already sets NO_BROWSER=%s", v)
+	}
+	dump := filepath.Join(t.TempDir(), "env-dump")
+	t.Setenv("FAKEAGENT_ENV_DUMP", dump)
+
+	_, wm, _ := newTestStoreAndManager(t)
+	task := newTestTaskUnder(t, wm)
+	r := New(wm, WithACPCommand(ProviderGLM, []string{fakeACPAgentPath}))
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", "", events)
+	}()
+	drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+	if v, ok := readAgentEnvDump(t, dump)["NO_BROWSER"]; ok {
+		t.Fatalf("run agent env NO_BROWSER = %q, want unset", v)
+	}
+}
 
 // waitForDiscoveredModes polls ProviderCatalog (which kicks the
 // background probe) until provider's modes are discovered.

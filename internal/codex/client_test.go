@@ -275,6 +275,114 @@ func TestClient_WithThreadPolicy(t *testing.T) {
 	}
 }
 
+// corpProviderConfig is the model_providers config the ModelProviderConfig
+// tests below send via WithModelProvider.
+var corpProviderConfig = map[string]any{
+	"model_providers": map[string]any{
+		"corp": map[string]any{
+			"name":     "corp",
+			"base_url": "https://x.example/v1",
+			"wire_api": "responses",
+		},
+	},
+}
+
+// assertRecordedThreadConfig decodes a fake-agent "thread-config*" file and
+// proves the modelProvider and the model_providers entry it carries
+// round-tripped on the wire.
+func assertRecordedThreadConfig(t *testing.T, path string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", filepath.Base(path), err)
+	}
+	var got struct {
+		ModelProvider string `json:"modelProvider"`
+		Config        struct {
+			ModelProviders map[string]map[string]string `json:"model_providers"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode %q: %v", raw, err)
+	}
+	if got.ModelProvider != "corp" {
+		t.Fatalf("modelProvider = %q, want %q", got.ModelProvider, "corp")
+	}
+	provider, ok := got.Config.ModelProviders["corp"]
+	if !ok {
+		t.Fatalf("model_providers = %v, want a corp entry", got.Config.ModelProviders)
+	}
+	if provider["base_url"] != "https://x.example/v1" {
+		t.Fatalf("base_url = %q, want %q", provider["base_url"], "https://x.example/v1")
+	}
+	if provider["wire_api"] != "responses" {
+		t.Fatalf("wire_api = %q, want %q", provider["wire_api"], "responses")
+	}
+}
+
+// TestCodexThreadStart_ModelProviderConfig proves WithModelProvider's
+// modelProvider/config reach thread/start on the wire, and that a Client
+// without the option sends neither (Codex keeps its own provider).
+func TestCodexThreadStart_ModelProviderConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("set", func(t *testing.T) {
+		t.Parallel()
+		c, cwd := newTestClient(t, "", WithModelProvider("corp", corpProviderConfig))
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := c.NewSession(ctx, cwd); err != nil {
+			t.Fatalf("NewSession() error = %v", err)
+		}
+		assertRecordedThreadConfig(t, filepath.Join(cwd, "thread-config.thread-start"))
+	})
+
+	t.Run("unset", func(t *testing.T) {
+		t.Parallel()
+		c, cwd := newTestClient(t, "")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := c.NewSession(ctx, cwd); err != nil {
+			t.Fatalf("NewSession() error = %v", err)
+		}
+		raw, err := os.ReadFile(filepath.Join(cwd, "thread-config.thread-start"))
+		if err != nil {
+			t.Fatalf("read thread-config.thread-start: %v", err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("decode %q: %v", raw, err)
+		}
+		if got["modelProvider"] != "" {
+			t.Fatalf("modelProvider = %v, want empty", got["modelProvider"])
+		}
+		if got["config"] != nil {
+			t.Fatalf("config = %v, want null/absent", got["config"])
+		}
+	})
+}
+
+// TestCodexThreadResume_ModelProviderConfig proves the same fields reach
+// thread/resume: NewSession then thread/archive forces ResumeSession down
+// the resume path instead of the loaded-thread short-circuit.
+func TestCodexThreadResume_ModelProviderConfig(t *testing.T) {
+	t.Parallel()
+	c, cwd := newTestClient(t, "", WithModelProvider("corp", corpProviderConfig))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	threadID, err := c.NewSession(ctx, cwd)
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	if _, err := c.conn.call(ctx, "thread/archive", map[string]string{"threadId": threadID}); err != nil {
+		t.Fatalf("thread/archive: %v", err)
+	}
+	if _, err := c.ResumeSession(ctx, threadID, cwd); err != nil {
+		t.Fatalf("ResumeSession() error = %v", err)
+	}
+	assertRecordedThreadConfig(t, filepath.Join(cwd, "thread-config.thread-resume"))
+}
+
 func TestCodex_LocalImageInput(t *testing.T) {
 	t.Parallel()
 	c, cwd := newTestClient(t, "")
