@@ -198,8 +198,12 @@ func (r *Runner) probeACPModes(ctx context.Context, provider Provider) error {
 	defer os.RemoveAll(dir)
 
 	popts := []acp.Option{acp.WithPermissionPolicy(acp.AutoDenyPolicy{})}
-	if env := r.acpEnvEntries(provider); len(env) > 0 {
-		popts = append(popts, acp.WithEnv(env...))
+	launchEnv, err := r.launchEnvEntries(provider)
+	if err != nil {
+		return fmt.Errorf("launch env: %w", err)
+	}
+	if len(launchEnv) > 0 {
+		popts = append(popts, acp.WithEnv(launchEnv...))
 	}
 	client, err := r.newACPClient(command, popts...)
 	if err != nil {

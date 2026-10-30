@@ -268,6 +268,10 @@ type Runner struct {
 	providerEnv   map[Provider]map[string]string
 	providerEnvMu sync.RWMutex
 
+	// providerSecrets is the store SecretEnv refs are resolved from at
+	// launch (WithProviderSecrets; nil: a spec with a secret fails it).
+	providerSecrets ProviderSecretSource
+
 	// registry is the provider table (nil: providers.Default).
 	registry *providers.Registry
 
@@ -489,7 +493,10 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 		opts = append(opts, acp.WithPermissionPolicy(r.acpPermissionPolicy))
 	}
 
-	env := r.acpEnvEntries(provider)
+	env, err := r.launchEnvEntries(provider)
+	if err != nil {
+		return fmt.Errorf("taskrunner: %w", err)
+	}
 	if add, note := hookEnvEntries(ctx, env); len(add) > 0 || note != "" {
 		env = append(env, add...)
 		if note != "" {
@@ -999,7 +1006,10 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 	}
 	// The configured launch env goes last so it wins over the daemon's own
 	// environment and everything above.
-	providerEnv := r.providerEnvEntries(provider)
+	providerEnv, err := r.launchEnvEntries(provider)
+	if err != nil {
+		return fmt.Errorf("taskrunner: %w", err)
+	}
 	if add, note := hookEnvEntries(ctx, append(append([]string(nil), env...), providerEnv...)); len(add) > 0 || note != "" {
 		env = append(env, add...)
 		if note != "" {
@@ -1308,7 +1318,11 @@ func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, 
 		opts = append(opts, codex.WithPermissionPolicy(r.codexPermissionPolicy))
 	}
 
-	if env := r.providerEnvEntries(provider); len(env) > 0 {
+	env, err := r.launchEnvEntries(provider)
+	if err != nil {
+		return fmt.Errorf("taskrunner: %w", err)
+	}
+	if len(env) > 0 {
 		opts = append(opts, codex.WithEnv(env...))
 	}
 

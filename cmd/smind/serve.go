@@ -124,7 +124,7 @@ func cmdServe(args []string) int {
 	}
 
 	// A second Registry over the same db is fine: it only reads.
-	runnerOpts := []taskrunner.Option{taskrunner.WithSessionStore(taskrunner.NewChatSessionStore(db)), taskrunner.WithACPModeProbe(), taskrunner.WithMcpServers(mcpservers.New(db))}
+	runnerOpts := []taskrunner.Option{taskrunner.WithSessionStore(taskrunner.NewChatSessionStore(db)), taskrunner.WithACPModeProbe(), taskrunner.WithMcpServers(mcpservers.New(db)), taskrunner.WithProviderSecrets(db)}
 	if mt := cfg.Agents.GLM.MaxTurns; mt != nil {
 		runnerOpts = append(runnerOpts, taskrunner.WithACPCommand(taskrunner.ProviderGLM, acp.GLMCommand(acp.WithMaxTurns(*mt))))
 	}
@@ -147,6 +147,15 @@ func cmdServe(args []string) int {
 		runnerOpts = append(runnerOpts, taskrunner.WithACPCommand(taskrunner.ProviderGLM, strings.Fields(cmd)))
 	}
 	runner := taskrunner.New(wm, runnerOpts...)
+
+	// Stored provider secrets outlive the config entries that referenced
+	// them: drop the ones whose instance is gone, once at startup. The log
+	// carries a count only, never a name or value.
+	if n, err := runner.PruneProviderSecrets(); err != nil {
+		log.Printf("prune provider secrets: %v", err)
+	} else if n > 0 {
+		log.Printf("pruned %d provider secret(s) of removed instances", n)
+	}
 
 	token, err := auth.LoadOrCreateToken(config.Dir())
 	if err != nil {
